@@ -18,18 +18,43 @@
 //! seats again.
 //!
 //! A memory voice's seat is primed and read ahead: the vocoder runs its [`latency`]
-//! and a window more of output frames from source starting a window before the seat
-//! and discards them, so the first frame of the block sounds the source at the
-//! seat, on time, and what a voice that had been playing all along would (the
-//! window is the ramp a stretched stream takes to fill). The voice's output is
-//! then not late, and it declares no latency. A disk voice's ring reads forward and
+//! and a window more of output frames (`prime`) from source starting a window
+//! before the seat and discards them, so the first sounding frame is the source
+//! at its own place on the timeline, on time, as a voice that had been playing all
+//! along would sound it (the window is the ramp a stretched stream takes to fill).
+//! A memory voice then declares no latency. A disk voice's ring reads forward and
 //! holds nothing before a seat, so it is not primed: its first [`latency`]
 //! frames are silence and it sounds [`latency`] frames late, which a standalone
 //! node declares and a pool cannot.
 //!
+//! # The priming budget
+//!
+//! `prime` is about 4 100 output frames of vocoder work, several milliseconds, and
+//! voices that reseat together (a seek, a loop wrap) would do it in one block each.
+//! A seat does at most [`PRIME_SPEED`] frames of it per frame of the block (the
+//! rest is carried in `Cursor::owed`), and the voice is silent until it is done.
+//! The speed is 8: a 64-frame block does 512 frames of priming, one hop, the
+//! vocoder's own quantum, which is one analysis frame of work (an FFT pair per
+//! channel) in a block of 64 frames, and a block of `L` frames never more than
+//! `8 L`, in proportion to what it renders anyway. Each frame that goes by adds a
+//! frame to what is owed (the voice must discard up to the frame it sounds at),
+//! and the speed takes eight off, so the voice sounds `ceil(owed / 7)` frames after
+//! it was seated: `ceil(prime / 7)`, 586 frames at the vocoder's `prime` of 4 097,
+//! from its first frame. The speed is per frame, not per block, so when the voice
+//! sounds does not depend on how the output is split into blocks. When it does, it is
+//! on the timeline: it skips the frames it was too late for. A voice seated at the
+//! start of its window, and a seek or a loop wrap, sound that much later; a voice
+//! whose window opens ahead (a clip placed on the timeline) starts priming `prime / 8`
+//! frames, and a block, before its start, from a transport that rolls, so its first
+//! frame lands on its frame (`preroll`).
+//!
 //! The cursor is an origin and the frames taken since: a position is the origin
 //! plus the step times all of them, one product, so the frames a source is read at
 //! do not depend on how the output was split into blocks.
+//!
+//! The sampler relies on the vocoder's invariant that a non-finite input sample
+//! does not latch (the output is clean again once the frames holding it have gone
+//! out, with no reset), and does not reset it after a block that wrote one.
 //!
 //! [`latency`]: PhaseVocoder::latency
 
@@ -45,30 +70,41 @@ use super::types::{Direction, Playback};
 use crate::SamplerFloat;
 use crate::lanes::{Gather, Lanes, scale};
 
-/// The vocoder's analysis window, in frames: about 43 ms at 48 kHz.
-const WINDOW: usize = 2048;
+/// The vocoder's analysis window: about 43 ms at 48 kHz.
+const WINDOW: Samples = Samples::new(2048);
 
 /// The vocoder's hop: a quarter of the window, the overlap Hann squared needs
 /// to sum to a constant.
-const HOP: usize = WINDOW / 4;
+const HOP: Samples = Samples::new(512);
+
+/// The frames of priming a seat does per frame of the block it is in (see the module
+/// docs).
+pub(crate) const PRIME_SPEED: usize = 8;
+
+/// The length of the scratch the discarded output of priming goes to: one hop, what a
+/// vocoder call writes at most.
+pub(crate) const PRIME_SCRATCH: Samples = HOP;
 
 /// The first frame of a wave: before it a read gives silence.
 const WAVE_START: SamplePosition = SamplePosition::new(0.0);
 
+/// The sample rate the vocoder's geometry names: its arithmetic counts frames and
+/// never reads it.
+const NOMINAL_RATE: SampleRate = SampleRate::SR_48K;
+
 /// A phase vocoder over `width` channels on the voice's fixed geometry (a
 /// 2048-frame Hann window, hop 512). Allocates: control thread only.
-///
-/// `rate` names the geometry's sample rate; the vocoder's arithmetic counts
-/// frames and never reads it.
-pub(crate) fn vocoder<F: SamplerFloat>(
-    width: ChannelLayout,
-    rate: SampleRate,
-) -> Box<PhaseVocoder<F>> {
-    let window = WindowLength::new(Samples::new(WINDOW)).expect("BUG: a nonzero window");
-    let hop = HopSize::new(Samples::new(HOP)).expect("BUG: a nonzero hop");
-    let geometry = ColaGeometry::try_from(StftGeometry::new(rate, window, hop))
+pub(crate) fn vocoder<F: SamplerFloat>(width: ChannelLayout) -> Box<PhaseVocoder<F>> {
+    let window = WindowLength::new(WINDOW).expect("BUG: a nonzero window");
+    let hop = HopSize::new(HOP).expect("BUG: a nonzero hop");
+    let geometry = ColaGeometry::try_from(StftGeometry::new(NOMINAL_RATE, window, hop))
         .expect("BUG: a hop of a quarter window is COLA-valid");
     Box::new(PhaseVocoder::new(width, geometry))
+}
+
+/// The output frames a seat primes: the vocoder's latency and a window.
+pub(crate) fn prime<F: SamplerFloat>(vocoder: &PhaseVocoder<F>) -> Samples {
+    Samples::new(vocoder.latency().get() + WINDOW.get())
 }
 
 /// The controls a voice's intent asks of its vocoder.
@@ -83,6 +119,7 @@ pub(crate) fn controls(play: &Playback) -> PhaseVocoderControls {
 /// the figure the transport's gate and a disk stream's fill sizing count by. A
 /// non-finite stretch reads as unity and the rest is held to the supported
 /// range, as the vocoder holds it.
+// replaced by PhaseVocoder::<method> once the pitch-shifter PR merges
 pub(crate) fn consumption(stretch: StretchFactor) -> ReadRate {
     let s = stretch.get();
     let s = if s.is_finite() {
@@ -93,29 +130,37 @@ pub(crate) fn consumption(stretch: StretchFactor) -> ReadRate {
     ReadRate::new(1.0 / s)
 }
 
-/// Where the vocoder's next input frame is read in the source.
+/// Where the vocoder's next input frame is read in the source, and what is left of
+/// its priming.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Cursor {
     /// Where the frame `taken` frames ago was read, before the step last changed.
     origin: SamplePosition,
     /// Source frames per input frame taken since `origin`.
     step: ReadRate,
-    taken: usize,
+    taken: Samples,
+    /// The output frames of priming still to run before the voice sounds.
+    owed: Samples,
+    /// Whether the seat was made ahead of the voice's window, which the voice has
+    /// not yet entered.
+    preroll: bool,
 }
 
 impl Cursor {
-    /// A cursor at `origin`, stepping by `step`.
-    fn new(origin: SamplePosition, step: ReadRate) -> Self {
+    /// A cursor at `origin`, stepping by `step`, owing `owed` frames.
+    fn new(origin: SamplePosition, step: ReadRate, owed: Samples) -> Self {
         Self {
             origin,
             step,
-            taken: 0,
+            taken: Samples::new(0),
+            owed,
+            preroll: false,
         }
     }
 
     /// The position of the input frame `t` past the next.
     fn position(&self, t: usize) -> SamplePosition {
-        self.origin + self.step.advance(Samples::new(self.taken + t))
+        self.origin + self.step.advance(Samples::new(self.taken.get() + t))
     }
 
     /// Steps by `step` from here on: the position carries on from where the last
@@ -123,7 +168,7 @@ impl Cursor {
     fn retarget(&mut self, step: ReadRate) {
         if step != self.step {
             self.origin = self.position(0);
-            self.taken = 0;
+            self.taken = Samples::new(0);
             self.step = step;
         }
     }
@@ -235,28 +280,148 @@ impl<F: SamplerFloat> Stretch<'_, F> {
             self.vocoder.reset();
         }
     }
+
+    /// Seats the vocoder at `origin`, the source's position at the frame the
+    /// voice sounds from, owing its priming (see the module docs).
+    fn seat(&mut self, feed: &mut impl Feed<F>, origin: SamplePosition) -> Cursor {
+        *self.seats += 1;
+        feed.seated();
+        let step = feed.step();
+        if !feed.primes() {
+            return Cursor::new(origin, step, Samples::new(0));
+        }
+        // The vocoder's output frame `k` is its input timeline's frame `k` at
+        // unity, a timeline that starts with `latency` frames of silence. The voice
+        // knows its future, so it reads that delay ahead: discarding `prime` output
+        // frames from source starting a window back puts the first frame after
+        // them on the source's own position, `origin`. A stretch consumes
+        // `1 / stretch` source frames per output frame.
+        let back = step.then(self.consumption).advance(WINDOW);
+        Cursor::new(origin - back, step, prime(self.vocoder))
+    }
 }
 
-/// The scratch a read goes through: the output and input lanes, and the
-/// positions the vocoder's input frames are read at.
-pub(crate) struct Lent<'a, F: SamplerFloat> {
-    pub(crate) out: &'a mut Lanes<F>,
+/// The input side of a read: the lanes the source is read into and the positions
+/// it is read at.
+pub(crate) struct Input<'a, F: SamplerFloat> {
     pub(crate) raw: &'a mut Lanes<F>,
     pub(crate) reads: &'a mut [Option<SamplePosition>],
     /// The channels the lanes carry.
     pub(crate) n: usize,
 }
 
-/// Renders output frames `0..gate.len()` of a piece into the first `n` lanes of
-/// `lent.out`: where `gate` has a position the vocoder runs, and elsewhere
-/// the frames are silence and the voice unseats. Whether any frame sounded.
+/// Discards `frames` output frames of priming into `prime`, the scratch (at least
+/// [`PRIME_SCRATCH`] long), a hop at a time.
+fn discard<F: SamplerFloat>(
+    vocoder: &mut PhaseVocoder<F>,
+    cursor: &mut Cursor,
+    feed: &mut impl Feed<F>,
+    generation: u64,
+    input: &mut Input<'_, F>,
+    prime: &mut Lanes<F>,
+    frames: usize,
+) {
+    let mut left = frames;
+    while left > 0 {
+        let hop = left.min(PRIME_SCRATCH.get());
+        pump(vocoder, cursor, feed, generation, input, prime, 0, hop);
+        left -= hop;
+    }
+}
+
+/// Spends the priming `cursor` owes over a run of `run` frames, and returns the
+/// frames of the run it is still silent for: the cursor owes `owed` frames to sound
+/// at the run's first frame, each frame of the run adds one, and the speed takes
+/// [`PRIME_SPEED`] off. Priming that finishes `k` frames in has discarded `owed + k`
+/// and sounds from there; priming that does not has discarded `PRIME_SPEED * run`
+/// and owes the rest, with the run gone by.
+fn spend<F: SamplerFloat>(
+    vocoder: &mut PhaseVocoder<F>,
+    cursor: &mut Cursor,
+    feed: &mut impl Feed<F>,
+    generation: u64,
+    input: &mut Input<'_, F>,
+    prime: &mut Lanes<F>,
+    run: usize,
+) -> usize {
+    let owed = cursor.owed.get();
+    if owed == 0 {
+        return 0;
+    }
+    let k = owed.div_ceil(PRIME_SPEED - 1);
+    if k <= run {
+        discard(vocoder, cursor, feed, generation, input, prime, owed + k);
+        cursor.owed = Samples::new(0);
+        k
+    } else {
+        discard(
+            vocoder,
+            cursor,
+            feed,
+            generation,
+            input,
+            prime,
+            PRIME_SPEED * run,
+        );
+        cursor.owed = Samples::new(owed - (PRIME_SPEED - 1) * run);
+        run
+    }
+}
+
+/// Starts or goes on priming a voice whose window opens `ahead` frames after the first
+/// of a block of `block` frames, seated at `origin`, its position at the window's
+/// start; nothing is owed for the frames before the window. The voice may still owe
+/// what it can run [`PRIME_SPEED`] frames per frame in the frames that are left, which
+/// is what is kept: so the priming is done by the window's start and does not depend on
+/// how the output is split into blocks. A block that has the window's start in it
+/// finishes the priming (the caller starts priming at least `prime / PRIME_SPEED`
+/// frames ahead). The voice keeps its seat in `render` until it enters its window.
+pub(crate) fn preroll<F: SamplerFloat>(
+    st: &mut Stretch<'_, F>,
+    feed: &mut impl Feed<F>,
+    origin: SamplePosition,
+    ahead: usize,
+    block: usize,
+    input: &mut Input<'_, F>,
+    prime: &mut Lanes<F>,
+) {
+    let mut cursor = match *st.cursor {
+        Some(cursor) => cursor,
+        None => {
+            let mut cursor = st.seat(feed, origin);
+            cursor.preroll = true;
+            cursor
+        }
+    };
+    let keep = PRIME_SPEED * (ahead - ahead.min(block));
+    let frames = cursor.owed.get().saturating_sub(keep);
+    discard(
+        st.vocoder,
+        &mut cursor,
+        feed,
+        *st.seats,
+        input,
+        prime,
+        frames,
+    );
+    cursor.owed = Samples::new(cursor.owed.get() - frames);
+    *st.cursor = Some(cursor);
+}
+
+/// Renders output frames `0..gate.len()` of a piece into the first `input.n` lanes of
+/// `out`: where `gate` has a position the vocoder runs, and elsewhere the frames
+/// are silence and the voice unseats (a voice that is priming ahead of its window
+/// keeps its seat). While a seat still owes priming the frames are silence too, and
+/// the priming goes through `prime`. Whether any frame sounded.
 ///
 /// Nothing allocates: the lanes and positions are the owner's.
 pub(crate) fn render<F: SamplerFloat>(
     mut st: Stretch<'_, F>,
     feed: &mut impl Feed<F>,
     gate: &[Option<SamplePosition>],
-    lent: &mut Lent<'_, F>,
+    out: &mut Lanes<F>,
+    prime: &mut Lanes<F>,
+    input: &mut Input<'_, F>,
 ) -> bool {
     let frames = gate.len();
     let mut sounded = false;
@@ -271,15 +436,42 @@ pub(crate) fn render<F: SamplerFloat>(
             sounded = true;
             let mut cursor = match *st.cursor {
                 Some(cursor) => cursor,
-                None => seat(&mut st, feed, origin, i..j, lent),
+                None => st.seat(feed, origin),
             };
-            pump(st.vocoder, &mut cursor, feed, *st.seats, lent, i, j - i);
+            cursor.preroll = false;
+            // Silent while it primes: the frames of the run before it sounds.
+            let silent = spend(
+                st.vocoder,
+                &mut cursor,
+                feed,
+                *st.seats,
+                input,
+                prime,
+                j - i,
+            );
+            for lane in out.lanes_mut().iter_mut().take(input.n) {
+                lane[i..i + silent].fill(F::ZERO);
+            }
+            if silent < j - i {
+                pump(
+                    st.vocoder,
+                    &mut cursor,
+                    feed,
+                    *st.seats,
+                    input,
+                    out,
+                    i + silent,
+                    j - i - silent,
+                );
+            }
             *st.cursor = Some(cursor);
         } else {
-            for lane in lent.out.lanes_mut().iter_mut().take(lent.n) {
+            for lane in out.lanes_mut().iter_mut().take(input.n) {
                 lane[i..j].fill(F::ZERO);
             }
-            st.unseat();
+            if !st.cursor.is_some_and(|cursor| cursor.preroll) {
+                st.unseat();
+            }
         }
         i = j;
     }
@@ -289,80 +481,50 @@ pub(crate) fn render<F: SamplerFloat>(
     sounded
 }
 
-/// Seats the vocoder at `origin`, the transport's position of output frame
-/// `run.start`, and returns the cursor. A source that primes is read from
-/// before the seat, for the vocoder's latency and a window of output frames,
-/// discarded into the lanes `run` is about to overwrite.
-fn seat<F: SamplerFloat>(
-    st: &mut Stretch<'_, F>,
-    feed: &mut impl Feed<F>,
-    origin: SamplePosition,
-    run: std::ops::Range<usize>,
-    lent: &mut Lent<'_, F>,
-) -> Cursor {
-    *st.seats += 1;
-    feed.seated();
-    let step = feed.step();
-    if !feed.primes() {
-        return Cursor::new(origin, step);
-    }
-    // The vocoder's output frame `k` is its input timeline's frame `k` at unity, a
-    // timeline that starts with `latency` frames of silence. The voice knows its
-    // future, so it reads that delay ahead: discarding `prime = latency + window`
-    // output frames from source starting a window back puts the first frame after
-    // them on the source's own position, `origin`. A stretch consumes `1 / stretch`
-    // source frames per output frame.
-    let prime = st.vocoder.latency().get() + WINDOW;
-    let back = step.then(st.consumption).advance(Samples::new(WINDOW));
-    let mut cursor = Cursor::new(origin - back, step);
-    let mut left = prime;
-    while left > 0 {
-        let chunk = left.min(run.len());
-        pump(
-            st.vocoder,
-            &mut cursor,
-            feed,
-            *st.seats,
-            lent,
-            run.start,
-            chunk,
-        );
-        left -= chunk;
-    }
-    cursor
-}
-
-/// Runs the vocoder over `frames` output frames into the lanes from frame
-/// `at`: for each hop of them it reads the input the vocoder asks for at the
-/// cursor and takes it in. An input longer than the scratch is taken in
-/// pieces ahead of the output, the vocoder's ring holding what it is given.
+/// Runs the vocoder over `frames` output frames into `out` from frame `at`: for
+/// each hop of them it reads the input the vocoder asks for at the cursor and takes
+/// it in. An input longer than the scratch is taken in pieces ahead of the output,
+/// the vocoder's ring holding what it is given.
+#[allow(clippy::too_many_arguments)] // one run: the vocoder, its source, and where each goes
 fn pump<F: SamplerFloat>(
     vocoder: &mut PhaseVocoder<F>,
     cursor: &mut Cursor,
     feed: &mut impl Feed<F>,
     generation: u64,
-    lent: &mut Lent<'_, F>,
+    input: &mut Input<'_, F>,
+    out: &mut Lanes<F>,
     at: usize,
     frames: usize,
 ) {
     let mut done = 0;
     while done < frames {
-        let hop = (frames - done).min(HOP);
+        let hop = (frames - done).min(HOP.get());
         let mut need = vocoder.input_needed(Samples::new(hop)).get();
-        while need > lent.reads.len() {
-            let ahead = lent.reads.len();
-            if take(vocoder, cursor, feed, generation, lent, ahead, (at, 0)) == 0 {
+        while need > input.reads.len() {
+            let ahead = input.reads.len();
+            if take(
+                vocoder,
+                cursor,
+                feed,
+                generation,
+                input,
+                out,
+                ahead,
+                (at, 0),
+            ) == 0
+            {
                 break;
             }
             need = vocoder.input_needed(Samples::new(hop)).get();
         }
-        let count = need.min(lent.reads.len());
+        let count = need.min(input.reads.len());
         take(
             vocoder,
             cursor,
             feed,
             generation,
-            lent,
+            input,
+            out,
             count,
             (at + done, hop),
         );
@@ -371,33 +533,35 @@ fn pump<F: SamplerFloat>(
 }
 
 /// Reads `count` frames at the cursor and takes them into the vocoder,
-/// writing `output.1` frames of output from frame `output.0`. The input
+/// writing `output.1` frames of output from frame `output.0` of `out`. The input
 /// frames the vocoder took, and the cursor moved over them.
+#[allow(clippy::too_many_arguments)] // one chunk: the vocoder, its source, and where each goes
 fn take<F: SamplerFloat>(
     vocoder: &mut PhaseVocoder<F>,
     cursor: &mut Cursor,
     feed: &mut impl Feed<F>,
     generation: u64,
-    lent: &mut Lent<'_, F>,
+    input: &mut Input<'_, F>,
+    out: &mut Lanes<F>,
     count: usize,
     output: (usize, usize),
 ) -> usize {
     cursor.retarget(feed.step());
-    for (t, read) in lent.reads[..count].iter_mut().enumerate() {
+    for (t, read) in input.reads[..count].iter_mut().enumerate() {
         let position = cursor.position(t);
         *read = (position >= WAVE_START).then_some(position);
     }
-    feed.read(&lent.reads[..count], generation, lent.raw);
-    let input = Planes::from_vecs(&lent.raw.lanes()[..lent.n])
+    feed.read(&input.reads[..count], generation, input.raw);
+    let planes = Planes::from_vecs(&input.raw.lanes()[..input.n])
         .expect("BUG: a stretching voice has at least one lane, all as long")
         .slice(Samples::new(0)..Samples::new(count));
-    let mut lanes = PlanesMut::from_vecs(&mut lent.out.lanes_mut()[..lent.n])
+    let mut lanes = PlanesMut::from_vecs(&mut out.lanes_mut()[..input.n])
         .expect("BUG: a stretching voice has at least one lane, all as long");
     let (at, frames) = output;
     let counts = vocoder.process(
-        input,
+        planes,
         lanes.slice_mut(Samples::new(at)..Samples::new(at + frames)),
     );
-    cursor.taken += counts.consumed.get();
+    cursor.taken = Samples::new(cursor.taken.get() + counts.consumed.get());
     counts.consumed.get()
 }

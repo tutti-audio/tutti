@@ -11,7 +11,7 @@ use tutti_buffers::MAX_CHANNELS;
 
 use super::clock::{BlockClock, Clock};
 use super::command::{
-    COMMAND_CAPACITY, MAX_RESIDENT_VOICES, Queued, SharedRate, VoiceCommand, VoicePoolHandle,
+    COMMAND_CAPACITY, MAX_RESIDENT_VOICES, Queued, VoiceCommand, VoicePoolHandle,
 };
 use super::loop_span::Loop;
 use super::memory_source::MemorySource;
@@ -295,15 +295,11 @@ pub struct VoicePool<F: SamplerFloat> {
     /// What the drain dropped or refused, shared with the handle
     /// ([`VoicePoolHandle::drops`]).
     pub(crate) counters: Arc<DrainCounters>,
-    /// The engine rate every slot is prepared at, and the vocoders the handle
-    /// builds carry. Written by `prepare`.
+    /// The engine rate every slot's source is prepared at. Written by `prepare`.
     pub(crate) sample_rate: SampleRate,
     /// The render mode the pool was last prepared in, given to every source
     /// (a fork's file read waits only when it is offline).
     render_mode: RenderMode,
-    /// The rate, shared with the handle, so a vocoder the handle builds for a
-    /// command is built at the rate the pool runs at.
-    pub(crate) rate: SharedRate,
     /// Output width — the node's audio outputs, fixed at construction.
     ///
     /// Declared rather than inferred from the voices it holds: this unit is built
@@ -372,7 +368,6 @@ impl<F: SamplerFloat> VoicePool<F> {
             rx: ring(0, Overflow::Refuse).1,
             sample_rate,
             render_mode: RenderMode::Realtime,
-            rate: SharedRate::new(sample_rate),
             channels,
             clock: Clock::new(),
             tempo: None,
@@ -456,7 +451,6 @@ impl<F: SamplerFloat> VoicePool<F> {
             tx: Arc::new(Mutex::new(tx)),
             retired: Arc::new(Mutex::new(retired)),
             channels: self.channels,
-            rate: self.rate.clone(),
             counters: Arc::clone(&self.counters),
             streams: Arc::default(),
             free: Arc::default(),
@@ -643,8 +637,7 @@ impl<F: SamplerFloat> VoicePool<F> {
     /// stream's, set by the control thread first, then recorded). A streaming
     /// voice's direction is the stream's too, so it is only recorded.
     pub(crate) fn insert_voice(&mut self, id: SlotId, voice: Voice<F>) {
-        let stretch = stretch_wanted(&voice.play)
-            .then(|| stretched::vocoder::<F>(self.channels, self.sample_rate));
+        let stretch = stretch_wanted(&voice.play).then(|| stretched::vocoder::<F>(self.channels));
         self.insert_voice_inner(id, Box::new(voice), stretch);
     }
 
@@ -674,7 +667,7 @@ impl<F: SamplerFloat> VoicePool<F> {
         // reader would truncate on the stretch path only, which no stereo test
         // can observe. Its vocoder, if any, was built by the sender on
         // the control thread (`VoicePoolHandle::send`) and only moves in here.
-        let mut slot = PlaybackSlot::with_channels(id, voice, self.sample_rate, self.channels);
+        let mut slot = PlaybackSlot::with_channels(id, voice, self.channels);
         slot.stretch = stretch;
         // The source runs at the pool's rate (the memory tier's conversion,
         // the disk tier's step), as `prepare` sets every resident slot's.
@@ -856,11 +849,10 @@ impl<F: SamplerFloat> Clone for VoicePool<F> {
                         stretch: s
                             .stretch
                             .as_ref()
-                            .map(|_| stretched::vocoder::<F>(s.channels, s.sample_rate)),
+                            .map(|_| stretched::vocoder::<F>(s.channels)),
                         cursor: None,
                         seats: 0,
                         channels: s.channels,
-                        sample_rate: s.sample_rate,
                     }
                 }));
                 voices
@@ -868,7 +860,6 @@ impl<F: SamplerFloat> Clone for VoicePool<F> {
             rx: ring(0, Overflow::Refuse).1,
             sample_rate: self.sample_rate,
             render_mode: self.render_mode,
-            rate: SharedRate::new(self.sample_rate),
             clock: Clock::new(),
             tempo: self.tempo.clone(),
             channels: self.channels,
@@ -904,12 +895,10 @@ impl<F: SamplerFloat> Node<F> for VoicePool<F> {
         let sample_rate = p.sample_rate();
         self.sample_rate = sample_rate;
         self.render_mode = p.render_mode();
-        self.rate.store(sample_rate);
         self.scratch
             .resize(p.max_block().get(), self.channels.count() as usize);
         for slot in &mut self.voices {
             slot.voice.source.set_render(sample_rate, self.render_mode);
-            slot.sample_rate = sample_rate;
         }
     }
 

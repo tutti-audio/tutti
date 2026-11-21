@@ -13,12 +13,12 @@ use crate::lanes::{BlockScratch, accumulate, audible_gain};
 use crate::nonempty;
 
 use super::clock::BlockClock;
-use super::stretched::{self, Cursor, DiskFeed, Lent, MemoryFeed, Stretch};
+use super::stretched::{self, Cursor, DiskFeed, Input, MemoryFeed, PRIME_SPEED, Stretch};
 use super::types::{Playback, SlotId, Voice, VoiceSource};
 use crate::SamplerFloat;
 use tutti_buffers::ChannelLayout;
 use tutti_dsp::PhaseVocoder;
-use tutti_units::{Cents, ReadRate, SampleRate, StretchFactor};
+use tutti_units::{Beat, Cents, ReadRate, SamplePosition, StretchFactor};
 
 /// A [`Voice`] plus the resident time-stretch DSP processor, and the read that
 /// turns the pair into audio.
@@ -82,9 +82,6 @@ pub(crate) struct PlaybackSlot<F: SamplerFloat> {
     /// Width the vocoder must be built at, remembered so a later
     /// materialisation matches the reader rather than defaulting.
     pub(crate) channels: ChannelLayout,
-    /// The engine rate the owner last prepared at, which the vocoders it builds
-    /// carry in their geometry.
-    pub(crate) sample_rate: SampleRate,
 }
 
 impl<F: SamplerFloat> PlaybackSlot<F> {
@@ -113,16 +110,16 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
     /// # Who builds one, when the voice needs it
     ///
     /// A slot that arrives already needing stretch (non-unity `play.stretch` /
-    /// `play.pitch`) gets its unit built on the control thread, before the
+    /// `play.pitch`) gets its vocoder built on the control thread, before the
     /// audio thread ever sees the slot. The two owners do that differently, and
     /// the difference is not cosmetic:
     ///
-    /// - `VoicePool` takes a pre-built filter from the sender — see
+    /// - `VoicePool` takes a pre-built vocoder from the sender — see
     ///   `VoicePoolHandle::prepare`, which fills in `VoiceCommand::AddVoice`'s
     ///   `stretch` field. It has to: `AddVoice` is drained in the callback, so the
     ///   pool cannot build one at the point it learns it needs one.
     /// - `VoiceNode` builds its own, in `VoiceNode::with_channels`, because
-    ///   that constructor *is* control-thread code. Nothing prepares a filter for
+    ///   that constructor *is* control-thread code. Nothing prepares a vocoder for
     ///   a node, and nothing needs to.
     ///
     /// # Turning stretch on later is a pool-only capability
@@ -134,15 +131,12 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
     /// host that wants to change it respawns the voice, which is what the
     /// hosts we know of do.
     ///
-    /// If that gap is ever closed, `VoiceNode`'s `prepare` has to close with
-    /// it. It refreshes an existing unit (`if let Some(unit) = &mut
-    /// self.slot.stretch`) and cannot create one, so a filter adopted mid-flight
-    /// would keep the rate it was built at and never be corrected — a pitch
-    /// error proportional to the device's real rate, with nothing logged.
+    /// If that gap is ever closed, the node would adopt a vocoder built by its
+    /// handle the way the pool's drain does: moved in, with the surplus retired
+    /// for the control thread to free.
     pub(crate) fn with_channels(
         id: SlotId,
         voice: Box<Voice<F>>,
-        sample_rate: SampleRate,
         channels: impl Into<ChannelLayout>,
     ) -> Self {
         let channels = nonempty(channels.into());
@@ -153,7 +147,6 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
             cursor: None,
             seats: 0,
             channels,
-            sample_rate,
         }
     }
 
@@ -321,13 +314,21 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
         let BlockScratch {
             out,
             raw,
+            prime,
             positions,
             reads,
             gather,
         } = scratch;
         let positions = &mut positions[..frames];
+        let longest = reads.len();
         // A resident vocoder always runs, at unity too, so the voice's latency
         // does not change with its stretch; a voice without one reads dry.
+        //
+        // Its seat primes over several blocks (see `stretched`): a seek, a loop wrap or
+        // the first block of a window sounds up to a few blocks late, and the voice is
+        // silent meanwhile. The vocoder's output is passed on as it is: a non-finite
+        // source sample does not latch in it (the vocoder's own invariant), so no
+        // reset follows a block that wrote one.
         let stretch = self.stretch.as_deref_mut().map(|vocoder| {
             vocoder.retarget(&stretched::controls(&play));
             Stretch {
@@ -344,10 +345,9 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
                 // the vocoder takes its input at a cursor of its own, one
                 // source step (`read_rate`: varispeed and `src_ratio`) per
                 // input frame, so a change of the stretch moves nothing.
-                if !sampler.placed_positions(clock, range, stretch.consumption, positions) {
-                    stretch.unseat();
-                    return Piece::Silent;
-                }
+                let window = sampler.window();
+                let sounds =
+                    sampler.placed_positions(clock, range.clone(), stretch.consumption, positions);
                 let mut feed = MemoryFeed {
                     sampler,
                     direction,
@@ -355,8 +355,34 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
                     n,
                     gather,
                 };
-                let mut lent = Lent { out, raw, reads, n };
-                stretched::render(stretch, &mut feed, positions, &mut lent);
+                let mut input = Input { raw, reads, n };
+                // A voice whose window opens soon primes ahead of it, so its first
+                // frame lands on its frame (see `stretched`).
+                let ahead = window.and_then(|w| frames_until(clock, range.start, w.start));
+                if let Some(ahead) = ahead {
+                    let lead = stretched::prime(stretch.vocoder)
+                        .get()
+                        .div_ceil(PRIME_SPEED);
+                    if stretch.cursor.is_some() || ahead <= lead + longest {
+                        stretched::preroll(
+                            &mut stretch,
+                            &mut feed,
+                            SamplePosition::new(0.0),
+                            ahead,
+                            frames,
+                            &mut input,
+                            prime,
+                        );
+                    }
+                }
+                if !sounds {
+                    // Any other silence unseats.
+                    if ahead.is_none() {
+                        stretch.unseat();
+                    }
+                    return Piece::Silent;
+                }
+                stretched::render(stretch, &mut feed, positions, out, prime, &mut input);
                 Piece::Ready
             }
             (VoiceSource::Disk(reader), Some(mut stretch)) => {
@@ -371,8 +397,8 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
                     return Piece::Silent;
                 }
                 let mut feed = DiskFeed { reader, n, gather };
-                let mut lent = Lent { out, raw, reads, n };
-                stretched::render(stretch, &mut feed, positions, &mut lent);
+                let mut input = Input { raw, reads, n };
+                stretched::render(stretch, &mut feed, positions, out, prime, &mut input);
                 Piece::Ready
             }
             // A free-running voice steps its own cursor (the transport is not
@@ -418,6 +444,16 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
             }
         }
     }
+}
+
+/// The frames from block frame `from` until the playhead reaches `start`, while the
+/// transport rolls (`None` when it does not, or `start` is not ahead): the first run's
+/// tempo carried on, a few blocks' extrapolation.
+fn frames_until(clock: &BlockClock<'_>, from: usize, start: Beat) -> Option<usize> {
+    let run = clock.runs_in(from..from + 1).next()?;
+    let per_beat = run.frames_per_beat()?;
+    let beats = (start - run.beat_at(from.max(run.start))).get();
+    (beats > 0.0).then_some((beats * per_beat) as usize)
 }
 
 /// What [`PlaybackSlot::render_lanes`] left for its piece.

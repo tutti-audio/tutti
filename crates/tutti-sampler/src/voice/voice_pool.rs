@@ -242,8 +242,7 @@ fn a_standalone_voices_fork_shares_no_stretch_state() {
 
 /// A pool's fork holds copies of the voices the pool was built with and
 /// shares nothing with the live pool: a voice the live handle adds later is
-/// not in it (one voice's ramp, not two), preparing it at another rate does
-/// not move the rate the live handle builds its stretch vocoders at, and a
+/// not in it (one voice's ramp, not two), and a
 /// pool whose handle has queued a command is not forked at all (its voices
 /// are on the audio thread).
 #[test]
@@ -270,19 +269,6 @@ fn a_pools_fork_shares_nothing_with_the_live_pool() {
         SampleRate::of(SR),
         MaxBlock::of(Samples::new(64)),
     ));
-    let mut elsewhere = source
-        .fork(tutti_graph::ForkMode::Live)
-        .expect("a pool forks")
-        .node;
-    elsewhere.prepare(&Prepare::new(
-        SampleRate::SR_96K,
-        MaxBlock::of(Samples::new(64)),
-    ));
-    assert_eq!(
-        handle.rate.load(),
-        SampleRate::of(SR),
-        "the fork moved the live pool's rate"
-    );
     let mut fork = source
         .fork(tutti_graph::ForkMode::Live)
         .expect("a pool forks")
@@ -2199,7 +2185,6 @@ fn send_builds_the_stretch_filter_not_the_drain() {
             tx: Arc::new(Mutex::new(probe_tx)),
             retired: Arc::new(Mutex::new(tutti_rt::ring(0, tutti_rt::Overflow::Refuse).1)),
             channels: ChannelLayout::from(6u16),
-            rate: SharedRate::new(SampleRate::SR_44K1),
             counters: Default::default(),
             streams: Default::default(),
             free: Default::default(),

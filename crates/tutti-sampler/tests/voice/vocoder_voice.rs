@@ -42,10 +42,15 @@ fn sine(f: f64, amplitude: f64, phase: f64) -> impl Fn(usize) -> f64 {
 }
 
 fn source(wave: &Arc<Wave>) -> MemorySource<f32> {
+    source_from(wave, 0.0)
+}
+
+/// `wave` placed from beat `start`.
+fn source_from(wave: &Arc<Wave>, start: f64) -> MemorySource<f32> {
     MemorySource::with_config(
         Arc::clone(wave),
         MemorySourceConfig {
-            placement: Some(VoiceWindow::from(Beat::new(0.0))),
+            placement: Some(VoiceWindow::from(Beat::new(start))),
             channels: wave.layout(),
             ..Default::default()
         },
@@ -61,7 +66,19 @@ fn render(
     stretch: f64,
     cents: f64,
     frames: usize,
-    mut each: impl FnMut(usize, &VoicePoolHandle<f32>),
+    each: impl FnMut(usize, &VoicePoolHandle<f32>, &MockTransport),
+) -> Vec<Vec<f32>> {
+    render_from(wave, 0.0, stretch, cents, frames, each)
+}
+
+/// [`render`] with the wave placed from beat `start`.
+fn render_from(
+    wave: &Arc<Wave>,
+    start: f64,
+    stretch: f64,
+    cents: f64,
+    frames: usize,
+    mut each: impl FnMut(usize, &VoicePoolHandle<f32>, &MockTransport),
 ) -> Vec<Vec<f32>> {
     let (pool, handle) = VoicePool::with_channels(wave.layout())
         .expect("a width the sampler reads")
@@ -71,7 +88,7 @@ fn render(
     handle
         .add(
             SlotId(1),
-            source(wave),
+            source_from(wave, start),
             Playback {
                 stretch: StretchFactor::new(stretch),
                 pitch: Cents::new(cents),
@@ -81,7 +98,7 @@ fn render(
         .expect("the command queue has room in a test");
     let mut out = vec![Vec::new(); usize::from(wave.layout().count())];
     for index in 0..frames / BLOCK {
-        each(index, &handle);
+        each(index, &handle, &transport);
         let block = contract::drive_input(
             &mut pool,
             &transport.env(BLOCK, SampleRate::of(SR)),
@@ -147,7 +164,7 @@ fn equal_channels_stay_equal_bit_for_bit_through_a_stretch_and_a_shift() {
     let mix = |i: usize| a(i) + b(i);
     let source = wave(60_000, &[&mix, &mix]);
     for (stretch, cents) in [(1.5, 0.0), (0.8, 300.0), (1.0, -500.0)] {
-        let out = render(&source, stretch, cents, 40_000, |_, _| {});
+        let out = render(&source, stretch, cents, 40_000, |_, _, _| {});
         assert!(
             out[0].iter().any(|&x| x != 0.0),
             "{stretch}, {cents}: silent"
@@ -165,7 +182,7 @@ fn a_stretch_keeps_the_inter_channel_phase_offset() {
     const MEASURE: usize = 16_384;
     let (f, offset) = (1000.3, 0.6);
     let source = wave(80_000, &[&sine(f, 0.5, 0.0), &sine(f, 0.5, offset)]);
-    let out = render(&source, 1.5, 0.0, 60_000, |_, _| {});
+    let out = render(&source, 1.5, 0.0, 60_000, |_, _, _| {});
     let (left, right) = (f64s(&out[0]), f64s(&out[1]));
     let at = 30_000;
     let measured = phase_over(
@@ -198,7 +215,7 @@ fn a_non_integer_ratio_plays_n_frames_over_n_times_the_ratio() {
     };
     let source = wave(60_000, &[&tone_burst, &tone_burst]);
     for ratio in [1.5, 0.8] {
-        let out = render(&source, ratio, 0.0, 40_000, |_, _| {});
+        let out = render(&source, ratio, 0.0, 40_000, |_, _, _| {});
         let half = 0.5 / 2.0f64.sqrt() / 2.0;
         let loud: Vec<usize> = out[0]
             .as_chunks::<RES>()
@@ -233,7 +250,7 @@ fn a_shift_of_700_cents_lands_at_the_input_times_two_to_the_seven_twelfths() {
     const STEP: usize = 4096;
     let f = 440.0;
     let source = wave(80_000, &[&sine(f, 0.5, 0.0), &sine(f, 0.5, 0.0)]);
-    let out = f64s(&render(&source, 1.0, 700.0, 60_000, |_, _| {})[0]);
+    let out = f64s(&render(&source, 1.0, 700.0, 60_000, |_, _, _| {})[0]);
     let want = f * (700.0f64 / 1200.0).exp2();
     let at = 14_336;
     let (a, b) = (&out[at..at + MEASURE], &out[at + STEP..at + STEP + MEASURE]);
@@ -253,13 +270,15 @@ fn a_shift_of_700_cents_lands_at_the_input_times_two_to_the_seven_twelfths() {
 /// periods of 1500 Hz, so a block's RMS is exact) after the vocoder has filled stay
 /// within 1 dB of the sine's, which is two overlapped frames' phase mismatch of
 /// `acos(10^(-1/20)) = 0.48` rad. The change of intake that flushed the stream
-/// cost 11.6 dB.
+/// cost 11.6 dB. (The step from 1.0 is not one: a voice at unity has no vocoder yet, and
+/// adopting one primes over blocks, silent meanwhile; see
+/// `a_reseat_sounds_after_the_priming_closed_form`.)
 #[test]
 fn a_ratio_step_mid_play_keeps_every_block_within_a_decibel() {
     let source = wave(120_000, &[&sine(1500.0, 0.5, 0.0), &sine(1500.0, 0.5, 0.0)]);
-    for (first, second) in [(0.8, 1.0667), (1.0667, 0.8), (1.0, 1.05)] {
+    for (first, second) in [(0.8, 1.0667), (1.0667, 0.8), (1.01, 1.05)] {
         let step_at = 320; // a block, 20 480 frames in
-        let out = render(&source, first, 0.0, 60_000, |index, handle| {
+        let out = render(&source, first, 0.0, 60_000, |index, handle, _| {
             if index == step_at {
                 handle
                     .set_stretch(SlotId(1), StretchFactor::new(second), Cents::new(0.0))
@@ -337,7 +356,7 @@ fn an_onset_lands_at_its_timeline_frame_through_a_pool() {
     const AT: usize = 4000;
     let impulse = |i: usize| if i == AT { 1.0 } else { 0.0 };
     let source = wave(20_000, &[&impulse, &impulse]);
-    let out = render(&source, 1.5, 0.0, 12_000, |index, handle| {
+    let out = render(&source, 1.5, 0.0, 12_000, |index, handle, _| {
         if index == 0 {
             handle
                 .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
@@ -420,7 +439,7 @@ fn a_six_channel_voice_stretches_every_channel() {
         .collect();
     let refs: Vec<&dyn Fn(usize) -> f64> = channels.iter().map(|c| &**c).collect();
     let source = wave(60_000, &refs);
-    let out = render(&source, 1.5, 0.0, 40_000, |_, _| {});
+    let out = render(&source, 1.5, 0.0, 40_000, |_, _, _| {});
     assert_eq!(out.len(), 6);
     for (c, a) in amplitudes.iter().enumerate() {
         let steady = a / 2.0f64.sqrt();
@@ -445,7 +464,7 @@ fn a_non_finite_source_sample_does_not_latch() {
     let tone = sine(1000.0, 0.5, 0.0);
     let poisoned = |i: usize| if i == 5000 { f64::NAN } else { tone(i) };
     let source = wave(60_000, &[&poisoned, &poisoned]);
-    let out = render(&source, 1.5, 0.0, 40_000, |_, _| {});
+    let out = render(&source, 1.5, 0.0, 40_000, |_, _, _| {});
     assert!(
         out[0].iter().any(|x| !x.is_finite()),
         "the sample reaches the output (a vacuous test otherwise)"
@@ -460,4 +479,81 @@ fn a_non_finite_source_sample_does_not_latch() {
         out[0][clear..].iter().any(|&x| x.abs() > 0.1),
         "and the voice sounds again"
     );
+}
+
+/// The vocoder's priming at a seat, `latency + window` output frames.
+fn prime() -> usize {
+    vocoder_latency().get() + WINDOW
+}
+
+/// A seek reseats the voice, which primes over blocks and is silent until it is done,
+/// then sounds the timeline: the seat owes `prime` frames, each frame that goes by adds
+/// one and the priming runs 8 a frame, so the voice sounds exactly `ceil(prime / 7)`
+/// frames after the seek. The block of the seek, and everything up to then, is exactly
+/// zero; after it the voice plays the source at its place on the timeline (a vocoder at
+/// unity, which a voice turned back to 1.0 keeps, reproduces it to the transforms'
+/// rounding, four overlapped frames of it).
+#[test]
+fn a_reseat_sounds_after_the_priming_closed_form() {
+    let (f, seek_block) = (1000.0, 375);
+    let seek = seek_block * BLOCK;
+    let source = wave(300_000, &[&sine(f, 0.5, 0.0), &sine(f, 0.5, 0.0)]);
+    let out = render(&source, 1.5, 0.0, 40_000, |index, handle, transport| {
+        if index == 0 {
+            handle
+                .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
+                .expect("the command queue has room in a test");
+        }
+        if index == seek_block {
+            transport.seek(Beat::new(5.0));
+        }
+    });
+    let silent = prime().div_ceil(7);
+    assert!(
+        out[0][seek..seek + silent].iter().all(|&x| x == 0.0),
+        "silent for the {silent} frames the priming takes"
+    );
+    // Beat 5 at 120 BPM and 48 kHz is source frame 120 000.
+    let tone = sine(f, 0.5, 0.0);
+    // The kernel's bound for an impulse (four overlapped frames, each in error by the
+    // transforms' rounding), twice over: a sine's energy is in two conjugate bins.
+    let bound = 8.0 * f32_transform_error();
+    let from = seek + silent;
+    for (t, &y) in out[0][from..from + 3000]
+        .iter()
+        .enumerate()
+        .map(|(k, y)| (from + k, y))
+    {
+        let want = tone(120_000 + t - seek);
+        assert!(
+            (f64::from(y) - want).abs() < bound,
+            "frame {t}, {} after the seek: {y} for {want}",
+            t - seek
+        );
+    }
+}
+
+/// A clip placed at beat 1 (frame 24 000) with a hit on its first frame sounds it on
+/// that frame: the voice primes ahead of its window, from a transport that rolls, so
+/// the frame lands where it is due, within the transforms' rounding (the vocoder at
+/// unity, as in the seek above), and nothing sounds before it.
+#[test]
+fn a_clip_placed_ahead_lands_its_first_frame_on_its_frame() {
+    let hit = |i: usize| if i == 0 { 1.0 } else { 0.0 };
+    let source = wave(20_000, &[&hit, &hit]);
+    let out = render_from(&source, 1.0, 1.5, 0.0, 30_000, |index, handle, _| {
+        if index == 0 {
+            handle
+                .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
+                .expect("the command queue has room in a test");
+        }
+    });
+    let bound = 4.0 * f32_transform_error();
+    for (n, &y) in out[0].iter().enumerate() {
+        let want = if n == 24_000 { 1.0 } else { 0.0 };
+        assert!(
+            (f64::from(y) - want).abs() < bound,
+            "frame {n}: {y}, the hit is due at 24000"
+        );
+    }
 }

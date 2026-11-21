@@ -8,7 +8,6 @@
 //! its one voice and owns the disk [`Stream`] that feeds it.
 
 use std::collections::HashMap;
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 use crate::streamer::{ControlCell, Stream, StreamId};
@@ -25,29 +24,9 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_dsp::PhaseVocoder;
 use tutti_graph::ParamSet;
-use tutti_rt::{AtomicSampleRate, Param};
+use tutti_rt::Param;
 use tutti_rt::{LockExt, Publisher, PushError, RingReader, RingWriter};
-use tutti_units::{Amplitude, Cents, PlaybackRate, SampleRate, StretchFactor};
-
-/// A node's sample rate, shared with its handle: the node stores it when it
-/// is prepared (control thread), the handle reads it to build a stretch
-/// vocoder at that rate (control thread). A scalar: no audio-thread read.
-#[derive(Clone, Debug)]
-pub(crate) struct SharedRate(Arc<AtomicSampleRate>);
-
-impl SharedRate {
-    pub(crate) fn new(rate: SampleRate) -> Self {
-        Self(Arc::new(AtomicSampleRate::new(rate)))
-    }
-
-    pub(crate) fn store(&self, rate: SampleRate) {
-        self.0.store(rate, Ordering::Relaxed);
-    }
-
-    pub(crate) fn load(&self) -> SampleRate {
-        self.0.load(Ordering::Relaxed)
-    }
-}
+use tutti_units::{Amplitude, Cents, PlaybackRate, StretchFactor};
 
 /// Voice slots a pool reserves, and the most its `AddVoice` drain will hold.
 ///
@@ -692,9 +671,6 @@ pub struct VoicePoolHandle<F: SamplerFloat> {
     /// the right width on the CONTROL thread — see
     /// [`VoiceCommand::AddVoice::stretch`].
     pub(crate) channels: ChannelLayout,
-    /// The reader's sample rate, as its `prepare` last stored it, for the
-    /// same reason.
-    pub(crate) rate: SharedRate,
     /// What the pool's drain dropped or refused; read by
     /// [`drops`](Self::drops).
     pub(crate) counters: Arc<DrainCounters>,
@@ -1117,7 +1093,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
                 voice,
                 stretch: None,
             } if stretch_wanted(&voice.play) => {
-                let vocoder = stretched::vocoder::<F>(self.channels, self.rate.load());
+                let vocoder = stretched::vocoder::<F>(self.channels);
                 VoiceCommand::AddVoice {
                     id,
                     voice,
@@ -1137,7 +1113,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
                 pitch_cents,
                 stretch: None,
             } if stretch_values_want_filter(stretch_factor, pitch_cents) => {
-                let vocoder = stretched::vocoder::<F>(self.channels, self.rate.load());
+                let vocoder = stretched::vocoder::<F>(self.channels);
                 VoiceCommand::UpdateStretch {
                     id,
                     stretch_factor,

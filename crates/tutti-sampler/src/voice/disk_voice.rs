@@ -210,6 +210,11 @@ pub struct DiskVoiceConfig {
 /// a memory voice does. It sounds [`latency`](tutti_dsp::PhaseVocoder::latency)
 /// frames late. A standalone `VoiceNode` declares that latency for delay
 /// compensation; in a [`VoicePool`](crate::VoicePool) it is not compensated.
+///
+/// Its seat is not primed either, so its first `latency` frames after a seat
+/// are silence, and the end of its window cuts the vocoder's output where it
+/// stands: the last `latency` frames of the source before the gate closes are
+/// still inside the vocoder and never sound.
 pub struct DiskVoice<F: SamplerFloat> {
     inner: DiskSource<F>,
     /// The playback controls: the streamer's cell, shared with `inner`, while

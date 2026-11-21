@@ -34,7 +34,7 @@ pub mod command;
 pub mod node;
 pub mod pool;
 pub mod slot;
-mod stretched;
+pub(crate) mod stretched;
 pub mod types;
 // Tests only: they exercise the five modules above in combination and reach
 // private state a sibling module could not see.

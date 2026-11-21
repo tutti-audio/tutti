@@ -33,7 +33,7 @@ use tutti_graph::{
 };
 use tutti_rt::{Param, Publisher, Reader};
 use tutti_timeline::TempoReader;
-use tutti_units::{Amplitude, Latency, PlaybackRate, SampleRate, Tail, UnitParam};
+use tutti_units::{Amplitude, Latency, PlaybackRate, Tail, UnitParam};
 
 /// One [`Voice`] as a graph node in its own right: zero inputs, `channels`
 /// outputs.
@@ -140,15 +140,11 @@ impl<F: SamplerFloat> VoiceNode<F> {
     /// else on this path fills it in.
     pub fn with_channels(voice: Voice<F>, channels: impl Into<ChannelLayout>) -> Self {
         let channels = nonempty(channels.into());
-        // The geometry's rate is nominal: the vocoder counts frames.
-        let sample_rate = SampleRate::SR_44K1;
-        let stretch =
-            stretch_wanted(&voice.play).then(|| stretched::vocoder::<F>(channels, sample_rate));
+        let stretch = stretch_wanted(&voice.play).then(|| stretched::vocoder::<F>(channels));
         let gain = Param::new(voice.play.gain);
         let window = voice.source.window();
         let play = voice.play;
-        let mut slot =
-            PlaybackSlot::with_channels(SlotId(0), Box::new(voice), sample_rate, channels);
+        let mut slot = PlaybackSlot::with_channels(SlotId(0), Box::new(voice), channels);
         slot.stretch = stretch;
         Self {
             slot,
@@ -446,7 +442,6 @@ impl<F: SamplerFloat> Node<F> for VoiceNode<F> {
             .voice
             .source
             .set_render(sample_rate, p.render_mode());
-        self.slot.sample_rate = sample_rate;
     }
 
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
@@ -619,7 +614,7 @@ mod tests {
     use super::*;
     use crate::{MemorySource, Playback, VoiceSource, VoiceWindow};
     use tutti_buffers::Mono;
-    use tutti_units::Beat;
+    use tutti_units::{Beat, SampleRate};
 
     /// A window the node held across the next publish is freed by the next
     /// `reclaim`, with no further publish.
@@ -727,6 +722,36 @@ mod tests {
             play: Playback::default(),
         };
         assert_eq!(VoiceNode::new(placed).shape().tail, Tail::None);
+    }
+
+    /// A standalone disk voice that stretches declares its vocoder's latency (its ring
+    /// cannot be read ahead of its seat), and one that does not declares none.
+    #[test]
+    fn a_standalone_disk_voice_declares_its_vocoders_latency() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("tone.wav");
+        tutti_fixtures::signal::write_wav_f32(&path, SampleRate::SR_48K, 1, &vec![0.25f32; 4_800]);
+        let mut streamer =
+            crate::DiskStreamer::<_, f32>::manual(SampleRate::SR_48K, Default::default())
+                .expect("streamer builds");
+        let mut latency = |play: Playback| {
+            let opening = streamer.open_stream(&path, crate::StreamStart::HEAD);
+            let (stream, reader) =
+                crate::testing::wait_for_open(&mut streamer, opening).expect("opens");
+            let voice = crate::DiskVoice::from_reader(reader, crate::VoiceWindow::default());
+            VoiceNode::streaming(voice, stream, play).shape().latency
+        };
+        let stretched = latency(Playback {
+            stretch: tutti_units::StretchFactor::new(1.5),
+            ..Playback::default()
+        });
+        let want = stretched::vocoder::<f32>(ChannelLayout::MONO).latency();
+        assert!(want.get() > 0);
+        assert_eq!(stretched.samples(), want);
+        assert_eq!(
+            latency(Playback::default()).samples(),
+            tutti_units::Samples::new(0)
+        );
     }
 
     /// **A streaming node's handle owns its stream.** With every other holder

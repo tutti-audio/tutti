@@ -1,12 +1,12 @@
-//! A stretched memory voice has sound right after a seek.
+//! A stretched memory voice sounds the source, in full, as soon as its priming is done
+//! after a seek.
 //!
 //! A seek unseats the vocoder, so pre-jump audio does not smear over the new
-//! region, and an unprimed vocoder is silent until its latency has passed (more
-//! than 2 000 frames). The seat is primed: the vocoder runs a latency and a window
-//! of output frames from source read before the seek's target, and discards them.
-//! Without it every seek or loop wrap of a stretched voice left tens of
-//! milliseconds of silence. `verify-audio`'s `seek_while_stretched` case heard
-//! it; this pins it in the suite.
+//! region, and the seat is primed: the vocoder runs a latency and a window of output
+//! frames from source read before the seek's target, and discards them, over a few
+//! blocks (silent meanwhile). Unprimed, a voice would be silent until the vocoder's
+//! latency had passed and then ramp in. `verify-audio`'s `seek_while_stretched` case
+//! heard that; this pins the primed voice in the suite.
 
 use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
@@ -69,17 +69,31 @@ fn render(frames: usize, seek_at: usize) -> Vec<f32> {
     out
 }
 
-/// The first 2 048 frames after a seek are as loud as the steady state
-/// before it (within 3 dB), not the flushed vocoder's silence.
+/// After a seek the voice is silent for exactly the priming the closed form gives, then
+/// plays the sine at its own level.
+///
+/// The seat owes `prime` = latency + window = 2049 + 2048 output frames, each frame
+/// that goes by adds one and the priming runs 8 a frame, so the voice sounds `ceil(prime
+/// / 7)` frames after the seek: the frames before are exactly zero. From there the
+/// vocoder is full (the priming ran a window ahead), so the next 2 048 frames have the
+/// sine's RMS, `amplitude / sqrt(2)`, to within 1 dB (two overlapped frames' phase
+/// mismatch of `acos(10^(-1/20)) = 0.48` rad) with no ramp: a voice left to fill from
+/// silence would be 3 dB down over them.
 #[test]
-fn a_stretched_voice_is_audible_right_after_a_seek() {
+fn a_stretched_voice_sounds_the_sine_after_exactly_its_priming() {
+    const PRIME: usize = 2049 + 2048;
     let seek_at = 375 * BLOCK; // 24 000
     let out = render(32_000, seek_at);
-    let before = rms(&out[seek_at - 8_192..seek_at]);
-    let after = rms(&out[seek_at..seek_at + 2_048]);
-    assert!(before > 0.3, "the steady state is audible: rms {before}");
+    let silent = PRIME.div_ceil(7);
     assert!(
-        after > before * 0.707,
-        "silent after the seek: rms {after} against {before} before it"
+        out[seek_at..seek_at + silent].iter().all(|&x| x == 0.0),
+        "silent for the {silent} frames of priming"
+    );
+    let after = rms(&out[seek_at + silent..seek_at + silent + 2_048]);
+    let want = 1.0 / 2.0f32.sqrt();
+    let db = 20.0 * (after / want).log10();
+    assert!(
+        db.abs() < 1.0,
+        "rms {after} for a sine of rms {want} after the priming ({db} dB)"
     );
 }

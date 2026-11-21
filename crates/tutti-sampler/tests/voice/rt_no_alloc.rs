@@ -31,7 +31,7 @@ use tutti_graph::contract::Direct;
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::{
     Direction, MemorySource, MemorySourceConfig, Playback, SlotId, Voice, VoiceNode, VoicePool,
-    VoiceSource, VoiceWindow,
+    VoicePoolHandle, VoiceSource, VoiceWindow,
 };
 use tutti_units::{
     Beat, BeatDuration, Bpm, Cents, PlaybackRate, SampleRate, Seconds, StretchFactor,
@@ -150,6 +150,115 @@ fn a_stretching_voice_with_a_changing_ratio_is_allocation_free() {
         assert_no_alloc::assert_no_alloc(|| rig.block());
         handle.collect_retired();
     }
+}
+
+/// A pool of one stretching memory voice (a wave of 4 s, stretched 1.5, shifted
+/// 300 cents) placed at beat 0 for `duration` beats (`None`: open-ended), driven in
+/// blocks of `block`, and its handle. Warmed outside any guard until the voice sounds.
+fn stretching_rig(
+    block: usize,
+    duration: Option<f64>,
+) -> (Rig<VoicePool<f32>>, VoicePoolHandle<f32>) {
+    let (pool, handle) = VoicePool::new().with_handle();
+    let mut rig = Rig::new(pool, block);
+    let source = MemorySource::placed(
+        sine_wave(4.0, 48_000.0),
+        VoiceWindow {
+            start: Beat::new(0.0),
+            duration: duration.map(BeatDuration::new),
+        },
+    )
+    .expect("a placeable wave");
+    handle
+        .add(
+            SlotId(1),
+            source,
+            Playback {
+                stretch: StretchFactor::new(1.5),
+                pitch: Cents::new(300.0),
+                ..Playback::default()
+            },
+        )
+        .expect("the command queue has room in a test");
+    for _ in 0..(16_384 / block).max(2) {
+        rig.block();
+    }
+    (rig, handle)
+}
+
+/// `blocks` guarded blocks of `rig`.
+fn guarded<N: Node>(rig: &mut Rig<N>, blocks: usize) {
+    for _ in 0..blocks {
+        assert_no_alloc::assert_no_alloc(|| rig.block());
+    }
+}
+
+/// A stretching voice allocates nothing wherever it seats: its priming (several
+/// blocks of vocoder work, in the scratch the owner built) runs inside the guard, at
+/// a seek mid-play, at a stop and a start, at a window's end and its re-entry, and in
+/// one-frame blocks and in a block past any scratch of a few thousand frames.
+#[test]
+fn a_stretching_voice_does_not_allocate_when_it_seats() {
+    // A seek mid-play, twice (the second lands in the first's priming).
+    let (mut rig, _handle) = stretching_rig(64, None);
+    rig.t.seek(Beat::new(0.3));
+    guarded(&mut rig, 4);
+    rig.t.seek(Beat::new(0.9));
+    guarded(&mut rig, 40);
+
+    // A stop and a start: the stop unseats, the start primes again.
+    rig.t.set_rolling(false);
+    guarded(&mut rig, 8);
+    rig.t.set_rolling(true);
+    guarded(&mut rig, 40);
+
+    // A window's end and its re-entry: 0.5 beat is 12 000 frames at 120 BPM; the
+    // blocks run past it, then the playhead goes back inside.
+    let (mut rig, _handle) = stretching_rig(64, Some(0.5));
+    guarded(&mut rig, 220);
+    rig.t.seek(Beat::new(0.1));
+    guarded(&mut rig, 40);
+
+    // One-frame blocks: a seat primes over hundreds of them.
+    let (mut rig, _handle) = stretching_rig(1, None);
+    rig.t.seek(Beat::new(0.2));
+    guarded(&mut rig, 700);
+
+    // A block of 8 492 frames, past a few thousand of scratch, across a seek.
+    let (mut rig, _handle) = stretching_rig(8_192 + 300, None);
+    rig.t.seek(Beat::new(1.0));
+    guarded(&mut rig, 3);
+}
+
+/// Removing a stretching voice and replacing its wave allocate nothing in the drain:
+/// the voice is retired for the control thread to free, and a voice that is added
+/// again primes inside the guard.
+#[test]
+fn removing_and_replacing_a_stretching_voice_does_not_allocate() {
+    let (mut rig, handle) = stretching_rig(64, None);
+    handle
+        .replace_wave(SlotId(1), sine_wave(3.0, 48_000.0))
+        .expect("the command queue has room in a test");
+    guarded(&mut rig, 20);
+    handle.collect_retired();
+    handle
+        .remove(SlotId(1))
+        .expect("the command queue has room in a test");
+    guarded(&mut rig, 4);
+    handle.collect_retired();
+    let source = MemorySource::placed(sine_wave(2.0, 48_000.0), VoiceWindow::from(Beat::new(0.0)))
+        .expect("a placeable wave");
+    handle
+        .add(
+            SlotId(1),
+            source,
+            Playback {
+                stretch: StretchFactor::new(0.8),
+                ..Playback::default()
+            },
+        )
+        .expect("the command queue has room in a test");
+    guarded(&mut rig, 40);
 }
 
 // ---------------------------------------------------------------------------
@@ -393,7 +502,9 @@ fn voice_nodes_at_max_block_512_in_ragged_blocks_are_allocation_free() {
 /// in ragged blocks that cut the loop's wraps (and so the crossfade) at
 /// every offset: nothing allocates, and the crossfade ran: no step across a
 /// wrap is a cut's (a 440 Hz tone steps 0.49 there).
-fn wraps_without_allocating<N: Node>(node: N) {
+/// `smooth`: the wrap is also free of a cut (a stretched voice reseats at a wrap and is
+/// silent while it primes, so it is not).
+fn wraps_without_allocating<N: Node>(node: N, smooth: bool) {
     use tutti_graph::TransportPosition;
     use tutti_music::LoopRange;
     const WRAPS: usize = 4;
@@ -428,6 +539,9 @@ fn wraps_without_allocating<N: Node>(node: N) {
         }
     });
     assert!(wraps >= WRAPS, "the run wraps ({wraps})");
+    if !smooth {
+        return;
+    }
     let widest = heard
         .windows(2)
         .map(|w| (w[1] - w[0]).abs())
@@ -443,11 +557,17 @@ fn a_loop_wrap_crossfade_is_allocation_free() {
     let wave = sine_wave(2.0, 48_000.0);
     let mut pool = VoicePool::new();
     insert(&mut pool, 0, placed_parts(&wave, 1.0));
-    wraps_without_allocating(pool);
-    wraps_without_allocating(VoiceNode::new(placed_voice(&wave, 1.0)));
+    wraps_without_allocating(pool, true);
+    wraps_without_allocating(VoiceNode::new(placed_voice(&wave, 1.0)), true);
+    // Stretched: every wrap is a reseat, which primes inside the guard.
+    let mut stretched = VoicePool::new();
+    insert(&mut stretched, 0, placed_parts(&wave, 1.5));
+    wraps_without_allocating(stretched, false);
+    wraps_without_allocating(VoiceNode::new(placed_voice(&wave, 1.5)), false);
     wraps_without_allocating(
         MemorySource::placed(wave.clone(), VoiceWindow::from(Beat::new(0.0)))
             .expect("a placeable wave"),
+        true,
     );
 }
 
