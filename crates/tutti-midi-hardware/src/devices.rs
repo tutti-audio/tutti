@@ -561,6 +561,7 @@ impl DeviceEvents {
 }
 
 /// The wait for the next change of a [`DeviceEvents`]: [`DeviceEvents::recv`].
+/// Fed by the backend's device-watch thread, which wakes it when a change lands.
 #[must_use = "a recv does nothing until it is awaited"]
 pub struct Recv<'a> {
     events: &'a DeviceEvents,
