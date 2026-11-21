@@ -287,6 +287,10 @@ pub struct Fdn {
     pub input: Gains,
     /// The output gains `C`.
     pub output: NetworkOutputMap,
+    /// The delay the loop holds beside its lines, in frames: the path a shimmer's shifter
+    /// adds to the feedback. Every decay query reads it as a longer trip for every line; it
+    /// is not a line (it sizes nothing and is no mode).
+    pub loop_delay: SampleSpan,
 }
 
 /// The output gains `C`: one row per output channel, one gain per line.

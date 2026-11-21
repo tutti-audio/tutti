@@ -1,6 +1,7 @@
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_units::{
-    Db, Depth, Hz, Mix, ReadPosition, SampleRate, Samples, Seconds, StereoWidth, Tail,
+    Cents, Db, Depth, Feedback, Hz, Mix, ReadPosition, SampleRate, Samples, Seconds, StereoWidth,
+    Tail,
 };
 
 use super::*;
@@ -855,4 +856,224 @@ fn the_longest_decay_at_192_khz_on_the_shortest_line_holds_its_closed_form_rt60_
         "RT60 {measured} s against {} s: error {error:e}, bound {bound:e} ({trips} trips of {frames_per_line} frames)",
         decay.get().get()
     );
+}
+
+/// An FFT roundtrip's relative error in `f32` over the shifter's 2048-point window: each
+/// transform grows rounding like `eps * log2(window)`, and a frame is one forward and one inverse.
+fn shimmer_transform_error() -> f64 {
+    2.0 * 2048.0f64.log2() * f64::from(f32::EPSILON)
+}
+
+fn shimmering(lines: usize) -> FdnLayout {
+    FdnLayout::shimmering(lines, MaxDecay::DEFAULT).unwrap()
+}
+
+/// The first frame of `x` that is not silent.
+fn first_sound(x: &[f32]) -> usize {
+    x.iter().position(|&v| v != 0.0).expect("it sounds")
+}
+
+/// At no shift the shimmer returns the feedback it took, delayed by the chunk it was collected
+/// in and the vocoder's latency (`delay`, the bank's own figure) and divided by the bound `B`.
+/// A diagonal two-line network at one decay in every band (a gain `g_j` a trip, whatever the
+/// frequency, `u = 1 / sqrt(2)`) takes an impulse `c_j` into line `j`, which comes round at
+/// `t_j` (read off its first echo) as `f_j = g_j c_j`. So on the left ear (line 0, gain
+/// `sqrt(2 / n) = 1`), with a send `k`:
+///
+/// - `2 t0`: line 0's own echo, less the share the shimmer takes: `g_0 c_0 (1 - k / 2)`;
+/// - `t0 + t1`: line 1's echo reaches line 0 as the shimmer takes it: `-k g_1 c_1 / 2`;
+/// - `2 t0 + D` and `t0 + t1 + D`: the shifted copies of those two, `k g_0 c_0 / (2 B)`
+///   and `k g_1 c_1 / (2 B)`.
+///
+/// None of the times is any other sum of `t0`, `t1` and `D`, so each frame holds one echo, to
+/// the `f32` transform's error (the rest is exactly the arithmetic of the loop in `f32`).
+#[test]
+fn at_zero_cents_the_echoes_are_the_feedback_and_its_delayed_copy() {
+    let l = shimmering(2);
+    let k = 0.5;
+    let c = still(|c| {
+        c.decay = [Seconds::new(2.0); 3];
+        c.diffusion = Mix::new(0.0);
+        c.pre_delay = Seconds::ZERO;
+        c.width = StereoWidth::new(1.0);
+        c.wet = Db::UNITY;
+        c.shimmer_pitch = Cents::new(0.0);
+        c.shimmer_send = Feedback::new_clamped(k);
+    });
+    let net = design(&l, RATE, &c);
+    let f = fdn_of(&net);
+    let g = |j: usize| f.lines[j].absorption.gain(Band::Low).get();
+    let input = |j: usize| f.input[j].get();
+    let (mut bank, mut ramps) = at_rest(&l, RATE, &c);
+    let d = bank.shimmer_delay().get();
+    let frames = 16_000;
+    let [left, right] = run(&mut bank, &mut ramps, &impulse(frames), 64);
+    let (t0, t1) = (first_sound(&left), first_sound(&right));
+    assert_eq!(
+        t0 as f64,
+        f.lines[0].length.get(),
+        "a line of 0 delay beyond its length"
+    );
+    let ear = f.output.rows[0][0].get();
+    let b = super::super::shimmer::GAIN_BOUND;
+    let want = [
+        (t0, ear * input(0)),
+        (2 * t0, ear * g(0) * input(0) * (1.0 - k / 2.0)),
+        (t0 + t1, -ear * k * g(1) * input(1) / 2.0),
+        (2 * t0 + d, ear * k * g(0) * input(0) / (2.0 * b)),
+        (t0 + t1 + d, ear * k * g(1) * input(1) / (2.0 * b)),
+    ];
+    let tolerance = 4.0 * shimmer_transform_error();
+    for (at, amplitude) in want {
+        assert!(
+            (f64::from(left[at]) - amplitude).abs() < tolerance,
+            "frame {at}: {} for {amplitude}",
+            left[at]
+        );
+    }
+}
+
+/// A send the control wrote at or past the stable bound is held at it, a non-finite one is
+/// none, and a layout that does not shimmer takes none: the loop's gain is `1 - k (1 - 1 / B)`
+/// at the largest `k`, below 1.
+#[test]
+fn a_send_is_held_under_the_stable_bound() {
+    let b = super::super::shimmer::GAIN_BOUND;
+    let target = |l: &FdnLayout, send: Feedback| {
+        let c = controls(|c| c.shimmer_send = send);
+        let (bank, _) = at_rest(l, RATE, &c);
+        bank.target.shimmer
+    };
+    let held = Feedback::MAX_STABLE.get() as f32;
+    assert_eq!(target(&shimmering(8), Feedback::new(5.0)), held);
+    assert_eq!(target(&shimmering(8), Feedback::new(1.0)), held);
+    assert_eq!(target(&shimmering(8), Feedback::new(f64::NAN)), 0.0);
+    assert_eq!(target(&shimmering(8), Feedback::new(-1.0)), 0.0);
+    assert_eq!(target(&shimmering(8), Feedback::new(0.5)), 0.5);
+    assert_eq!(
+        target(&layout(8, FreezeMode::Decaying), Feedback::new(0.9)),
+        0.0
+    );
+    let gain = 1.0 - Feedback::MAX_STABLE.get() * (1.0 - 1.0 / b);
+    assert!(gain < 1.0, "{gain}");
+}
+
+/// A shimmering network's tail is finite, holds the shifted path's delay in every line of the
+/// model while the send is above zero (and not otherwise), and covers the ring-out of the loop
+/// at +1200 cents and the largest send: the last frame of an impulse's response within 60 dB of
+/// its peak is inside it.
+#[test]
+fn the_tail_of_a_shimmer_holds_the_shifters_delay_and_covers_the_ring_out() {
+    let l = shimmering(8);
+    let c = |send: f64| {
+        still(|c| {
+            c.decay = [Seconds::new(1.0); 3];
+            c.shimmer_pitch = Cents::new(1200.0);
+            c.shimmer_send = Feedback::new_clamped(send);
+        })
+    };
+    let mut probe = FdnBank::<f32>::new(&l, RATE);
+    let ramps = probe.ramps();
+    let Tail::Finite(plain) = probe.tail_of(&ramps, &c(0.0)) else {
+        panic!("finite")
+    };
+    assert!(
+        fdn_of(&probe.network).loop_delay == SampleSpan::ZERO,
+        "no send, no loop delay in the model"
+    );
+    let Tail::Finite(shimmered) = probe.tail_of(&ramps, &c(0.99)) else {
+        panic!("finite")
+    };
+    let d = probe.shimmer_delay();
+    assert!(
+        fdn_of(&probe.network).loop_delay == SampleSpan::from_samples(d),
+        "the loop holds the shifter's delay"
+    );
+    assert!(
+        shimmered.get() >= plain.get() + d.get(),
+        "{shimmered:?} past {plain:?} by the delay"
+    );
+
+    let (mut bank, mut ramps) = at_rest(&l, RATE, &c(0.99));
+    let frames = shimmered.get() + 48_000;
+    let [left, right] = run(&mut bank, &mut ramps, &impulse(frames), 64);
+    let peak = left
+        .iter()
+        .chain(&right)
+        .fold(0.0f32, |p, v| p.max(v.abs()));
+    let floor = peak * 1e-3;
+    let last = (0..frames)
+        .rev()
+        .find(|&i| left[i].abs() > floor || right[i].abs() > floor)
+        .expect("it rings");
+    assert!(
+        last < shimmered.get(),
+        "rings to {last}, tail {shimmered:?}"
+    );
+    assert!(
+        left[frames - 1000..]
+            .iter()
+            .all(|v| v.is_finite() && v.abs() <= floor)
+    );
+}
+
+/// While the send ramps down to 0 (20 ms of chunks), the shifter's delay stays in the model's
+/// loop: the tail reported at each block of the ramp is the one the send held, and only once
+/// the ramp has reached 0 is it the plain network's. At every one of those blocks the tail
+/// covers the measured ring-out of the bank from that block on: the last frame within 60 dB of
+/// the impulse response's peak is inside it.
+#[test]
+fn the_tail_keeps_the_shifters_delay_until_the_send_ramp_reaches_zero() {
+    let l = shimmering(8);
+    let c = |send: f64| {
+        still(|c| {
+            c.decay = [Seconds::new(1.0); 3];
+            c.shimmer_pitch = Cents::new(1200.0);
+            c.shimmer_send = Feedback::new_clamped(send);
+        })
+    };
+    let (mut bank, mut ramps) = at_rest(&l, RATE, &c(0.99));
+    let mut x = impulse(4_000);
+    x.fill(0.0);
+    x[0] = 1.0;
+    let [left, right] = run(&mut bank, &mut ramps, &x, 64);
+    let peak = left
+        .iter()
+        .chain(&right)
+        .fold(0.0f32, |p, v| p.max(v.abs()));
+    let floor = peak * 1e-3;
+    let held = bank.tail_of(&ramps, &c(0.99));
+    let (mut probe, probe_ramps) = at_rest(&l, RATE, &c(0.0));
+    let plain = probe.tail_of(&probe_ramps, &c(0.0));
+    assert_ne!(held, plain, "the delay is in the tail while the send is on");
+    bank.retarget(&mut ramps, &c(0.0));
+    let silence = vec![0.0f32; 64];
+    let mut ramping = 0;
+    for block in 0..40 {
+        let now = bank.tail_of(&ramps, &c(0.0));
+        let at_zero = ramps.shimmer.now() == 0.0;
+        assert_eq!(
+            now,
+            if at_zero { plain } else { held },
+            "block {block}: the delay is dropped when the ramp has reached 0, not before"
+        );
+        ramping += usize::from(!at_zero);
+        if !at_zero {
+            let (mut twin, mut twin_ramps) = (bank.clone(), ramps.clone());
+            let Tail::Finite(t) = now else {
+                panic!("finite")
+            };
+            let frames = t.get() + 48_000;
+            let [l2, r2] = run(&mut twin, &mut twin_ramps, &vec![0.0; frames], 64);
+            let last = (0..frames)
+                .rev()
+                .find(|&i| l2[i].abs() > floor || r2[i].abs() > floor);
+            assert!(
+                last.is_none_or(|i| i < t.get()),
+                "block {block}: rings to {last:?}, tail {t:?}"
+            );
+        }
+        run(&mut bank, &mut ramps, &silence, 64);
+    }
+    assert!(ramping >= 10, "the ramp spans blocks: {ramping}");
 }
