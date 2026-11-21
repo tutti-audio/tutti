@@ -132,8 +132,9 @@ impl<E> State<E> {
 }
 
 /// Whether a send error is its destination's rather than the socket's: the
-/// peer's host or network cannot be reached, its port refuses, or its address
-/// cannot be used. UDP drops such a datagram and the link carries on; any
+/// peer's host or network cannot be reached, the network is down for now, its
+/// port refuses, or its address cannot be used. UDP drops such a datagram and
+/// the link carries on; any
 /// other kind (a permission, a closed descriptor, a buffer) is the socket's
 /// and ends the link.
 const fn is_per_destination(kind: io::ErrorKind) -> bool {
@@ -141,6 +142,7 @@ const fn is_per_destination(kind: io::ErrorKind) -> bool {
         kind,
         io::ErrorKind::HostUnreachable
             | io::ErrorKind::NetworkUnreachable
+            | io::ErrorKind::NetworkDown
             | io::ErrorKind::ConnectionRefused
             | io::ErrorKind::ConnectionReset
             | io::ErrorKind::AddrNotAvailable
