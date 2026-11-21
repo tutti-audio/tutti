@@ -172,7 +172,7 @@ pub enum RecoveryFailure {
         /// The load's error.
         source: Arc<IpcError>,
     },
-    /// The replacement opened inside the host's process, which a served
+    /// The replacement opened inside the host's process, which an out-of-process
     /// plugin's replacement must not.
     ReplacementInProcess,
     /// The replacement was dead before it was installed.

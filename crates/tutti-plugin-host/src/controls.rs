@@ -253,7 +253,7 @@ impl PluginReports {
 }
 
 impl PluginControls {
-    /// Public for `tutti-plugin`'s node of a served plugin, which builds its controls at load.
+    /// Public for `tutti-plugin`'s node of an out-of-process plugin, which builds its controls at load.
     ///
     /// Returns the controls with the [`PluginReports`] that write their latency and tail.
     pub fn new(
@@ -265,7 +265,7 @@ impl PluginControls {
     }
 
     /// [`new`](Self::new), reporting the pipeline's chunk counters (the
-    /// served hosting's own, `Ipc::chunk_counters`) rather than counters of
+    /// out-of-process hosting's own, `Ipc::chunk_counters`) rather than counters of
     /// its own.
     pub fn with_chunks(
         latency: Samples,
@@ -474,7 +474,7 @@ fn lock_tail(tail: &Mutex<PluginTail>) -> std::sync::MutexGuard<'_, PluginTail> 
 /// built, wherever that is: a source the host installs on the live node
 /// afterwards does not reach the fork.
 ///
-/// Public for `tutti-plugin`'s node of a served plugin, which drives the same piece.
+/// Public for `tutti-plugin`'s node of an out-of-process plugin, which drives the same piece.
 #[derive(Debug)]
 pub struct ForkedSources {
     meter: Option<ProjectMeter>,

@@ -1,5 +1,5 @@
-//! The client of a served plugin ([`PluginClient`]): the generic plugin node
-//! (`tutti_plugin_host::PluginNode`) over the served hosting
+//! The client of an out-of-process plugin ([`PluginClient`]): the generic plugin node
+//! (`tutti_plugin_host::PluginNode`) over the out-of-process hosting
 //! (`tutti_plugin_ipc::Ipc`), with the control surface the host keeps beside it.
 //!
 //! There is one node. `PluginClient` is what loads and launches the
@@ -119,7 +119,7 @@ use self::fork::{ForkWatch, ServedFork};
 /// [`PluginClient::new`] returns this state; [`PluginClient::bind`] leaves it.
 #[derive(Debug)]
 pub struct Unbound {
-    /// The generic client over the served plugin, activated at load. Boxed: it
+    /// The generic client over the out-of-process plugin, activated at load. Boxed: it
     /// is tens of KiB, and the client moves several times on its way into a
     /// graph (a debug build's frames hold a copy each).
     client: Box<InProcessClient<Ipc>>,
@@ -131,7 +131,7 @@ pub struct Unbound {
 /// Reached through [`PluginClient::bind`]. Only `PluginClient<Bound>` is an
 /// [`IntoNode`].
 pub struct Bound {
-    /// The generic node over the served hosting: what the graph runs. Boxed
+    /// The generic node over the out-of-process hosting: what the graph runs. Boxed
     /// for the reason [`Unbound`]'s client is.
     node: Box<PluginNode<Ipc>>,
     /// The project's tempo map reader the node was bound to, kept so a fork
@@ -199,7 +199,7 @@ pub struct PluginClient<S = Unbound> {
     refresh_sink: RefreshSink,
     invalidate_sink: InvalidateSink,
     transport_sink: TransportSink,
-    /// The served plugin's control side (its bridge and the server's lifetime
+    /// The out-of-process plugin's control side (its bridge and the server's lifetime
     /// guard), shared with `PluginClient::handle`.
     served: IpcController,
     /// Where this instance came from, so a fork can load another of it.
@@ -306,7 +306,7 @@ impl PluginClient<Unbound> {
         Self::over(ipc).map(|client| (client, restored))
     }
 
-    /// The client over a served plugin that is running: the controls and the
+    /// The client over an out-of-process plugin that is running: the controls and the
     /// sinks the bridge's events go to, and the generic node, activated at the
     /// slab's chunk ceiling (a graph's `prepare` then narrows it). Needs no
     /// main thread.
@@ -685,7 +685,7 @@ impl IntoNode for PluginClient<Bound> {
     }
 }
 
-/// A served plugin's state and preset requests, each answered into a oneshot
+/// An out-of-process plugin's state and preset requests, each answered into a oneshot
 /// receiver: a request is queued with the plugin's bridge and the call returns,
 /// with no wait and no main thread. **The bridge's IPC reader thread fills the
 /// sender** with the server's reply, and **its `plugin-control` lane thread

@@ -12,7 +12,7 @@
 //! [`InProcess`](tutti_plugin_types::InProcess) format.
 //!
 //! It names no format host, no wire and no server: the process edge is
-//! `tutti-plugin-ipc`'s, and `tutti-plugin` puts a served plugin behind these
+//! `tutti-plugin-ipc`'s, and `tutti-plugin` puts an out-of-process plugin behind these
 //! types. Nothing here is a dependency of either.
 
 #![forbid(unsafe_code)]

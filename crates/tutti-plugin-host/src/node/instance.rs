@@ -248,7 +248,7 @@ impl<L: Loaded> Instance<L> {
     /// returns. For a hosting whose activation needs no main thread.
     ///
     /// The [`widths`](Self::widths) of an adopted instance are the width it
-    /// runs at, not the plugin's capability: a served plugin's capability is
+    /// runs at, not the plugin's capability: an out-of-process plugin's capability is
     /// the server's `Loaded::widths`, which this side is not told.
     pub(super) fn adopt(
         processor: L::Processor,
