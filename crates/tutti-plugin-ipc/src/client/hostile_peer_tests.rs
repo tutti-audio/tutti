@@ -194,7 +194,7 @@ fn send_raw_frame(stream: &Stream, len: u32, body: &[u8]) -> std::io::Result<()>
 /// while and then die — which is the whole point of this file. Returning
 /// [`Action::Die`] closes the socket the way a segfaulting server does: no
 /// shutdown message, no goodbye, just EOF at the host's next read.
-enum Action {
+pub(crate) enum Action {
     /// Answer a control request.
     Reply(Box<ControlReply>),
     /// Answer a block or an `ApplyParameters` on the audio connection. Boxed:
@@ -346,8 +346,8 @@ fn serve_lane<Req: Wire>(
 /// How a mock lane answers: a script over the messages of its connection.
 type Responder<Body> = Arc<std::sync::Mutex<Box<dyn Fn(Body) -> Action + Send>>>;
 
-struct MockServer {
-    bridge: Arc<PluginBridge>,
+pub(crate) struct MockServer {
+    pub(crate) bridge: Arc<PluginBridge>,
     /// The ring the bridge's audio lane answers blocks into.
     replies: crate::client::audio::Replies,
     /// `Option` only so `Drop` can take it out and `mem::forget` it; see there.
@@ -357,7 +357,10 @@ struct MockServer {
 }
 
 impl MockServer {
-    fn start(label: &str, respond: impl Fn(ControlRequest) -> Action + Send + 'static) -> Self {
+    pub(crate) fn start(
+        label: &str,
+        respond: impl Fn(ControlRequest) -> Action + Send + 'static,
+    ) -> Self {
         // The production deadline, not the shortened one. Only the two tests
         // *about* the deadline shorten it: a 400 ms progress budget applied to
         // every mock made `a_state_larger_than_one_frame_round_trips` fail, and

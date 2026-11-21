@@ -2,7 +2,7 @@
 //! bridge runs, the server's [`ServerWatch`], the refused rate and the editor's
 //! news.
 
-use crate::ServerWatch;
+use crate::{OfflineWait, ServerWatch};
 use dpi::Size;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -34,6 +34,9 @@ pub(super) struct Lifecycle {
     /// without the lock or the reason's clone. Stored after the
     /// slot, so a reader that sees it set finds the reason.
     refused: Arc<AtomicBool>,
+    /// The fork's wait, which hears every refusal and clearing from the bridge
+    /// thread before `refused` changes. Set once, by the control side.
+    offered_to: Arc<Mutex<Option<Arc<OfflineWait>>>>,
     /// The size the server's editor asked its window to take
     /// (`EditorWantsSize`), until the host takes it.
     editor_wants: Arc<Mutex<Option<Size>>>,
@@ -55,6 +58,7 @@ impl Lifecycle {
             timeouts,
             refusal: Arc::new(Mutex::new(None)),
             refused: Arc::new(AtomicBool::new(false)),
+            offered_to: Arc::new(Mutex::new(None)),
             editor_wants: Arc::new(Mutex::new(None)),
             editor_closed: Arc::new(AtomicBool::new(false)),
             offline: Arc::new(AtomicBool::new(false)),
@@ -106,6 +110,13 @@ impl Lifecycle {
         self.refusal.lock_recover().clone()
     }
 
+    /// Offers every refusal and clearing to `wait` from now on, the standing
+    /// one included. Control side.
+    pub(super) fn offer_refusals_to(&self, wait: Arc<OfflineWait>) {
+        wait.offer_refusal(self.rate_refusal());
+        *self.offered_to.lock_recover() = Some(wait);
+    }
+
     /// Whether a refused rate stands. Wait-free: no lock, no allocation.
     pub(super) fn is_rate_refused(&self) -> bool {
         self.refused.load(Ordering::Acquire)
@@ -113,6 +124,11 @@ impl Lifecycle {
 
     pub(super) fn set_rate_refusal(&self, refusal: Option<RateRefusal>) {
         let refused = refusal.is_some();
+        // The fork's wait first: the flag is raised after it, so a reader of
+        // the flag finds the reason offered.
+        if let Some(wait) = self.offered_to.lock_recover().as_ref() {
+            wait.offer_refusal(refusal.clone());
+        }
         *self.refusal.lock_recover() = refusal;
         self.refused.store(refused, Ordering::Release);
     }

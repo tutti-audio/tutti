@@ -524,12 +524,10 @@ impl Batcher {
         }
         // A plugin that refused its rate publishes nothing, by design: the
         // chunk is silence at once, and the render's health says why.
-        // The flag first: the reason is a lock and a clone, taken only when
-        // there is a refusal to record.
+        // The flag only: the bridge thread offered the reason to the wait
+        // before it raised the flag.
         if bridge.rate_refused() {
-            if let Some(refusal) = bridge.rate_refusal() {
-                watch.latch_refusal(refusal);
-            }
+            watch.latch_refusal();
             return;
         }
         let deadline = Instant::now() + watch.budget();
@@ -565,9 +563,7 @@ impl Batcher {
         }
         // Refused while this chunk was awaited: its silence is deliberate.
         if bridge.rate_refused() && !self.slab.has_output(seq) {
-            if let Some(refusal) = bridge.rate_refusal() {
-                watch.latch_refusal(refusal);
-            }
+            watch.latch_refusal();
             return;
         }
         // The server publishes a chunk's audio, then sends its reply: wait
@@ -984,6 +980,60 @@ mod tests {
         let mut outs = [&mut out[..]];
         rows.play(&mut PlanesMut::new(&mut outs).unwrap(), 0, 4, &call);
         assert_eq!(out, wire.map(f64::from), "widened exactly");
+    }
+
+    /// **A refused rate is latched on the audio thread without allocating,
+    /// locking or freeing**, and the fork's health still reads the reason: the
+    /// bridge thread offered it to the wait before it raised the flag, and the
+    /// audio thread stores one flag.
+    #[test]
+    fn the_refused_wait_latches_without_allocating_and_the_reason_survives() {
+        use crate::client::hostile_peer_tests::{Action, MockServer};
+        use tutti_plugin_types::{RateRefusal, RateRefusalCause};
+        use tutti_units::SampleRate;
+
+        // A cause that carries a `String`: a clone of it allocates.
+        let cause = || RateRefusalCause::Deactivated {
+            reason: "the plugin's own message".to_owned(),
+        };
+        let mock = MockServer::start("batcher_refusal", move |msg| match msg {
+            crate::ControlRequest::SetSampleRate { rate } => {
+                Action::Reply(Box::new(crate::ControlReply::SampleRateSet {
+                    rate,
+                    refusal: Some(cause()),
+                }))
+            }
+            _ => Action::Silent,
+        });
+        let audio = mock.bridge.audio();
+        let wait = Arc::new(OfflineWait::new(
+            std::time::Duration::from_secs(60),
+            Arc::clone(audio.watch()),
+        ));
+        audio.offer_refusals_to(Arc::clone(&wait));
+        assert!(audio.set_sample_rate(SampleRate::SR_96K));
+        tutti_fixtures::wait_until(
+            "the refusal to be recorded",
+            std::time::Duration::from_secs(60),
+            || audio.rate_refused(),
+        );
+
+        let mut b = Batcher::new(
+            2,
+            2,
+            FloatWidth::F32,
+            MAX_CHUNK,
+            slab(MAX_CHUNK),
+            response_ring().1,
+        );
+        b.set_offline_wait(Arc::clone(&wait));
+        b.expect_seq = Some(1);
+        assert_eq!(wait.refusal(), None, "nothing latched before the wait");
+        assert_no_alloc::assert_no_alloc(|| b.await_output(audio));
+        assert_eq!(
+            wait.refusal(),
+            Some(RateRefusal::new(SampleRate::SR_96K, cause()))
+        );
     }
 
     /// A fresh batcher has nothing in flight, so its first chunk must be silence

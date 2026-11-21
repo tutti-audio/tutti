@@ -682,6 +682,10 @@ impl Ipc {
             self.link.timeout,
             Arc::clone(self.link.bridge.audio().watch()),
         ));
+        self.link
+            .bridge
+            .audio()
+            .offer_refusals_to(Arc::clone(&wait));
         *self.link.wait.lock_recover() = Some(Watch {
             wait: Arc::clone(&wait),
             offline,

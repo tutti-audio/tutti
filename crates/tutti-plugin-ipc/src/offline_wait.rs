@@ -24,8 +24,14 @@ pub struct OfflineWait {
     server: Arc<ServerWatch>,
     /// Latched when a block first misses `budget`.
     gave_up: AtomicBool,
-    /// Latched when the fork's plugin was found refusing its rate.
+    /// The plugin's standing rate refusal, offered by the bridge thread
+    /// ([`offer_refusal`](Self::offer_refusal)) before it raises its flag.
+    /// Written and freed only off the audio thread.
     refusal: Mutex<Option<RateRefusal>>,
+    /// Latched by the audio thread when the fork rendered silence because of a
+    /// refusal: a scalar store, no lock, no clone. Once set, the reported
+    /// refusal is the first one offered.
+    refused: AtomicBool,
     /// The latency the fork's graph was compiled against, recorded once the
     /// plugin has settled (`usize::MAX`: not planned yet).
     planned: AtomicUsize,
@@ -49,6 +55,7 @@ impl OfflineWait {
             server,
             gave_up: AtomicBool::new(false),
             refusal: Mutex::new(None),
+            refused: AtomicBool::new(false),
             planned: AtomicUsize::new(usize::MAX),
             budget,
         }
@@ -103,18 +110,34 @@ impl OfflineWait {
         self.server.cause()
     }
 
-    /// The latched rate refusal, if any.
+    /// The rate refusal the fork rendered silence for, if any: the standing
+    /// one, once the audio thread has latched.
     pub fn refusal(&self) -> Option<RateRefusal> {
+        if !self.refused.load(Ordering::Acquire) {
+            return None;
+        }
         self.refusal.lock_recover().clone()
     }
 
-    /// Latch a rate refusal: the fork renders silence, at once, for the rest
-    /// of the render.
-    pub(crate) fn latch_refusal(&self, refusal: RateRefusal) {
+    /// The bridge thread's record of the plugin's refusal (`Some`) or of its
+    /// clearing (`None`). Called before the bridge's flag changes, so the audio
+    /// thread never sees the flag without the reason. A refusal already latched
+    /// is kept: the first one stands. The value it replaces drops here.
+    pub(crate) fn offer_refusal(&self, refusal: Option<RateRefusal>) {
+        let latched = self.refused.load(Ordering::Acquire);
         let mut slot = self.refusal.lock_recover();
-        if slot.is_none() {
-            *slot = Some(refusal);
+        if latched && slot.is_some() {
+            return;
         }
+        let old = std::mem::replace(&mut *slot, refusal);
+        drop(slot);
+        drop(old);
+    }
+
+    /// Latch that the fork renders silence for a rate refusal, for the rest of
+    /// the render. Audio-thread safe: one atomic store.
+    pub(crate) fn latch_refusal(&self) {
+        self.refused.store(true, Ordering::Release);
     }
 
     /// Whether the server is gone, by any signal the watch has had: its

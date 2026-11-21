@@ -1350,7 +1350,7 @@ pub(super) fn apply_rate_reply(
             inbox.rate_refusal(Some(refusal));
         }
         None => {
-            if lifecycle.rate_refusal().is_some() {
+            if lifecycle.is_rate_refused() {
                 lifecycle.set_rate_refusal(None);
                 inbox.rate_refusal(None);
             }
