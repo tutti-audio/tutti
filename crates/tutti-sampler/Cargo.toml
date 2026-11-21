@@ -55,9 +55,7 @@ tutti-timeline = { version = "0.0.1", path = "../tutti-timeline" }
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 
-# The STFT analysis grid + the one periodic Hann. The time-stretch vocoder is an
-# STFT, so it shares `StftGeometry` (window/hop/rate validated together, COLA
-# checked) and `window::hann`.
+# `PhaseVocoder`: the time stretch and pitch shift of a voice that stretches.
 tutti-dsp = { version = "0.0.1", path = "../tutti-dsp", default-features = false }
 
 thiserror = { workspace = true, features = ["std"] }

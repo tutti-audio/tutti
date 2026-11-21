@@ -88,8 +88,6 @@
 1 crates/tutti-polysynth/src/polysynth/tests.rs
 1 crates/tutti-rt/src/param.rs
 1 crates/tutti-sampler/src/lib.rs
-2 crates/tutti-sampler/src/stretch/mod.rs
-1 crates/tutti-sampler/src/stretch/tests.rs
 1 crates/tutti-sampler/src/voice/memory_source.rs
 1 crates/tutti-sampler/src/voice/types.rs
 1 crates/tutti-sampler/tests/voice/gain.rs

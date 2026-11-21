@@ -45,11 +45,12 @@ mod pedal;
 mod probe;
 mod probing;
 mod scanner;
+mod stop;
 mod table;
 #[cfg(feature = "serde")]
 mod wire;
 
-pub use catalog::{BlacklistView, Catalog, PersistError};
+pub use catalog::{BlacklistView, Catalog, PersistError, SaveCatalog};
 pub use config::CatalogConfig;
 pub use facts::FileFacts;
 pub use fs::canonical_path;
@@ -61,6 +62,7 @@ pub use scanner::{
     FileFailure, FilesError, ProbeFailure, Scan, ScanBusy, ScanError, ScanOutcome, ScanPoll,
     ScanProgress, ScanResult, ScannedFile, Scanner, probe_plugin_fallback,
 };
+pub use stop::Stop;
 pub use table::{
     BlacklistedFile, FileRow, FileState, FormatMismatch, PluginDb, PluginEntry, Probed, RowChange,
 };

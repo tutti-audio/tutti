@@ -10,12 +10,12 @@
 //! at the deadline means it hung. The host states its pid to the child
 //! ([`HOST_PID_ENV`]), which ends itself with the host.
 
+use crate::Stop;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::time::Duration;
 use tracing::warn;
 use tutti_platform::Instant;
-use tutti_platform::StopToken;
 use tutti_plugin_ipc_ffi::{HOST_PID_ENV, Reaped};
 use tutti_plugin_types::{
     Deadline, Described, Helper, Locator, PluginFormat, PluginId, ProbeDeath, ProbeError,
@@ -68,7 +68,7 @@ pub fn probe_metadata_with(
     plugin_path: &Path,
     format: PluginFormat,
     timeout: Duration,
-    stop: &StopToken,
+    stop: &Stop,
 ) -> Result<Vec<Described>, ProbeError> {
     run(locator, plugin_path, format, timeout, stop, &[])
 }
@@ -102,7 +102,7 @@ pub fn measure_metadata_with(
     plugin_path: &Path,
     format: PluginFormat,
     timeout: Duration,
-    stop: &StopToken,
+    stop: &Stop,
     state: Option<&ProbeState>,
 ) -> Result<Vec<Described>, ProbeError> {
     let budget = run_budget(timeout).as_secs().to_string();
@@ -128,7 +128,7 @@ fn run(
     plugin_path: &Path,
     format: PluginFormat,
     timeout: Duration,
-    stop: &StopToken,
+    stop: &Stop,
     flags: &[&std::ffi::OsStr],
 ) -> Result<Vec<Described>, ProbeError> {
     let probe = locator
@@ -203,7 +203,7 @@ enum Waited {
 
 /// Waits for `child` to exit, killing and reaping it at `timeout` or when
 /// `stop` is requested.
-fn wait(child: &mut Reaped, timeout: Duration, stop: &StopToken) -> Waited {
+fn wait(child: &mut Reaped, timeout: Duration, stop: &Stop) -> Waited {
     let deadline = Deadline::after(Instant::now(), timeout);
     loop {
         match child.try_reap() {
@@ -254,7 +254,7 @@ mod tests {
             Path::new("/plugins/Some.clap"),
             PluginFormat::Clap,
             timeout,
-            &StopToken::new(),
+            &Stop::new(),
         )
     }
 
@@ -276,7 +276,7 @@ mod tests {
             &dir,
             &format!("echo $$ > {}\nexec sleep 300", fifo.display()),
         );
-        let stop = StopToken::new();
+        let stop = Stop::new();
         // Opening and reading the fifo block until the child is running and has
         // written its pid, so the stop comes while the probe waits on the child.
         let raiser = {

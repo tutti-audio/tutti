@@ -24,10 +24,4 @@ tutti-cpal  spawn_dedicated  crates/tutti-cpal/src/poller.rs::DevicePoller::spaw
 tutti-session  spawn  crates/tutti-session/src/recorder.rs::Recorder::spawn  core-engine
 
 # plugin
-tutti-plugin-db  spawn  crates/tutti-plugin-db/src/catalog.rs::Catalog::save_in_background  plugin
 tutti-plugin-db  spawn_dedicated  crates/tutti-plugin-db/src/scanner.rs::Scanner::start  plugin
-
-# midi
-tutti-midi-hardware  spawn_dedicated  crates/tutti-midi-hardware/src/backend/coremidi/watch.rs::start_hub  midi
-tutti-midi-hardware  spawn_dedicated  crates/tutti-midi-hardware/src/backend/winmm/output.rs::open  midi
-tutti-winmm-ffi  spawn_dedicated  crates/tutti-winmm-ffi/src/os/input.rs::MidiIn::open  midi

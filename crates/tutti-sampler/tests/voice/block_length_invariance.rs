@@ -3,7 +3,7 @@
 //! A voice node sizes its scratch from `Prepare::max_block` and renders each
 //! block in one piece. Nothing a voice computes per frame depends on where a
 //! block starts or how long it is: the per-frame arithmetic (taps, cubic,
-//! gain, the stretch filter's tick) is the same arithmetic in any piece,
+//! gain, the vocoder's frames) is the same arithmetic in any piece,
 //! and the placed read re-seats at each block's first frame where its step
 //! would have put it (the seat and the step are one model; a seat that
 //! landed elsewhere is the drift this test catches). So the same
