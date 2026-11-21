@@ -1419,6 +1419,10 @@ impl<F: Float> Graph<F> {
     /// Drops the retiring controls of the nodes whose units the editor handed
     /// back: one, the oldest, per key in `retired` (a node of several units
     /// names its key once per unit).
+    ///
+    /// Two swaps at one key whose units both come back in one `retired` drop
+    /// only the older box; the other is held until that key retires again or
+    /// the graph drops.
     fn bury(retiring: &mut Vec<(NodeKey, Box<dyn Any + Send>)>, retired: &[NodeKey]) {
         let mut seen: Vec<NodeKey> = Vec::new();
         for &key in retired {
