@@ -1,5 +1,5 @@
 # Umbrella names exported for items of more than one crate, or one item at two paths
-# (`cargo xtask umbrella-api`, stable-API rule R6: one noun per concept).
+# (`cargo xtask check-umbrella`, stable-API rule R6: one noun per concept).
 #
 # One `<kind>  <name>  <crates or paths, comma separated>` row per known collision, sorted;
 # kind is `crates` (one name, items of several crates) or `paths` (one item, several umbrella
