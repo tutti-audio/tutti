@@ -134,7 +134,9 @@ fn wait<T>(mut task: Task<T>, deadline: Option<Instant>) -> Result<Option<T>, Ta
             return Ok(ended(task, &mut cx));
         }
         // A poll registers the waker. One that finds the task dropped without ending, in
-        // the moment since the look above, panics with `async_task`'s message: `None`.
+        // the moment since the look above, panics with `async_task`'s message, which the
+        // panic hook prints: `None`. A `FallibleTask` would not panic, but cannot be handed
+        // back past the bound.
         match catch_unwind(AssertUnwindSafe(|| Pin::new(&mut task).poll(&mut cx))) {
             Ok(Poll::Ready(output)) => return Ok(Some(output)),
             Err(_) => return Ok(None),
