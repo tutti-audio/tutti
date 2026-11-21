@@ -120,6 +120,27 @@ pub enum InletError {
     },
 }
 
+/// Why [`Graph::set_sample_rate`](crate::Graph::set_sample_rate) refused.
+/// The graph keeps its rate.
+#[derive(Clone, Debug, PartialEq, Error)]
+#[non_exhaustive]
+pub enum SetRateError {
+    /// A node runs at other sample rates than the new one
+    /// ([`Shape::with_rates`](tutti_graph::Shape::with_rates)).
+    #[error("{node:?} runs at {supported}, not at {rate}")]
+    RateUnsupported {
+        /// A node that cannot run at the new rate.
+        node: tutti_graph::NodeKey,
+        /// The rates it runs at.
+        supported: tutti_graph::SampleRates,
+        /// The rate asked for.
+        rate: tutti_units::SampleRate,
+    },
+    /// The graph would not re-prepare.
+    #[error("the graph would not re-prepare: {0}")]
+    Commit(#[from] tutti_graph::CommitError),
+}
+
 /// Why [`Graph::connect`](crate::Graph::connect),
 /// [`Graph::set_sources`](crate::Graph::set_sources) or
 /// [`Graph::disconnect`](crate::Graph::disconnect) refused; nothing is stored.

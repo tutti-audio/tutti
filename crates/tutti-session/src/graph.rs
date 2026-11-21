@@ -85,7 +85,7 @@ use crate::key::{
 use crate::value::{GainTarget, GainTargetError, ValueTable, Write};
 use crate::{
     ConnectError, Connection, DeclarationError, Edge, EventInPort, EventOutPort, InPort,
-    InletError, Key, NoSuchNode, OutPort, RemoveError, Root, SessionNode,
+    InletError, Key, NoSuchNode, OutPort, RemoveError, Root, SessionNode, SetRateError,
 };
 use tutti_rt::LockExt;
 
@@ -768,20 +768,33 @@ impl<F: Float> Graph<F> {
     /// Re-prepare every node for `rate`, keeping the block and the quantum.
     /// With the executor local, both halves of the re-prepare run here, now;
     /// with it taken, the second half lands on a later collect (and commits
-    /// are `Retry` until it does). A refusal is logged.
+    /// are `Retry` until it does).
     ///
     /// For a detached graph, which has no device to take a rate from. A
     /// device's session re-rates with [`Session::restart`](crate::Session).
-    pub fn set_sample_rate(&mut self, rate: SampleRate) {
-        let current = *self.editor.prepare();
-        if let Err(e) =
-            self.editor
-                .reprepare(prepare_for(rate, current.max_block(), current.quantum()))
+    ///
+    /// # Errors
+    ///
+    /// [`SetRateError::RateUnsupported`] naming a node that does not run at
+    /// `rate` ([`Shape::with_rates`](tutti_graph::Shape::with_rates)), or
+    /// [`SetRateError::Commit`] when the editor would not re-prepare; the graph
+    /// keeps its rate.
+    pub fn set_sample_rate(&mut self, rate: SampleRate) -> Result<(), SetRateError> {
+        if let Some((node, supported)) = self
+            .editor
+            .first_unsupported_rate(self.nodes.keys().copied(), rate)
         {
-            tracing::error!("graph: re-prepare at {} Hz refused: {e}", rate.get());
-            return;
+            return Err(SetRateError::RateUnsupported {
+                node,
+                supported,
+                rate,
+            });
         }
+        let current = *self.editor.prepare();
+        self.editor
+            .reprepare(prepare_for(rate, current.max_block(), current.quantum()))?;
         self.pump_local();
+        Ok(())
     }
 
     /// Whether a re-prepare is between its two commits.
@@ -2049,20 +2062,27 @@ impl<F: Float> Graph<F> {
     ///
     /// Each [`Feeder`] owns only its own entry, so feeders never overwrite
     /// each other.
+    ///
+    /// # Errors
+    ///
+    /// [`NoSuchNode`] when `sink` is not in the graph; nothing changes.
     pub fn set_feed(
         &mut self,
         sink: impl Into<NodeKey>,
         feeder: Feeder,
         sources: Vec<EventOutPort>,
-    ) {
+    ) -> Result<(), NoSuchNode> {
         let sink = sink.into();
+        if !self.nodes.contains_key(&sink) {
+            return Err(NoSuchNode::new(sink));
+        }
         if sources.is_empty() {
             // No entry is made for a feeder that feeds nothing.
             let Some(feeds) = self.feeds.get_mut(&sink) else {
-                return;
+                return Ok(());
             };
             if feeds.remove(&feeder).is_none() {
-                return;
+                return Ok(());
             }
             if feeds.is_empty() {
                 self.feeds.remove(&sink);
@@ -2070,25 +2090,50 @@ impl<F: Float> Graph<F> {
         } else {
             let feeds = self.feeds.entry(sink).or_default();
             if feeds.get(&feeder) == Some(&sources) {
-                return;
+                return Ok(());
             }
             feeds.insert(feeder, sources);
         }
         self.write_feeds(sink);
+        Ok(())
     }
 
     /// What `feeder` feeds `sink`: empty when nothing.
-    pub fn feed(&self, sink: impl Into<NodeKey>, feeder: Feeder) -> &[EventOutPort] {
+    ///
+    /// # Errors
+    ///
+    /// [`NoSuchNode`] when `sink` is not in the graph.
+    pub fn feed(
+        &self,
+        sink: impl Into<NodeKey>,
+        feeder: Feeder,
+    ) -> Result<&[EventOutPort], NoSuchNode> {
         let sink = sink.into();
-        self.feeds
+        if !self.nodes.contains_key(&sink) {
+            return Err(NoSuchNode::new(sink));
+        }
+        Ok(self
+            .feeds
             .get(&sink)
             .and_then(|f| f.get(&feeder))
-            .map_or(&[], Vec::as_slice)
+            .map_or(&[], Vec::as_slice))
     }
 
     /// Every source any feeder feeds `sink`, sorted and without repeats.
-    pub fn feeds(&self, sink: impl Into<NodeKey>) -> Vec<EventOutPort> {
+    ///
+    /// # Errors
+    ///
+    /// [`NoSuchNode`] when `sink` is not in the graph.
+    pub fn feeds(&self, sink: impl Into<NodeKey>) -> Result<Vec<EventOutPort>, NoSuchNode> {
         let sink = sink.into();
+        if !self.nodes.contains_key(&sink) {
+            return Err(NoSuchNode::new(sink));
+        }
+        Ok(self.fed_sources(sink))
+    }
+
+    /// [`feeds`](Self::feeds) for a sink known to be in the graph.
+    fn fed_sources(&self, sink: NodeKey) -> Vec<EventOutPort> {
         let mut all: Vec<EventOutPort> = self
             .feeds
             .get(&sink)
@@ -2148,7 +2193,7 @@ impl<F: Float> Graph<F> {
     /// has: a source re-inserted without that port is not fed until it has it
     /// again.
     fn fed_in_graph(&self, sink: NodeKey) -> Vec<EventOutPort> {
-        self.feeds(sink)
+        self.fed_sources(sink)
             .into_iter()
             .filter(|s| self.check_event_out(*s).is_ok())
             .collect()
@@ -3372,10 +3417,12 @@ impl<F: Float> Graph<F> {
     ///   ([`Session::declare_root_topology`](crate::Session::declare_root_topology)),
     ///   anything wider than the declaration: the root is not widened under
     ///   it ([`RootError::Width`](tutti_graph::RootError::Width));
-    /// - past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS): the root
-    ///   is widened to that and the excess is not rendered
+    /// - past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS): the root keeps
+    ///   its width
     ///   ([`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced), the first
     ///   channel with no place).
+    ///
+    /// A refused request changes nothing.
     ///
     /// A request for as many or fewer channels than the root has is a no-op.
     ///
@@ -3406,16 +3453,12 @@ impl<F: Float> Graph<F> {
             None
         };
         self.widen_refusal = refused;
-        // A declared root is not widened at all when refused; an over-wide
-        // request widens as far as the engine renders.
-        let target = match refused {
-            Some(tutti_graph::RootError::Width { .. }) => 0,
-            _ => channels.min(tutti_buffers::MAX_CHANNELS),
-        };
-        let outputs = &mut self.editor.spec_mut().topology.outputs;
-        if outputs.len() < target {
-            outputs.resize(target, Vec::new());
-            self.edited = true;
+        if refused.is_none() {
+            let outputs = &mut self.editor.spec_mut().topology.outputs;
+            if outputs.len() < channels {
+                outputs.resize(channels, Vec::new());
+                self.edited = true;
+            }
         }
         self.publish_output_facts();
         refused.map_or(Ok(()), Err)

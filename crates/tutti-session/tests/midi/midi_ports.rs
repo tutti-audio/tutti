@@ -634,7 +634,7 @@ fn a_retiring_output_survives_a_re_rate() {
         .expect("queued");
     drop(out);
     let _ = s.update();
-    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     let _ = s.update();
     // The re-prepare's second half lands on a render, then the commit.
     blocks(&s, 8);
