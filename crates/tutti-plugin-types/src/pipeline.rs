@@ -93,8 +93,8 @@ pub struct ChunkCounters {
     detached: OnceLock<Tally<u64>>,
     /// The server's own cumulative loss counts, as it last told them
     /// ([`note_server_losses`](Self::note_server_losses)).
-    server_commands_refused: AtomicU64,
-    server_edits_refused: AtomicU64,
+    server_refused_commands: AtomicU64,
+    server_refused_edits: AtomicU64,
     /// Whether the chunk of a sequence has been answered, set when the node is
     /// bound (the shared-memory slab's reply flag, which this file does not
     /// name).
@@ -198,20 +198,20 @@ impl ChunkCounters {
 
     /// Takes the server's cumulative counts, as it last told them.
     pub fn note_server_losses(&self, commands_refused: u64, edits_refused: u64) {
-        self.server_commands_refused
+        self.server_refused_commands
             .store(commands_refused, Ordering::Relaxed);
-        self.server_edits_refused
+        self.server_refused_edits
             .store(edits_refused, Ordering::Relaxed);
     }
 
-    /// See `PluginControls::server_commands_refused`.
-    pub fn server_commands_refused(&self) -> u64 {
-        self.server_commands_refused.load(Ordering::Relaxed)
+    /// See `PluginControls::server_refused_commands`.
+    pub fn server_refused_commands(&self) -> u64 {
+        self.server_refused_commands.load(Ordering::Relaxed)
     }
 
-    /// See `PluginControls::server_edits_refused`.
-    pub fn server_edits_refused(&self) -> u64 {
-        self.server_edits_refused.load(Ordering::Relaxed)
+    /// See `PluginControls::server_refused_edits`.
+    pub fn server_refused_edits(&self) -> u64 {
+        self.server_refused_edits.load(Ordering::Relaxed)
     }
 
     /// See `PluginControls::skipped_chunks`.

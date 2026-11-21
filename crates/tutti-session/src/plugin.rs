@@ -666,8 +666,9 @@ pub enum PluginChange {
     },
     /// The silent stand-in for a plugin that ended could not be put at its node:
     /// the graph refused ([`ReplaceRefused`]: a poisoned graph, or a node that is
-    /// gone). The node stays as it was and is not asked again; the app removes
-    /// or replaces it. Reported once, after the plugin's
+    /// gone). The node stays as it was and is not asked again. For a poisoned
+    /// graph the app removes or replaces it; a node that is gone needs nothing.
+    /// Reported once, after the plugin's
     /// [`Died`](Self::Died) or [`GaveUp`](Self::GaveUp).
     NodeNotSilenced {
         /// Why the graph refused.
@@ -932,8 +933,8 @@ pub(crate) struct HostedPlugin {
     /// from the pool's threads.
     pub(crate) panicked_round_trips: tutti_rt::Tally<u64>,
     /// Periodic state snapshots the plugin failed:
-    /// [`Diagnostics::snapshots_failed`].
-    pub(crate) snapshots_failed: u64,
+    /// [`Diagnostics::failed_snapshots`].
+    pub(crate) failed_snapshots: u64,
     liveness: Liveness,
     hang: HangDetector,
     status: PluginLiveness,
@@ -1201,7 +1202,7 @@ impl HostedPlugin {
             banked: tutti_graph::Losses::NONE,
             banked_blocks: tutti_plugin_host::BlockLosses::default(),
             panicked_round_trips: tutti_rt::tally(),
-            snapshots_failed: 0,
+            failed_snapshots: 0,
             liveness: Liveness::new(),
             hang: HangDetector::default(),
             status: PluginLiveness::Healthy,
@@ -1956,7 +1957,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             }
             Err(e) => {
                 tracing::warn!("plugin {node:?}: periodic state snapshot failed: {e}");
-                hosted.snapshots_failed += 1;
+                hosted.failed_snapshots += 1;
                 false
             }
         }

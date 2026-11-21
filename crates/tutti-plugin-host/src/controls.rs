@@ -360,15 +360,15 @@ impl PluginControls {
     /// unseat, a mode, a rate or a barrier that never reached it), as the server
     /// last told them. Not [`refused_commands`](Self::refused_commands), which
     /// are the host side's. Zero for a plugin that runs in this process.
-    pub fn server_commands_refused(&self) -> u64 {
-        self.chunks.server_commands_refused()
+    pub fn server_refused_commands(&self) -> u64 {
+        self.chunks.server_refused_commands()
     }
 
     /// One-way edits the plugin refused in its server (an automation state, a
     /// track's info, a parameter write the wire has no reply for), as the
     /// server last told them. Zero for a plugin that runs in this process.
-    pub fn server_edits_refused(&self) -> u64 {
-        self.chunks.server_edits_refused()
+    pub fn server_refused_edits(&self) -> u64 {
+        self.chunks.server_refused_edits()
     }
 
     /// Audio responses (a block's MIDI-out and status) the bridge could not

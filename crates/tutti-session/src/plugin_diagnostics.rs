@@ -136,21 +136,21 @@ impl<'a> Diagnostics<'a> {
     /// Commands the plugin's server could not give its own render thread, as
     /// the server last told them. Not [`refused_commands`](Self::refused_commands),
     /// which are the host side's. Zero for a plugin that runs in this process.
-    pub fn server_commands_refused(&self) -> u64 {
+    pub fn server_refused_commands(&self) -> u64 {
         self.hosted.controls.as_ref().map_or(
             0,
-            tutti_plugin_host::PluginControls::server_commands_refused,
+            tutti_plugin_host::PluginControls::server_refused_commands,
         )
     }
 
     /// One-way edits the plugin refused in its server (an automation state, a
     /// track's info, a parameter write), as the server last told them. Zero for
     /// a plugin that runs in this process.
-    pub fn server_edits_refused(&self) -> u64 {
+    pub fn server_refused_edits(&self) -> u64 {
         self.hosted
             .controls
             .as_ref()
-            .map_or(0, tutti_plugin_host::PluginControls::server_edits_refused)
+            .map_or(0, tutti_plugin_host::PluginControls::server_refused_edits)
     }
 
     /// Audio responses the plugin's bridge could not queue for the audio thread: lost. Zero for a plugin that runs in this process.
@@ -205,8 +205,8 @@ impl<'a> Diagnostics<'a> {
     /// Periodic state snapshots the plugin failed (it refused or did not
     /// answer the save), over the life of the node. The last good snapshot
     /// stays the recovery point.
-    pub fn snapshots_failed(&self) -> u64 {
-        self.hosted.snapshots_failed
+    pub fn failed_snapshots(&self) -> u64 {
+        self.hosted.failed_snapshots
     }
 
     /// The latency the graph compensates for this plugin's node, as of the last

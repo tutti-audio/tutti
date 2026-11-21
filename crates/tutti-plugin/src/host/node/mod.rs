@@ -845,8 +845,8 @@ mod event_route_tests {
         });
         assert_eq!(
             (
-                controls.server_commands_refused(),
-                controls.server_edits_refused()
+                controls.server_refused_commands(),
+                controls.server_refused_edits()
             ),
             (2, 1)
         );
@@ -854,6 +854,6 @@ mod event_route_tests {
             commands_refused: 5,
             edits_refused: 1,
         });
-        assert_eq!(controls.server_commands_refused(), 5);
+        assert_eq!(controls.server_refused_commands(), 5);
     }
 }

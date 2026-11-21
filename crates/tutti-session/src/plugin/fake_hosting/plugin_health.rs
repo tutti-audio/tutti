@@ -488,7 +488,8 @@ fn a_render_mode_not_applied_arrives_in_the_stream() {
 /// **A graph that refuses the silent stand-in is heard, once, and the node is
 /// not counted silenced.** The node is not in the graph, so the swap is refused
 /// ([`ReplaceRefused::NoSuchNode`]): the session reports it as
-/// `NodeNotSilenced` and does not ask the graph again.
+/// `NodeNotSilenced`, and the node is no longer pending, which is what the
+/// update phase asks again.
 #[test]
 fn a_graph_that_refuses_the_silent_stand_in_is_reported_and_the_node_is_not_silenced() {
     use crate::ReplaceRefused;
@@ -521,12 +522,12 @@ fn a_graph_that_refuses_the_silent_stand_in_is_reported_and_the_node_is_not_sile
     assert_eq!(
         s.graph.plugins[&gone].silence,
         Silence::Refused,
-        "refused is not silenced, and is not asked again"
+        "refused is not silenced: the update phase asks only a pending node again"
     );
 }
 
 /// **A snapshot the plugin failed is counted for the app**
-/// ([`Diagnostics::snapshots_failed`](crate::Diagnostics::snapshots_failed)); one
+/// ([`Diagnostics::failed_snapshots`](crate::Diagnostics::failed_snapshots)); one
 /// it took is not.
 #[test]
 fn a_failed_periodic_snapshot_is_counted() {
@@ -536,7 +537,7 @@ fn a_failed_periodic_snapshot_is_counted() {
         s.plugin_view(node)
             .expect("hosted")
             .diagnostics()
-            .snapshots_failed()
+            .failed_snapshots()
     };
     assert_eq!(diagnostics(&s), 0);
     assert!(s.land_snapshot(node, &token, Instant::now(), Ok(vec![1, 2, 3]),));
