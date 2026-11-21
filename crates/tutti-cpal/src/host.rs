@@ -141,8 +141,7 @@ impl DeviceHost {
     /// **The one listing of a host's devices**: every device of both
     /// directions and both defaults, in one look ([`Snapshot::devices`] for
     /// one direction). It is what [`DevicePoller`](crate::DevicePoller)
-    /// publishes and [`DeviceListing`](crate::DeviceListing) fetches on a
-    /// thread. A device whose name cannot be read is listed with an empty
+    /// looks at and [`DeviceListing`](crate::DeviceListing) lists. A device whose name cannot be read is listed with an empty
     /// name. Blocks as long as the host's enumeration does.
     ///
     /// # Errors
