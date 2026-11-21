@@ -59,8 +59,9 @@ impl Waiting for Done {
     }
 }
 
-/// The wait for the backend to be ready: a `Send` future that another thread
-/// wakes. [`MidiEndpoints::start`](crate::MidiEndpoints::start),
+/// The wait for the backend to be ready: a `Send` future fed by the backend's
+/// own start thread, which wakes it (ready on the first poll where there is
+/// nothing to start). [`MidiEndpoints::start`](crate::MidiEndpoints::start),
 /// [`Devices::start`](crate::Devices::start) and
 /// [`MidiSession::start`](crate::MidiSession::start) make one.
 ///

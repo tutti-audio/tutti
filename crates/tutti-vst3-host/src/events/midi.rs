@@ -8,8 +8,8 @@ use tutti_plugin_types::{
 };
 use tutti_rt::RtVec;
 use tutti_ump::{
-    Address, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity, Rpn, SysexMessage,
-    Ump, Voice1, Voice2, parse_exact,
+    Address, GroupSpan, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity, Rpn,
+    SysexMessage, Ump, Voice1, Voice2, parse_exact,
 };
 use tutti_units::{Normalized, Semitones, Velocity};
 use tutti_voicing::{LIVE_NOTES, NOTE_CONTROLS, NoteControl, NoteEvent, PerNoteState};
@@ -94,22 +94,22 @@ pub struct MidiEncoder {
 impl Default for MidiEncoder {
     /// An encoder for a plugin with one event input bus.
     fn default() -> Self {
-        Self::new(1)
+        Self::new(GroupSpan::of(1))
     }
 }
 
 impl MidiEncoder {
-    /// An encoder for a plugin with `buses` event input buses (at most 16, the
-    /// Groups of MIDI 2.0; none is one: a plugin with no event bus is sent
-    /// Group 0's events, as before). Every channel's per-note bend
-    /// sensitivity starts at the MPE default, ±48 (RP-053). Allocates (about
-    /// 270 KiB for each bus): off the audio thread.
+    /// An encoder for a plugin with `buses` event input buses (1 to 16, the
+    /// Groups of MIDI 2.0). A plugin with no event input bus has no encoder:
+    /// its [`Stager`](super::Stager) is built
+    /// [`without_buses`](super::Stager::without_buses). Every channel's
+    /// per-note bend sensitivity starts at the MPE default, ±48 (RP-053).
+    /// Allocates (about 270 KiB for each bus): off the audio thread.
     #[must_use]
-    pub fn new(buses: usize) -> Self {
-        let buses = buses.clamp(1, usize::from(MidiGroup::COUNT));
+    pub fn new(buses: GroupSpan) -> Self {
         Self {
             notes: PerNoteState::new(buses, PitchBendSensitivity::MPE_MEMBER_DEFAULT.semitones()),
-            buses,
+            buses: usize::from(buses.get()),
             groups_dropped: 0,
             unsendable_dropped: 0,
             out: RtVec::boxed(),

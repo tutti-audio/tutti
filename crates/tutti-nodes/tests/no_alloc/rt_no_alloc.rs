@@ -299,12 +299,16 @@ fn distortion_antialiasing_is_allocation_free_fed_and_unfed() {
     ];
     let drive: Vec<f32> = (0..64).map(|i| 1.0 + 0.0625 * i as f32).collect();
     for kind in kinds {
-        for order in [Antialiasing::FirstOrder, Antialiasing::SecondOrder] {
+        for order in [Antialiasing::FirstOrder, Antialiasing::SecondOrder]
+            .into_iter()
+            .filter(|&order| order <= kind.max_antialiasing())
+        {
             for oversampled in [false, true] {
                 for fed in [false, true] {
                     let config = DistortionConfig::new(3u16, kind)
                         .drive(Drive::new(2.0))
-                        .antialiasing(order);
+                        .antialiasing(order)
+                        .expect("an order the kind has");
                     let config = if oversampled {
                         config.oversampling(OversamplingFactor::X4)
                     } else {

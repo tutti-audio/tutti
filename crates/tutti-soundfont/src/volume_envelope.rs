@@ -3,7 +3,7 @@
 // LICENSE-RUSTYSYNTH.txt, at the root of this crate.
 
 use tutti_dsp::{Envelope, EnvelopeCurve, EnvelopeDesign, EnvelopeStage, EnvelopeStages};
-use tutti_units::{Amplitude, Db, SampleRate, Samples, Seconds};
+use tutti_units::{Amplitude, Db, Normalized, SampleRate, Samples, Seconds};
 
 use crate::render::Render;
 use crate::soundfont_math::SoundFontMath;
@@ -32,7 +32,7 @@ impl VolumeEnvelope {
         let idle = EnvelopeStages::new(
             Seconds::new(0.0),
             Seconds::new(0.0),
-            Amplitude::SILENT,
+            Normalized::of(0.0),
             Seconds::new(0.0),
         );
         Self {
@@ -47,7 +47,7 @@ impl VolumeEnvelope {
         attack: Seconds,
         hold: Seconds,
         decay: Seconds,
-        sustain: Amplitude,
+        sustain: Normalized,
         release: Seconds,
     ) {
         let stages = EnvelopeStages::new(attack, decay, sustain, release)
@@ -100,7 +100,7 @@ impl VolumeEnvelope {
 /// of `exp` and `log10`: `1e-12` dB.
 #[cfg(test)]
 mod tests {
-    use tutti_units::{Amplitude, Db, SampleRate, Seconds};
+    use tutti_units::{Amplitude, Db, Normalized, SampleRate, Seconds};
 
     use super::VolumeEnvelope;
     use crate::render::Render;
@@ -110,7 +110,7 @@ mod tests {
     /// that is a time's `exp`, then a `log10` and a scale of 20.
     const DB: f64 = 1e-12;
 
-    fn envelope(decay: f64, sustain: Amplitude, release: f64) -> VolumeEnvelope {
+    fn envelope(decay: f64, sustain: Normalized, release: f64) -> VolumeEnvelope {
         let mut envelope = VolumeEnvelope::new(&Render::new(SampleRate::of(RATE)));
         // No delay, a 1 ms attack, no hold.
         envelope.start(
@@ -140,7 +140,7 @@ mod tests {
         // Key-off from full level, and from the sustain at -6 dB: the fall is
         // the same 100 dB a release time, from wherever it starts.
         for sustain_db in [0.0, 6.0] {
-            let sustain = Db::new(-sustain_db).to_amplitude();
+            let sustain = Normalized::clamped(Db::new(-sustain_db).to_amplitude().get());
             let mut envelope = envelope(1.0, sustain, 2.0);
             envelope.process(frames(0.5));
             let before = db(envelope.value());
@@ -165,7 +165,7 @@ mod tests {
     /// Spec: sf2.synth.env.decay-time, sf2.synth.env.decay-linear, sf2.gen.decayVolEnv
     #[test]
     fn a_decay_falls_100_db_in_its_time() {
-        let mut envelope = envelope(2.0, Amplitude::SILENT, 1.0);
+        let mut envelope = envelope(2.0, Normalized::of(0.0), 1.0);
         envelope.process(frames(0.001));
         for fraction in [0.1, 0.3, 0.5] {
             let mut again = envelope.clone();
@@ -183,7 +183,7 @@ mod tests {
     /// Spec: sf2.gen.exclusiveClass
     #[test]
     fn a_quick_release_falls_100_db_in_its_time() {
-        let mut envelope = envelope(10.0, Amplitude::UNITY, 5.0);
+        let mut envelope = envelope(10.0, Normalized::of(1.0), 5.0);
         envelope.process(frames(0.01));
         envelope.release_within(Seconds::new(0.01));
         envelope.release();

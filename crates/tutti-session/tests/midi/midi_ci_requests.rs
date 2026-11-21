@@ -52,7 +52,7 @@ impl Wire {
         });
         let (synth, seen) = tap(&mut s);
         s.midi()
-            .route(MidiRouteRule::any_channel().to(synth))
+            .route(MidiRouteRule::new().to(synth))
             .expect("routes");
         plug(&fake, MpePeer::RAW, "Wire", PortDirection::Duplex);
         let _ = s.update();

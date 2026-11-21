@@ -399,7 +399,7 @@ fn route_rules_wire_the_hardware_input() {
         p
     };
 
-    let all = s.midi().route(MidiRouteRule::any_channel().to(a)).unwrap();
+    let all = s.midi().route(MidiRouteRule::new().to(a)).unwrap();
     assert_eq!(
         ports(&s, a),
         (0..MIDI_INPUT_PORTS as u16).collect::<Vec<_>>()
@@ -407,7 +407,7 @@ fn route_rules_wire_the_hardware_input() {
 
     let ch2 = MidiChannel::of(2);
     s.midi()
-        .route(MidiRouteRule::for_channel(ch2).to(b))
+        .route(MidiRouteRule::new().channel(ch2).to(b))
         .unwrap();
     assert_eq!(ports(&s, b), vec![2, CHANNELLESS_PORT as u16]);
 
@@ -456,7 +456,8 @@ fn a_route_rule_names_a_group() {
     let group = MIDI_INPUT_PORTS as u16;
     s.midi()
         .route(
-            MidiRouteRule::for_channel(ch2)
+            MidiRouteRule::new()
+                .channel(ch2)
                 .in_group(MidiGroup::of(1))
                 .to(a),
         )
@@ -466,12 +467,13 @@ fn a_route_rule_names_a_group() {
         vec![group + 2, group + CHANNELLESS_PORT as u16]
     );
     s.midi()
-        .route(MidiRouteRule::for_channel(ch2).to(b))
+        .route(MidiRouteRule::new().channel(ch2).to(b))
         .unwrap();
     assert_eq!(ports(&s, b), vec![2, CHANNELLESS_PORT as u16]);
     s.midi()
         .route(
-            MidiRouteRule::for_channel(ch2)
+            MidiRouteRule::new()
+                .channel(ch2)
                 .in_group(MidiGroup::of(2))
                 .to(c),
         )
@@ -492,8 +494,8 @@ fn the_routes_have_one_declarer() {
     let (b, _) = tap(&mut s);
     let fed = |s: &Session, n: NodeKey| !s.graph_ref().feed(n, Feeder::Routes).is_empty();
 
-    let own = s.midi().route(MidiRouteRule::any_channel().to(a)).unwrap();
-    let host = [MidiRouteRule::<u8>::any_channel().to(1)];
+    let own = s.midi().route(MidiRouteRule::new().to(a)).unwrap();
+    let host = [MidiRouteRule::<u8>::new().to(1)];
     let resolve = |k: u8| (k == 1).then_some(b);
     assert!(matches!(
         s.midi().set_routes(input, &host, None, resolve),
@@ -505,7 +507,7 @@ fn the_routes_have_one_declarer() {
     s.midi().set_routes(input, &host, None, resolve).unwrap();
     assert!(fed(&s, b), "the host's routes apply");
     assert!(matches!(
-        s.midi().route(MidiRouteRule::any_channel().to(a)),
+        s.midi().route(MidiRouteRule::new().to(a)),
         Err(MidiError::TwoRouteDeclarers(RouteDeclarer::Host))
     ));
     assert!(matches!(
@@ -518,7 +520,7 @@ fn the_routes_have_one_declarer() {
         .set_routes(input, &[] as &[MidiRouteRule<u8>], None, resolve)
         .unwrap();
     assert!(!fed(&s, b), "handed back: nothing routed");
-    s.midi().route(MidiRouteRule::any_channel().to(a)).unwrap();
+    s.midi().route(MidiRouteRule::new().to(a)).unwrap();
     assert!(fed(&s, a), "the session declares again");
 }
 
@@ -545,7 +547,7 @@ impl tutti_midi_runtime::MidiOut for Refusing {
 /// handle keeps it open.
 fn clocked(sink: Arc<dyn tutti_midi_runtime::MidiOut>) -> (Session, tutti_session::MidiSink) {
     let mut s = offline();
-    let out = s.open_midi_sink(sink).run();
+    let out = s.open_midi_sink(sink).open();
     let _ = s.update(); // the sink's node, committed
     s.midi_nodes()
         .unwrap()
@@ -731,7 +733,7 @@ fn keyboards() -> (
         .expect("builds");
     let (synth, seen) = tap(&mut s);
     s.midi()
-        .route(MidiRouteRule::any_channel().to(synth))
+        .route(MidiRouteRule::new().to(synth))
         .expect("routes");
     let _ = s.update();
     (s, fake, seen)
@@ -1753,7 +1755,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     });
     let (synth, seen) = tap(&mut s);
     s.midi()
-        .route(MidiRouteRule::any_channel().to(synth))
+        .route(MidiRouteRule::new().to(synth))
         .expect("routes");
     plug(&fake, MpePeer::RAW, "Wire", PortDirection::Duplex);
     let _ = s.update();

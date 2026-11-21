@@ -17,7 +17,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use crate::{
     Control, Controller, Effect, Event, HostOp, Layout, Loaded, LoadedPlugin, MainThreadMarker,
-    Notice, PluginError, Prepare, Refused, Reply, SampleRate, State, Stuck, step,
+    Notice, PluginError, Prepare, Rebuilt, Refused, Reply, SampleRate, State, Stuck, step,
 };
 
 /// The main thread's end of the Processor's trip to the realtime thread.
@@ -550,9 +550,9 @@ impl<L: Loaded> Lifecycle<L> {
             }
         };
         match catch_unwind(AssertUnwindSafe(|| plugin.rebuild(main))) {
-            Ok(Ok(plugin)) => {
+            Ok(Ok(Rebuilt { plugin, restored })) => {
                 *self = Self::Loaded(plugin);
-                Reply::Rebuilt
+                Reply::Rebuilt { restored }
             }
             Ok(Err(Refused { plugin, reason })) => {
                 if let Some(plugin) = plugin {
