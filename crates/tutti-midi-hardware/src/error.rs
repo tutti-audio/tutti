@@ -94,29 +94,6 @@ pub enum MidiHardwareError {
         direction: tutti_midi_device::PortDirection,
     },
 
-    /// No present device has a name containing this text. Carries the names it
-    /// searched (the devices of the direction asked for), so a typo shows what
-    /// was there.
-    #[error("no MIDI device named like '{name}' (searched: {})", .searched.join(", "))]
-    NoDeviceNamed {
-        /// The text that matched nothing.
-        name: String,
-        /// The names of the devices it was matched against; empty when none
-        /// was present.
-        searched: Vec<String>,
-    },
-
-    /// A name matches more than one device, so none is picked: the caller names
-    /// one by its [`DeviceId`](tutti_midi_device::DeviceId), or by more of its
-    /// name. Carries the names it matched.
-    #[error("the name '{name}' matches several MIDI devices: {}", .matches.join(", "))]
-    AmbiguousDeviceName {
-        /// The text that matched more than one device.
-        name: String,
-        /// The names of the devices it matched, in the order searched.
-        matches: Vec<String>,
-    },
-
     /// The device has no open input: it was never connected, or was closed.
     #[error("MIDI device {0} has no open input")]
     NotConnected(tutti_midi_device::DeviceId),
