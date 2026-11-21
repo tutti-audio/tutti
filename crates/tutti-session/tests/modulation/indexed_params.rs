@@ -52,11 +52,13 @@ fn a_write_reaches_the_index_it_names() {
     let mut s = offline();
     let node = s.graph().add(Params(Bands::new(100.0, 500.0)));
     s.graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(node, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .unwrap()
+        .unfaded();
     s.graph()
-        .set_sources_unfaded(Root::output(1), [OutPort::new(node, 1)])
-        .unwrap();
+        .set_sources(Root::output(1), [OutPort::new(node, 1)])
+        .unwrap()
+        .unfaded();
     let _ = s.update();
 
     let [a, b] = render(&mut s, 256);
@@ -116,11 +118,13 @@ fn a_route_to_index_1_does_not_touch_index_0() {
     let mut s = offline();
     let node = s.graph().add(Params(Bands::new(100.0, 500.0)));
     s.graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(node, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .unwrap()
+        .unfaded();
     s.graph()
-        .set_sources_unfaded(Root::output(1), [OutPort::new(node, 1)])
-        .unwrap();
+        .set_sources(Root::output(1), [OutPort::new(node, 1)])
+        .unwrap()
+        .unfaded();
 
     let band1 = ParamRef::unit_at(node, UnitParam::Threshold, 1);
     assert_eq!(

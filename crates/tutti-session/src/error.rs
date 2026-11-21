@@ -102,7 +102,7 @@ impl From<NoSuchNode> for ConnectError {
     }
 }
 
-/// Why [`Graph::open_inlet`](crate::Graph::open_inlet) refused.
+/// Why [`Graph::add_inlet`](crate::Graph::add_inlet) refused.
 #[derive(Clone, Copy, Debug, PartialEq, Error)]
 #[non_exhaustive]
 pub enum InletError {
@@ -123,7 +123,7 @@ pub enum InletError {
 
 /// Why [`Graph::connect`](crate::Graph::connect),
 /// [`Graph::set_sources`](crate::Graph::set_sources) or
-/// [`Graph::chain`](crate::Graph::chain) refused; nothing is stored.
+/// [`Graph::disconnect`](crate::Graph::disconnect) refused; nothing is stored.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum ConnectError {

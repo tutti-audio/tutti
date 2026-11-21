@@ -18,7 +18,7 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 
 use tutti_buffers::Float;
-use tutti_graph::{BusRef, BusSource, NodeKey};
+use tutti_graph::{BusRef, BusSource, EdgeId, NodeKey};
 use tutti_units::Amplitude;
 
 use crate::{ConnectError, DeclarationError, Graph};
@@ -534,8 +534,7 @@ pub struct Bus;
 /// An event edge: an [`EventOutPort`] into an [`EventInPort`]. Events merge by
 /// offset at the sink, the graph ordering ties by source, and an event edge is
 /// **never faded**: a note-off is a message, not a level (doc 030, section 4),
-/// so [`Connection::unfaded`] and `disconnect_unfaded` are the same as their plain
-/// forms here.
+/// so [`Connection::unfaded`] and [`Disconnection::unfaded`] change nothing here.
 #[derive(Clone, Copy, Debug)]
 pub struct Event;
 
@@ -738,7 +737,7 @@ pub trait Fanin: Sealed + Copy {
         graph: &mut Graph<F>,
         from: Vec<Self::Source>,
         hard: bool,
-    ) -> Result<(), ConnectError>;
+    ) -> Result<Vec<EdgeId>, ConnectError>;
     #[doc(hidden)]
     fn disconnect_all<F: Float>(self, graph: &mut Graph<F>) -> Result<bool, ConnectError>;
 }
@@ -754,7 +753,7 @@ impl Fanin for InPort {
         graph: &mut Graph<F>,
         from: Vec<OutPort>,
         hard: bool,
-    ) -> Result<(), ConnectError> {
+    ) -> Result<Vec<EdgeId>, ConnectError> {
         graph.set_channel_sources(self, from, hard)
     }
     fn disconnect_all<F: Float>(self, graph: &mut Graph<F>) -> Result<bool, ConnectError> {
@@ -774,8 +773,9 @@ impl Fanin for EventInPort {
         graph: &mut Graph<F>,
         from: Vec<EventOutPort>,
         _hard: bool,
-    ) -> Result<(), ConnectError> {
-        graph.set_event_sources_of(self, &from)
+    ) -> Result<Vec<EdgeId>, ConnectError> {
+        graph.set_event_sources_of(self, &from)?;
+        Ok(Vec::new())
     }
     fn disconnect_all<F: Float>(self, graph: &mut Graph<F>) -> Result<bool, ConnectError> {
         graph.check_event_in(self)?;
@@ -859,6 +859,95 @@ impl<F: Float> RootDeclaration<'_, F> {
     /// the cut is its.
     pub fn unfaded(self) -> Self {
         self.graph.harden_root();
+        self
+    }
+}
+
+/// What a [`Graph::disconnect`] did: whether the edge was connected, and the
+/// step that makes the cut land at the next block boundary instead of fading
+/// out.
+///
+/// Dropping it keeps the edge fading out, as the call left it.
+#[derive(Debug)]
+pub struct Disconnection<'g, W: Wire, F: Float = f32> {
+    graph: &'g mut Graph<F>,
+    was_connected: bool,
+    ends: (W::Out, W::In),
+}
+
+impl<'g, W: Wire, F: Float> Disconnection<'g, W, F> {
+    pub(crate) fn new(
+        graph: &'g mut Graph<F>,
+        was_connected: bool,
+        from: W::Out,
+        to: W::In,
+    ) -> Self {
+        Self {
+            graph,
+            was_connected,
+            ends: (from, to),
+        }
+    }
+
+    /// Cuts the edge at the next block boundary: no fade out. The default is
+    /// a fade out over [`DECLICK`](tutti_graph::DECLICK) (5 ms), so a wire
+    /// never steps out of a running sum; `unfaded` is for a test, an analysis
+    /// graph or a wire nobody is listening to. An event edge is never faded,
+    /// so it changes nothing there.
+    pub fn unfaded(self) -> Self {
+        // The call that made this value found both ends, and the edge's
+        // fade is all that is left of it: cutting it again cannot refuse.
+        let recut = W::disconnect(self.graph, self.ends.0, self.ends.1, true);
+        debug_assert!(recut.is_ok(), "re-cutting a disconnected edge refused");
+        self
+    }
+
+    /// Whether the edge was connected (and so was taken out).
+    #[must_use]
+    pub fn was_connected(&self) -> bool {
+        self.was_connected
+    }
+}
+
+/// What a [`Graph::set_sources`] did, and the step that makes it land at the
+/// next block boundary instead of fading.
+///
+/// Dropping it keeps the change as the call left it: what was added fading
+/// in, what was taken out fading out.
+#[derive(Debug)]
+pub struct SetSources<'g, P: Fanin, F: Float = f32> {
+    graph: &'g mut Graph<F>,
+    to: P,
+    from: Vec<P::Source>,
+    cut: Vec<EdgeId>,
+}
+
+impl<'g, P: Fanin, F: Float> SetSources<'g, P, F> {
+    pub(crate) fn new(
+        graph: &'g mut Graph<F>,
+        to: P,
+        from: Vec<P::Source>,
+        cut: Vec<EdgeId>,
+    ) -> Self {
+        Self {
+            graph,
+            to,
+            from,
+            cut,
+        }
+    }
+
+    /// Steps the change at the next block boundary: what was added is at
+    /// full weight at once, and what was taken out is cut. The default fades
+    /// both over [`DECLICK`](tutti_graph::DECLICK) (5 ms); `unfaded` is for a
+    /// test, an analysis graph or a sink nobody is listening to. An event
+    /// sink is never faded, so it changes nothing there.
+    pub fn unfaded(self) -> Self {
+        self.graph.cut_edges(&self.cut);
+        // The call that made this value found the sink and every source:
+        // setting the same sources again cannot refuse.
+        let reset = self.to.set_sources(self.graph, self.from.clone(), true);
+        debug_assert!(reset.is_ok(), "setting the same sources again refused");
         self
     }
 }

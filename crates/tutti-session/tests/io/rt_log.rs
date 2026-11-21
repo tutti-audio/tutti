@@ -30,8 +30,9 @@ fn a_node_that_logs_on_the_audio_thread_emits_a_tracing_event_on_the_next_update
     let noisy = session.graph().add(ForkByClone(Noisy));
     session
         .graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(noisy, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(noisy, 0)])
+        .unwrap()
+        .unfaded();
 
     let events = rt_events(|| {
         let _ = session.update();
@@ -85,8 +86,9 @@ fn nothing_is_logged_when_no_subscriber_takes_the_target() {
     let noisy = session.graph().add(ForkByClone(Noisy));
     session
         .graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(noisy, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(noisy, 0)])
+        .unwrap()
+        .unfaded();
     let _ = session.update();
     stream
         .render_block(Samples::new(64))

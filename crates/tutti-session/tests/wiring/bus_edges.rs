@@ -108,8 +108,9 @@ fn rig() -> Rig {
         out: named(1),
     }));
     let sink = g.add(Unforkable(Pass { input: named(1) }));
-    g.set_sources_unfaded(Root::output(0), [OutPort::new(sink, 0)])
-        .unwrap();
+    g.set_sources(Root::output(0), [OutPort::new(sink, 0)])
+        .unwrap()
+        .unfaded();
     let _ = s.update();
     assert!(!s.graph_ref().is_edited());
     Rig {
@@ -163,12 +164,16 @@ fn connecting_and_disconnecting_a_bus_edge_round_trips() {
 
     let g = r.s.graph();
     assert!(
-        g.disconnect_unfaded(BusSource::Node(bus(r.stereo)), bus(r.sink))
+        g.disconnect(BusSource::Node(bus(r.stereo)), bus(r.sink))
             .unwrap()
+            .unfaded()
+            .was_connected()
     );
     assert!(
-        !g.disconnect_unfaded(BusSource::Node(bus(r.stereo)), bus(r.sink))
+        !g.disconnect(BusSource::Node(bus(r.stereo)), bus(r.sink))
             .unwrap()
+            .unfaded()
+            .was_connected()
     );
     assert!(g.is_edited());
     assert!(g.bus_sources(BusRef::new(r.sink, 0)).unwrap().is_empty());
@@ -209,6 +214,7 @@ fn a_bus_edge_fades_in_and_out_lane_by_lane() {
     assert!(
         g.disconnect(BusSource::Node(bus(r.stereo)), bus(r.sink))
             .unwrap()
+            .was_connected()
     );
     assert!(g.bus_sources(BusRef::new(r.sink, 0)).unwrap().is_empty());
     let down = out0(&mut r.s);
@@ -337,12 +343,16 @@ fn a_bus_into_the_declared_root_renders_the_itu_rows() {
 
     let g = s.graph();
     assert!(
-        g.disconnect_unfaded(BusSource::Node(bus(src)), Root)
+        g.disconnect(BusSource::Node(bus(src)), Root)
             .unwrap()
+            .unfaded()
+            .was_connected()
     );
     assert!(
-        !g.disconnect_unfaded(BusSource::Node(bus(src)), Root)
+        !g.disconnect(BusSource::Node(bus(src)), Root)
             .unwrap()
+            .unfaded()
+            .was_connected()
     );
     assert!(g.is_edited());
     let [l, r] = stereo_block(&mut s);
