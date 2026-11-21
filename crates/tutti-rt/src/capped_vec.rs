@@ -32,7 +32,7 @@
 pub struct CappedVec<T> {
     buf: Vec<T>,
     cap: usize,
-    overflowed: bool,
+    refused: usize,
 }
 
 impl<T> CappedVec<T> {
@@ -42,15 +42,15 @@ impl<T> CappedVec<T> {
         Self {
             buf: Vec::with_capacity(cap),
             cap,
-            overflowed: false,
+            refused: 0,
         }
     }
 
-    /// Drops all items and resets the overflow flag, keeping the storage.
+    /// Drops all items and resets the refusal count, keeping the storage.
     #[inline]
     pub fn clear(&mut self) {
         self.buf.clear();
-        self.overflowed = false;
+        self.refused = 0;
     }
 
     /// Appends one item if there is room.
@@ -60,7 +60,7 @@ impl<T> CappedVec<T> {
     #[inline]
     pub fn push(&mut self, v: T) -> bool {
         if self.buf.len() == self.cap {
-            self.overflowed = true;
+            self.refused = self.refused.saturating_add(1);
             return false;
         }
         // Below the cap, and the storage holds at least the cap: this push
@@ -94,7 +94,7 @@ impl<T> CappedVec<T> {
     #[inline]
     pub fn push_within_capacity(&mut self, value: T) -> Result<(), T> {
         if self.buf.len() == self.cap {
-            self.overflowed = true;
+            self.refused = self.refused.saturating_add(1);
             return Err(value);
         }
         // Below the cap: this push writes into reserved room.
@@ -122,22 +122,30 @@ impl<T> CappedVec<T> {
         self.buf.pop()
     }
 
-    /// Latches [`is_overflowed`](Self::is_overflowed) without pushing: the
+    /// Counts one refusal in [`refused`](Self::refused) without pushing: the
     /// caller refused a group of items as a whole and dropped it.
     #[inline]
     pub fn mark_overflowed(&mut self) {
-        self.overflowed = true;
+        self.refused = self.refused.saturating_add(1);
     }
 
     /// Appends from an iterator, stopping at the cap.
     ///
     /// Returns how many items were written; a short return means the rest were
-    /// dropped.
+    /// dropped. [`refused`](Self::refused) counts the first refused item and
+    /// at least the items the rest of the iterator's size hint reports: exact
+    /// for a slice or an `ExactSizeIterator`, a lower bound otherwise. It
+    /// never iterates past the first refusal, so it returns for an endless
+    /// iterator.
     #[inline]
     pub fn extend(&mut self, it: impl IntoIterator<Item = T>) -> usize {
         let mut written = 0;
-        for v in it {
+        let mut it = it.into_iter();
+        while let Some(v) = it.next() {
             if !self.push(v) {
+                // `push` counted the item it refused; the rest are counted
+                // by their size hint, without being iterated.
+                self.refused = self.refused.saturating_add(it.size_hint().0);
                 break;
             }
             written += 1;
@@ -159,11 +167,31 @@ impl<T> CappedVec<T> {
         &mut self.buf
     }
 
-    /// Whether anything has been dropped since the last [`clear`](Self::clear).
+    /// Whether anything has been dropped since the last [`clear`](Self::clear):
+    /// [`refused`](Self::refused) is not zero.
     #[inline]
     #[must_use]
     pub fn is_overflowed(&self) -> bool {
-        self.overflowed
+        self.refused > 0
+    }
+
+    /// How many items were refused since the last [`clear`](Self::clear): one
+    /// for each refused [`push`](Self::push) or
+    /// [`push_within_capacity`](Self::push_within_capacity), each item an
+    /// [`extend`](Self::extend) did not take, and each
+    /// [`mark_overflowed`](Self::mark_overflowed). Saturates at `usize::MAX`.
+    ///
+    /// ```
+    /// use tutti_rt::CappedVec;
+    ///
+    /// let mut v: CappedVec<u32> = CappedVec::with_capacity(1);
+    /// v.extend([1, 2, 3]);
+    /// assert_eq!(v.refused(), 2);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn refused(&self) -> usize {
+        self.refused
     }
 
     /// How many items are in the filled run; never more than the cap.
@@ -238,7 +266,7 @@ impl<T: core::fmt::Debug> core::fmt::Debug for CappedVec<T> {
         f.debug_struct("CappedVec")
             .field("items", &self.as_slice())
             .field("cap", &self.cap)
-            .field("overflowed", &self.overflowed)
+            .field("refused", &self.refused)
             .finish()
     }
 }
