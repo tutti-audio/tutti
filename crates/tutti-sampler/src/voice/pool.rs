@@ -21,7 +21,7 @@ use super::stretched::{self, Vocoders};
 use super::types::{Playback, Reach, SlotId, Voice, VoiceSource};
 use crate::SamplerFloat;
 use crate::lanes::{BlockScratch, UNPREPARED_FRAMES};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
@@ -46,13 +46,10 @@ use tutti_units::{SampleRate, Tail};
 /// ring and is freed by [`VoicePoolHandle::collect_retired`] on the
 /// control thread.
 ///
-/// A full ring (the control thread is not collecting) or a
-/// disconnected one degrades to dropping the value in the drain: a free on
-/// the audio thread, counted ([`PoolDrops::freed_in_callback`]), and no
-/// other effect. That is the documented policy of
-/// [`VoicePoolHandle::collect_retired`]. Parking the overflow in a spare slot
-/// instead would only move the free one value later, since the ring is
-/// already the bound.
+/// The ring always has room for what the drain pushes: the handle reserves a
+/// slot of it for every command that might retire a value, and refuses the
+/// command with [`SendError::RetirementFull`](super::command::SendError::RetirementFull)
+/// when none is left, so the drain never drops one.
 ///
 /// `pub(crate)`, not `pub`: [`PlaybackSlot`] is crate-private, and the retirement
 /// ring is an internal thread-handoff detail. Callers only ever see the count
@@ -143,10 +140,6 @@ pub struct PoolDrops {
     /// the retirement ring to be freed by
     /// [`collect_retired`](VoicePoolHandle::collect_retired).
     pub voices_refused: u64,
-    /// Values the drain had to free in the callback because the retirement
-    /// ring was full: the control thread was not calling
-    /// [`collect_retired`](VoicePoolHandle::collect_retired) often enough.
-    pub freed_in_callback: u64,
 }
 
 /// The atomics behind [`PoolDrops`], shared by a pool and its handle. Bumped
@@ -158,7 +151,10 @@ pub(crate) struct DrainCounters {
     pub(crate) directions_dropped: AtomicU64,
     wave_swaps_ignored: AtomicU64,
     voices_refused: AtomicU64,
-    freed_in_callback: AtomicU64,
+    /// Retirement slots the handle has reserved: values in the retirement
+    /// ring, plus commands queued that may still retire one. Never above the
+    /// ring's capacity, which is what lets the drain's push always fit.
+    retire_reserved: AtomicUsize,
     /// Commands the handle has queued: not a drop, so not in [`PoolDrops`]. A
     /// pool whose count is zero holds the voices it was built with and no
     /// others, which is what lets a fork copy it.
@@ -170,6 +166,24 @@ impl DrainCounters {
     /// have applied: the pool's voices are then not known here.
     pub(crate) fn commanded(&self) -> bool {
         self.queued.load(Ordering::Relaxed) > 0
+    }
+
+    /// Reserves one of `capacity` retirement slots for a command about to be
+    /// queued; `false` when none is left. Called with the command writer
+    /// locked, so reservations are serial and only releases race with it.
+    pub(crate) fn reserve(&self, capacity: usize) -> bool {
+        let taken = self.retire_reserved.load(Ordering::Acquire);
+        if taken >= capacity {
+            return false;
+        }
+        self.retire_reserved.fetch_add(1, Ordering::AcqRel);
+        true
+    }
+
+    /// Gives `n` reserved retirement slots back: by the drain for a command
+    /// that retired nothing, by `collect_retired` for the values it took.
+    pub(crate) fn release(&self, n: usize) {
+        self.retire_reserved.fetch_sub(n, Ordering::AcqRel);
     }
 
     pub(crate) fn note_queued(&self) {
@@ -187,7 +201,6 @@ impl DrainCounters {
             directions_dropped: load(&self.directions_dropped),
             wave_swaps_ignored: load(&self.wave_swaps_ignored),
             voices_refused: load(&self.voices_refused),
-            freed_in_callback: load(&self.freed_in_callback),
         }
     }
 }
@@ -287,10 +300,12 @@ pub struct VoicePool<F: SamplerFloat> {
     ///
     /// Pushing to a bounded ring instead is lock-free and allocation-free.
     /// The control thread drains it via [`VoicePoolHandle::collect_retired`];
-    /// if nobody ever does, the ring fills and the slot is dropped in the
-    /// callback — a degraded free, never a leak, counted as
-    /// [`PoolDrops::freed_in_callback`].
+    /// if nobody does, the handle refuses the commands that would retire
+    /// ([`SendError::RetirementFull`](super::command::SendError::RetirementFull)),
+    /// so the ring never overflows.
     pub(crate) retired: RingWriter<Retired<F>>,
+    /// Whether the command being drained retired a value.
+    retired_now: bool,
     /// What the drain dropped or refused, shared with the handle
     /// ([`VoicePoolHandle::drops`]).
     pub(crate) counters: Arc<DrainCounters>,
@@ -349,15 +364,15 @@ impl<F: SamplerFloat> VoicePool<F> {
     /// dead): [`with_handle`](Self::with_handle) or
     /// [`into_parts`](IntoNode::into_parts) makes them.
     fn from_parts(channels: impl Into<ChannelLayout>) -> Self {
-        // A zero-capacity ring never accepts, so until a handle exists `Remove`
-        // falls back to dropping in place — correct for a pool nothing
-        // controls (a fork, which owns its voices outright and has no control
-        // thread waiting to collect).
+        // A zero-capacity ring never accepts: a pool nothing controls (a fork,
+        // which owns its voices outright) receives no command, so retires
+        // nothing.
         let (retired, _) = ring(0, Overflow::Refuse);
         let sample_rate = SampleRate::SR_44K1;
         let channels = channels.into();
         Self {
             retired,
+            retired_now: false,
             counters: Arc::default(),
             // Reserved, not empty: `AddVoice` is drained inside `process`, so
             // a `push` that grows this vector would be a reallocation in the
@@ -668,24 +683,25 @@ impl<F: SamplerFloat> VoicePool<F> {
     /// voice's direction is the stream's too, so it is only recorded.
     pub(crate) fn insert_voice(&mut self, id: SlotId, voice: Voice<F>) {
         let stretch = stretch_wanted(&voice.play).then(|| stretched::vocoder::<F>(self.channels));
-        self.insert_voice_inner(id, Box::new(voice), stretch);
+        // Control side: a slot this replaces is freed here.
+        drop(self.insert_voice_inner(id, Box::new(voice), stretch));
     }
 
     /// Allocation-free, free-free and send-free, so the drain can run it: the
     /// voice arrives boxed and the box moves into the slot, and a slot this
-    /// one replaces goes to the retirement ring rather than being dropped
-    /// here. A streaming voice's loop and direction arrive already set on its
+    /// one replaces is returned, for the caller to retire or free. A streaming voice's loop and direction arrive already set on its
     /// stream (or `Off` and forward); see [`apply_loop`](Self::apply_loop).
     pub(super) fn insert_voice_inner(
         &mut self,
         id: SlotId,
         mut voice: Box<Voice<F>>,
         stretch: Option<Box<Vocoders<F>>>,
-    ) {
-        if let Some(i) = self.voices.iter().position(|s| s.id == id) {
-            let old = self.voices.swap_remove(i);
-            self.retire(Retired::Slot(old));
-        }
+    ) -> Option<PlaybackSlot<F>> {
+        let displaced = self
+            .voices
+            .iter()
+            .position(|s| s.id == id)
+            .map(|i| self.voices.swap_remove(i));
         // Take the loop out, leaving `Off` behind: `apply_loop` needs the slot
         // present to look it up, and applies it (an in-memory loop is primed
         // on the source) as it records it.
@@ -718,34 +734,46 @@ impl<F: SamplerFloat> VoicePool<F> {
             slot.voice.play.direction = direction;
         }
         self.apply_loop(id, loop_);
+        displaced
     }
 
     /// Hands a value the drain let go of to the control thread.
     ///
-    /// A full ring (the control thread is not collecting) or a
-    /// disconnected one (a pool no handle was taken for) drops it right here
-    /// instead: correctness is unaffected, only the thread that pays for the
-    /// free, and the count says it happened.
-    ///
-    /// The ring holds `MAX_RESIDENT_VOICES` (64) values, and one drain
-    /// takes at most `COMMAND_CAPACITY` (64) commands, each retiring at most
-    /// one value: a control thread that collects once between sends never
-    /// overflows it. Refused voices share the bound with every other
-    /// retirement, so a host that floods a full pool with adds and never
-    /// collects frees the 65th refusal in the callback, counted.
+    /// The ring always has room: the handle reserved a slot for the command
+    /// being drained before queueing it (`VoicePoolHandle::send`), a command
+    /// retires at most one value, and `drain_commands` stops while the ring
+    /// is full. A push can still fail when every handle was dropped (nothing
+    /// will ever collect) or the invariant broke; the value is then leaked
+    /// rather than freed in the callback.
     fn retire(&mut self, value: Retired<F>) {
-        if self.retired.push(value).is_err() {
-            DrainCounters::bump(&self.counters.freed_in_callback);
+        self.retired_now = true;
+        if let Err(returned) = self.retired.push(value) {
+            debug_assert!(
+                self.retired.is_disconnected(),
+                "the retirement ring has room for every reservation"
+            );
+            std::mem::forget(returned);
         }
     }
 
     fn drain_commands(&mut self) {
-        while let Some(Queued {
-            cmd,
-            forwarded,
-            generation,
-        }) = self.rx.pop()
-        {
+        // A command that may retire is taken only while the ring has room for
+        // its value, which the handle's reservation guarantees.
+        while let Some(next) = self.rx.peek() {
+            if next.cmd.may_retire() && self.retired.is_full() {
+                debug_assert!(false, "a reservation keeps room in the retirement ring");
+                break;
+            }
+            let Some(Queued {
+                cmd,
+                forwarded,
+                generation,
+            }) = self.rx.pop()
+            else {
+                break;
+            };
+            let reserved = cmd.may_retire();
+            self.retired_now = false;
             match cmd {
                 VoiceCommand::AddVoice { id, voice, stretch } => {
                     // A new slot in a full vector would grow it here, in the
@@ -764,7 +792,9 @@ impl<F: SamplerFloat> VoicePool<F> {
                     }
                     // The vocoder arrives prebuilt from `send` (control thread);
                     // this only moves it into the slot.
-                    self.insert_voice_inner(id, voice, stretch);
+                    if let Some(old) = self.insert_voice_inner(id, voice, stretch) {
+                        self.retire(Retired::Slot(old));
+                    }
                 }
                 VoiceCommand::Remove(id) => {
                     // `retain` would DROP the slot here, on the audio thread,
@@ -862,6 +892,10 @@ impl<F: SamplerFloat> VoicePool<F> {
                     }
                 }
             }
+            if reserved && !self.retired_now {
+                // Reserved, but nothing came of it: the slot is free again.
+                self.counters.release(1);
+            }
         }
     }
 }
@@ -877,6 +911,7 @@ impl<F: SamplerFloat> Clone for VoicePool<F> {
             // Dead, like the command `Receiver` beside it: a clone must not hand
             // slots back to the live pool's control thread.
             retired: ring(0, Overflow::Refuse).0,
+            retired_now: false,
             counters: Arc::default(),
             voices: {
                 // Reserved like a new pool's, so a clone's drain refuses at the

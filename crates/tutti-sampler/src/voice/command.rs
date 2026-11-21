@@ -219,6 +219,20 @@ pub(crate) enum VoiceCommand<F: SamplerFloat> {
 
 // Hand-rolled: `ReplaceWave` carries a non-`Debug` `Arc<Wave>` (summarize it by
 // frame count); `AddVoice`'s `Box<Voice>` is `Debug`, forwarded as-is.
+impl<F: SamplerFloat> VoiceCommand<F> {
+    /// Whether the drain may hand one value to the retirement channel for
+    /// this command: an add (refused at the voice cap), a remove, a wave
+    /// replacement, or a stretch update that carries a vocoder. No command
+    /// retires more than one.
+    pub(super) fn may_retire(&self) -> bool {
+        match self {
+            Self::AddVoice { .. } | Self::Remove(_) | Self::ReplaceWave { .. } => true,
+            Self::UpdateStretch { stretch, .. } => stretch.is_some(),
+            _ => false,
+        }
+    }
+}
+
 impl<F: SamplerFloat> std::fmt::Debug for VoiceCommand<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -337,6 +351,17 @@ pub enum SendError {
     /// dead pool distinguishable from a working one.
     #[error("voice pool is gone; the command was dropped")]
     Disconnected,
+    /// The retirement channel has no room left for what the command might
+    /// retire: the audio thread hands removed slots, surplus vocoders and
+    /// replaced waves back through a channel of
+    /// 64 values, and a value that finds it full could only be
+    /// freed in the callback. Call
+    /// [`collect_retired`](VoicePoolHandle::collect_retired) and send again.
+    /// Transient. The command was dropped.
+    #[error(
+        "the retirement channel has no room: collect retired voices first; the command was dropped"
+    )]
+    RetirementFull,
     /// The voice is free-running (a memory voice with no window) and a
     /// stretch or pitch shift was asked of it: a time-stretcher reads the
     /// transport's clock, which a free-running voice does not have. Place the
@@ -801,8 +826,9 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
     /// [`SendError::NoSuchSlot`] from here on.
     ///
     /// Call this periodically from the control thread — once a frame is ample.
-    /// Skipping it is safe but forfeits the point: the retirement ring fills,
-    /// and further retirements fall back to freeing in the audio callback.
+    /// Skipping it is safe, but the retirement channel then fills, and a
+    /// command that might retire a value is refused with
+    /// [`SendError::RetirementFull`] until it is called.
     ///
     /// Returns how many values were freed, which is what a test can assert on.
     pub fn collect_retired(&self) -> usize {
@@ -814,6 +840,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
             }
             freed += 1;
         }
+        self.counters.release(freed);
         // An add the pool refused at its voice cap holds no slot: its id is
         // free again and its stream, if any, ends (a send, outside the locks).
         let ended: Vec<_> = {
@@ -1286,16 +1313,31 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         forwarded: Option<StreamId>,
         generation: u64,
     ) -> Result<(), SendError> {
-        self.writer()
-            .push(Queued {
-                cmd,
-                forwarded,
-                generation,
-            })
-            .map_err(|r| match r.error {
+        let mut writer = self.writer();
+        if writer.is_full() {
+            return Err(SendError::Full);
+        }
+        // One retirement slot per command that might retire a value, taken
+        // before the command is visible to the drain and given back by the
+        // drain when the command retires nothing, or by `collect_retired`
+        // when the value is taken. The drain's push therefore always fits.
+        let reserves = cmd.may_retire();
+        if reserves && !self.counters.reserve(MAX_RESIDENT_VOICES) {
+            return Err(SendError::RetirementFull);
+        }
+        if let Err(r) = writer.push(Queued {
+            cmd,
+            forwarded,
+            generation,
+        }) {
+            if reserves {
+                self.counters.release(1);
+            }
+            return Err(match r.error {
                 PushError::Disconnected => SendError::Disconnected,
                 PushError::Full => SendError::Full,
-            })?;
+            });
+        }
         self.counters.note_queued();
         Ok(())
     }
