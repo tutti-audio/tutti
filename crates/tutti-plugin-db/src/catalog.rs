@@ -214,15 +214,15 @@ fn refusal(row: Option<FileRow>, canonical: &Path, plugin: &PluginRef) -> IpcRes
     let Some(row) = row else {
         return Ok(());
     };
+    let Some(reason) = row.blacklist_reason() else {
+        return Ok(());
+    };
     if !row.is_blacklisted_and_unchanged(&FileFacts::read(canonical)) {
         return Ok(());
     }
     Err(IpcError::Blacklisted {
         path: plugin.path().to_path_buf(),
-        reason: row
-            .blacklist_reason()
-            .unwrap_or("no reason recorded")
-            .to_string(),
+        reason: reason.to_string(),
     })
 }
 

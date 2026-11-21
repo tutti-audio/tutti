@@ -24,10 +24,10 @@ use crate::tuning::A4_FREQ;
 use crate::unison::MAX_UNISON_VOICES;
 use crate::{FilterModConfig, FilterType, SynthConfig};
 use crate::{MpeVoiceState, UnisonEngine, UnisonVoiceParams, UnisonVoices};
-use tutti_dsp::{PanLaw, pan_gains};
+use tutti_dsp::{Lfo, LfoWave, PanLaw, pan_gains};
 use tutti_ump::{MidiChannel, NoteNumber};
 use tutti_units::{
-    Amplitude, Depth, Hz, Normalized, Pan, Phase, PhaseIncrement, Resonance, SampleRate, Seconds,
+    Amplitude, Depth, Hz, Normalized, Pan, Phase, Resonance, SampleRate, Samples, Seconds,
     Semitones, Velocity,
 };
 use tutti_voicing::{ChannelState, DEFAULT_MODULATION_RANGE};
@@ -82,7 +82,8 @@ pub(crate) struct SynthVoice {
     /// toward the 0.95 ceiling in `modulated_resonance`.
     cc_resonance_value: Normalized,
     filter_mod: FilterModConfig,
-    lfo_phase: Phase,
+    /// The filter LFO: a sine at the rate the config states, re-aimed each control step.
+    lfo: Lfo,
     envelope_level: Amplitude,
     active: bool,
     mpe: MpeVoiceState,
@@ -240,7 +241,11 @@ impl SynthVoice {
             cc_cutoff_value: Normalized::of(0.5),
             cc_resonance_value: Normalized::of(0.0),
             filter_mod: config.filter_mod,
-            lfo_phase: Phase::START,
+            lfo: Lfo::new(
+                LfoWave::Sine,
+                config.filter_mod.lfo_rate.unwrap_or(Hz::new(0.0)),
+                sample_rate,
+            ),
             envelope_level: Amplitude::SILENT,
             active: false,
             mpe: MpeVoiceState::new(),
@@ -273,7 +278,7 @@ impl SynthVoice {
         self.snap_tone = true;
         self.snap_gain = fresh;
         self.active = true;
-        self.lfo_phase = Phase::START;
+        self.lfo.reset();
         self.base_note_freq = base_freq;
         self.pitch = base_freq;
         self.tuned = None;
@@ -306,7 +311,7 @@ impl SynthVoice {
         self.velocity_mod_value = Velocity::MAX;
         self.cc_cutoff_value = Normalized::of(0.5);
         self.cc_resonance_value = Normalized::of(0.0);
-        self.lfo_phase = Phase::START;
+        self.lfo.reset();
         self.mpe.reset();
         self.base_note_freq = A4_FREQ;
         self.tuned = None;
@@ -505,11 +510,9 @@ impl SynthVoice {
         if let Some(lfo_rate) = fm.lfo_rate
             && fm.lfo_depth > Depth::of(0.0)
         {
-            // `advance` rather than `% 1.0`: the remainder operator keeps the
-            // dividend's sign, so it is not a wrap for a negative phase.
-            let step = PhaseIncrement::per_sample(lfo_rate, sample_rate) * frames as f64;
-            self.lfo_phase = self.lfo_phase.advance(step);
-            let lfo_val = self.lfo_phase.sin();
+            self.lfo.retarget(lfo_rate, sample_rate);
+            self.lfo.advance(Samples::new(frames));
+            let lfo_val = self.lfo.value().get();
             cutoff *= 1.0 + lfo_val * fm.lfo_depth.get() * 0.5;
         }
 

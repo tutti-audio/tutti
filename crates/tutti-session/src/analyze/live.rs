@@ -117,6 +117,14 @@ where
         self.items.drain(..)
     }
 
+    /// A future that resolves once the tap has written a block or ended since
+    /// the last time one resolved ([`TapReader::notified`](tutti_graph::TapReader::notified)):
+    /// await it, then drain with [`try_iter`](Self::try_iter). `None` for a tap
+    /// opened without bells, which a session's never is.
+    pub fn notified(&mut self) -> Option<impl Future<Output = ()> + '_> {
+        self.reader.notified()
+    }
+
     /// Drains what is left and answers over the whole stream. The items this
     /// last drain completes are dropped: drain with [`try_iter`](Self::try_iter)
     /// first to keep them.

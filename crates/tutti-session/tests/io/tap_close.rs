@@ -7,6 +7,10 @@
 //! is a tap opened after the first render and one closed by name
 //! (`Graph::close_tap`).
 
+use std::future::Future;
+use std::pin::pin;
+use std::task::{Context, Poll, Waker};
+
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
@@ -105,4 +109,26 @@ fn a_session_without_a_tap_renders_untouched() {
         Samples::new(0),
         "a tap flows from its commit"
     );
+}
+
+/// A tap the session opens carries a bell: its `notified` is pending until a
+/// block renders, ready after one, and pending again once it has resolved with
+/// nothing more rendered.
+#[test]
+fn a_session_taps_notified_resolves_once_a_block_renders() {
+    let mut s = session();
+    let mut reader = s
+        .graph()
+        .taps()
+        .open_root(Samples::new(64))
+        .expect("the sources exist");
+    let mut cx = Context::from_waker(Waker::noop());
+    let mut poll = |reader: &mut tutti_graph::TapReader| {
+        pin!(reader.notified().expect("a session's tap carries a bell")).poll(&mut cx)
+    };
+    assert_eq!(poll(&mut reader), Poll::Pending, "nothing rendered yet");
+    let mut out = [0.0f32];
+    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
+    assert_eq!(poll(&mut reader), Poll::Ready(()), "a block was written");
+    assert_eq!(poll(&mut reader), Poll::Pending, "the ring was consumed");
 }
