@@ -113,25 +113,23 @@ pub(super) fn is_driving() -> bool {
     DRIVING.with(Cell::get)
 }
 
-/// Parks the calling thread until `task` ends: the task's waker unparks it.
+/// Blocks the calling thread on `task` until it ends.
 pub(super) fn join<T>(task: Task<T>) -> Option<T> {
-    match wait(task, None) {
-        Ok(output) => output,
-        Err(_) => unreachable!("a wait with no deadline only ends with the task"),
-    }
+    refuse_on_a_driving_thread();
+    // A task whose future panicked re-raises the panic at the poll, and the panic hook
+    // prints it: the task ended with no output. A cancelled one is `None` from the
+    // `fallible()` handle.
+    catch_unwind(AssertUnwindSafe(|| {
+        futures_lite::future::block_on(task.fallible())
+    }))
+    .unwrap_or(None)
 }
 
-/// Parks the calling thread until `task` ends or `bound` has passed.
-pub(super) fn join_within<T>(task: Task<T>, bound: Duration) -> Result<Option<T>, Task<T>> {
-    wait(task, Some(Instant::now() + bound))
-}
-
-/// Polls `task`'s handle, parking between polls, until it ends or `deadline` passes.
-fn wait<T>(mut task: Task<T>, deadline: Option<Instant>) -> Result<Option<T>, Task<T>> {
-    assert!(
-        !is_driving(),
-        "join on a thread that drives an executor: the wait would stop the tasks it runs"
-    );
+/// Parks the calling thread until `task` ends or `bound` has passed. Polls `task`'s
+/// handle, parking between polls; the task's waker unparks it.
+pub(super) fn join_within<T>(mut task: Task<T>, bound: Duration) -> Result<Option<T>, Task<T>> {
+    refuse_on_a_driving_thread();
+    let deadline = Instant::now() + bound;
     let waker = Waker::from(Arc::new(Unpark(thread::current())));
     let mut cx = Context::from_waker(&waker);
     loop {
@@ -145,18 +143,23 @@ fn wait<T>(mut task: Task<T>, deadline: Option<Instant>) -> Result<Option<T>, Ta
         match catch_unwind(AssertUnwindSafe(|| Pin::new(&mut task).poll(&mut cx))) {
             Ok(Poll::Ready(output)) => return Ok(Some(output)),
             Err(_) => return Ok(None),
-            Ok(Poll::Pending) => match deadline {
-                None => thread::park(),
-                Some(deadline) => {
-                    let left = deadline.saturating_duration_since(Instant::now());
-                    if left.is_zero() {
-                        return Err(task);
-                    }
-                    thread::park_timeout(left);
+            Ok(Poll::Pending) => {
+                let left = deadline.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    return Err(task);
                 }
-            },
+                thread::park_timeout(left);
+            }
         }
     }
+}
+
+/// Panics on a thread that drives an executor: a wait there would stop the tasks it runs.
+fn refuse_on_a_driving_thread() {
+    assert!(
+        !is_driving(),
+        "join on a thread that drives an executor: the wait would stop the tasks it runs"
+    );
 }
 
 /// The outcome of a task that has finished: its output, or `None` when its future

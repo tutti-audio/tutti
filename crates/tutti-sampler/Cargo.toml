@@ -53,6 +53,8 @@ tutti-tempo = { version = "0.0.1", path = "../tutti-tempo" }
 tutti-timeline = { version = "0.0.1", path = "../tutti-timeline" }
 # `spawn_named`, `PriorityRequest`: the disk streamer's thread.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
+# The streamer task yields to its drive between cycles.
+futures-lite.workspace = true
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 
 # `PhaseVocoder`: the time stretch and pitch shift of a voice that stretches.
