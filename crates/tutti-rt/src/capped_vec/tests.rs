@@ -112,3 +112,41 @@ fn the_default_has_a_zero_cap() {
     assert_eq!(v.capacity(), 0);
     assert!(!v.push(1));
 }
+
+/// `refused` counts one per refused `push`, one per refused
+/// `push_within_capacity`, and one per item an `extend` could not take; a
+/// push that fits adds nothing; `clear` resets it.
+#[test]
+fn refused_counts_every_item_each_way_it_is_turned_away() {
+    let mut v = CappedVec::with_capacity(2);
+    assert_eq!(v.refused(), 0);
+    assert!(v.push(1) && v.push(2));
+    assert_eq!(v.refused(), 0, "pushes that fit are not refused");
+    assert!(!v.push(3));
+    assert_eq!(v.refused(), 1);
+    assert_eq!(v.push_within_capacity(4), Err(4));
+    assert_eq!(v.refused(), 2);
+    assert_eq!(v.extend([5, 6, 7]), 0);
+    assert_eq!(v.refused(), 5, "each extend item is one refusal");
+    assert_eq!(v.as_slice(), &[1, 2]);
+    v.clear();
+    assert_eq!(v.refused(), 0);
+    assert!(!v.is_overflowed());
+}
+
+/// An extend of an endless iterator stops at the cap and returns.
+#[test]
+fn extending_an_endless_iterator_stops_at_the_cap() {
+    let mut v = CappedVec::with_capacity(3);
+    assert_eq!(v.extend(std::iter::repeat(1)), 3);
+    assert!(v.is_overflowed());
+}
+
+/// An extend that is partly taken counts only the items past the cap.
+#[test]
+fn a_partial_extend_counts_only_the_items_past_the_cap() {
+    let mut v = CappedVec::with_capacity(3);
+    assert_eq!(v.extend(0..5), 3);
+    assert_eq!(v.refused(), 2);
+    assert!(v.is_overflowed());
+}
