@@ -38,7 +38,7 @@ fn pushed_frames_reach_the_outputs_in_order() {
     let mut tap = s
         .graph()
         .taps()
-        .open_output(Samples::new(1_024))
+        .open_root(Samples::new(1_024))
         .expect("the sources exist");
     let _ = s.update();
 
@@ -87,7 +87,7 @@ fn a_producer_at_another_rate_is_refused() {
         }
     );
     assert!(
-        !s.graph().is_edited(),
+        !s.graph().has_uncommitted_edits(),
         "a refused inlet leaves the graph as it was"
     );
 }
@@ -109,11 +109,11 @@ fn add_inlet_checks_the_rate_the_ring_carries() {
             graph: RATE
         }
     );
-    assert!(!s.graph().is_edited(), "nothing was added");
+    assert!(!s.graph().has_uncommitted_edits(), "nothing was added");
 
     let (ring, _writer) = InletRing::pair(ChannelLayout::STEREO, Samples::new(64), RATE);
     s.graph().add_inlet(ring).expect("the graph's rate");
-    assert!(s.graph().is_edited(), "the node was added");
+    assert!(s.graph().has_uncommitted_edits(), "the node was added");
 }
 
 /// **An inlet of an `f64` session carries `FINE` exactly**: the producer

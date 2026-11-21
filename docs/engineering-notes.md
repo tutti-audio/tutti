@@ -445,7 +445,7 @@ kept a tracked map to know what to disconnect.
 edit, and `graph_ref()` a guard over it, to read; there is no way to the
 `Editor` inside and no `Deref` to the session, so the mutate/commit boundary
 stays visible), and `AudioConfig` the sample-rate / channel config. Every edit
-through it sets the session graph's edit flag (`Graph::is_edited`), which is
+through it sets the session graph's edit flag (`Graph::has_uncommitted_edits`), which is
 what coalesces a frame's edits into one commit (design 015). Node removal is an `On<Remove, AudioNode>` observer, not a
 despawn system.
 

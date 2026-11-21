@@ -46,7 +46,8 @@ use tutti_plugin_host::{RebindError, Settlement};
 use tutti_plugin_types::MainThreadMarker;
 
 use super::{PluginChange, PluginEvent, RebindState};
-use crate::{Clock, CrossfadeRefused, ReplaceRefused, Session, SessionEvent};
+use crate::graph::SwapRefused;
+use crate::{Clock, ReplaceRefused, Session, SessionEvent};
 use tutti_graph::NodeKey;
 
 /// Why a plugin's ports were not re-inserted ([`PluginChange::PortsRefused`]).
@@ -63,7 +64,7 @@ pub enum PortsRefusal {
     /// editor that refuses it); the plugin is untouched, since it is touched only
     /// once the node is in.
     #[error("the graph refused the node over the new ports: {0}")]
-    Swap(CrossfadeRefused),
+    Swap(ReplaceRefused),
 }
 
 /// `f32` because a plugin format is `f32` at its FFI.
@@ -154,8 +155,8 @@ impl<K: crate::AppKey, C: Clock<Float = f32>> Session<K, C> {
                         state.with(now, true)
                     }
                     // Between a re-prepare's two commits: asked again next update.
-                    Err(ReplaceRefused::Busy(_)) => state.with(laid_out, false),
-                    Err(ReplaceRefused::Failed(why)) => {
+                    Err(SwapRefused::Busy(_)) => state.with(laid_out, false),
+                    Err(SwapRefused::Failed(why)) => {
                         out.push(refused(node, PortsRefusal::Swap(why)));
                         state.with(now, false)
                     }

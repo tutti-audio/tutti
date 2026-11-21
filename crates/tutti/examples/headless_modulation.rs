@@ -126,7 +126,10 @@ fn main() -> Result<(), Error> {
     // commit and no plan is sent.
     s.set(DepthTarget::of(wobble, cutoff).to(Depth::of(0.45)))
         .expect("the route is declared");
-    assert!(!s.graph_ref().is_edited(), "a depth edit sends no plan");
+    assert!(
+        !s.graph_ref().has_uncommitted_edits(),
+        "a depth edit sends no plan"
+    );
     report(s.update());
     println!("LFO depth 0.45:");
     play(&mut s, 20);

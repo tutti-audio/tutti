@@ -26,16 +26,14 @@ use tutti_buffers::MaxBlock;
 use tutti_buffers::PlanesMut;
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::NodeKey;
-use tutti_graph::{
-    Cx, FadeLaw, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable,
-};
+use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{
     DistortionConfig, DistortionNode, LimiterConfig, LimiterControls, LimiterNode, ShapeKind,
     SvfFilterConfig, SvfFilterNode, SvfType,
 };
-use tutti_session::{AudioSide, DetachedSession, InPort, Key, OutPort, Root, Session};
-use tutti_units::{Db, Drive, Hz, Q, SampleRate, Samples, Seconds};
+use tutti_session::{AudioSide, DetachedSession, InPort, Key, OutPort, Replacement, Root, Session};
+use tutti_units::{Db, Drive, Hz, Q, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
 
@@ -284,7 +282,7 @@ impl Node for From {
     fn reset(&mut self) {}
 }
 
-/// **A crossfade follows its law to the new filter.** `Graph::crossfade`
+/// **A crossfade follows its law to the new filter.** `Graph::replace`
 /// fades the filter to one with another cutoff over 5 ms (240 frames),
 /// starting on the first frame of the next block (1 024), along
 /// `FadeLaw::EqualAmplitude`:
@@ -306,12 +304,7 @@ fn a_crossfade_follows_its_law_to_the_new_filter() {
     let mut b = render(&mut s.side, FADE_AT, 256);
     s.session
         .graph()
-        .crossfade(
-            s.filter,
-            low_pass(300.0),
-            Seconds::new(0.005),
-            FadeLaw::EqualAmplitude,
-        )
+        .replace(s.filter, Replacement::new(low_pass(300.0)))
         .expect("the crossfade starts");
     let _ = s.session.update();
     for (c, rest) in b.iter_mut().zip(render(&mut s.side, 3_072 - FADE_AT, 256)) {
