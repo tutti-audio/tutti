@@ -66,6 +66,10 @@ impl AmbisonicDecoder {
     /// speakers below the listener is panned by VBAP's own retreat of a source to the
     /// nearest triplet.
     #[must_use]
+    #[allow(
+        clippy::missing_panics_doc,
+        reason = "the gains buffer is built with the layout's speaker count"
+    )]
     pub fn allrad(
         order: AmbisonicOrder,
         normalization: HarmonicNormalization,
@@ -74,12 +78,14 @@ impl AmbisonicDecoder {
         let mut rows = vec![[0.0; MAX_CHANNELS]; layout.speaker_count()];
         let mut gains = vec![Gain::SILENT; layout.speaker_count()];
         for (direction, weight) in quadrature() {
-            layout.gains_into(
-                direction.azimuth,
-                direction.elevation,
-                Spread::POINT,
-                &mut gains,
-            );
+            layout
+                .gains_into(
+                    direction.azimuth,
+                    direction.elevation,
+                    Spread::POINT,
+                    &mut gains,
+                )
+                .expect("`gains` has one entry per speaker");
             let row = virtual_row(order, normalization, direction, weight);
             for (out, g) in rows.iter_mut().zip(&gains) {
                 for (o, v) in out.iter_mut().zip(&row) {

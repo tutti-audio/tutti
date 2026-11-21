@@ -656,7 +656,7 @@ fn replace_or_swap_to_a_node_with_another_bound_commits_and_holds_it() {
     for workers in std::iter::once(1).chain(common::WORKERS) {
         let mut rig = Bounded::new(workers, Some(8), &[6, 5]);
         assert_eq!(rig.run(1)[0].len(), 8);
-        let fade = tutti_graph::Fade::new(Samples::new(100));
+        let fade = tutti_graph::Fade::new(Samples::ZERO);
         rig.ed
             .replace_or_swap(
                 NodeKey(100),

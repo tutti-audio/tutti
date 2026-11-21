@@ -1,4 +1,4 @@
-//! The output block, tested without a sound card: the `MAX_FRAMES` clamp, the
+//! The output block, tested without a sound card: the `MAX_FRAMES` ceiling, the
 //! zero-fill and the stream's width.
 //!
 //! The sample-format conversion is the driver's (`tutti-cpal` tests its
@@ -6,28 +6,51 @@
 //! level, enabled against disabled) are in `tests/outputs/master_meter.rs`: the
 //! meter is an op in the graph's plan, not this callback's.
 
-use crate::fixtures::{dc_state, rolling_state};
-use tutti_buffers::ChannelLayout;
-use tutti_engine::{MAX_FRAMES, OutputBlock};
+use crate::fixtures::{SAMPLE_RATE, dc_state, fan, graph_engine, rolling_state};
+use std::sync::Arc;
+use tutti_buffers::{ChannelLayout, MaxBlock};
+use tutti_engine::{AudioCallbackState, MAX_FRAMES, OutputBlock, OutputQuantum, QuantumOutOfRange};
+use tutti_graph::NodeKey;
+use tutti_nodes::testing::Const;
+use tutti_timeline::Transport;
+use tutti_units::{SampleRate, Samples};
 
-/// **An over-sized callback renders its head and silences its tail.**
+/// **An over-sized callback renders its head, silences its tail and counts it.**
 ///
-/// The clamp exists so the callback never allocates. It is observable here
+/// The ceiling exists so the callback never allocates. It is observable here
 /// only because the `debug_assert` on a backend's contract lives at the *driver*
 /// boundary rather than inside `render_with`: it is a claim about the backend,
 /// not about the block, and keeping it out is what lets a debug build reach this.
+/// A callback at the ceiling counts nothing; one frame past it counts once.
 #[test]
-fn an_oversized_callback_silences_its_tail() {
-    let mut block = OutputBlock::new(dc_state(1.0, 2), ChannelLayout::STEREO);
+fn an_oversized_callback_silences_its_tail_and_counts_it() {
+    let engine = graph_engine(&Transport::new(SampleRate::of(SAMPLE_RATE)), |ed| {
+        ed.insert(NodeKey(1), "dc", Const::mono(1.0));
+        fan(ed, NodeKey(1), 2);
+    });
+    let blocks = engine.blocks();
+    let mut block = OutputBlock::new(
+        Arc::new(AudioCallbackState::new(engine)),
+        ChannelLayout::STEREO,
+    );
+
+    let mut whole = vec![-1.0f32; MAX_FRAMES * 2];
+    block.render(&mut whole);
+    assert_eq!(
+        blocks.get().truncated,
+        0,
+        "a callback at the ceiling is whole"
+    );
 
     let frames = MAX_FRAMES + 64;
     let mut out = vec![-1.0f32; frames * 2];
     block.render(&mut out);
 
+    assert_eq!(blocks.get().truncated, 1, "the silenced tail is counted");
     assert_eq!(
         block.last_rendered_frames(),
         MAX_FRAMES,
-        "the clamp must report what it actually rendered, not what it was asked for"
+        "the block reports what it actually rendered, not what it was asked for"
     );
     assert!(
         out[..MAX_FRAMES * 2].iter().all(|&s| s == 1.0),
@@ -65,4 +88,28 @@ fn an_empty_callback_renders_nothing_and_does_not_panic() {
     let mut out: [f32; 0] = [];
     block.render(&mut out);
     assert_eq!(block.last_rendered_frames(), 0);
+}
+
+/// **A callback quantum is from one frame to `MAX_FRAMES`.** A quantum the
+/// callback could not render whole cannot be written, and a block longer than
+/// the ceiling is refused when converted, never shortened.
+#[test]
+fn a_quantum_holds_from_one_frame_to_the_ceiling() {
+    tutti_fixtures::check_range_contract(&tutti_fixtures::RangeContract {
+        new: OutputQuantum::new,
+        get: OutputQuantum::get,
+        of: Some(OutputQuantum::of),
+        valid: &[1, 512, MAX_FRAMES],
+        invalid: &[0, MAX_FRAMES + 1, usize::MAX],
+    });
+    let long = MaxBlock::of(Samples::new(MAX_FRAMES + 1));
+    assert_eq!(
+        OutputQuantum::try_from(long),
+        Err(QuantumOutOfRange(MAX_FRAMES + 1))
+    );
+    let ceiling = MaxBlock::of(Samples::new(MAX_FRAMES));
+    assert_eq!(
+        OutputQuantum::try_from(ceiling).map(OutputQuantum::max_block),
+        Ok(ceiling)
+    );
 }

@@ -515,7 +515,7 @@ fn a_db_linear_release_is_a_straight_line_in_decibels<F: SynthFloat>(epsilon: f6
     let stages = EnvelopeStages::new(
         Seconds::new(0.0),
         Seconds::new(0.0),
-        Amplitude::UNITY,
+        Normalized::of(1.0),
         Seconds::new(release / SR),
     )
     .release_curve(EnvelopeCurve::db_linear(Db::new(depth)).expect("a depth above zero"));

@@ -37,7 +37,7 @@ fn controls(frequency: f64, index: f64, feedback: f64) -> FmControls {
 fn render(voice: &mut FmVoice<f64>, frames: usize) -> Vec<f64> {
     let mut out = vec![0.0; frames];
     for chunk in out.chunks_mut(BLOCK) {
-        voice.process(MonoMut::new(chunk));
+        voice.process(MonoMut::new(chunk)).unwrap();
     }
     out
 }

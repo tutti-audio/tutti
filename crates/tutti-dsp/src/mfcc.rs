@@ -25,7 +25,7 @@ use core::num::NonZeroUsize;
 use tutti_buffers::Float;
 
 use crate::spectral::RELATIVE_POWER_FLOOR;
-use crate::{Dct2, MelFilterbank};
+use crate::{Dct2, MelFilterbank, TooManyOutputs};
 
 /// A mel filterbank, a logarithm and a DCT-II, with the scratch they share.
 #[derive(Debug, Clone, PartialEq)]
@@ -36,20 +36,22 @@ pub struct Mfcc {
 }
 
 impl Mfcc {
-    /// The coefficients of `bank`'s bands, keeping the first `coefficients` (at most as many
-    /// as the bank has bands).
-    #[must_use]
-    pub fn new(bank: MelFilterbank, coefficients: NonZeroUsize) -> Self {
+    /// The coefficients of `bank`'s bands, keeping the first `coefficients`.
+    ///
+    /// # Errors
+    ///
+    /// [`TooManyOutputs`] when `coefficients` is more than the bank has bands.
+    pub fn new(bank: MelFilterbank, coefficients: NonZeroUsize) -> Result<Self, TooManyOutputs> {
         let bands = bank.bands().len();
-        Self {
+        Ok(Self {
             // A bank has at least one band.
             dct: Dct2::new(
                 NonZeroUsize::new(bands).unwrap_or(NonZeroUsize::MIN),
                 coefficients,
-            ),
+            )?,
             energies: vec![0.0; bands],
             bank,
-        }
+        })
     }
 
     /// The filterbank.

@@ -77,6 +77,8 @@ tutti-nodes = { path = "../tutti-nodes", default-features = false, features = ["
 tutti-codec = { path = "../tutti-codec", features = ["encode-wav"] }
 hound = "3.5"
 tempfile = "3.10"
+# `check_range_contract`, for the poll interval.
+tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 
 [[bench]]
 name = "audio_callback"

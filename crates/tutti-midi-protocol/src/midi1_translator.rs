@@ -172,7 +172,7 @@ impl Midi1Translator {
             PerNoteTranslation::Dropped => address,
         };
         let plain = |out: &mut dyn FnMut(Midi1Bytes)| {
-            if let Ok(voice) = Voice1::try_from_with(extremes, voice) {
+            if let Ok(voice) = Voice1::from_voice2(voice, extremes) {
                 out(voice.bytes(address.channel));
             }
         };

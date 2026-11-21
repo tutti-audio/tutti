@@ -251,7 +251,7 @@ impl<'a> PluginParam<'a> {
     /// range), [`UnitError::UnitMismatch`] for a unit `U` does not read
     /// (`Db` on a parameter in hertz) and [`UnitError::RangeUnfit`] for a
     /// declared range `U` cannot hold all of.
-    pub fn try_unit<U: PluginUnit>(&self) -> Result<PluginParamTarget<U>, UnitError> {
+    pub fn unit<U: PluginUnit>(&self) -> Result<PluginParamTarget<U>, UnitError> {
         PluginParamTarget::declared(self.params.node, self.info())
     }
 
@@ -284,7 +284,7 @@ impl<'a> PluginParam<'a> {
     /// `None` where the format has none.
     ///
     /// A bare `f64`, on purpose: a plugin's plain value has no tutti unit unless
-    /// the plugin declares one, and [`PluginParam::try_unit`] is the typed door for that.
+    /// the plugin declares one, and [`PluginParam::unit`] is the typed door for that.
     #[must_use]
     pub fn plain(&self) -> Option<f64> {
         self.params

@@ -9,8 +9,8 @@
 
 use dpi::Size;
 use tutti_plugin_types::{
-    ContentScale, EditorCapabilities, EditorError, EditorWindow, MainThreadMarker, PluginError,
-    PluginResult, WindowHandle,
+    ContentScale, EditorCapabilities, EditorError, EditorOpened, EditorWindow, MainThreadMarker,
+    PluginError, PluginResult, WindowHandle,
 };
 
 use super::audio::AudioBridge;
@@ -67,7 +67,7 @@ impl EditorWindow for IpcEditor {
         _main: MainThreadMarker,
         parent: WindowHandle,
         scale: ContentScale,
-    ) -> PluginResult<Size> {
+    ) -> PluginResult<EditorOpened<Size>> {
         if !WindowHandle::embeds_across_processes() {
             return Err(plugin_error(EditorError::UnsupportedPlatform {
                 got: "a window of this platform cannot be embedded into by another process; \
@@ -86,16 +86,16 @@ impl EditorWindow for IpcEditor {
             ))
         })?;
         self.open = true;
-        Ok(size)
+        Ok(EditorOpened::new(size))
     }
 
-    fn open_floating_editor(&mut self, _main: MainThreadMarker) -> PluginResult<()> {
+    fn open_floating_editor(&mut self, _main: MainThreadMarker) -> PluginResult<EditorOpened<()>> {
         self.hear_closed();
         self.audio
             .open_editor_in_server(None, ContentScale::IDENTITY)
             .map_err(plugin_error)?;
         self.open = true;
-        Ok(())
+        Ok(EditorOpened::new(()))
     }
 
     fn close_editor(&mut self, _main: MainThreadMarker) {

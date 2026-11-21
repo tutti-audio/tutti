@@ -14,7 +14,7 @@ pub enum SessionHeardTapError {
     Detached,
     /// The engine's tap refused: a reader is alive, or none is open.
     #[error(transparent)]
-    Tap(#[from] tutti_engine::OutputTapError),
+    Tap(#[from] tutti_engine::HeardTapError),
 }
 
 /// Why a declaration was refused: a value declared with a wire or a target
@@ -438,6 +438,12 @@ pub enum Error {
     /// [`RouteError`](crate::RouteError).
     #[error(transparent)]
     Modulation(#[from] crate::RouteError),
+
+    /// The block the system clock's stream renders is longer than a device
+    /// callback can be ([`MAX_FRAMES`](tutti_engine::MAX_FRAMES)): the timer
+    /// opens at the block it is given, never a shorter one.
+    #[error(transparent)]
+    Quantum(#[from] tutti_engine::QuantumOutOfRange),
 
     /// The system clock's timer thread did not start
     /// ([`SessionBuilder::system_clock`](crate::SessionBuilder::system_clock)).

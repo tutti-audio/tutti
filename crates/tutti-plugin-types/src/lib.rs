@@ -286,8 +286,9 @@ pub use descriptor::{AuComponentType, Described, EditorPresence, PluginClass, Pl
 pub use driver::{Hand, Lifecycle, Seat, Successor};
 pub use edit_slots::{EditReader, EditWriter, UnknownParam, edit_slots, epoch_before};
 pub use editor::{
-    AspectRatio, ContentScale, EditorCapabilities, EditorError, EditorUnit, InvalidContentScale,
-    KeyEvent, KeyUse, ModifierConvention, ResizeHints, WindowHandle,
+    AspectRatio, ContentScale, EditorCapabilities, EditorError, EditorMirrorError, EditorOpened,
+    EditorUnit, InvalidContentScale, KeyEvent, KeyUse, ModifierConvention, ResizeHints,
+    WindowHandle,
 };
 pub use failure::{PluginFailure, TerminationReason};
 pub use format::{FourCc, PluginFormat, PluginId, PluginIdError, Uid, UnknownExtension};

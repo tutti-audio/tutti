@@ -2,7 +2,7 @@
 //! optional air absorption.
 
 use tutti_buffers::{BusTopology, ChannelLayout, Float, MaxBlock, Planes, PlanesMut};
-use tutti_dsp::{DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec};
+use tutti_dsp::{DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec, ReferenceDistance};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, Metres, SampleRate, Samples, Speed, Tail};
 
@@ -18,22 +18,21 @@ pub struct DistanceConfig {
 }
 
 impl DistanceConfig {
-    /// A distance node of `width` channels (an empty layout is taken as mono) for sources up
+    /// A distance node of `width` channels for sources up
     /// to `max` away (it sets the delay line's length), at the default distance of 1 m, with a
     /// reference of 1 m, the speed of sound in air and no air absorption.
     #[must_use]
     pub fn new(width: impl Into<ChannelLayout>, max: Metres) -> Self {
         Self {
-            width: ChannelLayout::from_count(width.into().count().max(1)),
+            width: width.into(),
             spec: DistanceSpec::new(max),
             controls: DistanceControls::DEFAULT,
         }
     }
 
-    /// The distance at which the level is 1 (at least a millimetre): a source nearer is not
-    /// louder.
+    /// The distance at which the level is 1: a source nearer is not louder.
     #[must_use]
-    pub fn reference(self, reference: Metres) -> Self {
+    pub fn reference(self, reference: ReferenceDistance) -> Self {
         Self {
             spec: self.spec.reference(reference),
             ..self
