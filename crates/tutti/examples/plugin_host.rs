@@ -59,7 +59,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         |_| Ok(()),
     );
     //    The scan is a value: `run` blocks and this example has nothing else to
-    //    do; a host with a frame loop runs it on a thread and reads its progress.
+    //    do; a host with a frame loop runs it off the frame thread (a thread of its
+    //    own, or `Executor::unblock`) and reads its progress.
     let scanned = catalog.scan()?.run();
     let scanned = catalog.apply(scanned)?;
     eprintln!("scanned {} plugin file(s)", scanned.scanned());

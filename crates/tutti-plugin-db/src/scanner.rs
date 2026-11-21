@@ -298,8 +298,9 @@ pub enum FilesError {
 /// file.
 ///
 /// The value owns a snapshot of the database and the pedal's claim, and holds no
-/// thread: [`run`](Self::run) blocks the caller until the probes end, so the
-/// app runs it on a thread or an executor of its own. Take
+/// thread: [`run`](Self::run) blocks the caller for whole probes, so the app
+/// runs it off any thread that drives a queue (a thread of the app's, or
+/// `Executor::unblock`). Take
 /// [`canceller`](Self::canceller) and [`progress`](Self::progress) before `run`
 /// to cancel it and watch it from elsewhere. Dropping it unrun releases the
 /// pedal and probes nothing.
@@ -437,6 +438,16 @@ pub struct ScannedPlugins {
     report: ScanReport,
     changes: Vec<RowChange>,
 }
+
+// A scan is moved to the thread that runs it, and its handles are read from others.
+const _: () = {
+    const fn send<T: Send>() {}
+    const fn send_sync<T: Send + Sync>() {}
+    send::<ScanPlugins>();
+    send::<ScannedPlugins>();
+    send_sync::<ScanCanceller>();
+    send_sync::<ScanProgressReader>();
+};
 
 impl ScannedPlugins {
     /// What the run did with each file, in the order they were probed.
