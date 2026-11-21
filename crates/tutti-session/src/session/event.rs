@@ -5,9 +5,8 @@ use tutti_engine::StreamFault;
 use tutti_graph::{BusSource, CommitError, NodeKey, Wired};
 use tutti_units::SampleRate;
 
-use crate::graph::CrossfadeId;
 use crate::{
-    BusSink, CrossfadeRefused, Edge, EventEdge, Problem, ResourceFact, ResourceId, RootReader,
+    BusSink, Edge, EventEdge, Problem, ReplaceRefused, ResourceFact, ResourceId, RootReader,
 };
 
 /// Something an [`update`](crate::Session::update) found for the host.
@@ -18,25 +17,21 @@ pub enum SessionEvent {
     /// playing. Each update tries again; a refusal is reported once, until a
     /// commit is sent or it fails another way.
     CommitRefused(CommitError),
-    /// A crossfade that waited out a re-prepare
-    /// ([`Crossfade::Waiting`](crate::Crossfade::Waiting)) swapped its node
-    /// in; its key reaches the incoming node's values.
-    CrossfadeLanded {
+    /// A [`replace`](crate::Graph::replace) that waited out a re-prepare
+    /// swapped its node in: the key the call returned reaches the incoming
+    /// node's values. Sent only for a swap that was deferred; one made at the
+    /// call sends nothing.
+    Replaced {
         /// The node it swapped behind.
         node: NodeKey,
-        /// The id [`crate::Graph::crossfade`] returned.
-        id: CrossfadeId,
     },
-    /// A crossfade that waited out a re-prepare was refused when it was
-    /// retried (the graph is poisoned, or the node went): the incoming node
-    /// was dropped.
-    CrossfadeFailed {
+    /// A replacement that waited out a re-prepare was refused when it was
+    /// retried (the graph is poisoned): the incoming node was dropped.
+    ReplaceFailed {
         /// The node it was to swap behind.
         node: NodeKey,
-        /// The id [`crate::Graph::crossfade`] returned.
-        id: CrossfadeId,
         /// Why.
-        refused: CrossfadeRefused,
+        refused: ReplaceRefused,
     },
     /// A node re-inserted with a narrower shape (a plugin whose ports changed,
     /// a node re-declared at a new width) lost wiring to the ports it no
@@ -191,7 +186,7 @@ pub enum SessionEvent {
     },
     /// A reader of the root was opened again, because the root's width is no
     /// longer the one the reader has: a tap from
-    /// [`Taps::open_output`](crate::Taps::open_output), or the master meter
+    /// [`Taps::open_root`](crate::Taps::open_root), or the master meter
     /// once a host took it ([`crate::Session::take_master_meter`]). `id` names the new
     /// reader, which the session holds until
     /// [`crate::Session::take_reopened`] claims it (an event left unread loses

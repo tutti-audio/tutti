@@ -1,7 +1,7 @@
 //! A node's params are addressed as the node goes in, so a modulation lane's
 //! knob is the node's own cell.
 //!
-//! The insertion paths are `Graph::add` and `Graph::crossfade`; these pin
+//! The insertion paths are `Graph::add` and `Graph::replace`; these pin
 //! them: a lane finds a native param's knob
 //! through the node's `ParamSet`, which the insertion keeps by key
 //! (`SessionNode::params`, `set_node_params`). They stand at the insertion
@@ -17,12 +17,11 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use tutti_buffers::ChannelLayout;
-use tutti_graph::FadeLaw;
 use tutti_graph::NodeKey;
 use tutti_nodes::{DistortionConfig, DistortionNode, ShapeKind};
 use tutti_rt::ParamCell;
-use tutti_session::{OutPort, ParamRef, Root, RouteSpec, Session};
-use tutti_units::{Depth, Drive, Seconds, UnitParam};
+use tutti_session::{OutPort, ParamRef, Replacement, Root, RouteSpec, Session};
+use tutti_units::{Depth, Drive, UnitParam};
 
 use common::probe::ProbeUnit;
 
@@ -114,7 +113,7 @@ fn a_crossfade_hands_the_lane_the_incoming_nodes_cell() {
     let incoming = ProbeUnit::of(UnitParam::Drive, 3.0);
     let new = incoming.knob();
     s.graph()
-        .crossfade(node, incoming, Seconds::new(0.005), FadeLaw::EqualAmplitude)
+        .replace(node, Replacement::new(incoming))
         .expect("the crossfade starts");
     settle(&mut s);
     old.store(9.0, Ordering::Release);

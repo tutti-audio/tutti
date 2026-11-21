@@ -6,17 +6,17 @@
 //! weights, so the weighted fold `(0.0 + w * a) + b` is exact in `f32`.
 
 use std::sync::Arc;
-use tutti_graph::ForkByClone;
+use tutti_graph::{Fade, ForkByClone};
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::NodeKey;
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    DeclarationError, Edge, GainTarget, GainTargetError, InPort, OutPort, Root, Session,
-    SetRefusal, ValueErrorKind,
+    DeclarationError, Edge, GainTarget, GainTargetError, InPort, OutPort, Replacement, Root,
+    Session, SetRefusal, ValueErrorKind,
 };
-use tutti_units::Amplitude;
+use tutti_units::{Amplitude, Samples};
 
 const A: f32 = 0.25;
 const B: f32 = 0.5;
@@ -46,7 +46,7 @@ fn all_are(block: &[f32], want: f32) -> bool {
 }
 
 /// Constants `a` (`A`) and `b` (`B`) and a pass-through `sink` feeding output
-/// channel 0, committed once so `is_edited` is false. Nothing feeds the sink.
+/// channel 0, committed once so `has_uncommitted_edits` is false. Nothing feeds the sink.
 struct Rig {
     s: Session,
     a: NodeKey,
@@ -64,7 +64,7 @@ fn rig() -> Rig {
         .unwrap()
         .unfaded();
     let _ = s.update();
-    assert!(!s.graph_ref().is_edited());
+    assert!(!s.graph_ref().has_uncommitted_edits());
     Rig {
         s,
         a: a.erase(),
@@ -133,7 +133,10 @@ fn an_edge_gain_is_declared_written_read_and_cleared() {
         .unfaded()
         .gain(amp(0.5))
         .unwrap();
-    assert!(r.s.graph_ref().is_edited(), "a declared lane is structural");
+    assert!(
+        r.s.graph_ref().has_uncommitted_edits(),
+        "a declared lane is structural"
+    );
     let gain =
         r.s.graph_ref()
             .gain_target(edge.source(), edge.sink())
@@ -146,7 +149,10 @@ fn an_edge_gain_is_declared_written_read_and_cleared() {
     assert!(all_are(&settled(&mut r.s, 0), (0.0 + -2.0 * A) + B));
 
     assert!(edge.clear_gain(r.s.graph()));
-    assert!(r.s.graph_ref().is_edited(), "clearing is structural");
+    assert!(
+        r.s.graph_ref().has_uncommitted_edits(),
+        "clearing is structural"
+    );
     assert!(all_are(&settled(&mut r.s, 0), A + B), "the plain sum again");
     assert_eq!(
         r.s.set(gain.to(amp(1.0))).unwrap_err().kind,
@@ -154,7 +160,7 @@ fn an_edge_gain_is_declared_written_read_and_cleared() {
         "the cleared lane has no target"
     );
     assert!(!edge.clear_gain(r.s.graph()), "nothing left to clear");
-    assert!(!r.s.graph_ref().is_edited());
+    assert!(!r.s.graph_ref().has_uncommitted_edits());
 }
 
 /// An edge that is not there, or a plain one, has no gain target
@@ -195,7 +201,10 @@ fn a_gain_target_needs_a_lane_and_a_number() {
         all_are(&settled(&mut r.s, 0), 0.5 * A),
         "the render keeps it"
     );
-    assert!(!r.s.graph_ref().is_edited(), "a refusal edits nothing");
+    assert!(
+        !r.s.graph_ref().has_uncommitted_edits(),
+        "a refusal edits nothing"
+    );
 
     r.s.graph()
         .disconnect(node(r.a), InPort::new(r.sink, 0))
@@ -417,7 +426,10 @@ fn moving_a_weight_marks_no_recompile() {
             .gain_target(node(a), InPort::new(sink, 0))
             .expect("a lane");
     r.s.set(gain.to(amp(1.5))).unwrap();
-    assert!(!r.s.graph_ref().is_edited(), "a control, not a rewire");
+    assert!(
+        !r.s.graph_ref().has_uncommitted_edits(),
+        "a control, not a rewire"
+    );
     assert!(all_are(&settled(&mut r.s, 0), (0.0 + 1.5 * A) + B));
     assert!(Arc::ptr_eq(
         &plan,
@@ -432,9 +444,6 @@ fn moving_a_weight_marks_no_recompile() {
 /// that has no such input, and rewriting the sink's sources.
 #[test]
 fn a_gain_target_of_a_removed_lane_is_refused_at_the_call() {
-    use tutti_graph::FadeLaw;
-    use tutti_units::Seconds;
-
     let lane = |r: &mut Rig| {
         r.s.graph()
             .connect(node(r.a), InPort::new(r.sink, 0))
@@ -478,9 +487,7 @@ fn a_gain_target_of_a_removed_lane_is_refused_at_the_call() {
     r.s.graph()
         .replace(
             r.sink,
-            ForkByClone(Const::mono(A)),
-            Seconds::new(0.0),
-            FadeLaw::EqualAmplitude,
+            Replacement::new(ForkByClone(Const::mono(A))).fade(Fade::new(Samples::new(0))),
         )
         .unwrap();
     refused(&mut r, gain, "replace at an existing key");

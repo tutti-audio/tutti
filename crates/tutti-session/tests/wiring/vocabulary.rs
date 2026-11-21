@@ -69,7 +69,7 @@ fn a_bus_with_no_place_on_the_root_is_refused() {
         Some(ConnectError::RootFold { from, cause: FoldError::Unassigned { .. } })
             if from == mono.erase()
     ));
-    assert!(!s.graph_ref().is_edited(), "nothing was stored");
+    assert!(!s.graph_ref().has_uncommitted_edits(), "nothing was stored");
 }
 
 /// **A bus wider than the root is refused, never truncated**, and nothing is
@@ -88,7 +88,7 @@ fn a_bus_wider_than_the_root_is_refused() {
             root_width,
         })
     );
-    assert!(!s.graph_ref().is_edited(), "nothing was stored");
+    assert!(!s.graph_ref().has_uncommitted_edits(), "nothing was stored");
 }
 
 /// **A port that is not there is named and refused**: an output port past the
@@ -116,7 +116,7 @@ fn a_port_that_is_not_there_is_refused() {
         g.connect(Root::input(3), through.input(0)).err(),
         Some(ConnectError::NoSuchOutPort(Root::input(3)))
     );
-    assert!(!g.is_edited(), "nothing was stored");
+    assert!(!g.has_uncommitted_edits(), "nothing was stored");
 }
 
 /// **A connection's gain weights what the call added**: `0.5` of 0.5 is heard,
@@ -249,7 +249,10 @@ fn a_key_and_its_erasure_are_one_node() {
         .connect(OutPort::new(src.erase(), 0), Root::output(0))
         .unwrap()
         .unfaded();
-    assert!(!s.graph_ref().is_edited(), "the same edge, three spellings");
+    assert!(
+        !s.graph_ref().has_uncommitted_edits(),
+        "the same edge, three spellings"
+    );
     assert_eq!(
         s.graph_ref().sources(Root::output(0)).unwrap(),
         [src.out(0)]

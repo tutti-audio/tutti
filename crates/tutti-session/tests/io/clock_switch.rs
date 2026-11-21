@@ -140,7 +140,7 @@ fn a_device_session_switches_to_the_timer_and_its_graph_keeps_rendering() {
     let limit = Instant::now() + Duration::from_secs(10);
     let mut tap = loop {
         let _ = s.update();
-        if let Some(tap) = s.open_output_tap(Samples::new(4 * BLOCK)).unwrap().reader() {
+        if let Some(tap) = s.open_heard_tap(Samples::new(4 * BLOCK)).unwrap().reader() {
             break tap;
         }
         assert!(

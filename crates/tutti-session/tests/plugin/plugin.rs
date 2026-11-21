@@ -1312,14 +1312,14 @@ fn a_replacement_with_other_ports_is_refused_and_the_graph_stays_editable() {
     );
     // An edit made now commits.
     let extra = s.graph().add(ForkByClone(DropWitness(Arc::default())));
-    assert!(s.graph_ref().is_edited());
+    assert!(s.graph_ref().has_uncommitted_edits());
     // The commit alone, on the drive's clock: `update()` would run
     // `Phase::Plugins` on the real one, where a server launch (hundreds of ms on
     // macOS) outlasts the 1 ms reload backoff and hands out a reload task this test
     // would discard.
     s.run_phase(Phase::Commit, PhaseCx::at(drive.now), &mut Vec::new());
     assert!(
-        !s.graph_ref().is_edited(),
+        !s.graph_ref().has_uncommitted_edits(),
         "the commit was refused: the topology is invalid"
     );
     assert!(s.graph_ref().contains(extra));
@@ -1362,7 +1362,7 @@ fn a_replacement_with_other_ports_is_refused_and_the_graph_stays_editable() {
     );
     assert!(s.graph_ref().contains(node), "the node stays at its key");
     let _ = s.update();
-    assert!(!s.graph_ref().is_edited());
+    assert!(!s.graph_ref().has_uncommitted_edits());
 }
 
 /// Captures a snapshot of `node` at once, as a host's worker would (the

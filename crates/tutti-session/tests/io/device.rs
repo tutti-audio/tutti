@@ -28,7 +28,7 @@ fn spec_at(rate: f64) -> OutputSpec {
 }
 
 /// **The session publishes the meter and the taps its callback feeds**, not
-/// disconnected ones: a host opens a tap with `Graph::open_output_tap` and
+/// disconnected ones: a host opens a tap with `Graph::open_heard_tap` and
 /// sees the frames the callback renders, and reads the level they carry from
 /// `Session::take_master_meter`.
 #[test]
@@ -49,7 +49,7 @@ fn the_session_publishes_the_meter_and_taps_its_callback_feeds() {
     let mut tap = session
         .graph()
         .taps()
-        .open_output(Samples::new(1_024))
+        .open_root(Samples::new(1_024))
         .expect("the sources exist");
     let _ = session.update();
     let mut meter = session.take_master_meter().expect("declared at the build");
@@ -771,7 +771,7 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
     let across = s
-        .open_output_tap(Samples::new(1_024))
+        .open_heard_tap(Samples::new(1_024))
         .expect("opens")
         .reader()
         .expect("the audio thread is not behind");
@@ -798,7 +798,7 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
 
     drop(across);
     let after = s
-        .open_output_tap(Samples::new(1_024))
+        .open_heard_tap(Samples::new(1_024))
         .expect("reopens")
         .reader()
         .expect("the audio thread is not behind");

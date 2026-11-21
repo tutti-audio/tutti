@@ -50,7 +50,7 @@
 //! over its return queue, and a take's pump on the session's executor reports over a
 //! channel that [`Phase::Collect`] drains. A call on the [`Graph`] only stages
 //! an edit, in the graph value the control thread holds
-//! ([`Graph::is_edited`] says whether one waits); nothing reaches the audio
+//! ([`Graph::has_uncommitted_edits`] says whether one waits); nothing reaches the audio
 //! thread until an update's commit sends it.
 //!
 //! Like `tutti-graph`, every module is private: everything is
@@ -186,7 +186,7 @@ pub use device::{
 pub use editor::{Editor, EditorCallError, Opened};
 pub use error::{
     BackgroundWork, ConnectError, DeclarationError, Error, InletError, NoSuchNode, RemoveError,
-    Result, SessionOutputTapError, TempoError,
+    Result, SessionHeardTapError, TempoError,
 };
 #[cfg(feature = "midi")]
 pub use error::{MidiError, RouteDeclarer};
@@ -196,8 +196,8 @@ pub use graph::ModKeys;
 #[cfg(feature = "testing")]
 pub use graph::{AudioSide, Testing};
 pub use graph::{
-    Committed, Crossfade, CrossfadeId, CrossfadeRefused, Feeder, Graph, LIVE_MAX_BLOCK, Meters,
-    NotReopened, Reopened, ReplaceRefused, RootReader, Taps,
+    Committed, Feeder, Graph, LIVE_MAX_BLOCK, Meters, NotReopened, Reopened, ReplaceRefused,
+    Replacement, RootReader, Taps,
 };
 #[cfg(feature = "capture")]
 pub use input::{Input, InputConfig, InputOpener, OpenedInput};

@@ -290,7 +290,7 @@ mod vst3 {
         }
     }
 
-    /// **A node inserted with `Graph::insert_plugin`, no load behind it, loads
+    /// **A node inserted with `Graph::add_plugin`, no load behind it, loads
     /// a preset its own plugin listed.** The list is read from the node's
     /// plugin; a preset of another plugin instance is refused.
     #[test]
@@ -321,12 +321,8 @@ mod vst3 {
             .outputs_floor(ChannelLayout::STEREO)
             .build_detached(SampleRate::DEFAULT)
             .expect("a detached session builds");
-        let node = s
-            .graph()
-            .insert_plugin(Box::new(client(SampleRate::DEFAULT)));
-        let other = s
-            .graph()
-            .insert_plugin(Box::new(client(SampleRate::DEFAULT)));
+        let node = s.graph().add_plugin(Box::new(client(SampleRate::DEFAULT)));
+        let other = s.graph().add_plugin(Box::new(client(SampleRate::DEFAULT)));
 
         let listed = s.plugin_view(node).unwrap().presets(main);
         let preset = listed.iter().nth(1).expect("the plugin lists programs");

@@ -2,7 +2,7 @@
 //! callback size re-declares it (design 015 §4.3), over the reference CLAP
 //! plugin in a real `plugin-server`.
 //!
-//! `Session::crossfade_plugin` installs no meter on a crossfade's incoming
+//! `Graph::replace_plugin` installs no meter on a replacement's incoming
 //! client.
 //!
 //! **Build `plugin-server` first** (`cargo build -p tutti-plugin-server`):
@@ -23,8 +23,8 @@ use tutti_plugin::PluginClient;
 use tutti_plugin_db::Loadable;
 use tutti_plugin_types::PluginRef;
 use tutti_session::{
-    Bounce, BounceLatency, BounceTail, BufferMaster, Crossfade, ExportClock, OutPort, PHASES,
-    Phase, PhaseCx, Range, Root, Session, SessionEvent,
+    Bounce, BounceLatency, BounceTail, BufferMaster, ExportClock, OutPort, PHASES, Phase, PhaseCx,
+    Range, Replacement, Root, Session, SessionEvent,
 };
 use tutti_session::{PluginChange, PluginEvent};
 use tutti_units::{SampleRate, Samples};
@@ -96,7 +96,7 @@ fn a_plugins_latency_is_the_sessions_and_follows_the_plugin() {
             s.run_phase(phase, PhaseCx::at(now), &mut out);
             if phase == Phase::Plugins {
                 assert!(
-                    !s.graph_ref().is_edited(),
+                    !s.graph_ref().has_uncommitted_edits(),
                     "an unchanged plugin latency marked the graph edited"
                 );
             }
@@ -134,7 +134,7 @@ fn a_plugins_tail_ceiling_is_the_plugins_claim() {
         s.run_phase(phase, PhaseCx::at(now), &mut out);
         if phase == Phase::Plugins {
             assert!(
-                !s.graph_ref().is_edited(),
+                !s.graph_ref().has_uncommitted_edits(),
                 "an unchanged plugin tail marked the graph edited"
             );
         }
@@ -216,7 +216,7 @@ fn a_latency_the_plugin_reports_reaches_the_graph() {
 
 /// **A plugin crossfaded in is the one the latency phase reads.** The outgoing
 /// plugin announces a longer latency than the incoming one's, so the figure says
-/// which plugin the session's record follows: after `crossfade_plugin` the graph
+/// which plugin the session's record follows: after `replace_plugin` the graph
 /// plans against the incoming plugin's figure plus the chunk, and a later change
 /// of the incoming plugin's latency is the one the phase hands the graph (its
 /// record moved to the incoming plugin). The node keeps its key.
@@ -277,14 +277,14 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
     let incoming_handle = incoming.handle();
     let landed = s
         .graph()
-        .crossfade_plugin(
-            node,
-            Box::new(incoming),
-            tutti_units::Seconds::new(0.005),
-            tutti_graph::FadeLaw::EqualAmplitude,
-        )
-        .expect("the crossfade is accepted");
-    assert!(matches!(landed, Crossfade::Landed(_)), "nothing waits");
+        .replace_plugin(node, Replacement::new(Box::new(incoming)))
+        .expect("the replace is accepted");
+    assert_eq!(landed.erase(), node);
+    assert_eq!(
+        s.graph_ref().testing().waiting_replacements(),
+        0,
+        "nothing waits"
+    );
     let _ = s.update();
     let _ = s.update();
 
@@ -337,7 +337,7 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
         RATE,
     )
     .expect("the reference plugin loads");
-    let node = s.graph().insert_plugin(Box::new(client)).erase();
+    let node = s.graph().add_plugin(Box::new(client)).erase();
     s.graph()
         .set_sources(Root::output(0), [OutPort::new(node, 0)])
         .unwrap();
@@ -392,7 +392,7 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
         RATE,
     )
     .expect("the reference plugin loads");
-    let node = s.graph().insert_plugin(Box::new(client)).erase();
+    let node = s.graph().add_plugin(Box::new(client)).erase();
     s.graph()
         .set_sources(Root::output(0), [OutPort::new(node, 0)])
         .unwrap();
