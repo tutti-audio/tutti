@@ -421,6 +421,12 @@ impl<'e> BlockClock<'e> {
         }
     }
 
+    /// The loop the block's transport plays over, if any.
+    #[inline]
+    pub(crate) fn looping(&self) -> Option<LoopRange> {
+        self.env.transport.looping
+    }
+
     /// The block's runs, in order, covering it.
     pub(crate) fn runs(&self) -> Runs<'e> {
         let t = self.env.transport;

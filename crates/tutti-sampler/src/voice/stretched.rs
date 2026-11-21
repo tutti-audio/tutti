@@ -14,8 +14,8 @@
 //! source from there. A change of the stretch or the pitch moves nothing: the
 //! cursor and the vocoder's phase history carry on. The voice unseats, and
 //! the vocoder resets, where the transport leaves the voice's window or
-//! stands, and at a jump (a seek or a loop wrap); the next sounding frame
-//! seats again.
+//! stands, and at a jump (a seek, or a loop wrap the voice was not primed for); the
+//! next sounding frame seats again.
 //!
 //! A memory voice's seat is primed and read ahead: the vocoder runs its [`latency`]
 //! and a window more of output frames (`prime`) from source starting a window
@@ -53,6 +53,20 @@
 //! stands seats there and primes at the same rate, so play from a located position
 //! sounds at once once the transport has stood for `prime / 2` frames; a locate while
 //! stopped seats again.
+//!
+//! # Loop wraps
+//!
+//! A transport that loops jumps back to the loop's start, and a voice whose window covers
+//! that start would be silent for `prime` frames after every wrap. So the voice's second
+//! vocoder (`Vocoders::spare`) primes for the wrap ahead of it: when the loop's end is
+//! `prime / PRIME_SPEED` frames and a block away it seats at the source's position at the
+//! loop's start, and primes like a clip placed ahead (`preroll`). At the wrap the two
+//! swap: the spare, primed to sound the loop's start on the wrap's frame, is the voice's,
+//! and the vocoder it replaces is reset to prime for the next wrap. The spare is built
+//! with the voice, control-side, whether or not a loop comes (a voice cannot see the
+//! transport's loop before the audio thread does), so a loop set while the voice plays
+//! allocates nothing, and is primed for from the first wrap that is far enough off. A
+//! wrap that comes sooner than that after the loop is set flushes as a seek does.
 //!
 //! The cursor is an origin and the frames taken since: a position is the origin
 //! plus the step times all of them, one product, so the frames a source is read at
@@ -98,14 +112,28 @@ const WAVE_START: SamplePosition = SamplePosition::new(0.0);
 /// never reads it.
 const NOMINAL_RATE: SampleRate = SampleRate::SR_48K;
 
-/// A phase vocoder over `width` channels on the voice's fixed geometry (a
-/// 2048-frame Hann window, hop 512). Allocates: control thread only.
-pub(crate) fn vocoder<F: SamplerFloat>(width: ChannelLayout) -> Box<PhaseVocoder<F>> {
+/// A stretching voice's vocoders: the one it sounds through, and a second that primes
+/// for a loop wrap ahead of it and takes over at the wrap (see the module docs).
+///
+/// Both are built together, control-side, and move together: a voice cannot tell
+/// the transport's loop before the audio thread reads it, so it carries the spare
+/// whether or not a loop comes.
+pub(crate) struct Vocoders<F: SamplerFloat> {
+    pub(crate) live: PhaseVocoder<F>,
+    pub(crate) spare: PhaseVocoder<F>,
+}
+
+/// A voice's vocoders over `width` channels on its fixed geometry (a 2048-frame Hann
+/// window, hop 512). Allocates: control thread only.
+pub(crate) fn vocoder<F: SamplerFloat>(width: ChannelLayout) -> Box<Vocoders<F>> {
     let window = WindowLength::new(WINDOW).expect("BUG: a nonzero window");
     let hop = HopSize::new(HOP).expect("BUG: a nonzero hop");
     let geometry = ColaGeometry::try_from(StftGeometry::new(NOMINAL_RATE, window, hop))
         .expect("BUG: a hop of a quarter window is COLA-valid");
-    Box::new(PhaseVocoder::new(width, geometry))
+    Box::new(Vocoders {
+        live: PhaseVocoder::new(width, geometry),
+        spare: PhaseVocoder::new(width, geometry),
+    })
 }
 
 /// The output frames a seat primes: the vocoder's latency and a window.

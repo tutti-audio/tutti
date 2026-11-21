@@ -69,8 +69,8 @@ use tutti_units::{Amplitude, Latency, PlaybackRate, Tail, UnitParam};
 /// transport from its block's `Env`. A disk voice's node
 /// forks only for an offline render.
 ///
-/// A stretching voice's seat (a seek, a loop wrap, play from a position the transport
-/// has not stood at for 2 049 frames) primes the vocoder over blocks and is silent for
+/// A stretching voice's seat (a seek, play from a position the transport has not stood
+/// at for 2 049 frames; a loop wrap is primed for, by a second vocoder the voice carries) primes the vocoder over blocks and is silent for
 /// 4 097 frames (85 ms at 48 kHz) before it sounds on the timeline; a clip placed ahead
 /// of the playhead, or at a position the transport has stood at, primes before it
 /// plays and is not silent.
@@ -372,7 +372,7 @@ impl<F: SamplerFloat> VoiceNode<F> {
     /// for the node's life.
     fn latency(&self) -> Latency {
         match (&self.slot.voice.source, &self.slot.stretch) {
-            (VoiceSource::Disk(_), Some(vocoder)) => Latency::new(vocoder.latency()),
+            (VoiceSource::Disk(_), Some(vocoders)) => Latency::new(vocoders.live.latency()),
             _ => Latency::ZERO,
         }
     }
@@ -751,7 +751,9 @@ mod tests {
             stretch: tutti_units::StretchFactor::new(1.5),
             ..Playback::default()
         });
-        let want = stretched::vocoder::<f32>(ChannelLayout::MONO).latency();
+        let want = stretched::vocoder::<f32>(ChannelLayout::MONO)
+            .live
+            .latency();
         assert!(want.get() > 0);
         assert_eq!(stretched.samples(), want);
         assert_eq!(

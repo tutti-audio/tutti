@@ -50,11 +50,12 @@
 //! standalone `VoiceNode` declares it for delay compensation, and a `VoicePool`,
 //! which takes voices while it plays, cannot. The same holds for any voice started
 //! with no timeline position to read ahead of. A stretching voice's seat primes the
-//! vocoder over several blocks, silent meanwhile: a seek, a loop wrap, and play from
-//! a position the transport has not stood at for 2 049 frames are silent for 4 097
+//! vocoder over several blocks, silent meanwhile: a seek, and play from a position the
+//! transport has not stood at for 2 049 frames, are silent for 4 097
 //! frames (85 ms at 48 kHz) and then sound on the timeline; a clip placed ahead of the
 //! playhead, or at a position the transport has stood at, primes before it plays and
-//! is on time. Nothing ties the stretch to the tempo.
+//! is on time. A loop wrap does not go silent: a second vocoder primes for it ahead
+//! (unless the loop was set less than 2 049 frames before its first wrap). Nothing ties the stretch to the tempo.
 //! All three are `tutti-units` types.
 //!
 //! ## Quick start
