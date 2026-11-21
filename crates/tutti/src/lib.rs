@@ -308,6 +308,10 @@ pub mod nodes {
     pub use tutti_dsp::{
         GrainScheduler, GrainSettings, Granular, MaxGrains, MaxGrainsError, Onset,
     };
+    pub use tutti_dsp::{
+        KarplusStrong, KarplusStrongBank, KarplusStrongControls, WaveguideBank, WaveguideControls,
+        WaveguidePositions, WaveguideString,
+    };
     pub use tutti_dsp::{Lfo, LfoWave};
     pub use tutti_dsp::{
         Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,
@@ -400,6 +404,10 @@ pub mod nodes {
         EarlyReflectionsKernel, EarlyReflectionsNode, NoControls,
     };
     pub use tutti_nodes::{GranularConfig, GranularError, GranularNode};
+    pub use tutti_nodes::{
+        KarplusStrongConfig, KarplusStrongKernel, KarplusStrongNode, KarplusStrongSet,
+        WaveguideStringConfig, WaveguideStringKernel, WaveguideStringNode, WaveguideStringSet,
+    };
     pub use tutti_nodes::{ModalBankConfig, ModalBankKernel, ModalBankNode, ModalBankSet};
 }
 
