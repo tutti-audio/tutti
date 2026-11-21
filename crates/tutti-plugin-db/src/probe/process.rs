@@ -6,6 +6,7 @@
 //! [`Sleep`](tutti_platform::Sleep) the executor fires. The scan reads the [`Deadline`]
 //! against [`Instant::now`] to decide a timeout, so the sleep only wakes the race.
 
+use crate::scanner::ProbeListing;
 use futures_channel::oneshot;
 use futures_lite::future::{or, pending, yield_now};
 use std::ffi::OsStr;
@@ -13,12 +14,11 @@ use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::warn;
 use tutti_platform::{Instant, WeakExecutor, monotonic_ns, sleep_until_ns};
 use tutti_plugin_ipc_ffi::{ExitWait, HOST_PID_ENV, Reaped};
 use tutti_plugin_types::{
-    Deadline, Described, Helper, Locator, PluginFormat, ProbeDeath, ProbeError, ProbeOutcome,
-    ProbeRefusal, ResultError, read_result,
+    Deadline, Helper, Locator, PluginFormat, ProbeDeath, ProbeError, ProbeOutcome, ProbeRefusal,
+    ResultError, read_result,
 };
 
 /// How long the exit thread waits on the OS between looks at its receiver: a
@@ -38,7 +38,7 @@ pub(super) async fn run(
     format: PluginFormat,
     timeout: Duration,
     flags: &[&OsStr],
-) -> Result<Vec<Described>, ProbeError> {
+) -> Result<ProbeListing, ProbeError> {
     let probe = locator
         .resolve(Helper::Probe)
         .ok_or(ProbeError::ProbeNotFound)?;
@@ -86,17 +86,10 @@ pub(super) async fn run(
         ProbeOutcome::Described {
             plugins,
             unmeasured,
-        } => {
-            for lost in &unmeasured {
-                warn!(
-                    "{}: {} has no measurement: {}",
-                    plugin_path.display(),
-                    lost.plugin,
-                    lost.failure
-                );
-            }
-            Ok(plugins)
-        }
+        } => Ok(ProbeListing {
+            plugins,
+            unmeasured,
+        }),
         ProbeOutcome::Failed(refusal) => Err(refusal.into()),
         // `ProbeOutcome` is `#[non_exhaustive]`: an outcome from a newer probe.
         _ => Err(ResultError::UnknownOutcome.into()),

@@ -9,7 +9,7 @@
 use super::catalog::CatalogId;
 use super::facts::{self, FileFacts, ScanDecision};
 use super::fs::{canonical_path, discover};
-use super::pedal::Pedal;
+use super::pedal::{Pedal, PedalError, Recovered};
 use super::table::{FileRow, PluginDb, RowChange};
 use crossbeam_queue::ArrayQueue;
 use std::future::{Future, IntoFuture};
@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
 use tutti_platform::WeakExecutor;
 use tutti_plugin_types::{
-    Described, PluginClass, PluginDescriptor, PluginFormat, ProbeError, ProbeRefusal,
+    Described, MeasureFailure, PluginFormat, PluginId, ProbeError, ProbeRefusal, Unmeasured,
 };
 use tutti_rt::{LockExt, Tally, TallyWriter};
 
@@ -68,7 +68,27 @@ pub enum ScanProgress {
 }
 
 /// What a probe's future resolves to: the plugins a file holds, or why it gave none.
-type ProbeResult = Result<Vec<Described>, ProbeFailure>;
+type ProbeResult = Result<ProbeListing, ProbeFailure>;
+
+/// What a probe read from one file: its plugins, and the ones it could not
+/// measure.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ProbeListing {
+    /// The plugins the file holds.
+    pub plugins: Vec<Described>,
+    /// The plugins a measuring probe described and could not measure; empty for
+    /// a probe that does not measure.
+    pub unmeasured: Vec<Unmeasured>,
+}
+
+impl From<Vec<Described>> for ProbeListing {
+    fn from(plugins: Vec<Described>) -> Self {
+        Self {
+            plugins,
+            unmeasured: Vec::new(),
+        }
+    }
+}
 
 /// A probe in flight. Dropping it ends the probe (a real one kills its child).
 pub(crate) type ProbeFuture = Pin<Box<dyn Future<Output = ProbeResult> + Send>>;
@@ -126,9 +146,10 @@ impl Scanner {
     }
 
     /// Blacklists the plugin a previous, crashed scan was probing, in `db`, and
-    /// hands `db` to `save` before the sentinel is removed. Returns the file
-    /// that were blacklisted. If `save` fails the sentinel stays, and a scan
-    /// that follows keeps its entries beside its own.
+    /// hands `db` to `save` before the sentinel is removed. Returns the files
+    /// that were blacklisted, and what kept the recovery from finishing: if
+    /// `save` fails the sentinel stays, and a scan that follows keeps its
+    /// entries beside its own.
     ///
     /// Safe to call multiple times; a no-op when no sentinel is present. Every
     /// scan calls it first.
@@ -141,7 +162,7 @@ impl Scanner {
         &self,
         db: &mut PluginDb,
         save: impl FnOnce(&PluginDb) -> std::io::Result<()>,
-    ) -> Result<Vec<PathBuf>, ScanBusy> {
+    ) -> Result<Recovered, ScanBusy> {
         let _claim = Claim::take(&self.pedal)?;
         Ok(self.pedal.recover(db, save))
     }
@@ -152,11 +173,12 @@ impl Scanner {
     ///
     /// # Errors
     ///
-    /// [`ScanBusy`] while a scan is using the pedal: its entries are live
-    /// probes, which this must not touch.
-    pub fn forget(&self, file: &Path) -> Result<(), ScanBusy> {
+    /// [`ForgetError::Busy`] while a scan is using the pedal: its entries are
+    /// live probes, which this must not touch. [`ForgetError::Pedal`] when the
+    /// sentinel cannot be read or rewritten; its entries are then as they were.
+    pub fn forget(&self, file: &Path) -> Result<(), ForgetError> {
         let _claim = Claim::take(&self.pedal)?;
-        self.pedal.forget(file);
+        self.pedal.forget(file).map_err(PedalError::from)?;
         Ok(())
     }
 
@@ -235,9 +257,10 @@ impl Scanner {
         executor: WeakExecutor,
     ) -> Result<Job, ScanBusy> {
         let claim = Claim::take(&self.pedal)?;
-        self.pedal.recover(db, save);
+        let recovered = self.pedal.recover(db, save);
         Ok(Job {
             _claim: claim,
+            recovered,
             snapshot: db.clone(),
             targets,
             pedal: self.pedal.clone(),
@@ -280,6 +303,18 @@ impl Drop for Claim {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 #[error("a plugin scan is already running on this pedal")]
 pub struct ScanBusy;
+
+/// Why the crash sentinel of a pedal could not be forgotten for a file
+/// ([`Scanner::forget`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum ForgetError {
+    /// A scan or a crash recovery is already using the pedal.
+    #[error(transparent)]
+    Busy(#[from] ScanBusy),
+    /// The sentinel could not be read or rewritten.
+    #[error(transparent)]
+    Pedal(#[from] PedalError),
+}
 
 /// Why a task over named files was refused ([`Scanner::scan_files`], and the
 /// catalog's `register` and `measure` over it).
@@ -486,6 +521,8 @@ enum Targets {
 /// One scan's inputs.
 struct Job {
     _claim: Claim,
+    /// What the crash recovery that began the task did.
+    recovered: Recovered,
     snapshot: PluginDb,
     targets: Targets,
     pedal: Pedal,
@@ -524,7 +561,10 @@ impl Job {
 
         let total = plugin_paths.len();
 
-        let mut result = ScanReport::default();
+        let mut result = ScanReport {
+            recovered: self.recovered.clone(),
+            ..ScanReport::default()
+        };
         let mut changes = Vec::new();
         for (i, (path, format)) in plugin_paths.iter().enumerate() {
             emit(ScanProgress::Probing {
@@ -545,17 +585,24 @@ impl Job {
             } else {
                 facts::classify(self.snapshot.row(&key), &facts)
             };
-            let (outcome, change) = match decision {
+            let (outcome, change, unmeasured) = match decision {
                 ScanDecision::Blacklisted => {
                     debug!("skipping blacklisted plugin: {:?}", path);
-                    (ScanOutcome::Blacklisted, None)
+                    (ScanOutcome::Blacklisted, None, Vec::new())
                 }
                 ScanDecision::UpToDate => {
                     debug!("skipping up-to-date plugin: {:?}", path);
-                    (ScanOutcome::UpToDate, None)
+                    (ScanOutcome::UpToDate, None, Vec::new())
                 }
                 ScanDecision::Probe => self.probe_one(path, &key, *format, &facts).await?,
             };
+            result
+                .unmeasured
+                .extend(unmeasured.into_iter().map(|lost| UnmeasuredPlugin {
+                    path: key.clone(),
+                    plugin: lost.plugin,
+                    failure: lost.failure,
+                }));
             result.files.push(ScannedFile { path: key, outcome });
             changes.extend(change);
         }
@@ -586,7 +633,8 @@ impl Job {
         walking.fallible().await.ok_or(ScanError::ShutDown)
     }
 
-    /// Probes one file with pedal protection and returns the row to record.
+    /// Probes one file with pedal protection and returns the row to record, and
+    /// the plugins the probe could not measure.
     ///
     /// A probe that crashed or hung is recorded, not merely warned about. Without
     /// a row the file stays out of date and is re-probed at full cost (a 5 s hang,
@@ -596,6 +644,10 @@ impl Job {
     /// nothing about the plugin and records nothing
     /// ([`ProbeFailure::blacklistable`]). The pedal covers the other case, the
     /// scanning host itself dying, which out-of-process probing cannot prevent.
+    ///
+    /// A file whose pedal cannot be armed is not probed, and one whose pedal
+    /// cannot be disarmed afterwards records nothing: either way the file is
+    /// [`ScanOutcome::Unprotected`] and retried.
     ///
     /// The row carries the file's time, so reinstalling or updating the plugin
     /// re-admits it without the user knowing the blacklist existed.
@@ -610,18 +662,31 @@ impl Job {
         key: &Path,
         format: PluginFormat,
         facts: &FileFacts,
-    ) -> Result<(ScanOutcome, Option<RowChange>), ScanError> {
-        let armed = Armed::new(&self.pedal, path);
+    ) -> Result<Probed, ScanError> {
+        let armed = match Armed::new(&self.pedal, path) {
+            Ok(armed) => armed,
+            Err(e) => {
+                warn!("not probing {path:?}: the dead-man's pedal cannot be armed: {e}");
+                return Ok((ScanOutcome::Unprotected(e.kind()), None, Vec::new()));
+            }
+        };
         let probed = (self.probe)(&self.executor, path, format).await;
-        drop(armed);
+        let released = armed.release();
         // A probe the executor's end cut short says nothing about the plugin.
         if matches!(&probed, Err(failure) if failure.error == ProbeError::ShutDown) {
             return Err(ScanError::ShutDown);
         }
+        if let Err(e) = released {
+            warn!("the dead-man's pedal for {path:?} cannot be disarmed: {e}");
+            return Ok((ScanOutcome::Unprotected(e.kind()), None, Vec::new()));
+        }
         Ok(match probed {
-            Ok(plugins) => {
+            Ok(ProbeListing {
+                plugins,
+                unmeasured,
+            }) => {
                 match FileRow::probed(format, facts).plugins(plugins).build() {
-                    Ok(row) => (ScanOutcome::New, Some(RowChange::put(key, row))),
+                    Ok(row) => (ScanOutcome::New, Some(RowChange::put(key, row)), unmeasured),
                     // A probe that read the file as another format than it was asked
                     // for says nothing worth recording: the file is retried.
                     Err(mismatch) => {
@@ -630,6 +695,7 @@ impl Job {
                         (
                             ScanOutcome::Failed(ProbeFailure::from(ProbeError::Refused(refusal))),
                             None,
+                            Vec::new(),
                         )
                     }
                 }
@@ -640,6 +706,7 @@ impl Job {
                 (
                     ScanOutcome::NewlyBlacklisted(failure),
                     Some(RowChange::put(key, row)),
+                    Vec::new(),
                 )
             }
             // A refusal or the environment's failure (no `plugin-probe`, a stale
@@ -647,33 +714,48 @@ impl Job {
             // nothing and retry once it is fixed.
             Err(failure) => {
                 warn!("failed to probe plugin {:?}: {}", path, failure.reason());
-                (ScanOutcome::Failed(failure), None)
+                (ScanOutcome::Failed(failure), None, Vec::new())
             }
         })
     }
 }
 
-/// The pedal armed for the probe in flight: disarmed when the probe ends or the
-/// scan is dropped, never when a panic unwinds through it (the host going down is
-/// what the sentinel is left for).
+/// What `probe_one` settles for a file: its outcome, the row to record, and the
+/// plugins that went unmeasured.
+type Probed = (ScanOutcome, Option<RowChange>, Vec<Unmeasured>);
+
+/// The pedal armed for the probe in flight: released when the probe ends,
+/// disarmed when the scan is dropped, never when a panic unwinds through it (the
+/// host going down is what the sentinel is left for).
 struct Armed<'a> {
     pedal: &'a Pedal,
     plugin: &'a Path,
+    released: bool,
 }
 
 impl<'a> Armed<'a> {
-    fn new(pedal: &'a Pedal, plugin: &'a Path) -> Self {
-        if let Err(e) = pedal.arm(plugin) {
-            warn!("failed to arm dead-man's pedal: {e}");
-        }
-        Self { pedal, plugin }
+    fn new(pedal: &'a Pedal, plugin: &'a Path) -> std::io::Result<Self> {
+        pedal.arm(plugin)?;
+        Ok(Self {
+            pedal,
+            plugin,
+            released: false,
+        })
+    }
+
+    /// Disarms the pedal, telling the caller whether the entry is gone.
+    fn release(mut self) -> std::io::Result<()> {
+        self.released = true;
+        self.pedal.disarm(self.plugin)
     }
 }
 
 impl Drop for Armed<'_> {
     fn drop(&mut self) {
-        if !std::thread::panicking() {
-            self.pedal.disarm(self.plugin);
+        // A dropped scan has no caller to tell: the entry stays, and the next
+        // recovery reads it.
+        if !self.released && !std::thread::panicking() {
+            let _ = self.pedal.disarm(self.plugin);
         }
     }
 }
@@ -693,6 +775,11 @@ pub enum ScanOutcome {
     /// The probe failed in a way that says nothing about the plugin: nothing is
     /// recorded and the file is retried.
     Failed(ProbeFailure),
+    /// The crash sentinel could not be written before the probe (the file was not
+    /// probed) or cleared after it (its result is dropped), for the I/O reason
+    /// given. Nothing is recorded and the file is retried. A sentinel that could
+    /// not be cleared still names the file, so the next recovery blacklists it.
+    Unprotected(std::io::ErrorKind),
 }
 
 /// One file of a scan and what became of it.
@@ -709,6 +796,19 @@ pub struct ScannedFile {
 #[derive(Debug, Clone, Default)]
 pub struct ScanReport {
     files: Vec<ScannedFile>,
+    unmeasured: Vec<UnmeasuredPlugin>,
+    recovered: Recovered,
+}
+
+/// A plugin a measuring probe described and could not measure.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnmeasuredPlugin {
+    /// The file that holds it, by the path its row is keyed by.
+    pub path: PathBuf,
+    /// The plugin's id.
+    pub plugin: PluginId,
+    /// Why it has no measurement.
+    pub failure: MeasureFailure,
 }
 
 /// A probe failure: the typed account of what went wrong.
@@ -756,8 +856,21 @@ impl From<ProbeError> for ProbeFailure {
 pub struct FileFailure {
     /// The file, by canonical path.
     pub path: PathBuf,
-    /// Why its probe failed.
-    pub failure: ProbeFailure,
+    /// Why it was not recorded.
+    pub cause: FileFailureCause,
+}
+
+/// Why a file of a scan was not recorded: its probe failed, or it went
+/// unprobed because the crash sentinel could not cover it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FileFailureCause {
+    /// The probe failed ([`ScanOutcome::Failed`] or
+    /// [`ScanOutcome::NewlyBlacklisted`]).
+    Probe(ProbeFailure),
+    /// The crash sentinel could not be armed or cleared
+    /// ([`ScanOutcome::Unprotected`]).
+    Unprotected(std::io::ErrorKind),
 }
 
 impl ScanReport {
@@ -785,7 +898,9 @@ impl ScanReport {
         self.count(|outcome| {
             matches!(
                 outcome,
-                ScanOutcome::Failed(_) | ScanOutcome::NewlyBlacklisted(_)
+                ScanOutcome::Failed(_)
+                    | ScanOutcome::NewlyBlacklisted(_)
+                    | ScanOutcome::Unprotected(_)
             )
         })
     }
@@ -809,42 +924,45 @@ impl ScanReport {
         self.count(|outcome| matches!(outcome, ScanOutcome::NewlyBlacklisted(_)))
     }
 
-    /// Every file whose probe failed, with the reason, in the order they were
-    /// probed. [`failed`](Self::failed) counts these.
+    /// Every file the scan did not record for a failure, with the reason, in
+    /// the order they were probed: exactly the files [`failed`](Self::failed)
+    /// counts.
     #[must_use]
     pub fn failures(&self) -> Vec<FileFailure> {
         self.files
             .iter()
-            .filter_map(|file| match &file.outcome {
-                ScanOutcome::Failed(failure) | ScanOutcome::NewlyBlacklisted(failure) => {
-                    Some(FileFailure {
-                        path: file.path.clone(),
-                        failure: failure.clone(),
-                    })
-                }
-                _ => None,
+            .filter_map(|file| {
+                let cause = match &file.outcome {
+                    ScanOutcome::Failed(failure) | ScanOutcome::NewlyBlacklisted(failure) => {
+                        FileFailureCause::Probe(failure.clone())
+                    }
+                    ScanOutcome::Unprotected(kind) => FileFailureCause::Unprotected(*kind),
+                    _ => return None,
+                };
+                Some(FileFailure {
+                    path: file.path.clone(),
+                    cause,
+                })
             })
             .collect()
     }
 
+    /// The plugins a measuring probe described and could not measure, in the
+    /// order they were probed. Their rows are recorded with no measurement.
+    #[must_use]
+    pub fn unmeasured(&self) -> &[UnmeasuredPlugin] {
+        &self.unmeasured
+    }
+
+    /// What the crash recovery that began the task did: the files it blacklisted
+    /// (a scan hides these, so tell the user), and what kept it from finishing.
+    #[must_use]
+    pub fn recovered(&self) -> &Recovered {
+        &self.recovered
+    }
+
     fn count(&self, of: impl Fn(&ScanOutcome) -> bool) -> usize {
         self.files.iter().filter(|file| of(&file.outcome)).count()
-    }
-}
-
-/// Minimal metadata from the file name, for a host whose probe is unavailable.
-/// The native classification is unknown without a probe, so the descriptor
-/// carries [`PluginClass::Unknown`], and with no id read from the file the
-/// listing names the file's first plugin.
-pub fn probe_plugin_fallback(path: &Path) -> Described {
-    let name = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown")
-        .to_string();
-    Described {
-        id: None,
-        descriptor: PluginDescriptor::new(name, PluginClass::Unknown),
     }
 }
 
@@ -863,12 +981,14 @@ mod tests {
             PluginDescriptor::new(name, PluginClass::Unknown),
         )
     }
+    use crate::pedal::RecoveryFailure;
     use crate::table::FileState;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, UNIX_EPOCH};
     use tempfile::TempDir;
     use tutti_plugin_types::{
-        LoadStage, PluginId, ProbeDeath, ProbeExit, ProbeRefusal, ResultError, Uid,
+        LoadStage, PluginClass, PluginDescriptor, PluginId, ProbeDeath, ProbeExit, ProbeRefusal,
+        ResultError, Uid,
     };
 
     fn create_fake_plugin(dir: &Path, name: &str) -> PathBuf {
@@ -892,12 +1012,25 @@ mod tests {
             .unwrap();
     }
 
+    /// A listing named after the file, with no id and no class.
+    fn named_plugin(path: &Path) -> Described {
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        Described {
+            id: None,
+            descriptor: PluginDescriptor::new(name, PluginClass::Unknown),
+        }
+    }
+
     fn filename_probe(
         _: &WeakExecutor,
         path: &Path,
         _: PluginFormat,
     ) -> std::future::Ready<ProbeResult> {
-        ready(Ok(vec![probe_plugin_fallback(path)]))
+        ready(Ok(vec![named_plugin(path)].into()))
     }
 
     /// The executor the scans of these tests run on, for the whole test process.
@@ -951,13 +1084,13 @@ mod tests {
         let seen = Arc::clone(&calls);
         let scanner = Scanner::new(dir.join(".scanning"), move |_, path, _| {
             seen.fetch_add(1, Ordering::SeqCst);
-            ready(answer(path))
+            ready(answer(path).map(Into::into))
         });
         (scanner, calls)
     }
 
     fn named(path: &Path) -> Result<Vec<Described>, ProbeFailure> {
-        Ok(vec![probe_plugin_fallback(path)])
+        Ok(vec![named_plugin(path)])
     }
 
     /// The failure of a probe whose process was killed by a segfault.
@@ -1216,8 +1349,9 @@ mod tests {
 
         let mut db = PluginDb::new();
         let scanner = Scanner::new(pedal_file.clone(), filename_probe);
-        scanner.recover_crash(&mut db, no_save).unwrap();
+        let recovered = scanner.recover_crash(&mut db, no_save).unwrap();
 
+        assert_eq!(recovered.files, [PathBuf::from("/plugins/crashy.vst3")]);
         assert!(db.is_blacklisted(Path::new("/plugins/crashy.vst3")));
         assert!(!pedal_file.exists());
     }
@@ -1414,7 +1548,7 @@ mod tests {
 
     #[test]
     fn probe_plugin_fallback_returns_metadata() {
-        let meta = probe_plugin_fallback(Path::new("/plugins/My Reverb.vst3"));
+        let meta = named_plugin(Path::new("/plugins/My Reverb.vst3"));
         assert_eq!(meta.descriptor.name, "My Reverb");
         assert_eq!(meta.id, None, "a file name holds no id");
     }
@@ -1463,7 +1597,7 @@ mod tests {
     // New tests.
 
     fn two_plugins(path: &Path) -> Result<Vec<Described>, ProbeFailure> {
-        let first = probe_plugin_fallback(path);
+        let first = named_plugin(path);
         let second = described("second");
         Ok(vec![first, second])
     }
@@ -1613,7 +1747,7 @@ mod tests {
             if path.ends_with("fatal.clap") {
                 panic!("the host went down inside the plugin");
             }
-            ready(Ok(vec![probe_plugin_fallback(path)]))
+            ready(Ok(vec![named_plugin(path)].into()))
         });
         let mut before = PluginDb::new();
         let scan = dying
@@ -1695,7 +1829,7 @@ mod tests {
                     parked.send(path).unwrap();
                     gate.await.unwrap();
                 }
-                Ok(vec![described("new")])
+                Ok(vec![described("new")].into())
             }
         });
         let scan = scanner
@@ -1790,7 +1924,7 @@ mod tests {
                     parked.send(path.clone()).unwrap();
                     gate.await.unwrap();
                 }
-                answer(&path)
+                answer(&path).map(Into::into)
             }
         });
         (scanner, parked_rx, release_tx, calls)
@@ -1915,7 +2049,7 @@ mod tests {
         let probes = AtomicUsize::new(0);
         let scanner = Scanner::new(dir.path().join(".scanning"), move |_, path, _| {
             ready(if probes.fetch_add(1, Ordering::SeqCst) == 0 {
-                named(path)
+                named(path).map(Into::into)
             } else {
                 Err(ProbeError::ShutDown.into())
             })
@@ -1977,7 +2111,7 @@ mod tests {
         let seen = Arc::clone(&probed);
         let scanner = Scanner::new(dir.path().join(".scanning"), move |_, path, _| {
             seen.lock().unwrap().push(path.to_path_buf());
-            ready(named(path))
+            ready(named(path).map(Into::into))
         });
         let mut db = PluginDb::new();
         let scan = scanner
@@ -2059,7 +2193,7 @@ mod tests {
             ready(match path.file_stem().and_then(|s| s.to_str()) {
                 Some("crash") => Err(crashed()),
                 Some("env") => Err(ProbeError::ProbeNotFound.into()),
-                _ => Ok(vec![probe_plugin_fallback(path)]),
+                _ => Ok(vec![named_plugin(path)].into()),
             })
         });
         let mut db = PluginDb::new();
@@ -2128,7 +2262,7 @@ mod tests {
         let recorded = Arc::clone(&seen);
         let scanner = Scanner::new(dir.path().join(".scanning"), move |_, path, format| {
             recorded.lock().unwrap().push(format);
-            ready(Ok(vec![probe_plugin_fallback(path)]))
+            ready(Ok(vec![named_plugin(path)].into()))
         });
         let mut db = PluginDb::new();
 
@@ -2250,7 +2384,7 @@ mod tests {
             .recover_crash(&mut next, no_save)
             .unwrap();
 
-        assert_eq!(crashed.len(), 2, "{crashed:?}");
+        assert_eq!(crashed.files.len(), 2, "{crashed:?}");
         assert!(next.is_blacklisted(Path::new("/plugins/crashy.vst3")));
         assert!(next.is_blacklisted(&fatal));
         assert!(!pedal_file.exists());
@@ -2338,5 +2472,137 @@ mod tests {
             release.send(()).unwrap();
             let _ = runner.join().expect("the scan does not panic");
         }
+    }
+
+    /// **A pedal that cannot be armed leaves its file unprobed**: a pedal under a
+    /// path that is a file cannot be created, and a scan that went on would run
+    /// the plugin's load with no sentinel to catch a host that dies. The file is
+    /// `Unprotected` with the I/O kind, its probe never runs, and nothing is
+    /// recorded.
+    #[test]
+    fn a_file_whose_pedal_cannot_be_armed_is_not_probed() {
+        let dir = TempDir::new().unwrap();
+        let plugins_dir = plugins_dir(&dir);
+        let plugin = create_fake_plugin(&plugins_dir, "A.clap");
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, b"a file, not a directory").unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let seen = Arc::clone(&calls);
+        let scanner = Scanner::new(blocker.join(".scanning"), move |_, path, _| {
+            seen.fetch_add(1, Ordering::SeqCst);
+            ready(named(path).map(Into::into))
+        });
+        let mut db = PluginDb::new();
+
+        let report = scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "the probe never ran");
+        assert!(db.is_empty());
+        let [file] = report.files() else {
+            panic!("one file: {:?}", report.files());
+        };
+        assert_eq!(file.path, plugin);
+        assert!(
+            matches!(file.outcome, ScanOutcome::Unprotected(_)),
+            "{:?}",
+            file.outcome
+        );
+        assert_eq!((report.added(), report.failed()), (0, 1));
+    }
+
+    /// **`failed()` counts exactly the files `failures()` lists**: one file whose
+    /// probe failed and one left unprotected are both listed, each with its cause.
+    #[test]
+    fn failed_counts_exactly_the_listed_failures() {
+        let report = ScanReport {
+            files: vec![
+                ScannedFile {
+                    path: PathBuf::from("/p/a.clap"),
+                    outcome: ScanOutcome::Failed(ProbeFailure::from(ProbeError::ProbeNotFound)),
+                },
+                ScannedFile {
+                    path: PathBuf::from("/p/b.clap"),
+                    outcome: ScanOutcome::Unprotected(std::io::ErrorKind::PermissionDenied),
+                },
+                ScannedFile {
+                    path: PathBuf::from("/p/c.clap"),
+                    outcome: ScanOutcome::New,
+                },
+            ],
+            ..ScanReport::default()
+        };
+
+        let failures = report.failures();
+        assert_eq!(report.failed(), failures.len());
+        assert_eq!(
+            failures.iter().map(|f| &f.cause).collect::<Vec<_>>(),
+            [
+                &FileFailureCause::Probe(ProbeFailure::from(ProbeError::ProbeNotFound)),
+                &FileFailureCause::Unprotected(std::io::ErrorKind::PermissionDenied),
+            ]
+        );
+    }
+
+    /// **A probe's unmeasured plugins reach the scan's report**, each with its
+    /// file and why, while the file's row is recorded.
+    #[test]
+    fn a_scan_reports_the_plugins_a_probe_could_not_measure() {
+        let dir = TempDir::new().unwrap();
+        let plugins_dir = plugins_dir(&dir);
+        let file = create_fake_plugin(&plugins_dir, "A.clap");
+        let lost = Unmeasured {
+            plugin: PluginId::Clap("b".into()),
+            failure: MeasureFailure::NoAudioOutput,
+        };
+        let listing = ProbeListing {
+            plugins: vec![described("a"), described("b")],
+            unmeasured: vec![lost.clone()],
+        };
+        let scanner = Scanner::new(dir.path().join(".scanning"), move |_, _, _| {
+            ready(Ok(listing.clone()))
+        });
+        let mut db = PluginDb::new();
+
+        let report = scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
+
+        assert_eq!(
+            report.unmeasured(),
+            [UnmeasuredPlugin {
+                path: file,
+                plugin: lost.plugin,
+                failure: lost.failure,
+            }]
+        );
+        assert_eq!(report.added(), 1);
+    }
+
+    /// **A scan reports the files its crash recovery blacklisted, and when the
+    /// recovered blacklist could not be saved**: the crashed file is hidden by the
+    /// scan's own start, and the report is where the app learns of it.
+    #[test]
+    fn a_scan_reports_what_its_recovery_blacklisted_and_failed_to_save() {
+        let dir = TempDir::new().unwrap();
+        let plugins_dir = plugins_dir(&dir);
+        let crashy = create_fake_plugin(&plugins_dir, "Crashy.clap");
+        std::fs::write(
+            dir.path().join(".scanning"),
+            crashy.as_os_str().as_encoded_bytes(),
+        )
+        .unwrap();
+        let scanner = scanner_for(dir.path());
+        let mut db = PluginDb::new();
+
+        let report = scan_dirs(&scanner, &mut db, [&plugins_dir], |_| {
+            Err(std::io::Error::from(std::io::ErrorKind::StorageFull))
+        })
+        .unwrap();
+
+        assert_eq!(report.recovered().files, std::slice::from_ref(&crashy));
+        assert_eq!(
+            report.recovered().failure,
+            Some(RecoveryFailure::Unsaved(std::io::ErrorKind::StorageFull))
+        );
+        assert_eq!(report.blacklisted(), 1, "the scan skips the crashed file");
+        assert!(db.is_blacklisted(&crashy));
     }
 }
