@@ -1037,7 +1037,8 @@ fn shutdown_ends_a_local_dedicated_future() {
 }
 
 /// **`is_driving` is true on a thread that drives an executor and false elsewhere**: a
-/// dedicated future reads `true`, the test's own thread `false`.
+/// dedicated future and a task on a `Threads` driver read `true`, the test's own thread
+/// `false`.
 #[test]
 fn is_driving_is_true_only_on_a_driving_thread() {
     assert!(!is_driving(), "the test's thread drives nothing");
@@ -1046,6 +1047,13 @@ fn is_driving_is_true_only_on_a_driving_thread() {
         .spawn_dedicated("drives", None, async { is_driving() })
         .unwrap();
     assert_eq!(joined_off_thread(task), Some(true));
+    let _threads = executor.spawn_threads(NonZeroUsize::MIN).unwrap();
+    let on_driver = executor.spawn(async { is_driving() });
+    assert_eq!(
+        joined_off_thread(on_driver),
+        Some(true),
+        "a `Threads` driver drives"
+    );
 }
 
 #[cfg(target_os = "linux")]
