@@ -10,14 +10,14 @@
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
 use tutti_graph::{
-    Bus, BusRole, BusSource, Buses, Cx, FadeLaw, ForkByClone, Io, Node, NodeKey, Prepare, Shape,
+    Bus, BusRole, BusSource, Buses, Cx, Fade, ForkByClone, Io, Node, NodeKey, Prepare, Shape,
     Status,
 };
 use tutti_nodes::testing::Const;
 use tutti_session::{
-    BusSink, Edge, EventEdge, Feeder, InPort, OutPort, Root, Session, SessionEvent,
+    BusSink, Edge, EventEdge, Feeder, InPort, OutPort, Replacement, Root, Session, SessionEvent,
 };
-use tutti_units::{Amplitude, Seconds};
+use tutti_units::{Amplitude, Samples};
 
 const BLOCK: usize = 64;
 /// The sources' levels, and the gain of the wire that survives.
@@ -142,9 +142,7 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
     s.graph()
         .replace(
             x,
-            ForkByClone(Pass::<1, 1>),
-            Seconds::new(0.0),
-            FadeLaw::EqualAmplitude,
+            Replacement::new(ForkByClone(Pass::<1, 1>)).fade(Fade::new(Samples::new(0))),
         )
         .expect("the node is there");
     let events = s.update();
@@ -213,9 +211,7 @@ fn a_wider_reinsert_reports_nothing() {
     s.graph()
         .replace(
             x,
-            ForkByClone(Pass::<1, 1>),
-            Seconds::new(0.0),
-            FadeLaw::EqualAmplitude,
+            Replacement::new(ForkByClone(Pass::<1, 1>)).fade(Fade::new(Samples::new(0))),
         )
         .expect("the node is there");
     let events = s.update();
@@ -224,9 +220,7 @@ fn a_wider_reinsert_reports_nothing() {
     s.graph()
         .replace(
             x,
-            ForkByClone(Pass::<2, 2>),
-            Seconds::new(0.0),
-            FadeLaw::EqualAmplitude,
+            Replacement::new(ForkByClone(Pass::<2, 2>)).fade(Fade::new(Samples::new(0))),
         )
         .expect("the node is there");
     let events = s.update();
@@ -256,9 +250,7 @@ fn a_feed_naming_a_lost_event_output_is_not_written_back() {
     s.graph()
         .replace(
             src,
-            ForkByClone(Ports::<0, 1>),
-            Seconds::new(0.0),
-            FadeLaw::EqualAmplitude,
+            Replacement::new(ForkByClone(Ports::<0, 1>)).fade(Fade::new(Samples::new(0))),
         )
         .expect("the node is there");
     let events = s.update();
@@ -327,9 +319,7 @@ fn a_narrower_reinsert_reports_the_bus_edges_it_dropped() {
     s.graph()
         .replace(
             y,
-            ForkByClone(Bused { aux: false }),
-            Seconds::new(0.0),
-            FadeLaw::EqualAmplitude,
+            Replacement::new(ForkByClone(Bused { aux: false })).fade(Fade::new(Samples::new(0))),
         )
         .expect("the node is there");
     let events = s.update();
@@ -371,9 +361,7 @@ fn a_narrower_reinsert_reports_the_root_feed_it_dropped() {
     s.graph()
         .replace(
             y,
-            ForkByClone(Bused { aux: false }),
-            Seconds::new(0.0),
-            FadeLaw::EqualAmplitude,
+            Replacement::new(ForkByClone(Bused { aux: false })).fade(Fade::new(Samples::new(0))),
         )
         .expect("the node is there");
     let events = s.update();
@@ -406,9 +394,7 @@ fn unwired_waits_for_the_commit_that_lands() {
     let g = s.graph();
     g.replace(
         x,
-        ForkByClone(Pass::<1, 1>),
-        Seconds::new(0.0),
-        FadeLaw::EqualAmplitude,
+        Replacement::new(ForkByClone(Pass::<1, 1>)).fade(Fade::new(Samples::new(0))),
     )
     .expect("the node is there");
     g.connect(u.out(0), v.input(0)).unwrap().unfaded();

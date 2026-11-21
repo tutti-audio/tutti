@@ -138,8 +138,8 @@ pub use tutti_session::Error;
 pub use tutti_curve::DECLICK;
 pub use tutti_graph::{
     EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapOptions, EventTapReader,
-    FadeLaw, InletNode, InletRing, Level, Losses, MeterReader, NodeMode, Stamp, TapAlign, TapEvent,
-    TapId, TapOptions, TapReader, TapWriter,
+    Fade, FadeLaw, InletNode, InletRing, Level, Losses, MeterReader, NodeMode, Stamp, TapAlign,
+    TapEvent, TapId, TapOptions, TapReader, TapWriter,
 };
 pub use tutti_rt::PushError;
 // The engine's health: a `Gauge<Load>` and a `Counter<BlockCounts>`.
@@ -523,14 +523,14 @@ pub mod session {
     ))]
     pub use tutti_session::LoadError;
     pub use tutti_session::{
-        BackgroundWork, BlockConfig, Bus, BusSink, Channel, Committed, Connection, Crossfade,
-        CrossfadeId, CrossfadeRefused, DeclarationError, Disconnection, Event, EventEdge,
-        EventTapPort, Fanin, Feeder, Graph, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink,
-        Meters, NodeSlots, NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError,
-        OutputTapOpen, PHASES, Peer, PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence,
-        Reclaimer, Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact,
-        ResourceId, RootDeclaration, RootReader, RootTopologyStatus, SessionNode,
-        SessionOutputTapError, SetSources, Taps, TempoError, Weighted, Wire, root_width,
+        BackgroundWork, BlockConfig, Bus, BusSink, Channel, Committed, Connection,
+        DeclarationError, Disconnection, Event, EventEdge, EventTapPort, Fanin, Feeder, Graph,
+        Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots, NotReopened,
+        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputTapOpen, PHASES, Peer,
+        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
+        RemoveError, Reopened, ReplaceRefused, Replacement, Resource, ResourceFact, ResourceId,
+        RootDeclaration, RootReader, RootTopologyStatus, SessionHeardTapError, SessionNode,
+        SetSources, Taps, TempoError, Weighted, Wire, root_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,

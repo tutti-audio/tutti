@@ -38,7 +38,7 @@ fn opening_a_tap_yields_a_reader_that_sees_the_rendered_frames() {
     let mut reader = s
         .graph()
         .taps()
-        .open_output(Samples::new(64))
+        .open_root(Samples::new(64))
         .expect("the sources exist");
     for _ in 0..3 {
         s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
@@ -63,7 +63,7 @@ fn closing_the_tap_stops_the_copy() {
     let mut reader = s
         .graph()
         .taps()
-        .open_output(Samples::new(64))
+        .open_root(Samples::new(64))
         .expect("the sources exist");
     let mut out = [0.0f32];
     s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
@@ -98,7 +98,7 @@ fn a_session_without_a_tap_renders_untouched() {
     let reader = s
         .graph()
         .taps()
-        .open_output(Samples::new(64))
+        .open_root(Samples::new(64))
         .expect("the sources exist");
     assert_eq!(
         reader.available(),

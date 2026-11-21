@@ -43,9 +43,10 @@ use super::opened::{Context, Install, PluginCause, PluginInfo, PluginPorts, Shar
 use super::opened::{plugin_failed, ports_of};
 use super::{AnyPlugin, HostPlugin, Open, Origin, PluginLoad};
 use crate::apply::SessionId;
+use crate::graph::SwapRefused;
 use crate::loaded::{Stamp, caught};
 use crate::peer::sealed;
-use crate::{CrossfadeRefused, GiveUp, Key, LoadError, NoSuchNode, Peer, Presence};
+use crate::{GiveUp, Key, LoadError, NoSuchNode, Peer, Presence};
 use crate::{OtherPeer, PeerState, ReplaceRefused, Resource, ResourceId, SavedPeer, Session};
 
 /// A plugin to open, built by [`Session::load_plugin`] and not yet run. Where it
@@ -512,7 +513,7 @@ pub enum SwapPluginError {
     Busy(PluginNode),
     /// The graph refused the swap; the incoming plugin is closed.
     #[error("the node could not swap to the plugin: {0}")]
-    Graph(Arc<CrossfadeRefused>),
+    Graph(Arc<ReplaceRefused>),
 }
 
 /// `f32` because a plugin format is `f32` at its FFI.
@@ -802,33 +803,30 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         node: NodeKey,
         plugin: HostPlugin,
         origin: Origin,
-    ) -> Result<tutti_plugin::catalog::PluginRebinder, CrossfadeRefused> {
-        let (fade, law) = (tutti_graph::DECLICK, tutti_graph::FadeLaw::default());
+    ) -> Result<tutti_plugin::catalog::PluginRebinder, ReplaceRefused> {
         let meter = self.transport.settings().project_meter().clone();
         let recovery = self.plugins.recovery.map(crate::Recovery::new);
         match plugin.into_client() {
             Ok(client) => {
                 client.controls().set_meter(meter);
-                let swapped = self
-                    .graph
-                    .replace_plugin_with_rebinder(node, client, fade, law);
+                let swapped = self.graph.replace_plugin_with_rebinder(node, client, None);
                 if swapped.is_ok()
                     && let Some(hosted) = self.graph.plugins.get_mut(&node)
                 {
                     hosted.reloadable = Some(super::Reloadable { origin, recovery });
                 }
                 swapped.map_err(|refused| match refused {
-                    ReplaceRefused::Failed(refused) => refused,
-                    ReplaceRefused::Busy(_) => unreachable!("the graph is not re-preparing"),
+                    SwapRefused::Failed(refused) => refused,
+                    SwapRefused::Busy(_) => unreachable!("the graph is not re-preparing"),
                 })
             }
             Err(plugin) => {
                 plugin.node_controls().set_meter(meter);
                 self.graph
-                    .replace_hosted_plugin(node, plugin, fade, law)
+                    .replace_hosted_plugin(node, plugin, None)
                     .map_err(|refused| match refused {
-                        ReplaceRefused::Failed(refused) => refused,
-                        ReplaceRefused::Busy(_) => unreachable!("the graph is not re-preparing"),
+                        SwapRefused::Failed(refused) => refused,
+                        SwapRefused::Busy(_) => unreachable!("the graph is not re-preparing"),
                     })
             }
         }

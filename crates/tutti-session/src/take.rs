@@ -938,7 +938,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         let ports: Vec<_> = (0..width).map(|channel| node.out(channel)).collect();
         // A second of frames: the pump moves what the tap holds each time it wakes.
         let capacity = rate.one_second();
-        let reader = self.graph.taps().open(
+        let reader = self.graph.taps().open_ports(
             &ports,
             TapOptions::new(capacity)
                 .align(TapAlign::Raw)

@@ -1,5 +1,5 @@
 //! The session's graph properties, with no host: the edit flag, the
-//! crossfade retry, the event feeds, compensation, and what a fork renders.
+//! replacement retry, the event feeds, compensation, and what a fork renders.
 //!
 //! Design 015 §9.4.
 
@@ -9,19 +9,18 @@ use tutti_buffers::MaxBlock;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::MAX_CHANNELS;
-use tutti_graph::FadeLaw;
 use tutti_graph::Params;
 use tutti_graph::{
-    Cx, ForkByClone, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status,
-    Unforkable,
+    Cx, Fade, ForkByClone, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape,
+    Status, Unforkable,
 };
 use tutti_nodes::testing::{Const, Osc, Through};
 use tutti_rt::Param;
 use tutti_session::{
-    Crossfade, CrossfadeRefused, DetachedSession, EventInPort, Feeder, InPort, OutPort,
-    RemoveError, Root, Session, SessionEvent, SessionNode, root_width,
+    DetachedSession, EventInPort, Feeder, InPort, OutPort, RemoveError, ReplaceRefused,
+    Replacement, Root, Session, SessionEvent, SessionNode, root_width,
 };
-use tutti_units::{Drive, Hz, Real, SampleRate, Samples, Seconds};
+use tutti_units::{Drive, Hz, Real, SampleRate, Samples};
 use tutti_units::{Latency, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -316,7 +315,7 @@ fn removing_a_stranger_changes_nothing() {
     let _ = s.update();
     let stranger = tutti_graph::NodeKey(u64::MAX);
     assert_eq!(s.remove(stranger), Err(RemoveError::NoSuchNode(stranger)));
-    assert!(!s.graph_ref().is_edited(), "nothing was edited");
+    assert!(!s.graph_ref().has_uncommitted_edits(), "nothing was edited");
 }
 
 /// `root_width` is `max(project, device)` clamped to
@@ -399,9 +398,12 @@ fn an_edit_between_updates_is_committed_by_the_next() {
         .set_sources(Root::output(0), [OutPort::new(b, 0)])
         .unwrap()
         .unfaded();
-    assert!(s.graph_ref().is_edited());
+    assert!(s.graph_ref().has_uncommitted_edits());
     let _ = s.update();
-    assert!(!s.graph_ref().is_edited(), "the update committed the edit");
+    assert!(
+        !s.graph_ref().has_uncommitted_edits(),
+        "the update committed the edit"
+    );
     assert_eq!(
         s.graph_ref().testing().commits_sent(),
         sent + 1,
@@ -439,36 +441,32 @@ fn an_update_with_no_edit_sends_no_plan() {
     assert!(Arc::ptr_eq(&plan, &after), "the same plan");
 }
 
-// ---- crossfades ---------------------------------------------------------------
+// ---- replacements ---------------------------------------------------------------
 
-/// **A crossfade on a node that is gone is refused with the node named**, not
+/// **A replace on a node that is gone is refused with the node named**, not
 /// with a message to parse: the caller matches `NoSuchNode(node)`.
 #[test]
-fn a_crossfade_on_a_removed_node_is_refused_naming_it() {
+fn a_replace_on_a_removed_node_is_refused_naming_it() {
     let mut s = detached(1);
     let knob = s.graph().add(Params(Knob::new()));
     s.graph().remove(knob).unwrap();
     let refused = s
         .graph()
-        .crossfade(
-            knob,
-            Params(Knob::at(3.0)),
-            Seconds::new(0.005),
-            FadeLaw::EqualAmplitude,
-        )
+        .replace(knob, Replacement::new(Params(Knob::at(3.0))))
         .expect_err("the node is gone");
-    assert_eq!(refused, CrossfadeRefused::NoSuchNode(knob.erase()));
+    assert_eq!(refused, ReplaceRefused::NoSuchNode(knob.erase()));
 }
 
-/// **A crossfade refused `Busy` during a re-prepare lands on a later
-/// update**, its params addressed under the key: the graph an engine
-/// runs (the audio side is taken) changing rate, and a crossfade before the
-/// executor has handed its units back.
+/// **A replace during a re-prepare lands on a later update**, its params
+/// addressed under the key: the graph an engine runs (the audio side is
+/// taken) changing rate, and a replace before the executor has handed its
+/// units back. The call returns the key; the update that lands it sends
+/// `Replaced`.
 ///
 /// `Editor::replace` refuses while re-preparing and consumes its unit, so
 /// without the wait the new unit would be lost.
 #[test]
-fn a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update() {
+fn a_replace_during_a_re_prepare_lands_on_a_later_update() {
     let mut s = detached(1);
     let mut side = s.graph().take_audio_side();
     let knob = s.graph().add(Params(Knob::new()));
@@ -484,20 +482,16 @@ fn a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update() {
     // The rate changes on the running graph: the first half is sent, and
     // the executor has not run it yet.
     s.graph().set_sample_rate(SampleRate::SR_44K1);
-    let fade = Seconds::new(0.005);
-    let waiting =
-        match s
-            .graph()
-            .crossfade(knob, Params(Knob::at(3.0)), fade, FadeLaw::EqualAmplitude)
-        {
-            Ok(Crossfade::Waiting(id)) => id,
-            other => panic!("the crossfade waits for the re-prepare: {other:?}"),
-        };
-    assert_eq!(s.graph_ref().testing().waiting_crossfades(), 1);
+    let replaced = s
+        .graph()
+        .replace(knob, Replacement::new(Params(Knob::at(3.0))))
+        .expect("the node is in the graph");
+    assert_eq!(replaced, knob, "the key names the incoming node at once");
+    assert_eq!(s.graph_ref().testing().waiting_replacements(), 1);
 
     // Update by update through the re-prepare: the executor checks its units
     // out (a silent block), the editor sends them back, the executor
-    // resumes. The crossfade waits until an update finds the graph resumed.
+    // resumes. The replacement waits until an update finds the graph resumed.
     assert!(s.update().is_empty());
     side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     assert!(s.update().is_empty());
@@ -510,12 +504,10 @@ fn a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update() {
 
     let events = s.update();
     match events.as_slice() {
-        [SessionEvent::CrossfadeLanded { node, id }] => {
-            assert_eq!((*node, *id), (knob.erase(), waiting));
-        }
+        [SessionEvent::Replaced { node }] => assert_eq!(*node, knob.erase()),
         other => panic!("landed once the graph resumed: {other:?}"),
     }
-    assert_eq!(s.graph_ref().testing().waiting_crossfades(), 0);
+    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
     for _ in 0..512 {
         side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     }
@@ -525,13 +517,13 @@ fn a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update() {
     assert_eq!(out[0], 9.0, "its params are addressed under the key");
 }
 
-/// **Removing a node purges the crossfades parked on it**: the graph
-/// re-prepares, a crossfade waits, the node is removed, and the later updates
-/// report no `CrossfadeFailed` for it (before, the retry failed `NoSuchNode`
+/// **Removing a node purges the replacements parked on it**: the graph
+/// re-prepares, a replacement waits, the node is removed, and the later updates
+/// report no `ReplaceFailed` for it (before, the retry failed `NoSuchNode`
 /// and dropped the incoming node then); the incoming node is dropped at the
 /// removal.
 #[test]
-fn removing_a_node_purges_the_crossfades_parked_on_it() {
+fn removing_a_node_purges_the_replacements_parked_on_it() {
     use std::sync::Arc;
 
     let mut s = detached(1);
@@ -540,17 +532,16 @@ fn removing_a_node_purges_the_crossfades_parked_on_it() {
     assert!(s.update().is_empty());
     s.graph().set_sample_rate(SampleRate::SR_44K1);
     let token = Arc::new(());
-    let waiting = s.graph().crossfade(
-        knob,
-        Params(Knob::at(3.0).holding(&token)),
-        Seconds::new(0.005),
-        FadeLaw::EqualAmplitude,
-    );
-    assert!(matches!(waiting, Ok(Crossfade::Waiting(_))), "{waiting:?}");
-    assert_eq!(s.graph_ref().testing().waiting_crossfades(), 1);
+    s.graph()
+        .replace(
+            knob,
+            Replacement::new(Params(Knob::at(3.0).holding(&token))),
+        )
+        .expect("the node is in the graph");
+    assert_eq!(s.graph_ref().testing().waiting_replacements(), 1);
 
     s.graph().remove(knob).unwrap();
-    assert_eq!(s.graph_ref().testing().waiting_crossfades(), 0, "purged");
+    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0, "purged");
     assert_eq!(Arc::strong_count(&token), 1, "the incoming node dropped");
 
     let mut out = [0.0f32];
@@ -559,17 +550,17 @@ fn removing_a_node_purges_the_crossfades_parked_on_it() {
         assert!(
             !events
                 .iter()
-                .any(|e| matches!(e, SessionEvent::CrossfadeFailed { .. })),
+                .any(|e| matches!(e, SessionEvent::ReplaceFailed { .. })),
             "{events:?}"
         );
         side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     }
 }
 
-/// **On a poisoned graph a crossfade is refused**: nothing is parked (no
+/// **On a poisoned graph a replace is refused**: nothing is parked (no
 /// update will ever take it).
 #[test]
-fn a_crossfade_on_a_poisoned_graph_is_refused() {
+fn a_replace_on_a_poisoned_graph_is_refused() {
     let mut s = detached(1);
     let knob = s.graph().add(Params(Knob::new()));
     s.graph().add(Unforkable(Grenade));
@@ -577,15 +568,12 @@ fn a_crossfade_on_a_poisoned_graph_is_refused() {
     // Both halves run here (the executor is local); the second panics in
     // the grenade's `prepare` and poisons the editor.
     s.graph().set_sample_rate(SampleRate::SR_96K);
-    let refused = s.graph().crossfade(
-        knob,
-        Params(Knob::at(3.0)),
-        Seconds::new(0.005),
-        FadeLaw::EqualAmplitude,
-    );
+    let refused = s
+        .graph()
+        .replace(knob, Replacement::new(Params(Knob::at(3.0))));
     assert!(refused.is_err(), "{refused:?}");
     assert_eq!(
-        s.graph_ref().testing().waiting_crossfades(),
+        s.graph_ref().testing().waiting_replacements(),
         0,
         "nothing waits"
     );
@@ -650,7 +638,7 @@ fn move_feeds_moves_every_feeders_sources() {
         v.sort();
         v
     };
-    assert_eq!(g.fed(old), both, "each feeder kept its own entry");
+    assert_eq!(g.feeds(old), both, "each feeder kept its own entry");
     let mut edges = g.sources(EventInPort::new(old, 0)).unwrap();
     edges.sort();
     assert_eq!(edges, both, "the union is the sink's event edges");
@@ -658,7 +646,7 @@ fn move_feeds_moves_every_feeders_sources() {
     g.move_feeds(old, new);
     assert_eq!(g.feed(new, Feeder::Sequencer), [clip.events_out()]);
     assert_eq!(g.feed(new, Feeder::Routes), [route.events_out()]);
-    assert!(g.fed(old).is_empty(), "the old sink is fed by nothing");
+    assert!(g.feeds(old).is_empty(), "the old sink is fed by nothing");
     let mut edges = g.sources(EventInPort::new(new, 0)).unwrap();
     edges.sort();
     assert_eq!(edges, both, "the new sink's edges are the union");
@@ -667,7 +655,7 @@ fn move_feeds_moves_every_feeders_sources() {
         "and the old's are gone"
     );
     assert_eq!(s.update().len(), 0);
-    assert!(!s.graph_ref().is_edited(), "it commits");
+    assert!(!s.graph_ref().has_uncommitted_edits(), "it commits");
 }
 
 // ---- rendering --------------------------------------------------------------------
@@ -901,8 +889,8 @@ fn replace_under_a_held_borrow(controls: &PublishedControls) {
 
 /// **The update sweeps each node's reclaimer while it is in the graph**:
 /// a value its cell retired while a block held it is freed by the next
-/// update, for a node `add`ed and for the node a crossfade put in its
-/// place; the reclaimer goes with the node (replaced by the crossfade's,
+/// update, for a node `add`ed and for the node a replace put in its
+/// place; the reclaimer goes with the node (replaced by the incoming one's,
 /// dropped by a raw replace and by the removal), so a node out of the graph
 /// is not swept. The outgoing node's controls outlive its reclaimer until
 /// the update that collects its retired unit.
@@ -928,14 +916,13 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
     assert_eq!(first.cell.retired_len(), 0, "the update freed it");
 
     let (incoming, second) = Published::new();
-    match s
-        .graph()
-        .crossfade(node, incoming, Seconds::new(0.0), FadeLaw::EqualAmplitude)
-        .expect("the node is in the graph")
-    {
-        Crossfade::Landed(_) => {}
-        Crossfade::Waiting(_) => panic!("nothing re-prepares"),
-    }
+    s.graph()
+        .replace(
+            node,
+            Replacement::new(incoming).fade(Fade::new(Samples::new(0))),
+        )
+        .expect("the node is in the graph");
+    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
     assert_eq!(
         Arc::strong_count(&first.token),
         2,
@@ -962,9 +949,7 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
         s.graph()
             .replace(
                 node,
-                ForkByClone(Const::mono(0.0)),
-                Seconds::new(0.0),
-                FadeLaw::EqualAmplitude
+                Replacement::new(ForkByClone(Const::mono(0.0))).fade(Fade::new(Samples::new(0)))
             )
             .is_ok()
     );

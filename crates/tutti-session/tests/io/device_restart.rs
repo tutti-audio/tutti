@@ -10,13 +10,13 @@
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
+use tutti_graph::ForkByClone;
 use tutti_graph::NodeKey;
-use tutti_graph::{FadeLaw, ForkByClone};
 use tutti_nodes::testing::{Osc, Through};
 use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
-use tutti_session::{Crossfade, Error, InPort, LiveSession, OutPort, Root, Session};
+use tutti_session::{Error, InPort, LiveSession, OutPort, Replacement, Root, Session};
 use tutti_timeline::MotionCommand;
-use tutti_units::{At, Db, Frame, Hz, SampleRate, Samples, Seconds};
+use tutti_units::{At, Db, Frame, Hz, SampleRate, Samples};
 
 const OLD: f64 = 44_100.0;
 const NEW: f64 = 48_000.0;
@@ -377,29 +377,28 @@ fn a_restart_the_hook_refuses_leaves_the_device_placement_as_it_was() {
 /// the new rate: 24 frames a cycle.
 ///
 /// The waiting case (a crossfade while a graph re-prepares) is pinned by
-/// `graph.rs`'s `a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update`.
+/// `graph.rs`'s `a_replace_during_a_re_prepare_lands_on_a_later_update`.
 #[test]
-fn a_crossfade_after_the_restart_lands_at_once() {
+fn a_replace_after_the_restart_lands_at_once() {
     let (mut s, _old, osc, _) = engine();
     let (driver, new) = ManualStreamDriver::new();
     s.restart_on(spec_at(NEW), driver, None, None)
         .expect("restarts");
     let landed = s
         .graph()
-        .crossfade(
+        .replace(
             osc,
-            ForkByClone(Osc::sine(Hz::new(2_000.0))),
-            Seconds::new(0.005),
-            FadeLaw::EqualAmplitude,
+            Replacement::new(ForkByClone(Osc::sine(Hz::new(2_000.0)))),
         )
-        .expect("the crossfade is accepted");
-    assert!(
-        matches!(landed, Crossfade::Landed(_)),
+        .expect("the replace is accepted");
+    assert_eq!(landed.erase(), osc);
+    assert_eq!(
+        s.graph_ref().testing().waiting_replacements(),
+        0,
         "nothing waits: the re-prepare is done"
     );
-    assert_eq!(s.graph_ref().testing().waiting_crossfades(), 0);
     let out = play(&mut s, &new, 480, 50);
-    assert_eq!(s.graph_ref().testing().waiting_crossfades(), 0);
+    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
     assert!(
         (period(&out[4_800..]) - 24.0).abs() < 0.01,
         "2 kHz at 48 kHz, measured {}",

@@ -7,15 +7,15 @@
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::{
-    Cx, FadeLaw, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status, Unforkable,
+    Cx, Fade, FadeLaw, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status, Unforkable,
 };
 use tutti_nodes::{
     CompressorConfig, CompressorControls, CompressorNode, KeySource, SvfFilterConfig,
     SvfFilterNode, SvfType,
 };
 use tutti_rt::Param;
-use tutti_session::{DetachedSession, Session, ValueErrorKind};
-use tutti_units::{Db, Hz, Q, SampleRate, Seconds, UnitAddr, UnitParam};
+use tutti_session::{DetachedSession, Replacement, Session, ValueErrorKind};
+use tutti_units::{Db, Hz, Q, SampleRate, Samples, Seconds, UnitAddr, UnitParam};
 
 fn detached() -> DetachedSession {
     Session::builder()
@@ -98,13 +98,12 @@ fn a_write_to_a_missing_node_or_param_is_no_such_target() {
     s.graph()
         .replace(
             bare,
-            Unforkable(SvfFilterNode::<f32>::from(
+            Replacement::new(Unforkable(SvfFilterNode::<f32>::from(
                 SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
                     .freq(Hz::new(1_000.0))
                     .q(Q::new(0.7)),
-            )),
-            Seconds::new(0.0),
-            FadeLaw::EqualPower,
+            )))
+            .fade(Fade::new(Samples::new(0)).law(FadeLaw::EqualPower)),
         )
         .unwrap_or_else(|_| panic!("a detached graph swaps at once"));
     let refused = s.set(bare.cutoff().to(Hz::new(5.0))).unwrap_err();

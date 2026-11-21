@@ -1,5 +1,5 @@
 //! [`Graph`]: a `tutti-graph` [`Editor`], the nodes inserted through it, the
-//! event feeds into them, the crossfades waiting on a re-prepare, and — until
+//! event feeds into them, the replacements waiting on a re-prepare, and — until
 //! an engine or a test takes it — the [`Executor`] it sends to.
 //!
 //! What each method does to the editor:
@@ -8,11 +8,11 @@
 //! |---|---|
 //! | `add` | `Editor::insert` of the node's own [`IntoNode`] at a [`NodeKey`] minted by `NodeKey::fresh`, its controls, params and reclaimer kept ([`SessionNode`]) |
 //! | `set_source`, `set_sources`, `add_source`, `remove_source`, the `output` forms, `widen_outputs` | written into `editor.spec_mut()` (a port holds a set of sources, which the graph sums) |
-//! | `replace`, `crossfade` | `Editor::replace_or_swap` with a [`Fade`]: a plain swap when there is nothing to fade from |
+//! | `replace` | `Editor::replace_or_swap` with the [`Replacement`]'s [`Fade`]: a plain swap when there is nothing to fade from; parked while the graph re-prepares |
 //! | `node_latency`, `node_tail`, `node_inputs`, `node_outputs` | the editor's [`Shapes`](tutti_graph::Shapes) |
 //! | `set_feed`, `move_feeds` | the union of every feeder's sources, written as a sink's event edges beside the host's own |
 //! | `refresh_node_latency` | `Editor::set_latency` |
-//! | `insert_plugin`, `replace_plugin` | the bound `PluginClient` itself, a node with its own fork source |
+//! | `add_plugin`, `replace_plugin` | the bound `PluginClient` itself, a node with its own fork source |
 //!
 //! The commit is the [`Session`](crate::Session)'s: it publishes the plan's
 //! compensation with it.
@@ -48,7 +48,6 @@ use crate::fork::PendingExport;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_graph::Compensation;
-use tutti_graph::FadeLaw;
 #[cfg(feature = "testing")]
 use tutti_graph::fade_gains;
 use tutti_graph::{BusRef, BusSource, Buses, EdgeFade, EdgeGain};
@@ -66,7 +65,7 @@ use tutti_graph::{
 use tutti_rt::Mint;
 #[cfg(feature = "plugin")]
 use tutti_units::Latency;
-use tutti_units::{Amplitude, Mix, SampleRate, Seconds, UnitAddr};
+use tutti_units::{Amplitude, Mix, SampleRate, UnitAddr};
 use tutti_units::{Samples, Tail};
 
 mod observe;
@@ -100,26 +99,65 @@ pub const LIVE_MAX_BLOCK: MaxBlock = MaxBlock::of(Samples::new(1024));
 #[cfg(feature = "plugin")]
 const PLUGIN_KIND: &str = "tutti-session:plugin";
 
-/// Why [`Graph::replace`] did not take a node — or, as
-/// `ReplaceRefused<Box<PluginClient>>`, `Graph::replace_plugin` (feature
-/// `plugin`) a plugin.
-pub enum ReplaceRefused<U> {
-    /// Not now: the graph is re-preparing (a sample-rate or block-size change
-    /// between its two commits). The node is handed back, untouched; retry
-    /// once the re-prepare has resumed — [`Graph::crossfade`] keeps it
-    /// pending and `update()` does.
-    Busy(U),
-    /// Never: the graph is poisoned (a re-prepare failed with its units out),
-    /// or the node is not in it. The incoming node was dropped.
-    Failed(CrossfadeRefused),
+/// A node to swap in at a key, and the fade it swaps in over:
+/// [`Graph::replace`]'s argument, and `Graph::replace_plugin`'s (feature
+/// `plugin`) with a `Box<PluginClient>`.
+///
+/// The fade is [`DECLICK`](tutti_graph::DECLICK) along the default
+/// [`FadeLaw`](tutti_graph::FadeLaw), at the graph's rate when the swap is made, unless
+/// [`fade`](Self::fade) sets one.
+#[derive(Clone, Debug)]
+pub struct Replacement<N> {
+    incoming: N,
+    fade: Option<Fade>,
 }
 
-impl<U> std::fmt::Debug for ReplaceRefused<U> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Busy(_) => f.write_str("Busy(..)"),
-            Self::Failed(refused) => f.debug_tuple("Failed").field(refused).finish(),
+impl<N> Replacement<N> {
+    /// `incoming` over the graph's declick fade.
+    #[must_use]
+    pub fn new(incoming: N) -> Self {
+        Self {
+            incoming,
+            fade: None,
         }
+    }
+
+    /// Swaps over `fade` instead of the declick: its length in frames and its
+    /// law. A zero length is a plain swap at the next block.
+    #[must_use]
+    pub fn fade(mut self, fade: Fade) -> Self {
+        self.fade = Some(fade);
+        self
+    }
+}
+
+/// Why [`Graph::replace`] took nothing. The incoming node was dropped.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ReplaceRefused {
+    /// The graph is poisoned (a re-prepare failed with its units out); the
+    /// cause is the editor's.
+    #[error("the graph is poisoned ({0}); build a new one")]
+    Poisoned(String),
+    /// The node is not in the graph.
+    #[error("{0:?} is not in the graph")]
+    NoSuchNode(NodeKey),
+    /// The editor refused the swap.
+    #[error("the graph refused the swap: {0}")]
+    Editor(tutti_graph::CommitError),
+}
+
+/// Why a swap made now took nothing: the graph is re-preparing and hands the
+/// incoming value back, or the call is refused for good.
+pub(crate) enum SwapRefused<U> {
+    /// A sample-rate or block-size change is between its two commits.
+    Busy(U),
+    Failed(ReplaceRefused),
+}
+
+impl<U> From<ReplaceRefused> for SwapRefused<U> {
+    fn from(refused: ReplaceRefused) -> Self {
+        Self::Failed(refused)
     }
 }
 
@@ -142,49 +180,6 @@ pub enum Feeder {
     /// The session's MIDI clock, which feeds every output port
     /// (`open_midi_output`, feature `midi-hardware`).
     Clock,
-}
-
-tutti_rt::id! {
-    /// A crossfade waiting for a re-prepare, named so its landing can be told
-    /// from another's ([`SessionEvent::CrossfadeLanded`](crate::SessionEvent)).
-    pub struct CrossfadeId;
-}
-
-/// What [`Graph::crossfade`] came to, when the graph did not refuse it.
-pub enum Crossfade<N> {
-    /// Swapped in: the incoming node's key, its params addressed.
-    Landed(Key<N>),
-    /// The graph is re-preparing: the node waits, and the update that finds
-    /// the graph resumed swaps it in and reports
-    /// [`SessionEvent::CrossfadeLanded`](crate::SessionEvent) with this id, or
-    /// `CrossfadeFailed`.
-    Waiting(CrossfadeId),
-}
-
-impl<N> std::fmt::Debug for Crossfade<N> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Landed(key) => f.debug_tuple("Landed").field(key).finish(),
-            Self::Waiting(id) => f.debug_tuple("Waiting").field(id).finish(),
-        }
-    }
-}
-
-/// Why a swap ([`Graph::replace`], [`Graph::crossfade`]) took nothing. The
-/// incoming node was dropped.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
-pub enum CrossfadeRefused {
-    /// The graph is poisoned (a re-prepare failed with its units out); the
-    /// cause is the editor's.
-    #[error("the graph is poisoned ({0}); build a new one")]
-    Poisoned(String),
-    /// The node is not in the graph.
-    #[error("{0:?} is not in the graph")]
-    NoSuchNode(NodeKey),
-    /// The editor refused the swap.
-    #[error("the graph refused the swap: {0}")]
-    Editor(tutti_graph::CommitError),
 }
 
 /// One node's handle. Its params by address are the value table's.
@@ -217,9 +212,8 @@ trait ErasedSwap<F: Float>: Send {
         self: Box<Self>,
         graph: &mut Graph<F>,
         node: NodeKey,
-        fade: Seconds,
-        law: FadeLaw,
-    ) -> Result<(), ReplaceRefused<Box<dyn ErasedSwap<F>>>>;
+        fade: Option<Fade>,
+    ) -> Result<(), SwapRefused<Box<dyn ErasedSwap<F>>>>;
 }
 
 struct Swap<N>(N);
@@ -233,16 +227,15 @@ where
         self: Box<Self>,
         graph: &mut Graph<F>,
         node: NodeKey,
-        fade: Seconds,
-        law: FadeLaw,
-    ) -> Result<(), ReplaceRefused<Box<dyn ErasedSwap<F>>>> {
-        match graph.swap_node(node, self.0, fade, law) {
+        fade: Option<Fade>,
+    ) -> Result<(), SwapRefused<Box<dyn ErasedSwap<F>>>> {
+        match graph.swap_node(node, self.0, fade) {
             Ok(controls) => {
                 graph.address::<N>(node, controls);
                 Ok(())
             }
-            Err(ReplaceRefused::Busy(n)) => Err(ReplaceRefused::Busy(Box::new(Swap(n)))),
-            Err(ReplaceRefused::Failed(refused)) => Err(ReplaceRefused::Failed(refused)),
+            Err(SwapRefused::Busy(n)) => Err(SwapRefused::Busy(Box::new(Swap(n)))),
+            Err(SwapRefused::Failed(refused)) => Err(SwapRefused::Failed(refused)),
         }
     }
 }
@@ -256,47 +249,40 @@ impl ErasedSwap<f32> for PluginSwap {
         self: Box<Self>,
         graph: &mut Graph,
         node: NodeKey,
-        fade: Seconds,
-        law: FadeLaw,
-    ) -> Result<(), ReplaceRefused<Box<dyn ErasedSwap<f32>>>> {
-        match graph.replace_plugin(node, self.0, fade, law) {
+        fade: Option<Fade>,
+    ) -> Result<(), SwapRefused<Box<dyn ErasedSwap<f32>>>> {
+        match graph.replace_plugin_now(node, self.0, fade) {
             Ok(()) => Ok(()),
-            Err(ReplaceRefused::Busy(c)) => Err(ReplaceRefused::Busy(Box::new(PluginSwap(c)))),
-            Err(ReplaceRefused::Failed(refused)) => Err(ReplaceRefused::Failed(refused)),
+            Err(SwapRefused::Busy(c)) => Err(SwapRefused::Busy(Box::new(PluginSwap(c)))),
+            Err(SwapRefused::Failed(refused)) => Err(SwapRefused::Failed(refused)),
         }
     }
 }
 
-/// A crossfade parked while the graph re-prepares.
+/// A replacement parked while the graph re-prepares.
 struct Parked<F: Float> {
-    id: CrossfadeId,
     node: NodeKey,
     swap: Box<dyn ErasedSwap<F>>,
-    fade: Seconds,
-    law: FadeLaw,
+    fade: Option<Fade>,
 }
 
 impl<F: Float> std::fmt::Debug for Parked<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Parked")
-            .field("id", &self.id)
             .field("node", &self.node)
             .field("fade", &self.fade)
-            .field("law", &self.law)
             .finish_non_exhaustive()
     }
 }
 
-/// What a parked crossfade came to on a retry.
+/// What a parked replacement came to on a retry.
 pub(crate) enum Retried {
     Landed {
         node: NodeKey,
-        id: CrossfadeId,
     },
     Failed {
         node: NodeKey,
-        id: CrossfadeId,
-        refused: CrossfadeRefused,
+        refused: ReplaceRefused,
     },
 }
 
@@ -344,7 +330,7 @@ pub struct Graph<F: Float = f32> {
     /// there and the host did not wire itself, which are all a change of the
     /// feeds may take away. Every other edge on the input is the host's.
     fed_edges: BTreeMap<NodeKey, Vec<EventOutPort>>,
-    /// Names every tap, event tap, meter and crossfade of this graph.
+    /// Names every tap, event tap and meter of this graph.
     ids: Mint,
     /// Each open event tap as it was opened (its port, alignment and
     /// capacity), so [`Taps::reopen_event`] can open it
@@ -354,7 +340,7 @@ pub struct Graph<F: Float = f32> {
     master_meter: Option<MeterReader>,
     /// The master meter's id: the one meter that reads the root.
     master_meter_id: MeterId,
-    /// Each open tap on the root ([`Taps::open_output`]) with its capacity and
+    /// Each open tap on the root ([`Taps::open_root`]) with its capacity and
     /// the width its reader has, so a root of another width opens it again.
     output_taps: BTreeMap<TapId, (Samples, usize)>,
     /// The readers the root's width opened again, each held under its id until
@@ -859,7 +845,7 @@ impl<F: Float> Graph<F> {
     /// it, and the writer [`InletRing::pair`] returned is the producer's end:
     /// push whole frames with
     /// [`push_interleaved`](tutti_graph::TapWriter::push_interleaved) from any one thread.
-    /// The mirror of [`Taps::open`], which copies the other way.
+    /// The mirror of [`Taps::open_ports`], which copies the other way.
     ///
     /// An inlet **does not resample**, and its clock is not the graph's: the
     /// producer must run at the graph's rate, checked here, once. After that
@@ -961,21 +947,18 @@ impl Graph {
     /// restarts into a new slab and the node at this key is replaced by one
     /// over the new ports.
     #[cfg(feature = "plugin")]
-    pub fn insert_plugin(
-        &mut self,
-        client: Box<tutti_plugin::PluginClient>,
-    ) -> Key<crate::AnyPlugin> {
-        let (key, rebinder) = self.insert_plugin_with_rebinder(client);
+    pub fn add_plugin(&mut self, client: Box<tutti_plugin::PluginClient>) -> Key<crate::AnyPlugin> {
+        let (key, rebinder) = self.add_plugin_with_rebinder(client);
         if let Some(hosted) = self.plugins.get_mut(&key.erase()) {
             hosted.set_rebinder(rebinder);
         }
         key
     }
 
-    /// [`insert_plugin`](Self::insert_plugin), and the builder of the node
+    /// [`add_plugin`](Self::add_plugin), and the builder of the node
     /// that replaces this one when the plugin changes its audio ports.
     #[cfg(feature = "plugin")]
-    pub(crate) fn insert_plugin_with_rebinder(
+    pub(crate) fn add_plugin_with_rebinder(
         &mut self,
         client: Box<tutti_plugin::PluginClient>,
     ) -> (Key<crate::AnyPlugin>, tutti_plugin::catalog::PluginRebinder) {
@@ -1006,27 +989,53 @@ impl Graph {
         (Key::new(node), rebinder)
     }
 
-    /// Swap the plugin at `node` for `client`, as [`replace`](Self::replace)
-    /// swaps any node: crossfading when the running node's shape fits the
-    /// bound plugin's, else a plain swap at the same key. Refused, handing
-    /// `client` back unbound, while a re-prepare is between its two commits.
-    /// The incoming plugin's rebinder replaces the old one.
+    /// Swaps the plugin at `node` for the replacement's, as
+    /// [`replace`](Self::replace) swaps any node: crossfading when the running
+    /// node's shape fits the bound plugin's, else a plain swap at the same
+    /// key. The incoming plugin's rebinder replaces the old one, and the
+    /// plugin's record is carried over to it. Capture the plugin's controls
+    /// first: it is out of reach once handed over.
+    ///
+    /// It always lands, as [`replace`](Self::replace)'s does: now, or on the
+    /// first update after a re-prepare resumes
+    /// ([`SessionEvent::Replaced`](crate::SessionEvent::Replaced)).
     ///
     /// # Errors
     ///
-    /// As [`replace`](Self::replace): [`ReplaceRefused::Busy`] while the graph
-    /// re-prepares, with `client` handed back unbound;
-    /// [`ReplaceRefused::Failed`] on a poisoned graph or a `node` not in it.
+    /// [`ReplaceRefused`] on a poisoned graph or a `node` not in it.
     #[cfg(feature = "plugin")]
     pub fn replace_plugin(
         &mut self,
         node: impl Into<NodeKey>,
-        client: Box<tutti_plugin::PluginClient>,
-        fade: Seconds,
-        law: FadeLaw,
-    ) -> Result<(), ReplaceRefused<Box<tutti_plugin::PluginClient>>> {
+        replacement: Replacement<Box<tutti_plugin::PluginClient>>,
+    ) -> Result<Key<crate::AnyPlugin>, ReplaceRefused> {
         let node = node.into();
-        let rebinder = self.replace_plugin_with_rebinder(node, client, fade, law)?;
+        let Replacement {
+            incoming: client,
+            fade,
+        } = replacement;
+        if self.parked.iter().any(|p| p.node == node) {
+            self.park(node, Box::new(PluginSwap(client)), fade);
+            return Ok(Key::new(node));
+        }
+        match self.replace_plugin_now(node, client, fade) {
+            Ok(()) => {}
+            Err(SwapRefused::Busy(c)) => self.park(node, Box::new(PluginSwap(c)), fade),
+            Err(SwapRefused::Failed(refused)) => return Err(refused),
+        }
+        Ok(Key::new(node))
+    }
+
+    /// [`replace_plugin`](Self::replace_plugin) while the graph is not
+    /// re-preparing, handing `client` back unbound while it is.
+    #[cfg(feature = "plugin")]
+    fn replace_plugin_now(
+        &mut self,
+        node: NodeKey,
+        client: Box<tutti_plugin::PluginClient>,
+        fade: Option<Fade>,
+    ) -> Result<(), SwapRefused<Box<tutti_plugin::PluginClient>>> {
+        let rebinder = self.replace_plugin_with_rebinder(node, client, fade)?;
         if let Some(hosted) = self.plugins.get_mut(&node) {
             hosted.set_rebinder(rebinder);
         }
@@ -1038,31 +1047,29 @@ impl Graph {
     ///
     /// # Errors
     ///
-    /// As [`replace_plugin`](Self::replace_plugin).
+    /// [`SwapRefused::Busy`] while the graph re-prepares, handing `client`
+    /// back unbound; [`SwapRefused::Failed`] as [`replace_plugin`](Self::replace_plugin).
     #[cfg(feature = "plugin")]
     pub(crate) fn replace_plugin_with_rebinder(
         &mut self,
         node: impl Into<NodeKey>,
         client: Box<tutti_plugin::PluginClient>,
-        fade: Seconds,
-        law: FadeLaw,
-    ) -> Result<
-        tutti_plugin::catalog::PluginRebinder,
-        ReplaceRefused<Box<tutti_plugin::PluginClient>>,
-    > {
+        fade: Option<Fade>,
+    ) -> Result<tutti_plugin::catalog::PluginRebinder, SwapRefused<Box<tutti_plugin::PluginClient>>>
+    {
         let node = node.into();
         // Asked here, before binding: `replace` hands back what it refuses,
         // and a bound plugin cannot be unbound.
         if let Some(cause) = self.editor.poison_cause() {
-            return Err(ReplaceRefused::Failed(CrossfadeRefused::Poisoned(
+            return Err(SwapRefused::Failed(ReplaceRefused::Poisoned(
                 cause.to_owned(),
             )));
         }
         if !self.nodes.contains_key(&node) {
-            return Err(ReplaceRefused::Failed(CrossfadeRefused::NoSuchNode(node)));
+            return Err(SwapRefused::Failed(ReplaceRefused::NoSuchNode(node)));
         }
         if self.editor.is_repreparing() {
-            return Err(ReplaceRefused::Busy(client));
+            return Err(SwapRefused::Busy(client));
         }
         let handle = client.handle();
         let controls = client.controls();
@@ -1071,7 +1078,7 @@ impl Graph {
         let tempo = self.tempo.clone();
         let bound = client.bind(tempo);
         let rebinder = tutti_plugin::catalog::PluginRebinder::out_of_process(&bound);
-        match self.swap_unit(node, bound, fade, law) {
+        match self.swap_unit(node, bound, fade) {
             Ok(_controls) => {
                 // The record is carried over to the incoming plugin (unlike
                 // `replace`, which takes it out): its handle is what the
@@ -1095,8 +1102,8 @@ impl Graph {
                 self.write_own_bypass(node);
                 Ok(rebinder)
             }
-            Err(ReplaceRefused::Failed(refused)) => Err(ReplaceRefused::Failed(refused)),
-            Err(ReplaceRefused::Busy(_)) => unreachable!("checked above"),
+            Err(SwapRefused::Failed(refused)) => Err(SwapRefused::Failed(refused)),
+            Err(SwapRefused::Busy(_)) => unreachable!("checked above"),
         }
     }
 
@@ -1105,35 +1112,34 @@ impl Graph {
     ///
     /// # Errors
     ///
-    /// As [`replace_plugin`](Self::replace_plugin), handing `plugin` back
-    /// while the graph re-prepares.
+    /// As [`replace_plugin_with_rebinder`](Self::replace_plugin_with_rebinder),
+    /// handing `plugin` back while the graph re-prepares.
     #[cfg(feature = "plugin")]
     pub(crate) fn replace_hosted_plugin(
         &mut self,
         node: NodeKey,
         plugin: Box<tutti_plugin::catalog::Plugin>,
-        fade: Seconds,
-        law: FadeLaw,
+        fade: Option<Fade>,
     ) -> Result<
         tutti_plugin::catalog::PluginRebinder,
-        ReplaceRefused<Box<tutti_plugin::catalog::Plugin>>,
+        SwapRefused<Box<tutti_plugin::catalog::Plugin>>,
     > {
         if let Some(cause) = self.editor.poison_cause() {
-            return Err(ReplaceRefused::Failed(CrossfadeRefused::Poisoned(
+            return Err(SwapRefused::Failed(ReplaceRefused::Poisoned(
                 cause.to_owned(),
             )));
         }
         if !self.nodes.contains_key(&node) {
-            return Err(ReplaceRefused::Failed(CrossfadeRefused::NoSuchNode(node)));
+            return Err(SwapRefused::Failed(ReplaceRefused::NoSuchNode(node)));
         }
         if self.editor.is_repreparing() {
-            return Err(ReplaceRefused::Busy(plugin));
+            return Err(SwapRefused::Busy(plugin));
         }
         let handle = plugin.handle().clone();
         let controls = plugin.node_controls();
         let plugin_ref = plugin.plugin().clone();
         let (bound, rebinder) = (*plugin).bind_with_rebinder(self.tempo.clone());
-        match self.swap_unit(node, bound, fade, law) {
+        match self.swap_unit(node, bound, fade) {
             Ok(_) => {
                 match self.plugins.get_mut(&node) {
                     Some(hosted) => {
@@ -1150,8 +1156,8 @@ impl Graph {
                 self.provide_plugin(node);
                 Ok(rebinder)
             }
-            Err(ReplaceRefused::Failed(refused)) => Err(ReplaceRefused::Failed(refused)),
-            Err(ReplaceRefused::Busy(_)) => unreachable!("checked above"),
+            Err(SwapRefused::Failed(refused)) => Err(SwapRefused::Failed(refused)),
+            Err(SwapRefused::Busy(_)) => unreachable!("checked above"),
         }
     }
 
@@ -1165,17 +1171,16 @@ impl Graph {
     ///
     /// # Errors
     ///
-    /// [`ReplaceRefused::Busy`] while the graph re-prepares, handing `bound`
-    /// back unplaced; [`ReplaceRefused::Failed`] on a poisoned graph, a `node`
+    /// [`SwapRefused::Busy`] while the graph re-prepares, handing `bound`
+    /// back unplaced; [`SwapRefused::Failed`] on a poisoned graph, a `node`
     /// not in it, or an editor that refuses the swap.
     #[cfg(feature = "plugin")]
     pub(crate) fn replace_rebound(
         &mut self,
         node: NodeKey,
         bound: tutti_plugin::catalog::BoundPlugin,
-    ) -> Result<(), ReplaceRefused<tutti_plugin::catalog::BoundPlugin>> {
-        self.swap_unit(node, bound, tutti_graph::DECLICK, FadeLaw::default())
-            .map(|_| ())
+    ) -> Result<(), SwapRefused<tutti_plugin::catalog::BoundPlugin>> {
+        self.swap_unit(node, bound, None).map(|_| ())
     }
 
     /// Puts the silent stand-in of a plugin that is gone at `node`
@@ -1183,30 +1188,30 @@ impl Graph {
     /// its key, its ports, its wiring and its latency, renders silence and has
     /// no tail, and the plugin's node is retired to the control thread. Returns
     /// whether the swap was made: not while the graph re-prepares. A swap parked
-    /// for the same node (a crossfade waiting for the re-prepare) lands after the
+    /// for the same node (a replacement waiting for the re-prepare) lands after the
     /// stand-in and wins.
     ///
     /// # Errors
     ///
     /// A poisoned graph, or a `node` not in it.
     #[cfg(feature = "plugin")]
-    pub(crate) fn silence_plugin(&mut self, node: NodeKey) -> Result<bool, CrossfadeRefused> {
+    pub(crate) fn silence_plugin(&mut self, node: NodeKey) -> Result<bool, ReplaceRefused> {
         if let Some(cause) = self.editor.poison_cause() {
-            return Err(CrossfadeRefused::Poisoned(cause.to_owned()));
+            return Err(ReplaceRefused::Poisoned(cause.to_owned()));
         }
         let Some(shape) = self.shape(node).filter(|_| self.nodes.contains_key(&node)) else {
-            return Err(CrossfadeRefused::NoSuchNode(node));
+            return Err(ReplaceRefused::NoSuchNode(node));
         };
         if self.editor.is_repreparing() {
             return Ok(false);
         }
         let stand_in = tutti_graph::ForkByClone(crate::plugin::Lost::of(shape));
-        match self.swap_unit(node, stand_in, tutti_graph::DECLICK, FadeLaw::default()) {
+        match self.swap_unit(node, stand_in, None) {
             Ok(_) => Ok(true),
-            Err(ReplaceRefused::Failed(refused)) => Err(refused),
+            Err(SwapRefused::Failed(refused)) => Err(refused),
             // A re-prepare is `swap_unit`'s only cause for `Busy`, and it was
             // checked above on this thread.
-            Err(ReplaceRefused::Busy(_)) => unreachable!("checked above"),
+            Err(SwapRefused::Busy(_)) => unreachable!("checked above"),
         }
     }
 }
@@ -1270,7 +1275,7 @@ impl<F: Float> Graph<F> {
     }
 
     /// Runs every node's reclaimer ([`SessionNode::reclaimer`], kept by
-    /// [`add`](Self::add) and [`crossfade`](Self::crossfade), dropped with
+    /// [`add`](Self::add) and [`replace`](Self::replace), dropped with
     /// the node), the editor's param range cells ([`Editor::reclaim`]) and
     /// (`plugin`) every hosted plugin's meter cell,
     /// so a cell that stopped publishing still has what it retired freed.
@@ -1306,14 +1311,19 @@ impl<F: Float> Graph<F> {
         pinned
     }
 
-    /// Swaps the unit behind `node` for `incoming` under a `fade` along
-    /// `law` when its shape fits the running unit's, else as a plain swap
-    /// on the next commit (`Editor::replace_or_swap`), and hands back its
-    /// key. The incoming node goes in as [`add`](Self::add) puts one in:
-    /// its params are addressed and its reclaimer kept, and the outgoing
-    /// node's go with it. Refused as [`ReplaceRefused::Busy`] with the node
-    /// handed back while the graph re-prepares, and for good on a poisoned
-    /// graph; [`crossfade`](Self::crossfade) waits out a re-prepare instead.
+    /// Swaps the node behind `node` for the replacement's under its fade
+    /// when the shape fits the running unit's, else as a plain swap on the
+    /// next commit (`Editor::replace_or_swap`), and hands back the incoming
+    /// node's key. The incoming node goes in as [`add`](Self::add) puts one
+    /// in: its params are addressed and its reclaimer kept, and the outgoing
+    /// node's go with it.
+    ///
+    /// It always lands. While the graph re-prepares (a sample-rate or
+    /// block-size change between its two commits) the node waits, and the
+    /// first update that finds the graph resumed swaps it in and reports
+    /// [`SessionEvent::Replaced`](crate::SessionEvent::Replaced). A
+    /// replacement asked for while another of the same node waits waits
+    /// behind it, so the later one still wins.
     ///
     /// (`plugin`) A hosted plugin replaced this way is no longer hosted: its
     /// record is dropped, so its health, snapshots and render mode stop
@@ -1322,20 +1332,29 @@ impl<F: Float> Graph<F> {
     ///
     /// # Errors
     ///
-    /// [`ReplaceRefused::Busy`] while the graph re-prepares, handing `incoming`
-    /// back; [`ReplaceRefused::Failed`] on a poisoned graph or a `node` not in
-    /// it, dropping `incoming`.
-    pub fn replace<N: SessionNode<F>>(
+    /// [`ReplaceRefused`] on a poisoned graph or a `node` not in it, dropping
+    /// the incoming node.
+    pub fn replace<N>(
         &mut self,
         node: impl Into<NodeKey>,
-        incoming: N,
-        fade: Seconds,
-        law: FadeLaw,
-    ) -> Result<Key<N>, ReplaceRefused<N>> {
+        replacement: Replacement<N>,
+    ) -> Result<Key<N>, ReplaceRefused>
+    where
+        N: SessionNode<F>,
+        N::Controls: Send + 'static,
+    {
         let node = node.into();
+        let Replacement { incoming, fade } = replacement;
         let incoming = incoming.bind_tempo(&self.tempo);
-        let controls = self.swap_node(node, incoming, fade, law)?;
-        self.address::<N>(node, controls);
+        if self.parked.iter().any(|p| p.node == node) {
+            self.park(node, Box::new(Swap(incoming)), fade);
+            return Ok(Key::new(node));
+        }
+        match self.swap_node(node, incoming, fade) {
+            Ok(controls) => self.address::<N>(node, controls),
+            Err(SwapRefused::Busy(n)) => self.park(node, Box::new(Swap(n)), fade),
+            Err(SwapRefused::Failed(refused)) => return Err(refused),
+        }
         Ok(Key::new(node))
     }
 
@@ -1349,16 +1368,15 @@ impl<F: Float> Graph<F> {
         }
     }
 
-    /// The swap under [`replace`](Self::replace) and a crossfade, addressing
-    /// nothing: the caller addresses the incoming node.
+    /// The swap under [`replace`](Self::replace), addressing nothing: the
+    /// caller addresses the incoming node.
     fn swap_node<N: IntoNode<F>>(
         &mut self,
         node: NodeKey,
         incoming: N,
-        fade: Seconds,
-        law: FadeLaw,
-    ) -> Result<N::Controls, ReplaceRefused<N>> {
-        let controls = self.swap_unit(node, incoming, fade, law)?;
+        fade: Option<Fade>,
+    ) -> Result<N::Controls, SwapRefused<N>> {
+        let controls = self.swap_unit(node, incoming, fade)?;
         #[cfg(feature = "plugin")]
         if let Some(record) = self.plugins.remove(&node) {
             record.retire().settle(node, &mut self.graveyard);
@@ -1366,32 +1384,36 @@ impl<F: Float> Graph<F> {
         Ok(controls)
     }
 
-    /// [`replace`](Self::replace)'s swap, leaving the plugin record alone.
+    /// [`replace`](Self::replace)'s swap, leaving the plugin record alone. A
+    /// `fade` of `None` is the declick at the graph's rate.
     fn swap_unit<N: IntoNode<F>>(
         &mut self,
         node: NodeKey,
         incoming: N,
-        fade: Seconds,
-        law: FadeLaw,
-    ) -> Result<N::Controls, ReplaceRefused<N>> {
+        fade: Option<Fade>,
+    ) -> Result<N::Controls, SwapRefused<N>> {
         if let Some(cause) = self.editor.poison_cause() {
-            return Err(ReplaceRefused::Failed(CrossfadeRefused::Poisoned(
+            return Err(SwapRefused::Failed(ReplaceRefused::Poisoned(
                 cause.to_owned(),
             )));
         }
         // Before `Busy`: a node that is not there is refused at this call, not
         // parked for a retry that can only fail.
         if !self.nodes.contains_key(&node) {
-            return Err(ReplaceRefused::Failed(CrossfadeRefused::NoSuchNode(node)));
+            return Err(SwapRefused::Failed(ReplaceRefused::NoSuchNode(node)));
         }
         if self.editor.is_repreparing() {
-            return Err(ReplaceRefused::Busy(incoming));
+            return Err(SwapRefused::Busy(incoming));
         }
         let rate = self.editor.prepare().sample_rate();
         let placed = self
             .editor
-            .replace_or_swap(node, incoming, Fade::seconds(fade, rate).law(law))
-            .map_err(|e| ReplaceRefused::Failed(CrossfadeRefused::Editor(e)))?;
+            .replace_or_swap(
+                node,
+                incoming,
+                fade.unwrap_or_else(|| Fade::seconds(tutti_graph::DECLICK, rate)),
+            )
+            .map_err(|e| SwapRefused::Failed(ReplaceRefused::Editor(e)))?;
         let controls = placed.controls;
         self.note_unwired(node, &placed.unwired);
         if let Some(entry) = self.nodes.get_mut(&node) {
@@ -1536,146 +1558,26 @@ impl<F: Float> Graph<F> {
         std::mem::take(&mut self.unwired)
     }
 
-    /// Swaps the node behind `node` for `incoming` under `fade` along
-    /// `law`, as [`replace`](Self::replace) does, addressing the incoming
-    /// node's params ([`SessionNode::params`]) — and, while the graph
-    /// re-prepares, keeps it waiting instead of handing it back: the first
-    /// update that finds the graph resumed swaps it in
-    /// ([`Crossfade::Waiting`]). A crossfade asked for while another of the
-    /// same node waits waits behind it, so the later one still wins.
-    ///
-    /// # Errors
-    ///
-    /// On a poisoned graph, or a node not in it: the incoming node is dropped.
-    pub fn crossfade<N>(
-        &mut self,
-        node: impl Into<NodeKey>,
-        incoming: N,
-        fade: Seconds,
-        law: FadeLaw,
-    ) -> Result<Crossfade<N>, CrossfadeRefused>
-    where
-        N: SessionNode<F>,
-        N::Controls: Send + 'static,
-    {
-        let node = node.into();
-        let incoming = incoming.bind_tempo(&self.tempo);
-        if self.parked.iter().any(|p| p.node == node) {
-            return Ok(Crossfade::Waiting(self.park(
-                node,
-                Box::new(Swap(incoming)),
-                fade,
-                law,
-            )));
-        }
-        match self.swap_node(node, incoming, fade, law) {
-            Ok(controls) => {
-                self.address::<N>(node, controls);
-                Ok(Crossfade::Landed(Key::new(node)))
-            }
-            Err(ReplaceRefused::Busy(n)) => Ok(Crossfade::Waiting(self.park(
-                node,
-                Box::new(Swap(n)),
-                fade,
-                law,
-            ))),
-            Err(ReplaceRefused::Failed(refused)) => Err(refused),
-        }
-    }
-}
-
-impl Graph {
-    /// [`crossfade`](Self::crossfade) for a hosted plugin: the swap is
-    /// [`replace_plugin`](Self::replace_plugin)'s, and a landing reports the
-    /// node's key (capture the plugin's controls before handing it over).
-    ///
-    /// # Errors
-    ///
-    /// As `crossfade`.
-    #[cfg(feature = "plugin")]
-    pub fn crossfade_plugin(
-        &mut self,
-        node: impl Into<NodeKey>,
-        client: Box<tutti_plugin::PluginClient>,
-        fade: Seconds,
-        law: FadeLaw,
-    ) -> Result<Crossfade<crate::AnyPlugin>, CrossfadeRefused> {
-        let node = node.into();
-        if self.parked.iter().any(|p| p.node == node) {
-            return Ok(Crossfade::Waiting(self.park(
-                node,
-                Box::new(PluginSwap(client)),
-                fade,
-                law,
-            )));
-        }
-        match self.replace_plugin(node, client, fade, law) {
-            Ok(()) => Ok(Crossfade::Landed(Key::new(node))),
-            Err(ReplaceRefused::Busy(c)) => Ok(Crossfade::Waiting(self.park(
-                node,
-                Box::new(PluginSwap(c)),
-                fade,
-                law,
-            ))),
-            Err(ReplaceRefused::Failed(refused)) => Err(refused),
-        }
-    }
-}
-
-impl<F: Float> Graph<F> {
-    fn park(
-        &mut self,
-        node: NodeKey,
-        swap: Box<dyn ErasedSwap<F>>,
-        fade: Seconds,
-        law: FadeLaw,
-    ) -> CrossfadeId {
-        let id = CrossfadeId::mint(&self.ids);
-        self.parked.push_back(Parked {
-            id,
-            node,
-            swap,
-            fade,
-            law,
-        });
-        id
+    fn park(&mut self, node: NodeKey, swap: Box<dyn ErasedSwap<F>>, fade: Option<Fade>) {
+        self.parked.push_back(Parked { node, swap, fade });
     }
 
-    /// Try every waiting crossfade again, in request order: one still `Busy`
-    /// goes back on the queue, in order.
-    pub(crate) fn retry_crossfades(&mut self) -> Vec<Retried> {
+    /// Try every waiting replacement again, in request order: one still
+    /// `Busy` goes back on the queue, in order.
+    pub(crate) fn retry_replacements(&mut self) -> Vec<Retried> {
         let mut out = Vec::new();
-        for Parked {
-            id,
-            node,
-            swap,
-            fade,
-            law,
-        } in std::mem::take(&mut self.parked)
-        {
+        for Parked { node, swap, fade } in std::mem::take(&mut self.parked) {
             if self.parked.iter().any(|p| p.node == node) {
                 // An earlier one of the same node is still waiting.
-                self.parked.push_back(Parked {
-                    id,
-                    node,
-                    swap,
-                    fade,
-                    law,
-                });
+                self.parked.push_back(Parked { node, swap, fade });
                 continue;
             }
-            match swap.swap(self, node, fade, law) {
-                Ok(()) => out.push(Retried::Landed { node, id }),
-                Err(ReplaceRefused::Busy(swap)) => self.parked.push_back(Parked {
-                    id,
-                    node,
-                    swap,
-                    fade,
-                    law,
-                }),
-                Err(ReplaceRefused::Failed(refused)) => {
-                    tracing::error!("graph: crossfade of {node:?} refused: {refused}");
-                    out.push(Retried::Failed { node, id, refused });
+            match swap.swap(self, node, fade) {
+                Ok(()) => out.push(Retried::Landed { node }),
+                Err(SwapRefused::Busy(swap)) => self.parked.push_back(Parked { node, swap, fade }),
+                Err(SwapRefused::Failed(refused)) => {
+                    tracing::error!("graph: replacement of {node:?} refused: {refused}");
+                    out.push(Retried::Failed { node, refused });
                 }
             }
         }
@@ -1919,7 +1821,7 @@ impl<F: Float> Graph<F> {
     }
 
     /// Every source any feeder feeds `sink`, sorted and without repeats.
-    pub fn fed(&self, sink: impl Into<NodeKey>) -> Vec<EventOutPort> {
+    pub fn feeds(&self, sink: impl Into<NodeKey>) -> Vec<EventOutPort> {
         let sink = sink.into();
         let mut all: Vec<EventOutPort> = self
             .feeds
@@ -1980,7 +1882,7 @@ impl<F: Float> Graph<F> {
     /// has: a source re-inserted without that port is not fed until it has it
     /// again.
     fn fed_in_graph(&self, sink: NodeKey) -> Vec<EventOutPort> {
-        self.fed(sink)
+        self.feeds(sink)
             .into_iter()
             .filter(|s| self.check_event_out(*s).is_ok())
             .collect()
@@ -2001,7 +1903,7 @@ impl<F: Float> Graph<F> {
     ///
     /// The graph's one removal for a node, whatever it is (a plugin, an inlet,
     /// a clip). The edges fade out first (a declicked removal): the node stays
-    /// in the editor, rendering, until they have. A crossfade waiting on it is
+    /// in the editor, rendering, until they have. A replacement waiting on it is
     /// dropped, and the session forgets what it declared on it (modulation,
     /// MIDI routes, an input's capture) at its next update, as
     /// [`Session::remove`](crate::Session::remove) does at once.
@@ -2025,7 +1927,7 @@ impl<F: Float> Graph<F> {
         if let Some(record) = self.plugins.remove(&node) {
             record.retire().settle(node, &mut self.graveyard);
         }
-        // A crossfade waiting on it would only fail at its retry, dropping
+        // A replacement waiting on it would only fail at its retry, dropping
         // the incoming node then: drop it here, on the control thread.
         self.parked.retain(|p| p.node != node);
         self.removed.push(node);
@@ -2703,7 +2605,7 @@ impl<F: Float> Graph<F> {
         from: NodeKey,
         to: MainSink,
     ) -> Result<Vec<(OutPort, InPort)>, ConnectError> {
-        let (_, out_buses) = self.buses(from)?;
+        let (_, out_buses) = self.node_buses(from)?;
         let main = |buses: &Buses, node| {
             let (index, bus) = buses.main_bus().ok_or(ConnectError::NoMainBus(node))?;
             let first = buses
@@ -2721,7 +2623,7 @@ impl<F: Float> Graph<F> {
                 if from == to {
                     return Err(ConnectError::Itself(from));
                 }
-                let (in_buses, _) = self.buses(to)?;
+                let (in_buses, _) = self.node_buses(to)?;
                 let (in_first, in_width) = main(&in_buses, to)?;
                 if out_width != in_width {
                     return Err(ConnectError::Width {
@@ -2893,7 +2795,7 @@ impl<F: Float> Graph<F> {
     ///
     /// [`NoSuchNode`] when `node` is not in the graph.
     #[must_use = "the call refuses a node that does not exist"]
-    pub fn buses(&self, node: impl Into<NodeKey>) -> Result<(Buses, Buses), NoSuchNode> {
+    pub fn node_buses(&self, node: impl Into<NodeKey>) -> Result<(Buses, Buses), NoSuchNode> {
         self.shape_of(node.into())
             .map(|s| (*s.buses_in(), *s.buses_out()))
     }
@@ -3676,7 +3578,7 @@ impl<F: Float> Graph<F> {
 
     /// Whether an edit waits for a commit: what the session's next update
     /// commits on.
-    pub fn is_edited(&self) -> bool {
+    pub fn has_uncommitted_edits(&self) -> bool {
         self.edited
     }
 
@@ -4140,18 +4042,21 @@ mod tail_tests {
         let mut g = graph();
         let node = g.add(ForkByClone(Const::mono(0.0)));
         g.commit();
-        assert!(!g.is_edited());
+        assert!(!g.has_uncommitted_edits());
 
         let new = Tail::Finite(Samples::new(500));
         assert!(g.refresh_node_tail(node, new), "a moved tail is taken");
         assert_eq!(g.node_tail(node), Ok(new));
-        assert!(g.is_edited(), "the next commit moves the ceiling");
+        assert!(
+            g.has_uncommitted_edits(),
+            "the next commit moves the ceiling"
+        );
         g.commit();
         assert!(
             !g.refresh_node_tail(node, new),
             "an unmoved tail edits nothing"
         );
-        assert!(!g.is_edited());
+        assert!(!g.has_uncommitted_edits());
 
         let limit = tutti_graph::MAX_NODE_TAIL.to_samples_ceil(g.editor.prepare().sample_rate());
         let past = Tail::Finite(limit + Samples::new(1));
@@ -4163,7 +4068,7 @@ mod tail_tests {
         );
         g.commit();
         assert!(
-            !g.is_edited(),
+            !g.has_uncommitted_edits(),
             "the graph took it: nothing is left to retry"
         );
         assert!(

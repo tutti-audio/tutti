@@ -14,14 +14,14 @@
 //!
 //! # The record
 //!
-//! Each plugin the graph holds (`Graph::insert_plugin`,
+//! Each plugin the graph holds (`Graph::add_plugin`,
 //! [`Session::add_plugin`]) has a record,
 //! keyed by its [`NodeKey`] and lent as a [`Plugin`] ([`Session::plugin_view`]): the [`PluginRef`] it is, its handle, its
 //! controls (an out-of-process plugin's latency and meter cells), its
 //! liveness, whether it was told the render mode, its last good state
 //! ([`state`](Plugin::state)), and its parameter mirror
-//! ([`params`](Plugin::params)). A crossfade to another plugin (`Graph::crossfade_plugin`,
-//! `replace_plugin`) carries the record over to the incoming plugin, with
+//! ([`params`](Plugin::params)). A replacement by another plugin (`Graph::replace_plugin`,
+//! `Session::swap_plugin`) carries the record over to the incoming plugin, with
 //! nothing of the outgoing plugin's state (its last good state, an in-flight
 //! snapshot task, its mirror); replacing it with a native node
 //! (`Graph::replace`, `crossfade`) or removing the node drops it.
@@ -69,7 +69,7 @@
 //!   `PhaseCx::now`: dead after at least `Liveness::DEATHS` consecutive
 //!   unhealthy observations spanning at least the window. A dead loaded
 //!   plugin's node stays at its key, silent in its place, and its handle reads
-//!   lost; a node of a plugin the host inserted itself (`Graph::insert_plugin`)
+//!   lost; a node of a plugin the host inserted itself (`Graph::add_plugin`)
 //!   is removed ([`Session::remove`]). Either is reported once,
 //!   [`PluginChange::Died`].
 //! - **Reports.** What the plugin reported since the last update (its own edit
@@ -1461,7 +1461,7 @@ impl HostedPlugin {
 }
 
 /// The type of a hosted plugin's [`Key`]: what [`Session::add_plugin`]
-/// and [`Graph::insert_plugin`](crate::Graph::insert_plugin) return, so a plugin's
+/// and [`Graph::add_plugin`](crate::Graph::add_plugin) return, so a plugin's
 /// ports and parameters are methods of its key as a native node's are.
 ///
 /// A marker only: no value of it exists. It names the kind of node, any
@@ -1758,7 +1758,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         let (key, rebinder) = match plugin.into_client() {
             Ok(client) => {
                 client.controls().set_meter(meter);
-                let (key, rebinder) = self.graph.insert_plugin_with_rebinder(client);
+                let (key, rebinder) = self.graph.add_plugin_with_rebinder(client);
                 if let Some(hosted) = self.graph.plugins.get_mut(&key.erase()) {
                     hosted.reloadable = Some(Reloadable {
                         origin,
@@ -2086,18 +2086,13 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         let latency_before = hosted.reload.latency_before;
         let withheld = hosted.reload.withheld_age;
         let attempts = recovery.as_ref().map_or(1, Recovery::failures);
-        match self.graph.replace_plugin_with_rebinder(
-            node,
-            client,
-            tutti_graph::DECLICK,
-            tutti_graph::FadeLaw::default(),
-        ) {
+        match self.graph.replace_plugin_with_rebinder(node, client, None) {
             Ok(rebinder) => {
                 if let Some(hosted) = self.graph.plugins.get_mut(&node) {
                     hosted.set_rebinder(rebinder);
                 }
             }
-            Err(crate::ReplaceRefused::Busy(client)) => {
+            Err(crate::graph::SwapRefused::Busy(client)) => {
                 // Between a re-prepare's two commits: try again next phase.
                 if let Some(hosted) = self.graph.plugins.get_mut(&node) {
                     hosted.snapshot = snapshot;
@@ -2111,7 +2106,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 }
                 return;
             }
-            Err(crate::ReplaceRefused::Failed(refused)) => {
+            Err(crate::graph::SwapRefused::Failed(refused)) => {
                 tracing::error!("plugin {node:?}: the replacement was refused: {refused}");
                 if let Some(hosted) = self.graph.plugins.get_mut(&node) {
                     hosted.snapshot = snapshot;
@@ -3549,58 +3544,43 @@ mod tests {
     }
 
     /// **A hosted plugin replaced by a native node is no longer hosted**
-    /// (`Graph::replace`, and `Graph::crossfade` through it): its record
-    /// goes, so a later death of the outgoing plugin removes nothing (the
-    /// node is the native one's now) and reports nothing, and the record's
-    /// handle no longer keeps the outgoing plugin alive.
+    /// (`Graph::replace`): its record goes, so a later death of the outgoing
+    /// plugin removes nothing (the node is the native one's now) and reports
+    /// nothing, and the record's handle no longer keeps the outgoing plugin
+    /// alive.
     #[test]
     fn a_plugin_replaced_by_a_native_node_is_no_longer_hosted() {
-        for crossfade in [false, true] {
-            let mut rig = rig(None);
-            let replacement = tutti_graph::ForkByClone(tutti_nodes::testing::Const::mono(1.0));
-            let fade = tutti_units::Seconds::new(0.0);
-            let law = tutti_graph::FadeLaw::EqualAmplitude;
-            if crossfade {
-                assert!(matches!(
-                    rig.session
-                        .graph()
-                        .crossfade(rig.node, replacement, fade, law),
-                    Ok(crate::Crossfade::Landed(_))
-                ));
-            } else {
-                assert!(
-                    rig.session
-                        .graph()
-                        .replace(rig.node, replacement, fade, law)
-                        .is_ok()
-                );
-            }
-            assert!(
-                rig.session.plugin_view(rig.node).is_err(),
-                "the record went"
-            );
-            // The outgoing plugin dies, past the debounce's count and window.
-            rig.dead.store(true, Ordering::SeqCst);
-            for ms in [0, 100, 200, 300, 400] {
-                let died = rig.events_at(ms).into_iter().any(|e| {
-                    matches!(
-                        e,
-                        SessionEvent::Plugin(PluginEvent {
-                            change: PluginChange::Died { .. },
-                            ..
-                        })
-                    )
-                });
-                assert!(
-                    !died,
-                    "a native node is reported dead (crossfade: {crossfade})"
-                );
-            }
-            assert!(
-                rig.session.graph_ref().contains(rig.node),
-                "the native replacement stays in the graph (crossfade: {crossfade})"
-            );
+        let mut rig = rig(None);
+        let replacement = tutti_graph::ForkByClone(tutti_nodes::testing::Const::mono(1.0));
+        let cut = tutti_graph::Fade::new(tutti_units::Samples::new(0));
+        assert!(
+            rig.session
+                .graph()
+                .replace(rig.node, crate::Replacement::new(replacement).fade(cut))
+                .is_ok()
+        );
+        assert!(
+            rig.session.plugin_view(rig.node).is_err(),
+            "the record went"
+        );
+        // The outgoing plugin dies, past the debounce's count and window.
+        rig.dead.store(true, Ordering::SeqCst);
+        for ms in [0, 100, 200, 300, 400] {
+            let died = rig.events_at(ms).into_iter().any(|e| {
+                matches!(
+                    e,
+                    SessionEvent::Plugin(PluginEvent {
+                        change: PluginChange::Died { .. },
+                        ..
+                    })
+                )
+            });
+            assert!(!died, "a native node is reported dead");
         }
+        assert!(
+            rig.session.graph_ref().contains(rig.node),
+            "the native replacement stays in the graph"
+        );
     }
 
     /// **A swap ends the outgoing plugin's editor and closes it** when the main
