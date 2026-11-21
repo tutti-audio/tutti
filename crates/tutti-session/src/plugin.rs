@@ -3669,16 +3669,19 @@ mod tests {
             2,
             "the read is a task holding the token"
         );
-        let _ = rig.events_at(10);
-        assert_eq!(rig.mirror_holders(), 2, "and it is started once");
         rig.settle();
-        let _ = rig.land();
+        // This phase lands the read's end, and starts no second one.
+        let _ = rig.events_at(10);
         assert_eq!(
             rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)),
             Some(Some(0.75)),
             "the mirror holds the incoming plugin's values"
         );
-        assert_eq!(rig.mirror_holders(), 1, "the landing freed the token");
+        assert_eq!(
+            rig.mirror_holders(),
+            1,
+            "the landing freed the token, and no second read started"
+        );
 
         // A read asked for, then a second crossfade: the first lands nowhere.
         let (second, _) = fake_handle(None, vec![(param, 0.5)]);

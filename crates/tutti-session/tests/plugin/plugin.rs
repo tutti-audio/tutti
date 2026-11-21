@@ -797,96 +797,99 @@ fn a_plugin_that_crashes_every_time_is_given_up_on() {
     assert!(s.plugin_view(node).is_ok(), "and its record");
 }
 
-/// **Dropping a session with a reload in flight waits for it, so the replacement's
-/// server is reaped and the executor ends.** The first server aborts on its 60th
-/// block; the replacement restores a state its load holds on a fifo until a releaser
-/// thread opens and closes it. The reload task is inside `PluginLoad::run` (it holds the
-/// load and, through its upgrade, the executor only for the launch) when the session
-/// drops: the drop waits for the task, the replacement lands in the inbox, and its
-/// server dies with the inbox. No child of this process outlives the drop.
 #[cfg(target_os = "linux")]
-#[test]
-fn dropping_a_session_with_a_reload_in_flight_reaps_the_replacement_server() {
-    let once = once_file("drop-mid-reload.once");
-    let fifo = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
-        .join(format!("drop-mid-reload.fifo.{}", std::process::id()));
-    let _ = std::fs::remove_file(&fifo);
-    let made = std::process::Command::new("mkfifo")
-        .arg(&fifo)
-        .status()
-        .expect("mkfifo");
-    assert!(made.success());
-    let executor = tutti_platform::Executor::new();
-    let weak = executor.downgrade();
-    let mut s = session_built(
-        &[
-            PASSTHROUGH,
-            ("TUTTI_CLAP_PROBE_ONCE_FILE", &once),
-            ("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "60"),
-            (
-                "TUTTI_CLAP_PROBE_STATE_LOAD_HOLD_FIFO",
-                fifo.to_str().expect("a utf-8 path"),
-            ),
-        ],
-        |b| {
-            b.snapshot_interval(Duration::from_secs(1))
-                .executor(executor)
-        },
-    );
-    let (node, _) = wired_probe(&mut s);
-    snapshot_now(&mut s, node);
+mod reaped_on_drop {
+    use super::*;
 
-    // The death, and the reload handed out: its state restore holds on the fifo.
-    let mut drive = Drive::new();
-    drive.until(&mut s, "the reload starts", |e| {
-        matches!(
-            e,
-            SessionEvent::Plugin(PluginEvent {
-                change: PluginChange::Reloading { .. },
-                ..
-            })
-        )
-    });
-    let guard = Instant::now() + Duration::from_secs(30);
-    while s.plugin_tasks() == 0 {
-        assert!(Instant::now() < guard, "the reload was never handed out");
-        drive.step(&mut s);
-    }
-    // Opening the fifo for writing waits for the plugin's read, and closing it releases
-    // the restore.
-    let releaser = std::thread::spawn({
-        let fifo = fifo.clone();
-        move || drop(std::fs::OpenOptions::new().write(true).open(fifo))
-    });
+    /// **Dropping a session with a reload in flight waits for it, so the replacement's
+    /// server is reaped and the executor ends.** The first server aborts on its 60th
+    /// block; the replacement restores a state its load holds on a fifo until a releaser
+    /// thread opens and closes it. The reload task is inside `PluginLoad::run` (it holds the
+    /// load and, through its upgrade, the executor only for the launch) when the session
+    /// drops: the drop waits for the task, the replacement lands in the inbox, and its
+    /// server dies with the inbox. No child of this process outlives the drop.
+    #[test]
+    fn dropping_a_session_with_a_reload_in_flight_reaps_the_replacement_server() {
+        let once = once_file("drop-mid-reload.once");
+        let fifo = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join(format!("drop-mid-reload.fifo.{}", std::process::id()));
+        let _ = std::fs::remove_file(&fifo);
+        let made = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("mkfifo");
+        assert!(made.success());
+        let executor = tutti_platform::Executor::new();
+        let weak = executor.downgrade();
+        let mut s = session_built(
+            &[
+                PASSTHROUGH,
+                ("TUTTI_CLAP_PROBE_ONCE_FILE", &once),
+                ("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "60"),
+                (
+                    "TUTTI_CLAP_PROBE_STATE_LOAD_HOLD_FIFO",
+                    fifo.to_str().expect("a utf-8 path"),
+                ),
+            ],
+            |b| {
+                b.snapshot_interval(Duration::from_secs(1))
+                    .executor(executor)
+            },
+        );
+        let (node, _) = wired_probe(&mut s);
+        snapshot_now(&mut s, node);
 
-    drop(s);
-    releaser.join().expect("the releaser ended");
-    assert!(
-        weak.upgrade().is_none(),
-        "the executor ended with the session"
-    );
-    assert_eq!(
-        children_of_this_process(),
-        Vec::<u32>::new(),
-        "a plugin-server outlived the session"
-    );
-    let _ = std::fs::remove_file(&fifo);
-}
-
-/// The pids of this process's live children, from the kernel.
-#[cfg(target_os = "linux")]
-fn children_of_this_process() -> Vec<u32> {
-    let mut pids = Vec::new();
-    for task in std::fs::read_dir("/proc/self/task").expect("the task list") {
-        let path = task.expect("a task").path().join("children");
-        if let Ok(list) = std::fs::read_to_string(path) {
-            pids.extend(
-                list.split_whitespace()
-                    .filter_map(|pid| pid.parse::<u32>().ok()),
-            );
+        // The death, and the reload handed out: its state restore holds on the fifo.
+        let mut drive = Drive::new();
+        drive.until(&mut s, "the reload starts", |e| {
+            matches!(
+                e,
+                SessionEvent::Plugin(PluginEvent {
+                    change: PluginChange::Reloading { .. },
+                    ..
+                })
+            )
+        });
+        let guard = Instant::now() + Duration::from_secs(30);
+        while s.plugin_tasks() == 0 {
+            assert!(Instant::now() < guard, "the reload was never handed out");
+            drive.step(&mut s);
         }
+        // Opening the fifo for writing waits for the plugin's read, and closing it releases
+        // the restore.
+        let releaser = std::thread::spawn({
+            let fifo = fifo.clone();
+            move || drop(std::fs::OpenOptions::new().write(true).open(fifo))
+        });
+
+        drop(s);
+        releaser.join().expect("the releaser ended");
+        assert!(
+            weak.upgrade().is_none(),
+            "the executor ended with the session"
+        );
+        assert_eq!(
+            children_of_this_process(),
+            Vec::<u32>::new(),
+            "a plugin-server outlived the session"
+        );
+        let _ = std::fs::remove_file(&fifo);
     }
-    pids
+
+    /// The pids of this process's live children, from the kernel.
+    fn children_of_this_process() -> Vec<u32> {
+        let mut pids = Vec::new();
+        for task in std::fs::read_dir("/proc/self/task").expect("the task list") {
+            let path = task.expect("a task").path().join("children");
+            if let Ok(list) = std::fs::read_to_string(path) {
+                pids.extend(
+                    list.split_whitespace()
+                        .filter_map(|pid| pid.parse::<u32>().ok()),
+                );
+            }
+        }
+        pids
+    }
 }
 
 /// **A reload completes with no host code but `update()`.** The probe's first

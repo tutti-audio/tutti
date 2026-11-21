@@ -48,7 +48,9 @@ pub(crate) use device::DevicePart;
 pub use midi::MidiNodes;
 pub(crate) use midi::MidiPart;
 pub(crate) use output::OutputPart;
-pub(crate) use plugin::{EarlyWork, Loop, PluginOptions, PluginPart};
+#[cfg(feature = "plugin")]
+pub(crate) use plugin::Loop;
+pub(crate) use plugin::{EarlyWork, PluginOptions, PluginPart};
 pub(crate) use pool::PoolPart;
 pub(crate) use reports::Reports;
 pub(crate) use sampler::SamplerPart;
