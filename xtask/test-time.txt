@@ -47,9 +47,9 @@
 0 2 crates/tutti-session/tests/plugin/plugin_latency.rs
 0 5 crates/tutti-session/tests/plugin/plugin_modulation.rs
 0 1 crates/tutti-session/tests/plugin/plugin_own_bypass.rs
-0 5 crates/tutti-session/tests/plugin/plugin_pool.rs
 0 2 crates/tutti-session/tests/plugin/plugin_presets.rs
-0 2 crates/tutti-session/tests/support/pooled.rs
+0 2 crates/tutti-session/tests/plugin/plugin_served.rs
+0 1 crates/tutti-session/tests/support/loading.rs
 0 4 crates/tutti-session/tests/wiring/system_clock.rs
 0 1 crates/tutti-vst2-ffi/src/host/tests.rs
 0 3 crates/tutti-vst3-ffi/src/com/run_loop.rs
