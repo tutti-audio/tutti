@@ -66,7 +66,7 @@ fn client(
 /// An invitation to a confirming Host reaches the application as a Confirm
 /// event, the application's accept establishes the Session at both ends, UMP
 /// arrives once and in order each way, and a Bye ends it at both.
-/// Spec: m2-124/6#1
+/// Spec: m2-124/6.4#1, m2-124/6.5#1, m2-124/6.16#1
 #[test]
 fn a_session_runs_over_two_links_from_invitation_to_bye() {
     let executor = Executor::new();
@@ -299,7 +299,7 @@ fn events_past_the_queue_bound_are_counted_lost_exactly() {
 
 /// Dropping a Client's link sends its Bye: the Host sees the Session end
 /// from the remote side.
-/// Spec: m2-124/6#1
+/// Spec: m2-124/6.16#1
 #[test]
 fn dropping_a_client_link_ends_its_session_at_the_host() {
     let executor = Executor::new();
@@ -322,7 +322,7 @@ fn dropping_a_client_link_ends_its_session_at_the_host() {
 }
 
 /// Dropping a Host's link sends a Bye to each Client it serves.
-/// Spec: m2-124/6#1
+/// Spec: m2-124/6.16#1
 #[test]
 fn dropping_a_host_link_ends_every_session_at_its_clients() {
     let executor = Executor::new();
