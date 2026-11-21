@@ -24,10 +24,9 @@ use tutti_midi_hardware::{MidiHardwareConfig, MidiSession, OpenOutput};
 use tutti_midi_runtime::InputInlets;
 use tutti_ump::{MidiChannel, NoteKeyEvent, Ump};
 
-/// The loopback endpoint.
 /// `Midi Through`'s input (`input`) or output, once `io` lists it.
 fn through(io: &MidiSession, input: bool) -> DeviceInfo {
-    super::opening::listed(io, |d| {
+    super::opening::listed(io, "`Midi Through` (`sudo modprobe snd-seq-dummy`)", |d| {
         let way = if input {
             d.direction.is_input()
         } else {
