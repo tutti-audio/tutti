@@ -13,13 +13,15 @@
 //! exit task. The guard's drop does not poll the process: it waits for an
 //! event, the exit task having ended (the process reaped, or told to stop).
 
-use crate::latch::{Finish, Latch, yield_now};
+use crate::yield_now::yield_now;
 use crate::{IpcConfig, IpcThread, ServerWatch};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering, fence};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tutti_platform::{Executor, Instant, Task, WeakExecutor, monotonic_ns, sleep_until_ns};
+use tutti_platform::{
+    Executor, Instant, Task, WeakExecutor, join, join_within, monotonic_ns, sleep_until_ns,
+};
 use tutti_plugin_ipc_ffi::{ExitWait, Reaped};
 use tutti_plugin_types::{Deadline, PluginFailure};
 use tutti_rt::LockExt;
@@ -48,14 +50,21 @@ struct ExitFlow {
     ending: AtomicBool,
     /// The task ends at its next look, whether or not the process has.
     stop: AtomicBool,
-    /// Raised when the task has ended, by every way out of it.
-    done: Arc<Latch>,
 }
 
-impl ExitFlow {
-    /// Waits up to `timeout` for the task to end: `true` when it has.
-    fn wait_done(&self, timeout: Duration) -> bool {
-        self.done.wait(timeout)
+/// Waits up to `timeout` for the exit task in `exit` to end: `true` when it has (its
+/// output, a panic, or the executor's shutdown all end it), and then `exit` is empty.
+/// A task still running stays in `exit`.
+fn ended_within(exit: &mut Option<Task<()>>, timeout: Duration) -> bool {
+    match exit.take() {
+        None => true,
+        Some(task) => match join_within(task, timeout) {
+            Ok(_) => true,
+            Err(task) => {
+                *exit = Some(task);
+                false
+            }
+        },
     }
 }
 
@@ -69,8 +78,10 @@ struct Launched {
     /// The OS's wake for the process's end, shared with the exit task: the
     /// guard waits on it itself once the task is gone.
     wait: Arc<ExitWait>,
-    /// The exit task. Dropped last: it has ended by then.
-    exit: Task<()>,
+    /// The exit task, until it is known to have ended: the guard's drop waits on it,
+    /// so every way out of the task (its end, a panic, the executor's shutdown)
+    /// resolves it.
+    exit: Option<Task<()>>,
     /// Where a server that outlasts its kill is reaped, reached while the
     /// executor lives. No task holds even this: it is upgraded for one call.
     executor: WeakExecutor,
@@ -123,7 +134,6 @@ impl ProcessGuard {
                 Arc::clone(&wait),
                 Arc::clone(&watch),
                 Arc::clone(&flow),
-                Finish::new(&flow.done),
             ),
         )?;
         Ok(Self {
@@ -131,7 +141,7 @@ impl ProcessGuard {
                 process,
                 flow,
                 wait,
-                exit,
+                exit: Some(exit),
                 executor: executor.downgrade(),
             }),
             watch,
@@ -224,7 +234,7 @@ impl Drop for ProcessGuard {
                 process,
                 flow,
                 wait,
-                exit,
+                mut exit,
                 executor,
             } = launched;
             // A server nobody told to shut down (a failed launch) has no
@@ -234,15 +244,16 @@ impl Drop for ProcessGuard {
             } else {
                 Duration::ZERO
             };
-            let mut reaped = reaped_within(&flow, &process, &wait, grace);
+            let mut reaped = reaped_within(&mut exit, &process, &wait, grace);
             if !reaped {
                 kill(&process);
-                reaped = reaped_within(&flow, &process, &wait, REAP_PATIENCE);
+                reaped = reaped_within(&mut exit, &process, &wait, REAP_PATIENCE);
             }
             flow.stop.store(true, Ordering::Release);
             // Ends within a slice of the stop, or at once when it has ended.
-            flow.wait_done(Duration::MAX);
-            drop(exit);
+            if let Some(exit) = exit {
+                join(exit);
+            }
             let left = process.lock_recover().take();
             if let (false, Some(process)) = (reaped, left) {
                 reap_elsewhere(process, &executor);
@@ -263,8 +274,12 @@ fn kill(process: &Mutex<Option<Reaped>>) {
 /// ends when it reaps the process, so the wait is for its end, and the status
 /// is then read once more (a task that ended on an unreadable status reaped
 /// nothing).
-fn reaped_by(flow: &ExitFlow, process: &Mutex<Option<Reaped>>, timeout: Duration) -> bool {
-    flow.wait_done(timeout)
+fn reaped_by(
+    exit: &mut Option<Task<()>>,
+    process: &Mutex<Option<Reaped>>,
+    timeout: Duration,
+) -> bool {
+    ended_within(exit, timeout)
         && process
             .lock_recover()
             .as_mut()
@@ -277,13 +292,13 @@ fn reaped_by(flow: &ExitFlow, process: &Mutex<Option<Reaped>>, timeout: Duration
 /// shut down is thus given its whole grace to end on its own whether or not
 /// the executor outlives the guard.
 fn reaped_within(
-    flow: &ExitFlow,
+    exit: &mut Option<Task<()>>,
     process: &Mutex<Option<Reaped>>,
     wait: &ExitWait,
     timeout: Duration,
 ) -> bool {
     let deadline = Deadline::after(Instant::now(), timeout);
-    if !flow.done.is_raised() && reaped_by(flow, process, timeout) {
+    if exit.is_some() && reaped_by(exit, process, timeout) {
         return true;
     }
     await_end(process, wait, deadline, Instant::now)
@@ -356,18 +371,16 @@ fn pause(slice: Duration) {
 
 /// The exit task: declares the process's end to `watch`. It waits on the OS in
 /// slices until the process has ended (and then reads its status), or the
-/// `flow` says stop, and raises the flow's `done` as it ends.
+/// `flow` says stop.
 ///
-/// `_finish` is held by the future from its creation, so a future dropped before
-/// its first poll raises the latch as well. The task returns to the executor
-/// between slices, so an executor that shuts down drops it within one slice
-/// (`EXIT_SLICE`) rather than waiting for the process to end.
+/// The task returns to the executor between slices, so an executor that shuts
+/// down drops it within one slice (`EXIT_SLICE`) rather than waiting for the
+/// process to end.
 async fn exit_task(
     process: Arc<Mutex<Option<Reaped>>>,
     wait: Arc<ExitWait>,
     watch: Arc<ServerWatch>,
     flow: Arc<ExitFlow>,
-    _finish: Finish,
 ) {
     while !flow.stop.load(Ordering::Acquire) {
         if wait.wait(EXIT_SLICE, pause) {
@@ -441,7 +454,7 @@ mod tests {
     /// declares nothing again.
     #[test]
     fn a_process_that_exits_sets_the_watch_once_with_its_status() {
-        let guard = guard_over(Command::new("true"));
+        let mut guard = guard_over(Command::new("true"));
         assert!(
             guard.watch().wait_dead(HANG_GUARD),
             "the exit was never declared"
@@ -450,8 +463,9 @@ mod tests {
             Some(PluginFailure::ServerExited { status }) => assert!(status.success()),
             other => panic!("expected ServerExited, got {other:?}"),
         }
+        let launched = guard.launched.as_mut().expect("a launched guard");
         assert!(
-            flow_of(&guard).wait_done(HANG_GUARD),
+            ended_within(&mut launched.exit, HANG_GUARD),
             "the exit task outlived the death it declared"
         );
         assert!(
@@ -502,17 +516,19 @@ mod tests {
         assert!(!watch.is_dead(), "{:?}", watch.cause());
     }
 
-    /// **A drop returns once the exit task has ended**: the task's end, its
-    /// latch, is set when the drop is over, and the child is reaped.
+    /// **A drop returns once the exit task has ended**: the task's future is
+    /// gone (it no longer holds the flow) when the drop is over, and the child is
+    /// reaped.
     #[test]
     fn a_drop_returns_once_the_exit_task_has_ended() {
         let guard = guard_over(sleeper());
         let pid = guard.pid().expect("a launched guard has a pid");
         let flow = flow_of(&guard);
-        assert!(!flow.done.is_raised(), "the task is watching");
+        assert_eq!(Arc::strong_count(&flow), 3, "the task is watching");
         drop(guard);
-        assert!(
-            flow.done.is_raised(),
+        assert_eq!(
+            Arc::strong_count(&flow),
+            1,
             "the drop returned before the task ended"
         );
         assert!(!exists(pid), "the child {pid} was not reaped");
@@ -523,38 +539,40 @@ mod tests {
     /// not reaped by a wait that has run out, and is once it is killed.
     #[test]
     fn a_wait_for_the_reaping_gives_up_at_its_timeout_and_not_before() {
-        let guard = guard_over(sleeper());
-        let launched = guard.launched.as_ref().expect("a launched guard");
+        let mut guard = guard_over(sleeper());
+        let launched = guard.launched.as_mut().expect("a launched guard");
         assert!(
-            !reaped_by(&launched.flow, &launched.process, Duration::ZERO),
+            !reaped_by(&mut launched.exit, &launched.process, Duration::ZERO),
             "a running server is not reaped"
         );
         kill(&launched.process);
         assert!(
-            reaped_by(&launched.flow, &launched.process, HANG_GUARD),
+            reaped_by(&mut launched.exit, &launched.process, HANG_GUARD),
             "the killed server is reaped by the exit task"
         );
     }
 
-    /// **An exit task dropped before its first poll still raises the latch**,
-    /// so a drop that waits for the task's end never waits for one that never ran.
+    /// **An exit task never polled resolves its task when its executor shuts
+    /// down**, so a drop that waits for the task's end never waits for one that
+    /// never ran.
     #[test]
-    fn an_exit_task_dropped_unpolled_raises_its_latch() {
+    fn an_exit_task_dropped_unpolled_resolves_its_task() {
         let mut child = sleeper().spawn().expect("sleep spawns");
         let wait = Arc::new(ExitWait::of(&child));
-        let flow = Arc::new(ExitFlow::default());
-        let task = exit_task(
+        let executor = Executor::new();
+        let task = executor.spawn(exit_task(
             Arc::new(Mutex::new(None)),
             wait,
             Arc::new(ServerWatch::new()),
-            Arc::clone(&flow),
-            Finish::new(&flow.done),
+            Arc::new(ExitFlow::default()),
+        ));
+
+        drop(executor);
+
+        assert!(
+            matches!(join_within(task, HANG_GUARD), Ok(None)),
+            "the task never resolved"
         );
-        assert!(!flow.done.is_raised());
-
-        drop(task);
-
-        assert!(flow.wait_done(HANG_GUARD), "the latch was never raised");
         child.kill().expect("the sleeper is killed");
         child.wait().expect("reaped");
     }
@@ -626,15 +644,18 @@ mod tests {
         command.stdin(Stdio::piped());
         let mut child = command.spawn().expect("cat spawns");
         let stdin = child.stdin.take();
-        let guard = ProcessGuard::launched(
+        let mut guard = ProcessGuard::launched(
             Reaped::new(child),
             &IpcConfig::at(crate::unique_socket_path().expect("the OS has a random source")),
             &executor,
         )
         .expect("the exit task starts");
         drop(executor);
-        let launched = guard.launched.as_ref().expect("launched");
-        assert!(launched.flow.wait_done(HANG_GUARD), "the exit task is gone");
+        let launched = guard.launched.as_mut().expect("launched");
+        assert!(
+            ended_within(&mut launched.exit, HANG_GUARD),
+            "the exit task is gone"
+        );
         let (end, ends) = std::sync::mpsc::channel::<()>();
         let closer = std::thread::spawn(move || {
             ends.recv().expect("the wait begins");
@@ -643,7 +664,7 @@ mod tests {
 
         end.send(()).expect("the closer waits");
         let reaped = reaped_within(
-            &launched.flow,
+            &mut launched.exit,
             &launched.process,
             &launched.wait,
             HANG_GUARD,

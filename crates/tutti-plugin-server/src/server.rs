@@ -5,7 +5,6 @@
 //! which the render thread serves (`ProcessAudio` and `Reset`, nothing else),
 //! and the control connection, which the main thread's event loop serves.
 
-use crate::latch::{Finish, Latch};
 use crate::render::{NotHome, RenderSide, RenderThread};
 use crate::session::{Reaction, Session};
 use crate::transport::Pulser;
@@ -13,8 +12,9 @@ use crate::transport::{ControlTransport, Incoming, Transport, TransportListener}
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
-use tutti_platform::{Executor, Task, Timer};
+use tutti_platform::{Executor, Task, join};
 use tutti_plugin_ipc::{
     AudioReply, ControlFrame, ControlRequest, PROTOCOL_VERSION, ReqId, Request, Working,
 };
@@ -86,9 +86,9 @@ pub struct PluginServer {
     /// The thread that built the server: the one the plugin's main-thread
     /// calls run on, claimed once at startup.
     main: MainThreadMarker,
-    /// Raised once the shutdown is under way: a host that ends then finds the
+    /// Sent to once the shutdown is under way: a host that ends then finds the
     /// teardown, itself bounded, and is let finish ([`watch_host`]).
-    served: Arc<Latch>,
+    served: mpsc::Sender<()>,
     /// The watch on the host, held for the life of the server; a drop cancels it.
     _host_watch: Option<Task<()>>,
     /// Where this process's background work runs: built on the main thread and
@@ -126,14 +126,14 @@ impl PluginServer {
             "the plugin server must be built on the process's main thread",
         ))?;
         let (session, render) = Session::new()?;
-        let served = Arc::new(Latch::default());
+        let (served, shutdown_under_way) = mpsc::channel();
         let executor = Executor::new();
         let host_watch = watch_host(
             &executor,
             socket.clone(),
             Arc::clone(&session.ties().host_gone),
             session.ties().bell.clone(),
-            Arc::clone(&served),
+            shutdown_under_way,
         );
         Ok(Self {
             socket,
@@ -179,8 +179,8 @@ impl PluginServer {
     /// released first.
     pub fn run(mut self) -> IpcResult<Ended> {
         let served = self.serve();
-        // Idempotent: the paths that never reached the control phase.
-        self.served.raise();
+        // Again: the paths that never reached the control phase.
+        let _ = self.served.send(());
         self.release();
         // The plugin and the session go with the server: what they leak, they
         // leak here.
@@ -231,7 +231,7 @@ impl PluginServer {
         // The teardown below is bounded by the Processor's homecoming patience,
         // so the host watch has nothing left to guard: a host that ends now is
         // let finish it.
-        self.served.raise();
+        let _ = self.served.send(());
         // The plugin goes home before the render thread stops: its Processor
         // is returned by that thread's poll, and the plugin is destroyed only
         // once it has it back.
@@ -427,8 +427,9 @@ pub(crate) fn working<R>(
 /// pulse and the main reply alike, and the wait with them. It has no write
 /// timeout.
 struct Beat {
+    /// Dropped to stop the task: its wait for the next period ends at once.
+    stop: Option<mpsc::Sender<()>>,
     task: Option<Task<()>>,
-    over: Arc<Latch>,
 }
 
 impl Beat {
@@ -443,21 +444,12 @@ impl Beat {
         id: ReqId,
         restoring: &Arc<AtomicBool>,
     ) -> Option<Self> {
-        let over = Arc::new(Latch::default());
-        // Held from the task's creation: raised by every way out of it.
-        let finish = Finish::new(&over);
-        let beating = beat(
-            executor.timer(),
-            pulse,
-            period,
-            id,
-            Arc::clone(restoring),
-            finish,
-        );
+        let (stop, stopped) = mpsc::channel();
+        let beating = beat(stopped, pulse, period, id, Arc::clone(restoring));
         match executor.spawn_dedicated("plugin-beat", None, beating) {
             Ok(task) => Some(Self {
+                stop: Some(stop),
                 task: Some(task),
-                over,
             }),
             Err(error) => {
                 tracing::warn!(
@@ -470,25 +462,30 @@ impl Beat {
 }
 
 impl Drop for Beat {
+    /// Stops the task at its wait for the next period, or after the frame it is
+    /// sending: the wait is for that frame, which the host reads, and never for a
+    /// period. Runs on the thread that serves a request (the main thread), never
+    /// on one that drives an executor, which [`join`] would refuse.
     fn drop(&mut self) {
-        // Cancelled at its sleep, or after the frame it is sending: the wait is
-        // for that frame, which the host reads, and never for a period.
-        drop(self.task.take());
-        self.over.wait(Duration::MAX);
+        drop(self.stop.take());
+        if let Some(task) = self.task.take() {
+            join(task);
+        }
     }
 }
 
 /// The beat's task: every `period`, tells the host `Working` for request `id`
-/// until the host cannot be written to, or the executor ends (`Err(Shutdown)`).
+/// until the host cannot be written to or `stopped` is dropped. It waits on the
+/// stop for the period, so a stop ends it at once; the executor that runs it
+/// outlives it (the [`Beat`] borrows one), so nothing else ends it.
 async fn beat(
-    timer: Timer,
+    stopped: mpsc::Receiver<()>,
     pulse: Pulser<ControlFrame>,
     period: Duration,
     id: ReqId,
     restoring: Arc<AtomicBool>,
-    _finish: Finish,
 ) {
-    while timer.sleep(period).await.is_ok() {
+    while let Err(RecvTimeoutError::Timeout) = stopped.recv_timeout(period) {
         let stage = if restoring.load(Ordering::Acquire) {
             Working::Restoring
         } else {
@@ -537,26 +534,26 @@ pub(crate) const RENDER_STOP_PATIENCE: std::time::Duration = std::time::Duration
 /// ended outright: a bound on a wait for the shutdown, never a delay to it.
 const HOST_GONE_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// Starts the watch on the host. When the host ends, `host_gone` is raised and
-/// `bell` rung so the main loop shuts down; if `served` is not raised within
+/// Starts the watch on the host. When the host ends, `host_gone` is set and
+/// `bell` rung so the main loop shuts down; if `shutdown_under_way` is not sent to within
 /// [`HOST_GONE_GRACE`] the socket file at `socket_path` is removed and the
 /// process ended outright. A server whose host is unknown cannot watch it: that
 /// is logged, and only the host's connections end it.
 fn watch_host(
     executor: &Executor,
     socket_path: std::path::PathBuf,
-    host_gone: Arc<Latch>,
+    host_gone: Arc<AtomicBool>,
     bell: crate::main_loop::Bell,
-    served: Arc<Latch>,
+    shutdown_under_way: mpsc::Receiver<()>,
 ) -> Option<Task<()>> {
     let watch = tutti_plugin_ipc_ffi::watch_spawner(executor, move || {
         tracing::info!("the host process is gone; shutting the server down");
-        host_gone.raise();
+        host_gone.store(true, Ordering::Release);
         bell.ring();
         // A shutdown already under way is let finish; one that does not come is
         // ended: a plugin library's exit handlers must not run on an orphan
         // whose other threads are killed mid-call.
-        if !served.wait(HOST_GONE_GRACE) {
+        if shutdown_under_way.recv_timeout(HOST_GONE_GRACE) == Err(RecvTimeoutError::Timeout) {
             let _ = std::fs::remove_file(&socket_path);
             tutti_plugin_ipc_ffi::terminate_process()
         }

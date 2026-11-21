@@ -47,7 +47,6 @@ mod config;
 mod conversation;
 mod error;
 mod ipc;
-mod latch;
 mod offline_wait;
 mod process_guard;
 mod protocol;
@@ -55,6 +54,7 @@ mod server_watch;
 mod subprocess;
 mod transport;
 mod wake;
+mod yield_now;
 
 #[cfg(test)]
 mod process_pipeline_tests;
