@@ -33,16 +33,9 @@ pub struct OneshotReceiver<T> {
 }
 
 /// The sender dropped without answering: nothing will ever come.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("the sender was dropped without answering")]
 pub struct RecvError;
-
-impl std::fmt::Display for RecvError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("the sender was dropped without answering")
-    }
-}
-
-impl std::error::Error for RecvError {}
 
 /// A sender and its receiver.
 #[must_use]

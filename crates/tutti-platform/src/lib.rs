@@ -31,7 +31,7 @@
 //!   of its own; [`Executor::sleep_until`] is a deadline as a future ([`Sleep`]);
 //!   [`Executor::timer`] gives a [`Timer`] that makes them and keeps nothing alive, and
 //!   [`Executor::downgrade`] a [`WeakExecutor`] that reaches the executor while it lives.
-//! - [`oneshot`] — a value one side sends and a future resolves to, control side only
+//! - [`oneshot()`] — a value one side sends and a future resolves to, control side only
 //!   ([`OneshotSender`], [`OneshotReceiver`]; [`RecvError`] when the sender is dropped).
 //! - [`MainThreadMarker`] — proof that the holder is on the process's main
 //!   thread, made only where the OS says so (`!Send`, `!Sync`).
