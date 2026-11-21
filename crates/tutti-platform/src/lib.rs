@@ -34,8 +34,6 @@
 //!   [`join`] waits on the calling thread for a [`Task`] that runs elsewhere to end, and
 //!   [`join_within`] waits at most a bound, handing the task back past it; [`yield_now`]
 //!   returns to the executor once between slices of a task's work.
-//! - [`oneshot()`] — a value one side sends and a future resolves to, control side only
-//!   ([`OneshotSender`], [`OneshotReceiver`]; [`RecvError`] when the sender is dropped).
 //! - [`MainThreadMarker`] — proof that the holder is on the process's main
 //!   thread, made only where the OS says so (`!Send`, `!Sync`).
 //! - [`Asset`] — where bytes come from, as every file entry point takes it
@@ -84,7 +82,6 @@ mod denormals;
 #[cfg(not(loom))]
 mod executor;
 mod main_thread;
-mod oneshot;
 mod priority;
 mod sleep;
 mod thread;
@@ -98,7 +95,6 @@ pub use denormals::with_no_denormals;
 #[cfg(not(loom))]
 pub use executor::*;
 pub use main_thread::MainThreadMarker;
-pub use oneshot::{OneshotReceiver, OneshotSender, RecvError, oneshot};
 pub use priority::{PriorityOutcome, PriorityRequest, Scheduling, request_priority};
 pub use sleep::sleep_until_ns;
 pub use thread::{Panicked, StopToken, ThreadHandle, spawn_named};

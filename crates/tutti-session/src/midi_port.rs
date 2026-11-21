@@ -35,6 +35,7 @@
 use std::sync::{Arc, Mutex};
 
 use tutti_graph::{EventTapReader, Losses, NodeKey};
+use tutti_midi_ci::{Nak, PeData, PeStatus, ProfileState};
 use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, Resolved, SavedDevice};
 use tutti_midi_hardware::{
     Answer, CiPeerInfo, DeviceStream, InputFault, MidiSession, PeerProfiles, ProfileSwitch,
@@ -52,8 +53,8 @@ use crate::midi::{
     Claim, Departure, Held, LossReaders, LossWriters, Retiring, Sweepable, UmpOut, loss_cells,
 };
 use crate::midi_ci::{
-    EndSubscription, GetProperty, Landing, ListedPeer, Pending, PortLink, ProfilePeer, ReportPeer,
-    RequestReport, ResourcePeer, SetProperty, Subscribe, SwitchProfile, at_peer,
+    Landing, ListedPeer, Pending, PortLink, ProfilePeer, ReportPeer, ResourcePeer, Subscription,
+    at_peer, land,
 };
 use crate::{
     EventInPort, EventOutPort, MidiReport, Peer, PeerError, Presence, Resource, ResourceFact,
@@ -254,26 +255,27 @@ pub(crate) struct InputShared {
 }
 
 /// What a handle asked of the device, for the session to send at its next poll,
-/// with the `Landing` that lands the answer.
+/// with the `Landing` that resolves the future that asked. The end of a
+/// Subscription asks for no answer.
 pub(crate) enum InputRequest {
-    Profile(ProfileSwitch, Landing<SwitchProfile>),
-    Report(ReportAsk, Landing<RequestReport>),
-    Get(PropertyAsk, Landing<GetProperty>),
-    Set(PropertyAsk, Landing<SetProperty>),
-    Subscribe(PropertyAsk, Landing<Subscribe>),
-    Unsubscribe(PropertyAsk, Landing<EndSubscription>),
+    Profile(ProfileSwitch, Landing<ProfileState, Nak>),
+    Report(ReportAsk, Landing<(), Nak>),
+    Get(PropertyAsk, Landing<PeData>),
+    Set(PropertyAsk, Landing<PeStatus>),
+    Subscribe(PropertyAsk, Landing<Subscription>),
+    Unsubscribe(PropertyAsk),
 }
 
 impl InputRequest {
     /// The request ends as `why`.
     fn end(self, why: Ended) {
         match self {
-            Self::Profile(_, ticket) => ticket.land(Err(why.error())),
-            Self::Report(_, ticket) => ticket.land(Err(why.error())),
-            Self::Get(_, ticket) => ticket.land(Err(why.error())),
-            Self::Set(_, ticket) => ticket.land(Err(why.error())),
-            Self::Subscribe(_, ticket) => ticket.land(Err(why.error())),
-            Self::Unsubscribe(_, ticket) => ticket.land(Err(why.error())),
+            Self::Profile(_, ticket) => land(ticket, Err(why.error())),
+            Self::Report(_, ticket) => land(ticket, Err(why.error())),
+            Self::Get(_, ticket) => land(ticket, Err(why.error())),
+            Self::Set(_, ticket) => land(ticket, Err(why.error())),
+            Self::Subscribe(_, ticket) => land(ticket, Err(why.error())),
+            Self::Unsubscribe(_) => {}
         }
     }
 }
@@ -321,19 +323,17 @@ struct Inbox {
 impl InputShared {
     /// Queues `request` with its `ticket` when the port can take it now and
     /// `lists` says the peer and what is asked of it are still listed in the
-    /// port's info; otherwise ends the job at once: [`PeerError::Released`]
-    /// once every handle is dropped, [`PeerError::Disconnected`] while
-    /// the device is away or when `lists` is false, since the peer or the
-    /// Profile it lists has gone.
-    pub(crate) fn push<J, R, E>(
+    /// port's info; otherwise hands the ticket back with why: [`Ended::Released`]
+    /// once every handle is dropped, [`Ended::Disconnected`] while the device is
+    /// away or when `lists` is false, since the peer or the Profile it lists has
+    /// gone.
+    pub(crate) fn push<R, L>(
         &self,
         request: R,
-        ticket: Landing<J>,
+        ticket: L,
         lists: impl FnOnce(&MidiInputInfo, &R) -> bool,
-        make: impl FnOnce(R, Landing<J>) -> InputRequest,
-    ) where
-        J: crate::JobKind<Error = PeerError<E>>,
-    {
+        make: impl FnOnce(R, L) -> InputRequest,
+    ) -> Result<(), (L, Ended)> {
         let mut inbox = self.requests.lock_recover();
         let refused = match inbox.gate {
             Gate::Released => Some(Ended::Released),
@@ -344,13 +344,11 @@ impl InputShared {
             Gate::Open => None,
         };
         match refused {
-            Some(why) => {
-                // The job lands, and takes the landed queue's lock, with the
-                // inbox's lock released.
-                drop(inbox);
-                ticket.land(Err(why.error()));
+            Some(why) => Err((ticket, why)),
+            None => {
+                inbox.queue.push(make(request, ticket));
+                Ok(())
             }
-            None => inbox.queue.push(make(request, ticket)),
         }
     }
 
@@ -1189,7 +1187,7 @@ impl Ports {
     }
 
     /// Sends what the handles asked of the peers: a request the device took
-    /// waits for its answer, and one it cannot take ends the job.
+    /// waits for its answer, and one it cannot take ends its future.
     fn send_requests(&mut self, io: &mut MidiSession) {
         for port in &mut self.inputs {
             for request in port.shared.drain() {
@@ -1203,9 +1201,7 @@ impl Ports {
                     InputRequest::Subscribe(ask, ticket) => {
                         port.pending.subscribe(io, ask, ticket);
                     }
-                    InputRequest::Unsubscribe(ask, ticket) => {
-                        port.pending.unsubscribe(io, ask, ticket);
-                    }
+                    InputRequest::Unsubscribe(ask) => port.pending.unsubscribe(io, ask),
                 }
             }
         }
@@ -1475,15 +1471,10 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
         // The cells start closed: a connection reopens them.
         let (writers, cells) = InputWriters::new();
         drop(writers);
-        let landed = self.jobs.queue();
         let input = controls.clone();
         let pending = Pending::new(ids);
         let shared = Arc::new_cyclic(|weak| {
-            let link = PortLink::new(
-                weak.clone(),
-                Arc::downgrade(&self.state.ports.alive),
-                landed,
-            );
+            let link = PortLink::new(weak.clone(), Arc::downgrade(&self.state.ports.alive));
             InputShared {
                 id,
                 cell: Mutex::new(Cell {

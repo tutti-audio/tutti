@@ -42,6 +42,33 @@ use tutti_session::{MidiRouteRule, RouteDeclarer};
 use tutti_session::{Peer as _, Resource as _};
 use tutti_ump::{Message, Voice2};
 
+#[cfg(feature = "midi-hardware")]
+/// What `future` resolved to when polled once, or `None` while it is pending.
+/// Poll a future only until it resolves: a second poll of a resolved one ends it as
+/// disconnected.
+pub(crate) fn polled<F: std::future::Future + Unpin>(future: &mut F) -> Option<F::Output> {
+    use std::task::{Context, Poll, Waker};
+
+    match std::pin::Pin::new(future).poll(&mut Context::from_waker(Waker::noop())) {
+        Poll::Ready(out) => Some(out),
+        Poll::Pending => None,
+    }
+}
+
+/// Updates the session until `future` resolves, and returns what it resolved to.
+/// The bound is a count of updates, not time: it guards a request that never
+/// resolves.
+#[cfg(feature = "midi-hardware")]
+pub(crate) fn settled<F: std::future::Future + Unpin>(s: &mut Session, mut future: F) -> F::Output {
+    for _ in 0..2000 {
+        if let Some(out) = polled(&mut future) {
+            return out;
+        }
+        let _ = s.update();
+    }
+    panic!("the request never resolved");
+}
+
 /// Every phase at `now`: one update, at a time the test picks.
 #[cfg(feature = "midi-hardware")]
 pub(crate) fn update_at(s: &mut Session, now: Instant) -> Vec<SessionEvent> {
@@ -1229,13 +1256,14 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     for ms in 0..80 {
         let now = start + Duration::from_millis(ms);
         for event in update_at(&mut s, now) {
-            match event {
-                SessionEvent::Midi(MidiReport::CiProfiles { change, .. }) => seen.push(change),
-                SessionEvent::JobDone(mut output) => {
-                    enabled = enable.as_ref().and_then(|job| output.take(job)).or(enabled);
-                }
-                _ => {}
+            if let SessionEvent::Midi(MidiReport::CiProfiles { change, .. }) = event {
+                seen.push(change);
             }
+        }
+        if enabled.is_none()
+            && let Some(job) = enable.as_mut()
+        {
+            enabled = polled(job);
         }
         if enable.is_none() && seen.iter().any(|c| matches!(c, ProfilesChange::Known)) {
             let info = port.info();
@@ -1384,7 +1412,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
         },
     );
     assert_eq!(
-        stale.disable().wait(&mut s),
+        settled(&mut s, stale.disable()),
         Err(tutti_session::PeerError::Disconnected),
         "a Profile the peer no longer lists fails at the call"
     );
@@ -1393,12 +1421,12 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     let gone = c.disable();
     fake.unplug(raw);
     assert_eq!(
-        gone.wait(&mut s),
+        settled(&mut s, gone),
         Err(tutti_session::PeerError::Disconnected)
     );
     // A request on a lost port fails at the call.
     assert_eq!(
-        c.disable().wait(&mut s),
+        settled(&mut s, c.disable()),
         Err(tutti_session::PeerError::Disconnected)
     );
     // The device returns with no peers found yet: a request made from the old
@@ -1407,14 +1435,14 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     let _ = s.update();
     assert_eq!(port.presence(), tutti_session::Presence::Live);
     assert_eq!(
-        c.disable().wait(&mut s),
+        settled(&mut s, c.disable()),
         Err(tutti_session::PeerError::Disconnected)
     );
     // A request on a port whose handles were all dropped fails at the call.
     drop(port);
     let _ = s.update();
     assert_eq!(
-        c.disable().wait(&mut s),
+        settled(&mut s, c.disable()),
         Err(tutti_session::PeerError::Released)
     );
 }
@@ -1732,7 +1760,6 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     play(&s);
     let start = Instant::now();
     let clock = std::cell::Cell::new(0u64);
-    let outputs = std::cell::RefCell::new(Vec::<tutti_session::JobOutput>::new());
     // Runs the session and the peer for `ms` milliseconds; the profile
     // changes the session reported.
     let mut run = |s: &mut Session, ms: u64| {
@@ -1741,12 +1768,8 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
             clock.set(clock.get() + 1);
             let now = start + Duration::from_millis(clock.get());
             for event in update_at(s, now) {
-                match event {
-                    SessionEvent::Midi(MidiReport::CiProfiles { device, change, .. }) => {
-                        changes.push((device, change));
-                    }
-                    SessionEvent::JobDone(l) => outputs.borrow_mut().push(l),
-                    _ => {}
+                if let SessionEvent::Midi(MidiReport::CiProfiles { device, change, .. }) = event {
+                    changes.push((device, change));
                 }
             }
             peer.answer(&fake, now);
@@ -1800,15 +1823,9 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     assert_eq!(omni_offs(&seen), 1, "no zone, no rule");
 
     // Enabled with four Channels from Channel 1.
-    let enable = listed.enable(ChannelCount::new(4).unwrap());
+    let mut enable = listed.enable(ChannelCount::new(4).unwrap());
     let changes = run(&mut s, 60);
-    assert_eq!(
-        outputs
-            .borrow_mut()
-            .iter_mut()
-            .find_map(|l| l.take(&enable)),
-        Some(Ok(ProfileState::Enabled))
-    );
+    assert_eq!(polled(&mut enable), Some(Ok(ProfileState::Enabled)));
     assert!(
         changes.iter().any(|(_, c)| matches!(
             c,
@@ -1855,15 +1872,9 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     let [ListedProfile::Channel(listed)] = listed.as_slice() else {
         panic!("one Profile on a Channel: {listed:?}");
     };
-    let disable = listed.disable();
+    let mut disable = listed.disable();
     let _ = run(&mut s, 60);
-    assert_eq!(
-        outputs
-            .borrow_mut()
-            .iter_mut()
-            .find_map(|l| l.take(&disable)),
-        Some(Ok(ProfileState::Disabled))
-    );
+    assert_eq!(polled(&mut disable), Some(Ok(ProfileState::Disabled)));
     assert_eq!(
         port.info().peers()[0]
             .profiles()
@@ -1949,13 +1960,14 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
     for ms in 0..80 {
         let now = start + Duration::from_millis(ms);
         for event in update_at(&mut s, now) {
-            match event {
-                SessionEvent::Midi(MidiReport::CiProcess { change, .. }) => seen.push(change),
-                SessionEvent::JobDone(mut output) => {
-                    ended = request.as_ref().and_then(|job| output.take(job)).or(ended);
-                }
-                _ => {}
+            if let SessionEvent::Midi(MidiReport::CiProcess { change, .. }) = event {
+                seen.push(change);
             }
+        }
+        if ended.is_none()
+            && let Some(job) = request.as_mut()
+        {
+            ended = polled(job);
         }
         if request.is_none()
             && seen
@@ -2044,7 +2056,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
         [(CiDeviceId::FunctionBlock, DataControl::Full, asked)],
         "one Inquiry: MIDI Message Report, on the Function Block, as asked"
     );
-    assert_eq!(ended, Some(Ok(())), "the peer's End lands the job");
+    assert_eq!(ended, Some(Ok(())), "the peer's End resolves the request");
 
     // A request the call accepts and the device then leaves before the next
     // update ends as `Disconnected`; on a lost port it fails at the call; and
@@ -2055,21 +2067,23 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
     let gone = handle.request(ReportRequest::new(DataControl::Full, asked));
     fake.unplug(raw);
     assert_eq!(
-        gone.wait(&mut s),
+        settled(&mut s, gone),
         Err(tutti_session::PeerError::Disconnected)
     );
     assert_eq!(
-        handle
-            .request(ReportRequest::new(DataControl::Full, asked))
-            .wait(&mut s),
+        settled(
+            &mut s,
+            handle.request(ReportRequest::new(DataControl::Full, asked)),
+        ),
         Err(tutti_session::PeerError::Disconnected)
     );
     plug(&fake, 7, "Wire", PortDirection::Duplex);
     let _ = s.update();
     assert_eq!(
-        handle
-            .request(ReportRequest::new(DataControl::Full, asked))
-            .wait(&mut s),
+        settled(
+            &mut s,
+            handle.request(ReportRequest::new(DataControl::Full, asked)),
+        ),
         Err(tutti_session::PeerError::Disconnected)
     );
 }

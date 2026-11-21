@@ -289,13 +289,6 @@ impl Jobs {
         }
     }
 
-    /// Where the typed jobs land: a handle that makes jobs without the session
-    /// in hand makes its tickets on it.
-    #[cfg(feature = "midi-hardware")]
-    pub(crate) fn queue(&self) -> JobOutputQueue {
-        Arc::clone(&self.outputs)
-    }
-
     /// A job with no worker: its ticket lands when the session has the answer.
     pub(crate) fn new_job<J: JobKind>(&self) -> (Job<J>, Ticket<J>) {
         Ticket::new(&self.outputs)

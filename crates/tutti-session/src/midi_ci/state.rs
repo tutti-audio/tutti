@@ -17,10 +17,7 @@ use tutti_midi_ci::{
 use tutti_midi_device::SavedDevice;
 use tutti_midi_hardware::PropertyCall;
 
-use super::{
-    GetProperty, InputRequest, ListedPeer, ListedResource, PeFailure, PeerReply, SetProperty,
-    listing,
-};
+use super::{InputRequest, ListedPeer, ListedResource, PeFailure, PeerReply, listing};
 use crate::{OtherPeer, PeerError, PeerState, SavedPeer};
 
 /// A save of a device's state in flight: it resolves to the state the device
@@ -115,7 +112,7 @@ impl ListedPeer {
                 let get = Self::full_state()
                     .map(|target| ResourceGet::new(target).encoded(encoding_of(&resource)))
                     .map_err(not_sent)?;
-                Ok(resource.link.reply::<GetProperty, _>(
+                Ok(resource.link.reply(
                     resource.peer.ask(PropertyCall::Get(get)),
                     listing(&resource.entry),
                     InputRequest::Get,
@@ -151,7 +148,7 @@ impl ListedPeer {
                     .and_then(|target| ResourceSet::full(target, PeData::State(body)))
                     .map(|set| set.encoded(encoding_of(&resource)))
                     .map_err(not_sent)?;
-                Ok(resource.link.reply::<SetProperty, _>(
+                Ok(resource.link.reply(
                     resource.peer.ask(PropertyCall::Set(set)),
                     listing(&resource.entry),
                     InputRequest::Set,

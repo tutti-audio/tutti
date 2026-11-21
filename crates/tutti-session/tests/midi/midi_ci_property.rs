@@ -3,6 +3,7 @@
 //! peer that serves a store, refuses or stays silent, with the session's clock set
 //! by the test.
 
+use std::future::Future;
 use std::time::Duration;
 
 use tutti_platform::Instant;
@@ -19,14 +20,13 @@ use tutti_midi_device::{EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::FakeCounters;
 use tutti_session::Peer as _;
 use tutti_session::{
-    Job, JobKind, JobOutput, JobStatus, ListedResource, MidiInput, PeFailure, PeerError, Presence,
-    Resource as _, ResourceFact, ResourceId, Session, SessionEvent, Subscription,
-    SubscriptionCause,
+    ListedResource, MidiInput, PeFailure, PeerError, Presence, Resource as _, ResourceFact,
+    ResourceId, Session, SessionEvent, Subscription, SubscriptionCause,
 };
 use tutti_ump::{DeviceIdentity, ManufacturerId, MidiGroup, U7, Ump};
 
 use crate::common::{blocks, play};
-use crate::midi::{connect, hot_plug_session_ci, plug, update_at};
+use crate::midi::{connect, hot_plug_session_ci, plug, polled, update_at};
 
 const RAW: u64 = 9;
 
@@ -223,7 +223,6 @@ struct Wire {
     peer: PePeer,
     start: Instant,
     ms: u64,
-    outputs: Vec<JobOutput>,
     /// What the updates noticed of resources, in order.
     changed: Vec<(ResourceId, ResourceFact)>,
 }
@@ -257,7 +256,6 @@ impl Wire {
             peer: PePeer::new(store, requests),
             start: Instant::now(),
             ms: 0,
-            outputs: Vec::new(),
             changed: Vec::new(),
         };
         wire.run(120);
@@ -274,18 +272,18 @@ impl Wire {
         self.ms += by;
         let now = self.start + Duration::from_millis(self.ms);
         for event in update_at(&mut self.s, now) {
-            match event {
-                SessionEvent::JobDone(output) => self.outputs.push(output),
-                SessionEvent::ResourceChanged { id, fact } => self.changed.push((id, fact)),
-                _ => {}
+            if let SessionEvent::ResourceChanged { id, fact } = event {
+                self.changed.push((id, fact));
             }
         }
         self.peer.answer(&self.fake, now);
         blocks(&self.s, 1);
     }
 
-    fn result<J: JobKind>(&mut self, job: &Job<J>) -> Option<Result<J::Output, J::Error>> {
-        self.outputs.iter_mut().find_map(|output| output.take(job))
+    /// What `request` resolved to, or `None` while it is pending: polled without
+    /// an update.
+    fn result<F: Future + Unpin>(&mut self, request: &mut F) -> Option<F::Output> {
+        polled(request)
     }
 
     /// The Resource the peer's ResourceList names `resource`, as the port's info
@@ -325,9 +323,9 @@ fn the_info_lists_the_resources_of_the_peers_resource_list() {
 #[test]
 fn a_fetch_lands_the_peers_property_data() {
     let mut wire = Wire::new(store());
-    let job = wire.listed(&PeResource::LocalOn).fetch();
+    let mut job = wire.listed(&PeResource::LocalOn).fetch();
     wire.run(60);
-    assert_eq!(wire.result(&job), Some(Ok(on(false))));
+    assert_eq!(wire.result(&mut job), Some(Ok(on(false))));
     assert_eq!(wire.peer.asked, [Asked::Get("LocalOn".to_owned())]);
 }
 
@@ -336,10 +334,10 @@ fn a_fetch_lands_the_peers_property_data() {
 #[test]
 fn a_write_lands_status_200_and_the_peer_holds_the_data() {
     let mut wire = Wire::new(store());
-    let job = wire.listed(&PeResource::LocalOn).write(on(true));
+    let mut job = wire.listed(&PeResource::LocalOn).write(on(true));
     wire.run(60);
-    let Some(Ok(status)) = wire.result(&job) else {
-        panic!("a status: {:?}", wire.outputs);
+    let Some(Ok(status)) = wire.result(&mut job) else {
+        panic!("a status");
     };
     assert_eq!(status.code(), 200);
     assert_eq!(wire.peer.asked, [Asked::Set("LocalOn".to_owned())]);
@@ -352,10 +350,11 @@ fn a_write_lands_status_200_and_the_peer_holds_the_data() {
 #[test]
 fn a_fetch_the_peer_answers_404_is_a_status_not_a_nak() {
     let mut wire = Wire::new(store());
-    let job = wire.listed(&PeResource::DeviceInfo).fetch();
+    let mut job = wire.listed(&PeResource::DeviceInfo).fetch();
     wire.run(60);
-    let Some(Err(PeerError::Refused(PeFailure::Status(status, header)))) = wire.result(&job) else {
-        panic!("a status: {:?}", wire.outputs);
+    let Some(Err(PeerError::Refused(PeFailure::Status(status, header)))) = wire.result(&mut job)
+    else {
+        panic!("a status");
     };
     assert_eq!(status.code(), 404);
     assert_eq!(status, PeStatus::NotFound);
@@ -368,14 +367,14 @@ fn a_fetch_the_peer_answers_404_is_a_status_not_a_nak() {
 fn a_fetch_nothing_answers_times_out_after_the_property_exchange_timeout() {
     let mut wire = Wire::new(store());
     wire.peer.reply = Reply::Silent;
-    let job = wire.listed(&PeResource::LocalOn).fetch();
+    let mut job = wire.listed(&PeResource::LocalOn).fetch();
     wire.run(5);
     let wait = PE_TIMEOUT.as_millis() as u64;
     wire.step(wait - 20);
-    assert_eq!(wire.result(&job), None, "still waiting");
+    assert_eq!(wire.result(&mut job), None, "still waiting");
     wire.step(40);
     wire.run(1);
-    assert_eq!(wire.result(&job), Some(Err(PeerError::TimedOut)));
+    assert_eq!(wire.result(&mut job), Some(Err(PeerError::TimedOut)));
 }
 
 /// A peer that leaves before it answers ends the call as `Disconnected`.
@@ -383,7 +382,7 @@ fn a_fetch_nothing_answers_times_out_after_the_property_exchange_timeout() {
 fn a_fetch_whose_peer_leaves_before_it_answers_is_disconnected() {
     let mut wire = Wire::new(store());
     wire.peer.reply = Reply::Silent;
-    let job = wire.listed(&PeResource::LocalOn).fetch();
+    let mut job = wire.listed(&PeResource::LocalOn).fetch();
     wire.run(5);
     let muid = wire.peer.muid;
     for ump in (CiMessage::InvalidateMuid {
@@ -397,7 +396,7 @@ fn a_fetch_whose_peer_leaves_before_it_answers_is_disconnected() {
         assert!(wire.fake.send_input(EndpointId::from_raw(RAW), ump, now));
     }
     wire.run(5);
-    assert_eq!(wire.result(&job), Some(Err(PeerError::Disconnected)));
+    assert_eq!(wire.result(&mut job), Some(Err(PeerError::Disconnected)));
 }
 
 /// An identical Get is not sent again: both jobs land with its answer.
@@ -405,12 +404,12 @@ fn a_fetch_whose_peer_leaves_before_it_answers_is_disconnected() {
 fn an_identical_repeated_fetch_shares_the_answer_and_is_sent_once() {
     let mut wire = Wire::new(store());
     let res = wire.listed(&PeResource::LocalOn);
-    let first = res.fetch();
-    let second = res.fetch();
+    let mut first = res.fetch();
+    let mut second = res.fetch();
     wire.run(60);
     assert_eq!(wire.peer.asked, [Asked::Get("LocalOn".to_owned())]);
-    assert_eq!(wire.result(&first), Some(Ok(on(false))));
-    assert_eq!(wire.result(&second), Some(Ok(on(false))));
+    assert_eq!(wire.result(&mut first), Some(Ok(on(false))));
+    assert_eq!(wire.result(&mut second), Some(Ok(on(false))));
 }
 
 /// A Set asked while a Get of the same Resource is out waits behind it: the peer is
@@ -420,9 +419,9 @@ fn an_identical_repeated_fetch_shares_the_answer_and_is_sent_once() {
 fn a_write_behind_a_fetch_is_sent_after_it_and_a_later_fetch_reads_it() {
     let mut wire = Wire::new(store());
     let res = wire.listed(&PeResource::LocalOn);
-    let get = res.fetch();
-    let set = res.write(on(true));
-    let again = res.fetch();
+    let mut get = res.fetch();
+    let mut set = res.write(on(true));
+    let mut again = res.fetch();
     wire.run(120);
     assert_eq!(
         wire.peer.asked,
@@ -432,24 +431,23 @@ fn a_write_behind_a_fetch_is_sent_after_it_and_a_later_fetch_reads_it() {
             Asked::Get("LocalOn".to_owned())
         ]
     );
-    assert_eq!(wire.result(&get), Some(Ok(on(false))));
-    assert!(matches!(wire.result(&set), Some(Ok(_))));
-    assert_eq!(wire.result(&again), Some(Ok(on(true))));
+    assert_eq!(wire.result(&mut get), Some(Ok(on(false))));
+    assert!(matches!(wire.result(&mut set), Some(Ok(_))));
+    assert_eq!(wire.result(&mut again), Some(Ok(on(true))));
 }
 
-/// Data of another Resource is not a Set of this one: the job ends at the call
-/// and nothing is sent.
+/// Data of another Resource is not a Set of this one: the future is resolved at
+/// the call and nothing is sent.
 #[test]
 fn a_write_of_another_resources_data_ends_at_the_call_and_sends_nothing() {
     let mut wire = Wire::new(store());
-    let job = wire.listed(&PeResource::DeviceInfo).write(on(true));
-    assert_eq!(job.status(), JobStatus::Done);
-    wire.run(30);
+    let mut job = wire.listed(&PeResource::DeviceInfo).write(on(true));
     let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) =
-        wire.result(&job)
+        wire.result(&mut job)
     else {
-        panic!("not sent: {:?}", wire.outputs);
+        panic!("not sent");
     };
+    wire.run(30);
     assert!(
         matches!(refused, RequestRefused::DataOfAnotherResource { .. }),
         "{refused:?}"
@@ -457,21 +455,18 @@ fn a_write_of_another_resources_data_ends_at_the_call_and_sends_nothing() {
     assert!(wire.peer.asked.is_empty());
 }
 
-/// A request of a port that is lost fails at the call: the job is ended before any
-/// update, and lands `Disconnected` in the next one.
+/// A request of a port that is lost fails at the call: its future is resolved as
+/// `Disconnected` before any update.
 #[test]
 fn a_request_on_a_lost_port_fails_at_the_call() {
     let mut wire = Wire::new(store());
     let res = wire.listed(&PeResource::LocalOn);
     wire.fake.unplug(EndpointId::from_raw(RAW));
     wire.run(2);
-    let get = res.fetch();
-    let set = res.write(on(true));
-    assert_eq!(get.status(), JobStatus::Done);
-    assert_eq!(set.status(), JobStatus::Done);
-    wire.run(1);
-    assert_eq!(wire.result(&get), Some(Err(PeerError::Disconnected)));
-    assert_eq!(wire.result(&set), Some(Err(PeerError::Disconnected)));
+    let mut get = res.fetch();
+    let mut set = res.write(on(true));
+    assert_eq!(wire.result(&mut get), Some(Err(PeerError::Disconnected)));
+    assert_eq!(wire.result(&mut set), Some(Err(PeerError::Disconnected)));
 }
 
 /// A request pending when the port's last handle is dropped ends as `Released`, and one made
@@ -481,31 +476,33 @@ fn a_request_pending_when_the_port_is_released_ends_released() {
     let mut wire = Wire::new(store());
     wire.peer.reply = Reply::Silent;
     let res = wire.listed(&PeResource::LocalOn);
-    let pending = res.fetch();
+    let mut pending = res.fetch();
     wire.run(5);
     drop(wire.port.take());
     wire.run(3);
-    assert_eq!(wire.result(&pending), Some(Err(PeerError::Released)));
-    let late = res.fetch();
-    assert_eq!(late.status(), JobStatus::Done, "ended at the call");
-    wire.run(1);
-    assert_eq!(wire.result(&late), Some(Err(PeerError::Released)));
+    assert_eq!(wire.result(&mut pending), Some(Err(PeerError::Released)));
+    let mut late = res.fetch();
+    assert_eq!(
+        wire.result(&mut late),
+        Some(Err(PeerError::Released)),
+        "ended at the call"
+    );
 }
 
-/// A session that ends with a call pending ends the job, and a handle that
-/// outlives the session ends what it asks at the call.
+/// A session that ends with a call pending resolves it to `Disconnected`, and a
+/// handle that outlives the session ends what it asks at the call.
 #[test]
-fn a_session_dropped_with_a_call_pending_ends_the_job() {
+fn a_session_dropped_with_a_call_pending_resolves_disconnected() {
     let mut wire = Wire::new(store());
     wire.peer.reply = Reply::Silent;
     let res = wire.listed(&PeResource::LocalOn);
-    let pending = res.fetch();
+    let mut pending = res.fetch();
     wire.run(5);
-    let queued = res.write(on(true));
+    let mut queued = res.write(on(true));
     drop(wire);
-    assert_eq!(pending.status(), JobStatus::Done);
-    assert_eq!(queued.status(), JobStatus::Done);
-    assert_eq!(res.fetch().status(), JobStatus::Done);
+    assert_eq!(polled(&mut pending), Some(Err(PeerError::Disconnected)));
+    assert_eq!(polled(&mut queued), Some(Err(PeerError::Disconnected)));
+    assert_eq!(polled(&mut res.fetch()), Some(Err(PeerError::Disconnected)));
 }
 
 /// M2-103 section 8.5: a Resource whose entries are named by a `resId` is not
@@ -516,14 +513,13 @@ fn a_fetch_of_a_resource_that_needs_a_res_id_is_not_sent() {
     let mut states = ResourceStore::new();
     states.declare(ResourceEntry::builder(PeResource::State).build().unwrap());
     let mut wire = Wire::new(states);
-    let job = wire.listed(&PeResource::State).fetch();
-    assert_eq!(job.status(), JobStatus::Done);
-    wire.run(30);
+    let mut job = wire.listed(&PeResource::State).fetch();
     let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) =
-        wire.result(&job)
+        wire.result(&mut job)
     else {
-        panic!("not sent: {:?}", wire.outputs);
+        panic!("not sent");
     };
+    wire.run(30);
     assert!(
         matches!(refused, RequestRefused::ResIdRequired(_)),
         "{refused:?}"
@@ -552,9 +548,9 @@ fn synced() -> ResourceStore {
 #[test]
 fn calls_past_the_peers_simultaneous_requests_wait_for_room_and_all_land() {
     let mut wire = Wire::taking(synced(), 1);
-    let first = wire.listed(&PeResource::LocalOn).fetch();
-    let second = wire.listed(&PeResource::ExternalSync).fetch();
-    let third = wire.listed(&PeResource::LocalOn).write(on(true));
+    let mut first = wire.listed(&PeResource::LocalOn).fetch();
+    let mut second = wire.listed(&PeResource::ExternalSync).fetch();
+    let mut third = wire.listed(&PeResource::LocalOn).write(on(true));
     wire.run(200);
     assert_eq!(
         wire.peer.asked,
@@ -564,12 +560,12 @@ fn calls_past_the_peers_simultaneous_requests_wait_for_room_and_all_land() {
             Asked::Set("LocalOn".to_owned())
         ]
     );
-    assert_eq!(wire.result(&first), Some(Ok(on(false))));
+    assert_eq!(wire.result(&mut first), Some(Ok(on(false))));
     assert_eq!(
-        wire.result(&second),
+        wire.result(&mut second),
         Some(Ok(PeData::ExternalSync(PeExternalSync(true))))
     );
-    assert!(matches!(wire.result(&third), Some(Ok(_))));
+    assert!(matches!(wire.result(&mut third), Some(Ok(_))));
 }
 
 /// M2-103 section 14.2: a Set of a Resource the peer's entry says is read only is
@@ -586,13 +582,12 @@ fn a_write_of_a_read_only_resource_is_not_sent_with_the_rule_it_broke() {
     .expect("json");
     let info = PeData::decode(&PeResource::DeviceInfo, &table_6).expect("DeviceInfo");
     let mut wire = Wire::new(store());
-    let job = wire.listed(&PeResource::DeviceInfo).write(info);
-    assert_eq!(job.status(), JobStatus::Pending, "refused by the Initiator");
+    let mut job = wire.listed(&PeResource::DeviceInfo).write(info);
     wire.run(30);
     let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) =
-        wire.result(&job)
+        wire.result(&mut job)
     else {
-        panic!("not sent: {:?}", wire.outputs);
+        panic!("not sent");
     };
     assert!(
         matches!(refused, RequestRefused::CannotSet { .. }),
@@ -606,12 +601,12 @@ fn a_write_of_a_read_only_resource_is_not_sent_with_the_rule_it_broke() {
 fn an_identical_repeated_write_shares_the_answer_and_is_sent_once() {
     let mut wire = Wire::new(store());
     let res = wire.listed(&PeResource::LocalOn);
-    let first = res.write(on(true));
-    let second = res.write(on(true));
+    let mut first = res.write(on(true));
+    let mut second = res.write(on(true));
     wire.run(60);
     assert_eq!(wire.peer.asked, [Asked::Set("LocalOn".to_owned())]);
-    assert!(matches!(wire.result(&first), Some(Ok(_))));
-    assert!(matches!(wire.result(&second), Some(Ok(_))));
+    assert!(matches!(wire.result(&mut first), Some(Ok(_))));
+    assert!(matches!(wire.result(&mut second), Some(Ok(_))));
 }
 
 /// A Get identical to one that waits behind a Set joins the waiting one: the
@@ -621,9 +616,9 @@ fn an_identical_repeated_write_shares_the_answer_and_is_sent_once() {
 fn a_fetch_joins_an_identical_fetch_still_waiting_behind_a_write() {
     let mut wire = Wire::new(store());
     let res = wire.listed(&PeResource::LocalOn);
-    let set = res.write(on(true));
-    let first = res.fetch();
-    let second = res.fetch();
+    let mut set = res.write(on(true));
+    let mut first = res.fetch();
+    let mut second = res.fetch();
     wire.run(100);
     assert_eq!(
         wire.peer.asked,
@@ -632,9 +627,9 @@ fn a_fetch_joins_an_identical_fetch_still_waiting_behind_a_write() {
             Asked::Get("LocalOn".to_owned())
         ]
     );
-    assert!(matches!(wire.result(&set), Some(Ok(_))));
-    assert_eq!(wire.result(&first), Some(Ok(on(true))));
-    assert_eq!(wire.result(&second), Some(Ok(on(true))));
+    assert!(matches!(wire.result(&mut set), Some(Ok(_))));
+    assert_eq!(wire.result(&mut first), Some(Ok(on(true))));
+    assert_eq!(wire.result(&mut second), Some(Ok(on(true))));
 }
 
 /// A call pending when the device goes ends as `Disconnected`, and the port takes
@@ -643,17 +638,108 @@ fn a_fetch_joins_an_identical_fetch_still_waiting_behind_a_write() {
 fn a_call_pending_across_a_replug_ends_and_the_returned_port_takes_new_ones() {
     let mut wire = Wire::new(store());
     wire.peer.reply = Reply::Silent;
-    let pending = wire.listed(&PeResource::LocalOn).fetch();
+    let mut pending = wire.listed(&PeResource::LocalOn).fetch();
     wire.run(5);
     wire.fake.unplug(EndpointId::from_raw(RAW));
     wire.run(3);
-    assert_eq!(wire.result(&pending), Some(Err(PeerError::Disconnected)));
+    assert_eq!(
+        wire.result(&mut pending),
+        Some(Err(PeerError::Disconnected))
+    );
     plug(&wire.fake, RAW, "Wire", PortDirection::Duplex);
     wire.peer.reply = Reply::Serve;
     wire.run(200);
-    let again = wire.listed(&PeResource::LocalOn).fetch();
+    let mut again = wire.listed(&PeResource::LocalOn).fetch();
     wire.run(60);
-    assert_eq!(wire.result(&again), Some(Ok(on(false))));
+    assert_eq!(wire.result(&mut again), Some(Ok(on(false))));
+}
+
+impl Wire {
+    /// Steps the wire until `request` resolves. The bound is a count of simulated
+    /// milliseconds: it guards a request that never resolves.
+    fn settle<F: Future + Unpin>(&mut self, request: &mut F) -> F::Output {
+        for _ in 0..2000 {
+            if let Some(out) = self.result(request) {
+                return out;
+            }
+            self.step(1);
+        }
+        panic!("the request never resolved");
+    }
+}
+
+/// **A future resolves in the session's updates, not by itself**: a Get polled
+/// with no update stays pending, and the updates that send it and read the answer
+/// make it ready.
+#[test]
+fn a_fetch_is_pending_until_the_session_updates() {
+    let mut wire = Wire::new(store());
+    let mut fetch = wire.listed(&PeResource::LocalOn).fetch();
+    for _ in 0..3 {
+        assert_eq!(wire.result(&mut fetch), None, "no update has run");
+    }
+    assert_eq!(wire.settle(&mut fetch), Ok(on(false)));
+}
+
+/// As a Get, a Set is pending until the session updates.
+#[test]
+fn a_write_is_pending_until_the_session_updates() {
+    let mut wire = Wire::new(store());
+    let mut write = wire.listed(&PeResource::LocalOn).write(on(true));
+    for _ in 0..3 {
+        assert_eq!(wire.result(&mut write), None, "no update has run");
+    }
+    assert_eq!(wire.settle(&mut write).map(|status| status.code()), Ok(200));
+}
+
+/// As a Get, a Subscription is pending until the session updates.
+#[test]
+fn a_subscribe_is_pending_until_the_session_updates() {
+    let mut wire = Wire::new(subscribable());
+    let mut subscribe = wire.listed(&PeResource::LocalOn).subscribe();
+    for _ in 0..3 {
+        assert!(wire.result(&mut subscribe).is_none(), "no update has run");
+    }
+    let lease = wire.settle(&mut subscribe).expect("a lease");
+    assert_eq!(lease.presence(), Presence::Live);
+}
+
+/// A Subscription that waits for room in a peer that takes one request, and one
+/// still in the port's queue, resolve to `Disconnected` when the device goes
+/// away, and never hang.
+#[test]
+fn a_subscribe_whose_device_goes_away_resolves_to_disconnected() {
+    let mut wire = Wire::taking(subscribable(), 1);
+    wire.peer.reply = Reply::Silent;
+    let _get = wire.listed(&PeResource::DeviceInfo).fetch();
+    wire.run(10);
+    let mut waiting = wire.listed(&PeResource::LocalOn).subscribe();
+    wire.run(10);
+    assert!(wire.result(&mut waiting).is_none(), "waits for room");
+    let mut queued = wire.listed(&PeResource::LocalOn).subscribe();
+    wire.fake.unplug(EndpointId::from_raw(RAW));
+    wire.run(3);
+    assert!(matches!(
+        wire.result(&mut waiting),
+        Some(Err(PeerError::Disconnected))
+    ));
+    assert!(matches!(
+        wire.result(&mut queued),
+        Some(Err(PeerError::Disconnected))
+    ));
+}
+
+/// A Set whose device goes away before the peer answers resolves to
+/// `Disconnected`, and never hangs.
+#[test]
+fn a_write_whose_device_goes_away_resolves_to_disconnected() {
+    let mut wire = Wire::new(store());
+    wire.peer.reply = Reply::Silent;
+    let mut write = wire.listed(&PeResource::LocalOn).write(on(true));
+    wire.run(5);
+    wire.fake.unplug(EndpointId::from_raw(RAW));
+    wire.run(3);
+    assert_eq!(wire.result(&mut write), Some(Err(PeerError::Disconnected)));
 }
 
 // --- Subscriptions (M2-103 section 11) ---
@@ -707,9 +793,9 @@ impl Wire {
     /// Subscribes to `resource` and runs until the lease and its first Property
     /// Data have come.
     fn subscribed(&mut self, resource: &PeResource) -> Subscription {
-        let job = self.listed(resource).subscribe();
+        let mut job = self.listed(resource).subscribe();
         self.run(80);
-        match self.result(&job) {
+        match self.result(&mut job) {
             Some(Ok(lease)) => lease,
             other => panic!("a lease: {other:?}"),
         }
@@ -925,13 +1011,13 @@ fn a_subscription_whose_port_is_lost_reads_port_lost() {
 #[test]
 fn subscriptions_past_the_peers_simultaneous_requests_wait_for_room() {
     let mut wire = Wire::taking(subscribable(), 1);
-    let get = wire.listed(&PeResource::DeviceInfo).fetch();
-    let first = wire.listed(&PeResource::LocalOn).subscribe();
-    let second = wire.listed(&PeResource::DeviceInfo).subscribe();
+    let mut get = wire.listed(&PeResource::DeviceInfo).fetch();
+    let mut first = wire.listed(&PeResource::LocalOn).subscribe();
+    let mut second = wire.listed(&PeResource::DeviceInfo).subscribe();
     wire.run(300);
-    assert_eq!(wire.result(&get), Some(Ok(device_info("Workbench"))));
-    assert!(matches!(wire.result(&first), Some(Ok(_))));
-    assert!(matches!(wire.result(&second), Some(Ok(_))));
+    assert_eq!(wire.result(&mut get), Some(Ok(device_info("Workbench"))));
+    assert!(matches!(wire.result(&mut first), Some(Ok(_))));
+    assert!(matches!(wire.result(&mut second), Some(Ok(_))));
     let at = |wanted: Asked| {
         wire.peer
             .asked
@@ -950,12 +1036,12 @@ fn subscriptions_past_the_peers_simultaneous_requests_wait_for_room() {
 #[test]
 fn a_subscribe_to_a_resource_the_entry_forbids_is_not_sent() {
     let mut wire = Wire::new(store());
-    let job = wire.listed(&PeResource::LocalOn).subscribe();
+    let mut job = wire.listed(&PeResource::LocalOn).subscribe();
     wire.run(30);
     let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) =
-        wire.result(&job)
+        wire.result(&mut job)
     else {
-        panic!("not sent: {:?}", wire.outputs);
+        panic!("not sent");
     };
     assert!(
         matches!(refused, RequestRefused::CannotSubscribe(_)),
@@ -1062,7 +1148,7 @@ fn an_unsubscribe_past_the_peers_simultaneous_requests_waits_and_goes_out() {
     let mut wire = Wire::taking(subscribable(), 1);
     let lease = wire.subscribed(&PeResource::LocalOn);
     wire.peer.reply = Reply::Silent;
-    let get = wire.listed(&PeResource::DeviceInfo).fetch();
+    let mut get = wire.listed(&PeResource::DeviceInfo).fetch();
     wire.run(10);
     drop(lease);
     wire.run(10);
@@ -1070,7 +1156,7 @@ fn an_unsubscribe_past_the_peers_simultaneous_requests_waits_and_goes_out() {
     wire.peer.reply = Reply::Serve;
     wire.step(PE_TIMEOUT.as_millis() as u64 + 100);
     wire.run(60);
-    assert_eq!(wire.result(&get), Some(Err(PeerError::TimedOut)));
+    assert_eq!(wire.result(&mut get), Some(Err(PeerError::TimedOut)));
     assert_eq!(wire.peer.asked.last(), Some(&Asked::Unsubscribe));
     assert_eq!(wire.peer.responder.subscriptions().count(), 0);
 }
