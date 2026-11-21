@@ -113,7 +113,7 @@ impl<F: SamplerFloat> Clip<F> {
     /// channel in the wrong place.
     pub fn new(wave: impl Into<Arc<Wave<F>>>) -> Result<Self, PlaceError> {
         let wave = wave.into();
-        let width = voice_width(ChannelLayout::clamped(wave.channels()));
+        let width = voice_width(ChannelLayout::clamped(wave.channels()))?;
         Ok(Self::over(Tier::Resident {
             source: Box::new(MemorySource::with_channels(Arc::clone(&wave), width)?),
             wave,

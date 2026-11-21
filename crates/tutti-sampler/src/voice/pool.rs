@@ -11,7 +11,7 @@ use tutti_buffers::MAX_CHANNELS;
 
 use super::clock::{BlockClock, Clock};
 use super::command::{
-    COMMAND_CAPACITY, MAX_RESIDENT_VOICES, Queued, VoiceCommand, VoicePoolHandle,
+    COMMAND_CAPACITY, MAX_RESIDENT_VOICES, Queued, Tier, VoiceCommand, VoicePoolHandle,
 };
 use super::loop_span::Loop;
 use super::memory_source::MemorySource;
@@ -105,6 +105,8 @@ pub(crate) enum Retired<F: SamplerFloat> {
     /// callback), and dropping it would free the box, the source and the
     /// vocoder there. Counted as [`PoolDrops::voices_refused`].
     Refused {
+        /// The slot the add named, which the handle frees on collecting this.
+        id: SlotId,
         voice: Box<Voice<F>>,
         stretch: Option<Box<Vocoders<F>>>,
     },
@@ -459,6 +461,19 @@ impl<F: SamplerFloat> VoicePool<F> {
             counters: Arc::clone(&self.counters),
             streams: Arc::default(),
             free: Arc::default(),
+            // Voices inserted before the handle was made are live too.
+            live: Arc::new(Mutex::new(
+                self.voices
+                    .iter()
+                    .map(|s| {
+                        let tier = match s.voice.source {
+                            VoiceSource::Memory(_) => Tier::Memory,
+                            VoiceSource::Disk(_) => Tier::Disk,
+                        };
+                        (s.id, tier)
+                    })
+                    .collect(),
+            )),
         };
         (self, handle)
     }
@@ -724,7 +739,7 @@ impl<F: SamplerFloat> VoicePool<F> {
                     let replaces = self.voices.iter().any(|s| s.id == id);
                     if !replaces && self.voices.len() == self.voices.capacity() {
                         DrainCounters::bump(&self.counters.voices_refused);
-                        self.retire(Retired::Refused { voice, stretch });
+                        self.retire(Retired::Refused { id, voice, stretch });
                         continue;
                     }
                     // The vocoder arrives prebuilt from `send` (control thread);

@@ -146,7 +146,9 @@ fn a_gain_set_through_the_controls_reaches_the_running_voice() {
         all_at(&block(&mut s), 0.25),
         "the value did not survive the commit"
     );
-    s.controls().set_gain(Amplitude::new(0.5));
+    s.controls()
+        .set_gain(Amplitude::new(0.5))
+        .expect("a finite gain");
     assert!(all_at(&block(&mut s), 0.5), "the typed door");
     assert_eq!(s.controls().gain(), Amplitude::new(0.5));
 }

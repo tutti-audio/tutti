@@ -89,7 +89,8 @@ impl<F: SamplerFloat> DiskSource<F> {
         reader: tutti_rt::PosReader<F>,
         shared_state: Arc<Cells>,
     ) -> Self {
-        let width = crate::voice_width(consumer.channels());
+        let width =
+            crate::voice_width(consumer.channels()).expect("a test ring's width is a voice's");
         let place = Place::for_topology(consumer.topology(), width)
             .expect("a test ring is placeable at its own width");
         let control = consumer.control_reader();
@@ -115,7 +116,7 @@ impl<F: SamplerFloat> DiskSource<F> {
         width: ChannelLayout,
         place: Place<F>,
     ) -> Self {
-        let channels = crate::voice_width(width);
+        let channels = width;
         let stride = channels.count() as usize;
         Self {
             read: Box::new(LiveRead::new(consumer, reader, stride, place)),

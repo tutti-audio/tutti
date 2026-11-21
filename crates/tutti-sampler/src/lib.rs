@@ -225,10 +225,10 @@ impl<F: tutti_rt::RingFloat + tutti_dsp::FftFloat> SamplerFloat for F {}
 // `DiskVoice`'s `inner` — one capability, and only the outer type is a doorway.
 //
 pub use voice::{
-    Direction, DiskVoice, DiskVoiceControls, Loop, LoopError, MemorySource, MemorySourceConfig,
-    PlayError, Playback, PoolDrops, PoolTooWide, SendError, SlotId, StreamingAddError, Voice,
-    VoiceNode, VoiceNodeHandle, VoicePool, VoicePoolHandle, VoiceSource, VoiceWindow, memory_voice,
-    voice_width,
+    Direction, DiskVoice, DiskVoiceControls, GainError, Loop, LoopError, MemorySource,
+    MemorySourceConfig, PlayError, Playback, PoolDrops, PoolTooWide, SendError, SlotId,
+    StreamingAddError, Voice, VoiceNode, VoiceNodeHandle, VoicePool, VoicePoolHandle, VoiceSource,
+    VoiceWindow, memory_voice, voice_width,
 };
 // The async disk-streaming engine (streamer future + the `DiskStreamer` handle).
 pub(crate) mod streamer;

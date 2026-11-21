@@ -30,11 +30,11 @@ use tutti_graph::Node;
 use tutti_graph::contract::Direct;
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::{
-    Direction, MemorySource, MemorySourceConfig, Playback, SlotId, Voice, VoiceNode, VoicePool,
-    VoicePoolHandle, VoiceSource, VoiceWindow,
+    Direction, MemorySource, MemorySourceConfig, Playback, SendError, SlotId, Voice, VoiceNode,
+    VoicePool, VoicePoolHandle, VoiceSource, VoiceWindow,
 };
 use tutti_units::{
-    Beat, BeatDuration, Bpm, Cents, PlaybackRate, SampleRate, Seconds, StretchFactor,
+    Amplitude, Beat, BeatDuration, Bpm, Cents, PlaybackRate, SampleRate, Seconds, StretchFactor,
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -1198,10 +1198,20 @@ fn an_add_past_the_voice_cap_is_refused_without_allocating() {
         extra_weak.upgrade().is_some(),
         "the refused voice waits in the retirement channel"
     );
+    assert_eq!(
+        handle.set_gain(SlotId(CAP as u128), Amplitude::new(0.5)),
+        Ok(()),
+        "until collected, the handle counts the refused id as live"
+    );
     assert_eq!(handle.collect_retired(), 1, "it is handed back");
     assert!(
         extra_weak.upgrade().is_none(),
         "and freed here, on the control thread"
+    );
+    assert_eq!(
+        handle.set_gain(SlotId(CAP as u128), Amplitude::new(0.5)),
+        Err(SendError::NoSuchSlot(SlotId(CAP as u128))),
+        "the refused add holds no slot, so its id is free again"
     );
 }
 
@@ -1230,9 +1240,9 @@ fn update_loop_drain_is_allocation_free_at_six_channels() {
         },
     )
     .expect("a placeable wave");
-    reader
-        .node()
-        .insert(SlotId(1), sampler, Playback::default());
+    handle
+        .add(SlotId(1), sampler, Playback::default())
+        .expect("the command queue has room in a test");
 
     for _ in 0..16 {
         reader.block();
@@ -1374,14 +1384,15 @@ fn replacing_a_wave_retires_the_old_one_rather_than_freeing_it_in_the_drain() {
         "collect_retired must free the old wave, on the control side"
     );
 
-    // A `ReplaceWave` for a slot that does not exist sheds its own wave.
+    // A swap for a slot that does not exist is refused at the call: the wave
+    // is dropped by the caller's own call, and nothing is queued.
     let orphan = sine_wave(0.5, 48_000.0);
     let orphan_weak = Arc::downgrade(&orphan);
-    handle
-        .replace_wave(SlotId(99), orphan)
-        .expect("the command queue has room in a test");
+    assert_eq!(
+        handle.replace_wave(SlotId(99), orphan),
+        Err(SendError::NoSuchSlot(SlotId(99)))
+    );
+    assert_eq!(orphan_weak.strong_count(), 0, "freed here, never queued");
     assert_no_alloc::assert_no_alloc(|| rig.block());
-    assert_eq!(orphan_weak.strong_count(), 1, "retired, not freed");
-    assert_eq!(handle.collect_retired(), 1);
-    assert_eq!(orphan_weak.strong_count(), 0);
+    assert_eq!(handle.collect_retired(), 0, "nothing reached the pool");
 }

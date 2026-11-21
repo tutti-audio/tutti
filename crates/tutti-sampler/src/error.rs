@@ -48,4 +48,19 @@ pub enum PlaceError {
     /// a clip cannot be placed at another.
     #[error("a streamed clip is as wide as its stream, which was opened at that width")]
     Streamed,
+    /// The voice's width is zero: a node that reports no outputs is one
+    /// nothing can be wired to.
+    #[error("a voice needs at least one channel")]
+    EmptyWidth,
+    /// The voice's width is past the sampler's per-read ceiling
+    /// ([`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)): a voice wider than the
+    /// graph root can render is one nobody can hear, and a narrower one would
+    /// drop channels silently.
+    #[error("a voice of {channels} channels is wider than the sampler's {max}")]
+    WidthTooWide {
+        /// The width asked for.
+        channels: u16,
+        /// The widest a voice runs at.
+        max: u16,
+    },
 }

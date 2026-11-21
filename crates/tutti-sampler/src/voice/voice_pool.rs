@@ -803,6 +803,8 @@ fn a_stretched_disk_voice_consumes_its_source_at_the_stretched_rate() {
 const STREAM_1: crate::streamer::StreamId = crate::streamer::StreamId::of(1);
 #[cfg(test)]
 const STREAM_2: crate::streamer::StreamId = crate::streamer::StreamId::of(2);
+#[cfg(test)]
+const STREAM_3: crate::streamer::StreamId = crate::streamer::StreamId::of(3);
 
 /// Dominant frequency by Hann-windowed DFT scan — a test helper, not
 /// production code. Coarse (2 Hz) because the assertion tolerance is 2%.
@@ -1542,13 +1544,20 @@ fn add_with_stream(
     voice: Voice<f32>,
     port: &crate::streamer::StreamerPort<f32>,
 ) {
+    add_with_stream_result(handle, id, voice, port).expect("the command queue has room in a test");
+}
+
+fn add_with_stream_result(
+    handle: &VoicePoolHandle<f32>,
+    id: SlotId,
+    voice: Voice<f32>,
+    port: &crate::streamer::StreamerPort<f32>,
+) -> Result<(), Box<StreamingAddError<f32>>> {
     let stream = stream_of(&voice, port);
     let VoiceSource::Disk(disk) = voice.source else {
         unreachable!("a streaming voice")
     };
-    handle
-        .add_streaming(id, disk, stream, voice.play)
-        .expect("the command queue has room in a test");
+    handle.add_streaming(id, disk, stream, voice.play)
 }
 
 fn looped(mut voice: Voice<f32>) -> Voice<f32> {
@@ -1714,10 +1723,10 @@ fn a_direction_set_through_the_handle_reaches_the_stream() {
 }
 
 /// A stream ends with its voice: the handle holds it from the add, and a
-/// `Remove` (or an add at the same id) drops it, which sends the streamer
-/// its close.
+/// `Remove` drops it, which sends the streamer its close. An add at a live id
+/// is refused and hands its stream back, and the resident stream stays open.
 #[test]
-fn a_stream_ends_when_its_voice_is_removed_or_replaced() {
+fn a_stream_ends_when_its_voice_is_removed() {
     use crate::streamer::StreamerCommand as C;
     let (commands, streamer) = test_streamer(8);
     let (_pool, handle) = VoicePool::new().with_handle();
@@ -1728,20 +1737,36 @@ fn a_stream_ends_when_its_voice_is_removed_or_replaced() {
         0,
         "an add with nothing to set sends nothing"
     );
-    handle.send(VoiceCommand::Remove(id)).expect("room");
+    handle.remove(id).expect("room");
     assert!(matches!(
         streamer.try_iter().collect::<Vec<_>>().as_slice(),
         [C::Close { stream: STREAM_1 }]
     ));
 
     add_with_stream(&handle, id, streaming_voice_of(2), &commands);
-    add_with_stream(&handle, id, streaming_voice_of(3), &commands);
+    let refused = add_with_stream_result(&handle, id, streaming_voice_of(3), &commands)
+        .expect_err("the id is live");
+    assert_eq!(refused.error, SendError::SlotInUse(id));
+    assert_eq!(
+        streamer.try_iter().count(),
+        0,
+        "the refused add ended nothing: the resident voice's stream stays open"
+    );
+    drop(refused);
+    assert!(
+        matches!(
+            streamer.try_iter().collect::<Vec<_>>().as_slice(),
+            [C::Close { stream: STREAM_3 }]
+        ),
+        "only the stream handed back ends, when its caller drops it"
+    );
+    handle.remove(id).expect("room");
     assert!(
         matches!(
             streamer.try_iter().collect::<Vec<_>>().as_slice(),
             [C::Close { stream: STREAM_2 }]
         ),
-        "the replaced voice's stream ended, the replacing one's did not"
+        "the resident voice's stream ended, the refused one's did not open"
     );
 }
 
@@ -2188,6 +2213,7 @@ fn send_builds_the_stretch_filter_not_the_drain() {
             counters: Default::default(),
             streams: Default::default(),
             free: Default::default(),
+            live: Default::default(),
         };
         probe
             .send(VoiceCommand::AddVoice {

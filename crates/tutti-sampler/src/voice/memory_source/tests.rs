@@ -1134,12 +1134,25 @@ fn with_channels_declares_the_width() {
     let u = MemorySource::with_channels(indexed_wave(6, 32), 6u16).expect("a placeable wave");
     assert_eq!(u.channels(), ChannelLayout::from(6u16));
     assert_eq!(u.shape().audio_out().count(), 6);
+}
+
+/// A width of no channels, or past the sampler's ceiling, is refused, never
+/// coerced to mono or narrowed.
+#[test]
+fn with_channels_refuses_a_width_the_sampler_cannot_run() {
+    let max = tutti_buffers::MAX_CHANNELS as u16;
     assert_eq!(
-        MemorySource::with_channels(indexed_wave(2, 32), 0u16)
-            .expect("a placeable wave")
-            .channels(),
-        ChannelLayout::MONO
+        MemorySource::with_channels(indexed_wave(2, 32), 0u16).err(),
+        Some(PlaceError::EmptyWidth)
     );
+    assert_eq!(
+        MemorySource::with_channels(indexed_wave(2, 32), max + 1).err(),
+        Some(PlaceError::WidthTooWide {
+            channels: max + 1,
+            max
+        })
+    );
+    assert!(MemorySource::with_channels(indexed_wave(2, 32), max).is_ok());
 }
 
 /// The node's shape is its declared width, a source's: no inputs, no latency,
