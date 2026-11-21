@@ -66,8 +66,9 @@ fn a_mono_source_reaches_both_sides_of_a_stereo_strip() {
         .expect("a mono bus folds onto a stereo one")
         .unfaded();
     for c in 0..2 {
-        g.set_sources_unfaded(Root::output(c), [OutPort::new(strip, c)])
-            .unwrap();
+        g.set_sources(Root::output(c), [OutPort::new(strip, c)])
+            .unwrap()
+            .unfaded();
     }
     assert_eq!(heard(&mut s, 2), [0.5, 0.5]);
 }

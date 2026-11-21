@@ -1,4 +1,4 @@
-//! `Graph::open_event_inlet` and `add_event_inlet`: MIDI a thread of your own
+//! `Graph::open_event_inlet` and `Graph::add` of a prebuilt inlet node: MIDI a thread of your own
 //! pushes into the session's graph, each event on its frame.
 //!
 //! The graph's suite (`tutti-graph/tests/event_inlet.rs`) holds the node:
@@ -61,7 +61,7 @@ fn pushed_events_come_out_at_their_frames() {
     let (key, mut writer) = s.graph().open_event_inlet(EventCapacity::of(64));
     assert!(s.graph().is_edited(), "the open inserted a node");
     let (node, mut prebuilt) = EventInletNode::pair(EventCapacity::of(64));
-    let key2 = s.graph().add_event_inlet(node);
+    let key2 = s.graph().add(node);
     assert_ne!(key, key2);
     let mut tap = s
         .graph()
@@ -123,8 +123,9 @@ fn an_export_fork_is_accepted_and_silent() {
         .connect(key.events_out(), hear.events_in())
         .unwrap();
     s.graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(hear, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(hear, 0)])
+        .unwrap()
+        .unfaded();
     let _ = s.update();
     writer.push(Stamp::NextBlock, note(1)).unwrap();
     let mut fork = s.graph_ref().testing().fork_live().expect("an inlet forks");
@@ -154,8 +155,9 @@ fn an_event_edge_is_cut_with_one_commit_and_not_faded() {
         .connect(key.events_out(), hear.events_in())
         .unwrap();
     s.graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(hear, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(hear, 0)])
+        .unwrap()
+        .unfaded();
     let _ = s.update();
 
     writer.push(Stamp::NextBlock, note(1)).unwrap();
@@ -167,6 +169,7 @@ fn an_event_edge_is_cut_with_one_commit_and_not_faded() {
         s.graph()
             .disconnect(key.events_out(), hear.events_in())
             .unwrap()
+            .was_connected()
     );
     assert!(
         s.graph_ref().sources(hear.events_in()).unwrap().is_empty(),

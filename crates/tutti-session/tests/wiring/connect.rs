@@ -25,8 +25,9 @@ fn first_frame(s: &mut Session) -> [f32; 2] {
 fn feed_root(s: &mut Session, node: NodeKey) {
     for c in 0..2 {
         s.graph()
-            .set_sources_unfaded(Root::output(c), [OutPort::new(node, c)])
-            .unwrap();
+            .set_sources(Root::output(c), [OutPort::new(node, c)])
+            .unwrap()
+            .unfaded();
     }
 }
 
@@ -48,9 +49,10 @@ fn connect_wires_each_channel_to_its_own() {
     assert_eq!(first_frame(&mut s), [0.25, 0.5]);
 }
 
-/// **`chain` connects each node to the next**: source, two pass-throughs.
+/// **`connect` along a path wires each node to the next**: source, two
+/// pass-throughs.
 #[test]
-fn chain_connects_each_node_to_the_next() {
+fn connect_wires_each_node_to_the_next() {
     let mut s = offline();
     let src = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.5])));
     let a = s
@@ -59,11 +61,10 @@ fn chain_connects_each_node_to_the_next() {
     let b = s
         .graph()
         .add(ForkByClone(Through::new(ChannelLayout::STEREO)));
-    s.graph()
-        .chain([src.erase(), a.erase(), b.erase()])
-        .expect("all stereo");
+    s.graph().connect(src, a).expect("all stereo");
+    s.graph().connect(a, b).expect("all stereo");
     feed_root(&mut s, b.erase());
-    // The chain's links fade in over 256 frames: the fifth 64-frame block
+    // The links fade in over 256 frames: the fifth 64-frame block
     // starts past it.
     for _ in 0..4 {
         first_frame(&mut s);
@@ -89,7 +90,7 @@ fn connect_adds_to_what_feeds_the_input() {
 
 /// **Mismatched main-bus widths are refused, and nothing is stored**: a mono
 /// source into a stereo input is `ConnectError::Width`, never a truncation or
-/// a zero fill; a chain refuses at its bad link with nothing wired before it.
+/// a zero fill; a connect refuses at its bad link and wires nothing.
 #[test]
 fn a_width_mismatch_is_refused_and_stores_nothing() {
     let mut s = offline();
@@ -113,7 +114,7 @@ fn a_width_mismatch_is_refused_and_stores_nothing() {
         }
     );
     assert_eq!(
-        s.graph().chain([stereo, more, narrow]).unwrap_err(),
+        s.graph().connect(more, narrow).unwrap_err(),
         ConnectError::Width {
             from: more.erase(),
             from_width: 2,

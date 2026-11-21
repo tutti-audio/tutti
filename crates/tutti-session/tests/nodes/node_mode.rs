@@ -53,10 +53,12 @@ fn rig() -> Rig {
     let g = s.graph();
     let a = g.add(ForkByClone(Const::mono(A)));
     let halve = g.add(ForkByClone(Halve));
-    g.set_sources_unfaded(InPort::new(halve, 0), [OutPort::new(a, 0)])
-        .unwrap();
-    g.set_sources_unfaded(Root::output(0), [OutPort::new(halve, 0)])
-        .unwrap();
+    g.set_sources(InPort::new(halve, 0), [OutPort::new(a, 0)])
+        .unwrap()
+        .unfaded();
+    g.set_sources(Root::output(0), [OutPort::new(halve, 0)])
+        .unwrap()
+        .unfaded();
     let _ = s.update();
     assert!(!s.graph_ref().is_edited());
     Rig { s, halve }

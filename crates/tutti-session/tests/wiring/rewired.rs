@@ -82,8 +82,9 @@ fn a_connect_and_the_loss_of_the_last_source_are_each_reported_once() {
     assert_eq!(rewired(&s.update()), [], "reported once");
 
     let g = s.graph();
-    g.disconnect_unfaded(OutPort::new(a, 0), x.input(2))
-        .unwrap();
+    g.disconnect(OutPort::new(a, 0), x.input(2))
+        .unwrap()
+        .unfaded();
     assert_eq!(
         rewired(&s.update()),
         [(x.erase(), wired(0b100, 0b100), wired(0, 0b100))],
