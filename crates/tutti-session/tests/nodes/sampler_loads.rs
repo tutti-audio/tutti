@@ -139,7 +139,7 @@ fn clip_of(path: &Path, streamed: bool) -> (Session, tutti_sampler::Clip<f32>) {
 /// waiting first for a streamed clip's ring to prime.
 fn play(clip: tutti_sampler::Clip<f32>, frames: usize) -> Vec<f32> {
     let mut s = session();
-    let (key, handle) = s.graph().add(clip);
+    let (key, _) = s.graph().add(clip);
     s.graph()
         .set_sources(Root::output(0), [OutPort::new(key, 0)])
         .expect("the clip's channel into the root's");
@@ -148,7 +148,7 @@ fn play(clip: tutti_sampler::Clip<f32>, frames: usize) -> Vec<f32> {
     // offline render does not wait for it: wait for the stream to say it is
     // primed.
     let deadline = Instant::now() + Duration::from_secs(10);
-    while let Some(status) = handle.status() {
+    while let Some(status) = s.graph_ref().handle(&key).and_then(|h| h.status()) {
         if status.phase != StreamPhase::Opening {
             break;
         }
@@ -163,7 +163,6 @@ fn play(clip: tutti_sampler::Clip<f32>, frames: usize) -> Vec<f32> {
         out.extend(block.chunks(2).map(|frame| frame[0]));
     }
     out.truncate(frames);
-    drop(handle);
     out
 }
 

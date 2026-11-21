@@ -2,82 +2,44 @@
 // MeltySynth (Copyright (C) 2021 Nobuaki Tanaka). The MIT notice is
 // LICENSE-RUSTYSYNTH.txt, at the root of this crate.
 
-use tutti_units::{Bipolar, Hz, Seconds};
+use tutti_dsp::{Lfo as Wave, LfoWave};
+use tutti_units::{Bipolar, Hz, SampleRate, Samples, Seconds};
 
 use crate::render::Render;
 
 /// A triangle LFO (SF2 2.04 section 8.1.2, generators 21 to 24) read once a chunk: its
-/// value is a closed form of the time elapsed, in `f64`, so it does not drift however
-/// long the voice sounds.
+/// value is a closed form of the frames elapsed, so it does not drift however long the voice
+/// sounds. A frequency of a millihertz or less is no LFO: its value stays zero.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub(crate) struct Lfo {
-    sample_rate: i32,
-    block_size: usize,
-
-    active: bool,
-
-    delay: Seconds,
-    period: Seconds,
-
-    processed_sample_count: usize,
-    value: Bipolar,
+    rate: SampleRate,
+    block_size: Samples,
+    wave: Option<Wave>,
 }
 
 impl Lfo {
     pub(crate) fn new(settings: &Render) -> Self {
         Self {
-            sample_rate: settings.hz(),
-            block_size: settings.block_len(),
-            active: false,
-            delay: Seconds::new(0.0),
-            period: Seconds::new(0.0),
-            processed_sample_count: 0,
-            value: Bipolar::ZERO,
+            rate: settings.rate(),
+            block_size: Samples::new(settings.block_len()),
+            wave: None,
         }
     }
 
     pub(crate) fn start(&mut self, delay: Seconds, frequency: Hz) {
-        if frequency > Hz::new(1.0e-3) {
-            self.active = true;
-
-            self.delay = delay;
-            self.period = Seconds::new(1.0 / frequency.get());
-
-            self.processed_sample_count = 0;
-            self.value = Bipolar::ZERO;
-        } else {
-            self.active = false;
-            self.value = Bipolar::ZERO;
-        }
+        self.wave = (frequency > Hz::new(1.0e-3))
+            .then(|| Wave::new(LfoWave::Triangle, frequency, self.rate).delay(delay));
     }
 
     pub(crate) fn process(&mut self) {
-        if !self.active {
-            return;
-        }
-
-        self.processed_sample_count += self.block_size;
-
-        let current_time =
-            Seconds::new(self.processed_sample_count as f64 / f64::from(self.sample_rate));
-
-        if current_time < self.delay {
-            self.value = Bipolar::ZERO;
-        } else {
-            let phase = ((current_time - self.delay).get() % self.period.get()) / self.period.get();
-            if phase < 0.25 {
-                self.value = Bipolar::clamped(4.0 * phase);
-            } else if phase < 0.75 {
-                self.value = Bipolar::clamped(4.0 * (0.5 - phase));
-            } else {
-                self.value = Bipolar::clamped(4.0 * (phase - 1.0));
-            }
+        if let Some(wave) = &mut self.wave {
+            wave.advance(self.block_size);
         }
     }
 
     /// The wave's value in `-1..=1` at the last chunk.
     pub(crate) fn value(&self) -> Bipolar {
-        self.value
+        self.wave.as_ref().map_or(Bipolar::ZERO, Wave::value)
     }
 }
