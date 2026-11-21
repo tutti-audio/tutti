@@ -306,6 +306,10 @@ pub mod nodes {
         EnvelopeStages, EnvelopeStep,
     };
     pub use tutti_dsp::{
+        FillController, LoopBandwidth, LoopBandwidthError, VariableRate, VariableRateError,
+        VariableResampler,
+    };
+    pub use tutti_dsp::{
         GrainScheduler, GrainSettings, Granular, MaxGrains, MaxGrainsError, Onset,
     };
     pub use tutti_dsp::{

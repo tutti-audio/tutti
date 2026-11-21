@@ -1,6 +1,7 @@
-//! The reverbs' and the phase vocoder's audio-thread paths allocate nothing: the banks' `retarget`,
-//! `process` and `tail_of`, the network design in place, and the vocoder's `retarget`,
-//! `input_needed` and `process`.
+//! The reverbs', the phase vocoder's and the drift corrector's audio-thread paths allocate nothing:
+//! the banks' `retarget`, `process` and `tail_of`, the network design in place, the vocoder's
+//! `retarget`, `input_needed` and `process`, and the variable resampler's `input_needed` and
+//! `process` with its fill controller's `observe`.
 //!
 //! The crate carries no `assert_no_alloc` dev-dependency,
 //! so this binary counts allocations with its own global allocator, per thread.
@@ -152,6 +153,38 @@ fn the_phase_vocoder_retargets_and_renders_without_allocating() {
                 PlanesMut::new(&mut [&mut left, &mut right]).unwrap(),
             );
             std::hint::black_box(counts);
+        });
+        assert_eq!(n, 0, "block {block} allocated");
+    }
+}
+
+/// The drift corrector's audio-thread path allocates nothing: the controller's `observe`,
+/// the resampler's `input_needed` and `process`, with a different ratio every block and
+/// windows that straddle the history, after the one `VariableResampler::new` that builds the
+/// table.
+#[test]
+fn the_variable_resampler_and_its_controller_allocate_nothing() {
+    use tutti_buffers::{ChannelLayout, Planes, PlanesMut};
+    use tutti_dsp::{FillController, VariableResampler};
+    use tutti_units::Samples;
+
+    let mut resampler = VariableResampler::<f32>::new(ChannelLayout::STEREO);
+    let mut controller = FillController::new(Samples::new(512), SampleRate::SR_48K);
+    let input = vec![0.25f32; 700];
+    let (mut left, mut right) = (vec![0.0f32; 64], vec![0.0f32; 64]);
+    for block in 0..64usize {
+        let n = allocations(|| {
+            let ratio = controller.observe(Samples::new(500 + block), Samples::new(64));
+            let needed = resampler.input_needed(Samples::new(64), ratio).get();
+            let planes = [&input[..needed], &input[..needed]];
+            let consumed = resampler
+                .process(
+                    Planes::new(&planes).unwrap(),
+                    PlanesMut::new(&mut [&mut left, &mut right]).unwrap(),
+                    ratio,
+                )
+                .unwrap();
+            std::hint::black_box(consumed);
         });
         assert_eq!(n, 0, "block {block} allocated");
     }
