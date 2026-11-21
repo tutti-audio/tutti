@@ -9,7 +9,7 @@ use core::fmt::Debug;
 use core::ops::{AddAssign, BitAnd, Neg};
 use tutti_buffers::Float;
 use tutti_dsp::SimdLanes;
-use tutti_rt::SplitMix64;
+use tutti_dsp::{Noise, NoiseColour};
 use wide::{f32x8, f64x4};
 
 /// A float the synth renders in.
@@ -88,15 +88,15 @@ pub trait Lane:
     /// The lanes' sum.
     fn sum(self) -> Self::Scalar;
 
-    /// One generator per lane, seeded from `seed` in lane order.
+    /// One pink [`Noise`] generator per lane, seeded from `seed` in lane order.
     fn seed_rng(seed: impl FnMut() -> u64) -> Self::Rng;
-    /// Advance every lane's [`SplitMix64`] one step and return white noise in `-1.0..1.0`.
-    fn white(state: &mut Self::Rng) -> Self;
+    /// Advance every lane's generator one sample and return the samples.
+    fn noise(state: &mut Self::Rng) -> Self;
 }
 
 impl Lane for f32x8 {
     type Scalar = f32;
-    type Rng = [SplitMix64; 8];
+    type Rng = [Noise<f32>; 8];
 
     const LANES: usize = 8;
     const ZERO: Self = f32x8::ZERO;
@@ -163,19 +163,19 @@ impl Lane for f32x8 {
         self.reduce_add()
     }
 
-    fn seed_rng(mut seed: impl FnMut() -> u64) -> [SplitMix64; 8] {
-        core::array::from_fn(|_| SplitMix64::new(seed()))
+    fn seed_rng(mut seed: impl FnMut() -> u64) -> [Noise<f32>; 8] {
+        core::array::from_fn(|_| Noise::new(NoiseColour::Pink, seed()))
     }
 
     #[inline(always)]
-    fn white(state: &mut [SplitMix64; 8]) -> Self {
-        f32x8::new(state.each_mut().map(bipolar))
+    fn noise(state: &mut [Noise<f32>; 8]) -> Self {
+        f32x8::new(state.each_mut().map(Noise::next_sample))
     }
 }
 
 impl Lane for f64x4 {
     type Scalar = f64;
-    type Rng = [SplitMix64; 4];
+    type Rng = [Noise<f64>; 4];
 
     const LANES: usize = 4;
     const ZERO: Self = f64x4::ZERO;
@@ -242,21 +242,14 @@ impl Lane for f64x4 {
         self.reduce_add()
     }
 
-    fn seed_rng(mut seed: impl FnMut() -> u64) -> [SplitMix64; 4] {
-        core::array::from_fn(|_| SplitMix64::new(seed()))
+    fn seed_rng(mut seed: impl FnMut() -> u64) -> [Noise<f64>; 4] {
+        core::array::from_fn(|_| Noise::new(NoiseColour::Pink, seed()))
     }
 
     #[inline(always)]
-    fn white(state: &mut [SplitMix64; 4]) -> Self {
-        f64x4::new(state.each_mut().map(bipolar))
+    fn noise(state: &mut [Noise<f64>; 4]) -> Self {
+        f64x4::new(state.each_mut().map(Noise::next_sample))
     }
-}
-
-/// One uniform draw in `[-1, 1)` of the width `F`: `2u - 1` over the unit draw `u`, which
-/// [`Float::from_fraction_bits`] takes from the word's high bits at the float's own resolution.
-#[inline(always)]
-fn bipolar<F: Float>(rng: &mut SplitMix64) -> F {
-    F::lit(2.0) * F::from_fraction_bits(rng.next_u64()) - F::lit(1.0)
 }
 
 #[cfg(test)]

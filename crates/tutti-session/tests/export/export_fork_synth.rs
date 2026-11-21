@@ -27,7 +27,7 @@ use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, U7, Ump, Voice2};
-use tutti_units::{Amplitude, Beat, Bpm, SampleRate, Samples, Seconds, UnitParam};
+use tutti_units::{Amplitude, Beat, Bpm, SampleRate, Samples, Seconds};
 
 const RATE: f64 = 48_000.0;
 /// A beat at 90 BPM and 48 kHz, in frames.
@@ -260,15 +260,15 @@ fn a_param_on_a_synth_reaches_it_and_its_fork() {
             .build_detached(SampleRate::DEFAULT)
             .expect("a detached session builds");
         session.graph().set_sample_rate(SampleRate::of(RATE));
-        let (synth, controls) = session.graph().add(poly());
+        let (synth, _) = session.graph().add(poly());
         session.graph().connect(synth, Root).unwrap();
         let _ = session.update();
         if let Some(v) = volume {
             session.set(synth.volume().to(Amplitude::new(v))).unwrap();
             let _ = session.update();
             assert_eq!(
-                controls.get(UnitParam::Volume),
-                Some(v),
+                session.get(synth.volume()).unwrap(),
+                Amplitude::new(v),
                 "the write reaches the live synth's volume cell"
             );
         }

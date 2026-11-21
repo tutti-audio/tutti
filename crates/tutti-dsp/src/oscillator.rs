@@ -73,7 +73,7 @@ fn near<F: Float>(phase: RunningPhase, edge: u64, step: PhaseStep) -> Option<F> 
 /// with full relative precision, so the sine's zeros are exact to the width of `F` at any
 /// phase.
 #[inline]
-fn sine<F: Float>(phase: RunningPhase) -> F {
+pub(crate) fn sine<F: Float>(phase: RunningPhase) -> F {
     const RADIANS_PER_COUNT: f64 = core::f64::consts::TAU / 18_446_744_073_709_551_616.0;
     let count = phase.get();
     let quarter = count.wrapping_add(1 << 61) >> 62;

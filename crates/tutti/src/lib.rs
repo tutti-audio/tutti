@@ -165,6 +165,10 @@ pub use tutti_cpal::{AudioHost, DeviceId};
 #[cfg(feature = "sampler")]
 pub use tutti_sampler::Clip;
 
+// The sampler nodes `Graph::handle` reaches by key.
+#[cfg(feature = "sampler")]
+pub use tutti_session::Handled;
+
 // A decoded wave, and what a bounce writes.
 #[cfg(feature = "codec")]
 pub use tutti_buffers::Wave;
@@ -297,6 +301,11 @@ pub mod nodes {
         ShoeboxConfig, ShoeboxError, ShoeboxRoom, VelvetDensity, VelvetDensityError, VelvetLength,
         VelvetLengthError, VelvetNoise, VelvetPulse, Wall,
     };
+    pub use tutti_dsp::{
+        Envelope, EnvelopeCurve, EnvelopeDesign, EnvelopeLeg, EnvelopePace, EnvelopeStage,
+        EnvelopeStages, EnvelopeStep,
+    };
+    pub use tutti_dsp::{Lfo, LfoWave};
     pub use tutti_dsp::{
         Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,
         SpringLengthError,
@@ -707,10 +716,9 @@ pub mod polysynth {
 #[cfg(feature = "soundfont")]
 pub mod soundfont {
     pub use tutti_sf2::{
-        Bank as SoundFontBank, BankError, Error, GeneratorType, Instrument, InstrumentGenerator,
-        InstrumentRegion, LoopMode, Pcm24, Preset, PresetGenerator, PresetRegion, SampleHeader,
-        SamplePool, Side, SoundFont, SoundFontInfo, SoundFontVersion, SummedGenerator,
-        WrongLevelGenerator,
+        Bank, BankError, Error, GeneratorType, Instrument, InstrumentGenerator, InstrumentRegion,
+        LoopMode, Pcm24, Preset, PresetGenerator, PresetRegion, SampleHeader, SamplePool, Side,
+        SoundFont, SoundFontInfo, SoundFontVersion, SummedGenerator, WrongLevelGenerator,
     };
     pub use tutti_soundfont::{Polyphony, PolyphonyError, Settings, SoundFontUnit};
 }
