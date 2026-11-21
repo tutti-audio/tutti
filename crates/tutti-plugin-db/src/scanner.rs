@@ -121,9 +121,7 @@ impl Scanner {
     {
         Self {
             pedal: Pedal::new(pedal_path),
-            probe: Arc::new(move |executor, path, format| {
-                Box::pin(probe(executor, path, format))
-            }),
+            probe: Arc::new(move |executor, path, format| Box::pin(probe(executor, path, format))),
         }
     }
 
@@ -1618,7 +1616,9 @@ mod tests {
             ready(Ok(vec![probe_plugin_fallback(path)]))
         });
         let mut before = PluginDb::new();
-        let scan = dying.scan(&mut before, [&plugins_dir], no_save, exec()).unwrap();
+        let scan = dying
+            .scan(&mut before, [&plugins_dir], no_save, exec())
+            .unwrap();
         let died = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(scan)));
         assert!(died.is_err(), "the probe's panic reaches the caller");
         assert_eq!(
@@ -1698,7 +1698,9 @@ mod tests {
                 Ok(vec![described("new")])
             }
         });
-        let scan = scanner.scan(&mut db, [&plugins_dir], no_save, exec()).unwrap();
+        let scan = scanner
+            .scan(&mut db, [&plugins_dir], no_save, exec())
+            .unwrap();
         let runner = std::thread::spawn(move || run(scan));
 
         let parked = parked_rx
@@ -1823,7 +1825,9 @@ mod tests {
         let a = create_fake_plugin(&plugins_dir, "a.clap");
         let (scanner, parked, release, _) = gated_scanner(dir.path(), named);
         let mut db = PluginDb::new();
-        let scan = scanner.scan(&mut db, [&plugins_dir], no_save, exec()).unwrap();
+        let scan = scanner
+            .scan(&mut db, [&plugins_dir], no_save, exec())
+            .unwrap();
         let runner = std::thread::spawn(move || run(scan));
         parked.recv_timeout(HANG_GUARD).unwrap();
 
@@ -1848,7 +1852,9 @@ mod tests {
         release.send(()).unwrap();
         let _ = runner.join().expect("the scan does not panic");
         assert!(
-            scanner.scan(&mut db, [&plugins_dir], no_save, exec()).is_ok(),
+            scanner
+                .scan(&mut db, [&plugins_dir], no_save, exec())
+                .is_ok(),
             "the end of the scan releases the pedal"
         );
     }
@@ -1867,7 +1873,9 @@ mod tests {
         }
         let (scanner, parked, release, calls) = gated_scanner(dir.path(), environmental);
         let mut db = PluginDb::new();
-        let scan = scanner.scan(&mut db, [&plugins_dir], no_save, exec()).unwrap();
+        let scan = scanner
+            .scan(&mut db, [&plugins_dir], no_save, exec())
+            .unwrap();
         let mut scan = scan.into_future();
         until_parked(&mut scan, &parked);
         assert!(
@@ -1887,7 +1895,9 @@ mod tests {
             "the pedal is disarmed"
         );
         assert!(
-            scanner.scan(&mut db, [&plugins_dir], no_save, exec()).is_ok(),
+            scanner
+                .scan(&mut db, [&plugins_dir], no_save, exec())
+                .is_ok(),
             "the claim is released"
         );
     }
@@ -1911,16 +1921,23 @@ mod tests {
             })
         });
         let mut db = PluginDb::new();
-        let scan = scanner.scan(&mut db, [&plugins_dir], no_save, exec()).unwrap();
+        let scan = scanner
+            .scan(&mut db, [&plugins_dir], no_save, exec())
+            .unwrap();
 
-        assert_eq!(block_on(scan.into_future()).unwrap_err(), ScanError::ShutDown);
+        assert_eq!(
+            block_on(scan.into_future()).unwrap_err(),
+            ScanError::ShutDown
+        );
 
         assert!(
             !dir.path().join(".scanning").exists(),
             "the pedal is disarmed"
         );
         assert!(
-            scanner.scan(&mut db, [&plugins_dir], no_save, exec()).is_ok(),
+            scanner
+                .scan(&mut db, [&plugins_dir], no_save, exec())
+                .is_ok(),
             "the claim is released"
         );
     }
@@ -1935,9 +1952,14 @@ mod tests {
         let (scanner, calls) = counting_scanner(dir.path(), named);
         let dead = tutti_platform::Executor::new().downgrade();
         let mut db = PluginDb::new();
-        let scan = scanner.scan(&mut db, [&plugins_dir], no_save, dead).unwrap();
+        let scan = scanner
+            .scan(&mut db, [&plugins_dir], no_save, dead)
+            .unwrap();
 
-        assert_eq!(block_on(scan.into_future()).unwrap_err(), ScanError::ShutDown);
+        assert_eq!(
+            block_on(scan.into_future()).unwrap_err(),
+            ScanError::ShutDown
+        );
         assert_eq!(calls.load(Ordering::SeqCst), 0, "nothing was probed");
     }
 
@@ -1972,13 +1994,16 @@ mod tests {
             ScanProgress::Discovering { directory: second },
         ]
         .into_iter()
-        .chain(probed.into_iter().enumerate().map(|(i, path)| {
-            ScanProgress::Probing {
-                current: i + 1,
-                total: 2,
-                path,
-            }
-        }))
+        .chain(
+            probed
+                .into_iter()
+                .enumerate()
+                .map(|(i, path)| ScanProgress::Probing {
+                    current: i + 1,
+                    total: 2,
+                    path,
+                }),
+        )
         .collect();
         assert_eq!(updates, expected);
     }
@@ -1993,7 +2018,9 @@ mod tests {
         let (scanner, calls) = counting_scanner(dir.path(), named);
         let mut db = PluginDb::new();
 
-        let held = scanner.scan(&mut db, [&plugins_dir], no_save, exec()).unwrap();
+        let held = scanner
+            .scan(&mut db, [&plugins_dir], no_save, exec())
+            .unwrap();
         assert!(matches!(
             scanner.scan(&mut db, [&plugins_dir], no_save, exec()),
             Err(ScanBusy)
@@ -2005,11 +2032,15 @@ mod tests {
             "a dropped scan probes nothing"
         );
 
-        let awaited = scanner.scan(&mut db, [&plugins_dir], no_save, exec()).unwrap();
+        let awaited = scanner
+            .scan(&mut db, [&plugins_dir], no_save, exec())
+            .unwrap();
         let scanned = run(awaited);
         assert_eq!(scanned.changes().len(), 1);
         assert!(
-            scanner.scan(&mut db, [&plugins_dir], no_save, exec()).is_ok(),
+            scanner
+                .scan(&mut db, [&plugins_dir], no_save, exec())
+                .is_ok(),
             "the resolved scan released the pedal"
         );
     }
@@ -2132,7 +2163,12 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         assert!(
             scanner
-                .scan_files(&mut db, Vec::<(PathBuf, PluginFormat)>::new(), no_save, exec())
+                .scan_files(
+                    &mut db,
+                    Vec::<(PathBuf, PluginFormat)>::new(),
+                    no_save,
+                    exec()
+                )
                 .is_ok(),
             "a refused call did not claim the pedal"
         );
@@ -2145,16 +2181,23 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let plugins_dir = plugins_dir(&dir);
         create_fake_plugin(&plugins_dir, "a.clap");
-        let scanner = Scanner::new(dir.path().join(".scanning"), |_, _, _| -> std::future::Ready<ProbeResult> {
-            panic!("the probe dies")
-        });
+        let scanner = Scanner::new(
+            dir.path().join(".scanning"),
+            |_, _, _| -> std::future::Ready<ProbeResult> { panic!("the probe dies") },
+        );
         let mut db = PluginDb::new();
-        let scan = scanner.scan(&mut db, [&plugins_dir], no_save, exec()).unwrap();
+        let scan = scanner
+            .scan(&mut db, [&plugins_dir], no_save, exec())
+            .unwrap();
 
         let died = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(scan)));
 
         assert!(died.is_err());
-        assert!(scanner.scan(&mut db, [&plugins_dir], no_save, exec()).is_ok());
+        assert!(
+            scanner
+                .scan(&mut db, [&plugins_dir], no_save, exec())
+                .is_ok()
+        );
     }
 
     fn failing_save(_: &PluginDb) -> std::io::Result<()> {
@@ -2196,7 +2239,9 @@ mod tests {
             |_, _, _| -> std::future::Ready<ProbeResult> { panic!("host down") },
         );
         let mut db = PluginDb::new();
-        let scan = dying.scan(&mut db, [&plugins_dir], failing_save, exec()).unwrap();
+        let scan = dying
+            .scan(&mut db, [&plugins_dir], failing_save, exec())
+            .unwrap();
         let died = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(scan)));
         assert!(died.is_err());
 
@@ -2267,7 +2312,9 @@ mod tests {
             let a = create_fake_plugin(&plugins_dir, "a.clap");
             let (scanner, parked, release, _) = gated_scanner(dir.path(), named);
             let mut db = PluginDb::new();
-            let scan = scanner.scan(&mut db, [&plugins_dir], no_save, exec()).unwrap();
+            let scan = scanner
+                .scan(&mut db, [&plugins_dir], no_save, exec())
+                .unwrap();
             let runner = std::thread::spawn(move || run(scan));
             parked.recv_timeout(HANG_GUARD).unwrap();
 

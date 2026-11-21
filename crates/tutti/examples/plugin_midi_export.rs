@@ -64,7 +64,7 @@ fn load(
     let dir = tempfile::TempDir::new()?;
     let mut catalog =
         tutti::Catalog::new(PluginDb::new(), CatalogConfig::new(dir.path()), |_| Ok(()));
-    let scanned = catalog.register(plugin)?.run();
+    let scanned = tutti_fixtures::block_on(s.register_plugin(&mut catalog, plugin)?)?;
     let scanned = catalog.apply(scanned)?;
     catalog.save().run()?;
     if let Some(failure) = scanned.failures().first() {

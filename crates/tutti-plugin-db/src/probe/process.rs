@@ -240,7 +240,14 @@ mod tests {
         let deadline = Deadline::after(start, timeout);
         let running = || Ok(None);
         assert!(verdict(running(), deadline, start).is_none());
-        assert!(verdict(running(), deadline, start + timeout - Duration::from_nanos(1)).is_none());
+        assert!(
+            verdict(
+                running(),
+                deadline,
+                start + timeout - Duration::from_nanos(1)
+            )
+            .is_none()
+        );
         for at in [timeout, timeout + Duration::from_secs(1)] {
             assert!(matches!(
                 verdict(running(), deadline, start + at),

@@ -62,8 +62,15 @@ pub(crate) fn probe_fn(
                     *fallback,
                 ),
                 Probing::Measure { state } => interpret_probe(
-                    measure_metadata_with(&executor, &locator, &path, format, timeout, state.as_ref())
-                        .await,
+                    measure_metadata_with(
+                        &executor,
+                        &locator,
+                        &path,
+                        format,
+                        timeout,
+                        state.as_ref(),
+                    )
+                    .await,
                     &path,
                     false,
                 ),
@@ -171,14 +178,16 @@ mod tests {
         let executor = tutti_fixtures::executor().downgrade();
 
         let measuring = probe_fn(&config, Probing::Measure { state: None });
-        let failure = futures_lite::future::block_on(measuring(&executor, path, PluginFormat::Vst3))
-            .expect_err("a measurement is not answered with filename metadata");
+        let failure =
+            futures_lite::future::block_on(measuring(&executor, path, PluginFormat::Vst3))
+                .expect_err("a measurement is not answered with filename metadata");
         assert_eq!(failure.error, ProbeError::ProbeNotFound);
         assert!(!failure.blacklistable());
 
         let describing = probe_fn(&config, Probing::Describe { fallback: true });
-        let listed = futures_lite::future::block_on(describing(&executor, path, PluginFormat::Vst3))
-            .expect("a describing scan lists the file by its name");
+        let listed =
+            futures_lite::future::block_on(describing(&executor, path, PluginFormat::Vst3))
+                .expect("a describing scan lists the file by its name");
         assert_eq!(listed.len(), 1);
     }
 }

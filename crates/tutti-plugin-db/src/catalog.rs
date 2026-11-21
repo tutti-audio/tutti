@@ -58,11 +58,11 @@ use crate::{
     BlacklistedFile, CatalogConfig, FileFacts, FileRow, FilesError, PluginDb, PluginEntry,
     RowChange, ScanBusy, ScanPlugins, ScanReport, ScannedPlugins, Scanner, StaleScan,
 };
-use tutti_platform::WeakExecutor;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, PoisonError, RwLock};
+use tutti_platform::WeakExecutor;
 use tutti_plugin_types::{IpcError, IpcResult};
 use tutti_plugin_types::{PluginDescriptor, PluginFormat, PluginId, PluginRef};
 
@@ -777,7 +777,9 @@ mod tests {
 
     /// Runs a scan to its end on the calling thread and applies it.
     fn rescan(plugins: &mut Catalog) -> ScanReport {
-        let scan = plugins.scan(tutti_fixtures::executor().downgrade()).unwrap();
+        let scan = plugins
+            .scan(tutti_fixtures::executor().downgrade())
+            .unwrap();
         let scanned = futures_lite::future::block_on(scan.into_future()).unwrap();
         plugins.apply(scanned).unwrap()
     }

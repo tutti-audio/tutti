@@ -168,6 +168,7 @@ mod load;
 mod lost;
 mod opened;
 mod rebind;
+mod scan;
 pub use rebind::PortsRefusal;
 mod preset;
 mod state;

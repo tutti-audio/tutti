@@ -137,7 +137,9 @@ fn measure_measures_a_plugin_a_scan_left_unmeasured() {
     let (plugin, descriptor) = catalog.iter().next().expect("the plugin is listed");
     assert_eq!(descriptor.measured, None);
 
-    let task = catalog.measure(&plugin, None, exec()).expect("a file that exists");
+    let task = catalog
+        .measure(&plugin, None, exec())
+        .expect("a file that exists");
     let result = finish(&mut catalog, task);
     assert_eq!((result.scanned(), result.added()), (1, 1));
     let (_, descriptor) = catalog.iter().next().expect("still listed");
@@ -153,7 +155,9 @@ fn register_delivers_the_row_of_a_file_outside_the_scanned_directories() {
     let elsewhere = dir.path().join("Elsewhere.clap");
     std::fs::copy(tutti_fixtures::clap_probe(), &elsewhere).expect("a plugin");
 
-    let task = catalog.register(&elsewhere, exec()).expect("a file that exists");
+    let task = catalog
+        .register(&elsewhere, exec())
+        .expect("a file that exists");
     assert_eq!(catalog.iter().count(), 0, "nothing is applied by the call");
     let result = finish(&mut catalog, task);
 
@@ -356,7 +360,10 @@ mod stand_in_probe {
             .expect("the scan never resolved after the executor shut down");
         assert_eq!(ended.unwrap_err(), tutti_plugin_db::ScanError::ShutDown);
         assert!(!alive(&pid), "the probe (pid {pid}) outlived the executor");
-        assert!(!catalog.is_blacklisted(&file), "a shutdown blacklists nothing");
+        assert!(
+            !catalog.is_blacklisted(&file),
+            "a shutdown blacklists nothing"
+        );
         assert!(catalog.scan(exec()).is_ok(), "the claim was released");
     }
 
@@ -529,7 +536,9 @@ fn measure_names_a_missing_probe_binary() {
     let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
 
     let plugin = PluginRef::file(&file);
-    let task = catalog.measure(&plugin, None, exec()).expect("a plugin file");
+    let task = catalog
+        .measure(&plugin, None, exec())
+        .expect("a plugin file");
     let result = finish(&mut catalog, task);
 
     let failures = result.failures();
@@ -616,7 +625,9 @@ mod links {
         let (plugin, _) = catalog.iter().next().expect("the plugin is listed");
         assert_eq!(plugin.path(), canonical);
 
-        let task = catalog.measure(&plugin, None, exec()).expect("the key is a file");
+        let task = catalog
+            .measure(&plugin, None, exec())
+            .expect("the key is a file");
         let result = finish(&mut catalog, task);
 
         assert!(result.failures().is_empty(), "{:?}", result.failures());

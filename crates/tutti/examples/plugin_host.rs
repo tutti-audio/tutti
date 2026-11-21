@@ -49,6 +49,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let out = PathBuf::from(out);
     let dirs: Vec<PathBuf> = args.map(PathBuf::from).collect();
 
+    // 0. The offline session the plugin is loaded into. The scan runs on its
+    //    executor, so it is built first.
+    let mut session = Session::builder()
+        .sample_rate(RATE)
+        .max_block(MaxBlock::of(Samples::new(512)))
+        .build()?;
+
     // 1. Scan. The catalog's table is in memory (its persistence stores nothing,
     //    so nothing is kept between runs); the scan probes every file it finds in a
     //    `plugin-probe` subprocess, so a plugin that crashes the probe is
@@ -58,10 +65,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         CatalogConfig::new(std::env::temp_dir()).scan_dirs(dirs),
         |_| Ok(()),
     );
-    //    The scan is a value: `run` blocks and this example has nothing else to
-    //    do; a host with a frame loop runs it off the frame thread (a thread of its
-    //    own, or `Executor::unblock`) and reads its progress.
-    let scanned = catalog.scan()?.run();
+    //    The scan is a future: this example has nothing else to do and awaits it
+    //    here; a host with a frame loop polls it off the frame thread, reads
+    //    `progress()` as it goes, and cancels by dropping it.
+    let scanned = tutti_fixtures::block_on(session.scan_plugins(&mut catalog)?)?;
     let scanned = catalog.apply(scanned)?;
     eprintln!("scanned {} plugin file(s)", scanned.scanned());
     //    A scan leaves its rows in memory; the save is a value this app runs inline.
@@ -80,15 +87,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let plugin = entry.plugin_ref();
     eprintln!("{name}: {:?} in {}", plugin.id(), plugin.path().display());
 
-    // 3. Load it on the main thread and add it to an offline session. The load
+    // 3. Load it on the main thread and add it to the session. The load
     //    names the catalog's answer for the plugin's id, so a plugin the catalog
     //    blacklisted does not resolve and fails, before any server starts. The
     //    thread that runs the load is the main thread: make the token once. The
     //    load gives the node the session takes; its handle observes the plugin.
-    let mut session = Session::builder()
-        .sample_rate(RATE)
-        .max_block(MaxBlock::of(Samples::new(512)))
-        .build()?;
     let main = tutti::plugin::MainThreadMarker::new().ok_or("run on the process's main thread")?;
     let id = entry
         .id
