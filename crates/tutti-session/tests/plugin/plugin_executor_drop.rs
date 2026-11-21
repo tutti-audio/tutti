@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
-use tutti_buffers::{ChannelLayout, MaxBlock};
+use tutti_buffers::ChannelLayout;
 use tutti_engine::{ManualStreamDriver, OutputSpec};
 use tutti_plugin_types::PluginRef;
 use tutti_session::{OutPort, Root, Session};
@@ -45,7 +45,7 @@ fn a_session_drop_ends_the_lanes_of_a_plugin_a_render_feeds() {
                         ChannelLayout::STEREO,
                         tutti_buffers::SampleFormat::F32,
                     )
-                    .with_quantum(MaxBlock::of(Samples::new(256))),
+                    .with_quantum(tutti_engine::OutputQuantum::of(256)),
                     driver,
                 )
                 .expect("builds with no device");

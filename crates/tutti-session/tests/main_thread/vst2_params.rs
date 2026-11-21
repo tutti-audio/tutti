@@ -1,4 +1,4 @@
-//! `Param::try_unit` over a real format's own value map: the
+//! `Param::unit` over a real format's own value map: the
 //! reference VST2 plugin, in process. Its parameter 1 is labelled `Hz` and
 //! declares the integer range `0..=127`, which VST2 maps linearly
 //! (`tutti-vst2-host`'s `IntegerRange`), so `Hz::new(31.75)` is position `0.25`
@@ -66,14 +66,14 @@ fn a_typed_hertz_parameter_round_trips_through_the_formats_own_range() {
         "the label and the declared range type it"
     );
     assert!(matches!(
-        param.try_unit::<Db>(),
+        param.unit::<Db>(),
         Err(UnitError::UnitMismatch {
             declared: ParamUnit::Hertz,
             ..
         })
     ));
 
-    let hertz = param.try_unit::<Hz>().unwrap();
+    let hertz = param.unit::<Hz>().unwrap();
     let position = param.target();
     for (plain, at) in [(0.0, 0.0), (31.75, 0.25), (63.5, 0.5), (127.0, 1.0)] {
         s.set(hertz.to(Hz::new(plain))).unwrap();

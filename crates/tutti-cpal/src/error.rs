@@ -112,6 +112,24 @@ pub enum DeviceError {
         format: tutti_buffers::SampleFormat,
     },
 
+    /// The output device does not offer the callback size asked for
+    /// ([`OutputConfig::quantum`](crate::OutputConfig::quantum)): it is past the
+    /// range the device reports. The size is never clamped to the range.
+    #[error(
+        "output device {device_name:?} offers callbacks of {min} to {max} frames, not {}",
+        .quantum.get()
+    )]
+    QuantumUnavailable {
+        /// The output device's name, as the OS reports it.
+        device_name: String,
+        /// The callback size that was asked for.
+        quantum: tutti_engine::OutputQuantum,
+        /// The fewest frames the device offers.
+        min: u32,
+        /// The most frames the device offers.
+        max: u32,
+    },
+
     /// The inputs asked of a capture device cannot be selected: none were
     /// named, or one is past the device's last.
     ///

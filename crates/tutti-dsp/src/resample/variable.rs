@@ -1,7 +1,7 @@
 //! A variable-ratio windowed-sinc resampler and the PI loop that steers it.
 
 use tutti_buffers::{ChannelLayout, Float, Planes, PlanesMut};
-use tutti_units::{ReadPosition, ReadRate, SampleSpan, Samples};
+use tutti_units::{ReadPosition, ReadRate, Samples};
 
 use super::{ResampleError, WindowedSinc};
 use crate::CosineWindow;
@@ -176,8 +176,8 @@ impl<F: Float> VariableResampler<F> {
             return Samples::new(0);
         };
         let step = step_of(ratio);
-        let read = advanced(self.head, step, last).frames().get() + 1;
-        let moved = advanced(self.head, step, output.get()).frames().get();
+        let read = self.head.advanced(step, Samples::new(last)).frames().get() + 1;
+        let moved = self.head.advanced(step, output).frames().get();
         Samples::new(read.max(moved))
     }
 
@@ -214,14 +214,15 @@ impl<F: Float> VariableResampler<F> {
             });
         }
         let step = step_of(ratio);
-        let end = advanced(self.head, step, out_frames.get());
+        let end = self.head.advanced(step, out_frames);
         let consumed = end.frames().get();
         for c in 0..self.channels {
             let x = input.plane(c);
             let history = &mut self.history[c * HISTORY..(c + 1) * HISTORY];
             let mut y = output.plane_mut(c);
             for (n, y) in y.samples_mut().iter_mut().enumerate() {
-                let (first, fraction) = f64::split_position(advanced(self.head, step, n));
+                let (first, fraction) =
+                    f64::split_position(self.head.advanced(step, Samples::new(n)));
                 let first = first.get();
                 let window: &[F] = if first >= HISTORY {
                     &x.samples()[first - HISTORY..first - HISTORY + TAPS]
@@ -275,16 +276,11 @@ fn read<F: Float>(table: &[F], window: &[F], fraction: f64) -> F {
     value + between * slope
 }
 
-// `ReadPosition` has no step from a `ReadRate` and no sum with one, so the head's arithmetic is
-// these two functions.
-/// The head's move per output frame, in `2^-32` frames.
-fn step_of(ratio: VariableRate) -> u64 {
-    ReadPosition::from_span(SampleSpan::clamped(ratio.get())).get()
-}
-
-/// `head` moved by `n` steps, saturating.
-fn advanced(head: ReadPosition, step: u64, n: usize) -> ReadPosition {
-    ReadPosition::from_count(head.get().saturating_add(step.saturating_mul(n as u64)))
+/// The head's move per output frame.
+fn step_of(ratio: VariableRate) -> ReadPosition {
+    ReadRate::from(ratio)
+        .step()
+        .expect("a VariableRate is finite and positive, so its read rate has a step")
 }
 
 #[cfg(test)]
