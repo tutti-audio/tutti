@@ -552,6 +552,11 @@ impl Control for AuLoaded {
     fn dropped_reported_edits(&self) -> u64 {
         self.edits.dropped()
     }
+
+    /// Audio Unit has no host-side main-thread refusal: none is counted.
+    fn refused_off_thread_calls(&self) -> u64 {
+        0
+    }
 }
 
 impl AuLoaded {

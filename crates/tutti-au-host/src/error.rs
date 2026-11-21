@@ -2,7 +2,7 @@
 
 use thiserror::Error;
 
-use crate::platform::{os_status_message, unknown_code};
+use crate::platform::{NotRegistered, os_status_message};
 
 /// The loading step an [`AuError::LoadFailed`] belongs to.
 ///
@@ -50,20 +50,8 @@ pub enum AuError {
     NullComponent,
     /// No Audio Unit with this exact type, subtype and manufacturer is
     /// registered with the system.
-    #[error(
-        "no Audio Unit is registered with type {}, subtype {}, manufacturer {}",
-        unknown_code(*component_type),
-        unknown_code(*sub_type),
-        unknown_code(*manufacturer)
-    )]
-    ComponentNotRegistered {
-        /// The `componentType` code asked for.
-        component_type: u32,
-        /// The `componentSubType` code asked for.
-        sub_type: u32,
-        /// The `componentManufacturer` code asked for.
-        manufacturer: u32,
-    },
+    #[error(transparent)]
+    ComponentNotRegistered(#[from] NotRegistered),
     /// The component sets `kAudioComponentFlag_RequiresAsyncInstantiation`, so
     /// `AudioComponentInstanceNew` cannot create it.
     ///
@@ -312,7 +300,7 @@ impl AuError {
             AuError::OsStatus { code, .. } => *code,
             AuError::RenderFailed { code, .. } => *code,
             AuError::NullComponent => return "null component",
-            AuError::ComponentNotRegistered { .. } => return "no such Audio Unit is registered",
+            AuError::ComponentNotRegistered(_) => return "no such Audio Unit is registered",
             AuError::RequiresAsyncInstantiation => {
                 return "component requires asynchronous instantiation (AUv3 with a view)";
             }

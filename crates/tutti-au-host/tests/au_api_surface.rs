@@ -951,19 +951,9 @@ fn find_component_reports_absence_as_a_named_error() {
     )
     .expect("an exact key");
     match component::find_component(missing) {
-        Err(AuError::ComponentNotRegistered {
-            component_type,
-            sub_type,
-            manufacturer,
-        }) => assert_eq!(
-            (component_type, sub_type, manufacturer),
-            (
-                K_AUDIO_UNIT_TYPE_EFFECT,
-                u32::from_be_bytes(*b"zzzz"),
-                u32::from_be_bytes(*b"zzzz")
-            ),
-            "the error names the key asked for"
-        ),
+        Err(AuError::ComponentNotRegistered(absent)) => {
+            assert_eq!(absent.0, missing, "the error names the key asked for");
+        }
         other => panic!("no AU is registered as aufx/zzzz/zzzz, got {other:?}"),
     }
 }

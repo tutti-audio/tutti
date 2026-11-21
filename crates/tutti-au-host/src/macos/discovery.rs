@@ -3,7 +3,7 @@
 
 use super::types::*;
 use crate::component::{AuComponentInfo, AuType};
-use crate::error::{AuError, Result};
+use crate::error::Result;
 pub use tutti_au_ffi::ComponentKey;
 pub use tutti_au_ffi::ComponentRef as AuComponentRef;
 use tutti_plugin_types::PluginVersion;
@@ -95,13 +95,9 @@ pub fn enumerate_components_of_type(au_type: AuType) -> Vec<AuComponentInfo> {
 /// caller.
 ///
 /// # Errors
-/// [`AuError::ComponentNotRegistered`] when no installed Audio Unit has the key.
+/// [`AuError::ComponentNotRegistered`](crate::AuError::ComponentNotRegistered) when no installed Audio Unit has the key.
 pub fn find_component(key: ComponentKey) -> Result<AuComponentRef> {
-    AuComponentRef::find(key).map_err(|missing| AuError::ComponentNotRegistered {
-        component_type: missing.0.component_type(),
-        sub_type: missing.0.sub_type(),
-        manufacturer: missing.0.manufacturer(),
-    })
+    Ok(AuComponentRef::find(key)?)
 }
 
 pub(crate) fn component_info(component: AuComponentRef) -> Option<AuComponentInfo> {
