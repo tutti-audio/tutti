@@ -10,7 +10,7 @@
 //! whose DSP drifted away from it.
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock, Mono, Planes};
-use tutti_dsp::{Inline, Tap, Taps};
+use tutti_dsp::{Inline, Tap, TapSet};
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{GraphBuilder, IntoNode, Node, Prepare};
 use tutti_nodes::testing::Through;
@@ -137,7 +137,7 @@ fn crossover_and_multiband_report_zero_latency_and_respond_at_frame_0() {
 /// likewise its sequence, so it declares 0 too.
 #[test]
 fn early_reflections_and_the_decorrelator_report_zero_latency() {
-    let taps = Taps {
+    let taps = TapSet {
         taps: Inline::from_slice(&[Tap {
             delay: SampleSpan::new(300.0).unwrap(),
             gain: Gain::new(0.5),

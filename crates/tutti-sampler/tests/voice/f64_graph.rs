@@ -15,8 +15,8 @@ use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{Prepare, Standalone, TransportPosition};
 use tutti_sampler::testing::wait_for_open;
 use tutti_sampler::{
-    Direction, DiskStreamer, DiskVoice, Manual, MemorySource, MemorySourceConfig, Playback, SlotId,
-    StreamStart, Voice, VoiceNode, VoicePool, VoiceSource, VoiceWindow,
+    DiskStreamer, DiskVoice, Manual, MemorySource, MemorySourceConfig, PlayDirection, Playback,
+    SlotId, StreamStart, Voice, VoiceNode, VoicePool, VoiceSource, VoiceWindow,
 };
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
@@ -164,7 +164,7 @@ fn a_reversed_memory_voice_in_an_f64_graph_reads_the_mirrored_frames() {
     let node = VoiceNode::new(Voice {
         source: VoiceSource::Memory(memory(&write_file(dir.path()))),
         play: Playback {
-            direction: Direction::Reverse,
+            direction: PlayDirection::Reverse,
             ..Playback::default()
         },
     })
@@ -195,10 +195,10 @@ fn render_stepped<C>(
 /// placed at beat 0. The stream is held with the streamer: dropping it ends it.
 fn disk(
     path: &Path,
-    direction: Direction,
+    direction: PlayDirection,
 ) -> (
     DiskStreamer<Manual<f64>, f64>,
-    tutti_sampler::Stream<f64>,
+    tutti_sampler::StreamHandle<f64>,
     DiskVoice<f64>,
 ) {
     let mut streamer =
@@ -206,7 +206,7 @@ fn disk(
             .expect("builds");
     let opening = streamer.open_stream(path, StreamStart::HEAD);
     let (stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
-    if direction == Direction::Reverse {
+    if direction == PlayDirection::Reverse {
         stream.direction_cell().publish(direction);
         assert!(
             streamer.step_until_idle(1_000) < 1_000,
@@ -222,7 +222,7 @@ fn disk(
 #[test]
 fn a_disk_voice_in_an_f64_graph_plays_the_files_values() {
     let dir = tempfile::tempdir().expect("a temp dir");
-    let (mut streamer, _stream, voice) = disk(&write_file(dir.path()), Direction::Forward);
+    let (mut streamer, _stream, voice) = disk(&write_file(dir.path()), PlayDirection::Forward);
     let mut solo = Standalone::<_, f64>::new(voice, prepare());
     roll(&mut solo);
     let got = render_stepped(&mut solo, &mut streamer, RENDERED);
@@ -234,7 +234,7 @@ fn a_disk_voice_in_an_f64_graph_plays_the_files_values() {
 #[test]
 fn a_reversed_disk_voice_in_an_f64_graph_reads_the_mirrored_frames() {
     let dir = tempfile::tempdir().expect("a temp dir");
-    let (mut streamer, _stream, voice) = disk(&write_file(dir.path()), Direction::Reverse);
+    let (mut streamer, _stream, voice) = disk(&write_file(dir.path()), PlayDirection::Reverse);
     let mut solo = Standalone::<_, f64>::new(voice, prepare());
     roll(&mut solo);
     let got = render_stepped(&mut solo, &mut streamer, TURNED + RENDERED);

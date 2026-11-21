@@ -23,7 +23,7 @@ use tutti_graph::{
 };
 use tutti_graph::{OutPort, PortSource};
 use tutti_modulation::{
-    Amount, Clock, ControlProgramBuilder, Layer, LayerId, LfoShape, Polarity, Waveform,
+    Amount, ControlProgramBuilder, Layer, LayerClock, LayerId, LfoShape, Polarity, Waveform,
 };
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_nodes::{
@@ -140,7 +140,7 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
     let layer = Layer {
         id: LayerId(1),
         // 10 cycles a second: a cycle every 4800 frames.
-        clock: Clock::Seconds {
+        clock: LayerClock::Seconds {
             rate: Hz::new(10.0),
             phase: PhaseIncrement::new(0.0),
             anchor: None,
@@ -236,7 +236,7 @@ fn render_chorus(
         let ed = r.editor_mut();
         let layer = Layer {
             id: LayerId(1),
-            clock: Clock::Beats {
+            clock: LayerClock::Beats {
                 per_cycle: BeatsPerCycle::of(1.0),
                 phase: PhaseIncrement::new(0.0),
             },
@@ -409,7 +409,7 @@ fn render_lfo(param: UnitParam, range: ParamRange, depth: f64) -> (Vec<f32>, f64
     let ed = r.editor_mut();
     let layer = Layer {
         id: LayerId(1),
-        clock: Clock::Beats {
+        clock: LayerClock::Beats {
             per_cycle: BeatsPerCycle::of(1.0),
             phase: PhaseIncrement::new(0.0),
         },
@@ -519,7 +519,7 @@ where
     let ed = r.editor_mut();
     let layer = Layer {
         id: LayerId(1),
-        clock: Clock::Beats {
+        clock: LayerClock::Beats {
             per_cycle: BeatsPerCycle::of(1.0),
             phase: PhaseIncrement::new(0.0),
         },
@@ -790,7 +790,7 @@ fn shelf_handed_back(block: usize) -> Vec<f32> {
     let ed = r.editor_mut();
     let layer = Layer {
         id: LayerId(1),
-        clock: Clock::Beats {
+        clock: LayerClock::Beats {
             per_cycle: BeatsPerCycle::of(1.0),
             phase: PhaseIncrement::new(0.0),
         },

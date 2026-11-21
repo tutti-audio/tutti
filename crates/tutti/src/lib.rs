@@ -278,8 +278,8 @@ pub mod nodes {
         Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, DecayTime, Fdn, Fir,
         FirSummary, Full, Gains, HrirMeasurement, HrirSphere, HrtfBinauralError, Inline, Lerp,
         Line, LineModulation, LookaheadError, Matrix, MatrixConvolver, MatrixConvolverConfig,
-        MatrixConvolverError, MaxDecayError, Network, NetworkOutputMap, ResampleError, SimdLanes,
-        SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
+        MatrixConvolverError, MaxDecayError, Network, NetworkOutputMap, NetworkStage,
+        ResampleError, SimdLanes, SpeakerGeometryError, Tap, TapSet, WaveshaperControls,
     };
     pub use tutti_dsp::{
         AdditiveBank, AdditiveControls, Algorithm, AlgorithmError, FmControls, FmPatch, FmVoice,
@@ -322,13 +322,12 @@ pub mod nodes {
         VariableResampler,
     };
     pub use tutti_dsp::{
-        GrainScheduler, GrainSettings, Granular, MaxGrains, MaxGrainsError, Onset,
+        GrainScheduler, GrainSettings, GrainStart, Granular, MaxGrains, MaxGrainsError,
     };
     pub use tutti_dsp::{
         KarplusStrong, KarplusStrongBank, KarplusStrongControls, LowestPitch, LowestPitchError,
         WaveguideBank, WaveguideControls, WaveguidePositions, WaveguideString,
     };
-    pub use tutti_dsp::{Lfo, LfoWave};
     pub use tutti_dsp::{
         Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,
         SpringLengthError,
@@ -667,9 +666,9 @@ pub mod codec {
 #[cfg(feature = "sampler")]
 pub mod sampler {
     pub use tutti_sampler::{
-        Block, Direction, Error, GUARD_FRAMES, OpenError, RefusedStreamStart, SamplerFloat, Stream,
-        StreamFault, StreamFile, StreamId, StreamPhase, StreamReader, StreamStart, StreamStatus,
-        VoiceNodeHandle,
+        Block, Error, GUARD_FRAMES, OpenError, PlayDirection, RefusedStreamStart, SamplerFloat,
+        StreamFailure, StreamFile, StreamHandle, StreamId, StreamPhase, StreamReader, StreamStart,
+        StreamStatus, VoiceNodeHandle,
     };
     // A file's probe needs a decoder.
     pub use tutti_sampler::{
@@ -682,7 +681,7 @@ pub mod sampler {
         feature = "decode-mp3",
         feature = "decode-ogg"
     ))]
-    pub use tutti_sampler::{ProbeError, SampleFacts};
+    pub use tutti_sampler::{SampleFacts, SampleProbeError};
 }
 
 /// Audio measurement (`tutti-measure`): the analyses `Session::analyze` runs.
@@ -691,7 +690,7 @@ pub mod sampler {
 /// silence, onsets, spectrum, chroma and the vectorscope. Feature `analyze`.
 #[cfg(feature = "analyze")]
 pub mod measure {
-    pub use tutti_measure::{Error, Measure, Meter};
+    pub use tutti_measure::{Error, Measure, StreamMeter};
     // Silence and onsets.
     pub use tutti_measure::{
         DetectionFunction, FiniteLevel, FiniteLevelError, Framing, Novelty, Onset, OnsetConfig,
@@ -701,10 +700,11 @@ pub mod measure {
     // Spectrum and chroma.
     pub use tutti_measure::{
         BandCount, BandCountError, Banding, BandsPerOctave, BandsPerOctaveError, Chroma,
-        ChromaConfig, ChromaFrame, ChromaMeter, ChromaSummary, FrequencyBand, HarmonicDecay,
-        HarmonicDecayError, Harmonics, HarmonicsError, PeakDecay, PeakDecayError, PeakFloor,
-        PeakFloorError, Smoothing, SpectrumConfig, SpectrumFloor, SpectrumFloorError,
-        SpectrumMeter, SpectrumTime, SpectrumTimeError, Tuning, TuningOffset, TuningOffsetError,
+        ChromaConfig, ChromaFrame, ChromaMeter, ChromaSummary, FrequencyBand, HarmonicCount,
+        HarmonicCountError, HarmonicDecay, HarmonicDecayError, PeakDecay, PeakDecayError,
+        PeakFloor, PeakFloorError, Smoothing, SpectrumConfig, SpectrumFloor, SpectrumFloorError,
+        SpectrumMeter, SpectrumTime, SpectrumTimeError, TuningOffset, TuningOffsetError,
+        TuningReference,
     };
     // Loudness, waveform blocks and the vectorscope.
     pub use tutti_measure::{
@@ -724,13 +724,13 @@ pub mod measure {
 /// declares, and the `Lfo` and `Follower` that read them.
 pub mod modulation {
     pub use tutti_modulation::{
-        Amount, CompileError, ControlSource, Corners, Curve, CurveSegment, DepthBy, Follower,
-        LevelFollower, Lfo, LfoRate, Macro, NoteAdsr, NoteEnvelope, Polarity, ProgramError,
+        Amount, ControlSource, Corners, Curve, CurveSegment, DepthBy, Follower, LevelFollower, Lfo,
+        LfoRate, Macro, NoteAdsr, NoteEnvelope, Polarity, ProgramCompileError, ProgramError,
         SignalKind, TargetDecl,
     };
     pub use tutti_modulation::{
-        Clock, DepthSnapshot, LayerId, Leg, PlayGrid, ProgramTime, RateAnchor, RouteKey, SourceKey,
-        TargetKey,
+        DepthSnapshot, LayerClock, LayerId, Leg, PlayGrid, ProgramTime, RateAnchor, RouteKey,
+        SourceKey, TargetKey,
     };
 }
 

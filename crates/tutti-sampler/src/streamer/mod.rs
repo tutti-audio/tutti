@@ -7,7 +7,7 @@
 //! tier real-time safe.
 //!
 //! The streamer holds one [`record`] per open stream and changes the table by
-//! a pure step; the control side of a stream is [`Stream`], whose drop ends it.
+//! a pure step; the control side of a stream is [`StreamHandle`], whose drop ends it.
 
 mod bell;
 mod block;
@@ -60,8 +60,8 @@ use decode::Stage;
 pub use decode::{OpenStream, OpenedStream};
 pub use open::{AdoptError, OpenError, RefusedStreamStart, StreamReader, StreamStart};
 pub(crate) use status::StatusCell;
-pub use status::{StreamFault, StreamPhase, StreamStatus};
-pub use stream::Stream;
+pub use status::{StreamFailure, StreamPhase, StreamStatus};
+pub use stream::StreamHandle;
 pub(crate) use stream::StreamerPort;
 
 // The hand-driven cycle's verdict. Public only alongside the driver that
@@ -95,7 +95,7 @@ use tutti_units::SampleRate;
 /// stream is opened in two steps: [`open_stream`](Self::open_stream) is the
 /// work of reading the file, which the app runs on a thread of its own
 /// ([`OpenStream::run`]), and [`adopt`](Self::adopt) takes what it read back and
-/// answers with the stream's control-side [`Stream`] and the [`StreamReader`] a
+/// answers with the stream's control-side [`StreamHandle`] and the [`StreamReader`] a
 /// [`DiskVoice`](crate::DiskVoice) is built from; [`sample_rate`](Self::sample_rate)
 /// is the session rate it streams at.
 ///
@@ -343,7 +343,7 @@ impl<F: RingFloat> DiskStreamer<Manual<F>, F> {
 impl<D, F: RingFloat> DiskStreamer<D, F> {
     /// The reading of `asset` as a new stream, its reader starting at `place`:
     /// run it ([`OpenStream::run`]) on the thread that reads files, then
-    /// [`adopt`](Self::adopt) what it read for the stream's [`Stream`] and its one
+    /// [`adopt`](Self::adopt) what it read for the stream's [`StreamHandle`] and its one
     /// [`StreamReader`]. The voice is as wide as the file
     /// ([`voice_width`](crate::voice_width)); [`open_stream_into`](Self::open_stream_into)
     /// asks for another width.
@@ -410,7 +410,7 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
     pub fn adopt(
         &self,
         opened: OpenedStream<F>,
-    ) -> std::result::Result<(Stream<F>, StreamReader<F>), AdoptError<F>> {
+    ) -> std::result::Result<(StreamHandle<F>, StreamReader<F>), AdoptError<F>> {
         let OpenedStream {
             asset,
             start,
@@ -625,7 +625,7 @@ mod tests {
         );
     }
 
-    /// A dropped `Stream` ends its stream: the streamer frees its ring (and
+    /// A dropped `StreamHandle` ends its stream: the streamer frees its ring (and
     /// with it the writer's decoder and any resident wave) in the step that
     /// handles the drop, not before it. The reader is dropped first, so the
     /// streamer's writer is the ring's last holder.

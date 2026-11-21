@@ -2,7 +2,7 @@ use tutti_units::{Hz, Mix, SampleRate, Seconds};
 
 use super::*;
 use crate::System;
-use crate::reverb::network::{Fdn, Stage};
+use crate::reverb::network::{Fdn, NetworkStage};
 
 fn design(c: &PlateControls, rate: SampleRate) -> Box<Network> {
     let mut network = Box::new(Network::new(rate));
@@ -11,7 +11,8 @@ fn design(c: &PlateControls, rate: SampleRate) -> Box<Network> {
 }
 
 fn fdn_of(n: &Network) -> &Fdn {
-    let Some(Stage::Fdn(f)) = n.stages.iter().find(|s| matches!(s, Stage::Fdn(_))) else {
+    let Some(NetworkStage::Fdn(f)) = n.stages.iter().find(|s| matches!(s, NetworkStage::Fdn(_)))
+    else {
         panic!("one FDN stage")
     };
     f
@@ -32,7 +33,7 @@ fn lengths_at_48k_are_the_paper_table_scaled_and_rounded() {
 
     let f = fdn_of(&n);
     let input = n.stages.iter().filter_map(|s| match s {
-        Stage::AllPass(a) => Some(a[0].delay.get()),
+        NetworkStage::AllPass(a) => Some(a[0].delay.get()),
         _ => None,
     });
     let lines = f.lines.iter().map(|l| l.length.get());
@@ -170,7 +171,7 @@ fn diffusion_scales_every_lattice_coefficient_and_zero_makes_them_delays() {
             .stages
             .iter()
             .filter_map(|s| match s {
-                Stage::AllPass(a) => Some(a[0].gain.get()),
+                NetworkStage::AllPass(a) => Some(a[0].gain.get()),
                 _ => None,
             })
             .collect();

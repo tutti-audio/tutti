@@ -82,7 +82,7 @@ use super::shimmer::{GAIN_BOUND, Shimmer};
 use crate::delay::DelayRing;
 use crate::design::along;
 use crate::onepole::{cutoff_complement, cutoff_pole};
-use crate::reverb::network::{Absorption, Band, Matrix, Network, Stage};
+use crate::reverb::network::{Absorption, Band, Matrix, Network, NetworkStage};
 use crate::reverb::{CHUNK, ramp, tail_of};
 use crate::{DecayTime, FftFloat, Lerp, Ramp, Steps, System, TAIL_FLOOR};
 
@@ -504,11 +504,11 @@ impl<F: FftFloat + Lerp> FdnBank<F> {
     /// The coefficient point the design in `network` asks for, written into `target`: `false`
     /// for a network with no recirculating stage or no line, and then the target is as it was.
     fn coefficients(&mut self) -> bool {
-        let Some(Stage::Fdn(f)) = self
+        let Some(NetworkStage::Fdn(f)) = self
             .network
             .stages
             .iter()
-            .find(|s| matches!(s, Stage::Fdn(_)))
+            .find(|s| matches!(s, NetworkStage::Fdn(_)))
         else {
             return false;
         };

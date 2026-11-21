@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use tutti_modulation::{
-    Clock, Law, Lfo, LfoRate, Polarity, ProgramTime, RATE_ANCHOR_MARGIN, Waveform, shape,
+    Law, LayerClock, Lfo, LfoRate, Polarity, ProgramTime, RATE_ANCHOR_MARGIN, Waveform, shape,
 };
 use tutti_nodes::automation::{Breakpoint, Trajectory};
 use tutti_session::{DepthTarget, ModRouteId, ModSourceId, ParamRef, RouteSpec, ValueErrorKind};
@@ -59,7 +59,7 @@ fn program(
 }
 
 /// The clock of the one layer of the lane's program.
-fn clock(s: &tutti_session::DetachedSession, cutoff: ParamRef) -> Clock {
+fn clock(s: &tutti_session::DetachedSession, cutoff: ParamRef) -> LayerClock {
     program(s, cutoff).layers()[0].clock
 }
 
@@ -188,7 +188,7 @@ fn an_lfo_rate_set_lands_at_the_update_and_the_phase_continues() {
     );
     assert!(matches!(
         clock(&s, cutoff),
-        Clock::Seconds {
+        LayerClock::Seconds {
             rate,
             anchor: None,
             ..
@@ -197,7 +197,7 @@ fn an_lfo_rate_set_lands_at_the_update_and_the_phase_continues() {
 
     s.set(lfo.rate().to(LfoRate::Hz(Hz::new(5.0)))).unwrap();
     frame(&mut s, &mut side);
-    let Clock::Seconds {
+    let LayerClock::Seconds {
         rate,
         anchor: Some(anchor),
         ..
@@ -281,7 +281,7 @@ fn an_lfo_beats_rate_change_is_bar_locked_with_no_anchor() {
     let _ = s.update();
     let clock = clock(&s, cutoff);
     assert!(
-        matches!(clock, Clock::Beats { .. }),
+        matches!(clock, LayerClock::Beats { .. }),
         "no anchor on a beats clock"
     );
     let at = ProgramTime {
@@ -343,7 +343,7 @@ fn a_target_the_source_does_not_have_is_refused_at_the_call() {
     ));
     assert!(matches!(
         clock(&s, cutoff),
-        Clock::Seconds { rate, .. } if rate == Hz::new(3.0)
+        LayerClock::Seconds { rate, .. } if rate == Hz::new(3.0)
     ));
 
     s.mods_mut().remove_route(route).unwrap();

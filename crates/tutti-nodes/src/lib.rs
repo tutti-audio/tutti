@@ -459,7 +459,8 @@ pub use decorrelator::{DecorrelatorConfig, DecorrelatorKernel, DecorrelatorNode}
 pub use early_reflections::{EarlyReflectionsConfig, EarlyReflectionsKernel, EarlyReflectionsNode};
 // The velvet sequence's density and length, and a stage's refusal, are in these signatures.
 pub use tutti_dsp::{
-    EarlyReflectionsError, Taps, VelvetDensity, VelvetDensityError, VelvetLength, VelvetLengthError,
+    EarlyReflectionsError, TapSet, VelvetDensity, VelvetDensityError, VelvetLength,
+    VelvetLengthError,
 };
 // Distance: a source's delay, level and air absorption.
 mod distance;

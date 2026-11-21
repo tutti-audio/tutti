@@ -1,5 +1,5 @@
 //! What the control side can observe of a stream: its [`StreamStatus`], a
-//! level the streamer writes and [`Stream::status`](crate::Stream::status)
+//! level the streamer writes and [`StreamHandle::status`](crate::StreamHandle::status)
 //! reads.
 //!
 //! A level, not a queue: a slow reader loses nothing it needs (it sees the
@@ -22,7 +22,7 @@ use crate::Loop;
 /// Why a stream stopped being served.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum StreamFault {
+pub enum StreamFailure {
     /// The file could not be read at some position (a damaged file, a cut one,
     /// a seek the decoder refused). The frames before the fault were kept; the
     /// ring holds silence from it, which is what the voice plays.
@@ -55,16 +55,16 @@ pub enum StreamPhase {
     /// is `Live` again; it is a level, not an event.
     Ended,
     /// The stream is not served, for the reason it carries. Permanent.
-    Faulted(StreamFault),
+    Faulted(StreamFailure),
 }
 
-/// A stream's status: one level read ([`Stream::status`](crate::Stream::status)).
+/// A stream's status: one level read ([`StreamHandle::status`](crate::StreamHandle::status)).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StreamStatus {
     /// Where the stream is.
     pub phase: StreamPhase,
     /// The loop the stream runs, as the streamer applied it. It can differ from
-    /// the one asked for ([`Stream::looping_cell`](crate::Stream::looping_cell)): a
+    /// the one asked for ([`StreamHandle::looping_cell`](crate::StreamHandle::looping_cell)): a
     /// lead-in that cannot be read plays the loop hard, with no crossfade, and
     /// this says so. It is the loop an export fork of the stream plays.
     /// `None` until the streamer has applied one.
@@ -127,11 +127,11 @@ impl StatusCell {
     }
 
     /// Streamer: fault the stream. The first fault stays.
-    pub(crate) fn fault(&self, fault: StreamFault) {
+    pub(crate) fn fault(&self, fault: StreamFailure) {
         let word = match fault {
-            StreamFault::Decode => DECODE,
-            StreamFault::Panicked => PANICKED,
-            StreamFault::StreamerGone => GONE,
+            StreamFailure::Decode => DECODE,
+            StreamFailure::Panicked => PANICKED,
+            StreamFailure::StreamerGone => GONE,
         };
         let _ = self
             .word
@@ -146,9 +146,9 @@ impl StatusCell {
             OPENING => StreamPhase::Opening,
             LIVE => StreamPhase::Live,
             ENDED => StreamPhase::Ended,
-            DECODE => StreamPhase::Faulted(StreamFault::Decode),
-            PANICKED => StreamPhase::Faulted(StreamFault::Panicked),
-            _ => StreamPhase::Faulted(StreamFault::StreamerGone),
+            DECODE => StreamPhase::Faulted(StreamFailure::Decode),
+            PANICKED => StreamPhase::Faulted(StreamFailure::Panicked),
+            _ => StreamPhase::Faulted(StreamFailure::StreamerGone),
         }
     }
 }
@@ -180,19 +180,19 @@ mod tests {
         cell.set(Served::Live);
         assert_eq!(cell.phase(), StreamPhase::Live, "a level moves back");
 
-        cell.fault(StreamFault::Decode);
-        assert_eq!(cell.phase(), StreamPhase::Faulted(StreamFault::Decode));
+        cell.fault(StreamFailure::Decode);
+        assert_eq!(cell.phase(), StreamPhase::Faulted(StreamFailure::Decode));
         cell.set(Served::Ended);
-        cell.fault(StreamFault::StreamerGone);
-        cell.fault(StreamFault::Panicked);
+        cell.fault(StreamFailure::StreamerGone);
+        cell.fault(StreamFailure::Panicked);
         assert_eq!(
             cell.phase(),
-            StreamPhase::Faulted(StreamFault::Decode),
+            StreamPhase::Faulted(StreamFailure::Decode),
             "the first fault is the one reported"
         );
         // Closing is a fact of its own: a faulted stream is closed all the same.
         cell.close();
         assert!(cell.closed());
-        assert_eq!(cell.phase(), StreamPhase::Faulted(StreamFault::Decode));
+        assert_eq!(cell.phase(), StreamPhase::Faulted(StreamFailure::Decode));
     }
 }

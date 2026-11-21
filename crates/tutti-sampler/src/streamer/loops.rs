@@ -38,7 +38,7 @@ use tutti_units::{ReadRate, SamplePosition, SampleRate, Samples};
 
 use crate::Loop;
 use crate::nonempty;
-use crate::voice::Direction;
+use crate::voice::PlayDirection;
 use crate::voice::interp::{mirrored, split_position, tap_indices};
 use crate::voice::loop_span::LoopSpan;
 
@@ -50,7 +50,7 @@ const BODY_MAX_FRAMES: usize = 1 << 16;
 /// the streamer to rewrite before the reader gets there.
 ///
 /// It is the latency of a change to a streamed voice's loop or direction
-/// ([`Stream::looping_cell`](crate::Stream::looping_cell)): a change near the
+/// ([`StreamHandle::looping_cell`](crate::StreamHandle::looping_cell)): a change near the
 /// playhead is heard this many frames past the block being played, crossfaded
 /// over `DiskStreamerConfig`'s seek crossfade.
 pub const GUARD_FRAMES: Samples = Samples::new(256);
@@ -262,7 +262,7 @@ pub(crate) struct RingControl<F: Float> {
     /// How to read the slots.
     pub(crate) map: RingMap<F>,
     /// The direction the stream plays in.
-    pub(crate) direction: Direction,
+    pub(crate) direction: PlayDirection,
     /// The loop the stream runs, as applied.
     pub(crate) loop_: Option<Loop>,
 }
@@ -271,7 +271,7 @@ impl<F: Float> RingControl<F> {
     /// A control reading by `map`, running `loop_`; its direction is the
     /// map's newest arrangement's.
     pub(crate) fn new(map: RingMap<F>, loop_: Option<Loop>) -> Self {
-        let direction = Direction::from(map.after.reverse());
+        let direction = PlayDirection::from(map.after.reverse());
         Self {
             map,
             direction,

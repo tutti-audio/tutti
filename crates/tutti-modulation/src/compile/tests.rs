@@ -32,22 +32,22 @@ fn ranged(min: f64, max: f64) -> TargetDecl {
     }
 }
 
-fn lfo(shape: LfoShape, clock: Clock) -> Source {
+fn lfo(shape: LfoShape, clock: LayerClock) -> Source {
     Source::Lfo {
         wave: Waveform::Shape { shape, seed: 0 },
         clock,
     }
 }
 
-fn beats(per_cycle: f64) -> Clock {
-    Clock::Beats {
+fn beats(per_cycle: f64) -> LayerClock {
+    LayerClock::Beats {
         per_cycle: BeatsPerCycle::of(per_cycle),
         phase: PhaseIncrement::new(0.0),
     }
 }
 
-fn seconds(rate: f64) -> Clock {
-    Clock::Seconds {
+fn seconds(rate: f64) -> LayerClock {
+    LayerClock::Seconds {
         rate: Hz::new(rate),
         phase: PhaseIncrement::new(0.0),
         anchor: None,
@@ -88,7 +88,7 @@ fn run(
     sources: &[(SourceKey, Source)],
     routes: &[(RouteKey, RouteDecl)],
     targets: &[(TargetKey, TargetDecl)],
-) -> Result<Compiled, CompileError> {
+) -> Result<Compiled, ProgramCompileError> {
     compile(
         &Declarations {
             sources,
@@ -425,7 +425,7 @@ fn a_rate_edit_anchors_continuously() {
             .expect("the layer")
             .clock
     };
-    let Clock::Seconds {
+    let LayerClock::Seconds {
         anchor: Some(a), ..
     } = clock(&after)
     else {
@@ -473,8 +473,8 @@ fn an_anchor_is_carried_until_a_play_start() {
         .expect("the layer")
         .clock
     {
-        Clock::Seconds { anchor, .. } => anchor,
-        Clock::Beats { .. } => None,
+        LayerClock::Seconds { anchor, .. } => anchor,
+        LayerClock::Beats { .. } => None,
     };
     let mut rig = Rig::new();
     let c0 = rig.compile(None, now(7, 0));
@@ -504,7 +504,7 @@ fn an_anchor_is_carried_until_a_play_start() {
             shape: LfoShape::Sine,
             seed: 0,
         },
-        clock: Clock::Seconds {
+        clock: LayerClock::Seconds {
             rate: Hz::new(5.0),
             phase: PhaseIncrement::new(0.25),
             anchor: None,
@@ -576,7 +576,7 @@ fn each_refusal_fires_by_name() {
         .collect();
     assert_eq!(
         run(&one_lfo, &routes, &t1),
-        Err(CompileError::TooManyLayers {
+        Err(ProgramCompileError::TooManyLayers {
             target: target(1),
             count: 17
         })
@@ -588,7 +588,7 @@ fn each_refusal_fires_by_name() {
         .collect();
     assert_eq!(
         run(&f, &routes, &t1),
-        Err(CompileError::TooManyInputs {
+        Err(ProgramCompileError::TooManyInputs {
             target: target(1),
             count: 9
         })
@@ -597,7 +597,7 @@ fn each_refusal_fires_by_name() {
     // A NaN range bound.
     assert_eq!(
         run(&one_lfo, &r1, &[(target(1), ranged(f64::NAN, 1.0))]),
-        Err(CompileError::NanRange(target(1)))
+        Err(ProgramCompileError::NanRange(target(1)))
     );
     // A circular target's range is an arc, min at most max: 170..-170 would
     // read the opposite arc once ordered. A line takes crossed bounds as ever,
@@ -605,7 +605,7 @@ fn each_refusal_fires_by_name() {
     let bearing = TargetKey::param(1, ParamAddr::Unit(UnitParam::Azimuth));
     assert_eq!(
         run(&one_lfo, &[], &[(bearing, ranged(170.0, -170.0))]),
-        Err(CompileError::CrossedArc(bearing))
+        Err(ProgramCompileError::CrossedArc(bearing))
     );
     assert!(run(&one_lfo, &[], &[(bearing, ranged(170.0, 190.0))]).is_ok());
     let height = TargetKey::param(1, ParamAddr::Unit(UnitParam::Elevation));
@@ -629,7 +629,7 @@ fn each_refusal_fires_by_name() {
     )];
     assert_eq!(
         run(&one_lfo, &r1, &live),
-        Err(CompileError::LiveCurve(target(1)))
+        Err(ProgramCompileError::LiveCurve(target(1)))
     );
     // A depth_by chain deeper than one.
     let two = [
@@ -643,7 +643,7 @@ fn each_refusal_fires_by_name() {
     ];
     assert_eq!(
         run(&two, &chain, &t1),
-        Err(CompileError::DepthByChain { route: RouteKey(3) })
+        Err(ProgramCompileError::DepthByChain { route: RouteKey(3) })
     );
     // Two depth routes to one route.
     let twice = [
@@ -653,7 +653,7 @@ fn each_refusal_fires_by_name() {
     ];
     assert_eq!(
         run(&two, &twice, &t1),
-        Err(CompileError::TwoDepthBy { route: RouteKey(1) })
+        Err(ProgramCompileError::TwoDepthBy { route: RouteKey(1) })
     );
     // A depth route from a signal source, and to a route from one.
     let sig = [
@@ -666,7 +666,7 @@ fn each_refusal_fires_by_name() {
     ];
     assert_eq!(
         run(&sig, &from_signal, &t1),
-        Err(CompileError::DepthBySignal { route: RouteKey(2) })
+        Err(ProgramCompileError::DepthBySignal { route: RouteKey(2) })
     );
     let of_signal = [
         (RouteKey(1), route(2, to(1), 0.5)),
@@ -674,12 +674,12 @@ fn each_refusal_fires_by_name() {
     ];
     assert_eq!(
         run(&sig, &of_signal, &t1),
-        Err(CompileError::DepthBySignal { route: RouteKey(2) })
+        Err(ProgramCompileError::DepthBySignal { route: RouteKey(2) })
     );
     // Unknown references.
     assert_eq!(
         run(&[], &r1, &t1),
-        Err(CompileError::UnknownSource { route: RouteKey(1) })
+        Err(ProgramCompileError::UnknownSource { route: RouteKey(1) })
     );
     assert_eq!(
         run(
@@ -687,24 +687,24 @@ fn each_refusal_fires_by_name() {
             &[(RouteKey(2), route(1, RouteTarget::Depth(RouteKey(9)), 1.0))],
             &t1
         ),
-        Err(CompileError::UnknownRoute { route: RouteKey(2) })
+        Err(ProgramCompileError::UnknownRoute { route: RouteKey(2) })
     );
     assert_eq!(
         run(&one_lfo, &r1, &[]),
-        Err(CompileError::UndeclaredTarget { route: RouteKey(1) })
+        Err(ProgramCompileError::UndeclaredTarget { route: RouteKey(1) })
     );
     // Duplicate keys.
     assert_eq!(
         run(&[one_lfo[0].clone(), one_lfo[0].clone()], &r1, &t1),
-        Err(CompileError::DuplicateSource(SourceKey(1)))
+        Err(ProgramCompileError::DuplicateSource(SourceKey(1)))
     );
     assert_eq!(
         run(&one_lfo, &[r1[0], r1[0]], &t1),
-        Err(CompileError::DuplicateRoute(RouteKey(1)))
+        Err(ProgramCompileError::DuplicateRoute(RouteKey(1)))
     );
     assert_eq!(
         run(&one_lfo, &r1, &[t1[0].clone(), t1[0].clone()]),
-        Err(CompileError::DuplicateTarget(target(1)))
+        Err(ProgramCompileError::DuplicateTarget(target(1)))
     );
     // Sources out of their domain, and a declared anchor.
     let bad_sources = [
@@ -728,7 +728,7 @@ fn each_refusal_fires_by_name() {
     for s in bad_sources {
         assert_eq!(
             run(&[(SourceKey(1), s.clone())], &r1, &t1),
-            Err(CompileError::BadSource(SourceKey(1))),
+            Err(ProgramCompileError::BadSource(SourceKey(1))),
             "{s:?}"
         );
     }
@@ -737,7 +737,7 @@ fn each_refusal_fires_by_name() {
             shape: LfoShape::Sine,
             seed: 0,
         },
-        clock: Clock::Seconds {
+        clock: LayerClock::Seconds {
             rate: Hz::new(1.0),
             phase: PhaseIncrement::new(0.0),
             anchor: Some(RateAnchor {
@@ -750,7 +750,7 @@ fn each_refusal_fires_by_name() {
     };
     assert_eq!(
         run(&[(SourceKey(1), anchored)], &r1, &t1),
-        Err(CompileError::AnchorDeclared(SourceKey(1)))
+        Err(ProgramCompileError::AnchorDeclared(SourceKey(1)))
     );
     // At the caps, it compiles.
     let routes: Vec<_> = (0..16)
@@ -782,12 +782,12 @@ fn every_declaration_a_host_can_make_compiles_without_a_runtime() {
     for (k, &shape) in LfoShape::all().iter().enumerate() {
         let k = k as u64;
         let phase = PhaseIncrement::new(0.25);
-        let free = Clock::Seconds {
+        let free = LayerClock::Seconds {
             rate: Hz::new(1.5),
             phase,
             anchor: None,
         };
-        let synced = Clock::Beats {
+        let synced = LayerClock::Beats {
             per_cycle: BeatsPerCycle::of(2.0),
             phase,
         };
@@ -850,7 +850,7 @@ fn every_declaration_a_host_can_make_compiles_without_a_runtime() {
 }
 
 /// The clock of `route`'s layer in `target` (`depth_by` its scaler's id).
-fn layer_clock(c: &Compiled, t: TargetKey, route: u64, depth_by: Option<u64>) -> Clock {
+fn layer_clock(c: &Compiled, t: TargetKey, route: u64, depth_by: Option<u64>) -> LayerClock {
     let id = layer_id(RouteKey(route), depth_by.map(RouteKey));
     c.programs[&t]
         .layers()
@@ -860,10 +860,10 @@ fn layer_clock(c: &Compiled, t: TargetKey, route: u64, depth_by: Option<u64>) ->
         .clock
 }
 
-fn anchor_of(clock: Clock) -> Option<RateAnchor> {
+fn anchor_of(clock: LayerClock) -> Option<RateAnchor> {
     match clock {
-        Clock::Seconds { anchor, .. } => anchor,
-        Clock::Beats { .. } => None,
+        LayerClock::Seconds { anchor, .. } => anchor,
+        LayerClock::Beats { .. } => None,
     }
 }
 
@@ -955,7 +955,7 @@ fn a_second_rate_edit_near_its_anchor_reanchors() {
         (a2.at, a2.prev_rate),
         (edit.after(RATE_ANCHOR_MARGIN).play, Hz::new(5.0))
     );
-    let cyc = |c: Clock, p: f64| c.cycles(&time(0.0, p, 7)).expect("a phase");
+    let cyc = |c: LayerClock, p: f64| c.cycles(&time(0.0, p, 7)).expect("a phase");
     let a = a1.at.get() as f64;
     let b = a2.at.get() as f64;
     for p in [a, a + 1000.0, b - 1.0, b] {
@@ -991,16 +991,16 @@ fn a_value_that_is_not_finite_is_refused() {
         )];
         assert_eq!(
             run(&constant, &[(RouteKey(1), route(1, to(1), 0.5))], &t1),
-            Err(CompileError::BadSource(SourceKey(1))),
+            Err(ProgramCompileError::BadSource(SourceKey(1))),
             "constant {v}"
         );
     }
-    let clock = |rate: f64, phase: f64| Clock::Seconds {
+    let clock = |rate: f64, phase: f64| LayerClock::Seconds {
         rate: Hz::new(rate),
         phase: PhaseIncrement::new(phase),
         anchor: None,
     };
-    let beat = |phase: f64| Clock::Beats {
+    let beat = |phase: f64| LayerClock::Beats {
         per_cycle: BeatsPerCycle::of(1.0),
         phase: PhaseIncrement::new(phase),
     };
@@ -1013,7 +1013,7 @@ fn a_value_that_is_not_finite_is_refused() {
         let unrouted = [(SourceKey(1), lfo(LfoShape::Sine, c))];
         assert_eq!(
             run(&unrouted, &[], &t1),
-            Err(CompileError::BadSource(SourceKey(1))),
+            Err(ProgramCompileError::BadSource(SourceKey(1))),
             "{c:?}"
         );
     }
@@ -1036,7 +1036,7 @@ fn a_value_that_is_not_finite_is_refused() {
     assert!(anchor_of(c1.clocks[&SourceKey(10)]).is_some());
     assert_eq!(
         at(2.0, f64::INFINITY, Some(&c1), 2000),
-        Err(CompileError::BadSource(SourceKey(10)))
+        Err(ProgramCompileError::BadSource(SourceKey(10)))
     );
 }
 
@@ -1046,12 +1046,12 @@ fn a_value_that_is_not_finite_is_refused() {
 #[test]
 fn a_clock_phase_past_the_bound_is_refused() {
     let t1 = [(target(1), ranged(0.0, 1.0))];
-    let seconds = |phase: f64| Clock::Seconds {
+    let seconds = |phase: f64| LayerClock::Seconds {
         rate: Hz::new(1.0),
         phase: PhaseIncrement::new(phase),
         anchor: None,
     };
-    let beat = |phase: f64| Clock::Beats {
+    let beat = |phase: f64| LayerClock::Beats {
         per_cycle: BeatsPerCycle::of(1.0),
         phase: PhaseIncrement::new(phase),
     };
@@ -1064,7 +1064,7 @@ fn a_clock_phase_past_the_bound_is_refused() {
         let unrouted = [(SourceKey(1), lfo(LfoShape::Sine, c))];
         assert_eq!(
             run(&unrouted, &[], &t1),
-            Err(CompileError::PhaseOutOfRange(SourceKey(1))),
+            Err(ProgramCompileError::PhaseOutOfRange(SourceKey(1))),
             "{c:?}"
         );
     }
