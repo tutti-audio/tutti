@@ -31,12 +31,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  (none found)");
     }
     for d in list {
-        let capability = devices.capability(&d.id);
+        let capability = devices.capability(&d.id)?;
         let protocol = capability.as_ref().map(|c| c.active().protocol);
         println!(
             "  {:<48} {:<32} {:?} {protocol:?}",
             d.id, d.name, d.direction
         );
+        if let Some(left_out) = devices.blocks_left_out(&d.id)?.filter(|&n| n > 0) {
+            println!("      ({left_out} declared blocks the spec cannot hold are left out)");
+        }
         // The Function Blocks the OS exposes: which Groups, which way.
         for block in capability.iter().flat_map(Endpoint::function_blocks) {
             println!(

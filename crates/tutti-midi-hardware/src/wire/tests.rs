@@ -370,3 +370,23 @@ fn a_narrowed_controller_is_taken_whole_or_not_at_all() {
     assert_eq!([room(0), room(2), room(3)], [0, 0, 0]);
     assert_eq!([room(4), room(5)], [4, 5]);
 }
+
+/// **An event that becomes no packet is counted, once it is taken**: of a JR
+/// Clock, a note and a per-note bend sent to a MIDI 1.0 device that receives no
+/// JR (M2-104 7.1.6.2, D.2.8), two have no wire form, and the sink taking only
+/// the first event counts none of the ones after it.
+#[test]
+fn the_events_with_no_wire_form_are_counted_in_the_events_taken() {
+    let mut wire = Wire::new(MIDI1);
+    let g = Address::new(MidiGroup::FIRST, MidiChannel::FIRST);
+    let events = Outgoing::now_batch(&[
+        at(Ump::from(Message::Utility(Utility::JrClock(1)))),
+        at(midi::note_on(MidiChannel::FIRST, 60, 0xFFFF)),
+        at(midi::per_note_pitch_bend(g, 60, 0x9000_0000)),
+    ]);
+    wire.convert(&events);
+    assert_eq!(wire.batch().len(), 1, "only the note has a form");
+    assert_eq!(wire.unrepresentable_in(3), 2);
+    assert_eq!(wire.unrepresentable_in(1), 1, "the clock, before the note");
+    assert_eq!(wire.unrepresentable_in(0), 0);
+}

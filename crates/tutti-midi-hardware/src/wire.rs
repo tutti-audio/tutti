@@ -143,6 +143,19 @@ impl Wire {
         let events_taken = self.ends.partition_point(|&end| end <= taken.packets());
         Taken::within(events, events_taken)
     }
+
+    /// How many of the first `taken` events of the batch became no packet at
+    /// all: they have no form on the wire this device is in. Counted once, at
+    /// the offer that takes them.
+    pub(crate) fn unrepresentable_in(&self, taken: usize) -> u64 {
+        let mut before = 0;
+        let mut none = 0;
+        for &end in &self.ends[..taken] {
+            none += u64::from(end == before);
+            before = end;
+        }
+        none
+    }
 }
 
 /// Runs a MIDI 2.0 Channel Voice `message` through `midi1_translator` and calls `out`

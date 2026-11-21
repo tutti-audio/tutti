@@ -285,7 +285,9 @@ fn hardware_input_timed_by_jr_is_allocation_free() {
     let (mut port, inlet) = inputs.open_input_port("Test Input");
     let mut rig = Rig::new(&inputs, vec![inlet]);
     rig.run(512);
-    assert!(inputs.set_input_timing(port.port(), InputTiming::JitterReduction));
+    inputs
+        .set_input_timing(port.port(), InputTiming::JitterReduction)
+        .expect("the port is open");
     let jr = |utility| Ump::from(Message::Utility(utility));
 
     assert_no_alloc::assert_no_alloc(|| {

@@ -167,12 +167,14 @@ impl MidiEndpoints for WinMmEndpoints {
         )?))
     }
 
-    fn inputs(&self) -> Vec<OsEndpoint> {
-        list(Side::Input)
+    // winmm's device count and capability calls have no failure to report: a
+    // device that left is not in the list.
+    fn inputs(&self) -> Result<Vec<OsEndpoint>> {
+        Ok(list(Side::Input))
     }
 
-    fn outputs(&self) -> Vec<OsEndpoint> {
-        list(Side::Output)
+    fn outputs(&self) -> Result<Vec<OsEndpoint>> {
+        Ok(list(Side::Output))
     }
 
     fn open_input(

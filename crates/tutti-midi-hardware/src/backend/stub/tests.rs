@@ -3,8 +3,8 @@ use super::*;
 #[test]
 fn it_enumerates_nothing() {
     let b = StubEndpoints::new();
-    assert!(b.inputs().is_empty());
-    assert!(b.outputs().is_empty());
+    assert!(b.inputs().unwrap().is_empty());
+    assert!(b.outputs().unwrap().is_empty());
 }
 
 /// Opening must be `Unsupported`, not a not-found error — the caller renders
@@ -30,7 +30,7 @@ fn devices_over_the_stub_is_empty_and_quiet() {
     .unwrap();
     assert!(devices.list().is_empty());
     let events = devices.subscribe();
-    assert!(events.try_iter().next().is_none());
+    assert!(events.pending().next().is_none());
     assert!(events.failure().is_none());
 }
 

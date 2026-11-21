@@ -117,7 +117,7 @@ pub trait MidiEndpoints: Send + Sync {
     /// resolved sees the seeded list on every backend.
     ///
     /// Where the OS cannot be asked (no sequencer to open) the watch reports
-    /// nothing, as [`inputs`](Self::inputs) lists nothing there.
+    /// nothing, and [`inputs`](Self::inputs) fails there.
     ///
     /// # Errors
     ///
@@ -128,11 +128,20 @@ pub trait MidiEndpoints: Send + Sync {
     ///
     /// A fresh snapshot per call — device lists go stale on hot-plug, and a
     /// cached one is a second owner of state the OS already holds.
-    fn inputs(&self) -> Vec<OsEndpoint>;
+    ///
+    /// # Errors
+    ///
+    /// The platform error when the OS cannot be asked (a sequencer that will
+    /// not open): that is not an empty list.
+    fn inputs(&self) -> Result<Vec<OsEndpoint>>;
 
     /// Endpoints this engine can send MIDI to. A fresh snapshot per call, as
-    /// [`inputs`](Self::inputs) is.
-    fn outputs(&self) -> Vec<OsEndpoint>;
+    /// [`inputs`](Self::inputs) is, and failing as it does.
+    ///
+    /// # Errors
+    ///
+    /// As [`inputs`](Self::inputs).
+    fn outputs(&self) -> Result<Vec<OsEndpoint>>;
 
     /// Open `id` for input, delivering events into `producer`.
     ///
@@ -194,6 +203,14 @@ pub trait DeviceOut: MidiOut {
     /// returns), so it loses nothing after taking, which is the default.
     fn losses(&self) -> Losses {
         Losses::NONE
+    }
+
+    /// How many events the output took and never sent because they have no
+    /// form its wire carries: a message type a MIDI 1.0 byte port cannot
+    /// express. An output that sends what it is handed has none, which is the
+    /// default.
+    fn unrepresentable(&self) -> u64 {
+        0
     }
 
     /// How many events this crate's own sender thread has taken and not yet

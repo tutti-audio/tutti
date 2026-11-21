@@ -196,7 +196,7 @@ fn an_input_reopened_at_once_hears_a_note() {
         .expect("connect input");
     assert!(matches!(first, tutti_midi_hardware::Connected::Opened(_)));
     drop(first);
-    assert!(io.disconnect_input(&input_id), "the input was open");
+    io.disconnect_input(&input_id).expect("the input was open");
     let tutti_midi_hardware::Connected::Opened(inlet) = io
         .connect_input(super::opening::started(&io), &input_id)
         .expect("reconnects at once")

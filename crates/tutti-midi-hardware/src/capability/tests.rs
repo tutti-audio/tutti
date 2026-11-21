@@ -22,6 +22,7 @@ fn midi2(blocks: &[FunctionBlockInfo]) -> Endpoint {
         None,
         blocks.iter().map(|block| (*block, None)),
     )
+    .endpoint
 }
 
 /// What an OS describes is the protocol in use and the blocks it declares: the
@@ -38,7 +39,7 @@ fn an_os_endpoint_is_the_active_protocol_and_the_blocks_it_declares() {
         rx_jr: true,
         tx_jr: true,
     };
-    let endpoint = from_os(Protocol::Midi1, Some(&offered), [(info(3), Some("Out"))]);
+    let endpoint = from_os(Protocol::Midi1, Some(&offered), [(info(3), Some("Out"))]).endpoint;
     assert_eq!(
         endpoint.active().protocol,
         Protocol::Midi1,
@@ -60,8 +61,26 @@ fn an_os_block_the_spec_cannot_hold_is_left_out() {
     let endpoint = midi2(&[info(1), info(32), info(2)]);
     let ids: Vec<u8> = endpoint.function_blocks().map(|b| b.id().get()).collect();
     assert_eq!(ids, [1, 2]);
-    let reserved = from_os(read_protocol(0), None, []);
+    let reserved = from_os(read_protocol(0), None, []).endpoint;
     assert_eq!(reserved.active().protocol, Protocol::Midi1);
+}
+
+/// **Each block left out is counted**, so an app can tell a short list of blocks
+/// from a device that declared fewer: two of the four declared are past the
+/// spec's range (id 32, 40), and the described endpoint says two.
+#[test]
+fn the_blocks_an_os_declares_and_the_spec_cannot_hold_are_counted() {
+    let described = from_os(
+        Protocol::Midi2,
+        None,
+        [info(1), info(32), info(2), info(40)].map(|block| (block, None)),
+    );
+    assert_eq!(described.endpoint.function_blocks().count(), 2);
+    assert_eq!(described.blocks_left_out, 2);
+    assert_eq!(
+        from_os(Protocol::Midi2, None, [(info(1), None)]).blocks_left_out,
+        0
+    );
 }
 
 /// An OS name is display text: one over 91 bytes is cut and the block kept, and
@@ -73,7 +92,8 @@ fn an_os_name_is_cut_to_fit_and_a_nul_drops_only_the_name() {
         Protocol::Midi2,
         None,
         [(info(0), Some(long.as_str())), (info(1), Some("a\0b"))],
-    );
+    )
+    .endpoint;
     let names: Vec<Option<usize>> = endpoint
         .function_blocks()
         .map(|b| b.name().map(|n| n.as_str().len()))
@@ -95,10 +115,10 @@ fn a_reserved_protocol_claims_no_support_the_os_did_not_report() {
         rx_jr: false,
         tx_jr: false,
     };
-    let only2 = from_os(read_protocol(0), Some(&offering(false, true)), []);
+    let only2 = from_os(read_protocol(0), Some(&offering(false, true)), []).endpoint;
     assert_eq!(only2.active().protocol, Protocol::Midi1);
     assert!(only2.capabilities().midi2 && !only2.capabilities().midi1);
-    let neither = from_os(read_protocol(0), Some(&offering(false, false)), []);
+    let neither = from_os(read_protocol(0), Some(&offering(false, false)), []).endpoint;
     assert!(neither.capabilities().midi1 && !neither.capabilities().midi2);
 }
 
@@ -107,11 +127,9 @@ fn a_reserved_protocol_claims_no_support_the_os_did_not_report() {
 #[test]
 fn only_a_ump_endpoint_is_asked() {
     assert!(is_ump_endpoint(&midi2(&[])));
-    assert!(is_ump_endpoint(&from_os(
-        Protocol::Midi1,
-        None,
-        [(info(0), None)]
-    )));
+    assert!(is_ump_endpoint(
+        &from_os(Protocol::Midi1, None, [(info(0), None)]).endpoint
+    ));
     assert!(!is_ump_endpoint(&legacy()));
 }
 
@@ -142,7 +160,8 @@ fn a_legacy_port_is_presented_as_a_midi1_device() {
             tx_jr: false,
         }),
         [],
-    );
+    )
+    .endpoint;
     assert!(described(&offers_midi2).capabilities().midi2);
 }
 
