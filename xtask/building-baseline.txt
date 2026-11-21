@@ -63,9 +63,6 @@ tutti-codec  ctor-result  crates/tutti-codec/src/format.rs::Format::from_path
 
 # tutti-cpal
 tutti-cpal  ctor-result  crates/tutti-cpal/src/mic.rs::MicIn::open
-tutti-cpal  default-enum-arg  crates/tutti-cpal/src/driver.rs::TuttiDriver::restart_with
-tutti-cpal  default-enum-arg  crates/tutti-cpal/src/host.rs::DeviceHost::supported_configs
-tutti-cpal  default-enum-arg  crates/tutti-cpal/src/poller.rs::DevicePoller::new
 
 # tutti-curve
 tutti-curve  with-prefix  crates/tutti-curve/src/trajectory.rs::Trajectory::with_range
@@ -93,8 +90,6 @@ tutti-engine  setter  crates/tutti-engine/src/routing.rs::OutputLevels::set_stri
 tutti-engine  ctor-result  crates/tutti-engine/src/engine.rs::Engine::new
 tutti-engine  ctor-result  crates/tutti-engine/src/engine.rs::Engine::with_capacity
 tutti-engine  ctor-result  crates/tutti-engine/src/routing.rs::OutputMap::channels
-tutti-engine  default-enum-arg  crates/tutti-engine/src/engine.rs::Engine::new
-tutti-engine  default-enum-arg  crates/tutti-engine/src/engine.rs::Engine::with_capacity
 
 # tutti-export
 tutti-export  ctor-result  crates/tutti-export/src/graph.rs::RenderGraph::assemble
@@ -137,12 +132,6 @@ tutti-graph  ctor-result  crates/tutti-graph/src/event.rs::SortedEvents::with_bo
 tutti-graph  ctor-result  crates/tutti-graph/src/event.rs::SortedEvents::sort
 tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_new
 tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_of
-tutti-graph  default-enum-arg  crates/tutti-graph/src/editor/taps.rs::Editor::open_event_tap
-tutti-graph  default-enum-arg  crates/tutti-graph/src/fade.rs::Fade::new
-tutti-graph  default-enum-arg  crates/tutti-graph/src/fade.rs::Fade::seconds
-tutti-graph  default-enum-arg  crates/tutti-graph/src/param_event.rs::ParamSegment::by_id
-tutti-graph  default-enum-arg  crates/tutti-graph/src/param_event.rs::ParamSegment::new
-tutti-graph  default-enum-arg  crates/tutti-graph/src/param_event.rs::ParamSegment::unit
 
 # tutti-midi-runtime
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/live/input_node.rs::MidiInputNode::new
@@ -295,15 +284,6 @@ tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_routes
 tutti-session  setter  crates/tutti-session/src/modulation.rs::Mods::set_source
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::PumpLoop::new
 tutti-session  ctor-result  crates/tutti-session/src/session/mod.rs::Session::new
-tutti-session  default-enum-arg  crates/tutti-session/src/device.rs::Session::watch_devices_on
-tutti-session  default-enum-arg  crates/tutti-session/src/device.rs::Session::watch_host
-tutti-session  default-enum-arg  crates/tutti-session/src/graph/observe.rs::Meters::open
-tutti-session  default-enum-arg  crates/tutti-session/src/graph/observe.rs::Taps::open_event
-tutti-session  default-enum-arg  crates/tutti-session/src/latency.rs::TakeLatency::new
-tutti-session  default-enum-arg  crates/tutti-session/src/watch.rs::DeviceWatch::new
-tutti-session  default-enum-arg  crates/tutti-session/src/watch.rs::DeviceWatch::without_stream
-tutti-session  default-enum-arg  crates/tutti-session/src/watch.rs::Follow::not_started
-tutti-session  default-enum-arg  crates/tutti-session/src/watch.rs::Follow::running
 
 # tutti-sf2
 

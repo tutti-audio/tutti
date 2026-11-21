@@ -135,7 +135,12 @@ fn render(ed: &mut Editor, exec: &mut Executor, frames: usize) -> [Vec<f32>; 2] 
 fn both(from: f64, to: f64, len: usize, shape: Law) -> Vec<(u64, ParamSegment)> {
     [UnitParam::Azimuth, UnitParam::Elevation]
         .into_iter()
-        .map(|p| (0, ParamSegment::unit(p, from, to, Samples::new(len), shape)))
+        .map(|p| {
+            (
+                0,
+                ParamSegment::unit(p, from, to, Samples::new(len)).law(shape),
+            )
+        })
         .collect()
 }
 
@@ -203,7 +208,7 @@ fn the_port_wraps_a_bearing_rather_than_clamping_it() {
     let both_step = |v: f64| {
         [UnitParam::Azimuth, UnitParam::Elevation]
             .into_iter()
-            .map(|p| (0, ParamSegment::unit(p, v, v, Samples::new(0), Law::Linear)))
+            .map(|p| (0, ParamSegment::unit(p, v, v, Samples::new(0))))
             .collect::<Vec<_>>()
     };
     let (mut ed, mut exec) = graph(
@@ -232,7 +237,7 @@ fn the_port_holds_a_bearing_to_an_arc_across_180() {
         let (mut ed, mut exec) = graph(
             vec![(
                 0,
-                ParamSegment::unit(UnitParam::Azimuth, v, v, Samples::new(0), Law::Linear),
+                ParamSegment::unit(UnitParam::Azimuth, v, v, Samples::new(0)),
             )],
             &[(UnitParam::Azimuth, behind)],
         );
@@ -319,7 +324,7 @@ fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
         ed.insert(probe(k), "probe", Unforkable(Heavy(Probe(base))));
     }
     let (from, to) = (f64::from(target), f64::from(target));
-    let step = ParamSegment::unit(UnitParam::Azimuth, from, to, Samples::new(0), Law::Linear);
+    let step = ParamSegment::unit(UnitParam::Azimuth, from, to, Samples::new(0));
     ed.insert(
         NodeKey(SENDER),
         "sender",

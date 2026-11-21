@@ -13,7 +13,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_fixtures::midi;
 use tutti_fixtures::midi::key_of;
-use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
+use tutti_graph::{Cx, EventTapOptions, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_graph::{EventCapacity, EventInletNode, EventTapReader, TapAlign, TapEvent};
 use tutti_session::{DetachedSession, Losses, OutPort, Root, Session, Stamp};
 use tutti_ump::{MidiChannel, U7, Ump};
@@ -66,12 +66,18 @@ fn pushed_events_come_out_at_their_frames() {
     let mut tap = s
         .graph()
         .taps()
-        .open_event(key.events_out(), TapAlign::Raw, EventCapacity::of(64))
+        .open_event(
+            key.events_out(),
+            EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
+        )
         .expect("the port exists");
     let mut tap2 = s
         .graph()
         .taps()
-        .open_event(key2.events_out(), TapAlign::Raw, EventCapacity::of(64))
+        .open_event(
+            key2.events_out(),
+            EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
+        )
         .expect("the port exists");
     let _ = s.update();
 

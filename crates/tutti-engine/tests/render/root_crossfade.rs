@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_engine::Engine;
-use tutti_graph::{Edge, Editor, Fade, FadeLaw, ForkByClone, InPort, NodeKey, OutPort};
+use tutti_graph::{Edge, Editor, Fade, ForkByClone, InPort, NodeKey, OutPort};
 use tutti_graph::{Pool, PortSource, Prepare, WorkerPool};
 use tutti_timeline::Transport;
 use tutti_units::{Hz, SampleRate, Samples, Seconds};
@@ -83,18 +83,8 @@ fn render(pooled: bool) -> (Vec<f32>, usize) {
     }
     wire(&mut ed, [11, 12]);
     ed.commit().expect("commits");
-    let engine = Engine::new(
-        &Transport::new(rate),
-        &mut ed,
-        exec,
-        tutti_engine::BlockDates::Os,
-    )
-    .expect("within limits");
-    ed.set_root_fade(Some(Fade::seconds(
-        Seconds::new(0.005),
-        rate,
-        FadeLaw::EqualAmplitude,
-    )));
+    let engine = Engine::new(&Transport::new(rate), &mut ed, exec).expect("within limits");
+    ed.set_root_fade(Some(Fade::seconds(Seconds::new(0.005), rate)));
     let control = engine.output_control();
     let mut heard = Vec::new();
     let mut block = vec![0.0f32; 64 * 2];

@@ -155,8 +155,7 @@ fn render(
         })
     }));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     transport.settings().set_tempo_map(Arc::clone(map));
     transport
         .motion()
@@ -353,8 +352,7 @@ fn a_clip_placed_ahead_of_a_tempo_change_lands_its_first_frame_on_its_start() {
         })
     }));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     transport.settings().set_tempo_map(Arc::clone(&m));
     transport
         .motion()

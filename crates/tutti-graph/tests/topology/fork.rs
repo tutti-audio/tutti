@@ -787,7 +787,7 @@ fn the_live_graph_is_unaffected_while_a_fork_renders() {
 /// replace (a different width) changes nothing.
 #[test]
 fn a_replace_moves_forking_to_the_new_unit() {
-    let fade = Fade::new(Samples::new(64), FadeLaw::EqualPower);
+    let fade = Fade::new(Samples::new(64)).law(FadeLaw::EqualPower);
     let key = NodeKey(1);
     let (mut ed, mut exec) = Editor::new(prepare(64));
     ed.insert(key, "consts", consts(1, 0.5));

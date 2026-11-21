@@ -22,9 +22,9 @@ use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventOut, ForkMode, ForkTarget, IntoNode, Io, Law, MAX_PARAM_PORTS, Node,
-    NodeParts, ParamEvent, ParamIn, ParamInput, ParamNode, ParamPorts, ParamPortsError,
-    ParamSegment, ParamSet, Prepare, Shape, Status, TransportPosition, param_parts,
+    Cx, Editor, EventOut, ForkMode, ForkTarget, IntoNode, Io, MAX_PARAM_PORTS, Node, NodeParts,
+    ParamEvent, ParamIn, ParamInput, ParamNode, ParamPorts, ParamPortsError, ParamSegment,
+    ParamSet, Prepare, Shape, Status, TransportPosition, param_parts,
 };
 use tutti_graph::{OutPort, PortSource};
 use tutti_rt::Param;
@@ -114,7 +114,7 @@ impl Node for Steps {
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         let at = io.offset(0).expect("a block has a frame");
         for &(addr, v) in &self.to {
-            let seg = ParamSegment::unit(addr, v, v, Samples::new(0), Law::Linear);
+            let seg = ParamSegment::unit(addr, v, v, Samples::new(0));
             let _ = io.event_out(0).push_param(ParamEvent::segment(at, seg));
         }
         Status::Silent

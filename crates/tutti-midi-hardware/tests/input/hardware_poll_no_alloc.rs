@@ -27,8 +27,8 @@ use tutti_fixtures::midi;
 use tutti_graph::EventInletNode;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Editor, EventEdge, EventIn, EventOut, EventTapId, EventTapReader, Executor, Prepare, TapAlign,
-    TapEvent, TransportPosition,
+    Editor, EventEdge, EventIn, EventOut, EventTapId, EventTapOptions, EventTapReader, Executor,
+    Prepare, TapAlign, TapEvent, TransportPosition,
 };
 use tutti_midi_hardware::{HardwareMidiInputs, InputProducerHandle};
 use tutti_midi_runtime::{InputInlets, InputWriters, MidiInputNode};
@@ -82,8 +82,7 @@ impl Rig {
                     node: INPUT,
                     port: 0,
                 },
-                TapAlign::Raw,
-                tutti_graph::EventCapacity::of(1024),
+                EventTapOptions::new(tutti_graph::EventCapacity::of(1024)).align(TapAlign::Raw),
             )
             .expect("the input node is in the graph");
         editor.commit().expect("commits");

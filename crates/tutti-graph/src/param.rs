@@ -1315,7 +1315,6 @@ mod tests {
             Hz::new(5.0),
             Hz::new(9.0),
             Samples::new(20),
-            Law::Linear,
         );
         let ramp = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(0.0), Samples::new(2));
         let base = |i: usize| 1.0 + i as f32;
@@ -1416,13 +1415,7 @@ mod tests {
         let key = ParamKey::<Hz>::CUTOFF;
         let at = |i: usize| Offset::of(Samples::new(i), Samples::new(64));
         let seg = |from: f64, to: f64, len: usize| {
-            ParamSegment::new(
-                key,
-                Hz::new(from),
-                Hz::new(to),
-                Samples::new(len),
-                Law::Linear,
-            )
+            ParamSegment::new(key, Hz::new(from), Hz::new(to), Samples::new(len))
         };
         let corners = |events: &[ParamEvent]| {
             let mut buf = [0u32; 64];

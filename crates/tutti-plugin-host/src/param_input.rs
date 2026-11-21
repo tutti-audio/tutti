@@ -125,8 +125,8 @@ pub fn take(
                 let stands = stood(segments, params, id, o, abs(o));
                 match stands {
                     Some(stands) if ramp.duration() > Samples::new(0) => {
-                        let seg =
-                            ParamSegment::by_id(id, stands, value, ramp.duration(), ramp.shape());
+                        let seg = ParamSegment::by_id(id, stands, value, ramp.duration())
+                            .law(ramp.shape());
                         segments.start(params, id, seg, abs(o), frame, false);
                     }
                     _ => {
@@ -344,7 +344,7 @@ mod tests {
             ),
             ParamEvent::segment(
                 off(20),
-                ParamSegment::by_id(ParamId::new(7), 0.9, 0.9, Samples::new(2), Law::Linear),
+                ParamSegment::by_id(ParamId::new(7), 0.9, 0.9, Samples::new(2)),
             ),
             ParamEvent::ramp(
                 off(20),
@@ -515,7 +515,7 @@ mod tests {
         let events: Vec<ParamEvent> = (0..300)
             .map(|i| {
                 let v = if i % 2 == 0 { 0.25 } else { 0.75 };
-                let seg = ParamSegment::by_id(ParamId::new(7), v, v, Samples::new(2), Law::Linear);
+                let seg = ParamSegment::by_id(ParamId::new(7), v, v, Samples::new(2));
                 ParamEvent::segment(Offset::of(Samples::new(i), Samples::new(len)), seg)
             })
             .collect();

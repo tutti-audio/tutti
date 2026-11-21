@@ -111,8 +111,7 @@ fn chain_engine(outputs: usize) -> Engine {
         })
     }));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
 
     transport.settings().set_tempo(Bpm::of(120.0));
     let _ = transport.motion().try_send(MotionCommand::Play);
@@ -377,13 +376,8 @@ fn depth_graph_engine(depth: usize, ours: bool) -> Engine {
             port: 0,
         })]);
     ed.commit().expect("commits");
-    let engine = Engine::new(
-        &Transport::new(SampleRate::of(SR)),
-        &mut ed,
-        exec,
-        tutti_engine::BlockDates::Os,
-    )
-    .expect("within the limits");
+    let engine =
+        Engine::new(&Transport::new(SampleRate::of(SR)), &mut ed, exec).expect("within the limits");
     // Install the plan outside the timed loop; the editor may go.
     let mut warm = vec![0.0f32; 512 * 2];
     render(&engine, &mut warm, ChannelLayout::STEREO);

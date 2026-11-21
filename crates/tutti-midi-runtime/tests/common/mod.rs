@@ -6,8 +6,8 @@
 
 use tutti_fixtures::midi;
 use tutti_graph::{
-    Editor, EventEdge, EventIn, EventOut, EventTapId, EventTapReader, NodeKey, TapAlign, TapEvent,
-    TransportPosition,
+    Editor, EventEdge, EventIn, EventOut, EventTapId, EventTapOptions, EventTapReader, NodeKey,
+    TapAlign, TapEvent, TransportPosition,
 };
 use tutti_midi_runtime::TimedMidiEvent;
 use tutti_ump::{MidiChannel, Ump};
@@ -78,8 +78,7 @@ pub fn sink(ed: &mut Editor, first_id: u64, sources: &[(u64, u16)]) -> Sink {
                     node: NodeKey(node),
                     port,
                 },
-                TapAlign::Raw,
-                SINK_CAPACITY,
+                EventTapOptions::new(SINK_CAPACITY).align(TapAlign::Raw),
             )
             .expect("the source is in the graph")
         })

@@ -20,7 +20,7 @@ use tutti_units::SampleRate;
 fn a_blocked_enumeration_does_not_hold_the_update_and_lands_when_it_answers() {
     let (driver, _stream) = ManualStreamDriver::new();
     let mut s = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(
             OutputSpec::new(
                 SampleRate::SR_48K,
@@ -68,7 +68,7 @@ fn a_blocked_enumeration_does_not_hold_the_update_and_lands_when_it_answers() {
 fn a_failed_listing_reports_the_typed_error() {
     let (driver, _stream) = ManualStreamDriver::new();
     let mut s = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(
             OutputSpec::new(
                 SampleRate::SR_48K,
@@ -105,7 +105,7 @@ fn a_failed_listing_reports_the_typed_error() {
 fn a_listing_that_panics_reports_that_it_ended() {
     let (driver, _stream) = ManualStreamDriver::new();
     let mut s = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(
             OutputSpec::new(
                 SampleRate::SR_48K,

@@ -655,7 +655,7 @@ impl DeviceRestarted {
 /// assert_eq!(request.max_block, None);
 /// assert_eq!(DeviceRestart::default().device, DeviceSelector::Default);
 /// ```
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceRestart {
     /// The output device; the host's default by default.
     pub device: DeviceSelector,
@@ -680,13 +680,22 @@ pub struct DeviceRestart {
     wanted: bool,
 }
 
+impl Default for DeviceRestart {
+    /// A restart onto the host's default device, keeping the block size.
+    fn default() -> Self {
+        Self::to(DeviceSelector::Default)
+    }
+}
+
 impl DeviceRestart {
     /// A restart onto `device`, keeping the block size.
     #[must_use]
     pub fn to(device: impl Into<DeviceSelector>) -> Self {
         Self {
             device: device.into(),
-            ..Self::default()
+            max_block: None,
+            topology: None,
+            wanted: false,
         }
     }
 
@@ -1041,7 +1050,7 @@ mod tests {
             tutti_buffers::SampleFormat::F32,
         );
         let mut session = Session::builder()
-            .device(Default::default())
+            .device(tutti_cpal::DeviceSelector::Default)
             .build_device_on(spec, driver)
             .expect("builds with no device");
         let outcome = catch_unwind(AssertUnwindSafe(|| {

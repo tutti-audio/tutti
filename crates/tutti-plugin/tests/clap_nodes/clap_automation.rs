@@ -279,13 +279,8 @@ fn follows(
 #[test]
 fn a_scheduled_segment_drives_a_plugin_parameter_to_its_end() {
     const AT: u64 = 300;
-    let seg = ParamSegment::by_id(
-        GAIN,
-        0.5,
-        0.75,
-        Samples::new(1000),
-        Law::PowerIn(Exponent::of(2.0)),
-    );
+    let seg = ParamSegment::by_id(GAIN, 0.5, 0.75, Samples::new(1000))
+        .law(Law::PowerIn(Exponent::of(2.0)));
     let (out, latency) = render_gain(None, &[(AT, ParamKind::Segment(seg))], 10);
     let end = AT as usize + seg.arrives_after().get();
     follows(
@@ -315,13 +310,8 @@ fn a_shaped_ramp_drives_a_plugin_parameter_along_its_shape() {
         &[(100, ParamKind::Ramp(step)), (AT, ParamKind::Ramp(ramp))],
         10,
     );
-    let seg = ParamSegment::by_id(
-        GAIN,
-        0.5,
-        0.75,
-        Samples::new(1000),
-        Law::PowerIn(Exponent::of(2.0)),
-    );
+    let seg = ParamSegment::by_id(GAIN, 0.5, 0.75, Samples::new(1000))
+        .law(Law::PowerIn(Exponent::of(2.0)));
     follows(
         &out,
         latency,
@@ -339,13 +329,8 @@ fn a_shaped_ramp_drives_a_plugin_parameter_along_its_shape() {
 fn an_interrupting_ramp_stops_a_segment_on_a_plugin() {
     const AT: u64 = 300;
     const CUT: u64 = 800;
-    let seg = ParamSegment::by_id(
-        GAIN,
-        0.5,
-        0.75,
-        Samples::new(1000),
-        Law::PowerIn(Exponent::of(2.0)),
-    );
+    let seg = ParamSegment::by_id(GAIN, 0.5, 0.75, Samples::new(1000))
+        .law(Law::PowerIn(Exponent::of(2.0)));
     let ramp = ParamRamp::by_id(GAIN, 0.25, Samples::new(0));
     let (out, latency) = render_gain(
         None,

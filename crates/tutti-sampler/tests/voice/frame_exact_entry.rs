@@ -147,8 +147,7 @@ fn live_graph(start: Beat) -> Run {
     let t = transport();
     let probe = Arc::default();
     let (mut ed, exec) = graph_with(pool(start), Arc::clone(&probe));
-    let engine =
-        Engine::new(&t, &mut ed, exec, tutti_engine::BlockDates::Os).expect("within the limits");
+    let engine = Engine::new(&t, &mut ed, exec).expect("within the limits");
     let left = play(&engine, &t);
     let read = *probe.lock().expect("probe");
     Run { left, read }

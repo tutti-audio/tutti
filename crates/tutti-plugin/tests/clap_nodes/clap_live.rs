@@ -206,8 +206,7 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
     let declared = ed.spec().topology.nodes[&key].latency;
 
     let transport = Transport::new(SampleRate::of(rate));
-    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("the engine builds");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("the engine builds");
     let warm_up = 8 + declared.get().div_ceil(quantum);
     let mut buf = vec![0.0f32; quantum];
     let (mut silent, mut wrong) = (Vec::new(), Vec::new());

@@ -285,7 +285,7 @@ mod tests {
     /// before it.
     #[test]
     fn a_start_on_the_chunk_s_last_frame_is_a_corner() {
-        let seg = ParamSegment::by_id(ParamId::new(7), 0.5, 1.0, Samples::new(100), Law::Linear);
+        let seg = ParamSegment::by_id(ParamId::new(7), 0.5, 1.0, Samples::new(100));
         let mut sp = SegmentPoints::default();
         let mut d = delivery([7]);
         sp.prepare(MAX_SEGMENTS);
@@ -313,13 +313,8 @@ mod tests {
     /// move with the chunk.
     #[test]
     fn a_segment_sends_points_until_it_lands() {
-        let seg = ParamSegment::by_id(
-            ParamId::new(7),
-            0.0,
-            1.0,
-            Samples::new(150),
-            Law::PowerIn(Exponent::of(2.0)),
-        );
+        let seg = ParamSegment::by_id(ParamId::new(7), 0.0, 1.0, Samples::new(150))
+            .law(Law::PowerIn(Exponent::of(2.0)));
         let grid = |f: u64| f.is_multiple_of(32);
         let mut sp = SegmentPoints::default();
         let mut d = delivery([7]);
@@ -366,7 +361,7 @@ mod tests {
     #[test]
     fn an_interrupting_event_stops_the_segment() {
         let b = ParamId::new(8);
-        let seg = ParamSegment::by_id(ParamId::new(7), 0.0, 1.0, Samples::new(500), Law::Linear);
+        let seg = ParamSegment::by_id(ParamId::new(7), 0.0, 1.0, Samples::new(500));
         let mut sp = SegmentPoints::default();
         let mut d = delivery([7, 8]);
         sp.prepare(MAX_SEGMENTS);
@@ -392,13 +387,8 @@ mod tests {
         let addr = |k: u32| ParamId::new(100 + k);
         // Address `k` arrives `400 - k` frames after frame 0.
         let seg = |k: u32| {
-            ParamSegment::by_id(
-                addr(k),
-                0.0,
-                1.0,
-                Samples::new(401 - k as usize),
-                Law::PowerIn(Exponent::of(2.0)),
-            )
+            ParamSegment::by_id(addr(k), 0.0, 1.0, Samples::new(401 - k as usize))
+                .law(Law::PowerIn(Exponent::of(2.0)))
         };
         let mut sp = SegmentPoints::default();
         let mut d = delivery((0..n).map(|k| 100 + k));
@@ -459,9 +449,7 @@ mod tests {
         let mut sp = SegmentPoints::default();
         let mut d = delivery([1, 2, 3]);
         sp.prepare(2);
-        let seg = |id: u32| {
-            ParamSegment::by_id(ParamId::new(id), 0.0, 1.0, Samples::new(500), Law::Linear)
-        };
+        let seg = |id: u32| ParamSegment::by_id(ParamId::new(id), 0.0, 1.0, Samples::new(500));
         d.begin();
         sp.begin(64);
         for id in [1, 2, 3] {

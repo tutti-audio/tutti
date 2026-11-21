@@ -35,7 +35,7 @@ fn spec_at(rate: f64) -> OutputSpec {
 fn the_session_publishes_the_meter_and_taps_its_callback_feeds() {
     let (driver, stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
     let (dc, _) = session
@@ -80,7 +80,7 @@ fn the_session_publishes_the_meter_and_taps_its_callback_feeds() {
 fn the_session_reads_the_load_its_callback_measures() {
     let (driver, stream) = ManualStreamDriver::new();
     let session = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
     for _ in 0..3 {
@@ -103,7 +103,7 @@ fn the_session_reads_the_load_its_callback_measures() {
 fn a_rerate_keeps_the_published_compensation_in_step_with_the_plan() {
     let (driver, old) = ManualStreamDriver::new();
     let mut s = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
     let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
@@ -234,7 +234,7 @@ fn policy() -> DevicePolicy {
 fn the_watch_reports_what_the_host_lists() {
     let (driver, _stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
     let fake = Fake::default();
@@ -294,7 +294,7 @@ fn the_watch_reports_what_the_host_lists() {
 fn following_the_default_restarts_and_reports_the_rate() {
     let (driver, _stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(44_100.0), driver)
         .unwrap();
     let fake = Fake::default();
@@ -347,7 +347,7 @@ fn following_the_default_restarts_and_reports_the_rate() {
 fn an_explicit_device_is_not_replaced_by_the_default() {
     let (driver, stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
     let fake = Fake::default();
@@ -382,7 +382,7 @@ fn an_explicit_device_is_not_replaced_by_the_default() {
 fn a_disconnect_fault_asks_for_a_restart_once() {
     let (driver, stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
     let fake = Fake::default();
@@ -414,7 +414,7 @@ fn a_disconnect_fault_asks_for_a_restart_once() {
 fn a_flapping_device_is_not_restarted_on_every_change() {
     let (driver, stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
     let fake = Fake::default();
@@ -451,7 +451,7 @@ fn a_flapping_device_is_not_restarted_on_every_change() {
 fn a_refused_restart_keeps_the_old_spec_and_is_retried_later() {
     let (driver, _stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
     let fake = Fake::default();
@@ -501,7 +501,7 @@ fn a_refused_restart_keeps_the_old_spec_and_is_retried_later() {
 fn a_restart_that_stopped_the_stream_is_retried() {
     let (driver, _stream) = ManualStreamDriver::new();
     let mut live = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
     let fake = Fake::default();
@@ -548,7 +548,7 @@ fn a_restart_that_stopped_the_stream_is_retried() {
 fn a_stale_wanted_restart_does_not_replace_a_later_choice() {
     let (driver, _stream) = ManualStreamDriver::new();
     let mut live = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
     let fake = Fake::default();
@@ -596,7 +596,7 @@ fn a_stale_wanted_restart_does_not_replace_a_later_choice() {
 fn a_fault_after_a_restart_is_reported_again() {
     let (driver, _first) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
     let _ = session.update();
@@ -633,7 +633,7 @@ fn a_fault_after_a_restart_is_reported_again() {
 fn a_host_can_hold_restarts() {
     let (driver, _stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
     let fake = Fake::default();
@@ -663,7 +663,7 @@ fn a_host_can_hold_restarts() {
 fn a_stalled_backend_run_becomes_a_lost_stream() {
     let (driver, stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
     let fake = Fake::default();
@@ -705,7 +705,7 @@ fn the_render_worker_start_hook_runs_once_per_live_helper() {
     let session = Session::builder()
         .render_workers(Workers::of(4))
         .render_worker_start(move |i| hook.lock().unwrap().push(i))
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
     assert_eq!(indices_after(&seen, 3), [1, 2, 3]);
@@ -732,7 +732,7 @@ fn per_core_workers_start_a_helper_for_every_core_but_the_callbacks() {
     let live = Session::builder()
         .render_workers(Workers::PerCore)
         .render_worker_start(move |i| hook.lock().unwrap().push(i))
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
     let helpers: Vec<usize> = (1..cores).collect();
@@ -763,7 +763,7 @@ fn indices_after(seen: &Mutex<Vec<usize>>, n: usize) -> Vec<usize> {
 fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
     let (driver, _old) = ManualStreamDriver::new();
     let mut s = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
     let across = s
@@ -812,7 +812,7 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
 fn the_session_lists_the_outputs_once() {
     let (driver, _stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
     assert_eq!(
@@ -874,7 +874,7 @@ fn a_restart_onto_a_device_that_cannot_place_the_declared_root_is_refused() {
         .root_topology(tutti_buffers::ChannelTopology::unassigned(
             ChannelLayout::QUAD,
         ))
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(wide(48_000.0), driver)
         .expect("four buses place on six channels");
     assert_eq!(session.graph_ref().outputs(), 4);
@@ -918,7 +918,7 @@ fn a_restart_states_or_defaults_the_new_devices_placement() {
     );
     let (driver, _stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
     assert_eq!(
@@ -974,7 +974,7 @@ fn a_refused_declaration_is_retried_on_a_restart() {
     let buses = tutti_buffers::ChannelTopology::unassigned(ChannelLayout::QUAD);
     let (driver, _stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
     assert!(session.declare_root_topology(Some(buses.clone())).is_err());
@@ -1011,7 +1011,7 @@ fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a
     let stereo = tutti_buffers::ChannelTopology::default_for(ChannelLayout::STEREO);
     let (driver, stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(wide.clone(), driver)
         .unwrap();
     // Something is heard, so the old root has outputs to fade; the root in
@@ -1098,7 +1098,7 @@ impl Node for AlwaysPanics {
 fn a_panic_in_the_render_is_a_device_fault_event() {
     let (driver, stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
     let (node, _) = session.graph().add(ForkByClone(AlwaysPanics));
@@ -1153,7 +1153,7 @@ fn start_when_listed(retry_startup: bool) -> Vec<DeviceSelector> {
         let ran = watch.retry_start(&mut events, |selector| {
             asked.lock().unwrap().push(selector);
             Session::builder()
-                .device(Default::default())
+                .device(tutti_cpal::DeviceSelector::Default)
                 .build_device_on(spec_at(48_000.0), driver.take().expect("one start"))
         });
         (ran, events)
@@ -1220,7 +1220,7 @@ fn a_restart_onto_a_device_the_map_does_not_fit_is_refused_and_keeps_the_map() {
     };
     let (driver, _stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec(6), driver)
         .unwrap();
     let policy = OutputPolicy {

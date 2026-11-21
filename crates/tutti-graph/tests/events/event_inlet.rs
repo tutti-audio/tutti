@@ -18,9 +18,10 @@ use tutti_fixtures::midi;
 use tutti_graph::contract::{Direct, HAND_EVENT_CAPACITY};
 use tutti_graph::{
     Edge, Editor, Env, EventCapacity, EventEdge, EventIn, EventInletNode, EventInletWriter,
-    EventKind, EventOut, EventTapId, EventTapReader, Executor, ForkCause, ForkMode, ForkSource,
-    ForkTarget, Forked, InPort, IntoNode, Losses, Node, NodeKey, NodeParts, OutPort, PlayClock,
-    PortSource, Prepare, Stamp, TapAlign, TapEvent, TransportChanges, TransportPosition,
+    EventKind, EventOut, EventTapId, EventTapOptions, EventTapReader, Executor, ForkCause,
+    ForkMode, ForkSource, ForkTarget, Forked, InPort, IntoNode, Losses, Node, NodeKey, NodeParts,
+    OutPort, PlayClock, PortSource, Prepare, Stamp, TapAlign, TapEvent, TransportChanges,
+    TransportPosition,
 };
 use tutti_rt::PushError;
 use tutti_ump::{CCNumber, MidiChannel, U7, Ump};
@@ -600,8 +601,7 @@ fn graph(
                 node: NodeKey(1),
                 port: 0,
             },
-            TapAlign::Raw,
-            EventCapacity::of(256),
+            EventTapOptions::new(EventCapacity::of(256)).align(TapAlign::Raw),
         )
         .expect("the port exists")
     });

@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use crate::common::{MF, note};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
-use tutti_graph::{EventCapacity, Losses, TapAlign, UmpAt};
+use tutti_graph::{EventCapacity, EventTapOptions, Losses, TapAlign, UmpAt};
 use tutti_midi_runtime::MidiOut;
 use tutti_ump::{MidiGroup, Ump};
 use tutti_units::SampleRate;
@@ -122,8 +122,7 @@ fn a_full_tap_counts_what_it_drops() {
         .taps()
         .open_event(
             EventOutPort::new(clock, 0),
-            TapAlign::Raw,
-            EventCapacity::of(8_192),
+            EventTapOptions::new(EventCapacity::of(8_192)).align(TapAlign::Raw),
         )
         .expect("the clock is in the graph");
     let _ = s.update(); // commits the second tap
@@ -184,8 +183,7 @@ fn reopening_one_tap_leaves_the_others_fed() {
         .taps()
         .open_event(
             EventOutPort::new(clock, 0),
-            TapAlign::Raw,
-            EventCapacity::of(64),
+            EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .unwrap();
     let mut second = s
@@ -193,8 +191,7 @@ fn reopening_one_tap_leaves_the_others_fed() {
         .taps()
         .open_event(
             EventOutPort::new(clock, 0),
-            TapAlign::Raw,
-            EventCapacity::of(64),
+            EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .unwrap();
     let _ = s.update();

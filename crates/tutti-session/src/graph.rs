@@ -62,7 +62,7 @@ use tutti_graph::{
 };
 use tutti_graph::{
     EventCapacity, EventInletNode, EventInletWriter, EventTapId, MeterId, MeterSpec, MissingSource,
-    TapAlign, TapId,
+    TapId,
 };
 use tutti_rt::Mint;
 #[cfg(feature = "plugin")]
@@ -334,7 +334,7 @@ pub struct Graph<F: Float = f32> {
     /// Each open event tap as it was opened (its port, alignment and
     /// capacity), so [`Taps::reopen_events`] can open it
     /// again.
-    event_taps: BTreeMap<EventTapId, (tutti_graph::EventTapSource, TapAlign, EventCapacity)>,
+    event_taps: BTreeMap<EventTapId, (tutti_graph::EventTapSource, tutti_graph::EventTapOptions)>,
     /// The master meter's reader until a host takes it.
     master_meter: Option<MeterReader>,
     /// The master meter's id: the one meter that reads the root.
@@ -650,7 +650,7 @@ impl<F: Float> Graph<F> {
         // Built here, on the control side, after the pool sized the
         // executor: the engine moves to the audio thread and holds none.
         let rt_log = tutti_graph::RtLogReaders::new(&mut exec);
-        let engine = tutti_engine::Engine::new(transport, &mut self.editor, exec, dates)?;
+        let engine = tutti_engine::Engine::new(transport, &mut self.editor, exec)?.dates(dates);
         let control = engine.output_control();
         control.support(device)?;
         control.state_device(device, topology)?;
@@ -1337,7 +1337,7 @@ impl<F: Float> Graph<F> {
         let rate = self.editor.prepare().sample_rate();
         let placed = self
             .editor
-            .replace_or_swap(node, incoming, Fade::seconds(fade, rate, law))
+            .replace_or_swap(node, incoming, Fade::seconds(fade, rate).law(law))
             .map_err(|e| ReplaceRefused::Failed(CrossfadeRefused::Editor(e)))?;
         let controls = placed.controls;
         self.note_unwired(node, &placed.unwired);
@@ -3597,11 +3597,7 @@ impl<F: Float> Graph<F> {
             .map(|r| tutti_buffers::BusTopology::try_from(r).expect("a checked root fits a bus"));
         // Both roots render the same nodes, in phase.
         self.editor.set_root_fade((!hard).then(|| {
-            tutti_graph::Fade::seconds(
-                tutti_graph::DECLICK,
-                self.editor.prepare().sample_rate(),
-                tutti_graph::FadeLaw::EqualAmplitude,
-            )
+            tutti_graph::Fade::seconds(tutti_graph::DECLICK, self.editor.prepare().sample_rate())
         }));
         let spec = self.editor.spec_mut();
         if spec.root != bus {

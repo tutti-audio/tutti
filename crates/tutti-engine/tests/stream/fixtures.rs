@@ -32,8 +32,7 @@ pub fn graph_engine(transport: &Transport, build: impl FnOnce(&mut Editor)) -> E
     ));
     build(&mut ed);
     ed.commit().expect("commits");
-    let engine = Engine::new(transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("within the limits");
+    let engine = Engine::new(transport, &mut ed, exec).expect("within the limits");
     Box::leak(Box::new(ed));
     engine
 }

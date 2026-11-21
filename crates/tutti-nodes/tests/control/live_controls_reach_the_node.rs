@@ -26,7 +26,7 @@
 
 use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
-use tutti_graph::{Fade, FadeLaw, IntoNode, NodeMode, Prepare, Standalone};
+use tutti_graph::{Fade, IntoNode, NodeMode, Prepare, Standalone};
 use tutti_nodes::{EqBandConfig, EqBandNode, SvfType};
 use tutti_units::UnitParam;
 use tutti_units::{Db, Hz, Q, SampleRate, Samples};
@@ -120,11 +120,7 @@ fn a_by_value_change_reaches_the_audio_by_replacing_the_node() {
     let key = s.key();
     let editor = s.renderer_mut().editor_mut();
     editor
-        .replace(
-            key,
-            high_pass,
-            Fade::new(Samples::new(1), FadeLaw::default()),
-        )
+        .replace(key, high_pass, Fade::new(Samples::new(1)))
         .expect("same shape");
     editor.commit().expect("commits");
     let replaced = energy(&mut s);

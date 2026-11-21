@@ -103,7 +103,6 @@ use crate::param::{ParamIn, ParamInput};
 use crate::param_event::{ParamEvent, ParamSegment};
 use crate::rtlog::{LogCapture, LogFilter, RtRecord};
 use crate::spec::{EventIn, EventOut};
-use tutti_curve::Law;
 
 mod snapshot;
 pub use snapshot::{IsolateRow, SNAPSHOT_FRAMES};
@@ -1617,8 +1616,7 @@ impl Node for ParamPulse {
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         for (frame, value) in [(self.at, self.amplitude), (self.at + Samples::new(1), 0.0)] {
             if let Some(offset) = cx.env.offset_of(frame) {
-                let step =
-                    ParamSegment::unit(self.param, value, value, Samples::new(0), Law::Linear);
+                let step = ParamSegment::unit(self.param, value, value, Samples::new(0));
                 io.event_out(0)
                     .push_param(ParamEvent::segment(offset, step))
                     .expect("two events fit");

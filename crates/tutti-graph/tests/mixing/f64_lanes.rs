@@ -9,9 +9,9 @@ use tutti_graph::testing as common;
 use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Cx, Editor, EventOut, Executor, ForkByClone, Io, Law, Node, NodeKey, OutPort, ParamEvent,
-    ParamIn, ParamNode, ParamRamp, ParamRange, ParamSegment, ParamSet, Params, PortSource, Prepare,
-    Shape, Status, TransportPosition, declare_params,
+    Cx, Editor, EventOut, Executor, ForkByClone, Io, Node, NodeKey, OutPort, ParamEvent, ParamIn,
+    ParamNode, ParamRamp, ParamRange, ParamSegment, ParamSet, Params, PortSource, Prepare, Shape,
+    Status, TransportPosition, declare_params,
 };
 use tutti_rt::Param;
 use tutti_units::{Azimuth, Hz, ParamKey, Samples, UnitParam};
@@ -481,7 +481,6 @@ fn a_segment_f32_cannot_hold_renders_exactly_in_f64() {
         Hz::new(from),
         Hz::new(to),
         Samples::new(4),
-        Law::Linear,
     );
     let out = render_segment(
         Params(Lane(Param::new(Hz::new(BASE)))),
@@ -514,7 +513,6 @@ fn a_ten_minute_segment_steps_one_frame_per_frame_at_its_end() {
         Hz::new(0.0),
         Hz::new(LEN as f64),
         Samples::new(LEN),
-        Law::Linear,
     )
     .resumed(Samples::new(LEN - 16), Samples::new(LEN));
     let out = render_segment(
@@ -543,7 +541,7 @@ fn a_circular_segment_across_the_seam_takes_the_short_way_in_f64() {
     let (from, to) = (180.0 - 1e-8, -180.0 + 1e-8);
     assert_eq!(from as f32, 180.0, "f32 rounds the start onto the seam");
     assert_eq!(to as f32, -180.0, "and the end");
-    let seg = ParamSegment::unit(UnitParam::Azimuth, from, to, Samples::new(4), Law::Linear);
+    let seg = ParamSegment::unit(UnitParam::Azimuth, from, to, Samples::new(4));
     let out = render_segment(ForkByClone(Bearing), UnitParam::Azimuth, seg);
     let arc = UnitParam::Azimuth.arc(from, to);
     assert!((arc - 2e-8).abs() < 1e-12, "the short arc is {arc}");

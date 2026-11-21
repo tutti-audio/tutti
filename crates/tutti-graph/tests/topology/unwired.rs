@@ -513,10 +513,7 @@ fn a_tap_lane_on_a_lost_port_reads_silence() {
 #[test]
 fn a_narrower_reinsert_during_a_root_fade_prunes_the_spec_and_not_the_bank() {
     let (mut ed, _exec) = rig();
-    ed.set_root_fade(Some(tutti_graph::Fade::new(
-        Samples::new(64),
-        tutti_graph::FadeLaw::EqualAmplitude,
-    )));
+    ed.set_root_fade(Some(tutti_graph::Fade::new(Samples::new(64))));
     ed.spec_mut().root_id = ed.spec().root_id.next();
     let placed = ed.insert(X, "ported", Unforkable(narrow()));
     let lost = EdgeId {

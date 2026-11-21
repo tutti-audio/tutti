@@ -38,7 +38,7 @@ fn a_session_drop_ends_the_lanes_of_a_plugin_a_render_feeds() {
         std::thread::spawn(move || {
             let (driver, stream) = ManualStreamDriver::new();
             let mut session = Session::builder()
-                .device(Default::default())
+                .device(tutti_cpal::DeviceSelector::Default)
                 .build_device_on(
                     OutputSpec::new(
                         SampleRate::SR_48K,

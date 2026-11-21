@@ -12,8 +12,7 @@ use crate::meter::MeterReader;
 use crate::spec::{EventIn, EventOut};
 use crate::tap::{TapOptions, TapReader};
 use crate::{
-    EventCapacity, EventTapId, EventTapSource, EventTapSpec, MeterId, MeterSpec, TapAlign, TapId,
-    TapSpec,
+    EventTapId, EventTapOptions, EventTapSource, EventTapSpec, MeterId, MeterSpec, TapId, TapSpec,
 };
 
 impl<F: Float> Editor<F> {
@@ -251,10 +250,10 @@ impl<F: Float> Editor<F> {
     ///
     /// What the reader gets is the MIDI events the port carries, each with the
     /// frame it was due on ([`TapEvent`](crate::TapEvent)); ramps, segments,
-    /// harmony and resync are not copied. `align` is as for
-    /// [`open_tap`](Self::open_tap): [`TapAlign::ToOutput`] delays the port by
+    /// harmony and resync are not copied. `options`' alignment is as for
+    /// [`open_tap`](Self::open_tap): [`TapAlign::ToOutput`](crate::TapAlign::ToOutput) delays the port by
     /// the compensation an output of the same node gets (the frames are then
-    /// the output's time), [`TapAlign::Raw`] reads it as it leaves its node.
+    /// the output's time), [`TapAlign::Raw`](crate::TapAlign::Raw) reads it as it leaves its node.
     /// The frames are on the clock of [`EventTapReader::rate`], the rate the
     /// graph is prepared at now.
     ///
@@ -277,9 +276,9 @@ impl<F: Float> Editor<F> {
         &mut self,
         id: EventTapId,
         source: impl Into<EventTapSource>,
-        align: TapAlign,
-        capacity: EventCapacity,
+        options: EventTapOptions,
     ) -> Result<EventTapReader, MissingSource> {
+        let (capacity, align) = options.into_parts();
         let source = source.into();
         let t = &self.spec.topology;
         let node = source.node();

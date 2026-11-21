@@ -54,8 +54,7 @@ fn an_engine_renders_a_nodes_records_to_its_readers_from_the_block_after_the_fil
     ed.commit().expect("commits");
     let mut exec = exec;
     let readers = RtLogReaders::new(&mut exec);
-    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     let block = |engine: &Engine| {
         let mut buf = vec![0.0f32; 64];
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::MONO).unwrap());

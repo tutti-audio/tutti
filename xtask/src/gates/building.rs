@@ -161,6 +161,7 @@ const CTOR: &[Rule] = &[Rule::CtorResult];
 const RANGE: &[Rule] = &[Rule::RangeMacro];
 const SETTER: &[Rule] = &[Rule::Setter];
 const WIDTH: &[Rule] = &[Rule::ConfigWidth];
+const DEFAULT_ENUM: &[Rule] = &[Rule::DefaultEnumArg];
 
 /// An allow row for one type `owner` under `path`, for `rules`.
 const fn ty(
@@ -796,6 +797,13 @@ pub(super) const ALLOW: &[Allow] = &[
         "MpeTranslator::set_profile",
         SETTER,
         "a live command on a running translator: a Profile change stops and resets the channels that leave MPE and sends the events that say so",
+    ),
+    ty(
+        "crates/tutti-session/src/graph/observe.rs",
+        "Meters::open",
+        DEFAULT_ENUM,
+        "both alignments are everyday uses (a track's level reads `Raw`, a device's output reads `ToOutput`), \
+         so the alignment is the call's choice, not an option; `open_node` is the raw shorthand",
     ),
 ];
 

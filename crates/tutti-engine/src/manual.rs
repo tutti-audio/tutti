@@ -44,7 +44,7 @@ use crate::stream::{OutputSpec, RunningStream, StreamDriver};
 /// let rate = SampleRate::SR_48K;
 /// let transport = Transport::new(rate);
 /// let (mut editor, executor) = Editor::new(Prepare::new(rate, MaxBlock::of(Samples::new(512))));
-/// let engine = Engine::new(&transport, &mut editor, executor, tutti_engine::BlockDates::Os)?;
+/// let engine = Engine::new(&transport, &mut editor, executor)?;
 /// let state = Arc::new(AudioCallbackState::new(engine));
 ///
 /// let spec = OutputSpec::new(rate, ChannelLayout::STEREO, SampleFormat::F32);

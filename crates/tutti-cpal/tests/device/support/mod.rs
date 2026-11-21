@@ -34,8 +34,7 @@ pub fn dc_state(level: f32, outputs: usize) -> Arc<AudioCallbackState> {
         outputs
     ]);
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     // The editor outlives nothing here: a test process is the whole lifetime,
     // and nothing commits again.
     Box::leak(Box::new(ed));
@@ -74,8 +73,7 @@ pub fn dc_state_f64(level: f64, outputs: usize) -> Arc<AudioCallbackState<f64>> 
         outputs
     ]);
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     Box::leak(Box::new(ed));
     Arc::new(AudioCallbackState::new(engine))
 }

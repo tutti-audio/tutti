@@ -61,16 +61,26 @@ pub struct Fade {
 }
 
 impl Fade {
-    /// A fade of `duration` frames.
+    /// A fade of `duration` frames along [`FadeLaw::EqualAmplitude`].
     #[must_use]
-    pub const fn new(duration: Samples, law: FadeLaw) -> Self {
-        Self { duration, law }
+    pub const fn new(duration: Samples) -> Self {
+        Self {
+            duration,
+            law: FadeLaw::EqualAmplitude,
+        }
+    }
+
+    /// The gain law the fade runs along.
+    #[must_use]
+    pub const fn law(mut self, law: FadeLaw) -> Self {
+        self.law = law;
+        self
     }
 
     /// A fade of `duration` at `rate`, rounded to the nearest frame. The
     /// graph's rate is [`Editor::prepare`](crate::Editor::prepare)'s.
-    pub fn seconds(duration: Seconds, rate: SampleRate, law: FadeLaw) -> Self {
-        Self::new(duration.to_samples(rate), law)
+    pub fn seconds(duration: Seconds, rate: SampleRate) -> Self {
+        Self::new(duration.to_samples(rate))
     }
 
     /// Whether this swaps at once.
@@ -85,13 +95,9 @@ mod tests {
 
     #[test]
     fn seconds_round_to_the_nearest_frame() {
-        let f = Fade::seconds(Seconds::new(0.005), SampleRate::SR_48K, FadeLaw::EqualPower);
+        let f = Fade::seconds(Seconds::new(0.005), SampleRate::SR_48K);
         assert_eq!(f.duration, Samples::new(240));
-        let f = Fade::seconds(
-            Seconds::new(1.5 / 1000.0),
-            SampleRate::of(1000.0),
-            FadeLaw::EqualPower,
-        );
+        let f = Fade::seconds(Seconds::new(1.5 / 1000.0), SampleRate::of(1000.0));
         assert_eq!(f.duration, Samples::new(2));
     }
 }

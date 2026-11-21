@@ -58,8 +58,7 @@ fn engine(
         Latency::new(Samples::new(D))
     );
     assert_eq!(plan.unit(direct).unwrap().arrival, Latency::ZERO);
-    let engine = Engine::new(transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("within the limits");
+    let engine = Engine::new(transport, &mut ed, exec).expect("within the limits");
     (engine, ed, direct, pdc)
 }
 

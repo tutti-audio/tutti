@@ -7,7 +7,7 @@
 //! the next commit compiles them.
 
 use tutti_graph::{
-    CloseError, EventCapacity, EventTapId, EventTapReader, EventTapSource, MeterId, MeterReader,
+    CloseError, EventTapId, EventTapOptions, EventTapReader, EventTapSource, MeterId, MeterReader,
     MeterSpec, MissingSource, NodeKey, TapAlign, TapId, TapOptions, TapReader,
 };
 use tutti_units::Samples;
@@ -250,11 +250,11 @@ impl<F: Float> Taps<'_, F> {
     /// compiled by the next commit and fed by every block that renders after
     /// it; a copy of events, the event sibling of [`open`](Self::open).
     ///
-    /// `capacity` is a count of events ([`EventCapacity`], as for
-    /// `Midi::tap`). A non-note-off is refused once that
+    /// `options` carry the ring's capacity, a count of events
+    /// ([`EventCapacity`](tutti_graph::EventCapacity), as for `Midi::tap`). A non-note-off is refused once that
     /// many are held, a note-off is kept up to
     /// [`note_off_room`](tutti_graph::note_off_room) of it, and each refusal is
-    /// counted ([`EventTapReader::take_lost`]). `align` is as for a plan tap:
+    /// counted ([`EventTapReader::take_lost`]). `options`' alignment is as for a plan tap:
     /// [`TapAlign::ToOutput`] delays the port by the compensation an output of
     /// the same node gets, so the frames line up with the audio the graph
     /// outputs; [`TapAlign::Raw`] reads it as it leaves its node. Ramps,
@@ -283,8 +283,7 @@ impl<F: Float> Taps<'_, F> {
     pub fn open_event(
         &mut self,
         source: impl Into<EventTapPort>,
-        align: TapAlign,
-        capacity: EventCapacity,
+        options: EventTapOptions,
     ) -> Result<EventTapReader, MissingSource> {
         let id = EventTapId::mint(&self.graph.ids);
         let source = source.into();
@@ -308,8 +307,8 @@ impl<F: Float> Taps<'_, F> {
                 },
             }
         })?;
-        let reader = self.graph.editor.open_event_tap(id, raw, align, capacity)?;
-        self.graph.event_taps.insert(id, (raw, align, capacity));
+        let reader = self.graph.editor.open_event_tap(id, raw, options)?;
+        self.graph.event_taps.insert(id, (raw, options));
         self.graph.edited = true;
         Ok(reader)
     }
@@ -360,9 +359,9 @@ impl<F: Float> Taps<'_, F> {
     /// an id that is not open, and for a tap whose node was removed since,
     /// which is dropped from the graph's list.
     pub fn reopen_event(&mut self, id: EventTapId) -> Option<EventTapReader> {
-        let &(port, align, capacity) = self.graph.event_taps.get(&id)?;
+        let &(port, options) = self.graph.event_taps.get(&id)?;
         self.graph.edited = true;
-        match self.graph.editor.open_event_tap(id, port, align, capacity) {
+        match self.graph.editor.open_event_tap(id, port, options) {
             Ok(reader) => Some(reader),
             Err(_) => {
                 self.graph.event_taps.remove(&id);
