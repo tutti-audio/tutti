@@ -190,7 +190,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use tutti_buffers::Float;
 
-use tutti_rt::{RingReader, RingWriter};
+use tutti_rt::{CappedVec, RingReader, RingWriter};
 use tutti_units::PlayReading;
 use tutti_units::{Frame, Samples, Tail};
 
@@ -208,6 +208,27 @@ use crate::play::PlayState;
 use crate::rtlog::Logs;
 use crate::slots::{AudioSlots, EventSlots, SlotFlags};
 use crate::{EdgeFade, EdgeId};
+
+/// Puts `item` into `to`, which has room for it by construction (the editor
+/// sized `to` with the commit that is applying). A refusal is a miscount on
+/// the control side: the item is leaked, never dropped, because applying runs
+/// on the audio thread and must not free. The collection latches
+/// [`CappedVec::is_overflowed`].
+#[inline]
+pub(crate) fn place<T>(to: &mut CappedVec<T>, item: T) {
+    if let Err(refused) = to.push_within_capacity(item) {
+        debug_assert!(false, "the room made for this item was too small");
+        std::mem::forget(refused);
+    }
+}
+
+/// Moves every item of `from` into `to`, as [`place`] does one.
+#[inline]
+pub(crate) fn place_all<T>(to: &mut CappedVec<T>, from: &mut CappedVec<T>) {
+    for item in from.drain(..) {
+        place(to, item);
+    }
+}
 
 mod commit;
 mod mode_op;
@@ -301,7 +322,7 @@ pub struct Executor<F: Float = f32> {
     suspension: Suspension,
     /// The held-key tables of the units a re-prepare checked out, for the
     /// resume commit to hand back.
-    parked: Vec<(NodeKey, Keys)>,
+    parked: CappedVec<(NodeKey, Keys)>,
     /// Where a replaced node writes its state for its successor
     /// (`Node::chase`), sized when a plan is built from what its nodes
     /// declare (`Shape::chase`), so the swap never allocates it.
@@ -485,7 +506,7 @@ impl<F: Float> Executor<F> {
             },
             dropped: Dropped::new(),
             suspension: Suspension::Running,
-            parked: Vec::new(),
+            parked: CappedVec::with_capacity(0),
             chase: Vec::new(),
             pool: None,
             pool_participants: ends.pool,
