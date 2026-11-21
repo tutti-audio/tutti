@@ -488,11 +488,10 @@ fn a_clip_written_is_pending_until_the_update_publishes_it() {
     );
 }
 
-/// **A clip write pending when its node is removed never publishes and
-/// leaks nothing**: the written clip is freed by the updates after (no handle
-/// on it remains).
+/// **A clip write pending when its node is removed leaks nothing**: the
+/// written clip is freed by the updates after (no handle on it remains).
 #[test]
-fn a_pending_clip_write_to_a_removed_node_never_publishes_and_is_freed() {
+fn a_pending_clip_write_to_a_removed_node_is_freed() {
     let mut s = offline();
     let (clip, _) = s.graph().add(MidiClipNode::new(note(
         60,

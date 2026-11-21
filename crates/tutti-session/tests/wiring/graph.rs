@@ -895,7 +895,8 @@ fn replace_under_a_held_borrow(controls: &PublishedControls) {
 /// update, for a node `add`ed and for the node a crossfade put in its
 /// place; the reclaimer goes with the node (replaced by the crossfade's,
 /// dropped by a raw replace and by the removal), so a node out of the graph
-/// is not swept.
+/// is not swept. The outgoing node's controls outlive its reclaimer until
+/// the update that collects its retired unit.
 #[test]
 fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
     let mut s = detached(1);
@@ -927,8 +928,8 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
     }
     assert_eq!(
         Arc::strong_count(&first.token),
-        1,
-        "the outgoing node's reclaimer went with it"
+        2,
+        "the outgoing node's reclaimer went with it; its controls wait for its unit"
     );
     assert_eq!(
         Arc::strong_count(&second.token),
@@ -936,6 +937,11 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
         "the incoming one's kept"
     );
     let _ = s.update();
+    assert_eq!(
+        Arc::strong_count(&first.token),
+        1,
+        "the update collected the outgoing unit and dropped its controls"
+    );
     replace_under_a_held_borrow(&second);
     let _ = s.update();
     assert_eq!(second.cell.retired_len(), 0, "the incoming node is swept");
@@ -954,8 +960,14 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
     );
     assert_eq!(
         Arc::strong_count(&second.token),
-        1,
+        2,
         "the replaced node's reclaimer went with it"
+    );
+    let _ = s.update();
+    assert_eq!(
+        Arc::strong_count(&second.token),
+        1,
+        "and its controls with its collected unit"
     );
 
     let (published, third) = Published::new();
@@ -964,12 +976,55 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
     s.remove(other).unwrap();
     assert_eq!(
         Arc::strong_count(&third.token),
-        1,
-        "the removal dropped its reclaimer and its controls"
+        2,
+        "the removal dropped its reclaimer; its controls wait for its unit"
     );
     replace_under_a_held_borrow(&third);
     let _ = s.update();
+    assert_eq!(
+        Arc::strong_count(&third.token),
+        1,
+        "the update collected the removed unit and dropped its controls"
+    );
     assert_eq!(third.cell.retired_len(), 1, "a removed node is not swept");
+}
+
+/// **A removed node's controls live until its output has faded out**: the
+/// node renders through its declicked removal, so what its controls hold (a
+/// voice's stream) is dropped only by the update that collects its unit,
+/// while `handle` and every key read answer `None` from the removal on.
+#[test]
+fn a_removed_nodes_controls_live_until_its_fade_out_ends() {
+    let mut s = Session::builder()
+        .sample_rate(RATE)
+        .build()
+        .expect("builds");
+    let (published, controls) = Published::new();
+    let (node, _) = s.graph().add(published);
+    s.graph()
+        .set_sources_unfaded(Root::output(0), [OutPort::new(node, 0)])
+        .unwrap();
+    let _ = s.update();
+    let _ = pull(&s, ChannelLayout::STEREO, 64, 64);
+    s.remove(node).unwrap();
+    let _ = s.update();
+    assert_eq!(
+        Arc::strong_count(&controls.token),
+        2,
+        "the node still renders its fade-out, so the graph holds its controls"
+    );
+    // The declick spans 256 frames; render past it, then let the updates
+    // drop the node and collect its unit.
+    let _ = pull(&s, ChannelLayout::STEREO, 1_024, 64);
+    for _ in 0..3 {
+        let _ = s.update();
+        let _ = pull(&s, ChannelLayout::STEREO, 64, 64);
+    }
+    assert_eq!(
+        Arc::strong_count(&controls.token),
+        1,
+        "the collected unit took the controls with it"
+    );
 }
 
 /// A pool's voice added and then removed, rendered through, so the pool's
