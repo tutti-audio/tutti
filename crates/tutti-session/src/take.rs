@@ -692,7 +692,7 @@ pub enum TakeError {
     },
     /// The file could not be created.
     #[error("the take's file could not be created: {0}")]
-    Open(#[source] Arc<tutti_codec::Error>),
+    Open(#[source] Arc<tutti_codec::EncodeError>),
     /// The finished file could not be put in place (the path exists under
     /// [`TakeFile::create_new`], or the file system refused the move). The
     /// whole take is kept at [`kept`](StagedCommitError::kept) and the path is
@@ -1161,7 +1161,7 @@ enum StagedClosed {
     #[error("{source}")]
     Failed {
         #[source]
-        source: tutti_codec::Error,
+        source: tutti_codec::EncodeError,
         unfinished: tutti_codec::Unfinished,
     },
 }

@@ -420,15 +420,15 @@ pub mod types {
     pub use tutti_curve::Breakpoint;
     pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
     pub use tutti_music::{
-        Adsr, BarPosition, BeatsPerBar, FRAME_TOLERANCE, FrameClock, InvalidBeatsPerBar,
-        InvalidNoteValue, LoopRange, LoopRangeError, MeterChange, NotOnMidiScale, Note,
-        NoteDuration, NoteModifier, NoteNumberOutOfRange, NoteValue, Pass, PassEnd, PitchClass,
-        SegmentOrigin, TimelineSegment, beats_per_sample, first_frame_at_or_after, frames_per_beat,
-        snap_to_whole_frame,
+        Adsr, BarPosition, BeatsPerBar, ClockPass, ClockPassEnd, FRAME_TOLERANCE, FrameClock,
+        InvalidBeatsPerBar, InvalidNoteValue, LoopRange, LoopRangeError, MeterChange,
+        NotOnMidiScale, Note, NoteDuration, NoteModifier, NoteNumberOutOfRange, NoteValue,
+        PitchClass, SegmentOrigin, TimelineSegment, beats_per_sample, first_frame_at_or_after,
+        frames_per_beat, snap_to_whole_frame,
     };
     pub use tutti_platform::{
-        Asset, Destination, Identity, Open, Panicked, PriorityRequest, ReadSeek, Staged,
-        StagedCommitError, StagedFile, StagedKeep, Stamp,
+        Asset, Destination, FileStamp, Identity, Open, Panicked, PriorityRequest, ReadSeek, Staged,
+        StagedCommitError, StagedFile, StagedKeep,
     };
     pub use tutti_rt::{
         AtomicCell, AtomicWord, Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter,
@@ -618,7 +618,7 @@ pub mod codec {
         feature = "encode-aiff"
     ))]
     pub use tutti_codec::write_wave;
-    pub use tutti_codec::{Codec, Error, Kept, Unfinished};
+    pub use tutti_codec::{Codec, EncodeError, Kept, Unfinished};
     pub use tutti_codec::{
         DecodeError, FlacLevel, IntDepth, Spec, SpecError, can_decode, decodable_extensions,
     };

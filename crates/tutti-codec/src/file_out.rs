@@ -40,7 +40,7 @@ use crate::spec::Spec;
 /// [`Sink::write`] returns only the marker [`SinkFailed`], so the detail of a
 /// failure has nowhere to go mid-stream: the **first** write error (a full
 /// disk, or a WAV reaching its 4 GiB limit with
-/// [`Error::WavTooLarge`](crate::Error::WavTooLarge)) is kept, that write and
+/// [`EncodeError::WavTooLarge`](crate::EncodeError::WavTooLarge)) is kept, that write and
 /// every later one returns [`SinkFailed`], and later writes are skipped.
 /// [`finalize`](Sink::finalize) must run for the file to be
 /// readable: it closes what was written even after a failure (a recording
@@ -110,7 +110,7 @@ impl<S: Sample> FileOut<S> {
     ///
     /// # Errors
     ///
-    /// [`Error::Io`](crate::Error::Io) from writing the header (a full disk),
+    /// [`EncodeError::Io`](crate::EncodeError::Io) from writing the header (a full disk),
     /// and the codec's other errors when the [`Spec`] cannot be written.
     pub fn new(spec: &Spec, file: File) -> Result<Self> {
         let sink = BufWriter::new(file);
@@ -175,7 +175,7 @@ impl<S: Sample> Sink for FileOut<S> {
         let written = if frames.layout() == self.spec.layout() {
             self.encoder.write(frames)
         } else {
-            Err(crate::Error::Io(std::io::Error::new(
+            Err(crate::EncodeError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!(
                     "a {:?} view written to a {:?} file",

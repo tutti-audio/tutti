@@ -1,6 +1,6 @@
 use super::*;
 use crate::test_sink::Full;
-use crate::{Error, SpecError};
+use crate::{EncodeError, SpecError};
 use std::io::Cursor;
 #[cfg(any(
     all(feature = "encode-wav", feature = "decode-wav"),
@@ -133,7 +133,7 @@ fn a_refused_block_leaves_nothing_behind_once_dropped() {
         assert!(
             matches!(
                 err,
-                Error::BlockWidth { expected, got }
+                EncodeError::BlockWidth { expected, got }
                     if expected == ChannelLayout::STEREO && got == ChannelLayout::MONO
             ),
             "{ext}: {err}"
@@ -156,13 +156,13 @@ fn a_spec_that_cannot_be_written_is_refused_without_a_file() {
         let zero_width = spec(format, 0);
         let err = FileEncoder::create(&zero_width, &path).expect_err("no channels");
         assert!(
-            matches!(err, Error::Spec(SpecError::ZeroChannels)),
+            matches!(err, EncodeError::Spec(SpecError::ZeroChannels)),
             "{ext}: {err}"
         );
         let zero_rate = at_rate(format, 0.4);
         let err = FileEncoder::create(&zero_rate, &path).expect_err("no rate");
         assert!(
-            matches!(err, Error::Spec(SpecError::SampleRate(_))),
+            matches!(err, EncodeError::Spec(SpecError::SampleRate(_))),
             "{ext}: {err}"
         );
         assert!(
@@ -197,7 +197,7 @@ fn a_fractional_rate_is_refused_where_the_header_is_whole_hz_and_exact_in_aiff()
             assert_eq!(hz, 44_100.5);
         } else {
             assert!(
-                matches!(result, Err(Error::Spec(SpecError::SampleRate(_)))),
+                matches!(result, Err(EncodeError::Spec(SpecError::SampleRate(_)))),
                 "{ext}: 44100.5 Hz was accepted"
             );
             let whole = Encoder::create(&at_rate(format, 44_100.0), Cursor::new(Vec::new()));
@@ -217,7 +217,7 @@ fn a_width_past_the_containers_header_is_refused() {
         assert!(
             matches!(
                 err,
-                Error::Spec(SpecError::TooManyChannels {
+                EncodeError::Spec(SpecError::TooManyChannels {
                     channels: 40_000,
                     max: 32_767
                 })
@@ -237,7 +237,7 @@ fn a_take_that_outgrows_its_sink_fails_by_finish_at_the_latest() {
     for (ext, format) in formats() {
         let s = spec(format, 2);
         let mut encoder = Encoder::create(&s, Full::holding(6_000)).unwrap();
-        let mut failed: Option<Error> = None;
+        let mut failed: Option<EncodeError> = None;
         for _ in 0..40 {
             if let Err(e) = encoder.write(Interleaved::new(&saw(2, 4_096), s.layout()).unwrap()) {
                 failed = Some(e);
@@ -250,9 +250,9 @@ fn a_take_that_outgrows_its_sink_fails_by_finish_at_the_latest() {
         };
         let err = outcome.expect_err(&format!("{ext}: a 6000-byte sink cannot hold the take"));
         match err {
-            Error::Io(e) => assert_eq!(e.kind(), std::io::ErrorKind::StorageFull, "{ext}"),
+            EncodeError::Io(e) => assert_eq!(e.kind(), std::io::ErrorKind::StorageFull, "{ext}"),
             // Codecs that wrap the sink's error in their own report.
-            Error::Encoding { detail, .. } => {
+            EncodeError::Encoding { detail, .. } => {
                 assert!(!detail.is_empty(), "{ext}: the report names the cause")
             }
             other => panic!("{ext}: expected the sink's failure, got {other}"),
@@ -290,7 +290,7 @@ fn a_file_that_crosses_its_limit_is_never_put_in_place() {
         .write(Interleaved::new(&saw(2, 8), spec.layout()).unwrap())
         .expect_err("8 frames cross a limit of 6");
     assert!(
-        matches!(err, Error::WavTooLarge { limit_frames: 6 }),
+        matches!(err, EncodeError::WavTooLarge { limit_frames: 6 }),
         "{err}"
     );
     drop(encoder);
@@ -325,7 +325,7 @@ fn a_planned_length_past_the_limit_is_refused_before_the_file_exists() {
         .map(drop)
         .expect_err("one frame past the limit");
     assert!(
-        matches!(err, Error::WavTooLarge { limit_frames } if limit_frames == limit),
+        matches!(err, EncodeError::WavTooLarge { limit_frames } if limit_frames == limit),
         "{err}"
     );
     assert_eq!(std::fs::read(&path).unwrap(), b"previous");
@@ -392,7 +392,7 @@ fn a_rate_no_header_holds_is_refused_by_every_format() {
             let s = at_rate(format, rate);
             let err = Encoder::create(&s, Cursor::new(Vec::new())).expect_err("no such rate");
             assert!(
-                matches!(err, Error::Spec(SpecError::SampleRate(_))),
+                matches!(err, EncodeError::Spec(SpecError::SampleRate(_))),
                 "{ext} {rate}: {err}"
             );
         }
@@ -457,7 +457,7 @@ fn a_commit_that_cannot_rename_keeps_the_file() {
         let finalized = encoder.finalize().unwrap();
         std::fs::create_dir(&path).unwrap();
         let err = finalized.commit().expect_err("a directory is in the way");
-        let Error::Commit(e) = err else {
+        let EncodeError::Commit(e) = err else {
             panic!("{ext}: {err}");
         };
         assert!(
@@ -606,7 +606,10 @@ fn a_failed_encoder_finishes_keeping_the_frames_written_before_it() {
     let Err(Kept::Unfinished { source, unfinished }) = encoder.finish_keeping() else {
         panic!("not kept unfinished");
     };
-    assert!(matches!(source, Error::BlockWidth { .. }), "{source:?}");
+    assert!(
+        matches!(source, EncodeError::BlockWidth { .. }),
+        "{source:?}"
+    );
     assert!(unfinished.header_describes_frames);
     assert!(!path.exists(), "the path is untouched");
     assert_eq!(listing(dir.path()).len(), 1, "only the kept file");

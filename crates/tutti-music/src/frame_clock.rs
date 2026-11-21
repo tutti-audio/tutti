@@ -212,7 +212,7 @@ pub struct SegmentOrigin {
 /// Counts are in frames, like [`FrameClock::advance`]'s: `start` is a frame
 /// offset into the block, so it is a count of frames from the block's first.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Pass {
+pub struct ClockPass {
     /// The block frame the pass starts on.
     pub start: Samples,
     /// Frames in the pass (at least one).
@@ -220,12 +220,12 @@ pub struct Pass {
     /// The beat on `start`.
     pub beat: Beat,
     /// What ends the pass.
-    pub end: PassEnd,
+    pub end: ClockPassEnd,
 }
 
-/// What ends a [`Pass`].
+/// What ends a [`ClockPass`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum PassEnd {
+pub enum ClockPassEnd {
     /// A loop wrap, on the frame after the pass (the next pass's first, or,
     /// for a block's last pass, the first frame of the block after it).
     Wrap,
@@ -387,7 +387,7 @@ impl FrameClock {
     /// over which the playhead rolls linearly, cut at each loop wrap, in
     /// order. A block with no wrap is one pass; an empty block has none. A
     /// wrap on the first frame after the block ends its last pass
-    /// ([`PassEnd::Wrap`]): the clock then stands on the wrapped beat, and
+    /// ([`ClockPassEnd::Wrap`]): the clock then stands on the wrapped beat, and
     /// the next block has no wrap of its own to report.
     ///
     /// Rolls this clock as the iterator is consumed, so once it is
@@ -401,7 +401,7 @@ impl FrameClock {
         &mut self,
         frames: Samples,
         looping: Option<LoopRange>,
-    ) -> impl Iterator<Item = Pass> + '_ {
+    ) -> impl Iterator<Item = ClockPass> + '_ {
         let mut start = Samples::ZERO;
         core::iter::from_fn(move || {
             let left = frames.remaining_after(start);
@@ -412,11 +412,11 @@ impl FrameClock {
             let wrapped = self.advance_to_wrap(left, looping);
             let len = wrapped.unwrap_or(left);
             let end = if wrapped.is_some() {
-                PassEnd::Wrap
+                ClockPassEnd::Wrap
             } else {
-                PassEnd::Block
+                ClockPassEnd::Block
             };
-            let pass = Pass {
+            let pass = ClockPass {
                 start,
                 len,
                 beat,
@@ -779,11 +779,11 @@ mod tests {
         let passes: Vec<_> = c.passes(Samples::new(512), None).collect();
         assert_eq!(
             passes,
-            [Pass {
+            [ClockPass {
                 start: Samples::new(0),
                 len: Samples::new(512),
                 beat: Beat::new(1.0),
-                end: PassEnd::Block
+                end: ClockPassEnd::Block
             }]
         );
         assert_eq!(c.passes(Samples::new(0), None).count(), 0, "empty block");
@@ -829,19 +829,19 @@ mod tests {
             .passes(Samples::new(128_000), four)
             .map(|p| p.end)
             .collect();
-        assert_eq!(ends, [PassEnd::Wrap]);
+        assert_eq!(ends, [ClockPassEnd::Wrap]);
         let next: Vec<_> = c
             .passes(Samples::new(512), four)
             .map(|p| (p.beat, p.end))
             .collect();
-        assert_eq!(next, [(Beat::new(0.0), PassEnd::Block)]);
+        assert_eq!(next, [(Beat::new(0.0), ClockPassEnd::Block)]);
 
         let mut c = FrameClock::new(Beat::new(0.0), Bpm::of(90.0), SR);
         let ends: Vec<_> = c
             .passes(Samples::new(128_001), four)
             .map(|p| p.end)
             .collect();
-        assert_eq!(ends, [PassEnd::Wrap, PassEnd::Block]);
+        assert_eq!(ends, [ClockPassEnd::Wrap, ClockPassEnd::Block]);
     }
 
     /// Consuming the passes leaves the clock where `advance` leaves it, bit

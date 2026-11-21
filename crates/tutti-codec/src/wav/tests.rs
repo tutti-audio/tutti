@@ -168,7 +168,7 @@ fn a_rate_no_header_holds_is_refused() {
             .err()
             .unwrap_or_else(|| panic!("{rate} Hz was accepted"));
         assert!(
-            matches!(err, Error::Spec(SpecError::SampleRate(_))),
+            matches!(err, EncodeError::Spec(SpecError::SampleRate(_))),
             "{rate}: {err}"
         );
     }
@@ -191,7 +191,7 @@ fn the_limit_stops_at_a_whole_frame_and_a_take_ending_on_it_is_clean() {
         .write(Interleaved::new(&block[..2], s.layout()).unwrap())
         .expect_err("one frame past");
     assert!(
-        matches!(err, Error::WavTooLarge { limit_frames: 5 }),
+        matches!(err, EncodeError::WavTooLarge { limit_frames: 5 }),
         "{err}"
     );
 
@@ -203,7 +203,7 @@ fn the_limit_stops_at_a_whole_frame_and_a_take_ending_on_it_is_clean() {
         .write(Interleaved::new(&eight, s.layout()).unwrap())
         .expect_err("8 frames cross a limit of 5");
     assert!(
-        matches!(err, Error::WavTooLarge { limit_frames: 5 }),
+        matches!(err, EncodeError::WavTooLarge { limit_frames: 5 }),
         "{err}"
     );
     let bytes = w.finish().unwrap().into_inner();
@@ -267,7 +267,7 @@ fn a_full_disk_mid_take_fails_the_write_that_hit_it() {
         .write(Interleaved::new(&ramp(2, 6), s.layout()).unwrap())
         .expect_err("two of those frames do not fit");
     match err {
-        Error::Io(e) => assert_eq!(e.kind(), std::io::ErrorKind::StorageFull),
+        EncodeError::Io(e) => assert_eq!(e.kind(), std::io::ErrorKind::StorageFull),
         other => panic!("expected the sink's error, got {other}"),
     }
     // The frames before the failed write are the file; closing it patches the

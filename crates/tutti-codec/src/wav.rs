@@ -13,12 +13,12 @@
 //! A WAV file's sizes are 32-bit, so a file holds at most [`max_data_frames`]
 //! frames (just under 4 GiB: about 62 minutes of 8-channel 24-bit audio at
 //! 48 kHz). The write that would cross it writes the frames that fit and fails
-//! with [`Error::WavTooLarge`]; [`finish`](FormatWriter::finish) then closes the file
+//! with [`EncodeError::WavTooLarge`]; [`finish`](FormatWriter::finish) then closes the file
 //! at the last whole frame, which stays readable. RF64 is not written.
 
 mod mask;
 
-use crate::error::{Error, Result};
+use crate::error::{EncodeError, Result};
 use crate::pcm::Pcm;
 use crate::spec::Spec;
 use crate::writer::FormatWriter;
@@ -260,7 +260,7 @@ impl<W: Write + Seek> FormatWriter for WavWriter<W> {
         }
         self.frames += fits as u64;
         if fits < block.frames().get() {
-            return Err(Error::WavTooLarge {
+            return Err(EncodeError::WavTooLarge {
                 limit_frames: self.max_frames,
             });
         }

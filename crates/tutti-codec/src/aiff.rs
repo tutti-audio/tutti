@@ -9,7 +9,7 @@
 //! widths, so there is no conversion policy here beyond the rule in
 //! [`Sample`] every format shares.
 
-use crate::error::{Codec, Error, Result, SpecError};
+use crate::error::{Codec, EncodeError, Result, SpecError};
 use crate::pcm::Pcm;
 use crate::spec::Spec;
 use crate::writer::FormatWriter;
@@ -64,7 +64,7 @@ impl<W: Write + Seek> AiffWriter<W> {
             },
         };
         let writer = AifcWriter::new(sink, &info)
-            .map_err(|e| Error::encoding(Codec::Aiff, format!("{e:?}")))?;
+            .map_err(|e| EncodeError::encoding(Codec::Aiff, format!("{e:?}")))?;
         Ok(Self {
             writer,
             pcm,
@@ -109,13 +109,13 @@ impl<W: Write + Seek> FormatWriter for AiffWriter<W> {
                 self.writer.write_samples_f64(&self.doubles)
             }
         }
-        .map_err(|e| Error::encoding(Codec::Aiff, format!("write failed: {e:?}")))
+        .map_err(|e| EncodeError::encoding(Codec::Aiff, format!("write failed: {e:?}")))
     }
 
     fn finish(mut self) -> Result<Self::Sink> {
-        self.writer
-            .finalize()
-            .map_err(|e| Error::encoding(Codec::Aiff, format!("finalization failed: {e:?}")))?;
+        self.writer.finalize().map_err(|e| {
+            EncodeError::encoding(Codec::Aiff, format!("finalization failed: {e:?}"))
+        })?;
         Ok(self.writer.into_inner())
     }
 }

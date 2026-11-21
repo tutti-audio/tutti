@@ -59,8 +59,9 @@ fn a_create_new_bounce_onto_an_existing_master_keeps_the_bounce_and_leaves_the_p
         .bounce(bounce().master(&master, float_wav()).create_new())
         .map(|_| ())
         .expect_err("the path exists");
-    let BounceError::Export(tutti_export::RenderError::Encode(tutti_codec::Error::Commit(commit))) =
-        &error
+    let BounceError::Export(tutti_export::RenderError::Encode(tutti_codec::EncodeError::Commit(
+        commit,
+    ))) = &error
     else {
         panic!("not a commit failure: {error:?}");
     };

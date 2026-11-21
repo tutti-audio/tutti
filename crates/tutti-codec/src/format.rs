@@ -1,6 +1,6 @@
 //! The container to write, carrying only the settings it accepts.
 
-use crate::error::{Error, Result};
+use crate::error::{EncodeError, Result};
 use crate::pcm::IntDepth;
 #[cfg(any(feature = "encode-wav", feature = "encode-aiff"))]
 use crate::pcm::Pcm;
@@ -40,7 +40,7 @@ impl Format {
     ///
     /// # Errors
     ///
-    /// [`Error::UnknownExtension`] if the extension is not one of `wav`,
+    /// [`EncodeError::UnknownExtension`] if the extension is not one of `wav`,
     /// `flac`, `aiff` or `aif`, or names a format this build lacks.
     pub fn from_extension(ext: &str) -> Result<Self> {
         let ext = ext.to_lowercase();
@@ -54,7 +54,7 @@ impl Format {
             }),
             #[cfg(feature = "encode-aiff")]
             "aiff" | "aif" => Ok(Self::Aiff(Pcm::default())),
-            _ => Err(Error::UnknownExtension {
+            _ => Err(EncodeError::UnknownExtension {
                 extension: if ext.is_empty() { "(none)".into() } else { ext },
             }),
         }
@@ -65,7 +65,7 @@ impl Format {
     ///
     /// # Errors
     ///
-    /// [`Error::UnknownExtension`] if the extension is unsupported or missing.
+    /// [`EncodeError::UnknownExtension`] if the extension is unsupported or missing.
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self> {
         Self::from_extension(
             path.as_ref()
