@@ -49,6 +49,13 @@ pub(crate) fn key_freq(note: f64, tune: Semitones) -> Hz {
     A4_FREQ * (Semitones::new(note - f64::from(A4_NOTE.get())) + tune).to_pitch_ratio()
 }
 
+tutti_units::ranged! {
+    /// The frequency a [`Tuning`] pins its reference note to: `1 Hz` to `1 MHz`. The
+    /// table spans 128 keys from it, so every key stays a finite frequency above zero.
+    ReferencePitch(Hz), ReferencePitchOutOfRange, "a reference pitch from 1 Hz to 1 MHz",
+    |raw| raw.get() >= 1.0 && raw.get() <= 1.0e6
+}
+
 /// Why a [`Tuning`] was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum TuningError {
@@ -56,8 +63,7 @@ pub enum TuningError {
     #[error("a scale has at least one degree")]
     EmptyScale,
     /// A key's frequency is not finite and above zero: a degree is NaN or
-    /// infinite, a degree or the reference is far enough out to overflow or
-    /// vanish, or the reference frequency is not above zero.
+    /// infinite, or far enough out to overflow or vanish.
     #[error("key {} would not sound at a finite frequency above zero", .note.get())]
     Unplayable {
         /// The first key whose frequency is refused.
@@ -98,21 +104,15 @@ impl Tuning {
     /// `reference_freq`; everything else follows from equal-tempered steps
     /// either side. Use it for concert-pitch shifts (A4 = 432 Hz) or to pin the
     /// scale to a note other than A.
-    ///
-    /// # Errors
-    ///
-    /// [`TuningError::Unplayable`] when `reference_freq` is not finite and above
-    /// zero, or so far from audible that a key's frequency overflows.
     pub fn equal_temperament_with_reference(
-        reference_freq: impl Into<Hz>,
+        reference_freq: ReferencePitch,
         reference_note: NoteNumber,
-    ) -> Result<Self, TuningError> {
+    ) -> Self {
         Self::resolve(
             Self::twelve_tone_degrees(),
-            reference_freq.into(),
+            reference_freq.get(),
             reference_note,
         )
-        .checked()
     }
 
     fn twelve_tone_degrees() -> Vec<ScaleDegree> {
@@ -212,43 +212,6 @@ impl Tuning {
         Self::resolve(degrees, A4_FREQ, A4_NOTE)
     }
 
-    /// An arbitrary scale from a list of degrees in [`Cents`] above the root,
-    /// e.g. `0, 50, 100, …` cents for quarter tones.
-    ///
-    /// The scale repeats every octave (1200 cents), and its *length* — not 12 —
-    /// is the number of note numbers one repeat spans. Pinned at
-    /// A4 = 440 [`Hz`].
-    ///
-    /// # Errors
-    ///
-    /// [`TuningError::EmptyScale`] for an empty slice; [`TuningError::Unplayable`]
-    /// when a degree is NaN, infinite or so large a key's frequency overflows.
-    pub fn from_cents(cents: &[Cents]) -> Result<Self, TuningError> {
-        if cents.is_empty() {
-            return Err(TuningError::EmptyScale);
-        }
-        let degrees = cents.iter().map(|c| ScaleDegree::from_cents(*c)).collect();
-        Self::resolve(degrees, A4_FREQ, A4_NOTE).checked()
-    }
-
-    /// An arbitrary scale from frequency ratios above the root, e.g.
-    /// `[1.0, 9.0/8.0, 3.0/2.0]` as [`FrequencyRatio`]s, each finite and above
-    /// zero. Each is converted to [`Cents`], so this is
-    /// [`from_cents`](Self::from_cents) with the multiplication spelled the way
-    /// historical tunings are written. Same octave-repeat and reference rules.
-    ///
-    /// # Errors
-    ///
-    /// [`TuningError::EmptyScale`] for an empty slice; [`TuningError::Unplayable`]
-    /// when a ratio is so large or small a key's frequency overflows.
-    pub fn from_ratios(ratios: &[FrequencyRatio]) -> Result<Self, TuningError> {
-        if ratios.is_empty() {
-            return Err(TuningError::EmptyScale);
-        }
-        let degrees = ratios.iter().map(|r| ScaleDegree::from_ratio(*r)).collect();
-        Self::resolve(degrees, A4_FREQ, A4_NOTE).checked()
-    }
-
     fn recompute_table(&mut self) {
         let scale_size = self.degrees.len();
 
@@ -290,11 +253,14 @@ impl Tuning {
         let mut words = [TuningFrequency::NO_CHANGE; 128];
         for (word, &hz) in words.iter_mut().zip(&self.freq_table) {
             // MIDI note 69 is A4 = 440 Hz: the pitch of a frequency is its
-            // interval over A4 above that note.
-            let ratio = FrequencyRatio::new(hz / A4_FREQ)
-                .expect("a tuning's table was checked finite and above zero when built");
-            let above_a4 = Semitones::from_pitch_ratio(ratio);
-            *word = TuningFrequency::nearest(above_a4 + Semitones::new(f64::from(A4_NOTE.get())));
+            // interval over A4 above that note. Every key has a ratio to A4
+            // (`checked` refused a tuning without one); a key without one would
+            // stay `NO_CHANGE`, the word that sets nothing.
+            if let Some(ratio) = FrequencyRatio::new(hz / A4_FREQ) {
+                let above_a4 = Semitones::from_pitch_ratio(ratio);
+                *word =
+                    TuningFrequency::nearest(above_a4 + Semitones::new(f64::from(A4_NOTE.get())));
+            }
         }
         KeyTable::new(words)
     }
@@ -323,6 +289,51 @@ impl Tuning {
     #[cfg(test)]
     pub fn reference_note(&self) -> NoteNumber {
         self.reference_note
+    }
+}
+
+impl TryFrom<&[Cents]> for Tuning {
+    type Error = TuningError;
+
+    /// An arbitrary scale from a list of degrees in [`Cents`] above the root,
+    /// e.g. `0, 50, 100, …` cents for quarter tones.
+    ///
+    /// The scale repeats every octave (1200 cents), and its *length* — not 12 —
+    /// is the number of note numbers one repeat spans. Pinned at
+    /// A4 = 440 [`Hz`].
+    ///
+    /// # Errors
+    ///
+    /// [`TuningError::EmptyScale`] for an empty slice; [`TuningError::Unplayable`]
+    /// when a degree is NaN, infinite or so large a key's frequency overflows.
+    fn try_from(cents: &[Cents]) -> Result<Self, TuningError> {
+        if cents.is_empty() {
+            return Err(TuningError::EmptyScale);
+        }
+        let degrees = cents.iter().map(|c| ScaleDegree::from_cents(*c)).collect();
+        Self::resolve(degrees, A4_FREQ, A4_NOTE).checked()
+    }
+}
+
+impl TryFrom<&[FrequencyRatio]> for Tuning {
+    type Error = TuningError;
+
+    /// An arbitrary scale from frequency ratios above the root, e.g.
+    /// `[1.0, 9.0/8.0, 3.0/2.0]` as [`FrequencyRatio`]s, each finite and above
+    /// zero. Each is converted to [`Cents`], so this is the [`Cents`] conversion
+    /// with the multiplication spelled the way historical tunings are written.
+    /// Same octave-repeat and reference rules.
+    ///
+    /// # Errors
+    ///
+    /// [`TuningError::EmptyScale`] for an empty slice; [`TuningError::Unplayable`]
+    /// when a ratio is so large or small a key's frequency overflows.
+    fn try_from(ratios: &[FrequencyRatio]) -> Result<Self, TuningError> {
+        if ratios.is_empty() {
+            return Err(TuningError::EmptyScale);
+        }
+        let degrees = ratios.iter().map(|r| ScaleDegree::from_ratio(*r)).collect();
+        Self::resolve(degrees, A4_FREQ, A4_NOTE).checked()
     }
 }
 

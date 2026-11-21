@@ -152,7 +152,7 @@ pub use portamento::{GlideTime, GlideTimeError, PortamentoConfig, PortamentoMode
 
 mod tuning;
 // Public: `Tuning` appears in `SynthConfig`.
-pub use tuning::{Tuning, TuningError};
+pub use tuning::{ReferencePitch, ReferencePitchOutOfRange, Tuning, TuningError};
 
 mod synth;
 pub use synth::{
