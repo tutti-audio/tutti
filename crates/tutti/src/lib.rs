@@ -854,10 +854,10 @@ pub mod midi {
         TuningFrequency,
     };
     pub use tutti_midi_runtime::{
-        ClipEvents, ClockKind, ClockOffset, HarmonyChanges, HarmonyControls, HarmonyNode,
-        MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange, OutputLatency,
-        OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut, SyncOutControls,
-        TimedHarmony,
+        ClipEvents, ClockKind, ClockOffset, HarmonyChanges, HarmonyChangesError, HarmonyControls,
+        HarmonyNode, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange,
+        OutputLatency, OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut,
+        SyncOutControls, TimedHarmony,
     };
     pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
     #[cfg(feature = "midi-hardware")]

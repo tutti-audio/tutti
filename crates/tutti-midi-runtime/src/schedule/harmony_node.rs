@@ -71,15 +71,95 @@ impl Beated for TimedHarmony {
 }
 
 /// A sequencer's chord and scale lanes as they are published: the changes
-/// sorted by beat (non-finite beats dropped; two changes at one beat keep
-/// their order, the later winning). Collect them from [`TimedHarmony`]s in any
-/// order. Two are equal when their changes are.
+/// sorted by beat, each at a finite beat of its own. Build them from
+/// [`TimedHarmony`]s in any order with [`new`](Self::new), which refuses what
+/// the lanes cannot hold. Two are equal when their changes are.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct HarmonyChanges {
     changes: Box<[TimedHarmony]>,
 }
 
+/// What [`HarmonyChanges::new`] refuses.
+#[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
+pub enum HarmonyChangesError {
+    /// The change at `index` of the input has a NaN or infinite beat.
+    #[error("the harmony change at index {index} has a beat that is not finite")]
+    NonFiniteBeat {
+        /// Its position in the input.
+        index: usize,
+    },
+    /// Two changes of one `kind` take effect at `beat`: which of them holds
+    /// is not a choice the lanes make. (A chord and a scale at one beat are
+    /// two lanes, not a clash.)
+    #[error("two harmony changes of one kind ({kind:?}) take effect at beat {}", .beat.get())]
+    SameBeat {
+        /// The beat both name.
+        beat: Beat,
+        /// What both are, a chord or a scale.
+        kind: HarmonyKind,
+    },
+}
+
 impl HarmonyChanges {
+    /// The lanes of `changes`, in any order, sorted by beat.
+    ///
+    /// # Errors
+    ///
+    /// [`HarmonyChangesError::NonFiniteBeat`] for a change at a NaN or
+    /// infinite beat (the first one, by input position), and
+    /// [`HarmonyChangesError::SameBeat`] for two chords, or two scales, at one
+    /// beat. A chord and a scale at one beat are both kept: each holds in its
+    /// own lane.
+    ///
+    /// ```
+    /// use tutti_graph::{Harmony, HarmonyKind};
+    /// use tutti_midi_runtime::{HarmonyChanges, HarmonyChangesError, TimedHarmony};
+    /// use tutti_units::Beat;
+    ///
+    /// let c_major = Harmony::chord(60, 60, 0b1001_0001);
+    /// let at = |beat| TimedHarmony::new(Beat::new(beat), c_major);
+    ///
+    /// let lanes = HarmonyChanges::new([at(4.0), at(0.0)]).unwrap();
+    /// assert_eq!(lanes.as_slice()[0].beat, Beat::new(0.0));
+    /// assert_eq!(
+    ///     HarmonyChanges::new([at(0.0), at(f64::NAN)]),
+    ///     Err(HarmonyChangesError::NonFiniteBeat { index: 1 }),
+    /// );
+    /// assert_eq!(
+    ///     HarmonyChanges::new([at(1.0), at(1.0)]),
+    ///     Err(HarmonyChangesError::SameBeat {
+    ///         beat: Beat::new(1.0),
+    ///         kind: HarmonyKind::Chord,
+    ///     }),
+    /// );
+    /// ```
+    pub fn new(
+        changes: impl IntoIterator<Item = TimedHarmony>,
+    ) -> Result<Self, HarmonyChangesError> {
+        let mut v: Vec<TimedHarmony> = changes.into_iter().collect();
+        if let Some(index) = v.iter().position(|c| Beat::finite(c.beat.get()).is_none()) {
+            return Err(HarmonyChangesError::NonFiniteBeat { index });
+        }
+        v.sort_by(|a, b| a.beat.get().total_cmp(&b.beat.get()));
+        // Sorted, so the changes at one beat are neighbours, and a beat holds
+        // at most one chord and one scale.
+        for (i, a) in v.iter().enumerate() {
+            let clash = v[i + 1..]
+                .iter()
+                .take_while(|b| b.beat == a.beat)
+                .any(|b| b.harmony.kind() == a.harmony.kind());
+            if clash {
+                return Err(HarmonyChangesError::SameBeat {
+                    beat: a.beat,
+                    kind: a.harmony.kind(),
+                });
+            }
+        }
+        Ok(Self {
+            changes: v.into_boxed_slice(),
+        })
+    }
+
     /// The changes, in beat order.
     #[must_use]
     pub fn as_slice(&self) -> &[TimedHarmony] {
@@ -99,20 +179,6 @@ impl HarmonyChanges {
     }
 }
 
-impl FromIterator<TimedHarmony> for HarmonyChanges {
-    fn from_iter<I: IntoIterator<Item = TimedHarmony>>(changes: I) -> Self {
-        let mut v: Vec<TimedHarmony> = changes
-            .into_iter()
-            .filter(|c| c.beat.get().is_finite())
-            .collect();
-        // Stable: two changes at one beat keep their order, the later winning.
-        v.sort_by(|a, b| a.beat.get().total_cmp(&b.beat.get()));
-        Self {
-            changes: v.into_boxed_slice(),
-        }
-    }
-}
-
 /// A sequencer's chord and scale lanes as a graph node with one event output.
 /// See the module docs.
 ///
@@ -121,11 +187,12 @@ impl FromIterator<TimedHarmony> for HarmonyChanges {
 /// use tutti_units::{Beat, SampleRate, Samples};
 /// use tutti_graph::NodeKey;
 /// use tutti_graph::{Editor, Harmony, Prepare};
-/// use tutti_midi_runtime::{HarmonyNode, TimedHarmony};
+/// use tutti_midi_runtime::{HarmonyChanges, HarmonyNode, TimedHarmony};
 ///
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
 /// let c_major = Harmony::chord(60, 60, 0b1001_0001);
-/// let node = HarmonyNode::new([TimedHarmony::new(Beat::new(0.0), c_major)]);
+/// let changes = HarmonyChanges::new([TimedHarmony::new(Beat::new(0.0), c_major)]).unwrap();
+/// let node = HarmonyNode::new(changes);
 /// let controls = editor.insert(NodeKey(1), "harmony", node).controls;
 /// assert_eq!(controls.len(), 1);
 /// ```
@@ -160,11 +227,10 @@ impl std::fmt::Debug for HarmonyNode {
 }
 
 impl HarmonyNode {
-    /// A node sending `changes` (in any order: they are sorted by beat).
-    pub fn new(changes: impl IntoIterator<Item = TimedHarmony>) -> Self {
-        Self::over(Publisher::new(
-            changes.into_iter().collect::<HarmonyChanges>(),
-        ))
+    /// A node sending `changes`.
+    #[must_use]
+    pub fn new(changes: HarmonyChanges) -> Self {
+        Self::over(Publisher::new(changes))
     }
 
     /// A node over `cell`, reading it through a reader registered here.

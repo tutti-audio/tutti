@@ -8,20 +8,33 @@ use tutti_units::{Beat, Seconds};
 /// so a quarter note is 4 and beat 2.0 is 8; it rounds to the nearest.
 #[test]
 fn a_song_position_counts_sixteenths_rounded_to_the_nearest() {
-    assert_eq!(song_position(Beat::new(0.0)).get(), 0);
-    assert_eq!(song_position(Beat::new(2.0)).get(), 8);
-    assert_eq!(song_position(Beat::new(0.37)).get(), 1);
-    assert_eq!(song_position(Beat::new(0.38)).get(), 2);
+    let at = |beat: f64| song_position(Beat::new(beat)).map(U14::get);
+    assert_eq!(at(0.0), Some(0));
+    assert_eq!(at(2.0), Some(8));
+    assert_eq!(at(0.37), Some(1));
+    assert_eq!(at(0.38), Some(2));
 }
 
-/// The pointer is 14 bits: a position before the start or NaN is the start,
-/// and one past 16383 sixteenths sticks at the largest.
+/// The pointer is 14 bits, 0 to 16383 sixteenths: the first and the last fit.
 #[test]
-fn a_song_position_outside_the_14_bit_field_sticks_at_its_ends() {
-    assert_eq!(song_position(Beat::new(-3.0)).get(), 0);
-    assert_eq!(song_position(Beat::new(f64::NAN)).get(), 0);
-    assert_eq!(song_position(Beat::new(4096.0)), U14::MAX);
-    assert_eq!(song_position(Beat::new(1.0e9)), U14::MAX);
+fn a_song_position_is_some_at_both_edges_of_the_field() {
+    assert_eq!(song_position(Beat::new(0.0)), Some(U14::of(0)));
+    assert_eq!(song_position(Beat::new(16_383.0 / 4.0)), Some(U14::MAX));
+    assert_eq!(U14::MAX.get(), 16_383);
+}
+
+/// A beat the 14-bit field cannot hold has no pointer: past the last
+/// sixteenth, before the start, NaN and infinite, none clamped.
+#[test]
+fn a_song_position_is_none_past_the_field_before_zero_and_for_nan() {
+    assert_eq!(song_position(Beat::new(4096.0)), None);
+    assert_eq!(song_position(Beat::new(16_384.0 / 4.0 - 0.01)), None);
+    assert_eq!(song_position(Beat::new(1.0e9)), None);
+    assert_eq!(song_position(Beat::new(-3.0)), None);
+    assert_eq!(song_position(Beat::new(-0.01)), None);
+    assert_eq!(song_position(Beat::new(f64::NAN)), None);
+    assert_eq!(song_position(Beat::new(f64::INFINITY)), None);
+    assert_eq!(song_position(Beat::new(f64::NEG_INFINITY)), None);
 }
 
 /// 30 fps counts 30 frames a second, so 3661.5 s is `01:01:01:15`; 25 fps
@@ -29,23 +42,87 @@ fn a_song_position_outside_the_14_bit_field_sticks_at_its_ends() {
 /// `01:01:01:13`.
 #[test]
 fn a_time_is_the_label_of_the_nearest_frame() {
-    let at = |s, rate| SmpteTimecode::from_seconds(Seconds::new(s), rate).to_string();
+    let at = |s, rate| {
+        SmpteTimecode::from_seconds(Seconds::new(s), rate)
+            .expect("a time of day")
+            .to_string()
+    };
     assert_eq!(at(3661.5, SmpteFrameRate::Fps30), "01:01:01:15");
     assert_eq!(at(3661.5, SmpteFrameRate::Fps25), "01:01:01:13");
     assert_eq!(at(0.5 / 24.0 + 1e-9, SmpteFrameRate::Fps24), "00:00:00:01");
     assert_eq!(at(0.5 / 24.0 - 1e-9, SmpteFrameRate::Fps24), "00:00:00:00");
 }
 
-/// A time a float's width short of a frame boundary is that frame, a negative
-/// or NaN time is the origin, and one past 24 hours wraps its hours.
+/// A time a float's width short of a frame boundary is that frame.
 #[test]
-fn a_time_just_short_of_a_frame_rounds_up_and_out_of_range_times_are_bounded() {
+fn a_time_just_short_of_a_frame_rounds_up_to_it() {
+    let at = |s: f64| SmpteTimecode::from_seconds(Seconds::new(s), SmpteFrameRate::Fps30);
+    assert_eq!(at(1.0 - 1e-12).unwrap().to_string(), "00:00:01:00");
+}
+
+/// A time no label names has none: before zero, NaN and infinite, and past the
+/// last label of the day, each rate at its own edge. The label count of a day
+/// is 24, 25 or 30 labels a second for 86 400 s; drop-frame 29.97 skips two
+/// labels a minute but ten, so its day is 2 589 408 frames; non-drop 29.97
+/// counts 30 labels a second at 30 000/1001 frames a second, so its labels
+/// last 2 592 000 frames, to 86 486.4 s.
+#[test]
+fn a_time_is_none_before_zero_for_nan_and_past_the_last_label_of_the_day() {
+    for (rate, frames_in_day, last) in [
+        (SmpteFrameRate::Fps24, 24 * 86_400u64, "23:59:59:23"),
+        (SmpteFrameRate::Fps25, 25 * 86_400, "23:59:59:24"),
+        (SmpteFrameRate::Fps30, 30 * 86_400, "23:59:59:29"),
+        (SmpteFrameRate::Fps2997Df, 2_589_408, "23:59:59:29"),
+        (SmpteFrameRate::Fps2997Ndf, 2_592_000, "23:59:59:29"),
+    ] {
+        let at = |s: f64| SmpteTimecode::from_seconds(Seconds::new(s), rate);
+        let (num, den) = rate.ratio();
+        let frame = |n: u64| n as f64 * den as f64 / num as f64;
+        assert_eq!(at(-5.0), None, "{rate:?}");
+        assert_eq!(at(-1e-12), None, "{rate:?}");
+        assert_eq!(at(f64::NAN), None, "{rate:?}");
+        assert_eq!(at(f64::INFINITY), None, "{rate:?}");
+        assert!(at(0.0).is_some(), "{rate:?}");
+        assert_eq!(
+            at(frame(frames_in_day - 1)).unwrap().to_string(),
+            last,
+            "{rate:?}"
+        );
+        assert_eq!(at(frame(frames_in_day)), None, "{rate:?}");
+        assert_eq!(at(frame(frames_in_day) + 1.0), None, "{rate:?}");
+    }
+    // Non-drop 29.97 still names 24 hours of wall clock: its label for 86 400 s.
+    let ndf = SmpteFrameRate::Fps2997Ndf;
+    assert!(SmpteTimecode::from_seconds(Seconds::new(86_400.0), ndf).is_some());
+    assert_eq!(
+        SmpteTimecode::from_seconds(Seconds::new(86_486.4), ndf),
+        None
+    );
+}
+
+/// MIDI Time Code's hours count 0 to 23 and start again (M1 p.53): the
+/// wrapping form carries a time past a day, and still refuses what is no time.
+#[test]
+fn a_wrapping_time_carries_hours_past_24_and_refuses_before_zero_and_nan() {
     let rate = SmpteFrameRate::Fps30;
-    let at = |s: f64| SmpteTimecode::from_seconds(Seconds::new(s), rate);
-    assert_eq!(at(1.0 - 1e-12).to_string(), "00:00:01:00");
-    assert_eq!(at(-5.0).to_string(), "00:00:00:00");
-    assert_eq!(at(f64::NAN).to_string(), "00:00:00:00");
-    assert_eq!(at(86_400.0 + 1.0).to_string(), "00:00:01:00");
+    let at = |s: f64| SmpteTimecode::from_seconds_wrapping(Seconds::new(s), rate);
+    assert_eq!(at(86_400.0 + 1.0).unwrap().to_string(), "00:00:01:00");
+    assert_eq!(at(86_400.0 - 1e-9).unwrap().to_string(), "00:00:00:00");
+    assert_eq!(at(-1.0), None);
+    assert_eq!(at(f64::NAN), None);
+    assert_eq!(at(f64::INFINITY), None);
+    // The wrapping form agrees with `from_seconds` on every time `from_seconds`
+    // names, at the day's last label of non-drop 29.97 included.
+    let ndf = SmpteFrameRate::Fps2997Ndf;
+    for s in [0.0, 3_661.5, 86_399.0, 86_400.0, 86_486.3] {
+        assert_eq!(
+            SmpteTimecode::from_seconds_wrapping(Seconds::new(s), ndf),
+            SmpteTimecode::from_seconds(Seconds::new(s), ndf),
+            "{s}"
+        );
+    }
+    let past = SmpteTimecode::from_seconds_wrapping(Seconds::new(86_486.4), ndf);
+    assert_eq!(past.unwrap().to_string(), "00:00:00:00");
 }
 
 /// Drop-frame 29.97 labels skip `;00` and `;01` at a minute not divisible by
@@ -55,7 +132,8 @@ fn a_time_at_drop_frame_is_labelled_by_the_dropped_count() {
     let tc = SmpteTimecode::from_seconds(
         Seconds::new(1800.0 * 1001.0 / 30_000.0),
         SmpteFrameRate::Fps2997Df,
-    );
+    )
+    .expect("a time of day");
     assert_eq!(tc.to_string(), "00:01:00:02");
     assert_eq!(SmpteFrameRate::Fps25.frames_at(Seconds::new(2.0)), 50.0);
 }

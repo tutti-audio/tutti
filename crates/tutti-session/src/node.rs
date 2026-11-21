@@ -568,7 +568,9 @@ mod tests {
         #[cfg(feature = "midi")]
         {
             assert!(keeps_one(tutti_midi_runtime::MidiClipNode::new([])));
-            assert!(keeps_one(tutti_midi_runtime::HarmonyNode::new([])));
+            assert!(keeps_one(tutti_midi_runtime::HarmonyNode::new(
+                tutti_midi_runtime::HarmonyChanges::default()
+            )));
             assert!(keeps_one(tutti_midi_runtime::MidiInputNode::new()));
         }
         #[cfg(feature = "sampler")]

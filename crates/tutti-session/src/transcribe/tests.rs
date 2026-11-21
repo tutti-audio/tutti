@@ -203,7 +203,8 @@ fn a_chord_span_is_one_change_at_its_start_with_its_root_and_quality() {
         },
     ];
     let map = map();
-    let changes = harmony_from_chords(&spans, &mut map.view(SampleRate::SR_48K));
+    let changes = harmony_from_chords(&spans, &mut map.view(SampleRate::SR_48K))
+        .expect("spans at distinct beats");
     let [a, c] = changes.as_slice() else {
         panic!("one change per span: {changes:?}");
     };
@@ -223,5 +224,5 @@ fn no_input_gives_no_events() {
         NoteCents::PerNotePitchBend(range(50)),
     );
     assert!(clip_from_notes(&[], &mut view, bent).is_empty());
-    assert!(harmony_from_chords(&[], &mut view).is_empty());
+    assert!(harmony_from_chords(&[], &mut view).unwrap().is_empty());
 }
