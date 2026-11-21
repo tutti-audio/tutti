@@ -1812,11 +1812,10 @@ impl<F: Float> Midi<'_, F> {
         capacity: tutti_graph::EventCapacity,
     ) -> Result<EventTapReader> {
         let target = target.into();
+        self.takes_midi(target)?;
         let node = if let Some(queue) = self.instrument_queue(target) {
-            self.takes_midi(target)?;
             queue
         } else {
-            self.takes_midi(target)?;
             self.fed_by(target, Feeder::LiveInput, &self.state.live)
                 .map(|(node, _)| node)
                 .ok_or(MidiError::NoLiveInput(target))?
