@@ -425,6 +425,7 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
                 | IpcEvent::StateNotRestored { .. }
                 | IpcEvent::RenderModeNotApplied { .. }
                 | IpcEvent::WouldNotStop { .. }
+                | IpcEvent::ServerLosses { .. }
                 | IpcEvent::IoLayout(_)
                 | IpcEvent::RateRefusal(_)
                 | IpcEvent::ProcessRequested

@@ -844,3 +844,47 @@ fn test_vst3_process_f32_with_note() {
         "Expected at least one non-zero output sample after NoteOn"
     );
 }
+
+/// **The server's counts reach the host as news, once per change**: a command
+/// the render thread was not given and an edit the plugin refused are told with
+/// their cumulative totals at the next poll, and a poll after tells nothing.
+#[test]
+fn the_servers_losses_are_told_to_the_host_when_they_change() {
+    let _lock = crate::test_utils::plugin_load_lock();
+    let mut instance = Vst3Instance::load_first(
+        main_thread(),
+        Path::new(vst3_plugin()),
+        48_000.0,
+        128,
+        FloatWidth::F32,
+    )
+    .expect("the vendored VST3 probe loads");
+    let losses = |told: &[News]| {
+        told.iter()
+            .filter_map(|news| match news {
+                News::ServerLosses {
+                    commands_refused,
+                    edits_refused,
+                } => Some((*commands_refused, *edits_refused)),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        losses(&instance.poll(main_thread())).is_empty(),
+        "nothing lost yet"
+    );
+    instance.ties.commands_refused.writer().add(2);
+    instance.edits_refused.add(1);
+    assert_eq!(losses(&instance.poll(main_thread())), [(2, 1)]);
+    assert!(
+        losses(&instance.poll(main_thread())).is_empty(),
+        "told once"
+    );
+    instance.edits_refused.add(1);
+    assert_eq!(
+        losses(&instance.poll(main_thread())),
+        [(2, 2)],
+        "cumulative"
+    );
+}

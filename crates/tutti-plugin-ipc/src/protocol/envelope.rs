@@ -669,6 +669,16 @@ pub enum News {
         /// Why the plugin would not stop.
         reason: String,
     },
+    /// What the server's own work lost, over its life, sent when either count
+    /// has moved since it was last sent (at most once per control tick). The
+    /// figures are cumulative: a later one replaces an earlier one.
+    ServerLosses {
+        /// Commands the server could not give its render thread.
+        commands_refused: u64,
+        /// One-way edits the plugin refused: an automation state, a track's
+        /// info or a parameter write.
+        edits_refused: u64,
+    },
 }
 
 /// One frame the server sends on the control connection: an answer, a sign of

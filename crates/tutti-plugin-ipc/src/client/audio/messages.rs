@@ -303,6 +303,13 @@ pub enum IpcEvent {
         /// Why the plugin would not stop.
         reason: String,
     },
+    /// What the server's own work lost, cumulative.
+    ServerLosses {
+        /// Commands the server could not give its render thread.
+        commands_refused: u64,
+        /// One-way edits the plugin refused.
+        edits_refused: u64,
+    },
     /// The plugin refused the rate it was asked to run at (`Some`: the rate in
     /// Hz and the plugin's reason), or took a rate after refusing one (`None`).
     RateRefusal(Option<RateRefusal>),
@@ -395,6 +402,8 @@ pub(super) struct Unsolicited {
     /// Why the plugin last would not stop, until drained; a later one replaces
     /// it.
     would_not_stop: Option<String>,
+    /// The server's latest cumulative losses (commands, edits), until drained.
+    server_losses: Option<(u64, u64)>,
     io: bool,
     /// The buses the last `PluginIoChanged` carried, until drained.
     io_layout: Option<tutti_plugin_types::Layout>,
@@ -421,6 +430,7 @@ impl Unsolicited {
             state_not_restored: None,
             render_mode_not_applied: None,
             would_not_stop: None,
+            server_losses: None,
             io: false,
             io_layout: None,
             param_titles: false,
@@ -536,6 +546,12 @@ impl Unsolicited {
         }
     }
 
+    /// The server's cumulative losses, replacing any held: a figure that is
+    /// cumulative loses nothing by being replaced.
+    pub(super) fn server_losses(&mut self, commands_refused: u64, edits_refused: u64) {
+        self.server_losses = Some((commands_refused, edits_refused));
+    }
+
     /// A resync request; a second of the same kind adds nothing.
     pub(super) fn resync(&mut self, kind: ResyncKind) {
         *match kind {
@@ -588,12 +604,20 @@ impl Unsolicited {
             .would_not_stop
             .take()
             .map(|reason| IpcEvent::WouldNotStop { reason });
+        let losses = self
+            .server_losses
+            .take()
+            .map(|(commands_refused, edits_refused)| IpcEvent::ServerLosses {
+                commands_refused,
+                edits_refused,
+            });
         layout
             .into_iter()
             .chain(structural.into_iter().flatten())
             .chain(unrestored)
             .chain(mode_refused)
             .chain(stuck)
+            .chain(losses)
             .chain(params)
             .chain(latency)
             .chain(tail)

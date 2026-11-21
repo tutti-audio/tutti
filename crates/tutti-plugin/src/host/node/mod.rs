@@ -222,6 +222,84 @@ impl<S> std::fmt::Debug for PluginClient<S> {
     }
 }
 
+/// Where the bridge's events go: the cells and sinks the node's controls and
+/// subscribers read.
+struct EventRoute {
+    reports: tutti_plugin_host::PluginReports,
+    params: ParameterChangeSink,
+    refresh: RefreshSink,
+    invalidate: InvalidateSink,
+    transport: TransportSink,
+    chunks: Arc<tutti_plugin_types::ChunkCounters>,
+}
+
+impl EventRoute {
+    /// Puts one event of the bridge in its cell or sink.
+    fn hear(&self, ev: IpcEvent) {
+        let ev = match plain_invalidation(ev) {
+            Ok(invalidation) => return self.invalidate.fire(invalidation),
+            Err(ev) => ev,
+        };
+        match ev {
+            IpcEvent::LatencyChanged { samples } => {
+                let reported = PluginInvalidation::Latency { samples };
+                self.reports.take_report(&reported);
+                self.invalidate.fire(reported);
+            }
+            IpcEvent::TailChanged { tail } => {
+                let reported = PluginInvalidation::Tail { tail };
+                self.reports.take_report(&reported);
+                self.invalidate.fire(reported);
+            }
+            IpcEvent::ParameterChanged { edit } => {
+                self.params.fire(edit);
+            }
+            IpcEvent::Resync(kind) => match kind.classify() {
+                ResyncClass::Refresh(r) => self.refresh.fire(r),
+                ResyncClass::Invalidate(i) => self.invalidate.fire(i),
+            },
+            IpcEvent::ServerLosses {
+                commands_refused,
+                edits_refused,
+            } => self
+                .chunks
+                .set_server_losses(commands_refused, edits_refused),
+            // The wake it raises is bound through `Control::bind_wake` and
+            // raised by `Ipc` before this listener runs.
+            IpcEvent::ProcessRequested => {}
+            // Fired above.
+            IpcEvent::StateNotRestored { .. }
+            | IpcEvent::RenderModeNotApplied { .. }
+            | IpcEvent::WouldNotStop { .. }
+            | IpcEvent::RateRefusal(_)
+            | IpcEvent::Crashed { .. } => {}
+            // The layout is read from the link when the `Io` resync that follows it lands.
+            IpcEvent::IoLayout(_) => {}
+            IpcEvent::Transport { request } => self.transport.fire(request),
+        }
+    }
+}
+
+/// The invalidation an event of the bridge is, when it is that and nothing
+/// else: no cell is updated alongside it. `Crashed` is structural and
+/// terminal, and the crash flag it mirrors was already set by the bridge
+/// thread before it fired (see `thread::crash`).
+fn plain_invalidation(ev: IpcEvent) -> Result<PluginInvalidation, IpcEvent> {
+    match ev {
+        IpcEvent::StateNotRestored { reason } => {
+            Ok(PluginInvalidation::StateNotRestored { reason })
+        }
+        IpcEvent::RenderModeNotApplied { mode } => {
+            Ok(PluginInvalidation::RenderModeNotApplied { mode })
+        }
+        IpcEvent::WouldNotStop { reason } => Ok(PluginInvalidation::Stuck { reason }),
+        IpcEvent::RateRefusal(Some(refusal)) => Ok(PluginInvalidation::RateRefused(refusal)),
+        IpcEvent::RateRefusal(None) => Ok(PluginInvalidation::RateRestored),
+        IpcEvent::Crashed { cause } => Ok(PluginInvalidation::Crashed { cause }),
+        other => Err(other),
+    }
+}
+
 impl PluginClient<Unbound> {
     /// Spawns the plugin-server, loads `plugin` and returns the loaded
     /// plugin, [`Unbound`].
@@ -357,57 +435,15 @@ impl PluginClient<Unbound> {
         // re-plans PDC, which a host does with `Editor::set_latency`). Resync
         // signals split by consequence into the refresh (cosmetic) vs
         // invalidate (structural) sinks via `ResyncKind::classify`.
-        let listener_param_sink = param_sink.clone();
-        let listener_refresh_sink = refresh_sink.clone();
-        let listener_invalidate_sink = invalidate_sink.clone();
-        let listener_transport_sink = transport_sink.clone();
-        ipc.forward_events(Some(Arc::new(move |ev| match ev {
-            IpcEvent::LatencyChanged { samples } => {
-                let reported = PluginInvalidation::Latency { samples };
-                reports.take_report(&reported);
-                listener_invalidate_sink.fire(reported);
-            }
-            IpcEvent::TailChanged { tail } => {
-                let reported = PluginInvalidation::Tail { tail };
-                reports.take_report(&reported);
-                listener_invalidate_sink.fire(reported);
-            }
-            IpcEvent::ParameterChanged { edit } => {
-                listener_param_sink.fire(edit);
-            }
-            IpcEvent::Resync(kind) => match kind.classify() {
-                ResyncClass::Refresh(r) => listener_refresh_sink.fire(r),
-                ResyncClass::Invalidate(i) => listener_invalidate_sink.fire(i),
-            },
-            IpcEvent::StateNotRestored { reason } => {
-                listener_invalidate_sink.fire(PluginInvalidation::StateNotRestored { reason });
-            }
-            IpcEvent::RenderModeNotApplied { mode } => {
-                listener_invalidate_sink.fire(PluginInvalidation::RenderModeNotApplied { mode });
-            }
-            IpcEvent::WouldNotStop { reason } => {
-                listener_invalidate_sink.fire(PluginInvalidation::Stuck { reason });
-            }
-            IpcEvent::RateRefusal(Some(refusal)) => {
-                listener_invalidate_sink.fire(PluginInvalidation::RateRefused(refusal));
-            }
-            IpcEvent::RateRefusal(None) => {
-                listener_invalidate_sink.fire(PluginInvalidation::RateRestored);
-            }
-            // Structural and terminal. No cell is updated alongside it the
-            // way latency and tail are: there is no new value to cache, and the
-            // crash flag this mirrors was already set by the bridge thread
-            // before it fired — see `thread::crash`.
-            IpcEvent::Crashed { cause } => {
-                listener_invalidate_sink.fire(PluginInvalidation::Crashed { cause });
-            }
-            // The wake it raises is bound through `Control::bind_wake` and
-            // raised by `Ipc` before this listener runs.
-            IpcEvent::ProcessRequested => {}
-            // The layout is read from the link when the `Io` resync that follows it lands.
-            IpcEvent::IoLayout(_) => {}
-            IpcEvent::Transport { request } => listener_transport_sink.fire(request),
-        })));
+        let route = EventRoute {
+            reports,
+            params: param_sink.clone(),
+            refresh: refresh_sink.clone(),
+            invalidate: invalidate_sink.clone(),
+            transport: transport_sink.clone(),
+            chunks: Arc::clone(ipc.chunk_counters()),
+        };
+        ipc.forward_events(Some(Arc::new(move |ev| route.hear(ev))));
 
         // The parameter list, once, while loading blocks anyway: the node's
         // per-parameter delivery is sized from it. A `prepare` may not make
@@ -747,5 +783,77 @@ impl PluginAnswers {
     /// took ([`load_state`](Self::load_state)). On the main thread.
     pub fn mirror_state(&self, main: tutti_plugin_types::MainThreadMarker, data: &[u8]) {
         self.bridge.mirror_state(main, data);
+    }
+}
+
+#[cfg(test)]
+mod event_route_tests {
+    use super::*;
+
+    /// **The bridge's notices reach the host as the invalidations the session
+    /// maps**: a refused render mode keeps its mode, and a restart the plugin
+    /// would not make is `Stuck` with its reason.
+    #[test]
+    fn a_refused_render_mode_and_a_restart_the_plugin_would_not_make_map_to_their_invalidations() {
+        let mode = plain_invalidation(IpcEvent::RenderModeNotApplied {
+            mode: tutti_plugin_types::RenderMode::Offline,
+        });
+        assert!(
+            matches!(
+                mode,
+                Ok(PluginInvalidation::RenderModeNotApplied {
+                    mode: tutti_plugin_types::RenderMode::Offline
+                })
+            ),
+            "{mode:?}"
+        );
+        let stuck = plain_invalidation(IpcEvent::WouldNotStop {
+            reason: "inside a block".into(),
+        });
+        assert!(
+            matches!(&stuck, Ok(PluginInvalidation::Stuck { reason }) if reason == "inside a block"),
+            "{stuck:?}"
+        );
+        assert!(
+            plain_invalidation(IpcEvent::ProcessRequested).is_err(),
+            "an event that is not an invalidation is handed back"
+        );
+    }
+
+    /// **The server's loss counts the bridge heard are what the controls read**,
+    /// and a later report replaces the earlier (the figures are cumulative).
+    #[test]
+    fn the_servers_losses_reach_the_chunk_counters() {
+        let chunks = Arc::new(tutti_plugin_types::ChunkCounters::default());
+        let (controls, reports) = PluginControls::with_chunks(
+            Samples::new(0),
+            tutti_plugin_types::PluginTail::default(),
+            SampleRate::SR_48K,
+            Arc::clone(&chunks),
+        );
+        let route = EventRoute {
+            reports,
+            params: ParameterChangeSink::new(),
+            refresh: RefreshSink::new(),
+            invalidate: InvalidateSink::new(),
+            transport: TransportSink::new(),
+            chunks: Arc::clone(&chunks),
+        };
+        route.hear(IpcEvent::ServerLosses {
+            commands_refused: 2,
+            edits_refused: 1,
+        });
+        assert_eq!(
+            (
+                controls.server_commands_refused(),
+                controls.server_edits_refused()
+            ),
+            (2, 1)
+        );
+        route.hear(IpcEvent::ServerLosses {
+            commands_refused: 5,
+            edits_refused: 1,
+        });
+        assert_eq!(controls.server_commands_refused(), 5);
     }
 }

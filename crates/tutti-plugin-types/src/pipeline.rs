@@ -91,6 +91,10 @@ pub struct ChunkCounters {
     /// stop in time and were left running (set by
     /// [`attach_detached`](Self::attach_detached)).
     detached: OnceLock<Tally<u64>>,
+    /// The server's own cumulative loss counts, as it last told them
+    /// ([`set_server_losses`](Self::set_server_losses)).
+    server_commands_refused: AtomicU64,
+    server_edits_refused: AtomicU64,
     /// Whether the chunk of a sequence has been answered, set when the node is
     /// bound (the shared-memory slab's reply flag, which this file does not
     /// name).
@@ -190,6 +194,24 @@ impl ChunkCounters {
     /// See `PluginControls::detached_tasks`.
     pub fn detached(&self) -> u64 {
         self.detached.get().map_or(0, Tally::get)
+    }
+
+    /// Takes the server's cumulative counts, as it last told them.
+    pub fn set_server_losses(&self, commands_refused: u64, edits_refused: u64) {
+        self.server_commands_refused
+            .store(commands_refused, Ordering::Relaxed);
+        self.server_edits_refused
+            .store(edits_refused, Ordering::Relaxed);
+    }
+
+    /// See `PluginControls::server_commands_refused`.
+    pub fn server_commands_refused(&self) -> u64 {
+        self.server_commands_refused.load(Ordering::Relaxed)
+    }
+
+    /// See `PluginControls::server_edits_refused`.
+    pub fn server_edits_refused(&self) -> u64 {
+        self.server_edits_refused.load(Ordering::Relaxed)
     }
 
     /// See `PluginControls::skipped_chunks`.

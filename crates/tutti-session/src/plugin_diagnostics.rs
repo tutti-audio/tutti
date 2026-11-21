@@ -133,6 +133,26 @@ impl<'a> Diagnostics<'a> {
             .map_or(0, tutti_plugin_host::PluginControls::refused_commands)
     }
 
+    /// Commands the plugin's server could not give its own render thread, as
+    /// the server last told them. Not [`refused_commands`](Self::refused_commands),
+    /// which are the host side's. Zero for a plugin that runs in this process.
+    pub fn server_commands_refused(&self) -> u64 {
+        self.hosted.controls.as_ref().map_or(
+            0,
+            tutti_plugin_host::PluginControls::server_commands_refused,
+        )
+    }
+
+    /// One-way edits the plugin refused in its server (an automation state, a
+    /// track's info, a parameter write), as the server last told them. Zero for
+    /// a plugin that runs in this process.
+    pub fn server_edits_refused(&self) -> u64 {
+        self.hosted
+            .controls
+            .as_ref()
+            .map_or(0, tutti_plugin_host::PluginControls::server_edits_refused)
+    }
+
     /// Audio responses the plugin's bridge could not queue for the audio thread: lost. Zero for a plugin that runs in this process.
     pub fn lost_responses(&self) -> u64 {
         self.hosted

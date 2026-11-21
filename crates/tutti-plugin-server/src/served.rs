@@ -222,6 +222,8 @@ pub(crate) struct Server<L: OutOfProcess> {
     /// Adds to [`Losses::edits_refused`](crate::render::Losses): one-way edits
     /// the plugin refused.
     edits_refused: TallyWriter<u64>,
+    /// The loss counts last told to the host ([`News::ServerLosses`]).
+    told_losses: (u64, u64),
 }
 
 /// How long a plan that waits for the Processor to come home from the render
@@ -363,6 +365,7 @@ impl<L: ServerSide> Server<L> {
             events: Vec::new(),
             refused: false,
             edits_refused: ties.edits_refused.writer(),
+            told_losses: (0, 0),
             ties,
         };
         // The wake outlives every activation: the plugin's host state is the
@@ -723,6 +726,17 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
         self.forward_edits(main);
         if self.ties.bell.take() {
             self.events.push(News::ProcessRequested);
+        }
+        let losses = (
+            self.ties.commands_refused.get(),
+            self.ties.edits_refused.get(),
+        );
+        if losses != self.told_losses {
+            self.told_losses = losses;
+            self.events.push(News::ServerLosses {
+                commands_refused: losses.0,
+                edits_refused: losses.1,
+            });
         }
         std::mem::take(&mut self.events)
     }
