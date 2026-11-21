@@ -7,15 +7,14 @@
 //! one-shot semantics are enforced by the type system, not by hoping
 //! responses come back in the order requests went out.
 //!
-//! A reply is answered into a blocking [`Ask`] or into an [`oneshot::Receiver`] (a
-//! `futures_channel` oneshot) a caller awaits: the lane's thread that sends the
+//! A reply is answered into a blocking [`Ask`] or into an [`Answer`] a caller awaits: the lane's thread that sends the
 //! reply wakes the awaiting task, and a reply dropped unanswered resolves it as
 //! canceled.
 
-use futures_channel::oneshot;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
+use tutti_plugin_types::{Answer, AnswerSender};
 use tutti_rt::LockExt;
 
 /// Whether a control request is owed a reply: at most one is, and a caller who
@@ -59,7 +58,7 @@ pub(super) struct Reply<T> {
 /// future awaits.
 enum Sink<T> {
     Blocking(SyncSender<T>),
-    Awaited(oneshot::Sender<T>),
+    Awaited(AnswerSender<T>),
 }
 
 impl<T> Reply<T> {
@@ -111,14 +110,14 @@ pub(super) fn ask<T>() -> (Ask<T>, Reply<T>) {
     )
 }
 
-/// Make a paired reply and the [`oneshot::Receiver`] a future awaits: the thread that
+/// Make a paired reply and the [`Answer`] a future awaits: the thread that
 /// sends the reply fills it. It holds no slot ([`ControlSlot`]): the request
 /// queues behind an owed one and the lane's deadline bounds each in turn, with
 /// no caller waiting for either.
-pub(super) fn awaited<T>() -> (oneshot::Receiver<T>, Reply<T>) {
-    let (tx, rx) = oneshot::channel();
+pub(super) fn awaited<T>() -> (Answer<T>, Reply<T>) {
+    let (tx, answer) = Answer::channel();
     (
-        rx,
+        answer,
         Reply {
             tx: Sink::Awaited(tx),
             owing: None,
@@ -204,12 +203,18 @@ mod tests {
     #[test]
     fn an_awaited_reply_fills_the_answer_and_a_dropped_one_cancels_it() {
         let (mut answer, reply) = awaited::<u32>();
-        assert_eq!(answer.try_recv(), Ok(None), "nothing sent yet");
+        let mut peek =
+            || futures_lite::future::block_on(futures_lite::future::poll_once(&mut answer));
+        assert_eq!(peek(), None, "nothing sent yet");
         reply.send(7);
-        assert_eq!(answer.try_recv(), Ok(Some(7)));
-        let (mut answer, reply) = awaited::<u32>();
+        assert_eq!(peek(), Some(Some(7)));
+        let (answer, reply) = awaited::<u32>();
         drop(reply);
-        assert!(answer.try_recv().is_err(), "dropped unanswered: canceled");
+        assert_eq!(
+            futures_lite::future::block_on(answer),
+            None,
+            "dropped unanswered: canceled"
+        );
     }
 
     #[test]

@@ -873,6 +873,83 @@ fn a_plugin_that_refused_its_saved_state_is_heard_with_the_reason() {
     assert_eq!(*heard.lock(), ["Reloaded", "setState refused"]);
 }
 
+/// **A render mode the plugin did not take, and a restart it would not make,
+/// are heard by the host**: the server's news reaches the listener as
+/// `RenderModeNotApplied` with the mode and `WouldNotStop` with the reason.
+#[test]
+fn a_refused_render_mode_and_a_restart_the_plugin_would_not_make_are_heard() {
+    use crate::client::audio::IpcEvent;
+    use parking_lot::Mutex as PlMutex;
+
+    let mock = MockServer::start("mode-not-applied", |msg| match msg {
+        ControlRequest::SetRenderMode { .. } => Action::Events(vec![
+            News::RenderModeNotApplied {
+                mode: tutti_plugin_types::RenderMode::Offline,
+            },
+            News::PluginWouldNotStop {
+                reason: "inside a block".into(),
+            },
+        ]),
+        ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
+        _ => Action::Silent,
+    });
+    let heard: Arc<PlMutex<Vec<String>>> = Arc::new(PlMutex::new(Vec::new()));
+    let sink = Arc::clone(&heard);
+    mock.bridge
+        .audio()
+        .set_listener(Some(Arc::new(move |ev| match ev {
+            IpcEvent::RenderModeNotApplied { mode } => sink.lock().push(format!("{mode:?}")),
+            IpcEvent::WouldNotStop { reason } => sink.lock().push(reason),
+            _ => {}
+        })));
+    assert!(
+        mock.bridge
+            .audio()
+            .set_render_mode(tutti_plugin_types::RenderMode::Offline)
+    );
+    tutti_fixtures::wait_until("both to be heard", NOTICE_TIMEOUT, || {
+        heard.lock().len() >= 2
+    });
+    assert_eq!(*heard.lock(), ["Offline", "inside a block"]);
+}
+
+/// **The server's loss counts are heard by the host**, cumulative, the later
+/// report replacing the earlier.
+#[test]
+fn the_servers_loss_counts_are_heard() {
+    use crate::client::audio::IpcEvent;
+    use parking_lot::Mutex as PlMutex;
+
+    let mock = MockServer::start("server-losses", |msg| match msg {
+        ControlRequest::SetRenderMode { .. } => Action::Events(vec![News::ServerLosses {
+            commands_refused: 3,
+            edits_refused: 2,
+        }]),
+        ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
+        _ => Action::Silent,
+    });
+    let heard: Arc<PlMutex<Vec<(u64, u64)>>> = Arc::new(PlMutex::new(Vec::new()));
+    let sink = Arc::clone(&heard);
+    mock.bridge.audio().set_listener(Some(Arc::new(move |ev| {
+        if let IpcEvent::ServerLosses {
+            commands_refused,
+            edits_refused,
+        } = ev
+        {
+            sink.lock().push((commands_refused, edits_refused));
+        }
+    })));
+    assert!(
+        mock.bridge
+            .audio()
+            .set_render_mode(tutti_plugin_types::RenderMode::Offline)
+    );
+    tutti_fixtures::wait_until("the counts to be heard", NOTICE_TIMEOUT, || {
+        !heard.lock().is_empty()
+    });
+    assert_eq!(*heard.lock(), [(3, 2)]);
+}
+
 /// A handle to a real slab of `layout`: what the host sends, to a mock server
 /// that never opens it.
 fn a_handle(layout: &SlabLayout) -> SlabHandle {
@@ -2046,9 +2123,7 @@ fn an_editor_request_that_goes_wrong_names_how() {
 /// Awaits `answer` on a thread of its own, as an app's executor would: it is
 /// polled when the reader or the lane fills it, and nothing else polls it. The
 /// budget only guards a hang.
-fn await_answer<T: Send + 'static>(
-    answer: futures_channel::oneshot::Receiver<T>,
-) -> std::result::Result<T, futures_channel::oneshot::Canceled> {
+fn await_answer<T: Send + 'static>(answer: tutti_plugin_types::Answer<T>) -> Option<T> {
     call_within(move || futures_lite::future::block_on(answer))
         .unwrap_or_else(|w| panic!("an answer was never filled; waited {w:?}"))
 }
@@ -2070,7 +2145,7 @@ fn an_awaited_save_state_is_filled_with_the_servers_state() {
         .bridge
         .audio()
         .save_state_answer(tutti_plugin_types::StateUse::Project);
-    assert_eq!(await_answer(answer), Ok(Ok(bytes)));
+    assert_eq!(await_answer(answer), Some(Ok(bytes)));
 }
 
 /// **A server that never answers a save is cut off by the control lane's
@@ -2164,7 +2239,7 @@ fn an_awaited_save_state_the_server_dies_in_is_canceled() {
         .bridge
         .audio()
         .save_state_answer(tutti_plugin_types::StateUse::Project);
-    assert!(await_answer(answer).is_err(), "no reply was sent");
+    assert!(await_answer(answer).is_none(), "no reply was sent");
 }
 
 /// Assert that a stall left the session genuinely usable, not merely unflagged.
