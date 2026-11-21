@@ -17,8 +17,9 @@ use parking_lot::Mutex;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
     Event, Hand, HostOp, InProcess, Layout, Lifecycle, Loaded, MaxBlock, Notice, PluginError,
-    PluginFailure, PluginInvalidation, PluginRef, Prepare, Processor, RenderMode,
-    RenderModeSupport, SampleRate, Samples, State, Successor, Widths, standing,
+    PluginFailure, PluginInvalidation, PluginRef, Prepare, Processor, RateRefusal,
+    RateRefusalCause, RenderMode, RenderModeSupport, SampleRate, Samples, State, Successor, Widths,
+    standing,
 };
 use tutti_rt::Rt;
 
@@ -607,10 +608,11 @@ impl<L: Loaded> Instance<L> {
         match trouble {
             Trouble::Refused { rate, reason } => {
                 self.rate_refused = true;
-                self.reports.push(PluginInvalidation::RateRefused {
-                    rate,
-                    reason: reason.to_string(),
-                });
+                self.reports
+                    .push(PluginInvalidation::RateRefused(RateRefusal::new(
+                        rate,
+                        RateRefusalCause::from(&*reason),
+                    )));
             }
             Trouble::Stuck { reason } => {
                 self.reports.push(PluginInvalidation::Stuck {
@@ -975,7 +977,7 @@ mod tests {
         assert!(
             matches!(
                 reports.as_slice(),
-                [PluginInvalidation::RateRefused { rate, .. }] if *rate == SampleRate::SR_96K
+                [PluginInvalidation::RateRefused(refusal)] if refusal.rate == SampleRate::SR_96K
             ),
             "{reports:?}"
         );

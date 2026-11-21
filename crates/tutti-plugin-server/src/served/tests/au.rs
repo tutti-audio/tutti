@@ -468,7 +468,10 @@ fn a_unit_without_the_callbacks_is_not_published_to() {
         lifecycle: Lifecycle::new(loaded),
         state: Lifecycle::<AuLoaded>::initial_state(),
         hand: Hand::local(),
-        descriptor: Default::default(),
+        descriptor: tutti_plugin_types::PluginDescriptor::new(
+            "",
+            tutti_plugin_types::PluginClass::Unknown,
+        ),
         wiring: Default::default(),
         announced: Default::default(),
         requests: Vec::new(),

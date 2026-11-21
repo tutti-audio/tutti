@@ -21,7 +21,7 @@ use tutti_plugin_ipc::{
     AudioReply, ControlFrame, ControlReply, ControlRequest, ReqId, Request, Working, read_frame,
     socket_name, write_frame,
 };
-use tutti_plugin_types::{PluginFormat, PluginId, SampleRate};
+use tutti_plugin_types::{PluginFormat, PluginId, SampleRate, ServerError};
 
 /// Kills the server if the test fails before it shuts it down.
 struct Server(Child);
@@ -185,14 +185,16 @@ fn a_failed_load_is_answered_and_the_server_still_loads_a_good_plugin() {
     let (mut server, mut stream) = start_server();
 
     match load(&mut stream, &not_a_plugin, PluginFormat::Vst3) {
-        ControlReply::Error { message } => {
+        ControlReply::Error {
+            error: ServerError::Load { stage, reason },
+        } => {
             assert!(
-                !message.contains("unsupported plugin format"),
-                "the library was refused before a format read it: {message}"
+                !reason.contains("unsupported plugin format"),
+                "the library was refused before a format read it: {reason}"
             );
             assert!(
-                message.contains("no GetPluginFactory symbol"),
-                "the reply names the format's reason: {message}"
+                reason.contains("no GetPluginFactory symbol"),
+                "the reply names the format's reason at {stage}: {reason}"
             );
         }
         other => panic!("expected an Error reply, got {other:?}"),

@@ -145,6 +145,34 @@ pub enum IpcError {
     #[error("the host is shutting down")]
     ShutDown,
 
+    /// The plugin refused the sample rate it was asked to run at.
+    #[error(transparent)]
+    RateRefused(#[from] crate::RateRefusal),
+
+    /// The plugin-server failed a request it was asked.
+    #[error("the plugin-server failed the request: {0}")]
+    Server(#[from] crate::ServerError),
+
+    /// The served plugin has no origin to load a fresh instance from.
+    #[error("the served plugin has no origin")]
+    NoOrigin,
+
+    /// The plugin cannot run in blocks of `frames` frames.
+    #[error("the plugin cannot run in blocks of {frames} frames")]
+    BlockUnsupported {
+        /// The block size that was asked for.
+        frames: usize,
+    },
+
+    /// No editor host can load this plugin's editor in this process.
+    #[error("no editor host for the plugin at {}: {why}", path.display())]
+    NoEditorHost {
+        /// The plugin file.
+        path: PathBuf,
+        /// Why no host can.
+        why: NoEditorHost,
+    },
+
     /// The subprocess replied with a message the host was not waiting for.
     #[error("unexpected bridge message: expected {expected}, got {got}")]
     UnexpectedMessage {
@@ -276,6 +304,30 @@ pub enum IpcError {
     },
 }
 
+/// Why no editor host loads a plugin's editor in this process.
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NoEditorHost {
+    /// Audio Units exist only on macOS.
+    #[error("Audio Units exist only on macOS")]
+    AudioUnitOffMacos,
+    /// The Audio Unit host is not built: its cargo feature is off.
+    #[error("Audio Unit editors need the `au` feature")]
+    AudioUnitFeatureOff,
+    /// A VST2 plugin's editor lives in its in-process backend.
+    #[error(
+        "VST2 plugins use the in-process backend (enable the `vst2` feature); \
+         they do not go through the subprocess GUI loader"
+    )]
+    Vst2InProcess,
+    /// The format has no in-process editor host.
+    #[error("no in-process GUI support for format {0}")]
+    Format(crate::PluginFormat),
+    /// No format host is built.
+    #[error("no format feature is enabled (vst3, clap or au)")]
+    NoFormatHost,
+}
+
 /// A host operation's result, erroring as [`IpcError`].
 pub type IpcResult<T> = std::result::Result<T, IpcError>;
 
@@ -401,20 +453,6 @@ impl From<PluginError> for StateError {
     }
 }
 
-impl IpcError {
-    /// Turn a server-reported error message into a `LoadFailed` at the
-    /// `Opening` stage. The stage is coarse because the server's own
-    /// error-message protocol doesn't carry a stage tag.
-    #[must_use]
-    pub fn load_from_server(path: &std::path::Path, message: String) -> Self {
-        Self::LoadFailed {
-            path: Some(path.to_path_buf()),
-            stage: LoadStage::Opening,
-            reason: message,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -520,7 +558,11 @@ mod tests {
     /// and reason through the narrowing.
     #[test]
     fn a_load_failure_names_its_path_only_when_it_has_one() {
-        let with = IpcError::load_from_server(std::path::Path::new("/x.vst3"), "refused".into());
+        let with = IpcError::LoadFailed {
+            path: Some(PathBuf::from("/x.vst3")),
+            stage: LoadStage::Opening,
+            reason: "refused".into(),
+        };
         assert_eq!(
             with.to_string(),
             "the plugin at /x.vst3 failed to load at the opening library stage: refused"

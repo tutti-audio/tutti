@@ -19,7 +19,7 @@ use tutti_plugin_types::MAX_CHUNK;
 use tutti_plugin_types::StateUse;
 use tutti_plugin_types::Timeouts;
 use tutti_plugin_types::{Helper, Locator, PluginFormat, PluginId, PluginRef};
-use tutti_plugin_types::{IpcError, IpcResult};
+use tutti_plugin_types::{IpcError, IpcResult, ServerError};
 use tutti_plugin_types::{LoadedPlugin, PluginDescriptor};
 use tutti_units::SampleRate;
 
@@ -540,9 +540,14 @@ fn load_plugin(
             negotiated_format,
             state_error,
         } => Ok((id, descriptor, loaded, negotiated_format, state_error)),
-        ControlReply::Error { message } => {
-            Err(IpcError::load_from_server(request.origin.path(), message))
-        }
+        ControlReply::Error {
+            error: ServerError::Load { stage, reason },
+        } => Err(IpcError::LoadFailed {
+            path: Some(request.origin.path().to_path_buf()),
+            stage,
+            reason,
+        }),
+        ControlReply::Error { error } => Err(IpcError::Server(error)),
         ref other => Err(unexpected_message("PluginLoaded", other)),
     }
 }
