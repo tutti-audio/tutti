@@ -50,9 +50,9 @@ pub(super) struct Install {
 ///
 /// Dropped on another thread while `main_only`, its value is handed to the
 /// session's main-work collector to drop at the next tick on the main thread
-/// ([`MainWorkHandle::defer_drop`]); otherwise it drops where it is. The pool
-/// drops a released or replaced entry on whatever thread runs
-/// [`Session::update`] or [`Session::pool`].
+/// ([`MainWorkHandle::defer_drop`]); otherwise it drops where it is. The last
+/// clone of a [`LoadedPlugin`](crate::LoadedPlugin) drops its plugin through
+/// one, on whatever thread drops the clone.
 pub(super) struct Affine<T: Send + 'static> {
     value: Option<T>,
     work: MainWorkHandle,
