@@ -117,10 +117,11 @@ impl std::fmt::Debug for Catalog {
 /// app.
 ///
 /// Holds a copy of the table as it was at `save()` and the persistence the
-/// catalog was built with, so a change made after `save()` is not in what [`run`](Self::run) writes. It holds no thread and no
-/// executor: the app runs it inline, on its own thread or on its executor. It
-/// is `Send`, since a file write has no main-thread rule. Dropping it writes
-/// nothing.
+/// catalog was built with, so a change made after `save()` is not in what
+/// [`run`](Self::run) writes. It holds no thread and no executor: the app runs
+/// it inline, on its own thread or on its executor. It is `Send`, since a file
+/// write has no main-thread rule. Runs are not ordered and the last run wins, so
+/// run saves in the order `save()` took them. Dropping it writes nothing.
 #[must_use = "a SaveCatalog writes nothing until it is run"]
 pub struct SaveCatalog {
     table: PluginDb,

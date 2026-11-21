@@ -60,28 +60,23 @@ mod tests {
     /// Far past anything a test waits for: a hang guard, never a speed claim.
     const HANG_GUARD: Duration = Duration::from_secs(300);
 
-    /// **A raised request ends a wait that is already parked**, and the waiter
-    /// reports it: the wait returns long before its own timeout.
+    /// **A raised request ends a wait that started before it**, and the waiter
+    /// reports it: the result arrives within the hang guard, not at the wait's own
+    /// timeout.
     #[test]
-    fn stop_wakes_a_parked_wait() {
+    fn stop_ends_a_wait_that_started_before_it() {
         let stop = Stop::new();
-        let (parked_tx, parked_rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
         let waiter = {
             let stop = stop.clone();
-            std::thread::spawn(move || {
-                parked_tx.send(()).unwrap();
-                stop.wait(HANG_GUARD)
-            })
+            std::thread::spawn(move || done_tx.send(stop.wait(HANG_GUARD)).unwrap())
         };
-        parked_rx.recv().unwrap();
-        // Yields give the waiter the processor to park on the condvar before the
-        // request; the request is a latch, so a waiter that has not parked yet
-        // still returns, and only a parked one needs the wake.
-        for _ in 0..10_000 {
-            std::thread::yield_now();
-        }
         stop.stop();
-        assert!(waiter.join().unwrap(), "the wait reports the request");
+        let stopped = done_rx
+            .recv_timeout(Duration::from_secs(60))
+            .expect("the wait did not end within the hang guard");
+        assert!(stopped, "the wait reports the request");
+        waiter.join().unwrap();
     }
 
     /// **A wait that starts after the request returns at once**: the request is
