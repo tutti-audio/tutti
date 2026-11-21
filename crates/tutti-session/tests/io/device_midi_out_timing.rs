@@ -273,7 +273,7 @@ fn a_clips_notes_are_sent_when_their_frames_are_heard() {
         };
         TimedMidiEvent::new(at, Message::midi2(MidiChannel::FIRST, voice)).unwrap()
     };
-    let (clip, _) = s.graph().add(MidiClipNode::new([
+    let clip = s.graph().add(MidiClipNode::new([
         note(true, Beat::new(1.0)),
         note(false, Beat::new(2.0)),
     ]));

@@ -27,7 +27,7 @@ fn refused(result: Result<(), ValueError<&'static str>>) -> OutputPolicyError {
 const RATE: SampleRate = SampleRate::SR_48K;
 
 fn feed(session: &mut Session, values: &[f32]) {
-    let (node, _) = session.graph().add(ForkByClone(Const::frame(values)));
+    let node = session.graph().add(ForkByClone(Const::frame(values)));
     for c in 0..values.len() {
         session
             .graph()

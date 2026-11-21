@@ -253,8 +253,8 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
             ),
             ..Default::default()
         });
-        let (synth, _) = s.graph().add(synth);
-        let (hold, _) = s.graph().add(Unforkable(Hold {
+        let synth = s.graph().add(synth);
+        let hold = s.graph().add(Unforkable(Hold {
             base: 36 + i as u8,
             notes: NOTES,
             sent: 0,
@@ -303,7 +303,7 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
                 },
             );
         }
-        let (pool, _) = s.graph().add(pool);
+        let pool = s.graph().add(pool);
         strips.push(pool.erase());
     }
 
@@ -313,14 +313,14 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
     let tracks: Vec<_> = strips
         .into_iter()
         .map(|src| {
-            let (strip, _) = s
+            let strip = s
                 .graph()
                 .add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
             connect_stereo(&mut s, strip, 0, src);
             if reverb {
                 let send = BusStripNode::from(BusStripConfig::new(BusTopology::STEREO));
                 send.volume().store(Db::new(-12.0).to_amplitude());
-                let (send, _) = s.graph().add(send);
+                let send = s.graph().add(send);
                 connect_stereo(&mut s, send, 0, src);
                 sends.push(send);
             }
@@ -331,7 +331,7 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
     let mut sums = tracks;
     if reverb {
         let (l, r) = (ir(1), ir(2));
-        let (conv, _) = s.graph().add(
+        let conv = s.graph().add(
             ConvolverNode::try_from(
                 ConvolverConfig::new(BusTopology::STEREO, &[Mono::new(&l), Mono::new(&r)])
                     .block_size(Samples::new(PARTITION)),
@@ -341,20 +341,20 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
         for send in &sends {
             add_stereo(&mut s, conv, *send);
         }
-        let (ret, _) = s
+        let ret = s
             .graph()
             .add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
         connect_stereo(&mut s, ret, 0, conv);
         sums.push(ret);
     }
 
-    let (master, _) = s
+    let master = s
         .graph()
         .add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
     for strip in &sums {
         add_stereo(&mut s, master, *strip);
     }
-    let (limiter, _) = s.graph().add(LimiterNode::<f32>::from(
+    let limiter = s.graph().add(LimiterNode::<f32>::from(
         LimiterConfig::new(BusTopology::STEREO).controls(LimiterControls {
             threshold: Db::new(-1.0),
             ceiling: Db::new(0.0),

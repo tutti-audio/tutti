@@ -27,7 +27,7 @@ fn bounced(
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::SR_48K)
         .expect("a detached session builds");
-    let (dc, _) = session
+    let dc = session
         .graph()
         .add(ForkByClone(Const::new(LEVEL, ChannelLayout::STEREO)));
     session.graph().connect(dc, Root).unwrap().unfaded();

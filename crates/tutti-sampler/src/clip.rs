@@ -22,7 +22,7 @@ use crate::{
 /// [`VoiceWindow`]:
 ///
 /// ```ignore
-/// let (kick, _) = session.graph().add(
+/// let kick = session.graph().add(
 ///     Clip::new(wave)?.at(Beat::new(4.0)).gain(Amplitude::new(0.8)),
 /// );
 /// ```

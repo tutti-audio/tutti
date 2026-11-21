@@ -3240,7 +3240,7 @@ mod tests {
             Default::default(),
             Default::default(),
         );
-        let (node, _) =
+        let node =
             session
                 .graph()
                 .add(tutti_graph::ForkByClone(tutti_nodes::testing::Const::mono(

@@ -42,10 +42,10 @@ struct Rig {
 fn rig() -> Rig {
     let mut s = offline();
     let g = s.graph();
-    let (a, _) = g.add(ForkByClone(Const::mono(A)));
-    let (b, _) = g.add(ForkByClone(Const::mono(B)));
-    let (c, _) = g.add(ForkByClone(Const::mono(C)));
-    let (sink, _) = g.add(ForkByClone(Through::mono()));
+    let a = g.add(ForkByClone(Const::mono(A)));
+    let b = g.add(ForkByClone(Const::mono(B)));
+    let c = g.add(ForkByClone(Const::mono(C)));
+    let sink = g.add(ForkByClone(Through::mono()));
     g.set_sources_unfaded(Root::output(0), [OutPort::new(sink, 0)])
         .unwrap();
     let _ = s.update();

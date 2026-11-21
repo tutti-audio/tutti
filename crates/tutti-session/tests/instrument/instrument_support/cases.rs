@@ -210,12 +210,12 @@ const OFF: usize = 6_011;
 /// itself an effect is refused in `tests/plugin/plugin.rs`: it needs a plugin.)
 pub fn only_an_instrument_is_one<S: Subject>() {
     let mut rig = S::rig();
-    let (dc, _) =
-        rig.session
-            .graph()
-            .add(tutti_graph::ForkByClone(tutti_nodes::testing::Const::mono(
-                0.5,
-            )));
+    let dc = rig
+        .session
+        .graph()
+        .add(tutti_graph::ForkByClone(tutti_nodes::testing::Const::mono(
+            0.5,
+        )));
     let err = rig
         .session
         .instrument(dc)

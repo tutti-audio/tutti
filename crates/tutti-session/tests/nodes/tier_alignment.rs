@@ -82,8 +82,8 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
         .expect("builds");
 
     // The latent path, on output 2.
-    let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
-    let (eff, _) = s.graph().add(LimiterNode::<f32>::from(
+    let src = s.graph().add(ForkByClone(Const::mono(1.0)));
+    let eff = s.graph().add(LimiterNode::<f32>::from(
         LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
             threshold: Db::new(-1.0),
             ceiling: Db::new(-0.3),
@@ -110,7 +110,7 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
                 .expect("the file reads");
             let (stream, reader) = s.apply(opened).expect("the session serves it");
             let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(1.0)));
-            (s.graph().add(voice).0.erase(), Some(stream))
+            (s.graph().add(voice).erase(), Some(stream))
         }
         Tier::Memory => {
             let mut wave = tutti_buffers::Wave::new(2, tutti_nodes::SampleRate::of(RATE));
@@ -121,7 +121,7 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
             let source =
                 MemorySource::placed(std::sync::Arc::new(wave), VoiceWindow::from(Beat::new(1.0)))
                     .expect("a placeable wave");
-            (s.graph().add(source).0.erase(), None)
+            (s.graph().add(source).erase(), None)
         }
     };
     s.graph()

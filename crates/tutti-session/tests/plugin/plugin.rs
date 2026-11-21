@@ -248,7 +248,7 @@ fn a_dropped_export_job_restores_realtime_on_the_next_update() {
 #[test]
 fn a_plugin_added_mid_export_is_told_offline() {
     let mut s = session(&[]);
-    let (dc, _) = s
+    let dc = s
         .graph()
         .add(ForkByClone(tutti_nodes::testing::Const::mono(0.0)));
     s.graph().connect(dc, Root).unwrap();
@@ -394,7 +394,7 @@ impl tutti_graph::Node for DropWitness {
 fn export_leftovers_drop_on_the_main_thread() {
     let mut s = session(&[]);
     let drops: Arc<Mutex<Vec<std::thread::ThreadId>>> = Arc::default();
-    let (witness, _) = s.graph().add(ForkByClone(DropWitness(Arc::clone(&drops))));
+    let witness = s.graph().add(ForkByClone(DropWitness(Arc::clone(&drops))));
     let probe = add_probe(&mut s);
     s.graph()
         .set_sources(
@@ -1311,7 +1311,7 @@ fn a_replacement_with_other_ports_is_refused_and_the_graph_stays_editable() {
         drive.events
     );
     // An edit made now commits.
-    let (extra, _) = s.graph().add(ForkByClone(DropWitness(Arc::default())));
+    let extra = s.graph().add(ForkByClone(DropWitness(Arc::default())));
     assert!(s.graph_ref().is_edited());
     // The commit alone, on the drive's clock: `update()` would run
     // `Phase::Plugins` on the real one, where a server launch (hundreds of ms on
@@ -1652,7 +1652,7 @@ fn a_cancelled_export_frees_the_token_and_the_forked_server() {
     let probe = add_probe(&mut s);
     let blocks = Arc::new(AtomicUsize::new(0));
     let handle = Arc::new(std::sync::OnceLock::new());
-    let (cancel, _) = s.graph().add(ForkByClone(CancelOnSecondBlock {
+    let cancel = s.graph().add(ForkByClone(CancelOnSecondBlock {
         blocks: Arc::clone(&blocks),
         handle: Arc::clone(&handle),
     }));

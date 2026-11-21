@@ -462,7 +462,7 @@ fn a_granted_request_moves_the_sessions_output_to_the_protocol_asked() {
         })]
     );
 
-    let (clip, _) = s.graph().add(MidiClipNode::new(note(
+    let clip = s.graph().add(MidiClipNode::new(note(
         60,
         MF,
         Beat::new(0.0),

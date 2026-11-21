@@ -53,7 +53,7 @@ fn peaks(blocks: &PeakBlocks) -> Vec<f64> {
 #[test]
 fn a_sine_of_half_amplitude_yields_a_peak_of_half_per_item() {
     let mut s = offline();
-    let (osc, _) = s.graph().add(ForkByClone(
+    let osc = s.graph().add(ForkByClone(
         Osc::sine(Hz::new(1000.0)).with_amplitude(Amplitude::new(0.5)),
     ));
     let mut analyzer = s
@@ -81,7 +81,7 @@ fn a_sine_of_half_amplitude_yields_a_peak_of_half_per_item() {
 #[test]
 fn live_and_offline_finish_at_the_constants_peak() {
     let mut s = offline();
-    let (src, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
+    let src = s.graph().add(ForkByClone(Const::mono(0.25)));
     let analyzer: Analyzer<_> = s
         .graph()
         .taps()
@@ -104,7 +104,7 @@ fn live_and_offline_finish_at_the_constants_peak() {
 #[test]
 fn a_source_missing_at_open_is_missing_source() {
     let mut s = offline();
-    let (src, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
+    let src = s.graph().add(ForkByClone(Const::mono(0.25)));
     s.remove(src).unwrap();
     let refused = s
         .graph()
@@ -122,7 +122,7 @@ fn a_source_missing_at_open_is_missing_source() {
 #[test]
 fn a_config_the_context_refuses_opens_no_tap() {
     let mut s = offline();
-    let (src, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
+    let src = s.graph().add(ForkByClone(Const::mono(0.25)));
     let refused = s
         .graph()
         .taps()
@@ -149,7 +149,7 @@ fn a_config_the_context_refuses_opens_no_tap() {
 #[test]
 fn a_view_the_tap_width_cannot_make_opens_no_tap() {
     let mut s = offline();
-    let (src, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
+    let src = s.graph().add(ForkByClone(Const::mono(0.25)));
     let scope = VectorscopeConfig::new(NonZeroUsize::MIN);
     let refused = s
         .graph()
@@ -180,9 +180,9 @@ fn a_view_the_tap_width_cannot_make_opens_no_tap() {
 #[test]
 fn a_nan_block_is_counted_refused_and_the_next_blocks_items_arrive() {
     let mut s = offline();
-    let (nan, _) = s.graph().add(ForkByClone(Const::mono(f32::NAN)));
-    let (finite, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
-    let (through, _) = s.graph().add(ForkByClone(Through::mono()));
+    let nan = s.graph().add(ForkByClone(Const::mono(f32::NAN)));
+    let finite = s.graph().add(ForkByClone(Const::mono(0.25)));
+    let through = s.graph().add(ForkByClone(Through::mono()));
     s.graph().connect(nan, through).unwrap().unfaded();
     let loudness = WindowedLoudnessConfig::new(ChannelTopology::default_for(ChannelLayout::MONO));
     let mut analyzer = s
@@ -218,7 +218,7 @@ fn a_nan_block_is_counted_refused_and_the_next_blocks_items_arrive() {
 #[test]
 fn lost_counts_the_frames_rendered_past_the_capacity() {
     let mut s = offline();
-    let (src, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
+    let src = s.graph().add(ForkByClone(Const::mono(0.25)));
     let mut analyzer = s
         .graph()
         .taps()
@@ -239,7 +239,7 @@ fn lost_counts_the_frames_rendered_past_the_capacity() {
 #[test]
 fn the_analyzer_ends_after_its_source_is_removed() {
     let mut s = offline();
-    let (src, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
+    let src = s.graph().add(ForkByClone(Const::mono(0.25)));
     let mut analyzer = s
         .graph()
         .taps()

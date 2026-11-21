@@ -7,7 +7,7 @@ use tutti_graph::{
     Cx, ForkByClone, Instrument, IntoNode, Io, Node, NodeParts, Prepare, Shape, Status,
 };
 use tutti_session::SessionNode;
-use tutti_session::{AddedInstrument, Losses, Root};
+use tutti_session::{Losses, Root};
 
 /// Output `c` is the constant `c + 1`, whatever it is played.
 #[derive(Clone)]
@@ -49,7 +49,7 @@ impl SessionNode for Dressed {
 #[test]
 fn the_pair_a_node_names_is_the_one_played() {
     let mut session = crate::instrument_support::rig::offline_session();
-    let AddedInstrument { handle, .. } = session
+    let handle = session
         .add_instrument(Dressed(ForkByClone(Five)))
         .expect("five outputs and an event input");
     let mut rig = Rig::played(session, handle);
@@ -64,7 +64,7 @@ fn the_pair_a_node_names_is_the_one_played() {
 #[test]
 fn only_add_instrument_wires_the_strip_to_the_master() {
     let mut session = crate::instrument_support::rig::offline_session();
-    let AddedInstrument { handle, .. } = session
+    let handle = session
         .add_instrument_unwired(Dressed(ForkByClone(Five)))
         .expect("an instrument");
     let strip = handle.out();
@@ -115,7 +115,7 @@ fn a_pair_past_the_outputs_is_refused() {
 fn the_handle_counts_what_its_queue_dropped() {
     use tutti_units::Frame;
     let mut session = crate::instrument_support::rig::offline_session();
-    let AddedInstrument { handle, .. } = session
+    let handle = session
         .add_instrument(Dressed(ForkByClone(Five)))
         .expect("an instrument");
     let mut rig = Rig::played(session, handle);
@@ -147,7 +147,7 @@ fn the_handle_counts_what_its_queue_dropped() {
 fn a_wide_root_is_fed_from_the_main_pair_not_the_sends() {
     use tutti_session::OutPort;
     let mut session = crate::instrument_support::rig::offline_session();
-    let AddedInstrument { handle, .. } = session
+    let handle = session
         .add_instrument_unwired(Dressed(ForkByClone(Five)))
         .expect("an instrument");
     session.graph().widen_outputs(5).expect("a wider root");

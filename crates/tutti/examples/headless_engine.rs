@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .device(tutti::session::DeviceSelector::Default)
         .build()?;
     let tone = Osc::sine(Hz::new(440.0)).with_amplitude(Amplitude::new(0.2));
-    let (tone, _) = live.graph().add(ForkByClone(tone));
+    let tone = live.graph().add(ForkByClone(tone));
     live.graph().connect(tone, Root).unwrap();
     report(live.update());
     live.play()?;

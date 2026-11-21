@@ -34,7 +34,7 @@
 //! thread), stamped with a [`Stamp`](tutti_graph::Stamp), and a gain is a store into the strip's
 //! volume cell. Neither takes `&mut` of anything in the graph.
 
-use tutti_buffers::{BusTopology, Float};
+use tutti_buffers::BusTopology;
 use tutti_graph::NodeKey;
 use tutti_graph::{EventInletNode, Instrument};
 use tutti_midi_runtime::{LIVE_INLET_CAPACITY, MidiKeys};
@@ -190,27 +190,6 @@ impl<N: ?Sized> InstrumentHandle<N> {
     }
 }
 
-/// What [`Session::add_instrument`] hands back: the instrument's handle and
-/// the controls its node was added with.
-pub struct AddedInstrument<I: Instrument<F> + SessionNode<F>, F: Float> {
-    /// The instrument, playable, and wired to the master.
-    pub handle: InstrumentHandle<I>,
-    /// The node's controls (`SessionNode::Controls`).
-    pub controls: I::Controls,
-}
-
-impl<I: Instrument<F> + SessionNode<F>, F: Float> std::fmt::Debug for AddedInstrument<I, F>
-where
-    I::Controls: std::fmt::Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AddedInstrument")
-            .field("handle", &self.handle)
-            .field("controls", &self.controls)
-            .finish()
-    }
-}
-
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Adds `instrument` to the graph, makes it playable and wires its strip
     /// to the master, so a note sent through its keys is heard. It holds no MPE
@@ -231,11 +210,11 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     pub fn add_instrument<I: Instrument<C::Float> + SessionNode<C::Float>>(
         &mut self,
         instrument: I,
-    ) -> Result<AddedInstrument<I, C::Float>, crate::Error> {
+    ) -> Result<InstrumentHandle<I>, crate::Error> {
         let added = self.add_instrument_unwired(instrument)?;
-        if let Err(e) = self.graph().connect(added.handle.out(), Root) {
-            let node = added.handle.node().erase();
-            let handle = self.remove_instrument(added.handle);
+        if let Err(e) = self.graph().connect(added.out(), Root) {
+            let node = added.node().erase();
+            let handle = self.remove_instrument(added);
             let removed = self.remove(node);
             // Both were made a moment ago, so they are there.
             debug_assert!(handle.is_ok() && removed.is_ok());
@@ -258,11 +237,11 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     pub fn add_instrument_unwired<I: Instrument<C::Float> + SessionNode<C::Float>>(
         &mut self,
         instrument: I,
-    ) -> Result<AddedInstrument<I, C::Float>, crate::Error> {
+    ) -> Result<InstrumentHandle<I>, crate::Error> {
         let main = instrument.main_outputs();
-        let (node, controls) = self.graph().add(instrument);
+        let node = self.graph().add(instrument);
         match self.instrument_at(node, main) {
-            Ok(handle) => Ok(AddedInstrument { handle, controls }),
+            Ok(handle) => Ok(handle),
             Err(e) => {
                 let removed = self.remove(node);
                 // Added a moment ago, so it is there.
@@ -349,7 +328,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         let graph = self.graph();
         let (queue, keys) = open_keys(graph);
         graph.set_feed(node, Feeder::Instrument, vec![queue.events_out()]);
-        let (strip, _) = graph.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
+        let strip = graph.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
         graph.connect(OutPort::new(node, usize::from(main[0])), strip.input(0))?;
         graph.connect(OutPort::new(node, usize::from(main[1])), strip.input(1))?;
         Ok(InstrumentHandle {

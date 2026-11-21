@@ -139,7 +139,7 @@ fn clip_of(path: &Path, streamed: bool) -> (Session, tutti_sampler::Clip<f32>) {
 /// waiting first for a streamed clip's ring to prime.
 fn play(clip: tutti_sampler::Clip<f32>, frames: usize) -> Vec<f32> {
     let mut s = session();
-    let (key, _) = s.graph().add(clip);
+    let key = s.graph().add(clip);
     s.graph()
         .set_sources(Root::output(0), [OutPort::new(key, 0)])
         .expect("the clip's channel into the root's");

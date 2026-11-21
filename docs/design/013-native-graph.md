@@ -10522,8 +10522,8 @@ and `Graph::chain` over node keys, shaped as the first piece of it).
 plumbing and the failure rule are "Built (lane 2b)", below). What is there:
 
 - `Key<N>` (`Copy`, a `NodeKey` with `PhantomData<fn() -> N>`, `Key::erase`,
-  `From<Key<N>> for NodeKey`); `Graph::add` returns `(Key<N>,
-  N::Controls)`, and every `Graph` and `Session` method that takes a node takes
+  `From<Key<N>> for NodeKey`); `Graph::add` returns the
+  `Key<N>`, and every `Graph` and `Session` method that takes a node takes
   `impl Into<NodeKey>`.
 - `OutPort` and `InPort` are the session's own values (a node's port or a global
   channel; the index is a `usize` inside them, a count and not a unit), made by

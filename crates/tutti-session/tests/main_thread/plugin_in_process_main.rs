@@ -342,8 +342,8 @@ fn rebound(layout: u32) -> Rebound {
         )
         .unwrap();
     let g = s.graph();
-    let (a, _) = g.add(ForkByClone(Const::mono(0.25)));
-    let (b, _) = g.add(ForkByClone(Const::mono(0.5)));
+    let a = g.add(ForkByClone(Const::mono(0.25)));
+    let b = g.add(ForkByClone(Const::mono(0.5)));
     for (from, to) in [
         (tutti_session::OutPort::new(a, 0), node.input(0)),
         (tutti_session::OutPort::new(b, 0), node.input(1)),
