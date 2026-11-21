@@ -107,13 +107,12 @@ missing_panics_doc = "warn"
 
 [workspace.dependencies]
 thiserror = { version = "2", default-features = false }
-# `oneshot`: the reply of a plugin load running on the session executor.
+# `oneshot`: a reply filled off the caller (a plugin load, a device stream's stop).
 futures-channel = { version = "0.3.34", default-features = false, features = ["alloc"] }
 # `tutti-platform`'s `Executor`: the run queue, and the `Task` a spawn returns.
 async-executor = "1.14.1"
 async-task = "4.7.1"
 tracing = "0.1.44"
-futures-channel = { version = "0.3.34", default-features = false, features = ["alloc"] }
 tracing-subscriber = "0.3.23"
 libloading = "0.9"
 # The features both Windows FFI crates need; each adds its own.
