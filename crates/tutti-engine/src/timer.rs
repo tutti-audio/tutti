@@ -60,7 +60,8 @@ pub const DEFAULT_BLOCK: MaxBlock = MaxBlock::of(Samples::new(256));
 /// Pass it to [`OutputStream::start_with`](crate::OutputStream::start_with) or
 /// [`StreamHost::start_with`](crate::StreamHost::start_with); dropping the
 /// stream (or [`stop`](crate::OutputStream::stop)) waits for the loop to end, so
-/// no block renders after the stop returns.
+/// no block renders after the stop returns. Drop the stream before the executor:
+/// the loop ends only on the stream's stop.
 #[derive(Debug, Clone)]
 pub struct TimerDriver {
     executor: Executor,
