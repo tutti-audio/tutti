@@ -334,8 +334,12 @@ pub enum Reply {
     Refused(PluginError),
     /// `CallDeactivate`: the halves are rejoined.
     Deactivated,
-    /// `Rebuild`: the instance is rebuilt and loaded.
-    Rebuilt,
+    /// `Rebuild`: the instance is rebuilt and loaded, and `restored` says
+    /// whether it took the state the old one was saved with.
+    Rebuilt {
+        /// `Err` when the rebuilt instance is at its defaults.
+        restored: Result<(), PluginError>,
+    },
     /// `ReadLatency`: the figure.
     Latency(Samples),
     /// `ReadTail`: the figure.
@@ -374,6 +378,12 @@ pub enum Notice {
     ParamTitlesChanged,
     /// The instance was rebuilt.
     Reloaded,
+    /// The rebuilt instance did not take the state the old one was saved with:
+    /// it is at its defaults. Follows [`Reloaded`](Self::Reloaded).
+    StateNotRestored {
+        /// Why.
+        reason: PluginError,
+    },
     /// The plugin asked the host's transport to do something.
     Transport(TransportRequest),
     /// The plugin refused to run at `rate`; it renders nothing until an
@@ -1098,9 +1108,12 @@ impl State {
                 emit(out, Effect::Notify(Notice::Stuck { reason }));
                 emit(out, Effect::Lend);
             }
-            Reply::Rebuilt if wait == Wait::Rebuild => {
+            Reply::Rebuilt { restored } if wait == Wait::Rebuild => {
                 self.rebuild_pending = false;
                 emit(out, Effect::Notify(Notice::Reloaded));
+                if let Err(reason) = restored {
+                    emit(out, Effect::Notify(Notice::StateNotRestored { reason }));
+                }
                 self.advance(out);
             }
             Reply::Returned if wait == Wait::Recall => self.advance(out),

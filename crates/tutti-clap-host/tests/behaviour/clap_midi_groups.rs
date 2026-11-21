@@ -7,7 +7,7 @@
 use clap_sys::events::{
     CLAP_NOTE_EXPRESSION_BRIGHTNESS, CLAP_NOTE_EXPRESSION_PRESSURE, CLAP_NOTE_EXPRESSION_TUNING,
 };
-use tutti_clap_host::{ClapEvent, EventList, InputEventList, InputRooms};
+use tutti_clap_host::{ClapEvent, EventList, InputEventList, InputRooms, TooManyNotePorts};
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_midi_protocol::PitchBendSensitivity;
@@ -109,7 +109,7 @@ fn note_on_pitched(group: MidiGroup, channel: MidiChannel, key: u8, pitch: f64) 
 #[test]
 fn two_groups_land_on_note_ports_zero_and_one() {
     let mut list = InputEventList::new(InputRooms::new(1024));
-    list.set_note_ports(&[false, false]);
+    list.set_note_ports(&[false, false]).unwrap();
     add(
         &mut list,
         midi::note_on(Address::new(group(0), ch(0)), 60, 0x8000),
@@ -137,6 +137,26 @@ fn two_groups_land_on_note_ports_zero_and_one() {
     assert_eq!(list.groups_dropped(), 0);
 }
 
+/// **More note ports than the 16 Groups that name them are refused, not
+/// truncated** (M2-104 section 2.1.2): a 17-port list errors with its length
+/// and changes nothing, so Group 1 still reaches the port the 2-port list gave
+/// it; a 16-port list is accepted.
+#[test]
+fn a_list_of_more_than_sixteen_note_ports_is_refused_and_changes_nothing() {
+    let mut list = InputEventList::new(InputRooms::new(1024));
+    list.set_note_ports(&[false, false]).unwrap();
+    assert_eq!(list.set_note_ports(&[false; 17]), Err(TooManyNotePorts(17)));
+    add(
+        &mut list,
+        midi::note_on(Address::new(group(1), ch(0)), 60, 0x8000),
+    );
+    let events = drain(&mut list);
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(note_on(&events[0]).0, 1);
+    assert_eq!(list.groups_dropped(), 0);
+    assert_eq!(list.set_note_ports(&[false; 16]), Ok(()));
+}
+
 /// **A Group the plugin has no note port for is dropped and counted**, whole
 /// (a note, a controller), and not heard on Group 0's channels. A message that
 /// names no Group's channels (System Real Time) still goes to port 0 and is
@@ -144,7 +164,7 @@ fn two_groups_land_on_note_ports_zero_and_one() {
 #[test]
 fn a_group_without_a_note_port_is_dropped_and_counted() {
     let mut list = InputEventList::new(InputRooms::new(1024));
-    list.set_note_ports(&[false]);
+    list.set_note_ports(&[false]).unwrap();
     add(
         &mut list,
         midi::note_on(Address::new(group(0), ch(0)), 60, 0x8000),
@@ -447,7 +467,7 @@ fn a_pitch_then_a_bend_is_one_tuning_from_the_key() {
 #[test]
 fn the_sensitivity_is_per_group() {
     let mut list = InputEventList::new(InputRooms::new(1024));
-    list.set_note_ports(&[false, false]);
+    list.set_note_ports(&[false, false]).unwrap();
     add(
         &mut list,
         midi::registered(
@@ -564,7 +584,7 @@ fn rpn(group: MidiGroup, channel: MidiChannel, index: u8, value: u32) -> Ump {
 #[test]
 fn an_rpn_is_four_control_changes_every_time() {
     let mut list = InputEventList::new(InputRooms::new(1024));
-    list.set_note_ports(&[false, false]);
+    list.set_note_ports(&[false, false]).unwrap();
 
     add(&mut list, rpn(group(0), ch(1), 0, 12 << 25));
     let bytes: Vec<_> = drain(&mut list).iter().map(midi_bytes).collect();
@@ -686,7 +706,7 @@ fn a_minted_id_names_no_channel_and_key() {
 #[test]
 fn each_note_port_takes_its_own_dialect() {
     let mut list = InputEventList::new(InputRooms::new(1024));
-    list.set_note_ports(&[false, true]);
+    list.set_note_ports(&[false, true]).unwrap();
     add(
         &mut list,
         midi::note_on(Address::new(group(0), ch(0)), 60, 0x8000),

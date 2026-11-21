@@ -617,6 +617,12 @@ pub enum PluginChange {
     /// answers the recall once per block, so the change completes while the
     /// bypass lasts.
     IoChanged,
+    /// The plugin was rebuilt in place and did not take the state it was saved
+    /// with: it is at its defaults.
+    StateNotRestored {
+        /// Why the state was not restored.
+        reason: String,
+    },
     /// The plugin was prepared off the main thread, where a render mode change
     /// cannot run: it keeps the mode it runs in, and the next prepare on the
     /// main thread applies it. Not a refusal by the plugin.
@@ -700,9 +706,10 @@ fn hear(handle: &PluginHandle) -> (Signals, Subscription) {
 
 /// What `notice` is as an event, if it is one: a latency the plugin reports
 /// is reported once, by the update that hands it to the graph; a rate refusal,
-/// a crash and a reload are the plugin's health, read as a status. A render
-/// mode a prepare off the main thread could not apply has no status to read:
-/// it is an event.
+/// a crash and a reload are the plugin's health, read as a status. A reload
+/// that left the plugin at its defaults is [`PluginChange::StateNotRestored`],
+/// and a render mode a prepare off the main thread could not apply has no
+/// status to read: both are events.
 fn change_of(notice: PluginSignal) -> Option<PluginChange> {
     Some(match notice {
         PluginSignal::Param(ParamEdit::Begin(id)) => PluginChange::GestureBegan { id },
@@ -720,6 +727,9 @@ fn change_of(notice: PluginSignal) -> Option<PluginChange> {
             PluginChange::TailChanged { tail }
         }
         PluginSignal::Invalidate(PluginInvalidation::Io) => PluginChange::IoChanged,
+        PluginSignal::Invalidate(PluginInvalidation::StateNotRestored { reason }) => {
+            PluginChange::StateNotRestored { reason }
+        }
         PluginSignal::Invalidate(PluginInvalidation::RenderModeNotApplied { mode }) => {
             PluginChange::RenderModeNotApplied { mode }
         }
