@@ -6,9 +6,8 @@ use crate::ServerWatch;
 use dpi::Size;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tutti_plugin_types::{PluginFailure, Timeouts};
+use tutti_plugin_types::{PluginFailure, RateRefusal, Timeouts};
 use tutti_rt::LockExt;
-use tutti_units::SampleRate;
 
 #[derive(Clone)]
 pub(super) struct Lifecycle {
@@ -30,7 +29,7 @@ pub(super) struct Lifecycle {
     /// The sample rate the plugin refused and why, while it is refused. Not a
     /// crash: the plugin stays loaded and is retried at every later rate
     /// change, which clears this when it takes one.
-    refusal: Arc<Mutex<Option<(SampleRate, String)>>>,
+    refusal: Arc<Mutex<Option<RateRefusal>>>,
     /// Whether `refusal` holds one: the audio thread's question, answered
     /// without the lock or the reason's clone. Stored after the
     /// slot, so a reader that sees it set finds the reason.
@@ -103,7 +102,7 @@ impl Lifecycle {
     }
 
     /// The refused rate (Hz) and the plugin's reason, while one stands.
-    pub(super) fn rate_refusal(&self) -> Option<(SampleRate, String)> {
+    pub(super) fn rate_refusal(&self) -> Option<RateRefusal> {
         self.refusal.lock_recover().clone()
     }
 
@@ -112,7 +111,7 @@ impl Lifecycle {
         self.refused.load(Ordering::Acquire)
     }
 
-    pub(super) fn set_rate_refusal(&self, refusal: Option<(SampleRate, String)>) {
+    pub(super) fn set_rate_refusal(&self, refusal: Option<RateRefusal>) {
         let refused = refusal.is_some();
         *self.refusal.lock_recover() = refusal;
         self.refused.store(refused, Ordering::Release);
@@ -222,7 +221,10 @@ mod tests {
     fn the_refused_flag_follows_the_refusal_without_allocating() {
         let life = Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default());
         assert!(!life.is_rate_refused());
-        life.set_rate_refusal(Some((SampleRate::SR_44K1, "no".into())));
+        life.set_rate_refusal(Some(RateRefusal::new(
+            tutti_units::SampleRate::SR_44K1,
+            tutti_plugin_types::RateRefusalCause::Unconfigured,
+        )));
         let refused = assert_no_alloc::assert_no_alloc(|| life.is_rate_refused());
         assert!(refused);
         life.set_rate_refusal(None);

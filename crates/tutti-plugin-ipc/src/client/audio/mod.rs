@@ -31,6 +31,7 @@ use crate::SlabHandle;
 use crate::SlabLayout;
 use dpi::Size;
 use tutti_platform::Executor;
+use tutti_plugin_types::RateRefusal;
 use tutti_plugin_types::{
     BlockStatus, ContentScale, Delivered, EditWriter, EditorError, IpcResult, PluginFailure,
     PresetError, StateError, StateUse, UnknownParam, edit_slots,
@@ -347,7 +348,7 @@ impl AudioBridge {
     /// The sample rate (Hz) the plugin refused and its reason, while it is
     /// refused: it is loaded, renders silence, and is retried at the next
     /// rate change. `None` once it takes a rate.
-    pub fn rate_refusal(&self) -> Option<(SampleRate, String)> {
+    pub fn rate_refusal(&self) -> Option<RateRefusal> {
         self.lifecycle.rate_refusal()
     }
 
