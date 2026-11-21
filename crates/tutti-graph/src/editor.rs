@@ -53,7 +53,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use tutti_units::At;
+use crate::SampleRates;
+use tutti_units::{At, SampleRate};
 
 use crate::EdgeId;
 use crate::Fade;
@@ -535,6 +536,20 @@ impl<F: Float> Editor<F> {
     /// The shapes the units declared.
     pub fn shapes(&self) -> &Shapes {
         &self.shapes
+    }
+
+    /// The first of `nodes`, in the order given, whose declared
+    /// [`rates`](crate::Shape::rates) leave out `rate`, with those rates:
+    /// the one check a re-rate and a fork make.
+    pub fn first_unsupported_rate(
+        &self,
+        nodes: impl IntoIterator<Item = NodeKey>,
+        rate: SampleRate,
+    ) -> Option<(NodeKey, SampleRates)> {
+        nodes.into_iter().find_map(|node| {
+            let supported = self.shapes.get(&node)?.rates();
+            (!supported.contains(rate)).then_some((node, supported))
+        })
     }
 
     /// Declares the bus edge `from -> to`: the output bus `from` feeds the input bus
