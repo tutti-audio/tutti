@@ -492,7 +492,6 @@ pub mod session {
         )
     ))]
     pub use tutti_session::LoadError;
-    pub use tutti_session::WorkerError;
     pub use tutti_session::{
         BackgroundWork, BlockConfig, Bus, BusSink, Channel, Committed, Connection, Crossfade,
         CrossfadeId, CrossfadeRefused, DeclarationError, Event, EventEdge, EventTapPort, Fanin,

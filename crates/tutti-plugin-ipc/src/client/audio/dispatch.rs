@@ -19,7 +19,7 @@ use crate::{
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 use tutti_platform::Instant;
-use tutti_plugin_types::{Deadline, MidiIntake};
+use tutti_plugin_types::MidiIntake;
 use tutti_plugin_types::{IpcError, IpcResult, PresetError, ResyncKind, SlabError, StateError};
 use tutti_plugin_types::{ParameterChanges, ParameterPoint, ParameterQueue};
 use tutti_units::SampleRate;
@@ -862,10 +862,12 @@ pub(super) fn handle_audio(
 /// control lane answers `applied` (the server answers that lane, not the audio
 /// one).
 ///
-/// The wait ends after a rate change's deadline and a query's, or when the
-/// bridge stops or crashes. A change the lane gives up on at the deadline is
-/// counted ([`Channels::note_unapplied`]) and logged, and the blocks go on: a
-/// lane that cannot answer in that time is the control lane's to report.
+/// The wait ends when the control lane answers, when the bridge stops or
+/// crashes (the lane's end drops the setting's reply, so the wait sees it
+/// disconnect at once), or at `settle_wait()`. A change the lane gives up on at
+/// the deadline is counted ([`Channels::note_unapplied`]) and logged, and the
+/// blocks go on: a lane that cannot answer in that time is the control lane's
+/// to report.
 pub(super) fn apply_setting(channels: &Channels, lifecycle: &Lifecycle, setting: Setting) {
     let what = match setting {
         Setting::SampleRate(_) => "a rate change",
@@ -873,25 +875,15 @@ pub(super) fn apply_setting(channels: &Channels, lifecycle: &Lifecycle, setting:
         Setting::Fence => "a settle",
     };
     let (applied, reply) = super::ask::ask::<()>();
-    let deadline = Deadline::after(Instant::now(), lifecycle.timeouts().settle_wait());
     channels.put_setting(setting, reply);
-    loop {
-        match applied.recv_timeout_borrowed(RATE_SLICE) {
-            Err(RecvTimeoutError::Timeout) => {
-                if !lifecycle.is_running() || lifecycle.is_crashed() {
-                    return;
-                }
-                if deadline.passed(Instant::now()) {
-                    channels.note_unapplied();
-                    tracing::warn!(
-                        "the plugin bridge gave up holding blocks for {what}: \
-                         the plugin did not apply it in time"
-                    );
-                    return;
-                }
-            }
-            Ok(()) | Err(RecvTimeoutError::Disconnected) => return,
-        }
+    if let Err(RecvTimeoutError::Timeout) =
+        applied.recv_timeout_borrowed(lifecycle.timeouts().settle_wait())
+    {
+        channels.note_unapplied();
+        tracing::warn!(
+            "the plugin bridge gave up holding blocks for {what}: \
+             the plugin did not apply it in time"
+        );
     }
 }
 

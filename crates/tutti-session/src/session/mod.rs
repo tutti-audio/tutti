@@ -25,9 +25,9 @@ use tutti_engine::{OutputSpec, StreamFaults};
 use tutti_graph::NodeKey;
 use tutti_units::{Amplitude, SampleRate};
 
+use crate::background::Background;
 use crate::clock::sealed::Streaming;
 use crate::graph::Graph;
-use crate::jobs::Jobs;
 use crate::value::{SlotCell, ValueState, ValueTable};
 use crate::{Clock, Offline, OutputPolicy, RealTime, RemoveError, SessionFloat};
 use parts::{
@@ -62,8 +62,10 @@ impl<T: Ord + Clone + Debug + Send + Sync + 'static> AppKey for T {}
 /// (`MainThreadMarker`): `Session::editor`, `Plugin::presets`.
 ///
 /// Dropping a session commits every take before it returns: it joins each
-/// take's writer. Never drop a session on a thread that drives an executor (inside
-/// a future on a `tutti_platform::Executor`): the join panics there.
+/// take's pump. On a thread that drives an executor (inside a future on a
+/// `tutti_platform::Executor`) a join would stop the tasks that thread runs, so the drop
+/// detaches the pumps instead and logs how many takes it left unfinished: their files
+/// are not committed by that drop.
 ///
 /// ```
 /// use tutti_buffers::MaxBlock;
@@ -123,9 +125,9 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     pub(crate) midi: MidiPart,
     /// What modulation applied, and the session's own declarations.
     pub(crate) mods: crate::modulation::ModSession,
-    /// The disk streamer and the streams the opens landed. Declared before `jobs`, so it
+    /// The disk streamer and the streams the opens landed. Declared before `background`, so it
     /// drops first: its drop rings the streamer's bell, and the ring only reaches the
-    /// streamer's task while the bells `jobs` owns still have their final pass to run.
+    /// streamer's task while the bells `background` owns still have their final pass to run.
     pub(crate) sampler: SamplerPart<C::Float>,
     /// The output-device listing.
     pub(crate) devices: DevicePart,
@@ -133,10 +135,10 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     pub(crate) inputs: Inputs<C::Float>,
     /// The bounce token and the leftovers' channel.
     pub(crate) bounce: BouncePart,
-    /// The blocking work running on the executor, landed in `Phase::Collect`, and the
-    /// bells the session's futures await. Declared after `sampler` and every other part
-    /// that rings a bell (fields drop in declaration order): the bells drop last.
-    pub(crate) jobs: Jobs,
+    /// The executor, its thread, the bells the session's futures await and the takes'
+    /// pumps. Declared after `sampler` and every other part that rings a bell (fields
+    /// drop in declaration order): the bells drop last.
+    pub(crate) background: Background,
     /// Plugin hosting. Last, so it drops after every plugin the session holds:
     /// a close handed over while the session drops is still collected.
     pub(crate) plugins: PluginPart,
@@ -234,8 +236,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// The same session on the clock `running` belongs to: every field moves,
     /// the clock's own state is swapped, and the old one is handed back.
     ///
-    /// Jobs in flight carry over: a job's lander is typed to nothing of the
-    /// clock, and lands on the converted session.
+    /// The background work carries over: a take's pump names nothing of the clock, and
+    /// reports to the converted session.
     #[cfg(feature = "device")]
     pub(crate) fn with_clock<N: Clock<Float = C::Float>>(
         self,
@@ -257,7 +259,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             devices,
             inputs,
             bounce,
-            jobs,
+            background,
             plugins,
         } = self;
         (
@@ -277,7 +279,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 devices,
                 inputs,
                 bounce,
-                jobs,
+                background,
                 plugins,
             },
             old_running,
