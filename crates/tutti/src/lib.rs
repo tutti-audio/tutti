@@ -185,10 +185,11 @@ pub use tutti_session::PluginParams;
 pub use tutti_session::windows_from_signal;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{
-    AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadPreset, LoadedPreset, Opened, Plugin,
-    PluginApplyError, PluginBuses, PluginChange, PluginDeclaration, PluginEvent, PluginHealth,
-    PluginInfo, PluginPresets, PooledPlugin, PortCounts, PresetStartError, RestoreState,
-    RestoredState, SaveState, StateStartError,
+    AddPluginError, AddPooledPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadPlugin,
+    LoadPreset, LoadedPlugin, LoadedPreset, Opened, Plugin, PluginApplyError, PluginBuses,
+    PluginChange, PluginDeclaration, PluginEvent, PluginHealth, PluginInfo, PluginNode,
+    PluginPresets, PooledPlugin, PortCounts, PresetStartError, RestoreState, RestoredState,
+    SaveState, StateStartError, SwapPluginError,
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{
@@ -544,9 +545,9 @@ pub mod session {
     };
     #[cfg(feature = "plugin")]
     pub use tutti_session::{
-        Editor, EditorCallError, GiveUp, HangPolicy, LoadedPlugin, ParamGesture, PluginCause,
-        PluginParam, PluginPorts, PoolPluginEntry, PortsRefusal, Recovery, RecoveryAction,
-        RecoveryEvent, RecoveryFailure, RecoveryPolicy, ReloadCause, StateRestore, StateView,
+        Editor, EditorCallError, GiveUp, HangPolicy, ParamGesture, PluginCause, PluginParam,
+        PluginPorts, PoolPluginEntry, PortsRefusal, Recovery, RecoveryAction, RecoveryEvent,
+        RecoveryFailure, RecoveryPolicy, ReloadCause, StateRestore, StateView,
     };
     #[cfg(feature = "soundfont")]
     pub use tutti_session::{GeneralMidi, LoadSoundFont, LoadedSoundFont};
