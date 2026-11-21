@@ -174,6 +174,8 @@ pub use tutti_codec::{Format, Pcm};
 #[cfg(feature = "session")]
 pub use tutti_graph::NodeKey;
 #[cfg(feature = "plugin")]
+pub use tutti_plugin::catalog::ResolvedHosting;
+#[cfg(feature = "plugin")]
 pub use tutti_plugin_db::{Catalog, Hosting};
 #[cfg(feature = "plugin")]
 pub use tutti_plugin_types::{PluginFailure, PluginRef, PresetError, PresetId, StateUse};
