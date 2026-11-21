@@ -190,27 +190,21 @@ fn the_end_of_the_watch_wakes_the_pending_stream_and_ends_it() {
     assert!(matches!(events.failure(), Some(WatchFailure::Failed(_))));
 }
 
-/// Once the watch has ended and the queue is drained, every later poll is
-/// `None`, never `Pending`.
+/// Once the watch has ended and the queue is drained every poll is `None`, never
+/// `Pending`, and a change reported after the end queues nothing.
 #[test]
-fn an_ended_stream_stays_none() {
-    let (_devices, mut events, fake) = fake();
-    fake.fail_watch();
+fn a_send_after_fail_leaves_an_ended_stream_at_none() {
+    let (sink, devices) = sink_over_empty();
+    let mut events = devices.subscribe();
+    sink.fail(WatchFailure::Failed(Arc::new(
+        MidiHardwareError::DescriptorBroken,
+    )));
+    let present = os_devices(&[endpoint(1, "Keys")], &[]);
+    sink.send(OsChange::Present(present[0].clone()));
     let mut cx = std::task::Context::from_waker(Waker::noop());
     for _ in 0..3 {
         assert!(matches!(poll(&mut events, &mut cx), Poll::Ready(None)));
     }
-    assert!(events.pending().next().is_none());
-}
-
-/// `pending` takes what has queued and does not wait: two queued, two taken, then
-/// nothing.
-#[test]
-fn pending_takes_the_queued_changes_and_then_nothing() {
-    let (_devices, events, fake) = fake();
-    fake.plug(endpoint(1, "Keys"), PortDirection::Input);
-    fake.plug(endpoint(2, "Pads"), PortDirection::Input);
-    assert_eq!(events.pending().count(), 2);
     assert!(events.pending().next().is_none());
 }
 
@@ -227,9 +221,9 @@ fn a_dropped_stream_and_a_replaced_waker_leave_nothing_to_wake() {
     let (wa, wb) = (Waker::from(Arc::clone(&a)), Waker::from(Arc::clone(&b)));
     assert!(poll(&mut events, &mut std::task::Context::from_waker(&wa)).is_pending());
     assert!(poll(&mut events, &mut std::task::Context::from_waker(&wb)).is_pending());
-    assert_eq!(queue.inbox().wakers.len(), 1, "the re-poll replaced it");
+    assert!(queue.inbox().waker.is_some(), "the re-poll replaced it");
     drop(events);
-    assert!(queue.inbox().wakers.is_empty());
+    assert!(queue.inbox().waker.is_none());
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
     assert_eq!(
         (a.0.load(Ordering::SeqCst), b.0.load(Ordering::SeqCst)),

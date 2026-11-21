@@ -96,26 +96,17 @@ struct Queue {
 struct Inbox {
     events: VecDeque<DeviceEvent>,
     ended: Option<WatchFailure>,
-    /// The futures waiting on this inbox, each woken by the next push or end,
-    /// under the id its [`DeviceEvents`] holds.
-    wakers: Vec<(u64, Waker)>,
-    next_id: u64,
+    /// The waker of the stream waiting on this inbox, woken by the next push
+    /// or end.
+    waker: Option<Waker>,
 }
 
 impl Inbox {
-    fn take_wakers(&mut self) -> Vec<Waker> {
-        std::mem::take(&mut self.wakers)
-            .into_iter()
-            .map(|(_, waker)| waker)
-            .collect()
-    }
-
-    /// Removes the waker registered under `id`; the caller drops it once it
-    /// holds no lock, since a waker's drop can run its executor's code.
-    #[must_use = "drop it after releasing the inbox lock"]
-    fn forget(&mut self, id: u64) -> Option<Waker> {
-        let at = self.wakers.iter().position(|(held, _)| *held == id)?;
-        Some(self.wakers.swap_remove(at).1)
+    /// The waker to wake; the caller wakes it, or drops it, once it holds no
+    /// lock, since a waker's wake and drop can run its executor's code.
+    #[must_use = "wake or drop it after releasing the inbox lock"]
+    fn take_waker(&mut self) -> Option<Waker> {
+        self.waker.take()
     }
 }
 
@@ -124,21 +115,21 @@ impl Queue {
         self.inbox.lock_recover()
     }
 
-    /// Queues `event`; the wakers it returns are woken by the caller once it
+    /// Queues `event`; the waker it returns is woken by the caller once it
     /// holds no lock.
-    #[must_use = "wake them after releasing every lock"]
-    fn push(&self, event: DeviceEvent) -> Vec<Waker> {
+    #[must_use = "wake it after releasing every lock"]
+    fn push(&self, event: DeviceEvent) -> Option<Waker> {
         let mut inbox = self.inbox();
         inbox.events.push_back(event);
-        inbox.take_wakers()
+        inbox.take_waker()
     }
 
-    /// Ends the stream; the wakers are woken as for [`push`](Self::push).
-    #[must_use = "wake them after releasing every lock"]
-    fn end(&self, failure: WatchFailure) -> Vec<Waker> {
+    /// Ends the stream; the waker is woken as for [`push`](Self::push).
+    #[must_use = "wake it after releasing every lock"]
+    fn end(&self, failure: WatchFailure) -> Option<Waker> {
         let mut inbox = self.inbox();
         inbox.ended.get_or_insert(failure);
-        inbox.take_wakers()
+        inbox.take_waker()
     }
 }
 
@@ -169,6 +160,10 @@ impl ChangeSink {
     pub fn send_all(&self, changes: impl IntoIterator<Item = OsChange>) {
         let mut state = self.shared.state();
         state.begun = true;
+        // The list is frozen once the watch has ended: nothing queues after the end.
+        if state.failure.is_some() {
+            return;
+        }
         let mut wakers = Vec::new();
         for change in changes {
             if let Some(event) = state.table.apply(change) {
@@ -359,7 +354,6 @@ impl Devices {
         DeviceEvents {
             initial: state.table.list().cloned().collect(),
             queue,
-            waker: None,
             _devices: self.clone(),
         }
     }
@@ -507,16 +501,13 @@ impl Devices {
 pub struct DeviceEvents {
     initial: Vec<DeviceInfo>,
     queue: Arc<Queue>,
-    /// The id of the waker this registered in the inbox, until it is woken or
-    /// resolved.
-    waker: Option<u64>,
     // Keeps the watch running while events can still be expected from it.
     _devices: Devices,
 }
 
 impl Drop for DeviceEvents {
     fn drop(&mut self) {
-        let old = self.waker.and_then(|id| self.queue.inbox().forget(id));
+        let old = self.queue.inbox().take_waker();
         drop(old);
         let mine = Arc::as_ptr(&self.queue);
         self._devices
@@ -559,8 +550,7 @@ impl DeviceEvents {
 ///
 /// The stream ends, with `None` and then `None` again, once the watch has ended
 /// and every change it reported has been taken; [`DeviceEvents::failure`] says
-/// why it ended. Several tasks polling one `DeviceEvents` are all woken and the
-/// first to poll takes the change; each change goes to one.
+/// why it ended.
 impl Stream for DeviceEvents {
     type Item = DeviceEvent;
 
@@ -573,25 +563,16 @@ impl Stream for DeviceEvents {
             None => None,
         };
         if let Some(item) = ready {
-            let old = this.waker.take().and_then(|id| inbox.forget(id));
+            let old = inbox.take_waker();
             drop(inbox);
             drop(old);
             return Poll::Ready(item);
         }
-        // A re-poll replaces this stream's own waker; a waker already taken by a
-        // wake is registered again under the same id.
-        let id = *this.waker.get_or_insert_with(|| {
-            inbox.next_id += 1;
-            inbox.next_id
-        });
-        // The replaced waker is dropped once the inbox lock is released.
-        let old = match inbox.wakers.iter_mut().find(|(held, _)| *held == id) {
-            Some((_, waker)) if waker.will_wake(cx.waker()) => None,
-            Some((_, waker)) => Some(std::mem::replace(waker, cx.waker().clone())),
-            None => {
-                inbox.wakers.push((id, cx.waker().clone()));
-                None
-            }
+        // A re-poll replaces the waker only when it would not wake the same task;
+        // the replaced one is dropped once the inbox lock is released.
+        let old = match &inbox.waker {
+            Some(waker) if waker.will_wake(cx.waker()) => None,
+            _ => inbox.waker.replace(cx.waker().clone()),
         };
         drop(inbox);
         drop(old);

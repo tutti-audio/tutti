@@ -315,7 +315,8 @@ pub enum HostEvent {
 ///
 /// A [`Stream`] of [`HostEvent`]s, fed by the mDNS daemon's thread, which wakes
 /// it when a Host appears, changes or goes. It ends, with `None` and then `None`
-/// again, when the daemon stops.
+/// again, when the daemon stops. An event taken by [`pending`](Self::pending) is
+/// not seen by the stream, and the reverse.
 pub struct Browser {
     daemon: ServiceDaemon,
     /// The same channel the stream reads, for [`pending`](Self::pending).
