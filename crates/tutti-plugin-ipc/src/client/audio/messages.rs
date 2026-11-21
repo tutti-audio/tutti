@@ -287,6 +287,18 @@ pub enum IpcEvent {
         /// Why the state was not restored.
         reason: String,
     },
+    /// The plugin did not take the render mode it was asked for: it runs in the
+    /// mode it had.
+    RenderModeNotApplied {
+        /// The mode that was asked for.
+        mode: tutti_plugin_types::RenderMode,
+    },
+    /// A restart the host asked for did not happen: the plugin would not stop
+    /// and runs as it was.
+    WouldNotStop {
+        /// Why the plugin would not stop.
+        reason: String,
+    },
     /// The plugin refused the rate it was asked to run at (`Some`: the rate in
     /// Hz and the plugin's reason), or took a rate after refusing one (`None`).
     RateRefusal(Option<RateRefusal>),
@@ -373,6 +385,12 @@ pub(super) struct Unsolicited {
     /// Why the last rebuild's state was not restored, until drained; a later
     /// one replaces it.
     state_not_restored: Option<String>,
+    /// The mode the plugin last did not take, until drained; a later one
+    /// replaces it.
+    render_mode_not_applied: Option<tutti_plugin_types::RenderMode>,
+    /// Why the plugin last would not stop, until drained; a later one replaces
+    /// it.
+    would_not_stop: Option<String>,
     io: bool,
     /// The buses the last `PluginIoChanged` carried, until drained.
     io_layout: Option<tutti_plugin_types::Layout>,
@@ -397,6 +415,8 @@ impl Unsolicited {
             lifecycle: None,
             reloaded: false,
             state_not_restored: None,
+            render_mode_not_applied: None,
+            would_not_stop: None,
             io: false,
             io_layout: None,
             param_titles: false,
@@ -496,6 +516,22 @@ impl Unsolicited {
         }
     }
 
+    /// A render mode the plugin did not take. One already held is replaced and
+    /// counted with the dropped events.
+    pub(super) fn render_mode_not_applied(&mut self, mode: tutti_plugin_types::RenderMode) {
+        if self.render_mode_not_applied.replace(mode).is_some() {
+            self.dropped += 1;
+        }
+    }
+
+    /// A restart the plugin would not make. One already held is replaced and
+    /// counted with the dropped events.
+    pub(super) fn would_not_stop(&mut self, reason: String) {
+        if self.would_not_stop.replace(reason).is_some() {
+            self.dropped += 1;
+        }
+    }
+
     /// A resync request; a second of the same kind adds nothing.
     pub(super) fn resync(&mut self, kind: ResyncKind) {
         *match kind {
@@ -540,10 +576,20 @@ impl Unsolicited {
             .state_not_restored
             .take()
             .map(|reason| IpcEvent::StateNotRestored { reason });
+        let mode_refused = self
+            .render_mode_not_applied
+            .take()
+            .map(|mode| IpcEvent::RenderModeNotApplied { mode });
+        let stuck = self
+            .would_not_stop
+            .take()
+            .map(|reason| IpcEvent::WouldNotStop { reason });
         layout
             .into_iter()
             .chain(structural.into_iter().flatten())
             .chain(unrestored)
+            .chain(mode_refused)
+            .chain(stuck)
             .chain(params)
             .chain(latency)
             .chain(tail)

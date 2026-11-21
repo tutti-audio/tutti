@@ -11,6 +11,14 @@ use tutti_plugin_types::{
     InProcess, Lifecycle, MainThreadMarker, OutOfProcess, ParamEdit, Request,
 };
 
+/// How many of the plugin's answers to one-way writes are refusals.
+pub(in crate::served) fn refusals<E>(answers: impl IntoIterator<Item = Result<(), E>>) -> u64 {
+    answers
+        .into_iter()
+        .map(|answer| u64::from(answer.is_err()))
+        .sum()
+}
+
 /// What the server does to a loaded plugin of format `Self`, beyond what the
 /// format's [`OutOfProcess::load_served`] and its `Control` give.
 pub(crate) trait ServerSide: OutOfProcess + InProcess {
@@ -55,11 +63,13 @@ pub(crate) trait ServerSide: OutOfProcess + InProcess {
     /// them: the server serves requests on the thread that renders, so without
     /// this a save right after a write would read the old value until the next
     /// block. The default retries what a full edit ring refused, which is all a
-    /// format that applies a write at once needs.
-    fn settle_edits(lifecycle: &mut Lifecycle<Self>, main: MainThreadMarker) {
+    /// format that applies a write at once needs. Returns how many of the writes
+    /// the plugin refused.
+    fn settle_edits(lifecycle: &mut Lifecycle<Self>, main: MainThreadMarker) -> u64 {
         if let Some(control) = lifecycle.control() {
             control.flush_edits(main);
         }
+        0
     }
 }
 
@@ -68,7 +78,7 @@ pub(in crate::served) mod clap {
     use tutti_clap_host::ClapLoaded;
     use tutti_plugin_types::{Control, Lifecycle, MainThreadMarker, Request, Seat};
 
-    use super::ServerSide;
+    use super::{ServerSide, refusals};
 
     /// The pool this process serves `clap.thread-pool` requests on, built the
     /// first time a plugin that implements the extension loads; `None` on a
@@ -170,7 +180,7 @@ pub(in crate::served) mod clap {
         /// to the queue. Only what was pending is flushed, at the moment it is
         /// asked for, so a value the plugin or its editor has since moved is not
         /// re-asserted by every write.
-        fn settle_edits(lifecycle: &mut Lifecycle<Self>, main: MainThreadMarker) {
+        fn settle_edits(lifecycle: &mut Lifecycle<Self>, main: MainThreadMarker) -> u64 {
             if let Some(control) = lifecycle.control() {
                 control.flush_edits(main);
             }
@@ -183,9 +193,11 @@ pub(in crate::served) mod clap {
                     processor.take_edits(&mut pending);
                     processor.is_processing()
                 }
-                _ => return,
+                _ => return 0,
             };
-            for (id, value) in pending {
+            // A write the plugin refuses is not written and is counted: the
+            // wire has no reply to carry the error.
+            refusals(pending.into_iter().filter_map(|(id, value)| {
                 let requires = match &*lifecycle {
                     Lifecycle::Active { controller, .. } => {
                         controller.loaded().param_requires_process(main, id)
@@ -193,15 +205,21 @@ pub(in crate::served) mod clap {
                     _ => false,
                 };
                 if flush_out_of_band(requires, processing) {
-                    if let Lifecycle::Active { controller, .. } = lifecycle {
-                        // A write the plugin refuses is refused here and not
-                        // written; the wire has no reply to carry the error.
-                        let _ = Control::set_parameter(controller.loaded_mut(), main, id, value);
+                    match lifecycle {
+                        Lifecycle::Active { controller, .. } => Some(Control::set_parameter(
+                            controller.loaded_mut(),
+                            main,
+                            id,
+                            value,
+                        )),
+                        _ => None,
                     }
-                } else if let Some(control) = lifecycle.control() {
-                    let _ = control.set_parameter(main, id, value);
+                } else {
+                    lifecycle
+                        .control()
+                        .map(|control| control.set_parameter(main, id, value))
                 }
-            }
+            }))
         }
     }
 }
@@ -227,5 +245,22 @@ impl ServerSide for tutti_vst3_host::Vst3Loaded {
             }
             Lifecycle::Poisoned => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::refusals;
+
+    /// **Each write the plugin answered with an error is counted, and no
+    /// other**: a flush of three writes of which two were refused is two.
+    #[test]
+    fn a_flush_counts_the_writes_the_plugin_refused() {
+        assert_eq!(
+            refusals([Ok(()), Err("read-only"), Ok(()), Err("unknown")]),
+            2
+        );
+        assert_eq!(refusals::<()>([Ok(()), Ok(())]), 0);
+        assert_eq!(refusals::<()>([]), 0);
     }
 }

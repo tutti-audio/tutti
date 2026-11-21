@@ -194,7 +194,8 @@ use crate::plugin_diagnostics::Figures;
 use crate::session::parts::Loop;
 use crate::{
     Diagnostics, GiveUp, HangDetector, Key, PeerState, PluginBuses, PluginParams, PortCounts,
-    Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, ReloadCause, Session, SessionEvent,
+    Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, ReloadCause, ReplaceRefused, Session,
+    SessionEvent,
 };
 pub(crate) use inbox::Inbox;
 use inbox::{Arrival, contained};
@@ -561,6 +562,19 @@ pub struct PluginEvent {
     pub change: PluginChange,
 }
 
+/// Whether the node of a plugin that ended renders silence in its place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Silence {
+    /// Not yet: the plugin is running, or the graph was re-preparing and is
+    /// asked again at the next phase.
+    Pending,
+    /// The graph took the silent stand-in.
+    Silenced,
+    /// The graph refused it ([`PluginChange::NodeNotSilenced`]) and is not asked
+    /// again.
+    Refused,
+}
+
 /// What changed in a hosted plugin ([`PluginEvent::change`]).
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -629,6 +643,15 @@ pub enum PluginChange {
     RenderModeNotApplied {
         /// The mode the prepare carried.
         mode: RenderMode,
+    },
+    /// The silent stand-in for a plugin that ended could not be put at its node:
+    /// the graph refused ([`ReplaceRefused`]: a poisoned graph, or a node that is
+    /// gone). The node stays as it was and is not asked again; the app removes
+    /// or replaces it. Reported once, after the plugin's
+    /// [`Died`](Self::Died) or [`GaveUp`](Self::GaveUp).
+    NodeNotSilenced {
+        /// Why the graph refused.
+        why: ReplaceRefused,
     },
     /// The plugin's new ports were not made a node, and the node stays as it
     /// is: they are wider than a block serves, or the graph refused the swap
@@ -884,6 +907,13 @@ pub(crate) struct HostedPlugin {
     /// What the nodes before the held one did not render, or the plugin did
     /// not take ([`Diagnostics::block_losses`]): banked with `banked`.
     banked_blocks: tutti_plugin_host::BlockLosses,
+    /// Round trips of the plugin's session tasks (a parameter read, a state
+    /// snapshot) that panicked: [`Diagnostics::panicked_round_trips`]. Added to
+    /// from the pool's threads.
+    pub(crate) panicked_round_trips: tutti_rt::Tally<u64>,
+    /// Periodic state snapshots the plugin failed:
+    /// [`Diagnostics::snapshots_failed`].
+    pub(crate) snapshots_failed: u64,
     liveness: Liveness,
     hang: HangDetector,
     status: PluginLiveness,
@@ -940,9 +970,9 @@ pub(crate) struct HostedPlugin {
     /// Held by that task: a later read mints a new one, and the earlier read
     /// lands nowhere.
     mirror_token: Arc<()>,
-    /// The node of a plugin that is gone renders silence in the plugin's
-    /// place ([`lost`]); until the graph takes the swap it is not.
-    pub(crate) silenced: bool,
+    /// Whether the node of a plugin that is gone renders silence in the plugin's
+    /// place ([`lost`]).
+    pub(crate) silence: Silence,
     /// The handle this plugin was loaded as, `None` for a plugin the host inserted
     /// itself. Dropped when the record retires.
     pub(crate) link: Option<NodeLink>,
@@ -1150,6 +1180,8 @@ impl HostedPlugin {
             node,
             banked: tutti_graph::Losses::NONE,
             banked_blocks: tutti_plugin_host::BlockLosses::default(),
+            panicked_round_trips: tutti_rt::tally(),
+            snapshots_failed: 0,
             liveness: Liveness::new(),
             hang: HangDetector::default(),
             status: PluginLiveness::Healthy,
@@ -1172,7 +1204,7 @@ impl HostedPlugin {
             param_read: Some(read),
             carried: None,
             mirror_token: Arc::new(()),
-            silenced: false,
+            silence: Silence::Pending,
             link: None,
             rebind: None,
         }
@@ -1377,7 +1409,7 @@ impl HostedPlugin {
         // The incoming plugin's bypass is its own: nothing of the outgoing one's
         // episode, waits or count carries over.
         self.bypass = crate::bypass::BypassSync::default();
-        self.silenced = false;
+        self.silence = Silence::Pending;
         self.snapshot_token = Arc::new(());
         self.snapshot_at = None;
         outgoing
@@ -1901,6 +1933,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             }
             Err(e) => {
                 tracing::warn!("plugin {node:?}: periodic state snapshot failed: {e}");
+                hosted.snapshots_failed += 1;
                 false
             }
         }
@@ -2267,14 +2300,14 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// key, silent in the plugin's place, and its handle reads lost
     /// ([`PluginCause`]) until a swap ([`Session::swap_plugin`]) brings a plugin to
     /// it; any other plugin's node goes.
-    fn end_node(&mut self, node: NodeKey) {
+    fn end_node(&mut self, node: NodeKey, out: &mut Vec<SessionEvent>) {
         if self
             .graph
             .plugins
             .get(&node)
             .is_some_and(|hosted| hosted.link.is_some())
         {
-            self.silence_node(node);
+            self.silence_node(node, out);
         } else {
             let _ = self.remove(node); // gone already is as good as removed
         }
@@ -2282,17 +2315,21 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
 
     /// Puts the silent stand-in at `node`, which releases the dead plugin on
     /// the control side. A graph that is re-preparing is asked again at the
-    /// next phase.
-    fn silence_node(&mut self, node: NodeKey) {
-        let done = match self.graph.silence_plugin(node) {
-            Ok(done) => done,
-            Err(refused) => {
-                tracing::warn!("plugin {node:?}: its node could not be silenced: {refused}");
-                true // nothing more to ask of a graph that refuses
+    /// next phase. A graph that refuses is not asked again: the refusal is
+    /// reported once ([`PluginChange::NodeNotSilenced`]) and the node is not
+    /// [`Silenced`](Silence::Silenced).
+    fn silence_node(&mut self, node: NodeKey, out: &mut Vec<SessionEvent>) {
+        let silence = match self.graph.silence_plugin(node) {
+            Ok(true) => Silence::Silenced,
+            Ok(false) => return,
+            Err(why) => {
+                tracing::warn!("plugin {node:?}: its node could not be silenced: {why}");
+                out.push(event(node, PluginChange::NodeNotSilenced { why }));
+                Silence::Refused
             }
         };
-        if done && let Some(hosted) = self.graph.plugins.get_mut(&node) {
-            hosted.silenced = true;
+        if let Some(hosted) = self.graph.plugins.get_mut(&node) {
+            hosted.silence = silence;
         }
     }
 
@@ -2308,7 +2345,6 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             if let Some(link) = self.graph.plugins.get(&node).and_then(|h| h.link.as_ref()) {
                 link.gave_up(why.clone());
             }
-            self.end_node(node);
             out.push(event(
                 node,
                 PluginChange::GaveUp {
@@ -2316,6 +2352,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                     state: state.map(Box::new),
                 },
             ));
+            self.end_node(node, out);
         }
     }
 
@@ -2454,7 +2491,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 continue;
             };
             if matches!(hosted.status, PluginLiveness::Dead { .. }) {
-                if hosted.link.is_some() && !hosted.silenced {
+                if hosted.link.is_some() && hosted.silence == Silence::Pending {
                     unsilenced.push(node);
                 }
                 continue;
@@ -2595,6 +2632,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                     hosted.handle.clone(),
                     Arc::clone(&hosted.snapshot_token),
                     hosted.timeouts(),
+                    hosted.panicked_round_trips.writer(),
                 )
             });
 
@@ -2603,9 +2641,10 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 let post = self.plugins.inbox.post();
                 // blocks: the parameter read is an IPC round trip, bounded by `param_wait`.
                 let timeouts = hosted.timeouts();
+                let panics = hosted.panicked_round_trips.writer();
                 let started =
                     self.plugins.spawn(Loop::ParamRead, &timeouts, move || {
-                        match contained("parameter read", node, move || read.run()) {
+                        match contained("parameter read", node, &panics, move || read.run()) {
                             Some(values) => post.params(node, token, values),
                             None => post.params_lost(node, token),
                         }
@@ -2638,13 +2677,13 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                     },
                 ));
             }
-            if let Some((handle, token, timeouts)) = snapshot {
+            if let Some((handle, token, timeouts, panics)) = snapshot {
                 let asked = now;
                 let post = self.plugins.inbox.post();
                 // blocks: the state save is an IPC round trip, bounded by `state_wait`.
                 // A refused task drops its token, which frees the plugin for the next ask.
                 let _ = self.plugins.spawn(Loop::Snapshot, &timeouts, move || {
-                    if let Some(state) = contained("state snapshot", node, move || {
+                    if let Some(state) = contained("state snapshot", node, &panics, move || {
                         handle.save_state(StateUse::Project)
                     }) {
                         post.snapshot(node, token, asked, state);
@@ -2653,11 +2692,11 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             }
         }
         for node in unsilenced {
-            self.silence_node(node);
+            self.silence_node(node, out);
         }
         for (node, cause) in dead {
-            self.end_node(node);
             out.push(event(node, PluginChange::Died { cause }));
+            self.end_node(node, out);
         }
         self.finish_gave_up(gave_up, out);
     }

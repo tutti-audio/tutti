@@ -1374,6 +1374,8 @@ fn file_news(inbox: &mut Unsolicited, news: News) {
         }
         News::PluginReloaded => inbox.resync(ResyncKind::Reloaded),
         News::PluginStateNotRestored { reason } => inbox.state_not_restored(reason),
+        News::RenderModeNotApplied { mode } => inbox.render_mode_not_applied(mode),
+        News::PluginWouldNotStop { reason } => inbox.would_not_stop(reason),
         News::ProcessRequested => inbox.process_requested(),
         News::TransportRequested { request } => inbox.transport(request),
         // The server's editor is the remote editor's to hear of: no event of

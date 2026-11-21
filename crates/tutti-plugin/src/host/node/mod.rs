@@ -382,6 +382,12 @@ impl PluginClient<Unbound> {
             IpcEvent::StateNotRestored { reason } => {
                 listener_invalidate_sink.fire(PluginInvalidation::StateNotRestored { reason });
             }
+            IpcEvent::RenderModeNotApplied { mode } => {
+                listener_invalidate_sink.fire(PluginInvalidation::RenderModeNotApplied { mode });
+            }
+            IpcEvent::WouldNotStop { reason } => {
+                listener_invalidate_sink.fire(PluginInvalidation::Stuck { reason });
+            }
             IpcEvent::RateRefusal(Some(refusal)) => {
                 listener_invalidate_sink.fire(PluginInvalidation::RateRefused(refusal));
             }

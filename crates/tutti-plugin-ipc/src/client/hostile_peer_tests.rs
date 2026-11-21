@@ -870,6 +870,46 @@ fn a_plugin_that_refused_its_saved_state_is_heard_with_the_reason() {
     assert_eq!(*heard.lock(), ["Reloaded", "setState refused"]);
 }
 
+/// **A render mode the plugin did not take, and a restart it would not make,
+/// are heard by the host**: the server's news reaches the listener as
+/// `RenderModeNotApplied` with the mode and `WouldNotStop` with the reason.
+#[test]
+fn a_refused_render_mode_and_a_restart_the_plugin_would_not_make_are_heard() {
+    use crate::client::audio::IpcEvent;
+    use parking_lot::Mutex as PlMutex;
+
+    let mock = MockServer::start("mode-not-applied", |msg| match msg {
+        ControlRequest::SetRenderMode { .. } => Action::Events(vec![
+            News::RenderModeNotApplied {
+                mode: tutti_plugin_types::RenderMode::Offline,
+            },
+            News::PluginWouldNotStop {
+                reason: "inside a block".into(),
+            },
+        ]),
+        ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
+        _ => Action::Silent,
+    });
+    let heard: Arc<PlMutex<Vec<String>>> = Arc::new(PlMutex::new(Vec::new()));
+    let sink = Arc::clone(&heard);
+    mock.bridge
+        .audio()
+        .set_listener(Some(Arc::new(move |ev| match ev {
+            IpcEvent::RenderModeNotApplied { mode } => sink.lock().push(format!("{mode:?}")),
+            IpcEvent::WouldNotStop { reason } => sink.lock().push(reason),
+            _ => {}
+        })));
+    assert!(
+        mock.bridge
+            .audio()
+            .set_render_mode(tutti_plugin_types::RenderMode::Offline)
+    );
+    tutti_fixtures::wait_until("both to be heard", NOTICE_TIMEOUT, || {
+        heard.lock().len() >= 2
+    });
+    assert_eq!(*heard.lock(), ["Offline", "inside a block"]);
+}
+
 /// A handle to a real slab of `layout`: what the host sends, to a mock server
 /// that never opens it.
 fn a_handle(layout: &SlabLayout) -> SlabHandle {

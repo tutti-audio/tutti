@@ -174,6 +174,21 @@ impl<'a> Diagnostics<'a> {
             .map_or(0, tutti_plugin_host::PluginControls::detached_tasks)
     }
 
+    /// Round trips of the session's tasks for this plugin (a parameter read, a
+    /// periodic state snapshot) that panicked, over the life of the node. A
+    /// panicked read is asked again; a panicked snapshot leaves the last good
+    /// one as the recovery point.
+    pub fn panicked_round_trips(&self) -> u64 {
+        self.hosted.panicked_round_trips.get()
+    }
+
+    /// Periodic state snapshots the plugin failed (it refused or did not
+    /// answer the save), over the life of the node. The last good snapshot
+    /// stays the recovery point.
+    pub fn snapshots_failed(&self) -> u64 {
+        self.hosted.snapshots_failed
+    }
+
     /// The latency the graph compensates for this plugin's node, as of the last
     /// update: the plugin's own, and out of process one chunk of the pipeline
     /// that carries its audio.
