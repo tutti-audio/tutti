@@ -130,6 +130,14 @@ fn ready_is_terminal() {
 }
 
 #[test]
+fn a_failed_start_is_not_made_ready_by_a_late_client() {
+    let mut state = HubState::new();
+    assert!(state.failed(error(), None));
+    assert!(!state.ready());
+    assert!(matches!(state, HubState::Failed { .. }));
+}
+
+#[test]
 fn a_future_made_while_a_start_is_under_way_joins_it() {
     let mut state = HubState::new();
     let first = state.begin();

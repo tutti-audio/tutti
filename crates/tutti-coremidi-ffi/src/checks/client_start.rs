@@ -182,6 +182,23 @@ mod tests {
     }
 
     #[test]
+    fn a_creation_with_no_window_first_polled_at_the_bound_is_not_a_failed_window() {
+        let t0 = Instant::now();
+        let mut start = ClientStart::new(t0 + ms(1), Some(t0));
+        let (mut create, calls) = creator(usize::MAX, SERVER_GONE);
+        assert_eq!(
+            start.poll(t0 + ms(1) + CLIENT_BOUND, &mut create),
+            Poll::Ready(Err(Failure::TimedOut { last: SERVER_GONE }))
+        );
+        assert_eq!(calls.get(), 0);
+        assert_eq!(
+            start.gave_up_at(),
+            None,
+            "only a full window that ran out is remembered"
+        );
+    }
+
+    #[test]
     fn a_status_the_rule_does_not_retry_is_returned_at_once() {
         let t0 = Instant::now();
         let mut start = ClientStart::new(t0, None);
