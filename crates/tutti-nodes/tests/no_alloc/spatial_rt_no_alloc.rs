@@ -10,8 +10,8 @@ use tutti_graph::contract::{BlockRig, Direct};
 use tutti_graph::{IntoNode, Node};
 use tutti_nodes::testing::aim;
 use tutti_nodes::{
-    AmbisonicEncoderConfig, AmbisonicEncoderNode, AmbisonicRotatorConfig, AmbisonicRotatorNode,
-    VbapPannerConfig, VbapPannerNode,
+    AmbisonicDecoderConfig, AmbisonicDecoderNode, AmbisonicEncoderConfig, AmbisonicEncoderNode,
+    AmbisonicRotatorConfig, AmbisonicRotatorNode, Decoding, VbapPannerConfig, VbapPannerNode,
 };
 use tutti_units::SampleRate;
 use tutti_units::{ArcDegrees, Elevation};
@@ -539,6 +539,35 @@ fn ambisonic_rotator_process_is_allocation_free_with_the_front_moving() {
         )
         .unwrap(),
     );
+}
+
+#[test]
+fn ambisonic_decoder_process_is_allocation_free() {
+    for decoding in [Decoding::Sampling, Decoding::AllRad] {
+        let node = AmbisonicDecoderNode::<f32>::try_from(
+            AmbisonicDecoderConfig::new(Bed::Surround71)
+                .input(ambix(AmbisonicOrder::MAX))
+                .decoding(decoding),
+        )
+        .unwrap();
+        let (mut rig, _controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
+        for (c, plane) in rig.inputs_mut().iter_mut().enumerate() {
+            plane.into_samples_mut().fill(0.05 * (c as f32 + 1.0));
+        }
+        rig.block();
+        assert!(
+            rig.output()
+                .plane(0)
+                .samples()
+                .iter()
+                .any(|s| s.abs() > 1e-6)
+        );
+        assert_no_alloc::assert_no_alloc(|| {
+            for _ in 0..1_000 {
+                rig.block();
+            }
+        });
+    }
 }
 
 /// The AmbiX bus of `order`: ACN, SN3D.

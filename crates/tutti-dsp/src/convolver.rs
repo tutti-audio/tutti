@@ -64,6 +64,17 @@
 //! its partitions in ascending order from zero, so any split of the work into
 //! calls gives the same bits.
 //!
+//! # Zero latency
+//!
+//! [`Convolver::zero_latency`] splits the IR at `B` (Gardner, "Efficient Convolution without
+//! Input-Output Delay", 1995). The first `B` taps run as a direct-form FIR, one output per
+//! frame with no wait: `B` multiply-adds per frame per convolver. The taps from `B` on are an
+//! IR of their own whose convolution has latency `B` (above), and an IR starting `B` taps
+//! late is exactly that delay, so the levels' output at frame `n` is the tail's contribution
+//! to the full convolution at frame `n`, with no shifting. The two are summed: the latency is
+//! `0`. The head's taps are stored with the [`IrSpectra`], so they are shared like the
+//! spectra; a convolver keeps only its input history for them.
+//!
 //! No allocation happens after construction, and the render is bit-identical
 //! for any split of the input into calls, including one frame at a time.
 
@@ -76,6 +87,7 @@ use tutti_units::Samples;
 use crate::Complex;
 use crate::fft::StagedRealFft;
 use crate::sample_convert::convert_equal;
+use head::{HeadState, HeadTaps};
 
 /// Default FFT block size when the caller doesn't pick one. A power of two,
 /// as every partition size here is.
@@ -248,6 +260,9 @@ pub struct IrSpectra<F: FftFloat = f32> {
     block_size: Samples,
     ir_len: Samples,
     levels: Vec<Level<F>>,
+    /// The first `block_size` taps as a direct-form FIR, in a zero-latency IR (the levels
+    /// then cover the taps after them); `None` otherwise.
+    head: Option<HeadTaps<F>>,
     /// Power-of-two lengths of the input ring (the newest `part` frames plus
     /// the first step's offset, of every level) and the output ring (the
     /// furthest frame a level writes ahead of the read cursor).
@@ -260,6 +275,7 @@ impl<F: FftFloat> std::fmt::Debug for IrSpectra<F> {
         f.debug_struct("IrSpectra")
             .field("block_size", &self.block_size)
             .field("ir_len", &self.ir_len)
+            .field("head", &self.head)
             .field("input_ring", &self.input_ring)
             .field("output_ring", &self.output_ring)
             .finish_non_exhaustive()
@@ -270,13 +286,28 @@ impl<F: FftFloat> IrSpectra<F> {
     /// Partition and transform `ir` at `block_size`, which must be a power
     /// of two. Allocates; control thread.
     fn new(ir: &[F], block_size: Samples) -> Self {
+        Self::split(ir, block_size, false)
+    }
+
+    /// [`new`](Self::new), and with `zero_latency` the first `block_size` taps
+    /// are the direct head and the levels cover the rest.
+    fn split(ir: &[F], block_size: Samples, zero_latency: bool) -> Self {
         debug_assert!(block_size.get().is_power_of_two());
-        Self::from_plan(
-            ir,
+        let split = if zero_latency {
+            block_size.get().min(ir.len())
+        } else {
+            0
+        };
+        let (head, tail) = ir.split_at(split);
+        let mut spectra = Self::from_plan(
+            tail,
             block_size,
-            &plan_levels(ir.len(), block_size.get()),
+            &plan_levels(tail.len(), block_size.get()),
             MAX_SUB_FFT,
-        )
+        );
+        spectra.ir_len = Samples::new(ir.len());
+        spectra.head = zero_latency.then(|| HeadTaps::new(head));
+        spectra
     }
 
     /// `ir` cut into the levels of `plan`, whose tail transforms are cut into
@@ -364,6 +395,7 @@ impl<F: FftFloat> IrSpectra<F> {
             block_size,
             ir_len: Samples::new(ir.len()),
             levels,
+            head: None,
             input_ring,
             output_ring,
         }
@@ -611,6 +643,8 @@ pub struct Convolver<F: FftFloat = f32> {
     /// The output not yet read: every level's blocks summed at the frames they
     /// are due, a ring of `spectra.output_ring`, zeroed as it is read.
     output: Vec<F>,
+    /// The input history of the direct head, for a zero-latency IR.
+    head: Option<HeadState<F>>,
     /// Frames consumed since construction or the last reset.
     pushed: u64,
 }
@@ -633,10 +667,30 @@ impl<F: FftFloat> Convolver<F> {
     /// partition and the latency.
     #[must_use]
     pub fn new<S: Sample>(ir: Mono<'_, S>, block_size: Samples) -> Self {
-        let block_size = Samples::new(block_size.get().next_power_of_two().max(2));
+        let (ir, block_size) = Self::prepared(ir, block_size);
+        Self::over(Arc::new(IrSpectra::new(&ir, block_size)))
+    }
+
+    /// [`new`](Self::new) with no latency: the IR's first `block_size` taps run as a
+    /// direct-form FIR and the partitioned levels cover the rest, so the output at frame
+    /// `n` is the convolution at frame `n`.
+    ///
+    /// The head costs `block_size` multiply-adds per frame (fewer for a shorter IR), on top
+    /// of the levels'; its taps are in the shared [`IrSpectra`].
+    #[must_use]
+    pub fn zero_latency<S: Sample>(ir: Mono<'_, S>, block_size: Samples) -> Self {
+        let (ir, block_size) = Self::prepared(ir, block_size);
+        Self::over(Arc::new(IrSpectra::split(&ir, block_size, true)))
+    }
+
+    /// `ir` in `F` and `block_size` rounded up to a power of two.
+    fn prepared<S: Sample>(ir: Mono<'_, S>, block_size: Samples) -> (Vec<F>, Samples) {
         let mut converted = vec![F::ZERO; ir.samples().len()];
         convert_equal(ir.samples(), &mut converted);
-        Self::over(Arc::new(IrSpectra::new(&converted, block_size)))
+        (
+            converted,
+            Samples::new(block_size.get().next_power_of_two().max(2)),
+        )
     }
 
     /// A convolver over `ir` at `block_size` (a power of two) cut by `parts`
@@ -663,6 +717,7 @@ impl<F: FftFloat> Convolver<F> {
     fn over(spectra: Arc<IrSpectra<F>>) -> Self {
         Self {
             levels: spectra.levels.iter().map(LevelState::new).collect(),
+            head: spectra.head.as_ref().map(HeadState::new),
             input: vec![F::ZERO; spectra.input_ring],
             output: vec![F::ZERO; spectra.output_ring],
             pushed: 0,
@@ -694,13 +749,18 @@ impl<F: FftFloat> Convolver<F> {
         self.spectra.ir_len
     }
 
-    /// Latency introduced by the partitioned FFT (== block size).
+    /// Latency introduced by the partitioned FFT: the block size, or zero for a
+    /// [`zero_latency`](Self::zero_latency) convolver.
     pub fn latency(&self) -> Samples {
-        self.spectra.block_size
+        if self.spectra.head.is_some() {
+            Samples::ZERO
+        } else {
+            self.spectra.block_size
+        }
     }
 
     /// Produces one convolved sample. Returns `0.0` for the first
-    /// `block_size` samples (fill-up latency).
+    /// [`latency`](Self::latency) samples (fill-up latency).
     #[inline]
     pub fn process_sample(&mut self, input: F) -> F {
         let mut out = [F::ZERO];
@@ -726,8 +786,10 @@ impl<F: FftFloat> Convolver<F> {
             levels,
             input: ring,
             output: out_ring,
+            head,
             pushed,
         } = self;
+        let start = *pushed;
         let (in_mask, out_mask) = (ring.len() - 1, out_ring.len() - 1);
         let mut done = 0;
         while done < input.len() {
@@ -779,6 +841,9 @@ impl<F: FftFloat> Convolver<F> {
         for st in levels.iter_mut() {
             st.crossed = false;
         }
+        if let (Some(state), Some(taps)) = (head, &spectra.head) {
+            state.process(taps, start, input, output);
+        }
     }
 
     /// Zeros the working buffers without discarding the IR. Safe to
@@ -796,12 +861,16 @@ impl<F: FftFloat> Convolver<F> {
         self.input.fill(F::ZERO);
         self.output.fill(F::ZERO);
         self.pushed = 0;
+        if let Some(head) = &mut self.head {
+            head.reset();
+        }
         for (lv, st) in self.spectra.levels.iter().zip(&mut self.levels) {
             st.reset(lv);
         }
     }
 }
 
+mod head;
 mod matrix;
 pub use matrix::{MatrixConvolver, MatrixConvolverConfig, MatrixConvolverError};
 

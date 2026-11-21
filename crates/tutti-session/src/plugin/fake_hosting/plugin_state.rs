@@ -11,7 +11,7 @@ use tutti_plugin_types::fake::{Call, FakePlugin};
 use tutti_plugin_types::{PluginRef, PluginTail, StateError, StateUse};
 use tutti_units::{SampleRate, Samples};
 
-use super::{Inert, host};
+use super::{Inert, Run as _, host};
 use crate::plugin::{PluginApplyError, PluginSignal};
 use crate::{AnyPlugin, DetachedSession, Key, PeerState, Session};
 
