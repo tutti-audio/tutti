@@ -5,6 +5,7 @@
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes};
 use tutti_dsp::{FdnLayout, FreeverbControls, FreezeMode, LadderType, ShapeKind, Stages, SvfType};
+use tutti_dsp::{Inline, Tap, Taps};
 use tutti_graph::contract::drive_input;
 use tutti_graph::{Env, Node, PlayClock, Prepare, TransportChanges, TransportPosition};
 use tutti_nodes::{
@@ -28,12 +29,16 @@ use tutti_nodes::{
 use tutti_nodes::{
     CombFilterConfig, CombFilterNode, CombForm, FrequencyShifterConfig, FrequencyShifterNode,
 };
+use tutti_nodes::{
+    DecorrelatorConfig, DecorrelatorNode, EarlyReflectionsConfig, EarlyReflectionsNode,
+};
 use tutti_nodes::{GraphicBands, GraphicEqConfig, GraphicEqNode};
 use tutti_rt::SplitMix64;
 use tutti_units::{
     BitDepth, Cents, Db, Drive, Feedback, Frame, HoldFactor, Hz, Mix, Q, Resonance, SampleRate,
     Samples, Seconds, Semitones,
 };
+use tutti_units::{Gain, SampleSpan};
 
 const SR: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 64;
@@ -281,6 +286,29 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
                 ChannelLayout::STEREO,
                 CombForm::Feedback,
                 Seconds::new(0.002),
+            ))),
+        ),
+        (
+            "early reflections",
+            Box::new(
+                EarlyReflectionsNode::<f32>::try_from(EarlyReflectionsConfig::new(
+                    ChannelLayout::STEREO,
+                    Taps {
+                        taps: Inline::from_slice(&[Tap {
+                            delay: SampleSpan::new(300.0).unwrap(),
+                            gain: Gain::new(0.5),
+                            channel: 1,
+                        }])
+                        .unwrap(),
+                    },
+                ))
+                .unwrap(),
+            ),
+        ),
+        (
+            "decorrelator",
+            Box::new(DecorrelatorNode::<f32>::from(DecorrelatorConfig::new(
+                ChannelLayout::STEREO,
             ))),
         ),
         (

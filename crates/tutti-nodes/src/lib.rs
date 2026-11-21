@@ -68,6 +68,10 @@
 //!   `CombForm` of one delay, its coefficient live) and `FrequencyShifterNode` (single-sideband
 //!   modulation by a signed shift in hertz through a Hilbert all-pass network, with no latency),
 //!   from a `CombFilterConfig` and a `FrequencyShifterConfig`.
+//! - **Early reflections and decorrelator** — `EarlyReflectionsNode` (the reverb model's `Taps` stage:
+//!   the mean of the input through signed, delayed taps onto output channels, no latency, the tail
+//!   the last tap) and `DecorrelatorNode` (a sparse velvet-noise FIR per channel, each from its own
+//!   seeded sequence, of unit energy), from an `EarlyReflectionsConfig` and a `DecorrelatorConfig`.
 //! - **Pitch shifter** — `PitchShifterNode` (a shift in cents at the input's duration over a phase
 //!   vocoder shared by every channel, so a stereo image survives; its latency is reported), from a
 //!   `PitchShifterConfig`.
@@ -403,6 +407,16 @@ pub use frequency_shifter::{
 // The controls those start at and the form of a comb.
 pub use tutti_dsp::{CombControls, CombForm, FrequencyShifterControls};
 
+// Early reflections and the velvet-noise decorrelator.
+mod decorrelator;
+mod early_reflections;
+pub use decorrelator::{DecorrelatorConfig, DecorrelatorKernel, DecorrelatorNode};
+pub use early_reflections::{EarlyReflectionsConfig, EarlyReflectionsKernel, EarlyReflectionsNode};
+// The velvet sequence's density and length, and a stage's refusal, are in these signatures.
+pub use tutti_dsp::{
+    EarlyReflectionsError, Taps, VelvetDensity, VelvetDensityError, VelvetLength, VelvetLengthError,
+};
+
 // Pitch shifter.
 mod pitch_shifter;
 pub use pitch_shifter::{
@@ -419,7 +433,9 @@ pub use strip::{BusStripConfig, BusStripNode};
 mod kernel;
 pub use kernel::{ControlSignals, Kernel, KernelConfig, KernelNode, MAX_SIGNALS};
 
-pub use params::{At, Control, ControlRead, ControlSet, ControlValid, HasControl, Params};
+pub use params::{
+    At, Control, ControlRead, ControlSet, ControlValid, HasControl, NoControls, Params,
+};
 
 // Freeverb as a `KernelNode`, and the send (mono in, stereo wet out) the SoundFont
 // player's General MIDI setup uses.

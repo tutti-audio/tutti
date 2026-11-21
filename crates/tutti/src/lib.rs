@@ -283,6 +283,10 @@ pub mod nodes {
         LinkwitzRiley, Lti, MAX_GRID, MatchedBell, PassbandRipple, PassbandRippleError, Sos,
         SosError, StopbandAttenuation, StopbandAttenuationError, System, Tilt,
     };
+    pub use tutti_dsp::{
+        Decorrelator, EarlyReflections, EarlyReflectionsError, MAX_TAP_DELAY, VelvetDensity,
+        VelvetDensityError, VelvetLength, VelvetLengthError, VelvetNoise, VelvetPulse,
+    };
     pub use tutti_dsp::{Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection};
     pub use tutti_dsp::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
     pub use tutti_modulation::{
@@ -350,6 +354,10 @@ pub mod nodes {
         CombFilterConfig, CombFilterKernel, CombFilterNode, CombFilterSet, FrequencyShifterConfig,
         FrequencyShifterKernel, FrequencyShifterNode, FrequencyShifterSet, PitchShifterConfig,
         PitchShifterKernel, PitchShifterNode, PitchShifterSet,
+    };
+    pub use tutti_nodes::{
+        DecorrelatorConfig, DecorrelatorKernel, DecorrelatorNode, EarlyReflectionsConfig,
+        EarlyReflectionsKernel, EarlyReflectionsNode, NoControls,
     };
 }
 
