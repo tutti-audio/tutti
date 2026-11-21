@@ -123,11 +123,7 @@ fn rig(events: impl IntoIterator<Item = TimedMidiEvent>, max: usize) -> Rig {
     ));
     ed.insert(NodeKey(1), "clip", MidiClipNode::new(events));
     let tally = tutti_fixtures::Shared::default();
-    ed.insert(
-        NodeKey(2),
-        "sink",
-        Unforkable(Sink(tutti_fixtures::Shared::clone(&tally))),
-    );
+    ed.insert(NodeKey(2), "sink", Unforkable(Sink(tally.clone())));
     connect(&mut ed, 1, 2);
     ed.commit().expect("commits");
     Rig { ed, exec, tally }

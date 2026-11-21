@@ -2100,9 +2100,6 @@ mod no_alloc {
             exec.set_pool(Some(TestPool::no_alloc(workers)));
         }
         let mail = Mail::new(Vec::with_capacity(64));
-        // A std mutex can box its lock on first use (it does on macOS): take it
-        // once here, since the pool gates the warm-up blocks too.
-        drop(mail.lock().unwrap());
         let n = Arc::new(AtomicU64::new(0));
         ed.insert(NodeKey(1), "src", Unforkable(Src { mail: mail.clone() }));
         for s in [2u64, 3] {

@@ -7,7 +7,6 @@
 
 use tutti_graph::testing as common;
 
-use std::sync::{Arc, Mutex};
 use tutti_buffers::MaxBlock;
 
 use common::test_pool;
@@ -255,7 +254,7 @@ fn the_parallel_losses_are_the_serial_ones() {
 /// together).
 struct Recorder {
     bound: Option<u32>,
-    blocks: Arc<Mutex<tutti_fixtures::BlockLog<u32>>>,
+    blocks: tutti_fixtures::Shared<tutti_fixtures::BlockLog<u32>>,
 }
 
 impl Node for Recorder {
@@ -281,7 +280,7 @@ impl Node for Recorder {
 struct Bounded {
     ed: Editor,
     exec: Executor,
-    blocks: Arc<Mutex<tutti_fixtures::BlockLog<u32>>>,
+    blocks: tutti_fixtures::Shared<tutti_fixtures::BlockLog<u32>>,
     writers: u64,
 }
 
@@ -298,7 +297,7 @@ impl Bounded {
             "recorder",
             tutti_graph::Unforkable(Recorder {
                 bound,
-                blocks: Arc::clone(&blocks),
+                blocks: blocks.clone(),
             }),
         );
         let mut rig = Self {
@@ -531,7 +530,7 @@ fn a_declared_input_bound_covers_flushed_events_and_scheduled_commands() {
             "recorder",
             tutti_graph::Unforkable(Recorder {
                 bound: Some(4),
-                blocks: Arc::clone(&blocks),
+                blocks: blocks.clone(),
             }),
         );
         // The writer's latency makes the other writer's edge a delayed one.
@@ -662,7 +661,7 @@ fn replace_or_swap_to_a_node_with_another_bound_commits_and_holds_it() {
                 NodeKey(100),
                 tutti_graph::Unforkable(Recorder {
                     bound: Some(3),
-                    blocks: Arc::clone(&rig.blocks),
+                    blocks: rig.blocks.clone(),
                 }),
                 fade,
             )
@@ -832,7 +831,7 @@ impl Node for EarlyOnsLateOffs {
 /// Records `(frame, is note-off)` for each event it is sent, block by block,
 /// declaring a bound of 4.
 struct Trace {
-    blocks: Arc<Mutex<tutti_fixtures::BlockLog<(u32, bool)>>>,
+    blocks: tutti_fixtures::Shared<tutti_fixtures::BlockLog<(u32, bool)>>,
 }
 
 impl Node for Trace {
@@ -878,7 +877,7 @@ fn a_cut_keeps_late_note_offs_and_delivers_in_frame_order() {
             NodeKey(100),
             "trace",
             tutti_graph::Unforkable(Trace {
-                blocks: Arc::clone(&blocks),
+                blocks: blocks.clone(),
             }),
         );
         ed.insert(
