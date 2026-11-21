@@ -3,7 +3,8 @@
 //! [`Follow`] is the decision, a pure step: the time and the roster's view
 //! are values. [`DeviceWatch`] is what the session runs on `Phase::Poll`: a
 //! [`SnapshotSource`], a [`DeviceRoster`] and a `Follow`. Enumeration is
-//! [`DevicePoller`](tutti_cpal::DevicePoller)'s thread, and the diff of two listings is the
+//! [`DevicePoller`]'s look, run as a task on the session's
+//! executor (each look on its blocking pool), and the diff of two listings is the
 //! [`DeviceRoster`]'s; neither runs here.
 //!
 //! # The policy
@@ -36,15 +37,19 @@
 //!
 //! None of this has run against real hardware, and the cost of enumeration on
 //! WASAPI, CoreAudio and JACK is unmeasured, which is why the poll interval is
-//! the host's to choose ([`DevicePoller::spawn`](tutti_cpal::DevicePoller::spawn)).
+//! the host's to choose ([`DevicePoller::new`](tutti_cpal::DevicePoller::new)).
 
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::mpsc::{self, Receiver};
+use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
-use tutti_platform::Instant;
+use tutti_platform::{Executor, Instant, Task, WeakExecutor};
 
 use tutti_cpal::{
-    DeviceChange, DeviceId, DeviceListing, DeviceRoster, DeviceSelector, Listed, Snapshot,
-    SnapshotSource,
+    DeviceChange, DeviceError, DeviceId, DeviceListing, DevicePoller, DeviceRoster, DeviceSelector,
+    Snapshot, SnapshotSource,
 };
 
 use crate::{DeviceEvent, DeviceRestart, SessionEvent};
@@ -409,20 +414,49 @@ impl DeviceWatch {
 /// answers in milliseconds, and one that has not in this long is likely stuck.
 pub(crate) const LISTING_WARNING: Duration = Duration::from_secs(5);
 
-/// A [`DeviceListing`] being waited for: the policy around the thread. The
-/// time is a value, as in [`Follow::step`].
+/// A [`DeviceListing`] being waited for: the blocking pool's task and the
+/// policy around it. The time is a value, as in [`Follow::step`].
 #[derive(Debug)]
 pub(crate) struct OutputListing {
-    listing: DeviceListing,
+    state: ListingState,
     /// The `now` of the first poll.
     since: Option<Instant>,
     warned: bool,
 }
 
+/// Where a listing is.
+enum ListingState {
+    /// `list` runs on the blocking pool; a panic in it is the task's
+    /// [`DeviceError::ListingEnded`].
+    Running(Task<Result<Vec<DeviceId>, DeviceError>>),
+    /// The executor refused the task: the failure waiting to be reported.
+    Refused(Option<DeviceError>),
+}
+
+impl std::fmt::Debug for ListingState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Running(_) => "Running",
+            Self::Refused(_) => "Refused",
+        })
+    }
+}
+
 impl OutputListing {
-    pub(crate) fn new(listing: DeviceListing) -> Self {
+    /// Starts `listing`'s one blocking step on `executor`'s blocking pool.
+    pub(crate) fn new(executor: &Executor, listing: DeviceListing) -> Self {
+        let step = move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listing.list()))
+                .unwrap_or(Err(DeviceError::ListingEnded))
+        };
+        let state = match executor.unblock(step) {
+            Ok(task) => ListingState::Running(task),
+            Err(e) => ListingState::Refused(Some(DeviceError::InvalidConfig(format!(
+                "cannot start the device listing: {e}"
+            )))),
+        };
         Self {
-            listing,
+            state,
             since: None,
             warned: false,
         }
@@ -430,16 +464,27 @@ impl OutputListing {
 
     /// The event this poll has, and whether the listing is over.
     pub(crate) fn poll(&mut self, now: Instant) -> (Option<SessionEvent>, bool) {
-        match self.listing.poll() {
-            Listed::Devices(devices) => (
+        let answer = match &mut self.state {
+            ListingState::Refused(why) => why.take().map(Err),
+            ListingState::Running(task) if task.is_finished() => {
+                let mut cx = Context::from_waker(Waker::noop());
+                match Pin::new(task).poll(&mut cx) {
+                    Poll::Ready(listed) => Some(listed),
+                    Poll::Pending => None,
+                }
+            }
+            ListingState::Running(_) => None,
+        };
+        match answer {
+            Some(Ok(devices)) => (
                 Some(SessionEvent::Device(DeviceEvent::OutputsListed(devices))),
                 true,
             ),
-            Listed::Failed(why) => (
+            Some(Err(why)) => (
                 Some(SessionEvent::Device(DeviceEvent::OutputsListFailed(why))),
                 true,
             ),
-            Listed::Pending => {
+            None => {
                 let since = *self.since.get_or_insert(now);
                 let waited = now.saturating_duration_since(since);
                 let slow = waited >= LISTING_WARNING && !self.warned;
@@ -449,6 +494,75 @@ impl OutputListing {
                     false,
                 )
             }
+        }
+    }
+}
+
+/// The snapshots of a [`DevicePoller`] loop running on the session's executor.
+///
+/// Dropping it drops the loop's task, which cancels the loop; a look already
+/// on the blocking pool finishes on its own and its answer is discarded, so
+/// dropping never waits on a host that does not answer.
+#[derive(Debug)]
+pub(crate) struct PolledSource {
+    snapshots: Receiver<Snapshot>,
+    _task: Task<()>,
+}
+
+impl PolledSource {
+    /// Starts the loop of `poller` on `executor`: a look on the blocking pool,
+    /// the snapshot it returned sent on, then a sleep of the poller's
+    /// interval.
+    pub(crate) fn start(executor: &Executor, poller: DevicePoller) -> Self {
+        let (tx, snapshots) = mpsc::channel();
+        let task = executor.spawn(poll_loop(
+            executor.downgrade(),
+            executor.timer(),
+            poller,
+            tx,
+        ));
+        Self {
+            snapshots,
+            _task: task,
+        }
+    }
+}
+
+impl SnapshotSource for PolledSource {
+    fn poll(&mut self) -> Option<Snapshot> {
+        self.snapshots.try_iter().last()
+    }
+}
+
+/// The poller's loop: ends when the session or its executor is gone, the
+/// blocking pool refuses a look, or the source drops (a look that panics ends
+/// the task, which the executor drops).
+async fn poll_loop(
+    executor: WeakExecutor,
+    timer: tutti_platform::Timer,
+    mut poller: DevicePoller,
+    snapshots: mpsc::Sender<Snapshot>,
+) {
+    let interval = poller.interval();
+    loop {
+        let step = match executor.upgrade() {
+            Some(executor) => executor.unblock(move || {
+                let looked = poller.look();
+                (poller, looked)
+            }),
+            None => return,
+        };
+        let Ok(step) = step else { return };
+        let (back, looked) = step.await;
+        poller = back;
+        // A failed look is tried again at the next tick.
+        if let Ok(Some(snapshot)) = looked
+            && snapshots.send(snapshot).is_err()
+        {
+            return;
+        }
+        if timer.sleep(interval).await.is_err() {
+            return;
         }
     }
 }

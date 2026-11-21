@@ -12,14 +12,16 @@
 //! # Main thread
 //!
 //! Apple documents every interaction with a `MIDIUMPMutableEndpoint` as
-//! main-thread only. [`UmpEndpoint::new`] takes a [`MainThreadMarker`] and the
-//! endpoint is `!Send` and `!Sync`, so creating, enabling, disabling and
+//! main-thread only. [`UmpEndpoint::new`] takes a [`MainThreadMarker`] (and the
+//! process's [`SharedClient`], see its docs) and the endpoint is `!Send` and `!Sync`, so creating, enabling, disabling and
 //! releasing it all happen on the main thread. What may cross threads is the
 //! [`UmpSender`]: the source's `u32` reference and the callback's counters.
 
-use super::error::{Error, Operation};
+use super::client::SharedClient;
+use super::error::{Error, Operation, OsStatus};
 use super::objc_exception::catch;
 use super::receive::{Counts, Receiver};
+use super::retry::{Backoff, retry};
 use super::source::{protocol_id, publish};
 use crate::checks::blocks::{PlatformBlock, numbers_in_registered_order, platform_blocks};
 use block2::DynBlock;
@@ -35,7 +37,7 @@ use objc2_core_midi::{
 use objc2_foundation::{NSArray, NSError, NSString};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
-use tutti_platform::MainThreadMarker;
+use tutti_platform::{Instant, MainThreadMarker};
 use tutti_ump::{
     DeviceIdentity, FunctionBlockId, FunctionBlockInfo, ProductInstanceId, Protocol, U7, Ump,
 };
@@ -136,11 +138,18 @@ impl UmpSender {
 }
 
 impl UmpEndpoint {
-    /// Creates the endpoint `name` carrying `protocol`, identified as `device`
+    /// Creates the endpoint `name` on `client`, carrying `protocol`, identified as `device`
     /// (the Device Identity, M2-104 §7.1.3) with Product Instance Id `instance`
     /// (§7.1.5, `None` for none), registers `blocks` as its static Function Blocks
     /// and enables it. `on_ump` gets each message sent to it, on CoreMIDI's
     /// delivery thread. `main` proves the caller is on the main thread.
+    ///
+    /// `client` proves that [`SharedClient::start`] succeeded, so the process has
+    /// connected to the MIDI server. The endpoint API takes no client, and with no
+    /// connection and the server gone, CoreMIDI raises an exception that the crate's
+    /// exception catch cannot catch: the process aborts. A process whose start
+    /// failed has no way to call this. The proof does not cover a server that
+    /// dies after the start.
     ///
     /// CoreMIDI numbers the blocks itself, in registration order. `blocks` are
     /// given in number order with their numbers running from 0 without a gap, and
@@ -151,15 +160,34 @@ impl UmpEndpoint {
     ///
     /// Before any call into CoreMIDI: [`Error::ReservedProtocol`] for a reserved
     /// `protocol`, [`Error::Block`] for a block CoreMIDI cannot carry (checked
-    /// before the class lookup, so it is the same on every macOS), and
-    /// Then [`Error::UmpEndpointUnsupported`] before
-    /// macOS 15, [`Error::Exception`] when CoreMIDI raises an Objective-C
-    /// exception, [`Error::Objc`] or [`Error::NoObject`] when CoreMIDI refuses
-    /// the endpoint, [`Error::BlockNumber`] for a number the spec cannot hold, and
-    /// [`Error::BlockReadBack`] when CoreMIDI lists blocks other than the registered ones.
+    /// before the class lookup, so it is the same on every macOS). Then
+    /// [`Error::UmpEndpointUnsupported`] before macOS 15, [`Error::Exception`] when
+    /// CoreMIDI raises an Objective-C exception, [`Error::NotPermitted`] when it
+    /// answers a call with `kMIDINotPermitted` (the enable is tried again for up
+    /// to two seconds first), [`Error::Objc`] or
+    /// [`Error::NoObject`] when it refuses the endpoint otherwise,
+    /// [`Error::BlockNumber`] for a number the spec cannot hold, and
+    /// [`Error::BlockReadBack`] when CoreMIDI lists blocks other than the
+    /// registered ones.
     /// An `Err` leaves no endpoint published.
+    ///
+    /// # Concurrent creations
+    ///
+    /// Probes have seen CoreMIDI refuse an enable with `kMIDINotPermitted` while
+    /// other processes create endpoints, and accept the same call a few
+    /// milliseconds later. This call retries the enable, waiting 10 ms and then
+    /// longer, for two seconds from its first attempt, and returns
+    /// [`Error::NotPermitted`] only if the refusal lasts that long. The registration
+    /// of the blocks is retried the same way.
+    ///
+    /// On macOS 15.8.2 the registration has been seen to report failure without an
+    /// error after registering the blocks; that is accepted when the endpoint holds
+    /// as many blocks as were registered.
+    ///
+    /// The wait happens on the calling thread, which is the main thread.
     pub fn new<F>(
         main: MainThreadMarker,
+        _client: SharedClient,
         name: &str,
         protocol: Protocol,
         device: &DeviceIdentity,
@@ -236,8 +264,14 @@ impl UmpEndpoint {
     }
 }
 
-/// The endpoint, registered and enabled, its source and its blocks' numbers. The
-/// endpoint is put in `made` as soon as it exists, so a caller that gets an error
+/// The endpoint, registered and enabled, its source and its blocks' numbers.
+///
+/// Seen on macOS 15.8.2: `registerFunctionBlocks:markAsStatic:error:` registers the blocks and
+/// then reports failure without an `NSError` ([`RegisterFailure::Unreported`]);
+/// [`register`] accepts that only when the endpoint holds the registered count, and
+/// the read-back after the enable still checks the blocks by name.
+///
+/// The endpoint is put in `made` as soon as it exists, so a caller that gets an error
 /// (or an exception, which unwinds past this frame's destructors) can still take
 /// it down.
 fn create(
@@ -282,12 +316,8 @@ fn create(
     }
     .ok_or(Error::NoObject(Operation::CreateUmpEndpoint))?;
     let endpoint = made.insert(endpoint);
-    // SAFETY: plain messages to the live endpoint with an array of live blocks.
-    unsafe { endpoint.registerFunctionBlocks_markAsStatic_error(&function_blocks, true) }
-        .map_err(|e| objc(Operation::RegisterFunctionBlocks, &e))?;
-    // SAFETY: a plain message to the live endpoint.
-    unsafe { endpoint.setEnabled_error(true) }
-        .map_err(|e| objc(Operation::EnableUmpEndpoint, &e))?;
+    register(endpoint, &function_blocks, blocks.len())?;
+    enable(endpoint)?;
     // SAFETY: plain getters on the live endpoint and its blocks.
     let (source, listed) = unsafe {
         (
@@ -308,6 +338,105 @@ fn create(
         .map(|number| FunctionBlockId::new(number).ok_or(Error::BlockNumber(number)))
         .collect::<Result<Vec<_>, _>>()?;
     Ok((source, numbers))
+}
+
+/// How `registerFunctionBlocks:markAsStatic:error:` failed.
+#[derive(Debug, PartialEq, Eq)]
+enum RegisterFailure {
+    /// CoreMIDI returned an `NSError`.
+    Refused(Error),
+    /// It returned `NO` with no `NSError`, which objc2 reports as its own
+    /// missing-error object.
+    Unreported,
+}
+
+impl RegisterFailure {
+    /// The failure for an `NSError` with these fields.
+    fn classify(operation: Operation, code: isize, domain: String, description: String) -> Self {
+        if is_missing_error(code, &domain) {
+            Self::Unreported
+        } else {
+            Self::Refused(Error::from_ns_error(operation, code, domain, description))
+        }
+    }
+
+    /// The status the retry rule filters on: none for an unreported failure.
+    fn os_status(&self) -> Option<OsStatus> {
+        match self {
+            Self::Refused(error) => error.os_status(),
+            Self::Unreported => None,
+        }
+    }
+}
+
+/// Whether the error is the one objc2 makes when a method returns `NO` and leaves
+/// its error out. objc2 exposes no other signal for it: the object is a plain
+/// `NSError` with code 0 and the domain `__objc2.missingError`, so this is the one
+/// place that names the domain. The match is pinned to objc2's
+/// `__macro_helpers/null_error.rs` (0.6.x) and is re-checked when objc2 is bumped;
+/// if it stops matching, a register without an error fails closed as
+/// `Objc { code: 0 }`.
+fn is_missing_error(code: isize, domain: &str) -> bool {
+    code == 0 && domain == "__objc2.missingError"
+}
+
+/// Registers `function_blocks` (`count` of them) as static, trying again while
+/// CoreMIDI refuses with `kMIDINotPermitted`. A `NO` without an `NSError` is
+/// accepted when the endpoint holds `count` blocks, and is
+/// [`Error::NoObject`] otherwise. Called inside [`catch`].
+fn register(
+    endpoint: &MIDIUMPMutableEndpoint,
+    function_blocks: &NSArray<MIDIUMPMutableFunctionBlock>,
+    count: usize,
+) -> Result<(), Error> {
+    let operation = Operation::RegisterFunctionBlocks;
+    let result = retry(
+        Backoff::endpoint(Instant::now()),
+        || {
+            // SAFETY: plain messages to the live endpoint with an array of live blocks.
+            unsafe { endpoint.registerFunctionBlocks_markAsStatic_error(function_blocks, true) }
+                .map_err(|e| {
+                    RegisterFailure::classify(
+                        operation,
+                        e.code(),
+                        e.domain().to_string(),
+                        e.localizedDescription().to_string(),
+                    )
+                })
+        },
+        RegisterFailure::os_status,
+    );
+    match result {
+        Ok(()) => Ok(()),
+        Err(RegisterFailure::Refused(error)) => Err(error),
+        Err(RegisterFailure::Unreported) => {
+            // SAFETY: a plain getter on the live endpoint.
+            let held = unsafe { endpoint.mutableFunctionBlocks() }.count();
+            if held == count {
+                Ok(())
+            } else {
+                Err(Error::NoObject(operation))
+            }
+        }
+    }
+}
+
+/// Enables `endpoint`, trying again while CoreMIDI refuses with `kMIDINotPermitted`
+/// (see [`Backoff::endpoint`]). Called inside [`catch`].
+///
+/// An attempt fails with the whole [`Error`], so the last refusal keeps its
+/// `NSError` domain and description; [`Error::os_status`] is the status the rule
+/// filters on.
+fn enable(endpoint: &MIDIUMPMutableEndpoint) -> Result<(), Error> {
+    retry(
+        Backoff::endpoint(Instant::now()),
+        || {
+            // SAFETY: a plain message to the live endpoint.
+            unsafe { endpoint.setEnabled_error(true) }
+                .map_err(|e| objc(Operation::EnableUmpEndpoint, &e))
+        },
+        Error::os_status,
+    )
 }
 
 /// The Objective-C Function Block for `block`.
@@ -332,12 +461,12 @@ fn function_block(block: &PlatformBlock) -> Result<Retained<MIDIUMPMutableFuncti
 
 /// `operation` failed with `error`. Called inside [`catch`].
 fn objc(operation: Operation, error: &NSError) -> Error {
-    Error::Objc {
+    Error::from_ns_error(
         operation,
-        code: error.code(),
-        domain: error.domain().to_string(),
-        description: error.localizedDescription().to_string(),
-    }
+        error.code(),
+        error.domain().to_string(),
+        error.localizedDescription().to_string(),
+    )
 }
 
 /// Disables `endpoint` and releases it, each in its own [`catch`] (releasing runs the
@@ -402,5 +531,48 @@ mod tests {
         assert_eq!(MIDIUMPFunctionBlockUIHint::Receiver.0, UI_HINT_RECEIVER);
         assert_eq!(MIDIUMPFunctionBlockUIHint::Sender.0, UI_HINT_SENDER);
         assert_eq!(MIDIUMPFunctionBlockUIHint::SenderReceiver.0, UI_HINT_BOTH);
+    }
+
+    const OP: Operation = Operation::RegisterFunctionBlocks;
+
+    fn classify(code: isize, domain: &str) -> RegisterFailure {
+        RegisterFailure::classify(OP, code, domain.into(), "d".into())
+    }
+
+    #[test]
+    fn objc2s_missing_error_is_an_unreported_failure() {
+        assert_eq!(
+            classify(0, "__objc2.missingError"),
+            RegisterFailure::Unreported
+        );
+    }
+
+    #[test]
+    fn a_real_ns_error_is_refused_even_with_the_missing_error_domain_or_code() {
+        assert_eq!(
+            classify(-10844, "NSOSStatusErrorDomain"),
+            RegisterFailure::Refused(Error::NotPermitted(OP))
+        );
+        assert!(matches!(
+            classify(-10843, "NSOSStatusErrorDomain"),
+            RegisterFailure::Refused(Error::Objc { code: -10843, .. })
+        ));
+        assert!(matches!(
+            classify(0, "NSOSStatusErrorDomain"),
+            RegisterFailure::Refused(Error::Objc { code: 0, .. })
+        ));
+        assert!(matches!(
+            classify(-10843, "__objc2.missingError"),
+            RegisterFailure::Refused(_)
+        ));
+    }
+
+    #[test]
+    fn only_a_refused_not_permitted_carries_a_status_to_retry() {
+        assert_eq!(
+            classify(-10844, "d").os_status(),
+            Some(OsStatus::NOT_PERMITTED)
+        );
+        assert_eq!(classify(0, "__objc2.missingError").os_status(), None);
     }
 }

@@ -949,5 +949,92 @@ fn a_loop_of_yields_ends_when_its_task_is_dropped() {
     drop(executor);
 }
 
+/// **A local dedicated future runs on its own thread, built there, and its output comes
+/// back through its `Task`.** The future holds an `Rc` (not `Send`) across an await and
+/// records the thread it runs on; `make` runs on that same thread, which is the dedicated
+/// one, not the test's.
+#[test]
+fn a_local_dedicated_future_is_built_and_run_on_its_own_thread() {
+    let executor = Executor::new();
+    let (go, wait) = mpsc::channel::<()>();
+    let caller = thread::current().id();
+    let task = executor
+        .spawn_dedicated_local("local", None, move || {
+            let made_on = thread::current().id();
+            let held = std::rc::Rc::new(made_on);
+            async move {
+                yield_now().await;
+                wait.recv().unwrap();
+                (*held, thread::current().id())
+            }
+        })
+        .unwrap();
+    go.send(()).unwrap();
+    let (made_on, ran_on) = joined_off_thread(task).expect("the future ends");
+    assert_eq!(made_on, ran_on, "the future runs where it was built");
+    assert_ne!(ran_on, caller, "on the dedicated thread, not the caller's");
+}
+
+/// **A local dedicated future is dropped on its own thread when its `Task` drops**: the
+/// drop signal it holds reports the thread it was dropped on.
+#[test]
+fn a_cancelled_local_dedicated_future_is_dropped_on_its_own_thread() {
+    struct DroppedOn {
+        to: mpsc::Sender<thread::ThreadId>,
+        _not_send: std::rc::Rc<()>,
+    }
+    impl Drop for DroppedOn {
+        fn drop(&mut self) {
+            let _ = self.to.send(thread::current().id());
+        }
+    }
+    let executor = Executor::new();
+    let (dropped, on) = mpsc::channel();
+    let (entered, running) = mpsc::channel();
+    let task = executor
+        .spawn_dedicated_local("local-cancel", None, move || {
+            let held = DroppedOn {
+                to: dropped,
+                _not_send: std::rc::Rc::new(()),
+            };
+            async move {
+                let _held = held;
+                entered.send(thread::current().id()).unwrap();
+                std::future::pending::<()>().await;
+            }
+        })
+        .unwrap();
+    let ran_on = running.recv_timeout(HANG_GUARD).unwrap();
+    drop(task);
+    assert_eq!(on.recv_timeout(HANG_GUARD).unwrap(), ran_on);
+    drop(executor);
+}
+
+/// **A local dedicated future whose `make` panics ends its task as `None`**, as a
+/// panicking dedicated future does: `make` runs inside the task on its thread, so a failed
+/// build (a stream that cannot open, say) is the task's panic, and `join` reads `None`.
+#[test]
+fn a_local_dedicated_make_that_panics_joins_as_none() {
+    let executor = Executor::new();
+    let task = executor
+        .spawn_dedicated_local("local-panics", None, || -> std::future::Ready<u8> {
+            panic!("the stream did not open")
+        })
+        .unwrap();
+    assert_eq!(joined_off_thread(task), None);
+}
+
+/// **The executor's shutdown ends a local dedicated thread too**: a pending local future
+/// is dropped and its task joins as `None`.
+#[test]
+fn shutdown_ends_a_local_dedicated_future() {
+    let executor = Executor::new();
+    let task = executor
+        .spawn_dedicated_local("local-shutdown", None, std::future::pending::<u8>)
+        .unwrap();
+    drop(executor);
+    assert_eq!(joined_off_thread(task), None);
+}
+
 #[cfg(target_os = "linux")]
 mod linux;

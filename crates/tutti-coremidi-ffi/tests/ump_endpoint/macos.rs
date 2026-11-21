@@ -23,6 +23,12 @@ fn instance(text: &str) -> ProductInstanceId {
 /// A bound that only guards a hang: each message arrives on CoreMIDI's thread.
 const HANG_GUARD: Duration = Duration::from_secs(10);
 
+/// The process's client, started once: an endpoint is created on it.
+fn client() -> SharedClient {
+    static CLIENT: std::sync::OnceLock<SharedClient> = std::sync::OnceLock::new();
+    *CLIENT.get_or_init(|| SharedClient::start("tutti-ffi-test", |_| {}).expect("CoreMIDI client"))
+}
+
 fn main_thread() -> MainThreadMarker {
     MainThreadMarker::new().expect("a harness = false target runs on the main thread")
 }
@@ -89,6 +95,7 @@ fn endpoint(
     let id = tutti_fixtures::unique_name("tutti-ffi");
     let created = UmpEndpoint::new(
         main_thread(),
+        client(),
         &tutti_fixtures::unique_name("tutti-ffi-test-endpoint"),
         Protocol::Midi2,
         &identity(),
@@ -192,6 +199,7 @@ pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
     });
     let refused = UmpEndpoint::new(
         main_thread(),
+        client(),
         "tutti-ffi-test-ci",
         Protocol::Midi2,
         &identity(),
@@ -216,6 +224,7 @@ pub fn a_42_character_instance_id_is_listed_back_intact() {
     let major = tutti_fixtures::macos_major().expect("sw_vers names the macOS version");
     let created = UmpEndpoint::new(
         main_thread(),
+        client(),
         &tutti_fixtures::unique_name("tutti-ffi-test-instance"),
         Protocol::Midi2,
         &identity(),
@@ -249,7 +258,7 @@ pub fn an_endpoint_receives_what_is_sent_to_its_destination() {
             .expect("the endpoint has a destination"),
     )
     .expect("the destination is listed");
-    let client = SharedClient::start("tutti-ffi-test", |_| {}).expect("CoreMIDI client");
+    let client = client();
     let out = OutputPort::new(client, "tutti-ffi-test-out").expect("an output port");
     out.send(&destination, Protocol::Midi2, &[(None, jr())])
         .expect("the destination accepts the list");
@@ -274,7 +283,7 @@ pub fn what_the_sender_publishes_reaches_a_port_connected_to_the_source() {
             .expect("the endpoint has a source"),
     )
     .expect("the source is listed");
-    let client = SharedClient::start("tutti-ffi-test", |_| {}).expect("CoreMIDI client");
+    let client = client();
     let (tx, rx) = mpsc::channel();
     let _port = InputPort::connect(
         client,

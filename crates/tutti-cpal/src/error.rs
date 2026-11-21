@@ -128,9 +128,9 @@ pub enum DeviceError {
     #[error("the audio stream is already running; stop it before starting another")]
     AlreadyRunning,
 
-    /// A [`DeviceListing`](crate::DeviceListing)'s thread ended without an
+    /// A [`DeviceListing`](crate::DeviceListing)'s task ended without an
     /// answer (it panicked), so there is none to wait for.
-    #[error("the device listing thread ended without an answer")]
+    #[error("the device listing task ended without an answer")]
     ListingEnded,
 
     /// I/O failure while reading or writing audio data.
