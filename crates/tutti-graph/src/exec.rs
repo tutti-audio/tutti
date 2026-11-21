@@ -164,8 +164,8 @@
 //!
 //! A replace that waits behind a running fade is chased too, a block later:
 //! its predecessor (the unit fading in) writes its state when the replace is
-//! applied, the crossfade holds it (a `Vec` allocated there, with the apply
-//! that already allocates), and the plan's state keeps an injection for the
+//! applied, the crossfade holds it (a buffer the editor sized when it built the
+//! commit, so applying does not allocate), and the plan's state keeps an injection for the
 //! successor sized for it. When the running fade ends (`end_fades`) the
 //! successor takes over, and the held events are delivered as flushed events
 //! to its first event input at the next block, at offset 0, ahead of
