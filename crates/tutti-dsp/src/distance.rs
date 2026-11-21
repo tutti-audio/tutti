@@ -170,8 +170,9 @@ impl<F: Float> Distance<F> {
         if to == self.delay.target() {
             return;
         }
-        let moved =
-            to.get().abs_diff(self.delay.now().get()) as f64 / ReadPosition::COUNTS_PER_FRAME;
+        let moved = ReadPosition::from_count(to.get().abs_diff(self.delay.now().get()))
+            .span()
+            .get();
         let glide = DISTANCE_GLIDE.get() as f64;
         // `as` saturates at `u32::MAX`.
         let steps = (moved / DELAY_SLEW).ceil().max(glide) as u32;
