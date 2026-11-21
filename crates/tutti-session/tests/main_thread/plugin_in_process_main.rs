@@ -786,7 +786,7 @@ fn a_served_plugin_that_grows_its_ports_gets_a_wider_node() {
     s.close(tutti_fixtures::main_thread());
 }
 
-/// **A served plugin inserted with `Graph::insert_plugin`, no load
+/// **A served plugin inserted with `Graph::add_plugin`, no load
 /// behind it, that grows its ports gets a wider node at the same key and
 /// renders through it**: the session ticks the node's rebinder, so the
 /// plugin restarts into a new slab and the node follows. The tags of its first
@@ -808,7 +808,7 @@ fn an_inserted_served_plugin_that_grows_its_ports_gets_a_wider_node() {
         SampleRate::SR_48K,
     )
     .expect("the reference plugin loads");
-    let node = s.graph().insert_plugin(Box::new(client));
+    let node = s.graph().add_plugin(Box::new(client));
     for (from, to) in [
         (node.out(0), tutti_session::Root::output(0)),
         (node.out(1), tutti_session::Root::output(1)),

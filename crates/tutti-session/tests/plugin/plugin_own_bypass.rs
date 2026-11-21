@@ -20,10 +20,10 @@ use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_plugin::PluginClient;
 use tutti_plugin_db::Loadable;
 use tutti_plugin_types::PluginRef;
-use tutti_session::{ModeTarget, NodeMode, Session};
+use tutti_session::{ModeTarget, NodeMode, Replacement, Session};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
-use tutti_units::{SampleRate, Samples, Seconds};
+use tutti_units::{SampleRate, Samples};
 
 const BLOCK: usize = 512;
 
@@ -121,12 +121,7 @@ fn a_plugin_replacing_another_under_a_bypassed_node_is_bypassed_as_it_enters() {
     )
     .expect("a second instance loads");
     s.graph()
-        .crossfade_plugin(
-            node,
-            Box::new(incoming),
-            Seconds::new(0.005),
-            tutti_graph::FadeLaw::EqualAmplitude,
-        )
+        .replace_plugin(node, Replacement::new(Box::new(incoming)))
         .expect("the crossfade is accepted");
     // The record now holds the incoming plugin's handle, which is what is read.
     let incoming_pid = s.plugin_view(node).expect("hosted").handle().server_pid();

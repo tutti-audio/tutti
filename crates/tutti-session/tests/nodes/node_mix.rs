@@ -13,10 +13,12 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
-use tutti_graph::{Cx, FadeLaw, ForkByClone, Io, Node, Prepare, Shape, Status};
+use tutti_graph::{Cx, Fade, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
-use tutti_session::{InPort, Key, NodeMode, OutPort, Root, Session, SetRefusal, ValueErrorKind};
-use tutti_units::{Mix, Seconds};
+use tutti_session::{
+    InPort, Key, NodeMode, OutPort, Replacement, Root, Session, SetRefusal, ValueErrorKind,
+};
+use tutti_units::{Mix, Samples};
 
 const A: f32 = 0.25;
 const BLOCK: usize = 64;
@@ -61,7 +63,7 @@ fn rig() -> Rig {
         .unwrap()
         .unfaded();
     let _ = s.update();
-    assert!(!s.graph_ref().is_edited());
+    assert!(!s.graph_ref().has_uncommitted_edits());
     Rig { s, halve }
 }
 
@@ -148,7 +150,10 @@ fn a_mix_is_not_an_edit() {
 
     r.s.set(r.halve.mix().to(Mix::DRY)).unwrap();
     let _ = r.s.update();
-    assert!(!r.s.graph_ref().is_edited(), "a mix marks nothing edited");
+    assert!(
+        !r.s.graph_ref().has_uncommitted_edits(),
+        "a mix marks nothing edited"
+    );
     let _ = r.settled();
 
     assert_eq!(
@@ -241,9 +246,7 @@ fn a_refused_replace_keeps_the_last_plan_until_the_mix_or_mode_is_set_back() {
             r.s.graph()
                 .replace(
                     r.halve,
-                    ForkByClone(Quarter),
-                    Seconds::new(0.0),
-                    FadeLaw::EqualAmplitude
+                    Replacement::new(ForkByClone(Quarter)).fade(Fade::new(Samples::new(0)))
                 )
                 .is_ok()
         );
@@ -257,7 +260,7 @@ fn a_refused_replace_keeps_the_last_plan_until_the_mix_or_mode_is_set_back() {
             got[0]
         );
         assert!(
-            r.s.graph_ref().is_edited(),
+            r.s.graph_ref().has_uncommitted_edits(),
             "bypass {bypass}: still to commit"
         );
 
@@ -273,7 +276,10 @@ fn a_refused_replace_keeps_the_last_plan_until_the_mix_or_mode_is_set_back() {
             all_are(&r.settled(), A * 0.25),
             "bypass {bypass}: set back, the next commit places the new node"
         );
-        assert!(!r.s.graph_ref().is_edited(), "bypass {bypass}: committed");
+        assert!(
+            !r.s.graph_ref().has_uncommitted_edits(),
+            "bypass {bypass}: committed"
+        );
     }
 }
 

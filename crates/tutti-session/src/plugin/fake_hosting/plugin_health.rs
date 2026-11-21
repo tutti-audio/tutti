@@ -168,13 +168,16 @@ fn a_non_plugin_node_never_marks_the_graph_edited() {
         .expect("a detached session builds");
     s.graph().add(ForkByClone(Const::mono(0.0)));
     s.commit();
-    assert!(!s.graph_ref().is_edited(), "precondition: committed");
+    assert!(
+        !s.graph_ref().has_uncommitted_edits(),
+        "precondition: committed"
+    );
     let t0 = Instant::now();
     for ms in [0, 10, 20] {
         deaths_at(&mut s, t0, ms);
     }
     assert!(
-        !s.graph_ref().is_edited(),
+        !s.graph_ref().has_uncommitted_edits(),
         "a dc node is not a plugin and has no latency to compensate"
     );
 }

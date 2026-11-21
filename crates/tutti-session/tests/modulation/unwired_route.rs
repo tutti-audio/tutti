@@ -6,12 +6,13 @@ use crate::common;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
-use tutti_graph::{FadeLaw, ForkByClone};
+use tutti_graph::{Fade, ForkByClone};
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    Edge, ModTarget, OutPort, Problem, Root, RouteSpec, Session, SessionEvent, TargetName,
+    Edge, ModTarget, OutPort, Problem, Replacement, Root, RouteSpec, Session, SessionEvent,
+    TargetName,
 };
-use tutti_units::{Amplitude, Depth, Seconds};
+use tutti_units::{Amplitude, Depth, Samples};
 
 use common::probe::Pulse;
 
@@ -70,9 +71,7 @@ fn a_route_onto_a_dropped_edge_reads_unresolved() {
     s.graph()
         .replace(
             x,
-            ForkByClone(Through::mono()),
-            Seconds::new(0.0),
-            FadeLaw::EqualAmplitude,
+            Replacement::new(ForkByClone(Through::mono())).fade(Fade::new(Samples::new(0))),
         )
         .expect("the node is there");
     let events = settle(&mut s);

@@ -9,14 +9,14 @@ use std::sync::{Arc, Mutex};
 use crate::common::{MF, Seen, blocks, note, offline, play, tap};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
-use tutti_graph::{Cx, EventKind, Harmony, IntoNode, Io, Node, NodeParts, Prepare, Shape};
+use tutti_graph::{Cx, EventKind, Fade, Harmony, IntoNode, Io, Node, NodeParts, Prepare, Shape};
 use tutti_graph::{ForkByClone, Status};
 use tutti_midi_runtime::{
     ClipEvents, HarmonyChanges, HarmonyNode, MidiClipNode, TimedHarmony, TimedMidiEvent,
 };
-use tutti_session::{Feeder, Session, SessionNode, ValueErrorKind};
+use tutti_session::{Feeder, Replacement, Session, SessionNode, ValueErrorKind};
 use tutti_ump::NoteKeyEvent;
-use tutti_units::{Beat, BeatDuration};
+use tutti_units::{Beat, BeatDuration, Samples};
 
 /// Frames a beat takes at 120 BPM and 48 kHz.
 const BEAT: u64 = 24_000;
@@ -380,9 +380,7 @@ fn a_write_after_a_clip_is_replaced_reaches_the_new_node() {
     s.graph()
         .replace(
             clip,
-            MidiClipNode::new([]),
-            tutti_units::Seconds::new(0.0),
-            tutti_graph::FadeLaw::EqualAmplitude,
+            Replacement::new(MidiClipNode::new([])).fade(Fade::new(Samples::new(0))),
         )
         .expect("the clip is there");
     let _ = s.update();

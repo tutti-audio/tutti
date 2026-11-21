@@ -77,7 +77,7 @@ pub enum Phase {
     /// that is not published again gets that scan here. A lock and a
     /// length check per cell when nothing is retired. It also closes the
     /// graph's taps whose readers were dropped
-    /// ([`Taps::open`](crate::Taps::open),
+    /// ([`Taps::open_ports`](crate::Taps::open_ports),
     /// [`Taps::open_event`](crate::Taps::open_event)), and emits what the
     /// graph's nodes logged on the audio thread as `tracing` events.
     Reclaim,
@@ -202,9 +202,9 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 // What the graph's own removals left declared.
                 self.forget_removed();
                 // Before the collect, as a frame's spawns run before its
-                // commit: a crossfade lands on the update that first finds
+                // commit: a replacement lands on the update that first finds
                 // the re-prepare resumed.
-                self.graph.report_crossfades(out);
+                self.graph.report_replacements(out);
                 // What an export left behind (a render's fork, an edit
                 // that never ran) drops here, on the main thread.
                 self.bounce.collect(cx.now);
@@ -222,7 +222,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             }
             Phase::Commit => {
                 self.apply_output_policy();
-                let sent = self.graph.is_edited() && self.commit_reporting(out);
+                let sent = self.graph.has_uncommitted_edits() && self.commit_reporting(out);
                 self.graph.report_commit(out);
                 self.graph.report_rewired(out);
                 if self.graph.take_resumed() && !sent {

@@ -1326,7 +1326,7 @@ impl ModSession {
     ) -> bool {
         // Nothing to resolve while the update's own commit waits (refused
         // for now): its nodes are not in a plan yet.
-        if !self.state.has_unresolved_target() || graph.is_edited() {
+        if !self.state.has_unresolved_target() || graph.has_uncommitted_edits() {
             return false;
         }
         self.declarer(host, out) && self.apply(graph, host, now, out)
@@ -1335,7 +1335,7 @@ impl ModSession {
     /// `Phase::AfterCommit`'s resyncs: sent on an update that owes them and
     /// has nothing left to commit.
     pub(crate) fn resync<F: Float>(&mut self, graph: &mut Graph<F>) {
-        if self.state.modulation.resyncs_owed() > 0 && !graph.is_edited() {
+        if self.state.modulation.resyncs_owed() > 0 && !graph.has_uncommitted_edits() {
             graph.send_mod_resyncs(&mut self.state.modulation);
         }
     }
