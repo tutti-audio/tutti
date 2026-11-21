@@ -66,7 +66,8 @@
 //! own payload (in participant order) once every participant has left, so the
 //! caller unwinds with the node's message. The participant moves the payload
 //! into its [`Worker`] without allocating, and it is freed while the caller
-//! unwinds, never inside the block. Only when no payload was stored (the pool
+//! unwinds, never inside the block; so is a second participant's payload, which
+//! is not reported. Only when no payload was stored (the pool
 //! returned before the tasks were done) does the caller panic with a message
 //! naming the cause. The node's own panic message has already been printed by
 //! the panic hook.
@@ -167,6 +168,19 @@ pub(crate) struct Worker {
     /// The payload of a node's panic on this participant, moved here without
     /// allocating; the caller resumes it once every participant has left.
     panic: Option<Box<dyn Any + Send>>,
+}
+
+/// The workers of a block whose first panic the caller is resuming: dropped as
+/// the caller unwinds, it frees every other participant's payload then, never
+/// inside a block.
+struct Unclaimed<'w>(&'w mut [Worker]);
+
+impl Drop for Unclaimed<'_> {
+    fn drop(&mut self) {
+        for w in self.0.iter_mut() {
+            drop(w.panic.take());
+        }
+    }
 }
 
 /// The parallel executor's per-plan state: the task graph and every claim
@@ -437,6 +451,9 @@ pub(crate) fn run_block<F: Float>(
         shared.graph.is_aborted() || !shared.graph.done()
     };
     if aborted && let Some(payload) = workers.iter_mut().find_map(|w| w.panic.take()) {
+        // Every other participant's payload is freed by this guard as the
+        // caller unwinds, so none is left for a later block to drop in scope.
+        let _rest = Unclaimed(workers);
         resume_unwind(payload);
     }
     assert!(
