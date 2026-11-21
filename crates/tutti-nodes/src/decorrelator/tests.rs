@@ -57,3 +57,21 @@ fn an_impulse_through_the_node_is_a_sparse_response_of_unit_energy() {
     }
     assert_ne!(y[0], y[1]);
 }
+
+/// A density past the graph's rate is lowered to it at prepare, as one impulse a frame: at
+/// 8 kHz, 20000 impulses a second over 10 ms is 80 impulses on frames 0 to 79, so the tail is
+/// frame 79 (not a panic, and not the 200 impulses the density names).
+#[test]
+fn a_density_past_the_graph_rate_is_one_impulse_a_frame() {
+    use crate::test_support::prepared_at;
+    use tutti_units::SampleRate;
+    let n = prepared_at(
+        DecorrelatorNode::<f32>::from(
+            DecorrelatorConfig::new(1_u16)
+                .density(VelvetDensity::new(Hz::new(20_000.0)).unwrap())
+                .length(VelvetLength::new(Seconds::new(0.01)).unwrap()),
+        ),
+        SampleRate::of(8_000.0),
+    );
+    assert_eq!(n.shape().tail, Tail::Finite(Samples::new(79)));
+}

@@ -304,7 +304,7 @@ pub mod nodes {
     pub use tutti_dsp::{
         Decorrelator, EarlyReflections, EarlyReflectionsError, MAX_TAP_DELAY, ReflectionOrder,
         ShoeboxConfig, ShoeboxError, ShoeboxRoom, VelvetDensity, VelvetDensityError, VelvetLength,
-        VelvetLengthError, VelvetNoise, VelvetPulse, Wall,
+        VelvetLengthError, VelvetNoise, VelvetNoiseError, VelvetPulse, Wall,
     };
     pub use tutti_dsp::{
         Envelope, EnvelopeCurve, EnvelopeDesign, EnvelopeLeg, EnvelopePace, EnvelopeStage,
@@ -749,7 +749,7 @@ pub mod soundfont {
         LoopMode, Pcm24, Preset, PresetGenerator, PresetRegion, SampleHeader, SamplePool, Side,
         SoundFont, SoundFontInfo, SoundFontVersion, SummedGenerator, WrongLevelGenerator,
     };
-    pub use tutti_soundfont::{Polyphony, PolyphonyError, Settings, SoundFontUnit};
+    pub use tutti_soundfont::{MissingPresets, Polyphony, PolyphonyError, Settings, SoundFontUnit};
 }
 
 /// Plugin hosting (`tutti-plugin`): the main-thread proof, the bridge and

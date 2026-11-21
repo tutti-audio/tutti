@@ -249,6 +249,18 @@ pub(super) const ALLOW: &[Allow] = &[
         reason: "an FFI crate's raw types mirror a C ABI or an OS call, not an app's configuration",
     },
     ty(
+        "crates/tutti-dsp/src/decorrelator.rs",
+        "VelvetNoise::new",
+        CTOR,
+        "a density and a rate must agree (at most one impulse a frame): validity of two arguments together, which neither type can carry",
+    ),
+    ty(
+        "crates/tutti-dsp/src/decorrelator.rs",
+        "Decorrelator::new",
+        CTOR,
+        "builds `VelvetNoise::new` per channel: the same density-against-rate validity",
+    ),
+    ty(
         "crates/tutti-buffers/src/input_output.rs",
         "InputOutput::new",
         CTOR,

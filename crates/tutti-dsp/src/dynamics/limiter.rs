@@ -87,8 +87,8 @@ pub enum PeakDetection {
     /// `m + ceil((U - 7) / 4)` through `m + 1 + floor(U / 4)`, the newest of which must
     /// have been seen by the time the audio leaves, `lookahead` frames after it. (A
     /// frame's reach of one frame either side is an approximation, valid while the gain
-    /// varies slowly across it.) [`LimiterBank::detecting`] refuses a lookahead under
-    /// `1 + floor(U / 4)` frames, about 20. The latency stays the lookahead; only the
+    /// varies slowly across it.) [`LimiterBank::detecting`] raises a lookahead under
+    /// `1 + floor(U / 4)` frames, about 20, to it. The latency is the lookahead used; only the
     /// window narrows.
     TruePeak,
 }
@@ -96,29 +96,6 @@ pub enum PeakDetection {
 /// The input of the true-peak detector, held to this magnitude (2^100): the half-band sums
 /// of a sample this large stay finite, and a larger one reads as it.
 const TRUE_PEAK_INPUT_LIMIT: Amplitude = Amplitude::new(1.267_650_600_228_229_4e30);
-
-/// What [`LimiterBank::detecting`] refused.
-#[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
-pub enum TruePeakError {
-    /// The lookahead is shorter than the up-sampler's delay lets the detection line up.
-    #[error(
-        "a true-peak limiter at this rate looks at least {needed} frames ({ms:.2} ms) ahead, not {lookahead} frames",
-        needed = needed.get(),
-        lookahead = lookahead.get(),
-        ms = shortest.get().get() * 1e3
-    )]
-    Lookahead {
-        /// The frames the lookahead came to at the rate.
-        lookahead: Samples,
-        /// The fewest frames that line up.
-        needed: Samples,
-        /// The shortest lookahead that lines up at the rate.
-        shortest: Lookahead,
-    },
-    /// The up-sampler cannot be designed at the rate.
-    #[error("the true-peak oversampler cannot be designed: {0}")]
-    Design(#[from] FirError),
-}
 
 /// The controls of a [`LimiterBank`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -354,34 +331,46 @@ impl<F: Float> LimiterBank<F> {
     /// [`Sample`](PeakDetection::Sample), a true-peak one for
     /// [`TruePeak`](PeakDetection::TruePeak). Allocates: build it on the control side.
     ///
+    /// For true-peak detection `lookahead` is a floor. The detection needs `1 + floor(U / 4)`
+    /// frames of lookahead for the up-sampler's delay `U` (about 20), and a shorter `lookahead`
+    /// is raised to that, computed once here. The latency, [`latency`](Self::latency), is the
+    /// frames used, which is longer than `lookahead` then. Sample detection has no floor.
+    ///
     /// # Errors
     ///
-    /// [`TruePeakError::Lookahead`] when a true-peak `lookahead` is under what the
-    /// up-sampler's delay needs at `rate`: the two settings are valid only together.
-    /// [`TruePeakError::Design`] when the up-sampler cannot be designed at `rate`.
+    /// [`FirError`] when the true-peak up-sampler cannot be designed at `rate`.
     pub fn detecting(
         width: ChannelLayout,
         lookahead: Lookahead,
         rate: SampleRate,
         detection: PeakDetection,
-    ) -> Result<Self, TruePeakError> {
+    ) -> Result<Self, FirError> {
         if detection == PeakDetection::Sample {
             return Ok(Self::new(width, lookahead, rate));
         }
-        let plan: OversamplingPlan = Oversampling::new(OversamplingFactor::X4).plan(rate)?;
-        let delay = plan.upsample_delay();
-        let frames = lookahead_frames(lookahead, rate);
-        let needed = 1 + delay / 4;
-        if frames < needed {
-            let shortest = Lookahead::new(Seconds::new(needed as f64 / rate.get()))
-                .unwrap_or(Lookahead(Lookahead::CAP));
-            return Err(TruePeakError::Lookahead {
-                lookahead: Samples::new(frames),
-                needed: Samples::new(needed),
-                shortest,
-            });
-        }
-        let first = delay.saturating_sub(7).div_ceil(4);
+        let plan = Self::true_peak_plan(rate)?;
+        let frames = lookahead_frames(lookahead, rate).max(Self::true_peak_frames(&plan));
+        Ok(Self::true_peak(width, frames, rate, &plan))
+    }
+
+    /// The 4x up-sampler plan the true-peak detector reads through.
+    fn true_peak_plan(rate: SampleRate) -> Result<OversamplingPlan, FirError> {
+        Oversampling::new(OversamplingFactor::X4).plan(rate)
+    }
+
+    /// The fewest lookahead frames that line up with `plan`'s delay.
+    fn true_peak_frames(plan: &OversamplingPlan) -> usize {
+        1 + plan.upsample_delay() / 4
+    }
+
+    /// A true-peak limiter of `frames` of lookahead, at least [`true_peak_frames`](Self::true_peak_frames).
+    fn true_peak(
+        width: ChannelLayout,
+        frames: usize,
+        rate: SampleRate,
+        plan: &OversamplingPlan,
+    ) -> Self {
+        let first = plan.upsample_delay().saturating_sub(7).div_ceil(4);
         let channels = usize::from(width.count());
         let block = MaxBlock::of(Samples::new(CHUNK));
         let detector = Detector {
@@ -389,13 +378,7 @@ impl<F: Float> LimiterBank<F> {
             lag: vec![F::ZERO; first],
             at: 0,
         };
-        Ok(Self::build(
-            width,
-            frames,
-            frames - first + 1,
-            rate,
-            Some(detector),
-        ))
+        Self::build(width, frames, frames - first + 1, rate, Some(detector))
     }
 
     /// The processing latency: the lookahead in frames, at least one.

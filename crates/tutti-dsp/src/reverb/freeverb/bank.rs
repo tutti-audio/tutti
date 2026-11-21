@@ -104,12 +104,12 @@ impl<F: Float + Lerp> FreeverbRamps<F> {
 ///
 /// Built on the control side for one rate, where it allocates the lines; a clone keeps their
 /// size, and [`reset`](Self::reset) zeroes them without allocating. Its comb and all-pass
-/// lengths are Freeverb's, tuned at 44.1 kHz and scaled to the rate rounded to whole hertz.
+/// lengths are Freeverb's, tuned at 44.1 kHz and scaled to the rate as given.
 #[derive(Clone, Debug)]
 pub struct FreeverbBank<F: Float> {
     combs: [Vec<CombFilter<F>>; 2],
     all_passes: [Vec<AllPassFilter<F>>; 2],
-    /// The rate the lines were tuned for, in whole hertz.
+    /// The rate the lines were tuned for.
     rate: SampleRate,
     /// Frames of the current chunk already run: 0 at a chunk's start.
     into: usize,
@@ -125,11 +125,10 @@ impl<F: Float + Lerp> FreeverbBank<F> {
     /// can align it here, so a new target lands on a chunk's start.
     pub const CHUNK: usize = CHUNK;
 
-    /// A silent Freeverb at `rate`, rounded to whole hertz. Allocates the filter lines: each is
+    /// A silent Freeverb at `rate`, as given: a fractional rate scales the tunings as it is. Allocates the filter lines: each is
     /// at least 1 frame and at most 65,536 (a rate no device has saturates).
     #[must_use]
     pub fn new(rate: SampleRate) -> Self {
-        let rate = SampleRate::new(rate.get().round()).unwrap_or(rate);
         let side = |spread: usize| {
             (
                 COMBS

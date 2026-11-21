@@ -31,7 +31,6 @@ pub use key_source::KeySource;
 pub use leveller::{LevellerBank, LevellerControls};
 pub use limiter::{
     LimiterBank, LimiterControls, LimiterSignals, Lookahead, LookaheadError, PeakDetection,
-    TruePeakError,
 };
 pub use multiband::{
     BandReductions, BandSettings, BankShape, MultibandBands, MultibandBandsError, MultibandBank,

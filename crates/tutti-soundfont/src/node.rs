@@ -39,6 +39,9 @@ impl<F: Float + SimdLanes> Node<F> for SoundFontUnit<F> {
 
     /// Re-rate to the prepared rate (keeping the preset), and size the
     /// render scratch to the largest block. Control thread.
+    ///
+    /// A rate outside 16 to 192 kHz is accepted and the unit keeps its own rate, so it plays at
+    /// the wrong pitch: the graph has no supported-rate range on a `Shape` to refuse it with yet.
     fn prepare(&mut self, p: &Prepare) {
         let rate = p.sample_rate();
         if rate.get().round() != self.sample_rate.get().round()
