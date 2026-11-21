@@ -10,6 +10,7 @@ mod input_port;
 mod objc_exception;
 mod output_port;
 mod receive;
+mod retry;
 mod run_loop;
 mod source;
 mod ump_destination;
