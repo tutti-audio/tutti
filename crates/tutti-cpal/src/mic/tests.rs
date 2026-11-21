@@ -448,7 +448,10 @@ fn a_disconnected_mic_hands_over_its_buffered_frames_then_reads_failed() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("mic-fault.wav");
     let mut sink = mic
-        .matching_sink(&path, Format::Wav(tutti_codec::Pcm::Float32))
+        .matching_sink(
+            std::fs::File::create(&path).unwrap(),
+            Format::Wav(tutti_codec::Pcm::Float32),
+        )
         .unwrap();
 
     prod.push_interleaved(Interleaved::new(&[0.5, -0.5], prod.layout()).unwrap());
@@ -496,7 +499,7 @@ fn a_mic_whose_backend_keeps_failing_without_audio_is_failed() {
 // test binary rather than in `tests/` (where the output gates are). Nothing
 // else in this binary allocates inside an `assert_no_alloc` section.
 #[global_allocator]
-static ALLOC: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
 /// The capture callback does not allocate: blocks of `f32` and `i16`, wider than
 /// a chunk, with the recording ring and the monitor ring both filling and

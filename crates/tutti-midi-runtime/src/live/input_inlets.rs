@@ -80,7 +80,7 @@ pub type ArrivalClock = Arc<dyn Fn() -> Option<(Instant, Moment)> + Send + Sync>
 /// nothing.
 ///
 /// Ephemeral: it names a connection of this run, so it has no serde (a saved
-/// device is a `DeviceId`).
+/// device is a `MidiDeviceId`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct InputId(NonZeroU64);
 

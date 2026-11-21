@@ -28,7 +28,7 @@ use super::record::{Cmd, Record, Streams, step};
 use super::status::StatusCell;
 use crate::Loop;
 use crate::PlaceError;
-use crate::voice::Direction;
+use crate::voice::PlayDirection;
 use crate::voice::interp::Place;
 use crate::voice_width;
 use tutti_buffers::ChannelLayout;
@@ -256,7 +256,7 @@ pub(super) fn build_stream<F: RingFloat>(
     // The loop and direction the control side asks for: the record reads
     // them, the stream's handle (and the voice node, for a node) publishes.
     let looping = ControlCell::ringing(None::<Loop>, Arc::new(shared.bell.clone()));
-    let direction = ControlCell::ringing(Direction::Forward, Arc::new(shared.bell.clone()));
+    let direction = ControlCell::ringing(PlayDirection::Forward, Arc::new(shared.bell.clone()));
     let record = Record::new(
         producer,
         Arc::clone(&cells),
@@ -357,7 +357,7 @@ fn capture_loop<F: RingFloat>(record: &mut Record<F>, ask: Option<Loop>, config:
 /// [`apply_mapping`]'s: a switch the reader crossfades across just past the
 /// block it is in. The direction is the published map's own, so the one
 /// publish carries it to the voice and to a fork.
-fn turn<F: RingFloat>(record: &mut Record<F>, direction: Direction, config: &BufferConfig) {
+fn turn<F: RingFloat>(record: &mut Record<F>, direction: PlayDirection, config: &BufferConfig) {
     let reverse = direction.is_reverse();
     let rate = record.cells.read_rate();
     let writer = &mut record.out;

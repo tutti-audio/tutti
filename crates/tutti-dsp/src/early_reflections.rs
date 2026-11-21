@@ -1,4 +1,4 @@
-//! [`EarlyReflections`]: the realization of the reverb model's [`Taps`] stage.
+//! [`EarlyReflections`]: the realization of the reverb model's [`TapSet`] stage.
 //!
 //! The stage is a sum of delayed, scaled copies of one signal, each tap `g z^-d` on an output
 //! channel: `y_c[n] = sum over the taps t of channel c of g_t x[n - d_t]`, with the one signal
@@ -12,7 +12,7 @@ use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{ReadPosition, SampleSpan, Samples};
 
 use crate::delay::DelayRing;
-use crate::{MAX_CHANNELS, Taps, lerp};
+use crate::{MAX_CHANNELS, TapSet, lerp};
 
 /// The frames the input is averaged in at a time.
 const CHUNK: usize = 64;
@@ -21,7 +21,7 @@ const CHUNK: usize = 64;
 /// needs being 7.7 MB of `f32`.
 pub const MAX_TAP_DELAY: Samples = Samples::new(1_920_000);
 
-/// Why a [`Taps`] cannot be realized.
+/// Why a [`TapSet`] cannot be realized.
 #[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
 pub enum EarlyReflectionsError {
     /// A tap's gain is NaN or infinite.
@@ -61,7 +61,7 @@ struct Reflection<F> {
     channel: usize,
 }
 
-/// The [`Taps`] stage of a reverb model, running over the float `F`.
+/// The [`TapSet`] stage of a reverb model, running over the float `F`.
 ///
 /// Built on the control side, where it allocates its history ring and tap list; nothing it
 /// does after that allocates.
@@ -73,7 +73,7 @@ pub struct EarlyReflections<F: Float> {
     tail: Samples,
 }
 
-impl<F: Float> TryFrom<&Taps> for EarlyReflections<F> {
+impl<F: Float> TryFrom<&TapSet> for EarlyReflections<F> {
     type Error = EarlyReflectionsError;
 
     /// The stage `taps` describes. Allocates.
@@ -85,7 +85,7 @@ impl<F: Float> TryFrom<&Taps> for EarlyReflections<F> {
     ///
     /// [`EarlyReflectionsError`] for a tap whose gain is not finite, whose channel is past
     /// [`MAX_CHANNELS`] or whose delay is past [`MAX_TAP_DELAY`].
-    fn try_from(taps: &Taps) -> Result<Self, Self::Error> {
+    fn try_from(taps: &TapSet) -> Result<Self, Self::Error> {
         let longest = MAX_TAP_DELAY;
         let mut list = Vec::with_capacity(taps.taps.len());
         let (mut channels, mut last) = (1, SampleSpan::ZERO);

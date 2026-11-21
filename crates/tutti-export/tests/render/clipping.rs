@@ -157,3 +157,45 @@ fn an_infinity_is_a_clip_and_a_nan_is_not() {
         assert_eq!(written.clipped_samples, counted, "{value}");
     }
 }
+
+/// A noise-shaped export normalized to 0 dBTP clips nothing, and its target sits below the
+/// unshaped one by the feedback: the shaped error reaches `(1 + Σ|c_k|)` times the largest
+/// recorded error (dither plus half an LSB), so the ceiling drops by `Σ|c_k|` times that.
+/// The sine's crests sit on the ceiling, so any shortfall in the headroom is a clip.
+#[test]
+fn a_shaped_zero_dbtp_export_leaves_the_feedback_its_headroom() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("shaped.wav");
+    let gain = tutti_dsp::NoiseShaping::new(RATE).feedback_gain().get();
+    for (pcm, bits) in [(Pcm::Int16, 16u32), (Pcm::Int24, 24)] {
+        for (dither, peak) in [
+            (None, 0.0),
+            (Some(DitherShape::Rectangular), 0.5),
+            (Some(DitherShape::Triangular), 1.0),
+        ] {
+            let mut cfg = config(pcm, dither);
+            cfg.noise_shaping = true;
+            let written = render_normalized_to_file(
+                quarter_rate_sine(),
+                &cfg,
+                &FrozenClock,
+                Normalize::peak(Db::new(0.0)),
+                &path,
+            )
+            .unwrap();
+            assert_eq!(written.clipped_samples, 0, "{pcm:?} {dither:?}");
+            let lsbs = 1.0 + peak + gain * (peak + 0.5);
+            let want = Db::from_amplitude(tutti_units::Amplitude::new(
+                1.0 - lsbs / f64::from(1u32 << (bits - 1)),
+            ))
+            .get();
+            let landed = written.measured.unwrap().true_peak.get() + written.gain.unwrap().get();
+            assert!(
+                (landed - want).abs() < 1e-5,
+                "{pcm:?} {dither:?}: target {landed} vs {want}"
+            );
+            let unshaped_lsbs = 1.0 + peak;
+            assert!(lsbs > unshaped_lsbs);
+        }
+    }
+}

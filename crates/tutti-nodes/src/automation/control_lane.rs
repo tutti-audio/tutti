@@ -13,8 +13,8 @@ use tutti_graph::{
     Prepare, Shape, Status, TransportPosition,
 };
 use tutti_modulation::{
-    CONTROL_GRID, Clock, ControlProgram, CurveSegment, DepthSnapshot, MAX_LANE_INPUTS, ProgramTime,
-    SourceId, Waveform,
+    CONTROL_GRID, ControlProgram, CurveSegment, DepthSnapshot, LayerClock, MAX_LANE_INPUTS,
+    ProgramTime, SourceId, Waveform,
 };
 use tutti_rt::ParamCell;
 use tutti_rt::{Publisher, Reader};
@@ -1059,8 +1059,8 @@ impl Block<'_> {
 /// Whether any of `program`'s moving waves runs on the play clock (a
 /// constant wave, a layer's or its `depth_by`'s, moves on no clock).
 fn has_seconds(program: &ControlProgram) -> bool {
-    let moves = |c: &Clock, w: &Waveform| {
-        matches!(c, Clock::Seconds { .. }) && !matches!(w, Waveform::Const(_))
+    let moves = |c: &LayerClock, w: &Waveform| {
+        matches!(c, LayerClock::Seconds { .. }) && !matches!(w, Waveform::Const(_))
     };
     program.layers().iter().any(|l| {
         moves(&l.clock, &l.wave)

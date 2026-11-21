@@ -582,10 +582,9 @@ fn an_offline_fork_renders_the_same_on_a_pool() {
     }
 }
 
-/// A node that panics on a worker aborts the block, and the caller panics
-/// with a message naming the cause once every participant has left.
+/// A node that panics on a worker aborts the block, and the caller unwinds
+/// with the node's own payload once every participant has left.
 #[test]
-#[should_panic(expected = "a node panicked on a parallel worker")]
 fn a_panic_on_a_worker_reaches_the_caller() {
     struct Boom;
     impl Node for Boom {
@@ -629,15 +628,23 @@ fn a_panic_on_a_worker_reaches_the_caller() {
     ed.commit().expect("commits");
     let input = vec![0.5f32; MAX_BLOCK];
     let mut chans = vec![vec![0.0f32; MAX_BLOCK]; 6];
-    for _ in 0..4 {
-        let mut outs: Vec<&mut [f32]> = chans.iter_mut().map(Vec::as_mut_slice).collect();
-        exec.process(
-            MAX_BLOCK,
-            &TransportPosition::default(),
-            &[&input],
-            &mut outs,
-        );
-    }
+    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        for _ in 0..4 {
+            let mut outs: Vec<&mut [f32]> = chans.iter_mut().map(Vec::as_mut_slice).collect();
+            exec.process(
+                MAX_BLOCK,
+                &TransportPosition::default(),
+                &[&input],
+                &mut outs,
+            );
+        }
+    }));
+    let payload = caught.expect_err("the node's panic reaches the caller");
+    assert_eq!(
+        payload.downcast_ref::<&str>().copied(),
+        Some("boom"),
+        "the caller's payload is the node's own"
+    );
 }
 
 /// The executor hands its pool's waits to the task graph, not the defaults:

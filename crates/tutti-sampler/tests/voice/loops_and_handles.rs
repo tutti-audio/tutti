@@ -14,9 +14,9 @@ use tutti_buffers::Interleaved;
 use tutti_buffers::Wave;
 use tutti_sampler::testing::{MockTransport, loop_frames, play, wait_for_open};
 use tutti_sampler::{
-    Direction, DiskStreamer, DiskStreamerConfig, DiskVoice, Loop, LoopError, Manual, MemorySource,
-    Playback, SlotId, Stream, StreamStart, VoiceNode, VoiceNodeHandle, VoicePool, VoiceSource,
-    VoiceWindow,
+    DiskStreamer, DiskStreamerConfig, DiskVoice, Loop, LoopError, Manual, MemorySource,
+    PlayDirection, Playback, SlotId, StreamHandle, StreamStart, VoiceNode, VoiceNodeHandle,
+    VoicePool, VoiceSource, VoiceWindow,
 };
 use tutti_units::{Beat, Bpm, PlaybackRate, SampleRate, Samples};
 
@@ -68,7 +68,7 @@ fn streaming(
     dir: &Path,
 ) -> (
     DiskStreamer<Manual<f32>, f32>,
-    Stream<f32>,
+    StreamHandle<f32>,
     tutti_sampler::StreamReader<f32>,
 ) {
     let path = dir.join("ramp.wav");
@@ -191,7 +191,7 @@ fn render_with(node: &mut VoiceNode<f32>, frames: usize) -> Vec<f32> {
 /// dropped both silently is not writable: see `VoicePoolHandle::add`.)
 #[test]
 fn a_disk_voice_added_to_a_pool_keeps_its_loop_and_direction() {
-    for direction in [Direction::Forward, Direction::Reverse] {
+    for direction in [PlayDirection::Forward, PlayDirection::Reverse] {
         let dir = tempfile::tempdir().expect("a temp dir");
         let (mut streamer, stream, reader) = streaming(dir.path());
         let voice = DiskVoice::from_reader(reader, window());
@@ -214,13 +214,13 @@ fn a_disk_voice_added_to_a_pool_keeps_its_loop_and_direction() {
             // by a crossfade from what it was playing (about 256 frames past
             // the block it is in, over 512 more), so the mirror is judged past
             // it.
-            Direction::Reverse => {
+            PlayDirection::Reverse => {
                 const TURNED: usize = 1_024;
                 assert_frames("reversed disk voice in a pool", &got[TURNED..], |n| {
                     LEN - 1 - (TURNED + n)
                 });
             }
-            Direction::Forward => {
+            PlayDirection::Forward => {
                 assert_frames("looped disk voice in a pool", &got, |n| {
                     looped_frame(n, 300, 700)
                 });
@@ -328,7 +328,7 @@ fn free_node(play: Playback) -> VoiceNode<f32> {
 #[test]
 fn a_reversed_free_running_voice_plays_the_ramp_backwards() {
     let mut node = free_node(Playback {
-        direction: Direction::Reverse,
+        direction: PlayDirection::Reverse,
         ..Playback::default()
     });
     let got = render_with(&mut node, LEN + 128);
@@ -551,7 +551,7 @@ fn a_command_for_an_id_with_no_voice_is_refused_and_changes_nothing() {
             Err(NoSuchSlot(unknown))
         );
         assert_eq!(
-            handle.set_direction(unknown, Direction::Reverse),
+            handle.set_direction(unknown, PlayDirection::Reverse),
             Err(NoSuchSlot(unknown))
         );
         assert_eq!(

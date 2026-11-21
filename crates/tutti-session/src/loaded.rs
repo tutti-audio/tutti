@@ -63,7 +63,7 @@ pub enum LoadError {
     /// A file's header could not be read to stream it.
     #[cfg(all(feature = "sampler", codec))]
     #[error(transparent)]
-    Probe(Arc<tutti_sampler::ProbeError>),
+    Probe(Arc<tutti_sampler::SampleProbeError>),
     /// An asset declared streamed cannot be streamed by this build: its
     /// container reports no length, its decoder cannot seek, or no codec covers
     /// it. Carries the asset's [`name`](tutti_platform::Asset::name).

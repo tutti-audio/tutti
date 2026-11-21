@@ -275,4 +275,4 @@ pub use types::{PluginInfo, Vst2ProcessContext};
 // scopes. Matches the wiring used by clap-host and vst3-host.
 #[cfg(test)]
 #[global_allocator]
-static RT_NO_ALLOC_HARNESS: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+static RT_NO_ALLOC_HARNESS: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;

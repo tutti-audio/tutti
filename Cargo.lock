@@ -924,6 +924,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
+name = "gloo-timers"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4460540da666acdb5722b2a62ac47d18f627fcfc0c728d04dc7226b3f6d40a7"
+dependencies = [
+ "futures-channel",
+ "futures-core",
+ "js-sys",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2547,6 +2559,7 @@ dependencies = [
  "objc2-foundation",
  "thiserror 2.0.21",
  "tutti-buffers",
+ "tutti-fixtures",
  "tutti-midi-protocol",
  "tutti-plugin-types",
  "tutti-rt",
@@ -2801,6 +2814,7 @@ dependencies = [
 name = "tutti-fixtures"
 version = "0.0.1"
 dependencies = [
+ "assert_no_alloc",
  "coreaudio-sys",
  "hound",
  "raw-window-handle",
@@ -3085,11 +3099,13 @@ dependencies = [
  "async-executor",
  "async-task",
  "futures-lite",
+ "gloo-timers",
  "libc",
  "tempfile",
  "thiserror 2.0.21",
  "thread-priority",
  "tracing",
+ "wasm-bindgen-futures",
  "web-time",
  "windows",
 ]
@@ -3100,7 +3116,6 @@ version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
  "dpi",
- "futures-channel",
  "futures-lite",
  "interprocess",
  "libc",
@@ -3199,7 +3214,6 @@ dependencies = [
  "assert_no_alloc",
  "criterion",
  "dpi",
- "futures-channel",
  "futures-lite",
  "libloading 0.9.1",
  "parking_lot",
@@ -3232,7 +3246,6 @@ dependencies = [
  "bytemuck",
  "crossbeam-queue",
  "dpi",
- "futures-channel",
  "futures-lite",
  "getrandom",
  "interprocess",
@@ -3330,6 +3343,7 @@ dependencies = [
  "bitflags 2.13.2",
  "dpi",
  "futures-channel",
+ "futures-lite",
  "keyboard-types",
  "postcard",
  "proptest",
@@ -3622,6 +3636,7 @@ dependencies = [
  "assert_no_alloc",
  "libm",
  "thiserror 2.0.21",
+ "tutti-fixtures",
  "tutti-midi-protocol",
  "tutti-rt",
  "tutti-ump",
@@ -3762,7 +3777,10 @@ dependencies = [
 name = "tutti-web-test"
 version = "0.0.0"
 dependencies = [
+ "futures-lite",
+ "gloo-timers",
  "tutti",
+ "tutti-platform",
  "wasm-bindgen-test",
 ]
 

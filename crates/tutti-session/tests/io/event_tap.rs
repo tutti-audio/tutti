@@ -194,7 +194,7 @@ fn reopening_replaces_the_tap_at_the_new_rate() {
         .expect("the port exists");
     frames(5, &mut s);
     assert_eq!(drain(&mut old), vec![0, 4]);
-    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     let mut new = s
         .graph()
         .taps()
@@ -261,7 +261,7 @@ fn a_tap_of_an_event_input_hears_what_the_node_hears() {
         .expect("the input exists");
     frames(16, &mut s);
     assert_eq!(drain(&mut tap), vec![0, 4, 8, 12]);
-    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     let mut new = s
         .graph()
         .taps()

@@ -1,16 +1,14 @@
 //! The executor, the worker pool, the sample-accuracy contract and the reader ends of taps and inlets.
 //!
-//! The binary installs `AllocDisabler`, so an allocation inside an `assert_no_alloc`
+//! The binary installs `RtAllocCheck`, so an allocation inside an `assert_no_alloc`
 //! closure aborts.
 #![allow(
     clippy::disallowed_methods,
     reason = "a test starts the threads it races, outside any executor"
 )]
 
-use assert_no_alloc::AllocDisabler;
-
 #[global_allocator]
-static ALLOC: AllocDisabler = AllocDisabler;
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
 mod by_hand;
 mod chase;

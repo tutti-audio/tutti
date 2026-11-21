@@ -14,11 +14,11 @@ mod param_probe;
 #[path = "../support/param_reads.rs"]
 mod param_reads;
 
-// `assert_no_alloc` is inert unless `AllocDisabler` is the global allocator. It
+// `assert_no_alloc` is inert unless `RtAllocCheck` is the global allocator. It
 // does nothing outside an `assert_no_alloc` closure, so the other tests here are
 // unaffected.
 #[global_allocator]
-static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+static A: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
 mod clap_automation;
 mod clap_crash_recovery;

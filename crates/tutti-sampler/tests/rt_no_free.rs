@@ -21,7 +21,8 @@ use tutti_graph::contract::Direct;
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::testing::wait_for_open;
 use tutti_sampler::{
-    DiskStreamer, DiskVoice, Manual, MemorySource, Playback, SlotId, Stream, StreamStart, VoicePool,
+    DiskStreamer, DiskVoice, Manual, MemorySource, Playback, SlotId, StreamHandle, StreamStart,
+    VoicePool,
 };
 use tutti_units::{Beat, Bpm, SampleRate, Samples, StretchFactor};
 
@@ -153,7 +154,7 @@ fn write_wav(path: &std::path::Path) {
 fn stream() -> (
     tempfile::TempDir,
     DiskStreamer<Manual<f32>, f32>,
-    Stream<f32>,
+    StreamHandle<f32>,
     tutti_sampler::StreamReader<f32>,
 ) {
     let dir = tempfile::tempdir().expect("a temp dir");
@@ -166,7 +167,7 @@ fn stream() -> (
     (dir, streamer, stream, reader)
 }
 
-/// **Dropping a `Stream` sends; the streamer frees.** With the voice's reader
+/// **Dropping a `StreamHandle` sends; the streamer frees.** With the voice's reader
 /// already gone (so the streamer's writer is the ring's last holder), dropping
 /// the handle on the control thread frees no ring, and the ring is freed in the
 /// streamer's step that handles the close: the thread that steps, never the one
@@ -227,7 +228,7 @@ fn a_block_that_ends_after_a_publish_frees_nothing() {
 /// frees the ring wherever it happens.
 fn pool_holding_the_last_holder(
     streamer: DiskStreamer<Manual<f32>, f32>,
-    stream: Stream<f32>,
+    stream: StreamHandle<f32>,
     reader: tutti_sampler::StreamReader<f32>,
 ) -> (VoicePool<f32>, tutti_sampler::VoicePoolHandle<f32>) {
     let (pool, handle) = VoicePool::new().with_handle();
@@ -281,7 +282,7 @@ fn a_removed_disk_voice_frees_its_ring_on_the_control_thread() {
 /// callback, counted as `freed_in_callback`, and a voice that is the ring's
 /// last holder frees the ring there. The
 /// audio thread's "never frees" holds except on that counted path, for a
-/// stream's ring as for anything else the voice holds. A `Stream` is not
+/// stream's ring as for anything else the voice holds. A `StreamHandle` is not
 /// involved: its handle is the control side's and was dropped first.
 ///
 /// The channel is filled by replacing a slot 64 times without collecting: each

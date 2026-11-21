@@ -13,7 +13,7 @@ use support::rig::Rig;
 use tutti_fixtures::sf2::generator;
 use tutti_midi_protocol::SysexDeviceId;
 use tutti_sf2::SoundFont;
-use tutti_soundfont::Settings;
+use tutti_soundfont::SoundFontConfig;
 use tutti_ump::{MidiChannel, MidiGroup, Rpn, SysexMessage, Ump, Voice2};
 
 /// `0:0` and `0:1` are the plain sine and an octave above it; the percussion
@@ -90,8 +90,8 @@ fn energy(rig: &mut Rig) -> (f32, f32) {
 #[test]
 fn master_volume_scales_every_plane_by_the_square_of_the_value() {
     let font = font_with(false);
-    let settings = Settings::new().device(SysexDeviceId::of(5));
-    let mut rig = Rig::with(&font, settings);
+    let config = SoundFontConfig::new(Arc::clone(&font)).device(SysexDeviceId::of(5));
+    let mut rig = Rig::with(config);
     rig.note_on(0, 69, 100);
     let (l0, r0) = energy(&mut rig);
     send(&mut rig, &device_control(0x7F, 0x01, 0x00, 0x40));
@@ -106,8 +106,8 @@ fn master_volume_scales_every_plane_by_the_square_of_the_value() {
 #[test]
 fn only_the_all_call_and_the_units_own_id_are_heard() {
     let font = font_with(false);
-    let settings = Settings::new().device(SysexDeviceId::of(5));
-    let mut rig = Rig::with(&font, settings);
+    let config = SoundFontConfig::new(Arc::clone(&font)).device(SysexDeviceId::of(5));
+    let mut rig = Rig::with(config);
     rig.note_on(0, 69, 100);
     let (l0, _) = energy(&mut rig);
     send(&mut rig, &device_control(6, 0x01, 0x00, 0x00));

@@ -16,7 +16,7 @@ use support::font::{Inst, Preset, font};
 use support::rig::{Rig, timgm6mb};
 use tutti_fixtures::sf2::generator;
 use tutti_graph::Node;
-use tutti_soundfont::Settings;
+use tutti_soundfont::SoundFontConfig;
 use tutti_ump::CCNumber;
 use tutti_units::Tail;
 
@@ -79,7 +79,7 @@ fn longest_of(font: &tutti_sf2::SoundFont, preset: usize) -> Option<Longest> {
 /// Plays the longest zone of `preset` for a second, lets it go, and returns the
 /// frames it rang after the note-off and the declared tail in frames.
 fn rang(font: &std::sync::Arc<tutti_sf2::SoundFont>, longest: &Longest) -> (usize, usize) {
-    let mut rig = Rig::with(font, Settings::new());
+    let mut rig = Rig::with(SoundFontConfig::new(std::sync::Arc::clone(font)));
     let p = &font.presets()[longest.preset];
     let bank = p.bank().map_or(0, |b| b.get());
     let patch = p.patch().map_or(0, |p| p.get());

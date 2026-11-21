@@ -18,3 +18,7 @@ workspace = true
 [dev-dependencies]
 tutti = { path = "../../crates/tutti", features = ["sampler", "analyze", "decode-wav", "encode-wav", "export", "midi"] }
 wasm-bindgen-test = "0.3.80"
+# The executor the web driver runs: two of them on one page, no session around them.
+tutti-platform = { path = "../../crates/tutti-platform" }
+futures-lite.workspace = true
+gloo-timers = { version = "0.4.1", features = ["futures"] }

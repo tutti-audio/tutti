@@ -4,6 +4,7 @@
 use std::sync::{Arc, Mutex};
 use tutti_platform::Instant;
 
+use crate::Record;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{
     Cx, Editor, EventEdge, EventIn, EventKind, EventOut, Executor, ForkByClone, Io, Node, NodeKey,
@@ -14,7 +15,7 @@ use tutti_units::{Frame, Moment, SampleRate, Samples};
 
 /// `(event input, absolute frame, event)` of every MIDI event a [`Sink`]
 /// received, in the order its inputs and frames were processed.
-pub type Seen = Arc<Mutex<Vec<(usize, u64, Ump)>>>;
+pub type Seen = Record<(usize, u64, Ump)>;
 
 /// The frame and event of each entry of `seen`, the input dropped: what a sink of
 /// one input logged.
@@ -56,7 +57,7 @@ impl Sink {
     pub fn new(ports: u16, seen: &Seen, output: Output) -> Self {
         Self {
             ports,
-            seen: Arc::clone(seen),
+            seen: seen.clone(),
             output,
         }
     }
@@ -136,7 +137,7 @@ impl EventRig {
             SampleRate::of(rate),
             MaxBlock::of(Samples::new(max_block)),
         ));
-        let seen = Seen::default();
+        let seen = Seen::new();
         editor.insert(
             Self::SINK,
             "sink",
@@ -201,7 +202,10 @@ impl EventRig {
     /// Panics when the log's lock is poisoned.
     #[must_use]
     pub fn take(&self) -> Vec<(usize, u64, Ump)> {
-        std::mem::take(&mut *self.seen.lock().expect("the log is not poisoned"))
+        let mut log = self.seen.lock().expect("the log is not poisoned");
+        let all = log.to_vec();
+        log.clear();
+        all
     }
 }
 

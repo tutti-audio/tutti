@@ -9,7 +9,7 @@ use super::Discard;
 use tutti_buffers::Interleaved;
 use tutti_buffers::{Bed, ChannelLayout};
 use tutti_fixtures::allocations;
-use tutti_measure::{Measure, Meter, WindowedLoudnessConfig};
+use tutti_measure::{Measure, StreamMeter, WindowedLoudnessConfig};
 use tutti_units::SampleRate;
 
 fn stereo(s: &[f32]) -> Interleaved<'_> {

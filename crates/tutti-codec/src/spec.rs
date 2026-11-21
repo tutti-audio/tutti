@@ -82,28 +82,40 @@ impl Spec {
         self.rate
     }
 
-    /// The rate as the integer every codec header wants.
+    /// The rate as the integer a WAV or FLAC header holds.
     ///
-    /// The one place a rate is fitted to a header, for every format: a header
-    /// cannot hold a rate that is not a whole number of Hz from 1 to
-    /// `u32::MAX`, and an out-of-range float would otherwise saturate or
-    /// (AIFF) be written raw.
-    /// (AIFF states an extended float and writes [`rate`](Self::rate) as it is,
-    /// once it has passed this check.)
+    /// A header of whole Hz cannot state a fractional rate, and rounding it
+    /// would play the file at another pitch, so it is refused. (AIFF states an
+    /// extended float and takes the rate as it is.)
     ///
     /// # Errors
     ///
-    /// [`SpecError::SampleRate`] when the rate rounds to zero, exceeds
-    /// `u32::MAX` Hz.
+    /// [`SpecError::SampleRate`] when the rate is below 1 Hz, exceeds
+    /// `u32::MAX` Hz, or is not a whole number of Hz.
     pub fn header_rate(&self) -> Result<NonZeroU32> {
-        let hz = self.rate.get().round();
-        if hz <= f64::from(u32::MAX) {
-            // In range: the cast is exact.
+        let hz = self.header_hz()?;
+        if hz.fract() == 0.0 {
+            // In range and whole: the cast is exact.
             if let Some(rate) = NonZeroU32::new(hz as u32) {
                 return Ok(rate);
             }
         }
-        Err(SpecError::SampleRate(self.rate.get()).into())
+        Err(SpecError::SampleRate(hz).into())
+    }
+
+    /// The rate as the header states it, in Hz, when it fits a header at all.
+    ///
+    /// # Errors
+    ///
+    /// [`SpecError::SampleRate`] when the rate is below 1 Hz or exceeds
+    /// `u32::MAX` Hz.
+    pub(crate) fn header_hz(&self) -> Result<f64> {
+        let hz = self.rate.get();
+        if (1.0..=f64::from(u32::MAX)).contains(&hz) {
+            Ok(hz)
+        } else {
+            Err(SpecError::SampleRate(hz).into())
+        }
     }
 
     /// The width as a non-zero channel count.

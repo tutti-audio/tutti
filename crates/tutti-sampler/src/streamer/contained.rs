@@ -17,7 +17,7 @@ use tutti_units::{Beat, Bpm, Samples};
 
 use super::command::StreamId;
 use super::decode::Seams;
-use super::status::{StreamFault, StreamPhase};
+use super::status::{StreamFailure, StreamPhase};
 use super::*;
 use crate::testing::{MockTransport, play, prepared, wait_for_open, wait_for_open_threaded};
 use crate::{DiskStreamerConfig, DiskVoice, OpenError};
@@ -99,7 +99,7 @@ impl Driver {
     }
 
     /// Opens `path` and waits for the stream to be primed.
-    fn open(&mut self, path: &Path) -> (Stream<f32>, StreamReader<f32>) {
+    fn open(&mut self, path: &Path) -> (StreamHandle<f32>, StreamReader<f32>) {
         let opened = match self {
             Self::Hand(s) => {
                 let opening = s.open_stream(path, StreamStart::HEAD);
@@ -155,7 +155,7 @@ fn a_decode_fault_is_faulted_and_the_voice_reads_silence() {
     let (stream, reader) = wait_for_open(&mut sampler, opening).expect("a cut file opens");
     assert_eq!(
         stream.status().phase,
-        StreamPhase::Faulted(StreamFault::Decode)
+        StreamPhase::Faulted(StreamFailure::Decode)
     );
 
     let mut voice = prepared(
@@ -249,7 +249,7 @@ fn a_dropped_streamer_publishes_streamer_gone() {
     drop(driver);
     assert_eq!(
         stream.status().phase,
-        StreamPhase::Faulted(StreamFault::StreamerGone)
+        StreamPhase::Faulted(StreamFailure::StreamerGone)
     );
 }
 
@@ -288,11 +288,11 @@ fn a_dropped_streamer_future_publishes_streamer_gone() {
             .expect("the file opens");
     assert_ne!(
         stream.status().phase,
-        StreamPhase::Faulted(StreamFault::StreamerGone)
+        StreamPhase::Faulted(StreamFailure::StreamerGone)
     );
     drop(streamer);
     assert!(
-        polled_until(|| stream.status().phase == StreamPhase::Faulted(StreamFault::StreamerGone)),
+        polled_until(|| stream.status().phase == StreamPhase::Faulted(StreamFailure::StreamerGone)),
         "the future never ended"
     );
 }
@@ -342,9 +342,10 @@ fn a_panicking_decode_faults_only_its_stream(threaded: bool) {
             ));
         }
 
-        let status = |open: &[(Stream<f32>, StreamReader<f32>)], i: usize| open[i].0.status().phase;
+        let status =
+            |open: &[(StreamHandle<f32>, StreamReader<f32>)], i: usize| open[i].0.status().phase;
         driver.until("the faulted stream and the others' refills", || {
-            status(&open, 0) == StreamPhase::Faulted(StreamFault::Panicked)
+            status(&open, 0) == StreamPhase::Faulted(StreamFailure::Panicked)
                 && (1..streams).all(|i| open[i].1.ring.window().1 > before[i])
         });
         for i in 1..streams {
@@ -403,11 +404,11 @@ fn a_panic_while_a_loop_is_captured_faults_that_stream() {
         .looping_cell()
         .publish(Some(loop_frames(2000, 6000, 500)));
     driver.until("the capture to fault its stream", || {
-        first.status().phase == StreamPhase::Faulted(StreamFault::Panicked)
+        first.status().phase == StreamPhase::Faulted(StreamFailure::Panicked)
     });
     assert_ne!(
         second.status().phase,
-        StreamPhase::Faulted(StreamFault::Panicked)
+        StreamPhase::Faulted(StreamFailure::Panicked)
     );
     assert!(
         !matches!(second.status().phase, StreamPhase::Faulted(_)),
@@ -613,7 +614,7 @@ fn a_fork_of_a_closed_stream_fails_even_after_a_decode_fault() {
     let (stream, reader) = wait_for_open(&mut sampler, opening).expect("a cut file opens");
     assert_eq!(
         stream.status().phase,
-        StreamPhase::Faulted(StreamFault::Decode),
+        StreamPhase::Faulted(StreamFailure::Decode),
         "setup: the stream met its fault first"
     );
     let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));

@@ -29,14 +29,16 @@ impl EndpointId {
     }
 }
 
-/// What a device is known by, as far as the OS lets it be known.
+/// What an OS endpoint is known by across restarts: the UMP Product Instance Id,
+/// CoreMIDI's unique id, ALSA client and port names, or a WinMM port with its
+/// direction. [`EndpointId`] is the OS's live handle to the same endpoint.
 ///
 /// With the `serde` feature the document names the variant, so renaming one
 /// breaks saved files.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
-pub enum Identity {
+pub enum OsEndpointIdentity {
     /// The UMP Product Instance Id: the device's own, the same across restarts
     /// and across ports.
     Product(ProductInstanceId),
@@ -59,7 +61,7 @@ pub enum Identity {
     WinMmOutput(WinMmDevice),
 }
 
-impl Identity {
+impl OsEndpointIdentity {
     /// An ALSA device known by its client and port name.
     #[must_use]
     pub fn alsa(client: impl Into<String>, port: impl Into<String>) -> Self {
@@ -118,7 +120,7 @@ impl fmt::Display for WinMmDevice {
     }
 }
 
-/// A device's id: its [`Identity`] and an ordinal that tells apart devices the
+/// A device's id: its [`OsEndpointIdentity`] and an ordinal that tells apart devices the
 /// OS names alike.
 ///
 /// Two identical keyboards share an identity; the table gives the first to
@@ -138,22 +140,22 @@ impl fmt::Display for WinMmDevice {
 /// The serde form is the plain derive. The fields are private, but there is no
 /// raw to refuse: any identity string and any `u32` ordinal is an id the table
 /// could have minted, so `new` has no check for a `try_from` to share. The
-/// document names the `Identity` variants, so renaming one breaks saved files.
+/// document names the `OsEndpointIdentity` variants, so renaming one breaks saved files.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct DeviceId {
-    identity: Identity,
+pub struct MidiDeviceId {
+    identity: OsEndpointIdentity,
     ordinal: u32,
 }
 
-impl DeviceId {
-    pub(crate) fn new(identity: Identity, ordinal: u32) -> Self {
+impl MidiDeviceId {
+    pub(crate) fn new(identity: OsEndpointIdentity, ordinal: u32) -> Self {
         Self { identity, ordinal }
     }
 
     /// What the OS knows the device by.
     #[must_use]
-    pub fn identity(&self) -> &Identity {
+    pub fn identity(&self) -> &OsEndpointIdentity {
         &self.identity
     }
 
@@ -164,14 +166,14 @@ impl DeviceId {
     }
 }
 
-impl fmt::Display for DeviceId {
+impl fmt::Display for MidiDeviceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.identity {
-            Identity::Product(id) => write!(f, "product:{id}")?,
-            Identity::CoreMidi(id) => write!(f, "coremidi:{id}")?,
-            Identity::Alsa { client, port } => write!(f, "alsa:{client}/{port}")?,
-            Identity::WinMmInput(device) => write!(f, "winmm-in:{device}")?,
-            Identity::WinMmOutput(device) => write!(f, "winmm-out:{device}")?,
+            OsEndpointIdentity::Product(id) => write!(f, "product:{id}")?,
+            OsEndpointIdentity::CoreMidi(id) => write!(f, "coremidi:{id}")?,
+            OsEndpointIdentity::Alsa { client, port } => write!(f, "alsa:{client}/{port}")?,
+            OsEndpointIdentity::WinMmInput(device) => write!(f, "winmm-in:{device}")?,
+            OsEndpointIdentity::WinMmOutput(device) => write!(f, "winmm-out:{device}")?,
         }
         write!(f, "#{}", self.ordinal)
     }
@@ -217,7 +219,7 @@ impl PortDirection {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DeviceInfo {
     /// How to open it.
-    pub id: DeviceId,
+    pub id: MidiDeviceId,
     /// The name to show, as the OS reports it.
     pub name: String,
     /// Which way MIDI flows.

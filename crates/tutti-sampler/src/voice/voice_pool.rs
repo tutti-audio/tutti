@@ -646,7 +646,7 @@ fn a_voice_node_reads_a_wave_at_another_rate_at_any_block_length() {
     const LEN: usize = 4_096;
     let data: Vec<f32> = (0..LEN).map(|i| (i + 1) as f32).collect();
     let wave = Arc::new(Wave::from_mono(SampleRate::of(24_000.0), Mono::new(&data)));
-    for direction in [Direction::Forward, Direction::Reverse] {
+    for direction in [PlayDirection::Forward, PlayDirection::Reverse] {
         for via_tick in [false, true] {
             let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
             let sampler =
@@ -673,8 +673,8 @@ fn a_voice_node_reads_a_wave_at_another_rate_at_any_block_length() {
             for (n, &got) in out.iter().enumerate().skip(4) {
                 let at = n as f32 / 2.0;
                 let want = match direction {
-                    Direction::Forward => at + 1.0,
-                    Direction::Reverse => LEN as f32 - at,
+                    PlayDirection::Forward => at + 1.0,
+                    PlayDirection::Reverse => LEN as f32 - at,
                 };
                 assert!(
                     (got - want).abs() < 1e-2,
@@ -1017,7 +1017,7 @@ fn insert_voice_is_audible_without_channel() {
                 gain: sampler.gain(),
                 speed: sampler.speed(),
                 loop_: sampler.loop_(),
-                direction: Direction::Forward,
+                direction: PlayDirection::Forward,
                 stretch: StretchFactor::new(1.0),
                 pitch: Cents::new(0.0),
             },
@@ -1069,7 +1069,7 @@ fn a_pool_with_no_handle_has_no_channel_and_is_empty() {
                 gain: sampler.gain(),
                 speed: sampler.speed(),
                 loop_: sampler.loop_(),
-                direction: Direction::Forward,
+                direction: PlayDirection::Forward,
                 stretch: StretchFactor::new(1.0),
                 pitch: Cents::new(0.0),
             },
@@ -1339,7 +1339,7 @@ fn voice_node_is_a_standalone_graph_node() {
                 gain: sampler2.gain(),
                 speed: sampler2.speed(),
                 loop_: sampler2.loop_(),
-                direction: Direction::Forward,
+                direction: PlayDirection::Forward,
                 stretch: StretchFactor::new(1.0),
                 pitch: Cents::new(0.0),
             },
@@ -1538,11 +1538,14 @@ fn test_streamer(
 }
 
 /// The stream of `voice` on `port`: a handle whose commands the test sees.
-fn stream_of(voice: &Voice<f32>, port: &crate::streamer::StreamerPort<f32>) -> crate::Stream<f32> {
+fn stream_of(
+    voice: &Voice<f32>,
+    port: &crate::streamer::StreamerPort<f32>,
+) -> crate::StreamHandle<f32> {
     let VoiceSource::Disk(disk) = &voice.source else {
         unreachable!("a streaming voice")
     };
-    crate::Stream::detached(disk.stream(), port.clone())
+    crate::StreamHandle::detached(disk.stream(), port.clone())
 }
 
 /// Adds `voice` at `id` with a stream on `port`.
@@ -1577,7 +1580,7 @@ fn looped(mut voice: Voice<f32>) -> Voice<f32> {
 fn held_stream(
     handle: &VoicePoolHandle<f32>,
     id: SlotId,
-) -> std::sync::Arc<std::sync::Mutex<crate::Stream<f32>>> {
+) -> std::sync::Arc<std::sync::Mutex<crate::StreamHandle<f32>>> {
     handle
         .stream_of(id)
         .expect("the handle holds the voice's stream")
@@ -1689,28 +1692,28 @@ fn a_direction_set_through_the_handle_reaches_the_stream() {
     let (mut pool, handle) = VoicePool::new().with_handle();
     let id = SlotId(2);
     let mut voice = streaming_voice();
-    voice.play.direction = Direction::Reverse;
+    voice.play.direction = PlayDirection::Reverse;
     add_with_stream(&handle, id, voice, &commands);
     assert_eq!(
         held_stream(&handle, id).lock().unwrap().direction(),
-        Direction::Reverse,
+        PlayDirection::Reverse,
         "the add's direction"
     );
     handle
         .send(VoiceCommand::UpdateReverse {
             id,
-            direction: Direction::Forward,
+            direction: PlayDirection::Forward,
         })
         .expect("room");
     assert_eq!(
         held_stream(&handle, id).lock().unwrap().direction(),
-        Direction::Forward,
+        PlayDirection::Forward,
         "the update's"
     );
     one_block(&mut pool);
     assert_eq!(
         pool.playback_of(id).expect("slot exists").direction,
-        Direction::Forward
+        PlayDirection::Forward
     );
 
     // A slot the handle holds no stream for does not record a direction no
@@ -1719,13 +1722,13 @@ fn a_direction_set_through_the_handle_reaches_the_stream() {
     handle
         .send(VoiceCommand::UpdateReverse {
             id: SlotId(3),
-            direction: Direction::Reverse,
+            direction: PlayDirection::Reverse,
         })
         .expect("room");
     one_block(&mut pool);
     assert_eq!(
         pool.playback_of(SlotId(3)).expect("slot exists").direction,
-        Direction::Forward
+        PlayDirection::Forward
     );
     assert_eq!(handle.drops().directions_dropped, 1);
 }

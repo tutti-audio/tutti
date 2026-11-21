@@ -471,11 +471,11 @@ impl<F: Float> MicIn<F> {
     ///
     /// # Errors
     ///
-    /// Whatever [`FileOut::create`] reports: the file could not be created, the
-    /// format cannot be written at this width, or the header not written.
+    /// Whatever [`FileOut::new`] reports: the format cannot be written at
+    /// this width, or the header not written.
     pub fn matching_sink(
         &self,
-        path: impl AsRef<std::path::Path>,
+        file: std::fs::File,
         format: Format,
     ) -> tutti_codec::Result<FileOut> {
         // Read off `Source::layout` rather than hard-coded, so this pairing
@@ -483,9 +483,9 @@ impl<F: Float> MicIn<F> {
         // from a *different* width than the source reports is exactly what
         // `PumpLoop::new` refuses, and this helper exists to be the pairing
         // that always passes.
-        FileOut::create(
+        FileOut::new(
             &Spec::of_width(format, Source::layout(self), self.sample_rate),
-            path,
+            file,
         )
     }
 }

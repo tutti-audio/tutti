@@ -171,7 +171,7 @@ impl<F: Float> Taps<'_, F> {
     where
         A: tutti_measure::Measure<F>,
         A::Context: AudioContext,
-        for<'a> <A::Meter as tutti_measure::Meter>::Input<'a>: AudioInput<'a, F>,
+        for<'a> <A::Meter as tutti_measure::StreamMeter>::Input<'a>: AudioInput<'a, F>,
     {
         let rate = self.graph.editor.prepare().sample_rate();
         let width = u16::try_from(sources.len()).unwrap_or(u16::MAX);
@@ -422,28 +422,15 @@ impl<F: Float> Meters<'_, F> {
 }
 
 impl<'g, F: Float> Meters<'g, F> {
-    /// The master meter: the level of each global output channel, before
-    /// the engine's fold and declick. Declared and **on** when the graph is
-    /// built, so a host that reads it needs to ask for nothing; it follows
-    /// the outputs as they are re-wired or widened (up to
-    /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)). `None` once a
-    /// host has taken it ([`take_master`](Self::take_master)). A
-    /// block the engine refuses runs no op and does not touch it.
-    ///
-    /// **A declared root of another width replaces it**
-    /// ([`Session::declare_root_topology`](crate::Session::declare_root_topology)):
-    /// the one the graph holds is swapped in place, and one a host took is
-    /// announced by [`SessionEvent::RootReaderReopened`](crate::SessionEvent::RootReaderReopened),
-    /// claimed with [`Session::take_reopened`](crate::Session::take_reopened),
-    /// and reads closed ([`is_closed`](MeterReader::is_closed)).
-    pub fn master(self) -> Option<&'g mut MeterReader> {
+    /// The master meter's reader, while the graph holds it
+    /// ([`Session::master_meter`](crate::Session::master_meter)).
+    pub(crate) fn master(self) -> Option<&'g mut MeterReader> {
         self.graph.master_meter.as_mut()
     }
 
-    /// Hands the master meter's reader to its one consumer, which owns it
-    /// from here: dropping it closes the meter at the next
-    /// [`Reclaim`](crate::Phase::Reclaim) phase.
-    pub fn take_master(&mut self) -> Option<MeterReader> {
+    /// Hands the master meter's reader over
+    /// ([`Session::take_master_meter`](crate::Session::take_master_meter)).
+    pub(crate) fn take_master(&mut self) -> Option<MeterReader> {
         self.graph.master_meter.take()
     }
 }

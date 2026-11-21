@@ -1,0 +1,6 @@
+# Umbrella names a spec gives to items of more than one crate, where every crate's item is
+# that spec's own concept (`cargo xtask check-umbrella`). A spec name justifies the crate
+# whose item the spec defines keeping it; it never justifies another crate's different item
+# sharing it: that collision is a baseline row, for the rename to delete.
+# One `<name>  <crates>  <spec citation>: <reason>` row per collision; a row that no longer
+# collides fails, so the list only shrinks. Empty today.

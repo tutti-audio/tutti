@@ -8,7 +8,7 @@
 //! file's ticks become beats over its division, so no sample rate enters and
 //! the load never converts to frames.
 //!
-//! What the read repaired ([`Normalized`]) and what the conversion left out
+//! What the read repaired ([`ReadRepair`]) and what the conversion left out
 //! (a [`DroppedEvent`]) is the loaded value's [`report`](LoadedMidi::report),
 //! never a log line.
 
@@ -20,7 +20,7 @@ use std::task::{Context, Poll};
 
 use tutti_buffers::Float;
 use tutti_midi_file::{
-    FileEvent, MidiFile, Normalized, RefusedTimeSignature, Timebase, TimelineDrop, Track,
+    FileEvent, MidiFile, ReadRepair, RefusedTimeSignature, Timebase, TimelineDrop, Track,
 };
 use tutti_midi_runtime::{ClipEvents, TimedMidiEvent};
 use tutti_platform::{Asset, WeakExecutor};
@@ -179,8 +179,8 @@ pub struct DroppedEvent {
 #[non_exhaustive]
 pub struct LoadReport {
     /// What the read repaired so that the file can be written
-    /// ([`MidiFile::normalized`]).
-    pub normalized: Vec<Normalized>,
+    /// ([`MidiFile::repairs`]).
+    pub repairs: Vec<ReadRepair>,
     /// The events the conversion to clips left out, in track order.
     pub dropped: Vec<DroppedEvent>,
     /// The Time Signature events no meter holds, so no change of meter was
@@ -193,7 +193,7 @@ impl LoadReport {
     /// Whether the file was read as it is and every event is in a clip.
     #[must_use]
     pub fn is_clean(&self) -> bool {
-        self.normalized.is_empty()
+        self.repairs.is_empty()
             && self.dropped.is_empty()
             && self.refused_time_signatures.is_empty()
     }
@@ -295,7 +295,7 @@ impl<F: Float> Midi<'_, F> {
 /// The clips, timeline values and report of `file`.
 fn convert(file: MidiFile) -> LoadedMidi {
     let mut report = LoadReport {
-        normalized: file.normalized().to_vec(),
+        repairs: file.repairs().to_vec(),
         ..LoadReport::default()
     };
     let mut tracks = Vec::new();

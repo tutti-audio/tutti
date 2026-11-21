@@ -32,7 +32,7 @@ use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{MidiHardwareError, MidiThread, NotFound, Result};
 use crate::start::Started;
 use crate::{InputFault, InputProducerHandle};
-use tutti_midi_device::{EndpointId, Identity, OsChange, PortDirection};
+use tutti_midi_device::{EndpointId, OsChange, OsEndpointIdentity, PortDirection};
 use tutti_midi_runtime::{MidiOut, Taken};
 use tutti_rt::PushError;
 use tutti_ump::Protocol;
@@ -412,7 +412,7 @@ pub fn endpoint(raw: u64, name: &str) -> OsEndpoint {
     let described = from_os(Protocol::Midi2, None, []);
     OsEndpoint {
         id: EndpointId::from_raw(raw),
-        identity: Identity::alsa(name, "port"),
+        identity: OsEndpointIdentity::alsa(name, "port"),
         name: name.to_string(),
         capability: described.endpoint,
         blocks_left_out: described.blocks_left_out,
@@ -424,7 +424,7 @@ pub fn endpoint(raw: u64, name: &str) -> OsEndpoint {
 #[must_use]
 pub fn persistent_endpoint(raw: u32, name: &str) -> OsEndpoint {
     OsEndpoint {
-        identity: Identity::CoreMidi(raw.cast_signed()),
+        identity: OsEndpointIdentity::CoreMidi(raw.cast_signed()),
         ..endpoint(u64::from(raw), name)
     }
 }
@@ -615,7 +615,7 @@ impl MidiEndpoints for FakeBackend {
 /// session of its own.
 #[must_use]
 pub fn property_peer(
-    device: tutti_midi_device::DeviceId,
+    device: tutti_midi_device::MidiDeviceId,
     group: tutti_ump::MidiGroup,
     muid: tutti_midi_ci::Muid,
     resources: tutti_midi_ci::PeResourceList,

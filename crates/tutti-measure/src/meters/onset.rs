@@ -21,7 +21,7 @@ use tutti_units::{Amplitude, SampleRate, Samples, Seconds};
 
 use crate::convert::{for_blocks, widen};
 use crate::framing::{FrameCutter, Framing};
-use crate::{Measure, Meter, Result};
+use crate::{Measure, Result, StreamMeter};
 use tutti_dsp::Complex64;
 use tutti_dsp::FftScratch;
 use tutti_dsp::StftGeometry;
@@ -235,7 +235,7 @@ pub(crate) fn onset_lag(geometry: StftGeometry) -> Samples {
 /// A running onset detection at one rate: fed chunks of the buffer in order,
 /// of any length, it cuts the frames at the hop, yields each frame's novelty
 /// as an item (its position and the value) and reads the onsets at
-/// [`finish`](Meter::finish).
+/// [`finish`](StreamMeter::finish).
 ///
 /// Spectral flux and complex-domain deviation both need the previous frame,
 /// which the meter carries, so a run cannot diff its first frame against
@@ -353,7 +353,7 @@ impl<S: Sample> OnsetMeter<S> {
     }
 }
 
-impl<S: Sample> Meter for OnsetMeter<S> {
+impl<S: Sample> StreamMeter for OnsetMeter<S> {
     type Input<'a> = Mono<'a, S>;
     type Item = Novelty;
     type Output = Vec<Onset>;

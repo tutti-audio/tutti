@@ -86,7 +86,7 @@ use tutti_units::{Beat, ReadRate, SamplePosition, SampleRate, Samples};
 
 use super::disk_voice::DiskVoice;
 use super::memory_source::MemorySource;
-use super::types::{Direction, Playback};
+use super::types::{PlayDirection, Playback};
 use crate::SamplerFloat;
 use crate::lanes::{Gather, Lanes, scale};
 
@@ -220,7 +220,7 @@ pub(crate) trait Feed<F: SamplerFloat> {
 /// A memory voice's source.
 pub(crate) struct MemoryFeed<'a, F: SamplerFloat> {
     pub(crate) sampler: &'a MemorySource<F>,
-    pub(crate) direction: Direction,
+    pub(crate) direction: PlayDirection,
     pub(crate) gain: F,
     pub(crate) n: usize,
     pub(crate) gather: &'a mut Gather<F>,

@@ -321,10 +321,10 @@ fn every_setter_stores_silence_as_the_empty_set() {
         .set_sources(Root::output(0), [OutPort::new(src, 0)])
         .unwrap()
         .unfaded();
-    assert!(graph.disconnect_all(Root::output(0)).unwrap());
+    graph.set_sources(Root::output(0), []).unwrap().unfaded();
     assert!(
         graph.testing().planned_compensation().is_some(),
-        "disconnect_all"
+        "set_sources of none after one"
     );
 
     graph.connect(src, Root).unwrap().unfaded();
@@ -349,17 +349,12 @@ fn removing_a_node_twice_names_what_was_not_there() {
     let mut s = detached(1);
     let node = s.graph().add(ForkByClone(Const::mono(1.0)));
     assert!(s.graph_ref().contains(node));
-    assert_eq!(s.remove(node), Ok(()));
+    assert!(s.remove(node).is_ok());
     assert!(!s.graph_ref().contains(node));
     assert_eq!(
-        s.remove(node),
+        s.remove(node).map(|_| ()),
         Err(RemoveError::NoSuchNode(node.erase())),
-        "the session's remove names the node that is gone"
-    );
-    assert_eq!(
-        s.graph().remove(node).map(|_| ()),
-        Err(RemoveError::NoSuchNode(node.erase())),
-        "so does the graph's"
+        "the remove names the node that is gone"
     );
 }
 
@@ -370,7 +365,10 @@ fn removing_a_stranger_changes_nothing() {
     let mut s = detached(1);
     let _ = s.update();
     let stranger = tutti_graph::NodeKey(u64::MAX);
-    assert_eq!(s.remove(stranger), Err(RemoveError::NoSuchNode(stranger)));
+    assert_eq!(
+        s.remove(stranger).map(|_| ()),
+        Err(RemoveError::NoSuchNode(stranger))
+    );
     assert!(!s.graph_ref().has_uncommitted_edits(), "nothing was edited");
 }
 
@@ -505,7 +503,7 @@ fn an_update_with_no_edit_sends_no_plan() {
 fn a_replace_on_a_removed_node_is_refused_naming_it() {
     let mut s = detached(1);
     let knob = s.graph().add(Params(Knob::new()));
-    s.graph().remove(knob).unwrap();
+    s.remove(knob).unwrap();
     let refused = s
         .graph()
         .replace(knob, Replacement::new(Params(Knob::at(3.0))))
@@ -537,7 +535,7 @@ fn a_replace_during_a_re_prepare_lands_on_a_later_update() {
 
     // The rate changes on the running graph: the first half is sent, and
     // the executor has not run it yet.
-    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     let replaced = s
         .graph()
         .replace(knob, Replacement::new(Params(Knob::at(3.0))))
@@ -590,7 +588,7 @@ fn removing_a_node_purges_the_replacements_parked_on_it() {
     let mut side = s.graph().take_audio_side();
     let knob = s.graph().add(Params(Knob::new()));
     assert!(s.update().is_empty());
-    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     let token = Arc::new(());
     s.graph()
         .replace(
@@ -600,7 +598,7 @@ fn removing_a_node_purges_the_replacements_parked_on_it() {
         .expect("the node is in the graph");
     assert_eq!(s.graph_ref().testing().waiting_replacements(), 1);
 
-    s.graph().remove(knob).unwrap();
+    s.remove(knob).unwrap();
     assert_eq!(s.graph_ref().testing().waiting_replacements(), 0, "purged");
     assert_eq!(Arc::strong_count(&token), 1, "the incoming node dropped");
 
@@ -694,7 +692,7 @@ fn a_parked_swap_over_a_shape_change_fails_when_it_lands() {
 
     let (mut s, mut side, knob) = playing_knob();
     let token = Arc::new(());
-    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     s.graph()
         .replace(
             knob,
@@ -729,7 +727,7 @@ fn a_parked_swap_over_a_shape_change_fails_when_it_lands() {
 #[test]
 fn a_parked_swap_with_a_zero_fade_lands_over_a_shape_change() {
     let (mut s, mut side, knob) = playing_knob();
-    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     s.graph()
         .replace(
             knob,
@@ -757,7 +755,7 @@ fn a_parked_swap_with_a_zero_fade_lands_over_a_shape_change() {
 fn a_write_through_the_key_of_a_parked_swap_lands_with_the_incoming_node() {
     // The same type.
     let (mut s, mut side, knob) = playing_knob();
-    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     let same = s
         .graph()
         .replace(knob, Replacement::new(Params(Knob::at(3.0))))
@@ -785,7 +783,7 @@ fn a_write_through_the_key_of_a_parked_swap_lands_with_the_incoming_node() {
     // Another type: a write through its key, which the outgoing node's
     // table would refuse as a type mismatch.
     let (mut s, mut side, knob) = playing_knob();
-    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     let dial = s
         .graph()
         .replace(knob, Replacement::new(Params(Dial::at(3.0))))
@@ -820,7 +818,7 @@ fn the_readers_of_a_parked_swaps_key_answer_for_the_incoming_node() {
     };
     let two = s.graph().add(band(2));
     assert!(s.graph_ref().gain_reduction(&two, 2).is_none());
-    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     let three = s
         .graph()
         .replace(two, Replacement::new(band(3)))
@@ -838,11 +836,11 @@ fn the_readers_of_a_parked_swaps_key_answer_for_the_incoming_node() {
 #[test]
 fn removing_a_node_reports_the_parked_swap_it_drops() {
     let (mut s, _side, knob) = playing_knob();
-    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     s.graph()
         .replace(knob, Replacement::new(Params(Knob::at(3.0))))
         .unwrap();
-    s.graph().remove(knob).unwrap();
+    s.remove(knob).unwrap();
     let mut dropped = Vec::new();
     for _ in 0..4 {
         for event in s.update() {
@@ -861,7 +859,7 @@ fn removing_a_node_reports_the_parked_swap_it_drops() {
 fn an_unfaded_removal_cuts_where_the_default_fades_out() {
     for unfaded in [false, true] {
         let (mut s, mut side, knob) = playing_knob();
-        let removal = s.graph().remove(knob).unwrap();
+        let removal = s.remove(knob).unwrap();
         if unfaded {
             let _ = removal.unfaded();
         }
@@ -890,7 +888,7 @@ fn a_replace_on_a_poisoned_graph_is_refused() {
     let _ = s.update();
     // Both halves run here (the executor is local); the second panics in
     // the grenade's `prepare` and poisons the editor.
-    s.graph().set_sample_rate(SampleRate::SR_96K);
+    s.graph().set_sample_rate(SampleRate::SR_96K).unwrap();
     let refused = s
         .graph()
         .replace(knob, Replacement::new(Params(Knob::at(3.0))));
@@ -954,22 +952,31 @@ fn move_feeds_moves_every_feeders_sources() {
     let new = g.add(ForkByClone(Events::<1, 0>));
     let clip = g.add(ForkByClone(Events::<0, 1>));
     let route = g.add(ForkByClone(Events::<0, 1>));
-    g.set_feed(old, Feeder::Sequencer, vec![clip.events_out()]);
-    g.set_feed(old, Feeder::Routes, vec![route.events_out()]);
+    g.set_feed(old, Feeder::Sequencer, vec![clip.events_out()])
+        .unwrap();
+    g.set_feed(old, Feeder::Routes, vec![route.events_out()])
+        .unwrap();
     let both = {
         let mut v = vec![clip.events_out(), route.events_out()];
         v.sort();
         v
     };
-    assert_eq!(g.feeds(old), both, "each feeder kept its own entry");
+    assert_eq!(
+        g.feeds(old).unwrap(),
+        both,
+        "each feeder kept its own entry"
+    );
     let mut edges = g.sources(EventInPort::new(old, 0)).unwrap();
     edges.sort();
     assert_eq!(edges, both, "the union is the sink's event edges");
 
     g.move_feeds(old, new);
-    assert_eq!(g.feed(new, Feeder::Sequencer), [clip.events_out()]);
-    assert_eq!(g.feed(new, Feeder::Routes), [route.events_out()]);
-    assert!(g.feeds(old).is_empty(), "the old sink is fed by nothing");
+    assert_eq!(g.feed(new, Feeder::Sequencer).unwrap(), [clip.events_out()]);
+    assert_eq!(g.feed(new, Feeder::Routes).unwrap(), [route.events_out()]);
+    assert!(
+        g.feeds(old).unwrap().is_empty(),
+        "the old sink is fed by nothing"
+    );
     let mut edges = g.sources(EventInPort::new(new, 0)).unwrap();
     edges.sort();
     assert_eq!(edges, both, "the new sink's edges are the union");
@@ -1111,7 +1118,7 @@ fn a_removal_a_commit_and_an_update_run_on_any_thread() {
 
     let (s, driven) = std::thread::spawn(move || {
         let mut s = s;
-        let removed = s.remove(dc);
+        let removed = s.remove(dc).map(|_| ());
         s.commit();
         let _ = s.update();
         (s, removed)
@@ -1366,7 +1373,7 @@ fn a_refused_parked_replace_leaves_the_next_ones_controls_under_the_key() {
     let mut out = [0.0f32];
     side.tick(InterleavedMut::one_frame(&mut out).unwrap());
 
-    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     s.graph()
         .replace(node, Replacement::new(ForkByClone(Events::<0, 1>)))
         .expect("accepted: the shape is checked when it lands");

@@ -32,7 +32,7 @@ use tutti_midi_protocol::MtcRate;
 use tutti_ump::TicksPerQuarterNote;
 
 use crate::SmfParseError;
-use crate::file::{Normalized, Opening, SmfFormat, Track};
+use crate::file::{Opening, ReadRepair, SmfFormat, Track};
 
 tutti_units::ranged! {
     /// A metrical division in ticks per quarter note, `1..=0x7FFF`: the
@@ -162,5 +162,5 @@ pub(crate) struct SmfParts {
     /// The notice of the first track.
     pub(crate) copyright: Option<Box<[u8]>>,
     /// What the read changed to make the tracks writable.
-    pub(crate) normalized: Vec<Normalized>,
+    pub(crate) repairs: Vec<ReadRepair>,
 }

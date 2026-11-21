@@ -294,12 +294,17 @@ impl<S: Sample> FileIn<S> {
                 continue;
             }
             self.origin_ts.get_or_insert(ts);
-            // A packet whose channel count disagrees with `open`'s is
-            // zero-filled up to the file's width, so the stride stays constant.
+            // A packet whose channel count disagrees with `open`'s is refused:
+            // the read's stride is the file's width.
             let layout = self.topology.width();
-            let planes = self
-                .decoder
-                .planes_of_width(usize::from(layout.count()), frames);
+            let packet_width = self.decoder.planes().len();
+            if packet_width != usize::from(layout.count()) {
+                return Err(DecodeError::ChannelsChanged {
+                    file: usize::from(layout.count()),
+                    packet: packet_width,
+                });
+            }
+            let planes = self.decoder.planes();
             self.leftover.clear();
             self.leftover_pos = 0;
             self.leftover
