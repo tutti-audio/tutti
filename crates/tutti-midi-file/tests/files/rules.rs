@@ -94,7 +94,7 @@ fn held(event: &FileEvent) -> (u8, Vec<u8>) {
 }
 
 fn tempo(bpm: f64) -> FileEvent {
-    ev(Meta::tempo(Bpm::of(bpm)))
+    ev(Meta::tempo(Bpm::of(bpm)).unwrap())
 }
 
 fn played() -> Track {
@@ -496,7 +496,7 @@ fn the_ascii_view_of_a_text_event_leaves_out_non_ascii_bytes() {
         unreachable!()
     };
     assert_eq!(bytes.len(), 6);
-    assert_eq!(Meta::tempo(Bpm::of(120.0)).ascii_text(), None);
+    assert_eq!(Meta::tempo(Bpm::of(120.0)).unwrap().ascii_text(), None);
 }
 
 /// A track opens with its copyright notice, Sequence Number, Track Name and
@@ -1216,7 +1216,7 @@ fn a_format_2_file_is_written_with_tempo_and_time_signature_in_each_pattern() {
 /// Spec: smf/formats#11
 #[test]
 fn a_given_tempo_stays_and_the_missing_time_signature_joins_it() {
-    let given = Track::new().meta(Tick(0), Meta::tempo(Bpm::of(90.0)));
+    let given = Track::new().meta(Tick(0), Meta::tempo(Bpm::of(90.0)).unwrap());
     let bodies = chunk_bodies(&encoded(&lead(LeadTrack::new(given).copyright("c"))));
     // The copyright first, then the 90 BPM (666 667 us), then the signature.
     let mut expected = vec![

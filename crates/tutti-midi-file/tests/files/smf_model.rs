@@ -565,26 +565,39 @@ fn a_zero_tempo_is_not_a_tempo_and_an_absurd_one_is_read_as_written() {
     assert_eq!(read(&encoded(&file)), file);
 }
 
-/// Writing a tempo above the wire's range writes the fastest quarter, 1 us,
-/// not the wire's no-valid-tempo zero.
+/// SMF 1.0 section 3.3: `FF 51 03 tttttt` is 24 bits, and the wire's zero is no
+/// valid tempo. A tempo whose microseconds per quarter is outside `1..=0xFFFFFF`
+/// is refused, never pinned to an end.
 #[test]
-fn a_tempo_above_the_wire_range_writes_the_fastest_quarter() {
+fn a_tempo_outside_the_24_bit_field_is_refused() {
+    let micros = |us: f64| Meta::tempo(Bpm::from_beat_period(Seconds::new(us / 1.0e6)).unwrap());
+    // 0xFFFFFF is the last microsecond the field holds.
     assert_eq!(
-        Meta::tempo(Bpm::of(1.0e9)),
-        Meta::Tempo {
-            micros_per_quarter: MicrosPerQuarter::of(1),
-            extra: Box::default(),
-        }
-    );
-    assert_eq!(
-        Meta::tempo(Bpm::of(0.001)),
-        Meta::Tempo {
+        micros(16_777_215.0),
+        Some(Meta::Tempo {
             micros_per_quarter: MicrosPerQuarter::of(0xFF_FFFF),
             extra: Box::default(),
-        }
+        })
     );
+    // 0x1000000 does not fit in three bytes.
+    assert_eq!(micros(16_777_216.0), None);
+    assert_eq!(
+        micros(1.0),
+        Some(Meta::Tempo {
+            micros_per_quarter: MicrosPerQuarter::of(1),
+            extra: Box::default(),
+        })
+    );
+    // A quarter that rounds to 0 us is the wire's no-valid-tempo.
+    assert_eq!(micros(0.4), None);
+    assert_eq!(Meta::tempo(Bpm::of(1.0e9)), None);
+    assert_eq!(Meta::tempo(Bpm::of(0.001)), None);
+}
+
+#[test]
+fn a_tempo_is_microseconds_per_quarter() {
     // SMF 1.0 Set Tempo is microseconds per quarter: 120 BPM is a 0.5 s quarter.
-    let at_120 = Meta::tempo(Bpm::of(120.0));
+    let at_120 = Meta::tempo(Bpm::of(120.0)).unwrap();
     assert_eq!(
         at_120,
         Meta::Tempo {
@@ -596,13 +609,14 @@ fn a_tempo_above_the_wire_range_writes_the_fastest_quarter() {
     // 174 BPM is not a whole microsecond: the wire quantises it.
     let Meta::Tempo {
         micros_per_quarter, ..
-    } = Meta::tempo(Bpm::of(174.0))
+    } = Meta::tempo(Bpm::of(174.0)).unwrap()
     else {
         panic!("a tempo");
     };
     assert_eq!(micros_per_quarter, MicrosPerQuarter::of(344_828));
     assert!(
         !Meta::tempo(Bpm::of(174.0))
+            .unwrap()
             .bpm()
             .unwrap()
             .differs_from(Bpm::of(174.0), Bpm::of(0.001))
@@ -850,7 +864,10 @@ fn the_writer_frames_a_file_as_the_spec_bytes() {
     let file = crate::common::format1(
         SMF_DIVISION,
         vec![
-            track(vec![(0, FileEvent::Meta(Meta::tempo(Bpm::of(90.0))))]),
+            track(vec![(
+                0,
+                FileEvent::Meta(Meta::tempo(Bpm::of(90.0)).unwrap()),
+            )]),
             track(vec![
                 (0, on(0, 60, 100)),
                 (4 * u64::from(BEAT), off(0, 60, 0)),

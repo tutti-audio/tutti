@@ -353,23 +353,23 @@ pub enum Meta {
     Malformed(MalformedMeta),
 }
 
-/// The slowest tempo the wire holds: 24 bits of microseconds per quarter.
-const MAX_MICROS_PER_QUARTER: u32 = 0x00FF_FFFF;
-
 /// Microseconds in a second: a Set Tempo is microseconds per quarter note.
 const MICROS_PER_SECOND: f64 = 1_000_000.0;
 
 impl Meta {
-    /// A Set Tempo for `bpm`, rounded to the wire's microsecond. The wire
-    /// holds 1 to 16 777 215 us per quarter: a tempo above 60 million BPM
-    /// writes the shortest, 1 (the wire's zero means no valid tempo), and
-    /// one below about 3.6 BPM the longest.
-    pub fn tempo(bpm: Bpm) -> Self {
-        let micros = (bpm.beat_period().get() * MICROS_PER_SECOND).round() as u32;
-        Self::Tempo {
-            micros_per_quarter: MicrosPerQuarter::of(micros.clamp(1, MAX_MICROS_PER_QUARTER)),
+    /// A Set Tempo for `bpm`, rounded to the wire's microsecond, or `None`
+    /// when the rounded microseconds per quarter is outside `1..=16_777_215`:
+    /// the wire holds 24 bits (SMF 1.0 section 3.3) and its zero means no
+    /// valid tempo. That is a tempo above about 120 million BPM or below about 3.6.
+    #[must_use]
+    pub fn tempo(bpm: Bpm) -> Option<Self> {
+        let micros = (bpm.beat_period().get() * MICROS_PER_SECOND).round();
+        // `as` saturates, and a value past the field fails `new` below.
+        let micros = MicrosPerQuarter::new(micros as u32).filter(|m| m.get() != 0)?;
+        Some(Self::Tempo {
+            micros_per_quarter: micros,
             extra: Box::default(),
-        }
+        })
     }
 
     /// The tempo of a Set Tempo, `None` for any other event and for a zero
@@ -883,7 +883,7 @@ impl Track {
     /// use tutti_ump::{MidiChannel, NoteNumber, U7};
     ///
     /// let track = Track::new()
-    ///     .meta(Tick(0), Meta::tempo(Bpm::of(90.0)))
+    ///     .meta(Tick(0), Meta::tempo(Bpm::of(90.0)).unwrap())
     ///     .note(Tick(0), Tick(480), MidiChannel::FIRST, NoteNumber::of(60), U7::of(100))
     ///     .note(Tick(480), Tick(960), MidiChannel::FIRST, NoteNumber::of(64), U7::of(100));
     /// assert_eq!(track.end(), Tick(960));
@@ -1008,7 +1008,7 @@ impl Track {
     /// use tutti_midi_file::{Meta, Tick, Track};
     /// use tutti_units::Bpm;
     ///
-    /// let track = Track::new().meta(Tick(0), Meta::tempo(Bpm::of(90.0)));
+    /// let track = Track::new().meta(Tick(0), Meta::tempo(Bpm::of(90.0)).unwrap());
     /// assert_eq!(track.events().len(), 1);
     /// ```
     #[must_use]
@@ -1352,7 +1352,7 @@ impl Container {
 /// use tutti_ump::{MidiChannel, NoteNumber, U7};
 ///
 /// let track = Track::new()
-///     .meta(Tick(0), Meta::tempo(Bpm::of(120.0)))
+///     .meta(Tick(0), Meta::tempo(Bpm::of(120.0)).unwrap())
 ///     .note(Tick(0), Tick(480), MidiChannel::FIRST, NoteNumber::of(60), U7::of(100));
 /// let file = MidiFile::smf(SmfDivision::per_quarter(480), Layout::Format0(LeadTrack::new(track)))?;
 ///
@@ -2654,7 +2654,7 @@ fn specify_tempo_and_meter(format: SmfFormat, tracks: &mut [Track]) -> Vec<Norma
             .take_while(|(tick, e)| *tick == Tick(0) && matches!(e, FileEvent::Meta(_)))
             .count();
         let missing = [
-            tempo.then(|| Meta::tempo(DEFAULT_TEMPO)),
+            tempo.then(default_tempo),
             meter.then(default_time_signature),
         ];
         for (offset, meta) in missing.into_iter().flatten().enumerate() {
@@ -2672,6 +2672,14 @@ fn specify_tempo_and_meter(format: SmfFormat, tracks: &mut [Track]) -> Vec<Norma
 
 /// The tempo SMF 1.0 section 2.2 assumes when a file gives none.
 const DEFAULT_TEMPO: Bpm = Bpm::of(120.0);
+
+/// The Set Tempo for [`DEFAULT_TEMPO`]: 500 000 us per quarter.
+fn default_tempo() -> Meta {
+    Meta::Tempo {
+        micros_per_quarter: MicrosPerQuarter::of(500_000),
+        extra: Box::default(),
+    }
+}
 
 /// The time signature SMF 1.0 section 2.2 assumes when a file gives none, 4/4,
 /// with the clocks and 32nd notes of section 3.3's example (`FF 58 04 04 02 18 08`).
