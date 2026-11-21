@@ -22,9 +22,9 @@ use tutti_plugin_types::StateUse;
 use tutti_plugin_types::{PluginFailure, TerminationReason};
 use tutti_plugin_types::{PluginId, PluginRef};
 use tutti_session::{
-    CrossfadeRefused, DetachedSession, LoadedPlugin, OtherPeer, Peer, PeerState, PluginCause,
-    PluginHealth, PluginNode, Presence, RecoveryPolicy, Resource, Session, SessionEvent,
-    StateStartError, SwapPluginError,
+    CrossfadeRefused, DetachedSession, LoadPreset, LoadedPlugin, OtherPeer, Peer, PeerState,
+    PluginCause, PluginHealth, PluginNode, Presence, RecoveryPolicy, Resource, RestoreState,
+    SaveState, Session, SessionEvent, StateStartError, SwapPluginError,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -1001,4 +1001,182 @@ fn dropped_events_at_the_node_accumulate_across_a_reload_of_its_plugin() {
         "the reloaded plugin's node is cut the same: the reports add"
     );
     assert_eq!(losses(&s), Losses::NONE);
+}
+
+/// **The arm is the node's hosting**: a plugin in a plugin server hands out the
+/// out-of-process value for a save, a restore and a preset load.
+#[test]
+fn state_and_preset_work_for_a_served_plugin_is_out_of_process() {
+    let (catalog, _dir) = catalog();
+    let mut s = session(false);
+    let (_, node) = in_a_node(&mut s, &catalog, &first_id());
+    let save = s.save_state(&node, StateUse::Project).unwrap();
+    assert!(matches!(save, SaveState::OutOfProcess(_)), "{save:?}");
+    let state = block_on_save(s.save_state(&node, StateUse::Project).unwrap());
+    let restore = s.restore_state(&node, state).unwrap();
+    assert!(
+        matches!(restore, RestoreState::OutOfProcess(_)),
+        "{restore:?}"
+    );
+    let load = s.load_preset_file(&node, "/x.tutti-preset").unwrap();
+    assert!(matches!(load, LoadPreset::OutOfProcess(_)), "{load:?}");
+}
+
+fn block_on_save(save: SaveState) -> PeerState {
+    let SaveState::OutOfProcess(save) = save else {
+        panic!("a served plugin's save is awaited");
+    };
+    tutti_fixtures::block_on(save).expect("a state")
+}
+
+/// **A save awaited on a spawned thread returns the plugin's state**, which a
+/// new plugin loaded from it holds: no main thread ran the round trip.
+#[test]
+fn a_save_awaited_on_a_spawned_thread_returns_the_plugins_state() {
+    let (catalog, _dir) = catalog();
+    let mut s = session(false);
+    let (_, a) = in_a_node(&mut s, &catalog, &first_id());
+    let set = Normalized::of(0.9);
+    let target = s
+        .plugin_view(a)
+        .unwrap()
+        .params()
+        .get(ParamId::new(101))
+        .expect("the plugin declares Cutoff")
+        .target();
+    s.set(target.to(set)).unwrap();
+
+    let SaveState::OutOfProcess(save) = s.save_state(&a, StateUse::Project).unwrap() else {
+        panic!("a served plugin's save is awaited");
+    };
+    let state = std::thread::spawn(move || tutti_fixtures::block_on(save))
+        .join()
+        .expect("the awaiting thread ends")
+        .expect("a state");
+
+    let mut load = s.load_out_of_process(&first_id(), &catalog);
+    load.initial_state(state).expect("its own plugin's state");
+    let b = s
+        .add_plugin(load.block().expect("the plugin loads"))
+        .unwrap();
+    let read = s
+        .plugin_view(b)
+        .unwrap()
+        .params()
+        .get(ParamId::new(101))
+        .unwrap()
+        .normalized();
+    assert!(
+        (read.get() - set.get()).abs() < 1e-6,
+        "the saved value, not the default: {read:?}"
+    );
+}
+
+/// **A restore awaited off the main thread has its effect once the main thread
+/// applies it**: the plugin is moved off its default, the default state goes
+/// back from a spawned thread, and the mirror reads the default again after
+/// `apply`.
+#[test]
+fn a_restore_awaited_off_main_takes_effect_when_applied() {
+    let (catalog, _dir) = catalog();
+    let mut s = session(false);
+    let (_, node) = in_a_node(&mut s, &catalog, &first_id());
+    let cutoff = |s: &Session| {
+        s.plugin_view(node)
+            .unwrap()
+            .params()
+            .get(ParamId::new(101))
+            .unwrap()
+            .normalized()
+            .get()
+    };
+    let default = block_on_save(s.save_state(&node, StateUse::Project).unwrap());
+    let initial = cutoff(&s);
+    let target = s
+        .plugin_view(node)
+        .unwrap()
+        .params()
+        .get(ParamId::new(101))
+        .unwrap()
+        .target();
+    s.set(target.to(Normalized::of(0.9))).unwrap();
+    // The write reaches the plugin with the next block.
+    pump_until(&mut s, "the plugin holds the new value", |s| {
+        (cutoff(s) - 0.9).abs() < 1e-6
+    });
+    assert!(
+        (initial - 0.9).abs() > 1e-3,
+        "the default is not the value set"
+    );
+
+    let RestoreState::OutOfProcess(restore) = s.restore_state(&node, default).unwrap() else {
+        panic!("a served plugin's restore is awaited");
+    };
+    let restored = std::thread::spawn(move || tutti_fixtures::block_on(restore))
+        .join()
+        .expect("the awaiting thread ends")
+        .expect("the plugin takes the state");
+    s.apply(restored).expect("the node hosts the plugin");
+    pump_until(&mut s, "the mirror reads the restored value", |s| {
+        (cutoff(s) - initial).abs() < 1e-6
+    });
+}
+
+/// **A restore or a save dropped before its first poll asks the plugin
+/// nothing**, and no `RestoredState` exists for it: the plugin keeps its value.
+#[test]
+fn a_restore_dropped_before_it_is_awaited_sends_nothing() {
+    let (catalog, _dir) = catalog();
+    let mut s = session(false);
+    let (_, node) = in_a_node(&mut s, &catalog, &first_id());
+    let default = block_on_save(s.save_state(&node, StateUse::Project).unwrap());
+    let target = s
+        .plugin_view(node)
+        .unwrap()
+        .params()
+        .get(ParamId::new(101))
+        .unwrap()
+        .target();
+    s.set(target.to(Normalized::of(0.9))).unwrap();
+    drop(s.restore_state(&node, default).unwrap());
+    let after = block_on_save(s.save_state(&node, StateUse::Project).unwrap());
+    let mut loaded = s.load_out_of_process(&first_id(), &catalog);
+    loaded.initial_state(after).unwrap();
+    let c = s.add_plugin(loaded.block().unwrap()).unwrap();
+    let held = s
+        .plugin_view(c)
+        .unwrap()
+        .params()
+        .get(ParamId::new(101))
+        .unwrap()
+        .normalized();
+    assert!(
+        (held.get() - 0.9).abs() < 1e-6,
+        "a dropped restore never reached the plugin: {held:?}"
+    );
+}
+
+/// **A server that dies in a restore drops the sender, and the awaited restore
+/// ends as the dead plugin**, never a hang: the lane ends with the request
+/// unanswered.
+#[test]
+fn a_restore_the_server_dies_in_ends_as_the_dead_plugin() {
+    let (catalog, _dir) = catalog();
+    // SAFETY: nextest runs each test in its own process, and this is set before
+    // the first server is spawned, from the test's own thread.
+    unsafe { std::env::set_var("TUTTI_CLAP_PROBE_CRASH_ON_STATE_LOAD", "1") };
+    let mut s = session(false);
+    let (_, node) = in_a_node(&mut s, &catalog, &first_id());
+    let state = block_on_save(s.save_state(&node, StateUse::Project).unwrap());
+    let RestoreState::OutOfProcess(restore) = s.restore_state(&node, state).unwrap() else {
+        panic!("a served plugin's restore is awaited");
+    };
+    let ended = std::thread::spawn(move || tutti_fixtures::block_on(restore))
+        .join()
+        .expect("the awaiting thread ends");
+    assert!(
+        matches!(ended, Err(StateError::PluginCrashed)),
+        "the plugin died in the restore: {:?}",
+        ended.map(|_| ())
+    );
 }

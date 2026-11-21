@@ -15,7 +15,9 @@ mod clap {
     use tutti_buffers::MaxBlock;
     use tutti_plugin_types::PluginRef;
     use tutti_plugin_types::{PresetError, PresetSupport};
-    use tutti_session::{AnyPlugin, Key, LoadedPlugin, Peer as _, PluginApplyError, Session};
+    use tutti_session::{
+        AnyPlugin, Key, LoadPreset, LoadedPlugin, Peer as _, PluginApplyError, Session,
+    };
     use tutti_units::Samples;
 
     fn loaded() -> (Session, LoadedPlugin, Key<AnyPlugin>) {
@@ -133,6 +135,45 @@ mod clap {
             .load_preset_file(&node, "/nowhere/bright.tutti-preset")
             .unwrap()
             .perform(main)
+            .expect("the plugin takes the preset");
+        s.apply(loaded).expect("the node hosts the plugin");
+
+        let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(5);
+        while cutoff(&s, node) == Some(before) {
+            assert!(
+                tutti_platform::Instant::now() < deadline,
+                "the mirror still reads {before} after the preset moved Cutoff"
+            );
+            let _ = s.update_on(main);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    /// **A preset awaited off the main thread moves the mirror once the main
+    /// thread applies it.** The load is a `Send` future a spawned thread awaits
+    /// (the bridge's reader fills it); its output comes back to the main thread,
+    /// where `apply` has the session read the plugin's parameters again.
+    #[test]
+    fn a_preset_file_awaited_off_main_moves_the_mirror_when_applied() {
+        let (mut s, _plugin, node) = loaded();
+        let main = tutti_fixtures::main_thread();
+        let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(10);
+        while !s.plugin_view(node).is_ok_and(|p| p.params().is_ready()) {
+            assert!(tutti_platform::Instant::now() < deadline, "no read landed");
+            let _ = s.update_on(main);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let before = cutoff(&s, node).expect("Cutoff is read");
+
+        let LoadPreset::OutOfProcess(load) = s
+            .load_preset_file(&node, "/nowhere/bright.tutti-preset")
+            .unwrap()
+        else {
+            panic!("a served plugin's preset is awaited");
+        };
+        let loaded = std::thread::spawn(move || tutti_fixtures::block_on(load))
+            .join()
+            .expect("the awaiting thread ends")
             .expect("the plugin takes the preset");
         s.apply(loaded).expect("the node hosts the plugin");
 
