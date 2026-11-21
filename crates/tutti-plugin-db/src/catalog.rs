@@ -55,8 +55,9 @@ use crate::loadable::{Loadable, Resolved};
 use crate::probe::ProbeState;
 use crate::probing::{Probing, probe_fn};
 use crate::{
-    BlacklistedFile, CatalogConfig, FileFacts, FileRow, FilesError, PluginDb, PluginEntry,
-    RowChange, ScanBusy, ScanPlugins, ScanReport, ScannedPlugins, Scanner, StaleScan,
+    BlacklistedFile, CatalogConfig, FileFacts, FileRow, FilesError, ForgetError, PedalError,
+    PluginDb, PluginEntry, Recovered, RowChange, ScanBusy, ScanPlugins, ScanReport, ScannedPlugins,
+    Scanner, StaleScan,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -299,15 +300,14 @@ impl Catalog {
     }
 
     /// What a scan's probe does. A catalog told to measure renders each plugin
-    /// ([`Probing::Measure`]), and a missing `plugin-probe` is a failure of that
-    /// file, recorded as nothing and retried. Otherwise it reads each descriptor
-    /// ([`Probing::Describe`]) and lists a file by its name when `plugin-probe` is
-    /// missing.
+    /// ([`Probing::Measure`]); otherwise it reads each descriptor
+    /// ([`Probing::Describe`]). Either way a missing `plugin-probe` is a failure
+    /// of that file, recorded as nothing and retried.
     fn scanning(&self) -> Probing {
         if self.config.measuring {
             Probing::Measure { state: None }
         } else {
-            Probing::Describe { fallback: true }
+            Probing::Describe
         }
     }
 
@@ -411,8 +411,7 @@ impl Catalog {
     /// outside the scanned directories. The file is probed as a scan probes it,
     /// and a plugin that crashes, hangs or will not load is **blacklisted**, as in
     /// a scan; a failure that says nothing about the plugin (the probe binary is
-    /// missing, an I/O error) leaves the row as it was. Unlike a scan, a missing
-    /// `plugin-probe` does not record the file under its name: it is a failure.
+    /// missing, an I/O error) leaves the row as it was.
     ///
     /// A link whose target has another extension (`Foo.clap` to `libfoo.so`) is
     /// probed as named and recorded under its target, as CLAP; a load of that
@@ -438,12 +437,7 @@ impl Catalog {
         }
         let format = PluginFormat::from_path(path)
             .ok_or_else(|| FilesError::UnrecognizedFormat(path.to_path_buf()))?;
-        let probing = if self.config.measuring {
-            Probing::Measure { state: None }
-        } else {
-            Probing::Describe { fallback: false }
-        };
-        self.spawn_file(probing, path, format, executor)
+        self.spawn_file(self.scanning(), path, format, executor)
     }
 
     /// Prepares the probing of the one file `path`, read as `format`, as
@@ -621,15 +615,29 @@ impl Catalog {
     /// absent save kept), so the next recovery does not blacklist it again. While
     /// a rescan is running the sentinel is that scan's, and is left alone: the
     /// entry is then dropped by the next `unblacklist`.
-    pub fn unblacklist(&mut self, path: impl AsRef<Path>) -> bool {
+    ///
+    /// # Errors
+    ///
+    /// [`PedalError`] when the sentinel cannot be read or rewritten; the
+    /// blacklist is then unchanged.
+    pub fn unblacklist(&mut self, path: impl AsRef<Path>) -> std::result::Result<bool, PedalError> {
         let path = key(path.as_ref());
-        self.forget_in_pedal(&path);
-        self.change_with(|db, _| db.unblacklist(&path))
+        self.forget_in_pedal(&path)?;
+        Ok(self.change_with(|db, _| db.unblacklist(&path)))
     }
 
-    fn forget_in_pedal(&self, file: &Path) {
-        if self.scanner(self.scanning()).forget(file).is_err() {
-            tracing::warn!("a rescan is running; not touching its crash sentinel for {file:?}");
+    /// Drops the sentinel's entries for `file`, unless a rescan is using the
+    /// sentinel (its entries are that scan's).
+    fn forget_in_pedal(&self, file: &Path) -> std::result::Result<(), PedalError> {
+        match self.scanner(self.scanning()).forget(file) {
+            Err(ForgetError::Busy(_)) => {
+                tracing::debug!(
+                    "a rescan is running; not touching its crash sentinel for {file:?}"
+                );
+                Ok(())
+            }
+            Err(ForgetError::Pedal(e)) => Err(e),
+            Ok(()) => Ok(()),
         }
     }
 
@@ -642,10 +650,16 @@ impl Catalog {
     ///
     /// Unlike [`Self::unblacklist`] this forgets the plugin entirely, so the
     /// next scan treats it as new.
-    pub fn remove(&mut self, path: impl AsRef<Path>) {
+    ///
+    /// # Errors
+    ///
+    /// [`PedalError`] as for [`unblacklist`](Self::unblacklist); the row is then
+    /// kept.
+    pub fn remove(&mut self, path: impl AsRef<Path>) -> std::result::Result<(), PedalError> {
         let path = key(path.as_ref());
-        self.forget_in_pedal(&path);
+        self.forget_in_pedal(&path)?;
         self.change_with(|db, _| db.apply(RowChange::remove(path)));
+        Ok(())
     }
 
     /// Prepares the measurement of the file `plugin` names, as the format
@@ -731,18 +745,18 @@ impl Catalog {
     /// Every scan already calls this. Call it directly to report "a plugin
     /// brought your last session down" at startup without a full rescan.
     /// Idempotent, and a no-op when no sentinel is present. Returns the files
-    /// that were blacklisted.
+    /// that were blacklisted, and what kept the recovery from finishing.
     ///
     /// The sentinel is removed only after the blacklist is saved. If the
     /// persistence fails, the blacklist lives in memory, the sentinel stays armed
     /// (the next start blacklists the plugin again rather than forgetting it) and
-    /// the failure is logged.
+    /// the result's [`failure`](Recovered::failure) says so.
     ///
     /// # Errors
     ///
     /// [`ScanBusy`] while a rescan is in flight: its armed sentinel names a live
     /// probe, not a crash.
-    pub fn recover_crash(&mut self) -> std::result::Result<Vec<PathBuf>, ScanBusy> {
+    pub fn recover_crash(&mut self) -> std::result::Result<Recovered, ScanBusy> {
         let save = self.autosave();
         self.change(|db, scanner, _| scanner.recover_crash(db, save))
     }
@@ -1164,7 +1178,7 @@ mod tests {
                 .push((db.is_blacklisted(&key_path), pedal.exists()));
             Ok(())
         });
-        assert_eq!(plugins.recover_crash(), Ok(vec![key(&crashy)]));
+        assert_eq!(plugins.recover_crash().unwrap().files, vec![key(&crashy)]);
 
         assert_eq!(*seen.lock().unwrap(), vec![(true, true)]);
         assert!(!plugins.config.pedal_path().exists());
@@ -1184,7 +1198,7 @@ mod tests {
         let mut plugins = Catalog::new(PluginDb::new(), config.clone(), |_| {
             Err(PersistError::new("disk full"))
         });
-        assert_eq!(plugins.recover_crash(), Ok(vec![key(&crashy)]));
+        assert_eq!(plugins.recover_crash().unwrap().files, vec![key(&crashy)]);
         // A rescan recovers first; it must not delete what it could not save.
         rescan(&mut plugins);
 
@@ -1281,18 +1295,39 @@ mod tests {
         let mut plugins = Catalog::new(PluginDb::new(), config.clone(), |_| {
             Err(PersistError::new("no disk"))
         });
-        assert_eq!(plugins.recover_crash().unwrap().len(), 2);
+        assert_eq!(plugins.recover_crash().unwrap().files.len(), 2);
         assert!(config.pedal_path().exists(), "kept: the save failed");
 
-        assert!(plugins.unblacklist(&a));
+        assert!(plugins.unblacklist(&a).unwrap());
         rescan(&mut plugins);
         assert!(!plugins.is_blacklisted(&a), "the user's unblacklist held");
         assert!(plugins.is_blacklisted(&b), "the other entry is still kept");
 
-        plugins.remove(&b);
+        plugins.remove(&b).unwrap();
         rescan(&mut plugins);
         assert!(plugins.db().row(&key(&b)).is_none(), "the removal held");
         assert!(!config.pedal_path().exists());
+    }
+
+    /// **`unblacklist` and `remove` say when the sentinel cannot be read**, and
+    /// change nothing then: a sentinel that is a directory exists and cannot be
+    /// read, so its entry for the file may stay, and a success would let the next
+    /// recovery blacklist the file again.
+    #[test]
+    fn unblacklist_and_remove_refuse_when_the_sentinel_is_unreadable() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = CatalogConfig::new(dir.path());
+        std::fs::create_dir(config.pedal_path()).unwrap();
+        let path = dir.path().join("A.vst3");
+        std::fs::write(&path, b"x").unwrap();
+        let row = blacklisted_row(&path, "hung");
+        let mut plugins = Catalog::new(PluginDb::new(), config, |_| Ok(()));
+        plugins.record(RowChange::put(key(&path), row));
+
+        assert!(plugins.unblacklist(&path).is_err());
+        assert!(plugins.is_blacklisted(&path), "the blacklist is unchanged");
+        assert!(plugins.remove(&path).is_err());
+        assert!(plugins.db().row(&key(&path)).is_some(), "the row is kept");
     }
 
     #[cfg(unix)]
@@ -1335,8 +1370,8 @@ mod tests {
             plugins.blacklist(real_dir.join("Also.vst3"), "boom");
             std::fs::remove_file(&file).unwrap();
 
-            plugins.remove(alias_dir.join("Gone.vst3"));
-            assert!(plugins.unblacklist(alias_dir.join("Also.vst3")));
+            plugins.remove(alias_dir.join("Gone.vst3")).unwrap();
+            assert!(plugins.unblacklist(alias_dir.join("Also.vst3")).unwrap());
 
             assert_eq!(plugins.db().len(), 0);
         }
@@ -1362,12 +1397,12 @@ mod tests {
             plugins.blacklist(root.join("B.vst3"), "boom");
 
             let real_a = real.canonicalize().unwrap().join("A.vst3");
-            assert_eq!(crashed, vec![real_a.clone()]);
+            assert_eq!(crashed.files, vec![real_a.clone()]);
             for name in ["A.vst3", "B.vst3"] {
                 assert!(plugins.is_blacklisted(root.join(name)), "{name} by link");
                 assert!(plugins.is_blacklisted(real.join(name)), "{name} by path");
             }
-            assert!(plugins.unblacklist(root.join("A.vst3")));
+            assert!(plugins.unblacklist(root.join("A.vst3")).unwrap());
             assert!(!plugins.is_blacklisted(real_a));
             assert_eq!(plugins.db().len(), 1);
         }
@@ -1380,13 +1415,15 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let scanned_dir = dir.path().join("plugins");
         std::fs::create_dir(&scanned_dir).unwrap();
-        std::fs::write(scanned_dir.join("a.clap"), b"x").unwrap();
+        std::fs::copy(tutti_fixtures::clap_probe(), scanned_dir.join("a.clap")).unwrap();
         let make = || {
             Catalog::new(
                 PluginDb::new(),
                 CatalogConfig::new(dir.path().join("state"))
                     .scan_dirs([scanned_dir.clone()])
-                    .probe_locator(tutti_plugin_types::Locator::at("/nonexistent/plugin-probe")),
+                    .probe_locator(tutti_plugin_types::Locator::at(
+                        tutti_fixtures::plugin_probe(),
+                    )),
                 |_| Ok(()),
             )
         };

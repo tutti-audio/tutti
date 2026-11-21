@@ -26,11 +26,18 @@ impl Pedal {
     }
 
     /// The plugins the file names, in order: a crashed probe, and any entry a
-    /// recovery could not save and kept.
-    fn entries(&self) -> Vec<PathBuf> {
-        std::fs::read(&self.path)
-            .map(|bytes| parse_pedal(&bytes))
-            .unwrap_or_default()
+    /// recovery could not save and kept. An absent file names none.
+    ///
+    /// # Errors
+    ///
+    /// The read's error when the file exists and cannot be read: its entries
+    /// are unknown, which is not the same as none.
+    fn entries(&self) -> std::io::Result<Vec<PathBuf>> {
+        match std::fs::read(&self.path) {
+            Ok(bytes) => Ok(parse_pedal(&bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+            Err(e) => Err(e),
+        }
     }
 
     /// Writes `entries` (NUL-separated, which no path holds), or removes the
@@ -62,7 +69,7 @@ impl Pedal {
     /// the pedal's directory, so the first run is protected too.
     pub(super) fn arm(&self, plugin: impl AsRef<Path>) -> std::io::Result<()> {
         let plugin = plugin.as_ref();
-        let mut entries = self.entries();
+        let mut entries = self.entries()?;
         entries.retain(|p| p != plugin);
         entries.push(plugin.to_path_buf());
         self.write(&entries)
@@ -71,38 +78,61 @@ impl Pedal {
     /// Drops every entry that names `file` (compared by canonical path): the
     /// user has taken the file off the blacklist, and a kept entry would put it
     /// back at the next recovery.
-    pub(super) fn forget(&self, file: &Path) {
+    ///
+    /// # Errors
+    ///
+    /// The error of reading or rewriting the file; the entries are then as they
+    /// were.
+    pub(super) fn forget(&self, file: &Path) -> std::io::Result<()> {
         let file = canonical_path(file);
-        let mut entries = self.entries();
+        let mut entries = self.entries()?;
         let before = entries.len();
         entries.retain(|p| canonical_path(p) != file);
         if entries.len() != before {
-            let _ = self.write(&entries);
+            self.write(&entries)?;
         }
+        Ok(())
     }
 
     /// Remove the probe's entry on clean completion; a retained entry stays.
-    pub(super) fn disarm(&self, plugin: &Path) {
-        let mut entries = self.entries();
+    ///
+    /// # Errors
+    ///
+    /// The error of reading or rewriting the file; the entry then stays, and the
+    /// next recovery blacklists the plugin.
+    pub(super) fn disarm(&self, plugin: &Path) -> std::io::Result<()> {
+        let mut entries = self.entries()?;
         entries.retain(|p| p != plugin);
-        let _ = self.write(&entries);
+        self.write(&entries)
     }
 
     /// If a pedal file survives from a crashed previous scan, blacklists the
     /// recorded files in `db`, hands `db` to `save`, and removes the pedal.
-    /// Returns the files that were blacklisted.
+    /// Returns the files that were blacklisted, and what stopped the recovery
+    /// short of removing the pedal, if anything.
     ///
     /// The pedal stays until `save` succeeds, so a host that dies again before
     /// the blacklist is on disk still finds it next start, and a scan that
-    /// follows a failed save adds its own entry beside the kept ones.
+    /// follows a failed save adds its own entry beside the kept ones. A pedal
+    /// that cannot be read is left as it is.
     pub(super) fn recover(
         &self,
         db: &mut PluginDb,
         save: impl FnOnce(&PluginDb) -> std::io::Result<()>,
-    ) -> Vec<PathBuf> {
+    ) -> Recovered {
+        let entries = match self.entries() {
+            Ok(entries) => entries,
+            Err(e) => {
+                warn!("could not read the dead-man's pedal: {e}");
+                return Recovered {
+                    files: Vec::new(),
+                    failure: Some(RecoveryFailure::Unreadable(e.kind())),
+                };
+            }
+        };
         // Keyed like a scan keys a file, whatever name the entry was written
         // under, so lookups by any alias find the row.
-        let crashed: Vec<PathBuf> = self.entries().iter().map(|p| canonical_path(p)).collect();
+        let crashed: Vec<PathBuf> = entries.iter().map(|p| canonical_path(p)).collect();
         for p in &crashed {
             warn!(
                 "dead-man's pedal found: blacklisting {:?} (crashed during previous scan)",
@@ -118,10 +148,63 @@ impl Pedal {
             && let Err(e) = save(db)
         {
             warn!("could not save the blacklist for {crashed:?}; keeping the pedal: {e}");
-            return crashed;
+            return Recovered {
+                files: crashed,
+                failure: Some(RecoveryFailure::Unsaved(e.kind())),
+            };
         }
-        let _ = std::fs::remove_file(&self.path);
-        crashed
+        let failure = match std::fs::remove_file(&self.path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                Some(RecoveryFailure::Kept(e.kind()))
+            }
+            _ => None,
+        };
+        Recovered {
+            files: crashed,
+            failure,
+        }
+    }
+}
+
+/// What a crash recovery did: the files it blacklisted, and what kept it from
+/// finishing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[must_use = "a recovery that blacklisted files is something to tell the user"]
+pub struct Recovered {
+    /// The files blacklisted because the previous scan crashed on them, by
+    /// canonical path.
+    pub files: Vec<PathBuf>,
+    /// Why the recovery did not finish, if it did not.
+    pub failure: Option<RecoveryFailure>,
+}
+
+/// Why a crash recovery did not finish.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum RecoveryFailure {
+    /// The sentinel exists and could not be read, so the crash it records is
+    /// unknown. It is left in place.
+    #[error("the crash sentinel could not be read: {0}")]
+    Unreadable(std::io::ErrorKind),
+    /// The recovered blacklist could not be saved. It stands in memory, and the
+    /// sentinel stays, so the next start blacklists the files again.
+    #[error("the recovered blacklist could not be saved: {0}")]
+    Unsaved(std::io::ErrorKind),
+    /// The blacklist was saved and the sentinel could not be removed; the next
+    /// start blacklists the same files again.
+    #[error("the crash sentinel could not be removed: {0}")]
+    Kept(std::io::ErrorKind),
+}
+
+/// The crash sentinel could not be read or rewritten: its entries are as they
+/// were.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the crash sentinel could not be updated: {0}")]
+pub struct PedalError(pub std::io::ErrorKind);
+
+impl From<std::io::Error> for PedalError {
+    fn from(error: std::io::Error) -> Self {
+        Self(error.kind())
     }
 }
 
@@ -152,7 +235,7 @@ mod tests {
         let contents = std::fs::read_to_string(&pedal.path).unwrap();
         assert_eq!(contents, "/plugins/test.vst3");
 
-        pedal.disarm(plugin);
+        pedal.disarm(plugin).unwrap();
         assert!(!pedal.path.exists());
     }
 
@@ -170,7 +253,8 @@ mod tests {
             Ok(())
         });
 
-        assert_eq!(crashed, vec![PathBuf::from("/plugins/crashy.vst3")]);
+        assert_eq!(crashed.files, vec![PathBuf::from("/plugins/crashy.vst3")]);
+        assert_eq!(crashed.failure, None);
         assert!(db.is_blacklisted(Path::new("/plugins/crashy.vst3")));
         assert_eq!(saved, Some(db));
         assert!(!pedal.path.exists());
@@ -185,7 +269,11 @@ mod tests {
         let mut db = PluginDb::new();
         let crashed = pedal.recover(&mut db, |_| Err(std::io::Error::other("disk full")));
 
-        assert_eq!(crashed.len(), 1);
+        assert_eq!(crashed.files.len(), 1);
+        assert_eq!(
+            crashed.failure,
+            Some(RecoveryFailure::Unsaved(std::io::ErrorKind::Other))
+        );
         assert!(db.is_blacklisted(Path::new("/plugins/crashy.vst3")));
         assert!(pedal.path.exists());
     }
@@ -196,7 +284,7 @@ mod tests {
         let pedal = Pedal::new(dir.path().join(".scanning"));
         let mut db = PluginDb::new();
 
-        assert!(pedal.recover(&mut db, |_| Ok(())).is_empty());
+        assert_eq!(pedal.recover(&mut db, |_| Ok(())), Recovered::default());
     }
 
     #[test]
@@ -234,7 +322,7 @@ mod tests {
         std::fs::write(&pedal.path, "  \n").unwrap();
 
         let mut db = PluginDb::new();
-        assert!(pedal.recover(&mut db, |_| Ok(())).is_empty());
+        assert_eq!(pedal.recover(&mut db, |_| Ok(())), Recovered::default());
         assert!(db.is_empty());
         assert!(!pedal.path.exists());
     }
@@ -260,10 +348,10 @@ mod tests {
 
         pedal.arm(a).unwrap();
         pedal.arm(b).unwrap();
-        assert_eq!(pedal.entries(), [a, b]);
-        pedal.disarm(b);
-        assert_eq!(pedal.entries(), [a]);
-        pedal.disarm(a);
+        assert_eq!(pedal.entries().unwrap(), [a, b]);
+        pedal.disarm(b).unwrap();
+        assert_eq!(pedal.entries().unwrap(), [a]);
+        pedal.disarm(a).unwrap();
         assert!(!pedal.path.exists());
     }
 
@@ -276,16 +364,69 @@ mod tests {
         pedal.arm(&a).unwrap();
         pedal.arm(&b).unwrap();
 
-        pedal.forget(&a);
+        pedal.forget(&a).unwrap();
 
-        assert_eq!(pedal.entries(), std::slice::from_ref(&b));
-        pedal.forget(&b);
+        assert_eq!(pedal.entries().unwrap(), std::slice::from_ref(&b));
+        pedal.forget(&b).unwrap();
         assert!(!pedal.path.exists());
+    }
+
+    /// **An unreadable pedal is not an empty one**: a pedal path that is a
+    /// directory exists and cannot be read, so its entries are unknown, and
+    /// `arm`, `forget`, `disarm` and `recover` each say so (a recovery leaves the
+    /// pedal in place) where an absent pedal reads as no entries.
+    #[test]
+    fn an_unreadable_pedal_is_an_error_and_an_absent_one_is_empty() {
+        let dir = TempDir::new().unwrap();
+        let absent = Pedal::new(dir.path().join("absent"));
+        assert_eq!(absent.entries().unwrap(), Vec::<PathBuf>::new());
+
+        let unreadable = Pedal::new(dir.path().join("a-directory"));
+        std::fs::create_dir(&unreadable.path).unwrap();
+        assert!(unreadable.entries().is_err());
+        assert!(unreadable.arm("/p/a.vst3").is_err());
+        assert!(unreadable.forget(Path::new("/p/a.vst3")).is_err());
+        assert!(unreadable.disarm(Path::new("/p/a.vst3")).is_err());
+
+        let mut db = PluginDb::new();
+        let recovered = unreadable.recover(&mut db, |_| panic!("nothing to save"));
+        assert!(recovered.files.is_empty());
+        assert!(matches!(
+            recovered.failure,
+            Some(RecoveryFailure::Unreadable(_))
+        ));
+        assert!(unreadable.path.exists(), "an unreadable pedal is kept");
     }
 
     #[cfg(unix)]
     mod unix_tests {
         use super::*;
+
+        /// **A pedal that cannot be rewritten fails `forget` and `disarm`** and keeps
+        /// its entries: a read-only directory refuses the replacement file. Running as
+        /// root defeats the permission check, so there the test cannot fail.
+        #[test]
+        fn forget_and_disarm_report_a_pedal_that_cannot_be_rewritten() {
+            use std::os::unix::fs::PermissionsExt;
+            let dir = TempDir::new().unwrap();
+            let state = dir.path().join("state");
+            std::fs::create_dir(&state).unwrap();
+            let pedal = Pedal::new(state.join(".scanning"));
+            let a = Path::new("/p/a.vst3");
+            pedal.arm(a).unwrap();
+            std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o555)).unwrap();
+            let rewritable = std::fs::File::create(state.join("probe")).is_ok();
+
+            let forgot = pedal.forget(a);
+            let disarmed = pedal.disarm(a);
+            std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+            if !rewritable {
+                assert!(forgot.is_err());
+                assert!(disarmed.is_err());
+                assert_eq!(pedal.entries().unwrap(), [a]);
+            }
+        }
 
         /// A name that is not UTF-8 survives the pedal, so the file that crashed is
         /// the file that is blacklisted.
@@ -301,7 +442,7 @@ mod tests {
             let mut db = PluginDb::new();
             let crashed = pedal.recover(&mut db, |_| Ok(()));
 
-            assert_eq!(crashed, vec![plugin.clone()]);
+            assert_eq!(crashed.files, vec![plugin.clone()]);
             assert!(db.is_blacklisted(&plugin));
         }
 
@@ -320,7 +461,7 @@ mod tests {
 
             pedal.arm(b).unwrap();
 
-            assert_eq!(pedal.entries(), [a, b]);
+            assert_eq!(pedal.entries().unwrap(), [a, b]);
             assert_eq!(
                 std::fs::read_dir(dir.path()).unwrap().count(),
                 1,
@@ -343,13 +484,13 @@ mod tests {
             let pedal = Pedal::new(dir.path().join(".scanning"));
             pedal.arm(alias.join("a.vst3")).unwrap();
 
-            pedal.forget(&alias.join("a.vst3"));
+            pedal.forget(&alias.join("a.vst3")).unwrap();
             assert!(!pedal.path.exists(), "forget took the alias");
 
             pedal.arm(alias.join("a.vst3")).unwrap();
             let mut db = PluginDb::new();
             let crashed = pedal.recover(&mut db, |_| Ok(()));
-            assert_eq!(crashed, std::slice::from_ref(&canonical));
+            assert_eq!(crashed.files, std::slice::from_ref(&canonical));
             assert!(db.is_blacklisted(&canonical));
             assert_eq!(db.len(), 1);
         }

@@ -737,8 +737,8 @@ pub mod soundfont {
 pub mod plugin {
     pub use tutti_plugin_db::{
         BeforeEpoch, BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError,
-        Mtime, PluginEntry, ProbeFailure, RowChange, ScanBusy, ScanOutcome, ScanProgress,
-        ScannedFile,
+        Mtime, PedalError, PluginEntry, ProbeFailure, Recovered, RecoveryFailure, RowChange,
+        ScanBusy, ScanOutcome, ScanProgress, ScannedFile, UnmeasuredPlugin,
     };
     pub use tutti_plugin_db::{BindError, BlacklistView, Loadable, PersistError, Resolved};
     pub use tutti_plugin_host::{BlockLosses, RebindError};
