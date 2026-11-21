@@ -4,7 +4,7 @@
 //!
 //! Every format's state calls are the plugin's main thread's, so the value is
 //! `!Send` and its `run` takes the [`MainThreadMarker`], whether the plugin is
-//! served (its round trip runs on that thread) or in process (a direct call).
+//! out-of-process (its round trip runs on that thread) or in process (a direct call).
 //! Nothing is posted to the session and no `update` has to run for it.
 //!
 //! A save is pure data ([`PeerState`]). A restore ends as a [`RestoredState`],

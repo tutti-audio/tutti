@@ -2,9 +2,10 @@
 //! what the format does with them ([`PluginPresets::support`]) and the list
 //! where there is one ([`ListedPreset`]).
 //!
-//! The list is read once, when the plugin loads, and held: the load runs on the
-//! main thread ([`LoadPlugin::run`](crate::LoadPlugin::run)), which a served
-//! plugin's round trip and an in-process plugin's answer both take
+//! The list is read once, when the plugin loads, and held: an out-of-process
+//! plugin's load ([`LoadOutOfProcess`](crate::LoadOutOfProcess)) reads
+//! it in a round trip on the executor's thread, and an in-process plugin's
+//! ([`LoadInProcess::run`](crate::LoadInProcess::run)) on the main thread
 //! ([`PluginPresets::is_read`]). No host reports a change of a plugin's list, so
 //! nothing refreshes it later. Loading is work the app runs
 //! ([`Session::load_preset`](crate::Session::load_preset),
