@@ -71,11 +71,14 @@ pub enum Ended {
     TasksDetached(u64),
 }
 
-/// The exit status of a server whose session ended with [`Ended::PluginLeaked`]
-/// (see there for who can read it).
+/// The exit status of a server whose session ended with [`Ended::PluginLeaked`].
+/// No host reads it: it is for a supervisor that runs the server itself, or a
+/// person reading the status (see [`Ended::PluginLeaked`]).
 pub const EXIT_PLUGIN_LEAKED: u8 = 3;
 
 /// The exit status of a server whose session ended with [`Ended::TasksDetached`].
+/// No host reads it, as for [`EXIT_PLUGIN_LEAKED`]: the host's own detached
+/// tasks are its count, `PluginControls::detached_tasks`.
 pub const EXIT_TASKS_DETACHED: u8 = 4;
 
 /// The subprocess-side server: one hosted plugin, one host connection.

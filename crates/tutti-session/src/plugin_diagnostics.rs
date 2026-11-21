@@ -157,7 +157,8 @@ impl<'a> Diagnostics<'a> {
             .map_or(0, tutti_plugin_host::PluginControls::mirror_writes_refused)
     }
 
-    /// Host-side tasks of the plugin's server that did not stop in time and were left running. Zero for a plugin that runs in this process.
+    /// Host-side tasks of the plugin's server that did not stop in time and were
+    /// left running. Zero for a plugin that runs in this process.
     pub fn detached_tasks(&self) -> u64 {
         self.hosted
             .controls
