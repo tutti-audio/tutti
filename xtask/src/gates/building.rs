@@ -65,8 +65,9 @@
 //!   value is the option's default, so it is said by not calling the option. Not
 //!   one: a receiver by value whose built type (`Self`, the owner, any wrapper) is
 //!   its owner, which is how a chained option takes its value, a function whose owner
-//!   is the enum itself, and a function with no other parameter beside the receiver
-//!   (`set_mode(&mut self, mode)`): its call exists to pass that value.
+//!   is the enum itself, a function with no other parameter beside the receiver
+//!   (`set_mode(&mut self, mode)`), and a `set_*` function's last parameter (a keyed
+//!   setter, `set_mode(&mut self, key, mode)`): those calls exist to pass that value.
 //!
 //! **Blind spots.** The scan is lexical: it does not see an item a macro writes (the
 //! `with-prefix` of a macro-made method), an owner reached through a type alias, a
@@ -1433,7 +1434,9 @@ fn parse_file(path: &str, src: &str) -> Parsed {
         let chained = recv == Recv::Value && ty.is_some();
         let skip = usize::from(recv != Recv::None);
         if !chained && params.len() > skip + 1 {
-            let names: Vec<(String, String)> = params
+            // A keyed setter's last parameter is the value it sets.
+            let set = params.len() - usize::from(name.starts_with("set_"));
+            let names: Vec<(String, String)> = params[..set]
                 .iter()
                 .skip(skip)
                 .filter_map(|p| param_path(p, &bounds))
@@ -1823,6 +1826,20 @@ mod tests {
         assert_eq!(rules(&only), one("set_mode", "setter"));
         let two = format!("{HOSTING}impl S {{ pub fn load(&mut self, id: u8, h: Hosting) {{}} }}");
         assert_eq!(rules(&two), one("load", "default-enum-arg"));
+    }
+
+    #[test]
+    fn a_keyed_setter_sets_its_last_parameter_and_an_enum_before_it_is_an_option() {
+        let keyed =
+            format!("{HOSTING}impl S {{ pub fn set_mode(&mut self, id: u8, h: Hosting) {{}} }}");
+        assert_eq!(rules(&keyed), one("set_mode", "setter"));
+        let first =
+            format!("{HOSTING}impl S {{ pub fn set_mode(&mut self, h: Hosting, id: u8) {{}} }}");
+        let found = rules(&first);
+        assert!(
+            found.iter().any(|(_, r)| *r == "default-enum-arg"),
+            "an enum before the set value is an option: {found:?}"
+        );
     }
 
     #[test]

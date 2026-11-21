@@ -147,23 +147,12 @@ tutti-graph  ctor-result  crates/tutti-graph/src/event.rs::SortedEvents::with_bo
 tutti-graph  ctor-result  crates/tutti-graph/src/event.rs::SortedEvents::sort
 tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_new
 tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_of
-tutti-graph  default-enum-arg  crates/tutti-graph/src/bus_edge.rs::GraphSpec::set_bus_fade
-tutti-graph  default-enum-arg  crates/tutti-graph/src/editor/controls.rs::Editor::set_bus_fade
-tutti-graph  default-enum-arg  crates/tutti-graph/src/editor/controls.rs::Editor::set_edge_fade
-tutti-graph  default-enum-arg  crates/tutti-graph/src/editor/controls.rs::Editor::set_mode
-tutti-graph  default-enum-arg  crates/tutti-graph/src/editor/nodes.rs::Editor::set_tail
 tutti-graph  default-enum-arg  crates/tutti-graph/src/editor/taps.rs::Editor::open_event_tap
 tutti-graph  default-enum-arg  crates/tutti-graph/src/fade.rs::Fade::new
 tutti-graph  default-enum-arg  crates/tutti-graph/src/fade.rs::Fade::seconds
 tutti-graph  default-enum-arg  crates/tutti-graph/src/param_event.rs::ParamSegment::by_id
 tutti-graph  default-enum-arg  crates/tutti-graph/src/param_event.rs::ParamSegment::new
 tutti-graph  default-enum-arg  crates/tutti-graph/src/param_event.rs::ParamSegment::unit
-tutti-graph  default-enum-arg  crates/tutti-graph/src/reference.rs::Reference::set_mode
-tutti-graph  default-enum-arg  crates/tutti-graph/src/spec.rs::GraphSpec::set_mode
-
-# tutti-midi-hardware
-tutti-midi-hardware  default-enum-arg  crates/tutti-midi-hardware/src/port/manager.rs::HardwareMidiInputs::set_input_timing
-
 
 # tutti-midi-runtime
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/live/input_node.rs::MidiInputNode::new
@@ -300,7 +289,6 @@ tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/memory_source.rs::Mem
 tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::with_channels
 tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::with_config
 tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/pool.rs::VoicePool::with_channels
-tutti-sampler  default-enum-arg  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_direction
 
 # tutti-session
 tutti-session  with-prefix  crates/tutti-session/src/session/phases.rs::PhaseCx::with_mods
