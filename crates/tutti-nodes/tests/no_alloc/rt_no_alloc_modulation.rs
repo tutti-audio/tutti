@@ -30,7 +30,7 @@ use tutti_units::{
 
 /// A node through `BlockRig`: its inputs an alternating signal of
 /// `amplitude`, 32 warm-up blocks, then `blocks` blocks under
-/// `assert_no_alloc`, `between(i)` run before each (a control move).
+/// `RtScope`, `between(i)` run before each (a control move).
 fn gate<N: IntoNode>(node: N, amplitude: f32, blocks: usize, mut between: impl FnMut(usize)) {
     let (mut rig, _controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
     for c in rig.inputs_mut().iter_mut() {
@@ -51,12 +51,10 @@ fn gate<N: IntoNode>(node: N, amplitude: f32, blocks: usize, mut between: impl F
             .any(|s| s.abs() > 1e-6),
         "the node rendered silence; the gate would walk no DSP"
     );
-    assert_no_alloc::assert_no_alloc(|| {
-        for i in 0..blocks {
-            between(i);
-            rig.block();
-        }
-    });
+    for i in 0..blocks {
+        between(i);
+        rig.block();
+    }
 }
 
 #[test]

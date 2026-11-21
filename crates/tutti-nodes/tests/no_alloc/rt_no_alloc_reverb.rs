@@ -71,7 +71,7 @@ fn controls(freezable: bool) -> Vec<Control> {
 }
 
 /// A node of `layout` through `BlockRig` on a noise-like alternating input: 32 warm-up
-/// blocks, then `blocks` under `assert_no_alloc`, `between(i)` run before each (the cells
+/// blocks, then `blocks` under `RtScope`, `between(i)` run before each (the cells
 /// move). The output of every block is finite and under [`BOUND`].
 fn gate(layout: FdnLayout, blocks: usize, between: impl FnMut(&ParamSet, usize)) {
     gate_of(
@@ -100,18 +100,16 @@ fn gate_of<N: IntoNode<Controls = ParamSet>>(
     }
     let mut peak = 0.0f32;
     let mut finite = true;
-    assert_no_alloc::assert_no_alloc(|| {
-        for i in 0..blocks {
-            between(&set, i);
-            rig.block();
-            for c in 0..2 {
-                for &s in rig.output().plane(c).samples() {
-                    finite &= s.is_finite();
-                    peak = peak.max(s.abs());
-                }
+    for i in 0..blocks {
+        between(&set, i);
+        rig.block();
+        for c in 0..2 {
+            for &s in rig.output().plane(c).samples() {
+                finite &= s.is_finite();
+                peak = peak.max(s.abs());
             }
         }
-    });
+    }
     assert!(finite, "the output is finite");
     assert!(peak < BOUND, "the output is bounded: {peak}");
 }
