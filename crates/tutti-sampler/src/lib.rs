@@ -147,6 +147,13 @@
 //! ## License
 //!
 //! MIT OR Apache-2.0.
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "a test starts the threads it races"
+    )
+)]
 
 mod clip;
 pub use clip::Clip;

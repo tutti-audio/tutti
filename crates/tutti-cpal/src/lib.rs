@@ -110,6 +110,13 @@
 //!   returns [`DeviceError::HostUnavailable`].
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "a test starts the threads it races"
+    )
+)]
 
 mod driver;
 mod driver_seam;

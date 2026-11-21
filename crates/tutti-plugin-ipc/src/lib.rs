@@ -34,6 +34,13 @@
 //! safe calls.
 
 #![forbid(unsafe_code)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "a test starts the threads it races"
+    )
+)]
 
 // The test build's allocator: without it every `assert_no_alloc` gate in
 // this crate's tests is inert. Normal builds use the system allocator.

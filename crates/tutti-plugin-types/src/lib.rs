@@ -169,6 +169,13 @@
 // vouches for a window's bare platform number.
 #![deny(unsafe_code)]
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "a test starts the threads it races"
+    )
+)]
 
 mod any_thread;
 mod automation;

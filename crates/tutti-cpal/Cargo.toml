@@ -54,8 +54,7 @@ tutti-codec = { version = "0.0.1", path = "../tutti-codec", optional = true }
 
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
-# The `Executor` whose dedicated threads own the streams, and `spawn_named` for the
-# device-listing and poller threads.
+# The `Executor` whose dedicated threads own the streams.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 # The owner thread's warnings when a drop cannot wait for it.

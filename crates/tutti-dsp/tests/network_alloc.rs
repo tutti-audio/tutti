@@ -4,6 +4,10 @@
 //!
 //! The crate carries no `assert_no_alloc` dev-dependency,
 //! so this binary counts allocations with its own global allocator, per thread.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
 
 use tutti_fixtures::{ThreadCounting, allocations};
 use tutti_units::{Mix, SampleRate, Seconds};

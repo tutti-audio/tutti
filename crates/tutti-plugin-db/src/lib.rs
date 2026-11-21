@@ -34,6 +34,13 @@
 //! The crate never loads a plugin and never touches the audio thread.
 
 #![forbid(unsafe_code)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "a test starts the threads it races"
+    )
+)]
 
 mod catalog;
 mod config;

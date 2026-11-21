@@ -8,6 +8,10 @@
 //! The plugin's switches (render mode, rescan requests) are process-globals of
 //! its cdylib, so every test holds [`PLUGIN_LOCK`] across configure, load,
 //! drive and assert.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};

@@ -26,7 +26,7 @@ tutti-timeline = { version = "0.0.1", path = "../tutti-timeline" }
 tutti-tempo = { version = "0.0.1", path = "../tutti-tempo" }
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-music = { version = "0.0.1", path = "../tutti-music" }
-# `monotonic_ns`, `spawn_named`: the transport's system time and the host's worker threads.
+# `monotonic_ns`: the transport's system time.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 # The sample float the node is generic over, and the width a plugin activates at.

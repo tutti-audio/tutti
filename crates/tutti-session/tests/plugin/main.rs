@@ -1,4 +1,8 @@
 //! Hosted plugins through the session: latency, bypass, health, modulation and exports.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
 
 #[cfg(feature = "clap")]
 #[path = "../support/mod.rs"]

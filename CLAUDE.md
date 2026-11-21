@@ -161,6 +161,20 @@ std only. A rule the compiler already enforces is not a gate.
 - Every cell's publisher calls `reclaim()` on a control-side tick it already has; a new
   cell joins its owner's sweep in the same change.
 
+### Work off the audio thread
+
+- The app runs the work it asks for: a load, an analysis, a state save, a scan or a bounce
+  is an inert value with `run(self)`, and its output reaches the session through
+  `session.apply(out)`. tutti never runs it, and never offers a blocking call as a future.
+- tutti runs only the work that keeps pace with the audio thread or the hardware (the
+  streamer, a take's pump, OS edges, sensing, the bells' tick), on the session's own
+  executor, which the app never sees. A blocking OS wait or a priority loop is
+  `Executor::spawn_dedicated`; a future keeps a `Timer`, never an `Executor`.
+- Nothing else starts an OS thread: `clippy.toml`'s `disallowed-methods` refuses
+  `std::thread` starts and `tutti_platform::spawn_named`. The starts that stay (the
+  platform's own, the graph's render workers, the engine's deviceless clock, the CoreMIDI
+  hub) carry an `#[expect]` with their reason; test code allows the lint at its root.
+
 ### Unsafe and runtime structure
 
 - A library with no `unsafe` carries `#![forbid(unsafe_code)]` (`cargo xtask check-ffi`).
@@ -193,8 +207,7 @@ touched.
   `Parker`. A future's wake-up is a `tutti_rt::Bell` from the session's `Bells`: the audio
   thread rings it, and the future awaits its `Listener::rung()`.
 - A value the audio thread must never drop holds a `tutti_rt::ControlDrop`.
-- A `Mutex` is taken with `tutti_rt::LockExt::lock_recover`; a thread is started with
-  `tutti_platform::spawn_named`.
+- A `Mutex` is taken with `tutti_rt::LockExt::lock_recover`.
 - A collection the audio thread fills is a `tutti_rt::RtVec` or `CappedVec`: capped at
   construction, refusing past it, never growing. A value of more than one field read as
   one word is a `PackedAtomic`; an atomic float is `atomic_float::AtomicF32`/`AtomicF64`.

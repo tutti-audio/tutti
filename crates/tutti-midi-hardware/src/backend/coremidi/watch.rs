@@ -121,6 +121,11 @@ pub(super) fn client() -> Result<SharedClient> {
     started().map(|(_, client)| client)
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the CoreMIDI hub: a process-static client whose notification loop never returns, \
+              so its thread outlives every Executor"
+)]
 fn start_hub() -> Result<(&'static Hub, SharedClient)> {
     {
         let hub: &'static Hub = Box::leak(Box::new(Hub {
@@ -129,8 +134,7 @@ fn start_hub() -> Result<(&'static Hub, SharedClient)> {
         }));
         let (ready, started) = mpsc::channel();
         // The hub is a process-static CoreMIDI client whose notification loop never
-        // returns, so its thread outlives every `Executor`, and no owner stops it
-        // (`check-threads` exempts this file).
+        // returns, so its thread outlives every `Executor`, and no owner stops it.
         spawn_named(MidiThread::DeviceWatch.name(), None, move |_| {
             let client = SharedClient::start("tutti-midi-watch", move |notification| {
                 if notification.changes_devices() {
