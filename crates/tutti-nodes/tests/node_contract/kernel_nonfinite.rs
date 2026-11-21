@@ -13,13 +13,14 @@ use tutti_nodes::{
     AmbisonicRotatorConfig, AmbisonicRotatorNode, Antialiasing, AutoPanConfig, AutoPanNode,
     BrickwallLimiterConfig, BrickwallLimiterNode, CompressorConfig, CompressorControls,
     CompressorNode, CrossoverConfig, CrossoverControls, CrossoverNode, DelayConfig, DelayControls,
-    DelayLayout, DelayNode, DistanceConfig, DistanceNode, DistortionConfig, DistortionNode,
-    DynamicEqConfig, DynamicEqNode, FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig,
-    GateControls, GateNode, InterpolationMode, LadderFilterConfig, LadderFilterNode, LimiterConfig,
-    LimiterControls, LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, MultibandBands,
-    MultibandCompressorConfig, MultibandCompressorNode, PeakDetection, PhaserConfig, PhaserNode,
-    PitchShifterConfig, PitchShifterNode, PlateReverbConfig, PlateReverbNode, RingModConfig,
-    RingModNode, ShimmerConfig, ShimmerNode, SpringReverbConfig, SpringReverbNode, SvfFilterConfig,
+    DelayLayout, DelayNode, DiodeClipperConfig, DiodeClipperNode, DistanceConfig, DistanceNode,
+    DistortionConfig, DistortionNode, DynamicEqConfig, DynamicEqNode, FdnConfig, FdnNode,
+    FreeverbConfig, FreeverbNode, GateConfig, GateControls, GateNode, InterpolationMode,
+    LadderFilterConfig, LadderFilterNode, LimiterConfig, LimiterControls, LimiterNode, MaxDelay,
+    ModDelayConfig, ModDelayNode, MultibandBands, MultibandCompressorConfig,
+    MultibandCompressorNode, PeakDetection, PhaserConfig, PhaserNode, PitchShifterConfig,
+    PitchShifterNode, PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode,
+    ShimmerConfig, ShimmerNode, SpringReverbConfig, SpringReverbNode, SvfFilterConfig,
     SvfFilterNode, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
@@ -99,6 +100,12 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
                     ..DelayControls::DEFAULT
                 }),
             )),
+        ),
+        (
+            "diode clipper",
+            Box::new(DiodeClipperNode::<f32>::from(DiodeClipperConfig::new(
+                ChannelLayout::STEREO,
+            ))),
         ),
         (
             "distortion",

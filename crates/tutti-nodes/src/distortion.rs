@@ -1,17 +1,16 @@
 //! The waveshaper [`DistortionNode`]: seven curves ([`ShapeKind`]) at a drive.
 
-use tutti_buffers::BlockSide;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MAX_CHANNELS, MaxBlock};
-use tutti_buffers::{Float, Mono, Planes, PlanesMut};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{
-    Antialiasing, AntialiasingError, BlockMismatch, COEFF_INTERVAL, Lerp, Oversampler,
-    Oversampling, OversamplingFactor, OversamplingPlan, ShapeKind, WaveshaperBank,
-    WaveshaperControls,
+    Antialiasing, AntialiasingError, BlockMismatch, COEFF_INTERVAL, Lerp, OversamplingFactor,
+    ShapeKind, WaveshaperBank, WaveshaperControls,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Drive, SampleRate, Samples, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::oversampled::Oversampled;
 
 /// Waveshaping distortion of any width: `N` audio inputs and `N` outputs, every channel
 /// shaped alone by the same curve at the same drive.
@@ -39,7 +38,7 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 ///
 /// A curve shapes a signal into harmonics past the Nyquist frequency, which fold back as
 /// aliases. [`DistortionConfig::oversampling`] shapes at 2, 4 or 8 times the
-/// rate instead: each channel goes up through [`Oversampler`]'s linear-phase half-band
+/// rate instead: each channel goes up through [`Oversampler`](tutti_dsp::Oversampler)'s linear-phase half-band
 /// cascade, through the curve and back down, so the harmonics the down-sampler's stopband
 /// removes never fold. The cascade's round trip is a whole number of frames, which the node
 /// declares as its latency, and its ring-out, as many frames again, as its tail. The drive's
@@ -200,106 +199,6 @@ impl<F: Float + Lerp> DistortionKernel<F> {
     }
 }
 
-/// The oversampling of a prepared kernel: one [`Oversampler`] per channel and the drive control signal
-/// held across the oversampled frames.
-#[derive(Clone, Debug)]
-struct Oversampled<F: Float> {
-    plan: OversamplingPlan,
-    channels: Vec<Oversampler<F>>,
-    /// A drive control signal at the oversampled rate.
-    signal: Vec<F>,
-    max_block: usize,
-}
-
-impl<F: Float + Lerp> Oversampled<F> {
-    /// The oversampling by `factor` of `width` channels at `rate`, or `None` for a rate the
-    /// default half-band cannot be designed at (one no device runs at).
-    fn new(
-        factor: OversamplingFactor,
-        rate: SampleRate,
-        max_block: MaxBlock,
-        width: usize,
-    ) -> Option<Self> {
-        let plan = Oversampling::new(factor).plan(rate).ok()?;
-        let state = plan.state::<F>(max_block);
-        Some(Self {
-            signal: vec![F::ZERO; max_block.get() * factor.get()],
-            channels: vec![state; width],
-            plan,
-            max_block: max_block.get(),
-        })
-    }
-
-    /// `input` through `bank` at the oversampled rate into `output`, in blocks of at most the
-    /// prepared maximum.
-    fn render<S: Float>(
-        &mut self,
-        bank: &mut WaveshaperBank<F>,
-        signal: Option<Mono<'_, S>>,
-        block: &mut InputOutput<'_, S>,
-    ) -> Result<(), BlockMismatch> {
-        let width = self.channels.len();
-        for (side, found) in [
-            (BlockSide::Input, block.input().channels()),
-            (BlockSide::Output, block.output().channels()),
-        ] {
-            if found != width {
-                return Err(BlockMismatch::Width {
-                    side,
-                    expected: width,
-                    found,
-                });
-            }
-        }
-        let frames = block.frames().get();
-        let (input, mut output) = block.split();
-        let factor = self.plan.factor().get();
-        let mut start = 0;
-        while width > 0 && start < frames {
-            let end = (start + self.max_block).min(frames);
-            let span = Samples::new(start)..Samples::new(end);
-            for (c, state) in self.channels.iter_mut().enumerate().take(width) {
-                // The span is at most `self.max_block`, which the channel states are built for.
-                state
-                    .upsample(input.plane(c).slice(span.clone()))
-                    .expect("a span is at most the states' max block");
-            }
-            let held = signal.map(|l| {
-                let high = &mut self.signal[..(end - start) * factor];
-                for (k, h) in high.iter_mut().enumerate() {
-                    // A frame past the control signal's end, like a non-finite one, reads the drive in force.
-                    *h = l
-                        .samples()
-                        .get(start + k / factor)
-                        .map_or(F::NAN, |d| d.convert_to::<F>());
-                }
-                Mono::new(&*high)
-            });
-            let mut highs: [&[F]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
-            let mut shaped: [&mut [F]; MAX_CHANNELS] = core::array::from_fn(|_| &mut [][..]);
-            for ((h, s), state) in highs.iter_mut().zip(&mut shaped).zip(&mut self.channels) {
-                let (high, out) = state.high_rate();
-                (*h, *s) = (high.samples(), out.into_samples_mut());
-            }
-            if let (Ok(high), Ok(shaped)) = (
-                Planes::new(&highs[..width]),
-                PlanesMut::new(&mut shaped[..width]),
-            ) && let Ok(mut wide) = InputOutput::new(high.frames(), high, shaped)
-            {
-                let shaped = bank.process(held, &mut wide);
-                debug_assert!(shaped.is_ok(), "the bank is the node's width");
-            }
-            for (c, state) in self.channels.iter_mut().enumerate().take(width) {
-                state
-                    .downsample(output.plane_mut(c).slice_mut(span.clone()))
-                    .expect("a span is at most the states' max block");
-            }
-            start = end;
-        }
-        Ok(())
-    }
-}
-
 impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
     type Float = F;
     type Set = DistortionSet;
@@ -370,7 +269,9 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
     ) -> Result<(), BlockMismatch> {
         let signal = signals.get(DistortionSet::DRIVE_SIGNAL);
         let rendered = match &mut self.oversampled {
-            Some(oversampled) => oversampled.render(&mut self.bank, signal, block),
+            Some(oversampled) => {
+                oversampled.render(signal, block, |held, wide| self.bank.process(held, wide))
+            }
             None => self.bank.process(signal, block),
         };
         // A design after a render is a move, which ramps.
@@ -410,6 +311,7 @@ mod tests {
         RATE, amplitude_at, assert_cell_ramps, drive_block, prepared, render_change,
         render_chunked, sine,
     };
+    use tutti_buffers::Planes;
     use tutti_graph::contract::{assert_param_fork, drive};
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
