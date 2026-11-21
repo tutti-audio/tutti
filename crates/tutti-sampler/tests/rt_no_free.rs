@@ -381,3 +381,58 @@ fn a_retirement_after_the_handle_is_gone_is_freed_when_the_pool_drops() {
         "dropping the pool freed at most {biggest} bytes: the ring was leaked"
     );
 }
+
+/// **A second handle starts with every retirement slot.** Reservations belong
+/// to one handle's ring: a first handle with 64 reservations does not use up
+/// the second's room, and the first's `collect_retired` (on its own, dead
+/// ring) does not give the second's slots back.
+#[test]
+fn a_second_handle_has_its_own_retirement_room() {
+    let wave = Arc::new(Wave::from_mono(
+        SampleRate::SR_48K,
+        Mono::new(&vec![0.5f32; 480]),
+    ));
+    let memory = || {
+        MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
+            .expect("a placeable wave")
+    };
+    let (pool, first) = VoicePool::<f32>::new().with_handle();
+    first
+        .add(SlotId(1), memory(), Playback::default())
+        .expect("room");
+    for _ in 0..63 {
+        first
+            .replace_wave(SlotId(1), Arc::clone(&wave))
+            .expect("room");
+    }
+    let (pool, second) = pool.with_handle();
+    assert_eq!(
+        first.replace_wave(SlotId(1), Arc::clone(&wave)),
+        Err(SendError::RetirementFull),
+        "setup: the first handle still holds its own 64"
+    );
+    let t = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
+    let mut rig = Direct::new(pool, SampleRate::SR_48K, 64);
+    let env = t.env(64, SampleRate::SR_48K);
+    second
+        .add(SlotId(1), memory(), Playback::default())
+        .expect("room");
+    rig.block_in(&env);
+    // Every replaced wave is retired: 64 fill the second handle's channel.
+    for _ in 0..64 {
+        second
+            .replace_wave(SlotId(1), Arc::clone(&wave))
+            .expect("the second handle has all 64 slots");
+    }
+    rig.block_in(&env);
+    assert_eq!(first.collect_retired(), 0);
+    assert_eq!(
+        second.replace_wave(SlotId(1), Arc::clone(&wave)),
+        Err(SendError::RetirementFull),
+        "the first handle's collect gave nothing back to the second"
+    );
+    assert_eq!(second.collect_retired(), 64);
+    second
+        .replace_wave(SlotId(1), wave)
+        .expect("room after collecting");
+}

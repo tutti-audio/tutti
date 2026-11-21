@@ -2231,6 +2231,7 @@ fn send_builds_the_stretch_filter_not_the_drain() {
             retired: Arc::new(Mutex::new(tutti_rt::ring(0, tutti_rt::Overflow::Refuse).1)),
             channels: ChannelLayout::from(6u16),
             counters: Default::default(),
+            room: Default::default(),
             streams: Default::default(),
             free: Default::default(),
             live: Default::default(),

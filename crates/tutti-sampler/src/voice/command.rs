@@ -15,7 +15,7 @@ use crate::streamer::{ControlCell, StreamHandle, StreamId};
 use super::disk_voice::DiskVoice;
 use super::loop_span::Loop;
 use super::memory_source::{MemorySource, VoiceWindow};
-use super::pool::{DrainCounters, PoolDrops, Retired};
+use super::pool::{DrainCounters, PoolDrops, RetireRoom, Retired};
 use super::slot::{stretch_values_want_filter, stretch_wanted};
 use super::stretched::{self, Vocoders};
 use super::types::{PlayDirection, Playback, SlotId, Voice, VoiceSource};
@@ -757,6 +757,8 @@ pub struct VoicePoolHandle<F: SamplerFloat> {
     /// What the pool's drain dropped or refused; read by
     /// [`drops`](Self::drops).
     pub(crate) counters: Arc<DrainCounters>,
+    /// The retirement slots reserved of `retired`; this handle's ring only.
+    pub(crate) room: Arc<RetireRoom>,
     /// The stream of every streaming voice this handle (or a clone) added with
     /// [`add_streaming`](Self::add_streaming), by slot; a slot holding a memory
     /// voice, or a streaming one added without a stream, has no entry.
@@ -840,7 +842,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
             }
             freed += 1;
         }
-        self.counters.release(freed);
+        self.room.release(freed);
         // An add the pool refused at its voice cap holds no slot: its id is
         // free again and its stream, if any, ends (a send, outside the locks).
         let ended: Vec<_> = {
@@ -1322,7 +1324,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         // drain when the command retires nothing, or by `collect_retired`
         // when the value is taken. The drain's push therefore always fits.
         let reserves = cmd.may_retire();
-        if reserves && !self.counters.reserve(MAX_RESIDENT_VOICES) {
+        if reserves && !self.room.reserve(MAX_RESIDENT_VOICES) {
             return Err(SendError::RetirementFull);
         }
         if let Err(r) = writer.push(Queued {
@@ -1331,7 +1333,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
             generation,
         }) {
             if reserves {
-                self.counters.release(1);
+                self.room.release(1);
             }
             return Err(match r.error {
                 PushError::Disconnected => SendError::Disconnected,

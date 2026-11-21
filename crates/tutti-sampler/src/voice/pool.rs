@@ -140,6 +140,40 @@ pub struct PoolDrops {
     /// the retirement ring to be freed by
     /// [`collect_retired`](VoicePoolHandle::collect_retired).
     pub voices_refused: u64,
+    /// Retired values the drain could neither queue nor park, and leaked
+    /// rather than free in the callback. Always zero unless the retirement
+    /// bound is wrong: a reservation exists for every value, and values
+    /// retired after the handles are gone are parked in the pool.
+    pub leaked: u64,
+}
+
+/// The retirement slots one handle has reserved of its ring: values in the
+/// ring, plus commands queued that may still retire one. Never above the
+/// ring's capacity, which is what lets the drain's push always fit. Each
+/// `with_handle` makes a fresh one, shared by the pool and that handle only,
+/// so an older handle (with its older ring) never counts against the new one.
+#[derive(Debug, Default)]
+pub(crate) struct RetireRoom {
+    reserved: AtomicUsize,
+}
+
+impl RetireRoom {
+    /// Reserves one of `capacity` slots for a command about to be queued;
+    /// `false` when none is left. Called with the command writer locked, so
+    /// reservations are serial and only releases race with it.
+    pub(crate) fn reserve(&self, capacity: usize) -> bool {
+        if self.reserved.load(Ordering::Acquire) >= capacity {
+            return false;
+        }
+        self.reserved.fetch_add(1, Ordering::AcqRel);
+        true
+    }
+
+    /// Gives `n` reserved slots back: by the drain for a command that
+    /// retired nothing, by `collect_retired` for the values it took.
+    pub(crate) fn release(&self, n: usize) {
+        self.reserved.fetch_sub(n, Ordering::AcqRel);
+    }
 }
 
 /// The atomics behind [`PoolDrops`], shared by a pool and its handle. Bumped
@@ -151,10 +185,7 @@ pub(crate) struct DrainCounters {
     pub(crate) directions_dropped: AtomicU64,
     wave_swaps_ignored: AtomicU64,
     voices_refused: AtomicU64,
-    /// Retirement slots the handle has reserved: values in the retirement
-    /// ring, plus commands queued that may still retire one. Never above the
-    /// ring's capacity, which is what lets the drain's push always fit.
-    retire_reserved: AtomicUsize,
+    leaked: AtomicU64,
     /// Commands the handle has queued: not a drop, so not in [`PoolDrops`]. A
     /// pool whose count is zero holds the voices it was built with and no
     /// others, which is what lets a fork copy it.
@@ -166,24 +197,6 @@ impl DrainCounters {
     /// have applied: the pool's voices are then not known here.
     pub(crate) fn commanded(&self) -> bool {
         self.queued.load(Ordering::Relaxed) > 0
-    }
-
-    /// Reserves one of `capacity` retirement slots for a command about to be
-    /// queued; `false` when none is left. Called with the command writer
-    /// locked, so reservations are serial and only releases race with it.
-    pub(crate) fn reserve(&self, capacity: usize) -> bool {
-        let taken = self.retire_reserved.load(Ordering::Acquire);
-        if taken >= capacity {
-            return false;
-        }
-        self.retire_reserved.fetch_add(1, Ordering::AcqRel);
-        true
-    }
-
-    /// Gives `n` reserved retirement slots back: by the drain for a command
-    /// that retired nothing, by `collect_retired` for the values it took.
-    pub(crate) fn release(&self, n: usize) {
-        self.retire_reserved.fetch_sub(n, Ordering::AcqRel);
     }
 
     pub(crate) fn note_queued(&self) {
@@ -201,6 +214,7 @@ impl DrainCounters {
             directions_dropped: load(&self.directions_dropped),
             wave_swaps_ignored: load(&self.wave_swaps_ignored),
             voices_refused: load(&self.voices_refused),
+            leaked: load(&self.leaked),
         }
     }
 }
@@ -311,6 +325,8 @@ pub struct VoicePool<F: SamplerFloat> {
     /// is on the control side. Sized `COMMAND_CAPACITY` by `with_handle`, the
     /// most commands that can still be queued once the handles are gone.
     stranded: CappedVec<Retired<F>>,
+    /// The retirement slots reserved of `retired`, shared with the handle.
+    pub(crate) room: Arc<RetireRoom>,
     /// What the drain dropped or refused, shared with the handle
     /// ([`VoicePoolHandle::drops`]).
     pub(crate) counters: Arc<DrainCounters>,
@@ -379,6 +395,7 @@ impl<F: SamplerFloat> VoicePool<F> {
             retired,
             retired_now: false,
             stranded: CappedVec::with_capacity(0),
+            room: Arc::default(),
             counters: Arc::default(),
             // Reserved, not empty: `AddVoice` is drained inside `process`, so
             // a `push` that grows this vector would be a reallocation in the
@@ -464,6 +481,7 @@ impl<F: SamplerFloat> VoicePool<F> {
         self.rx = rx;
         self.retired = retired_tx;
         self.stranded = CappedVec::with_capacity(COMMAND_CAPACITY);
+        self.room = Arc::default();
         // The handle mirrors the reader's width and shares its rate so `send`
         // can build a vocoder that matches it, on the control thread.
         let handle = VoicePoolHandle {
@@ -471,6 +489,7 @@ impl<F: SamplerFloat> VoicePool<F> {
             retired: Arc::new(Mutex::new(retired)),
             channels: self.channels,
             counters: Arc::clone(&self.counters),
+            room: Arc::clone(&self.room),
             streams: Arc::default(),
             free: Arc::default(),
             // Voices inserted before the handle was made are live too.
@@ -768,6 +787,7 @@ impl<F: SamplerFloat> VoicePool<F> {
                 false,
                 "more retirements after disconnect than queued commands"
             );
+            DrainCounters::bump(&self.counters.leaked);
             std::mem::forget(last);
         }
     }
@@ -910,7 +930,7 @@ impl<F: SamplerFloat> VoicePool<F> {
             }
             if reserved && !self.retired_now {
                 // Reserved, but nothing came of it: the slot is free again.
-                self.counters.release(1);
+                self.room.release(1);
             }
         }
     }
@@ -929,6 +949,7 @@ impl<F: SamplerFloat> Clone for VoicePool<F> {
             retired: ring(0, Overflow::Refuse).0,
             retired_now: false,
             stranded: CappedVec::with_capacity(0),
+            room: Arc::default(),
             counters: Arc::default(),
             voices: {
                 // Reserved like a new pool's, so a clone's drain refuses at the
