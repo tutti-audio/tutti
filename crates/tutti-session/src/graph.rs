@@ -183,6 +183,12 @@ struct Entry {
     /// What frees the values its published cells retired
     /// ([`SessionNode::reclaimer`]), run by [`Graph::reclaim`].
     reclaimer: Option<crate::Reclaimer>,
+    /// The node's controls ([`IntoNode::Controls`]), a clone of what
+    /// [`Graph::add`] handed out, kept for the node's life: dropping the entry
+    /// drops them, so a handle whose last drop releases something (a voice's
+    /// stream) holds it until the node is removed. `None` for a node placed
+    /// without [`SessionNode`]. Read by [`Graph::controls`].
+    controls: Option<Box<dyn Any + Send>>,
 }
 
 /// The executor, while this side still holds it, and what a local render
@@ -766,6 +772,37 @@ impl<F: Float> Graph<F> {
         (key, controls)
     }
 
+    /// The controls [`add`](Self::add) kept for the node at `key`; `None` when
+    /// the node is gone.
+    pub(crate) fn controls<N: SessionNode<F>>(&self, key: &Key<N>) -> Option<&N::Controls> {
+        self.nodes
+            .get(&key.erase())?
+            .controls
+            .as_deref()?
+            .downcast_ref()
+    }
+
+    /// The sampler handle of the node at `key`, the controls
+    /// [`add`](Self::add) returned for it, until its commands become targets
+    /// ([`Handled`](crate::Handled) names the nodes). `None` when the node is gone.
+    ///
+    /// The graph keeps a clone for the node's life, so a handle's last drop
+    /// (a streamed voice's release) waits for the node's removal.
+    #[cfg(feature = "sampler")]
+    pub fn handle<N: crate::Handled<F>>(&self, key: &Key<N>) -> Option<&N::Controls> {
+        self.controls(key)
+    }
+
+    /// Band `band`'s largest gain reduction in the last block, the meter of
+    /// the multiband compressor at `key`: [`Db::UNITY`](tutti_units::Db::UNITY) for no reduction, and
+    /// past the last band. `None` when the node is gone.
+    pub fn gain_reduction<N>(&self, key: &Key<N>, band: usize) -> Option<tutti_units::Db>
+    where
+        N: SessionNode<F, Controls = tutti_nodes::MultibandControls>,
+    {
+        Some(self.controls(key)?.gain_reduction_db(band))
+    }
+
     /// Puts `node` in the editor under a fresh key, with nothing addressed and
     /// nothing to sweep: [`add`](Self::add)'s first half, for the nodes that
     /// are not a [`SessionNode`] (a bound plugin).
@@ -773,7 +810,13 @@ impl<F: Float> Graph<F> {
         let id = NodeKey::fresh();
         // A fresh key has no wiring recorded, so nothing is unwired.
         let controls = self.editor.insert(id, N::kind(), node).controls;
-        self.nodes.insert(id, Entry { reclaimer: None });
+        self.nodes.insert(
+            id,
+            Entry {
+                reclaimer: None,
+                controls: None,
+            },
+        );
         self.note_pass(id);
         self.edited = true;
         (Key::new(id), controls)
@@ -892,6 +935,7 @@ impl<F: Float> Graph<F> {
     /// params, its slots and its reclaimer.
     fn address<N: SessionNode<F>>(&mut self, node: NodeKey, controls: &N::Controls) {
         if let Some(entry) = self.nodes.get_mut(&node) {
+            entry.controls = Some(Box::new(controls.clone()));
             if let Some(set) = N::params(controls) {
                 self.values.address(node, std::any::TypeId::of::<N>(), set);
             }
@@ -944,7 +988,13 @@ impl Graph {
         let rebinder = tutti_plugin::catalog::PluginRebinder::out_of_process(&bound);
         // A fresh key has no wiring recorded, so nothing is unwired.
         let _controls = self.editor.insert(node, PLUGIN_KIND, bound).controls;
-        self.nodes.insert(node, Entry { reclaimer: None });
+        self.nodes.insert(
+            node,
+            Entry {
+                reclaimer: None,
+                controls: None,
+            },
+        );
         self.note_pass(node);
         self.plugins.insert(node, hosted);
         self.provide_plugin(node);

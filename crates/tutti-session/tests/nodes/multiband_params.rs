@@ -18,9 +18,7 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::ForkByClone;
 use tutti_modulation::Lfo;
 use tutti_nodes::testing::Osc;
-use tutti_nodes::{
-    MultibandBands, MultibandCompressorConfig, MultibandCompressorNode, MultibandControls,
-};
+use tutti_nodes::{MultibandBands, MultibandCompressorConfig, MultibandCompressorNode};
 use tutti_session::RouteSpec;
 use tutti_session::{InPort, Key, OutPort, Root, Session};
 use tutti_units::{Amplitude, SampleRate};
@@ -54,13 +52,8 @@ fn expected(hz: f64, g0: f64, g1: f64) -> f64 {
     A * (lp * gain(g0) + hp * gain(g1))
 }
 
-/// An offline stereo session with the rig wired to the outputs, and the
-/// node's controls.
-fn rig() -> (
-    Session,
-    Key<MultibandCompressorNode<f32>>,
-    MultibandControls,
-) {
+/// An offline stereo session with the rig wired to the outputs.
+fn rig() -> (Session, Key<MultibandCompressorNode<f32>>) {
     let mut s = Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .build()
@@ -72,7 +65,7 @@ fn rig() -> (
     let (high, _) = g.add(ForkByClone(
         Osc::sine(Hz::new(HIGH)).with_amplitude(Amplitude::new(A)),
     ));
-    let (mb, controls) = g.add(MultibandCompressorNode::<f32>::from(
+    let (mb, _) = g.add(MultibandCompressorNode::<f32>::from(
         MultibandCompressorConfig::new(BusTopology::STEREO, MultibandBands::of(2)),
     ));
     g.set_sources(InPort::new(mb, 0), [OutPort::new(low, 0)])
@@ -85,14 +78,11 @@ fn rig() -> (
         .unwrap();
     // Unity ratio on both bands: nothing is reduced, the make-ups are the gains.
     for band in 0..2 {
-        assert!(
-            controls
-                .params()
-                .set(UnitAddr::new(UnitParam::Ratio, band), 1.0)
-        );
+        s.set(mb.ratio_at(band).to(CompressionRatio::new(1.0)))
+            .unwrap();
     }
     let _ = s.update();
-    (s, mb, controls)
+    (s, mb)
 }
 
 /// Renders `frames` frames from a rolling transport, in blocks of 128.
@@ -134,7 +124,7 @@ fn measure(s: &mut Session) -> (f64, f64) {
 /// index 1 by the analytic figure, the left (band 0's) follows index 0.
 #[test]
 fn a_write_to_band_1_moves_band_1_only() {
-    let (mut s, mb, _) = rig();
+    let (mut s, mb) = rig();
     let (l, r) = measure(&mut s);
     assert!((l - expected(LOW, 0.0, 0.0)).abs() < 1e-5, "{l}");
     assert!((r - expected(HIGH, 0.0, 0.0)).abs() < 1e-5, "{r}");
@@ -160,7 +150,7 @@ fn a_write_to_band_1_moves_band_1_only() {
 /// no more: 6 per band and one per crossover, none for the toggles.
 #[test]
 fn the_graph_declares_each_band_and_crossover() {
-    let (mut s, mb, _) = rig();
+    let (mut s, mb) = rig();
     let g = s.graph();
     for band in 0..2u8 {
         for kind in tutti_nodes::BAND_PARAMS {
@@ -191,7 +181,7 @@ fn the_graph_declares_each_band_and_crossover() {
 }
 
 /// A write at index 1 reaches the band meter of band 1 through the
-/// controls the insert returned: a tone over the threshold is reduced by a
+/// `Graph::gain_reduction`: a tone over the threshold is reduced by a
 /// band-1 threshold written low and not by one written high, band 0 never.
 ///
 /// The right tone (0.4, -8 dB) is over a -30 dB threshold at 2:1 (the reduction
@@ -199,7 +189,7 @@ fn the_graph_declares_each_band_and_crossover() {
 /// 2).
 #[test]
 fn the_meter_of_band_1_follows_its_threshold() {
-    let (mut s, mb, controls) = rig();
+    let (mut s, mb) = rig();
     for band in 0..2 {
         s.set((
             mb.ratio_at(band).to(CompressionRatio::new(2.0)),
@@ -212,21 +202,21 @@ fn the_meter_of_band_1_follows_its_threshold() {
     s.set(mb.threshold_at(1).to(Db::new(-30.0))).unwrap();
     render(&mut s, 9_600);
     assert!(
-        controls.gain_reduction_db(1) > Db::new(3.0),
+        s.graph_ref().gain_reduction(&mb, 1).unwrap() > Db::new(3.0),
         "{:?}",
-        controls.gain_reduction_db(1)
+        s.graph_ref().gain_reduction(&mb, 1).unwrap()
     );
     assert!(
-        controls.gain_reduction_db(0) < Db::new(1e-2),
+        s.graph_ref().gain_reduction(&mb, 0).unwrap() < Db::new(1e-2),
         "{:?}",
-        controls.gain_reduction_db(0)
+        s.graph_ref().gain_reduction(&mb, 0).unwrap()
     );
     s.set(mb.threshold_at(1).to(Db::new(0.0))).unwrap();
     render(&mut s, 9_600);
     assert!(
-        controls.gain_reduction_db(1) < Db::new(1e-4),
+        s.graph_ref().gain_reduction(&mb, 1).unwrap() < Db::new(1e-4),
         "{:?}",
-        controls.gain_reduction_db(1)
+        s.graph_ref().gain_reduction(&mb, 1).unwrap()
     );
 }
 
@@ -245,7 +235,7 @@ fn the_meter_of_band_1_follows_its_threshold() {
 /// (w tau)^2)` of its depth and `atan(w tau)` late (0.992 and 0.125 rad at 4 Hz).
 #[test]
 fn a_route_to_band_1_modulates_band_1_only() {
-    let (mut s, mb, _) = rig();
+    let (mut s, mb) = rig();
     let band1 = mb.gain_db_at(1);
     let mut m = s.mods_mut();
     m.range(band1, Db::new(-24.0)..Db::new(24.0)).unwrap();
@@ -303,7 +293,7 @@ fn a_route_to_band_1_modulates_band_1_only() {
 /// moved the other way (each band), and each render keeps its own figures.
 #[test]
 fn a_fork_keeps_each_index_to_itself() {
-    let (mut s, mb, _) = rig();
+    let (mut s, mb) = rig();
     s.set(mb.gain_db_at(0).to(Db::new(-6.0))).unwrap();
     s.set(mb.gain_db_at(1).to(Db::new(6.0))).unwrap();
     render(&mut s, 128);
@@ -338,7 +328,7 @@ fn a_fork_keeps_each_index_to_itself() {
 /// `x = warp(100) / warp(150)` and the make-up of band 1 reaches it.
 #[test]
 fn a_crossover_write_moves_the_split() {
-    let (mut s, mb, _) = rig();
+    let (mut s, mb) = rig();
     s.set(mb.gain_db_at(1).to(Db::new(-60.0))).unwrap();
     let (l, _) = measure(&mut s);
     // Band 1 muted by 60 dB: the left is band 0's share alone.

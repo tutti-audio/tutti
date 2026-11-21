@@ -461,7 +461,7 @@ fn a_crossfade_on_a_removed_node_is_refused_naming_it() {
 fn a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update() {
     let mut s = detached(1);
     let mut side = s.graph().take_audio_side();
-    let (knob, old) = s.graph().add(Params(Knob::new()));
+    let (knob, _) = s.graph().add(Params(Knob::new()));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(knob, 0)])
         .unwrap();
@@ -490,11 +490,11 @@ fn a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update() {
     assert!(s.update().is_empty());
     side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     assert!(s.update().is_empty());
-    assert!(old.set(UnitParam::Drive, 7.0));
+    s.set(knob.drive().to(Drive::new(7.0))).unwrap();
     side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(
         out[0], 7.0,
-        "the old unit plays on, steered by its controls"
+        "the old unit plays on, steered by the key's param"
     );
 
     let events = s.update();
@@ -592,14 +592,14 @@ fn a_crossfade_on_a_poisoned_graph_is_refused() {
 
 /// **Every param write path the session has reaches a fork of a node**
 /// (the constraint export by `Editor::fork` rests on): `Session::set`
-/// through the node's addressed `ParamSet`, and a write to the controls
-/// `Graph::add` handed back. A fork starts from the values its cells hold.
+/// through the node's addressed `ParamSet`, and a write through the
+/// session's `Values` handle. A fork starts from the values its cells hold.
 /// (The modulated paths are `mod_lanes.rs`'.)
 #[test]
 fn every_param_write_path_reaches_a_fork() {
     let mut s = detached(2);
     let (k0, _) = s.graph().add(Params(Knob::new()));
-    let (k1, c1) = s.graph().add(Params(Knob::new()));
+    let (k1, _) = s.graph().add(Params(Knob::new()));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(k0, 0)])
         .unwrap();
@@ -609,7 +609,7 @@ fn every_param_write_path_reaches_a_fork() {
     let _ = s.update();
 
     s.set(k0.drive().to(Drive::new(5.0))).unwrap();
-    assert!(c1.set(UnitParam::Drive, 4.0));
+    s.values().set(k1.drive().to(Drive::new(4.0))).unwrap();
     let mut live = [0.0f32; 2];
     s.render_frame(InterleavedMut::one_frame(&mut live).unwrap());
     assert_eq!(live, [5.0, 4.0], "each write reaches the live node");
@@ -818,7 +818,7 @@ struct PublishedNode {
 
 /// [`Published`]'s controls: its cell, and a token only the controls hold
 /// (the unit holds none), so a test counts the clones alive (the test's,
-/// and the graph's reclaimer's).
+/// the graph's reclaimer's and the graph's own, kept for the node's life).
 #[derive(Clone)]
 struct PublishedControls {
     cell: tutti_rt::Publisher<u32>,
@@ -833,17 +833,20 @@ impl tutti_rt::Reclaim for PublishedControls {
 }
 
 impl Published {
-    fn new() -> Self {
+    /// The node, and the test's own clone of its controls.
+    fn new() -> (Self, PublishedControls) {
         let cell = tutti_rt::Publisher::new(0);
-        Self {
+        let controls = PublishedControls {
+            cell,
+            token: Arc::new(()),
+        };
+        let node = Self {
             node: PublishedNode {
-                reader: cell.reader(),
+                reader: controls.cell.reader(),
             },
-            controls: PublishedControls {
-                cell,
-                token: Arc::new(()),
-            },
-        }
+            controls: controls.clone(),
+        };
+        (node, controls)
     }
 }
 
@@ -896,31 +899,32 @@ fn replace_under_a_held_borrow(controls: &PublishedControls) {
 #[test]
 fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
     let mut s = detached(1);
-    let (node, first) = s.graph().add(Published::new());
+    let (published, first) = Published::new();
+    let (node, _) = s.graph().add(published);
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(node, 0)])
         .unwrap();
     let _ = s.update();
-    assert_eq!(Arc::strong_count(&first.token), 2, "the graph keeps one");
+    assert_eq!(
+        Arc::strong_count(&first.token),
+        3,
+        "the graph keeps two: the reclaimer's and the node's controls"
+    );
 
     replace_under_a_held_borrow(&first);
     assert_eq!(first.cell.retired_len(), 1, "retired, not yet scanned");
     let _ = s.update();
     assert_eq!(first.cell.retired_len(), 0, "the update freed it");
 
-    let second = match s
+    let (incoming, second) = Published::new();
+    match s
         .graph()
-        .crossfade(
-            node,
-            Published::new(),
-            Seconds::new(0.0),
-            FadeLaw::EqualAmplitude,
-        )
+        .crossfade(node, incoming, Seconds::new(0.0), FadeLaw::EqualAmplitude)
         .expect("the node is in the graph")
     {
-        Crossfade::Landed(controls) => controls,
+        Crossfade::Landed(_) => {}
         Crossfade::Waiting(_) => panic!("nothing re-prepares"),
-    };
+    }
     assert_eq!(
         Arc::strong_count(&first.token),
         1,
@@ -928,7 +932,7 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
     );
     assert_eq!(
         Arc::strong_count(&second.token),
-        2,
+        3,
         "the incoming one's kept"
     );
     let _ = s.update();
@@ -954,13 +958,14 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
         "the replaced node's reclaimer went with it"
     );
 
-    let (other, third) = s.graph().add(Published::new());
+    let (published, third) = Published::new();
+    let (other, _) = s.graph().add(published);
     let _ = s.update();
     s.remove(other).unwrap();
     assert_eq!(
         Arc::strong_count(&third.token),
         1,
-        "the removal dropped its reclaimer"
+        "the removal dropped its reclaimer and its controls"
     );
     replace_under_a_held_borrow(&third);
     let _ = s.update();
@@ -995,7 +1000,12 @@ fn park_a_retired_slot(s: &mut DetachedSession, handle: &tutti_sampler::VoicePoo
 #[test]
 fn the_update_frees_the_slots_a_graph_pool_retired() {
     let mut s = detached(1);
-    let (pool, handle) = s.graph().add(tutti_sampler::VoicePool::new());
+    let (pool, _) = s.graph().add(tutti_sampler::VoicePool::new());
+    let handle = s
+        .graph_ref()
+        .handle(&pool)
+        .expect("the pool is in the graph")
+        .clone();
     let (bare, bare_handle) = tutti_sampler::VoicePool::new().with_handle();
     let (bare, ()) = s.graph().add(tutti_graph::Unforkable(bare));
     s.graph()
@@ -1024,6 +1034,73 @@ fn the_update_frees_the_slots_a_graph_pool_retired() {
         1,
         "a pool with no reclaimer keeps its parked slot"
     );
+}
+
+/// **A handle is `None` once its node is removed**: the key names a node the
+/// graph no longer holds, so `Graph::handle` finds no controls for it.
+#[cfg(feature = "sampler")]
+#[test]
+fn a_handle_is_none_once_its_node_is_removed() {
+    let mut s = detached(1);
+    let (pool, _) = s.graph().add(tutti_sampler::VoicePool::new());
+    assert!(s.graph_ref().handle(&pool).is_some(), "in the graph");
+    s.remove(pool).unwrap();
+    assert!(s.graph_ref().handle(&pool).is_none(), "removed");
+}
+
+/// **A streamed voice keeps sounding after the host drops the handle `add`
+/// returned, and the graph's handle still commands it**: the pool's handle
+/// holds each streaming voice's `Stream`, and the last handle dropped closes
+/// it. The graph keeps a clone for the node's life, so the file (a constant
+/// 0.25) still renders at unity gain on the root's left channel (the file is
+/// mono) after the streamer has stepped past the drop, and a removal queued
+/// through `Graph::handle` silences it.
+#[cfg(feature = "sampler")]
+#[test]
+fn a_streamed_voice_keeps_sounding_after_the_host_drops_the_handle_add_returned() {
+    use tutti_sampler::{DiskStreamer, DiskVoice, Playback, SlotId, StreamStart, VoiceWindow};
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("level.wav");
+    tutti_fixtures::signal::write_wav_f32(&path, RATE, 1, &[0.25f32; 48_000]);
+    let mut streamer = DiskStreamer::manual(RATE, Default::default()).expect("builds");
+    let opening = streamer.open_stream(&path, StreamStart::HEAD);
+    let (stream, reader) =
+        tutti_sampler::testing::wait_for_open(&mut streamer, opening).expect("the file opens");
+
+    let mut s = Session::builder()
+        .sample_rate(RATE)
+        .build()
+        .expect("builds");
+    let (pool, host) = s.graph().add(tutti_sampler::VoicePool::new());
+    s.graph().connect(pool, Root).unwrap().unfaded();
+    host.add_streaming(
+        SlotId(1),
+        DiskVoice::from_reader(reader, VoiceWindow::from(tutti_units::Beat::new(0.0))),
+        stream,
+        Playback::default(),
+    )
+    .expect("queued");
+    drop(host);
+    let _ = streamer.step_until_idle(1_000);
+    let _ = s.update();
+    s.play().expect("room");
+    let mut block = [0.0f32; 1_024];
+    for _ in 0..8 {
+        let _ = streamer.step_until_idle(1_000);
+        s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
+    }
+    assert_eq!(block[1_022], 0.25, "the voice is still sounding");
+
+    s.graph_ref()
+        .handle(&pool)
+        .expect("the pool is in the graph")
+        .remove(SlotId(1))
+        .expect("queued");
+    for _ in 0..4 {
+        let _ = streamer.step_until_idle(1_000);
+        s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
+    }
+    assert_eq!(block[1_022], 0.0, "the graph's handle removed the voice");
 }
 
 /// The widest global input a layout holds builds: the count is a

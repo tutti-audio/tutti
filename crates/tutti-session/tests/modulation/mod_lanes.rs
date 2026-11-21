@@ -1011,7 +1011,7 @@ fn an_added_synth_is_a_modulation_target() {
 
     let (mut s, _side) = rig(2);
     let node = PolySynth::new(SynthConfig::default());
-    let (synth, params) = s.graph().add(node);
+    let (synth, _) = s.graph().add(node);
     master(&mut s, &[synth.erase(), synth.erase()]);
     let volume = ParamRef::unit(synth, UnitParam::Volume);
     let mut m = s.mods_mut();
@@ -1024,10 +1024,10 @@ fn an_added_synth_is_a_modulation_target() {
         .mod_state()
         .lane(volume.key())
         .expect("the volume has a lane");
-    // The knob is read from its cell: a write through the synth's own params
-    // is what the lane reads, value for value.
+    // The knob is read from its cell: a write through the synth's volume is
+    // what the lane reads, value for value.
     for v in [0.37, 0.81] {
-        assert!(params.set(UnitParam::Volume, v));
+        s.set(synth.volume().to(Amplitude::new(v))).unwrap();
         assert_eq!(lane.value(), Some(v), "its knob is the synth's volume cell");
     }
 }

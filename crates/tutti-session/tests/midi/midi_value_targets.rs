@@ -362,13 +362,13 @@ fn blocks_adopting_written_values_do_not_allocate() {
 
 /// **A write after the clip's node is replaced reaches the new node, and the
 /// old one gets nothing**: the key names the node now at it, so the write is
-/// the new node's clip, which plays at the next block; the controls of the
-/// node it replaced still hold the clip it had.
+/// the new node's clip, which plays at the next block; the replaced node's
+/// clip never sounds.
 #[test]
 fn a_write_after_a_clip_is_replaced_reaches_the_new_node() {
     let mut s = offline();
     let (synth, seen) = tap(&mut s);
-    let (clip, old) = s.graph().add(MidiClipNode::new(note(
+    let (clip, _) = s.graph().add(MidiClipNode::new(note(
         60,
         MF,
         Beat::new(0.0),
@@ -377,8 +377,7 @@ fn a_write_after_a_clip_is_replaced_reaches_the_new_node() {
     s.graph()
         .set_feed(synth, Feeder::Declared, vec![clip.events_out()]);
     let _ = s.update();
-    let new = s
-        .graph()
+    s.graph()
         .replace(
             clip,
             MidiClipNode::new([]),
@@ -391,16 +390,13 @@ fn a_write_after_a_clip_is_replaced_reaches_the_new_node() {
     let written = clip_of(note(64, MF, Beat::new(1.0 / 3.0), BeatDuration::new(1.0)));
     s.set(clip.events().to(written)).unwrap();
     let _ = s.update();
-    assert_eq!(new.len(), 2, "the new node holds the written clip");
-    assert_eq!(old.len(), 2);
-    assert_eq!(
-        *old.current(),
-        clip_of(note(60, MF, Beat::new(0.0), BeatDuration::new(1.0))),
-        "the replaced node's clip is as it was"
-    );
     play(&s);
     blocks(&s, 18);
-    assert_eq!(note_ons(&seen), vec![(8_000, 64)]);
+    assert_eq!(
+        note_ons(&seen),
+        vec![(8_000, 64)],
+        "the new node plays the written clip, the replaced node's note 60 never"
+    );
 }
 
 /// **`play_clip` on a target whose clip node was removed from the graph
@@ -462,21 +458,12 @@ fn writing_the_clip_in_force_by_pointer_cuts_no_note() {
 }
 
 /// **A clip written and not yet updated is read back, while its node still
-/// holds the clip in force**; the update gives the node the written one.
+/// plays the clip in force**: note 60 sounds; a write of note 64 changes
+/// nothing heard until the update, which ends note 60 on the first frame of
+/// the next block (frame 1 024: block 0 sounded the note, block 1 ran pending).
 #[test]
 fn a_clip_written_is_pending_until_the_update_publishes_it() {
-    let mut s = offline();
-    let (synth, _seen) = tap(&mut s);
-    let (clip, controls) = s.graph().add(MidiClipNode::new(note(
-        60,
-        MF,
-        Beat::new(0.0),
-        BeatDuration::new(1.0),
-    )));
-    s.graph()
-        .set_feed(synth, Feeder::Declared, vec![clip.events_out()]);
-    let _ = s.update();
-    let in_force = controls.current();
+    let (mut s, clip, seen) = sounding();
     let written = Arc::new(clip_of(note(
         64,
         MF,
@@ -486,28 +473,34 @@ fn a_clip_written_is_pending_until_the_update_publishes_it() {
 
     s.set(clip.events().to(Arc::clone(&written))).unwrap();
     assert!(Arc::ptr_eq(&s.get(clip.events()).unwrap(), &written));
-    assert!(
-        Arc::ptr_eq(&controls.current(), &in_force),
-        "the node's cell holds the old clip before the update"
+    blocks(&s, 1);
+    assert_eq!(
+        note_offs(&seen),
+        vec![],
+        "the node still plays the old clip before the update"
     );
     let _ = s.update();
-    assert!(Arc::ptr_eq(&controls.current(), &written));
+    blocks(&s, 1);
+    assert_eq!(
+        note_offs(&seen),
+        vec![(1_024, 60)],
+        "the update published it"
+    );
 }
 
 /// **A clip write pending when its node is removed never publishes and
-/// leaks nothing**: the node's cell keeps the clip it had through the
-/// updates after, and the written clip is freed (no handle on it remains).
+/// leaks nothing**: the written clip is freed by the updates after (no handle
+/// on it remains).
 #[test]
 fn a_pending_clip_write_to_a_removed_node_never_publishes_and_is_freed() {
     let mut s = offline();
-    let (clip, controls) = s.graph().add(MidiClipNode::new(note(
+    let (clip, _) = s.graph().add(MidiClipNode::new(note(
         60,
         MF,
         Beat::new(0.0),
         BeatDuration::new(1.0),
     )));
     let _ = s.update();
-    let in_force = controls.current();
     let written = Arc::new(clip_of(note(
         64,
         MF,
@@ -520,9 +513,5 @@ fn a_pending_clip_write_to_a_removed_node_never_publishes_and_is_freed() {
     s.remove(clip).unwrap();
     let _ = s.update();
     let _ = s.update();
-    assert!(
-        Arc::ptr_eq(&controls.current(), &in_force),
-        "the removed node's cell never took the write"
-    );
     assert!(gone.upgrade().is_none(), "the pending clip is freed");
 }

@@ -117,7 +117,7 @@ fn a_pool_built_with_its_voices_bounces_them() {
     )
     .expect("a placeable wave");
     pool.insert(SlotId(1), source, Playback::default());
-    let (pool, _handle) = session.graph().add(pool);
+    let (pool, _) = session.graph().add(pool);
     session.graph().connect(pool, Root).unwrap().unfaded();
 
     let bounce = Bounce::project()
@@ -143,14 +143,17 @@ fn a_pool_built_with_its_voices_bounces_them() {
 #[test]
 fn a_pool_driven_through_its_handle_refuses_the_bounce_by_key() {
     let mut session = session();
-    let (pool, handle) = session.graph().add(VoicePool::new());
+    let (pool, _) = session.graph().add(VoicePool::new());
     session.graph().connect(pool, Root).unwrap().unfaded();
     let source = MemorySource::placed(
         constant(RATE as usize, 0.25),
         tutti_sampler::VoiceWindow::from(Beat::new(0.0)),
     )
     .expect("a placeable wave");
-    handle
+    session
+        .graph_ref()
+        .handle(&pool)
+        .expect("the pool is in the graph")
         .add(SlotId(1), source, Playback::default())
         .expect("queued");
 

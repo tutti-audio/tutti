@@ -23,6 +23,10 @@ use crate::NodeSlots;
 /// - its own impl with the default `params` (none), for a node with
 ///   controls of another shape.
 ///
+/// The controls are `Clone + Send + 'static`: the graph keeps a clone for the
+/// node's life ([`Graph::add`](crate::Graph::add)), so a clone shares the node's
+/// cells, and the node's removal drops it.
+///
 /// Every impl states what frees what its controls publish
 /// ([`reclaimer`](Self::reclaimer)): [`Reclaims::Cells`] for a node whose
 /// controls publish to it through a `Publisher` cell (or hold another
@@ -65,7 +69,9 @@ use crate::NodeSlots;
 ///     }
 /// }
 /// ```
-pub trait SessionNode<F: Float = f32>: IntoNode<F> + Send + 'static {
+pub trait SessionNode<F: Float = f32>:
+    IntoNode<F, Controls: Clone + Send + 'static> + Send + 'static
+{
     /// The node's params by address, read off its controls once it is in:
     /// what a [`ParamTarget`](crate::ParamTarget) write goes through, and
     /// what a fork of the node starts from. `None`, the default, for a node
@@ -513,6 +519,32 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::DiskVoice
         Reclaims::Nothing
     }
 }
+
+/// The sampler nodes whose controls are a handle with commands:
+/// [`Graph::handle`](crate::Graph::handle) reaches it by key. Sealed to the
+/// four nodes whose commands are not yet targets.
+#[cfg(feature = "sampler")]
+pub trait Handled<F: Float = f32>: SessionNode<F> + sealed::Sealed {}
+
+#[cfg(feature = "sampler")]
+mod sealed {
+    use tutti_sampler::{Clip, DiskVoice, SamplerFloat, VoiceNode, VoicePool};
+
+    pub trait Sealed {}
+    impl<F: SamplerFloat> Sealed for VoiceNode<F> {}
+    impl<F: SamplerFloat> Sealed for Clip<F> {}
+    impl<F: SamplerFloat> Sealed for VoicePool<F> {}
+    impl<F: SamplerFloat> Sealed for DiskVoice<F> {}
+}
+
+#[cfg(feature = "sampler")]
+impl<F: tutti_sampler::SamplerFloat> Handled<F> for tutti_sampler::VoiceNode<F> {}
+#[cfg(feature = "sampler")]
+impl<F: tutti_sampler::SamplerFloat> Handled<F> for tutti_sampler::Clip<F> {}
+#[cfg(feature = "sampler")]
+impl<F: tutti_sampler::SamplerFloat> Handled<F> for tutti_sampler::VoicePool<F> {}
+#[cfg(feature = "sampler")]
+impl<F: tutti_sampler::SamplerFloat> Handled<F> for tutti_sampler::DiskVoice<F> {}
 
 #[cfg(test)]
 mod tests {

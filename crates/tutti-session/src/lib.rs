@@ -248,6 +248,8 @@ pub use modulation::{
     ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, ParamRef, Problem, Ranged, RouteError,
     RouteInfo, RouteSpec, SourceInfo, SourceName, TargetName, declare_targets,
 };
+#[cfg(feature = "sampler")]
+pub use node::Handled;
 pub use node::{Reclaimer, Reclaims, SessionNode};
 pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 #[cfg(any(feature = "plugin", feature = "midi-hardware"))]

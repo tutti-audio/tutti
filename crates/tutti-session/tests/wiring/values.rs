@@ -294,18 +294,18 @@ fn a_seconds_param_keeps_its_full_width() {
     assert_eq!(s.get(attack).unwrap(), Seconds::new(wide + 2e-9));
 }
 
-/// **A write reaches the node's own cell**, and a read answers what the cell holds.
+/// **A read answers what the last write left in the node's cell**, in the param's unit.
 #[test]
-fn a_write_and_a_read_go_through_the_nodes_cell() {
+fn a_read_answers_the_last_write_to_the_nodes_cell() {
     let mut s = detached();
-    let (lp, controls) = s.graph().add(SvfFilterNode::from(
+    let (lp, _) = s.graph().add(SvfFilterNode::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
             .freq(Hz::new(1_000.0))
             .q(Q::new(0.7)),
     ));
     s.set(lp.cutoff().to(Hz::new(2_500.0))).unwrap();
-    assert_eq!(controls.get(UnitParam::Cutoff), Some(2_500.0));
-    controls.set(UnitParam::Q, 4.0);
+    s.set(lp.q().to(Q::new(4.0))).unwrap();
+    assert_eq!(s.get(lp.cutoff()).unwrap(), Hz::new(2_500.0));
     assert_eq!(s.get(lp.q()).unwrap(), Q::new(4.0));
 }
 

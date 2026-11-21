@@ -48,20 +48,20 @@ fn a_keys_param_methods_name_their_kind_and_index() {
 #[test]
 fn a_write_reaches_the_cell_the_key_names() {
     let mut s = detached();
-    let (lp, controls) = s.graph().add(SvfFilterNode::<f32>::from(
+    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
             .freq(Hz::new(1_000.0))
             .q(Q::new(0.7)),
     ));
     s.set(lp.cutoff().to(Hz::new(2_500.0))).unwrap();
     s.set(lp.q().to(Q::new(1.5))).unwrap();
-    assert_eq!(controls.get(UnitParam::Cutoff), Some(2_500.0));
-    assert_eq!(controls.get(UnitParam::Q), Some(1.5));
-    assert_eq!(controls.get(UnitParam::GainDb), Some(0.0), "the rest stays");
+    assert_eq!(s.get(lp.cutoff()).unwrap(), Hz::new(2_500.0));
+    assert_eq!(s.get(lp.q()).unwrap(), Q::new(1.5));
+    assert_eq!(s.get(lp.gain_db()).unwrap(), Db::new(0.0), "the rest stays");
 
     // A `Seconds` param is an `f64` cell: the write is exact for a value an
     // `f32` holds.
-    let (comp, controls) = s.graph().add(CompressorNode::<f32>::from(
+    let (comp, _) = s.graph().add(CompressorNode::<f32>::from(
         CompressorConfig::new(BusTopology::MONO)
             .key(KeySource::Sidechain)
             .controls(CompressorControls {
@@ -73,7 +73,7 @@ fn a_write_reaches_the_cell_the_key_names() {
             }),
     ));
     s.set(comp.attack().to(Seconds::new(0.25))).unwrap();
-    assert_eq!(controls.get(UnitParam::Attack), Some(0.25));
+    assert_eq!(s.get(comp.attack()).unwrap(), Seconds::new(0.25));
 }
 
 /// **A write that reaches nothing is refused, saying which**: a node that is
@@ -166,7 +166,7 @@ tutti_graph::declare_params!([] Mine, n { Cutoff => Hz = &n.cutoff });
 #[test]
 fn a_params_wrapped_node_is_addressed_and_forks_from_its_values() {
     let mut s = detached();
-    let (mine, controls) = s.graph().add(Params(Mine {
+    let (mine, _) = s.graph().add(Params(Mine {
         cutoff: Param::new(Hz::new(100.0)),
     }));
     s.graph()
@@ -175,7 +175,7 @@ fn a_params_wrapped_node_is_addressed_and_forks_from_its_values() {
     let _ = s.update();
 
     s.set(mine.cutoff().to(Hz::new(440.0))).unwrap();
-    assert_eq!(controls.get(UnitParam::Cutoff), Some(440.0));
+    assert_eq!(s.get(mine.cutoff()).unwrap(), Hz::new(440.0));
     let mut live = [0.0f32];
     s.render_frame(InterleavedMut::one_frame(&mut live).unwrap());
     assert_eq!(live, [440.0], "the live node reads it");
