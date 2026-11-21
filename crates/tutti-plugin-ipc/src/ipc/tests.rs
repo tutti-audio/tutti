@@ -825,7 +825,10 @@ fn a_plugin_with_no_origin_is_not_reopened() {
     let _machine = machine_lock();
     let (ipc, _server) = mock();
     let err = ipc.reopen_restoring(None).expect_err("no origin");
-    assert!(err.to_string().contains("no origin"), "{err}");
+    assert!(
+        matches!(err, tutti_plugin_types::IpcError::NoOrigin),
+        "{err:?}"
+    );
     assert!(ipc.reopen(main_thread()).is_err());
 }
 

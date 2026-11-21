@@ -76,3 +76,38 @@ impl RateRefusal {
         Self { rate, cause }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **A typed refusal survives the loader-facing error**: a cause carried
+    /// through [`PluginError::Bridge`] comes out as the same arm, and any other
+    /// loader failure is [`RateRefusalCause::Other`].
+    #[test]
+    fn a_typed_cause_survives_the_loader_error() {
+        let cause = RateRefusalCause::RolledBack {
+            running: SampleRate::SR_44K1,
+            reason: "no".into(),
+        };
+        let carried = PluginError::Bridge(Box::new(IpcError::RateRefused(RateRefusal::new(
+            SampleRate::SR_96K,
+            cause.clone(),
+        ))));
+        assert_eq!(RateRefusalCause::from(&carried), cause);
+        assert!(matches!(
+            RateRefusalCause::from(&PluginError::Other("x".into())),
+            RateRefusalCause::Other(_)
+        ));
+    }
+
+    /// **A cause from a newer peer this build does not know is a decode
+    /// failure**, never a different cause: the wire's variant index is the
+    /// arm.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn an_unknown_cause_from_a_newer_peer_fails_to_decode() {
+        let unknown = [0x7f_u8];
+        assert!(postcard::from_bytes::<RateRefusalCause>(&unknown).is_err());
+    }
+}
