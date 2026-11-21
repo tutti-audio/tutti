@@ -19,9 +19,8 @@ impl BitCrusherConfig {
     /// A crusher of `width` channels at 8 bits and no hold.
     #[must_use]
     pub fn new(width: impl Into<ChannelLayout>) -> Self {
-        let width = width.into();
         Self {
-            width: width,
+            width: width.into(),
             controls: BitCrusherControls::DEFAULT,
         }
     }
