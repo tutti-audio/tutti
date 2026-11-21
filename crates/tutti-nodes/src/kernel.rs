@@ -223,22 +223,8 @@ impl<K: Kernel> std::fmt::Debug for KernelNode<K> {
 /// ```
 /// use tutti_buffers::{BusTopology, MaxBlock, Planes, PlanesMut};
 /// use tutti_graph::{Buses, Shape};
-/// use tutti_nodes::{ControlSet, ControlSignals, Kernel, KernelConfig, KernelNode};
-/// use tutti_units::{SampleRate, Tail, UnitAddr};
-///
-/// /// A kernel with no params.
-/// #[derive(Clone, Debug)]
-/// struct NoParams;
-///
-/// impl ControlSet for NoParams {
-///     type Controls = ();
-///     fn addrs(&self) -> &'static [UnitAddr] {
-///         &[]
-///     }
-///     fn defaults(&self) {}
-///     fn flatten(&self, _: &(), _: &mut [f64]) {}
-///     fn assemble(&self, _: &[f64]) {}
-/// }
+/// use tutti_nodes::{ControlSignals, Kernel, KernelConfig, KernelNode, NoControls};
+/// use tutti_units::{SampleRate, Tail};
 ///
 /// /// A mono pass-through.
 /// #[derive(Clone)]
@@ -246,7 +232,7 @@ impl<K: Kernel> std::fmt::Debug for KernelNode<K> {
 ///
 /// impl Kernel for Wire {
 ///     type Float = f32;
-///     type Set = NoParams;
+///     type Set = NoControls;
 ///     const GRID: usize = 16;
 ///     fn shape(&self) -> Shape {
 ///         Shape::buses(Buses::main(BusTopology::MONO), Buses::main(BusTopology::MONO))
@@ -270,7 +256,7 @@ impl<K: Kernel> std::fmt::Debug for KernelNode<K> {
 ///     }
 /// }
 ///
-/// let node = KernelNode::from(KernelConfig::new(Wire, NoParams));
+/// let node = KernelNode::from(KernelConfig::new(Wire, NoControls));
 /// # let _ = node;
 /// ```
 #[derive(Clone)]

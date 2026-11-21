@@ -81,7 +81,8 @@
 //!   [`PlateBank`] (Dattorro's plate), [`SpringReverb`] (Valimaki, Parker and Abel's spring:
 //!   stretched all-pass cascades in a loop with a delay and a low-pass), their parameters [`Ramp`]s in [`FreeverbRamps`],
 //!   [`FdnRamps`] and [`PlateRamps`]. [`rt60_from_gain`] is the RT60 of a loop of a
-//!   given gain.
+//!   given gain; [`EarlyReflections`] (the model's [`Taps`] stage: a sparse multi-tap delay
+//!   per output channel); and the velvet-noise [`Decorrelator`] over a [`VelvetNoise`] sequence.
 //! - **Waveshaping** (`waveshape.rs`): [`ShapeKind`], seven memoryless curves, and
 //!   [`WaveshaperBank`], which runs one over a block at a ramping or per-frame drive, with
 //!   [`Antialiasing`] of the first or second order.
@@ -167,11 +168,13 @@ mod control_rate;
 mod convolver;
 mod dc_block;
 mod dct;
+mod decorrelator;
 mod delay;
 mod design;
 mod distance;
 mod dither;
 mod dynamics;
+mod early_reflections;
 mod fft;
 mod filter;
 mod fir;
@@ -223,6 +226,10 @@ pub use convolver::{
 };
 pub use dc_block::{DC_CORNER, DcBlocker, DcBlockerControls, MIN_DC_CORNER};
 pub use dct::Dct2;
+pub use decorrelator::{
+    Decorrelator, VelvetDensity, VelvetDensityError, VelvetLength, VelvetLengthError, VelvetNoise,
+    VelvetPulse,
+};
 pub(crate) use delay::delay_step;
 pub use delay::{
     ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayLayout,
@@ -243,6 +250,7 @@ pub use dynamics::{
     MultibandSettings, MultibandSignals, PeakDetection, TransientBank, TransientControls,
     TruePeakError, amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
 };
+pub use early_reflections::{EarlyReflections, EarlyReflectionsError, MAX_TAP_DELAY};
 pub use fft::{Complex, Complex32, Complex64, Correlator, FftFloat, FftScratch, RealFft};
 pub use filter::{
     Biquad, CrossoverBands, CrossoverBandsError, CrossoverBank, CrossoverBlend, CrossoverControls,

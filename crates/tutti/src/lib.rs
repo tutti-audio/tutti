@@ -293,6 +293,10 @@ pub mod nodes {
     };
     pub use tutti_dsp::{DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec};
     pub use tutti_dsp::{
+        Decorrelator, EarlyReflections, EarlyReflectionsError, MAX_TAP_DELAY, VelvetDensity,
+        VelvetDensityError, VelvetLength, VelvetLengthError, VelvetNoise, VelvetPulse,
+    };
+    pub use tutti_dsp::{
         Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,
         SpringLengthError,
     };
@@ -370,6 +374,10 @@ pub mod nodes {
         DistanceKernel, DistanceNode, DistanceSet, FrequencyShifterConfig, FrequencyShifterKernel,
         FrequencyShifterNode, FrequencyShifterSet, PitchShifterConfig, PitchShifterKernel,
         PitchShifterNode, PitchShifterSet,
+    };
+    pub use tutti_nodes::{
+        DecorrelatorConfig, DecorrelatorKernel, DecorrelatorNode, EarlyReflectionsConfig,
+        EarlyReflectionsKernel, EarlyReflectionsNode, NoControls,
     };
 }
 

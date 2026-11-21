@@ -10,6 +10,7 @@
 //! whose DSP drifted away from it.
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock, Mono, Planes};
+use tutti_dsp::{Inline, Tap, Taps};
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{GraphBuilder, IntoNode, Node, Prepare};
 use tutti_nodes::testing::Through;
@@ -19,8 +20,11 @@ use tutti_nodes::{
     MultibandBands, MultibandCompressorConfig, MultibandCompressorNode, PitchShifterConfig,
     PitchShifterNode,
 };
-use tutti_units::Latency;
+use tutti_nodes::{
+    DecorrelatorConfig, DecorrelatorNode, EarlyReflectionsConfig, EarlyReflectionsNode,
+};
 use tutti_units::{Feedback, Hz, Mix, Seconds};
+use tutti_units::{Gain, Latency, SampleSpan};
 use tutti_units::{SampleRate, Samples};
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -122,6 +126,36 @@ fn crossover_and_multiband_report_zero_latency_and_respond_at_frame_0() {
     let out = impulse_response(mb, 64);
     assert_eq!(onsets(&out[0]).first(), Some(&0));
     assert!(out[0][0] > 0.1, "the sum answers at frame 0: {}", out[0][0]);
+}
+
+// ---------------------------------------------------------------------------
+// Early reflections and a decorrelator report zero latency.
+// ---------------------------------------------------------------------------
+
+/// The first reflection at 300 frames is the effect, not processing: the node declares 0 and
+/// its impulse response is silent until exactly that tap. The decorrelator's first impulse is
+/// likewise its sequence, so it declares 0 too.
+#[test]
+fn early_reflections_and_the_decorrelator_report_zero_latency() {
+    let taps = Taps {
+        taps: Inline::from_slice(&[Tap {
+            delay: SampleSpan::new(300.0).unwrap(),
+            gain: Gain::new(0.5),
+            channel: 0,
+        }])
+        .unwrap(),
+    };
+    let er = EarlyReflectionsNode::<f32>::try_from(EarlyReflectionsConfig::new(
+        ChannelLayout::MONO,
+        taps,
+    ))
+    .unwrap();
+    assert_eq!(declared(&er), Latency::ZERO);
+    let out = impulse_response(er, 512);
+    assert_eq!(onsets(&out[0]), vec![300]);
+
+    let dec = DecorrelatorNode::<f32>::from(DecorrelatorConfig::new(ChannelLayout::MONO));
+    assert_eq!(declared(&dec), Latency::ZERO);
 }
 
 // ---------------------------------------------------------------------------
