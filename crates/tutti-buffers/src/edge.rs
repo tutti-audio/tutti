@@ -16,8 +16,7 @@
 //! ```
 //!
 //! Recording is a source pumped into a sink: pull a block, write it, repeat.
-//! `tutti-session`'s `PumpLoop` is that pass and its `Recorder` the thread that
-//! runs it.
+//! `tutti-session`'s `PumpLoop` is that pass, stepped by the app's own loop.
 //!
 //! # The verdict comes back from the call
 //!
@@ -52,9 +51,9 @@
 //! # Width agreement between two edges is a runtime check
 //!
 //! "A stereo source cannot feed a 6-channel sink" is not a type error with a
-//! runtime width. Two runtime checks carry it, both load-bearing: a recorder's
-//! `start` returns an error, and its pump asserts in debug builds (see
-//! `tutti-session`'s `Recorder` and `PumpLoop`).
+//! runtime width. Two runtime checks carry it, both load-bearing: `PumpLoop::new`
+//! returns an error, and its pump asserts in debug builds (see
+//! `tutti-session`'s `PumpLoop`).
 //!
 //! # Not the RT hot path
 //!
@@ -191,8 +190,7 @@ pub trait Source {
 /// A decoded file is one; a microphone and a graph tap are not (they are live:
 /// "not yet" is always possible and "never again" never comes). A consumer
 /// that waits for a source's end asks for this bound, so waiting on a live
-/// source does not compile instead of hanging
-/// (`tutti_session::Recorder::start_finite`). Implement it only when both
+/// source does not compile instead of hanging. Implement it only when both
 /// halves hold: it is a promise the type cannot check.
 pub trait FiniteSource: Source {}
 

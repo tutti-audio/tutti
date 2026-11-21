@@ -128,7 +128,7 @@ encode-aiff = ["codec", "tutti-codec/encode-aiff"]
 # writes through. Implied by every format, so it is rarely named directly.
 codec = ["dep:tutti-codec"]
 
-# `Recorder` and its pump loop (`tutti-session`'s `record`, in `tutti::session`).
+# The pump loop (`tutti-session`'s `record`, in `tutti::session`).
 # Implies `session` and `codec` with the WAV writer: the sink is `tutti-codec`'s
 # `FileOut`, which writes a `Format`, and a `Format` has a value only with an
 # `encode-*` feature. Implied by `capture`, so it is rarely named directly.

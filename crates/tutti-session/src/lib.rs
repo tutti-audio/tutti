@@ -279,9 +279,7 @@ pub use plugin_params::{ParamGesture, PluginParam, PluginParams};
 pub use plugin_presets::{ListedPreset, PluginPresets};
 pub use policy::{OutputPolicy, OutputPolicyError, Policy};
 #[cfg(feature = "record")]
-pub use recorder::{
-    FinalizeError, Finite, IDLE_PARK, Live, PumpLoop, PumpPass, Recorder, RecorderError,
-};
+pub use recorder::{FinalizeError, PumpLoop, PumpLoopError, PumpPass};
 #[cfg(feature = "plugin")]
 pub use recovery::{
     GiveUp, PortCounts, Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, RecoveryPolicy,

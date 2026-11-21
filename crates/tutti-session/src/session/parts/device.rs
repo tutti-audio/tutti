@@ -28,6 +28,11 @@ impl DevicePart {
         }
     }
 
+    /// The session's executor, or `None` once it has shut down.
+    pub(crate) fn executor(&self) -> Option<Executor> {
+        self.executor.upgrade()
+    }
+
     /// Starts `listing`, replacing one still waiting, whose blocking step is
     /// left to end on its own.
     pub(crate) fn start(&mut self, listing: DeviceListing) {

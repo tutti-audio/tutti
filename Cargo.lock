@@ -2720,6 +2720,7 @@ dependencies = [
  "hound",
  "tempfile",
  "thiserror 2.0.21",
+ "tracing",
  "tutti-buffers",
  "tutti-codec",
  "tutti-engine",

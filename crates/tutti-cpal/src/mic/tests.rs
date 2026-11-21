@@ -230,6 +230,12 @@ fn a_default_that_already_matches_is_accepted_with_no_ranges() {
 }
 
 /// A `MicIn` over an empty ring and a fresh fault record, with no device.
+/// An executor that outlives every test's stream.
+fn executor() -> tutti_platform::Executor {
+    static EXECUTOR: std::sync::OnceLock<tutti_platform::Executor> = std::sync::OnceLock::new();
+    EXECUTOR.get_or_init(tutti_platform::Executor::new).clone()
+}
+
 fn mic_without_a_device() -> MicIn {
     mic_with_ring(2, 8).0
 }
@@ -244,7 +250,7 @@ fn mic_with_ring(width: u16, frames: usize) -> (MicIn, TapWriter) {
         device_inputs: ChannelLayout::from(width),
         faults: Arc::new(StreamFaults::new()),
         latency: Arc::new(StreamLatency::new()),
-        _stream: StreamHandle(Owned::spawn("test-input", || Ok(())).expect("spawn")),
+        _stream: StreamHandle(Owned::spawn(&executor(), "test-input", || Ok(())).expect("spawn")),
     };
     (mic, writer)
 }
@@ -284,7 +290,7 @@ fn capture<F: Float>(
         device_inputs: ChannelLayout::from(device),
         faults: Arc::new(StreamFaults::new()),
         latency: Arc::new(StreamLatency::new()),
-        _stream: StreamHandle(Owned::spawn("test-input", || Ok(())).expect("spawn")),
+        _stream: StreamHandle(Owned::spawn(&executor(), "test-input", || Ok(())).expect("spawn")),
     };
     (capture, mic, ring)
 }
