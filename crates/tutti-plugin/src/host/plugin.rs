@@ -477,7 +477,7 @@ impl Plugin {
         let (bound, rebinder) = match self.placed {
             Placed::Served(c) => {
                 let bound = c.bind(tempo);
-                let rebinder = PluginRebinder::served(&bound);
+                let rebinder = PluginRebinder::out_of_process(&bound);
                 (BoundPlaced::Served(Box::new(bound)), rebinder)
             }
             Placed::InProcess(c) => {
@@ -655,10 +655,10 @@ impl PluginRebinder {
         }
     }
 
-    /// The rebinder of a served plugin's bound client
+    /// The rebinder of an out-of-process plugin's bound client
     /// ([`PluginClient::rebinder`](crate::PluginClient::rebinder)).
     #[must_use]
-    pub fn served(client: &crate::PluginClient<crate::host::node::Bound>) -> Self {
+    pub fn out_of_process(client: &crate::PluginClient<crate::host::node::Bound>) -> Self {
         Self {
             inner: std::sync::Arc::new(std::sync::Mutex::new(ServedRebind {
                 rebinder: client.rebinder(),

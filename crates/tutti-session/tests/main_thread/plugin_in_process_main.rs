@@ -14,7 +14,7 @@ use tutti_platform::Instant;
 
 use tutti_clap_test_plugin::{ClapProbe, ClapSwitch, Site, ThreadAnswer};
 
-use crate::loading::LoadFrom as _;
+use crate::loading::{Hosted as _, LoadFrom as _};
 use tutti_buffers::MaxBlock;
 use tutti_plugin_db::{Catalog, CatalogConfig, Hosting};
 use tutti_plugin_db::{PluginDb, ScanPoll};
@@ -106,11 +106,7 @@ fn a_swap_replaces_an_in_process_nodes_plugin() {
         second
     );
 
-    let next = s
-        .load_plugin(&second_id(), &catalog)
-        .hosting(Hosting::InProcess)
-        .run(main)
-        .unwrap();
+    let next = s.load_in_process(&second_id(), &catalog).run(main).unwrap();
     s.swap_plugin(node, next, main).unwrap();
     assert_eq!(
         crate::loading::clap_id(s.plugin_view(node).unwrap().plugin()),
@@ -142,11 +138,7 @@ fn an_in_process_swap_to_other_ports_is_refused() {
     // The next plugin opened has the probe's aux-bus layout.
     probe().set(ClapSwitch::PortLayout, 1);
     probe().thread_reset();
-    let other = s
-        .load_plugin(&second_id(), &catalog)
-        .hosting(Hosting::InProcess)
-        .run(main)
-        .unwrap();
+    let other = s.load_in_process(&second_id(), &catalog).run(main).unwrap();
     let refused = s.swap_plugin(node, other, main);
     let Err(tutti_session::SwapPluginError::Ports { node: other, .. }) = refused else {
         panic!("other ports are refused: {refused:?}");

@@ -183,6 +183,7 @@ mod clap {
 
 #[cfg(feature = "vst3")]
 mod vst3 {
+    use crate::loading::{Block as _, Hosted as _};
     use tutti_buffers::ChannelLayout;
     use tutti_plugin_types::PluginRef;
     use tutti_plugin_types::PresetId;
@@ -212,8 +213,8 @@ mod vst3 {
             .build_detached(SampleRate::DEFAULT)
             .expect("a detached session builds");
         let opened = s
-            .load_plugin(&id, &catalog)
-            .run(tutti_fixtures::main_thread())
+            .load_out_of_process(&id, &catalog)
+            .block()
             .expect("the shared plugin loads");
         let loaded = opened.handle();
 
@@ -320,7 +321,7 @@ mod vst3 {
             .plugin_recovery(tutti_session::RecoveryPolicy::default())
             .build_detached(SampleRate::DEFAULT)
             .expect("a detached session builds");
-        let plugin = s.load_plugin(&id, &catalog).run(main).unwrap();
+        let plugin = s.load_out_of_process(&id, &catalog).block().unwrap();
         let node = s.add_plugin(plugin).unwrap();
         let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(60);
         let preset = s
@@ -360,7 +361,7 @@ mod vst3 {
 
 #[cfg(feature = "vst2")]
 mod vst2 {
-    use crate::loading::{LoadFrom as _, LoadPlugin, Spec};
+    use crate::loading::{Hosted as _, LoadFrom as _, LoadPlugin, Spec};
     use tutti_buffers::ChannelLayout;
     use tutti_fixtures::ScopedEnv;
     use tutti_plugin_db::Hosting;
@@ -509,8 +510,7 @@ mod vst2 {
         let main = tutti_fixtures::main_thread();
         let old = first.info().presets().iter().next().unwrap();
         let second = s
-            .load_plugin(&id, &catalog)
-            .hosting(Hosting::InProcess)
+            .load_in_process(&id, &catalog)
             .run(main)
             .expect("a second VST2 loads");
         let incoming = second.handle();

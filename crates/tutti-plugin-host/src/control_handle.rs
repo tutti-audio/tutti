@@ -638,6 +638,17 @@ impl PluginHandle {
         lent(control, |c| c.presets(main)).ok_or(PresetError::Lost)
     }
 
+    /// [`presets`](Self::presets) for an out-of-process plugin, from any thread:
+    /// its list is a round trip over the wire, which takes no main thread.
+    ///
+    /// # Errors
+    ///
+    /// [`PresetError::Lost`] when the plugin is gone, and for a plugin that is
+    /// not out of process (its list is the main thread's).
+    pub fn presets_out_of_process(&self) -> Result<Vec<Preset>, PresetError> {
+        self.any_thread.presets().ok_or(PresetError::Lost)
+    }
+
     /// Asks the plugin to load a preset, by an id [`presets`](Self::presets)
     /// produced (or, for CLAP, a path id).
     ///

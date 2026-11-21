@@ -51,6 +51,7 @@ mod alloc_count;
 #[cfg_attr(target_os = "macos", path = "au/macos.rs")]
 #[cfg_attr(not(target_os = "macos"), path = "au/other.rs")]
 mod au;
+mod block_on;
 mod digest;
 mod env;
 #[cfg(feature = "graph")]
@@ -85,6 +86,7 @@ pub use alloc_count::{ThreadCounting, allocations};
     reason = "the Audio Unit fixtures exist on macOS; `au` is empty elsewhere"
 )]
 pub use au::*;
+pub use block_on::block_on;
 pub use digest::{Fnv, Noise, noise};
 pub use env::{ScopedEnv, cases};
 #[cfg(feature = "graph")]

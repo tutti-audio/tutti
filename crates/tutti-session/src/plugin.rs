@@ -7,8 +7,8 @@
 //!
 //! # The load
 //!
-//! A plugin is a value the app runs ([`LoadPlugin`]) on the main thread, which
-//! returns a refcounted handle ([`LoadedPlugin`]); [`Session::add_plugin`] puts
+//! A plugin is a value the app runs ([`LoadPlugin`]): an in-process plugin on the
+//! main thread, an out-of-process one on any thread. It returns a refcounted handle ([`LoadedPlugin`]); [`Session::add_plugin`] puts
 //! its node in the graph through the one install, and the node's record holds a
 //! clone of the handle until the record retires.
 //!
@@ -56,7 +56,7 @@
 //! instead of dropping it, since the drop of a plugin's last owner tears down
 //! its library and instance. `Session::update` on the main thread empties it;
 //! [`Session::retired_plugins`] counts what waits, and `Phase::Plugins` warns
-//! once when more than a handful do. A served plugin's record drops where it
+//! once when more than a handful do. An out-of-process plugin's record drops where it
 //! is retired, on the control thread; only an editor it left open waits for
 //! the main thread, to be closed, through the registry of open editors
 //! (`Editors`).
@@ -113,7 +113,7 @@
 //! - **Load.** When the backoff passes, the existing `PluginLoad` (with
 //!   the last good state as its state) runs as a task on the executor.
 //!   Its end lands through the plugin inbox in a later `Session::update`, on whatever thread runs it
-//!   (no main-thread proof: a served replacement opens off the main thread,
+//!   (no main-thread proof: an out-of-process replacement opens off the main thread,
 //!   and one that came back unopened for the main thread is a failed attempt),
 //!   swaps the loaded plugin in at the same node (`Graph::replace_plugin`)
 //!   and keeps the record: the last good state, its age, the failure
@@ -173,7 +173,10 @@ mod state;
 pub(crate) use lost::Lost;
 
 use load::NodeLink;
-pub use load::{AddPluginError, LoadPlugin, LoadedPlugin, PluginNode, SwapPluginError};
+pub use load::{
+    AddPluginError, LoadInProcess, LoadOutOfProcess, LoadPlugin, LoadedPlugin, LoadingOutOfProcess,
+    PluginNode, SwapPluginError,
+};
 pub use opened::{PluginCause, PluginInfo, PluginPorts};
 pub use preset::{LoadPreset, LoadedPreset, PresetStartError};
 pub use state::{PluginApplyError, RestoreState, RestoredState, SaveState, StateStartError};
@@ -192,10 +195,10 @@ use inbox::{Arrival, contained};
 /// sets another.
 pub(crate) const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(8);
 
-/// A plugin load: what [`LoadPlugin::run`] runs on the main thread, and what a
-/// recovery reload runs again on a task. [`run`](Self::run) and
-/// [`run_on`](Self::run_on) block (a `plugin-server` launch, half a second to
-/// fifteen).
+/// A plugin load: what a [`LoadPlugin`]'s `run` runs, and what a recovery reload
+/// runs again on a task. [`run`](Self::run) and
+/// [`run_out_of_process`](Self::run_out_of_process) block (a `plugin-server`
+/// launch, half a second to fifteen).
 #[must_use = "a load does nothing until it is run"]
 pub(crate) struct PluginLoad {
     /// The plugin, under the blacklist of the catalog that resolved it, asked
@@ -206,8 +209,8 @@ pub(crate) struct PluginLoad {
     state: Option<Arc<PeerState>>,
     /// The session's collector of main-thread work, which the plugin's handles hold.
     work: tutti_plugin_types::MainWorkHandle,
-    /// The session's executor, which a served plugin's exit watch runs on. The
-    /// load upgrades it as it opens a served plugin and holds it only while it
+    /// The session's executor, which an out-of-process plugin's exit watch runs on. The
+    /// load upgrades it as it opens an out-of-process plugin and holds it only while it
     /// does, so a queued load never keeps the executor alive.
     executor: tutti_platform::WeakExecutor,
 }
@@ -223,29 +226,33 @@ impl std::fmt::Debug for PluginLoad {
 }
 
 impl PluginLoad {
-    /// Opens the plugin on the main thread `main` proves, restores the request's
-    /// state, and reads its parameter values, after the state: those are what a
-    /// modulation lane's knob starts at. A served plugin's server is launched
-    /// here, which blocks; an in-process plugin opens on `main` (a library load
-    /// and an instance's init, with no subprocess to wait for).
+    /// Opens an in-process plugin on the main thread `main` proves, restores the
+    /// request's state, and reads its parameter values, after the state: those
+    /// are what a modulation lane's knob starts at. A library load and an
+    /// instance's init, with no subprocess to wait for.
     ///
-    /// A load the catalog refuses, or whose hosting the format cannot have
-    /// ([`IpcError::NotOutOfProcess`] for VST2 asked to be served), is
-    /// refused here, before anything is opened.
-    fn run_on(self, main: MainThreadMarker) -> Open {
-        match self
-            .loadable
-            .check()
-            .and_then(|()| tutti_plugin::catalog::placement(&self.loadable))
-        {
+    /// A plugin the catalog blacklisted is refused here, before anything is
+    /// opened.
+    fn run_in_process(self, main: MainThreadMarker) -> Open {
+        match self.loadable.check() {
             Err(refusal) => Open::refused(refusal),
-            Ok(ResolvedHosting::OutOfProcess) => self.open(Opening::Served),
-            Ok(ResolvedHosting::InProcess) => self.open(Opening::OnMain(main)),
+            Ok(()) => self.open(Opening::OnMain(main)),
         }
     }
 
-    /// [`run_on`](Self::run_on) for a load that runs where no main thread is
-    /// proved (a recovery reload's task): a served plugin opens, and one that
+    /// Opens an out-of-process plugin: launches its `plugin-server`, restores the
+    /// request's state, and reads its parameter values, as
+    /// [`run_in_process`](Self::run_in_process) does. Any thread; it blocks
+    /// (half a second to fifteen).
+    fn run_out_of_process(self) -> Open {
+        match self.loadable.check() {
+            Err(refusal) => Open::refused(refusal),
+            Ok(()) => self.open(Opening::OutOfProcess),
+        }
+    }
+
+    /// [`run_in_process`](Self::run_in_process) for a load that runs where no main thread is
+    /// proved (a recovery reload's task): an out-of-process plugin opens, and one that
     /// resolves in process is not opened ([`Opened::InProcess`]), since it is
     /// confined to the main thread. Any thread; it blocks.
     pub(crate) fn run(self) -> PluginLoaded {
@@ -256,7 +263,9 @@ impl PluginLoad {
         {
             Err(refusal) => Opened::Done(Box::new(Open::refused(refusal))),
             Ok(ResolvedHosting::InProcess) => Opened::InProcess,
-            Ok(ResolvedHosting::OutOfProcess) => Opened::Done(Box::new(self.open(Opening::Served))),
+            Ok(ResolvedHosting::OutOfProcess) => {
+                Opened::Done(Box::new(self.open(Opening::OutOfProcess)))
+            }
         };
         PluginLoaded { opened }
     }
@@ -264,7 +273,7 @@ impl PluginLoad {
     /// The session's executor while it lives: a load that runs once the
     /// session is dropping is refused.
     ///
-    /// The open is the spawn: a served plugin's exit watch is spawned inside it, so the
+    /// The open is the spawn: an out-of-process plugin's exit watch is spawned inside it, so the
     /// strong handle lives only for the launch, which the load deadline bounds
     /// (`Timeouts::load`), and drops when the open returns. A session's drop waits for a
     /// reload task inside the open (see the module docs), so the executor outlives the
@@ -282,7 +291,7 @@ impl PluginLoad {
         // it is not silent.
         let state = self.state.as_deref().map(PeerState::bytes);
         let opened = match (at, state) {
-            (Opening::Served, None) => self.executor().and_then(|executor| {
+            (Opening::OutOfProcess, None) => self.executor().and_then(|executor| {
                 HostPlugin::open_served(
                     &self.config,
                     &executor,
@@ -292,7 +301,7 @@ impl PluginLoad {
                 )
                 .map(|plugin| (plugin, None))
             }),
-            (Opening::Served, Some(state)) => self.executor().and_then(|executor| {
+            (Opening::OutOfProcess, Some(state)) => self.executor().and_then(|executor| {
                 HostPlugin::open_served_restoring(
                     &self.config,
                     &executor,
@@ -390,18 +399,18 @@ impl Open {
 pub(crate) type ParamValues =
     Result<tutti_plugin_host::ParamSnapshot, Box<tutti_plugin_host::ParamRead>>;
 
-/// Where a load is opened: on the task's thread, or on the main thread an
+/// Where a load is opened: on the calling thread, or on the main thread an
 /// in-process plugin is confined to.
 #[derive(Clone, Copy)]
 enum Opening {
-    Served,
+    OutOfProcess,
     OnMain(MainThreadMarker),
 }
 
 /// What a `PluginLoad`'s [`run`](PluginLoad::run) did.
 enum Opened {
     /// Opened (or failed to) on the task's thread. Boxed: a plugin is far
-    /// larger than an unopened load.
+    /// larger than unopened load.
     Done(Box<Open>),
     /// Resolves in process, which only the main thread opens: nothing was opened.
     InProcess,
@@ -702,7 +711,7 @@ pub(crate) struct Outgoing {
 }
 
 impl Outgoing {
-    /// The handle, split by where its plugin ran. A served plugin's handle
+    /// The handle, split by where its plugin ran. An out-of-process plugin's handle
     /// drops here, on the calling (control) thread.
     pub(crate) fn retire(self) -> Retired {
         let Self { handle, placement } = self;
@@ -715,13 +724,13 @@ impl Outgoing {
 pub(crate) enum Retired {
     /// An in-process plugin's: its drop waits for the main thread.
     InProcess(InProcessRecord),
-    /// A served plugin's, already dropped.
+    /// An out-of-process plugin's, already dropped.
     Served,
 }
 
 impl Retired {
     /// `held` split by `placement`: an in-process owner is kept for the main
-    /// thread, a served one drops here.
+    /// thread, an out-of-process one drops here.
     fn of(placement: Placement, held: impl std::any::Any + Send) -> Self {
         match placement {
             Placement::InProcess => Self::InProcess(InProcessRecord {
@@ -731,7 +740,7 @@ impl Retired {
         }
     }
 
-    /// Parks an in-process record in `yard`; a served one has dropped, and
+    /// Parks an in-process record in `yard`; an out-of-process one has dropped, and
     /// nothing of it waits. The editors of the plugin at `node` end either
     /// way: the plugin they were made for no longer serves it.
     pub(crate) fn settle(self, node: NodeKey, yard: &mut Graveyard) {
@@ -757,7 +766,7 @@ pub(crate) struct InProcessRecord {
 /// owner of an in-process plugin tears its library and instance down, a
 /// main-thread call. `Session` is `Send` and has no main thread of its own,
 /// so whatever retires such a record parks it here instead of dropping it,
-/// and the view that holds the proof empties the yard. A served plugin's
+/// and the view that holds the proof empties the yard. An out-of-process plugin's
 /// record is not parked: it drops where it is retired, on a control thread.
 /// A host that never reaches the OS's main thread (a headless one) never
 /// empties the yard: [`len`](Self::len) is what `Phase::Plugins` warns on
@@ -1170,7 +1179,7 @@ impl HostedPlugin {
     }
 
     /// This record, retired: an in-process plugin's waits for the main
-    /// thread, a served plugin's drops here.
+    /// thread, an out-of-process plugin's drops here.
     pub(crate) fn retire(mut self) -> Retired {
         self.gate.end();
         // The node over a loaded plugin is gone: the link to its handle goes.
@@ -1192,7 +1201,7 @@ impl HostedPlugin {
     /// [`lost`](tutti_graph::Losses::lost)), the parameter points it did not
     /// deliver as they were, the chords and scales past the capacity of a
     /// block's sequencer context ([refused](tutti_graph::Losses::refused)), and,
-    /// for a served plugin, the commands its bridge's queue
+    /// for an out-of-process plugin, the commands its bridge's queue
     /// [refused](tutti_graph::Losses::refused) and the responses it
     /// [lost](tutti_graph::Losses::lost).
     fn node_losses(&self) -> tutti_graph::Losses {
@@ -1858,7 +1867,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// attempt's backoff, or [`PluginChange::GaveUp`] and the node's removal.
     ///
     /// Takes no main-thread proof: only an in-process plugin is opened on the
-    /// main thread, and a served plugin's replacement must not be one, so a
+    /// main thread, and an out-of-process plugin's replacement must not be one, so a
     /// load that came back unopened is a failed attempt
     /// ([`RecoveryFailure::ReplacementInProcess`]) without opening it.
     pub(crate) fn land_reload(

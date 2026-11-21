@@ -1,4 +1,4 @@
-//! A plugin as a load: `load_plugin(id, &catalog).run(main)` returns a handle,
+//! A plugin as a load: `load_plugin(id, &catalog)`, run, returns a handle,
 //! `add_plugin(handle.node())` puts it in the graph, and the plugin closes with
 //! the last clone of its handle. The reference CLAP bundle in a real
 //! `plugin-server`; the in-process half is `tests/main_thread/plugin_load_main.rs`.
@@ -17,6 +17,7 @@ use tutti_session::{
 };
 use tutti_units::Samples;
 
+use crate::loading::{Block as _, Hosted as _};
 use crate::support::clap_probe;
 
 const BLOCK: usize = 512;
@@ -89,8 +90,8 @@ fn a_load_gives_a_node_whose_handle_observes_it_and_renders() {
     let (catalog, _dir) = catalog();
     let mut s = session();
     let opened = s
-        .load_plugin(&second_id(), &catalog)
-        .run(tutti_fixtures::main_thread())
+        .load_out_of_process(&second_id(), &catalog)
+        .block()
         .expect("the reference plugin loads");
     let plugin = opened.handle();
     assert_eq!(
@@ -117,8 +118,49 @@ fn a_load_gives_a_node_whose_handle_observes_it_and_renders() {
     });
 }
 
+/// **An out-of-process load is awaited off the main thread, and its node adds
+/// and renders on the session's.** The load is `Send`: a thread that is no main
+/// thread awaits the launch of the server, and the node it returns carries the module's
+/// stamp, takes the session that built the load, and renders the plugin's tag.
+#[test]
+fn an_out_of_process_load_runs_on_a_spawned_thread_and_its_node_renders() {
+    let (catalog, _dir) = catalog();
+    let mut s = session();
+    let load = s.load_out_of_process(&second_id(), &catalog);
+    let opened = std::thread::spawn(move || {
+        assert!(
+            tutti_plugin_types::MainThreadMarker::new().is_none(),
+            "the load runs where no main thread is proved"
+        );
+        load.block()
+    })
+    .join()
+    .expect("the load's thread ends")
+    .expect("the reference plugin loads off the main thread");
+    let plugin = opened.handle();
+    assert_eq!(plugin.info().hosting(), Hosting::OutOfProcess);
+    assert_eq!(
+        plugin.asset().name(),
+        tutti_plugin_db::canonical_path(&clap_probe())
+            .display()
+            .to_string(),
+        "the stamp is of the plugin's module"
+    );
+    assert!(!plugin.changed(), "the module is as it was stamped");
+    let mut other = session();
+    let Err(AddPluginError::OtherSession(opened)) = other.add_plugin(opened) else {
+        panic!("another session refuses the node");
+    };
+
+    let node = s.add_plugin(opened).expect("its session adds it");
+    s.graph().connect(node.out(0), Root::output(0)).unwrap();
+    render_until(&mut s, "the plugin's tag", |left| {
+        left.iter().all(|&x| x == 1.0)
+    });
+}
+
 /// **A load that cannot run returns its error, named**: an id the catalog does
-/// not hold is `Unresolved`, never a default plugin, and a state of another
+/// not hold is `Unresolved` where the load is built, never a default plugin, and a state of another
 /// plugin is refused where the load is built, before anything opens.
 #[test]
 fn a_failed_load_returns_its_error() {
@@ -127,7 +169,6 @@ fn a_failed_load_returns_its_error() {
     let absent = PluginId::Clap("com.example.absent".into());
     let error = s
         .load_plugin(&absent, &catalog)
-        .run(tutti_fixtures::main_thread())
         .expect_err("no such plugin");
     assert!(matches!(error, LoadError::Unresolved(_)), "{error:?}");
 
@@ -137,12 +178,12 @@ fn a_failed_load_returns_its_error() {
         .expect("the plugin is listed");
     let other = tutti_session::PeerState::of_plugin(entry.plugin_ref(), Vec::new());
     assert!(
-        s.load_plugin(&second_id(), &catalog)
+        s.load_out_of_process(&second_id(), &catalog)
             .initial_state(other.clone())
             .is_err()
     );
     assert!(
-        s.load_plugin(&first_id(), &catalog)
+        s.load_out_of_process(&first_id(), &catalog)
             .initial_state(other)
             .is_ok()
     );
@@ -159,11 +200,17 @@ fn a_plugin_of_another_session_is_refused_by_name_and_handed_back() {
     let mut a = a;
     let mut b = session();
     let main = tutti_fixtures::main_thread();
-    let opened = a.load_plugin(&first_id(), &catalog).run(main).unwrap();
+    let opened = a
+        .load_out_of_process(&first_id(), &catalog)
+        .block()
+        .unwrap();
     let Err(AddPluginError::OtherSession(opened)) = b.add_plugin(opened) else {
         panic!("add to another session");
     };
-    let hosted = b.load_plugin(&first_id(), &catalog).run(main).unwrap();
+    let hosted = b
+        .load_out_of_process(&first_id(), &catalog)
+        .block()
+        .unwrap();
     let at = b.add_plugin(hosted).unwrap();
     let Err(SwapPluginError::OtherSession(opened)) = b.swap_plugin(at, opened, main) else {
         panic!("swap in another session");
@@ -190,8 +237,8 @@ mod process {
         let (catalog, _dir) = catalog();
         let mut s = session();
         let opened = s
-            .load_plugin(&first_id(), &catalog)
-            .run(tutti_fixtures::main_thread())
+            .load_out_of_process(&first_id(), &catalog)
+            .block()
             .unwrap();
         let plugin = opened.handle();
         let pid = plugin.info().server_pid().expect("a served plugin");
@@ -212,8 +259,8 @@ mod process {
         let (catalog, _dir) = catalog();
         let mut s = session();
         let opened = s
-            .load_plugin(&first_id(), &catalog)
-            .run(tutti_fixtures::main_thread())
+            .load_out_of_process(&first_id(), &catalog)
+            .block()
             .unwrap();
         let watch = opened.handle();
         let pid = watch.info().server_pid().expect("a served plugin");
@@ -239,7 +286,10 @@ mod process {
         let (catalog, _dir) = catalog();
         let mut s = session();
         let main = tutti_fixtures::main_thread();
-        let opened = s.load_plugin(&first_id(), &catalog).run(main).unwrap();
+        let opened = s
+            .load_out_of_process(&first_id(), &catalog)
+            .block()
+            .unwrap();
         let plugin = opened.handle();
         let pid = plugin.info().server_pid().expect("a served plugin");
         let killed = std::process::Command::new("kill")
@@ -252,7 +302,10 @@ mod process {
             plugin.presence(),
             Presence::Lost(PluginCause::Died(_))
         ));
-        let host = s.load_plugin(&first_id(), &catalog).run(main).unwrap();
+        let host = s
+            .load_out_of_process(&first_id(), &catalog)
+            .block()
+            .unwrap();
         let node = s.add_plugin(host).unwrap();
         let Err(SwapPluginError::Lost(dead)) = s.swap_plugin(node, opened, main) else {
             panic!("a lost plugin is refused by a swap");
@@ -277,8 +330,8 @@ mod process {
             crate::loading::catalog_of(&PluginRef::file(dir.join("Probe.clap")));
         let s = session();
         let opened = s
-            .load_plugin(&id, &catalog)
-            .run(tutti_fixtures::main_thread())
+            .load_out_of_process(&id, &catalog)
+            .block()
             .expect("the bundle loads");
         let plugin = opened.handle();
         assert_eq!(plugin.asset().name(), module.display().to_string());

@@ -19,6 +19,7 @@ use tutti_plugin_types::{Locator, PluginId};
 use tutti_session::{Peer, Presence, Session};
 use tutti_units::Samples;
 
+use crate::loading::Hosted;
 use crate::support::clap_probe;
 
 fn probe() -> &'static ClapProbe {
@@ -48,11 +49,16 @@ fn id() -> PluginId {
 
 /// A catalog that probed the reference plugin.
 fn catalog() -> (Catalog, tempfile::TempDir) {
+    catalog_of(&clap_probe())
+}
+
+/// A catalog that probed the plugin file at `path`.
+fn catalog_of(path: &std::path::Path) -> (Catalog, tempfile::TempDir) {
     let dir = tempfile::TempDir::new().expect("a scratch directory");
     let config =
         CatalogConfig::new(dir.path()).probe_locator(Locator::at(tutti_fixtures::plugin_probe()));
     let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
-    let mut task = catalog.register(clap_probe()).expect("a plugin file");
+    let mut task = catalog.register(path).expect("a plugin file");
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         match catalog.try_apply(&mut task) {
@@ -78,8 +84,7 @@ fn session() -> Session {
 }
 
 fn load(s: &Session, catalog: &Catalog) -> tutti_session::PluginNode {
-    s.load_plugin(&id(), catalog)
-        .hosting(Hosting::InProcess)
+    s.load_in_process(&id(), catalog)
         .run(tutti_fixtures::main_thread())
         .expect("the reference plugin loads in process")
 }
@@ -97,6 +102,42 @@ fn until_closed(s: &mut Session) {
         );
         thread::yield_now();
     }
+}
+
+/// **An in-process load stamps its module, and `changed()` reads it**: the
+/// handle is unchanged as loaded, and reads changed once the module's
+/// modification time moves.
+fn an_in_process_load_stamps_its_module() {
+    let scratch = tempfile::TempDir::new().expect("a scratch directory");
+    let module = scratch.path().join("Probe.clap");
+    std::fs::copy(clap_probe(), &module).unwrap();
+    let (catalog, _dir) = catalog_of(&module);
+    let s = session();
+    let opened = load(&s, &catalog);
+    let handle = opened.handle();
+    assert_eq!(handle.asset().name(), module.display().to_string());
+    assert!(!handle.changed(), "as loaded");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&module)
+        .unwrap()
+        .set_modified(tutti_platform::SystemTime::now() + Duration::from_secs(3600))
+        .unwrap();
+    assert!(handle.changed(), "the module was rewritten");
+    drop(opened);
+    s.close(tutti_fixtures::main_thread());
+}
+
+/// **An in-process load resolves in process from the catalog**: `load_plugin_as`
+/// with `Hosting::InProcess` returns the in-process load, which the format's
+/// default does not.
+fn an_in_process_hosting_resolves_to_an_in_process_load() {
+    let (catalog, _dir) = catalog();
+    let s = session();
+    assert!(matches!(
+        s.load_plugin_as(&id(), &catalog, Hosting::InProcess),
+        Ok(tutti_session::LoadPlugin::InProcess(_))
+    ));
 }
 
 /// **An in-process plugin loads on the main thread** and is a plugin hosted in
@@ -229,6 +270,8 @@ fn a_plugin_of_another_session_is_refused_and_closes_cleanly() {
 
 pub(crate) const CASES: &[(&str, fn())] = tutti_fixtures::cases!["plugin_load_main";
 an_in_process_load_is_a_plugin_hosted_in_this_process,
+an_in_process_load_stamps_its_module,
+an_in_process_hosting_resolves_to_an_in_process_load,
 an_unadded_node_dropped_off_the_main_thread_closes_on_the_main_thread,
 an_unadded_node_dropped_on_the_main_thread_closes_in_place,
 a_node_keeps_an_in_process_plugin_open_after_its_handle_drops,

@@ -250,10 +250,11 @@ pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 pub use peer_state::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "plugin")]
 pub use plugin::{
-    AddPluginError, AnyPlugin, LoadPlugin, LoadPreset, LoadedPlugin, LoadedPreset, Plugin,
-    PluginApplyError, PluginCause, PluginChange, PluginEvent, PluginHealth, PluginInfo, PluginNode,
-    PluginPorts, PortsRefusal, PresetStartError, RestoreState, RestoredState, SaveState,
-    StateRestore, StateStartError, StateView, SwapPluginError,
+    AddPluginError, AnyPlugin, LoadInProcess, LoadOutOfProcess, LoadPlugin, LoadPreset,
+    LoadedPlugin, LoadedPreset, LoadingOutOfProcess, Plugin, PluginApplyError, PluginCause,
+    PluginChange, PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginPorts, PortsRefusal,
+    PresetStartError, RestoreState, RestoredState, SaveState, StateRestore, StateStartError,
+    StateView, SwapPluginError,
 };
 pub(crate) use pool::Pool;
 pub use pool::{

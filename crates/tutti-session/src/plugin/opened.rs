@@ -18,7 +18,7 @@ use tutti_plugin::catalog::ResolvedHosting;
 use tutti_plugin_db::{Hosting, Loadable};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_ipc::AudioConfig;
-use tutti_plugin_types::{Features, IpcError, MainThreadMarker, MainWorkHandle, PluginFailure};
+use tutti_plugin_types::{Features, IpcError, MainWorkHandle, PluginFailure, Preset, PresetError};
 use tutti_plugin_types::{PluginDescriptor, PluginRef};
 use tutti_rt::LockExt;
 use tutti_units::SampleRate;
@@ -35,7 +35,7 @@ use crate::{GiveUp, LoadError, ResourceId};
 pub(super) struct Context {
     pub(super) rate: SampleRate,
     pub(super) work: MainWorkHandle,
-    /// The session's executor, which a served plugin's exit watch runs on.
+    /// The session's executor, which an out-of-process plugin's exit watch runs on.
     pub(super) executor: tutti_platform::WeakExecutor,
     pub(super) ids: ResourceIds,
     /// The session that built the load: the one the plugin may be added to.
@@ -194,15 +194,14 @@ impl fmt::Debug for Shared {
 }
 
 impl Shared {
-    /// `main` is the proof of the main thread the load runs on: the plugin's
-    /// preset list is read with it.
+    /// `read` reads the plugin's preset list, as the load's hosting allows.
     pub(super) fn new(
         cx: &Context,
         stamp: Stamp,
         open: Open,
         loadable: Loadable,
         config: AudioConfig,
-        main: MainThreadMarker,
+        read: impl FnOnce(&PluginHandle) -> Result<Vec<Preset>, PresetError>,
     ) -> Result<(Self, Install), LoadError> {
         let Open {
             plugin,
@@ -219,7 +218,7 @@ impl Shared {
         let id = cx.ids.mint();
         let presets = PluginPresets::new(handle.preset_support(), handle.instance());
         if presets.support().can_list() {
-            presets.fill(handle.presets(main));
+            presets.fill(read(&handle));
         }
         let info = PluginInfo {
             plugin: plugin.plugin().clone(),
