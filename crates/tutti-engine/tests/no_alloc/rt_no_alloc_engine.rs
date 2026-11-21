@@ -394,7 +394,7 @@ fn the_heard_tap_is_allocation_free() {
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     let _ = transport.motion().try_send(MotionCommand::Play);
-    let taps = engine.output_taps();
+    let taps = engine.heard_taps();
     let mut output = vec![0.0f32; 1024 * 2];
     let layout = ChannelLayout::STEREO;
     engine.process(&mut InterleavedMut::new(&mut output, layout).unwrap());

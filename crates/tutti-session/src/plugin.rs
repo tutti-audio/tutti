@@ -2099,7 +2099,12 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         let latency_before = hosted.reload.latency_before;
         let withheld = hosted.reload.withheld_age;
         let attempts = recovery.as_ref().map_or(1, Recovery::failures);
-        match self.graph.replace_plugin_with_rebinder(node, client, None) {
+        match self.graph.replace_plugin_with_rebinder(
+            node,
+            client,
+            None,
+            crate::graph::OnShape::Cut,
+        ) {
             Ok(rebinder) => {
                 if let Some(hosted) = self.graph.plugins.get_mut(&node) {
                     hosted.set_rebinder(rebinder);
