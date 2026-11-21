@@ -255,8 +255,11 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
             "a piece longer than the scratch"
         );
         let mut from = range.start;
-        // Most blocks hold no jump, and then no range of them does.
-        if clock.jumps() {
+        // Most blocks hold no jump, and then no range of them does. A stretching voice
+        // reads a piece a run at a time as well: where the transport stops or starts
+        // inside the block it primes in the stopped run, as it would in a block of its
+        // own, so what it sounds does not depend on how the output was split.
+        if clock.jumps() || self.stretch.is_some() {
             for run in clock.runs_in(range.clone()) {
                 if run.jump {
                     if run.start > from {
@@ -264,6 +267,9 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
                         from = run.start;
                     }
                     self.flush_playhead_state();
+                } else if self.stretch.is_some() && run.start > from {
+                    self.render_piece(clock, from..run.start, n, scratch, out);
+                    from = run.start;
                 }
             }
         }
@@ -333,10 +339,10 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
         let stretch = self.stretch.as_deref_mut().map(|vocoder| {
             vocoder.retarget(&stretched::controls(&play));
             Stretch {
+                consumption: vocoder.read_rate(),
                 vocoder,
                 cursor: &mut self.cursor,
                 seats: &mut self.seats,
-                consumption: stretched::consumption(play.stretch),
             }
         });
         match (&mut self.voice.source, stretch) {

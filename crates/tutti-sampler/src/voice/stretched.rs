@@ -68,7 +68,7 @@ use tutti_buffers::{ChannelLayout, Planes, PlanesMut};
 use tutti_dsp::{
     ColaGeometry, HopSize, PhaseVocoder, PhaseVocoderControls, StftGeometry, WindowLength,
 };
-use tutti_units::{Beat, ReadRate, SamplePosition, SampleRate, Samples, StretchFactor};
+use tutti_units::{Beat, ReadRate, SamplePosition, SampleRate, Samples};
 
 use super::disk_voice::DiskVoice;
 use super::memory_source::MemorySource;
@@ -119,21 +119,6 @@ pub(crate) fn controls(play: &Playback) -> PhaseVocoderControls {
         stretch: play.stretch,
         pitch: play.pitch,
     }
-}
-
-/// Source frames a stretching voice consumes per output frame: `1 / stretch`,
-/// the figure the transport's gate and a disk stream's fill sizing count by. A
-/// non-finite stretch reads as unity and the rest is held to the supported
-/// range, as the vocoder holds it.
-// replaced by PhaseVocoder::<method> once the pitch-shifter PR merges
-pub(crate) fn consumption(stretch: StretchFactor) -> ReadRate {
-    let s = stretch.get();
-    let s = if s.is_finite() {
-        s.clamp(StretchFactor::MIN.get(), StretchFactor::MAX.get())
-    } else {
-        1.0
-    };
-    ReadRate::new(1.0 / s)
 }
 
 /// Where the vocoder's next input frame is read in the source, and what is left of
@@ -278,7 +263,7 @@ pub(crate) struct Stretch<'a, F: SamplerFloat> {
     pub(crate) cursor: &'a mut Option<Cursor>,
     /// The seats so far: the generation of the current one.
     pub(crate) seats: &'a mut u64,
-    /// Source frames consumed per output frame: [`consumption`] of the stretch.
+    /// Source frames consumed per output frame: the vocoder's [`read_rate`](PhaseVocoder::read_rate).
     pub(crate) consumption: ReadRate,
 }
 
