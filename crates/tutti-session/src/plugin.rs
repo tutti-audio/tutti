@@ -160,6 +160,7 @@ use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
 
+mod awaiting;
 #[cfg(test)]
 mod fake_hosting;
 mod inbox;
@@ -178,8 +179,15 @@ pub use load::{
     PluginNode, SwapPluginError,
 };
 pub use opened::{PluginCause, PluginInfo, PluginPorts};
-pub use preset::{LoadPreset, LoadedPreset, PresetStartError};
-pub use state::{PluginApplyError, RestoreState, RestoredState, SaveState, StateStartError};
+pub use preset::{
+    LoadPreset, LoadPresetInProcess, LoadPresetOutOfProcess, LoadedPreset,
+    LoadingPresetOutOfProcess, PresetStartError,
+};
+pub use state::{
+    PluginApplyError, RestoreState, RestoreStateInProcess, RestoreStateOutOfProcess, RestoredState,
+    RestoringStateOutOfProcess, SaveState, SaveStateInProcess, SaveStateOutOfProcess,
+    SavingStateOutOfProcess, StateStartError,
+};
 
 use crate::plugin_diagnostics::Figures;
 use crate::session::parts::Loop;

@@ -9,6 +9,7 @@
 
 #[cfg(feature = "clap")]
 mod clap {
+    use crate::loading::Perform as _;
     use crate::loading::{LoadPlugin, Spec};
     use crate::support::clap_probe;
     use tutti_buffers::MaxBlock;
@@ -46,7 +47,7 @@ mod clap {
     ) -> Vec<u8> {
         s.save_state(&node, tutti_plugin_types::StateUse::Project)
             .unwrap()
-            .run(tutti_fixtures::main_thread())
+            .perform(tutti_fixtures::main_thread())
             .expect("the plugin saves")
             .bytes()
             .to_vec()
@@ -78,7 +79,7 @@ mod clap {
         let refused = s
             .load_preset_file(&node, "/nowhere/not-a-preset.txt")
             .unwrap()
-            .run(main);
+            .perform(main);
         assert!(
             matches!(refused, Err(PresetError::Refused)),
             "the plugin declined a file of the wrong kind: {refused:?}"
@@ -88,7 +89,7 @@ mod clap {
         let taken = s
             .load_preset_file(&node, "/nowhere/bright.tutti-preset")
             .unwrap()
-            .run(main);
+            .perform(main);
         assert!(taken.is_ok(), "{taken:?}");
         assert_ne!(
             saved(&s, node),
@@ -131,7 +132,7 @@ mod clap {
         let loaded = s
             .load_preset_file(&node, "/nowhere/bright.tutti-preset")
             .unwrap()
-            .run(main)
+            .perform(main)
             .expect("the plugin takes the preset");
         s.apply(loaded).expect("the node hosts the plugin");
 
@@ -155,7 +156,7 @@ mod clap {
         let loaded = s
             .load_preset_file(&node, "/nowhere/bright.tutti-preset")
             .unwrap()
-            .run(main)
+            .perform(main)
             .expect("the plugin takes the preset");
         let before = s.plugin_view(node).unwrap().diagnostics().server_pid();
         s.plugin_view(node).unwrap().diagnostics().terminate(
@@ -183,6 +184,7 @@ mod clap {
 
 #[cfg(feature = "vst3")]
 mod vst3 {
+    use crate::loading::Perform as _;
     use crate::loading::{Block as _, Hosted as _};
     use tutti_buffers::ChannelLayout;
     use tutti_plugin_types::PluginRef;
@@ -290,7 +292,7 @@ mod vst3 {
         let loaded = s
             .load_preset(&node, &preset)
             .expect("a preset of the node's own plugin")
-            .run(main)
+            .perform(main)
             .expect("the plugin takes it");
         s.apply(loaded).expect("the node hosts the plugin");
         assert!(matches!(
@@ -361,6 +363,7 @@ mod vst3 {
 
 #[cfg(feature = "vst2")]
 mod vst2 {
+    use crate::loading::Perform as _;
     use crate::loading::{Hosted as _, LoadFrom as _, LoadPlugin, Spec};
     use tutti_buffers::ChannelLayout;
     use tutti_fixtures::ScopedEnv;
@@ -410,7 +413,7 @@ mod vst2 {
         let loaded = s
             .load_preset(&node, &third)
             .unwrap()
-            .run(main)
+            .perform(main)
             .expect("the plugin takes it");
         s.apply(loaded).expect("the node hosts the plugin");
         assert_eq!(
@@ -424,7 +427,7 @@ mod vst2 {
         let file = s
             .load_preset_file(&node, "/x.tutti-preset")
             .unwrap()
-            .run(main);
+            .perform(main);
         assert!(
             matches!(file, Err(PresetError::Unsupported)),
             "a list-and-load format takes no file: {file:?}"
@@ -443,7 +446,7 @@ mod vst2 {
         let file = s
             .load_preset_file(&node, "/x.tutti-preset")
             .unwrap()
-            .run(tutti_fixtures::main_thread());
+            .perform(tutti_fixtures::main_thread());
         assert!(matches!(file, Err(PresetError::Unsupported)));
     }
 
@@ -530,7 +533,7 @@ mod vst2 {
         let loaded = s
             .load_preset(&node, &old)
             .unwrap()
-            .run(main)
+            .perform(main)
             .expect("the node's own plugin lists it");
         s.apply(loaded).expect("the node hosts the plugin");
 
@@ -546,7 +549,7 @@ mod vst2 {
         let loaded = s
             .load_preset(&node, &new)
             .unwrap()
-            .run(main)
+            .perform(main)
             .expect("the node's new plugin lists it");
         s.apply(loaded).expect("the node hosts the plugin");
     }
@@ -559,7 +562,7 @@ mod vst2 {
         let third = plugin.info().presets().iter().nth(2).unwrap();
         let load = s.load_preset(&node, &third).unwrap();
         s.graph().remove(node).expect("the node is removed");
-        let run = load.run(tutti_fixtures::main_thread());
+        let run = load.perform(tutti_fixtures::main_thread());
         assert!(matches!(run, Err(PresetError::Lost)), "{run:?}");
     }
 
@@ -571,7 +574,7 @@ mod vst2 {
         let (mut s, _catalog, _id, plugin, node, _env, _dir) = declared();
         let main = tutti_fixtures::main_thread();
         let third = plugin.info().presets().iter().nth(2).unwrap();
-        let loaded = s.load_preset(&node, &third).unwrap().run(main).unwrap();
+        let loaded = s.load_preset(&node, &third).unwrap().perform(main).unwrap();
         s.graph().remove(node).expect("the node is removed");
         assert_eq!(s.apply(loaded).unwrap_err(), PluginApplyError::Gone);
     }

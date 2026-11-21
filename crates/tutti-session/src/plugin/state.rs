@@ -1,25 +1,35 @@
 //! A plugin's state as work the app runs: [`Session::save_state`] and
 //! [`Session::restore_state`] hand back a [`SaveState`] and a [`RestoreState`],
-//! each run on the main thread with its proof (`run(main)`).
+//! each a value by where the plugin runs, as [`Session::load_plugin`] does.
 //!
-//! Every format's state calls are the plugin's main thread's, so the value is
-//! `!Send` and its `run` takes the [`MainThreadMarker`], whether the plugin is
-//! out-of-process (its round trip runs on that thread) or in process (a direct call).
-//! Nothing is posted to the session and no `update` has to run for it.
+//! A plugin in this process has its state calls on the main thread: its value
+//! (`SaveStateInProcess`, `RestoreStateInProcess`) is `!Send` and its `run` takes
+//! the [`MainThreadMarker`]. A plugin in a `plugin-server` process answers over
+//! IPC from any thread: its value (`SaveStateOutOfProcess`,
+//! `RestoreStateOutOfProcess`) is `Send` and a [`Future`] through [`IntoFuture`],
+//! filled by the bridge's IPC reader thread when the server's reply lands, with
+//! the bridge's control lane thread firing the deadline. It has no blocking form.
+//! Nothing is posted to the session and no `update` has to run for either.
 //!
 //! A save is pure data ([`PeerState`]). A restore ends as a [`RestoredState`],
 //! which [`Session::apply`] takes back: it queues the read of the plugin's
 //! parameters, and refuses by name when the node it was cut from is gone or
-//! now hosts another plugin instance.
+//! now hosts another plugin instance. An editor-only in-process instance of an
+//! out-of-process plugin (an Audio Unit's) is not told the restored state by the
+//! awaited restore.
 
 use core::marker::PhantomData;
 use std::fmt;
+use std::future::{Future, IntoFuture};
+use std::pin::Pin;
+use std::task::{Context as TaskContext, Poll};
 
 use tutti_graph::NodeKey;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, PluginRef, StateError, StateUse};
 
-use super::{AnyPlugin, Gate};
+use super::awaiting::Stage;
+use super::{AnyPlugin, Gate, Placement};
 use crate::SessionFloat;
 use crate::apply::{Cut, Sealed};
 use crate::{AppKey, Clock, Key, NoSuchNode, OtherPeer, PeerState, SavedPeer, Session};
@@ -51,11 +61,34 @@ pub enum PluginApplyError {
     Gone,
 }
 
-/// A plugin's state to save ([`Session::save_state`]).
+/// A plugin's state to save ([`Session::save_state`]), by where the plugin
+/// runs: a [`SaveStateInProcess`] the app runs on the main thread, or a
+/// [`SaveStateOutOfProcess`] it awaits on any thread. This enum has no `run`.
+///
+/// ```compile_fail
+/// fn send<T: Send>() {}
+/// send::<tutti_session::SaveStateInProcess>();
+/// ```
+///
+/// ```
+/// fn send<T: Send>() {}
+/// send::<tutti_session::SaveStateOutOfProcess>();
+/// send::<tutti_session::SavingStateOutOfProcess>();
+/// ```
+#[must_use = "work does nothing until it runs"]
+#[derive(Debug)]
+pub enum SaveState {
+    /// The plugin runs in this process.
+    InProcess(SaveStateInProcess),
+    /// The plugin runs in a `plugin-server` process.
+    OutOfProcess(SaveStateOutOfProcess),
+}
+
+/// A state to save from a plugin that runs in this process.
 ///
 /// `!Send`: the plugin's state is read on the main thread.
 #[must_use = "work does nothing until it runs"]
-pub struct SaveState {
+pub struct SaveStateInProcess {
     gate: Gate,
     handle: PluginHandle,
     plugin: PluginRef,
@@ -63,16 +96,16 @@ pub struct SaveState {
     main_thread: PhantomData<*const ()>,
 }
 
-impl fmt::Debug for SaveState {
+impl fmt::Debug for SaveStateInProcess {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SaveState")
+        f.debug_struct("SaveStateInProcess")
             .field("plugin", &self.plugin)
             .field("state_use", &self.state_use)
             .finish_non_exhaustive()
     }
 }
 
-impl SaveState {
+impl SaveStateInProcess {
     /// Asks the plugin for its state, on the main thread. The session is not
     /// touched, and no `update` has to run.
     ///
@@ -90,26 +123,153 @@ impl SaveState {
     }
 }
 
-/// A saved state to put back into a plugin ([`Session::restore_state`]).
+/// A state to save from a plugin that runs in a `plugin-server` process. It is
+/// `Send`, and it is a [`Future`] through [`IntoFuture`]: awaiting it queues the
+/// request with the plugin's bridge and yields the [`PeerState`]. Nothing of it
+/// needs the main thread, so any thread awaits it. There is no blocking form.
+///
+/// Dropping it unawaited asks nothing.
+#[must_use = "work does nothing until it is awaited"]
+pub struct SaveStateOutOfProcess {
+    gate: Gate,
+    handle: PluginHandle,
+    plugin: PluginRef,
+    state_use: StateUse,
+}
+
+impl fmt::Debug for SaveStateOutOfProcess {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SaveStateOutOfProcess")
+            .field("plugin", &self.plugin)
+            .field("state_use", &self.state_use)
+            .finish_non_exhaustive()
+    }
+}
+
+impl IntoFuture for SaveStateOutOfProcess {
+    type Output = Result<PeerState, StateError>;
+    type IntoFuture = SavingStateOutOfProcess;
+
+    fn into_future(self) -> SavingStateOutOfProcess {
+        let Self {
+            gate,
+            handle,
+            plugin,
+            state_use,
+        } = self;
+        SavingStateOutOfProcess {
+            stage: Stage::Unstarted((gate, handle, state_use)),
+            plugin,
+        }
+    }
+}
+
+/// An out-of-process save being awaited ([`SaveStateOutOfProcess`]): resolves
+/// to the plugin's [`PeerState`].
+///
+/// The first poll queues the request with the plugin's bridge and awaits the
+/// receiver of a oneshot. **The bridge's IPC reader thread fills the sender**
+/// when the server's reply lands, which wakes the future: a poll never blocks,
+/// and `Session::update` is not needed. **The bridge's control lane thread
+/// fires the deadline**: a server that never answers is cut off there, at the
+/// bridge's state timeout, and the lane sends [`StateError::Stalled`] into the
+/// sender with no one polling.
+///
+/// Dropped before it resolves, the future drops the receiver and the state the
+/// server sends is discarded: a save changes nothing in the plugin.
+///
+/// # Errors
+///
+/// The output is [`StateError::Lost`] when the node was removed or the plugin
+/// replaced since the value was made (nothing is asked);
+/// [`StateError::PluginCrashed`] when the plugin's bridge ended or its server
+/// died before it answered; [`StateError::Stalled`] when the server did not
+/// answer in time; otherwise the plugin's own: busy, refused, or too large.
+///
+/// # Panics
+///
+/// When polled after it resolved.
+#[must_use = "a save does nothing unless it is awaited"]
+pub struct SavingStateOutOfProcess {
+    stage: Stage<(Gate, PluginHandle, StateUse), Vec<u8>, StateError>,
+    plugin: PluginRef,
+}
+
+impl fmt::Debug for SavingStateOutOfProcess {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SavingStateOutOfProcess")
+            .field("plugin", &self.plugin)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Future for SavingStateOutOfProcess {
+    type Output = Result<PeerState, StateError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Output> {
+        let this = &mut *self;
+        this.stage
+            .poll(
+                cx,
+                |(gate, handle, state_use)| {
+                    if gate.is_ended() {
+                        return Err(StateError::Lost);
+                    }
+                    handle
+                        .save_state_answer(state_use)
+                        .ok_or(StateError::NoStateRoute)
+                },
+                StateError::PluginCrashed,
+            )
+            .map_ok(|bytes| PeerState::of_plugin(this.plugin.clone(), bytes))
+    }
+}
+
+/// A saved state to put back into a plugin ([`Session::restore_state`]), by
+/// where the plugin runs: a [`RestoreStateInProcess`] the app runs on the main
+/// thread, or a [`RestoreStateOutOfProcess`] it awaits on any thread. This enum
+/// has no `run`.
+///
+/// ```compile_fail
+/// fn send<T: Send>() {}
+/// send::<tutti_session::RestoreStateInProcess>();
+/// ```
+///
+/// ```
+/// fn send<T: Send>() {}
+/// send::<tutti_session::RestoreStateOutOfProcess>();
+/// send::<tutti_session::RestoringStateOutOfProcess>();
+/// send::<tutti_session::RestoredState>();
+/// ```
+#[must_use = "work does nothing until it runs"]
+#[derive(Debug)]
+pub enum RestoreState {
+    /// The plugin runs in this process.
+    InProcess(RestoreStateInProcess),
+    /// The plugin runs in a `plugin-server` process.
+    OutOfProcess(RestoreStateOutOfProcess),
+}
+
+/// A saved state to put into a plugin that runs in this process.
 ///
 /// `!Send`: the plugin's state is loaded on the main thread.
 #[must_use = "work does nothing until it runs"]
-pub struct RestoreState {
+pub struct RestoreStateInProcess {
     landed: Landed,
     handle: PluginHandle,
     state: PeerState,
     main_thread: PhantomData<*const ()>,
 }
 
-impl fmt::Debug for RestoreState {
+impl fmt::Debug for RestoreStateInProcess {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RestoreState")
+        f.debug_struct("RestoreStateInProcess")
             .field("node", &self.landed.node)
             .finish_non_exhaustive()
     }
 }
 
-impl RestoreState {
+impl RestoreStateInProcess {
     /// Loads the state into the plugin, on the main thread. The output goes to
     /// [`Session::apply`], which has the session read the plugin's parameters
     /// again.
@@ -127,6 +287,109 @@ impl RestoreState {
         }
         self.handle.load_state(main, self.state.bytes())?;
         Ok(RestoredState(self.landed))
+    }
+}
+
+/// A saved state to put into a plugin that runs in a `plugin-server` process. It
+/// is `Send`, and it is a [`Future`] through [`IntoFuture`]: awaiting it queues
+/// the state with the plugin's bridge and yields the [`RestoredState`], which
+/// [`Session::apply`] takes back on the main thread. There is no blocking form.
+///
+/// Dropping it unawaited sends nothing.
+#[must_use = "work does nothing until it is awaited"]
+pub struct RestoreStateOutOfProcess {
+    landed: Landed,
+    handle: PluginHandle,
+    state: PeerState,
+}
+
+impl fmt::Debug for RestoreStateOutOfProcess {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RestoreStateOutOfProcess")
+            .field("node", &self.landed.node)
+            .finish_non_exhaustive()
+    }
+}
+
+impl IntoFuture for RestoreStateOutOfProcess {
+    type Output = Result<RestoredState, StateError>;
+    type IntoFuture = RestoringStateOutOfProcess;
+
+    fn into_future(self) -> RestoringStateOutOfProcess {
+        let Self {
+            landed,
+            handle,
+            state,
+        } = self;
+        RestoringStateOutOfProcess {
+            stage: Stage::Unstarted((handle, state)),
+            landed: Some(landed),
+        }
+    }
+}
+
+/// An out-of-process restore being awaited ([`RestoreStateOutOfProcess`]):
+/// resolves to the [`RestoredState`] once the server has taken the state.
+///
+/// Filled and bounded as [`SavingStateOutOfProcess`] is: **the bridge's IPC
+/// reader thread fills the sender** with the server's reply, and **the bridge's
+/// control lane thread fires the deadline**, sending [`StateError::Stalled`]
+/// with no one polling.
+///
+/// Dropped after the first poll and before it resolves, the future drops the
+/// receiver, but the request is already queued: **the server may still apply
+/// the state**. No [`RestoredState`] exists for it, because one is made only by
+/// this future resolving, so [`Session::apply`] is never run for that restore
+/// and the session's view of the plugin's parameters is stale until they are
+/// read again (a later [`apply`](Session::apply), or the plugin's own report).
+///
+/// # Errors
+///
+/// The output is [`StateError::Lost`] when the node was removed or the plugin
+/// replaced since the value was made (the plugin is not asked);
+/// [`StateError::PluginCrashed`] when the plugin's bridge ended or its server
+/// died before it answered; [`StateError::Stalled`] when the server did not
+/// answer in time; otherwise the plugin's own: busy, refused
+/// ([`StateError::Rejected`]) or too large.
+///
+/// # Panics
+///
+/// When polled after it resolved.
+#[must_use = "a restore does nothing unless it is awaited"]
+pub struct RestoringStateOutOfProcess {
+    stage: Stage<(PluginHandle, PeerState), (), StateError>,
+    landed: Option<Landed>,
+}
+
+impl fmt::Debug for RestoringStateOutOfProcess {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RestoringStateOutOfProcess")
+            .finish_non_exhaustive()
+    }
+}
+
+impl Future for RestoringStateOutOfProcess {
+    type Output = Result<RestoredState, StateError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Output> {
+        let this = &mut *self;
+        let landed = &this.landed;
+        this.stage
+            .poll(
+                cx,
+                |(handle, state)| {
+                    // Checked when the request is made, so a plugin the node left
+                    // is never asked.
+                    if landed.as_ref().is_some_and(|l| l.gate.is_ended()) {
+                        return Err(StateError::Lost);
+                    }
+                    handle
+                        .load_state_answer(state.bytes())
+                        .ok_or(StateError::NoStateRoute)
+                },
+                StateError::PluginCrashed,
+            )
+            .map_ok(|()| RestoredState(this.landed.take().expect("a restore resolves once")))
     }
 }
 
@@ -203,7 +466,8 @@ impl<F: SessionFloat> Sealed<F> for RestoredState {
 impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
     /// The state of the plugin hosted at `node`, to save for `state_use`
     /// ([`StateUse::Project`] is the state a project keeps): run it on the main
-    /// thread with [`SaveState::run`].
+    /// thread with [`SaveStateInProcess::run`] or, for a plugin in a plugin
+    /// server, await it ([`SaveStateOutOfProcess`]).
     ///
     /// # Errors
     ///
@@ -214,17 +478,31 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
         state_use: StateUse,
     ) -> Result<SaveState, NoSuchNode> {
         let hosted = self.hosted_at(node)?;
-        Ok(SaveState {
-            gate: hosted.gate.clone(),
-            handle: hosted.handle.clone(),
-            plugin: hosted.plugin.clone(),
-            state_use,
-            main_thread: PhantomData,
+        let (gate, handle, plugin) = (
+            hosted.gate.clone(),
+            hosted.handle.clone(),
+            hosted.plugin.clone(),
+        );
+        Ok(match hosted.placement {
+            Placement::InProcess => SaveState::InProcess(SaveStateInProcess {
+                gate,
+                handle,
+                plugin,
+                state_use,
+                main_thread: PhantomData,
+            }),
+            Placement::Served => SaveState::OutOfProcess(SaveStateOutOfProcess {
+                gate,
+                handle,
+                plugin,
+                state_use,
+            }),
         })
     }
 
     /// Puts `state` back into the plugin hosted at `node`: run it on the main
-    /// thread with [`RestoreState::run`], then hand its output to
+    /// thread with [`RestoreStateInProcess::run`] or await it
+    /// ([`RestoreStateOutOfProcess`]), then hand its output to
     /// [`apply`](Self::apply).
     ///
     /// # Errors
@@ -241,11 +519,20 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
         state
             .check_for(&SavedPeer::Plugin(hosted.plugin.clone()))
             .map_err(StateStartError::OtherPeer)?;
-        Ok(RestoreState {
-            landed: Landed::of(self, *node, hosted.gate.clone()),
-            handle: hosted.handle.clone(),
-            state,
-            main_thread: PhantomData,
+        let landed = Landed::of(self, *node, hosted.gate.clone());
+        let handle = hosted.handle.clone();
+        Ok(match hosted.placement {
+            Placement::InProcess => RestoreState::InProcess(RestoreStateInProcess {
+                landed,
+                handle,
+                state,
+                main_thread: PhantomData,
+            }),
+            Placement::Served => RestoreState::OutOfProcess(RestoreStateOutOfProcess {
+                landed,
+                handle,
+                state,
+            }),
         })
     }
 

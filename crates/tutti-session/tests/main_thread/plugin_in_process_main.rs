@@ -14,6 +14,7 @@ use tutti_platform::Instant;
 
 use tutti_clap_test_plugin::{ClapProbe, ClapSwitch, Site, ThreadAnswer};
 
+use crate::loading::Perform as _;
 use crate::loading::{Hosted as _, LoadFrom as _};
 use tutti_buffers::MaxBlock;
 use tutti_plugin_db::PluginDb;
@@ -214,7 +215,7 @@ fn restore_round_trip(hosting: Hosting) {
     let state = s
         .save_state(&node, tutti_plugin_types::StateUse::Project)
         .expect("a node holds the plugin")
-        .run(main)
+        .perform(main)
         .expect("a state");
 
     set(&s, 0.1);
@@ -222,7 +223,7 @@ fn restore_round_trip(hosting: Hosting) {
     let restored = s
         .restore_state(&node, state)
         .expect("its own plugin's")
-        .run(main)
+        .perform(main)
         .expect("the plugin takes it");
     s.apply(restored).expect("the node still hosts the plugin");
     // The mirror is read again by the next updates.

@@ -148,3 +148,38 @@ impl tutti_plugin_types::Health for Inert {
     }
     fn terminate(&self, _reason: tutti_plugin_types::TerminationReason) {}
 }
+
+/// The work values of a plugin hosted in process, run on the main thread: the
+/// fakes are in-process plugins, so the other arm is a test's mistake.
+pub(super) trait Run {
+    type Output;
+
+    /// Runs the in-process work.
+    ///
+    /// # Panics
+    ///
+    /// When the work is for a plugin in a plugin server.
+    fn run(self, main: tutti_plugin_types::MainThreadMarker) -> Self::Output;
+}
+
+impl Run for crate::SaveState {
+    type Output = Result<crate::PeerState, tutti_plugin_types::StateError>;
+
+    fn run(self, main: tutti_plugin_types::MainThreadMarker) -> Self::Output {
+        match self {
+            Self::InProcess(save) => save.run(main),
+            Self::OutOfProcess(_) => panic!("a fake plugin runs in process"),
+        }
+    }
+}
+
+impl Run for crate::RestoreState {
+    type Output = Result<crate::RestoredState, tutti_plugin_types::StateError>;
+
+    fn run(self, main: tutti_plugin_types::MainThreadMarker) -> Self::Output {
+        match self {
+            Self::InProcess(restore) => restore.run(main),
+            Self::OutOfProcess(_) => panic!("a fake plugin runs in process"),
+        }
+    }
+}

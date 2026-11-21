@@ -12,6 +12,7 @@ use std::time::Duration;
 use tutti_buffers::PlanesMut;
 use tutti_platform::Instant;
 
+use crate::loading::Perform as _;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
@@ -308,7 +309,7 @@ fn an_initial_state_is_restored_and_two_loads_are_two_plugins() {
     let state = s
         .save_state(&a, tutti_plugin_types::StateUse::Project)
         .unwrap()
-        .run(tutti_fixtures::main_thread())
+        .perform(tutti_fixtures::main_thread())
         .expect("a state");
 
     let mut load = s.load_out_of_process(&first_id(), &catalog);
@@ -355,7 +356,7 @@ fn a_reload_awaited_on_a_spawned_thread_is_swapped_in_with_its_state() {
     let state = s
         .save_state(&node, StateUse::Project)
         .unwrap()
-        .run(main)
+        .perform(main)
         .expect("a state");
 
     let info = handle.info();
@@ -440,7 +441,7 @@ fn a_saved_state_holds_what_the_plugin_holds_and_refuses_by_name() {
     let state = s
         .save_state(&a, StateUse::Project)
         .expect("a node holds the plugin")
-        .run(main)
+        .perform(main)
         .expect("a state");
     assert_eq!(
         state.media_type().as_str(),
@@ -459,7 +460,7 @@ fn a_saved_state_holds_what_the_plugin_holds_and_refuses_by_name() {
     let duplicate = s
         .save_state(&a, StateUse::Duplicate)
         .expect("a node holds the plugin")
-        .run(main)
+        .perform(main)
         .expect("a duplicate state");
     assert_eq!(
         duplicate.bytes()[CONTEXT_BYTE],
@@ -496,12 +497,12 @@ fn a_restore_applied_after_a_recovery_replaced_the_plugin_is_stale() {
     let state = s
         .save_state(&node, StateUse::Project)
         .unwrap()
-        .run(main)
+        .perform(main)
         .expect("a state");
     let restored = s
         .restore_state(&node, state)
         .unwrap()
-        .run(main)
+        .perform(main)
         .expect("the plugin takes it");
     let before = pid_of(&s, node);
     s.plugin_view(node)
@@ -538,7 +539,7 @@ fn a_save_of_a_dead_plugin_is_the_plugins_refusal() {
     let saved = s
         .save_state(&node, StateUse::Project)
         .expect("the node is still there")
-        .run(tutti_fixtures::main_thread());
+        .perform(tutti_fixtures::main_thread());
     assert!(
         matches!(saved, Err(StateError::PluginCrashed)),
         "the plugin's refusal: {saved:?}"

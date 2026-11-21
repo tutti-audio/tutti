@@ -250,10 +250,12 @@ pub use peer_state::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "plugin")]
 pub use plugin::{
     AddPluginError, AnyPlugin, LoadInProcess, LoadOutOfProcess, LoadPlugin, LoadPreset,
-    LoadedPlugin, LoadedPreset, LoadingOutOfProcess, Plugin, PluginApplyError, PluginCause,
-    PluginChange, PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginPorts, PortsRefusal,
-    PresetStartError, RestoreState, RestoredState, SaveState, StateRestore, StateStartError,
-    StateView, SwapPluginError,
+    LoadPresetInProcess, LoadPresetOutOfProcess, LoadedPlugin, LoadedPreset, LoadingOutOfProcess,
+    LoadingPresetOutOfProcess, Plugin, PluginApplyError, PluginCause, PluginChange, PluginEvent,
+    PluginHealth, PluginInfo, PluginNode, PluginPorts, PortsRefusal, PresetStartError,
+    RestoreState, RestoreStateInProcess, RestoreStateOutOfProcess, RestoredState,
+    RestoringStateOutOfProcess, SaveState, SaveStateInProcess, SaveStateOutOfProcess,
+    SavingStateOutOfProcess, StateRestore, StateStartError, StateView, SwapPluginError,
 };
 
 #[cfg(feature = "plugin")]
