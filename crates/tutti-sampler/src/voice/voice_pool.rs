@@ -2207,7 +2207,7 @@ fn send_builds_the_stretch_filter_not_the_drain() {
     );
     let mut peeked = peeked;
     assert_eq!(
-        sounding_width(&mut peeked, 8),
+        sounding_width(&mut peeked.live, 8),
         6,
         "the sender must build at the reader's width"
     );
@@ -2237,7 +2237,7 @@ fn send_builds_the_stretch_filter_not_the_drain() {
         .as_mut()
         .expect("send must have built a vocoder for the stretching voice");
     assert_eq!(
-        sounding_width(filter, 8),
+        sounding_width(&mut filter.live, 8),
         6,
         "the vocoder must match the reader's width, not a default"
     );

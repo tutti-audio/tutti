@@ -32,10 +32,20 @@ const SCALE: f32 = 131_072.0;
 /// The ramp voice's left channel over `frames` frames, under `points` (beat, BPM, all
 /// steps) and the loop beats 0.25 to 1.5.
 fn render(points: &[(f64, f64)], stretched: bool, frames: usize) -> Vec<f32> {
+    render_with(points, stretched, frames, |i| i as f32 / SCALE)
+}
+
+/// [`render`] with the source `sample(i)` at frame `i`.
+fn render_with(
+    points: &[(f64, f64)],
+    stretched: bool,
+    frames: usize,
+    sample: impl Fn(usize) -> f32,
+) -> Vec<f32> {
     let transport = Transport::new(SampleRate::of(SR));
     let mut wave = Wave::new(1, SampleRate::of(SR));
     for i in 0..4 * SR as usize {
-        wave.append(Interleaved::new(&[i as f32 / SCALE], wave.layout()).unwrap())
+        wave.append(Interleaved::new(&[sample(i)], wave.layout()).unwrap())
             .unwrap();
     }
     let (mut ed, exec) = Editor::new(Prepare::new(
@@ -123,4 +133,25 @@ fn a_stretched_voice_follows_a_loop_wrap_that_falls_on_a_tempo_change() {
         "the ramp falls at {:?}, want 67 680",
         falls.first()
     );
+}
+
+/// With the voice's second vocoder primed for the wrap, a stretched clip sounds on across
+/// it. The same map and loop, the source a 1500 Hz tone of amplitude 0.5, whose phase at
+/// both ends of the loop is whole turns (the loop's start at 0.25 s is 375 periods, its
+/// end at 1.41 s is 2 115), so what is heard is the tone unbroken if the vocoder for the
+/// wrap is ready on its frame. Every block of 128 frames (four periods) from 6 016 on, past
+/// the first priming, is within 1 dB of the tone's RMS, which is two overlapped frames'
+/// phase mismatch of `acos(10^(-1/20)) = 0.48` rad, through both wraps (frames 67 680 and
+/// 123 360). The wrap comes after the tempo's step to 240 BPM at beat 1.38, and the
+/// spare is primed for it by counting through the map how far off it is.
+#[test]
+fn a_looping_stretched_clip_sounds_across_a_wrap_after_a_tempo_change() {
+    let tone = |i: usize| (0.5 * (std::f64::consts::TAU * 1500.0 * i as f64 / SR).sin()) as f32;
+    let x = render_with(&[(0.0, 60.0), (1.38, 240.0)], true, 130_000, tone);
+    let steady = 0.5 / 2.0f64.sqrt();
+    for (b, block) in x[6_016..].as_chunks::<128>().0.iter().enumerate() {
+        let rms = (block.iter().map(|&v| f64::from(v).powi(2)).sum::<f64>() / 128.0).sqrt();
+        let db = 20.0 * (rms / steady).log10();
+        assert!(db.abs() < 1.0, "frame {}: {db} dB", 6_016 + b * 128);
+    }
 }

@@ -421,6 +421,12 @@ impl<'e> BlockClock<'e> {
         }
     }
 
+    /// The loop the block's transport plays over, if any.
+    #[inline]
+    pub(crate) fn looping(&self) -> Option<LoopRange> {
+        self.env.transport.looping
+    }
+
     /// The frames the playhead takes to go from beat `from` to beat `to` (none when `to`
     /// is not after `from`), at `rate`: [`seconds`](Self::seconds) through the project's
     /// tempo map, so the tempo changes between the two count, and the whole frames of it.

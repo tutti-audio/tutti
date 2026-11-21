@@ -16,7 +16,7 @@ use super::command::{
 use super::loop_span::Loop;
 use super::memory_source::MemorySource;
 use super::slot::{PlaybackSlot, stretch_wanted};
-use super::stretched;
+use super::stretched::{self, Vocoders};
 use super::types::{Playback, Reach, SlotId, Voice, VoiceSource};
 use crate::SamplerFloat;
 use crate::lanes::{BlockScratch, UNPREPARED_FRAMES};
@@ -24,7 +24,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
-use tutti_dsp::PhaseVocoder;
 use tutti_graph::{
     Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare,
     RenderMode, Shape, Status,
@@ -40,7 +39,7 @@ use tutti_units::{SampleRate, Tail};
 /// Something the drain took ownership of and must not free in the callback.
 ///
 /// Every variant exists for the same reason: dropping it can free a large
-/// allocation — a [`PhaseVocoder`]'s rings (about 60 KB per channel), or a
+/// allocation — a vocoder pair's rings (about 120 KB per channel), or a
 /// decoded [`Wave`] whose last reference it is. Rather than teach each call
 /// site its own evasion, everything the drain needs to shed goes down one
 /// ring and is freed by [`VoicePoolHandle::collect_retired`] on the
@@ -90,7 +89,7 @@ pub(crate) enum Retired<F: SamplerFloat> {
     ///
     /// The box the command carried: the drain moves it to the ring and the
     /// control thread frees it.
-    Stretch(Box<PhaseVocoder<F>>),
+    Stretch(Box<Vocoders<F>>),
     /// A wave a `ReplaceWave` let go of: the one a memory slot swapped out,
     /// or the new one when no memory slot took it.
     ///
@@ -107,7 +106,7 @@ pub(crate) enum Retired<F: SamplerFloat> {
     /// vocoder there. Counted as [`PoolDrops::voices_refused`].
     Refused {
         voice: Box<Voice<F>>,
-        stretch: Option<Box<PhaseVocoder<F>>>,
+        stretch: Option<Box<Vocoders<F>>>,
     },
 }
 
@@ -262,8 +261,8 @@ pub struct PoolTooWide {
 /// latency late and the pool does not compensate it, nor any voice started with
 /// no timeline position to read ahead of.
 ///
-/// A stretching voice's seat (a seek, a loop wrap, play from a position the transport
-/// has not stood at for 2 049 frames) primes the vocoder over blocks and is silent for
+/// A stretching voice's seat (a seek, play from a position the transport has not stood
+/// at for 2 049 frames; a loop wrap is primed for, by a second vocoder the voice carries) primes the vocoder over blocks and is silent for
 /// 4 097 frames (85 ms at 48 kHz) before it sounds on the timeline; a clip placed ahead
 /// of the playhead, or at a position the transport has stood at, primes before it
 /// plays and is not silent.
@@ -656,7 +655,7 @@ impl<F: SamplerFloat> VoicePool<F> {
         &mut self,
         id: SlotId,
         mut voice: Box<Voice<F>>,
-        stretch: Option<Box<PhaseVocoder<F>>>,
+        stretch: Option<Box<Vocoders<F>>>,
     ) {
         if let Some(i) = self.voices.iter().position(|s| s.id == id) {
             let old = self.voices.swap_remove(i);
@@ -857,7 +856,9 @@ impl<F: SamplerFloat> Clone for VoicePool<F> {
                             .as_ref()
                             .map(|_| stretched::vocoder::<F>(s.channels)),
                         cursor: None,
+                        spare_cursor: None,
                         seats: 0,
+                        spare_seats: 0,
                         channels: s.channels,
                     }
                 }));

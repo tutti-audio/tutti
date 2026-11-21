@@ -14,11 +14,10 @@ use crate::nonempty;
 
 use super::clock::BlockClock;
 use super::memory_source::VoiceWindow;
-use super::stretched::{self, Cursor, DiskFeed, Input, MemoryFeed, PRIME_SPEED, Stretch};
+use super::stretched::{self, Cursor, DiskFeed, Input, MemoryFeed, PRIME_SPEED, Stretch, Vocoders};
 use super::types::{Playback, SlotId, Voice, VoiceSource};
 use crate::SamplerFloat;
 use tutti_buffers::ChannelLayout;
-use tutti_dsp::PhaseVocoder;
 use tutti_units::{Beat, Bpm, Cents, ReadRate, SamplePosition, StretchFactor};
 
 /// A [`Voice`] plus the resident time-stretch DSP processor, and the read that
@@ -59,7 +58,7 @@ pub(crate) struct PlaybackSlot<F: SamplerFloat> {
     /// The phase vocoder, present once the voice has been asked to stretch or
     /// transpose: `None` reads the source dry, the common case. From then on it
     /// always runs, at unity too, so the voice's latency
-    /// ([`PhaseVocoder::latency`]) is constant. It owns no copy of the
+    /// ([`PhaseVocoder::latency`](tutti_dsp::PhaseVocoder::latency)) is constant. It owns no copy of the
     /// audio source: the read feeds it the source frames it asks for (see
     /// `stretched`).
     ///
@@ -74,12 +73,18 @@ pub(crate) struct PlaybackSlot<F: SamplerFloat> {
     /// The vocoder's controls are read from `voice.play.stretch` and
     /// `voice.play.pitch` at each block, so a later change goes through
     /// [`PlaybackSlot::set_stretch`], which writes those.
-    pub(crate) stretch: Option<Box<PhaseVocoder<F>>>,
+    pub(crate) stretch: Option<Box<Vocoders<F>>>,
     /// Where the vocoder's next input frame is read in the source, once the
     /// voice is seated (see `stretched`).
     pub(crate) cursor: Option<Cursor>,
+    /// Where the spare vocoder's next input frame is read, while it primes for a loop
+    /// wrap ahead (see `stretched`).
+    pub(crate) spare_cursor: Option<Cursor>,
     /// The seats the voice has had: the generation of the current one.
     pub(crate) seats: u64,
+    /// The spare's, which nothing reads (a memory voice's read does not use a seat's
+    /// generation).
+    pub(crate) spare_seats: u64,
     /// Width the vocoder must be built at, remembered so a later
     /// materialisation matches the reader rather than defaulting.
     pub(crate) channels: ChannelLayout,
@@ -146,7 +151,9 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
             voice,
             stretch: None,
             cursor: None,
+            spare_cursor: None,
             seats: 0,
+            spare_seats: 0,
             channels,
         }
     }
@@ -165,14 +172,39 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
     /// are not, and nothing else clears them. The voice is unseated, and the
     /// next sounding frame seats it where the playhead now is.
     ///
-    /// RT-safe: [`PhaseVocoder::reset`] is buffer fills and cursor resets, no allocation.
+    /// RT-safe: [`PhaseVocoder::reset`](tutti_dsp::PhaseVocoder::reset) is buffer fills and cursor resets, no allocation.
     pub(crate) fn flush_playhead_state(&mut self) {
         self.voice.source.flush();
-        if let Some(vocoder) = &mut self.stretch
-            && self.cursor.take().is_some()
-        {
-            vocoder.reset();
+        if let Some(vocoders) = &mut self.stretch {
+            if self.cursor.take().is_some() {
+                vocoders.live.reset();
+            }
+            if self.spare_cursor.take().is_some() {
+                vocoders.spare.reset();
+            }
         }
+    }
+
+    /// A jump on its frame: a loop wrap (`wrapped`) goes on with the spare vocoder if it
+    /// has been priming for it (`stretched`), and anything else flushes.
+    fn jumped(&mut self, wrapped: bool) {
+        if wrapped && self.swap_in_spare() {
+            self.voice.source.flush();
+        } else {
+            self.flush_playhead_state();
+        }
+    }
+
+    /// Makes the spare vocoder, with the cursor it has primed to, the voice's, and
+    /// resets the one it replaces. `false` when the spare is not priming.
+    fn swap_in_spare(&mut self) -> bool {
+        let (Some(vocoders), Some(next)) = (&mut self.stretch, self.spare_cursor.take()) else {
+            return false;
+        };
+        std::mem::swap(&mut vocoders.live, &mut vocoders.spare);
+        vocoders.spare.reset();
+        self.cursor = Some(next);
+        true
     }
 
     /// Update the stretch factors — the only entry point for mutating them.
@@ -199,8 +231,8 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
         &mut self,
         stretch_factor: StretchFactor,
         pitch_cents: Cents,
-        incoming: Option<Box<PhaseVocoder<F>>>,
-    ) -> Option<Box<PhaseVocoder<F>>> {
+        incoming: Option<Box<Vocoders<F>>>,
+    ) -> Option<Box<Vocoders<F>>> {
         self.voice.play.stretch = stretch_factor;
         self.voice.play.pitch = pitch_cents;
         match (self.stretch.is_some(), incoming) {
@@ -266,7 +298,7 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
                         self.render_piece(clock, from..run.start, n, scratch, out);
                         from = run.start;
                     }
-                    self.flush_playhead_state();
+                    self.jumped(run.wrap.is_some_and(|wrap| wrap.ago == 0));
                 } else if self.stretch.is_some() && run.start > from {
                     self.render_piece(clock, from..run.start, n, scratch, out);
                     from = run.start;
@@ -336,15 +368,27 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
         // silent meanwhile. The vocoder's output is passed on as it is: a non-finite
         // source sample does not latch in it (the vocoder's own invariant), so no
         // reset follows a block that wrote one.
-        let stretch = self.stretch.as_deref_mut().map(|vocoder| {
-            vocoder.retarget(&stretched::controls(&play));
-            Stretch {
-                consumption: vocoder.read_rate(),
-                vocoder,
-                cursor: &mut self.cursor,
-                seats: &mut self.seats,
+        let (stretch, mut spare) = match self.stretch.as_deref_mut() {
+            Some(Vocoders { live, spare }) => {
+                live.retarget(&stretched::controls(&play));
+                spare.retarget(&stretched::controls(&play));
+                (
+                    Some(Stretch {
+                        consumption: live.read_rate(),
+                        vocoder: live,
+                        cursor: &mut self.cursor,
+                        seats: &mut self.seats,
+                    }),
+                    Some(Stretch {
+                        consumption: spare.read_rate(),
+                        vocoder: spare,
+                        cursor: &mut self.spare_cursor,
+                        seats: &mut self.spare_seats,
+                    }),
+                )
             }
-        });
+            None => (None, None),
+        };
         match (&mut self.voice.source, stretch) {
             (VoiceSource::Memory(sampler), Some(mut stretch)) if sampler.is_placed() => {
                 // The transport seats the read: the gate's position at the
@@ -398,6 +442,20 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
                             frames,
                             &mut input,
                             prime,
+                        );
+                    }
+                }
+                // A loop wrap ahead of a voice whose window covers the loop's start: the
+                // spare vocoder primes for it and takes over at the wrap.
+                let wrap = window.and_then(|w| wrap_ahead(clock, range.start, w));
+                if let (Some(spare), Some((to_wrap, loop_start, tempo))) = (spare.as_mut(), wrap) {
+                    let lead = stretched::prime(spare.vocoder).get().div_ceil(PRIME_SPEED);
+                    if (spare.cursor.is_some() || to_wrap <= lead + longest)
+                        && let Some(gate) = feed.sampler.gate(spare.consumption)
+                    {
+                        let origin = gate.origin(loop_start, tempo, Some(clock));
+                        stretched::preroll(
+                            spare, &mut feed, origin, None, to_wrap, frames, &mut input, prime,
                         );
                     }
                 }
@@ -500,6 +558,29 @@ fn standing_in(clock: &BlockClock<'_>, from: usize, window: VoiceWindow) -> Opti
     (beat >= window.start && before_end).then_some((beat, run.tempo()))
 }
 
+/// The frames from block frame `from` to the end of the loop the rolling transport plays
+/// over, the loop's start beat and the tempo, when `window` covers the loop's start:
+/// what a voice needs to prime for the wrap, counted through the project's tempo map
+/// ([`BlockClock::frames_between`]).
+fn wrap_ahead(
+    clock: &BlockClock<'_>,
+    from: usize,
+    window: VoiceWindow,
+) -> Option<(usize, Beat, Bpm)> {
+    let region = clock.looping()?;
+    let run = clock.runs_in(from..from + 1).next()?;
+    if !run.rolling() {
+        return None;
+    }
+    let beat = run.beat_at(from.max(run.start));
+    let (start, end) = (region.start(), region.end());
+    let covers = window.start <= start && window.duration.is_none_or(|d| start < window.start + d);
+    (covers && beat < end).then(|| {
+        let frames = clock.frames_between(beat, end, run.tempo(), run.sample_rate());
+        (frames.get(), start, run.tempo())
+    })
+}
+
 /// What [`PlaybackSlot::render_lanes`] left for its piece.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Piece {
@@ -531,4 +612,56 @@ pub(crate) fn stretch_wanted(play: &Playback) -> bool {
 #[inline]
 pub(crate) fn stretch_values_want_filter(stretch: StretchFactor, pitch: Cents) -> bool {
     (stretch.get() - 1.0).abs() > 0.001 || pitch.get().abs() > 0.5
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::voice::clock::Clock;
+    use std::sync::Arc;
+    use tutti_graph::{Env, PlayClock, TransportChanges, TransportPosition};
+    use tutti_music::LoopRange;
+    use tutti_tempo::{TempoMap, TempoPoint, Transition};
+    use tutti_units::{Frame, SampleRate, Samples};
+
+    /// What a voice counts to a beat ahead goes through the tempo map: the playhead at beat
+    /// 1.3 and 60 BPM, a step to 240 BPM at beat 1.38, a loop that ends at beat 1.5 and a
+    /// clip that starts at beat 1.45. The frames are the map's closed form, piecewise at
+    /// each tempo: 0.08 beat at 60 BPM is 0.08 s and 0.12 beat at 240 BPM is 0.03 s, 3 840
+    /// and 1 440 frames at 48 kHz, 5 280 to the loop's end; to 1.45, 3 840 and 840, 4 680.
+    /// At the playhead's own tempo they would be 9 600 and 7 200.
+    #[test]
+    fn what_a_voice_counts_ahead_goes_through_the_tempo_map() {
+        let map = TempoMap::new([
+            TempoPoint {
+                beat: Beat::new(0.0),
+                tempo: Bpm::of(60.0),
+                transition: Transition::Step,
+            },
+            TempoPoint {
+                beat: Beat::new(1.38),
+                tempo: Bpm::of(240.0),
+                transition: Transition::Step,
+            },
+        ])
+        .expect("a map");
+        let looping = LoopRange::new(Beat::new(0.25), Beat::new(1.5)).expect("a loop");
+        let env = Env {
+            frame: Frame::new(0),
+            sample_rate: SampleRate::SR_48K,
+            block_len: Samples::new(64),
+            transport: TransportPosition::new(true, Bpm::of(60.0), Beat::new(1.3), Some(looping)),
+            changes: TransportChanges::NONE,
+            play: PlayClock::ZERO,
+        };
+        let map = Arc::new(map);
+        let mut clock = Clock::new();
+        let block = clock.observe_with(&env, Some(&map));
+        let window = VoiceWindow::from(Beat::new(0.0));
+        let (to_wrap, start, _) = wrap_ahead(&block, 0, window).expect("a wrap ahead");
+        assert_eq!(start, Beat::new(0.25));
+        assert!(to_wrap.abs_diff(5_280) <= 1, "to the wrap: {to_wrap}");
+        let to_clip = frames_until(&block, 0, Beat::new(1.45)).expect("a start ahead");
+        assert!(to_clip.abs_diff(4_680) <= 1, "to the clip: {to_clip}");
+    }
 }

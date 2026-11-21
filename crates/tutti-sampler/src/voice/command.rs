@@ -17,12 +17,11 @@ use super::loop_span::Loop;
 use super::memory_source::{MemorySource, VoiceWindow};
 use super::pool::{DrainCounters, PoolDrops, Retired};
 use super::slot::{stretch_values_want_filter, stretch_wanted};
-use super::stretched;
+use super::stretched::{self, Vocoders};
 use super::types::{Direction, Playback, SlotId, Voice, VoiceSource};
 use crate::SamplerFloat;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
-use tutti_dsp::PhaseVocoder;
 use tutti_graph::ParamSet;
 use tutti_rt::Param;
 use tutti_rt::{LockExt, Publisher, PushError, RingReader, RingWriter};
@@ -94,13 +93,13 @@ pub(crate) enum VoiceCommand<F: SamplerFloat> {
         /// Boxed, as `UpdateStretch`'s is, so the command stays small: the
         /// slot keeps the same box, and moving a box is a pointer move that
         /// frees nothing.
-        stretch: Option<Box<PhaseVocoder<F>>>,
+        stretch: Option<Box<Vocoders<F>>>,
     },
     /// Retire the slot with this id, vocoder and all.
     ///
     /// The drain does not drop the slot in the callback — it hands it to the
     /// control thread through the retirement ring, because freeing a
-    /// [`PhaseVocoder`] frees its rings. See
+    /// [`PhaseVocoder`](tutti_dsp::PhaseVocoder) frees its rings. See
     /// [`VoicePoolHandle::collect_retired`].
     Remove(SlotId),
     /// Point an in-memory slot at a different wave, keeping its placement,
@@ -213,7 +212,7 @@ pub(crate) enum VoiceCommand<F: SamplerFloat> {
         ///
         /// Boxed, as [`AddVoice::stretch`](Self::AddVoice::stretch) is, and
         /// the slot keeps the same box: moving it frees nothing.
-        stretch: Option<Box<PhaseVocoder<F>>>,
+        stretch: Option<Box<Vocoders<F>>>,
     },
 }
 
@@ -976,7 +975,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         id: SlotId,
         voice: Box<Voice<F>>,
         stream: Stream<F>,
-        stretch: Option<Box<PhaseVocoder<F>>>,
+        stretch: Option<Box<Vocoders<F>>>,
     ) -> Result<(), Box<StreamingAddError<F>>> {
         if self.writer().is_full() {
             let error = SendError::Full;
