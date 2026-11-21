@@ -1018,7 +1018,7 @@ impl AudioBridge {
     /// [`Timeouts::state`] (renewed by the server's `Working`, up to the
     /// ceiling) it sends [`StateError::Stalled`] into the answer, so no caller
     /// waits and none polls. A lane that ends drops the request unanswered, which
-    /// cancels the answer. The request takes no slot ([`ControlSlot`]) and
+    /// cancels the answer. The request takes no slot (`ControlSlot`) and
     /// queues behind one in flight.
     pub fn save_state_answer(
         &self,
