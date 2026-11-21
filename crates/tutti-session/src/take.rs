@@ -1179,10 +1179,10 @@ impl<F: Float> Pump<F> {
                 }
                 // The tap rings as it writes a block and when it ends; the stop
                 // bell rings for a stop or the session's end.
-                let Some(frames) = self.reader.notified() else {
-                    failed = true;
-                    break 'pump;
-                };
+                let frames = self
+                    .reader
+                    .notified()
+                    .expect("a session's tap carries the session's bell");
                 futures_lite::future::or(frames, stop.rung()).await;
                 continue;
             }

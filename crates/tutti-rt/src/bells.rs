@@ -272,7 +272,10 @@ pub struct BellsHandle {
 }
 
 impl BellsHandle {
-    /// A new bell in the set ([`Bells::bell`]).
+    /// A new bell in the set ([`Bells::bell`]). It forgets the bells whose both
+    /// sides are gone first, as a pass does: a ring nobody waits on runs no
+    /// pass, so the set stays as large as its live bells only if the make does
+    /// this too.
     pub fn bell(&self) -> (Bell, Listener) {
         let state = Arc::new(State {
             rung: AtomicBool::new(false),
@@ -280,7 +283,11 @@ impl BellsHandle {
             waiting: AtomicBool::new(false),
             shut: Arc::clone(&self.shared.shut),
         });
-        self.shared.bells().push(Arc::clone(&state));
+        {
+            let mut bells = self.shared.bells();
+            bells.retain(|state| Arc::strong_count(state) > 1);
+            bells.push(Arc::clone(&state));
+        }
         (
             Bell {
                 _control: ControlDrop::new(),
