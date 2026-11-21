@@ -218,11 +218,11 @@ fn a_refusal_is_a_status_not_a_log_line() {
     s.declare_root_topology(None).unwrap();
     assert_eq!(s.root_topology_status(), RootTopologyStatus::Applied);
 
-    // A root wider than the engine renders is widened as far as it goes, and the
-    // excess is a refusal.
+    // A root wider than the engine renders is refused whole: its width stays.
     let max = tutti_buffers::MAX_CHANNELS;
+    let before = s.graph_ref().outputs();
     let err = s.graph().widen_outputs(max + 8).unwrap_err();
-    assert_eq!(s.graph_ref().outputs(), max);
+    assert_eq!(s.graph_ref().outputs(), before);
     assert!(matches!(
         err,
         RootError::Fold(FoldError::Unplaced { channel, .. }) if channel == max
@@ -425,4 +425,28 @@ fn a_declaration_past_the_pending_roots_is_refused_by_name() {
     let _ = heard(&mut s, 6);
     let _ = s.update();
     s.declare_root_topology(Some(buses(4))).unwrap();
+}
+
+/// **A widening past the engine's width is refused whole.** The root keeps the
+/// width it had, and the refusal is the first channel with no place; a
+/// request the engine can render widens afterwards.
+#[test]
+fn widen_outputs_past_the_maximum_changes_nothing() {
+    let mut s = offline(Session::builder(), 2).unwrap();
+    let before = s.graph_ref().outputs();
+    let max = tutti_buffers::MAX_CHANNELS;
+    for request in [max + 1, max + 8] {
+        let err = s.graph().widen_outputs(request).unwrap_err();
+        assert!(matches!(
+            err,
+            RootError::Fold(FoldError::Unplaced { channel, .. }) if channel == max
+        ));
+        assert_eq!(
+            s.graph_ref().outputs(),
+            before,
+            "the widths are as they were"
+        );
+    }
+    s.graph().widen_outputs(max).unwrap();
+    assert_eq!(s.graph_ref().outputs(), max);
 }

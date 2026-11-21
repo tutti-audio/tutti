@@ -40,6 +40,7 @@ fn session() -> (Keyed, NodeKey) {
 fn ports(s: &Session, input: NodeKey, node: NodeKey) -> BTreeSet<u16> {
     s.graph_ref()
         .feed(node, Feeder::Routes)
+        .unwrap()
         .iter()
         .map(|e| {
             assert_eq!(e.node(), input);
