@@ -523,12 +523,14 @@ pub mod session {
     #[cfg(feature = "device")]
     pub use tutti_cpal::{
         DeviceChange, DeviceDirection, DeviceHost, DeviceListing, DeviceRoster, DeviceSelector,
-        OutputConfig, Snapshot, SnapshotSource, SupportedConfig,
+        OutputConfig, PollInterval, PollIntervalTooShort, Snapshot, SnapshotSource,
+        SupportedConfig,
     };
     pub use tutti_engine::{
         BackendErrorKind, GraphEngineError, LOAD_MEAN_TIME_CONSTANT, Lagging, OutputLevelError,
-        OutputLevels, OutputMap, OutputMapError, OutputSpec, OutputStrip, Routing, RoutingError,
-        StartError, StreamFault, StreamFaultKind, StreamFaults, StreamLatency, TimerError,
+        OutputLevels, OutputMap, OutputMapError, OutputQuantum, OutputSpec, OutputStrip,
+        QuantumOutOfRange, Routing, RoutingError, StartError, StreamFault, StreamFaultKind,
+        StreamFaults, StreamLatency, TimerError,
     };
     #[cfg(feature = "export")]
     pub use tutti_export::{

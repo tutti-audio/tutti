@@ -323,7 +323,7 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
             ChannelLayout::STEREO,
             tutti_buffers::SampleFormat::F32,
         )
-        .with_quantum(MaxBlock::of(Samples::new(quantum)))
+        .with_quantum(tutti_engine::OutputQuantum::of(quantum))
     }
     set_server();
     let (driver, stream) = ManualStreamDriver::new();
@@ -418,7 +418,7 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
                 ChannelLayout::STEREO,
                 tutti_buffers::SampleFormat::F32,
             )
-            .with_quantum(MaxBlock::of(Samples::new(256))),
+            .with_quantum(tutti_engine::OutputQuantum::of(256)),
             driver,
         )
         .unwrap_or_else(|e| panic!("switches: {}", e.error()));

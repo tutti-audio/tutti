@@ -9,7 +9,8 @@ use std::sync::Arc;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, SampleFormat};
 use tutti_engine::{
-    AudioCallbackState, OutputSpec, OutputStream, StreamDriver, StreamFaults, StreamLatency,
+    AudioCallbackState, OutputQuantum, OutputSpec, OutputStream, StreamDriver, StreamFaults,
+    StreamLatency,
 };
 use tutti_platform::Executor;
 use tutti_units::SampleRate;
@@ -19,7 +20,8 @@ use crate::error::{DeviceError, Result};
 use crate::host::{AudioHost, DeviceHost, DeviceSelector, device_name};
 use crate::roster::{DeviceDirection, DeviceId};
 
-/// What [`AudioEngine`] opens: the output device and its sample format.
+/// What [`AudioEngine`] opens: the output device, its sample format and its
+/// callback size.
 /// [`new`](Self::new) names the device at its default format; `Default` is the
 /// host's default device; a [`DeviceSelector`], a [`DeviceId`] or an
 /// `Option<DeviceId>` converts to the config that names it. The choice survives
@@ -28,14 +30,17 @@ use crate::roster::{DeviceDirection, DeviceId};
 /// ```
 /// use tutti_buffers::SampleFormat;
 /// use tutti_cpal::{DeviceSelector, OutputConfig};
+/// use tutti_engine::OutputQuantum;
 ///
 /// let config = OutputConfig::new(DeviceSelector::named("Interface"))
-///     .sample_format(SampleFormat::I16);
+///     .sample_format(SampleFormat::I16)
+///     .quantum(OutputQuantum::of(128));
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputConfig {
     pub(crate) device: DeviceSelector,
     pub(crate) sample_format: Option<SampleFormat>,
+    pub(crate) quantum: Option<OutputQuantum>,
 }
 
 impl Default for OutputConfig {
@@ -52,6 +57,7 @@ impl OutputConfig {
         Self {
             device: device.into(),
             sample_format: None,
+            quantum: None,
         }
     }
 
@@ -74,6 +80,20 @@ impl OutputConfig {
     #[must_use]
     pub fn sample_format(mut self, format: SampleFormat) -> Self {
         self.sample_format = Some(format);
+        self
+    }
+}
+
+impl OutputConfig {
+    /// Opens the device with callbacks of exactly `quantum` frames. A size
+    /// outside the range the device reports is
+    /// [`DeviceError::QuantumUnavailable`] when the stream is opened, never
+    /// clamped into it. Without this the stream asks for
+    /// [`PREFERRED_QUANTUM`](crate::PREFERRED_QUANTUM) frames, clamped into the
+    /// range, and a device that reports no range opens with its own buffer.
+    #[must_use]
+    pub fn quantum(mut self, quantum: OutputQuantum) -> Self {
+        self.quantum = Some(quantum);
         self
     }
 }
@@ -122,6 +142,15 @@ fn output_config(
             .map_err(DeviceError::DeviceNotAvailable)?,
         wanted,
         &name,
+    )
+}
+
+/// What an engine built from a bare spec answers a call that needs a device.
+pub(crate) fn no_device() -> DeviceError {
+    DeviceError::InvalidDevice(
+        "this engine was built from a bare spec and has no device to open; \
+         use `start_with` and supply a driver"
+            .into(),
     )
 }
 
@@ -244,7 +273,12 @@ impl AudioEngine {
     ) -> Result<Self> {
         let config = config.into();
         let device = host.device(DeviceDirection::Output, &config.device)?;
-        let (spec, _) = spec_from_supported(&output_config(&device, config.sample_format)?)?;
+        let name = device_name(&device).unwrap_or_default();
+        let (spec, _) = spec_from_supported(
+            &output_config(&device, config.sample_format)?,
+            &name,
+            config.quantum,
+        )?;
         Ok(Self {
             stream: OutputStream::new(spec),
             target: Some((host, config, executor.clone())),
@@ -297,8 +331,10 @@ impl AudioEngine {
     /// [`select_device`](Self::select_device) the [`spec`](Self::spec),
     /// [`sample_rate`](Self::sample_rate) and [`channels`](Self::channels)
     /// describe the device that is actually playing. The stream is opened with
-    /// a fixed buffer of [`PREFERRED_QUANTUM`](crate::PREFERRED_QUANTUM) frames
-    /// clamped to the device's range, when the device reports one. Clears
+    /// a fixed buffer of the [`quantum`](OutputConfig::quantum) asked for, which
+    /// the device must offer, or else of
+    /// [`PREFERRED_QUANTUM`](crate::PREFERRED_QUANTUM) frames clamped to the
+    /// device's range, when the device reports one. Clears
     /// [`faults`](Self::faults).
     ///
     /// # Errors
@@ -306,7 +342,8 @@ impl AudioEngine {
     /// [`DeviceError::InvalidDevice`] for an unresolvable selector,
     /// [`DeviceError::DeviceNotAvailable`] if the config cannot be read,
     /// [`DeviceError::OutputFormatUnavailable`] for a chosen format the device does
-    /// not offer, [`DeviceError::InvalidConfig`] for a sample format the engine does
+    /// not offer, [`DeviceError::QuantumUnavailable`] for a chosen callback size
+    /// outside its range, [`DeviceError::InvalidConfig`] for a sample format the engine does
     /// not build,
     /// or [`DeviceError::BuildStream`] / [`DeviceError::PlayStream`] from CPAL.
     pub fn start<F: Float>(&mut self, state: Arc<AudioCallbackState<F>>) -> Result<()>
@@ -352,14 +389,15 @@ impl AudioEngine {
         target: Option<&Target>,
     ) -> Result<(CpalDriver, OutputSpec, Opened)> {
         let Some((host, config, executor)) = target else {
-            return Err(DeviceError::InvalidDevice(
-                "this engine was built from a bare spec and has no device to open; \
-                 use `start_with` and supply a driver"
-                    .into(),
-            ));
+            return Err(no_device());
         };
         let device = host.device(DeviceDirection::Output, &config.device)?;
-        let (spec, format) = spec_from_supported(&output_config(&device, config.sample_format)?)?;
+        let name = device_name(&device).unwrap_or_default();
+        let (spec, format) = spec_from_supported(
+            &output_config(&device, config.sample_format)?,
+            &name,
+            config.quantum,
+        )?;
         // What it is called is recorded by the caller once the stream runs
         // (`opened`): a restart that fails leaves the name of the device the
         // previous stream ran on.
@@ -471,12 +509,17 @@ impl AudioEngine {
     }
 
     /// Selects the device the next [`start`](Self::start) opens, by name or
-    /// index. Does not disturb a running stream, and does nothing on an engine
-    /// built with [`from_spec`](Self::from_spec).
-    pub fn select_device(&mut self, sel: DeviceSelector) {
-        if let Some((_, current, _)) = &mut self.target {
-            current.select(sel);
-        }
+    /// index. Does not disturb a running stream.
+    ///
+    /// # Errors
+    /// [`DeviceError::InvalidDevice`] on an engine built with
+    /// [`from_spec`](Self::from_spec), which has no device to select.
+    pub fn select_device(&mut self, sel: DeviceSelector) -> Result<()> {
+        let Some((_, current, _)) = &mut self.target else {
+            return Err(no_device());
+        };
+        current.select(sel);
+        Ok(())
     }
 
     /// The name of the device the running (or last started) stream opened,

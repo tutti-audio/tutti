@@ -830,11 +830,13 @@ fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
     // The first block adopts the plan (the commit apply is guarded elsewhere).
     engine.process(&mut InterleavedMut::new(&mut vec![0.0f32; 64 * 12], twelve).unwrap());
 
-    control.set_routing(Routing {
-        monitor: Some(Bed::Stereo.topology()),
-        map: OutputMap::channels([2, 3]).unwrap(),
-        ..Routing::default()
-    });
+    control
+        .set_routing(Routing {
+            monitor: Some(Bed::Stereo.topology()),
+            map: OutputMap::channels([2, 3]).unwrap(),
+            ..Routing::default()
+        })
+        .expect("the routing places the roots");
     let strip = |mute| OutputStrip {
         mute,
         ..OutputStrip::default()
@@ -914,16 +916,22 @@ fn a_routing_crossfade_is_allocation_free() {
     engine.process(&mut InterleavedMut::new(&mut vec![0.0f32; 64 * 12], twelve).unwrap());
 
     // Reversed: a full fade, over blocks that straddle its length.
-    control.set_routing(to([11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]));
+    control
+        .set_routing(to([11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]))
+        .expect("the routing places the roots");
     for _ in 0..6 {
         block(&engine);
         let _ = engine.reclaim();
     }
     // A second change two blocks in, and a third one block after it.
-    control.set_routing(to([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]));
+    control
+        .set_routing(to([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]))
+        .expect("the routing places the roots");
     block(&engine);
     block(&engine);
-    control.set_routing(to([1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10]));
+    control
+        .set_routing(to([1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10]))
+        .expect("the routing places the roots");
     block(&engine);
     for _ in 0..6 {
         block(&engine);

@@ -474,7 +474,8 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
     /// take the root ([`Error::Output`](crate::Error::Output)),
     /// (`midi-hardware`) the MIDI device watch cannot start, (`sampler`) the
     /// disk streamer cannot start, or the OS refuses the timer thread
-    /// ([`Error::Clock`](crate::Error::Clock)). A target that starts no thread (the web)
+    /// ([`Error::Clock`](crate::Error::Clock)), or [`max_block`](Self::max_block) is past
+    /// the callback ceiling ([`Error::Quantum`](crate::Error::Quantum)). A target that starts no thread (the web)
     /// refuses with [`Error::NeedsThreads`](crate::Error::NeedsThreads).
     pub fn build(mut self) -> Result<crate::SystemSession<&'static str, F>> {
         crate::background::require(crate::BackgroundWork::Timer)?;
@@ -499,7 +500,8 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
         let readings = (engine.load(), engine.blocks());
         let taps = engine.heard_taps();
         let clock = engine.block_clock();
-        let spec = tutti_engine::OutputSpec::new(rate, layout, F::FORMAT).with_quantum(max_block);
+        let spec = tutti_engine::OutputSpec::new(rate, layout, F::FORMAT)
+            .with_quantum(tutti_engine::OutputQuantum::try_from(max_block)?);
         let mut host = tutti_engine::StreamHost::new(
             tutti_engine::OutputStream::new(spec),
             Arc::new(tutti_engine::AudioCallbackState::new(engine)),
@@ -623,7 +625,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
             runtime,
             spec.sample_rate,
             LIVE_MAX_BLOCK,
-            spec.quantum,
+            spec.quantum.map(tutti_engine::OutputQuantum::max_block),
             root,
         )?;
         let engine = parts.graph.engine(
