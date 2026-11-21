@@ -6,19 +6,20 @@
 //! session's clock, whose events the session sends to the sink each update at
 //! the time its frame has on the OS clock (the same drain, the same timing, as a
 //! device's). A sink needs no device, so it is always there while a clone of its
-//! handle lives. The last clone's drop closes it: its node leaves the graph at
-//! the next [`update`](Session::update), or at the next open, whichever comes
-//! first.
+//! handle lives. The last clone's drop retires it: what was queued to its node
+//! before the drop is sent, and the sink ends and its node leaves the graph at
+//! the first [`update`](Session::update) after the graph has rendered past the
+//! drop.
 
 use std::sync::Arc;
 
 use tutti_graph::{EventTapReader, Losses, NodeKey};
-use tutti_midi_runtime::MidiOut;
+use tutti_midi_runtime::{DeviceGeneration, MidiOut};
 
 use crate::Session;
 use crate::midi::{
-    Claim, Held, LossReaders, LossWriters, OutputTiming, Stamping, Sweepable, UmpOut, drain_events,
-    loss_cells, sweep_dropped,
+    Claim, Departure, Held, Leaving, LossReaders, LossWriters, OutputTiming, Retiring, Stamping,
+    Sweepable, UmpOut, drain_events, loss_cells, sweep_dropped,
 };
 
 // --- The shared record ---
@@ -69,8 +70,8 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// A request to open `sink` as an output: wire what it should receive to
     /// its [`node`](MidiSink::node). Nothing opens until
     /// [`run`](OpenMidiSink::run) is called, and the sink
-    /// closes when every clone of the handle is dropped, at the next
-    /// [`update`](Self::update) or open.
+    /// ends when every clone of the handle is dropped, once the graph has
+    /// rendered past the drop ([`update`](Self::update) ends it).
     pub fn open_midi_sink(&mut self, sink: Arc<dyn MidiOut>) -> OpenMidiSink<'_, K, C> {
         OpenMidiSink {
             session: self,
@@ -119,14 +120,16 @@ struct SinkPort {
     claim: Held<SinkShared>,
     node: NodeKey,
     tap: EventTapReader,
+    departure: Departure,
     out: UmpOut,
     losses: LossWriters,
 }
 
-/// The sinks of the session.
+/// The sinks of the session, and those going.
 #[derive(Default)]
 pub(crate) struct Sinks {
     ports: Vec<SinkPort>,
+    retiring: Vec<Retiring<SinkPort>>,
 }
 
 impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
@@ -135,7 +138,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
     pub(crate) fn open_sink(&mut self, sink: Arc<dyn MidiOut>, stamping: Stamping) -> MidiSink {
         self.close_dropped();
         let rate = self.graph.prepared().sample_rate();
-        let (node, tap) = self.add_output_node();
+        let (node, tap, departure) = self.add_output_node();
         let mut out = UmpOut::new(sink, rate);
         out.set_stamping(stamping);
         let (losses, readers) = loss_cells();
@@ -145,6 +148,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             claim: held,
             node,
             tap,
+            departure,
             out,
             losses,
         });
@@ -163,7 +167,8 @@ impl Sinks {
         timing: Option<&OutputTiming>,
     ) -> bool {
         let mut edited = false;
-        for port in &mut self.ports {
+        let going = self.retiring.iter_mut().map(|going| &mut going.port);
+        for port in self.ports.iter_mut().chain(going) {
             if port.tap.rate() != graph.prepared().sample_rate() {
                 port.drain(timing);
                 if let Some(tap) = graph.taps().reopen_event(port.tap.id()) {
@@ -189,15 +194,15 @@ impl Sinks {
         self.close_dropped(graph, timing)
     }
 
-    /// The sinks whose handles were all dropped, closed: what their node
-    /// rendered before the drop is sent, and the node leaves the graph. Whether
-    /// the graph was edited.
+    /// The sinks whose handles were all dropped, retired: each is sent what its
+    /// node rendered, and ends once the graph has rendered past the drop and its
+    /// tap was drained, with its node taken out. Whether the graph was edited.
     pub(crate) fn close_dropped<F: tutti_buffers::Float>(
         &mut self,
         graph: &mut crate::graph::Graph<F>,
         timing: Option<&OutputTiming>,
     ) -> bool {
-        sweep_dropped(&mut self.ports, graph, timing)
+        sweep_dropped(&mut self.ports, &mut self.retiring, graph, timing)
     }
 }
 
@@ -206,6 +211,12 @@ impl Sweepable for SinkPort {
         self.claim.is_held()
     }
 
+    fn depart(&mut self) -> DeviceGeneration {
+        self.departure.depart()
+    }
+}
+
+impl Leaving for SinkPort {
     fn node(&self) -> NodeKey {
         self.node
     }

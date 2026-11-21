@@ -413,6 +413,39 @@ fn the_midi_out_node_counts_the_events_it_cannot_pass() {
     assert!(lost >= 1_200 - tutti_midi_runtime::MIDI_OUT_EVENT_CAPACITY as u64);
 }
 
+/// **A following output node handles a generation two blocks after the block
+/// that read it**: the first block reads the departure, and only the block after
+/// that one has begun is the node known to have run, sources to taps, after the
+/// departure; the generation is idle at the start of the second block after it.
+#[test]
+fn a_following_midi_out_node_handles_a_generation_two_blocks_after_reading_it() {
+    let (mut writer, generation) = DeviceGeneration::new();
+    writer.arrive();
+    let (_ed, mut exec, (), _seen) = rig_with(
+        tutti_graph::ForkByClone(MidiOutNode::new().following(&generation)),
+        1,
+        512,
+        |_| {},
+    );
+    block(&mut exec, 512);
+    block(&mut exec, 512);
+    assert!(generation.is_idle(), "the arrival is handled");
+    writer.depart();
+    assert!(!generation.is_idle(), "the departure is owed blocks");
+    block(&mut exec, 512);
+    assert!(
+        !generation.is_idle(),
+        "the block that read it is not enough"
+    );
+    block(&mut exec, 512);
+    assert!(!generation.is_idle(), "one block after it is not enough");
+    block(&mut exec, 512);
+    assert!(
+        generation.is_idle(),
+        "two blocks after the one that read it"
+    );
+}
+
 fn note_on_ump(i: u64) -> Ump {
     midi::note_on(MidiChannel::of((i % 16) as u8), (i % 100) as u8, 0x8000)
 }

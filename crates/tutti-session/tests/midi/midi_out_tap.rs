@@ -17,8 +17,9 @@ use tutti_ump::{MidiGroup, Ump};
 use tutti_units::SampleRate;
 
 use tutti_midi_runtime::MidiClipNode;
-use tutti_session::{EventInPort, EventOutPort, MidiSink, Session, Stamping};
+use tutti_session::{EventInPort, EventOutPort, MidiSink, Session, Stamp, Stamping};
 use tutti_ump::{Message, System};
+use tutti_ump::{MidiChannel, NoteKeyEvent, NoteNumber};
 use tutti_units::{Beat, BeatDuration};
 
 const RATE: f64 = 48_000.0;
@@ -295,12 +296,43 @@ fn dropping_the_last_handle_ends_the_sink() {
     let node = sink.node();
     drop(sink);
     let _ = s.update();
+    assert!(
+        s.graph_ref().contains(node),
+        "its node stays until the graph has rendered past the drop"
+    );
+    render(&s, 3 * 512);
     let _ = s.update();
     assert!(!s.graph_ref().contains(node), "its node left");
     let _ = wire.batches();
     render(&s, 4_096);
     let _ = s.update();
     assert!(wire.batches().is_empty(), "nothing more reaches it");
+}
+
+/// **A note off sent just before the last handle of a sink drops reaches the
+/// sink**: the sink stays open, its tap drained into it, until the graph has
+/// rendered past the drop.
+#[test]
+fn a_note_off_sent_just_before_the_last_handle_drops_reaches_the_sink() {
+    let wire = Wire::default();
+    let (mut s, sink) = rig(&wire);
+    let node = sink.node();
+    let mut keys = s.midi().input(node).expect("the node takes events");
+    let _ = s.update();
+    let _ = wire.batches();
+
+    keys.note_off(Stamp::NextBlock, MidiChannel::FIRST, NoteNumber::of(60))
+        .expect("queued");
+    drop(sink);
+    let _ = s.update();
+    assert!(s.graph_ref().contains(node), "no block has rendered it yet");
+    render(&s, 3 * 512);
+    let _ = s.update();
+    assert!(!s.graph_ref().contains(node), "the sink retired");
+    let off = wire.batches().iter().flatten().any(|(_, ump)| {
+        matches!(ump.note_key_event(), Some(NoteKeyEvent::Off(k)) if k.note().get() == 60)
+    });
+    assert!(off, "the sink received the note off");
 }
 
 /// **A JR-stamped sink stamps at the graph's new rate after a re-rate.** At 44.1

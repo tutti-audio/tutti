@@ -14,9 +14,11 @@ use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint, per
 use tutti_midi_runtime::MidiClipNode;
 use tutti_session::{
     EventInPort, MidiInput, MidiOutput, MidiPortError, MidiRouteRule, Peer, PortCause, Presence,
-    Resource, ResourceFact, Session, SessionEvent,
+    Resource, ResourceFact, Session, SessionEvent, Stamp,
 };
-use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, NoteKeyEvent, U7, Voice2};
+use tutti_ump::{
+    Address, CCNumber, Message, MidiChannel, MidiGroup, NoteKeyEvent, NoteNumber, U7, Voice2,
+};
 use tutti_units::{Beat, BeatDuration, SampleRate};
 
 const RATE: f64 = 48_000.0;
@@ -418,6 +420,57 @@ fn a_dropped_output_sends_what_its_node_held() {
     );
 }
 
+/// **A note off sent just before the last handle drops reaches the device**:
+/// the port stays open, its tap drained into the device, until the graph has
+/// rendered past the drop, so the note does not hang.
+#[test]
+fn a_note_off_sent_just_before_the_last_handle_drops_reaches_the_device() {
+    let (mut s, fake) = session();
+    plug(&fake, 10, "Synth", PortDirection::Output);
+    let _ = s.update();
+    let synth = device(&mut s, "Synth");
+    let out = output(&mut s, &synth);
+    let node = out.node();
+    let mut keys = s.midi().input(node).expect("the node takes events");
+    let _ = s.update();
+    let _ = fake.take_sent(EndpointId::from_raw(10));
+
+    keys.note_off(Stamp::NextBlock, MidiChannel::FIRST, NoteNumber::of(60))
+        .expect("queued");
+    drop(out);
+    let _ = s.update();
+    assert!(s.graph_ref().contains(node), "no block has rendered it yet");
+    blocks(&s, 3);
+    let _ = s.update();
+    assert!(!s.graph_ref().contains(node), "the output retired");
+    let sent = fake.take_sent(EndpointId::from_raw(10));
+    assert!(
+        sent.iter().any(
+            |u| matches!(u.note_key_event(), Some(NoteKeyEvent::Off(k)) if k.note().get() == 60)
+        ),
+        "the device received the note off: {sent:?}"
+    );
+}
+
+/// **A device an output still retires on opens again at once**: the open ends
+/// the retiring output, so the device has one connection of the session, and
+/// the new port is live on it.
+#[test]
+fn a_device_opens_again_while_its_dropped_output_is_retiring() {
+    let (mut s, fake) = session();
+    plug(&fake, 10, "Synth", PortDirection::Output);
+    let _ = s.update();
+    let synth = device(&mut s, "Synth");
+    let first = output(&mut s, &synth);
+    let node = first.node();
+    drop(first);
+    let _ = s.update();
+    assert!(s.graph_ref().contains(node), "it is retiring");
+    let again = s.open_midi_output(synth).run().expect("opens at once");
+    assert!(!s.graph_ref().contains(node), "the retiring output ended");
+    assert_eq!(again.presence(), Presence::Live);
+}
+
 /// **A device is free to open again as soon as its port's last handle is
 /// dropped**: the open sweeps the dropped port first, with no update between.
 #[test]
@@ -494,6 +547,12 @@ fn an_output_port_closes_when_its_last_handle_is_dropped() {
     assert!(s.graph_ref().contains(node));
 
     drop(out);
+    let _ = s.update();
+    assert!(
+        s.graph_ref().contains(node),
+        "the node stays until the graph has rendered past the drop"
+    );
+    blocks(&s, 3);
     let _ = s.update();
     assert!(!s.graph_ref().contains(node), "the output node went");
     unplug(&fake, 10);
@@ -1002,6 +1061,9 @@ fn closing_an_output_port_stops_its_active_sensing() {
     let (mut s, fake, out) = sensing_session(true);
     let _ = sent_until(&fake, "precondition: it runs", |sent| !sent.is_empty());
     drop(out);
+    let _ = s.update();
+    // The device closes once the graph has rendered past the drop.
+    blocks(&s, 3);
     let _ = s.update();
     let _ = sent_by_the_port(&fake);
     std::thread::sleep(SECOND);

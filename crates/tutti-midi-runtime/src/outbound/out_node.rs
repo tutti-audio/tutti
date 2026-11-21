@@ -11,6 +11,7 @@
 
 use tutti_graph::{Cx, Event, EventKind, Io, Node, Prepare, Shape, Status, UmpAt};
 
+use crate::live::DeviceGeneration;
 use crate::live::order::BLANK;
 
 /// The most events a [`MidiOutNode`] passes in one block, its declared event
@@ -33,10 +34,45 @@ const MIDI_OUT_PORT_CAPACITY: std::num::NonZeroU32 =
 ///     Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
 /// editor.insert(NodeKey(1), "midi out", tutti_graph::ForkByClone(MidiOutNode::new()));
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct MidiOutNode {
     /// The block's events, between reading the input and writing the output.
     staged: Box<[UmpAt]>,
+    /// The retirement the node acknowledges ([`following`](Self::following)).
+    follow: Option<Follow>,
+}
+
+/// A [`DeviceGeneration`] the node reads each block, and the generations of the
+/// two blocks before.
+#[derive(Debug)]
+struct Follow {
+    cell: DeviceGeneration,
+    /// The generation read at the start of the last block, and of the one before.
+    seen: [u64; 2],
+}
+
+impl Follow {
+    /// Reads the generation, and acknowledges the one read two blocks ago.
+    ///
+    /// A generation is handled once a whole block has run after the block that
+    /// read it: that block began after the control side stored the generation,
+    /// so every source of this node ran in it after that store, and it has
+    /// ended, taps included, when the next block starts.
+    fn step(&mut self) {
+        let now = self.cell.generation();
+        self.cell.mark_handled(self.seen[1]);
+        self.seen = [now, self.seen[0]];
+    }
+}
+
+impl Clone for MidiOutNode {
+    /// A copy that follows nothing: a fork acknowledges no retirement.
+    fn clone(&self) -> Self {
+        Self {
+            staged: self.staged.clone(),
+            follow: None,
+        }
+    }
 }
 
 impl MidiOutNode {
@@ -45,7 +81,23 @@ impl MidiOutNode {
     pub fn new() -> Self {
         Self {
             staged: vec![BLANK; MIDI_OUT_EVENT_CAPACITY].into_boxed_slice(),
+            follow: None,
         }
+    }
+
+    /// Acknowledges the retirement `generation` says: the node stores the
+    /// generation it has handled once a whole block has run, from its sources
+    /// to its taps, after the block that read it, so the control side takes the
+    /// node out ([`is_idle`](DeviceGeneration::is_idle)) when what was queued
+    /// to it before the generation moved has reached its tap. A node that is
+    /// never processed never goes idle. Its copies (the forks) follow nothing.
+    #[must_use]
+    pub fn following(mut self, generation: &DeviceGeneration) -> Self {
+        self.follow = Some(Follow {
+            cell: generation.clone(),
+            seen: [generation.generation(); 2],
+        });
+        self
     }
 }
 
@@ -69,6 +121,9 @@ impl<F: tutti_buffers::Float> Node<F> for MidiOutNode {
     fn prepare(&mut self, _: &Prepare) {}
 
     fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
+        if let Some(follow) = &mut self.follow {
+            follow.step();
+        }
         let mut kept = 0;
         let mut lost = 0;
         for event in io.events(0) {

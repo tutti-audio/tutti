@@ -23,9 +23,9 @@ use std::sync::{Arc, Weak};
 use tutti_graph::{EventTapReader, NodeKey, Offset, TapEvent};
 use tutti_midi_protocol::MpeMode;
 use tutti_midi_runtime::{
-    ClipEvents, ClockMap, MidiClipNode, MidiInputPorts, MidiKeys, MpeTransformNode, Outgoing,
-    OutputLatency, OutputPlan, OutputTerms, Placement, RouteRule, SendAt, TimedMidiEvent,
-    compile_routes,
+    ClipEvents, ClockMap, DeviceGeneration, GenerationWriter, MidiClipNode, MidiInputPorts,
+    MidiKeys, MpeTransformNode, Outgoing, OutputLatency, OutputPlan, OutputTerms, Placement,
+    RouteRule, SendAt, TimedMidiEvent, compile_routes,
 };
 use tutti_music::MeterMap;
 use tutti_rt::Mint;
@@ -560,34 +560,98 @@ pub(crate) struct Claim<S> {
     pub(crate) node: NodeKey,
 }
 
-/// A port or sink that is swept when its handles are all dropped.
-pub(crate) trait Sweepable {
-    /// Whether a handle lives.
-    fn is_held(&self) -> bool;
-    /// The output node.
+/// What leaves the session's tables for the graph to finish with: an input
+/// node, an output port or a sink whose handles were all dropped.
+pub(crate) trait Leaving {
+    /// The node.
     fn node(&self) -> NodeKey;
-    /// Reads the tap dry and sends it on.
+    /// Reads the tap dry and sends it on; nothing for what has no tap.
     fn drain(&mut self, timing: Option<&OutputTiming>);
 }
 
-/// Closes the `ports` whose handles were all dropped: what their taps held is
-/// sent first, and then their nodes leave the graph. Whether the graph was
-/// edited.
+/// A port or sink that retires when its handles are all dropped.
+pub(crate) trait Sweepable: Leaving {
+    /// Whether a handle lives.
+    fn is_held(&self) -> bool;
+    /// Moves the node's generation on, the drop that the node acknowledges once
+    /// the graph has rendered past it; the generation to wait on.
+    fn depart(&mut self) -> DeviceGeneration;
+}
+
+/// A port, a sink or an input node that is going: it left the session's tables
+/// and waits for the node's generation to go idle. The port closes only after
+/// the graph rendered past the drop and the tap was drained: it is dropped
+/// when [`settle`] takes the node out, and a device or sink closes with it.
+pub(crate) struct Retiring<P> {
+    pub(crate) port: P,
+    pub(crate) generation: DeviceGeneration,
+}
+
+/// The control side of an output node's generation: the node's half follows it
+/// ([`MidiOutNode::following`](tutti_midi_runtime::MidiOutNode::following)), and
+/// the drop of the last handle moves it on.
+#[derive(Debug)]
+pub(crate) struct Departure {
+    writer: GenerationWriter,
+    generation: DeviceGeneration,
+}
+
+impl Departure {
+    /// A generation with its node present, and the node's half.
+    pub(crate) fn new() -> (Self, DeviceGeneration) {
+        let (mut writer, generation) = DeviceGeneration::new();
+        writer.arrive();
+        let node = generation.clone();
+        (Self { writer, generation }, node)
+    }
+
+    /// The node's generation moved on, to wait on.
+    pub(crate) fn depart(&mut self) -> DeviceGeneration {
+        self.writer.depart();
+        self.generation.clone()
+    }
+}
+
+/// Moves the `ports` whose handles were all dropped to `retiring`, and settles
+/// what is retiring. Whether the graph was edited.
 pub(crate) fn sweep_dropped<P: Sweepable, F: Float>(
     ports: &mut Vec<P>,
+    retiring: &mut Vec<Retiring<P>>,
+    graph: &mut Graph<F>,
+    timing: Option<&OutputTiming>,
+) -> bool {
+    let mut at = 0;
+    while at < ports.len() {
+        if ports[at].is_held() {
+            at += 1;
+            continue;
+        }
+        let mut port = ports.remove(at);
+        let generation = port.depart();
+        retiring.push(Retiring { port, generation });
+    }
+    settle(retiring, graph, timing)
+}
+
+/// Sends what the taps of the `retiring` hold, and takes out the nodes the graph
+/// has rendered past the drop of (or a host removed itself): their ports close
+/// after a last drain. Whether the graph was edited.
+pub(crate) fn settle<P: Leaving, F: Float>(
+    retiring: &mut Vec<Retiring<P>>,
     graph: &mut Graph<F>,
     timing: Option<&OutputTiming>,
 ) -> bool {
     let mut edited = false;
-    ports.retain_mut(|port| {
-        let held = port.is_held();
-        if !held {
-            port.drain(timing);
+    retiring.retain_mut(|going| {
+        let node = going.port.node();
+        let done = going.generation.is_idle() || !graph.contains(node);
+        going.port.drain(timing);
+        if done {
             // A host that removed the node itself leaves nothing to take.
-            let _ = graph.remove(port.node());
+            let _ = graph.remove(node);
             edited = true;
         }
-        held
+        !done
     });
     edited
 }
@@ -1040,6 +1104,13 @@ impl MidiState {
         sinks || ports
     }
 
+    /// How a sweep outside an update times what it sends: by the `now` of the
+    /// last update, so it is placed as that update's drain would have been;
+    /// `None` before any update, and what is sent then goes at once.
+    pub(crate) fn sweep_timing(&self) -> Option<OutputTiming> {
+        self.last_now.and_then(|now| self.output_timing(now))
+    }
+
     /// `Phase::MidiOut`: drains every output's tap to its device or sink.
     /// Whether the graph was edited.
     pub(crate) fn midi_out_phase<F: Float>(&mut self, graph: &mut Graph<F>, now: Instant) -> bool {
@@ -1167,22 +1238,23 @@ impl<'a, F: Float> Midi<'a, F> {
 }
 
 impl<F: Float> Midi<'_, F> {
-    /// Closes the ports and sinks whose handles were all dropped, so a device
-    /// they held can be opened again by the call that follows. An input leaves
-    /// through [`Ports::retire`](crate::midi_port::Ports), which `update`'s poll
-    /// runs as well; an output or a sink leaves through the sweep that
-    /// `update`'s `Phase::MidiOut` runs as well, which first sends what its
-    /// node rendered before the drop (an event queued in the block just before
-    /// the drop can be lost). That final drain is timed by the `now` of the last
-    /// `update`, so it is placed as that update's drain would have been; before
-    /// any `update` there is no output clock and it is sent at once.
+    /// Retires the ports and sinks whose handles were all dropped, and ends the
+    /// ones the graph has rendered past. An input leaves through
+    /// [`Ports::retire`](crate::midi_port::Ports), which `update`'s poll runs as
+    /// well; an output or a sink through the sweep `update`'s `Phase::MidiOut`
+    /// runs as well. Each stays, its tap drained into its device or sink, until
+    /// the graph has rendered past the drop, so what was queued before the drop
+    /// is sent; then its node is taken out and its device or sink closes. A
+    /// device an output of the session still holds is the exception: opening it
+    /// again ends that output at once
+    /// (what the graph has not rendered is lost). The drain is timed by the
+    /// `now` of the last `update`, so it is placed as that update's drain would
+    /// have been; before any `update` there is no output clock and it is sent at
+    /// once.
     ///
     /// The graph edits go uncommitted here: the next `update` commits them.
     pub(crate) fn close_dropped(&mut self) {
-        let timing = self
-            .state
-            .last_now
-            .and_then(|now| self.state.output_timing(now));
+        let timing = self.state.sweep_timing();
         // The sweeps' `edited` results are not read: the graph is edited in
         // place, and the next `update` commits it.
         let _ = self.state.sinks.close_dropped(self.graph, timing.as_ref());
@@ -2051,10 +2123,12 @@ impl<F: Float> Midi<'_, F> {
     /// Adds an output node to the graph and opens its tap: the node is fed by
     /// the session's sync node (every output carries it), and the tap is aligned to
     /// the outputs' time so MIDI leaves with the audio. What a host wires to
-    /// the node's event input is read from the tap.
-    pub(crate) fn add_output_node(&mut self) -> (NodeKey, EventTapReader) {
+    /// the node's event input is read from the tap. The departure moves the node's
+    /// generation on when its last handle drops.
+    pub(crate) fn add_output_node(&mut self) -> (NodeKey, EventTapReader, Departure) {
+        let (departure, generation) = Departure::new();
         let (key, _) = self.graph.add(tutti_graph::ForkByClone(
-            tutti_midi_runtime::MidiOutNode::new(),
+            tutti_midi_runtime::MidiOutNode::new().following(&generation),
         ));
         let node = key.erase();
         if let Some(nodes) = self.nodes {
@@ -2070,7 +2144,7 @@ impl<F: Float> Midi<'_, F> {
                 MIDI_OUT_TAP_CAPACITY,
             )
             .expect("the output node is in the graph with its event output");
-        (node, tap)
+        (node, tap, departure)
     }
 
     /// The outputs' own latency and offset, a target of
