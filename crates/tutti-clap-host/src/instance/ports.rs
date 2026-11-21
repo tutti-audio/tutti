@@ -21,6 +21,8 @@ use tutti_buffers::{AmbisonicNormalization, AmbisonicOrdering, ChannelTopology};
 use tutti_plugin_types::MainThreadMarker;
 use tutti_units::Samples;
 
+use crate::TooManyNotePorts;
+
 /// CLAP's constant for `ordering`.
 const fn clap_ordering(ordering: AmbisonicOrdering) -> u32 {
     match ordering {
@@ -135,33 +137,49 @@ impl ClapLoaded {
             == Some(NoteDialect::Midi)
     }
 
-    /// For each input note port (at most 16, a UMP Group's worth), whether
-    /// notes to it go out as `clap_event_midi`: the same question as
+    /// For each input note port, whether notes to it go out as
+    /// `clap_event_midi`: the same question as
     /// [`sends_midi_notes`](Self::sends_midi_notes), asked of every port.
     /// Empty for a plugin with no input note port.
-    pub(crate) fn midi_note_ports(&self, main: MainThreadMarker) -> Vec<bool> {
-        let count = self.note_port_count(main, true).min(16);
-        (0..count)
+    ///
+    /// # Errors
+    ///
+    /// [`TooManyNotePorts`] when the plugin declares more than 16, before any
+    /// port is read.
+    pub(crate) fn midi_note_ports(
+        &self,
+        main: MainThreadMarker,
+    ) -> Result<Vec<bool>, TooManyNotePorts> {
+        let count = input_note_ports(self.note_port_count(main, true))?;
+        Ok((0..count)
             .map(|index| {
                 self.note_port_info(main, index, true)
                     .and_then(|port| port.dialect_to_send())
                     == Some(NoteDialect::Midi)
             })
-            .collect()
+            .collect())
     }
 
-    /// For each input note port (at most 16), whether it declares the MIDI
-    /// dialect (`CLAP_NOTE_DIALECT_MIDI` in `supported_dialects`), which
+    /// For each input note port, whether it declares the MIDI dialect
+    /// (`CLAP_NOTE_DIALECT_MIDI` in `supported_dialects`), which
     /// `clap_event_midi` and SysEx may be sent to. Empty for a plugin with no
     /// input note port: it declared no event it takes.
-    pub fn midi_capable_ports(&self, main: MainThreadMarker) -> Vec<bool> {
-        let count = self.note_port_count(main, true).min(16);
-        (0..count)
+    ///
+    /// # Errors
+    ///
+    /// [`TooManyNotePorts`] when the plugin declares more than 16 (one for each
+    /// UMP Group), before any port is read.
+    pub fn midi_capable_ports(
+        &self,
+        main: MainThreadMarker,
+    ) -> Result<Vec<bool>, TooManyNotePorts> {
+        let count = input_note_ports(self.note_port_count(main, true))?;
+        Ok((0..count)
             .map(|index| {
                 self.note_port_info(main, index, true)
                     .is_some_and(|port| port.supported_dialects.contains(NoteDialects::MIDI))
             })
-            .collect()
+            .collect())
     }
 
     /// Metadata for the note port at `index`, including supported dialects.
@@ -491,6 +509,37 @@ mod ambisonic_tests {
             assert_eq!(
                 ambisonic_of(CLAP_AMBISONIC_ORDERING_ACN, raw).map(|(_, n)| n),
                 Some(n)
+            );
+        }
+    }
+}
+
+/// The input note ports a plugin declares, when each has a UMP Group to be
+/// named by: refused before any port is read, so a count the plugin makes up
+/// is never walked.
+pub(crate) fn input_note_ports(count: u32) -> Result<u32, TooManyNotePorts> {
+    if count > u32::from(tutti_ump::MidiGroup::COUNT) {
+        return Err(TooManyNotePorts(count as usize));
+    }
+    Ok(count)
+}
+
+#[cfg(test)]
+mod note_port_count_tests {
+    use super::*;
+
+    /// **A declared count of input note ports past the 16 Groups is refused
+    /// from the number alone**, whatever it is (up to `u32::MAX`), and up to 16
+    /// is taken as it is.
+    #[test]
+    fn a_declared_count_past_sixteen_is_refused_before_any_port_is_read() {
+        for count in [0, 1, 16] {
+            assert_eq!(input_note_ports(count), Ok(count));
+        }
+        for count in [17, 1 << 20, u32::MAX] {
+            assert_eq!(
+                input_note_ports(count),
+                Err(TooManyNotePorts(count as usize))
             );
         }
     }

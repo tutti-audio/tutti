@@ -110,15 +110,46 @@ pub(crate) const FOLLOW_TAP_CAPACITY: tutti_graph::EventCapacity =
 /// [`Midi::follow_clock`](crate::Midi::follow_clock) and [`FollowClock`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FollowTempo {
-    /// The input port followed: its input node
-    /// (`MidiInput::node`).
-    pub input: tutti_graph::NodeKey,
-    /// The Group followed. A Group is a cable of its own (M2-104 §2.1.2,
-    /// Appendix B.1); the Group must be one the input hears
+    input: tutti_graph::NodeKey,
+    group: MidiGroup,
+    meter: bool,
+}
+
+impl FollowTempo {
+    /// Follows Set Tempo on `group` of the input port whose input node is
+    /// `input` (`MidiInput::node`). A Group is a cable of its own (M2-104
+    /// §2.1.2, Appendix B.1); the Group must be one the input hears
     /// ([`SessionBuilder::midi_groups`](crate::SessionBuilder::midi_groups)).
-    pub group: MidiGroup,
-    /// Whether Set Time Signature is followed too.
-    pub meter: bool,
+    #[must_use]
+    pub const fn new(input: tutti_graph::NodeKey, group: MidiGroup) -> Self {
+        Self {
+            input,
+            group,
+            meter: false,
+        }
+    }
+
+    /// Follows Set Time Signature too.
+    #[must_use]
+    pub const fn meter(mut self) -> Self {
+        self.meter = true;
+        self
+    }
+
+    /// The input node followed.
+    pub(crate) const fn input(&self) -> tutti_graph::NodeKey {
+        self.input
+    }
+
+    /// The Group followed.
+    pub(crate) const fn group(&self) -> MidiGroup {
+        self.group
+    }
+
+    /// Whether Set Time Signature is followed.
+    pub(crate) const fn follows_meter(&self) -> bool {
+        self.meter
+    }
 }
 
 /// How many events a clock follower's tap holds between two polls: Timing
@@ -135,15 +166,35 @@ pub(crate) const CLOCK_TAP_CAPACITY: tutti_graph::EventCapacity =
 /// session has one transport and one authority for its position.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FollowClock {
-    /// The input port followed: its input node
-    /// (`MidiInput::node`).
-    pub input: tutti_graph::NodeKey,
-    /// The Group followed. A Group is a cable of its own (M2-104 §2.1.2,
-    /// Appendix B.1); the Group must be one the input hears
+    input: tutti_graph::NodeKey,
+    group: MidiGroup,
+    kind: ClockKind,
+}
+
+impl FollowClock {
+    /// Follows the `kind` of clock that `group` carries on the input port whose
+    /// input node is `input` (`MidiInput::node`). A Group is a cable of its own
+    /// (M2-104 §2.1.2, Appendix B.1); the Group must be one the input hears
     /// ([`SessionBuilder::midi_groups`](crate::SessionBuilder::midi_groups)).
-    pub group: MidiGroup,
+    #[must_use]
+    pub const fn new(input: tutti_graph::NodeKey, group: MidiGroup, kind: ClockKind) -> Self {
+        Self { input, group, kind }
+    }
+
+    /// The input node followed.
+    pub(crate) const fn input(&self) -> tutti_graph::NodeKey {
+        self.input
+    }
+
+    /// The Group followed.
+    pub(crate) const fn group(&self) -> MidiGroup {
+        self.group
+    }
+
     /// Which clock it sends.
-    pub kind: ClockKind,
+    pub(crate) const fn kind(&self) -> ClockKind {
+        self.kind
+    }
 }
 
 /// How many events a Machine Control follower's tap holds between two polls:
@@ -160,16 +211,41 @@ pub(crate) const MACHINE_TAP_CAPACITY: tutti_graph::EventCapacity =
 /// [`FollowClock`] and never contends with it for the tempo map.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FollowMachineControl {
-    /// The input port followed: its input node
-    /// (`MidiInput::node`).
-    pub input: tutti_graph::NodeKey,
-    /// The Group followed. A Group is a cable of its own (M2-104 §2.1.2,
-    /// Appendix B.1); the Group must be one the input hears
+    input: tutti_graph::NodeKey,
+    group: MidiGroup,
+    device: SysexDeviceId,
+}
+
+impl FollowMachineControl {
+    /// Follows the commands `group` of the input port whose input node is
+    /// `input` (`MidiInput::node`) sends to `device`, this session's MMC device
+    /// ID: a command to it, to a group it was assigned to, or to the all-call
+    /// (`7F`, always accepted) is followed. A Group is a cable of its own
+    /// (M2-104 §2.1.2, Appendix B.1); the Group must be one the input hears
     /// ([`SessionBuilder::midi_groups`](crate::SessionBuilder::midi_groups)).
-    pub group: MidiGroup,
-    /// This session's MMC device ID. A command to it, to a group it was assigned
-    /// to, or to the all-call (`7F`, always accepted) is followed.
-    pub device: SysexDeviceId,
+    #[must_use]
+    pub const fn new(input: tutti_graph::NodeKey, group: MidiGroup, device: SysexDeviceId) -> Self {
+        Self {
+            input,
+            group,
+            device,
+        }
+    }
+
+    /// The input node followed.
+    pub(crate) const fn input(&self) -> tutti_graph::NodeKey {
+        self.input
+    }
+
+    /// The Group followed.
+    pub(crate) const fn group(&self) -> MidiGroup {
+        self.group
+    }
+
+    /// This session's MMC device ID.
+    pub(crate) const fn device(&self) -> SysexDeviceId {
+        self.device
+    }
 }
 
 /// The maps a follower overlays: the project's, and what the follower has

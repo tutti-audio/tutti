@@ -187,7 +187,7 @@ fn routed_level(channel: MidiChannel) -> f32 {
     s.graph()
         .connect(inlet.events_out(), EventInPort::new(input, 0))
         .unwrap();
-    let rule = MidiRouteRule::for_channel(channel).to(synth);
+    let rule = MidiRouteRule::new().channel(channel).to(synth);
     s.midi()
         .set_routes(input, [&rule], None, Some)
         .expect("one declarer");

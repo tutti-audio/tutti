@@ -53,11 +53,7 @@ fn rig_hearing(last: MidiGroup) -> (Keyed, FakeCounters) {
 fn follow(s: &mut Keyed, kind: ClockKind) {
     let input = s.input();
     s.midi()
-        .follow_clock(FollowClock {
-            input,
-            group: G,
-            kind,
-        })
+        .follow_clock(FollowClock::new(input, G, kind))
         .expect("follows");
     let _ = s.update();
 }
@@ -148,11 +144,7 @@ fn the_clock_of_the_chosen_group_is_followed_and_no_other() {
     let (mut s, fake) = rig_hearing(second);
     let input = s.input();
     s.midi()
-        .follow_clock(FollowClock {
-            input,
-            group: second,
-            kind: ClockKind::BeatClock,
-        })
+        .follow_clock(FollowClock::new(input, second, ClockKind::BeatClock))
         .expect("follows");
     let _ = s.update();
     send(&fake, system(System::Start), Instant::now());
@@ -318,11 +310,7 @@ fn a_beat_clock_follower_owns_the_tempo_and_mtc_does_not() {
     assert!(crate::tempo::set_tempo(&mut s, Bpm::of(100.0)).is_ok());
     let node = s.input();
     s.midi()
-        .follow_tempo(FollowTempo {
-            input: node,
-            group: G,
-            meter: false,
-        })
+        .follow_tempo(FollowTempo::new(node, G))
         .expect("MTC takes no tempo");
     s.midi().unfollow_tempo().unwrap();
 
@@ -333,11 +321,7 @@ fn a_beat_clock_follower_owns_the_tempo_and_mtc_does_not() {
             .kind,
         ValueErrorKind::Refused(SetRefusal::Following)
     );
-    let taken = s.midi().follow_tempo(FollowTempo {
-        input: node,
-        group: G,
-        meter: false,
-    });
+    let taken = s.midi().follow_tempo(FollowTempo::new(node, G));
     assert!(matches!(taken, Err(MidiError::TempoSourceTaken)));
 
     s.midi().unfollow_clock().expect("was following");

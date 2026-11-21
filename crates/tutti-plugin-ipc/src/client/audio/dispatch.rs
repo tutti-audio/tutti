@@ -1373,6 +1373,7 @@ fn file_news(inbox: &mut Unsolicited, news: News) {
             inbox.resync(ResyncKind::Io);
         }
         News::PluginReloaded => inbox.resync(ResyncKind::Reloaded),
+        News::PluginStateNotRestored { reason } => inbox.state_not_restored(reason),
         News::ProcessRequested => inbox.process_requested(),
         News::TransportRequested { request } => inbox.transport(request),
         // The server's editor is the remote editor's to hear of: no event of
