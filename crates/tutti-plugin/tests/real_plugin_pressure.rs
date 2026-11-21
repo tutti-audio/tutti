@@ -59,6 +59,10 @@
 // The harness drives the reference CLAP probe, so the whole file needs the
 // `clap` feature.
 #![cfg(feature = "clap")]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
 
 // The reference CLAP probe. `clap_probe` is the same module the out-of-process
 // CLAP suites use; it resolves the cdylib (a dev-dependency) and the

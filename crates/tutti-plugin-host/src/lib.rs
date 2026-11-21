@@ -16,6 +16,13 @@
 //! types. Nothing here is a dependency of either.
 
 #![forbid(unsafe_code)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "a test starts the threads it races"
+    )
+)]
 
 mod control_handle;
 mod controls;

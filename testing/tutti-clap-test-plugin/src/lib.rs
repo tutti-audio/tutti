@@ -22,6 +22,10 @@
 //!
 //! Single fake, single test process: a global is the simplest correct
 //! capture channel and is strictly test-only.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "test support: it starts the threads its tests race"
+)]
 
 use std::ffi::{CStr, c_char, c_void};
 use std::ptr;

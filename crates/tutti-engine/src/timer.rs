@@ -110,6 +110,11 @@ impl<F: Float> StreamDriver<F> for TimerDriver {
         // Sized here, on the control thread; the loop only fills it.
         let mut scratch = vec![F::ZERO; block.layout().interleaved_len(Samples::new(frames))];
         // A refusal of the priority leaves the thread at the default.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the deviceless audio clock: it paces and renders blocks against OS \
+                      deadlines, so it is no executor's task"
+        )]
         let thread = spawn_named("tutti-timer", Some(PriorityRequest::Highest), move |stop| {
             let time = OsTime;
             // The first block is due now and plays one block from now.

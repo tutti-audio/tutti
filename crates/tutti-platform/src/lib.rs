@@ -20,7 +20,8 @@
 //! - [`spawn_named`] — starts a named, optionally prioritised control-side
 //!   thread whose body gets a [`StopToken`]; its [`ThreadHandle`] stops and
 //!   joins on drop (or within a bound, `stop_within`) and reports a panic once
-//!   ([`Panicked`]); on the web it fails as `Unsupported`.
+//!   ([`Panicked`]); on the web it fails as `Unsupported`. Outside this crate clippy
+//!   refuses it (`disallowed-methods`), bar a real-time thread whose `#[expect]` says why.
 //! - [`Executor`] — where tutti's background work runs: a run queue and a deadline queue
 //!   that the caller's [`run_until_stalled`](Executor::run_until_stalled) and
 //!   [`try_tick`](Executor::try_tick), or the [`Threads`] of
@@ -74,6 +75,13 @@
 #![deny(missing_docs)]
 #![deny(unsafe_op_in_unsafe_fn)]
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "a test starts the threads it races"
+    )
+)]
 
 mod asset;
 mod clock;

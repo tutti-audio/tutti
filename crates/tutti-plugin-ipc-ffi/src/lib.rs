@@ -42,6 +42,13 @@
 //!   return, on every platform.
 //!
 //! It names no tutti crate.
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "a test starts the threads it races"
+    )
+)]
 
 #[cfg(unix)]
 mod descriptor;
