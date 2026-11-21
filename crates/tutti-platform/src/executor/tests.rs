@@ -865,5 +865,37 @@ fn join_on_a_driving_thread_panics_instead_of_waiting() {
     assert_eq!(joined_off_thread(joiner), None);
 }
 
+/// **`join_within` hands back a task that has not ended within the bound, and the task
+/// still runs**: a zero bound on a pending task returns it, and a later `join` gets its
+/// output once the test lets it end.
+#[test]
+fn join_within_hands_back_a_running_task_past_the_bound() {
+    let executor = Executor::new();
+    let (go, wait) = mpsc::channel::<u32>();
+    let task = executor
+        .spawn_dedicated("bounded", None, async move { wait.recv().unwrap() })
+        .unwrap();
+    let task = join_within(task, Duration::ZERO).expect_err("the task has not ended");
+    go.send(3).unwrap();
+    assert_eq!(joined_off_thread(task), Some(3));
+}
+
+/// **`join_within` returns a task's outcome once it ends within the bound**: its output,
+/// or `None` for a task its executor dropped.
+#[test]
+fn join_within_returns_the_outcome_of_a_task_that_ends() {
+    let executor = Executor::new();
+    let (go, wait) = mpsc::channel::<u32>();
+    let task = executor
+        .spawn_dedicated("ends", None, async move { wait.recv().unwrap() })
+        .unwrap();
+    go.send(8).unwrap();
+    assert_eq!(join_within(task, HANG_GUARD).ok(), Some(Some(8)));
+
+    let queued = executor.spawn(async { 1 });
+    drop(executor);
+    assert_eq!(join_within(queued, HANG_GUARD).ok(), Some(None));
+}
+
 #[cfg(target_os = "linux")]
 mod linux;
