@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use tutti_platform::Instant;
 
-use crate::pooled::{LoadPlugin, Spec};
+use crate::loading::{LoadPlugin, Spec};
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_plugin::PluginClient;

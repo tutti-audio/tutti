@@ -7,10 +7,10 @@
 //! `instrument`: the shared plugin's entry points do not link into the binary that links the
 //! reference probe, and that one is `instrument`'s neighbour.
 
-#[path = "../support/pooled.rs"]
-mod pooled;
+#[path = "../support/loading.rs"]
+mod loading;
 
-use crate::pooled::{LoadPlugin, Spec};
+use crate::loading::{LoadPlugin, Spec};
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_export::Produced;

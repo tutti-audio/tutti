@@ -7,7 +7,7 @@
 //! the reference plugin in process (a count that is the same figure in both
 //! hostings: lost MIDI).
 
-use crate::pooled::{LoadPlugin, Spec};
+use crate::loading::{LoadPlugin, Spec};
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_plugin_types::PluginRef;
@@ -47,7 +47,7 @@ mod clap {
 
     fn loaded(layout: Option<&str>) -> (Session, Key<AnyPlugin>) {
         // The plugin's file is probed before its variables are set.
-        crate::pooled::prime(&PluginRef::file(clap_probe()));
+        crate::loading::prime(&PluginRef::file(clap_probe()));
         set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
         if let Some(layout) = layout {
             set_env("TUTTI_CLAP_PROBE_PORT_LAYOUT", layout);

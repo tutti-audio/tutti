@@ -18,9 +18,7 @@
 tutti-rt  spawn_dedicated  crates/tutti-rt/src/bells/tick_thread.rs::Tick::start  core-foundation
 
 # core-engine
-tutti-cpal  spawn_dedicated  crates/tutti-cpal/src/listing.rs::DeviceListing::spawn_with  core-engine
 tutti-cpal  spawn_dedicated  crates/tutti-cpal/src/owner.rs::Owned::spawn  core-engine
-tutti-cpal  spawn_dedicated  crates/tutti-cpal/src/poller.rs::DevicePoller::spawn  core-engine
 tutti-session  spawn  crates/tutti-session/src/recorder.rs::Recorder::spawn  core-engine
 
 # plugin

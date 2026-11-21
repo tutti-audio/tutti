@@ -804,13 +804,12 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
     assert_eq!(after.take_lost(), Samples::new(0));
 }
 
-/// **The session lists the outputs once**, and a listing that could not
-/// start does not count: the first `list_outputs_once` whose listing starts
-/// is the only one `make` is asked for, and a `make` that fails is asked
-/// again by the next call. The device is one the host supplied, so
-/// `device_name` is `Ok(None)`, not an error.
+/// **The session lists the outputs once**: the first `list_outputs_once`
+/// starts its listing and the second starts nothing, so the second fake never
+/// runs. The device is one the host supplied, so `device_name` is `Ok(None)`,
+/// not an error.
 #[test]
-fn the_session_lists_the_outputs_once_and_retries_a_failed_start() {
+fn the_session_lists_the_outputs_once() {
     let (driver, _stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
         .device(Default::default())
@@ -822,19 +821,39 @@ fn the_session_lists_the_outputs_once_and_retries_a_failed_start() {
         "supplied, by design"
     );
 
-    let calls = std::cell::Cell::new(0);
-    let make = |fail: bool| {
-        calls.set(calls.get() + 1);
-        if fail {
-            Err(tutti_cpal::DeviceError::InvalidConfig("no thread".into()))
-        } else {
-            tutti_cpal::DeviceListing::spawn_with(|| Ok(Vec::new()))
-        }
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let fake = || {
+        let calls = std::sync::Arc::clone(&calls);
+        tutti_cpal::DeviceListing::from_fn(move || {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(Vec::new())
+        })
     };
-    assert!(session.list_outputs_once(|| make(true)).is_err());
-    session.list_outputs_once(|| make(false)).unwrap();
-    session.list_outputs_once(|| make(false)).unwrap();
-    assert_eq!(calls.get(), 2, "one failure, one start, then nothing");
+    session.list_outputs_once(fake());
+    let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(20);
+    while !session
+        .update()
+        .iter()
+        .any(|e| matches!(e, SessionEvent::Device(DeviceEvent::OutputsListed(_))))
+    {
+        assert!(tutti_platform::Instant::now() < deadline, "no list arrived");
+        std::thread::yield_now();
+    }
+    session.list_outputs_once(fake());
+    for _ in 0..3 {
+        assert!(
+            !session
+                .update()
+                .iter()
+                .any(|e| matches!(e, SessionEvent::Device(DeviceEvent::OutputsListed(_)))),
+            "a second listing answers"
+        );
+    }
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the second listing never starts"
+    );
 }
 
 /// A declared root is placed on the device it is declared for, and a restart to

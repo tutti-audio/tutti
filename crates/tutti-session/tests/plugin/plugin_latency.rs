@@ -10,7 +10,7 @@
 //! every test here fails, naming that command. They must fail rather than
 //! skip.
 
-use crate::pooled::{LoadPlugin, Spec};
+use crate::loading::{LoadPlugin, Spec};
 use crate::support;
 
 use tutti_buffers::MaxBlock;
@@ -166,7 +166,7 @@ fn request() -> Bounce<tutti_graph::NodeKey, BufferMaster> {
 #[test]
 fn a_latency_the_plugin_reports_reaches_the_graph() {
     // The plugin's file is probed before its variables are set.
-    crate::pooled::prime(&PluginRef::file(clap_probe()));
+    crate::loading::prime(&PluginRef::file(clap_probe()));
     // SAFETY: as `set_server`: before the first server, from the test's thread.
     unsafe { std::env::set_var("TUTTI_CLAP_PROBE_OFFLINE_EXTRA_LATENCY", "300") };
     let mut s = offline();
@@ -227,7 +227,7 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
     const OFFLINE_EXTRA: usize = 74;
     const OWN: usize = tutti_clap_test_plugin::REPORTED_LATENCY_SAMPLES as usize;
     // The plugin's file is probed before its variables are set.
-    crate::pooled::prime(&PluginRef::file(clap_probe()));
+    crate::loading::prime(&PluginRef::file(clap_probe()));
     // SAFETY: as `set_server`: before the first server, from the test's thread.
     unsafe {
         std::env::set_var(

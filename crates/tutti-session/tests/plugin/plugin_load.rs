@@ -42,7 +42,7 @@ fn second_id() -> PluginId {
 /// A catalog that scanned the reference bundle (both of its plugins), probed
 /// before the plugin's variables are set.
 fn catalog() -> (Catalog, tempfile::TempDir) {
-    let (catalog, _id, dir) = crate::pooled::catalog_of(&PluginRef::file(clap_probe()));
+    let (catalog, _id, dir) = crate::loading::catalog_of(&PluginRef::file(clap_probe()));
     (catalog, dir)
 }
 
@@ -92,7 +92,7 @@ fn a_load_gives_a_handle_whose_node_renders() {
         .run(tutti_fixtures::main_thread())
         .expect("the reference plugin loads");
     assert_eq!(
-        crate::pooled::clap_id(plugin.info().plugin()),
+        crate::loading::clap_id(plugin.info().plugin()),
         tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap(),
         "the plugin the id names, not the file's first"
     );

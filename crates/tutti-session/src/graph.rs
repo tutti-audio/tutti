@@ -909,7 +909,7 @@ impl Graph {
     /// and declares its latency in its `Shape`. Capture its controls first:
     /// the plugin is out of reach once inserted.
     ///
-    /// The session ticks the plugin's rebinder at each update, as a pooled
+    /// The session ticks the plugin's rebinder at each update, as a loaded
     /// plugin's: when the plugin changes its audio ports, a served one
     /// restarts into a new slab and the node at this key is replaced by one
     /// over the new ports.

@@ -406,20 +406,6 @@ pub enum LoadError {
     #[cfg(feature = "plugin")]
     #[error(transparent)]
     Unresolved(tutti_plugin_db::BindError),
-    /// The landed plugin has other ports than the node over the entry, which
-    /// keeps the plugin it has.
-    #[cfg(feature = "plugin")]
-    #[error("the plugin has {got} where its node has {was}")]
-    PluginPorts {
-        /// The landed plugin's ports.
-        got: crate::PluginPorts,
-        /// The node's.
-        was: crate::PluginPorts,
-    },
-    /// The graph refused the node's swap to the landed plugin.
-    #[cfg(feature = "plugin")]
-    #[error("the node could not swap to the landed plugin: {0}")]
-    PluginSwap(Arc<crate::CrossfadeRefused>),
     /// A load panicked (a decoder, a parser); `message` is the panic's, when it
     /// was a string.
     #[error("a load panicked: {message}")]

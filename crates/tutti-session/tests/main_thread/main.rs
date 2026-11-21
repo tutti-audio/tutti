@@ -17,10 +17,10 @@ mod support;
 #[path = "../support/param_reads.rs"]
 mod param_reads;
 
-// Loading a plugin file through the pool, as a test does where an app declares the entry.
+// Loading a plugin file, as a test does where an app runs the load.
 #[cfg(feature = "plugin")]
-#[path = "../support/pooled.rs"]
-mod pooled;
+#[path = "../support/loading.rs"]
+mod loading;
 
 // The handle of an in-process VST2 answers a pool thread while the main thread updates.
 #[cfg(feature = "vst2")]
@@ -30,10 +30,10 @@ mod vst2_off_main_handle;
 mod vst2_modulation;
 // A pool load's worker output when its session ends: dropped on the main thread, or leaked and counted.
 mod pool_main;
-// A plugin hosted in process, as a pool entry: its main-thread stage and the drop of its
-// main-affine parts. The reference CLAP plugin.
+// A plugin hosted in process through the session: the swap at a node, a restore, a port
+// change. The reference CLAP plugin.
 #[cfg(feature = "clap")]
-mod plugin_pool_main;
+mod plugin_in_process_main;
 // A plugin hosted in process, as a load: the handle's last clone closes it on the main thread.
 #[cfg(feature = "clap")]
 mod plugin_load_main;
@@ -70,7 +70,7 @@ fn main() {
     cases.extend_from_slice(main_work::CASES);
     cases.extend_from_slice(pool_main::CASES);
     #[cfg(feature = "clap")]
-    cases.extend_from_slice(plugin_pool_main::CASES);
+    cases.extend_from_slice(plugin_in_process_main::CASES);
     #[cfg(feature = "clap")]
     cases.extend_from_slice(plugin_load_main::CASES);
     cases.extend_from_slice(plugin_event_sources::CASES);

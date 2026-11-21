@@ -17,12 +17,6 @@ pub trait Sealed: tutti_rt::RingFloat {
         out: &mut Vec<SessionEvent>,
     );
 
-    /// Swaps the pooled plugins into their nodes: only an `f32` session
-    /// hosts plugins.
-    #[doc(hidden)]
-    #[cfg(feature = "plugin")]
-    fn swap_pooled_plugins<K: AppKey, C: Clock<Float = Self>>(session: &mut Session<K, C>);
-
     /// Announces the render mode to the hosted plugins: only an `f32` session
     /// hosts plugins, so an `f64` one has nobody to tell.
     #[doc(hidden)]
@@ -51,11 +45,6 @@ impl Sealed for f32 {
         let _ = (session, cx, out);
     }
 
-    #[cfg(feature = "plugin")]
-    fn swap_pooled_plugins<K: AppKey, C: Clock<Float = f32>>(session: &mut Session<K, C>) {
-        session.swap_pooled_plugins();
-    }
-
     fn announce_render_mode<K: AppKey, C: Clock<Float = f32>>(session: &mut Session<K, C>) {
         #[cfg(feature = "plugin")]
         session.render_mode_phase();
@@ -76,9 +65,6 @@ impl Sealed for f64 {
         _: &mut Vec<SessionEvent>,
     ) {
     }
-
-    #[cfg(feature = "plugin")]
-    fn swap_pooled_plugins<K: AppKey, C: Clock<Float = f64>>(_: &mut Session<K, C>) {}
 
     fn announce_render_mode<K: AppKey, C: Clock<Float = f64>>(_: &mut Session<K, C>) {}
 }

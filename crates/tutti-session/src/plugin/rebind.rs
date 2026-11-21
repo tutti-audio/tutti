@@ -1,4 +1,4 @@
-//! The node of a hosted plugin that keeps a rebinder (pooled, or inserted or
+//! The node of a hosted plugin that keeps a rebinder (loaded, or inserted or
 //! replaced through `Graph`) re-inserted when the plugin changes its ports.
 //!
 //! `Phase::Plugins` compares the ports such a plugin has now with the ones
@@ -37,7 +37,7 @@
 //! there, so the rebuild runs in an update that runs on it: `plugins_phase` does
 //! not tick an in-process plugin (only the editors' service does, for an open
 //! one), so this phase does, for each hosted plugin that keeps a rebinder
-//! (pooled, or inserted or replaced through `Graph`). A served plugin is
+//! (loaded, or inserted or replaced through `Graph`). A served plugin is
 //! ticked the same way: it restarts into a new slab, pipeline and node for its
 //! new buses.
 
@@ -68,7 +68,7 @@ pub enum PortsRefusal {
 
 /// `f32` because a plugin format is `f32` at its FFI.
 impl<K: crate::AppKey, C: Clock<Float = f32>> Session<K, C> {
-    /// Ticks each hosted plugin that keeps a rebinder (pooled, or inserted or
+    /// Ticks each hosted plugin that keeps a rebinder (loaded, or inserted or
     /// replaced through `Graph`); the tick is what reads a change of ports.
     /// Re-inserts the node of each whose ports changed. Called at the end of
     /// `Phase::Plugins`.

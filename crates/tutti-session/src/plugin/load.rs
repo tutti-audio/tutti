@@ -27,12 +27,12 @@ use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::{MainThreadMarker, PluginFailure, PluginId};
 use tutti_rt::LockExt;
 
-use super::entry::{Context, Install, PluginCause, PluginInfo, PluginPorts, Shared, Standing};
-use super::entry::{plugin_failed, ports_of};
+use super::opened::ports_of;
+use super::opened::{Context, Install, PluginCause, PluginInfo, PluginPorts, Shared, Standing};
 use super::{AnyPlugin, HostPlugin, Origin, PluginLoad};
 use crate::loaded::{Stamp, caught};
 use crate::peer::sealed;
-use crate::{CrossfadeRefused, GiveUp, Hold, Key, LoadError, NoSuchNode, Peer, PoolKey, Presence};
+use crate::{CrossfadeRefused, GiveUp, Key, LoadError, NoSuchNode, Peer, Presence};
 use crate::{OtherPeer, PeerState, ReplaceRefused, Resource, ResourceId, SavedPeer, Session};
 
 /// A plugin to open, built by [`Session::load_plugin`] and not yet run:
@@ -104,19 +104,19 @@ impl LoadPlugin {
             Ok(loadable) => loadable.clone().hosting(self.hosting),
             Err(unresolved) => return Err(LoadError::Unresolved(unresolved.clone())),
         };
-        tutti_plugin::catalog::placement(&loadable).map_err(plugin_failed)?;
         let stamp = Stamp::take(Asset::from(loadable.plugin().path()));
         let cx = self.cx;
         let request = PluginLoad {
-            loadable,
+            loadable: loadable.clone(),
             rate: cx.rate,
             config: AudioConfig::default(),
             state: self.state,
             work: cx.work.clone(),
             executor: cx.executor.clone(),
         };
-        let (loadable, config, open) = request.run().finish(Some(main));
-        let shared = Shared::new(&cx, stamp, open, loadable, config, Some(main))?;
+        let config = request.config.clone();
+        let open = request.run_on(main);
+        let shared = Shared::new(&cx, stamp, open, loadable, config, main)?;
         Ok(LoadedPlugin {
             shared: Arc::new(shared),
         })
@@ -309,7 +309,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             return Err(AddPluginError::Installed);
         };
         let (key, rebinder) = self.install_plugin(opened, mirror, origin);
-        self.link_node(key, NodeLink::of_handle(plugin), rebinder);
+        self.link_node(key, NodeLink::of(plugin), rebinder);
         Ok(key)
     }
 
@@ -365,72 +365,41 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         let rebinder = self
             .swap_installed(node.erase(), opened, origin)
             .map_err(|refused| SwapPluginError::Graph(Arc::new(refused)))?;
-        self.link_node(node, NodeLink::of_handle(plugin), rebinder);
+        self.link_node(node, NodeLink::of(plugin), rebinder);
         Ok(())
     }
 }
 
-/// What a node's record keeps of the plugin it is over: its standing, and the
-/// claim that keeps the plugin's owner alive while the node lives. Dropped with
-/// the node's record.
+/// What a node's record keeps of the plugin it is over: the handle the plugin
+/// was loaded as, a clone the node holds until its record retires, and with it
+/// the plugin's standing. Dropped with the node's record.
 pub(crate) struct NodeLink {
-    standing: Arc<Standing>,
-    keeps: Keeps,
-}
-
-/// What keeps a plugin's owner alive while its node does.
-enum Keeps {
-    /// The pool entry the plugin loaded through: its hold.
-    Entry { key: PoolKey, hold: Hold },
-    /// The handle the plugin was loaded as: the node's own clone.
-    Handle { _plugin: LoadedPlugin },
+    plugin: LoadedPlugin,
 }
 
 impl NodeLink {
-    fn of_handle(plugin: LoadedPlugin) -> Self {
-        Self {
-            standing: Arc::clone(&plugin.shared.standing),
-            keeps: Keeps::Handle { _plugin: plugin },
-        }
+    fn of(plugin: LoadedPlugin) -> Self {
+        Self { plugin }
     }
 
-    pub(super) fn of_entry(key: PoolKey, hold: Hold, standing: Arc<Standing>) -> Self {
-        Self {
-            standing,
-            keeps: Keeps::Entry { key, hold },
-        }
-    }
-
-    /// The pool entry the node is over, if it is over one.
-    pub(super) fn entry_key(&self) -> Option<&PoolKey> {
-        match &self.keeps {
-            Keeps::Entry { key, .. } => Some(key),
-            Keeps::Handle { .. } => None,
-        }
-    }
-
-    /// The hold of the pool entry the node is over.
-    pub(super) fn hold(&self) -> Option<Hold> {
-        match &self.keeps {
-            Keeps::Entry { hold, .. } => Some(hold.clone()),
-            Keeps::Handle { .. } => None,
-        }
+    fn standing(&self) -> &Standing {
+        &self.plugin.shared.standing
     }
 
     /// Recovery gave up on the plugin.
     pub(crate) fn gave_up(&self, why: GiveUp) {
-        *self.standing.gave_up.lock_recover() = Some(why);
+        *self.standing().gave_up.lock_recover() = Some(why);
     }
 
     /// The session saw the plugin's bridge dead, for `failure`.
     pub(crate) fn died(&self, failure: PluginFailure) {
-        self.standing.dead.lock_recover().get_or_insert(failure);
+        self.standing().dead.lock_recover().get_or_insert(failure);
     }
 }
 
 impl Drop for NodeLink {
     fn drop(&mut self) {
-        self.standing.hosted.store(false, Ordering::Release);
+        self.standing().hosted.store(false, Ordering::Release);
     }
 }
 
@@ -484,8 +453,8 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         link: NodeLink,
         rebinder: tutti_plugin::catalog::PluginRebinder,
     ) {
-        link.standing.hosted.store(true, Ordering::Release);
-        link.standing.release_handle();
+        link.standing().hosted.store(true, Ordering::Release);
+        link.standing().release_handle();
         if let Some(hosted) = self.graph.plugins.get_mut(&node.erase()) {
             hosted.link = Some(link);
             hosted.set_rebinder(rebinder);

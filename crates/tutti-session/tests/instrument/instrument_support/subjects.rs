@@ -1,6 +1,6 @@
 //! The three instruments, as subjects.
 
-use crate::pooled::{LoadPlugin, Spec};
+use crate::loading::{LoadPlugin, Spec};
 use tutti_music::Adsr;
 use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};
 use tutti_session::AddedInstrument;

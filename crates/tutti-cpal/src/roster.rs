@@ -222,7 +222,7 @@ impl DeviceRoster {
 }
 
 /// Something that yields snapshots of the host without blocking:
-/// [`DevicePoller`](crate::DevicePoller) on a machine, a fake in a test.
+/// the session's feed from a [`DevicePoller`](crate::DevicePoller) on a machine, a fake in a test.
 pub trait SnapshotSource {
     /// The newest snapshot not yet taken, or `None`. Never blocks.
     fn poll(&mut self) -> Option<Snapshot>;

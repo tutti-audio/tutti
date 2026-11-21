@@ -258,7 +258,6 @@ tutti-session  with-prefix  crates/tutti-session/src/session/phases.rs::PhaseCx:
 tutti-session  chain-result  crates/tutti-session/src/bounce.rs::Bounce::try_map
 tutti-session  chain-result  crates/tutti-session/src/bounce.rs::Stem::try_map
 tutti-session  chain-result  crates/tutti-session/src/key.rs::Connection::gain
-tutti-session  chain-result  crates/tutti-session/src/plugin/entry.rs::PluginDeclaration::initial_state
 tutti-session  chain-result  crates/tutti-session/src/plugin/load.rs::LoadPlugin::initial_state
 tutti-session  chain-result  crates/tutti-session/src/take.rs::Punch::until
 tutti-session  chain-result  crates/tutti-session/src/take.rs::Take::rolling

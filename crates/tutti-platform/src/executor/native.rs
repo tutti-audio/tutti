@@ -15,7 +15,7 @@ use std::num::NonZeroUsize;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::{Pin, pin};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread::{self, Thread, ThreadId};
 use std::time::Duration;
@@ -182,7 +182,7 @@ impl Wake for Unpark {
 /// `timers`, runs the tasks `queue` has ready one at a time, and parks until a task is
 /// scheduled or the next deadline. `stopped` is read after every task and every wake, and
 /// whoever sets it unparks every registered thread.
-fn drive(queue: &async_executor::Executor<'static>, timers: &Timers, stopped: &dyn Fn() -> bool) {
+fn drive(queue: &impl Queue, timers: &Timers, stopped: &dyn Fn() -> bool) {
     let _driving = Driving::enter();
     let thread = thread::current();
     timers.parked.register(thread.clone());
@@ -215,6 +215,24 @@ fn drive(queue: &async_executor::Executor<'static>, timers: &Timers, stopped: &d
         }
     }
     timers.parked.forget(thread.id());
+}
+
+/// A run queue [`drive`] runs: the shared one, or a dedicated thread's local one.
+trait Queue {
+    /// Runs one ready task, waiting for one when none is.
+    fn tick(&self) -> impl Future<Output = ()> + '_;
+}
+
+impl Queue for async_executor::Executor<'static> {
+    fn tick(&self) -> impl Future<Output = ()> + '_ {
+        async_executor::Executor::tick(self)
+    }
+}
+
+impl Queue for async_executor::LocalExecutor<'static> {
+    fn tick(&self) -> impl Future<Output = ()> + '_ {
+        async_executor::LocalExecutor::tick(self)
+    }
 }
 
 /// How long a stop waits, in all, for the threads it stops to end. A thread still
@@ -343,7 +361,6 @@ pub(super) fn spawn_dedicated<T: Send + 'static>(
     priority: Option<PriorityRequest>,
     future: impl Future<Output = T> + Send + 'static,
 ) -> io::Result<Task<T>> {
-    let handle = &executor.handle;
     let finished = Arc::new(Finished {
         done: AtomicBool::new(false),
         thread: OnceLock::new(),
@@ -354,12 +371,72 @@ pub(super) fn spawn_dedicated<T: Send + 'static>(
         let _guard = guard;
         future.await
     });
+    start_dedicated(
+        executor,
+        name,
+        priority,
+        finished,
+        move |shared, stopped| {
+            drive(&*queue, &shared.timers, stopped);
+        },
+    )?;
+    Ok(task)
+}
+
+/// Starts a thread named `name` that builds `make`'s future on itself and drives only
+/// it, and returns its [`Task`] once the thread has spawned it.
+pub(super) fn spawn_dedicated_local<T, F>(
+    executor: &Executor,
+    name: &str,
+    priority: Option<PriorityRequest>,
+    make: impl FnOnce() -> F + Send + 'static,
+) -> io::Result<Task<T>>
+where
+    T: Send + 'static,
+    F: Future<Output = T> + 'static,
+{
+    let finished = Arc::new(Finished {
+        done: AtomicBool::new(false),
+        thread: OnceLock::new(),
+    });
+    let guard = EndGuard(Arc::clone(&finished));
+    let (spawned, task) = mpsc::sync_channel(1);
+    start_dedicated(
+        executor,
+        name,
+        priority,
+        finished,
+        move |shared, stopped| {
+            let queue = async_executor::LocalExecutor::new();
+            let _ = spawned.send(queue.spawn(async move {
+                let _guard = guard;
+                make().await
+            }));
+            drive(&queue, &shared.timers, stopped);
+        },
+    )?;
+    // The thread sends the task before it drives: a thread that ends before sending has
+    // panicked, which the dedicated set already records.
+    task.recv()
+        .map_err(|_| io::Error::other("the dedicated thread ended before its task"))
+}
+
+/// Spawns the dedicated thread for `finished`'s future, running `body` with the executor
+/// it shares and its stop condition, and records it in the executor's dedicated set.
+fn start_dedicated(
+    executor: &Executor,
+    name: &str,
+    priority: Option<PriorityRequest>,
+    finished: Arc<Finished>,
+    body: impl FnOnce(&Shared, &dyn Fn() -> bool) + Send + 'static,
+) -> io::Result<()> {
+    let handle = &executor.handle;
     let id = Arc::new(OnceLock::new());
     let (shared, id_slot) = (Arc::clone(&handle.shared), Arc::clone(&id));
     let thread = spawn_named(name, priority, move |stop| {
         let _ = id_slot.set(thread::current().id());
         let _ = finished.thread.set(thread::current());
-        drive(&queue, &shared.timers, &|| {
+        body(&shared, &|| {
             stop.is_stopped() || finished.done.load(Ordering::Acquire)
         });
     })?;
@@ -369,5 +446,5 @@ pub(super) fn spawn_dedicated<T: Send + 'static>(
     let mut dedicated = lock(&handle.own.dedicated);
     dedicated.retain(|worker| !worker.handle.is_finished());
     dedicated.push(Worker { handle: thread, id });
-    Ok(task)
+    Ok(())
 }

@@ -1,84 +1,95 @@
-//! The OS side of device watching: a thread that enumerates the host and
-//! publishes what it finds.
+//! The OS side of device watching: a value whose blocking step looks at the host.
 //!
 //! cpal 0.15 has no change notification on any host, and enumeration can
-//! block (ALSA probes cards, WASAPI enumerates endpoints). So it runs on a
-//! thread of its own, never the audio thread and never inside
-//! `Session::update`, which only takes the newest result
-//! ([`SnapshotSource::poll`]).
+//! block (ALSA probes cards, WASAPI enumerates endpoints). So a look is a
+//! blocking step the caller runs off its queue: the session's loop runs it on
+//! the executor's blocking pool, never on the audio thread and never inside
+//! `Session::update`.
 
-use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
-use tutti_platform::StopToken;
 
-use crate::error::{DeviceError, Result};
+use crate::error::Result;
 use crate::host::{AudioHost, DeviceHost};
-use crate::roster::{Snapshot, SnapshotSource};
+use crate::roster::Snapshot;
 
 /// The shortest interval a poller keeps: enumeration can open every device.
 pub const MIN_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
-/// A thread enumerating one host every `interval` (at least
-/// [`MIN_POLL_INTERVAL`]).
+/// One host looked at every `interval` (at least [`MIN_POLL_INTERVAL`]).
 ///
-/// Only a snapshot that differs from the one before it is published. The
-/// thread opens its own [`DeviceHost`] and ends once the poller drops (after
-/// the enumeration it may be in the middle of; dropping never waits for it).
+/// It holds no thread or task: [`look`](Self::look) is the blocking step and
+/// the caller owns the cadence ([`interval`](Self::interval)). Only a
+/// snapshot that differs from the one before it is returned.
 #[derive(Debug)]
 pub struct DevicePoller {
-    snapshots: Receiver<Snapshot>,
-    /// Stopped when the poller drops: the thread's wait ends, and so does it.
-    stop: StopToken,
-}
-
-impl Drop for DevicePoller {
-    fn drop(&mut self) {
-        self.stop.stop();
-    }
+    host: AudioHost,
+    interval: Duration,
+    opened: Option<DeviceHost>,
+    last: Option<Snapshot>,
 }
 
 impl DevicePoller {
-    /// Starts polling `host` every `interval`, the first look at once.
+    /// A poller of `host` that looks every `interval`, at least
+    /// [`MIN_POLL_INTERVAL`]. Nothing is opened until the first
+    /// [`look`](Self::look).
+    #[must_use]
+    pub fn new(host: AudioHost, interval: Duration) -> Self {
+        Self {
+            host,
+            interval: interval.max(MIN_POLL_INTERVAL),
+            opened: None,
+            last: None,
+        }
+    }
+
+    /// The time between looks.
+    #[must_use]
+    pub fn interval(&self) -> Duration {
+        self.interval
+    }
+
+    /// Looks at the host: the snapshot when it differs from the last one
+    /// returned (the first look always), else `None`. The first call opens the
+    /// host, and a failed open is tried again by the next call.
+    ///
+    /// **Blocks** for one enumeration, which can wait on a sound server for
+    /// good: run it off any queue thread (the session runs it on the
+    /// executor's blocking pool).
     ///
     /// # Errors
-    /// [`DeviceError::HostUnavailable`] when the host cannot be opened, or
-    /// [`DeviceError::InvalidConfig`] when the thread cannot be spawned.
-    pub fn spawn(host: AudioHost, interval: Duration) -> Result<Self> {
-        let interval = interval.max(MIN_POLL_INTERVAL);
-        // Opened here to report an unreachable host to the caller; the thread
-        // opens its own, so no host crosses a thread.
-        DeviceHost::open(host)?;
-        let (tx, snapshots) = mpsc::channel();
-        // Detached: dropping the poller stops it without waiting on an
-        // enumeration in progress.
-        let thread = tutti_platform::spawn_named("tutti-device-poll", None, move |stop| {
-            let Ok(host) = DeviceHost::open(host) else {
-                return;
-            };
-            let mut last: Option<Snapshot> = None;
-            loop {
-                if let Ok(snap) = host.snapshot()
-                    && last.as_ref() != Some(&snap)
-                {
-                    last = Some(snap.clone());
-                    if tx.send(snap).is_err() {
-                        return;
-                    }
-                }
-                if stop.wait(interval) {
-                    return;
-                }
-            }
-        })
-        .map_err(|e| DeviceError::InvalidConfig(format!("cannot start the device poller: {e}")))?;
-        let stop = thread.token();
-        thread.detach();
-        Ok(Self { snapshots, stop })
+    /// [`DeviceError::HostUnavailable`](crate::DeviceError::HostUnavailable)
+    /// when the host cannot be opened,
+    /// [`DeviceError::DevicesError`](crate::DeviceError::DevicesError) when it
+    /// cannot enumerate.
+    pub fn look(&mut self) -> Result<Option<Snapshot>> {
+        let host = match &self.opened {
+            Some(host) => host,
+            None => self.opened.insert(DeviceHost::open(self.host)?),
+        };
+        let snapshot = host.snapshot()?;
+        if self.last.as_ref() == Some(&snapshot) {
+            return Ok(None);
+        }
+        self.last = Some(snapshot.clone());
+        Ok(Some(snapshot))
     }
 }
 
-impl SnapshotSource for DevicePoller {
-    fn poll(&mut self) -> Option<Snapshot> {
-        self.snapshots.try_iter().last()
+const _: () = {
+    const fn is_send<T: Send>() {}
+    is_send::<DevicePoller>();
+};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An interval under the minimum is raised to it, and a longer one is kept.
+    #[test]
+    fn the_interval_is_at_least_the_minimum() {
+        let short = DevicePoller::new(AudioHost::Default, Duration::from_millis(1));
+        assert_eq!(short.interval(), MIN_POLL_INTERVAL);
+        let long = DevicePoller::new(AudioHost::Default, Duration::from_secs(3));
+        assert_eq!(long.interval(), Duration::from_secs(3));
     }
 }

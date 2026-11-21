@@ -9,10 +9,10 @@ mod support;
 #[path = "../support/param_reads.rs"]
 mod param_reads;
 
-// Loading a plugin file through the pool, as a test does where an app declares the entry.
+// Loading a plugin file, as a test does where an app runs the load.
 #[cfg(feature = "plugin")]
-#[path = "../support/pooled.rs"]
-mod pooled;
+#[path = "../support/loading.rs"]
+mod loading;
 
 // Hosted plugins, their render mode and exports, over the reference CLAP
 // plugin in a real `plugin-server`: fails without the server, by design.
@@ -34,10 +34,10 @@ mod plugin_identity;
 // the reference CLAP plugin in a real `plugin-server`.
 #[cfg(all(feature = "clap", feature = "device"))]
 mod plugin_executor_drop;
-// A plugin as a pool entry, served: lands, swaps, is lost and retried, and held by its node:
+// A served plugin through the session: lost, recovered, saved, and swapped at its node:
 // the reference CLAP bundle in a real `plugin-server`.
 #[cfg(feature = "clap")]
-mod plugin_pool;
+mod plugin_served;
 // A plugin as a load: a handle, a node from it, and the plugin closing with the last clone:
 // the reference CLAP bundle in a real `plugin-server`.
 #[cfg(feature = "clap")]

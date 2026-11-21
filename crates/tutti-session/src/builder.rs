@@ -894,7 +894,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// [`no_plugin_recovery`](Self::no_plugin_recovery) for a host that decides itself.
     ///
     /// It covers out-of-process plugins loaded through the session's load
-    /// path ([`Session::add_pooled_plugin`](crate::Session::add_pooled_plugin)). It does not
+    /// path ([`Session::add_plugin`](crate::Session::add_plugin)). It does not
     /// cover an in-process VST2 plugin (its crash takes the process, and a
     /// hang in it is not observed), nor one a host inserted itself with
     /// `Graph::insert_plugin` (the session does not know its path): those are
@@ -906,7 +906,7 @@ impl<C: Clock> SessionBuilder<C> {
         self
     }
 
-    /// A hosted plugin's death or hang is not recovered: a pooled plugin's node
+    /// A hosted plugin's death or hang is not recovered: a loaded plugin's node
     /// stays silent at its key and the entry reads lost, and a node of a plugin
     /// the host inserted itself is removed
     /// ([`PluginChange::Died`](crate::PluginChange::Died)); the host decides, a
@@ -1080,7 +1080,7 @@ impl<C: Clock> SessionBuilder<C> {
                 Arc::clone(&table),
             ),
             sampler,
-            devices: Default::default(),
+            devices: crate::session::parts::DevicePart::new(&executor),
             inputs: crate::session::parts::Inputs::from_options(&mut self.opts),
             bounce: Default::default(),
             jobs: crate::jobs::Jobs::new(executor, parts.drive, bells),

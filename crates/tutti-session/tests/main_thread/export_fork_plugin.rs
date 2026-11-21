@@ -8,7 +8,7 @@
 //! not a dev-dependency (a cycle through `tutti-plugin`), and without it every
 //! test here fails, naming that command. They must fail rather than skip.
 
-use crate::pooled::{LoadPlugin, Spec};
+use crate::loading::{LoadPlugin, Spec};
 use crate::support;
 use tutti_session::Root;
 
@@ -98,7 +98,7 @@ fn session_with_probe_at(
     hosting: Hosting,
 ) -> (DetachedSession, NodeKey, ScopedEnv) {
     // The plugin's file is probed before its variables are set.
-    crate::pooled::prime(&PluginRef::file(&path));
+    crate::loading::prime(&PluginRef::file(&path));
     let mut env = ScopedEnv::new();
     env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     env.set("TUTTI_CLAP_PROBE_RENDER_MODE", mode.to_string());
