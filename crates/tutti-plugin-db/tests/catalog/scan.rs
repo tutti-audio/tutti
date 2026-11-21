@@ -3,32 +3,21 @@
 //! `clap`, the reference plugin; `cargo build -p tutti-plugin-probe` first, or
 //! the scan degrades to filename metadata, which still lists the file).
 
-use tutti_plugin_db::{Catalog, CatalogConfig, PluginDb, Scan, ScanPoll, ScanResult};
+use tutti_plugin_db::{Catalog, CatalogConfig, PluginDb, ScanPlugins, ScanReport};
 use tutti_plugin_types::Locator;
 use tutti_plugin_types::PluginRef;
 
-/// Applies `task` as it arrives until it ends, and returns its result; the wait
-/// is bounded by a hang guard.
-fn finish(catalog: &mut Catalog, mut task: Scan) -> ScanResult {
-    let mut result = None;
-    tutti_fixtures::wait_until(
-        "the task to end",
-        std::time::Duration::from_secs(120),
-        || match catalog.try_apply(&mut task) {
-            ScanPoll::Running => false,
-            ScanPoll::Done(done) => {
-                result = Some(done);
-                true
-            }
-            ScanPoll::Died => panic!("the task's worker died"),
-        },
-    );
-    result.expect("the wait ended on a result")
+/// Runs `task` to its end and applies it, returning its report. The probe's own
+/// deadline bounds the run.
+fn finish(catalog: &mut Catalog, task: ScanPlugins) -> ScanReport {
+    catalog
+        .apply(task.run())
+        .expect("the output of this catalog's own scan")
 }
 
 /// Runs a scan of the catalog's directories to its end.
-fn scan(catalog: &mut Catalog) -> ScanResult {
-    let task = catalog.scan().expect("no task is running");
+fn scan(catalog: &mut Catalog) -> ScanReport {
+    let task = catalog.scan().expect("no scan is held");
     finish(catalog, task)
 }
 
@@ -148,8 +137,8 @@ fn measure_measures_a_plugin_a_scan_left_unmeasured() {
     assert!(descriptor.measured.is_some());
 }
 
-/// **`register` adds a plugin outside the scanned directories** as a task: the
-/// row arrives through `try_apply`, not in the call.
+/// **`register` adds a plugin outside the scanned directories** as a scan: the
+/// row arrives through `apply` of the run's output, not in the call.
 #[test]
 fn register_delivers_the_row_of_a_file_outside_the_scanned_directories() {
     let dir = tempfile::TempDir::new().expect("a scratch directory");
@@ -197,6 +186,7 @@ mod stand_in_probe {
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use std::time::Duration;
+    use tutti_plugin_db::{ScanBusy, ScanOutcome, ScannedPlugins};
     use tutti_plugin_types::{ProbeDeath, ProbeError};
 
     /// A catalog over one plugin file whose probe is the script `body`, which
@@ -259,17 +249,22 @@ mod stand_in_probe {
             .to_owned()
     }
 
-    /// Drops `task` on a thread: a hang guard, so a drop that waits for the
-    /// probe fails instead of hanging the suite.
-    fn dropped_within_the_guard<T: Send + 'static>(task: T) {
+    /// Runs `task` on a thread, cancels it once its probe is running and returns
+    /// the output with the probe's pid. A hang guard fails a run that does not
+    /// return after the cancel instead of hanging the suite.
+    fn cancelled_in_flight(task: ScanPlugins, pid_file: &Path) -> (ScannedPlugins, String) {
+        let canceller = task.canceller();
         let (done, returned) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            drop(task);
-            let _ = done.send(());
+            let _ = done.send(task.run());
         });
-        returned
+        let pid = running_pid(pid_file);
+        assert!(alive(&pid));
+        canceller.cancel();
+        let scanned = returned
             .recv_timeout(Duration::from_secs(60))
-            .expect("the drop never returned");
+            .expect("the run never returned after the cancel");
+        (scanned, pid)
     }
 
     fn alive(pid: &str) -> bool {
@@ -281,38 +276,66 @@ mod stand_in_probe {
             .success()
     }
 
-    /// **Dropping a scan kills the probe in flight**: the probe hangs for ten
-    /// minutes, and when the drop returns the child is gone and the pedal
+    /// **Cancelling a scan kills the probe in flight**: the probe hangs for ten
+    /// minutes, and when `run` returns the child is gone, its file is
+    /// `Cancelled` and not blacklisted, the sentinel is removed and the pedal
     /// released.
     #[test]
-    fn dropping_a_scan_kills_a_stuck_probe() {
+    fn cancelling_a_scan_kills_a_stuck_probe() {
         let dir = tempfile::TempDir::new().expect("a scratch directory");
-        let (mut catalog, _, pid_file) = catalog_probed_by(&dir, HANG, None);
+        let (mut catalog, file, pid_file) = catalog_probed_by(&dir, HANG, None);
 
-        let task = catalog.scan().expect("no task is running");
-        let pid = running_pid(&pid_file);
-        assert!(alive(&pid));
+        let task = catalog.scan().expect("no scan is held");
+        let (scanned, pid) = cancelled_in_flight(task, &pid_file);
 
-        dropped_within_the_guard(task);
-
-        assert!(!alive(&pid), "the probe (pid {pid}) outlived the drop");
-        assert!(catalog.scan().is_ok(), "the drop released the pedal");
+        assert!(!alive(&pid), "the probe (pid {pid}) outlived the cancel");
+        let report = catalog.apply(scanned).expect("this catalog's scan");
+        assert!(report.cancelled());
+        assert_eq!(
+            report
+                .files()
+                .iter()
+                .map(|f| &f.outcome)
+                .collect::<Vec<_>>(),
+            [&ScanOutcome::Cancelled]
+        );
+        assert!(
+            !catalog.is_blacklisted(&file),
+            "a cancel blacklists nothing"
+        );
+        assert!(
+            !CatalogConfig::new(dir.path()).pedal_path().exists(),
+            "the sentinel outlived the cancel"
+        );
+        assert!(catalog.scan().is_ok(), "the run released the pedal");
     }
 
-    /// **Dropping a measure task kills its probe as well**: a measurement's
+    /// **Cancelling a measurement kills its probe as well**: a measurement's
     /// deadline is three minutes.
     #[test]
-    fn dropping_a_measure_kills_a_stuck_probe() {
+    fn cancelling_a_measure_kills_a_stuck_probe() {
         let dir = tempfile::TempDir::new().expect("a scratch directory");
         let (mut catalog, file, pid_file) = catalog_probed_by(&dir, HANG, None);
         let plugin = PluginRef::file(file);
 
         let task = catalog.measure(&plugin, None).expect("a file that exists");
-        let pid = running_pid(&pid_file);
+        let (_, pid) = cancelled_in_flight(task, &pid_file);
 
-        dropped_within_the_guard(task);
+        assert!(!alive(&pid), "the probe (pid {pid}) outlived the cancel");
+    }
 
-        assert!(!alive(&pid), "the probe (pid {pid}) outlived the drop");
+    /// **An unrun scan holds the pedal until it drops**, and probes nothing: a
+    /// second scan is `ScanBusy` while it is held and starts after the drop.
+    #[test]
+    fn an_unrun_scan_holds_the_pedal_until_it_drops() {
+        let dir = tempfile::TempDir::new().expect("a scratch directory");
+        let (mut catalog, _, _) = catalog_probed_by(&dir, HANG, None);
+
+        let held = catalog.scan().expect("no scan is held");
+        assert!(matches!(catalog.scan(), Err(ScanBusy)));
+        drop(held);
+
+        assert!(catalog.scan().is_ok(), "the drop released the pedal");
     }
 
     /// **A registration of a plugin that crashes its probe blacklists it**, as a
@@ -348,8 +371,11 @@ mod stand_in_probe {
             catalog_probed_by(&dir, HANG, Some(Duration::from_secs(5)));
 
         let task = catalog.register(&file).expect("a plugin file");
+        let runner = std::thread::spawn(move || task.run());
         running_pid(&pid_file);
-        let result = finish(&mut catalog, task);
+        let result = catalog
+            .apply(runner.join().expect("the run does not panic"))
+            .expect("this catalog's scan");
 
         let failures = result.failures();
 

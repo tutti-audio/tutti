@@ -30,7 +30,7 @@ use std::path::PathBuf;
 
 use tutti::midi::{Address, Message, MidiChannel, NoteNumber, TimedMidiEvent, U7, Ump, Voice1};
 use tutti::plugin::PresetSupport;
-use tutti::plugin::catalog::{CatalogConfig, PluginDb, ScanPoll};
+use tutti::plugin::catalog::{CatalogConfig, PluginDb};
 use tutti::session::Peer as _;
 use tutti::{
     Beat, Bounce, Catalog, Format, MaxBlock, ParamId, Pcm, PluginEvent, Range, Root, SampleRate,
@@ -58,16 +58,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         CatalogConfig::new(std::env::temp_dir()).scan_dirs(dirs),
         |_| Ok(()),
     );
-    //    The scan is a task: this example has nothing else to do, so it polls it to
-    //    its end; a host with a frame loop calls `try_apply` once per frame.
-    let mut scan = catalog.scan()?;
-    let scanned = loop {
-        match catalog.try_apply(&mut scan) {
-            ScanPoll::Running => std::thread::sleep(std::time::Duration::from_millis(10)),
-            ScanPoll::Done(result) => break result,
-            ScanPoll::Died => return Err("the scan's worker died".into()),
-        }
-    };
+    //    The scan is a value: `run` blocks and this example has nothing else to
+    //    do; a host with a frame loop runs it off the frame thread (a thread of its
+    //    own, or `Executor::unblock`) and reads its progress.
+    let scanned = catalog.scan()?.run();
+    let scanned = catalog.apply(scanned)?;
     eprintln!("scanned {} plugin file(s)", scanned.scanned());
     //    A scan leaves its rows in memory; the save is a value this app runs inline.
     catalog.save().run()?;

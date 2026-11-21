@@ -8,10 +8,8 @@
 
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::Duration;
-use tutti_platform::Instant;
+use tutti_plugin_db::PluginDb;
 use tutti_plugin_db::{Catalog, CatalogConfig, Hosting};
-use tutti_plugin_db::{PluginDb, ScanPoll};
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{Locator, PluginId, PluginRef};
 use tutti_rt::LockExt;
@@ -67,22 +65,11 @@ pub fn probe(catalog: &mut Catalog, path: &std::path::Path) {
         set.is_empty(),
         "probe before the plugin's variables are set (`prime`): {set:?}"
     );
-    let mut task = catalog.register(path).expect("a plugin file");
-    let deadline = Instant::now() + Duration::from_secs(120);
-    loop {
-        match catalog.try_apply(&mut task) {
-            ScanPoll::Running => {
-                assert!(Instant::now() < deadline, "the probe never ended");
-                std::thread::sleep(Duration::from_millis(2));
-            }
-            ScanPoll::Done(result) => {
-                assert!(result.failures().is_empty(), "{:?}", result.failures());
-                break;
-            }
-            ScanPoll::Died => panic!("the probe's worker died"),
-        }
-    }
-    drop(task);
+    let task = catalog.register(path).expect("a plugin file");
+    let result = catalog
+        .apply(task.run())
+        .expect("the output of this catalog's own scan");
+    assert!(result.failures().is_empty(), "{:?}", result.failures());
     catalog.save().run().expect("the catalog's table saves");
 }
 
