@@ -9,8 +9,8 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Receiver;
 
-use crossbeam_channel::Receiver;
 use futures_lite::future::yield_now;
 use tutti_rt::{Listener, RingFloat};
 

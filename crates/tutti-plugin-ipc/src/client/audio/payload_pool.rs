@@ -9,7 +9,7 @@
 //! never allocates.
 
 use super::messages::ProcessPayload;
-use crossbeam::queue::ArrayQueue;
+use crossbeam_queue::ArrayQueue;
 use std::sync::Arc;
 use tutti_plugin_types::ParameterChanges;
 use tutti_rt::{PackedAtomic, TallyWriter};
