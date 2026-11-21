@@ -6,7 +6,8 @@
 //! gone, or it has no plugin behind it. [`Install`] is the plugin and its
 //! parameter mirror, owned by one [`PluginNode`](crate::PluginNode). The parts
 //! that only the main thread may drop (an in-process plugin) go to the main
-//! thread when they are dropped on another ([`Affine`]).
+//! thread when they are dropped on another: the format's own handle defers its
+//! close to the session's main-work collector.
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -50,51 +51,6 @@ pub(super) struct Install {
     pub(super) origin: Origin,
 }
 
-/// A value that drops on the main thread when it must.
-///
-/// Dropped on another thread while `main_only`, its value is handed to the
-/// session's main-work collector to drop at the next tick on the main thread
-/// ([`MainWorkHandle::defer_drop`]); otherwise it drops where it is. The last
-/// clone of a [`LoadedPlugin`](crate::LoadedPlugin) drops its plugin through
-/// one, on whatever thread drops the clone.
-pub(super) struct Affine<T: Send + 'static> {
-    value: Option<T>,
-    work: MainWorkHandle,
-    main_only: bool,
-}
-
-impl<T: Send + 'static> Affine<T> {
-    pub(super) fn new(value: T, work: &MainWorkHandle, main_only: bool) -> Self {
-        Self {
-            value: Some(value),
-            work: work.clone(),
-            main_only,
-        }
-    }
-
-    pub(super) fn get(&self) -> &T {
-        self.value.as_ref().expect("held until dropped")
-    }
-
-    /// The value, which now drops where its new owner says.
-    pub(super) fn into_inner(mut self) -> T {
-        self.value.take().expect("held until taken")
-    }
-}
-
-impl<T: Send + 'static> Drop for Affine<T> {
-    fn drop(&mut self) {
-        let Some(value) = self.value.take() else {
-            return;
-        };
-        if self.main_only && MainThreadMarker::new().is_none() {
-            self.work.defer_drop(move |_main| drop(value));
-        } else {
-            drop(value);
-        }
-    }
-}
-
 /// The reading of whether a loaded plugin's live part is gone, shared by the
 /// opened plugin, the node's record and every clone of the handle.
 ///
@@ -102,7 +58,7 @@ impl<T: Send + 'static> Drop for Affine<T> {
 /// node takes it out ([`release_handle`](Self::release_handle)), so a clone of
 /// the handle never keeps a server alive past its node.
 pub(super) struct Standing {
-    pub(super) handle: Mutex<Option<Affine<PluginHandle>>>,
+    pub(super) handle: Mutex<Option<PluginHandle>>,
     /// The session recovers a plugin that dies at its node.
     pub(super) recovery: bool,
     /// A node hosts the plugin (and so recovery can act on it).
@@ -125,7 +81,7 @@ impl Standing {
                 .handle
                 .lock_recover()
                 .as_ref()
-                .is_some_and(|handle| handle.get().is_crashed())
+                .is_some_and(|handle| handle.is_crashed())
     }
 
     /// The bridge's lifecycle: recovery gave up, or the server is dead and
@@ -147,7 +103,7 @@ impl Standing {
             self.handle
                 .lock_recover()
                 .as_ref()
-                .and_then(|handle| handle.get().status().cause().cloned())
+                .and_then(|handle| handle.status().cause().cloned())
         });
         PluginCause::Died(failure.unwrap_or(PluginFailure::Unreported))
     }
@@ -247,7 +203,7 @@ impl Shared {
         loadable: Loadable,
         config: AudioConfig,
         main: MainThreadMarker,
-    ) -> Result<(Self, Affine<Install>), LoadError> {
+    ) -> Result<(Self, Install), LoadError> {
         let Open {
             plugin,
             restore: _,
@@ -258,7 +214,6 @@ impl Shared {
             ResolvedHosting::OutOfProcess => Hosting::OutOfProcess,
             ResolvedHosting::InProcess => Hosting::InProcess,
         };
-        let served = hosting == Hosting::OutOfProcess;
         let handle = plugin.handle().clone();
         let ports = ports_of(&handle);
         let id = cx.ids.mint();
@@ -273,13 +228,12 @@ impl Shared {
             server_pid: handle.server_pid(),
             presets,
         };
-        let main_only = !served;
         let shared = Self {
             id,
             stamp,
             info: Arc::new(info),
             standing: Arc::new(Standing {
-                handle: Mutex::new(Some(Affine::new(handle, &cx.work, main_only))),
+                handle: Mutex::new(Some(handle)),
                 recovery: cx.recovery,
                 hosted: AtomicBool::new(false),
                 dead: Mutex::new(None),
@@ -288,15 +242,11 @@ impl Shared {
             }),
             ports,
         };
-        let install = Affine::new(
-            Install {
-                plugin,
-                mirror,
-                origin: Origin { config, loadable },
-            },
-            &cx.work,
-            main_only,
-        );
+        let install = Install {
+            plugin,
+            mirror,
+            origin: Origin { config, loadable },
+        };
         Ok((shared, install))
     }
 }

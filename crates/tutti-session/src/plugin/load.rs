@@ -32,9 +32,7 @@ use tutti_plugin_types::{MainThreadMarker, PluginFailure, PluginFormat, PluginId
 use tutti_rt::LockExt;
 
 use super::opened::ports_of;
-use super::opened::{
-    Affine, Context, Install, PluginCause, PluginInfo, PluginPorts, Shared, Standing,
-};
+use super::opened::{Context, Install, PluginCause, PluginInfo, PluginPorts, Shared, Standing};
 use super::{AnyPlugin, HostPlugin, Origin, PluginLoad};
 use crate::apply::SessionId;
 use crate::loaded::{Stamp, caught};
@@ -98,7 +96,8 @@ impl LoadPlugin {
     /// # Errors
     ///
     /// [`LoadError::Unresolved`] when the id names no plugin of the catalog, or
-    /// several; [`LoadError::Plugin`] when the catalog or the format refuses the
+    /// several; [`LoadError::Module`] when its bundle holds no module for this
+    /// target; [`LoadError::Plugin`] when the catalog or the format refuses the
     /// hosting or the plugin does not open; [`LoadError::Panicked`] when a
     /// plugin or the host panicked in the open.
     pub fn run(self, main: MainThreadMarker) -> Result<PluginNode, LoadError> {
@@ -110,7 +109,7 @@ impl LoadPlugin {
             Ok(loadable) => loadable.clone().hosting(self.hosting),
             Err(unresolved) => return Err(LoadError::Unresolved(unresolved.clone())),
         };
-        let stamp = Stamp::take(Asset::from(module_of(loadable.plugin())));
+        let stamp = Stamp::take(Asset::from(module_of(loadable.plugin())?));
         let cx = self.cx;
         let request = PluginLoad {
             loadable: loadable.clone(),
@@ -136,15 +135,21 @@ impl LoadPlugin {
 /// The file a plugin's code is in: the module inside a bundle directory, else the
 /// path itself. A rewrite of the plugin shows in this file's metadata, where the
 /// bundle directory's does not move.
-fn module_of(plugin: &PluginRef) -> PathBuf {
+///
+/// # Errors
+///
+/// [`LoadError::Module`] for a bundle that holds no module this target loads: a
+/// plugin that opened has one, so there is no other file to stamp.
+fn module_of(plugin: &PluginRef) -> Result<PathBuf, LoadError> {
     let kind = match plugin.format() {
         Ok(PluginFormat::Vst2) => ModuleKind::Vst2,
         Ok(PluginFormat::Vst3) => ModuleKind::Vst3,
         Ok(PluginFormat::Clap) => ModuleKind::Clap,
         Ok(PluginFormat::AudioUnit) => ModuleKind::Au,
-        _ => return plugin.path().to_path_buf(),
+        // A path of no known format is a plain file: its own module.
+        _ => return Ok(plugin.path().to_path_buf()),
     };
-    native_module_path(plugin.path(), kind).unwrap_or_else(|_| plugin.path().to_path_buf())
+    native_module_path(plugin.path(), kind).map_err(|error| LoadError::Module(Arc::new(error)))
 }
 
 /// What an app observes of an opened plugin: [`PluginNode::handle`]. A clone
@@ -234,7 +239,7 @@ pub struct PluginNode {
     handle: LoadedPlugin,
     /// The plugin, until a session takes it. Boxed: an opened plugin is far
     /// larger than the errors that hand a node back.
-    install: Option<Box<Affine<Install>>>,
+    install: Option<Box<Install>>,
     /// The session that loaded it, the only one it may be added to.
     session: SessionId,
 }
@@ -260,7 +265,7 @@ impl PluginNode {
             .install
             .take()
             .expect("a node holds its plugin until taken");
-        (Affine::into_inner(*install), self.handle.clone())
+        (*install, self.handle.clone())
     }
 }
 
@@ -547,5 +552,31 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             hosted.link = Some(link);
             hosted.set_rebinder(rebinder);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **A bundle with no module this target loads is the load's error, not a
+    /// stamp of its directory.** `changed` reads the module, so a directory that
+    /// holds none has nothing to stamp.
+    #[test]
+    fn a_bundle_without_a_module_is_a_module_error() {
+        let dir = tempfile::TempDir::new().expect("a scratch directory");
+        let bundle = dir.path().join("Empty.clap");
+        std::fs::create_dir_all(bundle.join("Contents")).unwrap();
+        let error = module_of(&PluginRef::file(&bundle)).expect_err("no module inside");
+        assert!(matches!(error, LoadError::Module(_)), "{error:?}");
+    }
+
+    /// **A plain file is its own module.**
+    #[test]
+    fn a_plain_file_is_its_own_module() {
+        let dir = tempfile::TempDir::new().expect("a scratch directory");
+        let file = dir.path().join("plain.clap");
+        std::fs::write(&file, b"x").unwrap();
+        assert_eq!(module_of(&PluginRef::file(&file)).unwrap(), file);
     }
 }
