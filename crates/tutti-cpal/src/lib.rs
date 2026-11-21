@@ -92,7 +92,8 @@
 //!
 //! The output callback runs on CPAL's audio thread and does not allocate, lock or
 //! block. Its buffers are sized once at stream start to `tutti_engine::MAX_FRAMES` frames; a
-//! larger callback is clamped and its tail silenced rather than reallocating. Every
+//! larger callback has its tail silenced and counted
+//! ([`BlockCounts::truncated`](tutti_engine::BlockCounts::truncated)) rather than reallocating. Every
 //! other method runs on the control thread.
 //!
 //! This crate does not own the graph (rendering a block is `tutti-engine`'s) or
@@ -139,7 +140,7 @@ pub use error::{DeviceError, Result};
 pub use host::{AudioHost, DeviceHost, DeviceSelector, available_hosts};
 pub use listing::DeviceListing;
 pub use output::{AudioEngine, OutputConfig, Resolved};
-pub use poller::{DevicePoller, MIN_POLL_INTERVAL};
+pub use poller::{DevicePoller, PollInterval, PollIntervalTooShort};
 pub use roster::{DeviceChange, DeviceDirection, DeviceId, DeviceRoster, Snapshot, SnapshotSource};
 pub use supported::SupportedConfig;
 

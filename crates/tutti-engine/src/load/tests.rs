@@ -111,6 +111,7 @@ fn the_counts_only_grow_across_reads() {
         w.record(at(0.5 + 0.25 * (i % 4) as f64), BLOCK);
         w.silenced();
         w.dropped_events(i);
+        w.truncated();
         let now = blocks.get();
         assert!(now.blocks > last.blocks && now.silenced > last.silenced);
         assert!(now.over_budget >= last.over_budget);
@@ -124,7 +125,8 @@ fn the_counts_only_grow_across_reads() {
             blocks: 8,
             over_budget: 2,
             silenced: 8,
-            dropped_events: 28
+            dropped_events: 28,
+            truncated: 8,
         }
     );
 }
