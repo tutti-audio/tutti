@@ -39,7 +39,7 @@ tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-nodes = { version = "0.0.1", path = "../tutti-nodes", default-features = false }
 thiserror = { workspace = true, features = ["std"] }
-# `oneshot`: the reply of an out-of-process plugin load.
+# `oneshot`: the reply of an out-of-process plugin load, and of a MIDI-CI peer request.
 futures-channel = { workspace = true, optional = true }
 tracing.workspace = true
 serde = { version = "1", optional = true, features = ["derive"] }
@@ -57,8 +57,6 @@ tutti-midi-hardware = { version = "0.0.1", path = "../tutti-midi-hardware", opti
 # The device vocabulary (`DeviceId`, `DeviceInfo`, ...) the OS MIDI layer reports in,
 # and the `MediaType` a peer's saved state names its encoding by.
 tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device", optional = true }
-# The one-shot a peer-reply future resolves through (control side only).
-futures-channel = { workspace = true, optional = true }
 tutti-midi-ci = { version = "0.0.1", path = "../tutti-midi-ci", optional = true }
 tutti-sampler = { version = "0.0.1", path = "../tutti-sampler", default-features = false, optional = true }
 tutti-soundfont = { version = "0.0.1", path = "../tutti-soundfont", optional = true }
