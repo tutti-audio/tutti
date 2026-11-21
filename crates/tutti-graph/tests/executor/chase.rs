@@ -2,8 +2,8 @@
 //! executor delivers it once, at offset 0 of the successor's first block,
 //! ahead of every other event there.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 
 use tutti_graph::testing as common;
 
@@ -22,7 +22,7 @@ use tutti_units::Samples;
 const BLOCK: usize = 64;
 
 /// What each keeper received: `(call, offset, first word)`, in delivery order.
-type Log = Arc<Mutex<Vec<(usize, u32, u32)>>>;
+type Log = tutti_fixtures::Record<(usize, u32, u32)>;
 
 /// A mono instrument stand-in. Its state is the last message it received,
 /// heard as a constant output (the message's data byte over 127); with
@@ -41,7 +41,7 @@ impl Keeper {
             state,
             chases,
             capacity,
-            log: Arc::clone(log),
+            log: log.clone(),
             calls: 0,
         }
     }
@@ -181,7 +181,7 @@ fn cut() -> Fade {
 /// node's first block, as if it had received them: the spec of a chase.
 #[test]
 fn the_chased_state_is_heard_on_the_incoming_nodes_first_block() {
-    let log = Log::default();
+    let log = tutti_fixtures::Record::new();
     let set = cc(7, 100);
     let (mut ed, mut exec) = rig(Keeper::new(Some(set), true, 8, &log));
     assert_eq!(block(&mut exec)[0], data(&set), "the old node's state");
@@ -203,7 +203,7 @@ fn the_chased_state_is_heard_on_the_incoming_nodes_first_block() {
 /// Without `chase` nothing travels: the incoming node starts empty.
 #[test]
 fn a_node_that_does_not_chase_hands_nothing_over() {
-    let log = Log::default();
+    let log = tutti_fixtures::Record::new();
     let (mut ed, mut exec) = rig(Keeper::new(Some(cc(7, 100)), false, 8, &log));
     block(&mut exec);
     ed.replace(
@@ -221,7 +221,7 @@ fn a_node_that_does_not_chase_hands_nothing_over() {
 /// not sent anything.
 #[test]
 fn a_crossfade_chases_the_incoming_node_alone() {
-    let (old_log, new_log) = (Log::default(), Log::default());
+    let (old_log, new_log) = (tutti_fixtures::Record::new(), tutti_fixtures::Record::new());
     let set = cc(7, 90);
     let (mut ed, mut exec) = rig(Keeper::new(Some(set), true, 8, &old_log));
     block(&mut exec);
@@ -249,7 +249,7 @@ fn a_crossfade_chases_the_incoming_node_alone() {
 /// The chase lands ahead of an edge event at the same offset.
 #[test]
 fn the_chase_comes_ahead_of_edge_events_at_offset_zero() {
-    let log = Log::default();
+    let log = tutti_fixtures::Record::new();
     let (old, edge) = (cc(7, 100), cc(10, 20));
     let on = Arc::new(AtomicBool::new(false));
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
@@ -294,7 +294,7 @@ fn the_chase_comes_ahead_of_edge_events_at_offset_zero() {
 /// and counted.
 #[test]
 fn a_successor_with_no_event_input_counts_the_drop() {
-    let log = Log::default();
+    let log = tutti_fixtures::Record::new();
     let (mut ed, mut exec) = rig(Keeper::new(Some(cc(7, 100)), true, 8, &log));
     block(&mut exec);
     assert_eq!(exec.dropped_event_count(), 0);
@@ -308,7 +308,7 @@ fn a_successor_with_no_event_input_counts_the_drop() {
 /// fits is delivered in order.
 #[test]
 fn a_chase_past_its_declared_capacity_is_counted() {
-    let log = Log::default();
+    let log = tutti_fixtures::Record::new();
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
     ed.insert(NodeKey(1), "wide", Unforkable(Wide(5)));
     ed.spec_mut()
@@ -343,7 +343,7 @@ fn a_chase_past_its_declared_capacity_is_counted() {
 #[test]
 fn a_chase_renders_bit_identically_in_parallel() {
     fn render(workers: usize) -> Vec<Vec<u32>> {
-        let log = Log::default();
+        let log = tutti_fixtures::Record::new();
         let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
         if workers > 1 {
             exec.set_pool(Some(test_pool(workers)));
@@ -412,7 +412,11 @@ fn a_chase_renders_bit_identically_in_parallel() {
 /// state.
 #[test]
 fn a_replace_queued_behind_a_fade_is_chased_when_the_fade_ends() {
-    let (a, b, c) = (Log::default(), Log::default(), Log::default());
+    let (a, b, c) = (
+        tutti_fixtures::Record::new(),
+        tutti_fixtures::Record::new(),
+        tutti_fixtures::Record::new(),
+    );
     let set = cc(7, 90);
     let (mut ed, mut exec) = rig(Keeper::new(Some(set), true, 8, &a));
     block(&mut exec);

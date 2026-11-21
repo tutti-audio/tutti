@@ -3,7 +3,7 @@
 //!
 //! The plugin is `audio-probe`, which allocates nothing in `process`, so an
 //! allocation in the guarded region is the host's. The binary's global
-//! allocator is `AllocDisabler` (in `main.rs`) and an allocation in the guarded
+//! allocator is `RtAllocCheck` (in `main.rs`) and an allocation in the guarded
 //! region **aborts the process**, so nextest (one process per test) reports an
 //! abort as the failure of that case.
 //! `audio-probe` is built by `build.rs` on the `conformance` feature, which

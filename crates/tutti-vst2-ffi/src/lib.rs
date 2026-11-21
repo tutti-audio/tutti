@@ -115,7 +115,7 @@ pub use speaker::{ArrangementRead, MAX_ARRANGEMENT_CHANNELS, Speaker, SpeakerArr
 // any allocation inside an `assert_no_alloc` scope.
 #[cfg(test)]
 #[global_allocator]
-static RT_NO_ALLOC_HARNESS: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+static RT_NO_ALLOC_HARNESS: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
 #[cfg(test)]
 mod primitive_enum_tests {
