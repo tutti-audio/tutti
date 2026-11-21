@@ -291,6 +291,7 @@ pub mod nodes {
         LinkwitzRiley, Lti, MAX_GRID, MatchedBell, PassbandRipple, PassbandRippleError, Sos,
         SosError, StopbandAttenuation, StopbandAttenuationError, System, Tilt,
     };
+    pub use tutti_dsp::{DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec};
     pub use tutti_dsp::{
         Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,
         SpringLengthError,
@@ -365,9 +366,10 @@ pub mod nodes {
         SpringReverbSet, SvfSet, TiltFilterSet, TransientShaperKernel, TransientShaperSet,
     };
     pub use tutti_nodes::{
-        CombFilterConfig, CombFilterKernel, CombFilterNode, CombFilterSet, FrequencyShifterConfig,
-        FrequencyShifterKernel, FrequencyShifterNode, FrequencyShifterSet, PitchShifterConfig,
-        PitchShifterKernel, PitchShifterNode, PitchShifterSet,
+        CombFilterConfig, CombFilterKernel, CombFilterNode, CombFilterSet, DistanceConfig,
+        DistanceKernel, DistanceNode, DistanceSet, FrequencyShifterConfig, FrequencyShifterKernel,
+        FrequencyShifterNode, FrequencyShifterSet, PitchShifterConfig, PitchShifterKernel,
+        PitchShifterNode, PitchShifterSet,
     };
 }
 
@@ -744,7 +746,7 @@ pub mod plugin {
     /// holds.
     pub mod catalog {
         pub use tutti_plugin_db::{
-            CatalogConfig, FormatMismatch, PluginDb, Probed, SaveCatalog, ScanCanceller,
+            CatalogConfig, FormatMismatch, PluginDb, Probed, SaveCatalog, ScanError, ScanFuture,
             ScanPlugins, ScanProgressReader, ScanReport, ScannedPlugins, StaleScan,
         };
         pub use tutti_plugin_ipc::AudioConfig;
@@ -812,7 +814,7 @@ pub mod midi {
         InputTiming, NotAChannelCount, ProcessChange, ReportAsk, Reporter, WatchFailure,
     };
     #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError};
+    pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError, StartFailed};
     pub use tutti_midi_protocol::{
         ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, MmcSegmentError, MpeMode,
         MpeSpec, MpeZone, MpeZoneConfig, MpeZones, MtcRate, NotFrequencyData, NotSysexDeviceId,
@@ -873,7 +875,10 @@ pub mod midi {
         Stamping, TrackError,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
-    pub use tutti_session::{MidiInput, MidiOutput, OpenMidiOutput};
+    pub use tutti_session::{
+        MidiInput, MidiOpenError, MidiOutput, OpenedMidiInput, OpenedMidiOutput, OpeningMidiInput,
+        OpeningMidiOutput,
+    };
 
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_ci::Whole;

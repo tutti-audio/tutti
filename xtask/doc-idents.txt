@@ -37,18 +37,14 @@
 1 crates/tutti-clap-host/src/types.rs
 1 crates/tutti-clap-host/tests/behaviour/clap_event_lists.rs
 1 crates/tutti-clap-host/tests/behaviour/clap_midi_groups.rs
-2 crates/tutti-clap-host/tests/conformance/clap_params_state_conformance.rs
-1 crates/tutti-codec/src/contract.rs
 1 crates/tutti-codec/src/decode/extensions.rs
-1 crates/tutti-coremidi-ffi/src/os/destination.rs
 1 crates/tutti-dsp/src/convolver.rs
 2 crates/tutti-dsp/src/fft/real.rs
-2 crates/tutti-dsp/src/resample/streaming.rs
 1 crates/tutti-engine/tests/render/engine_graph.rs
 1 crates/tutti-export/src/control.rs
 1 crates/tutti-export/src/graph.rs
 1 crates/tutti-export/tests/formats/oracle_decode.rs
-3 crates/tutti-export/tests/render/render.rs
+2 crates/tutti-export/tests/render/render.rs
 1 crates/tutti-graph/benches/graph_render.rs
 1 crates/tutti-graph/src/event_tap.rs
 1 crates/tutti-graph/src/graph.rs
@@ -70,7 +66,6 @@
 1 crates/tutti-plugin-host/src/control_handle.rs
 1 crates/tutti-plugin-host/src/node/width_error.rs
 1 crates/tutti-plugin-ipc/src/protocol/envelope.rs
-1 crates/tutti-plugin-ipc/src/protocol/frame.rs
 1 crates/tutti-plugin-ipc/src/transport/sys/unix.rs
 1 crates/tutti-plugin-server/src/transport.rs
 1 crates/tutti-plugin-server/tests/orphan_watchdog.rs
@@ -101,8 +96,7 @@
 4 crates/tutti-units/src/unit_param.rs
 3 crates/tutti-vst2-ffi/src/api.rs
 2 crates/tutti-vst2-ffi/src/editor.rs
-2 crates/tutti-vst2-ffi/src/event.rs
-4 crates/tutti-vst2-ffi/src/plugin.rs
+3 crates/tutti-vst2-ffi/src/plugin.rs
 1 crates/tutti-vst2-host/src/keys.rs
 2 crates/tutti-vst2-host/tests/integration_tests.rs
 1 crates/tutti-vst3-ffi/src/com/attr_list.rs

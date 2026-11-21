@@ -149,7 +149,77 @@ pub fn with_input(groups: Option<tutti_ump::MidiGroup>) -> (Keyed, NodeKey) {
     let mut s = builder.build().expect("builds");
     let _ = s.update();
     let keys = s.midi().devices().remove(0);
-    let port = s.open_midi_input(keys).expect("opens");
+    let port = s.open_input(keys).expect("opens");
     let node = port.node();
     (Keyed::new(s, port), node)
+}
+
+/// Opening a port the way an app does, over a fake OS whose start is ready at
+/// once: begin the open, poll its wait, apply what it resolved to.
+#[cfg(feature = "midi-hardware")]
+pub trait OpenPorts {
+    /// The input port of `saved`.
+    fn open_input(
+        &mut self,
+        saved: tutti_midi_device::DeviceInfo,
+    ) -> Result<tutti_session::MidiInput, tutti_session::MidiPortError>;
+
+    /// The output port of `saved`.
+    fn open_output(
+        &mut self,
+        saved: tutti_midi_device::DeviceInfo,
+    ) -> Result<tutti_session::MidiOutput, tutti_session::MidiPortError>;
+
+    /// The output port of `saved`, sending Active Sensing when `on`.
+    fn open_sensing_output(
+        &mut self,
+        saved: tutti_midi_device::DeviceInfo,
+        on: bool,
+    ) -> Result<tutti_session::MidiOutput, tutti_session::MidiPortError>;
+}
+
+/// What `future` resolved to when polled once, or `None` while it is pending.
+#[cfg(feature = "midi-hardware")]
+pub fn polled<T>(future: impl std::future::Future<Output = T>) -> Option<T> {
+    use std::task::{Context, Poll, Waker};
+    match std::pin::pin!(future).poll(&mut Context::from_waker(Waker::noop())) {
+        Poll::Ready(out) => Some(out),
+        Poll::Pending => None,
+    }
+}
+
+/// What `wait` resolved to on its first poll: a fake backend has nothing to
+/// start.
+#[cfg(feature = "midi-hardware")]
+pub fn ready<T, E: std::fmt::Debug>(wait: impl std::future::Future<Output = Result<T, E>>) -> T {
+    polled(wait)
+        .expect("a fake backend's start is ready on the first poll")
+        .expect("a fake backend starts at once")
+}
+
+#[cfg(feature = "midi-hardware")]
+impl OpenPorts for Session {
+    fn open_input(
+        &mut self,
+        saved: tutti_midi_device::DeviceInfo,
+    ) -> Result<tutti_session::MidiInput, tutti_session::MidiPortError> {
+        let opened = ready(self.open_midi_input(saved)?);
+        self.apply(opened)
+    }
+
+    fn open_output(
+        &mut self,
+        saved: tutti_midi_device::DeviceInfo,
+    ) -> Result<tutti_session::MidiOutput, tutti_session::MidiPortError> {
+        self.open_sensing_output(saved, false)
+    }
+
+    fn open_sensing_output(
+        &mut self,
+        saved: tutti_midi_device::DeviceInfo,
+        on: bool,
+    ) -> Result<tutti_session::MidiOutput, tutti_session::MidiPortError> {
+        let opened = ready(self.open_midi_output(saved)?.active_sensing(on));
+        self.apply(opened)
+    }
 }

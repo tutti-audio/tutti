@@ -35,7 +35,7 @@ use tutti_buffers::{Interleaved, Sample};
 const BLOCK_SIZE: usize = 4096;
 
 /// Writes a FLAC file through the [`FormatWriter`] contract.
-pub struct FlacWriter<W: Write + Seek> {
+pub(crate) struct FlacWriter<W: Write + Seek> {
     sink: W,
     frames: FrameWriter,
     depth: IntDepth,
@@ -56,7 +56,12 @@ impl<W: Write + Seek> FlacWriter<W> {
     /// # Errors
     ///
     /// As [`Encoder::create`](crate::Encoder::create).
-    pub fn create(spec: &Spec, depth: IntDepth, level: FlacLevel, mut sink: W) -> Result<Self> {
+    pub(crate) fn create(
+        spec: &Spec,
+        depth: IntDepth,
+        level: FlacLevel,
+        mut sink: W,
+    ) -> Result<Self> {
         let rate = spec.header_rate()?.get() as usize;
         let channels = usize::from(spec.channels()?);
         let bits = usize::from(depth.bits());

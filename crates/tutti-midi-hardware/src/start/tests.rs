@@ -1,7 +1,7 @@
 use super::*;
 use std::task::Waker;
 
-fn poll_with(start: &mut Start) -> Poll<Result<Started, MidiHardwareError>> {
+fn poll_with(start: &mut Start) -> Poll<Result<Started, StartFailed>> {
     Pin::new(start).poll(&mut Context::from_waker(Waker::noop()))
 }
 

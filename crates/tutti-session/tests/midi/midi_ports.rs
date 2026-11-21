@@ -5,6 +5,7 @@
 use std::collections::BTreeSet;
 use tutti_platform::Instant;
 
+use crate::common::OpenPorts as _;
 use crate::common::{MF, Seen, blocks, note, play, tap};
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
@@ -55,14 +56,14 @@ fn device(s: &mut Session, name: &str) -> DeviceInfo {
 
 /// Opens the input port of `info`, and updates: the port's nodes are committed.
 fn input(s: &mut Session, info: &DeviceInfo) -> MidiInput {
-    let port = s.open_midi_input(info.clone()).expect("opens");
+    let port = s.open_input(info.clone()).expect("opens");
     let _ = s.update();
     port
 }
 
 /// Opens the output port of `info`, and updates.
 fn output(s: &mut Session, info: &DeviceInfo) -> MidiOutput {
-    let port = s.open_midi_output(info.clone()).run().expect("opens");
+    let port = s.open_output(info.clone()).expect("opens");
     let _ = s.update();
     port
 }
@@ -234,9 +235,7 @@ fn a_second_port_on_one_device_fails_in_use() {
     let _ = s.update();
     let keys = device(&mut s, "Keys");
     let first = input(&mut s, &keys);
-    let error = s
-        .open_midi_input(keys.clone())
-        .expect_err("the device is held");
+    let error = s.open_input(keys.clone()).expect_err("the device is held");
     assert_eq!(first.presence(), Presence::Live);
     assert!(
         matches!(&error, MidiPortError::InUse(id) if *id == keys.id),
@@ -359,7 +358,7 @@ fn an_ambiguous_match_fails_with_candidates_and_opens_once_one_leaves() {
     let saved = s.midi().devices().remove(0);
 
     let error = s
-        .open_midi_input(saved.clone())
+        .open_input(saved.clone())
         .expect_err("two devices could be the saved one");
     let MidiPortError::Ambiguous(candidates) = &error else {
         panic!("ambiguous, got {error:?}");
@@ -372,7 +371,7 @@ fn an_ambiguous_match_fails_with_candidates_and_opens_once_one_leaves() {
 
     unplug(&fake, 2);
     let _ = s.update();
-    let port = s.open_midi_input(saved).expect("opens once one left");
+    let port = s.open_input(saved).expect("opens once one left");
     assert_eq!(port.presence(), Presence::Live);
 }
 
@@ -385,7 +384,7 @@ fn a_session_without_the_hardware_layer_fails_the_open_by_name() {
     let keys = device(&mut with, "Keys");
 
     let mut s = Session::builder().build().expect("builds");
-    let error = s.open_midi_input(keys).expect_err("no OS MIDI layer");
+    let error = s.open_input(keys).expect_err("no OS MIDI layer");
     assert!(matches!(error, MidiPortError::NoHardware(_)), "{error:?}");
 }
 
@@ -493,7 +492,7 @@ fn a_device_opens_again_while_its_dropped_output_is_retiring() {
     drop(out);
     let _ = s.update();
     assert!(s.graph_ref().contains(node), "it is retiring");
-    let again = s.open_midi_output(synth).run().expect("opens at once");
+    let again = s.open_output(synth).expect("opens at once");
     assert!(!s.graph_ref().contains(node), "the retiring output ended");
     assert_eq!(again.presence(), Presence::Live);
     assert_eq!(fake.most_output_connections(), 1, "never two connections");
@@ -515,7 +514,7 @@ fn reopening_a_device_loses_what_its_retiring_output_had_not_rendered() {
     keys.note_off(Stamp::NextBlock, MidiChannel::FIRST, NoteNumber::of(60))
         .expect("queued");
     drop(out);
-    let _again = s.open_midi_output(synth).run().expect("opens at once");
+    let _again = s.open_output(synth).expect("opens at once");
     blocks(&s, 3);
     let _ = s.update();
     let sent = fake.take_sent(EndpointId::from_raw(10));
@@ -658,7 +657,7 @@ fn a_dropped_input_can_be_opened_again_at_once() {
     let keys = device(&mut s, "Keys");
     let first = input(&mut s, &keys);
     drop(first);
-    let again = s.open_midi_input(keys).expect("the dropped port freed it");
+    let again = s.open_input(keys).expect("the dropped port freed it");
     assert_eq!(again.presence(), Presence::Live);
     assert_eq!(fake.connected_inputs().len(), 1, "one connection");
 }
@@ -674,7 +673,7 @@ fn a_dropped_output_is_closed_by_the_next_open() {
     let first = output(&mut s, &synth);
     let node = first.node();
     drop(first);
-    let _second = s.open_midi_output(synth).run().expect("opens");
+    let _second = s.open_output(synth).expect("opens");
     assert!(!s.graph_ref().contains(node), "the dropped output closed");
 }
 
@@ -954,7 +953,7 @@ fn every_input_port_has_its_own_input_node() {
     let devices: Vec<DeviceInfo> = names.iter().map(|name| device(&mut s, name)).collect();
     let ports: Vec<_> = devices
         .iter()
-        .map(|d| s.open_midi_input(d.clone()).expect("opens"))
+        .map(|d| s.open_input(d.clone()).expect("opens"))
         .collect();
     let _ = s.update();
     roll(&s, 1_024);
@@ -1168,9 +1167,7 @@ fn sensing_session(active_sensing: bool) -> (Session, FakeCounters, MidiOutput) 
     let _ = s.update();
     let device = device(&mut s, "Synth");
     let out = s
-        .open_midi_output(device)
-        .active_sensing(active_sensing)
-        .run()
+        .open_sensing_output(device, active_sensing)
         .expect("opens");
     (s, fake, out)
 }
@@ -1180,10 +1177,7 @@ fn open_witness(s: &mut Session, fake: &FakeCounters) -> MidiOutput {
     fake.plug(midi1_output(WITNESS, "Witness"), PortDirection::Output);
     let _ = s.update();
     let device = device(s, "Witness");
-    s.open_midi_output(device)
-        .active_sensing(true)
-        .run()
-        .expect("opens")
+    s.open_sensing_output(device, true).expect("opens")
 }
 
 fn sent_by(fake: &FakeCounters, raw: u32) -> Vec<tutti_ump::Ump> {
@@ -1342,11 +1336,7 @@ fn a_midi2_protocol_output_port_sends_no_active_sensing() {
     plug(&fake, SYNTH, "Synth", PortDirection::Output);
     let _ = s.update();
     let device = device(&mut s, "Synth");
-    let _out = s
-        .open_midi_output(device)
-        .active_sensing(true)
-        .run()
-        .expect("opens");
+    let _out = s.open_sensing_output(device, true).expect("opens");
     let _witness = open_witness(&mut s, &fake);
     witness_sends_twice(&fake);
     assert!(sent_by_the_port(&fake).is_empty());
@@ -1441,4 +1431,169 @@ fn the_sessions_mpe_mode_reaches_a_ports_input_node() {
     let _ = s.update();
     blocks(&s, 2);
     assert_eq!(registered(&seen), 7, "the same mode: nothing sent");
+}
+
+/// A session over a fake OS with an input `Keys` (endpoint 1) and an output `Synth`
+/// (endpoint 2) plugged.
+fn a_session_with_keys_and_synth() -> (Session, FakeCounters) {
+    let (mut s, fake) = session();
+    plug(&fake, 1, "Keys", PortDirection::Input);
+    plug(&fake, 2, "Synth", PortDirection::Output);
+    let _ = s.update();
+    (s, fake)
+}
+
+/// **An open over a backend with nothing to start is ready on its first poll, and
+/// its apply installs a live input that hears**: the wait resolves to the proof
+/// and the saved device, and the port opens only at the apply.
+#[test]
+fn an_open_is_ready_on_the_first_poll_and_its_apply_installs_a_live_input() {
+    let (mut s, fake) = a_session_with_keys_and_synth();
+    let (synth, seen) = tap(&mut s);
+    s.midi()
+        .route(MidiRouteRule::any_channel().to(synth))
+        .expect("routes");
+    let keys = device(&mut s, "Keys");
+
+    let opening = s.open_midi_input(keys).expect("the device binds");
+    assert!(
+        fake.connected_inputs().is_empty(),
+        "nothing opens before the apply"
+    );
+    let opened = crate::common::polled(opening)
+        .expect("a backend with nothing to start is ready on the first poll")
+        .expect("it started");
+    let port = s.apply(opened).expect("installs");
+    let _ = s.update();
+    assert_eq!(port.presence(), Presence::Live);
+
+    roll(&s, 1_024);
+    assert!(fake.send_input(EndpointId::from_raw(1), key(0, 60), Instant::now()));
+    roll(&s, 4_096);
+    assert_eq!(note_ons(&seen), [60], "the installed port hears its device");
+}
+
+/// **A call that cannot bind fails at the call, with a named error and no
+/// future**: a session with no OS MIDI layer, and a saved device that several
+/// present ones could be.
+#[test]
+fn a_device_that_cannot_bind_fails_at_the_call() {
+    let (with, _fake) = a_session_with_keys_and_synth();
+    let mut with = with;
+    let keys = device(&mut with, "Keys");
+    let without = Session::builder().build().expect("builds");
+    let error = without
+        .open_midi_output(keys)
+        .expect_err("no OS MIDI layer");
+    assert!(matches!(error, MidiPortError::NoHardware(_)), "{error:?}");
+
+    let (mut s, fake) = session();
+    fake.plug(endpoint(1, "Pad"), PortDirection::Input);
+    fake.plug(endpoint(2, "Pad"), PortDirection::Input);
+    fake.plug(endpoint(3, "Pod"), PortDirection::Output);
+    fake.plug(endpoint(4, "Pod"), PortDirection::Output);
+    let _ = s.update();
+    let pad = s.midi().devices().remove(0);
+    let pod = s.midi().devices().remove(2);
+    let error = s
+        .open_midi_input(pad.clone())
+        .expect_err("two present devices could be the saved one");
+    assert!(
+        matches!(&error, MidiPortError::Ambiguous(c) if c.len() == 2),
+        "{error:?}"
+    );
+    let error = s.open_midi_output(pod).expect_err("so could two outputs");
+    assert!(matches!(error, MidiPortError::Ambiguous(_)), "{error:?}");
+}
+
+/// **An open made by one session is stale in another**: an opened input or output
+/// applied to a session other than the one that began it is refused as `Stale`
+/// and installs nothing.
+#[test]
+fn an_open_of_a_session_with_keys_and_synth_is_stale() {
+    let (a, _fake_a) = a_session_with_keys_and_synth();
+    let (mut b, fake_b) = a_session_with_keys_and_synth();
+    let mut a = a;
+    let keys = device(&mut a, "Keys");
+    let synth = device(&mut a, "Synth");
+
+    let opened = crate::common::ready(a.open_midi_input(keys).expect("binds"));
+    let error = b.apply(opened).expect_err("another session's open");
+    assert!(matches!(error, MidiPortError::Stale), "{error:?}");
+    let opened = crate::common::ready(a.open_midi_output(synth).expect("binds"));
+    let error = b.apply(opened).expect_err("another session's open");
+    assert!(matches!(error, MidiPortError::Stale), "{error:?}");
+    assert!(fake_b.connected_inputs().is_empty(), "nothing opened in b");
+}
+
+/// **An open holds nothing of its session, so a dropped session does not end it,
+/// and what it resolves to is stale in every other**: the wait resolves after
+/// its session is gone, and its apply refuses by name instead of pending.
+#[test]
+fn an_open_outlives_its_session_and_is_stale_in_another() {
+    let (mut a, _fake_a) = a_session_with_keys_and_synth();
+    let (mut b, _fake_b) = a_session_with_keys_and_synth();
+    let keys = device(&mut a, "Keys");
+    let synth = device(&mut a, "Synth");
+    let opening_input = a.open_midi_input(keys).expect("binds");
+    let opening_output = a.open_midi_output(synth).expect("binds");
+    drop(a);
+
+    let opened = crate::common::polled(opening_input)
+        .expect("a dropped session does not hold the wait")
+        .expect("it started");
+    let error = b.apply(opened).expect_err("the session is gone");
+    assert!(matches!(error, MidiPortError::Stale), "{error:?}");
+    let opened = crate::common::polled(opening_output)
+        .expect("a dropped session does not hold the wait")
+        .expect("it started");
+    let error = b.apply(opened).expect_err("the session is gone");
+    assert!(matches!(error, MidiPortError::Stale), "{error:?}");
+}
+
+/// **The apply binds against the device table as it then is**: a device that
+/// departed while the open was pending installs a port reading `Lost`, which
+/// opens behind the same handle when the device returns.
+#[test]
+fn a_device_that_departs_while_the_open_is_pending_installs_a_lost_port() {
+    let (mut s, fake) = a_session_with_keys_and_synth();
+    let keys = device(&mut s, "Keys");
+    let opened = crate::common::ready(s.open_midi_input(keys).expect("binds"));
+
+    unplug(&fake, 1);
+    let _ = s.update();
+    let port = s.apply(opened).expect("installs, unplugged");
+    assert_eq!(port.presence(), Presence::Lost(PortCause::Unplugged));
+    assert!(fake.connected_inputs().is_empty());
+
+    plug(&fake, 1, "Keys", PortDirection::Input);
+    let _ = s.update();
+    assert_eq!(port.presence(), Presence::Live, "it opens when it returns");
+}
+
+/// **A second device of the saved name arriving while the open is pending makes
+/// the apply refuse it as ambiguous**, for an input and for an output, and
+/// installs nothing.
+#[test]
+fn a_device_that_makes_the_saved_one_ambiguous_while_pending_fails_the_apply() {
+    let (mut s, fake) = session();
+    fake.plug(endpoint(1, "Pad"), PortDirection::Input);
+    fake.plug(endpoint(2, "Pod"), PortDirection::Output);
+    let _ = s.update();
+    let input = device(&mut s, "Pad");
+    let output = device(&mut s, "Pod");
+    let opened_input = crate::common::ready(s.open_midi_input(input).expect("binds"));
+    let opened_output = crate::common::ready(s.open_midi_output(output).expect("binds"));
+
+    fake.plug(endpoint(3, "Pad"), PortDirection::Input);
+    fake.plug(endpoint(4, "Pod"), PortDirection::Output);
+    let _ = s.update();
+    let error = s.apply(opened_input).expect_err("two could be it now");
+    assert!(matches!(error, MidiPortError::Ambiguous(_)), "{error:?}");
+    let error = s.apply(opened_output).expect_err("two could be it now");
+    assert!(matches!(error, MidiPortError::Ambiguous(_)), "{error:?}");
+    assert!(
+        fake.connected_inputs().is_empty(),
+        "the failed apply left no port"
+    );
 }

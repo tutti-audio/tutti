@@ -74,7 +74,7 @@
 //!
 //! A host that does not already know where its plugin is discovers one first — see
 //! [`Catalog`](tutti_plugin_db::Catalog), which scans, registers and measures plugin files
-//! as cancellable tasks, recovers from a crashed scan, and says what is
+//! as futures (dropping one cancels it), recovers from a crashed scan, and says what is
 //! blacklisted (the session's load asks it). It needs no feature flag.
 //!
 //! ## Architecture

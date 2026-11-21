@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use tutti_platform::Instant;
 
+use crate::common::OpenPorts as _;
 use crate::common::blocks;
 use tutti_midi_device::{DeviceInfo, EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, persistent_endpoint};
@@ -93,7 +94,7 @@ fn the_readings_held_from_before_the_first_connect_live_across_a_replug() {
     let saved = keys(&mut s);
     unplug(&fake);
     let _ = s.update();
-    let port = s.open_midi_input(saved).expect("opens");
+    let port = s.open_input(saved).expect("opens");
     let (timing, resyncs) = (port.timing(), port.resyncs());
     assert!(timing.is_closed() && resyncs.is_closed(), "no device yet");
     assert_eq!(

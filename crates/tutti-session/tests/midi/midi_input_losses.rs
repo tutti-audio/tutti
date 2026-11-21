@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use tutti_platform::Instant;
 
+use crate::common::OpenPorts as _;
 use crate::common::blocks;
 use tutti_graph::Losses;
 use tutti_midi_device::{DeviceInfo, EndpointId, PortDirection};
@@ -62,7 +63,7 @@ fn an_inlet_that_overflows_raises_the_ports_lost_count() {
     plug(&fake);
     let _ = s.update();
     let saved = keys(&mut s);
-    let port = s.open_midi_input(saved).expect("opens");
+    let port = s.open_input(saved).expect("opens");
     let _ = s.update();
     assert_eq!(port.losses(), Losses::NONE);
     push(&fake, 3_000);
@@ -78,7 +79,7 @@ fn the_lost_count_survives_an_unplug_and_keeps_counting_after_the_replug() {
     plug(&fake);
     let _ = s.update();
     let saved = keys(&mut s);
-    let port = s.open_midi_input(saved).expect("opens");
+    let port = s.open_input(saved).expect("opens");
     let _ = s.update();
     push(&fake, 3_000);
     let first = 3_000 - INLET;
@@ -132,7 +133,7 @@ fn an_inlet_eviction_raises_the_ports_count_and_carries_across_a_replug() {
     plug(&fake);
     let _ = s.update();
     let saved = keys(&mut s);
-    let port = s.open_midi_input(saved).expect("opens");
+    let port = s.open_input(saved).expect("opens");
     let _ = s.update();
     assert_eq!(port.losses(), Losses::NONE);
     // The engine's clock reads, so an arrival is placed ahead of its block.
@@ -173,7 +174,7 @@ fn an_input_node_mailbox_overflow_counts_as_refused_on_the_port() {
     plug(&fake);
     let _ = s.update();
     let saved = keys(&mut s);
-    let port = s.open_midi_input(saved).expect("opens");
+    let port = s.open_input(saved).expect("opens");
     let _ = s.update();
     blocks(&s, 2);
     push(&fake, 2_000);
@@ -191,7 +192,7 @@ fn a_late_arrival_is_counted_on_the_port_across_a_replug() {
     plug(&fake);
     let _ = s.update();
     let saved = keys(&mut s);
-    let port = s.open_midi_input(saved).expect("opens");
+    let port = s.open_input(saved).expect("opens");
     let _ = s.update();
     let late = |fake: &FakeCounters| {
         let ump = Ump::from(Message::midi2(

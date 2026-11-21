@@ -238,7 +238,7 @@ pub(crate) struct Parts<F: Float> {
     #[cfg(feature = "midi")]
     pub(crate) midi: Option<crate::MidiNodes>,
     #[cfg(feature = "midi-hardware")]
-    pub(crate) midi_io: Option<crate::midi_port::Io>,
+    pub(crate) midi_io: Option<tutti_midi_hardware::MidiSession>,
     #[cfg(feature = "midi-hardware")]
     pub(crate) device_events: Option<tutti_midi_hardware::DeviceEvents>,
 }
@@ -772,9 +772,10 @@ impl<C: Clock> SessionBuilder<C> {
     }
 
     /// Open the OS MIDI layer: its devices are listed by
-    /// [`Midi::devices`](crate::Midi::devices) and opened by
-    /// [`Session::open_midi_input`](crate::Session::open_midi_input) and
-    /// [`Session::open_midi_output`](crate::Session::open_midi_output),
+    /// [`Midi::devices`](crate::Midi::devices); a port is begun by
+    /// [`Session::open_midi_input`](crate::Session::open_midi_input) or
+    /// [`Session::open_midi_output`](crate::Session::open_midi_output) and installed
+    /// by [`Session::apply`](crate::Session::apply),
     /// each input feeding the graph through an input node and an event
     /// inlet of its own, with `config` (where input times come from). Who the
     /// session is on the wire (MIDI-CI, its UMP Endpoint) is the session's
@@ -934,9 +935,6 @@ impl<C: Clock> SessionBuilder<C> {
                 None => tutti_midi_hardware::MidiSession::open(&executor, inlets, options)
                     .map_err(crate::Error::MidiHardware)?,
             };
-            // The backend is ready before the first port opens (the one place the
-            // synchronous builder waits for it).
-            let io = crate::midi_port::Io::start(io).map_err(crate::Error::MidiHardware)?;
             // Subscribed before anything can plug in unseen: `Phase::Poll`
             // is this subscription's only reader.
             let events = io.devices().subscribe();

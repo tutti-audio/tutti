@@ -67,9 +67,12 @@ pub fn probe(catalog: &mut Catalog, path: &std::path::Path) {
         set.is_empty(),
         "probe before the plugin's variables are set (`prime`): {set:?}"
     );
-    let task = catalog.register(path).expect("a plugin file");
+    let task = catalog
+        .register(path, tutti_fixtures::executor().downgrade())
+        .expect("a plugin file");
+    let scanned = tutti_fixtures::block_on(task).expect("the executor lives");
     let result = catalog
-        .apply(task.run())
+        .apply(scanned)
         .expect("the output of this catalog's own scan");
     assert!(result.failures().is_empty(), "{:?}", result.failures());
     catalog.save().run().expect("the catalog's table saves");

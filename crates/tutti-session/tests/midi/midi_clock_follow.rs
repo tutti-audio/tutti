@@ -6,6 +6,7 @@
 //! pointer of `n` is beat `n / 4` (M1 p.27), an MTC position in seconds is a
 //! beat through the tempo map (2 s at 120 bpm is beat 4).
 
+use crate::common::OpenPorts as _;
 use crate::common::{Keyed, blocks};
 use std::time::Duration;
 use tutti_platform::Instant;
@@ -45,7 +46,7 @@ fn rig_hearing(last: MidiGroup) -> (Keyed, FakeCounters) {
         .expect("builds");
     let _ = s.update();
     let keys = s.midi().devices().remove(0);
-    let keys = s.open_midi_input(keys).expect("opens");
+    let keys = s.open_input(keys).expect("opens");
     (Keyed::new(s, keys), fake)
 }
 

@@ -25,8 +25,11 @@ fn a_scanned_link_to_a_differently_named_target_loads_by_its_catalog_key() {
         .scan_dirs(vec![scanned])
         .probe_locator(Locator::at(tutti_fixtures::plugin_probe()));
     let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
-    let task = catalog.scan().expect("no scan is held");
-    let result = catalog.apply(task.run()).expect("this catalog's own scan");
+    let task = catalog
+        .scan(tutti_fixtures::executor().downgrade())
+        .expect("no scan is held");
+    let scanned = tutti_fixtures::block_on(task).expect("the executor lives");
+    let result = catalog.apply(scanned).expect("this catalog's own scan");
     assert!(result.failures().is_empty(), "{:?}", result.failures());
     let (listed, _) = catalog.iter().next().expect("the link is one row");
     assert_eq!(listed.path(), tutti_plugin_db::canonical_path(&target));

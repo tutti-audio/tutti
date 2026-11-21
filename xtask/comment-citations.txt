@@ -24,8 +24,7 @@
 1 crates/tutti-plugin-types/src/midi.rs
 1 crates/tutti-rt/src/seq_cell.rs
 2 crates/tutti-session/src/bounce.rs
-1 crates/tutti-session/src/edge.rs
-3 crates/tutti-session/src/graph.rs
+1 crates/tutti-session/src/graph.rs
 3 crates/tutti-session/src/key.rs
 1 crates/tutti-session/src/lib.rs
 8 crates/tutti-session/src/modulation.rs

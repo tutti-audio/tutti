@@ -236,8 +236,8 @@ pub use midi_load::{
 };
 #[cfg(feature = "midi-hardware")]
 pub use midi_port::{
-    MidiInput, MidiInputInfo, MidiOutput, MidiOutputInfo, MidiPortError, NoHardware,
-    OpenMidiOutput, PortCause,
+    MidiInput, MidiInputInfo, MidiOpenError, MidiOutput, MidiOutputInfo, MidiPortError, NoHardware,
+    OpenedMidiInput, OpenedMidiOutput, OpeningMidiInput, OpeningMidiOutput, PortCause,
 };
 #[cfg(feature = "midi")]
 pub use midi_report::MidiReport;

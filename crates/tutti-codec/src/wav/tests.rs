@@ -1,6 +1,7 @@
 use super::*;
+use crate::SpecError;
 use crate::test_sink::Full;
-use crate::{FormatWriter, SpecError};
+use crate::writer::FormatWriter;
 use std::io::Cursor;
 use tutti_units::SampleRate;
 
