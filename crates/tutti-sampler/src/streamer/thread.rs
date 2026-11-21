@@ -30,7 +30,9 @@ use super::metrics::Metrics;
 use super::step::StepOutcome;
 use super::step::StreamerCycle;
 use crate::Error;
-use crossbeam_channel::Receiver;
+use std::sync::mpsc::Receiver;
+#[cfg(any(test, feature = "testing"))]
+use tutti_rt::Exclusive;
 use tutti_rt::RingFloat;
 
 /// A streamer that is built and drives nothing yet: its queue, its shared
@@ -64,7 +66,7 @@ impl<F: RingFloat> Built<F> {
         seams: Seams,
         bells: &Bells,
     ) -> Self {
-        let (tx, rx) = crossbeam_channel::bounded(channel_capacity.max(1));
+        let (tx, rx) = std::sync::mpsc::sync_channel(channel_capacity.max(1));
         #[cfg(not(test))]
         let _ = seams;
         let (bell, listener) = bells.bell();
@@ -151,7 +153,7 @@ impl<F: RingFloat> Built<F> {
     /// The caller drives: its cycle is stepped by `Manual::step`.
     pub(super) fn manual(self) -> Manual<F> {
         Manual {
-            rx: Some(self.rx),
+            rx: Some(Exclusive::new(self.rx)),
             cycle: StreamerCycle::new(self.config),
             shared: self.shared,
         }
@@ -208,7 +210,9 @@ impl Drop for Running {
 /// There is no future to race, so a test can say "after this many cycles the ring
 /// holds audio"; it is the same `StreamerCycle::step` the future runs.
 pub struct Manual<F: RingFloat> {
-    rx: Option<Receiver<StreamerCommand<F>>>,
+    /// The queue's receiving end. `Exclusive` keeps `Manual` `Sync` (a receiver is
+    /// `Send`, not `Sync`): only `step`, through `&mut self`, reaches it.
+    rx: Option<Exclusive<Receiver<StreamerCommand<F>>>>,
     cycle: StreamerCycle<F>,
     shared: Handles<F>,
 }
@@ -226,9 +230,10 @@ impl<F: RingFloat> Manual<F> {
     /// apply directions and refills. Returns once that work
     /// is done, reporting what the future *would* have done next.
     pub(super) fn step(&mut self) -> StepOutcome {
-        let queue = self.rx.as_ref();
-        self.cycle
-            .step(&self.shared, || queue.and_then(|rx| rx.try_recv().ok()))
+        let queue = self.rx.as_mut().map(Exclusive::get_mut);
+        self.cycle.step(&self.shared, || {
+            queue.as_ref().and_then(|rx| rx.try_recv().ok())
+        })
     }
 
     /// How many streams the streamer holds (tests).
@@ -291,19 +296,31 @@ mod tests {
     fn a_send_wakes_an_idle_streamer() {
         let executor = Executor::new();
         let bells = Bells::new(&executor).expect("the bells' tick task");
-        let built = built(8, &bells);
+        // A queue of one: a send fits only once the streamer has drained the
+        // command before it, so each send that returns proves a drain.
+        let built = built(1, &bells);
         let tx = built.command_sender();
         let streamer = built.start(&executor).expect("the future starts");
 
+        tx.try_send(StreamerCommand::Close {
+            stream: StreamId::of(90),
+        })
+        .expect("room in an empty queue");
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let sender = thread::spawn(move || {
+            for stream in [StreamId::of(91), StreamId::of(92)] {
+                let _ = done_tx.send(tx.send(StreamerCommand::Close { stream }).is_ok());
+            }
+        });
         for stream in [StreamId::of(90), StreamId::of(91)] {
-            tx.try_send(StreamerCommand::Close { stream })
-                .expect("room in an empty queue");
-            assert!(
-                within(Duration::from_secs(10), || tx.is_empty()),
+            assert_eq!(
+                done_rx.recv_timeout(Duration::from_secs(10)),
+                Ok(true),
                 "command {stream} was never drained"
             );
         }
         drop(streamer);
+        sender.join().unwrap();
     }
 
     /// Dropping a streamer ends its future: the queue's receiver goes with it, so a
@@ -323,7 +340,7 @@ mod tests {
                 tx.try_send(StreamerCommand::Close {
                     stream: StreamId::of(1)
                 }),
-                Err(crossbeam_channel::TrySendError::Disconnected(_))
+                Err(std::sync::mpsc::TrySendError::Disconnected(_))
             )),
             "the future ended but the queue still accepts commands"
         );
