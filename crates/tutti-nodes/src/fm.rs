@@ -160,7 +160,10 @@ impl<F: Float> Kernel for FmKernel<F> {
     ) {
         let mut out = output.plane_mut(0);
         match &mut self.voice {
-            Some(voice) => voice.process(out),
+            // A block is at most the `max_block` the voice was prepared for.
+            Some(voice) => voice
+                .process(out)
+                .expect("a rendered block is at most the prepared max block"),
             None => out.samples_mut().fill(F::ZERO),
         }
     }

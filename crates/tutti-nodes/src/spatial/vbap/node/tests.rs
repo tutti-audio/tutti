@@ -573,7 +573,9 @@ fn a_signal_driven_bearing_crosses_the_seam_the_short_way() {
 fn solve(bed: Bed, azimuth: Azimuth) -> Vec<Gain> {
     let layout = SpeakerLayout::try_from(bed).unwrap();
     let mut gains = vec![Gain::SILENT; speaker_of_channel(bed).iter().flatten().count()];
-    layout.gains_into(azimuth, Elevation::LEVEL, Spread::POINT, &mut gains);
+    layout
+        .gains_into(azimuth, Elevation::LEVEL, Spread::POINT, &mut gains)
+        .unwrap();
     gains
 }
 
