@@ -873,7 +873,7 @@ fn drive_one_block(
 // # What this does and does not prove
 //
 // [`assert_no_alloc`] arms a *thread-local* counter, and the detection lives in
-// the `AllocDisabler` global allocator this crate's tests register (`lib.rs`). A violation calls
+// the `RtAllocCheck` global allocator this crate's tests register (`lib.rs`). A violation calls
 // `handle_alloc_error`, which aborts rather than unwinds — so a regression here
 // kills the test process rather than reporting a tidy failure. That is the
 // harness working, not a broken test.

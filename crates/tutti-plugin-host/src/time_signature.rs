@@ -152,7 +152,7 @@ mod tests {
     /// `assert_no_alloc`, and the host's install or clear lands while the
     /// borrow is live, under `permit_alloc`: the free of the replaced meter
     /// must then fall to the control side, never to the borrow's drop. The
-    /// lib test binary registers the `AllocDisabler` allocator
+    /// lib test binary registers the `RtAllocCheck` allocator
     /// (`process_pipeline_tests`). This pins the reader's code path; the race
     /// itself is `arc-lend`'s loom model's.
     #[test]

@@ -6,7 +6,6 @@
 //! Every test renders a harmony node into a sink that logs each harmony
 //! event with its absolute frame. 120 BPM at 48 kHz: a beat is 24 000 frames.
 
-use std::sync::{Arc, Mutex};
 use tutti_buffers::MaxBlock;
 
 use crate::common::{beat_of, connect, rolling};
@@ -25,7 +24,7 @@ use tutti_units::{Beat, Bpm, SampleRate, Samples};
 const RATE: f64 = 48_000.0;
 
 /// `(absolute frame, harmony)` of every harmony event the sink received.
-type Seen = Arc<Mutex<Vec<(u64, Harmony)>>>;
+type Seen = tutti_fixtures::Record<(u64, Harmony)>;
 
 /// Logs harmony; a silent mono output so a fork targeting it has one. A
 /// fork's clone logs into the same list.
@@ -66,11 +65,11 @@ fn rig(node: HarmonyNode, max: usize) -> (Editor, Executor, HarmonyControls, See
         MaxBlock::of(Samples::new(max)),
     ));
     let controls = ed.insert(NodeKey(1), "harmony", node).controls;
-    let seen = Seen::default();
+    let seen = tutti_fixtures::Record::new();
     ed.insert(
         NodeKey(2),
         "sink",
-        tutti_graph::ForkByClone(Sink(Arc::clone(&seen))),
+        tutti_graph::ForkByClone(Sink(seen.clone())),
     );
     connect(&mut ed, 1, 2);
     ed.spec_mut()
@@ -120,7 +119,7 @@ fn changes_land_on_their_frames_and_are_sent_once() {
         block(&mut exec, 512, rolling(b * 512));
     }
     assert_eq!(
-        *seen.lock().unwrap(),
+        seen.lock().unwrap().to_vec(),
         vec![
             (0, C),
             (0, C_MAJOR),
@@ -204,7 +203,7 @@ fn a_loop_pass_restates_only_what_changed() {
             TransportPosition::new(true, Bpm::of(120.0), beat_of(start), lp),
         );
 
-        seen.lock().unwrap().clone()
+        seen.lock().unwrap().to_vec()
     };
     assert_eq!(
         render(12_000 + SIXTY_FOURTH, 12_000 + 2 * SIXTY_FOURTH),
@@ -245,7 +244,7 @@ fn a_change_on_the_loops_start_is_each_passs_context() {
         .flat_map(|k| [(375 * k, C), (375 * k + 200, G)])
         .filter(|&(f, _)| f < 2_048)
         .collect();
-    assert_eq!(*seen.lock().unwrap(), want);
+    assert_eq!(seen.lock().unwrap().to_vec(), want);
 }
 
 /// **New lanes re-state from the next block; the same lanes cut nothing.**

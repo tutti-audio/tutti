@@ -1,11 +1,9 @@
 //! The nodes' allocation gates: each node's audio-thread path, alone and through
-//! an engine. The binary installs `AllocDisabler`, so an allocation inside an
+//! an engine. The binary installs `RtAllocCheck`, so an allocation inside an
 //! `assert_no_alloc` closure aborts.
 
-use assert_no_alloc::AllocDisabler;
-
 #[global_allocator]
-static ALLOC: AllocDisabler = AllocDisabler;
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
 mod rt_no_alloc;
 mod rt_no_alloc_bit_crusher;

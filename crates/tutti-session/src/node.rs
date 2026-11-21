@@ -440,7 +440,7 @@ fn voice_slots<F: tutti_sampler::SamplerFloat>(
 #[cfg(feature = "sampler")]
 impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoiceNode<F> {
     fn bind_tempo(self, tempo: &tutti_timeline::TempoReader) -> Self {
-        self.with_tempo(tempo.clone())
+        self.tempo(tempo.clone())
     }
 
     fn params(controls: &tutti_sampler::VoiceNodeHandle<F>) -> Option<ParamSet> {
@@ -461,7 +461,7 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoiceNode
 #[cfg(feature = "sampler")]
 impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoicePool<F> {
     fn bind_tempo(self, tempo: &tutti_timeline::TempoReader) -> Self {
-        self.with_tempo(tempo.clone())
+        self.tempo(tempo.clone())
     }
 
     fn reclaimer(controls: &tutti_sampler::VoicePoolHandle<F>) -> Reclaims {
@@ -473,7 +473,7 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoicePool
 #[cfg(feature = "sampler")]
 impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::MemorySource<F> {
     fn bind_tempo(self, tempo: &tutti_timeline::TempoReader) -> Self {
-        self.with_tempo(tempo.clone())
+        self.tempo(tempo.clone())
     }
 
     fn reclaimer(_: &ParamSet) -> Reclaims {
@@ -492,7 +492,7 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::MemorySou
 #[cfg(feature = "sampler")]
 impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::Clip<F> {
     fn bind_tempo(self, tempo: &tutti_timeline::TempoReader) -> Self {
-        self.with_tempo(tempo.clone())
+        self.tempo(tempo.clone())
     }
 
     fn params(controls: &tutti_sampler::VoiceNodeHandle<F>) -> Option<ParamSet> {
@@ -513,7 +513,7 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::Clip<F> {
 #[cfg(feature = "sampler")]
 impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::DiskVoice<F> {
     fn bind_tempo(self, tempo: &tutti_timeline::TempoReader) -> Self {
-        self.with_tempo(tempo.clone())
+        self.tempo(tempo.clone())
     }
 
     fn reclaimer(_: &tutti_sampler::DiskVoiceControls) -> Reclaims {

@@ -60,7 +60,7 @@ fn the_measurement_vocabulary_arrives_and_converts() {
 #[test]
 fn the_dsp_library_and_the_node_contract_are_reachable() {
     // A `tutti-nodes` unit, built and driven through `tutti::` alone.
-    let _lfo = tutti::nodes::LfoNode::from(LfoConfig::new(tutti::nodes::LfoShape::Sine));
+    let _lfo = tutti::nodes::LfoNode::from(LfoConfig::new(tutti::modulation::LfoShape::Sine));
     // The node contract, `tutti::graph::Node`, on a node whose crate is a
     // dev-dependency.
     let node = Const::frame(&[0.5, 0.5]);

@@ -5,7 +5,7 @@
 
 use tutti_graph::testing as common;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use common::prepare;
 use tutti_buffers::ChannelLayout;
@@ -21,7 +21,7 @@ use tutti_ump::Ump;
 use tutti_units::{At, Beat, Bpm, Frame, ParamId, Samples, Tail};
 
 /// `(absolute frame, block start, offset, tag)` per event received.
-type Log = Arc<Mutex<Vec<(u64, u64, u32, u32)>>>;
+type Log = tutti_fixtures::Record<(u64, u64, u32, u32)>;
 
 const PROBE: NodeKey = NodeKey(7);
 const MAX: usize = 64;
@@ -118,13 +118,13 @@ struct Rig {
 }
 
 fn rig() -> Rig {
-    let (exec_log, ref_log) = (Log::default(), Log::default());
+    let (exec_log, ref_log) = (tutti_fixtures::Record::new(), tutti_fixtures::Record::new());
     let (mut ed, mut exec) = Editor::new(prepare(MAX));
     ed.insert(
         PROBE,
         "probe",
         Unforkable(Probe {
-            log: Arc::clone(&exec_log),
+            log: exec_log.clone(),
             level: 0.0,
         }),
     );
@@ -143,7 +143,7 @@ fn rig() -> Rig {
         [(
             PROBE,
             Box::new(Probe {
-                log: Arc::clone(&ref_log),
+                log: ref_log.clone(),
                 level: 0.0,
             }) as Box<dyn Node>,
         )]
@@ -202,7 +202,7 @@ fn a_command_lands_on_its_exact_frame_across_ragged_blocks() {
         rig.block(n, &transport);
     }
     for log in [&rig.exec_log, &rig.ref_log] {
-        let got = log.lock().unwrap().clone();
+        let got = log.lock().unwrap().to_vec();
         let want: Vec<(u64, u64, u32, u32)> = targets
             .iter()
             .enumerate()
@@ -247,7 +247,7 @@ fn a_late_command_lands_at_the_next_block_and_is_counted() {
     rig.block(32, &t);
     for log in [&rig.exec_log, &rig.ref_log] {
         assert_eq!(
-            log.lock().unwrap().clone(),
+            log.lock().unwrap().to_vec(),
             vec![(128, 128, 0, 1), (128, 128, 0, 2)],
             "both at offset 0 of the block starting at 128, in scheduling order"
         );
@@ -280,7 +280,7 @@ fn a_beat_command_lands_where_the_transport_reaches_it() {
     rig.block(64, &t);
     for log in [&rig.exec_log, &rig.ref_log] {
         assert_eq!(
-            log.lock().unwrap().clone(),
+            log.lock().unwrap().to_vec(),
             vec![(frame + 10, frame, 10, 3)]
         );
     }
@@ -414,7 +414,7 @@ fn scheduling_needs_a_plan() {
 
 /// Passes its audio through and adds 1.0 on the frame of every event, which
 /// it also logs as `(absolute frame, tag)`.
-struct Impulse(Arc<Mutex<Vec<(u64, u32)>>>);
+struct Impulse(tutti_fixtures::Record<(u64, u32)>);
 
 impl Node for Impulse {
     fn shape(&self) -> Shape {
@@ -449,17 +449,17 @@ fn a_scheduled_command_is_compensated_like_an_upstream_event() {
     const LAT: NodeKey = NodeKey(1);
     const A: NodeKey = NodeKey(2);
     const B: NodeKey = NodeKey(3);
-    let units = |log: &Arc<Mutex<Vec<(u64, u32)>>>| -> Vec<(NodeKey, Box<dyn Node>)> {
+    let units = |log: &tutti_fixtures::Record<(u64, u32)>| -> Vec<(NodeKey, Box<dyn Node>)> {
         vec![
             (
                 LAT,
                 Box::new(common::TestNode::new(common::Kind::Lag { latency: 20 })),
             ),
-            (A, Box::new(Impulse(Arc::clone(log)))),
-            (B, Box::new(Impulse(Arc::clone(log)))),
+            (A, Box::new(Impulse(log.clone()))),
+            (B, Box::new(Impulse(log.clone()))),
         ]
     };
-    let (exec_log, ref_log) = (Arc::default(), Arc::default());
+    let (exec_log, ref_log) = (tutti_fixtures::Record::new(), tutti_fixtures::Record::new());
     let (mut ed, mut exec) = Editor::new(prepare(MAX));
     for (k, u) in units(&exec_log) {
         ed.insert(k, "n", Unforkable(u));
@@ -526,7 +526,7 @@ fn a_scheduled_command_is_compensated_like_an_upstream_event() {
         routs[1].extend(b);
     }
     for (log, out) in [(&exec_log, &outs), (&ref_log, &routs)] {
-        let mut got = log.lock().unwrap().clone();
+        let mut got = log.lock().unwrap().to_vec();
         got.sort();
         assert_eq!(
             got,
@@ -563,13 +563,13 @@ fn a_scheduled_command_is_compensated_like_an_upstream_event() {
 fn a_command_waits_for_the_commit_it_was_checked_against() {
     use std::sync::atomic::{AtomicBool, Ordering};
     const ROUNDS: u32 = 3_000;
-    let log: Log = Arc::default();
+    let log: Log = tutti_fixtures::Record::new();
     let (mut ed, mut exec) = Editor::new(prepare(MAX));
     ed.insert(
         NodeKey(0),
         "probe",
         Unforkable(Probe {
-            log: Arc::clone(&log),
+            log: log.clone(),
             level: 0.0,
         }),
     );
@@ -591,7 +591,7 @@ fn a_command_waits_for_the_commit_it_was_checked_against() {
             key,
             "probe",
             Unforkable(Probe {
-                log: Arc::clone(&log),
+                log: log.clone(),
                 level: 0.0,
             }),
         );
@@ -941,12 +941,12 @@ fn beat_resolution_matches_a_hand_computed_table() {
         },
     ];
     for case in cases {
-        let log: Arc<Mutex<Vec<(u64, u32)>>> = Arc::default();
-        let ref_log: Arc<Mutex<Vec<(u64, u32)>>> = Arc::default();
+        let log: tutti_fixtures::Record<(u64, u32)> = tutti_fixtures::Record::new();
+        let ref_log: tutti_fixtures::Record<(u64, u32)> = tutti_fixtures::Record::new();
         let (lat, sink) = (NodeKey(1), NodeKey(2));
         let (mut ed, mut exec) = Editor::new(prepare(500));
         let mut reference = Reference::new(prepare(500));
-        let build = |ed: &mut Editor, log: &Arc<Mutex<Vec<(u64, u32)>>>| {
+        let build = |ed: &mut Editor, log: &tutti_fixtures::Record<(u64, u32)>| {
             ed.insert(
                 lat,
                 "lag",
@@ -954,7 +954,7 @@ fn beat_resolution_matches_a_hand_computed_table() {
                     latency: case.arrival,
                 })),
             );
-            ed.insert(sink, "impulse", Unforkable(Impulse(Arc::clone(log))));
+            ed.insert(sink, "impulse", Unforkable(Impulse(log.clone())));
         };
         build(&mut ed, &log);
         let t = &mut ed.spec_mut().topology;
@@ -983,7 +983,7 @@ fn beat_resolution_matches_a_hand_computed_table() {
                 latency: case.arrival,
             })),
         );
-        units.insert(sink, Box::new(Impulse(Arc::clone(&ref_log))));
+        units.insert(sink, Box::new(Impulse(ref_log.clone())));
         reference.set_graph(&ed.spec().validate().unwrap(), units);
         let to = EventIn {
             node: sink,
@@ -1000,8 +1000,18 @@ fn beat_resolution_matches_a_hand_computed_table() {
             reference.process(500, tr, &[&silence[..]], &mut []);
         }
         let want: Vec<(u64, u32)> = case.want.iter().map(|&(f, _)| (f, 9)).collect();
-        assert_eq!(*log.lock().unwrap(), want, "executor: {}", case.name);
-        assert_eq!(*ref_log.lock().unwrap(), want, "reference: {}", case.name);
+        assert_eq!(
+            log.lock().unwrap().to_vec(),
+            want,
+            "executor: {}",
+            case.name
+        );
+        assert_eq!(
+            ref_log.lock().unwrap().to_vec(),
+            want,
+            "reference: {}",
+            case.name
+        );
         let late = u64::from(case.want.is_some_and(|w| w.1));
         assert_eq!(exec.late_command_count(), late, "{}", case.name);
         assert_eq!(reference.late_command_count(), late, "{}", case.name);
@@ -1015,14 +1025,14 @@ fn beat_resolution_matches_a_hand_computed_table() {
 #[test]
 fn an_unroutable_command_is_timed_by_its_nodes_arrival() {
     let (lat, sink) = (NodeKey(1), NodeKey(2));
-    let log: Arc<Mutex<Vec<(u64, u32)>>> = Arc::default();
+    let log: tutti_fixtures::Record<(u64, u32)> = tutti_fixtures::Record::new();
     let (mut ed, mut exec) = Editor::new(prepare(MAX));
     ed.insert(
         lat,
         "lag",
         Unforkable(common::TestNode::new(common::Kind::Lag { latency: 20 })),
     );
-    ed.insert(sink, "impulse", Unforkable(Impulse(Arc::clone(&log))));
+    ed.insert(sink, "impulse", Unforkable(Impulse(log.clone())));
     let t = &mut ed.spec_mut().topology;
     t.inputs = ChannelLayout::MONO;
     t.edges.insert(
@@ -1048,7 +1058,7 @@ fn an_unroutable_command_is_timed_by_its_nodes_arrival() {
         lat,
         Box::new(common::TestNode::new(common::Kind::Lag { latency: 20 })),
     );
-    units.insert(sink, Box::new(Impulse(Arc::default())));
+    units.insert(sink, Box::new(Impulse(tutti_fixtures::Record::new())));
     reference.set_graph(&ed.spec().validate().unwrap(), units);
 
     let to = EventIn {
@@ -1259,8 +1269,12 @@ impl Node for Plain {
 
 /// The log of both interpreters, which must agree.
 fn logs(rig: &Rig) -> Vec<(u64, u64, u32, u32)> {
-    let exec = rig.exec_log.lock().unwrap().clone();
-    assert_eq!(exec, *rig.ref_log.lock().unwrap(), "the interpreters agree");
+    let exec = rig.exec_log.lock().unwrap().to_vec();
+    assert_eq!(
+        exec,
+        rig.ref_log.lock().unwrap().to_vec(),
+        "the interpreters agree"
+    );
     exec
 }
 
@@ -1402,7 +1416,7 @@ fn cancel_takes_a_param_command_back() {
     rig.ed.cancel(gone).expect("room");
     rig.exec.process(64, &t, &[], &mut [&mut [0.0; 64][..]]);
     assert_eq!(
-        rig.exec_log.lock().unwrap().clone(),
+        rig.exec_log.lock().unwrap().to_vec(),
         vec![(20, 0, 20, PARAM_TAG | 8)],
         "only the one not cancelled landed"
     );

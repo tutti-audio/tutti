@@ -24,7 +24,48 @@ use tutti_units::{Bpm, SampleRate, Samples};
 struct Tally {
     ons: usize,
     offs: usize,
-    held: std::collections::BTreeSet<u32>,
+    held: Keys,
+}
+
+/// The keys held, one flag per channel and note, so an insert or a remove on the
+/// audio thread allocates nothing.
+struct Keys {
+    on: Vec<bool>,
+    count: usize,
+}
+
+impl Default for Keys {
+    fn default() -> Self {
+        Self {
+            on: vec![false; 16 * 128],
+            count: 0,
+        }
+    }
+}
+
+impl Keys {
+    /// The flag of a key word (channel and note).
+    fn flag(&mut self, key: u32) -> &mut bool {
+        &mut self.on[(((key >> 16) & 0xf) * 128 + ((key >> 8) & 0x7f)) as usize]
+    }
+    fn insert(&mut self, key: u32) {
+        let flag = self.flag(key);
+        if !std::mem::replace(flag, true) {
+            self.count += 1;
+        }
+    }
+    fn remove(&mut self, key: u32) {
+        let flag = self.flag(key);
+        if std::mem::replace(flag, false) {
+            self.count -= 1;
+        }
+    }
+    fn len(&self) -> usize {
+        self.count
+    }
+    fn is_empty(&self) -> bool {
+        self.count == 0
+    }
 }
 
 struct Sink(Arc<Mutex<Tally>>);
@@ -43,7 +84,7 @@ impl Node for Sink {
             let key = w[0] & 0x000f_7f00; // channel and note
             if e.is_note_off() {
                 t.offs += 1;
-                t.held.remove(&key);
+                t.held.remove(key);
             } else {
                 t.ons += 1;
                 t.held.insert(key);
