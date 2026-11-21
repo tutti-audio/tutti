@@ -13,7 +13,7 @@ use futures_channel::oneshot;
 /// ended): an answer cancelled. A poll never blocks, and the sender's thread
 /// wakes the task.
 ///
-/// Made by [`Answer::channel`] (the hosting) or [`answered`] (a value already
+/// Made by [`Answer::channel`] (the hosting) or [`Answer::ready`] (a value already
 /// known). Dropping it discards the answer: a later send is told so.
 #[derive(Debug)]
 #[must_use = "an answer does nothing unless it is awaited"]
