@@ -494,6 +494,7 @@ fn a_weak_executor_keeps_no_executor_alive_and_upgrades_while_one_lives() {
         })
         .detach();
     armed_rx.recv_timeout(HANG_GUARD).unwrap();
+    assert!(weak.is_alive(), "a clone lives");
     let upgraded = weak.upgrade().expect("a clone lives, so it upgrades");
     assert_eq!(
         wait(upgraded.spawn(async { 6 * 7 })),
@@ -503,6 +504,7 @@ fn a_weak_executor_keeps_no_executor_alive_and_upgrades_while_one_lives() {
     drop(upgraded);
     drop(threads);
     drop(executor);
+    assert!(!weak.is_alive(), "no clone lives");
     assert_eq!(
         Arc::strong_count(&marker),
         1,
@@ -775,6 +777,33 @@ fn a_stop_deadline_is_shared_by_every_join() {
     assert_eq!(deadline.left(t0 + spent), os::STOP_BOUND - spent);
     assert_eq!(deadline.left(t0 + os::STOP_BOUND), Duration::ZERO);
     assert_eq!(deadline.left(t0 + os::STOP_BOUND * 3), Duration::ZERO);
+}
+
+/// **`join` waits for a task that runs on another thread and returns its output.** The
+/// dedicated future ends only once the test sends after `join` was entered on another
+/// thread, so the output can only come back through the wait.
+#[test]
+fn join_waits_for_a_task_run_elsewhere_and_returns_its_output() {
+    let executor = Executor::new();
+    let (go, wait) = mpsc::channel::<u32>();
+    let task = executor
+        .spawn_dedicated("joined", None, async move { wait.recv().unwrap() * 2 })
+        .unwrap();
+    let (out, joined) = mpsc::channel();
+    let waiter = thread::spawn(move || out.send(join(task)).unwrap());
+    go.send(21).unwrap();
+    assert_eq!(joined.recv_timeout(HANG_GUARD).unwrap(), Some(42));
+    waiter.join().unwrap();
+}
+
+/// **A task the executor drops instead of finishing joins as `None`.** A queued task no
+/// driver ran is dropped when its executor shuts down, and the wait ends with nothing.
+#[test]
+fn join_of_a_task_dropped_at_shutdown_is_none() {
+    let executor = Executor::new();
+    let task = executor.spawn(async { 7 });
+    drop(executor);
+    assert_eq!(join(task), None);
 }
 
 #[cfg(target_os = "linux")]

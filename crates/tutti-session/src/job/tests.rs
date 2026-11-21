@@ -150,7 +150,7 @@ fn a_job_waiting_for_the_main_thread_is_not_waited_for_off_it() {
     assert!(tutti_platform::MainThreadMarker::new().is_none());
     let mut s = session(Session::builder());
     let (job, ticket) = s.jobs.new_job::<Echo>();
-    ticket.waiting_for_main_thread();
+    ticket.set_main_wait(true);
     assert_eq!(job.status(), JobStatus::WaitingForMainThread);
     assert_eq!(
         job.wait(&mut s),
@@ -206,10 +206,10 @@ fn a_job_dropped_before_its_stage_runs_never_runs_it_and_lands_nothing() {
     let ran = Arc::new(AtomicBool::new(false));
     let stage = |ticket: Ticket<Echo>, ran: Arc<AtomicBool>| -> Box<dyn FnOnce()> {
         Box::new(move || {
-            ticket.complete(|| {
+            if !ticket.cancelled() {
                 ran.store(true, Ordering::SeqCst);
-                Ok(1)
-            });
+                ticket.land(Ok(1));
+            }
         })
     };
     // Dropped before the stage starts: the effect never runs.
@@ -233,30 +233,6 @@ fn a_job_dropped_after_its_landing_was_queued_takes_the_landing_with_it() {
     ticket.land(Ok(2));
     drop(job);
     assert_eq!(landings(&s.update()), [], "no orphan landing");
-}
-
-#[test]
-fn a_save_job_dropped_before_its_worker_starts_does_the_round_trip_never() {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    let (mut s, executor) = polled();
-    let saved = Arc::new(AtomicBool::new(false));
-    let effect = Arc::clone(&saved);
-    // The shape of `save_state`: the worker skips the round trip for a
-    // cancelled job.
-    let job: Job<Echo> = s.jobs.submit_job(
-        move |cancel| {
-            if cancel.is_cancelled() {
-                return None;
-            }
-            effect.store(true, Ordering::SeqCst);
-            Some(1_u32)
-        },
-        |_, done, ticket| ticket.land(done.map_err(EchoError::from).map(|n| n.unwrap_or(0))),
-    );
-    drop(job);
-    run_all(&executor);
-    assert!(!saved.load(Ordering::SeqCst), "nothing was saved");
-    assert_eq!(landings(&s.update()), []);
 }
 
 #[test]

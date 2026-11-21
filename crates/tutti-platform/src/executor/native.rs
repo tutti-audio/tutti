@@ -86,6 +86,19 @@ pub(super) fn unblock<T: Send + 'static>(
     handle.own.blocking.unblock(f)
 }
 
+/// Parks the calling thread until `task` ends: the task's waker unparks it.
+pub(super) fn join<T>(task: Task<T>) -> Option<T> {
+    let mut ended = pin!(task.fallible());
+    let waker = Waker::from(Arc::new(Unpark(thread::current())));
+    let mut cx = Context::from_waker(&waker);
+    loop {
+        if let Poll::Ready(output) = ended.as_mut().poll(&mut cx) {
+            return output;
+        }
+        thread::park();
+    }
+}
+
 /// Unparks the thread that polls.
 struct Unpark(Thread);
 

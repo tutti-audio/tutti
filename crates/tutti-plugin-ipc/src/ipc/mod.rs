@@ -587,6 +587,7 @@ impl Ipc {
         // watch, so the stream's end and the process's end set one latch.
         let mut guard = server.server;
         let (bridge, thread, replies) = PluginBridge::new(
+            executor,
             config.socket_path.clone(),
             origin.clone(),
             format,
