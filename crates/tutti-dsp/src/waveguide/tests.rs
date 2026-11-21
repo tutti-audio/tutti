@@ -23,7 +23,7 @@ fn string_at(excitation: f64, pickup: f64, t60: f64) -> WaveguideString<f64> {
             excitation: Normalized::of(excitation),
             pickup: Normalized::of(pickup),
         },
-        Hz::new(50.0),
+        LowestPitch::new(Hz::new(50.0)).unwrap(),
         SampleRate::of(RATE),
     );
     s.retarget(&WaveguideControls {
@@ -191,7 +191,7 @@ fn positions_and_frequencies_are_held_inside_the_string() {
             excitation: Normalized::of(0.0),
             pickup: Normalized::of(1.0),
         },
-        Hz::new(50.0),
+        LowestPitch::new(Hz::new(50.0)).unwrap(),
         SampleRate::of(RATE),
     );
     assert_eq!(
@@ -204,4 +204,32 @@ fn positions_and_frequencies_are_held_inside_the_string() {
         decay: Seconds::new(1.0),
     });
     assert_eq!(high.tuning().0.get(), 3);
+}
+
+/// Every channel of a width-3 bank is a string: an impulse on each channel rings on each of
+/// them.
+#[test]
+fn every_channel_of_a_three_wide_bank_rings() {
+    let mut bank = WaveguideBank::<f64>::new(
+        WaveguidePositions {
+            excitation: Normalized::of(0.2),
+            pickup: Normalized::of(0.7),
+        },
+        LowestPitch::new(Hz::new(50.0)).unwrap(),
+        SampleRate::of(RATE),
+        NonZeroU16::new(3).unwrap(),
+    );
+    let mut x = vec![0.0; 1024];
+    x[0] = 1.0;
+    let mut y = vec![vec![0.0; 1024]; 3];
+    let [y0, y1, y2] = &mut y[..] else {
+        unreachable!()
+    };
+    bank.process(
+        Planes::new(&[&x[..], &x[..], &x[..]]).unwrap(),
+        PlanesMut::new(&mut [&mut y0[..], &mut y1[..], &mut y2[..]]).unwrap(),
+    );
+    for (c, ch) in y.iter().enumerate() {
+        assert!(ch.iter().any(|v| *v != 0.0), "channel {c} is silent");
+    }
 }

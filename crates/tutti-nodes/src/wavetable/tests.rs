@@ -1,5 +1,6 @@
 use super::*;
 use crate::test_support::{RATE, render_f64};
+use core::num::NonZeroU16;
 use tutti_buffers::{Mono, Planes};
 use tutti_graph::contract::{Direct, assert_param_fork, drive};
 
@@ -18,7 +19,7 @@ fn sine_cycle<F: Float>() -> Vec<F> {
 
 fn sine_node(frequency: f64) -> WavetableNode<f32> {
     WavetableNode::from(
-        WavetableConfig::new(ChannelLayout::MONO, table(&[&sine_cycle::<f32>()]))
+        WavetableConfig::new(NonZeroU16::MIN, table(&[&sine_cycle::<f32>()]))
             .frequency(Hz::new(frequency)),
     )
 }
@@ -26,7 +27,7 @@ fn sine_node(frequency: f64) -> WavetableNode<f32> {
 /// Two frames of a constant, `0.25` and `0.75`: every level of each is its constant.
 fn two_levels_node() -> WavetableNode<f32> {
     WavetableNode::from(WavetableConfig::new(
-        ChannelLayout::MONO,
+        NonZeroU16::MIN,
         table(&[&[0.25f32; 16][..], &[0.75f32; 16][..]]),
     ))
 }
@@ -51,7 +52,7 @@ fn a_fork_shares_no_cell_and_shares_the_table() {
 #[test]
 fn the_shape_is_a_source_of_the_width_declaring_frequency_level_then_position() {
     let node = WavetableNode::from(
-        WavetableConfig::new(3u16, table(&[&sine_cycle::<f32>()]))
+        WavetableConfig::new(NonZeroU16::new(3).unwrap(), table(&[&sine_cycle::<f32>()]))
             .frequency(Hz::new(330.0))
             .level(Amplitude::new(0.25))
             .position(Normalized::of(0.5)),
@@ -72,7 +73,10 @@ fn the_shape_is_a_source_of_the_width_declaring_frequency_level_then_position() 
 #[test]
 fn every_channel_of_the_width_carries_the_one_signal() {
     let mut d = Direct::new(
-        WavetableNode::from(WavetableConfig::new(3u16, table(&[&sine_cycle::<f32>()]))),
+        WavetableNode::from(WavetableConfig::new(
+            NonZeroU16::new(3).unwrap(),
+            table(&[&sine_cycle::<f32>()]),
+        )),
         RATE,
         256,
     );
@@ -91,7 +95,7 @@ fn in_an_f64_graph_a_sine_table_is_a_sine_within_the_interpolation_bound() {
     let t = table(&[&sine_cycle::<f64>()]);
     let bound = t.interpolation_error(1) + 1e-12;
     let node = WavetableNode::from(
-        WavetableConfig::new(ChannelLayout::MONO, t)
+        WavetableConfig::new(NonZeroU16::MIN, t)
             .frequency(Hz::new(1_000.0))
             .level(Amplitude::new(1.0 / 3.0)),
     );
@@ -111,7 +115,7 @@ fn level_scales_the_output_exactly() {
     let full = render(sine_node(997.0), 512);
     let half = render(
         WavetableNode::from(
-            WavetableConfig::new(ChannelLayout::MONO, table(&[&sine_cycle::<f32>()]))
+            WavetableConfig::new(NonZeroU16::MIN, table(&[&sine_cycle::<f32>()]))
                 .frequency(Hz::new(997.0))
                 .level(Amplitude::new(0.5)),
         ),

@@ -9,6 +9,7 @@
 //! the output with an impulse, because the number alone cannot fail on a node
 //! whose DSP drifted away from it.
 
+use core::num::NonZeroU16;
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock, Mono, Planes};
 use tutti_dsp::{Inline, Tap, Taps};
 use tutti_graph::contract::{drive, prepared};
@@ -145,16 +146,14 @@ fn early_reflections_and_the_decorrelator_report_zero_latency() {
         }])
         .unwrap(),
     };
-    let er = EarlyReflectionsNode::<f32>::try_from(EarlyReflectionsConfig::new(
-        ChannelLayout::MONO,
-        taps,
-    ))
-    .unwrap();
+    let er =
+        EarlyReflectionsNode::<f32>::try_from(EarlyReflectionsConfig::new(NonZeroU16::MIN, taps))
+            .unwrap();
     assert_eq!(declared(&er), Latency::ZERO);
     let out = impulse_response(er, 512);
     assert_eq!(onsets(&out[0]), vec![300]);
 
-    let dec = DecorrelatorNode::<f32>::from(DecorrelatorConfig::new(ChannelLayout::MONO));
+    let dec = DecorrelatorNode::<f32>::from(DecorrelatorConfig::new(NonZeroU16::MIN));
     assert_eq!(declared(&dec), Latency::ZERO);
 }
 
@@ -369,7 +368,7 @@ fn a_limiter_summed_with_a_dry_path_reports_the_limiter_latency() {
 #[test]
 fn pitch_shifter_dry_and_wet_leave_together_at_the_reported_latency() {
     for mix in [0.0_f64, 0.5, 1.0] {
-        let node = PitchShifterNode::<f32>::from(PitchShifterConfig::new(1u16));
+        let node = PitchShifterNode::<f32>::from(PitchShifterConfig::new(NonZeroU16::MIN));
         let latency = declared(&prepared(node.clone(), SR, BLOCK)).samples().get();
         let out = mixed_impulse_response(node, latency + 256, Mix::new(mix));
         // The impulse is 1.0 at the unity COLA sum, to the transforms' rounding; the bound is

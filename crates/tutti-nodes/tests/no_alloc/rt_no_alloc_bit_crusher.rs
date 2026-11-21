@@ -1,7 +1,7 @@
 //! Regression gate: the bit crusher must not allocate per block, held and with its depth
 //! and hold moved between blocks.
 
-use tutti_buffers::ChannelLayout;
+use core::num::NonZeroU16;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{BitCrusherConfig, BitCrusherNode};
 use tutti_units::{SampleRate, UnitParam};
@@ -10,7 +10,7 @@ use tutti_units::{SampleRate, UnitParam};
 /// each.
 #[test]
 fn bit_crusher_process_is_allocation_free_with_the_controls_moving() {
-    let node = BitCrusherNode::<f32>::from(BitCrusherConfig::new(ChannelLayout::STEREO));
+    let node = BitCrusherNode::<f32>::from(BitCrusherConfig::new(NonZeroU16::new(2).unwrap()));
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
     for (c, ch) in rig.inputs_mut().iter_mut().enumerate() {
         let ch = ch.into_samples_mut();

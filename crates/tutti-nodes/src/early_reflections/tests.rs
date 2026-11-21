@@ -1,5 +1,6 @@
 use super::*;
 use crate::test_support::{RATE, prepared, render_chunked};
+use core::num::NonZeroU16;
 use tutti_dsp::{Inline, Tap};
 use tutti_graph::Node;
 use tutti_graph::contract::assert_declared_tail;
@@ -15,7 +16,7 @@ fn tap(delay: f64, gain: f64, channel: u8) -> Tap {
 
 fn config(width: u16, taps: &[Tap]) -> EarlyReflectionsConfig {
     EarlyReflectionsConfig::new(
-        width,
+        NonZeroU16::new(width).unwrap(),
         Taps {
             taps: Inline::from_slice(taps).unwrap(),
         },
@@ -27,7 +28,7 @@ fn node(width: u16, taps: &[Tap]) -> EarlyReflectionsNode<f32> {
 }
 
 /// The shape is the input's width in and a channel for each one a tap feeds out, with no
-/// latency; an empty layout is mono; the tail is the last tap, and the output holds to it.
+/// latency; the tail is the last tap, and the output holds to it.
 #[test]
 fn the_shape_is_the_input_width_to_the_taps_channels_with_no_latency() {
     let taps = [tap(3.0, 0.5, 0), tap(40.0, -0.25, 1)];
@@ -40,7 +41,8 @@ fn the_shape_is_the_input_width_to_the_taps_channels_with_no_latency() {
     assert_eq!(shape.latency, tutti_units::Latency::new(Samples::ZERO));
     assert_eq!(shape.tail, Tail::Finite(Samples::new(40)));
     assert_declared_tail(&mut n, RATE);
-    assert_eq!(node(0, &taps).shape().audio_in().count(), 1);
+    assert_eq!(node(1, &taps).shape().audio_in().count(), 1);
+    assert_eq!(node(1, &taps).shape().audio_out().count(), 2);
 }
 
 /// An impulse through the node is the taps' gains at their delays on their channels, whatever
@@ -91,7 +93,8 @@ fn a_rooms_taps_are_a_stage_that_rings_for_its_last_image() {
     let taps = room.taps(RATE);
     let last = taps.taps.iter().map(|t| t.delay).next_back().unwrap();
     let n = prepared(
-        EarlyReflectionsNode::<f32>::try_from(EarlyReflectionsConfig::new(1u16, taps)).unwrap(),
+        EarlyReflectionsNode::<f32>::try_from(EarlyReflectionsConfig::new(NonZeroU16::MIN, taps))
+            .unwrap(),
     );
     assert_eq!(n.shape().audio_out().count(), 1);
     assert_eq!(n.shape().tail, Tail::Finite(last.to_samples_ceil()));

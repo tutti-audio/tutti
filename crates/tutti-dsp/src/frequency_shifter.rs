@@ -20,6 +20,7 @@
 //! The network is a phase network, not a delay, so it reports no latency. It rings for the
 //! slowest pole's decay ([`tail`](FrequencyShifterBank::tail)).
 
+use core::num::{NonZeroU16, NonZeroUsize};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{Feedback, Hz, Phase, Radians, SampleRate, Samples, Tail};
 
@@ -79,12 +80,13 @@ struct Network<F: Float> {
     held: F,
 }
 
+/// The delay of each all-pass of the Hilbert network, in frames.
+const TWO: NonZeroUsize = NonZeroUsize::new(2).unwrap();
+
 impl<F: Float> Network<F> {
     fn new() -> Self {
         let chain = |a: [f64; 4]| {
-            a.map(|a| {
-                AllPassFilter::new(AllPassForm::Lattice, Samples::new(2), Feedback::new(a * a))
-            })
+            a.map(|a| AllPassFilter::new(AllPassForm::Lattice, TWO, Feedback::new(a * a)))
         };
         Self {
             first: chain(FIRST),
@@ -122,13 +124,13 @@ pub struct FrequencyShifterBank<F: Float> {
 }
 
 impl<F: Float> FrequencyShifterBank<F> {
-    /// A silent shifter of `width` channels (at least one) at `rate`, not shifting, the
+    /// A silent shifter of `width` channels at `rate`, not shifting, the
     /// carrier at phase 0. Allocates.
     #[must_use]
-    pub fn new(width: usize, rate: SampleRate) -> Self {
+    pub fn new(width: NonZeroU16, rate: SampleRate) -> Self {
         Self {
             rate,
-            networks: (0..width.max(1)).map(|_| Network::new()).collect(),
+            networks: (0..width.get()).map(|_| Network::new()).collect(),
             sine: Oscillator::new(OscillatorWave::Sine),
             cosine: Oscillator::at(OscillatorWave::Sine, Phase::new(0.25)),
             controls: FrequencyShifterControls::DEFAULT,

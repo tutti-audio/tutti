@@ -27,7 +27,8 @@
 //! (a coefficient in `0..=0.6`, a gain in `Feedback`'s, a pole in `0..1`), so every
 //! intermediate point is a valid design and `|L| < 1` holds throughout the glide.
 
-use tutti_buffers::{ChannelLayout, Float, Planes, PlanesMut};
+use core::num::{NonZeroU16, NonZeroUsize};
+use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{Feedback, Hz, Mix, SampleRate, Samples, Seconds, Tail};
 
 use crate::delay::trips;
@@ -36,7 +37,7 @@ use crate::reverb::{CHUNK, ramp_chunks};
 use crate::{AllPassFilter, AllPassForm, DelayLine, Ramp, TAIL_FLOOR};
 
 /// The stretched unit delay `K` of every all-pass, in frames.
-const STRETCH: usize = 4;
+const STRETCH: NonZeroUsize = NonZeroUsize::new(4).unwrap();
 
 /// The all-pass coefficient of the low cascade at full dispersion.
 pub(crate) const LOW_COEFFICIENT: f64 = 0.6;
@@ -167,7 +168,8 @@ impl Design {
         let low = Feedback::new_clamped(LOW_COEFFICIENT * dispersion.get());
         let high = Feedback::new_clamped(HIGH_COEFFICIENT * dispersion.get());
         let pole = cutoff_pole(tone, rate);
-        let chain = (layout.stages.len() * STRETCH) as f64 * (1.0 + low.get()) / (1.0 - low.get());
+        let chain =
+            (layout.stages.len() * STRETCH.get()) as f64 * (1.0 + low.get()) / (1.0 - low.get());
         let trip = loop_frames(layout, rate) as f64 + chain + pole / (1.0 - pole);
         let loop_gain =
             Feedback::new_clamped(libm::pow(10.0, -3.0 * trip / (decay.get() * rate.get())));
@@ -196,7 +198,7 @@ fn loop_frames(layout: SpringLayout, rate: SampleRate) -> usize {
 /// `stages` all-passes of the stretched delay, each of the coefficient `gain`.
 fn cascade<F: Float>(stages: SpringStages, gain: Feedback) -> Vec<AllPassFilter<F>> {
     (0..stages.len())
-        .map(|_| AllPassFilter::new(AllPassForm::Lattice, Samples::new(STRETCH), gain))
+        .map(|_| AllPassFilter::new(AllPassForm::Lattice, STRETCH, gain))
         .collect()
 }
 
@@ -282,10 +284,10 @@ impl<F: Float> SpringReverb<F> {
     /// The frames between the glide's steps: the chunk.
     pub const CHUNK: usize = CHUNK;
 
-    /// A silent spring of `width` channels (at least one) at `rate`, at
+    /// A silent spring of `width` channels at `rate`, at
     /// [`SpringControls::DEFAULT`].
     #[must_use]
-    pub fn new(width: ChannelLayout, rate: SampleRate, layout: SpringLayout) -> Self {
+    pub fn new(width: NonZeroU16, rate: SampleRate, layout: SpringLayout) -> Self {
         let design = Design::of(layout, rate, &SpringControls::DEFAULT);
         let delay = loop_frames(layout, rate);
         let spring = Spring {
@@ -303,7 +305,7 @@ impl<F: Float> SpringReverb<F> {
             pole: F::ZERO,
             leave: F::ONE,
             into: 0,
-            springs: vec![spring; usize::from(width.count()).max(1)],
+            springs: vec![spring; usize::from(width.get())],
         };
         spring_reverb.apply();
         spring_reverb

@@ -1,8 +1,9 @@
 //! [`KarplusStrongNode`]: a plucked string excited by its input.
 
+use core::num::NonZeroU16;
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{COEFF_INTERVAL, KarplusStrongBank, KarplusStrongControls};
+use tutti_dsp::{COEFF_INTERVAL, KarplusStrongBank, KarplusStrongControls, LowestPitch};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, SampleRate, Seconds, Tail};
 
@@ -12,26 +13,26 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// controls start.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct KarplusStrongConfig {
-    width: ChannelLayout,
-    lowest: Hz,
+    width: NonZeroU16,
+    lowest: LowestPitch,
     controls: KarplusStrongControls,
 }
 
 impl KarplusStrongConfig {
-    /// A string on each of `width` channels (an empty layout is taken as mono), down to 20 Hz,
+    /// A string on each of `width` channels, down to 20 Hz,
     /// at [`KarplusStrongControls::DEFAULT`] (220 Hz, a decay of 2 s).
     #[must_use]
-    pub fn new(width: impl Into<ChannelLayout>) -> Self {
+    pub fn new(width: NonZeroU16) -> Self {
         Self {
-            width: ChannelLayout::from_count(width.into().count().max(1)),
-            lowest: Hz::new(20.0),
+            width,
+            lowest: LowestPitch::DEFAULT,
             controls: KarplusStrongControls::DEFAULT,
         }
     }
 
     /// The lowest pitch the string plays: it sizes the delay line.
     #[must_use]
-    pub fn lowest(mut self, lowest: Hz) -> Self {
+    pub fn lowest(mut self, lowest: LowestPitch) -> Self {
         self.lowest = lowest;
         self
     }
@@ -100,8 +101,8 @@ control_set! {
 /// The string as a [`Kernel`]: a [`KarplusStrongBank`] sized at the prepared rate.
 #[derive(Clone, Debug)]
 pub struct KarplusStrongKernel<F: Float> {
-    width: ChannelLayout,
-    lowest: Hz,
+    width: NonZeroU16,
+    lowest: LowestPitch,
     controls: KarplusStrongControls,
     rate: SampleRate,
     /// `None` until [`prepare`](Kernel::prepare).
@@ -109,7 +110,7 @@ pub struct KarplusStrongKernel<F: Float> {
 }
 
 impl<F: Float> KarplusStrongKernel<F> {
-    fn new(width: ChannelLayout, lowest: Hz) -> Self {
+    fn new(width: NonZeroU16, lowest: LowestPitch) -> Self {
         Self {
             width,
             lowest,
@@ -129,14 +130,14 @@ impl<F: Float> Kernel for KarplusStrongKernel<F> {
     /// `width` channels in and out, `Moderate`: a ring, an all-pass and a multiply-add per
     /// sample and channel.
     fn shape(&self) -> Shape {
-        let bus =
-            BusTopology::unassigned(self.width).expect("a string is at most 16 channels wide");
+        let bus = BusTopology::unassigned(ChannelLayout::from_count(self.width.get()))
+            .expect("a string is at most 16 channels wide");
         Shape::through(bus).with_cost(Cost::Moderate)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
-        let mut bank = KarplusStrongBank::new(self.lowest, rate, usize::from(self.width.count()));
+        let mut bank = KarplusStrongBank::new(self.lowest, rate, self.width);
         bank.retarget(&self.controls);
         self.bank = Some(bank);
     }
@@ -189,7 +190,7 @@ mod tests {
 
     fn node(frequency: f64, decay: f64) -> KarplusStrongNode<f32> {
         KarplusStrongNode::from(
-            KarplusStrongConfig::new(2u16)
+            KarplusStrongConfig::new(NonZeroU16::new(2).unwrap())
                 .frequency(Hz::new(frequency))
                 .decay(Seconds::new(decay)),
         )

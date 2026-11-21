@@ -1,5 +1,6 @@
 //! [`CombFilterNode`]: a delay summed with the signal, forward or back.
 
+use core::num::{NonZeroU16, NonZeroUsize};
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, CombBank, CombControls, CombForm};
@@ -12,20 +13,20 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// coefficient starts.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CombFilterConfig {
-    width: ChannelLayout,
+    width: NonZeroU16,
     form: CombForm,
     delay: Seconds,
     controls: CombControls,
 }
 
 impl CombFilterConfig {
-    /// A comb of `width` channels (an empty layout is taken as mono) of `form` and `delay`, at
+    /// A comb of `width` channels of `form` and `delay`, at
     /// [`CombControls::DEFAULT`]. The delay rounds up to whole frames at the prepared rate and
     /// is at least one; a delay that is not finite or is negative reads as one frame.
     #[must_use]
-    pub fn new(width: impl Into<ChannelLayout>, form: CombForm, delay: Seconds) -> Self {
+    pub fn new(width: NonZeroU16, form: CombForm, delay: Seconds) -> Self {
         Self {
-            width: ChannelLayout::from_count(width.into().count().max(1)),
+            width,
             form,
             delay,
             controls: CombControls::DEFAULT,
@@ -89,7 +90,7 @@ control_set! {
 /// The comb as a [`Kernel`]: a [`CombBank`] sized at the prepared rate.
 #[derive(Clone, Debug)]
 pub struct CombFilterKernel<F: Float> {
-    width: ChannelLayout,
+    width: NonZeroU16,
     form: CombForm,
     delay: Seconds,
     rate: SampleRate,
@@ -98,7 +99,7 @@ pub struct CombFilterKernel<F: Float> {
 }
 
 impl<F: Float> CombFilterKernel<F> {
-    fn new(width: ChannelLayout, form: CombForm, delay: Seconds) -> Self {
+    fn new(width: NonZeroU16, form: CombForm, delay: Seconds) -> Self {
         Self {
             width,
             form,
@@ -117,7 +118,8 @@ impl<F: Float> Kernel for CombFilterKernel<F> {
 
     /// `width` channels in and out, `Light`: a ring read and a multiply-add per sample.
     fn shape(&self) -> Shape {
-        let bus = BusTopology::unassigned(self.width).expect("a comb is at most 16 channels wide");
+        let bus = BusTopology::unassigned(ChannelLayout::from_count(self.width.get()))
+            .expect("a comb is at most 16 channels wide");
         Shape::through(bus).with_cost(Cost::Light)
     }
 
@@ -132,9 +134,9 @@ impl<F: Float> Kernel for CombFilterKernel<F> {
         self.rate = rate;
         self.bank = Some(CombBank::new(
             self.form,
-            delay.to_samples_ceil(rate),
+            NonZeroUsize::new(delay.to_samples_ceil(rate).get()).unwrap_or(NonZeroUsize::MIN),
             CombControls::DEFAULT.gain,
-            usize::from(self.width.count()),
+            self.width,
         ));
     }
 
@@ -188,7 +190,8 @@ mod tests {
 
     fn node(form: CombForm, gain: f64) -> CombFilterNode<f32> {
         CombFilterNode::from(
-            CombFilterConfig::new(1u16, form, Seconds::new(0.004)).gain(Feedback::new(gain)),
+            CombFilterConfig::new(NonZeroU16::MIN, form, Seconds::new(0.004))
+                .gain(Feedback::new(gain)),
         )
     }
 
@@ -199,7 +202,7 @@ mod tests {
     }
 
     /// The shape is the width in and out and declares the coefficient as `Feedback`, with no
-    /// latency; an empty layout is mono; the delay is the declared tail of a feedforward comb.
+    /// latency; the delay is the declared tail of a feedforward comb.
     #[test]
     fn the_shape_declares_the_coefficient_and_the_tail() {
         let n = prepared(node(CombForm::Feedforward, 0.5), RATE, 64);
@@ -209,7 +212,7 @@ mod tests {
         assert_eq!(shape.tail, Tail::Finite(Samples::new(4)));
         assert_eq!(n.param_base(0), Some(0.5));
         let mono = CombFilterNode::<f32>::from(CombFilterConfig::new(
-            ChannelLayout::EMPTY,
+            NonZeroU16::MIN,
             CombForm::Feedback,
             Seconds::new(0.004),
         ));
@@ -229,8 +232,7 @@ mod tests {
     #[test]
     fn the_node_is_the_comb_of_its_form() {
         let run = |form, gain| {
-            let mut k =
-                CombFilterKernel::<f32>::new(ChannelLayout::MONO, form, Seconds::new(0.004));
+            let mut k = CombFilterKernel::<f32>::new(NonZeroU16::MIN, form, Seconds::new(0.004));
             k.prepare(RATE, MaxBlock::of(Samples::new(32)));
             let mut x = vec![0.0f32; 32];
             x[0] = 1.0;

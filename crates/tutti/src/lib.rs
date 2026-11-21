@@ -309,8 +309,8 @@ pub mod nodes {
         GrainScheduler, GrainSettings, Granular, MaxGrains, MaxGrainsError, Onset,
     };
     pub use tutti_dsp::{
-        KarplusStrong, KarplusStrongBank, KarplusStrongControls, WaveguideBank, WaveguideControls,
-        WaveguidePositions, WaveguideString,
+        KarplusStrong, KarplusStrongBank, KarplusStrongControls, LowestPitch, LowestPitchError,
+        WaveguideBank, WaveguideControls, WaveguidePositions, WaveguideString,
     };
     pub use tutti_dsp::{Lfo, LfoWave};
     pub use tutti_dsp::{

@@ -1,8 +1,11 @@
-use tutti_buffers::{ChannelLayout, Planes, PlanesMut};
+use core::num::NonZeroU16;
+use tutti_buffers::{Planes, PlanesMut};
 use tutti_rt::SplitMix64;
 use tutti_units::{Feedback, Hz, Mix, SampleRate, Seconds, Tail};
 
 use super::*;
+
+const NZ2: NonZeroU16 = NonZeroU16::new(2).unwrap();
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -61,7 +64,7 @@ fn stage_delay(g: f64, k: usize, w: f64) -> f64 {
 /// `g^(8000/K)` ~ 1e-440 of its peak, so the sums carry only rounding.
 #[test]
 fn the_cascades_group_delay_is_the_sum_of_the_stages() {
-    let k = STRETCH;
+    let k = STRETCH.get();
     for (m, g) in [(6u16, 0.6), (9, 0.3), (1, 0.0)] {
         let mut stages = cascade::<f64>(SpringStages::of(m), Feedback::new(g));
         let mut h = impulse(8000);
@@ -83,7 +86,7 @@ fn the_cascades_group_delay_is_the_sum_of_the_stages() {
 /// `w k = pi`, `m k (1 - g) / (1 + g)`, so a low frequency arrives after a high one.
 #[test]
 fn a_low_frequency_arrives_after_a_high_one() {
-    let (m, g, k) = (6u16, 0.6, STRETCH);
+    let (m, g, k) = (6u16, 0.6, STRETCH.get());
     let mut stages = cascade::<f64>(SpringStages::of(m), Feedback::new(g));
     let mut h = impulse(8000);
     for stage in &mut stages {
@@ -103,7 +106,7 @@ fn a_low_frequency_arrives_after_a_high_one() {
 /// trip of 500 frames and a decay of 5000 frames.
 #[test]
 fn at_zero_dispersion_the_echoes_fall_sixty_decibels_in_the_decay_time() {
-    let mut spring = SpringReverb::<f64>::new(ChannelLayout::MONO, RATE, layout(5, 0.01));
+    let mut spring = SpringReverb::<f64>::new(NonZeroU16::MIN, RATE, layout(5, 0.01));
     spring.retarget(&SpringControls {
         decay: Seconds::new(5000.0 / 48_000.0),
         tone: Hz::new(1.0e6),
@@ -140,7 +143,7 @@ fn at_zero_dispersion_the_echoes_fall_sixty_decibels_in_the_decay_time() {
 /// the [`Feedback`] ceiling for every one, the longest decay included.
 #[test]
 fn the_loop_gain_is_below_one_and_the_response_is_bounded_for_every_config() {
-    let spring = SpringReverb::<f64>::new(ChannelLayout::MONO, RATE, layout(8, 0.02));
+    let spring = SpringReverb::<f64>::new(NonZeroU16::MIN, RATE, layout(8, 0.02));
     for decay in [0.1, 0.5, 2.0, 60.0] {
         for tone in [20.0, 200.0, 4000.0, 1.0e6] {
             for dispersion in [0.0, 0.5, 1.0] {
@@ -154,7 +157,7 @@ fn the_loop_gain_is_below_one_and_the_response_is_bounded_for_every_config() {
                 if decay > 2.0 {
                     continue;
                 }
-                let mut s = SpringReverb::<f64>::new(ChannelLayout::MONO, RATE, layout(8, 0.02));
+                let mut s = SpringReverb::<f64>::new(NonZeroU16::MIN, RATE, layout(8, 0.02));
                 s.retarget(&c);
                 s.jump_to_target();
                 let frames = (4.0 * decay * 48_000.0) as usize;
@@ -174,7 +177,7 @@ fn the_loop_gain_is_below_one_and_the_response_is_bounded_for_every_config() {
 fn the_tail_covers_the_ring_out_and_is_no_longer_than_the_decay_and_three_trips() {
     let lay = layout(40, 0.04);
     let c = SpringControls::DEFAULT;
-    let mut spring = SpringReverb::<f64>::new(ChannelLayout::MONO, RATE, lay);
+    let mut spring = SpringReverb::<f64>::new(NonZeroU16::MIN, RATE, lay);
     spring.retarget(&c);
     spring.jump_to_target();
     let Tail::Finite(tail) = spring.tail_of(&c) else {
@@ -194,7 +197,7 @@ fn the_tail_covers_the_ring_out_and_is_no_longer_than_the_decay_and_three_trips(
 /// Each channel is its own spring: input on one channel leaves the other exactly silent.
 #[test]
 fn a_channel_with_no_input_stays_silent() {
-    let mut spring = SpringReverb::<f64>::new(ChannelLayout::STEREO, RATE, layout(8, 0.02));
+    let mut spring = SpringReverb::<f64>::new(NZ2, RATE, layout(8, 0.02));
     let silent = vec![0.0; 4000];
     let y = render(&mut spring, &[&impulse(4000), &silent]);
     assert!(y[0].iter().any(|v| *v != 0.0));
@@ -206,7 +209,7 @@ fn a_channel_with_no_input_stays_silent() {
 /// tail is past it, and past it every frame is at or under the floor.
 #[test]
 fn the_tail_of_a_pure_loop_is_past_the_last_echo_over_the_floor() {
-    let mut spring = SpringReverb::<f64>::new(ChannelLayout::MONO, RATE, layout(5, 0.01));
+    let mut spring = SpringReverb::<f64>::new(NonZeroU16::MIN, RATE, layout(5, 0.01));
     let c = SpringControls {
         decay: Seconds::new(5000.0 / 48_000.0),
         tone: Hz::new(1.0e6),
@@ -231,7 +234,7 @@ fn the_tail_of_a_pure_loop_is_past_the_last_echo_over_the_floor() {
 /// so the echoes follow the products of the glided gains, not of either end.
 #[test]
 fn a_decay_step_glides_the_loop_gain_over_thirty_chunks() {
-    let mut spring = SpringReverb::<f64>::new(ChannelLayout::MONO, RATE, layout(5, 0.005));
+    let mut spring = SpringReverb::<f64>::new(NonZeroU16::MIN, RATE, layout(5, 0.005));
     let controls = |decay: f64| SpringControls {
         decay: Seconds::new(decay),
         tone: Hz::new(1.0e6),
@@ -270,7 +273,7 @@ fn the_render_is_the_same_at_every_block_split() {
         dispersion: Mix::new(0.3),
     };
     let run = |block: usize| {
-        let mut spring = SpringReverb::<f64>::new(ChannelLayout::MONO, RATE, layout(8, 0.02));
+        let mut spring = SpringReverb::<f64>::new(NonZeroU16::MIN, RATE, layout(8, 0.02));
         spring.retarget(&SpringControls::DEFAULT);
         spring.jump_to_target();
         let mut y = Vec::new();
@@ -289,4 +292,16 @@ fn the_render_is_the_same_at_every_block_split() {
     assert_eq!(whole, run(96));
     assert_eq!(whole, run(50));
     assert_eq!(whole, run(7));
+}
+
+/// Every channel of a three-wide spring is a spring: an impulse on each of three channels rings
+/// on each of them.
+#[test]
+fn every_channel_of_a_three_wide_spring_rings() {
+    let mut spring = SpringReverb::<f64>::new(NonZeroU16::new(3).unwrap(), RATE, layout(8, 0.02));
+    let x = impulse(4000);
+    let y = render(&mut spring, &[&x, &x, &x]);
+    for (c, ch) in y.iter().enumerate() {
+        assert!(ch.iter().any(|v| *v != 0.0), "channel {c} is silent");
+    }
 }

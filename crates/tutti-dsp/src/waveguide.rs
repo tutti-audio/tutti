@@ -18,12 +18,13 @@
 //! / (fs T60))`, below 1 for any finite decay: the signal falls 60 dB in the decay
 //! time, the average's loss apart. A frequency is held between the string's lowest and `fs / 8`.
 
+use core::num::{NonZeroU16, NonZeroUsize};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{Feedback, Hz, Normalized, SampleRate, SampleSpan, Samples, Seconds, Tail};
 
 use crate::delay::DelayRing;
 use crate::karplus_strong::ring_tail;
-use crate::string_tuning::{Tuned, per_trip_decay, period, tune};
+use crate::string_tuning::{LowestPitch, Tuned, per_trip_decay, period, tune};
 use crate::{AllPassFilter, AllPassForm, TAIL_FLOOR};
 
 /// The controls of a [`WaveguideString`].
@@ -83,7 +84,7 @@ const ENDS_DELAY: f64 = 1.0;
 #[derive(Clone, Debug)]
 pub struct WaveguideString<F: Float> {
     rate: SampleRate,
-    lowest: Hz,
+    lowest: LowestPitch,
     positions: WaveguidePositions,
     right: DelayRing<F>,
     left: DelayRing<F>,
@@ -102,7 +103,7 @@ impl<F: Float> WaveguideString<F> {
     /// A silent string at [`WaveguideControls::DEFAULT`], excited and read at `positions`, whose
     /// pitch goes down to `lowest` at `rate`. Allocates.
     #[must_use]
-    pub fn new(positions: WaveguidePositions, lowest: Hz, rate: SampleRate) -> Self {
+    pub fn new(positions: WaveguidePositions, lowest: LowestPitch, rate: SampleRate) -> Self {
         let longest = period(Hz::ZERO, lowest, rate, 2);
         let rail = tune(longest, SampleSpan::of(ENDS_DELAY), 2).whole.get() / 2;
         let mut string = Self {
@@ -111,7 +112,7 @@ impl<F: Float> WaveguideString<F> {
             positions,
             right: DelayRing::new(rail + 2),
             left: DelayRing::new(rail + 2),
-            all_pass: AllPassFilter::new(AllPassForm::Lattice, Samples::new(1), Feedback::NONE),
+            all_pass: AllPassFilter::new(AllPassForm::Lattice, NonZeroUsize::MIN, Feedback::NONE),
             tuned: Tuned {
                 whole: Samples::new(2),
                 delay: SampleSpan::of(1.0),
@@ -199,11 +200,16 @@ pub struct WaveguideBank<F: Float> {
 }
 
 impl<F: Float> WaveguideBank<F> {
-    /// `width` silent strings (at least one). Allocates.
+    /// `width` silent strings. Allocates.
     #[must_use]
-    pub fn new(positions: WaveguidePositions, lowest: Hz, rate: SampleRate, width: usize) -> Self {
+    pub fn new(
+        positions: WaveguidePositions,
+        lowest: LowestPitch,
+        rate: SampleRate,
+        width: NonZeroU16,
+    ) -> Self {
         Self {
-            strings: vec![WaveguideString::new(positions, lowest, rate); width.max(1)],
+            strings: vec![WaveguideString::new(positions, lowest, rate); usize::from(width.get())],
         }
     }
 

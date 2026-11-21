@@ -12,7 +12,7 @@ const PERIOD: f64 = 48_000.0 / DENSITY;
 
 fn bank(width: u16, seed: u64) -> Decorrelator<f64> {
     Decorrelator::new(
-        ChannelLayout::from_count(width),
+        NonZeroU16::new(width).unwrap(),
         VelvetDensity::new(Hz::new(DENSITY)).unwrap(),
         VelvetLength::new(Seconds::new(LENGTH)).unwrap(),
         RATE,

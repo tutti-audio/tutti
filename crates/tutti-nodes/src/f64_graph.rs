@@ -20,6 +20,7 @@ use crate::{
     SvfFilterNode, TiltFilterConfig, TiltFilterNode, TransientShaperConfig, TransientShaperNode,
     TremoloConfig, TremoloNode,
 };
+use core::num::NonZeroU16;
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_dsp::{
     DelayControls, DelayLayout, FdnLayout, FreeverbControls, FreezeMode, InterpolationMode,
@@ -147,7 +148,7 @@ fn the_dynamics_that_do_nothing_return_a_wide_signal_as_it_is() {
 fn the_bit_crusher_at_thirty_two_bits_passes_a_wide_signal_exactly() {
     let x = wide_signal(300);
     let node = BitCrusherNode::<f64>::from(
-        BitCrusherConfig::new(ChannelLayout::MONO).bits(BitDepth::new(32.0)),
+        BitCrusherConfig::new(NonZeroU16::MIN).bits(BitDepth::new(32.0)),
     );
     assert_close_f64(&render(node, RATE, &on(1, &x))[0], &x, F64_TOLERANCE);
 }
@@ -168,8 +169,7 @@ fn the_distortion_is_the_softsign_curve_of_a_wide_signal() {
 #[test]
 fn the_tremolo_at_depth_zero_returns_a_wide_signal() {
     let x = wide_signal(300);
-    let node =
-        TremoloNode::<f64>::from(TremoloConfig::new(ChannelLayout::MONO).depth(Depth::of(0.0)));
+    let node = TremoloNode::<f64>::from(TremoloConfig::new(NonZeroU16::MIN).depth(Depth::of(0.0)));
     assert_close_f64(&render(node, RATE, &on(1, &x))[0], &x, F64_TOLERANCE);
 }
 
@@ -178,7 +178,7 @@ fn the_tremolo_at_depth_zero_returns_a_wide_signal() {
 fn the_ring_modulator_at_a_quarter_of_the_rate_multiplies_by_zero_one_zero_minus_one() {
     let x = wide_signal(64);
     let node = RingModNode::<f64>::from(
-        RingModConfig::new(ChannelLayout::MONO).frequency(Hz::new(RATE.get() / 4.0)),
+        RingModConfig::new(NonZeroU16::MIN).frequency(Hz::new(RATE.get() / 4.0)),
     );
     let out = render(node, RATE, &on(1, &x)).remove(0);
     let want: Vec<f64> = x
@@ -376,7 +376,7 @@ fn the_linear_nodes_satisfy_superposition() {
         6_000,
     );
     assert_linear(
-        || SpringReverbNode::<f64>::from(SpringReverbConfig::new(1u16)),
+        || SpringReverbNode::<f64>::from(SpringReverbConfig::new(NonZeroU16::MIN)),
         SampleRate::SR_44K1,
         1,
         6_000,
@@ -394,7 +394,7 @@ fn the_linear_nodes_satisfy_superposition() {
     assert_linear(
         || {
             EarlyReflectionsNode::<f64>::try_from(EarlyReflectionsConfig::new(
-                ChannelLayout::MONO,
+                NonZeroU16::MIN,
                 Taps {
                     taps: Inline::from_slice(&[
                         Tap {
@@ -418,7 +418,7 @@ fn the_linear_nodes_satisfy_superposition() {
         2_400,
     );
     assert_linear(
-        || DecorrelatorNode::<f64>::from(DecorrelatorConfig::new(ChannelLayout::STEREO)),
+        || DecorrelatorNode::<f64>::from(DecorrelatorConfig::new(NonZeroU16::new(2).unwrap())),
         RATE,
         2,
         2_400,
@@ -459,13 +459,13 @@ fn the_linear_nodes_satisfy_superposition() {
 #[test]
 fn the_modulators_satisfy_superposition() {
     assert_linear(
-        || TremoloNode::<f64>::from(TremoloConfig::new(ChannelLayout::MONO)),
+        || TremoloNode::<f64>::from(TremoloConfig::new(NonZeroU16::MIN)),
         RATE,
         1,
         2_400,
     );
     assert_linear(
-        || RingModNode::<f64>::from(RingModConfig::new(ChannelLayout::MONO)),
+        || RingModNode::<f64>::from(RingModConfig::new(NonZeroU16::MIN)),
         RATE,
         1,
         2_400,

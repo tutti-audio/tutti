@@ -1,5 +1,6 @@
 //! [`RingModNode`]: the input multiplied by a sine carrier.
 
+use core::num::NonZeroU16;
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, RingModControls, RingModulator};
@@ -11,16 +12,16 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// What a [`RingModNode`] is made from: its width and its starting carrier frequency.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RingModConfig {
-    width: ChannelLayout,
+    width: NonZeroU16,
     controls: RingModControls,
 }
 
 impl RingModConfig {
-    /// A ring modulator of `width` channels (an empty layout is taken as mono) at [`RingModControls::DEFAULT`] (440 Hz).
+    /// A ring modulator of `width` channels at [`RingModControls::DEFAULT`] (440 Hz).
     #[must_use]
-    pub fn new(width: impl Into<ChannelLayout>) -> Self {
+    pub fn new(width: NonZeroU16) -> Self {
         Self {
-            width: ChannelLayout::from_count(width.into().count().max(1)),
+            width,
             controls: RingModControls::DEFAULT,
         }
     }
@@ -54,7 +55,7 @@ pub type RingModNode<F> = KernelNode<RingModKernel<F>>;
 impl<F: Float> From<RingModConfig> for RingModNode<F> {
     fn from(config: RingModConfig) -> Self {
         Self::with_kernel(
-            RingModKernel::new(config.width),
+            RingModKernel::new(ChannelLayout::from_count(config.width.get())),
             RingModSet,
             config.controls,
         )
@@ -144,14 +145,18 @@ mod tests {
     /// A fork starts from the controls last set and shares no cell.
     #[test]
     fn a_fork_shares_no_cell() {
-        assert_param_fork(RingModNode::from(RingModConfig::new(2u16)));
+        assert_param_fork(RingModNode::from(RingModConfig::new(
+            NonZeroU16::new(2).unwrap(),
+        )));
     }
 
     /// The shape is the width in and out, `Moderate`, with no tail, and declares the carrier
     /// as `Frequency`; the default is 440 Hz.
     #[test]
     fn the_shape_declares_the_frequency() {
-        let n = prepared(RingModNode::from(RingModConfig::new(3u16)));
+        let n = prepared(RingModNode::from(RingModConfig::new(
+            NonZeroU16::new(3).unwrap(),
+        )));
         let shape = n.shape();
         assert_eq!(
             (shape.audio_in().count(), shape.audio_out().count()),
@@ -163,10 +168,10 @@ mod tests {
         assert_eq!(n.param_base(0), Some(440.0));
     }
 
-    /// An empty layout is taken as mono.
+    /// A width of one is one channel in and out.
     #[test]
-    fn an_empty_layout_is_mono() {
-        let n = RingModNode::<f32>::from(RingModConfig::new(ChannelLayout::EMPTY));
+    fn a_width_of_one_is_mono() {
+        let n = RingModNode::<f32>::from(RingModConfig::new(NonZeroU16::MIN));
         assert_eq!(n.shape().audio_in().count(), 1);
     }
 }

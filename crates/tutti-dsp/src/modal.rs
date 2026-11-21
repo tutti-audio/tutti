@@ -17,6 +17,7 @@
 //! The live controls move the whole bank: [`ModalControls`] names the first mode's frequency
 //! and decay now, and every mode keeps its configured ratio to the first's.
 
+use core::num::NonZeroU16;
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{Amplitude, Db, Gain, Hz, SampleRate, Samples, Seconds, Tail};
 
@@ -138,11 +139,11 @@ fn per_frame(t60: Seconds, rate: SampleRate) -> f64 {
 }
 
 impl<F: Float> ModalBank<F> {
-    /// A silent bank of `modes` on `width` channels (at least one) at `rate`. Allocates.
+    /// A silent bank of `modes` on `width` channels at `rate`. Allocates.
     #[must_use]
-    pub fn new(modes: &Modes, width: usize, rate: SampleRate) -> Self {
+    pub fn new(modes: &Modes, width: NonZeroU16, rate: SampleRate) -> Self {
         let count = modes.as_slice().len();
-        let width = width.max(1);
+        let width = usize::from(width.get());
         let mut bank = Self {
             rate,
             modes: modes.clone(),

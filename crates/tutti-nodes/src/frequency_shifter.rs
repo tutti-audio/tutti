@@ -1,5 +1,6 @@
 //! [`FrequencyShifterNode`]: single-sideband modulation by a shift in hertz.
 
+use core::num::NonZeroU16;
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, FrequencyShifterBank, FrequencyShifterControls};
@@ -11,17 +12,17 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// What a [`FrequencyShifterNode`] is made from: its width and its starting shift.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FrequencyShifterConfig {
-    width: ChannelLayout,
+    width: NonZeroU16,
     controls: FrequencyShifterControls,
 }
 
 impl FrequencyShifterConfig {
-    /// A frequency shifter of `width` channels (an empty layout is taken as mono) at
+    /// A frequency shifter of `width` channels at
     /// [`FrequencyShifterControls::DEFAULT`] (no shift).
     #[must_use]
-    pub fn new(width: impl Into<ChannelLayout>) -> Self {
+    pub fn new(width: NonZeroU16) -> Self {
         Self {
-            width: ChannelLayout::from_count(width.into().count().max(1)),
+            width,
             controls: FrequencyShifterControls::DEFAULT,
         }
     }
@@ -82,16 +83,16 @@ control_set! {
 /// The shifter as a [`Kernel`]: a [`FrequencyShifterBank`] at the prepared rate.
 #[derive(Clone, Debug)]
 pub struct FrequencyShifterKernel<F: Float> {
-    width: ChannelLayout,
+    width: NonZeroU16,
     bank: FrequencyShifterBank<F>,
 }
 
 impl<F: Float> FrequencyShifterKernel<F> {
     /// A shifter at a placeholder rate: an unprepared node renders nothing.
-    fn new(width: ChannelLayout) -> Self {
+    fn new(width: NonZeroU16) -> Self {
         Self {
             width,
-            bank: FrequencyShifterBank::new(usize::from(width.count()), SampleRate::SR_48K),
+            bank: FrequencyShifterBank::new(width, SampleRate::SR_48K),
         }
     }
 }
@@ -104,13 +105,13 @@ impl<F: Float> Kernel for FrequencyShifterKernel<F> {
 
     /// `width` channels in and out, `Moderate`: eight all-passes and two sines per sample.
     fn shape(&self) -> Shape {
-        let bus = BusTopology::unassigned(self.width)
+        let bus = BusTopology::unassigned(ChannelLayout::from_count(self.width.get()))
             .expect("a frequency shifter is at most 16 channels wide");
         Shape::through(bus).with_cost(Cost::Moderate)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-        self.bank = FrequencyShifterBank::new(usize::from(self.width.count()), rate);
+        self.bank = FrequencyShifterBank::new(self.width, rate);
     }
 
     fn reset(&mut self) {
@@ -148,17 +149,17 @@ mod tests {
     #[test]
     fn a_fork_shares_no_cell() {
         assert_param_fork(FrequencyShifterNode::from(
-            FrequencyShifterConfig::new(2u16).shift(Hz::new(-100.0)),
+            FrequencyShifterConfig::new(NonZeroU16::new(2).unwrap()).shift(Hz::new(-100.0)),
         ));
     }
 
     /// The shape is the width in and out with no latency and a finite tail, and declares the
-    /// shift as `Frequency`, which starts as configured; an empty layout is mono.
+    /// shift as `Frequency`, which starts as configured.
     #[test]
     fn the_shape_declares_the_shift_and_a_finite_tail() {
         let n = prepared(
             FrequencyShifterNode::<f32>::from(
-                FrequencyShifterConfig::new(3u16).shift(Hz::new(-12.5)),
+                FrequencyShifterConfig::new(NonZeroU16::new(3).unwrap()).shift(Hz::new(-12.5)),
             ),
             RATE,
             64,
@@ -172,8 +173,7 @@ mod tests {
         assert!(matches!(shape.tail, Tail::Finite(_)));
         assert_eq!(shape.params.as_slice(), &[UnitParam::Frequency][..]);
         assert_eq!(n.param_base(0), Some(-12.5));
-        let mono =
-            FrequencyShifterNode::<f32>::from(FrequencyShifterConfig::new(ChannelLayout::EMPTY));
+        let mono = FrequencyShifterNode::<f32>::from(FrequencyShifterConfig::new(NonZeroU16::MIN));
         assert_eq!(mono.shape().audio_in().count(), 1);
     }
 
@@ -181,7 +181,7 @@ mod tests {
     #[test]
     fn the_declared_tail_covers_the_ring_out() {
         let mut n = prepared(
-            FrequencyShifterNode::<f32>::from(FrequencyShifterConfig::new(1u16)),
+            FrequencyShifterNode::<f32>::from(FrequencyShifterConfig::new(NonZeroU16::MIN)),
             RATE,
             64,
         );

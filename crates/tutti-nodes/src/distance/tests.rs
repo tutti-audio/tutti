@@ -1,4 +1,5 @@
 use super::*;
+use core::num::NonZeroU16;
 use tutti_graph::Node;
 use tutti_graph::contract::{BlockRig, assert_param_fork, prepared};
 use tutti_units::{Latency, UnitParam};
@@ -47,18 +48,21 @@ fn run(
 #[test]
 fn a_fork_shares_no_cell() {
     assert_param_fork(DistanceNode::from(
-        DistanceConfig::new(2u16, Metres::of(50.0)).distance(Metres::of(8.0)),
+        DistanceConfig::new(NonZeroU16::new(2).unwrap(), Metres::of(50.0))
+            .distance(Metres::of(8.0)),
     ));
 }
 
 /// The shape is the width in and out, declares the distance as `Distance` starting as
 /// configured, reports no latency (the delay is musical) and a finite tail past the longest
-/// delay; an empty layout is mono.
+/// delay.
 #[test]
 fn the_shape_declares_the_distance_no_latency_and_a_tail_past_the_longest_delay() {
     let max = Metres::of(100.0);
     let n = prepared(
-        DistanceNode::<f32>::from(DistanceConfig::new(3u16, max).distance(Metres::of(8.0))),
+        DistanceNode::<f32>::from(
+            DistanceConfig::new(NonZeroU16::new(3).unwrap(), max).distance(Metres::of(8.0)),
+        ),
         RATE,
         64,
     );
@@ -74,7 +78,7 @@ fn the_shape_declares_the_distance_no_latency_and_a_tail_past_the_longest_delay(
     assert!(tail.get() as f64 >= (max / Speed::SOUND_IN_AIR_20C).get() * RATE.get());
     assert_eq!(shape.params.as_slice(), &[UnitParam::Distance][..]);
     assert_eq!(n.param_base(0), Some(8.0));
-    let mono = DistanceNode::<f32>::from(DistanceConfig::new(ChannelLayout::EMPTY, max));
+    let mono = DistanceNode::<f32>::from(DistanceConfig::new(NonZeroU16::MIN, max));
     assert_eq!(mono.shape().audio_in().count(), 1);
 }
 
@@ -84,7 +88,7 @@ fn the_shape_declares_the_distance_no_latency_and_a_tail_past_the_longest_delay(
 fn the_node_is_the_delay_r_over_c_scaled_by_reference_over_r() {
     let r = distance_of(480);
     let y = run(
-        DistanceConfig::new(1u16, Metres::of(100.0)).distance(r),
+        DistanceConfig::new(NonZeroU16::MIN, Metres::of(100.0)).distance(r),
         4,
         0,
         |_| None,
@@ -102,9 +106,12 @@ fn the_node_is_the_delay_r_over_c_scaled_by_reference_over_r() {
 fn a_live_distance_lands_on_its_delay_and_level() {
     let r = distance_of(480);
     // 340 frames of delay at 0.125 a frame: 2720 frames, about six blocks.
-    let y = run(DistanceConfig::new(1u16, Metres::of(100.0)), 20, 12, |i| {
-        (i == 0).then_some(r)
-    });
+    let y = run(
+        DistanceConfig::new(NonZeroU16::MIN, Metres::of(100.0)),
+        20,
+        12,
+        |i| (i == 0).then_some(r),
+    );
     let at = 12 * BLOCK + 480;
     let gain = 1.0 / r.get();
     assert!((y[at] - gain).abs() <= gain * 2f64.powi(-31), "{}", y[at]);
@@ -120,9 +127,12 @@ fn a_live_distance_lands_on_its_delay_and_level() {
 #[test]
 fn the_first_distance_lands_at_once() {
     let r = distance_of(480);
-    let y = run(DistanceConfig::new(1u16, Metres::of(100.0)), 2, 0, |i| {
-        (i == 0).then_some(r)
-    });
+    let y = run(
+        DistanceConfig::new(NonZeroU16::MIN, Metres::of(100.0)),
+        2,
+        0,
+        |i| (i == 0).then_some(r),
+    );
     let gain = 1.0 / r.get();
     assert!((y[480] - gain).abs() <= gain * 2f64.powi(-31), "{}", y[480]);
 }

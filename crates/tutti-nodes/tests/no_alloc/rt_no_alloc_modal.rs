@@ -1,7 +1,7 @@
 //! Regression gate: the modal bank must not allocate per block, held and with the frequency and
 //! decay moved between blocks.
 
-use tutti_buffers::ChannelLayout;
+use core::num::NonZeroU16;
 use tutti_graph::IntoNode;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{ModalBankConfig, ModalBankNode, Mode, Modes};
@@ -46,7 +46,7 @@ fn modal_bank_process_is_allocation_free_with_the_frequency_and_decay_moving() {
     });
     gate(
         ModalBankNode::from(ModalBankConfig::new(
-            ChannelLayout::STEREO,
+            NonZeroU16::new(2).unwrap(),
             Modes::try_from(&modes[..]).unwrap(),
         )),
         |controls, i| {

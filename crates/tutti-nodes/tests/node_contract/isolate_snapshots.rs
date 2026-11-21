@@ -14,6 +14,7 @@
 //! is read-only, or frozen by its fork when it is not — its own unit test
 //! `a_fork_freezes_a_live_curve`) and the `testing` stimulus nodes.
 
+use core::num::NonZeroU16;
 use std::sync::Arc;
 use tutti_buffers::Mono;
 use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, BusTopology, ChannelLayout};
@@ -210,7 +211,7 @@ fn distortion() {
 #[test]
 fn bit_crusher() {
     IsolateRow::new("BitCrusherNode (stereo)", || {
-        BitCrusherNode::<f32>::from(BitCrusherConfig::new(ChannelLayout::STEREO))
+        BitCrusherNode::<f32>::from(BitCrusherConfig::new(NonZeroU16::new(2).unwrap()))
     })
     .control("bits", |b| {
         assert!(b.param_set().set(UnitParam::BitDepth, 3.0))
@@ -235,7 +236,7 @@ fn stereo_width() {
 #[test]
 fn tremolo() {
     IsolateRow::new("TremoloNode (stereo)", || {
-        TremoloNode::from(TremoloConfig::new(ChannelLayout::STEREO))
+        TremoloNode::from(TremoloConfig::new(NonZeroU16::new(2).unwrap()))
     })
     .control("rate", |t| {
         assert!(t.param_set().set(UnitParam::Rate, 40.0))
@@ -484,7 +485,7 @@ fn comb_filter() {
     for form in [CombForm::Feedforward, CombForm::Feedback] {
         IsolateRow::new("CombFilterNode (stereo)", move || {
             CombFilterNode::from(CombFilterConfig::new(
-                ChannelLayout::STEREO,
+                NonZeroU16::new(2).unwrap(),
                 form,
                 Seconds::new(0.004),
             ))
@@ -499,7 +500,7 @@ fn comb_filter() {
 #[test]
 fn karplus_strong() {
     IsolateRow::new("KarplusStrongNode (stereo)", || {
-        KarplusStrongNode::from(KarplusStrongConfig::new(ChannelLayout::STEREO))
+        KarplusStrongNode::from(KarplusStrongConfig::new(NonZeroU16::new(2).unwrap()))
     })
     .control("frequency", |r| {
         assert!(r.param_set().set(UnitParam::Frequency, 330.0))
@@ -513,7 +514,7 @@ fn karplus_strong() {
 #[test]
 fn waveguide_string() {
     IsolateRow::new("WaveguideStringNode (stereo)", || {
-        WaveguideStringNode::from(WaveguideStringConfig::new(ChannelLayout::STEREO))
+        WaveguideStringNode::from(WaveguideStringConfig::new(NonZeroU16::new(2).unwrap()))
     })
     .control("frequency", |r| {
         assert!(r.param_set().set(UnitParam::Frequency, 330.0))
@@ -533,7 +534,7 @@ fn modal_bank() {
     });
     IsolateRow::new("ModalBankNode (stereo)", move || {
         ModalBankNode::from(ModalBankConfig::new(
-            ChannelLayout::STEREO,
+            NonZeroU16::new(2).unwrap(),
             Modes::try_from(&modes[..]).unwrap(),
         ))
     })
@@ -550,7 +551,7 @@ fn modal_bank() {
 fn frequency_shifter() {
     IsolateRow::new("FrequencyShifterNode (stereo)", || {
         FrequencyShifterNode::from(
-            FrequencyShifterConfig::new(ChannelLayout::STEREO).shift(Hz::new(200.0)),
+            FrequencyShifterConfig::new(NonZeroU16::new(2).unwrap()).shift(Hz::new(200.0)),
         )
     })
     .control("shift", |r| {
@@ -563,7 +564,7 @@ fn frequency_shifter() {
 fn pitch_shifter() {
     IsolateRow::new("PitchShifterNode (stereo)", || {
         PitchShifterNode::<f32>::from(
-            PitchShifterConfig::new(ChannelLayout::STEREO).pitch(Cents::new(200.0)),
+            PitchShifterConfig::new(NonZeroU16::new(2).unwrap()).pitch(Cents::new(200.0)),
         )
     })
     .control("pitch", |r| {
@@ -576,7 +577,7 @@ fn pitch_shifter() {
 fn distance() {
     IsolateRow::new("DistanceNode (stereo)", || {
         DistanceNode::<f32>::from(
-            DistanceConfig::new(ChannelLayout::STEREO, Metres::of(50.0))
+            DistanceConfig::new(NonZeroU16::new(2).unwrap(), Metres::of(50.0))
                 .air_absorption(Hz::new(8000.0))
                 .distance(Metres::of(2.0)),
         )
@@ -630,7 +631,7 @@ fn shimmer() {
 #[test]
 fn ring_mod() {
     IsolateRow::new("RingModNode (stereo)", || {
-        RingModNode::from(RingModConfig::new(ChannelLayout::STEREO))
+        RingModNode::from(RingModConfig::new(NonZeroU16::new(2).unwrap()))
     })
     .control("frequency", |r| {
         assert!(r.param_set().set(UnitParam::Frequency, 900.0))
@@ -645,7 +646,7 @@ fn wavetable() {
     let table = Wavetable::new(&[Mono::new(&one), Mono::new(&two)]).expect("two frames");
     IsolateRow::new("WavetableNode (two frames, 3 channels)", move || {
         WavetableNode::<f32>::from(
-            WavetableConfig::new(3u16, std::sync::Arc::clone(&table))
+            WavetableConfig::new(NonZeroU16::new(3).unwrap(), std::sync::Arc::clone(&table))
                 .frequency(Hz::new(300.0))
                 .level(Amplitude::new(0.8)),
         )
@@ -746,7 +747,7 @@ fn plate_reverb() {
 fn spring_reverb() {
     IsolateRow::new("SpringReverbNode", || {
         SpringReverbNode::<f32>::from(
-            SpringReverbConfig::new(ChannelLayout::STEREO).decay(Seconds::new(1.0)),
+            SpringReverbConfig::new(NonZeroU16::new(2).unwrap()).decay(Seconds::new(1.0)),
         )
     })
     .control("decay", |p| {

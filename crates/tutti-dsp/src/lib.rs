@@ -366,6 +366,7 @@ pub use stft::geometry::{
 pub use stft::grid::{BinCount, BinIndex, FrameCount, FrameIndex, Grid};
 pub use stft::vocoder::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
 pub use stft::window::{CosineWindow, Window};
+pub use string_tuning::{LowestPitch, LowestPitchError};
 pub use tremolo::{AutoPan, AutoPanControls, Tremolo, TremoloControls};
 pub use viterbi::sticky_viterbi;
 pub use waveguide::{WaveguideBank, WaveguideControls, WaveguidePositions, WaveguideString};

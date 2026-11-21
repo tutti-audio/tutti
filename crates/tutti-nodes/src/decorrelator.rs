@@ -1,5 +1,6 @@
 //! [`DecorrelatorNode`]: velvet-noise decorrelation of every channel.
 
+use core::num::NonZeroU16;
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{Decorrelator, VelvetDensity, VelvetLength};
@@ -12,19 +13,19 @@ use crate::params::NoControls;
 /// What a [`DecorrelatorNode`] is made from: its width and its sequences.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DecorrelatorConfig {
-    width: ChannelLayout,
+    width: NonZeroU16,
     density: VelvetDensity,
     length: VelvetLength,
     seed: u64,
 }
 
 impl DecorrelatorConfig {
-    /// A decorrelator of `width` channels (an empty layout is taken as mono) at
+    /// A decorrelator of `width` channels at
     /// [`VelvetDensity::DEFAULT`] and [`VelvetLength::DEFAULT`], seed 0.
     #[must_use]
-    pub fn new(width: impl Into<ChannelLayout>) -> Self {
+    pub fn new(width: NonZeroU16) -> Self {
         Self {
-            width: ChannelLayout::from_count(width.into().count().max(1)),
+            width,
             density: VelvetDensity::DEFAULT,
             length: VelvetLength::DEFAULT,
             seed: 0,
@@ -99,7 +100,7 @@ impl<F: Float> Kernel for DecorrelatorKernel<F> {
     /// `width` channels in and out, `Heavy`: a multiply-add for each impulse a frame, a
     /// hundred a channel at the default density.
     fn shape(&self) -> Shape {
-        let bus = BusTopology::unassigned(self.config.width)
+        let bus = BusTopology::unassigned(ChannelLayout::from_count(self.config.width.get()))
             .expect("a decorrelator is at most 16 channels wide");
         Shape::through(bus).with_cost(Cost::Heavy)
     }

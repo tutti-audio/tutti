@@ -1,5 +1,6 @@
 //! [`EarlyReflectionsNode`]: the reverb model's [`Taps`] stage as a node.
 
+use core::num::NonZeroU16;
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{EarlyReflections, EarlyReflectionsError, Taps};
@@ -12,18 +13,15 @@ use crate::params::NoControls;
 /// What an [`EarlyReflectionsNode`] is made from: the width of its input and the taps.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EarlyReflectionsConfig {
-    width: ChannelLayout,
+    width: NonZeroU16,
     taps: Taps,
 }
 
 impl EarlyReflectionsConfig {
-    /// A stage of `taps` (a rectangular room's come from [`ShoeboxRoom::taps`](tutti_dsp::ShoeboxRoom::taps)) over an input of `width` channels (an empty layout is taken as mono).
+    /// A stage of `taps` (a rectangular room's come from [`ShoeboxRoom::taps`](tutti_dsp::ShoeboxRoom::taps)) over an input of `width` channels.
     #[must_use]
-    pub fn new(width: impl Into<ChannelLayout>, taps: Taps) -> Self {
-        Self {
-            width: ChannelLayout::from_count(width.into().count().max(1)),
-            taps,
-        }
+    pub fn new(width: NonZeroU16, taps: Taps) -> Self {
+        Self { width, taps }
     }
 }
 
@@ -53,7 +51,7 @@ impl<F: Float> TryFrom<EarlyReflectionsConfig> for EarlyReflectionsNode<F> {
     fn try_from(config: EarlyReflectionsConfig) -> Result<Self, Self::Error> {
         Ok(Self::with_kernel(
             EarlyReflectionsKernel {
-                width: config.width,
+                width: ChannelLayout::from_count(config.width.get()),
                 stage: EarlyReflections::try_from(&config.taps)?,
             },
             NoControls,

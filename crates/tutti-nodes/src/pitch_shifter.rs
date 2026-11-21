@@ -1,5 +1,6 @@
 //! [`PitchShifterNode`]: a pitch shift in cents over a phase vocoder, at the input's duration.
 
+use core::num::NonZeroU16;
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock, Planes, PlanesMut};
 use tutti_dsp::{
     ColaGeometry, FftFloat, HopSize, PhaseVocoder, PhaseVocoderControls, StftGeometry, WindowLength,
@@ -12,7 +13,7 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// What a [`PitchShifterNode`] is made from: its width, its geometry and its starting shift.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PitchShifterConfig {
-    width: ChannelLayout,
+    width: NonZeroU16,
     hop: HopSize,
     controls: PhaseVocoderControls,
 }
@@ -21,12 +22,12 @@ impl PitchShifterConfig {
     /// The hop a pitch shifter starts at: 512 frames, a window of 2048.
     pub const DEFAULT_HOP: HopSize = HopSize::of(Samples::new(512));
 
-    /// A pitch shifter of `width` channels (an empty layout is taken as mono) at no shift, on a
+    /// A pitch shifter of `width` channels at no shift, on a
     /// hop of [`DEFAULT_HOP`](Self::DEFAULT_HOP).
     #[must_use]
-    pub fn new(width: impl Into<ChannelLayout>) -> Self {
+    pub fn new(width: NonZeroU16) -> Self {
         Self {
-            width: ChannelLayout::from_count(width.into().count().max(1)),
+            width,
             hop: Self::DEFAULT_HOP,
             controls: PhaseVocoderControls::UNITY,
         }
@@ -82,7 +83,7 @@ impl<F: FftFloat> From<PitchShifterConfig> for PitchShifterNode<F> {
     fn from(config: PitchShifterConfig) -> Self {
         Self::with_kernel(
             PitchShifterKernel::new(
-                config.width,
+                ChannelLayout::from_count(config.width.get()),
                 config.hop,
                 SampleRate::SR_48K,
                 config.controls,

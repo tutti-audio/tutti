@@ -15,7 +15,8 @@
 //! is the correlation of their outputs to one white input. The convolution visits only the
 //! nonzero taps.
 
-use tutti_buffers::{ChannelLayout, Float, Planes, PlanesMut};
+use core::num::NonZeroU16;
+use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_rt::SplitMix64;
 use tutti_units::{Db, Gain, Hz, SampleRate, SampleSpan, Samples, Seconds};
 
@@ -141,18 +142,18 @@ pub struct Decorrelator<F: Float> {
 }
 
 impl<F: Float> Decorrelator<F> {
-    /// A decorrelator of `width` channels (an empty layout is one) at `rate`. Channel `c`'s
+    /// A decorrelator of `width` channels at `rate`. Channel `c`'s
     /// sequence is [`VelvetNoise::new`] of the `c`-th word of `seed`'s stream. Allocates.
     #[must_use]
     pub fn new(
-        width: ChannelLayout,
+        width: NonZeroU16,
         density: VelvetDensity,
         length: VelvetLength,
         rate: SampleRate,
         seed: u64,
     ) -> Self {
         let mut seeds = SplitMix64::new(seed);
-        let sequences: Vec<VelvetNoise> = (0..width.count().max(1))
+        let sequences: Vec<VelvetNoise> = (0..width.get())
             .map(|_| VelvetNoise::new(density, length, rate, seeds.next_u64()))
             .collect();
         let frames = length.get().get() * rate.get();

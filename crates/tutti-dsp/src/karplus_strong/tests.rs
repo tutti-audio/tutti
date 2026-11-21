@@ -7,7 +7,10 @@ const LN_1000: f64 = 3.0 * core::f64::consts::LN_10;
 
 /// A string of `frequency` and `decay` at `rate`, lowest 50 Hz, f64.
 fn string(frequency: f64, decay: f64, rate: f64) -> KarplusStrong<f64> {
-    let mut s = KarplusStrong::new(Hz::new(50.0), SampleRate::of(rate));
+    let mut s = KarplusStrong::new(
+        LowestPitch::new(Hz::new(50.0)).unwrap(),
+        SampleRate::of(rate),
+    );
     s.retarget(&KarplusStrongControls {
         frequency: Hz::new(frequency),
         decay: Seconds::new(decay),
@@ -251,4 +254,28 @@ fn the_declared_tail_covers_the_ring_out() {
         last > tail.get() / 20,
         "the declared tail is not absurdly long"
     );
+}
+
+/// Every channel of a width-3 bank is a string: an impulse on each channel rings on each of
+/// them.
+#[test]
+fn every_channel_of_a_three_wide_bank_rings() {
+    let mut bank = KarplusStrongBank::<f64>::new(
+        LowestPitch::new(Hz::new(50.0)).unwrap(),
+        SampleRate::of(48_000.0),
+        NonZeroU16::new(3).unwrap(),
+    );
+    let mut x = vec![0.0; 512];
+    x[0] = 1.0;
+    let mut y = vec![vec![0.0; 512]; 3];
+    let [y0, y1, y2] = &mut y[..] else {
+        unreachable!()
+    };
+    bank.process(
+        Planes::new(&[&x[..], &x[..], &x[..]]).unwrap(),
+        PlanesMut::new(&mut [&mut y0[..], &mut y1[..], &mut y2[..]]).unwrap(),
+    );
+    for (c, ch) in y.iter().enumerate() {
+        assert!(ch.iter().any(|v| *v != 0.0), "channel {c} is silent");
+    }
 }

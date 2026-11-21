@@ -1,6 +1,6 @@
 //! Regression gate: the early reflections and the decorrelator must not allocate per block.
 
-use tutti_buffers::ChannelLayout;
+use core::num::NonZeroU16;
 use tutti_dsp::{Inline, Tap, Taps};
 use tutti_graph::IntoNode;
 use tutti_graph::contract::BlockRig;
@@ -55,7 +55,7 @@ fn early_reflections_process_is_allocation_free() {
     };
     gate(
         EarlyReflectionsNode::<f32>::try_from(EarlyReflectionsConfig::new(
-            ChannelLayout::STEREO,
+            NonZeroU16::new(2).unwrap(),
             taps,
         ))
         .unwrap(),
@@ -65,6 +65,6 @@ fn early_reflections_process_is_allocation_free() {
 #[test]
 fn decorrelator_process_is_allocation_free() {
     gate(DecorrelatorNode::<f32>::from(DecorrelatorConfig::new(
-        ChannelLayout::STEREO,
+        NonZeroU16::new(2).unwrap(),
     )));
 }

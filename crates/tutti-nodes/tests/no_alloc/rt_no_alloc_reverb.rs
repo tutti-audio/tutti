@@ -9,6 +9,7 @@
 //! idle blocks and the wake), a control signal driving the slow controls (the longest tail a block takes
 //! is designed from them) and a block of non-finite input run under it too.
 
+use core::num::NonZeroU16;
 use tutti_graph::IntoNode;
 use tutti_graph::ParamSet;
 use tutti_graph::Status;
@@ -357,7 +358,7 @@ fn the_spring_node_process_is_allocation_free_with_every_control_moving() {
         (UnitParam::Diffusion, 0.0, 1.0),
     ];
     gate_of(
-        SpringReverbNode::<f32>::from(SpringReverbConfig::new(2u16)),
+        SpringReverbNode::<f32>::from(SpringReverbConfig::new(NonZeroU16::new(2).unwrap())),
         1_000,
         |set, i| {
             for &(param, lo, hi) in &ends {
