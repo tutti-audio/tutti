@@ -42,7 +42,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tutti_platform::Instant;
-use tutti_platform::{Executor, PriorityRequest, Task, WeakExecutor};
+use tutti_platform::{Executor, PriorityRequest, Task, WeakExecutor, join_within};
 use tutti_rt::LockExt;
 
 use tutti_buffers::Float;
@@ -61,7 +61,6 @@ use tutti_rt::{
 use crate::audio_pipeline::{
     AudioBlock, AudioPipeline, AudioScratch, BlockFault, Clock, ProcessExtras,
 };
-use crate::latch::{Finish, Latch};
 use crate::main_loop::Bell;
 use crate::served::Render;
 use crate::ties::{Notify, Patience, Ties, ties};
@@ -1030,13 +1029,11 @@ pub(crate) struct RenderThread {
 
 /// The owner's half of a running lane.
 struct Lane {
-    /// Dropping it cancels the lane at its next return to the executor.
-    task: Task<()>,
+    /// Resolved by every way out of the lane: with its [`Outcome`] when it ran to
+    /// its end, with none when it was dropped. Dropping it cancels the lane at its
+    /// next return to the executor.
+    task: Task<Outcome>,
     stop: Arc<AtomicBool>,
-    /// Raised by every way out of the lane.
-    over: Arc<Latch>,
-    /// Set before `over` is raised, when the lane ended by running to its end.
-    outcome: Arc<Mutex<Option<Outcome>>>,
 }
 
 impl RenderThread {
@@ -1060,27 +1057,16 @@ impl RenderThread {
         let wake = side.wake.clone();
         let slot = Arc::new(Mutex::new(Some(side)));
         let stop = Arc::new(AtomicBool::new(false));
-        let over = Arc::new(Latch::default());
-        let outcome = Arc::new(Mutex::new(None));
-        let lane = render_lane(
-            Parts {
-                slot: Arc::clone(&slot),
-                audio,
-                stop: Arc::clone(&stop),
-                alive: executor.downgrade(),
-                ended: Arc::clone(&ended),
-                outcome: Arc::clone(&outcome),
-            },
-            Finish::new(&over),
-        );
+        let lane = render_lane(Parts {
+            slot: Arc::clone(&slot),
+            audio,
+            stop: Arc::clone(&stop),
+            alive: executor.downgrade(),
+            ended: Arc::clone(&ended),
+        });
         match executor.spawn_dedicated("plugin-render", Some(PriorityRequest::Highest), lane) {
             Ok(task) => Ok(Self {
-                lane: Some(Lane {
-                    task,
-                    stop,
-                    over,
-                    outcome,
-                }),
+                lane: Some(Lane { task, stop }),
                 wake,
                 ended,
             }),
@@ -1107,21 +1093,26 @@ impl RenderThread {
     ///
     /// The lane panicked (its state went with it), it ended without handing its
     /// state back (the executor dropped it), or it did not end within `patience`.
+    ///
+    /// # Panics
+    ///
+    /// On a thread that drives an executor ([`join_within`]): the server stops its
+    /// render thread from its main thread.
     pub(crate) fn stop_within(mut self, patience: Duration) -> Result<RenderSide, NotHome> {
         let lane = self.lane.take().expect("stopped once");
         lane.stop.store(true, Ordering::Release);
         self.wake.ring();
-        if !lane.over.wait(patience) {
-            // Cancelled where it stands: a lane inside a plugin call ends when
-            // that returns, which it may never do.
-            drop(lane.task);
-            return Err(NotHome::Stuck);
-        }
-        let outcome = lane.outcome.lock_recover().take();
-        match outcome {
-            Some(Ok(side)) => Ok(side),
-            Some(Err(payload)) => Err(NotHome::Panicked(panicked(payload.as_ref()))),
-            None => Err(NotHome::Dropped),
+        match join_within(lane.task, patience) {
+            Ok(Some(Ok(side))) => Ok(side),
+            Ok(Some(Err(payload))) => Err(NotHome::Panicked(panicked(payload.as_ref()))),
+            Ok(None) => Err(NotHome::Dropped),
+            Err(task) => {
+                // A lane inside a plugin call ends when that returns, which it
+                // may never do.
+                tracing::warn!("plugin-server: the render lane did not stop; leaving it");
+                task.detach();
+                Err(NotHome::Stuck)
+            }
         }
     }
 }
@@ -1158,7 +1149,10 @@ impl Drop for RenderThread {
         if let Some(lane) = self.lane.take() {
             lane.stop.store(true, Ordering::Release);
             self.wake.ring();
-            let _ = lane.over.wait(crate::server::RENDER_STOP_PATIENCE);
+            if let Err(task) = join_within(lane.task, crate::server::RENDER_STOP_PATIENCE) {
+                tracing::warn!("plugin-server: the render lane did not stop; leaving it");
+                task.detach();
+            }
         }
     }
 }
@@ -1172,23 +1166,21 @@ struct Parts {
     /// Reaches the executor's liveness, and nothing else of it.
     alive: WeakExecutor,
     ended: Arc<OnceLock<Arc<IpcError>>>,
-    outcome: Arc<Mutex<Option<Outcome>>>,
 }
 
 /// The lane's task: serves the audio connection and, after it ends, goes on
 /// trading the Processor until it is stopped. It blocks in the plugin's calls
 /// and returns to the executor nowhere, so its end is its own stop flag or the
 /// executor's end ([`run`]); a panic anywhere in it is caught here and left for
-/// the owner, and recorded as the end of the audio connection for the main loop.
-/// Its guard raises the owner's latch by every way out.
-async fn render_lane(parts: Parts, _finish: Finish) {
+/// the owner (its output), and recorded as the end of the audio connection for
+/// the main loop.
+async fn render_lane(parts: Parts) -> Outcome {
     let Parts {
         slot,
         audio,
         stop,
         alive,
         ended,
-        outcome,
     } = parts;
     let side = slot.lock_recover().take().expect("the side is taken once");
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1201,7 +1193,7 @@ async fn render_lane(parts: Parts, _finish: Finish) {
             "the render thread panicked".into(),
         )));
     }
-    *outcome.lock_recover() = Some(result);
+    result
 }
 
 /// The lane's loop: serves the audio connection, and after it ends goes on
@@ -1460,9 +1452,10 @@ mod tests {
         }
     }
 
-    /// The latch a running lane raises as it ends.
-    fn over(thread: &RenderThread) -> &Arc<Latch> {
-        &thread.lane.as_ref().expect("running").over
+    /// Waits for the lane of `thread` to end by itself: its task is finished.
+    fn ends_by_itself(thread: &RenderThread) {
+        let lane = thread.lane.as_ref().expect("running");
+        tutti_fixtures::wait_until("the lane to end", HANG_GUARD, || lane.task.is_finished());
     }
 
     /// **A render lane that is never idle stops when the executor drops**: it
@@ -1476,10 +1469,7 @@ mod tests {
         let thread = RenderThread::spawn(&executor, side, Some(Box::new(busy))).expect("lane");
         reads.recv_timeout(HANG_GUARD).expect("the lane is serving");
         drop(executor);
-        assert!(
-            over(&thread).wait(HANG_GUARD),
-            "the lane outlived the executor"
-        );
+        ends_by_itself(&thread);
         let home = thread.stop_within(HANG_GUARD);
         assert!(home.is_ok(), "the side comes home: {:?}", home.err());
     }
@@ -1500,35 +1490,28 @@ mod tests {
         link.attach_slab(slab).unwrap();
         settle.wait_past(seen, Patience::new(Instant::now(), HANG_GUARD));
         drop(executor);
-        assert!(
-            over(&thread).wait(HANG_GUARD),
-            "the lane outlived the executor"
-        );
+        ends_by_itself(&thread);
         let home = thread.stop_within(HANG_GUARD);
         assert!(home.is_ok(), "the side comes home: {:?}", home.err());
     }
 
-    /// **A lane dropped before it is polled raises its latch**: the guard is
-    /// held from the future's creation, and nothing is left in the outcome.
+    /// **A lane dropped before it is polled resolves its task with no outcome**:
+    /// the executor that took it shut down before it ran, so the owner's wait for
+    /// it ends and finds no side.
     #[test]
-    fn a_render_lane_dropped_before_it_is_polled_raises_its_latch() {
+    fn a_render_lane_dropped_before_it_is_polled_resolves_its_task() {
         let (_link, side) = link().expect("bells");
-        let (over, outcome) = (Arc::new(Latch::default()), Arc::new(Mutex::new(None)));
-        let lane = render_lane(
-            Parts {
-                slot: Arc::new(Mutex::new(Some(side))),
-                audio: None,
-                stop: Arc::default(),
-                alive: Executor::new().downgrade(),
-                ended: Arc::default(),
-                outcome: Arc::clone(&outcome),
-            },
-            Finish::new(&over),
-        );
-        assert!(!over.is_raised());
-        drop(lane);
-        assert!(over.is_raised());
-        assert!(outcome.lock_recover().is_none());
+        let executor = Executor::new();
+        let lane = executor.spawn(render_lane(Parts {
+            slot: Arc::new(Mutex::new(Some(side))),
+            audio: None,
+            stop: Arc::default(),
+            alive: executor.downgrade(),
+            ended: Arc::default(),
+        }));
+        assert!(!lane.is_finished());
+        drop(executor);
+        assert!(matches!(join_within(lane, HANG_GUARD), Ok(None)));
     }
 
     /// Records the threads that wake it.
@@ -1557,18 +1540,13 @@ mod tests {
         let (_link, side) = link().expect("bells");
         let wake = side.wake.clone();
         let executor = Executor::new();
-        let over = Arc::new(Latch::default());
-        let lane = render_lane(
-            Parts {
-                slot: Arc::new(Mutex::new(Some(side))),
-                audio,
-                stop: Arc::clone(stop),
-                alive: executor.downgrade(),
-                ended: Arc::default(),
-                outcome: Arc::default(),
-            },
-            Finish::new(&over),
-        );
+        let lane = render_lane(Parts {
+            slot: Arc::new(Mutex::new(Some(side))),
+            audio,
+            stop: Arc::clone(stop),
+            alive: executor.downgrade(),
+            ended: Arc::default(),
+        });
         let recorder = Arc::new(Recorder(Mutex::new(Vec::new())));
         let poller = {
             let recorder = Arc::clone(&recorder);
@@ -1576,13 +1554,13 @@ mod tests {
                 let waker = Waker::from(recorder);
                 let mut cx = Context::from_waker(&waker);
                 let mut lane = std::pin::pin!(lane);
-                lane.as_mut().poll(&mut cx) == Poll::Ready(())
+                matches!(lane.as_mut().poll(&mut cx), Poll::Ready(Ok(_)))
             })
         };
         feed(&wake);
         let finished = poller.join().expect("the poller");
         let wakes = recorder.0.lock_recover().len();
-        (wakes, finished && over.is_raised())
+        (wakes, finished)
     }
 
     /// **The render side never touches a `Waker`**: the lane's future is polled

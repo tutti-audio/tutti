@@ -35,6 +35,7 @@
 //! The loop owns no state: what a message or a tick does is [`Session`]'s.
 
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tutti_platform::{Executor, Instant};
 
@@ -239,7 +240,7 @@ pub(crate) fn serve_every(
         let readable = backend.wait(transport, timeout, &wakeups, &bell, &mut ready)?;
         // The host process ended (the watch rang the bell to end the wait): the
         // session is over, as when the control connection ends.
-        if host_gone.is_raised() {
+        if host_gone.load(Ordering::Acquire) {
             return Ok(());
         }
         // A plugin called the host from a thread of its own (its `request_process`,

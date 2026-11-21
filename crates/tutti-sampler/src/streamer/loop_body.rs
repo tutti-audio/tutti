@@ -7,33 +7,16 @@
 //! command, a voice's ring wanting a refill, shutdown, a loop or direction
 //! published for it, the control side's tick). Nothing polls and nothing times out.
 
-use std::future::poll_fn;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::task::Poll;
 
 use crossbeam_channel::Receiver;
+use tutti_platform::yield_now;
 use tutti_rt::{Listener, RingFloat};
 
 use super::command::StreamerCommand;
 use super::handlers::Handles;
 use super::step::{StepOutcome, StreamerCycle};
-
-/// Gives the executor its thread back once, and asks to be polled again: a loop that is
-/// still busy after its budget does not hold a caller-driven executor's drive.
-pub(super) async fn yield_now() {
-    let mut yielded = false;
-    poll_fn(|cx| {
-        if yielded {
-            Poll::Ready(())
-        } else {
-            yielded = true;
-            cx.waker().wake_by_ref();
-            Poll::Pending
-        }
-    })
-    .await;
-}
 
 /// The queue's receiving end, which frees what is still queued when the future
 /// ends. A queued command can hold a stream's record, and the queue outlives the
