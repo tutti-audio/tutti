@@ -810,3 +810,24 @@ fn a_remove_after_a_declicked_remove_cuts_the_leaving_node() {
     exec.apply_pending();
     assert_eq!(ed.collect(), vec![NODE], "the unit came back");
 }
+
+/// **`fade_fits` answers what `replace_or_swap` does**: true for a shape that
+/// fits (the swap fades), false for another (a fade is refused), `None` for a
+/// node that is not there.
+#[test]
+fn fade_fits_agrees_with_replace_or_swap() {
+    use tutti_graph::Node;
+    let fade = Fade::new(Samples::new(100));
+    let (mut ed, mut exec) = gain_graph(1.0);
+    dc(&mut exec, 20);
+    let fitting = gain(3.0);
+    let other = TestNode::new(Kind::Lag { latency: 3 });
+    assert_eq!(ed.fade_fits(NODE, &fitting.shape()), Some(true));
+    assert_eq!(ed.fade_fits(NODE, &other.shape()), Some(false));
+    assert_eq!(ed.fade_fits(NodeKey(9), &fitting.shape()), None);
+    assert!(ed.replace_or_swap(NODE, Unforkable(other), fade).is_err());
+    ed.replace_or_swap(NODE, Unforkable(fitting), fade)
+        .expect("a fitting shape fades");
+    ed.commit().expect("commits");
+    assert_eq!(ed.fades_in_flight(), 1);
+}

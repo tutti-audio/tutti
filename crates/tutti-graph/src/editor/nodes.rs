@@ -74,6 +74,19 @@ impl<F: Float> Editor<F> {
         self.place(key, kind, unit, wake, shape, None)
     }
 
+    /// Whether a unit of shape `incoming` could fade in at `key`: whether it
+    /// fits the running unit's, the question [`replace_or_swap`](Self::replace_or_swap)
+    /// answers with [`CommitError::FadeShape`]. `Some(false)` for a node with
+    /// no running unit yet, and `None` for a `key` not in the spec.
+    #[must_use]
+    pub fn fade_fits(&self, key: NodeKey, incoming: &Shape) -> Option<bool> {
+        if !self.spec.topology.nodes.contains_key(&key) {
+            return None;
+        }
+        let running = self.life.plan().and_then(|p| p.unit(key)).map(|u| u.shape);
+        Some(running.is_some_and(|r| Self::fits(incoming, &r)))
+    }
+
     /// Whether a unit of shape `shape` can crossfade from one of `running`:
     /// everything the running plan was compiled from but the tail agrees.
     fn fits(shape: &Shape, running: &Shape) -> bool {
@@ -246,7 +259,7 @@ impl<F: Float> Editor<F> {
         unit.bind_wake(wake.clone());
         unit.prepare(&self.prepare);
         let shape = unit.shape();
-        let fits = running.is_some_and(|r| Self::fits(&shape, &r));
+        let fits = self.fade_fits(key, &shape) == Some(true);
         if let Some(running) = running
             && !fits
             && !fade.is_cut()

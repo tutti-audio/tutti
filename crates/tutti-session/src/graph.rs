@@ -249,8 +249,9 @@ pub(crate) enum OnShape {
     /// Refuse it ([`ReplaceRefused::ShapeChanged`]): what a caller's
     /// [`replace`](Graph::replace) gets.
     Refuse,
-    /// Swap it in as a cut, whatever fade was asked: what the session's own
-    /// swaps (a plugin rebuilt for new ports, one that came back) get.
+    /// Fade where the shape fits and cut where it does not: what the
+    /// session's own swaps (a plugin reloaded, rebuilt for new ports, one
+    /// that came back) get.
     #[cfg(feature = "plugin")]
     Cut,
 }
@@ -1596,22 +1597,47 @@ impl<F: Float> Graph<F> {
             return Err(SwapRefused::Busy(incoming));
         }
         let rate = self.editor.prepare().sample_rate();
-        let fade = match on_shape {
-            OnShape::Refuse => fade.unwrap_or_else(|| Fade::seconds(tutti_graph::DECLICK, rate)),
-            // A cut: a recovered plugin may report another latency, and no
-            // app asked for a fade over a swap the session made itself.
+        let fade = fade.unwrap_or_else(|| Fade::seconds(tutti_graph::DECLICK, rate));
+        let (controls, unwired) = match on_shape {
+            OnShape::Refuse => {
+                let placed = self
+                    .editor
+                    .replace_or_swap(node, incoming, fade)
+                    .map_err(|e| SwapRefused::Failed(e.into()))?;
+                (placed.controls, placed.unwired)
+            }
+            // The fade where the shape fits, else a cut: a recovered or rebuilt
+            // plugin may report another latency, and no app asked for a fade
+            // over a swap the session made itself.
             #[cfg(feature = "plugin")]
-            OnShape::Cut => Fade::new(Samples::ZERO),
+            OnShape::Cut => {
+                let NodeParts {
+                    node: unit,
+                    controls,
+                    fork,
+                } = incoming.into_parts();
+                let fits = self.editor.fade_fits(node, &unit.shape()) == Some(true);
+                let unit = Unit::<N, F> {
+                    parts: NodeParts {
+                        node: unit,
+                        controls: (),
+                        fork,
+                    },
+                    node: std::marker::PhantomData,
+                };
+                let fade = if fits { fade } else { Fade::new(Samples::ZERO) };
+                let placed = self
+                    .editor
+                    .replace_or_swap(node, unit, fade)
+                    .map_err(|e| SwapRefused::Failed(e.into()))?;
+                (controls, placed.unwired)
+            }
         };
-        let placed = self
-            .editor
-            .replace_or_swap(node, incoming, fade)
-            .map_err(|e| SwapRefused::Failed(e.into()))?;
-        self.note_unwired(node, &placed.unwired);
+        self.note_unwired(node, &unwired);
         self.note_pass(node);
         self.sweep_gain_targets();
         self.edited = true;
-        Ok(placed.controls)
+        Ok(controls)
     }
 
     /// The outgoing node's controls at `node`, which a swap that took
@@ -4436,5 +4462,24 @@ mod root_fade_tests {
         let plan = g.editor.base().expect("a plan");
         assert_eq!(plan.root_bank(), None, "a hard declaration cuts");
         assert_eq!(plan.rendered_outputs(), 2);
+    }
+
+    /// **A session-owned swap fades where the shape fits and cuts where it
+    /// does not**: a node of the running shape swaps in under a crossfade, and
+    /// one of another width swaps in as a cut, neither refused.
+    #[cfg(feature = "plugin")]
+    #[test]
+    fn a_session_owned_swap_fades_where_the_shape_fits_and_cuts_where_it_does_not() {
+        for (incoming, fades) in [
+            (Const::mono(2.0), 1),
+            (Const::new(2.0, ChannelLayout::STEREO), 0),
+        ] {
+            let (mut g, node) = graph();
+            g.collect();
+            let swapped = g.swap_unit(node, ForkByClone(incoming), None, OnShape::Cut);
+            assert!(swapped.is_ok(), "never refused for its shape");
+            assert!(matches!(g.commit(), Committed::Sent));
+            assert_eq!(g.editor.fades_in_flight(), fades);
+        }
     }
 }
