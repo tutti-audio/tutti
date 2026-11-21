@@ -366,7 +366,7 @@ pub mod dsp {
     pub use tutti_dsp::{
         Absorption, AdditiveBank, AdditiveControls, Algorithm, AlgorithmError, AllPass,
         AllPassFilter, AllPassForm, AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, Band,
-        Biquad, BlockTooLong, BrickwallControls, Butterworth, ButterworthOrder,
+        Biquad, BlockMismatch, BlockTooLong, BrickwallControls, Butterworth, ButterworthOrder,
         ButterworthOrderError, ChebyshevI, ChebyshevII, ChunkSize, CombBank, CombControls,
         CombFilter, CombForm, Cookbook, CutResponse, DISTANCE_GLIDE, DecayTime, Decorrelator,
         Distance, DistanceControls, DistanceSpec, EarlyReflections, EarlyReflectionsError,

@@ -6,6 +6,7 @@ use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 
 use super::*;
 use crate::dynamics::curves::upward_gain_lift;
+use tutti_buffers::InputOutput;
 
 // The banks under test are `f32` (the session's audio format), so their tolerances are `f32`'s;
 // the `f64` banks have their own tests below.
@@ -106,9 +107,10 @@ fn run(
         let mut o: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
         bank.process(
             Planes::new(&k).unwrap(),
-            Planes::new(&i).unwrap(),
-            PlanesMut::new(&mut o).unwrap(),
-        );
+            &mut InputOutput::paired(Planes::new(&i).unwrap(), PlanesMut::new(&mut o).unwrap())
+                .unwrap(),
+        )
+        .unwrap();
         at = end;
     }
     out
@@ -472,9 +474,13 @@ fn an_f64_band_with_zero_range_is_the_identity() {
         let mut out = vec![0.0f64; x.len()];
         b.process(
             Planes::new(&[&x[..]]).unwrap(),
-            Planes::new(&[&x[..]]).unwrap(),
-            PlanesMut::new(&mut [&mut out[..]]).unwrap(),
-        );
+            &mut InputOutput::paired(
+                Planes::new(&[&x[..]]).unwrap(),
+                PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         assert_close_f64(&out, &x, 0.0);
     }
 }

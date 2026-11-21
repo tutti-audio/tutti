@@ -1,8 +1,8 @@
 //! [`FrequencyShifterNode`]: single-sideband modulation by a shift in hertz.
 
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{COEFF_INTERVAL, FrequencyShifterBank, FrequencyShifterControls};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, FrequencyShifterBank, FrequencyShifterControls};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, SampleRate, Tail};
 
@@ -123,11 +123,12 @@ impl<F: Float> Kernel for FrequencyShifterKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
+        let (input, output) = block.split();
         self.bank.process(input, output);
+        Ok(())
     }
 
     fn tail(&self) -> Tail {

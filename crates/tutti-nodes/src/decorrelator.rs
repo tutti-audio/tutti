@@ -1,8 +1,8 @@
 //! [`DecorrelatorNode`]: velvet-noise decorrelation of every channel.
 
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{Decorrelator, VelvetDensity, VelvetLength};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_dsp::{BlockMismatch, Decorrelator, VelvetDensity, VelvetLength};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{SampleRate, Tail};
 
@@ -126,13 +126,14 @@ impl<F: Float> Kernel for DecorrelatorKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
+        let (input, output) = block.split();
         if let Some(bank) = &mut self.bank {
             bank.process(input, output);
         }
+        Ok(())
     }
 
     fn tail(&self) -> Tail {

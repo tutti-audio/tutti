@@ -3,6 +3,7 @@ use tutti_units::{Hz, Q, SampleRate, Seconds, Semitones};
 
 use super::*;
 use crate::testing::amplitude_at;
+use tutti_buffers::InputOutput;
 
 // The banks under test are `f32` (the session's audio format), so their tolerances are `f32`'s;
 // the `f64` banks have their own tests below.
@@ -32,9 +33,13 @@ fn run(bank: &mut EnvelopeFilterBank<f32>, x: &[f32], block: usize) -> Vec<f32> 
     let mut out = vec![0.0f32; x.len()];
     for (xs, ys) in x.chunks(block).zip(out.chunks_mut(block)) {
         bank.process(
-            Planes::new(&[xs]).unwrap(),
-            PlanesMut::new(&mut [ys]).unwrap(),
-        );
+            &mut InputOutput::paired(
+                Planes::new(&[xs]).unwrap(),
+                PlanesMut::new(&mut [ys]).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
     }
     out
 }
@@ -295,9 +300,13 @@ fn an_f64_bank_at_depth_zero_is_the_cookbook_filter_at_its_base() {
         b.jump_to_target();
         let mut out = vec![0.0f64; x.len()];
         b.process(
-            Planes::new(&[&x[..]]).unwrap(),
-            PlanesMut::new(&mut [&mut out[..]]).unwrap(),
-        );
+            &mut InputOutput::paired(
+                Planes::new(&[&x[..]]).unwrap(),
+                PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         let want = direct_form(&rbj(ty, 1_000.0, 0.707, 0.0, RATE.get()), &x);
         assert_close_f64(&out, &want, 1e-12);
     }

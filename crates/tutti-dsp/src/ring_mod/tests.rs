@@ -1,6 +1,7 @@
 use super::*;
 use crate::testing::amplitude_at;
 use core::f64::consts::TAU;
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -18,9 +19,13 @@ fn run(m: &mut RingModulator, input: &[f32], block: usize) -> Vec<f32> {
         let ins = vec![chunk.to_vec()];
         let mut outs = vec![vec![0.0f32; chunk.len()]];
         m.process(
-            Planes::from_vecs(&ins).unwrap(),
-            PlanesMut::from_vecs(&mut outs).unwrap(),
-        );
+            &mut InputOutput::paired(
+                Planes::from_vecs(&ins).unwrap(),
+                PlanesMut::from_vecs(&mut outs).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         out.extend_from_slice(&outs[0]);
     }
     out

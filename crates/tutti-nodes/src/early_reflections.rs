@@ -1,8 +1,8 @@
 //! [`EarlyReflectionsNode`]: the reverb model's [`TapSet`] stage as a node.
 
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{EarlyReflections, EarlyReflectionsError, TapSet};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_dsp::{BlockMismatch, EarlyReflections, EarlyReflectionsError, TapSet};
 use tutti_graph::{Buses, Cost, Shape};
 use tutti_units::{SampleRate, Tail};
 
@@ -100,11 +100,12 @@ impl<F: Float> Kernel for EarlyReflectionsKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
+        let (input, output) = block.split();
         self.stage.process(input, output);
+        Ok(())
     }
 
     fn tail(&self) -> Tail {

@@ -6,11 +6,12 @@
 //! cancellation, which is why its notches are fewer and unevenly spaced compared with a
 //! flanger's.
 
-use tutti_buffers::{BusTopology, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
-    COEFF_INTERVAL, GAIN_RAMP, Lerp, MAX_PHASER_CHANNELS, MIN_RATE, PhaserChain, PhaserControls,
-    Ramp, Stages, Stagger, StaggerError, Steps, SweepRange, allpass_complement, sweep_hz,
+    BlockMismatch, COEFF_INTERVAL, GAIN_RAMP, Lerp, MAX_PHASER_CHANNELS, MIN_RATE, PhaserChain,
+    PhaserControls, Ramp, Stages, Stagger, StaggerError, Steps, SweepRange, allpass_complement,
+    sweep_hz,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Depth, Feedback, Hz, PhaseIncrement, SampleRate, Tail};
@@ -331,16 +332,17 @@ impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
+        let (input, output) = block.split();
         let frames = input.frames().get().min(output.frames().get());
         self.chain
             .process(&mut self.complements, &mut self.feedback, input, output);
         self.depth
             .advance(u32::try_from(frames).unwrap_or(u32::MAX));
         self.clock.advance(frames);
+        Ok(())
     }
 
     /// The closed loop's ring-out has no bound a tail could be cut at: unknown, so the
@@ -352,6 +354,7 @@ impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
 
 #[cfg(test)]
 mod tests {
+    use tutti_buffers::Planes;
     // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
     // format, so their tolerances are `f32`'s.
     use super::*;

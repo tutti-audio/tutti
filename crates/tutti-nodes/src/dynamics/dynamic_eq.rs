@@ -1,10 +1,11 @@
 //! The dynamic EQ band [`DynamicEqNode`]: an SVF bell whose gain follows the level of a
 //! band-passed key, and its de-esser configuration.
 
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{Float, Planes};
 use tutti_dsp::{
-    COEFF_INTERVAL, DynamicEqBank, DynamicEqControls, DynamicMode, KeySource, Lerp, SimdLanes,
+    BlockMismatch, COEFF_INTERVAL, DynamicEqBank, DynamicEqControls, DynamicMode, KeySource, Lerp,
+    SimdLanes,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, Tail};
@@ -257,22 +258,22 @@ impl<F: Float + SimdLanes + Lerp> Kernel for DynamicEqKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         signals: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
-        self.render_keyed(input, input, signals, output);
+    ) -> Result<(), BlockMismatch> {
+        let input = block.input();
+        self.render_keyed(block, input, signals)
     }
 
     fn render_keyed(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         key: Planes<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
-        if let Some(bank) = &mut self.bank {
-            bank.process(key, input, output);
+    ) -> Result<(), BlockMismatch> {
+        match &mut self.bank {
+            Some(bank) => bank.process(key, block),
+            None => Ok(()),
         }
     }
 
@@ -286,7 +287,9 @@ impl<F: Float + SimdLanes + Lerp> Kernel for DynamicEqKernel<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_buffers::InputOutput;
     use tutti_fixtures::signal::wide_signal;
+    use tutti_units::Samples;
 
     /// An `f64` kernel keeps the bell in `f64`: with a range of 0 dB the band never leaves
     /// flat, so a signal of more than 24 bits comes out exactly as it went in (an `f32` state
@@ -309,10 +312,11 @@ mod tests {
         let x = wide_signal(2_000);
         let mut y = vec![0.0f64; x.len()];
         k.render(
-            Planes::new(&[&x[..]]).unwrap(),
+            &mut InputOutput::from_slices(Samples::new(x.len()), &[&x[..]], &mut [&mut y[..]])
+                .unwrap(),
             ControlSignals::NONE,
-            PlanesMut::new(&mut [&mut y[..]]).unwrap(),
-        );
+        )
+        .unwrap();
         assert_eq!(y, x);
     }
 }

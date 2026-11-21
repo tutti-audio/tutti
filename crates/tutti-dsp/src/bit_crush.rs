@@ -14,8 +14,10 @@
 //! The quantizer is applied to the held value every frame, so a depth that moves while a
 //! sample is held changes what is heard of it at once.
 
+use crate::BlockMismatch;
+use crate::block::expect_widths;
 use tutti_buffers::ChannelLayout;
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput};
 use tutti_units::{BitDepth, HoldFactor};
 
 /// The word length a quantizer keeps by default, and the one a depth that is not finite
@@ -127,12 +129,16 @@ impl<F: Float> BitCrusher<F> {
         self.since = 0;
     }
 
-    /// Runs `input` into `output`, every channel on the same capture frames. The channels
-    /// rendered are the fewest of the two views' and the crusher's, the frames the fewer
-    /// of the two views'. No allocation.
-    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = input.channels().min(output.channels()).min(self.held.len());
+    /// Runs `input` into `output`, every channel on the same capture frames. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels.
+    pub fn process(&mut self, block: &mut InputOutput<'_, F>) -> Result<(), BlockMismatch> {
+        let width = self.held.len();
+        expect_widths(block, width, width)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let hold = hold_frames(self.controls.hold);
         let q = F::from_design(levels(self.controls.bits));
         let start = self.since;
@@ -157,6 +163,7 @@ impl<F: Float> BitCrusher<F> {
         if width > 0 {
             self.since = end;
         }
+        Ok(())
     }
 }
 

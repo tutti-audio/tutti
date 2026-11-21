@@ -6,11 +6,11 @@
 //! sound, a flanger at a short one (1 ms) so the copy combs against the original and the sweep
 //! moves the notches: the same node at different numbers ([`Sweep`]), at any width.
 
-use tutti_buffers::{BusTopology, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
-    COEFF_INTERVAL, DELAY_SLEW, GAIN_RAMP, Lerp, ModDelayBank, ModDelayControls, ModDelayLayout,
-    ModulationRate, Ramp, Steps,
+    BlockMismatch, COEFF_INTERVAL, DELAY_SLEW, GAIN_RAMP, Lerp, ModDelayBank, ModDelayControls,
+    ModDelayLayout, ModulationRate, Ramp, Steps,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Cents, Feedback, Hz, SampleRate, SampleSpan, Seconds, Tail};
@@ -323,10 +323,10 @@ impl<F: Float + Lerp> Kernel for ModDelayKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
+        let (input, output) = block.split();
         let frames = input.frames().get().min(output.frames().get());
         if let Some(bank) = &mut self.bank {
             bank.process(&mut self.delays, &mut self.feedback, input, output);
@@ -334,6 +334,7 @@ impl<F: Float + Lerp> Kernel for ModDelayKernel<F> {
         self.depth
             .advance(u32::try_from(frames).unwrap_or(u32::MAX));
         self.clock.advance(frames);
+        Ok(())
     }
 
     /// A recirculating line rings for as long as its feedback says: unknown, so the graph
@@ -351,6 +352,7 @@ impl<F: Float + Lerp> Kernel for ModDelayKernel<F> {
 
 #[cfg(test)]
 mod tests {
+    use tutti_buffers::Planes;
     // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
     // format, so their tolerances are `f32`'s.
     use super::*;

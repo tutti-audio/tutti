@@ -4,8 +4,9 @@
 //! and a block-aligned park. Every figure is the definition of a delay.
 
 use crate::{ControlSignals, Kernel, KernelNode, NoControls};
-use tutti_buffers::{BusTopology, MaxBlock};
-use tutti_buffers::{Planes, PlanesMut};
+use tutti_buffers::Planes;
+use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+use tutti_dsp::BlockMismatch;
 use tutti_graph::contract::{Driven, assert_declared_tail, drive_input, prepared};
 use tutti_graph::{Buses, Node, ParamNode, Shape};
 use tutti_graph::{
@@ -67,10 +68,10 @@ impl Kernel for Echo {
 
     fn render(
         &mut self,
-        input: Planes<'_, f32>,
+        block: &mut InputOutput<'_, f32>,
         _: ControlSignals<'_, f32>,
-        mut output: PlanesMut<'_, '_, f32>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
+        let (input, mut output) = block.split();
         let n = self.line.len();
         let (first, second) = (self.claimed + self.latency, self.actual + self.latency);
         let x = input.plane(0);
@@ -82,6 +83,7 @@ impl Kernel for Echo {
             *y = wet as f32;
             self.at = (self.at + 1) % n;
         }
+        Ok(())
     }
 
     fn latency(&self) -> Samples {
