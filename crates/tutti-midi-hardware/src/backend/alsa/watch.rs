@@ -573,9 +573,9 @@ impl Drop for AlsaWatch {
 ///
 /// Subscribing comes first, so a device that appears during the first
 /// enumeration is announced too. A sequencer that will not open starts no
-/// thread and tells `sink` ([`ChangeSink::fail`]), as a watch that later fails
-/// does: the list stays empty and the app can read why. A watch that
-/// later fails, by an error or a panic, tells `sink` ([`ChangeSink::fail`]).
+/// thread: the list stays empty. Either that refusal or a later failure of
+/// the watch, by an error or a panic, is told to `sink` ([`ChangeSink::fail`]),
+/// so the app can read why.
 pub(super) fn start(
     executor: &Executor,
     sink: ChangeSink,

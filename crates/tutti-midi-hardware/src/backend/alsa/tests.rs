@@ -537,16 +537,17 @@ fn a_watch_that_panics_reports_its_failure() {
 /// left for the sequencer's own.
 #[test]
 fn a_watch_whose_sequencer_will_not_open_reports_its_failure() {
+    let backend = Box::new(Panicky {
+        armed: std::sync::Arc::default(),
+        executor: tutti_platform::Executor::new(),
+    });
     let mut hogged = Vec::new();
     while let Ok(file) = std::fs::File::open("/dev/null") {
         hogged.push(file);
     }
     // The watch's stop pair takes two; the sequencer's open finds none.
     hogged.truncate(hogged.len().saturating_sub(2));
-    let devices = Watched::with_backend(Box::new(Panicky {
-        armed: std::sync::Arc::default(),
-        executor: tutti_platform::Executor::new(),
-    }));
+    let devices = Watched::with_backend(backend);
     drop(hogged);
     assert!(
         matches!(
