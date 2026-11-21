@@ -426,7 +426,8 @@ pub fn a_rate_change_keeps_the_note_on_its_frame<S: Subject>() {
         rig.render_to(2 * BLOCK);
         rig.session
             .graph()
-            .set_sample_rate(tutti_units::SampleRate::SR_44K1);
+            .set_sample_rate(tutti_units::SampleRate::SR_44K1)
+            .unwrap();
         rig.settle();
         let before = S::chunks(&rig);
         rig.render_to(rig.frame() + 4 * BLOCK);
@@ -501,7 +502,8 @@ fn rate_change_instant_once<S: Subject>(send_after_the_change: bool) -> Judged {
     }
     rig.session
         .graph()
-        .set_sample_rate(tutti_units::SampleRate::SR_44K1);
+        .set_sample_rate(tutti_units::SampleRate::SR_44K1)
+        .unwrap();
     rig.settle();
     let before = S::chunks(&rig);
     if send_after_the_change {

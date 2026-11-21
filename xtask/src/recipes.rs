@@ -215,7 +215,7 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     (
         "check-umbrella",
         "",
-        "tutti re-exports no crate whole and offers each item at one path",
+        "tutti re-exports no crate whole, offers each item at one path and each name for one crate, bar the rows of xtask/umbrella-collisions-baseline.txt",
     ),
     (
         "check-guards",
