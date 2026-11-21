@@ -42,13 +42,12 @@ pub fn watch_host(
         executor.timer(),
         host,
         |host| Imp::of_pid(host).map(|imp| move |slice| imp.wait(slice)),
-        NAP,
         on_gone,
     )
 }
 
-/// [`watch_host`] over its choices: the `timer` the poll sleeps on, how long it
-/// sleeps (`nap`), and how to ask the OS for a wake (made on the watch's thread,
+/// [`watch_host`] over its choices: the `timer` the poll sleeps on, and how to
+/// ask the OS for a wake (made on the watch's thread,
 /// `None` when there is none). A failed ask falls back to the poll for as long as
 /// it fails; it is never an end. A `timer` whose executor has shut down ends the
 /// watch.
@@ -57,7 +56,6 @@ fn watch<W: FnMut(Duration) -> Waited + Send>(
     timer: Timer,
     host: u32,
     wake: impl FnOnce(u32) -> Option<W> + Send + 'static,
-    nap: Duration,
     on_gone: impl FnOnce() + Send + 'static,
 ) -> std::io::Result<Task<()>> {
     executor.spawn_dedicated("host-watch", None, async move {
@@ -72,7 +70,7 @@ fn watch<W: FnMut(Duration) -> Waited + Send>(
                     if !crate::process_exists(host) {
                         break;
                     }
-                    if timer.sleep(nap).await.is_err() {
+                    if timer.sleep(NAP).await.is_err() {
                         return;
                     }
                 }
@@ -251,10 +249,6 @@ mod tests {
         assert_eq!(runs_after(executor, &ended), 0);
     }
 
-    /// The pause of the poll in these tests: a count of asks is what they
-    /// wait on, never the time it took.
-    const PACE: Duration = Duration::from_millis(1);
-
     /// **Without an OS wake the poll ends when the host ends.** The host ends
     /// while the watch polls, so its next ask finds the process gone and runs
     /// the function.
@@ -268,7 +262,6 @@ mod tests {
             executor.timer(),
             child.id(),
             |_| None::<fn(Duration) -> Waited>,
-            PACE,
             move || gone.send(()).expect("the test listens"),
         )
         .expect("the watch starts");
@@ -307,7 +300,6 @@ mod tests {
                     })
                 }
             },
-            PACE,
             move || gone.send(()).expect("the test listens"),
         )
         .expect("the watch starts");
@@ -336,7 +328,6 @@ mod tests {
                 let _ = polled.send(());
                 None::<fn(Duration) -> Waited>
             },
-            PACE,
             move || gone.send(()).expect("the test listens"),
         )
         .expect("the watch starts");
@@ -365,7 +356,6 @@ mod tests {
             timer,
             child.id(),
             |_| None::<fn(Duration) -> Waited>,
-            PACE,
             move || gone.send(()).expect("the test listens"),
         )
         .expect("the watch starts");

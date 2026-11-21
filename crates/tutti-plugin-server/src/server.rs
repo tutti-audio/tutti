@@ -257,11 +257,11 @@ impl PluginServer {
                 tracing::error!("plugin-server: {panicked}");
             }
             Err(NotHome::Dropped) => {
-                tracing::error!("plugin-server: the render thread was dropped with its state");
+                tracing::error!("plugin-server: the render lane was dropped with its state");
             }
             Err(NotHome::Stuck) => {
                 tracing::error!(
-                    "plugin-server: the render thread is stuck in the plugin; ending the process"
+                    "plugin-server: the render lane is stuck in the plugin; ending the process"
                 );
                 crate::leak::note();
                 let _ = std::fs::remove_file(&self.socket);
@@ -421,6 +421,11 @@ pub(crate) fn working<R>(
 /// The beat of a request: a task on a thread of the executor's of its own that
 /// sends the host `Working` every period. Dropping it ends the task and waits for
 /// it, so nothing is sent after the drop returns.
+///
+/// The wait lasts as long as the pulse in flight, which is a blocking
+/// `write_frame` on the control socket: a host that stops reading hangs the
+/// pulse and the main reply alike, and the wait with them. It has no write
+/// timeout.
 struct Beat {
     task: Option<Task<()>>,
     over: Arc<Latch>,
