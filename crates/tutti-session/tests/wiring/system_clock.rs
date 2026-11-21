@@ -42,7 +42,7 @@ fn a_system_session_renders_its_graph_with_no_device() {
     let limit = Instant::now() + Duration::from_secs(10);
     let mut tap = loop {
         let _ = s.update();
-        if let Some(tap) = s.open_output_tap(Samples::new(4 * BLOCK)).unwrap().reader() {
+        if let Some(tap) = s.open_heard_tap(Samples::new(4 * BLOCK)).unwrap().reader() {
             break tap;
         }
         assert!(

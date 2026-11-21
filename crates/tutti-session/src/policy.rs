@@ -30,7 +30,7 @@ pub trait Policy: Clone + PartialEq + Send + Sync + 'static {
 ///
 /// The root, a bounce and a tap are never changed by it: they read the root.
 /// What is heard is the device, and the heard tap
-/// ([`Session::open_output_tap`]).
+/// ([`Session::open_heard_tap`]).
 ///
 /// The default routes the root to the device by speaker, as a session with no
 /// policy does.

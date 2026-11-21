@@ -537,6 +537,8 @@ pub(super) const ALLOW: &[Allow] = &[
         FIXED_SOURCE,
     ),
     ty("crates/tutti-nodes/", "LfoConfig", WIDTH, FIXED_SOURCE),
+    ty("crates/tutti-nodes/", "FmConfig", WIDTH, FIXED_SOURCE),
+    ty("crates/tutti-nodes/", "AdditiveConfig", WIDTH, FIXED_SOURCE),
     ty("crates/tutti-nodes/", "NoiseConfig", WIDTH, FIXED_SOURCE),
     ty(
         "crates/tutti-nodes/",

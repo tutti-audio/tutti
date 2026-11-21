@@ -23,7 +23,7 @@ use tutti_platform::Instant;
 use tutti_ump::{MidiChannel, NoteNumber, U7};
 
 use tutti_graph::NodeKey;
-use tutti_graph::{Cx, Event, FadeLaw, ForkByClone, Io, Node, Prepare, Shape, Status};
+use tutti_graph::{Cx, Event, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_modulation::{
     Adsr, CompileError, Curve, Declarations, Follower, Lfo, NoteEnvelope, RouteDecl, RouteKey,
     RouteTarget, Source, SourceKey, TargetKey,
@@ -33,7 +33,7 @@ use tutti_nodes::{Feed, ModDelayConfig, PhaserConfig, ReconcileError};
 use tutti_session::{
     AudioSide, AutomationTake, DepthTarget, DetachedSession, MixRef, ModInput, ModKeys, ModRefusal,
     ModRouteId, ModSourceId, ModTarget, NoSuchModRoute, NoSuchModSource, OutPort, PHASES, ParamRef,
-    ParamTarget, PhaseCx, Problem, Root, RouteSpec, Session, SessionEvent, TargetName,
+    ParamTarget, PhaseCx, Problem, Replacement, Root, RouteSpec, Session, SessionEvent, TargetName,
     declare_targets,
 };
 use tutti_units::{
@@ -763,11 +763,9 @@ fn a_node_crossfaded_to_another_param_list_keeps_modulating() {
     assert_eq!(*out[0].last().unwrap(), 750.0, "precondition: modulated");
 
     s.graph()
-        .crossfade(
+        .replace(
             probe,
-            ProbeUnit::new(400.0).with_extra(UnitParam::Q),
-            Seconds::new(0.005),
-            FadeLaw::EqualAmplitude,
+            Replacement::new(ProbeUnit::new(400.0).with_extra(UnitParam::Q)),
         )
         .expect("the crossfade starts");
     // The update that commits the new node re-applies after its commit: the
@@ -1044,7 +1042,7 @@ fn sent(s: &DetachedSession) -> Arc<tutti_graph::Plan> {
 
 /// Nothing is staged: the last update's commit took every edit.
 fn idle(s: &DetachedSession) -> bool {
-    !s.graph_ref().is_edited()
+    !s.graph_ref().has_uncommitted_edits()
 }
 
 /// One update, then a block rendered, as a device would between updates.

@@ -30,7 +30,7 @@ fn left(s: &mut Session) -> Vec<f32> {
 }
 
 /// A session with constants `a`, `b`, `c` (`A`, `B`, `C`) and a pass-through
-/// `sink` feeding output channel 0, committed once so `is_edited` is false.
+/// `sink` feeding output channel 0, committed once so `has_uncommitted_edits` is false.
 struct Rig {
     s: Session,
     a: tutti_graph::NodeKey,
@@ -50,7 +50,7 @@ fn rig() -> Rig {
         .unwrap()
         .unfaded();
     let _ = s.update();
-    assert!(!s.graph_ref().is_edited());
+    assert!(!s.graph_ref().has_uncommitted_edits());
     Rig {
         s,
         a: a.erase(),
@@ -197,28 +197,37 @@ fn an_unchanged_set_marks_nothing_edited() {
         .set_sources(InPort::new(r.sink, 0), [node(r.a), node(r.b)])
         .unwrap()
         .unfaded();
-    assert!(r.s.graph_ref().is_edited(), "a change");
+    assert!(r.s.graph_ref().has_uncommitted_edits(), "a change");
     let _ = r.s.update();
     r.s.graph()
         .set_sources(InPort::new(r.sink, 0), [node(r.b), node(r.a)])
         .unwrap()
         .unfaded();
-    assert!(!r.s.graph_ref().is_edited(), "the same set, reordered");
+    assert!(
+        !r.s.graph_ref().has_uncommitted_edits(),
+        "the same set, reordered"
+    );
     r.s.graph()
         .connect(node(r.a), InPort::new(r.sink, 0))
         .unwrap()
         .unfaded();
-    assert!(!r.s.graph_ref().is_edited(), "a source it holds");
+    assert!(
+        !r.s.graph_ref().has_uncommitted_edits(),
+        "a source it holds"
+    );
     r.s.graph()
         .disconnect(node(r.c), InPort::new(r.sink, 0))
         .unwrap()
         .unfaded();
-    assert!(!r.s.graph_ref().is_edited(), "a source it lacks");
+    assert!(
+        !r.s.graph_ref().has_uncommitted_edits(),
+        "a source it lacks"
+    );
     r.s.graph()
         .connect(node(r.c), InPort::new(r.sink, 0))
         .unwrap()
         .unfaded();
-    assert!(r.s.graph_ref().is_edited(), "a new source");
+    assert!(r.s.graph_ref().has_uncommitted_edits(), "a new source");
 }
 
 /// Silence is the empty set: an empty `set_sources` and `disconnect_all` clear
@@ -271,7 +280,10 @@ fn a_node_cannot_be_its_own_source() {
             .err(),
         Some(tutti_session::ConnectError::Itself(r.sink))
     );
-    assert!(!r.s.graph_ref().is_edited(), "nothing was stored");
+    assert!(
+        !r.s.graph_ref().has_uncommitted_edits(),
+        "nothing was stored"
+    );
 }
 
 /// A global output channel is a sink too: its sources sum.
@@ -326,17 +338,17 @@ fn an_unchanged_output_set_marks_nothing_edited() {
         .set_sources(Root::output(0), [node(r.sink)])
         .unwrap()
         .unfaded();
-    assert!(!r.s.graph_ref().is_edited());
+    assert!(!r.s.graph_ref().has_uncommitted_edits());
     r.s.graph()
         .connect(node(r.sink), Root::output(0))
         .unwrap()
         .unfaded();
-    assert!(!r.s.graph_ref().is_edited());
+    assert!(!r.s.graph_ref().has_uncommitted_edits());
     r.s.graph()
         .disconnect(node(r.a), Root::output(0))
         .unwrap()
         .unfaded();
-    assert!(!r.s.graph_ref().is_edited());
+    assert!(!r.s.graph_ref().has_uncommitted_edits());
 }
 
 /// The output tap hears a fan-in channel whole, before and after the fan-in
@@ -351,7 +363,7 @@ fn the_output_tap_hears_the_sum() {
     let mut tap =
         r.s.graph()
             .taps()
-            .open_output(Samples::new(1_024))
+            .open_root(Samples::new(1_024))
             .expect("the sources exist");
     assert!(left(&mut r.s).iter().all(|&x| x == A + B));
     r.s.graph()

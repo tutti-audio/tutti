@@ -99,7 +99,7 @@ pub trait SessionNode<F: Float = f32>:
 
     /// The node reading the session's tempo map through `tempo` (a reader
     /// the graph hands each node it takes in [`Graph::add`](crate::Graph::add)
-    /// and [`Graph::crossfade`](crate::Graph::crossfade); the node clones it).
+    /// and [`Graph::replace`](crate::Graph::replace); the node clones it).
     /// The identity, the default, for a node that reads no map: a sampler
     /// node overrides it, so a placed voice stays where the map puts it
     /// through a step or a ramp (doc 020, stage 5).

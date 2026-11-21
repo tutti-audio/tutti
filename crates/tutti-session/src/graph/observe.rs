@@ -1,7 +1,7 @@
 //! The two facets of observing a [`Graph`]: [`Taps`] (audio and event copies
 //! out of it) and [`Meters`] (level readers on it).
 //!
-//! A facet borrows the graph for the call (`g.taps().open(..)`), so the
+//! A facet borrows the graph for the call (`g.taps().open_ports(..)`), so the
 //! graph's own type keeps adding, removing and wiring nodes. Both edit the
 //! graph's plan (a tap or a meter is an op in it), so both mark it edited and
 //! the next commit compiles them.
@@ -24,7 +24,7 @@ use crate::{EventTapPort, OutPort};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum RootReader {
-    /// A tap on the root ([`Taps::open_output`]).
+    /// A tap on the root ([`Taps::open_root`]).
     Tap(TapId),
     /// The master meter.
     Meter(MeterId),
@@ -67,7 +67,7 @@ pub(super) struct Held<F: Float> {
 /// The heard tap (what the output sounds like, after the engine's declick
 /// fader) is not here: it is a writer in the engine's output buffer, which
 /// the graph does not own, so it is
-/// [`Session::open_output_tap`](crate::Session::open_output_tap).
+/// [`Session::open_heard_tap`](crate::Session::open_heard_tap).
 #[derive(Debug)]
 pub struct Taps<'g, F: Float = f32> {
     pub(super) graph: &'g mut Graph<F>,
@@ -99,7 +99,7 @@ impl<F: Float> Taps<'_, F> {
     /// This is the **plan tap**: an op of the graph, so it sees the signal
     /// before the engine's declick fader and the fold to the device width, on
     /// any ports at any width. To record what the output sounds like, with the
-    /// fade, open [`Session::open_output_tap`](crate::Session::open_output_tap)
+    /// fade, open [`Session::open_heard_tap`](crate::Session::open_heard_tap)
     /// instead (the default for a recording); this is the explicit choice of
     /// the graph's own signal. A block the engine refuses (rendered silent)
     /// writes no frames here and counts none lost, since the op did not run;
@@ -131,7 +131,7 @@ impl<F: Float> Taps<'_, F> {
     /// # Errors
     ///
     /// [`MissingSource`] for the first source that is not in the graph now.
-    pub fn open(
+    pub fn open_ports(
         &mut self,
         sources: &[OutPort],
         options: TapOptions,
@@ -143,7 +143,7 @@ impl<F: Float> Taps<'_, F> {
         Ok(reader)
     }
 
-    /// Opens a tap on `sources` ([`open`](Self::open)) and an [`Analyzer`] over
+    /// Opens a tap on `sources` ([`open_ports`](Self::open_ports)) and an [`Analyzer`] over
     /// it: the meter `analysis` builds, bound to the graph's rate and the tap's
     /// width, fed what the tap holds each time the app drains it
     /// ([`Analyzer::try_iter`]). The analysis is bound the way
@@ -162,7 +162,7 @@ impl<F: Float> Taps<'_, F> {
     /// [`AnalyzerError::MissingSource`] for a source that is not in the graph
     /// now. Nothing is opened on an error.
     #[cfg(feature = "analyze")]
-    pub fn analyzer<A>(
+    pub fn open_analyzer<A>(
         &mut self,
         sources: &[OutPort],
         analysis: A,
@@ -175,7 +175,7 @@ impl<F: Float> Taps<'_, F> {
     {
         let rate = self.graph.editor.prepare().sample_rate();
         let width = u16::try_from(sources.len()).unwrap_or(u16::MAX);
-        Analyzer::open(rate, width, &analysis, || self.open(sources, options))
+        Analyzer::open(rate, width, &analysis, || self.open_ports(sources, options))
     }
 
     /// A tap on the graph's global outputs, aligned: lane `c` is output
@@ -203,19 +203,19 @@ impl<F: Float> Taps<'_, F> {
     /// reader takes twelve channels for two.
     ///
     /// This is the signal the graph produces, before the engine's declick
-    /// fader and the fold to the device's width; see [`open`](Self::open)
+    /// fader and the fold to the device's width; see [`open_ports`](Self::open_ports)
     /// for what that means at a transport stop. To record what is heard, with
-    /// the fade, use [`Session::open_output_tap`](crate::Session::open_output_tap).
+    /// the fade, use [`Session::open_heard_tap`](crate::Session::open_heard_tap).
     ///
     /// Refuses with [`MissingSource`] when an output names a source that does
     /// not exist now (an output wired to a port the node does not have); only
-    /// the open is checked, as for [`open`](Self::open).
+    /// the open is checked, as for [`open_ports`](Self::open_ports).
     ///
     /// # Errors
     ///
     /// [`MissingSource`] for the first output source that is not in the graph
     /// now.
-    pub fn open_output(&mut self, capacity: Samples) -> Result<TapReader<F>, MissingSource> {
+    pub fn open_root(&mut self, capacity: Samples) -> Result<TapReader<F>, MissingSource> {
         let id = TapId::mint(&self.graph.ids);
         let width = self.graph.outputs();
         let reader = self.graph.editor.open_output_tap(id, width, capacity)?;
@@ -248,7 +248,7 @@ impl<F: Float> Taps<'_, F> {
     /// ([`TapEvent`](tutti_graph::TapEvent)), on the clock of the rate the
     /// graph is prepared at now ([`EventTapReader::rate`]). The tap is
     /// compiled by the next commit and fed by every block that renders after
-    /// it; a copy of events, the event sibling of [`open`](Self::open).
+    /// it; a copy of events, the event sibling of [`open_ports`](Self::open_ports).
     ///
     /// `options` carry the ring's capacity, a count of events
     /// ([`EventCapacity`](tutti_graph::EventCapacity), as for `Midi::tap`). A non-note-off is refused once that

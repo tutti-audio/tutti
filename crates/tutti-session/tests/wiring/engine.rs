@@ -429,7 +429,7 @@ fn opening_a_tap_or_meter_on_a_missing_source_is_refused() {
     assert_eq!(
         s.graph()
             .taps()
-            .open(
+            .open_ports(
                 &[OutPort::new(a, 1)],
                 TapOptions::new(Samples::new(64)).align(TapAlign::Raw)
             )
@@ -470,7 +470,7 @@ fn opening_a_tap_or_meter_on_a_missing_source_is_refused() {
         .expect("it exists, uncommitted");
     s.graph()
         .taps()
-        .open_output(Samples::new(64))
+        .open_root(Samples::new(64))
         .expect("the outputs exist");
 }
 
@@ -608,21 +608,21 @@ fn closing_a_meter_names_one_that_is_not_open() {
 fn closing_the_heard_tap_names_one_that_is_not_open() {
     let s = offline();
     assert_eq!(
-        s.close_output_tap(),
-        Err(tutti_session::SessionOutputTapError::Tap(
+        s.close_heard_tap(),
+        Err(tutti_session::SessionHeardTapError::Tap(
             tutti_engine::OutputTapError::NotOpen
         )),
         "none was opened"
     );
     let tap = s
-        .open_output_tap(Samples::new(64))
+        .open_heard_tap(Samples::new(64))
         .expect("an engine")
         .reader()
         .expect("the audio thread is not behind");
-    assert_eq!(s.close_output_tap(), Ok(()));
+    assert_eq!(s.close_heard_tap(), Ok(()));
     assert_eq!(
-        s.close_output_tap(),
-        Err(tutti_session::SessionOutputTapError::Tap(
+        s.close_heard_tap(),
+        Err(tutti_session::SessionHeardTapError::Tap(
             tutti_engine::OutputTapError::NotOpen
         )),
         "closed already"
@@ -632,8 +632,8 @@ fn closing_the_heard_tap_names_one_that_is_not_open() {
         .build_detached(SampleRate::of(RATE))
         .expect("builds");
     assert_eq!(
-        detached.close_output_tap(),
-        Err(tutti_session::SessionOutputTapError::Detached)
+        detached.close_heard_tap(),
+        Err(tutti_session::SessionHeardTapError::Detached)
     );
 }
 
@@ -653,7 +653,7 @@ fn an_offline_render_feeds_an_output_tap() {
     let mut tap = s
         .graph()
         .taps()
-        .open_output(Samples::new(1_024))
+        .open_root(Samples::new(1_024))
         .expect("the sources exist");
     assert_eq!(tap.width(), 2);
     let _ = s.update();
@@ -688,7 +688,7 @@ fn an_output_tap_follows_a_rewired_output() {
     let mut tap = s
         .graph()
         .taps()
-        .open_output(Samples::new(1_024))
+        .open_root(Samples::new(1_024))
         .expect("the sources exist");
     let _ = s.update();
     let mut block = vec![0.0f32; 64 * 2];
@@ -729,7 +729,7 @@ fn a_dropped_reader_leaves_the_plan_at_the_reclaim_phase() {
     let tap = s
         .graph()
         .taps()
-        .open_output(Samples::new(64))
+        .open_root(Samples::new(64))
         .expect("the sources exist");
     let _ = s.update();
     assert_eq!(taps(&s), 1, "one op a tap while it is open");
@@ -760,7 +760,7 @@ fn a_detached_render_feeds_a_tap() {
     let mut tap = s
         .graph()
         .taps()
-        .open_output(Samples::new(16))
+        .open_root(Samples::new(16))
         .expect("the sources exist");
     let mut frame = [0.0f32];
     for _ in 0..3 {
@@ -831,7 +831,7 @@ fn a_tap_steps_at_a_transport_stop_where_the_output_fades() {
     let mut tap = s
         .graph()
         .taps()
-        .open_output(Samples::new(16_384))
+        .open_root(Samples::new(16_384))
         .expect("the sources exist");
     let _ = s.update();
     let motion = s.transport_handle();
@@ -898,10 +898,10 @@ fn the_heard_tap_carries_the_fade_at_a_stop() {
     let mut plan = s
         .graph()
         .taps()
-        .open_output(Samples::new(16_384))
+        .open_root(Samples::new(16_384))
         .expect("the sources exist");
     let mut heard = s
-        .open_output_tap(Samples::new(16_384))
+        .open_heard_tap(Samples::new(16_384))
         .expect("an engine")
         .reader()
         .expect("the audio thread is not behind");
@@ -969,13 +969,13 @@ fn render_feeds_the_heard_tap_and_a_fork_does_not() {
         .unfaded();
     let _ = s.update();
     let tap = s
-        .open_output_tap(Samples::new(1_024))
+        .open_heard_tap(Samples::new(1_024))
         .expect("an engine")
         .reader()
         .expect("the audio thread is not behind");
     assert_eq!(
-        s.open_output_tap(Samples::new(8)).err(),
-        Some(tutti_session::SessionOutputTapError::Tap(
+        s.open_heard_tap(Samples::new(8)).err(),
+        Some(tutti_session::SessionHeardTapError::Tap(
             tutti_engine::OutputTapError::Busy
         ))
     );
@@ -995,8 +995,8 @@ fn render_feeds_the_heard_tap_and_a_fork_does_not() {
         .build_detached(SampleRate::of(RATE))
         .expect("builds");
     assert_eq!(
-        detached.open_output_tap(Samples::new(8)).err(),
-        Some(tutti_session::SessionOutputTapError::Detached)
+        detached.open_heard_tap(Samples::new(8)).err(),
+        Some(tutti_session::SessionHeardTapError::Detached)
     );
 }
 
@@ -1009,7 +1009,7 @@ fn render_feeds_the_heard_tap_and_a_fork_does_not() {
 fn a_dropped_heard_reader_frees_the_tap() {
     let mut s = offline();
     let tap = s
-        .open_output_tap(Samples::new(64))
+        .open_heard_tap(Samples::new(64))
         .expect("an engine")
         .reader()
         .expect("the audio thread is not behind");
@@ -1017,7 +1017,7 @@ fn a_dropped_heard_reader_frees_the_tap() {
     let _ = s.update();
     let mut block = vec![0.0f32; 64 * 2];
     s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
-    assert!(s.open_output_tap(Samples::new(64)).is_ok());
+    assert!(s.open_heard_tap(Samples::new(64)).is_ok());
 }
 
 /// A project the device has no place for is refused when the session is built,

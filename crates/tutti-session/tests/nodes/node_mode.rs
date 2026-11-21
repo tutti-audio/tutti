@@ -60,7 +60,7 @@ fn rig() -> Rig {
         .unwrap()
         .unfaded();
     let _ = s.update();
-    assert!(!s.graph_ref().is_edited());
+    assert!(!s.graph_ref().has_uncommitted_edits());
     Rig { s, halve }
 }
 
@@ -125,7 +125,10 @@ fn a_mode_is_not_an_edit() {
 
     r.s.set(r.halve.mode().to(NodeMode::Bypassed)).unwrap();
     let _ = r.s.update();
-    assert!(!r.s.graph_ref().is_edited(), "a mode marks nothing edited");
+    assert!(
+        !r.s.graph_ref().has_uncommitted_edits(),
+        "a mode marks nothing edited"
+    );
     let _ = r.settled();
 
     assert_eq!(

@@ -181,6 +181,11 @@ pub enum UnitParam {
     /// its position jitter, a fraction of the source, and index 1 its timing jitter, a
     /// fraction of the interval between grains.
     Jitter = 44,
+    /// A modulation index (`ModulationIndex`, at least zero, in radians): how far a modulator
+    /// swings the phase of the operator it modulates. A frequency-modulation source numbers its
+    /// indices: 0 is the index of modulation the carrier receives, and 1 is the feedback
+    /// index, the swing an operator's own past output gives its phase.
+    Index = 45,
 }
 
 /// The error converting a `u16` that is not a known [`UnitParam`]
@@ -244,6 +249,7 @@ impl TryFrom<u16> for UnitParam {
             42 => Position,
             43 => GrainLength,
             44 => Jitter,
+            45 => Index,
             other => return Err(UnitParamOutOfRange(other)),
         })
     }
@@ -661,7 +667,8 @@ impl<U> From<ParamKey<U>> for UnitAddr {
 use super::Normalized;
 use super::units::{
     Amplitude, Azimuth, Balance, BitDepth, Cents, CentsSpan, CompressionRatio, Db, Depth, Drive,
-    Elevation, Feedback, HoldFactor, Hz, Metres, Mix, Q, Seconds, Semitones, Spread, StereoWidth,
+    Elevation, Feedback, HoldFactor, Hz, Metres, Mix, ModulationIndex, Q, Seconds, Semitones,
+    Spread, StereoWidth,
 };
 
 /// Defines the typed keys, and — from the same lines — the registry
@@ -786,6 +793,10 @@ param_keys! {
         /// Random deviation as a fraction of its range.
         JITTER = Jitter;
     }
+    ModulationIndex {
+        /// A modulation index: the swing of one operator's output on another's phase.
+        INDEX = Index;
+    }
 }
 
 impl ParamKey<()> {
@@ -836,6 +847,10 @@ mod tests {
         assert_eq!(
             ParamKey::<Balance>::BALANCE.addr(),
             UnitAddr::from(UnitParam::Balance)
+        );
+        assert_eq!(
+            ParamKey::<crate::ModulationIndex>::INDEX.addr(),
+            UnitAddr::from(UnitParam::Index)
         );
         assert_ne!(ParamKey::<Hz>::CUTOFF, ParamKey::<Hz>::RATE);
     }
@@ -933,7 +948,7 @@ mod tests {
         assert_eq!(UnitParam::try_from(26), Ok(UnitParam::Diffusion));
         assert_eq!(UnitParam::try_from(27), Ok(UnitParam::Freeze));
         assert_eq!(UnitParam::try_from(28), Ok(UnitParam::Azimuth));
-        assert_eq!(UnitParam::try_from(45), Err(UnitParamOutOfRange(45)));
+        assert_eq!(UnitParam::try_from(46), Err(UnitParamOutOfRange(46)));
         // Decay's three bands are indices of one kind.
         for (index, packed) in [(0u8, 0x0019u16), (1, 0x0119), (2, 0x0219)] {
             assert_eq!(UnitAddr::new(UnitParam::Decay, index).to_u16(), packed);
@@ -944,7 +959,7 @@ mod tests {
     /// (and is `AudioParam`'s `P`), so this table is the compatibility
     /// record: a renumbered or re-ordered variant fails here by name, which
     /// `u16_round_trips` (any id maps to *some* variant) cannot say.
-    const PINNED: [(UnitParam, u16); 44] = [
+    const PINNED: [(UnitParam, u16); 45] = [
         (UnitParam::Cutoff, 0),
         (UnitParam::Q, 1),
         (UnitParam::GainDb, 2),
@@ -989,6 +1004,7 @@ mod tests {
         (UnitParam::Position, 42),
         (UnitParam::GrainLength, 43),
         (UnitParam::Jitter, 44),
+        (UnitParam::Index, 45),
     ];
 
     /// **Index 0 is the plain id**, for every param: the packed form of

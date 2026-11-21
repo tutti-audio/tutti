@@ -23,11 +23,12 @@ use std::sync::Arc;
 use tutti_buffers::{Float, SampleFormat};
 use tutti_cpal::{AudioHost, DeviceSelector, MONITOR_RING, MicConfig, MicIn};
 use tutti_engine::StreamLatency;
-use tutti_graph::{DECLICK, FadeLaw, InletNode, InletRing};
+use tutti_graph::{InletNode, InletRing};
 use tutti_platform::Executor;
 use tutti_units::{SampleRate, Samples, Seconds};
 
-use crate::graph::CrossfadeRefused;
+use crate::graph::ReplaceRefused;
+use crate::graph::Replacement;
 use crate::{DeviceEvent, Error, Key, Result, Session, SessionEvent, SessionFloat, Trim};
 
 /// What [`Session::add_input`] opens: the capture device, which of its inputs,
@@ -386,7 +387,7 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, crate::DeviceClock<F>>
         held.retain_mut(|input| match self.reopen(input, rate) {
             Ok(()) => true,
             // The host removed the node: there is no input to keep.
-            Err(Error::Crossfade(CrossfadeRefused::NoSuchNode(_))) => false,
+            Err(Error::Replace(ReplaceRefused::NoSuchNode(_))) => false,
             Err(error) => {
                 self.running
                     .events
@@ -410,7 +411,7 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, crate::DeviceClock<F>>
         self.graph
             // The old ring is silent by now (its stream was dropped first), so
             // the fade only smooths the step.
-            .crossfade(input.node, node, DECLICK, FadeLaw::default())?;
+            .replace(input.node, Replacement::new(node))?;
         input.keep = Some(opened.keep);
         input.lead = opened.lead;
         Ok(())

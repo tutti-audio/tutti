@@ -284,7 +284,10 @@ fn a_target_placed_one_update_later_resolves_on_that_update() {
         "resolved on the update its node was placed"
     );
     assert!(s.mod_state().lane(HOST_TARGET).is_some(), "with its lane");
-    assert!(!s.graph_ref().is_edited(), "and the lane committed");
+    assert!(
+        !s.graph_ref().has_uncommitted_edits(),
+        "and the lane committed"
+    );
 }
 
 /// **The unresolved warning fires after 4 s of `now`, not after N

@@ -138,8 +138,8 @@ pub use tutti_session::Error;
 pub use tutti_curve::DECLICK;
 pub use tutti_graph::{
     EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapOptions, EventTapReader,
-    FadeLaw, InletNode, InletRing, Level, Losses, MeterReader, NodeMode, Stamp, TapAlign, TapEvent,
-    TapId, TapOptions, TapReader, TapWriter,
+    Fade, FadeLaw, InletNode, InletRing, Level, Losses, MeterReader, NodeMode, Stamp, TapAlign,
+    TapEvent, TapId, TapOptions, TapReader, TapWriter,
 };
 pub use tutti_rt::PushError;
 // The engine's health: a `Gauge<Load>` and a `Counter<BlockCounts>`.
@@ -282,6 +282,11 @@ pub mod nodes {
         SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
     };
     pub use tutti_dsp::{
+        AdditiveBank, AdditiveControls, Algorithm, AlgorithmError, FmControls, FmPatch, FmVoice,
+        MAX_OPERATORS, MAX_PARTIALS, Operator, OperatorCount, OperatorCountError, OperatorError,
+        OperatorFrequency, OperatorSpec, Partial, PartialCount, PartialCountError, Partials, Route,
+    };
+    pub use tutti_dsp::{
         AllPassFilter, CombBank, CombControls, CombFilter, CombForm, FrequencyShifterBank,
         FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,
     };
@@ -322,7 +327,8 @@ pub mod nodes {
         SpringLengthError,
     };
     pub use tutti_dsp::{
-        MAX_MODES, ModalBank, ModalControls, Mode, ModeCount, ModeCountError, Modes,
+        MAX_MODES, ModalBank, ModalControls, Mode, ModeCount, ModeCountError, Modes, Oversampler,
+        Oversampling, OversamplingFactor, OversamplingPlan, Passband, PassbandError,
     };
     pub use tutti_dsp::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
     pub use tutti_dsp::{
@@ -335,6 +341,10 @@ pub mod nodes {
         AutomationLaneConfig, AutomationLaneNode, AutomationRecorder, ControlLaneNode,
         ForeignLaneConfig, LaneControls, LiveAutomationLane, RecordMode, RecordingConfig,
         Trajectory, UnitLaneConfig,
+    };
+    pub use tutti_nodes::{
+        AdditiveConfig, AdditiveKernel, AdditiveNode, AdditiveSet, FmConfig, FmKernel, FmNode,
+        FmSet,
     };
     pub use tutti_nodes::{
         AmbisonicDecoderConfig, AmbisonicDecoderKernel, AmbisonicDecoderNode, AmbisonicDecoderSet,
@@ -372,15 +382,15 @@ pub mod nodes {
         MetronomeMode, ModDelayConfig, ModDelayControls, ModDelayLayout, ModDelayLayoutBuilder,
         ModDelayNode, MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
         MultibandControls, NoiseConfig, NoiseNode, NoteEnvelopeConfig, NoteEnvelopeNode, NoteTimes,
-        NoteTimesError, OscillatorConfig, OscillatorNode, OversamplingFactor, PhaserConfig,
-        PhaserControls, PhaserNode, PlateControls, PlateReverbConfig, PlateReverbNode,
-        SOURCE_EVENT_CAPACITY, ShapeKind, ShimmerConfig, ShimmerNode, SourceNode, SourcePorts,
-        SpringControls, SpringLayout, SpringReverbConfig, SpringReverbNode, SpringStages,
-        SpringStagesError, Stages, StagesError, Stagger, StaggerError, SvfControls,
-        SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError, SweepRange,
-        SweepRangeError, TiltFilterConfig, TiltFilterControls, TiltFilterNode, TransientControls,
-        TransientShaperConfig, TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode,
-        WavetableConfig, WavetableNode,
+        NoteTimesError, OscillatorConfig, OscillatorNode, PhaserConfig, PhaserControls, PhaserNode,
+        PlateControls, PlateReverbConfig, PlateReverbNode, SOURCE_EVENT_CAPACITY, ShapeKind,
+        ShimmerConfig, ShimmerNode, SourceNode, SourcePorts, SpringControls, SpringLayout,
+        SpringReverbConfig, SpringReverbNode, SpringStages, SpringStagesError, Stages, StagesError,
+        Stagger, StaggerError, SvfControls, SvfFilterConfig, SvfFilterNode, SvfType, Sweep,
+        SweepBuilder, SweepError, SweepRange, SweepRangeError, TiltFilterConfig,
+        TiltFilterControls, TiltFilterNode, TransientControls, TransientShaperConfig,
+        TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode, WavetableConfig,
+        WavetableNode,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
@@ -551,14 +561,14 @@ pub mod session {
     ))]
     pub use tutti_session::LoadError;
     pub use tutti_session::{
-        BackgroundWork, BlockConfig, Bus, BusSink, Channel, Committed, Connection, Crossfade,
-        CrossfadeId, CrossfadeRefused, DeclarationError, Disconnection, Event, EventEdge,
-        EventTapPort, Fanin, Feeder, Graph, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink,
-        Meters, NodeSlots, NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError,
-        OutputTapOpen, PHASES, Peer, PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence,
-        Reclaimer, Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact,
-        ResourceId, RootDeclaration, RootReader, RootTopologyStatus, SessionNode,
-        SessionOutputTapError, SetSources, Taps, TempoError, Weighted, Wire, root_width,
+        BackgroundWork, BlockConfig, Bus, BusSink, Channel, Committed, Connection,
+        DeclarationError, Disconnection, Event, EventEdge, EventTapPort, Fanin, Feeder, Graph,
+        Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots, NotReopened,
+        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputTapOpen, PHASES, Peer,
+        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
+        RemoveError, Reopened, ReplaceRefused, Replacement, Resource, ResourceFact, ResourceId,
+        RootDeclaration, RootReader, RootTopologyStatus, SessionHeardTapError, SessionNode,
+        SetSources, Taps, TempoError, Weighted, Wire, root_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,

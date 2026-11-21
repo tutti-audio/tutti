@@ -4,13 +4,13 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::ForkByClone;
-use tutti_graph::{FadeLaw, GraphInvalid, NodeKey, ParamRange};
+use tutti_graph::{GraphInvalid, NodeKey, ParamRange};
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    ConnectError, Crossfade, CrossfadeRefused, DetachedSession, EventInPort, EventOutPort, InPort,
-    OutPort, Root, Session,
+    ConnectError, DetachedSession, EventInPort, EventOutPort, InPort, OutPort, ReplaceRefused,
+    Replacement, Root, Session,
 };
-use tutti_units::{SampleRate, Seconds, UnitParam};
+use tutti_units::{SampleRate, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const GHOST: NodeKey = NodeKey(u64::MAX);
@@ -35,7 +35,7 @@ fn a_query_of_a_node_that_is_not_there_names_it() {
     assert_eq!(named(g.node_event_inputs(GHOST).unwrap_err()), GHOST);
     assert_eq!(named(g.node_latency(GHOST).unwrap_err()), GHOST);
     assert_eq!(named(g.node_tail(GHOST).unwrap_err()), GHOST);
-    assert_eq!(named(g.buses(GHOST).unwrap_err()), GHOST);
+    assert_eq!(named(g.node_buses(GHOST).unwrap_err()), GHOST);
     assert_eq!(named(g.mode(GHOST).unwrap_err()), GHOST);
     assert_eq!(named(g.mix(GHOST).unwrap_err()), GHOST);
     assert_eq!(
@@ -60,7 +60,7 @@ fn a_query_of_a_node_that_is_there_answers() {
     assert_eq!(g.node_inputs(through).unwrap(), 2);
     assert_eq!(g.node_outputs(through).unwrap(), 2);
     assert_eq!(g.node_event_inputs(through).unwrap(), 0);
-    assert!(g.buses(through).is_ok());
+    assert!(g.node_buses(through).is_ok());
     assert!(g.mode(through).is_ok());
     assert!(g.mix(through).is_ok());
     assert_eq!(g.param_mod(through, UnitParam::Cutoff).unwrap(), None);
@@ -139,7 +139,7 @@ fn a_param_modulation_of_a_missing_node_is_refused_at_the_call() {
         .graph()
         .add(ForkByClone(Through::new(ChannelLayout::STEREO)));
     let _ = s.update();
-    assert!(!s.graph_ref().is_edited());
+    assert!(!s.graph_ref().has_uncommitted_edits());
     let range = ParamRange { min: 0.0, max: 1.0 };
     let refused = s
         .graph()
@@ -157,7 +157,10 @@ fn a_param_modulation_of_a_missing_node_is_refused_at_the_call() {
         matches!(refused, GraphInvalid::UnknownParamNode { missing, .. } if missing == GHOST),
         "{refused:?}"
     );
-    assert!(!s.graph_ref().is_edited(), "a refusal changes nothing");
+    assert!(
+        !s.graph_ref().has_uncommitted_edits(),
+        "a refusal changes nothing"
+    );
     assert_eq!(
         s.graph()
             .clear_param_mod(GHOST, UnitParam::Cutoff)
@@ -167,11 +170,11 @@ fn a_param_modulation_of_a_missing_node_is_refused_at_the_call() {
     );
 }
 
-/// **A crossfade of a node that is not there is refused at the call even while
+/// **A replace of a node that is not there is refused at the call even while
 /// the graph re-prepares.** Asked `Busy` first, it would have been parked to
 /// fail on a later update; it is `NoSuchNode` now and nothing waits.
 #[test]
-fn a_crossfade_of_a_missing_node_is_refused_during_a_re_prepare() {
+fn a_replace_of_a_missing_node_is_refused_during_a_re_prepare() {
     let mut s = detached();
     let _side = s.graph().take_audio_side();
     let knob = s.graph().add(ForkByClone(Const::frame(&[1.0])));
@@ -181,24 +184,16 @@ fn a_crossfade_of_a_missing_node_is_refused_during_a_re_prepare() {
 
     let refused = s
         .graph()
-        .crossfade(
-            GHOST,
-            ForkByClone(Const::frame(&[2.0])),
-            Seconds::new(0.005),
-            FadeLaw::EqualAmplitude,
-        )
+        .replace(GHOST, Replacement::new(ForkByClone(Const::frame(&[2.0]))))
         .expect_err("a node that is not there");
-    assert_eq!(refused, CrossfadeRefused::NoSuchNode(GHOST));
-    assert_eq!(s.graph_ref().testing().waiting_crossfades(), 0);
+    assert_eq!(refused, ReplaceRefused::NoSuchNode(GHOST));
+    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
 
     // The node that is there waits, as before.
-    let waits = s.graph().crossfade(
-        knob,
-        ForkByClone(Const::frame(&[2.0])),
-        Seconds::new(0.005),
-        FadeLaw::EqualAmplitude,
-    );
-    assert!(matches!(waits, Ok(Crossfade::Waiting(_))), "{waits:?}");
+    s.graph()
+        .replace(knob, Replacement::new(ForkByClone(Const::frame(&[2.0]))))
+        .expect("the node is there");
+    assert_eq!(s.graph_ref().testing().waiting_replacements(), 1);
 }
 
 /// **A tap or meter source whose port index no `u16` holds is named, not
@@ -214,7 +209,7 @@ fn a_tap_source_past_what_a_port_index_holds_is_refused() {
     let refused = s
         .graph()
         .taps()
-        .open(
+        .open_ports(
             &[a.out(0), far],
             TapOptions::new(Samples::new(64)).align(TapAlign::Raw),
         )
