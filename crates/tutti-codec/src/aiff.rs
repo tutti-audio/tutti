@@ -40,7 +40,7 @@ impl<W: Write + Seek> AiffWriter<W> {
     ///
     /// As [`Encoder::create`](crate::Encoder::create).
     pub(crate) fn create(spec: &Spec, pcm: Pcm, sink: W) -> Result<Self> {
-        spec.header_rate()?;
+        let sample_rate = spec.header_hz()?;
         let channels = spec.channels()?;
         let info = AifcWriteInfo {
             // Float samples are an AIFF-C extension; plain AIFF is integer-only,
@@ -54,9 +54,8 @@ impl<W: Write + Seek> AiffWriter<W> {
                 channels,
                 max: i16::MAX.unsigned_abs(),
             })?,
-            // The extended float the header states; the one rate that is not
-            // narrowed to whole Hz.
-            sample_rate: spec.rate().get(),
+            // The extended float the header states, written exactly.
+            sample_rate,
             sample_format: match pcm {
                 Pcm::Int16 => SampleFormat::I16,
                 Pcm::Int24 => SampleFormat::I24,

@@ -172,6 +172,40 @@ fn a_spec_that_cannot_be_written_is_refused_without_a_file() {
     }
 }
 
+/// A WAV or FLAC header holds whole Hz, so a fractional rate is refused rather
+/// than rounded; AIFF's extended float states it exactly.
+#[test]
+fn a_fractional_rate_is_refused_where_the_header_is_whole_hz_and_exact_in_aiff() {
+    for (ext, format) in formats() {
+        let s = at_rate(format, 44_100.5);
+        let result = Encoder::create(&s, Cursor::new(Vec::new()));
+        if ext == "aiff" {
+            let bytes = result
+                .expect("aiff states it")
+                .finish()
+                .unwrap()
+                .into_inner();
+            let comm = bytes
+                .windows(4)
+                .position(|w| w == b"COMM")
+                .expect("COMM chunk");
+            // COMM: id, size, channels (2), frames (4), bits (2), then the rate.
+            let rate = &bytes[comm + 8 + 8..comm + 8 + 18];
+            let exponent = i32::from(u16::from_be_bytes([rate[0], rate[1]]) & 0x7fff);
+            let mantissa = u64::from_be_bytes(rate[2..10].try_into().unwrap());
+            let hz = mantissa as f64 * 2f64.powi(exponent - 16_383 - 63);
+            assert_eq!(hz, 44_100.5);
+        } else {
+            assert!(
+                matches!(result, Err(Error::Spec(SpecError::SampleRate(_)))),
+                "{ext}: 44100.5 Hz was accepted"
+            );
+            let whole = Encoder::create(&at_rate(format, 44_100.0), Cursor::new(Vec::new()));
+            assert!(whole.is_ok(), "{ext}: 44100 Hz refused");
+        }
+    }
+}
+
 /// Widths past a container's header are refused as spec errors where the
 /// container counts them: AIFF in an `i16`.
 #[test]

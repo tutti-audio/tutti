@@ -281,6 +281,7 @@ fn stop_and_join(threads: Vec<Worker>, timers: &Timers) {
             continue;
         }
         if let Err(running) = worker.handle.stop_within(deadline.left(Instant::now())) {
+            // Teardown: no caller is left to tell, so the overrun is logged.
             tracing::warn!(
                 thread = running.name(),
                 "a stopped thread still runs past the stop bound; it is detached"

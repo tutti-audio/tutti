@@ -9,7 +9,7 @@
 
 use tutti_midi_protocol::{KeyTable, TuningFrequency};
 use tutti_ump::NoteNumber;
-use tutti_units::{Cents, Hz, Semitones};
+use tutti_units::{Cents, FrequencyRatio, Hz, Semitones};
 
 // A second copy of A440. `Note::A4_HZ` is the engine's canonical one but is
 // private to `tutti-music`, and widening its visibility is a bigger change
@@ -35,7 +35,8 @@ impl ScaleDegree {
 
     pub fn from_ratio(ratio: f64) -> Self {
         Self {
-            cents: Cents::from_pitch_ratio(ratio),
+            // A ratio that is not above zero is the unison.
+            cents: FrequencyRatio::new(ratio).map_or(Cents::new(0.0), Cents::from_pitch_ratio),
         }
     }
 }
@@ -262,7 +263,9 @@ impl Tuning {
         for (word, &hz) in words.iter_mut().zip(&self.freq_table) {
             // MIDI note 69 is A4 = 440 Hz: the pitch of a frequency is its
             // interval over A4 above that note.
-            let above_a4 = Semitones::from_pitch_ratio(hz / A4_FREQ);
+            // A frequency with no ratio to A4 (not above zero) reads as A4.
+            let above_a4 = FrequencyRatio::new(hz / A4_FREQ)
+                .map_or(Semitones::UNISON, Semitones::from_pitch_ratio);
             *word = TuningFrequency::nearest(above_a4 + Semitones::new(f64::from(A4_NOTE.get())));
         }
         KeyTable::new(words)

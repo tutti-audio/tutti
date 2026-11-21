@@ -3,7 +3,7 @@
 //! [`Due`] is the timing rule: a method of `now` that returns the sleeps due then.
 //! [`Timers::fire`] calls it with [`Instant::now`], from a driving thread's loop or from
 //! [`Executor::run_until_stalled`](super::Executor::run_until_stalled) and
-//! [`Executor::try_tick`](super::Executor::try_tick).
+//! [`Executor::tick`](super::Executor::tick).
 
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};

@@ -285,6 +285,10 @@ pub struct Written {
     /// [`Default`](tutti_buffers::Placement::Default)). A `Lufs` normalize
     /// weighted the file's loudness by that placement.
     pub placement: tutti_buffers::Placement,
+    /// The spill file a normalizing output kept its rendered audio in, when
+    /// removing it failed: it is left beside [`path`](Self::path) for the
+    /// caller to delete. `None` when there was none or it is gone.
+    pub spill_left: Option<PathBuf>,
 }
 
 /// The frame width an export config asks for, as the interleave stride.
