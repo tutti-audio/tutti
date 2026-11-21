@@ -44,8 +44,10 @@
 
 use core::ops::Range;
 
+use crate::BlockMismatch;
+use crate::block::expect_widths;
 use tutti_buffers::{ChannelLayout, MAX_CHANNELS};
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput, Planes, PlanesMut};
 use tutti_units::{Db, SampleRate, Samples, Seconds};
 
 use super::curves::db_gain;
@@ -364,7 +366,7 @@ impl<F: Float + SimdLanes> LevellerBank<F> {
             return;
         };
         self.filter
-            .process(&mut self.coefficients, heard, filtered.reborrow());
+            .run(&mut self.coefficients, &heard, &mut filtered);
         let mut non_finite = false;
         for (plane, &weight) in filtered.iter().zip(self.weights.iter()) {
             for (p, &y) in out.iter_mut().zip(plane.samples()) {
@@ -383,13 +385,17 @@ impl<F: Float + SimdLanes> LevellerBank<F> {
 
     /// Runs `input` into `output`, scaled by one gain from the short-term loudness of `input`.
     ///
-    /// Channel `c` of `input` feeds channel `c` of `output`; a channel past the narrower of the
-    /// two views is not touched, and the frames rendered are the fewer of the two views'. A
-    /// channel of the bank that `input` does not have is silent. The result does not depend on
-    /// how the stream is cut into calls. No allocation.
-    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = input.channels().min(output.channels());
+    /// Channel `c` of `input` feeds channel `c` of `output`. The result does not depend on how
+    /// the stream is cut into calls. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels.
+    pub fn process(&mut self, block: &mut InputOutput<'_, F>) -> Result<(), BlockMismatch> {
+        let width = self.weights.len();
+        expect_widths(block, width, width)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let mut powers = [0.0f64; CHUNK];
         let mut gains = [F::ZERO; CHUNK];
         let mut start = 0;
@@ -414,6 +420,7 @@ impl<F: Float + SimdLanes> LevellerBank<F> {
             }
             start = end;
         }
+        Ok(())
     }
 }
 

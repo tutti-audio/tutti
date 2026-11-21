@@ -27,8 +27,10 @@
 //! says, at the lowest cutoff the controls reach), so the node over it declares
 //! [`Tail::Unknown`](tutti_units::Tail::Unknown).
 
+use crate::BlockMismatch;
+use crate::block::expect_widths;
 use tutti_buffers::ChannelLayout;
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput};
 use tutti_units::{Db, Hz, Q, SampleRate, Samples, Seconds, Semitones};
 
 use super::SvfBank;
@@ -184,12 +186,17 @@ impl<F: Float + SimdLanes + Lerp> EnvelopeFilterBank<F> {
     /// Runs `input` into `output`, designing at each grid period's first frame and ramping to
     /// the design.
     ///
-    /// Channel `c` of `input` feeds channel `c` of `output`; a channel past the bank's width or
-    /// the narrower of the two views is not touched, and the frames rendered are the fewer of
-    /// the two views'. A NaN sample reads as quiet and an infinite one as full scale. No
-    /// allocation.
-    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
-        let frames = input.frames().get().min(output.frames().get());
+    /// Channel `c` of `input` feeds channel `c` of `output`. A NaN sample reads as quiet and an
+    /// infinite one as full scale. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels.
+    pub fn process(&mut self, block: &mut InputOutput<'_, F>) -> Result<(), BlockMismatch> {
+        let width = self.bank.channels();
+        expect_widths(block, width, width)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let mut levels = [F::ZERO; GRID.get()];
         let mut start = 0;
         while start < frames {
@@ -205,14 +212,15 @@ impl<F: Float + SimdLanes + Lerp> EnvelopeFilterBank<F> {
                 self.follower.follow_raw(&mut self.env, l.min(F::ONE));
             }
             let range = Samples::new(start)..Samples::new(end);
-            self.bank.process(
+            self.bank.run(
                 &mut self.coefficients,
-                input.slice(range.clone()),
-                output.slice_mut(range),
+                &input.slice(range.clone()),
+                &mut output.slice_mut(range),
             );
             self.phase = (self.phase + Samples::new(n)) % GRID;
             start = end;
         }
+        Ok(())
     }
 }
 

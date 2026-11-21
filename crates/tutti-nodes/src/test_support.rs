@@ -1,9 +1,9 @@
 //! Rendering helpers shared by the width-generic nodes' unit tests.
 
-use tutti_buffers::{Planes, PlanesMut, Sample};
+use tutti_buffers::{InputOutput, Planes, Sample};
 use tutti_graph::contract::{BlockRig, drive};
 use tutti_graph::{IntoNode, Node};
-use tutti_units::{Db, Real, SampleRate};
+use tutti_units::{Db, Real, SampleRate, Samples};
 
 pub(crate) use tutti_fixtures::noise;
 
@@ -255,11 +255,12 @@ pub(crate) fn render_kernel<K: Kernel>(k: &mut K, input: &[Vec<K::Float>]) -> Ve
     let ins: Vec<&[K::Float]> = input.iter().map(Vec::as_slice).collect();
     let mut out = vec![vec![K::Float::ZERO; input[0].len()]; input.len()];
     let mut outs: Vec<&mut [K::Float]> = out.iter_mut().map(Vec::as_mut_slice).collect();
+    let frames = Samples::new(input[0].len());
     k.render(
-        Planes::new(&ins).unwrap(),
+        &mut InputOutput::from_slices(frames, &ins, &mut outs).unwrap(),
         ControlSignals::NONE,
-        PlanesMut::new(&mut outs).unwrap(),
-    );
+    )
+    .unwrap();
     out
 }
 

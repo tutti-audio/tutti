@@ -2,6 +2,7 @@ use super::*;
 use crate::pan_gains;
 use crate::testing::noise;
 use core::f64::consts::TAU;
+use tutti_buffers::{BlockSide, InputOutput, Planes, PlanesMut};
 use tutti_units::Pan;
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -11,7 +12,7 @@ const PERIOD: usize = 480;
 
 fn run<P>(frames: usize, blocks: &[usize], channels: &[Vec<f32>], mut f: P) -> Vec<Vec<f32>>
 where
-    P: FnMut(Planes<'_, f32>, PlanesMut<'_, '_, f32>),
+    P: FnMut(&mut InputOutput<'_, f32>) -> Result<(), BlockMismatch>,
 {
     let mut out = vec![vec![0.0f32; frames]; channels.len()];
     let (mut at, mut k) = (0, 0);
@@ -20,10 +21,12 @@ where
         k += 1;
         let ins: Vec<Vec<f32>> = channels.iter().map(|c| c[at..end].to_vec()).collect();
         let mut outs: Vec<Vec<f32>> = vec![vec![0.0; end - at]; channels.len()];
-        f(
+        let mut block = InputOutput::paired(
             Planes::from_vecs(&ins).unwrap(),
             PlanesMut::from_vecs(&mut outs).unwrap(),
-        );
+        )
+        .unwrap();
+        f(&mut block).unwrap();
         for (o, part) in out.iter_mut().zip(&outs) {
             o[at..end].copy_from_slice(part);
         }
@@ -50,7 +53,7 @@ fn tremolo(wave: OscillatorWave, rate: Hz, depth: f64) -> Tremolo {
 fn gains(depth: f64, frames: usize, blocks: &[usize]) -> Vec<f32> {
     let mut t = tremolo(OscillatorWave::Sine, Hz::new(HZ), depth);
     let ones = vec![vec![1.0f32; frames]];
-    run(frames, blocks, &ones, |i, o| t.process(i, o)).remove(0)
+    run(frames, blocks, &ones, |block| t.process(block)).remove(0)
 }
 
 /// Depth 0 is unity: the output is the input, bit for bit.
@@ -58,8 +61,8 @@ fn gains(depth: f64, frames: usize, blocks: &[usize]) -> Vec<f32> {
 fn depth_zero_is_unity() {
     let x = noise(1, 2_000, 1.0);
     let mut t = tremolo(OscillatorWave::Sine, Hz::new(HZ), 0.0);
-    let out = run(2_000, &[2_000], std::slice::from_ref(&x), |i, o| {
-        t.process(i, o)
+    let out = run(2_000, &[2_000], std::slice::from_ref(&x), |block| {
+        t.process(block)
     });
     assert_eq!(out[0], x);
 }
@@ -71,8 +74,8 @@ fn the_output_is_the_input_times_the_closed_form_gain() {
     let x = noise(2, 1_920, 1.0);
     for d in [1.0f64, 0.5, -0.75] {
         let mut t = tremolo(OscillatorWave::Sine, Hz::new(HZ), d);
-        let out = run(1_920, &[1_920], std::slice::from_ref(&x), |i, o| {
-            t.process(i, o)
+        let out = run(1_920, &[1_920], std::slice::from_ref(&x), |block| {
+            t.process(block)
         });
         for (n, (&y, &x)) in out[0].iter().zip(&x).enumerate() {
             let want = f64::from(x) * sine_gain(d, n);
@@ -129,14 +132,14 @@ fn the_phase_continues_across_blocks() {
 fn every_channel_takes_one_gain_and_rate_zero_holds() {
     let mut t = tremolo(OscillatorWave::Sine, Hz::new(HZ), 0.6);
     let ones = vec![vec![1.0f32; 100]; 3];
-    let out = run(100, &[100], &ones, |i, o| t.process(i, o));
+    let out = run(100, &[100], &ones, |block| t.process(block));
     for (c, channel) in out.iter().enumerate() {
         for (n, &y) in channel.iter().enumerate() {
             assert!((f64::from(y) - sine_gain(0.6, n)).abs() < 1e-6, "{c} {n}");
         }
     }
     let mut t = tremolo(OscillatorWave::Sine, Hz::ZERO, 0.6);
-    let out = run(50, &[50], &ones[..1], |i, o| t.process(i, o));
+    let out = run(50, &[50], &ones[..1], |block| t.process(block));
     assert!(out[0].iter().all(|&y| (y - 0.7).abs() < 1e-6));
 }
 
@@ -146,7 +149,7 @@ fn every_channel_takes_one_gain_and_rate_zero_holds() {
 fn a_square_wave_switches_between_unity_and_one_minus_depth() {
     let mut t = tremolo(OscillatorWave::Square, Hz::new(HZ), 0.75);
     let ones = vec![vec![1.0f32; PERIOD]];
-    let g = run(PERIOD, &[PERIOD], &ones, |i, o| t.process(i, o)).remove(0);
+    let g = run(PERIOD, &[PERIOD], &ones, |block| t.process(block)).remove(0);
     assert!(g[10..230].iter().all(|&g| (g - 1.0).abs() < 1e-6));
     assert!(g[250..470].iter().all(|&g| (g - 0.25).abs() < 1e-6));
 }
@@ -168,7 +171,7 @@ fn auto_pan_places_by_pan_gains_at_the_lfo_position() {
     for law in [PanLaw::SquareRoot, PanLaw::Rp036] {
         for d in [1.0f64, 0.4, -0.7] {
             let mut p = auto_pan(law, d);
-            let out = run(960, &[37, 200], &ones, |i, o| p.process(i, o));
+            let out = run(960, &[37, 200], &ones, |block| p.process(block));
             for (n, (&out_l, &out_r)) in out[0].iter().zip(&out[1]).enumerate() {
                 let u = (TAU * HZ * n as f64 / RATE.get()).sin();
                 let (l, r) = pan_gains(Pan::new(d * u), law);
@@ -194,25 +197,36 @@ fn auto_pan_places_by_pan_gains_at_the_lfo_position() {
 fn auto_pan_sweeps_the_whole_field_at_full_depth_and_none_at_zero() {
     let ones = vec![vec![1.0f32; PERIOD]; 2];
     let mut p = auto_pan(PanLaw::Rp036, 1.0);
-    let out = run(PERIOD, &[PERIOD], &ones, |i, o| p.process(i, o));
+    let out = run(PERIOD, &[PERIOD], &ones, |block| p.process(block));
     assert!(out[0][120].abs() < 1e-6 && (out[1][120] - 1.0).abs() < 1e-6);
     assert!((out[0][360] - 1.0).abs() < 1e-6 && out[1][360].abs() < 1e-6);
     let mut p = auto_pan(PanLaw::SquareRoot, 0.0);
-    let out = run(PERIOD, &[PERIOD], &ones, |i, o| p.process(i, o));
+    let out = run(PERIOD, &[PERIOD], &ones, |block| p.process(block));
     let half = 0.5f32.sqrt();
     assert!(out.iter().flatten().all(|&y| (y - half).abs() < 1e-6));
 }
 
-/// A view of one channel is left untouched, as a pair is two channels: an output prefilled
-/// with a sentinel keeps it.
+/// A view of one channel is refused, as a pair is two channels: an output prefilled with a
+/// sentinel keeps it.
 #[test]
-fn auto_pan_leaves_a_mono_view_untouched() {
+fn auto_pan_refuses_a_mono_view_untouched() {
     let mut p = auto_pan(PanLaw::SquareRoot, 1.0);
     let input = vec![vec![1.0f32; 10]];
     let mut output = vec![vec![7.0f32; 10]];
-    p.process(
-        Planes::from_vecs(&input).unwrap(),
-        PlanesMut::from_vecs(&mut output).unwrap(),
+    let refused = p.process(
+        &mut InputOutput::paired(
+            Planes::from_vecs(&input).unwrap(),
+            PlanesMut::from_vecs(&mut output).unwrap(),
+        )
+        .unwrap(),
+    );
+    assert_eq!(
+        refused,
+        Err(BlockMismatch::Width {
+            side: BlockSide::Input,
+            expected: 2,
+            found: 1
+        })
     );
     assert!(output[0].iter().all(|&y| y == 7.0));
 }
@@ -228,9 +242,13 @@ fn an_f64_tremolo_and_auto_pan_are_their_closed_forms_in_f64() {
     let mut t = tremolo(OscillatorWave::Sine, Hz::new(HZ), d);
     let mut y = vec![0.0f64; frames];
     t.process(
-        Planes::new(&[&ones[..]]).unwrap(),
-        PlanesMut::new(&mut [&mut y[..]]).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::new(&[&ones[..]]).unwrap(),
+            PlanesMut::new(&mut [&mut y[..]]).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     for (n, &y) in y.iter().enumerate() {
         assert!((y - sine_gain(d, n)).abs() < 1e-12, "tremolo frame {n}");
     }
@@ -238,9 +256,13 @@ fn an_f64_tremolo_and_auto_pan_are_their_closed_forms_in_f64() {
         let mut p = auto_pan(law, d);
         let (mut l, mut r) = (vec![0.0f64; frames], vec![0.0f64; frames]);
         p.process(
-            Planes::new(&[&ones[..], &ones[..]]).unwrap(),
-            PlanesMut::new(&mut [&mut l[..], &mut r[..]]).unwrap(),
-        );
+            &mut InputOutput::paired(
+                Planes::new(&[&ones[..], &ones[..]]).unwrap(),
+                PlanesMut::new(&mut [&mut l[..], &mut r[..]]).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         for n in 0..frames {
             let u = (TAU * HZ * n as f64 / RATE.get()).sin();
             let (gl, gr) = pan_gains(Pan::new(d * u), law);

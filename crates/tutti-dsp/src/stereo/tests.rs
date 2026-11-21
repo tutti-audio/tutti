@@ -1,13 +1,18 @@
 use super::*;
+use tutti_buffers::{BlockSide, InputOutput};
 use tutti_buffers::{Planes, PlanesMut};
 
 fn convert<S: Float>(dir: MidSide, l: &[S], r: &[S]) -> (Vec<S>, Vec<S>) {
     let input = vec![l.to_vec(), r.to_vec()];
     let mut out = vec![vec![S::ZERO; l.len()]; 2];
     dir.process(
-        Planes::from_vecs(&input).unwrap(),
-        PlanesMut::from_vecs(&mut out).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::from_vecs(&input).unwrap(),
+            PlanesMut::from_vecs(&mut out).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     let s = out.pop().unwrap();
     (out.pop().unwrap(), s)
 }
@@ -95,14 +100,25 @@ fn decode_of_encode_is_exact_on_a_grid_and_within_epsilon_otherwise() {
     }
 }
 
-/// A view with one channel is not converted.
+/// A view with one channel is refused, and the output is left as it was.
 #[test]
-fn a_mono_view_is_left_alone() {
+fn a_mono_view_is_refused_untouched() {
     let input = vec![vec![1.0f32; 4]];
     let mut out = vec![vec![7.0f32; 4]];
-    MidSide::Encode.process(
-        Planes::from_vecs(&input).unwrap(),
-        PlanesMut::from_vecs(&mut out).unwrap(),
+    let refused = MidSide::Encode.process(
+        &mut InputOutput::paired(
+            Planes::from_vecs(&input).unwrap(),
+            PlanesMut::from_vecs(&mut out).unwrap(),
+        )
+        .unwrap(),
+    );
+    assert_eq!(
+        refused,
+        Err(BlockMismatch::Width {
+            side: BlockSide::Input,
+            expected: 2,
+            found: 1
+        })
     );
     assert_eq!(out[0], [7.0; 4]);
 }
@@ -118,9 +134,13 @@ fn widen(width: f64, settle: bool, l: &[f64], r: &[f64]) -> (Vec<f64>, Vec<f64>)
     let input = vec![l.to_vec(), r.to_vec()];
     let mut out = vec![vec![0.0f64; l.len()]; 2];
     bank.process(
-        Planes::from_vecs(&input).unwrap(),
-        PlanesMut::from_vecs(&mut out).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::from_vecs(&input).unwrap(),
+            PlanesMut::from_vecs(&mut out).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     let r = out.pop().unwrap();
     (out.pop().unwrap(), r)
 }
@@ -165,14 +185,25 @@ fn a_bad_width_is_refused_or_floored() {
     assert_eq!(widen(-3.0, true, &l, &r).0, [0.5]);
 }
 
-/// A view with one channel is not widened.
+/// A view with one channel is refused, and the output is left as it was.
 #[test]
-fn a_mono_view_is_not_widened() {
+fn the_width_bank_refuses_a_mono_view_untouched() {
     let input = vec![vec![1.0f32; 4]];
     let mut out = vec![vec![7.0f32; 4]];
-    WidthBank::<f32>::new(SampleRate::SR_48K).process(
-        Planes::from_vecs(&input).unwrap(),
-        PlanesMut::from_vecs(&mut out).unwrap(),
+    let refused = WidthBank::<f32>::new(SampleRate::SR_48K).process(
+        &mut InputOutput::paired(
+            Planes::from_vecs(&input).unwrap(),
+            PlanesMut::from_vecs(&mut out).unwrap(),
+        )
+        .unwrap(),
+    );
+    assert_eq!(
+        refused,
+        Err(BlockMismatch::Width {
+            side: BlockSide::Input,
+            expected: 2,
+            found: 1
+        })
     );
     assert_eq!(out[0], [7.0; 4]);
 }

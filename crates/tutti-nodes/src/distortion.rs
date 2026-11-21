@@ -1,10 +1,12 @@
 //! The waveshaper [`DistortionNode`]: seven curves ([`ShapeKind`]) at a drive.
 
-use tutti_buffers::{BusTopology, ChannelLayout, MAX_CHANNELS, MaxBlock};
+use tutti_buffers::BlockSide;
+use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MAX_CHANNELS, MaxBlock};
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_dsp::{
-    Antialiasing, AntialiasingError, COEFF_INTERVAL, Lerp, Oversampler, Oversampling,
-    OversamplingFactor, OversamplingPlan, ShapeKind, WaveshaperBank, WaveshaperControls,
+    Antialiasing, AntialiasingError, BlockMismatch, COEFF_INTERVAL, Lerp, Oversampler,
+    Oversampling, OversamplingFactor, OversamplingPlan, ShapeKind, WaveshaperBank,
+    WaveshaperControls,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Drive, SampleRate, Samples, Tail};
@@ -234,14 +236,23 @@ impl<F: Float + Lerp> Oversampled<F> {
         &mut self,
         bank: &mut WaveshaperBank<F>,
         signal: Option<Mono<'_, S>>,
-        input: Planes<'_, S>,
-        mut output: PlanesMut<'_, '_, S>,
-    ) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = input
-            .channels()
-            .min(output.channels())
-            .min(self.channels.len());
+        block: &mut InputOutput<'_, S>,
+    ) -> Result<(), BlockMismatch> {
+        let width = self.channels.len();
+        for (side, found) in [
+            (BlockSide::Input, block.input().channels()),
+            (BlockSide::Output, block.output().channels()),
+        ] {
+            if found != width {
+                return Err(BlockMismatch::Width {
+                    side,
+                    expected: width,
+                    found,
+                });
+            }
+        }
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let factor = self.plan.factor().get();
         let mut start = 0;
         while width > 0 && start < frames {
@@ -274,7 +285,10 @@ impl<F: Float + Lerp> Oversampled<F> {
                 Planes::new(&highs[..width]),
                 PlanesMut::new(&mut shaped[..width]),
             ) {
-                bank.process(held, high, shaped);
+                if let Ok(mut wide) = InputOutput::new(high.frames(), high, shaped) {
+                    let shaped = bank.process(held, &mut wide);
+                    debug_assert!(shaped.is_ok(), "the bank is the node's width");
+                }
             }
             for (c, state) in self.channels.iter_mut().enumerate().take(width) {
                 state
@@ -283,6 +297,7 @@ impl<F: Float + Lerp> Oversampled<F> {
             }
             start = end;
         }
+        Ok(())
     }
 }
 
@@ -351,17 +366,17 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         signals: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
         let signal = signals.get(DistortionSet::DRIVE_SIGNAL);
-        match &mut self.oversampled {
-            Some(oversampled) => oversampled.render(&mut self.bank, signal, input, output),
-            None => self.bank.process(signal, input, output),
-        }
+        let rendered = match &mut self.oversampled {
+            Some(oversampled) => oversampled.render(&mut self.bank, signal, block),
+            None => self.bank.process(signal, block),
+        };
         // A design after a render is a move, which ramps.
         self.applied = true;
+        rendered
     }
 
     /// The cascade's round trip, in base frames, and the antialiasing's delay rounded to a

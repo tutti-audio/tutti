@@ -5,7 +5,9 @@
 //! scales the side and keeps the mid: `L' = M + w S`, `R' = M - w S`. Width 0 is the mono
 //! sum, 1 the pair as it is, 2 doubles the side.
 
-use tutti_buffers::{Float, Planes, PlanesMut};
+use crate::BlockMismatch;
+use crate::block::expect_widths;
+use tutti_buffers::{Float, InputOutput};
 use tutti_units::{SampleRate, StereoWidth};
 
 use crate::{GAIN_RAMP, Lerp, Ramp, Steps};
@@ -21,23 +23,25 @@ pub enum MidSide {
 }
 
 impl MidSide {
-    /// Converts the first two channels of `input` into the first two of `output`; nothing
-    /// is written when either view has fewer than two. The frames are the fewer of the two
-    /// views'. No allocation.
+    /// Converts the two channels of `input` into the two of `output`. No allocation.
     ///
     /// Decoding an encoding returns each channel within `F::EPSILON * max(|L|, |R|)`
     /// (the half sum, the half difference and their sum each round once; halving is
     /// exact), and exactly where the sums are exact.
-    pub fn process<F: Float>(self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
-        if input.channels() < 2 || output.channels() < 2 {
-            return;
-        }
-        let frames = input.frames().get().min(output.frames().get());
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the input or the output is not two channels.
+    pub fn process<F: Float>(self, block: &mut InputOutput<'_, F>) -> Result<(), BlockMismatch> {
+        expect_widths(block, 2, 2)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let (a, b) = (input.plane(0), input.plane(1));
         let (a, b) = (&a.samples()[..frames], &b.samples()[..frames]);
         let mut planes = output.iter_mut();
         let (Some(mut first), Some(mut second)) = (planes.next(), planes.next()) else {
-            return;
+            // Not reached: the width check above left two output channels.
+            return Ok(());
         };
         let (first, second) = (
             &mut first.samples_mut()[..frames],
@@ -56,6 +60,7 @@ impl MidSide {
                 }
             }
         }
+        Ok(())
     }
 }
 
@@ -115,16 +120,20 @@ impl<F: Float + Lerp> WidthBank<F> {
     }
 
     /// Runs `input` into `output` at the width in force. No allocation.
-    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
-        if input.channels() < 2 || output.channels() < 2 {
-            return;
-        }
-        let frames = input.frames().get().min(output.frames().get());
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the input or the output is not two channels.
+    pub fn process(&mut self, block: &mut InputOutput<'_, F>) -> Result<(), BlockMismatch> {
+        expect_widths(block, 2, 2)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let (l, r) = (input.plane(0), input.plane(1));
         let (l, r) = (&l.samples()[..frames], &r.samples()[..frames]);
         let mut planes = output.iter_mut();
         let (Some(mut left), Some(mut right)) = (planes.next(), planes.next()) else {
-            return;
+            // Not reached: the width check above left two output channels.
+            return Ok(());
         };
         let (out_l, out_r) = (
             &mut left.samples_mut()[..frames],
@@ -152,6 +161,7 @@ impl<F: Float + Lerp> WidthBank<F> {
         }
         self.width
             .advance(u32::try_from(frames).unwrap_or(u32::MAX));
+        Ok(())
     }
 }
 

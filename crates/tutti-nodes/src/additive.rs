@@ -2,9 +2,9 @@
 //!
 //! The algorithm is `tutti_dsp::AdditiveBank`; the node holds the controls and the shape.
 
-use tutti_buffers::{ChannelLayout, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{AdditiveBank, AdditiveControls, COEFF_INTERVAL, Partials};
+use tutti_buffers::Float;
+use tutti_buffers::{ChannelLayout, InputOutput, MaxBlock};
+use tutti_dsp::{AdditiveBank, AdditiveControls, BlockMismatch, COEFF_INTERVAL, Partials};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Amplitude, Hz, SampleRate, Tail};
 
@@ -121,15 +121,16 @@ impl<F: Float> Kernel for AdditiveKernel<F> {
 
     fn render(
         &mut self,
-        _: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        mut output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
+        let (_, mut output) = block.split();
         let mut out = output.plane_mut(0);
         match &mut self.bank {
             Some(bank) => bank.process(out),
             None => out.samples_mut().fill(F::ZERO),
         }
+        Ok(())
     }
 
     fn tail(&self) -> Tail {

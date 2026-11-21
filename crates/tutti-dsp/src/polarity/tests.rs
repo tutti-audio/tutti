@@ -1,13 +1,19 @@
 use super::*;
+use tutti_buffers::InputOutput;
 use tutti_buffers::{ChannelIndex, MAX_CHANNELS};
 use tutti_buffers::{Planes, PlanesMut};
 
 fn run(flips: &Polarity, input: &[Vec<f32>]) -> Vec<Vec<f32>> {
     let mut out = vec![vec![9.0f32; input[0].len()]; input.len()];
-    flips.process(
-        Planes::from_vecs(input).unwrap(),
-        PlanesMut::from_vecs(&mut out).unwrap(),
-    );
+    flips
+        .process(
+            &mut InputOutput::paired(
+                Planes::from_vecs(input).unwrap(),
+                PlanesMut::from_vecs(&mut out).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
     out
 }
 

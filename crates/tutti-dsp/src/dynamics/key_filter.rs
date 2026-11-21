@@ -122,8 +122,7 @@ impl<F: Float + SimdLanes + Lerp> KeyStage<F> {
             debug_assert!(false, "the scratch planes are one length");
             return;
         };
-        self.bank
-            .process(&mut self.coefficients, heard, filtered.reborrow());
+        self.bank.run(&mut self.coefficients, &heard, &mut filtered);
         let mut non_finite = false;
         for (plane, raw) in filtered.iter().zip(heard.iter()) {
             for ((m, &y), &x) in out.iter_mut().zip(plane.samples()).zip(raw.samples()) {

@@ -275,11 +275,12 @@ pub use tutti_session::{
 pub mod nodes {
     pub use tutti_curve::Breakpoint;
     pub use tutti_dsp::{
-        Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, DecayTime, Fdn, Fir,
-        FirSummary, Full, Gains, HrirMeasurement, HrirSphere, HrtfBinauralError, Inline, Lerp,
-        Line, LineModulation, LookaheadError, Matrix, MatrixConvolver, MatrixConvolverConfig,
-        MatrixConvolverError, MaxDecayError, Network, NetworkOutputMap, NetworkStage,
-        ResampleError, SimdLanes, SpeakerGeometryError, Tap, TapSet, WaveshaperControls,
+        Absorption, AllPass, AllPassForm, Band, BlockMismatch, BrickwallControls, ChunkSize,
+        DecayTime, Fdn, Fir, FirSummary, Full, Gains, HrirMeasurement, HrirSphere,
+        HrtfBinauralError, Inline, Lerp, Line, LineModulation, LookaheadError, Matrix,
+        MatrixConvolver, MatrixConvolverConfig, MatrixConvolverError, MaxDecayError, Network,
+        NetworkOutputMap, NetworkStage, ResampleError, SimdLanes, SpeakerGeometryError, Tap,
+        TapSet, WaveshaperControls,
     };
     pub use tutti_dsp::{
         AdditiveBank, AdditiveControls, Algorithm, AlgorithmError, FmControls, FmPatch, FmVoice,

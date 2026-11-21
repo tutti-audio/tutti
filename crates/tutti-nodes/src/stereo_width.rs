@@ -1,8 +1,8 @@
 //! [`StereoWidthNode`]: the side of a stereo pair scaled by a width.
 
-use tutti_buffers::{BusTopology, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{COEFF_INTERVAL, Lerp, WidthBank, WidthControls};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, Lerp, WidthBank, WidthControls};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{SampleRate, StereoWidth, Tail};
 
@@ -129,13 +129,13 @@ impl<F: Float + Lerp> Kernel for StereoWidthKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
-        self.bank.process(input, output);
+    ) -> Result<(), BlockMismatch> {
+        let rendered = self.bank.process(block);
         // A design after a render is a move, which ramps.
         self.applied = true;
+        rendered
     }
 
     fn tail(&self) -> Tail {

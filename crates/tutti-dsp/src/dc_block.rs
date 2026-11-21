@@ -9,8 +9,10 @@
 //! input decays as `R^n`, and the gain at `omega = 2 pi f / fs` is
 //! `|1 - e^(-j omega)| / |1 - R e^(-j omega)|`, which is `1/sqrt(2)` close to the corner.
 
+use crate::BlockMismatch;
+use crate::block::expect_widths;
 use tutti_buffers::ChannelLayout;
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput};
 use tutti_units::{Hz, SampleRate, Samples};
 
 use crate::onepole::{cutoff_pole, ring_frames};
@@ -120,15 +122,16 @@ impl<F: Float + Lerp> DcBlocker<F> {
         self.jump_to_target();
     }
 
-    /// Runs `input` into `output`, channel `c` through its own recursion. The channels
-    /// rendered are the fewest of the two views' and the blocker's, the frames the fewer of
-    /// the two views'. No allocation.
-    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = input
-            .channels()
-            .min(output.channels())
-            .min(self.state.len());
+    /// Runs `input` into `output`, channel `c` through its own recursion. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels.
+    pub fn process(&mut self, block: &mut InputOutput<'_, F>) -> Result<(), BlockMismatch> {
+        let width = self.state.len();
+        expect_widths(block, width, width)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let first = self.complement.steps_taken().saturating_add(1);
         for (ch, state) in self.state.iter_mut().enumerate().take(width) {
             let x = &input.plane(ch).samples()[..frames];
@@ -145,6 +148,7 @@ impl<F: Float + Lerp> DcBlocker<F> {
         }
         self.complement
             .advance(u32::try_from(frames).unwrap_or(u32::MAX));
+        Ok(())
     }
 }
 

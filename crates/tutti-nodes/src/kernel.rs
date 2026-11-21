@@ -10,7 +10,8 @@
 use core::ops::Range;
 
 use tutti_buffers::MaxBlock;
-use tutti_buffers::{Float, Mono, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput, Mono, Planes, PlanesMut};
+use tutti_dsp::BlockMismatch;
 use tutti_graph::{
     BusRole, Cx, HasParam, HasParams, InBus, IntoNode, Io, MAX_PORTS, Node, NodeParts, Offset,
     OutBus, ParamNode, ParamSet, Prepare, RtLevel, Shape, Status,
@@ -91,30 +92,39 @@ pub trait Kernel: Clone + Send + 'static {
     /// no allocation.
     fn retarget(&mut self, controls: &<Self::Set as ControlSet>::Controls);
 
-    /// Runs `input` into `output`, the same number of frames, with the controls a port
-    /// drives per frame in `signals`. Audio thread: no allocation.
+    /// Runs the block's input into its output, with the controls a port drives per frame in
+    /// `signals`. The node gives it the main buses' views at the width of the kernel's
+    /// [`shape`](Self::shape), so a kernel built for that width never meets another; one
+    /// that does returns the [`BlockMismatch`], and the node renders the block as silence.
+    /// Audio thread: no allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block is not the shape the kernel was built for.
     fn render(
         &mut self,
-        input: Planes<'_, Self::Float>,
+        block: &mut InputOutput<'_, Self::Float>,
         signals: ControlSignals<'_, Self::Float>,
-        output: PlanesMut<'_, '_, Self::Float>,
-    );
+    ) -> Result<(), BlockMismatch>;
 
-    /// Runs `input` into `output` as [`render`](Self::render) does, with the signal a
-    /// detector listens to in `key`: the input bus of the kernel's [`shape`](Self::shape) with
-    /// the [`Sidechain`](BusRole::Sidechain) role (a bus nobody wired is silence). The node
+    /// Runs the block as [`render`](Self::render) does, with the signal a detector listens to
+    /// in `key`: the input bus of the kernel's [`shape`](Self::shape) with the
+    /// [`Sidechain`](BusRole::Sidechain) role (a bus nobody wired is silence). The node
     /// calls this instead of `render` when the shape declares one, so a kernel with one
     /// overrides it; a block whose key bus (or main input bus) has no channels renders as silence.
     /// Audio thread: no allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block or the key is not the shape the kernel was built for.
     fn render_keyed(
         &mut self,
-        input: Planes<'_, Self::Float>,
+        block: &mut InputOutput<'_, Self::Float>,
         key: Planes<'_, Self::Float>,
         signals: ControlSignals<'_, Self::Float>,
-        output: PlanesMut<'_, '_, Self::Float>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
         let _ = key;
-        self.render(input, signals, output);
+        self.render(block, signals)
     }
 
     /// The processing latency, once prepared.
@@ -223,8 +233,9 @@ impl<K: Kernel> std::fmt::Debug for KernelNode<K> {
 /// declares the buses.
 ///
 /// ```
-/// use tutti_buffers::{BusTopology, MaxBlock, Planes, PlanesMut};
+/// use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
 /// use tutti_graph::{Buses, Shape};
+/// use tutti_dsp::BlockMismatch;
 /// use tutti_nodes::{ControlSignals, Kernel, KernelConfig, KernelNode, NoControls};
 /// use tutti_units::{SampleRate, Tail};
 ///
@@ -244,14 +255,15 @@ impl<K: Kernel> std::fmt::Debug for KernelNode<K> {
 ///     fn retarget(&mut self, _: &()) {}
 ///     fn render(
 ///         &mut self,
-///         input: Planes<'_, f32>,
+///         block: &mut InputOutput<'_, f32>,
 ///         _: ControlSignals<'_, f32>,
-///         mut output: PlanesMut<'_, '_, f32>,
-///     ) {
+///     ) -> Result<(), BlockMismatch> {
+///         let (input, mut output) = block.split();
 ///         output
 ///             .plane_mut(0)
 ///             .samples_mut()
 ///             .copy_from_slice(input.plane(0).samples());
+///         Ok(())
 ///     }
 ///     fn tail(&self) -> Tail {
 ///         Tail::None
@@ -434,12 +446,24 @@ impl<K: Kernel> KernelNode<K> {
         for (slot, signal) in signals.0.iter_mut().zip(driven) {
             *slot = signal.map(|l| Mono::new(&l[frames.clone()]));
         }
-        match self.key {
-            None => self.kernel.render(input, signals, output),
+        let key = match self.key {
+            None => None,
             Some(_) => match Planes::new(&key[..keys]) {
-                Ok(key) => self.kernel.render_keyed(input, key, signals, output),
-                Err(_) => silence(output),
+                Ok(key) => Some(key),
+                Err(_) => return silence(output),
             },
+        };
+        let Ok(mut block) = InputOutput::new(Samples::new(frames.len()), input, output) else {
+            debug_assert!(false, "both views are whole planes of the block's frames");
+            return;
+        };
+        let rendered = match key {
+            None => self.kernel.render(&mut block, signals),
+            Some(key) => self.kernel.render_keyed(&mut block, key, signals),
+        };
+        // A block that is not the kernel's shape is refused whole: silence, never a part.
+        if rendered.is_err() {
+            silence_block(&mut block);
         }
     }
 
@@ -559,6 +583,14 @@ pub(crate) fn slice_out<'a, G: Float>(
     (planes, n)
 }
 
+/// Every output channel of `block` as silence: what a block a processor refused renders as.
+pub(crate) fn silence_block<G: Float>(block: &mut InputOutput<'_, G>) {
+    let mut output = block.output();
+    for c in 0..output.channels() {
+        output.plane_mut(c).samples_mut().fill(G::ZERO);
+    }
+}
+
 /// Runs `f` over the main input and output buses of a stateless through node, each cut to
 /// the whole block: the views of `inputs` channels in and `outputs` out. A bus with no
 /// channels has nothing to render.
@@ -566,7 +598,7 @@ pub(crate) fn through_planes<G: Float>(
     io: &mut Io<'_, G>,
     inputs: usize,
     outputs: usize,
-    f: impl FnOnce(Planes<'_, G>, PlanesMut<'_, '_, G>),
+    f: impl FnOnce(&mut InputOutput<'_, G>) -> Result<(), BlockMismatch>,
 ) {
     debug_assert_eq!(
         inputs, outputs,
@@ -577,16 +609,29 @@ pub(crate) fn through_planes<G: Float>(
     let (input, _) = slice_in((0..inputs).map(|c| ins.get(c)), &frames);
     let (mut output, _) = slice_out(outs.iter_mut().take(outputs), &frames);
     let (n_in, n_out) = (inputs.min(MAX_PORTS), outputs.min(MAX_PORTS));
-    if let Ok(input) = Planes::new(&input[..n_in])
-        && let Ok(output) = PlanesMut::new(&mut output[..n_out])
-    {
-        f(input, output);
+    if n_in == 0 || n_out == 0 {
+        // No view to render (a bus of no channels): every channel is silence, none is left as
+        // the arena had it.
+        for ch in &mut output[..n_out] {
+            ch.fill(G::ZERO);
+        }
         return;
     }
-    // No view to render (a bus of no channels): every channel is silence, none is left as the
-    // arena had it.
-    for ch in &mut output[..n_out] {
-        ch.fill(G::ZERO);
+    // Every plane is the block's `frames` long, and at most `MAX_PORTS` of them are viewed.
+    let (Ok(input), Ok(output)) = (
+        Planes::new(&input[..n_in]),
+        PlanesMut::new(&mut output[..n_out]),
+    ) else {
+        debug_assert!(false, "the planes of a block are one length");
+        return;
+    };
+    let Ok(mut block) = InputOutput::new(Samples::new(frames.end), input, output) else {
+        debug_assert!(false, "the views are the block's frames long");
+        return;
+    };
+    // A block that is not the node's shape is refused whole: silence, never a part.
+    if f(&mut block).is_err() {
+        silence_block(&mut block);
     }
 }
 
@@ -930,10 +975,9 @@ mod tests {
             fn retarget(&mut self, _: &Gain) {}
             fn render(
                 &mut self,
-                _: Planes<'_, f32>,
+                _: &mut InputOutput<'_, f32>,
                 _: ControlSignals<'_, f32>,
-                _: PlanesMut<'_, '_, f32>,
-            ) {
+            ) -> Result<(), BlockMismatch> {
                 unreachable!("an empty bus is refused before the kernel renders");
             }
             fn tail(&self) -> Tail {
@@ -959,6 +1003,71 @@ mod tests {
                 "{main:?}, key {key:?}"
             );
         }
+    }
+
+    /// A kernel that refuses its block renders as silence: the node writes every output
+    /// channel zero, never a part, and the arena's old content does not leak through.
+    #[test]
+    fn a_refused_block_renders_as_silence() {
+        use tutti_buffers::BlockSide;
+        use tutti_graph::contract::Direct;
+        use tutti_units::Db;
+
+        #[derive(Clone, Copy, Debug, PartialEq)]
+        struct Gain {
+            gain: Db,
+        }
+        #[derive(Clone, Copy, Debug)]
+        struct GainSet;
+        control_set! {
+            GainSet(_s): Gain = Gain { gain: Db::new(0.0) };
+            live: (all);
+            GainDb => Db = gain { whole };
+            fn defaults(&self) -> Gain {
+                Gain { gain: Db::new(0.0) }
+            }
+        }
+        /// Writes the first sample, then refuses the block.
+        #[derive(Clone)]
+        struct Refuses;
+        impl Kernel for Refuses {
+            type Float = f32;
+            type Set = GainSet;
+            const GRID: usize = 16;
+            fn shape(&self) -> Shape {
+                use tutti_graph::Buses;
+                Shape::buses(
+                    Buses::main(BusTopology::MONO),
+                    Buses::main(BusTopology::MONO),
+                )
+            }
+            fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}
+            fn reset(&mut self) {}
+            fn retarget(&mut self, _: &Gain) {}
+            fn render(
+                &mut self,
+                block: &mut InputOutput<'_, f32>,
+                _: ControlSignals<'_, f32>,
+            ) -> Result<(), BlockMismatch> {
+                block.output().plane_mut(0).samples_mut()[0] = 1.0;
+                Err(BlockMismatch::Width {
+                    side: BlockSide::Input,
+                    expected: 2,
+                    found: 1,
+                })
+            }
+            fn tail(&self) -> Tail {
+                Tail::None
+            }
+        }
+        let node = KernelNode::with_kernel(Refuses, GainSet, Gain { gain: Db::new(0.0) });
+        let mut d = Direct::new(node, SampleRate::SR_48K, 64);
+        for c in d.inputs_mut().iter_mut() {
+            c.into_samples_mut().fill(0.5);
+        }
+        d.outputs_mut().plane_mut(0).samples_mut().fill(7.0);
+        d.block();
+        assert!(d.output().plane(0).iter().all(|&s| s == 0.0));
     }
 
     /// What a mono pass-through kernel hears of the tempo: the last and the count of the
@@ -1011,14 +1120,15 @@ mod tests {
         fn retarget(&mut self, _: &NoControls) {}
         fn render(
             &mut self,
-            input: Planes<'_, f32>,
+            block: &mut InputOutput<'_, f32>,
             _: ControlSignals<'_, f32>,
-            mut output: PlanesMut<'_, '_, f32>,
-        ) {
+        ) -> Result<(), BlockMismatch> {
+            let (input, mut output) = block.split();
             output
                 .plane_mut(0)
                 .samples_mut()
                 .copy_from_slice(input.plane(0).samples());
+            Ok(())
         }
         fn tail(&self) -> Tail {
             Tail::None
