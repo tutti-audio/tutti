@@ -15,7 +15,7 @@ use tutti_clap_test_plugin::{ClapProbe, Site, ThreadAnswer};
 use tutti_buffers::MaxBlock;
 use tutti_plugin::catalog::ResolvedHosting;
 use tutti_plugin_db::PluginDb;
-use tutti_plugin_db::{Catalog, CatalogConfig, Hosting};
+use tutti_plugin_db::{Catalog, CatalogConfig};
 use tutti_plugin_types::{Locator, PluginId};
 use tutti_session::{Peer, Presence, Session};
 use tutti_units::Samples;
@@ -138,7 +138,7 @@ fn an_in_process_load_is_a_plugin_hosted_in_this_process() {
     let mut s = session();
     let opened = load(&s, &catalog);
     let handle = opened.handle();
-    assert_eq!(handle.info().hosting(), Hosting::InProcess);
+    assert_eq!(handle.info().hosting(), ResolvedHosting::InProcess);
     assert!(matches!(handle.presence(), Presence::Live));
     let node = s.add_plugin(opened).expect("the plugin enters");
     assert!(

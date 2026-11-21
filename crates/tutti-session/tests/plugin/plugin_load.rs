@@ -10,7 +10,8 @@ use std::time::Duration;
 
 use tutti_buffers::{ChannelLayout, InterleavedMut, MaxBlock};
 use tutti_platform::Instant;
-use tutti_plugin_db::{Catalog, Hosting};
+use tutti_plugin::catalog::ResolvedHosting;
+use tutti_plugin_db::Catalog;
 use tutti_plugin_types::{PluginId, PluginRef};
 use tutti_session::{
     AddPluginError, LoadError, Peer, PluginCause, Presence, Root, Session, SwapPluginError,
@@ -100,7 +101,7 @@ fn a_load_gives_a_node_whose_handle_observes_it_and_renders() {
         tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap(),
         "the plugin the id names, not the file's first"
     );
-    assert_eq!(plugin.info().hosting(), Hosting::OutOfProcess);
+    assert_eq!(plugin.info().hosting(), ResolvedHosting::OutOfProcess);
     assert!(matches!(plugin.presence(), Presence::Live));
     assert!(!plugin.changed(), "the file is as it was loaded");
 
@@ -139,7 +140,7 @@ fn an_out_of_process_load_runs_on_a_spawned_thread_and_its_node_renders() {
     .expect("the load's thread ends")
     .expect("the reference plugin loads off the main thread");
     let plugin = opened.handle();
-    assert_eq!(plugin.info().hosting(), Hosting::OutOfProcess);
+    assert_eq!(plugin.info().hosting(), ResolvedHosting::OutOfProcess);
     assert_eq!(
         plugin.asset().name(),
         tutti_plugin_db::canonical_path(&clap_probe())
