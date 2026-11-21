@@ -400,7 +400,7 @@ mod stand_in_probe {
         };
         assert_eq!(failed.path, tutti_plugin_db::canonical_path(&file));
         assert_eq!(
-            failed.failure.error,
+            probe_failure(failed).error,
             ProbeError::Died(ProbeDeath::Signal(11))
         );
         assert!(catalog.is_blacklisted(&file));
@@ -433,9 +433,9 @@ mod stand_in_probe {
             panic!("one failure: {failures:?}");
         };
         assert!(
-            matches!(failed.failure.error, ProbeError::TimedOut { .. }),
+            matches!(probe_failure(failed).error, ProbeError::TimedOut { .. }),
             "{:?}",
-            failed.failure
+            probe_failure(failed)
         );
         assert!(catalog.is_blacklisted(&file));
     }
@@ -462,7 +462,7 @@ fn scan_fails_each_file_when_the_probe_binary_is_missing() {
     let [failed] = failures.as_slice() else {
         panic!("one failure: {failures:?}");
     };
-    assert_eq!(failed.failure.error, ProbeError::ProbeNotFound);
+    assert_eq!(probe_failure(failed).error, ProbeError::ProbeNotFound);
     assert_eq!(
         (result.added(), result.failed(), result.newly_blacklisted()),
         (0, 1, 0)
@@ -491,7 +491,7 @@ fn register_names_a_missing_probe_binary() {
     let [failed] = failures.as_slice() else {
         panic!("one failure: {failures:?}");
     };
-    assert_eq!(failed.failure.error, ProbeError::ProbeNotFound);
+    assert_eq!(probe_failure(failed).error, ProbeError::ProbeNotFound);
     assert_eq!(
         (result.added(), result.failed(), result.newly_blacklisted()),
         (0, 1, 0)
@@ -532,13 +532,13 @@ fn a_measure_state_does_not_reach_the_next_measure() {
     };
     assert!(
         matches!(
-            failed.failure.error,
+            probe_failure(failed).error,
             ProbeError::Refused(ProbeRefusal::StateRefused { .. })
         ),
         "{:?}",
-        failed.failure
+        probe_failure(failed)
     );
-    assert!(failed.failure.reason().contains("refused the state"));
+    assert!(probe_failure(failed).reason().contains("refused the state"));
     assert!(
         !catalog.is_blacklisted(&a),
         "a state the plugin refused says nothing about the plugin"
@@ -577,7 +577,7 @@ fn measure_names_a_missing_probe_binary() {
     let [failed] = failures.as_slice() else {
         panic!("one failure: {failures:?}");
     };
-    assert_eq!(failed.failure.error, ProbeError::ProbeNotFound);
+    assert_eq!(probe_failure(failed).error, ProbeError::ProbeNotFound);
     assert!(catalog.db().is_empty());
 }
 
@@ -699,5 +699,14 @@ mod links {
         assert_eq!(row.format(), Some(tutti_plugin_types::PluginFormat::Clap));
         let args = std::fs::read_to_string(log).expect("the probe ran");
         assert!(args.contains("--as clap"), "{args:?}");
+    }
+}
+
+/// The probe failure a listed file failed with; a file that went unprobed fails
+/// the test.
+fn probe_failure(failed: &tutti_plugin_db::FileFailure) -> &tutti_plugin_db::ProbeFailure {
+    match &failed.cause {
+        tutti_plugin_db::FileFailureCause::Probe(failure) => failure,
+        other => panic!("{:?} was not probed: {other:?}", failed.path),
     }
 }

@@ -856,8 +856,21 @@ impl From<ProbeError> for ProbeFailure {
 pub struct FileFailure {
     /// The file, by canonical path.
     pub path: PathBuf,
-    /// Why its probe failed.
-    pub failure: ProbeFailure,
+    /// Why it was not recorded.
+    pub cause: FileFailureCause,
+}
+
+/// Why a file of a scan was not recorded: its probe failed, or it went
+/// unprobed because the crash sentinel could not cover it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FileFailureCause {
+    /// The probe failed ([`ScanOutcome::Failed`] or
+    /// [`ScanOutcome::NewlyBlacklisted`]).
+    Probe(ProbeFailure),
+    /// The crash sentinel could not be armed or cleared
+    /// ([`ScanOutcome::Unprotected`]).
+    Unprotected(std::io::ErrorKind),
 }
 
 impl ScanReport {
@@ -911,22 +924,25 @@ impl ScanReport {
         self.count(|outcome| matches!(outcome, ScanOutcome::NewlyBlacklisted(_)))
     }
 
-    /// Every file whose probe failed, with the reason, in the order they were
-    /// probed. [`failed`](Self::failed) counts these, and also the files
-    /// [`ScanOutcome::Unprotected`], which no probe failed on: read them off
-    /// [`files`](Self::files).
+    /// Every file the scan did not record for a failure, with the reason, in
+    /// the order they were probed: exactly the files [`failed`](Self::failed)
+    /// counts.
     #[must_use]
     pub fn failures(&self) -> Vec<FileFailure> {
         self.files
             .iter()
-            .filter_map(|file| match &file.outcome {
-                ScanOutcome::Failed(failure) | ScanOutcome::NewlyBlacklisted(failure) => {
-                    Some(FileFailure {
-                        path: file.path.clone(),
-                        failure: failure.clone(),
-                    })
-                }
-                _ => None,
+            .filter_map(|file| {
+                let cause = match &file.outcome {
+                    ScanOutcome::Failed(failure) | ScanOutcome::NewlyBlacklisted(failure) => {
+                        FileFailureCause::Probe(failure.clone())
+                    }
+                    ScanOutcome::Unprotected(kind) => FileFailureCause::Unprotected(*kind),
+                    _ => return None,
+                };
+                Some(FileFailure {
+                    path: file.path.clone(),
+                    cause,
+                })
             })
             .collect()
     }
@@ -2492,6 +2508,39 @@ mod tests {
             file.outcome
         );
         assert_eq!((report.added(), report.failed()), (0, 1));
+    }
+
+    /// **`failed()` counts exactly the files `failures()` lists**: one file whose
+    /// probe failed and one left unprotected are both listed, each with its cause.
+    #[test]
+    fn failed_counts_exactly_the_listed_failures() {
+        let report = ScanReport {
+            files: vec![
+                ScannedFile {
+                    path: PathBuf::from("/p/a.clap"),
+                    outcome: ScanOutcome::Failed(ProbeFailure::from(ProbeError::ProbeNotFound)),
+                },
+                ScannedFile {
+                    path: PathBuf::from("/p/b.clap"),
+                    outcome: ScanOutcome::Unprotected(std::io::ErrorKind::PermissionDenied),
+                },
+                ScannedFile {
+                    path: PathBuf::from("/p/c.clap"),
+                    outcome: ScanOutcome::New,
+                },
+            ],
+            ..ScanReport::default()
+        };
+
+        let failures = report.failures();
+        assert_eq!(report.failed(), failures.len());
+        assert_eq!(
+            failures.iter().map(|f| &f.cause).collect::<Vec<_>>(),
+            [
+                &FileFailureCause::Probe(ProbeFailure::from(ProbeError::ProbeNotFound)),
+                &FileFailureCause::Unprotected(std::io::ErrorKind::PermissionDenied),
+            ]
+        );
     }
 
     /// **A probe's unmeasured plugins reach the scan's report**, each with its

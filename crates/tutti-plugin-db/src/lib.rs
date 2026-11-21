@@ -67,8 +67,8 @@ pub use pedal::{PedalError, Recovered, RecoveryFailure};
 pub use probe::DEFAULT_PROBE_TIMEOUT;
 pub use probing::DEFAULT_MEASURE_TIMEOUT;
 pub use scanner::{
-    FileFailure, FilesError, ForgetError, ProbeFailure, ProbeListing, ScanBusy, ScanError,
-    ScanFuture, ScanOutcome, ScanPlugins, ScanProgress, ScanProgressReader, ScanReport,
+    FileFailure, FileFailureCause, FilesError, ForgetError, ProbeFailure, ProbeListing, ScanBusy,
+    ScanError, ScanFuture, ScanOutcome, ScanPlugins, ScanProgress, ScanProgressReader, ScanReport,
     ScannedFile, ScannedPlugins, Scanner, StaleScan, UnmeasuredPlugin,
 };
 pub use table::{
