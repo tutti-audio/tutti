@@ -137,7 +137,9 @@ fn device_id() -> DeviceId {
         tutti_graph::EventCapacity::of(64),
         std::time::Duration::ZERO,
     );
+    let executor = tutti_platform::Executor::new();
     let session = tutti_midi_hardware::MidiSession::open_over(
+        &executor,
         backend,
         inlets,
         tutti_midi_hardware::MidiHardwareConfig::new(),

@@ -24,7 +24,7 @@ use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, NoWatch, Watch
 use crate::error::{MidiHardwareError, Result};
 use crate::virtual_endpoint::{EndpointBackend, VirtualProtocol, VirtualSpec};
 use tutti_midi_device::EndpointId;
-use tutti_platform::MainThreadMarker;
+use tutti_platform::{Executor, MainThreadMarker};
 
 /// Why every call here fails, in the error a caller will surface.
 const REASON: &str = "no MIDI backend on this platform (alsa-lib < 1.2.10)";
@@ -72,6 +72,7 @@ const VIRTUAL_REASON: &str = "no virtual MIDI endpoints on this platform (no MID
 
 /// Refuses: there is no virtual endpoint to publish.
 pub(crate) fn open_virtual_endpoint(
+    _executor: &Executor,
     _spec: &VirtualSpec,
     _producer: InputProducerHandle,
     _main: MainThreadMarker,

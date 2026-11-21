@@ -109,7 +109,8 @@ fn session_over_with(
     let (backend, counters) = FakeBackend::build_with(vec![], vec![], usize::MAX);
     let inlets =
         tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), Duration::ZERO);
-    let session = MidiSession::open_over(backend, inlets, options).unwrap();
+    let session =
+        MidiSession::open_over(&tutti_platform::Executor::new(), backend, inlets, options).unwrap();
     let mut info = endpoint(7, "Wire");
     info.capability = os;
     counters.plug(info, direction);

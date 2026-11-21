@@ -22,6 +22,11 @@ mod midi_ci_jobs;
 // Property Exchange with a MIDI-CI peer as typed jobs: a Get and a Set of a listed Resource.
 #[cfg(feature = "midi-hardware")]
 mod midi_ci_property;
+// A build that fails after the session's executor exists leaves nothing of it.
+#[cfg(feature = "midi-hardware")]
+mod build_failure;
+#[cfg(all(feature = "midi-hardware", target_os = "linux"))]
+mod build_failure_threads;
 // MIDI ports as pool entries: absent, replugged, ambiguous, released, per-port input node.
 #[cfg(feature = "midi-hardware")]
 mod midi_ports;

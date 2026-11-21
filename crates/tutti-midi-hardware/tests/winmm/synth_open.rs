@@ -31,7 +31,7 @@ fn drained(out: &OpenOutput) {
 
 #[test]
 fn the_synth_is_sent_every_event_at_its_time_and_opens_again_after_a_close() {
-    let devices = Devices::open().unwrap();
+    let devices = Devices::open(&tutti_platform::Executor::new()).unwrap();
     let id = synth(&devices).id;
     let note_on = Ump([0x2090_3C64, 0, 0, 0]);
     let note_off = Ump([0x2080_3C00, 0, 0, 0]);

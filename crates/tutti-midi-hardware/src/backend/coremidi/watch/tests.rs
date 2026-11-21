@@ -21,7 +21,7 @@ struct Watched {
 
 impl Watched {
     fn open() -> Self {
-        Self::of(Devices::open().unwrap())
+        Self::of(Devices::open(&tutti_platform::Executor::new()).unwrap())
     }
 
     fn of(devices: Devices) -> Self {
