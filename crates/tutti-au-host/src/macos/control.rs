@@ -27,7 +27,7 @@ use tutti_units::ParamId;
 use tutti_units::Samples;
 
 use crate::bus::BusDirection;
-use crate::component::{AuType, component_info};
+use crate::component::{AuType, ComponentKey, component_info};
 use crate::controller::AuController;
 use crate::edits::Edit;
 use crate::error::AuError;
@@ -36,7 +36,6 @@ use crate::instance::AuLoaded;
 use crate::marks::Marks;
 use crate::parameters;
 use crate::ranges::{ParamBounds, RangeTable};
-use crate::types::AudioComponentDescription;
 
 /// The wire's mirror of the AU host's component type.
 pub(crate) fn class_of(au_type: AuType) -> AuComponentType {
@@ -57,11 +56,11 @@ pub(crate) fn class_of(au_type: AuType) -> AuComponentType {
 /// The type is in it because an effect and an instrument of one manufacturer
 /// can share a subtype. The bundle lookup and a load's origin both use this
 /// function, so they cannot disagree.
-pub(crate) fn unit_id(desc: &AudioComponentDescription) -> PluginId {
+pub(crate) fn unit_id(key: ComponentKey) -> PluginId {
     PluginId::Au {
-        component_type: AuComponentType::from_code(desc.componentType),
-        subtype: FourCc::new(desc.componentSubType),
-        manufacturer: FourCc::new(desc.componentManufacturer),
+        component_type: AuComponentType::from_code(key.component_type()),
+        subtype: FourCc::new(key.sub_type()),
+        manufacturer: FourCc::new(key.manufacturer()),
     }
 }
 
@@ -132,23 +131,18 @@ impl AuLoaded {
     /// that name a processing relationship rather than speaker placement
     /// (MidSide, MatrixStereo, ambisonics), which arrive here as `None`.
     ///
-    /// # Errors
-    /// [`AuError::BusTooWide`] for a count no layout holds, naming the side.
-    pub(crate) fn buses(&self, direction: BusDirection) -> Result<PluginBuses, AuError> {
-        let (scope, channels) = match direction {
-            BusDirection::Input => ("input", self.num_inputs()),
-            BusDirection::Output => ("output", self.num_outputs()),
-        };
-        let layout = tutti_plugin_types::ChannelLayout::try_from(channels)
-            .map_err(|source| AuError::BusTooWide { scope, source })?;
+    /// The width is the layout the stream configuration holds, which was checked
+    /// when it was applied: no read of the unit, and nothing that can fail.
+    pub(crate) fn buses(&self, direction: BusDirection) -> PluginBuses {
+        let layout = self.configured_layout(direction);
         let placement = self
             .layout_tag(direction, 0)
             .ok()
             .and_then(crate::topology::topology_of);
-        Ok(PluginBus::single(layout)
+        PluginBus::single(layout)
             .into_iter()
             .map(|bus| bus.placed(placement.clone()))
-            .collect())
+            .collect()
     }
 
     /// The capabilities this unit has, as the shared vocabulary names them.
@@ -290,8 +284,8 @@ impl Control for AuLoaded {
 
     fn wiring(&self, _main: MainThreadMarker) -> LoadedPlugin {
         LoadedPlugin {
-            inputs: self.buses(BusDirection::Input).unwrap_or_default(),
-            outputs: self.buses(BusDirection::Output).unwrap_or_default(),
+            inputs: self.buses(BusDirection::Input),
+            outputs: self.buses(BusDirection::Output),
             latency_samples: self.latency_figure(),
             tail: self.tail_figure(),
             features: self.features(),

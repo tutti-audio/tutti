@@ -1081,14 +1081,13 @@ mod tests {
     /// and the unit takes a new one.
     #[test]
     fn a_withdrawal_during_a_render_is_refused_and_retried() {
-        let desc = coreaudio_sys::AudioComponentDescription {
-            componentType: coreaudio_sys::kAudioUnitType_Effect,
-            componentSubType: u32::from_be_bytes(*b"dely"),
-            componentManufacturer: u32::from_be_bytes(*b"appl"),
-            componentFlags: 0,
-            componentFlagsMask: 0,
-        };
-        let comp = crate::ComponentRef::first_matching(&desc).expect("AUDelay ships with macOS");
+        let key = crate::ComponentKey::new(
+            coreaudio_sys::kAudioUnitType_Effect,
+            u32::from_be_bytes(*b"dely"),
+            u32::from_be_bytes(*b"appl"),
+        )
+        .expect("an exact key");
+        let comp = crate::ComponentRef::find(key).expect("AUDelay ships with macOS");
         let (_work, handle) = tutti_plugin_types::MainWork::new();
         let unit = Unit::new(comp, &handle).expect("instantiate");
         assert!(unit.no_render_in_flight());
@@ -1122,14 +1121,13 @@ mod tests {
     /// `withdraw`; neither is observable here.)
     #[test]
     fn a_withdrawal_on_an_initialized_unit_is_refused_until_it_is_uninitialized() {
-        let desc = coreaudio_sys::AudioComponentDescription {
-            componentType: coreaudio_sys::kAudioUnitType_Effect,
-            componentSubType: u32::from_be_bytes(*b"dely"),
-            componentManufacturer: u32::from_be_bytes(*b"appl"),
-            componentFlags: 0,
-            componentFlagsMask: 0,
-        };
-        let comp = crate::ComponentRef::first_matching(&desc).expect("AUDelay ships with macOS");
+        let key = crate::ComponentKey::new(
+            coreaudio_sys::kAudioUnitType_Effect,
+            u32::from_be_bytes(*b"dely"),
+            u32::from_be_bytes(*b"appl"),
+        )
+        .expect("an exact key");
+        let comp = crate::ComponentRef::find(key).expect("AUDelay ships with macOS");
         let (_work, handle) = tutti_plugin_types::MainWork::new();
         let unit = Unit::new(comp, &handle).expect("instantiate");
         let registration = install(&unit, Box::new(|_, _| {})).expect("install");
