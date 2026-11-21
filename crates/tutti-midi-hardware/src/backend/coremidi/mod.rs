@@ -34,7 +34,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::InputProducerHandle;
 use crate::backend::by_message::{Refused, by_message};
-use crate::capability::{OsEndpoint, carries_midi2_only, from_os, legacy};
+use crate::capability::{Described, OsEndpoint, carries_midi2_only, from_os, legacy};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
@@ -45,7 +45,7 @@ use tutti_coremidi_ffi::{
     Endpoint as OsObject, InputPort, OutputPort, SharedClient, UmpEndpointInfo, UmpEndpointsError,
     UniqueId, ump_endpoints,
 };
-use tutti_midi_device::{Endpoint, EndpointId, Identity, OsDevice};
+use tutti_midi_device::{EndpointId, Identity, OsDevice};
 use tutti_midi_runtime::{MidiOut, Outgoing, Taken};
 use tutti_ump::{FunctionBlockInfo, Protocol, read_protocol};
 
@@ -112,7 +112,7 @@ fn endpoint_name(endpoint: &OsObject) -> String {
 /// use and its blocks. Otherwise the endpoint's property. An absent or unreadable `kMIDIPropertyProtocolID` means "the OS did not say",
 /// which resolves to MIDI 1.0 — claiming MIDI 2.0 on no evidence would feed
 /// per-note messages to an endpoint that cannot carry them.
-fn endpoint_capability(endpoint: &OsObject, ump: Option<&UmpEndpointInfo>) -> Endpoint {
+fn endpoint_capability(endpoint: &OsObject, ump: Option<&UmpEndpointInfo>) -> Described {
     if let Some(ump) = ump {
         return ump_capability(ump);
     }
@@ -120,7 +120,10 @@ fn endpoint_capability(endpoint: &OsObject, ump: Option<&UmpEndpointInfo>) -> En
         // `kMIDIProtocol_1_0` is 1 and `kMIDIProtocol_2_0` is 2; any other value
         // is reserved, which reads as MIDI 1.0.
         Some(id) => from_os(read_protocol(u8::try_from(id).unwrap_or(u8::MAX)), None, []),
-        None => legacy(),
+        None => Described {
+            endpoint: legacy(),
+            blocks_left_out: 0,
+        },
     }
 }
 
@@ -136,7 +139,7 @@ fn endpoint_capability(endpoint: &OsObject, ump: Option<&UmpEndpointInfo>) -> En
 fn input_protocol(source: &OsObject, ump: Option<&UmpEndpointInfo>) -> Protocol {
     let midi2 = match ump {
         Some(ump) => ump.offered.midi2,
-        None => carries_midi2_only(&endpoint_capability(source, None)),
+        None => carries_midi2_only(&endpoint_capability(source, None).endpoint),
     };
     if midi2 {
         Protocol::Midi2
@@ -148,7 +151,7 @@ fn input_protocol(source: &OsObject, ump: Option<&UmpEndpointInfo>) -> Protocol 
 /// A UMP Endpoint as the Endpoint it describes: the Protocol it has in use
 /// (having blocks is not having the MIDI 2.0 Protocol), the protocols it offers
 /// and the blocks the spec can hold.
-fn ump_capability(ump: &UmpEndpointInfo) -> Endpoint {
+fn ump_capability(ump: &UmpEndpointInfo) -> Described {
     from_os(
         ump.protocol,
         Some(&ump.offered),
@@ -264,11 +267,13 @@ fn os_umps() -> Vec<UmpEndpointInfo> {
 
 /// An endpoint the OS lists, as the endpoint it describes.
 fn os_endpoint(endpoint: &OsObject, ump: Option<&UmpEndpointInfo>) -> OsEndpoint {
+    let described = endpoint_capability(endpoint, ump);
     OsEndpoint {
         id: endpoint_id(endpoint.id()),
         identity: Identity::CoreMidi(endpoint.id().get()),
         name: endpoint_name(endpoint),
-        capability: endpoint_capability(endpoint, ump),
+        capability: described.endpoint,
+        blocks_left_out: described.blocks_left_out,
     }
 }
 
@@ -298,12 +303,15 @@ impl MidiEndpoints for CoreMidiEndpoints {
         watch::start(sink, Self::devices)
     }
 
-    fn inputs(&self) -> Vec<OsEndpoint> {
-        list_inputs()
+    // CoreMIDI's list is read through the process client's own calls, which
+    // have no failure of their own: an object that left while the list was read
+    // is not in it.
+    fn inputs(&self) -> Result<Vec<OsEndpoint>> {
+        Ok(list_inputs())
     }
 
-    fn outputs(&self) -> Vec<OsEndpoint> {
-        list_outputs()
+    fn outputs(&self) -> Result<Vec<OsEndpoint>> {
+        Ok(list_outputs())
     }
 
     fn open_input(

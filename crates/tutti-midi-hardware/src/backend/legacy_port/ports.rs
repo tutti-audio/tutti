@@ -186,6 +186,7 @@ pub(in crate::backend) fn endpoint(side: Side, occurrence: u32, info: PortInfo) 
         identity,
         name: info.name,
         capability: legacy(),
+        blocks_left_out: 0,
     }
 }
 

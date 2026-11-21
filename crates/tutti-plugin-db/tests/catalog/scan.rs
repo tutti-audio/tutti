@@ -1,7 +1,7 @@
 //! `Catalog::scan` against a directory of real files: a plugin file added
 //! between two scans is found by the second, and only it is new (feature
 //! `clap`, the reference plugin; `cargo build -p tutti-plugin-probe` first, or
-//! the scan degrades to filename metadata, which still lists the file).
+//! every file fails as `ProbeNotFound` and the scan records nothing).
 
 use tutti_plugin_db::{Catalog, CatalogConfig, PluginDb, ScanPlugins, ScanReport};
 use tutti_plugin_types::Locator;
@@ -39,7 +39,9 @@ fn scan_picks_up_a_new_file() {
     std::fs::create_dir(&scanned_dir).expect("the scanned directory");
     let mut catalog = Catalog::new(
         PluginDb::new(),
-        CatalogConfig::new(dir.path()).scan_dirs(vec![scanned_dir.clone()]),
+        CatalogConfig::new(dir.path())
+            .scan_dirs(vec![scanned_dir.clone()])
+            .probe_locator(Locator::at(tutti_fixtures::plugin_probe())),
         |_| Ok(()),
     );
     // The files the catalog holds a row for: one row per file, whatever the
@@ -398,7 +400,7 @@ mod stand_in_probe {
         };
         assert_eq!(failed.path, tutti_plugin_db::canonical_path(&file));
         assert_eq!(
-            failed.failure.error,
+            probe_failure(failed).error,
             ProbeError::Died(ProbeDeath::Signal(11))
         );
         assert!(catalog.is_blacklisted(&file));
@@ -431,12 +433,41 @@ mod stand_in_probe {
             panic!("one failure: {failures:?}");
         };
         assert!(
-            matches!(failed.failure.error, ProbeError::TimedOut { .. }),
+            matches!(probe_failure(failed).error, ProbeError::TimedOut { .. }),
             "{:?}",
-            failed.failure
+            probe_failure(failed)
         );
         assert!(catalog.is_blacklisted(&file));
     }
+}
+
+/// **A scan with no `plugin-probe` to run fails each file, as `register` does**:
+/// the failure's kind is the probe's absence, no row is recorded (not one named
+/// after the file), and nothing is blacklisted, so a later scan with the probe
+/// found lists the plugin.
+#[test]
+fn scan_fails_each_file_when_the_probe_binary_is_missing() {
+    use tutti_plugin_types::ProbeError;
+    let dir = tempfile::TempDir::new().expect("a scratch directory");
+    let (catalog, _) = catalog_with_one_plugin(&dir);
+    drop(catalog);
+    let config = CatalogConfig::new(dir.path())
+        .scan_dirs(vec![dir.path().join("plugins")])
+        .probe_locator(Locator::at(dir.path().join("no-such-plugin-probe")));
+    let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
+
+    let result = scan(&mut catalog);
+
+    let failures = result.failures();
+    let [failed] = failures.as_slice() else {
+        panic!("one failure: {failures:?}");
+    };
+    assert_eq!(probe_failure(failed).error, ProbeError::ProbeNotFound);
+    assert_eq!(
+        (result.added(), result.failed(), result.newly_blacklisted()),
+        (0, 1, 0)
+    );
+    assert!(catalog.db().is_empty());
 }
 
 /// **A registration with no `plugin-probe` to run says so**: the failure's kind
@@ -460,7 +491,7 @@ fn register_names_a_missing_probe_binary() {
     let [failed] = failures.as_slice() else {
         panic!("one failure: {failures:?}");
     };
-    assert_eq!(failed.failure.error, ProbeError::ProbeNotFound);
+    assert_eq!(probe_failure(failed).error, ProbeError::ProbeNotFound);
     assert_eq!(
         (result.added(), result.failed(), result.newly_blacklisted()),
         (0, 1, 0)
@@ -501,13 +532,13 @@ fn a_measure_state_does_not_reach_the_next_measure() {
     };
     assert!(
         matches!(
-            failed.failure.error,
+            probe_failure(failed).error,
             ProbeError::Refused(ProbeRefusal::StateRefused { .. })
         ),
         "{:?}",
-        failed.failure
+        probe_failure(failed)
     );
-    assert!(failed.failure.reason().contains("refused the state"));
+    assert!(probe_failure(failed).reason().contains("refused the state"));
     assert!(
         !catalog.is_blacklisted(&a),
         "a state the plugin refused says nothing about the plugin"
@@ -546,7 +577,7 @@ fn measure_names_a_missing_probe_binary() {
     let [failed] = failures.as_slice() else {
         panic!("one failure: {failures:?}");
     };
-    assert_eq!(failed.failure.error, ProbeError::ProbeNotFound);
+    assert_eq!(probe_failure(failed).error, ProbeError::ProbeNotFound);
     assert!(catalog.db().is_empty());
 }
 
@@ -668,5 +699,14 @@ mod links {
         assert_eq!(row.format(), Some(tutti_plugin_types::PluginFormat::Clap));
         let args = std::fs::read_to_string(log).expect("the probe ran");
         assert!(args.contains("--as clap"), "{args:?}");
+    }
+}
+
+/// The probe failure a listed file failed with; a file that went unprobed fails
+/// the test.
+fn probe_failure(failed: &tutti_plugin_db::FileFailure) -> &tutti_plugin_db::ProbeFailure {
+    match &failed.cause {
+        tutti_plugin_db::FileFailureCause::Probe(failure) => failure,
+        other => panic!("{:?} was not probed: {other:?}", failed.path),
     }
 }

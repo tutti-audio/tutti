@@ -24,7 +24,7 @@ fn next(events: &DeviceEvents) -> std::result::Result<DeviceEvent, WatchFailure>
 /// The event that woke the waiter and any queued behind it.
 fn wake(events: &DeviceEvents) -> Vec<DeviceEvent> {
     let first = next(events).expect("an event");
-    std::iter::once(first).chain(events.try_iter()).collect()
+    std::iter::once(first).chain(events.pending()).collect()
 }
 
 fn fake() -> (Devices, DeviceEvents, FakeCounters) {
@@ -65,7 +65,7 @@ fn open_lists_what_is_plugged_in_and_reports_no_event_for_it() {
     // two IAC endpoints share an identity and get two ordinals.
     assert_eq!(devices.list().len(), 4);
     assert_eq!(events.initial().len(), 4);
-    assert!(events.try_iter().next().is_none());
+    assert!(events.pending().next().is_none());
 }
 
 #[test]
@@ -121,11 +121,11 @@ fn a_rename_is_changed_and_keeps_the_id() {
 #[test]
 fn a_wake_takes_the_change_off_the_queue() {
     let (_devices, events, fake) = fake();
-    assert!(events.try_iter().next().is_none());
+    assert!(events.pending().next().is_none());
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
     let got = wake(&events);
     assert_eq!(got.len(), 1);
-    assert!(events.try_iter().next().is_none(), "wake consumed it");
+    assert!(events.pending().next().is_none(), "wake consumed it");
 }
 
 #[test]
@@ -150,7 +150,7 @@ fn recv_is_pending_while_nothing_changed() {
     let mut recv = std::pin::pin!(events.recv());
     let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
     assert!(recv.as_mut().poll(&mut cx).is_pending());
-    assert!(events.try_iter().next().is_none());
+    assert!(events.pending().next().is_none());
 }
 
 /// A pending `recv` is woken by the change that resolves it, once.
@@ -318,14 +318,14 @@ struct Refuses;
 
 impl MidiEndpoints for Refuses {
     fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
-        sink.seed(os_devices(&self.inputs(), &[]))?;
+        sink.seed(os_devices(&self.inputs()?, &[]))?;
         Ok(Box::new(crate::endpoints::NoWatch))
     }
-    fn inputs(&self) -> Vec<OsEndpoint> {
-        vec![endpoint(1, "Keys")]
+    fn inputs(&self) -> Result<Vec<OsEndpoint>> {
+        Ok(vec![endpoint(1, "Keys")])
     }
-    fn outputs(&self) -> Vec<OsEndpoint> {
-        Vec::new()
+    fn outputs(&self) -> Result<Vec<OsEndpoint>> {
+        Ok(Vec::new())
     }
     fn open_input(
         &self,
@@ -395,7 +395,7 @@ fn a_change_during_subscribe_is_in_initial_or_in_the_stream_once() {
         let events = devices.subscribe();
         sender.join().unwrap();
         let mut seen: Vec<String> = events.initial().iter().map(|d| d.name.clone()).collect();
-        seen.extend(events.try_iter().map(|e| e.info().name.clone()));
+        seen.extend(events.pending().map(|e| e.info().name.clone()));
         seen.retain(|name| name != "Keys");
         let total = seen.len();
         seen.sort();
@@ -548,8 +548,131 @@ fn capability_is_the_backends_for_a_present_device() {
     let (devices, events, fake) = fake();
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
     wake(&events);
-    let caps = devices.capability(&id_of(&devices, "Keys")).unwrap();
+    let caps = devices
+        .capability(&id_of(&devices, "Keys"))
+        .unwrap()
+        .unwrap();
     assert_eq!(caps.active().protocol, tutti_ump::Protocol::Midi2);
+}
+
+/// **An event with no wire form is taken and counted apart from the losses**: a
+/// JR Clock sent to a device that receives no JR is dropped by the spec's rule
+/// (M2-104 7.1.6.2), `queue` says the device took it, and `unrepresentable`
+/// says it went nowhere. The note beside it is sent.
+#[test]
+fn an_event_with_no_wire_form_is_taken_and_counted() {
+    let (devices, events, fake) = fake();
+    fake.plug(endpoint(1, "Synth"), PortDirection::Output);
+    wake(&events);
+    let mut out = devices
+        .open_output(crate::testing::started(), &id_of(&devices, "Synth"))
+        .unwrap();
+    let clock = tutti_ump::Ump::from(tutti_ump::Message::Utility(tutti_ump::Utility::JrClock(1)));
+    let note = tutti_fixtures::midi::note_on(tutti_ump::MidiChannel::FIRST, 60, 0xFFFF);
+    let at = |ump| (tutti_graph::Offset::ZERO, ump);
+    let taken = out.queue(&[at(clock), at(note)]);
+    assert_eq!(taken.packets(), 2, "the clock counts as taken");
+    assert_eq!(out.unrepresentable(), 1);
+    assert_eq!(out.losses(), Losses::NONE, "it is not a loss of room");
+    assert_eq!(fake.take_sent(EndpointId::from_raw(1)), [note]);
+    let taken = out.queue(&[at(note)]);
+    assert_eq!(taken.packets(), 1);
+    assert_eq!(out.unrepresentable(), 1, "a note has a form");
+}
+
+/// **Function Blocks the spec cannot hold are counted on the device**: two of
+/// the three an OS declares are past the spec's range, and the app reads the two.
+#[test]
+fn the_blocks_left_out_of_a_device_are_readable() {
+    use tutti_ump::{OsFunctionBlock, UiHint, read_function_block};
+    let block = |id| {
+        read_function_block(OsFunctionBlock {
+            active: true,
+            id,
+            direction: 2,
+            ui_hint: UiHint::Unknown,
+            midi1: 0,
+            first_group: 0,
+            groups_spanned: 1,
+            midi_ci_version: 0,
+            max_sysex8_streams: 0,
+        })
+    };
+    let described = crate::capability::from_os(
+        tutti_ump::Protocol::Midi2,
+        None,
+        [block(0), block(32), block(40)].map(|b| (b, None)),
+    );
+    let (devices, events, fake) = fake();
+    fake.plug(
+        OsEndpoint {
+            capability: described.endpoint,
+            blocks_left_out: described.blocks_left_out,
+            ..endpoint(1, "Keys")
+        },
+        PortDirection::Input,
+    );
+    wake(&events);
+    let keys = id_of(&devices, "Keys");
+    assert_eq!(devices.blocks_left_out(&keys).unwrap(), Some(2));
+    let caps = devices.capability(&keys).unwrap().unwrap();
+    assert_eq!(caps.function_blocks().count(), 1);
+}
+
+/// A backend whose OS cannot be asked: the listing fails, and the watch lists
+/// the device it was seeded with.
+struct Unlistable;
+
+impl MidiEndpoints for Unlistable {
+    fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
+        sink.seed(os_devices(&[endpoint(1, "Keys")], &[]))?;
+        Ok(Box::new(crate::endpoints::NoWatch))
+    }
+    fn inputs(&self) -> Result<Vec<OsEndpoint>> {
+        Err(MidiHardwareError::Unsupported(
+            "the sequencer will not open",
+        ))
+    }
+    fn outputs(&self) -> Result<Vec<OsEndpoint>> {
+        Err(MidiHardwareError::Unsupported(
+            "the sequencer will not open",
+        ))
+    }
+    fn open_input(
+        &self,
+        _started: crate::Started,
+        _: EndpointId,
+        _: crate::InputProducerHandle,
+    ) -> Result<Box<dyn InputConnection>> {
+        Err(MidiHardwareError::Unsupported("no inputs"))
+    }
+    fn open_output(
+        &self,
+        _started: crate::Started,
+        _: EndpointId,
+    ) -> Result<Box<dyn crate::DeviceOut>> {
+        Err(MidiHardwareError::Unsupported("no outputs"))
+    }
+}
+
+/// **A backend that cannot list its endpoints says so**: asking what a listed
+/// device is returns the backend's error, not "nothing", and opening the
+/// device's output fails with it too.
+#[test]
+fn a_backend_that_cannot_be_asked_fails_the_capability_query() {
+    let devices =
+        Devices::open_over(&tutti_platform::Executor::new(), Box::new(Unlistable)).unwrap();
+    let keys = id_of(&devices, "Keys");
+    assert!(matches!(
+        devices.capability(&keys),
+        Err(MidiHardwareError::Unsupported(
+            "the sequencer will not open"
+        ))
+    ));
+    assert!(matches!(
+        devices.blocks_left_out(&keys),
+        Err(MidiHardwareError::Unsupported(_))
+    ));
 }
 
 #[test]
@@ -726,7 +849,7 @@ fn a_seed_after_a_change_is_refused() {
     let present = os_devices(&[endpoint(1, "Keys")], &[]);
     sink.send(OsChange::Present(present[0].clone()));
     assert_eq!(sink.seed(present), Err(SeedError));
-    assert_eq!(events.try_iter().count(), 1, "only the reported change");
+    assert_eq!(events.pending().count(), 1, "only the reported change");
 }
 
 /// A backend whose one output records the Protocols it is told to follow.
@@ -748,14 +871,14 @@ impl crate::DeviceOut for TaggedSink {
 
 impl MidiEndpoints for Tagging {
     fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
-        sink.seed(os_devices(&[], &self.outputs()))?;
+        sink.seed(os_devices(&[], &self.outputs()?))?;
         Ok(Box::new(crate::endpoints::NoWatch))
     }
-    fn inputs(&self) -> Vec<OsEndpoint> {
-        Vec::new()
+    fn inputs(&self) -> Result<Vec<OsEndpoint>> {
+        Ok(Vec::new())
     }
-    fn outputs(&self) -> Vec<OsEndpoint> {
-        vec![endpoint(1, "Synth")]
+    fn outputs(&self) -> Result<Vec<OsEndpoint>> {
+        Ok(vec![endpoint(1, "Synth")])
     }
     fn open_input(
         &self,
@@ -800,7 +923,7 @@ fn the_sink_follows_the_protocol_the_output_is_in() {
     assert_eq!(*told.lock().unwrap(), [Protocol::Midi2, Protocol::Midi1]);
 }
 
-/// **`for event in &events` takes what `try_iter` would**, oldest first, and
+/// **`for event in &events` takes what `pending` would**, oldest first, and
 /// leaves nothing queued: the same queue is read, not a copy.
 #[test]
 fn a_reference_to_the_events_iterates_the_queued_changes() {
@@ -825,7 +948,7 @@ fn a_reference_to_the_events_iterates_the_queued_changes() {
         std::thread::yield_now();
     }
     assert_eq!(queued, ["Drums", "Bass"], "oldest first");
-    assert!(events.try_iter().next().is_none(), "the loop took them");
+    assert!(events.pending().next().is_none(), "the loop took them");
 }
 
 /// What the Active Sensing thread tests share: a fake output open over

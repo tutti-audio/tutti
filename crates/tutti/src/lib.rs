@@ -138,8 +138,8 @@ pub use tutti_session::Error;
 pub use tutti_curve::DECLICK;
 pub use tutti_graph::{
     EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapOptions, EventTapReader,
-    FadeLaw, InletNode, InletRing, Level, Losses, MeterReader, NodeMode, Stamp, TapAlign, TapEvent,
-    TapId, TapOptions, TapReader, TapWriter,
+    Fade, FadeLaw, InletNode, InletRing, Level, Losses, MeterReader, NodeMode, Stamp, TapAlign,
+    TapEvent, TapId, TapOptions, TapReader, TapWriter,
 };
 pub use tutti_rt::PushError;
 // The engine's health: a `Gauge<Load>` and a `Counter<BlockCounts>`.
@@ -282,6 +282,11 @@ pub mod nodes {
         SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
     };
     pub use tutti_dsp::{
+        AdditiveBank, AdditiveControls, Algorithm, AlgorithmError, FmControls, FmPatch, FmVoice,
+        MAX_OPERATORS, MAX_PARTIALS, Operator, OperatorCount, OperatorCountError, OperatorError,
+        OperatorFrequency, OperatorSpec, Partial, PartialCount, PartialCountError, Partials, Route,
+    };
+    pub use tutti_dsp::{
         AllPassFilter, CombBank, CombControls, CombFilter, CombForm, FrequencyShifterBank,
         FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,
     };
@@ -306,7 +311,15 @@ pub mod nodes {
         EnvelopeStages, EnvelopeStep,
     };
     pub use tutti_dsp::{
+        FillController, LoopBandwidth, LoopBandwidthError, VariableRate, VariableRateError,
+        VariableResampler,
+    };
+    pub use tutti_dsp::{
         GrainScheduler, GrainSettings, Granular, MaxGrains, MaxGrainsError, Onset,
+    };
+    pub use tutti_dsp::{
+        KarplusStrong, KarplusStrongBank, KarplusStrongControls, WaveguideBank, WaveguideControls,
+        WaveguidePositions, WaveguideString,
     };
     pub use tutti_dsp::{Lfo, LfoWave};
     pub use tutti_dsp::{
@@ -314,7 +327,8 @@ pub mod nodes {
         SpringLengthError,
     };
     pub use tutti_dsp::{
-        MAX_MODES, ModalBank, ModalControls, Mode, ModeCount, ModeCountError, Modes,
+        MAX_MODES, ModalBank, ModalControls, Mode, ModeCount, ModeCountError, Modes, Oversampler,
+        Oversampling, OversamplingFactor, OversamplingPlan, Passband, PassbandError,
     };
     pub use tutti_dsp::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
     pub use tutti_dsp::{
@@ -327,6 +341,10 @@ pub mod nodes {
         AutomationLaneConfig, AutomationLaneNode, AutomationRecorder, ControlLaneNode,
         ForeignLaneConfig, LaneControls, LiveAutomationLane, RecordMode, RecordingConfig,
         Trajectory, UnitLaneConfig,
+    };
+    pub use tutti_nodes::{
+        AdditiveConfig, AdditiveKernel, AdditiveNode, AdditiveSet, FmConfig, FmKernel, FmNode,
+        FmSet,
     };
     pub use tutti_nodes::{
         AmbisonicDecoderConfig, AmbisonicDecoderKernel, AmbisonicDecoderNode, AmbisonicDecoderSet,
@@ -364,15 +382,15 @@ pub mod nodes {
         MetronomeMode, ModDelayConfig, ModDelayControls, ModDelayLayout, ModDelayLayoutBuilder,
         ModDelayNode, MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
         MultibandControls, NoiseConfig, NoiseNode, NoteEnvelopeConfig, NoteEnvelopeNode, NoteTimes,
-        NoteTimesError, OscillatorConfig, OscillatorNode, OversamplingFactor, PhaserConfig,
-        PhaserControls, PhaserNode, PlateControls, PlateReverbConfig, PlateReverbNode,
-        SOURCE_EVENT_CAPACITY, ShapeKind, ShimmerConfig, ShimmerNode, SourceNode, SourcePorts,
-        SpringControls, SpringLayout, SpringReverbConfig, SpringReverbNode, SpringStages,
-        SpringStagesError, Stages, StagesError, Stagger, StaggerError, SvfControls,
-        SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError, SweepRange,
-        SweepRangeError, TiltFilterConfig, TiltFilterControls, TiltFilterNode, TransientControls,
-        TransientShaperConfig, TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode,
-        WavetableConfig, WavetableNode,
+        NoteTimesError, OscillatorConfig, OscillatorNode, PhaserConfig, PhaserControls, PhaserNode,
+        PlateControls, PlateReverbConfig, PlateReverbNode, SOURCE_EVENT_CAPACITY, ShapeKind,
+        ShimmerConfig, ShimmerNode, SourceNode, SourcePorts, SpringControls, SpringLayout,
+        SpringReverbConfig, SpringReverbNode, SpringStages, SpringStagesError, Stages, StagesError,
+        Stagger, StaggerError, SvfControls, SvfFilterConfig, SvfFilterNode, SvfType, Sweep,
+        SweepBuilder, SweepError, SweepRange, SweepRangeError, TiltFilterConfig,
+        TiltFilterControls, TiltFilterNode, TransientControls, TransientShaperConfig,
+        TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode, WavetableConfig,
+        WavetableNode,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
@@ -400,6 +418,10 @@ pub mod nodes {
         EarlyReflectionsKernel, EarlyReflectionsNode, NoControls,
     };
     pub use tutti_nodes::{GranularConfig, GranularError, GranularNode};
+    pub use tutti_nodes::{
+        KarplusStrongConfig, KarplusStrongKernel, KarplusStrongNode, KarplusStrongSet,
+        WaveguideStringConfig, WaveguideStringKernel, WaveguideStringNode, WaveguideStringSet,
+    };
     pub use tutti_nodes::{ModalBankConfig, ModalBankKernel, ModalBankNode, ModalBankSet};
 }
 
@@ -539,14 +561,14 @@ pub mod session {
     ))]
     pub use tutti_session::LoadError;
     pub use tutti_session::{
-        BackgroundWork, BlockConfig, Bus, BusSink, Channel, Committed, Connection, Crossfade,
-        CrossfadeId, CrossfadeRefused, DeclarationError, Disconnection, Event, EventEdge,
-        EventTapPort, Fanin, Feeder, Graph, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink,
-        Meters, NodeSlots, NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError,
-        OutputTapOpen, PHASES, Peer, PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence,
-        Reclaimer, Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact,
-        ResourceId, RootDeclaration, RootReader, RootTopologyStatus, SessionNode,
-        SessionOutputTapError, SetSources, Taps, TempoError, Weighted, Wire, root_width,
+        BackgroundWork, BlockConfig, Bus, BusSink, Channel, Committed, Connection,
+        DeclarationError, Disconnection, Event, EventEdge, EventTapPort, Fanin, Feeder, Graph,
+        Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots, NotReopened,
+        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputTapOpen, PHASES, Peer,
+        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
+        RemoveError, Reopened, ReplaceRefused, Replacement, Resource, ResourceFact, ResourceId,
+        RootDeclaration, RootReader, RootTopologyStatus, SessionHeardTapError, SessionNode,
+        SetSources, Taps, TempoError, Weighted, Wire, root_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
@@ -740,9 +762,9 @@ pub mod soundfont {
 #[cfg(feature = "plugin")]
 pub mod plugin {
     pub use tutti_plugin_db::{
-        BeforeEpoch, BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError,
-        Mtime, PluginEntry, ProbeFailure, RowChange, ScanBusy, ScanOutcome, ScanProgress,
-        ScannedFile,
+        BeforeEpoch, BlacklistedFile, FileFacts, FileFailure, FileFailureCause, FileRow, FileState,
+        FilesError, Mtime, PedalError, PluginEntry, ProbeFailure, Recovered, RecoveryFailure,
+        RowChange, ScanBusy, ScanOutcome, ScanProgress, ScannedFile, UnmeasuredPlugin,
     };
     pub use tutti_plugin_db::{BindError, BlacklistView, Loadable, PersistError, Resolved};
     pub use tutti_plugin_host::{BlockLosses, RebindError};
@@ -771,7 +793,7 @@ pub mod plugin {
         FrameTooLarge, ResultError, SlabAccessError, SlabError, SlabLayoutError,
     };
     // What a `ProbeFailure` holds.
-    pub use tutti_plugin_types::{ProbeDeath, ProbeError, ProbeExit, ProbeRefusal};
+    pub use tutti_plugin_types::{MeasureFailure, ProbeDeath, ProbeError, ProbeExit, ProbeRefusal};
     pub use tutti_plugin_types::{Timeouts, ZeroTimeout};
 
     /// The plugin catalog: scanning, the database and the descriptors it

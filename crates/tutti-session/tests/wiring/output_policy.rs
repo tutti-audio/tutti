@@ -64,7 +64,7 @@ fn monitoring_changes_what_is_heard_and_never_the_root() {
     let mut tap = s
         .graph()
         .taps()
-        .open_output(Samples::new(4_096))
+        .open_root(Samples::new(4_096))
         .expect("the sources exist");
     assert_eq!(last_frame(&mut s, 6, 128), [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
 

@@ -101,7 +101,7 @@ fn the_published_figures_are_the_plans_and_nothing_is_spliced_in() {
         s.graph_ref().sources(Root::output(1)).unwrap(),
     ];
     let _ = s.update();
-    assert!(!s.graph_ref().is_edited(), "committed");
+    assert!(!s.graph_ref().has_uncommitted_edits(), "committed");
 
     let sent = s
         .graph_ref()
@@ -144,7 +144,7 @@ fn an_update_with_no_edit_publishes_nothing() {
     let mut s = detached();
     skewed(&mut s);
     let _ = s.update();
-    assert!(!s.graph_ref().is_edited());
+    assert!(!s.graph_ref().has_uncommitted_edits());
     let sentinel = vec![Samples::new(99)];
     s.compensation().set(&sentinel);
 

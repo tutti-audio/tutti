@@ -39,7 +39,7 @@ impl Watched {
         tutti_fixtures::block_on_within(self.events.recv(), within)
             .and_then(|received| received.ok())
             .into_iter()
-            .chain(self.events.try_iter())
+            .chain(self.events.pending())
             .collect()
     }
 }
@@ -106,6 +106,7 @@ fn a_change_is_reported_when_an_output_port_comes_first() {
     let started = tutti_fixtures::block_on(backend.start()).expect("the hub makes its client");
     let id = backend
         .outputs()
+        .expect("the OS lists its endpoints")
         .into_iter()
         .find(|e| e.name.contains(&first_name))
         .expect("the virtual endpoint is listed")

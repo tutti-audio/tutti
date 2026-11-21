@@ -6,7 +6,7 @@ use tutti_graph::MeterReader;
 use tutti_rt::{Counter, Gauge};
 use tutti_units::Samples;
 
-use crate::{AppKey, Clock, OutputTapOpen, Session, SessionOutputTapError};
+use crate::{AppKey, Clock, OutputTapOpen, Session, SessionHeardTapError};
 
 impl<K: AppKey, C: Clock> Session<K, C> {
     /// Opens the tap on **what the engine renders**: every output channel at
@@ -16,7 +16,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// after the engine has written the tap. It is read through the same
     /// [`TapReader`](tutti_graph::TapReader) as a plan tap, and is the default way to record what the
     /// output sounds like. A transport stop fades in it as it does in the
-    /// engine's output, so a take has no click there; [`Taps::open_output`](crate::Taps::open_output) is the
+    /// engine's output, so a take has no click there; [`Taps::open_root`](crate::Taps::open_root) is the
     /// pre-fader signal of the graph, aligned by the compiler, and steps at a
     /// stop for a transport-gated source.
     ///
@@ -28,44 +28,44 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// the reader does not drain in time is dropped and counted
     /// ([`TapReader::take_lost`](tutti_graph::TapReader::take_lost)). It flows from the first
     /// render that begins after this returns, and is closed by
-    /// [`close_output_tap`](Self::close_output_tap) or, once its reader is
+    /// [`close_heard_tap`](Self::close_heard_tap) or, once its reader is
     /// dropped, by the next [`Reclaim`](crate::Phase::Reclaim) phase. The width is
     /// the device's when the session was built: a restart onto a device of
     /// another width counts the tap's blocks lost until it is opened again.
     ///
     /// # Errors
     ///
-    /// [`SessionOutputTapError::Detached`] on a session without an engine,
-    /// and [`SessionOutputTapError::Tap`]`(Busy)` while another reader is alive. While the
+    /// [`SessionHeardTapError::Detached`] on a session without an engine,
+    /// and [`SessionHeardTapError::Tap`]`(Busy)` while another reader is alive. While the
     /// audio thread has not taken the last installs it is not an error: the
     /// call returns [`OutputTapOpen::Retry`] and opens nothing.
-    pub fn open_output_tap(
+    pub fn open_heard_tap(
         &self,
         capacity: Samples,
-    ) -> Result<OutputTapOpen<C::Float>, SessionOutputTapError> {
+    ) -> Result<OutputTapOpen<C::Float>, SessionHeardTapError> {
         let (taps, layout) = self
             .output
             .taps
             .as_ref()
-            .ok_or(SessionOutputTapError::Detached)?;
+            .ok_or(SessionHeardTapError::Detached)?;
         Ok(taps.open(*layout, capacity)?)
     }
 
-    /// Closes the tap [`open_output_tap`](Self::open_output_tap) opened, now
+    /// Closes the tap [`open_heard_tap`](Self::open_heard_tap) opened, now
     /// rather than at the [`Reclaim`](crate::Phase::Reclaim) phase that follows a
     /// dropped reader. The reader keeps what it was written.
     ///
     /// # Errors
     ///
-    /// [`SessionOutputTapError::Detached`] on a session without an engine;
-    /// [`SessionOutputTapError::Tap`]`(NotOpen)` when no output tap is open (never opened, or
+    /// [`SessionHeardTapError::Detached`] on a session without an engine;
+    /// [`SessionHeardTapError::Tap`]`(NotOpen)` when no output tap is open (never opened, or
     /// closed already); nothing changes.
-    pub fn close_output_tap(&self) -> Result<(), SessionOutputTapError> {
+    pub fn close_heard_tap(&self) -> Result<(), SessionHeardTapError> {
         let (taps, _) = self
             .output
             .taps
             .as_ref()
-            .ok_or(SessionOutputTapError::Detached)?;
+            .ok_or(SessionHeardTapError::Detached)?;
         Ok(taps.close()?)
     }
 

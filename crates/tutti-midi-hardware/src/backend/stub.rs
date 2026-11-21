@@ -47,12 +47,12 @@ impl MidiEndpoints for StubEndpoints {
         Ok(Box::new(NoWatch))
     }
 
-    fn inputs(&self) -> Vec<OsEndpoint> {
-        Vec::new()
+    fn inputs(&self) -> Result<Vec<OsEndpoint>> {
+        Ok(Vec::new())
     }
 
-    fn outputs(&self) -> Vec<OsEndpoint> {
-        Vec::new()
+    fn outputs(&self) -> Result<Vec<OsEndpoint>> {
+        Ok(Vec::new())
     }
 
     fn open_input(

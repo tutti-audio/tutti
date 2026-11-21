@@ -11,10 +11,11 @@
 //! at the deadline means it hung. The host states its pid to the child
 //! ([`HOST_PID_ENV`](tutti_plugin_ipc_ffi::HOST_PID_ENV)), which ends itself with the host.
 
+use crate::scanner::ProbeListing;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tutti_platform::WeakExecutor;
-use tutti_plugin_types::{Described, Locator, PluginFormat, PluginId, ProbeError};
+use tutti_plugin_types::{Locator, PluginFormat, PluginId, ProbeError};
 
 // The one place the platform is chosen: a target that starts no processes answers every
 // probe as unsupported.
@@ -69,14 +70,14 @@ pub(crate) async fn probe_metadata_with(
     plugin_path: &Path,
     format: PluginFormat,
     timeout: Duration,
-) -> Result<Vec<Described>, ProbeError> {
+) -> Result<ProbeListing, ProbeError> {
     os::run(executor, locator, plugin_path, format, timeout, &[]).await
 }
 
 /// [`probe_metadata_with`] that also **measures** each plugin (`plugin-probe
 /// --measure`): the descriptors come back with
 /// [`PluginDescriptor::measured`](tutti_plugin_types::PluginDescriptor::measured) set where the plugin could be measured, and a
-/// plugin that could not be is logged with why. It renders the plugin, so give it
+/// plugin that could not be is listed with why ([`ProbeListing::unmeasured`]). It renders the plugin, so give it
 /// the long deadline
 /// ([`DEFAULT_MEASURE_TIMEOUT`](crate::DEFAULT_MEASURE_TIMEOUT)):
 /// a plugin that crashes or hangs while rendering is [`ProbeError::Died`] or
@@ -88,8 +89,8 @@ pub(crate) async fn probe_metadata_with(
 ///
 /// The probe is given one budget for its whole run, `timeout` less a margin
 /// (`--budget`), which the plugins of a file share: a plugin that
-/// is slow, or one that follows slow ones, times out its own rows (logged, no
-/// measurement) while the file's others keep theirs, and the probe ends before
+/// is slow, or one that follows slow ones, times out its own rows (listed
+/// as unmeasured) while the file's others keep theirs, and the probe ends before
 /// `timeout` and is not killed as a hang. A plugin that never returns from a block
 /// is still the host's `timeout`, and the whole file.
 ///
@@ -104,7 +105,7 @@ pub(crate) async fn measure_metadata_with(
     format: PluginFormat,
     timeout: Duration,
     state: Option<&ProbeState>,
-) -> Result<Vec<Described>, ProbeError> {
+) -> Result<ProbeListing, ProbeError> {
     let budget = run_budget(timeout).as_secs().to_string();
     let mut args = vec!["--measure".as_ref(), "--budget".as_ref(), budget.as_ref()];
     // The command line carries the id as text (`PluginId`'s `Display`), which
@@ -131,7 +132,7 @@ mod tests {
     use std::process::{Command, Stdio};
     use tempfile::TempDir;
     use tutti_plugin_ipc_ffi::HOST_PID_ENV;
-    use tutti_plugin_types::{ProbeDeath, ProbeExit, ResultError};
+    use tutti_plugin_types::{Described, ProbeDeath, ProbeExit, ResultError};
 
     /// A `plugin-probe` stand-in: a shell script given the plugin path as `$1`
     /// and the result file as `$2`, as the real one is.
@@ -151,6 +152,7 @@ mod tests {
             PluginFormat::Clap,
             timeout,
         ))
+        .map(|listing| listing.plugins)
     }
 
     /// **Dropping the probe's future kills and reaps its child**: the future loses a
@@ -269,6 +271,47 @@ mod tests {
         }
     }
 
+    /// **The plugins a measuring probe could not measure come back with the
+    /// listing**, each with why, and are not dropped after a log line.
+    #[test]
+    fn the_unmeasured_plugins_of_a_result_are_returned() {
+        use tutti_plugin_types::{MeasureFailure, ProbeOutcome, Unmeasured, write_result};
+        let dir = TempDir::new().unwrap();
+        let lost = Unmeasured {
+            plugin: PluginId::Clap("a.plugin".into()),
+            failure: MeasureFailure::NoAudioOutput,
+        };
+        let prepared = dir.path().join("listing");
+        write_result(
+            &prepared,
+            &ProbeOutcome::Described {
+                plugins: vec![Described::new(
+                    PluginId::Clap("a.plugin".into()),
+                    tutti_plugin_types::PluginDescriptor::new(
+                        "A",
+                        tutti_plugin_types::PluginClass::Unknown,
+                    ),
+                )],
+                unmeasured: vec![lost.clone()],
+            },
+        )
+        .unwrap();
+        let locator = stand_in(&dir, &format!("cp {} \"$2\"", prepared.display()));
+        let executor = tutti_fixtures::executor().downgrade();
+
+        let listing = futures_lite::future::block_on(probe_metadata_with(
+            &executor,
+            &locator,
+            Path::new("/plugins/Some.clap"),
+            PluginFormat::Clap,
+            Duration::from_secs(60),
+        ))
+        .unwrap();
+
+        assert_eq!(listing.plugins.len(), 1);
+        assert_eq!(listing.unmeasured, [lost]);
+    }
+
     /// **The host states its pid to the probe**, as it does to a plugin-server, so
     /// the probe watches the host and not whatever its parent is by then.
     #[test]
@@ -306,8 +349,8 @@ mod tests {
         );
     }
 
-    /// A probe binary that is not there is `ProbeNotFound`, the one error the
-    /// scan answers with filename metadata.
+    /// A probe binary that is not there is `ProbeNotFound`, a failure of its own
+    /// kind that no scan blacklists a file for.
     #[test]
     fn a_missing_probe_binary_is_probe_not_found() {
         let missing = Locator::at("/definitely/not/plugin-probe");

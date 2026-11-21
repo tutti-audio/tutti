@@ -16,8 +16,8 @@ use atomic_float::AtomicF64;
 use tutti_rt::{Param, ParamCell};
 use tutti_units::{
     Amplitude, Azimuth, Balance, BitDepth, Cents, CentsSpan, CompressionRatio, Db, Depth, Drive,
-    Elevation, Feedback, Gain, HoldFactor, Hz, Metres, Mix, Normalized, Pan, Q, Resonance,
-    SampleSpan, Seconds, Semitones, Spread, StereoWidth, Unit, UnitAddr,
+    Elevation, Feedback, Gain, HoldFactor, Hz, Metres, Mix, ModulationIndex, Normalized, Pan, Q,
+    Resonance, SampleSpan, Seconds, Semitones, Spread, StereoWidth, Unit, UnitAddr,
 };
 
 use crate::controls::{ParamSet, Params};
@@ -78,6 +78,7 @@ scalar_units!(
     Hz,
     Metres,
     Mix,
+    ModulationIndex,
     Normalized,
     Pan,
     Q,
