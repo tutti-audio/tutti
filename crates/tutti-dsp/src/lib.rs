@@ -299,8 +299,8 @@ pub use reverb::network::{
 pub use reverb::plate::bank::{PlateBank, PlateRamps};
 pub use reverb::plate::design::{MAX_PLATE_DECAY, PlateControls};
 pub use reverb::spring::{
-    HIGH_COEFFICIENT, LOW_COEFFICIENT, SpringControls, SpringLayout, SpringLength,
-    SpringLengthError, SpringReverb, SpringStages, SpringStagesError,
+    SpringControls, SpringLayout, SpringLength, SpringLengthError, SpringReverb, SpringStages,
+    SpringStagesError,
 };
 pub use ring_mod::{RingModControls, RingModulator};
 pub use sequence::{local_maxima, median, median_of_sorted};

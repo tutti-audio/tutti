@@ -1,4 +1,5 @@
 use tutti_buffers::{ChannelLayout, Planes, PlanesMut};
+use tutti_rt::SplitMix64;
 use tutti_units::{Feedback, Hz, Mix, SampleRate, Seconds, Tail};
 
 use super::*;
@@ -108,6 +109,7 @@ fn at_zero_dispersion_the_echoes_fall_sixty_decibels_in_the_decay_time() {
         tone: Hz::new(1.0e6),
         dispersion: Mix::DRY,
     });
+    spring.jump_to_target();
     let y = &render(&mut spring, &[&impulse(5600)])[0];
     let first = 20;
     let trip = 500;
@@ -154,6 +156,7 @@ fn the_loop_gain_is_below_one_and_the_response_is_bounded_for_every_config() {
                 }
                 let mut s = SpringReverb::<f64>::new(ChannelLayout::MONO, RATE, layout(8, 0.02));
                 s.retarget(&c);
+                s.jump_to_target();
                 let frames = (4.0 * decay * 48_000.0) as usize;
                 let y = &render(&mut s, &[&impulse(frames)])[0];
                 let energy: f64 = y.iter().map(|v| v * v).sum();
@@ -173,6 +176,7 @@ fn the_tail_covers_the_ring_out_and_is_no_longer_than_the_decay_and_three_trips(
     let c = SpringControls::DEFAULT;
     let mut spring = SpringReverb::<f64>::new(ChannelLayout::MONO, RATE, lay);
     spring.retarget(&c);
+    spring.jump_to_target();
     let Tail::Finite(tail) = spring.tail_of(&c) else {
         panic!("a spring's tail is finite");
     };
@@ -209,6 +213,7 @@ fn the_tail_of_a_pure_loop_is_past_the_last_echo_over_the_floor() {
         dispersion: Mix::DRY,
     };
     spring.retarget(&c);
+    spring.jump_to_target();
     let Tail::Finite(tail) = spring.tail_of(&c) else {
         panic!("a spring's tail is finite");
     };
@@ -216,4 +221,72 @@ fn the_tail_of_a_pure_loop_is_past_the_last_echo_over_the_floor() {
     assert!(tail > 20 + 9 * 500, "{tail}");
     let y = &render(&mut spring, &[&impulse(tail + 2000)])[0];
     assert!(y[tail..].iter().all(|v| v.abs() <= 1.0e-3 + 1e-9));
+}
+
+/// The pure loop at a trip of 260 frames (a 240-frame loop and a cascade of 20) with the decay
+/// stepped from 0.1 s to 0.2 s at frame 1024, a chunk start. The loop gain is
+/// `g(t) = 10^(-3 * 260 / (48000 t))` and glides over the 30 chunks of 20 ms, step `s` of the
+/// chunks after the move (the first reads step 1): `g = g0 + (g1 - g0) min(s, 30) / 30`. The
+/// echo `k` is the one before it times the gain of the chunk its trip starts in, `260 k / 32`,
+/// so the echoes follow the products of the glided gains, not of either end.
+#[test]
+fn a_decay_step_glides_the_loop_gain_over_thirty_chunks() {
+    let mut spring = SpringReverb::<f64>::new(ChannelLayout::MONO, RATE, layout(5, 0.005));
+    let controls = |decay: f64| SpringControls {
+        decay: Seconds::new(decay),
+        tone: Hz::new(1.0e6),
+        dispersion: Mix::DRY,
+    };
+    spring.retarget(&controls(0.1));
+    spring.jump_to_target();
+    let x = impulse(2200);
+    let mut y = render(&mut spring, &[&x[..1024]]).remove(0);
+    spring.retarget(&controls(0.2));
+    y.extend(render(&mut spring, &[&x[1024..]]).remove(0));
+    let gain = |decay: f64| 10f64.powf(-3.0 * 260.0 / (48_000.0 * decay));
+    let (g0, g1) = (gain(0.1), gain(0.2));
+    let mut want = 1.0;
+    for k in 1..=7usize {
+        let chunk = 260 * k / 32;
+        let steps = (chunk as i64 - 31).clamp(0, 30) as f64;
+        want *= g0 + (g1 - g0) * steps / 30.0;
+        let got = y[20 + 260 * k];
+        assert!((got - want).abs() < 1e-12, "echo {k}: {got} against {want}");
+    }
+}
+
+/// The glide is counted in chunks from the last reset, not in calls: one stream rendered in
+/// calls of 7, 32, 50, 96 and 4096 frames, with a design move at frame 1024 in each, is the same
+/// stream to the bit, over noise and the default dispersion, tone and decay.
+#[test]
+fn the_render_is_the_same_at_every_block_split() {
+    let mut rng = SplitMix64::new(7);
+    let x: Vec<f64> = (0..4096)
+        .map(|_| f64::from_fraction_bits(rng.next_u64()) - 0.5)
+        .collect();
+    let moved = SpringControls {
+        decay: Seconds::new(0.7),
+        tone: Hz::new(900.0),
+        dispersion: Mix::new(0.3),
+    };
+    let run = |block: usize| {
+        let mut spring = SpringReverb::<f64>::new(ChannelLayout::MONO, RATE, layout(8, 0.02));
+        spring.retarget(&SpringControls::DEFAULT);
+        spring.jump_to_target();
+        let mut y = Vec::new();
+        for (from, to) in [(0, 1024), (1024, 4096)] {
+            if from > 0 {
+                spring.retarget(&moved);
+            }
+            for piece in x[from..to].chunks(block) {
+                y.extend(render(&mut spring, &[piece]).remove(0));
+            }
+        }
+        y
+    };
+    let whole = run(4096);
+    assert_eq!(whole, run(32));
+    assert_eq!(whole, run(96));
+    assert_eq!(whole, run(50));
+    assert_eq!(whole, run(7));
 }

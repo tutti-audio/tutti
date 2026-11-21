@@ -6,9 +6,7 @@
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{
-    COEFF_INTERVAL, SpringControls, SpringLayout, SpringLength, SpringReverb, SpringStages,
-};
+use tutti_dsp::{SpringControls, SpringLayout, SpringLength, SpringReverb, SpringStages};
 use tutti_graph::{MAX_NODE_TAIL, Shape};
 use tutti_units::{Hz, Mix, SampleRate, Seconds, Tail};
 
@@ -85,7 +83,7 @@ impl SpringReverbConfig {
 ///
 /// The ports are the decay (an RT60 in seconds, `UnitParam::Decay`), the tone (the loop
 /// low-pass's cutoff, `UnitParam::Cutoff`) and the dispersion (`UnitParam::Diffusion`). Each
-/// lands whole at the 16-frame grid. The stage count and the loop's length are fixed by the
+/// glides in over 20 ms of 32-frame chunks (the chunk is the node's grid), the loop staying stable throughout. The stage count and the loop's length are fixed by the
 /// config.
 ///
 /// # The tail
@@ -136,6 +134,8 @@ pub struct SpringReverbKernel<F: Float> {
     layout: SpringLayout,
     rate: SampleRate,
     spring: SpringReverb<F>,
+    /// Whether the first retarget after `prepare` has been applied.
+    applied: bool,
 }
 
 impl<F: Float> SpringReverbKernel<F> {
@@ -147,6 +147,7 @@ impl<F: Float> SpringReverbKernel<F> {
             layout,
             rate,
             spring: SpringReverb::new(width, rate, layout),
+            applied: false,
         }
     }
 }
@@ -155,7 +156,8 @@ impl<F: Float> Kernel for SpringReverbKernel<F> {
     type Float = F;
     type Set = SpringReverbSet;
 
-    const GRID: usize = COEFF_INTERVAL;
+    /// A cell that moves reaches the render at a chunk's start, wherever the blocks fall.
+    const GRID: usize = SpringReverb::<F>::CHUNK;
 
     /// `width` channels in and out; `Heavy` (the default cost), as the stages are many.
     fn shape(&self) -> Shape {
@@ -168,14 +170,20 @@ impl<F: Float> Kernel for SpringReverbKernel<F> {
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
         self.spring = SpringReverb::new(self.width, rate, self.layout);
+        self.applied = false;
     }
 
     fn reset(&mut self) {
         self.spring.reset();
     }
 
+    /// The first design after `prepare` lands at once; a later one glides in over 20 ms.
     fn retarget(&mut self, controls: &SpringControls) {
         self.spring.retarget(controls);
+        if !self.applied {
+            self.spring.jump_to_target();
+            self.applied = true;
+        }
     }
 
     fn render(
@@ -205,8 +213,8 @@ impl<F: Float> Kernel for SpringReverbKernel<F> {
 mod tests {
     use super::*;
     use crate::test_support::{drive_block, prepared};
+    use tutti_graph::Node;
     use tutti_graph::contract::assert_param_fork;
-    use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
     fn node(width: u16) -> SpringReverbNode<f32> {
@@ -247,12 +255,13 @@ mod tests {
         assert_eq!(n.shape().audio_in().count(), 1);
     }
 
-    /// Set to no dispersion through its port, the node delays an impulse by the cascades'
-    /// `M K = 40 * 4 = 160` frames at unity (the mean of two equal delays), and not before.
+    /// Started at no dispersion the node delays an impulse by the cascades' `M K = 40 * 4 =
+    /// 160` frames at unity (the mean of two equal delays), and not before.
     #[test]
-    fn the_ports_reach_the_spring() {
-        let mut n = node(1);
-        assert!(n.param_set().set(UnitParam::Diffusion, 0.0));
+    fn a_dry_spring_is_a_delay_of_the_cascade() {
+        let mut n = prepared(SpringReverbNode::<f32>::from(
+            SpringReverbConfig::new(1u16).dispersion(Mix::DRY),
+        ));
         let mut x = vec![0.0f32; 64];
         x[0] = 1.0;
         let y = drive_block(&mut n, &[&x]).remove(0);
