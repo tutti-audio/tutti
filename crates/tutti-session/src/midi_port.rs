@@ -22,8 +22,8 @@
 //! release call. An input closes at the session's next
 //! [`update`](Session::update) or at the next open, whichever comes first, and
 //! its node goes once it has released its device's notes. An output retires
-//! the same way (`Retiring`): its connection and Active
-//! Sensing thread end after the graph has rendered past the drop, and a device
+//! the same way: its connection and Active Sensing
+//! thread end after the graph has rendered past the drop, and a device
 //! the dropped port held can be opened by the open that follows.
 //!
 //! An input is fed to the graph through an input node of its own, made when
@@ -50,7 +50,7 @@ use tutti_units::{Resyncs, Seconds};
 
 use crate::job::Ticket;
 use crate::midi::{
-    Claim, Departure, Held, Leaving, LossReaders, LossWriters, Retiring, UmpOut, loss_cells,
+    Claim, Departure, Held, LossReaders, LossWriters, Retiring, Sweepable, UmpOut, loss_cells,
 };
 use crate::midi_ci::{
     EndSubscription, GetProperty, Pending, PortLink, ProfilePeer, ReportPeer, RequestReport,
@@ -527,8 +527,18 @@ impl Peer for MidiInput {
 /// the graph has rendered past the drop; then the tap is drained a last time and
 /// the connection and its Active Sensing thread end, at the first
 /// [`update`](Session::update) after. So an event queued just before the drop
-/// is sent. Opening the device again ends a retiring output at once, so a device
-/// has one connection of the session; what the graph had not rendered is lost.
+/// is sent, and a note a source starts in the window is ended before the
+/// connection closes.
+///
+/// **The window is two rendered blocks.** An event that does not reach the
+/// output's node within them (a delayed or latency-compensated path, a feedback
+/// loop, a clip event stamped for later) is not sent; the node counts it
+/// dropped. **A session that renders no block, and an output whose node is
+/// bypassed or muted, keep the output retiring**, with its connection, until
+/// the device is opened again or the session ends. Opening the device again
+/// ends a retiring output at once, so a device has one connection of the
+/// session; what the graph had not rendered is lost. A retiring output lets go
+/// of a device that unplugs.
 #[derive(Clone, Debug)]
 pub struct MidiOutput {
     claim: Arc<Claim<OutputShared>>,
@@ -736,16 +746,29 @@ struct OutputPort {
     parked: Option<JrStream>,
 }
 
-/// An input node that is going: its device's notes are being released. It has
-/// no tap to drain.
-struct Released(NodeKey);
+/// What an input port leaves while its node goes: its device's notes are being
+/// released by the node, and nothing else is kept.
+struct Released;
 
-impl Leaving for Released {
-    fn node(&self) -> NodeKey {
-        self.0
+impl From<InputPort> for Released {
+    fn from(_: InputPort) -> Self {
+        Self
+    }
+}
+
+impl Sweepable for InputPort {
+    fn is_held(&self) -> bool {
+        self.claim.is_held()
     }
 
-    fn drain(&mut self, _: Option<&crate::midi::OutputTiming>) {}
+    fn node(&self) -> NodeKey {
+        self.node
+    }
+
+    fn depart(&mut self) -> DeviceGeneration {
+        self.writer.depart();
+        self.generation.clone()
+    }
 }
 
 /// The ports of the session, and what they are opened with.
@@ -860,11 +883,6 @@ impl InputPort {
         self.pending.end(why);
     }
 
-    /// Whether a handle of this port lives.
-    fn is_held(&self) -> bool {
-        self.claim.is_held()
-    }
-
     /// Takes in what the OS layer reads of the open device, saying so when it
     /// differs from what the handles read.
     fn refresh(&self, io: &MidiSession, out: &mut Vec<SessionEvent>) {
@@ -888,6 +906,26 @@ impl InputPort {
     }
 }
 
+/// Closes the open input `port`: its inlet leaves the graph and its device is
+/// let go; the node releases what the device held.
+fn disconnect<F: tutti_buffers::Float>(
+    port: &mut InputPort,
+    io: &mut MidiSession,
+    graph: &mut crate::graph::Graph<F>,
+) {
+    if let Some(id) = port.open.take() {
+        io.disconnect_input(&id);
+    }
+    if let Some(key) = port.inlet.take() {
+        // A host that removed the inlet itself leaves nothing to take.
+        let _ = graph.remove(key);
+    }
+    port.writer.depart();
+    port.controls.clear_mpe_profiles();
+    // The device's peers went with its connection.
+    port.end_requests(Gate::Away, Ended::Disconnected);
+}
+
 impl Ports {
     /// The input nodes of the ports, and of those going, for the routes to read.
     pub(crate) fn input_nodes(&self) -> Vec<NodeKey> {
@@ -896,7 +934,7 @@ impl Ports {
         self.inputs
             .iter()
             .map(|port| port.node)
-            .chain(self.retiring.iter().map(|going| going.port.0))
+            .chain(self.retiring.iter().map(|going| going.node))
             .collect()
     }
 
@@ -979,18 +1017,7 @@ impl Ports {
         io: &mut MidiSession,
         graph: &mut crate::graph::Graph<F>,
     ) {
-        let port = &mut self.inputs[at];
-        if let Some(id) = port.open.take() {
-            io.disconnect_input(&id);
-        }
-        if let Some(key) = port.inlet.take() {
-            // A host that removed the inlet itself leaves nothing to take.
-            let _ = graph.remove(key);
-        }
-        port.writer.depart();
-        port.controls.clear_mpe_profiles();
-        // The device's peers went with its connection.
-        port.end_requests(Gate::Away, Ended::Disconnected);
+        disconnect(&mut self.inputs[at], io, graph);
     }
 
     /// The step of the update's `Phase::Poll` for the ports: retires those whose
@@ -1034,29 +1061,17 @@ impl Ports {
         graph: &mut crate::graph::Graph<F>,
     ) -> Edits {
         let mut edits = Edits::default();
-        let mut at = 0;
-        while at < self.inputs.len() {
-            if self.inputs[at].is_held() {
-                at += 1;
-                continue;
-            }
-            self.inputs[at].end_requests(Gate::Released, Ended::Released);
-            self.disconnect_input(at, io, graph);
-            let mut port = self.inputs.remove(at);
-            self.notices.extend(port.pending.take_notices());
-            self.retiring.push(Retiring {
-                port: Released(port.node),
-                generation: port.generation.clone(),
-            });
-            edits.graph = true;
-            edits.routes = true;
-        }
+        let notices = &mut self.notices;
+        let left = crate::midi::sweep_dropped(&mut self.inputs, &mut self.retiring, |port| {
+            port.end_requests(Gate::Released, Ended::Released);
+            disconnect(port, io, graph);
+            notices.extend(port.pending.take_notices());
+        });
         // The node's block that released the notes has run, or a host removed
         // the node itself.
-        if crate::midi::settle(&mut self.retiring, graph, None) {
-            edits.graph = true;
-            edits.routes = true;
-        }
+        let gone = crate::midi::settle(&mut self.retiring, graph, |_| {}, |_| false);
+        edits.graph = left || gone;
+        edits.routes = left || gone;
         edits
     }
 
@@ -1084,7 +1099,13 @@ impl Ports {
             );
             edits.graph = true;
         }
-        for port in &mut self.outputs {
+        // A retiring output lets go of an unplugged device too, so a device that
+        // returns finds no connection of the session but its held ports'.
+        let going = self
+            .retiring_outputs
+            .iter_mut()
+            .map(|going| &mut going.going);
+        for port in self.outputs.iter_mut().chain(going) {
             let held = port.out.as_ref().and_then(UmpOut::device);
             if held.is_some_and(|open| *open.id() == device.id) {
                 port.fold_device_losses();
@@ -1347,23 +1368,17 @@ impl Ports {
     }
 }
 
-impl crate::midi::Sweepable for OutputPort {
+impl Sweepable for OutputPort {
     fn is_held(&self) -> bool {
         self.claim.is_held()
     }
 
-    fn depart(&mut self) -> DeviceGeneration {
-        self.departure.depart()
-    }
-}
-
-impl Leaving for OutputPort {
     fn node(&self) -> NodeKey {
         self.node
     }
 
-    fn drain(&mut self, timing: Option<&crate::midi::OutputTiming>) {
-        OutputPort::drain(self, timing);
+    fn depart(&mut self) -> DeviceGeneration {
+        self.departure.depart()
     }
 }
 
@@ -1603,7 +1618,7 @@ impl Ports {
         let going = self
             .retiring_outputs
             .iter_mut()
-            .map(|going| &mut going.port);
+            .map(|going| &mut going.going);
         for port in self.outputs.iter_mut().chain(going) {
             if port.tap.rate() != graph.prepared().sample_rate() {
                 crate::midi::drain_events(
@@ -1648,20 +1663,17 @@ impl Ports {
         graph: &mut crate::graph::Graph<F>,
         timing: Option<&crate::midi::OutputTiming>,
     ) {
-        self.retiring_outputs.retain_mut(|going| {
-            let holds = going
-                .port
-                .out
-                .as_ref()
-                .and_then(UmpOut::device)
-                .is_some_and(|open| open.id() == device);
-            if holds {
-                going.port.drain(timing);
-                // A host that removed the node itself leaves nothing to take.
-                let _ = graph.remove(going.port.node);
-            }
-            !holds
-        });
+        crate::midi::settle(
+            &mut self.retiring_outputs,
+            graph,
+            |port| port.drain(timing),
+            |port| {
+                port.out
+                    .as_ref()
+                    .and_then(UmpOut::device)
+                    .is_some_and(|open| open.id() == device)
+            },
+        );
     }
 
     /// The output ports whose handles were all dropped, retired: each is sent
@@ -1673,7 +1685,13 @@ impl Ports {
         graph: &mut crate::graph::Graph<F>,
         timing: Option<&crate::midi::OutputTiming>,
     ) -> bool {
-        crate::midi::sweep_dropped(&mut self.outputs, &mut self.retiring_outputs, graph, timing)
+        crate::midi::sweep_dropped(&mut self.outputs, &mut self.retiring_outputs, |_| {});
+        crate::midi::settle(
+            &mut self.retiring_outputs,
+            graph,
+            |port| port.drain(timing),
+            |_| false,
+        )
     }
 }
 

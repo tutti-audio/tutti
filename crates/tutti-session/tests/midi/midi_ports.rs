@@ -452,23 +452,200 @@ fn a_note_off_sent_just_before_the_last_handle_drops_reaches_the_device() {
     );
 }
 
-/// **A device an output still retires on opens again at once**: the open ends
-/// the retiring output, so the device has one connection of the session, and
-/// the new port is live on it.
-#[test]
-fn a_device_opens_again_while_its_dropped_output_is_retiring() {
+/// A session with an output port on `Synth`, and the keys of its node.
+fn retiring_rig() -> (
+    Session,
+    FakeCounters,
+    MidiOutput,
+    tutti_midi_runtime::MidiKeys,
+    DeviceInfo,
+) {
     let (mut s, fake) = session();
     plug(&fake, 10, "Synth", PortDirection::Output);
     let _ = s.update();
     let synth = device(&mut s, "Synth");
-    let first = output(&mut s, &synth);
-    let node = first.node();
-    drop(first);
+    let out = output(&mut s, &synth);
+    let keys = s.midi().input(out.node()).expect("the node takes events");
+    let _ = s.update();
+    let _ = fake.take_sent(EndpointId::from_raw(10));
+    (s, fake, out, keys, synth)
+}
+
+fn is_off(ump: &tutti_ump::Ump, note: u8) -> bool {
+    matches!(ump.note_key_event(), Some(NoteKeyEvent::Off(k)) if k.note().get() == note)
+}
+
+fn is_on(ump: &tutti_ump::Ump, note: u8) -> bool {
+    matches!(ump.note_key_event(), Some(NoteKeyEvent::On(k)) if k.note().get() == note)
+}
+
+/// **A device an output still retires on opens again at once, on one
+/// connection**: the open ends the retiring output with what its tap held sent,
+/// so the device never has two connections of the session, and the new port is
+/// live on it.
+#[test]
+fn a_device_opens_again_while_its_dropped_output_is_retiring() {
+    let (mut s, fake, out, mut keys, synth) = retiring_rig();
+    keys.note_off(Stamp::NextBlock, MidiChannel::FIRST, NoteNumber::of(60))
+        .expect("queued");
+    blocks(&s, 1);
+    let node = out.node();
+    drop(out);
     let _ = s.update();
     assert!(s.graph_ref().contains(node), "it is retiring");
     let again = s.open_midi_output(synth).run().expect("opens at once");
     assert!(!s.graph_ref().contains(node), "the retiring output ended");
     assert_eq!(again.presence(), Presence::Live);
+    assert_eq!(fake.most_output_connections(), 1, "never two connections");
+    assert_eq!(fake.connected_outputs().len(), 1, "one connection now");
+    let sent = fake.take_sent(EndpointId::from_raw(10));
+    assert!(
+        sent.iter().any(|u| is_off(u, 60)),
+        "the rendered note off was drained: {sent:?}"
+    );
+}
+
+/// **Opening a device again loses what the graph had not rendered**: the
+/// retiring output is ended at the open, so a note off queued and not yet
+/// rendered does not reach the device. This is the cost of the open being
+/// at once.
+#[test]
+fn reopening_a_device_loses_what_its_retiring_output_had_not_rendered() {
+    let (mut s, fake, out, mut keys, synth) = retiring_rig();
+    keys.note_off(Stamp::NextBlock, MidiChannel::FIRST, NoteNumber::of(60))
+        .expect("queued");
+    drop(out);
+    let _again = s.open_midi_output(synth).run().expect("opens at once");
+    blocks(&s, 3);
+    let _ = s.update();
+    let sent = fake.take_sent(EndpointId::from_raw(10));
+    assert!(
+        !sent.iter().any(|u| is_off(u, 60)),
+        "the unrendered note off was lost: {sent:?}"
+    );
+}
+
+/// **A note on that a source sends after the drop is ended before the device
+/// closes**: the node passes it in the window, and ends it in the last block it
+/// passes events.
+#[test]
+fn a_note_on_sent_after_the_drop_is_ended_before_the_device_closes() {
+    let (mut s, fake, out, mut keys, _) = retiring_rig();
+    let node = out.node();
+    drop(out);
+    let _ = s.update();
+    keys.note_on(
+        Stamp::NextBlock,
+        MidiChannel::FIRST,
+        NoteNumber::of(64),
+        tutti_ump::NoteVelocity::new(MF),
+    )
+    .expect("queued");
+    blocks(&s, 3);
+    let _ = s.update();
+    assert!(!s.graph_ref().contains(node), "the output retired");
+    let sent = fake.take_sent(EndpointId::from_raw(10));
+    let on = sent.iter().position(|u| is_on(u, 64)).expect("the note on");
+    let off = sent
+        .iter()
+        .position(|u| is_off(u, 64))
+        .expect("the note off");
+    assert!(on < off, "the off follows the on: {sent:?}");
+    assert!(fake.connected_outputs().is_empty(), "the device closed");
+}
+
+/// **An event queued in the update of the drop reaches the device**: the blocks
+/// that render it run before the update that retires the port.
+#[test]
+fn an_event_queued_in_the_update_of_the_drop_reaches_the_device() {
+    let (mut s, fake, out, mut keys, _) = retiring_rig();
+    let node = out.node();
+    keys.note_off(Stamp::NextBlock, MidiChannel::FIRST, NoteNumber::of(61))
+        .expect("queued");
+    drop(out);
+    blocks(&s, 1);
+    let _ = s.update();
+    blocks(&s, 3);
+    let _ = s.update();
+    assert!(!s.graph_ref().contains(node), "the output retired");
+    let sent = fake.take_sent(EndpointId::from_raw(10));
+    assert!(sent.iter().any(|u| is_off(u, 61)), "{sent:?}");
+}
+
+/// **With no block rendered a retiring output stays open, and the session's drop
+/// closes it**: a stopped engine does not advance the generation, so the
+/// connection and the node stay, update after update, until the device is
+/// opened again or the session ends.
+#[test]
+fn a_retiring_output_stays_open_while_no_block_renders_and_closes_with_the_session() {
+    let (mut s, fake, out, _keys, _) = retiring_rig();
+    let node = out.node();
+    drop(out);
+    for _ in 0..3 {
+        let _ = s.update();
+        assert!(s.graph_ref().contains(node), "the node stays");
+        assert_eq!(fake.connected_outputs().len(), 1, "the connection stays");
+    }
+    drop(s);
+    assert!(fake.connected_outputs().is_empty(), "the session closed it");
+}
+
+/// **A retiring output lets go of an unplugged device and is not reopened with
+/// it**: it neither errors nor holds a connection a returning device would
+/// meet, and still ends once the graph has rendered past the drop.
+#[test]
+fn a_retiring_output_lets_go_of_a_device_that_unplugs() {
+    let (mut s, fake, out, _keys, _) = retiring_rig();
+    let node = out.node();
+    drop(out);
+    let _ = s.update();
+    unplug(&fake, 10);
+    let _ = s.update();
+    assert!(fake.connected_outputs().is_empty(), "the connection went");
+    plug(&fake, 10, "Synth", PortDirection::Output);
+    let _ = s.update();
+    assert!(fake.connected_outputs().is_empty(), "it did not reopen");
+    blocks(&s, 3);
+    let _ = s.update();
+    assert!(!s.graph_ref().contains(node), "it ended");
+}
+
+/// **A host that removes a retiring output's node ends the port**: there is no
+/// block left to wait for, and the device closes.
+#[test]
+fn a_host_removed_node_ends_a_retiring_output() {
+    let (mut s, fake, out, _keys, _) = retiring_rig();
+    let node = out.node();
+    drop(out);
+    let _ = s.update();
+    assert_eq!(fake.connected_outputs().len(), 1, "it is retiring");
+    let _ = s.graph().remove(node);
+    let _ = s.update();
+    assert!(fake.connected_outputs().is_empty(), "the device closed");
+}
+
+/// **A retiring output follows the graph across a re-rate**: its tap is
+/// reopened at the new rate, so what it rendered still reaches the device and
+/// the port ends.
+#[test]
+fn a_retiring_output_survives_a_re_rate() {
+    let (mut s, fake, out, mut keys, _) = retiring_rig();
+    let node = out.node();
+    keys.note_off(Stamp::NextBlock, MidiChannel::FIRST, NoteNumber::of(62))
+        .expect("queued");
+    drop(out);
+    let _ = s.update();
+    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    let _ = s.update();
+    // The re-prepare's second half lands on a render, then the commit.
+    blocks(&s, 8);
+    let _ = s.update();
+    blocks(&s, 4);
+    let _ = s.update();
+    assert!(!s.graph_ref().contains(node), "the output ended");
+    assert!(fake.connected_outputs().is_empty(), "the device closed");
+    let sent = fake.take_sent(EndpointId::from_raw(10));
+    assert!(sent.iter().any(|u| is_off(u, 62)), "{sent:?}");
 }
 
 /// **A device is free to open again as soon as its port's last handle is

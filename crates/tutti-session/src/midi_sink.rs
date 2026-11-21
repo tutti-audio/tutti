@@ -9,7 +9,10 @@
 //! handle lives. The last clone's drop retires it: what was queued to its node
 //! before the drop is sent, and the sink ends and its node leaves the graph at
 //! the first [`update`](Session::update) after the graph has rendered past the
-//! drop.
+//! drop. As for an output ([`MidiOutput`](crate::MidiOutput)), the window is two
+//! rendered blocks: an event that does not reach the node within them is not
+//! sent, and a session that renders no block keeps the sink and its `MidiOut`
+//! until it drops; a sink has no release at an open.
 
 use std::sync::Arc;
 
@@ -18,8 +21,8 @@ use tutti_midi_runtime::{DeviceGeneration, MidiOut};
 
 use crate::Session;
 use crate::midi::{
-    Claim, Departure, Held, Leaving, LossReaders, LossWriters, OutputTiming, Retiring, Stamping,
-    Sweepable, UmpOut, drain_events, loss_cells, sweep_dropped,
+    Claim, Departure, Held, LossReaders, LossWriters, OutputTiming, Retiring, Stamping, Sweepable,
+    UmpOut, drain_events, loss_cells, settle, sweep_dropped,
 };
 
 // --- The shared record ---
@@ -167,7 +170,7 @@ impl Sinks {
         timing: Option<&OutputTiming>,
     ) -> bool {
         let mut edited = false;
-        let going = self.retiring.iter_mut().map(|going| &mut going.port);
+        let going = self.retiring.iter_mut().map(|going| &mut going.going);
         for port in self.ports.iter_mut().chain(going) {
             if port.tap.rate() != graph.prepared().sample_rate() {
                 port.drain(timing);
@@ -202,7 +205,13 @@ impl Sinks {
         graph: &mut crate::graph::Graph<F>,
         timing: Option<&OutputTiming>,
     ) -> bool {
-        sweep_dropped(&mut self.ports, &mut self.retiring, graph, timing)
+        sweep_dropped(&mut self.ports, &mut self.retiring, |_| {});
+        settle(
+            &mut self.retiring,
+            graph,
+            |port| port.drain(timing),
+            |_| false,
+        )
     }
 }
 
@@ -211,18 +220,12 @@ impl Sweepable for SinkPort {
         self.claim.is_held()
     }
 
-    fn depart(&mut self) -> DeviceGeneration {
-        self.departure.depart()
-    }
-}
-
-impl Leaving for SinkPort {
     fn node(&self) -> NodeKey {
         self.node
     }
 
-    fn drain(&mut self, timing: Option<&OutputTiming>) {
-        SinkPort::drain(self, timing);
+    fn depart(&mut self) -> DeviceGeneration {
+        self.departure.depart()
     }
 }
 

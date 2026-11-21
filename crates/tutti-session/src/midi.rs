@@ -560,30 +560,25 @@ pub(crate) struct Claim<S> {
     pub(crate) node: NodeKey,
 }
 
-/// What leaves the session's tables for the graph to finish with: an input
-/// node, an output port or a sink whose handles were all dropped.
-pub(crate) trait Leaving {
-    /// The node.
-    fn node(&self) -> NodeKey;
-    /// Reads the tap dry and sends it on; nothing for what has no tap.
-    fn drain(&mut self, timing: Option<&OutputTiming>);
-}
-
 /// A port or sink that retires when its handles are all dropped.
-pub(crate) trait Sweepable: Leaving {
+pub(crate) trait Sweepable {
     /// Whether a handle lives.
     fn is_held(&self) -> bool;
+    /// The output node.
+    fn node(&self) -> NodeKey;
     /// Moves the node's generation on, the drop that the node acknowledges once
     /// the graph has rendered past it; the generation to wait on.
     fn depart(&mut self) -> DeviceGeneration;
 }
 
-/// A port, a sink or an input node that is going: it left the session's tables
-/// and waits for the node's generation to go idle. The port closes only after
-/// the graph rendered past the drop and the tap was drained: it is dropped
-/// when [`settle`] takes the node out, and a device or sink closes with it.
-pub(crate) struct Retiring<P> {
-    pub(crate) port: P,
+/// What an input port, an output port or a sink left behind when its handles
+/// were all dropped, and waits for the node's generation to go idle. The port
+/// closes only after the graph rendered past the drop and the tap was drained:
+/// `going` is dropped when [`settle`] takes the node out, and a device or sink
+/// closes with it.
+pub(crate) struct Retiring<G> {
+    pub(crate) node: NodeKey,
+    pub(crate) going: G,
     pub(crate) generation: DeviceGeneration,
 }
 
@@ -612,14 +607,15 @@ impl Departure {
     }
 }
 
-/// Moves the `ports` whose handles were all dropped to `retiring`, and settles
-/// what is retiring. Whether the graph was edited.
-pub(crate) fn sweep_dropped<P: Sweepable, F: Float>(
+/// Moves the `ports` whose handles were all dropped to `retiring`, each after
+/// `leave` has run on it (what ends at the drop itself), as `G`. Whether any
+/// moved.
+pub(crate) fn sweep_dropped<P: Sweepable, G: From<P>>(
     ports: &mut Vec<P>,
-    retiring: &mut Vec<Retiring<P>>,
-    graph: &mut Graph<F>,
-    timing: Option<&OutputTiming>,
+    retiring: &mut Vec<Retiring<G>>,
+    mut leave: impl FnMut(&mut P),
 ) -> bool {
+    let mut moved = false;
     let mut at = 0;
     while at < ports.len() {
         if ports[at].is_held() {
@@ -627,28 +623,35 @@ pub(crate) fn sweep_dropped<P: Sweepable, F: Float>(
             continue;
         }
         let mut port = ports.remove(at);
-        let generation = port.depart();
-        retiring.push(Retiring { port, generation });
+        leave(&mut port);
+        retiring.push(Retiring {
+            node: port.node(),
+            generation: port.depart(),
+            going: G::from(port),
+        });
+        moved = true;
     }
-    settle(retiring, graph, timing)
+    moved
 }
 
-/// Sends what the taps of the `retiring` hold, and takes out the nodes the graph
-/// has rendered past the drop of (or a host removed itself): their ports close
-/// after a last drain. Whether the graph was edited.
-pub(crate) fn settle<P: Leaving, F: Float>(
-    retiring: &mut Vec<Retiring<P>>,
+/// Takes out the nodes of the `retiring` the graph has rendered past the drop
+/// of (or a host removed itself), after `drain` has read what their taps hold a
+/// last time; the rest are drained and stay. A retiring one `force` names is
+/// taken out at once. A port closes with its node, after its last drain: the
+/// one place the order is written. Whether the graph was edited.
+pub(crate) fn settle<G, F: Float>(
+    retiring: &mut Vec<Retiring<G>>,
     graph: &mut Graph<F>,
-    timing: Option<&OutputTiming>,
+    mut drain: impl FnMut(&mut G),
+    mut force: impl FnMut(&G) -> bool,
 ) -> bool {
     let mut edited = false;
     retiring.retain_mut(|going| {
-        let node = going.port.node();
-        let done = going.generation.is_idle() || !graph.contains(node);
-        going.port.drain(timing);
+        let done = going.generation.is_idle() || !graph.contains(going.node) || force(&going.going);
+        drain(&mut going.going);
         if done {
             // A host that removed the node itself leaves nothing to take.
-            let _ = graph.remove(node);
+            let _ = graph.remove(going.node);
             edited = true;
         }
         !done
@@ -1246,8 +1249,13 @@ impl<F: Float> Midi<'_, F> {
     /// the graph has rendered past the drop, so what was queued before the drop
     /// is sent; then its node is taken out and its device or sink closes. A
     /// device an output of the session still holds is the exception: opening it
-    /// again ends that output at once
-    /// (what the graph has not rendered is lost). The drain is timed by the
+    /// again ends that output at once (what the graph has not rendered is lost).
+    /// A sink has no such release.
+    ///
+    /// **A session that renders no block keeps what it retires**: the node
+    /// stays, with the device connection or the sink's `Arc<dyn MidiOut>`,
+    /// until blocks render, the device is opened again, or the session drops.
+    /// The drain is timed by the
     /// `now` of the last `update`, so it is placed as that update's drain would
     /// have been; before any `update` there is no output clock and it is sent at
     /// once.
