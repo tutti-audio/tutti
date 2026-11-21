@@ -56,7 +56,7 @@
 //! replaced by the shifted `s` of the chunk before (delayed by the chunk and the vocoder's
 //! latency, [`shimmer_delay`](FdnBank::shimmer_delay)), and the chunk's `s` goes to the vocoder
 //! at the chunk's end. The model's `Fdn` stage carries that delay as its `loop_delay` while the send
-//! is above zero, so the decay queries and the tail read it. A layout that does not shimmer
+//! is above zero or its ramp has not reached zero, so the decay queries and the tail read it. A layout that does not shimmer
 //! runs the loop above unchanged.
 //!
 //! **Format.** The state and the views are the bank's float `F`. The loop gains and the
@@ -420,11 +420,6 @@ impl<F: FftFloat + Lerp> FdnBank<F> {
         if self.designed != Some(*controls) {
             self.layout
                 .design_into(controls, self.rate, &mut self.network);
-            if let Some(shimmer) = &self.shimmer
-                && controls.shimmer_send > Feedback::NONE
-            {
-                set_loop_delay(&mut self.network, shimmer.delay());
-            }
             self.designed = Some(*controls);
         }
     }
@@ -441,6 +436,17 @@ impl<F: FftFloat + Lerp> FdnBank<F> {
     /// the ceiling's worst design already has.
     pub fn tail_of(&mut self, ramps: &FdnRamps<F>, controls: &FdnControls) -> Tail {
         self.design(controls);
+        // The shifted path's delay is in the loop while the send is above zero, and until its
+        // ramp has reached zero: the shifted share still circulating is read at the ramp's value.
+        let delay = match &self.shimmer {
+            Some(shimmer)
+                if controls.shimmer_send > Feedback::NONE || ramps.shimmer.now() > F::ZERO =>
+            {
+                shimmer.delay()
+            }
+            _ => Samples::ZERO,
+        };
+        set_loop_delay(&mut self.network, delay);
         let DecayTime::Finite(t) = self.network.tail(TAIL_FLOOR) else {
             return tail_of(DecayTime::Unbounded, self.rate);
         };

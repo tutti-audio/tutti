@@ -1016,3 +1016,64 @@ fn the_tail_of_a_shimmer_holds_the_shifters_delay_and_covers_the_ring_out() {
             .all(|v| v.is_finite() && v.abs() <= floor)
     );
 }
+
+/// While the send ramps down to 0 (20 ms of chunks), the shifter's delay stays in the model's
+/// loop: the tail reported at each block of the ramp is the one the send held, and only once
+/// the ramp has reached 0 is it the plain network's. At every one of those blocks the tail
+/// covers the measured ring-out of the bank from that block on: the last frame within 60 dB of
+/// the impulse response's peak is inside it.
+#[test]
+fn the_tail_keeps_the_shifters_delay_until_the_send_ramp_reaches_zero() {
+    let l = shimmering(8);
+    let c = |send: f64| {
+        still(|c| {
+            c.decay = [Seconds::new(1.0); 3];
+            c.shimmer_pitch = Cents::new(1200.0);
+            c.shimmer_send = Feedback::new_clamped(send);
+        })
+    };
+    let (mut bank, mut ramps) = at_rest(&l, RATE, &c(0.99));
+    let mut x = impulse(4_000);
+    x.fill(0.0);
+    x[0] = 1.0;
+    let [left, right] = run(&mut bank, &mut ramps, &x, 64);
+    let peak = left
+        .iter()
+        .chain(&right)
+        .fold(0.0f32, |p, v| p.max(v.abs()));
+    let floor = peak * 1e-3;
+    let held = bank.tail_of(&ramps, &c(0.99));
+    let (mut probe, probe_ramps) = at_rest(&l, RATE, &c(0.0));
+    let plain = probe.tail_of(&probe_ramps, &c(0.0));
+    assert_ne!(held, plain, "the delay is in the tail while the send is on");
+    bank.retarget(&mut ramps, &c(0.0));
+    let silence = vec![0.0f32; 64];
+    let mut ramping = 0;
+    for block in 0..40 {
+        let now = bank.tail_of(&ramps, &c(0.0));
+        let at_zero = ramps.shimmer.now() == 0.0;
+        assert_eq!(
+            now,
+            if at_zero { plain } else { held },
+            "block {block}: the delay is dropped when the ramp has reached 0, not before"
+        );
+        ramping += usize::from(!at_zero);
+        if !at_zero {
+            let (mut twin, mut twin_ramps) = (bank.clone(), ramps.clone());
+            let Tail::Finite(t) = now else {
+                panic!("finite")
+            };
+            let frames = t.get() + 48_000;
+            let [l2, r2] = run(&mut twin, &mut twin_ramps, &vec![0.0; frames], 64);
+            let last = (0..frames)
+                .rev()
+                .find(|&i| l2[i].abs() > floor || r2[i].abs() > floor);
+            assert!(
+                last.is_none_or(|i| i < t.get()),
+                "block {block}: rings to {last:?}, tail {t:?}"
+            );
+        }
+        run(&mut bank, &mut ramps, &silence, 64);
+    }
+    assert!(ramping >= 10, "the ramp spans blocks: {ramping}");
+}
