@@ -64,11 +64,22 @@ pub enum Ended {
     /// `Timeouts::shutdown`, so this status is for a supervisor that runs the
     /// server itself.
     PluginLeaked,
+    /// Every plugin was destroyed, but tasks of the server (the render lane, the
+    /// load's beat) did not stop within their patience and were left running
+    /// until the process ends: how many. Only a supervisor that runs the server
+    /// itself reads it, as [`EXIT_TASKS_DETACHED`].
+    TasksDetached(u64),
 }
 
-/// The exit status of a server whose session ended with [`Ended::PluginLeaked`]
-/// (see there for who can read it).
+/// The exit status of a server whose session ended with [`Ended::PluginLeaked`].
+/// No host reads it: it is for a supervisor that runs the server itself, or a
+/// person reading the status (see [`Ended::PluginLeaked`]).
 pub const EXIT_PLUGIN_LEAKED: u8 = 3;
+
+/// The exit status of a server whose session ended with [`Ended::TasksDetached`].
+/// No host reads it, as for [`EXIT_PLUGIN_LEAKED`]: the host's own detached
+/// tasks are its count, `PluginControls::detached_tasks`.
+pub const EXIT_TASKS_DETACHED: u8 = 4;
 
 /// The subprocess-side server: one hosted plugin, one host connection.
 ///
@@ -185,13 +196,13 @@ impl PluginServer {
         // The plugin and the session go with the server: what they leak, they
         // leak here.
         drop(self);
-        served.map(|()| {
-            if crate::leak::happened() {
-                Ended::PluginLeaked
-            } else {
-                Ended::Clean
-            }
-        })
+        served.map(
+            |()| match (crate::leak::happened(), crate::leak::detached()) {
+                (true, _) => Ended::PluginLeaked,
+                (false, 0) => Ended::Clean,
+                (false, detached) => Ended::TasksDetached(detached),
+            },
+        )
     }
 
     /// The phases of [`run`](Self::run), up to the plugin's release.
@@ -472,6 +483,7 @@ impl Drop for Beat {
             && let Err(task) = join_within(task, BEAT_STOP_PATIENCE)
         {
             tracing::warn!("plugin-server: the plugin-beat task did not stop; leaving it");
+            crate::leak::note_detached();
             task.detach();
         }
     }

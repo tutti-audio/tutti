@@ -9,7 +9,8 @@
 //! Logs go to standard error (which the host passes on), at `info` unless
 //! `RUST_LOG` says otherwise. The exit status is 0 for a session that ended with
 //! every plugin destroyed, [`EXIT_PLUGIN_LEAKED`] for one that had to leak a
-//! plugin, and 1 for an error.
+//! plugin, [`EXIT_TASKS_DETACHED`] for one that left a task running, and 1 for an
+//! error.
 #![cfg_attr(
     test,
     allow(
@@ -22,7 +23,7 @@ use std::env;
 use std::process::ExitCode;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::LevelFilter;
-use tutti_plugin_server::{EXIT_PLUGIN_LEAKED, Ended, PluginServer};
+use tutti_plugin_server::{EXIT_PLUGIN_LEAKED, EXIT_TASKS_DETACHED, Ended, PluginServer};
 use tutti_plugin_types::IpcResult;
 
 fn main() -> ExitCode {
@@ -38,6 +39,7 @@ fn main() -> ExitCode {
     match serve() {
         Ok(Ended::Clean) => ExitCode::SUCCESS,
         Ok(Ended::PluginLeaked) => ExitCode::from(EXIT_PLUGIN_LEAKED),
+        Ok(Ended::TasksDetached(_)) => ExitCode::from(EXIT_TASKS_DETACHED),
         Err(error) => {
             eprintln!("plugin-server: {error}");
             ExitCode::FAILURE
