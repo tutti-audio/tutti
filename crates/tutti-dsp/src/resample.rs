@@ -1,13 +1,20 @@
 //! Sample-rate conversion: a fixed-input FFT block resampler.
 
 mod fft;
+mod fill_controller;
 mod sinc;
 mod streaming;
+mod variable;
 
 use fft::FftResampler;
+pub use fill_controller::FillController;
 pub use sinc::WindowedSinc;
 pub use streaming::{
     ChunkSize, StreamingResampler, StreamingResamplerConfig, needs_resampling, resampled_frames,
+};
+pub use variable::{
+    VARIABLE_LATENCY, VARIABLE_MAX_RATE, VARIABLE_MIN_RATE, VARIABLE_PASSBAND_EDGE,
+    VARIABLE_PASSBAND_RIPPLE, VARIABLE_STOPBAND_ATTENUATION, VariableResampler,
 };
 
 /// Why a [`StreamingResampler`] could not be built or fed.

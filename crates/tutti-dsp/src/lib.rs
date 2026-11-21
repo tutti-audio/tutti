@@ -106,7 +106,9 @@
 //!   shifts the pitch of any width on a [`ColaGeometry`], one phase solution for all channels,
 //!   pulled by its output (`input_needed`, then `process`) under [`PhaseVocoderControls`].
 //! - **Resampling** (`resample/`): [`WindowedSinc`] and [`StreamingResampler`] (made from a
-//!   [`StreamingResamplerConfig`], sized by a [`ChunkSize`], failing with a [`ResampleError`]).
+//!   [`StreamingResamplerConfig`], sized by a [`ChunkSize`], failing with a [`ResampleError`]);
+//!   [`VariableResampler`], a windowed-sinc reader whose ratio is set per call, and the
+//!   [`FillController`] that steers it from a buffer's fill.
 //! - **Dither** (`dither/`): [`DitherNoise`] ([`DitherShape`]) and [`DitherSink`], the
 //!   `tutti_buffers::Sink` adapter that dithers on its way to a fixed-point format, with
 //!   [`NoiseShaping`] as its optional error feedback.
@@ -312,7 +314,9 @@ pub use pan::{PanLaw, pan_gains};
 pub use polarity::{ChannelOutOfRange, Polarity};
 pub use ramp::{Lerp, Ramp, Steps};
 pub use resample::{
-    ChunkSize, ResampleError, StreamingResampler, StreamingResamplerConfig, WindowedSinc,
+    ChunkSize, FillController, ResampleError, StreamingResampler, StreamingResamplerConfig,
+    VARIABLE_LATENCY, VARIABLE_MAX_RATE, VARIABLE_MIN_RATE, VARIABLE_PASSBAND_EDGE,
+    VARIABLE_PASSBAND_RIPPLE, VARIABLE_STOPBAND_ATTENUATION, VariableResampler, WindowedSinc,
     needs_resampling, resampled_frames,
 };
 pub use reverb::fdn::bank::{FdnBank, FdnRamps};

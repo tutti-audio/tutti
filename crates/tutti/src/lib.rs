@@ -305,6 +305,11 @@ pub mod nodes {
         Envelope, EnvelopeCurve, EnvelopeDesign, EnvelopeLeg, EnvelopePace, EnvelopeStage,
         EnvelopeStages, EnvelopeStep,
     };
+    pub use tutti_dsp::{
+        FillController, VARIABLE_LATENCY, VARIABLE_MAX_RATE, VARIABLE_MIN_RATE,
+        VARIABLE_PASSBAND_EDGE, VARIABLE_PASSBAND_RIPPLE, VARIABLE_STOPBAND_ATTENUATION,
+        VariableResampler,
+    };
     pub use tutti_dsp::{Lfo, LfoWave};
     pub use tutti_dsp::{
         Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,
