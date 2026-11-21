@@ -532,6 +532,32 @@ fn a_watch_that_panics_reports_its_failure() {
     ));
 }
 
+/// A watch whose sequencer will not open says so: `watch_failure` carries the
+/// OS's refusal, not an empty list with no word. The process has no descriptor
+/// left for the sequencer's own.
+#[test]
+fn a_watch_whose_sequencer_will_not_open_reports_its_failure() {
+    let mut hogged = Vec::new();
+    while let Ok(file) = std::fs::File::open("/dev/null") {
+        hogged.push(file);
+    }
+    // The watch's stop pair takes two; the sequencer's open finds none.
+    hogged.truncate(hogged.len().saturating_sub(2));
+    let devices = Watched::with_backend(Box::new(Panicky {
+        armed: std::sync::Arc::default(),
+        executor: tutti_platform::Executor::new(),
+    }));
+    drop(hogged);
+    assert!(
+        matches!(
+            devices.watch_failure(),
+            Some(crate::WatchFailure::Failed(_))
+        ),
+        "{:?}",
+        devices.watch_failure()
+    );
+}
+
 /// Asking the backend what a device can carry enumerates, and must not open a
 /// client (each would be announced to every watch).
 #[test]
