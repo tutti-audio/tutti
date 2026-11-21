@@ -5,7 +5,6 @@ use tutti_buffers::Float;
 use tutti_platform::MainThreadMarker;
 
 use crate::graph::Graph;
-use crate::pool::Defer;
 
 /// No plugin policy is set.
 #[derive(Debug, Default)]
@@ -22,11 +21,6 @@ pub(crate) struct EarlyWork;
 impl PluginPart {
     pub(crate) fn new(_: &PluginOptions, _: &tutti_platform::Executor) -> (Self, EarlyWork) {
         (Self, EarlyWork)
-    }
-
-    /// No discard is deferred.
-    pub(crate) fn main_deferral(&self) -> Option<Defer> {
-        None
     }
 
     /// No work is handed over.

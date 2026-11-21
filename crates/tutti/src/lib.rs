@@ -67,7 +67,7 @@
 //! | `tutti::types` | the unit vocabulary and edge traits not at the root: `Moment`, `Note`, `Param`, `Tail`, `Latency`, `Source`, `Sink`, `Pull`, layouts, channel folds | always |
 //! | `tutti::tempo` | the project's tempo map and the pieces it is built from | always |
 //! | `tutti::graph` | what a node author names: `Node`, `Shape`, `Io`, `Prepare`, `Env`, `ForkByClone`, `Unforkable`, `declare_params!` | always |
-//! | `tutti::session` | the session's host plumbing: phases, recovery, main-thread plugin sessions, the pool, handles and errors a host reads | `session` |
+//! | `tutti::session` | the session's host plumbing: phases, recovery, main-thread plugin sessions, handles and errors a host reads | `session` |
 //! | `tutti::midi` | the common MIDI path: files, messages, keys, routes, devices, profiles | `midi` |
 //! | `tutti::codec` | audio file settings: `Spec`, `FlacLevel`, `IntDepth` and the decode errors | `codec` |
 //! | `tutti::sampler` | sample playback voices and loops | `sampler` |
@@ -438,7 +438,7 @@ pub mod graph {
 }
 
 /// The session's host plumbing (`tutti-session`): what a host that runs the
-/// phases itself, a pool or a plugin editor names, rather than an application
+/// phases itself or a plugin editor names, rather than an application
 /// that calls `Session::update`. The application's own names are at the root.
 #[cfg(feature = "session")]
 pub mod session {
@@ -469,8 +469,24 @@ pub mod session {
         ForkError, InletCounts, Instrument, MeterId, ParamIn, PrerollTable, RootError, RootId,
     };
     pub use tutti_modulation::PeriodPoint;
+    pub use tutti_session::Apply;
     #[cfg(feature = "device")]
     pub use tutti_session::ClockError;
+    #[cfg(any(
+        feature = "plugin",
+        feature = "soundfont",
+        all(
+            feature = "sampler",
+            any(
+                feature = "decode-wav",
+                feature = "decode-flac",
+                feature = "decode-mp3",
+                feature = "decode-ogg"
+            )
+        )
+    ))]
+    pub use tutti_session::LoadError;
+    pub use tutti_session::WorkerError;
     pub use tutti_session::{
         BlockConfig, Bus, BusSink, Channel, Committed, Connection, Crossfade, CrossfadeId,
         CrossfadeRefused, DeclarationError, Event, EventEdge, EventTapPort, Fanin, Feeder, Graph,
@@ -484,15 +500,6 @@ pub mod session {
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
         Timeline,
-    };
-    // The pool.
-    pub use tutti_session::PoolLoad;
-    pub use tutti_session::WorkerError;
-    pub use tutti_session::{
-        Apply, Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Owned, PoolConfig,
-        PoolEntry, PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome,
-        PoolReport, PoolSet, PoolState, Retention, RetryError, Sharing, WhenLoadedError,
-        stranded_loads,
     };
 
     #[cfg(feature = "export")]

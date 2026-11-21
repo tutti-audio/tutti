@@ -37,7 +37,7 @@ impl fmt::Display for ResourceId {
 }
 
 /// The session's source of [`ResourceId`]s: one counter, from 1. A clone
-/// draws from the same counter, so a pool entry that mints when its load lands
+/// draws from the same counter, so a load that mints when it lands
 /// (off the session's own call) takes ids no other token has.
 #[derive(Clone, Debug)]
 pub(crate) struct ResourceIds {
@@ -129,8 +129,8 @@ pub enum Presence<C> {
     },
     /// Gone; the cause says whether it can return.
     Lost(C),
-    /// Its pool entry was released, or its plugin was dropped unadded, removed
-    /// with its node or swapped out: final, this handle never returns. It has no cause, since nothing about it can
+    /// Its plugin was dropped unadded, removed with its node or swapped out, or
+    /// every handle of its MIDI port was dropped: final, this handle never returns. It has no cause, since nothing about it can
     /// change.
     Closed,
 }
@@ -193,8 +193,8 @@ pub enum PeerError<E> {
     /// The peer said it does not support the request.
     #[error("the peer does not support the request")]
     Unsupported,
-    /// The peer was released before the request landed: its pool entry was
-    /// released, or its plugin was removed or swapped out (its handle reads
+    /// The peer was released before the request landed: its plugin was
+    /// removed or swapped out (its handle reads
     /// [`Presence::Closed`]), or every handle of its MIDI port was dropped.
     #[error("the peer was released")]
     Released,

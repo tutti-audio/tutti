@@ -1140,6 +1140,7 @@ pub struct Midi<'a, F: Float = f32> {
     pub(crate) graph: &'a mut Graph<F>,
     pub(crate) state: &'a mut MidiState,
     pub(crate) nodes: Option<&'a MidiNodes>,
+    #[cfg(feature = "midi-hardware")]
     pub(crate) jobs: &'a mut crate::jobs::Jobs,
     /// The transport's settings (the tempo map a follower overlays).
     pub(crate) settings: &'a tutti_timeline::TransportSettings,
@@ -1148,22 +1149,6 @@ pub struct Midi<'a, F: Float = f32> {
     /// The OS MIDI layer, when the builder opened it.
     #[cfg(feature = "midi-hardware")]
     pub(crate) io: Option<&'a mut tutti_midi_hardware::MidiSession>,
-}
-
-impl<'a, F: Float> Midi<'a, F> {
-    /// The same view, borrowed for a shorter time.
-    pub(crate) fn reborrow(&mut self) -> Midi<'_, F> {
-        Midi {
-            graph: &mut *self.graph,
-            state: &mut *self.state,
-            nodes: self.nodes,
-            jobs: &mut *self.jobs,
-            settings: self.settings,
-            meter: self.meter.clone(),
-            #[cfg(feature = "midi-hardware")]
-            io: self.io.as_deref_mut(),
-        }
-    }
 }
 
 impl<F: Float> Midi<'_, F> {

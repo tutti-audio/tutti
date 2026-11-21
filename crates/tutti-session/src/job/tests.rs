@@ -145,23 +145,6 @@ fn wait_ends_when_the_sessions_end_of_the_job_is_gone_unanswered() {
 }
 
 #[test]
-fn a_job_waiting_for_the_main_thread_is_not_waited_for_off_it() {
-    // A test thread is not the process's main thread.
-    assert!(tutti_platform::MainThreadMarker::new().is_none());
-    let mut s = session(Session::builder());
-    let (job, ticket) = s.jobs.new_job::<Echo>();
-    ticket.set_main_wait(true);
-    assert_eq!(job.status(), JobStatus::WaitingForMainThread);
-    assert_eq!(
-        job.wait(&mut s),
-        Err(EchoError::Wait(WaitError::NeedsMainThread))
-    );
-    // The job is still the caller's: it lands, and a wait then returns it.
-    ticket.land(Ok(5));
-    assert_eq!(job.wait(&mut s), Ok(5));
-}
-
-#[test]
 fn a_job_waited_for_while_another_lands_still_returns_the_other_later() {
     let (mut s, executor) = polled();
     let (a, b) = (echo(&mut s, 1), echo(&mut s, 2));
