@@ -3,7 +3,7 @@
 //! the network's own with that delay in every line's loop.
 
 use tutti_buffers::Planes;
-use tutti_dsp::{FdnBank, FdnControls, FdnLayout, MaxDecay, Network, Stage, System};
+use tutti_dsp::{FdnBank, FdnControls, FdnLayout, MaxDecay, Network, NetworkStage, System};
 use tutti_graph::contract::{assert_declared_tail, drive_input, prepared};
 use tutti_graph::{Env, Node, ParamNode, PlayClock, TransportChanges, TransportPosition};
 use tutti_nodes::{ShimmerConfig, ShimmerNode};
@@ -55,7 +55,7 @@ fn the_reported_tail_is_the_networks_with_the_shifters_delay_and_honest() {
         let mut network = Box::new(Network::new(SR));
         layout.design_into(c, SR, &mut network);
         for stage in network.stages.as_mut_slice() {
-            if let Stage::Fdn(f) = stage {
+            if let NetworkStage::Fdn(f) = stage {
                 f.loop_delay = SampleSpan::from_samples(loop_delay);
             }
         }

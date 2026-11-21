@@ -40,7 +40,7 @@ use super::design::{MIN_BANDWIDTH, OUTPUT_GAIN, OUTPUT_TAPS, PlateControls, Poin
 use crate::delay::DelayRing;
 use crate::design::along;
 use crate::onepole::{cutoff_complement, cutoff_pole, ring_frames};
-use crate::reverb::network::{Absorption, Network, Stage};
+use crate::reverb::network::{Absorption, Network, NetworkStage};
 use crate::reverb::{CHUNK, ramp, tail_of};
 use crate::{DecayTime, Lerp, Ramp, Steps, System, TAIL_FLOOR};
 
@@ -544,7 +544,7 @@ fn shape_of(network: &Network) -> Shape {
     let frames = SampleSpan::to_samples_floor;
     let mut input = [Samples::new(1); 4];
     for (slot, stage) in input.iter_mut().zip(network.stages.iter()) {
-        if let Stage::AllPass(a) = stage {
+        if let NetworkStage::AllPass(a) = stage {
             *slot = frames(a[0].delay);
         }
     }
@@ -555,7 +555,11 @@ fn shape_of(network: &Network) -> Shape {
         excursion: Samples::ZERO,
         pre: network.pre_delay,
     };
-    if let Some(Stage::Fdn(f)) = network.stages.iter().find(|s| matches!(s, Stage::Fdn(_))) {
+    if let Some(NetworkStage::Fdn(f)) = network
+        .stages
+        .iter()
+        .find(|s| matches!(s, NetworkStage::Fdn(_)))
+    {
         for (h, lines) in shape.halves.iter_mut().zip(f.lines.chunks(2)) {
             let (Some(a), Some(b)) = (lines[0].diffuser, lines[1].diffuser) else {
                 continue;
@@ -576,13 +580,17 @@ fn shape_of(network: &Network) -> Shape {
 /// The coefficient point the design in `network` asks for, `None` for a network that is not a
 /// plate's. The bandwidth is the caller's.
 fn target_of<F: Float>(network: &Network) -> Option<Coefficients<F>> {
-    let Stage::Fdn(f) = network.stages.iter().find(|s| matches!(s, Stage::Fdn(_)))? else {
+    let NetworkStage::Fdn(f) = network
+        .stages
+        .iter()
+        .find(|s| matches!(s, NetworkStage::Fdn(_)))?
+    else {
         return None;
     };
     let (a, b) = (f.lines.first()?, f.lines.get(1)?);
     let mut input = [F::ZERO; 4];
     for (slot, stage) in input.iter_mut().zip(network.stages.iter()) {
-        if let Stage::AllPass(d) = stage {
+        if let NetworkStage::AllPass(d) = stage {
             *slot = F::from_unit(d[0].gain);
         }
     }

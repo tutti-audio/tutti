@@ -18,7 +18,7 @@
 //! wave or names the file [`open_stream`](Session::open_stream) opens.
 
 use tutti_platform::Asset;
-use tutti_sampler::{AdoptError, OpenError, Stream, StreamReader, StreamStart};
+use tutti_sampler::{AdoptError, OpenError, StreamHandle, StreamReader, StreamStart};
 
 use crate::apply::{Cut, Sealed};
 use crate::{AppKey, Clock, Session, SessionFloat};
@@ -138,7 +138,7 @@ pub struct OpenedStream<F: SessionFloat> {
 }
 
 impl<F: SessionFloat> Sealed<F> for OpenedStream<F> {
-    type Applied = (Stream<F>, StreamReader<F>);
+    type Applied = (StreamHandle<F>, StreamReader<F>);
     type Error = OpenStreamError<F>;
 
     fn cut(&self) -> &Cut {
@@ -152,7 +152,7 @@ impl<F: SessionFloat> Sealed<F> for OpenedStream<F> {
     fn apply_to<K: AppKey, C: Clock<Float = F>>(
         self,
         session: &mut Session<K, C>,
-    ) -> Result<(Stream<F>, StreamReader<F>), OpenStreamError<F>> {
+    ) -> Result<(StreamHandle<F>, StreamReader<F>), OpenStreamError<F>> {
         let Self { cut, opened } = self;
         let streamer = session
             .sampler

@@ -3,7 +3,9 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use crate::id::{DeviceId, DeviceInfo, EndpointId, Identity, PortDirection, WinMmDevice};
+use crate::id::{
+    DeviceInfo, EndpointId, MidiDeviceId, OsEndpointIdentity, PortDirection, WinMmDevice,
+};
 
 /// One device as a backend sees it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -11,7 +13,7 @@ pub struct OsDevice {
     /// The OS's handle, the key a later [`OsChange::Gone`] names it by.
     pub handle: EndpointId,
     /// What the OS knows it by. Fixed for as long as the handle is present.
-    pub identity: Identity,
+    pub identity: OsEndpointIdentity,
     /// The name to show.
     pub name: String,
     /// Which way MIDI flows.
@@ -131,8 +133,8 @@ struct Entry {
 /// per presence: its id is listed until its handle is [`Gone`](OsChange::Gone).
 #[derive(Debug, Default)]
 pub struct DeviceTable {
-    devices: BTreeMap<DeviceId, Entry>,
-    by_handle: HashMap<EndpointId, DeviceId>,
+    devices: BTreeMap<MidiDeviceId, Entry>,
+    by_handle: HashMap<EndpointId, MidiDeviceId>,
 }
 
 impl DeviceTable {
@@ -163,7 +165,7 @@ impl DeviceTable {
 
         // The first ordinal no listed device holds.
         let id = (0..)
-            .map(|ordinal| DeviceId::new(device.identity.clone(), ordinal))
+            .map(|ordinal| MidiDeviceId::new(device.identity.clone(), ordinal))
             .find(|id| !self.devices.contains_key(id))?;
         let info = DeviceInfo {
             id: id.clone(),
@@ -194,14 +196,14 @@ impl DeviceTable {
 
     /// The device with this id, if present.
     #[must_use]
-    pub fn get(&self, id: &DeviceId) -> Option<&DeviceInfo> {
+    pub fn get(&self, id: &MidiDeviceId) -> Option<&DeviceInfo> {
         self.devices.get(id).map(|e| &e.info)
     }
 
     /// What `saved`, a device listed in an earlier run, names now.
     ///
     /// An ordinal tells alike devices apart within one run only (see
-    /// [`DeviceId`]), so it is trusted only as 0, and only where nothing else
+    /// [`MidiDeviceId`]), so it is trusted only as 0, and only where nothing else
     /// answers to the identity.
     ///
     /// - A CoreMIDI identity names one endpoint: `Exact` when it is present.
@@ -224,15 +226,15 @@ impl DeviceTable {
         let identity = saved.id.identity();
         let alike: Vec<&DeviceInfo> = self
             .devices
-            .range(DeviceId::new(identity.clone(), 0)..)
+            .range(MidiDeviceId::new(identity.clone(), 0)..)
             .take_while(|(id, _)| id.identity() == identity)
             .map(|(_, entry)| &entry.info)
             .collect();
         let owned = |infos: &[&DeviceInfo]| infos.iter().copied().cloned().collect::<Vec<_>>();
         match (identity, alike.as_slice()) {
             (_, []) => Resolved::Missing,
-            (Identity::CoreMidi(_), [only]) => Resolved::Exact((*only).clone()),
-            (Identity::Product(_), _) => {
+            (OsEndpointIdentity::CoreMidi(_), [only]) => Resolved::Exact((*only).clone()),
+            (OsEndpointIdentity::Product(_), _) => {
                 let port: Vec<&DeviceInfo> = alike
                     .iter()
                     .copied()
@@ -244,16 +246,16 @@ impl DeviceTable {
                 }
             }
             (
-                Identity::WinMmInput(WinMmDevice::Interface(_))
-                | Identity::WinMmOutput(WinMmDevice::Interface(_)),
+                OsEndpointIdentity::WinMmInput(WinMmDevice::Interface(_))
+                | OsEndpointIdentity::WinMmOutput(WinMmDevice::Interface(_)),
                 [only],
             ) if saved.id.ordinal() == 0 && serves(only.direction, saved.direction) => {
                 Resolved::Exact((*only).clone())
             }
             (
-                Identity::Alsa { .. }
-                | Identity::WinMmInput(WinMmDevice::Named { .. })
-                | Identity::WinMmOutput(WinMmDevice::Named { .. }),
+                OsEndpointIdentity::Alsa { .. }
+                | OsEndpointIdentity::WinMmInput(WinMmDevice::Named { .. })
+                | OsEndpointIdentity::WinMmOutput(WinMmDevice::Named { .. }),
                 [only],
             ) if saved.id.ordinal() == 0 && serves(only.direction, saved.direction) => {
                 Resolved::SameName((*only).clone())
@@ -264,7 +266,7 @@ impl DeviceTable {
 
     /// The OS handle to open `id` by, if it is present.
     #[must_use]
-    pub fn handle(&self, id: &DeviceId) -> Option<EndpointId> {
+    pub fn handle(&self, id: &MidiDeviceId) -> Option<EndpointId> {
         self.devices.get(id).map(|e| e.handle)
     }
 }

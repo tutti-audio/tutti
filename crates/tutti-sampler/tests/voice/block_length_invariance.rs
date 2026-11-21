@@ -55,8 +55,8 @@ use tutti_buffers::Wave;
 use tutti_graph::contract::{self, Direct};
 use tutti_graph::{Env, Node, TransportChanges, TransportPosition};
 use tutti_sampler::{
-    Direction, DiskStreamer, DiskStreamerConfig, Manual, MemorySource, Playback, SlotId,
-    StepOutcome, Stream, Voice, VoiceNode, VoicePool, VoiceSource,
+    DiskStreamer, DiskStreamerConfig, Manual, MemorySource, PlayDirection, Playback, SlotId,
+    StepOutcome, StreamHandle, Voice, VoiceNode, VoicePool, VoiceSource,
 };
 use tutti_units::{Beat, Bpm, Cents, Frame, PlaybackRate, SampleRate, Samples, StretchFactor};
 
@@ -251,7 +251,7 @@ fn playbacks() -> Vec<(&'static str, Playback)> {
         (
             "reverse",
             Playback {
-                direction: Direction::Reverse,
+                direction: PlayDirection::Reverse,
                 ..Default::default()
             },
         ),
@@ -329,7 +329,7 @@ fn disk_voice(
     path: &Path,
 ) -> (
     DiskStreamer<Manual<f32>, f32>,
-    Stream<f32>,
+    StreamHandle<f32>,
     tutti_sampler::DiskVoice<f32>,
 ) {
     let mut s = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())

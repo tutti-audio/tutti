@@ -829,13 +829,13 @@ fn midi_goes_only_to_note_ports_that_declare_the_midi_dialect() {
     let session = ProbeSession::begin(LAYOUT_SYMMETRIC_STEREO, RENDER_INERT);
     assert_eq!(
         session.load().midi_capable_ports(main_thread()),
-        [true, true]
+        Ok(vec![true, true])
     );
 
     session.controls.set_port0_dialects(CLAP_NOTE_DIALECT_CLAP);
     assert_eq!(
         session.load().midi_capable_ports(main_thread()),
-        [false, true],
+        Ok(vec![false, true]),
         "port 0 declared no MIDI dialect"
     );
 }

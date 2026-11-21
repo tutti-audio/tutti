@@ -36,6 +36,7 @@ const MODE_PARAM_RAMP: f64 = 1.0 / 10.0;
 /// `ProbeMisbehaviour` codes (`probeids.h`).
 const SET_ACTIVE_FAILS: &str = "1";
 const PROCESS_FAILS: &str = "4";
+const STATE_FAILS: &str = "6";
 const REFUSES_HIGH_RATES: &str = "14";
 const REFUSES_OFFLINE: &str = "15";
 
@@ -73,6 +74,12 @@ impl Probe {
             _lock: lock,
             previous,
         }
+    }
+
+    /// The misbehaviour the next load sees, from here on.
+    fn misbehave(&self, code: &str) {
+        // SAFETY: as in `enter`: `PROBE_LOCK` is held for the life of `self`.
+        unsafe { std::env::set_var("TUTTI_PROBE_MISBEHAVIOUR", code) };
     }
 
     fn load(&self) -> Vst3Loaded {
@@ -574,11 +581,40 @@ fn a_rebuild_keeps_the_state() {
     let rebuilt = loaded
         .rebuild(main_thread())
         .expect("the probe loads again");
+    assert!(rebuilt.restored.is_ok(), "{:?}", rebuilt.restored);
+    let rebuilt = rebuilt.plugin;
     assert_eq!(
         Control::parameter(&rebuilt, main_thread(), id(PARAM_UI_STATE)).map(Normalized::get),
         Some(0.625)
     );
     assert!(!rebuilt.is_active());
+}
+
+/// **A rebuilt plugin that refuses its own saved state is reported beside the
+/// plugin**, not returned as though it were restored: the probe saves its
+/// state, then the next instance (`kMisbehaveStateFails`) rejects every
+/// restore, so the rebuild is `Ok` with `restored` an error and the controller's
+/// UI value at its default.
+#[test]
+fn a_rebuild_reports_a_plugin_that_refuses_its_saved_state() {
+    let probe = Probe::behaving();
+    let mut loaded = probe.load();
+    Control::set_parameter(
+        &mut loaded,
+        main_thread(),
+        id(PARAM_UI_STATE),
+        Normalized::of(0.625),
+    )
+    .expect("a declared, writable parameter");
+    probe.misbehave(STATE_FAILS);
+    let rebuilt = loaded
+        .rebuild(main_thread())
+        .expect("a refused state is not a refused rebuild");
+    assert!(rebuilt.restored.is_err(), "{:?}", rebuilt.restored);
+    assert_ne!(
+        Control::parameter(&rebuilt.plugin, main_thread(), id(PARAM_UI_STATE)).map(Normalized::get),
+        Some(0.625)
+    );
 }
 
 /// **A write queued to an active plugin is in the state it saves**, before any

@@ -30,7 +30,7 @@ use tutti_graph::Node;
 use tutti_graph::contract::Direct;
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::{
-    Direction, MemorySource, MemorySourceConfig, Playback, SendError, SlotId, Voice, VoiceNode,
+    MemorySource, MemorySourceConfig, PlayDirection, Playback, SendError, SlotId, Voice, VoiceNode,
     VoicePool, VoicePoolHandle, VoiceSource, VoiceWindow,
 };
 use tutti_units::{
@@ -350,7 +350,7 @@ fn voice_pool_process_steady_state_is_allocation_free() {
                 gain: sampler.gain(),
                 speed: sampler.speed(),
                 loop_: sampler.loop_(),
-                direction: Direction::Forward,
+                direction: PlayDirection::Forward,
                 stretch: StretchFactor::new(1.0),
                 pitch: Cents::new(0.0),
             };
@@ -397,7 +397,7 @@ fn cloned_voice_pool_with_stretch_is_allocation_free() {
             gain: sampler.gain(),
             speed: sampler.speed(),
             loop_: sampler.loop_(),
-            direction: Direction::Forward,
+            direction: PlayDirection::Forward,
             // Actually stretching: a unity voice has no vocoder, so the
             // read would never touch one and the test would pass either way.
             stretch: StretchFactor::new(2.0),
@@ -438,7 +438,7 @@ fn voice_pool_one_frame_blocks_are_allocation_free() {
                 gain: sampler.gain(),
                 speed: sampler.speed(),
                 loop_: sampler.loop_(),
-                direction: Direction::Forward,
+                direction: PlayDirection::Forward,
                 stretch: StretchFactor::new(1.0),
                 pitch: Cents::new(0.0),
             };
@@ -497,7 +497,7 @@ fn placed_parts(wave: &Arc<Wave>, stretch: f64) -> (MemorySource<f32>, Playback)
         gain: sampler.gain(),
         speed: sampler.speed(),
         loop_: sampler.loop_(),
-        direction: Direction::Forward,
+        direction: PlayDirection::Forward,
         stretch: StretchFactor::new(stretch),
         pitch: Cents::new(0.0),
     };
@@ -847,7 +847,7 @@ fn six_channel_clip_reaches_six_reader_outputs_without_allocating() {
             gain: sampler.gain(),
             speed: sampler.speed(),
             loop_: sampler.loop_(),
-            direction: Direction::Forward,
+            direction: PlayDirection::Forward,
             stretch: StretchFactor::new(1.0),
             pitch: Cents::new(0.0),
         };

@@ -12,7 +12,7 @@ use crate::common::{encoded, read_bytes};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_midi_file::{
-    FileEvent, Layout, Lead, LeadTrack, Meta, MidiFile, Normalized, Pattern, Placement,
+    FileEvent, Layout, Lead, LeadRepair, LeadTrack, Meta, MidiFile, Pattern, ReadRepair,
     SmfDivision, SmpteFractionalFrames, SmpteOffset, SysEx, TextKind, Tick, Track, TracksError,
 };
 use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode};
@@ -72,8 +72,8 @@ fn start(data: &[u8]) -> FileEvent {
 }
 
 /// What a read changed: a `Lead` event of `track` at `at`, and what was done.
-fn changed(track: usize, at: u64, lead: Lead, placement: Placement) -> Normalized {
-    Normalized::Lead {
+fn changed(track: usize, at: u64, lead: Lead, placement: LeadRepair) -> ReadRepair {
+    ReadRepair::Lead {
         track,
         at: Tick(at),
         lead,
@@ -213,7 +213,7 @@ fn a_format_1_file_has_one_sequence_number_in_its_first_track() {
             1,
             0,
             Lead::SequenceNumber(3),
-            Placement::NotInFirstTrack
+            LeadRepair::NotInFirstTrack
         )]
     );
     let kept = read(2, &tracks);
@@ -380,13 +380,13 @@ fn an_smpte_offset_is_at_the_start_of_the_track() {
     assert_eq!(after_a_note.smpte_offset(0), None);
     assert_eq!(
         placed(&after_a_note),
-        [changed(0, 0, Lead::SmpteOffset(at), Placement::Late)]
+        [changed(0, 0, Lead::SmpteOffset(at), LeadRepair::Late)]
     );
     let after_a_delta = read(0, &[vec![meta(5, 0x54, &wire)]]);
     assert_eq!(after_a_delta.smpte_offset(0), None);
     assert_eq!(
         placed(&after_a_delta),
-        [changed(0, 5, Lead::SmpteOffset(at), Placement::Late)]
+        [changed(0, 5, Lead::SmpteOffset(at), LeadRepair::Late)]
     );
 }
 
@@ -426,7 +426,7 @@ fn a_format_1_smpte_offset_is_the_first_tracks() {
             1,
             0,
             Lead::SmpteOffset(at),
-            Placement::NotInFirstTrack
+            LeadRepair::NotInFirstTrack
         )]
     );
     let second = read(2, &tracks);
@@ -797,24 +797,24 @@ fn a_late_opening_meta_is_dropped_and_listed() {
     assert_eq!(
         placed(&file),
         [
-            changed(0, 0, Lead::SequenceNumber(4), Placement::Late),
-            changed(0, 0, Lead::SmpteOffset(at), Placement::Late),
+            changed(0, 0, Lead::SequenceNumber(4), LeadRepair::Late),
+            changed(0, 0, Lead::SmpteOffset(at), LeadRepair::Late),
             changed(
                 0,
                 5,
                 Lead::TrackName(b"late".as_slice().into()),
-                Placement::Late
+                LeadRepair::Late
             ),
             changed(
                 0,
                 480,
                 Lead::Copyright(b"(C)".as_slice().into()),
-                Placement::Late
+                LeadRepair::Late
             ),
         ]
     );
     let again = read_bytes(encoded(&file)).unwrap();
-    assert_eq!((&again, again.normalized()), (&file, [].as_slice()));
+    assert_eq!((&again, again.repairs()), (&file, [].as_slice()));
 }
 
 /// A Track Name or copyright notice at tick 0 but after a channel message is at
@@ -844,13 +844,13 @@ fn an_opening_meta_at_time_0_after_an_event_is_moved() {
                 0,
                 0,
                 Lead::TrackName(b"n".as_slice().into()),
-                Placement::Moved
+                LeadRepair::Moved
             ),
             changed(
                 0,
                 0,
                 Lead::Copyright(b"(C)".as_slice().into()),
-                Placement::Moved
+                LeadRepair::Moved
             ),
         ]
     );
@@ -889,18 +889,18 @@ fn a_second_opening_meta_is_a_listed_duplicate() {
     assert_eq!(
         placed(&file),
         [
-            changed(0, 0, Lead::SequenceNumber(2), Placement::Duplicate),
+            changed(0, 0, Lead::SequenceNumber(2), LeadRepair::Duplicate),
             changed(
                 0,
                 0,
                 Lead::TrackName(b"b".as_slice().into()),
-                Placement::Duplicate
+                LeadRepair::Duplicate
             ),
             changed(
                 0,
                 0,
                 Lead::Copyright(b"(C) 2".as_slice().into()),
-                Placement::Duplicate
+                LeadRepair::Duplicate
             ),
         ]
     );
@@ -922,7 +922,7 @@ fn bytes_past_a_sequence_number_or_an_smpte_offset_are_dropped_and_listed() {
     );
     assert_eq!(file.sequence_number(0), Some(7));
     assert_eq!(file.smpte_offset(0), Some(at));
-    let truncated = |lead, extra: &[u8]| changed(0, 0, lead, Placement::Truncated(extra.into()));
+    let truncated = |lead, extra: &[u8]| changed(0, 0, lead, LeadRepair::Truncated(extra.into()));
     assert_eq!(
         placed(&file),
         [
@@ -932,7 +932,7 @@ fn bytes_past_a_sequence_number_or_an_smpte_offset_are_dropped_and_listed() {
     );
     assert_eq!(body(&file)[..6], [0, 0xFF, 0x00, 2, 0, 7]);
     let again = read_bytes(encoded(&file)).unwrap();
-    assert_eq!((&again, again.normalized()), (&file, [].as_slice()));
+    assert_eq!((&again, again.repairs()), (&file, [].as_slice()));
     // Late as well: both changes are listed.
     let late = read(
         0,
@@ -945,7 +945,7 @@ fn bytes_past_a_sequence_number_or_an_smpte_offset_are_dropped_and_listed() {
         placed(&late),
         [
             truncated(Lead::SequenceNumber(7), &[0xAA]),
-            changed(0, 0, Lead::SequenceNumber(7), Placement::Late),
+            changed(0, 0, Lead::SequenceNumber(7), LeadRepair::Late),
         ]
     );
 }
@@ -976,7 +976,7 @@ fn a_dropped_late_event_does_not_move_the_end_of_a_track_with_no_end_of_track() 
             0,
             100,
             Lead::TrackName(b"late".as_slice().into()),
-            Placement::Late
+            LeadRepair::Late
         )]
     );
 }
@@ -1014,18 +1014,18 @@ fn an_f0_event_with_an_8_bit_byte_is_read_as_an_escape() {
     assert_eq!(
         placed(&file),
         [
-            Normalized::SysExEscaped {
+            ReadRepair::SysExEscaped {
                 track: 0,
                 at: Tick(1)
             },
-            Normalized::SysExClosed {
+            ReadRepair::SysExClosed {
                 track: 0,
                 at: Tick(0)
             },
         ]
     );
     let again = read_bytes(encoded(&file)).unwrap();
-    assert_eq!((&again, again.normalized()), (&file, [].as_slice()));
+    assert_eq!((&again, again.repairs()), (&file, [].as_slice()));
 }
 
 /// A copyright notice is in the first track: one in another track is dropped
@@ -1042,7 +1042,7 @@ fn a_copyright_notice_outside_the_first_track_is_dropped_and_listed() {
                 1,
                 0,
                 Lead::Copyright(b"(C)".as_slice().into()),
-                Placement::NotInFirstTrack
+                LeadRepair::NotInFirstTrack
             )]
         );
     }
@@ -1054,7 +1054,7 @@ fn a_copyright_notice_outside_the_first_track_is_dropped_and_listed() {
 /// that is ended is read as it is.
 #[test]
 fn an_unended_divided_sysex_is_closed_and_listed() {
-    let closed = |at| Normalized::SysExClosed {
+    let closed = |at| ReadRepair::SysExClosed {
         track: 0,
         at: Tick(at),
     };
@@ -1079,7 +1079,7 @@ fn an_unended_divided_sysex_is_closed_and_listed() {
     assert_eq!(events[3], complete(&[5]));
     assert_eq!(placed(&file), [closed(0), closed(3)]);
     let again = read_bytes(encoded(&file)).unwrap();
-    assert_eq!((&again, again.normalized()), (&file, [].as_slice()));
+    assert_eq!((&again, again.repairs()), (&file, [].as_slice()));
     // Ended: the packets stay as the file has them.
     let ended = read(
         0,
@@ -1247,32 +1247,32 @@ fn a_read_file_without_tempo_and_time_signature_is_given_the_defaults() {
     let defaults = vec![tempo(120.0), signature];
     let both = |track: usize| {
         [
-            Normalized::DefaultTempo { track },
-            Normalized::DefaultTimeSignature { track },
+            ReadRepair::DefaultTempo { track },
+            ReadRepair::DefaultTimeSignature { track },
         ]
     };
 
     let zero = read(0, &[note(0)]);
     assert_eq!(head(&zero, 0), defaults);
-    assert_eq!(zero.normalized(), both(0));
+    assert_eq!(zero.repairs(), both(0));
 
     let one = read(1, &[note(0), note(0)]);
     assert_eq!(head(&one, 0), defaults);
     assert_eq!(one.tracks()[1].events().len(), 1);
-    assert_eq!(one.normalized(), both(0));
+    assert_eq!(one.repairs(), both(0));
 
     let two = read(2, &[note(0), note(0)]);
     assert_eq!((head(&two, 0), head(&two, 1)), (defaults.clone(), defaults));
-    assert_eq!(two.normalized(), [both(0), both(1)].concat());
+    assert_eq!(two.repairs(), [both(0), both(1)].concat());
 
     // A format above 2 is read as format 2: each track its own pattern.
     let three = read(3, &[note(0), note(0)]);
-    assert_eq!(three.normalized(), [both(0), both(1)].concat());
+    assert_eq!(three.repairs(), [both(0), both(1)].concat());
 
     let tempo_only = read(0, &[vec![RawEvent::tempo(0, 1_000_000)]]);
     assert_eq!(
-        tempo_only.normalized(),
-        [Normalized::DefaultTimeSignature { track: 0 }]
+        tempo_only.repairs(),
+        [ReadRepair::DefaultTimeSignature { track: 0 }]
     );
     let given = read(
         0,
@@ -1281,7 +1281,7 @@ fn a_read_file_without_tempo_and_time_signature_is_given_the_defaults() {
             RawEvent::time_signature(0, 3, 2),
         ]],
     );
-    assert!(given.normalized().is_empty());
+    assert!(given.repairs().is_empty());
 }
 
 /// The tracks of a format 0 or 1 file share one timeline, so a tempo or time
@@ -1295,8 +1295,8 @@ fn a_tempo_or_time_signature_in_any_track_of_a_shared_timeline_is_the_files() {
     let meter_here = || vec![RawEvent::time_signature(0, 3, 2)];
     let tempo_in_second = read(1, &[note(), tempo_here()]);
     assert_eq!(
-        tempo_in_second.normalized(),
-        [Normalized::DefaultTimeSignature { track: 0 }]
+        tempo_in_second.repairs(),
+        [ReadRepair::DefaultTimeSignature { track: 0 }]
     );
     assert!(
         !tempo_in_second.tracks()[0]
@@ -1306,8 +1306,8 @@ fn a_tempo_or_time_signature_in_any_track_of_a_shared_timeline_is_the_files() {
     );
     let meter_in_third = read(1, &[note(), note(), meter_here()]);
     assert_eq!(
-        meter_in_third.normalized(),
-        [Normalized::DefaultTempo { track: 0 }]
+        meter_in_third.repairs(),
+        [ReadRepair::DefaultTempo { track: 0 }]
     );
     assert!(
         !meter_in_third.tracks()[0]
@@ -1316,14 +1316,14 @@ fn a_tempo_or_time_signature_in_any_track_of_a_shared_timeline_is_the_files() {
             .any(|(_, e)| matches!(e, FileEvent::Meta(Meta::TimeSignature { .. })))
     );
     let both = read(0, &[tempo_here().into_iter().chain(meter_here()).collect()]);
-    assert!(both.normalized().is_empty());
+    assert!(both.repairs().is_empty());
     let pattern = read(2, &[note(), tempo_here()]);
     assert_eq!(
-        pattern.normalized(),
+        pattern.repairs(),
         [
-            Normalized::DefaultTempo { track: 0 },
-            Normalized::DefaultTimeSignature { track: 0 },
-            Normalized::DefaultTimeSignature { track: 1 },
+            ReadRepair::DefaultTempo { track: 0 },
+            ReadRepair::DefaultTimeSignature { track: 0 },
+            ReadRepair::DefaultTimeSignature { track: 1 },
         ]
     );
 }

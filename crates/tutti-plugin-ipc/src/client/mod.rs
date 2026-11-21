@@ -9,7 +9,7 @@
 pub mod audio;
 pub mod editor_site;
 #[cfg(test)]
-mod hostile_peer_tests;
+pub(crate) mod hostile_peer_tests;
 mod ipc_editor;
 pub mod plugin_bridge;
 

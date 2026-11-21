@@ -137,6 +137,10 @@ pub(super) enum ControlCommand {
     },
     GetParameter {
         param_id: ParamId,
+        /// The audio lane's answer to the flush of the host's writes, when the
+        /// caller asked for one: the control lane waits for it, as a blocking
+        /// caller does itself, so the value read holds the writes made before.
+        flush: Option<Ask<bool>>,
         reply: Reply<Option<Normalized>>,
     },
     GetPresetList {
@@ -280,6 +284,13 @@ pub enum IpcEvent {
         /// What it asked.
         request: tutti_plugin_types::TransportRequest,
     },
+    /// The plugin was rebuilt and did not take the state it was saved with: it is
+    /// at its defaults. Follows the [`Resync`](Self::Resync) of
+    /// [`Reloaded`](ResyncKind::Reloaded).
+    StateNotRestored {
+        /// Why the state was not restored.
+        reason: String,
+    },
     /// The plugin refused the rate it was asked to run at (`Some`: the rate in
     /// Hz and the plugin's reason), or took a rate after refusing one (`None`).
     RateRefusal(Option<RateRefusal>),
@@ -333,7 +344,8 @@ pub(super) const UNSOLICITED_PARAMS: usize = 128;
 ///
 /// **Delivery order** ([`drain`](Self::drain)), per command:
 ///
-/// 1. `Resync(Reloaded)`, then `Resync(Io)`: structural changes first. A
+/// 1. `Resync(Reloaded)`, then `Resync(Io)`, then `StateNotRestored`:
+///    structural changes first. A
 ///    plugin that rebuilds itself or its buses and then reports parameters
 ///    reports them against the new table, so the host must rebuild before
 ///    it applies them.
@@ -362,6 +374,9 @@ pub(super) struct Unsolicited {
     /// What a late answer is applied to, when it is read.
     lifecycle: Option<super::lifecycle::Lifecycle>,
     reloaded: bool,
+    /// Why the last rebuild's state was not restored, until drained; a later
+    /// one replaces it.
+    state_not_restored: Option<String>,
     io: bool,
     /// The buses the last `PluginIoChanged` carried, until drained.
     io_layout: Option<tutti_plugin_types::Layout>,
@@ -385,6 +400,7 @@ impl Unsolicited {
             rate: None,
             lifecycle: None,
             reloaded: false,
+            state_not_restored: None,
             io: false,
             io_layout: None,
             param_titles: false,
@@ -476,6 +492,14 @@ impl Unsolicited {
         }
     }
 
+    /// A rebuilt plugin's refusal of its saved state. One already held is
+    /// replaced and counted with the dropped events.
+    pub(super) fn state_not_restored(&mut self, reason: String) {
+        if self.state_not_restored.replace(reason).is_some() {
+            self.dropped += 1;
+        }
+    }
+
     /// A resync request; a second of the same kind adds nothing.
     pub(super) fn resync(&mut self, kind: ResyncKind) {
         *match kind {
@@ -516,9 +540,14 @@ impl Unsolicited {
         let rate = self.rate.take().map(IpcEvent::RateRefusal);
         let process =
             std::mem::take(&mut self.process_requested).then_some(IpcEvent::ProcessRequested);
+        let unrestored = self
+            .state_not_restored
+            .take()
+            .map(|reason| IpcEvent::StateNotRestored { reason });
         layout
             .into_iter()
             .chain(structural.into_iter().flatten())
+            .chain(unrestored)
             .chain(params)
             .chain(latency)
             .chain(tail)
@@ -548,6 +577,22 @@ impl ControlCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A refusal of the saved state replaced before it was drained is
+    /// counted**, and the latest reason is the one delivered.
+    #[test]
+    fn a_replaced_state_refusal_is_counted_and_the_latest_is_delivered() {
+        let mut inbox = Unsolicited::new();
+        inbox.state_not_restored("first".into());
+        assert_eq!(inbox.take_dropped(), 0);
+        inbox.state_not_restored("second".into());
+        assert_eq!(inbox.take_dropped(), 1);
+        let heard: Vec<_> = inbox.drain().collect();
+        assert!(
+            matches!(heard.as_slice(), [IpcEvent::StateNotRestored { reason }] if reason == "second"),
+            "{heard:?}"
+        );
+    }
 
     /// **A request the queue refused is answered `Busy`, not left to read as a
     /// dead plugin**: the answer is filled, where a dropped reply would cancel it.

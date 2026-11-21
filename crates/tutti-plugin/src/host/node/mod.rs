@@ -379,6 +379,9 @@ impl PluginClient<Unbound> {
                 ResyncClass::Refresh(r) => listener_refresh_sink.fire(r),
                 ResyncClass::Invalidate(i) => listener_invalidate_sink.fire(i),
             },
+            IpcEvent::StateNotRestored { reason } => {
+                listener_invalidate_sink.fire(PluginInvalidation::StateNotRestored { reason });
+            }
             IpcEvent::RateRefusal(Some(refusal)) => {
                 listener_invalidate_sink.fire(PluginInvalidation::RateRefused(refusal));
             }
@@ -705,8 +708,7 @@ impl std::fmt::Debug for PluginAnswers {
     }
 }
 
-/// An answer a bridge thread fills.
-pub type Answer<T> = futures_channel::oneshot::Receiver<T>;
+pub use tutti_plugin_types::Answer;
 
 impl PluginAnswers {
     /// Queues the save of the plugin's state for `state_use`.

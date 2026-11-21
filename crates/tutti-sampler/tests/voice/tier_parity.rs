@@ -55,7 +55,9 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::{Node, contract};
 use tutti_sampler::testing::{MockTransport, wait_for_open};
-use tutti_sampler::{DiskStreamer, DiskStreamerConfig, Manual, StepOutcome, Stream, StreamStart};
+use tutti_sampler::{
+    DiskStreamer, DiskStreamerConfig, Manual, StepOutcome, StreamHandle, StreamStart,
+};
 use tutti_sampler::{DiskVoice, MemorySource, VoiceWindow};
 use tutti_units::{Beat, Bpm, PlaybackRate, SamplePosition, SampleRate};
 
@@ -335,7 +337,7 @@ fn stream_at(
     streamer: &mut DiskStreamer<Manual<f32>, f32>,
     path: &Path,
     at_sec: f64,
-) -> (DiskVoice<f32>, Arc<Clock>, Stream<f32>) {
+) -> (DiskVoice<f32>, Arc<Clock>, StreamHandle<f32>) {
     let clock = Clock::new(120.0);
     clock.seek_seconds(at_sec);
 

@@ -13,7 +13,8 @@ use tutti_graph::{
 use tutti_graph::{OutPort, PortSource};
 use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
 use tutti_modulation::{
-    Amount, Clock, ControlProgram, ControlProgramBuilder, Law, Layer, LayerId, Polarity, Waveform,
+    Amount, ControlProgram, ControlProgramBuilder, Law, Layer, LayerClock, LayerId, Polarity,
+    Waveform,
 };
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_polysynth::{Adsr, OscillatorType, PolySynth, SynthConfig, UnisonConfig, UnisonVoices};
@@ -58,7 +59,7 @@ fn synth_at(unison: bool, detune: f64, volume: tutti_units::Amplitude) -> PolySy
 fn constant(depth: f64) -> ControlProgram {
     let layer = Layer {
         id: LayerId(1),
-        clock: Clock::Beats {
+        clock: LayerClock::Beats {
             per_cycle: BeatsPerCycle::of(1.0),
             phase: PhaseIncrement::new(0.0),
         },

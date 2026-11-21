@@ -181,7 +181,10 @@ pub(crate) mod wire;
 ///   refusal, its two lengths, no plugin, an object the transport refused) in
 ///   place of the message, and `EditorOpened` and `EditorSized` carry an
 ///   `EditorError` in place of the refusal text.
-pub const PROTOCOL_VERSION: u32 = 57;
+/// - **Version 58** adds the control news `PluginStateNotRestored`, after
+///   `PluginReloaded`: a rebuilt plugin that refused the state it was saved
+///   with, and the reason.
+pub const PROTOCOL_VERSION: u32 = 58;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///
@@ -530,6 +533,12 @@ mod tests {
         assert_eq!(news(News::PluginParamValuesChanged), 3);
         assert_eq!(news(News::PluginReloaded), 6);
         assert_eq!(news(News::EditorClosed), 8);
+        assert_eq!(
+            news(News::PluginStateNotRestored {
+                reason: String::new()
+            }),
+            11
+        );
         assert_eq!(news(News::ProcessRequested), 9);
 
         let frame = |m: ControlFrame| tag(postcard::to_allocvec(&m).unwrap());

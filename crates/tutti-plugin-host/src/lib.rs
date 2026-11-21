@@ -61,7 +61,7 @@ pub use node::{
 };
 pub use node_losses::BlockLosses;
 pub use param_delivery::{DeliveryCounters, ParamDelivery, ParamDeliveryStats};
-pub use param_values::{ParamRead, ParamReporter, ParamSnapshot, PluginParamValues};
+pub use param_values::{ParamRead, ParamReporter, ParamSnapshot, PluginParamValues, ReadingParams};
 pub use render_mode::needs_notify;
 pub(crate) use segment_points::SegmentPoints;
 pub use time_signature::PluginTimeSignature;

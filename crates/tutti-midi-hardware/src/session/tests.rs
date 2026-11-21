@@ -42,7 +42,7 @@ fn session() -> (MidiSession, Arc<AtomicUsize>, Arc<AtomicUsize>) {
 }
 
 /// The id of the input listed under `name`.
-fn input(s: &MidiSession, name: &str) -> DeviceId {
+fn input(s: &MidiSession, name: &str) -> MidiDeviceId {
     s.inputs()
         .into_iter()
         .find(|d| d.name == name)

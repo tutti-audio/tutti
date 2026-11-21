@@ -3247,6 +3247,80 @@ fn parallel_closing_pedals_and_bends_allocates_nothing() {
     closing_pedals_and_bends_allocates_nothing_on(4);
 }
 
+/// **Retiring a unit that holds keys, and a re-prepare across it, allocate
+/// nothing**: the unit's tables leave through the commit's preallocated lists
+/// (the departed keys, the spare tables, the retired unit), its keys close at
+/// the sink exactly once, and a re-prepare parks the tables of a unit that
+/// holds keys and hands them back without closing them.
+fn retiring_and_re_preparing_a_key_holding_unit_allocates_nothing_on(workers: usize) {
+    let (mut ed, mut exec) = Editor::new(prepare(64));
+    use_pool(&mut exec, workers);
+    let (offs, pedals_up, bends_centred) = (
+        Arc::new(AtomicUsize::new(0)),
+        Arc::new(AtomicUsize::new(0)),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let input = vec![0.25f32; 64];
+    let mut outs = vec![vec![0.0f32; 64]; 1];
+    let transport = TransportPosition::default();
+    let mut blocks = |exec: &mut tutti_graph::Executor, n: usize| {
+        for _ in 0..n {
+            let mut slices: Vec<&mut [f32]> = outs.iter_mut().map(|o| &mut o[..]).collect();
+            assert_no_alloc::assert_no_alloc(|| {
+                exec.process(64, &transport, &[&input[..]], &mut slices);
+            });
+        }
+    };
+    let tallies = || [&offs, &pedals_up, &bends_centred].map(|n| n.load(Ordering::Relaxed));
+    ed.insert(NodeKey(2), "closed", {
+        Unforkable(Closed {
+            offs: Arc::clone(&offs),
+            pedals_up: Arc::clone(&pedals_up),
+            bends_centred: Arc::clone(&bends_centred),
+        })
+    });
+    ed.insert(NodeKey(1), "latch", Unforkable(Latch { sent: false }));
+    ed.spec_mut()
+        .connect_events(sink(2, 0), EventEdge::Direct(ev(1, 0)));
+    ed.commit().expect("commits");
+    apply(&mut exec);
+    ed.collect();
+    blocks(&mut exec, 4);
+
+    // A re-prepare while the unit holds keys: the tables wait, then return.
+    ed.reprepare(prepare(64)).expect("accepted");
+    apply(&mut exec);
+    blocks(&mut exec, 2);
+    ed.collect();
+    apply(&mut exec);
+    blocks(&mut exec, 4);
+    ed.collect();
+    assert_eq!(tallies(), [0, 0, 0], "a re-prepare closes nothing");
+
+    // The unit is removed holding them: its keys close once.
+    ed.remove(NodeKey(1));
+    ed.commit().expect("commits");
+    apply(&mut exec);
+    blocks(&mut exec, 4);
+    assert_eq!(ed.collect(), vec![NodeKey(1)], "the unit came back");
+    assert_eq!(
+        tallies(),
+        [1, 4, 1],
+        "the retired unit's key, pedals and bend close once"
+    );
+    assert_eq!(exec.dropped_event_count(), 0);
+}
+
+#[test]
+fn retiring_and_re_preparing_a_key_holding_unit_allocates_nothing() {
+    retiring_and_re_preparing_a_key_holding_unit_allocates_nothing_on(1);
+}
+
+#[test]
+fn parallel_retiring_and_re_preparing_a_key_holding_unit_allocates_nothing() {
+    retiring_and_re_preparing_a_key_holding_unit_allocates_nothing_on(4);
+}
+
 /// **A pool set while a commit is in flight**: the commit was staged for no
 /// pool, `set_pool` re-stages it with the parallel state for this one, and
 /// applying it allocates and frees nothing; then the pool goes and the commit

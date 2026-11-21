@@ -780,7 +780,7 @@ fn the_same_handle_hears_a_device_that_returns() {
     let _ = s.update();
     let (synth, seen) = tap(&mut s);
     s.midi()
-        .route(MidiRouteRule::any_channel().to(synth))
+        .route(MidiRouteRule::new().to(synth))
         .expect("routes");
     let keys = device(&mut s, "Keys");
     let port = input(&mut s, &keys);
@@ -857,7 +857,7 @@ fn held_notes_are_released_when_the_port_is_dropped() {
     let _ = s.update();
     let (synth, seen) = tap(&mut s);
     s.midi()
-        .route(MidiRouteRule::any_channel().to(synth))
+        .route(MidiRouteRule::new().to(synth))
         .expect("routes");
     let keys = device(&mut s, "Keys");
     let port = input(&mut s, &keys);
@@ -905,7 +905,7 @@ fn held_notes_are_released_when_the_device_is_unplugged() {
     let _ = s.update();
     let (synth, seen) = tap(&mut s);
     s.midi()
-        .route(MidiRouteRule::any_channel().to(synth))
+        .route(MidiRouteRule::new().to(synth))
         .expect("routes");
     let keys = device(&mut s, "Keys");
     let port = input(&mut s, &keys);
@@ -948,7 +948,7 @@ fn every_input_port_has_its_own_input_node() {
     let _ = s.update();
     let (synth, seen) = tap(&mut s);
     s.midi()
-        .route(MidiRouteRule::any_channel().to(synth))
+        .route(MidiRouteRule::new().to(synth))
         .expect("routes");
     let devices: Vec<DeviceInfo> = names.iter().map(|name| device(&mut s, name)).collect();
     let ports: Vec<_> = devices
@@ -1415,7 +1415,7 @@ fn the_sessions_mpe_mode_reaches_a_ports_input_node() {
     let _ = s.update();
     let (synth, seen) = tap(&mut s);
     s.midi()
-        .route(MidiRouteRule::any_channel().to(synth))
+        .route(MidiRouteRule::new().to(synth))
         .expect("routes");
     let keys = device(&mut s, "Keys");
     let _port = input(&mut s, &keys);
@@ -1451,7 +1451,7 @@ fn an_open_is_ready_on_the_first_poll_and_its_apply_installs_a_live_input() {
     let (mut s, fake) = a_session_with_keys_and_synth();
     let (synth, seen) = tap(&mut s);
     s.midi()
-        .route(MidiRouteRule::any_channel().to(synth))
+        .route(MidiRouteRule::new().to(synth))
         .expect("routes");
     let keys = device(&mut s, "Keys");
 

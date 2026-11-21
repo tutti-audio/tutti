@@ -1,6 +1,6 @@
 //! The crate-wide error type, for the paths that can fail on file access.
 //!
-//! Midi1Translator failures live with the operation that raises them — `ProbeError`
+//! Midi1Translator failures live with the operation that raises them — `SampleProbeError`
 //! for a header read, `OpenError` for a stream open —
 //! because a caller of those branches on the specific cause rather than on "an
 //! error happened".

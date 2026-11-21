@@ -2,8 +2,9 @@
 //! recovery's reload, a parameter mirror's read, a state snapshot) report to the
 //! session.
 //!
-//! Each loop is a blocking round trip on the session's executor
-//! ([`PluginPart::spawn`](crate::session::parts::PluginPart::spawn)). Its task holds a
+//! Each loop is a task on the session's executor: a blocking round trip
+//! ([`PluginPart::spawn`](crate::session::parts::PluginPart::spawn)) or, for a parameter
+//! read, a future ([`PluginPart::spawn_future`](crate::session::parts::PluginPart::spawn_future)). Its task holds a
 //! [`Post`], a `Sender` clone, and no executor: it sends one [`Arrival`] when the round
 //! trip returns, and `Phase::Plugins` drains the [`Inbox`] before it decides what is due,
 //! so what a task sent lands in the update that finds it. Every arrival carries the token

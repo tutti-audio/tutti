@@ -365,7 +365,8 @@ fn a_clips_transform_goes_with_the_clip_and_follows_a_retarget() {
 #[test]
 fn a_route_rule_keyed_by_the_apps_id_round_trips_and_refuses_a_bad_channel() {
     use tutti_session::MidiRouteRule;
-    let rule = MidiRouteRule::<String>::for_channel(MidiChannel::of(4))
+    let rule = MidiRouteRule::<String>::new()
+        .channel(MidiChannel::of(4))
         .in_group(MidiGroup::of(2))
         .to("lead".to_string())
         .to("pad".to_string())
@@ -373,14 +374,13 @@ fn a_route_rule_keyed_by_the_apps_id_round_trips_and_refuses_a_bad_channel() {
     let json = serde_json::to_string(&rule).unwrap();
     let back: MidiRouteRule<String> = serde_json::from_str(&json).unwrap();
     assert_eq!(back, rule);
-    assert!(!back.enabled);
-    assert_eq!(back.targets, ["lead", "pad"]);
     // Both states of `enabled` survive, so neither is a default filled in.
-    let on = MidiRouteRule::<String>::for_channel(MidiChannel::of(4)).to("lead".to_string());
+    let on = MidiRouteRule::<String>::new()
+        .channel(MidiChannel::of(4))
+        .to("lead".to_string());
     let on_back: MidiRouteRule<String> =
         serde_json::from_str(&serde_json::to_string(&on).unwrap()).unwrap();
     assert_eq!(on_back, on);
-    assert!(on_back.enabled);
 
     let bad = json.replace("\"channel\":4", "\"channel\":16");
     assert_ne!(bad, json, "the channel was in the text");
@@ -392,7 +392,7 @@ fn a_route_rule_keyed_by_the_apps_id_round_trips_and_refuses_a_bad_channel() {
 #[cfg(feature = "midi-hardware")]
 mod hardware {
     use super::*;
-    use tutti_midi_device::{EndpointId, Identity, PortDirection};
+    use tutti_midi_device::{EndpointId, OsEndpointIdentity, PortDirection};
     use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
     use tutti_session::{MidiPortError, Peer, PortCause, Presence};
     use tutti_ump::ProductInstanceId;
@@ -410,7 +410,7 @@ mod hardware {
     /// A device the OS names by a unit, so its saved identity is exact.
     fn unit(raw: u64, name: &str, unit: &str) -> tutti_midi_hardware::OsEndpoint {
         let mut e = endpoint(raw, name);
-        e.identity = Identity::Product(ProductInstanceId::new(unit).unwrap());
+        e.identity = OsEndpointIdentity::Product(ProductInstanceId::new(unit).unwrap());
         e
     }
 

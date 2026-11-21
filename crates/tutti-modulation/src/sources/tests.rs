@@ -3,7 +3,7 @@ use crate::RateAnchor;
 use tutti_units::Amplitude;
 
 /// The fields of an [`Source::Lfo`]: `(shape, seed, clock)`.
-fn lfo_parts(source: Source) -> (LfoShape, u64, Clock) {
+fn lfo_parts(source: Source) -> (LfoShape, u64, LayerClock) {
     match source {
         Source::Lfo {
             wave: Waveform::Shape { shape, seed },
@@ -30,7 +30,7 @@ fn each_lfo_constructor_is_its_shape_at_one_hertz() {
         assert_eq!(seed, 0);
         assert_eq!(
             clock,
-            Clock::Seconds {
+            LayerClock::Seconds {
                 rate: Hz::new(1.0),
                 phase: PhaseIncrement::new(0.0),
                 anchor: None,
@@ -55,7 +55,7 @@ fn an_lfos_clock_and_seed_are_pinned_field_by_field() {
     assert_eq!(seed, 7);
     assert_eq!(
         clock,
-        Clock::Beats {
+        LayerClock::Beats {
             per_cycle: BeatsPerCycle::of(0.5),
             phase: PhaseIncrement::new(0.25),
         }
@@ -68,7 +68,7 @@ fn an_lfos_clock_and_seed_are_pinned_field_by_field() {
     let (_, _, clock) = lfo_parts(seconds.into());
     assert_eq!(
         clock,
-        Clock::Seconds {
+        LayerClock::Seconds {
             rate: Hz::new(3.0),
             phase: PhaseIncrement::new(0.5),
             anchor: None::<RateAnchor>,

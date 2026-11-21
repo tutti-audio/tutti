@@ -31,6 +31,7 @@ use crate::SlabHandle;
 use crate::SlabLayout;
 use dpi::Size;
 use tutti_platform::Executor;
+use tutti_plugin_types::Answer;
 use tutti_plugin_types::RateRefusal;
 use tutti_plugin_types::{
     BlockStatus, ContentScale, Delivered, EditWriter, EditorError, IpcResult, PluginFailure,
@@ -364,6 +365,12 @@ impl AudioBridge {
     /// rate change. `None` once it takes a rate.
     pub fn rate_refusal(&self) -> Option<RateRefusal> {
         self.lifecycle.rate_refusal()
+    }
+
+    /// Has the bridge thread offer each rate refusal to `wait`
+    /// ([`OfflineWait::refusal`](crate::OfflineWait::refusal)), so the audio thread only latches a flag.
+    pub(crate) fn offer_refusals_to(&self, wait: Arc<crate::OfflineWait>) {
+        self.lifecycle.offer_refusals_to(wait);
     }
 
     /// Whether the plugin refuses its rate, as [`rate_refusal`](Self::rate_refusal)
@@ -1095,6 +1102,59 @@ impl AudioBridge {
         answer
     }
 
+    /// [`parameters`](Self::parameters) as an answer: queued, and **the control
+    /// lane's thread fills it** with the server's reply, or with `None` at the
+    /// query deadline ([`Timeouts::param`]). A lane that ends drops the request
+    /// unanswered, which cancels the answer, as does a full queue. The request
+    /// takes no slot and queues behind one in flight.
+    pub fn parameters_answer(&self) -> Answer<Option<Vec<ParameterInfo>>> {
+        let (answer, reply) = ask::awaited();
+        if self.lifecycle.is_crashed() {
+            reply.send(None);
+            return answer;
+        }
+        self.queue(ControlCommand::GetParameterList { reply });
+        answer
+    }
+
+    /// [`parameter`](Self::parameter) as an answer, filled and bounded as
+    /// [`parameters_answer`](Self::parameters_answer) is. The lane applies the
+    /// host's writes no block has carried before it asks.
+    pub fn parameter_answer(&self, param_id: ParamId) -> Answer<Option<Normalized>> {
+        let (answer, reply) = ask::awaited();
+        if self.lifecycle.is_crashed() {
+            reply.send(None);
+            return answer;
+        }
+        let flush = self.request_flush();
+        self.queue(ControlCommand::GetParameter {
+            param_id,
+            flush,
+            reply,
+        });
+        answer
+    }
+
+    /// [`parameter_normalized`](Self::parameter_normalized) as an answer, filled
+    /// and bounded as [`parameters_answer`](Self::parameters_answer) is.
+    pub(crate) fn parameter_normalized_answer(
+        &self,
+        param_id: ParamId,
+        plain: f64,
+    ) -> Answer<Option<Normalized>> {
+        let (answer, reply) = ask::awaited();
+        if self.lifecycle.is_crashed() {
+            reply.send(None);
+            return answer;
+        }
+        self.queue(ControlCommand::GetParameterNormalized {
+            param_id,
+            plain,
+            reply,
+        });
+        answer
+    }
+
     /// Queues `command`; a full queue answers it `Busy`.
     fn queue(&self, command: ControlCommand) {
         if let Err(refused) = self.channels.push_control_back(command) {
@@ -1172,7 +1232,11 @@ impl AudioBridge {
         // What the host wrote and no block has carried is read back.
         self.flush_host_edits();
         let ask_resp = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            ControlCommand::GetParameter { param_id, reply }
+            ControlCommand::GetParameter {
+                param_id,
+                flush: None,
+                reply,
+            }
         })?;
         await_reply(ask_resp, self.lifecycle.timeouts().param_wait())
             .ok()

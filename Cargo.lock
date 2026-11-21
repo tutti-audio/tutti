@@ -3102,6 +3102,7 @@ dependencies = [
  "assert_no_alloc",
  "dpi",
  "futures-channel",
+ "futures-lite",
  "interprocess",
  "libc",
  "libloading 0.9.1",
@@ -3144,6 +3145,7 @@ name = "tutti-plugin-contract"
 version = "0.1.0"
 dependencies = [
  "assert_no_alloc",
+ "futures-lite",
  "tempfile",
  "tutti-au-host",
  "tutti-buffers",
@@ -3198,6 +3200,8 @@ dependencies = [
  "assert_no_alloc",
  "criterion",
  "dpi",
+ "futures-channel",
+ "futures-lite",
  "libloading 0.9.1",
  "parking_lot",
  "thiserror 2.0.21",
@@ -3326,6 +3330,7 @@ dependencies = [
  "assert_no_alloc",
  "bitflags 2.13.2",
  "dpi",
+ "futures-channel",
  "keyboard-types",
  "postcard",
  "proptest",

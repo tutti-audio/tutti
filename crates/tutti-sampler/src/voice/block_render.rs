@@ -40,7 +40,7 @@ use tutti_units::{
 
 use super::memory_source::MemorySource;
 use super::pool::VoicePool;
-use super::types::{Direction, Playback, SlotId, Voice, VoiceSource};
+use super::types::{PlayDirection, Playback, SlotId, Voice, VoiceSource};
 use crate::{DiskStreamer, DiskStreamerConfig};
 
 const SR: f64 = 48_000.0;
@@ -212,7 +212,7 @@ fn the_block_read_is_the_same_at_any_block_length() {
             ),
             (
                 memory(&stereo, 0.0),
-                play(|p| p.direction = Direction::Reverse),
+                play(|p| p.direction = PlayDirection::Reverse),
             ),
             (
                 memory(&stereo, 0.0),

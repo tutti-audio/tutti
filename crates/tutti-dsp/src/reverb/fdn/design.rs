@@ -31,7 +31,7 @@ use tutti_units::{
 use crate::onepole::cutoff_pole;
 use crate::reverb::network::{
     Absorption, Fdn, Gains, Inline, Line, LineModulation, MAX_LINES, Matrix, Network,
-    NetworkCapacity, NetworkOutputMap, Stage, pre_delay_frames,
+    NetworkCapacity, NetworkOutputMap, NetworkStage, pre_delay_frames,
 };
 use crate::{DecayTime, MaxDecay, TAIL_FLOOR};
 
@@ -386,7 +386,7 @@ impl FdnLayout {
 
         out.clear(rate);
         out.pre_delay = pre_delay_frames(pre, rate);
-        let _ = out.stages.push(Stage::Fdn(Fdn {
+        let _ = out.stages.push(NetworkStage::Fdn(Fdn {
             lines,
             matrix,
             input,
@@ -402,7 +402,7 @@ impl FdnLayout {
 /// decay queries read as a longer trip for every line.
 pub(crate) fn set_loop_delay(network: &mut Network, delay: Samples) {
     for stage in network.stages.as_mut_slice() {
-        if let Stage::Fdn(f) = stage {
+        if let NetworkStage::Fdn(f) = stage {
             f.loop_delay = SampleSpan::from_samples(delay);
         }
     }
