@@ -29,6 +29,13 @@ fn poll_with(start: &mut Start, waker: &Waker) -> Poll<Result<Started, MidiHardw
     Pin::new(start).poll(&mut Context::from_waker(waker))
 }
 
+/// Makes a future's round, waking whatever the call took.
+fn begin(gate: &StartGate) -> Round {
+    let (round, wakers) = gate.begin(false);
+    wakers.wake();
+    round
+}
+
 fn error() -> Arc<MidiHardwareError> {
     Arc::new(MidiHardwareError::DescriptorBroken)
 }
@@ -43,11 +50,11 @@ fn gave_up(state: &HubState) -> Option<Instant> {
 #[test]
 fn a_start_over_a_gate_that_goes_ready_wakes_its_waker_and_then_resolves() {
     let gate = Arc::new(StartGate::new());
-    let mut start = gate.start(gate.begin(false));
+    let mut start = gate.start(begin(&gate));
     let (count, waker) = counting();
     assert!(poll_with(&mut start, &waker).is_pending());
     assert_eq!(woken(&count), 0);
-    gate.publish_ready();
+    gate.publish_ready().wake();
     assert_eq!(woken(&count), 1);
     assert!(matches!(poll_with(&mut start, &waker), Poll::Ready(Ok(_))));
 }
@@ -55,21 +62,21 @@ fn a_start_over_a_gate_that_goes_ready_wakes_its_waker_and_then_resolves() {
 #[test]
 fn a_waker_polled_twice_is_stored_once() {
     let gate = Arc::new(StartGate::new());
-    let mut start = gate.start(gate.begin(false));
+    let mut start = gate.start(begin(&gate));
     let (count, waker) = counting();
     assert!(poll_with(&mut start, &waker).is_pending());
     assert!(poll_with(&mut start, &waker).is_pending());
-    gate.publish_ready();
+    gate.publish_ready().wake();
     assert_eq!(woken(&count), 1);
 }
 
 #[test]
 fn a_failed_start_wakes_its_waker_and_resolves_to_the_error() {
     let gate = Arc::new(StartGate::new());
-    let mut start = gate.start(gate.begin(false));
+    let mut start = gate.start(begin(&gate));
     let (count, waker) = counting();
     assert!(poll_with(&mut start, &waker).is_pending());
-    gate.publish_failed(error(), None);
+    gate.publish_failed(error(), None).wake();
     assert_eq!(woken(&count), 1);
     let Poll::Ready(Err(MidiHardwareError::BackendFailed(why))) = poll_with(&mut start, &waker)
     else {
@@ -81,10 +88,10 @@ fn a_failed_start_wakes_its_waker_and_resolves_to_the_error() {
 #[test]
 fn a_thread_that_ends_before_answering_fails_the_start_and_wakes_its_waker() {
     let gate = Arc::new(StartGate::new());
-    let mut start = gate.start(gate.begin(false));
+    let mut start = gate.start(begin(&gate));
     let (count, waker) = counting();
     assert!(poll_with(&mut start, &waker).is_pending());
-    gate.ended(false);
+    gate.ended(false).wake();
     assert_eq!(woken(&count), 1);
     let Poll::Ready(Err(MidiHardwareError::BackendFailed(why))) = poll_with(&mut start, &waker)
     else {
@@ -113,7 +120,7 @@ fn ready_is_terminal() {
     assert!(!state.failed(error(), None));
     assert!(!state.ready());
     assert_eq!(
-        state.begin(false),
+        state.begin(false).0,
         Round {
             generation: 0,
             restarted: false
@@ -134,8 +141,8 @@ fn a_failed_start_is_not_made_ready_by_a_late_client() {
 #[test]
 fn a_future_made_while_a_start_is_under_way_joins_it() {
     let mut state = HubState::new();
-    let first = state.begin(false);
-    let second = state.begin(false);
+    let first = state.begin(false).0;
+    let second = state.begin(false).0;
     assert_eq!(first, second);
     assert!(!first.restarted);
     assert_eq!(state.wanted(None), Some((0, None)));
@@ -149,10 +156,10 @@ fn a_future_made_while_a_start_is_under_way_joins_it() {
 #[test]
 fn a_future_made_after_a_failure_restarts_with_the_next_generation() {
     let mut state = HubState::new();
-    let first = state.begin(false);
+    let first = state.begin(false).0;
     assert!(state.failed(error(), None));
     assert!(state.outcome(first.generation).is_some_and(|o| o.is_err()));
-    let second = state.begin(false);
+    let second = state.begin(false).0;
     assert_eq!(
         second,
         Round {
@@ -162,7 +169,7 @@ fn a_future_made_after_a_failure_restarts_with_the_next_generation() {
     );
     assert_eq!(state.wanted(Some(0)), Some((1, None)));
     // Two futures after one failure ask for one restart.
-    assert!(!state.begin(false).restarted);
+    assert!(!state.begin(false).0.restarted);
 }
 
 #[test]
@@ -215,7 +222,7 @@ fn a_start_failed_before_it_could_wait_resolves_to_the_error() {
 #[test]
 fn a_gate_used_across_threads_wakes_the_waiting_thread() {
     let gate = Arc::new(StartGate::new());
-    let start = gate.start(gate.begin(false));
+    let start = gate.start(begin(&gate));
     let (done, completed) = std::sync::mpsc::channel();
     let (waiting, is_waiting) = std::sync::mpsc::channel();
     let waiter = std::thread::spawn(move || {
@@ -235,7 +242,7 @@ fn a_gate_used_across_threads_wakes_the_waiting_thread() {
         let gate = Arc::clone(&gate);
         std::thread::spawn(move || {
             is_waiting.recv().expect("the waiter polled");
-            gate.publish_ready();
+            gate.publish_ready().wake();
         })
     };
     assert_eq!(
@@ -252,14 +259,14 @@ fn a_gate_tells_its_thread_of_a_restart_only_after_a_future_asks_for_one() {
     let gate = StartGate::new();
     assert_eq!(gate.wanted(None).map(|(generation, _)| generation), Some(0));
     assert_eq!(gate.wanted(Some(0)), None);
-    gate.begin(false);
-    gate.publish_failed(error(), None);
+    begin(&gate);
+    gate.publish_failed(error(), None).wake();
     assert_eq!(
         gate.wanted(Some(0)),
         None,
         "a failed round is not restarted by itself"
     );
-    assert!(gate.begin(false).restarted);
+    assert!(begin(&gate).restarted);
     assert_eq!(
         gate.wanted(Some(0)).map(|(generation, _)| generation),
         Some(1)
@@ -269,10 +276,10 @@ fn a_gate_tells_its_thread_of_a_restart_only_after_a_future_asks_for_one() {
 #[test]
 fn a_thread_that_ends_after_it_made_the_client_leaves_the_state_ready_and_wakes() {
     let gate = Arc::new(StartGate::new());
-    let mut start = gate.start(gate.begin(false));
+    let mut start = gate.start(begin(&gate));
     let (count, waker) = counting();
     assert!(poll_with(&mut start, &waker).is_pending());
-    gate.ended(true);
+    gate.ended(true).wake();
     assert_eq!(woken(&count), 1);
     assert!(matches!(poll_with(&mut start, &waker), Poll::Ready(Ok(_))));
 }
@@ -281,7 +288,7 @@ fn a_thread_that_ends_after_it_made_the_client_leaves_the_state_ready_and_wakes(
 fn a_client_that_exists_is_never_restarted_over() {
     let mut state = HubState::new();
     state.failed(error(), None);
-    let round = state.begin(true);
+    let (round, _) = state.begin(true);
     assert!(!round.restarted);
     assert!(matches!(state, HubState::Ready));
 }
@@ -292,7 +299,7 @@ fn a_round_restarted_onto_a_thread_that_then_ends_fails_for_the_future_that_aske
     state.begin(false);
     state.failed(error(), None);
     // A future asks for a new round, and the thread it woke is the one that is ending.
-    let asked = state.begin(false);
+    let asked = state.begin(false).0;
     assert!(asked.restarted);
     assert!(state.ended(false));
     assert!(
@@ -369,12 +376,12 @@ fn a_failed_start_leaves_the_watch_to_be_seeded_by_the_next_start() {
     )
     .unwrap();
     let events = devices.subscribe();
-    let mut first = gate.start(gate.begin(false));
+    let mut first = gate.start(begin(&gate));
     let (_, waker) = counting();
     assert!(poll_with(&mut first, &waker).is_pending());
 
     // The round fails: the future says so, and the watch is neither seeded nor ended.
-    gate.publish_failed(error(), None);
+    gate.publish_failed(error(), None).wake();
     assert!(matches!(
         poll_with(&mut first, &waker),
         Poll::Ready(Err(MidiHardwareError::BackendFailed(_)))
@@ -398,12 +405,12 @@ fn a_failed_start_leaves_the_watch_to_be_seeded_by_the_next_start() {
     assert!(late_events.failure().is_none());
 
     // The app asks again, and the thread makes the client: set, look, then ready.
-    let again = gate.begin(false);
+    let again = begin(&gate);
     assert!(again.restarted);
     let mut second = gate.start(again);
     client.store(true, Ordering::SeqCst);
     registry.look_all();
-    gate.publish_ready();
+    gate.publish_ready().wake();
     assert!(matches!(poll_with(&mut second, &waker), Poll::Ready(Ok(_))));
     assert_eq!(devices.list().len(), 1, "the list is seeded");
     assert_eq!(late.list().len(), 1);
@@ -426,4 +433,72 @@ fn a_failed_start_leaves_the_watch_to_be_seeded_by_the_next_start() {
     );
     drop((devices, late, events, late_events));
     assert_eq!(registry.len(), 0);
+}
+
+/// **A future made once the client exists is not left waiting for the thread's own
+/// publication**: `begin` moves a round to `Ready` itself, and the waiters hear it
+/// then, because the thread's `publish_ready` finds the state already `Ready` and
+/// wakes no one.
+#[test]
+fn a_future_made_after_the_client_exists_wakes_those_already_waiting() {
+    let gate = Arc::new(StartGate::new());
+    let mut waiter = gate.start(begin(&gate));
+    let (count, waker) = counting();
+    assert!(poll_with(&mut waiter, &waker).is_pending());
+    // The client is set; the thread is still enumerating when another caller asks.
+    let (round, wakers) = gate.begin(true);
+    assert!(!round.restarted);
+    wakers.wake();
+    assert_eq!(
+        woken(&count),
+        1,
+        "the waiter was woken by the change to Ready"
+    );
+    // The thread then publishes: nothing is left to wake.
+    gate.publish_ready().wake();
+    assert_eq!(woken(&count), 1);
+    assert!(matches!(poll_with(&mut waiter, &waker), Poll::Ready(Ok(_))));
+}
+
+/// **The gate wakes nothing itself**: a transition returns the wakers, so a caller
+/// can wake them after releasing its own locks; a waker run inside a transition
+/// that took one of those locks would deadlock.
+#[test]
+fn a_transition_wakes_nothing_until_its_wakers_are_woken() {
+    let gate = Arc::new(StartGate::new());
+    let mut waiter = gate.start(begin(&gate));
+    let (count, waker) = counting();
+    assert!(poll_with(&mut waiter, &waker).is_pending());
+    let wakers = gate.ended(false);
+    assert_eq!(woken(&count), 0, "not woken inside the transition");
+    wakers.wake();
+    assert_eq!(woken(&count), 1);
+}
+
+/// A waker that calls back into the gate when it is woken completes: the wakers are
+/// woken with the gate's own lock released.
+#[test]
+fn a_waker_that_re_enters_the_gate_does_not_deadlock() {
+    struct Reenter(Arc<StartGate>, std::sync::mpsc::Sender<()>);
+    impl Wake for Reenter {
+        fn wake(self: Arc<Self>) {
+            let _ = self.0.begin(false);
+            let _ = self.1.send(());
+        }
+    }
+    let gate = Arc::new(StartGate::new());
+    let mut waiter = gate.start(begin(&gate));
+    let (done, finished) = std::sync::mpsc::channel();
+    let waker = Waker::from(Arc::new(Reenter(Arc::clone(&gate), done)));
+    assert!(poll_with(&mut waiter, &waker).is_pending());
+    let worker = {
+        let gate = Arc::clone(&gate);
+        std::thread::spawn(move || gate.publish_ready().wake())
+    };
+    assert_eq!(
+        finished.recv_timeout(Duration::from_secs(30)),
+        Ok(()),
+        "the waker re-entering the gate never finished"
+    );
+    worker.join().unwrap();
 }

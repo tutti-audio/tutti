@@ -140,13 +140,20 @@ fn a_change_is_reported_when_a_virtual_endpoint_comes_first() {
     drop((destination, source));
 }
 
+/// A future's round, waking whatever the call took.
+fn begin(gate: &StartGate) -> crate::backend::hub::Round {
+    let (round, wakers) = gate.begin(false);
+    wakers.wake();
+    round
+}
+
 /// **A hub thread that ends before it answers fails the start by name and is
 /// replaced**: the start waiting on it resolves to `ThreadEnded` and the next start
 /// makes a thread. No thread runs here: the guard's action is `thread_ended`.
 #[test]
 fn a_hub_thread_that_ends_before_answering_fails_the_start() {
     let hub = Hub::new();
-    let start = hub.gate.start(hub.gate.begin(false));
+    let start = hub.gate.start(begin(&hub.gate));
     *hub.unparker.lock_recover() = Some(parker().0);
     hub.thread_ended();
     let Err(MidiHardwareError::BackendFailed(why)) = tutti_fixtures::block_on(start) else {

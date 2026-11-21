@@ -108,9 +108,14 @@ impl Hub {
     /// The hub thread ended, however it did: a round still under way is over (the
     /// client exists, or the round failed), and the next start makes a thread again.
     fn thread_ended(&self) {
-        let mut slot = self.unparker.lock_recover();
-        self.gate.ended(self.client.get().is_some());
-        *slot = None;
+        let wakers = {
+            let mut slot = self.unparker.lock_recover();
+            let wakers = self.gate.ended(self.client.get().is_some());
+            *slot = None;
+            wakers
+        };
+        // Woken with no lock held: a waker may call back into the hub.
+        wakers.wake();
     }
 
     /// What the hub thread does: makes the client for each round asked of it.
@@ -170,14 +175,15 @@ impl Hub {
     fn publish_client(&self, client: SharedClient) {
         let _ = self.client.set(client);
         self.registry.look_all();
-        self.gate.publish_ready();
+        self.gate.publish_ready().wake();
     }
 
     /// The round failed: the futures waiting on it are woken with the error. The
     /// watches stay registered and are seeded by a later round that makes the client.
     fn fail_round(&self, error: tutti_coremidi_ffi::Error, gave_up: Option<Instant>) {
         self.gate
-            .publish_failed(Arc::new(MidiHardwareError::Os(error)), gave_up);
+            .publish_failed(Arc::new(MidiHardwareError::Os(error)), gave_up)
+            .wake();
     }
 }
 
@@ -216,17 +222,26 @@ pub(super) fn client() -> Option<SharedClient> {
 /// lock, so a round is never handed to a thread that is ending.
 pub(super) fn begin_start() -> Start {
     let hub = cell();
-    let mut slot = hub.unparker.lock_recover();
-    if let Err(error) = hub.ensure_thread(&mut slot) {
-        return failed_start(error);
+    let begun = {
+        let mut slot = hub.unparker.lock_recover();
+        hub.ensure_thread(&mut slot).map(|()| {
+            let (round, wakers) = hub.gate.begin(hub.client.get().is_some());
+            if round.restarted
+                && let Some(unparker) = slot.as_ref()
+            {
+                unparker.unpark();
+            }
+            (round, wakers)
+        })
+    };
+    // Woken with no lock held: a waker may call back into the hub.
+    match begun {
+        Err(error) => failed_start(error),
+        Ok((round, wakers)) => {
+            wakers.wake();
+            hub.gate.start(round)
+        }
     }
-    let round = hub.gate.begin(hub.client.get().is_some());
-    if round.restarted
-        && let Some(unparker) = slot.as_ref()
-    {
-        unparker.unpark();
-    }
-    hub.gate.start(round)
 }
 
 /// Registers `sink` with the hub: it is seeded with `snapshot()` once the hub's

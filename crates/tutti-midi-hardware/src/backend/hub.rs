@@ -58,12 +58,14 @@ impl HubState {
 
     /// A future is made: it waits on the round under way, or, where the last round
     /// failed, on a new one that carries the window forward. `client_made` says the
-    /// client exists, which ends every round: the state is then `Ready`.
-    pub(crate) fn begin(&mut self, client_made: bool) -> Round {
+    /// client exists, which ends every round: the state is then `Ready`. Returns
+    /// whether the state changed to `Ready`, which the futures waiting must hear.
+    pub(crate) fn begin(&mut self, client_made: bool) -> (Round, bool) {
+        let ended = client_made && !matches!(self, Self::Ready);
         if client_made {
             *self = Self::Ready;
         }
-        match self {
+        let round = match self {
             Self::Starting { generation, .. } => Round {
                 generation: *generation,
                 restarted: false,
@@ -87,7 +89,8 @@ impl HubState {
                     restarted: true,
                 }
             }
-        }
+        };
+        (round, ended)
     }
 
     /// The client is made. Returns whether the state changed: `Ready` is terminal.
@@ -166,8 +169,21 @@ impl HubState {
     }
 }
 
-/// A [`HubState`] and the wakers of the futures waiting on it. Nothing waits while
-/// holding the lock, and a waker is woken after it is released.
+/// The wakers a state change took from the gate. Waking them runs arbitrary code,
+/// so a caller wakes them after it has released every lock it holds.
+#[must_use = "wake them after releasing every lock, or the futures waiting are never woken"]
+pub(crate) struct Wakers(Vec<Waker>);
+
+impl Wakers {
+    /// Wakes every waiting future.
+    pub(crate) fn wake(self) {
+        self.0.into_iter().for_each(Waker::wake);
+    }
+}
+
+/// A [`HubState`] and the wakers of the futures waiting on it. It wakes nothing
+/// itself: every transition returns the wakers to wake, and the state only changes
+/// through [`transition`](Self::transition), which takes them whenever it changed.
 pub(crate) struct StartGate {
     cell: Mutex<(HubState, Vec<Waker>)>,
 }
@@ -180,37 +196,42 @@ impl StartGate {
         }
     }
 
-    /// Runs `change` on the state; when it says the state changed every waiting
-    /// future is woken.
-    fn publish<R>(&self, change: impl FnOnce(&mut HubState) -> (bool, R)) -> R {
-        let (woken, result) = {
-            let mut cell = self.cell.lock_recover();
-            let (changed, result) = change(&mut cell.0);
-            (changed.then(|| std::mem::take(&mut cell.1)), result)
+    /// Runs `change` on the state. When it says the state changed, the waiting
+    /// futures' wakers are returned to be woken, whatever the change was.
+    fn transition<R>(&self, change: impl FnOnce(&mut HubState) -> (R, bool)) -> (R, Wakers) {
+        let mut cell = self.cell.lock_recover();
+        let (result, changed) = change(&mut cell.0);
+        let wakers = if changed {
+            std::mem::take(&mut cell.1)
+        } else {
+            Vec::new()
         };
-        woken.into_iter().flatten().for_each(Waker::wake);
-        result
+        (result, Wakers(wakers))
     }
 
     /// A future is made. See [`HubState::begin`].
-    pub(crate) fn begin(&self, client_made: bool) -> Round {
-        self.publish(|state| (false, state.begin(client_made)))
+    pub(crate) fn begin(&self, client_made: bool) -> (Round, Wakers) {
+        self.transition(|state| state.begin(client_made))
     }
 
-    /// The client is made: every waiting future is woken.
-    pub(crate) fn publish_ready(&self) {
-        self.publish(|state| (state.ready(), ()));
+    /// The client is made.
+    pub(crate) fn publish_ready(&self) -> Wakers {
+        self.transition(|state| ((), state.ready())).1
     }
 
-    /// The round failed: every waiting future is woken.
-    pub(crate) fn publish_failed(&self, error: Arc<MidiHardwareError>, gave_up: Option<Instant>) {
-        self.publish(|state| (state.failed(error, gave_up), ()));
+    /// The round failed.
+    pub(crate) fn publish_failed(
+        &self,
+        error: Arc<MidiHardwareError>,
+        gave_up: Option<Instant>,
+    ) -> Wakers {
+        self.transition(|state| ((), state.failed(error, gave_up)))
+            .1
     }
 
-    /// The backend's thread ended without answering: see [`HubState::ended`]. Every
-    /// waiting future is woken.
-    pub(crate) fn ended(&self, client_made: bool) {
-        self.publish(|state| (state.ended(client_made), ()));
+    /// The backend's thread ended without answering: see [`HubState::ended`].
+    pub(crate) fn ended(&self, client_made: bool) -> Wakers {
+        self.transition(|state| ((), state.ended(client_made))).1
     }
 
     /// See [`HubState::wanted`].
