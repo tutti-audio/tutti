@@ -283,16 +283,16 @@ fn a_shape_mismatch_is_refused() {
         gain: 1.0,
         width: 2,
     });
-    assert_eq!(
+    assert!(
         ed.replace(NODE, Unforkable(wider), fade)
-            .map(|placed| placed.controls),
-        Err(CommitError::FadeShape { node: NODE })
+            .map(|placed| placed.controls)
+            .is_err_and(|e| matches!(e, CommitError::FadeShape { node, .. } if node == NODE))
     );
     let not_in_place = TestNode::new(Kind::Thru { width: 1 });
-    assert_eq!(
+    assert!(
         ed.replace(NODE, Unforkable(not_in_place), fade)
-            .map(|placed| placed.controls),
-        Err(CommitError::FadeShape { node: NODE })
+            .map(|placed| placed.controls)
+            .is_err_and(|e| matches!(e, CommitError::FadeShape { node, .. } if node == NODE))
     );
     assert_eq!(
         ed.replace(NodeKey(9), Unforkable(gain(1.0)), fade)
@@ -326,14 +326,14 @@ fn a_shape_mismatch_is_refused() {
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
-    assert_eq!(
+    assert!(
         ed.replace(
             lagged,
             Unforkable(TestNode::new(Kind::Lag { latency: 5 })),
             fade
         )
-        .map(|placed| placed.controls),
-        Err(CommitError::FadeShape { node: lagged })
+        .map(|placed| placed.controls)
+        .is_err_and(|e| matches!(e, CommitError::FadeShape { node, .. } if node == lagged))
     );
     ed.replace(
         lagged,
@@ -356,10 +356,10 @@ fn a_shape_mismatch_is_refused() {
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
-    assert_eq!(
+    assert!(
         ed.replace(bursting, Unforkable(burst(3)), fade)
-            .map(|placed| placed.controls),
-        Err(CommitError::FadeShape { node: bursting })
+            .map(|placed| placed.controls)
+            .is_err_and(|e| matches!(e, CommitError::FadeShape { node, .. } if node == bursting))
     );
     ed.replace(bursting, Unforkable(burst(2)), fade)
         .expect("the same capacity fades");
@@ -714,8 +714,13 @@ fn the_reference_cuts_a_fade_on_a_latency_change() {
 /// diagnostics print), whether the replace fades or swaps.
 #[test]
 fn a_replace_takes_the_incoming_units_kind() {
-    let fade = Fade::new(Samples::new(100));
-    for incoming in [gain(3.0), TestNode::new(Kind::Lag { latency: 3 })] {
+    // The shape that does not fit is placed by a cut: a fade over it is refused.
+    let faded = Fade::new(Samples::new(100));
+    let cut = Fade::new(Samples::ZERO);
+    for (incoming, fade) in [
+        (gain(3.0), faded),
+        (TestNode::new(Kind::Lag { latency: 3 }), cut),
+    ] {
         let (mut ed, _exec) = gain_graph(1.0);
         assert_eq!(ed.spec().topology.nodes[&NODE].kind, "gain");
         ed.replace_or_swap(NODE, Unforkable(incoming), fade)
@@ -728,11 +733,12 @@ fn a_replace_takes_the_incoming_units_kind() {
     }
 }
 
-/// **`replace_or_swap` fades where `replace` would, and swaps where
-/// `replace` refuses**: a unit that fits the running one fades in; one that
-/// does not (here: a latency the plan was not compiled for) lands whole on
-/// the next commit, as an insert at the key does; so does a replace of a
-/// node that is not running yet.
+/// **`replace_or_swap` fades where `replace` would, and swaps only a cut or
+/// a node that is not running**: a unit that fits the running one fades in;
+/// one that does not (here: a latency the plan was not compiled for) is
+/// refused under a fade and lands whole on the next commit under a zero fade,
+/// as an insert at the key does; so does a replace of a node that is not
+/// running yet.
 #[test]
 fn replace_or_swap_fades_when_it_fits_and_swaps_when_it_does_not() {
     let fade = Fade::new(Samples::new(100));
@@ -752,12 +758,19 @@ fn replace_or_swap_fades_when_it_fits_and_swaps_when_it_does_not() {
 
     let (mut ed, mut exec) = gain_graph(1.0);
     dc(&mut exec, 20);
-    ed.replace_or_swap(
-        NODE,
-        Unforkable(TestNode::new(Kind::Lag { latency: 3 })),
-        fade,
-    )
-    .expect("a shape change is a swap, not a refusal");
+    let lagged = || Unforkable(TestNode::new(Kind::Lag { latency: 3 }));
+    assert!(
+        ed.replace_or_swap(NODE, lagged(), fade)
+            .is_err_and(|e| matches!(e, CommitError::FadeShape { node, .. } if node == NODE)),
+        "a fade over a shape change is refused"
+    );
+    assert_eq!(
+        ed.spec().topology.nodes[&NODE].kind,
+        "gain",
+        "a refusal changes nothing"
+    );
+    ed.replace_or_swap(NODE, lagged(), Fade::new(Samples::ZERO))
+        .expect("a cut over a shape change is a swap");
     ed.commit().expect("commits");
     assert_eq!(ed.fades_in_flight(), 0, "nothing to fade from");
     let out = dc(&mut exec, 10);
@@ -766,6 +779,14 @@ fn replace_or_swap_fades_when_it_fits_and_swaps_when_it_does_not() {
         &[0.0, 0.0, 0.0, 1.0],
         "the lag alone from the first frame: a swap, not a blend with the gain"
     );
+
+    // `fade_or_swap` never refuses a shape: the fade is dropped.
+    let (mut ed, mut exec) = gain_graph(1.0);
+    dc(&mut exec, 20);
+    ed.fade_or_swap(NODE, lagged(), fade)
+        .expect("a shape change is a swap");
+    ed.commit().expect("commits");
+    assert_eq!(ed.fades_in_flight(), 0, "nothing to fade from");
 
     // Not running yet: inserted and replaced before any commit.
     let (mut ed, _exec) = Editor::new(prepare(128));
@@ -779,4 +800,21 @@ fn replace_or_swap_fades_when_it_fits_and_swaps_when_it_does_not() {
         std::any::type_name::<TestNode>(),
         "the swapped-in unit's kind (a replace names the unit that runs)"
     );
+}
+
+/// **`remove` cuts a node that `remove_declicked` was fading out**: the node
+/// leaves the spec at once, with no leaving mark left behind.
+#[test]
+fn a_remove_after_a_declicked_remove_cuts_the_leaving_node() {
+    let (mut ed, mut exec) = gain_graph(1.0);
+    dc(&mut exec, 20);
+    assert!(!ed.remove_declicked(NODE), "its output edge fades out");
+    assert!(ed.is_leaving(NODE));
+    assert!(ed.spec().topology.nodes.contains_key(&NODE));
+    ed.remove(NODE);
+    assert!(!ed.is_leaving(NODE), "cut, not fading");
+    assert!(!ed.spec().topology.nodes.contains_key(&NODE));
+    ed.commit().expect("commits");
+    exec.apply_pending();
+    assert_eq!(ed.collect(), vec![NODE], "the unit came back");
 }

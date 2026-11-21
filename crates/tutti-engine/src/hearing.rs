@@ -22,9 +22,9 @@
 //!
 //! **When the first frame arrives.** An install is seen at the start of the
 //! next [`process`](crate::Engine::process) call that begins after
-//! [`open`](OutputTaps::open) returns, and that call's whole block is the first
+//! [`open`](HeardTaps::open) returns, and that call's whole block is the first
 //! thing written: a call already in progress when `open` ran is not. A
-//! [`close`](OutputTaps::close) stops the writes from the next call on, the
+//! [`close`](HeardTaps::close) stops the writes from the next call on, the
 //! same way. Opens and closes are applied in the order they took the lock, so
 //! racing ones leave the state the last of them asked for.
 //!
@@ -46,26 +46,26 @@ const INSTALLS: usize = 4;
 /// An install: a writer, or `None` to close.
 type Install<F> = Option<Box<TapWriter<F>>>;
 
-/// Why [`OutputTaps::open`] or [`OutputTaps::close`] refused.
+/// Why [`HeardTaps::open`] or [`HeardTaps::close`] refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 #[non_exhaustive]
-pub enum OutputTapError {
+pub enum HeardTapError {
     /// A reader of the engine's tap is alive. Close it first (or drop it:
     /// the session's reclaim phase closes a tap whose reader is gone).
     #[error("the heard tap already has a reader; close it before opening again")]
     Busy,
-    /// [`OutputTaps::close`] found no tap open (none was opened, or it was
+    /// [`HeardTaps::close`] found no tap open (none was opened, or it was
     /// closed, or its dropped reader was reclaimed).
     #[error("no heard tap is open")]
     NotOpen,
 }
 
-/// What [`OutputTaps::open`] did: opened the tap, or found the audio thread
-/// behind. Not a [`OutputTapError`]: that says a call was refused for good (a
+/// What [`HeardTaps::open`] did: opened the tap, or found the audio thread
+/// behind. Not a [`HeardTapError`]: that says a call was refused for good (a
 /// reader is alive, nothing is open), and this one is a moment that passes.
 #[derive(Debug)]
 #[must_use = "a Retry opened nothing"]
-pub enum OutputTapOpen<F: Float = f32> {
+pub enum HeardTapOpen<F: Float = f32> {
     /// The tap is open: this reads it. It flows from the first render that
     /// begins after the call returned.
     Opened(TapReader<F>),
@@ -74,7 +74,7 @@ pub enum OutputTapOpen<F: Float = f32> {
     Retry,
 }
 
-impl<F: Float> OutputTapOpen<F> {
+impl<F: Float> HeardTapOpen<F> {
     /// The reader, or `None` for a [`Retry`](Self::Retry).
     pub fn reader(self) -> Option<TapReader<F>> {
         match self {
@@ -86,9 +86,9 @@ impl<F: Float> OutputTapOpen<F> {
 
 /// The control side of the engine's after-the-fader tap: cheap to clone,
 /// usable from any control thread. Get it from
-/// [`Engine::output_taps`](crate::Engine::output_taps).
+/// [`Engine::heard_taps`](crate::Engine::heard_taps).
 #[derive(Clone, Debug)]
-pub struct OutputTaps<F: Float = f32>(Arc<Mutex<Control<F>>>);
+pub struct HeardTaps<F: Float = f32>(Arc<Mutex<Control<F>>>);
 
 struct Control<F: Float> {
     install: RingWriter<Install<F>>,
@@ -145,13 +145,13 @@ pub(crate) struct Hearing<F: Float> {
 }
 
 /// A linked pair, built with the engine.
-pub(crate) fn link<F: Float>() -> (OutputTaps<F>, Hearing<F>) {
+pub(crate) fn link<F: Float>() -> (HeardTaps<F>, Hearing<F>) {
     let (install_tx, install_rx) = ring::<Install<F>>(INSTALLS + 1, Overflow::Refuse);
     // A retired writer waits here for the control side; this holds every
     // install that can be in flight and the live one.
     let (retire_tx, retire_rx) = ring::<Box<TapWriter<F>>>(INSTALLS + 3, Overflow::Refuse);
     (
-        OutputTaps(Arc::new(Mutex::new(Control {
+        HeardTaps(Arc::new(Mutex::new(Control {
             install: install_tx,
             retired: retire_rx,
             reader: None,
@@ -165,7 +165,7 @@ pub(crate) fn link<F: Float>() -> (OutputTaps<F>, Hearing<F>) {
     )
 }
 
-impl<F: Float> OutputTaps<F> {
+impl<F: Float> HeardTaps<F> {
     fn control(&self) -> std::sync::MutexGuard<'_, Control<F>> {
         self.0.lock_recover()
     }
@@ -176,25 +176,25 @@ impl<F: Float> OutputTaps<F> {
     /// ([`TapReader::take_lost`]). Flows from the first call of the engine's
     /// render that begins after this returns.
     ///
-    /// Returns [`OutputTapOpen::Retry`], opening nothing, while the audio thread
+    /// Returns [`HeardTapOpen::Retry`], opening nothing, while the audio thread
     /// has not taken the last installs.
     ///
     /// # Errors
     ///
-    /// [`OutputTapError::Busy`] while another reader of the tap is alive.
+    /// [`HeardTapError::Busy`] while another reader of the tap is alive.
     pub fn open(
         &self,
         width: ChannelLayout,
         capacity: Samples,
-    ) -> Result<OutputTapOpen<F>, OutputTapError> {
+    ) -> Result<HeardTapOpen<F>, HeardTapError> {
         let mut c = self.control();
         c.settle();
         if c.alive() {
-            return Err(OutputTapError::Busy);
+            return Err(HeardTapError::Busy);
         }
         // One slot stays free for a close.
         if c.owed_close || c.install.vacant() <= 1 {
-            return Ok(OutputTapOpen::Retry);
+            return Ok(HeardTapOpen::Retry);
         }
         let (reader, writer) = TapReader::pair(usize::from(width.count()), capacity);
         // Full cannot happen (the vacancy was checked). With the engine gone the
@@ -208,7 +208,7 @@ impl<F: Float> OutputTaps<F> {
             );
         }
         c.reader = Some(reader.watch());
-        Ok(OutputTapOpen::Opened(reader))
+        Ok(HeardTapOpen::Opened(reader))
     }
 
     /// Closes the tap from the next call of the engine's render on. The
@@ -216,12 +216,12 @@ impl<F: Float> OutputTaps<F> {
     ///
     /// # Errors
     ///
-    /// [`OutputTapError::NotOpen`] when no tap is open; nothing is sent.
-    pub fn close(&self) -> Result<(), OutputTapError> {
+    /// [`HeardTapError::NotOpen`] when no tap is open; nothing is sent.
+    pub fn close(&self) -> Result<(), HeardTapError> {
         let mut c = self.control();
         c.settle();
         if c.reader.take().is_none() {
-            return Err(OutputTapError::NotOpen);
+            return Err(HeardTapError::NotOpen);
         }
         // A full queue means the audio thread is behind: the close stays owed
         // and goes out on the next open, close or [`reclaim`](Self::reclaim).
@@ -254,7 +254,7 @@ impl<F: Float> Hearing<F> {
                 && let Err(old) = self.retire.push(old)
             {
                 // Full cannot happen (the vacancy was checked above). The
-                // retire ring's reader is the control side's `OutputTaps`: if
+                // retire ring's reader is the control side's `HeardTaps`: if
                 // it was dropped, nothing will free the writer, and it is
                 // leaked rather than freed on the audio thread.
                 std::mem::forget(old);

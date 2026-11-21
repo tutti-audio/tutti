@@ -33,6 +33,13 @@ pub enum SessionEvent {
         /// Why.
         refused: ReplaceRefused,
     },
+    /// A node was removed while a [`replace`](crate::Graph::replace) of it
+    /// waited out a re-prepare: the waiting replacement was dropped with its
+    /// incoming node, one event for each.
+    ReplaceDropped {
+        /// The node that was removed.
+        node: NodeKey,
+    },
     /// A node re-inserted with a narrower shape (a plugin whose ports changed,
     /// a node re-declared at a new width) lost wiring to the ports it no
     /// longer has. Reported once, by the update that commits the re-insert,

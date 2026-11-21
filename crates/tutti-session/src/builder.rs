@@ -392,7 +392,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
         )?;
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
-        let taps = engine.output_taps();
+        let taps = engine.heard_taps();
         let readings = (engine.load(), engine.blocks());
         let clock = engine.block_clock();
         let mut session = self.session(parts, crate::clock::OfflineEngine { engine }, true)?;
@@ -496,7 +496,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
         let readings = (engine.load(), engine.blocks());
-        let taps = engine.output_taps();
+        let taps = engine.heard_taps();
         let clock = engine.block_clock();
         let spec = tutti_engine::OutputSpec::new(rate, layout, F::FORMAT).with_quantum(max_block);
         let mut host = tutti_engine::StreamHost::new(
@@ -638,7 +638,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
             true,
         )?;
         session.output.readings = Some((engine.load(), engine.blocks()));
-        session.output.taps = Some((engine.output_taps(), spec.channels));
+        session.output.taps = Some((engine.heard_taps(), spec.channels));
         let clock = engine.block_clock();
         // The outputs are timed by the session's one clock reader and the
         // stream's latency, read on every drain.

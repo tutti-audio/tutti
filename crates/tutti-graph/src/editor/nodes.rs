@@ -74,6 +74,34 @@ impl<F: Float> Editor<F> {
         self.place(key, kind, unit, wake, shape, None)
     }
 
+    /// Whether a unit of shape `shape` can crossfade from one of `running`:
+    /// everything the running plan was compiled from but the tail agrees.
+    fn fits(shape: &Shape, running: &Shape) -> bool {
+        (
+            shape.audio_in(),
+            shape.audio_out(),
+            shape.event_in,
+            shape.event_out,
+        ) == (
+            running.audio_in(),
+            running.audio_out(),
+            running.event_in,
+            running.event_out,
+        ) && shape.buses_in() == running.buses_in()
+            && shape.buses_out() == running.buses_out()
+            && shape.latency == running.latency
+            && shape.in_place == running.in_place
+            && shape.event_resolution == running.event_resolution
+            // The plan sizes the node's event ports from its declaration, and
+            // a replace waiting behind a running fade runs the old unit under
+            // the new plan: both must fit the same buffers.
+            && shape.event_capacity == running.event_capacity
+            && shape.event_input_capacity == running.event_input_capacity
+            // The key's param state (per declared param) runs on across a
+            // fade, so both units must declare the same params.
+            && shape.params == running.params
+    }
+
     /// Replaces the unit running at `key` with `node`, crossfading from one
     /// to the other over `fade` once the next [`commit`](Self::commit) lands
     /// — a new generation, like [`insert`](Self::insert), but heard as a
@@ -144,31 +172,13 @@ impl<F: Float> Editor<F> {
         let shape = unit.shape();
         // Everything the running plan was compiled from but the tail: the
         // op, its PDC and its borrows must be right for both units at once.
-        let fits = (
-            shape.audio_in(),
-            shape.audio_out(),
-            shape.event_in,
-            shape.event_out,
-        ) == (
-            running.audio_in(),
-            running.audio_out(),
-            running.event_in,
-            running.event_out,
-        ) && shape.buses_in() == running.buses_in()
-            && shape.buses_out() == running.buses_out()
-            && shape.latency == running.latency
-            && shape.in_place == running.in_place
-            && shape.event_resolution == running.event_resolution
-            // The plan sizes the node's event ports from its declaration, and
-            // a replace waiting behind a running fade runs the old unit under
-            // the new plan: both must fit the same buffers.
-            && shape.event_capacity == running.event_capacity
-            && shape.event_input_capacity == running.event_input_capacity
-            // The key's param state (per declared param) runs on across a
-            // fade, so both units must declare the same params.
-            && shape.params == running.params;
+        let fits = Self::fits(&shape, &running);
         if !fits {
-            return Err(CommitError::FadeShape { node: key });
+            return Err(CommitError::FadeShape {
+                node: key,
+                running: Box::new(running),
+                incoming: Box::new(shape),
+            });
         }
         // The unit that runs at the key names itself, not the one it replaced.
         let kind = N::kind();
@@ -183,26 +193,30 @@ impl<F: Float> Editor<F> {
     }
 
     /// [`replace`](Self::replace) where it can fade, and a plain placement at
-    /// `key` where it cannot — the node not running yet, or a shape the
-    /// running unit's plan does not fit (a latency change): then the new unit
-    /// lands as a swap on the next commit, as [`insert`](Self::insert) at an
-    /// existing key does, keeping the key's kind. What a host that swaps a
-    /// unit under a node wants: the fade when there is one to have, never a
-    /// refusal for want of it.
+    /// `key` where there is nothing to fade from: the node not running yet,
+    /// or a `fade` of zero length (a cut) over a shape the running unit's
+    /// plan does not fit (a latency change). Then the new unit lands as a
+    /// swap on the next commit, as [`insert`](Self::insert) at an existing key
+    /// does, keeping the key's kind. A fade asked for over a shape that does
+    /// not fit is refused with [`CommitError::FadeShape`]: the caller who
+    /// accepts a cut says so with a zero fade, or asks for
+    /// [`fade_or_swap`](Self::fade_or_swap).
     ///
     /// Either way the placement unwires what the new shape lacks, as
     /// [`insert`](Self::insert) does, and returns it in [`Inserted::unwired`].
     /// A shape that fits the running unit's ports and buses has none to
     /// unwire but edges recorded since the last commit.
     ///
-    /// Refused, changing nothing, only when the editor is poisoned or
+    /// Refused, changing nothing, when the editor is poisoned or
     /// re-preparing (check [`is_repreparing`](Self::is_repreparing) first to
-    /// keep the node: a refusal consumes it). `key` must be in the spec.
+    /// keep the node: a refusal consumes it), or on a fade over a shape that
+    /// does not fit. `key` must be in the spec.
     ///
     /// # Errors
     ///
-    /// [`CommitError::Poisoned`] or [`CommitError::Repreparing`]; nothing
-    /// changes and `node` is dropped.
+    /// [`CommitError::Poisoned`] or [`CommitError::Repreparing`], and
+    /// [`CommitError::FadeShape`] for a running unit and a non-zero `fade`;
+    /// nothing changes and `node` is dropped.
     ///
     /// # Panics
     ///
@@ -213,13 +227,45 @@ impl<F: Float> Editor<F> {
         node: N,
         fade: Fade,
     ) -> Result<Inserted<N::Controls>, CommitError> {
+        self.place_replacement(key, node, fade, true)
+    }
+
+    /// [`replace_or_swap`](Self::replace_or_swap) that never refuses a shape:
+    /// the new unit fades where it fits the running one and lands as a swap
+    /// where it does not, the fade dropped. For a host that swaps a unit
+    /// under a node and wants the fade when there is one to have.
+    ///
+    /// # Errors
+    ///
+    /// [`CommitError::Poisoned`] or [`CommitError::Repreparing`]; nothing
+    /// changes and `node` is dropped.
+    ///
+    /// # Panics
+    ///
+    /// If `key` is not in the spec.
+    pub fn fade_or_swap<N: IntoNode<F>>(
+        &mut self,
+        key: NodeKey,
+        node: N,
+        fade: Fade,
+    ) -> Result<Inserted<N::Controls>, CommitError> {
+        self.place_replacement(key, node, fade, false)
+    }
+
+    fn place_replacement<N: IntoNode<F>>(
+        &mut self,
+        key: NodeKey,
+        node: N,
+        fade: Fade,
+        refuse_unfit: bool,
+    ) -> Result<Inserted<N::Controls>, CommitError> {
         self.check_poisoned()?;
         if self.is_repreparing() {
             return Err(CommitError::Repreparing);
         }
         assert!(
             self.spec.topology.nodes.contains_key(&key),
-            "replace_or_swap names a node in the spec"
+            "a replacement names a node in the spec"
         );
         // The unit that runs at the key names itself, not the one it replaced.
         let kind = N::kind();
@@ -233,22 +279,18 @@ impl<F: Float> Editor<F> {
         unit.bind_wake(wake.clone());
         unit.prepare(&self.prepare);
         let shape = unit.shape();
-        let fits = running.is_some_and(|r| {
-            (
-                shape.audio_in(),
-                shape.audio_out(),
-                shape.event_in,
-                shape.event_out,
-            ) == (r.audio_in(), r.audio_out(), r.event_in, r.event_out)
-                && shape.buses_in() == r.buses_in()
-                && shape.buses_out() == r.buses_out()
-                && shape.latency == r.latency
-                && shape.in_place == r.in_place
-                && shape.event_resolution == r.event_resolution
-                && shape.event_capacity == r.event_capacity
-                && shape.event_input_capacity == r.event_input_capacity
-                && shape.params == r.params
-        });
+        let fits = running.is_some_and(|r| Self::fits(&shape, &r));
+        if let Some(running) = running
+            && refuse_unfit
+            && !fits
+            && !fade.is_cut()
+        {
+            return Err(CommitError::FadeShape {
+                node: key,
+                running: Box::new(running),
+                incoming: Box::new(shape),
+            });
+        }
         let unwired = self.place(key, kind, unit, wake, shape, fork);
         if fits {
             self.placements.set_fade(key, fade);
@@ -523,6 +565,8 @@ impl<F: Float> Editor<F> {
     /// Removes `key` and every edge that touches it. Output channels it fed
     /// are left empty (silence).
     pub fn remove(&mut self, key: NodeKey) {
+        // A node that was leaving is cut now.
+        self.placements.stop_leaving(key);
         self.remove_keeping(key, None);
     }
 

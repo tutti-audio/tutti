@@ -120,6 +120,62 @@ impl ParamNode for Knob {
 
 tutti_graph::declare_params!([] Knob, n { Drive => Drive = &n.drive });
 
+/// A source with an event output, which no knob has: another shape. It holds
+/// a token to see when the node is dropped.
+#[derive(Clone)]
+struct Holder(#[expect(dead_code, reason = "held to be counted")] std::sync::Arc<()>);
+
+impl Node for Holder {
+    fn shape(&self) -> Shape {
+        Shape::source_unassigned(ChannelLayout::MONO).with_events(0, 1)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+        io.output(0).fill(0.0);
+        Status::Modified
+    }
+    fn reset(&mut self) {}
+}
+
+/// A [`Knob`] of another type: the same source and the same param, under a
+/// type of its own, so a replacement of one by the other changes the node's
+/// type and keeps its shape.
+#[derive(Clone)]
+struct Dial(Knob);
+
+impl Dial {
+    fn at(drive: f64) -> Self {
+        Self(Knob::at(drive))
+    }
+}
+
+impl Node for Dial {
+    fn shape(&self) -> Shape {
+        self.0.shape()
+    }
+    fn prepare(&mut self, prepare: &Prepare) {
+        self.0.prepare(prepare);
+    }
+    fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
+        self.0.process(cx, io)
+    }
+    fn reset(&mut self) {}
+    fn param_base(&self, port: usize) -> Option<f64> {
+        self.0.param_base(port)
+    }
+}
+
+impl ParamNode for Dial {
+    fn param_set(&self) -> ParamSet {
+        self.declared_set()
+    }
+    fn fork_fresh(&self) -> Self {
+        Self(self.0.fork_fresh())
+    }
+}
+
+tutti_graph::declare_params!([] Dial, n { Drive => Drive = &n.0.drive });
+
 /// A node that cannot run above 90 kHz: its `prepare` panics there, which is
 /// how a re-prepare poisons an editor.
 struct Grenade;
@@ -301,7 +357,7 @@ fn removing_a_node_twice_names_what_was_not_there() {
         "the session's remove names the node that is gone"
     );
     assert_eq!(
-        s.graph().remove(node),
+        s.graph().remove(node).map(|_| ()),
         Err(RemoveError::NoSuchNode(node.erase())),
         "so does the graph's"
     );
@@ -498,8 +554,9 @@ fn a_replace_during_a_re_prepare_lands_on_a_later_update() {
     s.set(knob.drive().to(Drive::new(7.0))).unwrap();
     side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(
-        out[0], 7.0,
-        "the old unit plays on, steered by the key's param"
+        f64::from(out[0]),
+        Knob::BUILT_WITH,
+        "the old unit plays on, as it was: the write is the incoming node's"
     );
 
     let events = s.update();
@@ -511,7 +568,10 @@ fn a_replace_during_a_re_prepare_lands_on_a_later_update() {
     for _ in 0..512 {
         side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     }
-    assert_eq!(out[0], 3.0, "the incoming knob is what sounds");
+    assert_eq!(
+        out[0], 7.0,
+        "the incoming knob sounds with what was written to its key while it waited"
+    );
     s.set(knob.drive().to(Drive::new(9.0))).unwrap();
     side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(out[0], 9.0, "its params are addressed under the key");
@@ -554,6 +614,269 @@ fn removing_a_node_purges_the_replacements_parked_on_it() {
             "{events:?}"
         );
         side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    }
+}
+
+/// A detached session with a knob playing at the root, its first plan sent,
+/// and the audio side taken: the running node a swap fades from.
+fn playing_knob() -> (
+    DetachedSession,
+    tutti_session::AudioSide,
+    tutti_session::Key<Params<Knob>>,
+) {
+    let mut s = detached(1);
+    let mut side = s.graph().take_audio_side();
+    let knob = s.graph().add(Params(Knob::new()));
+    s.graph()
+        .set_sources(Root::output(0), [OutPort::new(knob, 0)])
+        .unwrap()
+        .unfaded();
+    assert!(s.update().is_empty());
+    let mut out = [0.0f32];
+    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    assert_eq!(f64::from(out[0]), Knob::BUILT_WITH, "the knob plays");
+    (s, side, knob)
+}
+
+/// **A fade over a node of another shape is refused, and a zero fade cuts**:
+/// the default declick is not zero, so a default `Replacement::new` across a
+/// shape change is `ShapeChanged` naming the node and both shapes, with the
+/// running node, its values and its controls untouched; the same swap with a
+/// zero-length fade lands as a plain swap, and the incoming node sounds from
+/// the first frame after the commit.
+#[test]
+fn a_fade_over_a_shape_change_is_refused_and_a_zero_fade_cuts() {
+    let (mut s, mut side, knob) = playing_knob();
+    let refused = s
+        .graph()
+        .replace(knob, Replacement::new(ForkByClone(Events::<0, 1>)))
+        .expect_err("the shape differs and the default fade is not zero");
+    let ReplaceRefused::ShapeChanged {
+        node,
+        running,
+        incoming,
+    } = refused
+    else {
+        panic!("{refused:?}");
+    };
+    assert_eq!(node, knob.erase());
+    assert_eq!(running.event_out, 0);
+    assert_eq!(incoming.event_out, 1);
+    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
+
+    // Nothing changed: the knob is still the node, still steerable.
+    s.set(knob.drive().to(Drive::new(4.0))).unwrap();
+    assert!(s.update().is_empty());
+    let mut out = [0.0f32];
+    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    assert_eq!(out[0], 4.0, "the refused swap left the running knob");
+
+    let cut = Fade::new(Samples::ZERO);
+    s.graph()
+        .replace(
+            knob,
+            Replacement::new(ForkByClone(Events::<0, 1>)).fade(cut),
+        )
+        .expect("a cut over a shape change is accepted");
+    assert!(s.update().is_empty());
+    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    assert_eq!(out[0], 0.0, "the incoming node, with no blend of the knob");
+}
+
+/// **A parked swap checks the shapes when it lands**: a re-prepare is between
+/// its commits, a fade is asked over another shape, and the update that finds
+/// the graph resumed reports `ReplaceFailed { ShapeChanged }`. The incoming
+/// node is dropped, and the key gives the outgoing knob its values back: a
+/// write through it reaches the knob that is still playing.
+#[test]
+fn a_parked_swap_over_a_shape_change_fails_when_it_lands() {
+    use std::sync::Arc;
+
+    let (mut s, mut side, knob) = playing_knob();
+    let token = Arc::new(());
+    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph()
+        .replace(
+            knob,
+            Replacement::new(ForkByClone(Holder(Arc::clone(&token)))),
+        )
+        .expect("accepted: the shapes are checked when it lands");
+    assert_eq!(s.graph_ref().testing().waiting_replacements(), 1);
+    assert!(Arc::strong_count(&token) > 1, "the incoming node waits");
+
+    let mut out = [0.0f32];
+    let mut failed = None;
+    for _ in 0..8 {
+        for event in s.update() {
+            if let SessionEvent::ReplaceFailed { node, refused } = event {
+                failed = Some((node, refused));
+            }
+        }
+        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    }
+    let (node, refused) = failed.expect("the retry was refused");
+    assert_eq!(node, knob.erase());
+    assert!(
+        matches!(refused, ReplaceRefused::ShapeChanged { .. }),
+        "{refused:?}"
+    );
+    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
+    assert_eq!(Arc::strong_count(&token), 1, "the incoming node is dropped");
+}
+
+/// **A parked swap with a zero fade lands over another shape**, as the same
+/// swap does at once.
+#[test]
+fn a_parked_swap_with_a_zero_fade_lands_over_a_shape_change() {
+    let (mut s, mut side, knob) = playing_knob();
+    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph()
+        .replace(
+            knob,
+            Replacement::new(ForkByClone(Events::<0, 1>)).fade(Fade::new(Samples::ZERO)),
+        )
+        .expect("accepted");
+    let mut out = [0.0f32];
+    let mut landed = false;
+    for _ in 0..8 {
+        landed |= s
+            .update()
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Replaced { node } if *node == knob.erase()));
+        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    }
+    assert!(landed, "reported as replaced");
+    assert_eq!(out[0], 0.0, "the incoming node renders");
+}
+
+/// **While a swap is parked, the returned key names the incoming node**, for
+/// a node of the same type and of another: a write through the key reaches
+/// the incoming node's values and lands with it (the value it renders is the
+/// write, not its default), and the outgoing node plays on as it was.
+#[test]
+fn a_write_through_the_key_of_a_parked_swap_lands_with_the_incoming_node() {
+    // The same type.
+    let (mut s, mut side, knob) = playing_knob();
+    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    let same = s
+        .graph()
+        .replace(knob, Replacement::new(Params(Knob::at(3.0))))
+        .unwrap();
+    s.set(same.drive().to(Drive::new(7.0))).unwrap();
+    let mut out = [0.0f32];
+    // The executor checks its units out for the re-prepare (a silent
+    // block) and resumes them; the swap waits for an update that finds the
+    // graph resumed.
+    assert!(s.update().is_empty());
+    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    assert!(s.update().is_empty());
+    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    assert_eq!(f64::from(out[0]), Knob::BUILT_WITH, "the outgoing plays on");
+    for _ in 0..8 {
+        let _ = s.update();
+        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    }
+    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
+    for _ in 0..512 {
+        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    }
+    assert_eq!(out[0], 7.0, "the write, not the incoming default 3.0");
+
+    // Another type: a write through its key, which the outgoing node's
+    // table would refuse as a type mismatch.
+    let (mut s, mut side, knob) = playing_knob();
+    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    let dial = s
+        .graph()
+        .replace(knob, Replacement::new(Params(Dial::at(3.0))))
+        .unwrap();
+    s.set(dial.drive().to(Drive::new(5.0)))
+        .expect("the key's targets are the incoming node's");
+    for _ in 0..8 {
+        let _ = s.update();
+        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    }
+    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
+    for _ in 0..512 {
+        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    }
+    assert_eq!(out[0], 5.0, "the write, not the incoming default 3.0");
+}
+
+/// **While a swap is parked, `gain_reduction` answers for the incoming node**:
+/// a three-band compressor replaces a two-band one, and its third band is
+/// readable through the key from the call on (the outgoing node has two).
+#[test]
+fn the_readers_of_a_parked_swaps_key_answer_for_the_incoming_node() {
+    use tutti_nodes::{MultibandBands, MultibandCompressorConfig, MultibandCompressorNode};
+
+    let mut s = detached(1);
+    let _side = s.graph().take_audio_side();
+    let band = |n| {
+        MultibandCompressorNode::from(MultibandCompressorConfig::new(
+            tutti_buffers::BusTopology::STEREO,
+            MultibandBands::of(n),
+        ))
+    };
+    let two = s.graph().add(band(2));
+    assert!(s.graph_ref().gain_reduction(&two, 2).is_none());
+    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    let three = s
+        .graph()
+        .replace(two, Replacement::new(band(3)))
+        .expect("accepted");
+    assert_eq!(s.graph_ref().testing().waiting_replacements(), 1);
+    assert!(
+        s.graph_ref().gain_reduction(&three, 2).is_some(),
+        "the key names the incoming node's controls"
+    );
+}
+
+/// **A removal drops a parked swap and says so**: the graph re-prepares, a
+/// replacement waits, the node is removed, and the next update reports
+/// `ReplaceDropped` for the node, once.
+#[test]
+fn removing_a_node_reports_the_parked_swap_it_drops() {
+    let (mut s, _side, knob) = playing_knob();
+    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph()
+        .replace(knob, Replacement::new(Params(Knob::at(3.0))))
+        .unwrap();
+    s.graph().remove(knob).unwrap();
+    let mut dropped = Vec::new();
+    for _ in 0..4 {
+        for event in s.update() {
+            if let SessionEvent::ReplaceDropped { node } = event {
+                dropped.push(node);
+            }
+        }
+    }
+    assert_eq!(dropped, vec![knob.erase()]);
+}
+
+/// **`remove` fades the node out, and `.unfaded()` cuts it**: a removed node
+/// that feeds the root plays on through the declick after the commit that
+/// carries the removal, and is gone at that commit with `.unfaded()`.
+#[test]
+fn an_unfaded_removal_cuts_where_the_default_fades_out() {
+    for unfaded in [false, true] {
+        let (mut s, mut side, knob) = playing_knob();
+        let removal = s.graph().remove(knob).unwrap();
+        if unfaded {
+            let _ = removal.unfaded();
+        }
+        assert!(s.update().is_empty());
+        let mut out = [0.0f32];
+        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+        if unfaded {
+            assert_eq!(out[0], 0.0, "cut at the block boundary");
+        } else {
+            assert!(
+                out[0] > 0.0 && f64::from(out[0]) <= Knob::BUILT_WITH,
+                "fading out: {}",
+                out[0]
+            );
+        }
     }
 }
 

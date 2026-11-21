@@ -85,7 +85,7 @@ impl<F: Float> Editor<F> {
     ///
     /// [`MissingSource`] naming the first output source that is not in the
     /// spec now.
-    pub fn open_output_tap(
+    pub fn open_heard_tap(
         &mut self,
         id: TapId,
         width: usize,
@@ -100,7 +100,7 @@ impl<F: Float> Editor<F> {
             .copied()
             .collect();
         self.check_sources(&named)?;
-        Ok(self.replace_output_tap(id, width, capacity))
+        Ok(self.replace_heard_tap(id, width, capacity))
     }
 
     /// Opens the outputs tap `id` again at `width` lanes, with no check of the
@@ -112,19 +112,19 @@ impl<F: Float> Editor<F> {
     /// # Errors
     ///
     /// [`CloseError::Tap`] when no outputs tap `id` is open; nothing changes.
-    pub fn reopen_output_tap(
+    pub fn reopen_heard_tap(
         &mut self,
         id: TapId,
         width: usize,
         capacity: Samples,
     ) -> Result<TapReader<F>, CloseError> {
         match self.spec.topology.taps.get(&id) {
-            Some(TapSpec::Outputs { .. }) => Ok(self.replace_output_tap(id, width, capacity)),
+            Some(TapSpec::Outputs { .. }) => Ok(self.replace_heard_tap(id, width, capacity)),
             _ => Err(CloseError::Tap(id)),
         }
     }
 
-    fn replace_output_tap(&mut self, id: TapId, width: usize, capacity: Samples) -> TapReader<F> {
+    fn replace_heard_tap(&mut self, id: TapId, width: usize, capacity: Samples) -> TapReader<F> {
         self.end_replaced_tap(id);
         let (reader, writer) = TapReader::named(id, width, capacity, None);
         let opened = TapOpened {

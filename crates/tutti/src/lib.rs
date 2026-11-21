@@ -525,9 +525,9 @@ pub mod session {
     pub use tutti_session::{
         BackgroundWork, BlockConfig, Bus, BusSink, Channel, Committed, Connection,
         DeclarationError, Disconnection, Event, EventEdge, EventTapPort, Fanin, Feeder, Graph,
-        Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots, NotReopened,
-        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputTapOpen, PHASES, Peer,
-        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
+        HeardTapOpen, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots,
+        NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer,
+        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims, Removal,
         RemoveError, Reopened, ReplaceRefused, Replacement, Resource, ResourceFact, ResourceId,
         RootDeclaration, RootReader, RootTopologyStatus, SessionHeardTapError, SessionNode,
         SetSources, Taps, TempoError, Weighted, Wire, root_width,

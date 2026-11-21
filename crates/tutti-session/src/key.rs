@@ -908,6 +908,33 @@ impl<'g, W: Wire, F: Float> Disconnection<'g, W, F> {
     }
 }
 
+/// What a [`Graph::remove`] did, and the step that makes the cut land at the
+/// next block boundary instead of fading the node out.
+///
+/// Dropping it keeps the removal as the call left it: the node's output edges
+/// fade out and the node goes once they have.
+#[derive(Debug)]
+pub struct Removal<'g, F: Float = f32> {
+    graph: &'g mut Graph<F>,
+    node: NodeKey,
+}
+
+impl<'g, F: Float> Removal<'g, F> {
+    pub(crate) fn new(graph: &'g mut Graph<F>, node: NodeKey) -> Self {
+        Self { graph, node }
+    }
+
+    /// Cuts the node at the next block boundary: no fade out. The default is
+    /// a fade out over [`DECLICK`](tutti_graph::DECLICK) (5 ms), so a node
+    /// never steps out of a running sum; `unfaded` is for a test, an analysis
+    /// graph or a node nobody is listening to. Its controls are held, as for
+    /// a faded removal, until the node has left the render.
+    pub fn unfaded(self) -> Self {
+        self.graph.cut_removal(self.node);
+        self
+    }
+}
+
 /// What a [`Graph::set_sources`] did, and the step that makes it land at the
 /// next block boundary instead of fading.
 ///
