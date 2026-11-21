@@ -253,9 +253,10 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, SystemClock<F>> {
     /// too the session stays stopped, and the host says what the graph is
     /// prepared at.
     fn back_to_the_timer(&mut self, old: OutputSpec) -> Result<()> {
+        let timer = TimerDriver::new(self.background.executor());
         let mut host = self.running.take_host();
         let restored = host.restart_with(
-            || Ok::<_, Error>((old, TimerDriver::new())),
+            || Ok::<_, Error>((old, timer)),
             |spec, stopped| self.rerate(spec, stopped, None, None),
         );
         if restored.is_err() {
@@ -319,7 +320,8 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, DeviceClock<F>> {
     /// timer's own failure ([`Error::Clock`]) after it, and
     /// [`Error::SwitchNotUndone`] when the card could not be started again.
     pub fn into_system_clock(self) -> std::result::Result<SystemSession<K, F>, ClockError<Self>> {
-        self.into_timer(TimerDriver::new(), |session, device, _| {
+        let timer = TimerDriver::new(self.background.executor());
+        self.into_timer(timer, |session, device, _| {
             let chosen = device.chosen.clone();
             device.driver.restart_with(chosen, |spec, stopped| {
                 session.rerate(spec, stopped, None, None)

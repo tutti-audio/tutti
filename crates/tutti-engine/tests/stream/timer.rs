@@ -4,11 +4,12 @@
 //! The schedule's arithmetic (deadlines, owed blocks, the re-anchor) is tested
 //! against a scripted clock in `src/timer/tests.rs`; these tests hold what only
 //! a running thread shows: whole blocks reach the engine, the block clock is
-//! dated by deadlines, the latency reads zero, and the stop joins.
+//! dated by deadlines, the latency reads zero, the stop joins, and a drop on a
+//! driving thread returns.
 
 use std::sync::Arc;
 use std::time::Duration;
-use tutti_platform::Instant;
+use tutti_platform::{Executor, Instant, join_within};
 
 use crate::fixtures::{SAMPLE_RATE, fan, graph_engine};
 use tutti_buffers::SampleFormat;
@@ -61,9 +62,10 @@ fn wait_for(clock: &BlockClockReader, done: impl Fn(&BlockReading) -> bool) -> B
 fn the_timer_renders_whole_quantum_blocks_and_reports_zero_latency() {
     const QUANTUM: usize = 480;
     let (state, clock) = timer_state();
+    let executor = Executor::new();
     let mut stream = OutputStream::new(spec(Some(QUANTUM)));
     stream
-        .start_with(state, TimerDriver::new())
+        .start_with(state, TimerDriver::new(&executor))
         .expect("a thread starts");
     let reading = wait_for(&clock, |r| r.frame.get() >= 5 * QUANTUM as u64);
     assert_eq!(reading.frame.get() % QUANTUM as u64, 0);
@@ -76,9 +78,10 @@ fn the_timer_renders_whole_quantum_blocks_and_reports_zero_latency() {
 fn a_spec_with_no_quantum_renders_the_default_block() {
     let block = tutti_engine::DEFAULT_BLOCK.get() as u64;
     let (state, clock) = timer_state();
+    let executor = Executor::new();
     let mut stream = OutputStream::new(spec(None));
     stream
-        .start_with(state, TimerDriver::new())
+        .start_with(state, TimerDriver::new(&executor))
         .expect("a thread starts");
     let reading = wait_for(&clock, |r| r.frame.get() >= 3 * block);
     assert_eq!(reading.frame.get() % block, 0);
@@ -94,10 +97,11 @@ fn a_spec_with_no_quantum_renders_the_default_block() {
 fn the_block_clock_is_dated_by_deadlines_not_wake_ups() {
     const QUANTUM: usize = 480;
     let (state, clock) = timer_state();
+    let executor = Executor::new();
     let mut stream = OutputStream::new(spec(Some(QUANTUM)));
     let faults = stream.faults();
     stream
-        .start_with(state, TimerDriver::new())
+        .start_with(state, TimerDriver::new(&executor))
         .expect("a thread starts");
 
     // A re-anchor counts a fault and then writes the reading after it. A
@@ -147,9 +151,10 @@ fn the_block_clock_is_dated_by_deadlines_not_wake_ups() {
 #[test]
 fn stopping_the_timer_ends_its_blocks() {
     let (state, clock) = timer_state();
+    let executor = Executor::new();
     let mut stream = OutputStream::new(spec(Some(240)));
     stream
-        .start_with(state, TimerDriver::new())
+        .start_with(state, TimerDriver::new(&executor))
         .expect("a thread starts");
     wait_for(&clock, |r| r.frame.get() > 0);
     stream.stop();
@@ -157,4 +162,26 @@ fn stopping_the_timer_ends_its_blocks() {
     std::thread::sleep(Duration::from_millis(60));
     assert_eq!(clock.read().expect("it rendered").frame, stopped_at);
     assert!(!stream.is_running());
+}
+
+/// **A drop on a driving thread returns:** a stream dropped inside a future on a
+/// dedicated executor thread stops its loop without joining it, where a join
+/// would panic.
+#[test]
+fn dropping_the_timer_on_a_driving_thread_returns_without_joining() {
+    let (state, clock) = timer_state();
+    let executor = Executor::new();
+    let mut stream = OutputStream::new(spec(Some(240)));
+    stream
+        .start_with(state, TimerDriver::new(&executor))
+        .expect("a thread starts");
+    wait_for(&clock, |r| r.frame.get() > 0);
+    let dropper = executor
+        .spawn_dedicated("drop-timer", None, async move { drop(stream) })
+        .expect("a thread starts");
+    // A hang guard only: the drop returns at once.
+    assert!(
+        matches!(join_within(dropper, Duration::from_secs(10)), Ok(Some(()))),
+        "the drop on a driving thread returns"
+    );
 }
