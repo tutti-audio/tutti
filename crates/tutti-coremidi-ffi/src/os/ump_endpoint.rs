@@ -403,13 +403,15 @@ fn register(
     match result {
         Ok(()) => Ok(()),
         Err(RegisterFailure::Refused(error)) => Err(error),
-        // SAFETY: a plain getter on the live endpoint.
-        Err(RegisterFailure::Unreported)
-            if unsafe { endpoint.mutableFunctionBlocks() }.count() == count =>
-        {
-            Ok(())
+        Err(RegisterFailure::Unreported) => {
+            // SAFETY: a plain getter on the live endpoint.
+            let held = unsafe { endpoint.mutableFunctionBlocks() }.count();
+            if held == count {
+                Ok(())
+            } else {
+                Err(Error::NoObject(operation))
+            }
         }
-        Err(RegisterFailure::Unreported) => Err(Error::NoObject(operation)),
     }
 }
 
