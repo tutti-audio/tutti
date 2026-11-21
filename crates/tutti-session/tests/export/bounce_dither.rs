@@ -22,14 +22,25 @@ fn bounced(
         Bounce<tutti_graph::NodeKey, tutti_session::FileMaster>,
     ) -> Bounce<tutti_graph::NodeKey, tutti_session::FileMaster>,
 ) -> Vec<i32> {
+    bounced_node(
+        ForkByClone(Const::new(LEVEL, ChannelLayout::STEREO)),
+        configure,
+    )
+}
+
+/// The 16-bit samples of a bounce of `node`, as `configure` sets its options.
+fn bounced_node<N: tutti_graph::Node + Clone + Send + 'static>(
+    node: ForkByClone<N>,
+    configure: impl FnOnce(
+        Bounce<tutti_graph::NodeKey, tutti_session::FileMaster>,
+    ) -> Bounce<tutti_graph::NodeKey, tutti_session::FileMaster>,
+) -> Vec<i32> {
     let mut session = Session::builder()
         .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::SR_48K)
         .expect("a detached session builds");
-    let dc = session
-        .graph()
-        .add(ForkByClone(Const::new(LEVEL, ChannelLayout::STEREO)));
+    let dc = session.graph().add(node);
     session.graph().connect(dc, Root).unwrap().unfaded();
     let dir = tempfile::tempdir().expect("dir");
     let path = dir.path().join("out.wav");
@@ -89,4 +100,34 @@ fn the_default_dither_is_triangular() {
         "{}",
         error_power(&rectangular)
     );
+}
+
+/// **`noise_shaping` reaches the file.** With no dither the rounding of a sine is
+/// deterministic and `no_dither` alone writes it; with the error fed back through the shaping
+/// filter a good part of the samples round the other way, and every one stays within the
+/// feedback bound `(1 + sum |c|) / 2` steps of the sine (a hundredth of a step more for the
+/// oscillator's own `f32` rounding).
+#[test]
+fn noise_shaping_feeds_the_rounding_error_back() {
+    use tutti_nodes::testing::Osc;
+    let tone = |n: usize| {
+        let phase = 2.0 * std::f64::consts::PI * 997.0 * (n / 2) as f64 / 48_000.0;
+        0.25 * phase.sin() * 32_768.0
+    };
+    let node = || {
+        ForkByClone(
+            Osc::sine(tutti_units::Hz::new(997.0))
+                .with_amplitude(tutti_units::Amplitude::new(0.25))
+                .with_layout(ChannelLayout::STEREO),
+        )
+    };
+    let plain = bounced_node(node(), Bounce::no_dither);
+    let shaped = bounced_node(node(), |b| b.no_dither().noise_shaping());
+    assert_eq!(plain.len(), shaped.len());
+    let moved = plain.iter().zip(&shaped).filter(|(a, b)| a != b).count();
+    assert!(moved * 10 > plain.len(), "{moved} of {}", plain.len());
+    let bound = 0.5 * (1.0 + tutti_session::NoiseShaping::new(SampleRate::SR_48K).feedback_gain());
+    for (n, &s) in shaped.iter().enumerate() {
+        assert!((f64::from(s) - tone(n)).abs() <= bound + 0.01, "sample {n}");
+    }
 }

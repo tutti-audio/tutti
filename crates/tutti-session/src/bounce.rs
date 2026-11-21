@@ -306,6 +306,7 @@ pub struct Bounce<N = NodeKey, M = NoMaster, F: Float = f32> {
     file_topology: Option<ChannelTopology>,
     serial: bool,
     dither: Option<DitherShape>,
+    noise_shaping: bool,
     on_event_loss: EventLossPolicy,
     normalize: Option<Normalize>,
     create_new: bool,
@@ -333,6 +334,7 @@ impl<N, F: Float> Bounce<N, NoMaster, F> {
             file_topology: None,
             serial: false,
             dither: Some(DitherShape::Triangular),
+            noise_shaping: false,
             on_event_loss: EventLossPolicy::default(),
             normalize: None,
             create_new: false,
@@ -389,6 +391,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             file_topology,
             serial,
             dither,
+            noise_shaping,
             on_event_loss,
             normalize,
             create_new,
@@ -408,6 +411,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             file_topology,
             serial,
             dither,
+            noise_shaping,
             on_event_loss,
             normalize,
             create_new,
@@ -448,6 +452,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             file_topology,
             serial,
             dither,
+            noise_shaping,
             on_event_loss,
             normalize,
             create_new,
@@ -471,6 +476,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             file_topology,
             serial,
             dither,
+            noise_shaping,
             on_event_loss,
             normalize,
             create_new,
@@ -620,6 +626,14 @@ impl<N, F: Float> Bounce<N, FileMaster, F> {
         self
     }
 
+    /// Shapes the quantization error of an integer width
+    /// ([`FileTarget::noise_shaping`]): off unless this says so, independent of
+    /// the dither, and ignored by a float width.
+    pub fn noise_shaping(mut self) -> Self {
+        self.noise_shaping = true;
+        self
+    }
+
     /// Normalizes the master file to `normalize`: the render is kept, measured
     /// and written with the gain, never rendered twice.
     pub fn normalize(mut self, normalize: Normalize) -> Self {
@@ -644,6 +658,7 @@ impl<N: std::fmt::Debug, M: std::fmt::Debug, F: Float> std::fmt::Debug for Bounc
             .field("file_topology", &self.file_topology)
             .field("serial", &self.serial)
             .field("dither", &self.dither)
+            .field("noise_shaping", &self.noise_shaping)
             .field("on_event_loss", &self.on_event_loss)
             .field("normalize", &self.normalize)
             .field("create_new", &self.create_new)
@@ -1113,11 +1128,12 @@ pub enum BounceError {
     Export(tutti_export::RenderError),
 }
 
-/// `file` with the bounce's resample, dither and normalize, each only when set.
+/// `file` with the bounce's resample, dither, noise shaping and normalize, each only when set.
 fn file_options(
     file: FileTarget,
     resample: Option<Resample>,
     dither: Option<DitherShape>,
+    noise_shaping: bool,
     normalize: Option<NormalizeSpec>,
 ) -> FileTarget {
     let file = match resample {
@@ -1127,6 +1143,11 @@ fn file_options(
     let file = match dither {
         Some(shape) => file.dither(shape),
         None => file.no_dither(),
+    };
+    let file = if noise_shaping {
+        file.noise_shaping()
+    } else {
+        file
     };
     match normalize {
         Some(normalize) => file.normalize(normalize),
@@ -1843,6 +1864,7 @@ where
             file_topology,
             serial,
             dither,
+            noise_shaping,
             on_event_loss,
             normalize,
             create_new,
@@ -1876,7 +1898,13 @@ where
                     Some(topology) => file.topology(topology),
                     None => file,
                 };
-                let file = file_options(file, resample, dither, normalize.map(NormalizeSpec::own));
+                let file = file_options(
+                    file,
+                    resample,
+                    dither,
+                    noise_shaping,
+                    normalize.map(NormalizeSpec::own),
+                );
                 refusing_existing(file, create_new).into()
             }
             None => {
@@ -1934,6 +1962,7 @@ where
                         FileTarget::new(path, format, layout),
                         resample,
                         dither,
+                        noise_shaping,
                         gain,
                     );
                     refusing_existing(file, create_new).into()

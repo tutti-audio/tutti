@@ -16,7 +16,7 @@ use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::{InletRing, TapWriter};
 use tutti_session::{
     Armed, Input, InputConfig, InputOpener, LiveSession, OpenedInput, Punch, Recorded, Session,
-    SessionEvent, Start, Take, TakeEnd, TakeError, TakeEvent, TakeTarget, Trim,
+    SessionEvent, Start, Take, TakeEnd, TakeError, TakeEvent, TakeFile, TakeTarget, Trim,
 };
 use tutti_units::{At, Beat, Frame, SampleRate, Samples};
 
@@ -77,6 +77,8 @@ struct Rig {
     events: Vec<SessionEvent>,
     /// The playback delay each rendered block reports; `None`: none.
     delay: Option<Duration>,
+    /// The value of frame `i` on both channels, to push instead of the ramp.
+    signal: Option<fn(usize) -> f32>,
 }
 
 fn rig(config: InputConfig, lead: Samples) -> Rig {
@@ -106,6 +108,7 @@ fn rig(config: InputConfig, lead: Samples) -> Rig {
         pushed: 0,
         events: Vec::new(),
         delay: None,
+        signal: None,
     }
 }
 
@@ -115,7 +118,10 @@ impl Rig {
     /// updates, collecting the events.
     fn step(&mut self, frames: usize) {
         let ramp: Vec<f32> = (self.pushed..self.pushed + frames)
-            .flat_map(|i| [i as f32, -(i as f32)])
+            .flat_map(|i| match self.signal {
+                Some(signal) => [signal(i); 2],
+                None => [i as f32, -(i as f32)],
+            })
             .collect();
         self.capture
             .lock()
@@ -243,7 +249,7 @@ fn a_beat_punch_records_exactly_the_frames_between_its_beats() {
     let punch = Punch::at(Beat::new(0.5)).until(Beat::new(1.0)).unwrap();
     let take = rig
         .session
-        .record(&rig.input, punch, TakeTarget::wav(wav(&dir, "a.wav")))
+        .record(&rig.input, punch, TakeFile::wav(wav(&dir, "a.wav")))
         .expect("armed");
     let window = take.window();
     let end = window.end.expect("a punch-out");
@@ -285,7 +291,7 @@ fn a_punch_in_the_past_starts_at_once_and_reports_the_real_frame() {
         .record(
             &rig.input,
             Punch::at(Frame::new(10)).until(Frame::new(5_000)).unwrap(),
-            TakeTarget::wav(wav(&dir, "past.wav")),
+            TakeFile::wav(wav(&dir, "past.wav")),
         )
         .expect("armed");
     rig.run_until(finished);
@@ -331,7 +337,7 @@ fn placement_is_the_formula_with_each_term_stated() {
             Punch::at(Frame::new(10_000))
                 .until(Frame::new(10_100))
                 .unwrap(),
-            TakeTarget::wav(wav(&dir, "p.wav")),
+            TakeFile::wav(wav(&dir, "p.wav")),
         )
         .expect("armed");
     rig.run_until(finished);
@@ -362,7 +368,7 @@ fn an_unreported_latency_is_stated_unknown_not_zero() {
             Punch::at(Frame::new(2_000))
                 .until(Frame::new(2_050))
                 .unwrap(),
-            TakeTarget::wav(wav(&dir, "u.wav")),
+            TakeFile::wav(wav(&dir, "u.wav")),
         )
         .expect("armed");
     rig.run_until(finished);
@@ -393,7 +399,7 @@ fn started_then_finished_once() {
             Punch::at(Frame::new(3_000))
                 .until(Frame::new(3_500))
                 .unwrap(),
-            TakeTarget::wav(wav(&dir, "e.wav")),
+            TakeFile::wav(wav(&dir, "e.wav")),
         )
         .expect("armed");
     let id = take.id();
@@ -419,11 +425,7 @@ fn an_open_ended_take_is_finished_by_its_handle() {
     rig.step(256);
     let take = rig
         .session
-        .record(
-            &rig.input,
-            Punch::now(),
-            TakeTarget::wav(wav(&dir, "o.wav")),
-        )
+        .record(&rig.input, Punch::now(), TakeFile::wav(wav(&dir, "o.wav")))
         .expect("armed");
     let mut armed: Option<Take<Armed>> = Some(take);
     let mut rolling = None;
@@ -466,7 +468,7 @@ fn a_take_ends_when_its_input_is_removed() {
     let path = wav(&dir, "r.wav");
     let _take = rig
         .session
-        .record(&rig.input, Punch::now(), TakeTarget::wav(path.clone()))
+        .record(&rig.input, Punch::now(), TakeFile::wav(path.clone()))
         .expect("armed");
     rig.run_until(started);
     rig.step(BLOCK);
@@ -581,7 +583,7 @@ fn what_cannot_be_armed_is_refused_where_it_is_made() {
         .record(
             &rig.input,
             Punch::at(Beat::new(2.0)),
-            TakeTarget::wav(wav(&dir, "s.wav")),
+            TakeFile::wav(wav(&dir, "s.wav")),
         )
         .unwrap_err();
     assert!(
@@ -597,7 +599,7 @@ fn what_cannot_be_armed_is_refused_where_it_is_made() {
             Punch::at(Frame::new(500_000))
                 .until(Beat::new(1.0))
                 .unwrap(),
-            TakeTarget::wav(wav(&dir, "b.wav")),
+            TakeFile::wav(wav(&dir, "b.wav")),
         )
         .unwrap_err();
     assert!(matches!(backwards, TakeError::Punch(_)), "{backwards:?}");
@@ -639,7 +641,7 @@ fn a_take_makes_a_clip_only_from_a_file() {
             Punch::at(Frame::new(1_000))
                 .until(Frame::new(1_200))
                 .unwrap(),
-            TakeTarget::wav(wav(&dir, "c.wav")),
+            TakeFile::wav(wav(&dir, "c.wav")),
         )
         .expect("armed");
     rig.run_until(finished);
@@ -697,7 +699,7 @@ fn a_take_records_and_its_file_holds_the_frames_written() {
     let path = wav(&dir, "ramp.wav");
     let take = rig
         .session
-        .record(&rig.input, Punch::now(), TakeTarget::wav(path.clone()))
+        .record(&rig.input, Punch::now(), TakeFile::wav(path.clone()))
         .expect("armed");
     rig.steps_until(started);
     for _ in 0..16 {
@@ -729,11 +731,7 @@ fn finish_returns_at_once_and_the_completion_lands_in_the_updates_after() {
     rig.step(256);
     let take = rig
         .session
-        .record(
-            &rig.input,
-            Punch::now(),
-            TakeTarget::wav(wav(&dir, "f.wav")),
-        )
+        .record(&rig.input, Punch::now(), TakeFile::wav(wav(&dir, "f.wav")))
         .expect("armed");
     rig.steps_until(started);
     let before = rig.takes().len();
@@ -769,7 +767,7 @@ fn an_idle_take_never_stalls_update() {
         .record(
             &rig.input,
             Punch::at(At::Frame(Frame::new(1 << 30))),
-            TakeTarget::wav(wav(&dir, "idle.wav")),
+            TakeFile::wav(wav(&dir, "idle.wav")),
         )
         .expect("armed");
     for _ in 0..100 {
@@ -804,7 +802,7 @@ fn dropping_a_session_commits_every_take_before_it_returns() {
     rig.step(256);
     let take = rig
         .session
-        .record(&rig.input, Punch::now(), TakeTarget::wav(path.clone()))
+        .record(&rig.input, Punch::now(), TakeFile::wav(path.clone()))
         .expect("armed");
     rig.steps_until(started);
     for _ in 0..16 {
@@ -848,7 +846,7 @@ fn dropping_a_session_on_a_driving_thread_returns_without_joining() {
                 rig.step(256);
                 let take = rig
                     .session
-                    .record(&rig.input, Punch::now(), TakeTarget::wav(path))
+                    .record(&rig.input, Punch::now(), TakeFile::wav(path))
                     .expect("armed");
                 rig.steps_until(started);
                 drop(rig);
@@ -865,7 +863,7 @@ fn dropping_a_session_on_a_driving_thread_returns_without_joining() {
 
 /// Runs a take of the ramp into `target` to its end and returns the
 /// session's events.
-fn record_to_end(target: TakeTarget) -> Vec<SessionEvent> {
+fn record_to_end(target: TakeFile) -> Vec<SessionEvent> {
     let mut rig = rig(InputConfig::default(), Samples::new(0));
     rig.step(256);
     let take = rig
@@ -900,7 +898,7 @@ fn a_create_new_take_onto_an_existing_file_keeps_the_take_and_leaves_the_path() 
     let dir = tempfile::tempdir().unwrap();
     let path = wav(&dir, "taken.wav");
     std::fs::write(&path, b"old bytes").unwrap();
-    let events = record_to_end(TakeTarget::wav(path.clone()).create_new());
+    let events = record_to_end(TakeFile::wav(path.clone()).create_new());
     let [SessionEvent::Take(TakeEvent::Failed { error, .. })] = events
         .iter()
         .filter(|e| matches!(e, SessionEvent::Take(_)))
@@ -934,8 +932,104 @@ fn a_take_replaces_an_existing_file_and_leaves_nothing_beside_it() {
     let dir = tempfile::tempdir().unwrap();
     let path = wav(&dir, "taken.wav");
     std::fs::write(&path, b"old bytes").unwrap();
-    let events = record_to_end(TakeTarget::wav(path.clone()));
+    let events = record_to_end(TakeFile::wav(path.clone()));
     let done = recorded(&events);
     assert_eq!(read(&path).len(), done.frames().get());
     assert_eq!(names(&dir), [std::ffi::OsString::from("taken.wav")]);
+}
+
+/// 1000.25 steps of 16 bit, exact in `f32`: a quarter of a step off a code.
+const LEVEL: f32 = 1_000.25 / 32_768.0;
+
+fn constant(_: usize) -> f32 {
+    LEVEL
+}
+
+/// A sine of 0.25 at 997 Hz.
+fn tone(i: usize) -> f32 {
+    (0.25 * (2.0 * std::f64::consts::PI * 997.0 * i as f64 / RATE).sin()) as f32
+}
+
+/// The 16-bit samples of a take of `signal` into `target`, and the graph frame the
+/// first of them is.
+fn signal_take(
+    signal: fn(usize) -> f32,
+    target: impl FnOnce(std::path::PathBuf) -> TakeFile,
+) -> (Vec<i32>, usize) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = wav(&dir, "signal.wav");
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
+    rig.signal = Some(signal);
+    rig.step(256);
+    let take = rig
+        .session
+        .record(&rig.input, Punch::now(), target(path.clone()))
+        .expect("armed");
+    rig.steps_until(started);
+    for _ in 0..16 {
+        rig.step(BLOCK);
+    }
+    take.finish();
+    rig.steps_until(finished);
+    let first = recorded(&rig.events).placement().first_frame().get() as usize;
+    let samples = hound::WavReader::open(&path)
+        .unwrap()
+        .into_samples::<i32>()
+        .map(Result::unwrap)
+        .collect();
+    (samples, first)
+}
+
+fn int16(path: std::path::PathBuf) -> TakeFile {
+    TakeFile::new(path, tutti_codec::Format::Wav(tutti_codec::Pcm::Int16))
+}
+
+/// **A take to an integer file is dithered by default, and the dither is triangular:** the
+/// samples of a constant a quarter step off a code scatter, and their mean squared distance
+/// from the level is 1/4 step^2 (1/6 for the dither's variance, 1/12 for the rounding,
+/// whatever the level), which neither plain rounding (1/16 here) nor a constant has.
+#[test]
+fn a_take_to_an_integer_file_is_triangular_dithered_by_default() {
+    let (samples, _) = signal_take(constant, int16);
+    // How much of the tail the pump drained before the stop is not pinned: the figure's
+    // bound follows the count. The squared error of a triangular dither has a standard
+    // deviation under 0.3, and the bound is seven of the mean's.
+    let n = samples.len() as f64;
+    assert!(n > 200.0, "{n}");
+    assert!(samples.iter().any(|&s| s != samples[0]), "a flat file");
+    let exact = f64::from(LEVEL) * 32_768.0;
+    let power = samples
+        .iter()
+        .map(|&s| (f64::from(s) - exact).powi(2))
+        .sum::<f64>()
+        / samples.len() as f64;
+    assert!((power - 0.25).abs() < 2.1 / n.sqrt(), "{power} over {n}");
+}
+
+/// **`no_dither` writes the plain rounding, exactly:** every sample is the quantization of
+/// the level.
+#[test]
+fn a_take_with_no_dither_writes_the_rounded_value_exactly() {
+    let (samples, _) = signal_take(constant, |path| int16(path).no_dither());
+    let plain = tutti_codec::IntDepth::Int16.quantize(LEVEL);
+    assert!(!samples.is_empty());
+    assert!(samples.iter().all(|&s| s == plain), "{:?}", &samples[..8]);
+}
+
+/// **`noise_shaping` reaches the take's quantizer:** with no dither a sine is written as
+/// its plain rounding; fed back through the filter a good part of the samples round the
+/// other way, and each stays within the feedback bound
+/// `(1 + sum |c|) / 2` steps of the sine.
+#[test]
+fn a_take_with_noise_shaping_feeds_the_rounding_error_back() {
+    let (shaped, first) = signal_take(tone, |path| int16(path).no_dither().noise_shaping());
+    let bound =
+        0.5 * (1.0 + tutti_session::NoiseShaping::new(SampleRate::of(RATE)).feedback_gain());
+    let mut moved = 0;
+    for (n, &s) in shaped.iter().enumerate() {
+        let exact = f64::from(tone(first + n / 2)) * 32_768.0;
+        assert!((f64::from(s) - exact).abs() <= bound + 1e-9, "sample {n}");
+        moved += usize::from(f64::from(s) != exact.round());
+    }
+    assert!(moved * 10 > shaped.len(), "{moved} of {}", shaped.len());
 }

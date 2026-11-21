@@ -5,6 +5,7 @@ mod support;
 
 mod dither_stats;
 mod generic;
+mod noise_shaping;
 mod oracle_decode;
 mod oracle_resample;
 mod roundtrip;
