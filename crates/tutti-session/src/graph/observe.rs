@@ -87,9 +87,10 @@ impl<F: Float> Taps<'_, F> {
     /// it (a device, [`Session::render`](crate::Session::render) and
     /// `Session::render_frame` alike).
     /// `options` give each lane's ring capacity in frames (what the reader does
-    /// not drain in time is counted, [`TapReader::take_lost`]), the alignment and
-    /// an optional bell the tap rings after each block it writes and when it ends,
-    /// so a reader that awaits its frames wakes on the audio thread's ring.
+    /// not drain in time is counted, [`TapReader::take_lost`]) and the alignment.
+    /// The tap rings a bell after each block it writes and when it ends, so a
+    /// reader that awaits its frames ([`TapReader::notified`]) wakes on the audio
+    /// thread's ring.
     ///
     /// [`TapAlign::ToOutput`] delays each lane by the compensation an output
     /// of the same source gets, so it lines up with what the outputs carry;
@@ -149,10 +150,9 @@ impl<F: Float> Taps<'_, F> {
     /// [`Session::analyze`](crate::Session::analyze) binds it to a wave
     /// ([`AudioContext`], [`AudioInput`]).
     ///
-    /// `options` are the tap's: its capacity, its alignment and a bell it rings
-    /// after each block it writes, which an app that awaits frames passes and
-    /// awaits ([`Bell`](tutti_rt::Bell)). A rate change after the open is not
-    /// followed.
+    /// `options` are the tap's: its capacity and its alignment. An app that
+    /// awaits frames awaits [`Analyzer::notified`]. A rate change after the open
+    /// is not followed.
     ///
     /// # Errors
     ///

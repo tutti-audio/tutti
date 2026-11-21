@@ -74,7 +74,6 @@ impl Background {
         self.bells.tick();
     }
 
-    /// The session's bells: a future that awaits the audio thread makes its bell here.
     /// The session's executor, held for the session's whole life.
     #[cfg_attr(
         not(feature = "device"),
@@ -84,10 +83,7 @@ impl Background {
         &self.executor
     }
 
-    #[cfg_attr(
-        not(feature = "capture"),
-        expect(dead_code, reason = "the take's pump (feature `capture`) is its user")
-    )]
+    /// The session's bells: a future that awaits the audio thread makes its bell here.
     pub(crate) fn bells(&self) -> &Bells {
         &self.bells
     }

@@ -1,7 +1,7 @@
 //! The helpers a design shares: the prewarped gain and the ramp fraction.
 
 use tutti_buffers::Float;
-use tutti_units::{Hz, Normalized, SampleRate, Samples};
+use tutti_units::{Hz, Normalized, SampleRate, Samples, Seconds};
 
 /// `k / n` of the way along a ramp of `n` steps, as data of the width `F`: how far a blend
 /// of two designs has gone at step `k`.
@@ -20,3 +20,19 @@ pub(crate) fn along<F: Float>(k: u32, n: u32) -> F {
 pub(crate) fn prewarp(fc: Hz, rate: SampleRate) -> f64 {
     libm::tan(core::f64::consts::PI * fc.get() / rate.get())
 }
+
+/// `time` at `rate` as a count of frames, exactly and so possibly fractional; a negative or
+/// non-finite time is none.
+#[must_use]
+pub(crate) fn exact_frames(time: Seconds, rate: SampleRate) -> f64 {
+    let frames = time.get() * rate.get();
+    if frames.is_finite() {
+        frames.max(0.0)
+    } else {
+        0.0
+    }
+}
+
+/// The frames under which a time is none: one that short has no frame to reach its end in, and a
+/// slope over it would not be finite.
+pub(crate) const NO_FRAME: f64 = 1e-12;

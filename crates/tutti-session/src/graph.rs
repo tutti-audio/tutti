@@ -605,6 +605,11 @@ impl<F: Float> Graph<F> {
         self.render_workers = workers;
     }
 
+    /// Makes every tap the graph opens from now on carry a bell from `bells`.
+    pub(crate) fn notify_with(&mut self, bells: tutti_rt::BellsHandle) {
+        self.editor.notify_with(bells);
+    }
+
     pub(crate) fn set_render_worker_start(&mut self, start: Option<RenderWorkerStart>) {
         self.render_worker_start = start;
     }

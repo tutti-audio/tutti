@@ -144,7 +144,7 @@ use tutti_rt::LockExt;
 
 use tutti_graph::NodeKey;
 use tutti_plugin::catalog::Plugin as HostPlugin;
-use tutti_plugin::catalog::{ResolvedHosting, RestoreRefused};
+use tutti_plugin::catalog::ResolvedHosting;
 use tutti_plugin_db::Loadable;
 use tutti_plugin_host::{Liveness, LivenessVerdict};
 use tutti_plugin_host::{
@@ -340,13 +340,15 @@ impl PluginLoad {
             // restores the state it was staged (`StateRestore`; a failure
             // before that step is a load failure and blames nothing): the state
             // is what the load is held against (the reload's landing withholds it).
-            Err(e @ tutti_plugin_types::IpcError::StateRestore { .. }) if self.state.is_some() => {
-                let reason = e.to_string();
-                (Err(e), Some(Err(RestoreRefused::Served(reason))))
+            Err(tutti_plugin_types::IpcError::StateRestore { cause }) if self.state.is_some() => {
+                let refusal = restore_ended(&cause);
+                (
+                    Err(tutti_plugin_types::IpcError::StateRestore { cause }),
+                    Some(Err(refusal)),
+                )
             }
             Err(e) => (Err(e), None),
         };
-        let restore = restore.map(|restore| restore.map_err(|refused| refused.to_string()));
         if let (Ok(plugin), Some(Err(e))) = (&plugin, &restore) {
             tracing::warn!(
                 "{}: saved state was not restored ({e}); the plugin is loaded at its \
@@ -384,11 +386,22 @@ struct Mirror {
     unread: Option<tutti_plugin_host::ParamRead>,
 }
 
+/// What the `cause` of a bridge failure inside a state restore says of the
+/// state: the server did not answer within its window, or the plugin is gone.
+/// Every other cause (a disconnect, a protocol violation) is `PluginCrashed`:
+/// a bridge failure mid-launch ends the server, so the plugin is gone.
+fn restore_ended(cause: &tutti_plugin_types::IpcError) -> StateError {
+    match *cause {
+        tutti_plugin_types::IpcError::Timeout { after, .. } => StateError::Stalled { after },
+        _ => StateError::PluginCrashed,
+    }
+}
+
 /// An opened plugin (or why it did not open) and its parameter mirror.
 struct Open {
     plugin: Result<HostPlugin, IpcError>,
-    /// The state restore, if one was asked for: the plugin's refusal, as text.
-    restore: Option<Result<(), String>>,
+    /// The state restore, if one was asked for, and the refusal when it was refused.
+    restore: Option<Result<(), StateError>>,
     mirror: Option<Mirror>,
 }
 
@@ -438,8 +451,8 @@ pub enum StateRestore {
     Refused {
         /// How old the snapshot was.
         age: Duration,
-        /// The plugin's refusal.
-        reason: String,
+        /// Why the snapshot was refused.
+        error: StateError,
     },
     /// No snapshot had been captured yet: the replacement loads at its
     /// defaults.
@@ -2002,7 +2015,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         };
         let restore = match (restore, snapshot_age) {
             (Some(Ok(())), Some(age)) => StateRestore::Restored { age },
-            (Some(Err(reason)), Some(age)) => StateRestore::Refused { age, reason },
+            (Some(Err(error)), Some(age)) => StateRestore::Refused { age, error },
             _ => StateRestore::NoSnapshot,
         };
         let ready = Ready {

@@ -169,7 +169,7 @@ impl Unparker {
     /// of the store-load pair with the parker's fence in `park`: the two
     /// fences are totally ordered, so either this sees the parker's
     /// `parked`, or its closure sees the write before the fence.
-    fn unpark_after_fence(&self) -> bool {
+    pub(crate) fn unpark_after_fence(&self) -> bool {
         let inner = &*self.inner;
         // The load first: the common case, a parker that is awake, is not a
         // read-modify-write on a line the parker owns.

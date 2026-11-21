@@ -398,6 +398,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
         let mut session = self.session(parts, crate::clock::OfflineEngine { engine }, true)?;
         session.output.readings = Some(readings);
         session.transport.handle.set_clock(clock);
+        taps.notify_with(session.background.bells().handle());
         session.output.taps = Some((taps, layout));
         Ok(session)
     }
@@ -515,6 +516,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
             true,
         )?;
         session.output.readings = Some(readings);
+        taps.notify_with(session.background.bells().handle());
         session.output.taps = Some((taps, layout));
         // The outputs are timed by the session's one clock reader and the
         // stream's latency, which the timer reports as zero.
@@ -638,7 +640,9 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
             true,
         )?;
         session.output.readings = Some((engine.load(), engine.blocks()));
-        session.output.taps = Some((engine.output_taps(), spec.channels));
+        let taps = engine.output_taps();
+        taps.notify_with(session.background.bells().handle());
+        session.output.taps = Some((taps, spec.channels));
         let clock = engine.block_clock();
         // The outputs are timed by the session's one clock reader and the
         // stream's latency, read on every drain.
@@ -1019,6 +1023,7 @@ impl<C: Clock> SessionBuilder<C> {
     ) -> Result<Session<&'static str, N>> {
         let executor = parts.executor.clone();
         let bells = tutti_rt::Bells::new(&executor).map_err(crate::Error::Bells)?;
+        parts.graph.notify_with(bells.handle());
         let sampler = crate::session::parts::SamplerPart::new(
             streamer,
             parts.graph.prepared().sample_rate(),

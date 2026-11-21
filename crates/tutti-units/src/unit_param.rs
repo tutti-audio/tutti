@@ -172,6 +172,9 @@ pub enum UnitParam {
     /// A source's distance from the listener (`Metres`, at least zero): how far a distance
     /// node places its input, which sets its delay and its level.
     Distance = 41,
+    /// A position within a source, 0 at its start and 1 at its end (`Normalized`): a
+    /// wavetable's frame position, a granular source's read point.
+    Position = 42,
 }
 
 /// The error converting a `u16` that is not a known [`UnitParam`]
@@ -232,6 +235,7 @@ impl TryFrom<u16> for UnitParam {
             39 => Semitones,
             40 => Pitch,
             41 => Distance,
+            42 => Position,
             other => return Err(UnitParamOutOfRange(other)),
         })
     }
@@ -646,6 +650,7 @@ impl<U> From<ParamKey<U>> for UnitAddr {
     }
 }
 
+use super::Normalized;
 use super::units::{
     Amplitude, Azimuth, Balance, BitDepth, Cents, CentsSpan, CompressionRatio, Db, Depth, Drive,
     Elevation, Feedback, HoldFactor, Hz, Metres, Mix, Q, Seconds, Semitones, Spread, StereoWidth,
@@ -765,6 +770,10 @@ param_keys! {
         /// A source's distance from the listener.
         DISTANCE = Distance;
     }
+    Normalized {
+        /// A position within a source: a wavetable's frame position.
+        POSITION = Position;
+    }
 }
 
 impl ParamKey<()> {
@@ -817,6 +826,22 @@ mod tests {
             UnitAddr::from(UnitParam::Balance)
         );
         assert_ne!(ParamKey::<Hz>::CUTOFF, ParamKey::<Hz>::RATE);
+    }
+
+    /// The frame position is keyed as a `Normalized`, whose `from_raw` saturates onto `0..=1`
+    /// and sends NaN to 0, as a parameter cell holding any float needs.
+    #[test]
+    fn the_position_key_is_a_normalized_whose_from_raw_saturates() {
+        use crate::Unit;
+        assert_eq!(
+            ParamKey::<Normalized>::POSITION.addr(),
+            UnitAddr::from(UnitParam::Position)
+        );
+        assert_eq!(Normalized::from_raw(0.25), Normalized::of(0.25));
+        assert_eq!(Normalized::from_raw(7.0), Normalized::of(1.0));
+        assert_eq!(Normalized::from_raw(-7.0), Normalized::of(0.0));
+        assert_eq!(Normalized::from_raw(f64::NAN), Normalized::of(0.0));
+        assert_eq!(Normalized::of(0.25).to_raw(), 0.25);
     }
 
     /// Every keyed param has exactly one key: no id appears twice (under the
@@ -896,7 +921,7 @@ mod tests {
         assert_eq!(UnitParam::try_from(26), Ok(UnitParam::Diffusion));
         assert_eq!(UnitParam::try_from(27), Ok(UnitParam::Freeze));
         assert_eq!(UnitParam::try_from(28), Ok(UnitParam::Azimuth));
-        assert_eq!(UnitParam::try_from(42), Err(UnitParamOutOfRange(42)));
+        assert_eq!(UnitParam::try_from(43), Err(UnitParamOutOfRange(43)));
         // Decay's three bands are indices of one kind.
         for (index, packed) in [(0u8, 0x0019u16), (1, 0x0119), (2, 0x0219)] {
             assert_eq!(UnitAddr::new(UnitParam::Decay, index).to_u16(), packed);
@@ -907,7 +932,7 @@ mod tests {
     /// (and is `AudioParam`'s `P`), so this table is the compatibility
     /// record: a renumbered or re-ordered variant fails here by name, which
     /// `u16_round_trips` (any id maps to *some* variant) cannot say.
-    const PINNED: [(UnitParam, u16); 41] = [
+    const PINNED: [(UnitParam, u16); 42] = [
         (UnitParam::Cutoff, 0),
         (UnitParam::Q, 1),
         (UnitParam::GainDb, 2),
@@ -949,6 +974,7 @@ mod tests {
         (UnitParam::Semitones, 39),
         (UnitParam::Pitch, 40),
         (UnitParam::Distance, 41),
+        (UnitParam::Position, 42),
     ];
 
     /// **Index 0 is the plain id**, for every param: the packed form of

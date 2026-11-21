@@ -483,7 +483,7 @@ fn the_output_is_what_the_plugin_wrote() {
 /// the load's reason is the [`PluginTooWide`] text for the input direction,
 /// the first one checked.
 fn a_plugin_wider_than_a_block_is_refused_at_load() {
-    use tutti_plugin_types::{IpcError, LoadStage, PluginTooWide};
+    use tutti_plugin_types::{IpcError, PluginTooWide};
 
     const WIDE: usize = 18;
 
@@ -506,20 +506,15 @@ fn a_plugin_wider_than_a_block_is_refused_at_load() {
         std::env::remove_var("TUTTI_VST2_PROBE_INPUTS");
         std::env::remove_var("TUTTI_VST2_PROBE_OUTPUTS");
     }
-    let Err(tutti_plugin_host::LoadClientError::Failed(IpcError::LoadFailed {
-        stage, reason, ..
-    })) = loaded
-    else {
+    let Err(tutti_plugin_host::LoadClientError::Failed(IpcError::TooWide(wide))) = loaded else {
         panic!("a plugin of {WIDE} channels has no node");
     };
-    assert_eq!(stage, LoadStage::Activation);
     assert_eq!(
-        reason,
+        wide,
         PluginTooWide {
             direction: "input",
             channels: WIDE
         }
-        .to_string()
     );
 }
 
@@ -726,6 +721,31 @@ fn main() {
         the_shape_declares_the_plugins_buses,
         a_refused_block_with_no_midi_is_counted,
     ]);
+}
+
+/// **A width refusal widens to the width the plugin lacks**: the error names
+/// the width asked and the widths the plugin has.
+#[test]
+fn a_width_refusal_widens_to_the_width_the_plugin_lacks() {
+    let _probe = lock_probe();
+    let path = tutti_fixtures::vst2_probe().to_path_buf();
+    reset_probe(&path);
+    let loaded = load_client::<Vst2Loaded, f64>(
+        main_thread(),
+        &tutti_fixtures::detached_work(),
+        &tutti_plugin_types::PluginRef::file(&path),
+        SampleRate::of(SAMPLE_RATE),
+    );
+    let Err(error) = loaded else {
+        panic!("a 32-bit plugin loads at 64-bit");
+    };
+    assert!(matches!(
+        error.into_bridge(),
+        IpcError::WidthRefused {
+            requested: tutti_buffers::FloatWidth::F64,
+            widths,
+        } if widths == tutti_plugin_types::Widths::F32
+    ));
 }
 
 /// **A plugin that does not process 64-bit audio fails a 64-bit load with its

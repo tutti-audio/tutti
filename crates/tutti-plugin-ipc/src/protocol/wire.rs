@@ -168,34 +168,41 @@ pub mod size {
     }
 }
 
-/// A `Result<Size, String>` carried as [`size`] does.
+/// A `Result<Size, EditorError>` carried as [`size`] does.
 pub mod size_result {
     use dpi::Size;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    use super::size::Checked;
-
-    /// Encodes the result as it is.
-    pub fn serialize<S: Serializer>(value: &Result<Size, String>, s: S) -> Result<S::Ok, S::Error> {
-        value.serialize(s)
-    }
-
-    /// Decodes the result, refusing a bad size in `Ok`.
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Result<Size, String>, D::Error> {
-        Ok(Result::<Checked, String>::deserialize(d)?.map(|c| c.0))
-    }
-}
-
-/// A `Result<Option<Size>, String>` carried as [`size`] does.
-pub mod size_opt_result {
-    use dpi::Size;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use tutti_plugin_types::EditorError;
 
     use super::size::Checked;
 
     /// Encodes the result as it is.
     pub fn serialize<S: Serializer>(
-        value: &Result<Option<Size>, String>,
+        value: &Result<Size, EditorError>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        value.serialize(s)
+    }
+
+    /// Decodes the result, refusing a bad size in `Ok`.
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<Result<Size, EditorError>, D::Error> {
+        Ok(Result::<Checked, EditorError>::deserialize(d)?.map(|c| c.0))
+    }
+}
+
+/// A `Result<Option<Size>, EditorError>` carried as [`size`] does.
+pub mod size_opt_result {
+    use dpi::Size;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use tutti_plugin_types::EditorError;
+
+    use super::size::Checked;
+
+    /// Encodes the result as it is.
+    pub fn serialize<S: Serializer>(
+        value: &Result<Option<Size>, EditorError>,
         s: S,
     ) -> Result<S::Ok, S::Error> {
         value.serialize(s)
@@ -204,15 +211,15 @@ pub mod size_opt_result {
     /// Decodes the result, refusing a bad size in `Ok(Some(_))`.
     pub fn deserialize<'de, D: Deserializer<'de>>(
         d: D,
-    ) -> Result<Result<Option<Size>, String>, D::Error> {
-        Ok(Result::<Option<Checked>, String>::deserialize(d)?.map(|o| o.map(|c| c.0)))
+    ) -> Result<Result<Option<Size>, EditorError>, D::Error> {
+        Ok(Result::<Option<Checked>, EditorError>::deserialize(d)?.map(|o| o.map(|c| c.0)))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use serde::{Deserialize, Serialize};
-    use tutti_plugin_types::{MIDI_STACK_CAPACITY, MidiEventVec, WireMidi};
+    use tutti_plugin_types::{EditorError, MIDI_STACK_CAPACITY, MidiEventVec, WireMidi};
     use tutti_ump::Ump;
 
     #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -418,10 +425,10 @@ mod tests {
         );
         assert_eq!(
             postcard::to_allocvec(&ControlReply::EditorOpened {
-                result: Err("x".into())
+                result: Err(EditorError::NoPlugin)
             })
             .unwrap(),
-            [16, 1, 1, b'x']
+            [16, 1, 4]
         );
         let mut sized = vec![17, 0];
         sized.extend(size_bytes);
