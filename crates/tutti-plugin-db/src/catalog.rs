@@ -10,8 +10,9 @@
 //! picks the format and where the bytes live.
 //!
 //! ```no_run
-//! # fn ex() -> Result<(), tutti_plugin_db::ScanBusy> {
+//! # fn ex() -> Result<(), Box<dyn std::error::Error>> {
 //! use tutti_plugin_db::{Catalog, CatalogConfig, PersistError, PluginDb};
+//! use tutti_platform::Executor;
 //! use std::path::PathBuf;
 //!
 //! let mut catalog = Catalog::new(
@@ -24,9 +25,11 @@
 //!         Ok::<(), PersistError>(())
 //!     },
 //! );
-//! let scan = catalog.scan()?;
-//! // `run` blocks: the app calls it on a thread or an executor of its own.
-//! let scanned = scan.run();
+//! let executor = Executor::new();
+//! let scan = catalog.scan(executor.downgrade())?;
+//! // The scan is a future: the app awaits it where it chooses, and dropping it
+//! // cancels the scan.
+//! let scanned = futures_lite::future::block_on(scan.into_future())?;
 //! let report = catalog.apply(scanned).expect("scanned from this catalog");
 //! println!("{} new", report.added());
 //! // A change is in memory until the app runs the save where it chooses.
@@ -42,10 +45,10 @@
 //! A [`Catalog`] is owned by one thread, the one that calls its methods. Its
 //! three discovery operations, [`scan`](Catalog::scan),
 //! [`register`](Catalog::register) and [`measure`](Catalog::measure), each
-//! return a [`ScanPlugins`] over a snapshot. Its [`run`](ScanPlugins::run) blocks
-//! the thread that calls it and returns the findings, and
+//! return a [`ScanPlugins`] over a snapshot, which is the scan itself: awaiting
+//! it (on any thread; it is `Send`) returns the findings, and
 //! [`apply`](Catalog::apply) applies them on the owner. The catalog is readable
-//! throughout. A [`ScanCanceller`](crate::ScanCanceller) taken before the run kills the probe process
+//! throughout. Dropping the future cancels the scan and kills the probe process
 //! in flight. Nothing here runs on or reaches the audio thread.
 
 use crate::loadable::{Loadable, Resolved};
@@ -55,6 +58,7 @@ use crate::{
     BlacklistedFile, CatalogConfig, FileFacts, FileRow, FilesError, PluginDb, PluginEntry,
     RowChange, ScanBusy, ScanPlugins, ScanReport, ScannedPlugins, Scanner, StaleScan,
 };
+use tutti_platform::WeakExecutor;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -361,14 +365,16 @@ impl Catalog {
         move |db| persist_unattended(&persist, db)
     }
 
-    /// Prepares a scan of the plugin directories.
+    /// Prepares a scan of the plugin directories, on `executor`.
     ///
     /// Recovers a crashed previous scan first (on this thread, persisting once
     /// if a sentinel was left), then hands the scanner a snapshot. This catalog
-    /// stays whole and usable while the scan runs. Run the value
-    /// ([`ScanPlugins::run`]) on a thread of the app's choice, and apply its
-    /// output with [`apply`](Self::apply). Dropping the value unrun cancels it
-    /// and frees the pedal.
+    /// stays whole and usable while the scan runs. The value is the scan: await
+    /// it ([`ScanPlugins`] is an `IntoFuture`) where the app chooses, and apply
+    /// its output with [`apply`](Self::apply). Dropping the value, or its future
+    /// mid-scan, cancels it and frees the pedal. `executor` is held weakly: the
+    /// future resolves [`ScanError::ShutDown`](crate::ScanError::ShutDown) once the
+    /// executor has shut down.
     ///
     /// # Errors
     ///
@@ -379,25 +385,22 @@ impl Catalog {
     ///
     /// ```no_run
     /// # use tutti_plugin_db::Catalog;
-    /// # fn ex(mut plugins: Catalog) -> Result<(), tutti_plugin_db::ScanBusy> {
-    /// let scan = plugins.scan()?;
+    /// # use tutti_platform::Executor;
+    /// # fn ex(mut plugins: Catalog, executor: &Executor) -> Result<(), Box<dyn std::error::Error>> {
+    /// let scan = plugins.scan(executor.downgrade())?;
+    /// // The app reads `progress.read()` while it awaits.
     /// let progress = scan.progress();
-    /// let canceller = scan.canceller();
-    /// let scanned = std::thread::scope(|s| {
-    ///     let run = s.spawn(|| scan.run());
-    ///     // The app reads `progress.read()` and may call `canceller.cancel()`.
-    ///     run.join().expect("the probe did not panic")
-    /// });
-    /// let _ = (progress, canceller);
+    /// let scanned = futures_lite::future::block_on(scan.into_future())?;
+    /// let _ = progress;
     /// let report = plugins.apply(scanned).expect("from this catalog");
     /// println!("{} new", report.added());
     /// # Ok(())
     /// # }
     /// ```
-    pub fn scan(&mut self) -> std::result::Result<ScanPlugins, ScanBusy> {
+    pub fn scan(&mut self, executor: WeakExecutor) -> std::result::Result<ScanPlugins, ScanBusy> {
         let save = self.autosave();
         let id = self.id;
-        self.change(|db, scanner, config| scanner.scan(db, &config.scan_dirs, save))
+        self.change(|db, scanner, config| scanner.scan(db, &config.scan_dirs, save, executor))
             .map(|scan| scan.of(id))
     }
 
@@ -427,6 +430,7 @@ impl Catalog {
     pub fn register(
         &mut self,
         path: impl AsRef<Path>,
+        executor: WeakExecutor,
     ) -> std::result::Result<ScanPlugins, FilesError> {
         let path = path.as_ref();
         if !path.exists() {
@@ -439,7 +443,7 @@ impl Catalog {
         } else {
             Probing::Describe { fallback: false }
         };
-        self.spawn_file(probing, path, format)
+        self.spawn_file(probing, path, format, executor)
     }
 
     /// Prepares the probing of the one file `path`, read as `format`, as
@@ -449,17 +453,18 @@ impl Catalog {
         probing: Probing,
         path: &Path,
         format: PluginFormat,
+        executor: WeakExecutor,
     ) -> std::result::Result<ScanPlugins, FilesError> {
         let save = self.autosave();
         let scanner = self.scanner(probing);
         let id = self.id;
-        self.change_with(|db, _| scanner.scan_files(db, [(path, format)], save))
+        self.change_with(|db, _| scanner.scan_files(db, [(path, format)], save, executor))
             .map(|scan| scan.of(id))
     }
 
-    /// Applies what a scan found ([`scan`](Self::scan), [`register`](Self::register)
-    /// or [`measure`](Self::measure) then [`ScanPlugins::run`]) and returns its
-    /// report. A cancelled run's partial rows apply as a finished run's do.
+    /// Applies what a scan found (awaiting what [`scan`](Self::scan),
+    /// [`register`](Self::register) or [`measure`](Self::measure) returned) and
+    /// returns its report.
     ///
     /// Each row replaces its file's row, so a change made to the table since the
     /// scan began (a [`blacklist`](Self::blacklist) call) gets the scan's row for
@@ -663,7 +668,7 @@ impl Catalog {
     /// As in a measuring scan, a plugin that crashes or hangs while being
     /// measured is **blacklisted**; one that cannot be measured (it would not
     /// activate, has no audio output, or is too slow to render) is logged and its
-    /// row has no measurement. Cancelling the run kills the probe. A
+    /// row has no measurement. Dropping the future kills the probe. A
     /// missing `plugin-probe` is a failure in the result, as for
     /// [`register`](Self::register).
     ///
@@ -675,6 +680,7 @@ impl Catalog {
         &mut self,
         plugin: &PluginRef,
         state: Option<&Path>,
+        executor: WeakExecutor,
     ) -> std::result::Result<ScanPlugins, FilesError> {
         let probing = Probing::Measure {
             state: state.map(|file| ProbeState {
@@ -685,7 +691,7 @@ impl Catalog {
         let format = plugin
             .format()
             .map_err(|_| FilesError::UnrecognizedFormat(plugin.path().to_path_buf()))?;
-        self.spawn_file(probing, plugin.path(), format)
+        self.spawn_file(probing, plugin.path(), format, executor)
     }
 
     /// Records a change the caller built, such as a [`RowChange::put`] of a row
@@ -771,7 +777,8 @@ mod tests {
 
     /// Runs a scan to its end on the calling thread and applies it.
     fn rescan(plugins: &mut Catalog) -> ScanReport {
-        let scanned = plugins.scan().unwrap().run();
+        let scan = plugins.scan(tutti_fixtures::executor().downgrade()).unwrap();
+        let scanned = futures_lite::future::block_on(scan.into_future()).unwrap();
         plugins.apply(scanned).unwrap()
     }
 
@@ -1380,52 +1387,13 @@ mod tests {
         };
         let (mut first, mut second) = (make(), make());
 
-        let scanned = first.scan().unwrap().run();
+        let scan = first.scan(tutti_fixtures::executor().downgrade()).unwrap();
+        let scanned = futures_lite::future::block_on(scan.into_future()).unwrap();
         let refused = second.apply(scanned.clone());
 
         assert_eq!(refused.unwrap_err(), StaleScan);
         assert!(second.db().is_empty(), "a refused output applies nothing");
         assert_eq!(first.apply(scanned).unwrap().scanned(), 1);
         assert_eq!(first.db().len(), 1);
-    }
-
-    /// **A cancelled scan's partial rows apply**: the file reached before the
-    /// cancel is a row, the file the cancel ended is not.
-    #[test]
-    fn apply_applies_a_cancelled_scans_partial_rows() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let scanned_dir = dir.path().join("plugins");
-        std::fs::create_dir(&scanned_dir).unwrap();
-        for name in ["a.clap", "b.clap"] {
-            std::fs::write(scanned_dir.join(name), b"x").unwrap();
-        }
-        let mut catalog = Catalog::new(PluginDb::new(), CatalogConfig::new(dir.path()), |_| Ok(()));
-        let (parked_tx, parked_rx) = std::sync::mpsc::sync_channel::<()>(1);
-        let probes = std::sync::atomic::AtomicUsize::new(0);
-        let scanner = Scanner::new(dir.path().join(".scanning"), move |path, _, stop| {
-            if probes.fetch_add(1, Ordering::SeqCst) == 1 {
-                parked_tx.send(()).unwrap();
-                let _ = stop.wait(std::time::Duration::from_secs(600));
-            }
-            Ok(vec![crate::probe_plugin_fallback(path)])
-        });
-        let mut snapshot = PluginDb::new();
-        let scan = scanner
-            .scan(&mut snapshot, [&scanned_dir], |_| Ok(()))
-            .unwrap()
-            .of(catalog.id);
-        let canceller = scan.canceller();
-        let runner = std::thread::spawn(move || scan.run());
-        parked_rx
-            .recv_timeout(std::time::Duration::from_secs(30))
-            .expect("the second probe parks");
-        canceller.cancel();
-        let scanned = runner.join().expect("the run does not panic");
-
-        let report = catalog.apply(scanned).unwrap();
-
-        assert!(report.cancelled());
-        assert_eq!((report.scanned(), report.added()), (2, 1));
-        assert_eq!(catalog.db().len(), 1, "only the first file's row");
     }
 }

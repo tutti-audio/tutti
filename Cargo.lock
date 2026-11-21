@@ -3168,6 +3168,8 @@ name = "tutti-plugin-db"
 version = "0.0.1"
 dependencies = [
  "crossbeam-queue",
+ "futures-channel",
+ "futures-lite",
  "postcard",
  "serde",
  "serde_json",

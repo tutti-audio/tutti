@@ -1,11 +1,12 @@
 //! The subprocess probe, as the probe `tutti-plugin-db` scans with.
 
-use crate::Stop;
 use crate::probe::{ProbeState, measure_metadata_with, probe_metadata_with};
+use crate::scanner::ProbeFuture;
 use crate::{CatalogConfig, ProbeFailure, probe_plugin_fallback};
 use std::path::Path;
 use std::time::Duration;
 use tracing::debug;
+use tutti_platform::WeakExecutor;
 use tutti_plugin_types::Described;
 use tutti_plugin_types::Locator;
 use tutti_plugin_types::PluginFormat;
@@ -35,28 +36,39 @@ pub enum Probing {
 }
 
 /// The probe a scanner calls, as `config` and `how` say: the binary
-/// `config.probe_locator` names and the deadlines `config` holds.
-pub fn probe_fn(
+/// `config.probe_locator` names and the deadlines `config` holds. Its future
+/// owns what it needs, so it outlives the call's borrows.
+pub(crate) fn probe_fn(
     config: &CatalogConfig,
     how: Probing,
-) -> impl Fn(&Path, PluginFormat, &Stop) -> Result<Vec<Described>, ProbeFailure> + Send + Sync + 'static
-{
+) -> impl Fn(&WeakExecutor, &Path, PluginFormat) -> ProbeFuture + Send + Sync + 'static {
     let locator: Locator = config.probe_locator.clone();
     let timeout = match how {
         Probing::Describe { .. } => config.probe_timeout,
         Probing::Measure { .. } => config.measure_timeout,
     };
-    move |path, format, stop| match &how {
-        Probing::Describe { fallback } => interpret_probe(
-            probe_metadata_with(&locator, path, format, timeout, stop),
-            path,
-            *fallback,
-        ),
-        Probing::Measure { state } => interpret_probe(
-            measure_metadata_with(&locator, path, format, timeout, stop, state.as_ref()),
-            path,
-            false,
-        ),
+    move |executor, path, format| {
+        let (executor, locator, how, path) = (
+            executor.clone(),
+            locator.clone(),
+            how.clone(),
+            path.to_path_buf(),
+        );
+        Box::pin(async move {
+            match &how {
+                Probing::Describe { fallback } => interpret_probe(
+                    probe_metadata_with(&executor, &locator, &path, format, timeout).await,
+                    &path,
+                    *fallback,
+                ),
+                Probing::Measure { state } => interpret_probe(
+                    measure_metadata_with(&executor, &locator, &path, format, timeout, state.as_ref())
+                        .await,
+                    &path,
+                    false,
+                ),
+            }
+        })
     }
 }
 
@@ -156,16 +168,16 @@ mod tests {
         let config =
             CatalogConfig::new("/pedal").probe_locator(Locator::at("/definitely/not/plugin-probe"));
         let path = Path::new("/plugins/Plain.vst3");
-        let stop = Stop::new();
+        let executor = tutti_fixtures::executor().downgrade();
 
         let measuring = probe_fn(&config, Probing::Measure { state: None });
-        let failure = measuring(path, PluginFormat::Vst3, &stop)
+        let failure = futures_lite::future::block_on(measuring(&executor, path, PluginFormat::Vst3))
             .expect_err("a measurement is not answered with filename metadata");
         assert_eq!(failure.error, ProbeError::ProbeNotFound);
         assert!(!failure.blacklistable());
 
         let describing = probe_fn(&config, Probing::Describe { fallback: true });
-        let listed = describing(path, PluginFormat::Vst3, &stop)
+        let listed = futures_lite::future::block_on(describing(&executor, path, PluginFormat::Vst3))
             .expect("a describing scan lists the file by its name");
         assert_eq!(listed.len(), 1);
     }

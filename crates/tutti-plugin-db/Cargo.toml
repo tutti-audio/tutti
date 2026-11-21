@@ -27,8 +27,11 @@ tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", featur
 # `Reaped`, the guard on the probe's child process, and `HOST_PID_ENV`, how the
 # host states its pid to it.
 tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
-# `Instant`: the probe's deadline.
+# `Instant`, the probe's deadline, and the `Executor` the scan waits on.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
+# The probe's exit wake (`oneshot`) and the race of that wake against the deadline.
+futures-channel.workspace = true
+futures-lite.workspace = true
 # `LockExt`, `Tally`: the catalog's lock and the scan's loss count.
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 serde = { version = "1", features = ["derive"], optional = true }

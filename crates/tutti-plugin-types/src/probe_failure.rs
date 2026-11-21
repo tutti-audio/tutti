@@ -177,7 +177,7 @@ pub enum ProbeError {
     /// The probe's result file could not be read as a result.
     #[error("the probe's result is unusable: {0}")]
     Result(#[from] ResultError),
-    /// The caller stopped the probe, which was killed.
-    #[error("the probe was cancelled")]
-    Cancelled,
+    /// The executor the probe waited on shut down under it; the probe was killed.
+    #[error("the executor shut down during the probe")]
+    ShutDown,
 }
