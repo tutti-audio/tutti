@@ -15,7 +15,6 @@ crates/tutti-plugin-types/src/contract.rs::check  not-audio: a normalized parame
 crates/tutti-plugin-types/src/contract.rs::positions  not-audio: a normalized parameter position, not audio
 crates/tutti-plugin-types/src/contract.rs::round_trip  not-audio: a normalized parameter position, not audio
 crates/tutti-plugin-types/src/contract.rs::steps  not-audio: a normalized parameter position, not audio
-crates/tutti-polysynth/src/tuning.rs::Tuning::from_ratios  not-audio: a scale's frequency ratios, a tuning table not audio
 crates/tutti-nodes/src/params.rs::ControlSet::assemble  not-audio: control cells are f64 quantities, one per control, not audio
 crates/tutti-nodes/src/params.rs::ControlSet::flatten  not-audio: control cells are f64 quantities, one per control, not audio
 crates/tutti-dsp/src/stft/window.rs::CosineWindow::new  not-audio: a window's design coefficients, a design figure in f64 crossed once per grid

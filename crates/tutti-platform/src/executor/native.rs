@@ -291,6 +291,9 @@ fn stop_and_join(threads: Vec<Worker>, timers: &Timers) {
     }
 }
 
+/// No value: a native target has threads, so nothing builds a [`super::PageDriver`].
+pub(super) enum Page {}
+
 /// The native half of [`super::Threads`]: the started threads and the executor they drive.
 pub(super) struct Threads {
     executor: Executor,
@@ -314,8 +317,8 @@ impl Drop for Threads {
 
 impl Executor {
     /// Starts `n` threads that drive this executor's queue, until the returned [`Threads`](super::Threads)
-    /// drops. Native targets only: a web page starts no threads, and its caller drives with
-    /// [`run_until_stalled`](Self::run_until_stalled).
+    /// drops. Native targets only: a web page starts no threads, and the browser's queue drives with
+    /// `drive_on_page`.
     ///
     /// # Errors
     ///

@@ -1977,7 +1977,7 @@ fn a_long_block_renders_every_frame_like_short_blocks() {
         oscillator: OscillatorType::Saw,
         filter: FilterType::Svf {
             cutoff: Hz::new(3_000.0),
-            q: tutti_units::Q::new(1.0),
+            q: crate::SvfQ::of(tutti_units::Q::new(1.0)),
             mode: crate::SvfMode::Lowpass,
         },
         portamento: Some(PortamentoConfig {
@@ -2225,7 +2225,7 @@ fn reset_all_controllers_leaves_the_cutoff_alone() {
         oscillator: OscillatorType::Saw,
         filter: FilterType::Svf {
             cutoff: Hz::new(600.0),
-            q: tutti_units::Q::new(0.707),
+            q: crate::SvfQ::BUTTERWORTH,
             mode: crate::SvfMode::Lowpass,
         },
         ..Default::default()
@@ -2294,7 +2294,7 @@ fn a_fork_renders_the_volume_and_unison_it_was_taken_with() {
                 stereo_spread: Spread::new(0.5),
                 phase_randomize: false,
             }),
-            volume: tutti_units::Amplitude::new(0.5),
+            volume: crate::MasterVolume::of(tutti_units::Amplitude::new(0.5)),
             ..Default::default()
         });
         synth.synth
