@@ -8,7 +8,7 @@
 
 use tutti_graph::{
     CloseError, EventTapId, EventTapOptions, EventTapReader, EventTapSource, MeterId, MeterReader,
-    MeterSpec, MissingSource, NodeKey, TapAlign, TapId, TapOptions, TapReader,
+    MeterSpec, MissingSource, TapAlign, TapId, TapOptions, TapReader,
 };
 use tutti_units::Samples;
 
@@ -275,7 +275,7 @@ impl<F: Float> Taps<'_, F> {
     /// **A re-prepare at another rate moves the graph's clock to a new scale,**
     /// so a reader's frames stay on the rate it was opened at only until then;
     /// the caller that re-rates the graph reopens its taps
-    /// ([`reopen_events`](Self::reopen_events)).
+    /// ([`reopen_event`](Self::reopen_event)).
     ///
     /// # Errors
     ///
@@ -329,35 +329,20 @@ impl<F: Float> Taps<'_, F> {
         Ok(())
     }
 
-    /// Opens every event tap again, at the rate the graph is prepared at now,
-    /// and returns the new readers: each replaces the tap of the same
+    /// Opens the event tap `id` again, at the rate the graph is prepared at
+    /// now, and returns the new reader: it replaces the tap of the same
     /// [`id`](EventTapReader::id), so the reader it supersedes is fed no more.
-    /// What a caller does after a re-prepare at another rate
+    /// What the owner of a tap does after a re-prepare at another rate
     /// ([`set_sample_rate`](Graph::set_sample_rate); a device session's restart
     /// re-rates the graph too), so that one reader's frames are always on one
-    /// scale. A tap whose node was removed since is not reopened and is
-    /// dropped from the graph's list.
+    /// scale. Each owner reopens its own tap and no other (the session's
+    /// hardware MIDI out reopens its own), so another owner's reader is not
+    /// superseded and left dead. `None` for an id that is not open, and for a
+    /// tap whose node was removed since, which is dropped from the graph's
+    /// list.
     ///
     /// The graph cannot do this by itself: a reader belongs to the thread that
     /// drains it, and the new one has to reach that thread.
-    ///
-    /// Every tap's reader is replaced, a caller's included: one that owns a
-    /// single tap reopens just that one with
-    /// [`reopen_event`](Self::reopen_event), so another owner's reader
-    /// is not superseded and left dead.
-    pub fn reopen_events(&mut self) -> Vec<EventTapReader> {
-        let ids: Vec<EventTapId> = self.graph.event_taps.keys().copied().collect();
-        ids.into_iter()
-            .filter_map(|id| self.reopen_event(id))
-            .collect()
-    }
-
-    /// Opens the event tap `id` again, at the rate the graph is prepared at
-    /// now: the one-tap form of [`reopen_events`](Self::reopen_events),
-    /// for the owner of that tap (the session's hardware MIDI out reopens its
-    /// own and no other). The reader it supersedes is fed no more. `None` for
-    /// an id that is not open, and for a tap whose node was removed since,
-    /// which is dropped from the graph's list.
     pub fn reopen_event(&mut self, id: EventTapId) -> Option<EventTapReader> {
         let &(port, options) = self.graph.event_taps.get(&id)?;
         self.graph.edited = true;
@@ -411,25 +396,6 @@ impl<F: Float> Meters<'_, F> {
     ) -> Result<MeterReader, MissingSource> {
         let sources = self.graph.raw_sources(sources)?;
         self.declare_meter(MeterSpec::Ports { sources, align })
-    }
-
-    /// A raw meter on every output port of `node`: a track's level. Its width is
-    /// the node's output count now; a later re-shape of the node does not
-    /// widen it. A key no node has is [`MissingSource::Node`], not a
-    /// zero-width meter.
-    ///
-    /// # Errors
-    ///
-    /// [`MissingSource`] for the first source that is not in the graph now.
-    pub fn open_node(&mut self, node: impl Into<NodeKey>) -> Result<MeterReader, MissingSource> {
-        let node = node.into();
-        let sources: Vec<OutPort> = (0..self
-            .graph
-            .node_outputs(node)
-            .map_err(|_| MissingSource::Node { node })?)
-            .map(|port| OutPort::new(node, port))
-            .collect();
-        self.open(&sources, TapAlign::Raw)
     }
 
     fn declare_meter(&mut self, spec: MeterSpec) -> Result<MeterReader, MissingSource> {

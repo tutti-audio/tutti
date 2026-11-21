@@ -64,9 +64,15 @@ fn an_event_edge_is_connected_read_back_and_disconnected() {
         "events merge: a second source joins the first"
     );
 
-    assert!(g.disconnect(src.events_out(), sink.events_in()).unwrap());
     assert!(
-        !g.disconnect(src.events_out(), sink.events_in()).unwrap(),
+        g.disconnect(src.events_out(), sink.events_in())
+            .unwrap()
+            .was_connected()
+    );
+    assert!(
+        !g.disconnect(src.events_out(), sink.events_in())
+            .unwrap()
+            .was_connected(),
         "gone"
     );
     assert_eq!(g.sources(sink.events_in()).unwrap(), [src.events_out_at(1)]);
@@ -158,12 +164,13 @@ fn set_sources_and_disconnect_all_cover_event_inputs() {
 
     // The refusal names the port and changes nothing.
     assert_eq!(
-        g.set_sources(input, [EventOutPort::new(a, 5)]),
-        Err(ConnectError::NoSuchEventOut(EventOutPort::new(a, 5)))
+        g.set_sources(input, [EventOutPort::new(a, 5)]).err(),
+        Some(ConnectError::NoSuchEventOut(EventOutPort::new(a, 5)))
     );
     assert_eq!(
-        g.set_sources(EventInPort::new(sink, 3), [a.events_out()]),
-        Err(ConnectError::NoSuchEventIn(EventInPort::new(sink, 3)))
+        g.set_sources(EventInPort::new(sink, 3), [a.events_out()])
+            .err(),
+        Some(ConnectError::NoSuchEventIn(EventInPort::new(sink, 3)))
     );
     assert!(g.sources(input).unwrap().is_empty());
 }

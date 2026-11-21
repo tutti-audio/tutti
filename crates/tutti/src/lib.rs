@@ -524,13 +524,13 @@ pub mod session {
     pub use tutti_session::LoadError;
     pub use tutti_session::{
         BackgroundWork, BlockConfig, Bus, BusSink, Channel, Committed, Connection, Crossfade,
-        CrossfadeId, CrossfadeRefused, DeclarationError, Event, EventEdge, EventTapPort, Fanin,
-        Feeder, Graph, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots,
-        NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputTapOpen,
-        PHASES, Peer, PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer,
-        Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId,
-        RootDeclaration, RootReader, RootTopologyStatus, SessionNode, SessionOutputTapError, Taps,
-        TempoError, Weighted, Wire, root_width,
+        CrossfadeId, CrossfadeRefused, DeclarationError, Disconnection, Event, EventEdge,
+        EventTapPort, Fanin, Feeder, Graph, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink,
+        Meters, NodeSlots, NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError,
+        OutputTapOpen, PHASES, Peer, PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence,
+        Reclaimer, Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact,
+        ResourceId, RootDeclaration, RootReader, RootTopologyStatus, SessionNode,
+        SessionOutputTapError, SetSources, Taps, TempoError, Weighted, Wire, root_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
