@@ -1,7 +1,6 @@
 //! Construct the `(InProcessClient<L, F>, PluginHandle)` pair for an in-process
 //! plugin of format `L`.
 
-use std::path::Path;
 use std::sync::Arc;
 use tutti_buffers::{Float, FloatWidth};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
@@ -16,8 +15,7 @@ use super::width_error::WidthError;
 use crate::PluginHandle;
 use crate::{ParameterChangeSink, PluginControls};
 use tutti_plugin_types::{
-    Features, InProcess, LoadStage, Loaded, LoadedPlugin, PluginDescriptor, PluginRef,
-    PluginTooWide, Prepare,
+    Features, InProcess, Loaded, LoadedPlugin, PluginDescriptor, PluginRef, PluginTooWide, Prepare,
 };
 use tutti_plugin_types::{IpcError, IpcResult, StateError};
 use tutti_units::ParamId;
@@ -56,17 +54,15 @@ impl<L: Loaded + 'static> std::fmt::Debug for LoadClientError<L> {
 }
 
 impl<L: Loaded + 'static> LoadClientError<L> {
-    /// The failure as a [`IpcError`] for the plugin at `path`, for a host of one width, where a
-    /// width refusal cannot come: the load's own failure, or the refusal as a
-    /// failed activation that drops the plugin.
+    /// The failure as a [`IpcError`], for a host of one width, where a
+    /// width refusal cannot come: the load's own failure, or the width refusal.
     #[must_use]
-    pub fn into_bridge(self, path: &Path) -> IpcError {
+    pub fn into_bridge(self) -> IpcError {
         match self {
             Self::Failed(e) => e,
-            Self::Width(e) => IpcError::LoadFailed {
-                path: Some(path.to_path_buf()),
-                stage: LoadStage::Activation,
-                reason: e.to_string(),
+            Self::Width(e) => IpcError::WidthRefused {
+                requested: e.requested(),
+                widths: e.widths(),
             },
         }
     }
@@ -137,7 +133,6 @@ where
     F: Float,
 {
     let sample_rate = sample_rate.into();
-    let path = plugin.path();
     let (inner, rt, restored) = Instance::<L>::load(
         main,
         work,
@@ -146,23 +141,18 @@ where
         MAX_BLOCK_SIZE,
         F::WIDTH,
         restore,
-    )
-    .map_err(|(stage, reason)| IpcError::LoadFailed {
-        path: Some(path.to_path_buf()),
-        stage,
-        reason,
-    })?;
+    )?;
     let (settled, widths) = (inner.width(), inner.widths());
     let origin = inner.origin().cloned().map(|origin| Reload {
         origin,
         work: work.clone(),
     });
     if settled == F::WIDTH {
-        let (client, handle) = assemble::<L, F>(main, work, path, inner, rt, origin, sample_rate)?;
+        let (client, handle) = assemble::<L, F>(main, work, inner, rt, origin, sample_rate)?;
         return Ok((client, handle, restored));
     }
     // `negotiate` only lowers a request to 32-bit: the plugin runs at `f32`.
-    let plugin = assemble::<L, f32>(main, work, path, inner, rt, origin, sample_rate)?;
+    let plugin = assemble::<L, f32>(main, work, inner, rt, origin, sample_rate)?;
     Err(LoadClientError::Width(Box::new(WidthError::new(
         plugin,
         F::WIDTH,
@@ -174,7 +164,6 @@ where
 fn assemble<L, F>(
     main: MainThreadMarker,
     work: &MainWorkHandle,
-    path: &Path,
     inner: Instance<L>,
     rt: tutti_rt::Rt<L::Processor>,
     origin: Option<Reload>,
@@ -185,11 +174,6 @@ where
     L::Processor: 'static,
     F: Float,
 {
-    let failed = |(stage, reason)| IpcError::LoadFailed {
-        path: Some(path.to_path_buf()),
-        stage,
-        reason,
-    };
     let Wired {
         mut client,
         inner,
@@ -197,7 +181,7 @@ where
         post,
         descriptor,
         loaded,
-    } = wire(main, inner, rt, origin, sample_rate, 0).map_err(failed)?;
+    } = wire(main, inner, rt, origin, sample_rate, 0)?;
     let param_sink = ParameterChangeSink::new();
     let invalidate_sink = crate::InvalidateSink::new();
     let transport_sink = crate::TransportSink::new();
@@ -256,17 +240,14 @@ fn wire<L, F>(
     origin: Option<Reload>,
     sample_rate: tutti_units::SampleRate,
     spares: usize,
-) -> Result<Wired<L, F>, (LoadStage, String)>
+) -> IpcResult<Wired<L, F>>
 where
     L: Loaded + 'static,
     L::Processor: 'static,
     F: Float,
 {
     let Some(control) = inner.control() else {
-        return Err((
-            LoadStage::Activation,
-            "the plugin was lost in its activation".into(),
-        ));
+        return Err(IpcError::LostInActivation);
     };
     let descriptor = control.info().clone();
     // What the format's wiring declares, asked of the plugin now: its widths,
@@ -285,7 +266,7 @@ where
     }
     // A plugin wider than a block serves is refused here, so no node is built
     // over it.
-    let declared = Declared::of(&loaded).map_err(|e| (LoadStage::Activation, e.to_string()))?;
+    let declared = Declared::of(&loaded)?;
     let inner = Arc::new(Mutex::new(inner));
     // Built here rather than inside the node so the node's producer end and the
     // backend's drain end are the same cell: the audio thread parks a rate in
@@ -407,4 +388,15 @@ where
         None,
         None,
     ))
+}
+
+impl From<ClientOverError> for IpcError {
+    fn from(e: ClientOverError) -> Self {
+        match e {
+            ClientOverError::TooWide(wide) => Self::TooWide(wide),
+            ClientOverError::Width { activated, hosted } => {
+                Self::WidthMismatch { activated, hosted }
+            }
+        }
+    }
 }

@@ -27,7 +27,7 @@ use super::rebind::{RebindError, Settlement};
 
 use tutti_plugin_types::ParamEdit;
 use tutti_plugin_types::PluginTail;
-use tutti_plugin_types::{LoadStage, StateError};
+use tutti_plugin_types::{IpcResult, StateError};
 
 /// What the plugin changed about itself since the last
 /// [`Instance::pump`]: each field is a re-read the core did after the
@@ -179,10 +179,14 @@ impl<L: InProcess> Instance<L> {
         block_size: usize,
         width: FloatWidth,
         restore: Option<&mut dyn FnMut(&mut L) -> Result<(), StateError>>,
-    ) -> Result<(Self, Rt<L::Processor>, Option<Result<(), StateError>>), (LoadStage, String)> {
+    ) -> IpcResult<(Self, Rt<L::Processor>, Option<Result<(), StateError>>)> {
         let mut loaded = L::load_in_process(main, work, plugin).map_err(|e| match e {
-            PluginError::Load { stage, reason } => (stage, reason),
-            other => (LoadStage::Opening, other.to_string()),
+            PluginError::Load { stage, reason } => IpcError::LoadFailed {
+                path: Some(plugin.path().to_path_buf()),
+                stage,
+                reason,
+            },
+            other => IpcError::from(other),
         })?;
         let origin = loaded.origin().clone();
         let restored = restore.map(|restore| restore(&mut loaded));
@@ -198,7 +202,9 @@ impl<L: Loaded> Instance<L> {
     ///
     /// # Errors
     ///
-    /// The stage that failed and the reason.
+    /// [`IpcError::BlockUnsupported`] for a block of no frames, and
+    /// [`IpcError::ActivationFailed`] with the loader's own failure when the
+    /// plugin refuses the activation.
     pub(super) fn start(
         main: MainThreadMarker,
         loaded: L,
@@ -206,16 +212,11 @@ impl<L: Loaded> Instance<L> {
         sample_rate: SampleRate,
         block_size: usize,
         width: FloatWidth,
-    ) -> Result<(Self, Rt<L::Processor>), (LoadStage, String)> {
+    ) -> IpcResult<(Self, Rt<L::Processor>)> {
         let widths = loaded.widths();
         let prepare = MaxBlock::new(Samples::new(block_size))
             .map(|block| Prepare::new(sample_rate, block).with_format(widths.negotiate(width)))
-            .ok_or_else(|| {
-                (
-                    LoadStage::Activation,
-                    format!("the plugin cannot run in blocks of {block_size} frames"),
-                )
-            })?;
+            .ok_or(IpcError::BlockUnsupported { frames: block_size })?;
         let (hand, rt) = Hand::threaded();
         let mut this = Self {
             lifecycle: Lifecycle::new(loaded),
@@ -233,10 +234,7 @@ impl<L: Loaded> Instance<L> {
         };
         let refused = this.drive(main, Event::Op(HostOp::Activate(prepare)));
         if let Some(trouble) = refused {
-            return Err((
-                LoadStage::Activation,
-                format!("activation failed: {trouble}"),
-            ));
+            return Err(IpcError::ActivationFailed(Arc::clone(trouble.reason())));
         }
         // What the activation read is the baseline, not a change.
         this.changes = Changes::default();
@@ -745,7 +743,7 @@ mod tests {
 
     use super::*;
 
-    /// **A load with no block is refused** at the activation stage (a rate is a
+    /// **A load with no block is refused** as an unsupported block (a rate is a
     /// `SampleRate`, so it cannot be none).
     #[test]
     fn a_load_with_no_block_is_refused() {
@@ -758,11 +756,32 @@ mod tests {
             FloatWidth::F32,
             None,
         ) {
-            Err((LoadStage::Activation, reason)) => {
-                assert!(reason.contains("cannot run in blocks"), "{reason}");
-            }
-            Err((stage, reason)) => panic!("{stage:?} {reason}"),
+            Err(IpcError::BlockUnsupported { frames: 0 }) => {}
+            Err(other) => panic!("{other:?}"),
             Ok(_) => panic!("a block of no frames must be refused"),
+        }
+    }
+
+    /// **A plugin that refuses its first activation fails the load with the
+    /// loader's own error**, not its text.
+    #[test]
+    fn a_refused_first_activation_carries_the_loaders_error() {
+        let (fake, loaded) = tutti_plugin_types::fake::FakePlugin::new();
+        fake.refuse_rate(Some(SampleRate::SR_48K));
+        let refused = Instance::start(
+            main_thread(),
+            loaded,
+            None,
+            SampleRate::SR_48K,
+            64,
+            FloatWidth::F32,
+        );
+        match refused {
+            Err(IpcError::ActivationFailed(cause)) => {
+                assert!(matches!(*cause, PluginError::Other(_)), "{cause:?}");
+            }
+            Err(other) => panic!("{other:?}"),
+            Ok(_) => panic!("the fake refuses 48 kHz"),
         }
     }
 

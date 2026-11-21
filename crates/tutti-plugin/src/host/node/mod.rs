@@ -106,8 +106,8 @@ use tutti_plugin_ipc::{
     Restore,
 };
 use tutti_plugin_types::{
-    Features, IpcError, IpcResult, LoadStage, LoadedPlugin, MainWorkHandle, MaxBlock,
-    ParameterChanges, PluginDescriptor, PluginInvalidation, PluginRef, Prepare, ResyncClass,
+    Features, IpcError, IpcResult, LoadedPlugin, MainWorkHandle, MaxBlock, ParameterChanges,
+    PluginDescriptor, PluginInvalidation, PluginRef, Prepare, ResyncClass,
 };
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
@@ -319,7 +319,6 @@ impl PluginClient<Unbound> {
         let loaded = ipc.loaded().clone();
         let rate = ipc.rate();
         // The plugin's file, when the ipc knows it: the path of a failure here.
-        let origin_path = ipc.origin().map(|o| o.origin.path().to_path_buf());
         // The pipeline's chunk ceiling, matching the slab (`Ipc` clamps it to
         // `MAX_CHUNK` for the same reason): the raw `max_buffer_size` would
         // stage 8192 samples per channel to ship 64.
@@ -430,11 +429,7 @@ impl PluginClient<Unbound> {
             ParameterChanges::SPARE_QUEUES,
             Some(controls.clone()),
         )
-        .map_err(|e| IpcError::LoadFailed {
-            path: origin_path.clone(),
-            stage: LoadStage::Activation,
-            reason: e.to_string(),
-        })?;
+        .map_err(IpcError::from)?;
         Ok(Self {
             bridge,
             descriptor,

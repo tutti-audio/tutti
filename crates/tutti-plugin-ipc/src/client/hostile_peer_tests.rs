@@ -1906,6 +1906,100 @@ fn a_stalled_load_state_fails_typed_and_leaves_the_bridge_healthy() {
     assert_healthy_after_stall(&mock, "load_state");
 }
 
+/// **A refusal the server typed reaches the caller as that error**, not as a
+/// rejection that wraps its text.
+#[test]
+fn a_load_state_refusal_the_server_typed_reaches_the_caller_typed() {
+    let refusal = StateError::ObjectLength {
+        declared: 4096,
+        actual: 100,
+    };
+    let sent = refusal.clone();
+    let mock = MockServer::start("typed-state-refusal", move |msg| match msg {
+        ControlRequest::LoadState { .. } => Action::Reply(Box::new(ControlReply::StateLoaded {
+            error: Some(sent.clone()),
+        })),
+        _ => Action::Silent,
+    });
+    let bridge = Arc::clone(&mock.bridge);
+    let got = call_within(move || {
+        bridge.load_state(
+            main_thread(),
+            &[3u8; 128],
+            tutti_plugin_types::StateUse::Project,
+        )
+    })
+    .unwrap_or_else(|w| panic!("the load never returned; blocked for {w:?}"));
+    assert_eq!(got, Err(refusal));
+}
+
+/// **Another request's reply to a state load is no answer**: the caller is told
+/// the server answered wrongly, not that the plugin rejected its state.
+#[test]
+fn a_state_load_answered_with_another_reply_is_unexpected() {
+    let mock = MockServer::start("wrong-state-reply", |msg| match msg {
+        ControlRequest::LoadState { .. } => Action::Reply(Box::new(ControlReply::ParameterList {
+            parameters: Vec::new(),
+        })),
+        _ => Action::Silent,
+    });
+    let bridge = Arc::clone(&mock.bridge);
+    let got = call_within(move || {
+        bridge.load_state(
+            main_thread(),
+            &[3u8; 128],
+            tutti_plugin_types::StateUse::Project,
+        )
+    })
+    .unwrap_or_else(|w| panic!("the load never returned; blocked for {w:?}"));
+    assert_eq!(got, Err(StateError::UnexpectedReply));
+}
+
+/// **An editor request the server fails, answers wrongly, or never answers is
+/// told as the arm that says so**, for an open and for a resize.
+#[test]
+fn an_editor_request_that_goes_wrong_names_how() {
+    use tutti_plugin_types::{ContentScale, EditorError, ServerError};
+    let size = dpi::Size::Physical(dpi::PhysicalSize::new(640, 480));
+    let timeouts = {
+        let mut t = Timeouts::default();
+        t.editor = Duration::from_millis(100);
+        t
+    };
+    let mock =
+        MockServer::start_with_timeouts("editor-goes-wrong", timeouts, move |msg| match msg {
+            ControlRequest::OpenEditor {
+                parent: Some(1), ..
+            } => Action::Reply(Box::new(ControlReply::Error {
+                error: ServerError::NoPluginId,
+            })),
+            ControlRequest::OpenEditor {
+                parent: Some(2), ..
+            } => Action::Reply(Box::new(ControlReply::StateLoaded { error: None })),
+            ControlRequest::SetEditorSize { .. } => {
+                Action::Reply(Box::new(ControlReply::StateLoaded { error: None }))
+            }
+            _ => Action::Silent,
+        });
+    let audio = mock.bridge.audio();
+    assert_eq!(
+        audio.open_editor_in_server(Some(1), ContentScale::IDENTITY),
+        Err(EditorError::Server(ServerError::NoPluginId))
+    );
+    assert_eq!(
+        audio.open_editor_in_server(Some(2), ContentScale::IDENTITY),
+        Err(EditorError::UnexpectedReply)
+    );
+    assert_eq!(
+        audio.set_editor_size_in_server(size),
+        Err(EditorError::UnexpectedReply)
+    );
+    assert!(matches!(
+        audio.open_editor_in_server(None, ContentScale::IDENTITY),
+        Err(EditorError::NoAnswer { within }) if within == Duration::from_millis(100)
+    ));
+}
+
 // ── Requests answered into a future ──────────────────────────────────────────
 
 /// Awaits `answer` on a thread of its own, as an app's executor would: it is

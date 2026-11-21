@@ -369,7 +369,7 @@ impl Plugin {
             sample_rate,
             restore.as_mut().map(|r| r as _),
         )
-        .map_err(|e| e.into_bridge(plugin.path()))?;
+        .map_err(|e| e.into_bridge())?;
         // The ref carries the id the load opened, so a state the plugin saves
         // names it as a scan would.
         let plugin = client.origin().cloned().unwrap_or_else(|| plugin.clone());

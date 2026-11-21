@@ -265,13 +265,16 @@ fn a_plugin_wider_than_a_block_is_refused_by_name() {
         0,
         None,
     );
-    assert_eq!(
-        refused.err(),
-        Some(ClientOverError::TooWide(PluginTooWide {
-            direction: "output",
-            channels: MAX_BLOCK_CHANNELS + 1
-        }))
-    );
+    let error = refused.err().expect("a plugin too wide has no client");
+    let wide = PluginTooWide {
+        direction: "output",
+        channels: MAX_BLOCK_CHANNELS + 1,
+    };
+    assert_eq!(error, ClientOverError::TooWide(wide));
+    assert!(matches!(
+        tutti_plugin_types::IpcError::from(error),
+        tutti_plugin_types::IpcError::TooWide(got) if got == wide
+    ));
 }
 
 /// **An `f64` graph hosts a plugin that processes 64-bit audio natively**: the
@@ -328,11 +331,21 @@ fn a_client_over_a_plugin_of_another_width_is_refused_by_name() {
         0,
         None,
     );
+    let error = refused
+        .err()
+        .expect("a plugin of another width has no client");
     assert_eq!(
-        refused.err(),
-        Some(ClientOverError::Width {
+        error,
+        ClientOverError::Width {
             activated: FloatWidth::F32,
             hosted: FloatWidth::F64,
-        })
+        }
     );
+    assert!(matches!(
+        tutti_plugin_types::IpcError::from(error),
+        tutti_plugin_types::IpcError::WidthMismatch {
+            activated: FloatWidth::F32,
+            hosted: FloatWidth::F64,
+        }
+    ));
 }
