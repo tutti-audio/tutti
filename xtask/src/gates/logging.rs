@@ -11,7 +11,8 @@
 //!   modules of a binary crate are library code. Comments and string literals are not
 //!   code.
 //! - **No `stderr()` or `stdout()`** in the same library code: a write to a standard
-//!   stream through a handle is a print.
+//!   stream through a handle is a print. An `io::stderr` or `io::stdout` path counts
+//!   without the call too, since it is the handle's function passed as a value.
 //!
 //! A finding that is a row of [`ALLOW`], `(path, reason)`, is exempt: the path is the
 //! manifest (for a `log` dependency) or the source file (for a print). A row that
@@ -78,7 +79,8 @@ fn exempt(path: &str) -> bool {
     }
 }
 
-/// `file:line: macro!` of each print in library code.
+/// `file:line: what` of each print in library code: a print macro or a
+/// standard-stream handle.
 fn prints(path: &str, text: &str) -> Vec<String> {
     let code = blank(text);
     let ranges = test_ranges(&code);
@@ -101,7 +103,8 @@ fn prints(path: &str, text: &str) -> Vec<String> {
         while let Some(at) = find_word_from(&code, name, from) {
             from = at + name.len();
             let before = code[..at].trim_end();
-            if !code[from..].trim_start().starts_with('(')
+            let called = code[from..].trim_start().starts_with('(');
+            if !(called || before.ends_with("io::"))
                 || before.ends_with('.')
                 || before.ends_with("fn")
             {
@@ -322,6 +325,8 @@ mod tests {
         assert!(findings(&[(LIB, method)], &[]).is_empty());
         let named = "fn f(stderr: u8, stdout_lines: u8) { let _ = (stderr, stdout_lines); }\n";
         assert!(findings(&[(LIB, named)], &[]).is_empty());
+        let value = "fn f() { let _ = g(std::io::stderr); }\n";
+        assert!(findings(&[(LIB, value)], &[])[1].contains("`stderr()`"));
     }
 
     #[test]
