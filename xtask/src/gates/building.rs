@@ -371,7 +371,13 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-midi-network/src/udp.rs",
-        "UdpDriver::bind",
+        "NetworkLink::spawn",
+        CTOR,
+        "duplicating the socket and starting the task's thread: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-midi-network/src/udp.rs",
+        "NetworkLink::bind",
         CTOR,
         "binding a UDP socket: the failure is the OS's, not a value's",
     ),
