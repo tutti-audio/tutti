@@ -45,8 +45,7 @@ bytemuck = "1"
 # Unpredictable slab and socket names (pure Rust; the OS's random source).
 getrandom = { workspace = true }
 
-crossbeam = "0.8"
-crossbeam-channel = "0.5"
+crossbeam-queue = "0.3"
 parking_lot = "0.13"
 
 # Cross-platform local IPC (Unix sockets on Unix, named pipes on Windows).

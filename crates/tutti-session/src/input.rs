@@ -24,7 +24,7 @@ use tutti_buffers::{Float, SampleFormat};
 use tutti_cpal::{AudioHost, DeviceSelector, MONITOR_RING, MicConfig, MicIn};
 use tutti_engine::StreamLatency;
 use tutti_graph::{DECLICK, FadeLaw, InletNode, InletRing};
-use tutti_rt::Mint;
+use tutti_platform::Executor;
 use tutti_units::{SampleRate, Samples, Seconds};
 
 use crate::graph::CrossfadeRefused;
@@ -208,11 +208,14 @@ impl<O: InputOpener<f32> + InputOpener<f64>> Openers for O {}
 
 /// The sound card's capture streams.
 #[derive(Debug)]
-struct Capture;
+struct Capture {
+    /// The executor whose dedicated threads own the capture streams.
+    executor: Executor,
+}
 
 impl<F: Float> InputOpener<F> for Capture {
     fn open(&mut self, config: &MicConfig, rate: SampleRate) -> tutti_cpal::Result<OpenedInput<F>> {
-        let (mic, ring) = MicIn::<F>::open_with_monitor(config, rate)?;
+        let (mic, ring) = MicIn::<F>::open_with_monitor(&self.executor, config, rate)?;
         Ok(OpenedInput {
             ring,
             keep: Box::new(mic),
@@ -242,8 +245,8 @@ pub(crate) struct Inputs<F: SessionFloat> {
     /// Where the output stream's callback reports its delay, once the session
     /// has a device ([`Device::latency`](crate::Device::latency)'s `output`).
     output_latency: Option<Arc<StreamLatency>>,
-    /// Names the takes begun.
-    takes: Mint,
+    /// Names the takes begun and carries what they report.
+    takes: crate::take::Takes,
 }
 
 impl<F: SessionFloat> std::fmt::Debug for Inputs<F> {
@@ -258,21 +261,29 @@ impl<F: SessionFloat> std::fmt::Debug for Inputs<F> {
 impl<F: SessionFloat> Inputs<F> {
     /// The inputs of a session built with `options`: on its host, opened by
     /// the builder's opener if it set one.
-    pub(crate) fn from_options(options: &mut crate::builder::Options) -> Self {
-        Self::new(options.host, options.input_opener.take())
+    pub(crate) fn from_options(options: &mut crate::builder::Options, executor: &Executor) -> Self {
+        Self::new(options.host, options.input_opener.take(), executor)
     }
 
-    pub(crate) fn new(host: AudioHost, opener: Option<Box<dyn Openers>>) -> Self {
+    pub(crate) fn new(
+        host: AudioHost,
+        opener: Option<Box<dyn Openers>>,
+        executor: &Executor,
+    ) -> Self {
         Self {
             host,
             latency: Arc::new(StreamLatency::new()),
             opener: opener.map_or_else(
-                || Box::new(Capture) as Box<dyn InputOpener<F>>,
+                || {
+                    Box::new(Capture {
+                        executor: executor.clone(),
+                    }) as Box<dyn InputOpener<F>>
+                },
                 <F as crate::format::Sealed>::upcast_opener,
             ),
             held: Vec::new(),
             output_latency: None,
-            takes: Mint::new(),
+            takes: crate::take::Takes::new(),
         }
     }
 
@@ -307,9 +318,14 @@ impl<F: SessionFloat> Inputs<F> {
         crate::take::LatencyProbe::new(Arc::clone(&self.latency), self.output_latency.clone())
     }
 
-    /// What names the takes begun.
-    pub(crate) fn takes(&self) -> &Mint {
+    /// The takes' numbering and report channel.
+    pub(crate) fn takes(&self) -> &crate::take::Takes {
         &self.takes
+    }
+
+    /// Lands what the takes' pumps reported since the last update, in the order sent.
+    pub(crate) fn land_takes(&mut self, out: &mut Vec<crate::SessionEvent>) {
+        self.takes.land(out);
     }
 
     /// The cell the capture callbacks report into.

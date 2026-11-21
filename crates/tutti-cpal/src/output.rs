@@ -11,6 +11,7 @@ use tutti_buffers::{Float, SampleFormat};
 use tutti_engine::{
     AudioCallbackState, OutputSpec, OutputStream, StreamDriver, StreamFaults, StreamLatency,
 };
+use tutti_platform::Executor;
 use tutti_units::SampleRate;
 
 use crate::driver_seam::{CpalDriver, choose_output_config, spec_from_supported};
@@ -131,11 +132,15 @@ pub struct AudioEngine {
     /// `None` for an engine built from a bare spec — no host, no device, so
     /// nothing to re-resolve on start. That is what makes a device-free
     /// lifecycle test possible.
-    pub(crate) target: Option<(DeviceHost, OutputConfig)>,
+    pub(crate) target: Option<Target>,
     /// What the stream last started is running on, kept so that naming it
     /// never enumerates the host.
     pub(crate) opened: Opened,
 }
+
+/// The device an engine resolves, with what opens its stream: its host, its config and
+/// the executor whose dedicated thread owns the stream.
+pub(crate) type Target = (DeviceHost, OutputConfig, Executor);
 
 /// A device found and its config read, not yet opened as a stream
 /// ([`AudioEngine::resolve_device`]): what
@@ -207,30 +212,35 @@ impl std::fmt::Debug for AudioEngine {
 
 impl AudioEngine {
     /// Opens a device on the default host and reads its output config,
-    /// without starting a stream.
+    /// without starting a stream. The stream runs on a dedicated thread of
+    /// `executor`.
     ///
     /// # Errors
     /// As [`open`](Self::open).
-    pub fn new(config: impl Into<OutputConfig>) -> Result<Self> {
-        Self::open(DeviceHost::open(AudioHost::Default)?, config)
+    pub fn new(executor: &Executor, config: impl Into<OutputConfig>) -> Result<Self> {
+        Self::open(executor, DeviceHost::open(AudioHost::Default)?, config)
     }
 
     /// Opens a device on the given host and reads its output config (the
     /// device's default, or the one that offers the chosen
     /// [`sample_format`](OutputConfig::sample_format)), without starting a
-    /// stream.
+    /// stream. The stream runs on a dedicated thread of `executor`.
     ///
     /// # Errors
     /// As [`new`](Self::new), plus whatever resolving the device on `host`
     /// reports, and [`DeviceError::OutputFormatUnavailable`] for a chosen format the
     /// device does not offer.
-    pub fn open(host: DeviceHost, config: impl Into<OutputConfig>) -> Result<Self> {
+    pub fn open(
+        executor: &Executor,
+        host: DeviceHost,
+        config: impl Into<OutputConfig>,
+    ) -> Result<Self> {
         let config = config.into();
         let device = host.device(DeviceDirection::Output, &config.device)?;
         let (spec, _) = spec_from_supported(&output_config(&device, config.sample_format)?)?;
         Ok(Self {
             stream: OutputStream::new(spec),
-            target: Some((host, config)),
+            target: Some((host, config, executor.clone())),
             opened: Opened::of(&device),
         })
     }
@@ -332,9 +342,9 @@ impl AudioEngine {
     /// [`resolve`](Self::resolve) for a bare `target`, which a restart reads
     /// while the stream is borrowed elsewhere.
     pub(crate) fn resolve_target(
-        target: Option<&(DeviceHost, OutputConfig)>,
+        target: Option<&Target>,
     ) -> Result<(CpalDriver, OutputSpec, Opened)> {
-        let Some((host, config)) = target else {
+        let Some((host, config, executor)) = target else {
             return Err(DeviceError::InvalidDevice(
                 "this engine was built from a bare spec and has no device to open; \
                  use `start_with` and supply a driver"
@@ -347,7 +357,11 @@ impl AudioEngine {
         // (`opened`): a restart that fails leaves the name of the device the
         // previous stream ran on.
         let opened = Opened::of(&device);
-        Ok((CpalDriver::new(device, format)?, spec, opened))
+        Ok((
+            CpalDriver::new(device, format, executor.clone())?,
+            spec,
+            opened,
+        ))
     }
 
     /// Starts `resolved` (this engine's device, found by
@@ -453,7 +467,7 @@ impl AudioEngine {
     /// index. Does not disturb a running stream, and does nothing on an engine
     /// built with [`from_spec`](Self::from_spec).
     pub fn select_device(&mut self, sel: DeviceSelector) {
-        if let Some((_, current)) = &mut self.target {
+        if let Some((_, current, _)) = &mut self.target {
             current.select(sel);
         }
     }

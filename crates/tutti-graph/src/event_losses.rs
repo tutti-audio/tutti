@@ -8,7 +8,7 @@ use tutti_rt::Count;
 /// What an event path lost, in four cumulative counts of **events**.
 ///
 /// Never frames: an audio loss stays a `Samples` (`TapReader::take_lost`,
-/// `Recorder::lost`). Every holder of events (the event inlet, the hardware
+/// `PumpLoop::lost`). Every holder of events (the event inlet, the hardware
 /// MIDI ports, the input node, the clock master) answers one `Losses` from
 /// its `losses()`, so a caller sums holders (`Add`, `Sum`) and never learns
 /// each one's own getters.

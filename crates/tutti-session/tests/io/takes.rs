@@ -829,6 +829,40 @@ fn dropping_a_session_commits_every_take_before_it_returns() {
     drop(take);
 }
 
+/// **A session dropped on a thread that drives an executor returns, leaving its take's
+/// pump detached**: a join there would stop the tasks the thread runs, so the drop does
+/// not wait. The future that drops the session ends.
+#[test]
+fn dropping_a_session_on_a_driving_thread_returns_without_joining() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = wav(&dir, "detached.wav");
+    let executor = tutti_platform::Executor::new();
+    // A session is not `Send`: the future builds it, arms the take and drops it, with no
+    // await between, on the thread that drives it.
+    let dropper = executor
+        .spawn_dedicated("drops-a-session", None, {
+            let path = path.clone();
+            async move {
+                assert!(tutti_platform::is_driving());
+                let mut rig = rig(InputConfig::default(), Samples::new(0));
+                rig.step(256);
+                let take = rig
+                    .session
+                    .record(&rig.input, Punch::now(), TakeTarget::wav(path))
+                    .expect("armed");
+                rig.steps_until(started);
+                drop(rig);
+                drop(take);
+            }
+        })
+        .expect("a dedicated thread");
+    assert_eq!(
+        tutti_platform::join(dropper),
+        Some(()),
+        "the future that dropped the session ended without panicking"
+    );
+}
+
 /// Runs a take of the ramp into `target` to its end and returns the
 /// session's events.
 fn record_to_end(target: TakeTarget) -> Vec<SessionEvent> {

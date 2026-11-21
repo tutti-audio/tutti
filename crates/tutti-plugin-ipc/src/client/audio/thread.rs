@@ -771,8 +771,10 @@ fn drain_with_errors(channels: &Channels, state: &mut AudioState) {
 }
 
 /// Drop every queued control-lane command: a request's caller, holding the
-/// other end of its reply, is told at once that none is coming.
+/// other end of its reply, is told at once that none is coming. The settings'
+/// slots close too, so a setting's waiter (the audio lane) ends at once.
 fn drop_controls(channels: &Channels) {
+    channels.close_settings();
     while let Some(Sequenced { cmd, .. }) = channels.pop_control() {
         drop(cmd);
     }

@@ -16,8 +16,6 @@ workspace = true
 [dependencies]
 # The mapping.
 memmap2 = "0.9"
-# The header's per-architecture cache-line padding.
-crossbeam-utils = "0.8"
 thiserror = "2"
 # The slab's wire form crosses the control wire; the slab's fresh name.
 serde = { version = "1", features = ["derive"] }

@@ -14,10 +14,11 @@
 //! `a_fork_freezes_a_live_curve`) and the `testing` stimulus nodes.
 
 use tutti_buffers::Mono;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, BusTopology, ChannelLayout};
 use tutti_graph::ParamNode;
 use tutti_graph::contract::IsolateRow;
 use tutti_nodes::{
+    AmbisonicEncoderConfig, AmbisonicEncoderNode, AmbisonicRotatorConfig, AmbisonicRotatorNode,
     AutoPanConfig, AutoPanNode, BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig,
     BusStripNode, ChannelTimes, CombFilterConfig, CombFilterNode, CombForm, CompressorConfig,
     CompressorControls, CompressorNode, ConvolverNode, DelayConfig, DelayControls, DelayLayout,
@@ -434,6 +435,40 @@ fn auto_pan() {
 }
 
 #[test]
+fn ambisonic_encoder() {
+    IsolateRow::new("AmbisonicEncoderNode", || {
+        AmbisonicEncoderNode::<f32>::try_from(AmbisonicEncoderConfig::new(ambix(
+            AmbisonicOrder::MAX,
+        )))
+        .unwrap()
+    })
+    .control("azimuth", |p| {
+        assert!(p.param_set().set(UnitParam::Azimuth, 70.0))
+    })
+    .control("elevation", |p| {
+        assert!(p.param_set().set(UnitParam::Elevation, 40.0))
+    })
+    .check();
+}
+
+#[test]
+fn ambisonic_rotator() {
+    IsolateRow::new("AmbisonicRotatorNode", || {
+        AmbisonicRotatorNode::<f32>::try_from(AmbisonicRotatorConfig::new(ambix(
+            AmbisonicOrder::MAX,
+        )))
+        .unwrap()
+    })
+    .control("azimuth", |p| {
+        assert!(p.param_set().set(UnitParam::Azimuth, 70.0))
+    })
+    .control("elevation", |p| {
+        assert!(p.param_set().set(UnitParam::Elevation, 40.0))
+    })
+    .check();
+}
+
+#[test]
 fn comb_filter() {
     for form in [CombForm::Feedforward, CombForm::Feedback] {
         IsolateRow::new("CombFilterNode (stereo)", move || {
@@ -672,4 +707,9 @@ fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>
             .block_size(block_size),
     )
     .expect("one response on a mono bus")
+}
+
+/// The AmbiX bus of `order`: ACN, SN3D.
+fn ambix(order: AmbisonicOrder) -> BusTopology {
+    BusTopology::ambisonic(AmbisonicFormat::ambix(order))
 }

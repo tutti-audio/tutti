@@ -41,6 +41,8 @@ tutti-nodes = { version = "0.0.1", path = "../tutti-nodes", default-features = f
 thiserror = { workspace = true, features = ["std"] }
 # `oneshot`: the reply of an out-of-process plugin load, and of a MIDI-CI peer request.
 futures-channel = { workspace = true, optional = true }
+# `FutureExt::catch_unwind`: a take's pump reports its panic as its end.
+futures-lite = { workspace = true, optional = true }
 tracing.workspace = true
 serde = { version = "1", optional = true, features = ["derive"] }
 
@@ -88,12 +90,12 @@ raw-window-handle = { version = "0.6", optional = true }
 # Every subsystem is a feature, as on every engine crate.
 default = []
 device = ["dep:tutti-cpal"]
-# The `Recorder` and its pump loop, device-free: a host that records files or
+# The pump loop, device-free: a host that records files or
 # taps without a microphone takes it alone.
 record = ["dep:tutti-dsp"]
 # Live audio input from the sound card: `Session::add_input`, takes, mic capture;
 # implies `device` and `record`.
-capture = ["device", "record", "tutti-cpal/capture", "encode-wav"]
+capture = ["device", "record", "tutti-cpal/capture", "encode-wav", "dep:futures-lite"]
 midi = [
     "dep:tutti-midi-protocol",
     "dep:tutti-midi-runtime",
@@ -157,7 +159,7 @@ tutti-codec = { path = "../tutti-codec", features = ["encode-wav", "decode-wav",
 # The collector that reads the `tutti::graph` events a session emits
 # (`tests/io/rt_log.rs`).
 tracing-subscriber.workspace = true
-# An independent reader for the WAV files the recorder tests write.
+# An independent reader for the WAV files the pump tests write.
 hound = "3.5"
 # `MidiRouteRule`'s serde round trip (`tests/midi/midi_front.rs`).
 serde_json = "1"
