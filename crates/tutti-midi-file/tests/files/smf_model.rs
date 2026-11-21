@@ -568,6 +568,8 @@ fn a_zero_tempo_is_not_a_tempo_and_an_absurd_one_is_read_as_written() {
 /// SMF 1.0 section 3.3: `FF 51 03 tttttt` is 24 bits, and the wire's zero is no
 /// valid tempo. A tempo whose microseconds per quarter is outside `1..=0xFFFFFF`
 /// is refused, never pinned to an end.
+///
+/// Spec: smf/set-tempo#1
 #[test]
 fn a_tempo_outside_the_24_bit_field_is_refused() {
     let micros = |us: f64| Meta::tempo(Bpm::from_beat_period(Seconds::new(us / 1.0e6)).unwrap());

@@ -2816,7 +2816,14 @@ fn tempo_map(
 
 #[cfg(test)]
 mod tests {
-    use super::{SmfFormat, TextKind};
+    use super::{DEFAULT_TEMPO, Meta, SmfFormat, TextKind, default_tempo};
+
+    /// The default Set Tempo is [`DEFAULT_TEMPO`]'s: SMF 1.0 section 2.2's
+    /// 120 BPM is 500 000 us per quarter.
+    #[test]
+    fn the_default_set_tempo_is_the_default_tempo() {
+        assert_eq!(Meta::tempo(DEFAULT_TEMPO), Some(default_tempo()));
+    }
 
     /// SMF 1.0 section 3.3: the text meta types are 01 to 09. The copyright
     /// notice (02) and the Track Name (03) are a track's fields, so no kind

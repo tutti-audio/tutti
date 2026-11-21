@@ -45,6 +45,10 @@ fn an_instance_name_holds_63_octets_not_64() {
     assert_eq!(InstanceName::new("i".repeat(64)), None);
     // RFC 1035 section 2.3.4: a label is not empty.
     assert_eq!(InstanceName::new(String::new()), None);
+    assert_eq!(
+        InstanceName::try_from(String::new()),
+        Err(InstanceNameError { octets: 0 })
+    );
     // Octets, not characters: 31 two-octet characters and a one-octet one
     // are 63; one more two-octet character is 65.
     let at_edge = format!("{}x", "é".repeat(31));
