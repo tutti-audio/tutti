@@ -1,0 +1,11 @@
+cargo::rerun-if-changed=build.rs
+cargo::rerun-if-env-changed=PKG_CONFIG_PATH
+cargo::rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+cargo::rerun-if-env-changed=PKG_CONFIG_LIBDIR
+cargo::rerun-if-env-changed=PKG_CONFIG_ALLOW_CROSS
+cargo::rustc-check-cfg=cfg(alsa_ump)
+cargo::rustc-cfg=alsa_ump
+cargo::rustc-link-lib=asound
+cargo::rustc-link-search=native=/usr/lib64
+cargo::metadata=alsa_ump=1
+cargo::metadata=alsa_ump_create=1

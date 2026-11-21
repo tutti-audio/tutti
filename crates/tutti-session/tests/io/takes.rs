@@ -80,12 +80,6 @@ struct Rig {
 }
 
 fn rig(config: InputConfig, lead: Samples) -> Rig {
-    rig_on(config, lead, None)
-}
-
-/// A rig whose session runs its background work on `executor` (driven by `update`), or,
-/// with `None`, on its own.
-fn rig_on(config: InputConfig, lead: Samples, executor: Option<tutti_platform::Executor>) -> Rig {
     let capture = Arc::new(Mutex::new(Capture {
         writer: None,
         lead,
@@ -97,11 +91,7 @@ fn rig_on(config: InputConfig, lead: Samples, executor: Option<tutti_platform::E
         ChannelLayout::STEREO,
         tutti_buffers::SampleFormat::F32,
     );
-    let mut builder = Session::builder();
-    if let Some(executor) = executor {
-        builder = builder.executor(executor);
-    }
-    let live = builder
+    let live = Session::builder()
         .input_opener(Opener(Arc::clone(&capture)))
         .device(Default::default())
         .build_device_on(spec, driver)
@@ -690,20 +680,15 @@ fn a_take_makes_a_clip_only_from_a_file() {
     drop((to_file, to_sink));
 }
 
-/// **A take on a polled session records and finishes, and the file holds the frames
-/// the input played.** The pump runs inside `update`, woken by the tap's bell: the
-/// ramp the test pushed (frame `i` is `[i, -i]`) comes back frame for frame from the
+/// **A take records and finishes, and the file holds the frames the input played.** The
+/// pump runs on tutti's thread, woken by the tap's bell: the ramp the test pushed (frame `i` is `[i, -i]`) comes back frame for frame from the
 /// first frame the take kept.
 #[test]
-fn a_take_on_a_polled_session_records_and_its_file_holds_the_frames_written() {
+fn a_take_records_and_its_file_holds_the_frames_written() {
     let dir = tempfile::tempdir().unwrap();
-    let mut rig = rig_on(
-        InputConfig::default(),
-        Samples::new(0),
-        Some(tutti_platform::Executor::new()),
-    );
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
     rig.step(256);
-    let path = wav(&dir, "polled.wav");
+    let path = wav(&dir, "ramp.wav");
     let take = rig
         .session
         .record(&rig.input, Punch::now(), TakeTarget::wav(path.clone()))
@@ -728,17 +713,13 @@ fn a_take_on_a_polled_session_records_and_its_file_holds_the_frames_written() {
 }
 
 /// **`finish` returns without waiting, and the completion lands in a later update.**
-/// On a polled session the pump closes the sink only inside an `update`'s poll, so a
-/// `finish` that joined would never return; it returns at once, nothing has landed, and
-/// the updates that follow report the end once.
+/// The pump closes the sink on its own thread and the end lands only in an `update`, so
+/// `finish` returns at once, nothing has landed, and the updates that follow report the
+/// end once.
 #[test]
 fn finish_returns_at_once_and_the_completion_lands_in_the_updates_after() {
     let dir = tempfile::tempdir().unwrap();
-    let mut rig = rig_on(
-        InputConfig::default(),
-        Samples::new(0),
-        Some(tutti_platform::Executor::new()),
-    );
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
     rig.step(256);
     let take = rig
         .session
@@ -768,18 +749,14 @@ fn finish_returns_at_once_and_the_completion_lands_in_the_updates_after() {
     assert_eq!(ends, 1, "the end is reported once: {:?}", rig.takes());
 }
 
-/// **A take that has nothing to record never stalls `update` on a polled session.** Its
+/// **A take that has nothing to record never stalls `update`.** Its
 /// punch-in is far ahead, so the pump has no frame to keep: it awaits its bell instead
 /// of waiting on the tap. A hundred updates return with it armed, and stopping it before
 /// its punch-in lands as a failure within the updates that follow.
 #[test]
-fn an_idle_take_on_a_polled_session_never_stalls_update() {
+fn an_idle_take_never_stalls_update() {
     let dir = tempfile::tempdir().unwrap();
-    let mut rig = rig_on(
-        InputConfig::default(),
-        Samples::new(0),
-        Some(tutti_platform::Executor::new()),
-    );
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
     rig.step(256);
     let take = rig
         .session
@@ -810,19 +787,14 @@ fn an_idle_take_on_a_polled_session_never_stalls_update() {
 
 /// **Dropping a session ends a take's pump, which commits the take.** The pump awaits its
 /// tap's bell; the graph's drop drops the tap's writer, which rings that bell, and the
-/// session's bells deliver the ring before they go. The executor's next poll runs the
-/// woken pump, which reads the writer gone and closes its sink: the take's file lands at
-/// its path, holding the ramp's frames. Until then the path does not exist.
+/// session's bells deliver the ring before they go. The woken pump reads the writer gone
+/// and closes its sink: the take's file lands at its path, holding the ramp's frames. Until
+/// then the path does not exist.
 #[test]
 fn dropping_a_session_ends_a_take_pump_and_commits_the_file() {
     let dir = tempfile::tempdir().unwrap();
     let path = wav(&dir, "dropped.wav");
-    let executor = tutti_platform::Executor::new();
-    let mut rig = rig_on(
-        InputConfig::default(),
-        Samples::new(0),
-        Some(executor.clone()),
-    );
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
     rig.step(256);
     let take = rig
         .session
@@ -835,7 +807,13 @@ fn dropping_a_session_ends_a_take_pump_and_commits_the_file() {
     assert!(!path.exists(), "the file is committed when the pump ends");
 
     drop(rig);
-    executor.run_until_stalled();
+    // The pump's thread commits the file when the bell tells it the writer is gone: a
+    // hang guard by deadline, and the wait is the file's arrival.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !path.exists() && Instant::now() < deadline {
+        std::thread::park_timeout(Duration::from_millis(1));
+    }
+    assert!(path.exists(), "the pump never committed the file");
 
     let frames = read(&path);
     assert!(!frames.is_empty(), "the committed file holds the take");
@@ -847,14 +825,10 @@ fn dropping_a_session_ends_a_take_pump_and_commits_the_file() {
     drop(take);
 }
 
-/// Runs a polled take of the ramp into `target` to its end and returns the
+/// Runs a take of the ramp into `target` to its end and returns the
 /// session's events.
-fn record_polled(target: TakeTarget) -> Vec<SessionEvent> {
-    let mut rig = rig_on(
-        InputConfig::default(),
-        Samples::new(0),
-        Some(tutti_platform::Executor::new()),
-    );
+fn record_to_end(target: TakeTarget) -> Vec<SessionEvent> {
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
     rig.step(256);
     let take = rig
         .session
@@ -888,7 +862,7 @@ fn a_create_new_take_onto_an_existing_file_keeps_the_take_and_leaves_the_path() 
     let dir = tempfile::tempdir().unwrap();
     let path = wav(&dir, "taken.wav");
     std::fs::write(&path, b"old bytes").unwrap();
-    let events = record_polled(TakeTarget::wav(path.clone()).create_new());
+    let events = record_to_end(TakeTarget::wav(path.clone()).create_new());
     let [SessionEvent::Take(TakeEvent::Failed { error, .. })] = events
         .iter()
         .filter(|e| matches!(e, SessionEvent::Take(_)))
@@ -922,7 +896,7 @@ fn a_take_replaces_an_existing_file_and_leaves_nothing_beside_it() {
     let dir = tempfile::tempdir().unwrap();
     let path = wav(&dir, "taken.wav");
     std::fs::write(&path, b"old bytes").unwrap();
-    let events = record_polled(TakeTarget::wav(path.clone()));
+    let events = record_to_end(TakeTarget::wav(path.clone()));
     let done = recorded(&events);
     assert_eq!(read(&path).len(), done.frames().get());
     assert_eq!(names(&dir), [std::ffi::OsString::from("taken.wav")]);

@@ -1,0 +1,5 @@
+cargo:rerun-if-changed=build.rs
+cargo:rustc-check-cfg=cfg(alsa_ump_create)
+cargo:rustc-check-cfg=cfg(midi_backend, values("coremidi", "winmm", "alsa", "none"))
+cargo:rustc-cfg=alsa_ump_create
+cargo:rustc-cfg=midi_backend="alsa"

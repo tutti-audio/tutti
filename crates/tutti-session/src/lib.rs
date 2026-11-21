@@ -70,7 +70,6 @@ mod bypass;
 mod clock;
 #[cfg(feature = "device")]
 mod device;
-mod drive;
 #[cfg(feature = "plugin")]
 mod editor;
 mod error;
@@ -97,6 +96,7 @@ mod instrument;
 )]
 mod job;
 mod jobs;
+mod keep_pace;
 mod key;
 #[cfg(any(feature = "capture", feature = "midi"))]
 mod latency;
@@ -104,11 +104,6 @@ mod latency;
 mod load_audio;
 #[cfg(feature = "soundfont")]
 mod load_soundfont;
-#[cfg(any(
-    all(feature = "sampler", codec),
-    feature = "soundfont",
-    feature = "plugin"
-))]
 mod loaded;
 #[cfg(feature = "midi")]
 mod midi;
@@ -194,7 +189,7 @@ pub use device::{
 #[cfg(feature = "plugin")]
 pub use editor::{Editor, EditorCallError, Opened};
 pub use error::{
-    ConnectError, DeclarationError, Error, InletError, NoSuchNode, RemoveError, Result,
+    ConnectError, DeclarationError, Error, InletError, KeepPace, NoSuchNode, RemoveError, Result,
     SessionOutputTapError, TempoError,
 };
 #[cfg(feature = "midi")]

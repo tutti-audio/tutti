@@ -1,0 +1,1 @@
+cargo:rerun-if-env-changed=VST3_SDK_DIR

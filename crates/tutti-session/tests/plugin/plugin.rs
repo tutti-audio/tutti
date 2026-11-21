@@ -79,10 +79,7 @@ fn session_built(
     for (key, value) in extra {
         set_env(key, value);
     }
-    // The executor is polled: a queued job runs in the `Collect` that polls it and lands
-    // there, in a deterministic order (the plugin tasks run on its blocking pool). A test
-    // that wants another executor says so in `build`.
-    build(Session::builder().executor(tutti_platform::Executor::new()))
+    build(Session::builder())
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
@@ -802,7 +799,7 @@ mod reaped_on_drop {
     use super::*;
 
     /// **Dropping a session with a reload in flight waits for it, so the replacement's
-    /// server is reaped and the executor ends.** The first server aborts on its 60th
+    /// server is reaped.** The first server aborts on its 60th
     /// block; the replacement restores a state its load holds on a fifo until a releaser
     /// thread opens and closes it. The reload task is inside `PluginLoad::run` (it holds the
     /// load and, through its upgrade, the executor only for the launch) when the session
@@ -819,8 +816,6 @@ mod reaped_on_drop {
             .status()
             .expect("mkfifo");
         assert!(made.success());
-        let executor = tutti_platform::Executor::new();
-        let weak = executor.downgrade();
         let mut s = session_built(
             &[
                 PASSTHROUGH,
@@ -831,10 +826,7 @@ mod reaped_on_drop {
                     fifo.to_str().expect("a utf-8 path"),
                 ),
             ],
-            |b| {
-                b.snapshot_interval(Duration::from_secs(1))
-                    .executor(executor)
-            },
+            |b| b.snapshot_interval(Duration::from_secs(1)),
         );
         let (node, _) = wired_probe(&mut s);
         snapshot_now(&mut s, node);
@@ -874,10 +866,6 @@ mod reaped_on_drop {
                 .expect("the fifo opens"),
         );
         releaser.join().expect("the releaser ended");
-        assert!(
-            weak.upgrade().is_none(),
-            "the executor ended with the session"
-        );
         assert_eq!(
             children_of_this_process(),
             Vec::<u32>::new(),

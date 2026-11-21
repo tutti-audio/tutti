@@ -84,7 +84,7 @@
 //!   its mirror, and (`modulation`) into the knob of the lane on that
 //!   parameter when it has one (doc 014 §8.2). A mirror rebuilt by a crossfade
 //!   to another plugin, or by a rescan the plugin announced, is read by a task
-//!   on the session's executor (`SessionBuilder::executor`): one round trip
+//!   on the session's executor: one round trip
 //!   per parameter, landed through the plugin inbox in a later [`Session::update`]. Until then the
 //!   mirror is not ready, and a lane on the plugin waits for it.
 //! - **Snapshots.** A healthy plugin's state is captured every
@@ -3126,13 +3126,11 @@ mod tests {
     }
 
     fn build_rig(state: Option<Vec<u8>>, mode: Mode) -> Rig {
-        let executor = Executor::new();
-        let weak = executor.downgrade();
         let mut session = Session::builder()
             .snapshot_interval(Duration::from_secs(1))
-            .executor(executor)
             .build_detached(SampleRate::SR_48K)
             .unwrap();
+        let weak = session.plugins.executor.clone();
         let saves = Arc::new(AtomicUsize::new(0));
         let dead = Arc::new(AtomicBool::new(false));
         let (release, hold) = if mode == Mode::Held {

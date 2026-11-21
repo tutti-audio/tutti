@@ -1,0 +1,1 @@
+{"rustc":2642861616376027855,"features":"","declared_features":"","target":0,"profile":0,"path":0,"deps":[[7877623251743276095,"build_script_build",false,9851070449887333230]],"local":[{"RerunIfEnvChanged":{"var":"CPAL_ASIO_DIR","val":null}}],"rustflags":[],"config":0,"compile_kind":0}

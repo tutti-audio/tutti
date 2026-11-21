@@ -26,7 +26,7 @@ use tutti_plugin_types::StateError;
 
 use super::{ParamValues, PluginLoaded};
 use crate::RecoveryFailure;
-use crate::jobs::panic_message;
+use crate::loaded::panic_message;
 
 /// What a loop's task ended with.
 pub(crate) enum Arrival {

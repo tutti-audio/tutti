@@ -25,16 +25,12 @@ fn session(builder: SessionBuilder) -> DetachedSession {
     builder.build_detached(SampleRate::SR_48K).unwrap()
 }
 
-/// A session on a polled executor the test shares: its futures wait until the test
-/// polls the executor, or the session's `update` does.
-fn polled() -> (DetachedSession, Executor) {
-    let executor = Executor::new();
-    let s = session(Session::builder().executor(executor.clone()));
-    (s, executor)
-}
-
-fn run_all(executor: &Executor) {
-    executor.run_until_stalled();
+/// A job already landed with `n`: its ticket lands at once, so the test does not wait on
+/// a worker.
+fn landed(s: &mut DetachedSession, n: u32) -> Job<Echo> {
+    let (job, ticket) = s.jobs.new_job::<Echo>();
+    ticket.land(Ok(n));
+    job
 }
 
 fn echo(s: &mut DetachedSession, n: u32) -> Job<Echo> {
@@ -75,20 +71,18 @@ fn a_running_job_reports_running_and_wait_returns_its_result() {
 }
 
 #[test]
-fn a_job_is_pending_until_its_task_runs_and_done_once_it_ended() {
-    let (mut s, executor) = polled();
-    let job = echo(&mut s, 1);
+fn a_job_is_pending_until_its_ticket_lands_and_done_after() {
+    let s = session(Session::builder());
+    let (job, ticket) = s.jobs.new_job::<Echo>();
     assert_eq!(job.status(), JobStatus::Pending);
-    run_all(&executor);
-    let _ = s.update();
+    ticket.land(Ok(1));
     assert_eq!(job.status(), JobStatus::Done);
 }
 
 #[test]
 fn wait_leaves_the_other_landings_for_the_next_update_in_order() {
-    let (mut s, executor) = polled();
-    let (first, second, third) = (echo(&mut s, 1), echo(&mut s, 2), echo(&mut s, 3));
-    run_all(&executor);
+    let mut s = session(Session::builder());
+    let (first, second, third) = (landed(&mut s, 1), landed(&mut s, 2), landed(&mut s, 3));
     assert_eq!(second.wait(&mut s), Ok(2));
     let rest = s.update();
     assert_eq!(landings(&rest), [first.id(), third.id()]);
@@ -97,9 +91,8 @@ fn wait_leaves_the_other_landings_for_the_next_update_in_order() {
 
 #[test]
 fn a_landing_is_taken_once_and_only_by_its_own_job() {
-    let (mut s, executor) = polled();
-    let (a, b) = (echo(&mut s, 1), echo(&mut s, 2));
-    run_all(&executor);
+    let mut s = session(Session::builder());
+    let (a, b) = (landed(&mut s, 1), landed(&mut s, 2));
     let mut events = s.update();
     let SessionEvent::JobDone(output) = &mut events[0] else {
         panic!("the first event is a landing");
@@ -111,10 +104,11 @@ fn a_landing_is_taken_once_and_only_by_its_own_job() {
 
 #[test]
 fn a_dropped_job_lands_nothing() {
-    let (mut s, executor) = polled();
-    let job = echo(&mut s, 1);
+    let mut s = session(Session::builder());
+    let (job, ticket) = s.jobs.new_job::<Echo>();
     drop(job);
-    run_all(&executor);
+    assert!(ticket.cancelled());
+    ticket.land(Ok(1));
     assert_eq!(landings(&s.update()), []);
 }
 
@@ -146,18 +140,16 @@ fn wait_ends_when_the_sessions_end_of_the_job_is_gone_unanswered() {
 
 #[test]
 fn a_job_waited_for_while_another_lands_still_returns_the_other_later() {
-    let (mut s, executor) = polled();
-    let (a, b) = (echo(&mut s, 1), echo(&mut s, 2));
-    run_all(&executor);
+    let mut s = session(Session::builder());
+    let (a, b) = (landed(&mut s, 1), landed(&mut s, 2));
     assert_eq!(a.wait(&mut s), Ok(1));
     assert_eq!(b.wait(&mut s), Ok(2), "b's landing was held for it");
 }
 
 #[test]
 fn a_wait_after_the_result_was_taken_answers_already_landed() {
-    let (mut s, executor) = polled();
-    let (a, b) = (echo(&mut s, 1), echo(&mut s, 2));
-    run_all(&executor);
+    let mut s = session(Session::builder());
+    let (a, b) = (landed(&mut s, 1), landed(&mut s, 2));
     assert_eq!(a.wait(&mut s), Ok(1));
     assert_eq!(
         a.wait(&mut s),
@@ -177,8 +169,8 @@ fn a_wait_after_the_result_was_taken_answers_already_landed() {
 
 #[test]
 fn ids_are_unique_across_sessions() {
-    let (mut first, _executor_a) = polled();
-    let (mut second, _executor_b) = polled();
+    let mut first = session(Session::builder());
+    let mut second = session(Session::builder());
     assert_ne!(echo(&mut first, 1).id(), echo(&mut second, 1).id());
 }
 
@@ -219,10 +211,10 @@ fn a_job_dropped_after_its_landing_was_queued_takes_the_landing_with_it() {
 }
 
 #[test]
-fn an_awaited_job_resolves_in_the_poll_after_the_update_that_landed_it() {
-    let executor = tutti_platform::Executor::new();
-    let mut s = session(Session::builder().executor(executor.clone()));
-    let job = echo(&mut s, 7);
+fn an_awaited_job_resolves_in_the_poll_after_the_update_that_found_it_landed() {
+    let executor = Executor::new();
+    let mut s = session(Session::builder());
+    let (job, ticket) = s.jobs.new_job::<Echo>();
     let got = Arc::new(Mutex::new(None));
     let into = Arc::clone(&got);
     executor
@@ -230,6 +222,12 @@ fn an_awaited_job_resolves_in_the_poll_after_the_update_that_landed_it() {
             *into.lock().unwrap() = Some(job.await);
         })
         .detach();
+    assert_eq!(
+        executor.run_until_stalled(),
+        1,
+        "the poll registers its waker"
+    );
+    ticket.land(Ok(7));
     let events = s.update();
     assert!(got.lock().unwrap().is_none(), "the update only landed it");
     assert!(
@@ -246,9 +244,9 @@ fn an_awaited_job_resolves_in_the_poll_after_the_update_that_landed_it() {
 
 #[test]
 fn an_awaited_job_whose_landing_the_collect_phase_reported_answers_already_landed() {
-    let executor = tutti_platform::Executor::new();
-    let mut s = session(Session::builder().executor(executor.clone()));
-    let job = echo(&mut s, 7);
+    let executor = Executor::new();
+    let mut s = session(Session::builder());
+    let job = landed(&mut s, 7);
     let _events = s.update();
     let got = Arc::new(Mutex::new(None));
     let into = Arc::clone(&got);

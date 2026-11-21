@@ -379,9 +379,8 @@ pub mod types {
         snap_to_whole_frame,
     };
     pub use tutti_platform::{
-        Asset, Destination, Executor, Identity, Open, Panicked, PriorityRequest, ReadSeek,
-        Shutdown, Sleep, Staged, StagedCommitError, StagedFile, StagedKeep, Stamp, Threads, Timer,
-        WeakExecutor,
+        Asset, Destination, Identity, Open, Panicked, PriorityRequest, ReadSeek, Staged,
+        StagedCommitError, StagedFile, StagedKeep, Stamp,
     };
     pub use tutti_rt::{
         AtomicCell, AtomicWord, Bell, Bells, Count, Counter, CounterWriter, Drained, Gauge,
@@ -490,12 +489,12 @@ pub mod session {
     pub use tutti_session::{
         BlockConfig, Bus, BusSink, Channel, Committed, Connection, Crossfade, CrossfadeId,
         CrossfadeRefused, DeclarationError, Event, EventEdge, EventTapPort, Fanin, Feeder, Graph,
-        Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots, NotReopened,
-        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputTapOpen, PHASES, Peer,
-        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
-        RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId, RootDeclaration,
-        RootReader, RootTopologyStatus, SessionNode, SessionOutputTapError, Taps, TempoError,
-        Weighted, Wire, root_width,
+        Inlet, InletError, KeepPace, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots,
+        NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputTapOpen,
+        PHASES, Peer, PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer,
+        Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId,
+        RootDeclaration, RootReader, RootTopologyStatus, SessionNode, SessionOutputTapError, Taps,
+        TempoError, Weighted, Wire, root_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
