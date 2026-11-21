@@ -154,6 +154,14 @@ pub enum IpcError {
     #[error("the plugin-server failed the request: {0}")]
     Server(#[from] crate::ServerError),
 
+    /// The plugin-server did not list the plugin's parameters: the request
+    /// could not be sent, the server answered something else, or the plugin
+    /// died first. A plugin with no parameters lists none, which is an answer;
+    /// this is the lack of one, and the node's per-parameter delivery cannot be
+    /// sized without it.
+    #[error("the plugin-server did not list the plugin's parameters")]
+    ParametersUnlisted,
+
     /// The served plugin has no origin to load a fresh instance from.
     #[error("the served plugin has no origin")]
     NoOrigin,

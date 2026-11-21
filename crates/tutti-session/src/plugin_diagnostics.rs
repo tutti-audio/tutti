@@ -149,12 +149,20 @@ impl<'a> Diagnostics<'a> {
             .map_or(0, tutti_plugin_host::PluginControls::leaked_buffers)
     }
 
-    /// Parameter writes the editor mirror refused (the plugin still got them; the open editor's display missed them). Zero for a plugin that runs in this process.
+    /// Transfers between the plugin and its editor instance that were refused: a parameter write the mirror dropped (the plugin still got it; the open editor's display missed it), an edit or a state one side did not take (an editor opened at the plugin's defaults among them). Zero for a plugin that runs in this process.
     pub fn mirror_writes_refused(&self) -> u64 {
         self.hosted
             .controls
             .as_ref()
             .map_or(0, tutti_plugin_host::PluginControls::mirror_writes_refused)
+    }
+
+    /// Requests the plugin's editor instance made that were dropped: every request but a transport request (a restart, an I/O change, a parameter rescan, a latency or tail change, a reload, a callback, a MIDI-CC or note-expression change, a timer or a file descriptor), which the plugin's audio instance cannot be told. Zero for a plugin that runs in this process.
+    pub fn editor_requests_dropped(&self) -> u64 {
+        self.hosted.controls.as_ref().map_or(
+            0,
+            tutti_plugin_host::PluginControls::editor_requests_dropped,
+        )
     }
 
     /// The latency the graph compensates for this plugin's node, as of the last

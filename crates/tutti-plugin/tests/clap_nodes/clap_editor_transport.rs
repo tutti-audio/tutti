@@ -41,10 +41,15 @@ fn served_a_request_the_editor_instance_makes_reaches_subscribers_in_order() {
             }
         }
     });
-    loaded
+    let opened = loaded
         .handle
         .open_editor(main, StandInWindow.handle(), ContentScale::IDENTITY)
         .expect("the editor instance opens");
+    assert_eq!(
+        opened.mirrored,
+        Ok(()),
+        "the editor instance took the state"
+    );
 
     for cmd in [HOSTEXT_CMD_START, HOSTEXT_CMD_STOP] {
         probe.hostext_command_via_callback(cmd, 0, 0);

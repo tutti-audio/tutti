@@ -82,7 +82,13 @@ fn an_editor_reads_a_requested_size_once() {
     let main = tutti_fixtures::main_thread();
     let mut editor = s.editor(node, &main).unwrap();
     let opened = editor.open(&StandInWindow, ContentScale::IDENTITY).unwrap();
-    assert_eq!(opened, Opened::Embedded(PhysicalSize::new(640, 480).into()));
+    assert_eq!(
+        opened,
+        Opened::Embedded {
+            size: PhysicalSize::new(640, 480).into(),
+            mirrored: Ok(()),
+        }
+    );
 
     let want = PhysicalSize::new(1000, 700);
     fake.request_editor_size(want);

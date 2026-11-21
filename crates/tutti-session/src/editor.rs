@@ -56,7 +56,8 @@ use raw_window_handle::HasWindowHandle;
 use tutti_graph::NodeKey;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{
-    ContentScale, EditorError, Features, KeyEvent, KeyUse, MainThreadMarker, WindowHandle,
+    ContentScale, EditorError, EditorMirrorError, Features, KeyEvent, KeyUse, MainThreadMarker,
+    WindowHandle,
 };
 
 use crate::{Clock, NoSuchNode, Session};
@@ -217,8 +218,14 @@ pub enum EditorCallError {
 }
 
 /// Whether the editor embedded in the parent the host gave, or the plugin
-/// opened a window of its own ([`Editor::open`]).
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// opened a window of its own ([`Editor::open`]), and whether the editor was
+/// brought in step with the plugin's state.
+///
+/// An editor that could not be mirrored (`mirrored` is an error) still opens:
+/// it shows the plugin at its defaults, and the plugin keeps its own state.
+/// The failure is counted too
+/// (`mirror_writes_refused` of the plugin's diagnostics).
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Opened {
     /// Embedded in the parent window, at this size: the host sizes the parent
@@ -226,10 +233,18 @@ pub enum Opened {
     /// format counts in device pixels, a [`Size::Logical`] where it counts in
     /// points (macOS, and AU), so a windowing frontend that sizes its windows
     /// in `dpi` units, as winit does, passes it on as it is.
-    Embedded(Size),
+    Embedded {
+        /// The size the plugin's editor asked for.
+        size: Size,
+        /// Whether the editor holds the plugin's state.
+        mirrored: Result<(), EditorMirrorError>,
+    },
     /// The plugin made a floating window of its own (a CLAP plugin that cannot
     /// embed): there is no size, and nothing to lay out.
-    Floating,
+    Floating {
+        /// Whether the editor holds the plugin's state.
+        mirrored: Result<(), EditorMirrorError>,
+    },
 }
 
 /// A hosted plugin's editor, made by [`Session::editor`].
@@ -298,11 +313,16 @@ impl Editor {
             return Err(EditorCallError::AlreadyOpen);
         }
         let opened = if handle.loaded().features.contains(Features::EDITOR_FLOATING) {
-            handle.open_floating_editor(main)?;
-            Opened::Floating
+            Opened::Floating {
+                mirrored: handle.open_floating_editor(main)?.mirrored,
+            }
         } else {
             let parent = WindowHandle::from_window(window)?;
-            Opened::Embedded(handle.open_editor(main, parent, scale)?)
+            let opened = handle.open_editor(main, parent, scale)?;
+            Opened::Embedded {
+                size: opened.window,
+                mirrored: opened.mirrored,
+            }
         };
         self.opened = true;
         Ok(opened)
@@ -325,7 +345,7 @@ impl Editor {
     /// resize of its window) and returns the size it took, which may be
     /// snapped or clamped. `requested` may be in either unit: the format
     /// converts it at the scale the editor was last given. The size taken is
-    /// in the format's own unit, as [`Opened::Embedded`]'s is.
+    /// in the format's own unit, as [`Opened::Embedded`]'s `size` is.
     ///
     /// # Errors
     ///

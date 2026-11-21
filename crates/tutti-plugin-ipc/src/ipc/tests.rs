@@ -111,6 +111,8 @@ struct Mock {
     /// Buses the plugin announces while the server is asked to open a slab,
     /// before it answers: a change that lands inside an activation.
     announce_during_setup: Arc<Mutex<Option<tutti_plugin_types::Layout>>>,
+    /// The state the server saves when asked; `None` for a plugin that cannot.
+    saved_state: Arc<Mutex<Option<Vec<u8>>>>,
     _bridge: crate::IpcThread,
 }
 
@@ -281,6 +283,8 @@ fn mock_with(
     let refusing = Arc::clone(&refuse_slabs);
     let announce_during_setup: Arc<Mutex<Option<tutti_plugin_types::Layout>>> = Arc::default();
     let announcing = Arc::clone(&announce_during_setup);
+    let saved_state: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(Some(vec![1, 2, 3])));
+    let saving = Arc::clone(&saved_state);
     std::thread::spawn(move || {
         loop {
             let mut len = [0u8; 4];
@@ -373,6 +377,29 @@ fn mock_with(
                 ControlRequest::LoadState { .. } => {
                     reply_control(&served, id, &ControlReply::StateLoaded { error: None })
                 }
+                ControlRequest::SaveState { .. } => match saving.lock().unwrap().clone() {
+                    Some(bytes) => {
+                        let object = tutti_plugin_ipc_ffi::Blob::create(&bytes).unwrap();
+                        reply_control(
+                            &served,
+                            id,
+                            &ControlReply::StateReady {
+                                len: bytes.len() as u64,
+                                blob: object.wire(),
+                            },
+                        );
+                        let _lease = object.send(crate::transport::connection(&served)).unwrap();
+                    }
+                    None => reply_control(
+                        &served,
+                        id,
+                        &ControlReply::Error {
+                            error: tutti_plugin_types::ServerError::Plugin(
+                                "the plugin cannot save".into(),
+                            ),
+                        },
+                    ),
+                },
                 ControlRequest::GetParameter { .. } => {
                     reply_control(&served, id, &ControlReply::ParameterValue { value: None })
                 }
@@ -418,6 +445,7 @@ fn mock_with(
             states,
             refuse_slabs,
             announce_during_setup,
+            saved_state,
             _bridge: thread,
         },
     )
@@ -903,7 +931,12 @@ fn a_remote_editor_opens_resizes_and_closes_over_the_wire() {
     let size = ipc
         .open_editor(main, host_window(0x40_0001), scale)
         .expect("the server opens it");
-    assert_eq!(size, MOCK_EDITOR);
+    assert_eq!(size.window, MOCK_EDITOR);
+    assert_eq!(
+        size.mirrored,
+        Ok(()),
+        "a served editor has nothing to mirror"
+    );
     let wanted = dpi::Size::Physical(dpi::PhysicalSize::new(801, 601));
     assert_eq!(ipc.set_editor_size(main, wanted).expect("resized"), wanted);
     ipc.close_editor(main);
@@ -925,7 +958,7 @@ fn a_remote_floating_editor_sends_no_parent() {
     use tutti_plugin_types::EditorWindow;
     let _machine = machine_lock();
     let (mut ipc, server) = mock_remote();
-    ipc.open_floating_editor(main_thread()).expect("opens");
+    let _opened = ipc.open_floating_editor(main_thread()).expect("opens");
     assert!(server.wait_for(|got| matches!(
         got,
         [Sent::Control(ControlRequest::OpenEditor {
@@ -965,7 +998,8 @@ fn what_the_servers_editor_says_unprompted_is_heard() {
     let _machine = machine_lock();
     let (mut ipc, server) = mock_remote();
     let main = main_thread();
-    ipc.open_editor(main, host_window(0x40_0001), ContentScale::IDENTITY)
+    let _opened = ipc
+        .open_editor(main, host_window(0x40_0001), ContentScale::IDENTITY)
         .expect("opens");
     let asked = dpi::Size::Physical(dpi::PhysicalSize::new(1024, 768));
     server.say(News::EditorWantsSize { size: asked });
@@ -1682,4 +1716,280 @@ fn a_flush_rides_the_audio_lane_behind_the_blocks_pushed_before_it() {
         unreachable!()
     };
     assert_eq!(last_change(param_changes, ParamId::new(1)), Some(0.5));
+}
+
+/// The editor instance's mirror, on a scripted stand-in for the plugin's
+/// editor: what the bridge's editor site counts and reports is the bridge's,
+/// and what each format's editor does is its host crate's.
+mod editor_mirror {
+    use super::*;
+    use tutti_plugin_types::{
+        EditorCapabilities, EditorMirrorError, EditorOpened, EditorWindow, ParamEdit, PluginError,
+        PluginResult, StateError, WindowHandle,
+    };
+    use tutti_units::Normalized;
+
+    /// What the next editor the loader makes does.
+    #[derive(Default)]
+    struct Script {
+        /// The editor refuses the state it is given.
+        refuses_state: bool,
+        /// The editor cannot say its own state.
+        cannot_save: bool,
+        /// A parameter edit the user made, which `poll_edits` yields once.
+        edit: Option<ParamEdit>,
+        /// The requests the editor makes, once.
+        requests: Vec<Request>,
+        /// The editor reports its state changed, once.
+        dirty: bool,
+    }
+
+    static SCRIPT: Mutex<Option<Script>> = Mutex::new(None);
+
+    struct Scripted(Script);
+
+    impl EditorWindow for Scripted {
+        fn has_editor(&self, _: tutti_plugin_types::MainThreadMarker) -> bool {
+            true
+        }
+        fn open_editor(
+            &mut self,
+            _: tutti_plugin_types::MainThreadMarker,
+            _: WindowHandle,
+            _: tutti_plugin_types::ContentScale,
+        ) -> PluginResult<EditorOpened<dpi::Size>> {
+            Ok(EditorOpened::new(MOCK_EDITOR))
+        }
+        fn open_floating_editor(
+            &mut self,
+            _: tutti_plugin_types::MainThreadMarker,
+        ) -> PluginResult<EditorOpened<()>> {
+            Ok(EditorOpened::new(()))
+        }
+        fn close_editor(&mut self, _: tutti_plugin_types::MainThreadMarker) {}
+        fn editor_idle(&mut self, _: tutti_plugin_types::MainThreadMarker) {}
+        fn editor_capabilities(
+            &mut self,
+            _: tutti_plugin_types::MainThreadMarker,
+        ) -> EditorCapabilities {
+            EditorCapabilities::default()
+        }
+        fn set_editor_size(
+            &mut self,
+            _: tutti_plugin_types::MainThreadMarker,
+            requested: dpi::Size,
+        ) -> PluginResult<dpi::Size> {
+            Ok(requested)
+        }
+        fn poll_editor_resize_request(
+            &mut self,
+            _: tutti_plugin_types::MainThreadMarker,
+        ) -> Option<dpi::Size> {
+            None
+        }
+    }
+
+    impl tutti_plugin_types::Editor for Scripted {
+        fn set_parameter(
+            &mut self,
+            _: tutti_plugin_types::MainThreadMarker,
+            _: ParamId,
+            _: Normalized,
+        ) {
+        }
+        fn set_state(
+            &mut self,
+            _: tutti_plugin_types::MainThreadMarker,
+            _: &[u8],
+        ) -> PluginResult<()> {
+            if self.0.refuses_state {
+                return Err(PluginError::StateFailed(StateError::Rejected(
+                    "no state for this editor".into(),
+                )));
+            }
+            Ok(())
+        }
+        fn poll_edits(&mut self, _: tutti_plugin_types::MainThreadMarker) -> Vec<ParamEdit> {
+            self.0.edit.take().into_iter().collect()
+        }
+        fn save_state(&mut self, _: tutti_plugin_types::MainThreadMarker) -> PluginResult<Vec<u8>> {
+            if self.0.cannot_save {
+                return Err(PluginError::StateFailed(StateError::Unavailable));
+            }
+            Ok(vec![9, 9])
+        }
+        fn take_dirty(&mut self, _: tutti_plugin_types::MainThreadMarker) -> bool {
+            std::mem::take(&mut self.0.dirty)
+        }
+        fn take_requests(
+            &mut self,
+            _: tutti_plugin_types::MainThreadMarker,
+            out: &mut Vec<Request>,
+        ) {
+            out.append(&mut self.0.requests);
+        }
+    }
+
+    fn scripted(
+        _: tutti_plugin_types::MainThreadMarker,
+        _: &tutti_plugin_types::MainWorkHandle,
+        _: &tutti_plugin_types::PluginRef,
+        _: tutti_plugin_types::PluginFormat,
+    ) -> tutti_plugin_types::IpcResult<Box<dyn tutti_plugin_types::Editor>> {
+        let script = SCRIPT.lock().unwrap().take().unwrap_or_default();
+        Ok(Box::new(Scripted(script)))
+    }
+
+    /// A served plugin whose editor is `script`'s.
+    fn with_editor(script: Script) -> (Ipc, Mock) {
+        *SCRIPT.lock().unwrap() = Some(script);
+        mock_loading(
+            tutti_plugin_types::PluginRef::file("test.clap"),
+            tutti_plugin_types::PluginFormat::Clap,
+            crate::EditorLoader::new(scripted, tutti_fixtures::detached_work()),
+        )
+    }
+
+    fn refused(ipc: &Ipc) -> u64 {
+        ipc.bridge()
+            .editor()
+            .mirror_refused_cell()
+            .expect("an in-process editor has a mirror")
+            .get()
+    }
+
+    /// **An editor given the audio instance's state reports it mirrored**,
+    /// and counts nothing.
+    #[test]
+    fn an_editor_given_the_state_is_mirrored() {
+        let _machine = machine_lock();
+        let (ipc, _server) = with_editor(Script::default());
+        let opened = ipc
+            .bridge()
+            .editor()
+            .open_floating_editor(main_thread())
+            .expect("opens");
+        assert_eq!(opened.mirrored, Ok(()));
+        assert_eq!(refused(&ipc), 0);
+    }
+
+    /// **An editor that refuses the state still opens, and says so**: the open
+    /// carries the refusal and the mirror's count moves.
+    #[test]
+    fn an_editor_that_refuses_the_state_opens_and_reports_it() {
+        let _machine = machine_lock();
+        let (ipc, _server) = with_editor(Script {
+            refuses_state: true,
+            ..Script::default()
+        });
+        let opened = ipc
+            .bridge()
+            .editor()
+            .open_floating_editor(main_thread())
+            .expect("the editor still opens");
+        assert!(
+            matches!(opened.mirrored, Err(EditorMirrorError::Refused(_))),
+            "{:?}",
+            opened.mirrored
+        );
+        assert_eq!(refused(&ipc), 1);
+    }
+
+    /// **A state the audio instance cannot give leaves the editor at its
+    /// defaults, and the embedded open says so.
+    #[test]
+    fn an_unreadable_audio_state_is_reported_by_the_open() {
+        let _machine = machine_lock();
+        let (ipc, server) = with_editor(Script::default());
+        *server.saved_state.lock().unwrap() = None;
+        let opened = ipc
+            .bridge()
+            .editor()
+            .open_editor(
+                main_thread(),
+                tutti_fixtures::StandInWindow.handle(),
+                tutti_plugin_types::ContentScale::IDENTITY,
+            )
+            .expect("the editor still opens");
+        assert_eq!(opened.window, MOCK_EDITOR);
+        assert!(
+            matches!(opened.mirrored, Err(EditorMirrorError::Unread(_))),
+            "{:?}",
+            opened.mirrored
+        );
+        assert_eq!(refused(&ipc), 1);
+    }
+
+    /// **An edit the audio instance has no parameter for is counted**, not
+    /// dropped silently: the editor reports a change to an id the plugin never
+    /// listed.
+    #[test]
+    fn an_edit_the_audio_instance_refuses_is_counted() {
+        let _machine = machine_lock();
+        let (ipc, _server) = with_editor(Script {
+            edit: Some(ParamEdit::Change {
+                id: ParamId::new(404),
+                value: Normalized::of(0.5),
+                record: true,
+            }),
+            ..Script::default()
+        });
+        let editor = ipc.bridge().editor();
+        let _opened = editor.open_floating_editor(main_thread()).expect("opens");
+        assert_eq!(refused(&ipc), 0);
+        editor.editor_idle(main_thread());
+        assert_eq!(refused(&ipc), 1);
+    }
+
+    /// **A state the editor cannot read is counted when it is pulled** to the
+    /// audio instance.
+    #[test]
+    fn an_editor_state_that_cannot_be_pulled_is_counted() {
+        let _machine = machine_lock();
+        let (ipc, _server) = with_editor(Script {
+            cannot_save: true,
+            dirty: true,
+            ..Script::default()
+        });
+        let editor = ipc.bridge().editor();
+        let _opened = editor.open_floating_editor(main_thread()).expect("opens");
+        assert_eq!(refused(&ipc), 0);
+        editor.editor_idle(main_thread());
+        assert_eq!(refused(&ipc), 1);
+    }
+
+    /// **A state the editor refuses on a later mirror is counted**, beside the
+    /// open's own.
+    #[test]
+    fn a_later_mirror_the_editor_refuses_is_counted() {
+        let _machine = machine_lock();
+        let (ipc, _server) = with_editor(Script {
+            refuses_state: true,
+            ..Script::default()
+        });
+        let editor = ipc.bridge().editor();
+        let _opened = editor.open_floating_editor(main_thread()).expect("opens");
+        assert_eq!(refused(&ipc), 1, "the open's");
+        editor.mirror_state(main_thread(), &[1]);
+        assert_eq!(refused(&ipc), 2);
+    }
+
+    /// **A request the editor instance makes that no one can answer is
+    /// counted**; a transport request is the application's and is not.
+    #[test]
+    fn a_dropped_editor_request_is_counted() {
+        let _machine = machine_lock();
+        let (ipc, _server) = with_editor(Script {
+            requests: vec![Request::Restart, Request::LatencyChanged],
+            ..Script::default()
+        });
+        let editor = ipc.bridge().editor();
+        let dropped = editor
+            .editor_requests_dropped_cell()
+            .expect("an in-process editor");
+        let _opened = editor.open_floating_editor(main_thread()).expect("opens");
+        assert_eq!(dropped.get(), 0);
+        editor.editor_idle(main_thread());
+        assert_eq!(dropped.get(), 2);
+    }
 }

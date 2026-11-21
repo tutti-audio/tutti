@@ -79,9 +79,14 @@ pub struct ChunkCounters {
     /// Parameter buffers the audio thread leaked rather than free, counted by
     /// the payload pool (set by [`attach_leaked_buffers`](Self::attach_leaked_buffers)).
     leaked_buffers: OnceLock<Tally<u64>>,
-    /// Parameter writes the editor mirror refused, counted by the bridge (set
-    /// by [`attach_mirror_refused`](Self::attach_mirror_refused)).
+    /// Transfers between the audio and editor instances that were refused,
+    /// counted by the bridge (set by
+    /// [`attach_mirror_refused`](Self::attach_mirror_refused)).
     mirror_refused: OnceLock<Tally<u64>>,
+    /// Requests the editor instance made that were dropped, counted by the
+    /// bridge (set by
+    /// [`attach_editor_requests_dropped`](Self::attach_editor_requests_dropped)).
+    editor_requests_dropped: OnceLock<Tally<u64>>,
     /// Whether the chunk of a sequence has been answered, set when the node is
     /// bound (the shared-memory slab's reply flag, which this file does not
     /// name).
@@ -101,6 +106,7 @@ impl std::fmt::Debug for ChunkCounters {
             .field("responses_lost", &self.responses_lost())
             .field("leaked_buffers", &self.leaked_buffers())
             .field("mirror_refused", &self.mirror_refused())
+            .field("editor_requests_dropped", &self.editor_requests_dropped())
             .finish_non_exhaustive()
     }
 }
@@ -151,7 +157,7 @@ impl ChunkCounters {
         self.leaked_buffers.get().map_or(0, Tally::get)
     }
 
-    /// Reads the editor mirror's count of refused writes (the node's bind).
+    /// Reads the editor mirror's count of refused transfers (the node's bind).
     pub fn attach_mirror_refused(&self, refused: Tally<u64>) {
         let _ = self.mirror_refused.set(refused);
     }
@@ -159,6 +165,16 @@ impl ChunkCounters {
     /// See `PluginControls::mirror_writes_refused`.
     pub fn mirror_refused(&self) -> u64 {
         self.mirror_refused.get().map_or(0, Tally::get)
+    }
+
+    /// Reads the count of editor-instance requests dropped (the node's bind).
+    pub fn attach_editor_requests_dropped(&self, dropped: Tally<u64>) {
+        let _ = self.editor_requests_dropped.set(dropped);
+    }
+
+    /// See `PluginControls::editor_requests_dropped`.
+    pub fn editor_requests_dropped(&self) -> u64 {
+        self.editor_requests_dropped.get().map_or(0, Tally::get)
     }
 
     /// See `PluginControls::skipped_chunks`.

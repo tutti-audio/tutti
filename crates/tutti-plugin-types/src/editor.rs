@@ -381,6 +381,53 @@ impl WindowHandle {
     }
 }
 
+/// Why an editor opened without the audio instance's state: the editor shows
+/// the plugin at its defaults until the user changes something.
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EditorMirrorError {
+    /// The audio instance's state could not be read, so the editor instance
+    /// was given none.
+    #[error("the audio instance's state could not be read for the editor: {0}")]
+    Unread(crate::StateError),
+    /// The editor instance refused the audio instance's state.
+    #[error("the editor instance refused the audio instance's state: {0}")]
+    Refused(String),
+}
+
+/// What an editor open returns: the window, and whether the editor instance
+/// was brought in step with the audio instance.
+///
+/// An editor that could not be mirrored still opens (the user would have no
+/// window at all otherwise); `mirrored` says the editor shows the plugin at its
+/// defaults and the audio instance stays the source of truth.
+#[derive(Debug, Clone, PartialEq)]
+#[must_use]
+pub struct EditorOpened<W> {
+    /// What the open produced: the editor's [`Size`], or `()` for a floating
+    /// window the plugin owns.
+    pub window: W,
+    /// `Ok` when the editor instance holds the audio instance's state, or
+    /// the editor is the audio instance's own (nothing to mirror).
+    pub mirrored: Result<(), EditorMirrorError>,
+}
+
+impl<W> EditorOpened<W> {
+    /// An open whose editor is in step with the audio instance.
+    pub const fn new(window: W) -> Self {
+        Self {
+            window,
+            mirrored: Ok(()),
+        }
+    }
+
+    /// This open, with the mirror failure `error`.
+    pub fn mirror_failed(mut self, error: EditorMirrorError) -> Self {
+        self.mirrored = Err(error);
+        self
+    }
+}
+
 /// Why opening a plugin editor failed.
 ///
 /// Each variant names a distinct cause, so a UI can say what went wrong and

@@ -769,14 +769,14 @@ macro_rules! fake_control {
                 _main: MainThreadMarker,
                 _parent: WindowHandle,
                 _scale: ContentScale,
-            ) -> PluginResult<Size> {
+            ) -> PluginResult<crate::EditorOpened<Size>> {
                 if !self.shared.editor.load(Ordering::Relaxed) {
                     return Err(PluginError::Editor(EditorError::PluginError(
                         "the fake plugin has no editor".into(),
                     )));
                 }
                 self.shared.log.push(Call::OpenEditor);
-                Ok(PhysicalSize::new(640, 480).into())
+                Ok(crate::EditorOpened::new(PhysicalSize::new(640, 480).into()))
             }
 
             fn set_editor_scale(

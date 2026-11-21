@@ -511,6 +511,9 @@ impl Ipc {
             if let Some(refused) = bridge.editor().mirror_refused_cell() {
                 counters.attach_mirror_refused(refused);
             }
+            if let Some(dropped) = bridge.editor().editor_requests_dropped_cell() {
+                counters.attach_editor_requests_dropped(dropped);
+            }
         }
         let events = Arc::new(Events {
             latency: AtomicUsize::new(loaded.latency_samples.get()),
@@ -569,7 +572,9 @@ impl Ipc {
     /// # Errors
     ///
     /// The server cannot be found or spawned, the handshake fails or times
-    /// out, the plugin fails to load, or the bridge cannot be set up.
+    /// out, the plugin fails to load, the bridge cannot be set up, or the server
+    /// does not list the plugin's parameters
+    /// ([`IpcError::ParametersUnlisted`]).
     pub fn launch(
         config: IpcConfig,
         request: &LoadRequest<'_>,
@@ -599,7 +604,11 @@ impl Ipc {
         guard.attach(thread);
         // The parameter list, once, while loading blocks anyway: the bridge's
         // buffers are sized by it at activation, which may not make the trip.
-        let parameters = bridge.audio().parameters().map_or(0, |list| list.len());
+        let parameters = bridge
+            .audio()
+            .parameters()
+            .ok_or(IpcError::ParametersUnlisted)?
+            .len();
         let ceiling = config.max_buffer_size.min(tutti_plugin_types::MAX_CHUNK);
         let timeout = config.timeouts.call;
         let ipc = Self::new(IpcParts {

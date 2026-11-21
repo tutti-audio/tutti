@@ -16,8 +16,9 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_plugin_types::AutomationMode;
 use tutti_plugin_types::{
-    ContentScale, Editor, EditorCapabilities, EditorError, EditorWindow, MainThreadMarker,
-    ParamEdit, PluginError, PluginFormat, PluginRef, Request, StateError, WindowHandle,
+    ContentScale, Editor, EditorCapabilities, EditorError, EditorMirrorError, EditorOpened,
+    EditorWindow, MainThreadMarker, ParamEdit, PluginError, PluginFormat, PluginRef, Request,
+    StateError, WindowHandle,
 };
 use tutti_rt::{LockExt, PackedAtomic, Tally, TallyWriter, tally};
 use tutti_units::{Normalized, ParamId};
@@ -59,6 +60,8 @@ pub(crate) struct InProcessEditor {
     /// What the realtime setters want the editor to show, applied by the next
     /// [`editor_idle`](EditorSite::editor_idle).
     mirror: GuiMirror,
+    /// Requests the editor instance made that were dropped, ever.
+    requests_dropped: TallyWriter<u64>,
 }
 
 /// The editor in the server: every window call is a message to it.
@@ -99,6 +102,7 @@ impl EditorSite {
                 gui: Mutex::new(None),
                 baseline: Mutex::new(None),
                 mirror: GuiMirror::new(),
+                requests_dropped: tally().writer(),
             })),
             None => Site::Server(Box::new(ServerEditor {
                 audio: audio.clone(),
@@ -112,6 +116,12 @@ impl EditorSite {
     /// the [`EditorLoader`] on the first open and giving it the audio instance's
     /// state.
     ///
+    /// The result says whether the editor instance was given the audio
+    /// instance's state ([`EditorOpened::mirrored`]); an editor whose mirror
+    /// failed still opens, at the plugin's defaults, and the failure is
+    /// counted in [`mirror_refused_cell`](Self::mirror_refused_cell). A served
+    /// editor is the audio instance's own: nothing to mirror.
+    ///
     /// # Errors
     ///
     /// The plugin is dead, the editor instance cannot be loaded, or the plugin
@@ -121,7 +131,7 @@ impl EditorSite {
         main: MainThreadMarker,
         parent: WindowHandle,
         scale: ContentScale,
-    ) -> std::result::Result<Size, EditorError> {
+    ) -> std::result::Result<EditorOpened<Size>, EditorError> {
         match &self.site {
             Site::InProcess(site) => site.open_editor(main, parent, scale),
             Site::Server(site) => site.open_editor(main, parent, scale),
@@ -140,7 +150,7 @@ impl EditorSite {
     pub fn open_floating_editor(
         &self,
         main: MainThreadMarker,
-    ) -> std::result::Result<(), EditorError> {
+    ) -> std::result::Result<EditorOpened<()>, EditorError> {
         match &self.site {
             Site::InProcess(site) => site.open_floating_editor(main),
             Site::Server(site) => site.open_floating_editor(main),
@@ -236,12 +246,28 @@ impl EditorSite {
         }
     }
 
-    /// The count of editor-mirror parameter writes a full queue refused. The
-    /// audio command is unaffected: the mirror only keeps the display current.
-    /// `None` for a served editor, which has no mirror.
+    /// The count of transfers between the audio instance and the editor
+    /// instance that were refused: parameter writes a full queue refused (the
+    /// audio command is unaffected: the mirror only keeps the display
+    /// current), user edits the audio instance did not take, and states that
+    /// could not be read or loaded either way, each counted once. `None` for a
+    /// served editor, which has no mirror.
     pub fn mirror_refused_cell(&self) -> Option<Tally<u64>> {
         match &self.site {
             Site::InProcess(site) => Some(site.mirror.refused.clone()),
+            Site::Server(_) => None,
+        }
+    }
+
+    /// The count of requests the editor instance made that the host cannot
+    /// answer, dropped: every [`Request`] but a transport request (a restart,
+    /// an I/O change, a parameter rescan, a latency or tail change, a reload,
+    /// a callback, a MIDI-CC or note-expression change, a timer or a file
+    /// descriptor). The audio instance cannot be told of them. `None` for a
+    /// served editor, whose requests the server raises itself.
+    pub fn editor_requests_dropped_cell(&self) -> Option<Tally<u64>> {
+        match &self.site {
+            Site::InProcess(site) => Some(site.requests_dropped.tally()),
             Site::Server(_) => None,
         }
     }
@@ -261,13 +287,16 @@ impl EditorSite {
     }
 
     /// Loads `data` into the in-process editor so its display stays in step
-    /// with the audio instance, best effort.
+    /// with the audio instance. A refusal is counted in
+    /// [`mirror_refused_cell`](Self::mirror_refused_cell): the audio instance
+    /// has the state either way.
     pub(crate) fn mirror_state(&self, main: MainThreadMarker, data: &[u8]) {
         if let Site::InProcess(site) = &self.site
             && let Ok(mut guard) = site.gui.lock()
             && let Some(gui) = guard.as_mut()
+            && gui.set_state(main, data).is_err()
         {
-            let _ = gui.set_state(main, data);
+            site.mirror.refuse();
         }
     }
 }
@@ -322,14 +351,17 @@ impl ServerEditor {
         main: MainThreadMarker,
         parent: WindowHandle,
         scale: ContentScale,
-    ) -> std::result::Result<Size, EditorError> {
+    ) -> std::result::Result<EditorOpened<Size>, EditorError> {
         if self.audio.is_crashed() {
             return Err(EditorError::PluginCrashed);
         }
         self.call(|remote| remote.open_editor(main, parent, scale))
     }
 
-    fn open_floating_editor(&self, main: MainThreadMarker) -> std::result::Result<(), EditorError> {
+    fn open_floating_editor(
+        &self,
+        main: MainThreadMarker,
+    ) -> std::result::Result<EditorOpened<()>, EditorError> {
         if self.audio.is_crashed() {
             return Err(EditorError::PluginCrashed);
         }
@@ -407,7 +439,7 @@ impl InProcessEditor {
         main: MainThreadMarker,
         parent: WindowHandle,
         scale: ContentScale,
-    ) -> std::result::Result<Size, EditorError> {
+    ) -> std::result::Result<EditorOpened<Size>, EditorError> {
         if self.audio.is_crashed() {
             return Err(EditorError::PluginCrashed);
         }
@@ -423,39 +455,61 @@ impl InProcessEditor {
 
         // Sync state from audio (source of truth) to GUI after opening.
         // Some plugins crash if set_state is called before the editor is attached.
-        // Best-effort: a state we cannot read means the GUI instance opens at
-        // its defaults, which is visibly wrong but not destructive — the audio
-        // instance remains the source of truth and nothing is written back. So
-        // this logs rather than failing the editor open, which would leave the
-        // user with no window at all.
-        let state_to_sync = self
-            .audio
-            .save_state(tutti_plugin_types::StateUse::Project)
-            .inspect_err(|e| {
-                tracing::warn!("[bridge] could not mirror plugin state into the editor: {e}");
-            });
+        // A state we cannot read means the GUI instance opens at its defaults,
+        // which is visibly wrong but not destructive — the audio instance
+        // remains the source of truth and nothing is written back. So the
+        // open still succeeds (failing it would leave the user with no window
+        // at all) and its result carries the failure.
+        let state_to_sync = self.audio.save_state(tutti_plugin_types::StateUse::Project);
 
         tracing::info!("[bridge] open_editor: calling gui.open_editor(parent={parent:?})");
         let size = gui
             .open_editor(main, parent, scale)
-            .map_err(|e| EditorError::PluginError(e.to_string()))?;
+            .map_err(|e| EditorError::PluginError(e.to_string()))?
+            .window;
         tracing::info!("[bridge] open_editor: editor opened {size:?}");
 
         // Sync state after editor is open (some plugins need the view attached first).
-        if let Ok(state) = state_to_sync {
-            tracing::info!(
-                "[bridge] open_editor: syncing {} bytes of state post-open",
-                state.len()
-            );
-            let _ = gui.set_state(main, &state);
-        }
+        let mirrored = self.sync_state(main, gui.as_mut(), state_to_sync);
         self.take_baseline(main, gui.as_mut());
         self.mirror.opened();
 
-        Ok(size)
+        Ok(EditorOpened {
+            window: size,
+            mirrored,
+        })
     }
 
-    fn open_floating_editor(&self, main: MainThreadMarker) -> std::result::Result<(), EditorError> {
+    /// Gives the editor instance the audio instance's `state` after an open,
+    /// counting a failure of either half.
+    fn sync_state(
+        &self,
+        main: MainThreadMarker,
+        gui: &mut dyn Editor,
+        state: std::result::Result<Vec<u8>, StateError>,
+    ) -> std::result::Result<(), EditorMirrorError> {
+        let result = match state {
+            Ok(state) => {
+                tracing::info!(
+                    "[bridge] open_editor: syncing {} bytes of state post-open",
+                    state.len()
+                );
+                gui.set_state(main, &state)
+                    .map_err(|e| EditorMirrorError::Refused(e.to_string()))
+            }
+            Err(e) => Err(EditorMirrorError::Unread(e)),
+        };
+        if let Err(e) = &result {
+            tracing::warn!("[bridge] could not mirror plugin state into the editor: {e}");
+            self.mirror.refuse();
+        }
+        result
+    }
+
+    fn open_floating_editor(
+        &self,
+        main: MainThreadMarker,
+    ) -> std::result::Result<EditorOpened<()>, EditorError> {
         if self.audio.is_crashed() {
             return Err(EditorError::PluginCrashed);
         }
@@ -465,24 +519,24 @@ impl InProcessEditor {
 
         // Read before the open, as the embedded path does: audio is the source
         // of truth for state, and some plugins refuse `set_state` until their
-        // view exists. Best-effort, as there.
-        let state_to_sync = self
-            .audio
-            .save_state(tutti_plugin_types::StateUse::Project)
-            .inspect_err(|e| {
-                tracing::warn!("[bridge] could not mirror plugin state into the editor: {e}");
-            });
+        // view exists. A failure is in the result, as there.
+        let state_to_sync = self.audio.save_state(tutti_plugin_types::StateUse::Project);
 
-        gui.open_floating_editor(main)
-            .map_err(|e| EditorError::PluginError(e.to_string()))?;
+        // The editor instance's own open mirrors nothing: its result is the
+        // window alone.
+        let () = gui
+            .open_floating_editor(main)
+            .map_err(|e| EditorError::PluginError(e.to_string()))?
+            .window;
 
-        if let Ok(state) = state_to_sync {
-            let _ = gui.set_state(main, &state);
-        }
+        let mirrored = self.sync_state(main, gui.as_mut(), state_to_sync);
         self.take_baseline(main, gui.as_mut());
         self.mirror.opened();
 
-        Ok(())
+        Ok(EditorOpened {
+            window: (),
+            mirrored,
+        })
     }
 
     /// Sends the audio instance the changes the user made in the editor, and
@@ -491,8 +545,10 @@ impl InProcessEditor {
         for edit in edits {
             if let ParamEdit::Change { id, value, .. } = edit {
                 // An id the editor reports is the plugin's own; the table
-                // follows its list, so the write has a slot.
-                let _ = self.audio.write_parameter(id, value);
+                // follows its list, so a refusal is counted.
+                if self.audio.write_parameter(id, value).is_err() {
+                    self.mirror.refuse();
+                }
             }
             self.audio.report_edit(edit);
         }
@@ -522,6 +578,7 @@ impl InProcessEditor {
                 tracing::warn!(
                     "[bridge] the editor instance asked for {request:?}, which is not its to ask"
                 );
+                self.requests_dropped.add(1);
             }
         }
     }
@@ -651,6 +708,7 @@ impl InProcessEditor {
         });
         if let Err(e) = pulled {
             tracing::warn!("[bridge] the editor's state did not reach the audio instance: {e}");
+            self.mirror.refuse();
         }
     }
 }
@@ -727,7 +785,9 @@ struct GuiMirror {
     /// The writes waiting for the next editor idle: a bounded lock-free
     /// queue, pushed from any thread and popped on the main thread.
     params: ArrayQueue<(ParamId, Normalized)>,
-    /// Writes the full queue refused, ever.
+    /// Transfers between the audio and editor instances that were refused,
+    /// ever: writes the full queue refused, and the failed ones of the editor's
+    /// edits and state (see [`EditorSite::mirror_refused_cell`]).
     refused: Tally<u64>,
     /// The writer of `refused`.
     refused_writer: TallyWriter<u64>,
@@ -790,6 +850,11 @@ impl GuiMirror {
         }
         self.shown.store(latest);
         mode_of_code(latest)
+    }
+
+    /// Counts a transfer between the audio and editor instances that failed.
+    fn refuse(&self) {
+        self.refused_writer.add(1);
     }
 
     /// Drops everything queued.
@@ -954,7 +1019,7 @@ mod state_back_tests {
             _: MainThreadMarker,
             _: WindowHandle,
             _: ContentScale,
-        ) -> PluginResult<Size> {
+        ) -> PluginResult<EditorOpened<Size>> {
             unreachable!("the state-back never opens")
         }
 

@@ -18,8 +18,8 @@ use dpi::Size;
 use tutti_plugin_ipc_ffi::Ready;
 
 use crate::{
-    AutomationMode, ContentScale, EditorCapabilities, EditorError, KeyEvent, KeyUse, Loaded,
-    MainThreadMarker, MainWorkHandle, ParamEdit, PluginDescriptor, PluginError, PluginId,
+    AutomationMode, ContentScale, EditorCapabilities, EditorError, EditorOpened, KeyEvent, KeyUse,
+    Loaded, MainThreadMarker, MainWorkHandle, ParamEdit, PluginDescriptor, PluginError, PluginId,
     PluginRef, PluginResult, Request, Wakeups, WindowHandle,
 };
 use tutti_units::Normalized;
@@ -166,6 +166,10 @@ pub trait EditorWindow {
     /// [`Size::Logical`] where it works in points. The editor keeps `scale` to
     /// convert a size it is later given in the other unit.
     ///
+    /// The result also says whether the editor was brought in step with the
+    /// audio instance ([`EditorOpened::mirrored`]): a format whose editor is
+    /// the plugin's own instance has nothing to mirror.
+    ///
     /// # Errors
     ///
     /// The plugin has no editor, or refuses or fails to open it.
@@ -174,7 +178,7 @@ pub trait EditorWindow {
         main: MainThreadMarker,
         parent: WindowHandle,
         scale: ContentScale,
-    ) -> PluginResult<Size>;
+    ) -> PluginResult<EditorOpened<Size>>;
 
     /// Opens the editor as a plugin-owned floating window. No parent in, no
     /// size out.
@@ -184,7 +188,7 @@ pub trait EditorWindow {
     /// # Errors
     ///
     /// The format has no floating editor, or the plugin refuses.
-    fn open_floating_editor(&mut self, main: MainThreadMarker) -> PluginResult<()> {
+    fn open_floating_editor(&mut self, main: MainThreadMarker) -> PluginResult<EditorOpened<()>> {
         let _ = main;
         Err(PluginError::Editor(EditorError::PluginError(
             "this plugin format has no floating-window editor".into(),
