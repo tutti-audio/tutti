@@ -3,7 +3,7 @@
 //! closed form written out here from the stage's authored time.
 
 use super::*;
-use tutti_units::{Amplitude, Db, SampleRate, Samples, Seconds};
+use tutti_units::{Amplitude, Db, Normalized, SampleRate, Samples, Seconds};
 
 const RATE: f64 = 48_000.0;
 
@@ -21,7 +21,7 @@ fn secs(frames: f64) -> Seconds {
 
 /// Delay 240, attack 480, hold 192, decay 960, release 1440 frames; sustain 0.5.
 fn stages() -> EnvelopeStages {
-    EnvelopeStages::new(secs(480.0), secs(960.0), Amplitude::new(0.5), secs(1440.0))
+    EnvelopeStages::new(secs(480.0), secs(960.0), Normalized::of(0.5), secs(1440.0))
         .delay(secs(240.0))
         .hold(secs(192.0))
 }
@@ -112,7 +112,7 @@ fn a_full_scale_fall_takes_the_share_of_the_scale_it_covers() {
 fn a_db_linear_segment_falls_its_depth_over_its_time_in_a_straight_line() {
     let depth = 100.0;
     let decay = 4800.0;
-    let stages = EnvelopeStages::new(secs(0.0), secs(decay), Amplitude::SILENT, secs(1.0))
+    let stages = EnvelopeStages::new(secs(0.0), secs(decay), Normalized::of(0.0), secs(1.0))
         .decay_curve(db(depth));
     let design = EnvelopeDesign::new(&stages, rate());
     let leg = design.enter(EnvelopeStage::Decay, Amplitude::UNITY);
@@ -207,7 +207,7 @@ fn a_quick_release_ends_within_its_time() {
     let stages = EnvelopeStages::new(
         secs(48.0),
         secs(4800.0),
-        Amplitude::new(0.8),
+        Normalized::of(0.8),
         secs(240_000.0),
     )
     .release_curve(db(100.0));
@@ -227,7 +227,7 @@ fn a_quick_release_ends_within_its_time() {
 /// the cap is not slowed.
 #[test]
 fn a_quick_release_never_slows_a_shorter_release() {
-    let stages = EnvelopeStages::new(secs(0.0), secs(0.0), Amplitude::UNITY, secs(100.0))
+    let stages = EnvelopeStages::new(secs(0.0), secs(0.0), Normalized::of(1.0), secs(100.0))
         .pace(EnvelopePace::Stage);
     let mut envelope = runner(&stages);
     envelope.release();
@@ -239,7 +239,7 @@ fn a_quick_release_never_slows_a_shorter_release() {
 /// the envelope is in its decay, and a zero release is silent at once.
 #[test]
 fn a_zero_length_stage_takes_no_frame() {
-    let stages = EnvelopeStages::new(secs(0.0), secs(960.0), Amplitude::new(0.6), secs(0.0));
+    let stages = EnvelopeStages::new(secs(0.0), secs(960.0), Normalized::of(0.6), secs(0.0));
     let mut envelope = runner(&stages);
     assert_eq!(envelope.stage(), EnvelopeStage::Decay);
     assert_eq!(envelope.level(), Amplitude::UNITY);
@@ -286,11 +286,28 @@ fn any_chunking_of_the_same_frames_reads_the_same_level() {
 #[test]
 fn a_time_under_a_trillionth_of_a_frame_is_a_zero_length_stage() {
     let tiny = Seconds::new(1e-30);
-    let stages = EnvelopeStages::new(tiny, tiny, Amplitude::new(0.6), tiny);
+    let stages = EnvelopeStages::new(tiny, tiny, Normalized::of(0.6), tiny);
     let mut envelope = runner(&stages);
     assert_eq!(envelope.stage(), EnvelopeStage::Sustain);
     assert_eq!(envelope.level(), Amplitude::new(0.6));
     envelope.release();
     assert!(envelope.is_idle());
     assert_eq!(envelope.level(), Amplitude::SILENT);
+}
+
+/// **An `Adsr` sustain outside `0..=1` is pinned onto it, a NaN is silence**: the envelope
+/// of a sustain of 1.5 holds at unity, of -0.5 and NaN at zero.
+#[test]
+fn an_adsr_sustain_outside_the_unit_range_is_pinned_onto_it() {
+    for (sustain, held) in [
+        (1.5, Amplitude::UNITY),
+        (-0.5, Amplitude::SILENT),
+        (f64::NAN, Amplitude::SILENT),
+        (0.25, Amplitude::new(0.25)),
+    ] {
+        let adsr = tutti_music::Adsr::new(secs(0.0), secs(0.0), Amplitude::new(sustain), secs(1.0));
+        let stages = EnvelopeStages::from_adsr_clamped(adsr);
+        let envelope = runner(&stages);
+        assert_eq!(envelope.level(), held, "sustain {sustain}");
+    }
 }

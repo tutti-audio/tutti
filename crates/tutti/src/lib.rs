@@ -300,7 +300,10 @@ pub mod nodes {
         LinkwitzRiley, Lti, MAX_GRID, MatchedBell, PassbandRipple, PassbandRippleError, Sos,
         SosError, StopbandAttenuation, StopbandAttenuationError, System, Tilt,
     };
-    pub use tutti_dsp::{DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec};
+    pub use tutti_dsp::{
+        DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec, ModulationRate,
+        ModulationRateError, ReferenceDistance, ReferenceDistanceError,
+    };
     pub use tutti_dsp::{
         Decorrelator, EarlyReflections, EarlyReflectionsError, MAX_TAP_DELAY, ReflectionOrder,
         ShoeboxConfig, ShoeboxError, ShoeboxRoom, VelvetDensity, VelvetDensityError, VelvetLength,
@@ -353,12 +356,12 @@ pub mod nodes {
         DirectionSet,
     };
     pub use tutti_nodes::{
-        Antialiasing, AutoPanConfig, AutoPanControls, AutoPanKernel, AutoPanNode, AutoPanSet,
-        ChannelOutOfRange, MidSideConfig, MidSideNode, NoiseColour, OscillatorWave, PanLaw,
-        PolarityConfig, PolarityError, PolarityNode, RingModConfig, RingModControls, RingModKernel,
-        RingModNode, RingModSet, StereoWidthConfig, StereoWidthKernel, StereoWidthNode,
-        StereoWidthSet, TremoloConfig, TremoloControls, TremoloKernel, TremoloNode, TremoloSet,
-        WidthControls,
+        Antialiasing, AntialiasingError, AutoPanConfig, AutoPanControls, AutoPanKernel,
+        AutoPanNode, AutoPanSet, ChannelOutOfRange, MidSideConfig, MidSideNode, NoiseColour,
+        OscillatorWave, PanLaw, PolarityConfig, PolarityError, PolarityNode, RingModConfig,
+        RingModControls, RingModKernel, RingModNode, RingModSet, StereoWidthConfig,
+        StereoWidthKernel, StereoWidthNode, StereoWidthSet, TremoloConfig, TremoloControls,
+        TremoloKernel, TremoloNode, TremoloSet, WidthControls,
     };
     pub use tutti_nodes::{
         BAND_PARAMS, BellFilterConfig, BellFilterControls, BellFilterNode, BitCrusherConfig,
