@@ -92,7 +92,7 @@ pub struct ChunkCounters {
     /// [`attach_detached`](Self::attach_detached)).
     detached: OnceLock<Tally<u64>>,
     /// The server's own cumulative loss counts, as it last told them
-    /// ([`set_server_losses`](Self::set_server_losses)).
+    /// ([`note_server_losses`](Self::note_server_losses)).
     server_commands_refused: AtomicU64,
     server_edits_refused: AtomicU64,
     /// Whether the chunk of a sequence has been answered, set when the node is
@@ -197,7 +197,7 @@ impl ChunkCounters {
     }
 
     /// Takes the server's cumulative counts, as it last told them.
-    pub fn set_server_losses(&self, commands_refused: u64, edits_refused: u64) {
+    pub fn note_server_losses(&self, commands_refused: u64, edits_refused: u64) {
         self.server_commands_refused
             .store(commands_refused, Ordering::Relaxed);
         self.server_edits_refused

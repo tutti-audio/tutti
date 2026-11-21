@@ -263,7 +263,7 @@ impl EventRoute {
                 edits_refused,
             } => self
                 .chunks
-                .set_server_losses(commands_refused, edits_refused),
+                .note_server_losses(commands_refused, edits_refused),
             // The wake it raises is bound through `Control::bind_wake` and
             // raised by `Ipc` before this listener runs.
             IpcEvent::ProcessRequested => {}
