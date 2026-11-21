@@ -30,7 +30,7 @@
 0 4 crates/tutti-session/tests/io/clock_switch.rs
 0 1 crates/tutti-session/tests/io/recorder_thread.rs
 0 2 crates/tutti-session/tests/io/takes.rs
-0 10 crates/tutti-session/tests/main_thread/plugin_pool_main.rs
+0 8 crates/tutti-session/tests/main_thread/plugin_in_process_main.rs
 0 1 crates/tutti-session/tests/main_thread/vst2_modulation.rs
 0 2 crates/tutti-session/tests/main_thread/vst2_off_main_handle.rs
 0 1 crates/tutti-session/tests/midi/loads.rs
