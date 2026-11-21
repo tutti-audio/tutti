@@ -84,6 +84,7 @@ param_methods! {
     semitones, semitones_at => Semitones;
     pitch, pitch_at => Pitch;
     distance, distance_at => Distance;
+    position, position_at => Position;
     knee, knee_at => Knee;
     decay, decay_at => Decay;
     diffusion, diffusion_at => Diffusion;
