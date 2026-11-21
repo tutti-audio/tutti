@@ -5,7 +5,10 @@ use std::sync::Arc;
 
 use tutti_buffers::{Float, PlanesMut, Wave};
 use tutti_rt::SplitMix64;
-use tutti_units::{Cents, Hz, Normalized, ReadPosition, SampleRate, SampleSpan, Samples, Seconds};
+use tutti_units::{
+    Bipolar, Cents, Hz, Normalized, PlaybackRate, ReadPosition, ReadRate, SampleRate, SampleSpan,
+    Samples, Seconds, SrcRatio,
+};
 
 use crate::cubic_hermite;
 
@@ -98,14 +101,25 @@ pub struct Onset {
 /// The places and times of grains: seeded, so the same seed and settings give the same
 /// [`Onset`]s.
 ///
-/// Each onset draws one word for its position and, after the first, one for the interval
-/// before it, so the stream does not depend on the settings' values.
+/// Onset `k` of a run is at the whole frame of `k * rate / density` after the run's first,
+/// computed from the index, never summed: it is exact however long the run, and an onset
+/// whose time is a whole number of frames is at that frame (`7 * 48000 / 7` is 48000, not a
+/// frame short). The timing jitter moves each onset by `+-fraction` of an interval from its own
+/// nominal time, not from the last onset, so the mean density is unchanged and the jitter does
+/// not accumulate. A change of density starts a new run from the last onset's nominal time.
+///
+/// Each onset draws two words, one for its timing and one for its position, whatever the
+/// settings' values.
 #[derive(Clone, Debug)]
 pub struct GrainScheduler {
     seed: u64,
     rng: SplitMix64,
-    /// The running onset time, in output frames from the first block's start.
-    time: SampleSpan,
+    /// The nominal time of the run's onset 0, in output frames from the start.
+    base: SampleSpan,
+    /// The index of the last onset in the run.
+    index: u64,
+    /// The density of the run.
+    density: Hz,
 }
 
 impl GrainScheduler {
@@ -115,7 +129,9 @@ impl GrainScheduler {
         Self {
             seed,
             rng: SplitMix64::new(seed),
-            time: SampleSpan::ZERO,
+            base: SampleSpan::ZERO,
+            index: 0,
+            density: Hz::new(0.0),
         }
     }
 
@@ -125,65 +141,162 @@ impl GrainScheduler {
     }
 
     /// A uniform draw in `[-1, 1)`.
-    fn draw(&mut self) -> f64 {
-        2.0 * f64::from_fraction_bits(self.rng.next_u64()) - 1.0
+    fn draw(&mut self) -> Bipolar {
+        Bipolar::clamped(2.0 * f64::from_fraction_bits(self.rng.next_u64()) - 1.0)
     }
 
-    fn onset(&mut self, settings: &GrainSettings) -> Onset {
-        let position = settings.position.get() + settings.position_jitter.get() * self.draw();
+    /// The nominal time of onset `index` of a run from `base` at `density`: `index * rate /
+    /// density` frames on. The product of the integer index and the rate is exact below `2^53`
+    /// and the division rounds once, so a quotient that is a whole number is exact.
+    fn nominal(base: SampleSpan, index: u64, density: Hz, rate: SampleRate) -> SampleSpan {
+        base + SampleSpan::clamped(index as f64 * rate.get() / density.get())
+    }
+
+    /// The onset at the run's current index, its timing moved by `settings`' jitter.
+    fn onset(&mut self, settings: &GrainSettings, rate: SampleRate) -> Onset {
+        let nominal = Self::nominal(self.base, self.index, self.density, rate);
+        let (timing, place) = (self.draw().get(), self.draw().get());
+        let interval = Self::nominal(SampleSpan::ZERO, 1, self.density, rate);
+        let moved = interval
+            .scaled(settings.timing_jitter.get() * timing.abs())
+            .unwrap_or(SampleSpan::ZERO);
+        let time = if timing < 0.0 {
+            nominal.saturating_sub(moved)
+        } else {
+            nominal + moved
+        };
         Onset {
-            frame: self.time.to_samples_floor(),
-            position: Normalized::clamped(position),
+            frame: time.to_samples_floor(),
+            position: Normalized::clamped(
+                settings.position.get() + settings.position_jitter.get() * place,
+            ),
         }
     }
 
-    /// The onset at frame `at`, which the running time then follows from; `None` when the
-    /// density is not above zero.
+    /// Whether `settings` has a density a run can have.
+    fn valid(settings: &GrainSettings) -> bool {
+        settings.density.get() > 0.0 && settings.density.get().is_finite()
+    }
+
+    /// The onset at frame `at`, which a new run follows from; `None` when the density is not
+    /// above zero.
     pub fn restart(
         &mut self,
         at: Samples,
         settings: &GrainSettings,
         rate: SampleRate,
     ) -> Option<Onset> {
-        interval(settings, rate)?;
-        self.time = SampleSpan::from_samples(at);
-        Some(self.onset(settings))
+        if !Self::valid(settings) {
+            return None;
+        }
+        self.base = SampleSpan::from_samples(at);
+        self.index = 0;
+        self.density = settings.density;
+        Some(self.onset(settings, rate))
     }
 
-    /// The onset after the last one: an interval of `rate / density` frames, moved by the
-    /// timing jitter, later. `None` when the density is not above zero.
+    /// The onset after the last one. A density that differs from the run's starts a new run
+    /// from the last onset's nominal time. `None` when the density is not above zero.
     pub fn next(&mut self, settings: &GrainSettings, rate: SampleRate) -> Option<Onset> {
-        let frames = interval(settings, rate)?;
-        let moved = frames * (1.0 + settings.timing_jitter.get() * self.draw());
-        self.time = SampleSpan::clamped(self.time.get() + moved);
-        Some(self.onset(settings))
+        if !Self::valid(settings) {
+            return None;
+        }
+        if settings.density != self.density {
+            self.base = Self::nominal(self.base, self.index, self.density, rate);
+            self.index = 0;
+            self.density = settings.density;
+        }
+        self.index += 1;
+        Some(self.onset(settings, rate))
     }
 }
 
-/// The frames between onsets at `settings`' density, or `None` when it is not above zero.
-fn interval(settings: &GrainSettings, rate: SampleRate) -> Option<f64> {
-    let density = settings.density.get();
-    (density > 0.0 && density.is_finite()).then(|| rate.get() / density)
-}
+/// How often a grain's window phasor is set exactly again: every `RESEED` frames.
+const RESEED: usize = 64;
 
 /// A grain in flight.
+///
+/// Its window is the periodic Hann `(1 - c) / 2` of the phasor `(c, s) = (cos, sin)` of
+/// `2 pi age / length`, turned by one frame's angle each frame, `c' = c cos(d) - s sin(d)` and
+/// `s' = s cos(d) + c sin(d)`, and set to the exact `cos` and `sin` at the grain's start and
+/// every [`RESEED`] frames. Each turn adds at most `4 eps` of error to `c` (the two rounded
+/// coefficients, the products and the sums), so `c` is within `4 RESEED eps` of the closed
+/// form whatever the grain's length: `4 * 64 * 2^-23 = 3.1e-5` at `f32` and `5.7e-14` at `f64`.
 #[derive(Clone, Copy, Debug)]
-struct Grain {
-    /// Where the next output frame reads in the source.
-    position: ReadPosition,
-    /// The read position's advance a frame, in counts of `2^-32` source frames.
-    step: u64,
+struct Grain<F: Float> {
+    /// The source frame the first output frame reads.
+    start: SampleSpan,
+    /// Source frames read per output frame.
+    rate: ReadRate,
     /// Output frames played.
-    age: usize,
-    /// Output frames in the grain.
-    length: usize,
+    age: Samples,
+    /// Output frames in the grain, at least 1 and at most `u32::MAX`.
+    length: Samples,
+    /// The window phasor.
+    cos: F,
+    sin: F,
+    /// One frame's turn of the phasor.
+    turn_cos: F,
+    turn_sin: F,
+}
+
+impl<F: Float> Grain<F> {
+    fn new(start: SampleSpan, rate: ReadRate, length: Samples) -> Self {
+        let turn = F::from_design(core::f64::consts::TAU / SampleSpan::from_samples(length).get());
+        Self {
+            start,
+            rate,
+            age: Samples::ZERO,
+            length,
+            cos: F::ONE,
+            sin: F::ZERO,
+            turn_cos: turn.cos(),
+            turn_sin: turn.sin(),
+        }
+    }
+
+    /// The window at this frame.
+    fn window(&self) -> F {
+        F::lit(0.5) * (F::ONE - self.cos)
+    }
+
+    /// Where this frame reads in the source: the start plus the age times the read rate,
+    /// from the age each time, so the read position does not drift.
+    fn position(&self) -> ReadPosition {
+        let advance = SampleSpan::from_samples(self.age)
+            .scaled(self.rate.get())
+            .unwrap_or(SampleSpan::ZERO);
+        ReadPosition::from_span(self.start + advance)
+    }
+
+    /// To the next frame.
+    fn advance(&mut self) {
+        self.age += Samples::new(1);
+        if self.age.get().is_multiple_of(RESEED) {
+            let angle = core::f64::consts::TAU
+                * (SampleSpan::from_samples(self.age) / SampleSpan::from_samples(self.length));
+            let angle = F::from_design(angle);
+            (self.cos, self.sin) = (angle.cos(), angle.sin());
+        } else {
+            (self.cos, self.sin) = (
+                self.cos * self.turn_cos - self.sin * self.turn_sin,
+                self.sin * self.turn_cos + self.cos * self.turn_sin,
+            );
+        }
+    }
+
+    fn done(&self) -> bool {
+        self.age >= self.length
+    }
 }
 
 /// A granular engine over an `Arc`-shared source.
 ///
 /// A grain plays `length` of the source from a start position, at a pitch ratio
-/// `2^(cents / 1200)` against the source's own rate, under a periodic Hann window
-/// `w[n] = (1 - cos(2 pi n / N)) / 2` of its `N` frames. The window peaks at 1 and a grain has
+/// `2^(cents / 1200)` against the source's own rate (within [`PlaybackRate`]'s `0.25..=4`, so
+/// `+-2400` cents), under a periodic Hann window `w[n] = (1 - cos(2 pi n / N)) / 2` of its `N`
+/// frames, computed by a phasor that is set exactly every 64 frames: within `2 eps` of the
+/// closed form, `eps` the float's epsilon, times 64. The window peaks at 1 and a grain has
 /// no gain of its own, so a cloud of density `d` and length `L` sums to about `d L` times the
 /// source's level; periodic Hann grains started every `N / 2` frames sum to exactly 1.
 ///
@@ -233,7 +346,7 @@ pub struct Granular<F: Float> {
     pending: Option<Onset>,
     /// Output frames rendered since the start.
     now: Samples,
-    slots: Vec<Option<Grain>>,
+    slots: Vec<Option<Grain<F>>>,
     dropped: u64,
 }
 
@@ -282,17 +395,14 @@ impl<F: Float> Granular<F> {
             return;
         };
         let source_rate = self.source.sample_rate();
-        let start = onset.position.get() * self.source.duration().get();
-        let ratio = settings.rate.to_pitch_ratio() * source_rate.get() / self.rate.get();
-        // `as` saturates, and maps a NaN ratio to 0, which holds the grain at its position.
-        let step = (ratio * ReadPosition::COUNTS_PER_FRAME + 0.5) as u64;
+        let at =
+            SampleSpan::from_seconds(self.source.duration() * onset.position.get(), source_rate)
+                .unwrap_or(SampleSpan::ZERO);
+        let rate = PlaybackRate::clamped(settings.rate.to_pitch_ratio())
+            .read_rate(SrcRatio::for_rates(source_rate, self.rate));
         let length = settings.length.to_samples(self.rate).get();
-        *slot = Some(Grain {
-            position: ReadPosition::of(Seconds::new(start), source_rate),
-            step,
-            age: 0,
-            length: length.clamp(1, u32::MAX as usize),
-        });
+        let length = Samples::new(length.clamp(1, u32::MAX as usize));
+        *slot = Some(Grain::new(at, rate, length));
     }
 
     /// Adds the sounding grains over `out`'s frames from `from`, `frames` of them.
@@ -305,30 +415,28 @@ impl<F: Float> Granular<F> {
         };
         for slot in &mut self.slots {
             let Some(grain) = slot else { continue };
-            let run = frames.min(grain.length - grain.age);
-            let length = F::from_count(grain.length as u32);
+            let run = frames.min(grain.length.remaining_after(grain.age).get());
             for n in 0..run {
-                let phase = F::TAU * F::from_count((grain.age + n) as u32) / length;
-                let window = F::lit(0.5) * (F::ONE - phase.cos());
+                let window = grain.window();
+                let position = grain.position();
                 for c in 0..channels {
                     let tap = read(
                         self.source.channel(if mono { 0 } else { c }).samples(),
-                        grain.position,
+                        position,
                     );
                     out.plane_mut(c).samples_mut()[from + n] += window * tap;
                 }
-                grain.position =
-                    ReadPosition::from_count(grain.position.get().saturating_add(grain.step));
+                grain.advance();
             }
-            grain.age += run;
-            if grain.age >= grain.length {
+            if grain.done() {
                 *slot = None;
             }
         }
     }
 
-    /// Renders the next frames of the cloud into `out`, overwriting it. Grains start at the frames of their onsets whatever the
-    /// block's size. No allocation.
+    /// Renders the next frames of the cloud into `out`, overwriting it.
+    ///
+    /// Grains start at the frames of their onsets whatever the block's size. No allocation.
     pub fn process(&mut self, settings: &GrainSettings, mut out: PlanesMut<'_, '_, F>) {
         out.silence();
         let frames = out.frames().get();

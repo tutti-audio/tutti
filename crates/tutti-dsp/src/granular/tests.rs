@@ -18,7 +18,12 @@ fn hann(n: usize, length: usize) -> f64 {
     0.5 - 0.5 * (2.0 * core::f64::consts::PI * n as f64 / length as f64).cos()
 }
 
-/// A rate with whole-frame intervals at power-of-two densities.
+/// The window's derived bound: its phasor, set exactly every 64 frames, is within `4 * 64 eps`
+/// of the closed form `c`, and the window `(1 - c) / 2` within half of that.
+fn window_bound<F: Float>() -> f64 {
+    2.0 * 64.0 * Into::<f64>::into(F::EPSILON)
+}
+
 const RATE: SampleRate = SampleRate::SR_48K;
 
 /// One grain of a constant `c` is `c w[n]` with the periodic Hann `w`, and silence after it.
@@ -31,7 +36,10 @@ fn one_grain_of_a_constant_is_the_window_times_the_constant() {
     let out = render(&mut cloud, &settings, 16);
     for (n, &y) in out.iter().enumerate() {
         let want = if n < 8 { 0.5 * hann(n, 8) } else { 0.0 };
-        assert!((y - want).abs() < 1e-15, "frame {n}: {y} against {want}");
+        assert!(
+            (y - want).abs() <= 0.5 * window_bound::<f64>(),
+            "frame {n}: {y} against {want}"
+        );
     }
 }
 
@@ -49,7 +57,7 @@ fn a_grain_of_a_sine_at_rate_r_is_the_sine_at_r_times_the_frequency() {
     let settings =
         GrainSettings::new(Hz::new(1.0), Seconds::new(length as f64 / 48_000.0)).rate(cents);
     let out = render(&mut cloud, &settings, length);
-    let bound = (omega * ratio).powi(3) / 4.0;
+    let bound = (omega * ratio).powi(3) / 4.0 + window_bound::<f64>();
     for (n, &y) in out.iter().enumerate() {
         let want = hann(n, length) * (omega * ratio * n as f64).sin();
         assert!((y - want).abs() <= bound, "frame {n}: {y} against {want}");
@@ -71,7 +79,7 @@ fn a_source_at_half_the_rate_is_read_at_half_a_frame_a_frame_from_its_position()
     let out = render(&mut cloud, &settings, 32);
     for (n, &y) in out.iter().enumerate() {
         let want = hann(n, 32) * (10.0 + n as f64 / 2.0) / 1000.0;
-        assert!((y - want).abs() < 1e-9, "frame {n}: {y} against {want}");
+        assert!((y - want).abs() <= 1e-9, "frame {n}: {y} against {want}");
     }
 }
 
@@ -84,7 +92,10 @@ fn hann_grains_at_half_overlap_of_a_constant_sum_to_the_constant() {
     let settings = GrainSettings::new(Hz::new(1024.0), Seconds::new(64.0 / 32_768.0));
     let out = render(&mut cloud, &settings, 512);
     for (n, &y) in out.iter().enumerate().take(480).skip(32) {
-        assert!((y - 0.75).abs() < 1e-14, "frame {n}: {y}");
+        assert!(
+            (y - 0.75).abs() <= 2.0 * 0.75 * window_bound::<f64>(),
+            "frame {n}: {y}"
+        );
     }
 }
 
@@ -101,7 +112,10 @@ fn a_block_split_does_not_move_a_grain() {
     }
     // The grains started at frames 0, 32, 64, ...: the first 512 frames of the same sum.
     for (n, &y) in out.iter().enumerate().take(480).skip(32) {
-        assert!((y - 0.75).abs() < 1e-14, "frame {n}: {y}");
+        assert!(
+            (y - 0.75).abs() <= 2.0 * 0.75 * window_bound::<f64>(),
+            "frame {n}: {y}"
+        );
     }
 }
 
@@ -150,43 +164,103 @@ fn the_same_seed_gives_the_same_onsets_and_another_seed_others() {
     );
 }
 
-/// Intervals are `T (1 + j u)` with `u` in `[-1, 1)`, so each is within `T j` of `T = 960`
-/// frames, and positions are within `0.25` of `0.5`; the mean interval over `n` onsets has the
-/// variance `(T j)^2 / (3 n)` of uniform draws, checked to 5 standard deviations.
+/// Onset `k` is the whole frame of `k T + j T u` with `u` in `[-1, 1)`, `T = 960`: its distance
+/// from `k T` is within `j T` and a frame, its position within `0.25` of `0.5`, and the
+/// displacements average to zero (`n` uniform draws of variance `(j T)^2 / 3`, checked to 5
+/// standard deviations, and the floor's half frame).
 #[test]
 fn jittered_onsets_stay_within_their_spread_and_keep_the_mean_density() {
     let n = 20_000;
     let list = onsets(3, &jittered(), n);
     let (t, j) = (960.0, 0.5);
-    let times: Vec<f64> = list.iter().map(|o| o.frame.get() as f64).collect();
-    for pair in times.windows(2) {
-        // A frame is the floor of a time, so a gap is within a frame of the interval.
-        assert!((pair[1] - pair[0] - t).abs() <= t * j + 1.0);
-    }
-    for o in &list {
+    let mut sum = 0.0;
+    for (k, o) in list.iter().enumerate() {
+        let displacement = o.frame.get() as f64 - k as f64 * t;
+        assert!(
+            displacement.abs() <= t * j + 1.0,
+            "onset {k}: {displacement}"
+        );
         assert!((o.position.get() - 0.5).abs() <= 0.25);
+        sum += displacement;
     }
-    let mean = (times[n - 1] - times[0]) / (n - 1) as f64;
-    let sigma = t * j / (3.0 * (n - 1) as f64).sqrt();
+    let sigma = t * j / (3.0 * n as f64).sqrt();
     assert!(
-        (mean - t).abs() < 5.0 * sigma + 1.0 / (n - 1) as f64,
-        "mean {mean}"
+        (sum / n as f64 + 0.5).abs() < 5.0 * sigma,
+        "mean {}",
+        sum / n as f64
     );
 }
 
-/// With no jitter an onset is at the floor of `k` intervals: 48000 / 7 frames, never at a
-/// multiple of 7 where the sum may sit a rounding under a whole frame.
+/// With no jitter onset `k` is at `floor(k * 48000 / 9)` for every `k`, the whole-frame ones
+/// included (`k = 195` is 1040000), where `k * (48000 / 9)` is a rounding under a whole frame.
 #[test]
-fn onsets_without_jitter_are_at_the_floor_of_whole_intervals() {
-    let settings = GrainSettings::new(Hz::new(7.0), Seconds::new(0.01));
-    let list = onsets(0, &settings, 100);
-    for (k, o) in list.iter().enumerate().filter(|(k, _)| k % 7 != 0) {
+fn onsets_without_jitter_are_at_the_floor_of_k_intervals_for_every_k() {
+    let settings = GrainSettings::new(Hz::new(9.0), Seconds::new(0.01));
+    for (k, o) in onsets(0, &settings, 1_000).iter().enumerate() {
+        assert_eq!(o.frame.get(), k * 48_000 / 9, "onset {k}");
+    }
+}
+
+/// Half an hour of onsets, 7 a second and 1000 a second, with no rendering: the last is at the
+/// closed form's frame, which a running sum of f64 intervals does not keep.
+#[test]
+fn an_onset_half_an_hour_in_is_at_the_closed_forms_frame() {
+    for density in [7_u64, 1_000] {
+        let settings = GrainSettings::new(Hz::new(density as f64), Seconds::new(0.01));
+        let count = (1_800 * density) as usize;
+        let mut scheduler = GrainScheduler::new(0);
+        let mut last = scheduler.restart(Samples::ZERO, &settings, RATE).unwrap();
+        for _ in 1..count {
+            last = scheduler.next(&settings, RATE).unwrap();
+        }
+        let k = (count - 1) as u128;
         assert_eq!(
-            o.frame.get(),
-            (k as f64 * 48_000.0 / 7.0).floor() as usize,
-            "onset {k}"
+            last.frame.get() as u128,
+            k * 48_000 / density as u128,
+            "density {density}"
         );
     }
+}
+
+/// A change of density starts a run from the last onset's nominal time: 100 Hz at 48 kHz is 480
+/// frames, then 50 Hz from onset 3 at 1440 is 960.
+#[test]
+fn a_density_change_continues_from_the_last_onset() {
+    let fast = GrainSettings::new(Hz::new(100.0), Seconds::new(0.01));
+    let slow = GrainSettings::new(Hz::new(50.0), Seconds::new(0.01));
+    let mut scheduler = GrainScheduler::new(0);
+    scheduler.restart(Samples::ZERO, &fast, RATE);
+    let frames: Vec<usize> = [fast, fast, fast, slow, slow]
+        .iter()
+        .map(|s| scheduler.next(s, RATE).unwrap().frame.get())
+        .collect();
+    assert_eq!(frames, [480, 960, 1440, 2400, 3360]);
+}
+
+/// A phasor window of grains from 5000 to a million frames (a turn per frame of `1e-3` to `6e-6`
+/// radians, where the rounded `cos` of the turn is `1` or a few units off it) is within the derived
+/// bound of the closed form at every frame, in `f32` where the bound is `1.5e-5` and in `f64`.
+#[test]
+fn a_long_grains_window_stays_within_the_derived_bound_of_the_hann() {
+    fn run<F: Float>(length: usize) {
+        let mut cloud = Granular::new(wave(RATE, &vec![F::ONE; length]), RATE, MaxGrains::of(1), 0);
+        let settings = GrainSettings::new(Hz::new(0.1), Seconds::new(length as f64 / 48_000.0));
+        let out = render(&mut cloud, &settings, length);
+        let bound = 0.5 * window_bound::<F>();
+        let worst = out
+            .iter()
+            .enumerate()
+            .map(|(n, &y)| (Into::<f64>::into(y) - hann(n, length)).abs())
+            .fold(0.0, f64::max);
+        assert!(
+            worst <= bound,
+            "length {length}: worst {worst} against {bound}"
+        );
+    }
+    for length in [5_000, 12_800, 20_000, 50_000, 1_000_000] {
+        run::<f32>(length);
+    }
+    run::<f64>(1_000_000);
 }
 
 /// A density that is not above zero starts nothing.
