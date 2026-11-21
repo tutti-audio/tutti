@@ -907,7 +907,7 @@ impl<C: Clock> SessionBuilder<C> {
     }
 
     /// A hosted plugin's death or hang is not recovered: a loaded plugin's node
-    /// stays silent at its key and the entry reads lost, and a node of a plugin
+    /// stays silent at its key and its handle reads lost, and a node of a plugin
     /// the host inserted itself is removed
     /// ([`PluginChange::Died`](crate::PluginChange::Died)); the host decides, a
     /// prompt to the user for instance. Replaces

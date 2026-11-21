@@ -21,8 +21,8 @@ use tutti_plugin_types::StateUse;
 use tutti_plugin_types::{PluginFailure, TerminationReason};
 use tutti_plugin_types::{PluginId, PluginRef};
 use tutti_session::{
-    AddPluginError, CrossfadeRefused, DetachedSession, LoadedPlugin, OtherPeer, Peer, PeerState,
-    PluginCause, PluginHealth, Presence, RecoveryPolicy, Resource, Session, SessionEvent,
+    CrossfadeRefused, DetachedSession, LoadedPlugin, OtherPeer, Peer, PeerState, PluginCause,
+    PluginHealth, PluginNode, Presence, RecoveryPolicy, Resource, Session, SessionEvent,
     StateStartError, SwapPluginError,
 };
 use tutti_units::Normalized;
@@ -223,29 +223,24 @@ fn a_dead_server_with_recovery_off_is_lost_and_a_new_plugin_swaps_in() {
         "the node does not revive the plugin"
     );
     let main = tutti_fixtures::main_thread();
-    assert!(
-        matches!(
-            s.swap_plugin(node, before.node(), main),
-            Err(SwapPluginError::Installed)
-        ),
-        "the dead plugin is the node's, or was"
-    );
 
     // A new plugin loaded and swapped in takes the stand-in's place, and its
     // own tail back.
-    let after = load(&s, &catalog, &first_id());
+    let opened = load(&s, &catalog, &first_id());
+    let after = opened.handle();
     assert!(matches!(after.presence(), Presence::Live));
-    s.swap_plugin(node, after.node(), main)
+    s.swap_plugin(node, opened, main)
         .expect("a live plugin swaps in at the node");
     pump_until(&mut s, "the node's new plugin", |s| {
         s.plugin_view(node)
             .is_ok_and(|view| view.diagnostics().server_pid() != Some(dead_pid))
     });
     assert_eq!(s.graph_ref().node_tail(node), Ok(tail));
-    assert!(matches!(
-        s.add_plugin(after.node()),
-        Err(AddPluginError::Installed)
-    ));
+    assert!(matches!(after.presence(), Presence::Live));
+    assert!(
+        matches!(before.presence(), Presence::Closed),
+        "the dead plugin was replaced"
+    );
 }
 
 /// **With recovery on, a dead server reads live while the session reloads it
@@ -321,7 +316,8 @@ fn an_initial_state_is_restored_and_two_loads_are_two_plugins() {
         .expect("its own plugin's state")
         .run(tutti_fixtures::main_thread())
         .expect("the plugin loads");
-    let b = s.add_plugin(second.node()).unwrap();
+    let second_handle = second.handle();
+    let b = s.add_plugin(second).unwrap();
     let read = s
         .plugin_view(b)
         .unwrap()
@@ -335,7 +331,7 @@ fn an_initial_state_is_restored_and_two_loads_are_two_plugins() {
     );
     let pid = |node| s.plugin_view(node).unwrap().diagnostics().server_pid();
     assert_ne!(pid(a), pid(b), "two plugins, two servers");
-    assert_ne!(first.id(), second.id());
+    assert_ne!(first.id(), second_handle.id());
 }
 
 /// **A state saved is the state of the plugin at the run, and the refusals are
@@ -420,7 +416,7 @@ fn a_saved_state_holds_what_the_plugin_holds_and_refuses_by_name() {
         .expect("its own plugin's state")
         .run(main)
         .expect("the plugin loads");
-    let b = s.add_plugin(b.node()).unwrap();
+    let b = s.add_plugin(b).unwrap();
     let read = s
         .plugin_view(b)
         .unwrap()
@@ -509,17 +505,17 @@ fn a_swap_to_a_plugin_with_other_ports_is_refused() {
     // The next server starts with the probe's aux-bus layout.
     layout("1");
     let other = load(&s, &catalog, &second_id());
-    let refused = s.swap_plugin(node, other.node(), tutti_fixtures::main_thread());
-    assert!(
-        matches!(refused, Err(SwapPluginError::Ports { .. })),
-        "{refused:?}"
-    );
+    let handle = other.handle();
+    let refused = s.swap_plugin(node, other, tutti_fixtures::main_thread());
+    let Err(SwapPluginError::Ports { node: returned, .. }) = refused else {
+        panic!("other ports are refused: {refused:?}");
+    };
     assert_eq!(
         crate::loading::clap_id(s.plugin_view(node).unwrap().plugin()),
         first
     );
     assert!(
-        matches!(other.presence(), Presence::Live),
+        matches!(handle.presence(), Presence::Live),
         "the refused plugin is still loaded"
     );
     let _ = pump(&mut s);
@@ -529,6 +525,10 @@ fn a_swap_to_a_plugin_with_other_ports_is_refused() {
             .all(|event| !matches!(event, SessionEvent::CommitRefused(_))),
         "the graph still commits"
     );
+    // The node comes back whole: it has a node of its own to add.
+    let own = s.add_plugin(returned).expect("the returned node adds");
+    assert_ne!(own, node);
+    assert!(matches!(handle.presence(), Presence::Live));
 }
 
 /// **A swap replaces the plugin at the node, at the same key.** The node is the
@@ -537,7 +537,8 @@ fn a_swap_to_a_plugin_with_other_ports_is_refused() {
 fn a_swap_replaces_the_plugin_at_the_node() {
     let (catalog, _dir) = catalog();
     let mut s = session(true);
-    let (_, node) = in_a_node(&mut s, &catalog, &first_id());
+    let (outgoing, node) = in_a_node(&mut s, &catalog, &first_id());
+    assert!(matches!(outgoing.presence(), Presence::Live));
     let id_of_node =
         |s: &Session| crate::loading::clap_id(s.plugin_view(node).unwrap().plugin()).to_owned();
     assert_eq!(
@@ -547,16 +548,18 @@ fn a_swap_replaces_the_plugin_at_the_node() {
     let first_pid = pid_of(&s, node);
 
     let second = load(&s, &catalog, &second_id());
-    s.swap_plugin(node, second.node(), tutti_fixtures::main_thread())
+    let incoming = second.handle();
+    s.swap_plugin(node, second, tutti_fixtures::main_thread())
         .expect("a plugin with the node's ports swaps in");
 
     let want = tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap();
     assert_eq!(id_of_node(&s), want, "the node is the second plugin");
     assert_ne!(pid_of(&s, node), first_pid, "in a server of its own");
-    assert!(matches!(
-        s.add_plugin(second.node()),
-        Err(AddPluginError::Installed)
-    ));
+    assert!(matches!(incoming.presence(), Presence::Live));
+    assert!(
+        matches!(outgoing.presence(), Presence::Closed),
+        "the swapped-out plugin's handle has no plugin behind it"
+    );
 }
 
 /// A node that cannot run above 90 kHz: its `prepare` panics there, which
@@ -608,12 +611,12 @@ fn with_node_in<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     (s, node)
 }
 
-/// `id` loaded on the main thread: the handle, not yet in a node.
+/// `id` loaded on the main thread: the node, not yet added.
 fn load<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     s: &Session<K, C>,
     catalog: &Catalog,
     id: &PluginId,
-) -> LoadedPlugin {
+) -> PluginNode {
     s.load_plugin(id, catalog)
         .run(tutti_fixtures::main_thread())
         .expect("the plugin loads")
@@ -625,8 +628,9 @@ fn in_a_node<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     catalog: &Catalog,
     id: &PluginId,
 ) -> (LoadedPlugin, tutti_session::Key<tutti_session::AnyPlugin>) {
-    let plugin = load(s, catalog, id);
-    let node = s.add_plugin(plugin.node()).expect("the plugin enters");
+    let opened = load(s, catalog, id);
+    let plugin = opened.handle();
+    let node = s.add_plugin(opened).expect("the plugin enters");
     (plugin, node)
 }
 
@@ -646,8 +650,8 @@ fn a_swap_to_the_same_totals_in_other_buses_is_refused() {
     let (mut s, node) = with_node(&catalog);
     layout("3");
     let other = load(&s, &catalog, &second_id());
-    let refused = s.swap_plugin(node, other.node(), tutti_fixtures::main_thread());
-    let Err(SwapPluginError::Ports { got, was }) = refused else {
+    let refused = s.swap_plugin(node, other, tutti_fixtures::main_thread());
+    let Err(SwapPluginError::Ports { got, was, .. }) = refused else {
         panic!("{refused:?}");
     };
     assert_eq!(
@@ -674,14 +678,14 @@ fn after_a_refused_swap_a_fitting_plugin_swaps_in() {
     layout("1");
     let wide = load(&s, &catalog, &second_id());
     assert!(matches!(
-        s.swap_plugin(node, wide.node(), main),
+        s.swap_plugin(node, wide, main),
         Err(SwapPluginError::Ports { .. })
     ));
 
     // The next server has the node's layout.
     layout("0");
     let fitting = load(&s, &catalog, &second_id());
-    s.swap_plugin(node, fitting.node(), main)
+    s.swap_plugin(node, fitting, main)
         .expect("a plugin that fits swaps in");
     let second = tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap();
     assert_eq!(
@@ -689,10 +693,6 @@ fn after_a_refused_swap_a_fitting_plugin_swaps_in() {
         second
     );
     assert_ne!(pid_of(&s, node), first, "another server");
-    assert!(matches!(
-        s.add_plugin(fitting.node()),
-        Err(AddPluginError::Installed)
-    ));
 }
 
 /// What a graph that re-prepares does to a swap: it waits, with the executor
@@ -718,10 +718,9 @@ fn a_swap_is_busy_while_the_graph_re_prepares_and_succeeds_after() {
     let mut side = repreparing(&mut s);
 
     let second = load(&s, &catalog, &second_id());
-    assert!(matches!(
-        s.swap_plugin(node, second.node(), main),
-        Err(SwapPluginError::Busy)
-    ));
+    let Err(SwapPluginError::Busy(second)) = s.swap_plugin(node, second, main) else {
+        panic!("a re-preparing graph is busy");
+    };
     assert_eq!(
         pid_of(&s, node),
         first,
@@ -733,8 +732,8 @@ fn a_swap_is_busy_while_the_graph_re_prepares_and_succeeds_after() {
         side.render(BLOCK, PlanesMut::from_vecs(&mut out).unwrap());
         !s.graph_ref().testing().is_repreparing()
     });
-    s.swap_plugin(node, second.node(), main)
-        .expect("the plugin the busy graph refused swaps in once it resumes");
+    s.swap_plugin(node, second, main)
+        .expect("the node the busy graph refused swaps in once it resumes");
     assert_eq!(
         crate::loading::clap_id(s.plugin_view(node).unwrap().plugin()),
         tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap(),
@@ -742,22 +741,21 @@ fn a_swap_is_busy_while_the_graph_re_prepares_and_succeeds_after() {
     assert_ne!(pid_of(&s, node), first);
 }
 
-/// **A swap into a node that is gone is refused by name**, and the plugin it
-/// would have swapped in stays loaded for a next node.
+/// **A swap into a node that is gone is refused by name**, and the node it
+/// would have swapped in is handed back for a next node.
 #[test]
-fn a_swap_into_a_removed_node_is_refused_and_leaves_the_plugin_loaded() {
+fn a_swap_into_a_removed_node_is_refused_and_hands_the_node_back() {
     let (catalog, _dir) = catalog();
     let (mut s, node) = with_node(&catalog);
     let main = tutti_fixtures::main_thread();
     let second = load(&s, &catalog, &second_id());
 
     s.remove(node).unwrap();
-    assert!(matches!(
-        s.swap_plugin(node, second.node(), main),
-        Err(SwapPluginError::NoSuchNode(_))
-    ));
+    let Err(SwapPluginError::NoSuchNode(_, second)) = s.swap_plugin(node, second, main) else {
+        panic!("a removed node is refused by name");
+    };
     let next = s
-        .add_plugin(second.node())
+        .add_plugin(second)
         .expect("the refused plugin is the next node's");
     assert_eq!(
         crate::loading::clap_id(s.plugin_view(next).unwrap().plugin()),
@@ -776,7 +774,8 @@ fn a_graph_that_refuses_the_swap_is_named_and_the_node_keeps_its_plugin() {
     // here and the grenade's panic has poisoned the editor when this returns.
     s.graph().set_sample_rate(SampleRate::SR_96K);
     let second = load(&s, &catalog, &second_id());
-    let refused = s.swap_plugin(node, second.node(), tutti_fixtures::main_thread());
+    let handle = second.handle();
+    let refused = s.swap_plugin(node, second, tutti_fixtures::main_thread());
     let Err(SwapPluginError::Graph(refused)) = refused else {
         panic!("{refused:?}");
     };
@@ -787,6 +786,10 @@ fn a_graph_that_refuses_the_swap_is_named_and_the_node_keeps_its_plugin() {
     assert_eq!(
         crate::loading::clap_id(s.plugin_view(node).unwrap().plugin()),
         tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap()
+    );
+    assert!(
+        matches!(handle.presence(), Presence::Closed),
+        "the refused plugin was consumed"
     );
 }
 

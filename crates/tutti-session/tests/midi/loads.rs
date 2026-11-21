@@ -1,5 +1,6 @@
 //! A MIDI file load is a value: `Midi::load_midi` returns a `LoadMidi` and
-//! `run()` returns the `LoadedMidi`, each track a clip value. A SoundFont is a pool entry, loaded the pool's way.
+//! `run()` returns the `LoadedMidi`, each track a clip value. A SoundFont is a
+//! value too: `load_soundfont` returns a `LoadSoundFont`.
 //!
 //! The fixtures are bytes written by hand, so every figure is the file's own
 //! (SMF 1.0): ticks over the division are beats, a Set Tempo of 500 000

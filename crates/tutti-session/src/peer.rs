@@ -129,8 +129,8 @@ pub enum Presence<C> {
     },
     /// Gone; the cause says whether it can return.
     Lost(C),
-    /// Its pool entry was released, or swapped to another identity: final,
-    /// this handle never returns. It has no cause, since nothing about it can
+    /// Its pool entry was released, or its plugin was dropped unadded, removed
+    /// with its node or swapped out: final, this handle never returns. It has no cause, since nothing about it can
     /// change.
     Closed,
 }
@@ -194,7 +194,7 @@ pub enum PeerError<E> {
     #[error("the peer does not support the request")]
     Unsupported,
     /// The peer was released before the request landed: its pool entry was
-    /// released or swapped to another identity (its handle reads
+    /// released, or its plugin was removed or swapped out (its handle reads
     /// [`Presence::Closed`]), or every handle of its MIDI port was dropped.
     #[error("the peer was released")]
     Released,

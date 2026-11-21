@@ -80,17 +80,19 @@ fn render_until(s: &mut Session, what: &str, mut done: impl FnMut(&[f32]) -> boo
     }
 }
 
-/// **A load gives a handle whose node renders.** The handle reads the plugin
-/// the id names, served and live; the node over it renders the plugin's tag
-/// (`probe_tag(0, 0)`, 1) on every frame once the server's first blocks arrive.
+/// **A load gives a node whose handle observes it, and the node renders.** The
+/// handle reads the plugin the id names, served and live; the node over it
+/// renders the plugin's tag (`probe_tag(0, 0)`, 1) on every frame once the
+/// server's first blocks arrive.
 #[test]
-fn a_load_gives_a_handle_whose_node_renders() {
+fn a_load_gives_a_node_whose_handle_observes_it_and_renders() {
     let (catalog, _dir) = catalog();
     let mut s = session();
-    let plugin = s
+    let opened = s
         .load_plugin(&second_id(), &catalog)
         .run(tutti_fixtures::main_thread())
         .expect("the reference plugin loads");
+    let plugin = opened.handle();
     assert_eq!(
         crate::loading::clap_id(plugin.info().plugin()),
         tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap(),
@@ -100,7 +102,7 @@ fn a_load_gives_a_handle_whose_node_renders() {
     assert!(matches!(plugin.presence(), Presence::Live));
     assert!(!plugin.changed(), "the file is as it was loaded");
 
-    let node = s.add_plugin(plugin.node()).expect("the plugin enters");
+    let node = s.add_plugin(opened).expect("the plugin enters");
     assert!(
         s.plugin_view(node)
             .unwrap()
@@ -113,28 +115,6 @@ fn a_load_gives_a_handle_whose_node_renders() {
     render_until(&mut s, "the plugin's tag", |left| {
         left.iter().all(|&x| x == 1.0)
     });
-}
-
-/// **A loaded plugin has one node**: a second node from the same handle is
-/// refused, and so is one after the first is removed.
-#[test]
-fn a_second_node_from_one_handle_is_refused() {
-    let (catalog, _dir) = catalog();
-    let mut s = session();
-    let plugin = s
-        .load_plugin(&first_id(), &catalog)
-        .run(tutti_fixtures::main_thread())
-        .unwrap();
-    let node = s.add_plugin(plugin.node()).unwrap();
-    assert!(matches!(
-        s.add_plugin(plugin.node()),
-        Err(AddPluginError::Installed)
-    ));
-    s.remove(node).unwrap();
-    assert!(matches!(
-        s.add_plugin(plugin.node()),
-        Err(AddPluginError::Installed)
-    ));
 }
 
 /// **A load that cannot run returns its error, named**: an id the catalog does
@@ -168,6 +148,32 @@ fn a_failed_load_returns_its_error() {
     );
 }
 
+/// **A plugin loaded by one session is refused by another and handed back**,
+/// by `add_plugin` and by `swap_plugin`: the other session's rate and collector
+/// of main-thread work are not the plugin's. The node then enters the session
+/// that loaded it.
+#[test]
+fn a_plugin_of_another_session_is_refused_by_name_and_handed_back() {
+    let (catalog, _dir) = catalog();
+    let a = session();
+    let mut a = a;
+    let mut b = session();
+    let main = tutti_fixtures::main_thread();
+    let opened = a.load_plugin(&first_id(), &catalog).run(main).unwrap();
+    let Err(AddPluginError::OtherSession(opened)) = b.add_plugin(opened) else {
+        panic!("add to another session");
+    };
+    let hosted = b.load_plugin(&first_id(), &catalog).run(main).unwrap();
+    let at = b.add_plugin(hosted).unwrap();
+    let Err(SwapPluginError::OtherSession(opened)) = b.swap_plugin(at, opened, main) else {
+        panic!("swap in another session");
+    };
+    assert!(
+        a.add_plugin(opened).is_ok(),
+        "the session that loaded it takes it"
+    );
+}
+
 /// The cases that name the server by its process id.
 #[cfg(target_os = "linux")]
 mod process {
@@ -177,47 +183,53 @@ mod process {
         std::path::Path::new(&format!("/proc/{pid}")).exists()
     }
 
-    /// **Dropping every clone of a handle releases the plugin**: the server ends
-    /// with the last clone, not before.
+    /// **Dropping an unadded node reaps the server**, though its handle lives:
+    /// the handle holds readings, not the plugin, and reads `Closed`.
     #[test]
-    fn dropping_every_clone_reaps_the_server() {
+    fn dropping_an_unadded_node_reaps_the_server() {
         let (catalog, _dir) = catalog();
         let mut s = session();
-        let plugin = s
+        let opened = s
             .load_plugin(&first_id(), &catalog)
             .run(tutti_fixtures::main_thread())
             .unwrap();
+        let plugin = opened.handle();
         let pid = plugin.info().server_pid().expect("a served plugin");
         assert!(alive(pid));
         let clone = plugin.clone();
         drop(plugin);
         let _ = s.update();
-        assert!(alive(pid), "a clone holds the plugin");
-        drop(clone);
+        assert!(alive(pid), "the node holds the plugin");
+        drop(opened);
         render_until(&mut s, "the server's end", |_| !alive(pid));
+        assert!(matches!(clone.presence(), Presence::Closed));
     }
 
     /// **A node keeps its plugin alive after the app drops its handle**, and the
-    /// node's removal is what releases it.
+    /// node's removal is what releases it, the handle reading `Closed`.
     #[test]
     fn a_node_keeps_its_plugin_alive_after_the_app_drops_its_handle() {
         let (catalog, _dir) = catalog();
         let mut s = session();
-        let plugin = s
+        let opened = s
             .load_plugin(&first_id(), &catalog)
             .run(tutti_fixtures::main_thread())
             .unwrap();
-        let pid = plugin.info().server_pid().expect("a served plugin");
-        let node = s.add_plugin(plugin.node()).unwrap();
+        let watch = opened.handle();
+        let pid = watch.info().server_pid().expect("a served plugin");
+        let node = s.add_plugin(opened).unwrap();
         s.graph().connect(node.out(0), Root::output(0)).unwrap();
-        drop(plugin);
+        let kept = watch.clone();
+        drop(watch);
         render_until(&mut s, "the plugin's tag", |left| {
             left.iter().all(|&x| x == 1.0)
         });
         assert!(alive(pid), "the node holds the plugin");
+        assert!(matches!(kept.presence(), Presence::Live));
 
         s.remove(node).unwrap();
         render_until(&mut s, "the server's end", |_| !alive(pid));
+        assert!(matches!(kept.presence(), Presence::Closed));
     }
 
     /// **A plugin that died before it had a node is lost, and refuses one**: the
@@ -226,10 +238,9 @@ mod process {
     fn a_plugin_dead_before_its_node_is_lost_and_refuses_one() {
         let (catalog, _dir) = catalog();
         let mut s = session();
-        let plugin = s
-            .load_plugin(&first_id(), &catalog)
-            .run(tutti_fixtures::main_thread())
-            .unwrap();
+        let main = tutti_fixtures::main_thread();
+        let opened = s.load_plugin(&first_id(), &catalog).run(main).unwrap();
+        let plugin = opened.handle();
         let pid = plugin.info().server_pid().expect("a served plugin");
         let killed = std::process::Command::new("kill")
             .args(["-9", &pid.to_string()])
@@ -241,18 +252,43 @@ mod process {
             plugin.presence(),
             Presence::Lost(PluginCause::Died(_))
         ));
-        assert!(matches!(
-            s.add_plugin(plugin.node()),
-            Err(AddPluginError::Lost)
-        ));
-        let host = s
-            .load_plugin(&first_id(), &catalog)
+        let host = s.load_plugin(&first_id(), &catalog).run(main).unwrap();
+        let node = s.add_plugin(host).unwrap();
+        let Err(SwapPluginError::Lost(dead)) = s.swap_plugin(node, opened, main) else {
+            panic!("a lost plugin is refused by a swap");
+        };
+        assert!(matches!(s.add_plugin(dead), Err(AddPluginError::Lost)));
+    }
+
+    /// **`changed()` reads the plugin's module, not its bundle directory.** A
+    /// bundle's directory keeps its modification time when the module inside is
+    /// rewritten; the handle stamps the module, so setting the module's time
+    /// moves it.
+    #[test]
+    fn changed_reads_the_module_inside_a_bundle() {
+        let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join(format!("plugin-load-bundle.{}", std::process::id()));
+        let arch = tutti_plugin_types::bundle::native_arch_subdirs()[0];
+        let module_dir = dir.join("Probe.clap/Contents").join(arch);
+        std::fs::create_dir_all(&module_dir).unwrap();
+        let module = module_dir.join("Probe.so");
+        std::fs::copy(clap_probe(), &module).unwrap();
+        let (catalog, id, _scratch) =
+            crate::loading::catalog_of(&PluginRef::file(dir.join("Probe.clap")));
+        let s = session();
+        let opened = s
+            .load_plugin(&id, &catalog)
             .run(tutti_fixtures::main_thread())
+            .expect("the bundle loads");
+        let plugin = opened.handle();
+        assert_eq!(plugin.asset().name(), module.display().to_string());
+        assert!(!plugin.changed(), "as loaded");
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&module)
             .unwrap();
-        let node = s.add_plugin(host.node()).unwrap();
-        assert!(matches!(
-            s.swap_plugin(node, plugin.node(), tutti_fixtures::main_thread()),
-            Err(SwapPluginError::Lost)
-        ));
+        file.set_modified(tutti_platform::SystemTime::now() + Duration::from_secs(3600))
+            .unwrap();
+        assert!(plugin.changed(), "the module was rewritten");
     }
 }

@@ -211,10 +211,11 @@ mod vst3 {
             .outputs_floor(ChannelLayout::STEREO)
             .build_detached(SampleRate::DEFAULT)
             .expect("a detached session builds");
-        let loaded = s
+        let opened = s
             .load_plugin(&id, &catalog)
             .run(tutti_fixtures::main_thread())
             .expect("the shared plugin loads");
+        let loaded = opened.handle();
 
         assert!(loaded.info().presets().support().can_list());
         for info in [loaded.info(), loaded.clone().info()] {
@@ -320,7 +321,7 @@ mod vst3 {
             .build_detached(SampleRate::DEFAULT)
             .expect("a detached session builds");
         let plugin = s.load_plugin(&id, &catalog).run(main).unwrap();
-        let node = s.add_plugin(plugin.node()).unwrap();
+        let node = s.add_plugin(plugin).unwrap();
         let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(60);
         let preset = s
             .plugin_view(node)
@@ -512,7 +513,8 @@ mod vst2 {
             .hosting(Hosting::InProcess)
             .run(main)
             .expect("a second VST2 loads");
-        let new = second.info().presets().iter().nth(2).unwrap();
+        let incoming = second.handle();
+        let new = incoming.info().presets().iter().nth(2).unwrap();
         assert_ne!(new, old, "another plugin instance listed it");
 
         let before = s.current_preset(&node, main);
@@ -532,7 +534,7 @@ mod vst2 {
             .expect("the node's own plugin lists it");
         s.apply(loaded).expect("the node hosts the plugin");
 
-        s.swap_plugin(node, second.node(), main)
+        s.swap_plugin(node, second, main)
             .expect("the second plugin swaps in");
         assert!(
             matches!(

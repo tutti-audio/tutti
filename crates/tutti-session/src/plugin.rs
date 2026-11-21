@@ -4009,6 +4009,47 @@ mod tests {
         );
     }
 
+    /// **A swap while the plugin is recovering ends the recovery: the old reload
+    /// lands nowhere and the node reads healthy.** The reload is in flight when
+    /// the incoming plugin takes the record (`HostedPlugin::adopt`, which a swap
+    /// runs): its token is not the record's any more, so its end is discarded, and
+    /// the incoming plugin's health starts clean.
+    #[cfg(feature = "clap")]
+    #[test]
+    fn a_replacement_while_recovering_lands_the_old_reload_nowhere() {
+        let mut rig = rig(None);
+        rig.recovering_in_process();
+        let _ = rig.events_at(0);
+        assert!(
+            matches!(
+                rig.session.plugin_view(rig.node).unwrap().health(),
+                PluginHealth::Reloading { .. }
+            ),
+            "the record is recovering"
+        );
+        let (incoming, _) = fake_handle(None, Vec::new());
+        rig.session
+            .graph
+            .plugins
+            .get_mut(&rig.node)
+            .unwrap()
+            .adopt(incoming, Placement::InProcess);
+        assert!(matches!(
+            rig.session.plugin_view(rig.node).unwrap().health(),
+            PluginHealth::Running
+        ));
+        rig.settle();
+        let events = rig.land();
+        assert!(
+            events.is_empty(),
+            "the old reload landed nowhere: {events:?}"
+        );
+        assert!(matches!(
+            rig.session.plugin_view(rig.node).unwrap().health(),
+            PluginHealth::Running
+        ));
+    }
+
     /// **A reload task that outlives its node lands nowhere, silently.** The
     /// task ends after the node is removed: its end lands as no event, and no failure is
     /// recorded for a node that is gone.
