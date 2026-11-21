@@ -28,8 +28,6 @@ mod vst2_off_main_handle;
 // Modulation lanes on the reference VST2 plugin's parameters.
 #[cfg(feature = "vst2")]
 mod vst2_modulation;
-// A pool load's worker output when its session ends: dropped on the main thread, or leaked and counted.
-mod pool_main;
 // A plugin hosted in process through the session: the swap at a node, a restore, a port
 // change. The reference CLAP plugin.
 #[cfg(feature = "clap")]
@@ -68,7 +66,6 @@ fn main() {
     cases.extend_from_slice(vst2_params::CASES);
     #[cfg(feature = "vst2")]
     cases.extend_from_slice(main_work::CASES);
-    cases.extend_from_slice(pool_main::CASES);
     #[cfg(feature = "clap")]
     cases.extend_from_slice(plugin_in_process_main::CASES);
     #[cfg(feature = "clap")]

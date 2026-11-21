@@ -31,7 +31,7 @@ use crate::jobs::Jobs;
 use crate::value::{SlotCell, ValueState, ValueTable};
 use crate::{Clock, Offline, OutputPolicy, RealTime, RemoveError, SessionFloat};
 use parts::{
-    BouncePart, DevicePart, EarlyWork, Inputs, MidiPart, OutputPart, PluginPart, PoolPart, Reports,
+    BouncePart, DevicePart, EarlyWork, Inputs, MidiPart, OutputPart, PluginPart, Reports,
     SamplerPart, TransportPart,
 };
 
@@ -60,6 +60,10 @@ impl<T: Ord + Clone + Debug + Send + Sync + 'static> AppKey for T {}
 /// (`Session::retired_plugins`). What does need the main thread (an editor,
 /// loading an in-process plugin, restoring state) takes the proof
 /// (`MainThreadMarker`): `Session::editor`, `Plugin::presets`.
+///
+/// Dropping a session commits every take before it returns: it joins each
+/// take's writer. Never drop a session on a thread that drives an executor (inside
+/// a future on a `tutti_platform::Executor`): the join panics there.
 ///
 /// ```
 /// use tutti_buffers::MaxBlock;
@@ -99,8 +103,16 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     /// so a stream stops before the session's own state drops.
     pub(crate) running: C::Running,
     pub(crate) graph: Graph<C::Float>,
-    /// What the app declared loaded, and the ids of the session's resources.
-    pub(crate) pool: PoolPart<K, C>,
+    /// The source of the ids of the session's resources; a clock switch carries it over.
+    #[cfg_attr(
+        not(any(feature = "plugin", feature = "midi", feature = "device")),
+        expect(
+            dead_code,
+            reason = "the ids of plugins and MIDI ports (features `plugin`, `midi`); \
+                      a clock switch (`device`) carries them over"
+        )
+    )]
+    pub(crate) resource_ids: crate::peer::ResourceIds,
     /// The transport and the figures of the plan sent last.
     pub(crate) transport: TransportPart,
     /// Where the mix lands: the root, the policy, the engine's output readings.
@@ -223,10 +235,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// the clock's own state is swapped, and the old one is handed back.
     ///
     /// Jobs in flight carry over: a job's lander is typed to nothing of the
-    /// clock, and lands on the converted session. The runs waiting for an
-    /// entry to load (`when_loaded`) are typed to the clock they were asked of
-    /// and do not: the caller has run or refused them first, so this runs no
-    /// closure of the app's.
+    /// clock, and lands on the converted session.
     #[cfg(feature = "device")]
     pub(crate) fn with_clock<N: Clock<Float = C::Float>>(
         self,
@@ -238,7 +247,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             _early_work,
             running: old_running,
             graph,
-            pool,
+            resource_ids,
             transport,
             output,
             reports,
@@ -258,7 +267,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 _early_work,
                 running,
                 graph,
-                pool: pool.rebind(),
+                resource_ids,
                 transport,
                 output,
                 reports,

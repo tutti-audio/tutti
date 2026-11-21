@@ -11,8 +11,8 @@ use tutti_units::SampleRate;
 
 use crate::graph::CrossfadeId;
 use crate::{
-    BusSink, CrossfadeRefused, Edge, EventEdge, JobOutput, PoolEvent, PoolKey, Problem,
-    ResourceFact, ResourceId, RootReader,
+    BusSink, CrossfadeRefused, Edge, EventEdge, JobOutput, Problem, ResourceFact, ResourceId,
+    RootReader,
 };
 
 /// The controls a landed crossfade hands the app: the incoming node's
@@ -245,14 +245,5 @@ pub enum SessionEvent {
         id: RootReader,
         /// The root's topology the reader was opened for.
         topology: ChannelTopology,
-    },
-    /// A pool entry's change: its load landed or failed, a reload landed, or it
-    /// was released. See [`PoolEvent`]; `key` is the key the
-    /// app declared it under ([`PoolKey::get`](PoolKey::get)).
-    Pool {
-        /// The entry's key.
-        key: PoolKey,
-        /// What changed.
-        event: PoolEvent,
     },
 }

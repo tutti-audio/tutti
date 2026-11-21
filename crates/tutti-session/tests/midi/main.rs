@@ -27,7 +27,7 @@ mod midi_ci_property;
 mod build_failure;
 #[cfg(all(feature = "midi-hardware", target_os = "linux"))]
 mod build_failure_threads;
-// MIDI ports as pool entries: absent, replugged, ambiguous, released, per-port input node.
+// MIDI ports: absent, replugged, ambiguous, released, per-port input node.
 #[cfg(feature = "midi-hardware")]
 mod midi_ports;
 // A MIDI input handle reads the timing of its clock map and its resyncs.

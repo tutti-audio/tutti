@@ -62,6 +62,7 @@
 #[cfg(feature = "analyze")]
 mod analyze;
 mod apply;
+mod background;
 #[cfg(feature = "export")]
 mod bounce;
 mod builder;
@@ -70,7 +71,6 @@ mod bypass;
 mod clock;
 #[cfg(feature = "device")]
 mod device;
-mod drive;
 #[cfg(feature = "plugin")]
 mod editor;
 mod error;
@@ -86,6 +86,15 @@ mod hang;
 mod input;
 #[cfg(feature = "midi")]
 mod instrument;
+#[cfg_attr(
+    not(any(test, feature = "midi-hardware")),
+    expect(
+        dead_code,
+        unused_imports,
+        unused_macros,
+        reason = "a typed job has a user only in MIDI-CI's requests (feature `midi-hardware`)"
+    )
+)]
 mod job;
 mod jobs;
 mod key;
@@ -95,11 +104,6 @@ mod latency;
 mod load_audio;
 #[cfg(feature = "soundfont")]
 mod load_soundfont;
-#[cfg(any(
-    all(feature = "sampler", codec),
-    feature = "soundfont",
-    feature = "plugin"
-))]
 mod loaded;
 #[cfg(feature = "midi")]
 mod midi;
@@ -137,7 +141,6 @@ mod plugin_params;
 #[cfg(feature = "plugin")]
 mod plugin_presets;
 mod policy;
-mod pool;
 #[cfg(feature = "record")]
 mod recorder;
 #[cfg(feature = "plugin")]
@@ -186,8 +189,8 @@ pub use device::{
 #[cfg(feature = "plugin")]
 pub use editor::{Editor, EditorCallError, Opened};
 pub use error::{
-    ConnectError, DeclarationError, Error, InletError, NoSuchNode, RemoveError, Result,
-    SessionOutputTapError, TempoError,
+    BackgroundWork, ConnectError, DeclarationError, Error, InletError, NoSuchNode, RemoveError,
+    Result, SessionOutputTapError, TempoError,
 };
 #[cfg(feature = "midi")]
 pub use error::{MidiError, RouteDeclarer};
@@ -216,6 +219,12 @@ pub use latency::{Start, TakeLatency, Trim};
 pub use load_audio::{AudioData, LoadAudio, LoadedAudio, Tier};
 #[cfg(feature = "soundfont")]
 pub use load_soundfont::{LoadSoundFont, LoadedSoundFont};
+#[cfg(any(
+    all(feature = "sampler", codec),
+    feature = "soundfont",
+    feature = "plugin"
+))]
+pub use loaded::LoadError;
 #[cfg(feature = "midi")]
 pub use midi::{Midi, MidiRouteId, MidiRouteRule, Stamping};
 #[cfg(feature = "midi-hardware")]
@@ -254,12 +263,6 @@ pub use plugin::{
     PluginApplyError, PluginCause, PluginChange, PluginEvent, PluginHealth, PluginInfo, PluginNode,
     PluginPorts, PortsRefusal, PresetStartError, RestoreState, RestoredState, SaveState,
     StateRestore, StateStartError, StateView, SwapPluginError,
-};
-pub(crate) use pool::Pool;
-pub use pool::{
-    Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Owned, PoolConfig, PoolEntry,
-    PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoad, PoolLoaded, PoolOutcome, PoolReport,
-    PoolSet, PoolState, Retention, RetryError, Sharing, WhenLoadedError, stranded_loads,
 };
 
 #[cfg(feature = "plugin")]

@@ -350,7 +350,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 rate: self.graph.prepared().sample_rate(),
                 work: self.plugins.work.clone(),
                 executor: self.plugins.executor.clone(),
-                ids: self.pool.resource_ids.clone(),
+                ids: self.resource_ids.clone(),
                 session: self.id,
                 recovery: self.plugins.recovery.is_some(),
             },

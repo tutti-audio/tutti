@@ -19,11 +19,8 @@ use crate::{AppKey, Clock, Committed, Session, SessionEvent};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Phase {
-    /// The bells tick and the session's executor polls what was woken
-    /// (`SessionBuilder::executor`), then what the jobs sent lands (each message,
-    /// then each end, in arrival order). Then the pool's
-    /// landings are reported ([`SessionEvent::Pool`], in the order the app's
-    /// set names the entries), then its releases (by key), then crossfades
+    /// The bells tick, then what the jobs sent lands (each message,
+    /// then each end, in arrival order). Then crossfades
     /// that waited out a re-prepare are retried, what bounces
     /// sent back is dropped (feature `export`; and a bounce in flight for
     /// an hour of `PhaseCx::now` warned about, once), then
@@ -114,7 +111,7 @@ pub struct PhaseCx<'a> {
     pub mods: Option<ModInput<'a>>,
     /// The proof the calling thread is the main thread, when it is: the work
     /// only that thread may do (the retired plugins' drops, the editors'
-    /// service, the work other threads handed over, the pool's main stages)
+    /// service, the work other threads handed over)
     /// runs in a phase that holds one and waits otherwise. [`PhaseCx::at`]
     /// asks the OS ([`MainThreadMarker::new`](MainThreadMarker::new)).
     pub main: Option<MainThreadMarker>,
@@ -164,7 +161,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// This is the one update. What only the main thread may do (dropping the
     /// plugins the session retired, closing the editors of those, servicing
     /// the open `Editor`s (feature `plugin`), running the work other threads
-    /// handed over, and the pool's main stages) runs when it is called on the
+    /// handed over) runs when it is called on the
     /// thread the OS says is the main one; called elsewhere that work waits
     /// for an update on that thread. A host whose main thread is not the OS's
     /// calls [`update_on`](Self::update_on).
@@ -203,9 +200,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 // First of the landings, so what a job landed is in the graph this
                 // update commits.
                 self.land_jobs(out);
-                // What those landings and the holds' ends changed, and the pool's
-                // stages on this thread.
-                self.pool_events(cx.main, out);
                 // What the graph's own removals left declared.
                 self.forget_removed();
                 // Before the collect, as a frame's spawns run before its
