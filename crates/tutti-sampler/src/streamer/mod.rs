@@ -436,7 +436,7 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
                 parts,
                 StreamerPort::new(self.streamer_tx.clone()),
             )),
-            Err(crossbeam_channel::TrySendError::Full(StreamerCommand::Adopt(record))) => {
+            Err(std::sync::mpsc::TrySendError::Full(StreamerCommand::Adopt(record))) => {
                 Err(AdoptError::Busy(Box::new(OpenedStream {
                     asset,
                     start,

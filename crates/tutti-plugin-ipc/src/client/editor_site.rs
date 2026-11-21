@@ -10,7 +10,7 @@
 use super::audio::AudioBridge;
 use super::ipc_editor::IpcEditor;
 use super::plugin_bridge::EditorLoader;
-use crossbeam::queue::ArrayQueue;
+use crossbeam_queue::ArrayQueue;
 use dpi::Size;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -88,7 +88,7 @@ raw-window-handle = { version = "0.6", optional = true }
 # Every subsystem is a feature, as on every engine crate.
 default = []
 device = ["dep:tutti-cpal"]
-# The `Recorder` and its pump loop, device-free: a host that records files or
+# The pump loop, device-free: a host that records files or
 # taps without a microphone takes it alone.
 record = ["dep:tutti-dsp"]
 # Live audio input from the sound card: `Session::add_input`, takes, mic capture;
@@ -157,7 +157,7 @@ tutti-codec = { path = "../tutti-codec", features = ["encode-wav", "decode-wav",
 # The collector that reads the `tutti::graph` events a session emits
 # (`tests/io/rt_log.rs`).
 tracing-subscriber.workspace = true
-# An independent reader for the WAV files the recorder tests write.
+# An independent reader for the WAV files the pump tests write.
 hound = "3.5"
 # `MidiRouteRule`'s serde round trip (`tests/midi/midi_front.rs`).
 serde_json = "1"

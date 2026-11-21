@@ -16,7 +16,7 @@ use crate::transport::shm::RING_SLOTS;
 use crate::{
     AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, News, ReqId, Request,
 };
-use crossbeam_channel::RecvTimeoutError;
+use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_plugin_types::{Deadline, MidiIntake};
