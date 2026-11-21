@@ -11,7 +11,6 @@
 use std::ffi::{CStr, c_char, c_void};
 use std::ptr::NonNull;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use clap_sys::ext::ambisonic::{
     CLAP_EXT_AMBISONIC, CLAP_EXT_AMBISONIC_COMPAT, clap_host_ambisonic,
@@ -309,22 +308,10 @@ fn guarded<R: Copy>(
     })
 }
 
-/// Main-thread callbacks [`main_only`] has refused since the process began.
-static REFUSED_OFF_THREAD: AtomicU64 = AtomicU64::new(0);
-
-/// How many `[main-thread]` host callbacks a plugin made from another thread
-/// (or from the main thread while it holds the audio claim), process-wide
-/// since the process began. Each was refused and answered its fallback, so a
-/// nonzero count is a plugin that breaks CLAP's thread rules, like
-/// [`contained_panics`](tutti_plugin_types::contained_panics) for panics.
-#[must_use]
-pub fn refused_off_thread_calls() -> u64 {
-    REFUSED_OFF_THREAD.load(Ordering::Relaxed)
-}
-
 /// [`guarded`] for a callback CLAP marks `[main-thread]`: off the instance's
 /// main thread (or on it while it holds the audio claim) the call is refused,
-/// answering `fallback` and counted in [`refused_off_thread_calls`]; the
+/// answering `fallback` and counted in
+/// [`refused_off_thread_calls`](tutti_plugin_types::refused_off_thread_calls); the
 /// embedding crate sees nothing. A plugin that
 /// calls one from `process` or a pool task would otherwise have the host take
 /// locks and allocate there, or race the main thread's own state.
@@ -337,7 +324,7 @@ fn main_only<R: Copy>(
         if cb.is_main_thread() {
             f(cb)
         } else {
-            REFUSED_OFF_THREAD.fetch_add(1, Ordering::Relaxed);
+            tutti_plugin_types::count_refused_off_thread_call();
             fallback
         }
     })
@@ -1060,7 +1047,7 @@ mod tests {
             let mut id = 0u32;
 
             spy.main.store(false, Ordering::SeqCst);
-            let refused_before = refused_off_thread_calls();
+            let refused_before = tutti_plugin_types::refused_off_thread_calls();
             assert!(!(timers.register_timer.unwrap())(raw, 10, &mut id));
             (state.mark_dirty.unwrap())(raw);
             assert!(!(fds.register_fd.unwrap())(raw, 3, 1));
@@ -1070,7 +1057,7 @@ mod tests {
                 "refused off the main thread"
             );
             assert_eq!(
-                refused_off_thread_calls() - refused_before,
+                tutti_plugin_types::refused_off_thread_calls() - refused_before,
                 3,
                 "each refused call is counted"
             );
@@ -1087,7 +1074,7 @@ mod tests {
             assert!((fds.register_fd.unwrap())(raw, 3, 1));
             assert_eq!(spy.reached.load(Ordering::SeqCst), 4);
             assert_eq!(
-                refused_off_thread_calls() - refused_before,
+                tutti_plugin_types::refused_off_thread_calls() - refused_before,
                 3,
                 "an admitted call is not counted"
             );

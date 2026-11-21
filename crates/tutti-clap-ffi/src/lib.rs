@@ -101,7 +101,7 @@ pub use events::{EventRef, EventSink, EventSource, PluginEvent, header_size};
 #[doc(hidden)]
 pub use events::{input_raw_for_test, output_raw_for_test};
 pub use gui::{EditorKind, EmbedOutcome, GuiError, gui_size};
-pub use host::{Host, HostCallbacks, refused_off_thread_calls};
+pub use host::{Host, HostCallbacks};
 pub use library::{Bundle, DescriptorInfo, LoadError, Stage};
 pub use plugin::PortConfigRequest;
 pub use plugin::{ActivateError, AudioPortInfo, CallError, Plugin, PortKind};

@@ -407,10 +407,10 @@ impl PluginPart {
 ///
 /// End a session that hosted an in-process plugin with `close` on the main
 /// thread; dropped elsewhere, it leaks those plugins and counts them in
-/// `tutti_plugin_types::MainWork::stranded()`; `MainWork::deferred_drops()` and
-/// `contained_panics()`, both in `tutti_plugin_types`, are the other two
-/// process-wide readings. It is a field, not a `Drop` of the session, so a
-/// session moves to another clock field by field.
+/// `tutti_plugin_types::MainWork::stranded()`; `MainWork::deferred_drops()`,
+/// `contained_panics()` and `refused_off_thread_calls()`, all in
+/// `tutti_plugin_types`, are the other process-wide readings. It is a field,
+/// not a `Drop` of the session, so a session moves to another clock field by field.
 #[derive(Debug)]
 pub(crate) struct EarlyWork(SharedWork, Tasks);
 
