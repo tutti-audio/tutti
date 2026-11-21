@@ -76,6 +76,7 @@ pub enum LoadPlugin {
 /// from, and what the session lends the load.
 #[derive(Debug)]
 struct Request {
+    id: PluginId,
     loadable: Loadable,
     state: Option<Arc<PeerState>>,
     cx: Context,
@@ -108,7 +109,8 @@ impl Request {
         };
         let config = request.config.clone();
         let opened = open(request);
-        let (shared, install) = Shared::new(&cx, stamp, opened, self.loadable, config, presets)?;
+        let (shared, install) =
+            Shared::new(&cx, stamp, self.id, opened, self.loadable, config, presets)?;
         Ok(PluginNode {
             handle: LoadedPlugin {
                 shared: Arc::new(shared),
@@ -365,8 +367,8 @@ impl LoadedPlugin {
     /// modification time) now differs from the one taken before the load. This
     /// reads the file's metadata, and nothing else.
     ///
-    /// To reload, run [`Session::load_plugin`] again and swap the new plugin in
-    /// ([`Session::swap_plugin`]).
+    /// To reload, compose the load as [`Session::swap_plugin`]'s reload
+    /// recipe does.
     #[must_use]
     pub fn changed(&self) -> bool {
         self.shared.stamp.changed()
@@ -584,6 +586,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             .and_then(|()| tutti_plugin::catalog::placement(&loadable))
             .map_err(plugin_failed)?;
         let request = Request {
+            id: id.clone(),
             loadable,
             state: None,
             cx: Context {
@@ -646,6 +649,50 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// update on the main thread; its handle reads [`Closed`](Presence::Closed).
     /// `main` proves this call is on the main thread, for the inline close of a
     /// refused in-process incoming plugin.
+    ///
+    /// # Reloading
+    ///
+    /// A reload is the app's own composition: the load of the plugin's id as it
+    /// was hosted, started from the state worth keeping, swapped in at its key.
+    /// The inputs are read: [`PluginInfo::id`] and [`PluginInfo::hosting`] from
+    /// the node's handle, and [`StateView::withheld`](crate::StateView::withheld)
+    /// or [`last_good`](crate::StateView::last_good) from the session's view of
+    /// it. A node that gave up is revived the same way.
+    ///
+    /// ```no_run
+    /// # use tutti_plugin_db::Catalog;
+    /// # use tutti_plugin_types::MainThreadMarker;
+    /// # use tutti_session::{AnyPlugin, Key, LoadPlugin, LoadedPlugin, Peer, Session};
+    /// # async fn go(
+    /// #     session: &mut Session,
+    /// #     catalog: &Catalog,
+    /// #     node: Key<AnyPlugin>,
+    /// #     handle: &LoadedPlugin,
+    /// #     main: MainThreadMarker,
+    /// # ) -> Result<(), Box<dyn std::error::Error>> {
+    /// let info = handle.info();
+    /// let state = {
+    ///     let view = session.plugin_view(node)?;
+    ///     view.state().withheld().or(view.state().last_good()).cloned()
+    /// };
+    /// let loaded = match session.load_plugin_as(info.id(), catalog, info.hosting())? {
+    ///     LoadPlugin::InProcess(mut load) => {
+    ///         if let Some(state) = state {
+    ///             load.initial_state(state)?;
+    ///         }
+    ///         load.run(main)?
+    ///     }
+    ///     LoadPlugin::OutOfProcess(mut load) => {
+    ///         if let Some(state) = state {
+    ///             load.initial_state(state)?;
+    ///         }
+    ///         load.await?
+    ///     }
+    /// };
+    /// session.swap_plugin(node, loaded, main)?;
+    /// # Ok(())
+    /// # }
+    /// ```
     ///
     /// # Errors
     ///
