@@ -7,17 +7,24 @@ use tutti_plugin_db::{Catalog, CatalogConfig, PluginDb, ScanPlugins, ScanReport}
 use tutti_plugin_types::Locator;
 use tutti_plugin_types::PluginRef;
 
-/// Runs `task` to its end and applies it, returning its report. The probe's own
-/// deadline bounds the run.
+/// The executor every scan of this binary runs on.
+fn exec() -> tutti_platform::WeakExecutor {
+    tutti_fixtures::executor().downgrade()
+}
+
+/// Awaits `task` on this thread and applies it, returning its report. The probe's
+/// own deadline bounds the wait.
 fn finish(catalog: &mut Catalog, task: ScanPlugins) -> ScanReport {
+    use std::future::IntoFuture;
+    let scanned = futures_lite::future::block_on(task.into_future()).expect("the executor lives");
     catalog
-        .apply(task.run())
+        .apply(scanned)
         .expect("the output of this catalog's own scan")
 }
 
 /// Runs a scan of the catalog's directories to its end.
 fn scan(catalog: &mut Catalog) -> ScanReport {
-    let task = catalog.scan().expect("no scan is held");
+    let task = catalog.scan(exec()).expect("no scan is held");
     finish(catalog, task)
 }
 
@@ -130,7 +137,9 @@ fn measure_measures_a_plugin_a_scan_left_unmeasured() {
     let (plugin, descriptor) = catalog.iter().next().expect("the plugin is listed");
     assert_eq!(descriptor.measured, None);
 
-    let task = catalog.measure(&plugin, None).expect("a file that exists");
+    let task = catalog
+        .measure(&plugin, None, exec())
+        .expect("a file that exists");
     let result = finish(&mut catalog, task);
     assert_eq!((result.scanned(), result.added()), (1, 1));
     let (_, descriptor) = catalog.iter().next().expect("still listed");
@@ -146,7 +155,9 @@ fn register_delivers_the_row_of_a_file_outside_the_scanned_directories() {
     let elsewhere = dir.path().join("Elsewhere.clap");
     std::fs::copy(tutti_fixtures::clap_probe(), &elsewhere).expect("a plugin");
 
-    let task = catalog.register(&elsewhere).expect("a file that exists");
+    let task = catalog
+        .register(&elsewhere, exec())
+        .expect("a file that exists");
     assert_eq!(catalog.iter().count(), 0, "nothing is applied by the call");
     let result = finish(&mut catalog, task);
 
@@ -171,11 +182,11 @@ fn register_and_measure_refuse_a_missing_or_unrecognized_file_at_the_call() {
     std::fs::write(&text, b"x").expect("a file");
 
     assert!(matches!(
-        catalog.register(&gone).unwrap_err(),
+        catalog.register(&gone, exec()).unwrap_err(),
         FilesError::Missing(path) if path == gone
     ));
     assert!(matches!(
-        catalog.register(&text).unwrap_err(),
+        catalog.register(&text, exec()).unwrap_err(),
         FilesError::UnrecognizedFormat(path) if path == text
     ));
 }
@@ -186,7 +197,7 @@ mod stand_in_probe {
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use std::time::Duration;
-    use tutti_plugin_db::{ScanBusy, ScanOutcome, ScannedPlugins};
+    use tutti_plugin_db::ScanBusy;
     use tutti_plugin_types::{ProbeDeath, ProbeError};
 
     /// A catalog over one plugin file whose probe is the script `body`, which
@@ -249,22 +260,31 @@ mod stand_in_probe {
             .to_owned()
     }
 
-    /// Runs `task` on a thread, cancels it once its probe is running and returns
-    /// the output with the probe's pid. A hang guard fails a run that does not
-    /// return after the cancel instead of hanging the suite.
-    fn cancelled_in_flight(task: ScanPlugins, pid_file: &Path) -> (ScannedPlugins, String) {
-        let canceller = task.canceller();
-        let (done, returned) = std::sync::mpsc::channel();
+    /// Polls `task` until its probe is running, then drops it, and returns the
+    /// probe's pid. The scan loses a race to the pid arriving; its future is dropped
+    /// when the race ends.
+    fn dropped_in_flight(task: ScanPlugins, pid_file: &Path) -> String {
+        let (sent, received) = futures_channel::oneshot::channel();
+        let pid_file = pid_file.to_owned();
         std::thread::spawn(move || {
-            let _ = done.send(task.run());
+            let _ = sent.send(std::fs::read_to_string(pid_file));
         });
-        let pid = running_pid(pid_file);
-        assert!(alive(&pid));
-        canceller.cancel();
-        let scanned = returned
-            .recv_timeout(Duration::from_secs(60))
-            .expect("the run never returned after the cancel");
-        (scanned, pid)
+        let pid = futures_lite::future::block_on(futures_lite::future::or(
+            async {
+                let ended = task.into_future().await;
+                panic!("the scan ended before it was dropped: {ended:?}");
+            },
+            async {
+                received
+                    .await
+                    .expect("the reader sends")
+                    .expect("the probe wrote its pid")
+                    .trim()
+                    .to_owned()
+            },
+        ));
+        assert!(!pid.is_empty());
+        pid
     }
 
     fn alive(pid: &str) -> bool {
@@ -276,66 +296,89 @@ mod stand_in_probe {
             .success()
     }
 
-    /// **Cancelling a scan kills the probe in flight**: the probe hangs for ten
-    /// minutes, and when `run` returns the child is gone, its file is
-    /// `Cancelled` and not blacklisted, the sentinel is removed and the pedal
-    /// released.
+    /// **Dropping a scan kills the probe in flight**: the probe hangs for ten
+    /// minutes, and once the scan's future is dropped the child is gone, nothing is
+    /// blacklisted, the sentinel is removed and the pedal released.
     #[test]
-    fn cancelling_a_scan_kills_a_stuck_probe() {
+    fn dropping_a_scan_kills_a_stuck_probe() {
         let dir = tempfile::TempDir::new().expect("a scratch directory");
         let (mut catalog, file, pid_file) = catalog_probed_by(&dir, HANG, None);
 
-        let task = catalog.scan().expect("no scan is held");
-        let (scanned, pid) = cancelled_in_flight(task, &pid_file);
+        let task = catalog.scan(exec()).expect("no scan is held");
+        let pid = dropped_in_flight(task, &pid_file);
 
-        assert!(!alive(&pid), "the probe (pid {pid}) outlived the cancel");
-        let report = catalog.apply(scanned).expect("this catalog's scan");
-        assert!(report.cancelled());
-        assert_eq!(
-            report
-                .files()
-                .iter()
-                .map(|f| &f.outcome)
-                .collect::<Vec<_>>(),
-            [&ScanOutcome::Cancelled]
-        );
+        assert!(!alive(&pid), "the probe (pid {pid}) outlived the scan");
         assert!(
             !catalog.is_blacklisted(&file),
-            "a cancel blacklists nothing"
+            "a dropped scan blacklists nothing"
         );
         assert!(
             !CatalogConfig::new(dir.path()).pedal_path().exists(),
-            "the sentinel outlived the cancel"
+            "the sentinel outlived the scan"
         );
-        assert!(catalog.scan().is_ok(), "the run released the pedal");
+        assert!(catalog.scan(exec()).is_ok(), "the drop released the pedal");
     }
 
-    /// **Cancelling a measurement kills its probe as well**: a measurement's
+    /// **Dropping a measurement kills its probe as well**: a measurement's
     /// deadline is three minutes.
     #[test]
-    fn cancelling_a_measure_kills_a_stuck_probe() {
+    fn dropping_a_measure_kills_a_stuck_probe() {
         let dir = tempfile::TempDir::new().expect("a scratch directory");
         let (mut catalog, file, pid_file) = catalog_probed_by(&dir, HANG, None);
         let plugin = PluginRef::file(file);
 
-        let task = catalog.measure(&plugin, None).expect("a file that exists");
-        let (_, pid) = cancelled_in_flight(task, &pid_file);
+        let task = catalog
+            .measure(&plugin, None, exec())
+            .expect("a file that exists");
+        let pid = dropped_in_flight(task, &pid_file);
 
-        assert!(!alive(&pid), "the probe (pid {pid}) outlived the cancel");
+        assert!(!alive(&pid), "the probe (pid {pid}) outlived the measure");
     }
 
-    /// **An unrun scan holds the pedal until it drops**, and probes nothing: a
+    /// **A scan whose executor shuts down mid-probe resolves the named error**, and
+    /// the probe's child is killed: no hang, and no partial list passed off as a
+    /// scan. The scan holds the executor weakly, so dropping its last clone is what
+    /// ends it.
+    #[test]
+    fn a_scan_whose_executor_shuts_down_mid_probe_resolves_shut_down() {
+        use std::future::IntoFuture;
+        let dir = tempfile::TempDir::new().expect("a scratch directory");
+        let (mut catalog, file, pid_file) = catalog_probed_by(&dir, HANG, None);
+        let executor = tutti_platform::Executor::new();
+        let task = catalog.scan(executor.downgrade()).expect("no scan is held");
+        let (done, returned) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = done.send(futures_lite::future::block_on(task.into_future()));
+        });
+        let pid = running_pid(&pid_file);
+        assert!(alive(&pid));
+
+        drop(executor);
+
+        let ended = returned
+            .recv_timeout(Duration::from_secs(60))
+            .expect("the scan never resolved after the executor shut down");
+        assert_eq!(ended.unwrap_err(), tutti_plugin_db::ScanError::ShutDown);
+        assert!(!alive(&pid), "the probe (pid {pid}) outlived the executor");
+        assert!(
+            !catalog.is_blacklisted(&file),
+            "a shutdown blacklists nothing"
+        );
+        assert!(catalog.scan(exec()).is_ok(), "the claim was released");
+    }
+
+    /// **An unawaited scan holds the pedal until it drops**, and probes nothing: a
     /// second scan is `ScanBusy` while it is held and starts after the drop.
     #[test]
-    fn an_unrun_scan_holds_the_pedal_until_it_drops() {
+    fn an_unawaited_scan_holds_the_pedal_until_it_drops() {
         let dir = tempfile::TempDir::new().expect("a scratch directory");
         let (mut catalog, _, _) = catalog_probed_by(&dir, HANG, None);
 
-        let held = catalog.scan().expect("no scan is held");
-        assert!(matches!(catalog.scan(), Err(ScanBusy)));
+        let held = catalog.scan(exec()).expect("no scan is held");
+        assert!(matches!(catalog.scan(exec()), Err(ScanBusy)));
         drop(held);
 
-        assert!(catalog.scan().is_ok(), "the drop released the pedal");
+        assert!(catalog.scan(exec()).is_ok(), "the drop released the pedal");
     }
 
     /// **A registration of a plugin that crashes its probe blacklists it**, as a
@@ -345,7 +388,7 @@ mod stand_in_probe {
         let dir = tempfile::TempDir::new().expect("a scratch directory");
         let (mut catalog, file, _) = catalog_probed_by(&dir, "kill -SEGV $$", None);
 
-        let task = catalog.register(&file).expect("a plugin file");
+        let task = catalog.register(&file, exec()).expect("a plugin file");
         let result = finish(&mut catalog, task);
 
         assert_eq!(result.newly_blacklisted(), 1);
@@ -368,14 +411,19 @@ mod stand_in_probe {
     fn registering_a_plugin_that_hangs_its_probe_blacklists_it() {
         let dir = tempfile::TempDir::new().expect("a scratch directory");
         let (mut catalog, file, pid_file) =
-            catalog_probed_by(&dir, HANG, Some(Duration::from_secs(5)));
+            catalog_probed_by(&dir, HANG, Some(Duration::from_secs(2)));
 
-        let task = catalog.register(&file).expect("a plugin file");
-        let runner = std::thread::spawn(move || task.run());
+        let task = catalog.register(&file, exec()).expect("a plugin file");
+        let runner = std::thread::spawn(move || {
+            use std::future::IntoFuture;
+            futures_lite::future::block_on(task.into_future())
+        });
         running_pid(&pid_file);
-        let result = catalog
-            .apply(runner.join().expect("the run does not panic"))
-            .expect("this catalog's scan");
+        let scanned = runner
+            .join()
+            .expect("the scan does not panic")
+            .expect("the executor lives");
+        let result = catalog.apply(scanned).expect("this catalog's scan");
 
         let failures = result.failures();
 
@@ -404,7 +452,7 @@ fn register_names_a_missing_probe_binary() {
     drop(catalog);
     let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
 
-    let task = catalog.register(&file).expect("a plugin file");
+    let task = catalog.register(&file, exec()).expect("a plugin file");
     let result = finish(&mut catalog, task);
 
     let failures = result.failures();
@@ -435,7 +483,7 @@ fn a_measure_state_does_not_reach_the_next_measure() {
     std::fs::write(&refused, b"not a state").expect("a state the plugin refuses");
 
     // The file holds two plugins, so the state is for the one the ref names.
-    let registered = catalog.register(&a).expect("a plugin file");
+    let registered = catalog.register(&a, exec()).expect("a plugin file");
     finish(&mut catalog, registered);
     let named = catalog
         .db()
@@ -444,7 +492,7 @@ fn a_measure_state_does_not_reach_the_next_measure() {
         .expect("a registered plugin")
         .plugin_ref();
     let first = catalog
-        .measure(&named, Some(&refused))
+        .measure(&named, Some(&refused), exec())
         .expect("a file that exists");
     let first = finish(&mut catalog, first);
     let failures = first.failures();
@@ -466,7 +514,7 @@ fn a_measure_state_does_not_reach_the_next_measure() {
     );
 
     let second = catalog
-        .measure(&PluginRef::file(&b), None)
+        .measure(&PluginRef::file(&b), None, exec())
         .expect("a file that exists");
     let second = finish(&mut catalog, second);
 
@@ -488,7 +536,9 @@ fn measure_names_a_missing_probe_binary() {
     let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
 
     let plugin = PluginRef::file(&file);
-    let task = catalog.measure(&plugin, None).expect("a plugin file");
+    let task = catalog
+        .measure(&plugin, None, exec())
+        .expect("a plugin file");
     let result = finish(&mut catalog, task);
 
     let failures = result.failures();
@@ -542,7 +592,7 @@ mod links {
         let (locator, log) = logging_probe(dir.path());
         let mut catalog = catalog_with(dir.path(), locator);
 
-        let task = catalog.register(&link).expect("a plugin file");
+        let task = catalog.register(&link, exec()).expect("a plugin file");
         let result = finish(&mut catalog, task);
 
         assert!(result.failures().is_empty(), "{:?}", result.failures());
@@ -568,14 +618,16 @@ mod links {
         std::os::unix::fs::symlink(&target, &link).expect("a link");
         let mut catalog = catalog_with(dir.path(), Locator::at(tutti_fixtures::plugin_probe()));
 
-        let task = catalog.register(&link).expect("a plugin file");
+        let task = catalog.register(&link, exec()).expect("a plugin file");
         let result = finish(&mut catalog, task);
         assert!(result.failures().is_empty(), "{:?}", result.failures());
         let canonical = tutti_plugin_db::canonical_path(&target);
         let (plugin, _) = catalog.iter().next().expect("the plugin is listed");
         assert_eq!(plugin.path(), canonical);
 
-        let task = catalog.measure(&plugin, None).expect("the key is a file");
+        let task = catalog
+            .measure(&plugin, None, exec())
+            .expect("the key is a file");
         let result = finish(&mut catalog, task);
 
         assert!(result.failures().is_empty(), "{:?}", result.failures());

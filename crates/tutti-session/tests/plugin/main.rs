@@ -71,3 +71,7 @@ mod plugin_presets;
 // and ended.
 #[cfg(any(feature = "clap", feature = "vst2"))]
 mod plugin_diagnostics;
+// A plugin scan on the session: awaited as a future, dropped to cancel, ended by the
+// session's drop. The reference CLAP bundle and a stand-in `plugin-probe` that hangs.
+#[cfg(all(feature = "clap", unix))]
+mod plugin_scan;

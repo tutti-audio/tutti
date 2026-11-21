@@ -1,32 +1,31 @@
 //! One-shot metadata probe: spawn `plugin-probe`, wait for it, read its result
-//! file (the descriptor of every plugin the file holds). A timeout kills the child.
+//! file (the descriptor of every plugin the file holds). A timeout kills the child,
+//! and so does dropping the probe's future.
 //!
 //! The wire is the file (`tutti_plugin_types::probe_wire`), not a socket or a
 //! stream. The child's stdout and stderr go to the null device, because plugins
 //! print from their init code. With the result file the outcomes are
 //! unambiguous: a file means the probe finished, with a descriptor or a typed
-//! refusal; no file and an exit means it died, and its [`ExitStatus`] says how
+//! refusal; no file and an exit means it died, and its [`ExitStatus`](std::process::ExitStatus) says how
 //! (a signal, a panic, one of its own failing codes, a plugin's `exit`); no file
 //! at the deadline means it hung. The host states its pid to the child
-//! ([`HOST_PID_ENV`]), which ends itself with the host.
+//! ([`HOST_PID_ENV`](tutti_plugin_ipc_ffi::HOST_PID_ENV)), which ends itself with the host.
 
-use crate::Stop;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
 use std::time::Duration;
-use tracing::warn;
-use tutti_platform::Instant;
-use tutti_plugin_ipc_ffi::{HOST_PID_ENV, Reaped};
-use tutti_plugin_types::{
-    Deadline, Described, Helper, Locator, PluginFormat, PluginId, ProbeDeath, ProbeError,
-    ProbeOutcome, ProbeRefusal, ResultError, read_result,
-};
+use tutti_platform::WeakExecutor;
+use tutti_plugin_types::{Described, Locator, PluginFormat, PluginId, ProbeError};
+
+// The one place the platform is chosen: a target that starts no processes answers every
+// probe as unsupported.
+#[cfg_attr(not(target_arch = "wasm32"), path = "probe/process.rs")]
+#[cfg_attr(target_arch = "wasm32", path = "probe/unsupported.rs")]
+mod os;
 
 /// How long a probe may take, spawn and the plugin's load included, unless the
 /// caller says otherwise. A cold plugin can take seconds to `dlopen`; the old
 /// socket probe allowed about twelve.
 pub const DEFAULT_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
-const POLL: Duration = Duration::from_millis(5);
 
 /// What a measuring probe leaves of the host's deadline for what is not rendering:
 /// the result's write and the host's own wake. The most of it, and at most a
@@ -61,16 +60,17 @@ pub struct ProbeState {
 /// [`ProbeError::Refused`] if the probe ran to its end and refused the plugin;
 /// [`ProbeError::Died`] if it ended without a result, by the status it names;
 /// [`ProbeError::TimedOut`] if it did not finish within `timeout` (it is killed);
-/// [`ProbeError::Cancelled`] if `stop` was requested (the child is killed and
-/// reaped before this returns).
-pub fn probe_metadata_with(
+/// [`ProbeError::ShutDown`] if the executor shut down while it ran (it is killed).
+///
+/// Dropping the future kills and reaps the child.
+pub(crate) async fn probe_metadata_with(
+    executor: &WeakExecutor,
     locator: &Locator,
     plugin_path: &Path,
     format: PluginFormat,
     timeout: Duration,
-    stop: &Stop,
 ) -> Result<Vec<Described>, ProbeError> {
-    run(locator, plugin_path, format, timeout, stop, &[])
+    os::run(executor, locator, plugin_path, format, timeout, &[]).await
 }
 
 /// [`probe_metadata_with`] that also **measures** each plugin (`plugin-probe
@@ -96,13 +96,13 @@ pub fn probe_metadata_with(
 /// # Errors
 ///
 /// As [`probe_metadata_with`]; a plugin that refuses `state` is
-/// [`ProbeRefusal::StateRefused`].
-pub fn measure_metadata_with(
+/// [`ProbeRefusal::StateRefused`](tutti_plugin_types::ProbeRefusal::StateRefused).
+pub(crate) async fn measure_metadata_with(
+    executor: &WeakExecutor,
     locator: &Locator,
     plugin_path: &Path,
     format: PluginFormat,
     timeout: Duration,
-    stop: &Stop,
     state: Option<&ProbeState>,
 ) -> Result<Vec<Described>, ProbeError> {
     let budget = run_budget(timeout).as_secs().to_string();
@@ -120,115 +120,7 @@ pub fn measure_metadata_with(
             args.push(plugin.as_ref());
         }
     }
-    run(locator, plugin_path, format, timeout, stop, &args)
-}
-
-fn run(
-    locator: &Locator,
-    plugin_path: &Path,
-    format: PluginFormat,
-    timeout: Duration,
-    stop: &Stop,
-    flags: &[&std::ffi::OsStr],
-) -> Result<Vec<Described>, ProbeError> {
-    let probe = locator
-        .resolve(Helper::Probe)
-        .ok_or(ProbeError::ProbeNotFound)?;
-    // A directory of the probe's own (mode 0700), removed when it drops, on a
-    // panic as well: the result path is not a name in a shared directory.
-    let dir = tempfile::Builder::new()
-        .prefix("tutti-probe-")
-        .tempdir()
-        .map_err(|e| ProbeError::Io(e.kind()))?;
-    let result = dir.path().join("result");
-
-    let child = Command::new(&probe)
-        .arg(plugin_path)
-        .arg(&result)
-        // The format the caller knows the file by, which a link's target need
-        // not name in its own extension.
-        .args(["--as", format.extension_id()])
-        .args(flags)
-        // The probe ends with this process: a plugin hung in its init does not
-        // outlive its host.
-        .env(HOST_PID_ENV, std::process::id().to_string())
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| ProbeError::Io(e.kind()))?;
-    let mut child = Reaped::new(child);
-    let status = wait(&mut child, timeout, stop);
-    // The file is read even after a timeout or a bad exit: it is the only proof
-    // of finishing, and a probe that finished at the deadline did.
-    let file = read_result(&result);
-    let outcome = match (file, status) {
-        (Ok(Some(outcome)), _) => outcome,
-        (Err(e), _) => return Err(ProbeError::Result(e)),
-        (Ok(None), Waited::Exited(status)) => return Err(ProbeError::Died(ProbeDeath::of(status))),
-        (Ok(None), Waited::TimedOut) => return Err(ProbeError::TimedOut { after: timeout }),
-        (Ok(None), Waited::Lost(e)) => return Err(ProbeError::Io(e.kind())),
-        (Ok(None), Waited::Cancelled) => return Err(ProbeError::Cancelled),
-    };
-    match outcome {
-        ProbeOutcome::Described { plugins, .. } if plugins.is_empty() => {
-            Err(ProbeRefusal::Empty.into())
-        }
-        ProbeOutcome::Described {
-            plugins,
-            unmeasured,
-        } => {
-            for lost in &unmeasured {
-                warn!(
-                    "{}: {} has no measurement: {}",
-                    plugin_path.display(),
-                    lost.plugin,
-                    lost.failure
-                );
-            }
-            Ok(plugins)
-        }
-        ProbeOutcome::Failed(refusal) => Err(refusal.into()),
-        // `ProbeOutcome` is `#[non_exhaustive]`: an outcome from a newer probe.
-        _ => Err(ResultError::UnknownOutcome.into()),
-    }
-}
-
-enum Waited {
-    Exited(ExitStatus),
-    TimedOut,
-    Cancelled,
-    Lost(std::io::Error),
-}
-
-/// Waits for `child` to exit, killing and reaping it at `timeout` or when
-/// `stop` is requested.
-fn wait(child: &mut Reaped, timeout: Duration, stop: &Stop) -> Waited {
-    let deadline = Deadline::after(Instant::now(), timeout);
-    loop {
-        match child.try_reap() {
-            Ok(Some(status)) => return Waited::Exited(status),
-            Ok(None) if stop.is_stopped() => {
-                let _ = child.kill_all();
-                let _ = child.wait();
-                return Waited::Cancelled;
-            }
-            Ok(None) if deadline.passed(Instant::now()) => {
-                let _ = child.kill_all();
-                let _ = child.wait();
-                return Waited::TimedOut;
-            }
-            Ok(None) => {
-                // Wakes at once on a stop; the child's exit has no wake to wait on.
-                let _ = stop.wait(POLL);
-            }
-            Err(e) => {
-                let _ = child.kill_all();
-                let _ = child.wait();
-                return Waited::Lost(e);
-            }
-        }
-    }
+    os::run(executor, locator, plugin_path, format, timeout, &args).await
 }
 
 #[cfg(all(test, unix))]
@@ -236,8 +128,10 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
+    use std::process::{Command, Stdio};
     use tempfile::TempDir;
-    use tutti_plugin_types::{ProbeExit, ResultError};
+    use tutti_plugin_ipc_ffi::HOST_PID_ENV;
+    use tutti_plugin_types::{ProbeDeath, ProbeExit, ResultError};
 
     /// A `plugin-probe` stand-in: a shell script given the plugin path as `$1`
     /// and the result file as `$2`, as the real one is.
@@ -249,19 +143,20 @@ mod tests {
     }
 
     fn probe(locator: &Locator, timeout: Duration) -> Result<Vec<Described>, ProbeError> {
-        probe_metadata_with(
+        let executor = tutti_fixtures::executor().downgrade();
+        futures_lite::future::block_on(probe_metadata_with(
+            &executor,
             locator,
             Path::new("/plugins/Some.clap"),
             PluginFormat::Clap,
             timeout,
-            &Stop::new(),
-        )
+        ))
     }
 
-    /// A probe a stop ends is killed and reaped, and the caller is told it was
-    /// cancelled.
+    /// **Dropping the probe's future kills and reaps its child**: the future loses a
+    /// race to the child's pid arriving, and the child is gone when the race ends.
     #[test]
-    fn a_cancelled_probe_is_killed_and_reaped() {
+    fn a_dropped_probe_is_killed_and_reaped() {
         let dir = TempDir::new().unwrap();
         let fifo = dir.path().join("pid");
         assert!(
@@ -276,29 +171,32 @@ mod tests {
             &dir,
             &format!("echo $$ > {}\nexec sleep 300", fifo.display()),
         );
-        let stop = Stop::new();
         // Opening and reading the fifo block until the child is running and has
-        // written its pid, so the stop comes while the probe waits on the child.
-        let raiser = {
-            let stop = stop.clone();
-            tutti_platform::spawn_named("probe-raiser", None, move |_| {
-                let pid = std::fs::read_to_string(&fifo).expect("the child writes its pid");
-                stop.stop();
-                pid
-            })
-            .expect("the raiser starts")
-        };
+        // written its pid.
+        let (sent, arrived) = futures_channel::oneshot::channel();
+        let reader = tutti_platform::spawn_named("probe-pid", None, move |_| {
+            let pid = std::fs::read_to_string(&fifo).expect("the child writes its pid");
+            let _ = sent.send(pid);
+        })
+        .expect("the reader starts");
 
-        let result = probe_metadata_with(
-            &locator,
-            Path::new("/plugins/Some.clap"),
-            PluginFormat::Clap,
-            Duration::from_secs(300),
-            &stop,
-        );
-        let pid = raiser.join().unwrap();
+        let executor = tutti_fixtures::executor().downgrade();
+        let pid = futures_lite::future::block_on(futures_lite::future::or(
+            async {
+                let result = probe_metadata_with(
+                    &executor,
+                    &locator,
+                    Path::new("/plugins/Some.clap"),
+                    PluginFormat::Clap,
+                    Duration::from_secs(300),
+                )
+                .await;
+                panic!("the probe ended before it was dropped: {result:?}");
+            },
+            async { arrived.await.expect("the reader sends") },
+        ));
+        reader.join().unwrap();
 
-        assert_eq!(result.unwrap_err(), ProbeError::Cancelled);
         let alive = Command::new("kill")
             .args(["-0", pid.trim()])
             .stderr(Stdio::null())
@@ -307,7 +205,7 @@ mod tests {
             .success();
         assert!(
             !alive,
-            "the cancelled probe (pid {}) is still running",
+            "the dropped probe (pid {}) is still running",
             pid.trim()
         );
     }

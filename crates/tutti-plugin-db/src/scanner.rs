@@ -1,9 +1,9 @@
 //! The plugin scanner, with crash recovery.
 //!
-//! A scan works on a snapshot of the database: [`ScanPlugins::run`] discovers
-//! plugin files, probes the new or changed ones and collects a [`RowChange`] per
-//! file. The owner of the [`PluginDb`] applies them afterwards, so the database
-//! stays readable for the whole scan. An internal dead-man's pedal
+//! A scan works on a snapshot of the database: awaiting a [`ScanPlugins`]
+//! discovers plugin files, probes the new or changed ones and collects a
+//! [`RowChange`] per file. The owner of the [`PluginDb`] applies them afterwards,
+//! so the database stays readable for the whole scan. An internal dead-man's pedal
 //! auto-blacklists a plugin that takes the host down while it is probed.
 
 use super::catalog::CatalogId;
@@ -11,11 +11,13 @@ use super::facts::{self, FileFacts, ScanDecision};
 use super::fs::{canonical_path, discover};
 use super::pedal::Pedal;
 use super::table::{FileRow, PluginDb, RowChange};
-use crate::Stop;
 use crossbeam_queue::ArrayQueue;
+use std::future::{Future, IntoFuture};
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
+use tutti_platform::WeakExecutor;
 use tutti_plugin_types::{
     Described, PluginClass, PluginDescriptor, PluginFormat, ProbeError, ProbeRefusal,
 };
@@ -45,7 +47,7 @@ impl Progress {
 /// Advisory: the owner reads it with [`ScanProgressReader::read`]. When the owner
 /// has not kept up and the queue is full, the oldest update is dropped for the
 /// newest ([`ScanProgressReader::dropped`] counts them). The end of a scan is
-/// the return of [`ScanPlugins::run`], never a progress update.
+/// its future resolving, never a progress update.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScanProgress {
     /// Finding plugin files in a directory. Only a scan of directories reports
@@ -65,9 +67,14 @@ pub enum ScanProgress {
     },
 }
 
+/// What a probe's future resolves to: the plugins a file holds, or why it gave none.
+type ProbeResult = Result<Vec<Described>, ProbeFailure>;
+
+/// A probe in flight. Dropping it ends the probe (a real one kills its child).
+pub(crate) type ProbeFuture = Pin<Box<dyn Future<Output = ProbeResult> + Send>>;
+
 /// What a scanner calls to read one plugin file's metadata.
-type ProbeFn =
-    dyn Fn(&Path, PluginFormat, &Stop) -> Result<Vec<Described>, ProbeFailure> + Send + Sync;
+type ProbeFn = dyn Fn(&WeakExecutor, &Path, PluginFormat) -> ProbeFuture + Send + Sync;
 
 /// Scans plugin directories into a [`PluginDb`], with crash recovery.
 ///
@@ -99,21 +106,22 @@ impl Scanner {
     /// `pedal_path` is where the crash sentinel file lives: a crashed scan
     /// leaves it behind, and the next run blacklists the plugin it names.
     ///
-    /// `probe` reads one plugin file's metadata. It runs out of process where
-    /// it loads the plugin, so a crash or a hang cannot take the scan down. It
-    /// watches the [`Stop`] it is given and, once a stop is requested, ends
-    /// the process it is waiting on and returns at once: a cancelled
-    /// [`ScanPlugins::run`] waits for the probe in flight to return.
-    pub fn new(
+    /// `probe` reads one plugin file's metadata, given the scan's executor, and
+    /// returns a future of it. It runs out of process where it loads the plugin,
+    /// so a crash or a hang cannot take the scan down. The scan awaits one probe
+    /// at a time and drops its future when the scan's own future drops, so a
+    /// probe ends its work (kills its child) when dropped. A probe that finds
+    /// the executor gone ends [`ProbeError::ShutDown`], which ends the scan.
+    pub fn new<F>(
         pedal_path: impl Into<PathBuf>,
-        probe: impl Fn(&Path, PluginFormat, &Stop) -> Result<Vec<Described>, ProbeFailure>
-        + Send
-        + Sync
-        + 'static,
-    ) -> Self {
+        probe: impl Fn(&WeakExecutor, &Path, PluginFormat) -> F + Send + Sync + 'static,
+    ) -> Self
+    where
+        F: Future<Output = ProbeResult> + Send + 'static,
+    {
         Self {
             pedal: Pedal::new(pedal_path),
-            probe: Arc::new(probe),
+            probe: Arc::new(move |executor, path, format| Box::pin(probe(executor, path, format))),
         }
     }
 
@@ -152,25 +160,28 @@ impl Scanner {
         Ok(())
     }
 
-    /// Prepares a scan of `directories`, returning the value that runs it.
+    /// Prepares a scan of `directories`, returning the value that is the scan.
     ///
     /// Runs crash recovery on the calling thread first (see
     /// [`recover_crash`](Self::recover_crash)), then takes a snapshot of `db`.
-    /// The findings come back from [`ScanPlugins::run`] as changes for
-    /// `Catalog::apply`; until then `db` is unchanged and fully usable.
+    /// The findings come back from awaiting the [`ScanPlugins`] as changes for
+    /// `Catalog::apply`; until then `db` is unchanged and fully usable. The scan
+    /// reaches `executor` for its directory walk and its probes' waits, and holds
+    /// it weakly.
     ///
     /// # Errors
     ///
-    /// [`ScanBusy`] while another scan, a recovery or an unrun value is using
+    /// [`ScanBusy`] while another scan, a recovery or an unawaited value is using
     /// the same pedal, whether from this scanner, a clone of it, or any scanner
-    /// built on that pedal path. The claim ends when the value drops or its run
-    /// returns, so a second scan cannot delete the armed sentinel of a probe
-    /// still in flight.
+    /// built on that pedal path. The claim ends when the value drops or its
+    /// future resolves or drops, so a second scan cannot delete the armed
+    /// sentinel of a probe still in flight.
     pub fn scan(
         &self,
         db: &mut PluginDb,
         directories: impl IntoIterator<Item = impl AsRef<Path>>,
         save: impl FnOnce(&PluginDb) -> std::io::Result<()>,
+        executor: WeakExecutor,
     ) -> Result<ScanPlugins, ScanBusy> {
         let targets = Targets::Directories(
             directories
@@ -178,7 +189,7 @@ impl Scanner {
                 .map(|d| d.as_ref().to_path_buf())
                 .collect(),
         );
-        Ok(ScanPlugins::new(self.job(db, targets, save)?))
+        Ok(ScanPlugins::new(self.job(db, targets, save, executor)?))
     }
 
     /// Prepares the probing of the given plugin files, whether or not a row for
@@ -198,6 +209,7 @@ impl Scanner {
         db: &mut PluginDb,
         files: impl IntoIterator<Item = (impl AsRef<Path>, PluginFormat)>,
         save: impl FnOnce(&PluginDb) -> std::io::Result<()>,
+        executor: WeakExecutor,
     ) -> Result<ScanPlugins, FilesError> {
         let mut targets = Vec::new();
         for (file, format) in files {
@@ -211,6 +223,7 @@ impl Scanner {
             db,
             Targets::Files(targets),
             save,
+            executor,
         )?))
     }
 
@@ -219,6 +232,7 @@ impl Scanner {
         db: &mut PluginDb,
         targets: Targets,
         save: impl FnOnce(&PluginDb) -> std::io::Result<()>,
+        executor: WeakExecutor,
     ) -> Result<Job, ScanBusy> {
         let claim = Claim::take(&self.pedal)?;
         self.pedal.recover(db, save);
@@ -228,6 +242,7 @@ impl Scanner {
             targets,
             pedal: self.pedal.clone(),
             probe: Arc::clone(&self.probe),
+            executor,
         })
     }
 }
@@ -283,22 +298,45 @@ pub enum FilesError {
     UnrecognizedFormat(PathBuf),
 }
 
-/// One task of discovery, ready to run: a scan of directories
-/// ([`Scanner::scan`]), a registration or a measurement (both
-/// [`Scanner::scan_files`]). It probes files and collects a [`RowChange`] per
-/// file.
+/// The future of a scan: what awaiting a [`ScanPlugins`] runs.
+pub type ScanFuture = Pin<Box<dyn Future<Output = Result<ScannedPlugins, ScanError>> + Send>>;
+
+/// Why a scan ended without findings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[non_exhaustive]
+pub enum ScanError {
+    /// The executor the scan was handed shut down before the scan ended (the
+    /// session dropped). The probe in flight was killed, nothing is recorded, and
+    /// the files reached so far are not a result.
+    #[error("the executor shut down before the scan ended")]
+    ShutDown,
+    /// The OS refused a thread the directory walk needed.
+    #[error("the directory walk could not start a thread: {0}")]
+    Threads(std::io::ErrorKind),
+}
+
+/// One task of discovery: a scan of directories ([`Scanner::scan`]), a
+/// registration or a measurement (both [`Scanner::scan_files`]). It probes files
+/// and collects a [`RowChange`] per file.
 ///
-/// The value owns a snapshot of the database and the pedal's claim, and holds no
-/// thread: [`run`](Self::run) blocks the caller for whole probes, so the app
-/// runs it off any thread that drives a queue (a thread of the app's, or
-/// `Executor::unblock`). Take
-/// [`canceller`](Self::canceller) and [`progress`](Self::progress) before `run`
-/// to cancel it and watch it from elsewhere. Dropping it unrun releases the
-/// pedal and probes nothing.
-#[must_use = "a ScanPlugins probes nothing until it is run"]
+/// **The value is the scan.** It is an [`IntoFuture`] whose future owns the pedal's
+/// claim and a snapshot of the database, walks the directories on the executor's
+/// blocking pool, and probes the files one after another; each probe races the
+/// child's exit (an OS wake) against its deadline. No task is spawned for the scan
+/// itself: it runs where it is polled (`futures_lite::future::block_on`, or the
+/// app's own runtime), and wakes from the exit and the deadline.
+///
+/// **Dropping the future cancels the scan**: the probe in flight is killed and
+/// reaped, the pedal is disarmed and the claim released, and nothing is recorded. An
+/// app with a cancel button selects the scan against the button's future, or drops
+/// it. Dropping the value unawaited releases the claim and probes nothing. Take
+/// [`progress`](Self::progress) first to watch the scan from elsewhere.
+///
+/// The future resolves [`ScanError::ShutDown`] when the executor shuts down under
+/// it, and otherwise with the findings, every file reached.
+#[must_use = "a ScanPlugins probes nothing until it is awaited"]
 pub struct ScanPlugins {
     job: Job,
-    stop: Stop,
     progress: Progress,
     reader: ScanProgressReader,
     origin: Option<CatalogId>,
@@ -316,7 +354,6 @@ impl ScanPlugins {
         let dropped = tutti_rt::tally::<u64>();
         Self {
             job,
-            stop: Stop::new(),
             progress: Progress {
                 queue: Arc::clone(&queue),
                 dropped: dropped.writer(),
@@ -332,70 +369,44 @@ impl ScanPlugins {
         self
     }
 
-    /// Probes the files, one at a time on the calling thread, and returns what it
-    /// found. Blocks until the last probe ends or a [`cancel`](ScanCanceller::cancel)
-    /// ends the one in flight.
-    ///
-    /// The pedal's claim is released and its sentinel gone before this returns.
-    /// A cancelled run returns the files it reached, the one it was probing
-    /// as [`ScanOutcome::Cancelled`] (never blacklisted).
-    ///
-    /// # Panics
-    ///
-    /// When the probe panics; the claim is released as the panic unwinds.
-    pub fn run(self) -> ScannedPlugins {
-        let Self {
-            job,
-            stop,
-            progress,
-            origin,
-            ..
-        } = self;
-        let (report, changes) = job.run(&stop, &progress);
-        // The claim ends with the job, before the caller sees the output, so the
-        // next scan can start.
-        drop(job);
-        ScannedPlugins {
-            origin,
-            report,
-            changes,
-        }
-    }
-
-    /// The handle that ends the run from another thread. It outlives this value.
-    pub fn canceller(&self) -> ScanCanceller {
-        ScanCanceller {
-            stop: self.stop.clone(),
-        }
-    }
-
-    /// The reader of the run's progress updates. It outlives this value.
+    /// The reader of the scan's progress updates. It outlives this value.
     pub fn progress(&self) -> ScanProgressReader {
         self.reader.clone()
     }
 }
 
-/// Ends a [`ScanPlugins::run`]: the probe in flight is killed and the run
-/// returns what it has. `Clone`, `Send` and `Sync`; every clone cancels the same
-/// run, and cancelling after the run ended does nothing.
-#[derive(Debug, Clone)]
-pub struct ScanCanceller {
-    stop: Stop,
-}
+impl IntoFuture for ScanPlugins {
+    type Output = Result<ScannedPlugins, ScanError>;
+    type IntoFuture = ScanFuture;
 
-impl ScanCanceller {
-    /// Requests the end. Idempotent; never blocks.
-    pub fn cancel(&self) {
-        self.stop.stop();
+    fn into_future(self) -> ScanFuture {
+        let Self {
+            job,
+            progress,
+            origin,
+            ..
+        } = self;
+        Box::pin(async move {
+            let found = job.run(&progress).await;
+            // The claim ends with the job, before the caller sees the output, so
+            // the next scan can start.
+            drop(job);
+            let (report, changes) = found?;
+            Ok(ScannedPlugins {
+                origin,
+                report,
+                changes,
+            })
+        })
     }
 }
 
-/// Reads the progress of a [`ScanPlugins::run`]. `Clone` and `Send`; clones share
+/// Reads the progress of a [`ScanPlugins`]. `Clone` and `Send`; clones share
 /// one queue.
 ///
 /// When the reader has not kept up and the queue is full, the oldest update is
 /// dropped for the newest ([`dropped`](Self::dropped) counts them). The end of a
-/// run is its return, never an update.
+/// scan is its future resolving, never an update.
 #[derive(Debug, Clone)]
 pub struct ScanProgressReader {
     queue: Arc<ArrayQueue<ScanProgress>>,
@@ -415,7 +426,7 @@ impl ScanProgressReader {
     }
 }
 
-/// What a [`ScanPlugins::run`] found: each file's outcome and the row changes to
+/// What a [`ScanPlugins`] found: each file's outcome and the row changes to
 /// apply with `Catalog::apply`. Applying it is the only way it changes a
 /// catalog.
 #[derive(Debug, Clone)]
@@ -426,18 +437,18 @@ pub struct ScannedPlugins {
     changes: Vec<RowChange>,
 }
 
-// A scan is moved to the thread that runs it, and its handles are read from others.
+// A scan is polled wherever the app awaits it, and its handles are read from others.
 const _: () = {
     const fn send<T: Send>() {}
     const fn send_sync<T: Send + Sync>() {}
     send::<ScanPlugins>();
+    send::<ScanFuture>();
     send::<ScannedPlugins>();
-    send_sync::<ScanCanceller>();
     send_sync::<ScanProgressReader>();
 };
 
 impl ScannedPlugins {
-    /// What the run did with each file, in the order they were probed.
+    /// What the scan did with each file, in the order they were probed.
     #[must_use]
     pub fn report(&self) -> &ScanReport {
         &self.report
@@ -479,12 +490,18 @@ struct Job {
     targets: Targets,
     pedal: Pedal,
     probe: Arc<ProbeFn>,
+    executor: WeakExecutor,
 }
 
 impl Job {
     /// Walks, classifies (pure), then probes (effectful), collecting each
-    /// change. A stop ends the walk after the probe in flight.
-    fn run(&self, stop: &Stop, progress: &Progress) -> (ScanReport, Vec<RowChange>) {
+    /// change. Dropped at an await, it ends the probe in flight and records
+    /// nothing.
+    ///
+    /// The directory walk runs on the executor's blocking pool, one task for the
+    /// whole walk. Each file's facts are one `stat`, read where the file is
+    /// reached.
+    async fn run(&self, progress: &Progress) -> Result<(ScanReport, Vec<RowChange>), ScanError> {
         let emit = |p: ScanProgress| progress.send(p);
 
         let (plugin_paths, force) = match &self.targets {
@@ -494,7 +511,7 @@ impl Job {
                         directory: dir.clone(),
                     });
                 }
-                let found = discover(directories);
+                let found = self.walk(directories.clone()).await?;
                 info!(
                     "discovered {} plugin files across {} directories",
                     found.len(),
@@ -510,10 +527,6 @@ impl Job {
         let mut result = ScanReport::default();
         let mut changes = Vec::new();
         for (i, (path, format)) in plugin_paths.iter().enumerate() {
-            if stop.is_stopped() {
-                result.cancelled = true;
-                return (result, changes);
-            }
             emit(ScanProgress::Probing {
                 current: i + 1,
                 total,
@@ -541,9 +554,8 @@ impl Job {
                     debug!("skipping up-to-date plugin: {:?}", path);
                     (ScanOutcome::UpToDate, None)
                 }
-                ScanDecision::Probe => self.probe_one(stop, path, &key, *format, &facts),
+                ScanDecision::Probe => self.probe_one(path, &key, *format, &facts).await?,
             };
-            result.cancelled |= outcome == ScanOutcome::Cancelled;
             result.files.push(ScannedFile { path: key, outcome });
             changes.extend(change);
         }
@@ -556,7 +568,22 @@ impl Job {
             result.blacklisted()
         );
 
-        (result, changes)
+        Ok((result, changes))
+    }
+
+    /// Finds the plugin files under `directories` on the executor's blocking pool.
+    async fn walk(
+        &self,
+        directories: Vec<PathBuf>,
+    ) -> Result<Vec<(PathBuf, PluginFormat)>, ScanError> {
+        // Upgraded for the call only: the scan does not keep the executor alive.
+        let executor = self.executor.upgrade().ok_or(ScanError::ShutDown)?;
+        let walking = executor
+            .unblock(move || discover(&directories))
+            .map_err(|e| ScanError::Threads(e.kind()))?;
+        drop(executor);
+        // `None`: the executor dropped the task, which is its shutdown.
+        walking.fallible().await.ok_or(ScanError::ShutDown)
     }
 
     /// Probes one file with pedal protection and returns the row to record.
@@ -572,24 +599,26 @@ impl Job {
     ///
     /// The row carries the file's time, so reinstalling or updating the plugin
     /// re-admits it without the user knowing the blacklist existed.
-    fn probe_one(
+    ///
+    /// # Errors
+    ///
+    /// [`ScanError::ShutDown`] when the probe found the executor gone; the file is
+    /// recorded as nothing.
+    async fn probe_one(
         &self,
-        stop: &Stop,
         path: &Path,
         key: &Path,
         format: PluginFormat,
         facts: &FileFacts,
-    ) -> (ScanOutcome, Option<RowChange>) {
-        if let Err(e) = self.pedal.arm(path) {
-            warn!("failed to arm dead-man's pedal: {e}");
+    ) -> Result<(ScanOutcome, Option<RowChange>), ScanError> {
+        let armed = Armed::new(&self.pedal, path);
+        let probed = (self.probe)(&self.executor, path, format).await;
+        drop(armed);
+        // A probe the executor's end cut short says nothing about the plugin.
+        if matches!(&probed, Err(failure) if failure.error == ProbeError::ShutDown) {
+            return Err(ScanError::ShutDown);
         }
-        let probed = (self.probe)(path, format, stop);
-        self.pedal.disarm(path);
-        // A probe a stop ended says nothing about the plugin.
-        if stop.is_stopped() {
-            return (ScanOutcome::Cancelled, None);
-        }
-        match probed {
+        Ok(match probed {
             Ok(plugins) => {
                 match FileRow::probed(format, facts).plugins(plugins).build() {
                     Ok(row) => (ScanOutcome::New, Some(RowChange::put(key, row))),
@@ -620,6 +649,31 @@ impl Job {
                 warn!("failed to probe plugin {:?}: {}", path, failure.reason());
                 (ScanOutcome::Failed(failure), None)
             }
+        })
+    }
+}
+
+/// The pedal armed for the probe in flight: disarmed when the probe ends or the
+/// scan is dropped, never when a panic unwinds through it (the host going down is
+/// what the sentinel is left for).
+struct Armed<'a> {
+    pedal: &'a Pedal,
+    plugin: &'a Path,
+}
+
+impl<'a> Armed<'a> {
+    fn new(pedal: &'a Pedal, plugin: &'a Path) -> Self {
+        if let Err(e) = pedal.arm(plugin) {
+            warn!("failed to arm dead-man's pedal: {e}");
+        }
+        Self { pedal, plugin }
+    }
+}
+
+impl Drop for Armed<'_> {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            self.pedal.disarm(self.plugin);
         }
     }
 }
@@ -639,8 +693,6 @@ pub enum ScanOutcome {
     /// The probe failed in a way that says nothing about the plugin: nothing is
     /// recorded and the file is retried.
     Failed(ProbeFailure),
-    /// A stop ended the probe.
-    Cancelled,
 }
 
 /// One file of a scan and what became of it.
@@ -657,7 +709,6 @@ pub struct ScannedFile {
 #[derive(Debug, Clone, Default)]
 pub struct ScanReport {
     files: Vec<ScannedFile>,
-    cancelled: bool,
 }
 
 /// A probe failure: the typed account of what went wrong.
@@ -667,8 +718,7 @@ pub struct ScanReport {
 /// ([`blacklistable`](Self::blacklistable)). Everything else says nothing about the
 /// plugin and stays retryable: a refusal (a missing file, a format the probe lacks,
 /// a state it would not take, a loader that said no), a missing or stale
-/// `plugin-probe`, a probe that exited by one of its own failing codes, a
-/// cancelled probe.
+/// `plugin-probe`, a probe that exited by one of its own failing codes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProbeFailure {
     /// What went wrong.
@@ -711,12 +761,6 @@ pub struct FileFailure {
 }
 
 impl ScanReport {
-    /// Whether a cancel ended the scan before it reached every file.
-    #[must_use]
-    pub const fn cancelled(&self) -> bool {
-        self.cancelled
-    }
-
     /// Every file the scan reached, in the order they were probed.
     #[must_use]
     pub fn files(&self) -> &[ScannedFile] {
@@ -808,6 +852,9 @@ pub fn probe_plugin_fallback(path: &Path) -> Described {
 mod tests {
     use super::*;
     use crate::mtime::Mtime;
+    use futures_channel::oneshot;
+    use futures_lite::future::block_on;
+    use std::future::ready;
 
     /// A CLAP plugin listing named `name`.
     fn described(name: &str) -> Described {
@@ -846,11 +893,21 @@ mod tests {
     }
 
     fn filename_probe(
+        _: &WeakExecutor,
         path: &Path,
         _: PluginFormat,
-        _: &Stop,
-    ) -> Result<Vec<Described>, ProbeFailure> {
-        Ok(vec![probe_plugin_fallback(path)])
+    ) -> std::future::Ready<ProbeResult> {
+        ready(Ok(vec![probe_plugin_fallback(path)]))
+    }
+
+    /// The executor the scans of these tests run on, for the whole test process.
+    fn exec() -> WeakExecutor {
+        tutti_fixtures::executor().downgrade()
+    }
+
+    /// Awaits a scan on the calling thread.
+    fn run(scan: ScanPlugins) -> ScannedPlugins {
+        block_on(scan.into_future()).expect("the executor lives")
     }
 
     /// A generous bound on how long a test waits for an event it knows is
@@ -859,7 +916,7 @@ mod tests {
 
     /// Runs a prepared scan and applies its changes to `db`, as a catalog does.
     fn settle(scan: ScanPlugins, db: &mut PluginDb) -> ScanReport {
-        let (report, changes) = scan.run().into_parts();
+        let (report, changes) = run(scan).into_parts();
         for change in changes {
             db.apply(change);
         }
@@ -873,7 +930,7 @@ mod tests {
         dirs: impl IntoIterator<Item = impl AsRef<Path>>,
         save: impl FnOnce(&PluginDb) -> std::io::Result<()>,
     ) -> Result<ScanReport, ScanBusy> {
-        let scan = scanner.scan(db, dirs, save)?;
+        let scan = scanner.scan(db, dirs, save, exec())?;
         Ok(settle(scan, db))
     }
 
@@ -892,9 +949,9 @@ mod tests {
     ) -> (Scanner, Arc<AtomicUsize>) {
         let calls = Arc::new(AtomicUsize::new(0));
         let seen = Arc::clone(&calls);
-        let scanner = Scanner::new(dir.join(".scanning"), move |path, _, _| {
+        let scanner = Scanner::new(dir.join(".scanning"), move |_, path, _| {
             seen.fetch_add(1, Ordering::SeqCst);
-            answer(path)
+            ready(answer(path))
         });
         (scanner, calls)
     }
@@ -958,7 +1015,7 @@ mod tests {
                 expected: 6,
                 found: 5,
             }),
-            ProbeError::Cancelled,
+            ProbeError::ShutDown,
         ];
         for error in kept {
             assert!(
@@ -1176,7 +1233,7 @@ mod tests {
 
         let mut db = PluginDb::new();
         let scan = scanner_for(dir.path())
-            .scan(&mut db, [&plugins_dir], no_save)
+            .scan(&mut db, [&plugins_dir], no_save, exec())
             .unwrap();
         let progress = scan.progress();
         let result = settle(scan, &mut db);
@@ -1213,7 +1270,7 @@ mod tests {
 
         let mut db = PluginDb::new();
         let scan = scanner_for(dir.path())
-            .scan(&mut db, [&plugins_dir], no_save)
+            .scan(&mut db, [&plugins_dir], no_save, exec())
             .unwrap();
         let progress = scan.progress();
         let result = settle(scan, &mut db);
@@ -1247,7 +1304,7 @@ mod tests {
 
         let mut db = PluginDb::new();
         let scan = scanner_for(dir.path())
-            .scan(&mut db, &[plugins_dir], no_save)
+            .scan(&mut db, &[plugins_dir], no_save, exec())
             .unwrap();
         assert!(
             db.is_empty(),
@@ -1552,15 +1609,17 @@ mod tests {
         let fatal = create_fake_plugin(&plugins_dir, "fatal.clap");
         let pedal_file = dir.path().join(".scanning");
 
-        let dying = Scanner::new(pedal_file.clone(), |path, _, _| {
+        let dying = Scanner::new(pedal_file.clone(), |_, path, _| {
             if path.ends_with("fatal.clap") {
                 panic!("the host went down inside the plugin");
             }
-            Ok(vec![probe_plugin_fallback(path)])
+            ready(Ok(vec![probe_plugin_fallback(path)]))
         });
         let mut before = PluginDb::new();
-        let scan = dying.scan(&mut before, [&plugins_dir], no_save).unwrap();
-        let died = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| scan.run()));
+        let scan = dying
+            .scan(&mut before, [&plugins_dir], no_save, exec())
+            .unwrap();
+        let died = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(scan)));
         assert!(died.is_err(), "the probe's panic reaches the caller");
         assert_eq!(
             std::fs::read_to_string(&pedal_file).unwrap(),
@@ -1623,19 +1682,26 @@ mod tests {
         }
 
         let (parked_tx, parked_rx) = std::sync::mpsc::sync_channel::<PathBuf>(1);
-        let (release_tx, release_rx) = std::sync::mpsc::sync_channel::<()>(1);
-        // The probe closure is `Sync`; a `Receiver` is not.
-        let release_rx = Mutex::new(release_rx);
+        let (release_tx, release_rx) = oneshot::channel::<()>();
+        // The probe closure is `Sync`; a `Mutex` makes the receiver one.
+        let release_rx = Mutex::new(Some(release_rx));
         let probes = AtomicUsize::new(0);
-        let scanner = Scanner::new(dir.path().join(".scanning"), move |path, _, _| {
-            if probes.fetch_add(1, Ordering::SeqCst) == 1 {
-                parked_tx.send(path.to_path_buf()).unwrap();
-                release_rx.lock().unwrap().recv_timeout(HANG_GUARD).unwrap();
+        let scanner = Scanner::new(dir.path().join(".scanning"), move |_, path, _| {
+            let gate = (probes.fetch_add(1, Ordering::SeqCst) == 1)
+                .then(|| release_rx.lock().unwrap().take().expect("one gate"));
+            let (parked, path) = (parked_tx.clone(), path.to_path_buf());
+            async move {
+                if let Some(gate) = gate {
+                    parked.send(path).unwrap();
+                    gate.await.unwrap();
+                }
+                Ok(vec![described("new")])
             }
-            Ok(vec![described("new")])
         });
-        let scan = scanner.scan(&mut db, [&plugins_dir], no_save).unwrap();
-        let runner = std::thread::spawn(move || scan.run());
+        let scan = scanner
+            .scan(&mut db, [&plugins_dir], no_save, exec())
+            .unwrap();
+        let runner = std::thread::spawn(move || run(scan));
 
         let parked = parked_rx
             .recv_timeout(HANG_GUARD)
@@ -1662,7 +1728,7 @@ mod tests {
         assert_eq!(db.row(second).unwrap().mtime, Some(at(old)), "still parked");
 
         release_tx.send(()).unwrap();
-        let scanned = runner.join().expect("the run does not panic");
+        let scanned = runner.join().expect("the scan does not panic");
         let (result, changes) = scanned.into_parts();
         for change in changes {
             db.apply(change);
@@ -1682,7 +1748,7 @@ mod tests {
         create_fake_plugin(&plugins_dir, "a.clap");
         let mut db = PluginDb::new();
         let scan = scanner_for(dir.path())
-            .scan(&mut db, [&plugins_dir], no_save)
+            .scan(&mut db, [&plugins_dir], no_save, exec())
             .unwrap();
 
         let elsewhere = Path::new("/elsewhere/user-hid-this.vst3");
@@ -1699,30 +1765,48 @@ mod tests {
 
     /// A scanner whose first probe parks until released, then answers `answer`.
     /// Returns the scanner, a receiver that fires when the first probe is
-    /// parked, a sender that releases it, and the probe count.
+    /// parked, the sender that releases it, and the probe count.
     fn gated_scanner(
         dir: &Path,
         answer: fn(&Path) -> Result<Vec<Described>, ProbeFailure>,
     ) -> (
         Scanner,
         std::sync::mpsc::Receiver<PathBuf>,
-        std::sync::mpsc::SyncSender<()>,
+        oneshot::Sender<()>,
         Arc<AtomicUsize>,
     ) {
         let (parked_tx, parked_rx) = std::sync::mpsc::sync_channel::<PathBuf>(1);
-        let (release_tx, release_rx) = std::sync::mpsc::sync_channel::<()>(1);
-        // The probe closure is `Sync`; a `Receiver` is not.
-        let release_rx = Mutex::new(release_rx);
+        let (release_tx, release_rx) = oneshot::channel::<()>();
+        // The probe closure is `Sync`; a `Mutex` makes the receiver one.
+        let release_rx = Mutex::new(Some(release_rx));
         let calls = Arc::new(AtomicUsize::new(0));
         let seen = Arc::clone(&calls);
-        let scanner = Scanner::new(dir.join(".scanning"), move |path, _, _| {
-            if seen.fetch_add(1, Ordering::SeqCst) == 0 {
-                parked_tx.send(path.to_path_buf()).unwrap();
-                release_rx.lock().unwrap().recv_timeout(HANG_GUARD).unwrap();
+        let scanner = Scanner::new(dir.join(".scanning"), move |_, path, _| {
+            let gate = (seen.fetch_add(1, Ordering::SeqCst) == 0)
+                .then(|| release_rx.lock().unwrap().take().expect("one gate"));
+            let (parked, path) = (parked_tx.clone(), path.to_path_buf());
+            async move {
+                if let Some(gate) = gate {
+                    parked.send(path.clone()).unwrap();
+                    gate.await.unwrap();
+                }
+                answer(&path)
             }
-            answer(path)
         });
         (scanner, parked_rx, release_tx, calls)
+    }
+
+    /// Polls `scan` on this thread until the first probe has parked, and returns it
+    /// there, unfinished.
+    fn until_parked(scan: &mut ScanFuture, parked: &std::sync::mpsc::Receiver<PathBuf>) {
+        block_on(std::future::poll_fn(|cx| {
+            assert!(scan.as_mut().poll(cx).is_pending(), "the scan ended");
+            if parked.try_recv().is_ok() {
+                std::task::Poll::Ready(())
+            } else {
+                std::task::Poll::Pending
+            }
+        }));
     }
 
     fn environmental(_: &Path) -> Result<Vec<Described>, ProbeFailure> {
@@ -1732,8 +1816,8 @@ mod tests {
     /// While a scan is parked mid-probe, nothing else may use its pedal: not a
     /// second scan from the scanner, a clone or a new scanner on the same path,
     /// not a recovery. Each would delete the armed sentinel
-    /// and blacklist a plugin that did not crash. The claim ends when the run
-    /// returns, so the next scan can start.
+    /// and blacklist a plugin that did not crash. The claim ends when the
+    /// scan's future resolves, so the next scan can start.
     #[test]
     fn nothing_else_may_use_the_pedal_while_a_scan_is_parked_mid_probe() {
         let dir = TempDir::new().unwrap();
@@ -1741,17 +1825,19 @@ mod tests {
         let a = create_fake_plugin(&plugins_dir, "a.clap");
         let (scanner, parked, release, _) = gated_scanner(dir.path(), named);
         let mut db = PluginDb::new();
-        let scan = scanner.scan(&mut db, [&plugins_dir], no_save).unwrap();
-        let runner = std::thread::spawn(move || scan.run());
+        let scan = scanner
+            .scan(&mut db, [&plugins_dir], no_save, exec())
+            .unwrap();
+        let runner = std::thread::spawn(move || run(scan));
         parked.recv_timeout(HANG_GUARD).unwrap();
 
         assert!(matches!(
-            scanner.scan(&mut db, [&plugins_dir], no_save),
+            scanner.scan(&mut db, [&plugins_dir], no_save, exec()),
             Err(ScanBusy)
         ));
         let clone = scanner.clone();
         assert!(matches!(
-            clone.scan(&mut db, [&plugins_dir], no_save),
+            clone.scan(&mut db, [&plugins_dir], no_save, exec()),
             Err(ScanBusy)
         ));
         let fresh = scanner_for(dir.path());
@@ -1764,19 +1850,22 @@ mod tests {
         assert!(!db.is_blacklisted(&a), "nothing crashed");
 
         release.send(()).unwrap();
-        let _ = runner.join().expect("the run does not panic");
+        let _ = runner.join().expect("the scan does not panic");
         assert!(
-            scanner.scan(&mut db, [&plugins_dir], no_save).is_ok(),
-            "the end of the run releases the pedal"
+            scanner
+                .scan(&mut db, [&plugins_dir], no_save, exec())
+                .is_ok(),
+            "the end of the scan releases the pedal"
         );
     }
 
-    /// A cancelled run stops after the file in flight even when no file
-    /// produces a change (every failure environmental), and the pedal is
-    /// disarmed. Without the stop the run would probe every remaining file, each
-    /// with a `plugin-server` child.
+    /// **Dropping the scan mid-probe ends it**: no later file is probed even when
+    /// no file produces a change (every failure environmental), the probe's future
+    /// is dropped with it, the pedal is disarmed and the claim released. Without the
+    /// drop the scan would probe every remaining file, each with a `plugin-probe`
+    /// child.
     #[test]
-    fn cancelling_the_scan_stops_the_run_even_when_nothing_is_recorded() {
+    fn dropping_the_scan_mid_probe_stops_it_and_releases_the_pedal() {
         let dir = TempDir::new().unwrap();
         let plugins_dir = plugins_dir(&dir);
         for name in ["a.clap", "b.clap", "c.clap", "d.clap"] {
@@ -1784,82 +1873,156 @@ mod tests {
         }
         let (scanner, parked, release, calls) = gated_scanner(dir.path(), environmental);
         let mut db = PluginDb::new();
-        let scan = scanner.scan(&mut db, [&plugins_dir], no_save).unwrap();
-        let canceller = scan.canceller();
-        let runner = std::thread::spawn(move || scan.run());
-        parked.recv_timeout(HANG_GUARD).unwrap();
+        let scan = scanner
+            .scan(&mut db, [&plugins_dir], no_save, exec())
+            .unwrap();
+        let mut scan = scan.into_future();
+        until_parked(&mut scan, &parked);
+        assert!(
+            dir.path().join(".scanning").exists(),
+            "the pedal is armed for the probe in flight"
+        );
 
-        canceller.cancel();
-        release.send(()).unwrap();
-        let scanned = runner.join().expect("the run does not panic");
+        drop(scan);
 
         assert_eq!(calls.load(Ordering::SeqCst), 1);
-        assert!(scanned.report().cancelled());
-        assert!(scanned.changes().is_empty());
+        assert!(
+            release.send(()).is_err(),
+            "the probe's future was dropped with the scan"
+        );
         assert!(
             !dir.path().join(".scanning").exists(),
             "the pedal is disarmed"
         );
+        assert!(
+            scanner
+                .scan(&mut db, [&plugins_dir], no_save, exec())
+                .is_ok(),
+            "the claim is released"
+        );
     }
 
-    /// **A cancel reaches the probe in flight, and the claim is released when
-    /// `run` returns**: the probe waits on its `Stop` as a real one waits on its
-    /// child, so `run` returns as soon as the probe sees the request, not when
-    /// its own deadline passes (ten minutes here, past the test harness's limit,
-    /// so a run that waited for it fails). Its file is `Cancelled`, nothing is
-    /// recorded, and the sentinel is gone.
+    /// **A probe the executor's end cut short ends the scan**, with the named error
+    /// and no findings: the files reached before are not passed off as a complete
+    /// scan, and the file in flight is not recorded as a failure.
     #[test]
-    fn cancelling_the_scan_stops_the_probe_in_flight_and_releases_the_pedal() {
+    fn a_probe_cut_short_by_the_executors_end_ends_the_scan() {
         let dir = TempDir::new().unwrap();
         let plugins_dir = plugins_dir(&dir);
-        let file = create_fake_plugin(&plugins_dir, "a.clap");
-        let (probing_tx, probing_rx) = std::sync::mpsc::sync_channel::<()>(1);
-        let scanner = Scanner::new(dir.path().join(".scanning"), move |path, _, stop| {
-            let _ = probing_tx.try_send(());
-            let _ = stop.wait(Duration::from_secs(600));
-            named(path)
+        for name in ["a.clap", "b.clap"] {
+            create_fake_plugin(&plugins_dir, name);
+        }
+        let probes = AtomicUsize::new(0);
+        let scanner = Scanner::new(dir.path().join(".scanning"), move |_, path, _| {
+            ready(if probes.fetch_add(1, Ordering::SeqCst) == 0 {
+                named(path)
+            } else {
+                Err(ProbeError::ShutDown.into())
+            })
         });
         let mut db = PluginDb::new();
-        let scan = scanner.scan(&mut db, [&plugins_dir], no_save).unwrap();
-        let canceller = scan.canceller();
-        let runner = std::thread::spawn(move || scan.run());
-        probing_rx.recv_timeout(HANG_GUARD).unwrap();
+        let scan = scanner
+            .scan(&mut db, [&plugins_dir], no_save, exec())
+            .unwrap();
 
-        canceller.cancel();
-        let scanned = runner.join().expect("the run does not panic");
-
-        let files = scanned.report().files();
         assert_eq!(
-            files,
-            [ScannedFile {
-                path: file,
-                outcome: ScanOutcome::Cancelled
-            }]
+            block_on(scan.into_future()).unwrap_err(),
+            ScanError::ShutDown
         );
-        assert!(scanned.changes().is_empty());
+
         assert!(
             !dir.path().join(".scanning").exists(),
-            "the sentinel is gone"
+            "the pedal is disarmed"
         );
         assert!(
-            scanner.scan(&mut db, [&plugins_dir], no_save).is_ok(),
-            "the pedal is released"
+            scanner
+                .scan(&mut db, [&plugins_dir], no_save, exec())
+                .is_ok(),
+            "the claim is released"
         );
     }
 
-    /// **An unrun scan holds the pedal until it drops**, probes nothing, and
-    /// frees the pedal when it does; a run frees it as well.
+    /// **A scan whose executor is gone resolves the named error at its first
+    /// await**, not a hang and not an empty list.
     #[test]
-    fn the_pedal_is_released_on_drop_of_an_unrun_scan_and_after_run() {
+    fn a_scan_on_a_dead_executor_resolves_shut_down() {
+        let dir = TempDir::new().unwrap();
+        let plugins_dir = plugins_dir(&dir);
+        create_fake_plugin(&plugins_dir, "a.clap");
+        let (scanner, calls) = counting_scanner(dir.path(), named);
+        let dead = tutti_platform::Executor::new().downgrade();
+        let mut db = PluginDb::new();
+        let scan = scanner
+            .scan(&mut db, [&plugins_dir], no_save, dead)
+            .unwrap();
+
+        assert_eq!(
+            block_on(scan.into_future()).unwrap_err(),
+            ScanError::ShutDown
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "nothing was probed");
+    }
+
+    /// **Progress reports in order**: the directories first, then each file in
+    /// the order it is probed, whatever the directories hold.
+    #[test]
+    fn progress_reports_each_directory_then_each_probe_in_order() {
+        let dir = TempDir::new().unwrap();
+        let (first, second) = (dir.path().join("one"), dir.path().join("two"));
+        for d in [&first, &second] {
+            std::fs::create_dir(d).unwrap();
+            create_fake_plugin(d, "p.clap");
+        }
+        let probed = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&probed);
+        let scanner = Scanner::new(dir.path().join(".scanning"), move |_, path, _| {
+            seen.lock().unwrap().push(path.to_path_buf());
+            ready(named(path))
+        });
+        let mut db = PluginDb::new();
+        let scan = scanner
+            .scan(&mut db, [&first, &second], no_save, exec())
+            .unwrap();
+        let progress = scan.progress();
+        let _ = run(scan);
+
+        let updates: Vec<_> = progress.read().collect();
+        let probed = probed.lock().unwrap().clone();
+        assert_eq!(probed.len(), 2);
+        let expected: Vec<_> = [
+            ScanProgress::Discovering { directory: first },
+            ScanProgress::Discovering { directory: second },
+        ]
+        .into_iter()
+        .chain(
+            probed
+                .into_iter()
+                .enumerate()
+                .map(|(i, path)| ScanProgress::Probing {
+                    current: i + 1,
+                    total: 2,
+                    path,
+                }),
+        )
+        .collect();
+        assert_eq!(updates, expected);
+    }
+
+    /// **An unawaited scan holds the pedal until it drops**, probes nothing, and
+    /// frees the pedal when it does; an awaited one frees it as well.
+    #[test]
+    fn the_pedal_is_released_on_drop_of_an_unawaited_scan_and_after_the_await() {
         let dir = TempDir::new().unwrap();
         let plugins_dir = plugins_dir(&dir);
         create_fake_plugin(&plugins_dir, "a.clap");
         let (scanner, calls) = counting_scanner(dir.path(), named);
         let mut db = PluginDb::new();
 
-        let held = scanner.scan(&mut db, [&plugins_dir], no_save).unwrap();
+        let held = scanner
+            .scan(&mut db, [&plugins_dir], no_save, exec())
+            .unwrap();
         assert!(matches!(
-            scanner.scan(&mut db, [&plugins_dir], no_save),
+            scanner.scan(&mut db, [&plugins_dir], no_save, exec()),
             Err(ScanBusy)
         ));
         drop(held);
@@ -1869,38 +2032,41 @@ mod tests {
             "a dropped scan probes nothing"
         );
 
-        let run = scanner.scan(&mut db, [&plugins_dir], no_save).unwrap();
-        let scanned = run.run();
+        let awaited = scanner
+            .scan(&mut db, [&plugins_dir], no_save, exec())
+            .unwrap();
+        let scanned = run(awaited);
         assert_eq!(scanned.changes().len(), 1);
         assert!(
-            scanner.scan(&mut db, [&plugins_dir], no_save).is_ok(),
-            "the run released the pedal"
+            scanner
+                .scan(&mut db, [&plugins_dir], no_save, exec())
+                .is_ok(),
+            "the resolved scan released the pedal"
         );
     }
 
-    /// **`run` returns each file's outcome and one change per probed file**, in
+    /// **A scan returns each file's outcome and one change per probed file**, in
     /// probe order: of five files, three probed well, one crashing the probe
     /// (blacklisted), one the environment's failure (nothing recorded).
     #[test]
-    fn run_returns_each_files_outcome_and_one_change_per_recorded_file() {
+    fn a_scan_returns_each_files_outcome_and_one_change_per_recorded_file() {
         let dir = TempDir::new().unwrap();
         let plugins_dir = plugins_dir(&dir);
         for name in ["a.clap", "b.clap", "c.clap", "crash.clap", "env.clap"] {
             create_fake_plugin(&plugins_dir, name);
         }
-        let scanner = Scanner::new(dir.path().join(".scanning"), |path, _, _| {
-            match path.file_stem().and_then(|s| s.to_str()) {
+        let scanner = Scanner::new(dir.path().join(".scanning"), |_, path, _| {
+            ready(match path.file_stem().and_then(|s| s.to_str()) {
                 Some("crash") => Err(crashed()),
                 Some("env") => Err(ProbeError::ProbeNotFound.into()),
                 _ => Ok(vec![probe_plugin_fallback(path)]),
-            }
+            })
         });
         let mut db = PluginDb::new();
 
-        let scanned = scanner
-            .scan(&mut db, [&plugins_dir], no_save)
-            .unwrap()
-            .run();
+        let scanned = run(scanner
+            .scan(&mut db, [&plugins_dir], no_save, exec())
+            .unwrap());
 
         let report = scanned.report();
         assert_eq!(report.scanned(), 5);
@@ -1910,48 +2076,12 @@ mod tests {
             2,
             "the crash and the environment's failure"
         );
-        assert!(!report.cancelled());
         assert_eq!(
             scanned.changes().len(),
             4,
             "three rows and one blacklist row; the environment's failure records nothing"
         );
-        assert!(db.is_empty(), "a run changes no database");
-    }
-
-    /// **A probe a stop ended records nothing**: no change, no blacklist row,
-    /// not even when the probe reports what a killed child looks like (a crash),
-    /// and the row that was there is as it was.
-    #[test]
-    fn a_stopped_probe_leaves_the_row_as_it_was() {
-        let dir = TempDir::new().unwrap();
-        let plugins_dir = plugins_dir(&dir);
-        let file = create_fake_plugin(&plugins_dir, "a.clap");
-        let (probing_tx, probing_rx) = std::sync::mpsc::sync_channel::<()>(1);
-        let scanner = Scanner::new(dir.path().join(".scanning"), move |_, _, stop| {
-            let _ = probing_tx.try_send(());
-            let _ = stop.wait(Duration::from_secs(600));
-            Err(crashed())
-        });
-        let mut db = PluginDb::new();
-        scan_dirs(&scanner_for(dir.path()), &mut db, [&plugins_dir], no_save).unwrap();
-        let before = db.row(&file).cloned().expect("a row");
-
-        let task = scanner
-            .scan_files(&mut db, [(&file, PluginFormat::Clap)], no_save)
-            .unwrap();
-        let canceller = task.canceller();
-        let runner = std::thread::spawn(move || task.run());
-        probing_rx.recv_timeout(HANG_GUARD).unwrap();
-        canceller.cancel();
-        let (result, changes) = runner.join().unwrap().into_parts();
-        for change in changes {
-            db.apply(change);
-        }
-
-        assert!(result.failures().is_empty(), "{result:?}");
-        assert_eq!(db.row(&file), Some(&before));
-        assert!(!db.is_blacklisted(&file));
+        assert!(db.is_empty(), "a scan changes no database");
     }
 
     /// **A file task probes the files it names whether or not their rows are
@@ -1972,7 +2102,7 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 1);
 
         let task = scanner
-            .scan_files(&mut db, [(&file, PluginFormat::Clap)], no_save)
+            .scan_files(&mut db, [(&file, PluginFormat::Clap)], no_save, exec())
             .unwrap();
         let result = settle(task, &mut db);
 
@@ -1996,14 +2126,14 @@ mod tests {
         let file = create_fake_plugin(&plugins_dir, "libsynth.so");
         let seen = Arc::new(Mutex::new(Vec::new()));
         let recorded = Arc::clone(&seen);
-        let scanner = Scanner::new(dir.path().join(".scanning"), move |path, format, _| {
+        let scanner = Scanner::new(dir.path().join(".scanning"), move |_, path, format| {
             recorded.lock().unwrap().push(format);
-            Ok(vec![probe_plugin_fallback(path)])
+            ready(Ok(vec![probe_plugin_fallback(path)]))
         });
         let mut db = PluginDb::new();
 
         let task = scanner
-            .scan_files(&mut db, [(&file, PluginFormat::Clap)], no_save)
+            .scan_files(&mut db, [(&file, PluginFormat::Clap)], no_save, exec())
             .unwrap();
         settle(task, &mut db);
 
@@ -2026,36 +2156,48 @@ mod tests {
 
         assert!(matches!(
             scanner
-                .scan_files(&mut db, [(&missing, PluginFormat::Clap)], no_save)
+                .scan_files(&mut db, [(&missing, PluginFormat::Clap)], no_save, exec())
                 .unwrap_err(),
             FilesError::Missing(path) if path == missing
         ));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         assert!(
             scanner
-                .scan_files(&mut db, Vec::<(PathBuf, PluginFormat)>::new(), no_save)
+                .scan_files(
+                    &mut db,
+                    Vec::<(PathBuf, PluginFormat)>::new(),
+                    no_save,
+                    exec()
+                )
                 .is_ok(),
             "a refused call did not claim the pedal"
         );
     }
 
-    /// A probe that panics reaches the caller of `run` and takes the claim down
+    /// A probe that panics reaches the awaiter of the scan and takes the claim down
     /// with it, so the pedal is free for the next scan.
     #[test]
     fn a_panicking_probe_releases_the_claim() {
         let dir = TempDir::new().unwrap();
         let plugins_dir = plugins_dir(&dir);
         create_fake_plugin(&plugins_dir, "a.clap");
-        let scanner = Scanner::new(dir.path().join(".scanning"), |_, _, _| {
-            panic!("the probe dies")
-        });
+        let scanner = Scanner::new(
+            dir.path().join(".scanning"),
+            |_, _, _| -> std::future::Ready<ProbeResult> { panic!("the probe dies") },
+        );
         let mut db = PluginDb::new();
-        let scan = scanner.scan(&mut db, [&plugins_dir], no_save).unwrap();
+        let scan = scanner
+            .scan(&mut db, [&plugins_dir], no_save, exec())
+            .unwrap();
 
-        let died = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| scan.run()));
+        let died = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(scan)));
 
         assert!(died.is_err());
-        assert!(scanner.scan(&mut db, [&plugins_dir], no_save).is_ok());
+        assert!(
+            scanner
+                .scan(&mut db, [&plugins_dir], no_save, exec())
+                .is_ok()
+        );
     }
 
     fn failing_save(_: &PluginDb) -> std::io::Result<()> {
@@ -2092,10 +2234,15 @@ mod tests {
         let fatal = create_fake_plugin(&plugins_dir, "fatal.clap");
         let pedal_file = dir.path().join(".scanning");
         std::fs::write(&pedal_file, "/plugins/crashy.vst3").unwrap();
-        let dying = Scanner::new(pedal_file.clone(), |_, _, _| panic!("host down"));
+        let dying = Scanner::new(
+            pedal_file.clone(),
+            |_, _, _| -> std::future::Ready<ProbeResult> { panic!("host down") },
+        );
         let mut db = PluginDb::new();
-        let scan = dying.scan(&mut db, [&plugins_dir], failing_save).unwrap();
-        let died = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| scan.run()));
+        let scan = dying
+            .scan(&mut db, [&plugins_dir], failing_save, exec())
+            .unwrap();
+        let died = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(scan)));
         assert!(died.is_err());
 
         let mut next = PluginDb::new();
@@ -2165,8 +2312,10 @@ mod tests {
             let a = create_fake_plugin(&plugins_dir, "a.clap");
             let (scanner, parked, release, _) = gated_scanner(dir.path(), named);
             let mut db = PluginDb::new();
-            let scan = scanner.scan(&mut db, [&plugins_dir], no_save).unwrap();
-            let runner = std::thread::spawn(move || scan.run());
+            let scan = scanner
+                .scan(&mut db, [&plugins_dir], no_save, exec())
+                .unwrap();
+            let runner = std::thread::spawn(move || run(scan));
             parked.recv_timeout(HANG_GUARD).unwrap();
 
             let link = dir.path().join("link");
@@ -2187,7 +2336,7 @@ mod tests {
             assert!(!db.is_blacklisted(&a));
 
             release.send(()).unwrap();
-            let _ = runner.join().expect("the run does not panic");
+            let _ = runner.join().expect("the scan does not panic");
         }
     }
 }

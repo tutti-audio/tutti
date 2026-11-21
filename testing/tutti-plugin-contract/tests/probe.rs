@@ -50,8 +50,9 @@ fn run_task(
 ) -> Result<PluginDb, ProbeFailure> {
     let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
     let task = start(&mut catalog);
+    let scanned = tutti_fixtures::block_on(task).expect("the executor lives");
     let result = catalog
-        .apply(task.run())
+        .apply(scanned)
         .expect("the output of this catalog's own scan");
     match result.failures().into_iter().next() {
         Some(failed) => Err(failed.failure),
@@ -79,7 +80,9 @@ fn probe_db(path: &Path) -> Result<PluginDb, ProbeFailure> {
 fn probe_db_with_timeout(path: &Path, timeout: Duration) -> Result<PluginDb, ProbeFailure> {
     let pedal = tempfile::tempdir().unwrap();
     run_task(config(pedal.path()).probe_timeout(timeout), |catalog| {
-        catalog.register(path).expect("a plugin file")
+        catalog
+            .register(path, tutti_fixtures::executor().downgrade())
+            .expect("a plugin file")
     })
 }
 
@@ -102,7 +105,9 @@ fn measure_db(path: &Path, file: &Path, timeout: Duration) -> Result<PluginDb, P
     let pedal = tempfile::tempdir().unwrap();
     let config = config(pedal.path()).measure_timeout(timeout);
     run_task(config, |catalog| {
-        catalog.measure(&plugin, Some(file)).expect("a plugin file")
+        catalog
+            .measure(&plugin, Some(file), tutti_fixtures::executor().downgrade())
+            .expect("a plugin file")
     })
 }
 
