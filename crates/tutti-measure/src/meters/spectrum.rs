@@ -69,7 +69,7 @@ use tutti_units::{Ballistics, Db, Hz, SampleRate, Samples, Seconds};
 use crate::convert::{all_finite, for_blocks};
 use crate::framing::{Framing, check_hop_within, check_nyquist, check_overlap, check_window};
 use crate::meters::chroma::FrequencyBand;
-use crate::{Error, Measure, Measurement, Result};
+use crate::{Error, Measure, Result, StreamMeter};
 use tutti_dsp::BinIndex;
 use tutti_dsp::Complex64;
 use tutti_dsp::FftScratch;
@@ -466,7 +466,7 @@ impl SpectrumPlan {
 /// A push yields one item per analysed frame, and the readings
 /// ([`levels`](Self::levels), [`peaks`](Self::peaks),
 /// [`spectrogram`](Self::spectrogram)) are available after any push;
-/// [`finish`](Measurement::finish) returns the levels.
+/// [`finish`](StreamMeter::finish) returns the levels.
 ///
 /// Pushing allocates nothing once the meter is built, but each frame is a
 /// transform and every output is smoothed, so it belongs on the consumer side of
@@ -738,7 +738,7 @@ impl<S: Sample> SpectrumMeter<S> {
     }
 }
 
-impl<S: Sample> Measurement for SpectrumMeter<S> {
+impl<S: Sample> StreamMeter for SpectrumMeter<S> {
     type Input<'a> = Mono<'a, S>;
     type Item = ();
     type Output = Vec<Db>;

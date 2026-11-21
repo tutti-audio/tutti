@@ -62,7 +62,7 @@ use crate::convert::{all_finite, for_blocks, widen};
 use crate::framing::{
     FrameCutter, Framing, check_frame_count, check_nyquist, check_overlap, check_window,
 };
-use crate::{Error, Measure, Measurement, Result};
+use crate::{Error, Measure, Result, StreamMeter};
 use tutti_dsp::Complex64;
 use tutti_dsp::FftScratch;
 use tutti_dsp::StftGeometry;
@@ -626,7 +626,7 @@ pub struct ChromaSummary {
 /// far.
 ///
 /// The reading, [`mean`](Self::mean) and [`tuning`](Self::tuning), is
-/// available after any push, and [`finish`](Measurement::finish) returns both as a
+/// available after any push, and [`finish`](StreamMeter::finish) returns both as a
 /// [`ChromaSummary`]. With
 /// [`TuningReference::Estimate`] the tuning is the estimate from the peaks seen so far;
 /// with a fixed tuning the frames equal [`chroma`]'s bit for bit.
@@ -696,7 +696,7 @@ impl<S: Sample> ChromaMeter<S> {
     }
 }
 
-impl<S: Sample> Measurement for ChromaMeter<S> {
+impl<S: Sample> StreamMeter for ChromaMeter<S> {
     type Input<'a> = Mono<'a, S>;
     type Item = ChromaFrame;
     type Output = ChromaSummary;

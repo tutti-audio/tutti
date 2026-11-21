@@ -8,8 +8,8 @@ use tutti_buffers::Mono;
 use tutti_dsp::FrameCount;
 use tutti_fixtures::allocations;
 use tutti_measure::{
-    Banding, BandsPerOctave, Framing, FrequencyBand, Measure, Measurement, PeakDecay, Smoothing,
-    SpectrumConfig, SpectrumTime,
+    Banding, BandsPerOctave, Framing, FrequencyBand, Measure, PeakDecay, Smoothing, SpectrumConfig,
+    SpectrumTime, StreamMeter,
 };
 use tutti_units::{Db, Hz, SampleRate, Samples, Seconds};
 

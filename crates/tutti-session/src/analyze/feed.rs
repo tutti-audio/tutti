@@ -166,7 +166,7 @@ impl sealed_context::Sealed for () {
     fn from_audio(_: SampleRate, _: ChannelLayout) -> Self {}
 }
 
-/// Makes the view a meter takes ([`Measurement::Input`](tutti_measure::Measurement::Input))
+/// Makes the view a meter takes ([`StreamMeter::Input`](tutti_measure::StreamMeter::Input))
 /// from one chunk.
 ///
 /// [`Interleaved`] is the chunk interleaved. [`Mono`] is the audio itself when

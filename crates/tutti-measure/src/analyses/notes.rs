@@ -77,7 +77,7 @@ use crate::convert::widen;
 use crate::framing::{Framing, check_frame_count, check_hop_within, check_overlap};
 use crate::meters::onset::{DetectionFunction, OnsetConfig, OnsetPlan, onset_lag, run};
 use crate::meters::silence::FiniteLevel;
-use crate::{Error, Measurement, Region, Result};
+use crate::{Error, Region, Result, StreamMeter};
 use tutti_dsp::{median, median_of_sorted};
 use tutti_units::ranged;
 

@@ -68,12 +68,12 @@
 //!
 //! - **one-shot**, like scipy: `x(&config, view, rate)` over a whole buffer;
 //! - **streaming**: the config is a [`Measure`] and `config.measure(context)`
-//!   makes its meter, which is a [`Measurement`]: `meter.push(view, &mut out)` takes
+//!   makes its meter, which is a [`StreamMeter`]: `meter.push(view, &mut out)` takes
 //!   the audio in chunks of any length and extends `out` with the items each
-//!   chunk completes, and `meter.finish()` reads the [`Output`](Measurement::Output)
+//!   chunk completes, and `meter.finish()` reads the [`Output`](StreamMeter::Output)
 //!   of the whole run. `meter.reset()` starts over. Import the two traits to
 //!   call them; a consumer that is generic over `A: Measure<S>` takes any analysis
-//!   (a [`Measurement`] is not object-safe).
+//!   (a [`StreamMeter`] is not object-safe).
 //!
 //! The one-shot feeds a meter the whole buffer, so the two cannot drift, with
 //! one stated exception: `chroma` under `TuningReference::Estimate` finds the tuning in a
@@ -104,7 +104,7 @@
 //! | waveform blocks | [`PeakConfig`] | [`summarize`] | [`PeakMeter`] | `ChannelLayout` | `Interleaved` | [`ChannelBlock`], a whole block of a channel | [`PeakBlocks`] | no: grows per block |
 //! | vectorscope | [`VectorscopeConfig`] | [`vectorscope_points`] | [`VectorscopeMeter`] | `()` | `StereoPlanes` | [`ScopePoint`] | `()` | no: grows the caller's collection |
 //!
-//! [`StereoSmoother`] (of a [`Ballistics`](tutti_units::Ballistics)) is not a [`Measurement`]: it is a display
+//! [`StereoSmoother`] (of a [`Ballistics`](tutti_units::Ballistics)) is not a [`StreamMeter`]: it is a display
 //! filter over stereo level readings, with no stream behind it. It allocates
 //! nothing and costs a few flops, so it is fit for the audio thread.
 //!
@@ -360,7 +360,7 @@ pub use error::{Error, Result};
 pub use framing::Framing;
 #[cfg(test)]
 pub(crate) use measure::fold_uneven;
-pub use measure::{Measure, Measurement};
+pub use measure::{Measure, StreamMeter};
 pub use meters::chroma::{
     Chroma, ChromaConfig, ChromaFrame, ChromaMeter, ChromaSummary, FrequencyBand, HarmonicCount,
     HarmonicCountError, HarmonicDecay, HarmonicDecayError, PeakFloor, PeakFloorError, TuningOffset,

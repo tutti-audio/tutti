@@ -17,7 +17,7 @@
 //!   play reading, a seconds-clocked layer whose rate changed gets a
 //!   [`RateAnchor`] [`RATE_ANCHOR_MARGIN`] frames ahead, at the phase the
 //!   previous program reaches there, so its phase is continuous.
-//! - Refusals are by name ([`ModulationCompileError`]).
+//! - Refusals are by name ([`ProgramCompileError`]).
 
 use crate::ControlProgramBuilder;
 use alloc::collections::{BTreeMap, BTreeSet};
@@ -141,7 +141,7 @@ fn adsr_valid(adsr: &Adsr) -> bool {
 pub enum Source {
     /// A wave on a clock: a closed-form layer, no node. The clock's anchor
     /// is the compiler's to set; a declared one is refused
-    /// ([`ModulationCompileError::AnchorDeclared`]).
+    /// ([`ProgramCompileError::AnchorDeclared`]).
     Lfo {
         /// One period.
         wave: Waveform,
@@ -185,7 +185,7 @@ pub enum RouteTarget {
 /// A route: a source into a target, shaped by an amount.
 ///
 /// Plain data, built with a struct literal: every field is independent, and
-/// [`compile`] refuses a combination it cannot run ([`ModulationCompileError`]).
+/// [`compile`] refuses a combination it cannot run ([`ProgramCompileError`]).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct RouteDecl {
     /// What modulates.
@@ -356,7 +356,7 @@ pub const MAX_CLOCK_PHASE: f64 = 1_099_511_627_776.0;
 /// `tutti_graph::CompileError`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
-pub enum ModulationCompileError {
+pub enum ProgramCompileError {
     /// Two sources with one key.
     #[error("two sources share key {}", .0.0)]
     DuplicateSource(SourceKey),
@@ -490,37 +490,37 @@ pub fn layer_id(route: RouteKey, depth_by: Option<RouteKey>) -> LayerId {
 ///
 /// # Errors
 ///
-/// Each [`ModulationCompileError`], by name.
+/// Each [`ProgramCompileError`], by name.
 pub fn compile(
     decl: &Declarations<'_>,
     prev: Option<&Compiled>,
     now: PlayReading,
     rate: SampleRate,
-) -> Result<Compiled, ModulationCompileError> {
-    let sources = index(decl.sources, ModulationCompileError::DuplicateSource)?;
-    let routes = index(decl.routes, ModulationCompileError::DuplicateRoute)?;
-    let targets = index(decl.targets, ModulationCompileError::DuplicateTarget)?;
+) -> Result<Compiled, ProgramCompileError> {
+    let sources = index(decl.sources, ProgramCompileError::DuplicateSource)?;
+    let routes = index(decl.routes, ProgramCompileError::DuplicateRoute)?;
+    let targets = index(decl.targets, ProgramCompileError::DuplicateTarget)?;
 
     for (&key, source) in &sources {
         check_source(key, source)?;
     }
     for (&key, route) in &routes {
         if !sources.contains_key(&route.source) {
-            return Err(ModulationCompileError::UnknownSource { route: key });
+            return Err(ProgramCompileError::UnknownSource { route: key });
         }
     }
     for (&key, t) in &targets {
         if t.min.is_nan() || t.max.is_nan() {
-            return Err(ModulationCompileError::NanRange(key));
+            return Err(ProgramCompileError::NanRange(key));
         }
         if t.min > t.max
             && matches!(key, TargetKey::Param { param, .. }
                 if param.as_unit().is_some_and(|a| a.param.is_circular()))
         {
-            return Err(ModulationCompileError::CrossedArc(key));
+            return Err(ProgramCompileError::CrossedArc(key));
         }
         if t.automation.as_ref().is_some_and(|c| c.frozen().is_some()) {
-            return Err(ModulationCompileError::LiveCurve(key));
+            return Err(ProgramCompileError::LiveCurve(key));
         }
     }
 
@@ -537,16 +537,16 @@ pub fn compile(
             continue;
         };
         let Some(inner) = routes.get(&scaled) else {
-            return Err(ModulationCompileError::UnknownRoute { route: key });
+            return Err(ProgramCompileError::UnknownRoute { route: key });
         };
         if matches!(inner.to, RouteTarget::Depth(_)) {
-            return Err(ModulationCompileError::DepthByChain { route: key });
+            return Err(ProgramCompileError::DepthByChain { route: key });
         }
         if is_signal(route.source) || is_signal(inner.source) {
-            return Err(ModulationCompileError::DepthBySignal { route: key });
+            return Err(ProgramCompileError::DepthBySignal { route: key });
         }
         if depth_of.insert(scaled, key).is_some() {
-            return Err(ModulationCompileError::TwoDepthBy { route: scaled });
+            return Err(ProgramCompileError::TwoDepthBy { route: scaled });
         }
     }
 
@@ -612,7 +612,7 @@ pub fn compile(
             continue;
         };
         if !targets.contains_key(&target) {
-            return Err(ModulationCompileError::UndeclaredTarget { route: key });
+            return Err(ProgramCompileError::UndeclaredTarget { route: key });
         }
         let scaler = depth_of.get(&key).copied();
         let id = layer_id(key, scaler);
@@ -661,18 +661,18 @@ pub fn compile(
         }
         let program = builder.build().map_err(|e| match e {
             ProgramError::TooManyLayers { count } | ProgramError::TooManyDepths { count } => {
-                ModulationCompileError::TooManyLayers { target, count }
+                ProgramCompileError::TooManyLayers { target, count }
             }
             ProgramError::TooManyInputs { count } => {
-                ModulationCompileError::TooManyInputs { target, count }
+                ProgramCompileError::TooManyInputs { target, count }
             }
-            ProgramError::DuplicateLayer(_) => ModulationCompileError::LayerIdCollision(target),
+            ProgramError::DuplicateLayer(_) => ProgramCompileError::LayerIdCollision(target),
             // Sources and routes are checked above, so these do not reach
             // here; named by the layer's source if they do.
             ProgramError::BadDrawnWave(id) | ProgramError::NotANumber(id) => origin
                 .get(&id)
-                .map_or(ModulationCompileError::LayerIdCollision(target), |&s| {
-                    ModulationCompileError::BadSource(s)
+                .map_or(ProgramCompileError::LayerIdCollision(target), |&s| {
+                    ProgramCompileError::BadSource(s)
                 }),
         })?;
         programs.insert(target, program);
@@ -695,8 +695,8 @@ fn next_id(n: u32) -> SourceId {
 
 fn index<K: Ord + Copy, V>(
     items: &[(K, V)],
-    dup: impl Fn(K) -> ModulationCompileError,
-) -> Result<BTreeMap<K, &V>, ModulationCompileError> {
+    dup: impl Fn(K) -> ProgramCompileError,
+) -> Result<BTreeMap<K, &V>, ProgramCompileError> {
     let mut out = BTreeMap::new();
     for (k, v) in items {
         if out.insert(*k, v).is_some() {
@@ -707,8 +707,8 @@ fn index<K: Ord + Copy, V>(
 }
 
 /// A source's params in their domain, or the refusal.
-fn check_source(key: SourceKey, source: &Source) -> Result<(), ModulationCompileError> {
-    let bad = Err(ModulationCompileError::BadSource(key));
+fn check_source(key: SourceKey, source: &Source) -> Result<(), ProgramCompileError> {
+    let bad = Err(ProgramCompileError::BadSource(key));
     match source {
         Source::Lfo { wave, clock } => {
             let ok_clock = match *clock {
@@ -719,7 +719,7 @@ fn check_source(key: SourceKey, source: &Source) -> Result<(), ModulationCompile
                     anchor,
                 } => {
                     if anchor.is_some() {
-                        return Err(ModulationCompileError::AnchorDeclared(key));
+                        return Err(ProgramCompileError::AnchorDeclared(key));
                     }
                     rate.get().is_finite() && phase.get().is_finite()
                 }
@@ -728,7 +728,7 @@ fn check_source(key: SourceKey, source: &Source) -> Result<(), ModulationCompile
                 LayerClock::Beats { phase, .. } | LayerClock::Seconds { phase, .. } => phase.get(),
             };
             if ok_clock && phase.abs() > MAX_CLOCK_PHASE {
-                return Err(ModulationCompileError::PhaseOutOfRange(key));
+                return Err(ProgramCompileError::PhaseOutOfRange(key));
             }
             let ok_wave = match wave {
                 Waveform::Shape { .. } => true,

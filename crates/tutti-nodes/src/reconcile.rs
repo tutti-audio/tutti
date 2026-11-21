@@ -22,7 +22,7 @@ use tutti_graph::{
 };
 use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_modulation::{
-    Compiled, ControlProgram, Declarations, LayerId, ModulationCompileError, RouteDecl, RouteKey,
+    Compiled, ControlProgram, Declarations, LayerId, ProgramCompileError, RouteDecl, RouteKey,
     RouteTarget, SignalKind, SignalSource, Source as ModSource, SourceId, SourceKey, TargetDecl,
     TargetKey, compile, layer_id,
 };
@@ -140,7 +140,7 @@ pub enum Feed {
 pub enum ReconcileError {
     /// The declarations do not compile.
     #[error("modulation does not compile")]
-    Compile(#[from] ModulationCompileError),
+    Compile(#[from] ProgramCompileError),
     /// A route from a signal source whose input is downstream of the route's
     /// own target: its edge would close a cycle.
     #[error("route {}: its source's input is downstream of its target", route.0)]
@@ -1638,7 +1638,7 @@ fn attach_depths(
     compiled: &mut Compiled,
     decl: &Declarations<'_>,
     host: &dyn ModHost,
-) -> Result<(), ModulationCompileError> {
+) -> Result<(), ProgramCompileError> {
     let mut cells: BTreeMap<TargetKey, Vec<(LayerId, Param<Depth>)>> = BTreeMap::new();
     for (key, route) in decl.routes {
         if let RouteTarget::Param(target) = route.to
@@ -1655,7 +1655,7 @@ fn attach_depths(
             let count = cells.len();
             program
                 .bind_depths(cells)
-                .map_err(|_| ModulationCompileError::TooManyLayers { target, count })?;
+                .map_err(|_| ProgramCompileError::TooManyLayers { target, count })?;
         }
     }
     Ok(())

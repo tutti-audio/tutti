@@ -13,7 +13,7 @@
 //!   to a param or to another route's depth) and targets (`TargetDecl`: range
 //!   and automation) in, a `Compiled` out. Pure: no clock, no state, no
 //!   `Publisher`. Equal declarations compile equal, so a host republishes only
-//!   the programs that changed. Refusals are by name (`ModulationCompileError`).
+//!   the programs that changed. Refusals are by name (`ProgramCompileError`).
 //! - **The program.** `ControlProgram`: automation (which replaces the knob
 //!   where it has a value) plus time-function layers and event-input layers
 //!   (which add), summed in `LayerId` order. A description: equal programs
@@ -103,7 +103,7 @@ mod source;
 mod sources;
 
 pub use compile::{
-    Compiled, Declarations, MAX_CLOCK_PHASE, ModulationCompileError, RATE_ANCHOR_MARGIN, RouteDecl,
+    Compiled, Declarations, MAX_CLOCK_PHASE, ProgramCompileError, RATE_ANCHOR_MARGIN, RouteDecl,
     RouteKey, RouteTarget, SignalKind, SignalSource, Source, SourceKey, TargetDecl, TargetKey,
     compile, layer_id,
 };

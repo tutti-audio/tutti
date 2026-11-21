@@ -13,7 +13,7 @@ use core::num::NonZeroUsize;
 
 use tutti_buffers::{Sample, StereoPlanes};
 
-use crate::{Measure, Measurement, Result};
+use crate::{Measure, Result, StreamMeter};
 
 /// One frame on the scope.
 ///
@@ -111,7 +111,7 @@ impl<S: Sample> VectorscopeMeter<S> {
     }
 }
 
-impl<S: Sample> Measurement for VectorscopeMeter<S> {
+impl<S: Sample> StreamMeter for VectorscopeMeter<S> {
     type Input<'a> = StereoPlanes<'a, S>;
     type Item = ScopePoint;
     type Output = ();

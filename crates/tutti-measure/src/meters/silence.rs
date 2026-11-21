@@ -20,7 +20,7 @@ use tutti_units::{Amplitude, Db, SampleRate, Samples, Seconds};
 use core::marker::PhantomData;
 
 use crate::convert::for_blocks;
-use crate::{Measure, Measurement, Result};
+use crate::{Measure, Result, StreamMeter};
 use tutti_units::ranged;
 
 ranged! {
@@ -147,7 +147,7 @@ impl<S: Sample> Measure<S> for SilenceConfig {
 }
 
 /// A running strip-silence scan at one rate: fed chunks of the buffer in
-/// order, it reads the regions at [`finish`](Measurement::finish). A push yields no
+/// order, it reads the regions at [`finish`](StreamMeter::finish). A push yields no
 /// item: the regions are the output.
 ///
 /// Not for the audio thread: it keeps one entry per region found, so it grows
@@ -197,7 +197,7 @@ impl<S: Sample> SilenceMeter<S> {
     }
 }
 
-impl<S: Sample> Measurement for SilenceMeter<S> {
+impl<S: Sample> StreamMeter for SilenceMeter<S> {
     type Input<'a> = Mono<'a, S>;
     type Item = ();
     type Output = Vec<Region>;

@@ -88,7 +88,7 @@ fn run(
     sources: &[(SourceKey, Source)],
     routes: &[(RouteKey, RouteDecl)],
     targets: &[(TargetKey, TargetDecl)],
-) -> Result<Compiled, ModulationCompileError> {
+) -> Result<Compiled, ProgramCompileError> {
     compile(
         &Declarations {
             sources,
@@ -576,7 +576,7 @@ fn each_refusal_fires_by_name() {
         .collect();
     assert_eq!(
         run(&one_lfo, &routes, &t1),
-        Err(ModulationCompileError::TooManyLayers {
+        Err(ProgramCompileError::TooManyLayers {
             target: target(1),
             count: 17
         })
@@ -588,7 +588,7 @@ fn each_refusal_fires_by_name() {
         .collect();
     assert_eq!(
         run(&f, &routes, &t1),
-        Err(ModulationCompileError::TooManyInputs {
+        Err(ProgramCompileError::TooManyInputs {
             target: target(1),
             count: 9
         })
@@ -597,7 +597,7 @@ fn each_refusal_fires_by_name() {
     // A NaN range bound.
     assert_eq!(
         run(&one_lfo, &r1, &[(target(1), ranged(f64::NAN, 1.0))]),
-        Err(ModulationCompileError::NanRange(target(1)))
+        Err(ProgramCompileError::NanRange(target(1)))
     );
     // A circular target's range is an arc, min at most max: 170..-170 would
     // read the opposite arc once ordered. A line takes crossed bounds as ever,
@@ -605,7 +605,7 @@ fn each_refusal_fires_by_name() {
     let bearing = TargetKey::param(1, ParamAddr::Unit(UnitParam::Azimuth));
     assert_eq!(
         run(&one_lfo, &[], &[(bearing, ranged(170.0, -170.0))]),
-        Err(ModulationCompileError::CrossedArc(bearing))
+        Err(ProgramCompileError::CrossedArc(bearing))
     );
     assert!(run(&one_lfo, &[], &[(bearing, ranged(170.0, 190.0))]).is_ok());
     let height = TargetKey::param(1, ParamAddr::Unit(UnitParam::Elevation));
@@ -629,7 +629,7 @@ fn each_refusal_fires_by_name() {
     )];
     assert_eq!(
         run(&one_lfo, &r1, &live),
-        Err(ModulationCompileError::LiveCurve(target(1)))
+        Err(ProgramCompileError::LiveCurve(target(1)))
     );
     // A depth_by chain deeper than one.
     let two = [
@@ -643,7 +643,7 @@ fn each_refusal_fires_by_name() {
     ];
     assert_eq!(
         run(&two, &chain, &t1),
-        Err(ModulationCompileError::DepthByChain { route: RouteKey(3) })
+        Err(ProgramCompileError::DepthByChain { route: RouteKey(3) })
     );
     // Two depth routes to one route.
     let twice = [
@@ -653,7 +653,7 @@ fn each_refusal_fires_by_name() {
     ];
     assert_eq!(
         run(&two, &twice, &t1),
-        Err(ModulationCompileError::TwoDepthBy { route: RouteKey(1) })
+        Err(ProgramCompileError::TwoDepthBy { route: RouteKey(1) })
     );
     // A depth route from a signal source, and to a route from one.
     let sig = [
@@ -666,7 +666,7 @@ fn each_refusal_fires_by_name() {
     ];
     assert_eq!(
         run(&sig, &from_signal, &t1),
-        Err(ModulationCompileError::DepthBySignal { route: RouteKey(2) })
+        Err(ProgramCompileError::DepthBySignal { route: RouteKey(2) })
     );
     let of_signal = [
         (RouteKey(1), route(2, to(1), 0.5)),
@@ -674,12 +674,12 @@ fn each_refusal_fires_by_name() {
     ];
     assert_eq!(
         run(&sig, &of_signal, &t1),
-        Err(ModulationCompileError::DepthBySignal { route: RouteKey(2) })
+        Err(ProgramCompileError::DepthBySignal { route: RouteKey(2) })
     );
     // Unknown references.
     assert_eq!(
         run(&[], &r1, &t1),
-        Err(ModulationCompileError::UnknownSource { route: RouteKey(1) })
+        Err(ProgramCompileError::UnknownSource { route: RouteKey(1) })
     );
     assert_eq!(
         run(
@@ -687,24 +687,24 @@ fn each_refusal_fires_by_name() {
             &[(RouteKey(2), route(1, RouteTarget::Depth(RouteKey(9)), 1.0))],
             &t1
         ),
-        Err(ModulationCompileError::UnknownRoute { route: RouteKey(2) })
+        Err(ProgramCompileError::UnknownRoute { route: RouteKey(2) })
     );
     assert_eq!(
         run(&one_lfo, &r1, &[]),
-        Err(ModulationCompileError::UndeclaredTarget { route: RouteKey(1) })
+        Err(ProgramCompileError::UndeclaredTarget { route: RouteKey(1) })
     );
     // Duplicate keys.
     assert_eq!(
         run(&[one_lfo[0].clone(), one_lfo[0].clone()], &r1, &t1),
-        Err(ModulationCompileError::DuplicateSource(SourceKey(1)))
+        Err(ProgramCompileError::DuplicateSource(SourceKey(1)))
     );
     assert_eq!(
         run(&one_lfo, &[r1[0], r1[0]], &t1),
-        Err(ModulationCompileError::DuplicateRoute(RouteKey(1)))
+        Err(ProgramCompileError::DuplicateRoute(RouteKey(1)))
     );
     assert_eq!(
         run(&one_lfo, &r1, &[t1[0].clone(), t1[0].clone()]),
-        Err(ModulationCompileError::DuplicateTarget(target(1)))
+        Err(ProgramCompileError::DuplicateTarget(target(1)))
     );
     // Sources out of their domain, and a declared anchor.
     let bad_sources = [
@@ -728,7 +728,7 @@ fn each_refusal_fires_by_name() {
     for s in bad_sources {
         assert_eq!(
             run(&[(SourceKey(1), s.clone())], &r1, &t1),
-            Err(ModulationCompileError::BadSource(SourceKey(1))),
+            Err(ProgramCompileError::BadSource(SourceKey(1))),
             "{s:?}"
         );
     }
@@ -750,7 +750,7 @@ fn each_refusal_fires_by_name() {
     };
     assert_eq!(
         run(&[(SourceKey(1), anchored)], &r1, &t1),
-        Err(ModulationCompileError::AnchorDeclared(SourceKey(1)))
+        Err(ProgramCompileError::AnchorDeclared(SourceKey(1)))
     );
     // At the caps, it compiles.
     let routes: Vec<_> = (0..16)
@@ -991,7 +991,7 @@ fn a_value_that_is_not_finite_is_refused() {
         )];
         assert_eq!(
             run(&constant, &[(RouteKey(1), route(1, to(1), 0.5))], &t1),
-            Err(ModulationCompileError::BadSource(SourceKey(1))),
+            Err(ProgramCompileError::BadSource(SourceKey(1))),
             "constant {v}"
         );
     }
@@ -1013,7 +1013,7 @@ fn a_value_that_is_not_finite_is_refused() {
         let unrouted = [(SourceKey(1), lfo(LfoShape::Sine, c))];
         assert_eq!(
             run(&unrouted, &[], &t1),
-            Err(ModulationCompileError::BadSource(SourceKey(1))),
+            Err(ProgramCompileError::BadSource(SourceKey(1))),
             "{c:?}"
         );
     }
@@ -1036,7 +1036,7 @@ fn a_value_that_is_not_finite_is_refused() {
     assert!(anchor_of(c1.clocks[&SourceKey(10)]).is_some());
     assert_eq!(
         at(2.0, f64::INFINITY, Some(&c1), 2000),
-        Err(ModulationCompileError::BadSource(SourceKey(10)))
+        Err(ProgramCompileError::BadSource(SourceKey(10)))
     );
 }
 
@@ -1064,7 +1064,7 @@ fn a_clock_phase_past_the_bound_is_refused() {
         let unrouted = [(SourceKey(1), lfo(LfoShape::Sine, c))];
         assert_eq!(
             run(&unrouted, &[], &t1),
-            Err(ModulationCompileError::PhaseOutOfRange(SourceKey(1))),
+            Err(ProgramCompileError::PhaseOutOfRange(SourceKey(1))),
             "{c:?}"
         );
     }

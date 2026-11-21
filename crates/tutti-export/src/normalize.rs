@@ -16,7 +16,7 @@ use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{Float, Interleaved, InterleavedMut, Planes, Sample, convert, interleave};
 use tutti_dsp::DitherShape;
 use tutti_measure::{
-    Loudness, LoudnessConfig, LoudnessMeter, Measure, Measurement as _, TruePeakConfig,
+    Loudness, LoudnessConfig, LoudnessMeter, Measure, StreamMeter as _, TruePeakConfig,
     TruePeakMeter,
 };
 use tutti_units::{Amplitude, Db, SampleRate, Samples};

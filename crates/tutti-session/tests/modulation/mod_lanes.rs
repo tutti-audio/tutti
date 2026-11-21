@@ -25,7 +25,7 @@ use tutti_ump::{MidiChannel, NoteNumber, U7};
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Event, Fade, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_modulation::{
-    Adsr, Curve, Declarations, Follower, Lfo, ModulationCompileError, NoteEnvelope, RouteDecl,
+    Adsr, Curve, Declarations, Follower, Lfo, NoteEnvelope, ProgramCompileError, RouteDecl,
     RouteKey, RouteTarget, Source, SourceKey, TargetKey,
 };
 use tutti_nodes::automation::{Breakpoint, RecordMode, Trajectory};
@@ -701,7 +701,7 @@ fn two_ranges_or_automations_on_one_param_are_refused() {
                 s.mod_state().problems().next(),
                 Some(Problem::Refused {
                     cause: ModRefusal::Apply(ReconcileError::Compile(
-                        ModulationCompileError::DuplicateTarget(_)
+                        ProgramCompileError::DuplicateTarget(_)
                     )),
                     ..
                 })

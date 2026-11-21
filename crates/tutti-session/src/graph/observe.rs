@@ -171,7 +171,7 @@ impl<F: Float> Taps<'_, F> {
     where
         A: tutti_measure::Measure<F>,
         A::Context: AudioContext,
-        for<'a> <A::Meter as tutti_measure::Measurement>::Input<'a>: AudioInput<'a, F>,
+        for<'a> <A::Meter as tutti_measure::StreamMeter>::Input<'a>: AudioInput<'a, F>,
     {
         let rate = self.graph.editor.prepare().sample_rate();
         let width = u16::try_from(sources.len()).unwrap_or(u16::MAX);

@@ -18,7 +18,7 @@
 //! - a **phase-inverted** pair folds to a flat line — the clip looks like
 //!   silence and is not.
 //!
-//! [`PeakConfig`] carries a [`ChannelLayout`], [`Measurement::push`] refuses a
+//! [`PeakConfig`] carries a [`ChannelLayout`], [`StreamMeter::push`] refuses a
 //! mis-strided chunk, and the meter carries a ragged *block* tail so a caller
 //! feeding chunks of any length loses nothing.
 //!
@@ -34,7 +34,7 @@ use tutti_units::{Amplitude, Samples};
 use core::marker::PhantomData;
 
 use crate::convert::{Discard, for_blocks};
-use crate::{Error, Measure, Measurement, Result};
+use crate::{Error, Measure, Result, StreamMeter};
 use tutti_dsp::rms;
 
 /// One block of a waveform summary, for one channel.
@@ -386,7 +386,7 @@ impl<S: Sample> PeakMeter<S> {
     }
 }
 
-impl<S: Sample> Measurement for PeakMeter<S> {
+impl<S: Sample> StreamMeter for PeakMeter<S> {
     type Input<'a> = Interleaved<'a, S>;
     type Item = ChannelBlock;
     type Output = PeakBlocks;

@@ -687,7 +687,7 @@ pub mod sampler {
 /// silence, onsets, spectrum, chroma and the vectorscope. Feature `analyze`.
 #[cfg(feature = "analyze")]
 pub mod measure {
-    pub use tutti_measure::{Error, Measure, Measurement};
+    pub use tutti_measure::{Error, Measure, StreamMeter};
     // Silence and onsets.
     pub use tutti_measure::{
         DetectionFunction, FiniteLevel, FiniteLevelError, Framing, Novelty, Onset, OnsetConfig,
@@ -722,7 +722,7 @@ pub mod measure {
 pub mod modulation {
     pub use tutti_modulation::{
         Amount, ControlSource, Corners, Curve, CurveSegment, DepthBy, Follower, LevelFollower, Lfo,
-        LfoRate, Macro, ModulationCompileError, NoteAdsr, NoteEnvelope, Polarity, ProgramError,
+        LfoRate, Macro, NoteAdsr, NoteEnvelope, Polarity, ProgramCompileError, ProgramError,
         SignalKind, TargetDecl,
     };
     pub use tutti_modulation::{

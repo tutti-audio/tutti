@@ -9,7 +9,7 @@
 
 use tutti_buffers::{ChannelLayout, ChannelTopology, Float, Pull, Source};
 use tutti_graph::{MissingSource, TapReader};
-use tutti_measure::{Measure, Measurement};
+use tutti_measure::{Measure, StreamMeter};
 use tutti_units::{SampleRate, Samples};
 
 use super::feed::{Bind, Chunk, View};
@@ -40,7 +40,7 @@ pub enum AnalyzerError {
 /// [`try_iter`](Self::try_iter) and reads what the tap lost
 /// ([`lost`](Self::lost)). Opened by [`Taps::open_analyzer`](crate::Taps::open_analyzer).
 ///
-/// Generic over the analysis `A`, never boxed: [`Measurement`] is not object-safe.
+/// Generic over the analysis `A`, never boxed: [`StreamMeter`] is not object-safe.
 /// Drain it from a thread of your own, never the audio thread. Dropping it
 /// leaves the tap open until the session's next
 /// [`Reclaim`](crate::Phase::Reclaim) phase, which closes it. It is read on
@@ -51,7 +51,7 @@ pub struct Analyzer<A: Measure<F>, F: Float = f32> {
     meter: A::Meter,
     chunk: Chunk<'static, F>,
     /// The items the last drain collected; handed out by `try_iter`.
-    items: Vec<<A::Meter as Measurement>::Item>,
+    items: Vec<<A::Meter as StreamMeter>::Item>,
     /// The tap's losses read so far; `lost` adds what the tap counted since.
     lost: std::cell::Cell<Samples>,
     refused: Samples,
@@ -76,7 +76,7 @@ where
     F: Float,
     A: Measure<F>,
     A::Context: AudioContext,
-    for<'a> <A::Meter as Measurement>::Input<'a>: AudioInput<'a, F>,
+    for<'a> <A::Meter as StreamMeter>::Input<'a>: AudioInput<'a, F>,
 {
     /// Opens the tap `open` makes, once `analysis` is bound to `rate` and to
     /// `width` channels and its view of them is known to exist.
@@ -91,7 +91,7 @@ where
         let mut chunk = Chunk::new(&ChannelTopology::default_for(layout));
         // An empty chunk shows whether the meter's view of this width exists.
         chunk.fill(Samples::ZERO)?;
-        <<A::Meter as Measurement>::Input<'_> as View<'_, F>>::view(&mut chunk)?;
+        <<A::Meter as StreamMeter>::Input<'_> as View<'_, F>>::view(&mut chunk)?;
         let reader = open()?;
         Ok(Self {
             reader,
@@ -112,7 +112,7 @@ where
     /// on) is skipped and counted ([`refused`](Self::refused)); the chunks
     /// after it are shown as usual. Once the tap has ended
     /// ([`is_finished`](Self::is_finished)) or failed ([`is_failed`](Self::is_failed)) there is nothing more.
-    pub fn try_iter(&mut self) -> impl Iterator<Item = <A::Meter as Measurement>::Item> + '_ {
+    pub fn try_iter(&mut self) -> impl Iterator<Item = <A::Meter as StreamMeter>::Item> + '_ {
         self.drain();
         self.items.drain(..)
     }
@@ -129,7 +129,7 @@ where
     /// last drain completes are dropped: drain with [`try_iter`](Self::try_iter)
     /// first to keep them.
     #[must_use]
-    pub fn finish(mut self) -> <A::Meter as Measurement>::Output {
+    pub fn finish(mut self) -> <A::Meter as StreamMeter>::Output {
         self.drain();
         self.meter.finish()
     }
@@ -161,7 +161,7 @@ where
     /// taken.
     fn push(&mut self) {
         let frames = self.chunk.frames();
-        let taken = <<A::Meter as Measurement>::Input<'_> as View<'_, F>>::view(&mut self.chunk)
+        let taken = <<A::Meter as StreamMeter>::Input<'_> as View<'_, F>>::view(&mut self.chunk)
             .ok()
             .is_some_and(|view| self.meter.push(view, &mut self.items).is_ok());
         if !taken {
