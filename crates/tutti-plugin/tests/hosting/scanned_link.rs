@@ -4,8 +4,8 @@
 #![cfg(all(feature = "clap", unix))]
 
 use tutti_plugin::catalog::Plugin;
+use tutti_plugin_db::PluginDb;
 use tutti_plugin_db::{Catalog, CatalogConfig, Hosting};
-use tutti_plugin_db::{PluginDb, ScanPoll};
 use tutti_plugin_types::PluginFormat;
 use tutti_plugin_types::{Locator, PluginId};
 
@@ -25,21 +25,8 @@ fn a_scanned_link_to_a_differently_named_target_loads_by_its_catalog_key() {
         .scan_dirs(vec![scanned])
         .probe_locator(Locator::at(tutti_fixtures::plugin_probe()));
     let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
-    let mut task = catalog.scan().expect("no task is running");
-    let mut result = None;
-    tutti_fixtures::wait_until(
-        "the scan to end",
-        std::time::Duration::from_secs(120),
-        || match catalog.try_apply(&mut task) {
-            ScanPoll::Running => false,
-            ScanPoll::Done(done) => {
-                result = Some(done);
-                true
-            }
-            ScanPoll::Died => panic!("the scan's worker died"),
-        },
-    );
-    let result = result.expect("the wait ended on a result");
+    let task = catalog.scan().expect("no scan is held");
+    let result = catalog.apply(task.run()).expect("this catalog's own scan");
     assert!(result.failures().is_empty(), "{:?}", result.failures());
     let (listed, _) = catalog.iter().next().expect("the link is one row");
     assert_eq!(listed.path(), tutti_plugin_db::canonical_path(&target));

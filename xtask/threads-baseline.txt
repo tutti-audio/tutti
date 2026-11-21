@@ -22,4 +22,3 @@ tutti-cpal  spawn_dedicated  crates/tutti-cpal/src/owner.rs::Owned::spawn  core-
 tutti-session  spawn  crates/tutti-session/src/recorder.rs::Recorder::spawn  core-engine
 
 # plugin
-tutti-plugin-db  spawn_dedicated  crates/tutti-plugin-db/src/scanner.rs::Scanner::start  plugin

@@ -15,15 +15,16 @@
 //!   not deserialize.
 //! - [`Scanner`] probes the files that are new or changed since their row was
 //!   stamped, through the probe it is given (the host supplies an out-of-process
-//!   one). A scan runs on a worker over a snapshot of the table and sends
-//!   changes; the owner applies them with [`Scan::poll`], so the table stays
-//!   readable for the whole scan. A sentinel file (the dead-man's pedal)
+//!   one). A scan is a [`ScanPlugins`] over a snapshot of the table: its
+//!   `run` blocks the caller and returns the changes as [`ScannedPlugins`], which
+//!   the owner applies with [`Catalog::apply`], so the table stays readable for
+//!   the whole scan. A sentinel file (the dead-man's pedal)
 //!   outlives a host that dies mid-probe and blacklists the culprit on the next
 //!   run.
 //!
 //! - [`Catalog`] wraps a [`PluginDb`] with the persistence the app supplies and
 //!   what a bare table cannot do: scans, registrations and measurements as
-//!   cancellable tasks, crash recovery, the blacklist ([`BlacklistView`]) and
+//!   cancellable values, crash recovery, the blacklist ([`BlacklistView`]) and
 //!   [`resolve`](Catalog::resolve), which names a saved id's plugin as a
 //!   [`Loadable`]. Its probe spawns `plugin-probe` on a file, waits under a
 //!   deadline ([`DEFAULT_PROBE_TIMEOUT`], [`DEFAULT_MEASURE_TIMEOUT`]) and reads
@@ -59,8 +60,9 @@ pub use mtime::{BeforeEpoch, Mtime};
 pub use probe::DEFAULT_PROBE_TIMEOUT;
 pub use probing::DEFAULT_MEASURE_TIMEOUT;
 pub use scanner::{
-    FileFailure, FilesError, ProbeFailure, Scan, ScanBusy, ScanError, ScanOutcome, ScanPoll,
-    ScanProgress, ScanResult, ScannedFile, Scanner, probe_plugin_fallback,
+    FileFailure, FilesError, ProbeFailure, ScanBusy, ScanCanceller, ScanOutcome, ScanPlugins,
+    ScanProgress, ScanProgressReader, ScanReport, ScannedFile, ScannedPlugins, Scanner, StaleScan,
+    probe_plugin_fallback,
 };
 pub use stop::Stop;
 pub use table::{
