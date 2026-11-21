@@ -397,7 +397,7 @@ pub(super) struct Unsolicited {
     /// Why the plugin last would not stop, until drained; a later one replaces
     /// it.
     would_not_stop: Option<String>,
-    /// The server's latest cumulative losses (commands, edits), until drained.
+    /// The server's latest cumulative losses, until drained.
     server_losses: Option<ServerLosses>,
     io: bool,
     /// The buses the last `PluginIoChanged` carried, until drained.

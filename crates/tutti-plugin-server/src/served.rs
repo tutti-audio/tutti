@@ -25,8 +25,8 @@ use tutti_plugin_types::{
     LoadStage, LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock, Notice, OutOfProcess,
     ParamEdit, ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginIo, PluginRef,
     PluginResult, Prepare, Preset, PresetId, ProcessWake, RateRefusal, RateRefusalCause,
-    RenderMode, RenderModeSupport, Request, SampleRate, Samples, Seat, Stage, State, StateError,
-    StateUse, TrackInfo, Widths,
+    RenderMode, RenderModeSupport, Request, SampleRate, Samples, Seat, ServerLosses, Stage, State,
+    StateError, StateUse, TrackInfo, Widths,
 };
 use tutti_rt::TallyWriter;
 use tutti_units::Normalized;
@@ -223,7 +223,7 @@ pub(crate) struct Server<L: OutOfProcess> {
     /// the plugin refused.
     edits_refused: TallyWriter<u64>,
     /// The loss counts last told to the host ([`News::ServerLosses`]).
-    told_losses: (u64, u64, u64),
+    told_losses: ServerLosses,
 }
 
 /// How long a plan that waits for the Processor to come home from the render
@@ -365,7 +365,11 @@ impl<L: ServerSide> Server<L> {
             events: Vec::new(),
             refused: false,
             edits_refused: ties.edits_refused.writer(),
-            told_losses: (0, 0, 0),
+            told_losses: ServerLosses {
+                commands_refused: 0,
+                edits_refused: 0,
+                refused_off_thread_calls: 0,
+            },
             ties,
         };
         // The wake outlives every activation: the plugin's host state is the
@@ -728,21 +732,22 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
             self.events.push(News::ProcessRequested);
         }
         // A poisoned plugin has no control surface: its last count stands.
-        let refused_off_thread = self
-            .lifecycle
-            .control()
-            .map_or(self.told_losses.2, |c| c.refused_off_thread_calls());
-        let losses = (
-            self.ties.commands_refused.get(),
-            self.ties.edits_refused.get(),
-            refused_off_thread,
-        );
+        let losses = ServerLosses {
+            commands_refused: self.ties.commands_refused.get(),
+            edits_refused: self.ties.edits_refused.get(),
+            refused_off_thread_calls: self
+                .lifecycle
+                .control()
+                .map_or(self.told_losses.refused_off_thread_calls, |c| {
+                    c.refused_off_thread_calls()
+                }),
+        };
         if losses != self.told_losses {
             self.told_losses = losses;
             self.events.push(News::ServerLosses {
-                commands_refused: losses.0,
-                edits_refused: losses.1,
-                refused_off_thread_calls: losses.2,
+                commands_refused: losses.commands_refused,
+                edits_refused: losses.edits_refused,
+                refused_off_thread_calls: losses.refused_off_thread_calls,
             });
         }
         std::mem::take(&mut self.events)
