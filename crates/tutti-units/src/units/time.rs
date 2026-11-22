@@ -302,6 +302,8 @@ crate::ranged! {
     ///
     /// `new` and `of` take Hertz; serde reads and writes the bare `f64` and
     /// refuses what `new` refuses.
+    /// [`get`](Self::get) is for a boundary the unit types do not cross (C ABI,
+    /// IPC, WIT), not for arithmetic the type deliberately omits.
     #[repr(transparent)]
     #[derive(PartialOrd)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

@@ -16,6 +16,9 @@ crate::ranged! {
     /// There is no `Unit` impl and no `From<f64>`: both would be an unchecked
     /// constructor.
     ///
+    /// [`get`](Self::get) is for a boundary the unit types do not cross (C ABI,
+    /// IPC, WIT) or for beat math.
+    ///
     /// ```
     /// use tutti_units::Bpm;
     ///
