@@ -7,9 +7,8 @@
 //! 1 000 frames at 48 kHz.
 
 use std::sync::Arc;
-use tutti_rt::Mutex;
 
-use crate::common::{MF, note};
+use crate::common::{MF, Wire, note};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{EventCapacity, EventTapOptions, TapAlign, UmpAt};
@@ -25,24 +24,6 @@ use tutti_ump::{MidiChannel, NoteKeyEvent, NoteNumber};
 use tutti_units::{Beat, BeatDuration};
 
 const RATE: f64 = 48_000.0;
-
-/// Every batch the output was handed, in order.
-#[derive(Clone, Default)]
-struct Wire(Arc<Mutex<Vec<Vec<UmpAt>>>>);
-
-impl MidiOut for Wire {
-    fn queue_timed(&self, batch: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
-        let events: Vec<tutti_graph::UmpAt> = batch.iter().map(|e| (e.at, e.ump)).collect();
-        self.0.lock().push(events.to_vec());
-        tutti_midi_runtime::Taken::within(batch, batch.len())
-    }
-}
-
-impl Wire {
-    fn batches(&self) -> Vec<Vec<UmpAt>> {
-        std::mem::take(&mut *self.0.lock())
-    }
-}
 
 /// A session with its clock enabled and a stamping-off sink on `wire`, with the
 /// sink's handle, which keeps it open.

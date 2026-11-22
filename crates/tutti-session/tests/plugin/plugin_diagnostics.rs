@@ -139,18 +139,20 @@ mod clap {
                 held: std::time::Duration::from_secs(5),
             });
 
-        let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(10);
-        let cause = loop {
-            if let PluginHealth::Died { cause } = s.plugin_view(node).unwrap().health() {
-                break cause;
-            }
-            assert!(
-                tutti_platform::Instant::now() < deadline,
-                "it never read Died"
-            );
-            render_block(&mut s);
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        };
+        let mut died = None;
+        tutti_fixtures::wait_until(
+            "the plugin to read Died",
+            tutti_fixtures::HANG_GUARD,
+            || {
+                if let PluginHealth::Died { cause } = s.plugin_view(node).unwrap().health() {
+                    died = Some(cause);
+                    return true;
+                }
+                render_block(&mut s);
+                false
+            },
+        );
+        let cause = died.expect("the wait ended on Died");
         assert!(
             matches!(
                 cause,

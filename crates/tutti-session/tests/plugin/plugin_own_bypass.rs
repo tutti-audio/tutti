@@ -11,8 +11,6 @@ use crate::param_reads::ParamReads as _;
 
 use std::time::Duration;
 
-use tutti_platform::Instant;
-
 use crate::loading::Perform as _;
 use crate::loading::{LoadPlugin, Spec};
 use tutti_buffers::InterleavedMut;
@@ -67,19 +65,15 @@ fn told(s: &Session, node: tutti_graph::NodeKey) -> Option<f64> {
         .map(Normalized::get)
 }
 
-/// Renders blocks until the plugin's last bypass point is `want`.
-fn until_told(s: &mut Session, node: tutti_graph::NodeKey, want: f64) -> bool {
+/// Renders blocks until the plugin's last bypass point is `want`, for at most a
+/// bound that only guards a hang.
+fn until_told(s: &mut Session, node: tutti_graph::NodeKey, want: f64, what: &str) {
     let mut block = vec![0.0f32; BLOCK * 2];
-    let end = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < end {
+    tutti_fixtures::wait_until(what, Duration::from_secs(30), || {
         s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
         let _ = s.update();
-        if told(s, node) == Some(want) {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    false
+        told(s, node) == Some(want)
+    });
 }
 
 /// **Bypassed tells the plugin its bypass is on, and Active tells it off.**
@@ -90,9 +84,9 @@ fn setting_bypassed_writes_the_plugins_own_bypass_and_active_clears_it() {
     let node = key.erase();
     assert_eq!(told(&s, node), Some(0.0), "the plugin starts processing");
     s.set(ModeTarget::of(node).to(NodeMode::Bypassed)).unwrap();
-    assert!(until_told(&mut s, node, 1.0), "bypassed was not told");
+    until_told(&mut s, node, 1.0, "bypassed was not told");
     s.set(ModeTarget::of(node).to(NodeMode::Active)).unwrap();
-    assert!(until_told(&mut s, node, 0.0), "processing was not told");
+    until_told(&mut s, node, 0.0, "processing was not told");
 }
 
 /// **A plugin swapped in under a `Bypassed` node is bypassed.** The node was
@@ -104,10 +98,7 @@ fn a_plugin_replacing_another_under_a_bypassed_node_is_bypassed_as_it_enters() {
     let (mut s, key) = session_with_plugin();
     let node = key.erase();
     s.set(ModeTarget::of(node).to(NodeMode::Bypassed)).unwrap();
-    assert!(
-        until_told(&mut s, node, 1.0),
-        "the first plugin is bypassed"
-    );
+    until_told(&mut s, node, 1.0, "the first plugin is bypassed");
 
     let outgoing_pid = s
         .plugin_view(node)
@@ -135,10 +126,7 @@ fn a_plugin_replacing_another_under_a_bypassed_node_is_bypassed_as_it_enters() {
         incoming_pid, outgoing_pid,
         "the node's plugin is the new one"
     );
-    assert!(
-        until_told(&mut s, node, 1.0),
-        "the incoming plugin was not bypassed"
-    );
+    until_told(&mut s, node, 1.0, "the incoming plugin was not bypassed");
 }
 
 /// **A bypass the plugin is moved off is made the node's mode again.** The
@@ -161,10 +149,7 @@ fn a_restore_that_leaves_the_bypass_on_under_an_active_node_is_reconciled() {
     handle
         .send_parameter(BYPASS, Normalized::of(1.0))
         .expect("a declared parameter");
-    assert!(
-        until_told(&mut s, node, 1.0),
-        "the plugin's own bypass went on"
-    );
+    until_told(&mut s, node, 1.0, "the plugin's own bypass went on");
     let main = tutti_fixtures::main_thread();
     let state = s
         .save_state(&key, tutti_plugin_types::StateUse::Project)
@@ -177,9 +162,11 @@ fn a_restore_that_leaves_the_bypass_on_under_an_active_node_is_reconciled() {
         .perform(main)
         .expect("restores");
     s.apply(restored).expect("the node hosts the plugin");
-    assert!(
-        until_told(&mut s, node, 0.0),
-        "the session did not make the plugin's bypass the node's mode"
+    until_told(
+        &mut s,
+        node,
+        0.0,
+        "the session did not make the plugin's bypass the node's mode",
     );
     assert!(
         s.plugin_view(node)

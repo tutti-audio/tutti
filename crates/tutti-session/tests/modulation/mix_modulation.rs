@@ -10,8 +10,9 @@
 //! `depth * macro * span`, clamped to the range; every figure is exact in
 //! `f32`).
 
+use crate::common::render;
+use crate::offline::offline;
 use tutti_buffers::ChannelLayout;
-use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::ReconcileError;
 use tutti_nodes::testing::Const;
@@ -45,10 +46,6 @@ impl Node for Halve {
     fn reset(&mut self) {}
 }
 
-fn offline() -> Session {
-    Session::builder().build().expect("builds")
-}
-
 fn settle(s: &mut Session) {
     for _ in 0..6 {
         let _ = s.update();
@@ -58,17 +55,6 @@ fn settle(s: &mut Session) {
         None,
         "the declarations apply"
     );
-}
-
-/// Output channel 0 (the left of the stereo main output) for `blocks` blocks.
-fn render(s: &mut Session, blocks: usize) -> Vec<f32> {
-    let mut all = Vec::new();
-    let mut buf = vec![0.0f32; BLOCK * 2];
-    for _ in 0..blocks {
-        s.render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
-        all.extend(buf.as_chunks::<2>().0.iter().map(|f| f[0]));
-    }
-    all
 }
 
 /// `Const(A) -> Halve -> output 0`; the node and the render's blend at `m`.

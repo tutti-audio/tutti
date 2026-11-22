@@ -2,14 +2,13 @@
 //! (the card is a `ManualStreamDriver`, the timer is real). What a switch
 //! keeps, what it refuses before anything stops, and what it hands back.
 
-use std::time::Duration;
-
 use tutti_buffers::InterleavedMut;
 use tutti_platform::Instant;
 
 use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_cpal::{DeviceId, DeviceSelector};
 use tutti_engine::{ManualStreamDriver, OutputSpec};
+use tutti_fixtures::{HANG_GUARD, wait_until};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
@@ -68,14 +67,6 @@ fn a_system_clock_block_past_the_callback_ceiling_is_refused() {
     );
 }
 
-fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
-    let limit = Instant::now() + Duration::from_secs(10);
-    while !done() {
-        assert!(Instant::now() < limit, "{what}");
-        std::thread::sleep(Duration::from_millis(2));
-    }
-}
-
 fn play<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(s: &Session<K, C>) {
     s.play().expect("room");
 }
@@ -86,7 +77,7 @@ fn frame<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(s: &Ses
 
 /// Waits for the timer to have rendered past `than`, updating as a host does.
 fn wait_past(s: &mut SystemSession, than: u64) -> u64 {
-    wait_until("the timer never rendered another block", || {
+    wait_until("the timer to render another block", HANG_GUARD, || {
         let _ = s.update();
         frame(s) > than
     });
@@ -138,7 +129,7 @@ fn a_device_session_switches_to_the_timer_and_its_graph_keeps_rendering() {
     play(&s);
     let mut tap = s.open_heard_tap(Samples::new(4 * BLOCK)).unwrap();
     let mut heard = vec![0.0f32; 2 * BLOCK];
-    wait_until("the constant never reached the tap", || {
+    wait_until("the constant to reach the tap", HANG_GUARD, || {
         let _ = s.update();
         let frames = tap
             .pop_into(InterleavedMut::new(&mut heard, tap.layout()).unwrap())
@@ -286,15 +277,17 @@ fn a_poisoned_graph_comes_back_stopped() {
         err.error()
     );
     assert!(!stream.is_open(), "the card never started");
-    let s = err.into_session();
+    let mut s = err.into_session();
     assert_eq!(
         s.stream_spec().sample_rate,
         s.sample_rate(),
         "the host says what the graph is prepared at"
     );
     let stopped_at = frame(&s);
-    std::thread::sleep(Duration::from_millis(100));
-    assert_eq!(frame(&s), stopped_at, "the timer is stopped");
+    for _ in 0..50 {
+        let _ = s.update();
+        assert_eq!(frame(&s), stopped_at, "the timer is stopped");
+    }
     assert_eq!(s.faults().count(), 0, "and the session still answers");
 }
 
@@ -675,7 +668,7 @@ impl tutti_engine::StreamDriver for ThreadedCard {
             let mut data = vec![0.0f32; 64 * channels];
             while !flag.load(std::sync::atomic::Ordering::SeqCst) {
                 block.render(&mut data);
-                std::thread::sleep(Duration::from_millis(1));
+                std::thread::yield_now();
             }
         });
         Ok(ThreadedRunning {
@@ -725,7 +718,7 @@ fn the_old_driver_renders_its_last_block_before_the_new_one_its_first() {
         .unwrap()
         .unfaded();
     let _ = s.update();
-    wait_until("the timer never rendered", || {
+    wait_until("the timer to render", HANG_GUARD, || {
         !log.lock().unwrap().is_empty()
     });
     let mut live = s
@@ -733,7 +726,7 @@ fn the_old_driver_renders_its_last_block_before_the_new_one_its_first() {
         .unwrap_or_else(|e| panic!("switches: {}", e.error()));
     let _ = live.update();
     let at = log.lock().unwrap().len();
-    wait_until("the card never rendered", || {
+    wait_until("the card to render", HANG_GUARD, || {
         log.lock().unwrap().len() > at + 3
     });
     let (changes, back) = hand_overs(&log.lock().unwrap());
@@ -746,7 +739,7 @@ fn the_old_driver_renders_its_last_block_before_the_new_one_its_first() {
         .unwrap_or_else(|e| panic!("switches: {}", e.error()));
     let _ = system.update();
     let at = log.lock().unwrap().len();
-    wait_until("the timer never rendered again", || {
+    wait_until("the timer to render again", HANG_GUARD, || {
         log.lock().unwrap().len() > at + 3
     });
     let (changes, back) = hand_overs(&log.lock().unwrap());

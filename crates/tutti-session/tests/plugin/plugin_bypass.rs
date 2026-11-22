@@ -19,10 +19,7 @@
 use crate::loading::{LoadPlugin, Spec};
 use crate::support;
 
-use std::time::Duration;
-
 use tutti_buffers::MaxBlock;
-use tutti_platform::Instant;
 
 use support::clap_probe;
 use tutti_buffers::ChannelLayout;
@@ -127,6 +124,21 @@ impl Rig {
         out
     }
 
+    /// Waits until the server has answered the chunk the node last submitted.
+    fn answered(&self) {
+        tutti_fixtures::wait_until(
+            "the server to answer the chunk in flight",
+            tutti_fixtures::HANG_GUARD,
+            || {
+                self.s
+                    .plugin_view(self.plugin)
+                    .expect("hosted")
+                    .diagnostics()
+                    .chunk_in_flight_answered()
+            },
+        );
+    }
+
     /// The blocks the plugin's server has answered.
     fn replies(&self) -> u64 {
         self.s
@@ -200,14 +212,15 @@ fn a_plugin_without_its_own_bypass_is_left_to_the_executor() {
 #[test]
 fn a_bypassed_plugin_is_not_called_and_comes_back() {
     let mut r = rig(NodeMode::Bypassed);
-    // Paced at the device's rate, so a server that was called has had time to
-    // answer: the count not moving is the node not calling it, not a late reply.
-    let block_time = Duration::from_secs_f64(BLOCK as f64 / RATE.get());
+    // Each block waits for the server to answer the chunk before it, and the last
+    // for the one it submitted: the count not moving is the node not calling the
+    // server, not a late reply.
     let before = r.replies();
     for _ in 0..8 {
-        std::thread::sleep(block_time);
+        r.answered();
         let _ = r.render(1);
     }
+    r.answered();
     assert_eq!(
         r.replies(),
         before,
@@ -218,22 +231,17 @@ fn a_bypassed_plugin_is_not_called_and_comes_back() {
         .expect("the plugin node is there");
     let _ = r.s.update();
     // The served pipeline is realtime here: a block whose reply is late plays
-    // silence and is not counted. So the blocks stay paced and the plugin is
-    // waited for (reset, the warm-up of `L` frames, the 256-frame fade, then
-    // the plugin alone), up to a deadline that only a plugin that never comes
-    // back reaches.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        std::thread::sleep(block_time);
-        let out = r.render(1);
-        if r.replies() > before && out.iter().any(|&x| x != 0.0) {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "the plugin was not heard (replies {} from {before}) 10 s after it \
-             was made active",
-            r.replies()
-        );
-    }
+    // silence and is not counted. So each block waits for the chunk before it to
+    // be answered, and the plugin is waited for (reset, the warm-up of `L`
+    // frames, the 256-frame fade, then the plugin alone), up to a bound that
+    // only a plugin that never comes back reaches.
+    tutti_fixtures::wait_until(
+        "the plugin to be heard after it was made active",
+        tutti_fixtures::HANG_GUARD,
+        || {
+            r.answered();
+            let out = r.render(1);
+            r.replies() > before && out.iter().any(|&x| x != 0.0)
+        },
+    );
 }
