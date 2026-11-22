@@ -22,9 +22,9 @@ use std::sync::atomic::Ordering;
 use common::{Kind, Pair, SpecBehaviour, bits, driver_value, input_signal, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    CompileError, CycleEdge, Edge, Editor, EventOutputPort, ForkMode, ForkTarget, GraphInvalid,
-    GraphSpec, InputPort, NodeKey, NodeMix, NodeMode, OutputPort, ParamIn, ParamPorts,
-    ParamPortsError, ParamRange, PortSource, Topology, TransportPosition, ValidGraph, compile,
+    CompileError, CycleEdge, Edge, Editor, EventOutputPort, ForkTarget, GraphInvalid, GraphSpec,
+    InputPort, NodeKey, NodeMix, NodeMode, OutputPort, ParamIn, ParamPorts, ParamPortsError,
+    ParamRange, PortSource, RenderMode, Topology, TransportPosition, ValidGraph, compile,
 };
 use tutti_units::{Mix, Tail, UnitAddr, UnitParam};
 
@@ -700,7 +700,10 @@ fn the_mix_cell_is_the_one_writer() {
     knob.store(0.875, Ordering::Release);
     // A fork starts at the base the cell holds.
     let (fed, mut fexec) = ed
-        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare(BLOCK))
+        .fork(
+            ForkTarget::MainOutput,
+            prepare(BLOCK).with_render_mode(RenderMode::Offline),
+        )
         .expect("forks");
     assert_eq!(fed.mix(key(1)), Mix::new(0.875));
     let o = block(&mut fexec, &input);

@@ -15,6 +15,7 @@ use crate::NodeKey;
 use crate::{Edge, FeedbackFrom, InputPort, OutputPort, PortSink, PortSource, Topology};
 
 use crate::CompileError;
+use crate::RenderMode;
 use crate::editor::{CommitError, Editor};
 use crate::exec::Executor;
 use crate::gain::EdgeGain;
@@ -32,8 +33,9 @@ use tutti_buffers::Float;
 /// unit something over a control channel it already has: a hosted plugin's
 /// source asks the live instance for its saved state.)
 pub trait ForkSource<F: Float = f32>: Send {
-    /// A fresh unit for `mode`, sharing no state with the live one: severed
-    /// from every live input and reset. The editor prepares it.
+    /// A fresh unit rendering in `mode` (the fork's prepare's), sharing no
+    /// state with the live one: severed from every live input and reset. The
+    /// editor prepares it.
     ///
     /// An `Err` fails the whole fork as [`ForkError::Source`], naming the key.
     /// A source whose copy is a clone cannot fail; one that has to build its
@@ -44,7 +46,7 @@ pub trait ForkSource<F: Float = f32>: Send {
     /// # Errors
     ///
     /// [`ForkCause`] when the copy cannot be built.
-    fn fork(&self, mode: ForkMode) -> Result<Forked<F>, ForkCause>;
+    fn fork(&self, mode: RenderMode) -> Result<Forked<F>, ForkCause>;
 
     /// The control-thread half of a fork ([`Editor::fork_gather`]): read
     /// what the fork must take from the live node **now**, and say where the
@@ -70,7 +72,7 @@ pub trait ForkSource<F: Float = f32>: Send {
     ///
     /// [`ForkCause`] when the build cannot start; the default returns what
     /// [`fork`](Self::fork) does.
-    fn gather(&self, mode: ForkMode) -> Result<ForkBuild<F>, ForkCause> {
+    fn gather(&self, mode: RenderMode) -> Result<ForkBuild<F>, ForkCause> {
         self.fork(mode).map(ForkBuild::pinned)
     }
 }
@@ -509,20 +511,6 @@ impl fmt::Display for ForkCause {
     }
 }
 
-/// What a fork is for.
-///
-/// Neither mode carries a timeline: a forked node reads musical time from
-/// its block's `Env`, which the fork's executor hands it like the live one's.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ForkMode {
-    /// A live duplicate: isolated and reset.
-    Live,
-    /// An offline render: isolated and reset. A source that renders
-    /// differently offline reads this (a hosted plugin is told it renders
-    /// offline); a sampler's disk voice refuses [`Live`](Self::Live).
-    Offline,
-}
-
 /// What [`Editor::fork`] copies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ForkTarget {
@@ -633,7 +621,7 @@ impl Error for ForkError {
 ///
 /// ```
 /// use tutti_buffers::MaxBlock;
-/// use tutti_graph::{Editor, ForkByClone, ForkMode, ForkTarget, Prepare};
+/// use tutti_graph::{Editor, ForkByClone, ForkTarget, Prepare};
 /// # use tutti_graph::{Cx, Io, Node, Shape, Status};
 /// # use tutti_units::{SampleRate, Samples};
 /// # use tutti_buffers::ChannelLayout;
@@ -652,7 +640,7 @@ impl Error for ForkError {
 /// editor.spec_mut().topology.set_outputs([tutti_graph::PortSource::Node(
 ///     tutti_graph::OutputPort { node: NodeKey(1), port: 0 },
 /// )]);
-/// assert!(editor.fork(ForkTarget::Node(NodeKey(1)), ForkMode::Live, prepare).is_ok());
+/// assert!(editor.fork(ForkTarget::Node(NodeKey(1)), prepare).is_ok());
 /// ```
 #[derive(Clone, Debug)]
 pub struct ForkByClone<N>(pub N);
@@ -661,7 +649,7 @@ pub struct ForkByClone<N>(pub N);
 struct CloneFork<N>(N);
 
 impl<F: Float, N: Node<F> + Clone + Send + 'static> ForkSource<F> for CloneFork<N> {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked<F>, ForkCause> {
         let mut node = self.0.clone();
         node.reset();
         Ok(Forked::new(Box::new(node)))
@@ -675,7 +663,7 @@ impl<F: Float, N: Node<F> + Clone + Send + 'static> ForkSource<F> for CloneFork<
     /// before the fork was split. A node whose controls must be frozen at
     /// the fork is a `ParamNode` ([`ParamFork`](crate::ParamFork) reads the
     /// cells here and detaches its own) or brings its own source.
-    fn gather(&self, mode: ForkMode) -> Result<ForkBuild<F>, ForkCause> {
+    fn gather(&self, mode: RenderMode) -> Result<ForkBuild<F>, ForkCause> {
         self.fork(mode).map(ForkBuild::ready)
     }
 }
@@ -714,7 +702,7 @@ impl<F: Float, N: Node<F> + Clone + Send + 'static> IntoNode<F> for ForkByClone<
 ///
 /// ```
 /// use tutti_buffers::MaxBlock;
-/// use tutti_graph::{Editor, ForkError, ForkMode, ForkTarget, Prepare, Unforkable};
+/// use tutti_graph::{Editor, ForkError, ForkTarget, Prepare, Unforkable};
 /// # use tutti_graph::{Cx, Io, Node, Shape, Status};
 /// # use tutti_units::{SampleRate, Samples};
 /// # use tutti_buffers::ChannelLayout;
@@ -733,7 +721,7 @@ impl<F: Float, N: Node<F> + Clone + Send + 'static> IntoNode<F> for ForkByClone<
 ///     tutti_graph::OutputPort { node: NodeKey(1), port: 0 },
 /// )]);
 /// assert_eq!(
-///     editor.fork(ForkTarget::MainOutput, ForkMode::Live, prepare).err(),
+///     editor.fork(ForkTarget::MainOutput, prepare).err(),
 ///     Some(ForkError::NotForkable { key: NodeKey(1) }),
 /// );
 /// ```
@@ -818,6 +806,12 @@ impl<F: Float> Editor<F> {
     ///   the device). Latency and tail are probed again at that `Prepare`, so
     ///   a figure set with [`set_latency`](Self::set_latency) is not carried
     ///   over.
+    /// - **The prepare's [`RenderMode`].** Each source is handed it: one that
+    ///   renders differently offline reads it (a hosted plugin is told it
+    ///   renders offline; a sampler's disk voice refuses
+    ///   [`Realtime`](RenderMode::Realtime)).
+    /// - **No timeline.** A forked node reads musical time from its block's
+    ///   `Env`, which the fork's executor hands it like the live one's.
     /// - **No state.** Delay rings, feedback edges' captured
     ///   blocks and event FIFOs start silent, so a feedback loop in a fork
     ///   does not carry the live loop's circulating signal. The executor's
@@ -873,12 +867,11 @@ impl<F: Float> Editor<F> {
     pub fn fork(
         &self,
         target: ForkTarget,
-        mode: ForkMode,
         prepare: Prepare,
     ) -> Result<(Editor<F>, Executor<F>), ForkError> {
         // Whatever was built is dropped here, on the thread that gathered
         // it, which is where a pinned unit belongs.
-        self.fork_gather(target, mode, prepare)?
+        self.fork_gather(target, prepare)?
             .build()
             .map_err(|(error, _remains)| error)
     }
@@ -934,7 +927,6 @@ impl<F: Float> Editor<F> {
     pub fn fork_gather(
         &self,
         target: ForkTarget,
-        mode: ForkMode,
         prepare: Prepare,
     ) -> Result<PendingFork<F>, ForkError> {
         // A bus edge is its lanes in the fork: it forks the lowered spec, so
@@ -1104,6 +1096,7 @@ impl<F: Float> Editor<F> {
             spec.set_mix(key, self.mix(key));
         }
 
+        let mode = prepare.render_mode();
         let mut units = Vec::with_capacity(sources.len());
         for (key, source) in sources {
             let build = source

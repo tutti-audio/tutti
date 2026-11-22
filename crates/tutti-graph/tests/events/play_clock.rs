@@ -18,8 +18,8 @@ use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, Executor, ForkByClone, ForkMode, ForkTarget, Io, Node, Offset, PlayReading,
-    Prepare, Reference, Shape, Status, TransportChanges, TransportPosition, Unforkable,
+    Cx, Editor, Executor, ForkByClone, ForkTarget, Io, Node, Offset, PlayReading, Prepare,
+    Reference, Shape, Status, TransportChanges, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_units::{Beat, Bpm, Frame, Latency, Samples};
@@ -281,7 +281,7 @@ fn a_fork_starts_its_clock_at_zero() {
     let live = r.ed.play_reading();
     assert!(live.play.get() > 0);
     let (mut fed, mut fexec) =
-        r.ed.fork(ForkTarget::MainOutput, ForkMode::Live, prepare(MAX))
+        r.ed.fork(ForkTarget::MainOutput, prepare(MAX))
             .expect("forks");
     let fresh = fed.play_reading();
     assert_eq!(fresh.play, Frame::new(0));

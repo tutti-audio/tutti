@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use common::{Kind, Pair, TestNode, bits, input_signal, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    CommitError, Cx, Edge, EdgeGain, EdgeId, Editor, Executor, ForkByClone, ForkMode, ForkTarget,
+    CommitError, Cx, Edge, EdgeGain, EdgeId, Editor, Executor, ForkByClone, ForkTarget,
     GraphInvalid, GraphSpec, InputPort, Io, Node, NodeKey, Op, OutputPort, Plan, PortSink,
     PortSource, Prepare, Renderer, Shape, Status, Topology, TransportPosition, Unforkable,
     ValidGraph, compile,
@@ -1025,7 +1025,7 @@ fn a_fork_carries_the_edge_gains() {
         .set_edge_gain(output_edge(2), EdgeGain::new(amp(-2.0)));
     ed.commit().expect("commits");
     let (fork_ed, fork_exec) = ed
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(BLOCK))
+        .fork(ForkTarget::MainOutput, prepare(BLOCK))
         .expect("forkable");
     let got = Renderer::new(fork_ed, fork_exec).render(2 * BLOCK);
     assert_eq!(got.len(), 1);
@@ -1065,7 +1065,7 @@ fn a_fork_starts_at_the_base_the_knob_wrote() {
     knob.store(0.25, std::sync::atomic::Ordering::Release);
     assert_eq!(ed.edge_gain(output_edge(1)), Some(amp(0.25)), "the cell's");
     let (fork_ed, fork_exec) = ed
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(BLOCK))
+        .fork(ForkTarget::MainOutput, prepare(BLOCK))
         .expect("forkable");
     let got = Renderer::new(fork_ed, fork_exec).render(2 * BLOCK);
     assert!(got[0].iter().all(|&x| x == 0.0 + 0.25 * 1.0));

@@ -11,7 +11,7 @@ use tutti_buffers::MaxBlock;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Editor, EventEdge, EventInputPort, EventOutputPort, Executor, ForkMode, ForkTarget, Prepare,
+    Editor, EventEdge, EventInputPort, EventOutputPort, Executor, ForkTarget, Prepare, RenderMode,
     Renderer, TransportPosition,
 };
 
@@ -115,7 +115,10 @@ fn a_forked_graph_plays_the_clip() {
     let (live, _exec) = graph(unit(), 48_000.0, 1_000);
     let prepare = *live.prepare();
     let (fork, fork_exec) = live
-        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare)
+        .fork(
+            ForkTarget::MainOutput,
+            prepare.with_render_mode(RenderMode::Offline),
+        )
         .expect("a clip and a soundfont node fork");
     assert_eq!(
         onset(&render(fork, fork_exec, 48_000.0, 4_096)),

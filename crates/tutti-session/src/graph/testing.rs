@@ -138,7 +138,7 @@ impl<F: Float> Testing<'_, F> {
     }
 
     /// A live duplicate of the whole graph that shares no state with it
-    /// (`Editor::fork`, `ForkMode::Live`), as an audio side to render. Each
+    /// (`Editor::fork`, prepared as the live graph is), as an audio side to render. Each
     /// node is forked from its own fork source: a `ParamNode` from the
     /// values its set's cells hold. What an export renders from, so a test
     /// can check that a control write reaches it.
@@ -149,7 +149,6 @@ impl<F: Float> Testing<'_, F> {
     pub fn fork_live(&self) -> Result<AudioSide<F>, tutti_graph::ForkError> {
         let (editor, exec) = self.graph.editor.fork(
             tutti_graph::ForkTarget::MainOutput,
-            tutti_graph::ForkMode::Live,
             *self.graph.editor.prepare(),
         )?;
         Ok(AudioSide::forked(editor, exec))

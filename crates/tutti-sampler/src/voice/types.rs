@@ -11,7 +11,7 @@ use super::fault::FirstError;
 use super::loop_span::Loop;
 use super::memory_source::{MemorySource, VoiceWindow};
 use crate::SamplerFloat;
-use tutti_graph::{ForkCause, ForkMode, Node, RenderMode};
+use tutti_graph::{ForkCause, Node, RenderMode};
 use tutti_units::{Amplitude, Cents, PlaybackRate, SampleRate, StretchFactor, Tail};
 
 /// Whether anything can still steer a voice node: the live node, which a
@@ -268,17 +268,17 @@ impl<F: SamplerFloat> Voice<F> {
     /// nothing with it: a memory voice with its own gain cell (at the value
     /// it holds), a disk voice reading its file itself
     /// ([`DiskVoice::fork_copy`]). A disk voice forks only for an offline
-    /// render: [`ForkMode::Live`] is refused for it (its fork would read its
+    /// render: [`RenderMode::Realtime`] is refused for it (its fork would read its
     /// file on the audio thread).
-    pub(crate) fn fork_copy(&self, mode: ForkMode) -> Result<Self, ForkCause> {
+    pub(crate) fn fork_copy(&self, mode: RenderMode) -> Result<Self, ForkCause> {
         let source = match &self.source {
             VoiceSource::Memory(s) => {
                 let mut s = s.clone();
                 s.detach_gain();
                 VoiceSource::Memory(s)
             }
-            VoiceSource::Disk(_) if matches!(mode, ForkMode::Live) => {
-                return Err(ForkCause::new(super::disk_voice::LiveDiskFork));
+            VoiceSource::Disk(_) if matches!(mode, RenderMode::Realtime) => {
+                return Err(ForkCause::new(super::disk_voice::RealtimeDiskFork));
             }
             VoiceSource::Disk(voice) => VoiceSource::Disk(voice.fork_copy()),
         };

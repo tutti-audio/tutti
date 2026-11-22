@@ -131,7 +131,7 @@
 
 use std::sync::{Arc, Weak};
 
-use tutti_graph::{ForkBuild, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked};
+use tutti_graph::{ForkBuild, ForkCause, ForkFaultKind, ForkHealth, ForkSource, Forked};
 use tutti_units::{Latency, SampleRate};
 
 use super::{Bound, PluginClient, Unbound};
@@ -234,13 +234,13 @@ impl ServedFork {
     }
 
     /// The five steps in the module docs, in order.
-    fn instance(&self, mode: ForkMode) -> Result<PluginClient<Bound>, PluginForkError> {
+    fn instance(&self, mode: RenderMode) -> Result<PluginClient<Bound>, PluginForkError> {
         self.capture(mode)?.build()
     }
 
     /// Step 1, and everything else the fork reads of the live node: what the
     /// gather takes on the control thread ("Threads" in the module docs).
-    fn capture(&self, mode: ForkMode) -> Result<Capture, PluginForkError> {
+    fn capture(&self, mode: RenderMode) -> Result<Capture, PluginForkError> {
         // First, so a plugin that cannot save costs no subprocess. The `Arc`
         // is dropped straight after: the fork holds no strong reference.
         let live = self.bridge.upgrade().ok_or(PluginForkError::LiveGone)?;
@@ -298,7 +298,7 @@ struct Capture {
     /// A reader of the project's tempo map of the fork's own, registered at
     /// the gather.
     tempo: tutti_timeline::TempoReader,
-    mode: ForkMode,
+    mode: RenderMode,
 }
 
 impl Capture {
@@ -336,7 +336,7 @@ impl Capture {
 
         // Watched before it is activated: offline, the pipeline waits for each
         // chunk; either way a `prepare` settles and records the plan.
-        let wait = ipc.watch(matches!(self.mode, ForkMode::Offline));
+        let wait = ipc.watch(matches!(self.mode, RenderMode::Offline));
         let mut fork = PluginClient::over(ipc).map_err(|source| PluginForkError::Load {
             path: path.clone(),
             source,
@@ -374,14 +374,14 @@ fn forked(fork: PluginClient<Bound>) -> Forked {
 }
 
 impl ForkSource for ServedFork {
-    fn fork(&self, mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, mode: RenderMode) -> Result<Forked, ForkCause> {
         self.instance(mode).map(forked).map_err(ForkCause::new)
     }
 
     /// The live instance's state (and rate, and meter) is read here, at the
     /// gather; the `plugin-server` launch and the state load, half a second
     /// or more, are the build's, on whichever thread runs it.
-    fn gather(&self, mode: ForkMode) -> Result<ForkBuild, ForkCause> {
+    fn gather(&self, mode: RenderMode) -> Result<ForkBuild, ForkCause> {
         let capture = self.capture(mode).map_err(ForkCause::new)?;
         Ok(ForkBuild::deferred(move || {
             capture.build().map(forked).map_err(ForkCause::new)
@@ -399,7 +399,7 @@ impl PluginClient<Unbound> {
     /// As [`PluginClient::fork_instance`].
     pub fn fork_instance(
         &self,
-        mode: ForkMode,
+        mode: RenderMode,
         tempo: tutti_timeline::TempoReader,
     ) -> Result<PluginClient<Bound>, PluginForkError> {
         ServedFork::reading(self, tempo).instance(mode)
@@ -414,8 +414,8 @@ impl PluginClient<Bound> {
     /// on a subprocess launch and two state transfers (half a second or
     /// more).
     ///
-    /// `mode` is the graph's: [`ForkMode::Offline`] tells the plugin it is
-    /// rendering offline and makes it wait for each chunk; [`ForkMode::Live`]
+    /// `mode` is the graph's: [`RenderMode::Offline`] tells the plugin it is
+    /// rendering offline and makes it wait for each chunk; [`RenderMode::Realtime`]
     /// does neither. Either way the fork reads the transport from the `Env`
     /// of the graph it is rendered in. A fork does not carry live MIDI or running
     /// DSP state (voices, delay lines, a reverb's tail): the state is what the
@@ -434,7 +434,7 @@ impl PluginClient<Bound> {
     /// instance is gone or would not save its state, the new instance failed
     /// to load, it turned out to be a different plugin, or it refused the
     /// state. A partly started fork is shut down before this returns.
-    pub fn fork_instance(&self, mode: ForkMode) -> Result<PluginClient<Bound>, PluginForkError> {
+    pub fn fork_instance(&self, mode: RenderMode) -> Result<PluginClient<Bound>, PluginForkError> {
         ServedFork::of(self).instance(mode)
     }
 
@@ -539,7 +539,9 @@ mod tests {
     #[test]
     fn a_served_forks_capture_carries_the_live_preset() {
         let rig = rig();
-        let capture = source_over(&rig).capture(ForkMode::Live).expect("captures");
+        let capture = source_over(&rig)
+            .capture(RenderMode::Realtime)
+            .expect("captures");
         let (preset, state) = restored_with(&capture);
         assert_eq!(preset, Some(PresetId::Number(PRESET)));
         assert_eq!(state, STATE);
@@ -552,7 +554,7 @@ mod tests {
         let rig = rig();
         let mut source = source_over(&rig);
         source.features = Features::empty();
-        let capture = source.capture(ForkMode::Live).expect("captures");
+        let capture = source.capture(RenderMode::Realtime).expect("captures");
         assert_eq!(restored_with(&capture).0, None);
     }
 
@@ -563,17 +565,17 @@ mod tests {
     fn a_served_live_fork_keeps_the_live_render_mode() {
         let rig = rig();
         let source = source_over(&rig);
-        let live = source.capture(ForkMode::Live).expect("captures");
+        let live = source.capture(RenderMode::Realtime).expect("captures");
         assert!(!live.snapshot.offline(live.mode), "told nothing: realtime");
-        let offline = source.capture(ForkMode::Offline).expect("captures");
+        let offline = source.capture(RenderMode::Offline).expect("captures");
         assert!(offline.snapshot.offline(offline.mode));
 
         assert!(rig.bridge.audio().set_render_mode(RenderMode::Offline));
-        let live = source.capture(ForkMode::Live).expect("captures");
+        let live = source.capture(RenderMode::Realtime).expect("captures");
         assert!(live.snapshot.offline(live.mode), "told offline: offline");
 
         assert!(rig.bridge.audio().set_render_mode(RenderMode::Realtime));
-        let live = source.capture(ForkMode::Live).expect("captures");
+        let live = source.capture(RenderMode::Realtime).expect("captures");
         assert!(!live.snapshot.offline(live.mode), "told realtime again");
     }
 }

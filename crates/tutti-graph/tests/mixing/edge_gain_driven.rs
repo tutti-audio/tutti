@@ -15,9 +15,9 @@ use std::collections::BTreeMap;
 
 use common::{Kind, Pair, SpecBehaviour, bits, driver_value, input_signal, prepare};
 use tutti_graph::{
-    CompileError, Edge, EdgeId, Editor, EventOutputPort, ForkCause, ForkMode, ForkSource, Forked,
+    CompileError, Edge, EdgeId, Editor, EventOutputPort, ForkCause, ForkSource, Forked,
     GraphInvalid, GraphSpec, InputPort, IntoNode, Node, NodeKey, NodeParts, OutputPort, ParamRange,
-    PortSink, PortSource, Topology, Unforkable, ValidGraph, compile,
+    PortSink, PortSource, RenderMode, Topology, Unforkable, ValidGraph, compile,
 };
 use tutti_units::{Amplitude, Samples, Tail};
 
@@ -591,7 +591,10 @@ fn a_fork_carries_the_driven_lane() {
     exec.apply_pending();
     ed.collect();
     let (mut fed, mut fexec) = ed
-        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare(BLOCK))
+        .fork(
+            ForkTarget::MainOutput,
+            prepare(BLOCK).with_render_mode(RenderMode::Offline),
+        )
         .expect("forks");
     let mut o = vec![0.0f32; BLOCK];
     fexec.process(
@@ -613,7 +616,7 @@ struct Forkable(Kind);
 struct KindFork(Kind);
 
 impl ForkSource for KindFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked, ForkCause> {
         Ok(Forked::new(Box::new(common::TestNode::new(self.0.clone()))))
     }
 }

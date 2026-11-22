@@ -11,8 +11,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::{InterleavedMut, Pull, Source as _};
 use tutti_graph::{CloseError, Edge, InputPort, OutputPort, PortSource};
 use tutti_graph::{
-    Editor, Executor, ForkCause, ForkMode, ForkSource, ForkTarget, Forked, IntoNode, MissingSource,
-    Node, NodeParts, Op, TapReader, TransportPosition,
+    Editor, Executor, ForkCause, ForkSource, ForkTarget, Forked, IntoNode, MissingSource, Node,
+    NodeParts, Op, RenderMode, TapReader, TransportPosition,
 };
 use tutti_graph::{MeterId, MeterSpec, NodeKey, TapAlign, TapId, TapOptions, TapSpec};
 use tutti_units::{Beat, Bpm, Frame, Samples};
@@ -23,7 +23,7 @@ struct Forkable(Kind);
 struct KindFork(Kind);
 
 impl ForkSource for KindFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked, ForkCause> {
         Ok(Forked::new(Box::new(TestNode::new(self.0.clone()))))
     }
 }
@@ -595,8 +595,7 @@ fn a_fork_carries_no_tap_and_an_export_reads_its_own_losslessly() {
     let (mut fed, fexec) =
         r.ed.fork(
             ForkTarget::MainOutput,
-            ForkMode::Offline,
-            prepare(MAX_BLOCK),
+            prepare(MAX_BLOCK).with_render_mode(RenderMode::Offline),
         )
         .expect("forks");
     assert!(

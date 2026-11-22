@@ -903,7 +903,7 @@ fn a_bus_edges_lanes_align_like_any_edges() {
 /// fold (the fork is reachability over the lanes, too: the source is forked).
 #[test]
 fn a_fork_of_a_bus_edge_renders_the_fold() {
-    use tutti_graph::{Cx, ForkByClone, ForkMode, ForkTarget, Io, Renderer, Shape, Status};
+    use tutti_graph::{Cx, ForkByClone, ForkTarget, Io, Renderer, Shape, Status};
 
     #[derive(Clone)]
     struct Stereo;
@@ -942,7 +942,7 @@ fn a_fork_of_a_bus_edge_renders_the_fold() {
     ed.spec_mut().topology.set_outputs(vec![out_port(2, 0)]);
     ed.commit().expect("commits");
     let (fork_ed, fork_exec) = ed
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(BLOCK))
+        .fork(ForkTarget::MainOutput, prepare(BLOCK))
         .expect("forkable");
     let got = Renderer::new(fork_ed, fork_exec).render(2 * BLOCK);
     assert_eq!(got.len(), 1);
@@ -1186,7 +1186,7 @@ fn main_output_edges_connect_disconnect_and_go_with_their_node() {
 /// the fold on the outputs, which is what an export of the main output hears.
 #[test]
 fn a_fork_of_a_main_output_edge_renders_the_fold() {
-    use tutti_graph::{Cx, ForkByClone, ForkMode, ForkTarget, Io, Renderer, Shape, Status};
+    use tutti_graph::{Cx, ForkByClone, ForkTarget, Io, Renderer, Shape, Status};
 
     #[derive(Clone)]
     struct Stereo;
@@ -1210,7 +1210,7 @@ fn a_fork_of_a_main_output_edge_renders_the_fold() {
     ed.connect_bus_to_main_output(from(1, 0)).unwrap();
     ed.commit().expect("commits");
     let (fork_ed, fork_exec) = ed
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(BLOCK))
+        .fork(ForkTarget::MainOutput, prepare(BLOCK))
         .expect("forkable");
     let got = Renderer::new(fork_ed, fork_exec).render(2 * BLOCK);
     assert_eq!(got.len(), 1);
