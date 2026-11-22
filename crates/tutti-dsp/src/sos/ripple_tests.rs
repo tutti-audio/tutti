@@ -165,7 +165,7 @@ fn elliptic_edges_are_the_ripple_and_the_attenuation() {
                     (stopband + a).abs() < 1e-7,
                     "{response:?} {n} {r} {a}: {stopband}"
                 );
-                let omega = design.selectivity().recip();
+                let omega = design.selectivity().get().recip();
                 for step in 0..400 {
                     let outside = db_at(
                         &sos,
@@ -191,7 +191,7 @@ fn elliptic_passband_maximum_is_0_db_and_its_minima_are_the_ripple() {
             let (r, a) = (0.8, 55.0);
             let design = Elliptic::new(response, order(n), tolerances(r, a));
             let sos = design.design(Hz::new(FC), RATE).unwrap();
-            let m = Modulus::new(design.selectivity());
+            let m = Modulus::new(design.selectivity().get());
             let order = usize::from(n);
             for j in 1..=order.div_ceil(2) {
                 let omega = cd((2 * j - 1) as f64 / order as f64 * complete_k(m), m);
@@ -224,7 +224,7 @@ fn elliptic_zeros_are_at_the_mapped_cd_frequencies() {
         for n in ORDERS {
             let design = Elliptic::new(response, order(n), tolerances(1.0, 60.0));
             let sos = design.design(Hz::new(FC), RATE).unwrap();
-            let m = Modulus::new(design.selectivity());
+            let m = Modulus::new(design.selectivity().get());
             let order = usize::from(n);
             for i in 1..=order / 2 {
                 let zeta = cd((2 * i - 1) as f64 / order as f64 * complete_k(m), m);
@@ -243,7 +243,7 @@ fn elliptic_selectivity_solves_the_degree_equation() {
     for n in ORDERS {
         for (r, a) in [(0.5, 40.0), (1.0, 60.0), (0.1, 90.0), (3.0, 40.0)] {
             let design = Elliptic::new(CutResponse::LowPass, order(n), tolerances(r, a));
-            let m = Modulus::new(design.selectivity());
+            let m = Modulus::new(design.selectivity().get());
             let eps = |db: f64| libm::sqrt(libm::pow(10.0, db / 10.0) - 1.0);
             let k1 = Modulus::new(eps(r) / eps(a));
             let got = complete_k(m) * complete_k(k1.complement())

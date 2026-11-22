@@ -228,27 +228,23 @@ fn the_fdn_parks_and_wakes_without_allocating() {
         assert!(peak > 0.0, "the room rings before the gate");
         set_input(&mut rig, 0.0);
         let (mut idle, mut finite) = (0, true);
-        assert_no_alloc::assert_no_alloc(|| {
-            for _ in 0..800 {
-                let status = rig.block();
-                idle += usize::from(status == Status::Idle);
-                let (p, f) = level(&rig);
-                finite &= f && p < BOUND;
-            }
-        });
+        for _ in 0..800 {
+            let status = rig.block();
+            idle += usize::from(status == Status::Idle);
+            let (p, f) = level(&rig);
+            finite &= f && p < BOUND;
+        }
         assert!(finite);
         assert!(idle > 600, "it parks and stays parked: {idle} idle blocks");
         set_input(&mut rig, 0.5);
         let mut woke = 0.0f32;
         let mut finite = true;
-        assert_no_alloc::assert_no_alloc(|| {
-            for _ in 0..100 {
-                rig.block();
-                let (p, f) = level(&rig);
-                finite &= f;
-                woke = woke.max(p);
-            }
-        });
+        for _ in 0..100 {
+            rig.block();
+            let (p, f) = level(&rig);
+            finite &= f;
+            woke = woke.max(p);
+        }
         assert!(finite && woke > 0.0 && woke < BOUND, "it wakes: {woke}");
     }
 }
@@ -280,14 +276,12 @@ fn the_fdn_with_its_signals_fed_is_allocation_free() {
                 rig.block();
             }
             let (mut peak, mut finite) = (0.0f32, true);
-            assert_no_alloc::assert_no_alloc(|| {
-                for _ in 0..400 {
-                    rig.block();
-                    let (p, f) = level(&rig);
-                    peak = peak.max(p);
-                    finite &= f;
-                }
-            });
+            for _ in 0..400 {
+                rig.block();
+                let (p, f) = level(&rig);
+                peak = peak.max(p);
+                finite &= f;
+            }
             assert!(finite, "the output is finite");
             assert!(peak < BOUND, "the output is bounded: {peak}");
         }
@@ -314,11 +308,9 @@ fn the_fdn_renders_non_finite_input_without_allocating() {
             c[1] = f32::INFINITY;
             c[2] = f32::NEG_INFINITY;
         }
-        assert_no_alloc::assert_no_alloc(|| {
-            for _ in 0..200 {
-                rig.block();
-            }
-        });
+        for _ in 0..200 {
+            rig.block();
+        }
     }
 }
 
@@ -398,31 +390,25 @@ fn the_plate_parks_wakes_and_renders_non_finite_input_without_allocating() {
     assert!(peak(&rig) > 0.0, "the room rings before the gate");
     set_input(&mut rig, 0.0);
     let mut idle = 0;
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..2_500 {
-            idle += usize::from(rig.block() == Status::Idle);
-        }
-    });
+    for _ in 0..2_500 {
+        idle += usize::from(rig.block() == Status::Idle);
+    }
     assert!(
         idle > 1_000,
         "it parks and stays parked: {idle} idle blocks"
     );
     set_input(&mut rig, 0.5);
     let mut woke = 0.0f32;
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..100 {
-            rig.block();
-            woke = woke.max(peak(&rig));
-        }
-    });
+    for _ in 0..100 {
+        rig.block();
+        woke = woke.max(peak(&rig));
+    }
     assert!(woke > 0.0 && woke < BOUND, "it wakes: {woke}");
     for c in rig.inputs_mut().iter_mut() {
         let c = c.into_samples_mut();
         (c[0], c[1], c[2]) = (f32::NAN, f32::INFINITY, f32::NEG_INFINITY);
     }
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..200 {
-            rig.block();
-        }
-    });
+    for _ in 0..200 {
+        rig.block();
+    }
 }

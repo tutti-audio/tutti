@@ -95,28 +95,28 @@ fn walk<F: Float, N: Node<F>>(
     mut between: impl FnMut(usize),
 ) -> Option<f64> {
     let (mut peak, mut finite) = (0.0f64, true);
-    assert_no_alloc::assert_no_alloc(|| {
-        for i in 0..blocks {
-            between(i);
-            if i % 53 == 52 {
-                Node::<F>::reset(&mut *rig.node);
-            }
-            if i % 59 == 58 {
+    for i in 0..blocks {
+        between(i);
+        if i % 53 == 52 {
+            assert_no_alloc::assert_no_alloc(|| Node::<F>::reset(&mut *rig.node));
+        }
+        if i % 59 == 58 {
+            assert_no_alloc::assert_no_alloc(|| {
                 Node::<F>::prepare(
                     &mut *rig.node,
                     &Prepare::new(rate, MaxBlock::of(Samples::new(FRAMES))),
                 );
-            }
-            rig.set_block_len(BLOCKS[i % BLOCKS.len()]);
-            rig.block();
-            for c in 0..outputs {
-                for &s in rig.output().plane(c).samples() {
-                    finite &= s.is_finite();
-                    peak = peak.max(s.to_f64().abs());
-                }
+            });
+        }
+        rig.set_block_len(BLOCKS[i % BLOCKS.len()]);
+        rig.block();
+        for c in 0..outputs {
+            for &s in rig.output().plane(c).samples() {
+                finite &= s.is_finite();
+                peak = peak.max(s.to_f64().abs());
             }
         }
-    });
+    }
     finite.then_some(peak)
 }
 

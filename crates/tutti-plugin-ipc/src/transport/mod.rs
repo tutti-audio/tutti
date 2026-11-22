@@ -17,6 +17,9 @@ mod sys;
 #[path = "sys/windows.rs"]
 mod sys;
 
+pub(crate) use sys::PendingLane;
+#[cfg(any(test, feature = "testing"))]
+pub use sys::broker_pair;
 /// What a mock server receives a slab over.
 #[cfg(test)]
 pub(crate) use sys::connection;

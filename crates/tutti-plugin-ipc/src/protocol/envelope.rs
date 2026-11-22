@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use super::process::ProcessAudioData;
 use super::shm::SlabLayout;
-use crate::{BlobWire, SlabWire};
+use crate::{BlobWire, LaneWire, SlabWire};
 use dpi::Size;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::Samples;
@@ -165,22 +165,21 @@ pub enum AudioReply {
         #[serde(default)]
         refused: bool,
     },
-    /// Handshake sent once the subprocess is live. Carries the wire
-    /// [`PROTOCOL_VERSION`](super::PROTOCOL_VERSION) so a host and subprocess
-    /// built from mismatched commits refuse to proceed rather than mis-parsing
-    /// each other's messages (postcard is not self-describing). `#[serde(default)]`
-    /// = 0 for an ancient binary that predates the field → treated as a mismatch.
-    Ready {
-        /// The subprocess's [`PROTOCOL_VERSION`](super::PROTOCOL_VERSION).
-        #[serde(default)]
-        protocol_version: u32,
-    },
     /// The changes of an [`ApplyParameters`](AudioRequest::ApplyParameters) are
     /// in the plugin.
     ParametersApplied {
         /// The `id` of the request.
         id: ReqId,
     },
+}
+
+/// A lane the broker connection opens to the server.
+///
+/// Variant order is wire-significant; see the module docs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Lane {
+    /// The audio lane: blocks in, block replies out, served by the render thread.
+    Audio,
 }
 
 /// A request on the control connection: everything but a block.
@@ -410,6 +409,17 @@ pub enum ControlRequest {
         /// reads from it.
         info: tutti_plugin_types::TrackInfo,
     },
+    /// Open a lane to the server: the audio lane's stream, whose server end is
+    /// the descriptor that follows this frame on unix (`send_lane`) and the pipe
+    /// `wire` names on Windows. Answered by [`ControlReply::LaneOpened`]; a lane
+    /// is opened once, and a frame without its descriptor is refused.
+    OpenLane {
+        /// Which lane the stream is.
+        lane: Lane,
+        /// What the frame carries of the stream's server end: nothing on unix,
+        /// where the descriptor follows, and the pipe's checked name on Windows.
+        wire: LaneWire,
+    },
 }
 
 /// What the server answers a [`ControlRequest`] with.
@@ -571,6 +581,9 @@ pub enum ControlReply {
         #[serde(with = "super::wire::size_result")]
         result: Result<Size, EditorError>,
     },
+    /// The server holds its end of the lane an
+    /// [`OpenLane`](ControlRequest::OpenLane) opened and serves it.
+    LaneOpened,
 }
 
 /// What the plugin says unprompted, on the control connection.
@@ -708,12 +721,13 @@ pub enum ControlFrame {
         /// What the server is doing.
         stage: Working,
     },
-    /// Handshake sent once the subprocess is live: the first frame of the
-    /// connection. Carries the wire [`PROTOCOL_VERSION`](super::PROTOCOL_VERSION)
-    /// so a host and subprocess built from mismatched commits refuse to
-    /// proceed rather than mis-parsing each other's messages (postcard is not
-    /// self-describing).
-    Ready {
+    /// Sent once the subprocess is live: the first frame the server sends on
+    /// the broker connection, and the only one of its kind. Carries the wire
+    /// [`PROTOCOL_VERSION`](super::PROTOCOL_VERSION) so a host and subprocess
+    /// built from mismatched commits refuse to proceed rather than mis-parsing
+    /// each other's messages (postcard is not self-describing). Every lane is
+    /// opened over this connection, so the version is checked once.
+    Hello {
         /// The subprocess's [`PROTOCOL_VERSION`](super::PROTOCOL_VERSION).
         protocol_version: u32,
     },

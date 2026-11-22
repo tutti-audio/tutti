@@ -40,17 +40,20 @@ fn a_feedback_comb_peaks_at_the_multiples_of_fs_over_d_at_one_over_one_minus_g()
     }
 }
 
-/// A feedforward comb `1 + g z^-D` has its notches at the odd multiples of `fs / 2D`, where
-/// `|H| = 1 - g`, and its peaks at the multiples of `fs / D`, where `|H| = 1 + g`.
+/// A feedforward comb `1 + g z^-D` has `|H| = 1 + g` at the multiples of `fs / D` and `1 - g` at
+/// the odd multiples of `fs / 2D`: for `g > 0` the former are its peaks and the latter its
+/// notches, and for `g = -0.5` they swap, `|H|` is 0.5 at the former and 1.5 at the latter.
 #[test]
 fn a_feedforward_comb_notches_at_the_odd_multiples_of_fs_over_two_d() {
-    let (d, g) = (10usize, 0.9);
-    let h = impulse_response(CombForm::Feedforward, d, g, d + 1);
-    for k in 0..=4 {
-        let notch = magnitude(&h, TAU * (2 * k + 1) as f64 / (2 * d) as f64);
-        assert!((notch - (1.0 - g)).abs() < 1e-12, "notch {k}: {notch}");
-        let peak = magnitude(&h, TAU * k as f64 / d as f64);
-        assert!((peak - (1.0 + g)).abs() < 1e-12, "peak {k}: {peak}");
+    let d = 10usize;
+    for g in [0.9, -0.5] {
+        let h = impulse_response(CombForm::Feedforward, d, g, d + 1);
+        for k in 0..=4 {
+            let odd = magnitude(&h, TAU * (2 * k + 1) as f64 / (2 * d) as f64);
+            assert!((odd - (1.0 - g)).abs() < 1e-12, "g {g}, odd {k}: {odd}");
+            let even = magnitude(&h, TAU * k as f64 / d as f64);
+            assert!((even - (1.0 + g)).abs() < 1e-12, "g {g}, even {k}: {even}");
+        }
     }
 }
 
@@ -178,19 +181,22 @@ fn a_comb_delay_takes_exactly_the_finite_times_above_zero_to_the_cap() {
 }
 
 /// A driven coefficient is held by the comb's form: not finite is 0, a feedforward comb's is
-/// at least 0 and is not capped, a feedback comb's is within `0..=MAX_STABLE`; a coefficient
-/// inside is unchanged, the bounds included.
+/// within `-1..=1`, a feedback comb's is within `0..=MAX_STABLE`; a coefficient inside is
+/// unchanged, the bounds included.
 #[test]
 fn a_driven_coefficient_is_held_by_the_form() {
     let held = |form: CombForm, g: f64| form.held(Feedback::new(g)).get();
     for form in [CombForm::Feedforward, CombForm::Feedback] {
         assert_eq!(held(form, f64::NAN), 0.0);
         assert_eq!(held(form, f64::INFINITY), 0.0);
-        assert_eq!(held(form, -0.5), 0.0);
         assert_eq!(held(form, 0.0), 0.0);
         assert_eq!(held(form, 0.5), 0.5);
         assert_eq!(held(form, 0.99), 0.99);
     }
-    assert_eq!(held(CombForm::Feedforward, 3.0), 3.0);
+    // Feedforward holds `-1..=1`; feedback holds `0..=MAX_STABLE`.
+    for (g, ff) in [(-0.5, -0.5), (-1.0, -1.0), (-3.0, -1.0), (3.0, 1.0)] {
+        assert_eq!(held(CombForm::Feedforward, g), ff, "feedforward {g}");
+    }
+    assert_eq!(held(CombForm::Feedback, -0.5), 0.0);
     assert_eq!(held(CombForm::Feedback, 3.0), Feedback::MAX_STABLE.get());
 }

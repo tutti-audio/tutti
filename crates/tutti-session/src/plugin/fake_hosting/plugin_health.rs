@@ -196,7 +196,7 @@ fn a_non_plugin_node_never_marks_the_graph_edited() {
 /// alone.
 #[test]
 fn a_dead_plugin_reports_the_engines_cause_not_a_placeholder() {
-    let latched = PluginFailure::Connect {
+    let latched = PluginFailure::Io {
         source: Arc::new(IpcError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "No such file or directory",
@@ -208,11 +208,11 @@ fn a_dead_plugin_reports_the_engines_cause_not_a_placeholder() {
     assert_eq!(died[0].0, node);
     let cause = &died[0].1;
     assert!(
-        matches!(cause, PluginFailure::Connect { .. }),
+        matches!(cause, PluginFailure::Io { .. }),
         "the cause must be the engine's latched failure, carried through as its kind: {cause:?}"
     );
     // The `IpcError` behind it is still the `source`, not flattened to text.
-    let source = std::error::Error::source(cause).expect("a connect failure has a source");
+    let source = std::error::Error::source(cause).expect("an I/O failure has a source");
     assert!(
         matches!(source.downcast_ref::<IpcError>(), Some(IpcError::Io(e))
             if e.kind() == std::io::ErrorKind::NotFound),

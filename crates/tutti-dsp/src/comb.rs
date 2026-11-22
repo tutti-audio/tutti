@@ -61,8 +61,10 @@ pub enum CombForm {
 
 impl CombForm {
     /// The coefficient of a comb of this form that a driven `gain` is held to: a gain that is
-    /// not finite is 0, a feedforward comb's is at least 0 and a feedback comb's is within
-    /// `0..=`[`Feedback::MAX_STABLE`] (the loop must decay).
+    /// not finite is 0, a feedforward comb's is within `-1..=1` (`1 + g z^-D` is a valid
+    /// filter of either sign: a negative gain moves the notches to where the peaks were) and a
+    /// feedback comb's is within `0..=`[`Feedback::MAX_STABLE`] (the loop must decay; a
+    /// negative feedback is stable too, but [`Feedback`] is a non-negative coefficient).
     ///
     /// The hold of a coefficient driven live (a cell or a control signal sets it with no
     /// control side to refuse a value): [`CombBank::retarget`] applies it.
@@ -71,7 +73,7 @@ impl CombForm {
         let gain = gain.get();
         let gain = if gain.is_finite() { gain } else { 0.0 };
         match self {
-            Self::Feedforward => Feedback::new(gain.max(0.0)),
+            Self::Feedforward => Feedback::new(gain.clamp(-1.0, 1.0)),
             Self::Feedback => Feedback::new_clamped(gain),
         }
     }
@@ -173,7 +175,7 @@ impl<F: Float> CombFilter<F> {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CombControls {
     /// The coefficient `g`, driven live and held by the comb's form ([`CombForm::held`]): one
-    /// that is not finite reads as 0, a feedforward comb's is at least 0 and a feedback
+    /// that is not finite reads as 0, a feedforward comb's is inside `-1..=1` and a feedback
     /// comb's is inside [`Feedback::MAX_STABLE`] (the loop must decay).
     pub gain: Feedback,
 }

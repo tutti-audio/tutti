@@ -58,7 +58,7 @@ impl Biquad {
 /// only its spectral radius, plus one time constant (`1 / -ln r`): the response
 /// peaks some frames in and not at `n = 0`, so a tail measured from the peak must
 /// not be reported short. [`DecayTime::Unbounded`] for a radius that is not below 1.
-pub(super) fn decay_time(radius: f64, multiplicity: u32, floor: Db, rate: SampleRate) -> DecayTime {
+pub(crate) fn decay_time(radius: f64, multiplicity: u32, floor: Db, rate: SampleRate) -> DecayTime {
     if radius.is_nan() || radius >= 1.0 {
         return DecayTime::Unbounded;
     }

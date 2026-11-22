@@ -77,7 +77,6 @@ tutti-dsp  default-enum-arg  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::
 tutti-dsp  default-enum-arg  crates/tutti-dsp/src/dynamics/dynamic_eq.rs::DynamicEqBank::new
 tutti-dsp  default-enum-arg  crates/tutti-dsp/src/dynamics/limiter.rs::LimiterBank::detecting
 tutti-dsp  default-enum-arg  crates/tutti-dsp/src/filter/envelope.rs::EnvelopeFilterBank::new
-tutti-dsp  default-enum-arg  crates/tutti-dsp/src/filter/svf/kernel.rs::SvfDesign::new
 tutti-dsp  default-enum-arg  crates/tutti-dsp/src/waveshape.rs::WaveshaperBank::new
 
 # tutti-engine

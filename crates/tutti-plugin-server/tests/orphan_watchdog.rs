@@ -166,7 +166,7 @@ fn an_orphaned_server_exits_without_a_host() {
     );
 }
 
-/// Connects to the server's socket once it is bound, and reads its `Ready`:
+/// Connects to the server's socket once it is bound, and reads its `Hello`:
 /// the server is then past binding and accepted this connection. Panics if the
 /// server ends first.
 fn connect(socket: &Path, mut server_gone: impl FnMut() -> bool) -> Stream {
@@ -185,7 +185,7 @@ fn connect(socket: &Path, mut server_gone: impl FnMut() -> bool) -> Stream {
     let mut stream = connected.expect("the wait ended on a connection");
     assert!(matches!(
         read_frame::<_, ControlFrame>(&mut stream),
-        Ok(ControlFrame::Ready { .. })
+        Ok(ControlFrame::Hello { .. })
     ));
     stream
 }

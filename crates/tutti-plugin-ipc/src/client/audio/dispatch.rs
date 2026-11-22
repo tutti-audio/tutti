@@ -134,13 +134,11 @@ pub(super) enum AbandonedAudio {
     Params,
 }
 
-/// The key of the request an audio reply answers: `None` for a reply that
-/// answers none (the handshake's `Ready`).
-fn audio_key(reply: &AudioReply) -> Option<AudioKey> {
+/// The key of the request an audio reply answers.
+fn audio_key(reply: &AudioReply) -> AudioKey {
     match reply {
-        AudioReply::AudioProcessed { seq, .. } => Some(AudioKey::Block(*seq)),
-        AudioReply::ParametersApplied { id } => Some(AudioKey::Params(*id)),
-        AudioReply::Ready { .. } => None,
+        AudioReply::AudioProcessed { seq, .. } => AudioKey::Block(*seq),
+        AudioReply::ParametersApplied { id } => AudioKey::Params(*id),
     }
 }
 
@@ -312,7 +310,7 @@ impl AudioState {
         awaited: AudioKey,
         channels: &Channels,
     ) -> IpcResult<Option<AudioReply>> {
-        let key = audio_key(&reply).ok_or_else(|| fault(Fault::Unknown))?;
+        let key = audio_key(&reply);
         match self.conv.hear(key).map_err(fault)? {
             Heard::Answer if key == awaited => Ok(Some(reply)),
             Heard::Answer => Err(IpcError::ProtocolError(
@@ -494,8 +492,8 @@ impl ControlState {
                 self.conv.extend(id, now);
                 Ok(None)
             }
-            ControlFrame::Ready { .. } => Err(IpcError::ProtocolError(
-                "a second handshake on a connection that is in use",
+            ControlFrame::Hello { .. } => Err(IpcError::ProtocolError(
+                "a second Hello on a connection that is in use",
             )),
             ControlFrame::Reply { id, reply } => match self.conv.hear(id).map_err(fault)? {
                 Heard::Answer if awaited == Some(id) => Ok(Some(reply)),
@@ -1034,8 +1032,8 @@ pub(super) fn handle_control(
             reply,
         } => {
             // The server's refusal (it could not open the slab) is an `Error`
-            // answer: no reason to wait out the deadline for a `Ready` that is
-            // not coming.
+            // answer: no reason to wait out the deadline for a `SharedMemoryReady`
+            // that is not coming.
             let ok = matches!(
                 query_by(lane, inbox, lifecycle, |stream, id| {
                     ipc::send_setup(stream, id, layout, &slab)
@@ -1529,6 +1527,32 @@ mod tests {
                     Err(IpcError::ProtocolError(_))
                 ),
                 "a reply to nothing this lane sent was accepted"
+            );
+        }
+    }
+
+    /// **A second `Hello`, and a `LaneOpened` nobody asked for, are the server's
+    /// fault** on a control connection that is in use: the version is said once,
+    /// and a lane is opened only by a request.
+    #[test]
+    fn a_second_hello_and_an_unrequested_lane_answer_are_faults() {
+        let mut state = control_state();
+        let mut inbox = Unsolicited::new();
+        let id = open(&mut state, 1, Abandoned::Discard);
+        let hello = ControlFrame::Hello {
+            protocol_version: crate::PROTOCOL_VERSION,
+        };
+        let unrequested = ControlFrame::Reply {
+            id: ReqId::new(9),
+            reply: ControlReply::LaneOpened,
+        };
+        for frame in [hello, unrequested] {
+            assert!(
+                matches!(
+                    state.hear(frame, Some(id), Instant::now(), &mut inbox),
+                    Err(IpcError::ProtocolError(_))
+                ),
+                "the frame was accepted"
             );
         }
     }

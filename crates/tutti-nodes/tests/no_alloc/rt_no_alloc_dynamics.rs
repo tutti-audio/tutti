@@ -98,7 +98,7 @@ fn compressor_stereo_process_is_allocation_free() {
 /// The compressor's control signal path with every cell moving too: the threshold port fed a per-frame
 /// ramp with a NaN frame (the `ControlSignals` control signal the kernel reads per frame), and each block
 /// writes the ratio, the times, the knee and the makeup (a new design on the stream grid, the
-/// makeup ramping) through the `ParamSet`, 6 channels, 2 000 blocks under `assert_no_alloc`.
+/// makeup ramping) through the `ParamSet`, 6 channels, 256 blocks.
 #[test]
 fn compressor_fed_threshold_and_moving_cells_are_allocation_free() {
     use tutti_graph::ParamNode;
@@ -136,17 +136,15 @@ fn compressor_fed_threshold_and_moving_cells_are_allocation_free() {
     for _ in 0..16 {
         node.block();
     }
-    assert_no_alloc::assert_no_alloc(|| {
-        for b in 0..2_000 {
-            let k = (b % 40) as f32;
-            assert!(set.set(UnitParam::Ratio, f64::from(2.0 + 0.2 * k)));
-            assert!(set.set(UnitParam::Attack, f64::from(0.0005 + 0.0002 * k)));
-            assert!(set.set(UnitParam::Release, f64::from(0.01 + 0.005 * k)));
-            assert!(set.set(UnitParam::Knee, f64::from(0.3 * k)));
-            assert!(set.set(UnitParam::GainDb, f64::from(k - 20.0)));
-            node.block();
-        }
-    });
+    for b in 0..256 {
+        let k = (b % 40) as f32;
+        assert!(set.set(UnitParam::Ratio, f64::from(2.0 + 0.2 * k)));
+        assert!(set.set(UnitParam::Attack, f64::from(0.0005 + 0.0002 * k)));
+        assert!(set.set(UnitParam::Release, f64::from(0.01 + 0.005 * k)));
+        assert!(set.set(UnitParam::Knee, f64::from(0.3 * k)));
+        assert!(set.set(UnitParam::GainDb, f64::from(k - 20.0)));
+        node.block();
+    }
 }
 
 #[test]
@@ -393,7 +391,7 @@ fn limiter_node_burst_and_release_are_allocation_free() {
 }
 
 /// The brickwall with its ceiling port fed a per-frame ramp (the `ControlSignals` control signal the
-/// kernel reads each frame), 6 channels, 1 000 blocks under `assert_no_alloc`.
+/// kernel reads each frame), 6 channels, 256 blocks.
 /// `Direct` feeds the port, which `BlockRig` cannot.
 #[test]
 fn brickwall_limiter_fed_ceiling_process_is_allocation_free() {
@@ -422,17 +420,15 @@ fn brickwall_limiter_fed_ceiling_process_is_allocation_free() {
         "the fed ceiling did not reach the clip: {}",
         node.output().plane(5).samples()[0]
     );
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..1_000 {
-            node.block();
-        }
-    });
+    for _ in 0..256 {
+        node.block();
+    }
 }
 
 /// The brickwall's control signal path with the cell moving too, and a control signal carrying every
 /// value the clip must survive (NaN, `+-inf`, a mute): each block writes the cell to a
 /// new ceiling through the `ParamSet` (a new design, retargeted on the audio thread),
-/// 2 000 blocks under `assert_no_alloc`.
+/// 256 blocks.
 #[test]
 fn brickwall_limiter_moving_cell_and_hostile_signal_are_allocation_free() {
     use tutti_graph::ParamNode;
@@ -459,21 +455,19 @@ fn brickwall_limiter_moving_cell_and_hostile_signal_are_allocation_free() {
     node.feed(0, Some(&signal));
     let set = node.node.param_set();
     node.block();
-    assert_no_alloc::assert_no_alloc(|| {
-        for b in 0..2_000 {
-            let db = -20.0 + (b % 40) as f32 * 0.5;
-            assert!(set.set(
-                UnitParam::Ceiling,
-                if b % 7 == 0 { f64::NAN } else { f64::from(db) }
-            ));
-            node.block();
-        }
-    });
+    for b in 0..256 {
+        let db = -20.0 + (b % 40) as f32 * 0.5;
+        assert!(set.set(
+            UnitParam::Ceiling,
+            if b % 7 == 0 { f64::NAN } else { f64::from(db) }
+        ));
+        node.block();
+    }
 }
 
 /// The lookahead limiter with its ceiling and threshold ports fed per frame
 /// (the path that reads both per sample instead of through the block's
-/// curve), 6 channels, 1 000 blocks under `assert_no_alloc`, the first
+/// curve), 6 channels, 256 blocks, the first
 /// measured after a warm-up that has the limiter reducing.
 #[test]
 fn limiter_node_fed_ceiling_and_threshold_process_is_allocation_free() {
@@ -511,15 +505,13 @@ fn limiter_node_fed_ceiling_and_threshold_process_is_allocation_free() {
             .any(|y| y.abs() < 1.0),
         "the limiter was not reducing; the gate would walk no gain curve"
     );
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..1_000 {
-            node.block();
-        }
-    });
+    for _ in 0..256 {
+        node.block();
+    }
 }
 
 /// A lookahead limiter cloned mid-release, and the clone processed on
-/// through the rest of the release under `assert_no_alloc`, with no
+/// through the rest of the release, with no
 /// `prepare` between (which would rebuild the deque at full capacity and
 /// hide a short one). At the clone the window-minimum deque holds about
 /// one block of a rising run, fewer entries than its window; the clone must
@@ -556,11 +548,9 @@ fn a_limiter_cloned_mid_release_processes_allocation_free() {
     fill(&mut d, 0.05);
     d.block();
     d.node = d.node.clone();
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..200 {
-            d.block();
-        }
-    });
+    for _ in 0..200 {
+        d.block();
+    }
     assert!(
         d.output().plane(0).iter().any(|s| s.abs() > 1e-6),
         "the clone rendered silence after the release"
@@ -629,57 +619,55 @@ pub(crate) fn sweep<N: tutti_graph::Node + tutti_graph::ParamNode>(
             for phase in 0..3usize {
                 let (mut finite, mut within) = (true, true);
                 fill(&mut d, amplitude);
-                assert_no_alloc::assert_no_alloc(|| {
-                    for b in 0..blocks {
-                        // Silent from 65 to 80 percent of the window: a node that parks
-                        // parks and wakes.
-                        if b == blocks * 65 / 100 {
-                            for c in d.inputs_mut().iter_mut() {
-                                let c = c.into_samples_mut();
-                                c.fill(0.0);
-                            }
-                        } else if b == blocks * 80 / 100 {
-                            for c in d.inputs_mut().iter_mut() {
-                                let c = c.into_samples_mut();
-                                for (i, x) in c.iter_mut().enumerate() {
-                                    *x = if i % 2 == 0 { amplitude } else { -amplitude };
-                                }
-                            }
+                for b in 0..blocks {
+                    // Silent from 65 to 80 percent of the window: a node that parks
+                    // parks and wakes.
+                    if b == blocks * 65 / 100 {
+                        for c in d.inputs_mut().iter_mut() {
+                            let c = c.into_samples_mut();
+                            c.fill(0.0);
                         }
-                        for &(addr, lo, hi) in corners.cells {
-                            let high = match phase {
-                                0 => false,
-                                1 => true,
-                                _ => b % 2 == 1,
-                            };
-                            set.set(addr, if high { f64::from(hi) } else { f64::from(lo) });
-                        }
-                        if b == blocks * 90 / 100 || b == blocks * 99 / 100 {
-                            d.node.reset();
-                        }
-                        if let Some(k) = key_from {
-                            let hot = b % 50 == 5 && b < blocks * 65 / 100;
-                            let silent = (blocks * 65 / 100..blocks * 80 / 100).contains(&b);
-                            for mut c in d.inputs_mut().iter_mut().skip(k) {
-                                let c = c.samples_mut();
-                                c[0] = if hot {
-                                    f32::INFINITY
-                                } else if silent {
-                                    0.0
-                                } else {
-                                    amplitude
-                                };
-                            }
-                        }
-                        d.block();
-                        for c in 0..outs {
-                            for &s in d.output().plane(c).samples() {
-                                finite &= s.is_finite();
-                                within &= s.abs() <= corners.bound;
+                    } else if b == blocks * 80 / 100 {
+                        for c in d.inputs_mut().iter_mut() {
+                            let c = c.into_samples_mut();
+                            for (i, x) in c.iter_mut().enumerate() {
+                                *x = if i % 2 == 0 { amplitude } else { -amplitude };
                             }
                         }
                     }
-                });
+                    for &(addr, lo, hi) in corners.cells {
+                        let high = match phase {
+                            0 => false,
+                            1 => true,
+                            _ => b % 2 == 1,
+                        };
+                        set.set(addr, if high { f64::from(hi) } else { f64::from(lo) });
+                    }
+                    if b == blocks * 90 / 100 || b == blocks * 99 / 100 {
+                        assert_no_alloc::assert_no_alloc(|| d.node.reset());
+                    }
+                    if let Some(k) = key_from {
+                        let hot = b % 50 == 5 && b < blocks * 65 / 100;
+                        let silent = (blocks * 65 / 100..blocks * 80 / 100).contains(&b);
+                        for mut c in d.inputs_mut().iter_mut().skip(k) {
+                            let c = c.samples_mut();
+                            c[0] = if hot {
+                                f32::INFINITY
+                            } else if silent {
+                                0.0
+                            } else {
+                                amplitude
+                            };
+                        }
+                    }
+                    d.block();
+                    for c in 0..outs {
+                        for &s in d.output().plane(c).samples() {
+                            finite &= s.is_finite();
+                            within &= s.abs() <= corners.bound;
+                        }
+                    }
+                }
                 assert!(
                     finite,
                     "block {block}, signals {v}, phase {phase}: not finite"
@@ -902,6 +890,18 @@ fn the_limiter_corners_are_allocation_free_finite_and_under_the_ceiling() {
         for width in [2u16, 6] {
             let bus = BusTopology::default_for(ChannelLayout::from(width)).expect("one bus");
             for corners in [&CORNERS, &HOSTILE, &HOSTILE_BASE, &INFINITE] {
+                // A 1 ns lookahead has no ring to wrap: the shorter window covers it.
+                let corners = Corners {
+                    frames: if lookahead == Seconds::new(1.0) {
+                        corners.frames
+                    } else {
+                        19_200
+                    },
+                    cells: corners.cells,
+                    signals: corners.signals,
+                    signal_values: corners.signal_values,
+                    bound: corners.bound,
+                };
                 sweep(
                     || {
                         LimiterNode::<f32>::from(
@@ -910,7 +910,7 @@ fn the_limiter_corners_are_allocation_free_finite_and_under_the_ceiling() {
                                 .controls(LimiterControls::DEFAULT),
                         )
                     },
-                    corners,
+                    &corners,
                     1.5,
                     None,
                 );

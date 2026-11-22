@@ -12,7 +12,7 @@ use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_plugin_ipc::{
     AUDIO_REPLY_FRAME_BYTES, AUDIO_REQUEST_FRAME_BYTES, AudioReply, AudioRequest, BlobWire,
-    ControlFrame, ControlReply, ControlRequest, FrameBuf, Framed, ReqId, Request, SlabHandle,
+    ControlFrame, ControlReply, ControlRequest, FrameBuf, Framed, Lane, ReqId, Request, SlabHandle,
     SlabLayout, read_frame, write_frame,
 };
 use tutti_plugin_ipc_ffi::{Blob, Lease};
@@ -21,7 +21,7 @@ use tutti_plugin_types::{
 };
 
 use crate::main_loop::Bell;
-use crate::main_loop::{Listener as PlatformListener, Stream as PlatformStream};
+use crate::main_loop::{LaneEnd, Listener as PlatformListener, Stream as PlatformStream};
 
 /// The longest request the audio connection takes: the protocol's own cap for
 /// a block's request ([`AUDIO_REQUEST_FRAME_BYTES`]). A block's request carries
@@ -42,12 +42,13 @@ pub(crate) type AudioTransport = dyn Transport<AudioRequest, AudioReply>;
 /// The control connection's transport: requests in, answers and news out.
 pub(crate) type ControlTransport = dyn Transport<Incoming, ControlFrame>;
 
-/// What the control connection delivers: a request, or a slab setup or a state
-/// with the object it announced.
+/// What the control connection delivers: a request, or a slab setup, a lane
+/// open or a state with the object it announced.
 ///
-/// A `SetupSharedMemory`, `LoadState` or `StageState` frame is not delivered as
-/// a [`Request`]: the transport reads the object that follows it and delivers
-/// both, so a setup or a state without its object cannot reach the session.
+/// A `SetupSharedMemory`, `OpenLane`, `LoadState` or `StageState` frame is not
+/// delivered as a [`Request`]: the transport reads the object that follows it
+/// and delivers both, so a setup, a lane or a state without its object cannot
+/// reach the session.
 #[derive(Debug)]
 pub(crate) enum Incoming {
     /// Any request but a slab setup.
@@ -60,6 +61,14 @@ pub(crate) enum Incoming {
         layout: SlabLayout,
         /// The slab, as received.
         slab: SlabHandle,
+    },
+    /// The host's `OpenLane` for the audio lane and the lane's server end that
+    /// came with it.
+    OpenAudio {
+        /// The request's id, which the answer echoes.
+        id: ReqId,
+        /// The lane's server end.
+        lane: LaneEnd,
     },
     /// The host's `LoadState` and the state in the object that came with it.
     LoadState {
@@ -121,6 +130,14 @@ impl Inbound for Incoming {
                 // right after the frame, so no read ahead can have taken it.
                 let slab = SlabHandle::receive(crate::main_loop::connection(stream), slab)?;
                 Ok(Self::SetupSlab { id, layout, slab })
+            }
+            ControlRequest::OpenLane {
+                lane: Lane::Audio,
+                wire,
+            } => {
+                // The lane's end is the next message on the stream, as the slab is.
+                let lane = crate::main_loop::receive_lane(stream, &wire)?;
+                Ok(Self::OpenAudio { id, lane })
             }
             ControlRequest::LoadState {
                 state_use,
@@ -227,7 +244,7 @@ pub(crate) trait Transport<In, Out>: Send {
     /// Returns an error on EOF (the host disconnected), a short read, a length
     /// prefix over the lane's frame cap (a peer that cannot frame), or a payload
     /// postcard cannot decode — the last meaning a protocol-version mismatch the
-    /// `Ready` handshake failed to catch.
+    /// `Hello` failed to catch.
     fn recv(&mut self) -> IpcResult<In>;
 
     /// Wait up to `timeout` (`None`: for ever) for the host to have something to
@@ -491,8 +508,7 @@ impl<In: Inbound, Out: Framed, W: Writing> Transport<In, Out> for SocketTranspor
     }
 }
 
-/// The listening endpoint the host connects to, twice: once for the handshake
-/// phase and once for the audio phase.
+/// The listening endpoint the host connects to, once: the broker connection.
 pub(crate) struct TransportListener {
     listener: PlatformListener,
 }
@@ -526,19 +542,7 @@ impl TransportListener {
     /// then fails with `WouldBlock`). A host that dies while this waits is the
     /// host watch's to end the process ([`crate::server`]).
     pub(crate) fn accept(&self) -> IpcResult<SocketTransport<Incoming, ControlFrame>> {
-        Ok(SocketTransport::new(self.accept_stream()?))
-    }
-
-    /// [`accept`](Self::accept) for the audio connection, whose transport reads
-    /// and writes through fixed buffers ([`SocketTransport::audio`]).
-    pub(crate) fn accept_audio(
-        &self,
-    ) -> IpcResult<SocketTransport<AudioRequest, AudioReply, Alone>> {
-        Ok(SocketTransport::audio(self.accept_stream()?)?)
-    }
-
-    fn accept_stream(&self) -> IpcResult<PlatformStream> {
-        Ok(self.listener.accept()?)
+        Ok(SocketTransport::new(self.listener.accept()?))
     }
 }
 
@@ -569,6 +573,82 @@ mod recv_tests {
         match transport.recv() {
             Err(IpcError::FrameTooLarge(e)) => assert_eq!(e.len, CONTROL_FRAME_BYTES + 1),
             other => panic!("expected FrameTooLarge, got {other:?}"),
+        }
+    }
+}
+
+/// A lane open crosses the control connection with the lane's end beside its
+/// frame, and the server's receive refuses a frame whose end does not follow.
+#[cfg(all(test, unix))]
+mod lane_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::os::fd::{AsFd, OwnedFd};
+    use std::os::unix::net::UnixStream;
+    use tutti_plugin_ipc::LaneWire;
+    use tutti_plugin_types::SlabError;
+
+    fn pair() -> (UnixStream, SocketTransport<Incoming, ControlFrame>) {
+        let (host, server) = UnixStream::pair().expect("socket pair");
+        (
+            host,
+            SocketTransport::new(PlatformStream::from(OwnedFd::from(server))),
+        )
+    }
+
+    fn open_lane(id: u64) -> Request {
+        Request {
+            id: ReqId::new(id),
+            body: ControlRequest::OpenLane {
+                lane: Lane::Audio,
+                wire: LaneWire::fresh().expect("a lane wire"),
+            },
+        }
+    }
+
+    /// **A lane's end that follows its frame is delivered with it, as a live
+    /// duplex stream, and the frames before and after it parse.**
+    #[test]
+    fn an_open_lane_is_delivered_with_its_end_between_two_frames() {
+        let (mut host, mut transport) = pair();
+        let (host_end, server_end) = tutti_plugin_ipc_ffi::lane_pair().expect("a lane pair");
+        let request = |id| Request {
+            id: ReqId::new(id),
+            body: ControlRequest::Shutdown,
+        };
+        write_frame(&mut host, &request(1)).expect("before");
+        write_frame(&mut host, &open_lane(2)).expect("the frame");
+        tutti_plugin_ipc_ffi::send_lane(host.as_fd(), server_end.as_fd()).expect("the end");
+        write_frame(&mut host, &request(3)).expect("after");
+
+        assert!(matches!(transport.recv(), Ok(Incoming::Request(r)) if r.id == ReqId::new(1)));
+        let Ok(Incoming::OpenAudio { id, lane }) = transport.recv() else {
+            panic!("expected the lane open");
+        };
+        assert_eq!(id, ReqId::new(2));
+        assert!(matches!(transport.recv(), Ok(Incoming::Request(r)) if r.id == ReqId::new(3)));
+
+        let mut server = lane.accept().expect("the lane's stream");
+        let mut host_lane = UnixStream::from(host_end);
+        host_lane.write_all(b"up").expect("host to server");
+        let mut got = [0u8; 2];
+        (&server).read_exact(&mut got).expect("read");
+        assert_eq!(&got, b"up");
+        server.write_all(b"dn").expect("server to host");
+        host_lane.read_exact(&mut got).expect("read");
+        assert_eq!(&got, b"dn");
+    }
+
+    /// **A lane open whose end does not follow it is refused by name**: the next
+    /// bytes are a frame, not the descriptor's mark, so the stream is out of step.
+    #[test]
+    fn an_open_lane_without_its_end_is_refused_by_name() {
+        let (mut host, mut transport) = pair();
+        write_frame(&mut host, &open_lane(1)).expect("the frame");
+        write_frame(&mut host, &open_lane(2)).expect("the next frame");
+        match transport.recv() {
+            Err(IpcError::Slab(SlabError::BadMark { .. })) => {}
+            other => panic!("expected a refusal by name, got {other:?}"),
         }
     }
 }

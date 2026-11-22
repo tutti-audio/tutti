@@ -12,11 +12,8 @@ mod param_list;
 use crate::AudioSlab;
 use crate::PluginBridge;
 use crate::SlabLayout;
-use crate::unique_socket_path;
-use crate::{
-    AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, Framed, News,
-    PROTOCOL_VERSION, Request,
-};
+use crate::transport::broker_pair;
+use crate::{AudioRequest, ControlFrame, ControlReply, ControlRequest, Framed, News, Request};
 use crate::{IpcEvent, IpcThread};
 use param_list::ParamList as _;
 use std::sync::Arc;
@@ -132,31 +129,14 @@ impl From<News> for Say {
     }
 }
 
-/// Accepts the host's audio connection and then its control one, as the
-/// server does (the host connects the second after the first one's `Ready`),
-/// and serves the control one on its own thread with `lane`. The audio
-/// connection is read and not answered. The returned handle is the audio
-/// lane's, which ends with the host; the socket file is removed then.
+/// Serves the server's end of the control connection on its own thread with
+/// `lane`. The audio connection is read and not answered. The returned handle is
+/// the audio lane's, which ends with the host.
 fn serve_lanes(
-    listener: &interprocess::local_socket::Listener,
-    path: std::path::PathBuf,
+    audio: interprocess::local_socket::Stream,
+    control: interprocess::local_socket::Stream,
     lane: impl Fn(&interprocess::local_socket::Stream) + Send + Sync + 'static,
 ) -> std::thread::JoinHandle<()> {
-    use interprocess::local_socket::traits::Listener as _;
-    let audio = listener.accept().unwrap();
-    send_bridge_msg(
-        &audio,
-        &AudioReply::Ready {
-            protocol_version: PROTOCOL_VERSION,
-        },
-    );
-    let control = listener.accept().unwrap();
-    send_bridge_msg(
-        &control,
-        &ControlFrame::Ready {
-            protocol_version: PROTOCOL_VERSION,
-        },
-    );
     std::thread::Builder::new()
         .name("mock-plugin-server-control".to_string())
         .spawn(move || lane(&control))
@@ -164,13 +144,6 @@ fn serve_lanes(
     std::thread::Builder::new()
         .name("mock-plugin-server".to_string())
         .spawn(move || {
-            struct Cleanup(std::path::PathBuf);
-            impl Drop for Cleanup {
-                fn drop(&mut self) {
-                    let _ = std::fs::remove_file(&self.0);
-                }
-            }
-            let _cleanup = Cleanup(path);
             while std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 recv_host_msg::<AudioRequest>(&audio)
             }))
@@ -186,12 +159,7 @@ fn serve_lanes(
 fn handle_with_mock_server(
     respond: impl Fn(ControlRequest) -> Option<ControlReply> + Send + 'static,
 ) -> (PluginHandle, IpcThread, std::thread::JoinHandle<()>) {
-    use interprocess::local_socket::ListenerOptions;
-
-    let path = unique_socket_path().expect("the OS has a random source");
-    let _ = std::fs::remove_file(&path);
-    let name = crate::socket_name(&path).unwrap();
-    let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+    let ((audio_stream, audio), (control_stream, control)) = (broker_pair(), broker_pair());
 
     // The test writes no audio: the slab is kept for the served plugin it builds.
     let (slab, _handle) = AudioSlab::create(SlabLayout {
@@ -204,7 +172,8 @@ fn handle_with_mock_server(
     .unwrap();
     let (bridge, bridge_thread, replies) = PluginBridge::new(
         tutti_fixtures::executor(),
-        path.clone(),
+        audio_stream,
+        control_stream,
         tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
@@ -218,7 +187,7 @@ fn handle_with_mock_server(
     .unwrap();
 
     let respond = std::sync::Mutex::new(respond);
-    let server_thread = serve_lanes(&listener, path, move |stream| {
+    let server_thread = serve_lanes(audio, control, move |stream| {
         loop {
             let msg = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 recv_host_msg::<Request>(stream)
@@ -272,12 +241,7 @@ fn handle_with_multi_reply_server(
     IpcThread,
     std::thread::JoinHandle<()>,
 ) {
-    use interprocess::local_socket::ListenerOptions;
-
-    let path = unique_socket_path().expect("the OS has a random source");
-    let _ = std::fs::remove_file(&path);
-    let name = crate::socket_name(&path).unwrap();
-    let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+    let ((audio_stream, audio), (control_stream, control)) = (broker_pair(), broker_pair());
 
     // The test writes no audio: the slab is kept for the served plugin it builds.
     let (slab, _handle) = AudioSlab::create(SlabLayout {
@@ -290,7 +254,8 @@ fn handle_with_multi_reply_server(
     .unwrap();
     let (bridge, bridge_thread, replies) = PluginBridge::new(
         tutti_fixtures::executor(),
-        path.clone(),
+        audio_stream,
+        control_stream,
         tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
@@ -304,7 +269,7 @@ fn handle_with_multi_reply_server(
     .unwrap();
 
     let respond = std::sync::Mutex::new(respond);
-    let server_thread = serve_lanes(&listener, path, move |stream| {
+    let server_thread = serve_lanes(audio, control, move |stream| {
         loop {
             let msg = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 recv_host_msg::<Request>(stream)

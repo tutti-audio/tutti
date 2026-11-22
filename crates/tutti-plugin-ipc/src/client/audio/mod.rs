@@ -26,6 +26,7 @@ mod messages;
 mod payload_pool;
 mod thread;
 
+use crate::ControlStream;
 use crate::ServerWatch;
 use crate::SlabHandle;
 use crate::SlabLayout;
@@ -112,7 +113,6 @@ use lifecycle::Lifecycle;
 use messages::{AudioCommand, AudioResponse, ControlCommand, Setting};
 use parking_lot::Mutex;
 pub use payload_pool::{PARAM_BUFFERS, PayloadPool};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tutti_plugin_ipc_ffi::Blob;
@@ -224,16 +224,17 @@ impl Replies {
 }
 
 impl AudioBridge {
-    /// Starts the bridge's lanes on `executor`, which connect to the server at
-    /// `socket_path` and speak for the queues; dropping the [`IpcThread`] stops
-    /// them. The bridge keeps no handle to `executor`.
+    /// Starts the bridge's lanes on `executor`, which speak for the queues on the
+    /// server's `audio` lane and its `control` connection; dropping the
+    /// [`IpcThread`] stops them. The bridge keeps no handle to `executor`.
     ///
     /// # Errors
     ///
     /// The bridge thread cannot be spawned.
     pub(crate) fn new(
         executor: &Executor,
-        socket_path: PathBuf,
+        audio: ControlStream,
+        control: ControlStream,
         sample_rate: SampleRate,
         watch: Arc<ServerWatch>,
         timeouts: Timeouts,
@@ -262,7 +263,8 @@ impl AudioBridge {
             payloads.clone(),
             lifecycle.clone(),
             Arc::clone(&listener),
-            socket_path,
+            audio,
+            control,
         )?;
         let bridge = Self {
             channels,

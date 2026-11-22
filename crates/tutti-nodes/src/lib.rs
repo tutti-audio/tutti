@@ -242,7 +242,7 @@
 //!   ([`LadderType`]), [`EqBandNode`], [`CutFilterNode`] ([`CutResponse`]), [`BellFilterNode`],
 //!   [`TiltFilterNode`], [`GraphicEqNode`] ([`GraphicBands`]), [`EnvelopeFilterNode`], [`FirConvolverConfig`] (a
 //!   linear-phase equalizer: a [`tutti_dsp::Fir`] through the convolver); the coefficient solvers
-//!   [`SvfDesign::new`](tutti_dsp::SvfDesign::new) and
+//!   [`SvfControls::design`](tutti_dsp::SvfControls::design) and
 //!   [`LadderDesign::new`](tutti_dsp::LadderDesign::new); a node runs in the float of the
 //!   graph it is inserted in (`tutti_buffers::Float` with [`SimdLanes`]).
 //! - Crossover: [`CrossoverNode`], over `tutti_dsp::CrossoverBank`, a 2 to 6 band

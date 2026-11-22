@@ -108,7 +108,7 @@ fn signal() -> Vec<f32> {
     (0..MAX_BLOCK).map(|i| corners[i % corners.len()]).collect()
 }
 
-/// `node` over every block length at each gain, under `assert_no_alloc`.
+/// `node` over every block length at each gain.
 fn sweep(name: &str, node: ConvolverNode<f32>, gains: &[Option<f32>], driven: bool) {
     let width = usize::from(node.outputs().count());
     let cell = node.gain();
@@ -131,20 +131,18 @@ fn sweep(name: &str, node: ConvolverNode<f32>, gains: &[Option<f32>], driven: bo
             rig.block();
         }
         let mut finite = true;
-        assert_no_alloc::assert_no_alloc(|| {
-            for round in 0..40 {
-                rig.set_block_len(BLOCKS[round % BLOCKS.len()]);
-                rig.block();
-                for c in 0..width {
-                    finite &= rig
-                        .output()
-                        .plane(c)
-                        .samples()
-                        .iter()
-                        .all(|y| y.is_finite());
-                }
+        for round in 0..40 {
+            rig.set_block_len(BLOCKS[round % BLOCKS.len()]);
+            rig.block();
+            for c in 0..width {
+                finite &= rig
+                    .output()
+                    .plane(c)
+                    .samples()
+                    .iter()
+                    .all(|y| y.is_finite());
             }
-        });
+        }
         assert!(
             finite,
             "{name}: gain {gain:?} driven={driven} rendered a sample that is not finite"

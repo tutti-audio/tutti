@@ -32,10 +32,8 @@ use tutti_fixtures::machine_lock;
 /// slab with, and the block they drive (so every call is one whole chunk).
 const BATCH_SIZE: usize = 64;
 use crate::BlockPayload;
-use crate::unique_socket_path;
-use crate::{
-    AudioReply, AudioRequest, ControlFrame, Framed, PROTOCOL_VERSION, Request, SlabLayout,
-};
+use crate::transport::broker_pair;
+use crate::{AudioReply, AudioRequest, Framed, Request, SlabLayout};
 use crate::{AudioSlab, BATCH_OUTCOMES, Chunks, RING_SLOTS, Replies, SlabHandle, SlabWriter};
 use std::sync::Arc;
 use tutti_buffers::FloatWidth;
@@ -156,19 +154,9 @@ fn recv_host_msg<T: Framed>(stream: &interprocess::local_socket::Stream) -> Opti
     postcard::from_bytes(&buf).ok()
 }
 
-/// The control connection, accepted after the audio one as the server does:
-/// `Ready` is sent and what the host sends on it is read and dropped (these
-/// servers answer blocks only). Call it once the audio connection's `Ready`
-/// has gone, which is what the host waits for before it connects.
-fn accept_control(listener: &interprocess::local_socket::Listener) {
-    use interprocess::local_socket::traits::Listener as _;
-    let control = listener.accept().unwrap();
-    send_bridge_msg(
-        &control,
-        &ControlFrame::Ready {
-            protocol_version: PROTOCOL_VERSION,
-        },
-    );
+/// The server's end of the control connection: what the host sends on it is
+/// read and dropped (these servers answer blocks only).
+fn serve_control(control: interprocess::local_socket::Stream) {
     std::thread::spawn(move || while recv_host_msg::<Request>(&control).is_some() {});
 }
 
@@ -268,12 +256,7 @@ fn bridge_with_server_mode(
     mute: bool,
     gate: Option<ServerGate>,
 ) -> Rig {
-    use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
-
-    let path = unique_socket_path().expect("the OS has a random source");
-    let _ = std::fs::remove_file(&path);
-    let name = crate::socket_name(&path).unwrap();
-    let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+    let ((audio, server_stream), (control, control_peer)) = (broker_pair(), broker_pair());
 
     let out_channels: usize = layout.outputs.iter().map(|l| l.count() as usize).sum();
     let (host_slab, handle) = AudioSlab::create(layout.clone()).unwrap();
@@ -283,7 +266,8 @@ fn bridge_with_server_mode(
 
     let (bridge, bridge_thread, replies) = PluginBridge::new(
         tutti_fixtures::executor(),
-        path.clone(),
+        audio,
+        control,
         tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
@@ -296,27 +280,12 @@ fn bridge_with_server_mode(
     )
     .unwrap();
 
-    let server_stream = listener.accept().unwrap();
-    send_bridge_msg(
-        &server_stream,
-        &AudioReply::Ready {
-            protocol_version: PROTOCOL_VERSION,
-        },
-    );
-    accept_control(&listener);
+    serve_control(control_peer);
 
-    let path_cleanup = path;
     let published = Arc::clone(bridge.audio().progress());
     let server_thread = std::thread::Builder::new()
         .name("mock-doubling-server".to_string())
         .spawn(move || {
-            struct Cleanup(std::path::PathBuf);
-            impl Drop for Cleanup {
-                fn drop(&mut self) {
-                    let _ = std::fs::remove_file(&self.0);
-                }
-            }
-            let _cleanup = Cleanup(path_cleanup);
             let mut scratch = vec![0.0f32; BATCH_SIZE];
             loop {
                 let msg = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -803,10 +772,10 @@ fn a_stale_slot_holding_real_audio_still_yields_silence() {
     bridge_thread.shutdown();
 }
 
-/// A bridge whose socket has no server behind it: the listener is created,
-/// dropped, and never accepts. Every dispatch therefore fails, which is how the
-/// bridge marks itself crashed through its ordinary path rather than through a
-/// test-only setter.
+/// A bridge whose connections have no server behind them: the peers are dropped
+/// at once, so the bridge reads the end of its control connection and marks
+/// itself crashed through its ordinary path rather than through a test-only
+/// setter.
 ///
 /// Returned deliberately without a server thread — the point is a bridge that
 /// never publishes to the slab.
@@ -817,15 +786,18 @@ fn bridge_with_no_server() -> (
     SlabHandle,
     Replies,
 ) {
-    let path = unique_socket_path().expect("the OS has a random source");
-    let _ = std::fs::remove_file(&path);
+    // Both peers are dropped at once: the control lane reads the end of its
+    // connection and the bridge is dead.
+    let (audio, _) = broker_pair();
+    let (control, _) = broker_pair();
 
     let layout = stereo_layout();
     let (host_slab, handle) = AudioSlab::create(layout).unwrap();
 
     let (bridge, bridge_thread, replies) = PluginBridge::new(
         tutti_fixtures::executor(),
-        path,
+        audio,
+        control,
         tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
@@ -1572,12 +1544,7 @@ fn bridge_with_first_block_stalled(stall: Stall) -> Rig {
 /// an arriving frame belongs to. `offset` is a label here and nothing
 /// interprets it as a position.
 fn stamped_server(stall: Stall, first_only: bool, rate: SampleRate) -> Rig {
-    use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
-
-    let path = unique_socket_path().expect("the OS has a random source");
-    let _ = std::fs::remove_file(&path);
-    let name = crate::socket_name(&path).unwrap();
-    let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+    let ((audio, server_stream), (control, control_peer)) = (broker_pair(), broker_pair());
 
     let layout = stereo_layout();
     let (host_slab, handle) = AudioSlab::create(layout.clone()).unwrap();
@@ -1585,7 +1552,8 @@ fn stamped_server(stall: Stall, first_only: bool, rate: SampleRate) -> Rig {
 
     let (bridge, bridge_thread, replies) = PluginBridge::new(
         tutti_fixtures::executor(),
-        path.clone(),
+        audio,
+        control,
         tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
@@ -1598,27 +1566,12 @@ fn stamped_server(stall: Stall, first_only: bool, rate: SampleRate) -> Rig {
     )
     .unwrap();
 
-    let server_stream = listener.accept().unwrap();
-    send_bridge_msg(
-        &server_stream,
-        &AudioReply::Ready {
-            protocol_version: PROTOCOL_VERSION,
-        },
-    );
-    accept_control(&listener);
+    serve_control(control_peer);
 
-    let path_cleanup = path;
     let published = Arc::clone(bridge.audio().progress());
     let server_thread = std::thread::Builder::new()
         .name("mock-stamped-server".to_string())
         .spawn(move || {
-            struct Cleanup(std::path::PathBuf);
-            impl Drop for Cleanup {
-                fn drop(&mut self) {
-                    let _ = std::fs::remove_file(&self.0);
-                }
-            }
-            let _cleanup = Cleanup(path_cleanup);
             let mut scratch = vec![0.0f32; BATCH_SIZE];
             let mut stalled_once = false;
             loop {
@@ -1843,17 +1796,17 @@ fn an_unstaged_chunk_reports_its_midi_lost() {
 }
 
 /// **A chunk the bridge refuses reports its MIDI lost, with how many events
-/// it carried.** A bridge that never connected is crashed, and refuses
+/// it carried.** A bridge whose server is gone is crashed, and refuses
 /// every chunk.
 #[test]
 fn a_refused_chunk_reports_its_midi_lost() {
     let _lock = machine_lock();
-    let path = unique_socket_path().expect("the OS has a random source");
-    let _ = std::fs::remove_file(&path);
+    let ((audio, _), (control, _)) = (broker_pair(), broker_pair());
     let (slab, _handle) = AudioSlab::create(stereo_layout()).unwrap();
     let (bridge, _thread, replies) = PluginBridge::new(
         tutti_fixtures::executor(),
-        path,
+        audio,
+        control,
         tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
@@ -1895,8 +1848,8 @@ fn a_refused_chunk_reports_its_midi_lost() {
 }
 
 /// **A block the bridge thread skips as stale never lets the SysEx open in
-/// it through with a gap.** The mock server holds its `Ready` until four
-/// blocks are queued, so the bridge thread finds the first two stale
+/// it through with a gap.** The mock server holds its answer to a first block
+/// until four more are queued, so the bridge thread finds the first two stale
 /// (`RING_SLOTS` = 2) and skips them: their MIDI is lost, counted, and the
 /// rest of the message open in them (in block 3) is not sent either. The
 /// message after it, and a note, arrive.
@@ -1971,9 +1924,10 @@ fn sysex_fragments(len: usize) -> Vec<tutti_plugin_types::WireMidi> {
         .collect()
 }
 
-/// Submits four blocks of MIDI before the mock server says `Ready`, so the
-/// bridge thread finds blocks 1 and 2 stale (`RING_SLOTS` = 2) and skips
-/// them. Returns the MIDI the server got in blocks 3 and 4, and the
+/// Submits four blocks of MIDI while the bridge thread waits on the mock
+/// server's answer to an empty first block (block 1), so the bridge thread finds
+/// the first two of the four (blocks 2 and 3) stale (`RING_SLOTS` = 2) and skips
+/// them. Returns the MIDI the server got in blocks 4 and 5, and the
 /// bridge's count of the MIDI it did not send.
 fn two_stale_blocks(
     blocks: [Vec<tutti_plugin_types::WireMidi>; 4],
@@ -1983,16 +1937,12 @@ fn two_stale_blocks(
     u64,
     u64,
 ) {
-    use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
-
-    assert_eq!(RING_SLOTS, 2, "blocks 1 and 2 of 4 are stale");
-    let path = unique_socket_path().expect("the OS has a random source");
-    let _ = std::fs::remove_file(&path);
-    let name = crate::socket_name(&path).unwrap();
-    let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+    assert_eq!(RING_SLOTS, 2, "blocks 2 and 3 of 2..=5 are stale");
+    let ((audio, server_stream), (control, control_peer)) = (broker_pair(), broker_pair());
     let (bridge, thread, _replies) = PluginBridge::new(
         tutti_fixtures::executor(),
-        path.clone(),
+        audio,
+        control,
         tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
@@ -2004,26 +1954,21 @@ fn two_stale_blocks(
         tutti_plugin_types::Timeouts::default(),
     )
     .unwrap();
-    let server_stream = listener.accept().unwrap();
-    let listener = std::sync::Arc::new(listener);
-    let control_listener = Arc::clone(&listener);
+    // Block 1 is waited on until the server answers it, however long that takes.
+    bridge.audio().set_reply_wait(Some(WAIT_BUDGET));
+    serve_control(control_peer);
     let (release, released) = std::sync::mpsc::channel::<()>();
     let (got_tx, got) = std::sync::mpsc::channel();
     let server = std::thread::spawn(move || {
-        released.recv().unwrap();
-        send_bridge_msg(
-            &server_stream,
-            &AudioReply::Ready {
-                protocol_version: PROTOCOL_VERSION,
-            },
-        );
-        accept_control(&control_listener);
         while let Some(msg) = recv_host_msg::<AudioRequest>(&server_stream) {
             if let AudioRequest::ProcessAudio(data) = msg {
                 let midi: Vec<tutti_plugin_types::WireMidi> = data.midi_events.to_vec();
                 let _ = got_tx.send((data.seq, midi));
+                if data.seq == 1 {
+                    released.recv().unwrap();
+                }
                 // The test asserts on `got`, which is sent above: once it has
-                // block 4 it drops the bridge, so the last reply may find the
+                // block 5 it drops the bridge, so the last reply may find the
                 // peer closed. That ends the server, as a closed read does.
                 let reply = AudioReply::AudioProcessed {
                     latency_us: 0,
@@ -2037,12 +1982,11 @@ fn two_stale_blocks(
                 }
             }
         }
-        let _ = std::fs::remove_file(&path);
     });
 
-    for (i, midi) in blocks.iter().enumerate() {
+    let submit = |seq: u64, midi: &[tutti_plugin_types::WireMidi]| {
         let submitted = bridge.audio().submit(
-            i as u64 + 1,
+            seq,
             BATCH_SIZE,
             midi.iter().copied().collect(),
             &mut tutti_plugin_types::ParameterChanges::new(),
@@ -2052,13 +1996,19 @@ fn two_stale_blocks(
             Default::default(),
         );
         assert!(submitted.accepted());
+    };
+    submit(1, &[]);
+    let wait = WAIT_BUDGET;
+    let (seq, _) = got.recv_timeout(wait).expect("block 1 sent");
+    assert_eq!(seq, 1);
+    for (i, midi) in blocks.iter().enumerate() {
+        submit(i as u64 + 2, midi);
     }
     release.send(()).unwrap();
-    let wait = WAIT_BUDGET;
-    let (seq, three) = got.recv_timeout(wait).expect("block 3 sent");
-    assert_eq!(seq, 3);
-    let (seq, four) = got.recv_timeout(wait).expect("block 4 sent");
+    let (seq, three) = got.recv_timeout(wait).expect("block 4 sent");
     assert_eq!(seq, 4);
+    let (seq, four) = got.recv_timeout(wait).expect("block 5 sent");
+    assert_eq!(seq, 5);
     let dropped = bridge.audio().dropped_midi_cell().get();
     let skipped = bridge.audio().skipped_cell().get();
     drop(thread);
