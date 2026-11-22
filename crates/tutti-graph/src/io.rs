@@ -688,6 +688,10 @@ impl<'a, F: Float> Io<'a, F> {
     ///     }
     /// }
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// If the handle reaches past this node's event inputs.
     pub fn sub_blocks(&self, port: InEvents) -> SubBlocks<'a> {
         self.events_in[port.index()].sub_blocks(Samples::new(self.frames))
     }
