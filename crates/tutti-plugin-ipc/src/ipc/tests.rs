@@ -413,9 +413,7 @@ fn mock_with(
     let ipc = Ipc::new(IpcParts {
         bridge,
         replies,
-        guard: Arc::new(ProcessGuard::for_test(
-            crate::unique_socket_path().expect("the OS has a random source"),
-        )),
+        guard: Arc::new(ProcessGuard::for_test()),
         descriptor: PluginDescriptor::new("", PluginClass::Unknown),
         loaded: PluginWiring {
             inputs: vec![PluginBus::main(ChannelLayout::STEREO)],

@@ -12,12 +12,38 @@ mod bell;
 
 pub(crate) use bell::Bell;
 
-/// The platform's concrete listener and stream, not the crate's dispatch enum.
+/// The platform's concrete stream, not the crate's dispatch enum.
 ///
 /// Unix needs the concrete stream because only it implements `AsFd`, which the
 /// wait polls.
-pub(crate) type Listener = interprocess::os::unix::uds_local_socket::Listener;
 pub(crate) type Stream = interprocess::os::unix::uds_local_socket::Stream;
+
+/// The server's end of the connection the host made: the stream socket the host
+/// handed this process as its standard input.
+pub type HostEnd = std::os::fd::OwnedFd;
+
+/// Takes the host's end of the connection from this process's standard input
+/// ([`tutti_plugin_ipc_ffi::adopt_host_socket`]). Call it first thing in `main`,
+/// before any thread starts.
+///
+/// # Errors
+///
+/// Standard input is not a stream socket, which is the case for a server started
+/// by hand rather than by its host.
+pub fn adopt_host() -> IpcResult<HostEnd> {
+    tutti_plugin_ipc_ffi::adopt_host_socket()
+        .map_err(|e| tutti_plugin_types::IpcError::Io(std::io::Error::other(e)))
+}
+
+/// The host's connection as a stream, in blocking mode.
+///
+/// # Errors
+///
+/// Never on unix.
+#[allow(clippy::unnecessary_wraps)]
+pub(crate) fn meet(host: HostEnd) -> IpcResult<Stream> {
+    Ok(Stream::from(host))
+}
 
 /// What a slab is received over on `stream`: the socket's descriptor.
 pub(crate) fn connection(stream: &Stream) -> tutti_plugin_ipc_ffi::Connection<'_> {

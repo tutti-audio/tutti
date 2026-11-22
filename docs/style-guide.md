@@ -90,6 +90,11 @@ until it is un-parked. `vendor/` is third-party and never restyled.
     depend on each other and answers with a named error.
   - *Nodes:* a `*Node` has no public constructor. The app builds its `*Config`;
     the node is made from it at insertion.
+  - *Public fields:* a `*Config`, `*Settings` or `*Options` is not a struct of public
+    fields filled with `..Default::default()`: its fields are private and its options
+    are the chain. The gate sees that shape by the name alone; a value type that is
+    not a configuration (a reading, a record, a wire message's own fields) may have
+    public fields, and a boundary one is a row of the gate's allow list.
   - *Builders:* a separate `*Builder` with a terminal `build()` exists only where
     finishing does work or can fail (`SessionBuilder` makes the engine and opens
     the device).
