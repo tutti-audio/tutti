@@ -1287,7 +1287,14 @@ fn a_non_json_entry_leaves_the_schema_type_empty() {
     };
     assert!(sample(r#"{"title":"Sample Upload","description":"Upload the sample here"}"#).is_ok());
     assert!(sample(r#"{"title":"Sample Upload","type":[]}"#).is_ok());
-    assert!(sample(r#"{"title":"Sample Upload","type":"string"}"#).is_err());
+    assert!(matches!(
+        sample(r#"{"title":"Sample Upload","type":"string"}"#),
+        Err(EntryError::SchemaTypedNonJson(_))
+    ));
+    assert!(matches!(
+        sample(r#"{"type":[]}"#),
+        Err(EntryError::SchemaIncomplete(_))
+    ));
 }
 
 // M2-103 §8.6.1: a list object holds plain values and arrays of plain values or
@@ -1391,6 +1398,16 @@ fn a_store_refuses_a_link_to_an_undeclared_action_resource() {
     assert_eq!(
         store.put(None, simple("X-Paste")),
         Err(StoreError::ActionNotDeclared(custom("X-Paste")))
+    );
+    // The options of a selector are a List Resource on write too (§13.1.2).
+    let PeData::ChannelList(list) = selector.clone() else {
+        panic!("not ChannelList");
+    };
+    let mut entries = list.into_entries();
+    entries[0].links[0].resource = custom("X-Options");
+    assert_eq!(
+        store.put(None, PeData::ChannelList(PeChannelList::new(entries))),
+        Err(StoreError::OptionsNotAList(custom("X-Options")))
     );
     assert_eq!(
         store.put(None, selector),

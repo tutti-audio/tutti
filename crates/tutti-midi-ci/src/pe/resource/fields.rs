@@ -434,7 +434,7 @@ pub enum InvalidValue {
     NotControlChange,
     /// The options Resource of a `selectorAction` Link, which is no List Resource
     /// (M2-103 §13.1.2).
-    #[error("the options Resource of a selector is a List Resource")]
+    #[error("the options Resource of a selector is not a List Resource")]
     NotAListResource,
     /// An `x-` property a list object cannot hold.
     #[error(transparent)]

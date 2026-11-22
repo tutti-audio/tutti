@@ -26,6 +26,10 @@ pub enum StoreError {
     /// §13.1.1: an action Resource is listed in the ResourceList).
     #[error("an action Link names {0}, which has no entry declared")]
     ActionNotDeclared(PeResource),
+    /// A `selectorAction` Link of the data has options that are no List Resource
+    /// (M2-103 §13.1.2).
+    #[error("the options Resource {0} of a selector is not a List Resource")]
+    OptionsNotAList(PeResource),
 }
 
 #[derive(Clone, Debug)]
@@ -73,7 +77,10 @@ impl ResourceStore {
     /// [`StoreError::NotDeclared`] for a Resource with no entry, and
     /// [`StoreError::ResIdDisagrees`] when `res_id` is given and the entry says
     /// there is none, or the reverse, and [`StoreError::ActionNotDeclared`] when
-    /// a Link of the data is an action on a Resource with no entry.
+    /// a Link of the data is an action on a Resource with no entry, so the
+    /// Resource of an action Link is declared before data linking to it is put;
+    /// [`StoreError::OptionsNotAList`] for a selector Link whose options Resource
+    /// is no List Resource.
     pub fn put(&mut self, res_id: Option<ResourceId>, data: PeData) -> Result<(), StoreError> {
         let resource = data.resource();
         let entry = self
@@ -85,16 +92,20 @@ impl ResourceStore {
                 required: entry.require_res_id(),
             });
         }
-        let undeclared = data.links().into_iter().find_map(|link| {
+        for link in data.links() {
             let acted = match &link.role {
                 Some(LinkRole::Simple(_)) => &link.resource,
-                Some(LinkRole::Selector(action)) => &action.action_resource,
-                _ => return None,
+                Some(LinkRole::Selector(action)) => {
+                    if !link.resource.is_list() {
+                        return Err(StoreError::OptionsNotAList(link.resource.clone()));
+                    }
+                    &action.action_resource
+                }
+                _ => continue,
             };
-            self.entry(acted).is_none().then(|| acted.clone())
-        });
-        if let Some(acted) = undeclared {
-            return Err(StoreError::ActionNotDeclared(acted));
+            if self.entry(acted).is_none() {
+                return Err(StoreError::ActionNotDeclared(acted.clone()));
+            }
         }
         let stored = self
             .resources
