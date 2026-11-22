@@ -11,7 +11,7 @@ use crate::sys;
 use tutti_ump::Ump;
 
 /// `-EAGAIN`: nothing queued yet on a non-blocking client.
-const EAGAIN: i32 = -11;
+pub(crate) const EAGAIN: i32 = -11;
 
 /// A name as a C string.
 ///

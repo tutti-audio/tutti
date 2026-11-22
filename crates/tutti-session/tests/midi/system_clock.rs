@@ -3,9 +3,10 @@
 //! terms are complete from the first block (the audio output's latency is zero,
 //! not unknown).
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::Instant;
+use tutti_rt::Mutex;
 
 use tutti_buffers::MaxBlock;
 use tutti_graph::UmpAt;
@@ -19,10 +20,7 @@ struct Wire(Arc<Mutex<Vec<UmpAt>>>);
 
 impl MidiOut for Wire {
     fn queue_timed(&self, events: &[Outgoing]) -> Taken {
-        self.0
-            .lock()
-            .unwrap()
-            .extend(events.iter().map(|e| (e.at, e.ump)));
+        self.0.lock().extend(events.iter().map(|e| (e.at, e.ump)));
         Taken::within(events, events.len())
     }
 }
@@ -58,13 +56,7 @@ fn the_midi_clock_reaches_the_output_on_the_timers_blocks() {
     let limit = Instant::now() + Duration::from_secs(10);
     loop {
         let _ = s.update();
-        let ticks = wire
-            .0
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|(_, ump)| *ump == tick)
-            .count();
+        let ticks = wire.0.lock().iter().filter(|(_, ump)| *ump == tick).count();
         if ticks >= 3 {
             break;
         }

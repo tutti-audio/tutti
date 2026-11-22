@@ -4,9 +4,10 @@
 //! (`SessionBuilder::input_opener`) and its output on a `ManualStreamDriver`.
 
 use std::any::Any;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tutti_buffers::Interleaved;
+use tutti_rt::Mutex;
 
 use tutti_buffers::ChannelLayout;
 use tutti_cpal::MicConfig;
@@ -46,7 +47,7 @@ struct Stream(Arc<Mutex<Record>>);
 
 impl Drop for Stream {
     fn drop(&mut self) {
-        self.0.lock().unwrap().log.push("closed".into());
+        self.0.lock().log.push("closed".into());
     }
 }
 
@@ -61,7 +62,7 @@ impl std::fmt::Debug for Record {
 
 impl InputOpener for Capture {
     fn open(&mut self, config: &MicConfig, rate: SampleRate) -> tutti_cpal::Result<OpenedInput> {
-        let mut rec = self.0.lock().unwrap();
+        let mut rec = self.0.lock();
         let n = rec.writers.len();
         rec.log.push(format!("open {}", rate.get()));
         if rec.fail_from.is_some_and(|from| n >= from) {
@@ -143,7 +144,7 @@ fn a_restart_reopens_an_added_input_into_the_same_node() {
     assert_eq!(wired.len(), 1, "monitored");
 
     let block = [0.25, -0.25].repeat(16);
-    let mut rec = record.lock().unwrap();
+    let mut rec = record.lock();
     let view = Interleaved::new(&block, ChannelLayout::STEREO).unwrap();
     rec.writers[0].push_interleaved(view);
     drop(rec);
@@ -154,12 +155,12 @@ fn a_restart_reopens_an_added_input_into_the_same_node() {
         .restart_on(spec_at(44_100.0), driver, None, None)
         .expect("restarts");
     assert_eq!(
-        record.lock().unwrap().log,
+        record.lock().log,
         ["open 48000", "closed", "open 44100"],
         "the old capture closed before the new one opened, at the new rate"
     );
     assert_eq!(
-        record.lock().unwrap().configs[1].inputs,
+        record.lock().configs[1].inputs,
         Some(vec![0, 1]),
         "the same config"
     );
@@ -170,7 +171,7 @@ fn a_restart_reopens_an_added_input_into_the_same_node() {
         wired
     );
     {
-        let mut rec = record.lock().unwrap();
+        let mut rec = record.lock();
         rec.writers[0].push_interleaved(
             Interleaved::new(&[0.9, 0.9].repeat(16), ChannelLayout::STEREO).unwrap(),
         );
@@ -183,7 +184,7 @@ fn a_restart_reopens_an_added_input_into_the_same_node() {
     for _ in 0..64 {
         last = first_frame(&mut session, &new);
         let block = [0.5, -0.5].repeat(16);
-        let mut rec = record.lock().unwrap();
+        let mut rec = record.lock();
         let view = Interleaved::new(&block, ChannelLayout::STEREO).unwrap();
         rec.writers[1].push_interleaved(view);
     }
@@ -204,7 +205,7 @@ fn an_input_that_cannot_be_reopened_is_reported_with_its_error() {
     let (live, _stream) = live(&record);
     let mut session = live;
     let input = session.add_input(InputConfig::default()).expect("opens");
-    record.lock().unwrap().fail_from = Some(1);
+    record.lock().fail_from = Some(1);
 
     let (driver, _new) = ManualStreamDriver::new();
     session
@@ -284,12 +285,7 @@ fn device_latency_is_the_reported_delay_in_frames_and_none_before_a_report() {
     stream
         .render_block_delayed(Samples::new(64), Duration::from_millis(10))
         .expect("open");
-    let cell = record
-        .lock()
-        .unwrap()
-        .latency
-        .clone()
-        .expect("handed a cell");
+    let cell = record.lock().latency.clone().expect("handed a cell");
     cell.record(Some(Duration::from_millis(5)));
     let l = session.device().latency();
     assert_eq!(l.output, Some(Samples::new(480)));
@@ -322,14 +318,14 @@ fn removing_an_inputs_node_closes_the_capture_and_a_restart_does_not_reopen_it()
     for _ in 0..4 {
         let _ = session.update();
     }
-    let log = record.lock().unwrap().log.clone();
+    let log = record.lock().log.clone();
     assert_eq!(log, ["open 48000", "closed"], "the capture closed");
 
     let (driver, _new) = ManualStreamDriver::new();
     session
         .restart_on(spec_at(44_100.0), driver, None, None)
         .expect("restarts");
-    let log = record.lock().unwrap().log.clone();
+    let log = record.lock().log.clone();
     assert_eq!(
         log,
         ["open 48000", "closed"],
@@ -353,7 +349,7 @@ fn a_switch_to_the_timer_ends_every_capture_and_reports_each_once() {
         .into_system_clock()
         .unwrap_or_else(|e| panic!("switches: {}", e.error()));
     assert_eq!(
-        record.lock().unwrap().log,
+        record.lock().log,
         ["open 48000", "open 48000", "closed", "closed"],
         "both capture streams dropped"
     );
@@ -409,5 +405,5 @@ fn a_capture_refusing_the_sessions_width_fails_the_add_input_call() {
         ),
         "{refused:?}"
     );
-    assert!(record.lock().unwrap().writers.is_empty());
+    assert!(record.lock().writers.is_empty());
 }

@@ -1,7 +1,8 @@
 //! A restart re-rates the MIDI clock master, through a session on
 //! `ManualStreamDriver`s.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tutti_rt::Mutex;
 
 use tutti_buffers::ChannelLayout;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
@@ -29,7 +30,7 @@ struct Wire(Arc<Mutex<Vec<Vec<UmpAt>>>>);
 impl MidiOut for Wire {
     fn queue_timed(&self, batch: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
         let events: Vec<tutti_graph::UmpAt> = batch.iter().map(|e| (e.at, e.ump)).collect();
-        self.0.lock().unwrap().push(events.to_vec());
+        self.0.lock().push(events.to_vec());
         tutti_midi_runtime::Taken::within(batch, batch.len())
     }
 }
@@ -43,14 +44,14 @@ fn clock(
     stream: &ManualStream,
     (frames, blocks): (usize, usize),
 ) -> Vec<(Ump, u64)> {
-    wire.0.lock().unwrap().clear();
+    wire.0.lock().clear();
     for _ in 0..blocks {
         stream
             .render_block(Samples::new(frames))
             .expect("the stream is open");
     }
     let _ = s.update();
-    let batches = std::mem::take(&mut *wire.0.lock().unwrap());
+    let batches = std::mem::take(&mut *wire.0.lock());
     assert_eq!(batches.len(), 1, "one drain, one batch");
     batches[0]
         .iter()

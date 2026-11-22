@@ -559,11 +559,7 @@ fn stream(w: [u32; 4]) -> Option<Stream> {
             tx_jr: flag(w[1], 0),
         })),
         0x02 if complete => Some(Stream::DeviceIdentity(DeviceIdentity {
-            manufacturer: ManufacturerId::from_sysex_bytes([
-                u7(w[1], 2),
-                u7(w[1], 1),
-                u7(w[1], 0),
-            ])?,
+            manufacturer: ManufacturerId::try_from([u7(w[1], 2), u7(w[1], 1), u7(w[1], 0)]).ok()?,
             family: [u7(w[2], 3), u7(w[2], 2)],
             model: [u7(w[2], 1), u7(w[2], 0)],
             revision: SoftwareRevision::from([u7(w[3], 3), u7(w[3], 2), u7(w[3], 1), u7(w[3], 0)]),

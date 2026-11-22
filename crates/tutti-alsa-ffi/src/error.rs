@@ -210,6 +210,13 @@ impl Error {
             _ => None,
         }
     }
+
+    /// Whether the call was refused with `-EAGAIN`: a non-blocking client's send
+    /// to a destination with no room, or a read with nothing queued.
+    #[must_use]
+    pub fn would_block(&self) -> bool {
+        self.errno() == Some(-crate::client::EAGAIN)
+    }
 }
 
 /// The address byte of the client, port or queue `id` that `what` names.
@@ -253,6 +260,13 @@ mod tests {
         assert_eq!(failed.errno(), Some(2));
         assert_eq!(check(0, Operation::Open).unwrap(), 0);
         assert_eq!(check(7, Operation::Open).unwrap(), 7);
+    }
+
+    #[test]
+    fn only_eagain_would_block() {
+        assert!(check(-11, Operation::Open).unwrap_err().would_block());
+        assert!(!check(-9, Operation::Open).unwrap_err().would_block());
+        assert!(!address_byte("port", 256).unwrap_err().would_block());
     }
 
     #[test]

@@ -18,7 +18,6 @@
 
 use crate::bounced::bounced;
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 use tutti_session::MainOutput;
 
@@ -33,7 +32,7 @@ use tutti_units::{SampleRate, Samples, Seconds};
 const RATE: SampleRate = SampleRate::SR_48K;
 const BRANCHES: usize = 8;
 
-type Threads = Arc<Mutex<HashSet<ThreadId>>>;
+type Threads = tutti_fixtures::Shared<HashSet<ThreadId>>;
 
 /// A mono sine with its own phase, a few harmonics deep so a block costs
 /// enough for a helper to take it, and a record of the threads that ran it.
@@ -115,7 +114,7 @@ fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Rendered>, usize) {
         .render_workers(workers)
         .build_detached(RATE)
         .unwrap();
-    let threads = Threads::default();
+    let threads = Threads::new(HashSet::with_capacity(64));
     let sum = session.graph().add(ForkByClone(Sum));
     let mut named = Vec::new();
     for i in 0..BRANCHES {
@@ -123,7 +122,7 @@ fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Rendered>, usize) {
             hz: 110.0 * (i + 1) as f32 + 0.37 * i as f32,
             phase: 0.0,
             dt: 0.0,
-            threads: Arc::clone(&threads),
+            threads: threads.clone(),
         }));
         session
             .graph()

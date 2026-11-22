@@ -8,8 +8,9 @@
 
 use crate::common::OpenPorts as _;
 use crate::common::{Keyed, blocks};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tutti_platform::Instant;
+use tutti_rt::Mutex;
 
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
@@ -337,10 +338,7 @@ struct Wire(Arc<Mutex<Vec<Ump>>>);
 impl MidiOut for Wire {
     fn queue_timed(&self, batch: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
         let events: Vec<tutti_graph::UmpAt> = batch.iter().map(|e| (e.at, e.ump)).collect();
-        self.0
-            .lock()
-            .unwrap()
-            .extend(events.iter().map(|(_, ump)| *ump));
+        self.0.lock().extend(events.iter().map(|(_, ump)| *ump));
         tutti_midi_runtime::Taken::within(batch, batch.len())
     }
 }
@@ -350,7 +348,7 @@ impl Wire {
     fn messages(&self) -> Vec<Vec<u8>> {
         let mut messages = Vec::new();
         let mut current = Vec::new();
-        for ump in std::mem::take(&mut *self.0.lock().unwrap()) {
+        for ump in std::mem::take(&mut *self.0.lock()) {
             let Ok(Message::Sysex7(_, packet)) = ump.decode() else {
                 continue;
             };
