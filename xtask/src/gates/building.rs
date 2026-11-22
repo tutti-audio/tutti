@@ -189,6 +189,9 @@ const fn ty(
     }
 }
 
+const COPY_WITH_ONE_FIELD: &str = "a copy with one field replaced (std's `with_` as in \
+    `Path::with_extension`), whose getter holds the bare name";
+
 const STEREO_ONLY: &str = "a stereo-only node: mid/side, width and auto-pan are defined on a \
     left and right pair, so the width is not a choice and the config takes none";
 const MONO_ONLY: &str = "a mono-only node: an EQ band is one filter section on one channel, so \
@@ -809,31 +812,31 @@ pub(super) const ALLOW: &[Allow] = &[
         "crates/tutti-graph/src/node.rs",
         "Shape::with_rates",
         &[Rule::WithPrefix],
-        "a copy with one field replaced (std's `with_` as in `Path::with_extension`), whose getter holds the bare name",
+        COPY_WITH_ONE_FIELD,
     ),
     ty(
         "crates/tutti-graph/src/node.rs",
         "Prepare::with_render_mode",
         &[Rule::WithPrefix],
-        "a copy with one field replaced (std's `with_` as in `Path::with_extension`), whose getter holds the bare name",
+        COPY_WITH_ONE_FIELD,
     ),
     ty(
         "crates/tutti-graph/src/node.rs",
         "Prepare::with_quantum",
         &[Rule::WithPrefix],
-        "a copy with one field replaced (std's `with_` as in `Path::with_extension`), whose getter holds the bare name",
+        COPY_WITH_ONE_FIELD,
     ),
     ty(
         "crates/tutti-graph/src/node.rs",
         "TransportPosition::with_recording",
         &[Rule::WithPrefix],
-        "a copy with one field replaced (std's `with_` as in `Path::with_extension`), whose getter holds the bare name",
+        COPY_WITH_ONE_FIELD,
     ),
     ty(
         "crates/tutti-graph/src/param_event.rs",
         "ParamRamp::with_shape",
         &[Rule::WithPrefix],
-        "a copy with one field replaced (std's `with_` as in `Path::with_extension`), whose getter holds the bare name",
+        COPY_WITH_ONE_FIELD,
     ),
     ty(
         "crates/tutti-midi-protocol/src/universal/machine_control/segmentation.rs",
