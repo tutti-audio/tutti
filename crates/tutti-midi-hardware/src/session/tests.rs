@@ -6,11 +6,11 @@ use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, NoWatch, Watch};
 use crate::test_support::FakeBackend;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_fixtures::midi;
 use tutti_graph::{Offset, UmpAt};
 use tutti_midi_device::EndpointId;
+use tutti_rt::Mutex;
 
 /// A session over the shared fake backend, plus its two counters.
 ///
@@ -497,13 +497,13 @@ impl InputConnection for LoggingConnection {}
 
 impl Drop for LoggingConnection {
     fn drop(&mut self) {
-        self.log.lock().unwrap().push("connection");
+        self.log.lock().push("connection");
     }
 }
 
 impl Drop for LoggingBackend {
     fn drop(&mut self) {
-        self.log.lock().unwrap().push("backend");
+        self.log.lock().push("backend");
     }
 }
 
@@ -568,7 +568,7 @@ fn dropping_the_session_closes_inputs_then_the_backend_and_retires_ports() {
     assert_eq!(ports.list_input_ports().len(), 1);
 
     drop(s);
-    assert_eq!(*log.lock().unwrap(), vec!["connection", "backend"]);
+    assert_eq!(*log.lock(), vec!["connection", "backend"]);
     assert!(
         ports.list_input_ports().is_empty(),
         "the session's port does not outlive it in a shared manager"

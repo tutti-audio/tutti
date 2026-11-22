@@ -862,9 +862,9 @@ fn a_seed_after_a_change_is_refused() {
 }
 
 /// A backend whose one output records the Protocols it is told to follow.
-struct Tagging(Arc<std::sync::Mutex<Vec<tutti_ump::Protocol>>>);
+struct Tagging(Arc<tutti_rt::Mutex<Vec<tutti_ump::Protocol>>>);
 
-struct TaggedSink(Arc<std::sync::Mutex<Vec<tutti_ump::Protocol>>>);
+struct TaggedSink(Arc<tutti_rt::Mutex<Vec<tutti_ump::Protocol>>>);
 
 impl tutti_midi_runtime::MidiOut for TaggedSink {
     fn queue_timed(&self, events: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
@@ -874,7 +874,7 @@ impl tutti_midi_runtime::MidiOut for TaggedSink {
 
 impl crate::DeviceOut for TaggedSink {
     fn follow(&self, protocol: tutti_ump::Protocol) {
-        self.0.lock().unwrap().push(protocol);
+        self.0.lock().push(protocol);
     }
 }
 
@@ -923,13 +923,13 @@ fn the_sink_follows_the_protocol_the_output_is_in() {
     let mut out = devices
         .open_output(crate::testing::started(), &id_of(&devices, "Synth"))
         .unwrap();
-    assert_eq!(*told.lock().unwrap(), [Protocol::Midi2], "at open");
+    assert_eq!(*told.lock(), [Protocol::Midi2], "at open");
     out.set_config(StreamConfig {
         protocol: Protocol::Midi1,
         rx_jr: false,
         tx_jr: false,
     });
-    assert_eq!(*told.lock().unwrap(), [Protocol::Midi2, Protocol::Midi1]);
+    assert_eq!(*told.lock(), [Protocol::Midi2, Protocol::Midi1]);
 }
 
 /// **`for event in &events` takes what `pending` would**, oldest first, and
