@@ -9,13 +9,11 @@
 //! window.
 //!
 //! Most applications do not use this crate directly: `tutti-plugin` (with its
-//! `vst2` feature) and `tutti-plugin-server` build on it and give every format one
-//! interface. Use it directly when you want a VST2 host without the rest of the
+//! `vst2` feature) builds on it and gives every format one interface. Use it directly when you want a VST2 host without the rest of the
 //! engine.
 //!
-//! Built on `tutti-vst2-ffi`, the host half of the fork of the [`vst`](https://docs.rs/vst) crate,
-//! which handles the AEffect-level FFI and adds back the host-side `audioMaster`
-//! callbacks upstream swallowed. This crate adds what a host actually needs on top:
+//! Built on `tutti-vst2-ffi`, the host half of the [`vst`](https://docs.rs/vst) crate's
+//! AEffect-level FFI, with the host-side `audioMaster` callbacks. This crate adds what a host actually needs on top:
 //! callback wiring,
 //! transport-info bookkeeping, state save/restore, and editor lifecycle.
 //!
@@ -47,9 +45,7 @@
 //! **Subprocess isolation.** VST2 fuses the editor and the audio processor into a
 //! single `AEffect` instance, so you cannot host the editor in one process and audio
 //! in another against the same plugin: callers must accept in-process hosting.
-//! Isolation, where wanted, is the caller's job —
-//! [`tutti-plugin-server`](../tutti-plugin-server) does it by wrapping this crate
-//! in a subprocess, which is what keeps a crashing VST2 from killing the host.
+//! VST2 is never served out of process.
 //!
 //! **The comparison against the other three formats.** VST3, CLAP, AU and VST2 model
 //! the same two-state shape and reach three different answers. The comparative
@@ -104,8 +100,8 @@
 //!
 //! [`Lifecycle`](tutti_plugin_types::Lifecycle) drives the same transitions from
 //! the plugin's own requests (`audioMasterIOChanged`, `audioMasterUpdateDisplay`),
-//! which [`Vst2Loaded::take_requests`] collects; VST2 re-reads the figures instead of
-//! restarting ([`RestartRules::NONE`](tutti_plugin_types::RestartRules::NONE)).
+//! which [`Vst2Loaded::take_requests`] collects; `audioMasterIOChanged` restarts the
+//! plugin ([`RestartRules::VST2`](tutti_plugin_types::RestartRules::VST2)).
 //!
 //! ### A parameter id is its position — VST2 alone among the four
 //!

@@ -150,3 +150,40 @@ fn a_partial_extend_counts_only_the_items_past_the_cap() {
     assert_eq!(v.refused(), 2);
     assert!(v.is_overflowed());
 }
+
+/// An insert shifts the later items up one, a full collection hands the item
+/// back and latches the flag, and the storage never moves.
+#[test]
+fn insert_within_capacity_shifts_and_refuses_at_the_cap() {
+    let mut v = CappedVec::with_capacity(4);
+    v.extend([10, 30, 40]);
+    let storage = v.as_slice().as_ptr();
+    assert_eq!(v.insert_within_capacity(1, 20), Ok(()));
+    assert_eq!(v.as_slice(), &[10, 20, 30, 40]);
+    assert!(!v.is_overflowed());
+    assert_eq!(v.insert_within_capacity(0, 5), Err(5));
+    assert_eq!(v.as_slice(), &[10, 20, 30, 40]);
+    assert!(v.is_overflowed());
+    assert_eq!(v.as_slice().as_ptr(), storage);
+}
+
+/// `retain_mut` keeps the accepted items in order, lets the closure edit
+/// them, and keeps the storage and the cap.
+#[test]
+fn retain_mut_keeps_accepted_items_in_order_and_edits_them() {
+    let mut v = CappedVec::with_capacity(5);
+    v.extend([1, 2, 3, 4, 5]);
+    v.retain_mut(|x| {
+        *x *= 10;
+        *x != 20 && *x != 40
+    });
+    assert_eq!(v.as_slice(), &[10, 30, 50]);
+    v[0] = 7;
+    assert_eq!(
+        v.as_slice(),
+        &[7, 30, 50],
+        "an indexed edit goes through the slice"
+    );
+    assert_eq!(v.capacity(), 5);
+    assert_eq!(v.remaining(), 2);
+}

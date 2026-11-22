@@ -59,9 +59,9 @@ use tutti_plugin_types::{TransportChange, TransportChanges, TransportInfo};
 /// What the walk reads of one call, and of the project, to place changes in
 /// the call's frames.
 #[derive(Debug)]
-pub struct Call<'a, 'c> {
+pub struct Call<'a> {
     /// The call's context: its `Env`, arrival and the transport history.
-    pub cx: &'a Cx<'c>,
+    pub cx: &'a Cx<'a>,
     /// The call's length in frames.
     pub frames: usize,
     /// The steady-time counter at the call's first frame.
@@ -230,7 +230,7 @@ impl TransportWalk {
     )]
     pub fn scan(
         &mut self,
-        call: &Call<'_, '_>,
+        call: &Call<'_>,
         view: &mut TempoView<'_>,
         project: &mut ProjectTime,
         chunk_transport: &mut TransportInfo,

@@ -102,6 +102,37 @@ impl<T> CappedVec<T> {
         Ok(())
     }
 
+    /// Inserts `value` at `index`, shifting the items after it up one, and
+    /// hands it back when there is no room: the shape of
+    /// [`push_within_capacity`](Self::push_within_capacity). A refusal latches
+    /// [`is_overflowed`](Self::is_overflowed). Never reallocates.
+    ///
+    /// # Errors
+    ///
+    /// `Err(value)` when the collection is already at the cap.
+    ///
+    /// # Panics
+    ///
+    /// If `index` is past [`len`](Self::len).
+    #[inline]
+    pub fn insert_within_capacity(&mut self, index: usize, value: T) -> Result<(), T> {
+        if self.buf.len() == self.cap {
+            self.refused = self.refused.saturating_add(1);
+            return Err(value);
+        }
+        // Below the cap: the insert writes into reserved room.
+        self.buf.insert(index, value);
+        Ok(())
+    }
+
+    /// Keeps the items `keep` accepts, in order, visiting each once and
+    /// letting `keep` change it; the rest are dropped here. Never frees the
+    /// storage and leaves the overflow flag as it is.
+    #[inline]
+    pub fn retain_mut(&mut self, keep: impl FnMut(&mut T) -> bool) {
+        self.buf.retain_mut(keep);
+    }
+
     /// Removes the items in `range` and yields them in order; the rest shift
     /// down. Dropping the iterator removes what was not yielded. Never frees
     /// the storage and leaves the overflow flag as it is.
@@ -249,6 +280,14 @@ impl<T> core::ops::Deref for CappedVec<T> {
     #[inline]
     fn deref(&self) -> &[T] {
         self.as_slice()
+    }
+}
+
+impl<T> core::ops::DerefMut for CappedVec<T> {
+    /// The filled run, for in-place edits: a slice cannot grow, so the cap holds.
+    #[inline]
+    fn deref_mut(&mut self) -> &mut [T] {
+        self.as_mut_slice()
     }
 }
 

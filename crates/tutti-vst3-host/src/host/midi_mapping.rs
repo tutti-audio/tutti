@@ -517,8 +517,7 @@ impl CcRoute {
     /// untouched and the hot path pays nothing.
     ///
     /// Allocation-free after warmup: both scratch buffers are cleared in place
-    /// and reuse their heap capacity. Decoding goes through MIDI-1 bytes, the
-    /// same lossless path the event list's encoding uses for events.
+    /// and reuse their heap capacity.
     pub(crate) fn route(
         &mut self,
         midi_events: &[UmpAt],
