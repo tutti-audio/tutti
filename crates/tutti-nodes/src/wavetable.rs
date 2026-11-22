@@ -26,7 +26,7 @@ use tutti_units::{Amplitude, Hz, Normalized, SampleRate, Tail, UnitParam};
 /// position ([`UnitParam::Position`], a [`Normalized`] position along the table's frames),
 /// all read per frame: a driven control signal's every frame is heard, and a non-finite
 /// driven value holds the last finite one. Made from a [`WavetableConfig`]
-/// (`WavetableNode::from`); inserted, its controls are a [`ParamSet`]; a fork starts from the
+/// (`WavetableNode::from`); inserted, its controls are a [`ParamSet`](tutti_graph::ParamSet); a fork starts from the
 /// values last set through it, at phase 0.
 ///
 /// The node renders silence until the graph prepares it at the device rate

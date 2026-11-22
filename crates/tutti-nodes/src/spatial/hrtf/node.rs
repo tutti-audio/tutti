@@ -29,8 +29,8 @@ tutti_graph::declare_params!([F: FftFloat] HrtfBinauralNode<F>, n {
 /// folded to mono, placed at the commanded bearing and height, and blended
 /// against the (equally delayed) dry mono by the blend ([`UnitParam::Wet`]:
 /// 1.0, the default, is full HRTF, 0.0 the dry mono).
-/// It is a graph node (`tutti_graph::Node` and [`ParamNode`]); inserting it
-/// hands back its [`ParamSet`] ([`UnitParam::Azimuth`],
+/// It is a graph node (`tutti_graph::Node` and [`ParamNode`](tutti_graph::ParamNode)); inserting it
+/// hands back its [`ParamSet`](tutti_graph::ParamSet) ([`UnitParam::Azimuth`],
 /// [`Elevation`](tutti_units::UnitParam::Elevation) and [`Wet`](tutti_units::UnitParam::Wet)), which
 /// move the source lock-free while it renders, and a graph's control lanes
 /// may drive all three.

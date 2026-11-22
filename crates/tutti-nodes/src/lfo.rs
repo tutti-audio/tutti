@@ -77,7 +77,7 @@ impl core::fmt::Display for LfoClock {
 ///
 /// # In a graph
 ///
-/// A graph node ([`IntoNode`]): inserted, its controls are a [`ParamSet`]
+/// A graph node ([`IntoNode`](tutti_graph::IntoNode)): inserted, its controls are a [`ParamSet`](tutti_graph::ParamSet)
 /// over the depth ([`UnitParam::Depth`]) and, free-running, the rate
 /// ([`UnitParam::Rate`], in [`Hz`]), the one route to them. Both are read
 /// per frame, so a driven port's every frame is heard. A beat-synced node's

@@ -2,12 +2,12 @@
 //!
 //! A mixer bus applies two things to a summed signal: a fader and a balance.
 //! [`BusStripNode`] is both in one node, addressed by [`UnitParam`] through
-//! the [`ParamSet`] it is inserted with, so a host sets it with the same
+//! the [`ParamSet`](tutti_graph::ParamSet) it is inserted with, so a host sets it with the same
 //! generic machinery it uses for a filter cutoff and needs no downcast. A
 //! strip's mute is not here: muting is graph state, `NodeMode::Muted`
 //! (`Graph::set_mode`), the same for every node.
 //!
-//! Every scalar lives in a cell the node's [`ParamSet`] addresses by
+//! Every scalar lives in a cell the node's [`ParamSet`](tutti_graph::ParamSet) addresses by
 //! [`UnitParam`] — the same shape every other node in this crate uses — so a
 //! host has one param path to the strip, not a second set of handles beside
 //! it.
@@ -65,7 +65,7 @@ tutti_graph::declare_params!([] BusStripNode, n {
 /// There is deliberately no mute: it is `NodeMode::Muted`, which the graph
 /// holds for any node.
 ///
-/// Params, by address through its [`ParamSet`]:
+/// Params, by address through its [`ParamSet`](tutti_graph::ParamSet):
 ///
 /// - [`UnitParam::Volume`], a linear amplitude;
 /// - [`UnitParam::Balance`], a [`Balance`] (`-1..1`), only on a bus with a
@@ -77,7 +77,7 @@ tutti_graph::declare_params!([] BusStripNode, n {
 /// Every control is read **once per block**; no cell is loaded per sample.
 ///
 /// `Clone` shares the two cells: it is the template
-/// [`tutti_graph::param_parts`] forks from ([`ParamNode::fork_fresh`] is the
+/// [`tutti_graph::param_parts`] forks from ([`ParamNode::fork_fresh`](tutti_graph::ParamNode::fork_fresh) is the
 /// copy that shares nothing).
 #[derive(Clone, Debug)]
 pub struct BusStripNode {
