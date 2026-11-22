@@ -309,7 +309,13 @@ impl AllocationResult {
 struct OneVoice;
 
 impl Patch for OneVoice {
-    fn voices(&self, _: MidiChannel, _: NoteNumber, _: u16, spec: &mut dyn FnMut(VoiceSpec)) {
+    fn voices(
+        &self,
+        _: MidiChannel,
+        _: NoteNumber,
+        _: NoteVelocity,
+        spec: &mut dyn FnMut(VoiceSpec),
+    ) {
         spec(VoiceSpec {
             group: None,
             scope: 0,
@@ -522,13 +528,13 @@ impl SynthVoices {
         strike: Option<(NoteId, Velocity)>,
         channel: MidiChannel,
         key: NoteNumber,
-        velocity16: u16,
+        velocity16: NoteVelocity,
     ) -> (NoteId, Velocity) {
         match strike {
             Some((id, v)) if id.channel_note().is_some_and(|(_, note)| note == key) => (id, v),
             _ => (
                 NoteId::from_channel_note(channel, key),
-                NoteVelocity::new(velocity16).velocity(),
+                velocity16.velocity(),
             ),
         }
     }
