@@ -10,6 +10,7 @@ use tutti_ump::ControlValue;
 use std::sync::Arc;
 use support::font::{Inst, Preset, font};
 use support::rig::Rig;
+use tutti_fixtures::midi;
 use tutti_fixtures::sf2::generator;
 use tutti_midi_protocol::SysexDeviceId;
 use tutti_sf2::SoundFont;
@@ -53,8 +54,7 @@ const GM_ON: [u8; 6] = [0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7];
 const GM_OFF: [u8; 6] = [0xF0, 0x7E, 0x7F, 0x09, 0x02, 0xF7];
 
 fn send(rig: &mut Rig, bytes: &[u8]) {
-    rig.hand
-        .queue_midi(&tutti_fixtures::midi::sysex_packets(0, bytes));
+    rig.hand.queue_midi(&midi::sysex_packets(0, bytes));
 }
 
 /// The rising zero crossings in a second of key 69 on `channel`: the pitch in Hz.
@@ -205,7 +205,7 @@ fn general_midi_off_also_returns_to_the_initial_status() {
 #[test]
 fn another_groups_message_is_not_this_units() {
     let mut rig = Rig::dry(&font_with(false));
-    rig.hand.queue_midi(&tutti_fixtures::midi::sysex_packets(
+    rig.hand.queue_midi(&midi::sysex_packets(
         1,
         &device_control(0x7F, 0x04, 0x00, 0x4C),
     ));

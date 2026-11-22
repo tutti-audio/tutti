@@ -88,9 +88,10 @@ fn enumeration_passes_the_backend_through() {
 }
 
 /// Reconnecting must not reopen the port — a second driver connection to one
-/// device duplicates every inbound event.
+/// device duplicates every inbound event. A connect makes the input connected, under
+/// its name, and a second one leaves it so.
 #[test]
-fn connecting_an_open_input_is_idempotent() {
+fn connecting_an_open_input_connects_it_once() {
     let (mut s, _, opens) = session();
     assert!(!s.is_any_input_connected());
     let _ = s

@@ -18,6 +18,7 @@ use crate::capability::{OsEndpoint, legacy};
 use crate::devices::ChangeSink;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{MidiHardwareError, Result};
+use tutti_fixtures::midi::sysex7 as sysex;
 use tutti_midi_device::{
     DeviceEvent, EndpointId, OsDevice, OsEndpointIdentity, PortDirection, WinMmDevice,
 };
@@ -297,8 +298,6 @@ fn sent(out: &mut ByteOut, ump: Ump) -> Vec<Vec<u8>> {
     .unwrap();
     wire
 }
-
-use tutti_fixtures::midi::sysex7 as sysex;
 
 #[test]
 fn a_midi1_note_on_is_one_short_message() {

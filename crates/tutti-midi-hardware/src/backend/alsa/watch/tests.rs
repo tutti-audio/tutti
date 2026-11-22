@@ -485,6 +485,9 @@ fn a_look_that_never_succeeds_reports_nothing_and_keeps_the_starts() {
     world.model.failing.set(0);
     world.wake(heard(&[]), |_| {});
     assert_eq!(world.shape(), pair("One", "One"));
+    let settled: Settled<()> = settle(NOTHING, || NOTHING, || None);
+    assert!(settled.seen.is_none(), "no look succeeded");
+    assert!(!settled.quiet, "and no read followed one");
 }
 
 /// A look that fails once is retried within the wake, and reports as if it had

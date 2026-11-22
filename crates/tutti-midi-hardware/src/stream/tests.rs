@@ -12,6 +12,7 @@ use crate::{Delivered, HardwareMidiInputs};
 use std::sync::Arc;
 use std::time::Duration;
 use tutti_fixtures::midi;
+use tutti_fixtures::midi::device_identity_one_byte_manufacturer as identity;
 use tutti_graph::UmpAt;
 use tutti_midi_device::{
     Capabilities, EndpointId, FunctionBlock, MAX_ATTEMPTS, MidiDeviceId, PortDirection,
@@ -460,8 +461,6 @@ fn identity_reply(device: u8) -> Vec<Ump> {
         0x7E, device, 0x06, 0x02, 0x41, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
     ])
 }
-
-use tutti_fixtures::midi::device_identity_one_byte_manufacturer as identity;
 
 fn reply_at(wire: &Wire, packets: Vec<Ump>, ms: u64) {
     for ump in packets {

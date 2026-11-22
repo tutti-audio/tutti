@@ -1365,7 +1365,6 @@ mod tests {
     use super::*;
     use crate::MidiSession;
     use crate::test_support::{FakeBackend, FakeCounters, endpoint};
-
     use tutti_fixtures::midi::device_identity_one_byte_manufacturer as identity;
 
     /// The output of a fake device, and the counters of what it was sent.
