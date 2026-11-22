@@ -98,7 +98,7 @@ fn render_with(
             .expect("a placeable wave");
         let pool = VoicePool::new()
             .tempo(transport.settings().tempo_reader())
-            .loops(transport.motion().clone());
+            .loops(transport.motion().loop_reader());
         let handle = ed.insert(NodeKey(1), "voice", pool).controls;
         tick = Some(handle.clone());
         handle

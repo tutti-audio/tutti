@@ -27,7 +27,7 @@ use tutti_graph::ParamSet;
 use tutti_music::LoopRange;
 use tutti_rt::Param;
 use tutti_rt::{Mutex, Publisher, PushError, RingReader, RingWriter};
-use tutti_timeline::MotionFsm;
+use tutti_timeline::LoopReader;
 use tutti_units::{Amplitude, Beat, Cents, PlaybackRate, StretchFactor};
 
 /// Voice slots a pool reserves, and the most its `AddVoice` drain will hold.
@@ -862,22 +862,22 @@ impl Live {
 #[derive(Default)]
 pub(crate) struct LoopFeed {
     start: Mutex<Option<Beat>>,
-    motion: Mutex<Option<MotionFsm>>,
+    reader: Mutex<Option<LoopReader>>,
 }
 
 impl std::fmt::Debug for LoopFeed {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LoopFeed")
             .field("start", &*self.start.lock())
-            .field("bound", &self.motion.lock().is_some())
+            .field("bound", &self.reader.lock().is_some())
             .finish()
     }
 }
 
 impl LoopFeed {
-    /// Reads the loop from `motion` from now on.
-    pub(crate) fn bind(&self, motion: MotionFsm) {
-        *self.motion.lock() = Some(motion);
+    /// Reads the loop from `reader` from now on.
+    pub(crate) fn bind(&self, reader: LoopReader) {
+        *self.reader.lock() = Some(reader);
     }
 
     /// The loop's start as last written or read.
@@ -891,8 +891,8 @@ impl LoopFeed {
 
     /// Reads the bound transport's loop, if one is bound.
     fn read(&self) -> Option<Option<Beat>> {
-        let motion = self.motion.lock().clone()?;
-        Some(motion.loop_region().active().map(|range| range.start()))
+        let reader = self.reader.lock().clone()?;
+        Some(reader.read().active().map(|range| range.start()))
     }
 }
 
@@ -1225,12 +1225,20 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
             if wants == entry.spare {
                 continue;
             }
+            // Nothing is built or queued while the ring or the retirement room is full:
+            // the refusal is counted and the next tick retries.
+            if self.writer().is_full() || !self.room.has_room(MAX_RESIDENT_VOICES) {
+                DrainCounters::bump(&self.counters.spares_deferred);
+                continue;
+            }
             let spare = wants.then(|| stretched::spare_vocoder::<F>(self.channels));
             if self
                 .queue(VoiceCommand::SetSpare { id, spare }, None)
                 .is_ok()
             {
                 entry.spare = wants;
+            } else {
+                DrainCounters::bump(&self.counters.spares_deferred);
             }
         }
     }
@@ -1577,6 +1585,44 @@ impl<F: SamplerFloat> tutti_rt::Reclaim for VoicePoolHandle<F> {
 mod tests {
     use super::*;
     use crate::voice::pool::VoicePool;
+
+    /// A full retirement room refuses a spare on the control side: `SetSpare` reserves a
+    /// retirement slot like every command that may retire, so with none left nothing is
+    /// queued, the refusal is counted (`PoolDrops::spares_deferred`), and the next tick
+    /// sends it once a slot is free. No box reaches the audio thread to be dropped there.
+    #[test]
+    fn a_full_retirement_room_defers_the_spare_and_the_next_tick_sends_it() {
+        let (_pool, handle) = VoicePool::<f32>::new().with_handle();
+        let wave = Arc::new(Wave::new(2, tutti_units::SampleRate::SR_48K));
+        let source = MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0)))
+            .expect("a placeable wave");
+        handle
+            .add(
+                SlotId(1),
+                source,
+                Playback {
+                    stretch: StretchFactor::new(1.5),
+                    ..Default::default()
+                },
+            )
+            .expect("room");
+        // Every retirement slot taken, as 64 uncollected retirements would hold them.
+        while handle.room.reserve(MAX_RESIDENT_VOICES) {}
+        let range = LoopRange::new(Beat::new(0.0), Beat::new(1.0)).expect("a loop");
+        handle.follow_loop(Some(range));
+        assert_eq!(handle.spares_sent(), 0, "nothing was sent");
+        let deferred = handle.drops().spares_deferred;
+        assert!(deferred >= 1, "the refusal is counted");
+        tutti_rt::Reclaim::reclaim(&handle);
+        assert!(
+            handle.drops().spares_deferred > deferred,
+            "a tick without room defers again"
+        );
+        assert_eq!(handle.spares_sent(), 0, "still nothing sent");
+        handle.room.release(1);
+        tutti_rt::Reclaim::reclaim(&handle);
+        assert_eq!(handle.spares_sent(), 1, "the next tick with room sends it");
+    }
 
     /// A full queue is reported to the caller, not logged and forgotten.
     ///

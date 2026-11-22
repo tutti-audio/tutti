@@ -162,6 +162,7 @@ mod signal_windows;
 mod switch;
 #[cfg(feature = "capture")]
 mod take;
+mod timeline_view;
 #[cfg(all(feature = "midi", feature = "analyze"))]
 mod transcribe;
 mod transport_handle;
@@ -292,6 +293,7 @@ pub use plugin::{
     RestoringStateOutOfProcess, SaveState, SaveStateInProcess, SaveStateOutOfProcess,
     SavingStateOutOfProcess, StateRestore, StateStartError, StateView, SwapPluginError,
 };
+pub use timeline_view::TimelineView;
 
 #[cfg(feature = "plugin")]
 use hang::HangDetector;

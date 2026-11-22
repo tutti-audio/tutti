@@ -30,7 +30,7 @@ use tutti_graph::{
     Status,
 };
 use tutti_rt::{CappedVec, Mutex, Overflow, RingReader, RingWriter, ring};
-use tutti_timeline::{MotionFsm, TempoReader};
+use tutti_timeline::{LoopReader, TempoReader};
 use tutti_units::{SampleRate, Tail};
 
 // ---------------------------------------------------------------------------
@@ -148,6 +148,10 @@ pub struct PoolDrops {
     /// bound is wrong: a reservation exists for every value, and values
     /// retired after the handles are gone are parked in the pool.
     pub leaked: u64,
+    /// Spare vocoders (or their withdrawal) the handle could not queue because the
+    /// command ring or the retirement room was full. Nothing was sent: the next tick
+    /// retries, and a wrap met meanwhile flushes as a seek does.
+    pub spares_deferred: u64,
 }
 
 /// The retirement slots one handle has reserved of its ring: values in the
@@ -172,6 +176,11 @@ impl RetireRoom {
         true
     }
 
+    /// Whether a slot of `capacity` is left to reserve.
+    pub(crate) fn has_room(&self, capacity: usize) -> bool {
+        self.reserved.load(Ordering::Acquire) < capacity
+    }
+
     /// Gives `n` reserved slots back: by the drain for a command that
     /// retired nothing, by `collect_retired` for the values it took.
     pub(crate) fn release(&self, n: usize) {
@@ -189,6 +198,7 @@ pub(crate) struct DrainCounters {
     wave_swaps_ignored: AtomicU64,
     voices_refused: AtomicU64,
     leaked: AtomicU64,
+    pub(crate) spares_deferred: AtomicU64,
     /// Commands the handle has queued: not a drop, so not in [`PoolDrops`]. A
     /// pool whose count is zero holds the voices it was built with and no
     /// others, which is what lets a fork copy it.
@@ -218,6 +228,7 @@ impl DrainCounters {
             wave_swaps_ignored: load(&self.wave_swaps_ignored),
             voices_refused: load(&self.voices_refused),
             leaked: load(&self.leaked),
+            spares_deferred: load(&self.spares_deferred),
         }
     }
 }
@@ -435,8 +446,8 @@ impl<F: SamplerFloat> VoicePool<F> {
         self
     }
 
-    /// This pool reading the transport's loop from `motion`
-    /// ([`Transport::motion`](tutti_timeline::Transport::motion)).
+    /// This pool reading the transport's loop through `reader`
+    /// ([`MotionFsm::loop_reader`](tutti_timeline::MotionFsm::loop_reader)).
     ///
     /// The pool's handle reads the loop region on its reclaim tick, control-side, and sends a spare
     /// vocoder to each stretched voice whose window covers the loop's start (see
@@ -444,8 +455,8 @@ impl<F: SamplerFloat> VoicePool<F> {
     /// transport is bound to). A fork reads no transport: its voices keep the spares
     /// they were built with.
     #[must_use]
-    pub fn loops(self, motion: MotionFsm) -> Self {
-        self.loops.bind(motion);
+    pub fn loops(self, reader: LoopReader) -> Self {
+        self.loops.bind(reader);
         self
     }
 

@@ -14,7 +14,9 @@ use tutti_units::SampleRate;
 use crate::graph::{Graph, LIVE_MAX_BLOCK};
 use tutti_buffers::Float;
 
-use crate::{Clock, Offline, OfflineSession, Result, Session, SessionFloat, SystemClock};
+use crate::{
+    Clock, Offline, OfflineSession, Result, Session, SessionFloat, SystemClock, TimelineView,
+};
 use tutti_engine::BlockDates;
 
 /// Builds a [`Session`], declaratively: chain the options, then
@@ -451,9 +453,8 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
             rate,
             LIVE_MAX_BLOCK,
             None,
-            transport.settings().tempo_reader(),
+            TimelineView::of(&transport),
         );
-        graph.set_loops(transport.motion().clone());
         graph.set_render_workers(self.opts.render_workers);
         graph.declare_main_output(self.opts.main_output.clone(), true)?;
         let (executor, background) = Self::session_executor()?;
@@ -982,9 +983,8 @@ impl<C: Clock> SessionBuilder<C> {
             rate,
             max_block,
             quantum,
-            transport.settings().tempo_reader(),
+            TimelineView::of(&transport),
         );
-        graph.set_loops(transport.motion().clone());
         graph.set_render_workers(self.opts.render_workers);
         graph.set_render_worker_start(self.opts.render_worker_start.take());
         let click_settings = Arc::new(ClickSettings::new());
