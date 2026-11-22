@@ -21,9 +21,10 @@
 //!
 //! **One pending install, latest wins.** [`open`](HeardTaps::open) and
 //! [`close`](HeardTaps::close) always succeed: each sets the one pending
-//! install, replacing the one not yet pushed (a replaced writer is dropped on
-//! the control side, and its reader ends: [`Pull::Ended`](tutti_buffers::Pull::Ended) once drained), and then pushes it if
-//! the queue has room. With no room (the audio thread is behind) it stays
+//! install, replacing the one not yet pushed (a replaced writer is closed on
+//! the control side, and its reader ends:
+//! [`Pull::Ended`](tutti_buffers::Pull::Ended) once drained), and then pushes
+//! it if the queue has room. With no room (the audio thread is behind) it stays
 //! pending until a later push: [`reclaim`](HeardTaps::reclaim), or another
 //! open or close. Opening while a reader is alive supersedes it: the audio
 //! thread swaps the writer, the old one is freed on the control side, and the
@@ -130,10 +131,12 @@ impl<F: Float> HeardTaps<F> {
             return;
         };
         if let Err(refused) = self.install.push(install) {
-            // With the engine gone the install is dropped here, as one pushed
-            // just before the engine went would be.
-            if refused.error == PushError::Full {
-                self.pending = Some(refused.value);
+            match (refused.error, refused.value) {
+                (PushError::Full, install) => self.pending = Some(install),
+                // The engine is gone and never takes the writer: it is closed,
+                // so its reader ends.
+                (PushError::Disconnected, Some(writer)) => writer.close(),
+                (PushError::Disconnected, None) => {}
             }
         }
     }

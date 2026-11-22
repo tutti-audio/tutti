@@ -221,6 +221,21 @@ fn closing_with_none_open_is_a_no_op() {
     assert_eq!(tap.available(), Samples::new(64));
 }
 
+/// With the engine gone nothing takes an install: the writer is closed on the
+/// control side, so its reader answers `Ended` at once instead of starving.
+#[test]
+fn an_open_after_the_engine_is_gone_ends_its_reader() {
+    let (engine, mut taps) = rig(2);
+    drop(engine);
+    let mut tap = taps.open(ChannelLayout::STEREO, Samples::new(1024));
+    let mut buf = vec![0.0f32; 8];
+    let layout = tap.layout();
+    assert_eq!(
+        Source::pull(&mut tap, InterleavedMut::new(&mut buf, layout).unwrap()),
+        Pull::Ended
+    );
+}
+
 /// With the audio thread behind (no render since two installs filled the
 /// queue) an open still returns its reader. It is the pending install: it
 /// writes from the first render after the push, a later open replaces it
