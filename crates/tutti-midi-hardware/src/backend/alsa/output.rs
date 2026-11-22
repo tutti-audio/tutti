@@ -130,7 +130,7 @@ impl MidiOut for AlsaOutput {
             }
             Ok(())
         });
-        sender.lost.add(Losses::lost(sent.lost));
+        sender.lost.add(sent.losses);
         sent.taken
     }
 }

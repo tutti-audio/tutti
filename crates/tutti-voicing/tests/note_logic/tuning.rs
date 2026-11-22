@@ -12,7 +12,7 @@ use tutti_midi_protocol::{
 };
 use tutti_ump::ControlValue;
 use tutti_ump::{CCNumber, MidiChannel, NoteNumber, Rpn, U7, U14, Voice2};
-use tutti_units::Seconds;
+use tutti_units::{Losses, Seconds};
 use tutti_voicing::{
     NoSuchTuning, TuningCapacity, VoiceAllocator, VoiceCommand, VoiceConfig, VoiceId,
 };
@@ -265,13 +265,13 @@ fn a_program_or_bank_the_core_has_none_of_is_ignored_and_counted() {
     on(&mut core, 0, 60);
     assert!(rpn(&mut core, 0, Rpn::TUNING_PROGRAM_SELECT, 4).is_empty());
     assert!(rpn(&mut core, 0, Rpn::TUNING_BANK_SELECT, 1).is_empty());
-    assert_eq!(core.tuning_refused(), 2);
+    assert_eq!(core.losses(), Losses::refused(2));
     assert_eq!(core.channel(MidiChannel::of(0)).tuning_program(), U7::of(0));
     assert_eq!(core.channel(MidiChannel::of(0)).tuning_bank(), U7::of(0));
     // The last program there is is taken.
     rpn(&mut core, 0, Rpn::TUNING_PROGRAM_SELECT, 3);
     assert_eq!(core.channel(MidiChannel::of(0)).tuning_program(), U7::of(3));
-    assert_eq!(core.tuning_refused(), 2);
+    assert_eq!(core.losses(), Losses::refused(2));
 }
 
 /// The same refusal for what is stored: a Single Note Tuning Change or a dump
@@ -284,7 +284,7 @@ fn a_change_for_a_program_there_is_no_room_for_is_refused_and_counted() {
             .with_tuning_capacity(TuningCapacity::new(1, 4).unwrap()),
     );
     let refused = |core: &mut VoiceAllocator, bank: Option<u8>, program: u8| {
-        let before = core.tuning_refused();
+        let before = core.losses().refused;
         say(
             core,
             note_change(
@@ -294,7 +294,7 @@ fn a_change_for_a_program_there_is_no_room_for_is_refused_and_counted() {
                 &[change(60, word(70, 0))],
             ),
         );
-        core.tuning_refused() - before
+        core.losses().refused - before
     };
     assert_eq!(refused(&mut core, Some(0), 4), 1);
     assert_eq!(refused(&mut core, Some(1), 0), 1);
@@ -307,7 +307,11 @@ fn a_change_for_a_program_there_is_no_room_for_is_refused_and_counted() {
             program: U7::of(4)
         })
     );
-    assert_eq!(core.tuning_refused(), 3, "the host's call is not counted");
+    assert_eq!(
+        core.losses(),
+        Losses::refused(3),
+        "the host's call is not counted"
+    );
     assert!(
         core.store_tuning(U7::of(0), U7::of(3), KeyTable::equal_temperament())
             .is_ok()
@@ -470,7 +474,7 @@ fn a_dump_request_does_nothing_here() {
         },
     );
     assert!(out.is_empty());
-    assert_eq!(core.tuning_refused(), 0);
+    assert_eq!(core.losses(), Losses::NONE);
 }
 
 /// The percussion channel is key-based: its keys are sounds, not pitches, so
