@@ -10,12 +10,6 @@ const PERIOD: usize = 192;
 /// The error in the plate voltage from the seed alone after the cap, volts: measured worst
 /// `2.8e-10` over the grid voltages `+/- 35` V, rounded up.
 const SEED_ERROR: f64 = 5e-10;
-/// The error from the previous sample's plate when a signal moves slowly (1 kHz at `+30 dB`, the
-/// plate moves under 8 V a sample), volts: measured worst `9e-12`, rounded up.
-const SLOW_ERROR: f64 = 1e-10;
-/// The error from the plate of any other grid voltage in the range (a full-range jump in one
-/// sample), volts: measured worst `3.5e-4`, rounded up.
-const JUMP_ERROR: f64 = 4e-4;
 
 fn rate() -> SampleRate {
     SampleRate::new(FS).expect("a rate")
@@ -111,10 +105,9 @@ fn even_derivatives(f: impl Fn(f64) -> f64, x: f64, h: f64) -> (f64, f64) {
 
 /// The rest point is the self-bias point of the load line (`V_gk = -R_k I_p`, solved here by
 /// bisection on the paper's formula) to the two bisections' width and the rounding of `f64`
-/// (`1e-9` V is orders above both), and a stage at rest holds the plate there: a Newton step
-/// from the root moves it by the rounding of the load line at `B+`'s scale (`8 eps B+`,
-/// `4e-13` V), so the plate stays within `1e-11` V and the output, that distance per volt, under
-/// `1e-12`.
+/// (`1e-9` V is orders above both), and a stage at rest holds the plate there: the solve's error
+/// is under [`SEED_ERROR`], so the output, that distance per volt, is under [`SEED_ERROR`] per
+/// `|A|`.
 #[test]
 fn the_rest_point_is_the_self_bias_point_of_the_load_line() {
     let (grid, plate) = rest_point();
@@ -132,9 +125,7 @@ fn the_rest_point_is_the_self_bias_point_of_the_load_line() {
     assert!(grid < -0.5 && grid > -3.0, "a bias of a few volts: {grid}");
     let mut s = stage(0.0);
     let y = run(&mut s, &vec![0.0; 2_000]);
-    assert!(y.iter().all(|v| v.abs() <= 1e-12));
-    let held = s.state[0].0;
-    assert!((held - plate).abs() <= 1e-11, "{held} vs {plate}");
+    assert!(y.iter().all(|v| v.abs() <= SEED_ERROR * s.per_volt));
 }
 
 /// The stage's gain for a -80 dBFS sine is the small-signal `A = -g_m (r_p || R_p)` at the rest
@@ -143,8 +134,8 @@ fn the_rest_point_is_the_self_bias_point_of_the_load_line() {
 /// normalized output has gain `|H|`, the coupling high-pass's `|1 - e^(-jw)| / |1 - R e^(-jw)|`
 /// with `R = exp(-2 pi f_c / f_s)` (the normalization is `1 / |A|`). The error is the
 /// plate's cubic term, `(A3 / A1) a^2 3 / 4` under `1e-8` at `a = 1e-4` V, and the Newton
-/// error `SLOW_ERROR` against a plate swing of `|A| a`, `SLOW_ERROR / (|A| a) = 1.7e-8` at worst,
-/// the sum rounded up to `1e-7`. The sine settles for 420 periods, 27 time constants of the coupling.
+/// error, smooth in the grid voltage, at worst `SEED_ERROR / (|A| a) = 8e-8` against a plate swing
+/// of `|A| a`, the sum rounded up to `1e-7`. The sine settles for 420 periods, 27 time constants of the coupling.
 #[test]
 fn a_minus_80_dbfs_sine_has_the_small_signal_gain_of_the_model() {
     let (grid, plate) = rest_point();
@@ -231,35 +222,25 @@ fn the_plate_current_rises_with_the_plate_voltage_at_the_slope_newton_uses() {
     }
 }
 
-/// The solve from the seed alone (a NaN warm start is passed over) reaches the load line's
-/// root, found by bisection, within [`SEED_ERROR`] over the grid voltages `+/- 35` V in 0.05 V
-/// steps, and so does the solve from the plate of any other grid voltage (0.5 V steps: the
-/// previous sample after a jump) within [`JUMP_ERROR`]. The residual is under the error times
-/// the slope (`f' >= 1` makes the error at most the residual), and the root stays between ground
-/// and the supply. A fourth step is needed: after three the seed's error reaches `4e-4` V.
+/// The solve reaches the load line's root, found by bisection, within [`SEED_ERROR`] over the
+/// grid voltages `+/- 35` V in 0.05 V steps. The residual is under the error times the slope
+/// (`f' >= 1` makes the error at most the residual), and the root stays between ground and the
+/// supply. A fourth step is needed: after three the error reaches `4e-4` V.
 #[test]
-fn the_residual_after_the_cap_is_under_the_bound_over_the_grid_range_and_every_start() {
+fn the_residual_after_the_cap_is_under_the_bound_over_the_grid_range() {
     let triode = Triode::<f64>::new();
-    let roots: Vec<f64> = (-70..=70).map(|k| load_line(0.5 * f64::from(k))).collect();
     let mut three_steps = 0.0f64;
     for k in -700..=700 {
         let vg = 0.05 * f64::from(k);
         let root = load_line(vg);
         assert!(root > 0.0 && root <= SUPPLY, "{vg}: {root}");
-        for (warm, bound) in
-            std::iter::once((f64::NAN, SEED_ERROR)).chain(roots.iter().map(|&w| (w, JUMP_ERROR)))
-        {
-            let v = triode.solve(vg, warm);
-            let (residual, slope) = triode.residual(vg, v);
-            assert!(
-                (v - root).abs() <= bound,
-                "{vg} V from {warm}: {v} vs {root}"
-            );
-            assert!(
-                residual.abs() <= bound * slope,
-                "{vg} V from {warm}: residual {residual:e}"
-            );
-        }
+        let v = triode.solve(vg);
+        let (residual, slope) = triode.residual(vg, v);
+        assert!((v - root).abs() <= SEED_ERROR, "{vg} V: {v} vs {root}");
+        assert!(
+            residual.abs() <= SEED_ERROR * slope,
+            "{vg} V: residual {residual:e}"
+        );
         let mut v = triode.seed(vg);
         for _ in 0..TUBE_NEWTON_CAP - 1 {
             let (value, slope) = triode.residual(vg, v);
@@ -275,8 +256,8 @@ fn the_residual_after_the_cap_is_under_the_bound_over_the_grid_range_and_every_s
 
 /// The static stage against the load line solved for every sample by bisection (exact to the
 /// width of `f64`) and carried through the coupling high-pass `y[n] = R y[n-1] + x[n] - x[n-1]`
-/// written from its pole. The stage's solve leaves an error of at most [`SLOW_ERROR`] volts per
-/// sample (a 1 kHz signal moves the plate slowly), `SLOW_ERROR / |A|` normalized; the high-pass's impulse response is `1, -(1-R), -(1-R) R,
+/// written from its pole. The stage's solve leaves an error of at most [`SEED_ERROR`] volts per
+/// sample, `SEED_ERROR / |A|` normalized; the high-pass's impulse response is `1, -(1-R), -(1-R) R,
 /// ...`, of absolute sum under 2, so the output differs by at most twice that, plus the
 /// rounding of the recursion. At +6 dB and +24 dB (the grid swings to +14.5 V, into the
 /// saturated plate).
@@ -299,7 +280,7 @@ fn a_hot_sine_follows_the_load_line_solved_by_bisection() {
             worst = worst.max((got - out).abs());
             swing = swing.max(out.abs());
         }
-        let bound = 2.0 * SLOW_ERROR * s.per_volt;
+        let bound = 2.0 * SEED_ERROR * s.per_volt;
         assert!(worst <= bound, "{drive} dB: {worst:e} > {bound:e}");
         assert!(swing > 0.5, "{drive} dB: the signal is there: {swing}");
     }

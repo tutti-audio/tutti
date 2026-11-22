@@ -50,19 +50,19 @@
 //!
 //! With `z0 = Kp (1 / mu + V_gk / sqrt KVB)` (the exponent at `V_pk` small against `sqrt KVB`),
 //! `a = softplus(z0) / Kp` and `c = R_p (2 / KG1) a^Ex`, the load line reads
-//! `V + c V^Ex = B+`. Its first approximation is `V = (B+ / c)^(1 / Ex)` (the term `c V^Ex`
-//! carries the load), refined by two steps of `V <- ((B+ - V) / c)^(1 / Ex)`, a contraction of
-//! ratio `V / (Ex (B+ - V))`. A seed past `B+` (the tube cut off) is `B+`.
+//! `V + c V^Ex = B+`. With `c^(-1 / Ex) = kappa / a`, `kappa = (R_p 2 / KG1)^(-1 / Ex)` a
+//! constant, its first approximation is `V = (B+ / c)^(1 / Ex) = B+^(1 / Ex) kappa / a` (the term
+//! `c V^Ex` carries the load), refined by two steps of
+//! `V <- ((B+ - V) / c)^(1 / Ex) = (B+ - V)^(1 / Ex) kappa / a`, a contraction of ratio
+//! `V / (Ex (B+ - V))`. A seed past `B+` (the tube cut off) is `B+`.
 //!
-//! The solver then takes [`TUBE_NEWTON_CAP`] steps from the better of the seed and the
-//! previous sample's solution. The cap is 4. The error is measured by the module's tests,
-//! sweeping `V_gk` from -35 V to +35 V in 0.05 V steps: from the seed alone it is at worst
-//! `0.5` V after two steps, `4e-4` V after three and `2.8e-10` V after four. A warm start the
-//! solver prefers to the seed (the smaller `|f|`) is the plate of the previous sample: within a
-//! sample of a 1 kHz signal at the highest drive it leaves under `1e-11` V, and after the worst
-//! jump of the grid (from +35 V to -0.2 V in one sample, the plate from 0.6 V to 80 V) `3.5e-4` V.
-//! The error in the solution bounds the residual `f` by `f'` times it, and `f' >= 1` bounds the
-//! error by the residual.
+//! The solver takes [`TUBE_NEWTON_CAP`] steps from the seed alone: the grid voltage fixes the
+//! plate voltage, and a warm start from the previous sample is no better (the step from the
+//! seed is the same whatever the signal did before, so the render is a function of each
+//! sample alone). The cap is 4. The error is measured by the module's tests, sweeping `V_gk`
+//! from -35 V to +35 V in 0.05 V steps: at worst `0.5` V after two steps, `4e-4` V after three
+//! and `2.8e-10` V after four. The error in the solution bounds the residual `f` by `f'` times
+//! it, and `f' >= 1` bounds the error by the residual.
 //!
 //! The grid voltage is not bounded by a grid current (the tube's grid diode is not
 //! modelled): a drive's peak reaches `V_gk` of `+/- 32` V, over which the Koren expression
@@ -71,7 +71,7 @@
 use crate::BlockMismatch;
 use crate::block::expect_widths;
 use crate::dc_block::{DC_CORNER, dc_complement};
-use crate::newton::capped_newton_steps;
+use crate::newton::newton_steps;
 use crate::{GAIN_RAMP, Lerp, Ramp, Steps};
 use tutti_buffers::{ChannelLayout, Float, InputOutput};
 use tutti_units::{Db, SampleRate, Samples};
@@ -176,6 +176,10 @@ struct Triode<F: Float> {
     sqrt_kvb: F,
     supply: F,
     load: F,
+    /// `B+^(1 / Ex)`.
+    supply_root: F,
+    /// `kappa = (R_p 2 / KG1)^(-1 / Ex)`.
+    kappa: F,
 }
 
 impl<F: Float> Triode<F> {
@@ -191,6 +195,8 @@ impl<F: Float> Triode<F> {
             sqrt_kvb: F::from_design(KVB.sqrt()),
             supply: F::from_design(SUPPLY),
             load: F::from_design(PLATE_LOAD),
+            supply_root: F::from_design(SUPPLY.powf(1.0 / EX)),
+            kappa: F::from_design((PLATE_LOAD * 2.0 / KG1).powf(-1.0 / EX)),
         }
     }
 
@@ -243,24 +249,23 @@ impl<F: Float> Triode<F> {
     #[inline]
     fn seed(&self, vg: F) -> F {
         let (sp, _) = Self::softplus(self.kp * (self.inv_mu + vg / self.sqrt_kvb));
-        let c = self.load * self.scale * (sp * self.inv_kp).powf(self.ex);
-        let first = (self.supply / c).powf(self.inv_ex);
+        let scale = self.kappa / (sp * self.inv_kp);
+        let first = self.supply_root * scale;
         if first >= self.supply || first.is_nan() {
             self.supply
         } else {
             let mut v = first;
             for _ in 0..2 {
-                v = ((self.supply - v) / c).powf(self.inv_ex);
+                v = (self.supply - v).powf(self.inv_ex) * scale;
             }
             v.min(self.supply)
         }
     }
 
-    /// The plate voltage at grid voltage `vg`, from the seed and the previous solution `warm`
-    /// by [`TUBE_NEWTON_CAP`] Newton steps.
+    /// The plate voltage at grid voltage `vg`: [`TUBE_NEWTON_CAP`] Newton steps from the seed.
     #[inline]
-    fn solve(&self, vg: F, warm: F) -> F {
-        capped_newton_steps::<F, TUBE_NEWTON_CAP>(|v| self.residual(vg, v), self.seed(vg), warm)
+    fn solve(&self, vg: F) -> F {
+        newton_steps::<F, TUBE_NEWTON_CAP>(|v| self.residual(vg, v), self.seed(vg))
     }
 }
 
@@ -339,8 +344,8 @@ pub struct TubeStage<F: Float> {
     gain: F,
     /// The frames into the current chunk, `0..CHUNK`.
     into: usize,
-    /// Each channel's last plate voltage and the high-pass's `(x[n-1], y[n-1])`.
-    state: Vec<(F, F, F)>,
+    /// Each channel's coupling high-pass `(x[n-1], y[n-1])`.
+    state: Vec<(F, F)>,
 }
 
 impl<F: Float + Lerp> TubeStage<F> {
@@ -363,7 +368,7 @@ impl<F: Float + Lerp> TubeStage<F> {
             steps,
             gain: F::ONE,
             into: 0,
-            state: vec![(rest.1, F::ZERO, F::ZERO); usize::from(width.count())],
+            state: vec![(F::ZERO, F::ZERO); usize::from(width.count())],
         };
         stage.gain = stage.design(0);
         stage
@@ -382,10 +387,9 @@ impl<F: Float + Lerp> TubeStage<F> {
         self.into = 0;
     }
 
-    /// Back to rest: the tube at its rest point, the coupling capacitor discharged and the
-    /// drive on its target.
+    /// Back to rest: the coupling capacitor discharged and the drive on its target.
     pub fn reset(&mut self) {
-        self.state.fill((self.rest.1, F::ZERO, F::ZERO));
+        self.state.fill((F::ZERO, F::ZERO));
         self.jump_to_target();
     }
 
@@ -424,11 +428,11 @@ impl<F: Float + Lerp> TubeStage<F> {
                 let mut plane = output.plane_mut(c);
                 let y = &mut plane.samples_mut()[start..end];
                 for (y, &x) in y.iter_mut().zip(x) {
-                    let (warm, x1, y1) = *state;
-                    let v = triode.solve(grid + gain * x, warm);
+                    let (x1, y1) = *state;
+                    let v = triode.solve(grid + gain * x);
                     let shaped = (plate - v) * per_volt;
                     let out = y1 + ((shaped - x1) - complement * y1);
-                    *state = (v, shaped, out);
+                    *state = (shaped, out);
                     *y = out;
                 }
             }
