@@ -137,9 +137,7 @@ impl Hub {
             let started = StartClient::new(
                 "tutti-midi-watch",
                 move |notification| {
-                    if notification.changes_devices() {
-                        hub.registry.look_all();
-                    }
+                    hub.registry.notified(notification.changes_devices());
                 },
                 Instant::now(),
                 carried,
