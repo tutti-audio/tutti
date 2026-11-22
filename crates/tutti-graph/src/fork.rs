@@ -19,7 +19,6 @@ use crate::RenderMode;
 use crate::editor::{CommitError, Editor};
 use crate::exec::Executor;
 use crate::node::{IntoNode, Node, NodeParts, Prepare};
-use crate::node_values::NodeValues;
 use crate::spec::{EventInputPort, GraphSpec};
 use crate::values::Values;
 use crate::wake::Wake;
