@@ -13,6 +13,7 @@
 #       range-macro   a `macro_rules!` writing a range type outside tutti-units and tutti-rt's id.rs
 #       option-arg    a chained option (`self` in, `Self` out) that takes an `Option`
 #       default-enum-arg  a parameter whose type is an enum with a usual value (`Default`), passed positionally
+#       pub-field-config  a `pub struct` named `*Config`, `*Settings` or `*Options` with a `pub` field
 # key   `<file>::<Owner>::<fn>`, or `<file>::<macro>` for `range-macro`.
 
 # tutti-au-host
@@ -326,3 +327,29 @@ tutti-vst3-host  setter  crates/tutti-vst3-host/src/host/loaded/editor.rs::Vst3L
 tutti-vst3-host  setter  crates/tutti-vst3-host/src/host/processor.rs::Vst3Processor::set_prefetch
 tutti-vst3-host  ctor-result  crates/tutti-vst3-host/src/host/controller.rs::Vst3Loaded::deactivate_typed
 tutti-vst3-host  option-arg  crates/tutti-vst3-host/src/types/mod.rs::PluginInfo::sub_categories
+tutti-au-host  pub-field-config  crates/tutti-au-host/src/macos/stream.rs::StreamConfig
+tutti-cpal  pub-field-config  crates/tutti-cpal/src/mic.rs::MicConfig
+tutti-cpal  pub-field-config  crates/tutti-cpal/src/supported.rs::SupportedConfig
+tutti-dsp  pub-field-config  crates/tutti-dsp/src/dynamics/multiband.rs::BandSettings
+tutti-dsp  pub-field-config  crates/tutti-dsp/src/dynamics/multiband.rs::MultibandSettings
+tutti-measure  pub-field-config  crates/tutti-measure/src/analyses/transform.rs::StftConfig
+tutti-midi-ci  pub-field-config  crates/tutti-midi-ci/src/pe/initiator.rs::PeSettings
+tutti-midi-ci  pub-field-config  crates/tutti-midi-ci/src/pe/resource/server.rs::ResponderSettings
+tutti-midi-hardware  pub-field-config  crates/tutti-midi-hardware/src/session.rs::MidiHardwareConfig
+tutti-midi-network  pub-field-config  crates/tutti-midi-network/src/endpoint.rs::HostConfig
+tutti-nodes  pub-field-config  crates/tutti-nodes/src/automation/recording.rs::RecordingConfig
+tutti-plugin-db  pub-field-config  crates/tutti-plugin-db/src/config.rs::CatalogConfig
+tutti-plugin-ipc  pub-field-config  crates/tutti-plugin-ipc/src/config/audio.rs::AudioConfig
+tutti-plugin-types  pub-field-config  crates/tutti-plugin-types/src/measured.rs::ProbeConfig
+tutti-polysynth  pub-field-config  crates/tutti-polysynth/src/portamento.rs::PortamentoConfig
+tutti-polysynth  pub-field-config  crates/tutti-polysynth/src/synth.rs::FilterModConfig
+tutti-polysynth  pub-field-config  crates/tutti-polysynth/src/synth.rs::SynthConfig
+tutti-polysynth  pub-field-config  crates/tutti-polysynth/src/unison.rs::UnisonConfig
+tutti-polysynth  pub-field-config  crates/tutti-polysynth/src/voice.rs::SynthVoicesConfig
+tutti-sampler  pub-field-config  crates/tutti-sampler/src/streamer/config.rs::BufferConfig
+tutti-sampler  pub-field-config  crates/tutti-sampler/src/streamer/mod.rs::DiskStreamerConfig
+tutti-sampler  pub-field-config  crates/tutti-sampler/src/voice/disk_voice.rs::DiskVoiceConfig
+tutti-sampler  pub-field-config  crates/tutti-sampler/src/voice/memory_source.rs::MemorySourceConfig
+tutti-session  pub-field-config  crates/tutti-session/src/input.rs::InputConfig
+tutti-timeline  pub-field-config  crates/tutti-timeline/src/offline.rs::OfflineTimelineConfig
+tutti-voicing  pub-field-config  crates/tutti-voicing/src/voicing.rs::VoiceConfig
