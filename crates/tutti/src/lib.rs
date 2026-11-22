@@ -436,7 +436,7 @@ pub mod types {
         Adsr, BarPosition, BeatsPerBar, ClockPass, ClockPassEnd, FRAME_TOLERANCE, FrameClock,
         InvalidBeatsPerBar, InvalidNoteValue, LoopRange, LoopRangeError, MeterChange, Note,
         NoteDuration, NoteModifier, NoteValue, PitchClass, SegmentOrigin, TimelineSegment,
-        beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
+        beats_per_sample, first_frame_at_or_after, snap_to_whole_frame,
     };
     pub use tutti_platform::{
         Asset, Destination, FileStamp, Identity, Open, Panicked, PriorityRequest, ReadSeek, Staged,
@@ -451,13 +451,14 @@ pub mod types {
         ArcDegrees, Azimuth, Balance, Ballistics, BarCount, BeatDuration, BeatsPerCycle,
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,
         CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, DepthOutOfRange, Direction,
-        Drive, Elevation, Feedback, FrequencyRatio, FrequencyRatioOutOfRange, Gain, HoldFactor,
-        Latency, Metres, MetresOutOfRange, Mix, ModulationIndex, ModulationIndexOutOfRange, Moment,
-        NormalizedOutOfRange, Pan, ParamAddr, ParamKey, PhaseIncrement, PhaseStep, PlayReading,
-        PlaybackRate, PlaybackRateOutOfRange, Radians, ReadPosition, ReadRate, Resonance,
-        RunningPhase, SamplePosition, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange,
-        Speed, SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail,
-        TimecodeFrames, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
+        Drive, Elevation, Feedback, FramesPerBeat, FramesPerBeatOutOfRange, FrequencyRatio,
+        FrequencyRatioOutOfRange, Gain, HoldFactor, Latency, Metres, MetresOutOfRange, Mix,
+        ModulationIndex, ModulationIndexOutOfRange, Moment, NormalizedOutOfRange, Pan, ParamAddr,
+        ParamKey, PhaseIncrement, PhaseStep, PlayReading, PlaybackRate, PlaybackRateOutOfRange,
+        Radians, ReadPosition, ReadRate, Resonance, RunningPhase, SamplePosition,
+        SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, Speed, SpeedOutOfRange, Spread,
+        SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail, TimecodeFrames, Unit, UnitAddr,
+        UnitParam, UnitParamOutOfRange, Velocity,
     };
     pub use tutti_units::{Phase, Quantity, Real, Resyncs};
 }

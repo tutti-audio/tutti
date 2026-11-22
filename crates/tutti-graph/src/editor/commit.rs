@@ -219,14 +219,8 @@ impl<F: Float> Editor<F> {
                 .committed()
                 .is_some_and(|c| c.shapes == self.shapes && c.spec.same_plan(&self.spec))
         {
-            // The plan the executor has is this spec's: at most a fade
+            // The plan the executor has is this spec's: at most a value
             // moved, which is a control.
-            if self.life.committed().is_some_and(|c| c.spec != self.spec) {
-                Self::lower_and_validate(&self.spec, &self.shapes)?;
-                self.sync_ranges();
-                self.life
-                    .set_committed(self.spec.clone(), self.shapes.clone());
-            }
             return Ok(Vec::new());
         }
         let (valid, weights, fading) = self.lower_with_bank()?;
@@ -369,6 +363,17 @@ impl<F: Float> Editor<F> {
             },
             |f| f.bases.clone(),
         );
+        let fades: BTreeMap<EdgeId, EdgeFade> = continuing.map_or_else(
+            || {
+                was.spec
+                    .gains
+                    .keys()
+                    .map(|&id| (id, self.values.fade(id)))
+                    .filter(|&(_, fade)| fade != EdgeFade::None)
+                    .collect()
+            },
+            |f| f.fades.clone(),
+        );
         let lower = |spec: &GraphSpec, shapes: &Shapes| {
             spec.lowered(shapes)
                 .map_err(|e| CommitError::Compile(CompileError::Bus(e)))
@@ -402,8 +407,7 @@ impl<F: Float> Editor<F> {
                     sink: PortSink::Output(c as u16),
                     from: Edge::Direct(source),
                 };
-                let gain = before.spec.gains.get(&was_id);
-                if gain.is_some_and(|g| g.fade == EdgeFade::Out) {
+                if fades.get(&was_id) == Some(&EdgeFade::Out) {
                     continue;
                 }
                 let id = EdgeId {
@@ -445,6 +449,7 @@ impl<F: Float> Editor<F> {
         let fading = Fading {
             was: was.clone(),
             bases,
+            fades,
             main_output: self.spec.main_output_id,
             bank,
         };

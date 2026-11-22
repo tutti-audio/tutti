@@ -137,6 +137,22 @@ impl Bpm {
         BeatDuration::new(span.get() * self.0 / 60.0)
     }
 
+    /// The frames one beat spans at this tempo and `rate`: `rate` times 60
+    /// over the beats per minute. `None` when the count is not finite (a tempo
+    /// too slow for an `f64` count of frames, such as the smallest `Bpm`).
+    ///
+    /// ```
+    /// use tutti_units::{Bpm, SampleRate};
+    /// let rate = SampleRate::of(48_000.0);
+    /// assert_eq!(Bpm::of(120.0).frames_per_beat(rate).map(|f| f.get()), Some(24_000.0));
+    /// assert_eq!(Bpm::of(f64::from_bits(1)).frames_per_beat(rate), None);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn frames_per_beat(self, rate: SampleRate) -> Option<FramesPerBeat> {
+        FramesPerBeat::new(rate.get() * 60.0 / self.0)
+    }
+
     /// Whether this tempo differs from `other` by more than `epsilon`, a
     /// tolerance in beats per minute (the unit is the tolerance's, not a tempo
     /// that is played).
@@ -686,6 +702,65 @@ impl BeatDuration {
         let r = crate::maths::rem_euclid_f64(self.0, rhs.0);
         let span = rhs.0.abs();
         BeatDuration(if r >= span { span.next_down() } else { r })
+    }
+}
+
+// `FramesPerBeat` holds the range its constructors refuse past, so it takes the
+// macro's `Quantity` impl and no `Unit`: a parameter cell never holds one.
+crate::ranged! {
+    @items []
+    /// How many frames one beat spans at a tempo and a rate: finite and above
+    /// zero, so a tempo too slow for a finite count of frames has none (the
+    /// clock does not move).
+    ///
+    /// The one conversion between a span of beats and a count of frames: a
+    /// reader placing a beat in a block multiplies a [`BeatDuration`] by it
+    /// ([`frames_in`](Self::frames_in)), and one stepping back from frames
+    /// divides by it ([`beats_over`](Self::beats_over)), so every reader groups
+    /// the arithmetic the same way and lands a beat on the same frame.
+    ///
+    /// Made from a tempo with [`Bpm::frames_per_beat`].
+    ///
+    /// ```
+    /// use tutti_units::{BeatDuration, Bpm, FramesPerBeat, SampleRate};
+    ///
+    /// let fpb = Bpm::of(120.0).frames_per_beat(SampleRate::of(48_000.0)).unwrap();
+    /// assert_eq!(fpb.get(), 24_000.0);
+    /// assert_eq!(fpb.frames_in(BeatDuration::new(-0.5)), -12_000.0);
+    /// assert_eq!(fpb.beats_over(6_000.0), BeatDuration::new(0.25));
+    /// assert_eq!(FramesPerBeat::new(f64::INFINITY), None);
+    /// ```
+    #[repr(transparent)]
+    #[derive(PartialOrd)]
+    FramesPerBeat(f64), FramesPerBeatOutOfRange, "finite and above zero",
+    |raw| raw > 0.0 && raw <= f64::MAX
+}
+// NOT `Additive` or `Scalable`: a rate between two measures composes only by
+// converting through them, which `frames_in` and `beats_over` name.
+impl FramesPerBeat {
+    /// The frames `span` covers, `span` times this: fractional, and negative
+    /// for a negative span. A bare `f64` because no unit holds a signed
+    /// fractional count of frames; `first_frame_at_or_after` and its kin take
+    /// it.
+    #[inline]
+    #[must_use]
+    pub fn frames_in(self, span: BeatDuration) -> f64 {
+        span.get() * self.0
+    }
+
+    /// The beats `frames` span, `frames` over this: the inverse of
+    /// [`frames_in`](Self::frames_in), over the same bare count of frames.
+    #[inline]
+    #[must_use]
+    pub fn beats_over(self, frames: f64) -> BeatDuration {
+        BeatDuration::new(frames / self.0)
+    }
+
+    /// The beats one frame spans: one over this.
+    #[inline]
+    #[must_use]
+    pub fn beats_per_frame(self) -> BeatDuration {
+        BeatDuration::new(1.0 / self.0)
     }
 }
 

@@ -2528,8 +2528,7 @@ impl<F: Float> Graph<F> {
     /// Whether `id` is an edge the session has already taken out and is only
     /// fading to silence.
     fn fading_out(&self, id: EdgeId) -> bool {
-        let spec = self.editor.spec();
-        spec.has_edge(id) && spec.gains.get(&id).is_some_and(|g| g.fade == EdgeFade::Out)
+        self.editor.spec().has_edge(id) && self.editor.edge_fade(id) == Some(EdgeFade::Out)
     }
 
     /// Makes the edge `edge` a plain, unfaded connection: no fade in or out
@@ -2541,10 +2540,8 @@ impl<F: Float> Graph<F> {
         };
         if !self
             .editor
-            .spec()
-            .gains
-            .get(&id)
-            .is_some_and(|g| g.fade != EdgeFade::None)
+            .edge_fade(id)
+            .is_some_and(|fade| fade != EdgeFade::None)
         {
             return;
         }
@@ -3121,13 +3118,10 @@ impl<F: Float> Graph<F> {
             return false;
         }
         // A fade in is not the author's gain: the edge goes on rising, to unity.
-        let fade = self.editor.spec().gains.get(&id).map(|g| g.fade);
-        let cleared = if fade == Some(EdgeFade::In) {
-            let fresh = EdgeGain {
-                fade: EdgeFade::In,
-                ..EdgeGain::default()
-            };
-            self.editor.spec_mut().set_edge_gain(id, fresh);
+        let cleared = if self.editor.edge_fade(id) == Some(EdgeFade::In) {
+            self.editor
+                .spec_mut()
+                .set_edge_gain(id, EdgeGain::default());
             self.editor
                 .set_edge_gain(id, Amplitude::UNITY)
                 .expect("the lane was just declared");

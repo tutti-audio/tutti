@@ -8,6 +8,7 @@ use crate::mode::NodeMix;
 use crate::node::Shape;
 use crate::param::ParamIn;
 use crate::spec::{EventEdge, EventInputPort, EventOutputPort};
+use crate::values::GraphValues;
 use crate::{Edge, EdgeId, FeedbackFrom, NodeKey, PortSink, PortSource};
 use tutti_buffers::Float;
 
@@ -74,8 +75,8 @@ impl<F: Float> Editor<F> {
         let (ein, eout) = (shape.event_in, shape.event_out);
         let spec = &mut self.spec;
         let values = &mut self.values;
-        let faded_out = |spec: &crate::GraphSpec, id: EdgeId| {
-            spec.gains.get(&id).is_some_and(|g| g.fade == EdgeFade::Out)
+        let faded_out = |spec: &crate::GraphSpec, values: &GraphValues, id: EdgeId| {
+            spec.gains.contains_key(&id) && values.fade(id) == EdgeFade::Out
         };
         let gone_source =
             |s: &PortSource| matches!(s, PortSource::Node(p) if p.node == key && p.port >= aout);
@@ -115,7 +116,7 @@ impl<F: Float> Editor<F> {
             });
         }
         for id in dropped {
-            if !faded_out(spec, id) {
+            if !faded_out(spec, values, id) {
                 out.edges.push(id);
             }
             spec.gains.remove(&id);
