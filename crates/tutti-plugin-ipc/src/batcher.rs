@@ -374,6 +374,8 @@ pub(crate) struct Batcher {
     /// collecting a chunk, wait up to this long for the server to publish it.
     /// See [`await_output`](Self::await_output).
     offline_wait: Option<Arc<OfflineWait>>,
+    /// The armed state the bridge's reply wait was last set from.
+    reply_armed: bool,
     /// The plugin's MIDI-out for the chunk the ring holds, at that chunk's
     /// frames, sorted (`collect`). Inline, so the drain never allocates.
     reply: MidiEventVec,
@@ -423,6 +425,7 @@ impl Batcher {
             next_seq: 1,
             expect_seq: None,
             offline_wait: None,
+            reply_armed: false,
             reply: MidiEventVec::new(),
             said: BlockStatus::Continue,
             counters: Arc::default(),
@@ -517,12 +520,19 @@ impl Batcher {
     /// budget, where a poll of the slab saw it at the publish. An export that
     /// waits for a block's MIDI waits for the reply anyway.
     fn await_output(&mut self, bridge: &AudioBridge) {
+        // The bridge thread holds a block for its reply only while the wait is
+        // armed: it follows the switch, on every chunk (one atomic store).
+        if let Some(watch) = &self.offline_wait
+            && watch.armed() != self.reply_armed
+        {
+            self.reply_armed = watch.armed();
+            bridge.set_reply_wait(watch.reply_wait());
+        }
         let (Some(watch), Some(seq)) = (&self.offline_wait, self.expect_seq) else {
             return;
         };
-        // Read live: the graph's render mode is followed by the control side
-        // (`Control::follow_graph_mode`), which may disarm between two chunks,
-        // and a realtime graph's audio thread never waits.
+        // Read live: the node's `prepare` arms and disarms the wait (between
+        // two chunks too), and a realtime graph's audio thread never waits.
         if !watch.armed() || watch.stopped_waiting() {
             return;
         }
@@ -1039,7 +1049,7 @@ mod tests {
             slab(MAX_CHUNK),
             response_ring().1,
         );
-        wait.arm(true);
+        wait.switch().arm(true);
         b.set_offline_wait(Arc::clone(&wait));
         b.expect_seq = Some(1);
         assert_eq!(wait.refusal(), None, "nothing latched before the wait");

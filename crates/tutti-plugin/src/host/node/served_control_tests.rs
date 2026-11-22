@@ -268,7 +268,7 @@ fn a_normal_teardown_leaves_the_forks_watch_alive() {
         tutti_fixtures::executor(),
     )
     .expect("the probe launches in a real plugin-server");
-    let wait = ipc.watch(false);
+    let wait = ipc.watch();
     assert!(!wait.server_died(), "a launched server is alive");
     drop(ipc);
     assert!(

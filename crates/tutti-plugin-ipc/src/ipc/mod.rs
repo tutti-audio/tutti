@@ -56,8 +56,8 @@ use tutti_plugin_types::{
     ChunkCounters, Controller, IpcError, IpcResult, Loaded, MainThreadMarker, ParamAccess,
     ParamWriteError, ParameterChanges, ParameterQueue, PluginDescriptor, PluginError, PluginFormat,
     PluginRef, PluginResult, PluginTail, PluginWiring, Prepare, PresetId, ProcessWake, Refused,
-    RenderMode, Reopen, Request, RestartRules, ResyncKind, SampleRate, Samples, StateError,
-    StateUse, Stuck, Widths,
+    Reopen, Request, RestartRules, ResyncKind, SampleRate, Samples, StateError, StateUse, Stuck,
+    Widths,
 };
 use tutti_rt::AtomicSampleRate;
 use tutti_units::ParamId;
@@ -404,33 +404,6 @@ impl Link {
         self.wait.lock().clone()
     }
 
-    /// A watched fork follows its graph's render mode ([`Control::follow_graph_mode`](tutti_plugin_types::Control::follow_graph_mode)):
-    /// arms the per-chunk wait for an offline graph and disarms it for a realtime
-    /// one, tells the plugin [`Offline`](RenderMode::Offline) in the first case and
-    /// [`Realtime`](RenderMode::Realtime) when the wait was armed and the
-    /// plugin did not run offline when forked, and moves the bridge's reply wait
-    /// with it. Not a watched fork: nothing.
-    pub(crate) fn follow_graph_mode(&self, mode: RenderMode) {
-        let Some(Watch {
-            wait,
-            keeps_offline,
-        }) = self.watch()
-        else {
-            return;
-        };
-        let was_armed = wait.armed();
-        wait.arm(mode.is_offline());
-        let audio = self.bridge.audio();
-        // A refused mode is a crashed bridge, which the fork's health reports;
-        // one the plugin does not apply in time is `unapplied_settings`.
-        if mode.is_offline() {
-            let _ = audio.set_render_mode(RenderMode::Offline);
-        } else if was_armed && !keeps_offline {
-            let _ = audio.set_render_mode(RenderMode::Realtime);
-        }
-        audio.set_reply_wait(wait.reply_wait());
-    }
-
     /// The queues and points of the bridge's parameter buffers for chunks of
     /// `chunk` frames: a queue per listed parameter and the spares the
     /// node's delivery may learn an address into.
@@ -452,12 +425,7 @@ impl Link {
 /// A fork's watch on its pipeline ([`Ipc::watch`]).
 #[derive(Clone)]
 pub(crate) struct Watch {
-    /// Whether the pipeline waits for each chunk ([`OfflineWait::armed`]) is
-    /// the wait's own.
     pub(crate) wait: Arc<OfflineWait>,
-    /// The plugin ran offline when the fork was made: a realtime graph keeps
-    /// it told offline.
-    pub(crate) keeps_offline: bool,
 }
 
 /// A served plugin that is configured and not rendering.
@@ -722,14 +690,13 @@ impl Ipc {
     /// health reports a later move as a fault.
     ///
     /// The pipeline waits for each chunk, up to the configuration's timeout,
-    /// only while the graph it is prepared in is
-    /// [`Offline`](tutti_plugin_types::RenderMode::Offline) (the offline mode
-    /// of a forked instance; [`follow_graph_mode`](tutti_plugin_types::Control::follow_graph_mode)),
-    /// and never otherwise, so the audio thread of a realtime graph never
-    /// blocks. `keeps_offline` is whether the plugin ran offline when it was
-    /// forked: a realtime graph then leaves it told offline. Call before
-    /// [`activate`](Loaded::activate).
-    pub fn watch(&mut self, keeps_offline: bool) -> Arc<OfflineWait> {
+    /// only while the wait is armed ([`OfflineWait::switch`]), and the only
+    /// writer of that switch is the node's `prepare`: armed for a graph
+    /// prepared offline (the offline mode of a forked instance), disarmed
+    /// otherwise, so the audio thread of a realtime graph never blocks. The
+    /// plugin's own render mode is separate: telling it offline arms nothing.
+    /// Call before [`activate`](Loaded::activate).
+    pub fn watch(&mut self) -> Arc<OfflineWait> {
         let wait = Arc::new(OfflineWait::new(
             self.link.timeout,
             Arc::clone(self.link.bridge.audio().watch()),
@@ -740,7 +707,6 @@ impl Ipc {
             .offer_refusals_to(Arc::clone(&wait));
         *self.link.wait.lock() = Some(Watch {
             wait: Arc::clone(&wait),
-            keeps_offline,
         });
         wait
     }
@@ -965,7 +931,7 @@ impl Ipc {
         .starting_at(next_seq)
         .with_counters(Arc::clone(&link.counters));
         batcher.prepare(Samples::new(prepare.max_block().get()), None);
-        if let Some(Watch { wait, .. }) = link.watch() {
+        if let Some(Watch { wait }) = link.watch() {
             // A wait already latched (a reactivation after a give-up or a
             // death) stays on the live bound: the batcher collects at once, and
             // the bridge must not hold one budget per chunk for a server that

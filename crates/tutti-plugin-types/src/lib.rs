@@ -246,6 +246,7 @@ mod track_info;
 mod transport;
 mod transport_request;
 mod version;
+mod wait_switch;
 mod wakeups;
 mod widths;
 mod wire_error;
@@ -381,6 +382,7 @@ pub use transport::{
     BarInfo, LoopRegion, MusicalTiming, PlayheadWatch, TransportChange, TransportChanges,
     TransportFlags, TransportInfo, TransportPosition,
 };
+pub use wait_switch::WaitSwitch;
 pub use widths::Widths;
 pub use written_values::WrittenValues;
 // The session's render mode, which a plugin's `Prepare` carries and `Control::set_render_mode` takes.

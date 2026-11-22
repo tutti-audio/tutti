@@ -111,6 +111,11 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     /// counters and the chunk counters are the node's own. `None` for an
     /// in-process plugin, whose figures are the control side's.
     pub(super) controls: Option<PluginControls>,
+    /// The switch of an out-of-process fork's per-chunk wait, which this
+    /// node's `prepare` sets from the graph's render mode on every prepare
+    /// ([`drive_wait`](Self::drive_wait)). `None` for any node that is not
+    /// such a fork: nothing waits.
+    pub(super) wait_switch: Option<tutti_plugin_types::WaitSwitch>,
     /// The parameters the delivery has a slot for, and the spare slots it
     /// learns unlisted ones into: what a successor node's delivery is made from.
     pub(super) parameters: Vec<ParamId>,
@@ -611,6 +616,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             out: ProcessOutput::default(),
             transport,
             controls,
+            wait_switch: None,
             parameters,
             spares,
             features,
@@ -770,14 +776,23 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
         tutti_plugin_types::MIDI_STACK_BOUND.min(self.event_room)
     }
 
-    /// Tells the plugin's control surface the render mode of the graph `p`
-    /// prepares ([`Control::follow_graph_mode`](tutti_plugin_types::Control::follow_graph_mode)),
-    /// whether or not its Processor is in hand: what a wait on the audio
-    /// thread follows. Any thread.
-    pub(super) fn follow_graph_mode(&mut self, p: &tutti_graph::Prepare) {
-        if let Some(control) = self.inner.lock().control() {
-            control.follow_graph_mode(p.render_mode());
+    /// Sets the per-chunk wait of an out-of-process fork from the graph's
+    /// render mode: armed for an offline graph, disarmed for any other. What
+    /// the node's `prepare` does on every prepare, with no guard and whether
+    /// or not the Processor is in hand; it is the only writer of the switch,
+    /// and the plugin's own render mode ([`set_render_mode_from`](Self::set_render_mode_from))
+    /// is a separate thing.
+    pub(super) fn drive_wait(&self, p: &tutti_graph::Prepare) {
+        if let Some(switch) = &self.wait_switch {
+            switch.arm(p.render_mode().is_offline());
         }
+    }
+
+    /// Hands the node the switch of its fork's per-chunk wait, at the fork's
+    /// build: from then on its `prepare` drives it
+    /// ([`WaitSwitch`](tutti_plugin_types::WaitSwitch)).
+    pub fn adopt_wait_switch(&mut self, switch: tutti_plugin_types::WaitSwitch) {
+        self.wait_switch = Some(switch);
     }
 
     /// Tells the plugin the render mode `p` carries when it is not the mode
@@ -793,11 +808,6 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
         // carries a change.
         if self.prepared_mode == mode {
             return;
-        }
-        if mode.is_offline() {
-            // An offline render runs at its own speed: no host clock relates
-            // to it.
-            self.transport.go_offline();
         }
         let mut inner = self.inner.lock();
         if inner.render_mode() != mode {

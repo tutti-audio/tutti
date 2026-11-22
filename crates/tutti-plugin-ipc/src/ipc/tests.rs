@@ -11,9 +11,9 @@ use tutti_rt::Mutex;
 use tutti_buffers::FloatWidth;
 use tutti_fixtures::{machine_lock, main_thread};
 use tutti_plugin_types::{
-    ChannelLayout, Control, Controller, EditorError, Loaded, MaxBlock, ParamAccess, ParameterInfo,
-    PluginBus, PluginClass, PluginDescriptor, PluginWiring, Prepare, Processor, RenderMode, Reopen,
-    Request, SampleRate, Samples,
+    AnyThread, ChannelLayout, Control, Controller, EditorError, Loaded, MaxBlock, ParamAccess,
+    ParameterInfo, PluginBus, PluginClass, PluginDescriptor, PluginWiring, Prepare, Processor,
+    RenderMode, Reopen, Request, SampleRate, Samples,
 };
 use tutti_units::ParamId;
 
@@ -1181,108 +1181,93 @@ fn render_chunks(processor: &mut IpcProcessor, server: &Mock, chunks: usize) {
     }
 }
 
-/// The graph's prepare for an offline render: the one thing that makes a
-/// watched fork wait for each chunk.
-fn prepare_offline(controller: &mut IpcController) {
-    controller.follow_graph_mode(RenderMode::Offline);
+/// The graph's prepare for an offline render, as the node makes it: the one
+/// thing that arms a watched fork's wait.
+fn prepare_offline(wait: &crate::OfflineWait) {
+    wait.switch().arm(true);
 }
 
-/// **A fork waits for a chunk only while its graph is prepared offline, and
-/// the mode is followed whether or not the Processor is in hand.** A watched
-/// fork prepared for realtime renders chunks the server never answers without
-/// waiting for one, inside a realtime scope (where taking the wait's lock
-/// panics in a debug build) and without giving up. Prepared offline it waits
-/// and gives up at the budget. Re-prepared for realtime through the control
-/// side alone (the Processor away: no `retune` runs), it renders inside the
-/// scope again without a wait.
+/// **A fork waits for a chunk only while its node's prepare has armed the
+/// wait.** A watched fork whose graph is prepared for realtime renders chunks
+/// the server never answers without waiting for one, inside a realtime scope
+/// (where taking the wait's lock panics in a debug build) and without giving
+/// up. Armed by an offline prepare it waits and gives up at the budget; once
+/// the switch is disarmed again it stops waiting.
 #[test]
 fn a_fork_waits_for_a_chunk_only_when_its_graph_is_prepared_offline() {
     let _machine = machine_lock();
     let (mut ipc, server) = mock();
-    let wait = ipc.watch(false);
-    let (mut processor, mut controller) = activate(ipc, 32);
+    let wait = ipc.watch();
+    let (mut processor, _controller) = activate(ipc, 32);
 
-    assert!(
-        !wait.armed(),
-        "a fork not yet prepared offline does not wait"
-    );
+    assert!(!wait.armed(), "a fork not prepared offline does not wait");
     for _ in 0..3 {
         render_silence_as(&mut processor, 32, true);
     }
     assert!(!wait.gave_up(), "a realtime fork never waited for a chunk");
 
-    prepare_offline(&mut controller);
-    assert!(wait.armed(), "an offline prepare arms the wait");
+    prepare_offline(&wait);
     render_chunks(&mut processor, &server, 2);
     assert!(
         wait.gave_up(),
         "an offline fork waits, and misses its budget"
     );
 
-    controller.follow_graph_mode(RenderMode::Realtime);
+    wait.switch().arm(false);
     assert!(!wait.armed(), "a realtime prepare disarms it again");
 }
 
 /// **A realtime re-prepare while the Processor is away disarms a wait an
-/// offline prepare armed.** Only the control side hears the re-prepare (no
-/// `retune`): the chunks the Processor renders afterwards, inside the audio
-/// thread's scope, do not wait, and the wait never gives up.
+/// offline prepare armed.** The node's prepare writes the switch with no
+/// Processor involved (no `retune`): the chunks the Processor renders
+/// afterwards, inside the audio thread's scope, do not wait.
 #[test]
 fn a_realtime_reprepare_with_the_processor_away_stops_the_wait() {
     let _machine = machine_lock();
     let (mut ipc, _server) = mock();
-    let wait = ipc.watch(false);
-    let (mut processor, mut controller) = activate(ipc, 32);
-    prepare_offline(&mut controller);
+    let wait = ipc.watch();
+    let (mut processor, _controller) = activate(ipc, 32);
+    prepare_offline(&wait);
     assert!(wait.armed());
-    controller.follow_graph_mode(RenderMode::Realtime);
+    wait.switch().arm(false);
     for _ in 0..3 {
         render_silence_as(&mut processor, 32, true);
     }
     assert!(!wait.gave_up(), "no chunk was waited for");
 }
 
-/// The render modes the mock server was told, in order.
-fn told_modes(log: &[Sent]) -> Vec<RenderMode> {
-    log.iter()
-        .filter_map(|m| match m {
-            Sent::Control(ControlRequest::SetRenderMode { mode }) => Some(*mode),
-            _ => None,
-        })
-        .collect()
-}
-
-/// **A realtime re-prepare tells a fork realtime again, unless the live plugin
-/// ran offline.** An offline prepare tells the server `Offline`; a realtime one
-/// after it tells it `Realtime`, and a fork made from a plugin that ran offline
-/// is not told `Realtime` (it stays as it was built).
+/// **Telling the plugin it renders offline never arms the wait.** The render
+/// mode is the plugin's own setting (an app sets it through the handle); the
+/// wait is the node's, armed only by an offline prepare. A fork whose graph is
+/// prepared for realtime, told `Offline` through the handle's `AnyThread` and
+/// through `Control`, still renders inside the audio thread's scope without
+/// waiting and never gives up, while the server hears the mode.
 #[test]
-fn a_realtime_reprepare_tells_the_fork_realtime_unless_the_live_plugin_ran_offline() {
+fn telling_a_fork_offline_does_not_make_its_realtime_graph_wait() {
     let _machine = machine_lock();
-    for keeps_offline in [false, true] {
-        let (mut ipc, server) = mock();
-        let _wait = ipc.watch(keeps_offline);
-        let (_processor, mut controller) = activate(ipc, 32);
-        controller.follow_graph_mode(RenderMode::Offline);
-        assert!(server.wait_for(|log| told_modes(log) == [RenderMode::Offline]));
-        controller.follow_graph_mode(RenderMode::Realtime);
-        if keeps_offline {
-            // A settle behind it proves the server handled everything queued.
-            controller.bridge().audio().settle();
-            assert_eq!(
-                told_modes(&server.received.lock()),
-                [RenderMode::Offline],
-                "kept offline"
-            );
-        } else {
-            assert!(
-                server
-                    .wait_for(|log| told_modes(log) == [RenderMode::Offline, RenderMode::Realtime]),
-                "told realtime again: {:?}",
-                told_modes(&server.received.lock())
-            );
-        }
+    let (mut ipc, server) = mock();
+    let wait = ipc.watch();
+    let (mut processor, mut controller) = activate(ipc, 32);
+    assert!(AnyThread::set_render_mode(&controller, RenderMode::Offline));
+    assert!(Control::set_render_mode(
+        &mut controller,
+        main_thread(),
+        RenderMode::Offline
+    ));
+    assert!(!wait.armed(), "a render mode is not the wait");
+    for _ in 0..3 {
+        render_silence_as(&mut processor, 32, true);
     }
+    assert!(!wait.gave_up(), "no chunk was waited for");
+    assert!(
+        server.wait_for(|log| log.iter().any(|m| matches!(
+            m,
+            Sent::Control(ControlRequest::SetRenderMode {
+                mode: RenderMode::Offline
+            })
+        ))),
+        "the plugin was told offline all the same"
+    );
 }
 
 /// **A server that never replies costs an offline fork one budget, however
@@ -1296,9 +1281,9 @@ fn a_silent_server_holds_the_bridge_for_one_budget_not_one_per_chunk() {
     let _machine = machine_lock();
     let (mut ipc, server) = mock();
     let bridge = Arc::clone(ipc.bridge());
-    let wait = ipc.watch(false);
-    let (mut processor, mut controller) = activate(ipc, 32);
-    prepare_offline(&mut controller);
+    let wait = ipc.watch();
+    let (mut processor, _controller) = activate(ipc, 32);
+    prepare_offline(&wait);
     render_chunks(&mut processor, &server, 2);
     assert!(
         wait.gave_up(),
@@ -1323,9 +1308,9 @@ fn a_reactivation_after_a_give_up_does_not_wait_the_budget_again() {
     let main = main_thread();
     let (mut ipc, server) = mock();
     let bridge = Arc::clone(ipc.bridge());
-    let wait = ipc.watch(false);
-    let (mut processor, mut controller) = activate(ipc, 32);
-    prepare_offline(&mut controller);
+    let wait = ipc.watch();
+    let (mut processor, controller) = activate(ipc, 32);
+    prepare_offline(&wait);
     render_chunks(&mut processor, &server, 2);
     assert!(
         wait.gave_up(),

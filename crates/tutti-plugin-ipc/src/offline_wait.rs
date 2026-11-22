@@ -5,7 +5,7 @@ use crate::ServerWatch;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
-use tutti_plugin_types::{PluginFailure, RateRefusal};
+use tutti_plugin_types::{PluginFailure, RateRefusal, WaitSwitch};
 use tutti_rt::Mutex;
 use tutti_units::Samples;
 
@@ -13,6 +13,10 @@ use tutti_units::Samples;
 /// latches the batcher sets when the wait fails (a missed budget, a plugin that
 /// refused its rate). A dead server is the fork's [`ServerWatch`], the one latch
 /// every signal of the death sets.
+///
+/// Whether the pipeline waits at all is the node's: the wait is armed through
+/// [`switch`](Self::switch) by the node's `prepare` alone, for a graph prepared
+/// offline. The plugin's own render mode is separate and never arms it.
 ///
 /// The batcher records the failure here and whoever probes the fork's health
 /// reads it back ([`gave_up`](Self::gave_up), [`death`](Self::death),
@@ -35,11 +39,10 @@ pub struct OfflineWait {
     /// The latency the fork's graph was compiled against, recorded once the
     /// plugin has settled (`usize::MAX`: not planned yet).
     planned: AtomicUsize,
-    /// Whether the pipeline waits for each chunk: set from the render mode of
-    /// the graph the fork is prepared in ([`arm`](Self::arm)), never from
-    /// anywhere else, so a fork prepared for realtime never blocks the audio
-    /// thread.
-    armed: AtomicBool,
+    /// Whether the pipeline waits for each chunk: written only by the node's
+    /// `prepare` from the graph's render mode ([`switch`](Self::switch)), so a
+    /// fork prepared for realtime never blocks the audio thread.
+    armed: WaitSwitch,
     budget: Duration,
 }
 
@@ -62,22 +65,23 @@ impl OfflineWait {
             refusal: Mutex::new(None),
             refused: AtomicBool::new(false),
             planned: AtomicUsize::new(usize::MAX),
-            armed: AtomicBool::new(false),
+            armed: WaitSwitch::new(),
             budget,
         }
     }
 
     /// Whether the pipeline waits for each chunk, up to
-    /// [`budget`](Self::budget). Not armed until a prepare in an offline graph
-    /// arms it.
-    pub(crate) fn armed(&self) -> bool {
-        self.armed.load(Ordering::Acquire)
+    /// [`budget`](Self::budget). Not until the node's `prepare` in an offline
+    /// graph arms it. The plugin's own render mode has no say.
+    pub fn armed(&self) -> bool {
+        self.armed.armed()
     }
 
-    /// Arms the wait for an offline graph's prepare and disarms it for a
-    /// realtime one.
-    pub(crate) fn arm(&self, offline: bool) {
-        self.armed.store(offline, Ordering::Release);
+    /// The switch the node's `prepare` drives: the only source of the wait. A
+    /// clone is the same switch.
+    #[must_use]
+    pub fn switch(&self) -> WaitSwitch {
+        self.armed.clone()
     }
 
     /// Record the whole latency (the plugin's own and the pipeline's chunk)
@@ -175,7 +179,7 @@ mod tests {
     /// An armed wait, as an offline graph's prepare leaves it.
     fn armed() -> OfflineWait {
         let wait = wait();
-        wait.arm(true);
+        wait.switch().arm(true);
         wait
     }
 

@@ -37,12 +37,6 @@ impl ForkState {
         self.preset.is_some()
     }
 
-    /// Whether the live plugin ran offline.
-    #[must_use]
-    pub fn ran_offline(&self) -> bool {
-        self.mode.is_offline()
-    }
-
     /// Whether the fork renders offline: a [`RenderMode::Offline`] fork does,
     /// and a [`RenderMode::Realtime`] one keeps the mode the live plugin ran in.
     #[must_use]

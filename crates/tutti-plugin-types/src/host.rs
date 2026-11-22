@@ -347,17 +347,6 @@ pub trait Control: EditorWindow {
         false
     }
 
-    /// Follows the render mode of the graph this plugin is prepared in: called
-    /// by the node's `prepare`, with or without the Processor in hand and on
-    /// any thread, so it takes no [`MainThreadMarker`]. A plugin that blocks
-    /// the audio thread for a result in an offline graph (an offline fork's
-    /// per-chunk wait) does so only after it has been told
-    /// [`RenderMode::Offline`] here, and stops at the next call with
-    /// [`RenderMode::Realtime`]. Nothing by default.
-    fn follow_graph_mode(&mut self, mode: RenderMode) {
-        let _ = mode;
-    }
-
     /// Appends the parameter edits the plugin reported of its own accord (its
     /// editor moving a knob, its own automation), oldest first, to `out`: each
     /// a [`ParamEdit`], so a gesture's `Begin`, its changes and its `End` come
