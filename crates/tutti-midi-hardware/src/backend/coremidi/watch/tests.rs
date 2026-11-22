@@ -72,9 +72,9 @@ fn until(devices: &Watched, want: impl Fn(&DeviceEvent) -> bool) -> DeviceEvent 
 
 /// A virtual endpoint that appears is `Added` and, dropped, `Removed`; the
 /// watch's registration ends with `Devices`. On GitHub's macOS runner CoreMIDI
-/// sent the background client no notification, so this passes on the hub's own
-/// look (see `watch.rs`); without `hub.notify` in the timer the first wait times out
-/// there.
+/// sent the background client no notification, so the change may arrive through the
+/// hub's idle look (see `watch.rs`) rather than a notification; that a notification
+/// has the watches look is pinned platform-free by the registry's `notified` test.
 #[test]
 fn a_virtual_endpoint_comes_and_goes_and_the_watch_unregisters() {
     let name = format!("tutti-test-{}", std::process::id());
