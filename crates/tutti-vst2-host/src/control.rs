@@ -74,7 +74,10 @@ pub(crate) fn descriptor_of(info: &PluginInfo) -> PluginDescriptor {
 fn placed(channels: ChannelLayout, kept: Option<&ChannelTopology>) -> PluginBuses {
     PluginBus::single(channels)
         .into_iter()
-        .map(|bus| bus.placed(kept.cloned()))
+        .map(|bus| match kept {
+            Some(topology) => bus.placed(topology.clone()),
+            None => bus,
+        })
         .collect()
 }
 

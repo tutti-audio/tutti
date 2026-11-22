@@ -150,17 +150,15 @@ macro_rules! rec_control {
                 let stereo =
                     ChannelTopology::new([Speaker::FrontLeft, Speaker::FrontRight]).unwrap();
                 let mut wiring = PluginWiring {
-                    inputs: vec![
-                        PluginBus::main(ChannelLayout::STEREO).placed(Some(stereo.clone())),
-                    ],
-                    outputs: vec![PluginBus::main(ChannelLayout::STEREO).placed(Some(stereo))],
+                    inputs: vec![PluginBus::main(ChannelLayout::STEREO).placed(stereo.clone())],
+                    outputs: vec![PluginBus::main(ChannelLayout::STEREO).placed(stereo)],
                     features: self.rig.features,
                     ..PluginWiring::default()
                 };
                 if self.rig.key_bus.load(Ordering::Relaxed) {
                     wiring.inputs.push(
                         PluginBus::new(ChannelLayout::MONO, BusRole::Aux)
-                            .placed(Some(ChannelTopology::new([Speaker::FrontCenter]).unwrap())),
+                            .placed(ChannelTopology::new([Speaker::FrontCenter]).unwrap()),
                     );
                 }
                 wiring

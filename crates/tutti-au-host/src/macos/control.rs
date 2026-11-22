@@ -141,7 +141,10 @@ impl AuLoaded {
             .and_then(crate::topology::topology_of);
         PluginBus::single(layout)
             .into_iter()
-            .map(|bus| bus.placed(placement.clone()))
+            .map(|bus| match &placement {
+                Some(topology) => bus.placed(topology.clone()),
+                None => bus,
+            })
             .collect()
     }
 

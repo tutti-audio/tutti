@@ -142,10 +142,11 @@ impl ClapLoaded {
                 } else {
                     BusRole::Aux
                 };
-                Some(
-                    PluginBus::new(port.layout, role)
-                        .placed(self.surround_topology(main, is_input, i)),
-                )
+                let bus = PluginBus::new(port.layout, role);
+                Some(match self.surround_topology(main, is_input, i) {
+                    Some(topology) => bus.placed(topology),
+                    None => bus,
+                })
             })
             .collect();
         if !buses.is_empty() {

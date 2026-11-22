@@ -1336,12 +1336,12 @@ fn process_with_transport() {
     let mut instance = load_probe();
 
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
-        .with_playing(true)
-        .with_beat(tutti_units::Beat::new(2.0))
-        .with_position_samples(44_100)
-        .with_tempo(tutti_units::Bpm::of(120.0))
-        .with_time_signature(TimeSignature::default())
-        .with_loop(tutti_plugin_types::LoopRegion::new(
+        .playing(true)
+        .beat(tutti_units::Beat::new(2.0))
+        .position_samples(44_100)
+        .tempo(tutti_units::Bpm::of(120.0))
+        .time_signature(TimeSignature::default())
+        .loop_region(tutti_plugin_types::LoopRegion::new(
             tutti_music::LoopRange::new(tutti_units::Beat::new(0.0), tutti_units::Beat::new(4.0))
                 .expect("a loop"),
         ));

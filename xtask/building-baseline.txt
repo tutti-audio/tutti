@@ -172,22 +172,9 @@ tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::Pa
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_role
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_steps
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_unit
-tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_bar
-tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_beat
-tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_continuous_samples
-tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_loop
-tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_playing
-tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_position_samples
-tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_recording
-tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_seconds
-tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_system_time_ns
-tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_tempo
-tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_tempo_inc
-tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_time_signature
 tutti-plugin-types  setter  crates/tutti-plugin-types/src/lifecycle.rs::State::set_mode
 tutti-plugin-types  setter  crates/tutti-plugin-types/src/process.rs::ProcessOutput::set_params_unsent
 tutti-plugin-types  setter  crates/tutti-plugin-types/src/process.rs::ProcessOutput::set_status
-tutti-plugin-types  option-arg  crates/tutti-plugin-types/src/metadata.rs::PluginBus::placed
 tutti-plugin-types  option-arg  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_measures
 tutti-plugin-types  option-arg  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_role
 

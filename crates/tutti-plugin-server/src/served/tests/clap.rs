@@ -2017,9 +2017,9 @@ fn test_clap_process_with_transport() {
     .expect("Failed to load");
 
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
-        .with_playing(true)
-        .with_tempo(tutti_units::Bpm::of(120.0))
-        .with_time_signature(tutti_plugin_types::TimeSignature::default());
+        .playing(true)
+        .tempo(tutti_units::Bpm::of(120.0))
+        .time_signature(tutti_plugin_types::TimeSignature::default());
 
     let num_samples = 512;
     let input_data = vec![vec![0.0f32; num_samples]; 2];
