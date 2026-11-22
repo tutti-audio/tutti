@@ -167,7 +167,13 @@ mod take;
 #[cfg(all(feature = "midi", feature = "analyze"))]
 mod transcribe;
 mod transport_handle;
-#[cfg(any(feature = "sampler", feature = "analyze", feature = "midi"))]
+#[cfg(any(
+    feature = "sampler",
+    feature = "analyze",
+    feature = "midi",
+    feature = "soundfont",
+    feature = "export"
+))]
 mod unblocked;
 mod value;
 #[cfg(feature = "device")]

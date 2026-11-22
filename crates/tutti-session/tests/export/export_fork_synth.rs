@@ -79,14 +79,14 @@ fn render_stem(
 
 /// A saw with an instant attack, built at the live graph's rate.
 fn poly() -> PolySynth<f32> {
-    PolySynth::<f32>::new(SynthConfig {
-        oscillator: OscillatorType::Saw,
-        envelope: Adsr {
-            attack: Seconds::new(0.0),
-            ..Default::default()
-        },
-        ..Default::default()
-    })
+    PolySynth::<f32>::new(
+        SynthConfig::new()
+            .oscillator(OscillatorType::Saw)
+            .envelope(Adsr {
+                attack: Seconds::new(0.0),
+                ..Default::default()
+            }),
+    )
 }
 
 /// The repo's committed test soundfont.
