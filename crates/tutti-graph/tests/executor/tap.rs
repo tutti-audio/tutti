@@ -107,7 +107,7 @@ fn rig(workers: usize, no_alloc: bool) -> Rig {
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
     if workers > 1 {
         exec.set_pool(Some(if no_alloc {
-            common::TestPool::no_alloc(workers)
+            common::TestPool::new(workers)
         } else {
             common::test_pool(workers)
         }));

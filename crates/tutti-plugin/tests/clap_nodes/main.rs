@@ -14,9 +14,9 @@ mod param_probe;
 #[path = "../support/param_reads.rs"]
 mod param_reads;
 
-// `assert_no_alloc` is inert unless `RtAllocCheck` is the global allocator. It
-// does nothing outside an `assert_no_alloc` closure, so the other tests here are
-// unaffected.
+// `RtAllocCheck` aborts inside an `RtScope` (a render prepared `Realtime`) or
+// an `assert_no_alloc` closure and does nothing elsewhere, so the other tests
+// here are unaffected.
 #[global_allocator]
 static A: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 

@@ -1,4 +1,5 @@
 use super::*;
+use crate::AboveNyquist;
 use crate::analyses::yin::{PitchEstimate, yin_track};
 use crate::test_rng::uniform;
 use tutti_rt::SplitMix64;
@@ -230,14 +231,14 @@ fn a_band_above_nyquist_a_short_buffer_and_a_huge_grid_are_refused() {
             RATE,
             hop()
         ),
-        Err(Error::AboveNyquist {
+        Err(PitchError::Nyquist(AboveNyquist {
             freq: Hz::new(9000.0),
             nyquist: Hz::new(8000.0),
-        })
+        }))
     );
     assert_eq!(
         pyin_track(&PyinConfig::new(), Mono::new(&[0.0f32; 100]), RATE, hop()),
-        Err(Error::InsufficientInput {
+        Err(PitchError::InsufficientInput {
             needed: Samples::new(FRAME),
             got: Samples::new(100),
         })
@@ -245,6 +246,6 @@ fn a_band_above_nyquist_a_short_buffer_and_a_huge_grid_are_refused() {
     let tiny = FrequencyBand::new(Hz::new(1e-100), Hz::new(1000.0)).unwrap();
     assert!(matches!(
         PyinConfig::new().band(tiny).model(),
-        Err(Error::PitchGridTooLarge { .. })
+        Err(PitchError::PitchGridTooLarge { .. })
     ));
 }

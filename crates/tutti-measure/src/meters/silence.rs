@@ -20,7 +20,7 @@ use tutti_units::{Amplitude, Db, SampleRate, Samples, Seconds};
 use core::marker::PhantomData;
 
 use crate::convert::for_blocks;
-use crate::{Measure, Result, StreamMeter};
+use crate::{Measure, MeterError, StreamMeter};
 use tutti_units::ranged;
 
 ranged! {
@@ -141,7 +141,7 @@ impl<S: Sample> Measure<S> for SilenceConfig {
     type Meter = SilenceMeter<S>;
 
     /// A meter that scans audio at `rate`, chunk by chunk. Never fails.
-    fn measure(&self, rate: SampleRate) -> Result<SilenceMeter<S>> {
+    fn measure(&self, rate: SampleRate) -> Result<SilenceMeter<S>, MeterError> {
         Ok(self.bind(rate))
     }
 }
@@ -202,7 +202,7 @@ impl<S: Sample> StreamMeter for SilenceMeter<S> {
     type Item = ();
     type Output = Vec<Region>;
 
-    fn push(&mut self, chunk: Mono<'_, S>, _: &mut impl Extend<()>) -> Result<()> {
+    fn push(&mut self, chunk: Mono<'_, S>, _: &mut impl Extend<()>) -> Result<(), MeterError> {
         for_blocks(chunk.samples(), 1, |block| self.scan(block));
         Ok(())
     }

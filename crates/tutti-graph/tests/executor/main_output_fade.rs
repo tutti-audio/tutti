@@ -680,7 +680,7 @@ mod no_alloc {
         let mut r = rig();
         if workers > 1 {
             r.executor_mut()
-                .set_pool(Some(common::TestPool::no_alloc(workers)));
+                .set_pool(Some(common::TestPool::new(workers)));
         }
         let law = FadeLaw::EqualPower;
         let run = |r: &mut Renderer| {

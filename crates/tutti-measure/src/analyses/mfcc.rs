@@ -11,7 +11,7 @@ use tutti_dsp::{
 
 use tutti_units::Hz;
 
-use crate::Result;
+use crate::MfccError;
 use crate::analyses::transform::StftMagnitude;
 
 /// The size and shape of an MFCC analysis.
@@ -67,11 +67,11 @@ impl MfccConfig {
 /// [`BinCount`] counts the columns, which are coefficients here).
 ///
 /// # Errors
-/// [`Error::Mel`](crate::Error::Mel) when the bank does not fit the transform: a range
+/// [`MfccError::Mel`] when the bank does not fit the transform: a range
 /// above Nyquist, or a band that holds no bin (a longer window cures it).
-/// [`Error::Coefficients`](crate::Error::Coefficients) when `config` asks for more
+/// [`MfccError::Coefficients`] when `config` asks for more
 /// coefficients than the bank has bands.
-pub fn mfcc(config: &MfccConfig, transform: &StftMagnitude) -> Result<Grid<f64>> {
+pub fn mfcc(config: &MfccConfig, transform: &StftMagnitude) -> Result<Grid<f64>, MfccError> {
     let geometry = transform.geometry();
     let mut mel = MelConfig::new(
         config.bands,

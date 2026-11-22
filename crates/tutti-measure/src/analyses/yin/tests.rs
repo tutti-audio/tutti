@@ -1,4 +1,5 @@
 use super::*;
+use crate::{AboveNyquist, EmptyFrequencyRange};
 
 const SR: SampleRate = SampleRate::SR_44K1;
 
@@ -10,11 +11,11 @@ fn frame(cfg: &YinConfig) -> usize {
     cfg.buffer_size(SR).unwrap().get()
 }
 
-fn pitch_of(cfg: &YinConfig, x: &[f32]) -> Result<PitchEstimate> {
+fn pitch_of(cfg: &YinConfig, x: &[f32]) -> Result<PitchEstimate, PitchError> {
     yin(cfg, Mono::new(x), SR)
 }
 
-fn track_of(cfg: &YinConfig, x: &[f32], hop: usize) -> Result<Vec<PitchEstimate>> {
+fn track_of(cfg: &YinConfig, x: &[f32], hop: usize) -> Result<Vec<PitchEstimate>, PitchError> {
     yin_track(cfg, Mono::new(x), SR, PitchHop::of(Samples::new(hop)))
 }
 
@@ -34,7 +35,7 @@ fn sine(sample_rate: f64, freq: f64, seconds: f64) -> Vec<f32> {
 fn an_inverted_range_is_not_a_band() {
     assert_eq!(
         FrequencyBand::try_from(Hz::new(2000.0)..=Hz::new(50.0)),
-        Err(Error::EmptyFrequencyRange {
+        Err(EmptyFrequencyRange {
             min: Hz::new(2000.0),
             max: Hz::new(50.0),
         })
@@ -55,10 +56,10 @@ fn a_maximum_above_nyquist_is_refused() {
             Mono::new(&[0.0f32; 4096]),
             SampleRate::SR_8K,
         ),
-        Err(Error::AboveNyquist {
+        Err(PitchError::Nyquist(AboveNyquist {
             freq: Hz::new(5000.0),
             nyquist: Hz::new(4000.0),
-        })
+        }))
     );
 }
 
@@ -70,7 +71,7 @@ fn a_short_buffer_reports_why() {
 
     assert_eq!(
         pitch_of(&cfg, &samples),
-        Err(Error::InsufficientInput {
+        Err(PitchError::InsufficientInput {
             needed: cfg.buffer_size(SR).unwrap(),
             got: Samples::new(64),
         })

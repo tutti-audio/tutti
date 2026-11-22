@@ -61,9 +61,10 @@ use tutti_units::Samples;
 
 use tutti_units::ranged;
 
+use crate::ChordError;
+use crate::Region;
 use crate::framing::{Framing, check_frame_count};
 use crate::meters::chroma::{CLASSES, Chroma};
-use crate::{Error, Region, Result};
 use tutti_dsp::{FrameCount, FrameIndex, Grid, median, sticky_viterbi};
 
 /// The most frames one call smooths, bounding the backpointers (50 bytes a
@@ -177,13 +178,13 @@ impl Default for ChordConfig {
 ///
 /// # Errors
 ///
-/// [`Error::ZeroWindow`] or [`Error::ZeroHop`] for a zero window or hop in the
-/// chroma's framing; [`Error::NotTwelveClasses`] when the grid is not 12 columns wide;
-/// [`Error::NegativeInput`] when it holds a negative value;
-/// [`Error::TooManyFrames`] for more than 524288 frames;
-/// [`Error::SpanBeyondSampleCount`] when a span lies beyond the range of a
-/// sample count; [`Error::NonFiniteInput`] for a NaN or infinity.
-pub fn detect_chords(cfg: &ChordConfig, chroma: &Chroma) -> Result<Vec<ChordSpan>> {
+/// [`FramingError::ZeroWindow`](crate::FramingError::ZeroWindow) or [`FramingError::ZeroHop`](crate::FramingError::ZeroHop) for a zero window or hop in the
+/// chroma's framing; [`ChordError::NotTwelveClasses`] when the grid is not 12 columns wide;
+/// [`ChordError::NegativeInput`] when it holds a negative value;
+/// [`ChordError::TooManyFrames`] for more than 524288 frames;
+/// [`ChordError::SpanBeyondSampleCount`] when a span lies beyond the range of a
+/// sample count; [`ChordError::NonFiniteInput`] for a NaN or infinity.
+pub fn detect_chords(cfg: &ChordConfig, chroma: &Chroma) -> Result<Vec<ChordSpan>, ChordError> {
     detect(chroma.grid(), chroma.framing(), cfg)
 }
 
@@ -192,20 +193,20 @@ pub(crate) fn detect(
     chroma: &Grid<f64>,
     framing: Framing,
     cfg: &ChordConfig,
-) -> Result<Vec<ChordSpan>> {
+) -> Result<Vec<ChordSpan>, ChordError> {
     framing.check()?;
     if chroma.bins().get() != CLASSES {
-        return Err(Error::NotTwelveClasses {
+        return Err(ChordError::NotTwelveClasses {
             columns: chroma.bins().get(),
         });
     }
     check_frame_count(chroma.frames(), MAX_FRAMES)?;
     let frames = chroma.frames().get();
     if chroma.as_slice().iter().any(|v| !v.is_finite()) {
-        return Err(Error::NonFiniteInput);
+        return Err(ChordError::NonFiniteInput);
     }
     if chroma.as_slice().iter().any(|&v| v < 0.0) {
-        return Err(Error::NegativeInput);
+        return Err(ChordError::NegativeInput);
     }
     if frames == 0 {
         return Ok(Vec::new());
@@ -260,10 +261,10 @@ fn viterbi(chroma: &Grid<f64>, cfg: &ChordConfig) -> Vec<u16> {
 }
 
 /// Runs of one chord in `path`, placed on `framing`'s samples.
-fn spans(path: &[u16], framing: Framing) -> Result<Vec<ChordSpan>> {
+fn spans(path: &[u16], framing: Framing) -> Result<Vec<ChordSpan>, ChordError> {
     let (window, hop) = (framing.window().get() as u128, framing.hop().get() as u128);
     let frames = path.len() as u128;
-    let sample = |v: u128| usize::try_from(v).map_err(|_| Error::SpanBeyondSampleCount);
+    let sample = |v: u128| usize::try_from(v).map_err(|_| ChordError::SpanBeyondSampleCount);
     // The change before frame `j`: the midpoint of two centres.
     let boundary = |j: usize| -> u128 { (2 * j as u128 * hop + window - hop) / 2 };
     let end = (frames - 1) * hop + window;
@@ -297,7 +298,7 @@ fn spans(path: &[u16], framing: Framing) -> Result<Vec<ChordSpan>> {
                         sample(boundary(t))?
                     }),
                 )
-                .ok_or(Error::SpanBeyondSampleCount)?,
+                .ok_or(ChordError::SpanBeyondSampleCount)?,
             });
         }
         start = t;

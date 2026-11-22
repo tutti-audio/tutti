@@ -1,31 +1,23 @@
-//! The crate-wide error type, for the paths that can fail on file access.
+//! The errors of the sampler's calls that are not named for an operation of their own.
 //!
-//! Midi1Translator failures live with the operation that raises them — `SampleProbeError`
-//! for a header read, `OpenError` for a stream open —
-//! because a caller of those branches on the specific cause rather than on "an
-//! error happened".
+//! Failures that belong to one operation live with it: `SampleProbeError` for a header
+//! read, `OpenError` for a stream open, `PlaceError` for a wave placed into a voice.
 
 use thiserror::Error;
 
-/// A failure on a sampler path that touches the filesystem.
+/// Why the disk streamer did not start ([`DiskStreamer::start`](crate::DiskStreamer::start),
+/// [`DiskStreamer::manual`](crate::DiskStreamer::manual)).
 ///
-/// `#[non_exhaustive]`: a match on this must carry a `_` arm, so adding a
-/// variant for a new failure mode is not a breaking change.
+/// `#[non_exhaustive]`: a match on this must carry a `_` arm, so adding a variant for a
+/// new failure mode is not a breaking change.
 #[derive(Error, Debug)]
 #[non_exhaustive]
-pub enum Error {
-    /// The underlying file could not be read or written.
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-    /// The OS refused to start the disk streamer's thread
-    /// ([`DiskStreamer::start`](crate::DiskStreamer::start)): there is no
-    /// streamer, and a stream command with no consumer would stall silently.
+pub enum StreamerStartError {
+    /// The OS refused to start the disk streamer's thread: there is no streamer, and a
+    /// stream command with no consumer would stall silently.
     #[error("the disk streamer's thread could not be started: {0}")]
     Spawn(#[source] std::io::Error),
 }
-
-/// `Result` specialized to this crate's [`Error`](enum@Error).
-pub type Result<T> = std::result::Result<T, Error>;
 
 /// Why a wave cannot be placed into a voice's channels.
 ///

@@ -65,7 +65,7 @@ fn rig(workers: usize, no_alloc: bool) -> Rig {
     let (ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
     if workers > 1 {
         exec.set_pool(Some(if no_alloc {
-            common::TestPool::no_alloc(workers)
+            common::TestPool::new(workers)
         } else {
             common::test_pool(workers)
         }));
@@ -841,7 +841,7 @@ fn run(r: &mut Rig, blocks: usize) -> Vec<Vec<Level>> {
 }
 
 /// The parallel render's readings are bit-identical to the serial one at
-/// several worker counts, with every participant inside `assert_no_alloc`.
+/// several worker counts, with every participant inside `RtScope`.
 #[test]
 fn the_parallel_meters_are_bit_identical_and_allocation_free() {
     let mut s = rig(1, false);

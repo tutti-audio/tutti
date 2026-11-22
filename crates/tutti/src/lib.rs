@@ -644,14 +644,14 @@ pub mod codec {
 #[cfg(feature = "sampler")]
 pub mod sampler {
     pub use tutti_sampler::{
-        Block, Error, GUARD_FRAMES, OpenError, PlayDirection, RefusedStreamStart, SamplerFloat,
+        Block, GUARD_FRAMES, OpenError, PlayDirection, RefusedStreamStart, SamplerFloat,
         StreamFailure, StreamFile, StreamHandle, StreamId, StreamPhase, StreamReader, StreamStart,
         StreamStatus, VoiceNodeHandle,
     };
     // A file's probe needs a decoder.
     pub use tutti_sampler::{
         ControlCell, GainError, Loop, LoopError, PlaceError, PlayError, Playback, SendError,
-        SlotId, StreamingAddError, VoiceNodeError, VoiceWindow,
+        SlotId, StreamerStartError, StreamingAddError, VoiceNodeError, VoiceWindow,
     };
     #[cfg(any(
         feature = "decode-wav",
@@ -668,7 +668,10 @@ pub mod sampler {
 /// silence, onsets, spectrum, chroma and the vectorscope. Feature `analyze`.
 #[cfg(feature = "analyze")]
 pub mod measure {
-    pub use tutti_measure::{Error, Measure, StreamMeter};
+    pub use tutti_measure::{
+        AboveNyquist, EmptyFrequencyRange, FramingError, Measure, MeterError, StreamMeter,
+        TooManyFrames,
+    };
     // Silence and onsets.
     pub use tutti_measure::{
         DetectionFunction, FiniteLevel, FiniteLevelError, Framing, Novelty, Onset, OnsetConfig,
