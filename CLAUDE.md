@@ -309,6 +309,9 @@ touched.
   plugin records what the host sent before it orders or repairs anything, and is
   configured only through its state. A case a format cannot pass is a `Gap` that must fail
   with its text; `gaps = N` is a ratchet. Never `#[ignore]`.
+- Every host callback a plugin can call (an `extern "C" fn`, a COM method, the VST2
+  audioMaster) runs its body under the panic guard, and a CLAP `[main-thread]` callback
+  under `main_only`: a panic out of one aborts the host (`cargo xtask check-guards`).
 
 ### Style
 
@@ -333,6 +336,10 @@ touched.
 - A comment states what the code does and the invariant it holds, in the present tense;
   rustdoc documents the item. No history, no "why it was added", no removed names, no
   design-doc citations. A comment or doc that disagrees with the code is a bug.
+- Prose never cites a line (`file.rs:N`): it states the logic or the invariant itself
+  (`cargo xtask check-pointers`).
+- A public fieldless enum that is `Eq` also derives `Hash` (`cargo xtask
+  check-value-traits`).
 - Before working around a constraint, name it in one sentence and verify it (read the
   manifest, grep, run the probe). An indirection whose only job is to avoid a change is
   the finding: make the change.
