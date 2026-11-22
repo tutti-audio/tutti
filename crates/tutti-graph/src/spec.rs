@@ -50,11 +50,8 @@ impl EventInputPort {
 
     /// Event input `port` of `node`.
     #[must_use]
-    pub fn new(node: impl Into<NodeKey>, port: u16) -> Self {
-        Self {
-            node: node.into(),
-            port,
-        }
+    pub const fn new(node: NodeKey, port: u16) -> Self {
+        Self { node, port }
     }
 }
 
@@ -80,11 +77,8 @@ impl EventOutputPort {
 
     /// Event output `port` of `node`.
     #[must_use]
-    pub fn new(node: impl Into<NodeKey>, port: u16) -> Self {
-        Self {
-            node: node.into(),
-            port,
-        }
+    pub const fn new(node: NodeKey, port: u16) -> Self {
+        Self { node, port }
     }
 }
 
