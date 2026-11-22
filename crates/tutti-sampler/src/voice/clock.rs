@@ -246,8 +246,8 @@ fn wrap_offset(clock: &FrameClock, end: Beat, limit: usize) -> Option<usize> {
     if limit <= 1 || beat_after(clock, limit - 1) < end {
         return None;
     }
-    // A tempo with no frames per beat does not move the beat, so the check
-    // above has already answered.
+    // A tempo with no frames per beat does not move the beat: it stays below
+    // `end` (the precondition), so `beat_after` above has already returned.
     let fpb = clock.tempo().frames_per_beat(clock.sample_rate())?;
     let est = first_frame_at_or_after(fpb.frames_in(end - clock.beat()));
     let mut k = if est >= 1 {
