@@ -840,6 +840,17 @@ a separate, opt-in piece.
   give up. It is one call in `tutti-plugin-ipc-ffi`, and a no-op elsewhere.
 - **macOS host:** the hardened runtime of the app's signing gives the same
   protection. It is the app's job; tutti does nothing for it.
+- **Descriptors a helper inherits:** on unix the server and the probe are spawned
+  through `inherit_only_stdio`, which marks every descriptor from 3 up close-on-exec
+  between the fork and the exec (`close_range` on Linux, a sweep of `fcntl` calls
+  elsewhere and on old kernels), so the helper holds descriptors 0, 1 and 2 only. The
+  server cannot do this itself: a pre-main initialiser may own descriptors.
+  **Missing on Windows:** std starts a process with `bInheritHandles` true and no handle
+  list, so every handle of the host marked inheritable reaches the helper (std's own
+  are not; a CRT `_open` without `O_NOINHERIT`, a plugin or a driver DLL can leave
+  some). The fix is a hand-written CreateProcessW with `STARTUPINFOEX` and a
+  PROC_THREAD_ATTRIBUTE_HANDLE_LIST of the standard handles, until
+  CommandExt::inherit_handles is stable (rust-lang/rust#146407).
 - **A server's end:** the guard's drop sends `Shutdown` and waits
   `Timeouts::shutdown` on the OS's exit wake, then kills. The kill is `SIGKILL`
   of the server's process group on unix (a server leads its own group, so the

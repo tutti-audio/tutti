@@ -21,9 +21,9 @@ pub fn inherit_only_stdio(command: &mut Command) {
             // SAFETY: `close_range` takes three integers and reads no memory.
             let done = libc::syscall(
                 libc::SYS_close_range,
-                3 as libc::c_uint,
-                libc::c_uint::MAX,
-                libc::CLOSE_RANGE_CLOEXEC,
+                3 as libc::c_long,
+                libc::c_long::from(libc::c_uint::MAX),
+                libc::c_long::from(libc::CLOSE_RANGE_CLOEXEC),
             );
             if done != 0 {
                 // ENOSYS (before 5.9) or EINVAL (before 5.11, no flag).
