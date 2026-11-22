@@ -897,9 +897,10 @@ pub mod midi {
         SysexStatus, SysexStep, System, U4, UiHint, UmpVersion, Unknown, Utility, Voice2,
     };
     pub use tutti_ump::{
-        Address, CCNumber, DeviceIdentity, ExtremeValues, ManufacturerId, Message, Midi1Parser,
-        MidiChannel, MidiChannelSet, MidiGroup, MidiGroupSet, NoteNumber, NoteVelocity, Protocol,
-        StreamConfig, SysexAssembler, TicksPerQuarterNote, U7, U14, Ump, Voice1,
+        Address, CCNumber, DeviceIdentity, ExtremeValues, FunctionBlockSet, ManufacturerId,
+        Message, Midi1Parser, MidiChannel, MidiChannelSet, MidiGroup, MidiGroupSet, NoteNumber,
+        NoteVelocity, Protocol, StreamConfig, SysexAssembler, TicksPerQuarterNote, U7, U14, Ump,
+        Voice1,
     };
     pub use tutti_ump::{
         CCNumberOutOfRange, ChordTypeOutOfRange, DeltaTicksOutOfRange, FirstGroupOutOfRange,

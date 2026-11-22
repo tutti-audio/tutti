@@ -1476,6 +1476,17 @@ fn a_bye_whose_message_is_not_utf8_still_ends_the_session() {
         sim.commands(Direction::ClientToHost)
             .contains(&Command::ByeReply)
     );
+    assert_eq!(sim.client.losses(), Losses::lost(1));
+}
+
+/// A Bye whose message is whole loses nothing.
+/// Spec: m2-124/6.16#5
+#[test]
+fn a_bye_whose_message_is_whole_is_not_counted_as_lost() {
+    let mut sim = established();
+    sim.client
+        .on_message(host_addr(), &raw_bye(b"all of it"), sim.now);
+    assert_eq!(sim.client.losses(), Losses::NONE);
 }
 
 /// Spec: m2-124/6.16#4
