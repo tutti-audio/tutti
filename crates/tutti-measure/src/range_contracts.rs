@@ -11,8 +11,8 @@ use tutti_units::{Amplitude, Cents, Confidence, Db, Samples, Seconds};
 use crate::{
     Alternatives, BandCount, BandsPerOctave, FiniteLevel, HarmonicCount, HarmonicDecay, NoteSpan,
     OnsetGap, OnsetSensitivity, OnsetThreshold, PeakDecay, PeakFloor, PitchHop, PitchSplit,
-    PriorSpread, SelfTransition, Sharpness, SpectrumFloor, SpectrumTime, Tightness, TuningOffset,
-    YinThreshold,
+    PriorSpread, PyinSwitch, PyinThresholdMean, PyinTransitionWidth, SelfTransition, Sharpness,
+    SpectrumFloor, SpectrumTime, Tightness, TuningOffset, YinThreshold,
 };
 
 macro_rules! serde_through_try_from {
@@ -54,6 +54,9 @@ serde_through_try_from! {
     PitchHop: Samples,
     Alternatives: usize,
     YinThreshold: Confidence,
+    PyinThresholdMean: Confidence,
+    PyinSwitch: Confidence,
+    PyinTransitionWidth: Cents,
 }
 
 const NAN: f64 = f64::NAN;
@@ -66,6 +69,10 @@ fn db(raws: &[f64]) -> Vec<Db> {
 
 fn cents(raws: &[f64]) -> Vec<Cents> {
     raws.iter().map(|&r| Cents::new(r)).collect()
+}
+
+fn confidences(raws: &[f64]) -> Vec<Confidence> {
+    raws.iter().map(|&r| Confidence::new(r)).collect()
 }
 
 fn amplitudes(raws: &[f64]) -> Vec<Amplitude> {
@@ -353,5 +360,41 @@ fn yin_threshold_keeps_the_range_checked_shape() {
             Confidence::new(0.51),
             Confidence::new(f64::NAN),
         ],
+    });
+}
+
+/// `0.02..=0.5`.
+#[test]
+fn pyin_threshold_mean_keeps_the_range_checked_shape() {
+    check_range_contract(&RangeContract {
+        new: PyinThresholdMean::new,
+        get: PyinThresholdMean::get,
+        of: Some(PyinThresholdMean::of),
+        valid: &confidences(&[0.02, 0.1, 0.5]),
+        invalid: &confidences(&[0.0, 0.019, 0.51, NAN, INF, NEG_INF]),
+    });
+}
+
+/// `(0, 0.5]`.
+#[test]
+fn pyin_switch_keeps_the_range_checked_shape() {
+    check_range_contract(&RangeContract {
+        new: PyinSwitch::new,
+        get: PyinSwitch::get,
+        of: Some(PyinSwitch::of),
+        valid: &confidences(&[f64::MIN_POSITIVE, 0.01, 0.5]),
+        invalid: &confidences(&[0.0, 0.51, -0.1, NAN, INF, NEG_INF]),
+    });
+}
+
+/// `10..=1200` cents.
+#[test]
+fn pyin_transition_width_keeps_the_range_checked_shape() {
+    check_range_contract(&RangeContract {
+        new: PyinTransitionWidth::new,
+        get: PyinTransitionWidth::get,
+        of: Some(PyinTransitionWidth::of),
+        valid: &cents(&[10.0, 250.0, 1200.0]),
+        invalid: &cents(&[9.9, 1200.1, 0.0, NAN, INF, NEG_INF]),
     });
 }

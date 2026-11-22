@@ -5,10 +5,7 @@ use tutti_engine::StreamFault;
 use tutti_graph::{BusSource, CommitError, NodeKey, Wired};
 use tutti_units::SampleRate;
 
-use crate::{
-    BusSink, ChannelEdge, EventEdge, MainOutputReader, PeerResourceId, Problem, ReplaceRefused,
-    ResourceFact,
-};
+use crate::{BusSink, ChannelEdge, EventEdge, MainOutputReader, Problem, ReplaceRefused};
 
 /// Something an [`update`](crate::Session::update) found for the host.
 #[derive(Debug)]
@@ -175,23 +172,17 @@ pub enum SessionEvent {
     /// A MIDI event of the session's, by area (design 030, convention 1):
     /// a device came or went, a held input or the output was lost, a
     /// negotiation settled, the device watch ended, or events were dropped.
-    /// See [`MidiReport`](crate::MidiReport).
+    /// See [`MidiEvent`](crate::MidiEvent).
     #[cfg(feature = "midi")]
-    Midi(crate::MidiReport),
+    Midi(crate::MidiEvent),
     /// A hosted plugin's event, by area: what the plugin reported (its own edit of a parameter, a
     /// new tail) and every transition of its life (died, reloading, recovered,
     /// gave up). See [`PluginEvent`](crate::PluginEvent).
     #[cfg(feature = "plugin")]
     Plugin(crate::PluginEvent),
-    /// A reading of one peer changed: read `fact` again on the token whose
-    /// [`Resource::id`](crate::Resource::id) is `id`. The notice carries no
-    /// value.
-    ResourceChanged {
-        /// The peer's token.
-        id: PeerResourceId,
-        /// Which of its readings changed.
-        fact: ResourceFact,
-    },
+    /// A reading of one of the session's peers changed. See
+    /// [`PeerEvent`](crate::PeerEvent).
+    Peer(crate::PeerEvent),
     /// A reader of the main output was opened again, because the main output's width is no
     /// longer the one the reader has: a tap from
     /// [`Taps::open_main_output`](crate::Taps::open_main_output), or the main output meter

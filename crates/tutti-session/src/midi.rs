@@ -40,7 +40,7 @@ use crate::midi_follow::{
     CLOCK_TAP_CAPACITY, ClockAction, ClockFollow, FOLLOW_TAP_CAPACITY, Follow, FollowCx,
     MACHINE_TAP_CAPACITY, MachineFollow, Placed,
 };
-use crate::{EventOutPort, Key, MidiError, MidiNodes, MidiReport};
+use crate::{EventOutPort, Key, MidiError, MidiEvent, MidiNodes};
 use crate::{FollowClock, FollowMachineControl, FollowTempo};
 
 /// What a [`Midi`] call returns: the area's one error.
@@ -839,7 +839,7 @@ pub(crate) struct MidiState {
     machine: Option<MachineFollow>,
     /// Events [`Midi::unfollow_tempo`] and [`Midi::unfollow_clock`] queued for the next `Poll` phase, which
     /// reports them.
-    follow_events: Vec<MidiReport>,
+    follow_events: Vec<MidiEvent>,
     /// What the engine gives the outputs' timing: its block clock and the
     /// audio output's latency. `None` offline, where every event
     /// is sent at once.
@@ -920,19 +920,24 @@ impl MidiState {
     }
 
     /// `Phase::Poll`, for the ports: retires those whose handles were all dropped, takes in
-    /// the devices that came and went (each a [`MidiReport`], and a port that
+    /// the devices that came and went (each a [`MidiEvent`], and a port that
     /// held one reads it as its [`Presence`](crate::Presence)), sends what the
     /// handles asked of the MIDI-CI peers, steps the UMP Stream negotiations and
     /// the MIDI-CI of the open inputs. Whether the graph was edited.
     #[cfg(feature = "midi-hardware")]
     pub(crate) fn midi_input_phase<F: Float>(
         &mut self,
-        io: Option<&mut tutti_midi_hardware::MidiSession>,
+        link: Option<&crate::midi_link::MidiLink>,
         graph: &mut Graph<F>,
         now: Instant,
         out: &mut Vec<crate::SessionEvent>,
     ) -> bool {
-        let Some(io) = io else { return false };
+        let Some(link) = link else { return false };
+        let mut io = link.lock();
+        // The task steps the layer too: this step is the one a constructed
+        // `now` reaches, and it drains the requests queued since the task's.
+        link.step(&mut io, now);
+        let polled = link.take_queued();
         // Drained first: reopening a device takes the state mutably.
         let pending: Vec<_> = self
             .device_events
@@ -940,7 +945,7 @@ impl MidiState {
             .flat_map(tutti_midi_hardware::DeviceEvents::pending)
             .collect();
         let rate = graph.prepared().sample_rate();
-        let edits = self.ports.poll(io, graph, rate, pending, now, out);
+        let edits = self.ports.poll(&mut io, graph, rate, pending, polled, out);
         if !self.watch_failure_reported
             && let Some(why) = self
                 .device_events
@@ -948,7 +953,7 @@ impl MidiState {
                 .and_then(tutti_midi_hardware::DeviceEvents::failure)
         {
             self.watch_failure_reported = true;
-            out.push(MidiReport::WatchFailed(why).into());
+            out.push(MidiEvent::WatchFailed(why).into());
         }
         edits.graph || edits.routes
     }
@@ -1257,7 +1262,10 @@ pub struct Midi<'a, F: Float = f32> {
     pub(crate) executor: tutti_platform::WeakExecutor,
     /// The OS MIDI layer, when the builder opened it.
     #[cfg(feature = "midi-hardware")]
-    pub(crate) io: Option<&'a mut tutti_midi_hardware::MidiSession>,
+    pub(crate) io: Option<std::sync::MutexGuard<'a, tutti_midi_hardware::MidiSession>>,
+    /// The link the layer is locked through: its bell and port table.
+    #[cfg(feature = "midi-hardware")]
+    pub(crate) link: Option<&'a crate::midi_link::MidiLink>,
 }
 
 impl<F: Float> Midi<'_, F> {
@@ -1889,7 +1897,7 @@ impl<F: Float> Midi<'_, F> {
     /// (M2-104 §7.5.3, §7.5.4): the session reads them from an event tap on
     /// that Group's channelless port in each
     /// [`Poll`](crate::Phase::Poll) phase and publishes them to the transport,
-    /// reported as [`MidiReport::TempoFollowed`] and [`MidiReport::MeterFollowed`].
+    /// reported as [`MidiEvent::TempoFollowed`] and [`MidiEvent::MeterFollowed`].
     /// **Off by default**: until this is called, a Flex tempo changes nothing.
     ///
     /// The source is Flex Set Tempo on one Group; MIDI Beat Clock and MIDI Time
@@ -1963,7 +1971,7 @@ impl<F: Float> Midi<'_, F> {
     /// project's tempo map and meter again, for the ones the follower changed.
     /// The transport takes them at the next block at its current beat, so the
     /// playhead does not jump, and the tempo from there on is the project's.
-    /// Reported as [`MidiReport::TempoUnfollowed`] by the next update.
+    /// Reported as [`MidiEvent::TempoUnfollowed`] by the next update.
     ///
     /// # Errors
     ///
@@ -1978,7 +1986,7 @@ impl<F: Float> Midi<'_, F> {
         if let Some(meter) = meter {
             self.meter.set_meter(meter);
         }
-        self.state.follow_events.push(MidiReport::TempoUnfollowed);
+        self.state.follow_events.push(MidiEvent::TempoUnfollowed);
         Ok(())
     }
 
@@ -1993,7 +2001,7 @@ impl<F: Float> Midi<'_, F> {
     /// **[`ClockKind::BeatClock`](tutti_midi_runtime::ClockKind::BeatClock)**:
     /// the tempo fit from the Timing Clocks' spacing is published into the
     /// tempo map as [`follow_tempo`](Self::follow_tempo)'s is (and reported as
-    /// [`MidiReport::TempoFollowed`]), Start plays from beat 0, Continue plays
+    /// [`MidiEvent::TempoFollowed`]), Start plays from beat 0, Continue plays
     /// from where the source counted to, Stop stops, and a Song Position
     /// Pointer locates to its sixteenth notes (M1 pp.27 to 31).
     ///
@@ -2002,8 +2010,8 @@ impl<F: Float> Midi<'_, F> {
     /// the tempo map in force. The transport plays once the follower locks,
     /// locates when the source jumps, and a Full Message locates.
     ///
-    /// **Lock** is reported as [`MidiReport::ClockLocked`] and
-    /// [`MidiReport::ClockUnlocked`]; the rules and constants are those of
+    /// **Lock** is reported as [`MidiEvent::ClockLocked`] and
+    /// [`MidiEvent::ClockUnlocked`]; the rules and constants are those of
     /// `tutti_midi_runtime::ClockFollower`. A source silent for its dropout
     /// unlocks and stops the transport it was rolling.
     ///
@@ -2024,10 +2032,10 @@ impl<F: Float> Midi<'_, F> {
     /// a beat at most, so an error stays within `TEMPO_STEP * CATCH_UP / 60`
     /// (0.0067 beat) and the fit's noise. An error past `ClockFollower::SLIP` (a
     /// quarter of a beat) locates to the source's beat once and is reported as
-    /// [`MidiReport::ClockSlipped`]. MTC has no tempo to trim, and the same slip rule
+    /// [`MidiEvent::ClockSlipped`]. MTC has no tempo to trim, and the same slip rule
     /// reads its time against the transport's at `ClockFollower::MTC_SLIP_FRAMES` (2
     /// frames). A source off nominal speed is followed by those locates alone; MTC
-    /// running backward stops the transport ([`MidiReport::ClockReversed`]).
+    /// running backward stops the transport ([`MidiEvent::ClockReversed`]).
     ///
     /// **One clock at a time**: following again replaces the first.
     ///
@@ -2077,7 +2085,7 @@ impl<F: Float> Midi<'_, F> {
     /// Stops following ([`follow_clock`](Self::follow_clock)): the transport
     /// keeps the motion it had, and the project's tempo map and meter are
     /// published again for the ones a Beat Clock follower changed. Reported as
-    /// [`MidiReport::ClockUnfollowed`] by the next update.
+    /// [`MidiEvent::ClockUnfollowed`] by the next update.
     ///
     /// # Errors
     ///
@@ -2090,7 +2098,7 @@ impl<F: Float> Midi<'_, F> {
             .ok_or(MidiError::NotFollowingClock)?;
         self.state.sync_following();
         self.restore_maps(clock.restore());
-        self.state.follow_events.push(MidiReport::ClockUnfollowed);
+        self.state.follow_events.push(MidiEvent::ClockUnfollowed);
         Ok(())
     }
 
@@ -2125,9 +2133,9 @@ impl<F: Float> Midi<'_, F> {
     /// it). A LOCATE and a play in one message locate and then play. Every
     /// command is placed at the next block (`At::NextBlock`). A command the
     /// transport has no counterpart for is reported as
-    /// [`MidiReport::MachineControlIgnored`]; no response is sent. COMMAND SEGMENT
+    /// [`MidiEvent::MachineControlIgnored`]; no response is sent. COMMAND SEGMENT
     /// strings are reassembled first, and a segment that does not belong is
-    /// [`MidiReport::MachineControlSegmentation`].
+    /// [`MidiEvent::MachineControlSegmentation`].
     ///
     /// **One at a time**: following again replaces the first, forgetting the
     /// groups it was assigned to.
@@ -2149,7 +2157,7 @@ impl<F: Float> Midi<'_, F> {
 
     /// Stops following Machine Control ([`follow_machine_control`](Self::follow_machine_control)):
     /// the transport keeps the motion it had. Reported as
-    /// [`MidiReport::MachineControlUnfollowed`] by the next update.
+    /// [`MidiEvent::MachineControlUnfollowed`] by the next update.
     ///
     /// # Errors
     ///
@@ -2161,7 +2169,7 @@ impl<F: Float> Midi<'_, F> {
             .ok_or(MidiError::NotFollowingMachineControl)?;
         self.state
             .follow_events
-            .push(MidiReport::MachineControlUnfollowed);
+            .push(MidiEvent::MachineControlUnfollowed);
         Ok(())
     }
 

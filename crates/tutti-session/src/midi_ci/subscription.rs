@@ -11,7 +11,7 @@ use super::reply::peer_future;
 use super::{PeFailure, PortLink, ResourcePeer, listed_peer};
 use crate::midi_port::InputRequest;
 use crate::peer::sealed::Sealed;
-use crate::{PeerResourceId, Presence, Resource, ResourceFact, SessionEvent};
+use crate::{PeerEvent, PeerResourceId, Presence, Resource, ResourceFact, SessionEvent};
 
 peer_future!(
     /// A Subscription to a peer's Resource in flight: it resolves to the lease
@@ -62,7 +62,7 @@ impl Lease {
 /// ([`ResourcePeer::property`](crate::ResourcePeer::property)): a `full` update
 /// replaces it, a `partial` one is merged into it, and a `notify`, or an update
 /// whose Property Data does not decode, makes the session Get the Resource. Each
-/// change is a [`ResourceChanged`](SessionEvent::ResourceChanged) of the port with
+/// change is a [`ResourceChanged`](PeerEvent::ResourceChanged) of the port with
 /// [`ResourceFact::Info`].
 ///
 /// Dropping it ends the Subscription with the peer: the request goes through the
@@ -78,7 +78,7 @@ pub struct Subscription {
 impl Subscription {
     /// Whether the peer is still sending updates: [`Presence::Live`], or
     /// [`Presence::Lost`] with why. Its end is a
-    /// [`ResourceChanged`](SessionEvent::ResourceChanged) with this lease's
+    /// [`ResourceChanged`](PeerEvent::ResourceChanged) with this lease's
     /// [`id`](Resource::id) and [`ResourceFact::Presence`]. Never blocks.
     #[must_use]
     pub fn presence(&self) -> Presence<SubscriptionCause> {
@@ -264,10 +264,10 @@ impl Subscriptions {
 
 fn lose(lease: &Lease, cause: SubscriptionCause, out: &mut Vec<SessionEvent>) {
     if lease.lose(cause) {
-        out.push(SessionEvent::ResourceChanged {
+        out.push(SessionEvent::Peer(PeerEvent::ResourceChanged {
             id: lease.id,
             fact: ResourceFact::Presence,
-        });
+        }));
     }
 }
 

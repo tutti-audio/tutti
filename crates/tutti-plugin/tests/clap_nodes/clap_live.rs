@@ -10,12 +10,12 @@
 //! device period to answer. Asserted here: every block is either the input
 //! delayed by exactly the declared latency (137 + quantum) or silence, and the
 //! graph declares that latency. A silent block is a chunk the node collected
-//! unanswered (`PluginControls::missed_chunks`), and every missed chunk ends as
-//! one of four: published after all (`late_chunks`, a late answer a loaded
+//! unanswered (`ChunkOutcomes::missed`), and a missed chunk's fate is one of
+//! four: published after all (`late`, a late answer a loaded
 //! machine produces), refused by the server, which did not publish it
-//! (`refused_chunks`: its input slot was recycled before it ran), skipped by
-//! the bridge as more than a chunk behind (`skipped_chunks`), or unanswered
-//! (`unanswered_chunks`). A silent block is excused only by the first three,
+//! (`refused`: its input slot was recycled before it ran), skipped by
+//! the bridge as more than a chunk behind (`skipped`), or unanswered
+//! (`unanswered`). A silent block is excused only by the first three,
 //! counted within a few blocks of the miss; a silent block whose chunk was none
 //! of these, or that no collect missed, fails; so does a run with an
 //! unanswered chunk: a server that drops a chunk silently.
@@ -74,19 +74,19 @@ struct Run {
     silent: Vec<usize>,
     /// Of those, neither silent nor the input delayed by `declared`.
     wrong: Vec<usize>,
-    /// The blocks whose collect missed its chunk (`missed_chunks` moved).
+    /// The blocks whose collect missed its chunk (`missed` moved).
     misses: Vec<usize>,
-    /// The blocks in which a missed chunk was counted late (`late_chunks`
+    /// The blocks in which a missed chunk was counted late (`late`
     /// moved), once per chunk.
     lates: Vec<usize>,
-    /// The blocks in which the server refused a chunk (`refused_chunks`
+    /// The blocks in which the server refused a chunk (`refused`
     /// moved), once per chunk.
     refuses: Vec<usize>,
     /// The blocks in which the bridge skipped a chunk as stale
-    /// (`skipped_chunks` moved), once per chunk.
+    /// (`skipped` moved), once per chunk.
     skips: Vec<usize>,
     /// Missed chunks no counter explains at the end of the run
-    /// (`unanswered_chunks`).
+    /// (`unanswered`).
     unanswered: u64,
 }
 
@@ -161,7 +161,10 @@ fn settled(controls: &tutti_plugin_host::PluginControls, refused: u64, skipped: 
     clap_probe::await_answer_or(
         controls,
         "the chunk in flight to be answered, refused or skipped",
-        || controls.refused_chunks() > refused || controls.skipped_chunks() > skipped,
+        || {
+            controls.chunk_outcomes().refused > refused
+                || controls.chunk_outcomes().skipped > skipped
+        },
     );
 }
 
@@ -220,28 +223,28 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
         // The bridge thread counts a skip when it gets to the chunk, between
         // callbacks: what it counted since the last callback began is the
         // last block's.
-        let now_skipped = controls.skipped_chunks();
+        let now_skipped = controls.chunk_outcomes().skipped;
         if b > warm_up {
             skips.extend((skipped..now_skipped).map(|_| b - 1 - warm_up));
         }
         skipped = now_skipped;
         let (missed, late, refused) = (
-            controls.missed_chunks(),
-            controls.late_chunks(),
-            controls.refused_chunks(),
+            controls.chunk_outcomes().missed,
+            controls.chunk_outcomes().late,
+            controls.chunk_outcomes().refused,
         );
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::MONO).unwrap());
         ed.collect();
         if b >= warm_up {
             let at = b - warm_up;
             let first = (b * quantum) as u64;
-            if controls.missed_chunks() > missed {
+            if controls.chunk_outcomes().missed > missed {
                 misses.push(at);
             }
-            for _ in late..controls.late_chunks() {
+            for _ in late..controls.chunk_outcomes().late {
                 lates.push(at);
             }
-            for _ in refused..controls.refused_chunks() {
+            for _ in refused..controls.chunk_outcomes().refused {
                 refuses.push(at);
             }
             let judged = at < blocks;
@@ -265,8 +268,8 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
         // it none and read as silence.
         settled(&controls, refused, now_skipped);
     }
-    skips.extend((skipped..controls.skipped_chunks()).map(|_| blocks + TRAILING - 1));
-    let unanswered = controls.unanswered_chunks();
+    skips.extend((skipped..controls.chunk_outcomes().skipped).map(|_| blocks + TRAILING - 1));
+    let unanswered = controls.chunk_outcomes().unanswered;
     drop(probe.handle);
     Run {
         declared,

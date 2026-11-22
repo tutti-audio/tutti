@@ -16,6 +16,7 @@
 //!   this crate's default.
 //! - `detect_onsets` — onset detection over four selectable detection functions.
 //! - `yin` — monophonic pitch estimation (de Cheveigné and Kawahara, 2002).
+//! - `pyin_track` — pitch tracking under a probabilistic threshold (Mauch and Dixon, 2014).
 //! - `correlate` — inter-channel phase correlation and stereo image.
 //! - `measure_loudness` — EBU R128 integrated loudness, loudness range and true
 //!   peak.
@@ -267,7 +268,8 @@
 //!   buffer, producing [`Stft`],
 //!   [`StftMagnitude`] or [`StftPolar`].
 //! - Pitch: [`yin()`] and [`yin_track`] with a [`YinConfig`], returning
-//!   [`PitchEstimate`] and [`Pitch`]; [`median_filter`] and [`penalize_jumps`]
+//!   [`PitchEstimate`] and [`Pitch`]; [`pyin_track`] with a [`PyinConfig`] decodes
+//!   a [`PyinFrame`] track under a Beta prior on the threshold; [`median_filter`] and [`penalize_jumps`]
 //!   clean up a track.
 //! - Onsets: [`detect_onsets`] with an [`OnsetConfig`] and a
 //!   [`DetectionFunction`], or incrementally with an [`OnsetMeter`];
@@ -341,6 +343,10 @@ pub use analyses::mfcc::{MfccConfig, mfcc};
 pub use analyses::notes::{
     NoteConfig, NoteEvent, NoteSpan, NoteSpanError, PitchHop, PitchHopError, PitchSplit,
     PitchSplitError, VelocityRange, frame_levels, notes_from_track, transcribe,
+};
+pub use analyses::pyin::{
+    PyinConfig, PyinFrame, PyinSwitch, PyinSwitchError, PyinThresholdMean, PyinThresholdMeanError,
+    PyinTransitionWidth, PyinTransitionWidthError, pyin_track,
 };
 pub use analyses::tempo::{
     Alternatives, AlternativesError, BeatGrid, PriorSpread, PriorSpreadError, Tempo,

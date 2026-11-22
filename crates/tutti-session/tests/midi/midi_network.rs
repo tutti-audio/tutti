@@ -15,7 +15,7 @@ use tutti_midi_network::{
 };
 use tutti_platform::{Executor, Instant};
 use tutti_session::{
-    MidiNetwork, MidiReport, MidiRouteRule, NetworkError, NetworkReport, OpenClient, OpenHost,
+    MidiEvent, MidiNetwork, MidiRouteRule, NetworkError, NetworkEvent, OpenClient, OpenHost,
     Session, SessionEvent, Stamp,
 };
 use tutti_ump::{EndpointName, Message, MidiChannel, NoteNumber, NoteVelocity, ProductInstanceId};
@@ -169,11 +169,11 @@ fn hosting(admission: Admission) -> (Session, MidiNetwork<Host>, u16) {
 }
 
 /// The network reports of one update.
-fn reports(events: Vec<SessionEvent>) -> Vec<NetworkReport> {
+fn reports(events: Vec<SessionEvent>) -> Vec<NetworkEvent> {
     events
         .into_iter()
         .filter_map(|e| match e {
-            SessionEvent::Midi(MidiReport::Network(report)) => Some(report),
+            SessionEvent::Midi(MidiEvent::Network(report)) => Some(report),
             _ => None,
         })
         .collect()
@@ -194,7 +194,7 @@ fn an_invitation_is_reported_and_an_accept_gives_the_peer_an_input_node() {
     }
     let heard = reports(s.update());
     assert!(
-        matches!(&heard[..], [NetworkReport::Invited { identity }] if *identity == laptop),
+        matches!(&heard[..], [NetworkEvent::Invited { identity }] if *identity == laptop),
         "{heard:?}"
     );
     assert_eq!(net.input_node(laptop), None, "an invitation has no input");
@@ -207,7 +207,7 @@ fn an_invitation_is_reported_and_an_accept_gives_the_peer_an_input_node() {
     peer.established();
     let heard = reports(s.update());
     assert!(
-        matches!(&heard[..], [NetworkReport::Connected { identity }] if *identity == laptop),
+        matches!(&heard[..], [NetworkEvent::Connected { identity }] if *identity == laptop),
         "{heard:?}"
     );
     let node = net.input_node(laptop).expect("the peer has an input node");
@@ -234,7 +234,7 @@ fn a_decline_ends_the_invitation_with_its_reason() {
     assert!(
         matches!(
             &heard[..],
-            [NetworkReport::Ended { identity, by: EndedBy::Local, reason: ByeReason::UserDeclined }]
+            [NetworkEvent::Ended { identity, by: EndedBy::Local, reason: ByeReason::UserDeclined }]
                 if *identity == laptop
         ),
         "{heard:?}"
@@ -255,7 +255,7 @@ fn a_peers_ump_reaches_a_graph_node() {
     peer.join();
     let heard = reports(s.update());
     assert!(
-        matches!(&heard[..], [NetworkReport::Connected { .. }]),
+        matches!(&heard[..], [NetworkEvent::Connected { .. }]),
         "{heard:?}"
     );
 
@@ -340,7 +340,7 @@ fn a_peers_bye_ends_its_input_entry_alone() {
     assert!(
         matches!(
             &heard[..],
-            [NetworkReport::Ended { identity, by: EndedBy::Remote, reason: ByeReason::UserTerminated }]
+            [NetworkEvent::Ended { identity, by: EndedBy::Remote, reason: ByeReason::UserTerminated }]
                 if *identity == leaves
         ),
         "{heard:?}"
@@ -404,8 +404,8 @@ fn a_peer_back_from_another_address_replaces_its_entry() {
         matches!(
             &heard[..],
             [
-                NetworkReport::Replaced { identity: gone },
-                NetworkReport::Connected { identity: came },
+                NetworkEvent::Replaced { identity: gone },
+                NetworkEvent::Connected { identity: came },
             ] if *gone == laptop && *came == laptop
         ),
         "{heard:?}"
@@ -459,7 +459,7 @@ fn a_client_session_hears_its_host() {
     });
     assert!(matches!(
         heard.first(),
-        Some(NetworkReport::Connected { identity }) if *identity == studio
+        Some(NetworkEvent::Connected { identity }) if *identity == studio
     ));
     assert_eq!(host.with(|h, _| h.session_count()), 1);
     let client = SocketAddr::from(([127, 0, 0, 1], net.local_addr().unwrap().port()));

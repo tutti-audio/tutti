@@ -31,7 +31,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tutti_rt::LockExt;
 
-use tutti_plugin_types::{ChunkCounters, PluginInvalidation, PluginTail};
+use tutti_plugin_types::{
+    BridgeLosses, ChunkCounters, ChunkOutcomes, PluginInvalidation, PluginTail, ServerLosses,
+};
 use tutti_rt::AtomicSampleRate;
 use tutti_timeline::ProjectMeter;
 use tutti_units::Latency;
@@ -78,7 +80,7 @@ pub struct PluginControls {
     /// docs for why it could not stay a per-clone field. `f64` at the atomic.
     sample_rate: Arc<AtomicSampleRate>,
     /// What the node's IPC pipeline reports
-    /// ([`missed_chunks`](Self::missed_chunks),
+    /// ([`chunk_outcomes`](Self::chunk_outcomes),
     /// [`chunk_in_flight_answered`](Self::chunk_in_flight_answered)).
     chunks: Arc<ChunkCounters>,
 }
@@ -295,121 +297,28 @@ impl PluginControls {
         Arc::clone(&self.chunks)
     }
 
-    /// How many chunks the plugin-server had not answered by the time the
-    /// node played them, since the plugin was bound: each played as
-    /// silence (a dropout). A crashed plugin's silence is not counted. An
-    /// offline fork waits for every chunk, so its count stays zero unless
-    /// it gave up. RT-safe: one relaxed load.
-    pub fn missed_chunks(&self) -> u64 {
-        self.chunks.missed()
+    /// What became of the chunks the plugin-server had not answered by the
+    /// time the node played them, since the plugin was bound: each missed
+    /// chunk played as silence (a dropout). See [`ChunkOutcomes`] for each
+    /// count and how they add up. RT-safe: relaxed loads.
+    pub fn chunk_outcomes(&self) -> ChunkOutcomes {
+        self.chunks.outcomes()
     }
 
-    /// Of the [`missed_chunks`](Self::missed_chunks), how many the plugin-server
-    /// published after the node had played the silence: a late answer, not a
-    /// lost one. Telemetry: a late chunk means an overloaded plugin or machine
-    /// (raise the device buffer size). It is seen in the shared ring or in the
-    /// server's reply, so it can be counted a few chunks after it was missed.
-    /// Every missed chunk ends as exactly one of late, [refused](Self::refused_chunks),
-    /// [skipped](Self::skipped_chunks) or [unanswered](Self::unanswered_chunks).
-    /// RT-safe: one relaxed load.
-    pub fn late_chunks(&self) -> u64 {
-        self.chunks.late()
+    /// What the host side of the plugin's server lost of its own work, since
+    /// the plugin was bound: refused commands, lost responses, leaked buffers,
+    /// refused editor transfers, dropped editor requests and detached tasks.
+    /// See [`BridgeLosses`]. RT-safe: relaxed loads.
+    pub fn bridge_losses(&self) -> BridgeLosses {
+        self.chunks.bridge_losses()
     }
 
-    /// Of the [`missed_chunks`](Self::missed_chunks), how many the plugin-server
-    /// refused: it did not publish the chunk's audio, and said so in its reply.
-    /// Its reasons are the chunk's input slot in the shared ring recycled
-    /// before the server ran it, a block that did not fit, an output channel
-    /// not written, and a refused sample rate. Telemetry beside
-    /// [`late_chunks`](Self::late_chunks): an overloaded plugin or machine.
-    /// RT-safe: one relaxed load.
-    pub fn refused_chunks(&self) -> u64 {
-        self.chunks.refused()
-    }
-
-    /// Of the [`missed_chunks`](Self::missed_chunks), how many are neither
-    /// [late](Self::late_chunks), [refused](Self::refused_chunks) nor
-    /// [skipped](Self::skipped_chunks): the server never said what became of
-    /// them within the last few chunks. Not zero is a loss no counter explains:
-    /// a server that drops chunks silently. RT-safe: one relaxed load.
-    pub fn unanswered_chunks(&self) -> u64 {
-        self.chunks.unanswered()
-    }
-
-    /// Chunks dropped because the plugin fell more than one chunk behind: the
-    /// bridge skipped the chunk (the shared ring holds one chunk behind the
-    /// newest) and never sent it, so it plays as silence and is never
-    /// answered. Telemetry beside [`missed_chunks`](Self::missed_chunks): it
-    /// means an overloaded plugin or machine, so raise the device buffer size.
-    /// RT-safe: one relaxed load.
-    pub fn skipped_chunks(&self) -> u64 {
-        self.chunks.skipped()
-    }
-
-    /// Commands the audio side could not hand to the plugin's bridge: a full
-    /// command queue refused a reset or rate command, or a block
-    /// found no payload or no room for its parameter buffer, so the block was
-    /// refused. The command is lost (a block plays as silence). Telemetry
-    /// beside [`skipped_chunks`](Self::skipped_chunks): an overloaded plugin or
-    /// machine. RT-safe: one relaxed load.
-    pub fn refused_commands(&self) -> u64 {
-        self.chunks.commands_refused()
-    }
-
-    /// Commands the plugin's server could not give its own render thread (an
-    /// unseat, a mode, a rate or a barrier that never reached it), as the server
-    /// last told them. Not [`refused_commands`](Self::refused_commands), which
-    /// are the host side's. Zero for a plugin that runs in this process.
-    pub fn server_refused_commands(&self) -> u64 {
-        self.chunks.server_refused_commands()
-    }
-
-    /// One-way edits the plugin refused in its server (an automation state, a
-    /// track's info, a parameter write the wire has no reply for), as the
-    /// server last told them. Zero for a plugin that runs in this process.
-    pub fn server_refused_edits(&self) -> u64 {
-        self.chunks.server_refused_edits()
-    }
-
-    /// Audio responses (a block's MIDI-out and status) the bridge could not
-    /// queue for the audio thread because its queue was full. Lost.
-    /// RT-safe: one relaxed load.
-    pub fn lost_responses(&self) -> u64 {
-        self.chunks.responses_lost()
-    }
-
-    /// Parameter-change buffers the audio thread leaked rather than free on
-    /// its own thread: a broken sizing bound, apart from a full command queue
-    /// ([`refused_commands`](Self::refused_commands)). RT-safe: one relaxed load.
-    pub fn leaked_buffers(&self) -> u64 {
-        self.chunks.leaked_buffers()
-    }
-
-    /// Transfers between the plugin and its editor instance that were refused:
-    /// a parameter write the mirror's full queue dropped (the plugin still got
-    /// it; only the open editor's display missed it), an edit the user made in
-    /// the editor that the plugin did not take, and a state that could not be
-    /// read or loaded either way (an editor opened at the plugin's defaults
-    /// among them). RT-safe: one relaxed load.
-    pub fn mirror_transfers_refused(&self) -> u64 {
-        self.chunks.mirror_transfers_refused()
-    }
-
-    /// Requests the plugin's editor instance made that were dropped: every
-    /// [`Request`](tutti_plugin_types::Request) but a transport request (a
-    /// restart, an I/O change, a parameter rescan, a latency or tail change, a
-    /// reload, a callback, a MIDI-CC or note-expression change, a timer or a
-    /// file descriptor), which the plugin's audio instance cannot be told.
-    /// RT-safe: one relaxed load.
-    pub fn editor_requests_dropped(&self) -> u64 {
-        self.chunks.editor_requests_dropped()
-    }
-
-    /// Tasks of the plugin's server on the host side (the bridge's lanes, the
-    /// process's exit watch) that did not stop in time and were left running.
-    /// Zero for a plugin that runs in this process. RT-safe: one relaxed load.
-    pub fn detached_tasks(&self) -> u64 {
-        self.chunks.detached()
+    /// What the plugin's server lost of its own work (commands its render
+    /// thread never got, one-way edits the plugin refused, callbacks from a
+    /// forbidden thread), as the server last told them. Not
+    /// [`bridge_losses`](Self::bridge_losses), which are the host side's.
+    pub fn server_losses(&self) -> ServerLosses {
+        self.chunks.server_losses()
     }
 
     /// Whether the chunk the node submitted last, and has not played yet,
@@ -420,7 +329,7 @@ impl PluginControls {
     /// before the next block, so that block plays the answer rather than
     /// silence. A live host does not wait on it: the device's callback
     /// period is the server's deadline, and a late answer is a dropout,
-    /// counted by [`missed_chunks`](Self::missed_chunks).
+    /// counted by [`chunk_outcomes`](Self::chunk_outcomes).
     pub fn chunk_in_flight_answered(&self) -> bool {
         self.chunks.in_flight_answered()
     }

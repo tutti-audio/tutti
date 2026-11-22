@@ -31,14 +31,15 @@ use tutti_nodes::{
     AutoPanConfig, AutoPanNode, BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig,
     BusStripNode, ChannelTimes, CombFilterConfig, CombFilterNode, CombForm, CompressorConfig,
     CompressorControls, CompressorNode, ConvolverNode, DelayConfig, DelayControls, DelayLayout,
-    DelayNode, DistanceConfig, DistanceNode, DistortionConfig, DistortionNode, DynamicEqConfig,
-    DynamicEqNode, EqBandConfig, EqBandNode, FrequencyShifterConfig, FrequencyShifterNode,
-    GateConfig, GateControls, GateNode, InterpolationMode, KeySource, LadderFilterConfig,
+    DelayNode, DiodeClipperConfig, DiodeClipperNode, DistanceConfig, DistanceNode,
+    DistortionConfig, DistortionNode, DynamicEqConfig, DynamicEqNode, EqBandConfig, EqBandNode,
+    FrequencyShifterConfig, FrequencyShifterNode, GateConfig, GateControls, GateNode,
+    HysteresisConfig, HysteresisNode, InterpolationMode, KeySource, LadderFilterConfig,
     LadderFilterNode, LadderType, LfoConfig, LfoNode, LfoShape, LimiterConfig, LimiterControls,
     LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserControls, PhaserNode,
     PitchShifterConfig, PitchShifterNode, RingModConfig, RingModNode, ShapeKind, ShimmerConfig,
     ShimmerNode, Stages, SvfFilterConfig, SvfFilterNode, SvfType, TremoloConfig, TremoloNode,
-    WavetableConfig, WavetableNode,
+    TubeStageConfig, TubeStageNode, WavetableConfig, WavetableNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -196,6 +197,31 @@ fn delay_line() {
     })
     .control("cross feedback", |d| {
         assert!(d.param_set().set(UnitParam::CrossFeedback, 0.0));
+    })
+    .check();
+}
+
+#[test]
+fn diode_clipper() {
+    IsolateRow::new("DiodeClipperNode (stereo)", || {
+        DiodeClipperNode::<f32>::from(DiodeClipperConfig::new(ChannelLayout::STEREO))
+    })
+    .control("cutoff", |d| {
+        assert!(d.param_set().set(UnitParam::Cutoff, 900.0))
+    })
+    .control("drive", |d| {
+        assert!(d.param_set().set(UnitParam::GainDb, 30.0))
+    })
+    .check();
+}
+
+#[test]
+fn hysteresis() {
+    IsolateRow::new("HysteresisNode (stereo)", || {
+        HysteresisNode::<f32>::from(HysteresisConfig::new(ChannelLayout::STEREO))
+    })
+    .control("drive", |d| {
+        assert!(d.param_set().set(UnitParam::GainDb, 6.0))
     })
     .check();
 }
@@ -924,4 +950,15 @@ fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>
 /// The AmbiX bus of `order`: ACN, SN3D.
 fn ambix(order: AmbisonicOrder) -> BusTopology {
     BusTopology::ambisonic(AmbisonicFormat::ambix(order))
+}
+
+#[test]
+fn tube_stage() {
+    IsolateRow::new("TubeStageNode (stereo)", || {
+        TubeStageNode::<f32>::from(TubeStageConfig::new(ChannelLayout::STEREO))
+    })
+    .control("drive", |d| {
+        assert!(d.param_set().set(UnitParam::GainDb, 24.0))
+    })
+    .check();
 }
