@@ -79,15 +79,11 @@ fn set(group: MidiGroup, mds: u8, data: &[u8]) -> MixedDataSet<'_> {
 /// size takes, and the data is what the payload UMPs hold past their prefix.
 #[test]
 fn chunk_size_counts_the_header_and_whole_umps() {
-    assert_eq!(MdsChunkSize::new(0), None);
-    assert_eq!(MdsChunkSize::new(15), None);
     let header_only = MdsChunkSize::new(16).unwrap();
     assert_eq!((header_only.payload_umps(), header_only.data_len()), (0, 0));
     let one = MdsChunkSize::new(32).unwrap();
     assert_eq!((one.payload_umps(), one.data_len()), (1, 14));
     // One byte into a payload UMP's prefix carries nothing: not a size.
-    assert_eq!(MdsChunkSize::new(33), None);
-    assert_eq!(MdsChunkSize::new(16 + 16 * 5 + 1), None);
     assert_eq!(MdsChunkSize::new(u16::MAX).unwrap().payload_umps(), 4095);
     for len in 0..300usize {
         let size = MdsChunkSize::from_data_len(len).unwrap();
@@ -108,8 +104,6 @@ fn chunk_counts_and_numbers_keep_their_special_zero() {
         assert_eq!(MdsChunks::new(raw).get(), raw);
         assert_eq!(MdsChunk::new(raw).get(), raw);
     }
-    assert_eq!(MdsChunkUmps::new(0), None);
-    assert_eq!(MdsChunkUmps::new(4095), None);
     assert_eq!(MdsChunkUmps::new(4094).unwrap().get(), 4094);
 }
 

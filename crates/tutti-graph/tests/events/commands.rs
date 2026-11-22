@@ -106,10 +106,7 @@ fn segment(target: f64) -> ParamKind {
 }
 
 fn to() -> EventInputPort {
-    EventInputPort {
-        node: PROBE,
-        port: 0,
-    }
+    EventInputPort::new(PROBE, 0)
 }
 
 /// An editor and executor running one `Probe`, plus a reference running
@@ -346,19 +343,10 @@ fn scheduling_back_pressures_at_capacity() {
 fn a_command_needs_a_port_and_an_orphan_is_counted() {
     let mut rig = rig();
     assert_eq!(
-        rig.ed.schedule(
-            At::NextBlock,
-            EventInputPort {
-                node: PROBE,
-                port: 1
-            },
-            tag(0)
-        ),
+        rig.ed
+            .schedule(At::NextBlock, EventInputPort::new(PROBE, 1), tag(0)),
         Err(ScheduleError::NoSuchPort {
-            to: EventInputPort {
-                node: PROBE,
-                port: 1
-            }
+            to: EventInputPort::new(PROBE, 1)
         })
     );
     rig.ed
@@ -504,7 +492,7 @@ fn a_scheduled_command_is_compensated_like_an_upstream_event() {
         units(&ref_log).into_iter().collect(),
     );
     for (k, t) in [(A, 1), (B, 2)] {
-        let to = EventInputPort { node: k, port: 0 };
+        let to = EventInputPort::new(k, 0);
         ed.schedule(At::Frame(Frame::new(100)), to, tag(t))
             .expect("room");
         reference.schedule(At::Frame(Frame::new(100)), to, tag(t));
@@ -609,12 +597,8 @@ fn a_command_waits_for_the_commit_it_was_checked_against() {
                 Err(e) => panic!("{e}"),
             }
         }
-        ed.schedule(
-            At::NextBlock,
-            EventInputPort { node: key, port: 0 },
-            tag(round),
-        )
-        .expect("one outstanding at a time");
+        ed.schedule(At::NextBlock, EventInputPort::new(key, 0), tag(round))
+            .expect("one outstanding at a time");
         // Wait for it to land before the next round removes its node.
         let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(10);
         while ed.commands_outstanding() > 0 {
@@ -991,10 +975,7 @@ fn beat_resolution_matches_a_hand_computed_table() {
         );
         units.insert(sink, Box::new(Impulse(ref_log.clone())));
         reference.set_graph(&ed.spec().validate().unwrap(), units);
-        let to = EventInputPort {
-            node: sink,
-            port: 0,
-        };
+        let to = EventInputPort::new(sink, 0);
         let silence = [0.0f32; 500];
         for (i, tr) in case.transports.iter().enumerate() {
             if i == case.sched_at {
@@ -1063,10 +1044,7 @@ fn an_unroutable_command_is_timed_by_its_nodes_arrival() {
     units.insert(sink, Box::new(Impulse(tutti_fixtures::Record::new())));
     reference.set_graph(&ed.spec().validate().unwrap(), units);
 
-    let to = EventInputPort {
-        node: sink,
-        port: 0,
-    };
+    let to = EventInputPort::new(sink, 0);
     ed.schedule(At::Frame(Frame::new(100)), to, tag(1))
         .expect("room");
     reference.schedule(At::Frame(Frame::new(100)), to, tag(1));
@@ -1458,10 +1436,7 @@ fn a_param_command_to_a_node_without_param_events_is_refused() {
     }
     assert!(!ScheduleError::NoParamEvents { to: to() }.is_transient());
     // A missing port is still a missing port, whatever the payload.
-    let port = EventInputPort {
-        node: PROBE,
-        port: 1,
-    };
+    let port = EventInputPort::new(PROBE, 1);
     assert_eq!(
         ed.schedule(At::NextBlock, port, ramp(1.0)),
         Err(ScheduleError::NoSuchPort { to: port })

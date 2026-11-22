@@ -1219,12 +1219,7 @@ impl<F: Float> Editor<F> {
                 });
             let events = spec
                 .events
-                .range(
-                    EventInputPort { node, port: 0 }..=EventInputPort {
-                        node,
-                        port: u16::MAX,
-                    },
-                )
+                .range(EventInputPort::new(node, 0)..=EventInputPort::new(node, u16::MAX))
                 .flat_map(|(_, sources)| sources.iter().map(|e| e.from().node));
             let params = spec
                 .params

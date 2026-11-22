@@ -17,8 +17,9 @@ use tutti_ump::{
     ChordBass, ChordName, ChordPitch, ChordType, Field, FirstGroup, Flex, FlexAddress,
     FlexTextKind, FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, FunctionBlocks,
     GroupSpan, KeySignature, Letter, Message, Midi1Port, MidiChannel, MidiGroup, NoteNumber,
-    NoteVelocity, OsFunctionBlock, Protocol, RegisteredPerNoteController, SharpsFlats, Stream,
-    StreamConfig, U4, UiHint, Ump, Unknown, Utility, Voice2, read_function_block, read_protocol,
+    NoteVelocity, OsFunctionBlock, Pitch, Protocol, RegisteredPerNoteController, SharpsFlats,
+    Stream, StreamConfig, Sysex8StreamCount, U4, UiHint, Ump, Unknown, Utility, Voice2,
+    read_function_block, read_protocol,
 };
 
 /// `dirty` decodes to the message `clean` encodes, and re-encoding gives
@@ -585,7 +586,7 @@ fn a_constructed_message_encodes_no_reserved_value() {
         Attribute::None,
         Attribute::Manufacturer(0xABCD),
         Attribute::Profile(0x1234),
-        Attribute::Pitch(0x3C00),
+        Attribute::Pitch(Pitch::from_q7_9(0x3C00)),
     ] {
         round_trip(Message::Midi2(
             address,
@@ -702,7 +703,7 @@ fn a_constructed_message_encodes_no_reserved_value() {
                     first_group: FirstGroup::of(0).into(),
                     groups_spanned: GroupSpan::of(1).into(),
                     midi_ci_version: 0,
-                    max_sysex8_streams: 0,
+                    max_sysex8_streams: Sysex8StreamCount::new(0),
                 },
             )));
         }
@@ -737,7 +738,7 @@ fn an_os_value_reads_as_the_decoder_reads_the_wire() {
                     first_group: 16,
                     groups_spanned: 0,
                     midi_ci_version: 7,
-                    max_sysex8_streams: 9,
+                    max_sysex8_streams: Sysex8StreamCount::new(9),
                 };
                 let words = [
                     0xF011_8000
@@ -767,7 +768,7 @@ fn an_os_value_reads_as_the_decoder_reads_the_wire() {
             first_group: 4,
             groups_spanned: 2,
             midi_ci_version: 0,
-            max_sysex8_streams: 0,
+            max_sysex8_streams: Sysex8StreamCount::new(0),
         };
         edit(&mut block);
         read_function_block(block)

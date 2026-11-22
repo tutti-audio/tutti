@@ -534,14 +534,8 @@ fn graph(
     );
     for k in 1..=n {
         ed.spec_mut().connect_events(
-            EventInputPort {
-                node: NodeKey(10),
-                port: k - 1,
-            },
-            EventEdge::Direct(EventOutputPort {
-                node: NodeKey(u64::from(k)),
-                port: 0,
-            }),
+            EventInputPort::new(NodeKey(10), k - 1),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(u64::from(k)), 0)),
         );
     }
     // Heavy audio chains beside the inlets, so the cost model has work worth
@@ -585,10 +579,7 @@ fn graph(
     let tap = tap.then(|| {
         ed.open_event_tap(
             EventTapId::of(1),
-            EventOutputPort {
-                node: NodeKey(1),
-                port: 0,
-            },
+            EventOutputPort::new(NodeKey(1), 0),
             EventTapOptions::new(EventCapacity::of(256)).align(TapAlign::Raw),
         )
         .expect("the port exists")

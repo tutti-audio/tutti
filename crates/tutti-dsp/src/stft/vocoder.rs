@@ -367,6 +367,22 @@ impl<F: FftFloat> PhaseVocoder<F> {
         };
     }
 
+    /// Back to silence like [`reset`](Self::reset), with the stream starting at the first
+    /// input frame given: no silence leads it. A caller that holds the signal's own history
+    /// seats a stream on it, feeding the history from `window` frames before the place it
+    /// wants to hear.
+    ///
+    /// Frame `k` of the output is then the input's frame `k` at unity (the window's
+    /// lookahead is the caller's to read ahead of), and the output over the first `window`
+    /// frames is a ramp: the analysis frames that overlap it began before the history did.
+    /// From frame `window` on it is steady, as a stream that had run all along. The frame
+    /// whose output lies wholly inside the ramp needs no synthesis
+    /// ([`discard`](Self::discard)).
+    pub fn seat(&mut self) {
+        self.reset();
+        self.cursor.fed = 0;
+    }
+
     /// The input frames the next `output` frames consume under the controls in force, beyond
     /// the input already held. No allocation.
     #[must_use]
@@ -405,9 +421,42 @@ impl<F: FftFloat> PhaseVocoder<F> {
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
     ) -> StreamCounts {
+        let wanted = output.frames().get();
+        let counts = self.stream(&input, wanted, Some(&mut output));
+        for c in 0..output.channels() {
+            output.plane_mut(c).samples_mut()[counts.produced.get()..].fill(F::ZERO);
+        }
+        counts
+    }
+
+    /// Takes `input` as [`process`](Self::process) does for `output` frames of output, and
+    /// writes none: each frame it runs is analysed and its phases solved, and nothing is
+    /// synthesised, overlap-added or read out.
+    ///
+    /// After `discard`, the cursors, the phase history and the frames taken are bit for bit
+    /// what `process` over the same input and the same `output` leaves, wherever in a stream
+    /// it is called. What differs is the overlap-add: the frames run here added nothing to
+    /// it, and the hops they would have finished are cleared (so nothing from earlier
+    /// frames wraps into a later hop), so the output of the next
+    /// [`window`](StftGeometry::window) frames is short of the frames that would have
+    /// overlapped it, and from there on it is `process`'s. A caller that seats a stream on history ([`seat`](Self::seat)) discards
+    /// the frames whose output lies wholly inside the ramp, and the stream's phases are as
+    /// if they had been synthesised. The counts are `process`'s: `produced` is the output
+    /// frames discarded. No allocation.
+    pub fn discard(&mut self, input: Planes<'_, F>, output: Samples) -> StreamCounts {
+        self.stream(&input, output.get(), None)
+    }
+
+    /// The shared pull of [`process`](Self::process) and [`discard`](Self::discard): a frame
+    /// is synthesised and read out into `output` when there is one.
+    fn stream(
+        &mut self,
+        input: &Planes<'_, F>,
+        wanted: usize,
+        mut output: Option<&mut PlanesMut<'_, '_, F>>,
+    ) -> StreamCounts {
         let hop = self.geometry.hop().get();
         let size = self.geometry.window().get();
-        let wanted = output.frames().get();
         let supplied = input.frames().get();
         let mut consumed = 0;
         let mut produced = 0;
@@ -419,23 +468,24 @@ impl<F: FftFloat> PhaseVocoder<F> {
                 let required = start + size;
                 if self.cursor.fed < required {
                     let take = (required - self.cursor.fed).min(supplied - consumed);
-                    self.feed(&input, consumed, take);
+                    self.feed(input, consumed, take);
                     consumed += take;
                     if self.cursor.fed < required {
                         break 'chunks;
                     }
                 }
-                self.run_frame(start);
+                self.run_frame(start, output.is_some());
             }
-            self.read_output(&mut output, produced, n);
+            if let Some(output) = output.as_deref_mut() {
+                self.read_output(output, produced, n);
+            } else {
+                self.cursor.read = self.walk(self.cursor.read, n, |_, _, _, _, _| {});
+            }
             produced += n;
-        }
-        for c in 0..output.channels() {
-            output.plane_mut(c).samples_mut()[produced..].fill(F::ZERO);
         }
         let room = self.input[0].len() - self.cursor.fed.saturating_sub(self.cursor.next_start());
         let keep = room.min(supplied - consumed);
-        self.feed(&input, consumed, keep);
+        self.feed(input, consumed, keep);
         StreamCounts {
             consumed: Samples::new(consumed + keep),
             produced: Samples::new(produced),
@@ -454,9 +504,9 @@ impl<F: FftFloat> PhaseVocoder<F> {
         self.cursor.fed += count;
     }
 
-    /// Analyses the frame at `start`, rotates its phases, and overlap-adds it, finishing one
-    /// hop of output.
-    fn run_frame(&mut self, start: usize) {
+    /// Analyses the frame at `start` and solves its phases; with `synthesise`, rotates its
+    /// spectrum and overlap-adds it, finishing one hop of output.
+    fn run_frame(&mut self, start: usize, synthesise: bool) {
         let size = self.geometry.window().get();
         let hop = self.geometry.hop().get();
         for (ring, spectrum) in self.input.iter().zip(&mut self.spectra) {
@@ -469,24 +519,30 @@ impl<F: FftFloat> PhaseVocoder<F> {
         }
         let hops = self.cursor.last_start.map(|last| (start - last, hop));
         let rotation = self.lock.solve(&self.spectra, hops, size);
-        let norm = F::from_design(1.0 / size as f64);
-        let mask = self.energy.len() - 1;
-        for (c, spectrum) in self.spectra.iter_mut().enumerate() {
-            for (bin, &rotate) in spectrum.iter_mut().zip(rotation) {
-                *bin = *bin * rotate;
+        if synthesise {
+            let norm = F::from_design(1.0 / size as f64);
+            let mask = self.energy.len() - 1;
+            for (c, spectrum) in self.spectra.iter_mut().enumerate() {
+                for (bin, &rotate) in spectrum.iter_mut().zip(rotation) {
+                    *bin = *bin * rotate;
+                }
+                self.plan
+                    .inverse(spectrum, MonoMut::new(&mut self.frame), &mut self.scratch);
+                for (i, (&x, &w)) in self.frame.iter().zip(&self.window).enumerate() {
+                    self.sum[c][(self.cursor.finished + i) & mask] += x * norm * w;
+                }
             }
-            self.plan
-                .inverse(spectrum, MonoMut::new(&mut self.frame), &mut self.scratch);
-            for (i, (&x, &w)) in self.frame.iter().zip(&self.window).enumerate() {
-                self.sum[c][(self.cursor.finished + i) & mask] += x * norm * w;
+            for (i, &w) in self.window.iter().enumerate() {
+                self.energy[(self.cursor.finished + i) & mask] += w * w;
             }
-        }
-        for (i, &w) in self.window.iter().enumerate() {
-            self.energy[(self.cursor.finished + i) & mask] += w * w;
         }
         let slot = self.cursor.finished / hop % self.steps.len();
         self.steps[slot] = self.step;
-        self.finish_hop();
+        if synthesise {
+            self.finish_hop();
+        } else {
+            self.clear_hop();
+        }
         self.cursor.frame_done(start, hop, self.advance);
     }
 
@@ -504,6 +560,18 @@ impl<F: FftFloat> PhaseVocoder<F> {
                 } else {
                     F::ZERO
                 };
+            }
+        }
+        self.clear_hop();
+    }
+
+    /// Clears the overlap-add slots of the hop at the cursor, which the ring reuses for the
+    /// hop a window on: whatever earlier frames added there is dropped.
+    fn clear_hop(&mut self) {
+        let hop = self.geometry.hop().get();
+        let mask = self.energy.len() - 1;
+        for t in self.cursor.finished..self.cursor.finished + hop {
+            for sum in &mut self.sum {
                 sum[t & mask] = F::ZERO;
             }
             self.energy[t & mask] = F::ZERO;

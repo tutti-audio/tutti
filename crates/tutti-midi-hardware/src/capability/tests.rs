@@ -1,6 +1,6 @@
 use super::*;
 use tutti_ump::BlockName;
-use tutti_ump::{OsFunctionBlock, UiHint, read_function_block, read_protocol};
+use tutti_ump::{OsFunctionBlock, Sysex8StreamCount, UiHint, read_function_block, read_protocol};
 
 fn info(id: u8) -> FunctionBlockInfo {
     read_function_block(OsFunctionBlock {
@@ -12,7 +12,7 @@ fn info(id: u8) -> FunctionBlockInfo {
         first_group: 4,
         groups_spanned: 2,
         midi_ci_version: 0,
-        max_sysex8_streams: 0,
+        max_sysex8_streams: Sysex8StreamCount::new(0),
     })
 }
 

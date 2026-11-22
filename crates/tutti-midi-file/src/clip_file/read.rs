@@ -40,7 +40,8 @@ use winnow::error::{ContextError, ModalResult};
 use winnow::token::any;
 
 use tutti_ump::{
-    Flex, Message, Stream, SysexStatus, TicksPerQuarterNote, Ump, Utility, split_stream,
+    Flex, Message, MessageType, Stream, SysexStatus, TicksPerQuarterNote, Ump, Utility,
+    split_stream,
 };
 
 use super::{ClipFileError, ParsedClip, property_exchange};
@@ -112,7 +113,7 @@ fn classify(ump: Ump) -> Packet {
         Ok(Message::Utility(Utility::ReservedTicksPerQuarterNote(_))) => Kind::Dctpq(None),
         Ok(Message::Utility(Utility::Noop)) => Kind::Noop,
         Ok(Message::Utility(Utility::JrClock(_) | Utility::JrTimestamp(_))) => Kind::Pad,
-        Err(_) if ump.message_type() == 0x0 => Kind::Pad,
+        Err(_) if ump.message_type() == MessageType::Utility => Kind::Pad,
         Ok(Message::Stream(Stream::StartOfClip)) => Kind::StartOfClip,
         Ok(Message::Stream(Stream::EndOfClip)) => Kind::EndOfClip,
         Ok(message) => Kind::Message(message),

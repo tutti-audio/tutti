@@ -24,7 +24,7 @@ use objc2_foundation::{NSArray, NSString};
 use tutti_coremidi_ffi::{UmpEndpointInfo, UmpEndpointsError, ump_endpoints};
 use tutti_ump::{
     BlockDirection, FirstGroup, FunctionBlockCount, FunctionBlockInfo, FunctionBlocks, GroupSpan,
-    Midi1Port, Protocol, UiHint,
+    Midi1Port, Protocol, Sysex8StreamCount, UiHint,
 };
 
 const KEYS: &str = "tutti-ffi-test Keys";
@@ -161,7 +161,7 @@ fn an_endpoint_reads_back_its_protocol_and_blocks() {
     assert_eq!(keys.midi1, Midi1Port::No);
     assert_eq!(
         (keys.ui_hint, keys.max_sysex8_streams, keys.active),
-        (UiHint::Both, 3, true)
+        (UiHint::Both, Sysex8StreamCount::new(3), true)
     );
     let port = named(PORT);
     assert_eq!(port.direction, BlockDirection::Input);

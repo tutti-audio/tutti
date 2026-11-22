@@ -73,14 +73,8 @@ mod common {
     /// Wires event output 0 of node `from` to event input 0 of node `to`.
     pub(super) fn connect(ed: &mut Editor, from: u64, to: u64) {
         ed.spec_mut().connect_events(
-            EventInputPort {
-                node: NodeKey(to),
-                port: 0,
-            },
-            EventEdge::Direct(EventOutputPort {
-                node: NodeKey(from),
-                port: 0,
-            }),
+            EventInputPort::new(NodeKey(to), 0),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(from), 0)),
         );
     }
 }
@@ -227,14 +221,8 @@ impl<F: Float> Node<F> for Latent {
 
 fn disconnect(ed: &mut Editor, from: u64, to: u64) {
     assert!(ed.spec_mut().disconnect_events(
-        EventInputPort {
-            node: NodeKey(to),
-            port: 0
-        },
-        EventOutputPort {
-            node: NodeKey(from),
-            port: 0
-        }
+        EventInputPort::new(NodeKey(to), 0),
+        EventOutputPort::new(NodeKey(from), 0)
     ));
 }
 

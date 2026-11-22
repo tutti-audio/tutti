@@ -857,7 +857,7 @@ pub fn compile(
         // (`GraphSpec::validate`), so the order is total.
         let mut ein = Vec::with_capacity(shape.event_in as usize);
         for port in 0..shape.event_in {
-            let at = EventInputPort { node: key, port };
+            let at = EventInputPort::new(key, port);
             let mut sources: Vec<EventEdge> = graph.events().get(&at).cloned().unwrap_or_default();
             sources.sort_by_key(|e| e.from());
             let mut refs: Vec<ERef> = Vec::with_capacity(sources.len());
@@ -993,7 +993,7 @@ pub fn compile(
         let eout: Vec<u32> = (0..shape.event_out)
             .map(|port| {
                 let v = em.event_value(op);
-                event_out_val.insert(EventOutputPort { node: key, port }, v);
+                event_out_val.insert(EventOutputPort::new(key, port), v);
                 v
             })
             .collect();

@@ -37,10 +37,7 @@ fn out(node: u64) -> PortSource {
 }
 
 fn lane_out(node: u64) -> EventOutputPort {
-    EventOutputPort {
-        node: key(node),
-        port: 0,
-    }
+    EventOutputPort::new(key(node), 0)
 }
 
 fn amp(v: f32) -> Amplitude {
@@ -449,13 +446,8 @@ fn connect_edge_gain_refusals() {
     // output 5).
     let mut rig = Rig::new(&[dc(1.0), driver(0)], &[1], Where::Port);
     let id = rig.edge(1);
-    rig.spec.connect_edge_gain(
-        id,
-        EventOutputPort {
-            node: key(2),
-            port: 5,
-        },
-    );
+    rig.spec
+        .connect_edge_gain(id, EventOutputPort::new(key(2), 5));
     let err = compile(
         &rig.graph(),
         &common::shapes_of(&rig.kinds),

@@ -1365,7 +1365,7 @@ impl<F: Float> Midi<'_, F> {
             .feed(target, Feeder::Instrument)
             .ok()?
             .first()
-            .map(|port| port.node)
+            .map(|port| port.node())
     }
 
     /// The node of `target`'s live input, opened with its keys held if it has
@@ -1564,7 +1564,7 @@ impl<F: Float> Midi<'_, F> {
                 self.state
                     .clips
                     .iter()
-                    .find_map(|(&clip, c)| (c.transform == s.node).then_some(clip))
+                    .find_map(|(&clip, c)| (c.transform == s.node()).then_some(clip))
             })
             .map(Key::new)
     }
@@ -1582,7 +1582,7 @@ impl<F: Float> Midi<'_, F> {
             .feed(target, feeder)
             .ok()?
             .iter()
-            .find_map(|s| ours.get_key_value(&s.node))
+            .find_map(|s| ours.get_key_value(&s.node()))
             .map(|(&node, v)| (node, v))
     }
 
@@ -2249,6 +2249,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
     use tutti_fixtures::midi;
+    use tutti_ump::MessageType;
     use tutti_units::SampleRate;
 
     /// **A device's inlet holds at least a second of a saturated MIDI 1.0
@@ -2525,17 +2526,18 @@ mod tests {
         let sent = log.lock().clone();
         let events: Vec<&Outgoing> = sent
             .iter()
-            .filter(|e| e.ump == note(0).1 || e.ump.message_type() == 0)
+            .filter(|e| e.ump == note(0).1 || e.ump.message_type() == MessageType::Utility)
             .collect();
         assert!(events.len() >= 4, "a stamp for each event");
         for pair in sent.windows(2) {
-            if pair[0].ump.message_type() == 0 && pair[1].ump == note(0).1 {
+            if pair[0].ump.message_type() == MessageType::Utility && pair[1].ump == note(0).1 {
                 assert_eq!(pair[0].send, pair[1].send, "a stamp rides with its event");
             }
         }
         assert!(
             sent.iter()
-                .all(|e| matches!(e.send, SendAt::At(_)) || e.ump.message_type() == 0),
+                .all(|e| matches!(e.send, SendAt::At(_))
+                    || e.ump.message_type() == MessageType::Utility),
             "every note is scheduled"
         );
     }

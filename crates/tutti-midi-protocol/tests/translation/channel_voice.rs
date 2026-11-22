@@ -5,8 +5,8 @@
 
 use tutti_midi_protocol::channel_voice;
 use tutti_ump::{
-    Address, Attribute, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, System, U7, Ump,
-    Voice1, Voice2,
+    Address, Attribute, Message, MessageType, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
+    System, U7, Ump, Voice1, Voice2,
 };
 
 fn address() -> Address {
@@ -87,7 +87,7 @@ fn bytes_become_a_midi_2_packet() {
             })
         ))
     );
-    assert_eq!(on.message_type(), 0x4);
+    assert_eq!(on.message_type(), MessageType::Midi2ChannelVoice);
     let off = Ump::from_midi1_bytes(group, &[0x99, 60, 0]).unwrap();
     assert_eq!(off.0[0], 0x4589_3C00);
     assert_eq!(off.0[1], 0x8000_0000);

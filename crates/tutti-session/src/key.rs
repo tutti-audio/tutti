@@ -68,10 +68,7 @@ impl<N: ?Sized> Key<N> {
     /// Event output `index` of the node.
     #[must_use]
     pub const fn event_output(self, index: u16) -> EventOutputPort {
-        EventOutputPort {
-            node: self.node,
-            port: index,
-        }
+        EventOutputPort::new(self.node, index)
     }
 
     /// Event input `index` of the node (a port per MIDI Group, a plugin's note
@@ -82,10 +79,7 @@ impl<N: ?Sized> Key<N> {
     /// delivered there.
     #[must_use]
     pub const fn event_input(self, index: u16) -> EventInputPort {
-        EventInputPort {
-            node: self.node,
-            port: index,
-        }
+        EventInputPort::new(self.node, index)
     }
 
     /// Output bus `bus` of the node, as a source of a bus edge.

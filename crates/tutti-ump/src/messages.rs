@@ -19,15 +19,15 @@
 //! message before it.
 
 use crate::{
-    Data128, Field, Flex, FlexAddress, FlexTextKind, Form, FunctionBlockId, Message, MidiGroup,
-    Stream, SysexStatus, Ump,
+    Data128, Field, Flex, FlexAddress, FlexTextKind, Form, FunctionBlockId, Message, MessageType,
+    MidiGroup, Stream, Sysex8StreamId, SysexStatus, Ump,
 };
 
 /// Which message of several packets a packet belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Run {
     Sysex7(MidiGroup),
-    Sysex8(MidiGroup, u8),
+    Sysex8(MidiGroup, Sysex8StreamId),
     FlexText(MidiGroup, FlexAddress, FlexTextKind),
     EndpointName,
     ProductInstanceId,
@@ -182,9 +182,9 @@ fn framed_len<T>(items: &[T], ump: &impl Fn(&T) -> Ump) -> usize {
 /// Whether `packet`, which is no part of the runs `open`, sits inside them.
 fn passes(packet: Ump, open: &OpenRuns) -> bool {
     match packet.message_type() {
-        0 | 0xF => true,
+        MessageType::Utility | MessageType::Stream => true,
         // System Real Time: status 0xF8 and above.
-        1 => packet.is_system_real_time() || !open.has_group_of(packet),
+        MessageType::System => packet.is_system_real_time() || !open.has_group_of(packet),
         _ => !open.has_group_of(packet),
     }
 }
@@ -370,7 +370,7 @@ mod tests {
     fn sysex8(status: SysexStatus, stream: u8) -> Ump {
         Ump::from(Message::Data128(
             G,
-            Data128::Sysex8(Sysex8Packet::new(status, stream, &[1]).unwrap()),
+            Data128::Sysex8(Sysex8Packet::new(status, Sysex8StreamId::new(stream), &[1]).unwrap()),
         ))
     }
 

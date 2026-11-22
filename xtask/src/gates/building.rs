@@ -809,6 +809,12 @@ pub(super) const ALLOW: &[Allow] = &[
         "reading a resolved service record as a Host: the failure is the record's, not a value's",
     ),
     ty(
+        "crates/tutti-graph/src/bus_edge.rs",
+        "NodeBus::with_band",
+        &[Rule::WithPrefix],
+        COPY_WITH_ONE_FIELD,
+    ),
+    ty(
         "crates/tutti-graph/src/node.rs",
         "Shape::with_rates",
         &[Rule::WithPrefix],

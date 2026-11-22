@@ -106,13 +106,7 @@ fn graph(
     s.topology
         .set_outputs((0..2).map(|c| PortSource::Node(OutputPort::new(NodeKey(PROBE), c))));
     for p in [UnitParam::Azimuth, UnitParam::Elevation] {
-        s.connect_param(
-            at(p),
-            EventOutputPort {
-                node: NodeKey(SENDER),
-                port: 0,
-            },
-        );
+        s.connect_param(at(p), EventOutputPort::new(NodeKey(SENDER), 0));
     }
     for &(p, r) in ranges {
         s.set_param_range(at(p), r);
@@ -355,10 +349,7 @@ fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
                 node: probe(k),
                 param: UnitParam::Azimuth.into(),
             },
-            EventOutputPort {
-                node: NodeKey(SENDER),
-                port: 0,
-            },
+            EventOutputPort::new(NodeKey(SENDER), 0),
         );
     }
     ed.commit().expect("commits");

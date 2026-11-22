@@ -3,7 +3,7 @@ use tutti_alsa_ffi::UmpBlock;
 use tutti_midi_device::{Endpoint, FunctionBlock};
 use tutti_ump::{
     EndpointInfoNotification, FunctionBlockCount, FunctionBlocks, Midi1Port, OsFunctionBlock,
-    Protocol, UiHint, UmpVersion, read_function_block, read_protocol,
+    Protocol, Sysex8StreamCount, UiHint, UmpVersion, read_function_block, read_protocol,
 };
 
 /// The Endpoint a UMP record describes.
@@ -29,7 +29,7 @@ fn block(
             first_group,
             groups_spanned: groups,
             midi_ci_version: 0,
-            max_sysex8_streams: 0,
+            max_sysex8_streams: Sysex8StreamCount::new(0),
         }),
         name: None,
     }

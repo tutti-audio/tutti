@@ -43,20 +43,16 @@
 //! (derived from the file and engine rates, never set by the user), and
 //! `StretchFactor` drives the phase vocoder (duration changes, pitch does not).
 //! A voice asked to stretch or transpose owns a
-//! [`PhaseVocoder`](tutti_dsp::PhaseVocoder) that always runs, at unity too, so
-//! its latency is constant. A memory voice reads its source the vocoder's latency
-//! ahead of its place on the timeline, so it sounds on time and declares none. A
-//! disk voice cannot read before where it seats, so it sounds the latency late: a
-//! standalone `VoiceNode` declares it for delay compensation, and a `VoicePool`,
-//! which takes voices while it plays, cannot. The same holds for any voice started
-//! with no timeline position to read ahead of. A stretching voice's seat primes the
-//! vocoder over several blocks, silent meanwhile: a seek, and play from a position the
-//! transport has not stood at for 2 049 frames, are silent for 4 097
-//! frames (85 ms at 48 kHz) and then sound on the timeline; a clip placed ahead of the
-//! playhead, or at a position the transport has stood at, primes before it plays and
-//! is on time. A loop wrap does not go silent: a second vocoder, which a pool's handle
-//! sends a stretched voice under the loop, primes for it ahead (unless the loop was set less
-//! than 2 049 frames before its first wrap). Nothing ties the stretch to the tempo.
+//! [`PhaseVocoder`](tutti_dsp::PhaseVocoder) that always runs, at unity too. A voice is
+//! seated on the source's own history, so it sounds on time and declares no latency: a seat
+//! primes the vocoder over several blocks, silent meanwhile. A seek, and play from a
+//! position the transport has not stood at for 1 024 frames, are silent for 1 024 frames
+//! (21 ms at 48 kHz) and then sound on the timeline; a clip placed ahead of the playhead,
+//! or at a position the transport has stood at, primes before it plays and is on time. A
+//! loop wrap does not go silent for a memory voice under the loop: a second vocoder, which a
+//! pool's handle sends it, primes for it ahead (unless the loop was set less than 1 024
+//! frames before its first wrap). A voice without one, a disk voice included, reseats at the
+//! wrap. Nothing ties the stretch to the tempo.
 //! All three are `tutti-units` types.
 //!
 //! ## Quick start

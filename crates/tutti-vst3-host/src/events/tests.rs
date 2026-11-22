@@ -8,8 +8,8 @@ use tutti_plugin_types::{NoteExpressionType, NoteExpressionValue};
 use tutti_ump::RegisteredPerNoteController;
 use tutti_ump::{
     Address, BendValue, CCNumber, ControlValue, Message, MidiChannel, MidiGroup, NoteId,
-    NoteNumber, NoteVelocity, PerNoteManagement, Sysex7Packets, SysexStatus, System, U7, U14, Ump,
-    Voice2,
+    NoteNumber, NoteVelocity, PerNoteManagement, Pitch, Sysex7Packets, SysexStatus, System, U7,
+    U14, Ump, Voice2,
 };
 use tutti_units::{Bipolar, Samples};
 use tutti_vst3_ffi::EventList;
@@ -1090,7 +1090,7 @@ mod message {
         for attribute in [
             midi::reserved_attribute(0x04, 0xABCD),
             midi::reserved_attribute(0xFF, 0),
-            Attribute::Pitch(0x3C00),
+            Attribute::Pitch(Pitch::from_q7_9(0x3C00)),
             Attribute::Manufacturer(0x1234),
         ] {
             let event = packet(Message::Midi2(

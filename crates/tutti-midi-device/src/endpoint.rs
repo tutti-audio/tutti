@@ -9,7 +9,8 @@
 use tutti_ump::{
     BlockDirection, BlockFilter, BlockSelect, DeviceIdentity, DiscoveryFilter, FirstGroup,
     FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, GroupSpan, Message, Midi1Port,
-    Protocol, Stream, StreamConfig, Sysex8StreamIds, UiHint, Ump, UmpVersion, text_packets,
+    Protocol, Stream, StreamConfig, Sysex8StreamCount, Sysex8StreamIds, UiHint, Ump, UmpVersion,
+    text_packets,
 };
 
 use tutti_ump::{BlockName, EndpointName, NameError, ProductInstanceId};
@@ -130,7 +131,7 @@ pub struct FunctionBlock {
     first_group: FirstGroup,
     groups: GroupSpan,
     midi_ci_version: u8,
-    max_sysex8_streams: u8,
+    max_sysex8_streams: Sysex8StreamCount,
     pub(crate) name: Option<BlockName>,
 }
 
@@ -231,7 +232,7 @@ impl FunctionBlockBuilder {
     /// The block's MIDI-CI Message Version/Format (`0` is none, the default,
     /// §7.1.8) and the number of simultaneous SysEx 8 streams it supports (`0`
     /// none: no System Exclusive 8 at all, `1` one, `2..=255` that many).
-    pub const fn midi_ci(mut self, version: u8, max_sysex8_streams: u8) -> Self {
+    pub const fn midi_ci(mut self, version: u8, max_sysex8_streams: Sysex8StreamCount) -> Self {
         self.block.midi_ci_version = version;
         self.block.max_sysex8_streams = max_sysex8_streams;
         self
@@ -301,7 +302,7 @@ impl FunctionBlock {
                 first_group,
                 groups,
                 midi_ci_version: 0,
-                max_sysex8_streams: 0,
+                max_sysex8_streams: Sysex8StreamCount::new(0),
                 name: None,
             },
         }
@@ -320,7 +321,7 @@ impl FunctionBlock {
             first_group: FirstGroup::of(0),
             groups,
             midi_ci_version: 0,
-            max_sysex8_streams: 0,
+            max_sysex8_streams: Sysex8StreamCount::new(0),
             name: None,
         }
     }
@@ -385,7 +386,7 @@ impl FunctionBlock {
 
     /// Its simultaneous SysEx 8 streams: `0` is none, no System Exclusive 8 at all.
     #[must_use]
-    pub const fn max_sysex8_streams(&self) -> u8 {
+    pub const fn max_sysex8_streams(&self) -> Sysex8StreamCount {
         self.max_sysex8_streams
     }
 
@@ -1168,7 +1169,7 @@ mod wire {
 
     use tutti_ump::{
         BlockDirection, DeviceIdentity, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan,
-        Midi1Port, StreamConfig, UiHint, UmpVersion,
+        Midi1Port, StreamConfig, Sysex8StreamCount, UiHint, UmpVersion,
     };
 
     use super::{
@@ -1186,7 +1187,7 @@ mod wire {
         pub first_group: FirstGroup,
         pub groups: GroupSpan,
         pub midi_ci_version: u8,
-        pub max_sysex8_streams: u8,
+        pub max_sysex8_streams: Sysex8StreamCount,
         pub name: Option<BlockName>,
     }
 

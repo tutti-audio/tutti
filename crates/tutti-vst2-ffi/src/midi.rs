@@ -22,7 +22,7 @@ use std::sync::Arc;
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_midi_protocol::{Midi1Translator, Midi2Translator};
-use tutti_ump::{Message, MidiGroup, Ump, parse_exact};
+use tutti_ump::{Message, MessageType, MidiGroup, Ump, parse_exact};
 
 use crate::host::RenderHandle;
 use tutti_plugin_types::{MIDI_STACK_CAPACITY, MidiEventVec, WireMidi, sysex_assembler};
@@ -410,7 +410,7 @@ impl MidiSendBuffer {
         let mut next_sysex = 0;
         for (index, (offset, ev)) in midi_events.iter().enumerate() {
             // Type 3 is System Exclusive (7-bit) (M2-104 Table 4).
-            if ev.message_type() == 0x3 {
+            if ev.message_type() == MessageType::Sysex7 {
                 let Some(&(end, at, message)) = self.completed.as_slice().get(next_sysex) else {
                     continue;
                 };
