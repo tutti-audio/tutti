@@ -3,7 +3,7 @@
 
 #![allow(
     clippy::disallowed_types,
-    reason = "an offline fork waits here inside a realtime `Prepare`, where `tutti_rt`'s locks panic"
+    reason = "`PluginClient::fork_instance` takes its own mode, so an offline fork can wait here inside a realtime `Prepare`, where `tutti_rt`'s locks panic"
 )]
 
 use std::sync::{Condvar, Mutex, PoisonError};
