@@ -1,6 +1,8 @@
 //! The controls a running graph takes without a commit: param ranges, edge
 //! gains and fades, pass states, modes and mixes.
 
+use std::collections::BTreeMap;
+
 use tutti_buffers::Float;
 use tutti_rt::ParamCell;
 use tutti_units::{Gain, Mix};
@@ -150,15 +152,16 @@ impl<F: Float> Editor<F> {
         }
     }
 
-    /// Makes the cell of every entry of the spec that has none: the entries
-    /// written through [`spec_mut`](Self::spec_mut) (and a builder's or a
-    /// fork's whole wiring), which no declaration saw. It is the one place a
-    /// cell is made for an entry the spec already holds, run by every control
-    /// that declares a lane and by each commit before it hands cells out.
-    pub(super) fn declare_gain_cells(&mut self) {
-        let ids: Vec<EdgeId> = self.spec.gains.keys().copied().collect();
-        for id in ids {
-            if !self.cells.gains.has(id) {
+    /// Makes `entries` the spec's gain entries, as a caller that builds the
+    /// editor whole does (a builder, a fork, the test harness): an entry
+    /// the spec did not hold is declared, its cell made from the values; one
+    /// it held keeps its cell; one left out is dropped. The values are set
+    /// first, so a new lane starts from them.
+    pub(crate) fn enter_gains(&mut self, entries: BTreeMap<EdgeId, EdgeGain>) {
+        self.touch();
+        self.spec.gains.retain(|id, _| entries.contains_key(id));
+        for (id, entry) in entries {
+            if self.spec.gains.insert(id, entry).is_none() {
                 self.cells.gains.declare(id, &self.values);
             }
         }

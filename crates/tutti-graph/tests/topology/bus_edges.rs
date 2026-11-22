@@ -649,7 +649,7 @@ fn a_replaced_node_whose_bus_no_longer_folds_fails_the_commit() {
 
 /// A bus edge's lanes carry the fold's weights and no gain of the author's:
 /// `set_edge_gain` refuses a lane by name, a hand-written entry at a lane's
-/// edge fails the commit, and the lane's cell is nobody's knob.
+/// edge fails the lowering, and the lane's cell is nobody's knob.
 #[test]
 fn a_bus_lane_takes_no_gain_of_the_authors() {
     let (mut ed, mut exec) = editor(&[(1, source(2, smpte(2))), (2, sink(1, smpte(1)))], 2);
@@ -676,12 +676,11 @@ fn a_bus_lane_takes_no_gain_of_the_authors() {
     );
     // A hand-written entry at a lane's edge is the author's weight where the
     // fold's goes.
-    ed.spec_mut().set_edge_gain(id, EdgeGain::default());
+    let mut written = ed.spec().clone();
+    written.set_edge_gain(id, EdgeGain::default());
     assert_eq!(
-        ed.commit(),
-        Err(CommitError::Compile(CompileError::Bus(
-            BusError::GainOnLane { id }
-        )))
+        written.lowered(ed.shapes()).unwrap_err(),
+        BusError::GainOnLane { id }
     );
 }
 

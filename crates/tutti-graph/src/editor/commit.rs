@@ -508,7 +508,6 @@ impl<F: Float> Editor<F> {
         resume: Option<Resume>,
     ) {
         self.touch();
-        self.declare_gain_cells();
         let fades = starting(&delta);
         // A plan that carries the crossfade the last one carried continues
         // it: the executor keeps its progress, and it ends under the seq that

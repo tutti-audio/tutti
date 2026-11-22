@@ -12,7 +12,7 @@ use tutti_session::{
     ChannelEdge, MainOutput, ModTarget, OutputPort, Problem, Replacement, RouteSpec, Session,
     SessionEvent, TargetName,
 };
-use tutti_units::{Gain, Depth, Samples};
+use tutti_units::{Depth, Gain, Samples};
 
 use common::probe::Pulse;
 
@@ -64,8 +64,7 @@ fn a_route_onto_a_dropped_edge_reads_unresolved() {
         .unfaded();
     let lost = ChannelEdge::new(OutputPort::new(p, 0), x.input(1));
     let mut m = s.mods_mut();
-    m.range(lost, Gain::new(-2.0)..Gain::new(2.0))
-        .unwrap();
+    m.range(lost, Gain::new(-2.0)..Gain::new(2.0)).unwrap();
     let source = m.macro_(0.5);
     m.route(RouteSpec::new(source, lost, Depth::of(0.25)))
         .unwrap();

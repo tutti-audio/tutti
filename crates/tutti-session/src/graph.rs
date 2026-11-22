@@ -3119,15 +3119,15 @@ impl<F: Float> Graph<F> {
         }
         // A fade in is not the author's gain: the edge goes on rising, to unity.
         let cleared = if self.editor.edge_fade(id) == Some(EdgeFade::In) {
-            self.editor
-                .spec_mut()
-                .set_edge_gain(id, EdgeGain::default());
+            if let Some(source) = self.editor.spec().gains[&id].source {
+                self.editor.spec_mut().disconnect_edge_gain(id, source);
+            }
             self.editor
                 .set_edge_gain(id, Gain::UNITY)
-                .expect("the lane was just declared");
+                .expect("the lane has its entry");
             self.editor
                 .set_edge_gain_range(id, EdgeGain::DEFAULT_RANGE)
-                .expect("the lane was just declared");
+                .expect("the lane has its entry");
             true
         } else {
             self.editor.spec_mut().clear_edge_gain(id).is_some()

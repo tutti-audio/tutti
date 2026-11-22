@@ -708,11 +708,11 @@ impl<F: Float> GraphBuilder<F> {
         live.events = events;
         live.required_resolution = required_resolution;
         live.params = params;
-        live.gains = gains;
         live.bus_edges = bus_edges;
         live.main_output = main_output;
         live.main_output_id = main_output_id;
         live.main_output_sources = main_output_sources;
+        editor.enter_gains(gains);
         editor.commit()?;
         executor.apply_pending();
         editor.collect();

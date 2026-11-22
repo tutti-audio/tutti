@@ -519,6 +519,14 @@ impl<F: Float> Editor<F> {
     /// [`insert`](Self::insert), not here, so every node has a unit.
     /// Moves the [`revision`](Self::revision), whether or not the borrow
     /// writes.
+    ///
+    /// A gain entry is declared by the editor, which makes its cell
+    /// ([`set_edge_gain`](Self::set_edge_gain),
+    /// [`set_edge_gain_range`](Self::set_edge_gain_range),
+    /// [`set_edge_fade`](Self::set_edge_fade)): wire a source
+    /// ([`GraphSpec::connect_edge_gain`]) only to an edge declared that way,
+    /// and never write [`GraphSpec::gains`] through this borrow. A commit
+    /// that finds an entry without its cell panics.
     pub fn spec_mut(&mut self) -> &mut GraphSpec {
         self.touch();
         &mut self.spec

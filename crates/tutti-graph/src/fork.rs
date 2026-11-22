@@ -357,7 +357,7 @@ impl<F: Float> PendingFork<F> {
         fork.events = spec.events;
         fork.required_resolution = spec.required_resolution;
         fork.params = spec.params;
-        fork.gains = spec.gains;
+        editor.enter_gains(spec.gains);
         if let Err(e) = editor.commit() {
             let remains = ForkRemains {
                 units: Vec::new(),

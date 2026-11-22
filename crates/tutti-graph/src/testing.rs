@@ -840,10 +840,9 @@ impl<F: Float> Pair<F> {
         // `set_edge_gain` checks the edge against it: with edge gains in
         // play, the editor's spec is the graph's (a harness that compiles
         // itself has otherwise left it empty).
-        if !graph.gains().is_empty() || !self.editor.spec_mut().gains.is_empty() {
-            let live = self.editor.spec_mut();
-            live.topology = graph.topology().clone();
-            live.gains = graph.gains().clone();
+        if !graph.gains().is_empty() || !self.editor.spec().gains.is_empty() {
+            self.editor.spec_mut().topology = graph.topology().clone();
+            self.editor.enter_gains(graph.gains().clone());
         }
         if !graph.params().is_empty() || !self.editor.spec_mut().params.is_empty() {
             self.editor.spec_mut().params = graph.params().clone();

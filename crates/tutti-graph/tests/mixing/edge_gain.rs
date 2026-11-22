@@ -18,10 +18,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use common::{Kind, Pair, TestNode, bits, input_signal, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    CommitError, Cx, Edge, EdgeGain, EdgeGainError, EdgeId, Editor, Executor, ForkByClone,
-    ForkTarget, GraphInvalid, GraphSpec, InputPort, Io, Node, NodeKey, Op, OutputPort, Plan,
-    PortSink, PortSource, Prepare, Renderer, Shape, Status, Topology, TransportPosition,
-    Unforkable, ValidGraph, compile,
+    Cx, Edge, EdgeGain, EdgeGainError, EdgeId, Editor, Executor, ForkByClone, ForkTarget,
+    GraphInvalid, GraphSpec, InputPort, Io, Node, NodeKey, Op, OutputPort, Plan, PortSink,
+    PortSource, Prepare, Renderer, Shape, Status, Topology, TransportPosition, Unforkable,
+    ValidGraph, compile,
 };
 use tutti_units::Gain;
 
@@ -795,12 +795,37 @@ fn removing_an_edge_removes_its_entry() {
 
     let mut rig = Rig::new(0.5);
     rig.ed
-        .spec_mut()
-        .set_edge_gain(output_edge(2), EdgeGain::default());
+        .set_edge_gain(output_edge(2), amp(1.0))
+        .expect("an edge");
     rig.ed.remove(key(1));
     assert!(rig.ed.spec_mut().gains.contains_key(&output_edge(2)));
     assert!(!rig.ed.spec_mut().gains.contains_key(&output_edge(1)));
     rig.ed.commit().expect("commits without the stale entry");
+}
+
+/// An entry dropped and declared again is a new lane: its cell starts at unity
+/// with the default range, not from what the dropped entry's cell held.
+#[test]
+fn a_redeclared_entry_gets_a_fresh_cell() {
+    let mut rig = Rig::new(0.5);
+    let id = output_edge(1);
+    let held = tutti_graph::ParamRange::of(-2.0, 2.0);
+    rig.ed.set_edge_gain_range(id, held).expect("an edge");
+    let old = rig.ed.edge_gain_range_cell(id).expect("a cell");
+    assert_eq!(old.current(), held);
+
+    rig.ed.spec_mut().clear_edge_gain(id);
+    assert_eq!(rig.ed.edge_gain(id), None, "dropped");
+    assert!(
+        rig.ed.edge_gain_range_cell(id).is_none(),
+        "a dropped entry has no cell to read"
+    );
+    rig.ed.set_edge_gain(id, amp(0.25)).expect("an edge");
+    let new = rig.ed.edge_gain_range_cell(id).expect("a cell");
+    assert!(!old.same_cell(&new), "a new cell, not the dropped entry's");
+    assert_eq!(new.current(), EdgeGain::DEFAULT_RANGE);
+    assert_eq!(rig.ed.edge_gain_range(id), Some(EdgeGain::DEFAULT_RANGE));
+    assert_eq!(rig.ed.edge_gain(id), Some(amp(0.25)));
 }
 
 // ---------------------------------------------------------------------------
@@ -1110,17 +1135,4 @@ fn a_fork_starts_at_the_base_the_knob_wrote() {
     let got = Renderer::new(fork_ed, fork_exec).render(2 * BLOCK);
     assert!(got[0].iter().all(|&x| x == 0.0 + 0.25 * 1.0));
     drop((ed, exec));
-}
-
-/// The commit refuses a stale entry rather than weighting nothing.
-#[test]
-fn a_commit_refuses_an_entry_without_its_edge() {
-    let mut rig = Rig::new(0.5);
-    rig.ed
-        .spec_mut()
-        .set_edge_gain(output_edge(7), EdgeGain::default());
-    assert!(matches!(
-        rig.ed.commit(),
-        Err(CommitError::Invalid(e)) if matches!(e[..], [GraphInvalid::GainWithoutEdge { .. }])
-    ));
 }
