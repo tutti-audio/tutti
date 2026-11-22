@@ -270,7 +270,7 @@ fn modulation_banks_refuse_a_block_of_another_width() {
     });
     refuses_another_width(2, |block| {
         let mut complements = [Ramp::new(0.5f32), Ramp::new(0.5f32)];
-        PhaserChain::<f32>::new(Stages::of(2), ChannelLayout::STEREO).process(
+        PhaserChain::<f32>::new(Stages::of(2), tutti_buffers::BusTopology::STEREO).process(
             &mut complements,
             &mut Ramp::new(0.0),
             block,

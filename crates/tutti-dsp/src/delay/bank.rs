@@ -286,10 +286,9 @@ impl<F: Float + Lerp> DelayBank<F> {
         let linked = self.linked;
         // The ramp channel `c` reads: channel 0's, for a channel that follows it.
         let ramp_of = |c: usize| &g.times[if c == 0 || linked { 0 } else { c }];
-        let (rate, cap) = (self.rate, self.cap);
+        let rate = self.rate;
         // The rate crosses into the data's float once per block.
         let signal_rate = F::from_unit(rate);
-        let line_end = ReadPosition::from_frames(Samples::new(cap));
         if time.is_none() && feedback.is_none() && !moving {
             // Nothing moves and nothing is driven: every control is a constant of the loop,
             // the common case and the one worth keeping tight.
@@ -319,7 +318,7 @@ impl<F: Float + Lerp> DelayBank<F> {
                 // control signal's own precision; a held time keeps the exact `ReadPosition::of` path.
                 match time.and_then(|s| s.get(i)) {
                     Some(&x) if x.is_finite() => {
-                        F::offset_position(ReadPosition::START, x * signal_rate).min(line_end)
+                        F::offset_position(ReadPosition::START, x * signal_rate)
                     }
                     _ => at_step(ramp_of(c), i),
                 }
@@ -366,7 +365,7 @@ impl<F: Float + Lerp> DelayBank<F> {
         for i in 0..frames {
             let (fb, cf) = gain(i);
             for (c, line) in self.lines.iter().enumerate().take(width) {
-                let d = delay_at(c, i);
+                let d = line.held(delay_at(c, i));
                 self.taps[c] = line.read_sample(d.saturating_sub(Samples::new(1)), interp);
             }
             for (c, line) in self.lines.iter_mut().enumerate().take(width) {
@@ -382,7 +381,7 @@ impl<F: Float + Lerp> DelayBank<F> {
                 line.push_sample(acc);
             }
             for (c, line) in self.lines.iter().enumerate().take(width) {
-                ys[c][i] = line.read_sample(delay_at(c, i), interp);
+                ys[c][i] = line.read_sample(line.held(delay_at(c, i)), interp);
             }
         }
     }

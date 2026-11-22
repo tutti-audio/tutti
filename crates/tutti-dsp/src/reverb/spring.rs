@@ -387,7 +387,6 @@ impl<F: Float> SpringReverb<F> {
         let frames = block.frames().get();
         let (input, mut output) = block.split();
         let half = F::lit(0.5);
-        let back = loop_frames(self.layout, self.rate) - 1;
         let mut at = 0;
         while at < frames {
             if self.into == 0 {
@@ -401,6 +400,7 @@ impl<F: Float> SpringReverb<F> {
                 let mut plane = output.plane_mut(c);
                 for (y, &x) in plane.samples_mut()[at..at + run].iter_mut().zip(x) {
                     // The sample pushed `N` frames ago, through the low-pass.
+                    let back = spring.line.end().saturating_sub(Samples::new(1));
                     spring.tone = leave * spring.line.read_whole(back) + pole * spring.tone;
                     let v = x + gain * spring.tone;
                     let (mut low, mut high) = (v, v);

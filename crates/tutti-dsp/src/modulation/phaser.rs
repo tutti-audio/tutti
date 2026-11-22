@@ -19,7 +19,7 @@ use core::ops::RangeInclusive;
 
 use crate::BlockMismatch;
 use crate::block::expect_widths;
-use tutti_buffers::{ChannelLayout, MAX_CHANNELS};
+use tutti_buffers::{BusTopology, MAX_CHANNELS};
 use tutti_buffers::{Float, InputOutput};
 use tutti_units::{Depth, Feedback, Hz};
 
@@ -212,19 +212,12 @@ pub struct PhaserChain<F: Float> {
 }
 
 impl<F: Float + Lerp> PhaserChain<F> {
-    /// A silent chain of `stages` sections on `width` channels (at most
-    /// [`MAX_PHASER_CHANNELS`]). Allocates: build it on the control side.
-    ///
-    /// # Panics
-    ///
-    /// If `width` is past [`MAX_PHASER_CHANNELS`].
+    /// A silent chain of `stages` sections on the channels of `bus`. A bus has at most
+    /// [`MAX_PHASER_CHANNELS`], so no width is refused: the type holds the bound. Allocates:
+    /// build it on the control side.
     #[must_use]
-    pub fn new(stages: Stages, width: ChannelLayout) -> Self {
-        let width = usize::from(width.count());
-        assert!(
-            width <= MAX_PHASER_CHANNELS,
-            "a phaser has at most {MAX_PHASER_CHANNELS} channels"
-        );
+    pub fn new(stages: Stages, bus: BusTopology) -> Self {
+        let width = usize::from(bus.layout().count());
         Self {
             stages,
             width,

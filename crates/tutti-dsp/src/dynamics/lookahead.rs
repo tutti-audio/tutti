@@ -16,7 +16,6 @@ pub(crate) struct LookaheadRing<F: Float> {
     /// One delay line per audio channel, read at the lookahead by the whole-frame reader;
     /// `lines.len()` == width. Built at construction, never resized in the RT path.
     lines: Vec<DelayLine<F>>,
-    lookahead: usize,
     min_deque: MonotonicMinDeque<F>,
     sample_counter: u64,
 }
@@ -36,7 +35,6 @@ impl<F: Float> LookaheadRing<F> {
             lines: (0..channels)
                 .map(|_| DelayLine::new(Samples::new(n)))
                 .collect(),
-            lookahead: n,
             min_deque: MonotonicMinDeque::new(window),
             sample_counter: 0,
         }
@@ -77,7 +75,7 @@ impl<F: Float> LookaheadRing<F> {
         let line = &mut self.lines[c];
         for ((o, &x), &g) in out.iter_mut().zip(input).zip(gains) {
             line.push_sample(x);
-            let d = line.read_whole(self.lookahead);
+            let d = line.read_whole(line.end());
             // A NaN in both operands: x86 returns the first one's and which
             // is first is up to the compiler, so pick the delayed sample's
             // (as the per-frame product did) to keep the sign bit. An infinite sample
