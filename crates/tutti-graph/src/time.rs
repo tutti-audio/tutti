@@ -30,8 +30,8 @@
 //! no `impl From<Frame> for Offset`.
 
 use tutti_music::{FRAME_TOLERANCE, first_frame_at_or_after};
-use tutti_units::Bpm;
 use tutti_units::{At, Frame, Latency, SampleRate, Samples};
+use tutti_units::{BeatDuration, Bpm, FramesPerBeat};
 
 use crate::node::{Env, TransportChanges, TransportPosition};
 
@@ -525,15 +525,21 @@ impl Env {
         // The distance range, in beats: nothing when stopped.
         let (lo, hi) = match (a, b) {
             (None, None) => (0.0, 0.0),
-            (Some(f), None) | (None, Some(f)) => (len / f, len / f),
-            (Some(f), Some(g)) => ((len / f).min(len / g), (len / f).max(len / g)),
+            (Some(f), None) | (None, Some(f)) => {
+                let d = f.beats_over(len).get();
+                (d, d)
+            }
+            (Some(f), Some(g)) => {
+                let (d, e) = (f.beats_over(len).get(), g.beats_over(len).get());
+                (d.min(e), d.max(e))
+            }
         };
         // One frame of slack, in beats, at the faster of the two tempos (a
         // frame is fewer beats at the slower), whether or not it rolls.
         let slack = [t.tempo, next_tempo]
             .into_iter()
             .filter_map(|tempo| self.frames_per_beat_at(tempo))
-            .map(|fpb| 1.0 / fpb)
+            .map(|fpb| fpb.beats_per_frame().get())
             .fold(STILL, f64::max);
         let fits = |x: f64| x - from >= lo - slack && x - from <= hi + slack;
         if fits(next) {
@@ -579,20 +585,20 @@ impl Env {
     }
 
     /// Frames per beat while the transport rolls, `None` when it does not.
-    fn frames_per_beat(&self) -> Option<f64> {
+    fn frames_per_beat(&self) -> Option<FramesPerBeat> {
         self.frames_per_beat_at(self.transport.tempo)
             .filter(|_| self.transport.playing)
     }
 
     /// Frames per beat at `tempo` and this block's rate, when both are
     /// usable, whether or not the transport rolls.
-    fn frames_per_beat_at(&self, tempo: Bpm) -> Option<f64> {
+    fn frames_per_beat_at(&self, tempo: Bpm) -> Option<FramesPerBeat> {
         // Frames per beat, not seconds, on purpose: `frames_per_beat` is the one
         // grouping every reader placing a beat in a block divides by, and
         // routing through `BeatDuration::to_seconds` (now an exact `f64`
         // `Seconds`) would re-associate the arithmetic and round a frame
         // differently (see `BeatDuration::to_seconds`).
-        tutti_music::frames_per_beat(tempo, self.sample_rate)
+        tempo.frames_per_beat(self.sample_rate)
     }
 
     /// Where a scheduled command lands in the block of a sink whose inputs
@@ -643,7 +649,8 @@ impl Env {
         // beat between a block's last frame and its end (or a rounding error
         // behind the playhead) is due here, not late, and every
         // beat lands exactly once.
-        let beat = if beat < now && (now - beat) * frames_per_beat < 1.0 - FRAME_TOLERANCE {
+        let behind = BeatDuration::new(now - beat);
+        let beat = if beat < now && frames_per_beat.frames_in(behind) < 1.0 - FRAME_TOLERANCE {
             now
         } else {
             beat
@@ -671,7 +678,7 @@ impl Env {
         // on that frame rather than the next, so a beat computed as
         // `frame / frames_per_beat` cannot miss its own frame by one. Every
         // clip and MIDI reader in the engine places beats by the same rule.
-        let k = first_frame_at_or_after(ahead * frames_per_beat).max(0);
+        let k = first_frame_at_or_after(frames_per_beat.frames_in(BeatDuration::new(ahead))).max(0);
         match u32::try_from(k) {
             Ok(k) if (k as usize) < self.block_len.get() => Due::In(Offset(k)),
             _ => Due::NotYet,
@@ -777,7 +784,7 @@ mod tests {
 
     /// **A tempo too slow to count frames at does not move the transport**: the
     /// smallest `Bpm` has no frames per beat, rolling or not, as in
-    /// `tutti_music::frames_per_beat`.
+    /// `Bpm::frames_per_beat`.
     #[test]
     fn the_slowest_tempo_has_no_frames_per_beat() {
         let slow = env(
@@ -791,7 +798,10 @@ mod tests {
             64,
             TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None),
         );
-        assert_eq!(normal.frames_per_beat(), Some(24_000.0));
+        assert_eq!(
+            normal.frames_per_beat().map(FramesPerBeat::get),
+            Some(24_000.0)
+        );
     }
 
     /// An offset exists only inside its block.

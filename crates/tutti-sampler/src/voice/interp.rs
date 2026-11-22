@@ -185,8 +185,7 @@ impl Gate {
         let Some(fpb) = run.frames_per_beat() else {
             return false;
         };
-        let last =
-            run.beat_at(run.start) + wrap.back - BeatDuration::new((wrap.ago + 1) as f64 / fpb);
+        let last = run.beat_at(run.start) + wrap.back - fpb.beats_over((wrap.ago + 1) as f64);
         let tempo = run.tempo();
         self.reached(last, tempo, self.window.start)
             && self
@@ -203,7 +202,7 @@ impl Gate {
         let Some(fpb) = run.frames_per_beat() else {
             return false;
         };
-        let before = run.beat_at(run.start) - BeatDuration::new((wrap.ago + 1) as f64 / fpb);
+        let before = run.beat_at(run.start) - fpb.beats_over((wrap.ago + 1) as f64);
         !self.reached(before, run.tempo(), self.window.start)
     }
 
@@ -219,8 +218,12 @@ impl Gate {
         if to - from == 1 || !at(to - 1) {
             return to;
         }
-        let fpb = run.frames_per_beat().unwrap_or(1.0);
-        let est = first_frame_at_or_after((target - run.beat_at(from)).get() * fpb);
+        let ahead = target - run.beat_at(from);
+        // A run with no frames per beat reads the beats as frames.
+        let est = first_frame_at_or_after(
+            run.frames_per_beat()
+                .map_or(ahead.get(), |fpb| fpb.frames_in(ahead)),
+        );
         let mut j = if est >= 1 {
             (from + est as usize).min(to - 1)
         } else {
