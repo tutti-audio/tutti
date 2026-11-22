@@ -20,14 +20,14 @@ const RATE: f64 = 48_000.0;
 const BLOCK: usize = 256;
 
 fn saw() -> PolySynth<f32> {
-    PolySynth::<f32>::new(SynthConfig {
-        oscillator: OscillatorType::Saw,
-        envelope: Adsr {
-            attack: Seconds::new(0.0),
-            ..Default::default()
-        },
-        ..Default::default()
-    })
+    PolySynth::<f32>::new(
+        SynthConfig::new()
+            .oscillator(OscillatorType::Saw)
+            .envelope(Adsr {
+                attack: Seconds::new(0.0),
+                ..Default::default()
+            }),
+    )
 }
 
 fn note_on_at(frame: u64) -> TimedMidiEvent {

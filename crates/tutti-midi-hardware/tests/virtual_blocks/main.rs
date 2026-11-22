@@ -14,8 +14,8 @@
 #[global_allocator]
 static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
-#[cfg_attr(target_os = "macos", path = "macos.rs")]
-#[cfg_attr(not(target_os = "macos"), path = "other.rs")]
+#[cfg_attr(all(target_os = "macos", feature = "coremidi"), path = "macos.rs")]
+#[cfg_attr(not(all(target_os = "macos", feature = "coremidi")), path = "other.rs")]
 mod platform;
 
 fn main() {

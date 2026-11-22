@@ -519,6 +519,18 @@ only where the OS grants the raise: GitHub's runners are unprivileged
 stayed where an unraised thread does. Run it as root, or with `CAP_SYS_NICE`,
 to cover the call.
 
+### What `cargo xtask rtsan` sees and misses
+
+`RtAllocCheck` sees Rust allocations and `tutti_rt::Mutex` sees our locks; neither
+sees a C `malloc`, a pthread lock or file I/O inside a plugin or a dependency.
+`cargo xtask rtsan` builds with `RTSAN_ENABLE` and the `tutti-rt/rtsan` feature, so
+every `RtScope` also holds LLVM's RealtimeSanitizer region (the `rtsan-standalone`
+crate: libc interceptors, no compiler flag, no nightly). It catches those calls,
+and a std or `parking_lot` lock only when contended. It misses an uncontended lock
+and `thread::sleep`. The one syscall it is told to ignore is `Unparker`'s wake: a wake never waits, and the doorbells and the worker pool wake from the audio thread by design. It is a local recipe, never a CI job: the runtime is a
+prebuilt download (curl, network on the first build), Linux and macOS only, and
+without `RTSAN_ENABLE` the crate's functions are empty and download nothing.
+
 ## Check the constraint before designing around it
 
 Before writing anything that *works around* an obstacle, **name the obstacle in

@@ -106,7 +106,7 @@ fn cache_time_is_a_non_negative_integer() {
 }
 
 // §7.4.1 Table 15 and §12: the codes a header may carry, and no others.
-/// Spec: m2-103/7.4.1#1
+/// Spec: m2-103/7.4.1#1, m2-103/7.3#1
 #[test]
 fn status_is_a_code_of_the_table() {
     let listed = [
@@ -242,7 +242,7 @@ fn whitespace_outside_a_string_is_refused() {
 }
 
 // §7.1.1: a property is a number, a boolean or a string.
-/// Spec: m2-103/7.1.1#1
+/// Spec: m2-103/7.1.1#1, m2-103/7.2#1
 #[test]
 fn a_property_value_is_a_number_boolean_or_string() {
     for bad in [
@@ -464,7 +464,7 @@ fn subscription_messages_read() {
     }
 }
 
-/// Spec: m2-103/7.1.1#4, m2-103/7.1.1#5, m2-103/7.1.1#6
+/// Spec: m2-103/7.1.1#4, m2-103/7.1.1#5, m2-103/7.1.1#6, m2-103/7.4#1
 #[test]
 fn the_writer_puts_the_required_property_first() {
     let mut start = PeRequest::new(ResourceName::new("Mode").unwrap());
@@ -549,6 +549,7 @@ fn everything() -> Vec<PeHeader> {
     ]
 }
 
+/// Spec: m2-103/7.1#1
 #[test]
 fn what_the_writer_writes_the_reader_reads() {
     for header in everything() {
@@ -721,5 +722,129 @@ proptest::proptest! {
         let wire = mcoded7::encode_vec(&data);
         proptest::prop_assert!(wire.iter().all(|b| b & 0x80 == 0));
         proptest::prop_assert_eq!(mcoded7::decode_vec(&wire), Ok(data));
+    }
+}
+
+// M2-103 §6.1, §7.1.1: a header string with a described length has that maximum, and
+// one byte more is refused.
+/// Spec: m2-103/7.1.1#2
+#[test]
+fn a_header_string_has_the_maximum_length_its_table_gives() {
+    let ok = |text: String| assert!(parse(&text).is_ok(), "{text}");
+    let bad = |text: String| assert!(parse(&text).is_err(), "{text}");
+    let a = |len: usize| "a".repeat(len);
+    for (max, header) in [
+        (36, r#"{"resource":"A"}"#.replace('A', "$")),
+        (36, r#"{"resource":"A","resId":"$"}"#.to_owned()),
+        (75, r#"{"resource":"A","mediaType":"$"}"#.to_owned()),
+        (512, r#"{"status":400,"message":"$"}"#.to_owned()),
+        (8, r#"{"command":"end","subscribeId":"$"}"#.to_owned()),
+    ] {
+        ok(header.replace('$', &a(max)));
+        bad(header.replace('$', &a(max + 1)));
+    }
+}
+
+// M2-103 §7.3 Table 14: a Reply's properties have the types the table gives, and a
+// value of another type is refused.
+/// Spec: m2-103/7.3#2
+#[test]
+fn a_reply_property_has_the_type_of_its_table() {
+    let got = reply(
+        r#"{"status":200,"message":"m","cacheTime":30,"totalCount":5,"mutualEncoding":"Mcoded7","mediaType":"a/b","subscribeId":"s1"}"#,
+    );
+    assert_eq!(got.status, PeStatus::Ok);
+    assert_eq!(got.message.as_ref().map(PeMessage::as_str), Some("m"));
+    assert_eq!(got.cache_time, Some(PeCacheTime::from_secs(30)));
+    assert_eq!(got.total_count, Some(5));
+    assert_eq!(got.mutual_encoding, Some(PeEncoding::Mcoded7));
+    for (key, wrong) in [
+        ("status", r#""200""#),
+        ("status", "200.5"),
+        ("message", "5"),
+        ("cacheTime", "true"),
+        ("totalCount", r#""5""#),
+        ("totalCount", "-1"),
+        ("mutualEncoding", "7"),
+        ("mediaType", "7"),
+        ("subscribeId", "7"),
+    ] {
+        let text = if key == "status" {
+            format!(r#"{{"status":{wrong}}}"#)
+        } else {
+            format!(r#"{{"status":200,"{key}":{wrong}}}"#)
+        };
+        assert!(parse(&text).is_err(), "{text}");
+    }
+}
+
+// M2-103 §6.1: a number in Header Data is decimal: the writer writes integers and
+// decimals as decimal digits, and a hexadecimal literal is not JSON.
+/// Spec: m2-103/6.1#4
+#[test]
+fn a_header_number_is_written_and_read_in_decimal() {
+    let mut request = PeRequest::new(ResourceName::new("A").unwrap());
+    request
+        .extra
+        .insert(name("x-a"), PeJson::Integer(0x7D))
+        .unwrap();
+    request
+        .extra
+        .insert(name("x-b"), PeJson::Integer(-0x10))
+        .unwrap();
+    request.page = Some(PePage {
+        offset: 0xFF,
+        limit: NonZeroU32::new(0x10).unwrap(),
+    });
+    let bytes = PeHeader::Request(request).encode(big()).unwrap();
+    let text = String::from_utf8(bytes).unwrap();
+    assert!(text.contains(r#""x-a":125"#), "{text}");
+    assert!(text.contains(r#""x-b":-16"#), "{text}");
+    assert!(text.contains(r#""offset":255,"limit":16"#), "{text}");
+    assert!(!text.contains("0x") && !text.contains("0X"), "{text}");
+    for hex in ["0x7D", "0X7d", "-0x10", "7Dh", "$7D"] {
+        let hexed = format!(r#"{{"resource":"A","x-a":{hex}}}"#);
+        assert!(
+            matches!(parse(&hexed), Err(PeHeaderError::Malformed { .. })),
+            "{hexed}"
+        );
+    }
+}
+
+// M2-103 §7.1: Header Data is Property Data (JSON, 7-bit ASCII, escapes) under the
+// extra rules of a header: one line without whitespace outside a string, a required
+// property first. A header the writer writes keeps both.
+/// Spec: m2-103/7.1#2
+#[test]
+fn header_data_is_property_data_under_the_extra_header_rules() {
+    // What Property Data allows and a header allows too.
+    assert!(parse(r#"{"resource":"A","x-s":"Beats\u266a \"q\" \\ \/"}"#).is_ok());
+    // Not JSON: not an object, a bare key, a trailing comma.
+    for bad in [
+        r#"["resource","A"]"#,
+        r#"{resource:"A"}"#,
+        r#"{"resource":"A",}"#,
+    ] {
+        assert!(parse(bad).is_err(), "{bad}");
+    }
+    // Property Data rules a header keeps: 7-bit ASCII only.
+    assert!(matches!(
+        PeHeader::try_from("{\"resource\":\"A\",\"x-s\":\"\u{e9}\"}".as_bytes()),
+        Err(PeHeaderError::NotAscii { .. })
+    ));
+    // The extra rules: no whitespace outside a string (Property Data has it), and the
+    // required property first.
+    assert!(PeJson::try_from(br#"{"resource": "A"}"#.as_slice()).is_ok());
+    assert!(parse(r#"{"resource": "A"}"#).is_err());
+    assert_eq!(
+        parse(r#"{"x-s":"1","resource":"A"}"#),
+        Err(PeHeaderError::FirstProperty)
+    );
+    // Everything the writer writes meets both.
+    for header in everything() {
+        let bytes = header.encode(big()).unwrap();
+        assert!(bytes.is_ascii() && !bytes.contains(&b'\n'));
+        assert!(PeJson::try_from(bytes.as_slice()).is_ok());
+        assert!(PeHeader::try_from(bytes.as_slice()).is_ok());
     }
 }

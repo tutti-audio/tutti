@@ -2,17 +2,22 @@
 //!
 //! - `alsa_ump_create`: alsa-lib >= 1.2.13, which adds publishing our own UMP
 //!   endpoint.
-//! - `midi_backend`: the one platform decision. `"coremidi"` on macOS, `"winmm"`
-//!   on Windows, `"alsa"` on Linux with alsa-lib >= 1.2.10 (the UMP sequencer
-//!   API that backend needs), `"none"` everywhere else. The `backend` module
-//!   declares the platform module this names; no other file branches on the
-//!   platform.
+//! - `midi_backend`: the one platform decision, made by `backend_choice::choose`
+//!   from the target OS and the backend features (`coremidi`, `winmm`, `alsa`).
+//!   `"coremidi"` on macOS, `"winmm"` on Windows, `"alsa"` on Linux with alsa-lib
+//!   1.2.10 or later (the UMP sequencer API that backend needs), each only with its
+//!   feature on; `"none"` everywhere else. The `backend` module declares the
+//!   platform module this names; no other file branches on the platform.
 //!
 //! An older or absent alsa-lib degrades to the empty stub rather than failing
 //! the build; the ffi crate's build script prints the reason as a warning.
 
+#[path = "backend_choice.rs"]
+mod backend_choice;
+
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=backend_choice.rs");
     // Declared unconditionally so `unexpected_cfgs` stays quiet where unset.
     println!("cargo:rustc-check-cfg=cfg(alsa_ump_create)");
     println!(
@@ -26,14 +31,13 @@ fn main() {
     }
 
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    let backend = if target_os == "macos" {
-        "coremidi"
-    } else if target_os == "windows" {
-        "winmm"
-    } else if target_os == "linux" && std::env::var_os("DEP_ASOUND_ALSA_UMP").is_some() {
-        "alsa"
-    } else {
-        "none"
-    };
+    let on = |feature: &str| std::env::var_os(format!("CARGO_FEATURE_{feature}")).is_some();
+    let backend = backend_choice::choose(
+        &target_os,
+        on("ALSA"),
+        on("COREMIDI"),
+        on("WINMM"),
+        std::env::var_os("DEP_ASOUND_ALSA_UMP").is_some(),
+    );
     println!("cargo:rustc-cfg=midi_backend=\"{backend}\"");
 }

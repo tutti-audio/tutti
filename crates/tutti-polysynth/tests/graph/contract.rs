@@ -21,16 +21,16 @@ fn synth_row() -> Row {
     Row::new(
         "PolySynth",
         || {
-            Box::new(PolySynth::<f32>::new(SynthConfig {
-                oscillator: OscillatorType::Square {
-                    pulse_width: Normalized::of(0.5),
-                },
-                envelope: Adsr {
-                    attack: tutti_units::Seconds::new(0.0),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }))
+            Box::new(PolySynth::<f32>::new(
+                SynthConfig::new()
+                    .oscillator(OscillatorType::Square {
+                        pulse_width: Normalized::of(0.5),
+                    })
+                    .envelope(Adsr {
+                        attack: tutti_units::Seconds::new(0.0),
+                        ..Default::default()
+                    }),
+            ))
         },
         Excite::Event {
             port: 0,
