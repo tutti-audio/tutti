@@ -1,4 +1,4 @@
-//! The blocking face: [`Mutex`] and [`Condvar`].
+//! The blocking face: [`Mutex`], [`RwLock`] and [`Condvar`].
 //!
 //! Each wraps std's and asserts, in a debug build, that it is not called inside
 //! an [`RtScope`] before it waits, so a block that takes a lock
@@ -11,7 +11,9 @@
 //! `Mutex` names it itself.
 
 use std::fmt;
-use std::sync::{self, MutexGuard, PoisonError, WaitTimeoutResult};
+use std::sync::{
+    self, MutexGuard, PoisonError, RwLockReadGuard, RwLockWriteGuard, WaitTimeoutResult,
+};
 use std::time::Duration;
 
 use crate::RtScope;
@@ -92,6 +94,67 @@ impl<T> From<T> for Mutex<T> {
 }
 
 impl<T: ?Sized + fmt::Debug> fmt::Debug for Mutex<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+/// A reader-writer lock whose [`read`](Self::read) and [`write`](Self::write)
+/// refuse to wait inside an audio block.
+///
+/// Wraps [`std::sync::RwLock`] and hands out its guards. Unlike std's, neither
+/// call answers a poison error: each returns the guard of a lock whose holder
+/// panicked.
+///
+/// # Panics
+///
+/// [`read`](Self::read) and [`write`](Self::write) panic, in a debug build,
+/// inside an [`RtScope`].
+///
+/// # Examples
+///
+/// ```
+/// use tutti_rt::RwLock;
+///
+/// let live = RwLock::new(true);
+/// *live.write() = false;
+/// assert!(!*live.read());
+/// ```
+pub struct RwLock<T: ?Sized>(sync::RwLock<T>);
+
+impl<T> RwLock<T> {
+    /// A lock holding `value`.
+    #[must_use]
+    pub const fn new(value: T) -> Self {
+        Self(sync::RwLock::new(value))
+    }
+}
+
+impl<T: ?Sized> RwLock<T> {
+    /// Waits until no writer holds the lock and returns a shared guard; a
+    /// poisoned lock answers its guard as an unpoisoned one does.
+    ///
+    /// # Panics
+    ///
+    /// In a debug build, inside an [`RtScope`].
+    pub fn read(&self) -> RwLockReadGuard<'_, T> {
+        RtScope::check_not_blocking("RwLock::read");
+        self.0.read().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Waits until no one holds the lock and returns the exclusive guard; a
+    /// poisoned lock answers its guard as an unpoisoned one does.
+    ///
+    /// # Panics
+    ///
+    /// In a debug build, inside an [`RtScope`].
+    pub fn write(&self) -> RwLockWriteGuard<'_, T> {
+        RtScope::check_not_blocking("RwLock::write");
+        self.0.write().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl<T: ?Sized + fmt::Debug> fmt::Debug for RwLock<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
