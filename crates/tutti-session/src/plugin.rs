@@ -1875,7 +1875,8 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             Err(plugin) => {
                 let node_controls = plugin.node_controls();
                 node_controls.set_meter(meter);
-                let (bound, rebinder) = (*plugin).bind_with_rebinder(self.graph.tempo.clone());
+                let (bound, rebinder) =
+                    (*plugin).bind_with_rebinder(self.graph.timeline.tempo().clone());
                 let (node, _) = self.graph.place(bound);
                 let hosted = HostedPlugin::new(handle, loaded_ref, node_controls);
                 self.graph.plugins.insert(node.erase(), hosted);

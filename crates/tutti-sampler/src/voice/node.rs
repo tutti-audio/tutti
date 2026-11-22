@@ -171,7 +171,7 @@ impl<F: SamplerFloat> VoiceNode<F> {
     ) -> Result<Self, VoiceNodeError> {
         let channels = crate::voice_width(channels.into())?;
         GainError::check(voice.play.gain)?;
-        let stretch = stretch_wanted(&voice.play).then(|| stretched::vocoder::<F>(channels));
+        let stretch = stretch_wanted(&voice.play).then(|| stretched::vocoder::<F>(channels, true));
         let gain = Param::new(voice.play.gain);
         let window = voice.source.window();
         let play = voice.play;
@@ -804,7 +804,7 @@ mod tests {
             stretch: tutti_units::StretchFactor::new(1.5),
             ..Playback::default()
         });
-        let want = stretched::vocoder::<f32>(ChannelLayout::MONO)
+        let want = stretched::vocoder::<f32>(ChannelLayout::MONO, false)
             .live
             .latency();
         assert!(want.get() > 0);

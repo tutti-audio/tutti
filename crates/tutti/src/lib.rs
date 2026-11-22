@@ -548,12 +548,12 @@ pub mod session {
         OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError, PeerEvent,
         PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
         Removal, RemoveError, Reopened, ReplaceRefused, Replacement, Resource, ResourceFact,
-        SessionHeardTapError, SessionNode, SetRateError, SetSources, SetTempoError, Taps, Weighted,
-        Wire, main_output_width,
+        SessionHeardTapError, SessionNode, SetRateError, SetSources, SetTempoError, Taps,
+        TimelineView, Weighted, Wire, main_output_width,
     };
     pub use tutti_timeline::{
-        AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
-        Timeline,
+        AudioTaken, LoopEdit, LoopReader, OfflineTimeline, OfflineTimelineConfig, OfflineTransport,
+        TimedError, Timeline,
     };
 
     #[cfg(feature = "export")]
