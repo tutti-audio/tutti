@@ -66,7 +66,7 @@ impl DcBlockerControls {
 
 /// The complement `1 - R` of the pole of a blocker with `corner` at `rate`: the small term the
 /// recursion runs on, solved in `f64`.
-fn dc_complement(corner: Hz, rate: SampleRate) -> f64 {
+pub(crate) fn dc_complement(corner: Hz, rate: SampleRate) -> f64 {
     -libm::expm1(-held_corner(corner, rate).angle_per_frame(rate).get())
 }
 

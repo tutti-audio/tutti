@@ -29,7 +29,8 @@ use tutti_nodes::{
     CompressorControls, CompressorNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
     DistortionConfig, DistortionNode, FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig,
     GateControls, GateNode, InterpolationMode, KeySource, LadderFilterConfig, LadderFilterNode,
-    LadderType, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ShapeKind,
+    LadderType, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ShapeKind, TubeStageConfig,
+    TubeStageNode,
 };
 use tutti_rt::SplitMix64;
 use tutti_units::{
@@ -523,6 +524,16 @@ fn reverb(c: &mut Criterion) {
         None,
     );
 }
+/// The tube stage's solve at the default 4 times oversampling, over noise at the default drive.
+fn tube_stage(c: &mut Criterion) {
+    run(
+        c,
+        "tube_stage",
+        "stereo_x4",
+        || TubeStageNode::<f32>::from(TubeStageConfig::new(ChannelLayout::STEREO)),
+        None,
+    );
+}
 fn convolver(c: &mut Criterion) {
     use tutti_buffers::Mono;
     use tutti_fixtures::signal::decay_ir;
@@ -546,6 +557,7 @@ criterion_group!(
     limiter,
     dynamics,
     reverb,
+    tube_stage,
     convolver
 );
 criterion_main!(benches);

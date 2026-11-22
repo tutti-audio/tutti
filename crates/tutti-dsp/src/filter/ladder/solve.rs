@@ -59,7 +59,7 @@ use tutti_buffers::Float;
 
 use super::kernel::{LadderCoefficients, LadderType};
 use crate::SimdLanes;
-use crate::newton::NEWTON_CAP;
+use crate::newton::{NEWTON_CAP, newton_steps};
 
 /// The chain from the loop variable `u`: the saturated stage inputs `a0..a3`, the stage
 /// outputs `y1..y4` and the stage increments `v1..v4` (`yn = s(n) + vn`, the integrator
@@ -122,12 +122,7 @@ pub(crate) fn linear_seed<F: Float + SimdLanes>(c: &LadderCoefficients<F>, s: &[
 /// function of the inputs alone).
 #[inline(always)]
 pub(crate) fn solve_loop<F: Float + SimdLanes>(c: &LadderCoefficients<F>, s: &[F; 4], x: F) -> F {
-    let mut u = linear_seed(c, s, x);
-    for _ in 0..NEWTON_CAP {
-        let (value, slope) = loop_residual(c, s, x, u);
-        u -= value / slope;
-    }
-    u
+    newton_steps::<F, NEWTON_CAP>(|u| loop_residual(c, s, x, u), linear_seed(c, s, x))
 }
 
 /// One sample: the loop solved, the stages advanced, the tap `ty` returned. `x` is the driven

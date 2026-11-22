@@ -44,3 +44,30 @@ fn a_nan_warm_start_takes_the_seed() {
     let root = 1000.0f64.ln();
     assert!((capped_newton(f, 6.9, f64::NAN) - root).abs() <= after_two_steps(root - 6.9));
 }
+
+/// `u^2 - 2` from 3/2: `newton_steps` takes exactly `CAP` steps from its one start, 17/12, 577/408,
+/// 665857/470832 (`u <- (u + 2 / u) / 2`, exact in rationals).
+#[test]
+fn newton_steps_from_one_start_take_exactly_cap_steps() {
+    let f = |u: f64| (u * u - 2.0, 2.0 * u);
+    let tol = 2.0 * f64::EPSILON;
+    assert!((newton_steps::<f64, 1>(f, 1.5) - 17.0 / 12.0).abs() <= tol);
+    assert!((newton_steps::<f64, 2>(f, 1.5) - 577.0 / 408.0).abs() <= tol);
+    assert!((newton_steps::<f64, 3>(f, 1.5) - 665_857.0 / 470_832.0).abs() <= tol);
+}
+
+/// The first step takes the slope and value of the start from the choice that made it: `CAP`
+/// steps from one start evaluate `f` `CAP` times, and the choice of two starts adds one
+/// evaluation, never a repeat of the chosen start's.
+#[test]
+fn the_first_step_does_not_evaluate_the_start_again() {
+    let calls = core::cell::Cell::new(0usize);
+    let f = |u: f64| {
+        calls.set(calls.get() + 1);
+        (u * u - 2.0, 2.0 * u)
+    };
+    let _ = newton_steps::<f64, 4>(f, 1.5);
+    assert_eq!(calls.replace(0), 4);
+    let _ = capped_newton_steps::<f64, 4>(f, 1.5, 1.4);
+    assert_eq!(calls.get(), 5);
+}
