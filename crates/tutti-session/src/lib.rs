@@ -135,8 +135,6 @@ mod midi_port;
 mod midi_sink;
 mod modulation;
 mod node;
-#[cfg(feature = "midi")]
-mod os_clock;
 mod params;
 mod peer;
 #[cfg(any(feature = "plugin", feature = "midi-hardware"))]

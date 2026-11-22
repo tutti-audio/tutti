@@ -20,6 +20,68 @@ unit! {
     pub struct Seconds(f64): Unit, Ordered, Bounded, Additive, Scalable, Ratio;
 }
 
+unit! {
+    /// A fractional count of SMPTE timecode frames: how many labelled frames
+    /// of an SMPTE ST 12-1 timecode frame rate a time spans, with the part of
+    /// a frame kept. Not a graph [`Frame`](crate::Frame),
+    /// which is one value per channel at the sample rate.
+    ///
+    /// The count is the frames elapsed, not a label: a drop-frame label skips
+    /// numbers, and the label of a count belongs to the timecode that owns
+    /// the rate. [`round`](Self::round) and [`floor`](Self::floor) are the
+    /// ways back to a whole count, named for the rounding.
+    pub struct TimecodeFrames(f64): Unit, Ordered, Bounded, Additive, Signed, Scalable;
+}
+
+// Deliberately absent, and the omissions are load-bearing:
+//
+// - `Mul<TimecodeFrames>` — frames squared is no quantity. Scaling is
+//   `Mul<f64>` (`Scalable`).
+// - `Div<TimecodeFrames> -> f64` (`Ratio`) — the quotient of two counts at one
+//   rate is a speed ratio; a comparison is `<`, and the whole frames in a span
+//   are its `floor`.
+// - `Rem` (`Modular`) — a label wraps by its own fields (seconds, minutes,
+//   hours), and the drop-frame wrap is `SmpteTimecode::from_frame_count`, not a
+//   remainder of the count.
+// - `From<f64>` / `From<TimecodeFrames> for f64` — `new` and `get`.
+
+impl TimecodeFrames {
+    /// No frames.
+    pub const ZERO: TimecodeFrames = TimecodeFrames(0.0);
+
+    /// The count of a whole number of frames, exact up to 2^53.
+    #[inline]
+    #[must_use]
+    pub const fn from_count(count: u64) -> Self {
+        Self(count as f64)
+    }
+
+    /// The magnitude of the count, for a distance that has no direction.
+    #[inline]
+    #[must_use]
+    pub fn abs(self) -> Self {
+        Self(self.0.abs())
+    }
+
+    /// The whole count nearest this one, half away from zero: the frame a
+    /// time a float's width short of a boundary reads as. A NaN or negative
+    /// count gives 0, and one past `u64::MAX` saturates.
+    #[inline]
+    #[must_use]
+    pub fn round(self) -> u64 {
+        libm::round(self.0) as u64
+    }
+
+    /// The whole frames fully elapsed, rounded **down**; the remainder is
+    /// `self - TimecodeFrames::from_count(self.floor())`. A NaN or negative count
+    /// gives 0, and one past `u64::MAX` saturates.
+    #[inline]
+    #[must_use]
+    pub fn floor(self) -> u64 {
+        libm::floor(self.0) as u64
+    }
+}
+
 impl Hz {
     /// No frequency: a rate of zero.
     pub const ZERO: Hz = Hz(0.0);

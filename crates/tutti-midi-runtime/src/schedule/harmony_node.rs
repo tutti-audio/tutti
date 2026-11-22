@@ -28,8 +28,8 @@ use tutti_buffers::Float;
 use tutti_rt::Mutex;
 
 use tutti_graph::{
-    Cx, Event, EventDensity, EventWriter, ForkCause, ForkMode, ForkSource, Forked, Harmony,
-    HarmonyKind, IntoNode, Io, MIN_EVENT_PORT_CAPACITY, Node, NodeParts, Offset, Prepare, Shape,
+    Cx, Event, EventDensity, EventWriter, ForkCause, ForkSource, Forked, Harmony, HarmonyKind,
+    IntoNode, Io, MIN_EVENT_PORT_CAPACITY, Node, NodeParts, Offset, Prepare, RenderMode, Shape,
     Status,
 };
 use tutti_rt::{Publisher, Reader};
@@ -438,7 +438,7 @@ struct HarmonyFork {
 }
 
 impl<F: Float> ForkSource<F> for HarmonyFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked<F>, ForkCause> {
         let cell = Publisher::from_arc(self.cell.current());
         Ok(Forked::new(Box::new(HarmonyNode::over(cell))))
     }

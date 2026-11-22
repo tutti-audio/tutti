@@ -45,15 +45,14 @@ use std::sync::Arc;
 use tutti_buffers::Float;
 
 use tutti_graph::{
-    Cx, Event, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Offset,
-    Prepare, Shape, Status, UmpAt, declare_params,
+    Cx, Event, ForkCause, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Offset, Prepare,
+    RenderMode, Shape, Status, UmpAt, declare_params,
 };
 use tutti_midi_protocol::{MtcRate, Recipient};
 use tutti_music::MeterMap;
 use tutti_rt::{AtomicCell, Counter, CounterWriter, Publisher, Reader, RtVec, counter};
 use tutti_ump::{MidiGroup, Sysex7Packets};
-use tutti_units::Losses;
-use tutti_units::{Beat, SampleRate};
+use tutti_units::{Beat, Losses, SampleRate};
 
 use super::clock_master::ClockMaster;
 use super::machine_control_out::MachineControlSender;
@@ -345,7 +344,7 @@ struct SyncFork {
 }
 
 impl<F: Float> ForkSource<F> for SyncFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked<F>, ForkCause> {
         let meter = self.meter.clone();
         let node = SyncOut::new(self.group)
             .meter(move || (meter.0)())

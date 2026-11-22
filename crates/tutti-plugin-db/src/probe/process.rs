@@ -68,9 +68,18 @@ pub(super) async fn run(
     let mut child = Reaped::new(child);
     let deadline = Deadline::after(Instant::now(), timeout);
     let status = wait(&mut child, executor, deadline).await;
-    // The file is read even after a timeout or a bad exit: it is the only proof
-    // of finishing, and a probe that finished at the deadline did.
-    let file = read_result(&result);
+    settle(read_result(&result), status, timeout)
+}
+
+/// What a probe's result file and the way its wait ended make of the probe. The file
+/// wins whatever the end: it is the only proof of finishing, so a listing written
+/// before a crash or a hang at the deadline is the result; without one, the end is
+/// the failure.
+fn settle(
+    file: Result<Option<ProbeOutcome>, ResultError>,
+    status: Waited,
+    timeout: Duration,
+) -> Result<ProbeListing, ProbeError> {
     let outcome = match (file, status) {
         (Ok(Some(outcome)), _) => outcome,
         (Err(e), _) => return Err(ProbeError::Result(e)),
@@ -258,5 +267,38 @@ mod tests {
             Some(Waited::Lost(_))
         ));
         assert!(verdict(running(), Deadline::never(), start + timeout).is_none());
+    }
+
+    /// **A listing written before a hang or a crash is the result**: the file wins
+    /// over a timeout, a signal and a shut-down alike, and without one a timeout is
+    /// `TimedOut` after the caller's deadline.
+    #[test]
+    fn a_listing_wins_over_how_the_wait_ended() {
+        use tutti_plugin_types::{Described, PluginClass, PluginDescriptor, PluginId};
+        let timeout = Duration::from_secs(15);
+        let plugins = vec![Described::new(
+            PluginId::Clap("a.plugin".into()),
+            PluginDescriptor::new("A", PluginClass::Unknown),
+        )];
+        let written = || {
+            Ok(Some(ProbeOutcome::Described {
+                plugins: plugins.clone(),
+                unmeasured: Vec::new(),
+            }))
+        };
+        let ends = || {
+            [
+                Waited::TimedOut,
+                Waited::Exited(ExitStatus::from_raw(11)),
+                Waited::ShutDown,
+            ]
+        };
+        for end in ends() {
+            assert_eq!(settle(written(), end, timeout).unwrap().plugins, plugins);
+        }
+        assert_eq!(
+            settle(Ok(None), Waited::TimedOut, timeout).unwrap_err(),
+            ProbeError::TimedOut { after: timeout }
+        );
     }
 }

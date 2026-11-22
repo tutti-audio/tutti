@@ -15,9 +15,9 @@ use tutti_buffers::ChannelLayout;
 use tutti_curve::{Breakpoint, Trajectory};
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventEdge, EventInputPort, EventOutputPort, Executor, ForkByClone, ForkMode,
-    ForkTarget, Io, Law, Node, Offset, ParamEvent, ParamIn, ParamKind, ParamRange, ParamSegment,
-    Prepare, Shape, Status, TransportChanges, TransportPosition, control_in, declick_frames,
+    Cx, Editor, EventEdge, EventInputPort, EventOutputPort, Executor, ForkByClone, ForkTarget, Io,
+    Law, Node, Offset, ParamEvent, ParamIn, ParamKind, ParamRange, ParamSegment, Prepare,
+    RenderMode, Shape, Status, TransportChanges, TransportPosition, control_in, declick_frames,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_modulation::{
@@ -572,8 +572,8 @@ fn an_export_is_the_live_render_bit_for_bit() {
     let (mut fed, mut fexec) = ed
         .fork(
             ForkTarget::MainOutput,
-            ForkMode::Offline,
-            Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(1024))),
+            Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(1024)))
+                .with_render_mode(RenderMode::Offline),
         )
         .expect("forks");
     let total = 60_000;
@@ -1352,8 +1352,8 @@ fn a_lane_fed_fork_reads_its_value_at_frame_0() {
     let (mut fed, mut fexec) = ed
         .fork(
             ForkTarget::MainOutput,
-            ForkMode::Offline,
-            Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(64))),
+            Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(64)))
+                .with_render_mode(RenderMode::Offline),
         )
         .expect("forks");
     assert!(controls.store(700.0));

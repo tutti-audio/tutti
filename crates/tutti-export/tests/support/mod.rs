@@ -23,7 +23,7 @@ use tutti_export::{
     BufferTarget, Control, EventLossPolicy, FileTarget, Job, Normalize, NormalizeSpec, Outcome,
     Output, Produced, RenderGraph, Rendered, Resample, Result, Setup, Written, render_one,
 };
-use tutti_graph::{Editor, ForkMode, ForkTarget};
+use tutti_graph::{Editor, ForkTarget};
 use tutti_timeline::RenderClock;
 use tutti_units::{SampleRate, Samples, Seconds};
 
@@ -170,11 +170,7 @@ pub fn write_buffers(
 /// main output).
 pub fn fork_offline(live: &Editor, rate: SampleRate) -> RenderGraph {
     let (editor, executor) = live
-        .fork(
-            ForkTarget::MainOutput,
-            ForkMode::Offline,
-            RenderGraph::prepare(rate),
-        )
+        .fork(ForkTarget::MainOutput, RenderGraph::prepare(rate))
         .expect("every node here is forkable");
     RenderGraph::assemble(editor, executor, Setup::new()).expect("forked together")
 }

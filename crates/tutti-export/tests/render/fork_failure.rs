@@ -21,8 +21,8 @@ use tutti_export::{
 };
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, IntoNode, Io,
-    Node, NodeParts, Prepare, Shape, Status,
+    Cx, Editor, ForkCause, ForkFaultKind, ForkHealth, ForkSource, Forked, IntoNode, Io, Node,
+    NodeParts, Prepare, RenderMode, Shape, Status,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_timeline::FrozenClock;
@@ -68,7 +68,7 @@ impl ForkHealth for Crashed {
 struct Fork(Arc<Crashed>);
 
 impl ForkSource for Fork {
-    fn fork(&self, _: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, _: RenderMode) -> Result<Forked, ForkCause> {
         Ok(Forked::new(Box::new(Dc)).with_health(Arc::clone(&self.0) as Arc<dyn ForkHealth>))
     }
 }

@@ -1232,11 +1232,7 @@ fn a_fork_modulates_as_the_live_graph_does() {
     };
     drive(&mut editor, at, Arc::new(AtomicF64::new(3.0)), vec![]);
     let (fed, fexec) = editor
-        .fork(
-            tutti_graph::ForkTarget::MainOutput,
-            tutti_graph::ForkMode::Live,
-            prepare,
-        )
+        .fork(tutti_graph::ForkTarget::MainOutput, prepare)
         .expect("forks");
     let mut fork = Renderer::new(fed, fexec);
     let x = noise(7);

@@ -39,7 +39,8 @@ use tutti_units::UnitAddr;
 #[cfg(test)]
 use tutti_units::UnitParam;
 
-use crate::fork::{ForkBuild, ForkCause, ForkMode, ForkSource, Forked};
+use crate::RenderMode;
+use crate::fork::{ForkBuild, ForkCause, ForkSource, Forked};
 use tutti_buffers::Float;
 
 use crate::node::{IntoNode, Node, NodeParts};
@@ -220,14 +221,14 @@ impl<N> ParamFork<N> {
 }
 
 impl<F: Float, N: ParamNode<F>> ForkSource<F> for ParamFork<N> {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked<F>, ForkCause> {
         Ok(Forked::new(Box::new(self.fork_node())))
     }
 
     /// The cells are read here, at the gather: a param set after
     /// it does not reach the fork. The fork's cells are its own, so it can
     /// be prepared on any thread.
-    fn gather(&self, mode: ForkMode) -> Result<ForkBuild<F>, ForkCause> {
+    fn gather(&self, mode: RenderMode) -> Result<ForkBuild<F>, ForkCause> {
         self.fork(mode).map(ForkBuild::ready)
     }
 }

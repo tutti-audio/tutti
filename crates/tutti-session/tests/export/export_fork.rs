@@ -26,8 +26,8 @@ use tutti_export::Produced;
 use tutti_fixtures::block_on;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, ForkBuild, ForkByClone, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node,
-    NodeParts, ParamNode, ParamSet, Params, Prepare, Shape, Status,
+    Cx, ForkBuild, ForkByClone, ForkCause, ForkSource, Forked, IntoNode, Io, Node, NodeParts,
+    ParamNode, ParamSet, Params, Prepare, RenderMode, Shape, Status,
 };
 use tutti_nodes::testing::{Const, Osc, Sink};
 use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
@@ -612,7 +612,7 @@ struct Counter {
 struct CounterFork;
 
 impl ForkSource for CounterFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked, ForkCause> {
         let n = Arc::new(AtomicU64::new(0));
         Ok(Forked::new(Box::new(Counter { n })))
     }
@@ -850,11 +850,11 @@ struct SlowFork {
 }
 
 impl ForkSource for SlowFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked, ForkCause> {
         unreachable!("an export gathers")
     }
 
-    fn gather(&self, _mode: ForkMode) -> Result<ForkBuild, ForkCause> {
+    fn gather(&self, _mode: RenderMode) -> Result<ForkBuild, ForkCause> {
         // Read now, when the export starts.
         let level = f32::from_bits(self.level.load(Ordering::SeqCst));
         let wait = self.wait.lock().unwrap().take();
@@ -1045,14 +1045,14 @@ impl Drop for Pinned {
 struct PinnedFork(Arc<Threads>);
 
 impl ForkSource for PinnedFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked, ForkCause> {
         here(&self.0.built);
         Ok(Forked::new(Box::new(Pinned {
             threads: Arc::clone(&self.0),
         })))
     }
 
-    fn gather(&self, mode: ForkMode) -> Result<ForkBuild, ForkCause> {
+    fn gather(&self, mode: RenderMode) -> Result<ForkBuild, ForkCause> {
         self.fork(mode).map(ForkBuild::pinned)
     }
 }
@@ -1199,10 +1199,10 @@ impl Node for Broken {
 struct BrokenFork;
 
 impl ForkSource for BrokenFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked, ForkCause> {
         unreachable!("an export gathers")
     }
-    fn gather(&self, _mode: ForkMode) -> Result<ForkBuild, ForkCause> {
+    fn gather(&self, _mode: RenderMode) -> Result<ForkBuild, ForkCause> {
         Ok(ForkBuild::deferred(|| Err(ForkCause::new(NoServer))))
     }
 }

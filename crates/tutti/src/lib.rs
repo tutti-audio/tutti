@@ -457,7 +457,7 @@ pub mod types {
         PlaybackRate, PlaybackRateOutOfRange, Radians, ReadPosition, ReadRate, Resonance,
         RunningPhase, SamplePosition, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange,
         Speed, SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail,
-        Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
+        TimecodeFrames, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
     };
     pub use tutti_units::{Phase, Quantity, Real, Resyncs};
 }
@@ -486,7 +486,7 @@ pub mod graph {
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,
         Due, Edge, Event, EventKind, EventOrderError, EventRejected, EventWriter, ForkBuild,
-        ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, GraphInvalid, Harmony,
+        ForkCause, ForkFaultKind, ForkHealth, ForkSource, Forked, GraphInvalid, Harmony,
         HarmonyKind, InPlaceMask, NodeParts, Offset, ParamEvent, ParamInput, ParamKind, ParamMod,
         ParamPorts, ParamPortsError, ParamRamp, ParamRange, ParamRangeCell, ParamRangeReader,
         ParamSegment, Pass, PlayClock, PortSink, PortSource, RenderMode, Resolution, SilenceMask,
@@ -868,8 +868,9 @@ pub mod midi {
         ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, Mcm, MemberCount,
         MmcSegmentCount, MmcSegmentError, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones,
         MtcRate, NotFrequencyData, NotMemberCount, NotMmcSegmentCount, NotSysexDeviceId,
-        PitchBendSensitivity, Recipient, SmpteFrameRate, SmpteTimecode, SysexDeviceId,
-        TuningFrequency,
+        NotTimecodeHours, NotTimecodeMinutes, NotTimecodeSeconds, PitchBendSensitivity, Recipient,
+        SmpteFrameRate, SmpteTimecode, SysexDeviceId, TimecodeHours, TimecodeMinutes,
+        TimecodeSeconds, TuningFrequency,
     };
     pub use tutti_midi_runtime::{
         ClipEvents, ClockKind, ClockOffset, HarmonyChanges, HarmonyChangesError, HarmonyControls,

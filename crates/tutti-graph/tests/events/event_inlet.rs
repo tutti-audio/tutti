@@ -19,14 +19,13 @@ use tutti_graph::contract::{Direct, HAND_EVENT_CAPACITY};
 use tutti_graph::{
     Edge, Editor, Env, EventCapacity, EventEdge, EventInletNode, EventInletWriter, EventInputPort,
     EventKind, EventOutputPort, EventTapId, EventTapOptions, EventTapReader, Executor, ForkCause,
-    ForkMode, ForkSource, ForkTarget, Forked, InputPort, IntoNode, Node, NodeKey, NodeParts,
-    OutputPort, PlayClock, PortSource, Prepare, Stamp, TapAlign, TapEvent, TransportChanges,
+    ForkSource, ForkTarget, Forked, InputPort, IntoNode, Node, NodeKey, NodeParts, OutputPort,
+    PlayClock, PortSource, Prepare, RenderMode, Stamp, TapAlign, TapEvent, TransportChanges,
     TransportPosition,
 };
 use tutti_rt::PushError;
 use tutti_ump::{CCNumber, MidiChannel, U7, Ump};
-use tutti_units::Losses;
-use tutti_units::{Frame, Moment, SampleRate, Samples};
+use tutti_units::{Frame, Losses, Moment, SampleRate, Samples};
 
 const R48: SampleRate = SampleRate::SR_48K;
 const R441: SampleRate = SampleRate::SR_44K1;
@@ -473,7 +472,7 @@ struct Forkable(Kind);
 struct KindFork(Kind);
 
 impl ForkSource for KindFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked, ForkCause> {
         Ok(Forked::new(Box::new(TestNode::new(self.0.clone()))))
     }
 }
@@ -721,8 +720,7 @@ fn the_fork_is_silent() {
     let (mut fed, mut fexec) = ed
         .fork(
             ForkTarget::MainOutput,
-            ForkMode::Offline,
-            common::prepare(MAX_BLOCK),
+            common::prepare(MAX_BLOCK).with_render_mode(RenderMode::Offline),
         )
         .expect("forks");
     fexec.apply_pending();

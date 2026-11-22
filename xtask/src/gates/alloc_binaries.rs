@@ -80,10 +80,6 @@ pub(super) const DEBT: &[(&str, &str)] = &[
         "crates/tutti-session/tests/io/main.rs",
         "clock_switch::the_old_driver_renders_its_last_block_before_the_new_one_its_first: Renderer::process, tests/io/clock_switch.rs:628",
     ),
-    (
-        "crates/tutti-soundfont/tests/graph/main.rs",
-        "contract::soundfont::direct: tutti_graph::contract::Recorder::process, tutti-graph src/contract.rs:1534",
-    ),
 ];
 
 /// Whether `path` is `(crates|testing)/<crate>/tests/<area>/main.rs`, an area binary.

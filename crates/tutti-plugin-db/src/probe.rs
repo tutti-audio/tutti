@@ -249,26 +249,24 @@ mod tests {
                 tutti_plugin_types::PluginClass::Unknown,
             ),
         )];
-        // A crash ends the probe by itself, so its window only guards a hang; a hang
-        // ends at the window, so it is short.
-        for (end, window) in [
-            ("kill -SEGV $$", Duration::from_secs(60)),
-            ("exec sleep 300", Duration::from_secs(2)),
-        ] {
-            let dir = TempDir::new().unwrap();
-            let prepared = dir.path().join("listing");
-            write_result(
-                &prepared,
-                &ProbeOutcome::Described {
-                    plugins: listed.clone(),
-                    unmeasured: Vec::new(),
-                },
-            )
-            .unwrap();
-            let locator = stand_in(&dir, &format!("cp {} \"$2\"\n{end}", prepared.display()));
-            let result = probe(&locator, window);
-            assert_eq!(result, Ok(listed.clone()), "after `{end}`");
-        }
+        // A crash ends the probe by itself, so its window only guards a hang. A hang
+        // with a listing is `settle`'s rule, tested over constructed ends in `os`.
+        let dir = TempDir::new().unwrap();
+        let prepared = dir.path().join("listing");
+        write_result(
+            &prepared,
+            &ProbeOutcome::Described {
+                plugins: listed.clone(),
+                unmeasured: Vec::new(),
+            },
+        )
+        .unwrap();
+        let locator = stand_in(
+            &dir,
+            &format!("cp {} \"$2\"\nkill -SEGV $$", prepared.display()),
+        );
+        let result = probe(&locator, Duration::from_secs(60));
+        assert_eq!(result, Ok(listed));
     }
 
     /// **The plugins a measuring probe could not measure come back with the

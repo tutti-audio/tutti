@@ -31,8 +31,8 @@
 use std::num::NonZeroU32;
 use tutti_buffers::Float;
 use tutti_graph::{
-    Cost, Cx, Event, EventKind, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node,
-    NodeParts, Offset, Prepare, Shape, Status, UmpAt, note_off_room,
+    Cost, Cx, Event, EventKind, ForkCause, ForkSource, Forked, IntoNode, Io, Node, NodeParts,
+    Offset, Prepare, RenderMode, Shape, Status, UmpAt, note_off_room,
 };
 use tutti_midi_protocol::{Midi2Translator, MpeMode};
 use tutti_rt::{Counter, CounterWriter, Publisher, Reader, counter};
@@ -243,7 +243,7 @@ struct ModeFork {
 }
 
 impl<F: Float> ForkSource<F> for ModeFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked<F>, ForkCause> {
         let snapshot = Publisher::new(*self.mode.current());
         Ok(Forked::new(Box::new(MpeTransformNode::new(&snapshot))))
     }

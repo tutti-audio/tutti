@@ -23,7 +23,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, Executor, ForkByClone, ForkMode, ForkTarget, IntoNode, Io, Node, Prepare, Shape,
+    Cx, Editor, Executor, ForkByClone, ForkTarget, IntoNode, Io, Node, Prepare, RenderMode, Shape,
     Status, TransportPosition,
 };
 use tutti_graph::{OutputPort, PortSource};
@@ -94,7 +94,10 @@ fn stopped() -> TransportPosition {
 /// The offline fork of `ed`'s graph (what the export takes), applied.
 fn fork(ed: &Editor) -> Executor {
     let (_ed, mut exec) = ed
-        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare())
+        .fork(
+            ForkTarget::MainOutput,
+            prepare().with_render_mode(RenderMode::Offline),
+        )
         .expect("forks");
     exec.apply_pending();
     exec

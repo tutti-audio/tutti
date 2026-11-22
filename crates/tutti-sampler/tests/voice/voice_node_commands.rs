@@ -37,7 +37,7 @@ use tutti_buffers::Mono;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::NodeKey;
-use tutti_graph::{Editor, Executor, ForkMode, ForkTarget, Prepare, TransportPosition, Unforkable};
+use tutti_graph::{Editor, Executor, ForkTarget, Prepare, TransportPosition, Unforkable};
 use tutti_graph::{OutputPort, PortSource};
 use tutti_sampler::testing::{MockTransport, block};
 use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoiceSource, VoiceWindow};
@@ -216,7 +216,6 @@ fn a_fork_steals_no_commands() {
     let (_fork_ed, mut fork) = ed
         .fork(
             ForkTarget::MainOutput,
-            ForkMode::Live,
             Prepare::new(RATE, MaxBlock::of(Samples::new(256))),
         )
         .expect("a memory voice forks");
@@ -264,9 +263,7 @@ fn a_placement_sent_after_the_insert_reaches_a_fork() {
     let (ed, _exec, handle) = graph_with(node_at(0.0));
     let prepare = Prepare::new(RATE, MaxBlock::of(Samples::new(256)));
     // A fork taken before the move: not vacuous, it is still at beat 0.
-    let (_before_ed, mut before) = ed
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
-        .expect("forks");
+    let (_before_ed, mut before) = ed.fork(ForkTarget::MainOutput, prepare).expect("forks");
     before.apply_pending();
 
     handle.window_cell().publish(Some(VoiceWindow::span(
@@ -274,9 +271,7 @@ fn a_placement_sent_after_the_insert_reaches_a_fork() {
         BeatDuration::new(1.0),
     )));
 
-    let (_after_ed, mut after) = ed
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
-        .expect("forks");
+    let (_after_ed, mut after) = ed.fork(ForkTarget::MainOutput, prepare).expect("forks");
     after.apply_pending();
     assert!(
         render_peak(&mut after, 10.0) > 0.5,
@@ -349,18 +344,14 @@ fn a_speed_published_after_the_insert_reaches_a_fork() {
     .expect("a finite gain and a nonempty width");
     let (ed, _exec, handle) = graph_with(node);
     let prepare = Prepare::new(RATE, MaxBlock::of(Samples::new(256)));
-    let (_before_ed, mut before) = ed
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
-        .expect("forks");
+    let (_before_ed, mut before) = ed.fork(ForkTarget::MainOutput, prepare).expect("forks");
     before.apply_pending();
 
     handle
         .speed_cell()
         .publish(tutti_units::PlaybackRate::of(2.0));
 
-    let (_after_ed, mut after) = ed
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
-        .expect("forks");
+    let (_after_ed, mut after) = ed.fork(ForkTarget::MainOutput, prepare).expect("forks");
     after.apply_pending();
     let render = |exec: &mut Executor| {
         let mut out = vec![0.0f32; 256];
