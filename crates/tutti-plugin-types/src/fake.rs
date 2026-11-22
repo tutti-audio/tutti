@@ -25,8 +25,8 @@ use crate::PluginClass;
 use crate::StateError;
 use crate::{
     ChannelLayout, ContentScale, Control, Controller, EditReader, EditWriter, EditorError,
-    EditorWindow, Layout, Loaded, LoadedPlugin, MainThreadMarker, ParamEdit, ParamFlags,
-    ParameterInfo, PluginBus, PluginDescriptor, PluginError, PluginIo, PluginResult, PluginTail,
+    EditorWindow, Layout, Loaded, MainThreadMarker, ParamEdit, ParamFlags, ParameterInfo,
+    PluginBus, PluginDescriptor, PluginError, PluginIo, PluginResult, PluginTail, PluginWiring,
     Prepare, Processor, Rebuilt, Refused, RenderMode, RenderModeSupport, Request, RescanScope,
     RestartRules, SampleRate, Samples, Stuck, TimerId, Widths, WindowHandle, edit_slots,
 };
@@ -298,16 +298,16 @@ impl Shared {
         self.declared.lock_recover().clone()
     }
 
-    fn wiring(&self) -> LoadedPlugin {
+    fn wiring(&self) -> PluginWiring {
         self.log.push(Call::Wiring);
         let outputs = ChannelLayout::try_from(self.outputs.load(Ordering::Relaxed))
             .expect("a fake plugin has few outputs");
-        LoadedPlugin {
+        PluginWiring {
             inputs: vec![PluginBus::main(ChannelLayout::STEREO)],
             outputs: vec![PluginBus::main(outputs)],
             latency_samples: Samples::new(self.latency.load(Ordering::Relaxed)),
             tail: self.tail(),
-            ..LoadedPlugin::default()
+            ..PluginWiring::default()
         }
     }
 
@@ -628,7 +628,7 @@ macro_rules! fake_control {
                 &self.descriptor
             }
 
-            fn wiring(&self, _main: MainThreadMarker) -> LoadedPlugin {
+            fn wiring(&self, _main: MainThreadMarker) -> PluginWiring {
                 self.shared.wiring()
             }
 

@@ -736,14 +736,14 @@ mod tests {
     /// what the blocks below carry as their extras.
     static QUIET: std::sync::LazyLock<ProcessAudioData> =
         std::sync::LazyLock::new(|| ProcessAudioData::empty(tutti_units::SampleRate::SR_48K));
-    use tutti_plugin_types::{ChannelLayout, LoadedPlugin, PluginResult};
+    use tutti_plugin_types::{ChannelLayout, PluginResult, PluginWiring};
 
     /// A stand-in plugin whose `render` fills every output sample with a
     /// non-finite value. Used to prove the pipeline sanitizes plugin output
     /// before it reaches the shared-memory slab. Only its wiring and `render`
     /// are meaningful.
     struct NanPlugin {
-        meta: LoadedPlugin,
+        meta: PluginWiring,
         fill: f32,
     }
 
@@ -772,7 +772,7 @@ mod tests {
 
     /// A stand-in plugin that fills its output with `fill` and says `status`.
     struct SaysPlugin {
-        meta: LoadedPlugin,
+        meta: PluginWiring,
         fill: f32,
         status: BlockStatus,
     }
@@ -848,7 +848,7 @@ mod tests {
     /// the sidechain bus is observed. Sample-erased via an interior-mutable
     /// `RefCell` so `render(&mut self)` can stash the seen values.
     struct EchoProbe {
-        meta: LoadedPlugin,
+        meta: PluginWiring,
         seen_inputs: std::cell::RefCell<Vec<f32>>,
     }
 
@@ -916,9 +916,9 @@ mod tests {
     /// its sequence check pass by accident rather than because anyone published.
     const SEQ: u64 = 1;
 
-    /// A test [`LoadedPlugin`] with the given per-bus input/output channel widths.
-    fn meta(inputs: &[usize], outputs: &[usize]) -> LoadedPlugin {
-        LoadedPlugin {
+    /// A test [`PluginWiring`] with the given per-bus input/output channel widths.
+    fn meta(inputs: &[usize], outputs: &[usize]) -> PluginWiring {
+        PluginWiring {
             inputs: inputs
                 .iter()
                 .map(|&c| {
@@ -937,7 +937,7 @@ mod tests {
             // and no speaker placement either.
             features: Features::empty(),
             probed: Features::empty(),
-            ..LoadedPlugin::default()
+            ..PluginWiring::default()
         }
     }
 
