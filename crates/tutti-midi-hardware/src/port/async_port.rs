@@ -21,13 +21,13 @@ use std::sync::{Arc, Mutex};
 use tutti_platform::Instant;
 use tutti_rt::LockExt;
 
-use tutti_graph::Losses;
 use tutti_midi_device::{ClockHeard, JrReceiver};
 use tutti_midi_runtime::{DeviceInput, InputId};
 use tutti_rt::{
     Bell, Counter, CounterWriter, Overflow, PushError, RingReader, RingWriter, counter, ring,
 };
 use tutti_ump::{Message, Ump, Utility};
+use tutti_units::Losses;
 use tutti_units::Resyncs;
 
 use crate::InputTiming;

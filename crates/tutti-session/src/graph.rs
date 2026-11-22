@@ -1005,7 +1005,7 @@ impl<F: Float> Graph<F> {
     /// (a live input's is `tutti_midi_runtime::LIVE_INLET_CAPACITY`, 256).
     ///
     /// Nothing blocks and what does not fit is counted in the writer's
-    /// [`Losses`](tutti_graph::Losses) (`EventInletWriter::counts`, then
+    /// [`Losses`](tutti_units::Losses) (`EventInletWriter::counts`, then
     /// `losses()`: `lost`, `evicted`, `refused`, and `late` for what was found
     /// past). A producer
     /// has no rate to match: an event names a frame, or a

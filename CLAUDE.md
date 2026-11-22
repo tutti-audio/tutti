@@ -216,7 +216,7 @@ touched.
 
 - A reading the audio thread writes and any thread reads is a `tutti_rt::Gauge<U>` (latest
   value) or `Counter<U>` (a cumulative count that saturates); a count with many writers is
-  a `Tally<U>`. A count of lost events is a `Counter<Losses>` (`tutti_graph::Losses`).
+  a `Tally<U>`. A count of lost events is a `Counter<Losses>` (`tutti_units::Losses`).
 - A refusable push returns `tutti_rt::PushError { Full, Disconnected }`.
 - A thread's wake-up is `tutti_rt::parker()`: any number of `Unparker`s unpark one
   `Parker`. A future's wake-up is a `tutti_rt::Bell` from the session's `Bells`: the audio

@@ -11,8 +11,9 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use tutti_rt::{Bell, LockExt};
 
-use tutti_graph::{EventInletNode, Losses};
+use tutti_graph::EventInletNode;
 use tutti_midi_runtime::{DeviceWriters, InputId, InputInlets};
+use tutti_units::Losses;
 use tutti_units::Resyncs;
 
 use super::async_port::{HardwareMidiInput, InputProducerHandle, StreamDrain};

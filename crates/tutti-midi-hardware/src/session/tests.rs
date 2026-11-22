@@ -415,7 +415,7 @@ fn a_message_the_device_cannot_take_whole_is_refused_whole_and_counted() {
         "the note before the message, and no more"
     );
     assert_eq!(counters.take_sent(raw), [note().1]);
-    assert_eq!(output.losses(), tutti_graph::Losses::refused(4));
+    assert_eq!(output.losses(), tutti_units::Losses::refused(4));
 }
 
 /// An output is the caller's value, not the session's: each connect returns

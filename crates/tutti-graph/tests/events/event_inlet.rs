@@ -19,12 +19,13 @@ use tutti_graph::contract::{Direct, HAND_EVENT_CAPACITY};
 use tutti_graph::{
     Edge, Editor, Env, EventCapacity, EventEdge, EventInletNode, EventInletWriter, EventInputPort,
     EventKind, EventOutputPort, EventTapId, EventTapOptions, EventTapReader, Executor, ForkCause,
-    ForkMode, ForkSource, ForkTarget, Forked, InputPort, IntoNode, Losses, Node, NodeKey,
-    NodeParts, OutputPort, PlayClock, PortSource, Prepare, Stamp, TapAlign, TapEvent,
-    TransportChanges, TransportPosition,
+    ForkMode, ForkSource, ForkTarget, Forked, InputPort, IntoNode, Node, NodeKey, NodeParts,
+    OutputPort, PlayClock, PortSource, Prepare, Stamp, TapAlign, TapEvent, TransportChanges,
+    TransportPosition,
 };
 use tutti_rt::PushError;
 use tutti_ump::{CCNumber, MidiChannel, U7, Ump};
+use tutti_units::Losses;
 use tutti_units::{Frame, Moment, SampleRate, Samples};
 
 const R48: SampleRate = SampleRate::SR_48K;

@@ -7,8 +7,8 @@
 //! goes in part, and the packets it lost are counted ([`DeviceOut::losses`]).
 
 use std::sync::Mutex;
-use tutti_graph::Losses;
 use tutti_rt::{Counter, CounterWriter, LockExt, counter};
+use tutti_units::Losses;
 
 use crate::backend::by_message::{Refused, by_message};
 use crate::endpoints::DeviceOut;

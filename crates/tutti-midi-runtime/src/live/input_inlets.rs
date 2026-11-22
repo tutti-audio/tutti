@@ -55,13 +55,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tutti_platform::Instant;
 
-use tutti_graph::{EventCapacity, EventInletNode, EventInletWriter, InletCounts, Losses, Stamp};
+use tutti_graph::{EventCapacity, EventInletNode, EventInletWriter, InletCounts, Stamp};
 use tutti_rt::Param64;
 use tutti_rt::{
     Counter, CounterWriter, Gauge, GaugeWriter, Publisher, PushError, Reader, Tally, counter,
     gauge, tally,
 };
 use tutti_ump::Ump;
+use tutti_units::Losses;
 use tutti_units::{Moment, Resyncs, Seconds};
 
 use crate::clock_map::{ClockMap, ClockReading, Observed};
