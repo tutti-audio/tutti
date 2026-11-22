@@ -7,12 +7,12 @@
 
 use std::convert::Infallible;
 use std::fmt::Display;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::Instant;
 
 use tutti_buffers::{Float, Sample};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 use tutti_units::Samples;
 
 use crate::callback::OutputBlock;
@@ -97,7 +97,7 @@ impl<F: Float> ManualStreamDriver<F> {
 
 impl<F: Float> ManualStream<F> {
     fn with_block<R>(&self, f: impl FnOnce(&mut OutputBlock<F>) -> R) -> Option<R> {
-        let mut guard = self.slot.lock_recover();
+        let mut guard = self.slot.lock();
         guard.as_mut().map(f)
     }
 
@@ -127,7 +127,7 @@ impl<F: Float> ManualStream<F> {
         let layout = self.with_block(|b| b.layout())?;
         let mut out = vec![F::ZERO; layout.interleaved_len(frames)];
         self.with_block(|b| b.render_delayed_with(&mut out, delay, |x| x))?;
-        if let Some(faults) = self.faults.lock_recover().as_ref() {
+        if let Some(faults) = self.faults.lock().as_ref() {
             faults.delivered();
         }
         Some(out)
@@ -149,7 +149,7 @@ impl<F: Float> ManualStream<F> {
     /// the fault path without unplugging a device. Does nothing before the
     /// stream is first opened.
     pub fn fail(&self, kind: BackendErrorKind, err: &dyn Display, now: Instant) {
-        if let Some(faults) = self.faults.lock_recover().as_ref() {
+        if let Some(faults) = self.faults.lock().as_ref() {
             faults.record(kind, err, now);
         }
     }
@@ -157,7 +157,7 @@ impl<F: Float> ManualStream<F> {
     /// Returns whether a stream is currently open on this handle.
     #[must_use]
     pub fn is_open(&self) -> bool {
-        self.slot.lock_recover().is_some()
+        self.slot.lock().is_some()
     }
 }
 
@@ -176,7 +176,7 @@ impl<F: Float> RunningStream for ManualRunning<F> {
 
 impl<F: Float> Drop for ManualRunning<F> {
     fn drop(&mut self) {
-        *self.slot.lock_recover() = None;
+        *self.slot.lock() = None;
     }
 }
 
@@ -194,8 +194,8 @@ impl<F: Float> StreamDriver<F> for ManualStreamDriver<F> {
         // separate wiring call: `open` is the one place both the driver and
         // the sink are in scope, and a generic `start_with` cannot know it is
         // holding a manual driver.
-        *self.faults.lock_recover() = Some(faults);
-        *self.slot.lock_recover() = Some(block);
+        *self.faults.lock() = Some(faults);
+        *self.slot.lock() = Some(block);
         Ok(ManualRunning { slot: self.slot })
     }
 }
