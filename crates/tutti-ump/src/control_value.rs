@@ -2,7 +2,7 @@
 
 use tutti_units::Normalized;
 
-use crate::{U7, U14, scale};
+use crate::{BendValue, ExtremeValues, U7, U14, scale};
 
 /// The 32-bit value of a MIDI 2.0 Control Change, Channel or Polyphonic
 /// Pressure, Registered or Assignable Controller, or Per-Note Controller
@@ -87,6 +87,43 @@ impl ControlValue {
 }
 
 impl ControlValue {
+    /// The data of Registered Controller `index` from its 14-bit MIDI 1.0 form
+    /// (M2-115 section 4.1): zero-extended for an index of 0 to 31 in every
+    /// bank, scaled Min-Center-Max otherwise.
+    #[inline]
+    #[must_use]
+    pub fn from_registered(index: U7, data: U14) -> Self {
+        if scale::zero_extended(index) {
+            Self(u32::from(data.get()) << 18)
+        } else {
+            Self::from(data)
+        }
+    }
+
+    /// The 14-bit MIDI 1.0 data of Registered Controller `index`, the inverse of
+    /// [`from_registered`](Self::from_registered): rounded for an index of 0 to
+    /// 31 (M2-115 section 4.4.1), otherwise
+    /// [`to_assignable_u14`](Self::to_assignable_u14).
+    #[inline]
+    #[must_use]
+    pub fn to_registered_u14(self, index: U7, extremes: ExtremeValues) -> U14 {
+        if scale::zero_extended(index) {
+            // `rounded_u14` clamps to 14 bits.
+            U14::masked(scale::rounded_u14(self.0))
+        } else {
+            self.to_assignable_u14(extremes)
+        }
+    }
+
+    /// The 14-bit MIDI 1.0 data of an Assignable Controller, or of a Registered
+    /// one that M2-115 scales Min-Center-Max: the top 14 bits (as
+    /// [`BendValue::to_u14`] does a bend), with `extremes` applied.
+    #[inline]
+    #[must_use]
+    pub fn to_assignable_u14(self, extremes: ExtremeValues) -> U14 {
+        extremes.fourteen(BendValue::new(self.0).to_u14(), self.0)
+    }
+
     /// The value as 7 bits: the top 7 bits, the downscale of M2-115 section 3.4
     /// as a plain right shift.
     #[inline]

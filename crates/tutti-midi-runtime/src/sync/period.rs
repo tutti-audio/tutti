@@ -16,7 +16,7 @@
 //! memory for the same noise and lags a tempo ramp by it; the window lags a ramp
 //! by half of itself, two beats at most.
 
-use tutti_units::Seconds;
+use tutti_units::{Seconds, slope};
 
 /// Ticks the fit looks back over: two quarter notes at 24 per quarter.
 pub(crate) const WINDOW: usize = 48;
@@ -63,20 +63,8 @@ impl PeriodFit {
     /// Seconds per tick: the least-squares slope of arrival time against tick
     /// index. `None` with fewer than two arrivals.
     pub(crate) fn period(&self) -> Option<Seconds> {
-        if self.len < 2 {
-            return None;
-        }
-        let n = self.len as f64;
         let oldest = (self.next + WINDOW - self.len) % WINDOW;
-        let at = |i: usize| self.times[(oldest + i) % WINDOW];
-        let mean_t = (0..self.len).map(at).sum::<f64>() / n;
-        let mean_i = (n - 1.0) / 2.0;
-        let (mut num, mut den) = (0.0, 0.0);
-        for i in 0..self.len {
-            let di = i as f64 - mean_i;
-            num += di * (at(i) - mean_t);
-            den += di * di;
-        }
-        Some(Seconds::new(num / den))
+        let tick = |i: usize| (i as f64, Seconds::new(self.times[(oldest + i) % WINDOW]));
+        slope((0..self.len).map(tick)).map(Seconds::new)
     }
 }

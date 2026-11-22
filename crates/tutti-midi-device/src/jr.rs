@@ -33,7 +33,7 @@ use std::time::Duration;
 use tutti_platform::Instant;
 
 use tutti_ump::JrTicks;
-use tutti_units::Seconds;
+use tutti_units::{Seconds, slope};
 
 fn ticks_to_seconds(ticks: f64) -> Seconds {
     Seconds::new(ticks / JrTicks::RATE.get())
@@ -365,7 +365,7 @@ impl JrReceiver {
         (self.len > 0).then(|| self.window[(self.start + self.len - 1) % WINDOW])
     }
 
-    fn readings(&self) -> impl Iterator<Item = Reading> + '_ {
+    fn readings(&self) -> impl Iterator<Item = Reading> + Clone + '_ {
         (0..self.len).map(|i| self.window[(self.start + i) % WINDOW])
     }
 
@@ -373,27 +373,15 @@ impl JrReceiver {
     fn fit_window(&self) -> Option<Line> {
         let first = self.readings().next()?;
         let x = |r: Reading| ticks_to_seconds((r.ticks - first.ticks) as f64);
-        let n = self.len as f64;
-        let (mx, my) = self
-            .readings()
-            .fold((Seconds::ZERO, Seconds::ZERO), |(sx, sy), r| {
-                (sx + x(r), sy + r.at)
-            });
-        let (mx, my) = (mx / n, my / n);
-        let (cov, var) = self.readings().fold((0.0, 0.0), |(c, v), r| {
-            let dx = (x(r) - mx).get();
-            (c + dx * (r.at - my).get(), v + dx * dx)
-        });
         let span = self.readings().last().map_or(Seconds::ZERO, x);
-        let fitted = cov / var;
-        let slope = if self.len >= 2
-            && span.get() >= DRIFT_SPAN.as_secs_f64()
-            && var > 0.0
-            && (fitted - 1.0).abs() <= MAX_DRIFT
-        {
-            fitted
-        } else {
-            1.0
+        let fitted = slope(self.readings().map(|r| (x(r).get(), r.at)));
+        let slope = match fitted {
+            Some(fitted)
+                if span.get() >= DRIFT_SPAN.as_secs_f64() && (fitted - 1.0).abs() <= MAX_DRIFT =>
+            {
+                fitted
+            }
+            _ => 1.0,
         };
         let mut low = Seconds::new(f64::INFINITY);
         let mut high = Seconds::new(f64::NEG_INFINITY);
