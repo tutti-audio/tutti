@@ -85,7 +85,7 @@ impl TransportHandle {
     /// [`TimedError::Full`] when the transport's command queue is full; the
     /// event is handed back in it.
     pub fn play(&self) -> Result<(), TimedError<MotionCommand>> {
-        self.transport.motion().try_send(MotionCommand::Play)?;
+        self.transport.motion().send(MotionCommand::Play)?;
         self.record(true);
         Ok(())
     }
@@ -97,9 +97,7 @@ impl TransportHandle {
     ///
     /// [`TimedError::Full`], as [`play`](Self::play).
     pub fn stop(&self, fade: FadeOut) -> Result<(), TimedError<MotionCommand>> {
-        self.transport
-            .motion()
-            .try_send(MotionCommand::Stop { fade })?;
+        self.transport.motion().send(MotionCommand::Stop { fade })?;
         self.record(false);
         Ok(())
     }
@@ -111,9 +109,7 @@ impl TransportHandle {
     ///
     /// [`TimedError::Full`], as [`play`](Self::play).
     pub fn locate(&self, beat: Beat) -> Result<(), TimedError<MotionCommand>> {
-        self.transport
-            .motion()
-            .try_send(MotionCommand::locate(beat))?;
+        self.transport.motion().send(MotionCommand::locate(beat))?;
         Ok(())
     }
 

@@ -41,7 +41,7 @@ fn motion(event: MotionCommand) {
             .last()
             .expect("an engine")
             .motion()
-            .try_send(event)
+            .send(event)
             .expect("room");
     });
 }

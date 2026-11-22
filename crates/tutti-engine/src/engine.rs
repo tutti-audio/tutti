@@ -60,7 +60,7 @@
 //!   a seek, and after a stop whatever still sounds while stopped (live
 //!   input, a reverb tail; transport-gated sources are already silent), so
 //!   the output never comes back with a step.
-//! - **With no lead time** (`At::NextBlock`, an untimed `try_send`, a late
+//! - **With no lead time** (`At::NextBlock`, an untimed `send`, a late
 //!   command) the jump is at the block's first frame and nothing could fade
 //!   the audio before it: the gain is zero on that frame (the old audio's
 //!   abrupt end, the one step, accepted) and the new audio fades in.
@@ -786,7 +786,7 @@ impl<F: Float> Engine<F> {
     /// argument could. The graph root is folded to `output`'s width (the device
     /// / target width, see [`support_output`](Self::support_output)) — see
     /// [`process_segment`](Self::process_segment). Untimed motion
-    /// ([`MotionFsm::try_send`]) applies at the block's first frame; scheduled
+    /// ([`MotionFsm::send`]) applies at the block's first frame; scheduled
     /// commands ([`MotionFsm::schedule`]) on their own frames (module docs).
     /// Called once per block from the audio callback. RT-safe: no
     /// allocation, no locks, no I/O.
@@ -1227,7 +1227,7 @@ impl GainPlan {
 /// to its target, a fade-in `from * out + in` over one [`DECLICK`](tutti_graph::DECLICK). The gain
 /// is continuous by construction: a fade starts from wherever the gain is, so
 /// the one step is a declicked command with no lead time (`At::NextBlock`, a
-/// late command, an untimed `try_send`): the old audio ends on the jump frame
+/// late command, an untimed `send`): the old audio ends on the jump frame
 /// with the gain at zero there, and the new audio fades in.
 #[derive(Clone, Copy, Debug)]
 struct Fader<F: Float> {
@@ -1768,7 +1768,7 @@ mod tests {
             MaxBlock::of(Samples::new(512)),
         ));
         let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
-        let _ = transport.motion().try_send(MotionCommand::Play);
+        let _ = transport.motion().send(MotionCommand::Play);
         let mut buf = vec![1.0f32; 64 * 2];
         let mut seg = vec![1.0f32; 64 * 2];
         {
@@ -1835,7 +1835,7 @@ mod tests {
                 MaxBlock::of(Samples::new(512)),
             ));
             let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
-            let _ = transport.motion().try_send(MotionCommand::Play);
+            let _ = transport.motion().send(MotionCommand::Play);
             engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
             assert!(transport.is_rolling());
         }
@@ -1844,7 +1844,7 @@ mod tests {
             MaxBlock::of(Samples::new(512)),
         ));
         let engine = Engine::new(&transport, &mut ed, exec).expect("the first engine is gone");
-        let _ = transport.motion().try_send(MotionCommand::stop_unfaded());
+        let _ = transport.motion().send(MotionCommand::stop_unfaded());
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
         assert!(!transport.is_rolling(), "the machine knew it was rolling");
     }
@@ -1870,11 +1870,11 @@ mod tests {
         ));
     }
 
-    /// `try_send` and a `NextBlock` command are one queue, so they apply in
+    /// `send` and a `NextBlock` command are one queue, so they apply in
     /// the order they were sent: a `Stop` then a `Play` ends rolling, a
     /// `Play` then a `Stop` ends stopped.
     #[test]
-    fn try_send_and_a_next_block_command_apply_in_send_order() {
+    fn send_and_a_next_block_command_apply_in_send_order() {
         use tutti_buffers::ChannelLayout;
         let run = |first_is_play: bool| {
             let transport = Transport::new(SampleRate::SR_48K);
@@ -1885,10 +1885,7 @@ mod tests {
             let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
             let stop = MotionCommand::stop_unfaded();
             if first_is_play {
-                transport
-                    .motion()
-                    .try_send(MotionCommand::Play)
-                    .expect("room");
+                transport.motion().send(MotionCommand::Play).expect("room");
                 transport
                     .motion()
                     .schedule(At::NextBlock, stop)
@@ -1898,10 +1895,7 @@ mod tests {
                     .motion()
                     .schedule(At::NextBlock, stop)
                     .expect("room");
-                transport
-                    .motion()
-                    .try_send(MotionCommand::Play)
-                    .expect("room");
+                transport.motion().send(MotionCommand::Play).expect("room");
             }
             let mut buf = vec![0.0f32; 64 * 2];
             engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
@@ -1911,7 +1905,7 @@ mod tests {
         assert!(run(false), "stop then play ends rolling");
     }
 
-    /// A locate sent with `try_send` lands on the block's first frame and
+    /// A locate sent with `send` lands on the block's first frame and
     /// its seek is taken once, after the command: the block starts at the
     /// target, a loop wrap inside it is counted once, and the next block
     /// continues from the end of this one without taking the seek again.
@@ -1935,7 +1929,7 @@ mod tests {
         let engine = engine_for(&transport);
         transport
             .motion()
-            .try_send(MotionCommand::play_from(Beat::new(8.0)))
+            .send(MotionCommand::play_from(Beat::new(8.0)))
             .expect("room");
         let mut buf = vec![0.0f32; 64 * 2];
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
@@ -1957,7 +1951,7 @@ mod tests {
             .expect("room");
         transport
             .motion()
-            .try_send(MotionCommand::play_from(Beat::new(3.99)))
+            .send(MotionCommand::play_from(Beat::new(3.99)))
             .expect("room");
         let mut buf = vec![0.0f32; 1024 * 2];
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
@@ -1977,7 +1971,7 @@ mod tests {
             MaxBlock::of(Samples::new(512)),
         ));
         let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
-        let _ = transport.motion().try_send(MotionCommand::Play);
+        let _ = transport.motion().send(MotionCommand::Play);
         let mut render = engine.graph.borrow_mut();
         let mut pieces = GraphPieces {
             changes: TransportChanges::NONE,
