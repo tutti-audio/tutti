@@ -121,11 +121,7 @@ impl ForkSource for SharedFork {
 impl IntoNode for Shared {
     type Controls = ();
     fn into_parts(self) -> NodeParts<()> {
-        NodeParts {
-            node: Box::new(self),
-            controls: (),
-            fork: Some(Box::new(SharedFork)),
-        }
+        NodeParts::new(Box::new(self), (), Some(Box::new(SharedFork)))
     }
 }
 
@@ -191,11 +187,11 @@ impl IntoNode for Forkable {
         (Box::new(TestNode::new(self.0)), ())
     }
     fn into_parts(self) -> NodeParts<()> {
-        NodeParts {
-            node: Box::new(TestNode::new(self.0.clone())),
-            controls: (),
-            fork: Some(Box::new(KindFork(self.0))),
-        }
+        NodeParts::new(
+            Box::new(TestNode::new(self.0.clone())),
+            (),
+            Some(Box::new(KindFork(self.0))),
+        )
     }
 }
 
@@ -277,14 +273,14 @@ impl ForkSource for ModeFork {
 impl IntoNode for ReadsMode {
     type Controls = ();
     fn into_parts(self) -> NodeParts<()> {
-        NodeParts {
-            node: Box::new(Consts {
+        NodeParts::new(
+            Box::new(Consts {
                 outs: 1,
                 base: 0.25,
             }),
-            controls: (),
-            fork: Some(Box::new(ModeFork)),
-        }
+            (),
+            Some(Box::new(ModeFork)),
+        )
     }
 }
 
@@ -447,11 +443,7 @@ impl IntoNode for Watched {
     }
     fn into_parts(self) -> NodeParts<()> {
         let flag = Arc::clone(&self.0);
-        NodeParts {
-            node: self.into_node().0,
-            controls: (),
-            fork: Some(Box::new(WatchedFork(flag))),
-        }
+        NodeParts::new(self.into_node().0, (), Some(Box::new(WatchedFork(flag))))
     }
 }
 
@@ -535,11 +527,7 @@ impl IntoNode for Failing {
         )
     }
     fn into_parts(self) -> NodeParts<()> {
-        NodeParts {
-            node: self.into_node().0,
-            controls: (),
-            fork: Some(Box::new(FailingFork)),
-        }
+        NodeParts::new(self.into_node().0, (), Some(Box::new(FailingFork)))
     }
 }
 
@@ -1097,11 +1085,7 @@ impl IntoNode for Witnessed {
             How::Default => Box::new(Defaulted(self.0)),
             _ => Box::new(self.0),
         };
-        NodeParts {
-            node,
-            controls: (),
-            fork: Some(fork),
-        }
+        NodeParts::new(node, (), Some(fork))
     }
 }
 

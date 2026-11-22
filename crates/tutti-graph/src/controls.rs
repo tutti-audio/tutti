@@ -251,11 +251,7 @@ impl<F: Float, N: ParamNode<F>> ForkSource<F> for ParamFork<N> {
 /// then. A `Clone` that detached them would fork the values at insert.
 pub fn param_parts<F: Float, N: ParamNode<F> + Clone>(node: N) -> NodeParts<ParamSet, F> {
     let fork = ParamFork::new(&node);
-    NodeParts {
-        node: Box::new(node),
-        controls: fork.params.clone(),
-        fork: Some(Box::new(fork)),
-    }
+    NodeParts::new(Box::new(node), fork.params.clone(), Some(Box::new(fork)))
 }
 
 /// A [`ParamNode`] inserted as one: the wrapper that makes `Params(node)` an
