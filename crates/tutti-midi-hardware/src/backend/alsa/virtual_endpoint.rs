@@ -19,8 +19,11 @@ use super::input::{self, AlsaInput};
 use crate::InputProducerHandle;
 use crate::endpoints::InputConnection;
 use crate::error::{MidiHardwareError, Result};
-use crate::virtual_endpoint::{EndpointBackend, SenderBackend, VirtualProtocol, VirtualSpec};
-use std::sync::{Arc, PoisonError, RwLock};
+use crate::virtual_endpoint::{
+    Delivery, EndpointBackend, SenderBackend, VirtualProtocol, VirtualSpec,
+};
+use std::sync::Arc;
+use tutti_rt::RwLock;
 
 /// The sequencer's version for a protocol.
 fn version_of(protocol: VirtualProtocol) -> UmpVersion {
@@ -102,7 +105,17 @@ pub(crate) struct AlsaVirtualEndpoint {
 
 impl Drop for AlsaVirtualEndpoint {
     fn drop(&mut self) {
-        *self.live.write().unwrap_or_else(PoisonError::into_inner) = false;
+        *self.live.write() = false;
+    }
+}
+
+/// What a send's result says: a subscriber with no room is [`Delivery::Full`], the
+/// non-blocking client's refusal, and any other failure is the OS's error.
+fn delivery(sent: tutti_alsa_ffi::Result<()>) -> Result<Delivery> {
+    match sent {
+        Ok(()) => Ok(Delivery::Sent),
+        Err(error) if error.would_block() => Ok(Delivery::Full),
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -114,15 +127,16 @@ struct AlsaSender {
 }
 
 impl SenderBackend for AlsaSender {
-    fn send(&self, ump: &Ump) -> Result<()> {
-        let live = self.live.read().unwrap_or_else(PoisonError::into_inner);
+    fn send(&self, ump: &Ump) -> Result<Delivery> {
+        let live = self.live.read();
         if !*live {
             return Err(MidiHardwareError::EndpointGone);
         }
-        self.client
+        let sent = self
+            .client
             .with(|client| client.send_to_subscribers(self.port, ump))
-            .ok_or(MidiHardwareError::EndpointGone)??;
-        Ok(())
+            .ok_or(MidiHardwareError::EndpointGone)?;
+        delivery(sent)
     }
 }
 
@@ -163,3 +177,6 @@ pub(crate) fn endpoint(
     let live = Arc::new(RwLock::new(true));
     Ok((AlsaVirtualEndpoint { input, port, live }, protocol))
 }
+
+#[cfg(test)]
+mod tests;

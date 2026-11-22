@@ -36,8 +36,7 @@ fn text(t: &str) -> PeText {
 /// model 48, version 1.0.
 fn device() -> DeviceIdentity {
     DeviceIdentity {
-        manufacturer: ManufacturerId::from_sysex_bytes([U7::of(0x7D), U7::of(0), U7::of(0)])
-            .unwrap(),
+        manufacturer: ManufacturerId::try_from([U7::of(0x7D), U7::of(0), U7::of(0)]).unwrap(),
         family: [U7::of(0), U7::of(0)],
         model: [U7::of(48), U7::of(0)],
         revision: SoftwareRevision::from([U7::of(0), U7::of(0), U7::of(1), U7::of(0)]),

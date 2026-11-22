@@ -114,7 +114,7 @@ fn preamble_fields(input: &mut &[u8]) -> Res<Preamble> {
 /// The three-byte manufacturer id.
 fn manufacturer(input: &mut &[u8]) -> Res<ManufacturerId> {
     (u7, u7, u7)
-        .verify_map(|(a, b, c)| ManufacturerId::from_sysex_bytes([a, b, c]))
+        .verify_map(|(a, b, c)| ManufacturerId::try_from([a, b, c]).ok())
         .parse_next(input)
 }
 

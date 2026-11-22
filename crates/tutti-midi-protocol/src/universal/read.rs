@@ -70,7 +70,7 @@ fn device(input: &mut &[u8]) -> Res<Recipient> {
 fn manufacturer(input: &mut &[u8]) -> Res<ManufacturerId> {
     alt((
         preceded(literal(0x00_u8), (u7, u7))
-            .verify_map(|(a, b)| ManufacturerId::from_sysex_bytes([U7::of(0), a, b])),
+            .verify_map(|(a, b)| ManufacturerId::try_from([U7::of(0), a, b]).ok()),
         u7.verify_map(|m| ManufacturerId::new(u16::from(m.get()))),
     ))
     .parse_next(input)

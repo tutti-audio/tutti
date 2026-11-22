@@ -149,7 +149,7 @@ pub use flex_write::{
 };
 pub use held_controllers::HeldControllers;
 pub use held_keys::{GroupChannelIndex, Held, KeyBitset};
-pub use manufacturer::{ManufacturerId, NotManufacturerId};
+pub use manufacturer::{ManufacturerBytesError, ManufacturerId, NotManufacturerId};
 pub use message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockDirection,
     BlockFilter, BlockSelect, ChordBass, ChordName, ChordPitch, Data128, DeviceIdentity,
