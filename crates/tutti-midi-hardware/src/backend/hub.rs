@@ -357,6 +357,14 @@ impl Registry {
         }
     }
 
+    /// What an OS notification asks of the watches: one that `changes_devices`
+    /// has every watch look again, any other asks nothing.
+    pub(crate) fn notified(&self, changes_devices: bool) {
+        if changes_devices {
+            self.look_all();
+        }
+    }
+
     /// How many watches are registered.
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
