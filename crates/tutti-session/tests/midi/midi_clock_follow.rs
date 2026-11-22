@@ -15,7 +15,7 @@ use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_midi_runtime::{ClockKind, MidiClockDecoder};
 use tutti_session::{
-    FollowClock, FollowTempo, MidiError, MidiReport, Session, SessionEvent, SetRefusal,
+    FollowClock, FollowTempo, MidiError, MidiEvent, Session, SessionEvent, SetRefusal,
     ValueErrorKind,
 };
 use tutti_timeline::MotionCommand;
@@ -63,7 +63,7 @@ fn send(fake: &FakeCounters, ump: Ump, at: Instant) {
 }
 
 /// Renders one block and runs one update; the MIDI events it reported.
-fn pump(s: &mut Session) -> Vec<MidiReport> {
+fn pump(s: &mut Session) -> Vec<MidiEvent> {
     blocks(s, 1);
     s.update()
         .into_iter()
@@ -75,7 +75,7 @@ fn pump(s: &mut Session) -> Vec<MidiReport> {
 }
 
 /// Pumps until `done` holds of what an update reported, at most `limit` times.
-fn until(s: &mut Session, limit: usize, done: impl Fn(&[MidiReport]) -> bool) -> Vec<MidiReport> {
+fn until(s: &mut Session, limit: usize, done: impl Fn(&[MidiEvent]) -> bool) -> Vec<MidiEvent> {
     let mut all = Vec::new();
     for _ in 0..limit {
         all.extend(pump(s));
@@ -209,21 +209,20 @@ fn a_steady_clock_locks_and_sets_the_tempo_and_a_dropout_unlocks() {
     }
     send_ticks(&fake, Instant::now(), period, 60);
     let events = until(&mut s, 400, |e| {
-        e.iter()
-            .any(|e| matches!(e, MidiReport::ClockLocked { .. }))
+        e.iter().any(|e| matches!(e, MidiEvent::ClockLocked { .. }))
             && e.iter()
-                .any(|e| matches!(e, MidiReport::TempoFollowed { .. }))
+                .any(|e| matches!(e, MidiEvent::TempoFollowed { .. }))
     });
     assert!(events.iter().any(|e| matches!(
         e,
-        MidiReport::ClockLocked {
+        MidiEvent::ClockLocked {
             kind: ClockKind::BeatClock
         }
     )));
     let tempo = events
         .iter()
         .find_map(|e| match e {
-            MidiReport::TempoFollowed { tempo, .. } => Some(*tempo),
+            MidiEvent::TempoFollowed { tempo, .. } => Some(*tempo),
             _ => None,
         })
         .unwrap();
@@ -240,7 +239,7 @@ fn a_steady_clock_locks_and_sets_the_tempo_and_a_dropout_unlocks() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            MidiReport::ClockUnlocked {
+            MidiEvent::ClockUnlocked {
                 kind: ClockKind::BeatClock
             }
         )),
@@ -286,12 +285,11 @@ fn mtc_quarter_frames_lock_and_play_from_their_position() {
         );
     }
     let events = until(&mut s, 400, |e| {
-        e.iter()
-            .any(|e| matches!(e, MidiReport::ClockLocked { .. }))
+        e.iter().any(|e| matches!(e, MidiEvent::ClockLocked { .. }))
     });
     assert!(events.iter().any(|e| matches!(
         e,
-        MidiReport::ClockLocked {
+        MidiEvent::ClockLocked {
             kind: ClockKind::Mtc
         }
     )));
@@ -333,7 +331,7 @@ fn a_beat_clock_follower_owns_the_tempo_and_mtc_does_not() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, SessionEvent::Midi(MidiReport::ClockUnfollowed)))
+            .any(|e| matches!(e, SessionEvent::Midi(MidiEvent::ClockUnfollowed)))
     );
     assert!(crate::tempo::set_tempo(&mut s, Bpm::of(100.0)).is_ok());
 }
@@ -353,7 +351,7 @@ fn a_clock_command_the_transport_refuses_is_counted() {
         // The list is full again before the update that places what the tap held.
         while s.schedule(At::NextBlock, MotionCommand::stop()).is_ok() {}
         for event in s.update() {
-            if let SessionEvent::Midi(MidiReport::ClockCommandsRefused(n)) = event {
+            if let SessionEvent::Midi(MidiEvent::ClockCommandsRefused(n)) = event {
                 refused += n;
             }
         }
@@ -417,7 +415,7 @@ fn a_locked_rolling_beat_clock_reads_an_error_under_slip() {
 /// cycles lock and roll it (as above); Quarter Frames then arrive in descending
 /// piece order (`7` down to `0`, M1 MTC, Quarter Frame Message Implementation).
 /// The transport has no negative rate, so the session reports
-/// [`MidiReport::ClockReversed`] once and the transport stops.
+/// [`MidiEvent::ClockReversed`] once and the transport stops.
 #[test]
 fn mtc_running_backward_is_reported_and_stops_the_transport() {
     let (mut s, fake) = rig();
@@ -443,11 +441,11 @@ fn mtc_running_backward_is_reported_and_stops_the_transport() {
     }
     let events = until(&mut s, 400, |e| {
         e.iter()
-            .any(|e| matches!(e, MidiReport::ClockReversed { .. }))
+            .any(|e| matches!(e, MidiEvent::ClockReversed { .. }))
     });
     let reversed = events
         .iter()
-        .filter(|e| matches!(e, MidiReport::ClockReversed { .. }))
+        .filter(|e| matches!(e, MidiEvent::ClockReversed { .. }))
         .count();
     assert_eq!(reversed, 1, "{events:?}");
     until_rolling(&mut s, false, 100);

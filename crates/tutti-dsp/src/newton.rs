@@ -36,15 +36,40 @@ pub(crate) fn capped_newton_steps<F: Float, const CAP: usize>(
     seed: F,
     warm: F,
 ) -> F {
-    let (at_seed, _) = f(seed);
-    let (at_warm, _) = f(warm);
-    let mut u = if at_seed.abs() <= at_warm.abs() || at_warm.is_nan() {
-        seed
+    let at_seed = f(seed);
+    let at_warm = f(warm);
+    let (start, at_start) = if at_seed.0.abs() <= at_warm.0.abs() || at_warm.0.is_nan() {
+        (seed, at_seed)
     } else {
-        warm
+        (warm, at_warm)
     };
-    for _ in 0..CAP {
-        let (value, slope) = f(u);
+    steps_from::<F, CAP>(f, start, at_start)
+}
+
+/// Exactly `CAP` Newton steps from `start`, with no choice of start: for a kernel whose
+/// closed-form seed is the whole starting guess. The cap, like [`NEWTON_CAP`], is the count
+/// the kernel's own convergence argument names.
+#[inline]
+#[must_use]
+pub(crate) fn newton_steps<F: Float, const CAP: usize>(f: impl Fn(F) -> (F, F), start: F) -> F {
+    let at_start = f(start);
+    steps_from::<F, CAP>(f, start, at_start)
+}
+
+/// The step loop both forms share: `CAP` steps from `start`, whose value and slope are
+/// `at_start`, so the first step does not evaluate `f` again.
+#[inline(always)]
+fn steps_from<F: Float, const CAP: usize>(
+    f: impl Fn(F) -> (F, F),
+    start: F,
+    at_start: (F, F),
+) -> F {
+    let mut u = start;
+    let (mut value, mut slope) = at_start;
+    for step in 0..CAP {
+        if step > 0 {
+            (value, slope) = f(u);
+        }
         u -= value / slope;
     }
     u

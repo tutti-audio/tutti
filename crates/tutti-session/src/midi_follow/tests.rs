@@ -1,5 +1,5 @@
 use super::*;
-use crate::{MidiReport, SessionEvent};
+use crate::{MidiEvent, SessionEvent};
 use tutti_midi_runtime::ClockOffset;
 use tutti_music::MeterMap;
 use tutti_units::{SampleRate, Samples};
@@ -168,7 +168,7 @@ fn a_tempo_step_lands_on_the_beat_at_its_placed_frame() {
     assert_eq!(published.tempo_at(Beat::new(4.05)), Bpm::of(90.0));
     assert!(matches!(
         out[..],
-        [SessionEvent::Midi(MidiReport::TempoFollowed { beat, .. })] if (beat.get() - 4.04).abs() < 1e-9
+        [SessionEvent::Midi(MidiEvent::TempoFollowed { beat, .. })] if (beat.get() - 4.04).abs() < 1e-9
     ));
 }
 
@@ -212,13 +212,13 @@ fn a_reversed_source_is_reported_and_stopped() {
     );
     assert!(matches!(
         out[0],
-        SessionEvent::Midi(MidiReport::ClockReversed {
+        SessionEvent::Midi(MidiEvent::ClockReversed {
             kind: ClockKind::Mtc
         })
     ));
     assert!(matches!(
         out[1],
-        SessionEvent::Midi(MidiReport::ClockSlipped {
+        SessionEvent::Midi(MidiEvent::ClockSlipped {
             kind: ClockKind::Mtc,
             error: ClockOffset::Time(_)
         })

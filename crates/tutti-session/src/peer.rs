@@ -6,9 +6,8 @@
 //! with something live behind it that can change on its own, go away, come
 //! back and be asked things (a port's device, a capture's audio device, a
 //! plugin). Whatever its kind, a peer is read through [`Peer::info`] and
-//! [`Peer::presence`], told about through one
-//! [`SessionEvent::ResourceChanged`](crate::SessionEvent::ResourceChanged), and
-//! asked with requests that fail as [`PeerError`].
+//! [`Peer::presence`], told about through one [`PeerEvent::ResourceChanged`],
+//! and asked with requests that fail as [`PeerError`].
 //!
 //! Only this crate implements [`Resource`]: a token is the session's, minted
 //! with an id no other token of the session has.
@@ -21,8 +20,7 @@ use thiserror::Error;
 /// A resource's identity in one session: unique among every token the session
 /// has handed out, and never reused.
 ///
-/// A [`SessionEvent::ResourceChanged`](crate::SessionEvent::ResourceChanged)
-/// names the resource it is about by this id; the token's [`Resource::id`]
+/// A [`PeerEvent::ResourceChanged`] names the resource it is about by this id; the token's [`Resource::id`]
 /// matches it. An id means nothing in another session, and an app cannot make
 /// one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -82,9 +80,7 @@ pub(crate) mod sealed {
 /// SoundFont is a `Resource` only; a resource with something live behind it is
 /// also a [`Peer`].
 pub trait Resource: sealed::Sealed {
-    /// The token's identity, the one a
-    /// [`SessionEvent::ResourceChanged`](crate::SessionEvent::ResourceChanged)
-    /// carries.
+    /// The token's identity, the one a [`PeerEvent::ResourceChanged`] carries.
     fn id(&self) -> PeerResourceId;
 }
 
@@ -109,7 +105,7 @@ pub trait Peer: Resource {
 /// Whether a [`Peer`] is there, and when it is not, why.
 ///
 /// A change of presence is noticed once, as
-/// [`ResourceChanged`](crate::SessionEvent::ResourceChanged) with
+/// [`ResourceChanged`](crate::PeerEvent::ResourceChanged) with
 /// [`ResourceFact::Presence`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Presence<C> {
@@ -150,8 +146,24 @@ impl<C> Presence<C> {
     }
 }
 
+/// What a [`Peer`] reports to [`Session::update`](crate::Session::update)
+/// ([`SessionEvent::Peer`](crate::SessionEvent::Peer)): a reading of one of
+/// the session's peers changed.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub enum PeerEvent {
+    /// A reading of one peer changed: read `fact` again on the token whose
+    /// [`Resource::id`] is `id`. The notice carries no value.
+    ResourceChanged {
+        /// The peer's token.
+        id: PeerResourceId,
+        /// Which of its readings changed.
+        fact: ResourceFact,
+    },
+}
+
 /// Which reading of a peer a
-/// [`ResourceChanged`](crate::SessionEvent::ResourceChanged) says changed:
+/// [`ResourceChanged`](crate::PeerEvent::ResourceChanged) says changed:
 /// read it again. The notice carries no value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]

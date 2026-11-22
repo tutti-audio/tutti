@@ -59,8 +59,8 @@ use crate::midi_ci::{
     Subscription, at_peer, resolve,
 };
 use crate::{
-    EventInPort, EventOutPort, MidiReport, Peer, PeerError, PeerResourceId, Presence, Resource,
-    ResourceFact, Session, SessionEvent,
+    EventInPort, EventOutPort, MidiEvent, Peer, PeerError, PeerEvent, PeerResourceId, Presence,
+    Resource, ResourceFact, Session, SessionEvent,
 };
 
 /// Why a port whose input could not be reopened is lost: the fault the reader
@@ -1029,7 +1029,7 @@ impl std::ops::BitOrAssign for Edits {
 }
 
 fn changed(out: &mut Vec<SessionEvent>, id: PeerResourceId, fact: ResourceFact) {
-    out.push(SessionEvent::ResourceChanged { id, fact });
+    out.push(SessionEvent::Peer(PeerEvent::ResourceChanged { id, fact }));
 }
 
 /// Sets a record's presence, saying so once when it changed.
@@ -1268,7 +1268,7 @@ impl Ports {
         let mut edits = Edits::default();
         edits |= self.retire(io, graph);
         for event in events {
-            out.push(MidiReport::of_device(event.clone()).into());
+            out.push(MidiEvent::of_device(event.clone()).into());
             match event {
                 tutti_midi_device::DeviceEvent::Removed(device) => {
                     edits |= self.lose(io, graph, &device, out);
@@ -1467,7 +1467,7 @@ impl Ports {
                         profile_devices.push(device.clone());
                     }
                     out.push(
-                        MidiReport::CiProfiles {
+                        MidiEvent::CiProfiles {
                             device: device.clone(),
                             peer: *peer,
                             change: change.clone(),
@@ -1483,7 +1483,7 @@ impl Ports {
                         port.shared.pending.lock_recover().lose_reports(*peer);
                     }
                     out.push(
-                        MidiReport::CiProcess {
+                        MidiEvent::CiProcess {
                             device: device.clone(),
                             peer: *peer,
                             change: change.clone(),
