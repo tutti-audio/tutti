@@ -307,6 +307,8 @@ impl<F: Float> GraphBuilder<F> {
     }
 
     /// Sets `node`'s [`Mix`]: the built graph starts the node steady at it.
+    /// A mode has no builder call: set it on the built editor
+    /// ([`Editor::set_mode`](crate::Editor::set_mode)), where it fades in.
     /// [`build`](Self::build) refuses a mix short of [`Mix::WET`] on a node
     /// with no pass ([`CommitError::Unplaced`]).
     ///
