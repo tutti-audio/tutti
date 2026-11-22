@@ -828,7 +828,7 @@ mod tests {
     use super::*;
     use crate::client::audio::response_ring;
     use crate::{AudioSlab, SlabHandle};
-    use tutti_plugin_types::MAX_CHUNK;
+    use tutti_plugin_types::{ChunkOutcomes, MAX_CHUNK};
 
     /// A real slab's input writer, `samples` frames per channel, stereo both
     /// ways: these tests stage nothing, but a batcher cannot exist without the
@@ -881,7 +881,9 @@ mod tests {
     }
 
     /// **A batcher wider than its slab counts a missed chunk for each channel
-    /// the slab lacks, and the others still play.**
+    /// the slab lacks, and the others still play.** Such a miss has no fate:
+    /// it is missed and none of late, refused, unanswered or skipped, so the
+    /// four sum to less than `missed` (the [`ChunkOutcomes`] inequality, strict).
     #[test]
     fn a_channel_the_slab_lacks_is_counted_as_missed() {
         let (writer, handle) = slab_of(MAX_CHUNK, FloatWidth::F32);
@@ -896,7 +898,14 @@ mod tests {
         // The refusal is a `Copy` error: nothing is allocated on the audio
         // thread to report it.
         assert_no_alloc::assert_no_alloc(|| b.read_ring(1));
-        assert_eq!(b.counters.missed.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            b.counters.outcomes(),
+            ChunkOutcomes {
+                missed: 1,
+                ..ChunkOutcomes::default()
+            },
+            "one miss, with no fate"
+        );
         assert_eq!(ring32(&b)[0][..8], [0.25; 8], "the channels it has play");
         assert_eq!(ring32(&b)[2][..8], [0.0; 8], "the one it lacks is silence");
     }
@@ -1071,9 +1080,17 @@ mod tests {
         for seq in 1..=BATCH_OUTCOMES as u64 {
             b.remember_unanswered(seq);
         }
-        assert_eq!(counters.unanswered(), 0, "the list was not full yet");
+        assert_eq!(
+            counters.outcomes().unanswered,
+            0,
+            "the list was not full yet"
+        );
         b.remember_unanswered(BATCH_OUTCOMES as u64 + 1);
-        assert_eq!(counters.unanswered(), 1, "chunk 1, the oldest, is replaced");
+        assert_eq!(
+            counters.outcomes().unanswered,
+            1,
+            "chunk 1, the oldest, is replaced"
+        );
         assert!(!b.unanswered.contains(&1));
         b.reset();
         assert_eq!(b.unanswered, [0; BATCH_OUTCOMES]);

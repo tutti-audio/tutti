@@ -376,7 +376,7 @@ macro_rules! served_control {
             /// The off-thread callbacks the plugin server refused, as its
             /// latest `News::ServerLosses` told.
             fn refused_off_thread_calls(&self) -> u64 {
-                self.link.counters.server_refused_off_thread_calls()
+                self.link.counters.server_losses().refused_off_thread_calls
             }
         }
     };
