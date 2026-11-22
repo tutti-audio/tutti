@@ -106,6 +106,8 @@ mod midi;
 #[cfg(feature = "midi-hardware")]
 mod midi_ci;
 #[cfg(feature = "midi")]
+mod midi_event;
+#[cfg(feature = "midi")]
 mod midi_follow;
 #[cfg(feature = "midi-hardware")]
 mod midi_hardware;
@@ -114,8 +116,6 @@ mod midi_link;
 #[cfg(feature = "midi")]
 mod midi_load;
 // Where UDP sockets exist and the feature is on; its twin is empty of them.
-#[cfg(feature = "midi")]
-mod midi_event;
 #[cfg(feature = "midi")]
 #[cfg_attr(
     all(feature = "midi-network", not(target_arch = "wasm32")),

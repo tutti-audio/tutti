@@ -180,8 +180,8 @@ pub enum SessionEvent {
     /// gave up). See [`PluginEvent`](crate::PluginEvent).
     #[cfg(feature = "plugin")]
     Plugin(crate::PluginEvent),
-    /// A peer's event, by area: a MIDI-CI device or port the session holds a
-    /// resource of changed. See [`PeerEvent`](crate::PeerEvent).
+    /// A reading of one of the session's peers changed. See
+    /// [`PeerEvent`](crate::PeerEvent).
     Peer(crate::PeerEvent),
     /// A reader of the root was opened again, because the root's width is no
     /// longer the one the reader has: a tap from

@@ -266,8 +266,8 @@ pub enum NetworkEvent {
 }
 
 impl From<NetworkEvent> for SessionEvent {
-    fn from(report: NetworkEvent) -> Self {
-        MidiEvent::Network(report).into()
+    fn from(event: NetworkEvent) -> Self {
+        MidiEvent::Network(event).into()
     }
 }
 

@@ -8,7 +8,7 @@
 //! Every request is a future that resolves when the device answers, on that
 //! task, with no [`update`](crate::Session::update). The session's view of the
 //! peer (the port's info, [`MidiEvent::CiProfiles`](crate::MidiEvent) and the
-//! other reports) changes at the next `update`, so a future may resolve before
+//! other events) changes at the next `update`, so a future may resolve before
 //! the `update` that reports its peer's change; each future's output carries what
 //! the answer said, so a request needs no report. Dropping one is harmless. A peer's state is
 //! [`ListedPeer::save_state`], a [`SavePeerState`], and
