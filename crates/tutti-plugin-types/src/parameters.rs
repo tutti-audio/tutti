@@ -219,6 +219,7 @@ bitflags! {
 /// ```
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "ParameterInfoWire"))]
 pub struct ParameterInfo {
     /// How this parameter is addressed: the plugin's handle for VST3, CLAP and
     /// AU, its position for VST2. Opaque either way; see [`ParamId`].
@@ -275,12 +276,71 @@ pub struct ParameterInfo {
     /// The plugin marks this parameter as one of its headline controls (AU's
     /// `ParametersForOverview`). `false` is both "not marked" and "the format
     /// has no such list": VST3 and CLAP say nothing of it.
-    #[cfg_attr(feature = "serde", serde(default))]
     overview: bool,
     /// How the plain value follows from the normalized position, as the format
     /// declares it. Read through [`plain_map`](Self::plain_map).
-    #[cfg_attr(feature = "serde", serde(default))]
     plain_map: Option<PlainMap>,
+}
+
+/// What a [`ParameterInfo`] is read from: its fields as the document holds
+/// them, before the conversion checks them.
+#[cfg(feature = "serde")]
+#[derive(Deserialize)]
+struct ParameterInfoWire {
+    pub id: ParamId,
+    pub name: String,
+    pub unit: String,
+    pub range: PluginParamRange,
+    pub steps: ParamSteps,
+    pub flags: ParamFlags,
+    pub known: ParamFlags,
+    pub group: String,
+    pub measures: Option<ParamUnit>,
+    pub role: Option<ControlRole>,
+    #[serde(default)]
+    pub overview: bool,
+    #[serde(default)]
+    pub plain_map: Option<PlainMap>,
+}
+
+/// A document's parameter that breaks one of [`ParameterInfo`]'s invariants.
+#[cfg(feature = "serde")]
+#[derive(Debug, thiserror::Error)]
+enum ParameterInfoInvalid {
+    /// A flag is set that the `known` mask never reported.
+    #[error("a flag is set outside the `known` mask")]
+    FlagOutsideKnown,
+    /// `measures` names a unit the declared range does not fit.
+    #[error("`measures` names a unit the declared range does not fit")]
+    MeasuresOutsideRange,
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<ParameterInfoWire> for ParameterInfo {
+    type Error = ParameterInfoInvalid;
+
+    fn try_from(w: ParameterInfoWire) -> Result<Self, Self::Error> {
+        if !w.known.contains(w.flags) {
+            return Err(ParameterInfoInvalid::FlagOutsideKnown);
+        }
+        if w.measures.is_some_and(|unit| !unit.fits(&w.range)) {
+            return Err(ParameterInfoInvalid::MeasuresOutsideRange);
+        }
+        Ok(Self {
+            id: w.id,
+            name: w.name,
+            unit: w.unit,
+            range: w.range,
+            steps: w.steps,
+            flags: w.flags,
+            known: w.known,
+            group: w.group,
+            measures: w.measures,
+            role: w.role,
+            overview: w.overview,
+            plain_map: w.plain_map,
+        })
+    }
 }
 
 impl ParameterInfo {
@@ -929,5 +989,26 @@ mod measures_serde_tests {
             r#""group": "Filter", "role": "Nope""#,
         );
         assert!(serde_json::from_str::<ParameterInfo>(&json).is_err());
+    }
+
+    /// A document that sets a flag its `known` mask never reported is refused:
+    /// the flag would read as a reported value nobody reported.
+    #[test]
+    fn a_flag_outside_the_known_mask_is_refused() {
+        let json = OLD_JSON.replace(r#""known": "AUTOMATABLE""#, r#""known": """#);
+        assert!(serde_json::from_str::<ParameterInfo>(&json).is_err());
+    }
+
+    /// A document whose `measures` unit its range does not fit is refused:
+    /// Hertz is non-negative, and this range starts at -1.
+    #[test]
+    fn a_measures_unit_the_range_does_not_fit_is_refused() {
+        let with = |min: &str| {
+            OLD_JSON
+                .replace("20.0", min)
+                .replace(r#""group": "Filter""#, r#""group": "Filter", "measures": "Hertz""#)
+        };
+        assert!(serde_json::from_str::<ParameterInfo>(&with("-1.0")).is_err());
+        assert!(serde_json::from_str::<ParameterInfo>(&with("20.0")).is_ok());
     }
 }

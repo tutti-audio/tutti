@@ -151,11 +151,6 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "permanent: a request number is any u64; the host numbers its requests and no value is invalid",
     ),
     (
-        "crates/tutti-plugin-types/src/parameters.rs",
-        "ParameterInfo",
-        "temporary: a document can set `flags` outside `known` and a `measures` its range does not fit; `serde(try_from)` removes it",
-    ),
-    (
         "crates/tutti-plugin-types/src/plugin_ref.rs",
         "PluginRef",
         "permanent: any path and id names a plugin; one the file does not hold is the load's error",
