@@ -22,8 +22,8 @@ unit! {
 
 unit! {
     /// A fractional count of SMPTE timecode frames: how many labelled frames
-    /// of a [frame rate](https://en.wikipedia.org/wiki/SMPTE_timecode) a time
-    /// spans, with the part of a frame kept. Not a graph [`Frame`](crate::Frame),
+    /// of an SMPTE ST 12-1 timecode frame rate a time spans, with the part of
+    /// a frame kept. Not a graph [`Frame`](crate::Frame),
     /// which is one value per channel at the sample rate.
     ///
     /// The count is the frames elapsed, not a label: a drop-frame label skips
@@ -38,8 +38,8 @@ unit! {
 // - `Mul<TimecodeFrames>` — frames squared is no quantity. Scaling is
 //   `Mul<f64>` (`Scalable`).
 // - `Div<TimecodeFrames> -> f64` (`Ratio`) — the quotient of two counts at one
-//   rate is a speed ratio; a comparison is `<`, and a whole number of times one
-//   holds another is `floor` of the difference's count.
+//   rate is a speed ratio; a comparison is `<`, and the whole frames in a span
+//   are its `floor`.
 // - `Rem` (`Modular`) — a label wraps by its own fields (seconds, minutes,
 //   hours), and the drop-frame wrap is `SmpteTimecode::from_frame_count`, not a
 //   remainder of the count.
