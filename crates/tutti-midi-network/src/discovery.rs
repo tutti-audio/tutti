@@ -156,6 +156,32 @@ fn local_hostname(hostname: &str) -> Result<String, DiscoveryError> {
     Ok(format!("{bare}.local."))
 }
 
+/// The service record of the Host `identity`: the PTR, SRV and TXT records,
+/// and the A and AAAA records of `addresses`, or of every address of the
+/// machine when none is given.
+fn service_info(
+    identity: &EndpointIdentity,
+    hostname: &str,
+    addresses: &[IpAddr],
+    port: u16,
+) -> Result<ServiceInfo, DiscoveryError> {
+    let host = local_hostname(hostname)?;
+    let instance = instance_name(identity)?;
+    let info = ServiceInfo::new(
+        SERVICE_TYPE,
+        instance.as_str(),
+        &host,
+        addresses,
+        port,
+        &txt_properties(identity)[..],
+    )?;
+    Ok(if addresses.is_empty() {
+        info.enable_addr_auto()
+    } else {
+        info
+    })
+}
+
 /// A Host published on the network, until dropped.
 ///
 /// The records follow M2-124 section 4: the PTR and SRV under
@@ -186,20 +212,8 @@ impl Advertisement {
         addresses: &[IpAddr],
         port: u16,
     ) -> Result<Self, DiscoveryError> {
-        let host = local_hostname(hostname)?;
-        let instance = instance_name(identity)?;
+        let info = service_info(identity, hostname, addresses, port)?;
         let daemon = ServiceDaemon::new()?;
-        let mut info = ServiceInfo::new(
-            SERVICE_TYPE,
-            instance.as_str(),
-            &host,
-            addresses,
-            port,
-            &txt_properties(identity)[..],
-        )?;
-        if addresses.is_empty() {
-            info = info.enable_addr_auto();
-        }
         let fullname = info.get_fullname().to_owned();
         daemon.register(info)?;
         Ok(Self { daemon, fullname })
@@ -467,5 +481,75 @@ mod tests {
         ));
         assert!(host_event(ServiceEvent::SearchStarted(SERVICE_TYPE.to_owned())).is_none());
         assert!(host_event(ServiceEvent::SearchStopped(SERVICE_TYPE.to_owned())).is_none());
+    }
+
+    fn identity(name: &str, id: &str) -> EndpointIdentity {
+        identity_from_txt(name, id).unwrap()
+    }
+
+    /// Spec: m2-124/3.1#5
+    #[test]
+    fn a_host_publishes_each_address_it_is_given_or_every_address_of_the_machine() {
+        let v4: IpAddr = "192.0.2.7".parse().unwrap();
+        let v6: IpAddr = "2001:db8::1".parse().unwrap();
+        let given = service_info(&identity("Keys", "DEV-1"), "keys", &[v4, v6], 5004).unwrap();
+        assert_eq!(given.get_addresses(), &[v4, v6].into());
+        assert!(!given.is_addr_auto());
+        let none = service_info(&identity("Keys", "DEV-1"), "keys", &[], 5004).unwrap();
+        assert!(none.get_addresses().is_empty());
+        assert!(none.is_addr_auto(), "no address given: the machine's own");
+    }
+
+    /// Spec: m2-124/3.2#3
+    #[test]
+    fn the_srv_record_holds_the_port_the_host_listens_on() {
+        let info = service_info(&identity("Keys", "DEV-1"), "keys", &[], 5004).unwrap();
+        assert_eq!(info.get_port(), 5004);
+        assert_eq!(info.get_hostname(), "keys.local.");
+    }
+
+    /// Spec: m2-124/4.2#2
+    #[test]
+    fn hosts_of_one_hostname_have_distinct_service_instance_names() {
+        let fullname = |name: &str, id: &str| {
+            service_info(&identity(name, id), "workbench", &[], 5004)
+                .unwrap()
+                .get_fullname()
+                .to_owned()
+        };
+        let keys = fullname("Keys", "DEV-1");
+        let synth = fullname("Synth", "DEV-1");
+        let other_device = fullname("Keys", "DEV-2");
+        assert_eq!(keys, "DEV-1-Keys._midi2._udp.local.");
+        assert!(keys != synth && keys != other_device && synth != other_device);
+    }
+
+    /// Spec: m2-124/4.3#1
+    #[test]
+    fn a_hostname_is_published_in_the_local_domain_however_it_was_given() {
+        for given in ["synth", "synth.", "synth.local", "synth.local."] {
+            assert_eq!(local_hostname(given).unwrap(), "synth.local.", "{given}");
+        }
+        assert!(matches!(
+            local_hostname("syn\u{e9}th"),
+            Err(DiscoveryError::Hostname)
+        ));
+    }
+
+    /// Spec: m2-124/4.4#1
+    #[test]
+    fn the_published_record_carries_the_txt_properties_of_the_identity() {
+        let host = identity("MIDI Workbench", "173ACEHDI3nVAUiFH");
+        let info = service_info(&host, "workbench", &[], 5004).unwrap();
+        assert_eq!(info.get_type(), SERVICE_TYPE);
+        assert_eq!(
+            info.get_property_val_str(KEY_ENDPOINT_NAME),
+            Some("MIDI Workbench")
+        );
+        assert_eq!(
+            info.get_property_val_str(KEY_PRODUCT_INSTANCE_ID),
+            Some("173ACEHDI3nVAUiFH")
+        );
+        assert_eq!(info.get_properties().iter().count(), 2);
     }
 }
