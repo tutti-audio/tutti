@@ -542,10 +542,11 @@ pub mod session {
         DeclarationError, Disconnection, EventEdge, EventTapPort, EventWire, Fanin, Feeder, Graph,
         Inlet, InletError, LIVE_MAX_BLOCK, MainBusWire, MainSink, Meters, NodeSlots, NotReopened,
         Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError,
-        PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
-        Removal, RemoveError, Reopened, ReplaceRefused, Replacement, Resource, ResourceFact,
-        RootDeclaration, RootReader, RootTopologyStatus, SessionHeardTapError, SessionNode,
-        SetRateError, SetSources, SetTempoError, Taps, Weighted, Wire, main_output_width,
+        PeerEvent, PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer,
+        Reclaims, Removal, RemoveError, Reopened, ReplaceRefused, Replacement, Resource,
+        ResourceFact, RootDeclaration, RootReader, RootTopologyStatus, SessionHeardTapError,
+        SessionNode, SetRateError, SetSources, SetTempoError, Taps, Weighted, Wire,
+        main_output_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
@@ -803,7 +804,7 @@ pub mod plugin {
 /// `MidiChannel`, `MidiGroup`, `NoteNumber`, `NoteVelocity`, `Voice1`, `SysexAssembler`, `Midi1Parser`), a timed event, the keys
 /// that play an instrument or a live input (`MidiKeys`),
 /// the session's MIDI (`Midi`, `InstrumentHandle`), its route rule, events and
-/// errors (`MidiRouteRule`, `MidiRouteId`, `MidiReport`, `MidiError`), its
+/// errors (`MidiRouteRule`, `MidiRouteId`, `MidiEvent`, `MidiError`), its
 /// followers (`FollowTempo`, `FollowClock`, `FollowMachineControl`), the
 /// sync node that sends the transport (`SyncOut`, `SyncMessages`), a host's own output (`MidiSink`, `OpenMidiSink`, `Stamping`), and under `midi-hardware` a device (`MidiDeviceId`,
 /// `DeviceInfo`), the ports a session opens for them
@@ -912,7 +913,7 @@ pub mod midi {
     #[cfg(feature = "session")]
     pub use tutti_session::{
         AnyNode, DroppedEvent, FollowClock, FollowMachineControl, FollowTempo, InstrumentHandle,
-        LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi, Midi, MidiReport, MidiRouteId,
+        LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi, Midi, MidiEvent, MidiRouteId,
         MidiRouteRule, MidiSink, NoCommonTimelineError, NotInstrument, OpenMidiSink, Stamping,
         TrackError,
     };
@@ -966,7 +967,7 @@ pub mod midi {
             PendingHosts, Requests, Retransmit, SessionConfig, Timer, TimerOutOfRange, Username,
         };
         #[cfg(feature = "session")]
-        pub use tutti_session::{MidiNetwork, NetworkError, NetworkReport, OpenClient, OpenHost};
+        pub use tutti_session::{MidiNetwork, NetworkError, NetworkEvent, OpenClient, OpenHost};
     }
 
     /// MIDI-CI Property Exchange (M2-103 and its resource specifications): a

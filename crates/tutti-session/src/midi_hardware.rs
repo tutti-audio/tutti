@@ -101,7 +101,7 @@ impl<F: Float> Midi<'_, F> {
     /// a session with no OS MIDI layer
     /// ([`SessionBuilder::midi_hardware`](crate::SessionBuilder::midi_hardware)).
     /// A device that came or went since is reported as a
-    /// [`MidiReport`](crate::MidiReport) from `Session::update`.
+    /// [`MidiEvent`](crate::MidiEvent) from `Session::update`.
     #[must_use]
     pub fn devices(&self) -> Vec<DeviceInfo> {
         self.io
