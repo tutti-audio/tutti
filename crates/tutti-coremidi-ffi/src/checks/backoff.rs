@@ -103,6 +103,11 @@ impl Backoff {
         self
     }
 
+    /// Whether this rule makes one attempt ([`Backoff::single_attempt`]).
+    pub(crate) fn is_single_attempt(&self) -> bool {
+        self.single_attempt
+    }
+
     /// When the next poll can make progress: the next attempt's instant, never
     /// past the bound (a poll at the bound is the timeout). After the last failure
     /// it is the give-up instant: the bound.
