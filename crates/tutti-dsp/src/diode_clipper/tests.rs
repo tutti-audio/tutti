@@ -114,8 +114,8 @@ fn a_slow_sine_follows_the_wright_omega_static_curve_when_the_cutoff_is_far_abov
     assert!(worst > 1e-5, "the lag is there to see: {worst:e}");
 }
 
-/// Radau IIA of three stages and order 5 on `u' = w (x(t) - u - beta sinh u)`, stage equations
-/// by Newton on the 3x3 system to `1e-13` in `K`. Its local error is `O((w h)^6)`, under `1e-15`
+/// Radau IIA of three stages and order 5 on `u' = w (x(t) - u - beta sinh u)`
+/// ([`crate::testing::radau5_step`], stage equations to `1e-13` of the largest slope). Its local error is `O((w h)^6)`, under `1e-15`
 /// at `w h = 2.5e-3`, so the reference is exact to the Newton tolerance.
 struct Radau {
     w: f64,
@@ -133,55 +133,13 @@ impl Radau {
     }
 
     fn step(&self, t: f64, u: f64, h: f64) -> f64 {
-        let r6 = 6.0f64.sqrt();
-        let c = [(4.0 - r6) / 10.0, (4.0 + r6) / 10.0, 1.0];
-        let a = [
-            [
-                (88.0 - 7.0 * r6) / 360.0,
-                (296.0 - 169.0 * r6) / 1800.0,
-                (-2.0 + 3.0 * r6) / 225.0,
-            ],
-            [
-                (296.0 + 169.0 * r6) / 1800.0,
-                (88.0 + 7.0 * r6) / 360.0,
-                (-2.0 - 3.0 * r6) / 225.0,
-            ],
-            [(16.0 - r6) / 36.0, (16.0 + r6) / 36.0, 1.0 / 9.0],
-        ];
-        let mut k = [self.rhs(t, u); 3];
-        for _ in 0..50 {
-            let stage: [f64; 3] =
-                core::array::from_fn(|i| u + h * (0..3).map(|j| a[i][j] * k[j]).sum::<f64>());
-            let g: [f64; 3] = core::array::from_fn(|i| self.rhs(t + c[i] * h, stage[i]) - k[i]);
-            let fu: [f64; 3] = core::array::from_fn(|i| -self.w * (1.0 + BETA * stage[i].cosh()));
-            // (I - h A diag(fu)) dk = g, by elimination.
-            let mut m = [[0.0; 4]; 3];
-            for i in 0..3 {
-                for j in 0..3 {
-                    m[i][j] = f64::from(u8::from(i == j)) - h * a[i][j] * fu[j];
-                }
-                m[i][3] = g[i];
-            }
-            for p in 0..3 {
-                for i in p + 1..3 {
-                    let r = m[i][p] / m[p][p];
-                    for j in p..4 {
-                        m[i][j] -= r * m[p][j];
-                    }
-                }
-            }
-            let mut dk = [0.0; 3];
-            for i in (0..3).rev() {
-                dk[i] = (m[i][3] - (i + 1..3).map(|j| m[i][j] * dk[j]).sum::<f64>()) / m[i][i];
-            }
-            for i in 0..3 {
-                k[i] += dk[i];
-            }
-            if dk.iter().all(|d| d.abs() <= 1e-13) {
-                break;
-            }
-        }
-        u + h * (0..3).map(|j| a[2][j] * k[j]).sum::<f64>()
+        crate::testing::radau5_step(
+            &|t, u: &[f64; 1]| [self.rhs(t, u[0])],
+            &|_, u: &[f64; 1]| [[-self.w * (1.0 + BETA * u[0].cosh())]],
+            t,
+            &[u],
+            h,
+        )[0]
     }
 }
 
