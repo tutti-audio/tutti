@@ -161,10 +161,10 @@ impl Subject for Plugin {
             .diagnostics()
             .chunks();
         Chunks {
-            missed: d.missed,
-            late: d.late,
-            refused: d.refused,
-            skipped: d.skipped,
+            missed: d.missed.get(),
+            late: d.late.get(),
+            refused: d.refused.get(),
+            skipped: d.skipped.get(),
         }
     }
 

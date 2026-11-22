@@ -75,7 +75,7 @@ impl<'a> ProcessOutputRef<'a> {
 /// # use tutti_units::{Bpm, SampleRate};
 /// # fn ex(plugin: &mut ClapProcessor, buffer: &mut InputOutput<'_, f32>)
 /// # -> tutti_clap_host::Result<()> {
-/// let transport = TransportInfo::new(SampleRate::SR_48K).with_tempo(Bpm::of(120.0));
+/// let transport = TransportInfo::new(SampleRate::SR_48K).tempo(Bpm::of(120.0));
 /// let midi = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 16384))];
 /// plugin.process(buffer, &ClapProcessContext {
 ///     midi: &midi,
@@ -151,7 +151,7 @@ impl ClapProcessor {
     /// # use tutti_units::{Bpm, SampleRate};
     /// # fn ex(active: &mut ClapProcessor, buffer: &mut InputOutput<'_, f32>)
     /// # -> tutti_clap_host::Result<()> {
-    /// let transport = TransportInfo::new(SampleRate::SR_48K).with_tempo(Bpm::of(120.0));
+    /// let transport = TransportInfo::new(SampleRate::SR_48K).tempo(Bpm::of(120.0));
     /// let midi = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 16384))];
     /// active.process(buffer, &ClapProcessContext {
     ///     midi: &midi,
@@ -645,7 +645,7 @@ mod tests {
     /// The slope rides beside the tempo when it is finite; a NaN one is `0.0`.
     #[test]
     fn the_slope_is_sent_only_when_finite() {
-        let mut t = base().with_tempo(Bpm::of(120.0)).with_tempo_inc(0.002);
+        let mut t = base().tempo(Bpm::of(120.0)).tempo_inc(0.002);
         assert_eq!(build_clap_transport(&t).tempo_inc, 0.002);
         t.timing.tempo_inc = f64::NAN;
         assert_eq!(build_clap_transport(&t).tempo_inc, 0.0);
@@ -658,10 +658,10 @@ mod tests {
     fn the_bar_at_song_position_zero_is_number_zero() {
         use tutti_units::BarNumber;
         assert_eq!(build_clap_transport(&base()).bar_number, 0);
-        let third = base().with_bar(Beat::new(8.0), BarNumber::new(3));
+        let third = base().bar(Beat::new(8.0), BarNumber::new(3));
         assert_eq!(build_clap_transport(&third).bar_number, 2);
         // Pre-roll: the bar before the first is -1.
-        let pickup = base().with_bar(Beat::new(-4.0), BarNumber::new(0));
+        let pickup = base().bar(Beat::new(-4.0), BarNumber::new(0));
         assert_eq!(build_clap_transport(&pickup).bar_number, -1);
     }
 
@@ -673,9 +673,9 @@ mod tests {
     fn an_active_loop_carries_its_seconds() {
         use tutti_units::Seconds;
         let looped = base()
-            .with_beat(Beat::new(1.0))
-            .with_seconds(Seconds::new(0.5))
-            .with_loop(LoopRegion {
+            .beat(Beat::new(1.0))
+            .seconds(Seconds::new(0.5))
+            .loop_region(LoopRegion {
                 seconds: Some((Seconds::new(1.0), Seconds::new(4.5))),
                 ..cycle(2.0, 8.0)
             });
@@ -685,9 +685,9 @@ mod tests {
         assert_eq!(ev.loop_end_seconds, CLAP_SECTIME_FACTOR * 9 / 2);
 
         let unknown = base()
-            .with_beat(Beat::new(1.0))
-            .with_seconds(Seconds::new(0.5))
-            .with_loop(cycle(2.0, 8.0));
+            .beat(Beat::new(1.0))
+            .seconds(Seconds::new(0.5))
+            .loop_region(cycle(2.0, 8.0));
         assert_eq!(
             build_clap_transport(&unknown).flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE,
             0,
