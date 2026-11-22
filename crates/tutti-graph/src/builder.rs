@@ -48,11 +48,13 @@
 use crate::NodeKey;
 use crate::{Edge, FeedbackFrom, InputPort, NodeSpec, OutputPort, PortSource};
 use tutti_buffers::ChannelLayout;
-use tutti_units::{Frame, Samples};
+use tutti_units::{Frame, Mix, Samples};
 
 use crate::editor::{CommitError, Editor};
 use crate::exec::Executor;
+use crate::mode::NodeMix;
 use crate::node::{IntoNode, NodeParts, Prepare, Shape, TransportPosition};
+use crate::node_values::NodeValues;
 use crate::spec::{EventEdge, EventInputPort, EventOutputPort, GraphSpec};
 use tutti_buffers::{Float, Planes, PlanesMut};
 
@@ -163,6 +165,8 @@ struct Pending<F: Float> {
 /// ```
 pub struct GraphBuilder<F: Float = f32> {
     spec: GraphSpec,
+    /// Each node's mix, which the built editor starts its units at.
+    values: NodeValues,
     /// Every added node's shape, read at `add` — the widths the fan-out
     /// calls use.
     shapes: Vec<Shape>,
@@ -200,6 +204,7 @@ impl<F: Float> GraphBuilder<F> {
         spec.topology.outputs = vec![Vec::new(); outputs.count() as usize];
         Self {
             spec,
+            values: NodeValues::default(),
             shapes: Vec::new(),
             units: Vec::new(),
         }
@@ -299,6 +304,30 @@ impl<F: Float> GraphBuilder<F> {
     /// here, so every node has a unit.
     pub fn spec_mut(&mut self) -> &mut GraphSpec {
         &mut self.spec
+    }
+
+    /// Sets `node`'s [`Mix`]: the built graph starts the node steady at it.
+    /// A mode has no builder call: set it on the built editor
+    /// ([`Editor::set_mode`](crate::Editor::set_mode)), where it fades in.
+    /// [`build`](Self::build) refuses a mix short of [`Mix::WET`] on a node
+    /// with no pass ([`CommitError::Unplaced`]).
+    ///
+    /// # Panics
+    ///
+    /// If `node` is not in the builder, or `mix` is NaN or outside `0..=1`
+    /// (make one with [`Mix::new_clamped`]).
+    pub fn mix(&mut self, node: NodeKey, mix: Mix) -> &mut Self {
+        self.check_node(node);
+        assert!(NodeMix::is_sound(mix), "a mix is finite and in 0..=1");
+        self.values.set_mix(node, mix);
+        self
+    }
+
+    fn check_node(&self, node: NodeKey) {
+        assert!(
+            self.spec.topology.nodes.contains_key(&node),
+            "{node:?} is not in the builder"
+        );
     }
 
     fn check_in(&self, node: NodeKey, port: usize) -> InputPort {
@@ -649,8 +678,6 @@ impl<F: Float> GraphBuilder<F> {
             required_resolution,
             params,
             gains,
-            modes,
-            mixes,
             bus_edges,
             main_output,
             main_output_id,
@@ -664,12 +691,11 @@ impl<F: Float> GraphBuilder<F> {
         live.required_resolution = required_resolution;
         live.params = params;
         live.gains = gains;
-        live.modes = modes;
-        live.mixes = mixes;
         live.bus_edges = bus_edges;
         live.main_output = main_output;
         live.main_output_id = main_output_id;
         live.main_output_sources = main_output_sources;
+        *editor.values_mut() = self.values;
         editor.commit()?;
         executor.apply_pending();
         editor.collect();

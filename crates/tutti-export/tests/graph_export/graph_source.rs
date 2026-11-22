@@ -170,7 +170,7 @@ fn convolved() -> GraphBuilder {
     let src = g.add(Osc::sine(Hz::new(330.0)).with_amplitude(Amplitude::new(0.5)));
     let conv = g.add_with_controls(convolver(&ir())).0;
     // Half the dry input, aligned by the latency, and half the wet: the graph's mix.
-    g.spec_mut().set_mix(conv, tutti_units::Mix::new(0.5));
+    g.mix(conv, tutti_units::Mix::new(0.5));
     g.connect(src, 0, conv, 0).pipe_output(conv);
     g
 }

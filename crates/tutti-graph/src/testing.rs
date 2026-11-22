@@ -17,7 +17,7 @@
     clippy::missing_errors_doc
 )]
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -850,17 +850,20 @@ impl<F: Float> Pair<F> {
         if !graph.params().is_empty() || !self.editor.spec_mut().params.is_empty() {
             self.editor.spec_mut().params = graph.params().clone();
         }
-        // And `set_mode` checks the node against it, and a unit placed now
-        // starts in the spec's mode.
-        if !graph.modes().is_empty()
-            || !self.editor.spec_mut().modes.is_empty()
-            || !graph.mixes().is_empty()
-            || !self.editor.spec_mut().mixes.is_empty()
-        {
-            let live = self.editor.spec_mut();
-            live.topology = graph.topology().clone();
-            live.modes = graph.modes().clone();
-            live.mixes = graph.mixes().clone();
+        // The node values name nodes of the graph switched to: a node that is
+        // gone takes its values with it (`Editor::remove`'s rule), and
+        // `set_mode` checks the node against the editor's spec.
+        let live_nodes = graph
+            .topology()
+            .nodes
+            .keys()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        self.editor
+            .values_mut()
+            .retain(|key| live_nodes.contains(&key));
+        if !self.editor.values().is_empty() {
+            self.editor.spec_mut().topology = graph.topology().clone();
         }
         // Back on the control side, where the box and what it retired are
         // freed.
@@ -873,7 +876,8 @@ impl<F: Float> Pair<F> {
         // The reference decides for itself what is new, from generations; give
         // it a fresh unit for every key it might need.
         let all = units_costed(kinds, &self.costs, graph.topology().nodes.keys().copied());
-        self.reference.set_graph_with_fades(graph, all, fades);
+        self.reference
+            .set_graph_with(graph, all, fades, self.editor.values());
     }
 
     /// Move edge `id`'s weight to `base` in both, as a host moving a fader:
@@ -883,6 +887,18 @@ impl<F: Float> Pair<F> {
             .set_edge_gain(id, base)
             .expect("the edge has a gain entry");
         self.reference.set_edge_gain(id, base);
+    }
+
+    /// Sets the mode a unit placed at `key` by the next switch starts steady
+    /// in, in both: before the first block, no fade. After a switch it is
+    /// [`set_mode`](Self::set_mode) that moves a running unit.
+    pub fn start_mode(&mut self, key: NodeKey, mode: crate::NodeMode) {
+        self.editor.values_mut().set_mode(key, mode);
+    }
+
+    /// As [`start_mode`](Self::start_mode), for the mix.
+    pub fn start_mix(&mut self, key: NodeKey, mix: tutti_units::Mix) {
+        self.editor.values_mut().set_mix(key, mix);
     }
 
     /// Move `key`'s mode in both, as a host clicking bypass: the editor's

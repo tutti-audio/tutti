@@ -2334,6 +2334,13 @@ fn answer_blocks(msg: AudioRequest) -> Action {
     }
 }
 
+/// Gives each block's reply up to `NOTICE_TIMEOUT`, so no block is abandoned at
+/// the live deadline: a block the bridge gave up on is answered by the bridge
+/// itself, before the server has logged it.
+fn hold_replies(mock: &MockServer) {
+    mock.bridge.audio().set_reply_wait(Some(NOTICE_TIMEOUT));
+}
+
 /// Whether block `seq` has been answered on the ring.
 fn answered(mock: &mut MockServer, seq: u64) -> bool {
     let (mut midi, mut status) = (Default::default(), Default::default());
@@ -2658,6 +2665,7 @@ fn a_render_mode_is_applied_before_the_next_block() {
         log_blocks(Arc::clone(&log), block_seen),
         control,
     );
+    hold_replies(&mock);
 
     assert!(
         mock.bridge
@@ -2695,6 +2703,7 @@ fn a_rate_change_is_applied_before_the_next_block() {
         log_blocks(Arc::clone(&log), block_seen),
         control,
     );
+    hold_replies(&mock);
 
     assert!(mock.bridge.audio().set_sample_rate(SampleRate::SR_96K));
     submit_block(&mock.bridge, 1);
@@ -2746,6 +2755,7 @@ fn a_control_command_pushed_after_a_block_reaches_the_server_after_it() {
         }
     };
     let mut mock = MockServer::start_lanes("control-after-block", audio, control);
+    hold_replies(&mock);
 
     assert!(
         mock.bridge

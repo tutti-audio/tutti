@@ -20,6 +20,7 @@ use crate::editor::{CommitError, Editor};
 use crate::exec::Executor;
 use crate::gain::EdgeGain;
 use crate::node::{IntoNode, Node, NodeParts, Prepare};
+use crate::node_values::NodeValues;
 use crate::spec::{EventInputPort, GraphSpec};
 use crate::wake::Wake;
 use tutti_buffers::Float;
@@ -226,6 +227,8 @@ pub struct PendingFork<F: Float = f32> {
     /// The fork's spec, but for what the inserts write (each node's shape
     /// figures, generations).
     spec: GraphSpec,
+    /// The mode and mix each unit starts steady in.
+    values: NodeValues,
     units: Vec<(NodeKey, Unit<F>)>,
 }
 
@@ -292,6 +295,7 @@ impl<F: Float> PendingFork<F> {
             prepare,
             event_capacity,
             spec,
+            values,
             units,
         } = self;
         // Every deferred build first, so a failure installs nothing.
@@ -352,8 +356,7 @@ impl<F: Float> PendingFork<F> {
         fork.required_resolution = spec.required_resolution;
         fork.params = spec.params;
         fork.gains = spec.gains;
-        fork.modes = spec.modes;
-        fork.mixes = spec.mixes;
+        *editor.values_mut() = values;
         if let Err(e) = editor.commit() {
             let remains = ForkRemains {
                 units: Vec::new(),
@@ -1058,8 +1061,6 @@ impl<F: Float> Editor<F> {
                 .map(|(at, m)| (*at, *m))
                 .collect(),
             gains: BTreeMap::new(),
-            modes: BTreeMap::new(),
-            mixes: BTreeMap::new(),
             // The fork is of the lowered spec: a bus edge is already its
             // lanes.
             bus_edges: BTreeMap::new(),
@@ -1082,18 +1083,14 @@ impl<F: Float> Editor<F> {
             })
             .collect();
         // Each unit starts steady in the mode the live graph holds, with no
-        // fade: an export hears the state, not a toggle.
-        spec.modes = live
-            .modes
-            .iter()
-            .filter(|(key, _)| keys.contains(key))
-            .map(|(key, mode)| (*key, *mode))
-            .collect();
-        // The mix is the live cell's (a driving lane's knob writes it, so the
-        // spec's copy, or its absence, may be behind): the fork starts at the
-        // base, a lane's value being the fork's own route's to give.
+        // fade: an export hears the state, not a toggle. The mix is the live
+        // cell's (a driving lane's knob writes it, so the editor's value may
+        // be behind): the fork starts at the base, a lane's value being the
+        // fork's own route's to give.
+        let mut values = NodeValues::default();
         for &key in &keys {
-            spec.set_mix(key, self.mix(key));
+            values.set_mode(key, self.mode(key));
+            values.set_mix(key, self.mix(key));
         }
 
         let mode = prepare.render_mode();
@@ -1120,6 +1117,7 @@ impl<F: Float> Editor<F> {
             prepare,
             event_capacity: self.event_capacity(),
             spec,
+            values,
             units,
         })
     }

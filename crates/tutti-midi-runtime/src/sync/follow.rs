@@ -116,7 +116,7 @@
 //!   no position until the pieces ascend again, when it locks afresh.
 
 use tutti_midi_protocol::{
-    Addressed, SmpteFrameRate, SmpteTimecode, Universal, UniversalRead, read,
+    Addressed, QuarterFramePiece, SmpteFrameRate, SmpteTimecode, Universal, UniversalRead, read,
 };
 use tutti_ump::{Message, SysexAssembler, SysexStep, System, Ump};
 use tutti_units::{Beat, Bpm, Seconds, TimecodeFrames};
@@ -746,7 +746,7 @@ impl MtcFollower {
             return;
         }
         self.last_heard = Some(at);
-        if self.decoder.last_piece() == Some(0) {
+        if self.decoder.last_piece() == Some(QuarterFramePiece::of(0)) {
             self.piece0_at = Some(at);
         }
         match self.decoder.direction() {

@@ -223,23 +223,32 @@ impl DrumInstrument {
     /// Details Reply (Table 5, Table 11).
     #[must_use]
     pub const fn bitmap_position(self) -> BitmapPosition {
-        // The index is at most 61: the byte is at most 10 and the bit at most 6.
-        let i = self.index();
-        BitmapPosition {
-            byte: 2 + (i / 7) as u8,
-            bit: (i % 7) as u8,
-        }
+        // The index is at most 61, inside the position's range.
+        BitmapPosition::of(self.index() as u8)
     }
 }
 
-/// Where a bit sits in the Inquiry Target Data (M2-125 Table 5 and Table 11):
-/// the data byte, counted from 1, and the bit in it, `D0` to `D6`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct BitmapPosition {
-    /// The data byte, `2..=10` for a sound.
-    pub byte: u8,
-    /// The bit, `0..=6`.
-    pub bit: u8,
+tutti_units::ranged! {
+    /// Where a bit sits in the Inquiry Target Data (M2-125 Table 5 and Table 11):
+    /// the bit's index counted from `D0` of data byte 2, seven bits to a byte, so
+    /// `0..=62` (data bytes 2 to 10). The data byte, counted from 1, and the bit
+    /// in it, `D0` to `D6`, are [`byte`](Self::byte) and [`bit`](Self::bit).
+    #[derive(Eq, Hash)]
+    BitmapPosition(u8), NotABitmapPosition, "a bit index within 0..=62", |raw| raw <= 62
+}
+
+impl BitmapPosition {
+    /// The data byte, `2..=10`.
+    #[must_use]
+    pub const fn byte(self) -> u8 {
+        2 + self.get() / 7
+    }
+
+    /// The bit in the data byte, `0..=6`.
+    #[must_use]
+    pub const fn bit(self) -> u8 {
+        self.get() % 7
+    }
 }
 
 /// A control the Profile responds to on a Note Number or a Channel (M2-125 §5
@@ -398,7 +407,7 @@ impl DrumFeatures {
         data[0] = u8::from(self.per_note_controllers) | u8::from(self.key_based_controllers) << 1;
         for instrument in self.sounds.iter() {
             let at = instrument.bitmap_position();
-            data[usize::from(at.byte) - 1] |= 1 << at.bit;
+            data[usize::from(at.byte()) - 1] |= 1 << at.bit();
         }
         data
     }
@@ -414,7 +423,7 @@ impl DrumFeatures {
         let sounds = DrumInstrument::all()
             .filter(|i| {
                 let at = i.bitmap_position();
-                data[usize::from(at.byte) - 1] >> at.bit & 1 == 1
+                data[usize::from(at.byte()) - 1] >> at.bit() & 1 == 1
             })
             .collect();
         Some(Self {

@@ -704,3 +704,31 @@ fn connect_adds_and_set_source_replaces() {
     assert!(matches!(edges[0], Edge::Direct(_)));
     assert!(matches!(edges[1], Edge::Feedback(_)));
 }
+
+/// **A built mix needs a pass.** A mono node with a stereo output names no
+/// placement for its dry path, so a mix short of WET set on the builder is
+/// refused at `build` with the reason, and WET builds.
+#[test]
+fn a_built_mix_short_of_wet_on_a_node_with_no_pass_is_refused() {
+    let build = |mix: tutti_units::Mix| {
+        let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::STEREO);
+        let split = g.add(node(1, 2));
+        g.connect_input(0, split, 0)
+            .connect_output(split, 0, 0)
+            .connect_output(split, 1, 1)
+            .mix(split, mix);
+        (split, g.build(prepare(64)).map(|_| ()))
+    };
+    let (split, refused) = build(tutti_units::Mix::new(0.5));
+    assert_eq!(
+        refused,
+        Err(tutti_graph::CommitError::Unplaced {
+            node: split,
+            error: tutti_graph::PassError::Unplaced {
+                inputs: 1,
+                outputs: 2
+            },
+        })
+    );
+    assert_eq!(build(tutti_units::Mix::WET).1, Ok(()), "WET needs no pass");
+}

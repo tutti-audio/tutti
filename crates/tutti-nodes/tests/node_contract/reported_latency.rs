@@ -69,7 +69,7 @@ fn mixed_impulse_response<N: IntoNode>(node: N, frames: usize, mix: Mix) -> Vec<
     for c in 0..usize::from(shape.audio_out().count()) {
         g.connect_output(key, c, c);
     }
-    g.spec_mut().set_mix(key, mix);
+    g.mix(key, mix);
     let mut r = g
         .renderer(Prepare::new(SR, MaxBlock::of(Samples::new(BLOCK))))
         .expect("a one-node graph builds");
@@ -279,7 +279,7 @@ fn a_delay_insert_adds_no_compensation_to_the_other_paths() {
         }),
     );
     let (echo, _) = g.add_with_controls(echo);
-    g.spec_mut().set_mix(echo, Mix::new(0.5_f64));
+    g.mix(echo, Mix::new(0.5_f64));
     let (chorus, _) = g.add_with_controls(ModDelayNode::<f32>::from(ModDelayConfig::chorus(
         BusTopology::STEREO,
     )));

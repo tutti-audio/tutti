@@ -1,6 +1,6 @@
 //! The controller Resources (M2-117): AllCtrlList, ChCtrlList and CtrlMapList.
 
-use tutti_ump::U7;
+use tutti_ump::{ControlValue, U7};
 
 use super::super::limits::ResourceId;
 use super::super::tree::{PeJson, PeObject};
@@ -189,10 +189,20 @@ pub enum CtrlRange {
     /// `minMax`: the values from `min` to `max`, unsigned 32-bit.
     MinMax {
         /// The lowest value recognized.
-        min: u32,
+        min: ControlValue,
         /// The highest value recognized.
-        max: u32,
+        max: ControlValue,
     },
+}
+
+/// A 32-bit controller value read from a JSON integer.
+fn control_value(json: &PeJson) -> Option<ControlValue> {
+    unsigned32(json).map(ControlValue::new)
+}
+
+/// A controller value as a JSON integer.
+fn control_value_json(value: ControlValue) -> PeJson {
+    u32_json(value.get())
 }
 
 /// A controller message of a device, as AllCtrlList and ChCtrlList describe it
@@ -208,7 +218,7 @@ pub struct PeCtrl {
     /// How prominent to make it.
     pub priority: Option<Priority>,
     /// The value when reset, unsigned 32-bit.
-    pub default: Option<u32>,
+    pub default: Option<ControlValue>,
     /// The values it sends.
     pub transmit: CtrlValueKind,
     /// The values it recognizes.
@@ -262,7 +272,7 @@ impl PeCtrl {
             o.insert("priority", i64::from(p.get()).into());
         }
         if let Some(d) = self.default {
-            o.insert("default", u32_json(d));
+            o.insert("default", control_value_json(d));
         }
         if self.transmit != CtrlValueKind::Absolute {
             o.insert("transmit", self.transmit.as_str().into());
@@ -294,7 +304,10 @@ impl PeCtrl {
             CtrlRange::Full => {}
             CtrlRange::Steps(n) => o.insert("stepCount", u32_json(n.get())),
             CtrlRange::MinMax { min, max } => {
-                o.insert("minMax", PeJson::Array(vec![u32_json(min), u32_json(max)]));
+                o.insert(
+                    "minMax",
+                    PeJson::Array(vec![control_value_json(min), control_value_json(max)]),
+                );
             }
         }
         self.extensions.write(o);
@@ -317,7 +330,7 @@ impl PeCtrl {
             .optional("priority", "an integer", integer)?
             .map(|n| narrowed::<u8, Priority>(n).map_err(|e| f.invalid("priority", e)))
             .transpose()?;
-        let default = f.optional("default", "an unsigned 32-bit integer", unsigned32)?;
+        let default = f.optional("default", "an unsigned 32-bit integer", control_value)?;
         let transmit = value_kind(f, "transmit")?;
         let recognize = value_kind(f, "recognize")?;
         let significant_bits = f
@@ -351,7 +364,7 @@ impl PeCtrl {
             "minMax",
             "an array of 2 unsigned 32-bit integers",
             |j| match j.as_array()? {
-                [lo, hi] => Some((unsigned32(lo)?, unsigned32(hi)?)),
+                [lo, hi] => Some((control_value(lo)?, control_value(hi)?)),
                 _ => None,
             },
         )?;
@@ -608,7 +621,7 @@ impl PeChCtrlList {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PeCtrlMapEntry {
     /// The unsigned 32-bit value.
-    pub value: u32,
+    pub value: ControlValue,
     /// The name of the value.
     pub title: PeText,
 }
@@ -626,7 +639,7 @@ impl PeCtrlMapList {
                 .iter()
                 .map(|e| {
                     let mut o = PeObject::new();
-                    o.insert("value", u32_json(e.value));
+                    o.insert("value", control_value_json(e.value));
                     o.insert("title", e.title.as_str().into());
                     PeJson::Object(o)
                 })
@@ -639,7 +652,7 @@ impl PeCtrlMapList {
             .iter()
             .map(|json| {
                 let mut f = Fields::new(json, "CtrlMapList entry")?;
-                let value = f.required("value", "an unsigned 32-bit integer", unsigned32)?;
+                let value = f.required("value", "an unsigned 32-bit integer", control_value)?;
                 let title = required_text(&mut f, "title")?;
                 f.finish()?;
                 Ok(PeCtrlMapEntry { value, title })
