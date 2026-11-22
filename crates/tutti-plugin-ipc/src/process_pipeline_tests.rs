@@ -41,7 +41,7 @@ use tutti_buffers::{InputOutput, Planes, PlanesMut};
 use tutti_fixtures::midi;
 use tutti_plugin_types::{BlockStatus, ChannelLayout, ChannelTable, ChunkCounters, MidiEventVec};
 use tutti_ump::MidiChannel;
-use tutti_units::{SampleRate, Samples};
+use tutti_units::{Chunks, SampleRate, Samples};
 
 /// The bridge's editor loader: these peers never open an editor, and one that
 /// tried is refused (the suite loads no plugin format).
@@ -992,7 +992,7 @@ fn a_chunk_published_after_its_miss_is_counted_late() {
     drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
     assert_eq!(
         counters.outcomes().missed,
-        tutti_units::Chunks::new(1),
+        Chunks::new(1),
         "chunk 1 was collected unanswered"
     );
     assert_eq!(
@@ -1006,7 +1006,7 @@ fn a_chunk_published_after_its_miss_is_counted_late() {
     drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
     assert_eq!(
         counters.outcomes().late,
-        tutti_units::Chunks::new(1),
+        Chunks::new(1),
         "chunk 1, published after its miss, is counted late"
     );
     assert!(counters.outcomes().late <= counters.outcomes().missed);
@@ -1039,7 +1039,7 @@ fn a_chunk_never_published_is_missed_and_never_late() {
     }
     assert_eq!(
         counters.outcomes().missed,
-        tutti_units::Chunks::new(5),
+        Chunks::new(5),
         "every chunk but the first collect"
     );
     assert_eq!(
@@ -1133,9 +1133,9 @@ fn a_chunk_the_server_refuses_is_counted_refused() {
     assert_eq!(
         counters.outcomes(),
         tutti_plugin_types::ChunkOutcomes {
-            missed: tutti_units::Chunks::new(2),
-            late: tutti_units::Chunks::new(1),
-            refused: tutti_units::Chunks::new(1),
+            missed: Chunks::new(2),
+            late: Chunks::new(1),
+            refused: Chunks::new(1),
             unanswered: tutti_units::Chunks::ZERO,
             skipped: tutti_units::Chunks::ZERO,
         }
@@ -1185,7 +1185,7 @@ fn a_chunk_the_server_never_accounts_for_is_counted_unanswered() {
         "nothing was published"
     );
     assert!(
-        counters.outcomes().unanswered >= tutti_units::Chunks::new(1),
+        counters.outcomes().unanswered >= Chunks::new(1),
         "chunks the server never answered, past the window, are unanswered"
     );
 
@@ -1373,7 +1373,7 @@ fn a_late_reply_does_not_permanently_crash_the_bridge() {
     // server answer: what is under test is what the host did with the missed
     // deadline, not whether the server ever answered.
     wait_for(&bridge, "the bridge never abandoned the block", || {
-        bridge.audio().block_counts().abandoned >= tutti_units::Chunks::new(1)
+        bridge.audio().block_counts().abandoned >= Chunks::new(1)
     });
     permits.send(()).expect("the server waits for a permit");
     wait_for(&bridge, "the server never answered", || {
@@ -1458,7 +1458,7 @@ fn a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block() {
         stamps.push(midi_out.iter().map(|e| e.ump.0[0]).collect());
         if block == 0 {
             wait_for(&bridge, "the bridge never abandoned block 1", || {
-                bridge.audio().block_counts().abandoned >= tutti_units::Chunks::new(1)
+                bridge.audio().block_counts().abandoned >= Chunks::new(1)
             });
             permits.send(()).expect("the server waits for a permit");
         }
@@ -1482,12 +1482,12 @@ fn a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block() {
     // block miss its few-ms budget too, so neither count is pinned.
     let counts = bridge.audio().block_counts();
     assert!(
-        counts.abandoned >= tutti_units::Chunks::new(1),
+        counts.abandoned >= Chunks::new(1),
         "block 1 was held past its budget, yet no reply was abandoned — the rig \
          did not stage the timeout this test is about",
     );
     assert!(
-        counts.late >= tutti_units::Chunks::new(1),
+        counts.late >= Chunks::new(1),
         "the drain collected no owed reply although {} blocks were abandoned. \
          `AudioState::hear` never ran or never collected anything, and the abandoned \
          frame is still queued — which the stamps below cannot reliably detect.",

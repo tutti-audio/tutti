@@ -82,7 +82,7 @@ use tutti_plugin_types::{
     BlockStatus, ChunkCounters, MidiEventVec, NoteExpressionChanges, ParameterChanges,
     TransportChanges, TransportInfo, WireMidi,
 };
-use tutti_units::{SampleRate, Samples};
+use tutti_units::{Chunks, SampleRate, Samples};
 
 /// The FIFO and the ring in one wire format `T`, each row `ceiling` frames
 /// long.
@@ -654,7 +654,7 @@ impl Batcher {
                     && !bridge.is_crashed()
                     && !bridge.rate_refused()
                 {
-                    self.counters.note_missed(tutti_units::Chunks::new(1));
+                    self.counters.note_missed(Chunks::new(1));
                     self.remember_unanswered(seq);
                 }
                 self.wire.silence_ring(chunk);
@@ -681,8 +681,7 @@ impl Batcher {
     fn read_ring(&mut self, seq: u64) {
         let missing = self.wire.read_ring(self.slab.slab(), seq, self.chunk);
         if missing > 0 {
-            self.counters
-                .note_missed(tutti_units::Chunks::new(missing as u64));
+            self.counters.note_missed(Chunks::new(missing as u64));
         }
     }
 
@@ -752,7 +751,7 @@ impl Batcher {
         let seq = self.next_seq;
         let staged = self.wire.stage(&mut self.slab, seq, chunk);
         if !staged {
-            self.counters.note_missed(tutti_units::Chunks::new(1));
+            self.counters.note_missed(Chunks::new(1));
             // The chunk will never be collectable (a channel the slab lacks
             // lands here too, and counts); its output plays as silence.
             // Its parameter changes did not go either: the host keeps them for
@@ -914,7 +913,7 @@ mod tests {
         assert_eq!(
             b.counters.outcomes(),
             ChunkOutcomes {
-                missed: tutti_units::Chunks::new(1),
+                missed: Chunks::new(1),
                 ..ChunkOutcomes::default()
             },
             "one miss, with no fate"
@@ -1103,7 +1102,7 @@ mod tests {
         b.remember_unanswered(BATCH_OUTCOMES as u64 + 1);
         assert_eq!(
             counters.outcomes().unanswered,
-            tutti_units::Chunks::new(1),
+            Chunks::new(1),
             "chunk 1, the oldest, is replaced"
         );
         assert!(!b.unanswered.contains(&1));
