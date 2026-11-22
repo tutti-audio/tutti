@@ -87,7 +87,7 @@ impl Virtual {
 }
 
 fn plug(name: &str) -> Virtual {
-    let seq = super::client::open(name, tutti_alsa_ffi::UmpVersion::Midi2)
+    let seq = Client::open(name, tutti_alsa_ffi::UmpVersion::Midi2)
         .expect("a sequencer to open (modprobe snd-seq)");
     let caps = PortCaps::READ | PortCaps::SUBS_READ | PortCaps::WRITE | PortCaps::SUBS_WRITE;
     seq.open_port("port", caps, PortKind::MIDI_GENERIC | PortKind::APPLICATION)
@@ -281,7 +281,7 @@ fn a_saved_alsa_device_resolves_by_name_only() {
 fn a_port_gaining_its_capabilities_is_added_as_a_duplex() {
     let devices = Watched::open();
     let name = unique("caps");
-    let seq = super::client::open(&name, tutti_alsa_ffi::UmpVersion::Midi2)
+    let seq = Client::open(&name, tutti_alsa_ffi::UmpVersion::Midi2)
         .expect("a sequencer to open (modprobe snd-seq)");
     let kind = PortKind::MIDI_GENERIC | PortKind::APPLICATION;
     let port = seq
@@ -911,8 +911,8 @@ fn dropping_an_input_does_not_wait_on_a_stuck_pump() {
 }
 
 /// The next note message (type `0x2`) that reaches `device`'s port, polling
-/// for up to `patience`; the sequencer's own notices about the subscription
-/// (Stream messages) pass by.
+/// for up to `patience`, waiting on the client's descriptors between reads; the
+/// sequencer's own notices about the subscription (Stream messages) pass by.
 fn next_note(device: &Virtual, patience: Duration) -> Option<(u32, Instant)> {
     let deadline = Instant::now() + patience;
     while Instant::now() < deadline {
@@ -923,7 +923,10 @@ fn next_note(device: &Virtual, patience: Duration) -> Option<(u32, Instant)> {
                 return Some((ump.0[0], Instant::now()));
             }
             Ok(tutti_alsa_ffi::Read::Event(_)) => {}
-            _ => std::thread::sleep(Duration::from_micros(500)),
+            _ => {
+                let left = deadline.saturating_duration_since(Instant::now());
+                device.0.wait_input(left).expect("a wait");
+            }
         }
     }
     None
@@ -1245,60 +1248,73 @@ fn a_clients_protocol_and_blocks_are_read_from_its_ump_endpoint() {
 /// ring, not the graph.
 #[test]
 fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use tutti_alsa_ffi::Read;
+    use tutti_alsa_ffi::{Read, Wait};
     use tutti_midi_device::{Capabilities, Endpoint, Supports};
     use tutti_ump::{Message, Protocol};
 
     let name = unique("negotiated");
     let device = plug_ump(&name, Protocol::Midi1);
-    let stop = std::sync::Arc::new(AtomicBool::new(false));
+    // Closing `stop` ends the device's wait, as production stops its pump.
+    let (stop, stop_rx) = std::os::unix::net::UnixStream::pair().unwrap();
+    let mut poller = device.0.into_poller(stop_rx.into()).expect("descriptors");
     let inlets =
         tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), Duration::ZERO);
+    let executor = tutti_platform::Executor::new();
+    let bells = tutti_rt::Bells::new(&executor).unwrap();
+    let (bell, mut listener) = bells.bell();
     let mut session = crate::MidiSession::open(
-        &tutti_platform::Executor::new(),
-        crate::HardwareMidiInputs::new(inlets),
+        &executor,
+        crate::HardwareMidiInputs::new(inlets).ringing(bell),
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();
     let want = format!("{name}: port");
+    // Subscribed before the first look, so a change between the look and the
+    // wait is queued.
+    let mut changes = session.devices().subscribe();
     let deadline = Instant::now() + PATIENCE;
     let id = loop {
         if let Some(d) = session.inputs().into_iter().find(|d| d.name == want) {
             break d.id;
         }
-        assert!(Instant::now() < deadline, "device never listed");
-        std::thread::sleep(Duration::from_millis(10));
+        let left = deadline.saturating_duration_since(Instant::now());
+        tutti_fixtures::block_on_within(futures_lite::StreamExt::next(&mut changes), left)
+            .expect("the device to be listed");
     };
-    let thread = {
-        let stop = std::sync::Arc::clone(&stop);
-        std::thread::spawn(move || {
-            // The device: in MIDI 1.0, offering MIDI 2.0.
-            let mut endpoint = Endpoint::new(Supports::of(Capabilities {
-                midi1: true,
-                midi2: true,
-                ..Capabilities::default()
-            }));
-            while !stop.load(Ordering::Acquire) {
-                match device.0.read_event() {
-                    Ok(Read::Event(Event::Ump { ump, .. })) => {
-                        let Ok(message @ Message::Stream(_)) = ump.decode() else {
-                            continue;
-                        };
-                        let mut answers: Vec<tutti_ump::Ump> = Vec::new();
-                        let _ = endpoint.reply(message, &mut answers);
-                        for answer in answers {
-                            device
-                                .0
-                                .send_to_subscribers(PortId::of(0), &answer)
-                                .unwrap();
-                        }
+    let thread = std::thread::spawn(move || {
+        // The device: in MIDI 1.0, offering MIDI 2.0.
+        let mut endpoint = Endpoint::new(Supports::of(Capabilities {
+            midi1: true,
+            midi2: true,
+            ..Capabilities::default()
+        }));
+        loop {
+            // The guard is held for the read only, never across the wait.
+            let read = poller.client().read_event();
+            match read {
+                Ok(Read::Event(Event::Ump { ump, .. })) => {
+                    let Ok(message @ Message::Stream(_)) = ump.decode() else {
+                        continue;
+                    };
+                    let mut answers: Vec<tutti_ump::Ump> = Vec::new();
+                    let _ = endpoint.reply(message, &mut answers);
+                    for answer in answers {
+                        poller
+                            .client()
+                            .send_to_subscribers(PortId::of(0), &answer)
+                            .unwrap();
                     }
-                    _ => std::thread::sleep(Duration::from_millis(1)),
                 }
+                // Any other event is consumed; only an empty read waits.
+                Ok(Read::Event(_)) => {}
+                _ => match poller.wait().expect("a wait") {
+                    Wait::Stopped => break,
+                    Wait::Broken => panic!("the device's sequencer descriptor failed"),
+                    _ => {}
+                },
             }
-        })
-    };
+        }
+    });
     let _ = session
         .connect_input(crate::testing::started(), &id)
         .unwrap();
@@ -1308,10 +1324,16 @@ fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
         if let Some(found) = session.stream(&id) {
             break found;
         }
-        assert!(Instant::now() < deadline, "the negotiation never settled");
-        std::thread::sleep(Duration::from_millis(2));
+        // The session rings its bell when the device's reply reaches the stream
+        // ring, and the negotiation's own steps are due at its deadline.
+        let left = deadline.saturating_duration_since(Instant::now());
+        let step = session.deadline().map_or(left, |at| {
+            at.saturating_duration_since(Instant::now()).min(left)
+        });
+        assert!(!left.is_zero(), "the negotiation never settled");
+        let _ = tutti_fixtures::block_on_within(listener.rung(), step);
     };
-    stop.store(true, Ordering::Release);
+    drop(stop);
     thread.join().unwrap();
     assert_eq!(stream.basis(), crate::Basis::Negotiated);
     assert_eq!(stream.config().protocol, Protocol::Midi2);

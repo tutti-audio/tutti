@@ -81,6 +81,13 @@ impl Listener {
         self.rig.commit();
     }
 
+    /// Yields for about a block between looks at the wall clock. The rig renders
+    /// on real time, so nothing signals the next block: this paces the
+    /// renderer, not a wait for an event.
+    fn pace() {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+
     /// Renders the blocks the wall clock has reached.
     fn play(&mut self) {
         let due = (self.origin.elapsed().as_secs_f64() * RATE) as u64;
@@ -101,7 +108,7 @@ impl Listener {
         let end = Instant::now() + patience;
         while self.rig.seen.lock().unwrap().len() < count && Instant::now() < end {
             self.play();
-            std::thread::sleep(Duration::from_millis(1));
+            Self::pace();
         }
         self.listen(SETTLE)
     }
@@ -130,7 +137,7 @@ impl Listener {
         let end = Instant::now() + span;
         while Instant::now() < end {
             self.play();
-            std::thread::sleep(Duration::from_millis(1));
+            Self::pace();
         }
         self.rig.take().into_iter().map(|(_, _, ump)| ump).collect()
     }
