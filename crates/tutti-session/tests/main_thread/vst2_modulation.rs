@@ -214,7 +214,7 @@ fn a_plugins_midi_rewiring_keeps_its_lanes() {
             .sources(EventInputPort::new(node, 0))
             .unwrap()
             .into_iter()
-            .map(|e| e.node())
+            .map(|e| e.node)
             .collect();
         sources.sort();
         assert_eq!(sources, want, "{what}: the port's sources");

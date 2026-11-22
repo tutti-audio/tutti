@@ -1192,6 +1192,12 @@ pub(crate) fn drain_events(
     losses.lost(tap.take_lost());
 }
 
+/// The graph's index of the input node's port `port`. An input node has at most
+/// `MidiGroup::COUNT * MIDI_INPUT_PORTS` ports, which fits the graph's `u16`.
+fn input_port(port: usize) -> u16 {
+    u16::try_from(port).expect("an input node's port index fits u16")
+}
+
 /// Wires `inputs`' ports as `rules` route them (`tutti_midi_runtime::compile_routes`)
 /// to the sinks `resolve` names, replacing every route before: the ports of
 /// every input node feed each sink their rule gives ports, so devices merge in
@@ -1223,11 +1229,14 @@ fn compile_feeds<'r, T: Copy + Ord + 'r, F: Float>(
         let Some(sink) = resolve(target).filter(|&n| graph.contains(n)) else {
             continue;
         };
-        wanted.entry(sink).or_default().extend(
-            inputs
-                .iter()
-                .flat_map(|&input| ports.iter().map(move |&p| EventOutputPort::new(input, p))),
-        );
+        wanted
+            .entry(sink)
+            .or_default()
+            .extend(inputs.iter().flat_map(|&input| {
+                ports
+                    .iter()
+                    .map(move |&p| EventOutputPort::new(input, input_port(p)))
+            }));
     }
     for &fed in routed.iter() {
         // A sink removed since has no feed left to clear.
@@ -1365,7 +1374,7 @@ impl<F: Float> Midi<'_, F> {
             .feed(target, Feeder::Instrument)
             .ok()?
             .first()
-            .map(|port| port.node())
+            .map(|port| port.node)
     }
 
     /// The node of `target`'s live input, opened with its keys held if it has
@@ -1564,7 +1573,7 @@ impl<F: Float> Midi<'_, F> {
                 self.state
                     .clips
                     .iter()
-                    .find_map(|(&clip, c)| (c.transform == s.node()).then_some(clip))
+                    .find_map(|(&clip, c)| (c.transform == s.node).then_some(clip))
             })
             .map(Key::new)
     }
@@ -1582,7 +1591,7 @@ impl<F: Float> Midi<'_, F> {
             .feed(target, feeder)
             .ok()?
             .iter()
-            .find_map(|s| ours.get_key_value(&s.node()))
+            .find_map(|s| ours.get_key_value(&s.node))
             .map(|(&node, v)| (node, v))
     }
 
@@ -1890,7 +1899,7 @@ impl<F: Float> Midi<'_, F> {
         self.graph
             .taps()
             .open_event(
-                EventOutputPort::new(input, port),
+                EventOutputPort::new(input, input_port(port)),
                 EventTapOptions::new(capacity).align(tutti_graph::TapAlign::Raw),
             )
             .map_err(MidiError::Tap)

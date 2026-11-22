@@ -37,6 +37,17 @@ pub struct EventInputPort {
     pub port: u16,
 }
 
+impl EventInputPort {
+    /// Event input `port` of `node`.
+    #[must_use]
+    pub fn new(node: impl Into<NodeKey>, port: u16) -> Self {
+        Self {
+            node: node.into(),
+            port,
+        }
+    }
+}
+
 /// An event **output** port of a node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EventOutputPort {
@@ -44,6 +55,17 @@ pub struct EventOutputPort {
     pub node: NodeKey,
     /// Which of its event output ports.
     pub port: u16,
+}
+
+impl EventOutputPort {
+    /// Event output `port` of `node`.
+    #[must_use]
+    pub fn new(node: impl Into<NodeKey>, port: u16) -> Self {
+        Self {
+            node: node.into(),
+            port,
+        }
+    }
 }
 
 /// One source of an event input port.

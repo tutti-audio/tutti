@@ -18,7 +18,7 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 
 use tutti_buffers::Float;
-use tutti_graph::{BusRef, BusSource, EdgeId, NodeKey};
+use tutti_graph::{BusRef, BusSource, EdgeId, EventInputPort, EventOutputPort, NodeKey};
 use tutti_units::Amplitude;
 
 use crate::{ConnectError, DeclarationError, Graph};
@@ -73,10 +73,10 @@ impl<N: ?Sized> Key<N> {
 
     /// Event output `index` of the node.
     #[must_use]
-    pub const fn events_out_at(self, index: usize) -> EventOutputPort {
+    pub const fn events_out_at(self, index: u16) -> EventOutputPort {
         EventOutputPort {
             node: self.node,
-            index,
+            port: index,
         }
     }
 
@@ -93,10 +93,10 @@ impl<N: ?Sized> Key<N> {
     /// Event input `index` of the node (a port per MIDI Group, a plugin's
     /// note port `N`).
     #[must_use]
-    pub const fn events_in_at(self, index: usize) -> EventInputPort {
+    pub const fn events_in_at(self, index: u16) -> EventInputPort {
         EventInputPort {
             node: self.node,
-            index,
+            port: index,
         }
     }
 
@@ -289,101 +289,6 @@ impl MainInput {
     }
 }
 
-/// One event port a stream of events leaves from: an event output of a node.
-/// Made by [`Key::events_out`], [`Key::events_out_at`] and
-/// [`EventOutputPort::new`]. What [`Graph::connect`] wires into an
-/// [`EventInputPort`] and [`Taps::open_event`](crate::Taps::open_event) copies.
-///
-/// The index is a port number of the node's declared event ports, a count
-/// and not a unit.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct EventOutputPort {
-    node: NodeKey,
-    index: usize,
-}
-
-impl EventOutputPort {
-    /// Event output `index` of `node`.
-    #[must_use]
-    pub fn new(node: impl Into<NodeKey>, index: usize) -> Self {
-        Self {
-            node: node.into(),
-            index,
-        }
-    }
-
-    /// The node it leaves.
-    #[must_use]
-    pub const fn node(self) -> NodeKey {
-        self.node
-    }
-
-    /// The port's index on its node.
-    #[must_use]
-    pub const fn index(self) -> usize {
-        self.index
-    }
-
-    /// The graph's own name for it, `None` for an index no port has.
-    pub(crate) fn raw(self) -> Option<tutti_graph::EventOutputPort> {
-        Some(tutti_graph::EventOutputPort {
-            node: self.node,
-            port: u16::try_from(self.index).ok()?,
-        })
-    }
-
-    pub(crate) fn of_raw(from: tutti_graph::EventOutputPort) -> Self {
-        Self::new(from.node, usize::from(from.port))
-    }
-}
-
-/// One event port a stream of events arrives at: an event input of a node.
-/// Made by [`Key::events_in`], [`Key::events_in_at`] and
-/// [`EventInputPort::new`].
-///
-/// Input 0 is the node's main event input. The index is a port number of the
-/// node's declared event ports, a count and not a unit.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct EventInputPort {
-    node: NodeKey,
-    index: usize,
-}
-
-impl EventInputPort {
-    /// Event input `index` of `node`.
-    #[must_use]
-    pub fn new(node: impl Into<NodeKey>, index: usize) -> Self {
-        Self {
-            node: node.into(),
-            index,
-        }
-    }
-
-    /// The node it arrives at.
-    #[must_use]
-    pub const fn node(self) -> NodeKey {
-        self.node
-    }
-
-    /// The port's index on its node.
-    #[must_use]
-    pub const fn index(self) -> usize {
-        self.index
-    }
-
-    /// The graph's own name for it, `None` for an index no port has.
-    pub(crate) fn raw(self) -> Option<tutti_graph::EventInputPort> {
-        Some(tutti_graph::EventInputPort {
-            node: self.node,
-            port: u16::try_from(self.index).ok()?,
-        })
-    }
-
-    pub(crate) fn of_raw(at: tutti_graph::EventInputPort) -> Self {
-        Self::new(at.node, usize::from(at.port))
-    }
-}
-
 /// One event edge, named: what feeds which event input. What
 /// [`Graph::connect`] adds between an [`EventOutputPort`] and an
 /// [`EventInputPort`], and what [`SessionEvent::Unwired`](crate::SessionEvent::Unwired)
@@ -411,41 +316,6 @@ impl EventEdge {
     #[must_use]
     pub const fn sink(self) -> EventInputPort {
         self.to
-    }
-}
-
-/// One event port an event tap copies: an output (what the port wrote) or an
-/// input (what its node hears there, every source merged). An
-/// [`EventOutputPort`] and an [`EventInputPort`] both convert into it, so
-/// [`Taps::open_event`](crate::Taps::open_event) takes either.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum EventTapPort {
-    /// An event output.
-    Out(EventOutputPort),
-    /// An event input.
-    In(EventInputPort),
-}
-
-impl EventTapPort {
-    /// The node whose port this is.
-    #[must_use]
-    pub const fn node(self) -> NodeKey {
-        match self {
-            Self::Out(p) => p.node(),
-            Self::In(p) => p.node(),
-        }
-    }
-}
-
-impl From<EventOutputPort> for EventTapPort {
-    fn from(port: EventOutputPort) -> Self {
-        Self::Out(port)
-    }
-}
-
-impl From<EventInputPort> for EventTapPort {
-    fn from(port: EventInputPort) -> Self {
-        Self::In(port)
     }
 }
 

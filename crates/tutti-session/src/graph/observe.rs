@@ -7,17 +7,17 @@
 //! the next commit compiles them.
 
 use tutti_graph::{
-    CloseError, EventTapId, EventTapOptions, EventTapPort as RawEventTap, EventTapReader, MeterId,
-    MeterReader, MeterSpec, MissingSource, TapAlign, TapId, TapOptions, TapReader,
+    CloseError, EventTapId, EventTapOptions, EventTapPort, EventTapReader, MeterId, MeterReader,
+    MeterSpec, MissingSource, TapAlign, TapId, TapOptions, TapReader,
 };
 use tutti_units::Samples;
 
 use tutti_buffers::Float;
 
 use super::Graph;
+use crate::OutputPort;
 #[cfg(feature = "analyze")]
 use crate::{Analyzer, AnalyzerError, AudioContext, AudioInput};
-use crate::{EventTapPort, OutputPort};
 
 /// What a reader of the main output is named by: the id of the tap or of the meter.
 /// The reader a reopen opens takes the id of the one it supersedes.
@@ -287,28 +287,8 @@ impl<F: Float> Taps<'_, F> {
     ) -> Result<EventTapReader, MissingSource> {
         let id = EventTapId::mint(&self.graph.ids);
         let source = source.into();
-        let node = source.node();
-        let raw = match source {
-            EventTapPort::Out(p) => p.raw().map(RawEventTap::Out),
-            EventTapPort::In(p) => p.raw().map(RawEventTap::In),
-        }
-        .ok_or_else(|| {
-            let shape = self.graph.shape(node);
-            match source {
-                EventTapPort::Out(_) => MissingSource::EventPort {
-                    node,
-                    port: u16::MAX,
-                    width: shape.map_or(0, |s| usize::from(s.event_out)),
-                },
-                EventTapPort::In(_) => MissingSource::EventInputPort {
-                    node,
-                    port: u16::MAX,
-                    width: shape.map_or(0, |s| usize::from(s.event_in)),
-                },
-            }
-        })?;
-        let reader = self.graph.editor.open_event_tap(id, raw, options)?;
-        self.graph.event_taps.insert(id, (raw, options));
+        let reader = self.graph.editor.open_event_tap(id, source, options)?;
+        self.graph.event_taps.insert(id, (source, options));
         self.graph.edited = true;
         Ok(reader)
     }

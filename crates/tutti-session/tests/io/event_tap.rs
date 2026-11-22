@@ -114,12 +114,12 @@ fn opening_refuses_a_port_the_graph_does_not_have() {
         s.graph()
             .taps()
             .open_event(
-                EventOutputPort::new(source.node(), 3),
+                EventOutputPort::new(source.node, 3),
                 EventTapOptions::new(EventCapacity::of(8)).align(TapAlign::Raw)
             )
             .err(),
         Some(MissingSource::EventPort {
-            node: source.node(),
+            node: source.node,
             port: 3,
             width: 1
         })

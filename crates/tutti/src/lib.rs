@@ -182,6 +182,8 @@ pub use tutti_codec::{Format, Pcm};
 // The session, its wiring and its requests.
 #[cfg(feature = "session")]
 pub use tutti_graph::NodeKey;
+#[cfg(feature = "session")]
+pub use tutti_graph::{EventInputPort, EventOutputPort};
 #[cfg(feature = "plugin")]
 pub use tutti_plugin::catalog::ResolvedHosting;
 #[cfg(feature = "plugin")]
@@ -220,10 +222,9 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    AppKey, BlockDates, ChannelEdge, Clock, ConnectError, EventInputPort, EventOutputPort,
-    InputPort, Key, MainInput, MainOutput, NoSuchNode, Offline, OfflineSession, OutputPort,
-    Playhead, RealTime, Session, SessionBuilder, SessionEvent, SessionFloat, SystemClock,
-    SystemSession, TransportHandle, Workers,
+    AppKey, BlockDates, ChannelEdge, Clock, ConnectError, InputPort, Key, MainInput, MainOutput,
+    NoSuchNode, Offline, OfflineSession, OutputPort, Playhead, RealTime, Session, SessionBuilder,
+    SessionEvent, SessionFloat, SystemClock, SystemSession, TransportHandle, Workers,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
@@ -524,9 +525,8 @@ pub mod session {
         ModeError, PassError, Rewired, Unwired, Wired,
     };
     pub use tutti_graph::{
-        BusFeed, BusFold, BusSide, EdgeFade, EdgeId, EventCapacityError, EventInputPort,
-        EventOutputPort, ForkError, InletCounts, InstrumentNode, MainOutputError, MainOutputId,
-        MeterId, ParamIn, PrerollTable,
+        BusFeed, BusFold, BusSide, EdgeFade, EdgeId, EventCapacityError, ForkError, InletCounts,
+        InstrumentNode, MainOutputError, MainOutputId, MeterId, ParamIn, PrerollTable,
     };
     pub use tutti_modulation::PeriodPoint;
     pub use tutti_session::Apply;
