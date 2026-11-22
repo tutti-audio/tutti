@@ -228,12 +228,9 @@ impl<F: Float> GraphBuilder<F> {
             node,
             controls,
             fork,
+            ..
         } = node.into_parts();
-        let unit = NodeParts {
-            node,
-            controls: (),
-            fork,
-        };
+        let unit = NodeParts::new(node, (), fork);
         (self.insert(N::kind(), unit), controls)
     }
 
@@ -1040,17 +1037,11 @@ impl<C, F: Float> Standalone<C, F> {
             node,
             controls,
             fork,
+            ..
         } = node.into_parts();
         let shape = node.shape();
         let mut g = GraphBuilder::<F>::with_format(shape.audio_in(), shape.audio_out());
-        let key = g.insert(
-            N::kind(),
-            NodeParts {
-                node,
-                controls: (),
-                fork,
-            },
-        );
+        let key = g.insert(N::kind(), NodeParts::new(node, (), fork));
         for c in 0..usize::from(shape.audio_in().count()) {
             g.connect_input(c, key, c);
         }

@@ -17,11 +17,13 @@
 //!   is the node's job, which keeps an out-of-process plugin's declared
 //!   pipeline latency constant.
 
+use std::any::Any;
 use std::num::NonZeroU32;
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 
 use tutti_music::{FrameClock, LoopRange, MeterMap, SegmentOrigin};
+use tutti_rt::Reclaim;
 use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
 use crate::bus::{Buses, InEvents, OutEvents, PortSpan};
@@ -1794,11 +1796,17 @@ pub trait IntoNode<F: Float = f32> {
     }
 }
 
-/// A node split for insertion: the unit, its controls, and where a fork of
-/// it comes from. What [`IntoNode::into_parts`] returns — and itself an
-/// [`IntoNode`], so a caller that had to split a node early (to read its
-/// shape, as [`GraphBuilder`](crate::GraphBuilder) does) can still insert it
-/// with its fork source.
+/// A node split for insertion: the unit, its controls, where a fork of it
+/// comes from, and what the session keeps for it. What [`IntoNode::into_parts`]
+/// returns, and itself an [`IntoNode`], so a caller that had to split a node
+/// early (to read its shape, as [`GraphBuilder`](crate::GraphBuilder) does) can
+/// still insert it with its fork source.
+///
+/// Built with [`NodeParts::new`] and the chained options
+/// [`reclaimer`](Self::reclaimer) and [`attachment`](Self::attachment); an
+/// option not given is empty. The unit, controls and fork are public fields
+/// because callers destructure them; the options are read through
+/// [`as_reclaimer`](Self::as_reclaimer) and [`as_attachment`](Self::as_attachment).
 pub struct NodeParts<C, F: Float = f32> {
     /// The unit the executor will own.
     pub node: Box<dyn Node<F>>,
@@ -1806,6 +1814,51 @@ pub struct NodeParts<C, F: Float = f32> {
     pub controls: C,
     /// Where a fork of this node comes from; `None` if it cannot be forked.
     pub fork: Option<Box<dyn ForkSource<F>>>,
+    reclaimer: Option<Box<dyn Reclaim + Send>>,
+    attachment: Option<Box<dyn Any + Send>>,
+}
+
+impl<C, F: Float> NodeParts<C, F> {
+    /// The unit, its controls and its fork source, with no reclaimer and no
+    /// attachment.
+    #[must_use]
+    pub fn new(node: Box<dyn Node<F>>, controls: C, fork: Option<Box<dyn ForkSource<F>>>) -> Self {
+        Self {
+            node,
+            controls,
+            fork,
+            reclaimer: None,
+            attachment: None,
+        }
+    }
+
+    /// Sets the cell the control side sweeps for this node: the publisher
+    /// whose retired values [`Reclaim::reclaim`] frees on the control thread.
+    #[must_use]
+    pub fn reclaimer(mut self, reclaimer: Box<dyn Reclaim + Send>) -> Self {
+        self.reclaimer = Some(reclaimer);
+        self
+    }
+
+    /// Sets a value the node's owner keeps beside it, erased; read it back by
+    /// downcasting [`as_attachment`](Self::as_attachment).
+    #[must_use]
+    pub fn attachment(mut self, attachment: Box<dyn Any + Send>) -> Self {
+        self.attachment = Some(attachment);
+        self
+    }
+
+    /// The reclaimer set with [`reclaimer`](Self::reclaimer), if any.
+    #[must_use]
+    pub fn as_reclaimer(&self) -> Option<&(dyn Reclaim + Send)> {
+        self.reclaimer.as_deref()
+    }
+
+    /// The attachment set with [`attachment`](Self::attachment), if any.
+    #[must_use]
+    pub fn as_attachment(&self) -> Option<&(dyn Any + Send)> {
+        self.attachment.as_deref()
+    }
 }
 
 impl<C, F: Float> std::fmt::Debug for NodeParts<C, F> {
@@ -1827,6 +1880,49 @@ impl<C, F: Float> IntoNode<F> for NodeParts<C, F> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct Count(std::sync::atomic::AtomicUsize);
+
+    impl Reclaim for Count {
+        fn reclaim(&self) -> usize {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 7
+        }
+    }
+
+    struct Silent;
+
+    impl Node for Silent {
+        fn shape(&self) -> Shape {
+            Shape::source_unassigned(ChannelLayout::MONO)
+        }
+        fn prepare(&mut self, _: &Prepare) {}
+        fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
+            Status::Modified
+        }
+        fn reset(&mut self) {}
+    }
+
+    /// A reclaimer given to `NodeParts` is the one `as_reclaimer` hands back,
+    /// and a `NodeParts` given none has none.
+    #[test]
+    fn node_parts_hands_back_its_reclaimer() {
+        let bare = NodeParts::<(), f32>::new(Box::new(Silent), (), None);
+        assert!(bare.as_reclaimer().is_none());
+        let parts = bare.reclaimer(Box::new(Count(0.into())));
+        let r = parts.as_reclaimer().expect("reclaimer set");
+        assert_eq!(r.reclaim(), 7);
+        assert_eq!(r.reclaim(), 8, "the same cell answers each call");
+    }
+
+    /// An attachment downcasts back to the type it was given, and to no other.
+    #[test]
+    fn node_parts_attachment_downcasts_to_its_type() {
+        let parts = NodeParts::<(), f32>::new(Box::new(Silent), (), None)
+            .attachment(Box::new(String::from("kept")));
+        let a = parts.as_attachment().expect("attachment set");
+        assert_eq!(a.downcast_ref::<String>().map(String::as_str), Some("kept"));
+        assert!(a.downcast_ref::<u32>().is_none());
+    }
 
     /// `all` and `covers` agree at the edges, including the 64-channel cap.
     #[test]
