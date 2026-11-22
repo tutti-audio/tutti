@@ -1,5 +1,10 @@
 //! Shared state a test node locks on the audio thread.
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "a test node locks this inside a render, where `tutti_rt::Mutex` refuses by design"
+)]
+
 use std::sync::{Arc, LockResult, Mutex, MutexGuard};
 
 /// Shared test state a test node may lock inside `process`, and the test reads
