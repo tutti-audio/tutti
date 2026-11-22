@@ -1,8 +1,7 @@
 use tutti_platform::Instant;
 
-use tutti_midi_ci::Muid;
 use tutti_midi_ci::{
-    CiDeviceId, CiHeader, CiMessage, Decoded, DetailsData, Initiator, Nak, NakStatus,
+    CiDeviceId, CiHeader, CiMessage, Decoded, DetailsData, Initiator, Muid, Nak, NakStatus,
     ProfileAction, ProfileId,
 };
 use tutti_midi_protocol::{ControllerSupport, PitchBendSupport};
@@ -52,7 +51,7 @@ fn outcome(actions: Vec<ProfileAction>) -> ProfileOutcome {
 #[test]
 fn the_inquiry_asks_the_mpe_profile_for_target_one() {
     let (mut i, now) = initiator();
-    let actions = ask_mpe_features(&mut i, tutti_ump::MidiChannel::of(0), now).unwrap();
+    let actions = ask_mpe_features(&mut i, MidiChannel::of(0), now).unwrap();
     let [
         ProfileAction::Send(CiMessage::ProfileDetailsInquiry {
             profile, target, ..
@@ -71,8 +70,8 @@ fn the_inquiry_asks_the_mpe_profile_for_target_one() {
 #[test]
 fn the_reply_reads_as_the_four_declared_features() {
     let (mut i, now) = initiator();
-    let address = CiDeviceId::Channel(tutti_ump::MidiChannel::of(0));
-    ask_mpe_features(&mut i, tutti_ump::MidiChannel::of(0), now).unwrap();
+    let address = CiDeviceId::Channel(MidiChannel::of(0));
+    ask_mpe_features(&mut i, MidiChannel::of(0), now).unwrap();
     let mut answer = reply(&[0x01, 0x01, 0x01, 0x02]);
     if let Decoded::Message(CiMessage::ProfileDetailsReply { header, .. }) = &mut answer {
         header.device_id = address;

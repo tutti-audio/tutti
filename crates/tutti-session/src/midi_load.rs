@@ -14,11 +14,8 @@
 //! (a [`DroppedEvent`]) is the loaded value's [`report`](LoadedMidi::report),
 //! never a log line.
 
-use std::fmt;
-use std::future::{Future, IntoFuture};
-use std::pin::Pin;
+use std::future::IntoFuture;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
 use tutti_buffers::Float;
 use tutti_midi_file::{
@@ -84,24 +81,15 @@ impl IntoFuture for LoadMidi {
     type IntoFuture = LoadingMidi;
 
     fn into_future(self) -> LoadingMidi {
-        LoadingMidi {
-            load: Unblocked::new(self.executor.clone(), self, Self::run),
-        }
+        Unblocked::new(self.executor.clone(), self, Self::run)
     }
 }
 
 /// A MIDI file load being awaited ([`LoadMidi`]): resolves to the
 /// [`LoadedMidi`] once the file is read and converted.
 ///
-/// The first poll starts the read as a task on the session's executor (the
-/// session's weak handle, upgraded for the spawn only) and awaits the receiver
-/// of a oneshot. **The task fills the sender**: it reads the file, converts its
-/// tracks, and sends the value or the error, which wakes the future. A poll
-/// never blocks, and `Session::update` is not needed.
-///
-/// Dropped before it resolves, the future drops the receiver: a read that has
-/// not begun reads nothing, and one in flight finishes and its value is dropped.
-/// Dropped before its first poll it starts nothing.
+/// A [`Unblocked`]: its first poll starts the work as a task on the session's executor, and
+/// `Session::update` is not needed.
 ///
 /// # Errors
 ///
@@ -112,24 +100,7 @@ impl IntoFuture for LoadMidi {
 /// # Panics
 ///
 /// When polled after it resolved.
-#[must_use = "a load does nothing unless it is awaited"]
-pub struct LoadingMidi {
-    load: Unblocked<LoadMidi, LoadedMidi, LoadError>,
-}
-
-impl Future for LoadingMidi {
-    type Output = Result<LoadedMidi, LoadError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.load).poll(cx)
-    }
-}
-
-impl fmt::Debug for LoadingMidi {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("LoadingMidi").finish_non_exhaustive()
-    }
-}
+pub type LoadingMidi = Unblocked<LoadMidi, LoadedMidi, LoadError>;
 
 /// Why a [`LoadedMidi`] has no [`LoadedTrack`] `i`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]

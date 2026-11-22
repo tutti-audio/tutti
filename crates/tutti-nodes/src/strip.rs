@@ -42,7 +42,7 @@
 //! exactly on the new gain at the block's last sample. See
 //! `BusStripNode::render`.
 
-use crate::ramp::LastGood;
+use crate::last_good::LastGood;
 use tutti_buffers::{BusTopology, Float, MAX_CHANNELS};
 use tutti_graph::{
     Cx, Inputs, IntoNode, Io, Node, NodeParts, Outputs, ParamNode, ParamSet, Prepare, Shape, Status,
