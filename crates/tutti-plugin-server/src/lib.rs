@@ -54,14 +54,15 @@
 //!
 //! ## How a session runs
 //!
-//! The host connects three times. The first connection is the handshake: plugin
-//! load, format negotiation and shared-memory setup. The second carries per-block
-//! audio traffic for the rest of the session, served by a render thread that asks
-//! the OS for the highest priority it grants (not real time; a refusal is logged)
-//! and sends plugin events to the host after each block. The third is the
-//! control connection, served by the main thread's event loop. Each connection
-//! opens with a `Ready` message carrying the protocol version, and the host
-//! refuses a version it does not know.
+//! The host connects once, and that connection is the broker. It opens with a
+//! `Hello` message carrying the protocol version, which the host refuses when it
+//! does not know it. Over it the host does the handshake (plugin load, format
+//! negotiation and shared-memory setup) and then opens the audio lane, handing the
+//! server its end of a fresh stream. The audio lane carries per-block audio
+//! traffic for the rest of the session, served by a render thread that asks the OS
+//! for the highest priority it grants (not real time; a refusal is logged) and
+//! sends plugin events to the host after each block. The broker stays the control
+//! connection, served by the main thread's event loop.
 //!
 //! If the host dies, at any point of the session, the server notices on its own
 //! and exits: from [`PluginServer::new`] on, a thread the OS wakes when the host

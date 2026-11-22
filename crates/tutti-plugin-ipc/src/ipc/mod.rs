@@ -608,7 +608,8 @@ impl Ipc {
         let mut guard = server.server;
         let (bridge, thread, replies) = PluginBridge::new(
             executor,
-            config.socket_path.clone(),
+            server.audio,
+            server.control,
             origin.clone(),
             format,
             load_editor.clone(),

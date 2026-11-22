@@ -4,7 +4,9 @@
 //! Win32 message queue a floating editor needs) replaces the wait, without
 //! touching the loop's logic.
 
-use tutti_plugin_ipc_ffi::Ready;
+use interprocess::local_socket::traits::Listener as _;
+use interprocess::local_socket::{GenericNamespaced, ListenerOptions, ToNsName as _};
+use tutti_plugin_ipc_ffi::{LaneWire, Ready, SlabError};
 use tutti_plugin_types::{IpcResult, Wakeups};
 
 #[path = "windows_bell.rs"]
@@ -18,6 +20,42 @@ pub(crate) type Stream = interprocess::local_socket::Stream;
 /// What a slab is received over on `stream`: nothing, as its name is in the frame.
 pub(crate) fn connection(_: &Stream) -> tutti_plugin_ipc_ffi::Connection<'_> {
     tutti_plugin_ipc_ffi::Connection::detached()
+}
+
+/// The server's end of a lane the host opened: the pipe the server listens on,
+/// which the host connects to once it is told the lane is open.
+#[derive(Debug)]
+pub(crate) struct LaneEnd(Listener);
+
+impl LaneEnd {
+    /// Waits for the host to connect to the lane's pipe, which it does once it
+    /// has been told the lane is open.
+    ///
+    /// # Errors
+    ///
+    /// The accept failed.
+    pub(crate) fn accept(self) -> IpcResult<Stream> {
+        Ok(self.0.accept()?)
+    }
+}
+
+/// The lane `wire` names: a pipe of that name, listened on from now.
+///
+/// # Errors
+///
+/// The pipe could not be created.
+pub(crate) fn receive_lane(_: &Stream, wire: &LaneWire) -> Result<LaneEnd, SlabError> {
+    let transfer = |source| SlabError::Transfer { source };
+    let name = wire
+        .name()
+        .to_owned()
+        .to_ns_name::<GenericNamespaced>()
+        .map_err(transfer)?;
+    let listener = ListenerOptions::new()
+        .name(name)
+        .create_sync()
+        .map_err(transfer)?;
+    Ok(LaneEnd(listener))
 }
 
 /// The reactor. A named pipe has no descriptor to add the plugin's to, so it

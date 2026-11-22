@@ -2,8 +2,8 @@
 
 use super::audio::{AudioBridge, IpcThread, Replies, WriteRefused};
 use super::editor_site::EditorSite;
+use crate::ControlStream;
 use crate::ServerWatch;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tutti_platform::Executor;
 use tutti_plugin_types::{Delivered, Editor, IpcResult, PluginFormat, PluginRef, Timeouts};
@@ -74,9 +74,9 @@ impl std::fmt::Debug for EditorLoader {
 }
 
 impl PluginBridge {
-    /// Build the full bridge — spawns the audio bridge thread that connects
-    /// to the plugin-server at `socket_path` (and starts the control lane's
-    /// thread, so a block never waits behind a control request) and leaves the
+    /// Build the full bridge — spawns the audio bridge thread that speaks to the
+    /// plugin-server on its `audio` lane (and starts the control lane's thread on
+    /// `control`, so a block never waits behind a control request) and leaves the
     /// GUI instance to be lazily loaded on first `open_editor`.
     ///
     /// Returns an `Arc<Self>` (for cheap cloning into the audio graph), a
@@ -94,7 +94,8 @@ impl PluginBridge {
     /// The bridge thread cannot be spawned, or `timeouts` has a zero deadline.
     pub fn new(
         executor: &Executor,
-        socket_path: PathBuf,
+        audio: ControlStream,
+        control: ControlStream,
         origin: PluginRef,
         format: PluginFormat,
         load_editor: Option<EditorLoader>,
@@ -104,7 +105,7 @@ impl PluginBridge {
     ) -> IpcResult<(Arc<Self>, IpcThread, Replies)> {
         timeouts.validate()?;
         let (audio, bridge_thread, replies) =
-            AudioBridge::new(executor, socket_path, sample_rate, watch, timeouts)?;
+            AudioBridge::new(executor, audio, control, sample_rate, watch, timeouts)?;
         let editor = EditorSite::new(&audio, origin, format, load_editor);
         Ok((Arc::new(Self { audio, editor }), bridge_thread, replies))
     }

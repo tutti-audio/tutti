@@ -19,7 +19,7 @@ use crate::{IpcError, PluginError};
 
 /// Why a hosted plugin is dead.
 ///
-/// The variants from [`Connect`](Self::Connect) to [`Bridge`](Self::Bridge) are
+/// The variants from [`StreamClosed`](Self::StreamClosed) to [`Bridge`](Self::Bridge) are
 /// a served plugin's death, latched by the bridge; [`Terminated`](Self::Terminated)
 /// is the host ending it; [`Panicked`](Self::Panicked) is an in-process plugin's
 /// death, latched by its lifecycle; [`Unreported`](Self::Unreported) is a
@@ -30,19 +30,6 @@ use crate::{IpcError, PluginError};
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum PluginFailure {
-    /// The bridge thread could not connect to the plugin-server's realtime
-    /// socket: the plugin never ran.
-    Connect {
-        /// What the connect returned.
-        source: Arc<IpcError>,
-    },
-    /// The server's handshake on the realtime socket failed: it sent no
-    /// `Ready`, sent something else first, or spoke another protocol version
-    /// ([`IpcError::ProtocolMismatch`]).
-    Handshake {
-        /// What the handshake read.
-        source: Arc<IpcError>,
-    },
     /// The control stream closed mid-session: the server is gone
     /// ([`IpcError::ProcessCrashed`]).
     StreamClosed,
@@ -99,8 +86,6 @@ pub enum PluginFailure {
 impl std::fmt::Display for PluginFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Connect { source } => write!(f, "could not connect to plugin-server: {source}"),
-            Self::Handshake { source } => write!(f, "plugin-server handshake failed: {source}"),
             Self::StreamClosed => f.write_str("the plugin-server's stream closed"),
             Self::ServerExited { status } => write!(f, "plugin-server exited: {status}"),
             Self::StatusUnreadable { source } => {
@@ -134,9 +119,7 @@ impl std::fmt::Display for PluginFailure {
 impl std::error::Error for PluginFailure {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Connect { source }
-            | Self::Handshake { source }
-            | Self::StatusUnreadable { source }
+            Self::StatusUnreadable { source }
             | Self::TimedOut { source }
             | Self::Io { source }
             | Self::Protocol { source }

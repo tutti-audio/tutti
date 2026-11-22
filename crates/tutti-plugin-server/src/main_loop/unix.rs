@@ -4,7 +4,7 @@
 //! platform that needs one (macOS: `CFRunLoop` with the socket as a source)
 //! replaces the wait, without touching the loop's logic.
 
-use tutti_plugin_ipc_ffi::{Interest, Ready, Watch};
+use tutti_plugin_ipc_ffi::{Interest, LaneWire, Ready, SlabError, Watch};
 use tutti_plugin_types::{IpcResult, Wakeups};
 
 #[path = "unix_bell.rs"]
@@ -23,6 +23,33 @@ pub(crate) type Stream = interprocess::os::unix::uds_local_socket::Stream;
 pub(crate) fn connection(stream: &Stream) -> tutti_plugin_ipc_ffi::Connection<'_> {
     use std::os::fd::AsFd;
     stream.as_fd()
+}
+
+/// The server's end of a lane the host opened: the stream, which arrived as a
+/// descriptor.
+#[derive(Debug)]
+pub(crate) struct LaneEnd(Stream);
+
+impl LaneEnd {
+    /// The lane's stream, once the host has been told the lane is open.
+    ///
+    /// # Errors
+    ///
+    /// Never on unix.
+    #[allow(clippy::unnecessary_wraps)]
+    pub(crate) fn accept(self) -> IpcResult<Stream> {
+        Ok(self.0)
+    }
+}
+
+/// The lane `wire` announced, received over `stream` right after its frame.
+///
+/// # Errors
+///
+/// The descriptor did not arrive as the frame announced.
+pub(crate) fn receive_lane(stream: &Stream, wire: &LaneWire) -> Result<LaneEnd, SlabError> {
+    let end = tutti_plugin_ipc_ffi::receive_lane(connection(stream), wire)?;
+    Ok(LaneEnd(Stream::from(end)))
 }
 
 /// The reactor: what the loop waits with. It keeps the scratch of the wait, so a

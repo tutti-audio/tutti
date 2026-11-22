@@ -13,6 +13,9 @@
 //!   and out. A mapping exists only with its one writer, which is what makes the
 //!   copies safe to call. What the data region holds, and where, is
 //!   `tutti-plugin-ipc`'s.
+//! - **The audio lane's wire** ([`LaneWire`], and on unix [`lane_pair`],
+//!   [`send_lane`], [`receive_lane`]): the lane's socket end travels over the
+//!   broker connection as a descriptor on unix, and a fresh pipe's name on Windows.
 //! - **The wait for a child's end** ([`ExitWait`]): the host's wait for a server
 //!   process to end, which the OS wakes (a pidfd on Linux, a kqueue on macOS, the
 //!   process handle on Windows).
@@ -55,6 +58,7 @@ mod descriptor;
 mod exit;
 mod harden;
 mod header;
+mod lane;
 mod lifetime;
 mod mapping;
 #[cfg(unix)]
@@ -72,6 +76,7 @@ pub use exit::ExitWait;
 pub use exit::{HOST_PID_ENV, Host, host_pid, watch_host, watch_spawner};
 pub use harden::protect_host_memory;
 pub use header::{Direction, RING_SLOTS, SLAB_HEADER_BYTES, SlabHeader, slot_for};
+pub use lane::*;
 pub use lifetime::{bind_to_host, has_ended, kill_group, own_group};
 pub use mapping::{
     Blob, BlobWire, Connection, Lease, MappingWriter, Received, SharedMapping, SlabHandle, SlabWire,
@@ -121,23 +126,23 @@ pub enum SlabError {
     /// socket, directory or device.
     #[error("the descriptor is not a shared memory object")]
     NotSharedMemory,
-    /// The byte that carries a slab's descriptor arrived without one, or did
-    /// not arrive.
-    #[error("the slab's descriptor did not arrive")]
+    /// The byte that carries a descriptor (a slab's, a lane's) arrived without
+    /// one, or did not arrive.
+    #[error("the announced descriptor did not arrive")]
     NoDescriptor,
-    /// More than one descriptor arrived with the slab's byte, or the control
+    /// More than one descriptor arrived with the byte, or the control
     /// message was cut short: all that arrived is closed.
-    #[error("more than one descriptor, or a cut control message, arrived with the slab")]
+    #[error("more than one descriptor, or a cut control message, arrived with the byte")]
     ExtraDescriptors,
-    /// The byte that carries a slab's descriptor is not the mark: the stream is
+    /// The byte that carries a descriptor is not the mark: the stream is
     /// out of step with the sender, and any descriptor that came is closed.
-    #[error("the slab's descriptor byte is {found:#x}, not the mark")]
+    #[error("the descriptor byte is {found:#x}, not the mark")]
     BadMark {
         /// The byte received.
         found: u8,
     },
-    /// The OS failed or the peer closed while the slab's descriptor was received.
-    #[error("failed to receive the slab's descriptor: {source}")]
+    /// The OS failed or the peer closed while a descriptor was received.
+    #[error("failed to receive the descriptor: {source}")]
     Transfer {
         /// The OS error.
         #[source]

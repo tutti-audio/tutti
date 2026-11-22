@@ -1,14 +1,15 @@
 //! `PluginServer` — the outer shell. Owns a [`Session`] and drives it
-//! over a [`Transport`] across the connection dance the host expects: first a
-//! handshake connection for plugin load / format negotiation / shared-memory
-//! setup, then, for the rest of the session, two more: the audio connection,
-//! which the render thread serves (`ProcessAudio` and `Reset`, nothing else),
-//! and the control connection, which the main thread's event loop serves.
+//! over a [`Transport`] across the connection dance the host expects: one
+//! broker connection for plugin load / format negotiation / shared-memory
+//! setup, over which the host then opens the audio connection, which the
+//! render thread serves (`ProcessAudio` and `Reset`, nothing else). The broker
+//! stays the control connection, which the main thread's event loop serves.
 
+use crate::main_loop::LaneEnd;
 use crate::render::{NotHome, RenderSide, RenderThread};
 use crate::session::{Reaction, Session};
 use crate::transport::Pulser;
-use crate::transport::{ControlTransport, Incoming, Transport, TransportListener};
+use crate::transport::{ControlTransport, Incoming, SocketTransport, Transport, TransportListener};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,7 +17,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 use tutti_platform::{Executor, Task, join_within};
 use tutti_plugin_ipc::{
-    AudioReply, ControlFrame, ControlRequest, PROTOCOL_VERSION, ReqId, Request, Working,
+    ControlFrame, ControlReply, ControlRequest, PROTOCOL_VERSION, ReqId, Request, Working,
 };
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{IpcError, IpcResult};
@@ -104,6 +105,19 @@ pub fn failure_status(error: &IpcError) -> u8 {
     }
 }
 
+/// How the handshake phase ended.
+enum Handshake {
+    /// The host asked for shutdown or left: nothing more is served.
+    Over,
+    /// The host opened the audio lane, request `id`, whose server end is `lane`.
+    AudioLane {
+        /// The request's id, which the answer echoes.
+        id: ReqId,
+        /// The lane's server end.
+        lane: LaneEnd,
+    },
+}
+
 /// The subprocess-side server: one hosted plugin, one host connection.
 ///
 /// Construct with [`PluginServer::new`] and hand control to
@@ -187,31 +201,31 @@ impl PluginServer {
     ///
     /// # The connection dance
     ///
-    /// The host connects three times, and the split is what lets the blocks run
-    /// at the highest priority the OS grants (not real time) on a thread that
-    /// nothing else shares:
+    /// The host connects once, and opens the lane that lets the blocks run at the
+    /// highest priority the OS grants (not real time) on a thread that nothing
+    /// else shares:
     ///
-    /// 1. **Handshake**: plugin load, format negotiation, shared-memory setup.
-    ///    Returns early if the host asks for shutdown before any audio flows.
-    /// 2. **Audio**: `ProcessAudio` and `Reset`, in order, answered one by one.
+    /// 1. **Hello**: the server's [`ControlFrame::Hello`] carries
+    ///    `PROTOCOL_VERSION`; the host refuses a version it does not know.
+    /// 2. **Handshake**: plugin load, format negotiation, shared-memory setup, and
+    ///    the host's `OpenLane` for the audio lane, which ends the phase. Returns
+    ///    early if the host asks for shutdown, or leaves, before any audio flows.
+    /// 3. **Audio**: `ProcessAudio` and `Reset`, in order, answered one by one.
     ///    The **render thread** serves it (`render`): it owns the
     ///    plugin's `Processor`, runs at the highest priority the OS grants (the
     ///    executor's `spawn_dedicated` asks for it), and shares nothing with the
     ///    main thread but queues, so an editor's paint can never delay a block.
-    /// 3. **Control**: every other request and the plugin's unsolicited news,
-    ///    for the rest of the session. The **main thread** serves it in its
-    ///    event loop (`main_loop`), which keeps the plugin's
-    ///    `Controller`, its editor and the idle tick.
-    ///
-    /// Each phase opens with a [`ControlFrame::Ready`] carrying
-    /// `PROTOCOL_VERSION`; the host refuses a version it does not know.
+    /// 4. **Control**: every other request and the plugin's unsolicited news,
+    ///    for the rest of the session, on the connection the handshake used. The
+    ///    **main thread** serves it in its event loop (`main_loop`), which keeps
+    ///    the plugin's `Controller`, its editor and the idle tick.
     ///
     /// # Errors
     ///
     /// Returns an error if the socket cannot be bound, if a handshake frame
     /// does not decode (a host of another protocol), or if the control
-    /// connection fails. The handshake connection closing is the host's way of
-    /// ending that phase, not an error. However it ends, the plugin is
+    /// connection fails. The host leaving the connection before it opens the
+    /// audio lane is not an error. However it ends, the plugin is
     /// released first.
     pub fn run(mut self) -> IpcResult<Ended> {
         let served = self.serve();
@@ -239,25 +253,22 @@ impl PluginServer {
     fn serve(&mut self) -> IpcResult<()> {
         let listener = TransportListener::bind(&self.socket)?;
 
-        // First connection: handshake.
-        let mut handshake = listener.accept()?;
-        handshake.send(&ControlFrame::Ready {
-            protocol_version: PROTOCOL_VERSION,
-        })?;
-        if self.handshake_phase(&mut handshake)? {
-            return Ok(());
-        }
-        drop(handshake);
-
-        // Second connection: audio. Third: control.
-        let mut audio = listener.accept_audio()?;
-        audio.send(&AudioReply::Ready {
-            protocol_version: PROTOCOL_VERSION,
-        })?;
+        // The broker: the handshake connection, which stays the control one.
         let mut control = listener.accept()?;
-        control.send(&ControlFrame::Ready {
+        control.send(&ControlFrame::Hello {
             protocol_version: PROTOCOL_VERSION,
         })?;
+        let (id, lane) = match self.handshake_phase(&mut control)? {
+            Handshake::Over => return Ok(()),
+            Handshake::AudioLane { id, lane } => (id, lane),
+        };
+        // The host connects to a lane that is a pipe once it is told the lane is
+        // open, so the answer goes before the accept.
+        control.send(&ControlFrame::Reply {
+            id,
+            reply: ControlReply::LaneOpened,
+        })?;
+        let audio = SocketTransport::audio(lane.accept()?)?;
         let side = self
             .render
             .take()
@@ -335,7 +346,7 @@ impl PluginServer {
         }
     }
 
-    fn handshake_phase(&mut self, transport: &mut ControlTransport) -> IpcResult<bool> {
+    fn handshake_phase(&mut self, transport: &mut ControlTransport) -> IpcResult<Handshake> {
         loop {
             let (id, reaction) = match transport.recv() {
                 Ok(Incoming::Request(Request { id, body })) => {
@@ -367,19 +378,22 @@ impl PluginServer {
                 Ok(Incoming::StateRefused { id, staging, error }) => {
                     (id, self.session.refuse_state(staging, error))
                 }
-                Err(IpcError::Io(_)) => return Ok(false),
+                Ok(Incoming::OpenAudio { id, lane }) => {
+                    return Ok(Handshake::AudioLane { id, lane });
+                }
+                Err(IpcError::Io(_)) => return Ok(Handshake::Over),
                 Err(e) => return Err(e),
             };
             match reaction {
-                Reaction::Shutdown => return Ok(true),
+                Reaction::Shutdown => return Ok(Handshake::Over),
                 Reaction::Reply(reply) => {
                     if transport.send(&ControlFrame::Reply { id, reply }).is_err() {
-                        return Ok(false);
+                        return Ok(Handshake::Over);
                     }
                 }
                 Reaction::State(state) => {
                     if crate::transport::send_state(transport, id, &state).is_err() {
-                        return Ok(false);
+                        return Ok(Handshake::Over);
                     }
                 }
                 Reaction::None => {}

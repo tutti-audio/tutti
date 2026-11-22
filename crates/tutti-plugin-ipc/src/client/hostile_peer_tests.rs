@@ -24,10 +24,9 @@
 use super::PluginBridge;
 use crate::client::audio::IpcThread;
 use crate::transport::shm::RING_SLOTS;
-use crate::unique_socket_path;
 use crate::{
     AudioReply, AudioRequest, AudioSlab, ControlFrame, ControlReply, ControlRequest, Framed, News,
-    PROTOCOL_VERSION, ReqId, Request, SlabHandle, SlabLayout,
+    ReqId, Request, SlabHandle, SlabLayout,
 };
 use std::io::{Read, Write};
 use std::sync::Arc;
@@ -45,7 +44,8 @@ use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::SampleRate;
 
-use interprocess::local_socket::{ListenerOptions, Stream, traits::Listener as _};
+use crate::transport::broker_pair;
+use interprocess::local_socket::Stream;
 
 /// Upper bound on how long any single "the host must notice" wait may take.
 ///
@@ -353,7 +353,6 @@ pub(crate) struct MockServer {
     /// `Option` only so `Drop` can take it out and `mem::forget` it; see there.
     thread: Option<IpcThread>,
     server: Option<std::thread::JoinHandle<()>>,
-    socket: std::path::PathBuf,
 }
 
 impl MockServer {
@@ -437,17 +436,13 @@ impl MockServer {
             t.reply_margin = REPLY_MARGIN;
             t
         };
-        let path = unique_socket_path().expect("the OS has a random source");
-        let _ = std::fs::remove_file(&path);
-        let name = crate::transport::control::socket_name(&path).expect("socket name");
-        let listener = ListenerOptions::new()
-            .name(name)
-            .create_sync()
-            .expect("listen");
+        let ((audio_stream, audio_peer), (control_stream, control_peer)) =
+            (broker_pair(), broker_pair());
 
         let (bridge, thread, replies) = PluginBridge::new(
             tutti_fixtures::executor(),
-            path.clone(),
+            audio_stream,
+            control_stream,
             tutti_plugin_types::PluginRef::file("test.vst3"),
             tutti_plugin_types::PluginFormat::Vst3,
             Some(crate::EditorLoader::new(
@@ -460,33 +455,16 @@ impl MockServer {
         )
         .expect("bridge");
 
-        // Two connections, as the server accepts them: audio, then control.
-        // Each is served on its own thread by its lane's responder.
-        let stream = listener.accept().expect("accept");
-        send_bridge_msg(
-            &stream,
-            &AudioReply::Ready {
-                protocol_version: PROTOCOL_VERSION,
-            },
-        )
-        .expect("handshake");
+        // Each lane is served on its own thread by its lane's responder.
         let server = std::thread::Builder::new()
             .name(format!("mock-hostile-{label}-audio"))
-            .spawn(move || serve_lane::<AudioRequest>(stream, &audio))
+            .spawn(move || serve_lane::<AudioRequest>(audio_peer, &audio))
             .expect("spawn mock");
-        let stream = listener.accept().expect("accept");
-        send_bridge_msg(
-            &stream,
-            &ControlFrame::Ready {
-                protocol_version: PROTOCOL_VERSION,
-            },
-        )
-        .expect("handshake");
         // The control lane's thread ends with the connection; nothing joins it.
         drop(
             std::thread::Builder::new()
                 .name(format!("mock-hostile-{label}-control"))
-                .spawn(move || serve_lane::<Request>(stream, &control))
+                .spawn(move || serve_lane::<Request>(control_peer, &control))
                 .expect("spawn mock"),
         );
 
@@ -495,7 +473,6 @@ impl MockServer {
             replies,
             thread: Some(thread),
             server: Some(server),
-            socket: path,
         }
     }
 
@@ -531,14 +508,13 @@ impl Drop for MockServer {
     /// whole run, with three threads in `futex_wait` inside this `drop` and the
     /// mock threads in `unix_stream_data_wait`.
     ///
-    /// So the socket file is removed and both threads are detached. Each exits
+    /// So both threads are detached. Each exits
     /// on its own once its read fails or its timeout expires; the process is a
     /// test binary that is about to end anyway. `IpcThread`'s own `Drop`
     /// joins, so it is `mem::forget`-ed rather than dropped — the cost is a
     /// detached thread for the life of the test binary, and the alternative is
     /// a run that never finishes.
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.socket);
         if let Some(h) = self.server.take() {
             drop(h); // detach: joining would wait on a socket read
         }
@@ -1692,7 +1668,7 @@ mod shell_server {
         });
         let mut guard = crate::ProcessGuard::launched(
             tutti_plugin_ipc_ffi::Reaped::new(child),
-            &crate::IpcConfig::at(mock.socket.clone()),
+            &crate::IpcConfig::at(crate::unique_socket_path().expect("the OS has a random source")),
             tutti_fixtures::executor(),
         )
         .expect("the exit thread starts");
