@@ -342,7 +342,7 @@ mod tests {
 
     /// A parameter the plugin declared no bounds for passes through unconverted.
     ///
-    /// Same rule the `set_parameter` mirror follows: `ParamRange::Normalized`
+    /// Same rule the `set_parameter` mirror follows: `PluginParamRange::Normalized`
     /// means there is nothing to convert against, and inventing `0..=1` would
     /// rescale a parameter the plugin never described. `0.5` is chosen because
     /// it is a legal value in *either* domain, so this asserts the pass-through

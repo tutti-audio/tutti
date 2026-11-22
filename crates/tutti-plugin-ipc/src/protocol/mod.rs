@@ -268,8 +268,8 @@ mod tests {
 
     use tutti_plugin_types::{
         ChordValue, MidiEventVec, NoteExpressionIntValue, NoteExpressionTextValue, ParameterInfo,
-        PluginFormat, PluginId, PluginTail, Preset, PresetId, Samples, ScaleValue, TransportInfo,
-        Uid, WireMidi,
+        PluginFormat, PluginId, PluginPreset, PluginTail, PresetId, Samples, ScaleValue,
+        TransportInfo, Uid, WireMidi,
     };
     use tutti_ump::{CCNumber, ControlValue, Message, MidiChannel, NoteVelocity, U7, Ump, Voice2};
     use tutti_units::{Normalized, ParamId, SampleRate};
@@ -331,8 +331,8 @@ mod tests {
         let responses = [
             ControlReply::PresetList {
                 presets: vec![
-                    Preset::new(PresetId::Number(0), "Init"),
-                    Preset::in_bank(
+                    PluginPreset::new(PresetId::Number(0), "Init"),
+                    PluginPreset::in_bank(
                         PresetId::Program {
                             list_id: 1,
                             index: 2,

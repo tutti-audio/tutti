@@ -596,7 +596,7 @@ impl<S> PluginClient<S> {
     /// takes no main thread, bounded by the parameter wait. `None` when the
     /// server is gone or did not answer.
     #[must_use]
-    pub fn presets(&self) -> Option<Vec<tutti_plugin_types::Preset>> {
+    pub fn presets(&self) -> Option<Vec<tutti_plugin_types::PluginPreset>> {
         self.bridge.audio().presets()
     }
 

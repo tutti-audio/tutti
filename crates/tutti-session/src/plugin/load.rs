@@ -35,7 +35,7 @@ use tutti_plugin::catalog::ResolvedHosting;
 use tutti_plugin_db::{Catalog, Hosting, Loadable};
 use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::bundle::{ModuleKind, native_module_path};
-use tutti_plugin_types::{IpcError, Preset, PresetError};
+use tutti_plugin_types::{IpcError, PluginPreset, PresetError};
 use tutti_plugin_types::{MainThreadMarker, PluginFailure, PluginFormat, PluginId, PluginRef};
 use tutti_rt::LockExt;
 
@@ -96,7 +96,7 @@ impl Request {
     fn open(
         self,
         open: impl FnOnce(PluginLoad) -> Open,
-        presets: impl FnOnce(&HostPlugin) -> Result<Vec<Preset>, PresetError>,
+        presets: impl FnOnce(&HostPlugin) -> Result<Vec<PluginPreset>, PresetError>,
     ) -> Result<LoadedPlugin, LoadError> {
         let stamp = Stamp::take(Asset::from(module_of(self.loadable.plugin())?));
         let cx = self.cx;

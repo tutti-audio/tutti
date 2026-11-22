@@ -23,8 +23,8 @@ use tutti_plugin_ipc::News;
 use tutti_plugin_types::{
     AutomationMode, Control, Delivered, Effect, Event, Features, Hand, HostOp, Layout, Lifecycle,
     LoadStage, LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock, Notice, OutOfProcess,
-    ParamEdit, ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginIo, PluginRef,
-    PluginResult, Prepare, Preset, PresetId, ProcessWake, RateRefusal, RateRefusalCause,
+    ParamEdit, ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginIo, PluginPreset,
+    PluginRef, PluginResult, Prepare, PresetId, ProcessWake, RateRefusal, RateRefusalCause,
     RenderMode, RenderModeSupport, Request, SampleRate, Samples, Seat, ServerLosses, Stage, State,
     StateError, StateUse, TrackInfo, Widths,
 };
@@ -159,7 +159,7 @@ pub(crate) trait ServerPlugin {
         text: &str,
     ) -> Option<Normalized>;
     /// The plugin's presets.
-    fn presets(&mut self, main: MainThreadMarker) -> Vec<Preset>;
+    fn presets(&mut self, main: MainThreadMarker) -> Vec<PluginPreset>;
     /// Loads a preset; whether the plugin took it.
     fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool;
     /// The preset the plugin is on.
@@ -926,7 +926,7 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
             .parameter_value_from_text(main, id, text)
     }
 
-    fn presets(&mut self, main: MainThreadMarker) -> Vec<Preset> {
+    fn presets(&mut self, main: MainThreadMarker) -> Vec<PluginPreset> {
         self.lifecycle
             .control()
             .map(|control| control.presets(main))
