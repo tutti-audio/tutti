@@ -148,19 +148,17 @@ fn stand_in_report() -> (Vec<String>, Vec<u32>, Vec<String>) {
         .map(|fd| u32::try_from(fd).expect("a descriptor number"))
         .collect();
     let mut command = Command::new(std::env::current_exe().expect("the test binary's path"));
+    // The pipe's write end is the command's, which the spawn drops: the read
+    // ends at the stand-in's end.
+    let (mut stdout, report_to) = std::io::pipe().expect("the report pipe");
     command
         .args(&args)
         .env(STAND_IN_ENV, "1")
-        .stdout(std::process::Stdio::piped())
+        .stdout(report_to)
         .stderr(std::process::Stdio::null());
-    let (mut child, rendezvous) = crate::transport::spawn(command).expect("the stand-in spawns");
-    let mut stdout = child.stdout.take().expect("the stand-in's stdout is piped");
-    let guard = ProcessGuard::launched(
-        Reaped::new(child),
-        &IpcConfig::new(),
-        tutti_fixtures::executor(),
-    )
-    .expect("the exit thread starts");
+    let (server, rendezvous) = crate::transport::spawn(command).expect("the stand-in spawns");
+    let guard = ProcessGuard::launched(server, &IpcConfig::new(), tutti_fixtures::executor())
+        .expect("the exit thread starts");
     let mut host = rendezvous
         .connect(&guard, Duration::from_secs(60))
         .expect("the host's end exists from the spawn");
