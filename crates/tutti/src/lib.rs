@@ -106,6 +106,7 @@
 //! - `export` — `Bounce` and its results (implies `encode-wav`).
 //! - `midi` — `tutti::midi`. `crates/tutti/examples/midi_all.rs` uses every piece together, offline.
 //! - `midi-hardware` — OS MIDI I/O in `tutti::midi` (implies `midi`).
+//! - `midi-network` — Network MIDI 2.0 in `tutti::midi::network` (implies `midi`; not on the web).
 //! - `synth`, `soundfont`, `sampler` — the matching module.
 //!   `synth` and `soundfont` imply `midi`; `sampler` implies no decoder.
 //! - `analyze` — `Session::analyze` and `tutti::measure` (implies `session`).
@@ -932,6 +933,23 @@ pub mod midi {
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_ump::{EndpointName, InstanceIdError, Name, NameError, ProductInstanceId};
+    /// Network MIDI 2.0 (M2-124) as the session's MIDI: a Client or a Host bound by
+    /// `Midi::open_network`, its peers' input nodes and its output node, and the
+    /// Hosts found by mDNS. Not on the web, which has no UDP sockets. Feature
+    /// `midi-network`.
+    #[cfg(all(feature = "midi-network", not(target_arch = "wasm32")))]
+    pub mod network {
+        pub use tutti_midi_network::{
+            Admission, Advertisement, AuthFailure, AuthMethods, Browser, ByeReason, Credentials,
+            DiscoveryError, EndedBy, EndpointIdentity, Fec, FoundHost, HostEvent, IdleInterval,
+            IdleIntervalOutOfRange, InstanceName, InstanceNameError, PendingHosts, Requests,
+            Retransmit, SessionConfig, Timer, TimerOutOfRange, Username,
+        };
+        #[cfg(feature = "session")]
+        pub use tutti_session::{MidiNetwork, NetworkError, NetworkReport, OpenNetwork};
+        pub use tutti_units::Text;
+    }
+
     /// MIDI-CI Property Exchange (M2-103 and its resource specifications): a
     /// peer's resources, read, written and subscribed to through the session.
     /// Under `plugin` alone it holds only the `MediaType` a `PeerState` carries.

@@ -822,6 +822,8 @@ pub(crate) struct MidiState {
     pub(crate) sinks: crate::midi_sink::Sinks,
     /// The ports begun by `open_midi_input` and `open_midi_output` and installed by `apply`.
     pub(crate) ports: crate::midi_port::Ports,
+    /// The network endpoints opened by `open_network`.
+    pub(crate) networks: crate::midi_network::Networks,
     /// The session's one MPE mode ([`MpeModeTarget`](crate::MpeModeTarget)),
     /// the cell every input and clip transform reads.
     mpe: tutti_rt::Publisher<MpeMode>,
@@ -981,12 +983,30 @@ impl MidiState {
     /// The input nodes of the input ports: none on a session without the OS
     /// MIDI layer.
     pub(crate) fn input_nodes(&self) -> Vec<NodeKey> {
-        self.ports.input_nodes()
+        let mut nodes = self.ports.input_nodes();
+        nodes.extend(self.networks.input_nodes());
+        nodes
     }
 
-    /// Whether `node` is the input node of an input port.
+    /// Whether `node` is the input node of an input port or of a network peer.
     pub(crate) fn is_input_node(&self, node: NodeKey) -> bool {
-        self.ports.is_input_node(node)
+        self.ports.is_input_node(node) || self.networks.is_input_node(node)
+    }
+
+    /// `Phase::Poll`, for the network endpoints: reads what their links queued and
+    /// reports it into `out`. Whether the graph was edited.
+    pub(crate) fn midi_network_phase<F: Float>(
+        &mut self,
+        nodes: Option<&MidiNodes>,
+        graph: &mut Graph<F>,
+        out: &mut Vec<crate::SessionEvent>,
+    ) -> bool {
+        let layout = nodes.map_or(MidiInputPorts::FIRST_GROUP, |n| n.input_ports);
+        let edited = self.networks.poll(graph, &self.mpe, layout, out);
+        if edited && !self.host_routes {
+            self.compile_session_feeds(graph, layout);
+        }
+        edited
     }
 
     /// The timing of a drain at `now`, from the engine's block clock: `None`

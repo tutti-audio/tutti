@@ -128,8 +128,13 @@ impl MidiPart {
         now: Instant,
         out: &mut Vec<SessionEvent>,
     ) -> bool {
-        self.hardware
-            .poll(&mut self.state, self.nodes.as_ref(), graph, now, out)
+        let devices = self
+            .hardware
+            .poll(&mut self.state, self.nodes.as_ref(), graph, now, out);
+        let networks = self
+            .state
+            .midi_network_phase(self.nodes.as_ref(), graph, out);
+        devices || networks
     }
 
     /// The tempo, the MIDI clock and Machine Control the session follows, read

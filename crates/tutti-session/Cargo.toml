@@ -86,6 +86,11 @@ tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", option
 # `HasWindowHandle`, the parent a view embeds an editor into (`Editor::open`).
 raw-window-handle = { version = "0.6", optional = true }
 
+# Network MIDI 2.0 over UDP: no sockets on the web, so the dependency is native only
+# and the feature does nothing there (`midi_network_none.rs`).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tutti-midi-network = { version = "0.0.1", path = "../tutti-midi-network", optional = true }
+
 [features]
 # Every subsystem is a feature, as on every engine crate.
 default = []
@@ -101,6 +106,8 @@ midi = [
     "dep:tutti-midi-runtime",
     "dep:tutti-midi-file",
 ]
+# Network MIDI 2.0: a Client or a Host as MIDI input and output over UDP (native targets).
+midi-network = ["midi", "dep:tutti-midi-network"]
 midi-hardware = ["midi", "dep:tutti-midi-hardware", "dep:tutti-midi-device", "dep:tutti-midi-ci"]
 # `serde` for `MidiRouteRule<T>` (keyed by the app's own stable id, not a
 # `NodeKey`): its Group and channel are `tutti-ump`'s, with its `serde`; and for

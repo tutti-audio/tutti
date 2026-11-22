@@ -1,0 +1,449 @@
+//! A network endpoint as the session's MIDI: a Client or a Host bound by
+//! `Midi::open_network`, over real UDP sockets on the loopback interface.
+//!
+//! The peer of a Host is a bare `Client` endpoint on a socket of the test's, so
+//! each wait is a blocking read of a datagram (under a hang guard) and a Ping is
+//! the barrier that says the Host's socket task has taken everything sent before
+//! it. The session is read the way an app reads it: through `update`.
+
+use std::net::{SocketAddr, UdpSocket};
+use std::time::Duration;
+
+use crate::common::{blocks, offline, tap};
+use tutti_fixtures::wait_until;
+use tutti_midi_network::{
+    Admission, ByeReason, Client, Command, Credentials, DatagramBuilder, EndedBy, EndpointIdentity,
+    Event, Host, HostConfig, NetworkEndpoint, NetworkLink, PingId, SessionConfig, parse,
+};
+use tutti_platform::{Executor, Instant};
+use tutti_session::{
+    MidiNetwork, MidiReport, MidiRouteRule, NetworkError, NetworkReport, OpenNetwork, Session,
+    SessionEvent, Stamp,
+};
+use tutti_ump::{EndpointName, Message, MidiChannel, NoteNumber, NoteVelocity, ProductInstanceId};
+use tutti_ump::{Ump, Voice2};
+
+/// A hang guard: a wait that ends in time never reaches it.
+const HANG_GUARD: Duration = Duration::from_secs(30);
+
+fn identity(name: &str, id: &str) -> EndpointIdentity {
+    EndpointIdentity::new(
+        EndpointName::new(name).unwrap(),
+        ProductInstanceId::new(id).unwrap(),
+    )
+    .unwrap()
+}
+
+fn note_on(note: u8) -> Ump {
+    Message::midi2(
+        MidiChannel::FIRST,
+        Voice2::note_on(NoteNumber::of(note), NoteVelocity::new(0x8000)),
+    )
+    .into()
+}
+
+/// A Client endpoint on a socket of its own, driven by the test.
+struct Peer {
+    socket: UdpSocket,
+    client: Client,
+    host: SocketAddr,
+}
+
+impl Peer {
+    /// A peer named `name` that will invite the Host listening on `port`.
+    fn new(name: &str, port: u16) -> Self {
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        socket.set_read_timeout(Some(HANG_GUARD)).unwrap();
+        let host = SocketAddr::from(([127, 0, 0, 1], port));
+        let client = Client::new(
+            identity(name, name),
+            Credentials::none(),
+            SessionConfig::default(),
+            host,
+            Instant::now(),
+        );
+        Self {
+            socket,
+            client,
+            host,
+        }
+    }
+
+    fn flush(&mut self) {
+        while let Some(sent) = self.client.poll_transmit() {
+            self.socket.send_to(&sent.payload, sent.to).unwrap();
+        }
+    }
+
+    fn connect(&mut self) {
+        self.client.connect(Instant::now());
+        self.flush();
+    }
+
+    fn recv(&self) -> Vec<u8> {
+        let mut buffer = [0u8; 2048];
+        let (len, _) = self
+            .socket
+            .recv_from(&mut buffer)
+            .expect("a datagram within the hang guard");
+        buffer[..len].to_vec()
+    }
+
+    /// Reads datagrams into the Client until it reports an event `want` takes.
+    fn next_event<T>(&mut self, mut want: impl FnMut(&Event) -> Option<T>) -> T {
+        loop {
+            while let Some(event) = self.client.poll_event() {
+                if let Some(found) = want(&event) {
+                    return found;
+                }
+            }
+            let datagram = self.recv();
+            self.client.on_message(self.host, &datagram, Instant::now());
+            self.flush();
+        }
+    }
+
+    /// Reads datagrams until the Client's Session is established.
+    fn established(&mut self) {
+        self.next_event(|e| matches!(e, Event::Established { .. }).then_some(()));
+    }
+
+    /// Returns once the Host's socket task has taken every datagram sent so far: a
+    /// Ping is answered after the datagrams before it, and what each of them
+    /// queued for the session is queued before the reply is sent.
+    fn barrier(&mut self, id: u32) {
+        let mut ping = DatagramBuilder::new();
+        ping.push(&Command::Ping(PingId::new(id)));
+        self.socket.send_to(&ping.finish(), self.host).unwrap();
+        loop {
+            let datagram = self.recv();
+            let replied = parse(&datagram)
+                .unwrap()
+                .filter_map(Result::ok)
+                .any(|c| c == Command::PingReply(PingId::new(id)));
+            if replied {
+                return;
+            }
+            self.client.on_message(self.host, &datagram, Instant::now());
+            self.flush();
+        }
+    }
+
+    fn send(&mut self, packets: &[Ump]) {
+        self.client.send(Instant::now(), packets).unwrap();
+        self.flush();
+    }
+
+    fn close(&mut self, reason: ByeReason) {
+        self.client.close(Instant::now(), reason);
+        self.flush();
+    }
+}
+
+/// A session, and a Host endpoint it opened on a port the OS picked.
+fn hosting(admission: Admission) -> (Session, MidiNetwork, u16) {
+    let mut s = offline();
+    let net = s
+        .midi()
+        .open_network(OpenNetwork::host(identity("Studio", "HOST-1"), 0).admission(admission))
+        .expect("binds");
+    let port = net.local_addr().unwrap().port();
+    let _ = s.update();
+    (s, net, port)
+}
+
+/// The network reports of one update.
+fn reports(events: Vec<SessionEvent>) -> Vec<NetworkReport> {
+    events
+        .into_iter()
+        .filter_map(|e| match e {
+            SessionEvent::Midi(MidiReport::Network(report)) => Some(report),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A peer invites a Host that confirms: the invitation is reported and waits, a
+/// call that names no invitation is refused, and an accept establishes the Session
+/// with an input node of its own in the graph.
+#[test]
+fn an_invitation_is_reported_and_an_accept_gives_the_peer_an_input_node() {
+    let (mut s, net, port) = hosting(Admission::Confirm);
+    let mut peer = Peer::new("Laptop", port);
+    let laptop = identity("Laptop", "Laptop");
+    peer.connect();
+    // The Host's Pending reply is sent after the invitation is queued for the session.
+    while peer.client.remote().is_none() {
+        let datagram = peer.recv();
+        peer.client.on_message(peer.host, &datagram, Instant::now());
+    }
+    let heard = reports(s.update());
+    assert!(
+        matches!(&heard[..], [NetworkReport::Invited { identity }] if *identity == laptop),
+        "{heard:?}"
+    );
+    assert_eq!(net.input_node(laptop), None, "an invitation has no input");
+    assert_eq!(
+        net.accept(identity("Other", "Other")),
+        Err(NetworkError::NoInvitation)
+    );
+
+    net.accept(laptop).unwrap();
+    peer.established();
+    let heard = reports(s.update());
+    assert!(
+        matches!(&heard[..], [NetworkReport::Connected { identity }] if *identity == laptop),
+        "{heard:?}"
+    );
+    let node = net.input_node(laptop).expect("the peer has an input node");
+    assert_eq!(net.inputs(), [(laptop, node)]);
+    assert!(s.graph().contains(node));
+    assert_eq!(net.accept(laptop), Err(NetworkError::NoInvitation));
+}
+
+/// A Host that declines tells the peer: its Bye carries the reason, and no input
+/// entry was made.
+#[test]
+fn a_decline_ends_the_invitation_with_its_reason() {
+    let (mut s, net, port) = hosting(Admission::Confirm);
+    let mut peer = Peer::new("Laptop", port);
+    let laptop = identity("Laptop", "Laptop");
+    peer.connect();
+    peer.barrier(1);
+    let _ = s.update();
+    net.decline(laptop).unwrap();
+    let (by, reason) = peer.next_event(|e| match e {
+        Event::Closed {
+            ended_by, reason, ..
+        } => Some((*ended_by, *reason)),
+        _ => None,
+    });
+    assert_eq!((by, reason), (EndedBy::Remote, ByeReason::UserDeclined));
+    // The peer answered the Bye; the Host's socket task has taken the answer.
+    peer.barrier(2);
+    let heard = reports(s.update());
+    assert!(
+        matches!(
+            &heard[..],
+            [NetworkReport::Ended { identity, by: EndedBy::Local, reason: ByeReason::UserDeclined }]
+                if *identity == laptop
+        ),
+        "{heard:?}"
+    );
+    assert!(net.inputs().is_empty());
+}
+
+/// UMP a peer sends reaches a node of the graph: through the peer's input node,
+/// on the route rule the session declared, once the update has read what the
+/// link queued and a block has rendered.
+#[test]
+fn a_peers_ump_reaches_a_graph_node() {
+    let (mut s, net, port) = hosting(Admission::Open);
+    let (target, seen) = tap(&mut s);
+    s.midi()
+        .route(MidiRouteRule::new().to(target))
+        .expect("the tap takes MIDI");
+    let mut peer = Peer::new("Laptop", port);
+    peer.connect();
+    peer.established();
+    peer.barrier(1);
+    let heard = reports(s.update());
+    assert!(
+        matches!(&heard[..], [NetworkReport::Connected { .. }]),
+        "{heard:?}"
+    );
+
+    peer.send(&[note_on(60), note_on(64)]);
+    peer.barrier(2);
+    let _ = s.update();
+    blocks(&s, 2);
+    let heard: Vec<Ump> = seen.lock().unwrap().iter().map(|(_, ump)| *ump).collect();
+    assert_eq!(heard, [note_on(60), note_on(64)], "once and in order");
+    drop(net);
+}
+
+/// An event the graph sends to the network's output node reaches the peer, as
+/// the UMP the spec lays out.
+#[test]
+fn a_graph_event_reaches_the_peer() {
+    let (mut s, net, port) = hosting(Admission::Open);
+    let mut keys = s
+        .midi()
+        .input(net.output_node())
+        .expect("the output takes MIDI");
+    let _ = s.update();
+    let mut peer = Peer::new("Laptop", port);
+    peer.connect();
+    peer.established();
+    peer.barrier(1);
+    let _ = s.update();
+
+    keys.note_on(
+        Stamp::NextBlock,
+        MidiChannel::FIRST,
+        NoteNumber::of(72),
+        NoteVelocity::new(0x8000),
+    )
+    .unwrap();
+    blocks(&s, 2);
+    let _ = s.update();
+    let got = peer.next_event(|e| match e {
+        Event::Ump { packet, .. } => Some(*packet),
+        _ => None,
+    });
+    assert_eq!(got, note_on(72));
+    assert_eq!(net.losses().refused, 0, "a Session took it");
+}
+
+/// With no Session established the output has nowhere to send: what the graph
+/// sends is counted as refused, never waited on.
+#[test]
+fn an_event_with_no_peer_is_counted_refused() {
+    let (mut s, net, _) = hosting(Admission::Open);
+    let mut keys = s.midi().input(net.output_node()).unwrap();
+    let _ = s.update();
+    keys.note_on(
+        Stamp::NextBlock,
+        MidiChannel::FIRST,
+        NoteNumber::of(60),
+        NoteVelocity::new(0x8000),
+    )
+    .unwrap();
+    blocks(&s, 2);
+    let _ = s.update();
+    assert_eq!(net.losses().refused, 1);
+}
+
+/// A Host's Clients each have an input node of their own, and a Bye from one
+/// ends its entry (reported with who ended it and why, its node taken out once
+/// the graph has rendered past the release) and no other.
+#[test]
+fn a_peers_bye_ends_its_input_entry_alone() {
+    let (mut s, net, port) = hosting(Admission::Open);
+    let mut stay = Peer::new("Stays", port);
+    let mut leave = Peer::new("Leaves", port);
+    for peer in [&mut stay, &mut leave] {
+        peer.connect();
+        peer.established();
+        peer.barrier(1);
+    }
+    let heard = reports(s.update());
+    assert_eq!(heard.len(), 2, "{heard:?}");
+    let (stays, leaves) = (identity("Stays", "Stays"), identity("Leaves", "Leaves"));
+    let stays_node = net.input_node(stays).unwrap();
+    let leaves_node = net.input_node(leaves).unwrap();
+    assert_ne!(stays_node, leaves_node);
+
+    leave.close(ByeReason::UserTerminated);
+    leave.next_event(|e| matches!(e, Event::Closed { .. }).then_some(()));
+    let heard = reports(s.update());
+    assert!(
+        matches!(
+            &heard[..],
+            [NetworkReport::Ended { identity, by: EndedBy::Remote, reason: ByeReason::UserTerminated }]
+                if *identity == leaves
+        ),
+        "{heard:?}"
+    );
+    assert_eq!(net.input_node(leaves), None);
+    assert_eq!(net.inputs(), [(stays, stays_node)]);
+    // The node stays while the graph renders what it releases, then goes.
+    blocks(&s, 2);
+    let _ = s.update();
+    assert!(!s.graph().contains(leaves_node));
+    assert!(s.graph().contains(stays_node));
+}
+
+/// Dropping the handle ends the network: the next update retires the entries, and
+/// the link's Bye reaches every peer, sent from the executor's pool.
+#[test]
+fn dropping_the_network_sends_bye_to_the_peer() {
+    let (mut s, net, port) = hosting(Admission::Open);
+    let mut peer = Peer::new("Laptop", port);
+    peer.connect();
+    peer.established();
+    peer.barrier(1);
+    let _ = s.update();
+    let node = net.input_node(identity("Laptop", "Laptop")).unwrap();
+
+    drop(net);
+    let _ = s.update();
+    let (by, reason) = peer.next_event(|e| match e {
+        Event::Closed {
+            ended_by, reason, ..
+        } => Some((*ended_by, *reason)),
+        _ => None,
+    });
+    assert_eq!((by, reason), (EndedBy::Remote, ByeReason::PowerDown));
+    blocks(&s, 2);
+    let _ = s.update();
+    assert!(!s.graph().contains(node), "the peer's input node left");
+}
+
+/// A handle that outlives its session still ends cleanly: the link says Bye when
+/// the last clone drops, though the executor it ran on is gone.
+#[test]
+fn a_handle_may_outlive_its_session() {
+    let (mut s, net, port) = hosting(Admission::Open);
+    let mut peer = Peer::new("Laptop", port);
+    peer.connect();
+    peer.established();
+    peer.barrier(1);
+    let _ = s.update();
+    drop(s);
+    drop(net);
+    let (by, reason) = peer.next_event(|e| match e {
+        Event::Closed {
+            ended_by, reason, ..
+        } => Some((*ended_by, *reason)),
+        _ => None,
+    });
+    assert_eq!((by, reason), (EndedBy::Remote, ByeReason::PowerDown));
+}
+
+/// A session that is a Client of a Host hears it: the Host's UMP reaches the
+/// graph through the Host's input node.
+#[test]
+fn a_client_session_hears_its_host() {
+    let executor = Executor::new();
+    let host = NetworkLink::bind(
+        &executor,
+        "127.0.0.1:0",
+        Host::new(HostConfig::new(identity("Studio", "HOST-1"))),
+    )
+    .unwrap();
+    let addr = host.local_addr().unwrap();
+    let mut s = offline();
+    let (target, seen) = tap(&mut s);
+    s.midi().route(MidiRouteRule::new().to(target)).unwrap();
+    let net = s
+        .midi()
+        .open_network(OpenNetwork::client(
+            identity("Laptop", "CLIENT-1"),
+            SocketAddr::from(([127, 0, 0, 1], addr.port())),
+        ))
+        .expect("binds");
+
+    // The session learns of its Session in `update`, its one read: the wait is
+    // on the link's task, which another thread runs.
+    let studio = identity("Studio", "HOST-1");
+    let mut heard = Vec::new();
+    wait_until("the session to connect", HANG_GUARD, || {
+        heard.extend(reports(s.update()));
+        net.input_node(studio).is_some()
+    });
+    assert!(matches!(
+        heard.first(),
+        Some(NetworkReport::Connected { identity }) if *identity == studio
+    ));
+    assert_eq!(host.with(|h, _| h.session_count()), 1);
+    let client = SocketAddr::from(([127, 0, 0, 1], net.local_addr().unwrap().port()));
+    host.with(|h, now| h.send(now, client, &[note_on(65)]))
+        .unwrap();
+    wait_until("the Host's UMP to reach the graph", HANG_GUARD, || {
+        let _ = s.update();
+        blocks(&s, 1);
+        !seen.lock().unwrap().is_empty()
+    });
+    assert_eq!(seen.lock().unwrap()[0].1, note_on(65));
+}
