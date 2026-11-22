@@ -169,15 +169,14 @@ impl Vst2Loaded {
         };
 
         if info.preset_chunks {
-            // `try_get_preset_data`, not `get_preset_data`: the infallible one
-            // folds "nothing saved" and "the save failed" into the same empty
-            // `Vec`, so a failed `getChunk` would silently downgrade to a
-            // parameter snapshot, losing the non-parameter state chunks exist
-            // to carry. A failure is an error; an *empty* chunk still falls through
-            // to the parameter snapshot, keeping a fresh plugin saveable.
+            // A failed `getChunk` is an error, never folded into an empty
+            // chunk: falling back to a parameter snapshot would lose the
+            // non-parameter state chunks exist to carry. An *empty* chunk still
+            // falls through to the parameter snapshot, keeping a fresh plugin
+            // saveable.
             let chunk = self
                 .instance
-                .try_get_preset_data(main)
+                .get_preset_data(main)
                 .map_err(Vst2Error::ChunkSave)?;
             if !chunk.is_empty() {
                 let mut state = Vec::with_capacity(8 + chunk.len());

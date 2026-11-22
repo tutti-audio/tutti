@@ -137,7 +137,7 @@ impl QueueState {
     /// Puts `point` before every point the queue holds, if it has room.
     /// Allocation-free; `false` (the queue unchanged) when it is full.
     pub(crate) fn prepend(&mut self, point: ParameterPoint) -> bool {
-        self.points.try_push_front(point).is_ok()
+        self.points.push_front(point).is_ok()
     }
 
     /// Iterates over each `ParameterPoint` in this queue. RT-safe.
@@ -271,7 +271,7 @@ impl IParamValueQueueTrait for ParamValueQueueImpl {
                 // clamps it, which is a guard this direction never had.
                 value: Normalized::clamped(value),
             };
-            let at = match points.try_push(point) {
+            let at = match points.push(point) {
                 Ok(()) => Some(points.len() - 1),
                 Err(point) => {
                     self.count_dropped();
