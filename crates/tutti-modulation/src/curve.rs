@@ -25,7 +25,7 @@ pub enum CurveSegment {
     },
     /// The value moves from `from` at `start` to `to` at `end` along
     /// `shape`, as [`tutti_curve::Piece::value`] reads it: at beat `b` the
-    /// value is `Piece::new(from, to, shape).value((b - start) / (end - start))`.
+    /// value is `Piece::new(from, to).law(shape).value((b - start) / (end - start))`.
     /// `start < end`.
     Move {
         /// Where the move starts.

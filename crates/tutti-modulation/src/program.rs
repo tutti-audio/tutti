@@ -857,7 +857,7 @@ fn automation_at(
             && end.get() > start.get()
         {
             let t = Normalized::clamped((Beat::new(b) - start) / (end - start));
-            return Some(Piece::new(from, to, shape).value(Some(p), t));
+            return Some(Piece::new(from, to).law(shape).value(Some(p), t));
         }
         return curve.value_at(Beat::new(b));
     }
@@ -872,7 +872,7 @@ fn automation_at(
         && end > start
     {
         let t = Normalized::clamped((Beat::new(x) - start) / (end - start));
-        return Some(Piece::new(from, to, shape).value(circular, t));
+        return Some(Piece::new(from, to).law(shape).value(circular, t));
     }
     curve.value_at(Beat::new(x))
 }
@@ -1195,7 +1195,9 @@ fn crossing(curve: Law, a: f64, b: f64) -> Option<f64> {
     let below = a < 0.0;
     for _ in 0..30 {
         let mid = 0.5 * (lo + hi);
-        let v = Piece::new(a, b, curve).value(None, Normalized::clamped(mid));
+        let v = Piece::new(a, b)
+            .law(curve)
+            .value(None, Normalized::clamped(mid));
         if (v < 0.0) == below {
             lo = mid;
         } else {

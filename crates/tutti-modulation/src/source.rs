@@ -17,7 +17,7 @@ pub use note_adsr::NoteAdsr;
 
 use core::num::NonZeroU32;
 
-use tutti_curve::{Law, Piece};
+use tutti_curve::Piece;
 use tutti_ump::Ump;
 use tutti_units::{Frame, SampleRate, Samples};
 
@@ -75,7 +75,7 @@ impl Leg {
     #[must_use]
     pub const fn linear(from: f64, to: f64, frames: Samples) -> Self {
         Self {
-            piece: Piece::new(from, to, Law::Linear),
+            piece: Piece::new(from, to),
             frames,
         }
     }

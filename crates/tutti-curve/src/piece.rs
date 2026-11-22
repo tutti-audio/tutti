@@ -16,10 +16,21 @@ pub struct Piece {
 }
 
 impl Piece {
-    /// A piece from `from` to `to` along `law`.
+    /// A piece from `from` to `to` along [`Law::Linear`].
     #[must_use]
-    pub const fn new(from: f64, to: f64, law: Law) -> Self {
-        Self { from, to, law }
+    pub const fn new(from: f64, to: f64) -> Self {
+        Self {
+            from,
+            to,
+            law: Law::Linear,
+        }
+    }
+
+    /// The piece along `law`.
+    #[must_use]
+    pub const fn law(mut self, law: Law) -> Self {
+        self.law = law;
+        self
     }
 
     /// The value `t` of the way along the piece of `param`: `from + (to -
@@ -52,7 +63,7 @@ impl Piece {
         if k + 1 >= n {
             to
         } else {
-            Self::new(from, to, Law::Linear).value(
+            Self::new(from, to).value(
                 param,
                 Normalized::progress(Samples::new(k + 1), Samples::new(n)),
             )

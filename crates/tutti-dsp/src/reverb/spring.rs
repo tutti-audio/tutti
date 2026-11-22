@@ -36,7 +36,7 @@ use tutti_units::{Feedback, Hz, Mix, SampleRate, Samples, Seconds, Tail};
 use crate::delay::trips;
 use crate::onepole::cutoff_pole;
 use crate::reverb::{CHUNK, ramp_chunks};
-use crate::{AllPassFilter, AllPassForm, DelayLine, Ramp, TAIL_FLOOR};
+use crate::{AllPassFilter, DelayLine, Ramp, TAIL_FLOOR};
 
 /// The stretched unit delay `K` of every all-pass, in frames.
 const STRETCH: NonZeroUsize = NonZeroUsize::new(4).unwrap();
@@ -200,7 +200,7 @@ fn loop_frames(layout: SpringLayout, rate: SampleRate) -> usize {
 /// `stages` all-passes of the stretched delay, each of the coefficient `gain`.
 fn cascade<F: Float>(stages: SpringStages, gain: Feedback) -> Vec<AllPassFilter<F>> {
     (0..stages.len())
-        .map(|_| AllPassFilter::new(AllPassForm::Lattice, STRETCH, gain))
+        .map(|_| AllPassFilter::new(STRETCH, gain))
         .collect()
 }
 

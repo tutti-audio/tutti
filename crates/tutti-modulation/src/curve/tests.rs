@@ -5,16 +5,10 @@ use tutti_units::Mix;
 
 fn trajectory() -> Trajectory<Mix> {
     let mut e = Trajectory::new();
-    e.add_breakpoint(Breakpoint::with_law(
-        Beat::new(1.0),
-        Mix::new(0.2),
-        Law::PowerIn(Exponent::of(2.0)),
-    ));
-    e.add_breakpoint(Breakpoint::with_law(
-        Beat::new(2.0),
-        Mix::new(0.8),
-        Law::Linear,
-    ));
+    e.add_breakpoint(
+        Breakpoint::new(Beat::new(1.0), Mix::new(0.2)).law(Law::PowerIn(Exponent::of(2.0))),
+    );
+    e.add_breakpoint(Breakpoint::new(Beat::new(2.0), Mix::new(0.8)));
     e.add_breakpoint(Breakpoint::new(Beat::new(3.0), Mix::new(0.4)));
     e
 }
