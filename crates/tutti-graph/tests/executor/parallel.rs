@@ -112,10 +112,7 @@ impl RampEvery {
         .with_events(0, 1)
         .with_param_events()
         .with_event_capacity(tutti_graph::testing::cap_of(16));
-    const OUT: tutti_graph::OutEvents = match Self::BASE.event_output(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::BASE.event_output(0).expect("declared");
 }
 
 impl Node for RampEvery {

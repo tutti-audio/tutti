@@ -1355,10 +1355,7 @@ impl ImpulseSource {
     }
 
     const BASE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0);
-    const IN: InEvents = match Self::BASE.event_input(0) {
-        Some(port) => port,
-        None => panic!("declared"),
-    };
+    const IN: InEvents = Self::BASE.event_input(0).expect("declared");
 
     fn declared(latency: Latency, resolution: Resolution) -> Shape {
         Self::BASE
@@ -1581,10 +1578,7 @@ impl Emitter {
     }
 
     const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
-    const OUT: OutEvents = match Self::SHAPE.event_output(0) {
-        Some(port) => port,
-        None => panic!("declared"),
-    };
+    const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
 impl Node for Emitter {
@@ -1635,10 +1629,7 @@ impl ParamPulse {
     }
 
     const SHAPE: Shape = Shape::EMPTY.with_events(0, 1).with_param_events();
-    const OUT: OutEvents = match Self::SHAPE.event_output(0) {
-        Some(port) => port,
-        None => panic!("declared"),
-    };
+    const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
 impl Node for ParamPulse {

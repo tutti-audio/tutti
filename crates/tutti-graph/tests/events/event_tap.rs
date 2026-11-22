@@ -719,10 +719,7 @@ struct Probe {
 
 impl Probe {
     const BASE: Shape = Shape::EMPTY.with_events(1, 0);
-    const IN: tutti_graph::InEvents = match Self::BASE.event_input(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
 }
 
 impl Node for Probe {

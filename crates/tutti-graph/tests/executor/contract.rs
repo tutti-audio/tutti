@@ -171,10 +171,7 @@ impl Liar {
 
 impl Liar {
     const BASE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0);
-    const IN: tutti_graph::InEvents = match Self::BASE.event_input(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
 }
 
 impl Node for Liar {
@@ -343,10 +340,7 @@ struct Tags(tutti_fixtures::Record<(u64, u32)>);
 
 impl Tags {
     const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0);
-    const IN: tutti_graph::InEvents = match Self::SHAPE.event_input(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
 impl Node for Tags {

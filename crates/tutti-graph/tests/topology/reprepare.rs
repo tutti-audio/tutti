@@ -40,10 +40,7 @@ struct Recorder(Inbox);
 
 impl Recorder {
     const SHAPE: Shape = Shape::EMPTY.with_events(1, 0).with_tail(Tail::Unknown);
-    const IN: tutti_graph::InEvents = match Self::SHAPE.event_input(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
 impl Node for Recorder {

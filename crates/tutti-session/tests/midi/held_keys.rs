@@ -15,10 +15,9 @@ const MF: u16 = 0x8000;
 struct Src(tutti_fixtures::Shared<Vec<[u32; 4]>>);
 impl Src {
     const SHAPE: Shape = Shape::EMPTY.with_events(0, MIDI_INPUT_PORTS);
-    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-        Some(port) => port,
-        None => panic!("one event output is declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::SHAPE
+        .event_output(0)
+        .expect("one event output is declared");
 }
 
 impl Node for Src {

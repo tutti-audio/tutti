@@ -225,10 +225,7 @@ impl Signal {
         .with_events(0, 1)
         .with_param_events()
         .with_event_capacity(tutti_graph::testing::cap_of(256));
-    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
 impl Node for Signal {
@@ -264,10 +261,7 @@ impl Hold {
         .with_events(0, 1)
         .with_param_events()
         .with_event_capacity(tutti_graph::testing::cap_of(4));
-    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
 impl Node for Hold {
@@ -358,10 +352,7 @@ impl Ramps {
         .with_events(0, 1)
         .with_param_events()
         .with_event_capacity(tutti_graph::testing::cap_of(64));
-    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
 impl Node for Ramps {
@@ -1098,10 +1089,7 @@ impl OnFirstBlock {
         .with_events(0, 1)
         .with_param_events()
         .with_event_capacity(tutti_graph::testing::cap_of(4));
-    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
 impl Node for OnFirstBlock {
@@ -1655,10 +1643,7 @@ impl SegmentThenRamp {
         .with_events(0, 1)
         .with_param_events()
         .with_event_capacity(tutti_graph::testing::cap_of(4));
-    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
 impl Node for SegmentThenRamp {

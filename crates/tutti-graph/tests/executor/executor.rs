@@ -687,10 +687,7 @@ impl Synth {
 
 impl Synth {
     const BASE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0);
-    const IN: tutti_graph::InEvents = match Self::BASE.event_input(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
 }
 
 impl Node for Synth {
@@ -748,10 +745,7 @@ struct OneShot {
 
 impl OneShot {
     const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
-    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
 impl Node for OneShot {
@@ -880,10 +874,7 @@ fn a_merge_holds_all_its_inputs_so_no_note_off_is_lost() {
     struct Offs;
     impl Offs {
         const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
-        const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-            Some(p) => p,
-            None => panic!("declared"),
-        };
+        const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
     }
 
     impl Node for Offs {
@@ -912,10 +903,7 @@ fn a_merge_holds_all_its_inputs_so_no_note_off_is_lost() {
     struct Count(Arc<AtomicUsize>);
     impl Count {
         const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
-        const IN: tutti_graph::InEvents = match Self::SHAPE.event_input(0) {
-            Some(p) => p,
-            None => panic!("declared"),
-        };
+        const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
     }
 
     impl Node for Count {

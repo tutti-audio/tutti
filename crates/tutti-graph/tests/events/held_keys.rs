@@ -38,10 +38,7 @@ struct Src {
 
 impl Src {
     const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
-    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
 impl Node for Src {
@@ -89,10 +86,7 @@ impl Node for Lag {
 
 impl Sink {
     const BASE: Shape = Shape::sink_unassigned(ChannelLayout::EMPTY).with_events(1, 0);
-    const IN: tutti_graph::InEvents = match Self::BASE.event_input(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
 }
 
 impl Node for Sink {
@@ -1715,10 +1709,7 @@ fn a_source_without_note_events_closes_nothing() {
     struct Clock;
     impl Clock {
         const SHAPE: Shape = Shape::EMPTY.with_events(0, 1).with_no_note_events();
-        const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-            Some(p) => p,
-            None => panic!("declared"),
-        };
+        const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
     }
 
     impl Node for Clock {
@@ -1765,10 +1756,7 @@ fn a_note_from_a_source_that_declared_none_is_caught() {
     struct Liar;
     impl Liar {
         const SHAPE: Shape = Shape::EMPTY.with_events(0, 1).with_no_note_events();
-        const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-            Some(p) => p,
-            None => panic!("declared"),
-        };
+        const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
     }
 
     impl Node for Liar {
@@ -1811,10 +1799,7 @@ impl Clone for Once {
 }
 impl Once {
     const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
-    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
 impl Node for Once {
@@ -1836,10 +1821,7 @@ impl Node for Once {
 struct Hear(Log, u64);
 impl Hear {
     const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0);
-    const IN: tutti_graph::InEvents = match Self::SHAPE.event_input(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
 impl Node for Hear {
@@ -2136,10 +2118,7 @@ mod no_alloc {
     struct Count(Arc<AtomicU64>);
     impl Count {
         const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
-        const IN: tutti_graph::InEvents = match Self::SHAPE.event_input(0) {
-            Some(p) => p,
-            None => panic!("declared"),
-        };
+        const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
     }
 
     impl Node for Count {

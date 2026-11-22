@@ -128,10 +128,9 @@ struct Held {
 
 impl Held {
     const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
-    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-        Some(port) => port,
-        None => panic!("one event output is declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::SHAPE
+        .event_output(0)
+        .expect("one event output is declared");
 }
 
 impl Node for Held {

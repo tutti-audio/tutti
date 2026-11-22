@@ -46,10 +46,7 @@ impl Probe {
         .with_events(1, 0)
         .with_param_events()
         .with_tail(Tail::Unknown);
-    const IN: tutti_graph::InEvents = match Self::SHAPE.event_input(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
 impl Node for Probe {
@@ -428,10 +425,7 @@ impl Impulse {
     const SHAPE: Shape = Shape::through_unassigned(ChannelLayout::MONO)
         .with_events(1, 0)
         .with_tail(Tail::Unknown);
-    const IN: tutti_graph::InEvents = match Self::SHAPE.event_input(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
 impl Node for Impulse {

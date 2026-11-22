@@ -47,10 +47,7 @@ struct Emitter {
 
 impl Emitter {
     const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
-    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
 impl Node for Emitter {
@@ -602,10 +599,7 @@ struct Clock;
 
 impl Clock {
     const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(0, 1);
-    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
 impl Node for Clock {
@@ -637,10 +631,7 @@ impl Tap {
     const SHAPE: Shape = Shape::through_unassigned(ChannelLayout::MONO)
         .with_events(1, 0)
         .with_tail(Tail::Unknown);
-    const IN: tutti_graph::InEvents = match Self::SHAPE.event_input(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
 impl Node for Tap {

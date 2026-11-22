@@ -259,10 +259,7 @@ struct Recorder {
 
 impl Recorder {
     const BASE: Shape = Shape::EMPTY.with_events(1, 0);
-    const IN: tutti_graph::InEvents = match Self::BASE.event_input(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
 }
 
 impl Node for Recorder {
@@ -501,10 +498,7 @@ struct Once {
 
 impl Once {
     const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
-    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
 impl Node for Once {
@@ -700,10 +694,7 @@ struct Holder {
 
 impl Holder {
     const BASE: Shape = Shape::EMPTY.with_events(1, 1);
-    const IN: tutti_graph::InEvents = match Self::BASE.event_input(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
 }
 
 impl Node for Holder {
@@ -731,10 +722,7 @@ impl Keys {
     const SHAPE: Shape = Shape::EMPTY
         .with_events(0, 1)
         .with_event_capacity(tutti_graph::testing::cap_of(16));
-    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
 impl Node for Keys {
@@ -836,10 +824,7 @@ impl EarlyOnsLateOffs {
     const SHAPE: Shape = Shape::EMPTY
         .with_events(0, 1)
         .with_event_capacity(tutti_graph::testing::cap_of(16));
-    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
 impl Node for EarlyOnsLateOffs {
@@ -879,10 +864,7 @@ impl Trace {
     const SHAPE: Shape = Shape::EMPTY
         .with_events(1, 0)
         .with_event_input_capacity(tutti_graph::testing::cap_of(4));
-    const IN: tutti_graph::InEvents = match Self::SHAPE.event_input(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
 impl Node for Trace {

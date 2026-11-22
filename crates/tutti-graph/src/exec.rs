@@ -729,10 +729,7 @@ mod tests {
 
     impl Count {
         const SHAPE: crate::node::Shape = crate::node::Shape::EMPTY.with_events(1, 0);
-        const IN: crate::InEvents = match Self::SHAPE.event_input(0) {
-            Some(p) => p,
-            None => panic!("declared"),
-        };
+        const IN: crate::InEvents = Self::SHAPE.event_input(0).expect("declared");
     }
 
     impl Node for Count {

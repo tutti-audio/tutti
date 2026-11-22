@@ -473,10 +473,7 @@ impl HeldChaser {
     const SHAPE: Shape = Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO))
         .with_events(1, 0)
         .with_chase(4);
-    const IN: tutti_graph::InEvents = match Self::SHAPE.event_input(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
 impl Node for HeldChaser {
@@ -660,10 +657,7 @@ struct Spray {
 
 impl Spray {
     const BASE: Shape = Shape::EMPTY.with_events(0, 1);
-    const OUT: tutti_graph::OutEvents = match Self::BASE.event_output(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::BASE.event_output(0).expect("declared");
 }
 
 impl Node for Spray {
@@ -893,10 +887,7 @@ impl RampEvery {
         .with_events(0, 1)
         .with_param_events()
         .with_event_capacity(tutti_graph::testing::cap_of(16));
-    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
 impl Node for RampEvery {
@@ -1314,10 +1305,7 @@ impl SeamEvery {
         .with_events(0, 1)
         .with_param_events()
         .with_event_capacity(tutti_graph::testing::cap_of(16));
-    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
 impl Node for SeamEvery {
@@ -2354,10 +2342,7 @@ impl Chaser {
     const SHAPE: Shape = Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO))
         .with_events(1, 0)
         .with_chase(STATE as u32);
-    const IN: tutti_graph::InEvents = match Self::SHAPE.event_input(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
 impl Node for Chaser {
@@ -2589,10 +2574,7 @@ impl Node for OffCount {
 
 impl Holder {
     const BASE: Shape = Shape::EMPTY.with_events(0, 1);
-    const OUT: tutti_graph::OutEvents = match Self::BASE.event_output(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::BASE.event_output(0).expect("declared");
 }
 
 impl Node for Holder {
@@ -3107,10 +3089,7 @@ struct Latch {
 
 impl Latch {
     const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
-    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
 impl Node for Latch {
@@ -3151,10 +3130,7 @@ struct Closed {
 
 impl Closed {
     const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
-    const IN: tutti_graph::InEvents = match Self::SHAPE.event_input(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
 impl Node for Closed {

@@ -21,10 +21,9 @@ impl<F: Float + SimdLanes> SoundFontUnit<F> {
     /// the MIDI event input.
     const PORTS: Shape =
         Shape::source_unassigned(ChannelLayout::from_count(Plane::COUNT as u16)).with_events(1, 0);
-    const EVENTS: InEvents = match Self::PORTS.event_input(0) {
-        Some(port) => port,
-        None => panic!("declared one event input"),
-    };
+    const EVENTS: InEvents = Self::PORTS
+        .event_input(0)
+        .expect("declared one event input");
 }
 
 impl<F: Float + SimdLanes> Node<F> for SoundFontUnit<F> {

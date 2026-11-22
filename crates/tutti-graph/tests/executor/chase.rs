@@ -54,10 +54,7 @@ fn data(u: &Ump) -> f32 {
 impl Keeper {
     const BASE: Shape =
         Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO)).with_events(1, 0);
-    const IN: tutti_graph::InEvents = match Self::BASE.event_input(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
 }
 
 impl Node for Keeper {
@@ -143,10 +140,7 @@ struct Edge0(Ump, Arc<AtomicBool>);
 
 impl Edge0 {
     const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
-    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
-        Some(p) => p,
-        None => panic!("declared"),
-    };
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
 impl Node for Edge0 {

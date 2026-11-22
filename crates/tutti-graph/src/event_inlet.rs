@@ -441,10 +441,7 @@ impl EventInletNode {
     }
 
     const BASE: Shape = Shape::EMPTY.with_events(0, 1);
-    const OUT: OutEvents = match Self::BASE.event_output(0) {
-        Some(port) => port,
-        None => panic!("declared"),
-    };
+    const OUT: OutEvents = Self::BASE.event_output(0).expect("declared");
 
     fn declared(capacity: EventCapacity) -> Shape {
         Self::BASE

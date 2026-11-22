@@ -169,10 +169,9 @@ struct HarmonyTap(tutti_fixtures::Record<(u64, Harmony)>);
 
 impl HarmonyTap {
     const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
-    const IN: tutti_graph::InEvents = match Self::SHAPE.event_input(0) {
-        Some(port) => port,
-        None => panic!("one event input is declared"),
-    };
+    const IN: tutti_graph::InEvents = Self::SHAPE
+        .event_input(0)
+        .expect("one event input is declared");
 }
 
 impl Node for HarmonyTap {
@@ -303,10 +302,9 @@ struct Count(Arc<AtomicUsize>);
 
 impl Count {
     const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
-    const IN: tutti_graph::InEvents = match Self::SHAPE.event_input(0) {
-        Some(port) => port,
-        None => panic!("one event input is declared"),
-    };
+    const IN: tutti_graph::InEvents = Self::SHAPE
+        .event_input(0)
+        .expect("one event input is declared");
 }
 
 impl Node for Count {

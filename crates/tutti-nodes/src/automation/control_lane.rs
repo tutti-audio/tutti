@@ -497,14 +497,12 @@ impl ControlLaneNode {
         .with_cost(Cost::Moderate)
         .with_tail(Tail::None)
         .with_no_note_events();
-    const IN: InEvents = match Self::SHAPE.event_input(0) {
-        Some(port) => port,
-        None => panic!("declared one event input"),
-    };
-    const OUT: OutEvents = match Self::SHAPE.event_output(0) {
-        Some(port) => port,
-        None => panic!("declared one event output"),
-    };
+    const IN: InEvents = Self::SHAPE
+        .event_input(0)
+        .expect("declared one event input");
+    const OUT: OutEvents = Self::SHAPE
+        .event_output(0)
+        .expect("declared one event output");
 
     fn build(
         program: Arc<ControlProgram>,

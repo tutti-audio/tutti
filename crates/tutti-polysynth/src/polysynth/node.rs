@@ -48,10 +48,9 @@ pub(super) const MODERATE_LANES: usize = 16;
 impl<F: SynthFloat> PolySynth<F> {
     /// The ports every shape declares: stereo out and the MIDI event input.
     const PORTS: Shape = Shape::source(BusTopology::STEREO).with_events(1, 0);
-    const EVENTS: InEvents = match Self::PORTS.event_input(0) {
-        Some(port) => port,
-        None => panic!("declared one event input"),
-    };
+    const EVENTS: InEvents = Self::PORTS
+        .event_input(0)
+        .expect("declared one event input");
 
     /// What the synth declares to the cost model: `Moderate` up to
     /// [`MODERATE_LANES`] oscillator lanes, `Heavy` past them.
