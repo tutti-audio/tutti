@@ -15,7 +15,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::bus_edge::{BusFeed, BusRef};
+use crate::bus_edge::{BusFeed, NodeBus};
 use crate::gain::EdgeGain;
 use crate::mode::{NodeMix, NodeMode};
 use crate::{ChannelFeed, LatencyGraph, PortFeed};
@@ -198,7 +198,7 @@ pub struct GraphSpec {
     /// [`validate`](Self::validate) and [`compile`](fn@crate::compile) take.
     /// [`Editor::commit`](crate::Editor::commit) lowers for you. An empty
     /// `Vec` is the same as an absent key.
-    pub bus_edges: BTreeMap<BusRef, Vec<BusFeed>>,
+    pub bus_edges: BTreeMap<NodeBus, Vec<BusFeed>>,
     /// The declared topology of the main output, the graph's outputs, as a bus: what a
     /// bus edge into the main output folds to. `None` is undeclared. Every main output the
     /// engine renders is at most [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)

@@ -1,6 +1,6 @@
 //! Event ports on typed keys (doc 013, "The session graph's surface"; doc 030
-//! step 2c): `key.events_in()` and `key.events_out()` are the main (index 0)
-//! event ports, `events_in_at(i)` and `events_out_at(i)` take an index, and
+//! step 2c): `key.event_input(0)` and `key.event_output(0)` are the main (index 0)
+//! event ports, `event_input(i)` and `event_output(i)` take an index, and
 //! the one `connect`, `disconnect`, `sources`, and `set_sources`
 //! cover an event edge as they do an audio one.
 //!
@@ -45,37 +45,40 @@ fn an_event_edge_is_connected_read_back_and_disconnected() {
     let src = g.add(ForkByClone(Events::<0, 2>));
     let sink = g.add(ForkByClone(Events::<1, 0>));
 
-    let connection = g.connect(src.events_out(), sink.events_in()).unwrap();
+    let connection = g.connect(src.event_output(0), sink.event_input(0)).unwrap();
     assert!(
         connection.edges().is_empty(),
         "an event edge is no audio edge"
     );
-    g.connect(src.events_out(), sink.events_in()).unwrap();
+    g.connect(src.event_output(0), sink.event_input(0)).unwrap();
     assert_eq!(
-        g.sources(sink.events_in()).unwrap(),
-        [src.events_out()],
+        g.sources(sink.event_input(0)).unwrap(),
+        [src.event_output(0)],
         "once"
     );
 
-    g.connect(src.events_out_at(1), sink.events_in()).unwrap();
+    g.connect(src.event_output(1), sink.event_input(0)).unwrap();
     assert_eq!(
-        g.sources(sink.events_in()).unwrap(),
-        [src.events_out(), src.events_out_at(1)],
+        g.sources(sink.event_input(0)).unwrap(),
+        [src.event_output(0), src.event_output(1)],
         "events merge: a second source joins the first"
     );
 
     assert!(
-        g.disconnect(src.events_out(), sink.events_in())
+        g.disconnect(src.event_output(0), sink.event_input(0))
             .unwrap()
             .was_connected()
     );
     assert!(
-        !g.disconnect(src.events_out(), sink.events_in())
+        !g.disconnect(src.event_output(0), sink.event_input(0))
             .unwrap()
             .was_connected(),
         "gone"
     );
-    assert_eq!(g.sources(sink.events_in()).unwrap(), [src.events_out_at(1)]);
+    assert_eq!(
+        g.sources(sink.event_input(0)).unwrap(),
+        [src.event_output(1)]
+    );
 }
 
 /// **Port 0 is the main event port, and an index names another**: an edge
@@ -86,16 +89,19 @@ fn event_port_zero_is_the_main_port_and_an_index_names_another() {
     let g = s.graph();
     let src = g.add(ForkByClone(Events::<0, 1>));
     let sink = g.add(ForkByClone(Events::<2, 0>));
-    assert_eq!(sink.events_in(), sink.events_in_at(0));
-    assert_eq!(src.events_out(), src.events_out_at(0));
-    assert_eq!(sink.events_in().port, 0);
+    assert_eq!(sink.event_input(0), sink.event_input(0));
+    assert_eq!(src.event_output(0), src.event_output(0));
+    assert_eq!(sink.event_input(0).port, 0);
 
-    g.connect(src.events_out(), sink.events_in_at(1)).unwrap();
+    g.connect(src.event_output(0), sink.event_input(1)).unwrap();
     assert!(
-        g.sources(sink.events_in()).unwrap().is_empty(),
+        g.sources(sink.event_input(0)).unwrap().is_empty(),
         "the main input is unfed"
     );
-    assert_eq!(g.sources(sink.events_in_at(1)).unwrap(), [src.events_out()]);
+    assert_eq!(
+        g.sources(sink.event_input(1)).unwrap(),
+        [src.event_output(0)]
+    );
 }
 
 /// **A port the node does not have, a node that is not there, and a node
@@ -113,24 +119,24 @@ fn a_missing_event_port_is_refused_and_stores_nothing() {
     let g = s.graph();
 
     assert_eq!(
-        g.connect(src.events_out(), sink.events_in_at(1)).err(),
-        Some(ConnectError::NoSuchEventIn(sink.events_in_at(1)))
+        g.connect(src.event_output(0), sink.event_input(1)).err(),
+        Some(ConnectError::NoSuchEventIn(sink.event_input(1)))
     );
     assert_eq!(
-        g.connect(src.events_out_at(1), sink.events_in()).err(),
-        Some(ConnectError::NoSuchEventOut(src.events_out_at(1)))
+        g.connect(src.event_output(1), sink.event_input(0)).err(),
+        Some(ConnectError::NoSuchEventOut(src.event_output(1)))
     );
     // A sink with no event output has no output 0 either.
     assert_eq!(
-        g.connect(sink.events_out(), src.events_in()).err(),
-        Some(ConnectError::NoSuchEventOut(sink.events_out()))
+        g.connect(sink.event_output(0), src.event_input(0)).err(),
+        Some(ConnectError::NoSuchEventOut(sink.event_output(0)))
     );
     assert_eq!(
-        g.connect(both.events_out(), both.events_in()).err(),
+        g.connect(both.event_output(0), both.event_input(0)).err(),
         Some(ConnectError::Itself(both.erase()))
     );
     assert_eq!(
-        g.connect(src.events_out(), gone.events_in()).err(),
+        g.connect(src.event_output(0), gone.event_input(0)).err(),
         Some(ConnectError::NoSuchNode(gone.erase()))
     );
     assert!(
@@ -149,17 +155,17 @@ fn set_sources_covers_event_inputs() {
     let a = g.add(ForkByClone(Events::<0, 1>));
     let b = g.add(ForkByClone(Events::<0, 1>));
     let sink = g.add(ForkByClone(Events::<1, 0>));
-    let input = sink.events_in();
+    let input = sink.event_input(0);
 
-    g.set_sources(input, [a.events_out(), b.events_out()])
+    g.set_sources(input, [a.event_output(0), b.event_output(0)])
         .unwrap();
     let mut held = g.sources(input).unwrap();
     held.sort();
-    let mut both = [a.events_out(), b.events_out()];
+    let mut both = [a.event_output(0), b.event_output(0)];
     both.sort();
     assert_eq!(held, both);
-    g.set_sources(input, [b.events_out()]).unwrap();
-    assert_eq!(g.sources(input).unwrap(), [b.events_out()]);
+    g.set_sources(input, [b.event_output(0)]).unwrap();
+    assert_eq!(g.sources(input).unwrap(), [b.event_output(0)]);
 
     g.set_sources(input, []).unwrap();
     assert!(g.sources(input).unwrap().is_empty());
@@ -170,7 +176,7 @@ fn set_sources_covers_event_inputs() {
         Some(ConnectError::NoSuchEventOut(EventOutputPort::new(a, 5)))
     );
     assert_eq!(
-        g.set_sources(EventInputPort::new(sink, 3), [a.events_out()])
+        g.set_sources(EventInputPort::new(sink, 3), [a.event_output(0)])
             .err(),
         Some(ConnectError::NoSuchEventIn(EventInputPort::new(sink, 3)))
     );

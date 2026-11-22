@@ -950,7 +950,7 @@ fn a_hand_wired_event_edge_survives_the_sequencers_feed() {
         BeatDuration::new(1.0),
     )));
     s.graph()
-        .set_sources(input(synth), [hand.events_out()])
+        .set_sources(input(synth), [hand.event_output(0)])
         .unwrap();
     s.midi()
         .play_clip(
@@ -965,7 +965,7 @@ fn a_hand_wired_event_edge_survives_the_sequencers_feed() {
     let transform = s.graph_ref().feed(synth, Feeder::Sequencer).unwrap()[0];
     assert_eq!(
         sorted(s.graph_ref().sources(input(synth)).unwrap()),
-        sorted(vec![hand.events_out(), transform]),
+        sorted(vec![hand.event_output(0), transform]),
         "the sequencer's clip joins the hand-wired one"
     );
     roll(&mut s, 9_000);
@@ -975,18 +975,18 @@ fn a_hand_wired_event_edge_survives_the_sequencers_feed() {
 
     let hand2 = s.graph().add(MidiClipNode::new([]));
     s.graph()
-        .set_sources(input(synth), [hand2.events_out()])
+        .set_sources(input(synth), [hand2.event_output(0)])
         .unwrap();
     assert_eq!(
         sorted(s.graph_ref().sources(input(synth)).unwrap()),
-        sorted(vec![hand2.events_out(), transform]),
+        sorted(vec![hand2.event_output(0), transform]),
         "the host's call sets its own edges, beside the feed's"
     );
 
     s.midi().retarget(clip, other).unwrap();
     assert_eq!(
         s.graph_ref().sources(input(synth)).unwrap(),
-        vec![hand2.events_out()],
+        vec![hand2.event_output(0)],
         "the feed's edge goes, the host's stays"
     );
 }

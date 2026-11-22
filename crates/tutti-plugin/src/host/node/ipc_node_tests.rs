@@ -155,7 +155,7 @@ fn a_late_reply_still_carries_its_midi_out_offline() {
         unit.events(0, &events);
         unit.block_in(&block_env(frame, CHUNK));
         heard.push(
-            unit.events_out(0)
+            unit.event_output(0)
                 .iter()
                 .map(|e| e.offset.index())
                 .collect::<Vec<_>>(),
@@ -295,7 +295,7 @@ fn the_server_is_sent_the_schedule_on_the_chunks_frames() {
         unit.param_events(0, &params);
         unit.block_in(&block_env(frame, len));
         out_events.push(
-            unit.events_out(0)
+            unit.event_output(0)
                 .iter()
                 .map(|e| e.offset.index())
                 .collect::<Vec<_>>(),

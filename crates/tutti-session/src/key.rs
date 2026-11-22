@@ -4,10 +4,10 @@
 //! - [`Key<N>`] is a node's identity with its type: [`Graph::add`] returns one, and every call that takes a node takes
 //!   `impl Into<NodeKey>`, so a [`Key`] and an erased [`NodeKey`] both work.
 //! - [`OutputPort`] and [`InputPort`] name one channel: a node's output or input
-//!   port (`key.out(0)`, `key.input(1)`), a main input channel
+//!   port (`key.output(0)`, `key.input(1)`), a main input channel
 //!   ([`MainInput::channel`]) or a main output channel ([`MainOutput::channel`]).
 //! - [`EventOutputPort`] and [`EventInputPort`] name one event port
-//!   (`key.events_out()`, `key.events_in_at(1)`); **event input 0 is the
+//!   (`key.event_output(0)`, `key.event_input(1)`); **event input 0 is the
 //!   node's main event input**, where the chase (`Node::chase`) delivers.
 //! - [`Graph::connect`] takes an [`Outlet`] and an [`Inlet`] of the same kind
 //!   of wire: one channel, a node's whole main bus, a bus edge, or an event
@@ -18,7 +18,7 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 
 use tutti_buffers::Float;
-use tutti_graph::{BusRef, BusSource, EdgeId, EventInputPort, EventOutputPort, NodeKey};
+use tutti_graph::{BusOutputPort, EdgeId, EventInputPort, EventOutputPort, NodeBus, NodeKey};
 use tutti_units::Amplitude;
 
 use crate::{ConnectError, DeclarationError, Graph};
@@ -55,7 +55,7 @@ impl<N: ?Sized> Key<N> {
 
     /// Output port `index` of the node.
     #[must_use]
-    pub const fn out(self, index: usize) -> OutputPort {
+    pub const fn output(self, index: usize) -> OutputPort {
         OutputPort(OutEnd::Node(self.node, index))
     }
 
@@ -65,35 +65,23 @@ impl<N: ?Sized> Key<N> {
         InputPort(InEnd::Node(self.node, index))
     }
 
-    /// The node's main event output (port 0), as a source of an event edge.
-    #[must_use]
-    pub const fn events_out(self) -> EventOutputPort {
-        self.events_out_at(0)
-    }
-
     /// Event output `index` of the node.
     #[must_use]
-    pub const fn events_out_at(self, index: u16) -> EventOutputPort {
+    pub const fn event_output(self, index: u16) -> EventOutputPort {
         EventOutputPort {
             node: self.node,
             port: index,
         }
     }
 
-    /// The node's main event input (port 0), as a sink of an event edge.
+    /// Event input `index` of the node (a port per MIDI Group, a plugin's note
+    /// port `N`).
     ///
     /// **Event input 0 is the main event input**: the chase (`Node::chase`),
     /// the state a node is given when it takes over from another, is
     /// delivered there.
     #[must_use]
-    pub const fn events_in(self) -> EventInputPort {
-        self.events_in_at(0)
-    }
-
-    /// Event input `index` of the node (a port per MIDI Group, a plugin's
-    /// note port `N`).
-    #[must_use]
-    pub const fn events_in_at(self, index: u16) -> EventInputPort {
+    pub const fn event_input(self, index: u16) -> EventInputPort {
         EventInputPort {
             node: self.node,
             port: index,
@@ -102,14 +90,14 @@ impl<N: ?Sized> Key<N> {
 
     /// Output bus `bus` of the node, as a source of a bus edge.
     #[must_use]
-    pub const fn bus_out(self, bus: u8) -> BusSource {
-        BusSource::Node(BusRef::new(self.node, bus))
+    pub const fn bus_output(self, bus: u8) -> BusOutputPort {
+        BusOutputPort::Node(NodeBus::new(self.node, bus))
     }
 
     /// Input bus `bus` of the node, as a sink of a bus edge.
     #[must_use]
-    pub const fn bus_in(self, bus: u8) -> BusRef {
-        BusRef::new(self.node, bus)
+    pub const fn bus_input(self, bus: u8) -> BusInputPort {
+        BusInputPort::node(NodeBus::new(self.node, bus))
     }
 }
 
@@ -259,7 +247,7 @@ impl InputPort {
 /// The graph's main output: the channels the device or the render reads.
 ///
 /// A value of its own rather than a method of [`Graph`], so naming a channel
-/// borrows nothing: `s.graph().connect(osc.out(0), MainOutput::channel(0))`
+/// borrows nothing: `s.graph().connect(osc.output(0), MainOutput::channel(0))`
 /// is one borrow of the session. As an [`Inlet`] it is the sink of a node's
 /// main bus ([`Graph::connect`] channel by channel onto the outputs) and of a
 /// bus edge (folded to the topology the main output was declared with).
@@ -423,7 +411,7 @@ impl Weighted for ChannelWire {}
 impl Weighted for MainBusWire {}
 
 /// Something a signal leaves from: [`OutputPort`] (one channel), a [`Key`] or
-/// [`NodeKey`] (the node's whole main bus) or a [`BusSource`]. Sealed.
+/// [`NodeKey`] (the node's whole main bus) or a [`BusOutputPort`]. Sealed.
 pub trait Outlet: Sealed {
     /// The kind of wire it starts.
     type Wire: Wire;
@@ -433,7 +421,7 @@ pub trait Outlet: Sealed {
 
 /// Something a signal arrives at, for a wire of kind `W`: [`InputPort`] (one
 /// channel), a [`Key`] or [`NodeKey`] (the node's whole main bus), a
-/// [`BusRef`], or the [`MainOutput`]. Sealed.
+/// [`BusInputPort`], or the [`MainOutput`]. Sealed.
 pub trait Inlet<W: Wire>: Sealed {
     #[doc(hidden)]
     fn sink(self) -> W::In;
@@ -448,21 +436,35 @@ pub enum MainSink {
     MainOutput,
 }
 
-/// A bus-edge sink: a node's input bus, or the main output.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BusSink {
-    #[doc(hidden)]
-    Node(BusRef),
-    #[doc(hidden)]
+/// A bus-edge sink: a node's input bus, or the main output. Made by
+/// [`Key::bus_input`] and [`MainOutput`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BusInputPort(pub(crate) BusEnd);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum BusEnd {
+    Node(NodeBus),
     MainOutput,
+}
+
+impl BusInputPort {
+    /// Input bus `bus` of `node`.
+    #[must_use]
+    pub fn new(node: impl Into<NodeKey>, bus: u8) -> Self {
+        Self(BusEnd::Node(NodeBus::new(node.into(), bus)))
+    }
+
+    pub(crate) const fn node(bus: NodeBus) -> Self {
+        Self(BusEnd::Node(bus))
+    }
 }
 
 impl Sealed for OutputPort {}
 impl Sealed for InputPort {}
 impl Sealed for NodeKey {}
 impl<N: ?Sized> Sealed for Key<N> {}
-impl Sealed for BusSource {}
-impl Sealed for BusRef {}
+impl Sealed for BusOutputPort {}
+impl Sealed for BusInputPort {}
 impl Sealed for MainOutput {}
 impl Sealed for ChannelWire {}
 impl Sealed for MainBusWire {}
@@ -551,20 +553,20 @@ impl Wire for MainBusWire {
 }
 
 impl Wire for BusWire {
-    type Out = BusSource;
-    type In = BusSink;
+    type Out = BusOutputPort;
+    type In = BusInputPort;
     fn connect<F: Float>(
         graph: &mut Graph<F>,
-        from: BusSource,
-        to: BusSink,
+        from: BusOutputPort,
+        to: BusInputPort,
     ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError> {
         graph.add_bus_edge(from, to)?;
         Ok(Vec::new())
     }
     fn disconnect<F: Float>(
         graph: &mut Graph<F>,
-        from: BusSource,
-        to: BusSink,
+        from: BusOutputPort,
+        to: BusInputPort,
         hard: bool,
     ) -> Result<bool, ConnectError> {
         graph.check_bus_nodes(from, to)?;
@@ -572,8 +574,8 @@ impl Wire for BusWire {
     }
     fn harden<F: Float>(
         graph: &mut Graph<F>,
-        from: BusSource,
-        to: BusSink,
+        from: BusOutputPort,
+        to: BusInputPort,
         _: &[(ChannelEdge, bool)],
     ) {
         graph.harden_bus_edge(from, to);
@@ -691,9 +693,9 @@ impl<N: ?Sized> Outlet for Key<N> {
         self.node
     }
 }
-impl Outlet for BusSource {
+impl Outlet for BusOutputPort {
     type Wire = BusWire;
-    fn out(self) -> BusSource {
+    fn out(self) -> BusOutputPort {
         self
     }
 }
@@ -718,14 +720,14 @@ impl Inlet<MainBusWire> for MainOutput {
         MainSink::MainOutput
     }
 }
-impl Inlet<BusWire> for BusRef {
-    fn sink(self) -> BusSink {
-        BusSink::Node(self)
+impl Inlet<BusWire> for BusInputPort {
+    fn sink(self) -> BusInputPort {
+        self
     }
 }
 impl Inlet<BusWire> for MainOutput {
-    fn sink(self) -> BusSink {
-        BusSink::MainOutput
+    fn sink(self) -> BusInputPort {
+        BusInputPort(BusEnd::MainOutput)
     }
 }
 
@@ -870,7 +872,7 @@ impl<'g, P: Fanin, F: Float> SetSources<'g, P, F> {
 }
 
 /// The edges a [`Graph::connect`] just made, borrowing the graph so a gain
-/// can be set on them: `g.connect(a.out(0), b.input(0))?.gain(half)?`.
+/// can be set on them: `g.connect(a.output(0), b.input(0))?.gain(half)?`.
 ///
 /// Dropping it keeps the edges as they are. Get the [`ChannelEdge`]s with
 /// [`edges`](Self::edges) to keep a handle (a modulation target, a later

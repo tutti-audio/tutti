@@ -120,12 +120,12 @@ fn an_f64_take_reads_back_as_a_clip_holding_a_figure_f32_rounds_away() {
     let node = session.graph().add(clip);
     session
         .graph()
-        .connect(node.out(0), MainOutput::channel(0))
+        .connect(node.output(0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     session
         .graph()
-        .connect(node.out(1), MainOutput::channel(1))
+        .connect(node.output(1), MainOutput::channel(1))
         .unwrap()
         .unfaded();
     let _ = session.update();

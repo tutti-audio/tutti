@@ -8,7 +8,7 @@ use tutti_units::{Latency, Tail};
 
 use super::outlets::Closed;
 use super::{CommitError, Editor, Inserted, Unwired};
-use crate::bus_edge::{BusRef, BusSource};
+use crate::bus_edge::{BusOutputPort, NodeBus};
 use crate::fade::Fade;
 use crate::fork::ForkSource;
 use crate::gain::{EdgeFade, EdgeGain};
@@ -486,10 +486,10 @@ impl<F: Float> Editor<F> {
                 }
             }
         }
-        let mut feeds: Vec<(BusSource, Option<BusRef>)> = Vec::new();
+        let mut feeds: Vec<(BusOutputPort, Option<NodeBus>)> = Vec::new();
         for (&to, list) in &self.spec.bus_edges {
             for f in list {
-                if matches!(f.source, BusSource::Node(b) if b.node == key)
+                if matches!(f.source, BusOutputPort::Node(b) if b.node == key)
                     && to.node != key
                     && self.bus_edge_is_live(f.source, Some(to))
                 {
@@ -498,7 +498,7 @@ impl<F: Float> Editor<F> {
             }
         }
         for f in &self.spec.main_output_sources {
-            if matches!(f.source, BusSource::Node(b) if b.node == key)
+            if matches!(f.source, BusOutputPort::Node(b) if b.node == key)
                 && self.bus_edge_is_live(f.source, None)
             {
                 feeds.push((f.source, None));
@@ -538,7 +538,7 @@ impl<F: Float> Editor<F> {
                 .values()
                 .flatten()
                 .chain(&spec.main_output_sources)
-                .any(|f| matches!(f.source, BusSource::Node(b) if b.node == key))
+                .any(|f| matches!(f.source, BusOutputPort::Node(b) if b.node == key))
     }
 
     /// Removes `key` and every edge that touches it. Output channels it fed
@@ -556,7 +556,7 @@ impl<F: Float> Editor<F> {
     fn remove_keeping(
         &mut self,
         key: NodeKey,
-        keep: Option<(&BTreeSet<EdgeId>, &[(BusSource, Option<BusRef>)])>,
+        keep: Option<(&BTreeSet<EdgeId>, &[(BusOutputPort, Option<NodeBus>)])>,
     ) {
         self.touch();
         let leaving = keep.is_some();
@@ -564,12 +564,12 @@ impl<F: Float> Editor<F> {
         let (kept_edges, kept_feeds) = keep.unwrap_or((&no_edges, &[]));
         // A bus edge that touches the node goes with it, as its edges do.
         self.spec.main_output_sources.retain(|f| {
-            !matches!(f.source, BusSource::Node(b) if b.node == key)
+            !matches!(f.source, BusOutputPort::Node(b) if b.node == key)
                 || kept_feeds.contains(&(f.source, None))
         });
         self.spec.bus_edges.retain(|to, sources| {
             sources.retain(|f| {
-                !matches!(f.source, BusSource::Node(b) if b.node == key)
+                !matches!(f.source, BusOutputPort::Node(b) if b.node == key)
                     || kept_feeds.contains(&(f.source, Some(*to)))
             });
             to.node != key && !sources.is_empty()

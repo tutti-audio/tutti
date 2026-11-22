@@ -30,7 +30,7 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 ///   naming its key, so a gate added like any effect never waits on one. **The key must
 ///   be wired**: the graph feeds an unconnected input silence, and a gate keyed by silence
 ///   stays closed (at its range). Wire it with a bus edge, for example
-///   `graph.connect(kick.bus_out(0), gate.bus_in(1))` in `tutti-session`, or each key
+///   `graph.connect(kick.bus_output(0), gate.bus_input(1))` in `tutti-session`, or each key
 ///   channel into the inputs after the audio.
 ///
 /// A finite [`ratio`](GateControls::ratio) (`UnitParam::Ratio`, after the range) makes the gate a

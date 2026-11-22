@@ -29,10 +29,10 @@ fn tone() -> Result<Session, tutti::Error> {
     // One mono output, heard in the left and the right channel.
     session
         .graph()
-        .connect(sine.out(0), MainOutput::channel(0))?;
+        .connect(sine.output(0), MainOutput::channel(0))?;
     session
         .graph()
-        .connect(sine.out(0), MainOutput::channel(1))?;
+        .connect(sine.output(0), MainOutput::channel(1))?;
     Ok(session)
 }
 // ANCHOR_END: session

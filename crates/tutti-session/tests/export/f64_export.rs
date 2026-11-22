@@ -24,11 +24,11 @@ fn session() -> tutti_session::DetachedSession<&'static str, f64> {
     let dc = s.graph().add(ForkByClone(Dc(FINE)));
     let gain = s.graph().add(Params(Gain(Param::new(Amplitude::new(1.0)))));
     s.graph()
-        .connect(dc.out(0), gain.input(0))
+        .connect(dc.output(0), gain.input(0))
         .unwrap()
         .unfaded();
     s.graph()
-        .connect(gain.out(0), MainOutput::channel(0))
+        .connect(gain.output(0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     let _ = s.update();

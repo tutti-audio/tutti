@@ -552,7 +552,7 @@ pub fn an_instrument_is_one_handle_at_a_time<S: Subject>() {
         rig.peak(rig.t(STAMP)..rig.t(STAMP) + 2_000) > 1e-4,
         "the first handle plays"
     );
-    let (queue, strip) = (rig.handle.queue(), rig.handle.out());
+    let (queue, strip) = (rig.handle.queue(), rig.handle.output());
     rig.session.remove(strip.erase()).unwrap();
     assert_eq!(
         rig.session.remove_instrument(rig.handle),
@@ -646,20 +646,22 @@ pub fn sending_allocates_nothing<S: Subject>() {
     let mut buf = vec![0.0f32; BLOCK * 2];
     let on = note_on(0, 64, 100);
     let off = note_off(0, 64);
-    let ok = assert_no_alloc::assert_no_alloc(|| {
-        let a = rig.handle.keys_mut().push(Stamp::NextBlock, on).is_ok();
-        rig.session.render(
-            &mut tutti_buffers::InterleavedMut::new(&mut buf, tutti_buffers::ChannelLayout::STEREO)
-                .unwrap(),
-        );
-        let b = rig.handle.keys_mut().push(Stamp::NextBlock, off).is_ok();
-        rig.session.render(
-            &mut tutti_buffers::InterleavedMut::new(&mut buf, tutti_buffers::ChannelLayout::STEREO)
-                .unwrap(),
-        );
-        a && b
-    });
-    assert!(ok);
+    // The blocks run inside `RtScope`; the pushes are checked here.
+    let push = |rig: &mut Rig, packet| {
+        assert_no_alloc::assert_no_alloc(|| rig.handle.keys_mut().push(Stamp::NextBlock, packet))
+            .is_ok()
+    };
+    let a = push(&mut rig, on);
+    rig.session.render(
+        &mut tutti_buffers::InterleavedMut::new(&mut buf, tutti_buffers::ChannelLayout::STEREO)
+            .unwrap(),
+    );
+    let b = push(&mut rig, off);
+    rig.session.render(
+        &mut tutti_buffers::InterleavedMut::new(&mut buf, tutti_buffers::ChannelLayout::STEREO)
+            .unwrap(),
+    );
+    assert!(a && b);
 }
 
 /// The fundamental's period in frames: autocorrelation, an octave error

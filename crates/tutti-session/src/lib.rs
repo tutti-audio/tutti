@@ -221,9 +221,9 @@ pub use input::{Input, InputConfig, InputOpener, OpenedInput};
 #[cfg(feature = "midi")]
 pub use instrument::{AnyNode, InstrumentHandle, NotInstrument};
 pub use key::{
-    BusSink, BusWire, ChannelEdge, ChannelWire, Connection, Disconnection, EventEdge, EventWire,
-    Fanin, Inlet, InputPort, Key, MainBusWire, MainInput, MainOutput, MainOutputDeclaration,
-    MainSink, Outlet, OutputPort, Removal, SetSources, Weighted, Wire,
+    BusInputPort, BusWire, ChannelEdge, ChannelWire, Connection, Disconnection, EventEdge,
+    EventWire, Fanin, Inlet, InputPort, Key, MainBusWire, MainInput, MainOutput,
+    MainOutputDeclaration, MainSink, Outlet, OutputPort, Removal, SetSources, Weighted, Wire,
 };
 #[cfg(any(feature = "capture", feature = "midi"))]
 pub use latency::{Start, TakeLatency, Trim};
@@ -339,7 +339,7 @@ pub use tutti_export::{
     EventLossPolicy, Normalize, Outcome, Produced, Progress, Rendered, Resample, Stage, Written,
 };
 pub use tutti_graph::{
-    BusError, BusRef, BusSource, Buses, HasParam, HasParams, MissingSource, ParamValue, Scalar,
+    BusError, BusOutputPort, Buses, HasParam, HasParams, MissingSource, ParamValue, Scalar,
 };
 pub use tutti_graph::{
     CloseError, CommitError, EventCapacity, Losses, NodeMode, PassError, Stamp, Wired, WiredMask,

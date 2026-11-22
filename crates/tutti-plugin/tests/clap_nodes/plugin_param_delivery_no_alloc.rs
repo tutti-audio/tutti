@@ -29,7 +29,7 @@ const PASSES: usize = QUANTUM / BLOCK;
 const PARAMS: usize = 200;
 
 /// Two hundred parameters, each a foreign control lane whose knob is set to
-/// a new value before every block (the lanes run inside the gate too), so
+/// a new value before every block (the lanes run in the render), so
 /// every chunk carries a queue for each of them with a point from each of
 /// its sixteen blocks (more than a queue's ten inline points, fewer than its
 /// reserved room of 1024 / 32 + 4). Rolling transport, real time between
@@ -78,15 +78,11 @@ fn two_hundred_moving_parameters_do_not_allocate_on_the_audio_thread() {
         }
     };
 
-    // Warm up: the first blocks fault in the slab and fill the pipeline.
-    for b in 0..4 * PASSES {
+    // The first blocks fault in the slab and fill the pipeline; every block is
+    // inside `RtScope`, so none may allocate.
+    for b in 0..=20 * PASSES {
         block(b, &mut rig, &mut outs);
     }
-    assert_no_alloc::assert_no_alloc(|| {
-        for b in 4 * PASSES..=20 * PASSES {
-            block(b, &mut rig, &mut outs);
-        }
-    });
     drop(outs);
     drop(handle);
     let stats = rig.controls.param_delivery();

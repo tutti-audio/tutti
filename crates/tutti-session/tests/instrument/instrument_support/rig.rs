@@ -50,7 +50,10 @@ impl Rig {
     /// A rig over a handle the session already made, its strip wired to the
     /// outputs here.
     pub fn wired<N: ?Sized>(mut session: Session, handle: InstrumentHandle<N>) -> Self {
-        session.graph().connect(handle.out(), MainOutput).unwrap();
+        session
+            .graph()
+            .connect(handle.output(), MainOutput)
+            .unwrap();
         Self::played(session, handle)
     }
 

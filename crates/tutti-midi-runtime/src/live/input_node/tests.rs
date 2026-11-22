@@ -153,7 +153,7 @@ fn sent_at_arrival(reset: bool) -> usize {
     writer.arrive();
     d.block();
     (0..MIDI_INPUT_PORTS)
-        .map(|p| d.events_out(usize::from(p)).len())
+        .map(|p| d.event_output(usize::from(p)).len())
         .sum()
 }
 

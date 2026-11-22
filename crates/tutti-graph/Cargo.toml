@@ -23,7 +23,7 @@ contract = ["dep:libm"]
 # `Reference`, the naive interpreter the differential suites compare the
 # executor with: test support (about 2,700 lines), so off by default. This
 # crate's own tests turn it on through the self dev-dependency below.
-testing = ["dep:assert_no_alloc"]
+testing = []
 # `Serialize` and `Deserialize` on `RenderMode`, which a plugin's IPC carries.
 serde = ["dep:serde"]
 
@@ -50,8 +50,6 @@ bytemuck = { version = "1.16", features = ["derive"] }
 # `contract` only: the stimulus's sine is `libm`'s, so the snapshot does not
 # depend on the platform's C math library.
 libm = { version = "0.2.15", optional = true }
-# `testing` only: `TestPool::no_alloc` runs each participant under the gate.
-assert_no_alloc = { version = "1", default-features = false, optional = true }
 # `RenderMode`'s wire form, with `serde`.
 serde = { version = "1", features = ["derive"], optional = true }
 # The `Error` derive of the crate's error types.

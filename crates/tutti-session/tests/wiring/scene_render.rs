@@ -382,7 +382,7 @@ fn pdc_is_the_compilers() {
     let mut s = scene(true);
     assert_eq!(
         s.session.graph().sources(MainOutput::channel(0)).unwrap(),
-        [s.drive.out(0)],
+        [s.drive.output(0)],
         "nothing is spliced in; the plan delays the channel"
     );
     assert!(

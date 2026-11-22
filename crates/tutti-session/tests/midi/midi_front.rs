@@ -185,7 +185,7 @@ fn a_node_whose_live_input_has_its_keys_is_not_made_an_instrument() {
 }
 
 /// **The instrument's key is typed, so a source of the caller's own wires into
-/// its event input** (`events_in` is a method of `Key`, which an erased
+/// its event input** (`event_input` is a method of `Key`, which an erased
 /// `NodeKey` has not).
 #[test]
 fn an_instruments_typed_key_takes_a_wire_of_the_callers_own() {
@@ -195,13 +195,13 @@ fn an_instruments_typed_key_takes_a_wire_of_the_callers_own() {
         .expect("an instrument");
     let (inlet, _writer) = s.graph().open_event_inlet(EventCapacity::of(8));
     s.graph()
-        .connect(inlet.events_out(), synth.node().events_in())
+        .connect(inlet.event_output(0), synth.node().event_input(0))
         .expect("the instrument's main event input takes a second source");
     assert!(
         s.graph_ref()
-            .sources(synth.node().events_in())
+            .sources(synth.node().event_input(0))
             .unwrap()
-            .contains(&inlet.events_out()),
+            .contains(&inlet.event_output(0)),
         "the caller's wire is one of the input's sources"
     );
 }

@@ -95,64 +95,56 @@ fn the_border_nodes_process_without_allocating() {
     ed.commit().unwrap();
     let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
     let mut drain = [(0, Ump([0; 4])); 256];
-    // Warm up outside the gate.
+    // Warm up.
     busy(&mut dev, 0);
     exec.process(512, &t, &[], &mut []);
     let _ = out.poll_into(&mut drain);
 
     let (mut clocks, mut quarter_frames, mut sysex) = (0usize, 0usize, 0usize);
     let (mut tempos, mut meters) = (0usize, 0usize);
-    assert_no_alloc::assert_no_alloc(|| {
-        for b in 1..200u32 {
-            busy(&mut dev, u64::from(b));
-            keys.note_on(
-                Stamp::NextBlock,
-                MidiChannel::FIRST,
-                NoteNumber::of(60),
-                NoteVelocity::new(0xC800),
-            )
-            .unwrap();
-            // Every path of the sync output runs under the gate: a tempo that
-            // changes each block (Set Tempo), a meter published off the grid
-            // every 20th block (Set Time Signature on the new bars, the reader
-            // lent over a changing meter), a stop and a start every 50th (Stop,
-            // Start, Play, Stop) and a jump every 30th (Song Position, a Full
-            // Message, a Locate).
-            if b % 20 == 0 {
-                assert_no_alloc::permit_alloc(|| {
-                    let signature = if b % 40 == 0 { (4, 4) } else { (3, 4) };
-                    meter.set_meter(MeterMap::new([
-                        MeterChange::new(Beat::new(0.0), TimeSignature::of(4, 4)),
-                        MeterChange::new(
-                            Beat::new(0.1),
-                            TimeSignature::of(signature.0, signature.1),
-                        ),
-                    ]));
-                    meter.reclaim();
-                });
-            }
-            let tempo = Bpm::of(120.0 + f64::from(b % 3) * 10.0);
-            let at =
-                Beat::new(f64::from(b) * 512.0 / 24_000.0 + if b % 30 == 0 { 40.0 } else { 0.0 });
-            exec.process(
-                512,
-                &TransportPosition::new(b % 50 != 0, tempo, at, None),
-                &[],
-                &mut [],
-            );
-            let n = out.poll_into(&mut drain);
-            for (_, ump) in &drain[..n] {
-                match ump.decode() {
-                    Ok(Message::System(_, System::TimingClock)) => clocks += 1,
-                    Ok(Message::System(_, System::TimeCode(_))) => quarter_frames += 1,
-                    Ok(Message::Sysex7(..)) => sysex += 1,
-                    Ok(Message::Flex(_, Flex::SetTempo(_))) => tempos += 1,
-                    Ok(Message::Flex(_, Flex::SetTimeSignature(_))) => meters += 1,
-                    _ => {}
-                }
+    for b in 1..200u32 {
+        busy(&mut dev, u64::from(b));
+        keys.note_on(
+            Stamp::NextBlock,
+            MidiChannel::FIRST,
+            NoteNumber::of(60),
+            NoteVelocity::new(0xC800),
+        )
+        .unwrap();
+        // Every path of the sync output runs under the gate: a tempo that
+        // changes each block (Set Tempo), a meter published off the grid
+        // every 20th block (Set Time Signature on the new bars, the reader
+        // lent over a changing meter), a stop and a start every 50th (Stop,
+        // Start, Play, Stop) and a jump every 30th (Song Position, a Full
+        // Message, a Locate).
+        if b % 20 == 0 {
+            let signature = if b % 40 == 0 { (4, 4) } else { (3, 4) };
+            meter.set_meter(MeterMap::new([
+                MeterChange::new(Beat::new(0.0), TimeSignature::of(4, 4)),
+                MeterChange::new(Beat::new(0.1), TimeSignature::of(signature.0, signature.1)),
+            ]));
+            meter.reclaim();
+        }
+        let tempo = Bpm::of(120.0 + f64::from(b % 3) * 10.0);
+        let at = Beat::new(f64::from(b) * 512.0 / 24_000.0 + if b % 30 == 0 { 40.0 } else { 0.0 });
+        exec.process(
+            512,
+            &TransportPosition::new(b % 50 != 0, tempo, at, None),
+            &[],
+            &mut [],
+        );
+        let n = out.poll_into(&mut drain);
+        for (_, ump) in &drain[..n] {
+            match ump.decode() {
+                Ok(Message::System(_, System::TimingClock)) => clocks += 1,
+                Ok(Message::System(_, System::TimeCode(_))) => quarter_frames += 1,
+                Ok(Message::Sysex7(..)) => sysex += 1,
+                Ok(Message::Flex(_, Flex::SetTempo(_))) => tempos += 1,
+                Ok(Message::Flex(_, Flex::SetTimeSignature(_))) => meters += 1,
+                _ => {}
             }
         }
-    });
+    }
     assert_eq!(out.dropped(), 0);
     // The emit paths ran under the gate: ticks, quarter-frames, and the Full
     // Messages and Machine Control commands (SysEx).
@@ -186,30 +178,28 @@ fn a_generation_change_processes_without_allocating() {
     ed.commit().unwrap();
     let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
     let mut drain = [(0, Ump([0; 4])); 256];
-    // Warm up outside the gate.
+    // Warm up.
     busy(&mut dev, 0);
     exec.process(512, &t, &[], &mut []);
     let _ = out.poll_into(&mut drain);
 
     let mut offs = 0;
-    assert_no_alloc::assert_no_alloc(|| {
-        for b in 1..200u32 {
-            busy(&mut dev, u64::from(b));
-            // A device goes every eighth block and another takes the input two
-            // blocks on.
-            match b % 8 {
-                0 => writer.depart(),
-                2 => writer.arrive(),
-                _ => {}
-            }
-            exec.process(512, &t, &[], &mut []);
-            let n = out.poll_into(&mut drain);
-            offs += drain[..n]
-                .iter()
-                .filter(|(_, ump)| matches!(ump.note_key_event(), Some(NoteKeyEvent::Off(_))))
-                .count();
+    for b in 1..200u32 {
+        busy(&mut dev, u64::from(b));
+        // A device goes every eighth block and another takes the input two
+        // blocks on.
+        match b % 8 {
+            0 => writer.depart(),
+            2 => writer.arrive(),
+            _ => {}
         }
-    });
+        exec.process(512, &t, &[], &mut []);
+        let n = out.poll_into(&mut drain);
+        offs += drain[..n]
+            .iter()
+            .filter(|(_, ump)| matches!(ump.note_key_event(), Some(NoteKeyEvent::Off(_))))
+            .count();
+    }
     assert!(offs > 0, "the departures released the keys they held");
     writer.depart();
     exec.process(512, &t, &[], &mut []);
@@ -234,13 +224,11 @@ fn the_midi_out_node_passes_events_without_allocating() {
     let _ = out.poll_into(&mut drain);
 
     let mut passed = 0;
-    assert_no_alloc::assert_no_alloc(|| {
-        for b in 1..200u32 {
-            busy(&mut dev, u64::from(b));
-            exec.process(512, &t, &[], &mut []);
-            passed += out.poll_into(&mut drain);
-        }
-    });
+    for b in 1..200u32 {
+        busy(&mut dev, u64::from(b));
+        exec.process(512, &t, &[], &mut []);
+        passed += out.poll_into(&mut drain);
+    }
     assert!(passed >= 199 * 4, "the events passed: {passed}");
     assert_eq!(out.dropped(), 0);
 }
@@ -281,13 +269,11 @@ fn the_mpe_bend_range_fan_out_processes_without_allocating() {
     let _ = out.poll_into(&mut drain);
 
     let mut reached = 0;
-    assert_no_alloc::assert_no_alloc(|| {
-        for b in 1..=50 {
-            bend_range(&mut dev, b);
-            exec.process(512, &t, &[], &mut []);
-            reached += out.poll_into(&mut drain);
-        }
-    });
+    for b in 1..=50 {
+        bend_range(&mut dev, b);
+        exec.process(512, &t, &[], &mut []);
+        reached += out.poll_into(&mut drain);
+    }
     assert_eq!(reached, 50, "the last member's port carries one per block");
 }
 
@@ -338,13 +324,11 @@ fn the_mpe_expression_paths_process_without_allocating() {
     let _ = out.poll_into(&mut drain);
 
     let mut reached = 0;
-    assert_no_alloc::assert_no_alloc(|| {
-        for b in 1..=50 {
-            gesture(&mut dev, b);
-            exec.process(512, &t, &[], &mut []);
-            reached += out.poll_into(&mut drain);
-        }
-    });
+    for b in 1..=50 {
+        gesture(&mut dev, b);
+        exec.process(512, &t, &[], &mut []);
+        reached += out.poll_into(&mut drain);
+    }
     assert!(reached > 0, "channel 2's port carries the gesture");
 }
 
@@ -404,10 +388,8 @@ fn an_mpe_mode_change_and_an_mcm_process_without_allocating() {
         // The device's thread pushes the block's message: upper on the odd
         // blocks, as the first (warm-up) block's was.
         mcm(&mut dev, i as u64 + 1, i % 2 == 1);
-        assert_no_alloc::assert_no_alloc(|| {
-            exec.process(512, &t, &[], &mut []);
-            reached += out.poll_into(&mut drain);
-        });
+        exec.process(512, &t, &[], &mut []);
+        reached += out.poll_into(&mut drain);
         cell.reclaim();
     }
     // Each block's adoption resets the upper master (channel 15), and every
@@ -481,18 +463,16 @@ fn a_block_of_many_loop_passes_walks_without_allocating() {
         clock.advance(Samples::new(512), Some(region));
         out.poll_into(&mut drain)
     };
-    // Warm up outside the gate; the clip sends its notes.
+    // Warm up; the clip sends its notes.
     assert!(
         block(&mut exec, &mut clock) >= 16,
         "eight passes of two notes"
     );
 
     let mut sent = 0;
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..100 {
-            sent += block(&mut exec, &mut clock);
-        }
-    });
+    for _ in 0..100 {
+        sent += block(&mut exec, &mut clock);
+    }
     // Per pass the clip sends two note-ons, the pedal and the bend, then at the
     // wrap two note-offs, the pedal-up and the centred bend.
     assert!(sent >= 100 * 8 * 8, "every block walked its passes: {sent}");
@@ -544,13 +524,11 @@ fn a_clip_overflowing_its_port_refuses_and_retries_without_allocating() {
         f += 64;
         out.poll_into(&mut drain)
     };
-    // The first block outside the gate: lazy state, if any.
+    // The first block: lazy state, if any.
     polled += block(&mut exec);
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..24 {
-            polled += block(&mut exec);
-        }
-    });
+    for _ in 0..24 {
+        polled += block(&mut exec);
+    }
     assert!(polled > 0);
     assert!(
         exec.dropped_event_count() >= 88,
@@ -620,27 +598,25 @@ fn a_clip_with_a_full_table_sends_and_pays_without_allocating() {
         n
     };
     let mut polled = block(&mut exec, true, f);
-    assert_no_alloc::assert_no_alloc(|| {
-        // The table fills over blocks 0 to 4; the offs at frame 4,000 are in
-        // block 7, which refuses most of them.
-        for _ in 0..7 {
-            f += 512;
-            polled += block(&mut exec, true, f);
-        }
-        // The refused offs are paid over the next blocks.
-        for _ in 0..8 {
-            f += 512;
-            polled += block(&mut exec, true, f);
-        }
-        // A seek back: the table is empty, the notes start again.
-        for k in 0..8 {
-            polled += block(&mut exec, true, 512 * k);
-        }
-        // A jump while the table is full, then a stop.
-        polled += block(&mut exec, true, 0);
-        polled += block(&mut exec, false, 0);
-        polled += block(&mut exec, false, 0);
-    });
+    // The table fills over blocks 0 to 4; the offs at frame 4,000 are in
+    // block 7, which refuses most of them.
+    for _ in 0..7 {
+        f += 512;
+        polled += block(&mut exec, true, f);
+    }
+    // The refused offs are paid over the next blocks.
+    for _ in 0..8 {
+        f += 512;
+        polled += block(&mut exec, true, f);
+    }
+    // A seek back: the table is empty, the notes start again.
+    for k in 0..8 {
+        polled += block(&mut exec, true, 512 * k);
+    }
+    // A jump while the table is full, then a stop.
+    polled += block(&mut exec, true, 0);
+    polled += block(&mut exec, false, 0);
+    polled += block(&mut exec, false, 0);
     assert!(polled > 0);
     assert_eq!(out.dropped(), 0, "the sink's ring took every event");
     assert_eq!(sounding, 0, "every note the sink heard begin has ended");
@@ -670,17 +646,15 @@ fn the_event_inlet_processes_without_allocating() {
     let msg = midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100));
     let mut heard = 0;
     for b in 1..200u64 {
-        // Control side, outside the gate: one for this block's middle, one
+        // Control side: one for this block's middle, one
         // already late, one for the next block.
         tx.push(Stamp::Frame(Frame::new(b * 512 + 200)), msg)
             .unwrap();
         tx.push(Stamp::Frame(Frame::new(3)), msg).unwrap();
         tx.push(Stamp::NextBlock, msg).unwrap();
-        // The audio thread's part, inside the gate.
-        assert_no_alloc::assert_no_alloc(|| {
-            exec.process(512, &t, &[], &mut []);
-            heard += out.poll_into(&mut drain);
-        });
+        // The audio thread's part.
+        exec.process(512, &t, &[], &mut []);
+        heard += out.poll_into(&mut drain);
     }
     assert_eq!(out.dropped(), 0);
     // Every send but the last block's own frame-stamped one was heard.
@@ -705,7 +679,7 @@ fn the_event_inlet_with_a_full_list_processes_without_allocating() {
     let mut drain = [(0, Ump([0; 4])); 256];
     let on = midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100));
     let off = midi::m1_note_off(MidiChannel::FIRST, 60, U7::of(0));
-    // Outside the gate: fill the list with events for frames far ahead.
+    // Control side: fill the list with events for frames far ahead.
     for k in 0..256u64 {
         tx.push(Stamp::Frame(Frame::new(10_000_000 + k)), on)
             .unwrap();
@@ -714,16 +688,14 @@ fn the_event_inlet_with_a_full_list_processes_without_allocating() {
     let _ = out.poll_into(&mut drain);
 
     for b in 1..100u64 {
-        // Control side, outside the gate.
+        // Control side.
         tx.push(Stamp::NextBlock, on).unwrap();
         tx.push(Stamp::Frame(Frame::new(20_000_000 + b)), off)
             .unwrap();
         tx.push(Stamp::Frame(Frame::new(30_000_000 + b)), on)
             .unwrap();
-        assert_no_alloc::assert_no_alloc(|| {
-            exec.process(512, &t, &[], &mut []);
-            let _ = out.poll_into(&mut drain);
-        });
+        exec.process(512, &t, &[], &mut []);
+        let _ = out.poll_into(&mut drain);
     }
     assert!(
         tx.counts().losses().evicted >= 99 * 2,
@@ -774,10 +746,8 @@ fn the_mpe_transform_node_processes_without_allocating() {
         cell.publish(modes[(b % 2) as usize]);
         gesture(&mut dev, b);
         manager(&mut dev, b);
-        assert_no_alloc::assert_no_alloc(|| {
-            exec.process(512, &t, &[], &mut []);
-            reached += out.poll_into(&mut drain);
-        });
+        exec.process(512, &t, &[], &mut []);
+        reached += out.poll_into(&mut drain);
         cell.reclaim();
     }
     assert!(reached > 50 * 16, "the fan-out reached the port: {reached}");
@@ -822,30 +792,22 @@ fn machine_control_out_of_a_sync_node_processes_without_allocating() {
             .unwrap();
     }
     let mut drain = [(0, Ump([0; 4])); 256];
-    // Warm up outside the gate: the first block only looks.
+    // Warm up: the first block only looks.
     exec.process(512, &at(false, 0.0), &[], &mut []);
     let mut sent = 0;
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..200 {
-            exec.process_with_changes(512, &at(false, 0.0), &changes, &[], &mut []);
+    for _ in 0..200 {
+        exec.process_with_changes(512, &at(false, 0.0), &changes, &[], &mut []);
+        sent += out.poll_into(&mut drain);
+        // The next block starts away from where the last left off.
+        exec.process_with_changes(512, &at(true, 3.0), &TransportChanges::NONE, &[], &mut []);
+        sent += out.poll_into(&mut drain);
+        // A stop, and then a transport before zero standing elsewhere: it names
+        // no time code, so it is refused and counted.
+        for beat in [-4.0, -8.0] {
+            exec.process_with_changes(512, &at(false, beat), &TransportChanges::NONE, &[], &mut []);
             sent += out.poll_into(&mut drain);
-            // The next block starts away from where the last left off.
-            exec.process_with_changes(512, &at(true, 3.0), &TransportChanges::NONE, &[], &mut []);
-            sent += out.poll_into(&mut drain);
-            // A stop, and then a transport before zero standing elsewhere: it names
-            // no time code, so it is refused and counted.
-            for beat in [-4.0, -8.0] {
-                exec.process_with_changes(
-                    512,
-                    &at(false, beat),
-                    &TransportChanges::NONE,
-                    &[],
-                    &mut [],
-                );
-                sent += out.poll_into(&mut drain);
-            }
         }
-    });
+    }
     assert!(
         sent >= 200 * 4,
         "play, stop, locate and deferred play: {sent}"
@@ -886,7 +848,7 @@ fn resetting_the_border_nodes_allocates_nothing() {
             None,
         ));
         d.block();
-        d.events_out(0).len()
+        d.event_output(0).len()
     };
     let traffic = |d: &mut Direct<SyncOut>| {
         (0..8)

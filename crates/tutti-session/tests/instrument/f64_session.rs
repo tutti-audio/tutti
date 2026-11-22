@@ -145,7 +145,7 @@ fn an_f64_general_midi_rig_is_silent_then_renders_a_finite_note() {
             .graph()
             .set_sources(
                 MainOutput::channel(channel),
-                [OutputPort::new(gm.out(), channel)],
+                [OutputPort::new(gm.output(), channel)],
             )
             .unwrap();
     }
