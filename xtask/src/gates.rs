@@ -518,6 +518,18 @@ fn midi_doc_inventory(root: &Path, repo: &RealTree, doc: &midi_spec::Doc) -> Res
     write_regenerated(root, &path, regen, texts, items.len())
 }
 
+/// Write `xtask/building-baseline.txt` with its stale rows deleted.
+pub(crate) fn prune_building(root: &Path) -> Result<(), String> {
+    let tree = RealTree {
+        root: root.to_path_buf(),
+    };
+    let (text, removed) = building::pruned(&tree, building::ALLOW, building::MIN_SITES)?;
+    let file = root.join(building::LIST);
+    fs::write(&file, text).map_err(|e| format!("cannot write {}: {e}", file.display()))?;
+    println!("wrote {}: {removed} stale rows deleted", building::LIST);
+    Ok(())
+}
+
 fn clap_inventory(root: &Path) -> Result<(), String> {
     let repo = RealTree {
         root: root.to_path_buf(),

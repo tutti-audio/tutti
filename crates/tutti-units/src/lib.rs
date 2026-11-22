@@ -105,6 +105,9 @@ mod ranged;
 mod real;
 
 mod bars;
+mod blocks;
+mod calls;
+mod chunks;
 mod frame;
 mod latency;
 mod losses;
@@ -116,6 +119,9 @@ mod text;
 mod unit_param;
 
 pub use bars::{BarCount, BarNumber};
+pub use blocks::Blocks;
+pub use calls::Calls;
+pub use chunks::Chunks;
 pub use frame::{At, Frame, Moment};
 pub use latency::Latency;
 pub use losses::Losses;

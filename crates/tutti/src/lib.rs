@@ -459,7 +459,7 @@ pub mod types {
         Speed, SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail,
         TimecodeFrames, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
     };
-    pub use tutti_units::{Phase, Quantity, Real, Resyncs};
+    pub use tutti_units::{Blocks, Calls, Chunks, Phase, Quantity, Real, Resyncs};
 }
 
 /// The project's tempo (`tutti-tempo`): `TempoMap`, the points and builder it is
