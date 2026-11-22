@@ -97,8 +97,9 @@ pub use ratios::{
 };
 pub use time::{Hz, SampleRate, SampleRateOutOfRange, Seconds, TimecodeFrames};
 pub use transport::{
-    Beat, BeatDuration, BeatsPerCycle, BeatsPerCycleOutOfRange, Bpm, BpmOutOfRange, PlaybackRate,
-    PlaybackRateOutOfRange, ReadRate, SamplePosition, SrcRatio, StretchFactor,
+    Beat, BeatDuration, BeatsPerCycle, BeatsPerCycleOutOfRange, Bpm, BpmOutOfRange, FramesPerBeat,
+    FramesPerBeatOutOfRange, PlaybackRate, PlaybackRateOutOfRange, ReadRate, SamplePosition,
+    SrcRatio, StretchFactor,
 };
 
 /// Marker trait implemented by every unit newtype.

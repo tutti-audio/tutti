@@ -144,15 +144,15 @@ impl<F: Float> Editor<F> {
         }
     }
 
-    /// Sets edge `id`'s declick fade ([`EdgeFade`]). A control, like the base:
-    /// it stores into the lane's cell and the spec's entry and marks nothing for
+    /// Sets edge `id`'s declick fade ([`EdgeFade`]). A value, like the base:
+    /// it stores into the table and the lane's cell and marks nothing for
     /// commit, and the executor reads it at the start of a block. An edge with
     /// no entry gets one (unity, the default range), which is structural.
     ///
     /// The fade is the lane's: it starts when the kind the lane reads is not
     /// the one it last acted on, and its end is reported through
-    /// [`finish_fades`](Self::finish_fades), which finishes it in the spec
-    /// (an `Out` edge is removed, an `In` one forgets the fade). A host that
+    /// [`finish_fades`](Self::finish_fades), which finishes it (an `Out` edge
+    /// leaves the spec, an `In` one forgets the fade). A host that
     /// never sets one never has a fade.
     ///
     /// # Errors
@@ -164,16 +164,9 @@ impl<F: Float> Editor<F> {
         self.check_gain_edge(id)?;
         self.touch();
         self.declare_lane(id);
-        if let Some(g) = self.spec.gains.get_mut(&id) {
-            g.fade = fade;
-        }
+        self.values.set_fade(id, fade);
         if let Some(cell) = self.cells.gains.get(id) {
             cell.store_fade(fade);
-        }
-        if let Some(c) = self.life.committed_mut()
-            && let Some(g) = c.spec.gains.get_mut(&id)
-        {
-            g.fade = fade;
         }
         Ok(())
     }
@@ -264,7 +257,13 @@ impl<F: Float> Editor<F> {
 
     fn settle_edge(&mut self, id: EdgeId, kind: EdgeFade) -> bool {
         if self.spec.has_edge(id) {
-            let Some(g) = self.spec.gains.get(&id).copied().filter(|g| g.fade == kind) else {
+            let Some(g) = self
+                .spec
+                .gains
+                .get(&id)
+                .copied()
+                .filter(|_| self.values.fade(id) == kind)
+            else {
                 return false;
             };
             return match kind {
@@ -283,13 +282,7 @@ impl<F: Float> Editor<F> {
                         self.spec.clear_edge_gain(id);
                         self.values.forget_edge(id);
                     } else {
-                        self.spec.set_edge_gain(
-                            id,
-                            EdgeGain {
-                                fade: EdgeFade::None,
-                                ..g
-                            },
-                        );
+                        self.values.set_fade(id, EdgeFade::None);
                     }
                     true
                 }
@@ -548,6 +541,13 @@ impl<F: Float> Editor<F> {
                 .get(id)
                 .map_or_else(|| self.values.base(id), GainCell::load),
         )
+    }
+
+    /// Edge `id`'s declick fade ([`EdgeFade`]), if the edge has an entry: what
+    /// [`set_edge_fade`](Self::set_edge_fade) set, [`EdgeFade::None`] before.
+    pub fn edge_fade(&self, id: EdgeId) -> Option<EdgeFade> {
+        self.spec.gains.get(&id)?;
+        Some(self.values.fade(id))
     }
 
     /// Edge `id`'s range, if the edge has an entry: what

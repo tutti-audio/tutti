@@ -945,7 +945,12 @@ impl<F: Float> Editor<F> {
         let live = lowered.as_ref().map_or_else(|| self.spec(), |l| &l.spec);
         // A fork starts steady: a declick fade the live graph is in the middle
         // of is over in it (an edge fading out is gone).
-        let settled = live.settled();
+        let settled = live.settled(|id| {
+            lowered
+                .as_ref()
+                .and_then(|l| l.fades.get(&id).copied())
+                .unwrap_or_else(|| self.values().fade(id))
+        });
         let live = settled.as_ref().unwrap_or(live);
         let (keys, outputs) = match target {
             // What the main outputs hear, and nothing else: a node no

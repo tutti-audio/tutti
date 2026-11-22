@@ -154,9 +154,9 @@ impl GainCells {
 
     fn sync(&self, spec: &GraphSpec, values: &GraphValues) {
         for (id, cell) in &self.0 {
-            if let Some(g) = spec.gains.get(id) {
+            if spec.gains.contains_key(id) {
                 cell.store_range(values.gain_range(*id));
-                cell.store_fade(g.fade);
+                cell.store_fade(values.fade(*id));
             }
         }
     }
@@ -182,7 +182,11 @@ impl GainCells {
                     cell.store_fade(fade);
                     return (id, cell);
                 }
-                let fade = spec.gains.get(&id).map_or(EdgeFade::None, |g| g.fade);
+                let fade = if spec.gains.contains_key(&id) {
+                    values.fade(id)
+                } else {
+                    EdgeFade::None
+                };
                 let range = values.gain_range(id);
                 let cell = self
                     .0
