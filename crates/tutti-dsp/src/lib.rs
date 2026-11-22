@@ -155,7 +155,7 @@
 //! - **Mel bank, DCT-II and MFCC** (`mel.rs`, `dct.rs`, `mfcc.rs`): [`MelFilterbank`]
 //!   (from a [`MelConfig`], in a [`MelScale`] and [`MelNorm`]), the orthonormal [`Dct2`], and
 //!   [`Mfcc`], the cepstral coefficients of one magnitude spectrum.
-//! - **Sequence decoding** (`viterbi.rs`, `beat.rs`, `sequence.rs`): [`viterbi`] over a [`Transition`] ([`StickyTransition`], [`BandedTransition`]), and [`sticky_viterbi`], the best
+//! - **Sequence decoding** (`viterbi.rs`, `beat.rs`, `sequence.rs`): [`viterbi()`] over a [`Transition`] ([`StickyTransition`], [`BandedTransition`]), and [`sticky_viterbi`], the best
 //!   state path when every switch costs the same; [`track_beat_frames`], beat placement by
 //!   dynamic programming over a novelty curve (Ellis, 2007); the [`median`] of a set and the
 //!   [`local_maxima`] of a curve.

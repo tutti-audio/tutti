@@ -172,7 +172,7 @@ impl PyinConfig {
             max: MAX_BINS,
         };
         let half_width = (self.transition_width.get() / BIN.get()) as u16;
-        let switch = f64::from(self.switch.get());
+        let switch = self.switch.get();
         let transition = u16::try_from(bins)
             .ok()
             .and_then(|pitches| {
@@ -257,7 +257,7 @@ pub fn pyin_track<S: Sample>(
     let frames = Framing::new(frame, hop.get()).frames_for(Samples::new(samples.len()));
     check_frame_count(frames, MAX_FRAMES)?;
 
-    let weights = threshold_weights(f64::from(cfg.threshold_mean.get()));
+    let weights = threshold_weights(cfg.threshold_mean.get());
     let lowest = cfg.band.min().get();
     let mut detector = plan.detector();
     let mut voiced = Vec::with_capacity(frames.get());

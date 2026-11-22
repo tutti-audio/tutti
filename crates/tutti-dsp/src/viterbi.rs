@@ -2,7 +2,7 @@
 //!
 //! The best state path through a sequence of frames, where each frame scores
 //! every state by an emission and a [`Transition`] scores each move between
-//! frames. [`viterbi`] owns the search (the back pointers, the per-frame
+//! frames. [`viterbi()`] owns the search (the back pointers, the per-frame
 //! shift of scores, the trace back); a model owns only how a frame's scores
 //! turn into the best way into each state. Two models ship:
 //!
@@ -71,7 +71,7 @@ pub fn viterbi<F: Float, T: Transition<F>>(
             best = best.max(score[s]);
         }
         for s in &mut score {
-            *s = *s - best;
+            *s -= best;
         }
     }
 
@@ -174,14 +174,18 @@ impl<F: Float> BandedTransition<F> {
         switch: F,
     ) -> Option<Self> {
         pitches.checked_mul(layers)?;
-        let weight = |d: u16| F::from_f64(f64::from(half_width + 1 - d));
-        let log_weight: Vec<F> = (0..=half_width).map(|d| weight(d).ln()).collect();
+        // The weights `1, 2, .. half_width + 1` from the widest distance in.
+        let mut weight = vec![F::ONE; usize::from(half_width) + 1];
+        for d in (0..usize::from(half_width)).rev() {
+            weight[d] = weight[d + 1] + F::ONE;
+        }
+        let log_weight: Vec<F> = weight.iter().map(|w| w.ln()).collect();
         let log_norm = (0..pitches)
             .map(|p| {
                 let lo = p.saturating_sub(half_width);
                 let hi = p.saturating_add(half_width).min(pitches - 1);
                 (lo..=hi)
-                    .map(|q| weight(p.abs_diff(q)))
+                    .map(|q| weight[usize::from(p.abs_diff(q))])
                     .fold(F::ZERO, |a, b| a + b)
                     .ln()
             })
@@ -250,7 +254,7 @@ impl<F: Float> Transition<F> for BandedTransition<F> {
     }
 }
 
-/// [`viterbi`] under a [`StickyTransition`]: the best state path over `frames`
+/// [`viterbi()`] under a [`StickyTransition`]: the best state path over `frames`
 /// frames of `states` states, as one state per frame.
 ///
 /// `emission(frame, row)` fills `row` (`states` long) with the score of each
