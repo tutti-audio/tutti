@@ -21,7 +21,7 @@ use tutti_units::{Beat, Bpm, Frame, Samples};
 
 use super::mock_server::{
     BEATS_PER_FRAME_120, CHUNK, PARAMS, Record, ReplyGate, SR, STEP_BEAT, STEP_FRAME, Said, at,
-    beat_at, new_node, rig, rig_gated, rig_unlisted, served, tempo,
+    beat_at, fork_node, new_node, rig, rig_gated, rig_unlisted, served, tempo,
 };
 
 use tutti_ump::{Message, NoteNumber, NoteVelocity, U7, Voice2};
@@ -669,4 +669,35 @@ fn a_server_that_does_not_list_its_parameters_fails_the_load() {
         matches!(err, tutti_plugin_types::IpcError::ParametersUnlisted),
         "got {err:?}"
     );
+}
+
+/// **A served fork's wait is its node's prepare and nothing else.** A fork
+/// prepared realtime does not wait. The plugin told offline through the handle
+/// (its own render mode) does not make the wait arm, in a realtime graph or
+/// after a realtime re-prepare; an offline prepare arms it whether or not the
+/// plugin was told offline first (the node's mode may already read offline, so
+/// a guard that skipped an unchanged mode would leave it unarmed); the next
+/// realtime prepare disarms it again.
+#[test]
+fn a_served_forks_wait_is_its_nodes_prepare_and_nothing_else() {
+    use tutti_graph::{Prepare, RenderMode};
+    let _machine = machine_lock();
+    let mut fork = fork_node(rig(), tempo(STEP_BEAT), RenderMode::Realtime);
+    let prepare = |mode| {
+        Prepare::new(SR, tutti_buffers::MaxBlock::of(Samples::new(CHUNK))).with_render_mode(mode)
+    };
+    assert!(!fork.wait.armed(), "a realtime prepare does not arm it");
+
+    assert!(fork.any_thread.set_render_mode(RenderMode::Offline));
+    assert!(
+        !fork.wait.armed(),
+        "telling the plugin offline is not the wait"
+    );
+    fork.unit.node.prepare(&prepare(RenderMode::Realtime));
+    assert!(!fork.wait.armed(), "nor does a realtime re-prepare arm it");
+
+    fork.unit.node.prepare(&prepare(RenderMode::Offline));
+    assert!(fork.wait.armed(), "an offline prepare arms it");
+    fork.unit.node.prepare(&prepare(RenderMode::Realtime));
+    assert!(!fork.wait.armed(), "and a realtime one disarms it");
 }

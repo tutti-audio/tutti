@@ -11,9 +11,9 @@ use tutti_rt::Mutex;
 use tutti_buffers::FloatWidth;
 use tutti_fixtures::{machine_lock, main_thread};
 use tutti_plugin_types::{
-    ChannelLayout, Control, Controller, EditorError, Loaded, MaxBlock, ParamAccess, ParameterInfo,
-    PluginBus, PluginClass, PluginDescriptor, PluginWiring, Prepare, Processor, Reopen, Request,
-    SampleRate, Samples,
+    AnyThread, ChannelLayout, Control, Controller, EditorError, Loaded, MaxBlock, ParamAccess,
+    ParameterInfo, PluginBus, PluginClass, PluginDescriptor, PluginWiring, Prepare, Processor,
+    RenderMode, Reopen, Request, SampleRate, Samples,
 };
 use tutti_units::ParamId;
 
@@ -388,6 +388,10 @@ fn mock_with(
                 },
                 ControlRequest::GetParameter { .. } => {
                     reply_control(&served, id, &ControlReply::ParameterValue { value: None })
+                }
+                // The settle's fence (a retune of a watched fork).
+                ControlRequest::GetCurrentPreset => {
+                    reply_control(&served, id, &ControlReply::CurrentPreset { id: None })
                 }
                 ControlRequest::GetParameterList
                     if !listing.load(std::sync::atomic::Ordering::Relaxed) =>
@@ -1058,6 +1062,12 @@ fn a_client_with_a_loader_sends_no_editor_message() {
 
 /// Renders one block of `frames` silent frames through `processor`.
 fn render_silence(processor: &mut IpcProcessor, frames: usize) {
+    render_silence_as(processor, frames, false);
+}
+
+/// [`render_silence`], the block inside the audio thread's scope when
+/// `in_scope` (where a lock, an allocation or a wait panics in a debug build).
+fn render_silence_as(processor: &mut IpcProcessor, frames: usize, in_scope: bool) {
     use tutti_buffers::InputOutput;
     use tutti_plugin_types::{PluginIo, ProcessContext, ProcessOutput};
     let input = vec![vec![0.0f32; frames]; 2];
@@ -1076,6 +1086,7 @@ fn render_silence(processor: &mut IpcProcessor, frames: usize) {
         ctx: &ctx,
         out: &mut out,
     };
+    let _scope = in_scope.then(tutti_rt::RtScope::enter);
     processor.process(&mut io).expect("the block renders");
 }
 
@@ -1170,6 +1181,95 @@ fn render_chunks(processor: &mut IpcProcessor, server: &Mock, chunks: usize) {
     }
 }
 
+/// The graph's prepare for an offline render, as the node makes it: the one
+/// thing that arms a watched fork's wait.
+fn prepare_offline(switch: &tutti_plugin_types::WaitSwitch) {
+    switch.arm(true);
+}
+
+/// **A fork waits for a chunk only while its node's prepare has armed the
+/// wait.** A watched fork whose graph is prepared for realtime renders chunks
+/// the server never answers without waiting for one, inside a realtime scope
+/// (where taking the wait's lock panics in a debug build) and without giving
+/// up. Armed by an offline prepare it waits and gives up at the budget; once
+/// the switch is disarmed again it stops waiting.
+#[test]
+fn a_fork_waits_for_a_chunk_only_when_its_graph_is_prepared_offline() {
+    let _machine = machine_lock();
+    let (mut ipc, server) = mock();
+    let (wait, switch) = ipc.watch();
+    let (mut processor, _controller) = activate(ipc, 32);
+
+    assert!(!wait.armed(), "a fork not prepared offline does not wait");
+    for _ in 0..3 {
+        render_silence_as(&mut processor, 32, true);
+    }
+    assert!(!wait.gave_up(), "a realtime fork never waited for a chunk");
+
+    prepare_offline(&switch);
+    render_chunks(&mut processor, &server, 2);
+    assert!(
+        wait.gave_up(),
+        "an offline fork waits, and misses its budget"
+    );
+
+    switch.arm(false);
+    assert!(!wait.armed(), "a realtime prepare disarms it again");
+}
+
+/// **A realtime re-prepare while the Processor is away disarms a wait an
+/// offline prepare armed.** The node's prepare writes the switch with no
+/// Processor involved (no `retune`): the chunks the Processor renders
+/// afterwards, inside the audio thread's scope, do not wait.
+#[test]
+fn a_realtime_reprepare_with_the_processor_away_stops_the_wait() {
+    let _machine = machine_lock();
+    let (mut ipc, _server) = mock();
+    let (wait, switch) = ipc.watch();
+    let (mut processor, _controller) = activate(ipc, 32);
+    prepare_offline(&switch);
+    assert!(wait.armed());
+    switch.arm(false);
+    for _ in 0..3 {
+        render_silence_as(&mut processor, 32, true);
+    }
+    assert!(!wait.gave_up(), "no chunk was waited for");
+}
+
+/// **Telling the plugin it renders offline never arms the wait.** The render
+/// mode is the plugin's own setting (an app sets it through the handle); the
+/// wait is the node's, armed only by an offline prepare. A fork whose graph is
+/// prepared for realtime, told `Offline` through the handle's `AnyThread` and
+/// through `Control`, still renders inside the audio thread's scope without
+/// waiting and never gives up, while the server hears the mode.
+#[test]
+fn telling_a_fork_offline_does_not_make_its_realtime_graph_wait() {
+    let _machine = machine_lock();
+    let (mut ipc, server) = mock();
+    let (wait, _switch) = ipc.watch();
+    let (mut processor, mut controller) = activate(ipc, 32);
+    assert!(AnyThread::set_render_mode(&controller, RenderMode::Offline));
+    assert!(Control::set_render_mode(
+        &mut controller,
+        main_thread(),
+        RenderMode::Offline
+    ));
+    assert!(!wait.armed(), "a render mode is not the wait");
+    for _ in 0..3 {
+        render_silence_as(&mut processor, 32, true);
+    }
+    assert!(!wait.gave_up(), "no chunk was waited for");
+    assert!(
+        server.wait_for(|log| log.iter().any(|m| matches!(
+            m,
+            Sent::Control(ControlRequest::SetRenderMode {
+                mode: RenderMode::Offline
+            })
+        ))),
+        "the plugin was told offline all the same"
+    );
+}
+
 /// **A server that never replies costs an offline fork one budget, however
 /// many chunks the render still submits.** The bridge thread waits the fork's
 /// budget for a reply while the fork waits on it; once the fork gives up it
@@ -1181,8 +1281,9 @@ fn a_silent_server_holds_the_bridge_for_one_budget_not_one_per_chunk() {
     let _machine = machine_lock();
     let (mut ipc, server) = mock();
     let bridge = Arc::clone(ipc.bridge());
-    let wait = ipc.watch(true);
+    let (wait, switch) = ipc.watch();
     let (mut processor, _controller) = activate(ipc, 32);
+    prepare_offline(&switch);
     render_chunks(&mut processor, &server, 2);
     assert!(
         wait.gave_up(),
@@ -1207,8 +1308,9 @@ fn a_reactivation_after_a_give_up_does_not_wait_the_budget_again() {
     let main = main_thread();
     let (mut ipc, server) = mock();
     let bridge = Arc::clone(ipc.bridge());
-    let wait = ipc.watch(true);
+    let (wait, switch) = ipc.watch();
     let (mut processor, controller) = activate(ipc, 32);
+    prepare_offline(&switch);
     render_chunks(&mut processor, &server, 2);
     assert!(
         wait.gave_up(),

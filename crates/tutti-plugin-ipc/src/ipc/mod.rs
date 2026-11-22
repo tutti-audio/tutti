@@ -57,7 +57,7 @@ use tutti_plugin_types::{
     ParamWriteError, ParameterChanges, ParameterQueue, PluginDescriptor, PluginError, PluginFormat,
     PluginRef, PluginResult, PluginTail, PluginWiring, Prepare, PresetId, ProcessWake, Refused,
     Reopen, Request, RestartRules, ResyncKind, SampleRate, Samples, StateError, StateUse, Stuck,
-    Widths,
+    WaitSwitch, Widths,
 };
 use tutti_rt::AtomicSampleRate;
 use tutti_units::ParamId;
@@ -426,8 +426,6 @@ impl Link {
 #[derive(Clone)]
 pub(crate) struct Watch {
     pub(crate) wait: Arc<OfflineWait>,
-    /// The pipeline waits for each chunk, up to the wait's budget.
-    pub(crate) offline: bool,
 }
 
 /// A served plugin that is configured and not rendering.
@@ -686,27 +684,33 @@ impl Ipc {
     }
 
     /// Watches this plugin as a fork: the returned [`OfflineWait`] holds what
-    /// the pipeline latches (when `offline`, which makes it wait for each
-    /// chunk, up to the configuration's timeout: the offline mode of a forked
-    /// instance) and the latency the
-    /// fork's graph is planned against. Either way, a retune settles the
-    /// server's queued rate and mode changes and records that latency
-    /// (`IpcProcessor::retune`), live as offline: the health reports a later
-    /// move as a fault. Call before [`activate`](Loaded::activate).
-    pub fn watch(&mut self, offline: bool) -> Arc<OfflineWait> {
-        let wait = Arc::new(OfflineWait::new(
+    /// the pipeline latches and the latency the fork's graph is planned
+    /// against. A retune settles the server's queued rate and mode changes and
+    /// records that latency (`IpcProcessor::retune`), live as offline: the
+    /// health reports a later move as a fault.
+    ///
+    /// The pipeline waits for each chunk, up to the configuration's timeout,
+    /// only while the wait is armed, and the [`WaitSwitch`] returned beside it
+    /// is the only writer: the one the fork's node owns, which its `prepare`
+    /// writes (armed for a graph prepared offline, the offline mode of a forked
+    /// instance, and disarmed otherwise, so the audio thread of a realtime
+    /// graph never blocks). The wait only reads it, so nothing that holds the
+    /// wait can arm it. The plugin's own render mode is separate: telling it
+    /// offline arms nothing. Call before [`activate`](Loaded::activate).
+    pub fn watch(&mut self) -> (Arc<OfflineWait>, WaitSwitch) {
+        let (wait, switch) = OfflineWait::new(
             self.link.timeout,
             Arc::clone(self.link.bridge.audio().watch()),
-        ));
+        );
+        let wait = Arc::new(wait);
         self.link
             .bridge
             .audio()
             .offer_refusals_to(Arc::clone(&wait));
         *self.link.wait.lock() = Some(Watch {
             wait: Arc::clone(&wait),
-            offline,
         });
-        wait
+        (wait, switch)
     }
 
     /// Sends every event the bridge's thread reports (a latency change, a
@@ -929,15 +933,11 @@ impl Ipc {
         .starting_at(next_seq)
         .with_counters(Arc::clone(&link.counters));
         batcher.prepare(Samples::new(prepare.max_block().get()), None);
-        if let Some(Watch {
-            wait,
-            offline: true,
-        }) = link.watch()
-        {
+        if let Some(Watch { wait }) = link.watch() {
             // A wait already latched (a reactivation after a give-up or a
             // death) stays on the live bound: the batcher collects at once, and
             // the bridge must not hold one budget per chunk for a server that
-            // did not answer.
+            // did not answer. Unarmed, it waits for nothing.
             link.bridge.audio().set_reply_wait(wait.reply_wait());
             batcher.set_offline_wait(wait);
         } else {
