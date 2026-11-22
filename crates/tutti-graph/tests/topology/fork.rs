@@ -1010,12 +1010,12 @@ fn a_main_output_fork_holds_only_what_the_outputs_reach() {
 /// Where a [`Witness`]'s fork was built, prepared and dropped, by thread.
 #[derive(Default)]
 struct Threads {
-    built: std::sync::Mutex<Vec<std::thread::ThreadId>>,
-    prepared: std::sync::Mutex<Vec<std::thread::ThreadId>>,
-    dropped: std::sync::Mutex<Vec<std::thread::ThreadId>>,
+    built: tutti_fixtures::Record<std::thread::ThreadId>,
+    prepared: tutti_fixtures::Record<std::thread::ThreadId>,
+    dropped: tutti_fixtures::Record<std::thread::ThreadId>,
 }
 
-fn here(at: &std::sync::Mutex<Vec<std::thread::ThreadId>>) {
+fn here(at: &tutti_fixtures::Record<std::thread::ThreadId>) {
     at.lock().unwrap().push(std::thread::current().id());
 }
 
@@ -1229,7 +1229,7 @@ fn each_source_builds_and_prepares_where_its_gather_says() {
     .expect("the build thread");
     assert_ne!(gatherer, builder);
 
-    let one = |at: &std::sync::Mutex<Vec<std::thread::ThreadId>>| {
+    let one = |at: &tutti_fixtures::Record<std::thread::ThreadId>| {
         let at = at.lock().unwrap();
         assert_eq!(at.len(), 1, "once: {at:?}");
         at[0]
@@ -1295,7 +1295,7 @@ fn a_failing_build_names_its_key_and_hands_back_what_it_built() {
     assert!(!remains.is_empty());
     drop(remains);
     assert_eq!(
-        *pinned.dropped.lock().unwrap(),
+        pinned.dropped.lock().unwrap().as_slice(),
         [std::thread::current().id()],
         "the pinned unit drops with the remains, here"
     );
@@ -1334,7 +1334,7 @@ fn a_pinned_unit_is_not_dropped_on_a_worker_that_panics() {
     .join();
     assert!(joined.is_err(), "the build panicked");
     let worker = rx.recv().unwrap();
-    let dropped = pinned.dropped.lock().unwrap().clone();
+    let dropped = pinned.dropped.lock().unwrap().to_vec();
     assert!(
         !dropped.contains(&worker),
         "the pinned unit was dropped on the panicking worker {worker:?}: {dropped:?}"
@@ -1409,7 +1409,7 @@ fn a_build_whose_commit_fails_hands_back_the_graph() {
     assert!(!remains.is_empty());
     drop(remains);
     assert_eq!(
-        *pinned.dropped.lock().unwrap(),
+        pinned.dropped.lock().unwrap().as_slice(),
         [std::thread::current().id()],
         "the pinned unit drops with the remains, here"
     );

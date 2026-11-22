@@ -6,9 +6,9 @@
 
 use std::any::Any;
 use std::io::{Read, Seek, SeekFrom};
-use std::sync::{Mutex, PoisonError};
 use tutti_buffers::{I24, Planes, Sample, SampleFormat, Wave};
 use tutti_platform::Asset;
+use tutti_rt::Exclusive;
 use tutti_units::{SampleRate, Samples};
 
 use symphonia::core::audio::sample::{SampleFormat as FileFormat, i24};
@@ -216,7 +216,7 @@ pub(super) fn total_frames_of(track: &Track, params: &AudioCodecParameters) -> O
 /// [`read_wave_metadata`] stop here, [`read_wave`] decodes on from it.
 ///
 /// symphonia's [`MediaSource`] is `Sync`; a reader that is only `Send` is made
-/// so by a [`Mutex`] that is never locked (it is reached through `get_mut`).
+/// so by an [`Exclusive`], which is reached only through `&mut`.
 pub(super) fn probe_asset(asset: &Asset) -> Result<Box<dyn FormatReader>, Error> {
     let mut hint = Hint::new();
     if let Some(extension) = asset.extension() {
@@ -231,7 +231,7 @@ pub(super) fn probe_asset(asset: &Asset) -> Result<Box<dyn FormatReader>, Error>
         .seek(SeekFrom::Start(start))
         .map_err(Error::IoError)?;
     let source = Reader {
-        reader: Mutex::new(reader),
+        reader: Exclusive::new(reader),
         len,
     };
     probe_source(Box::new(source), &hint)
@@ -239,16 +239,14 @@ pub(super) fn probe_asset(asset: &Asset) -> Result<Box<dyn FormatReader>, Error>
 
 /// A `Read + Seek + Send` source as a [`MediaSource`].
 struct Reader<R> {
-    reader: Mutex<R>,
+    reader: Exclusive<R>,
     /// The source's length in bytes.
     len: u64,
 }
 
 impl<R> Reader<R> {
     fn get(&mut self) -> &mut R {
-        self.reader
-            .get_mut()
-            .unwrap_or_else(PoisonError::into_inner)
+        self.reader.get_mut()
     }
 }
 
