@@ -20,7 +20,7 @@ impl Region {
     }
 }
 
-/// Sanitizer error reporting off until drop.
+/// Sanitizer error reporting off until drop. The sanitizer counts its depth, so it nests.
 pub(super) struct Quiet(ScopedDisabler);
 
 impl Quiet {

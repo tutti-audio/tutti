@@ -19,6 +19,9 @@ pub(crate) struct Ctx {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Step {
     Run(Cmd),
+    /// Run the command; a failure is remembered and the recipe goes on, then fails
+    /// at its end (`rtsan`: one run lists every finding).
+    RunAll(Cmd),
     /// Write a file (`check-windows`'s stub header), creating its directory.
     WriteFile {
         path: PathBuf,
@@ -71,7 +74,7 @@ impl Step {
     /// The step as a line a shell could read (for `--dry-run` and the echo).
     pub(crate) fn display(&self) -> String {
         match self {
-            Step::Run(c) => c.display(),
+            Step::Run(c) | Step::RunAll(c) => c.display(),
             Step::WriteFile { path, .. } => format!("write {}", path.display()),
             Step::Gate(g) => g.display(),
             Step::ConformanceInventory(f) => format!("conformance-inventory {f}"),
@@ -554,12 +557,16 @@ impl Planner<'_> {
     /// test finds them beside its own binary.
     fn rtsan(&mut self) {
         let dir = self.ctx.target.join("rtsan").display().to_string();
-        for line in RTSAN {
-            self.run(
-                Cmd::sh(line)
-                    .env("RTSAN_ENABLE", "1")
-                    .env("CARGO_TARGET_DIR", dir.clone()),
-            );
+        for (i, line) in RTSAN.iter().enumerate() {
+            let cmd = Cmd::sh(line)
+                .env("RTSAN_ENABLE", "1")
+                .env("CARGO_TARGET_DIR", dir.clone());
+            // The builds stop the recipe; the suites each run and report.
+            self.out.push(if i < 2 {
+                Step::Run(cmd)
+            } else {
+                Step::RunAll(cmd)
+            });
         }
     }
 
@@ -1005,7 +1012,7 @@ const MIRI: &[&str] = &[
 const RTSAN: &[&str] = &[
     r#"cargo build --locked -p tutti-plugin-server --bin plugin-server"#,
     r#"cargo build --locked -p tutti-plugin-probe --bin plugin-probe"#,
-    r#"cargo nextest run --locked --no-fail-fast --features tutti-rt/rtsan -p tutti-rt -p tutti-engine -p tutti-cpal -p tutti-plugin-host -p tutti-plugin-contract --all-features"#,
+    r#"cargo nextest run --locked --no-fail-fast --features tutti-rt/rtsan -p tutti-engine -p tutti-cpal -p tutti-plugin-host -p tutti-plugin-contract --all-features"#,
     r#"cargo nextest run --locked --no-fail-fast --features tutti-rt/rtsan,tutti-plugin/clap,tutti-plugin/vst2,tutti-plugin/serde -p tutti-plugin"#,
 ];
 

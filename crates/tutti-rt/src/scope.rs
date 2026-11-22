@@ -139,6 +139,18 @@ impl RtScope {
     }
 }
 
+/// Runs `wake`, a call that unparks a thread, with the sanitizer's reporting off.
+///
+/// A wake never waits: the futex wake it makes is a syscall that returns at once,
+/// and the doorbells and the worker pool wake from the audio thread by design. The
+/// sanitizer flags every syscall in a region, so it is told this one is sanctioned.
+/// Nothing that waits, locks or allocates goes through here. Without the `rtsan`
+/// feature this is `wake()`.
+pub(crate) fn sanctioned_wake<R>(wake: impl FnOnce() -> R) -> R {
+    let _sanctioned = region::Quiet::new();
+    wake()
+}
+
 impl Drop for RtScopeGuard {
     fn drop(&mut self) {
         DEPTH.with(|d| d.set(d.get() - 1));
