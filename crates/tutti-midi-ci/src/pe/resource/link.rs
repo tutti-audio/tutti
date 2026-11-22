@@ -3,7 +3,8 @@
 use super::super::limits::{PropertyName, ResourceId, ResourceName};
 use super::super::tree::{PeJson, PeObject};
 use super::fields::{
-    Fields, PeDataError, PeDataFault, PeExtensions, RoleName, UnlistedText, boolean, text,
+    Fields, InvalidValue, PeDataError, PeDataFault, PeExtensions, RoleName, UnlistedText, boolean,
+    text,
 };
 use super::kind::PeResource;
 
@@ -234,7 +235,13 @@ impl PeLink {
             None => None,
             Some("cluster") => Some(LinkRole::Cluster),
             Some("simpleAction") => Some(LinkRole::Simple(read_simple(&mut f)?)),
-            Some("selectorAction") => Some(LinkRole::Selector(read_selector(&mut f)?)),
+            Some("selectorAction") => {
+                // The options of a selector are a List Resource (§13.1.2).
+                if !resource.is_list() {
+                    return Err(f.invalid("resource", InvalidValue::NotAListResource));
+                }
+                Some(LinkRole::Selector(read_selector(&mut f)?))
+            }
             Some(other) => Some(LinkRole::Other(
                 RoleName::try_from(other).map_err(|e| f.invalid("role", e))?,
             )),

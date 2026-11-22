@@ -92,7 +92,7 @@ impl PeDeviceInfo {
             version,
             serial_number,
             links,
-            extensions: f.finish()?,
+            extensions: f.finish_unrestricted()?,
         })
     }
 }
