@@ -50,7 +50,6 @@ impl<F: Float> Editor<F> {
             node: mut unit,
             controls,
             fork,
-            ..
         } = node.into_parts();
         let wake = Wake::new();
         unit.bind_wake(wake.clone());
@@ -179,7 +178,6 @@ impl<F: Float> Editor<F> {
             node: mut unit,
             controls,
             fork,
-            ..
         } = node.into_parts();
         let wake = Wake::new();
         unit.bind_wake(wake.clone());
@@ -256,7 +254,6 @@ impl<F: Float> Editor<F> {
             node: mut unit,
             controls,
             fork,
-            ..
         } = node.into_parts();
         let wake = Wake::new();
         unit.bind_wake(wake.clone());

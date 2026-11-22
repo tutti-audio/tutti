@@ -228,7 +228,6 @@ impl<F: Float> GraphBuilder<F> {
             node,
             controls,
             fork,
-            ..
         } = node.into_parts();
         let unit = NodeParts::new(node, (), fork);
         (self.insert(N::kind(), unit), controls)
@@ -1037,7 +1036,6 @@ impl<C, F: Float> Standalone<C, F> {
             node,
             controls,
             fork,
-            ..
         } = node.into_parts();
         let shape = node.shape();
         let mut g = GraphBuilder::<F>::with_format(shape.audio_in(), shape.audio_out());

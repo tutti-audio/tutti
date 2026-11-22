@@ -1513,7 +1513,6 @@ impl<F: Float> Graph<F> {
             node: unit,
             controls,
             fork,
-            ..
         } = self.bound(incoming).into_parts();
         let unit = Unit::<N, F> {
             parts: NodeParts::new(unit, (), fork),
@@ -1634,7 +1633,6 @@ impl<F: Float> Graph<F> {
                     node: unit,
                     controls,
                     fork,
-                    ..
                 } = incoming.into_parts();
                 let fits = self.editor.fade_fits(node, &unit.shape()) == Some(true);
                 let unit = Unit::<N, F> {

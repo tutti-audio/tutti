@@ -267,7 +267,6 @@ fn a_pools_fork_shares_nothing_with_the_live_pool() {
         node: mut live,
         controls: handle,
         fork,
-        ..
     } = pool.into_parts();
     let source = fork.expect("a pool forks");
     live.prepare(&Prepare::new(
