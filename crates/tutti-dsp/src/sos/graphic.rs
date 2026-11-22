@@ -6,7 +6,8 @@ use core::f64::consts::LN_2;
 use tutti_units::{Db, Hz, Q, SampleRate};
 
 use super::{Cookbook, Sos, SosError};
-use crate::Biquad;
+use crate::filter::decay_time;
+use crate::{Biquad, DecayTime, Lti};
 
 /// The ISO 266 preferred third-octave centers, 20 Hz to 20 kHz; the octave bands are every
 /// third from 31.5 Hz.
@@ -145,5 +146,37 @@ impl GraphicBands {
         into.sections.clear();
         into.sections.extend_from_slice(&sections[..self.count()]);
         Ok(())
+    }
+
+    /// A ceiling on the ring-out of the bank over every gain within `+-largest`: the frames
+    /// until `r^n` falls to `floor` plus a time constant (the decay of a single pole), `r`
+    /// the greatest modulus among the sections' poles with every band at `largest` and at
+    /// `-largest`. A bell's poles depend on its own gain alone and their modulus is monotone in
+    /// it, so no gain set within the range has a slower one.
+    ///
+    /// The figure is the slowest pole's, not the cascade's own decay, which falls sooner (the
+    /// modes of a bell have residues of order `alpha`): it errs long.
+    /// [`DecayTime::Unbounded`] for a pole on or past the unit circle.
+    ///
+    /// # Errors
+    ///
+    /// [`SosError::GainOutOfRange`] for `largest` beyond
+    /// [`MAX_GAIN_MAGNITUDE`](super::MAX_GAIN_MAGNITUDE).
+    pub fn decay_ceiling(
+        self,
+        largest: Db,
+        rate: SampleRate,
+        floor: Db,
+    ) -> Result<DecayTime, SosError> {
+        let largest = Db::new(largest.get().abs());
+        let radius = [largest, -largest]
+            .into_iter()
+            .map(|gain| {
+                Ok(self
+                    .design(&[gain; Self::MAX_COUNT], rate)?
+                    .spectral_radius())
+            })
+            .try_fold(0.0f64, |r, radius| radius.map(|x: f64| r.max(x)))?;
+        Ok(decay_time(radius, 1, floor, rate))
     }
 }

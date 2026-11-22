@@ -10,6 +10,18 @@ use crate::design::{along, prewarp};
 use crate::{Complex64, Lerp, SimdLanes};
 use tutti_units::{Db, Hz, Q, SampleRate};
 
+/// A refused [`SvfControls::design`](crate::SvfControls::design): the raw it carries.
+#[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
+#[non_exhaustive]
+pub enum SvfDesignError {
+    /// The `Q` is not finite or is below [`SvfControls::MIN_Q`](crate::SvfControls::MIN_Q).
+    #[error("the Q is {0:?}: it must be finite and at least 0.01")]
+    Q(Q),
+    /// The gain is not finite or is past `+-`[`SvfDesign::MAX_GAIN`].
+    #[error("the gain is {0:?}: it must be finite and within 200 dB either way")]
+    Gain(Db),
+}
+
 /// Which response the state-variable filter presents.
 ///
 /// All eight share one coefficient computation and differ only in the output
@@ -80,48 +92,30 @@ pub struct SvfDesign {
 }
 
 impl SvfDesign {
-    /// The largest gain, in dB either way, [`new`](Self::new) solves for. A
-    /// gain further out is this one: 200 dB is a factor of 10^10 in
+    /// The largest gain, in dB either way, a design solves for: 200 dB is a factor of 10^10 in
     /// amplitude, past anything audible, and keeps every coefficient finite.
+    /// [`SvfControls::design`](crate::SvfControls::design) refuses a gain past it and
+    /// [`design_clamped`](crate::SvfControls::design_clamped) holds it there.
     pub const MAX_GAIN: Db = Db::new(200.0);
 
-    /// Computes SVF filter coefficients from parameters (pure function, no state).
-    ///
-    /// The solve of a control value, which every caller reads at control rate with no one to
-    /// refuse it to: the cutoff is held in `1 Hz` to just under Nyquist (`tan` diverges at it),
-    /// `q` at [`SvfControls::MIN_Q`](crate::SvfControls::MIN_Q) or above, a gain within `+-`[`MAX_GAIN`](Self::MAX_GAIN), and a NaN
-    /// gain is 0 dB.
-    ///
-    /// The three tuning parameters are three different units, and taking them as
-    /// [`Hz`] / [`Q`] / [`Db`] is what keeps them apart. As bare floats they are
-    /// adjacent and interchangeable — the call reads as a run of positional numbers,
-    /// `(LowPass, 1000.0, 0.707, 0.0, 44100.0)`, where transposing any two compiles
-    /// and detunes the filter.
-    pub fn new(
+    /// The coefficients of a `q` and a gain already in range: [`SvfControls::design`](crate::SvfControls::design)
+    /// and [`design_clamped`](crate::SvfControls::design_clamped) are the calls that bring them there.
+    /// The cutoff is held in `1 Hz` to just under Nyquist (`tan` diverges at it), the stability
+    /// bound every design shares. Pure, no state.
+    pub(super) fn solve(
         filter_type: SvfType,
-        freq: impl Into<Hz>,
-        q: impl Into<Q>,
-        gain_db: impl Into<Db>,
-        sample_rate: impl Into<SampleRate>,
-    ) -> SvfDesign {
-        let (freq, q, gain_db) = (freq.into(), q.into().get(), gain_db.into());
-        let sample_rate = sample_rate.into();
+        freq: Hz,
+        q: Q,
+        gain_db: Db,
+        sample_rate: SampleRate,
+    ) -> Self {
+        let q = q.get();
         // `tan` diverges at Nyquist itself, so the cutoff stops just short of it.
         let fc = freq.clamp(
             Hz::new(1.0),
             sample_rate.nyquist_scaled(crate::filter::NYQUIST_MARGIN),
         );
         let g0 = prewarp(fc, sample_rate);
-        let q = q.max(crate::SvfControls::MIN_Q);
-        // A gain past `MAX_GAIN` either way is that gain: `10^(dB / 40)`
-        // underflows to 0 far out (`k = 1 / (Q * A)` is then infinite and the
-        // set NaN), and overflows to infinity the other way. A NaN gain is
-        // unity (0 dB).
-        let gain_db = if gain_db.get().is_nan() {
-            Db::UNITY
-        } else {
-            gain_db.clamp(-Self::MAX_GAIN, Self::MAX_GAIN)
-        };
         // The half-gain amplitude `10^(dB / 40)` is half the decibels.
         let a = Db::new(0.5 * gain_db.get()).to_amplitude().get();
 
