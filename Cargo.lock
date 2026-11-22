@@ -2961,6 +2961,7 @@ name = "tutti-midi-hardware"
 version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
+ "futures-channel",
  "futures-core",
  "futures-lite",
  "getrandom",
@@ -3252,7 +3253,6 @@ dependencies = [
  "crossbeam-queue",
  "dpi",
  "futures-lite",
- "getrandom",
  "interprocess",
  "parking_lot",
  "postcard",

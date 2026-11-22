@@ -314,8 +314,8 @@ touched.
   `tutti-measure`); a node file holds only the `Node` adapter.
 - A new trait states its boundary in one sentence without "and".
 - A configured thing is `Type::new(required..)` plus chained options (`self`, a bare
-  name, `-> Self`); a separate builder with `build()` only where finishing does work
-  or can fail.
+  name, `-> Self`), never a struct of public fields filled with `..Default::default()`;
+  a separate builder with `build()` only where finishing does work or can fail.
   See `docs/style-guide.md` T5; `cargo xtask check-building` holds it.
 - An error type derives `thiserror::Error` with its text in `#[error(..)]`; a hand
   `impl Error for` is a row of the gate's allow-list with its reason (`cargo xtask

@@ -801,9 +801,7 @@ fn an_inserted_served_plugin_that_grows_its_ports_gets_a_wider_node() {
     env.set("TUTTI_CLAP_PROBE_PORT_CHANGE_FILE", port_change_file());
     let mut s = session();
     let client = tutti_plugin::PluginClient::new(
-        tutti_plugin_ipc::IpcConfig::at(
-            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
-        ),
+        tutti_plugin_ipc::IpcConfig::new(),
         tutti_fixtures::executor(),
         &tutti_fixtures::detached_work(),
         &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(clap_probe())),

@@ -134,11 +134,11 @@
 //!
 //! The work that waits on the OS (an ALSA input's pump, the device watch, Active
 //! Sensing, the legacy ports' poll) runs as futures on the [`Executor`](tutti_platform::Executor)
-//! the session is opened with: the ALSA input and watch each on a dedicated thread of
-//! it, Active Sensing and the poll as timer loops. Each component holds its task and
-//! drops it to stop. Until core-engine's R2-last, an
-//! executor the app drives (a session built with its own) runs this work only while
-//! the app drives it: in `tutti-session`, only inside `update`.
+//! the session is opened with: the ALSA input and watch and each output's Active
+//! Sensing each on a dedicated thread of it, the poll as a timer loop. Each
+//! component holds its task and drops it to stop. A dedicated thread runs whether
+//! or not the app drives the executor; the poll runs only while the app drives
+//! it: in `tutti-session`, inside `update`.
 //!
 //! ## Quick start
 //!

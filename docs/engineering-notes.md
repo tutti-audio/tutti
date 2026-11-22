@@ -581,6 +581,20 @@ knowing because the same shapes recur:
   *between* syscalls, so a budget of any size was unenforceable. The fix is
   `PeekNamedPipe`: ask how many bytes are buffered, and only read when the
   answer is "some". See `tutti-plugin-ipc`'s `transport::control`.
+- **The plugin server's connection has no name on unix.** The host makes a socket
+  pair and spawns the server with one end as its standard input
+  (`Command::stdin(Stdio::from(OwnedFd))`, safe std, no `pre_exec`), so nothing is
+  in `argv` or the environment and there is no path to bind, unlink or race. The
+  server's first act is `adopt_host_socket`: it duplicates descriptor 0 close-on-exec,
+  refuses (by name) a descriptor that is not a stream socket, and puts `/dev/null` on 0, so
+  a plugin that reads its standard input reads end of file and no helper a plugin
+  starts inherits the connection. A server run by hand fails with that error rather
+  than waiting on the terminal. std sets close-on-exec after `socketpair` on macOS,
+  not with it, so a static mutex is held across making the pair and spawning; a
+  spawn by another part of the process is outside it, the window the slab's
+  descriptors have. The audio lane is a second socket pair whose server end rides
+  the first connection as a descriptor. Windows has no end to hand a child, so
+  it keeps a pipe the host names in `argv`, behind the one `sys` seam.
 - **The audio slab is anonymous on unix, and its descriptor is its own message.**
   The plugin process loads untrusted code, so a slab it could open by name, or
   `ftruncate` once opened, would fault the host's audio thread (SIGBUS on the next
