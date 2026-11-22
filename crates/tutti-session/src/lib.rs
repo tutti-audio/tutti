@@ -174,7 +174,7 @@ mod watch;
 #[cfg(feature = "analyze")]
 pub use analyze::{
     Analyze, AnalyzeError, Analyzer, AnalyzerError, Analyzing, Audio, AudioContext, AudioInput,
-    BindError,
+    MeterBindError,
 };
 pub use apply::Apply;
 #[cfg(feature = "export")]
@@ -200,7 +200,7 @@ pub use device::{
 pub use editor::{Editor, EditorCallError, Opened};
 pub use error::{
     BackgroundWork, ConnectError, DeclarationError, Error, InletError, NoSuchNode, RemoveError,
-    Result, SessionHeardTapError, SetRateError, TempoError,
+    Result, SessionHeardTapError, SetRateError, SetTempoError,
 };
 #[cfg(feature = "midi")]
 pub use error::{MidiError, RouteDeclarer};
@@ -218,9 +218,9 @@ pub use input::{Input, InputConfig, InputOpener, OpenedInput};
 #[cfg(feature = "midi")]
 pub use instrument::{AnyNode, InstrumentHandle, NotInstrument};
 pub use key::{
-    Bus, BusSink, Channel, Connection, Disconnection, Edge, Event, EventEdge, EventInPort,
-    EventOutPort, EventTapPort, Fanin, InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet,
-    Removal, Root, RootDeclaration, SetSources, Weighted, Wire,
+    BusSink, BusWire, ChannelEdge, ChannelWire, Connection, Disconnection, EventEdge, EventInPort,
+    EventOutPort, EventTapPort, EventWire, Fanin, InPort, Inlet, Key, MainBusWire, MainSink,
+    OutPort, Outlet, Removal, Root, RootDeclaration, SetSources, Weighted, Wire,
 };
 #[cfg(any(feature = "capture", feature = "midi"))]
 pub use latency::{Start, TakeLatency, Trim};
@@ -271,7 +271,7 @@ pub use modulation::{
 #[cfg(feature = "sampler")]
 pub use node::Handled;
 pub use node::{Reclaimer, Reclaims, SessionNode};
-pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
+pub use peer::{Peer, PeerError, PeerResourceId, Presence, Resource, ResourceFact};
 #[cfg(any(feature = "plugin", feature = "midi-hardware"))]
 pub use peer_state::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "plugin")]
@@ -333,7 +333,7 @@ pub use tutti_export::{
     EventLossPolicy, Normalize, Outcome, Produced, Progress, Rendered, Resample, Stage, Written,
 };
 pub use tutti_graph::{
-    BusError, BusRef, BusSource, Buses, HasParam, HasParams, MissingSource, ParamUnit, Scalar,
+    BusError, BusRef, BusSource, Buses, HasParam, HasParams, MissingSource, ParamValue, Scalar,
 };
 pub use tutti_graph::{
     CloseError, CommitError, EventCapacity, Losses, NodeMode, PassError, Stamp, Wired, WiredMask,

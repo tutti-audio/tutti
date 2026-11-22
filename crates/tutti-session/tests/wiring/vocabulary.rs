@@ -9,7 +9,7 @@ use tutti_buffers::{FoldError, InterleavedMut};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    ConnectError, DeclarationError, Edge, GainTargetError, OutPort, Root, Session,
+    ChannelEdge, ConnectError, DeclarationError, GainTargetError, OutPort, Root, Session,
 };
 use tutti_units::Amplitude;
 
@@ -133,7 +133,7 @@ fn a_connections_gain_weights_the_edge_it_added() {
         .gain(Amplitude::new(0.5))
         .unwrap();
     assert_eq!(first_frame(&mut s), [0.25, 0.0]);
-    let edge = Edge::new(src.out(0), Root::output(0));
+    let edge = ChannelEdge::new(src.out(0), Root::output(0));
     let gain = s
         .graph_ref()
         .gain_target(edge.source(), edge.sink())

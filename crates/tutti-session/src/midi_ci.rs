@@ -45,7 +45,7 @@ use tutti_ump::{MidiChannel, MidiGroup};
 use crate::PeerError;
 use crate::SessionEvent;
 use crate::midi_port::{Ended, InputRequest, InputShared};
-use crate::peer::{ResourceId, ResourceIds};
+use crate::peer::{PeerResourceId, ResourceIds};
 use reply::{PeerReply, peer_future};
 pub(crate) use reply::{ReplySender, resolve};
 
@@ -214,8 +214,8 @@ impl std::fmt::Debug for PortLink {
 /// [`PeerId`]; its requests go through the port's queue.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ListedPeer {
-    id: ResourceId,
-    port: ResourceId,
+    id: PeerResourceId,
+    port: PeerResourceId,
     /// The device the peer is on, as the input said of it when the peer was
     /// listed: whose state a [`PeerState`](crate::PeerState) of the peer is.
     device: SavedDevice,
@@ -227,8 +227,8 @@ pub struct ListedPeer {
 
 impl ListedPeer {
     pub(crate) fn new(
-        id: ResourceId,
-        port: ResourceId,
+        id: PeerResourceId,
+        port: PeerResourceId,
         device: SavedDevice,
         info: CiPeerInfo,
         profiles: Option<ProfilePeer>,
@@ -250,13 +250,13 @@ impl ListedPeer {
     /// its input first lists it, and the same for as long as the input lists it
     /// ([`peer_id`](Self::peer_id) is its Group and MUID on the wire).
     #[must_use]
-    pub const fn id(&self) -> ResourceId {
+    pub const fn id(&self) -> PeerResourceId {
         self.id
     }
 
-    /// The input the peer was found on, by its [`ResourceId`].
+    /// The input the peer was found on, by its [`PeerResourceId`].
     #[must_use]
-    pub const fn port(&self) -> ResourceId {
+    pub const fn port(&self) -> PeerResourceId {
         self.port
     }
 
@@ -715,7 +715,7 @@ pub(crate) struct Pending {
     /// listed, so a refresh of the listing gives it the same id, and dropped
     /// when a refresh lists the peer no more, so a peer that returns after that
     /// is a new one with a new id.
-    peer_ids: Mutex<BTreeMap<PeerId, ResourceId>>,
+    peer_ids: Mutex<BTreeMap<PeerId, PeerResourceId>>,
 }
 
 /// A Property Exchange call sent to a peer, or waiting to be, in the order the
@@ -809,7 +809,7 @@ impl Pending {
 
     /// The ids of the peers `listed`, in its order: minted when a peer is first
     /// listed, and dropped for the peers `listed` no longer holds.
-    pub(crate) fn peer_ids(&self, listed: &[PeerId]) -> Vec<ResourceId> {
+    pub(crate) fn peer_ids(&self, listed: &[PeerId]) -> Vec<PeerResourceId> {
         let mut ids = self.peer_ids.lock_recover();
         ids.retain(|peer, _| listed.contains(peer));
         listed

@@ -1,18 +1,20 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use super::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId, ResourceIds, sealed};
+use super::{
+    Peer, PeerError, PeerResourceId, Presence, Resource, ResourceFact, ResourceIds, sealed,
+};
 
 /// A token of the crate's kind, as a lane's would be: a peer with a presence.
 struct Token {
-    id: ResourceId,
+    id: PeerResourceId,
     presence: Presence<&'static str>,
 }
 
 impl sealed::Sealed for Token {}
 
 impl Resource for Token {
-    fn id(&self) -> ResourceId {
+    fn id(&self) -> PeerResourceId {
         self.id
     }
 }
@@ -33,7 +35,7 @@ impl Peer for Token {
 #[test]
 fn ids_are_unique_within_a_session_and_start_at_one() {
     let ids = ResourceIds::new();
-    let minted: Vec<ResourceId> = (0..1_000).map(|_| ids.mint()).collect();
+    let minted: Vec<PeerResourceId> = (0..1_000).map(|_| ids.mint()).collect();
     assert_eq!(minted[0].to_string(), "resource 1");
     assert_eq!(minted.iter().collect::<HashSet<_>>().len(), minted.len());
     assert!(minted.windows(2).all(|pair| pair[0] < pair[1]), "ascending");
@@ -105,7 +107,7 @@ fn a_notice_names_which_reading_to_read_again() {
 /// failure rides a reply.
 const _: () = {
     const fn send_sync<T: Send + Sync>() {}
-    send_sync::<ResourceId>();
+    send_sync::<PeerResourceId>();
     send_sync::<ResourceFact>();
     send_sync::<Presence<&'static str>>();
     send_sync::<PeerError<String>>();

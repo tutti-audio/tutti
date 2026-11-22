@@ -313,8 +313,7 @@ order, one PR per step, each deleting what it replaces. It supersedes tasks
      `HasParam`/`HasParams` impls (the unit is the cell's, checked), the
      node's `ParamSet` and its shape's param ports (`declared_set`,
      `declared_ports`, `declared_base`); the `DesignNode` families' controls
-     are one `control_set!` each. `HasParam`, `HasParams`, `ParamUnit` (was the
-     session's `ParamValue`) and `Scalar` moved to `tutti-graph`; the session's
+     are one `control_set!` each. `HasParam`, `HasParams`, `ParamValue` and `Scalar` moved to `tutti-graph`; the session's
      `declare_params!` table, `Declared` and the `*_PARAMS` lists are gone. The
      port order a node's `process` reads (`Io::param(k)`) is the declaration's
      row order.
