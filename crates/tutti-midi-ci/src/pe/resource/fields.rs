@@ -5,11 +5,11 @@
 use std::fmt;
 use std::num::TryFromIntError;
 
-use tutti_ump::{Bank, MidiChannelOutOfRange, U7};
+use tutti_ump::{Bank, ManufacturerBytesError, MidiChannelOutOfRange, U7};
 
 use super::super::limits::{PeTextError, PropertyName, PropertyNameError, text_type};
 use super::super::tree::{PeJson, PeJsonError, PeObject};
-use super::controllers::ListedTwice;
+use super::controllers::{ControllerIndexError, ListedTwice};
 use super::entry::EntryError;
 use super::kind::PeResource;
 use super::state::NotUnixSeconds;
@@ -82,21 +82,41 @@ impl ParamPath {
     /// The most bytes a path takes, 256.
     pub const MAX_LEN: usize = 256;
 
-    /// The path `text` spells, or `None` unless it is a JSON Pointer of at most
-    /// [`MAX_LEN`](Self::MAX_LEN) bytes.
-    #[must_use]
-    pub fn new(text: &str) -> Option<Self> {
-        if text.len() > Self::MAX_LEN {
-            return None;
-        }
-        super::super::partial::JsonPointer::new(text).map(Self)
-    }
-
     /// The text.
     #[must_use]
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
+}
+
+/// The path `text` spells: a JSON Pointer of at most [`MAX_LEN`](ParamPath::MAX_LEN)
+/// bytes; [`ParamPathError::TooLong`] past that, and
+/// [`ParamPathError::NotJsonPointer`] for text that is no JSON Pointer.
+impl TryFrom<&str> for ParamPath {
+    type Error = ParamPathError;
+
+    fn try_from(text: &str) -> Result<Self, ParamPathError> {
+        if text.len() > Self::MAX_LEN {
+            return Err(ParamPathError::TooLong { len: text.len() });
+        }
+        super::super::partial::JsonPointer::new(text)
+            .map(Self)
+            .ok_or(ParamPathError::NotJsonPointer)
+    }
+}
+
+/// Text that is no [`ParamPath`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ParamPathError {
+    /// More than [`ParamPath::MAX_LEN`] bytes (M2-117 Table 5).
+    #[error("the path is {len} bytes, and at most {} fit", ParamPath::MAX_LEN)]
+    TooLong {
+        /// Its length in bytes.
+        len: usize,
+    },
+    /// Not a JSON Pointer (RFC 6901).
+    #[error("the path is no JSON Pointer")]
+    NotJsonPointer,
 }
 
 impl fmt::Display for ParamPath {
@@ -312,7 +332,12 @@ where
     T: TryFrom<R>,
     InvalidValue: From<T::Error>,
 {
-    Ok(T::try_from(R::try_from(n)?)?)
+    let raw = R::try_from(n).map_err(|source| InvalidValue::Width {
+        value: n,
+        bits: u32::try_from(8 * std::mem::size_of::<R>()).unwrap_or(u32::MAX),
+        source,
+    })?;
+    Ok(T::try_from(raw)?)
 }
 
 /// An array of `N` 7-bit integers.
@@ -402,9 +427,16 @@ pub enum InvalidValue {
     /// A number that is no time in Unix seconds.
     #[error(transparent)]
     UnixSeconds(#[from] NotUnixSeconds),
-    /// An integer outside the width of the value it is read as.
-    #[error("the integer does not fit the width of the value")]
-    Width(#[from] TryFromIntError),
+    /// An integer outside the unsigned width of the value it is read as.
+    #[error("{value} does not fit an unsigned {bits}-bit value")]
+    Width {
+        /// The integer read.
+        value: i64,
+        /// The bits of the width it was read as.
+        bits: u32,
+        /// Why it does not fit.
+        source: TryFromIntError,
+    },
     /// Text that is not JSON of the Property Exchange form.
     #[error(transparent)]
     Json(#[from] PeJsonError),
@@ -414,17 +446,16 @@ pub enum InvalidValue {
     /// A controller list with a controller listed twice.
     #[error(transparent)]
     ListedTwice(#[from] ListedTwice),
-    /// Three bytes that are no Manufacturer id: a one-byte id followed by a
-    /// non-zero byte, or `00 00 00` (M2-104 §7.1.3).
-    #[error("the bytes are no Manufacturer id")]
-    ManufacturerId,
+    /// Three bytes that are no Manufacturer id (M2-104 §7.1.3).
+    #[error(transparent)]
+    ManufacturerId(#[from] ManufacturerBytesError),
     /// A `ctrlIndex` that does not fit the `ctrlType` (M2-117 Table 5).
-    #[error("the index does not fit the controller type")]
-    ControllerIndex,
+    #[error(transparent)]
+    ControllerIndex(#[from] ControllerIndexError),
     /// A `paramPath` that is no JSON Pointer of at most 256 bytes (M2-117
     /// Table 5).
-    #[error("the path is no JSON Pointer of at most 256 bytes")]
-    ParamPath,
+    #[error(transparent)]
+    ParamPath(#[from] ParamPathError),
     /// A `minMax` whose minimum is above its maximum (M2-117 Table 5).
     #[error("the minimum is above the maximum")]
     MinAboveMax,
@@ -432,6 +463,13 @@ pub enum InvalidValue {
     /// Table 20).
     #[error("only a Control Change takes the flag")]
     NotControlChange,
+    /// The options Resource of a `selectorAction` Link, which is no List Resource
+    /// (M2-103 §13.1.2).
+    #[error("the options Resource of a selector is not a List Resource")]
+    NotAListResource,
+    /// An `x-` property a list object cannot hold.
+    #[error(transparent)]
+    Extension(#[from] ExtensionError),
     /// Data of a Resource that has a JSON form, held in none.
     #[error("the data has no JSON form")]
     NoJsonForm,
@@ -505,28 +543,58 @@ impl PeDataError {
 }
 
 /// The manufacturer-specific properties of an object: names that start `x-`
-/// (M2-103 §6.1.4), each with any JSON value, kept and written back.
+/// (M2-103 §6.1.4), kept and written back.
+///
+/// On the object of a List Resource a value is a plain value, or an array of plain
+/// values (null, a boolean, a number or a string), never an object or a nested array
+/// (§8.6.1); `Default` is that form. DeviceInfo's has any JSON value.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct PeExtensions(Vec<(PropertyName, PeJson)>);
+pub struct PeExtensions {
+    items: Vec<(PropertyName, PeJson)>,
+    nested: bool,
+}
 
-/// A name that does not start with `x-`, so is not manufacturer-specific.
+/// A property of a list object that cannot be an extension.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("{0:?} does not start with \"x-\"")]
-pub struct NotVendorName(pub String);
+#[non_exhaustive]
+pub enum ExtensionError {
+    /// A name that does not start with `x-`, so is not manufacturer-specific.
+    #[error("{0:?} does not start with \"x-\"")]
+    NotVendorName(String),
+    /// A value of a list object that is an object or holds one, or an array that
+    /// holds an array (M2-103 §8.6.1).
+    #[error("a list object holds plain values and arrays of them, not objects")]
+    Nested,
+}
+
+impl ExtensionError {
+    fn check(value: &PeJson) -> Result<(), Self> {
+        let plain = |j: &PeJson| j.is_scalar() || matches!(j, PeJson::Null);
+        let flat = plain(value)
+            || value
+                .as_array()
+                .is_some_and(|items| items.iter().all(plain));
+        if flat { Ok(()) } else { Err(Self::Nested) }
+    }
+}
 
 impl PeExtensions {
     /// Adds a property, replacing the value of one with the same name.
     ///
     /// # Errors
     ///
-    /// [`NotVendorName`] unless the name starts `x-`.
-    pub fn insert(&mut self, name: PropertyName, value: PeJson) -> Result<(), NotVendorName> {
+    /// [`ExtensionError::NotVendorName`] unless the name starts `x-`, and
+    /// [`ExtensionError::Nested`] for a value a list object does not hold.
+    pub fn insert(&mut self, name: PropertyName, value: PeJson) -> Result<(), ExtensionError> {
         if !name.as_str().starts_with("x-") {
-            return Err(NotVendorName(name.into()));
+            return Err(ExtensionError::NotVendorName(name.into()));
         }
-        match self.0.iter_mut().find(|(n, _)| *n == name) {
+        if !self.nested {
+            ExtensionError::check(&value)?;
+        }
+        match self.items.iter_mut().find(|(n, _)| *n == name) {
             Some((_, old)) => *old = value,
-            None => self.0.push((name, value)),
+            None => self.items.push((name, value)),
         }
         Ok(())
     }
@@ -534,7 +602,7 @@ impl PeExtensions {
     /// The value of the property `name`.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&PeJson> {
-        self.0
+        self.items
             .iter()
             .find(|(n, _)| n.as_str() == name)
             .map(|(_, v)| v)
@@ -542,17 +610,17 @@ impl PeExtensions {
 
     /// The properties, in order.
     pub fn iter(&self) -> impl Iterator<Item = (&PropertyName, &PeJson)> {
-        self.0.iter().map(|(n, v)| (n, v))
+        self.items.iter().map(|(n, v)| (n, v))
     }
 
     /// Whether there are none.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.items.is_empty()
     }
 
     pub(super) fn write(&self, object: &mut PeObject) {
-        for (name, value) in &self.0 {
+        for (name, value) in &self.items {
             object.insert(name.as_str(), value.clone());
         }
     }
@@ -628,7 +696,19 @@ impl<'a> Fields<'a> {
     ///
     /// [`PeDataFault::NotValid`] for a name that is no property name.
     pub(super) fn finish(self) -> Result<PeExtensions, PeDataError> {
-        let mut extensions = PeExtensions::default();
+        self.finish_as(PeExtensions::default())
+    }
+
+    /// [`finish`](Self::finish) for an object that is no list object: its
+    /// extensions hold any JSON value.
+    pub(super) fn finish_unrestricted(self) -> Result<PeExtensions, PeDataError> {
+        self.finish_as(PeExtensions {
+            items: Vec::new(),
+            nested: true,
+        })
+    }
+
+    fn finish_as(self, mut extensions: PeExtensions) -> Result<PeExtensions, PeDataError> {
         for (name, value) in self.left {
             let valid = PropertyName::try_from(name).map_err(|e| {
                 PeDataError::new(
@@ -637,8 +717,10 @@ impl<'a> Fields<'a> {
                 )
             })?;
             if valid.as_str().starts_with("x-") {
-                // The name starts `x-`, so the insert cannot refuse it.
-                let _ = extensions.insert(valid, value.clone());
+                let place = Place::of(self.what).property(name);
+                extensions.insert(valid, value.clone()).map_err(|e| {
+                    PeDataError::new(place, PeDataFault::NotValid(InvalidValue::Extension(e)))
+                })?;
             }
         }
         Ok(extensions)

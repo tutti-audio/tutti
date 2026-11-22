@@ -3,8 +3,8 @@
 
 use tutti_midi_protocol::{
     ChannelMask, KeyChange, KeyChanges, KeyTable, MtcRate, MtcTimeCode, OctaveOffsets,
-    PerNotePolicy, PerNoteTranslation, SmpteFrameRate, SmpteTimecode, Timing, TranslationMode,
-    TuningFrequency, TuningName,
+    PerNotePolicy, PerNoteTranslation, SmpteFrameRate, SmpteTimecode, TimecodeHours,
+    TimecodeMinutes, TimecodeSeconds, Timing, TranslationMode, TuningFrequency, TuningName,
 };
 use tutti_ump::{ExtremeValues, NoteNumber, PerNoteManagement, U7, U14};
 
@@ -20,7 +20,14 @@ where
 #[test]
 fn a_timecode_reads_back_only_when_its_labels_are_in_range_for_its_rate() {
     for rate in SmpteFrameRate::ALL {
-        let at = SmpteTimecode::new(23, 59, 58, 23, rate).unwrap();
+        let at = SmpteTimecode::new(
+            TimecodeHours::of(23),
+            TimecodeMinutes::of(59),
+            TimecodeSeconds::of(58),
+            23,
+            rate,
+        )
+        .unwrap();
         assert_eq!(round_trip(&at), at);
     }
     let mut json = serde_json::to_value(SmpteTimecode::origin(SmpteFrameRate::Fps24)).unwrap();
@@ -32,7 +39,14 @@ fn a_timecode_reads_back_only_when_its_labels_are_in_range_for_its_rate() {
     assert!(serde_json::from_value::<SmpteTimecode>(json).is_err());
 
     for rate in MtcRate::ALL {
-        let at = MtcTimeCode::new(rate, 1, 2, 3, rate.labels_per_second() - 1).unwrap();
+        let at = MtcTimeCode::new(
+            rate,
+            TimecodeHours::of(1),
+            TimecodeMinutes::of(2),
+            TimecodeSeconds::of(3),
+            rate.labels_per_second() - 1,
+        )
+        .unwrap();
         assert_eq!(round_trip(&at), at);
         let mut json = serde_json::to_value(at).unwrap();
         json["frames"] = rate.labels_per_second().into();
@@ -116,4 +130,21 @@ fn the_tuning_values_read_back_and_a_frequency_above_21_bits_is_refused() {
     ] {
         assert_eq!(round_trip(&offsets), offsets);
     }
+}
+
+/// **A zone has 1 to 15 member channels** (RP-053): the count type holds exactly
+/// that range, and a persisted zone with another count is refused.
+#[test]
+fn a_member_count_keeps_the_range_contract() {
+    use tutti_fixtures::{RangeContract, check_range_contract, check_range_serde};
+    use tutti_midi_protocol::MemberCount;
+    let counts = RangeContract {
+        new: MemberCount::new,
+        get: MemberCount::get,
+        of: Some(MemberCount::of),
+        valid: &[1, 7, 15],
+        invalid: &[0, 16, 255],
+    };
+    check_range_contract(&counts);
+    check_range_serde(&counts);
 }

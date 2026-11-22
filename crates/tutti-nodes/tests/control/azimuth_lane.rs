@@ -40,11 +40,10 @@ impl Node for Probe {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         for k in 0..2 {
-            let vals: Vec<f32> = match io.param(k) {
-                ParamInput::Base => vec![0.0; io.frames()],
-                ParamInput::Frames { values, .. } => values.to_vec(),
-            };
-            io.output(k).copy_from_slice(&vals);
+            match io.param(k) {
+                ParamInput::Base => io.output(k).fill(0.0),
+                ParamInput::Frames { values, .. } => io.output(k).copy_from_slice(values),
+            }
         }
         Status::Modified
     }

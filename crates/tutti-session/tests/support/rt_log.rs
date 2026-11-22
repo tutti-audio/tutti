@@ -1,7 +1,8 @@
 //! A node that logs on the audio thread, and a `tracing` collector for the
 //! `tutti::` events a session emits for it.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tutti_rt::Mutex;
 
 use tracing::field::{Field, Visit};
 use tracing::{Event, Level, Subscriber};
@@ -82,7 +83,7 @@ impl<S: Subscriber> Layer<S> for Collect {
         let mut logged = read.0;
         logged.level = Some(*event.metadata().level());
         logged.target = event.metadata().target().to_owned();
-        self.0.lock().expect("collected").push(logged);
+        self.0.lock().push(logged);
     }
 }
 
@@ -91,7 +92,7 @@ pub fn rt_events(f: impl FnOnce()) -> Vec<Logged> {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let subscriber = tracing_subscriber::registry().with(Collect(seen.clone()));
     tracing::subscriber::with_default(subscriber, f);
-    let all = std::mem::take(&mut *seen.lock().expect("collected"));
+    let all = std::mem::take(&mut *seen.lock());
     all.into_iter()
         .filter(|e| e.target.starts_with("tutti::"))
         .collect()
@@ -107,7 +108,7 @@ pub fn rt_events_on_any_thread(f: impl FnOnce()) -> Vec<Logged> {
     tracing::subscriber::set_global_default(subscriber)
         .expect("one test of the process installs the default subscriber");
     f();
-    let all = std::mem::take(&mut *seen.lock().expect("collected"));
+    let all = std::mem::take(&mut *seen.lock());
     all.into_iter()
         .filter(|e| e.target.starts_with("tutti::"))
         .collect()

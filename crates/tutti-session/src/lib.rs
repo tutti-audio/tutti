@@ -135,8 +135,6 @@ mod midi_port;
 mod midi_sink;
 mod modulation;
 mod node;
-#[cfg(feature = "midi")]
-mod os_clock;
 mod params;
 mod peer;
 #[cfg(any(feature = "plugin", feature = "midi-hardware"))]
@@ -167,7 +165,13 @@ mod take;
 #[cfg(all(feature = "midi", feature = "analyze"))]
 mod transcribe;
 mod transport_handle;
-#[cfg(any(feature = "sampler", feature = "analyze", feature = "midi"))]
+#[cfg(any(
+    feature = "sampler",
+    feature = "analyze",
+    feature = "midi",
+    feature = "soundfont",
+    feature = "export"
+))]
 mod unblocked;
 mod value;
 #[cfg(feature = "device")]

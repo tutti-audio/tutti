@@ -23,7 +23,7 @@ fn ranged(
     master: PitchBendSensitivity,
     member: PitchBendSensitivity,
 ) -> MpeZoneConfig {
-    MpeZoneConfig::new(z, n, master, member).expect("a valid member count")
+    MpeZoneConfig::new(z, MemberCount::of(n), master, member)
 }
 
 fn registered(channel: MidiChannel, rpn: Rpn, value: u32) -> Ump {
@@ -42,36 +42,25 @@ fn registered(channel: MidiChannel, rpn: Rpn, value: u32) -> Ump {
 }
 
 /// RP-053: a zone has 1 to 15 member channels (a count of 0 in an MCM disables
-/// the zone and is not a zone). Nothing is clamped.
+/// the zone and is not a zone), so no `MemberCount` is outside that range.
 #[test]
 fn a_zone_has_one_to_fifteen_members() {
+    assert_eq!(MemberCount::new(0), None, "0 members is no zone");
+    assert_eq!(MemberCount::new(16), None);
+    assert_eq!(MemberCount::new(255), None);
     for z in [MpeZone::Lower, MpeZone::Upper] {
-        assert_eq!(
-            MpeZoneConfig::new(z, 0, MASTER, MEMBER),
-            None,
-            "0 members is no zone"
-        );
-        assert_eq!(MpeZoneConfig::new(z, 16, MASTER, MEMBER), None);
-        assert_eq!(MpeZoneConfig::new(z, 255, MASTER, MEMBER), None);
         for n in 1..=15 {
-            assert_eq!(zone(z, n).member_count(), n);
+            assert_eq!(zone(z, n).member_count().get(), n);
+            assert_eq!(zone(z, n).channel_count().get(), n + 1);
         }
     }
     assert_eq!(
-        MpeZoneConfig::lower(
-            7,
-            PitchBendSensitivity::MPE_MASTER_DEFAULT,
-            PitchBendSensitivity::MPE_MEMBER_DEFAULT
-        ),
-        MpeZoneConfig::new(MpeZone::Lower, 7, MASTER, MEMBER)
+        MpeZoneConfig::lower(MemberCount::of(7), MASTER, MEMBER),
+        MpeZoneConfig::new(MpeZone::Lower, MemberCount::of(7), MASTER, MEMBER)
     );
     assert_eq!(
-        MpeZoneConfig::upper(
-            7,
-            PitchBendSensitivity::MPE_MASTER_DEFAULT,
-            PitchBendSensitivity::MPE_MEMBER_DEFAULT
-        ),
-        MpeZoneConfig::new(MpeZone::Upper, 7, MASTER, MEMBER)
+        MpeZoneConfig::upper(MemberCount::of(7), MASTER, MEMBER),
+        MpeZoneConfig::new(MpeZone::Upper, MemberCount::of(7), MASTER, MEMBER)
     );
 }
 
@@ -138,7 +127,7 @@ fn the_bend_ranges_are_set_independently() {
         PitchBendSensitivity::from_semitones(U7::of(48)),
         "member range untouched"
     );
-    assert_eq!(config.member_count(), 5);
+    assert_eq!(config.member_count().get(), 5);
 
     let config = ranged(
         MpeZone::Lower,
@@ -236,9 +225,21 @@ fn from_mcm_rejects_out_of_range_configurations() {
 fn an_mcm_ignores_the_low_25_bits_of_its_data() {
     for below in [0, 1, 0x00FF_FFFF, 0x01FF_FFFF] {
         let mcm = registered(ch(0), Rpn::MPE_CONFIGURATION, 7 << 25 | below);
-        assert_eq!(MpeZoneConfig::from_mcm(&mcm), Some((MpeZone::Lower, 7)));
+        assert_eq!(
+            MpeZoneConfig::from_mcm(&mcm),
+            Some(Mcm::Configure {
+                zone: MpeZone::Lower,
+                members: MemberCount::of(7)
+            })
+        );
         let upper = registered(ch(15), Rpn::MPE_CONFIGURATION, 4 << 25 | below);
-        assert_eq!(MpeZoneConfig::from_mcm(&upper), Some((MpeZone::Upper, 4)));
+        assert_eq!(
+            MpeZoneConfig::from_mcm(&upper),
+            Some(Mcm::Configure {
+                zone: MpeZone::Upper,
+                members: MemberCount::of(4)
+            })
+        );
     }
 }
 
@@ -246,7 +247,13 @@ fn an_mcm_ignores_the_low_25_bits_of_its_data() {
 fn an_mcm_round_trips_and_zero_disables() {
     for z in [MpeZone::Lower, MpeZone::Upper] {
         for n in 1..=15 {
-            assert_eq!(MpeZoneConfig::from_mcm(&zone(z, n).to_mcm()), Some((z, n)));
+            assert_eq!(
+                MpeZoneConfig::from_mcm(&zone(z, n).to_mcm()),
+                Some(Mcm::Configure {
+                    zone: z,
+                    members: MemberCount::of(n)
+                })
+            );
         }
     }
     // Word values from RP-053 / M2-104 section 7.4.7: Registered Controller
@@ -259,9 +266,14 @@ fn an_mcm_round_trips_and_zero_disables() {
         zone(MpeZone::Upper, 4).to_mcm(),
         Ump([0x402F_0006, 4 << 25, 0, 0])
     );
-    // Zero members: the zone is disabled, reported as `0` (not a `new`).
+    // Zero members: the zone is disabled, not a zone.
     let off = registered(ch(0), Rpn::MPE_CONFIGURATION, 0);
-    assert_eq!(MpeZoneConfig::from_mcm(&off), Some((MpeZone::Lower, 0)));
+    assert_eq!(
+        MpeZoneConfig::from_mcm(&off),
+        Some(Mcm::Disable {
+            zone: MpeZone::Lower
+        })
+    );
 }
 
 /// Sixteen channels less two masters leave 14 to share: the lower zone takes
@@ -271,16 +283,16 @@ fn two_zones_may_not_share_a_member_channel() {
     for l in 1..=15u8 {
         for u in 1..=15u8 {
             let zones = MpeZones::new(
-                MpeZoneConfig::lower(
-                    l,
+                Some(MpeZoneConfig::lower(
+                    MemberCount::of(l),
                     PitchBendSensitivity::MPE_MASTER_DEFAULT,
                     PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-                ),
-                MpeZoneConfig::upper(
-                    u,
+                )),
+                Some(MpeZoneConfig::upper(
+                    MemberCount::of(u),
                     PitchBendSensitivity::MPE_MASTER_DEFAULT,
                     PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-                ),
+                )),
             );
             assert_eq!(zones.is_some(), l + u <= 14, "lower {l}, upper {u}");
         }
@@ -288,31 +300,31 @@ fn two_zones_may_not_share_a_member_channel() {
     // The boundary, spelled out: 8 + 6 fit, 8 + 7 put channel 8 in both.
     assert!(
         MpeZones::new(
-            MpeZoneConfig::lower(
-                8,
+            Some(MpeZoneConfig::lower(
+                MemberCount::of(8),
                 PitchBendSensitivity::MPE_MASTER_DEFAULT,
                 PitchBendSensitivity::MPE_MEMBER_DEFAULT
-            ),
-            MpeZoneConfig::upper(
-                6,
+            )),
+            Some(MpeZoneConfig::upper(
+                MemberCount::of(6),
                 PitchBendSensitivity::MPE_MASTER_DEFAULT,
                 PitchBendSensitivity::MPE_MEMBER_DEFAULT
-            )
+            ))
         )
         .is_some()
     );
     assert!(
         MpeZones::new(
-            MpeZoneConfig::lower(
-                8,
+            Some(MpeZoneConfig::lower(
+                MemberCount::of(8),
                 PitchBendSensitivity::MPE_MASTER_DEFAULT,
                 PitchBendSensitivity::MPE_MEMBER_DEFAULT
-            ),
-            MpeZoneConfig::upper(
-                7,
+            )),
+            Some(MpeZoneConfig::upper(
+                MemberCount::of(7),
                 PitchBendSensitivity::MPE_MASTER_DEFAULT,
                 PitchBendSensitivity::MPE_MEMBER_DEFAULT
-            )
+            ))
         )
         .is_none()
     );
@@ -419,8 +431,8 @@ fn a_zone_follows_the_specification_it_was_built_for() {
 fn the_manager_is_the_lowest_channel_and_the_members_follow_it() {
     let z = pzone(4, 5);
     assert_eq!(z.master_channel(), ch(4));
-    assert_eq!(z.channel_count(), 5);
-    assert_eq!(z.member_count(), 4);
+    assert_eq!(z.channel_count().get(), 5);
+    assert_eq!(z.member_count().get(), 4);
     assert_eq!(
         z.member_channels()
             .map(MidiChannel::get)

@@ -25,7 +25,7 @@ struct TestTransport {
     beat: AtomicF64,
     tempo: Bpm,
     playing: StdAtomicBool,
-    looping: std::sync::Mutex<Option<tutti_music::LoopRange>>,
+    looping: tutti_rt::Mutex<Option<tutti_music::LoopRange>>,
 }
 
 impl TestTransport {
@@ -34,11 +34,11 @@ impl TestTransport {
             beat: AtomicF64::new(0.0),
             tempo,
             playing: StdAtomicBool::new(false),
-            looping: std::sync::Mutex::new(None),
+            looping: tutti_rt::Mutex::new(None),
         }
     }
     fn set_loop(&self, start: f64, end: f64) {
-        *self.looping.lock().unwrap() =
+        *self.looping.lock() =
             Some(LoopRange::new(Beat::new(start), Beat::new(end)).expect("a loop"));
     }
     fn set_beat(&self, b: f64) {
@@ -52,7 +52,7 @@ impl TestTransport {
             self.playing.load(Ordering::Acquire),
             self.tempo,
             Beat::new(self.beat.load(Ordering::Acquire)),
-            *self.looping.lock().unwrap(),
+            *self.looping.lock(),
         )
     }
 }
@@ -95,7 +95,7 @@ impl Rig {
             &self.transport.now(),
             Samples::new(block_size),
             &mut |e| {
-                self.out.0.lock().unwrap().push(e);
+                self.out.0.lock().push(e);
             },
         );
     }
@@ -121,11 +121,11 @@ fn master(tempo: Bpm, sample_rate: impl Into<SampleRate>) -> (Rig, Arc<TestTrans
 
 /// What the rig's master emitted, in order.
 #[derive(Clone, Default)]
-struct Collected(Arc<std::sync::Mutex<Vec<UmpAt>>>);
+struct Collected(Arc<tutti_rt::Mutex<Vec<UmpAt>>>);
 
 /// Takes everything emitted so far.
 fn drain_all(receiver: &Collected) -> Vec<UmpAt> {
-    std::mem::take(&mut *receiver.0.lock().unwrap())
+    std::mem::take(&mut *receiver.0.lock())
 }
 
 fn is_status(ev: &UmpAt, status: u8) -> bool {
@@ -642,7 +642,7 @@ fn mtc_loopback(rate: f64, fps: MtcRate, offset: f64) {
         "{cycles} cycles"
     );
     assert_eq!(
-        decoder.timecode().map(|t| t.minutes()),
+        decoder.timecode().map(|t| t.minutes().get()),
         Some(1),
         "crossed 1:00"
     );
@@ -1318,7 +1318,7 @@ fn flex_master(clock: bool) -> (FlexMaster, ProjectMeter, Collected) {
 fn play(cm: &mut FlexMaster, out: &Collected, tempo: f64, beat: f64, frames: usize) {
     let transport = TransportPosition::new(true, Bpm::of(tempo), Beat::new(beat), None);
     cm.tick(&transport, Samples::new(frames), &mut |e| {
-        out.0.lock().unwrap().push(e);
+        out.0.lock().push(e);
     });
 }
 
@@ -1723,7 +1723,7 @@ fn the_passes_of_a_looped_block_restate_nothing() {
     let looping = LoopRange::new(Beat::new(0.0), Beat::new(1.0)).expect("a loop");
     let transport = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), Some(looping));
     cm.tick(&transport, Samples::new(72_000), &mut |e| {
-        out.0.lock().unwrap().push(e);
+        out.0.lock().push(e);
     });
     let events = drain_all(&out);
     assert_eq!(offsets(&events, 0xF2), [24_000, 48_000], "two wraps");

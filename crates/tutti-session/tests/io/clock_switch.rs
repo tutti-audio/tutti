@@ -12,7 +12,6 @@ use tutti_cpal::{DeviceId, DeviceSelector};
 use tutti_engine::{ManualStreamDriver, OutputSpec};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::{Const, Through};
-use tutti_rt::LockExt;
 use tutti_session::{
     Error, InputPort, LiveSession, MainOutput, OutputPort, Session, SessionEvent, SystemSession,
 };
@@ -605,7 +604,7 @@ fn a_restart_report_no_update_read_is_reported_after_the_switch() {
 /// blocks are in `process` at once.
 #[derive(Clone)]
 struct Renderer {
-    log: std::sync::Arc<std::sync::Mutex<Vec<std::thread::ThreadId>>>,
+    log: tutti_fixtures::Record<std::thread::ThreadId>,
     inside: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -625,7 +624,10 @@ impl tutti_graph::Node for Renderer {
             !self.inside.swap(true, std::sync::atomic::Ordering::SeqCst),
             "two threads in process at once"
         );
-        self.log.lock_recover().push(std::thread::current().id());
+        self.log
+            .lock()
+            .expect("log")
+            .push(std::thread::current().id());
         io.output(0).fill(0.0);
         self.inside
             .store(false, std::sync::atomic::Ordering::SeqCst);
@@ -711,7 +713,7 @@ fn hand_overs(log: &[std::thread::ThreadId]) -> (usize, bool) {
 /// thread in `process` at once is the failure.)
 #[test]
 fn the_old_driver_renders_its_last_block_before_the_new_one_its_first() {
-    let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = tutti_fixtures::Record::new();
     // The timer, then a card on a thread of its own.
     let mut s = system();
     let node = s.graph().add(ForkByClone(Renderer {

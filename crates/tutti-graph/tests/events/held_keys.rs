@@ -15,8 +15,8 @@ use tutti_fixtures::midi;
 use tutti_graph::NodeSpec;
 use tutti_graph::{
     Cx, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor, Fade,
-    ForkByClone, ForkMode, ForkTarget, Io, Node, Offset, Prepare, Reference, Shape, Shapes, Status,
-    TransportPosition, Unforkable,
+    ForkByClone, ForkTarget, Io, Node, Offset, Prepare, Reference, RenderMode, Shape, Shapes,
+    Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{NodeKey, Topology};
 use tutti_ump::{
@@ -36,16 +36,23 @@ struct Src {
     mail: Mail,
 }
 
+impl Src {
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Src {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.events(0, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         let mut m = self.mail.lock().unwrap();
         for (_, w) in m.drain(..) {
             // A unit fading out has detached writers: its pushes are refused.
-            let _ = io.event_out(0).push(Event::midi(Offset::ZERO, Ump(w)));
+            let _ = io
+                .event_out(Self::OUT)
+                .push(Event::midi(Offset::ZERO, Ump(w)));
         }
         Status::Silent
     }
@@ -77,6 +84,11 @@ impl Node for Lag {
     fn reset(&mut self) {}
 }
 
+impl Sink {
+    const BASE: Shape = Shape::sink_unassigned(ChannelLayout::EMPTY).events(1, 0);
+    const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
+}
+
 impl Node for Sink {
     fn shape(&self) -> Shape {
         let a = if self.audio {
@@ -89,7 +101,7 @@ impl Node for Sink {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
         let mut log = self.log.lock().unwrap();
-        for e in io.events(0) {
+        for e in io.events(Self::IN) {
             if let EventKind::Midi(Ump(w)) = e.kind {
                 log.push((self.id, cx.env.frame_at(e.offset).get(), w));
             }
@@ -1695,13 +1707,18 @@ fn a_live_note_during_a_long_drain_is_neither_refused_nor_left_sounding() {
 #[test]
 fn a_source_without_note_events_closes_nothing() {
     struct Clock;
+    impl Clock {
+        const SHAPE: Shape = Shape::EMPTY.events(0, 1).no_note_events();
+        const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+    }
+
     impl Node for Clock {
         fn shape(&self) -> Shape {
-            Shape::EMPTY.events(0, 1).no_note_events()
+            Self::SHAPE
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-            let _ = io.event_out(0).push(Event::midi(
+            let _ = io.event_out(Self::OUT).push(Event::midi(
                 Offset::ZERO,
                 Ump(m1_controller(CCNumber::VOLUME, 100)),
             ));
@@ -1737,13 +1754,20 @@ fn a_source_without_note_events_closes_nothing() {
 #[should_panic(expected = "declared no note events")]
 fn a_note_from_a_source_that_declared_none_is_caught() {
     struct Liar;
+    impl Liar {
+        const SHAPE: Shape = Shape::EMPTY.events(0, 1).no_note_events();
+        const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+    }
+
     impl Node for Liar {
         fn shape(&self) -> Shape {
-            Shape::EMPTY.events(0, 1).no_note_events()
+            Self::SHAPE
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-            let _ = io.event_out(0).push(Event::midi(Offset::ZERO, Ump(on60())));
+            let _ = io
+                .event_out(Self::OUT)
+                .push(Event::midi(Offset::ZERO, Ump(on60())));
             Status::Modified
         }
         fn reset(&mut self) {}
@@ -1773,14 +1797,21 @@ impl Clone for Once {
         Once(self.1, self.1)
     }
 }
+impl Once {
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Once {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.events(0, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         if !std::mem::replace(&mut self.0, true) {
-            let _ = io.event_out(0).push(Event::midi(Offset::ZERO, Ump(on60())));
+            let _ = io
+                .event_out(Self::OUT)
+                .push(Event::midi(Offset::ZERO, Ump(on60())));
         }
         Status::Modified
     }
@@ -1788,13 +1819,18 @@ impl Node for Once {
 }
 #[derive(Clone)]
 struct Hear(Log, u64);
+impl Hear {
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).events(1, 0);
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for Hear {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        for e in io.events(0) {
+        for e in io.events(Self::IN) {
             if let EventKind::Midi(Ump(w)) = e.kind {
                 self.0
                     .lock()
@@ -1837,8 +1873,11 @@ fn forked(log: &Log, blocks: usize, mid_note: bool) -> (Editor, Executor) {
             &mut [&mut out_buf[..]],
         );
     }
-    ed.fork(ForkTarget::MainOutput, ForkMode::Offline, prep)
-        .expect("forks")
+    ed.fork(
+        ForkTarget::MainOutput,
+        prep.with_render_mode(RenderMode::Offline),
+    )
+    .expect("forks")
 }
 
 /// A fork closes what it has seen itself: the live graph has not run, so the
@@ -2080,14 +2119,19 @@ mod no_alloc {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     struct Count(Arc<AtomicU64>);
+    impl Count {
+        const SHAPE: Shape = Shape::EMPTY.events(1, 0);
+        const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
+    }
+
     impl Node for Count {
         fn shape(&self) -> Shape {
-            Shape::EMPTY.events(1, 0)
+            Self::SHAPE
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
             self.0
-                .fetch_add(io.events(0).len() as u64, Ordering::Relaxed);
+                .fetch_add(io.events(Self::IN).len() as u64, Ordering::Relaxed);
             Status::Silent
         }
         fn reset(&mut self) {}

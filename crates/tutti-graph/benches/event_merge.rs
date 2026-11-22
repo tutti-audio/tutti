@@ -18,8 +18,9 @@ use std::num::NonZeroU32;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_buffers::MaxBlock;
 use tutti_graph::{
-    Cx, Editor, Event, EventEdge, EventInputPort, EventOutputPort, Executor, Io, Node, NodeKey,
-    ParamEvent, ParamSegment, Prepare, Shape, Status, TransportPosition, Unforkable,
+    Cx, Editor, Event, EventEdge, EventInputPort, EventOutputPort, Executor, InEvents, Io, Node,
+    NodeKey, OutEvents, ParamEvent, ParamSegment, Prepare, Shape, Status, TransportPosition,
+    Unforkable,
 };
 use tutti_ump::Ump;
 use tutti_units::{ParamId, SampleRate, Samples};
@@ -38,23 +39,40 @@ enum Mix {
 }
 
 struct Source {
+    out: OutEvents,
     n: u32,
     mix: Mix,
 }
 
-impl Node for Source {
-    fn shape(&self) -> Shape {
+impl Source {
+    fn new(n: u32, mix: Mix) -> Self {
+        Self {
+            out: Self::declared(n, mix)
+                .event_output(0)
+                .expect("one event output"),
+            n,
+            mix,
+        }
+    }
+
+    fn declared(n: u32, mix: Mix) -> Shape {
         let shape = Shape::EMPTY
             .events(0, 1)
-            .event_capacity(NonZeroU32::new(self.n * 2).expect("a capacity"));
-        match self.mix {
+            .event_capacity(NonZeroU32::new(n * 2).expect("a capacity"));
+        match mix {
             Mix::Midi => shape,
             Mix::Params | Mix::Mixed => shape.param_events(),
         }
     }
+}
+
+impl Node for Source {
+    fn shape(&self) -> Shape {
+        Self::declared(self.n, self.mix)
+    }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        let out = io.event_out(0);
+        let out = io.event_out(self.out);
         for i in 0..self.n as usize {
             let at = cx.env.offset(i * BLOCK / self.n as usize).expect("inside");
             if matches!(self.mix, Mix::Midi | Mix::Mixed) {
@@ -70,15 +88,23 @@ impl Node for Source {
     fn reset(&mut self) {}
 }
 
-struct Sink;
+struct Sink(InEvents);
+
+impl Sink {
+    const SHAPE: Shape = Shape::EMPTY.events(1, 0);
+
+    fn new() -> Self {
+        Self(Self::SHAPE.event_input(0).expect("one event input"))
+    }
+}
 
 impl Node for Sink {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
-        black_box(io.events(0).len() + io.events(0).params().len());
+        black_box(io.events(self.0).len() + io.events(self.0).params().len());
         Status::Modified
     }
     fn reset(&mut self) {}
@@ -89,9 +115,9 @@ fn rig(k: u64, n: u32, mix: Mix) -> Executor {
         SampleRate::SR_48K,
         MaxBlock::of(Samples::new(BLOCK)),
     ));
-    ed.insert(NodeKey(100), "sink", Unforkable(Sink));
+    ed.insert(NodeKey(100), "sink", Unforkable(Sink::new()));
     for i in 0..k {
-        ed.insert(NodeKey(i + 1), "source", Unforkable(Source { n, mix }));
+        ed.insert(NodeKey(i + 1), "source", Unforkable(Source::new(n, mix)));
         ed.spec_mut().connect_events(
             EventInputPort {
                 node: NodeKey(100),

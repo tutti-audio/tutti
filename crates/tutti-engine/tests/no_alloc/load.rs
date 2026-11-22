@@ -130,9 +130,15 @@ struct Burst {
     per_block: usize,
 }
 
+impl Burst {
+    const SHAPE: tutti_graph::Shape =
+        tutti_graph::Shape::source_unassigned(ChannelLayout::MONO).events(0, 1);
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl tutti_graph::Node for Burst {
     fn shape(&self) -> tutti_graph::Shape {
-        tutti_graph::Shape::source_unassigned(ChannelLayout::MONO).events(0, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &tutti_graph::Prepare) {}
     fn process(
@@ -141,7 +147,7 @@ impl tutti_graph::Node for Burst {
         mut io: tutti_graph::Io<'_>,
     ) -> tutti_graph::Status {
         io.output(0).fill(0.0);
-        let out = io.event_out(0);
+        let out = io.event_out(Self::OUT);
         for _ in 0..self.per_block {
             // A note-on; a full port refuses it, which is the point.
             let _ = out.push(tutti_graph::Event::midi(

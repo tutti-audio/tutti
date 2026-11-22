@@ -126,14 +126,21 @@ struct Held {
     on: u64,
 }
 
+impl Held {
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
+    const OUT: tutti_graph::OutEvents = Self::SHAPE
+        .event_output(0)
+        .expect("one event output is declared");
+}
+
 impl Node for Held {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.events(0, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         if let Some(o) = cx.env.offset_of(Frame::new(self.on)) {
-            io.event_out(0)
+            io.event_out(Self::OUT)
                 .push(Event::midi(
                     o,
                     Message::midi1(
@@ -1010,7 +1017,7 @@ fn an_added_synth_is_a_modulation_target() {
     use tutti_polysynth::{PolySynth, SynthConfig};
 
     let (mut s, _side) = rig(2);
-    let node = PolySynth::new(SynthConfig::default());
+    let node = PolySynth::new(SynthConfig::new());
     let synth = s.graph().add(node);
     main_output(&mut s, &[synth.erase(), synth.erase()]);
     let volume = ParamRef::unit(synth, UnitParam::Volume);

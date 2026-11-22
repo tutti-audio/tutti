@@ -20,9 +20,9 @@
 //! `FloatWidth::F64`; every other plugin is told 32.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 use tutti_buffers::FloatWidth;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_vst2_host::Vst2ProcessContext;
 use tutti_vst2_test_plugin::{ProcessCapture, ProcessEntry};
@@ -57,7 +57,7 @@ const NEEDS_F64: f64 = 1.0 / 3.0;
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock_recover()
+    PROBE_LOCK.lock()
 }
 
 /// Every `TUTTI_VST2_PROBE_*` key this file sets. A leaked variable reshapes

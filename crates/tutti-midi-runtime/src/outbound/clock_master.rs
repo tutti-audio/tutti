@@ -57,7 +57,7 @@ use tutti_music::{
     ClockPass, ClockPassEnd, Meter, MeterMap, TimeSignature, first_frame_at_or_after,
 };
 use tutti_ump::{Flex, Message, MidiGroup, System, Ump};
-use tutti_units::{BarCount, Beat, BeatDuration, Bpm, SampleRate, Samples, Seconds};
+use tutti_units::{BarCount, Beat, BeatDuration, Bpm, SampleRate, SampleSpan, Samples, Seconds};
 
 use tutti_midi_protocol::{
     MtcFullMessage, MtcRate, MtcTimeCode, QuarterFrameCycle, QuarterFramePiece, SmpteTimecode,
@@ -271,9 +271,7 @@ impl ClockMaster {
     /// Frames from the MTC grid segment's first frame to quarter-frame `k`,
     /// at `rate` and `fps`: closed form, never accumulated.
     fn mtc_due(&self, k: u64, rate: SampleRate, fps: MtcRate) -> f64 {
-        self.mtc.lead
-            + k.saturating_sub(self.mtc.base) as f64 * fps.frame_rate().samples_per_frame(rate)
-                / 4.0
+        self.mtc.lead + k.saturating_sub(self.mtc.base) as f64 * frame_span(fps, rate).get() / 4.0
     }
 
     /// Start a new MTC grid segment at the next quarter-frame due, the
@@ -683,7 +681,7 @@ impl ClockMaster {
         // change moves the timeline under a grid fixed in samples, and the
         // label (read from the beat at each piece 0) follows within a frame.
         if std::mem::take(&mut self.mtc.align) {
-            let period = 2.0 * fps.frame_rate().samples_per_frame(rate);
+            let period = 2.0 * frame_span(fps, rate).get();
             let cycles = block_pos / period;
             let k = if (cycles - cycles.round()).abs() < 1e-6 {
                 cycles.round()
@@ -771,6 +769,13 @@ fn frame_offset(frames: usize, block_size: usize) -> Offset {
         Samples::new(block_size),
     )
     .unwrap_or(Offset::ZERO)
+}
+
+/// The frames one MTC frame lasts at `rate`: the exact frame period, kept
+/// fractional.
+fn frame_span(fps: MtcRate, rate: SampleRate) -> SampleSpan {
+    SampleSpan::from_seconds(fps.frame_rate().frame_period(), rate)
+        .expect("a frame period and a sample rate are positive")
 }
 
 /// The sample position of `beat` from beat 0 at a steady `beats_per_sample`:

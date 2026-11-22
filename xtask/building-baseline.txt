@@ -332,11 +332,6 @@ tutti-midi-network  pub-field-config  crates/tutti-midi-network/src/endpoint.rs:
 tutti-plugin-db  pub-field-config  crates/tutti-plugin-db/src/config.rs::CatalogConfig
 tutti-plugin-ipc  pub-field-config  crates/tutti-plugin-ipc/src/config/audio.rs::AudioConfig
 tutti-plugin-types  pub-field-config  crates/tutti-plugin-types/src/measured.rs::ProbeConfig
-tutti-polysynth  pub-field-config  crates/tutti-polysynth/src/portamento.rs::PortamentoConfig
-tutti-polysynth  pub-field-config  crates/tutti-polysynth/src/synth.rs::FilterModConfig
-tutti-polysynth  pub-field-config  crates/tutti-polysynth/src/synth.rs::SynthConfig
-tutti-polysynth  pub-field-config  crates/tutti-polysynth/src/unison.rs::UnisonConfig
-tutti-polysynth  pub-field-config  crates/tutti-polysynth/src/voice.rs::SynthVoicesConfig
 tutti-sampler  pub-field-config  crates/tutti-sampler/src/streamer/config.rs::BufferConfig
 tutti-sampler  pub-field-config  crates/tutti-sampler/src/streamer/mod.rs::DiskStreamerConfig
 tutti-sampler  pub-field-config  crates/tutti-sampler/src/voice/disk_voice.rs::DiskVoiceConfig

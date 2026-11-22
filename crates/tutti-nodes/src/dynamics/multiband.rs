@@ -1371,7 +1371,7 @@ mod tests {
     /// makeup: a fork sharing either cell would not render the reduced level.
     #[test]
     fn the_graphs_fork_renders_from_the_values_it_took() {
-        use tutti_graph::ForkMode;
+        use tutti_graph::RenderMode;
         let (n, _) = node(2);
         let parts = n.into_parts();
         let live = Ctl {
@@ -1383,7 +1383,7 @@ mod tests {
         b0.set_ratio(4.0);
         b0.set_attack(0.001);
         b0.set_release(0.001);
-        let forked = parts.fork.unwrap().fork(ForkMode::Offline).unwrap();
+        let forked = parts.fork.unwrap().fork(RenderMode::Offline).unwrap();
         b0.set_bypass(true);
         b0.set_makeup(20.0);
         b0.set_solo(false);

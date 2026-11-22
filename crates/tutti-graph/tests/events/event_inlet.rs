@@ -19,8 +19,8 @@ use tutti_graph::contract::{Direct, HAND_EVENT_CAPACITY};
 use tutti_graph::{
     Edge, Editor, Env, EventCapacity, EventEdge, EventInletNode, EventInletWriter, EventInputPort,
     EventKind, EventOutputPort, EventTapId, EventTapOptions, EventTapReader, Executor, ForkCause,
-    ForkMode, ForkSource, ForkTarget, Forked, InputPort, IntoNode, Losses, Node, NodeKey,
-    NodeParts, OutputPort, PlayClock, PortSource, Prepare, Stamp, TapAlign, TapEvent,
+    ForkSource, ForkTarget, Forked, InputPort, IntoNode, Losses, Node, NodeKey, NodeParts,
+    OutputPort, PlayClock, PortSource, Prepare, RenderMode, Stamp, TapAlign, TapEvent,
     TransportChanges, TransportPosition,
 };
 use tutti_rt::PushError;
@@ -57,7 +57,10 @@ fn rig(capacity: u32) -> Rig {
 
 /// `(offset, status nibble, data byte 1)` of what the last block emitted.
 fn sent(d: &Direct<EventInletNode>) -> Vec<(u32, u32, u32)> {
-    d.event_output(0)
+    let port = Node::<f32>::shape(&*d.node)
+        .event_output(0)
+        .expect("the inlet's output");
+    d.event_output(port)
         .iter()
         .map(|e| match e.kind {
             EventKind::Midi(Ump(w)) => (e.offset.get(), (w[0] >> 20) & 0xf, (w[0] >> 8) & 0x7f),
@@ -472,7 +475,7 @@ struct Forkable(Kind);
 struct KindFork(Kind);
 
 impl ForkSource for KindFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked, ForkCause> {
         Ok(Forked::new(Box::new(TestNode::new(self.0.clone()))))
     }
 }
@@ -720,8 +723,7 @@ fn the_fork_is_silent() {
     let (mut fed, mut fexec) = ed
         .fork(
             ForkTarget::MainOutput,
-            ForkMode::Offline,
-            common::prepare(MAX_BLOCK),
+            common::prepare(MAX_BLOCK).with_render_mode(RenderMode::Offline),
         )
         .expect("forks");
     fexec.apply_pending();

@@ -11,7 +11,9 @@
 //! follows no retirement ([`following`](MidiOutNode::following)). An event past
 //! [`MIDI_OUT_EVENT_CAPACITY`] in a block is not passed and is counted as lost.
 
-use tutti_graph::{Cx, Event, EventKind, Io, Node, Offset, Prepare, Shape, Status, UmpAt};
+use tutti_graph::{
+    Cx, Event, EventKind, InEvents, Io, Node, Offset, OutEvents, Prepare, Shape, Status, UmpAt,
+};
 use tutti_ump::NoteKey;
 
 use crate::ledger::{Class, owed_off};
@@ -171,6 +173,14 @@ impl Clone for MidiOutNode {
 }
 
 impl MidiOutNode {
+    const SHAPE: Shape = Shape::EMPTY
+        .events(1, 1)
+        .event_capacity(MIDI_OUT_PORT_CAPACITY)
+        // Event-only: a copy per event, nothing per frame.
+        .cost(tutti_graph::Cost::Light);
+    const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
+    const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
+
     /// A node with room for [`MIDI_OUT_EVENT_CAPACITY`] events a block.
     #[must_use]
     pub fn new() -> Self {
@@ -233,11 +243,7 @@ impl<F: tutti_buffers::Float> Node<F> for MidiOutNode {
     /// No audio; one event input and one event output of
     /// [`MIDI_OUT_EVENT_CAPACITY`] events.
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .events(1, 1)
-            .event_capacity(MIDI_OUT_PORT_CAPACITY)
-            // Event-only: a copy per event, nothing per frame.
-            .cost(tutti_graph::Cost::Light)
+        Self::SHAPE
     }
 
     fn prepare(&mut self, _: &Prepare) {}
@@ -252,7 +258,7 @@ impl<F: tutti_buffers::Float> Node<F> for MidiOutNode {
         });
         let mut kept = 0;
         let mut lost = 0;
-        for event in io.events(0) {
+        for event in io.events(Self::IN) {
             let EventKind::Midi(raw) = event.kind else {
                 continue;
             };
@@ -274,7 +280,11 @@ impl<F: tutti_buffers::Float> Node<F> for MidiOutNode {
         for (offset, raw) in &self.staged[..kept] {
             // Refused past the capacity: counted by the executor, and a note
             // the port refused is not one to end.
-            if io.event_out(0).push(Event::midi(*offset, *raw)).is_ok() {
+            if io
+                .event_out(Self::OUT)
+                .push(Event::midi(*offset, *raw))
+                .is_ok()
+            {
                 at = *offset;
                 if let Some(held) = self.held.as_deref_mut() {
                     track(held, *raw);
@@ -284,7 +294,7 @@ impl<F: tutti_buffers::Float> Node<F> for MidiOutNode {
         if let Some(held) = self.held.as_deref_mut()
             && phase != Phase::Live
         {
-            end_notes(held, io.event_out(0), at);
+            end_notes(held, io.event_out(Self::OUT), at);
         }
         Status::Modified
     }

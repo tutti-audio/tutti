@@ -154,9 +154,16 @@ struct Hold {
     sent: usize,
 }
 
+impl Hold {
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1).cost(Cost::Light);
+    const OUT: tutti_graph::OutEvents = Self::SHAPE
+        .event_output(0)
+        .expect("one event output is declared");
+}
+
 impl Node for Hold {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.events(0, 1).cost(Cost::Light)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -172,7 +179,7 @@ impl Node for Hold {
                 ),
             ));
             let at = Offset::of(Samples::new(0), Samples::new(io.frames()));
-            if io.event_out(0).push(Event::midi(at, note)).is_ok() {
+            if io.event_out(Self::OUT).push(Event::midi(at, note)).is_ok() {
                 self.sent += 1;
             }
         }
@@ -241,21 +248,21 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
     let mut strips = Vec::new();
     let mut sends = Vec::new();
     for i in 0..SYNTHS {
-        let synth = PolySynth::new(SynthConfig {
-            polyphony: std::num::NonZeroUsize::new(NOTES).expect("at least one voice"),
-            oscillator: OscillatorType::Saw,
-            filter: FilterType::Moog {
-                cutoff: Hz::new(1_200.0),
-                resonance: Resonance::new(0.3),
-            },
-            envelope: Adsr::new(
-                Seconds::new(0.005),
-                Seconds::new(0.2),
-                Amplitude::new(0.7),
-                Seconds::new(0.3),
-            ),
-            ..Default::default()
-        });
+        let synth = PolySynth::new(
+            SynthConfig::new()
+                .polyphony(std::num::NonZeroUsize::new(NOTES).expect("at least one voice"))
+                .oscillator(OscillatorType::Saw)
+                .filter(FilterType::Moog {
+                    cutoff: Hz::new(1_200.0),
+                    resonance: Resonance::new(0.3),
+                })
+                .envelope(Adsr::new(
+                    Seconds::new(0.005),
+                    Seconds::new(0.2),
+                    Amplitude::new(0.7),
+                    Seconds::new(0.3),
+                )),
+        );
         let synth = s.graph().add(synth);
         let hold = s.graph().add(Unforkable(Hold {
             base: 36 + i as u8,

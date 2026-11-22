@@ -45,9 +45,8 @@
 //! guard) while calibrating this file — which is also what confirms the
 //! allocator hook is armed at all, the property every assertion here rests on.
 
-use std::sync::Mutex;
 use tutti_graph::UmpAt;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use crate::support::au::Au;
 use tutti_au_host::BusDirection;
@@ -59,15 +58,7 @@ use tutti_fixtures::midi;
 use tutti_ump::{CCNumber, MidiChannel, MidiGroup};
 
 /// Serializes AU instantiation across these tests.
-///
-/// Poison is recovered rather than propagated: an ordinary assertion failure in
-/// one test would otherwise convert every later test into a spurious
-/// `PoisonError` and hide which one actually broke.
 static PLUGIN_LOAD_LOCK: Mutex<()> = Mutex::new(());
-
-fn lock() -> std::sync::MutexGuard<'static, ()> {
-    PLUGIN_LOAD_LOCK.lock_recover()
-}
 
 /// Block size every test in this file renders at.
 const BLOCK: u32 = 64;
@@ -161,7 +152,7 @@ impl Bufs64 {
 /// as intermittent dropouts under load rather than seen as a crash.
 #[test]
 fn effect_render_does_not_allocate() {
-    let _lock = lock();
+    let _lock = PLUGIN_LOAD_LOCK.lock();
     let mut au = corpus::DELAY.open(tutti_units::SampleRate::SR_48K, BLOCK);
     let mut b = Bufs::new();
 
@@ -187,7 +178,7 @@ fn effect_render_does_not_allocate() {
 /// AU on a `Float64` pipeline takes it on every block unconditionally.
 #[test]
 fn f64_effect_render_does_not_allocate() {
-    let _lock = lock();
+    let _lock = PLUGIN_LOAD_LOCK.lock();
     let mut au = corpus::DELAY.open(tutti_units::SampleRate::SR_48K, BLOCK);
     let mut b = Bufs64::new();
 
@@ -209,7 +200,7 @@ fn f64_effect_render_does_not_allocate() {
 /// worst possible moment, and one that never reproduces on an idle timeline.
 #[test]
 fn instrument_render_with_midi_does_not_allocate() {
-    let _lock = lock();
+    let _lock = PLUGIN_LOAD_LOCK.lock();
     let mut au = corpus::DLS_SYNTH.open(tutti_units::SampleRate::SR_48K, BLOCK);
     let mut b = Bufs::new();
 
@@ -239,7 +230,7 @@ fn instrument_render_with_midi_does_not_allocate() {
 /// to a test that only drove the delivered families.
 #[test]
 fn send_midi_decode_does_not_allocate() {
-    let _lock = lock();
+    let _lock = PLUGIN_LOAD_LOCK.lock();
     let mut au = corpus::DLS_SYNTH.open(tutti_units::SampleRate::SR_48K, BLOCK);
     let mut b = Bufs::new();
 
@@ -290,7 +281,7 @@ fn send_midi_decode_does_not_allocate() {
 fn a_long_sysex_does_not_allocate_and_an_oversized_one_is_dropped_counted() {
     use tutti_ump::SYSEX7_MAX_PAYLOAD;
 
-    let _lock = lock();
+    let _lock = PLUGIN_LOAD_LOCK.lock();
     let au = corpus::SAMPLER.open(tutti_units::SampleRate::SR_48K, BLOCK);
 
     // Built before the guarded region: the harness allocates, the host must not.
@@ -333,7 +324,7 @@ fn a_long_sysex_does_not_allocate_and_an_oversized_one_is_dropped_counted() {
 /// non-linear, so a load genuinely moves its state.
 #[test]
 fn render_after_preset_load_does_not_allocate() {
-    let _lock = lock();
+    let _lock = PLUGIN_LOAD_LOCK.lock();
     let mut au = corpus::DISTORTION.open(tutti_units::SampleRate::SR_48K, BLOCK);
     let mut b = Bufs::new();
 
@@ -368,7 +359,7 @@ fn render_after_preset_load_does_not_allocate() {
 /// drops a buffer.
 #[test]
 fn bypass_toggle_during_render_does_not_allocate() {
-    let _lock = lock();
+    let _lock = PLUGIN_LOAD_LOCK.lock();
     let mut au = corpus::DISTORTION.open(tutti_units::SampleRate::SR_48K, BLOCK);
     let mut b = Bufs::new();
 
@@ -397,7 +388,7 @@ fn bypass_toggle_during_render_does_not_allocate() {
 /// hides, and a suite that only drove the success path would never see it.
 #[test]
 fn per_element_parameter_writes_do_not_allocate() {
-    let _lock = lock();
+    let _lock = PLUGIN_LOAD_LOCK.lock();
     let mut au = corpus::MULTI_CHANNEL_MIXER.open(tutti_units::SampleRate::SR_48K, BLOCK);
     let mut b = Bufs::new();
 
@@ -446,7 +437,7 @@ fn per_element_parameter_writes_do_not_allocate() {
 /// shows up on the machine that switched.
 #[test]
 fn render_after_sample_rate_change_does_not_allocate() {
-    let _lock = lock();
+    let _lock = PLUGIN_LOAD_LOCK.lock();
     let mut au = corpus::DELAY.open(tutti_units::SampleRate::SR_48K, BLOCK);
     let mut b = Bufs::new();
 

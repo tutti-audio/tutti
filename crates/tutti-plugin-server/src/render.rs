@@ -39,11 +39,11 @@
 //! every block the host sends after that answer.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_platform::{Executor, PriorityRequest, Task, Unjoined, WeakExecutor, join_within};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_buffers::Float;
 use tutti_buffers::FloatWidth;
@@ -1091,7 +1091,7 @@ impl RenderThread {
             Err(error) => Err(Box::new(SpawnFailed {
                 error,
                 side: slot
-                    .lock_recover()
+                    .lock()
                     .take()
                     .expect("a thread that did not start took nothing"),
             })),
@@ -1207,7 +1207,7 @@ async fn render_lane(parts: Parts) -> Outcome {
         alive,
         ended,
     } = parts;
-    let side = slot.lock_recover().take().expect("the side is taken once");
+    let side = slot.lock().take().expect("the side is taken once");
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         run(side, audio, &stop, &alive, &ended)
     }));
@@ -1588,7 +1588,7 @@ mod tests {
         }
 
         fn wake_by_ref(self: &Arc<Self>) {
-            self.0.lock_recover().push(std::thread::current().id());
+            self.0.lock().push(std::thread::current().id());
         }
     }
 
@@ -1624,7 +1624,7 @@ mod tests {
         };
         feed(&wake);
         let finished = poller.join().expect("the poller");
-        let wakes = recorder.0.lock_recover().len();
+        let wakes = recorder.0.lock().len();
         (wakes, finished)
     }
 

@@ -49,7 +49,14 @@ fn non_drop_2997_has_no_mtc_rate() {
 
 #[test]
 fn test_to_seconds() {
-    let tc = SmpteTimecode::new(1, 0, 0, 0, SmpteFrameRate::Fps30).unwrap();
+    let tc = SmpteTimecode::new(
+        TimecodeHours::of(1),
+        TimecodeMinutes::of(0),
+        TimecodeSeconds::of(0),
+        0,
+        SmpteFrameRate::Fps30,
+    )
+    .unwrap();
     assert!((tc.to_seconds().get() - 3600.0).abs() < 0.001);
 }
 
@@ -76,7 +83,16 @@ fn drop_frame_labels_skip_00_and_01_except_every_tenth_minute() {
 
 #[test]
 fn invalid_drop_frame_labels_count_as_the_next_valid_one() {
-    let at = |m, s, f| SmpteTimecode::new(0, m, s, f, SmpteFrameRate::Fps2997Df).unwrap();
+    let at = |m, s, f| {
+        SmpteTimecode::new(
+            TimecodeHours::of(0),
+            TimecodeMinutes::of(m),
+            TimecodeSeconds::of(s),
+            f,
+            SmpteFrameRate::Fps2997Df,
+        )
+        .unwrap()
+    };
     assert_eq!(at(1, 0, 0).frame_count(), 1800);
     assert_eq!(at(1, 0, 1).frame_count(), 1800);
     assert_eq!(at(1, 0, 2).frame_count(), 1800);
@@ -108,20 +124,26 @@ fn frame_count_inverts_from_frame_count_and_to_seconds_follows_it() {
     );
 }
 
-/// `new` refuses each field one past its range, per rate, and accepts the
-/// last in-range value.
+/// `new` refuses a frame label at or past the rate's count, per rate, and
+/// accepts the last in-range one; the other fields are in range by type.
 #[test]
-fn new_refuses_a_field_out_of_range() {
+fn new_refuses_a_frame_label_out_of_range() {
     use SmpteFrameRate::*;
-    assert!(SmpteTimecode::new(23, 59, 59, 23, Fps24).is_some());
-    assert!(SmpteTimecode::new(24, 0, 0, 0, Fps30).is_none());
-    assert!(SmpteTimecode::new(0, 60, 0, 0, Fps30).is_none());
-    assert!(SmpteTimecode::new(0, 0, 60, 0, Fps30).is_none());
-    assert!(SmpteTimecode::new(0, 0, 0, 24, Fps24).is_none());
-    assert!(SmpteTimecode::new(0, 0, 0, 25, Fps25).is_none());
-    assert!(SmpteTimecode::new(0, 0, 0, 24, Fps25).is_some());
+    let at = |frames, rate| {
+        SmpteTimecode::new(
+            TimecodeHours::of(23),
+            TimecodeMinutes::of(59),
+            TimecodeSeconds::of(59),
+            frames,
+            rate,
+        )
+    };
+    assert!(at(23, Fps24).is_some());
+    assert!(at(24, Fps24).is_none());
+    assert!(at(24, Fps25).is_some());
+    assert!(at(25, Fps25).is_none());
     for rate in [Fps2997Df, Fps2997Ndf, Fps30] {
-        assert!(SmpteTimecode::new(0, 0, 0, 29, rate).is_some());
-        assert!(SmpteTimecode::new(0, 0, 0, 30, rate).is_none());
+        assert!(at(29, rate).is_some());
+        assert!(at(30, rate).is_none());
     }
 }

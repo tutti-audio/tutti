@@ -1,10 +1,10 @@
 //! The audio-thread half of a plugin: `IAudioProcessor::process` and
 //! `setProcessing`.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, MutexGuard};
 
-use parking_lot::{Mutex, MutexGuard};
+use tutti_rt::Mutex;
 use vst3::Steinberg::Vst::{
     IAudioProcessor, IAudioProcessorTrait, ProcessContext, ProcessData, ProcessSetup,
 };

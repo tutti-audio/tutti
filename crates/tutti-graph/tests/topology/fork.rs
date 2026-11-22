@@ -12,9 +12,9 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, EventEdge, EventInputPort, EventOutputPort, Fade, FadeLaw, ForkBuild, ForkByClone,
-    ForkCause, ForkError, ForkFault, ForkFaultKind, ForkHealth, ForkMode, ForkRemains, ForkSource,
+    ForkCause, ForkError, ForkFault, ForkFaultKind, ForkHealth, ForkRemains, ForkSource,
     ForkTarget, Forked, GraphBuilder, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet,
-    PendingFork, Prepare, Renderer, Shape, Status, Unforkable, param_parts,
+    PendingFork, Prepare, RenderMode, Renderer, Shape, Status, Unforkable, param_parts,
 };
 use tutti_graph::{Edge, FeedbackFrom, InputPort, OutputPort, PortSource};
 use tutti_rt::Param;
@@ -111,7 +111,7 @@ impl Node for Shared {
 struct SharedFork;
 
 impl ForkSource for SharedFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked, ForkCause> {
         Ok(Forked::new(Box::new(Shared {
             pos: Arc::new(AtomicU32::new(0)),
         })))
@@ -180,7 +180,7 @@ struct Forkable(Kind);
 struct KindFork(Kind);
 
 impl ForkSource for KindFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked, ForkCause> {
         Ok(Forked::new(Box::new(TestNode::new(self.0.clone()))))
     }
 }
@@ -244,7 +244,7 @@ fn a_forked_chain_renders_like_a_fresh_build() {
     let pre = prepare(256);
     let (fork_ed, fork_exec) = live
         .editor()
-        .fork(ForkTarget::MainOutput, ForkMode::Live, pre)
+        .fork(ForkTarget::MainOutput, pre)
         .expect("every node is forkable");
     assert_eq!(fork_ed.prepare(), &pre);
     let forked = render(fork_ed, fork_exec, 3_000);
@@ -256,16 +256,16 @@ fn a_forked_chain_renders_like_a_fresh_build() {
 
 /// Forks as its fork source was asked to: a constant 0.75 for an offline
 /// render, or 0 for a live duplicate. The one thing a source reads from the
-/// [`ForkMode`].
+/// [`RenderMode`].
 struct ReadsMode;
 
 struct ModeFork;
 
 impl ForkSource for ModeFork {
-    fn fork(&self, mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, mode: RenderMode) -> Result<Forked, ForkCause> {
         let value = match mode {
-            ForkMode::Offline => 0.75,
-            ForkMode::Live => 0.0,
+            RenderMode::Offline => 0.75,
+            RenderMode::Realtime => 0.0,
         };
         Ok(Forked::new(Box::new(Consts {
             outs: 1,
@@ -301,7 +301,10 @@ fn a_fork_hands_its_sources_its_mode() {
 
     let (ed, exec) = live
         .editor()
-        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare(64))
+        .fork(
+            ForkTarget::MainOutput,
+            prepare(64).with_render_mode(RenderMode::Offline),
+        )
         .expect("forks");
     let offline = render(ed, exec, 64);
     assert!(
@@ -312,7 +315,7 @@ fn a_fork_hands_its_sources_its_mode() {
 
     let (ed, exec) = live
         .editor()
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(64))
+        .fork(ForkTarget::MainOutput, prepare(64))
         .expect("forks");
     let dup = render(ed, exec, 64);
     assert!(dup[0].iter().all(|&x| x == 0.0), "{:?}", &dup[0][..4]);
@@ -338,9 +341,7 @@ fn a_value_set_after_insert_reaches_the_fork() {
     ed.collect();
 
     assert!(controls.set(UnitParam::Volume, 0.75));
-    let (fork_ed, fork_exec) = ed
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(64))
-        .expect("forks");
+    let (fork_ed, fork_exec) = ed.fork(ForkTarget::MainOutput, prepare(64)).expect("forks");
     assert!(controls.set(UnitParam::Volume, 0.9));
     let forked = render(fork_ed, fork_exec, 128);
     assert!(
@@ -378,12 +379,11 @@ fn a_node_without_a_fork_source_is_not_forkable() {
     t.set_outputs(vec![out(NodeKey(1), 0)]);
     let pre = prepare(64);
     assert_eq!(
-        ed.fork(ForkTarget::MainOutput, ForkMode::Live, pre).err(),
+        ed.fork(ForkTarget::MainOutput, pre).err(),
         Some(ForkError::NotForkable { key: NodeKey(2) })
     );
     assert_eq!(
-        ed.fork(ForkTarget::Node(NodeKey(1)), ForkMode::Live, pre)
-            .err(),
+        ed.fork(ForkTarget::Node(NodeKey(1)), pre).err(),
         Some(ForkError::NotForkable { key: NodeKey(2) }),
         "upstream of the target"
     );
@@ -394,28 +394,26 @@ fn a_node_without_a_fork_source_is_not_forkable() {
     ed.insert(NodeKey(1), "boxed", Unforkable(gain().into_node().0));
     ed.spec_mut().topology.set_outputs(vec![out(NodeKey(1), 0)]);
     assert_eq!(
-        ed.fork(ForkTarget::MainOutput, ForkMode::Live, pre).err(),
+        ed.fork(ForkTarget::MainOutput, pre).err(),
         Some(ForkError::NotForkable { key: NodeKey(1) })
     );
 
     let (mut ed, _exec) = Editor::new(pre);
     ed.insert(NodeKey(3), "gain", gain());
     ed.spec_mut().topology.set_outputs(vec![out(NodeKey(3), 0)]);
-    assert!(ed.fork(ForkTarget::MainOutput, ForkMode::Live, pre).is_ok());
+    assert!(ed.fork(ForkTarget::MainOutput, pre).is_ok());
     ed.insert(NodeKey(3), "boxed", Unforkable(gain().into_node().0));
     assert_eq!(
-        ed.fork(ForkTarget::MainOutput, ForkMode::Live, pre).err(),
+        ed.fork(ForkTarget::MainOutput, pre).err(),
         Some(ForkError::NotForkable { key: NodeKey(3) })
     );
     assert_eq!(
-        ed.fork(ForkTarget::Node(NodeKey(9)), ForkMode::Live, pre)
-            .err(),
+        ed.fork(ForkTarget::Node(NodeKey(9)), pre).err(),
         Some(ForkError::NoSuchNode { key: NodeKey(9) })
     );
     ed.insert(NodeKey(4), "sink", consts(0, 0.0));
     assert_eq!(
-        ed.fork(ForkTarget::Node(NodeKey(4)), ForkMode::Live, pre)
-            .err(),
+        ed.fork(ForkTarget::Node(NodeKey(4)), pre).err(),
         Some(ForkError::NoOutputs { key: NodeKey(4) })
     );
 }
@@ -463,7 +461,7 @@ impl IntoNode for Watched {
 struct WatchedFork(Arc<Flag>);
 
 impl ForkSource for WatchedFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked, ForkCause> {
         let node = Box::new(TestNode::new(Kind::Const {
             value: 1.0,
             width: 1,
@@ -486,9 +484,7 @@ fn a_forked_unit_that_fails_while_rendering_is_a_fork_fault() {
         .topology
         .set_outputs(vec![out(NodeKey(1), 0), out(NodeKey(4), 0)]);
 
-    let (fork, _fork_exec) = ed
-        .fork(ForkTarget::MainOutput, ForkMode::Live, pre)
-        .expect("forks");
+    let (fork, _fork_exec) = ed.fork(ForkTarget::MainOutput, pre).expect("forks");
     assert_eq!(fork.fork_health(), Ok(()));
     flag.0.store(1, Ordering::SeqCst);
     let fault: ForkFault = fork.fork_health().expect_err("crashed");
@@ -523,7 +519,7 @@ impl std::error::Error for RefusedState {}
 struct FailingFork;
 
 impl ForkSource for FailingFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked, ForkCause> {
         Err(ForkCause::new(RefusedState("bad chunk")))
     }
 }
@@ -565,7 +561,7 @@ fn a_failing_fork_source_is_a_named_error_with_its_cause() {
         .set_outputs(vec![out(NodeKey(1), 0), out(NodeKey(5), 0)]);
 
     let err = ed
-        .fork(ForkTarget::MainOutput, ForkMode::Live, pre)
+        .fork(ForkTarget::MainOutput, pre)
         .expect_err("a failing source fails the fork");
     let ForkError::Source { key, cause } = &err else {
         panic!("expected ForkError::Source, got {err:?}");
@@ -580,10 +576,7 @@ fn a_failing_fork_source_is_a_named_error_with_its_cause() {
     assert_eq!(err.clone(), err, "a clone shares its cause");
 
     // The target's sub-graph excludes the failing node, so forking it works.
-    assert!(
-        ed.fork(ForkTarget::Node(NodeKey(1)), ForkMode::Live, pre)
-            .is_ok()
-    );
+    assert!(ed.fork(ForkTarget::Node(NodeKey(1)), pre).is_ok());
 }
 
 /// **A node fork's outputs clamp**: channel `c` reads the node's port `min(c, outs - 1)` —
@@ -610,9 +603,7 @@ fn a_node_fork_fans_out_as_clone_isolated_does() {
             ed.spec_mut()
                 .topology
                 .set_outputs(vec![PortSource::Zero; graph_outs]);
-            let (fe, fx) = ed
-                .fork(ForkTarget::Node(key), ForkMode::Live, prepare(64))
-                .expect("forks");
+            let (fe, fx) = ed.fork(ForkTarget::Node(key), prepare(64)).expect("forks");
             let got = render(fe, fx, 64);
             assert_eq!(bits(&got), bits(&want), "{node_outs} into {graph_outs}");
         }
@@ -706,7 +697,7 @@ fn a_node_fork_holds_exactly_what_feeds_the_node() {
     ed.commit().expect("the live graph commits");
 
     let (fe, fx) = ed
-        .fork(ForkTarget::Node(target), ForkMode::Live, prepare(64))
+        .fork(ForkTarget::Node(target), prepare(64))
         .expect("forks");
     let keys: BTreeSet<NodeKey> = fe.spec().topology.nodes.keys().copied().collect();
     assert_eq!(keys, BTreeSet::from([osc, a, fb, emit, target]));
@@ -759,7 +750,7 @@ fn the_live_graph_is_unaffected_while_a_fork_renders() {
 
     let (fe, fx) = live
         .editor()
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(64))
+        .fork(ForkTarget::MainOutput, prepare(64))
         .expect("forks");
     // The live level moves after the fork: the fork keeps what it took.
     assert!(controls.set(UnitParam::Volume, 0.9));
@@ -803,17 +794,14 @@ fn a_replace_moves_forking_to_the_new_unit() {
         ed.replace(key, consts(2, 0.1), fade),
         Err(tutti_graph::CommitError::FadeShape { .. })
     ));
-    let (fe, fx) = ed
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(64))
-        .expect("forks");
+    let (fe, fx) = ed.fork(ForkTarget::MainOutput, prepare(64)).expect("forks");
     let forked = render(fe, fx, 64);
     assert!(forked[0].iter().all(|&x| x == 0.9), "{:?}", &forked[0][..4]);
 
     ed.replace(key, Unforkable(consts(1, 0.7).into_node().0), fade)
         .expect("same shape");
     assert_eq!(
-        ed.fork(ForkTarget::MainOutput, ForkMode::Live, prepare(64))
-            .err(),
+        ed.fork(ForkTarget::MainOutput, prepare(64)).err(),
         Some(ForkError::NotForkable { key })
     );
 }
@@ -830,10 +818,10 @@ fn a_fork_source_from_an_older_generation_is_refused() {
     let (mut ed, _exec) = Editor::new(pre);
     ed.insert(NodeKey(1), "consts", consts(1, 0.5));
     ed.spec_mut().topology.set_outputs(vec![out(NodeKey(1), 0)]);
-    assert!(ed.fork(ForkTarget::MainOutput, ForkMode::Live, pre).is_ok());
+    assert!(ed.fork(ForkTarget::MainOutput, pre).is_ok());
     ed.spec_mut().generations.insert(NodeKey(1), 7);
     assert_eq!(
-        ed.fork(ForkTarget::MainOutput, ForkMode::Live, pre).err(),
+        ed.fork(ForkTarget::MainOutput, pre).err(),
         Some(ForkError::NotForkable { key: NodeKey(1) })
     );
 }
@@ -869,9 +857,7 @@ fn a_fork_carries_event_capacity_and_its_own_marks() {
         spec.require_resolution(at, from, Resolution::Sample);
     }
 
-    let (fe, mut fx) = ed
-        .fork(ForkTarget::Node(fold), ForkMode::Live, pre)
-        .expect("forks");
+    let (fe, mut fx) = ed.fork(ForkTarget::Node(fold), pre).expect("forks");
     let mark = (
         EventInputPort {
             node: fold,
@@ -910,8 +896,7 @@ fn a_node_fork_with_no_main_outputs_is_no_outputs() {
     let (mut ed, _exec) = Editor::new(prepare(64));
     ed.insert(NodeKey(1), "consts", consts(1, 0.5));
     assert_eq!(
-        ed.fork(ForkTarget::Node(NodeKey(1)), ForkMode::Live, prepare(64))
-            .err(),
+        ed.fork(ForkTarget::Node(NodeKey(1)), prepare(64)).err(),
         Some(ForkError::NoOutputs { key: NodeKey(1) })
     );
 }
@@ -967,7 +952,7 @@ fn a_fork_by_clone_node_forks_from_reset() {
     );
     let (fork_ed, fork_exec) = live
         .editor()
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(256))
+        .fork(ForkTarget::MainOutput, prepare(256))
         .expect("a ForkByClone node forks");
     let forked = render(fork_ed, fork_exec, 4);
     assert_eq!(forked[0], vec![0.0, 1.0, 2.0, 3.0]);
@@ -979,9 +964,7 @@ fn a_fork_by_clone_node_forks_from_reset() {
         .topology
         .set_outputs(vec![out(NodeKey(1), 0)]);
     assert_eq!(
-        plain
-            .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(256))
-            .err(),
+        plain.fork(ForkTarget::MainOutput, prepare(256)).err(),
         Some(ForkError::NotForkable { key: NodeKey(1) })
     );
 }
@@ -1006,7 +989,7 @@ fn a_main_output_fork_holds_only_what_the_outputs_reach() {
     );
     ed.spec_mut().topology.set_outputs(vec![out(NodeKey(1), 0)]);
     let (fork, _fork_exec) = ed
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(256))
+        .fork(ForkTarget::MainOutput, prepare(256))
         .expect("the unrouted, unforkable node is not asked");
     let keys: Vec<NodeKey> = fork.spec().topology.nodes.keys().copied().collect();
     assert_eq!(keys, vec![NodeKey(1)]);
@@ -1015,8 +998,7 @@ fn a_main_output_fork_holds_only_what_the_outputs_reach() {
         .topology
         .set_outputs(vec![out(NodeKey(1), 0), out(NodeKey(2), 0)]);
     assert_eq!(
-        ed.fork(ForkTarget::MainOutput, ForkMode::Live, prepare(256))
-            .err(),
+        ed.fork(ForkTarget::MainOutput, prepare(256)).err(),
         Some(ForkError::NotForkable { key: NodeKey(2) })
     );
 }
@@ -1028,12 +1010,12 @@ fn a_main_output_fork_holds_only_what_the_outputs_reach() {
 /// Where a [`Witness`]'s fork was built, prepared and dropped, by thread.
 #[derive(Default)]
 struct Threads {
-    built: std::sync::Mutex<Vec<std::thread::ThreadId>>,
-    prepared: std::sync::Mutex<Vec<std::thread::ThreadId>>,
-    dropped: std::sync::Mutex<Vec<std::thread::ThreadId>>,
+    built: tutti_fixtures::Record<std::thread::ThreadId>,
+    prepared: tutti_fixtures::Record<std::thread::ThreadId>,
+    dropped: tutti_fixtures::Record<std::thread::ThreadId>,
 }
 
-fn here(at: &std::sync::Mutex<Vec<std::thread::ThreadId>>) {
+fn here(at: &tutti_fixtures::Record<std::thread::ThreadId>) {
     at.lock().unwrap().push(std::thread::current().id());
 }
 
@@ -1089,7 +1071,7 @@ struct WitnessFork {
 }
 
 impl ForkSource for WitnessFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked, ForkCause> {
         here(&self.threads.built);
         Ok(Forked::new(Box::new(Witness {
             value: self.value.load(Ordering::SeqCst) as f32,
@@ -1097,7 +1079,7 @@ impl ForkSource for WitnessFork {
         })))
     }
 
-    fn gather(&self, mode: ForkMode) -> Result<ForkBuild, ForkCause> {
+    fn gather(&self, mode: RenderMode) -> Result<ForkBuild, ForkCause> {
         Ok(match self.how {
             // The trait's own default, by not overriding: see `Defaulted`.
             How::Default => unreachable!("a `Default` witness forks through `Defaulted`"),
@@ -1126,7 +1108,7 @@ impl ForkSource for WitnessFork {
 struct Defaulted(WitnessFork);
 
 impl ForkSource for Defaulted {
-    fn fork(&self, mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, mode: RenderMode) -> Result<Forked, ForkCause> {
         self.0.fork(mode)
     }
 }
@@ -1190,7 +1172,7 @@ fn a_gathered_fork_is_the_live_graph_at_the_gather() {
     assert!(level.set(UnitParam::Volume, 0.75));
 
     let pending = ed
-        .fork_gather(ForkTarget::MainOutput, ForkMode::Live, pre)
+        .fork_gather(ForkTarget::MainOutput, pre)
         .expect("gathers");
     assert_eq!(pending.deferred(), 1, "the witness builds later");
 
@@ -1237,7 +1219,7 @@ fn each_source_builds_and_prepares_where_its_gather_says() {
 
     let gatherer = std::thread::current().id();
     let pending = ed
-        .fork_gather(ForkTarget::MainOutput, ForkMode::Live, pre)
+        .fork_gather(ForkTarget::MainOutput, pre)
         .expect("gathers");
     let (builder, rendered) = std::thread::spawn(move || {
         let (fed, fexec) = pending.build().map_err(|(e, _)| e).expect("builds");
@@ -1247,7 +1229,7 @@ fn each_source_builds_and_prepares_where_its_gather_says() {
     .expect("the build thread");
     assert_ne!(gatherer, builder);
 
-    let one = |at: &std::sync::Mutex<Vec<std::thread::ThreadId>>| {
+    let one = |at: &tutti_fixtures::Record<std::thread::ThreadId>| {
         let at = at.lock().unwrap();
         assert_eq!(at.len(), 1, "once: {at:?}");
         at[0]
@@ -1285,7 +1267,7 @@ fn a_failing_build_names_its_key_and_hands_back_what_it_built() {
     let (_, later) = witness(&mut ed, NodeKey(3), How::Deferred, 3);
 
     let pending = ed
-        .fork_gather(ForkTarget::MainOutput, ForkMode::Live, pre)
+        .fork_gather(ForkTarget::MainOutput, pre)
         .expect("gathers");
     let (error, remains) = std::thread::spawn(move || {
         pending
@@ -1313,7 +1295,7 @@ fn a_failing_build_names_its_key_and_hands_back_what_it_built() {
     assert!(!remains.is_empty());
     drop(remains);
     assert_eq!(
-        *pinned.dropped.lock().unwrap(),
+        pinned.dropped.lock().unwrap().as_slice(),
         [std::thread::current().id()],
         "the pinned unit drops with the remains, here"
     );
@@ -1342,7 +1324,7 @@ fn a_pinned_unit_is_not_dropped_on_a_worker_that_panics() {
     witness(&mut ed, NodeKey(2), How::Panics, 2);
 
     let pending = ed
-        .fork_gather(ForkTarget::MainOutput, ForkMode::Live, pre)
+        .fork_gather(ForkTarget::MainOutput, pre)
         .expect("gathers");
     let (tx, rx) = std::sync::mpsc::channel();
     let joined = std::thread::spawn(move || {
@@ -1352,7 +1334,7 @@ fn a_pinned_unit_is_not_dropped_on_a_worker_that_panics() {
     .join();
     assert!(joined.is_err(), "the build panicked");
     let worker = rx.recv().unwrap();
-    let dropped = pinned.dropped.lock().unwrap().clone();
+    let dropped = pinned.dropped.lock().unwrap().to_vec();
     assert!(
         !dropped.contains(&worker),
         "the pinned unit was dropped on the panicking worker {worker:?}: {dropped:?}"
@@ -1372,9 +1354,8 @@ fn a_gather_failure_is_named_before_a_build_failure() {
     witness(&mut ed, NodeKey(2), How::GatherFails, 2);
 
     for err in [
-        ed.fork(ForkTarget::MainOutput, ForkMode::Live, pre).err(),
-        ed.fork_gather(ForkTarget::MainOutput, ForkMode::Live, pre)
-            .err(),
+        ed.fork(ForkTarget::MainOutput, pre).err(),
+        ed.fork_gather(ForkTarget::MainOutput, pre).err(),
     ] {
         let Some(ForkError::Source { key, cause }) = err else {
             panic!("expected ForkError::Source, got {err:?}");
@@ -1411,7 +1392,7 @@ fn a_build_whose_commit_fails_hands_back_the_graph() {
         vec![Edge::Direct(PortSource::MainInput(0))],
     );
     let pending = ed
-        .fork_gather(ForkTarget::MainOutput, ForkMode::Live, pre)
+        .fork_gather(ForkTarget::MainOutput, pre)
         .expect("gathers: the spec is checked at the commit");
     let (error, remains) =
         std::thread::spawn(move || pending.build().expect_err("the commit fails"))
@@ -1428,7 +1409,7 @@ fn a_build_whose_commit_fails_hands_back_the_graph() {
     assert!(!remains.is_empty());
     drop(remains);
     assert_eq!(
-        *pinned.dropped.lock().unwrap(),
+        pinned.dropped.lock().unwrap().as_slice(),
         [std::thread::current().id()],
         "the pinned unit drops with the remains, here"
     );

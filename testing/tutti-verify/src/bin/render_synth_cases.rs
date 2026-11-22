@@ -55,7 +55,10 @@ fn render(cfg: SynthConfig, notes: &[u8]) -> (Vec<f32>, Vec<f32>) {
         .map(|&n| midi::note_on(MidiChannel::FIRST, n, NoteVelocity::from(U7::of(100)).get()))
         .map(|e: Ump| Event::midi(at, e))
         .collect();
-    synth.events(0, &events);
+    let input = tutti_graph::Node::shape(&*synth.node)
+        .event_input(0)
+        .expect("an event input");
+    synth.events(input, &events);
 
     let (mut l, mut r) = (Vec::new(), Vec::new());
     for _ in 0..BLOCKS {
@@ -105,11 +108,7 @@ fn main() {
     let out = Path::new(&out);
     std::fs::create_dir_all(out).expect("create output dir");
 
-    let base = |osc: OscillatorType| SynthConfig {
-        oscillator: osc,
-        envelope: flat_envelope(),
-        ..Default::default()
-    };
+    let base = |osc: OscillatorType| SynthConfig::new().oscillator(osc).envelope(flat_envelope());
 
     let mut count = 0usize;
 
@@ -146,12 +145,11 @@ fn main() {
     // measurable. Cutoffs are placed so a fixed number of harmonics of note 45
     // (110 Hz) survive, which the judge re-derives.
     for cutoff in [500.0f64, 1000.0, 2000.0, 4000.0] {
-        let mut cfg = base(OscillatorType::Saw);
-        cfg.filter = FilterType::Svf {
+        let cfg = base(OscillatorType::Saw).filter(FilterType::Svf {
             cutoff: Hz::new(cutoff),
             q: tutti_polysynth::SvfQ::BUTTERWORTH,
             mode: SvfMode::Lowpass,
-        };
+        });
         let (l, r) = render(cfg, &[45]);
         write_wav(
             &out.join(format!("filter_lp{cutoff:.0}_note45.wav")),
@@ -163,12 +161,11 @@ fn main() {
 
     // Highpass, so a judge that merely detected "less energy" cannot pass both.
     for cutoff in [500.0f64, 2000.0] {
-        let mut cfg = base(OscillatorType::Saw);
-        cfg.filter = FilterType::Svf {
+        let cfg = base(OscillatorType::Saw).filter(FilterType::Svf {
             cutoff: Hz::new(cutoff),
             q: tutti_polysynth::SvfQ::BUTTERWORTH,
             mode: SvfMode::Highpass,
-        };
+        });
         let (l, r) = render(cfg, &[45]);
         write_wav(
             &out.join(format!("filter_hp{cutoff:.0}_note45.wav")),
@@ -185,13 +182,12 @@ fn main() {
     // spread should also decorrelate the channels, which the Rust tests
     // explicitly assert does *not* happen without unison.
     for (voices, detune) in [(2u8, 10.0f64), (3, 20.0), (7, 25.0)] {
-        let mut cfg = base(OscillatorType::Saw);
-        cfg.unison = Some(UnisonConfig {
-            voice_count: UnisonVoices::new(voices).expect("a unison count"),
-            detune_cents: CentsSpan::new(detune).expect("a non-negative detune"),
-            stereo_spread: Spread::new(0.8),
-            ..Default::default()
-        });
+        let cfg = base(OscillatorType::Saw).unison(
+            UnisonConfig::new()
+                .voice_count(UnisonVoices::new(voices).expect("a unison count"))
+                .detune_cents(CentsSpan::new(detune).expect("a non-negative detune"))
+                .stereo_spread(Spread::new(0.8)),
+        );
         let (l, r) = render(cfg, &[57]);
         write_wav(
             &out.join(format!("unison_v{voices}_d{detune:.0}_note57.wav")),

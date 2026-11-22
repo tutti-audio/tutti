@@ -2,7 +2,9 @@
 //! 24-bit tempo, the SMPTE Offset, the type byte of an untyped meta event, and a
 //! meta event the reader could not type.
 
-use tutti_midi_protocol::{MtcRate, SmpteTimecode};
+use tutti_midi_protocol::{
+    MtcRate, SmpteTimecode, TimecodeHours, TimecodeMinutes, TimecodeSeconds,
+};
 
 tutti_units::ranged! {
     /// Microseconds per quarter note as a Set Tempo holds it: 24 bits,
@@ -75,7 +77,13 @@ impl SmpteOffset {
             return None;
         }
         let (rate, hours) = MtcRate::from_hours_byte(hours);
-        let time = SmpteTimecode::new(hours, minutes, seconds, frames, rate.frame_rate())?;
+        let time = SmpteTimecode::new(
+            TimecodeHours::new(hours)?,
+            TimecodeMinutes::new(minutes)?,
+            TimecodeSeconds::new(seconds)?,
+            frames,
+            rate.frame_rate(),
+        )?;
         Self::new(time, SmpteFractionalFrames::new(fraction)?)
     }
 
@@ -83,15 +91,16 @@ impl SmpteOffset {
     pub(crate) fn to_wire(self) -> [u8; 5] {
         // A rate MTC has no code for (29.97 non-drop) writes as code 0, the
         // 24 fps code; the offset's rate is only what its hours byte names.
+        let hours = self.time.hours().get();
         let hours_byte = self
             .time
             .frame_rate()
             .mtc_rate()
-            .map_or(self.time.hours(), |rate| rate.hours_byte(self.time.hours()));
+            .map_or(hours, |rate| rate.hours_byte(hours));
         [
             hours_byte,
-            self.time.minutes(),
-            self.time.seconds(),
+            self.time.minutes().get(),
+            self.time.seconds().get(),
             self.time.frames(),
             self.fractional.get(),
         ]

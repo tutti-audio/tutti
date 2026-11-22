@@ -35,8 +35,8 @@
 //! load → drive → assert* and clears the holes on the way out.
 
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
-use tutti_rt::LockExt;
+use std::sync::MutexGuard;
+use tutti_rt::Mutex;
 
 use crate::support;
 use support::active::{Activate, Active, ActiveExt};
@@ -90,7 +90,7 @@ impl Probe {
     /// these symbols drive the very globals the host reads), and start from a
     /// clean slate.
     fn acquire() -> Self {
-        let lock = PROBE_LOCK.lock_recover();
+        let lock = PROBE_LOCK.lock();
         unsafe {
             let lib = libloading::Library::new(tutti_fixtures::clap_probe())
                 .expect("re-open reference plugin");

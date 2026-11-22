@@ -408,7 +408,7 @@ fn a_setting_lands_at_the_next_block() {
 /// **A forked sync node runs, over what the live one sent at the fork.**
 #[test]
 fn a_fork_sends_what_the_live_node_sent_at_the_fork() {
-    use tutti_graph::{ForkMode, ForkTarget};
+    use tutti_graph::ForkTarget;
     // A fork keeps what reaches the main output: the sink has one.
     let mut rig = EventRig::new(RATE, BLOCK, 1);
     let controls = rig
@@ -425,7 +425,7 @@ fn a_fork_sends_what_the_live_node_sent_at_the_fork() {
     let prepare = *rig.editor.prepare();
     let (_fork, mut exec) = rig
         .editor
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
+        .fork(ForkTarget::MainOutput, prepare)
         .expect("forks");
     let mut out = vec![0.0f32; 512];
     exec.process(512, &rolling(Beat::new(0.0)), &[], &mut [&mut out[..]]);
@@ -518,9 +518,12 @@ fn set_metronome_is_a_complete_group_packet_and_off_by_default() {
 
 /// One block of 64 frames under `transport` through `node`; what it sent.
 fn drive(d: &mut Direct<SyncOut>, transport: TransportPosition) -> Vec<Ump> {
+    let out = tutti_graph::Node::<f32>::shape(&*d.node)
+        .event_output(0)
+        .expect("an event output");
     d.set_transport(transport);
     d.block();
-    d.event_output(0)
+    d.event_output(out)
         .iter()
         .filter_map(|e| match e.kind {
             EventKind::Midi(ump) => Some(ump),
@@ -716,7 +719,7 @@ fn a_locate_or_a_wrap_with_mtc_and_no_clock_sends_no_song_position_and_no_stop()
 /// Set Time Signature of 3, 2^2, 8 thirty-seconds on the start frame.
 #[test]
 fn a_fork_states_the_live_nodes_meter() {
-    use tutti_graph::{ForkMode, ForkTarget};
+    use tutti_graph::ForkTarget;
     use tutti_music::{MeterChange, MeterMap, TimeSignature};
     let meter = std::sync::Arc::new(tutti_rt::Publisher::new(MeterMap::new([MeterChange::new(
         Beat::new(0.0),
@@ -738,7 +741,7 @@ fn a_fork_states_the_live_nodes_meter() {
     let prepare = *rig.editor.prepare();
     let (_fork, mut exec) = rig
         .editor
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
+        .fork(ForkTarget::MainOutput, prepare)
         .expect("forks");
     let mut out = vec![0.0f32; 512];
     exec.process(512, &rolling(Beat::new(0.0)), &[], &mut [&mut out[..]]);

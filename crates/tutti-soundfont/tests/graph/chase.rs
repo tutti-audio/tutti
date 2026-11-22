@@ -4,14 +4,13 @@
 //!
 //! Against the committed `TimGM6mb.sf2`; a missing fixture fails.
 
-use std::sync::{Arc, Mutex};
-
+use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, MaxBlock};
-use tutti_fixtures::midi;
+use tutti_fixtures::{Record, midi};
 use tutti_graph::{
     Buses, Chase, Cx, Editor, EventCapacity, EventEdge, EventInletNode, EventInletWriter,
-    EventInputPort, EventKind, EventOutputPort, Executor, Fade, FadeLaw, Io, Node, OutputPort,
-    PortSource, Prepare, Shape, Status, TransportPosition, Unforkable,
+    EventInputPort, EventKind, EventOutputPort, Executor, Fade, FadeLaw, InEvents, Io, Node,
+    OutputPort, PortSource, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{NodeKey, Stamp};
 
@@ -114,17 +113,23 @@ impl Rig {
 }
 
 /// A successor that writes down what it is sent.
-struct Recorder(Arc<Mutex<Vec<Ump>>>);
+struct Recorder(Record<Ump>);
+
+impl Recorder {
+    const SHAPE: Shape =
+        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::STEREO)).events(1, 0);
+    const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
 
 impl Node for Recorder {
     fn shape(&self) -> Shape {
-        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::STEREO)).events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        for e in io.events(0).iter() {
+        for e in io.events(Self::IN).iter() {
             if let EventKind::Midi(u) = e.kind {
-                self.0.lock().unwrap().push(u);
+                self.0.lock().expect("the record").push(u);
             }
         }
         for c in 0..2 {
@@ -168,10 +173,16 @@ fn the_unit_chases_its_programs_banks_controllers_and_wheels() {
         cc(5, 0, 7),
     ]);
     rig.block();
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    rig.swap(Unforkable(Recorder(Arc::clone(&seen))));
+    let seen = Record::new();
+    rig.swap(Unforkable(Recorder(seen.clone())));
     rig.block();
-    let got: Vec<_> = seen.lock().unwrap().iter().map(|&u| decoded(u)).collect();
+    let got: Vec<_> = seen
+        .lock()
+        .expect("the record")
+        .as_slice()
+        .iter()
+        .map(|&u| decoded(u))
+        .collect();
     let on = |c: u8| MidiChannel::of(c);
     let wants = [
         (
@@ -219,7 +230,7 @@ fn a_font_swapped_for_a_polysynth_keeps_its_controllers() {
         let mut rig = Rig::new(unit());
         rig.send(&volume.map(|v| cc(0, 7, v)).into_iter().collect::<Vec<_>>());
         rig.block();
-        let synth = PolySynth::new(SynthConfig::default());
+        let synth = PolySynth::new(SynthConfig::new());
         rig.swap(synth);
         rig.send(&[note_on()]);
         let peak = rig.block();

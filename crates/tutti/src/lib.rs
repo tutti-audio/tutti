@@ -457,7 +457,7 @@ pub mod types {
         PlaybackRate, PlaybackRateOutOfRange, Radians, ReadPosition, ReadRate, Resonance,
         RunningPhase, SamplePosition, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange,
         Speed, SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail,
-        Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
+        TimecodeFrames, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
     };
     pub use tutti_units::{Phase, Quantity, Real, Resyncs};
 }
@@ -478,15 +478,15 @@ pub mod tempo {
 /// a program that builds one directly depends on `tutti-graph`.
 pub mod graph {
     pub use tutti_graph::{
-        Bus, BusRole, Buses, Cost, Cx, Env, ForkByClone, HasParam, HasParams, InBus, Inputs,
-        IntoNode, Io, Node, OutBus, Outputs, ParamFork, ParamNode, ParamSet, ParamSetBuilder,
-        ParamValue, Params, Prepare, RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar,
-        Shape, Status, Unforkable, declare_params, param_parts,
+        Bus, BusRole, Buses, Cost, Cx, Env, ForkByClone, HasParam, HasParams, InBus, InEvents,
+        Inputs, IntoNode, Io, Node, OutBus, OutEvents, Outputs, ParamFork, ParamNode, ParamSet,
+        ParamSetBuilder, ParamValue, Params, Prepare, RtLevel, RtRecord, RtTarget, RtValue,
+        SampleRates, Scalar, Shape, Status, Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,
         Due, Edge, Event, EventKind, EventOrderError, EventRejected, EventWriter, ForkBuild,
-        ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, GraphInvalid, Harmony,
+        ForkCause, ForkFaultKind, ForkHealth, ForkSource, Forked, GraphInvalid, Harmony,
         HarmonyKind, InPlaceMask, NodeParts, Offset, ParamEvent, ParamInput, ParamKind, ParamMod,
         ParamPorts, ParamPortsError, ParamRamp, ParamRange, ParamRangeCell, ParamRangeReader,
         ParamSegment, Pass, PlayClock, PortSink, PortSource, RenderMode, Resolution, SilenceMask,
@@ -865,10 +865,12 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError, StartFailed};
     pub use tutti_midi_protocol::{
-        ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, MmcSegmentError, MpeMode,
-        MpeSpec, MpeZone, MpeZoneConfig, MpeZones, MtcRate, NotFrequencyData, NotSysexDeviceId,
-        PitchBendSensitivity, Recipient, SmpteFrameRate, SmpteTimecode, SysexDeviceId,
-        TuningFrequency,
+        ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, Mcm, MemberCount,
+        MmcSegmentCount, MmcSegmentError, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones,
+        MtcRate, NotFrequencyData, NotMemberCount, NotMmcSegmentCount, NotSysexDeviceId,
+        NotTimecodeHours, NotTimecodeMinutes, NotTimecodeSeconds, PitchBendSensitivity, Recipient,
+        SmpteFrameRate, SmpteTimecode, SysexDeviceId, TimecodeHours, TimecodeMinutes,
+        TimecodeSeconds, TuningFrequency,
     };
     pub use tutti_midi_runtime::{
         ClipEvents, ClockKind, ClockOffset, HarmonyChanges, HarmonyChangesError, HarmonyControls,
@@ -885,13 +887,14 @@ pub mod midi {
         ChordType, ControlValue, Data128, DeltaTicks, DiscoveryFilter, EndpointInfoNotification,
         Field, FirstGroup, Flex, FlexAddress, FlexTextKind, FlexTimeSignature, Form, Framed,
         FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, FunctionBlocks, GroupChannelIndex,
-        GroupSpan, KeySignature, Letter, MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, Metronome,
-        Midi1Bytes, Midi1Port, MixedDataHeader, MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan,
-        NotChunkSize, NotManufacturerId, NoteKey, NoteKeyEvent, PerNoteManagement, Pitch,
-        RegisteredData, RegisteredPerNoteController, Reserved, ReservedAccents, ReservedAttribute,
-        Rpn, SharpsFlats, Stream, SyllableError, Sysex7Packet, Sysex7Packets, Sysex8Packet,
-        Sysex8Packets, Sysex8Stream, Sysex8StreamIds, SysexError, SysexMessage, SysexPart,
-        SysexRef, SysexStatus, SysexStep, System, U4, UiHint, UmpVersion, Unknown, Utility, Voice2,
+        GroupSpan, KeySignature, Letter, ManufacturerBytesError, MdsChunk, MdsChunkSize, MdsChunks,
+        MdsIdentity, Metronome, Midi1Bytes, Midi1Port, MixedDataHeader, MpeChannels, MpeOverlap,
+        MpeZoneSet, MpeZoneSpan, NotChunkSize, NotManufacturerId, NoteKey, NoteKeyEvent,
+        PerNoteManagement, Pitch, RegisteredData, RegisteredPerNoteController, Reserved,
+        ReservedAccents, ReservedAttribute, Rpn, SharpsFlats, Stream, SyllableError, Sysex7Packet,
+        Sysex7Packets, Sysex8Packet, Sysex8Packets, Sysex8Stream, Sysex8StreamIds, SysexError,
+        SysexMessage, SysexPart, SysexRef, SysexStatus, SysexStep, System, U4, UiHint, UmpVersion,
+        Unknown, Utility, Voice2,
     };
     pub use tutti_ump::{
         Address, CCNumber, DeviceIdentity, ExtremeValues, ManufacturerId, Message, Midi1Parser,
@@ -988,16 +991,16 @@ pub mod midi {
         pub use tutti_midi_ci::{
             Ack, AckStatus, ActionError, BodyLimit, BufferLimit, CallError, CallId, CanSet,
             CcIndex, ChangeKind, ChunkNo, ClusterKind, ColumnSource, ConfirmIcon, ConfirmType,
-            Confirmation, CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource,
-            EntryError, InvalidValue, JsonPointer, LinkRole, ListedTwice, ModeId, NotABodyLimit,
-            NotABufferLimit, NotAChunkNo, NotAPeChannel, NotAPeMidiMode, NotAPriority,
-            NotARequestId, NotASimultaneousRequests, NotAStateSize, NotAStepCount, NotAStreamLimit,
-            NotATimeoutWait, NotSignificantBits, NotUnixSeconds, NotVendorName, OpaqueBody,
-            PaginationFault, ParamPath, PartialError, PartialUpdate, PartialValue, PeAllCtrlEntry,
-            PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx,
-            PeBodyError, PeCacheTime, PeCapabilities, PeCapabilitiesFailure, PeChCtrlEntry,
-            PeChCtrlList, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode, PeChunkError,
-            PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList,
+            Confirmation, ControllerIndexError, CtrlControl, CtrlKind, CtrlRange, CtrlValueKind,
+            CustomResource, EntryError, ExtensionError, InvalidValue, JsonPointer, LinkRole,
+            ListedTwice, ModeId, NotABodyLimit, NotABufferLimit, NotAChunkNo, NotAPeChannel,
+            NotAPeMidiMode, NotAPriority, NotARequestId, NotASimultaneousRequests, NotAStateSize,
+            NotAStepCount, NotAStreamLimit, NotATimeoutWait, NotSignificantBits, NotUnixSeconds,
+            OpaqueBody, PaginationFault, ParamPath, ParamPathError, PartialError, PartialUpdate,
+            PartialValue, PeAllCtrlEntry, PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx,
+            PeBasicChannelTx, PeBodyError, PeCacheTime, PeCapabilities, PeCapabilitiesFailure,
+            PeChCtrlEntry, PeChCtrlList, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode,
+            PeChunkError, PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList,
             PeCurrentMode, PeData, PeDataError, PeDataFault, PeDecimal, PeDeviceInfo, PeEncoding,
             PeEndedBy, PeError, PeExtensions, PeExternalSync, PeExtra, PeExtraError, PeFlowControl,
             PeHeaderError, PeHeaderTooLong, PeJson, PeJsonError, PeJsonSchema, PeLink, PeLocalOn,

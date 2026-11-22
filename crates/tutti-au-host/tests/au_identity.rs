@@ -34,10 +34,9 @@
 
 mod support;
 
-use std::sync::Mutex;
 use tutti_au_ffi::property::ParametersForOverview;
 use tutti_au_ffi::{Property, Scope};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use crate::support::au::Au;
 use support::corpus::{
@@ -54,20 +53,13 @@ use tutti_au_host::AuError;
 /// `AU_LOCK` in `au_conformance.rs`.
 static AU_LOCK: Mutex<()> = Mutex::new(());
 
-/// `AU_LOCK` is poisoned by any panicking test, and a poisoned lock would
-/// convert one real failure into N spurious ones. The guard is only a
-/// serializer — there is no shared state to be left inconsistent — so recover.
-fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock_recover()
-}
-
 /// Every instantiable unit hands back the exact context name written.
 ///
 /// Asserts the **read-back**, not the write status.
 /// Spec: au.prop.ContextName
 #[test]
 fn every_unit_round_trips_a_context_name() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut checked = 0;
     for info in every_component() {
         // Loaded, not initialized: a property read needs no `initialize`, and a
@@ -100,7 +92,7 @@ fn every_unit_round_trips_a_context_name() {
 /// ever saw would satisfy the sweep above.
 #[test]
 fn a_context_name_can_be_replaced() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = DELAY.open(tutti_units::SampleRate::SR_48K, 512);
 
     au.set_context_name("track 3").expect("set_context_name");
@@ -120,7 +112,7 @@ fn a_context_name_can_be_replaced() {
 /// Spec: au.prop.NickName
 #[test]
 fn a_nick_name_round_trips_and_can_be_replaced() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = DELAY.open(tutti_units::SampleRate::SR_48K, 512);
 
     au.set_nick_name("Slapback").expect("set_nick_name");
@@ -146,7 +138,7 @@ fn a_nick_name_round_trips_and_can_be_replaced() {
 /// passing every single-instance test above.
 #[test]
 fn two_instances_of_one_au_hold_independent_nick_names() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let a = DELAY.open(tutti_units::SampleRate::SR_48K, 512);
     let b = DELAY.open(tutti_units::SampleRate::SR_48K, 512);
 
@@ -169,7 +161,7 @@ fn two_instances_of_one_au_hold_independent_nick_names() {
 /// these while leaving the ASCII tests green.
 #[test]
 fn a_nick_name_survives_non_ascii_text() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = DELAY.open(tutti_units::SampleRate::SR_48K, 512);
     for name in ["ドラム", "Café — Bus 2", "трек 3", "🥁 kick"] {
         au.set_nick_name(name).expect("set_nick_name");
@@ -187,7 +179,7 @@ fn a_nick_name_survives_non_ascii_text() {
 /// AUMatrixReverb reports 8 of its 17 parameters (measured, macOS 15.6).
 #[test]
 fn the_overview_is_a_strict_subset_for_a_unit_that_curates() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = MATRIX_REVERB.open(tutti_units::SampleRate::SR_48K, 512);
 
     let overview = au
@@ -225,7 +217,7 @@ fn the_overview_is_a_strict_subset_for_a_unit_that_curates() {
 /// into the decoder would be invisible without this.
 #[test]
 fn the_overview_order_is_not_the_parameter_list_order() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = DYNAMICS.open(tutti_units::SampleRate::SR_48K, 512);
 
     let overview = au
@@ -251,7 +243,7 @@ fn the_overview_order_is_not_the_parameter_list_order() {
 /// to get wrong as 16.
 #[test]
 fn every_overview_entry_addresses_a_readable_parameter() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = MATRIX_REVERB.open(tutti_units::SampleRate::SR_48K, 512);
 
     let overview = au.parameters_for_overview().expect("overview");
@@ -280,7 +272,7 @@ fn every_overview_entry_addresses_a_readable_parameter() {
 /// Collapsing them would silently downgrade every non-implementer.
 #[test]
 fn a_non_implementing_unit_reports_the_gap_rather_than_an_empty_list() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = DLS_SYNTH.open(tutti_units::SampleRate::SR_48K, 512);
 
     match au.parameters_for_overview() {
@@ -307,7 +299,7 @@ fn a_non_implementing_unit_reports_the_gap_rather_than_an_empty_list() {
 /// silently.
 #[test]
 fn the_string_readers_report_a_missing_property_as_an_error() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     // `icon_location` is witnessed by the real corpus: 16 units refuse it, so
     // the sweep must run to completion rather than return on the first refusal.
     // Returning early can only ever reach one of the two readers.
@@ -365,7 +357,7 @@ fn the_string_readers_report_a_missing_property_as_an_error() {
 /// Spec: au.prop.ParametersForOverview
 #[test]
 fn the_overview_decodes_every_entry_the_au_reported() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in [MATRIX_REVERB, DYNAMICS] {
         let au = unit.open(tutti_units::SampleRate::SR_48K, 512);
         let overview = au.parameters_for_overview().expect("overview");
@@ -416,7 +408,7 @@ fn the_overview_decodes_every_entry_the_au_reported() {
 /// Spec: au.prop.IconLocation
 #[test]
 fn an_icon_url_names_a_file_that_exists() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut with_icon = 0;
     let mut checked = 0;
     for info in every_component() {
@@ -460,7 +452,7 @@ fn an_icon_url_names_a_file_that_exists() {
 /// rather than intermittently.
 #[test]
 fn the_corpus_sweep_never_sees_a_harness_probe() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
 
     // Force the probes into the registry — this is the exact precondition that
     // made the race reachable.

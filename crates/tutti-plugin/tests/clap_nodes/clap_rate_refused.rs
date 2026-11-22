@@ -17,9 +17,10 @@ use clap_probe::{ProbeEnv, Rig, load_probe, render};
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::machine_lock;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::Instant;
+use tutti_rt::Mutex;
 
 use tutti_graph::Prepare;
 use tutti_plugin_host::{PluginHandle, PluginStatus};
@@ -132,7 +133,7 @@ fn a_refused_rate_is_silent_visible_and_retried() {
     let sink = Arc::clone(&events);
     let _subscription = handle.subscribe(move |n| {
         if let tutti_plugin_host::PluginSignal::Invalidate(e) = n {
-            sink.lock().unwrap().push(e);
+            sink.lock().push(e);
         }
     });
 
@@ -162,18 +163,17 @@ fn a_refused_rate_is_silent_visible_and_retried() {
         "a refused plugin's silence is deliberate, not a dropout"
     );
     assert!(
-        events.lock().unwrap().iter().any(
+        events.lock().iter().any(
             |e| matches!(e, PluginInvalidation::RateRefused(refusal) if refusal.rate.get() == REFUSED_RATE)
         ),
         "{:?}",
-        events.lock().unwrap()
+        events.lock()
     );
 
     // Asked again at the same rate: refused again, still silent.
     let refusals = || {
         events
             .lock()
-            .unwrap()
             .iter()
             .filter(|e| matches!(e, PluginInvalidation::RateRefused(refusal) if refusal.rate.get() == REFUSED_RATE))
             .count()
@@ -192,11 +192,10 @@ fn a_refused_rate_is_silent_visible_and_retried() {
     assert!(
         events
             .lock()
-            .unwrap()
             .iter()
             .any(|e| matches!(e, PluginInvalidation::RateRestored)),
         "{:?}",
-        events.lock().unwrap()
+        events.lock()
     );
 
     // Refused once more, then dropped: the teardown returns.

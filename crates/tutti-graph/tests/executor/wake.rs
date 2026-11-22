@@ -3,14 +3,15 @@
 
 use tutti_graph::testing as common;
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use tutti_rt::Mutex;
 
 use common::{Burst, WORKERS, bits, prepare, test_pool};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Cx, Editor, Executor, ForkByClone, ForkMode, ForkTarget, Io, Node, NodeKey, OutputPort,
-    PortSource, Prepare, Shape, Status, TransportPosition, Unforkable, Wake,
+    Cx, Editor, Executor, ForkByClone, ForkTarget, Io, Node, NodeKey, OutputPort, PortSource,
+    Prepare, Shape, Status, TransportPosition, Unforkable, Wake,
 };
 
 /// Every `Wake` a placement of a [`Napper`] was given, with that placement's
@@ -46,10 +47,7 @@ impl Node for Napper {
         Shape::source_unassigned(ChannelLayout::MONO).events(1, 0)
     }
     fn bind_wake(&mut self, wake: Wake) {
-        self.placements
-            .lock()
-            .expect("the registry")
-            .push((wake, Arc::clone(&self.calls)));
+        self.placements.lock().push((wake, Arc::clone(&self.calls)));
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
@@ -63,7 +61,7 @@ const NAP: NodeKey = NodeKey(1);
 const BLOCK: usize = 32;
 
 fn placed(placements: &Placements, n: usize) -> (Wake, Arc<AtomicUsize>) {
-    placements.lock().expect("the registry")[n].clone()
+    placements.lock()[n].clone()
 }
 
 fn render(exec: &mut Executor, outs: usize) {
@@ -156,11 +154,11 @@ fn a_raise_on_an_unparked_node_does_not_wake_it_after_it_parks() {
 fn a_raise_on_the_live_wake_does_not_wake_the_forks_node() {
     let (live_ed, mut live, placements) = one_napper();
     let (mut fork_ed, mut fork) = live_ed
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(BLOCK))
+        .fork(ForkTarget::MainOutput, prepare(BLOCK))
         .expect("the napper forks by clone");
     fork.apply_pending();
     fork_ed.collect();
-    assert_eq!(placements.lock().unwrap().len(), 2, "live, then the fork");
+    assert_eq!(placements.lock().len(), 2, "live, then the fork");
     let ((live_wake, live_calls), (fork_wake, fork_calls)) =
         (placed(&placements, 0), placed(&placements, 1));
     let calls = |c: &Arc<AtomicUsize>| c.load(Ordering::Relaxed);

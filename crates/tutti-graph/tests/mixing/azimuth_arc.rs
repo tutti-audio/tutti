@@ -59,12 +59,17 @@ impl Node for Probe {
 #[derive(Clone)]
 struct Sender(Vec<(u64, ParamSegment)>);
 
+impl Sender {
+    const SHAPE: Shape = Shape::EMPTY
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(16));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Sender {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .events(0, 1)
-            .param_events()
-            .event_capacity(tutti_graph::testing::cap_of(16))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -72,7 +77,9 @@ impl Node for Sender {
         for &(at, seg) in &self.0 {
             if at >= start && at < start + io.frames() as u64 {
                 let o = io.offset((at - start) as usize).expect("inside");
-                let _ = io.event_out(0).push_param(ParamEvent::segment(o, seg));
+                let _ = io
+                    .event_out(Self::OUT)
+                    .push_param(ParamEvent::segment(o, seg));
             }
         }
         Status::Silent

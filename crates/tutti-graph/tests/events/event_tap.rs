@@ -23,8 +23,8 @@ use tutti_fixtures::midi;
 use tutti_graph::{CloseError, EventCapacity, EventTapId, EventTapOptions, EventTapReader};
 use tutti_graph::{
     Cx, Edge, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor,
-    ForkByClone, ForkCause, ForkMode, ForkSource, ForkTarget, Forked, InputPort, IntoNode, Io,
-    MissingSource, Node, NodeKey, NodeParts, Offset, Op, OutputPort, PortSource, Prepare, Shape,
+    ForkByClone, ForkCause, ForkSource, ForkTarget, Forked, InputPort, IntoNode, Io, MissingSource,
+    Node, NodeKey, NodeParts, Offset, Op, OutputPort, PortSource, Prepare, RenderMode, Shape,
     Status, TapAlign, TapEvent, TransportPosition, note_off_room,
 };
 use tutti_ump::{MidiChannel, U7, Ump};
@@ -38,7 +38,7 @@ struct Forkable(Kind);
 struct KindFork(Kind);
 
 impl ForkSource for KindFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked, ForkCause> {
         Ok(Forked::new(Box::new(TestNode::new(self.0.clone()))))
     }
 }
@@ -118,8 +118,8 @@ impl Node for Script {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        for p in 0..self.ports {
-            let out = io.event_out(p);
+        for (p, port) in (0..self.ports).zip(self.shape().event_outputs()) {
+            let out = io.event_out(port);
             if p == 0 && self.resync {
                 let _ = out.push(Event::resync(Offset::ZERO));
             }
@@ -583,8 +583,7 @@ fn closed_fork_reopen_and_prune() {
     let (fed, _fexec) =
         r.ed.fork(
             ForkTarget::MainOutput,
-            ForkMode::Offline,
-            prepare(MAX_BLOCK),
+            prepare(MAX_BLOCK).with_render_mode(RenderMode::Offline),
         )
         .expect("forks");
     assert!(fed.spec().topology.event_taps.is_empty());
@@ -717,6 +716,11 @@ struct Probe {
     capacity: u32,
 }
 
+impl Probe {
+    const BASE: Shape = Shape::EMPTY.events(1, 0);
+    const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
+}
+
 impl Node for Probe {
     fn shape(&self) -> Shape {
         let shape = Shape::EMPTY.events(self.ports as u16, 0);
@@ -729,7 +733,7 @@ impl Node for Probe {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
         let mut heard = self.heard.lock().unwrap();
-        for e in io.events(0) {
+        for e in io.events(Self::IN) {
             if let EventKind::Midi(ump) = e.kind {
                 heard.push(TapEvent {
                     frame: cx.env.frame_at(e.offset),

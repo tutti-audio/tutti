@@ -13,8 +13,8 @@ use tutti_graph::testing as common;
 use common::{Kind, TestNode, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    CloseError, CommitError, Cx, Editor, Executor, ForkCause, ForkMode, ForkSource, ForkTarget,
-    Forked, IntoNode, Io, Level, MeterReader, Node, NodeParts, Op, Shape, Status,
+    CloseError, CommitError, Cx, Editor, Executor, ForkCause, ForkSource, ForkTarget, Forked,
+    IntoNode, Io, Level, MeterReader, Node, NodeParts, Op, RenderMode, Shape, Status,
     TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
@@ -27,7 +27,7 @@ struct Forkable(Kind);
 struct KindFork(Kind);
 
 impl ForkSource for KindFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked, ForkCause> {
         Ok(Forked::new(Box::new(TestNode::new(self.0.clone()))))
     }
 }
@@ -775,8 +775,7 @@ fn a_fork_meters_its_own_render_and_leaves_the_live_meter_alone() {
     let (mut fed, fexec) =
         r.ed.fork(
             ForkTarget::MainOutput,
-            ForkMode::Offline,
-            prepare(MAX_BLOCK),
+            prepare(MAX_BLOCK).with_render_mode(RenderMode::Offline),
         )
         .expect("forks");
     assert!(

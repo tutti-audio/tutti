@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_graph::{
-    Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare, Shape,
+    Cx, ForkCause, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare, RenderMode, Shape,
     Status, control_in,
 };
 use tutti_units::{Beat, Latency, Tail};
@@ -193,7 +193,7 @@ impl<F: Float> Node<F> for AutomationLaneNode {
 struct LaneFork(AutomationLaneNode);
 
 impl<F: Float> ForkSource<F> for LaneFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked<F>, ForkCause> {
         Ok(Forked::new(Box::new(self.0.fork_fresh())))
     }
 }

@@ -26,8 +26,8 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::{
-    Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare,
-    RenderMode, Shape, Status,
+    Cx, ForkCause, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare, RenderMode, Shape,
+    Status,
 };
 use tutti_rt::{CappedVec, Mutex, Overflow, RingReader, RingWriter, ring};
 use tutti_timeline::TempoReader;
@@ -1083,7 +1083,7 @@ struct PoolFork<F: SamplerFloat> {
 struct PoolCommanded;
 
 impl<F: SamplerFloat> ForkSource<F> for PoolFork<F> {
-    fn fork(&self, mode: ForkMode) -> Result<Forked<F>, ForkCause> {
+    fn fork(&self, mode: RenderMode) -> Result<Forked<F>, ForkCause> {
         if self.counters.commanded() {
             return Err(ForkCause::new(PoolCommanded));
         }

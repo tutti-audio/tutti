@@ -59,13 +59,13 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroU32;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tutti_buffers::Float;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_graph::{
-    Cx, EventDensity, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io,
-    MIN_EVENT_PORT_CAPACITY, Node, NodeParts, Offset, Prepare, Shape, Status,
+    Cx, EventDensity, ForkCause, ForkSource, Forked, IntoNode, Io, MIN_EVENT_PORT_CAPACITY, Node,
+    NodeParts, Offset, OutEvents, Prepare, RenderMode, Shape, Status,
 };
 use tutti_midi_protocol::Midi2Translator;
 use tutti_rt::{Publisher, Reader};
@@ -428,7 +428,7 @@ impl MidiClipControls {
     /// note-on) changes nothing: no note is cut. Control thread.
     pub fn set(&self, events: impl Into<Arc<ClipEvents>>) {
         let events = events.into();
-        let _serial = self.serial.lock_recover();
+        let _serial = self.serial.lock();
         let current = self.cell.current();
         if Arc::ptr_eq(&current, &events) || *current == *events {
             return;
@@ -507,6 +507,19 @@ struct Play {
 }
 
 impl MidiClipNode {
+    const fn declared(capacity: NonZeroU32) -> Shape {
+        Shape::EMPTY
+            .events(0, 1)
+            .event_capacity(capacity)
+            // Event-only: a walk over the block's events, nothing per frame
+            // (measured about 0.3 µs a block at any length; a gain's 256
+            // frames, 0.2).
+            .cost(tutti_graph::Cost::Light)
+    }
+    const OUT: OutEvents = Self::declared(MIN_EVENT_PORT_CAPACITY)
+        .event_output(0)
+        .expect("declared");
+
     /// A node playing `events` (in any order: they are sorted by beat).
     pub fn new(events: impl IntoIterator<Item = TimedMidiEvent>) -> Self {
         Self::over(Publisher::new(events.into_iter().collect::<ClipEvents>()))
@@ -582,13 +595,7 @@ impl<F: Float> Node<F> for MidiClipNode {
     /// No audio, one MIDI event output of [`CLIP_EVENT_DENSITY`] per frame of
     /// the block it was prepared for.
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .events(0, 1)
-            .event_capacity(self.capacity)
-            // Event-only: a walk over the block's events, nothing per frame
-            // (measured about 0.3 µs a block at any length; a gain's 256
-            // frames, 0.2).
-            .cost(tutti_graph::Cost::Light)
+        Self::declared(self.capacity)
     }
 
     fn prepare(&mut self, p: &Prepare) {
@@ -604,7 +611,7 @@ impl<F: Float> Node<F> for MidiClipNode {
         let replaced = std::mem::replace(&mut self.last_seq, seq) != seq;
         let Play { walk, held } = &mut self.play;
         let mut playing = Playing {
-            sending: held.block(io.event_out(0), first),
+            sending: held.block(io.event_out(Self::OUT), first),
             chase: &clip.chase,
         };
         if replaced {
@@ -651,7 +658,7 @@ struct ClipFork {
 }
 
 impl<F: Float> ForkSource<F> for ClipFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked<F>, ForkCause> {
         let cell = Publisher::from_arc(self.cell.current());
         Ok(Forked::new(Box::new(MidiClipNode::over(cell))))
     }

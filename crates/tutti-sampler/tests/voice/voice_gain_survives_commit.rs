@@ -37,8 +37,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    EventOutputPort, ForkMode, ForkTarget, ParamIn, ParamRange, Prepare, Standalone,
-    TransportPosition,
+    EventOutputPort, ForkTarget, ParamIn, ParamRange, Prepare, Standalone, TransportPosition,
 };
 use tutti_modulation::{Amount, ControlProgramBuilder, Law, Layer, LayerClock, LayerId, Polarity};
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
@@ -191,7 +190,6 @@ fn a_fork_starts_from_the_gain_last_set_and_shares_nothing() {
         .editor()
         .fork(
             ForkTarget::MainOutput,
-            ForkMode::Live,
             Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))),
         )
         .expect("a memory voice forks");

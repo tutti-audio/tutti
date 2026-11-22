@@ -741,7 +741,16 @@ mod tests {
             std::fs::set_permissions(&stand_in, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
 
-        let config = IpcConfig::new();
+        // The stand-in ends the launch itself, so a long window costs nothing; it
+        // only guards a stand-in that never starts.
+        let config = IpcConfig {
+            timeouts: {
+                let mut t = Timeouts::default();
+                t.call = Duration::from_secs(60);
+                t
+            },
+            ..IpcConfig::new()
+        };
 
         let err = match launch_with(
             &Locator::at(&stand_in),

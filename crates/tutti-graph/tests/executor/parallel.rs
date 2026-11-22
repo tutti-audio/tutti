@@ -21,8 +21,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor, ForkCause,
-    ForkMode, ForkSource, ForkTarget, Forked, IntoNode, Io, Law, Node, NodeParts, ParamIn,
-    ParamRamp, ParamRange, ParamSegment, Prepare, Schedule, Shape, Status, TransportPosition,
+    ForkSource, ForkTarget, Forked, IntoNode, Io, Law, Node, NodeParts, ParamIn, ParamRamp,
+    ParamRange, ParamSegment, Prepare, RenderMode, Schedule, Shape, Status, TransportPosition,
     Unforkable,
 };
 use tutti_graph::{Edge, FeedbackFrom, InputPort, OutputPort, PortSource};
@@ -37,7 +37,7 @@ struct Forkable(Kind);
 struct KindFork(Kind);
 
 impl ForkSource for KindFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked, ForkCause> {
         Ok(Forked::new(Box::new(TestNode::new(self.0.clone()))))
     }
 }
@@ -107,13 +107,17 @@ impl RampEvery {
     }
 }
 
+impl RampEvery {
+    const BASE: Shape = Shape::EMPTY
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(16));
+    const OUT: tutti_graph::OutEvents = Self::BASE.event_output(0).expect("declared");
+}
+
 impl Node for RampEvery {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .events(0, 1)
-            .param_events()
-            .event_capacity(tutti_graph::testing::cap_of(16))
-            .latency(Latency::new(Samples::new(self.latency)))
+        Self::BASE.latency(Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -148,7 +152,7 @@ impl Node for RampEvery {
                         tutti_graph::ParamEvent::segment(o, seg)
                     }
                 };
-                let _ = io.event_out(0).push_param(event);
+                let _ = io.event_out(Self::OUT).push_param(event);
             }
         }
         Status::Silent
@@ -562,7 +566,10 @@ fn an_offline_fork_renders_the_same_on_a_pool() {
     let pre = prepare(256);
     let fork = |workers: usize| {
         let (ed, mut exec) = live_ed
-            .fork(ForkTarget::MainOutput, ForkMode::Offline, pre)
+            .fork(
+                ForkTarget::MainOutput,
+                pre.with_render_mode(RenderMode::Offline),
+            )
             .expect("every node forks");
         if workers > 1 {
             exec.set_pool(Some(test_pool(workers)));

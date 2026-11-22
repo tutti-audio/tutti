@@ -23,7 +23,7 @@ use clap_probe::{ProbeEnv, Rig, load_probe, render};
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::machine_lock;
 
-use tutti_graph::{Env, ForkMode, Offset, TransportChanges, TransportPosition};
+use tutti_graph::{Env, Offset, RenderMode, TransportChanges, TransportPosition};
 use tutti_music::LoopRange;
 use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples};
 
@@ -219,7 +219,7 @@ fn the_transport_an_offline_fork_sees_is_env_at_every_chunk() {
     let probe = load_probe(SAMPLE_RATE);
     let fork = probe
         .client
-        .fork_instance(ForkMode::Offline, scene_tempo())
+        .fork_instance(RenderMode::Offline, scene_tempo())
         .expect("the probe forks");
     const BLOCK: usize = 2 * CHUNK;
     // A 64-frame device quantum in 128-frame blocks: two chunks a block.
@@ -300,7 +300,7 @@ fn a_plugin_behind_a_latent_path_sees_the_transport_its_input_was_rendered_at() 
     let probe = load_probe(SAMPLE_RATE);
     let fork = probe
         .client
-        .fork_instance(ForkMode::Offline, scene_tempo())
+        .fork_instance(RenderMode::Offline, scene_tempo())
         .expect("the probe forks");
     const BLOCK: usize = 2 * CHUNK;
     const ARRIVAL: usize = 40;
@@ -369,7 +369,7 @@ fn the_plugin_is_told_the_maps_tempo_and_slope() {
     let probe = load_probe(SAMPLE_RATE);
     let fork = probe
         .client
-        .fork_instance(ForkMode::Offline, ramp_tempo())
+        .fork_instance(RenderMode::Offline, ramp_tempo())
         .expect("the probe forks");
     let prepare = tutti_graph::Prepare::new(
         SampleRate::of(SAMPLE_RATE),
@@ -455,7 +455,7 @@ fn a_ramps_end_inside_a_chunk_is_a_transport_event_at_its_frame() {
     let probe = load_probe(SAMPLE_RATE);
     let fork = probe
         .client
-        .fork_instance(ForkMode::Offline, two_ramps())
+        .fork_instance(RenderMode::Offline, two_ramps())
         .expect("the probe forks");
     let prepare = tutti_graph::Prepare::new(
         SampleRate::of(SAMPLE_RATE),

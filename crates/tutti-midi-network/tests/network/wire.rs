@@ -703,3 +703,33 @@ fn a_command_stays_small() {
     let size = std::mem::size_of::<Command>();
     assert!(size <= 160, "{size}");
 }
+
+/// A string with no NUL ends where its Command ends: a Bye and a NAK whose text
+/// fills the longest payload to the last byte are read whole.
+/// Spec: m2-124/5.3#3
+#[test]
+fn a_string_that_fills_its_command_to_the_last_byte_is_read_whole() {
+    let mut bye = vec![0xF0, 255, 0x01, 0x00];
+    bye.extend_from_slice(&[b'x'; 1020]);
+    let Ok(Command::Bye(bye)) = one(&bye) else {
+        panic!("a Bye of 255 words")
+    };
+    assert_eq!(bye.text.as_str(), "x".repeat(1020));
+
+    let mut nak = vec![0x8F, 255, 0x00, 0x00, 0xF1, 0x00, 0x00, 0x00];
+    nak.extend_from_slice(&[b'y'; 1016]);
+    let Ok(Command::Nak(nak)) = one(&nak) else {
+        panic!("a NAK of 255 words")
+    };
+    assert_eq!(nak.text.as_str(), "y".repeat(1016));
+}
+
+/// Spec: m2-124/5.3#1
+#[test]
+fn a_leading_byte_order_mark_is_refused_in_every_wire_string() {
+    assert!(ByeText::new("\u{FEFF}Keys").is_none());
+    assert!(NakText::new("\u{FEFF}Keys").is_none());
+    assert!(Username::new("\u{FEFF}Keys").is_none());
+    // U+FEFF inside a string is a zero-width no-break space, not a BOM.
+    assert!(Username::new("Ke\u{FEFF}ys").is_some());
+}

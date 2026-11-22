@@ -28,7 +28,7 @@ use tutti_plugin_types::PipelineCounts;
 use tutti_rt::AtomicSampleRate;
 use tutti_rt::AudioThreadCell;
 use tutti_rt::{
-    Counter, LockExt, Overflow, PackedAtomic, Parker, RingReader, RingWriter, Tally, TallyWriter,
+    Counter, Mutex, Overflow, PackedAtomic, Parker, RingReader, RingWriter, Tally, TallyWriter,
     Unparker, parker, ring, tally,
 };
 use tutti_units::{Normalized, ParamId, SampleRate};
@@ -71,11 +71,11 @@ pub(super) struct Channels {
     owing: ControlSlot,
     /// The settings the audio lane has written and the control lane has not
     /// taken: one slot per kind, the latest value, never a queue.
-    settings: Arc<std::sync::Mutex<Settings>>,
+    settings: Arc<Mutex<Settings>>,
     /// What callers asked for, before the audio lane takes it up: a slot, never
     /// a queue, so a full block queue (a producer racing a held lane) cannot
     /// lose one.
-    requests: Arc<std::sync::Mutex<Requests>>,
+    requests: Arc<Mutex<Requests>>,
     /// The newest block sequence the audio thread has submitted. Owned here
     /// rather than on the batcher because the *bridge* thread is what reads it,
     /// to decide whether a dequeued block is still worth sending.
@@ -177,7 +177,7 @@ pub(super) struct Channels {
     /// [`bytes_waiting`](Self::bytes_waiting) asks it whether bytes the thread
     /// has not read are there, which `news` alone misses before the thread's
     /// wait has returned.
-    probe: Arc<std::sync::Mutex<Option<Arc<crate::transport::control::Watch>>>>,
+    probe: Arc<Mutex<Option<Arc<crate::transport::control::Watch>>>>,
     /// Notified on a lane's thread when a response is queued and when it has
     /// finished a turn (a lane read dry, a command answered): what a control or
     /// worker thread waiting on the bridge sleeps on. The server's watch
@@ -446,7 +446,7 @@ impl Channels {
     pub(super) fn request_setting(&self, setting: Setting) {
         let after = self.newest_submitted();
         {
-            let mut slots = self.requests.lock_recover();
+            let mut slots = self.requests.lock();
             match setting {
                 Setting::SampleRate(rate) => slots.rate = Some((rate, after)),
                 Setting::RenderMode(mode) => slots.mode = Some((mode, after)),
@@ -460,7 +460,7 @@ impl Channels {
 
     /// Whether a requested setting waits for the audio lane.
     fn requested(&self) -> bool {
-        let slots = self.requests.lock_recover();
+        let slots = self.requests.lock();
         slots.rate.is_some() || slots.mode.is_some()
     }
 
@@ -468,7 +468,7 @@ impl Channels {
     /// while a lesser sequence was the newest), or any with `None`; a rate
     /// before a render mode.
     pub(super) fn take_request(&self, before: Option<u64>) -> Option<Setting> {
-        let mut slots = self.requests.lock_recover();
+        let mut slots = self.requests.lock();
         let due = |after: u64| before.is_none_or(|seq| seq > after);
         if let Some((rate, after)) = slots.rate
             && due(after)
@@ -502,12 +502,12 @@ impl Channels {
 
     /// Keeps `watch` as the probe [`bytes_waiting`](Self::bytes_waiting) asks.
     pub(super) fn set_probe(&self, watch: Arc<crate::transport::control::Watch>) {
-        *self.probe.lock_recover() = Some(watch);
+        *self.probe.lock() = Some(watch);
     }
 
     /// Lets the connection's duplicate go once nothing watches it.
     pub(super) fn clear_probe(&self) {
-        *self.probe.lock_recover() = None;
+        *self.probe.lock() = None;
     }
 
     /// Whether the control connection has bytes the control thread has not read
@@ -517,7 +517,7 @@ impl Channels {
     pub(super) fn bytes_waiting(&self) -> bool {
         let waiting = self
             .probe
-            .lock_recover()
+            .lock()
             .as_ref()
             .is_some_and(|watch| watch.wait_readable(Duration::ZERO));
         std::sync::atomic::fence(Ordering::SeqCst);
@@ -764,7 +764,7 @@ impl Channels {
 
     /// Whether a setting waits for the control lane.
     pub(super) fn setting_waiting(&self) -> bool {
-        let slots = self.settings.lock_recover();
+        let slots = self.settings.lock();
         slots.rate.is_some() || slots.mode.is_some()
     }
 
@@ -779,7 +779,7 @@ impl Channels {
     /// are applied in.
     pub(super) fn put_setting(&self, setting: Setting, applied: Reply<()>) {
         {
-            let mut slots = self.settings.lock_recover();
+            let mut slots = self.settings.lock();
             if slots.closed {
                 // No lane takes it: dropping the reply ends its waiter.
                 return;
@@ -802,7 +802,7 @@ impl Channels {
     /// as it ends (stop or crash).
     pub(super) fn close_settings(&self) {
         let dropped = {
-            let mut slots = self.settings.lock_recover();
+            let mut slots = self.settings.lock();
             slots.closed = true;
             (slots.rate.take(), slots.mode.take(), slots.fence.take())
         };
@@ -812,7 +812,7 @@ impl Channels {
     /// The setting waiting for the control lane, if any: a rate first, then a
     /// render mode, then a fence.
     pub(super) fn take_setting(&self) -> Option<(Setting, Reply<()>)> {
-        let mut slots = self.settings.lock_recover();
+        let mut slots = self.settings.lock();
         if let Some((rate, applied)) = slots.rate.take() {
             return Some((Setting::SampleRate(rate), applied));
         }

@@ -1,7 +1,8 @@
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tutti_platform::Instant;
+use tutti_rt::Mutex;
 
 use super::anchor::Anchor;
 use super::bytes::{ByteIn, ByteOut, Wire};
@@ -669,7 +670,7 @@ fn device(n: u64, name: &str) -> OsDevice {
 }
 
 fn listed() -> Vec<OsDevice> {
-    LISTED.lock().unwrap().clone()
+    LISTED.lock().clone()
 }
 
 /// Held by the poll's snapshot, so its count says whether the poll's future lives.
@@ -712,7 +713,7 @@ impl MidiEndpoints for Polled {
 /// One test owns `LISTED`, so the process-wide list is not raced.
 #[test]
 fn the_poll_seeds_then_reports_a_device_that_appears_and_one_that_goes() {
-    *LISTED.lock().unwrap() = vec![device(1, "A")];
+    *LISTED.lock() = vec![device(1, "A")];
     let executor = tutti_platform::Executor::new();
     let threads = executor.spawn_threads(std::num::NonZeroUsize::MIN).unwrap();
     let witness = Arc::new(());
@@ -724,7 +725,7 @@ fn the_poll_seeds_then_reports_a_device_that_appears_and_one_that_goes() {
     assert_eq!(devices.list().len(), 1, "seeded before open returns");
     let mut events = devices.subscribe();
 
-    LISTED.lock().unwrap().push(device(2, "B"));
+    LISTED.lock().push(device(2, "B"));
     let Some(DeviceEvent::Added(added)) = tutti_fixtures::block_on_within(
         futures_lite::StreamExt::next(&mut events),
         Duration::from_secs(30),
@@ -734,7 +735,7 @@ fn the_poll_seeds_then_reports_a_device_that_appears_and_one_that_goes() {
     };
     assert_eq!(added.name, "B");
 
-    LISTED.lock().unwrap().remove(0);
+    LISTED.lock().remove(0);
     let Some(DeviceEvent::Removed(removed)) = tutti_fixtures::block_on_within(
         futures_lite::StreamExt::next(&mut events),
         Duration::from_secs(30),
@@ -763,7 +764,7 @@ struct Captured(Arc<Mutex<Option<ChangeSink>>>);
 
 impl MidiEndpoints for Captured {
     fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
-        *self.0.lock().unwrap() = Some(sink);
+        *self.0.lock() = Some(sink);
         Ok(Box::new(crate::endpoints::NoWatch))
     }
     fn inputs(&self) -> Result<Vec<OsEndpoint>> {
@@ -798,7 +799,7 @@ fn a_poll_ends_when_its_executor_has_shut_down() {
     let slot = Arc::new(Mutex::new(None));
     let executor = tutti_platform::Executor::new();
     let _devices = Devices::open_over(&executor, Box::new(Captured(Arc::clone(&slot)))).unwrap();
-    let sink = slot.lock().unwrap().take().unwrap();
+    let sink = slot.lock().take().unwrap();
     // The executor made here drops at once, so its timer is already shut down:
     // the poll's first sleep fails.
     let timer = tutti_platform::Executor::new().timer();

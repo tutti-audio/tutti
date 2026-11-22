@@ -17,6 +17,7 @@
 use std::sync::{Arc, Mutex};
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{Planes, PlanesMut};
+use tutti_rt::CappedVec;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
@@ -43,10 +44,19 @@ const MAX_BLOCK: usize = 4_096;
 
 /// What the node saw: the beat of every frame of every block, and each block's
 /// length and number of transport changes.
-#[derive(Default)]
 struct Seen {
-    beats: Vec<f64>,
-    blocks: Vec<(usize, usize)>,
+    beats: CappedVec<f64>,
+    blocks: CappedVec<(usize, usize)>,
+}
+
+impl Default for Seen {
+    /// Room reserved here, on the control side, for the longest run a test renders.
+    fn default() -> Self {
+        Self {
+            beats: CappedVec::with_capacity(1 << 19),
+            blocks: CappedVec::with_capacity(1 << 14),
+        }
+    }
 }
 
 type Log = Arc<Mutex<Seen>>;
@@ -61,7 +71,9 @@ impl Node for BeatLog {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let mut seen = self.0.lock().expect("log");
-        cx.env.for_each_beat(|_, beat| seen.beats.push(beat.get()));
+        cx.env.for_each_beat(|_, beat| {
+            seen.beats.push(beat.get());
+        });
         seen.blocks
             .push((cx.env.block_len.get(), cx.env.changes.len()));
         io.output(0).fill(0.0);

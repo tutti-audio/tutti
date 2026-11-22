@@ -333,24 +333,29 @@ fn a_recovery_of_an_older_refusal_does_not_mask_a_new_loss() {
 
 mod loss {
     use super::*;
-    use tutti_graph::{Cx, Event, ForkByClone, Io, Node, Prepare, Shape, Status};
+    use tutti_graph::{Cx, Event, ForkByClone, Io, Node, OutEvents, Prepare, Shape, Status};
 
     /// Ten note-ons into a port of four, every block: six refused.
     #[derive(Clone)]
     struct Burst;
 
+    impl Burst {
+        const SHAPE: Shape = Shape::EMPTY
+            .events(0, 1)
+            .event_capacity(std::num::NonZeroU32::new(4).expect("a capacity"));
+        const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
+    }
+
     impl Node for Burst {
         fn shape(&self) -> Shape {
-            Shape::EMPTY
-                .events(0, 1)
-                .event_capacity(std::num::NonZeroU32::new(4).expect("a capacity"))
+            Self::SHAPE
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
             for i in 0..10 {
                 let at = cx.env.offset(i).expect("inside the block");
                 let _ = io
-                    .event_out(0)
+                    .event_out(Self::OUT)
                     .push(Event::midi(at, Ump([0x2090_3c64, 0, 0, 0])));
             }
             Status::Silent

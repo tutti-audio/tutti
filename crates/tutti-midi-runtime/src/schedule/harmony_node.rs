@@ -23,14 +23,14 @@
 //! ([`HarmonyControls::set`]); the node reads them once per block.
 
 use std::num::NonZeroU32;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tutti_buffers::Float;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_graph::{
-    Cx, Event, EventDensity, EventWriter, ForkCause, ForkMode, ForkSource, Forked, Harmony,
-    HarmonyKind, IntoNode, Io, MIN_EVENT_PORT_CAPACITY, Node, NodeParts, Offset, Prepare, Shape,
-    Status,
+    Cx, Event, EventDensity, EventWriter, ForkCause, ForkSource, Forked, Harmony, HarmonyKind,
+    IntoNode, Io, MIN_EVENT_PORT_CAPACITY, Node, NodeParts, Offset, OutEvents, Prepare, RenderMode,
+    Shape, Status,
 };
 use tutti_rt::{Publisher, Reader};
 use tutti_units::Beat;
@@ -227,6 +227,18 @@ impl std::fmt::Debug for HarmonyNode {
 }
 
 impl HarmonyNode {
+    const fn declared(capacity: NonZeroU32) -> Shape {
+        Shape::EMPTY
+            .events(0, 1)
+            .event_capacity(capacity)
+            // Event-only: the clip node's walk over its changes, nothing per
+            // frame.
+            .cost(tutti_graph::Cost::Light)
+    }
+    const OUT: OutEvents = Self::declared(MIN_EVENT_PORT_CAPACITY)
+        .event_output(0)
+        .expect("declared");
+
     /// A node sending `changes`.
     #[must_use]
     pub fn new(changes: HarmonyChanges) -> Self {
@@ -270,7 +282,7 @@ impl HarmonyControls {
     /// force change nothing. Control thread.
     pub fn set(&self, changes: impl Into<Arc<HarmonyChanges>>) {
         let changes = changes.into();
-        let _serial = self.serial.lock_recover();
+        let _serial = self.serial.lock();
         let current = self.cell.current();
         if Arc::ptr_eq(&current, &changes) || *current == *changes {
             return;
@@ -394,12 +406,7 @@ impl<F: Float> Node<F> for HarmonyNode {
     /// No audio, one event output of [`HARMONY_EVENT_DENSITY`] per frame of
     /// the block it was prepared for.
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .events(0, 1)
-            .event_capacity(self.capacity)
-            // Event-only: the clip node's walk over its changes, nothing per
-            // frame.
-            .cost(tutti_graph::Cost::Light)
+        Self::declared(self.capacity)
     }
 
     fn prepare(&mut self, p: &Prepare) {
@@ -414,7 +421,7 @@ impl<F: Float> Node<F> for HarmonyNode {
             self.sent = Sent::default();
         }
         let mut writer = HarmonyWriter {
-            out: io.event_out(0),
+            out: io.event_out(Self::OUT),
             sent: &mut self.sent,
             restated: None,
         };
@@ -438,7 +445,7 @@ struct HarmonyFork {
 }
 
 impl<F: Float> ForkSource<F> for HarmonyFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked<F>, ForkCause> {
         let cell = Publisher::from_arc(self.cell.current());
         Ok(Forked::new(Box::new(HarmonyNode::over(cell))))
     }

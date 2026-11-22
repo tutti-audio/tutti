@@ -195,11 +195,11 @@ fn two_publishes_between_blocks_release_each_held_note_once() {
 /// at its frame, on the `Env` it is rendered with.
 #[test]
 fn a_fork_plays_the_clip_as_it_was_at_the_fork() {
-    use tutti_graph::{ForkMode, NodeParts};
+    use tutti_graph::{NodeParts, RenderMode};
     let NodeParts { controls, fork, .. } = MidiClipNode::new([at(300, on(60))]).into_parts();
     let forked = fork
         .expect("a clip is forkable")
-        .fork(ForkMode::Live)
+        .fork(RenderMode::Realtime)
         .expect("a clip forks");
     publish(&controls, [at(100, on(72))]);
     let (_ed, mut exec, (), seen) = rig_with(Unforkable(forked.node), 256);

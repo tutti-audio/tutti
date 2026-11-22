@@ -334,7 +334,8 @@
 //!
 //! ```
 //! use tutti_graph::{
-//!     Cx, Event, EventKind, ForkByClone, GraphBuilder, Io, Node, Offset, Prepare, Shape, Status,
+//!     Cx, Event, EventKind, ForkByClone, GraphBuilder, InEvents, Io, Node, Offset, OutEvents,
+//!     Prepare, Shape, Status,
 //! };
 //! use tutti_units::{SampleRate, Samples};
 //! use tutti_buffers::{ChannelLayout, MaxBlock};
@@ -346,15 +347,23 @@
 //! #[derive(Clone)]
 //! struct Pulse;
 //!
+//! impl Pulse {
+//!     const SHAPE: Shape = Shape::EMPTY.events(0, 1).event_capacity(CAPACITY);
+//!     const OUT: OutEvents = match Self::SHAPE.event_output(0) {
+//!         Some(port) => port,
+//!         None => panic!("declared"),
+//!     };
+//! }
+//!
 //! impl Node for Pulse {
 //!     fn shape(&self) -> Shape {
-//!         Shape::EMPTY.events(0, 1).event_capacity(CAPACITY)
+//!         Self::SHAPE
 //!     }
 //!     fn prepare(&mut self, _: &Prepare) {}
 //!     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
 //!         let on = Message::midi1(MidiChannel::of(0), Voice1::note_on(NoteNumber::of(60), U7::of(100)));
 //!         if let Some(at) = io.offset(3) {
-//!             let _ = io.event_out(0).push(Event::midi(at, Ump::from(on)));
+//!             let _ = io.event_out(Self::OUT).push(Event::midi(at, Ump::from(on)));
 //!         }
 //!         Status::Silent
 //!     }
@@ -366,13 +375,21 @@
 //!     open: bool,
 //! }
 //!
+//! impl Gate {
+//!     const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).events(1, 0);
+//!     const IN: InEvents = match Self::SHAPE.event_input(0) {
+//!         Some(port) => port,
+//!         None => panic!("declared"),
+//!     };
+//! }
+//!
 //! impl Node for Gate {
 //!     fn shape(&self) -> Shape {
-//!         Shape::source_unassigned(ChannelLayout::MONO).events(1, 0)
+//!         Self::SHAPE
 //!     }
 //!     fn prepare(&mut self, _: &Prepare) {}
 //!     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-//!         for (range, events) in io.sub_blocks(0) {
+//!         for (range, events) in io.sub_blocks(Self::IN) {
 //!             for e in events {
 //!                 if let EventKind::Midi(_) = e.kind {
 //!                     self.open = true;
@@ -722,14 +739,14 @@ pub use event_tap::{EventTapOptions, EventTapReader, EventTapWriter, TapEvent};
 pub use exec::{DEFAULT_EVENT_CAPACITY, Executor, FADE_CAPACITY, MainOutputFade, QUEUE_CAPACITY};
 pub use fade::Fade;
 pub use fork::{
-    ForkBuild, ForkByClone, ForkCause, ForkError, ForkFault, ForkFaultKind, ForkHealth, ForkMode,
+    ForkBuild, ForkByClone, ForkCause, ForkError, ForkFault, ForkFaultKind, ForkHealth,
     ForkRemains, ForkSource, ForkTarget, Forked, PendingFork, Unforkable,
 };
 pub use lane::{control_in, fade_gains, fade_in, ramp_in};
 pub use tutti_curve::{Curvature, DECLICK, Exponent, FadeLaw, Law, declick_frames};
 // The audio graph as a value, and the two passes over it. `plan` is the
 // latency pass and is exported as `latency_plan`.
-pub use bus::{Bus, BusRole, Buses, InBus, MAX_BUSES, OutBus};
+pub use bus::{Bus, BusRole, Buses, InBus, InEvents, MAX_BUSES, OutBus, OutEvents};
 pub use bus_edge::{BusError, BusFeed, BusFold, BusOutputPort, BusSide, Lowering, NodeBus};
 pub use gain::{EdgeFade, EdgeGain};
 pub use graph::{

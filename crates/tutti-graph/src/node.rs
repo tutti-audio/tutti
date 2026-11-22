@@ -24,7 +24,7 @@ use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_music::{FrameClock, LoopRange, MeterMap, SegmentOrigin};
 use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
-use crate::bus::{Buses, PortSpan};
+use crate::bus::{Buses, InEvents, OutEvents, PortSpan};
 use crate::cost::Cost;
 use crate::fork::ForkSource;
 use crate::history::TransportHistory;
@@ -520,6 +520,39 @@ impl Shape {
         (0..self.buses_out.len())
             .filter_map(|i| self.output_bus(i))
             .chain(self.spare_out())
+    }
+
+    /// Event input `index`: the handle a node reads it through
+    /// ([`Io::events`](crate::Io::events)). `None` past
+    /// [`event_in`](Self::event_in).
+    #[must_use]
+    pub const fn event_input(&self, index: u16) -> Option<InEvents> {
+        if index < self.event_in {
+            Some(InEvents(index))
+        } else {
+            None
+        }
+    }
+
+    /// Event output `index` ([`Io::event_out`](crate::Io::event_out)). `None`
+    /// past [`event_out`](Self::event_out).
+    #[must_use]
+    pub const fn event_output(&self, index: u16) -> Option<OutEvents> {
+        if index < self.event_out {
+            Some(OutEvents(index))
+        } else {
+            None
+        }
+    }
+
+    /// Every event input as a handle, in port order.
+    pub fn event_inputs(&self) -> impl Iterator<Item = InEvents> + use<> {
+        (0..self.event_in).map(InEvents)
+    }
+
+    /// Every event output as a handle, in port order.
+    pub fn event_outputs(&self) -> impl Iterator<Item = OutEvents> + use<> {
+        (0..self.event_out).map(OutEvents)
     }
 
     /// The ports [`Io::input`](crate::Io::input) and

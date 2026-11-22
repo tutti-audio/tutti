@@ -74,14 +74,14 @@ use tutti_buffers::Float;
 use tutti_graph::{Losses, UmpAt};
 
 use std::num::NonZeroU32;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tutti_graph::{
-    Cx, Event, EventDensity, EventKind, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io,
-    Node, NodeParts, Offset, Prepare, Shape, Status,
+    Cx, Event, EventDensity, EventKind, ForkCause, ForkSource, Forked, InEvents, IntoNode, Io,
+    Node, NodeParts, Offset, OutEvents, Prepare, RenderMode, Shape, Status,
 };
 use tutti_midi_protocol::Midi2Translator;
 use tutti_midi_protocol::{MpeMode, MpeZones};
-use tutti_rt::{Counter, CounterWriter, LockExt, Publisher, Reader, counter};
+use tutti_rt::{Counter, CounterWriter, Mutex, Publisher, Reader, counter};
 use tutti_ump::{Held, Message, MidiChannel, MidiGroup, System, Ump};
 use tutti_units::{Frame, SampleRate, Samples};
 
@@ -290,6 +290,8 @@ pub struct MidiInputNode {
     /// The events a block translates and each port holds, from the block the
     /// node was prepared for.
     capacity: NonZeroU32,
+    /// Its event outputs, in port order.
+    outputs: Vec<OutEvents>,
 }
 
 /// The MPE Profile zones of each of a device's Groups.
@@ -458,7 +460,9 @@ impl MidiInputNode {
     pub fn new() -> Self {
         let cell = Publisher::new(Requests::new());
         let (dropped, dropped_reader) = counter();
+        let shape = Self::declared(MidiInputPorts::FIRST_GROUP, MIDI_INPUT_PORT_CAPACITY);
         Self {
+            outputs: shape.event_outputs().collect(),
             mpe_mode: None,
             mpe_request: cell.reader(),
             request_serial: Arc::default(),
@@ -499,7 +503,24 @@ impl MidiInputNode {
     #[must_use]
     pub fn hearing(mut self, ports: MidiInputPorts) -> Self {
         self.ports = ports;
+        self.outputs = Self::declared(ports, self.capacity)
+            .event_outputs()
+            .collect();
         self
+    }
+
+    /// The event input every shape declares.
+    const IN: InEvents = Self::declared(MidiInputPorts::FIRST_GROUP, MIDI_INPUT_PORT_CAPACITY)
+        .event_input(0)
+        .expect("declared");
+
+    /// One event input and [`MidiInputPorts::count`] event outputs of `capacity`.
+    const fn declared(ports: MidiInputPorts, capacity: NonZeroU32) -> Shape {
+        Shape::EMPTY
+            .events(1, ports.count())
+            .event_capacity(capacity)
+            // Event-only: a translation per event, nothing per frame.
+            .cost(tutti_graph::Cost::Light)
     }
 
     /// Translate classic MPE in the mode `mode` holds from the first block, on
@@ -564,7 +585,7 @@ impl MidiInputControls {
     /// Publishes the requests with `edit` applied to the device's zones, when it
     /// says it changed them.
     fn edit_profiles(&self, edit: impl FnOnce(&mut GroupProfiles) -> bool) {
-        let _serial = self.serial.lock_recover();
+        let _serial = self.serial.lock();
         let mut request = (*self.request.current()).clone();
         if edit(&mut request.profiles) {
             self.request.publish(request);
@@ -589,11 +610,7 @@ impl<F: Float> Node<F> for MidiInputNode {
     /// prepared capacity ([`MIDI_INPUT_EVENT_CAPACITY`] at least, and
     /// [`MIDI_INPUT_DENSITY`] per frame of a long block).
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .events(1, self.ports.count())
-            .event_capacity(self.capacity)
-            // Event-only: a translation per event, nothing per frame.
-            .cost(tutti_graph::Cost::Light)
+        Self::declared(self.ports, self.capacity)
     }
 
     fn prepare(&mut self, p: &Prepare) {
@@ -663,7 +680,7 @@ impl<F: Float> Node<F> for MidiInputNode {
         }
         device.pay(&mut staging);
         if device.present {
-            for event in io.events(0) {
+            for event in io.events(Self::IN) {
                 let EventKind::Midi(raw) = event.kind else {
                     continue;
                 };
@@ -723,7 +740,7 @@ impl<F: Float> Node<F> for MidiInputNode {
             };
             // Refused past the capacity: counted by the executor.
             let _ = io
-                .event_out(port)
+                .event_out(self.outputs[usize::from(port)])
                 .push(Event::midi(offset_of(ev, block_len), ev.1));
         }
         if let (Some(cell), Some(handled)) = (&self.generation, handled_generation) {
@@ -815,7 +832,7 @@ struct SilentInput {
 }
 
 impl<F: Float> ForkSource<F> for SilentInput {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked<F>, ForkCause> {
         Ok(Forked::new(Box::new(
             MidiInputNode::new().hearing(self.ports),
         )))

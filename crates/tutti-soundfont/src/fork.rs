@@ -25,7 +25,7 @@
 
 use tutti_buffers::Float;
 use tutti_dsp::SimdLanes;
-use tutti_graph::{ForkCause, ForkMode, ForkSource, Forked};
+use tutti_graph::{ForkCause, ForkSource, Forked, RenderMode};
 
 use crate::SoundFontUnit;
 
@@ -36,7 +36,7 @@ pub(crate) struct SoundFontFork<F: Float + SimdLanes> {
 }
 
 impl<F: Float + SimdLanes> ForkSource<F> for SoundFontFork<F> {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked<F>, ForkCause> {
         Ok(Forked::new(Box::new(self.template.fork_instance())))
     }
 }
@@ -80,7 +80,7 @@ mod tests {
 
     use tutti_graph::contract::drive_input;
     use tutti_graph::{
-        Env, Event, ForkMode, ForkSource, Node, Offset, Prepare, TransportChanges,
+        Env, Event, ForkSource, Node, Offset, Prepare, RenderMode, TransportChanges,
         TransportPosition,
     };
     use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity, U7};
@@ -158,7 +158,7 @@ mod tests {
 
         for rate in [LIVE, SampleRate::SR_96K] {
             let held = Arc::strong_count(&font);
-            let fork = source.fork(ForkMode::Live).expect("forks").node;
+            let fork = source.fork(RenderMode::Realtime).expect("forks").node;
             assert_eq!(
                 Arc::strong_count(&font),
                 held + 1,
@@ -190,7 +190,7 @@ mod tests {
         );
         let fork = live
             .fork_template()
-            .fork(ForkMode::Live)
+            .fork(RenderMode::Realtime)
             .expect("forks")
             .node;
         // No new events: the tail of each render, two seconds on.

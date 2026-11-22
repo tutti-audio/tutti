@@ -14,23 +14,26 @@ const BLOCK: usize = 64;
 /// A sine synth of one voice with a flat envelope, so the output is the oscillator and the
 /// voice's gain alone.
 fn sine() -> PolySynth<f64> {
-    PolySynth::<f64>::new(SynthConfig {
-        oscillator: OscillatorType::Sine,
-        polyphony: NonZeroUsize::new(1).unwrap(),
-        envelope: Adsr::new(
-            Seconds::new(0.0),
-            Seconds::new(0.0),
-            Amplitude::new(1.0),
-            Seconds::new(0.1),
-        ),
-        ..Default::default()
-    })
+    PolySynth::<f64>::new(
+        SynthConfig::new()
+            .oscillator(OscillatorType::Sine)
+            .polyphony(NonZeroUsize::new(1).unwrap())
+            .envelope(Adsr::new(
+                Seconds::new(0.0),
+                Seconds::new(0.0),
+                Amplitude::new(1.0),
+                Seconds::new(0.1),
+            )),
+    )
 }
 
 /// The left channel of `blocks` blocks after a Note On of `note`, as a graph drives it.
 fn play(note: u8, blocks: usize) -> Vec<f64> {
     let mut direct: Direct<PolySynth<f64>, f64> =
         Direct::with_format(sine(), SampleRate::SR_48K, BLOCK);
+    let input = tutti_graph::Node::shape(&*direct.node)
+        .event_input(0)
+        .expect("an event input");
     let on = midi::note_on(
         MidiChannel::FIRST,
         note,
@@ -43,7 +46,7 @@ fn play(note: u8, blocks: usize) -> Vec<f64> {
         } else {
             vec![]
         };
-        direct.events(0, &events);
+        direct.events(input, &events);
         direct.block();
         out.extend_from_slice(direct.output().plane(0).samples());
     }

@@ -20,8 +20,8 @@ use std::sync::Arc;
 
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Editor, EventEdge, EventInputPort, EventOutputPort, ForkMode, ForkTarget, Law, ParamKind,
-    ParamRamp, ParamRange, ParamSegment, Prepare,
+    Editor, EventEdge, EventInputPort, EventOutputPort, ForkTarget, Law, ParamKind, ParamRamp,
+    ParamRange, ParamSegment, Prepare, RenderMode,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_modulation::ControlProgram;
@@ -99,7 +99,10 @@ fn automation_reaches_the_plugin_through_its_event_input() {
         ..Default::default()
     }));
     let (_fork_ed, mut fork_exec) = live
-        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare)
+        .fork(
+            ForkTarget::MainOutput,
+            prepare.with_render_mode(RenderMode::Offline),
+        )
         .expect("the lane and the plugin fork");
 
     let mut block = vec![0.0f32; BLOCK];
@@ -176,7 +179,10 @@ fn render_gain(
         ..Default::default()
     }));
     let (mut fork_ed, mut fork_exec) = live
-        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare)
+        .fork(
+            ForkTarget::MainOutput,
+            prepare.with_render_mode(RenderMode::Offline),
+        )
         .expect("the graph forks");
     for &(frame, kind) in schedule {
         fork_ed

@@ -112,13 +112,13 @@
 
 #![cfg(target_os = "macos")]
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tutti_au_ffi::Property;
 use tutti_au_ffi::property::{BypassEffect, Latency, PresentPreset};
 use tutti_au_host::types::{self, AudioComponentDescription, K_AUDIO_UNIT_TYPE_EFFECT};
 use tutti_platform::Instant;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 mod support;
 use support::corpus::{DELAY, DISTORTION, MULTI_CHANNEL_MIXER, N_BAND_EQ};
@@ -135,12 +135,6 @@ use tutti_au_host::{BusDirection, TransportInfo, TransportState};
 /// a process-global registry and these tests open the same units the other suites
 /// do.
 static AU_LOCK: Mutex<()> = Mutex::new(());
-
-/// Poison recovery. The guard is a serializer only — it protects no shared
-/// state — so one panicking test must not convert into N spurious failures.
-fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock_recover()
-}
 
 const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
@@ -171,19 +165,19 @@ struct EventLog(Arc<Mutex<Vec<AuEvent>>>);
 impl EventLog {
     fn sink(&self) -> impl Fn(AuEvent) + Send + Sync + 'static {
         let inner = Arc::clone(&self.0);
-        move |ev| inner.lock_recover().push(ev)
+        move |ev| inner.lock().push(ev)
     }
 
     fn snapshot(&self) -> Vec<AuEvent> {
-        self.0.lock_recover().clone()
+        self.0.lock().clone()
     }
 
     fn len(&self) -> usize {
-        self.0.lock_recover().len()
+        self.0.lock().len()
     }
 
     fn clear(&self) {
-        self.0.lock_recover().clear();
+        self.0.lock().clear();
     }
 
     /// Block until at least `n` events have arrived, or `SETTLE` elapses.
@@ -257,7 +251,7 @@ fn property_ids(events: &[AuEvent]) -> Vec<u32> {
 /// 202–216 ms.
 #[test]
 fn a_host_property_write_reaches_a_property_listener() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
 
     let log = EventLog::default();
@@ -299,7 +293,7 @@ fn a_host_property_write_reaches_a_property_listener() {
 /// Measured over 5 trials: 0 events in 1.2 s, every trial.
 #[test]
 fn a_property_listener_does_not_receive_properties_it_did_not_watch() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DISTORTION.open(RATE, BLOCK);
 
     let log = EventLog::default();
@@ -363,7 +357,7 @@ fn a_property_listener_does_not_receive_properties_it_did_not_watch() {
 /// `BypassEffect` (21).
 #[test]
 fn two_watched_properties_arrive_under_their_own_ids() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DISTORTION.open(RATE, BLOCK);
 
     let log = EventLog::default();
@@ -423,7 +417,7 @@ fn two_watched_properties_arrive_under_their_own_ids() {
 /// here rather than as a host that silently stops watching.
 #[test]
 fn registration_never_refuses_a_property_id() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
 
     let log = EventLog::default();
@@ -484,7 +478,7 @@ fn registration_never_refuses_a_property_id() {
 /// could explain.
 #[test]
 fn a_dropped_property_listener_stops_delivering() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
 
     let log = EventLog::default();
@@ -556,7 +550,7 @@ fn a_dropped_property_listener_stops_delivering() {
 /// asymmetry is what makes the assertion load-bearing.
 #[test]
 fn value_strings_at_is_answered_only_on_the_global_scope() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = N_BAND_EQ.open(RATE, BLOCK);
     let unit = au.unit().clone();
 
@@ -605,7 +599,7 @@ fn value_strings_at_is_answered_only_on_the_global_scope() {
 /// `Soft Clip`, `Filter`, `Mix`), and **none** named on the input or output scope.
 #[test]
 fn clump_name_at_is_answered_only_on_the_global_scope() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = DISTORTION.open(RATE, BLOCK);
     let unit = au.unit().clone();
 
@@ -688,7 +682,7 @@ fn clump_name_at_is_answered_only_on_the_global_scope() {
 /// returned `None`.
 #[test]
 fn the_at_string_conversions_report_absence_rather_than_fabricating_zero() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     // Hosted uninitialized: AUMultiChannelMixer's per-element parameters are
     // readable in the Loaded state, and `au_multibus.rs` documents why the mixers
     // are hosted this way (they refuse `AudioUnitInitialize` as this host
@@ -768,7 +762,7 @@ fn the_at_string_conversions_report_absence_rather_than_fabricating_zero() {
 /// the wrong arity.
 #[test]
 fn the_mixer_strip_arity_differs_between_input_and_output_scope() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = MULTI_CHANNEL_MIXER.open_uninitialized(RATE, BLOCK);
     let unit = au.unit().clone();
 
@@ -943,7 +937,7 @@ fn stream_count_is_the_length_of_the_name_list_including_unnamed_slots() {
 /// the measurement the assertion rests on.
 #[test]
 fn find_component_reports_absence_as_a_named_error() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let missing = ComponentKey::new(
         K_AUDIO_UNIT_TYPE_EFFECT,
         u32::from_be_bytes(*b"zzzz"),
@@ -970,7 +964,7 @@ fn find_component_reports_absence_as_a_named_error() {
 /// (about 138 registered).
 #[test]
 fn a_wildcard_is_no_key_and_is_listed_by_all_matching() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let (delay, apple) = (u32::from_be_bytes(*b"dely"), u32::from_be_bytes(*b"appl"));
     assert!(ComponentKey::new(0, delay, apple).is_none());
     assert!(ComponentKey::from_description(&AudioComponentDescription::default()).is_none());
@@ -998,7 +992,7 @@ fn a_wildcard_is_no_key_and_is_listed_by_all_matching() {
 /// something other than the codes.
 #[test]
 fn find_component_agrees_with_the_enumerator() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let desc = ComponentKey::new(
         K_AUDIO_UNIT_TYPE_EFFECT,
         u32::from_be_bytes(*b"dely"),
@@ -1080,7 +1074,7 @@ fn fourcc_to_string_is_big_endian_and_survives_non_utf8() {
 
     // Round-trip against the enumerator: every manufacturer code on the system
     // decodes to a 4-character string, so no real plugin can break the scan.
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let all = component::enumerate_components_of_type(AuType::Effect);
     assert!(!all.is_empty(), "the system has effect AUs registered");
     for c in &all {

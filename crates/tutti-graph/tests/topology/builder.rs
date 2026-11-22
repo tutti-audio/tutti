@@ -7,8 +7,6 @@ use tutti_buffers::{Planes, PlanesMut};
 use tutti_fixtures::signal::bits;
 use tutti_graph::testing as common;
 
-use std::sync::{Arc, Mutex};
-
 use common::{Kind, TestNode, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
@@ -578,8 +576,8 @@ fn renderer_drives_blocks_and_interleaves() {
     g.pipe_output(key);
     let mut r = g.renderer(prepare(256)).expect("builds");
     r.set_block(Samples::new(100));
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let log = Arc::clone(&seen);
+    let seen = tutti_fixtures::Record::new();
+    let log = seen.clone();
     r.set_transport_fn(move |frame| {
         log.lock().unwrap().push(frame);
         TransportPosition::new(
@@ -591,8 +589,8 @@ fn renderer_drives_blocks_and_interleaves() {
     });
     let out = r.render_interleaved(250);
     assert_eq!(
-        *seen.lock().unwrap(),
-        vec![Frame::new(0), Frame::new(100), Frame::new(200)]
+        seen.lock().unwrap().as_slice(),
+        [Frame::new(0), Frame::new(100), Frame::new(200)]
     );
     assert_eq!(out.len(), 500);
     assert!(out.chunks(2).all(|f| f == [1.0, 2.0]));

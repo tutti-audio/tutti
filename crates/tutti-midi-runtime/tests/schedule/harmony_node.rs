@@ -11,7 +11,7 @@ use tutti_buffers::MaxBlock;
 use crate::common::{beat_of, connect, rolling};
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventKind, Executor, ForkMode, ForkTarget, Harmony, HarmonyKind, Io, Node, Prepare,
+    Cx, Editor, EventKind, Executor, ForkTarget, Harmony, HarmonyKind, InEvents, Io, Node, Prepare,
     Shape, Status, TransportPosition,
 };
 use tutti_graph::{OutputPort, PortSource};
@@ -31,14 +31,19 @@ type Seen = tutti_fixtures::Record<(u64, Harmony)>;
 #[derive(Clone)]
 struct Sink(Seen);
 
+impl Sink {
+    const SHAPE: Shape = Shape::source_unassigned(tutti_buffers::ChannelLayout::MONO).events(1, 0);
+    const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for Sink {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(tutti_buffers::ChannelLayout::MONO).events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let mut seen = self.0.lock().unwrap();
-        for e in io.events(0) {
+        for e in io.events(Self::IN) {
             if let EventKind::Harmony(h) = e.kind {
                 seen.push((cx.env.frame.get() + u64::from(e.offset.get()), h));
             }
@@ -284,9 +289,7 @@ fn a_restate_follows_a_publish_and_only_a_publish() {
 fn a_fork_sends_the_lanes_as_they_stood() {
     let (live, _exec, controls, seen) = rig(HarmonyNode::new(changes(lanes())), 512);
     let prepare = *live.prepare();
-    let (_fork, mut fork_exec) = live
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
-        .expect("forks");
+    let (_fork, mut fork_exec) = live.fork(ForkTarget::MainOutput, prepare).expect("forks");
     publish(&controls, [at(0, G)]);
     block(&mut fork_exec, 512, rolling(0));
     assert_eq!(seen.lock().unwrap()[..], [(0, C), (0, C_MAJOR)]);

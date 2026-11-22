@@ -4,7 +4,7 @@
 use tutti_ump::{U4, U7, first_non_seven_bit};
 
 use super::MmcBytes;
-use tutti_units::Seconds;
+use tutti_units::{Seconds, TimecodeFrames};
 
 use crate::smpte::{MtcRate, SmpteTimecode};
 use crate::universal::MtcTimeCode;
@@ -155,8 +155,8 @@ impl MmcTimeLabel {
         let p = self.time_code;
         [
             p.hours_byte(),
-            u8::from(self.color_frame) << 6 | p.timecode().minutes(),
-            u8::from(self.blank) << 6 | p.timecode().seconds(),
+            u8::from(self.color_frame) << 6 | p.timecode().minutes().get(),
+            u8::from(self.blank) << 6 | p.timecode().seconds().get(),
             self.sign.wire() << 6 | p.timecode().frames(),
         ]
     }
@@ -306,10 +306,11 @@ impl MmcPosition {
         }
         let frame_rate = rate.frame_rate();
         let frames = frame_rate.frames_at(seconds);
-        let whole = libm::floor(frames);
-        // `whole` is a finite whole number from 0 below one day of frames.
-        let label = SmpteTimecode::from_frame_count(whole as u64, frame_rate);
-        let hundredths = libm::floor((frames - whole) * 100.0).clamp(0.0, 99.0);
+        let whole = frames.floor();
+        // `whole` is a count from 0 below one day of frames.
+        let label = SmpteTimecode::from_frame_count(whole, frame_rate);
+        let fraction = frames - TimecodeFrames::from_count(whole);
+        let hundredths = libm::floor(fraction.get() * 100.0).clamp(0.0, 99.0);
         Some(Self {
             label: MmcTimeLabel::new(MtcTimeCode::new(
                 rate,
@@ -391,36 +392,43 @@ impl MmcShortTimeCode {
     }
 }
 
+tutti_units::ranged! {
+    /// The shift left count of a speed, `0` to `7`: three bits (RP-013 p.11).
+    #[derive(Eq, Hash)]
+    MmcShift(u8), NotMmcShift, bits 3
+}
+
+tutti_units::ranged! {
+    /// The mantissa of a speed: 17 bits, `0` to `0x1_FFFF` (RP-013 p.11).
+    #[derive(Eq, Hash)]
+    MmcMantissa(u32), NotMmcMantissa, bits 17
+}
+
 /// A speed and direction in the standard three bytes (RP-013 p.11): a 17 bit
 /// mantissa with its binary point `3 + shift` bits from the top, so its value
 /// is a multiple of play speed of `mantissa / 2^(14 - shift)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MmcSpeed {
     direction: MmcDirection,
-    shift: u8,
-    mantissa: u32,
+    shift: MmcShift,
+    mantissa: MmcMantissa,
 }
 
 impl MmcSpeed {
     /// Forward play speed: one times, shift 0.
     pub const PLAY: Self = Self {
         direction: MmcDirection::Forward,
-        shift: 0,
-        mantissa: 1 << 14,
+        shift: MmcShift::of(0),
+        mantissa: MmcMantissa::of(1 << 14),
     };
 
-    /// The speed of `mantissa` (17 bits) at `shift` (0..=7) in `direction`,
-    /// or `None` for a field out of range.
+    /// The speed of `mantissa` at `shift` in `direction`.
     #[must_use]
-    pub const fn new(direction: MmcDirection, shift: u8, mantissa: u32) -> Option<Self> {
-        if shift < 8 && mantissa < 1 << 17 {
-            Some(Self {
-                direction,
-                shift,
-                mantissa,
-            })
-        } else {
-            None
+    pub const fn new(direction: MmcDirection, shift: MmcShift, mantissa: MmcMantissa) -> Self {
+        Self {
+            direction,
+            shift,
+            mantissa,
         }
     }
 
@@ -430,29 +438,30 @@ impl MmcSpeed {
         self.direction
     }
 
-    /// The shift left count, 0..=7.
+    /// The shift left count.
     #[must_use]
-    pub const fn shift(self) -> u8 {
+    pub const fn shift(self) -> MmcShift {
         self.shift
     }
 
     /// The 17 bit mantissa.
     #[must_use]
-    pub const fn mantissa(self) -> u32 {
+    pub const fn mantissa(self) -> MmcMantissa {
         self.mantissa
     }
 
     /// How many bits of the mantissa are fractional: `14 - shift`.
     #[must_use]
     pub const fn fraction_bits(self) -> u8 {
-        14 - self.shift
+        14 - self.shift.get()
     }
 
     pub(super) const fn wire(self) -> [u8; 3] {
+        let mantissa = self.mantissa.get();
         [
-            self.direction.wire() << 6 | self.shift << 3 | (self.mantissa >> 14) as u8,
-            (self.mantissa >> 7) as u8 & 0x7F,
-            self.mantissa as u8 & 0x7F,
+            self.direction.wire() << 6 | self.shift.get() << 3 | (mantissa >> 14) as u8,
+            (mantissa >> 7) as u8 & 0x7F,
+            mantissa as u8 & 0x7F,
         ]
     }
 
@@ -460,30 +469,32 @@ impl MmcSpeed {
         if sh >= 0x80 || sm >= 0x80 || sl >= 0x80 {
             return None;
         }
-        Self::new(
+        Some(Self::new(
             direction_of(sh),
-            (sh >> 3) & 0x07,
-            ((sh & 0x07) as u32) << 14 | (sm as u32) << 7 | sl as u32,
-        )
+            MmcShift::masked((sh >> 3) & 0x07),
+            MmcMantissa::masked(((sh & 0x07) as u32) << 14 | (sm as u32) << 7 | sl as u32),
+        ))
     }
+}
+
+tutti_units::ranged! {
+    /// A count of step lengths, `0` to `63`: six bits (RP-013 p.30).
+    #[derive(Eq, Hash)]
+    MmcStepCount(u8), NotMmcStepCount, bits 6
 }
 
 /// A signed count of step lengths for STEP (RP-013 p.30).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MmcStep {
     direction: MmcDirection,
-    count: u8,
+    count: MmcStepCount,
 }
 
 impl MmcStep {
-    /// `count` step lengths (0..=63) in `direction`, or `None` above 63.
+    /// `count` step lengths in `direction`.
     #[must_use]
-    pub const fn new(direction: MmcDirection, count: u8) -> Option<Self> {
-        if count < 64 {
-            Some(Self { direction, count })
-        } else {
-            None
-        }
+    pub const fn new(direction: MmcDirection, count: MmcStepCount) -> Self {
+        Self { direction, count }
     }
 
     /// The direction of the step.
@@ -494,12 +505,12 @@ impl MmcStep {
 
     /// The number of step lengths.
     #[must_use]
-    pub const fn count(self) -> u8 {
+    pub const fn count(self) -> MmcStepCount {
         self.count
     }
 
     pub(super) const fn wire(self) -> u8 {
-        self.direction.wire() << 6 | self.count
+        self.direction.wire() << 6 | self.count.get()
     }
 
     pub(super) const fn from_wire(byte: u8) -> Option<Self> {
@@ -508,9 +519,17 @@ impl MmcStep {
         }
         Some(Self {
             direction: direction_of(byte),
-            count: byte & 0x3F,
+            count: MmcStepCount::masked(byte),
         })
     }
+}
+
+tutti_units::ranged! {
+    /// An audio track of the track bitmap, counted from 1: `1` to `317`
+    /// (RP-013 p.11).
+    #[derive(Eq, Hash)]
+    MmcAudioTrack(u16), NotMmcAudioTrack, "an audio track (1 to 317)",
+    |raw| raw >= 1 && raw <= 317
 }
 
 /// One track of the standard track bitmap (RP-013 p.11).
@@ -524,8 +543,8 @@ pub enum MmcTrack {
     AuxA,
     /// Auxiliary track B.
     AuxB,
-    /// Audio track `n`, counted from 1.
-    Audio(u16),
+    /// An audio track.
+    Audio(MmcAudioTrack),
 }
 
 /// The most bitmap bytes a field holds in one message: 317 tracks.
@@ -568,40 +587,42 @@ impl MmcTrackBitmap {
         &self.bytes[..usize::from(self.len)]
     }
 
-    /// The byte and bit of `track`, or `None` for a track the bitmap cannot
-    /// hold (audio track 0, or past 317).
-    fn place(track: MmcTrack) -> Option<(usize, u8)> {
+    /// The byte and bit of `track`.
+    fn place(track: MmcTrack) -> (usize, u8) {
         match track {
-            MmcTrack::Video => Some((0, 0)),
-            MmcTrack::TimeCode => Some((0, 2)),
-            MmcTrack::AuxA => Some((0, 3)),
-            MmcTrack::AuxB => Some((0, 4)),
-            MmcTrack::Audio(1) => Some((0, 5)),
-            MmcTrack::Audio(2) => Some((0, 6)),
-            MmcTrack::Audio(n @ 3..=317) => {
-                let k = n - 3;
-                let bit = u8::try_from(k % 7).expect("a remainder of 7 is below 256");
-                Some((1 + usize::from(k / 7), bit))
-            }
-            MmcTrack::Audio(_) => None,
+            MmcTrack::Video => (0, 0),
+            MmcTrack::TimeCode => (0, 2),
+            MmcTrack::AuxA => (0, 3),
+            MmcTrack::AuxB => (0, 4),
+            MmcTrack::Audio(n) => match n.get() {
+                1 => (0, 5),
+                2 => (0, 6),
+                n => {
+                    let k = n - 3;
+                    let bit = u8::try_from(k % 7).expect("a remainder of 7 is below 256");
+                    (1 + usize::from(k / 7), bit)
+                }
+            },
         }
     }
 
     /// Whether `track` is active.
     #[must_use]
     pub fn contains(&self, track: MmcTrack) -> bool {
-        Self::place(track)
-            .is_some_and(|(byte, bit)| self.as_bytes().get(byte).is_some_and(|b| b >> bit & 1 != 0))
+        let (byte, bit) = Self::place(track);
+        self.as_bytes().get(byte).is_some_and(|b| b >> bit & 1 != 0)
     }
 
-    /// This bitmap with `track` set, or `None` for a track it cannot hold.
+    /// This bitmap with `track` set.
     #[must_use]
-    pub fn with(mut self, track: MmcTrack) -> Option<Self> {
-        let (byte, bit) = Self::place(track)?;
+    pub fn with(mut self, track: MmcTrack) -> Self {
+        let (byte, bit) = Self::place(track);
         self.bytes[byte] |= 1 << bit;
-        let end = u8::try_from(byte + 1).ok()?;
-        self.len = self.len.max(end);
-        Some(self)
+        // A byte index is below 46, so the end always fits a `u8`.
+        if let Ok(end) = u8::try_from(byte + 1) {
+            self.len = self.len.max(end);
+        }
+        self
     }
 }
 

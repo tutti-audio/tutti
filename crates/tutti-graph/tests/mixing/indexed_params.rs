@@ -22,9 +22,9 @@ use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventOutputPort, ForkMode, ForkTarget, IntoNode, Io, MAX_PARAM_PORTS, Node,
-    NodeParts, ParamEvent, ParamIn, ParamInput, ParamNode, ParamPorts, ParamPortsError,
-    ParamSegment, ParamSet, Prepare, Shape, Status, TransportPosition, param_parts,
+    Cx, Editor, EventOutputPort, ForkTarget, IntoNode, Io, MAX_PARAM_PORTS, Node, NodeParts,
+    ParamEvent, ParamIn, ParamInput, ParamNode, ParamPorts, ParamPortsError, ParamSegment,
+    ParamSet, Prepare, Shape, Status, TransportPosition, param_parts,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_rt::Param;
@@ -103,19 +103,26 @@ struct Steps {
     to: Vec<(UnitAddr, f64)>,
 }
 
+impl Steps {
+    const SHAPE: Shape = Shape::EMPTY
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(8));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Steps {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .events(0, 1)
-            .param_events()
-            .event_capacity(tutti_graph::testing::cap_of(8))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         let at = io.offset(0).expect("a block has a frame");
         for &(addr, v) in &self.to {
             let seg = ParamSegment::unit(addr, v, v, Samples::new(0));
-            let _ = io.event_out(0).push_param(ParamEvent::segment(at, seg));
+            let _ = io
+                .event_out(Self::OUT)
+                .push_param(ParamEvent::segment(at, seg));
         }
         Status::Silent
     }
@@ -350,9 +357,7 @@ fn a_fork_starts_from_each_indexs_value() {
     ed.commit().expect("commits");
     exec.apply_pending();
     assert!(controls.set(BAND1, -33.0));
-    let (mut fork_ed, mut fork_exec) = ed
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(64))
-        .expect("forks");
+    let (mut fork_ed, mut fork_exec) = ed.fork(ForkTarget::MainOutput, prepare(64)).expect("forks");
     assert!(controls.set(BAND1, -1.0), "a write after the fork");
     assert!(controls.set(BAND0, -2.0));
     let [f0, f1] = render(&mut fork_ed, &mut fork_exec, 64);

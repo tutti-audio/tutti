@@ -4,7 +4,8 @@
 use tutti_midi_protocol::{
     Addressed, Addressee, GeneralMidiMode, Heard, MtcFullMessage, MtcRate, MtcTimeCode,
     NotSysexDeviceId, QuarterFrame, Recipient, SmpteFrameRate, SmpteTimecode, SysexDeviceId,
-    Universal, UniversalRead, UniversalReader, read,
+    TimecodeHours, TimecodeMinutes, TimecodeSeconds, Universal, UniversalRead, UniversalReader,
+    read,
 };
 use tutti_ump::Voice1;
 use tutti_ump::{
@@ -132,7 +133,16 @@ fn an_mtc_full_message_reads_its_position_and_rate_code() {
         assert_eq!(a.to, Recipient::AllCall);
         assert_eq!(
             a.message,
-            Universal::MtcFullMessage(MtcFullMessage::new(rate, 23, 59, 58, 17).unwrap())
+            Universal::MtcFullMessage(
+                MtcFullMessage::new(
+                    rate,
+                    TimecodeHours::of(23),
+                    TimecodeMinutes::of(59),
+                    TimecodeSeconds::of(58),
+                    17
+                )
+                .unwrap()
+            )
         );
     }
 }
@@ -142,13 +152,27 @@ fn an_mtc_full_message_reads_its_position_and_rate_code() {
 /// is `7F 7F 01 01 21 02 03 04`.
 #[test]
 fn an_mtc_full_message_writes_the_bytes_of_t9_and_reads_back() {
-    let message = MtcFullMessage::new(MtcRate::Fps25, 1, 2, 3, 4).unwrap();
+    let message = MtcFullMessage::new(
+        MtcRate::Fps25,
+        TimecodeHours::of(1),
+        TimecodeMinutes::of(2),
+        TimecodeSeconds::of(3),
+        4,
+    )
+    .unwrap();
     assert_eq!(
         message.payload(),
         [0x7F, 0x7F, 0x01, 0x01, 0x21, 0x02, 0x03, 0x04]
     );
     for rate in MtcRate::ALL {
-        let message = MtcFullMessage::new(rate, 23, 59, 58, 17).unwrap();
+        let message = MtcFullMessage::new(
+            rate,
+            TimecodeHours::of(23),
+            TimecodeMinutes::of(59),
+            TimecodeSeconds::of(58),
+            17,
+        )
+        .unwrap();
         let mut framed = vec![0xF0];
         framed.extend(message.payload());
         framed.push(0xF7);
@@ -170,7 +194,14 @@ fn the_hours_byte_is_the_rate_over_the_hours_in_every_encoding() {
         (3, MtcRate::Fps30),
     ] {
         for hours in 0..24u8 {
-            let time = MtcTimeCode::new(rate, hours, 0, 0, 0).unwrap();
+            let time = MtcTimeCode::new(
+                rate,
+                TimecodeHours::of(hours),
+                TimecodeMinutes::of(0),
+                TimecodeSeconds::of(0),
+                0,
+            )
+            .unwrap();
             let spec = (code << 5) | hours;
             assert_eq!(time.hours_byte(), spec, "{rate:?} hour {hours}");
             assert_eq!(MtcFullMessage::from(time).payload()[4], spec);
@@ -192,13 +223,20 @@ fn the_hours_byte_is_the_rate_over_the_hours_in_every_encoding() {
 #[test]
 fn an_mtc_time_code_reads_as_a_smpte_position_at_its_one_rate() {
     for rate in MtcRate::ALL {
-        let time = MtcTimeCode::new(rate, 1, 2, 3, 4).unwrap();
+        let time = MtcTimeCode::new(
+            rate,
+            TimecodeHours::of(1),
+            TimecodeMinutes::of(2),
+            TimecodeSeconds::of(3),
+            4,
+        )
+        .unwrap();
         assert_eq!(time.timecode().frame_rate(), rate.frame_rate());
         assert_eq!(
             (
-                time.timecode().hours(),
-                time.timecode().minutes(),
-                time.timecode().seconds(),
+                time.timecode().hours().get(),
+                time.timecode().minutes().get(),
+                time.timecode().seconds().get(),
                 time.timecode().frames()
             ),
             (1, 2, 3, 4)
@@ -214,13 +252,47 @@ fn a_frame_at_or_past_the_rate_count_and_a_non_mtc_rate_are_refused() {
     for rate in MtcRate::ALL {
         let count = rate.labels_per_second();
         assert!(
-            MtcTimeCode::new(rate, 0, 0, 0, count - 1).is_some(),
+            MtcTimeCode::new(
+                rate,
+                TimecodeHours::of(0),
+                TimecodeMinutes::of(0),
+                TimecodeSeconds::of(0),
+                count - 1
+            )
+            .is_some(),
             "{rate:?}"
         );
-        assert_eq!(MtcTimeCode::new(rate, 0, 0, 0, count), None, "{rate:?}");
-        assert_eq!(MtcTimeCode::new(rate, 0, 0, 0, 31), None, "{rate:?}");
+        assert_eq!(
+            MtcTimeCode::new(
+                rate,
+                TimecodeHours::of(0),
+                TimecodeMinutes::of(0),
+                TimecodeSeconds::of(0),
+                count
+            ),
+            None,
+            "{rate:?}"
+        );
+        assert_eq!(
+            MtcTimeCode::new(
+                rate,
+                TimecodeHours::of(0),
+                TimecodeMinutes::of(0),
+                TimecodeSeconds::of(0),
+                31
+            ),
+            None,
+            "{rate:?}"
+        );
     }
-    let non_drop = SmpteTimecode::new(0, 0, 1, 5, SmpteFrameRate::Fps2997Ndf).unwrap();
+    let non_drop = SmpteTimecode::new(
+        TimecodeHours::of(0),
+        TimecodeMinutes::of(0),
+        TimecodeSeconds::of(1),
+        5,
+        SmpteFrameRate::Fps2997Ndf,
+    )
+    .unwrap();
     assert_eq!(MtcTimeCode::from_timecode(non_drop), None);
 }
 
@@ -229,7 +301,14 @@ fn a_frame_at_or_past_the_rate_count_and_a_non_mtc_rate_are_refused() {
 /// words `3616_7F7F 0101_2102` and `3632_0304 0`, on Group 6.
 #[test]
 fn an_mtc_full_message_is_a_start_and_an_end_packet() {
-    let message = MtcFullMessage::new(MtcRate::Fps25, 1, 2, 3, 4).unwrap();
+    let message = MtcFullMessage::new(
+        MtcRate::Fps25,
+        TimecodeHours::of(1),
+        TimecodeMinutes::of(2),
+        TimecodeSeconds::of(3),
+        4,
+    )
+    .unwrap();
     let [start, end] = message.packets(tutti_ump::MidiGroup::of(6));
     assert_eq!(start.0, [0x3616_7F7F, 0x0101_2102, 0, 0]);
     assert_eq!(end.0, [0x3632_0304, 0, 0, 0]);
@@ -241,9 +320,15 @@ fn an_mtc_full_message_is_a_start_and_an_end_packet() {
 /// is the nibbles `6 1 5 1 4 1 3 7` and the data bytes `0n` through `7n`.
 #[test]
 fn the_quarter_frame_pieces_of_a_position_are_the_nibbles_of_t9() {
-    let at = MtcFullMessage::new(MtcRate::Fps30, 19, 20, 21, 22)
-        .unwrap()
-        .time_code();
+    let at = MtcFullMessage::new(
+        MtcRate::Fps30,
+        TimecodeHours::of(19),
+        TimecodeMinutes::of(20),
+        TimecodeSeconds::of(21),
+        22,
+    )
+    .unwrap()
+    .time_code();
     assert_eq!(at.nibbles(), [6, 1, 5, 1, 4, 1, 3, 7]);
     assert_eq!(
         at.cycle().frames().map(|q| q.data().get()),
@@ -277,7 +362,14 @@ fn a_quarter_frame_is_the_piece_over_the_nibble_of_its_data_byte() {
 fn nibbles_invert_for_every_rate_and_refuse_a_position_no_clock_reads() {
     for rate in MtcRate::ALL {
         for (h, m, s, f) in [(0, 0, 0, 0), (23, 59, 59, rate.labels_per_second() - 1)] {
-            let at = MtcTimeCode::new(rate, h, m, s, f).unwrap();
+            let at = MtcTimeCode::new(
+                rate,
+                TimecodeHours::of(h),
+                TimecodeMinutes::of(m),
+                TimecodeSeconds::of(s),
+                f,
+            )
+            .unwrap();
             assert_eq!(MtcTimeCode::from_nibbles(at.nibbles()), Some(at));
         }
     }
@@ -308,8 +400,26 @@ fn an_mtc_full_message_out_of_range_is_unread() {
             "{hr} {mn} {sc} {fr}"
         );
     }
-    assert!(MtcFullMessage::new(MtcRate::Fps25, 0, 0, 0, 24).is_some());
-    assert!(MtcFullMessage::new(MtcRate::Fps25, 0, 0, 0, 25).is_none());
+    assert!(
+        MtcFullMessage::new(
+            MtcRate::Fps25,
+            TimecodeHours::of(0),
+            TimecodeMinutes::of(0),
+            TimecodeSeconds::of(0),
+            24
+        )
+        .is_some()
+    );
+    assert!(
+        MtcFullMessage::new(
+            MtcRate::Fps25,
+            TimecodeHours::of(0),
+            TimecodeMinutes::of(0),
+            TimecodeSeconds::of(0),
+            25
+        )
+        .is_none()
+    );
 }
 
 /// A message that is not one this crate reads is a typed outcome, never a
@@ -499,11 +609,12 @@ mod machine_control {
     use tutti_midi_protocol::{
         MMC_MAX_DATA, McpSuccess, McsSuccess, MmcCodeStatus, MmcCommand, MmcCommandReassembler,
         MmcCommands, MmcDirection, MmcErrorCode, MmcErrorKind, MmcEventDirection, MmcEventFlags,
-        MmcFields, MmcGroup, MmcInfoField, MmcLocate, MmcName, MmcPosition, MmcProcedure,
-        MmcResponseReassembler, MmcSegment, MmcSegmentBytes, MmcSegmentError, MmcSegmentPlace,
-        MmcSegments, MmcSegmentsRefused, MmcSelection, MmcShortTimeCode, MmcSign, MmcSlot,
-        MmcSpeed, MmcStep, MmcSubframes, MmcTimeCode, MmcTimeCodeName, MmcTimeLabel, MmcTimeTail,
-        MmcUpdate, MotionControlTally, MotionProcess, MotionState, MtcRate, MtcTimeCode,
+        MmcFields, MmcGroup, MmcInfoField, MmcLocate, MmcMantissa, MmcName, MmcPosition,
+        MmcProcedure, MmcResponseReassembler, MmcSegment, MmcSegmentBytes, MmcSegmentCount,
+        MmcSegmentError, MmcSegmentPlace, MmcSegments, MmcSegmentsRefused, MmcSelection, MmcShift,
+        MmcShortTimeCode, MmcSign, MmcSlot, MmcSpeed, MmcStep, MmcStepCount, MmcSubframes,
+        MmcTimeCode, MmcTimeCodeName, MmcTimeLabel, MmcTimeTail, MmcUpdate, MotionControlTally,
+        MotionProcess, MotionState, MtcRate, MtcTimeCode,
     };
 
     fn framed(device: u8, sub_id: u8, data: &[u8]) -> Vec<u8> {
@@ -538,7 +649,16 @@ mod machine_control {
 
     /// The label of `h:m:s:f` at 30 frames.
     fn label(h: u8, m: u8, s: u8, f: u8) -> MmcTimeLabel {
-        MmcTimeLabel::new(MtcTimeCode::new(MtcRate::Fps30, h, m, s, f).unwrap())
+        MmcTimeLabel::new(
+            MtcTimeCode::new(
+                MtcRate::Fps30,
+                TimecodeHours::of(h),
+                TimecodeMinutes::of(m),
+                TimecodeSeconds::of(s),
+                f,
+            )
+            .unwrap(),
+        )
     }
 
     /// RP-013 p.14 and M1 p.53: the Time Standard field's byte is the rate code
@@ -656,9 +776,9 @@ mod machine_control {
         assert_eq!(p.label.time_code().rate(), MtcRate::Fps2997Df);
         assert_eq!(
             (
-                p.label.time_code().timecode().hours(),
-                p.label.time_code().timecode().minutes(),
-                p.label.time_code().timecode().seconds(),
+                p.label.time_code().timecode().hours().get(),
+                p.label.time_code().timecode().minutes().get(),
+                p.label.time_code().timecode().seconds().get(),
                 p.label.time_code().timecode().frames()
             ),
             (23, 59, 59, 29)
@@ -730,13 +850,20 @@ mod machine_control {
             panic!()
         };
         assert_eq!(reverse.direction(), MmcDirection::Reverse);
-        assert_eq!((reverse.shift(), reverse.mantissa()), (0, 1 << 14));
+        assert_eq!(
+            (reverse.shift().get(), reverse.mantissa().get()),
+            (0, 1 << 14)
+        );
         // Shift 7: ten integer bits, seven fraction bits.
         let MmcCommand::Search(fast) = one_command(&[0x46, 0x03, 0x3F, 0x7F, 0x7F]) else {
             panic!()
         };
         assert_eq!(
-            (fast.shift(), fast.fraction_bits(), fast.mantissa()),
+            (
+                fast.shift().get(),
+                fast.fraction_bits(),
+                fast.mantissa().get()
+            ),
             (7, 7, 0x1FFFF)
         );
         let mut list = MmcCommands::new();
@@ -888,13 +1015,13 @@ mod machine_control {
             panic!()
         };
         assert_eq!(segment.place(), MmcSegmentPlace::First);
-        assert_eq!(segment.remaining(), 2);
+        assert_eq!(segment.remaining().get(), 2);
         assert_eq!(segment.bytes().as_bytes(), [1, 2, 3, 4]);
         let MmcCommand::CommandSegment(last) = one_command(&[0x53, 0x04, 0x00, 0x0A, 0x0B, 0x0C])
         else {
             panic!()
         };
-        assert!(last.place() == MmcSegmentPlace::Later && last.remaining() == 0);
+        assert!(last.place() == MmcSegmentPlace::Later && last.remaining().get() == 0);
     }
 
     /// RP-013 p.6: a code the specification leaves undefined is skipped by its
@@ -982,9 +1109,9 @@ mod machine_control {
         assert_eq!(code.label.time_code().rate(), MtcRate::Fps2997Df);
         assert_eq!(
             (
-                code.label.time_code().timecode().hours(),
-                code.label.time_code().timecode().minutes(),
-                code.label.time_code().timecode().seconds(),
+                code.label.time_code().timecode().hours().get(),
+                code.label.time_code().timecode().minutes().get(),
+                code.label.time_code().timecode().seconds().get(),
                 code.label.time_code().timecode().frames()
             ),
             (3, 2, 21, 1)
@@ -1124,26 +1251,21 @@ mod machine_control {
     /// tracks to a byte.
     #[test]
     fn a_track_bitmap_places_each_track() {
-        use tutti_midi_protocol::{MmcTrack, MmcTrackBitmap};
+        use tutti_midi_protocol::{MmcAudioTrack, MmcTrack, MmcTrackBitmap};
+        let audio = |n| MmcTrack::Audio(MmcAudioTrack::of(n));
         let [MmcInfoField::TrackRecordReady(bitmap)] =
             fields(1, &[0x4F, 0x02, 0b0100000, 0b0000001])[..]
         else {
             panic!()
         };
-        assert!(bitmap.contains(MmcTrack::Audio(1)));
-        assert!(bitmap.contains(MmcTrack::Audio(3)));
-        assert!(!bitmap.contains(MmcTrack::Audio(2)) && !bitmap.contains(MmcTrack::Video));
-        assert!(
-            !bitmap.contains(MmcTrack::Audio(300)),
-            "past the bytes sent"
-        );
-        let built = MmcTrackBitmap::NONE
-            .with(MmcTrack::Audio(1))
-            .and_then(|b| b.with(MmcTrack::Audio(10)))
-            .unwrap();
+        assert!(bitmap.contains(audio(1)));
+        assert!(bitmap.contains(audio(3)));
+        assert!(!bitmap.contains(audio(2)) && !bitmap.contains(MmcTrack::Video));
+        assert!(!bitmap.contains(audio(300)), "past the bytes sent");
+        let built = MmcTrackBitmap::NONE.with(audio(1)).with(audio(10));
         assert_eq!(built.as_bytes(), [0b0100000, 0, 1]);
-        assert!(MmcTrackBitmap::NONE.with(MmcTrack::Audio(0)).is_none());
-        assert!(MmcTrackBitmap::NONE.with(MmcTrack::Audio(318)).is_none());
+        // The last audio track fills the last byte.
+        assert_eq!(MmcTrackBitmap::NONE.with(audio(317)).as_bytes().len(), 46);
         assert!(
             MmcTrackBitmap::from_bytes(&[0b10]).is_none(),
             "the reserved bit"
@@ -1178,7 +1300,7 @@ mod machine_control {
                 n.push(&MmcName::of(0x48)).unwrap();
                 n
             })),
-            MmcCommand::Step(MmcStep::new(MmcDirection::Reverse, 3).unwrap()),
+            MmcCommand::Step(MmcStep::new(MmcDirection::Reverse, MmcStepCount::of(3))),
             MmcCommand::AssignSystemMaster(tutti_midi_protocol::MmcSystemMaster::Nobody),
             MmcCommand::GeneratorCommand(tutti_midi_protocol::GeneratorAction::CopyJam),
             MmcCommand::MtcCommand(tutti_midi_protocol::MtcAction::Follow),
@@ -1210,10 +1332,13 @@ mod machine_control {
         assert_eq!(MmcDirection::Reverse.wire(), 1);
         let mut list = MmcCommands::new();
         for direction in [MmcDirection::Forward, MmcDirection::Reverse] {
-            let speed = MmcSpeed::new(direction, 0, 1 << 14).unwrap();
+            let speed = MmcSpeed::new(direction, MmcShift::of(0), MmcMantissa::of(1 << 14));
             list.push(&MmcCommand::Shuttle(speed)).unwrap();
-            list.push(&MmcCommand::Step(MmcStep::new(direction, 3).unwrap()))
-                .unwrap();
+            list.push(&MmcCommand::Step(MmcStep::new(
+                direction,
+                MmcStepCount::of(3),
+            )))
+            .unwrap();
         }
         let MmcCommand::Shuttle(speed) = one_command(&[0x47, 0x03, 0x41, 0x00, 0x00]) else {
             panic!()
@@ -1252,7 +1377,11 @@ mod machine_control {
 
     /// The segment `place`, `remaining`, `bytes` as the command that carries it.
     fn segment(place: MmcSegmentPlace, remaining: u8, bytes: &[u8]) -> MmcSegment {
-        MmcSegment::new(place, remaining, MmcSegmentBytes::new(bytes).unwrap()).unwrap()
+        MmcSegment::new(
+            place,
+            MmcSegmentCount::of(remaining),
+            MmcSegmentBytes::new(bytes).unwrap(),
+        )
     }
 
     /// The wire bytes of `segment` as a COMMAND SEGMENT message to all.
@@ -1349,8 +1478,8 @@ mod machine_control {
         assert_eq!(
             reassemble(&mut r, &[first, third]),
             Err(MmcSegmentError::OutOfOrder {
-                expected: 1,
-                got: 0
+                expected: MmcSegmentCount::of(1),
+                got: MmcSegmentCount::of(0)
             })
         );
         assert!(!r.in_progress());
@@ -1359,8 +1488,8 @@ mod machine_control {
         assert_eq!(
             r.push(third).unwrap_err(),
             MmcSegmentError::OutOfOrder {
-                expected: 1,
-                got: 0
+                expected: MmcSegmentCount::of(1),
+                got: MmcSegmentCount::of(0)
             }
         );
         // The string was cancelled, so the second now has no first.
@@ -1494,7 +1623,7 @@ mod machine_control {
         let segments: Vec<MmcSegment> = MmcSegments::new(&string).unwrap().collect();
         let shape: Vec<_> = segments
             .iter()
-            .map(|s| (s.place(), s.remaining(), s.bytes().as_bytes().len()))
+            .map(|s| (s.place(), s.remaining().get(), s.bytes().as_bytes().len()))
             .collect();
         assert_eq!(
             shape,
@@ -1523,8 +1652,8 @@ mod machine_control {
         let longest = vec![0x02; 2880];
         let segments: Vec<MmcSegment> = MmcSegments::new(&longest).unwrap().collect();
         assert_eq!(segments.len(), 64);
-        assert_eq!(segments[0].remaining(), 63);
-        assert_eq!(segments[63].remaining(), 0);
+        assert_eq!(segments[0].remaining().get(), 63);
+        assert_eq!(segments[63].remaining().get(), 0);
         let mut r = MmcCommandReassembler::new();
         let done = reassemble(&mut r, &segments).unwrap().unwrap();
         assert_eq!(done.len(), 2880);
@@ -1558,7 +1687,7 @@ mod machine_control {
         let whole = at(2.0).unwrap();
         assert_eq!(
             (
-                whole.label.time_code().timecode().seconds(),
+                whole.label.time_code().timecode().seconds().get(),
                 whole.label.time_code().timecode().frames()
             ),
             (2, 0)
@@ -1578,7 +1707,13 @@ mod machine_control {
         assert_eq!(at(f64::NAN), None);
         assert_eq!(at(0.0).unwrap().label.time_code().timecode().frames(), 0);
         assert_eq!(
-            at(86_399.0).unwrap().label.time_code().timecode().hours(),
+            at(86_399.0)
+                .unwrap()
+                .label
+                .time_code()
+                .timecode()
+                .hours()
+                .get(),
             23
         );
         assert_eq!(at(86_400.0), None);
@@ -1622,4 +1757,49 @@ fn a_device_id_and_a_slot_keep_the_range_contract() {
     };
     check_range_contract(&slots);
     check_range_serde(&slots);
+}
+
+/// RP-013 pp.11, 30: a speed's shift is three bits, its mantissa 17, a step's
+/// count and a segment count six, and an audio track of the bitmap is 1 to 317.
+#[test]
+fn the_machine_control_fields_keep_the_range_contract() {
+    use tutti_fixtures::{RangeContract, check_range_contract};
+    use tutti_midi_protocol::{
+        MmcAudioTrack, MmcMantissa, MmcSegmentCount, MmcShift, MmcStepCount,
+    };
+    check_range_contract(&RangeContract {
+        new: MmcShift::new,
+        get: MmcShift::get,
+        of: Some(MmcShift::of),
+        valid: &[0, 7],
+        invalid: &[8, 255],
+    });
+    check_range_contract(&RangeContract {
+        new: MmcMantissa::new,
+        get: MmcMantissa::get,
+        of: Some(MmcMantissa::of),
+        valid: &[0, 1 << 14, 0x1_FFFF],
+        invalid: &[0x2_0000, u32::MAX],
+    });
+    check_range_contract(&RangeContract {
+        new: MmcStepCount::new,
+        get: MmcStepCount::get,
+        of: Some(MmcStepCount::of),
+        valid: &[0, 63],
+        invalid: &[64, 255],
+    });
+    check_range_contract(&RangeContract {
+        new: MmcSegmentCount::new,
+        get: MmcSegmentCount::get,
+        of: Some(MmcSegmentCount::of),
+        valid: &[0, 63],
+        invalid: &[64, 255],
+    });
+    check_range_contract(&RangeContract {
+        new: MmcAudioTrack::new,
+        get: MmcAudioTrack::get,
+        of: Some(MmcAudioTrack::of),
+        valid: &[1, 2, 317],
+        invalid: &[0, 318, u16::MAX],
+    });
 }

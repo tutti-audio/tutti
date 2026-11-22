@@ -19,16 +19,17 @@
 //! so the variables are set for the load (and a fork's second instance) and
 //! cleared after.
 
-use std::sync::{Arc, MutexGuard};
+use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_fixtures::main_thread;
 use tutti_rt::Mutex;
 use tutti_vst2_host::Vst2Loaded;
 
+use tutti_graph::Node as _;
 use tutti_graph::contract::Direct;
 use tutti_graph::{
-    ForkMode, ForkTarget, GraphBuilder, Offset, ParamEvent, ParamRamp, ParamRange, Prepare,
+    ForkTarget, GraphBuilder, Offset, ParamEvent, ParamRamp, ParamRange, Prepare, RenderMode,
     TransportPosition,
 };
 use tutti_modulation::ControlProgram;
@@ -49,10 +50,6 @@ const BLOCK: usize = 64;
 
 /// Serializes against the probe's process-global environment.
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
-
-fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock()
-}
 
 /// The probe's environment for one test, cleared when it drops. The caller
 /// holds `PROBE_LOCK`.
@@ -124,18 +121,23 @@ fn ramp(at: usize, id: u32, value: f64) -> ParamEvent {
 /// is counted as sent, none dropped or merged; a block with no event leaves
 /// the plugin's values where they are.
 fn a_moving_parameter_reaches_the_plugin() {
-    let _lock = lock_probe();
+    let _lock = PROBE_LOCK.lock();
     let _env = ProbeEnv::new().params(8);
     let (client, handle) = load();
     let controls = client.controls();
     let mut unit = Direct::new(client, SampleRate::of(SAMPLE_RATE), BLOCK);
+    let unit_in = unit
+        .node
+        .shape()
+        .event_input(0)
+        .expect("the node declares an event input");
     assert_eq!(read(&handle, 1), Some(1.0 / 16.0), "the probe's default");
 
     // Exact eighths, distinct within and across blocks.
     let at = |b: usize, k: usize| ((b * 2 + k) % 8) as f64 / 8.0 + 0.0625;
     for b in 0..6 {
         unit.param_events(
-            0,
+            unit_in,
             &[
                 ramp(0, 1, at(b, 0)),
                 ramp(0, 3, 1.0 - at(b, 0)),
@@ -169,16 +171,21 @@ fn a_moving_parameter_reaches_the_plugin() {
 /// keeps sending 0.25 and the plugin keeps 0.75, with nothing more sent;
 /// then the host moves to 0.5 and the plugin takes it.
 fn a_held_value_is_sent_once_and_an_edit_on_the_plugin_survives_it() {
-    let _lock = lock_probe();
+    let _lock = PROBE_LOCK.lock();
     let _env = ProbeEnv::new().params(8);
     let (client, handle) = load();
     let controls = client.controls();
     let mut unit = Direct::new(client, SampleRate::of(SAMPLE_RATE), BLOCK);
+    let unit_in = unit
+        .node
+        .shape()
+        .event_input(0)
+        .expect("the node declares an event input");
     let p = 2;
 
     let held = |unit: &mut Direct<PluginNode<Vst2Loaded>>, v: f64, blocks: usize| {
         for _ in 0..blocks {
-            unit.param_events(0, &[ramp(0, p, v), ramp(32, p, v)]);
+            unit.param_events(unit_in, &[ramp(0, p, v), ramp(32, p, v)]);
             unit.block();
         }
     };
@@ -221,7 +228,7 @@ fn a_held_value_is_sent_once_and_an_edit_on_the_plugin_survives_it() {
 /// 0.25 on its first block, is not passed
 /// on, and the export renders 501 too.
 fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
-    let _lock = lock_probe();
+    let _lock = PROBE_LOCK.lock();
     let _env = ProbeEnv::new().params(4).state_dc();
     let (client, handle) = load();
     // A host's knob for VST2 parameter 0, held still.
@@ -275,7 +282,10 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     }));
     let (_fork_ed, mut fork_exec) = live
         .editor()
-        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare)
+        .fork(
+            ForkTarget::MainOutput,
+            prepare.with_render_mode(RenderMode::Offline),
+        )
         .expect("the lane and the plugin fork");
     let mut out = vec![vec![0.0f32; BLOCK]; 2];
     for _ in 0..8 {

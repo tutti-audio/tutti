@@ -7,7 +7,7 @@
 use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Editor, EventEdge, EventInputPort, EventOutputPort, Executor, ForkMode, ForkTarget, Prepare,
+    Editor, EventEdge, EventInputPort, EventOutputPort, Executor, ForkTarget, Prepare, RenderMode,
     Renderer, TransportPosition,
 };
 use tutti_graph::{OutputPort, PortSource};
@@ -20,14 +20,14 @@ const RATE: f64 = 48_000.0;
 const BLOCK: usize = 256;
 
 fn saw() -> PolySynth<f32> {
-    PolySynth::<f32>::new(SynthConfig {
-        oscillator: OscillatorType::Saw,
-        envelope: Adsr {
-            attack: Seconds::new(0.0),
-            ..Default::default()
-        },
-        ..Default::default()
-    })
+    PolySynth::<f32>::new(
+        SynthConfig::new()
+            .oscillator(OscillatorType::Saw)
+            .envelope(Adsr {
+                attack: Seconds::new(0.0),
+                ..Default::default()
+            }),
+    )
 }
 
 fn note_on_at(frame: u64) -> TimedMidiEvent {
@@ -115,7 +115,10 @@ fn a_forked_graph_plays_the_clip() {
     let (live, _exec) = graph(1_000);
     let prepare = *live.prepare();
     let (fork, fork_exec) = live
-        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare)
+        .fork(
+            ForkTarget::MainOutput,
+            prepare.with_render_mode(RenderMode::Offline),
+        )
         .expect("a clip and a synth fork");
     let out = render(fork, fork_exec, 2_048);
     assert_eq!(onset(&out), Some(1_000 + lead()));

@@ -7,7 +7,7 @@ use alloc::string::String;
 use core::fmt;
 use core::str::FromStr;
 
-use tutti_units::Text;
+use tutti_units::{Text, TextError};
 use unicode_normalization::{UnicodeNormalization, is_nfc};
 
 /// Why a text is not a name ([`Name`] reads through [`FromStr`]; a MIDI-CI
@@ -95,31 +95,26 @@ impl<const N: usize> Name<N> {
         Self::parse(text).ok()
     }
 
-    /// The text composed to NFC when it is not already, with a leading Byte
-    /// Order Mark and a NUL refused.
-    fn composed(text: &str) -> Result<Cow<'_, str>, NameError> {
-        if text.starts_with('\u{FEFF}') {
-            return Err(NameError::Bom);
-        }
+    /// The text composed to NFC when it is not already.
+    fn composed(text: &str) -> Cow<'_, str> {
         // Composed only when it is not NFC already, so the common name does not
         // allocate.
-        let text = if is_nfc(text) {
+        if is_nfc(text) {
             Cow::Borrowed(text)
         } else {
             Cow::Owned(text.nfc().collect())
-        };
-        if text.as_bytes().contains(&0) {
-            return Err(NameError::Nul);
         }
-        Ok(text)
     }
 
-    /// The composed text as a name; `composed` has refused a NUL, so only the
-    /// length can fail.
+    /// The composed text as a name. NFC leaves a leading U+FEFF where it is,
+    /// so `Text` refuses it on the composed text as on the given one.
     fn held(text: &str) -> Result<Self, NameError> {
-        Text::new(text)
-            .map(Self)
-            .ok_or(NameError::TooLong { max: N })
+        Text::try_from(text).map(Self).map_err(|error| match error {
+            TextError::Nul => NameError::Nul,
+            TextError::Bom => NameError::Bom,
+            // `Text<0, N>` has no minimum, so `TooShort` cannot occur.
+            TextError::TooLong { .. } | TextError::TooShort { .. } => NameError::TooLong { max: N },
+        })
     }
 
     /// The name, composed to NFC, or why the text is not one.
@@ -130,7 +125,7 @@ impl<const N: usize> Name<N> {
     /// a NUL, [`NameError::TooLong`] when the composed text is longer than `N`
     /// bytes.
     fn parse(text: &str) -> Result<Self, NameError> {
-        Self::held(&Self::composed(text)?)
+        Self::held(&Self::composed(text))
     }
 
     /// The name for display: composed to NFC, and cut at the last character
@@ -143,7 +138,10 @@ impl<const N: usize> Name<N> {
     /// ([`FromStr`] says which); never for length.
     #[must_use]
     pub fn truncated(text: &str) -> Option<Self> {
-        let text = Self::composed(text).ok()?;
+        let text = Self::composed(text);
+        if let Err(NameError::Bom | NameError::Nul) = Self::held(&text) {
+            return None;
+        }
         let mut end = text.len().min(N);
         while !text.is_char_boundary(end) {
             end -= 1;

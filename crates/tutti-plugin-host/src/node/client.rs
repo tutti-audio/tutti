@@ -33,7 +33,7 @@ use tutti_rt::Rt;
 
 use arrayvec::ArrayVec;
 use tutti_buffers::{BusTopology, ChannelLayout};
-use tutti_graph::{Bus, Buses, Cx, Offset, Shape};
+use tutti_graph::{Bus, Buses, Cx, InEvents, Offset, OutEvents, Shape};
 use tutti_plugin_types::{Layout, PluginBus, PluginWiring};
 use tutti_rt::Mutex;
 use tutti_rt::PendingSampleRate;
@@ -119,6 +119,10 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     /// and `process` size by. Moves are reported through the handle
     /// (`PluginInvalidation`), not here.
     pub(super) declared: Declared,
+    /// The event input of the node's shape: MIDI and parameter events.
+    pub(super) event_in: InEvents,
+    /// The event output of the node's shape, for a plugin that declared MIDI out.
+    pub(super) event_out: Option<OutEvents>,
     /// The block's MIDI in: its event input's.
     pub(super) midi: MidiEventVec,
     /// Takes the event input's MIDI into `midi`, carrying across blocks
@@ -259,6 +263,14 @@ pub(super) struct Declared {
 }
 
 impl Declared {
+    /// The ports with the node's events: one input (MIDI and parameter
+    /// events) and an output for a plugin that declared MIDI out.
+    pub(super) fn event_shape(self, features: Features) -> Shape {
+        self.ports
+            .events(1, u16::from(features.contains(Features::MIDI_OUT)))
+            .param_events()
+    }
+
     /// What the plugin reported at load.
     ///
     /// # Errors
@@ -578,6 +590,9 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             .or(event_room)
             .unwrap_or(tutti_plugin_types::MIDI_STACK_BOUND);
         let event_input = event_room;
+        let shape = declared.event_shape(features);
+        let event_in = shape.event_input(0).expect("one event input is declared");
+        let event_out = shape.event_output(0);
         Self {
             inner,
             rt,
@@ -589,6 +604,8 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             reload,
             pipeline,
             declared,
+            event_in,
+            event_out,
             midi: MidiEventVec::new(),
             intake: MidiIntake::default(),
             out: ProcessOutput::default(),

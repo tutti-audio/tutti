@@ -41,16 +41,21 @@ struct Probe {
     level: f32,
 }
 
+impl Probe {
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO)
+        .events(1, 0)
+        .param_events()
+        .tail(Tail::Unknown);
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for Probe {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO)
-            .events(1, 0)
-            .param_events()
-            .tail(Tail::Unknown)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        for (range, events) in io.sub_blocks(0) {
+        for (range, events) in io.sub_blocks(Self::IN) {
             for p in events.params() {
                 let target = match p.kind {
                     ParamKind::Ramp(r) => r.target_by_id(ID),
@@ -416,16 +421,21 @@ fn scheduling_needs_a_plan() {
 /// it also logs as `(absolute frame, tag)`.
 struct Impulse(tutti_fixtures::Record<(u64, u32)>);
 
+impl Impulse {
+    const SHAPE: Shape = Shape::through_unassigned(ChannelLayout::MONO)
+        .events(1, 0)
+        .tail(Tail::Unknown);
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for Impulse {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::MONO)
-            .events(1, 0)
-            .tail(Tail::Unknown)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         io.channel(0).map(|x| x);
-        for e in io.events(0) {
+        for e in io.events(Self::IN) {
             if let EventKind::Midi(Ump(w)) = e.kind {
                 self.0
                     .lock()

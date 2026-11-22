@@ -4,10 +4,10 @@
 
 use crate::{OfflineWait, ServerWatch};
 use dpi::Size;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use tutti_plugin_types::{PluginFailure, RateRefusal, Timeouts};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 #[derive(Clone)]
 pub(super) struct Lifecycle {
@@ -84,12 +84,12 @@ impl Lifecycle {
 
     /// The server's editor asked for `size`; the latest ask stands.
     pub(super) fn set_editor_wants(&self, size: Size) {
-        *self.editor_wants.lock_recover() = Some(size);
+        *self.editor_wants.lock() = Some(size);
     }
 
     /// The size the server's editor asked for since the last call.
     pub(super) fn take_editor_wants(&self) -> Option<Size> {
-        self.editor_wants.lock_recover().take()
+        self.editor_wants.lock().take()
     }
 
     /// The server closed its editor itself.
@@ -109,7 +109,7 @@ impl Lifecycle {
 
     /// The refused rate (Hz) and the plugin's reason, while one stands.
     pub(super) fn rate_refusal(&self) -> Option<RateRefusal> {
-        self.refusal.lock_recover().clone()
+        self.refusal.lock().clone()
     }
 
     /// Offers every refusal to `wait` from now on, the standing one included.
@@ -119,7 +119,7 @@ impl Lifecycle {
         // refusal read. A `set_rate_refusal` that holds the lock first wrote
         // its refusal before this read and is offered here; one that holds it
         // after finds the wait and offers it itself.
-        let mut offered_to = self.offered_to.lock_recover();
+        let mut offered_to = self.offered_to.lock();
         let wait = offered_to.insert(wait);
         if let Some(refusal) = self.rate_refusal() {
             wait.offer_refusal(refusal);
@@ -141,8 +141,8 @@ impl Lifecycle {
         // or the other. A clearing is not offered: the wait's slot is only
         // filled, and its latch decides what is reported.
         {
-            let offered_to = self.offered_to.lock_recover();
-            *self.refusal.lock_recover() = refusal.clone();
+            let offered_to = self.offered_to.lock();
+            *self.refusal.lock() = refusal.clone();
             if let Some(refusal) = refusal
                 && let Some(wait) = offered_to.as_ref()
             {

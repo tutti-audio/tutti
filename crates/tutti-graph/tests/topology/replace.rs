@@ -471,13 +471,19 @@ fn a_replace_during_a_fade_waits_for_it() {
 /// Counts the events it is handed; outputs the count.
 struct EventCount(Arc<AtomicUsize>);
 
+impl EventCount {
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).events(1, 0);
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for EventCount {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        self.0.fetch_add(io.events(0).len(), Ordering::Relaxed);
+        self.0
+            .fetch_add(io.events(Self::IN).len(), Ordering::Relaxed);
         let n = self.0.load(Ordering::Relaxed) as f32;
         io.output(0).fill(n);
         Status::Modified

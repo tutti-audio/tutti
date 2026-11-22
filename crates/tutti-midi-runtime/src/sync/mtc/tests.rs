@@ -43,7 +43,12 @@ fn joining_mid_cycle_waits_for_the_next_piece_zero() {
     let tc = decoder.timecode().expect("a full cycle after piece 0");
     // 1:02:03:04 and the receiver's +2 frames.
     assert_eq!(
-        (tc.hours(), tc.minutes(), tc.seconds(), tc.frames()),
+        (
+            tc.hours().get(),
+            tc.minutes().get(),
+            tc.seconds().get(),
+            tc.frames()
+        ),
         (1, 2, 3, 6)
     );
 }
@@ -84,7 +89,12 @@ fn eight_quarter_frames_assemble_into_a_timecode_at_every_rate() {
 
         let tc = decoder.timecode().expect("eight pieces is a full timecode");
         assert_eq!(
-            (tc.hours(), tc.minutes(), tc.seconds(), tc.frames()),
+            (
+                tc.hours().get(),
+                tc.minutes().get(),
+                tc.seconds().get(),
+                tc.frames()
+            ),
             shown,
             "rate bits {rate_bits}"
         );
@@ -129,7 +139,12 @@ fn test_resyncs_on_next_piece_zero() {
     let tc = decoder.timecode().unwrap();
     // 1:02:03:04 and the receiver's +2 frames.
     assert_eq!(
-        (tc.hours(), tc.minutes(), tc.seconds(), tc.frames()),
+        (
+            tc.hours().get(),
+            tc.minutes().get(),
+            tc.seconds().get(),
+            tc.frames()
+        ),
         (1, 2, 3, 6)
     );
 }
@@ -163,9 +178,9 @@ fn test_hours_above_15() {
     // Hour 23: low nibble = 7 (0x07), bit4 = 1
     feed_timecode(&mut decoder, 23, 59, 59, 25, 3);
     let tc = decoder.timecode().unwrap();
-    assert_eq!(tc.hours(), 23);
-    assert_eq!(tc.minutes(), 59);
-    assert_eq!(tc.seconds(), 59);
+    assert_eq!(tc.hours().get(), 23);
+    assert_eq!(tc.minutes().get(), 59);
+    assert_eq!(tc.seconds().get(), 59);
     assert_eq!(tc.frames(), 27, "25 and the receiver's +2 frames");
 }
 
@@ -198,7 +213,12 @@ fn the_reported_time_is_two_frames_on_across_every_carry() {
         feed_timecode(&mut decoder, fed.0, fed.1, fed.2, fed.3, rate_bits);
         let tc = decoder.timecode().unwrap();
         assert_eq!(
-            (tc.hours(), tc.minutes(), tc.seconds(), tc.frames()),
+            (
+                tc.hours().get(),
+                tc.minutes().get(),
+                tc.seconds().get(),
+                tc.frames()
+            ),
             expected,
             "from {fed:?}"
         );
@@ -229,7 +249,12 @@ fn reserved_bits_of_the_quarter_frames_are_ignored() {
     let tc = decoder.timecode().expect("not a corrupt frame");
     // 1:02:03:04 and the receiver's +2 frames.
     assert_eq!(
-        (tc.hours(), tc.minutes(), tc.seconds(), tc.frames()),
+        (
+            tc.hours().get(),
+            tc.minutes().get(),
+            tc.seconds().get(),
+            tc.frames()
+        ),
         (1, 2, 3, 6)
     );
 }

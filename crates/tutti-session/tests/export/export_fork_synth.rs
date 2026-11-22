@@ -79,14 +79,14 @@ fn render_stem(
 
 /// A saw with an instant attack, built at the live graph's rate.
 fn poly() -> PolySynth<f32> {
-    PolySynth::<f32>::new(SynthConfig {
-        oscillator: OscillatorType::Saw,
-        envelope: Adsr {
-            attack: Seconds::new(0.0),
-            ..Default::default()
-        },
-        ..Default::default()
-    })
+    PolySynth::<f32>::new(
+        SynthConfig::new()
+            .oscillator(OscillatorType::Saw)
+            .envelope(Adsr {
+                attack: Seconds::new(0.0),
+                ..Default::default()
+            }),
+    )
 }
 
 /// The repo's committed test soundfont.
@@ -181,8 +181,13 @@ fn request(rate: f64) -> Bounce<NodeKey, BufferMainOutput> {
 /// the note sounds like from its first frame, at `rate`.
 fn reference<N: Node>(unit: N, rate: f64) -> Vec<f32> {
     let mut unit = Direct::new(unit, SampleRate::of(rate), 64);
+    let unit_in = unit
+        .node
+        .shape()
+        .event_input(0)
+        .expect("the node declares an event input");
     let at = Offset::of(Samples::new(0), Samples::new(64));
-    unit.events(0, &[Event::midi(at, clip_note_on())]);
+    unit.events(unit_in, &[Event::midi(at, clip_note_on())]);
     let mut out = Vec::with_capacity(NOTE);
     while out.len() < NOTE {
         unit.block();

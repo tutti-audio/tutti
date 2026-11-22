@@ -36,7 +36,7 @@ use std::sync::atomic::Ordering;
 use tutti_buffers::BusTopology;
 use tutti_buffers::Float;
 use tutti_graph::{
-    Cx, Env, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare,
+    Cx, Env, ForkCause, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare, RenderMode,
     Shape, Status, declare_params,
 };
 use tutti_music::{Meter, MeterMap, TimeSignature};
@@ -577,7 +577,7 @@ impl ClickFork {
 }
 
 impl<F: Float> ForkSource<F> for ClickFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked<F>, ForkCause> {
         Ok(Forked::new(Box::new(self.node::<F>())))
     }
 }

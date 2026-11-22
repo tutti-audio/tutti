@@ -48,9 +48,9 @@ use proptest::prelude::*;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    CommitError, Cx, Editor, EventOutputPort, Executor, ForkByClone, ForkMode, ForkTarget,
-    GraphInvalid, Io, Law, Node, ParamEvent, ParamIn, ParamInput, ParamRamp, ParamRange,
-    ParamSegment, Prepare, Reference, Shape, Status, TransportPosition, Unforkable,
+    CommitError, Cx, Editor, EventOutputPort, Executor, ForkByClone, ForkTarget, GraphInvalid, Io,
+    Law, Node, ParamEvent, ParamIn, ParamInput, ParamRamp, ParamRange, ParamSegment, Prepare,
+    Reference, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_units::{Hz, Latency, ParamKey, Q, Real, SampleRate, Samples, UnitParam};
@@ -220,12 +220,17 @@ struct Signal {
     seed: u64,
 }
 
+impl Signal {
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO)
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(256));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Signal {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO)
-            .events(0, 1)
-            .param_events()
-            .event_capacity(tutti_graph::testing::cap_of(256))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -236,7 +241,7 @@ impl Node for Signal {
             io.output(0)[i] = v as f32;
             let o = io.offset(i).expect("inside");
             for p in [UnitParam::Cutoff, UnitParam::Q] {
-                let _ = io.event_out(0).push_param(step(o, p, v));
+                let _ = io.event_out(Self::OUT).push_param(step(o, p, v));
             }
         }
         Status::Modified
@@ -251,18 +256,23 @@ struct Hold {
     value: f64,
 }
 
+impl Hold {
+    const SHAPE: Shape = Shape::EMPTY
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(4));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Hold {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .events(0, 1)
-            .param_events()
-            .event_capacity(tutti_graph::testing::cap_of(4))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         let o = io.offset(0).expect("a block has a frame");
         for p in [UnitParam::Cutoff, UnitParam::Q] {
-            let _ = io.event_out(0).push_param(step(o, p, self.value));
+            let _ = io.event_out(Self::OUT).push_param(step(o, p, self.value));
         }
         Status::Silent
     }
@@ -314,6 +324,9 @@ impl Node for Lag {
 /// Sends one `ParamRamp` per `(absolute frame, param, target, length)`, and
 /// each `(absolute frame, segment)`, on its frame, in frame order whatever
 /// the plans' order.
+/// The events a block of [`Ramps`] may write.
+const EVENT_ROOM: u16 = 64;
+
 #[derive(Clone)]
 struct Ramps {
     plan: Vec<(u64, UnitParam, f64, usize)>,
@@ -323,6 +336,9 @@ struct Ramps {
     /// Ramps built whole (a shaped one), each on its absolute frame (after
     /// the frame's `plan` ramps, before its segments).
     shaped: Vec<(u64, ParamRamp)>,
+    /// The block's events in frame order, reserved in `prepare` for the
+    /// event output's room.
+    events: Vec<ParamEvent>,
 }
 
 impl Ramps {
@@ -332,22 +348,37 @@ impl Ramps {
             plan: steps.iter().map(|&(at, p, v)| (at, p, v, 0)).collect(),
             segs: Vec::new(),
             shaped: Vec::new(),
+            events: Vec::new(),
         }
     }
 }
 
+impl Ramps {
+    const SHAPE: Shape = Shape::EMPTY
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(EVENT_ROOM as u32));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Ramps {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .events(0, 1)
-            .param_events()
-            .event_capacity(tutti_graph::testing::cap_of(64))
+        Self::SHAPE
     }
-    fn prepare(&mut self, _: &Prepare) {}
+    fn prepare(&mut self, _: &Prepare) {
+        self.events.reserve(usize::from(EVENT_ROOM));
+    }
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let start = cx.env.frame.get();
         let inside = |at: u64| at >= start && at < start + io.frames() as u64;
-        let mut events: Vec<ParamEvent> = Vec::new();
+        self.events.clear();
+        // Each event is placed after the ones at its frame or before, so the
+        // block's events end in frame order (ramps before segments on one
+        // frame, each in plan order) without a sort's scratch allocation.
+        let place = |events: &mut Vec<ParamEvent>, e: ParamEvent| {
+            let at = events.partition_point(|x| x.offset <= e.offset);
+            events.insert(at, e);
+        };
         for &(at, param, target, len) in &self.plan {
             if !inside(at) {
                 continue;
@@ -357,25 +388,22 @@ impl Node for Ramps {
                 _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(target), Samples::new(len)),
             };
             let offset = io.offset((at - start) as usize).expect("inside");
-            events.push(ParamEvent::ramp(offset, ramp));
+            place(&mut self.events, ParamEvent::ramp(offset, ramp));
         }
         for &(at, ramp) in &self.shaped {
             if inside(at) {
                 let offset = io.offset((at - start) as usize).expect("inside");
-                events.push(ParamEvent::ramp(offset, ramp));
+                place(&mut self.events, ParamEvent::ramp(offset, ramp));
             }
         }
         for &(at, seg) in &self.segs {
             if inside(at) {
                 let offset = io.offset((at - start) as usize).expect("inside");
-                events.push(ParamEvent::segment(offset, seg));
+                place(&mut self.events, ParamEvent::segment(offset, seg));
             }
         }
-        // In frame order (stably: on one frame, ramps before segments, each
-        // in plan order), as an event output must be written.
-        events.sort_by_key(|e| e.offset);
-        for e in events {
-            let _ = io.event_out(0).push_param(e);
+        for e in self.events.drain(..) {
+            let _ = io.event_out(Self::OUT).push_param(e);
         }
         Status::Silent
     }
@@ -571,6 +599,7 @@ fn a_modulation_step_lands_on_its_frame() {
                     ],
                     segs: Vec::new(),
                     shaped: Vec::new(),
+                    events: Vec::new(),
                 }),
             );
             {
@@ -855,6 +884,7 @@ fn an_event_source_replaces_the_base_from_its_first_event() {
             ],
             segs: Vec::new(),
             shaped: Vec::new(),
+            events: Vec::new(),
         }),
     );
     for p in [UnitParam::Cutoff, UnitParam::Q] {
@@ -1068,12 +1098,17 @@ struct OnFirstBlock {
     pending: bool,
 }
 
+impl OnFirstBlock {
+    const SHAPE: Shape = Shape::EMPTY
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(4));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for OnFirstBlock {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .events(0, 1)
-            .param_events()
-            .event_capacity(tutti_graph::testing::cap_of(4))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {
         self.pending = true;
@@ -1082,9 +1117,11 @@ impl Node for OnFirstBlock {
         if std::mem::take(&mut self.pending) {
             let o = io.offset(0).expect("a block has a frame");
             let _ = io
-                .event_out(0)
+                .event_out(Self::OUT)
                 .push_param(step(o, UnitParam::Cutoff, self.cutoff));
-            let _ = io.event_out(0).push_param(step(o, UnitParam::Q, self.q));
+            let _ = io
+                .event_out(Self::OUT)
+                .push_param(step(o, UnitParam::Q, self.q));
         }
         Status::Silent
     }
@@ -1129,9 +1166,7 @@ fn a_lane_fed_fork_reads_its_value_at_frame_0() {
     let live = render(&mut exec, &mut ed, 600, 64);
     assert_eq!((live[0][599], live[1][599]), (500.0, 3.0), "live, held");
 
-    let (mut fed, mut fexec) = ed
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(64))
-        .expect("forks");
+    let (mut fed, mut fexec) = ed.fork(ForkTarget::MainOutput, prepare(64)).expect("forks");
     let out = render(&mut fexec, &mut fed, 10, 10);
     #[allow(clippy::needless_range_loop, reason = "two outputs at one frame")]
     for i in 0..10 {
@@ -1262,7 +1297,12 @@ fn render_moves(
     ed.insert(
         NodeKey(1),
         "ramps",
-        Unforkable(Ramps { plan, segs, shaped }),
+        Unforkable(Ramps {
+            plan,
+            segs,
+            shaped,
+            events: Vec::new(),
+        }),
     );
     ed.spec_mut().connect_param(
         param(PROBE, UnitParam::Cutoff),
@@ -1561,6 +1601,7 @@ fn a_range_clamps_a_segment_without_rewriting_it() {
             plan: Vec::new(),
             segs: vec![(0, seg)],
             shaped: Vec::new(),
+            events: Vec::new(),
         }),
     );
     let at = param(PROBE, UnitParam::Cutoff);
@@ -1615,12 +1656,17 @@ struct SegmentThenRamp {
     step_at: Option<u64>,
 }
 
+impl SegmentThenRamp {
+    const SHAPE: Shape = Shape::EMPTY
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(4));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for SegmentThenRamp {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .events(0, 1)
-            .param_events()
-            .event_capacity(tutti_graph::testing::cap_of(4))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -1629,7 +1675,9 @@ impl Node for SegmentThenRamp {
         if let Some(at) = self.step_at.filter(|at| block.contains(at)) {
             let o = io.offset((at - start) as usize).expect("inside");
             let step = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(7.0), Samples::new(0));
-            let _ = io.event_out(0).push_param(ParamEvent::ramp(o, step));
+            let _ = io
+                .event_out(Self::OUT)
+                .push_param(ParamEvent::ramp(o, step));
         }
         if block.contains(&self.at) {
             let o = io.offset((self.at - start) as usize).expect("inside");
@@ -1640,8 +1688,12 @@ impl Node for SegmentThenRamp {
                 Samples::new(20),
             );
             let ramp = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(0.0), Samples::new(4));
-            let _ = io.event_out(0).push_param(ParamEvent::segment(o, seg));
-            let _ = io.event_out(0).push_param(ParamEvent::ramp(o, ramp));
+            let _ = io
+                .event_out(Self::OUT)
+                .push_param(ParamEvent::segment(o, seg));
+            let _ = io
+                .event_out(Self::OUT)
+                .push_param(ParamEvent::ramp(o, ramp));
         }
         Status::Silent
     }
@@ -1794,6 +1846,7 @@ fn a_segment_replaces_the_base() {
             plan: Vec::new(),
             segs: vec![(10, seg)],
             shaped: Vec::new(),
+            events: Vec::new(),
         }),
     );
     ed.spec_mut()
@@ -2059,6 +2112,7 @@ fn a_shrinking_range_rewrites_neither_the_base_nor_a_ramp() {
             plan: vec![(0, UnitParam::Cutoff, TARGET, LEN)],
             segs: Vec::new(),
             shaped: Vec::new(),
+            events: Vec::new(),
         }),
     );
     let at = param(PROBE, UnitParam::Cutoff);
@@ -2358,6 +2412,7 @@ fn run_differential(g: &Gen) {
                 plan: plan.clone(),
                 segs: segs.clone(),
                 shaped: shaped.clone(),
+                events: Vec::new(),
             }),
         );
         fresh.insert(
@@ -2366,6 +2421,7 @@ fn run_differential(g: &Gen) {
                 plan: plan.clone(),
                 segs,
                 shaped,
+                events: Vec::new(),
             }),
         );
     }
@@ -2594,6 +2650,7 @@ fn corners_skip_a_resend_at_any_block_size() {
             (80, b),
         ],
         shaped: Vec::new(),
+        events: Vec::new(),
     };
     let render = |block: usize, side: Side| -> Vec<u32> {
         let (cutoff, q) = (Cell::new(0.0), Cell::new(0.0));

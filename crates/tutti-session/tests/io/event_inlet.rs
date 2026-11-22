@@ -101,13 +101,20 @@ fn pushed_events_come_out_at_their_frames() {
 #[derive(Clone)]
 struct Hear;
 
+impl Hear {
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).events(1, 0);
+    const IN: tutti_graph::InEvents = Self::SHAPE
+        .event_input(0)
+        .expect("one event input is declared");
+}
+
 impl Node for Hear {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        let n = io.events(0).len() as f32;
+        let n = io.events(Self::IN).len() as f32;
         io.output(0).fill(n);
         Status::Modified
     }

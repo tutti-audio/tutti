@@ -396,7 +396,8 @@ mod rect_tests {
 #[cfg(test)]
 mod attach_tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
+    use tutti_rt::Mutex;
     use vst3::Class;
     use vst3::Steinberg::{TBool, char16, int16, kResultOk, kResultTrue, tresult};
 
@@ -422,7 +423,7 @@ mod attach_tests {
             kInvalidArgument
         }
         unsafe fn removed(&self) -> tresult {
-            self.0.lock().unwrap().push(Call::Removed);
+            self.0.lock().push(Call::Removed);
             kResultOk
         }
         unsafe fn onWheel(&self, _d: f32) -> tresult {
@@ -444,7 +445,7 @@ mod attach_tests {
             kResultOk
         }
         unsafe fn setFrame(&self, frame: *mut IPlugFrame) -> tresult {
-            self.0.lock().unwrap().push(if frame.is_null() {
+            self.0.lock().push(if frame.is_null() {
                 Call::ClearFrame
             } else {
                 Call::SetFrame
@@ -474,6 +475,6 @@ mod attach_tests {
         let parent = unsafe { WindowHandle::from_u64(1) };
         let result = Editor::open(view, parent, ContentScale::default(), frame);
         assert!(matches!(result, Err(EditorError::Attach(_))));
-        assert_eq!(*calls.lock().unwrap(), [Call::SetFrame, Call::ClearFrame]);
+        assert_eq!(*calls.lock(), [Call::SetFrame, Call::ClearFrame]);
     }
 }

@@ -16,9 +16,10 @@ use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, Event, EventEdge, EventInputPort, EventOutputPort, Executor, ForkByClone, ForkMode,
-    ForkTarget, Io, Node, Offset, ParamIn, ParamKind, ParamRange, ParamSegment, Prepare, Shape,
-    Status, TransportChanges, TransportPosition, control_in,
+    Cx, Editor, Event, EventEdge, EventInputPort, EventOutputPort, Executor, ForkByClone,
+    ForkTarget, InEvents, Io, Node, Offset, OutEvents, ParamIn, ParamKind, ParamRange,
+    ParamSegment, Prepare, RenderMode, Shape, Status, TransportChanges, TransportPosition,
+    control_in,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_modulation::{
@@ -140,9 +141,14 @@ struct Seq {
     stopped_on: Option<u64>,
 }
 
+impl Seq {
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
+    const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Seq {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.events(0, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -163,7 +169,9 @@ impl Node for Seq {
                 (Some(cx.env.frame.get() + i as u64) == self.stopped_on).then(|| note_on(64))
             };
             if let Some(w) = words {
-                io.event_out(0).push(Event::midi(at, Ump(w))).expect("room");
+                io.event_out(Self::OUT)
+                    .push(Event::midi(at, Ump(w)))
+                    .expect("room");
             }
         }
         Status::Modified
@@ -177,17 +185,24 @@ struct Midi {
     plan: Vec<(u64, [u32; 4])>,
 }
 
+impl Midi {
+    const SHAPE: Shape = Shape::EMPTY
+        .events(0, 1)
+        .event_capacity(std::num::NonZeroU32::new(1024).expect("a capacity"));
+    const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Midi {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .events(0, 1)
-            .event_capacity(std::num::NonZeroU32::new(1024).expect("a capacity"))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         for &(at, w) in &self.plan {
             if let Some(o) = cx.env.offset_of(Frame::new(at)) {
-                io.event_out(0).push(Event::midi(o, Ump(w))).expect("room");
+                io.event_out(Self::OUT)
+                    .push(Event::midi(o, Ump(w)))
+                    .expect("room");
             }
         }
         Status::Modified
@@ -204,44 +219,43 @@ struct Tap {
     last: Option<(ParamSegment, u64)>,
 }
 
+impl Tap {
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::from_count(4)).events(1, 0);
+    const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for Tap {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::from_count(4)).events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let n = io.frames();
         let base = cx.env.frame.get();
-        let events: Vec<(usize, ParamSegment)> = io
-            .events(0)
-            .params()
-            .iter()
-            .filter_map(|e| match e.kind {
-                ParamKind::Segment(s) => Some((e.offset.index(), s)),
-                ParamKind::Ramp(_) => None,
-            })
-            .collect();
-        let mut out = vec![vec![0.0f32; n]; 4];
+        let events = io.events(Self::IN).params();
         let mut k = 0;
-        #[allow(clippy::needless_range_loop, reason = "four outputs at one frame")]
         for i in 0..n {
-            while let Some(&(_, s)) = events.get(k).filter(|e| e.0 == i) {
+            let (mut mark, mut start, mut target) = (0.0f32, 0.0f32, 0.0f32);
+            while let Some(e) = events.get(k).filter(|e| e.offset.index() == i) {
+                k += 1;
+                let ParamKind::Segment(s) = e.kind else {
+                    continue;
+                };
                 self.last = Some((s, base + i as u64));
                 let id = match s.addr() {
                     tutti_units::ParamAddr::Id(id) => id,
                     a => panic!("a source sends foreign segments, got {a:?}"),
                 };
-                out[1][i] = 1.0;
-                out[2][i] = control_in(s.start_by_id(id).expect("an id-addressed segment"));
-                out[3][i] = control_in(s.target_by_id(id).expect("an id-addressed segment"));
-                k += 1;
+                mark = 1.0;
+                start = control_in(s.start_by_id(id).expect("an id-addressed segment"));
+                target = control_in(s.target_by_id(id).expect("an id-addressed segment"));
             }
-            out[0][i] = control_in(self.last.map_or(0.0, |(s, at)| {
+            io.output(0)[i] = control_in(self.last.map_or(0.0, |(s, at)| {
                 s.raw_value_after(Samples::new((base + i as u64 - at) as usize))
             }));
-        }
-        for (c, v) in out.iter().enumerate() {
-            io.output(c).copy_from_slice(v);
+            io.output(1)[i] = mark;
+            io.output(2)[i] = start;
+            io.output(3)[i] = target;
         }
         Status::Modified
     }
@@ -260,11 +274,9 @@ impl Node for Probe {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        match io.param(0).frames() {
-            Some(v) => {
-                let v: Vec<f32> = v.to_vec();
-                io.output(0).copy_from_slice(&v);
-            }
+        let param = io.param(0);
+        match param.frames() {
+            Some(v) => io.output(0).copy_from_slice(v),
             None => io.output(0).fill(0.0),
         }
         Status::Modified
@@ -953,8 +965,8 @@ fn an_export_is_the_live_render_for_signal_sources() {
     let (mut fed, mut fexec) = ed
         .fork(
             ForkTarget::MainOutput,
-            ForkMode::Offline,
-            Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(1024))),
+            Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(1024)))
+                .with_render_mode(RenderMode::Offline),
         )
         .expect("forks");
     let total = 60_000;

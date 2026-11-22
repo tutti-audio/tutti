@@ -6,8 +6,8 @@ use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_graph::contract::{BlockRig, Direct, drive};
 use tutti_graph::testing::{bits, test_pool};
 use tutti_graph::{
-    Cx, ForkByClone, ForkMode, ForkTarget, GraphBuilder, Io, Node, ParamNode, ParamSet, Params,
-    Prepare, Renderer, Shape, Status,
+    Cx, ForkByClone, ForkTarget, GraphBuilder, Io, Node, ParamNode, ParamSet, Params, Prepare,
+    Renderer, Shape, Status,
 };
 use tutti_rt::Param;
 use tutti_units::{Amplitude, SampleRate, Samples, UnitParam};
@@ -205,7 +205,7 @@ fn an_f64_graph_hosts_a_param_node_and_forks_it_from_its_value() {
 
     let (fork_ed, fork_exec) = r
         .editor()
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare())
+        .fork(ForkTarget::MainOutput, prepare())
         .expect("forks at f64");
     assert!(sets[0].set(UnitParam::Volume, 0.5));
     let mut forked = Renderer::new(fork_ed, fork_exec);

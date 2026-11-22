@@ -42,7 +42,7 @@
 mod machine_control;
 mod read;
 
-use crate::smpte::{MtcRate, SmpteTimecode};
+use crate::smpte::{MtcRate, SmpteTimecode, TimecodeHours, TimecodeMinutes, TimecodeSeconds};
 use crate::tuning::TuningMessage;
 use alloc::boxed::Box;
 use alloc::vec;
@@ -153,8 +153,8 @@ impl QuarterFrameCycle {
 /// what an MTC Full Message and an MMC [`MmcTimeLabel`] both state.
 ///
 /// It is a [`SmpteTimecode`] restricted to an [`MtcRate`]: [`timecode`](Self::timecode)
-/// is the position at any SMPTE rate, for counting frames and reading seconds,
-/// and the rate is held here once, as the two-bit MTC code. An MMC
+/// is the position, for counting frames and reading seconds, and the rate is
+/// held here as the two-bit MTC code it travels as. An MMC
 /// [`MmcTimeCode`] is a different thing: the five-byte field of RP-013, a label
 /// and its tail.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -165,28 +165,26 @@ impl QuarterFrameCycle {
 )]
 pub struct MtcTimeCode {
     rate: MtcRate,
-    hours: u8,
-    minutes: u8,
-    seconds: u8,
-    frames: u8,
+    /// Counted at `rate.frame_rate()`.
+    timecode: SmpteTimecode,
 }
 
 /// The persisted shape of an [`MtcTimeCode`]: its rate and labels as written,
-/// checked by `TryFrom` on the way back in.
+/// the frames checked against the rate by `TryFrom` on the way back in.
 #[cfg(feature = "serde")]
 #[derive(serde::Serialize, serde::Deserialize)]
 struct MtcTimeCodeRaw {
     rate: MtcRate,
-    hours: u8,
-    minutes: u8,
-    seconds: u8,
+    hours: TimecodeHours,
+    minutes: TimecodeMinutes,
+    seconds: TimecodeSeconds,
     frames: u8,
 }
 
-/// A persisted position with a label out of range for its rate.
+/// A persisted position with a frame label out of range for its rate.
 #[cfg(feature = "serde")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
-#[error("a time code label is out of range for its MTC rate")]
+#[error("a time code frame label is out of range for its MTC rate")]
 pub struct InvalidMtcTimeCode;
 
 #[cfg(feature = "serde")]
@@ -194,10 +192,10 @@ impl From<MtcTimeCode> for MtcTimeCodeRaw {
     fn from(t: MtcTimeCode) -> Self {
         Self {
             rate: t.rate,
-            hours: t.hours,
-            minutes: t.minutes,
-            seconds: t.seconds,
-            frames: t.frames,
+            hours: t.timecode.hours(),
+            minutes: t.timecode.minutes(),
+            seconds: t.timecode.seconds(),
+            frames: t.timecode.frames(),
         }
     }
 }
@@ -218,32 +216,22 @@ impl MtcTimeCode {
     pub const fn origin(rate: MtcRate) -> Self {
         Self {
             rate,
-            hours: 0,
-            minutes: 0,
-            seconds: 0,
-            frames: 0,
+            timecode: SmpteTimecode::origin(rate.frame_rate()),
         }
     }
 
-    /// The position `hours:minutes:seconds:frames` at `rate`, or `None` when a
-    /// field is out of range: hours 0..=23, minutes and seconds 0..=59, frames
-    /// below [`MtcRate::labels_per_second`].
+    /// The position `hours:minutes:seconds:frames` at `rate`, or `None` when
+    /// `frames` is not below [`MtcRate::labels_per_second`].
     #[must_use]
     pub const fn new(
         rate: MtcRate,
-        hours: u8,
-        minutes: u8,
-        seconds: u8,
+        hours: TimecodeHours,
+        minutes: TimecodeMinutes,
+        seconds: TimecodeSeconds,
         frames: u8,
     ) -> Option<Self> {
         match SmpteTimecode::new(hours, minutes, seconds, frames, rate.frame_rate()) {
-            Some(_) => Some(Self {
-                rate,
-                hours,
-                minutes,
-                seconds,
-                frames,
-            }),
+            Some(timecode) => Some(Self { rate, timecode }),
             None => None,
         }
     }
@@ -252,16 +240,10 @@ impl MtcTimeCode {
     /// (29.97 non-drop).
     #[must_use]
     pub const fn from_timecode(timecode: SmpteTimecode) -> Option<Self> {
-        let Some(rate) = timecode.frame_rate().mtc_rate() else {
-            return None;
-        };
-        Self::new(
-            rate,
-            timecode.hours(),
-            timecode.minutes(),
-            timecode.seconds(),
-            timecode.frames(),
-        )
+        match timecode.frame_rate().mtc_rate() {
+            Some(rate) => Some(Self { rate, timecode }),
+            None => None,
+        }
     }
 
     /// The position of the frame nearest `seconds` at `rate`, the hours
@@ -269,30 +251,19 @@ impl MtcTimeCode {
     /// `None` before zero and for NaN.
     #[must_use]
     pub fn at(seconds: Seconds, rate: MtcRate) -> Option<Self> {
-        Some(Self::at_rate(
-            SmpteTimecode::from_seconds_wrapping(seconds, rate.frame_rate())?,
+        Some(Self {
             rate,
-        ))
+            timecode: SmpteTimecode::from_seconds_wrapping(seconds, rate.frame_rate())?,
+        })
     }
 
     /// The position of frame number `count` since `00:00:00:00` at `rate`
     /// ([`SmpteTimecode::from_frame_count`]); hours wrap at 24.
     #[must_use]
     pub fn from_frame_count(count: u64, rate: MtcRate) -> Self {
-        Self::at_rate(
-            SmpteTimecode::from_frame_count(count, rate.frame_rate()),
-            rate,
-        )
-    }
-
-    /// `timecode`, counted at `rate.frame_rate()` by the caller.
-    fn at_rate(timecode: SmpteTimecode, rate: MtcRate) -> Self {
         Self {
             rate,
-            hours: timecode.hours(),
-            minutes: timecode.minutes(),
-            seconds: timecode.seconds(),
-            frames: timecode.frames(),
+            timecode: SmpteTimecode::from_frame_count(count, rate.frame_rate()),
         }
     }
 
@@ -305,13 +276,7 @@ impl MtcTimeCode {
     /// The time code, for counting frames and reading seconds.
     #[must_use]
     pub const fn timecode(self) -> SmpteTimecode {
-        SmpteTimecode::counted(
-            self.hours,
-            self.minutes,
-            self.seconds,
-            self.frames,
-            self.rate.frame_rate(),
-        )
+        self.timecode
     }
 
     /// The hours byte `0rrhhhhh` of a Full Message and of an MMC time code: the
@@ -319,7 +284,7 @@ impl MtcTimeCode {
     /// Frame nibbles are its halves.
     #[must_use]
     pub const fn hours_byte(self) -> u8 {
-        self.rate.hours_byte(self.hours)
+        self.rate.hours_byte(self.timecode.hours().get())
     }
 
     /// The position the four bytes `hr mn sc fr` state, with `hr` as
@@ -328,7 +293,14 @@ impl MtcTimeCode {
     #[must_use]
     pub(crate) const fn from_hours_byte(hr: u8, mn: u8, sc: u8, fr: u8) -> Option<Self> {
         let (rate, hours) = MtcRate::from_hours_byte(hr);
-        Self::new(rate, hours, mn, sc, fr)
+        let (Some(hours), Some(minutes), Some(seconds)) = (
+            TimecodeHours::new(hours),
+            TimecodeMinutes::new(mn),
+            TimecodeSeconds::new(sc),
+        ) else {
+            return None;
+        };
+        Self::new(rate, hours, minutes, seconds, fr)
     }
 
     /// The eight Quarter Frame nibbles that state this position (M1 p.53,
@@ -336,7 +308,11 @@ impl MtcTimeCode {
     /// minutes low and high, and the hours byte low and high.
     #[must_use]
     pub const fn nibbles(self) -> [u8; 8] {
-        let (m, s, f) = (self.minutes, self.seconds, self.frames);
+        let (m, s, f) = (
+            self.timecode.minutes().get(),
+            self.timecode.seconds().get(),
+            self.timecode.frames(),
+        );
         let hr = self.hours_byte();
         [
             f & 0x0F,
@@ -388,9 +364,9 @@ impl MtcFullMessage {
     #[must_use]
     pub const fn new(
         rate: MtcRate,
-        hours: u8,
-        minutes: u8,
-        seconds: u8,
+        hours: TimecodeHours,
+        minutes: TimecodeMinutes,
+        seconds: TimecodeSeconds,
         frames: u8,
     ) -> Option<Self> {
         match MtcTimeCode::new(rate, hours, minutes, seconds, frames) {
@@ -413,19 +389,19 @@ impl MtcFullMessage {
 
     /// Hours, 0..=23.
     #[must_use]
-    pub const fn hours(self) -> u8 {
+    pub const fn hours(self) -> TimecodeHours {
         self.0.timecode().hours()
     }
 
     /// Minutes, 0..=59.
     #[must_use]
-    pub const fn minutes(self) -> u8 {
+    pub const fn minutes(self) -> TimecodeMinutes {
         self.0.timecode().minutes()
     }
 
     /// Seconds, 0..=59.
     #[must_use]
-    pub const fn seconds(self) -> u8 {
+    pub const fn seconds(self) -> TimecodeSeconds {
         self.0.timecode().seconds()
     }
 
@@ -458,8 +434,8 @@ impl MtcFullMessage {
             0x01,
             0x01,
             self.0.hours_byte(),
-            self.minutes(),
-            self.seconds(),
+            self.minutes().get(),
+            self.seconds().get(),
             self.frames(),
         ]
     }

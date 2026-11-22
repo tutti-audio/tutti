@@ -1,5 +1,9 @@
 //! Control lanes, modulation sources and the reconciler.
 
+/// An allocation inside an `RtScope` aborts the running test.
+#[global_allocator]
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
+
 mod automation_segments;
 mod azimuth_lane;
 mod control_lane;
