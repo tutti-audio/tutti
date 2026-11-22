@@ -3613,3 +3613,70 @@ fn a_glide_leaves_its_source_keys_tuned_pitch() {
     let freq = s.voices[0].sounding_freq().get();
     assert!((freq - 277.1826).abs() < 0.3, "{freq}");
 }
+
+/// A config's `ladder_saturation` reaches the voice bank, and unset it is per stage: a unit sine
+/// at 100 Hz through the ladder at 18 kHz with no resonance is quasi-static, so its peak is
+/// `tanh` of the unit peak applied once by `Input` and four times by `PerStage` (the default).
+/// The oscillators carry no constant, so the sine's peak stands for the wide constant.
+#[test]
+fn the_ladder_saturates_per_stage_unless_set() {
+    use crate::bank::CONTROL_BLOCK;
+    use tutti_dsp::LadderSaturation;
+    use tutti_units::{Phase, SampleRate};
+    let rate = SampleRate::of(48_000.0);
+    let base = SynthConfig {
+        oscillator: OscillatorType::Sine,
+        filter: FilterType::Moog {
+            cutoff: Hz::new(18_000.0),
+            resonance: Resonance::NONE,
+        },
+        envelope: Adsr::new(
+            Seconds::new(0.0),
+            Seconds::new(0.0),
+            Amplitude::new(1.0),
+            Seconds::new(0.1),
+        ),
+        ..Default::default()
+    };
+    for (config, times) in [
+        (base.clone(), 4),
+        (
+            SynthConfig {
+                ladder_saturation: LadderSaturation::Input,
+                ..base.clone()
+            },
+            1,
+        ),
+        (
+            SynthConfig {
+                ladder_saturation: LadderSaturation::PerStage,
+                ..base
+            },
+            4,
+        ),
+    ] {
+        let mut bank = PolySynth::build_bank(&config, rate, UnisonVoices::ONE);
+        bank.set_pitch(0, Hz::new(100.0));
+        bank.set_filter(0, 1, Hz::new(18_000.0), Resonance::NONE);
+        bank.set_gains(0, Amplitude::UNITY, Amplitude::UNITY);
+        bank.snap_tone(0);
+        bank.snap_gain(0);
+        bank.start(0, Phase::START);
+        bank.gate_on(0);
+        let mut peak = 0.0f32;
+        for _ in 0..4_800 / CONTROL_BLOCK {
+            bank.mark_live(0);
+            peak = bank
+                .render(CONTROL_BLOCK)
+                .0
+                .iter()
+                .fold(peak, |p, &y| p.max(y));
+        }
+        let want = (0..times).fold(1.0f32, |x, _| x.tanh());
+        assert!(
+            (peak - want).abs() < 0.01 * want,
+            "{:?}: peak {peak}, want {want}",
+            config.ladder_saturation
+        );
+    }
+}

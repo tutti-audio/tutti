@@ -47,11 +47,3 @@ fn svf_q_takes_exactly_the_stable_range() {
         ],
     });
 }
-
-#[test]
-fn the_ladder_saturates_per_stage_unless_set() {
-    assert_eq!(
-        SynthConfig::default().ladder_saturation,
-        tutti_dsp::LadderSaturation::PerStage
-    );
-}
