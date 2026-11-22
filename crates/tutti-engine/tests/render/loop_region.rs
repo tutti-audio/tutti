@@ -13,8 +13,8 @@
 //!   of the regions written.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use tutti_buffers::MaxBlock;
+use tutti_fixtures::Record;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
@@ -33,7 +33,7 @@ type Seen = Option<(f64, f64)>;
 
 /// Logs, for every frame it renders, the loop its `Env` gives that frame
 /// (`transport_at`): the audio-side read. Logs nothing when given no log.
-struct LoopProbe(Option<Arc<Mutex<Vec<Seen>>>>);
+struct LoopProbe(Option<Record<Seen>>);
 
 impl Node for LoopProbe {
     fn shape(&self) -> Shape {
@@ -54,13 +54,13 @@ impl Node for LoopProbe {
     fn reset(&mut self) {}
 }
 
-fn engine(transport: &Transport) -> (Engine, Editor, Arc<Mutex<Vec<Seen>>>) {
-    let log = Arc::default();
-    let (engine, ed) = engine_logging(transport, Some(Arc::clone(&log)));
+fn engine(transport: &Transport) -> (Engine, Editor, Record<Seen>) {
+    let log = Record::new();
+    let (engine, ed) = engine_logging(transport, Some(log.clone()));
     (engine, ed, log)
 }
 
-fn engine_logging(transport: &Transport, log: Option<Arc<Mutex<Vec<Seen>>>>) -> (Engine, Editor) {
+fn engine_logging(transport: &Transport, log: Option<Record<Seen>>) -> (Engine, Editor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
         MaxBlock::of(Samples::new(512)),

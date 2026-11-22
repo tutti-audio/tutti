@@ -4,8 +4,8 @@
 use std::ffi::c_void;
 use std::mem::ManuallyDrop;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use tutti_rt::LockExt;
+use std::sync::Arc;
+use tutti_rt::Mutex;
 
 use libloading::Library;
 use vst3::Steinberg::{
@@ -181,13 +181,9 @@ unsafe impl Sync for Module {}
 /// open and close in the process.
 static MODULE_LOCK: Mutex<()> = Mutex::new(());
 
-fn lock_modules() -> std::sync::MutexGuard<'static, ()> {
-    MODULE_LOCK.lock_recover()
-}
-
 impl Drop for Module {
     fn drop(&mut self) {
-        let _one_at_a_time = lock_modules();
+        let _one_at_a_time = MODULE_LOCK.lock();
         // Whatever is still registered with the run loop (a registration
         // through the module's own context belongs to no instance) points into
         // code about to be unloaded.
@@ -226,7 +222,7 @@ impl Module {
     ///
     /// Opens and teardowns are serialised process-wide; see `MODULE_LOCK`.
     pub fn open(lib_path: &Path) -> Result<Arc<Self>, LoadError> {
-        let _one_at_a_time = lock_modules();
+        let _one_at_a_time = MODULE_LOCK.lock();
         // SAFETY: loading a plugin runs its static initializers, which is what
         // the caller asked for by naming a plugin module; `Library::new`'s
         // contract is that the path is a library the process may run.

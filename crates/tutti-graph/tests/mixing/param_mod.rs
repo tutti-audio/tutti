@@ -325,6 +325,9 @@ impl Node for Lag {
 /// Sends one `ParamRamp` per `(absolute frame, param, target, length)`, and
 /// each `(absolute frame, segment)`, on its frame, in frame order whatever
 /// the plans' order.
+/// The events a block of [`Ramps`] may write.
+const EVENT_ROOM: u16 = 64;
+
 #[derive(Clone)]
 struct Ramps {
     plan: Vec<(u64, UnitParam, f64, usize)>,
@@ -334,6 +337,9 @@ struct Ramps {
     /// Ramps built whole (a shaped one), each on its absolute frame (after
     /// the frame's `plan` ramps, before its segments).
     shaped: Vec<(u64, ParamRamp)>,
+    /// The block's events in frame order, reserved in `prepare` for the
+    /// event output's room.
+    events: Vec<ParamEvent>,
 }
 
 impl Ramps {
@@ -343,6 +349,7 @@ impl Ramps {
             plan: steps.iter().map(|&(at, p, v)| (at, p, v, 0)).collect(),
             segs: Vec::new(),
             shaped: Vec::new(),
+            events: Vec::new(),
         }
     }
 }
@@ -351,7 +358,7 @@ impl Ramps {
     const SHAPE: Shape = Shape::EMPTY
         .with_events(0, 1)
         .with_param_events()
-        .with_event_capacity(tutti_graph::testing::cap_of(64));
+        .with_event_capacity(tutti_graph::testing::cap_of(EVENT_ROOM as u32));
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -359,11 +366,20 @@ impl Node for Ramps {
     fn shape(&self) -> Shape {
         Self::SHAPE
     }
-    fn prepare(&mut self, _: &Prepare) {}
+    fn prepare(&mut self, _: &Prepare) {
+        self.events.reserve(usize::from(EVENT_ROOM));
+    }
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let start = cx.env.frame.get();
         let inside = |at: u64| at >= start && at < start + io.frames() as u64;
-        let mut events: Vec<ParamEvent> = Vec::new();
+        self.events.clear();
+        // Each event is placed after the ones at its frame or before, so the
+        // block's events end in frame order (ramps before segments on one
+        // frame, each in plan order) without a sort's scratch allocation.
+        let place = |events: &mut Vec<ParamEvent>, e: ParamEvent| {
+            let at = events.partition_point(|x| x.offset <= e.offset);
+            events.insert(at, e);
+        };
         for &(at, param, target, len) in &self.plan {
             if !inside(at) {
                 continue;
@@ -373,24 +389,21 @@ impl Node for Ramps {
                 _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(target), Samples::new(len)),
             };
             let offset = io.offset((at - start) as usize).expect("inside");
-            events.push(ParamEvent::ramp(offset, ramp));
+            place(&mut self.events, ParamEvent::ramp(offset, ramp));
         }
         for &(at, ramp) in &self.shaped {
             if inside(at) {
                 let offset = io.offset((at - start) as usize).expect("inside");
-                events.push(ParamEvent::ramp(offset, ramp));
+                place(&mut self.events, ParamEvent::ramp(offset, ramp));
             }
         }
         for &(at, seg) in &self.segs {
             if inside(at) {
                 let offset = io.offset((at - start) as usize).expect("inside");
-                events.push(ParamEvent::segment(offset, seg));
+                place(&mut self.events, ParamEvent::segment(offset, seg));
             }
         }
-        // In frame order (stably: on one frame, ramps before segments, each
-        // in plan order), as an event output must be written.
-        events.sort_by_key(|e| e.offset);
-        for e in events {
+        for e in self.events.drain(..) {
             let _ = io.event_out(Self::OUT).push_param(e);
         }
         Status::Silent
@@ -587,6 +600,7 @@ fn a_modulation_step_lands_on_its_frame() {
                     ],
                     segs: Vec::new(),
                     shaped: Vec::new(),
+                    events: Vec::new(),
                 }),
             );
             {
@@ -871,6 +885,7 @@ fn an_event_source_replaces_the_base_from_its_first_event() {
             ],
             segs: Vec::new(),
             shaped: Vec::new(),
+            events: Vec::new(),
         }),
     );
     for p in [UnitParam::Cutoff, UnitParam::Q] {
@@ -1283,7 +1298,12 @@ fn render_moves(
     ed.insert(
         NodeKey(1),
         "ramps",
-        Unforkable(Ramps { plan, segs, shaped }),
+        Unforkable(Ramps {
+            plan,
+            segs,
+            shaped,
+            events: Vec::new(),
+        }),
     );
     ed.spec_mut().connect_param(
         param(PROBE, UnitParam::Cutoff),
@@ -1582,6 +1602,7 @@ fn a_range_clamps_a_segment_without_rewriting_it() {
             plan: Vec::new(),
             segs: vec![(0, seg)],
             shaped: Vec::new(),
+            events: Vec::new(),
         }),
     );
     let at = param(PROBE, UnitParam::Cutoff);
@@ -1826,6 +1847,7 @@ fn a_segment_replaces_the_base() {
             plan: Vec::new(),
             segs: vec![(10, seg)],
             shaped: Vec::new(),
+            events: Vec::new(),
         }),
     );
     ed.spec_mut()
@@ -2091,6 +2113,7 @@ fn a_shrinking_range_rewrites_neither_the_base_nor_a_ramp() {
             plan: vec![(0, UnitParam::Cutoff, TARGET, LEN)],
             segs: Vec::new(),
             shaped: Vec::new(),
+            events: Vec::new(),
         }),
     );
     let at = param(PROBE, UnitParam::Cutoff);
@@ -2390,6 +2413,7 @@ fn run_differential(g: &Gen) {
                 plan: plan.clone(),
                 segs: segs.clone(),
                 shaped: shaped.clone(),
+                events: Vec::new(),
             }),
         );
         fresh.insert(
@@ -2398,6 +2422,7 @@ fn run_differential(g: &Gen) {
                 plan: plan.clone(),
                 segs,
                 shaped,
+                events: Vec::new(),
             }),
         );
     }
@@ -2626,6 +2651,7 @@ fn corners_skip_a_resend_at_any_block_size() {
             (80, b),
         ],
         shaped: Vec::new(),
+        events: Vec::new(),
     };
     let render = |block: usize, side: Side| -> Vec<u32> {
         let (cutoff, q) = (Cell::new(0.0), Cell::new(0.0));

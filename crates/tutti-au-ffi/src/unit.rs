@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 use std::mem::{MaybeUninit, size_of};
 use std::os::raw::c_void;
 use std::sync::Arc;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use coreaudio_sys as sys;
 
@@ -58,7 +58,7 @@ pub(crate) struct Inner {
     /// those calls and across a withdrawal's free ([`Unit::while_uninitialized`]),
     /// so no `initialize` overlaps the free; only control-side calls take it, the
     /// render path never does.
-    initialized: std::sync::Mutex<bool>,
+    initialized: Mutex<bool>,
 }
 
 // SAFETY: the instance is an opaque handle into AudioToolbox. Nothing in Rust
@@ -145,7 +145,7 @@ impl Unit {
                 work: work.clone(),
                 midi_output: std::sync::atomic::AtomicBool::new(false),
                 renders: tutti_rt::RenderCount::new(),
-                initialized: std::sync::Mutex::new(false),
+                initialized: Mutex::new(false),
             }),
             _not_sync: PhantomData,
         })
@@ -201,10 +201,6 @@ impl Unit {
 
     // ---- lifecycle ----
 
-    fn lifecycle(&self) -> std::sync::MutexGuard<'_, bool> {
-        self.inner.initialized.lock_recover()
-    }
-
     /// `AudioUnitInitialize`. Serialized with every other lifecycle call and with
     /// a withdrawal's free of what the AU's callbacks read.
     ///
@@ -214,7 +210,7 @@ impl Unit {
     /// withdrawal free; an AU that took its callbacks before refusing would
     /// break that, and none measured does.
     pub fn initialize(&self) -> std::result::Result<(), OsError> {
-        let mut initialized = self.lifecycle();
+        let mut initialized = self.inner.initialized.lock();
         // SAFETY: `raw()` is a live instance.
         check("AudioUnitInitialize", unsafe {
             sys::AudioUnitInitialize(self.raw())
@@ -233,7 +229,7 @@ impl Unit {
     /// # Errors
     /// The `OSStatus` of the call, which leaves the unit initialized.
     pub fn uninitialize(&self) -> std::result::Result<(), OsError> {
-        let mut initialized = self.lifecycle();
+        let mut initialized = self.inner.initialized.lock();
         // SAFETY: `raw()` is a live instance.
         check("AudioUnitUninitialize", unsafe {
             sys::AudioUnitUninitialize(self.raw())
@@ -247,7 +243,7 @@ impl Unit {
     /// `AudioUnitUninitialize` failed). A unit that was never initialized is
     /// uninitialized.
     pub(crate) fn while_uninitialized<R>(&self, f: impl FnOnce() -> R) -> Option<R> {
-        let initialized = self.lifecycle();
+        let initialized = self.inner.initialized.lock();
         if *initialized {
             return None;
         }

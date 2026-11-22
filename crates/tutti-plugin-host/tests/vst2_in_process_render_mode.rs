@@ -26,7 +26,6 @@
 //! test.
 
 use std::path::PathBuf;
-use std::sync::MutexGuard;
 use tutti_buffers::Planes;
 use tutti_fixtures::main_thread;
 use tutti_rt::Mutex;
@@ -48,10 +47,6 @@ const LEVEL_OFFLINE: i32 = 4;
 
 /// Serializes against the probe's one process-global capture.
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
-
-fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock()
-}
 
 /// Re-open the image the host loaded and call one of the probe's exports.
 ///
@@ -189,7 +184,7 @@ fn drive_blocks_in(
 /// were indistinguishable to a caller, which is why this asserts the plain
 /// boolean before anything reads the plugin's side.
 fn the_handle_accepts_a_render_mode() {
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let loaded = load();
 
     assert!(
@@ -205,7 +200,7 @@ fn the_handle_accepts_a_render_mode() {
 /// implementation that hard-coded `4` would pass the next test and fail this
 /// one.
 fn a_plugin_renders_at_realtime_level_by_default() {
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let mut loaded = load();
 
     drive_block(&mut loaded.unit);
@@ -227,7 +222,7 @@ fn a_plugin_renders_at_realtime_level_by_default() {
 /// The whole point: this is the call a bounce driver makes, and the level the
 /// plugin reads is the one it would size an oversampling buffer from.
 fn an_offline_mode_set_on_the_handle_reaches_the_plugin() {
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let mut loaded = load();
 
     assert!(loaded.handle.announce_render_mode(RenderMode::Offline));
@@ -246,7 +241,7 @@ fn an_offline_mode_set_on_the_handle_reaches_the_plugin() {
 /// call on the handle: the session's render mode is carried by `Prepare`.
 #[test]
 fn a_node_prepared_offline_renders_the_plugin_offline() {
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let mut loaded = load();
 
     drive_blocks_in(
@@ -269,7 +264,7 @@ fn a_node_prepared_offline_renders_the_plugin_offline() {
 /// mode set on the handle since survives it, and a changed one is told.
 #[test]
 fn a_re_prepare_at_the_same_mode_keeps_what_the_handle_set() {
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let mut loaded = load();
 
     drive_blocks_in(
@@ -321,7 +316,7 @@ fn a_re_prepare_at_the_same_mode_keeps_what_the_handle_set() {
 /// which is the failure the driver's guard design exists to prevent; this pins
 /// that the underlying call can actually undo itself.
 fn restoring_realtime_reaches_the_plugin() {
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let mut loaded = load();
 
     assert!(loaded.handle.announce_render_mode(RenderMode::Offline));
@@ -347,7 +342,7 @@ fn restoring_realtime_reaches_the_plugin() {
 /// rate (a rejoin and an activation) must not put it back to realtime. An export
 /// sets the mode and then prepares at its own rate.
 fn a_rate_change_keeps_the_render_mode() {
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let mut loaded = load();
 
     assert!(loaded.handle.announce_render_mode(RenderMode::Offline));
@@ -371,7 +366,7 @@ fn a_rate_change_keeps_the_render_mode() {
 /// the call taking effect at the next block.
 fn an_automation_mode_set_on_the_handle_reaches_the_plugin() {
     use tutti_plugin_types::AutomationMode;
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let mut loaded = load();
 
     drive_block(&mut loaded.unit);
@@ -399,7 +394,7 @@ fn an_automation_mode_set_on_the_handle_reaches_the_plugin() {
 /// **A VST2 plugin carries the automation-state feature**, so the session
 /// forwards a mode to it: the host answers the query for every plugin.
 fn a_vst2_plugin_claims_the_automation_state_feature() {
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let loaded = load();
 
     assert!(

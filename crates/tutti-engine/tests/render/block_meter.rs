@@ -14,9 +14,10 @@
 //! 24 000 frames, and a click is heard a frame after its beat (its first
 //! sample is `sin(0)`).
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, MaxBlock, Planes, PlanesMut};
 use tutti_engine::Engine;
+use tutti_fixtures::Record;
 use tutti_graph::{Editor, Executor, NodeKey, OutputPort, PortSource, Prepare};
 use tutti_music::LoopRange;
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
@@ -38,8 +39,8 @@ fn four_four_then(at: f64, signature: TimeSignature) -> MeterMap {
 }
 
 /// The engine of an `EnvLog` under `transport`, and the log.
-fn logging(transport: &Transport) -> (Engine, Arc<Mutex<Vec<tutti_graph::Env>>>) {
-    let log = Arc::new(Mutex::new(Vec::new()));
+fn logging(transport: &Transport) -> (Engine, Record<tutti_graph::Env>) {
+    let log = Record::new();
     let (mut ed, exec) = env_graph(512, &log);
     let engine = Engine::new(transport, &mut ed, exec).expect("within the limits");
     (engine, log)

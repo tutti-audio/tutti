@@ -645,7 +645,14 @@ impl<F: Float> Node<F> for TestNode<F> {
     }
 
     fn reset(&mut self) {
-        *self = Self::counted_in(self.kind.clone(), Arc::clone(&self.calls));
+        // In place: the ring keeps its length and `pending` its room, so a reset
+        // allocates nothing.
+        self.ring.iter_mut().for_each(|v| *v = F::ZERO);
+        self.prev = F::ZERO;
+        self.count = 0.0;
+        self.state = 0.0;
+        self.pending.clear();
+        self.rate = None;
     }
 }
 

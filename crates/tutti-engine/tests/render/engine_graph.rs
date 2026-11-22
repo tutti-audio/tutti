@@ -23,6 +23,7 @@
 
 use std::sync::{Arc, Mutex};
 use tutti_buffers::MaxBlock;
+use tutti_fixtures::Record;
 use tutti_fixtures::signal::bits;
 
 use crate::support;
@@ -103,7 +104,7 @@ impl Node for Clocked {
 /// Per frame: 1 while the transport rolls, else 0. Logs every frame's
 /// `(absolute frame, beat, playing)` when given a log.
 struct Gate {
-    log: Option<Arc<Mutex<Vec<(u64, f64, bool)>>>>,
+    log: Option<Record<(u64, f64, bool)>>,
 }
 
 impl Node for Gate {
@@ -127,7 +128,7 @@ impl Node for Gate {
 }
 
 /// One event input; logs the absolute frame of every event it receives.
-struct NoteLog(Arc<Mutex<Vec<u64>>>);
+struct NoteLog(Record<u64>);
 
 impl NoteLog {
     const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO)
@@ -352,12 +353,12 @@ fn a_timed_start_sounds_from_its_exact_frame() {
 #[test]
 fn beat_timed_seek_and_stop_land_on_their_frames() {
     let transport = Transport::new(SampleRate::of(SR));
-    let log = Arc::new(Mutex::new(Vec::new()));
+    let log = Record::new();
     let (engine, _ed) = graph_engine(
         &transport,
         700,
         Unforkable(Gate {
-            log: Some(Arc::clone(&log)),
+            log: Some(log.clone()),
         }),
         1,
     );
@@ -394,7 +395,7 @@ fn beat_timed_seek_and_stop_land_on_their_frames() {
 
 /// A constant 1.0 that logs the transport at every frame: the declick gain
 /// envelope, read straight off the output, beside where the transport moved.
-struct DcLog(Arc<Mutex<Vec<(u64, f64, bool)>>>);
+struct DcLog(Record<(u64, f64, bool)>);
 
 impl Node for DcLog {
     fn shape(&self) -> Shape {
@@ -416,7 +417,7 @@ impl Node for DcLog {
 
 /// Logs `Env`'s recording flag once per block, at the block's first frame
 /// and at its last (through `transport_at`).
-struct RecLog(Arc<Mutex<Vec<(bool, bool)>>>);
+struct RecLog(Record<(bool, bool)>);
 
 impl Node for RecLog {
     fn shape(&self) -> Shape {
@@ -442,17 +443,17 @@ impl Node for RecLog {
 #[test]
 fn the_recording_flag_reaches_a_nodes_env() {
     let transport = Transport::new(SampleRate::of(SR));
-    let log = Arc::new(Mutex::new(Vec::new()));
-    let (engine, _ed) = graph_engine(&transport, 256, Unforkable(RecLog(Arc::clone(&log))), 1);
+    let log = Record::new();
+    let (engine, _ed) = graph_engine(&transport, 256, Unforkable(RecLog(log.clone())), 1);
     transport.motion().send(MotionCommand::Play).expect("room");
     render(&engine, ChannelLayout::MONO, &[256; 2]);
     transport.settings().set_recording(true);
     render(&engine, ChannelLayout::MONO, &[256; 2]);
     transport.settings().set_recording(false);
     render(&engine, ChannelLayout::MONO, &[256]);
-    let log = log.lock().expect("log").clone();
+    let log = log.lock().expect("log");
     assert_eq!(
-        log,
+        log.as_slice(),
         vec![
             (false, false),
             (false, false),
@@ -510,8 +511,8 @@ fn dc_run(
     script: impl Fn(&tutti_timeline::MotionFsm, usize),
 ) -> (Vec<f32>, Vec<(f64, bool)>) {
     let transport = Transport::new(SampleRate::of(SR));
-    let log = Arc::new(Mutex::new(Vec::new()));
-    let (engine, _ed) = graph_engine(&transport, 256, Unforkable(DcLog(Arc::clone(&log))), 1);
+    let log = Record::new();
+    let (engine, _ed) = graph_engine(&transport, 256, Unforkable(DcLog(log.clone())), 1);
     let mut out = Vec::new();
     transport.motion().send(MotionCommand::Play).expect("room");
     for i in 0..blocks {
@@ -631,7 +632,7 @@ fn a_declick_lasts_five_milliseconds_at_any_rate() {
             SampleRate::of(rate),
             MaxBlock::of(Samples::new(256)),
         ));
-        let log = Arc::new(Mutex::new(Vec::new()));
+        let log = Record::new();
         ed.insert(NodeKey(1), "node", Unforkable(DcLog(log)));
         outputs(&mut ed, NodeKey(1), 1);
         ed.commit().expect("commits");
@@ -708,12 +709,12 @@ fn a_past_frame_lands_at_once_and_is_counted() {
 #[test]
 fn tempo_and_loop_change_on_their_frames() {
     let transport = Transport::new(SampleRate::of(SR));
-    let log = Arc::new(Mutex::new(Vec::new()));
+    let log = Record::new();
     let (engine, _ed) = graph_engine(
         &transport,
         512,
         Unforkable(Gate {
-            log: Some(Arc::clone(&log)),
+            log: Some(log.clone()),
         }),
         1,
     );
@@ -751,9 +752,8 @@ fn tempo_and_loop_change_on_their_frames() {
 #[test]
 fn a_graph_beat_note_after_a_timed_start_lands_on_its_frame() {
     let transport = Transport::new(SampleRate::of(SR));
-    let notes = Arc::new(Mutex::new(Vec::new()));
-    let (engine, mut ed) =
-        graph_engine(&transport, 256, Unforkable(NoteLog(Arc::clone(&notes))), 1);
+    let notes = Record::new();
+    let (engine, mut ed) = graph_engine(&transport, 256, Unforkable(NoteLog(notes.clone())), 1);
     // Install the plan so the editor can schedule against it.
     render(&engine, ChannelLayout::MONO, &[256]);
     ed.collect();
@@ -771,7 +771,10 @@ fn a_graph_beat_note_after_a_timed_start_lands_on_its_frame() {
         .schedule(At::Frame(Frame::new(1_000)), MotionCommand::Play)
         .expect("room");
     render(&engine, ChannelLayout::MONO, &[256; 60]);
-    assert_eq!(*notes.lock().expect("log"), vec![1_000, 1_000 + FPB / 2]);
+    assert_eq!(
+        notes.lock().expect("log").as_slice(),
+        [1_000, 1_000 + FPB / 2]
+    );
 }
 
 /// The beat a graph node reads from `Env`, through a start, a tempo change,
@@ -785,12 +788,12 @@ fn a_graph_beat_note_after_a_timed_start_lands_on_its_frame() {
 #[test]
 fn env_beats_are_the_closed_form_of_each_segment() {
     let transport = Transport::new(SampleRate::of(SR));
-    let log = Arc::new(Mutex::new(Vec::new()));
+    let log = Record::new();
     let (engine, _ed) = graph_engine(
         &transport,
         512,
         Unforkable(Gate {
-            log: Some(Arc::clone(&log)),
+            log: Some(log.clone()),
         }),
         1,
     );
@@ -891,12 +894,12 @@ fn env_beats_are_the_closed_form_of_each_segment() {
 #[test]
 fn a_loop_armed_behind_the_playhead_does_not_jump() {
     let transport = Transport::new(SampleRate::of(SR));
-    let log = Arc::new(Mutex::new(Vec::new()));
+    let log = Record::new();
     let (engine, _ed) = graph_engine(
         &transport,
         512,
         Unforkable(Gate {
-            log: Some(Arc::clone(&log)),
+            log: Some(log.clone()),
         }),
         1,
     );
@@ -953,12 +956,12 @@ fn a_declick_stop_stops_the_transport_on_its_frame() {
     // Rolling from frame 256; a declick stop at frame 600, inside the block
     // 512..768.
     let transport = Transport::new(SampleRate::of(SR));
-    let log = Arc::new(Mutex::new(Vec::new()));
+    let log = Record::new();
     let (engine, _ed) = graph_engine(
         &transport,
         256,
         Unforkable(Gate {
-            log: Some(Arc::clone(&log)),
+            log: Some(log.clone()),
         }),
         1,
     );
@@ -977,8 +980,8 @@ fn a_declick_stop_stops_the_transport_on_its_frame() {
     // A graph beat command after the stop's frame, in the same block: beat
     // 400/24 000 would be frame 656 had the transport rolled on.
     let t2 = Transport::new(SampleRate::of(SR));
-    let notes = Arc::new(Mutex::new(Vec::new()));
-    let (e, mut ed2) = graph_engine(&t2, 256, Unforkable(NoteLog(Arc::clone(&notes))), 1);
+    let notes = Record::new();
+    let (e, mut ed2) = graph_engine(&t2, 256, Unforkable(NoteLog(notes.clone())), 1);
     render(&e, ChannelLayout::MONO, &[256]);
     ed2.collect();
     ed2.schedule(
@@ -1122,12 +1125,12 @@ fn re_preparing_under_the_engine_adopts_the_new_block_at_once() {
 #[test]
 fn a_tempo_wiggle_under_the_clock_hysteresis_does_not_move_the_beat() {
     let transport = Transport::new(SampleRate::of(SR));
-    let log = Arc::new(Mutex::new(Vec::new()));
+    let log = Record::with_capacity(480 * 512);
     let (engine, _ed) = graph_engine(
         &transport,
         512,
         Unforkable(Gate {
-            log: Some(Arc::clone(&log)),
+            log: Some(log.clone()),
         }),
         1,
     );
@@ -1335,7 +1338,7 @@ const NEW_SR: f64 = 48_000.0;
 #[test]
 fn a_re_prepare_keeps_the_beat_and_a_frame_command_on_wall_clock_time() {
     let transport = Transport::new(SampleRate::of(OLD_SR));
-    let log = Arc::new(Mutex::new(Vec::new()));
+    let log = Record::new();
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(OLD_SR),
         MaxBlock::of(Samples::new(512)),
@@ -1344,7 +1347,7 @@ fn a_re_prepare_keeps_the_beat_and_a_frame_command_on_wall_clock_time() {
         NodeKey(1),
         "node",
         Unforkable(Gate {
-            log: Some(Arc::clone(&log)),
+            log: Some(log.clone()),
         }),
     );
     outputs(&mut ed, NodeKey(1), 1);

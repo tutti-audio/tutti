@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::ffi::{CString, NulError, c_char};
 use std::mem::ManuallyDrop;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
-use tutti_rt::LockExt;
+use std::sync::{Arc, Weak};
+use tutti_rt::Mutex;
 
 use clap_sys::entry::clap_plugin_entry;
 use clap_sys::factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_factory};
@@ -170,12 +170,6 @@ static ENTRY_REGISTRY: Mutex<Option<HashMap<PathBuf, Weak<LiveEntry>>>> = Mutex:
 
 type Registry = Option<HashMap<PathBuf, Weak<LiveEntry>>>;
 
-/// The registry, locked. A poisoned lock is taken as is: the map is only
-/// ever inserted into, so a panicking holder left it consistent.
-fn registry() -> MutexGuard<'static, Registry> {
-    ENTRY_REGISTRY.lock_recover()
-}
-
 /// Liveness token of one initialised entry: its existence proves the image
 /// is still mapped and initialised. Its drop is the entry's `deinit`.
 struct LiveEntry {
@@ -212,7 +206,13 @@ fn entry_registry_acquire(
     deinit_fn: Option<DeinitFn>,
     path_cstr: &CString,
 ) -> Result<EntryGuard, LoadError> {
-    acquire_in(&mut registry(), path, init_fn, deinit_fn, path_cstr)
+    acquire_in(
+        &mut ENTRY_REGISTRY.lock(),
+        path,
+        init_fn,
+        deinit_fn,
+        path_cstr,
+    )
 }
 
 /// The entry claim for `path` on a registry the caller already holds locked.
@@ -276,7 +276,7 @@ impl std::fmt::Debug for Bundle {
 
 impl Drop for Bundle {
     fn drop(&mut self) {
-        let _registry = registry();
+        let _registry = ENTRY_REGISTRY.lock();
         // SAFETY: each is dropped once, here, and never used again. The claim
         // goes first: if it is the last on the image its `deinit` runs while
         // the image is still mapped (`entry.h`), and then the library goes
@@ -312,7 +312,7 @@ impl Bundle {
     pub fn open(bundle_path: &Path, library_path: Option<&Path>) -> Result<Self, LoadError> {
         let load_path = library_path.unwrap_or(bundle_path);
         // Held until the entry is acquired: see `acquire_in`.
-        let mut registry = registry();
+        let mut registry = ENTRY_REGISTRY.lock();
         // SAFETY: loading a plugin library runs its initialisers, which the
         // host accepts by loading plugins at all; the caller named the path.
         let library = unsafe { libloading::Library::new(load_path) }.map_err(LoadError::Library)?;
@@ -597,12 +597,12 @@ mod tests {
     static ORDER: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 
     unsafe extern "C" fn ordered_init(_path: *const c_char) -> bool {
-        ORDER.lock().unwrap().push("init");
+        ORDER.lock().push("init");
         true
     }
 
     unsafe extern "C" fn ordered_deinit() {
-        ORDER.lock().unwrap().push("deinit");
+        ORDER.lock().push("deinit");
     }
 
     /// `entry.h`: `deinit` answers `init`, once, when the last claim on the
@@ -619,16 +619,16 @@ mod tests {
             entry_registry_acquire(path, ordered_init, Some(ordered_deinit), &cstr).unwrap();
         let second =
             entry_registry_acquire(path, ordered_init, Some(ordered_deinit), &cstr).unwrap();
-        assert_eq!(*ORDER.lock().unwrap(), ["init"]);
+        assert_eq!(*ORDER.lock(), ["init"]);
         drop(first);
-        assert_eq!(*ORDER.lock().unwrap(), ["init"], "a claim is still held");
+        assert_eq!(*ORDER.lock(), ["init"], "a claim is still held");
         drop(second);
-        assert_eq!(*ORDER.lock().unwrap(), ["init", "deinit"]);
+        assert_eq!(*ORDER.lock(), ["init", "deinit"]);
 
         let third =
             entry_registry_acquire(path, ordered_init, Some(ordered_deinit), &cstr).unwrap();
         drop(third);
-        assert_eq!(*ORDER.lock().unwrap(), ["init", "deinit", "init", "deinit"]);
+        assert_eq!(*ORDER.lock(), ["init", "deinit", "init", "deinit"]);
     }
 
     /// A failed `init` must not register the path, or the next acquire would
@@ -768,7 +768,7 @@ mod select_tests {
         let bundle = Bundle::open(&path, None).expect("opens");
         let wait = Duration::from_millis(300);
 
-        let held = registry();
+        let held = ENTRY_REGISTRY.lock();
         let (done, finished) = mpsc::channel();
         let dropper = std::thread::spawn(move || {
             drop(bundle);
@@ -784,7 +784,7 @@ mod select_tests {
             .expect("the drop ends");
         dropper.join().unwrap();
 
-        let held = registry();
+        let held = ENTRY_REGISTRY.lock();
         let (done, finished) = mpsc::channel();
         let opener = std::thread::spawn(move || {
             let bundle = Bundle::open(&path, None).expect("opens");
