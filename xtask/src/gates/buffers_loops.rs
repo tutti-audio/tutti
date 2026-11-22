@@ -43,9 +43,11 @@
 //! outside any function. Several hits in one function share one row.
 //!
 //! **List.** [`LIST`] holds `<key>  <reason>` lines, `#` and blank lines
-//! aside, the reason `pending` or `not-interleave: <why>`: a judged hit whose
-//! stride is not a channel interleave (an FFT's complex re/im packing, a
-//! matrix row), which no `tutti_buffers` call replaces. A free-text
+//! aside, the reason `pending`, `not-interleave: <why>` or `atomic: <why>`. A
+//! `not-interleave` hit's stride is not a channel interleave (an FFT's complex
+//! re/im packing, a matrix row); an `atomic` hit walks an interleave of atomic
+//! cells (a ring the audio thread reads while another thread writes), which
+//! no `tutti_buffers` view borrows. No `tutti_buffers` call replaces either. A free-text
 //! `measured:` is refused. The gate fails on a hit
 //! with no row, on a row with no hit (delete it), on an unknown reason and on
 //! a key listed twice.
@@ -406,7 +408,7 @@ fn source_files(tree: &dyn Tree) -> Vec<String> {
         .collect()
 }
 
-const LOOP_KINDS: [&str; 2] = ["pending", "not-interleave"];
+const LOOP_KINDS: [&str; 3] = ["pending", "not-interleave", "atomic"];
 
 /// The list's rows, key to reason; the errors name the line.
 fn parse(text: &str) -> Result<BTreeMap<String, String>, Vec<String>> {
@@ -705,6 +707,7 @@ mod tests {
             "crates/a/src/lib.rs::f  measured: a fixed 5.1 table\n",
             "crates/a/src/lib.rs::f  spec-f32: control\n",
             "crates/a/src/lib.rs::f  not-interleave\n",
+            "crates/a/src/lib.rs::f  atomic\n",
             "crates/a/src/lib.rs::f  not-audio: a 5.1 mixing table\n",
             "crates/a/src/lib.rs::f  pending\ncrates/a/src/lib.rs::f  pending\n",
         ] {
@@ -712,11 +715,16 @@ mod tests {
             assert!(!r.passed(), "{list}");
         }
         assert!(!check(&Mem::with(&[(F, "fn f() {}\n")]), 0).passed());
-        let ok = run(
-            "crates/a/src/lib.rs::f  not-interleave: complex re/im packing\n",
-            &[(F, "fn f() { let n = frames * channels; }\n")],
-        );
-        assert!(ok.passed());
+        for reason in [
+            "not-interleave: complex re/im packing",
+            "atomic: a ring of atomic cells",
+        ] {
+            let ok = run(
+                &format!("crates/a/src/lib.rs::f  {reason}\n"),
+                &[(F, "fn f() { let n = frames * channels; }\n")],
+            );
+            assert!(ok.passed(), "{reason}");
+        }
     }
 
     #[test]
