@@ -33,11 +33,11 @@
 
 use std::sync::Arc;
 
-use parking_lot::Mutex;
 use tutti_plugin_types::{
     Control, EditReader, EditWriter, MainThreadMarker, UnknownParam, edit_slots,
 };
 use tutti_rt::AudioThreadCell;
+use tutti_rt::Mutex;
 use tutti_units::{Normalized, ParamId};
 
 /// The slots for `ids`: the backend's post and the first node's port.

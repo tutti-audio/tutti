@@ -26,10 +26,10 @@
 //! test.
 
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 use tutti_buffers::Planes;
 use tutti_fixtures::main_thread;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 use tutti_vst2_host::Vst2Loaded;
 
 use tutti_graph::RenderMode;
@@ -50,7 +50,7 @@ const LEVEL_OFFLINE: i32 = 4;
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock_recover()
+    PROBE_LOCK.lock()
 }
 
 /// Re-open the image the host loaded and call one of the probe's exports.
