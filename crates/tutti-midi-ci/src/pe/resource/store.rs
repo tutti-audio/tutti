@@ -4,6 +4,7 @@ use super::super::limits::ResourceId;
 use super::data::PeData;
 use super::entry::{PeResourceList, ResourceEntry};
 use super::kind::PeResource;
+use super::link::LinkRole;
 use super::request::ResourceTarget;
 
 /// A value the store refuses.
@@ -21,6 +22,14 @@ pub enum StoreError {
         /// What the entry says.
         required: bool,
     },
+    /// An action Link of the data names a Resource with no entry declared (M2-103
+    /// §13.1.1: an action Resource is listed in the ResourceList).
+    #[error("an action Link names {0}, which has no entry declared")]
+    ActionNotDeclared(PeResource),
+    /// A `selectorAction` Link of the data has options that are no List Resource
+    /// (M2-103 §13.1.2).
+    #[error("the options Resource {0} of a selector is not a List Resource")]
+    OptionsNotAList(PeResource),
 }
 
 #[derive(Clone, Debug)]
@@ -67,20 +76,42 @@ impl ResourceStore {
     ///
     /// [`StoreError::NotDeclared`] for a Resource with no entry, and
     /// [`StoreError::ResIdDisagrees`] when `res_id` is given and the entry says
-    /// there is none, or the reverse.
+    /// there is none, or the reverse, and [`StoreError::ActionNotDeclared`] when
+    /// a Link of the data is an action on a Resource with no entry, so the
+    /// Resource of an action Link is declared before data linking to it is put;
+    /// [`StoreError::OptionsNotAList`] for a selector Link whose options Resource
+    /// is no List Resource.
     pub fn put(&mut self, res_id: Option<ResourceId>, data: PeData) -> Result<(), StoreError> {
         let resource = data.resource();
+        let entry = self
+            .entry(&resource)
+            .ok_or_else(|| StoreError::NotDeclared(resource.clone()))?;
+        if entry.require_res_id() != res_id.is_some() {
+            return Err(StoreError::ResIdDisagrees {
+                resource,
+                required: entry.require_res_id(),
+            });
+        }
+        for link in data.links() {
+            let acted = match &link.role {
+                Some(LinkRole::Simple(_)) => &link.resource,
+                Some(LinkRole::Selector(action)) => {
+                    if !link.resource.is_list() {
+                        return Err(StoreError::OptionsNotAList(link.resource.clone()));
+                    }
+                    &action.action_resource
+                }
+                _ => continue,
+            };
+            if self.entry(acted).is_none() {
+                return Err(StoreError::ActionNotDeclared(acted.clone()));
+            }
+        }
         let stored = self
             .resources
             .iter_mut()
             .find(|s| *s.entry.resource() == resource)
             .ok_or_else(|| StoreError::NotDeclared(resource.clone()))?;
-        if stored.entry.require_res_id() != res_id.is_some() {
-            return Err(StoreError::ResIdDisagrees {
-                resource,
-                required: stored.entry.require_res_id(),
-            });
-        }
         match stored.values.iter_mut().find(|(id, _)| *id == res_id) {
             Some((_, old)) => *old = data,
             None => stored.values.push((res_id, data)),

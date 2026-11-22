@@ -527,7 +527,7 @@ sees a C `malloc`, a pthread lock or file I/O inside a plugin or a dependency.
 every `RtScope` also holds LLVM's RealtimeSanitizer region (the `rtsan-standalone`
 crate: libc interceptors, no compiler flag, no nightly). It catches those calls,
 and a std or `parking_lot` lock only when contended. It misses an uncontended lock
-and `thread::sleep`. The one syscall it is told to ignore is `Unparker`'s wake: a wake never waits, and the doorbells and the worker pool wake from the audio thread by design. It is a local recipe, never a CI job: the runtime is a
+and `thread::sleep`. It is told to ignore two syscalls, both through `scope::sanctioned`: `Unparker`'s wake (a wake never waits, and the doorbells and the worker pool wake from the audio thread by design) and a block wait's yield after its budget without progress (it gives the core to the helper the block waits on). It is a local recipe, never a CI job: the runtime is a
 prebuilt download (curl, network on the first build), Linux and macOS only, and
 without `RTSAN_ENABLE` the crate's functions are empty and download nothing.
 

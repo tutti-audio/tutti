@@ -62,7 +62,7 @@ impl SpinThenYield {
             self.restart();
             #[cfg(all(test, not(loom)))]
             super::tests::yielding::count_yield();
-            yield_now();
+            crate::scope::sanctioned(yield_now);
         } else {
             spin_loop();
         }

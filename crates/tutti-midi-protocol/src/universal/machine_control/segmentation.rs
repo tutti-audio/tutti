@@ -8,7 +8,7 @@ use core::marker::PhantomData;
 
 use tutti_ump::first_non_seven_bit;
 
-use super::field::{MmcSegment, MmcSegmentPlace};
+use super::field::{MmcSegment, MmcSegmentCount, MmcSegmentPlace};
 use super::values::{MMC_SEGMENT_BYTES, MmcSegmentBytes};
 use super::{MmcCommand, MmcInfoField, MmcItem};
 
@@ -94,9 +94,9 @@ impl Iterator for MmcSegments<'_> {
         // `new` checked the string: at most 63 segments follow and every
         // segment's bytes are seven-bit and short, so each step is `Some`; a
         // string that were not would end the iterator here.
-        let remaining = u8::try_from(self.left).ok()?;
+        let remaining = MmcSegmentCount::new(u8::try_from(self.left).ok()?)?;
         let bytes = MmcSegmentBytes::new(now)?;
-        MmcSegment::new(place, remaining, bytes)
+        Some(MmcSegment::new(place, remaining, bytes))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -121,12 +121,12 @@ pub enum MmcSegmentError {
     #[error("a first segment arrived inside a string")]
     FirstInsideString,
     /// A later segment's count is not the one that follows the last.
-    #[error("segment {got} arrived where {expected} was due")]
+    #[error("segment {} arrived where {} was due", got.get(), expected.get())]
     OutOfOrder {
         /// The count the next segment had to carry.
-        expected: u8,
+        expected: MmcSegmentCount,
         /// The count it carried.
-        got: u8,
+        got: MmcSegmentCount,
     },
     /// The string is complete but is not a whole number of well-formed items.
     #[error("the segments do not make a whole number of well-formed items")]
@@ -217,7 +217,7 @@ impl<'a, T: MmcItem> IntoIterator for MmcString<'a, T> {
 pub struct MmcReassembler<T> {
     bytes: Vec<u8>,
     /// The count the next later segment must carry, while a string is in progress.
-    due: Option<u8>,
+    due: Option<MmcSegmentCount>,
     item: PhantomData<fn() -> T>,
 }
 
@@ -286,8 +286,8 @@ impl<T: MmcItem> MmcReassembler<T> {
             self.bytes.clear();
         }
         self.bytes.extend_from_slice(segment.bytes().as_bytes());
-        if segment.remaining() > 0 {
-            self.due = Some(segment.remaining() - 1);
+        if let Some(due) = segment.remaining().get().checked_sub(1) {
+            self.due = MmcSegmentCount::new(due);
             return Ok(None);
         }
         self.due = None;
