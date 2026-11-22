@@ -3,6 +3,7 @@
 use super::*;
 use tutti_au_host::AuLoaded;
 use tutti_buffers::{FloatWidth, InputOutput};
+use tutti_plugin_types::fake::{at_frame, unit_value};
 
 impl Server<AuLoaded> {
     /// `load_first` for the plugin `plugin` names, in
@@ -587,7 +588,7 @@ fn param_automation_denormalizes_and_reads_back_normalized() {
     ] {
         let mut changes = ParameterChanges::new();
         let mut queue = ParameterQueue::with_capacity(target.id(), 1);
-        queue.add_point(0, normalized);
+        queue.add_point(at_frame(0), unit_value(normalized));
         changes.add_queue(queue);
         run(&mut au, 64, None, Some(&changes)).expect("process should succeed");
 

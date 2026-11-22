@@ -2614,6 +2614,7 @@ version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
  "bytemuck",
+ "criterion",
  "libm",
  "serde",
  "serde_json",
@@ -3411,6 +3412,7 @@ dependencies = [
  "assert_no_alloc",
  "atomic_float",
  "bytemuck",
+ "criterion",
  "futures-lite",
  "libc",
  "loom",
@@ -3747,6 +3749,7 @@ dependencies = [
  "tracing",
  "tutti-buffers",
  "tutti-fixtures",
+ "tutti-graph",
  "tutti-music",
  "tutti-platform",
  "tutti-plugin-ipc-ffi",

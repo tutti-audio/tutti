@@ -12,6 +12,7 @@ use tutti_buffers::{InputOutput, Planes, PlanesMut};
 use tutti_units::ParamId;
 
 use active::{Active, ActiveExt};
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_vst3_host::{InputEvents, TransportInfo};
 
 /// **A block skipped for a busy input list is silence, and counted.** The
@@ -75,7 +76,7 @@ fn a_block_is_skipped_while_the_plugin_holds_a_parameter_queue() {
     let input = [[1.0f32; 16]; 2];
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
     let mut automation = tutti_plugin_types::ParameterChanges::reserved(1, 4);
-    automation.add_change(ParamId::new(0u32), 0, 0.5);
+    automation.add_change(ParamId::new(0u32), at_frame(0), unit_value(0.5));
     let render = |plugin: &mut Active| {
         let mut out = [[9.0f32; 16]; 2];
         let [l, r] = &mut out;
