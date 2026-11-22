@@ -14,12 +14,13 @@
     reason = "a frame index reads several outputs and the signal at that frame"
 )]
 
+use crate::rendezvous::Rendezvous;
 use common::spec_of;
 use tutti_graph::testing as common;
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
 use common::{Kind, Pair, SpecBehaviour, TestNode, bits, prepare};
 use tutti_buffers::ChannelLayout;
@@ -522,25 +523,6 @@ fn a_mix_moving_during_a_fade_follows_frame_by_frame() {
 // Determinism, the plan, forks, the spec
 // ---------------------------------------------------------------------------
 
-/// Calls a function on the frame it runs: a control thread's `set_mix`
-/// landing in the middle of a block, staged deterministically.
-struct Hook {
-    run: Box<dyn FnMut() + Send>,
-}
-
-impl Node for Hook {
-    fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO)
-    }
-    fn prepare(&mut self, _: &Prepare) {}
-    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        (self.run)();
-        io.output(0).fill(1.0);
-        Status::Modified
-    }
-    fn reset(&mut self) {}
-}
-
 /// **The mix snapshot is per block**: a `set_mix` that lands while a block runs
 /// (here from an upstream node's `process`, before the node's own op) reaches
 /// no op of that block, and the ramp is the next block's. Serial and
@@ -548,47 +530,35 @@ impl Node for Hook {
 #[test]
 fn a_mix_stored_mid_block_lands_on_the_next_block() {
     for workers in WORKERS {
-        let (ed, exec) = Editor::new(prepare(MAX_BLOCK));
-        let ed = Arc::new(Mutex::new(ed));
-        let mut exec = exec;
+        let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
         if workers > 1 {
             exec.set_pool(Some(common::test_pool(workers)));
         }
-        let blocks = Arc::new(AtomicUsize::new(0));
-        {
-            let mut e = ed.lock().unwrap();
-            let (hook_ed, hook_blocks) = (Arc::clone(&ed), Arc::clone(&blocks));
-            e.insert(
-                key(1),
-                "hook",
-                Unforkable(Hook {
-                    run: Box::new(move || {
-                        // The third block: store while the block is running.
-                        if hook_blocks.fetch_add(1, Ordering::Relaxed) == 2 {
-                            hook_ed
-                                .lock()
-                                .unwrap()
-                                .set_mix(key(2), Mix::new(0.5))
-                                .expect("a node");
-                        }
-                    }),
-                }),
-            );
-            e.insert(key(2), "gain", Unforkable(TestNode::new(plain())));
-            e.spec_mut()
-                .topology
-                .connect(at(2, 0), Edge::Direct(out(1, 0)));
-            e.spec_mut().topology.set_outputs(vec![out(2, 0)]);
-            e.commit().expect("commits");
-        }
+        let (hook, handle) = Rendezvous::new();
+        ed.insert(key(1), "hook", Unforkable(hook));
+        ed.insert(key(2), "gain", Unforkable(TestNode::new(plain())));
+        ed.spec_mut()
+            .topology
+            .connect(at(2, 0), Edge::Direct(out(1, 0)));
+        ed.spec_mut().topology.set_outputs(vec![out(2, 0)]);
+        ed.commit().expect("commits");
         exec.apply_pending();
-        ed.lock().unwrap().collect();
+        ed.collect();
         let mut got = Vec::new();
-        for _ in 0..8 {
-            let mut o = vec![0.0f32; BLOCK];
-            exec.process(BLOCK, &TransportPosition::default(), &[], &mut [&mut o[..]]);
-            got.extend(o);
-        }
+        std::thread::scope(|scope| {
+            // The control thread stores once the third block is inside
+            // `process`, then lets the block go.
+            scope.spawn(|| {
+                handle.store_while_inside(|| {
+                    ed.set_mix(key(2), Mix::new(0.5)).expect("a node");
+                });
+            });
+            for _ in 0..8 {
+                let mut o = vec![0.0f32; BLOCK];
+                exec.process(BLOCK, &TransportPosition::default(), &[], &mut [&mut o[..]]);
+                got.extend(o);
+            }
+        });
         // The hook's output is 1.0, so `y = 3`, `x̂ = 1`.
         assert!(
             got[..3 * BLOCK].iter().all(|&v| v == 3.0),

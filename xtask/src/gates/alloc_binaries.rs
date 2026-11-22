@@ -69,14 +69,6 @@ pub(super) const EXEMPT: &[(&str, &str)] = &[
 /// test node or helper that allocates inside an `RtScope`.
 pub(super) const DEBT: &[(&str, &str)] = &[
     (
-        "crates/tutti-engine/tests/render/main.rs",
-        "engine_graph::a_tempo_wiggle_under_the_clock_hysteresis_does_not_move_the_beat: Vec::push in Gate::process, tests/render/engine_graph.rs:121",
-    ),
-    (
-        "crates/tutti-graph/tests/mixing/main.rs",
-        "mode::a_mode_stored_mid_block_lands_on_the_next_block: GraphSpec::set_mode called from a node's process, src/spec.rs:559 via tests/mixing/mode.rs:1335",
-    ),
-    (
         "crates/tutti-nodes/tests/control/main.rs",
         "control_lane::a_constant_layer_is_one_held_value: Vec growth in SegSink::process, tests/control/control_lane.rs:94",
     ),
@@ -87,10 +79,6 @@ pub(super) const DEBT: &[(&str, &str)] = &[
     (
         "crates/tutti-sampler/tests/offline/main.rs",
         "offline_disk_voice::a_fork_follows_a_looping_render_timeline: FileIn::open inside a render, tutti-codec src/decode/read.rs:223 via tutti-sampler src/voice/offline_read.rs:321",
-    ),
-    (
-        "crates/tutti-session/tests/io/main.rs",
-        "clock_switch::the_old_driver_renders_its_last_block_before_the_new_one_its_first: Renderer::process, tests/io/clock_switch.rs:628",
     ),
     (
         "crates/tutti-soundfont/tests/graph/main.rs",

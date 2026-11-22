@@ -13,8 +13,10 @@
     reason = "a frame index reads several outputs and the signal at that frame"
 )]
 
+use crate::rendezvous::Rendezvous;
 use common::spec_of;
 use tutti_buffers::Float;
+use tutti_fixtures::Record;
 use tutti_graph::testing as common;
 
 use std::collections::BTreeMap;
@@ -744,7 +746,7 @@ fn a_bypassed_output_carries_its_inputs_flags() {
         s.mode(2, NodeMode::Bypassed);
         s.commit();
         s.run(8, BLOCK, &|_| 0.0);
-        let silent = q.silent.lock().unwrap().clone();
+        let silent = q.silent.lock().unwrap().to_vec();
         assert_eq!(silent, want, "latency {latency}");
     }
 }
@@ -820,9 +822,9 @@ struct Probe {
     calls: Arc<AtomicUsize>,
     resets: Arc<AtomicUsize>,
     /// Per call, whether input channel 0 was flagged silent.
-    silent: Arc<Mutex<Vec<bool>>>,
+    silent: Record<bool>,
     /// Every event the node was sent, as `(frame, words)`.
-    events: Arc<Mutex<Vec<(u64, [u32; 4])>>>,
+    events: Record<(u64, [u32; 4])>,
 }
 
 impl Probe {
@@ -839,8 +841,8 @@ impl Probe {
             state: 0.0,
             calls: Arc::new(AtomicUsize::new(0)),
             resets: Arc::new(AtomicUsize::new(0)),
-            silent: Arc::new(Mutex::new(Vec::new())),
-            events: Arc::new(Mutex::new(Vec::new())),
+            silent: Record::new(),
+            events: Record::new(),
         }
     }
 
@@ -1004,7 +1006,7 @@ fn a_muted_node_keeps_running_and_un_muting_needs_nothing() {
     assert!(muted[FADE..].iter().all(|v| v.to_bits() == 0));
     // The downstream node was told the input is silent, from the first
     // steady block (after the 4 blocks of fade) on.
-    let silent = q.silent.lock().unwrap().clone();
+    let silent = q.silent.lock().unwrap().to_vec();
     assert!(
         silent[10..14].iter().all(|&b| !b),
         "not silent while fading"
@@ -1270,7 +1272,7 @@ fn a_bypassed_source_closes_its_notes() {
         "only the note-on so far"
     );
     s.run(1, BLOCK, &|_| 0.5);
-    let seen: Vec<(u64, [u32; 4])> = sink.events.lock().unwrap().clone();
+    let seen: Vec<(u64, [u32; 4])> = sink.events.lock().unwrap().to_vec();
     assert_eq!(
         seen.iter().map(|e| e.1).collect::<Vec<_>>(),
         vec![ON60, OFF60]
@@ -1286,25 +1288,6 @@ fn a_bypassed_source_closes_its_notes() {
 // Determinism, the plan, forks
 // ---------------------------------------------------------------------------
 
-/// Calls a function on the frame it runs: a control thread's `set_mode`
-/// landing in the middle of a block, staged deterministically.
-struct Hook {
-    run: Box<dyn FnMut() + Send>,
-}
-
-impl Node for Hook {
-    fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO)
-    }
-    fn prepare(&mut self, _: &Prepare) {}
-    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        (self.run)();
-        io.output(0).fill(1.0);
-        Status::Modified
-    }
-    fn reset(&mut self) {}
-}
-
 /// **The mode snapshot is per block**: a `set_mode` that lands while a block
 /// runs — here from an upstream node's `process`, before the node's own op —
 /// reaches no op of that block, and the fade starts on the next. Serial and
@@ -1312,52 +1295,40 @@ impl Node for Hook {
 #[test]
 fn a_mode_stored_mid_block_lands_on_the_next_block() {
     for workers in WORKERS {
-        let (ed, exec) = Editor::new(prepare(MAX_BLOCK));
-        let ed = Arc::new(Mutex::new(ed));
-        let mut exec = exec;
+        let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
         if workers > 1 {
             exec.set_pool(Some(common::test_pool(workers)));
         }
-        let blocks = Arc::new(AtomicUsize::new(0));
-        {
-            let mut e = ed.lock().unwrap();
-            let (hook_ed, hook_blocks) = (Arc::clone(&ed), Arc::clone(&blocks));
-            e.insert(
-                key(1),
-                "hook",
-                Unforkable(Hook {
-                    run: Box::new(move || {
-                        // The third block: store while the block is running.
-                        if hook_blocks.fetch_add(1, Ordering::Relaxed) == 2 {
-                            hook_ed
-                                .lock()
-                                .unwrap()
-                                .set_mode(key(2), NodeMode::Bypassed)
-                                .expect("a node");
-                        }
-                    }),
-                }),
-            );
-            e.insert(
-                key(2),
-                "gain",
-                Unforkable(TestNode::new(Kind::Gain {
-                    gain: 3.0,
-                    width: 1,
-                })),
-            );
-            e.spec_mut().topology.connect(at(2, 0), direct(1));
-            e.spec_mut().topology.set_outputs(vec![out(2, 0)]);
-            e.commit().expect("commits");
-        }
+        let (hook, handle) = Rendezvous::new();
+        ed.insert(key(1), "hook", Unforkable(hook));
+        ed.insert(
+            key(2),
+            "gain",
+            Unforkable(TestNode::new(Kind::Gain {
+                gain: 3.0,
+                width: 1,
+            })),
+        );
+        ed.spec_mut().topology.connect(at(2, 0), direct(1));
+        ed.spec_mut().topology.set_outputs(vec![out(2, 0)]);
+        ed.commit().expect("commits");
         exec.apply_pending();
-        ed.lock().unwrap().collect();
+        ed.collect();
         let mut got = Vec::new();
-        for _ in 0..8 {
-            let mut o = vec![0.0f32; BLOCK];
-            exec.process(BLOCK, &TransportPosition::default(), &[], &mut [&mut o[..]]);
-            got.extend(o);
-        }
+        std::thread::scope(|scope| {
+            // The control thread stores once the third block is inside
+            // `process`, then lets the block go.
+            scope.spawn(|| {
+                handle.store_while_inside(|| {
+                    ed.set_mode(key(2), NodeMode::Bypassed).expect("a node");
+                });
+            });
+            for _ in 0..8 {
+                let mut o = vec![0.0f32; BLOCK];
+                exec.process(BLOCK, &TransportPosition::default(), &[], &mut [&mut o[..]]);
+                got.extend(o);
+            }
+        });
         assert!(
             got[..3 * BLOCK].iter().all(|&v| v == 3.0),
             "the block the store landed in is still Active"
