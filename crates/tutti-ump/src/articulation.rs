@@ -704,7 +704,7 @@ impl NoteArticulation {
             Attribute::None => (0x00, 0),
             Attribute::Manufacturer(data) => (0x01, data),
             Attribute::Profile(data) => (0x02, data),
-            Attribute::Pitch(data) => (0x03, data),
+            Attribute::Pitch(data) => (0x03, data.q7_9()),
             Attribute::Reserved(r) => (r.kind(), r.data()),
             Attribute::Articulation(a) => (a.kind(), a.data()),
         };
@@ -889,7 +889,7 @@ impl NoteOffArticulation {
             Attribute::None => (0x00, 0),
             Attribute::Manufacturer(data) => (0x01, data),
             Attribute::Profile(data) => (0x02, data),
-            Attribute::Pitch(data) => (0x03, data),
+            Attribute::Pitch(data) => (0x03, data.q7_9()),
             Attribute::Reserved(r) => (r.kind(), r.data()),
             Attribute::Articulation(a) => (a.kind(), a.data()),
         };

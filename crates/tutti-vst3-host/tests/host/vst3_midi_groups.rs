@@ -11,7 +11,7 @@ use tutti_graph::{Offset, UmpAt};
 use tutti_midi_protocol::PitchBendSensitivity;
 use tutti_ump::{
     Address, Attribute, ControlValue, Message, MidiChannel, MidiGroup, NoteId, NoteNumber,
-    NoteVelocity, PerNoteManagement, Rpn, Ump, Voice2,
+    NoteVelocity, PerNoteManagement, Pitch, Rpn, Ump, Voice2,
 };
 use tutti_ump::{Bank, RegisteredPerNoteController, System, U7};
 use tutti_units::Samples;
@@ -143,7 +143,7 @@ fn note_on_pitched(group: MidiGroup, channel: MidiChannel, key: u8, pitch: f64) 
         Voice2::NoteOn {
             note: NoteNumber::of(key),
             velocity: NoteVelocity::CENTER,
-            attribute: Attribute::Pitch((pitch * 512.0) as u16),
+            attribute: Attribute::Pitch(Pitch::from_q7_9((pitch * 512.0) as u16)),
         },
     ))
 }

@@ -5,7 +5,7 @@ use tutti_ump::ManufacturerId;
 use tutti_ump::{
     BlockDirection, DeviceIdentity, FirstGroup, Form, FunctionBlockCount, FunctionBlockId,
     FunctionBlockInfo, GroupSpan, Message, Midi1Port, Protocol, SoftwareRevision, Stream,
-    StreamConfig, U7, UiHint, Ump,
+    StreamConfig, Sysex8StreamCount, U7, UiHint, Ump,
 };
 
 use super::*;
@@ -70,7 +70,7 @@ fn device() -> Endpoint {
         .block(block(0, 0, 1, "Keys").build().unwrap())
         .block(
             block(1, 1, 2, "A function block name past thirteen bytes")
-                .midi_ci(2, 2)
+                .midi_ci(2, Sysex8StreamCount::new(2))
                 .build()
                 .unwrap(),
         )
@@ -501,7 +501,7 @@ fn info_of(n: u8) -> Message {
         first_group: FirstGroup::new(n).unwrap().into(),
         groups_spanned: GroupSpan::new(1).unwrap().into(),
         midi_ci_version: 0,
-        max_sysex8_streams: 0,
+        max_sysex8_streams: Sysex8StreamCount::new(0),
     }))
 }
 

@@ -12,9 +12,9 @@ use tutti_ump::{
     FlexAddress, FlexTextKind, FlexTimeSignature, Form, FunctionBlockId, FunctionBlockInfo,
     GroupSpan, KeySignature, Letter, MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, Message,
     Metronome, Midi1Port, MidiChannel, MidiGroup, MixedDataHeader, NoteNumber, NoteVelocity,
-    PerNoteManagement, Protocol, RegisteredPerNoteController, SharpsFlats, SoftwareRevision,
-    Stream, StreamConfig, Sysex7Packet, SysexStatus, System, U4, U7, U14, UiHint, Ump, UmpVersion,
-    Utility, Voice1, Voice2,
+    PerNoteManagement, Pitch, Protocol, RegisteredPerNoteController, SharpsFlats, SoftwareRevision,
+    Stream, StreamConfig, Sysex7Packet, Sysex8StreamCount, Sysex8StreamId, SysexStatus, System, U4,
+    U7, U14, UiHint, Ump, UmpVersion, Utility, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue, FunctionBlockCount, TicksPerQuarterNote};
 use tutti_ump::{ManufacturerId, Unknown};
@@ -191,7 +191,7 @@ fn sysex8() {
         };
         assert_eq!(group, g(4), "{words:08x?}");
         assert_eq!(
-            (packet.status(), packet.stream_id(), packet.bytes()),
+            (packet.status(), packet.stream_id().get(), packet.bytes()),
             (status, stream, data),
             "{words:08x?}"
         );
@@ -226,7 +226,12 @@ fn sysex8() {
     // §7.8.1: an End with `# of bytes` 0xF aborts the stream.
     pin(
         [0x543F_0700, 0, 0, 0],
-        Message::Data128(g(4), Data128::Sysex8Abort { stream_id: 7 }),
+        Message::Data128(
+            g(4),
+            Data128::Sysex8Abort {
+                stream_id: Sysex8StreamId::new(7),
+            },
+        ),
     );
 }
 
@@ -280,7 +285,7 @@ fn midi2_note_and_pressure() {
         v(Voice2::NoteOn {
             note: NoteNumber::of(60),
             velocity: NoteVelocity::new(0xABCD),
-            attribute: Attribute::Pitch(0x1234),
+            attribute: Attribute::Pitch(Pitch::from_q7_9(0x1234)),
         }),
     );
     pin(
@@ -886,7 +891,7 @@ fn stream_function_blocks() {
             first_group: FirstGroup::new(4).unwrap().into(),
             groups_spanned: GroupSpan::new(2).unwrap().into(),
             midi_ci_version: 1,
-            max_sysex8_streams: 16,
+            max_sysex8_streams: Sysex8StreamCount::new(16),
         })),
     );
     pin(
@@ -900,7 +905,7 @@ fn stream_function_blocks() {
             first_group: FirstGroup::new(15).unwrap().into(),
             groups_spanned: GroupSpan::new(16).unwrap().into(),
             midi_ci_version: 0,
-            max_sysex8_streams: 0,
+            max_sysex8_streams: Sysex8StreamCount::new(0),
         })),
     );
     // Figure 23: block number in 15-8, then thirteen name bytes.

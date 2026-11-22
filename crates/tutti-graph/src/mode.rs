@@ -204,8 +204,8 @@ pub enum ModeError {
 /// What the graph reserves for a node's [`Mix`]: the address a lane drives it
 /// at, its default range, and what a mix may be. The value itself is the
 /// editor's ([`Editor::set_mix`](crate::Editor::set_mix)).
-#[derive(Clone, Copy, Debug)]
-pub struct NodeMix;
+#[derive(Debug)]
+pub enum NodeMix {}
 
 impl NodeMix {
     /// The address a driving lane's ramps and segments carry, and the

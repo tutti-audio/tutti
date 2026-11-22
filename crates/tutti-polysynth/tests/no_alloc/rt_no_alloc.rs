@@ -27,7 +27,7 @@ use tutti_fixtures::midi;
 use tutti_polysynth::{FilterType, OscillatorType, PolySynth, PortamentoConfig, SynthConfig};
 use tutti_ump::{
     Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
-    PerNoteManagement, RegisteredPerNoteController, Rpn, U7, U14, Ump, Voice1, Voice2,
+    PerNoteManagement, Pitch, RegisteredPerNoteController, Rpn, U7, U14, Ump, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
 use tutti_units::{Hz, SampleRate};
@@ -201,7 +201,7 @@ fn polysynth_every_decoded_message_is_allocation_free() {
         m2(Voice2::NoteOn {
             note,
             velocity: NoteVelocity::CENTER,
-            attribute: Attribute::Pitch(60 << 9),
+            attribute: Attribute::Pitch(Pitch::from_q7_9(60 << 9)),
         }),
         m2(Voice2::NoteOn {
             note,

@@ -13,8 +13,8 @@ use std::os::raw::{c_char, c_uint};
 use tutti_ump::{
     BlockDirection, DeviceIdentity, EndpointInfoNotification, Field, FirstGroup,
     FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, FunctionBlocks, GroupSpan,
-    ManufacturerId, Midi1Port, OsFunctionBlock, ProductInstanceId, Protocol, SoftwareRevision, U7,
-    UiHint, UmpVersion, read_function_block, read_protocol,
+    ManufacturerId, Midi1Port, OsFunctionBlock, ProductInstanceId, Protocol, SoftwareRevision,
+    Sysex8StreamCount, U7, UiHint, UmpVersion, read_function_block, read_protocol,
 };
 
 use crate::address::ClientId;
@@ -218,7 +218,7 @@ impl BlockFields {
             first_group: byte(self.first_group),
             groups_spanned: byte(self.num_groups),
             midi_ci_version: byte(self.midi_ci_version),
-            max_sysex8_streams: byte(self.sysex8_streams),
+            max_sysex8_streams: Sysex8StreamCount::new(byte(self.sysex8_streams)),
         })
     }
 
@@ -254,7 +254,7 @@ impl BlockFields {
             first_group: defined(info.first_group, "first Group", FirstGroup::get)?,
             num_groups: defined(info.groups_spanned, "Group span", GroupSpan::get)?,
             midi_ci_version: u32::from(info.midi_ci_version),
-            sysex8_streams: u32::from(info.max_sysex8_streams),
+            sysex8_streams: u32::from(info.max_sysex8_streams.get()),
             ui_hint: match info.ui_hint {
                 UiHint::Unknown => 0,
                 UiHint::Receiver => 1,
@@ -597,7 +597,7 @@ mod tests {
             first_group: 0,
             groups_spanned: 1,
             midi_ci_version: 0,
-            max_sysex8_streams: 0,
+            max_sysex8_streams: Sysex8StreamCount::new(0),
         })
         .midi1
     }
@@ -714,7 +714,10 @@ mod tests {
         assert_eq!(info.first_group.value().map(FirstGroup::get), Some(4));
         assert_eq!(info.groups_spanned.value().map(GroupSpan::get), Some(2));
         assert_eq!(info.ui_hint, UiHint::Both);
-        assert_eq!((info.midi_ci_version, info.max_sysex8_streams), (2, 5));
+        assert_eq!(
+            (info.midi_ci_version, info.max_sysex8_streams.get()),
+            (2, 5)
+        );
     }
 
     /// The sequencer's two flag bits are the spec's three port values: not a

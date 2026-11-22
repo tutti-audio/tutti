@@ -2,7 +2,68 @@
 
 use bytemuck::{Pod, Zeroable};
 
-use crate::{Address, CCNumber, GroupChannelIndex, MidiChannel, MidiGroup, NoteNumber, Protocol};
+use crate::{
+    Address, CCNumber, GroupChannelIndex, MidiChannel, MidiGroup, NoteNumber, Protocol, Reserved,
+};
+
+/// A UMP message type, the top nibble of a packet's first word (M2-104 Table
+/// 4).
+///
+/// A nibble Table 4 reserves is [`Reserved`](Self::Reserved), as read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MessageType {
+    /// `0x0`: Utility messages (§7.2).
+    Utility,
+    /// `0x1`: System Common and System Real Time messages (§7.6).
+    System,
+    /// `0x2`: MIDI 1.0 Channel Voice messages (§7.3).
+    Midi1ChannelVoice,
+    /// `0x3`: System Exclusive 7 messages (§7.7).
+    Sysex7,
+    /// `0x4`: MIDI 2.0 Channel Voice messages (§7.4).
+    Midi2ChannelVoice,
+    /// `0x5`: System Exclusive 8 and Mixed Data Set messages (§7.8, §7.9).
+    Data128,
+    /// `0xD`: Flex Data messages (§7.5).
+    FlexData,
+    /// `0xF`: UMP Stream messages (§7.1).
+    Stream,
+    /// A nibble Table 4 reserves, as read.
+    Reserved(Reserved),
+}
+
+impl MessageType {
+    /// The message type of the nibble `nibble`, `0x0` to `0xF`.
+    const fn from_nibble(nibble: u8) -> Self {
+        match nibble {
+            0x0 => Self::Utility,
+            0x1 => Self::System,
+            0x2 => Self::Midi1ChannelVoice,
+            0x3 => Self::Sysex7,
+            0x4 => Self::Midi2ChannelVoice,
+            0x5 => Self::Data128,
+            0xD => Self::FlexData,
+            0xF => Self::Stream,
+            reserved => Self::Reserved(Reserved::wire(reserved)),
+        }
+    }
+
+    /// The nibble, `0x0` to `0xF`.
+    #[must_use]
+    pub const fn get(self) -> u8 {
+        match self {
+            Self::Utility => 0x0,
+            Self::System => 0x1,
+            Self::Midi1ChannelVoice => 0x2,
+            Self::Sysex7 => 0x3,
+            Self::Midi2ChannelVoice => 0x4,
+            Self::Data128 => 0x5,
+            Self::FlexData => 0xD,
+            Self::Stream => 0xF,
+            Self::Reserved(reserved) => reserved.get(),
+        }
+    }
+}
 
 /// One Universal MIDI Packet: four 32-bit words, of which the message type in
 /// the top nibble of the first word says how many are meaningful
@@ -58,12 +119,11 @@ impl Ump {
         Some(Ump(out))
     }
 
-    /// The message type: the top nibble of the first word (M2-104 Table 4),
-    /// `0x0` to `0xF`.
+    /// The message type: the top nibble of the first word (M2-104 Table 4).
     #[inline]
     #[must_use]
-    pub const fn message_type(&self) -> u8 {
-        (self.0[0] >> 28) as u8
+    pub const fn message_type(&self) -> MessageType {
+        MessageType::from_nibble((self.0[0] >> 28) as u8)
     }
 
     /// Whether this is a UMP Stream message (type `0xF`, M2-104 §7.1): the
@@ -71,7 +131,7 @@ impl Ump {
     #[inline]
     #[must_use]
     pub const fn is_stream(&self) -> bool {
-        self.message_type() == 0xF
+        matches!(self.message_type(), MessageType::Stream)
     }
 
     /// Whether this is a JR Clock or a JR Timestamp (type `0x0`, status `0x1` or
@@ -79,7 +139,8 @@ impl Ump {
     #[inline]
     #[must_use]
     pub const fn is_jr(&self) -> bool {
-        self.message_type() == 0 && matches!((self.0[0] >> 20) & 0xF, 1 | 2)
+        matches!(self.message_type(), MessageType::Utility)
+            && matches!((self.0[0] >> 20) & 0xF, 1 | 2)
     }
 
     /// Whether this is a System Real Time message (type `0x1`, status
@@ -88,7 +149,7 @@ impl Ump {
     #[inline]
     #[must_use]
     pub const fn is_system_real_time(&self) -> bool {
-        self.message_type() == 0x1 && (self.0[0] >> 16) & 0xFF >= 0xF8
+        matches!(self.message_type(), MessageType::System) && (self.0[0] >> 16) & 0xFF >= 0xF8
     }
 
     /// The Group of a message type that has one: System (`0x1`), MIDI 1.0
@@ -99,8 +160,13 @@ impl Ump {
     #[must_use]
     pub const fn group(&self) -> Option<MidiGroup> {
         match self.message_type() {
-            0x1..=0x5 | 0xD => Some(MidiGroup::masked((self.0[0] >> 24) as u8)),
-            _ => None,
+            MessageType::System
+            | MessageType::Midi1ChannelVoice
+            | MessageType::Sysex7
+            | MessageType::Midi2ChannelVoice
+            | MessageType::Data128
+            | MessageType::FlexData => Some(MidiGroup::masked((self.0[0] >> 24) as u8)),
+            MessageType::Utility | MessageType::Stream | MessageType::Reserved(_) => None,
         }
     }
 
@@ -110,7 +176,7 @@ impl Ump {
     #[must_use]
     pub const fn address(&self) -> Option<Address> {
         match self.message_type() {
-            0x2 | 0x4 => Some(Address {
+            MessageType::Midi1ChannelVoice | MessageType::Midi2ChannelVoice => Some(Address {
                 group: MidiGroup::masked((self.0[0] >> 24) as u8),
                 channel: MidiChannel::masked((self.0[0] >> 16) as u8),
             }),
@@ -371,11 +437,7 @@ impl NoteKey {
     /// The Group and Channel.
     #[must_use]
     pub const fn address(self) -> Address {
-        let lane = ((self.0 >> 7) & 0xff) as u8;
-        Address {
-            group: MidiGroup::masked(lane >> 4),
-            channel: MidiChannel::masked(lane),
-        }
+        Address::from_lane(((self.0 >> 7) & 0xff) as u8)
     }
 
     /// The note number.
@@ -452,7 +514,7 @@ mod tests {
         // channel 14.
         let m2 = Ump([0x4599_3C00, 0x8000_0000, 0, 0]);
         let m1 = Ump([0x22BE_0740, 0, 0, 0]);
-        assert_eq!(m2.message_type(), 0x4);
+        assert_eq!(m2.message_type(), MessageType::Midi2ChannelVoice);
         assert_eq!(
             m2.address(),
             Some(Address {

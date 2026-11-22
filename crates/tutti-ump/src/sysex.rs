@@ -4,7 +4,7 @@
 use core::iter::FusedIterator;
 
 use crate::field::first_non_seven_bit;
-use crate::{Message, MidiGroup, Sysex7Packet, SysexStatus, U7, Ump};
+use crate::{Message, MessageType, MidiGroup, Sysex7Packet, SysexStatus, U7, Ump};
 
 /// The longest SysEx7 payload (the bytes between `0xF0` and `0xF7`) a host
 /// passes a [`SysexAssembler`] as its `max_message` less the two delimiters:
@@ -519,7 +519,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> SysexAssembler<B> {
         let (group, packet) = match ump.decode() {
             Ok(Message::Sysex7(group, packet)) => (group, packet),
             Ok(_) => return self.other(ump),
-            Err(_) if ump.message_type() == 0x3 => return SysexStep::Held,
+            Err(_) if ump.message_type() == MessageType::Sysex7 => return SysexStep::Held,
             Err(_) => return self.other(ump),
         };
         let payload = packet.data();

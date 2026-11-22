@@ -20,8 +20,8 @@ use tutti_midi_device::{
 use tutti_ump::ControlValue;
 use tutti_ump::MidiChannel;
 use tutti_ump::{
-    BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, Message, SoftwareRevision, Stream,
-    SysexAssembler, SysexStep,
+    BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, Message, MessageType, SoftwareRevision,
+    Stream, Sysex8StreamCount, SysexAssembler, SysexStep,
 };
 use tutti_ump::{BlockName, EndpointName};
 
@@ -207,7 +207,7 @@ impl Wire {
             .counters
             .take_sent(self.raw)
             .into_iter()
-            .partition(|ump| ump.message_type() == 3);
+            .partition(|ump| ump.message_type() == MessageType::Sysex7);
         // MIDI-CI is SysEx and is not the negotiation's.
         self.held.borrow_mut().extend(cis);
         let sent: Vec<Stream> = sent
@@ -413,7 +413,8 @@ fn a_midi1_port_is_not_sent_stream_messages_and_is_described_at_once() {
     assert!(settled.is_empty());
     let sent = received(&wire);
     assert!(
-        sent.iter().all(|ump| ump.message_type() == 3),
+        sent.iter()
+            .all(|ump| ump.message_type() == MessageType::Sysex7),
         "only SysEx goes to a MIDI 1.0 port, got {sent:?}"
     );
 }
@@ -836,7 +837,11 @@ fn a_midi1_port_is_never_sent_type_4() {
         2
     );
     let got = received(&wire);
-    assert!(got.iter().all(|u| u.message_type() == 2), "{got:?}");
+    assert!(
+        got.iter()
+            .all(|u| u.message_type() == MessageType::Midi1ChannelVoice),
+        "{got:?}"
+    );
     let bytes: Vec<(u8, u8)> = got[1..]
         .iter()
         .map(|&u| match u.decode() {
@@ -869,13 +874,19 @@ fn the_output_follows_the_negotiated_protocol() {
     let note = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 0xFFFF))];
     // ... but until then the output is what the OS said: MIDI 2.0.
     wire.send(&note);
-    assert_eq!(received(&wire)[0].message_type(), 4);
+    assert_eq!(
+        received(&wire)[0].message_type(),
+        MessageType::Midi2ChannelVoice
+    );
 
     let stream = settle(&mut wire);
     assert_eq!(stream.config().protocol, Protocol::Midi2);
     received(&wire);
     wire.send(&note);
-    assert_eq!(received(&wire)[0].message_type(), 4);
+    assert_eq!(
+        received(&wire)[0].message_type(),
+        MessageType::Midi2ChannelVoice
+    );
 
     // The device goes to MIDI 1.0 on its own: it is told, and the output goes
     // with it.
@@ -886,7 +897,10 @@ fn the_output_follows_the_negotiated_protocol() {
         "{changed:?}"
     );
     wire.send(&note);
-    assert_eq!(received(&wire)[0].message_type(), 2);
+    assert_eq!(
+        received(&wire)[0].message_type(),
+        MessageType::Midi1ChannelVoice
+    );
     assert_eq!(
         wire.output.as_ref().map(|o| o.config().protocol),
         Some(Protocol::Midi1)
@@ -928,7 +942,7 @@ fn moved_block(first_group: u8) -> Stream {
         first_group: FirstGroup::new(first_group).unwrap().into(),
         groups_spanned: GroupSpan::new(2).unwrap().into(),
         midi_ci_version: 0,
-        max_sysex8_streams: 0,
+        max_sysex8_streams: Sysex8StreamCount::new(0),
     })
 }
 
@@ -1009,7 +1023,10 @@ fn an_output_connected_after_the_settle_starts_in_the_settled_protocol() {
     assert_eq!(settle(&mut wire).config().protocol, Protocol::Midi1);
     wire.connect_output();
     wire.send(&[(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 0xFFFF))]);
-    assert_eq!(received(&wire)[0].message_type(), 2);
+    assert_eq!(
+        received(&wire)[0].message_type(),
+        MessageType::Midi1ChannelVoice
+    );
 }
 
 mod ci;
@@ -1312,7 +1329,10 @@ fn the_port_copies_sysex_before_the_first_discovery_is_sent() {
     for ms in (0..=3).map(|n| n * step) {
         wire.poll(ms);
         let sent = received(&wire);
-        if sent.iter().all(|ump| ump.message_type() != 3) {
+        if sent
+            .iter()
+            .all(|ump| ump.message_type() != MessageType::Sysex7)
+        {
             continue;
         }
         // The device answers the Discovery at once.

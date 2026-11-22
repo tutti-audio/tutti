@@ -148,7 +148,7 @@ pub use flex_write::{
     flex_recording_date_packets, flex_text_packets,
 };
 pub use held_controllers::HeldControllers;
-pub use held_keys::{GroupChannelIndex, Held, KeyBitset};
+pub use held_keys::{GroupChannelIndex, GroupChannelIndexOutOfRange, Held, KeyBitset};
 pub use manufacturer::{ManufacturerBytesError, ManufacturerId, NotManufacturerId};
 pub use message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockDirection,
@@ -165,8 +165,8 @@ pub use midi_group::{MidiGroup, MidiGroupOutOfRange};
 pub use midi_translation::{ExtremeValues, NoMidi1Form};
 pub use midi1::{Framed, Midi1Bytes, Midi1Parser, frame, parse_exact};
 pub use mixed_data::{
-    MdsChunk, MdsChunkSize, MdsChunkUmps, MdsChunks, MdsIdentity, MixedDataAssembler,
-    MixedDataPackets, MixedDataSet, MixedDataStep, NotChunkSize,
+    MdsChunk, MdsChunkSize, MdsChunkUmps, MdsChunkUmpsOutOfRange, MdsChunks, MdsIdentity,
+    MixedDataAssembler, MixedDataPackets, MixedDataSet, MixedDataStep, NotChunkSize,
 };
 pub use mpe_zone::{MpeOverlap, MpeZoneSet, MpeZoneSpan};
 pub use name::{
@@ -186,7 +186,8 @@ pub use sysex::{
     SysexPart, SysexRef, SysexStep, UNIVERSAL_NON_REAL_TIME, UNIVERSAL_REAL_TIME,
 };
 pub use sysex8::{
-    Sysex8Assembler, Sysex8Message, Sysex8Packets, Sysex8Step, Sysex8Stream, Sysex8StreamIds,
+    Sysex8Assembler, Sysex8Message, Sysex8Packets, Sysex8Step, Sysex8Stream, Sysex8StreamCount,
+    Sysex8StreamId, Sysex8StreamIds,
 };
 pub use text::{StreamTextAssembler, TextPackets, text_packets};
-pub use ump::{NoteKey, NoteKeyEvent, Ump, split_stream};
+pub use ump::{MessageType, NoteKey, NoteKeyEvent, Ump, split_stream};

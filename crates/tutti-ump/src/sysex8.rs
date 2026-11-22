@@ -5,7 +5,7 @@
 use core::cell::Cell;
 use core::iter::FusedIterator;
 
-use crate::{Data128, Message, MidiGroup, Sysex8Packet, SysexStatus, Ump};
+use crate::{Data128, Message, MessageType, MidiGroup, Sysex8Packet, SysexStatus, Ump};
 
 /// The data bytes one packet carries after the Stream ID: 13 of the 14 bytes
 /// `# of bytes` counts.
@@ -14,6 +14,96 @@ const BYTES_PER_PACKET: usize = 13;
 /// per lane.
 const LANES: usize = 16;
 
+/// A SysEx 8 Stream ID (M2-104 §7.8): the whole byte, `0` to `255`, so every
+/// `u8` is one. A receiver of `N` streams takes `0` to `N - 1`
+/// ([`Sysex8StreamIds`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+pub struct Sysex8StreamId(u8);
+
+// Every `u8` is one, so the serde form (the bare byte) reads back through a
+// conversion that cannot fail.
+#[cfg(feature = "serde")]
+#[allow(
+    clippy::infallible_try_from,
+    reason = "no `From<u8>`: a value enters through `new`; this is the serde form"
+)]
+impl TryFrom<u8> for Sysex8StreamId {
+    type Error = core::convert::Infallible;
+
+    fn try_from(raw: u8) -> Result<Self, Self::Error> {
+        Ok(Self(raw))
+    }
+}
+
+impl Sysex8StreamId {
+    /// The Stream ID `raw`.
+    #[inline]
+    #[must_use]
+    pub const fn new(raw: u8) -> Self {
+        Self(raw)
+    }
+
+    /// The Stream ID byte.
+    #[inline]
+    #[must_use]
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+}
+
+impl From<Sysex8StreamId> for u8 {
+    fn from(id: Sysex8StreamId) -> Self {
+        id.0
+    }
+}
+
+/// How many simultaneous SysEx 8 streams a Function Block takes (`Max Number
+/// of SysEx 8 Streams`, M2-104 §7.1.8): the whole byte, where `0` is no
+/// System Exclusive 8 at all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+pub struct Sysex8StreamCount(u8);
+
+// Every `u8` is one, so the serde form (the bare byte) reads back through a
+// conversion that cannot fail.
+#[cfg(feature = "serde")]
+#[allow(
+    clippy::infallible_try_from,
+    reason = "no `From<u8>`: a value enters through `new`; this is the serde form"
+)]
+impl TryFrom<u8> for Sysex8StreamCount {
+    type Error = core::convert::Infallible;
+
+    fn try_from(raw: u8) -> Result<Self, Self::Error> {
+        Ok(Self(raw))
+    }
+}
+
+impl Sysex8StreamCount {
+    /// The count `raw`.
+    #[inline]
+    #[must_use]
+    pub const fn new(raw: u8) -> Self {
+        Self(raw)
+    }
+
+    /// The count byte.
+    #[inline]
+    #[must_use]
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+}
+
+impl From<Sysex8StreamCount> for u8 {
+    fn from(count: Sysex8StreamCount) -> Self {
+        count.0
+    }
+}
+
 /// A received System Exclusive 8 message (section 7.8), which a
 /// [`Sysex8Assembler`] hands back: the Group and Stream ID it travelled on
 /// and its bytes after the Stream ID, which begin with the Manufacturer ID,
@@ -21,16 +111,16 @@ const LANES: usize = 16;
 /// here.
 ///
 /// Any byte value is data: that is the point of SysEx8. The Stream ID is the
-/// plain byte the sender wrote. A sender has no way to write one itself: it
+/// byte the sender wrote. A sender has no way to write one itself: it
 /// takes a [`Sysex8Stream`] from the [`Sysex8StreamIds`] of its receiver, and
 /// [`Sysex8Stream::packets`] is the only public writer of SysEx 8 message packets (`Data128::Sysex8Abort`, which a decoder returns, is the one
-/// variant that still takes a raw Stream ID).
+/// variant that still takes a [`Sysex8StreamId`] of its own).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Sysex8Message<'a> {
     /// The Group it travelled on.
     pub group: MidiGroup,
     /// The stream it was on: messages of different streams interleave.
-    pub stream_id: u8,
+    pub stream_id: Sysex8StreamId,
     /// The message's bytes after the Stream ID.
     pub payload: &'a [u8],
 }
@@ -61,9 +151,9 @@ pub struct Sysex8Message<'a> {
 /// merger over several threads needs its own lock.
 ///
 /// ```
-/// use tutti_ump::{Data128, Message, Sysex8StreamIds};
+/// use tutti_ump::{Data128, Message, Sysex8StreamCount, Sysex8StreamIds};
 ///
-/// let ids = Sysex8StreamIds::discovered(2);
+/// let ids = Sysex8StreamIds::discovered(Sysex8StreamCount::new(2));
 /// let first = ids.open().unwrap();
 /// let second = ids.open().unwrap();
 /// assert!(ids.open().is_none());
@@ -72,7 +162,7 @@ pub struct Sysex8Message<'a> {
 ///     let Ok(Message::Data128(_, Data128::Sysex8(p))) = ump.decode() else { unreachable!() };
 ///     p.stream_id()
 /// };
-/// assert_eq!((wire(first), wire(second)), (0, 1));
+/// assert_eq!((wire(first).get(), wire(second).get()), (0, 1));
 /// // Both messages are written: both IDs are free again.
 /// assert!(ids.open().is_some());
 /// ```
@@ -89,7 +179,7 @@ pub struct Sysex8Message<'a> {
 #[derive(Debug)]
 pub struct Sysex8StreamIds {
     /// The streams the receiver takes.
-    count: u8,
+    count: Sysex8StreamCount,
     /// Bit `i` is set while Stream ID `i` is in use.
     used: Cell<[u64; 4]>,
     /// The Group of the unfinished message of each Stream ID that is owed an
@@ -102,14 +192,14 @@ impl Sysex8StreamIds {
     /// discovered: one stream, ID 0.
     #[must_use]
     pub const fn undiscovered() -> Self {
-        Self::discovered(1)
+        Self::discovered(Sysex8StreamCount::new(1))
     }
 
     /// The Stream IDs of a receiver that declared `max_streams` simultaneous
     /// SysEx 8 streams in its Function Block Info: `0` takes none, `1` takes
     /// one, `N` takes `N`.
     #[must_use]
-    pub const fn discovered(max_streams: u8) -> Self {
+    pub const fn discovered(max_streams: Sysex8StreamCount) -> Self {
         Self {
             count: max_streams,
             used: Cell::new([0; 4]),
@@ -120,7 +210,7 @@ impl Sysex8StreamIds {
     /// How many streams the receiver takes; the Stream IDs are `0` to one
     /// less.
     #[must_use]
-    pub const fn count(&self) -> u8 {
+    pub const fn count(&self) -> Sysex8StreamCount {
         self.count
     }
 
@@ -128,7 +218,9 @@ impl Sysex8StreamIds {
     /// receiver takes none).
     pub fn open(&self) -> Option<Sysex8Stream<'_>> {
         let used = self.used.get();
-        let id = (0..self.count).find(|&i| used[usize::from(i / 64)] & (1 << (i % 64)) == 0)?;
+        let id = (0..self.count.get())
+            .find(|&i| used[usize::from(i / 64)] & (1 << (i % 64)) == 0)
+            .map(Sysex8StreamId::new)?;
         self.set(id, true);
         Some(Sysex8Stream {
             ids: self,
@@ -146,8 +238,10 @@ impl Sysex8StreamIds {
     #[must_use = "the abort is written to the receiver; the Stream ID is free once it is taken"]
     pub fn take_abort(&self) -> Option<Ump> {
         let mut owed = self.owed.get();
-        let id = (0..self.count).find(|&i| owed[usize::from(i)].is_some())?;
-        let group = owed[usize::from(id)].take()?;
+        let id = (0..self.count.get())
+            .find(|&i| owed[usize::from(i)].is_some())
+            .map(Sysex8StreamId::new)?;
+        let group = owed[usize::from(id.get())].take()?;
         self.owed.set(owed);
         self.set(id, false);
         Some(Ump::from(Message::Data128(
@@ -156,8 +250,9 @@ impl Sysex8StreamIds {
         )))
     }
 
-    fn set(&self, id: u8, on: bool) {
+    fn set(&self, id: Sysex8StreamId, on: bool) {
         let mut used = self.used.get();
+        let id = id.get();
         let (word, bit) = (usize::from(id / 64), 1u64 << (id % 64));
         if on {
             used[word] |= bit;
@@ -201,7 +296,7 @@ impl Sysex8StreamIds {
 #[derive(Debug)]
 pub struct Sysex8Stream<'a> {
     ids: &'a Sysex8StreamIds,
-    id: u8,
+    id: Sysex8StreamId,
     /// Set by an unfinished message: the ID is owed an abort, not free.
     keep: bool,
 }
@@ -321,7 +416,9 @@ impl Sysex8Packets<'_> {
         self.started = true;
         // Message type 5, status End (3), `# of bytes` 1: the Stream ID alone.
         Ump([
-            0x5031_0000 | (u32::from(self.group.get()) << 24) | (u32::from(self.stream.id) << 8),
+            0x5031_0000
+                | (u32::from(self.group.get()) << 24)
+                | (u32::from(self.stream.id.get()) << 8),
             0,
             0,
             0,
@@ -333,7 +430,7 @@ impl Drop for Sysex8Packets<'_> {
     fn drop(&mut self) {
         if self.started && !self.finished() {
             let mut owed = self.stream.ids.owed.get();
-            owed[usize::from(self.stream.id)] = Some(self.group);
+            owed[usize::from(self.stream.id.get())] = Some(self.group);
             self.stream.ids.owed.set(owed);
             self.stream.keep = true;
         }
@@ -367,7 +464,7 @@ enum Run {
 #[derive(Clone, Copy, Debug)]
 struct Entry {
     group: MidiGroup,
-    stream_id: u8,
+    stream_id: Sysex8StreamId,
     run: Run,
 }
 
@@ -415,7 +512,7 @@ struct Entry {
 /// let mut done = 0;
 /// for ump in ids.open().unwrap().packets(MidiGroup::of(0), &[0x80; 40]) {
 ///     if let Sysex8Step::Complete(whole) = assembler.push(ump) {
-///         assert_eq!((whole.stream_id, whole.payload), (0, &[0x80; 40][..]));
+///         assert_eq!((whole.stream_id.get(), whole.payload), (0, &[0x80; 40][..]));
 ///         done += 1;
 ///     }
 /// }
@@ -496,14 +593,16 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Sysex8Assembler<B> {
                 Sysex8Step::Held
             }
             // Status 0 to 3 of type 5 with a `# of bytes` that is no count.
-            Err(_) if ump.message_type() == 0x5 && (ump.0[0] >> 20) & 0xF <= 0x3 => {
+            Err(_)
+                if ump.message_type() == MessageType::Data128 && (ump.0[0] >> 20) & 0xF <= 0x3 =>
+            {
                 Sysex8Step::Held
             }
             _ => Sysex8Step::NotSysex8,
         }
     }
 
-    fn find(&self, group: MidiGroup, stream_id: u8) -> Option<usize> {
+    fn find(&self, group: MidiGroup, stream_id: Sysex8StreamId) -> Option<usize> {
         (0..self.lanes).find(
             |&i| matches!(self.entries[i], Some(e) if e.group == group && e.stream_id == stream_id),
         )
@@ -517,7 +616,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Sysex8Assembler<B> {
         &mut self.buf.as_mut()[i * self.max_payload..][..self.max_payload]
     }
 
-    fn set(&mut self, i: usize, group: MidiGroup, stream_id: u8, run: Run) {
+    fn set(&mut self, i: usize, group: MidiGroup, stream_id: Sysex8StreamId, run: Run) {
         self.entries[i] = Some(Entry {
             group,
             stream_id,
@@ -527,7 +626,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Sysex8Assembler<B> {
 
     /// The stream's open message ends without its `End`: counted if it was
     /// being collected.
-    fn close(&mut self, group: MidiGroup, stream_id: u8) {
+    fn close(&mut self, group: MidiGroup, stream_id: Sysex8StreamId) {
         if let Some(i) = self.find(group, stream_id) {
             if matches!(
                 self.entries[i],
@@ -542,7 +641,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Sysex8Assembler<B> {
         }
     }
 
-    fn abort(&mut self, group: MidiGroup, stream_id: u8) {
+    fn abort(&mut self, group: MidiGroup, stream_id: Sysex8StreamId) {
         self.close(group, stream_id);
     }
 
@@ -636,7 +735,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Sysex8Assembler<B> {
 
     /// A `Continue` with no message open: counted, and its stream skipped to
     /// the `End` if a lane is free to remember it.
-    fn orphan(&mut self, group: MidiGroup, stream_id: u8) {
+    fn orphan(&mut self, group: MidiGroup, stream_id: Sysex8StreamId) {
         self.dropped += 1;
         if let Some(i) = self.free() {
             self.set(i, group, stream_id, Run::Discarding);
@@ -645,7 +744,14 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Sysex8Assembler<B> {
 
     /// Append `bytes` to the message of `len` bytes in lane `i`, or drop it
     /// whole past capacity.
-    fn extend(&mut self, i: usize, group: MidiGroup, stream_id: u8, len: usize, bytes: &[u8]) {
+    fn extend(
+        &mut self,
+        i: usize,
+        group: MidiGroup,
+        stream_id: Sysex8StreamId,
+        len: usize,
+        bytes: &[u8],
+    ) {
         if len + bytes.len() > self.max_payload {
             self.dropped += 1;
             self.set(i, group, stream_id, Run::Discarding);

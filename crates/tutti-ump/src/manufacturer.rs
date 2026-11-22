@@ -2,43 +2,44 @@
 
 use crate::U7;
 
-/// A manufacturer's id in the 16-bit form (MfrID) that System Exclusive 8,
-/// Mixed Data Sets and the Device Identity use (M2-104 section 7.10), and the
-/// MIDI 1.0 System Exclusive ids it encodes: a 7-bit id (one byte, which includes
-/// the Special and Universal ids) or a 21-bit id (`00 xx yy`).
-///
-/// A one-byte id is `0x00xx`. A three-byte id has the high bit of the word set
-/// and its second and third bytes in the high and low bytes: `0x8000 | xx << 8 | yy`.
-/// So a word is a valid id when it is `0x0001..=0x007F`, or when its top bit is set
-/// and bits 14 to 8 and 6 to 0 hold the two 7-bit bytes, and bit 7 is clear:
-/// [`new`](Self::new) refuses any other word and never masks.
-///
-/// `00` and `00 00 00` (unusable per the MIDI 1.0 Detailed Specification,
-/// Manufacturer SysEx ID Numbers; `0x0000` is Reserved in Table 20) are no id:
-/// [`new`](Self::new) refuses `0x0000` and `0x8000`, and
-/// the [`TryFrom`] of three bytes refuses three zero bytes.
-///
-/// ```
-/// use tutti_ump::{ManufacturerId, U7};
-///
-/// // A 21-bit id, 00 21 09 (Table 21's style of example).
-/// let id = ManufacturerId::try_from([0x00, 0x21, 0x09].map(U7::of)).unwrap();
-/// assert_eq!(id.get(), 0xA109);
-/// assert_eq!(id.sysex_bytes().map(U7::get), [0x00, 0x21, 0x09]);
-/// // A 7-bit id, 0x41, is 0x0041 and writes as `41 00 00` in a Device Identity.
-/// let id = ManufacturerId::try_from([0x41, 0, 0].map(U7::of)).unwrap();
-/// assert_eq!(id.get(), 0x0041);
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "u16", into = "u16"))]
-pub struct ManufacturerId(u16);
-
-/// A word that is no [`ManufacturerId`]: it is neither a 7-bit id nor a 21-bit
-/// id in the 16-bit form.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("{:#06x} is not a 16-bit manufacturer id", .0)]
-pub struct NotManufacturerId(pub u16);
+tutti_units::ranged! {
+    /// A manufacturer's id in the 16-bit form (MfrID) that System Exclusive 8,
+    /// Mixed Data Sets and the Device Identity use (M2-104 section 7.10), and the
+    /// MIDI 1.0 System Exclusive ids it encodes: a 7-bit id (one byte, which includes
+    /// the Special and Universal ids) or a 21-bit id (`00 xx yy`).
+    ///
+    /// A one-byte id is `0x00xx`. A three-byte id has the high bit of the word set
+    /// and its second and third bytes in the high and low bytes: `0x8000 | xx << 8 | yy`.
+    /// So a word is a valid id when it is `0x0001..=0x007F`, or when its top bit is set
+    /// and bits 14 to 8 and 6 to 0 hold the two 7-bit bytes, and bit 7 is clear:
+    /// [`new`](Self::new) refuses any other word and never masks.
+    ///
+    /// `00` and `00 00 00` (unusable per the MIDI 1.0 Detailed Specification,
+    /// Manufacturer SysEx ID Numbers; `0x0000` is Reserved in Table 20) are no id:
+    /// [`new`](Self::new) refuses `0x0000` and `0x8000`, and
+    /// the [`TryFrom`] of three bytes refuses three zero bytes.
+    ///
+    /// ```
+    /// use tutti_ump::{ManufacturerId, U7};
+    ///
+    /// // A 21-bit id, 00 21 09 (Table 21's style of example).
+    /// let id = ManufacturerId::try_from([0x00, 0x21, 0x09].map(U7::of)).unwrap();
+    /// assert_eq!(id.get(), 0xA109);
+    /// assert_eq!(id.sysex_bytes().map(U7::get), [0x00, 0x21, 0x09]);
+    /// // A 7-bit id, 0x41, is 0x0041 and writes as `41 00 00` in a Device Identity.
+    /// let id = ManufacturerId::try_from([0x41, 0, 0].map(U7::of)).unwrap();
+    /// assert_eq!(id.get(), 0x0041);
+    /// ```
+    #[derive(Eq, PartialOrd, Ord, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u16", into = "u16"))]
+    ManufacturerId(u16), NotManufacturerId, "a 16-bit manufacturer id",
+    |raw| if raw & 0x8000 == 0 {
+        raw != 0 && raw <= 0x007F
+    } else {
+        raw != 0x8000 && raw & 0x0080 == 0
+    }
+}
 
 /// Three System Exclusive id bytes that are no [`ManufacturerId`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
@@ -75,41 +76,6 @@ impl ManufacturerId {
     pub const UNIVERSAL_NON_REAL_TIME: Self = Self(crate::UNIVERSAL_NON_REAL_TIME as u16);
     /// Universal System Exclusive, Real Time: `0x007F`.
     pub const UNIVERSAL_REAL_TIME: Self = Self(crate::UNIVERSAL_REAL_TIME as u16);
-
-    /// The id of the word `raw`, or `None` if it is neither form or is one of
-    /// the two reserved zero ids.
-    #[inline]
-    #[must_use]
-    pub const fn new(raw: u16) -> Option<Self> {
-        let valid = if raw & 0x8000 == 0 {
-            raw != 0 && raw <= 0x007F
-        } else {
-            raw != 0x8000 && raw & 0x0080 == 0
-        };
-        if valid { Some(Self(raw)) } else { None }
-    }
-
-    /// The id for a literal or a constant.
-    ///
-    /// # Panics
-    ///
-    /// When `raw` is no id; in a `const` that is a compile error.
-    #[inline]
-    #[must_use]
-    #[track_caller]
-    pub const fn of(raw: u16) -> Self {
-        match Self::new(raw) {
-            Some(id) => id,
-            None => panic!("not a 16-bit manufacturer id"),
-        }
-    }
-
-    /// The word.
-    #[inline]
-    #[must_use]
-    pub const fn get(self) -> u16 {
-        self.0
-    }
 
     /// The three System Exclusive id bytes: `xx 00 00` for a one-byte id (what a
     /// Device Identity carries, M2-104 section 7.1.3) and `00 xx yy` for a 21-bit one.
@@ -165,22 +131,6 @@ impl TryFrom<[U7; 3]> for ManufacturerId {
         } else {
             Err(ManufacturerBytesError::TrailingBytes { first })
         }
-    }
-}
-
-impl TryFrom<u16> for ManufacturerId {
-    type Error = NotManufacturerId;
-
-    #[inline]
-    fn try_from(raw: u16) -> Result<Self, NotManufacturerId> {
-        Self::new(raw).ok_or(NotManufacturerId(raw))
-    }
-}
-
-impl From<ManufacturerId> for u16 {
-    #[inline]
-    fn from(id: ManufacturerId) -> u16 {
-        id.0
     }
 }
 
@@ -249,27 +199,11 @@ mod tests {
     /// Reserved.
     #[test]
     fn the_zero_ids_are_refused() {
-        assert_eq!(ManufacturerId::new(0x0000), None);
-        assert_eq!(ManufacturerId::new(0x8000), None);
-        assert_eq!(ManufacturerId::try_from(0u16), Err(NotManufacturerId(0)));
         assert_eq!(
             ManufacturerId::try_from(bytes([0, 0, 0])),
             Err(ManufacturerBytesError::AllZero)
         );
         assert!(ManufacturerId::try_from(bytes([0, 0, 1])).is_ok());
-    }
-
-    /// A word is an id only if it is `0x00xx` with `xx` 7-bit, or has the top
-    /// bit set and both bytes 7-bit.
-    #[test]
-    fn a_word_that_is_neither_form_is_refused() {
-        for bad in [0x0080u16, 0x0100, 0x7F00, 0x7FFF, 0x8080, 0xFFFF, 0x80FF] {
-            assert_eq!(ManufacturerId::new(bad), None, "{bad:#x}");
-            assert_eq!(ManufacturerId::try_from(bad), Err(NotManufacturerId(bad)));
-        }
-        for good in [0x0001u16, 0x007F, 0x8001, 0xFF7F] {
-            assert_eq!(ManufacturerId::new(good).map(u16::from), Some(good));
-        }
     }
 
     /// Every word `new` accepts survives the three-byte form.
