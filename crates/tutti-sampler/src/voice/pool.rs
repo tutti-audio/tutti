@@ -1023,7 +1023,7 @@ impl<F: SamplerFloat> Node<F> for VoicePool<F> {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(self.channels)
             .tail(self.ring_out())
-            // Its voices arrive while it plays, so no single voice's cost holds.
+            // Its voices arrive while it plays, so its cost is not known when it is placed.
             .cost(tutti_graph::Cost::Heavy)
     }
 
