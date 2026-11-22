@@ -91,13 +91,37 @@ impl From<GlideTime> for Seconds {
 
 /// How pitch glide behaves between notes.
 ///
-/// A [`PolySynth`](crate::PolySynth) built with `None` here has no glide state
+/// A [`PolySynth`](crate::PolySynth) built without a glide has no glide state
 /// at all and cannot gain one later.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PortamentoConfig {
+    pub(crate) mode: PortamentoMode,
+    pub(crate) curve: Law,
+    pub(crate) time: GlideTime,
+    pub(crate) constant_time: bool,
+}
+
+impl PortamentoConfig {
+    /// A glide that is off: [`Off`](PortamentoMode::Off), [`Linear`](Law::Linear), 0.1 s and
+    /// constant-time.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            mode: PortamentoMode::Off,
+            curve: Law::Linear,
+            time: GlideTime::of(Seconds::new(0.1)),
+            constant_time: true,
+        }
+    }
+
     /// When to glide. [`Off`](PortamentoMode::Off) by default, which makes the
-    /// rest of these fields inert.
-    pub mode: PortamentoMode,
+    /// other options inert.
+    #[must_use]
+    pub const fn mode(mut self, mode: PortamentoMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
     /// The shape of the glide: the [`Law`] of its progress over its duration.
     ///
     /// The pitch itself is interpolated logarithmically (the glide is even in
@@ -106,27 +130,36 @@ pub struct PortamentoConfig {
     /// [`Linear`](Law::Linear) is the constant rate of interval change;
     /// `PowerIn(2.0)` lingers near the old note and arrives abruptly;
     /// `PowerIn(0.5)` leaves the old note at once and eases into the new one.
-    pub curve: Law,
-    /// Glide duration, or the *base* duration when
+    #[must_use]
+    pub const fn curve(mut self, curve: Law) -> Self {
+        self.curve = curve;
+        self
+    }
+
+    /// The glide duration, or the *base* duration when
     /// [`constant_time`](Self::constant_time) is false.
-    pub time: GlideTime,
+    #[must_use]
+    pub const fn time(mut self, time: GlideTime) -> Self {
+        self.time = time;
+        self
+    }
+
     /// Whether every glide takes the same time regardless of how far it travels.
     ///
     /// `true` (the default) is constant-*time*: an octave and a semitone both
     /// take [`time`](Self::time). `false` is constant-*rate*: the duration
     /// scales with the interval in octaves, floored at 10% of `time` so a tiny
     /// interval still glides audibly rather than snapping.
-    pub constant_time: bool,
+    #[must_use]
+    pub const fn constant_time(mut self, constant_time: bool) -> Self {
+        self.constant_time = constant_time;
+        self
+    }
 }
 
 impl Default for PortamentoConfig {
     fn default() -> Self {
-        Self {
-            mode: PortamentoMode::Off,
-            curve: Law::Linear,
-            time: GlideTime::of(Seconds::new(0.1)),
-            constant_time: true,
-        }
+        Self::new()
     }
 }
 

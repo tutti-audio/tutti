@@ -557,23 +557,73 @@ fn mpe_expression_and_release_follow_the_note_channel() {
     assert_eq!(feed(&mut n, note_on(62)), [vec![0x92, 62, 0x40]]);
 }
 
-/// **With every member busy the oldest note is ended on its channel and the
-/// channel is given to the new one**, and the new note starts from a centred
-/// bend when the channel's last note moved it.
-/// Spec: m2-104/d.2.8#1
+fn note_off(note: u8) -> Message {
+    Message::Midi2(
+        A,
+        Voice2::NoteOff {
+            note: NoteNumber::of(note),
+            velocity: NoteVelocity::new(0),
+            attribute: tutti_ump::Attribute::None,
+        },
+    )
+}
+
+/// **With no unoccupied member a new note shares a channel with an existing
+/// note** and ends none: Ch2 and Ch3 each play one note, so the third note
+/// shares the one given a note longest ago, Ch2, and no Note Off is sent. The
+/// section leaves the choice of channel open; the fewest notes, then the
+/// oldest, is this sender's.
+/// Spec: m2-120/3.6.1#2
 #[test]
-fn mpe_steals_the_oldest_member_and_resets_its_bend() {
+fn mpe_shares_a_member_with_an_existing_note_when_none_is_free() {
+    let mut n = mpe(zone());
+    let _ = feed(&mut n, note_on(60));
+    let _ = feed(&mut n, note_on(64));
+    assert_eq!(feed(&mut n, note_on(67)), [vec![0x91, 67, 0x40]]);
+    // Ch3 now plays the fewest notes.
+    assert_eq!(feed(&mut n, note_on(70)), [vec![0x92, 70, 0x40]]);
+    // Both play two: the one given a note longest ago, Ch2, takes the next.
+    assert_eq!(feed(&mut n, note_on(72)), [vec![0x91, 72, 0x40]]);
+}
+
+/// **A shared channel plays on until its last note ends**: releasing one of two
+/// notes on Ch2 sends that Note Off on Ch2 and leaves Ch2 playing, so it is
+/// the least loaded only after Ch3 gains a second note.
+/// Spec: m2-120/3.6.1#2
+#[test]
+fn a_shared_member_is_idle_only_after_its_last_note_ends() {
+    let mut n = mpe(zone());
+    let _ = feed(&mut n, note_on(60));
+    let _ = feed(&mut n, note_on(64));
+    let _ = feed(&mut n, note_on(67));
+    let _ = feed(&mut n, note_on(70));
+    assert_eq!(feed(&mut n, note_off(60)), [vec![0x81, 60, 0]]);
+    // Ch2 plays one note, Ch3 two.
+    assert_eq!(feed(&mut n, note_on(72)), [vec![0x91, 72, 0x40]]);
+    // Ending both notes of Ch3 frees it: it is the idle channel taken first.
+    let _ = feed(&mut n, note_off(64));
+    let _ = feed(&mut n, note_off(70));
+    assert_eq!(feed(&mut n, note_on(74)), [vec![0x92, 74, 0x40]]);
+}
+
+/// **A note that joins a channel playing another leaves the channel's bend
+/// where it is**: a reset would move the note already there (M2-120
+/// section 3.6.1: a channel's controllers affect every note on it).
+/// Spec: m2-120/3.6.1#2
+#[test]
+fn a_note_sharing_a_member_does_not_reset_its_bend() {
     let mut n = mpe(zone());
     let _ = feed(&mut n, note_on(60));
     let _ = feed(&mut n, note_on(64));
     let _ = feed(&mut n, per_note_bend(60, 0xFFFF_FFFF));
+    assert_eq!(feed(&mut n, note_on(67)), [vec![0x91, 67, 0x40]]);
+    // Once Ch2 plays nothing, its next note starts from a centred bend.
+    let _ = feed(&mut n, note_off(60));
+    let _ = feed(&mut n, note_off(67));
+    let _ = feed(&mut n, note_off(64));
     assert_eq!(
-        feed(&mut n, note_on(67)),
-        [
-            vec![0x81, 60, 0],
-            vec![0xE1, 0x00, 0x40],
-            vec![0x91, 67, 0x40]
-        ]
+        feed(&mut n, note_on(72)),
+        [vec![0xE1, 0x00, 0x40], vec![0x91, 72, 0x40]]
     );
 }
 
@@ -629,45 +679,6 @@ fn the_default_translation_stays_under_the_bounds() {
     assert_eq!(sent.iter().map(Vec::len).sum::<usize>(), 12);
 }
 
-/// **A steal is as long as a re-strike**: the oldest member's note, bent,
-/// pressed and slid, ends, the three centre, and the new note sounds there.
-#[test]
-fn a_stealing_mpe_note_is_the_longest_sequence() {
-    let one = one_member_zone();
-    let mut n = mpe(one);
-    let _ = feed(&mut n, note_on(60));
-    let _ = feed(&mut n, per_note_bend(60, 0xFFFF_FFFF));
-    let _ = feed(
-        &mut n,
-        Message::Midi2(
-            A,
-            Voice2::PolyPressure {
-                note: NoteNumber::of(60),
-                value: ControlValue::new(0x8000_0000),
-            },
-        ),
-    );
-    let _ = feed(
-        &mut n,
-        Message::Midi2(
-            A,
-            Voice2::AssignablePerNote {
-                note: NoteNumber::of(60),
-                controller: 74,
-                value: ControlValue::new(0xFFFF_FFFF),
-            },
-        ),
-    );
-    let sent = feed(&mut n, note_on(64));
-    assert_eq!(sent.len(), Midi1Translator::MAX_MESSAGES);
-    assert_eq!(
-        sent.iter().map(Vec::len).sum::<usize>(),
-        Midi1Translator::MAX_BYTES
-    );
-    assert_eq!(sent[0], [sent[4][0] & 0xEF, 60, 0]);
-    assert_eq!(sent[4][1], 64);
-}
-
 /// A mode is alternate unless it is the Default Translation, so a product can
 /// tell its user (D.4).
 #[test]
@@ -676,6 +687,138 @@ fn the_default_mode_is_the_default_translation() {
     assert_eq!(Midi1Translator::new().mode(), TranslationMode::default());
     assert!(mpe(zone()).mode().is_alternate());
     assert!(avoiding().mode().is_alternate());
+}
+
+/// **Omni Off, Omni On, Mono Mode On and Poly Mode On are not sent on an MPE
+/// channel**: Control Changes 124 to 127 send nothing, and a neighbouring
+/// Control Change (123, All Notes Off on the Manager, 7) still goes on the
+/// Manager Channel.
+/// Spec: m2-120/4.7#9, m2-120/4.7#11, m2-120/4.7#13, m2-120/4.7#15
+#[test]
+fn mpe_never_sends_channel_mode_selects() {
+    let mut n = mpe(zone());
+    let cc = |controller: u8| {
+        Message::Midi2(
+            A,
+            Voice2::ControlChange {
+                controller: CCNumber::of(controller),
+                value: ControlValue::new(0),
+            },
+        )
+    };
+    for controller in 124..=127 {
+        assert!(feed(&mut n, cc(controller)).is_empty(), "CC {controller}");
+    }
+    assert_eq!(feed(&mut n, cc(123)), [vec![0xB0, 123, 0]]);
+}
+
+/// **Reset All Controllers and All Notes Off are sent on the Manager Channel,
+/// never on a member**: from source Ch6 (index 5) both go on Ch1 (index 0),
+/// the lower zone's Manager.
+/// Spec: m2-120/4.7#3, m2-120/4.7#5, m2-120/4.7#6, m2-120/4.7#8
+#[test]
+fn mpe_sends_reset_all_controllers_and_all_notes_off_on_the_manager() {
+    let mut n = mpe(zone());
+    let from = Address::first(MidiChannel::of(5));
+    for controller in [CCNumber::RESET_ALL, CCNumber::ALL_NOTES_OFF] {
+        let message = Message::Midi2(
+            from,
+            Voice2::ControlChange {
+                controller,
+                value: ControlValue::new(0),
+            },
+        );
+        assert_eq!(feed(&mut n, message), [vec![0xB0, controller.get(), 0]]);
+    }
+}
+
+/// **The Pitch Bend range is not sent to Member Channels** (M2-120
+/// section 3.5): Pitch Bend Sensitivity (RPN 0/0) from source Ch6 (index 5)
+/// is Control Changes 101, 100, 6 and 38 on the Manager Channel, Ch1.
+/// Spec: m2-120/3.5#2, m2-120/3.5#5
+#[test]
+fn mpe_sends_the_pitch_bend_range_on_the_manager_only() {
+    let mut n = mpe(zone());
+    let from = Address::first(MidiChannel::of(5));
+    assert_eq!(
+        feed(&mut n, rpn(from, 0, 0, 12 << 25)),
+        [
+            vec![0xB0, 101, 0],
+            vec![0xB0, 100, 0],
+            vec![0xB0, 6, 12],
+            vec![0xB0, 38, 0],
+        ]
+    );
+}
+
+/// **A MIDI 1.0 message in the MPE mode follows the same rules as a MIDI 2.0
+/// one**: a Note On takes a member channel, a Pitch Bend from source Ch6 (index
+/// 5) and an RPN 0 Control Change go on the Manager, and Control Changes 124
+/// to 127 are dropped.
+/// Spec: m2-120/4.7#9, m2-120/4.7#11, m2-120/4.7#13, m2-120/4.7#15, m2-120/3.5#2
+#[test]
+fn mpe_translates_midi1_input_by_the_same_rules() {
+    let mut n = mpe(zone());
+    let from = Address::first(MidiChannel::of(5));
+    let midi1 = |voice: Voice1| Message::Midi1(from, voice);
+    assert_eq!(
+        feed(
+            &mut n,
+            midi1(Voice1::NoteOn {
+                note: NoteNumber::of(60),
+                velocity: U7::of(0x40),
+            })
+        ),
+        [vec![0x91, 60, 0x40]]
+    );
+    assert_eq!(
+        feed(&mut n, midi1(Voice1::PitchBend(tutti_ump::U14::of(0x2000)))),
+        [vec![0xE0, 0x00, 0x40]]
+    );
+    let cc = |controller: u8, value: u8| {
+        midi1(Voice1::ControlChange {
+            controller: CCNumber::of(controller),
+            value: U7::of(value),
+        })
+    };
+    assert_eq!(feed(&mut n, cc(101, 0)), [vec![0xB0, 101, 0]]);
+    for controller in 124..=127 {
+        assert!(
+            feed(&mut n, cc(controller, 0)).is_empty(),
+            "CC {controller}"
+        );
+    }
+    // Without the MPE mode a MIDI 1.0 message passes on its own channel.
+    assert_eq!(
+        feed(&mut Midi1Translator::new(), cc(124, 0)),
+        [vec![0xB5, 124, 0]]
+    );
+}
+
+/// **A MIDI 1.0 Note On at velocity 0 is a Note Off** (M2-104 D.3.1: a MIDI 2.0 Note Off)
+/// and in the MPE mode ends its note on its member: the Note Off goes out on
+/// Ch2, which is then idle, so the next note takes the longest idle member,
+/// Ch3, and the one after that Ch2 again.
+/// Spec: m2-104/d.3.1#1
+#[test]
+fn mpe_releases_a_member_on_a_midi1_note_on_at_velocity_zero() {
+    let mut n = mpe(zone());
+    let on = |note: u8, velocity: u8| {
+        Message::Midi1(
+            A,
+            Voice1::NoteOn {
+                note: NoteNumber::of(note),
+                velocity: U7::of(velocity),
+            },
+        )
+    };
+    assert_eq!(feed(&mut n, on(60, 0x40)), [vec![0x91, 60, 0x40]]);
+    let off = feed(&mut n, on(60, 0));
+    assert_eq!(off.len(), 1);
+    assert_eq!(off[0][0], 0x81, "a Note Off on Ch2");
+    assert_eq!(off[0][1], 60);
+    assert_eq!(feed(&mut n, on(62, 0x40)), [vec![0x92, 62, 0x40]]);
+    assert_eq!(feed(&mut n, on(64, 0x40)), [vec![0x91, 64, 0x40]]);
 }
 
 fn mpe_avoiding() -> Midi1Translator {
@@ -689,7 +832,7 @@ fn mpe_avoiding() -> Midi1Translator {
 /// sections 4.1 to 4.6): a Pitch Bend, a Program Change with its Bank Select
 /// and a Control Change from source Ch6 (index 5) go on Ch1 (index 0), the
 /// lower zone's Manager, not on Ch6 nor on a member.
-/// Spec: m2-104/d.2.8#1
+/// Spec: m2-104/d.2.8#1, m2-120/4.6#1
 #[test]
 fn mpe_sends_channel_messages_on_the_manager_channel() {
     let mut n = mpe(zone());

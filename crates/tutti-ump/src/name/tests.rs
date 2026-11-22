@@ -7,7 +7,7 @@ fn collect<const W: usize>(bytes: &[u8]) -> Vec<(Form, [u8; W])> {
 
 // The longest text of each kind, from the packet counts of M2-104 §7.1.4,
 // §7.1.5 and §7.1.9.
-/// Spec: m2-104/7.1.4#3, m2-104/7.1.5#6, m2-104/7.1.9#5
+/// Spec: m2-104/7.1.4#3, m2-104/7.1.5#6, m2-104/7.1.9#5, m2-124/4.4#6
 #[test]
 fn a_name_holds_exactly_what_its_packets_carry() {
     assert!(EndpointName::new(&"a".repeat(98)).is_some());

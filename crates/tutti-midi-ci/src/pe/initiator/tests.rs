@@ -301,7 +301,7 @@ fn the_capabilities_inquiry_times_out_at_three_seconds_and_a_nak_refuses_it() {
 
 // M2-101 Table 33 and M2-103 §15.2 Table 95: a Get is one chunk of Header Data and
 // no Property Data, numbered 1 of 1 (M2-101 §8.3.2), to the Function Block.
-/// Spec: m2-101/8.3.2#1, m2-101/8.3.2#2, m2-101/8.7#1
+/// Spec: m2-101/8.3.2#1, m2-101/8.3.2#2, m2-101/8.7#1, m2-103/15#3
 #[test]
 fn a_get_is_one_header_only_chunk() {
     let (mut i, now) = ready(2);
@@ -341,7 +341,7 @@ fn a_get_is_one_header_only_chunk() {
 // M2-103 §9, §6.2: the reply is reassembled whatever its chunks, its Property
 // Data decoded by the encoding the reply names, and the status, header and body
 // delivered together.
-/// Spec: m2-104/1.6.1#3, m2-116/1.4.1#2
+/// Spec: m2-104/1.6.1#3, m2-116/1.4.1#2, m2-103/6.1.6#4
 #[test]
 fn a_get_reply_of_many_chunks_is_decoded_by_its_mutual_encoding() {
     let (mut i, now) = ready(2);
@@ -371,6 +371,7 @@ fn a_get_reply_of_many_chunks_is_decoded_by_its_mutual_encoding() {
 
 // M2-103 §6.1.6: Property Data is JSON in ASCII by default, so a reply that names
 // no encoding is ASCII; zlib+Mcoded7 inflates.
+/// Spec: m2-103/6#1
 #[test]
 fn a_reply_without_an_encoding_is_ascii_and_a_zlib_reply_inflates() {
     let (mut i, now) = ready(2);
@@ -490,6 +491,7 @@ fn a_get_under_flow_control_acknowledges_every_chunk_including_the_last() {
 // M2-103 §12.2: the time to a reply is under 3 seconds: the request is over at its
 // deadline, a message arriving at that instant is late, and the NAK 0x42 says so
 // (§12.2.3); the Request ID is free again.
+/// Spec: m2-103/12.2.3#2
 #[test]
 fn a_request_times_out_at_three_seconds_and_its_id_is_free() {
     let (mut i, now) = ready(1);
@@ -512,8 +514,47 @@ fn a_request_times_out_at_three_seconds_and_its_id_is_free() {
     );
     assert_eq!(i.in_flight(), 0);
     assert_eq!(i.deadline(), None);
+    // The Transaction is concluded: a reply that comes after it is for nothing, and
+    // draws no answer.
+    let late = reply_chunks(request, ok(PeStatus::Ok), b"{}");
+    assert!(deliver(&mut i, late, now + 3 * SECOND).is_empty());
     // The one request the peer takes can be made again.
     assert!(i.start(get("State"), now + 3 * SECOND).is_ok());
+}
+
+// M2-103 §12.1.2: an Initiator that terminates a Get sends the Terminate NAK and
+// concludes the Transaction without waiting for a reply: the chunks that follow are
+// for nothing and draw no answer.
+/// Spec: m2-103/12.1.2#4
+#[test]
+fn a_get_the_initiator_terminates_is_concluded_without_a_reply() {
+    let (mut i, now) = ready(1);
+    let mut get = PeGet::new(name("State"));
+    get.reply_limit = Some(BodyLimit::new(20).unwrap());
+    let (request, _) = i.start(PeCall::Get(get), now).unwrap();
+    let chunks = reply_chunks(request, ok(PeStatus::Ok), &[b'1'; 300]);
+    assert!(chunks.len() >= 3, "{} chunks", chunks.len());
+    let mut at = 0;
+    let ended = loop {
+        let (kind, chunk) = chunks[at].clone();
+        let actions = i.on_message(&chunk_from_peer(kind, chunk), now);
+        at += 1;
+        if !finished(&actions).is_empty() {
+            break actions;
+        }
+        assert!(at < chunks.len(), "the limit never ended the request");
+    };
+    let [nak] = naks(&ended)[..] else {
+        panic!("one NAK, got {ended:?}");
+    };
+    assert_eq!(nak.status, NakStatus::Terminate(PeTerminator::Initiator));
+    assert!(matches!(one_finished(&ended).2, PeOutcome::TooLarge(_)));
+    assert_eq!(i.in_flight(), 0);
+    assert_eq!(i.deadline(), None);
+    for (kind, chunk) in chunks[at..].iter().cloned() {
+        let after = i.on_message(&chunk_from_peer(kind, chunk), now);
+        assert!(after.is_empty(), "{after:?}");
+    }
 }
 
 // M2-103 §12.2: the time between chunks is under 3 seconds, from each chunk.
@@ -689,7 +730,7 @@ fn set(flow: PeFlowControl) -> PeSet {
 // M2-103 §10, M2-101 §8.3: a Set encodes its Property Data, splits it so that each
 // chunk fits the peer's receivable size, carries the header in chunk 1 only, and
 // sends every chunk at once when no Flow Control was asked.
-/// Spec: m2-101/8.9#1
+/// Spec: m2-101/8.9#1, m2-103/10#1, m2-103/10#2, m2-103/11#8
 #[test]
 fn a_set_sends_every_chunk_at_once_without_flow_control() {
     let (mut i, now) = ready(1);
@@ -728,7 +769,7 @@ fn a_set_sends_every_chunk_at_once_without_flow_control() {
 }
 
 // M2-103 §10.2: a Partial Set says so in its header.
-/// Spec: m2-103/10#4
+/// Spec: m2-103/10#4, m2-103/10#5
 #[test]
 fn a_partial_set_says_so() {
     let (mut i, now) = ready(1);
@@ -858,7 +899,7 @@ fn an_ack_resets_the_count_of_resends() {
 
 // M2-103 §15.5: no ACK within 3 seconds of a chunk sends it again, three times;
 // then the Sender fails and sends a Terminate NAK.
-/// Spec: m2-103/15.5#2, m2-103/15.5#3
+/// Spec: m2-103/15.5#2, m2-103/15.5#3, m2-103/15.5#5
 #[test]
 fn a_chunk_with_no_ack_is_sent_again_after_three_seconds_and_given_up_after_three_resends() {
     let (mut i, now) = ready(1);
@@ -1105,7 +1146,7 @@ fn reply_status(actions: &[PeAction]) -> (PeRequestId, PeReply) {
 // M2-103 §11.1: Start is the header of a Get with the command `start` first; the
 // Responder assigns the Subscription Id in its reply, and the Initiator keeps a
 // table of it to the Resource.
-/// Spec: m2-103/11#4, m2-103/11.1#4
+/// Spec: m2-103/11#4, m2-103/11.1#4, m2-103/11.1#2
 #[test]
 fn start_subscription_is_a_get_shaped_header_and_the_reply_names_the_id() {
     let (mut i, now) = ready(2);
@@ -1163,7 +1204,7 @@ fn a_start_that_gives_no_id_or_fails_holds_no_subscription() {
 // M2-103 §11.1, §11.2: the Responder's `full` and `partial` updates carry Property
 // Data in the encoding they name; each is answered with a Reply to Subscription of
 // the same Request ID and status 200, and handed out against its Resource.
-/// Spec: m2-101/8.12#1, m2-103/11#10, m2-103/11.2#1
+/// Spec: m2-101/8.12#1, m2-103/11#10, m2-103/11.2#1, m2-103/11.1#3
 #[test]
 fn a_full_and_a_partial_update_are_answered_and_handed_out() {
     let (mut i, now) = ready(2);
@@ -1295,7 +1336,7 @@ fn the_responder_ends_a_subscription() {
 
 // §11.5, §11.1: the Initiator ends it with `end` and `endedBy` `initiator`, which
 // leaves the table at once, and the reply is the end of the transaction.
-/// Spec: m2-103/11.5#1
+/// Spec: m2-103/11.5#1, m2-103/11.1#3
 #[test]
 fn the_initiator_ends_a_subscription() {
     let (mut i, now) = ready(2);
@@ -1370,7 +1411,7 @@ fn notify(request: PeRequestId, status: PeStatus) -> Decoded {
 
 // M2-103 §12.1.3: a receiver terminates the request a Notify with status 144
 // names, whatever the transaction, and no NAK answers it.
-/// Spec: m2-103/12.1.3#3, m2-103/12.1.3#2
+/// Spec: m2-103/12.1.3#3, m2-103/12.1.3#2, m2-101/8.13#2
 #[test]
 fn a_notify_terminate_ends_a_get_and_a_set_by_request_id() {
     let (mut i, now) = ready(2);

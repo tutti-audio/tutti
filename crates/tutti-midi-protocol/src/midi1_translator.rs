@@ -3,7 +3,6 @@
 
 use crate::scale;
 use crate::{PerNoteTranslation, TranslationMode, midi1};
-use alloc::boxed::Box;
 use members::Members;
 use tutti_ump::{
     Address, BendValue, CCNumber, ControlValue, ExtremeValues, Message, Midi1Bytes, U7, U14, Ump,
@@ -44,9 +43,12 @@ mod members;
 /// runs an Alternate Translation Mode (D.4): near-extreme values kept off the
 /// minimum and maximum (D.1.5, [`ExtremeValues`]) and the per-note messages sent
 /// as MPE on a zone's member channels (D.2.8, [`PerNoteTranslation`]). In the MPE
-/// mode a Note On takes the member idle longest, or steals the oldest note's
-/// when all play; a per-note message for a note that does not sound sends
-/// nothing, and every message that is not per-note goes on the zone's Manager Channel. A MIDI 1.0 message passes unchanged.
+/// mode a Note On takes the member idle longest, or shares the member that plays
+/// the fewest notes and was given a note longest ago when all play (M2-120
+/// section 3.6.1); a per-note message for a note that does not sound sends
+/// nothing, and every message that is not per-note goes on the zone's Manager
+/// Channel. A MIDI 1.0 message passes unchanged, except in the MPE mode, where it
+/// takes the rules of its MIDI 2.0 equivalent.
 ///
 /// It holds no state of the receiver: a message's MIDI 1.0 sequence is the
 /// same whatever went before. It allocates nothing after construction and holds
@@ -73,7 +75,7 @@ mod members;
 pub struct Midi1Translator {
     mode: TranslationMode,
     /// The note allocation of the MPE mode; none in any other.
-    members: Option<Box<Members>>,
+    members: Option<Members>,
 }
 
 impl Default for Midi1Translator {
@@ -84,10 +86,10 @@ impl Default for Midi1Translator {
 
 impl Midi1Translator {
     /// The most MIDI 1.0 messages one [`feed`](Self::feed) sends. An MPE Note
-    /// On sends one Note Off when it steals a sounding member or strikes its
-    /// key again (never both), then a centred Pitch Bend, Channel Pressure 0
-    /// and Control Change 74 at 0x40 for each its member's last note moved,
-    /// then the Note On. The Default Translation sends at most four, a
+    /// On sends one Note Off when it strikes its key again, then a centred Pitch
+    /// Bend, Channel Pressure 0 and Control Change 74 at 0x40 for each its
+    /// member's last note moved (only a member that plays no other note), then
+    /// the Note On. The Default Translation sends at most four, a
     /// controller's sequence (D.2.3).
     pub const MAX_MESSAGES: usize = 5;
 
@@ -114,8 +116,7 @@ impl Midi1Translator {
     /// held without sending their Note Offs.
     #[must_use]
     pub fn with_mode(mode: TranslationMode) -> Self {
-        let members =
-            matches!(mode.per_note, PerNoteTranslation::Mpe(_)).then(|| Box::new(Members::new()));
+        let members = matches!(mode.per_note, PerNoteTranslation::Mpe(_)).then(Members::new);
         Self { mode, members }
     }
 
@@ -128,7 +129,9 @@ impl Midi1Translator {
     /// Forgets the notes the MPE mode holds, without a Note Off, as at
     /// [`new`](Self::new). The Default Translation holds nothing to forget.
     pub fn reset(&mut self) {
-        *self = Self::with_mode(self.mode);
+        if let Some(members) = self.members.as_mut() {
+            members.clear();
+        }
     }
 
     /// Calls `out` with each MIDI 1.0 message `message` stands for, in the
@@ -144,6 +147,12 @@ impl Midi1Translator {
         };
         let (address, voice) = match message {
             Message::Midi2(address, voice) => (address, voice),
+            // In the MPE mode a MIDI 1.0 voice message is the MIDI 2.0 one it
+            // means (M2-104 D.3) and takes the same rules; otherwise it passes
+            // unchanged.
+            Message::Midi1(address, voice) if self.members.is_some() => {
+                (address, Voice2::from(voice))
+            }
             Message::Midi1(..) => {
                 midi1(message).for_each(&mut out);
                 return;
@@ -209,6 +218,11 @@ impl Midi1Translator {
                 cc(CCNumber::BANK_SELECT_LSB, bank.lsb);
                 out(Voice1::ProgramChange(program).bytes(address.channel));
             }
+            // Omni Off, Omni On, Mono Mode On and Poly Mode On are sent on no
+            // MPE Channel (M2-120 section 4.7).
+            Voice2::ControlChange { controller, .. }
+                if matches!(self.mode.per_note, PerNoteTranslation::Mpe(_))
+                    && (124..=127).contains(&controller.get()) => {}
             _ => plain(&mut out),
         }
     }

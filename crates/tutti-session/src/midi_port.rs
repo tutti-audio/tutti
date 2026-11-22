@@ -770,8 +770,9 @@ impl OpeningMidiOutput {
     /// that has seen one releases its notes when they stop (MIDI 1.0 Detailed
     /// Specification p. 32). Off by default.
     ///
-    /// The task runs on the executor, not in [`update`](Session::update), so a
-    /// stalled update does not stop it.
+    /// The heartbeat has a dedicated thread of the executor, not a call in
+    /// [`update`](Session::update), so a stalled update or app driver does not
+    /// stop it.
     ///
     /// A port whose device is in the MIDI 2.0 Protocol sends none: MIDI 2.0
     /// has no Active Sensing. It starts when a negotiation moves the device to
@@ -1633,7 +1634,9 @@ fn open_device_output(
         .connect_output(started, id)
         .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?;
     if active_sensing {
-        device.active_sensing();
+        device
+            .active_sensing()
+            .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?;
     }
     Ok(device)
 }
