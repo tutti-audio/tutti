@@ -67,7 +67,7 @@ impl<N: ?Sized> Key<N> {
 
     /// Event output `index` of the node.
     #[must_use]
-    pub fn event_output(self, index: u16) -> EventOutputPort {
+    pub const fn event_output(self, index: u16) -> EventOutputPort {
         EventOutputPort::new(self.node, index)
     }
 
@@ -78,7 +78,7 @@ impl<N: ?Sized> Key<N> {
     /// the state a node is given when it takes over from another, is
     /// delivered there.
     #[must_use]
-    pub fn event_input(self, index: u16) -> EventInputPort {
+    pub const fn event_input(self, index: u16) -> EventInputPort {
         EventInputPort::new(self.node, index)
     }
 
