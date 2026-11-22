@@ -7,9 +7,12 @@
 //! on where it has been (Jiles and Atherton 1986, "Theory of ferromagnetic hysteresis"). The
 //! effective field is `H_e = H + alpha M`, the field without loss is Langevin's
 //! `M_an = M_s L(H_e / a)` with `L(x) = coth x - 1 / x`, and `M` is pulled toward `M_an` by
-//! pinning of strength `k`, `c` of the pull being reversible. The slope the discretization of
-//! Holters and Zoelzer (2016, "Circuit simulation with inductors and transformers based on the
-//! Jiles-Atherton model of magnetization") integrates is
+//! pinning of strength `k`, `c` of the pull being reversible. The slope integrated here is the
+//! effective-field form with the total magnetization in the irreversible term (in place of
+//! the irreversible part alone), which keeps the denominator away from the pole of the
+//! textbook irreversible slope; the trapezoidal discretization follows Holters and Zoelzer
+//! (2016, "Circuit simulation with inductors and transformers based on the Jiles-Atherton
+//! model of magnetization"), not their exact slope:
 //!
 //! ```text
 //! dM/dH_e = (1 - c) max(0, delta (M_an - M)) / k + c dM_an/dH_e,    dM/dH = (dM/dH_e) / (1 - alpha dM/dH_e)
