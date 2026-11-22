@@ -43,27 +43,48 @@ const MAX_BANDS: usize = BankShape::MAX_BANDS;
 /// The controls of one band.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BandSettings {
-    /// The band's compressor.
-    pub compressor: CompressorControls,
-    /// Passes the band unreduced and without makeup.
-    pub bypass: bool,
-    /// Solos the band: while any band is soloed, only the soloed ones sound.
-    pub solo: bool,
+    compressor: CompressorControls,
+    bypass: bool,
+    solo: bool,
 }
 
 impl BandSettings {
     /// A band that does nothing: [`CompressorControls::DEFAULT`], neither bypassed nor
     /// soloed.
-    pub const DEFAULT: Self = Self {
-        compressor: CompressorControls::DEFAULT,
-        bypass: false,
-        solo: false,
-    };
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            compressor: CompressorControls::DEFAULT,
+            bypass: false,
+            solo: false,
+        }
+    }
+
+    /// The band's compressor.
+    #[must_use]
+    pub const fn compressor(mut self, compressor: CompressorControls) -> Self {
+        self.compressor = compressor;
+        self
+    }
+
+    /// Passes the band unreduced and without makeup.
+    #[must_use]
+    pub const fn bypass(mut self, bypass: bool) -> Self {
+        self.bypass = bypass;
+        self
+    }
+
+    /// Solos the band: while any band is soloed, only the soloed ones sound.
+    #[must_use]
+    pub const fn solo(mut self, solo: bool) -> Self {
+        self.solo = solo;
+        self
+    }
 }
 
 impl Default for BandSettings {
     fn default() -> Self {
-        Self::DEFAULT
+        Self::new()
     }
 }
 
@@ -71,32 +92,47 @@ impl Default for BandSettings {
 /// band. Entries past the bank's bands (and past its splits) are ignored.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MultibandSettings {
-    /// The crossover's split frequencies, lowest first.
-    pub crossover: CrossoverControls,
-    /// The bands, lowest first.
-    pub bands: [BandSettings; MAX_BANDS],
+    crossover: CrossoverControls,
+    bands: [BandSettings; MAX_BANDS],
 }
 
 impl MultibandSettings {
     /// A multiband that does nothing but split and sum: every band at
-    /// [`BandSettings::DEFAULT`], the splits at 200 Hz, 1 kHz and 5 kHz.
-    pub const DEFAULT: Self = Self {
-        crossover: CrossoverControls {
-            frequencies: [
-                Hz::new(200.0),
-                Hz::new(1_000.0),
-                Hz::new(5_000.0),
-                Hz::ZERO,
-                Hz::ZERO,
-            ],
-        },
-        bands: [BandSettings::DEFAULT; MAX_BANDS],
-    };
+    /// [`BandSettings::new`], the splits at 200 Hz, 1 kHz and 5 kHz.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            crossover: CrossoverControls {
+                frequencies: [
+                    Hz::new(200.0),
+                    Hz::new(1_000.0),
+                    Hz::new(5_000.0),
+                    Hz::ZERO,
+                    Hz::ZERO,
+                ],
+            },
+            bands: [BandSettings::new(); MAX_BANDS],
+        }
+    }
+
+    /// The crossover's split frequencies, lowest first.
+    #[must_use]
+    pub const fn crossover(mut self, crossover: CrossoverControls) -> Self {
+        self.crossover = crossover;
+        self
+    }
+
+    /// The bands, lowest first.
+    #[must_use]
+    pub const fn bands(mut self, bands: [BandSettings; MAX_BANDS]) -> Self {
+        self.bands = bands;
+        self
+    }
 }
 
 impl Default for MultibandSettings {
     fn default() -> Self {
-        Self::DEFAULT
+        Self::new()
     }
 }
 

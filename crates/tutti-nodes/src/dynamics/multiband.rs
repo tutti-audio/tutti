@@ -200,8 +200,8 @@ impl Band {
         let makeup = take(MAKEUP, self.makeup.load().get());
         // The threshold's control signal is the bank's own; only the base is read here.
         let threshold = self.good[THRESHOLD].read(self.threshold.load().get());
-        BandSettings {
-            compressor: CompressorControls {
+        BandSettings::new()
+            .compressor(CompressorControls {
                 threshold: Db::new(threshold),
                 knee: Db::new(knee),
                 ratio: CompressionRatio::new(ratio),
@@ -210,10 +210,9 @@ impl Band {
                 makeup: Db::new(makeup),
                 // The multiband compressor has no key filter: its bands read the split signal.
                 ..CompressorControls::DEFAULT
-            },
-            bypass: is_on(&self.bypass),
-            solo: is_on(&self.solo),
-        }
+            })
+            .bypass(is_on(&self.bypass))
+            .solo(is_on(&self.solo))
     }
 }
 
@@ -399,14 +398,13 @@ impl Rig {
         if let Ok(set) = CrossoverControls::try_from((&targets[..nb - 1], rate)) {
             self.crossover = set;
         }
-        let mut settings = MultibandSettings {
-            crossover: self.crossover,
-            bands: [BandSettings::DEFAULT; BankShape::MAX_BANDS],
-        };
+        let mut bands = [BandSettings::new(); BankShape::MAX_BANDS];
         for (b, band) in self.bands.iter_mut().enumerate() {
-            settings.bands[b] = band.read(&signals.band[b], at);
+            bands[b] = band.read(&signals.band[b], at);
         }
-        settings
+        MultibandSettings::new()
+            .crossover(self.crossover)
+            .bands(bands)
     }
 }
 

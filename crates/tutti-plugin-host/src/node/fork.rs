@@ -102,9 +102,9 @@ use std::sync::{Arc, Weak};
 use tutti_buffers::Float;
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 
-use parking_lot::Mutex;
 use tutti_graph::{ForkBuild, ForkCause, ForkSource, Forked};
 use tutti_plugin_types::{Control, Features, InProcess, PluginRef, RenderMode, StateUse};
+use tutti_rt::Mutex;
 
 use super::client::{PluginNode, RateDelivery, TransportFeed};
 use super::instance::Instance;

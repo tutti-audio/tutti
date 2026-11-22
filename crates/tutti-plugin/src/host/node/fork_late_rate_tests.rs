@@ -59,9 +59,7 @@ fn a_late_rate_answer_does_not_silence_an_offline_fork() {
                 t.rate = RATE_TIMEOUT;
                 t
             },
-            ..IpcConfig::at(
-                tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
-            )
+            ..IpcConfig::new()
         },
         tutti_fixtures::executor(),
         &tutti_fixtures::detached_work(),

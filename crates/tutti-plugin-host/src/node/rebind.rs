@@ -22,8 +22,8 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use tutti_buffers::Float;
 
-use parking_lot::Mutex;
 use tutti_plugin_types::{Features, Loaded, MainThreadMarker, PluginDescriptor, Successor};
+use tutti_rt::Mutex;
 use tutti_rt::PendingSampleRate;
 use tutti_timeline::TempoReader;
 use tutti_units::ParamId;

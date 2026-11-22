@@ -68,6 +68,16 @@
 //!   is the enum itself, a function with no other parameter beside the receiver
 //!   (`set_mode(&mut self, mode)`), and a `set_*` function's last parameter (a keyed
 //!   setter, `set_mode(&mut self, key, mode)`): those calls exist to pass that value.
+//! - `pub-field-config`: a `pub struct` (a `pub(..)` item is not public) whose name ends
+//!   in `Config`, `Settings` or `Options` (the bare name too) and that has at
+//!   least one `pub` field (a `pub(..)` field is not public), named or tuple, outside a
+//!   `macro_rules!` body. A configured thing is `Type::new(required..)` plus chained
+//!   options; a struct of public fields filled with `..Default::default()` has no
+//!   method for the other rules to see. Its key is `<file>::<Type>`. A struct that is
+//!   plain data (a wire, IPC or FFI shape, or the protocol's own fields) is a named row
+//!   of [`ALLOW`] with its reason. The rule's limit: it catches the config-by-name shape
+//!   only. The method-shape rules above stay the real check, and a value type that is no
+//!   configuration but has public fields is fine by the style guide's T5.
 //!
 //! **Blind spots.** The scan is lexical: it does not see an item a macro writes (the
 //! `with-prefix` of a macro-made method), an owner reached through a type alias, a
@@ -112,9 +122,10 @@ pub(super) enum Rule {
     RangeMacro,
     OptionArg,
     DefaultEnumArg,
+    PubFieldConfig,
 }
 
-const RULES: [(Rule, &str); 9] = [
+const RULES: [(Rule, &str); 10] = [
     (Rule::WithPrefix, "with-prefix"),
     (Rule::ChainResult, "chain-result"),
     (Rule::Setter, "setter"),
@@ -124,6 +135,7 @@ const RULES: [(Rule, &str); 9] = [
     (Rule::RangeMacro, "range-macro"),
     (Rule::OptionArg, "option-arg"),
     (Rule::DefaultEnumArg, "default-enum-arg"),
+    (Rule::PubFieldConfig, "pub-field-config"),
 ];
 
 impl Rule {
@@ -163,6 +175,7 @@ const RANGE: &[Rule] = &[Rule::RangeMacro];
 const SETTER: &[Rule] = &[Rule::Setter];
 const WIDTH: &[Rule] = &[Rule::ConfigWidth];
 const DEFAULT_ENUM: &[Rule] = &[Rule::DefaultEnumArg];
+const FIELDS: &[Rule] = &[Rule::PubFieldConfig];
 
 /// An allow row for one type `owner` under `path`, for `rules`.
 const fn ty(
@@ -856,6 +869,30 @@ pub(super) const ALLOW: &[Allow] = &[
         "a live command on shared running inlets: the lead changes while events flow",
     ),
     ty(
+        "crates/tutti-ump/src/message.rs",
+        "StreamConfig",
+        FIELDS,
+        "the payload of Stream Configuration Request and Notification: its fields are the UMP wire message's own (protocol, rx_jr, tx_jr), a wire boundary",
+    ),
+    ty(
+        "crates/tutti-plugin-ipc/src/config/bridge.rs",
+        "IpcConfig",
+        FIELDS,
+        "the bridge's configuration as it crosses the host-to-server process boundary (serialized onto the wire): an IPC shape, built from the app's `AudioConfig`",
+    ),
+    ty(
+        "crates/tutti-au-host/src/macos/bus.rs",
+        "AuChannelConfig",
+        FIELDS,
+        "the decoded pair of an AudioUnit `AUChannelInfo` (input and output counts): a mirror of the C ABI record the unit reports, not an app's configuration",
+    ),
+    ty(
+        "crates/tutti-cpal/src/supported.rs",
+        "SupportedConfig",
+        FIELDS,
+        "a reading the device reports (rate range, sample formats, channels), not a configuration an app sets",
+    ),
+    ty(
         "crates/tutti-midi-runtime/src/live/mpe_translator.rs",
         "MpeTranslator::set_mode",
         SETTER,
@@ -1200,6 +1237,13 @@ fn macro_bodies(code: &str) -> Vec<(usize, usize, String)> {
     out
 }
 
+/// Whether one field's text (a named or tuple field) starts with a bare `pub`.
+fn has_pub_field(field: &str) -> bool {
+    let f = strip_attrs(field);
+    let (w, end) = ident_at(f, 0);
+    w == "pub" && !f[end..].trim_start().starts_with('(')
+}
+
 /// A `fn new` of one parameter returning `Option<..>` inside `body`.
 fn writes_range_type(body: &str) -> bool {
     let mut from = 0;
@@ -1427,6 +1471,54 @@ fn parse_file(path: &str, src: &str) -> Parsed {
                     rule: Rule::RangeMacro,
                 });
             }
+        }
+    }
+    let mut at = 0;
+    while let Some(e) = find_word_from(&code, "struct", at) {
+        at = e + 6;
+        let before = code[..e].trim_end();
+        let Some(pub_at) = before.len().checked_sub(3) else {
+            continue;
+        };
+        if !before.ends_with("pub")
+            || in_test(e)
+            || in_macro(e)
+            || before[..pub_at].ends_with(|c: char| c.is_alphanumeric() || c == '_')
+        {
+            continue;
+        }
+        let (name, mut cur) = ident_at(&code, e + 6);
+        let suffixed = ["Config", "Settings", "Options"]
+            .iter()
+            .any(|x| name.ends_with(x));
+        if !suffixed {
+            continue;
+        }
+        if code[cur..].trim_start().starts_with('<') {
+            let lt = cur + (code[cur..].len() - code[cur..].trim_start().len());
+            let Some(gt) = matching(&code, lt, b'<', b'>') else {
+                continue;
+            };
+            cur = gt + 1;
+        }
+        let rest = code[cur..].trim_start();
+        let (open, close) = if rest.starts_with('(') {
+            let o = code.len() - rest.len();
+            (o, matching(&code, o, b'(', b')'))
+        } else {
+            let o = item_end(&code, cur);
+            (o, matching(&code, o, b'{', b'}'))
+        };
+        let Some(close) = close else { continue };
+        if split_top(&code[open + 1..close])
+            .into_iter()
+            .any(has_pub_field)
+        {
+            sites.insert(Site {
+                key: format!("{path}::{name}"),
+                owner: name.to_owned(),
+                rule: Rule::PubFieldConfig,
+            });
         }
     }
     let mut from = 0;
@@ -2145,6 +2237,88 @@ mod tests {
         assert_eq!(rules(src), one("ranged", "range-macro"));
         assert!(scan("crates/tutti-units/src/lib.rs", src).is_empty());
         assert!(scan("crates/tutti-rt/src/id.rs", src).is_empty());
+    }
+
+    #[test]
+    fn a_public_field_config_is_a_violation_and_other_shapes_are_not() {
+        for bad in [
+            "pub struct SynthConfig { pub gain: f32, depth: u8 }",
+            "pub struct VoiceSettings<F> { #[doc = \"x\"] pub gain: F }",
+            "pub struct RunOptions(pub u8);",
+            "pub struct RunOptions(u8, pub u8);",
+            "pub struct Config { pub gain: f32 }",
+        ] {
+            let name = bad
+                .split_whitespace()
+                .nth(2)
+                .unwrap()
+                .split(['<', '('])
+                .next()
+                .unwrap();
+            assert_eq!(rules(bad), one(name, "pub-field-config"), "{bad}");
+        }
+        for ok in [
+            "pub struct SynthConfig { pub(crate) gain: f32, pub(super) d: u8 }",
+            "pub struct SynthConfig(pub(crate) u8);",
+            "pub struct SynthConfig { gain: f32 } impl SynthConfig { pub fn new() -> Self { todo!() } pub fn gain(self, g: f32) -> Self { self } }",
+            "pub struct Synth { pub gain: f32 }",
+            "pub struct SynthConfigs { pub gain: f32 }",
+            "struct SynthConfig { pub gain: f32 }",
+            "pub(crate) struct SynthConfig { pub gain: f32 }",
+            "pub struct SynthConfig;",
+        ] {
+            assert_eq!(rules(ok), vec![], "{ok}");
+        }
+    }
+
+    #[test]
+    fn a_public_field_config_in_a_test_or_a_macro_body_is_not_read() {
+        let src = "#[cfg(test)] mod m { pub struct SynthConfig { pub gain: f32 } }\n\
+                   macro_rules! m { () => { pub struct SynthConfig { pub gain: f32 } }; }\n\
+                   // pub struct XConfig { pub a: u8 }\n";
+        assert!(rules(src).is_empty());
+        let r = check(
+            &Mem::with(&[
+                (LIST, ""),
+                ("crates/a/tests/t.rs", "pub struct XConfig { pub a: u8 }"),
+                ("crates/a/src/tests.rs", "pub struct XConfig { pub a: u8 }"),
+                ("testing/b/src/lib.rs", "pub struct XConfig { pub a: u8 }"),
+                ("xtask/src/lib.rs", "pub struct XConfig { pub a: u8 }"),
+                ("vendor/c/src/lib.rs", "pub struct XConfig { pub a: u8 }"),
+            ]),
+            &[],
+            0,
+        );
+        assert!(r.passed());
+    }
+
+    #[test]
+    fn a_public_field_config_needs_a_row_and_an_allow_row_or_a_baseline_row_covers_it() {
+        let src = "pub struct SynthConfig { pub gain: f32 }";
+        let r = run("", src, &[]);
+        assert!(!r.passed());
+        assert_eq!(
+            r.findings[1],
+            "  a  pub-field-config  crates/a/src/lib.rs::SynthConfig"
+        );
+        let row = "a  pub-field-config  crates/a/src/lib.rs::SynthConfig\n";
+        assert!(run(row, src, &[]).passed());
+        let allow = [ty(F, "SynthConfig", FIELDS, "the protocol's own fields")];
+        assert!(run("", src, &allow).passed());
+        assert!(!run(row, src, &allow).passed());
+        let other = [ty(F, "OtherConfig", FIELDS, "x")];
+        assert!(!run("", src, &other).passed());
+    }
+
+    #[test]
+    fn a_public_field_config_row_with_no_violation_is_stale_and_fails() {
+        let r = run(
+            "a  pub-field-config  crates/a/src/lib.rs::SynthConfig\n",
+            "pub struct SynthConfig { gain: f32 }",
+            &[],
+        );
+        assert!(!r.passed());
+        assert!(r.findings[0].contains("names no violation"));
     }
 
     #[test]

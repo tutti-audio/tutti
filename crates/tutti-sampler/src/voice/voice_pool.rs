@@ -16,12 +16,13 @@ use super::node::*;
 use super::pool::*;
 use super::types::*;
 use crate::PlaceError;
+use std::sync::Arc;
 use std::sync::mpsc::sync_channel;
-use std::sync::{Arc, Mutex};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::Wave;
 use tutti_graph::{IntoNode, Node, NodeParts, Prepare};
+use tutti_rt::Mutex;
 use tutti_units::SampleRate;
 use tutti_units::{Amplitude, Beat, Cents, Seconds, StretchFactor};
 
@@ -1580,7 +1581,7 @@ fn looped(mut voice: Voice<f32>) -> Voice<f32> {
 fn held_stream(
     handle: &VoicePoolHandle<f32>,
     id: SlotId,
-) -> std::sync::Arc<std::sync::Mutex<crate::StreamHandle<f32>>> {
+) -> std::sync::Arc<tutti_rt::Mutex<crate::StreamHandle<f32>>> {
     handle
         .stream_of(id)
         .expect("the handle holds the voice's stream")
@@ -1600,7 +1601,7 @@ fn a_loop_sent_through_the_handle_is_published_to_the_stream_and_recorded() {
         .expect("the command queue has room in a test");
     {
         let stream = held_stream(&handle, id);
-        let stream = stream.lock().unwrap();
+        let stream = stream.lock();
         assert_eq!(
             stream.looping_cell().seq(),
             2,
@@ -1628,21 +1629,10 @@ fn the_drain_publishes_nothing_to_the_stream() {
     handle
         .send(loop_on(id))
         .expect("the command queue has room in a test");
-    let seq = held_stream(&handle, id)
-        .lock()
-        .unwrap()
-        .looping_cell()
-        .seq();
+    let seq = held_stream(&handle, id).lock().looping_cell().seq();
     one_block(&mut pool);
     assert!(pool.playback_of(id).expect("slot exists").loop_.is_some());
-    assert_eq!(
-        held_stream(&handle, id)
-            .lock()
-            .unwrap()
-            .looping_cell()
-            .seq(),
-        seq
-    );
+    assert_eq!(held_stream(&handle, id).lock().looping_cell().seq(), seq);
     assert_eq!(handle.drops(), PoolDrops::default());
 }
 
@@ -1695,7 +1685,7 @@ fn a_direction_set_through_the_handle_reaches_the_stream() {
     voice.play.direction = PlayDirection::Reverse;
     add_with_stream(&handle, id, voice, &commands);
     assert_eq!(
-        held_stream(&handle, id).lock().unwrap().direction(),
+        held_stream(&handle, id).lock().direction(),
         PlayDirection::Reverse,
         "the add's direction"
     );
@@ -1706,7 +1696,7 @@ fn a_direction_set_through_the_handle_reaches_the_stream() {
         })
         .expect("room");
     assert_eq!(
-        held_stream(&handle, id).lock().unwrap().direction(),
+        held_stream(&handle, id).lock().direction(),
         PlayDirection::Forward,
         "the update's"
     );
@@ -1892,7 +1882,7 @@ fn a_loop_forwarded_to_a_replaced_stream_is_not_recorded() {
         .send(loop_on(id))
         .expect("the command queue has room in a test");
     assert_eq!(
-        held_stream(&handle, id).lock().unwrap().loop_(),
+        held_stream(&handle, id).lock().loop_(),
         Some(loop_frames(0, 64, 0)),
         "the update, published to the stream held"
     );
@@ -1914,11 +1904,7 @@ fn a_full_queue_refuses_a_streaming_loop_or_add_before_the_stream() {
     let err = handle.send(loop_on(id)).expect_err("the queue is full");
     assert!(matches!(err, SendError::Full));
     assert_eq!(
-        held_stream(&handle, id)
-            .lock()
-            .unwrap()
-            .looping_cell()
-            .seq(),
+        held_stream(&handle, id).lock().looping_cell().seq(),
         1,
         "only the add's own loop was published"
     );

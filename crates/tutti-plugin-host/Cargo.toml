@@ -36,7 +36,6 @@ tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 
 # The in-process node's stack channel tables.
 arrayvec = "0.7"
-parking_lot = "0.13"
 thiserror = { workspace = true, features = ["std"] }
 tracing.workspace = true
 

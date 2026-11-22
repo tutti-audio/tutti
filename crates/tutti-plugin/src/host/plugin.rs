@@ -249,7 +249,7 @@ impl Plugin {
         state: Option<&[u8]>,
     ) -> IpcResult<(Self, Option<Result<(), StateError>>)> {
         let (client, restored) = PluginClient::open(
-            audio.to_bridge_config()?,
+            audio.to_bridge_config(),
             executor,
             work,
             plugin,

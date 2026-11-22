@@ -10,8 +10,8 @@
 //! close to the session's main-work collector.
 
 use std::fmt;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 
 use tutti_buffers::ChannelLayout;
 use tutti_plugin::catalog::ResolvedHosting;
@@ -22,7 +22,7 @@ use tutti_plugin_types::{
     Features, IpcError, MainWorkHandle, PluginFailure, PluginPreset, PresetError,
 };
 use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRef};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 use tutti_units::SampleRate;
 
 use super::{HostPlugin, Mirror, Open, Origin};
@@ -78,10 +78,10 @@ impl Standing {
     /// The bridge is dead: seen by the session at the node, or by the handle
     /// while the plugin is still in no node.
     pub(super) fn crashed(&self) -> bool {
-        self.dead.lock_recover().is_some()
+        self.dead.lock().is_some()
             || self
                 .handle
-                .lock_recover()
+                .lock()
                 .as_ref()
                 .is_some_and(|handle| handle.is_crashed())
     }
@@ -91,19 +91,19 @@ impl Standing {
     /// plugin for recovery to act on). A plugin that recovery reloads in place
     /// reads live throughout.
     pub(super) fn lost(&self) -> bool {
-        self.gave_up.lock_recover().is_some()
+        self.gave_up.lock().is_some()
             || (self.crashed() && !(self.recovery && self.hosted.load(Ordering::Acquire)))
     }
 
     /// Why the plugin is not live: that recovery gave up, else the failure of
     /// the bridge the session or the plugin's own handle saw.
     pub(super) fn cause(&self) -> PluginCause {
-        if let Some(why) = self.gave_up.lock_recover().clone() {
+        if let Some(why) = self.gave_up.lock().clone() {
             return PluginCause::GaveUp(why);
         }
-        let failure = self.dead.lock_recover().clone().or_else(|| {
+        let failure = self.dead.lock().clone().or_else(|| {
             self.handle
-                .lock_recover()
+                .lock()
                 .as_ref()
                 .and_then(|handle| handle.status().cause().cloned())
         });
@@ -112,7 +112,7 @@ impl Standing {
 
     /// The node has the plugin: its death is seen there from now on.
     pub(super) fn release_handle(&self) {
-        let released = self.handle.lock_recover().take();
+        let released = self.handle.lock().take();
         drop(released);
     }
 }

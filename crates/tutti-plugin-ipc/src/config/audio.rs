@@ -2,7 +2,7 @@
 //! [`IpcConfig`] for each plugin subprocess. Read per load; where plugins
 //! live and what a scan does is `tutti-plugin-db`'s `CatalogConfig`.
 
-use super::bridge::{IpcConfig, RandomSourceError};
+use super::bridge::IpcConfig;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::Timeouts;
 
@@ -82,18 +82,12 @@ impl AudioConfig {
     // --- internal resolution ---
 
     /// The bridge configuration a plugin loaded under this catalog config gets.
-    ///
-    /// # Errors
-    ///
-    /// The operating system's random source cannot be read, so no socket name
-    /// can be made.
-    pub fn to_bridge_config(&self) -> Result<IpcConfig, RandomSourceError> {
-        Ok(IpcConfig {
+    pub fn to_bridge_config(&self) -> IpcConfig {
+        IpcConfig {
             preferred_format: self.format,
             max_buffer_size: self.buffer_size,
             timeouts: self.timeouts,
             protect_host_memory: self.protect_host_memory,
-            ..IpcConfig::at(crate::unique_socket_path()?)
-        })
+        }
     }
 }

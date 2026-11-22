@@ -1668,7 +1668,7 @@ mod shell_server {
         });
         let mut guard = crate::ProcessGuard::launched(
             tutti_plugin_ipc_ffi::Reaped::new(child),
-            &crate::IpcConfig::at(crate::unique_socket_path().expect("the OS has a random source")),
+            &crate::IpcConfig::new(),
             tutti_fixtures::executor(),
         )
         .expect("the exit thread starts");

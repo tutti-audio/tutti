@@ -46,12 +46,13 @@
 use std::fmt;
 use std::marker::PhantomData;
 use std::panic::AssertUnwindSafe;
+use tutti_rt::Mutex;
 
 use futures_lite::FutureExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, OnceLock};
 
 use thiserror::Error;
 use tutti_buffers::ChannelLayout;
@@ -1029,7 +1030,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
             stop: Arc::clone(&stop.stop),
         };
         let report = Report::new(self.inputs.takes(), id, self.background.closed());
-        *parts.lock().unwrap_or_else(PoisonError::into_inner) = Some((pump, report));
+        *parts.lock() = Some((pump, report));
         stop.bell.ring();
         Ok(Take {
             id,
@@ -1051,7 +1052,7 @@ async fn await_parts<F: Float>(
     stop: &AtomicBool,
 ) -> Option<Parts<F>> {
     loop {
-        if let Some(found) = parts.lock().unwrap_or_else(PoisonError::into_inner).take() {
+        if let Some(found) = parts.lock().take() {
             return Some(found);
         }
         if stop.load(Ordering::Acquire) {
@@ -1429,7 +1430,6 @@ fn write_silence<F: Float>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
     use tutti_units::Bpm;
 
     /// A sink that keeps what it is written.
@@ -1442,7 +1442,7 @@ mod tests {
             ChannelLayout::MONO
         }
         fn write(&mut self, frames: Interleaved<'_, f32>) -> Result<(), SinkFailed> {
-            self.0.lock().unwrap().extend_from_slice(frames.samples());
+            self.0.lock().extend_from_slice(frames.samples());
             Ok(())
         }
         fn finalize(self) -> Result<(), Self::Error> {
@@ -1508,7 +1508,7 @@ mod tests {
         else {
             panic!("not a start then a finish: {events:?}");
         };
-        let kept = kept.lock().unwrap();
+        let kept = kept.lock();
         assert_eq!(kept.len(), 250);
         assert_eq!(recorded.lost(), Samples::new(50));
         assert_eq!(recorded.frames(), Samples::new(250));

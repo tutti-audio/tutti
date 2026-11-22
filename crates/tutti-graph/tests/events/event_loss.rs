@@ -53,7 +53,7 @@ impl Node for Writer {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        for (p, s) in self.scripts.iter().enumerate() {
+        for (p, s) in (0..).zip(&self.scripts) {
             let out = io.event_out(p);
             for i in 0..s.ons + s.offs {
                 let words = if i < s.ons {
@@ -83,12 +83,12 @@ impl Node for Counter {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
         let mut seen = self.seen.lock().unwrap();
-        for p in 0..io.event_input_count() {
+        for (p, tally) in (0..io.event_input_count()).zip(seen.iter_mut()) {
             for e in io.events(p) {
                 if e.is_note_off() {
-                    seen[p].1 += 1;
+                    tally.1 += 1;
                 } else if matches!(e.kind, EventKind::Midi(Ump(_))) {
-                    seen[p].0 += 1;
+                    tally.0 += 1;
                 }
             }
         }
