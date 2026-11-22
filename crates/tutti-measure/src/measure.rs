@@ -4,6 +4,7 @@
 use tutti_buffers::Sample;
 
 use crate::MeterError;
+use crate::convert::Discard;
 
 /// A config that builds a meter for one stream.
 ///
@@ -68,6 +69,23 @@ pub trait StreamMeter {
     /// The answer over everything pushed, consuming the meter.
     #[must_use]
     fn finish(self) -> Self::Output;
+}
+
+/// The whole-buffer form of every meter: one meter of `cfg` bound to `context`,
+/// fed `input` as a single chunk, then finished. The one-shot entry points are
+/// this call, so they and the streaming path cannot drift.
+///
+/// # Errors
+///
+/// The [`MeterError`] of [`Measure::measure`] or of the push.
+pub(crate) fn measure_buffer<S: Sample, M: Measure<S>>(
+    cfg: &M,
+    context: M::Context,
+    input: <M::Meter as StreamMeter>::Input<'_>,
+) -> Result<<M::Meter as StreamMeter>::Output, MeterError> {
+    let mut meter = cfg.measure(context)?;
+    meter.push(input, &mut Discard)?;
+    Ok(meter.finish())
 }
 
 /// Drives one meter of `cfg` over a stream of `frames` frames in uneven chunks
