@@ -704,7 +704,7 @@ pub use command::{CANCEL_CAPACITY, COMMAND_CAPACITY, CommandId, ScheduleError, S
 pub use compile::{CompileError, CycleEdge, Shapes, VerifyError, compile};
 pub use controls::{ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, param_parts};
 pub use cost::{Cost, Schedule, Work};
-pub use declare::{HasParam, HasParams, ParamUnit, Scalar};
+pub use declare::{HasParam, HasParams, ParamValue, Scalar};
 pub use editor::{
     CloseError, CommitError, Editor, Inserted, Limits, MissingSource, Rewired, RootGate, Unwired,
 };

@@ -49,7 +49,7 @@ use tutti_units::{Depth, ParamAddr, ParamId, UnitAddr, UnitParam};
 use crate::ChannelEdge;
 use crate::DeclarationError;
 use crate::ModKeys;
-use crate::ParamUnit;
+use crate::ParamValue;
 use tutti_buffers::Float;
 
 use crate::graph::Graph;

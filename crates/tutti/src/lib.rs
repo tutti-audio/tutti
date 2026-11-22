@@ -469,7 +469,7 @@ pub mod graph {
     pub use tutti_graph::{
         Bus, BusRole, Buses, Cost, Cx, Env, ForkByClone, HasParam, HasParams, InBus, Inputs,
         IntoNode, Io, Node, OutBus, Outputs, ParamFork, ParamNode, ParamSet, ParamSetBuilder,
-        ParamUnit, Params, Prepare, RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar,
+        ParamValue, Params, Prepare, RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar,
         Shape, Status, Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
