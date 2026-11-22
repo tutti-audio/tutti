@@ -16,7 +16,7 @@
 //! the first local one below threshold) before being committed.
 
 use tutti_buffers::{Float, Mono};
-use tutti_measure::{FrequencyBand, PitchEstimate, PitchHop, Result, YinConfig};
+use tutti_measure::{FrequencyBand, PitchError, PitchEstimate, PitchHop, YinConfig};
 use tutti_rt::SplitMix64;
 use tutti_units::{Hz, SampleRate, Samples};
 
@@ -45,12 +45,16 @@ fn sine(freq: f64, secs: f64, amp: f64) -> Vec<f32> {
 }
 
 /// `yin` at this file's rate.
-fn yin(cfg: &YinConfig, samples: &[f32]) -> Result<PitchEstimate> {
+fn yin(cfg: &YinConfig, samples: &[f32]) -> Result<PitchEstimate, PitchError> {
     tutti_measure::yin(cfg, Mono::new(samples), SampleRate::of(SR))
 }
 
 /// `yin_track` at this file's rate, one estimate every `hop` samples.
-fn yin_track(cfg: &YinConfig, samples: &[f32], hop: Samples) -> Result<Vec<PitchEstimate>> {
+fn yin_track(
+    cfg: &YinConfig,
+    samples: &[f32],
+    hop: Samples,
+) -> Result<Vec<PitchEstimate>, PitchError> {
     tutti_measure::yin_track(
         cfg,
         Mono::new(samples),
@@ -248,7 +252,7 @@ fn the_note_name_agrees_with_the_frequency() {
         let est = yin(&cfg, &sine(f, 0.5, 0.5)).expect("long enough");
         let p = est.pitch().unwrap_or_else(|| panic!("{f} Hz unvoiced"));
 
-        let midi = (69.0 + 12.0 * (p.frequency.get() as f64 / 440.0).log2()).round() as i32;
+        let midi = (69.0 + 12.0 * (p.frequency.get() / 440.0).log2()).round() as i32;
         let derived = format!("{}{}", NAMES[(midi % 12) as usize], midi / 12 - 1);
 
         assert_eq!(

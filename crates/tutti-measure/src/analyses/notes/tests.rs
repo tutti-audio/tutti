@@ -3,6 +3,7 @@ use crate::analyses::yin::Pitch;
 use crate::framing::Framing;
 use crate::meters::chroma::FrequencyBand;
 use crate::test_rng::uniform;
+use crate::{AboveNyquist, PitchError, TooManyFrames};
 use tutti_rt::SplitMix64;
 use tutti_ump::NoteNumber;
 use tutti_units::{Confidence, Hz};
@@ -68,11 +69,11 @@ impl std::ops::Deref for Case {
 
 type NoteConfig = Case;
 
-fn transcribe(c: &Case, x: &[f64]) -> Result<Vec<NoteEvent>> {
+fn transcribe(c: &Case, x: &[f64]) -> Result<Vec<NoteEvent>, NoteError> {
     super::transcribe(&c.cfg, Mono::new(x), c.rate)
 }
 
-fn frame_levels(c: &Case, x: &[f64]) -> Result<Vec<Amplitude>> {
+fn frame_levels(c: &Case, x: &[f64]) -> Result<Vec<Amplitude>, NoteError> {
     super::frame_levels(&c.cfg, Mono::new(x), c.rate)
 }
 
@@ -81,11 +82,11 @@ fn notes_from_track(
     track: &[PitchEstimate],
     levels: &[Amplitude],
     onsets: &[Samples],
-) -> Result<Vec<NoteEvent>> {
+) -> Result<Vec<NoteEvent>, NoteError> {
     super::notes_from_track(&c.cfg, track, levels, onsets, c.rate)
 }
 
-fn yin_track(yin: &YinPlan, x: &[f64], hop: Samples) -> Result<Vec<PitchEstimate>> {
+fn yin_track(yin: &YinPlan, x: &[f64], hop: Samples) -> Result<Vec<PitchEstimate>, PitchError> {
     yin_track_at(yin, x, hop)
 }
 
@@ -471,25 +472,25 @@ fn a_note_shorter_than_the_minimum_is_dropped() {
 #[test]
 fn silence_noise_and_bad_input_are_defined() {
     let c = cfg();
-    assert_eq!(transcribe(&c, &vec![0.0; 44100]), Err(Error::NoSignal));
-    assert_eq!(transcribe(&c, &vec![1e-6; 44100]), Err(Error::NoSignal));
+    assert_eq!(transcribe(&c, &vec![0.0; 44100]), Err(NoteError::NoSignal));
+    assert_eq!(transcribe(&c, &vec![1e-6; 44100]), Err(NoteError::NoSignal));
     let mut rng = SplitMix64::new(7);
     let noise: Vec<f64> = (0..88200).map(|_| uniform(&mut rng, -0.3, 0.3)).collect();
     assert_eq!(transcribe(&c, &noise), Ok(Vec::new()));
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let mut x = render(RATE, &[tone(0.1, 0.5, 440.0, 0.5)], 0.7);
         x[10_000] = bad;
-        assert_eq!(transcribe(&c, &x), Err(Error::NonFiniteInput));
+        assert_eq!(transcribe(&c, &x), Err(NoteError::NonFiniteInput));
     }
     let n = c.frame().get() + 10 * c.hop.get() + c.hop.get() / 2;
     let mut tail: Vec<f64> = (0..n)
         .map(|i| (TAU * 440.0 * i as f64 / RATE).sin() * 0.5)
         .collect();
     *tail.last_mut().unwrap() = f64::NAN;
-    assert_eq!(transcribe(&c, &tail), Err(Error::NonFiniteInput));
+    assert_eq!(transcribe(&c, &tail), Err(NoteError::NonFiniteInput));
     assert!(matches!(
         transcribe(&c, &[0.5; 100]),
-        Err(Error::InsufficientInput { .. })
+        Err(NoteError::InsufficientInput { .. })
     ));
 }
 
@@ -557,7 +558,7 @@ fn the_velocity_map_is_linear_and_clamped() {
     assert!(VelocityRange::new(level(-20.0), level(-20.0)).is_none());
     assert_eq!(
         VelocityRange::try_from(level(-20.0)..=level(-30.0)),
-        Err(Error::EmptyVelocityRange {
+        Err(EmptyVelocityRange {
             floor: Db::new(-20.0),
             ceiling: Db::new(-30.0)
         })
@@ -741,20 +742,26 @@ fn settings_and_inputs_are_validated() {
     let huge = YinConfig::new().band(band(0.01, 1000.0));
     assert!(matches!(
         notes(huge, flux).unwrap_err(),
-        Error::YinFrameTooLong { .. }
+        NoteError::YinFrameTooLong { .. }
     ));
     let yin = YinConfig::new().band(band(80.0, 1000.0));
     let energy = OnsetConfig::new(DetectionFunction::Energy);
-    assert_eq!(notes(yin, energy).unwrap_err(), Error::OnsetNotSpectralFlux);
+    assert_eq!(
+        notes(yin, energy).unwrap_err(),
+        NoteError::OnsetNotSpectralFlux
+    );
     // A pitch band above Nyquist is refused where the rate binds.
     let high = YinConfig::new().band(band(80.0, 30_000.0));
     assert!(matches!(
         notes(high, flux).unwrap_err(),
-        Error::AboveNyquist { .. }
+        NoteError::Pitch(PitchError::Nyquist(AboveNyquist { .. }))
     ));
     // A zero onset window is refused too.
     let zero = flux.framing(Framing::new(Samples::new(0), Samples::new(256)));
-    assert!(matches!(notes(yin, zero).unwrap_err(), Error::ZeroWindow));
+    assert!(matches!(
+        notes(yin, zero).unwrap_err(),
+        NoteError::Framing(FramingError::ZeroWindow)
+    ));
 
     let c = cfg();
     let frame = c.frame().get();
@@ -765,28 +772,28 @@ fn settings_and_inputs_are_validated() {
     let levels = |c: &NoteConfig| frame_levels(c, &vec![0.0; frame]).map(|_| ());
     assert!(matches!(
         levels(&hop(frame + 1)),
-        Err(Error::HopWiderThanWindow { .. })
+        Err(NoteError::Framing(FramingError::HopWiderThanWindow { .. }))
     ));
     assert!(matches!(
         levels(&hop(frame / 64 - 1)),
-        Err(Error::TooManyOverlaps { .. })
+        Err(NoteError::Framing(FramingError::TooManyOverlaps { .. }))
     ));
     assert!(levels(&hop(frame)).is_ok());
     assert!(levels(&hop(frame.div_ceil(64))).is_ok());
     let t = track(&[Some(440.0); 3]);
     assert!(matches!(
         notes_from_track(&hop(frame + 1), &t, &loud(3), &[]),
-        Err(Error::HopWiderThanWindow { .. })
+        Err(NoteError::Framing(FramingError::HopWiderThanWindow { .. }))
     ));
     assert!(matches!(
         transcribe(&hop(1), &vec![0.1; frame]),
-        Err(Error::TooManyOverlaps { .. })
+        Err(NoteError::Framing(FramingError::TooManyOverlaps { .. }))
     ));
 
     let t = track(&[Some(440.0); 10]);
     assert_eq!(
         notes_from_track(&c, &t, &loud(9), &[]),
-        Err(Error::LevelsLengthMismatch {
+        Err(NoteError::LevelsLengthMismatch {
             levels: 9,
             track: 10
         })
@@ -795,27 +802,27 @@ fn settings_and_inputs_are_validated() {
     neg[3] = Amplitude::new(-0.1);
     assert_eq!(
         notes_from_track(&c, &t, &neg, &[]),
-        Err(Error::NegativeInput)
+        Err(NoteError::NegativeInput)
     );
     neg[3] = Amplitude::new(f64::NAN);
     assert_eq!(
         notes_from_track(&c, &t, &neg, &[]),
-        Err(Error::NonFiniteInput)
+        Err(NoteError::NonFiniteInput)
     );
     let zero = track(&[Some(0.0); 10]);
     assert_eq!(
         notes_from_track(&c, &zero, &loud(10), &[]),
-        Err(Error::NonPositiveFrequency)
+        Err(NoteError::NonPositiveFrequency)
     );
     let nan = track(&[Some(f64::NAN); 10]);
     assert_eq!(
         notes_from_track(&c, &nan, &loud(10), &[]),
-        Err(Error::NonFiniteInput)
+        Err(NoteError::NonFiniteInput)
     );
     let wide = c.smoothing(NoteSpan::of(Seconds::new(60.0)));
     assert!(matches!(
         notes_from_track(&wide, &t, &loud(10), &[]),
-        Err(Error::SmoothingTooLong { .. })
+        Err(NoteError::SmoothingTooLong { .. })
     ));
     assert!(notes_from_track(&c, &[], &[], &[]).unwrap().is_empty());
     assert!(
@@ -842,10 +849,10 @@ fn too_many_frames_are_refused() {
     let x = vec![0.1f64; MAX_FRAMES.get() + c.frame().get() + 1];
     assert_eq!(
         transcribe(&c, &x),
-        Err(Error::TooManyFrames {
+        Err(NoteError::TooManyFrames(TooManyFrames {
             frames: FrameCount(MAX_FRAMES.get() + 2),
             max: MAX_FRAMES
-        })
+        }))
     );
 }
 

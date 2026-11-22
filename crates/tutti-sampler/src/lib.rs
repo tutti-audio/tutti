@@ -158,7 +158,7 @@
 mod clip;
 pub use clip::Clip;
 mod error;
-pub use error::{Error, PlaceError, Result};
+pub use error::{PlaceError, StreamerStartError};
 
 /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) as a layout's count. The cast is
 /// checked at compile time: the build fails if the cap ever grows past what a

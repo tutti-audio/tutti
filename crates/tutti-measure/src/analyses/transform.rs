@@ -19,8 +19,9 @@ use tutti_buffers::{Mono, MonoMut, Sample};
 use tutti_units::{Amplitude, SampleRate, Samples};
 
 use crate::convert::widen;
+use crate::{FramingError, TransformError};
 
-use crate::{Error, Region, Result};
+use crate::Region;
 use tutti_dsp::Complex64;
 use tutti_dsp::CosineWindow;
 use tutti_dsp::FftScratch;
@@ -210,11 +211,14 @@ impl Stft {
     /// in one call, so no caller hand-writes the zip plus the inverse.
     ///
     /// # Errors
-    /// Returns [`Error::GridShapeDisagreement`] if `mask` does not
+    /// Returns [`TransformError::GridShapeDisagreement`] if `mask` does not
     /// match this transform's `frames x bins` shape.
-    pub fn resynthesize_masked<S: Sample>(&self, mask: &Grid<Complex64>) -> Result<Vec<S>> {
+    pub fn resynthesize_masked<S: Sample>(
+        &self,
+        mask: &Grid<Complex64>,
+    ) -> Result<Vec<S>, TransformError> {
         if !self.bins.has_same_shape(mask) {
-            return Err(Error::GridShapeDisagreement);
+            return Err(TransformError::GridShapeDisagreement);
         }
         let masked: Vec<Complex64> = self
             .bins
@@ -385,9 +389,13 @@ impl StftConfig {
     /// when the result must invert.
     ///
     /// # Errors
-    /// Returns an [`Error`] for a zero window or hop, a hop wider than
+    /// Returns a [`TransformError`] for a zero window or hop, a hop wider than
     /// the window, or a non-positive sample rate.
-    pub fn resolve(&self, rate: impl Into<SampleRate>, len: Samples) -> Result<StftGeometry> {
+    pub fn resolve(
+        &self,
+        rate: impl Into<SampleRate>,
+        len: Samples,
+    ) -> Result<StftGeometry, TransformError> {
         let hop = self.effective_hop(len.get());
         self.geometry_at(rate.into(), hop)
     }
@@ -396,18 +404,22 @@ impl StftConfig {
     ///
     /// # Errors
     /// Everything [`resolve`](Self::resolve) rejects, plus
-    /// [`tutti_dsp::StftError::NotColaCompliant`] (as [`Error::Dsp`]) when the hop does not divide the
+    /// [`tutti_dsp::StftError::NotColaCompliant`] (as [`TransformError::Dsp`]) when the hop does not divide the
     /// window at the overlap this geometry's window shape requires — 4x for
     /// Hann and Hamming, 8x for Blackman.
-    pub fn resolve_cola(&self, rate: impl Into<SampleRate>, len: Samples) -> Result<StftGeometry> {
+    pub fn resolve_cola(
+        &self,
+        rate: impl Into<SampleRate>,
+        len: Samples,
+    ) -> Result<StftGeometry, TransformError> {
         let hop = self.effective_hop(len.get());
         Ok(ColaGeometry::try_from(self.geometry_at(rate.into(), hop)?)?.into())
     }
 
     /// The geometry of this config's window and shape at `hop` and `rate`.
-    fn geometry_at(&self, rate: SampleRate, hop: Samples) -> Result<StftGeometry> {
-        let window = WindowLength::new(self.window).ok_or(Error::ZeroWindow)?;
-        let hop = HopSize::new(hop).ok_or(Error::ZeroHop)?;
+    fn geometry_at(&self, rate: SampleRate, hop: Samples) -> Result<StftGeometry, TransformError> {
+        let window = WindowLength::new(self.window).ok_or(FramingError::ZeroWindow)?;
+        let hop = HopSize::new(hop).ok_or(FramingError::ZeroHop)?;
         Ok(StftGeometry::new(rate, window, hop).shape(self.window_fn))
     }
 
@@ -438,7 +450,7 @@ pub fn stft<S: Sample>(
     samples: Mono<'_, S>,
     range: SampleRange,
     rate: impl Into<SampleRate>,
-) -> Result<Stft> {
+) -> Result<Stft, TransformError> {
     let samples = widen(samples.samples());
     let (start, end) = range.resolve(samples.len());
     let slice = &samples[start..end];
@@ -456,7 +468,7 @@ pub fn stft_polar<S: Sample>(
     samples: Mono<'_, S>,
     range: SampleRange,
     rate: impl Into<SampleRate>,
-) -> Result<StftPolar> {
+) -> Result<StftPolar, TransformError> {
     Ok(stft(config, samples, range, rate)?.to_polar())
 }
 
@@ -474,7 +486,7 @@ pub fn stft_magnitude<S: Sample>(
     samples: Mono<'_, S>,
     range: SampleRange,
     rate: impl Into<SampleRate>,
-) -> Result<StftMagnitude> {
+) -> Result<StftMagnitude, TransformError> {
     let samples = widen(samples.samples());
     let (start, end) = range.resolve(samples.len());
     let slice = &samples[start..end];

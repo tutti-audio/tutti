@@ -5,7 +5,10 @@ use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, Speaker};
 use tutti_units::Amplitude;
 
 /// Pushes one chunk to a windowed meter and returns the reading it yields.
-fn read(state: &mut WindowedMeter<f32>, chunk: Interleaved<'_>) -> Result<WindowedReading> {
+fn read(
+    state: &mut WindowedMeter<f32>,
+    chunk: Interleaved<'_>,
+) -> Result<WindowedReading, MeterError> {
     let mut readings = Vec::new();
     state.push(chunk, &mut readings)?;
     assert_eq!(readings.len(), 1, "one reading per accepted push");
@@ -19,7 +22,7 @@ struct Rated<C>(C, SampleRate);
 fn measure_loudness<S: Sample>(
     c: &Rated<LoudnessConfig>,
     buffer: Interleaved<'_, S>,
-) -> Result<Loudness> {
+) -> Result<Loudness, MeterError> {
     super::measure_loudness(&c.0, buffer, c.1)
 }
 
@@ -192,7 +195,7 @@ fn a_chunk_of_the_wrong_width_is_refused() {
             Interleaved::new(&buf, ChannelLayout::QUAD).unwrap(),
             &mut ()
         ),
-        Err(Error::ChunkLayoutMismatch {
+        Err(MeterError::ChunkLayoutMismatch {
             chunk: ChannelLayout::QUAD,
             config: ChannelLayout::STEREO,
         })
@@ -505,7 +508,7 @@ fn bad_settings_and_input_are_errors() {
     for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
         let mut chunk = tone.clone();
         chunk[7] = bad;
-        assert_eq!(fed(&mut state, &chunk), Err(Error::NonFiniteInput));
+        assert_eq!(fed(&mut state, &chunk), Err(MeterError::NonFiniteInput));
         assert_eq!(state.frames_seen(), frames, "a refused chunk feeds nothing");
     }
     assert!(matches!(
@@ -513,7 +516,7 @@ fn bad_settings_and_input_are_errors() {
             &mut state,
             Interleaved::new(&tone, ChannelLayout::QUAD).unwrap()
         ),
-        Err(Error::ChunkLayoutMismatch { .. })
+        Err(MeterError::ChunkLayoutMismatch { .. })
     ));
     assert_eq!(state.frames_seen(), frames);
 
@@ -522,7 +525,7 @@ fn bad_settings_and_input_are_errors() {
     for rate in [7_999.0, 192_001.0] {
         assert!(matches!(
             Measure::<f32>::measure(&cfg.0, SampleRate::of(rate)),
-            Err(Error::SampleRateOutOfRange { .. })
+            Err(MeterError::SampleRateOutOfRange { .. })
         ));
     }
 }
@@ -700,21 +703,21 @@ fn a_topology_without_angles_is_refused_by_name() {
     let unplaced = ChannelTopology::unassigned(ChannelLayout::from(3u16));
     assert_eq!(
         Measure::<f32>::measure(&LoudnessConfig::new(ambisonic.clone()), rate).unwrap_err(),
-        Error::AmbisonicLoudness
+        MeterError::AmbisonicLoudness
     );
     assert_eq!(
         Measure::<f32>::measure(&LoudnessConfig::new(unplaced.clone()), rate).unwrap_err(),
-        Error::UnplacedLoudnessChannels {
+        MeterError::UnplacedLoudnessChannels {
             width: ChannelLayout::from(3u16)
         }
     );
     assert_eq!(
         Measure::<f32>::measure(&WindowedLoudnessConfig::new(ambisonic), rate).unwrap_err(),
-        Error::AmbisonicLoudness
+        MeterError::AmbisonicLoudness
     );
     assert!(matches!(
         Measure::<f32>::measure(&WindowedLoudnessConfig::new(unplaced), rate),
-        Err(Error::UnplacedLoudnessChannels { .. })
+        Err(MeterError::UnplacedLoudnessChannels { .. })
     ));
 }
 
@@ -796,7 +799,7 @@ fn the_true_peak_meter_floors_silence_and_refuses_a_wrong_width() {
             Interleaved::new(&loud, ChannelLayout::QUAD).unwrap(),
             &mut ()
         ),
-        Err(Error::ChunkLayoutMismatch { .. })
+        Err(MeterError::ChunkLayoutMismatch { .. })
     ));
     state
         .push(

@@ -45,12 +45,12 @@ use tutti_buffers::{Mono, Sample};
 use tutti_dsp::{BandedTransition, FrameCount, viterbi};
 use tutti_units::{Cents, Confidence, Hz, SampleRate, Samples, ranged};
 
+use crate::PitchError;
 use crate::analyses::notes::PitchHop;
 use crate::analyses::yin::{PitchDetector, YinConfig};
 use crate::convert::widen;
 use crate::framing::{Framing, check_frame_count};
 use crate::meters::chroma::FrequencyBand;
-use crate::{Error, Result};
 
 ranged! {
     /// The mean of pYIN's Beta prior on the threshold: within `0.02..=0.5`.
@@ -121,8 +121,8 @@ impl PyinConfig {
     /// Searches and tracks `band`: the lowest pitch is the first bin of the
     /// grid, and the grid runs in 10 cent steps to the last bin within the
     /// top. A band whose top exceeds half the buffer's sample rate is refused
-    /// by [`pyin_track`] ([`Error::AboveNyquist`]), and one spanning more
-    /// than 32767 bins of 10 cents ([`Error::PitchGridTooLarge`]).
+    /// by [`pyin_track`] ([`AboveNyquist`](crate::AboveNyquist)), and one spanning more
+    /// than 32767 bins of 10 cents ([`PitchError::PitchGridTooLarge`]).
     #[must_use]
     pub fn band(mut self, band: FrequencyBand) -> Self {
         self.band = band;
@@ -157,17 +157,17 @@ impl PyinConfig {
     ///
     /// # Errors
     ///
-    /// [`Error::AboveNyquist`] when the band's top exceeds half `rate`.
-    pub fn buffer_size(&self, rate: impl Into<SampleRate>) -> Result<Samples> {
+    /// [`AboveNyquist`](crate::AboveNyquist) when the band's top exceeds half `rate`.
+    pub fn buffer_size(&self, rate: impl Into<SampleRate>) -> Result<Samples, PitchError> {
         YinConfig::new().band(self.band).buffer_size(rate.into())
     }
 
     /// The grid's bins, the lowest pitch and every 10 cents up to the top, and
     /// the transition matrix over them in a voiced and an unvoiced layer.
-    fn model(&self) -> Result<(usize, BandedTransition<f64>)> {
+    fn model(&self) -> Result<(usize, BandedTransition<f64>), PitchError> {
         let span = libm::log2(self.band.max().get() / self.band.min().get()) * 1200.0;
         let bins = (span / BIN.get()) as usize + 1;
-        let too_large = Error::PitchGridTooLarge {
+        let too_large = PitchError::PitchGridTooLarge {
             bins,
             max: MAX_BINS,
         };
@@ -233,22 +233,22 @@ fn threshold_weights(mean: f64) -> [f64; THRESHOLDS] {
 ///
 /// # Errors
 ///
-/// [`Error::AboveNyquist`] when the band's top exceeds half `rate`;
-/// [`Error::PitchGridTooLarge`] for a band of too many bins;
-/// [`Error::InsufficientInput`] if `samples` is shorter than
-/// [`PyinConfig::buffer_size`]; [`Error::TooManyFrames`] when the track would
+/// [`AboveNyquist`](crate::AboveNyquist) when the band's top exceeds half `rate`;
+/// [`PitchError::PitchGridTooLarge`] for a band of too many bins;
+/// [`PitchError::InsufficientInput`] if `samples` is shorter than
+/// [`PyinConfig::buffer_size`]; [`PitchError::TooManyFrames`] when the track would
 /// hold more than 65536 frames.
 pub fn pyin_track<S: Sample>(
     cfg: &PyinConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
     hop: PitchHop,
-) -> Result<Vec<PyinFrame>> {
+) -> Result<Vec<PyinFrame>, PitchError> {
     let plan = YinConfig::new().band(cfg.band).plan(rate.into())?;
     let (bins, transition) = cfg.model()?;
     let frame = plan.buffer_size();
     if samples.frames() < frame {
-        return Err(Error::InsufficientInput {
+        return Err(PitchError::InsufficientInput {
             needed: frame,
             got: samples.frames(),
         });

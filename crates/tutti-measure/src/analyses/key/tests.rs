@@ -104,20 +104,20 @@ fn a_blurred_chroma_is_less_certain() {
 #[test]
 fn silence_and_flat_chroma_are_errors() {
     let bad = |x: [f64; CLASSES]| estimate_key_from_mean(KeyProfile::Krumhansl, &x).unwrap_err();
-    assert_eq!(bad([0.0; CLASSES]), Error::NoTonalContent);
-    assert_eq!(bad([0.3; CLASSES]), Error::NoTonalContent);
-    assert_eq!(bad([1e-30; CLASSES]), Error::NoTonalContent);
+    assert_eq!(bad([0.0; CLASSES]), KeyEstimateError::NoTonalContent);
+    assert_eq!(bad([0.3; CLASSES]), KeyEstimateError::NoTonalContent);
+    assert_eq!(bad([1e-30; CLASSES]), KeyEstimateError::NoTonalContent);
     // One ulp of spread on 0.3 is rounding, not a key.
     let mut ulp = [0.3f64; CLASSES];
     ulp[0] = 0.3 + 0.3 * f64::EPSILON;
-    assert_eq!(bad(ulp), Error::NoTonalContent);
+    assert_eq!(bad(ulp), KeyEstimateError::NoTonalContent);
     let mut tilted = [0.5f64; CLASSES];
     tilted[0] = 0.51;
     assert!(estimate_key_from_mean(KeyProfile::Krumhansl, &tilted).is_ok());
     let none = Grid::try_from((Vec::new(), FrameCount(0), BinCount(CLASSES))).unwrap();
     assert_eq!(
         estimate_key(KeyProfile::Krumhansl, &none).unwrap_err(),
-        Error::NoTonalContent
+        KeyEstimateError::NoTonalContent
     );
 }
 
@@ -127,15 +127,15 @@ fn bad_chroma_is_refused() {
     let mut x = [0.5f64; CLASSES];
     x[3] = f64::NAN;
     let e = |x: &[f64; CLASSES]| estimate_key_from_mean(KeyProfile::Krumhansl, x).unwrap_err();
-    assert_eq!(e(&x), Error::NonFiniteInput);
+    assert_eq!(e(&x), KeyEstimateError::NonFiniteInput);
     x[3] = f64::INFINITY;
-    assert_eq!(e(&x), Error::NonFiniteInput);
+    assert_eq!(e(&x), KeyEstimateError::NonFiniteInput);
     x[3] = -0.1;
-    assert_eq!(e(&x), Error::NegativeInput);
+    assert_eq!(e(&x), KeyEstimateError::NegativeInput);
     let wide = Grid::try_from((vec![0.5; 13], FrameCount(1), BinCount(13))).unwrap();
     assert_eq!(
         estimate_key(KeyProfile::Krumhansl, &wide),
-        Err(Error::NotTwelveClasses { columns: 13 })
+        Err(KeyEstimateError::NotTwelveClasses { columns: 13 })
     );
 }
 

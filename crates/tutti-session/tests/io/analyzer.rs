@@ -9,7 +9,7 @@ use std::num::NonZeroUsize;
 use tutti_buffers::{ChannelLayout, ChannelTopology, InterleavedMut, Mono, Wave};
 use tutti_graph::{ForkByClone, TapAlign, TapOptions};
 use tutti_measure::{
-    Error as MeasureError, PeakBlocks, PeakConfig, VectorscopeConfig, WindowedLoudnessConfig,
+    MeterError as MeasureError, PeakBlocks, PeakConfig, VectorscopeConfig, WindowedLoudnessConfig,
 };
 use tutti_nodes::testing::{Const, Osc, Through};
 use tutti_session::{Analyzer, AnalyzerError, MeterBindError, Session};
