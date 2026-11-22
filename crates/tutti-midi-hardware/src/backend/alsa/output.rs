@@ -160,7 +160,7 @@ pub(super) fn connect(id: EndpointId) -> Result<AlsaOutput> {
 
     // Non-blocking: a destination with no room refuses the send, which is
     // counted, rather than holding the caller until it has some.
-    let seq = super::client::open(CLIENT, UmpVersion::Midi2)?;
+    let seq = Client::open(CLIENT, UmpVersion::Midi2)?;
     let port = seq.open_port(
         CLIENT,
         // Not subscribable by others, so never listed as a device (see

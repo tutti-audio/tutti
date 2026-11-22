@@ -87,7 +87,7 @@ impl Virtual {
 }
 
 fn plug(name: &str) -> Virtual {
-    let seq = super::client::open(name, tutti_alsa_ffi::UmpVersion::Midi2)
+    let seq = Client::open(name, tutti_alsa_ffi::UmpVersion::Midi2)
         .expect("a sequencer to open (modprobe snd-seq)");
     let caps = PortCaps::READ | PortCaps::SUBS_READ | PortCaps::WRITE | PortCaps::SUBS_WRITE;
     seq.open_port("port", caps, PortKind::MIDI_GENERIC | PortKind::APPLICATION)
@@ -281,7 +281,7 @@ fn a_saved_alsa_device_resolves_by_name_only() {
 fn a_port_gaining_its_capabilities_is_added_as_a_duplex() {
     let devices = Watched::open();
     let name = unique("caps");
-    let seq = super::client::open(&name, tutti_alsa_ffi::UmpVersion::Midi2)
+    let seq = Client::open(&name, tutti_alsa_ffi::UmpVersion::Midi2)
         .expect("a sequencer to open (modprobe snd-seq)");
     let kind = PortKind::MIDI_GENERIC | PortKind::APPLICATION;
     let port = seq
