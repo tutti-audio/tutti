@@ -219,7 +219,7 @@ fn the_transport_an_offline_fork_sees_is_env_at_every_chunk() {
     let probe = load_probe(SAMPLE_RATE);
     let fork = probe
         .client
-        .fork_instance(RenderMode::Offline, scene_tempo())
+        .fork_instance(scene_tempo())
         .expect("the probe forks");
     const BLOCK: usize = 2 * CHUNK;
     // A 64-frame device quantum in 128-frame blocks: two chunks a block.
@@ -227,7 +227,8 @@ fn the_transport_an_offline_fork_sees_is_env_at_every_chunk() {
         SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples::new(BLOCK)),
     )
-    .with_quantum(MaxBlock::of(Samples::new(CHUNK)));
+    .with_quantum(MaxBlock::of(Samples::new(CHUNK)))
+    .with_render_mode(RenderMode::Offline);
     let mut rig = Rig::prepared(fork, prepare);
 
     const BLOCKS: usize = 24;
@@ -300,7 +301,7 @@ fn a_plugin_behind_a_latent_path_sees_the_transport_its_input_was_rendered_at() 
     let probe = load_probe(SAMPLE_RATE);
     let fork = probe
         .client
-        .fork_instance(RenderMode::Offline, scene_tempo())
+        .fork_instance(scene_tempo())
         .expect("the probe forks");
     const BLOCK: usize = 2 * CHUNK;
     const ARRIVAL: usize = 40;
@@ -308,7 +309,8 @@ fn a_plugin_behind_a_latent_path_sees_the_transport_its_input_was_rendered_at() 
         SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples::new(BLOCK)),
     )
-    .with_quantum(MaxBlock::of(Samples::new(CHUNK)));
+    .with_quantum(MaxBlock::of(Samples::new(CHUNK)))
+    .with_render_mode(RenderMode::Offline);
     let mut rig = Rig::behind(fork, prepare, Latency::new(Samples::new(ARRIVAL)));
 
     const BLOCKS: usize = 24;
@@ -369,13 +371,14 @@ fn the_plugin_is_told_the_maps_tempo_and_slope() {
     let probe = load_probe(SAMPLE_RATE);
     let fork = probe
         .client
-        .fork_instance(RenderMode::Offline, ramp_tempo())
+        .fork_instance(ramp_tempo())
         .expect("the probe forks");
     let prepare = tutti_graph::Prepare::new(
         SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples::new(CHUNK)),
     )
-    .with_quantum(MaxBlock::of(Samples::new(CHUNK)));
+    .with_quantum(MaxBlock::of(Samples::new(CHUNK)))
+    .with_render_mode(RenderMode::Offline);
     let mut rig = Rig::prepared(fork, prepare);
 
     let ins = rig.inputs();
@@ -455,13 +458,14 @@ fn a_ramps_end_inside_a_chunk_is_a_transport_event_at_its_frame() {
     let probe = load_probe(SAMPLE_RATE);
     let fork = probe
         .client
-        .fork_instance(RenderMode::Offline, two_ramps())
+        .fork_instance(two_ramps())
         .expect("the probe forks");
     let prepare = tutti_graph::Prepare::new(
         SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples::new(CHUNK)),
     )
-    .with_quantum(MaxBlock::of(Samples::new(CHUNK)));
+    .with_quantum(MaxBlock::of(Samples::new(CHUNK)))
+    .with_render_mode(RenderMode::Offline);
     let mut rig = Rig::prepared(fork, prepare);
 
     let s0 = (-2.0 + (4.0f64 + 1.25 * 3.999).sqrt()) / 0.625;
