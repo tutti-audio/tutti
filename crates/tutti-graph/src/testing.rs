@@ -990,7 +990,7 @@ impl<F: Float> Pair<F> {
     }
 }
 
-/// A deterministic global input signal.
+/// A deterministic main input signal.
 pub fn input_signal<F: Float>(start: u64, frames: usize) -> Vec<F> {
     (0..frames)
         .map(|i| {

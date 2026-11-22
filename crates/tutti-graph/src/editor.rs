@@ -100,7 +100,7 @@ pub use unwired::{Inserted, Unwired};
 /// The host's side of a main output generation: whether it has published the folds
 /// for `main_output` at `outputs` channels ([`Editor::set_main_output_gate`]).
 pub trait MainOutputGate: Send + Sync {
-    /// Whether a plan of generation `main_output` with `outputs` global outputs has
+    /// Whether a plan of generation `main_output` with `outputs` main outputs has
     /// its folds. A graph with no outputs has nothing to fold.
     fn published(&self, main_output: crate::MainOutputId, outputs: usize) -> bool;
 }
@@ -114,8 +114,8 @@ pub trait MainOutputGate: Send + Sync {
 /// scratch's width and length.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
-    /// Most global outputs a committed graph may have.
-    pub max_global_outputs: usize,
+    /// Most main outputs a committed graph may have.
+    pub max_main_outputs: usize,
     /// Largest `MaxBlock` a re-prepare may ask for, in frames.
     pub max_block: usize,
 }
@@ -123,15 +123,15 @@ pub struct Limits {
 impl Limits {
     /// No limit: what an editor starts with.
     pub const NONE: Limits = Limits {
-        max_global_outputs: usize::MAX,
+        max_main_outputs: usize::MAX,
         max_block: usize::MAX,
     };
 
     fn outputs(&self, outputs: usize) -> Result<(), CommitError> {
-        if outputs > self.max_global_outputs {
+        if outputs > self.max_main_outputs {
             return Err(CommitError::TooManyOutputs {
                 outputs,
-                limit: self.max_global_outputs,
+                limit: self.max_main_outputs,
             });
         }
         Ok(())
@@ -206,7 +206,7 @@ impl Limits {
 /// editor.insert(half, "half", ForkByClone(Half));
 /// let topology = &mut editor.spec_mut().topology;
 /// topology.inputs = ChannelLayout::MONO;
-/// topology.connect(InputPort { node: half, port: 0 }, Edge::Direct(PortSource::Global(0)));
+/// topology.connect(InputPort { node: half, port: 0 }, Edge::Direct(PortSource::MainInput(0)));
 /// topology.set_outputs([PortSource::Node(OutputPort { node: half, port: 0 })]);
 /// editor.commit().expect("compiles");
 ///
@@ -425,14 +425,12 @@ impl<F: Float> Editor<F> {
         // looser one would let through a graph the host's buffers cannot
         // run).
         let limits = Limits {
-            max_global_outputs: limits
-                .max_global_outputs
-                .min(self.limits.max_global_outputs),
+            max_main_outputs: limits.max_main_outputs.min(self.limits.max_main_outputs),
             max_block: limits.max_block.min(self.limits.max_block),
         };
         self.collect();
         if let Some(plan) = self.life.plan() {
-            limits.outputs(plan.global_outputs())?;
+            limits.outputs(plan.main_outputs())?;
         }
         limits.block(self.prepare.max_block().get())?;
         self.limits = limits;

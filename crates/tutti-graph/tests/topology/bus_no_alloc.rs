@@ -72,7 +72,7 @@ impl Node for Downmixer {
 
 /// Nodes: 1 a 5.1 source and 2 a stereo sink joined by a bus edge; 3 a latent
 /// downmixer, bypassed; 4 one at `Mix::DRY`. Every node's inputs are the six
-/// global ones; the outputs are the two channels of nodes 2, 3 and 4.
+/// main-input ones; the outputs are the two channels of nodes 2, 3 and 4.
 fn rig(workers: usize) -> (Editor, Executor) {
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
     if workers > 1 {
@@ -105,7 +105,7 @@ fn rig(workers: usize) -> (Editor, Executor) {
                     node: key(n),
                     port: c,
                 },
-                Edge::Direct(PortSource::Global(c)),
+                Edge::Direct(PortSource::MainInput(c)),
             );
         }
     }

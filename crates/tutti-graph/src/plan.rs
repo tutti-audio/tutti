@@ -101,7 +101,7 @@ pub enum DelayKey {
     Audio {
         /// The sink port.
         at: InputPort,
-        /// What feeds it: a node port or a global input channel.
+        /// What feeds it: a node port or a main input channel.
         from: PortSource,
     },
     /// One source of an event input port. Each source of a fan-in port can
@@ -124,7 +124,7 @@ pub enum DelayKey {
     },
     /// The event source of a driven edge gain, delayed to the edge's sink
     /// like a param's source ([`ParamEvent`](Self::ParamEvent), whose rules
-    /// it has): to the sink node's arrival, or, for a global output channel,
+    /// it has): to the sink node's arrival, or, for a main output channel,
     /// to the output time (see
     /// [`GraphSpec::connect_edge_gain`](crate::GraphSpec::connect_edge_gain)).
     /// Its pending events are not flushed when the key disappears.
@@ -134,7 +134,7 @@ pub enum DelayKey {
         /// The event output that drives it.
         from: EventOutputPort,
     },
-    /// A global output channel, delayed to align with the slowest channel.
+    /// A main output channel, delayed to align with the slowest channel.
     Output {
         /// The graph output channel.
         channel: u16,
@@ -405,8 +405,8 @@ pub struct PlanUnit {
 /// [`Plan::audio_list`] or [`Plan::event_list`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Op {
-    /// Copy a global input channel into a slot.
-    GlobalIn {
+    /// Copy a main input channel into a slot.
+    MainInput {
         /// The graph input channel.
         channel: u16,
         /// Audio slot written.
@@ -504,7 +504,7 @@ pub enum Op {
         /// base. Their sources are read by this op, before the node runs.
         params: Span,
     },
-    /// Write a global output channel, through its alignment ring if it has one.
+    /// Write a main output channel, through its alignment ring if it has one.
     Output {
         /// The graph output channel.
         channel: u16,
@@ -1058,7 +1058,7 @@ pub struct Plan {
     pub(crate) units: Vec<PlanUnit>,
     pub(crate) store_len: u32,
     pub(crate) order: Vec<NodeKey>,
-    pub(crate) global_inputs: u16,
+    pub(crate) main_inputs: u16,
     pub(crate) compensation: Vec<Samples>,
     /// The main output generation the spec carried when this plan was committed.
     pub(crate) main_output_id: crate::MainOutputId,
@@ -1328,9 +1328,9 @@ impl Plan {
         &self.order
     }
 
-    /// Global input width.
-    pub fn global_inputs(&self) -> u16 {
-        self.global_inputs
+    /// Main input width.
+    pub fn main_inputs(&self) -> u16 {
+        self.main_inputs
     }
 
     /// The generation of the main output this plan renders into: what the engine
@@ -1339,12 +1339,12 @@ impl Plan {
         self.main_output_id
     }
 
-    /// Global output width: the main output's channels.
-    pub fn global_outputs(&self) -> usize {
+    /// Main output width: the main output's channels.
+    pub fn main_outputs(&self) -> usize {
         self.compensation.len()
     }
 
-    /// The output channels the plan renders: [`global_outputs`](Self::global_outputs)
+    /// The output channels the plan renders: [`main_outputs`](Self::main_outputs)
     /// and, during a main output change's crossfade, the old main output's channels after
     /// them ([`main_output_bank`](Self::main_output_bank)). The slices a render is handed.
     pub fn rendered_outputs(&self) -> usize {
@@ -1353,7 +1353,7 @@ impl Plan {
 
     /// The old main output this plan renders beside its own while the main output change
     /// that made it crossfades: its channels are
-    /// `global_outputs()..rendered_outputs()`.
+    /// `main_outputs()..rendered_outputs()`.
     pub fn main_output_bank(&self) -> Option<crate::MainOutputBank> {
         self.main_output_bank
     }

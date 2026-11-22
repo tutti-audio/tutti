@@ -467,7 +467,7 @@ fn output_bits(workers: usize, main_output: bool, track: bool) -> Vec<u32> {
                 node: NodeKey(lag),
                 port: 0,
             },
-            vec![Edge::Direct(PortSource::Global(0))],
+            vec![Edge::Direct(PortSource::MainInput(0))],
         );
         t.edges.insert(
             InputPort {

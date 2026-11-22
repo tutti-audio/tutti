@@ -1,7 +1,7 @@
 //! Level meters: declared readers on ports of the compiled plan.
 //!
 //! A meter is declared on the [`Topology`](crate::Topology) as "measure
-//! these sources" ([`MeterSpec`](crate::MeterSpec)): the global outputs
+//! these sources" ([`MeterSpec`](crate::MeterSpec)): the main outputs
 //! for a main output meter (`Outputs`, aligned: each lane is what its output
 //! channel carries, at the output's time), any node's output ports for a track
 //! (`Ports { sources, align }`, as they leave their nodes or aligned to the

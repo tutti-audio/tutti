@@ -252,7 +252,7 @@ impl<const IN: u16, const OUT: u16> Node for Events<IN, OUT> {
 // ---- the graph's own vocabulary ----------------------------------------------
 
 /// Every [`OutputPort`] kind survives a write and a read-back, on a node
-/// port and on a global output: the translation to the spec's spelling and
+/// port and on a main output: the translation to the spec's spelling and
 /// back is total and lossless.
 #[test]
 fn every_source_reads_back_as_written() {
@@ -286,7 +286,7 @@ fn every_source_reads_back_as_written() {
         assert_eq!(
             graph.sources(MainOutput::channel(1)).unwrap(),
             held,
-            "global output"
+            "main output"
         );
     }
 }
@@ -1566,7 +1566,7 @@ fn a_streamed_voice_keeps_sounding_after_the_host_drops_its_handle() {
     assert_eq!(block[1_022], 0.0, "the graph's handle removed the voice");
 }
 
-/// The widest global input a layout holds builds: the count is a
+/// The widest main input a layout holds builds: the count is a
 /// `ChannelLayout`, so one no layout holds cannot be written.
 #[test]
 fn the_widest_input_layout_builds() {

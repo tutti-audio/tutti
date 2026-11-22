@@ -119,7 +119,7 @@ fn step(r: &mut Renderer, frames: usize) -> Block {
     exec.apply_pending();
     let fade = exec.main_output_fade();
     let plan = exec.plan().expect("a plan");
-    let (rendered, base) = (plan.rendered_outputs(), plan.global_outputs());
+    let (rendered, base) = (plan.rendered_outputs(), plan.main_outputs());
     let mut bufs = vec![vec![0.0f32; frames]; rendered];
     let mut refs: Vec<&mut [f32]> = bufs.iter_mut().map(|b| &mut b[..]).collect();
     exec.process(frames, &TransportPosition::default(), &[], &mut refs);

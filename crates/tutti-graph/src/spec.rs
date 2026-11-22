@@ -122,7 +122,7 @@ impl EventEdge {
     }
 }
 
-/// The graph as a value: a [`Topology`] (nodes, audio edges, global inputs
+/// The graph as a value: a [`Topology`] (nodes, audio edges, main inputs
 /// and outputs) plus event edges, param modulation and unit generations.
 ///
 /// Plain data — `Clone`, `Eq` and `Hash` — built and edited on the control
@@ -139,7 +139,7 @@ impl EventEdge {
 /// sources, merged by offset.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct GraphSpec {
-    /// Nodes, audio edges, global outputs and global input width — unchanged.
+    /// Nodes, audio edges, main outputs and main input width — unchanged.
     pub topology: Topology,
     /// Event edges, keyed on the sink port: every source of the port (an
     /// event input may have several). An empty `Vec` is
@@ -248,7 +248,7 @@ impl GraphSpec {
         self.topology.disconnect(at, edge)
     }
 
-    /// Removes `source` from the sources of global output `channel`, and its
+    /// Removes `source` from the sources of main output `channel`, and its
     /// gain entry with it. Returns whether it was there.
     ///
     /// # Panics
@@ -288,7 +288,7 @@ impl GraphSpec {
     ///
     /// **PDC.** The source is aligned to the edge's sink: to the sink node's
     /// arrival (a later source raises it, as a param source does), or, for a
-    /// global output channel, to the output time (a later source raises
+    /// main output channel, to the output time (a later source raises
     /// that). The delay is keyed [`DelayKey::EdgeGain`](crate::DelayKey::EdgeGain).
     ///
     /// An edge without an entry gets one (base unity, the default range): the
@@ -358,7 +358,7 @@ impl GraphSpec {
     }
 
     /// Whether edge `id` is in the topology: a direct or feedback edge of an
-    /// input port, or a source of a global output channel.
+    /// input port, or a source of a main output channel.
     #[must_use]
     pub fn has_edge(&self, id: EdgeId) -> bool {
         match id.sink {
@@ -1030,7 +1030,7 @@ fn driving_nodes<'a>(
     event_sources.chain(param_sources).chain(gain_sources)
 }
 
-/// The nodes that drive the gain of an edge into a global output channel:
+/// The nodes that drive the gain of an edge into a main output channel:
 /// [`LatencyGraph::output_sources`].
 fn output_gain_sources(gains: &BTreeMap<EdgeId, EdgeGain>) -> impl Iterator<Item = NodeKey> + '_ {
     gains

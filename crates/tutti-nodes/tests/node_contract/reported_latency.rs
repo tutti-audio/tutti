@@ -338,7 +338,7 @@ fn a_limiter_summed_with_a_dry_path_reports_the_limiter_latency() {
     ));
     g.connect_input(0, lim, 0);
     g.connect_output(lim, 0, 0);
-    g.add_output(0, PortSource::Global(0));
+    g.add_output(0, PortSource::MainInput(0));
     let mut r = g
         .renderer(Prepare::new(SR, MaxBlock::of(Samples::new(BLOCK))))
         .expect("builds");

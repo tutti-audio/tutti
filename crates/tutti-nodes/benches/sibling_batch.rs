@@ -2,7 +2,7 @@
 //! one kind into one kernel call would save, at the graph level.
 //!
 //! Each case is one block of `frames` through an `Executor` (serial, no
-//! pool), `members` siblings of one kind, every member reading the global
+//! pool), `members` siblings of one kind, every member reading the main
 //! input and writing graph outputs of its own (no sum, so nothing but the
 //! members and the copies differs between rows). Rows, per kind:
 //!
@@ -336,7 +336,7 @@ enum Variant {
     Soa,
 }
 
-/// Member `m`'s channel `c` reads global input `c`, and output
+/// Member `m`'s channel `c` reads main input `c`, and output
 /// `m * width + c` is its own.
 fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executor {
     let (mut ed, mut exec) = Editor::new(Prepare::new(
@@ -349,14 +349,14 @@ fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executo
     let feed = |ed: &mut Editor, node: NodeKey, port: u16, c: usize| {
         ed.spec_mut().topology.edges.insert(
             InputPort { node, port },
-            vec![Edge::Direct(PortSource::Global(c as u16))],
+            vec![Edge::Direct(PortSource::MainInput(c as u16))],
         );
     };
     match variant {
         Variant::None => {
             for _ in 0..members {
                 for c in 0..w {
-                    outputs.push(PortSource::Global(c as u16));
+                    outputs.push(PortSource::MainInput(c as u16));
                 }
             }
         }

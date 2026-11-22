@@ -1,6 +1,6 @@
 //! `Editor::set_limits`: a host's bounds, enforced where commits are made.
 //!
-//! The engine sets these to its fold scratch (`MAX_CHANNELS` global
+//! The engine sets these to its fold scratch (`MAX_CHANNELS` main
 //! outputs, its block capacity); a graph past them must be refused on the
 //! control thread rather than reach an audio callback that cannot run it.
 
@@ -38,7 +38,7 @@ fn wire(ed: &mut Editor, width: u16) {
 }
 
 const LIMITS: Limits = Limits {
-    max_global_outputs: 8,
+    max_main_outputs: 8,
     max_block: 1024,
 };
 
@@ -99,7 +99,7 @@ fn limits_below_what_was_sent_are_refused() {
     let (mut ed, _exec) = Editor::new(prep(1024));
     assert!(matches!(
         ed.set_limits(Limits {
-            max_global_outputs: 8,
+            max_main_outputs: 8,
             max_block: 512
         }),
         Err(CommitError::BlockTooLong { .. })
@@ -124,14 +124,14 @@ fn limits_only_tighten() {
     ed.set_limits(Limits::NONE).expect("a no-op");
     assert_eq!(ed.limits(), LIMITS);
     ed.set_limits(Limits {
-        max_global_outputs: 4,
+        max_main_outputs: 4,
         max_block: 4096,
     })
     .expect("tightens one field");
     assert_eq!(
         ed.limits(),
         Limits {
-            max_global_outputs: 4,
+            max_main_outputs: 4,
             max_block: 1024
         }
     );

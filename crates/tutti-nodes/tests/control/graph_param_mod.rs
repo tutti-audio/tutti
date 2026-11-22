@@ -136,7 +136,7 @@ fn drive(ed: &mut Editor, at: ParamIn, knob: impl Into<ParamCell>, layers: Vec<L
     ed.commit().expect("the lane commits");
 }
 
-/// `node` with every input on a global input carrying noise, its outputs
+/// `node` with every input on a main input carrying noise, its outputs
 /// the graph's, and — when `fed` — `param` driven to exactly `v` by a
 /// control lane whose knob is at `v`, whatever the node's own control.
 /// Renders `FRAMES` in 100-frame blocks (not a multiple of 64).
