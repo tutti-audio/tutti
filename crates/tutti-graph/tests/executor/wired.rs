@@ -12,8 +12,8 @@ use tutti_graph::testing as common;
 use common::{Kind, TestNode, WORKERS, prepare, test_pool};
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::{
-    Bus, BusRef, BusRole, BusSource, Buses, Cx, Edge, EdgeFade, EdgeId, Editor, Executor,
-    FeedbackFrom, InputPort, Io, Node, NodeKey, OutputPort, PortSink, PortSource, Prepare, Rewired,
+    Bus, BusOutputPort, BusRole, Buses, Cx, Edge, EdgeFade, EdgeId, Editor, Executor, FeedbackFrom,
+    InputPort, Io, Node, NodeBus, NodeKey, OutputPort, PortSink, PortSource, Prepare, Rewired,
     Shape, Status, TapAlign, TapId, TapOptions, TransportPosition, Unforkable, Wired, WiredMask,
 };
 use tutti_units::{Samples, Tail};
@@ -321,13 +321,13 @@ fn pair() -> (Editor, Executor, Arc<Seen>, Arc<Seen>) {
 fn a_bus_edge_marks_every_channel_port_of_its_bus() {
     let (mut ed, mut exec, a, b) = pair();
     ed.connect_bus(
-        BusSource::Node(BusRef::new(PROBE, 0)),
-        BusRef::new(OTHER, 0),
+        BusOutputPort::Node(NodeBus::new(PROBE, 0)),
+        NodeBus::new(OTHER, 0),
     )
     .expect("stereo to stereo");
     ed.connect_bus(
-        BusSource::Node(BusRef::new(PROBE, 1)),
-        BusRef::new(OTHER, 1),
+        BusOutputPort::Node(NodeBus::new(PROBE, 1)),
+        NodeBus::new(OTHER, 1),
     )
     .expect("mono to mono");
     let report = ed.commit().expect("commits");

@@ -127,7 +127,7 @@ fn session_with<N: tutti_session::SessionNode>(unit: N) -> (DetachedSession, Nod
     for c in 0..2 {
         session
             .graph()
-            .connect(synth.out(c), MainOutput::channel(c))
+            .connect(synth.output(c), MainOutput::channel(c))
             .unwrap();
     }
     let _ = session.update();

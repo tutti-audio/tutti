@@ -774,7 +774,7 @@ fn chunked_midi_out_past_the_blocks_room_is_counted() {
     run_block(&mut unit, 0, 128);
     let room = tutti_plugin_types::MIDI_STACK_CAPACITY;
     assert_eq!(controls.midi_out_dropped(), (2 * 200 - room) as u64);
-    assert_eq!(unit.events_out(0).len(), room);
+    assert_eq!(unit.event_output(0).len(), room);
 }
 
 /// **Chords past the capacity of a piece are counted**, in the whole-block path

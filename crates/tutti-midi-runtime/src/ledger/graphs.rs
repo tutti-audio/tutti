@@ -784,13 +784,13 @@ fn a_reset_node_forgets_the_notes_it_held() {
         let mut d = Direct::new(clip, SampleRate::SR_48K, 256);
         d.set_transport(rolling(0));
         d.block();
-        assert_eq!(d.events_out(0).len(), 1, "the note started");
+        assert_eq!(d.event_output(0).len(), 1, "the note started");
         if reset {
             tutti_graph::Node::<f32>::reset(&mut *d.node);
         }
         d.set_transport(stopped(256));
         d.block();
-        d.events_out(0).len()
+        d.event_output(0).len()
     };
     assert_eq!(stop_after(false), 1, "the stop ends the held note");
     assert_eq!(stop_after(true), 0);
@@ -1215,7 +1215,7 @@ fn a_midi_1_pedal_and_bend_are_returned_in_midi_1() {
     d.block();
     d.block();
     let released: Vec<Ump> = d
-        .events_out(0)
+        .event_output(0)
         .iter()
         .map(|e| match e.kind {
             EventKind::Midi(u) => u,

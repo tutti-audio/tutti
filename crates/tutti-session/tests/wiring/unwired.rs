@@ -10,13 +10,13 @@
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
 use tutti_graph::{
-    Bus, BusRole, BusSource, Buses, Cx, Fade, ForkByClone, Io, Node, NodeKey, Prepare, Shape,
+    Bus, BusOutputPort, BusRole, Buses, Cx, Fade, ForkByClone, Io, Node, NodeKey, Prepare, Shape,
     Status,
 };
 use tutti_nodes::testing::Const;
 use tutti_session::{
-    BusSink, ChannelEdge, EventEdge, Feeder, InputPort, MainOutput, OutputPort, Replacement,
-    Session, SessionEvent,
+    BusInputPort, BusWire, ChannelEdge, EventEdge, Feeder, Inlet, InputPort, MainOutput,
+    OutputPort, Replacement, Session, SessionEvent,
 };
 use tutti_units::{Amplitude, Samples};
 
@@ -111,16 +111,16 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
     for (from, to) in [
         (OutputPort::new(a, 0), x.input(0)),
         (OutputPort::new(b, 0), x.input(1)),
-        (x.out(0), MainOutput::channel(0)),
-        (x.out(1), MainOutput::channel(1)),
+        (x.output(0), MainOutput::channel(0)),
+        (x.output(1), MainOutput::channel(1)),
     ] {
         g.connect(from, to).unwrap().unfaded();
     }
     for (from, to) in [
-        (src.events_out_at(0), x.events_in_at(0)),
-        (src.events_out_at(1), x.events_in_at(1)),
-        (x.events_out_at(0), sink.events_in_at(0)),
-        (x.events_out_at(1), sink.events_in_at(1)),
+        (src.event_output(0), x.event_input(0)),
+        (src.event_output(1), x.event_input(1)),
+        (x.event_output(0), sink.event_input(0)),
+        (x.event_output(1), sink.event_input(1)),
     ] {
         g.connect(from, to).unwrap();
     }
@@ -155,12 +155,12 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
     event_edges.sort();
     let mut want_edges = vec![
         ChannelEdge::new(OutputPort::new(b, 0), x.input(1)),
-        ChannelEdge::new(x.out(1), MainOutput::channel(1)),
+        ChannelEdge::new(x.output(1), MainOutput::channel(1)),
     ];
     want_edges.sort();
     let mut want_events = vec![
-        EventEdge::new(src.events_out_at(1), x.events_in_at(1)),
-        EventEdge::new(x.events_out_at(1), sink.events_in_at(1)),
+        EventEdge::new(src.event_output(1), x.event_input(1)),
+        EventEdge::new(x.event_output(1), sink.event_input(1)),
     ];
     want_events.sort();
     assert_eq!(edges, want_edges);
@@ -188,8 +188,8 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
         "the kept port is still wired"
     );
     assert_eq!(
-        s.graph().sources(x.events_in_at(0)).unwrap(),
-        [src.events_out_at(0)]
+        s.graph().sources(x.event_input(0)).unwrap(),
+        [src.event_output(0)]
     );
 
     // Reported once.
@@ -208,7 +208,7 @@ fn a_wider_reinsert_reports_nothing() {
     g.connect(OutputPort::new(a, 0), x.input(0))
         .unwrap()
         .unfaded();
-    g.connect(x.out(0), MainOutput::channel(0))
+    g.connect(x.output(0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     let events = s.update();
@@ -247,9 +247,9 @@ fn a_feed_naming_a_lost_event_output_is_not_written_back() {
     let src = g.add(ForkByClone(Ports::<0, 2>));
     let other = g.add(ForkByClone(Ports::<0, 1>));
     let sink = g.add(ForkByClone(Ports::<1, 0>));
-    g.set_feed(sink, Feeder::Sequencer, vec![src.events_out_at(0)])
+    g.set_feed(sink, Feeder::Sequencer, vec![src.event_output(0)])
         .unwrap();
-    g.set_feed(sink, Feeder::Routes, vec![src.events_out_at(1)])
+    g.set_feed(sink, Feeder::Routes, vec![src.event_output(1)])
         .unwrap();
     let events = s.update();
     assert!(!refused(&events));
@@ -265,11 +265,11 @@ fn a_feed_naming_a_lost_event_output_is_not_written_back() {
     let [(_, _, event_edges)] = <[_; 1]>::try_from(unwired(&events)).expect("one Unwired");
     assert_eq!(
         event_edges,
-        [EventEdge::new(src.events_out_at(1), sink.events_in())]
+        [EventEdge::new(src.event_output(1), sink.event_input(0))]
     );
 
     s.graph()
-        .set_feed(sink, Feeder::LiveInput, vec![other.events_out_at(0)])
+        .set_feed(sink, Feeder::LiveInput, vec![other.event_output(0)])
         .unwrap();
     let events = s.update();
     assert!(
@@ -277,8 +277,8 @@ fn a_feed_naming_a_lost_event_output_is_not_written_back() {
         "the lost output is not written back: {events:?}"
     );
     assert_eq!(
-        s.graph().sources(sink.events_in()).unwrap(),
-        [src.events_out_at(0), other.events_out_at(0)],
+        s.graph().sources(sink.event_input(0)).unwrap(),
+        [src.event_output(0), other.event_output(0)],
         "the feeds whose ports exist still deliver"
     );
 }
@@ -317,10 +317,18 @@ fn a_narrower_reinsert_reports_the_bus_edges_it_dropped() {
     let a = g.add(ForkByClone(Bused { aux: true }));
     let y = g.add(ForkByClone(Bused { aux: true }));
     let t = g.add(ForkByClone(Bused { aux: true }));
-    g.connect(a.bus_out(0), y.bus_in(0)).unwrap().unfaded();
-    g.connect(a.bus_out(1), y.bus_in(1)).unwrap().unfaded();
-    g.connect(y.bus_out(0), t.bus_in(0)).unwrap().unfaded();
-    g.connect(y.bus_out(1), t.bus_in(1)).unwrap().unfaded();
+    g.connect(a.bus_output(0), y.bus_input(0))
+        .unwrap()
+        .unfaded();
+    g.connect(a.bus_output(1), y.bus_input(1))
+        .unwrap()
+        .unfaded();
+    g.connect(y.bus_output(0), t.bus_input(0))
+        .unwrap()
+        .unfaded();
+    g.connect(y.bus_output(1), t.bus_input(1))
+        .unwrap()
+        .unfaded();
     let events = s.update();
     assert!(!refused(&events), "{events:?}");
 
@@ -342,9 +350,9 @@ fn a_narrower_reinsert_reports_the_bus_edges_it_dropped() {
             .collect::<Vec<_>>(),
     )
     .expect("one Unwired");
-    let mut want: Vec<(BusSource, BusSink)> = vec![
-        (a.bus_out(1), BusSink::Node(y.bus_in(1))),
-        (y.bus_out(1), BusSink::Node(t.bus_in(1))),
+    let mut want: Vec<(BusOutputPort, BusInputPort)> = vec![
+        (a.bus_output(1), y.bus_input(1)),
+        (y.bus_output(1), t.bus_input(1)),
     ];
     assert_eq!(bus_edges.len(), want.len());
     for w in want.drain(..) {
@@ -361,8 +369,8 @@ fn a_narrower_reinsert_reports_the_main_output_feed_it_dropped() {
     s.declare_main_output_topology(Some(ChannelTopology::default_for(ChannelLayout::STEREO)))
         .expect("stereo");
     let g = s.graph();
-    g.connect(y.bus_out(0), MainOutput).unwrap().unfaded();
-    g.connect(y.bus_out(1), MainOutput).unwrap().unfaded();
+    g.connect(y.bus_output(0), MainOutput).unwrap().unfaded();
+    g.connect(y.bus_output(1), MainOutput).unwrap().unfaded();
     let events = s.update();
     assert!(!refused(&events), "{events:?}");
 
@@ -374,14 +382,17 @@ fn a_narrower_reinsert_reports_the_main_output_feed_it_dropped() {
         .expect("the node is there");
     let events = s.update();
     assert!(!refused(&events), "{events:?}");
-    let reported: Vec<Vec<(BusSource, BusSink)>> = events
+    let reported: Vec<Vec<(BusOutputPort, BusInputPort)>> = events
         .iter()
         .filter_map(|e| match e {
             SessionEvent::Unwired { bus_edges, .. } => Some(bus_edges.clone()),
             _ => None,
         })
         .collect();
-    assert_eq!(reported, [vec![(y.bus_out(1), BusSink::MainOutput)]]);
+    assert_eq!(
+        reported,
+        [vec![(y.bus_output(1), Inlet::<BusWire>::sink(MainOutput))]]
+    );
 }
 
 /// **A commit that is refused reports nothing, and the record waits for the
@@ -407,8 +418,8 @@ fn unwired_waits_for_the_commit_that_lands() {
         Replacement::new(ForkByClone(Pass::<1, 1>)).fade(Fade::new(Samples::new(0))),
     )
     .expect("the node is there");
-    g.connect(u.out(0), v.input(0)).unwrap().unfaded();
-    g.connect(v.out(0), u.input(0)).unwrap().unfaded();
+    g.connect(u.output(0), v.input(0)).unwrap().unfaded();
+    g.connect(v.output(0), u.input(0)).unwrap().unfaded();
     let events = s.update();
     assert!(refused(&events), "the cycle is refused: {events:?}");
     assert!(unwired(&events).is_empty(), "nothing landed yet");
@@ -417,7 +428,7 @@ fn unwired_waits_for_the_commit_that_lands() {
 
     assert!(
         s.graph()
-            .disconnect(v.out(0), u.input(0))
+            .disconnect(v.output(0), u.input(0))
             .unwrap()
             .was_connected()
     );

@@ -956,12 +956,12 @@ fn move_feeds_moves_every_feeders_sources() {
     let new = g.add(ForkByClone(Events::<1, 0>));
     let clip = g.add(ForkByClone(Events::<0, 1>));
     let route = g.add(ForkByClone(Events::<0, 1>));
-    g.set_feed(old, Feeder::Sequencer, vec![clip.events_out()])
+    g.set_feed(old, Feeder::Sequencer, vec![clip.event_output(0)])
         .unwrap();
-    g.set_feed(old, Feeder::Routes, vec![route.events_out()])
+    g.set_feed(old, Feeder::Routes, vec![route.event_output(0)])
         .unwrap();
     let both = {
-        let mut v = vec![clip.events_out(), route.events_out()];
+        let mut v = vec![clip.event_output(0), route.event_output(0)];
         v.sort();
         v
     };
@@ -975,8 +975,14 @@ fn move_feeds_moves_every_feeders_sources() {
     assert_eq!(edges, both, "the union is the sink's event edges");
 
     g.move_feeds(old, new);
-    assert_eq!(g.feed(new, Feeder::Sequencer).unwrap(), [clip.events_out()]);
-    assert_eq!(g.feed(new, Feeder::Routes).unwrap(), [route.events_out()]);
+    assert_eq!(
+        g.feed(new, Feeder::Sequencer).unwrap(),
+        [clip.event_output(0)]
+    );
+    assert_eq!(
+        g.feed(new, Feeder::Routes).unwrap(),
+        [route.event_output(0)]
+    );
     assert!(
         g.feeds(old).unwrap().is_empty(),
         "the old sink is fed by nothing"
@@ -1033,7 +1039,7 @@ fn an_offline_session_renders_a_sines_analytic_rms() {
     let osc = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
     for c in 0..s.graph_ref().outputs() {
         s.graph()
-            .connect(osc.out(0), MainOutput::channel(c))
+            .connect(osc.output(0), MainOutput::channel(c))
             .unwrap()
             .unfaded();
     }
