@@ -121,7 +121,8 @@
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_midi_protocol::{
-    ChannelResponse, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones, PitchBendSensitivity,
+    ChannelResponse, Mcm, MemberCount, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones,
+    PitchBendSensitivity,
 };
 use tutti_ump::{
     Address, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, RegisteredData, Rpn, Ump,
@@ -459,7 +460,7 @@ struct ZoneView {
     /// The channels above or below the manager the zone's members occupy,
     /// ascending: `first..first + count`.
     first_member: u8,
-    member_count: u8,
+    member_count: MemberCount,
     manager_range: PitchBendSensitivity,
     member_range: PitchBendSensitivity,
     /// How the zone's members were configured to take notes.
@@ -477,7 +478,8 @@ impl ZoneView {
     }
 
     fn member_channels(&self) -> impl Iterator<Item = MidiChannel> + Clone {
-        (self.first_member..self.first_member + self.member_count).filter_map(MidiChannel::new)
+        (self.first_member..self.first_member + self.member_count.get())
+            .filter_map(MidiChannel::new)
     }
 
     fn role_of(&self, channel: MidiChannel) -> Role {
@@ -742,11 +744,14 @@ impl MpeTranslator {
         // replaces it (M2-120 section 2.2), so RPN 0x00/0x06 there is ordinary
         // parameter traffic too.
         let decoded = event.1.decode().ok();
-        if let (Some((zone, members)), Some(Message::Midi2(address, _))) =
+        if let (Some(mcm), Some(Message::Midi2(address, _))) =
             (MpeZoneConfig::from_mcm(&event.1), decoded)
             && self.groups[address.group.index()].profile.is_none()
         {
-            if !self.reconfigure_from_mcm(address.group, zone, members, event.0, out) {
+            let zone = match mcm {
+                Mcm::Configure { zone, .. } | Mcm::Disable { zone } => zone,
+            };
+            if !self.reconfigure_from_mcm(address.group, mcm, event.0, out) {
                 return None;
             }
             // A zone disabled has no ranges to reset.
@@ -854,7 +859,7 @@ impl MpeTranslator {
 
     /// Apply an MPE Configuration Message: it configures the zone whose master
     /// channel it arrived on, in the Group it arrived in (RP-053 / M2-104; a
-    /// Group's messages apply to no other, Appendix B.1), `members == 0` disables
+    /// Group's messages apply to no other, Appendix B.1), a [`Mcm::Disable`] disables
     /// that zone. The zone on the *other* side is preserved (a dual-zone setup
     /// configures each zone with its own MCM).
     ///
@@ -868,8 +873,7 @@ impl MpeTranslator {
     fn reconfigure_from_mcm(
         &mut self,
         group: MidiGroup,
-        zone: MpeZone,
-        members: u8,
+        mcm: Mcm,
         offset: Offset,
         out: &mut impl FnMut(UmpAt),
     ) -> bool {
@@ -878,12 +882,18 @@ impl MpeTranslator {
             MpeMode::Zones(zones) => (zones.lower().copied(), zones.upper().copied()),
             MpeMode::Disabled | MpeMode::SingleChannelRotation { .. } => (None, None),
         };
-        let configured = MpeZoneConfig::new(
-            zone,
-            members,
-            PitchBendSensitivity::MPE_MASTER_DEFAULT,
-            PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-        );
+        let (zone, configured) = match mcm {
+            Mcm::Configure { zone, members } => (
+                zone,
+                Some(MpeZoneConfig::new(
+                    zone,
+                    members,
+                    PitchBendSensitivity::MPE_MASTER_DEFAULT,
+                    PitchBendSensitivity::MPE_MEMBER_DEFAULT,
+                )),
+            ),
+            Mcm::Disable { zone } => (zone, None),
+        };
         match zone {
             MpeZone::Lower => lower = configured,
             MpeZone::Upper => upper = configured,

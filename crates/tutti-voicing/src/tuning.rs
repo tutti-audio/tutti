@@ -34,6 +34,7 @@
 use alloc::boxed::Box;
 use alloc::vec;
 use tutti_midi_protocol::{KeyTable, OctaveOffsets, TuningFrequency};
+use tutti_music::PitchClass;
 use tutti_ump::{NoteNumber, U7};
 use tutti_units::Semitones;
 
@@ -169,7 +170,9 @@ impl Tunings {
         let mut table = KeyTable::equal_temperament();
         for k in 0..128u8 {
             let key = NoteNumber::of(k);
-            let offset = offsets.offset(usize::from(k % 12)).to_semitones();
+            let offset = offsets
+                .offset(PitchClass::from_semitones_above_c(k))
+                .to_semitones();
             table.set(
                 key,
                 TuningFrequency::nearest(Semitones::new(f64::from(k)) + offset),
@@ -180,7 +183,7 @@ impl Tunings {
 
     /// Replaces channel `channel`'s twelve Scale/Octave offsets.
     pub(crate) fn set_octave(&mut self, channel: usize, offsets: &OctaveOffsets) {
-        for (class, slot) in self.octave[channel].iter_mut().enumerate() {
+        for (class, slot) in PitchClass::ALL.into_iter().zip(&mut self.octave[channel]) {
             *slot = offsets.offset(class).to_semitones();
         }
     }

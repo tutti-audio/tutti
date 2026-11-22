@@ -16,6 +16,7 @@ workspace = true
 [dependencies]
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
+tutti-music = { version = "0.0.1", path = "../tutti-music", default-features = false }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 # The portamento rate (`glide_rate`) and the registered-parameter words are
 # `libm`'s pure-Rust `expf`/`logf`/`roundf`/`floorf`: the crate builds without

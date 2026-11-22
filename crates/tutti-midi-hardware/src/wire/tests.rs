@@ -283,16 +283,15 @@ fn the_accepted_count_is_in_the_callers_events() {
 #[test]
 fn a_change_of_protocol_drops_an_mpe_notes_channel() {
     use tutti_midi_protocol::{
-        MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
+        MemberCount, MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
     };
     use tutti_ump::{Attribute, BendValue, ExtremeValues, NoteVelocity};
     let mpe = || {
         let zone = MpeZoneConfig::lower(
-            2,
+            MemberCount::of(2),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-        )
-        .unwrap();
+        );
         Midi1Translator::with_mode(TranslationMode {
             extremes: ExtremeValues::Scaled,
             per_note: PerNoteTranslation::Mpe(zone),

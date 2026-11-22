@@ -865,8 +865,9 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError, StartFailed};
     pub use tutti_midi_protocol::{
-        ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, MmcSegmentError, MpeMode,
-        MpeSpec, MpeZone, MpeZoneConfig, MpeZones, MtcRate, NotFrequencyData, NotSysexDeviceId,
+        ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, Mcm, MemberCount,
+        MmcSegmentCount, MmcSegmentError, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones,
+        MtcRate, NotFrequencyData, NotMemberCount, NotMmcSegmentCount, NotSysexDeviceId,
         PitchBendSensitivity, Recipient, SmpteFrameRate, SmpteTimecode, SysexDeviceId,
         TuningFrequency,
     };
