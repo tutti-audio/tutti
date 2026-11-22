@@ -26,8 +26,8 @@
 //!    the pitch by at most [`PyinConfig::transition_width`] with a triangular
 //!    weight, and the voiced/unvoiced copy with probability
 //!    [`PyinConfig::switch`] (a row of the transition matrix sums to 1). The
-//!    best path is found by [`viterbi`](tutti_dsp::viterbi) over a
-//!    [`BandedTransition`](tutti_dsp::BandedTransition).
+//!    best path is found by [`viterbi`] over a
+//!    [`BandedTransition`].
 //!
 //! A voiced frame reports the centre of its decoded bin, so it is within 5
 //! cents of the candidate that put the path there. Continuity is what the
