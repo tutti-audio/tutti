@@ -16,13 +16,13 @@ workspace = true
 [dependencies]
 # The editor's sizes, which name their unit (`dpi::Size`).
 dpi.workspace = true
+# `Pod` for the plain-bytes mirror of `TimeInfo` the transport cell holds.
+bytemuck = { version = "1.16", features = ["derive"] }
 # The two plugin→host callback queues. `ArrayQueue`, not `crossbeam-channel`:
 # `automate` and `process_events` are invoked from inside the plugin's
 # `processReplacing`, so their push runs on the audio thread. An unbounded
 # channel allocates a list node there per event and can never report
 # back-pressure; a bounded lock-free queue does neither.
-# `Pod` for the plain-bytes mirror of `TimeInfo` the transport cell holds.
-bytemuck = { version = "1.16", features = ["derive"] }
 crossbeam-queue = { version = "0.3", default-features = false, features = ["alloc"] }
 thiserror = "2"
 # The editor key vocabulary a `KeyEvent` is written in.
@@ -35,9 +35,9 @@ tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-music = { version = "0.0.1", path = "../tutti-music" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
-# Tutti fork of the `vst` crate: adds the host-side audioMaster callbacks
+# The AEffect-level FFI and the host-side audioMaster callbacks
 # (get_sample_rate / size_window / io_changed / latency / process_level /
-# automation_state) that upstream vst-rs's host_dispatch swallowed.
+# automation_state).
 tutti-vst2-ffi = { version = "0.0.1", path = "../tutti-vst2-ffi" }
 
 [dev-dependencies]

@@ -133,7 +133,7 @@ unit! {
 
 unit! {
     /// Pitch offset in cents. 100 cents = 1 semitone.
-    pub struct Cents(f64): Unit, Ordered, Bounded, Additive, Signed, Scalable;
+    pub struct Cents(f64): Unit, Ordered, Bounded, Additive, Signed, Scalable, Ratio;
 }
 
 impl Cents {

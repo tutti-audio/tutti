@@ -188,9 +188,9 @@ impl BusBuffers {
     ///
     /// [`Vst3Error::InvalidArgument`] if these buffers were built for the other
     /// [`SampleWidth`].
-    pub fn bind_outputs_f32<'a, 'b: 'a>(
+    pub fn bind_outputs_f32<'a>(
         &'a mut self,
-        channels: &'a mut [&'b mut [f32]],
+        channels: &'a mut [&mut [f32]],
     ) -> Result<BoundBuses<'a>, Vst3Error> {
         self.expect_width(SampleWidth::F32)?;
         Ok(self.bind_out(channels))
@@ -202,9 +202,9 @@ impl BusBuffers {
     ///
     /// [`Vst3Error::InvalidArgument`] if these buffers were built for the other
     /// [`SampleWidth`].
-    pub fn bind_outputs_f64<'a, 'b: 'a>(
+    pub fn bind_outputs_f64<'a>(
         &'a mut self,
-        channels: &'a mut [&'b mut [f64]],
+        channels: &'a mut [&mut [f64]],
     ) -> Result<BoundBuses<'a>, Vst3Error> {
         self.expect_width(SampleWidth::F64)?;
         Ok(self.bind_out(channels))
@@ -248,7 +248,7 @@ impl BusBuffers {
     /// Binds the output direction to this block's channel slices, laid out flat
     /// in bus order. Buses the caller does not supply are backed by a sink the
     /// plugin may write to.
-    fn bind_out<'a, 'b: 'a, T>(&'a mut self, channels: &'a mut [&'b mut [T]]) -> BoundBuses<'a> {
+    fn bind_out<'a, T>(&'a mut self, channels: &'a mut [&mut [T]]) -> BoundBuses<'a> {
         let mut shortest = usize::MAX;
         let mut bound = 0;
         for (slot, channel) in self.live.iter_mut().zip(channels.iter_mut()) {

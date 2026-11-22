@@ -181,6 +181,10 @@ fn execute(step: &Step, ctx: &Ctx) -> Result<(), u8> {
                 eprintln!("xtask: {e}");
                 1
             }),
+        Step::PruneBuilding => gates::prune_building(&ctx.root).map_err(|e| {
+            eprintln!("xtask: {e}");
+            1
+        }),
         Step::Conformance { results, out } => gates::conformance_site(&ctx.root, results, out)
             .map_err(|e| {
                 eprintln!("xtask: {e}");

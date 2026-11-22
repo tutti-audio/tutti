@@ -111,12 +111,14 @@ fn command() -> impl Strategy<Value = Command> {
             reason,
             refused: Header::from_word(refused),
             text: NakText::new(&text).unwrap(),
+            text_cut: 0,
         }))
     });
     let bye = (any::<u8>(), "[a-z ]{0,60}").prop_map(|(reason, text)| {
         Command::Bye(Box::new(Bye {
             reason: ByeReason::from_code(reason),
             text: ByeText::new(&text).unwrap(),
+            text_cut: 0,
         }))
     });
     let data = (sequence(), packets())
@@ -219,6 +221,17 @@ fn signed(bytes: &[u8]) -> Vec<u8> {
     all
 }
 
+/// `command` as it reads back from its own datagram: the text a peer sent cut
+/// is written whole, so its count of cut bytes reads 0.
+fn written_whole(mut command: Command) -> Command {
+    match &mut command {
+        Command::Nak(nak) => nak.text_cut = 0,
+        Command::Bye(bye) => bye.text_cut = 0,
+        _ => {}
+    }
+    command
+}
+
 proptest! {
     /// Any bytes, with and without the signature in front, are read or refused
     /// by name, never a panic; a command that is read writes back to a datagram
@@ -233,7 +246,7 @@ proptest! {
                 let mut builder = DatagramBuilder::new();
                 builder.push(&command);
                 let again: Vec<_> = parse(&builder.finish()).unwrap().collect();
-                prop_assert_eq!(again, vec![Ok(command)]);
+                prop_assert_eq!(again, vec![Ok(written_whole(command))]);
             }
         }
     }
