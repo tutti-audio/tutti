@@ -3290,6 +3290,7 @@ version = "0.0.1"
 dependencies = [
  "futures-lite",
  "getrandom",
+ "libc",
  "loom",
  "memmap2",
  "rustix",

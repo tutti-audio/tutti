@@ -36,6 +36,8 @@
 //!   kernel ends a server with when the host dies (Windows). And
 //!   [`protect_host_memory`], the host's dumpable flag cleared (Linux), so a
 //!   same-user plugin cannot `ptrace` the host or write its memory.
+//! - **What a spawned helper inherits** ([`inherit_only_stdio`]): descriptors 0, 1 and 2
+//!   only, so plugin code in the helper cannot reach the host's files and sockets (unix).
 //! - **The guard on a child process** ([`Reaped`]): a spawned child, killed with its
 //!   process group and reaped when the guard drops, so no path out of the code that holds
 //!   it leaves a running process or a zombie. It holds no `unsafe` of its own.
@@ -65,6 +67,7 @@ mod descriptor;
 mod exit;
 mod harden;
 mod header;
+mod inherit;
 mod lane;
 mod lifetime;
 mod mapping;
@@ -83,6 +86,7 @@ pub use exit::ExitWait;
 pub use exit::{HOST_PID_ENV, Host, host_pid, watch_host, watch_spawner};
 pub use harden::protect_host_memory;
 pub use header::{Direction, RING_SLOTS, SLAB_HEADER_BYTES, SlabHeader, slot_for};
+pub use inherit::inherit_only_stdio;
 pub use lane::*;
 pub use lifetime::{bind_to_host, has_ended, kill_group, own_group};
 pub use mapping::{

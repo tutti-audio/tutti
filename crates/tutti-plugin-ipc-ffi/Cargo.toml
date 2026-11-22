@@ -35,6 +35,10 @@ futures-lite.workspace = true
 # a hand-written call.
 rustix = { version = "1", default-features = false, features = ["std", "event", "process", "fs", "net", "stdio"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# `close_range`, marking every inherited descriptor close-on-exec at a spawn.
+libc = "0.2"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 # The slab's POSIX shared memory object.
 rustix = { version = "1", default-features = false, features = ["shm"] }
