@@ -253,15 +253,9 @@ impl Rig {
                 );
                 if lag {
                     ed.spec_mut().topology.edges.insert(
-                        tutti_graph::InputPort {
-                            node: NodeKey(s),
-                            port: 0,
-                        },
+                        tutti_graph::InputPort::new(NodeKey(s), 0),
                         vec![tutti_graph::Edge::Direct(tutti_graph::PortSource::Node(
-                            tutti_graph::OutputPort {
-                                node: NodeKey(LAG),
-                                port: 0,
-                            },
+                            tutti_graph::OutputPort::new(NodeKey(LAG), 0),
                         ))],
                     );
                 }
@@ -338,15 +332,9 @@ impl Rig {
                 if self.lag {
                     for &s in &self.sinks {
                         t.edges.insert(
-                            tutti_graph::InputPort {
-                                node: NodeKey(s),
-                                port: 0,
-                            },
+                            tutti_graph::InputPort::new(NodeKey(s), 0),
                             vec![tutti_graph::Edge::Direct(tutti_graph::PortSource::Node(
-                                tutti_graph::OutputPort {
-                                    node: NodeKey(LAG),
-                                    port: 0,
-                                },
+                                tutti_graph::OutputPort::new(NodeKey(LAG), 0),
                             ))],
                         );
                     }
@@ -1856,10 +1844,7 @@ fn forked(log: &Log, blocks: usize, mid_note: bool) -> (Editor, Executor) {
     ed.spec_mut()
         .topology
         .set_outputs(vec![tutti_graph::PortSource::Node(
-            tutti_graph::OutputPort {
-                node: NodeKey(2),
-                port: 0,
-            },
+            tutti_graph::OutputPort::new(NodeKey(2), 0),
         )]);
     ed.commit().unwrap();
     exec.apply_pending();

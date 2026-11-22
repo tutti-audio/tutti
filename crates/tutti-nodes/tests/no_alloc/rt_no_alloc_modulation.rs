@@ -452,7 +452,7 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
             },
             EventOutputPort { node: l, port: 0 },
         );
-        outputs.push(PortSource::Node(OutputPort { node: p, port: 0 }));
+        outputs.push(PortSource::Node(OutputPort::new(p, 0)));
     }
     ed.spec_mut().topology.set_outputs(outputs);
     ed.commit().expect("commits");
@@ -750,10 +750,10 @@ fn lanes_200(
             ed.spec_mut()
                 .topology
                 .outputs
-                .push(vec![PortSource::Node(OutputPort {
-                    node: NodeKey(1000 + j),
-                    port: p,
-                })]);
+                .push(vec![PortSource::Node(OutputPort::new(
+                    NodeKey(1000 + j),
+                    p,
+                ))]);
         }
     }
     for k in 0..200 {
@@ -1040,10 +1040,7 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
         ed.spec_mut()
             .topology
             .outputs
-            .push(vec![PortSource::Node(OutputPort {
-                node: probe(k),
-                port: 0,
-            })]);
+            .push(vec![PortSource::Node(OutputPort::new(probe(k), 0))]);
         ed.set_param_range(cutoff(k), ParamRange::new(0.0, 1.0))
             .expect("a probe");
     }
@@ -1069,11 +1066,8 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
             ed.insert(node, "follower", ForkByClone(follower));
             for port in 0..2 {
                 ed.spec_mut().topology.edges.insert(
-                    InputPort { node, port },
-                    vec![Edge::Direct(PortSource::Node(OutputPort {
-                        node: src,
-                        port,
-                    }))],
+                    InputPort::new(node, port),
+                    vec![Edge::Direct(PortSource::Node(OutputPort::new(src, port)))],
                 );
             }
         } else {
@@ -1367,19 +1361,10 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
         .controls;
     let topology = &mut ed.spec_mut().topology;
     topology.edges.insert(
-        InputPort {
-            node: filter,
-            port: 0,
-        },
-        vec![Edge::Direct(PortSource::Node(OutputPort {
-            node: saw,
-            port: 0,
-        }))],
+        InputPort::new(filter, 0),
+        vec![Edge::Direct(PortSource::Node(OutputPort::new(saw, 0)))],
     );
-    topology.set_outputs(vec![PortSource::Node(OutputPort {
-        node: filter,
-        port: 0,
-    })]);
+    topology.set_outputs(vec![PortSource::Node(OutputPort::new(filter, 0))]);
     ed.commit().expect("commits");
     let transport = TransportPosition::new(false, Bpm::of(120.0), Beat::new(0.0), None);
     let mut out = vec![0.0f32; 128];

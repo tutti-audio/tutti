@@ -130,7 +130,7 @@ impl Node for Steps {
 }
 
 fn out(node: NodeKey, port: u16) -> PortSource {
-    PortSource::Node(OutputPort { node, port })
+    PortSource::Node(OutputPort::new(node, port))
 }
 
 const BANDS: NodeKey = NodeKey(1);

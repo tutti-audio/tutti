@@ -153,10 +153,7 @@ fn cutoff(node: u64) -> ParamIn {
 }
 
 fn out(node: u64, port: u16) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: NodeKey(node),
-        port,
-    })
+    PortSource::Node(OutputPort::new(NodeKey(node), port))
 }
 
 /// An editor with a probe at each of `probes` (cutoff ranged `range`), its

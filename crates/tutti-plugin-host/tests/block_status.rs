@@ -164,7 +164,7 @@ fn graph(fake_ring: Samples) -> (Editor, Executor, tutti_graph::EventInletWriter
     );
     ed.spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort { node: plugin, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(plugin, port))));
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

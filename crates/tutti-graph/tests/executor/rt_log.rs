@@ -108,7 +108,7 @@ fn build(
                 acts,
             }),
         );
-        outputs.push(PortSource::Node(OutputPort { node: key, port: 0 }));
+        outputs.push(PortSource::Node(OutputPort::new(key, 0)));
     }
     ed.spec_mut().topology.set_outputs(outputs);
     ed.commit().expect("commits");

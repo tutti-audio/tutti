@@ -96,10 +96,7 @@ fn fork() -> (RenderGraph, Arc<Crashed>, Editor) {
     live.insert(NodeKey(1), "watched", Watched(Arc::clone(&probe)));
     live.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     let graph = support::fork_offline(&live, RATE);
     (graph, probe, live)
 }

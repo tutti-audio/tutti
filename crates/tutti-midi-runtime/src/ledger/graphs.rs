@@ -703,14 +703,11 @@ fn the_close_reaches_a_sink_behind_a_delayed_edge() {
     sink(&mut ed, 3);
     connect(&mut ed, 1, 2);
     ed.spec_mut().topology.edges.insert(
-        InputPort {
-            node: NodeKey(2),
-            port: 0,
-        },
-        vec![Edge::Direct(PortSource::Node(OutputPort {
-            node: NodeKey(4),
-            port: 0,
-        }))],
+        InputPort::new(NodeKey(2), 0),
+        vec![Edge::Direct(PortSource::Node(OutputPort::new(
+            NodeKey(4),
+            0,
+        )))],
     );
     ed.commit().unwrap();
     let f = run(&mut exec, 0, 8, 256);
@@ -763,10 +760,7 @@ fn forkable_rig() -> (
     connect(&mut ed, 1, 2);
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(2),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))]);
     ed.commit().unwrap();
     (ed, exec, controls, tally, forks)
 }

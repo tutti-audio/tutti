@@ -38,11 +38,11 @@ fn spec(kind: &str, ins: u16, outs: u16) -> NodeSpec {
 }
 
 fn at(node: NodeKey, port: u16) -> InputPort {
-    InputPort { node, port }
+    InputPort::new(node, port)
 }
 
 fn out(node: NodeKey, port: u16) -> OutputPort {
-    OutputPort { node, port }
+    OutputPort::new(node, port)
 }
 
 fn edge(t: &mut Topology, sink: InputPort, from: OutputPort) {

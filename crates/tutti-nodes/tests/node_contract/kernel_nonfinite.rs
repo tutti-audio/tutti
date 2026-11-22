@@ -574,14 +574,11 @@ mod logged {
         let topology = &mut ed.spec_mut().topology;
         for port in 0..2u16 {
             topology.edges.insert(
-                InputPort { node: fx, port },
-                vec![Edge::Direct(PortSource::Node(OutputPort {
-                    node: src,
-                    port,
-                }))],
+                InputPort::new(fx, port),
+                vec![Edge::Direct(PortSource::Node(OutputPort::new(src, port)))],
             );
         }
-        topology.set_outputs((0..2).map(|port| PortSource::Node(OutputPort { node: fx, port })));
+        topology.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(fx, port))));
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();

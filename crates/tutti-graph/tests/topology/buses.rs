@@ -157,24 +157,13 @@ fn declaring_buses_changes_no_plan() {
     }
     for p in 0..6u16 {
         t.connect(
-            InputPort {
-                node: NodeKey(2),
-                port: p,
-            },
-            Edge::Direct(PortSource::Node(OutputPort {
-                node: NodeKey(1),
-                port: p,
-            })),
+            InputPort::new(NodeKey(2), p),
+            Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(1), p))),
         );
     }
     t.outputs = vec![
         (0..6u16)
-            .map(|p| {
-                PortSource::Node(OutputPort {
-                    node: NodeKey(2),
-                    port: p,
-                })
-            })
+            .map(|p| PortSource::Node(OutputPort::new(NodeKey(2), p)))
             .collect(),
     ];
     let graph = GraphSpec::new(t).validate().expect("valid");

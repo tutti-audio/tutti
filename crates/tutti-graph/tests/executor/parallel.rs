@@ -161,17 +161,11 @@ impl Node for RampEvery {
 }
 
 fn at(node: u64, port: u16) -> InputPort {
-    InputPort {
-        node: NodeKey(node),
-        port,
-    }
+    InputPort::new(NodeKey(node), port)
 }
 
 fn out(node: u64, port: u16) -> OutputPort {
-    OutputPort {
-        node: NodeKey(node),
-        port,
-    }
+    OutputPort::new(NodeKey(node), port)
 }
 
 fn from(node: u64, port: u16) -> Edge {

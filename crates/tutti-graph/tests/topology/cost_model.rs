@@ -38,19 +38,13 @@ fn sum(inputs: usize, cost: Option<Cost>) -> Unforkable<TestNode> {
 
 fn wire(ed: &mut Editor, node: u64, port: u16, from: PortSource) {
     ed.spec_mut().topology.edges.insert(
-        InputPort {
-            node: NodeKey(node),
-            port,
-        },
+        InputPort::new(NodeKey(node), port),
         vec![Edge::Direct(from)],
     );
 }
 
 fn node(key: u64) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: NodeKey(key),
-        port: 0,
-    })
+    PortSource::Node(OutputPort::new(NodeKey(key), 0))
 }
 
 /// A fresh editor and executor, the executor on a pool of `workers` when

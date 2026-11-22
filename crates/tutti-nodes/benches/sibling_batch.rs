@@ -348,7 +348,7 @@ fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executo
     let mut outputs = Vec::with_capacity(members * w);
     let feed = |ed: &mut Editor, node: NodeKey, port: u16, c: usize| {
         ed.spec_mut().topology.edges.insert(
-            InputPort { node, port },
+            InputPort::new(node, port),
             vec![Edge::Direct(PortSource::MainInput(c as u16))],
         );
     };
@@ -378,10 +378,7 @@ fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executo
                 }
                 for c in 0..w {
                     feed(&mut ed, k, c as u16, c);
-                    outputs.push(PortSource::Node(OutputPort {
-                        node: k,
-                        port: c as u16,
-                    }));
+                    outputs.push(PortSource::Node(OutputPort::new(k, c as u16)));
                 }
             }
         }
@@ -409,7 +406,7 @@ fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executo
                 for c in 0..w {
                     let port = (m * w + c) as u16;
                     feed(&mut ed, k, port, c);
-                    outputs.push(PortSource::Node(OutputPort { node: k, port }));
+                    outputs.push(PortSource::Node(OutputPort::new(k, port)));
                 }
             }
         }

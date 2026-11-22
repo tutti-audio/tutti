@@ -75,21 +75,12 @@ fn graph_at(tail: Tail, prepared: Prepare) -> (Editor, Executor, Arc<AtomicUsize
         }),
     );
     ed.spec_mut().topology.edges.insert(
-        InputPort {
-            node: NODE,
-            port: 0,
-        },
-        vec![Edge::Direct(PortSource::Node(OutputPort {
-            node: SRC,
-            port: 0,
-        }))],
+        InputPort::new(NODE, 0),
+        vec![Edge::Direct(PortSource::Node(OutputPort::new(SRC, 0)))],
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NODE,
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -219,18 +210,12 @@ fn set_tail_does_not_cut_a_fade() {
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
     ed.insert(NodeKey(2), "gain", Unforkable(gain(1.0)));
     ed.spec_mut().topology.edges.insert(
-        InputPort {
-            node: NodeKey(2),
-            port: 0,
-        },
+        InputPort::new(NodeKey(2), 0),
         vec![Edge::Direct(PortSource::MainInput(0))],
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(2),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

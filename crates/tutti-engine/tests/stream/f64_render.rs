@@ -40,10 +40,7 @@ fn dc_state(level: f64, outputs: usize) -> Arc<AudioCallbackState<f64>> {
     ));
     ed.insert(NodeKey(1), "dc", ForkByClone(Dc(level)));
     ed.spec_mut().topology.set_outputs(vec![
-        PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0
-        });
+        PortSource::Node(OutputPort::new(NodeKey(1), 0));
         outputs
     ]);
     ed.commit().expect("commits");

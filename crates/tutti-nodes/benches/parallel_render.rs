@@ -56,22 +56,15 @@ const WORKERS: [usize; 4] = [1, 2, 4, 8];
 
 /// Adds `from`'s port 0 to the sources of main output 0: the graph sums them.
 fn out(ed: &mut Editor, from: NodeKey) {
-    ed.spec_mut().topology.connect_output(
-        0,
-        PortSource::Node(OutputPort {
-            node: from,
-            port: 0,
-        }),
-    );
+    ed.spec_mut()
+        .topology
+        .connect_output(0, PortSource::Node(OutputPort::new(from, 0)));
 }
 
 fn wire(ed: &mut Editor, node: NodeKey, port: u16, from: NodeKey) {
     ed.spec_mut().topology.edges.insert(
-        InputPort { node, port },
-        vec![Edge::Direct(PortSource::Node(OutputPort {
-            node: from,
-            port: 0,
-        }))],
+        InputPort::new(node, port),
+        vec![Edge::Direct(PortSource::Node(OutputPort::new(from, 0)))],
     );
 }
 
@@ -187,7 +180,7 @@ fn tiny(lanes: usize, light: bool, workers: usize) -> Executor {
         let k = NodeKey(lane as u64 + 1);
         gain(&mut ed, k, lane, light);
         ed.spec_mut().topology.edges.insert(
-            InputPort { node: k, port: 0 },
+            InputPort::new(k, 0),
             vec![Edge::Direct(PortSource::MainInput(0))],
         );
         out(&mut ed, k);

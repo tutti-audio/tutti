@@ -34,18 +34,12 @@ fn gain_graph(g: f32) -> (Editor, Executor) {
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
     ed.insert(NODE, "gain", Unforkable(gain(g)));
     ed.spec_mut().topology.edges.insert(
-        InputPort {
-            node: NODE,
-            port: 0,
-        },
+        InputPort::new(NODE, 0),
         vec![Edge::Direct(PortSource::MainInput(0))],
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NODE,
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -186,18 +180,12 @@ fn the_outgoing_unit_retires_on_the_control_thread() {
         }),
     );
     ed.spec_mut().topology.edges.insert(
-        InputPort {
-            node: NODE,
-            port: 0,
-        },
+        InputPort::new(NODE, 0),
         vec![Edge::Direct(PortSource::MainInput(0))],
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NODE,
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))]);
     ed.commit().expect("commits");
     dc(&mut exec, 16);
     ed.collect();
@@ -319,10 +307,7 @@ fn a_shape_mismatch_is_refused() {
     ed.spec_mut()
         .topology
         .outputs
-        .push(vec![PortSource::Node(OutputPort {
-            node: lagged,
-            port: 0,
-        })]);
+        .push(vec![PortSource::Node(OutputPort::new(lagged, 0))]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -373,10 +358,7 @@ fn a_shape_mismatch_is_refused() {
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: lagged,
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(lagged, 0))]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -522,10 +504,7 @@ fn events_go_to_the_incoming_unit_only() {
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NODE,
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))]);
     ed.commit().expect("commits");
     let note = EventKind::Midi(midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100)));
     let mut out = vec![0.0f32; 64];
@@ -666,16 +645,10 @@ fn the_reference_cuts_a_fade_on_a_latency_change() {
                 .latency(Samples::new(latency)),
         );
         t.edges.insert(
-            InputPort {
-                node: NODE,
-                port: 0,
-            },
+            InputPort::new(NODE, 0),
             vec![Edge::Direct(PortSource::MainInput(0))],
         );
-        t.set_outputs(vec![PortSource::Node(OutputPort {
-            node: NODE,
-            port: 0,
-        })]);
+        t.set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))]);
         let mut spec = GraphSpec::new(t);
         spec.generations.insert(NODE, generation);
         spec.validate().expect("valid")

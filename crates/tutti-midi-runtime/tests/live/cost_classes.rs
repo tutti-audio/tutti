@@ -117,10 +117,7 @@ fn graph(workers: usize, declared: bool) -> (Executor, Vec<common::Sink>, Vec<Se
             let log = tutti_fixtures::Record::new();
             ed.insert(sink, "recorder", ForkByClone(Recorder(log.clone())));
             seen.push(log);
-            outputs.push(PortSource::Node(OutputPort {
-                node: sink,
-                port: 0,
-            }));
+            outputs.push(PortSource::Node(OutputPort::new(sink, 0)));
         } else if declared {
             ed.insert(source, "clip", clip(k));
             outs.push(common::sink(&mut ed, k + 1, &[(source.0, 0)]));

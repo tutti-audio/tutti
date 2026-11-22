@@ -411,10 +411,7 @@ impl Node for Ramps {
 }
 
 fn port(node: u64, port: u16) -> OutputPort {
-    OutputPort {
-        node: NodeKey(node),
-        port,
-    }
+    OutputPort::new(NodeKey(node), port)
 }
 
 /// Event output 0 of `node`.
@@ -990,17 +987,11 @@ fn a_delay_appearing_on_a_param_source_holds_its_last_value() {
     for lag in [100, 150] {
         ed.insert(NodeKey(3), "lag", Unforkable(Lag::new(lag)));
         ed.spec_mut().topology.edges.insert(
-            InputPort {
-                node: NodeKey(3),
-                port: 0,
-            },
+            InputPort::new(NodeKey(3), 0),
             vec![Edge::Direct(PortSource::Node(port(4, 0)))],
         );
         ed.spec_mut().topology.edges.insert(
-            InputPort {
-                node: NodeKey(PROBE),
-                port: 0,
-            },
+            InputPort::new(NodeKey(PROBE), 0),
             vec![Edge::Direct(PortSource::Node(port(3, 0)))],
         );
         ed.commit().expect("the sibling moves the arrival");
@@ -2430,7 +2421,7 @@ fn run_differential(g: &Gen) {
         ed.insert(k, "probe", Unforkable(probe(i, 0)));
         fresh.insert(k, Box::new(probe(i, 1)));
         for c in 0..4 {
-            outputs.push(PortSource::Node(OutputPort { node: k, port: c }));
+            outputs.push(PortSource::Node(OutputPort::new(k, c)));
         }
         // Every probe has a sibling (of latency 0 when it adds none), so a
         // later latency change has a node to re-insert.
@@ -2440,18 +2431,15 @@ fn run_differential(g: &Gen) {
             fresh.insert(s, Box::new(Lag::new(lag)));
             // Fed by the first signal, so the sibling carries something.
             ed.spec_mut().topology.edges.insert(
-                InputPort { node: s, port: 0 },
-                vec![Edge::Direct(PortSource::Node(OutputPort {
-                    node: NodeKey(100),
-                    port: 0,
-                }))],
+                InputPort::new(s, 0),
+                vec![Edge::Direct(PortSource::Node(OutputPort::new(
+                    NodeKey(100),
+                    0,
+                )))],
             );
             ed.spec_mut().topology.edges.insert(
-                InputPort { node: k, port: 0 },
-                vec![Edge::Direct(PortSource::Node(OutputPort {
-                    node: s,
-                    port: 0,
-                }))],
+                InputPort::new(k, 0),
+                vec![Edge::Direct(PortSource::Node(OutputPort::new(s, 0)))],
             );
         }
     }

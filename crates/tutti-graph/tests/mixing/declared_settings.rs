@@ -81,10 +81,7 @@ impl Rig {
         );
         ed.spec_mut()
             .topology
-            .set_outputs([PortSource::Node(OutputPort {
-                node: NODE,
-                port: 0,
-            })]);
+            .set_outputs([PortSource::Node(OutputPort::new(NODE, 0))]);
         ed.commit().expect("commits");
         exec.apply_pending();
         Self { ed, exec }

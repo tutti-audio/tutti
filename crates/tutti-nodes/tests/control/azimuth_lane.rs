@@ -73,10 +73,7 @@ fn rig(azimuth: ParamRange, elevation: ParamRange) -> (Editor, Executor) {
         ed.spec_mut()
             .topology
             .outputs
-            .push(vec![PortSource::Node(OutputPort {
-                node: NodeKey(PROBE),
-                port: c,
-            })]);
+            .push(vec![PortSource::Node(OutputPort::new(NodeKey(PROBE), c))]);
     }
     ed.set_param_range(at(UnitParam::Azimuth), azimuth)
         .expect("a probe");

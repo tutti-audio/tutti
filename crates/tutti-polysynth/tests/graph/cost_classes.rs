@@ -123,7 +123,7 @@ fn graph(workers: usize, declared: bool) -> Executor {
         // The bus is the graph's fan-in: each output channel holds every
         // synth's matching port, and the graph sums them.
         for c in 0..2u16 {
-            let from = PortSource::Node(OutputPort { node: key, port: c });
+            let from = PortSource::Node(OutputPort::new(key, c));
             ed.spec_mut().topology.connect_output(c as usize, from);
         }
     }

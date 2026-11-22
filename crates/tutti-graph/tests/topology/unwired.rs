@@ -45,11 +45,11 @@ const B: NodeKey = NodeKey(3);
 const DELAY: Samples = Samples::new(128);
 
 fn out(node: NodeKey, port: u16) -> OutputPort {
-    OutputPort { node, port }
+    OutputPort::new(node, port)
 }
 
 fn inp(node: NodeKey, port: u16) -> InputPort {
-    InputPort { node, port }
+    InputPort::new(node, port)
 }
 
 fn direct(node: NodeKey, port: u16) -> Edge {

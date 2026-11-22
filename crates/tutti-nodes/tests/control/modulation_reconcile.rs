@@ -399,10 +399,7 @@ fn probe_of(ed: &mut Editor, host: &mut Host, id: u64, p: Probe) {
     ed.spec_mut()
         .topology
         .outputs
-        .push(vec![PortSource::Node(OutputPort {
-            node: key(id),
-            port: 0,
-        })]);
+        .push(vec![PortSource::Node(OutputPort::new(key(id), 0))]);
     ed.commit().expect("commits");
 }
 
@@ -711,7 +708,7 @@ fn a_removed_source_leaves_no_node_and_no_layer() {
     let spec = r.ed.spec();
     assert!(!spec.topology.nodes.contains_key(&node), "the node is gone");
     assert!(
-        !spec.topology.edges.keys().any(|at| at.node == node),
+        !spec.topology.edges.keys().any(|at| at.node() == node),
         "its input is gone"
     );
     assert!(
@@ -911,10 +908,7 @@ fn a_host_key_is_never_taken() {
     ed.spec_mut()
         .topology
         .outputs
-        .push(vec![PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        })]);
+        .push(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     ed.insert(
         NodeKey(2),
         "pulse",
@@ -1347,14 +1341,8 @@ fn a_follower_downstream_of_its_target_is_refused_by_route() {
         ForkByClone(Through::new(ChannelLayout::MONO)),
     );
     r.ed.spec_mut().topology.edges.insert(
-        InputPort {
-            node: key(20),
-            port: 0,
-        },
-        vec![Edge::Direct(PortSource::Node(OutputPort {
-            node: key(1),
-            port: 0,
-        }))],
+        InputPort::new(key(20), 0),
+        vec![Edge::Direct(PortSource::Node(OutputPort::new(key(1), 0)))],
     );
     r.ed.commit().expect("commits");
     render(&mut r.ed, &mut r.exec, 128, 128);
@@ -1686,14 +1674,11 @@ fn a_feed_moved_after_a_steady_state_is_rewired() {
     assert!(reapply(&mut r).commit);
     let follower = r.m.source(SourceKey(2)).expect("a follower");
     assert_eq!(
-        r.ed.spec().topology.edges.get(&InputPort {
-            node: follower,
-            port: 0
-        }),
-        Some(&vec![Edge::Direct(PortSource::Node(OutputPort {
-            node: key(11),
-            port: 0
-        }))])
+        r.ed.spec().topology.edges.get(&InputPort::new(follower, 0)),
+        Some(&vec![Edge::Direct(PortSource::Node(OutputPort::new(
+            key(11),
+            0
+        )))])
     );
 }
 

@@ -115,10 +115,7 @@ fn render(ramp: Ramp, range: Option<ParamRange>) -> Vec<f64> {
     };
     ed.spec_mut()
         .topology
-        .set_outputs([PortSource::Node(OutputPort {
-            node: LANE,
-            port: 0,
-        })]);
+        .set_outputs([PortSource::Node(OutputPort::new(LANE, 0))]);
     ed.spec_mut()
         .connect_param(at, EventOutputPort { node: SRC, port: 0 });
     if let Some(range) = range {
@@ -246,10 +243,7 @@ fn a_range_change_lands_on_the_next_block() {
     };
     ed.spec_mut()
         .topology
-        .set_outputs([PortSource::Node(OutputPort {
-            node: LANE,
-            port: 0,
-        })]);
+        .set_outputs([PortSource::Node(OutputPort::new(LANE, 0))]);
     ed.spec_mut()
         .connect_param(at, EventOutputPort { node: SRC, port: 0 });
     ed.commit().expect("commits");
@@ -335,10 +329,7 @@ fn an_f64_edge_weight_ramps_in_f64() {
     use tutti_units::Amplitude;
     let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
     ed.insert(LANE, "dc", ForkByClone(Dc(FINE)));
-    let from = PortSource::Node(OutputPort {
-        node: LANE,
-        port: 0,
-    });
+    let from = PortSource::Node(OutputPort::new(LANE, 0));
     ed.spec_mut().topology.set_outputs([from]);
     let id = EdgeId {
         sink: PortSink::Output(0),
@@ -370,21 +361,12 @@ fn an_f64_mix_ramps_in_f64() {
     ed.insert(NodeKey(5), "dc", ForkByClone(Dc(FINE)));
     ed.insert(LANE, "double", ForkByClone(Double));
     ed.spec_mut().topology.connect(
-        tutti_graph::InputPort {
-            node: LANE,
-            port: 0,
-        },
-        tutti_graph::Edge::Direct(PortSource::Node(OutputPort {
-            node: NodeKey(5),
-            port: 0,
-        })),
+        tutti_graph::InputPort::new(LANE, 0),
+        tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(5), 0))),
     );
     ed.spec_mut()
         .topology
-        .set_outputs([PortSource::Node(OutputPort {
-            node: LANE,
-            port: 0,
-        })]);
+        .set_outputs([PortSource::Node(OutputPort::new(LANE, 0))]);
     ed.commit().expect("commits");
     exec.apply_pending();
     let first = block(&mut exec, &mut ed);
@@ -463,10 +445,7 @@ fn render_segment(
     ed.insert(SRC, "segment", ForkByClone(Segment(segment)));
     ed.spec_mut()
         .topology
-        .set_outputs([PortSource::Node(OutputPort {
-            node: LANE,
-            port: 0,
-        })]);
+        .set_outputs([PortSource::Node(OutputPort::new(LANE, 0))]);
     ed.spec_mut().connect_param(
         ParamIn {
             node: LANE,
