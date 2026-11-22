@@ -1128,7 +1128,7 @@ impl RenderThread {
             }
             Err(Unjoined::Driving(task)) => {
                 task.detach();
-                Err(NotHome::Stuck)
+                Err(NotHome::Driving)
             }
         }
     }
@@ -1141,6 +1141,9 @@ pub(crate) enum NotHome {
     Panicked(tutti_platform::Panicked),
     /// The lane is still running (a plugin that does not return from a block).
     Stuck,
+    /// Stopped on a thread that drives an executor: the lane was asked to stop and is
+    /// detached.
+    Driving,
     /// The lane was dropped without running to its end: the executor shut down
     /// under it, and its state was dropped with it.
     Dropped,
@@ -1436,6 +1439,8 @@ mod tests {
     struct Endless {
         entered: Option<std::sync::mpsc::Sender<()>>,
         until: Option<(usize, Arc<AtomicBool>)>,
+        /// Dropped with the transport, which the lane drops when it ends.
+        gone: Option<std::sync::mpsc::Sender<()>>,
     }
 
     impl Endless {
@@ -1445,6 +1450,7 @@ mod tests {
                 Self {
                     entered: Some(entered),
                     until: None,
+                    gone: None,
                 },
                 reads,
             )
@@ -1472,6 +1478,33 @@ mod tests {
         fn send(&mut self, _: &AudioReply) -> IpcResult<()> {
             Ok(())
         }
+    }
+
+    /// **A render thread stopped on a thread that drives an executor reports `Driving`
+    /// and its lane still ends**: the stop flag is set and the lane detached, so the
+    /// outcome is `Driving` (never `Stuck`, which ends the process) and the lane drops
+    /// its transport.
+    #[test]
+    fn a_render_thread_stopped_on_a_driving_thread_reports_driving_and_its_lane_ends() {
+        let (_link, side) = link().expect("bells");
+        let (mut busy, reads) = Endless::new();
+        let (gone, ended) = std::sync::mpsc::channel::<()>();
+        busy.gone = Some(gone);
+        let executor = Executor::new();
+        let thread = RenderThread::spawn(&executor, side, Some(Box::new(busy))).expect("lane");
+        reads.recv_timeout(HANG_GUARD).expect("the lane is serving");
+        let stopper = executor
+            .spawn_dedicated("stops-the-render", None, async move {
+                thread.stop_within(HANG_GUARD).err()
+            })
+            .expect("a dedicated thread");
+        let outcome = tutti_platform::join(stopper).expect("the stop ended without panicking");
+        assert!(matches!(outcome, Some(NotHome::Driving)), "{outcome:?}");
+        assert_eq!(
+            ended.recv_timeout(HANG_GUARD),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected),
+            "the lane ended and dropped its transport"
+        );
     }
 
     /// Waits for the lane of `thread` to end by itself: its task is finished.

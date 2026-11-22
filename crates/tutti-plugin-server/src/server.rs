@@ -306,6 +306,10 @@ impl PluginServer {
         match render.stop_within(RENDER_STOP_PATIENCE) {
             Ok(_side) => {}
             Err(lost @ (NotHome::Panicked(_) | NotHome::Dropped)) => note_lane_lost(&lost),
+            Err(NotHome::Driving) => tracing::error!(
+                "plugin-server: the render thread was stopped on a thread that drives an executor; \
+                 its lane is asked to stop and detached"
+            ),
             Err(NotHome::Stuck) => {
                 tracing::error!(
                     "plugin-server: the render lane is stuck in the plugin; ending the process"
@@ -609,7 +613,7 @@ fn note_lane_lost(lost: &NotHome) {
         NotHome::Dropped => {
             tracing::error!("plugin-server: the render lane was dropped with its state");
         }
-        NotHome::Stuck => return,
+        NotHome::Stuck | NotHome::Driving => return,
     }
     crate::leak::note_lane_lost();
 }
@@ -858,10 +862,11 @@ mod exit_tests {
         }));
         assert_eq!(crate::leak::lanes_lost(), 2);
         note_lane_lost(&NotHome::Stuck);
+        note_lane_lost(&NotHome::Driving);
         assert_eq!(
             crate::leak::lanes_lost(),
             2,
-            "a stuck lane ends the process"
+            "a stuck lane ends the process and a detached one is not lost"
         );
     }
 }

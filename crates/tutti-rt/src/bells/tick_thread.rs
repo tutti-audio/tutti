@@ -80,13 +80,7 @@ impl Drop for Tick {
                 );
                 task.detach();
             }
-            Err(Unjoined::Driving(task)) => {
-                tracing::debug!(
-                    "the bells dropped on a thread that drives an executor: their tick task is \
-                     detached and ends on its own"
-                );
-                task.detach();
-            }
+            Err(Unjoined::Driving(task)) => task.detach(),
         }
     }
 }
