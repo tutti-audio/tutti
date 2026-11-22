@@ -126,15 +126,18 @@ impl Client {
         })
     }
 
-    /// Blocks until the sequencer has input for this client (`true`) or
-    /// `timeout` passes (`false`). The descriptors are level-triggered, so input
-    /// that arrived after the last read returns at once. A `timeout` too long for
-    /// an `Instant` waits for ever.
+    /// Blocks until a descriptor of this client is ready (`true`) or `timeout`
+    /// passes (`false`). The descriptors are level-triggered, so input that
+    /// arrived after the last read returns at once. A failed descriptor
+    /// (`POLLERR`, `POLLHUP`) also reads as `true`: the read that follows reports
+    /// the failure. A `timeout` too long for an `Instant` waits for ever.
     ///
     /// # Errors
     ///
-    /// The descriptor query's failure, or the OS error of `poll` but an
-    /// interrupted wait, which is retried.
+    /// The descriptor query's failure, or the OS error of `poll`. An interrupted
+    /// `poll` is retried with the time left.
+    #[cfg(feature = "testing")]
+    #[doc(hidden)]
     pub fn wait_input(&self, timeout: Duration) -> io::Result<bool> {
         let mut polls = self.input_descriptors().map_err(io::Error::other)?;
         let deadline = Instant::now().checked_add(timeout);
