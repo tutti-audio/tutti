@@ -8,7 +8,7 @@
 //! its one voice and owns the disk [`StreamHandle`] that feeds it.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::streamer::{ControlCell, StreamHandle, StreamId};
 
@@ -24,7 +24,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::ParamSet;
 use tutti_rt::Param;
-use tutti_rt::{LockExt, Publisher, PushError, RingReader, RingWriter};
+use tutti_rt::{Mutex, Publisher, PushError, RingReader, RingWriter};
 use tutti_units::{Amplitude, Cents, PlaybackRate, StretchFactor};
 
 /// Voice slots a pool reserves, and the most its `AddVoice` drain will hold.
@@ -569,7 +569,7 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
     /// thread: publishing allocates the new value and frees the one it
     /// replaces, here, so the node never does either.
     fn steer(&self, edit: impl FnOnce(&mut Steering)) {
-        let mut latest = self.latest.lock_recover();
+        let mut latest = self.latest.lock();
         edit(&mut latest);
         self.steering.publish(*latest);
     }
@@ -619,7 +619,7 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
     /// a memory voice, which has no stream.
     #[must_use]
     pub fn status(&self) -> Option<crate::StreamStatus> {
-        self.stream.as_ref().map(|s| s.lock_recover().status())
+        self.stream.as_ref().map(|s| s.lock().status())
     }
 
     /// The cell holding the voice's varispeed (pitch follows the rate), on
@@ -679,7 +679,7 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
 
     /// Whether the voice is playing (not [`stop`](Self::stop)ped).
     pub fn is_playing(&self) -> bool {
-        !self.latest.lock_recover().stopped
+        !self.latest.lock().stopped
     }
 
     /// Sets the voice's gain, from the node's next block on. A write to a
@@ -836,7 +836,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
     pub fn collect_retired(&self) -> usize {
         let mut freed = 0;
         let mut refused = Vec::new();
-        for value in self.retired.lock_recover().drain() {
+        for value in self.retired.lock().drain() {
             if let Retired::Refused { id, generation, .. } = &value {
                 refused.push((*id, *generation));
             }
@@ -857,7 +857,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
                         return None;
                     }
                     live.remove(id);
-                    self.free.lock_recover().remove(id);
+                    self.free.lock().remove(id);
                     streams.remove(id)
                 })
                 .collect()
@@ -953,7 +953,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
             return Err(SendError::NoSuchSlot(id));
         }
         self.send(VoiceCommand::Remove(id))?;
-        self.free.lock_recover().remove(&id);
+        self.free.lock().remove(&id);
         live.remove(&id);
         Ok(())
     }
@@ -990,7 +990,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
     pub fn set_window(&self, id: SlotId, window: VoiceWindow) -> Result<(), SendError> {
         self.tier(id)?;
         self.send(VoiceCommand::UpdatePlacement { id, window })?;
-        self.free.lock_recover().remove(&id);
+        self.free.lock().remove(&id);
         Ok(())
     }
 
@@ -1064,7 +1064,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         pitch: Cents,
     ) -> Result<(), SendError> {
         self.tier(id)?;
-        if stretch_values_want_filter(factor, pitch) && self.free.lock_recover().contains(&id) {
+        if stretch_values_want_filter(factor, pitch) && self.free.lock().contains(&id) {
             return Err(SendError::FreeRunning);
         }
         self.send(VoiceCommand::UpdateStretch {
@@ -1229,7 +1229,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
             // An in-memory (or unknown) slot: nothing to set it on.
             return self.queue(cmd, None);
         };
-        let stream = entry.lock_recover();
+        let stream = entry.lock();
         self.queue(cmd, Some(stream.id()))?;
         ask(stream.looping_cell(), setting);
         Ok(())
@@ -1243,7 +1243,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
             // without a stream here is counted by the drain.
             return self.queue(cmd, None);
         };
-        let stream = entry.lock_recover();
+        let stream = entry.lock();
         self.queue(cmd, Some(stream.id()))?;
         ask(stream.direction_cell(), direction);
         Ok(())
@@ -1264,7 +1264,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         cmd: VoiceCommand<F>,
     ) -> Result<(), SendError> {
         self.send_stamped(cmd, generation)?;
-        let mut set = self.free.lock_recover();
+        let mut set = self.free.lock();
         if free {
             set.insert(id);
         } else {
@@ -1282,7 +1282,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
 
     /// The live-slot table, locked.
     fn live(&self) -> std::sync::MutexGuard<'_, HashMap<SlotId, Live>> {
-        self.live.lock_recover()
+        self.live.lock()
     }
 
     /// The tier holding slot `id`'s voice, or [`SendError::NoSuchSlot`].
@@ -1295,12 +1295,12 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
 
     /// The command ring's writer, locked.
     fn writer(&self) -> std::sync::MutexGuard<'_, RingWriter<Queued<F>>> {
-        self.tx.lock_recover()
+        self.tx.lock()
     }
 
     /// The stream table, locked.
     fn streams(&self) -> std::sync::MutexGuard<'_, HashMap<SlotId, Arc<Mutex<StreamHandle<F>>>>> {
-        self.streams.lock_recover()
+        self.streams.lock()
     }
 
     /// Queues `cmd` for the drain, with the stream its loop was set on.
@@ -1405,7 +1405,7 @@ impl<F: SamplerFloat> tutti_rt::Reclaim for VoicePoolHandle<F> {
     fn reclaim(&self) -> usize {
         self.collect_retired();
         let streams: Vec<_> = self.streams().values().cloned().collect();
-        streams.iter().map(|s| s.lock_recover().reclaim()).sum()
+        streams.iter().map(|s| s.lock().reclaim()).sum()
     }
 }
 
