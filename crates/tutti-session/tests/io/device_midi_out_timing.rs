@@ -25,8 +25,8 @@ use tutti_ump::{Message, MidiGroup, System, Ump};
 use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity, Voice2};
 use tutti_units::{Beat, SampleRate, Samples, Seconds};
 
-const RATE: f64 = 48_000.0;
-const BLOCK: usize = 512;
+const RATE: SampleRate = SampleRate::of(48_000.0);
+const BLOCK: Samples = Samples::new(512);
 /// The most a figure here may differ from its arithmetic: the nanosecond
 /// roundings of a block's date and of a frame count turned into a `Duration`.
 const ROUNDING: Duration = Duration::from_nanos(5);
@@ -63,7 +63,7 @@ impl Wire {
 
 fn spec() -> OutputSpec {
     OutputSpec::new(
-        SampleRate::of(RATE),
+        RATE,
         ChannelLayout::STEREO,
         tutti_buffers::SampleFormat::F32,
     )
@@ -93,8 +93,13 @@ fn rig(wire: &Wire) -> (LiveSession, ManualStream, tutti_session::MidiSink) {
 
 /// The instant frame `frame` is rendered, for blocks dated from `base`: its
 /// frames over the rate after block 0's date.
-fn rendered(base: Instant, frame: u64) -> Instant {
-    base + Duration::from_secs_f64(frame as f64 / RATE)
+fn rendered(base: Instant, frame: Samples) -> Instant {
+    base + span(frame)
+}
+
+/// The `Duration` of `frames` at [`RATE`].
+fn span(frames: Samples) -> Duration {
+    Duration::from_secs_f64(frames.to_seconds(RATE).get())
 }
 
 /// Renders blocks `from..to`, block `k` dated `base + k * BLOCK / RATE` and
@@ -102,11 +107,7 @@ fn rendered(base: Instant, frame: u64) -> Instant {
 fn render(stream: &ManualStream, base: Instant, blocks: Range<usize>, delay: Option<Duration>) {
     for k in blocks {
         stream
-            .render_block_at(
-                Samples::new(BLOCK),
-                rendered(base, (k * BLOCK) as u64),
-                delay,
-            )
+            .render_block_at(BLOCK, rendered(base, BLOCK * k), delay)
             .expect("the stream is open");
     }
 }
@@ -132,7 +133,7 @@ fn assert_ticks(ticks: &[Instant], base: Instant, after: Duration) {
     for (j, at) in ticks.iter().enumerate() {
         assert_at(
             *at,
-            rendered(base, 1_000 * j as u64) + after,
+            rendered(base, Samples::new(1_000) * j) + after,
             &format!("tick {j}"),
         );
     }
@@ -156,15 +157,11 @@ fn the_clock_is_sent_at_the_time_of_its_frames() {
     // Frames 0 to 30 719 hold the ticks at 0, 1 000, ... 30 000.
     assert_eq!(ticks.len(), 31);
     for pair in ticks.windows(2) {
-        assert_at(
-            pair[1],
-            pair[0] + Duration::from_secs_f64(1_000.0 / RATE),
-            "tick spacing",
-        );
+        assert_at(pair[1], pair[0] + span(Samples::new(1_000)), "tick spacing");
     }
     assert_at(
         *ticks.last().unwrap(),
-        rendered(base, 30_000) + latency,
+        rendered(base, Samples::new(30_000)) + latency,
         "the newest tick is its frame's instant plus the latency",
     );
     assert_ticks(&ticks, base, latency);
@@ -281,7 +278,7 @@ fn an_unreported_audio_latency_is_left_out_and_reported() {
     assert_eq!(ticks.len(), 1);
     assert_at(
         ticks[0],
-        rendered(base, 31_000) + Duration::from_millis(40),
+        rendered(base, Samples::new(31_000)) + Duration::from_millis(40),
         "the reported 40 ms is in the send time",
     );
 }
@@ -350,7 +347,7 @@ fn a_clips_notes_are_sent_when_their_frames_are_heard() {
     // The note-on is frame 24 000 and the sink's own latency is sent early.
     assert_at(
         on,
-        rendered(base, 24_000) + latency - Duration::from_millis(5),
+        rendered(base, Samples::new(24_000)) + latency - Duration::from_millis(5),
         "the note-on is its frame's instant plus the audio latency, less the sink's",
     );
 }
