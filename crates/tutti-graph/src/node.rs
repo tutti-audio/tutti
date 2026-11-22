@@ -858,6 +858,14 @@ impl Prepare {
         self.render_mode
     }
 
+    /// Marks the current thread as inside a block ([`RtScope::enter`](tutti_rt::RtScope::enter)) when
+    /// this prepare is [`Realtime`](RenderMode::Realtime), and not when it is
+    /// [`Offline`](RenderMode::Offline): an offline render may block and
+    /// allocate.
+    pub(crate) fn enter_rt_scope(&self) -> Option<tutti_rt::RtScopeGuard> {
+        (!self.render_mode.is_offline()).then(tutti_rt::RtScope::enter)
+    }
+
     /// This prepare, for a host whose device calls back with `quantum`
     /// frames each time (the largest, if its callbacks vary).
     ///
