@@ -935,8 +935,9 @@ fn load_failure(e: &PluginError) -> ControlReply {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, Mutex, MutexGuard};
+    use std::sync::{Arc, MutexGuard};
     use tutti_plugin_ipc::{AudioReply, AudioRequest};
+    use tutti_rt::Mutex;
 
     /// A session with its render side running beside it, as the server runs
     /// them: a thread steps the side (applies the commands, trades the
@@ -961,7 +962,7 @@ mod tests {
                 move || {
                     while !stop.load(Ordering::Acquire) {
                         {
-                            let mut side = side.lock().unwrap();
+                            let mut side = side.lock();
                             side.drain();
                             side.poll_seat();
                         }
@@ -981,7 +982,7 @@ mod tests {
 
         /// The render side, with what the session queued applied.
         fn side(&self) -> MutexGuard<'_, RenderSide> {
-            let mut side = self.side.lock().unwrap();
+            let mut side = self.side.lock();
             side.drain();
             side
         }
@@ -1107,7 +1108,7 @@ mod tests {
                     }
                     shm.publish(seq);
                     {
-                        let mut side = side.lock().unwrap();
+                        let mut side = side.lock();
                         side.drain();
                         side.poll_seat();
                         side.handle(AudioRequest::ProcessAudio(

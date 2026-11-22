@@ -111,12 +111,12 @@ pub(crate) use channels::response_ring;
 pub(crate) use channels::{BATCH_OUTCOMES, BatchOutcome};
 use lifecycle::Lifecycle;
 use messages::{AudioCommand, AudioResponse, ControlCommand, Setting};
-use parking_lot::Mutex;
 pub use payload_pool::{PARAM_BUFFERS, PayloadPool};
 use std::sync::Arc;
 use std::time::Duration;
 use tutti_plugin_ipc_ffi::Blob;
 use tutti_plugin_types::Timeouts;
+use tutti_rt::Mutex;
 
 pub use messages::IpcEvent;
 pub use thread::IpcThread;

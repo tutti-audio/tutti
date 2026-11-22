@@ -6,7 +6,7 @@
 //!
 use std::io::Read;
 use std::marker::PhantomData;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, MutexGuard};
 use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_plugin_ipc::{
@@ -18,6 +18,7 @@ use tutti_plugin_ipc_ffi::{Blob, Lease};
 use tutti_plugin_types::{
     Deadline, IpcError, IpcResult, MAX_STATE_BYTES, ServerError, SlabError, StateError, StateUse,
 };
+use tutti_rt::Mutex;
 
 use crate::main_loop::Bell;
 use crate::main_loop::{LaneEnd, Stream as PlatformStream};
@@ -376,7 +377,7 @@ pub(crate) struct Shared(Arc<Mutex<()>>);
 
 impl Writing for Shared {
     fn hold(&self) -> Option<MutexGuard<'_, ()>> {
-        Some(self.0.lock().unwrap_or_else(PoisonError::into_inner))
+        Some(self.0.lock())
     }
 
     fn shared(&self) -> Option<Arc<Mutex<()>>> {
@@ -501,7 +502,7 @@ impl<In: Inbound, Out: Framed, W: Writing> Transport<In, Out> for SocketTranspor
     fn pulser(&self) -> Option<Pulser<Out>> {
         let (stream, writing) = (Arc::clone(&self.stream), self.writing.shared()?);
         Some(Box::new(move |msg| {
-            let _writing = writing.lock().unwrap_or_else(PoisonError::into_inner);
+            let _writing = writing.lock();
             write_frame(&mut &*stream, msg)
         }))
     }

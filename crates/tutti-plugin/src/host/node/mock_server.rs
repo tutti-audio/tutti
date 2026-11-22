@@ -3,8 +3,9 @@
 //! it is sent as the raw bytes of the wire, and the helpers that build the
 //! generic node over [`Ipc`] against it.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
+use tutti_rt::Mutex;
 
 use tutti_buffers::FloatWidth;
 use tutti_graph::Offset;
@@ -130,7 +131,6 @@ fn serve_audio(
         let reply = match message {
             AudioRequest::ProcessAudio(data) => {
                 log.lock()
-                    .unwrap()
                     .push(Said::Audio(AudioRequest::ProcessAudio(data.clone())));
                 let reply = answer(&mut slab, &mut scratch, data);
                 if let Some(gate) = &gate {
@@ -140,7 +140,7 @@ fn serve_audio(
                 Some(reply)
             }
             AudioRequest::Reset => {
-                log.lock().unwrap().push(Said::Audio(AudioRequest::Reset));
+                log.lock().push(Said::Audio(AudioRequest::Reset));
                 None
             }
             AudioRequest::ApplyParameters { id, .. } => Some(AudioReply::ParametersApplied { id }),
@@ -182,7 +182,6 @@ fn serve_control(stream: &interprocess::local_socket::Stream, log: &Record, list
             }
             ControlRequest::SetSampleRate { rate } => {
                 log.lock()
-                    .unwrap()
                     .push(Said::Control(ControlRequest::SetSampleRate { rate }));
                 Some(ControlReply::SampleRateSet {
                     rate,

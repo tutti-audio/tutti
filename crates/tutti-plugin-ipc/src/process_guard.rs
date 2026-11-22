@@ -14,15 +14,15 @@
 
 use crate::{IpcConfig, IpcThread, ServerWatch};
 use futures_lite::future::yield_now;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering, fence};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tutti_platform::{
     Executor, Instant, Task, Unjoined, WeakExecutor, join_within, monotonic_ns, sleep_until_ns,
 };
 use tutti_plugin_ipc_ffi::{ExitWait, Reaped};
 use tutti_plugin_types::{Deadline, IpcError, PluginFailure};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 /// How long the exit task waits on the OS between looks at its stop flag.
 /// Only bounds how long a dropped guard waits for the task when the process was
@@ -163,7 +163,7 @@ impl ProcessGuard {
         self.launched
             .as_ref()?
             .process
-            .lock_recover()
+            .lock()
             .as_ref()
             .map(|process| process.id())
     }
@@ -262,7 +262,7 @@ impl Drop for ProcessGuard {
                     Err(Unjoined::Driving(exit)) => exit.detach(),
                 }
             }
-            let left = process.lock_recover().take();
+            let left = process.lock().take();
             if let (false, Some(process)) = (reaped, left) {
                 reap_elsewhere(process, &executor);
             }
@@ -272,7 +272,7 @@ impl Drop for ProcessGuard {
 
 /// Kills the server in `process` and its group, without waiting for it.
 fn kill(process: &Mutex<Option<Reaped>>) {
-    if let Some(process) = process.lock_recover().as_mut() {
+    if let Some(process) = process.lock().as_mut() {
         let _ = process.kill_all();
     }
 }
@@ -288,7 +288,7 @@ fn reaped_by(
 ) -> bool {
     ended_within(exit, timeout)
         && process
-            .lock_recover()
+            .lock()
             .as_mut()
             .is_some_and(|process| matches!(process.try_reap(), Ok(Some(_))))
 }
@@ -322,7 +322,7 @@ fn await_end(
     mut now: impl FnMut() -> Instant,
 ) -> bool {
     loop {
-        match process.lock_recover().as_mut().map(Reaped::try_reap) {
+        match process.lock().as_mut().map(Reaped::try_reap) {
             Some(Ok(Some(_))) => return true,
             Some(Ok(None)) => {}
             // No process, or a status that cannot be read: an end that cannot be awaited.
@@ -356,13 +356,13 @@ fn reap_started_by(
     let slot = Arc::new(Mutex::new(Some(process)));
     let reap = {
         let slot = Arc::clone(&slot);
-        move || drop(slot.lock_recover().take())
+        move || drop(slot.lock().take())
     };
     match start(Box::new(reap)) {
         Ok(task) => task.detach(),
         // The refused work was dropped unrun, and the process is still in the slot.
         Err(_) => {
-            if let Some(process) = slot.lock_recover().take() {
+            if let Some(process) = slot.lock().take() {
                 process.leave();
             }
         }
@@ -391,7 +391,7 @@ async fn exit_task(
 ) {
     while !flow.stop.load(Ordering::Acquire) {
         if wait.wait(EXIT_SLICE, pause) {
-            let status = match process.lock_recover().as_mut() {
+            let status = match process.lock().as_mut() {
                 Some(process) => process.try_reap(),
                 None => return,
             };
@@ -499,7 +499,7 @@ mod tests {
         {
             // The exit task waits for this lock once the process has ended, so the
             // reap below is before its status read.
-            let _held = launched.process.lock_recover();
+            let _held = launched.process.lock();
             let pid = rustix::process::Pid::from_raw(i32::try_from(pid).expect("a pid"))
                 .expect("a pid is not zero");
             rustix::process::kill_process(pid, rustix::process::Signal::KILL).expect("kill");

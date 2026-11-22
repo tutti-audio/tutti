@@ -167,12 +167,12 @@ pub(crate) mod test_utils {
     // `Path` belongs to the VST3 bundle walk; CLAP only resolves a path string.
     #[cfg(feature = "vst3")]
     use std::path::Path;
+    use std::sync::MutexGuard;
     #[cfg(any(feature = "clap", feature = "vst3"))]
     use std::sync::OnceLock;
-    use std::sync::{Mutex, MutexGuard};
     #[cfg(feature = "clap")]
     use tutti_clap_test_plugin::{ClapProbe, ClapSwitch};
-    use tutti_rt::LockExt;
+    use tutti_rt::Mutex;
 
     /// The reference CLAP plugin's probe, opened once on its two images and
     /// kept for the process: a switch set before a load must stay resident
@@ -536,6 +536,6 @@ pub(crate) mod test_utils {
     /// The guarded data is `()`, so there's no invariant a poisoned lock
     /// could violate; recovering is safe and keeps failures isolated.
     pub fn plugin_load_lock() -> MutexGuard<'static, ()> {
-        PLUGIN_LOAD_LOCK.lock_recover()
+        PLUGIN_LOAD_LOCK.lock()
     }
 }
