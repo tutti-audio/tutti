@@ -200,8 +200,9 @@ pub trait DeviceOut: MidiOut {
     /// is [`lost`](Losses::lost); an event waiting when the sender ended, and
     /// one with no form its wire carries (a message type a MIDI 1.0 byte port
     /// cannot express), is [`refused`](Losses::refused). An output that sends
-    /// inside `queue` takes nothing it does not send (a failure there is the shorter count `queue`
-    /// returns), so it loses nothing after taking, which is the default.
+    /// inside `queue` takes nothing it does not send (a failure there is the
+    /// shorter count `queue` returns), so it loses nothing after taking, which
+    /// is the default.
     fn losses(&self) -> Losses {
         Losses::NONE
     }

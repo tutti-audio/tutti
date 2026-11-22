@@ -227,11 +227,11 @@ impl ClockMaster {
         }
     }
 
-    /// The messages [refused](Losses::refused) since the last call, then
-    /// none: a Song Position Pointer for a beat past its 14-bit field (4096 beats) or before the
-    /// start, and an MTC position for a time before zero or NaN (once from each
-    /// grid restart while the quarter-frames have none). Each is skipped, never
-    /// sent clamped to a position the transport is not at.
+    /// The messages [refused](Losses::refused) since the last call, then none:
+    /// a Song Position Pointer for a beat past its 14-bit field (4096 beats) or
+    /// before the start, and an MTC position for a time before zero or NaN
+    /// (once from each grid restart while the quarter-frames have none). Each
+    /// is skipped, never sent clamped to a position the transport is not at.
     pub(crate) fn take_losses(&mut self) -> Losses {
         std::mem::take(&mut self.refused)
     }

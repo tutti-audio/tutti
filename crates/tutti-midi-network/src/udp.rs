@@ -320,8 +320,8 @@ impl<E: NetworkEndpoint + Send + 'static> NetworkLink<E> {
     }
 
     /// How many datagrams (not events: one carries several) were dropped
-    /// because the OS refused them for their destination (the peer's host or network is unreachable, its port
-    /// refuses, its address is unusable).
+    /// because the OS refused them for their destination (the peer's host or
+    /// network is unreachable, its port refuses, its address is unusable).
     #[must_use]
     pub fn sends_failed(&self) -> u64 {
         self.shared.state().sends_failed
