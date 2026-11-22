@@ -187,3 +187,13 @@ fn retain_mut_keeps_accepted_items_in_order_and_edits_them() {
     assert_eq!(v.capacity(), 5);
     assert_eq!(v.remaining(), 2);
 }
+
+/// An index past `len` panics whether or not there is room: the index is
+/// checked before the cap.
+#[test]
+#[should_panic(expected = "past len")]
+fn an_insert_past_len_panics_even_when_full() {
+    let mut v = CappedVec::with_capacity(2);
+    v.extend([1, 2]);
+    let _ = v.insert_within_capacity(3, 9);
+}

@@ -116,6 +116,11 @@ impl<T> CappedVec<T> {
     /// If `index` is past [`len`](Self::len).
     #[inline]
     pub fn insert_within_capacity(&mut self, index: usize, value: T) -> Result<(), T> {
+        assert!(
+            index <= self.buf.len(),
+            "insert index {index} past len {}",
+            self.buf.len()
+        );
         if self.buf.len() == self.cap {
             self.refused = self.refused.saturating_add(1);
             return Err(value);

@@ -101,6 +101,8 @@ impl<'a, T: 'a + Float> AudioBuffer<'a, T> {
 }
 
 /// Iterator over pairs of buffers of input channels and output channels.
+///
+/// Not `Clone`: a copy would yield each output channel's `&mut` twice.
 #[derive(Debug)]
 pub struct AudioBufferIterator<'a, T>
 where
@@ -301,6 +303,8 @@ impl<'a, T> IndexMut<usize> for Outputs<'a, T> {
 }
 
 /// Iterator over buffers for output channels of an `AudioBuffer`.
+///
+/// Not `Clone`: a copy would yield each channel's `&mut` twice.
 #[derive(Debug)]
 pub struct OutputIterator<'a, T>
 where
