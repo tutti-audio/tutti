@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use tutti_platform::{Executor, Task};
+use tutti_platform::{Executor, Task, Unjoined};
 use tutti_rt::{Bell, Bells};
 
 pub(crate) use os::{Running, THREADS, start};
@@ -137,8 +137,8 @@ const PUMP_JOIN_BOUND: Duration = Duration::from_secs(10);
 impl Drop for Background {
     /// Sets the closed flag, rings each pump's bell so it sees it and finishes (a take
     /// commits its file), and waits for each before the executor can go. On a thread that
-    /// drives an executor a wait would stop the tasks it runs, so the pumps are detached
-    /// there, unfinished.
+    /// drives an executor a wait would stop the tasks it runs, so a pump still running is
+    /// detached there.
     fn drop(&mut self) {
         self.closed.store(true, Ordering::Release);
         for (_, bell) in &self.pumps {
@@ -146,29 +146,28 @@ impl Drop for Background {
         }
         // Delivers the rings to the pumps' wakers now, not at the next tick.
         self.bells.tick();
-        if tutti_platform::is_driving() {
-            let unfinished = self
-                .pumps
-                .drain(..)
-                .filter(|(pump, _)| !pump.is_finished())
-                .map(|(pump, _)| pump.detach())
-                .count();
-            if unfinished > 0 {
-                tracing::warn!(
-                    "the session dropped on a thread that drives an executor, which cannot wait: \
-                     {unfinished} take(s) are left unfinished and not committed by this drop"
-                );
-            }
-            return;
-        }
+        let mut unfinished = 0_usize;
         for (pump, _) in self.pumps.drain(..) {
-            if let Err(pump) = tutti_platform::join_within(pump, PUMP_JOIN_BOUND) {
-                tracing::warn!(
-                    "a pump did not finish within {PUMP_JOIN_BOUND:?} of the session's drop: \
-                     what it owed (a take's file) is not committed"
-                );
-                pump.detach();
+            match tutti_platform::join_within(pump, PUMP_JOIN_BOUND) {
+                Ok(_) => {}
+                Err(Unjoined::TimedOut(pump)) => {
+                    tracing::warn!(
+                        "a pump did not finish within {PUMP_JOIN_BOUND:?} of the session's drop: \
+                         what it owed (a take's file) is not committed"
+                    );
+                    pump.detach();
+                }
+                Err(Unjoined::Driving(pump)) => {
+                    unfinished += 1;
+                    pump.detach();
+                }
             }
+        }
+        if unfinished > 0 {
+            tracing::warn!(
+                "the session dropped on a thread that drives an executor, which cannot wait: \
+                 {unfinished} take(s) are left unfinished and not committed by this drop"
+            );
         }
     }
 }

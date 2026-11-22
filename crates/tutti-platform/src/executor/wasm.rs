@@ -27,7 +27,7 @@ use std::time::Duration;
 use futures_lite::future::or;
 use gloo_timers::future::TimeoutFuture;
 
-use super::{Executor, Handle, Shared, Task, lock};
+use super::{Executor, Handle, Shared, Task, Unjoined, lock};
 use crate::Instant;
 use crate::priority::PriorityRequest;
 
@@ -79,11 +79,6 @@ impl Gate {
     }
 }
 
-/// No thread drives on the web.
-pub(super) fn is_driving() -> bool {
-    false
-}
-
 /// The web cannot block: one look at `task`, its output when it has ended.
 pub(super) fn join<T>(task: Task<T>) -> Option<T> {
     let mut ended = pin!(task.fallible());
@@ -94,9 +89,9 @@ pub(super) fn join<T>(task: Task<T>) -> Option<T> {
 }
 
 /// The web cannot block: one look at `task`, handed back when it has not ended.
-pub(super) fn join_within<T>(task: Task<T>, _bound: Duration) -> Result<Option<T>, Task<T>> {
+pub(super) fn join_within<T>(task: Task<T>, _bound: Duration) -> Result<Option<T>, Unjoined<T>> {
     if !task.is_finished() {
-        return Err(task);
+        return Err(Unjoined::TimedOut(task));
     }
     Ok(join(task))
 }

@@ -13,8 +13,7 @@ use std::time::Duration;
 
 use tutti_buffers::Float;
 use tutti_platform::{
-    Executor, PriorityRequest, StopToken, Task, is_driving, join_within, monotonic_ns,
-    sleep_until_ns,
+    Executor, PriorityRequest, StopToken, Task, Unjoined, join_within, monotonic_ns, sleep_until_ns,
 };
 use tutti_units::Samples;
 
@@ -109,14 +108,13 @@ impl Drop for TimerRunning {
         let Some(task) = self.task.take() else {
             return;
         };
-        if is_driving() {
-            tracing::warn!(
-                "a timer stream is dropped on an executor's thread; leaving it to stop there"
-            );
-            task.detach();
-        } else if let Err(task) = join_within(task, STOP_PATIENCE) {
-            tracing::warn!("the timer loop did not stop in time; leaving it");
-            task.detach();
+        match join_within(task, STOP_PATIENCE) {
+            Ok(_) => {}
+            Err(Unjoined::TimedOut(task)) => {
+                tracing::warn!("the timer loop did not stop in time; leaving it");
+                task.detach();
+            }
+            Err(Unjoined::Driving(task)) => task.detach(),
         }
     }
 }
