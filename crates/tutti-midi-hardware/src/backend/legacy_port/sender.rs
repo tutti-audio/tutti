@@ -7,8 +7,8 @@ use tutti_platform::Instant;
 use tutti_rt::Mutex;
 
 use super::schedule::{Next, Outbox};
-use tutti_graph::Losses;
 use tutti_rt::{Counter, CounterWriter, counter};
+use tutti_units::Losses;
 
 /// What an output and its sender thread share: the [`Outbox`] behind its lock
 /// and the counts of what the sender could not send.

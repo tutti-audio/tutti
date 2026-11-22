@@ -17,7 +17,7 @@ struct Events<const IN: u16, const OUT: u16>;
 
 impl<const IN: u16, const OUT: u16> Node for Events<IN, OUT> {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_events(IN, OUT)
+        Shape::source_unassigned(ChannelLayout::MONO).events(IN, OUT)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

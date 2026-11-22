@@ -29,12 +29,9 @@ fn prep(max: usize) -> Prepare {
 }
 
 fn wire(ed: &mut Editor, width: u16) {
-    ed.spec_mut().topology.set_outputs((0..width).map(|port| {
-        PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port,
-        })
-    }));
+    ed.spec_mut()
+        .topology
+        .set_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))));
 }
 
 const LIMITS: Limits = Limits {

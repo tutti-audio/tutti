@@ -71,7 +71,8 @@
 //! Its fork is silent: an offline render reads no wire.
 
 use tutti_buffers::Float;
-use tutti_graph::{Losses, UmpAt};
+use tutti_graph::UmpAt;
+use tutti_units::Losses;
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -517,10 +518,10 @@ impl MidiInputNode {
     /// One event input and [`MidiInputPorts::count`] event outputs of `capacity`.
     const fn declared(ports: MidiInputPorts, capacity: NonZeroU32) -> Shape {
         Shape::EMPTY
-            .with_events(1, ports.count())
-            .with_event_capacity(capacity)
+            .events(1, ports.count())
+            .event_capacity(capacity)
             // Event-only: a translation per event, nothing per frame.
-            .with_cost(tutti_graph::Cost::Light)
+            .cost(tutti_graph::Cost::Light)
     }
 
     /// Translate classic MPE in the mode `mode` holds from the first block, on

@@ -54,17 +54,11 @@ fn apply(exec: &mut tutti_graph::Executor) {
 }
 
 fn at(node: u64, port: u16) -> InputPort {
-    InputPort {
-        node: NodeKey(node),
-        port,
-    }
+    InputPort::new(NodeKey(node), port)
 }
 
 fn from(node: u64, port: u16) -> Edge {
-    Edge::Direct(PortSource::Node(OutputPort {
-        node: NodeKey(node),
-        port,
-    }))
+    Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(node), port)))
 }
 
 fn process_is_allocation_free_in_steady_state_on(workers: usize) {
@@ -169,24 +163,15 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
     t.edges.insert(
         at(7, 2),
         vec![Edge::Feedback(FeedbackFrom::one_block(
-            OutputPort {
-                node: NodeKey(9),
-                port: 0,
-            },
+            OutputPort::new(NodeKey(9), 0),
             Samples::new(256),
         ))],
     );
     t.edges.insert(at(8, 0), vec![from(7, 0)]);
     t.edges.insert(at(9, 0), vec![from(8, 0)]);
     t.set_outputs(vec![
-        PortSource::Node(OutputPort {
-            node: NodeKey(9),
-            port: 0,
-        }),
-        PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        }),
+        PortSource::Node(OutputPort::new(NodeKey(9), 0)),
+        PortSource::Node(OutputPort::new(NodeKey(1), 0)),
     ]);
     ed.commit().expect("commits");
     apply(&mut exec);
@@ -314,10 +299,7 @@ fn a_bounded_event_merge_is_allocation_free_on(workers: usize) {
     wire(&mut ed, 2);
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(4),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(4), 0))]);
     ed.commit().expect("commits");
     apply(&mut exec);
     ed.collect();
@@ -391,14 +373,8 @@ fn crossfades_are_allocation_free_on(workers: usize) {
     t.edges
         .insert(at(1, 1), vec![Edge::Direct(PortSource::MainInput(1))]);
     t.set_outputs(vec![
-        PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        }),
-        PortSource::Node(OutputPort {
-            node: NodeKey(3),
-            port: 0,
-        }),
+        PortSource::Node(OutputPort::new(NodeKey(1), 0)),
+        PortSource::Node(OutputPort::new(NodeKey(3), 0)),
     ]);
     ed.commit().expect("commits");
 
@@ -471,8 +447,8 @@ struct HeldChaser(Arc<AtomicU64>);
 
 impl HeldChaser {
     const SHAPE: Shape = Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO))
-        .with_events(1, 0)
-        .with_chase(4);
+        .events(1, 0)
+        .chase(4);
     const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
@@ -516,12 +492,9 @@ fn a_held_chase_is_delivered_allocation_free_on(workers: usize) {
             Unforkable(HeldChaser(Arc::clone(&a[k as usize]))),
         );
     }
-    ed.spec_mut().topology.set_outputs((1..=KEYS).map(|k| {
-        PortSource::Node(OutputPort {
-            node: NodeKey(k),
-            port: 0,
-        })
-    }));
+    ed.spec_mut()
+        .topology
+        .set_outputs((1..=KEYS).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))));
     ed.commit().expect("commits");
     let mut out = vec![vec![0.0f32; 64]; KEYS as usize];
     let transport = TransportPosition::default();
@@ -603,10 +576,7 @@ fn a_replace_queued_behind_a_running_fade_chases_without_allocating() {
     ed.insert(NodeKey(1), "chaser", Unforkable(HeldChaser(Arc::clone(&a))));
     ed.spec_mut()
         .topology
-        .set_outputs([PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        })]);
+        .set_outputs([PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     ed.commit().expect("commits");
     let mut out = vec![0.0f32; 64];
     let transport = TransportPosition::default();
@@ -656,13 +626,13 @@ struct Spray {
 }
 
 impl Spray {
-    const BASE: Shape = Shape::EMPTY.with_events(0, 1);
+    const BASE: Shape = Shape::EMPTY.events(0, 1);
     const OUT: tutti_graph::OutEvents = Self::BASE.event_output(0).expect("declared");
 }
 
 impl Node for Spray {
     fn shape(&self) -> Shape {
-        Self::BASE.with_event_capacity(tutti_graph::testing::cap_of(self.cap))
+        Self::BASE.event_capacity(tutti_graph::testing::cap_of(self.cap))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -694,9 +664,9 @@ struct LateEvents;
 impl Node for LateEvents {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
-            .with_latency(Latency::new(Samples::new(141)))
-            .with_tail(Tail::Finite(Samples::new(141)))
+            .events(0, 1)
+            .latency(Latency::new(Samples::new(141)))
+            .tail(Tail::Finite(Samples::new(141)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
@@ -710,7 +680,7 @@ struct Tally([Arc<AtomicU64>; 2]);
 
 impl Node for Tally {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(2, 0)
+        Shape::EMPTY.events(2, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
@@ -861,7 +831,7 @@ struct ParamSink;
 impl Node for ParamSink {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_params(&[tutti_units::UnitParam::Cutoff, tutti_units::UnitParam::Q])
+            .params(&[tutti_units::UnitParam::Cutoff, tutti_units::UnitParam::Q])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -884,9 +854,9 @@ struct RampEvery;
 
 impl RampEvery {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_param_events()
-        .with_event_capacity(tutti_graph::testing::cap_of(16));
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(16));
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -966,10 +936,7 @@ fn modulated_params_are_allocation_free_on(workers: usize) {
         t.edges
             .insert(at(2, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
         t.edges.insert(at(1, 0), vec![from(2, 0)]);
-        t.set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        })]);
+        t.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     }
     let cut = ParamIn {
         node: NodeKey(1),
@@ -1064,8 +1031,8 @@ struct ParamTally([Arc<AtomicU64>; 2]);
 impl Node for ParamTally {
     fn shape(&self) -> Shape {
         Shape::sink_unassigned(ChannelLayout::MONO)
-            .with_events(2, 0)
-            .with_param_events()
+            .events(2, 0)
+            .param_events()
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
@@ -1106,10 +1073,7 @@ fn param_events_are_allocation_free_on(workers: usize) {
         t.edges
             .insert(at(2, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
         t.edges.insert(at(1, 0), vec![from(2, 0)]);
-        t.set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(2),
-            port: 0,
-        })]);
+        t.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))]);
     }
     let port = |p| EventInputPort {
         node: NodeKey(1),
@@ -1189,10 +1153,7 @@ fn scheduled_params_are_allocation_free_on(workers: usize) {
         t.edges
             .insert(at(2, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
         t.edges.insert(at(1, 0), vec![from(2, 0)]);
-        t.set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(2),
-            port: 0,
-        })]);
+        t.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))]);
     }
     ed.commit().expect("commits");
     apply(&mut exec);
@@ -1280,8 +1241,7 @@ struct AzimuthSink;
 
 impl Node for AzimuthSink {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::MONO)
-            .with_params(&[tutti_units::UnitParam::Azimuth])
+        Shape::through_unassigned(ChannelLayout::MONO).params(&[tutti_units::UnitParam::Azimuth])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -1302,9 +1262,9 @@ struct SeamEvery;
 
 impl SeamEvery {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_param_events()
-        .with_event_capacity(tutti_graph::testing::cap_of(16));
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(16));
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -1351,10 +1311,7 @@ fn an_azimuth_param_port_is_allocation_free() {
     ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     let azimuth = ParamIn {
         node: NodeKey(1),
         param: tutti_units::UnitParam::Azimuth.into(),
@@ -1404,10 +1361,7 @@ fn a_range_published_while_blocks_render_is_allocation_free() {
     ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     let azimuth = ParamIn {
         node: NodeKey(1),
         param: tutti_units::UnitParam::Azimuth.into(),
@@ -1464,10 +1418,7 @@ fn removing_a_node_with_a_moved_range_frees_nothing_on_the_audio_thread() {
     ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     let azimuth = ParamIn {
         node: NodeKey(1),
         param: tutti_units::UnitParam::Azimuth.into(),
@@ -1574,7 +1525,7 @@ fn reporting_nodes_are_allocation_free_on(workers: usize) {
             .topology
             .edges
             .insert(at(fx.0, 0), vec![from(src.0, 0)]);
-        outputs.push(PortSource::Node(OutputPort { node: fx, port: 0 }));
+        outputs.push(PortSource::Node(OutputPort::new(fx, 0)));
     }
     ed.spec_mut().topology.set_outputs(outputs);
     ed.commit().expect("commits");
@@ -1656,19 +1607,11 @@ fn fan_in_is_allocation_free_on(workers: usize) {
                     }
                     ed.spec_mut()
                         .topology
-                        .set_outputs(vec![PortSource::Node(OutputPort {
-                            node: sink,
-                            port: 0,
-                        })]);
+                        .set_outputs(vec![PortSource::Node(OutputPort::new(sink, 0))]);
                 } else {
                     ed.spec_mut().topology.outputs = vec![
                         (1..=n)
-                            .map(|k| {
-                                PortSource::Node(OutputPort {
-                                    node: NodeKey(k),
-                                    port: 0,
-                                })
-                            })
+                            .map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0)))
                             .collect(),
                     ];
                 }
@@ -1758,19 +1701,11 @@ fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
                 }
                 ed.spec_mut()
                     .topology
-                    .set_outputs(vec![PortSource::Node(OutputPort {
-                        node: sink,
-                        port: 0,
-                    })]);
+                    .set_outputs(vec![PortSource::Node(OutputPort::new(sink, 0))]);
             } else {
                 ed.spec_mut().topology.outputs = vec![
                     (1..=n)
-                        .map(|k| {
-                            PortSource::Node(OutputPort {
-                                node: NodeKey(k),
-                                port: 0,
-                            })
-                        })
+                        .map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0)))
                         .collect(),
                 ];
             }
@@ -1885,10 +1820,10 @@ impl Node for Wire {
         // pass by index; a wider input's rest are ports.
         let main = ch(self.ins.min(self.outs));
         Shape::buses(Buses::unassigned(main), Buses::unassigned(main))
-            .with_ports(ch(self.ins), ch(self.outs))
-            .with_latency(Latency::new(Samples::new(self.latency)))
-            .with_events(self.ein, self.eout)
-            .with_tail(Tail::None)
+            .ports(ch(self.ins), ch(self.outs))
+            .latency(Latency::new(Samples::new(self.latency)))
+            .events(self.ein, self.eout)
+            .tail(Tail::None)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -1986,10 +1921,7 @@ fn mode_graph(workers: usize) -> (Editor, tutti_graph::Executor) {
     t.connect(at(8, 0), from(4, 0));
     t.connect(at(8, 1), from(7, 0));
     t.connect(at(9, 0), from(8, 0));
-    t.set_outputs(vec![PortSource::Node(OutputPort {
-        node: NodeKey(9),
-        port: 0,
-    })]);
+    t.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(9), 0))]);
     ed.commit().expect("commits");
     apply(&mut exec);
     ed.collect();
@@ -2066,10 +1998,7 @@ fn own_bypass_toggling_is_allocation_free_on(workers: usize) {
     ed.spec_mut().topology.inputs = ChannelLayout::from_count(1);
     let t = &mut ed.spec_mut().topology;
     t.connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
-    t.set_outputs(vec![PortSource::Node(OutputPort {
-        node: NodeKey(1),
-        port: 0,
-    })]);
+    t.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -2270,12 +2199,7 @@ fn fading_edges_are_allocation_free_on(workers: usize) {
     };
     ed.spec_mut().topology.outputs = vec![
         (1..=8u64)
-            .map(|k| {
-                PortSource::Node(OutputPort {
-                    node: NodeKey(k),
-                    port: 0,
-                })
-            })
+            .map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0)))
             .collect(),
     ];
     for k in 1..=8u64 {
@@ -2340,8 +2264,8 @@ const STATE: u8 = 4;
 
 impl Chaser {
     const SHAPE: Shape = Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO))
-        .with_events(1, 0)
-        .with_chase(STATE as u32);
+        .events(1, 0)
+        .chase(STATE as u32);
     const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
@@ -2384,12 +2308,9 @@ fn a_swap_is_allocation_free_on(workers: usize) {
             }),
         );
     }
-    ed.spec_mut().topology.set_outputs((1..=NODES).map(|k| {
-        PortSource::Node(OutputPort {
-            node: NodeKey(k),
-            port: 0,
-        })
-    }));
+    ed.spec_mut()
+        .topology
+        .set_outputs((1..=NODES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))));
     ed.commit().expect("commits");
     let transport = TransportPosition::default();
     let mut outs: [Vec<f32>; NODES as usize] = std::array::from_fn(|_| vec![0.0f32; 256]);
@@ -2456,12 +2377,7 @@ fn edge_fades_are_allocation_free() {
         };
         ed.insert(NodeKey(n), "const", Unforkable(TestNode::new(k)));
     }
-    let src = |n: u64| {
-        PortSource::Node(OutputPort {
-            node: NodeKey(n),
-            port: 0,
-        })
-    };
+    let src = |n: u64| PortSource::Node(OutputPort::new(NodeKey(n), 0));
     ed.spec_mut().topology.outputs = vec![vec![src(1), src(2)]];
     let id = |n: u64| EdgeId {
         sink: PortSink::Output(0),
@@ -2553,7 +2469,7 @@ struct OffCount {
 
 impl Node for OffCount {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(self.inputs, 0)
+        Shape::EMPTY.events(self.inputs, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
@@ -2573,13 +2489,13 @@ impl Node for OffCount {
 }
 
 impl Holder {
-    const BASE: Shape = Shape::EMPTY.with_events(0, 1);
+    const BASE: Shape = Shape::EMPTY.events(0, 1);
     const OUT: tutti_graph::OutEvents = Self::BASE.event_output(0).expect("declared");
 }
 
 impl Node for Holder {
     fn shape(&self) -> Shape {
-        Self::BASE.with_event_capacity(tutti_graph::testing::cap_of(self.per_block.max(1) as u32))
+        Self::BASE.event_capacity(tutti_graph::testing::cap_of(self.per_block.max(1) as u32))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -2677,7 +2593,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     use_pool(&mut exec, workers);
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
     let first = pdc_pair(&mut ed, 1, 40);
-    let out_of = |node: NodeKey| PortSource::Node(OutputPort { node, port: 0 });
+    let out_of = |node: NodeKey| PortSource::Node(OutputPort::new(node, 0));
     ed.spec_mut().topology.set_outputs(vec![out_of(first)]);
     let cap = Samples::new(1 << 16);
     let mut tap = ed
@@ -2804,10 +2720,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     );
     let feedback = |delay: usize| {
         vec![Edge::Feedback(FeedbackFrom::one_block(
-            OutputPort {
-                node: gain,
-                port: 0,
-            },
+            OutputPort::new(gain, 0),
             Samples::new(delay),
         ))]
     };
@@ -3088,7 +3001,7 @@ struct Latch {
 }
 
 impl Latch {
-    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -3129,7 +3042,7 @@ struct Closed {
 }
 
 impl Closed {
-    const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+    const SHAPE: Shape = Shape::EMPTY.events(1, 0);
     const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
@@ -3345,10 +3258,7 @@ fn a_pool_set_across_a_commit_in_flight_allocates_nothing() {
     }
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(200),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(200), 0))]);
     ed.commit().expect("commits");
     use_pool(&mut exec, 4);
     apply(&mut exec);
@@ -3386,7 +3296,7 @@ fn an_output_tap_opened_again_at_another_width_swaps_without_allocating() {
             width: 3,
         })),
     );
-    let port = |p| PortSource::Node(OutputPort { node, port: p });
+    let port = |p| PortSource::Node(OutputPort::new(node, p));
     ed.spec_mut()
         .topology
         .set_outputs(vec![port(0), port(1), port(2)]);

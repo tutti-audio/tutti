@@ -53,7 +53,7 @@ impl Node for Downmixer {
             Buses::new(&[smpte(6)]).expect("one bus"),
             Buses::new(&[smpte(2)]).expect("one bus"),
         )
-        .with_latency(Latency::new(Samples::new(self.latency)))
+        .latency(Latency::new(Samples::new(self.latency)))
     }
 
     fn prepare(&mut self, _: &Prepare) {}
@@ -101,10 +101,7 @@ fn rig(workers: usize) -> (Editor, Executor) {
     for n in [1, 3, 4] {
         for c in 0..6 {
             ed.spec_mut().topology.connect(
-                InputPort {
-                    node: key(n),
-                    port: c,
-                },
+                InputPort::new(key(n), c),
                 Edge::Direct(PortSource::MainInput(c)),
             );
         }
@@ -116,7 +113,7 @@ fn rig(workers: usize) -> (Editor, Executor) {
     .expect("5.1 folds into stereo");
     ed.set_mode(key(3), NodeMode::Bypassed).expect("folds");
     ed.set_mix(key(4), Mix::DRY).expect("a mix");
-    let out = |n: u64, port: u16| PortSource::Node(OutputPort { node: key(n), port });
+    let out = |n: u64, port: u16| PortSource::Node(OutputPort::new(key(n), port));
     ed.spec_mut().topology.set_outputs(vec![
         out(2, 0),
         out(2, 1),

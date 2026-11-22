@@ -190,10 +190,10 @@ fn guarded<N: Node>(rig: &mut Rig<N>, blocks: usize) {
     }
 }
 
-/// A loop set while a stretching voice plays allocates nothing: the spare vocoder that
-/// primes for the wrap is built with the voice, so setting the loop only changes what the
-/// blocks read, and the priming, the swap at the wraps and the reset of the vocoder the
-/// swap replaces all run in `process`.
+/// A loop set while a stretching voice plays allocates nothing: a pool driven by hand has
+/// no handle to send a spare later, so its voice carries one built with it, and setting
+/// the loop only changes what the blocks read; the priming, the swap at the wraps and the
+/// reset of the vocoder the swap replaces all run in `process`.
 #[test]
 fn a_loop_set_while_a_stretching_voice_plays_does_not_allocate() {
     use tutti_graph::TransportPosition;
@@ -221,6 +221,25 @@ fn a_loop_set_while_a_stretching_voice_plays_does_not_allocate() {
     }
     for i in 0..256 {
         block((i >= 10).then_some(region), &mut direct);
+    }
+}
+
+/// A spare vocoder arrives and leaves without the audio thread allocating or freeing: the
+/// handle builds it when the loop is set (outside the guard), the drain moves it into the
+/// slot and, when the loop moves off, out to the retirement ring, and the handle frees it.
+#[test]
+fn a_spare_vocoder_arrives_and_retires_without_allocating() {
+    use tutti_music::LoopRange;
+    let region = LoopRange::new(Beat::new(0.125), Beat::new(0.376)).expect("a loop");
+    let (mut rig, handle) = stretching_rig(64, None);
+    for _ in 0..3 {
+        handle.follow_loop(Some(region));
+        guarded(&mut rig, 4);
+        assert_eq!(tutti_sampler::testing::spare_count(rig.node()), 1);
+        handle.follow_loop(None);
+        guarded(&mut rig, 4);
+        assert_eq!(tutti_sampler::testing::spare_count(rig.node()), 0);
+        assert_eq!(handle.collect_retired(), 1);
     }
 }
 

@@ -275,7 +275,7 @@ fn one_silent_node_makes_the_figure_partial_without_losing_it() {
 
     impl Node for Unreporting {
         fn shape(&self) -> Shape {
-            Shape::through_unassigned(ChannelLayout::MONO).with_tail(tutti_units::Tail::Unknown)
+            Shape::through_unassigned(ChannelLayout::MONO).tail(tutti_units::Tail::Unknown)
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -337,7 +337,7 @@ struct Integrator([f32; 2]);
 
 impl Node for Integrator {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::STEREO).with_tail(tutti_units::Tail::Unbounded)
+        Shape::through_unassigned(ChannelLayout::STEREO).tail(tutti_units::Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -1358,7 +1358,7 @@ struct Narrowing;
 impl Node for Narrowing {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_tail(tutti_units::Tail::Finite(tutti_units::Samples::new(4_000)))
+            .tail(tutti_units::Tail::Finite(tutti_units::Samples::new(4_000)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

@@ -185,7 +185,7 @@ impl OutputPort {
     /// The port the graph's `source` names, `None` for explicit silence.
     pub(crate) fn of_source(source: tutti_graph::PortSource) -> Option<Self> {
         match source {
-            tutti_graph::PortSource::Node(p) => Some(Self::new(p.node, usize::from(p.port))),
+            tutti_graph::PortSource::Node(p) => Some(Self::new(p.node(), usize::from(p.port()))),
             tutti_graph::PortSource::MainInput(c) => Some(MainInput::channel(usize::from(c))),
             tutti_graph::PortSource::Zero => None,
         }
@@ -238,7 +238,7 @@ impl InputPort {
     /// The port the graph's `sink` names.
     pub(crate) fn of_sink(sink: tutti_graph::PortSink) -> Self {
         match sink {
-            tutti_graph::PortSink::Port(p) => Self::new(p.node, usize::from(p.port)),
+            tutti_graph::PortSink::Port(p) => Self::new(p.node(), usize::from(p.port())),
             tutti_graph::PortSink::Output(c) => MainOutput::channel(usize::from(c)),
         }
     }

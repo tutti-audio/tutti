@@ -528,7 +528,7 @@ const LATE: usize = 100;
 impl tutti_graph::Node for Late {
     fn shape(&self) -> tutti_graph::Shape {
         tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(tutti_units::Latency::new(Samples::new(LATE)))
+            .latency(tutti_units::Latency::new(Samples::new(LATE)))
     }
     fn prepare(&mut self, _: &tutti_graph::Prepare) {}
     fn process(

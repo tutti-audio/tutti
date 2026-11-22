@@ -83,11 +83,11 @@ where
         let latency = Latency::new(Samples::new(latency.get() + this.pipeline.get()));
         this.declared
             .event_shape(this.features)
-            .with_event_input_capacity(this.event_input)
-            .with_latency(latency)
+            .event_input_capacity(this.event_input)
+            .latency(latency)
             // The ceiling: the plugin's claim, raised by what a probe measured
             // (empty until a probe ran with `--measure`), never lowered.
-            .with_tail(Processing::new(tail).ceiling(rate))
+            .tail(Processing::new(tail).ceiling(rate))
     }
 
     /// The rate (pending for the plugin, dispatched from the main thread; a

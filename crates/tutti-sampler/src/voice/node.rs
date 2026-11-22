@@ -171,7 +171,7 @@ impl<F: SamplerFloat> VoiceNode<F> {
     ) -> Result<Self, VoiceNodeError> {
         let channels = crate::voice_width(channels.into())?;
         GainError::check(voice.play.gain)?;
-        let stretch = stretch_wanted(&voice.play).then(|| stretched::vocoder::<F>(channels));
+        let stretch = stretch_wanted(&voice.play).then(|| stretched::vocoder::<F>(channels, true));
         let gain = Param::new(voice.play.gain);
         let window = voice.source.window();
         let play = voice.play;
@@ -467,10 +467,10 @@ impl<F: SamplerFloat> Node<F> for VoiceNode<F> {
     /// skipped, with the ring-out of `ring_out`.
     fn shape(&self) -> Shape {
         Shape::source_unassigned(self.channels)
-            .with_tail(self.ring_out())
-            .with_latency(self.latency())
-            .with_cost(self.cost())
-            .with_param_addrs(self.declared_ports().as_slice())
+            .tail(self.ring_out())
+            .latency(self.latency())
+            .cost(self.cost())
+            .param_addrs(self.declared_ports().as_slice())
     }
 
     /// The rate the voice's source runs at, and the
@@ -623,7 +623,7 @@ impl<F: SamplerFloat> ForkSource<F> for VoiceNodeFork<F> {
         node.reach = Reach::Frozen;
         let forked = Forked::new(Box::new(node));
         Ok(match health {
-            Some(h) => forked.with_health(Arc::new(h)),
+            Some(h) => forked.health(Arc::new(h)),
             None => forked,
         })
     }
@@ -804,7 +804,7 @@ mod tests {
             stretch: tutti_units::StretchFactor::new(1.5),
             ..Playback::default()
         });
-        let want = stretched::vocoder::<f32>(ChannelLayout::MONO)
+        let want = stretched::vocoder::<f32>(ChannelLayout::MONO, false)
             .live
             .latency();
         assert!(want.get() > 0);

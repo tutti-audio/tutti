@@ -53,7 +53,7 @@
 //! let key = NodeKey(1);
 //! editor.insert(key, "piano", unit);
 //! editor.spec_mut().topology.set_outputs((0..2)
-//!     .map(|port| PortSource::Node(OutputPort { node: key, port })));
+//!     .map(|port| PortSource::Node(OutputPort::new(key, port))));
 //! editor.commit()?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```

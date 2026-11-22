@@ -26,8 +26,8 @@ struct Burst;
 
 impl Burst {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_event_capacity(std::num::NonZeroU32::new(4).expect("a capacity"));
+        .events(0, 1)
+        .event_capacity(std::num::NonZeroU32::new(4).expect("a capacity"));
     const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -53,7 +53,7 @@ struct Discard;
 
 impl Node for Discard {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0)
+        Shape::EMPTY.events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {

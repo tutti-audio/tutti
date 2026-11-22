@@ -4,7 +4,7 @@
 //! # Why a wrapper and not an extension of `crate`
 //!
 //! Giving `InputPort`/`OutputPort` a kind would break every place
-//! that builds them by literal (`InputPort { node, port }`). Event edges also
+//! that builds them by literal (`InputPort::new(node, port)`). Event edges also
 //! have a different *edge kind* from audio edges (an event edge carries an
 //! offset-merged stream, an audio edge a signal that will be summed), so the
 //! two maps do not share a type.
@@ -80,7 +80,7 @@ impl EventOutputPort {
 /// use tutti_graph::OutputPort;
 /// use tutti_graph::NodeKey;
 /// let mut g = GraphSpec::default();
-/// let audio = OutputPort { node: NodeKey(1), port: 0 };
+/// let audio = OutputPort::new(NodeKey(1), 0);
 /// g.connect_events(EventInputPort { node: NodeKey(2), port: 0 }, EventEdge::Direct(audio));
 /// ```
 ///

@@ -380,7 +380,7 @@ fn forked(fork: PluginClient<Bound>) -> Forked {
     let health = fork.fork_health();
     let forked = Forked::new(fork.state.node);
     match health {
-        Some(health) => forked.with_health(health),
+        Some(health) => forked.health(health),
         None => forked,
     }
 }

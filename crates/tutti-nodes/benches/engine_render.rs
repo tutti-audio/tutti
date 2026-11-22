@@ -66,11 +66,8 @@ const SR: f64 = 48_000.0;
 /// Wire `from`'s output `out` into `node`'s input `port`.
 fn wire(ed: &mut Editor, node: NodeKey, port: u16, from: NodeKey, out: u16) {
     ed.spec_mut().topology.edges.insert(
-        InputPort { node, port },
-        vec![Edge::Direct(PortSource::Node(OutputPort {
-            node: from,
-            port: out,
-        }))],
+        InputPort::new(node, port),
+        vec![Edge::Direct(PortSource::Node(OutputPort::new(from, out)))],
     );
 }
 
@@ -104,12 +101,9 @@ fn chain_engine(outputs: usize) -> Engine {
     wire(&mut ed, eq, 0, osc, 0);
     wire(&mut ed, strip, 0, eq, 0);
     wire(&mut ed, strip, 1, eq, 0);
-    ed.spec_mut().topology.set_outputs((0..outputs).map(|c| {
-        PortSource::Node(OutputPort {
-            node: strip,
-            port: (c % 2) as u16,
-        })
-    }));
+    ed.spec_mut().topology.set_outputs(
+        (0..outputs).map(|c| PortSource::Node(OutputPort::new(strip, (c % 2) as u16))),
+    );
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
 
@@ -245,7 +239,7 @@ struct Sine {
 impl tutti_graph::Node for Sine {
     fn shape(&self) -> tutti_graph::Shape {
         tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
-            .with_tail(tutti_units::Tail::Unbounded)
+            .tail(tutti_units::Tail::Unbounded)
     }
     fn prepare(&mut self, p: &tutti_graph::Prepare) {
         self.dt = (1.0 / p.sample_rate().get()) as f32;
@@ -292,8 +286,8 @@ impl Lowpass {
 impl tutti_graph::Node for Lowpass {
     fn shape(&self) -> tutti_graph::Shape {
         tutti_graph::Shape::through_unassigned(ChannelLayout::MONO)
-            .with_tail(tutti_units::Tail::Unknown)
-            .with_in_place()
+            .tail(tutti_units::Tail::Unknown)
+            .in_place()
     }
     fn prepare(&mut self, p: &tutti_graph::Prepare) {
         let g = (std::f32::consts::PI * self.cutoff / p.sample_rate().get() as f32).tan();
@@ -361,20 +355,14 @@ fn depth_graph_engine(depth: usize, ours: bool) -> Engine {
         let k = NodeKey(1 + i as u64);
         ed.insert(k, "lowpass", Unforkable(f));
         ed.spec_mut().topology.edges.insert(
-            InputPort { node: k, port: 0 },
-            vec![Edge::Direct(PortSource::Node(OutputPort {
-                node: last,
-                port: 0,
-            }))],
+            InputPort::new(k, 0),
+            vec![Edge::Direct(PortSource::Node(OutputPort::new(last, 0)))],
         );
         last = k;
     }
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: last,
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(last, 0))]);
     ed.commit().expect("commits");
     let engine =
         Engine::new(&Transport::new(SampleRate::of(SR)), &mut ed, exec).expect("within the limits");

@@ -889,7 +889,7 @@ impl PluginHandle {
     ///
     /// **The node's mode owns the plugin's bypass.** A node whose plugin has one
     /// ([`PluginWiring::own_bypass`], claimed only where the host can read it
-    /// back) declares [`Shape::with_own_bypass`](tutti_graph::Shape::with_own_bypass),
+    /// back) declares [`Shape::own_bypass`](tutti_graph::Shape::own_bypass),
     /// so the executor leaves it running in
     /// [`NodeMode::Bypassed`](tutti_graph::NodeMode::Bypassed): the session
     /// writes the bypass when the mode changes and compares it every tick. A

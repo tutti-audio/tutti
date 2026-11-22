@@ -84,7 +84,7 @@ impl<F: Float> Kernel for EarlyReflectionsKernel<F> {
             .expect("early reflections take at most 16 channels");
         let output = BusTopology::unassigned(ChannelLayout::from_count(channels))
             .expect("a stage has at most 8 channels");
-        Shape::buses(Buses::main(input), Buses::main(output)).with_cost(Cost::Moderate)
+        Shape::buses(Buses::main(input), Buses::main(output)).cost(Cost::Moderate)
     }
 
     /// A re-prepare empties the history.

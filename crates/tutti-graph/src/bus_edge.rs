@@ -378,10 +378,7 @@ impl GraphSpec {
         };
         let (sink_topology, sink_first) = to.resolve(sink_shape.buses_in()).ok_or(no_sink)?;
         self.fold_lanes(shapes, from, sink_topology, fold, |c| {
-            PortSink::Port(InputPort {
-                node: to.node,
-                port: (sink_first + c) as u16,
-            })
+            PortSink::Port(InputPort::new(to.node, (sink_first + c) as u16))
         })
         .map_err(|error| match error {
             LaneError::Bus(e) => e,
@@ -453,10 +450,9 @@ impl GraphSpec {
         for c in 0..usize::from(sink.layout().count()) {
             for (k, gain) in fold.contributions(c) {
                 let source = match source_node {
-                    Some(node) => PortSource::Node(OutputPort {
-                        node,
-                        port: (source_first + k) as u16,
-                    }),
+                    Some(node) => {
+                        PortSource::Node(OutputPort::new(node, (source_first + k) as u16))
+                    }
                     None => PortSource::MainInput(k as u16),
                 };
                 lanes.push((

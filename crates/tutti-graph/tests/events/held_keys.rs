@@ -37,7 +37,7 @@ struct Src {
 }
 
 impl Src {
-    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -73,8 +73,8 @@ struct Lag;
 impl Node for Lag {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(tutti_units::Latency::new(Samples::new(LAG_FRAMES)))
-            .with_tail(tutti_units::Tail::Unknown)
+            .latency(tutti_units::Latency::new(Samples::new(LAG_FRAMES)))
+            .tail(tutti_units::Tail::Unknown)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -85,7 +85,7 @@ impl Node for Lag {
 }
 
 impl Sink {
-    const BASE: Shape = Shape::sink_unassigned(ChannelLayout::EMPTY).with_events(1, 0);
+    const BASE: Shape = Shape::sink_unassigned(ChannelLayout::EMPTY).events(1, 0);
     const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
 }
 
@@ -96,7 +96,7 @@ impl Node for Sink {
         } else {
             ChannelLayout::EMPTY
         };
-        Shape::sink_unassigned(a).with_events(1, 0)
+        Shape::sink_unassigned(a).events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
@@ -253,15 +253,9 @@ impl Rig {
                 );
                 if lag {
                     ed.spec_mut().topology.edges.insert(
-                        tutti_graph::InputPort {
-                            node: NodeKey(s),
-                            port: 0,
-                        },
+                        tutti_graph::InputPort::new(NodeKey(s), 0),
                         vec![tutti_graph::Edge::Direct(tutti_graph::PortSource::Node(
-                            tutti_graph::OutputPort {
-                                node: NodeKey(LAG),
-                                port: 0,
-                            },
+                            tutti_graph::OutputPort::new(NodeKey(LAG), 0),
                         ))],
                     );
                 }
@@ -330,23 +324,17 @@ impl Rig {
                     t.nodes.insert(
                         NodeKey(k),
                         NodeSpec::new("n", sh.audio_in(), sh.audio_out())
-                            .with_latency(sh.latency.samples())
-                            .with_tail(sh.tail),
+                            .latency(sh.latency.samples())
+                            .tail(sh.tail),
                     );
                     shapes.insert(NodeKey(k), sh);
                 }
                 if self.lag {
                     for &s in &self.sinks {
                         t.edges.insert(
-                            tutti_graph::InputPort {
-                                node: NodeKey(s),
-                                port: 0,
-                            },
+                            tutti_graph::InputPort::new(NodeKey(s), 0),
                             vec![tutti_graph::Edge::Direct(tutti_graph::PortSource::Node(
-                                tutti_graph::OutputPort {
-                                    node: NodeKey(LAG),
-                                    port: 0,
-                                },
+                                tutti_graph::OutputPort::new(NodeKey(LAG), 0),
                             ))],
                         );
                     }
@@ -1708,7 +1696,7 @@ fn a_live_note_during_a_long_drain_is_neither_refused_nor_left_sounding() {
 fn a_source_without_note_events_closes_nothing() {
     struct Clock;
     impl Clock {
-        const SHAPE: Shape = Shape::EMPTY.with_events(0, 1).with_no_note_events();
+        const SHAPE: Shape = Shape::EMPTY.events(0, 1).no_note_events();
         const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
     }
 
@@ -1755,7 +1743,7 @@ fn a_source_without_note_events_closes_nothing() {
 fn a_note_from_a_source_that_declared_none_is_caught() {
     struct Liar;
     impl Liar {
-        const SHAPE: Shape = Shape::EMPTY.with_events(0, 1).with_no_note_events();
+        const SHAPE: Shape = Shape::EMPTY.events(0, 1).no_note_events();
         const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
     }
 
@@ -1783,9 +1771,9 @@ fn a_note_from_a_source_that_declared_none_is_caught() {
 /// forgets the declaration is tracked, not left unclosed.
 #[test]
 fn a_shape_carries_note_events_by_default() {
-    let shape = Shape::EMPTY.with_events(0, 1);
+    let shape = Shape::EMPTY.events(0, 1);
     assert!(shape.note_events);
-    assert!(!shape.with_no_note_events().note_events);
+    assert!(!shape.no_note_events().note_events);
 }
 
 /// Fork fixtures: a source that sends `on60()` once, and a sink that logs. A
@@ -1798,7 +1786,7 @@ impl Clone for Once {
     }
 }
 impl Once {
-    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -1820,7 +1808,7 @@ impl Node for Once {
 #[derive(Clone)]
 struct Hear(Log, u64);
 impl Hear {
-    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0);
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).events(1, 0);
     const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
@@ -1856,10 +1844,7 @@ fn forked(log: &Log, blocks: usize, mid_note: bool) -> (Editor, Executor) {
     ed.spec_mut()
         .topology
         .set_outputs(vec![tutti_graph::PortSource::Node(
-            tutti_graph::OutputPort {
-                node: NodeKey(2),
-                port: 0,
-            },
+            tutti_graph::OutputPort::new(NodeKey(2), 0),
         )]);
     ed.commit().unwrap();
     exec.apply_pending();
@@ -2120,7 +2105,7 @@ mod no_alloc {
 
     struct Count(Arc<AtomicU64>);
     impl Count {
-        const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+        const SHAPE: Shape = Shape::EMPTY.events(1, 0);
         const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
     }
 

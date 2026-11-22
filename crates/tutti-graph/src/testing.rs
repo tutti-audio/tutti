@@ -158,7 +158,7 @@ pub enum Kind {
         buses_in: Box<crate::Buses>,
         buses_out: Box<crate::Buses>,
     },
-    /// `inner`, declaring `Shape::with_own_bypass`: the node behaves as
+    /// `inner`, declaring `Shape::own_bypass`: the node behaves as
     /// `inner` and the executor never blends or parks it in `Bypassed`.
     OwnBypass { inner: Box<Kind> },
 }
@@ -185,7 +185,7 @@ pub struct TestNode<F: Float = f32> {
     rate: Option<f64>,
     calls: Arc<AtomicUsize>,
     /// What its shape declares to the cost model (`Cost::Heavy`, the
-    /// default, unless set with `with_cost`).
+    /// default, unless set with `cost`).
     cost: crate::Cost,
     /// The buses a `Kind::Bused` declares.
     buses: Option<(crate::Buses, crate::Buses)>,
@@ -252,7 +252,7 @@ impl<F: Float> TestNode<F> {
     }
 
     /// This node, declaring `cost` (`Shape::cost`).
-    pub fn with_cost(mut self, cost: crate::Cost) -> Self {
+    pub fn cost(mut self, cost: crate::Cost) -> Self {
         self.cost = cost;
         self
     }
@@ -265,49 +265,49 @@ impl<F: Float> TestNode<F> {
                 unreachable!("`counted` unwraps the buses and the own bypass")
             }
             Kind::Const { width, .. } => Shape::source_unassigned(ch(width)),
-            Kind::Gain { width, .. } => Shape::through_unassigned(ch(width)).with_in_place(),
+            Kind::Gain { width, .. } => Shape::through_unassigned(ch(width)).in_place(),
             // Any number of inputs, which are not a bus: ports.
-            Kind::Sum { inputs } => Shape::EMPTY.with_ports(ch(inputs), ch(1)),
+            Kind::Sum { inputs } => Shape::EMPTY.ports(ch(inputs), ch(1)),
             Kind::Smooth => Shape::through_unassigned(ch(1))
-                .with_tail(Tail::Finite(Samples::new(1)))
-                .with_in_place(),
+                .tail(Tail::Finite(Samples::new(1)))
+                .in_place(),
             // A pure delay declared as latency: its tail, which excludes
             // latency, is none.
             Kind::Lag { latency } => Shape::through_unassigned(ch(1))
-                .with_latency(lat(latency))
-                .with_tail(Tail::None),
-            Kind::Emitter { .. } => Shape::source_unassigned(ch(1)).with_events(0, 1),
+                .latency(lat(latency))
+                .tail(Tail::None),
+            Kind::Emitter { .. } => Shape::source_unassigned(ch(1)).events(0, 1),
             Kind::GainDriver { latency, .. } | Kind::MixDriver { latency, .. } => Shape::EMPTY
-                .with_events(0, 1)
-                .with_param_events()
-                .with_latency(lat(latency))
-                .with_tail(Tail::None),
+                .events(0, 1)
+                .param_events()
+                .latency(lat(latency))
+                .tail(Tail::None),
             Kind::Burst { cap, .. } => Shape::source_unassigned(ch(1))
-                .with_events(0, 1)
-                .with_event_capacity(cap_of(cap)),
+                .events(0, 1)
+                .event_capacity(cap_of(cap)),
             Kind::Consumer { inputs } => Shape::source_unassigned(ch(1))
-                .with_events(inputs, 0)
-                .with_param_events()
-                .with_tail(Tail::Unbounded),
+                .events(inputs, 0)
+                .param_events()
+                .tail(Tail::Unbounded),
             Kind::BoundedConsumer { inputs, cap } => Shape::source_unassigned(ch(1))
-                .with_events(inputs, 0)
-                .with_tail(Tail::Unbounded)
-                .with_event_input_capacity(cap_of(cap)),
+                .events(inputs, 0)
+                .tail(Tail::Unbounded)
+                .event_input_capacity(cap_of(cap)),
             Kind::EventLag { latency } => Shape::EMPTY
-                .with_events(1, 1)
-                .with_latency(lat(latency))
-                .with_tail(Tail::None),
+                .events(1, 1)
+                .latency(lat(latency))
+                .tail(Tail::None),
             Kind::EnvProbe => Shape::source_unassigned(ch(1)),
             Kind::Thru { width } => Shape::through_unassigned(ch(width)),
-            Kind::ThruInPlace { width } => Shape::through_unassigned(ch(width)).with_in_place(),
+            Kind::ThruInPlace { width } => Shape::through_unassigned(ch(width)).in_place(),
             Kind::Mixed {
                 width,
                 events_in,
                 events_out,
             } => Shape::through_unassigned(ch(width))
-                .with_events(events_in, events_out)
-                .with_tail(Tail::Unbounded)
-                .with_in_place(),
+                .events(events_in, events_out)
+                .tail(Tail::Unbounded)
+                .in_place(),
             Kind::Spec {
                 ins,
                 outs,
@@ -318,8 +318,8 @@ impl<F: Float> TestNode<F> {
                 crate::Buses::unassigned(ch(ins)),
                 crate::Buses::unassigned(ch(outs)),
             )
-            .with_latency(lat(latency))
-            .with_tail(tail),
+            .latency(lat(latency))
+            .tail(tail),
         }
     }
 }
@@ -337,8 +337,7 @@ pub const fn cap_of(n: u32) -> NonZeroU32 {
 /// `shape`'s figures over these buses, its ports kept.
 #[allow(dead_code)]
 pub fn with_buses(shape: Shape, buses_in: crate::Buses, buses_out: crate::Buses) -> Shape {
-    let mut bused =
-        Shape::buses(buses_in, buses_out).with_ports(shape.audio_in(), shape.audio_out());
+    let mut bused = Shape::buses(buses_in, buses_out).ports(shape.audio_in(), shape.audio_out());
     bused.event_in = shape.event_in;
     bused.event_out = shape.event_out;
     bused.event_capacity = shape.event_capacity;
@@ -356,9 +355,9 @@ pub fn with_buses(shape: Shape, buses_in: crate::Buses, buses_out: crate::Buses)
 
 impl<F: Float> Node<F> for TestNode<F> {
     fn shape(&self) -> Shape {
-        let mut shape = self.kind_shape().with_cost(self.cost);
+        let mut shape = self.kind_shape().cost(self.cost);
         if self.own_bypass {
-            shape = shape.with_own_bypass();
+            shape = shape.own_bypass();
         }
         match self.buses {
             // The kind's figures over the buses the test declared.
@@ -662,8 +661,8 @@ impl<F: Float> Node<F> for TestNode<F> {
 pub fn spec_of(kind: &Kind) -> crate::NodeSpec {
     let s = TestNode::new(kind.clone()).shape();
     crate::NodeSpec::new("test", s.audio_in(), s.audio_out())
-        .with_latency(s.latency.samples())
-        .with_tail(s.tail)
+        .latency(s.latency.samples())
+        .tail(s.tail)
 }
 
 pub fn shapes_of(kinds: &BTreeMap<NodeKey, Kind>) -> Shapes {
@@ -688,7 +687,7 @@ fn costed<F: Float>(
 ) -> TestNode<F> {
     let node = TestNode::<F>::in_format(kind.clone());
     match costs.get(&k) {
-        Some(&c) => node.with_cost(c),
+        Some(&c) => node.cost(c),
         None => node,
     }
 }
@@ -1225,7 +1224,7 @@ impl RingingNode {
     }
 
     /// This node, declaring `latency`.
-    pub fn with_latency(mut self, latency: Samples) -> Self {
+    pub fn latency(mut self, latency: Samples) -> Self {
         self.latency = latency;
         self
     }
@@ -1247,10 +1246,10 @@ impl Node for RingingNode {
     fn shape(&self) -> Shape {
         let ch = ChannelLayout::try_from(self.width).expect("a width");
         let shape = Shape::through_unassigned(ch)
-            .with_latency(Latency::new(self.latency))
-            .with_tail(self.ceiling);
+            .latency(Latency::new(self.latency))
+            .tail(self.ceiling);
         if self.event_out {
-            shape.with_events(0, 1)
+            shape.events(0, 1)
         } else {
             shape
         }

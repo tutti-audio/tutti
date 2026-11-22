@@ -68,7 +68,7 @@ fn side(role: BusRole) -> Buses {
 }
 
 fn probe_shape() -> Shape {
-    Shape::buses(side(BusRole::Sidechain), side(BusRole::Aux)).with_tail(Tail::Unbounded)
+    Shape::buses(side(BusRole::Sidechain), side(BusRole::Aux)).tail(Tail::Unbounded)
 }
 
 impl Node for Probe {
@@ -100,7 +100,7 @@ impl Node for Probe {
 }
 
 fn out(node: NodeKey, port: u16) -> OutputPort {
-    OutputPort { node, port }
+    OutputPort::new(node, port)
 }
 
 fn wired(inputs: u64, outputs: u64) -> Wired {
@@ -157,7 +157,7 @@ fn scenario(workers: usize) -> Vec<(Vec<Rewired>, Read)> {
             width: 1,
         })),
     );
-    let at = |port| InputPort { node: PROBE, port };
+    let at = |port| InputPort::new(PROBE, port);
     let from = |port| Edge::Direct(PortSource::Node(out(SRC, port)));
     let mut steps = Vec::new();
 
@@ -348,10 +348,7 @@ fn a_bus_edge_marks_every_channel_port_of_its_bus() {
 fn a_feedback_edge_marks_the_input_and_the_source_output() {
     let (mut ed, mut exec, a, _b) = pair();
     ed.spec_mut().connect(
-        InputPort {
-            node: PROBE,
-            port: 1,
-        },
+        InputPort::new(PROBE, 1),
         Edge::Feedback(FeedbackFrom::new(out(PROBE, 0), Samples::new(16))),
     );
     let report = ed.commit().expect("commits");
@@ -367,7 +364,7 @@ fn a_shape_with_64_ports_reads_bit_63() {
     impl Node for Wide {
         fn shape(&self) -> Shape {
             let all = ChannelLayout::from_count(64);
-            Shape::unassigned(all, all).with_tail(Tail::Unbounded)
+            Shape::unassigned(all, all).tail(Tail::Unbounded)
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
@@ -391,10 +388,7 @@ fn a_shape_with_64_ports_reads_bit_63() {
     );
     ed.insert(PROBE, "wide", Unforkable(Wide(Arc::clone(&seen))));
     ed.spec_mut().connect(
-        InputPort {
-            node: PROBE,
-            port: 63,
-        },
+        InputPort::new(PROBE, 63),
         Edge::Direct(PortSource::Node(out(SRC, 63))),
     );
     let _tap = ed
@@ -429,10 +423,7 @@ fn heard_edge() -> (Editor, Executor, Arc<Seen>, EdgeId) {
         }),
     );
     let from = Edge::Direct(PortSource::Node(out(SRC, 0)));
-    let sink = InputPort {
-        node: PROBE,
-        port: 0,
-    };
+    let sink = InputPort::new(PROBE, 0);
     ed.spec_mut().connect(sink, from);
     let _ = ed.commit().expect("commits");
     render(&mut exec, 0);
@@ -481,10 +472,7 @@ fn a_fade_out_keeps_the_input_wired_until_the_commit_that_removes_the_edge() {
 #[test]
 fn a_fade_in_counts_as_wired_at_once() {
     let (mut ed, mut exec, seen, _) = heard_edge();
-    let sink = InputPort {
-        node: PROBE,
-        port: 1,
-    };
+    let sink = InputPort::new(PROBE, 1);
     let from = Edge::Direct(PortSource::Node(out(SRC, 1)));
     ed.spec_mut().connect(sink, from);
     let id = EdgeId {

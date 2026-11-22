@@ -367,6 +367,6 @@ fn mts_is_allocation_free() {
                 }
             }
         });
-        assert!(core.tuning_refused() > 0, "the refusals were exercised");
+        assert!(core.losses().refused > 0, "the refusals were exercised");
     }
 }

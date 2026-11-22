@@ -314,8 +314,8 @@ impl<F: Float> Node<F> for GranularNode<F> {
     /// No inputs, the layout's channels out, no latency, no ring-out.
     fn shape(&self) -> Shape {
         Shape::source_unassigned(self.layout)
-            .with_tail(Tail::None)
-            .with_param_addrs(self.declared_ports().as_slice())
+            .tail(Tail::None)
+            .param_addrs(self.declared_ports().as_slice())
     }
 
     fn prepare(&mut self, prepare: &Prepare) {

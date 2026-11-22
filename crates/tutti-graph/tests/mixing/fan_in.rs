@@ -33,17 +33,11 @@ fn key(n: u64) -> NodeKey {
 }
 
 fn at(node: u64, port: u16) -> InputPort {
-    InputPort {
-        node: key(node),
-        port,
-    }
+    InputPort::new(key(node), port)
 }
 
 fn out(node: u64) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: key(node),
-        port: 0,
-    })
+    PortSource::Node(OutputPort::new(key(node), 0))
 }
 
 fn direct(node: u64) -> Edge {
@@ -325,10 +319,7 @@ fn a_feedback_addend_sums_last() {
         at(4, 0),
         vec![
             Edge::Feedback(FeedbackFrom::new(
-                OutputPort {
-                    node: key(2),
-                    port: 0,
-                },
+                OutputPort::new(key(2), 0),
                 Samples::new(BLOCK),
             )),
             direct(3),

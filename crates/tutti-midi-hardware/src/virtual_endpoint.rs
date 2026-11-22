@@ -57,9 +57,9 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::task::Poll;
-use tutti_graph::Losses;
 use tutti_platform::Instant;
 use tutti_rt::{Counter, CounterWriter, Mutex, counter};
+use tutti_units::Losses;
 
 use tutti_midi_device::FunctionBlock;
 use tutti_midi_protocol::{Midi1Translator, Midi2Translator};

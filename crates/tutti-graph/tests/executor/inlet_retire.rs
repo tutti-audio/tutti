@@ -29,7 +29,7 @@ fn render(exec: &mut tutti_graph::Executor, blocks: usize) {
 fn outputs(ed: &mut Editor) {
     ed.spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort { node: KEY, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(KEY, port))));
 }
 
 /// Replacing an inlet through a cut and through a crossfade, then removing

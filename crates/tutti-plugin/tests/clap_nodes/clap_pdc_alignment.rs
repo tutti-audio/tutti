@@ -194,8 +194,8 @@ fn two_paths(plugin: PluginClient<Bound>) -> Rig {
         g.set_source(key, port, PortSource::MainInput(0));
     }
     g.set_source(dry, 0, PortSource::MainInput(0));
-    g.add_output(0, PortSource::Node(OutputPort { node: key, port: 0 }));
-    g.add_output(0, PortSource::Node(OutputPort { node: dry, port: 0 }));
+    g.add_output(0, PortSource::Node(OutputPort::new(key, 0)));
+    g.add_output(0, PortSource::Node(OutputPort::new(dry, 0)));
     finish(g, key, controls)
 }
 
@@ -209,7 +209,7 @@ fn plugin_alone(plugin: PluginClient<Bound>) -> Rig {
     for port in 0..plugin_inputs {
         g.set_source(key, port, PortSource::MainInput(0));
     }
-    g.set_output(0, PortSource::Node(OutputPort { node: key, port: 0 }));
+    g.set_output(0, PortSource::Node(OutputPort::new(key, 0)));
     finish(g, key, controls)
 }
 

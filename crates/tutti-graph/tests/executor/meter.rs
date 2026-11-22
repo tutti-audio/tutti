@@ -49,10 +49,7 @@ impl IntoNode for Forkable {
 const MAX_BLOCK: usize = 1024;
 
 fn out(node: u64) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: NodeKey(node),
-        port: 0,
-    })
+    PortSource::Node(OutputPort::new(NodeKey(node), 0))
 }
 
 struct Rig {
@@ -463,17 +460,11 @@ fn output_bits(workers: usize, main_output: bool, track: bool) -> Vec<u32> {
         );
         let t = &mut r.ed.spec_mut().topology;
         t.edges.insert(
-            InputPort {
-                node: NodeKey(lag),
-                port: 0,
-            },
+            InputPort::new(NodeKey(lag), 0),
             vec![Edge::Direct(PortSource::MainInput(0))],
         );
         t.edges.insert(
-            InputPort {
-                node: NodeKey(gain),
-                port: 0,
-            },
+            InputPort::new(NodeKey(gain), 0),
             vec![Edge::Direct(out(lag))],
         );
         outputs.push(out(gain));
@@ -558,12 +549,7 @@ fn a_narrowed_node_silences_the_lanes_past_its_width_and_commits() {
             width: 2,
         }),
     );
-    let port = |p| {
-        PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: p,
-        })
-    };
+    let port = |p| PortSource::Node(OutputPort::new(NodeKey(1), p));
     r.ed.spec_mut().topology.set_outputs(vec![port(0)]);
     let mut m =
         r.ed.open_meter(MeterId::of(1), MeterSpec::raw(vec![port(0), port(1)]))
@@ -625,13 +611,10 @@ fn the_main_output_reads_at_the_outputs_time() {
     r.ed.insert(NodeKey(1), "pulse", Unforkable(Burst { len: 50, done: 0 }));
     r.ed.insert(NodeKey(2), "pulse", Unforkable(Burst { len: 50, done: 0 }));
     r.ed.insert(NodeKey(3), "lag", Forkable(Kind::Lag { latency: 30 }));
-    r.ed.spec_mut().topology.edges.insert(
-        InputPort {
-            node: NodeKey(3),
-            port: 0,
-        },
-        vec![Edge::Direct(out(2))],
-    );
+    r.ed.spec_mut()
+        .topology
+        .edges
+        .insert(InputPort::new(NodeKey(3), 0), vec![Edge::Direct(out(2))]);
     // Output 0 is the latent path, output 1 the bare pulse (delayed to meet it).
     r.ed.spec_mut().topology.set_outputs(vec![out(3), out(1)]);
     let mut main_output =
@@ -811,13 +794,10 @@ fn run(r: &mut Rig, blocks: usize) -> Vec<Vec<Level>> {
     constants(r, &values);
     // A chain with latency so the compiler aligns the outputs.
     r.ed.insert(NodeKey(20), "lag", Forkable(Kind::Lag { latency: 7 }));
-    r.ed.spec_mut().topology.edges.insert(
-        InputPort {
-            node: NodeKey(20),
-            port: 0,
-        },
-        vec![Edge::Direct(out(1))],
-    );
+    r.ed.spec_mut()
+        .topology
+        .edges
+        .insert(InputPort::new(NodeKey(20), 0), vec![Edge::Direct(out(1))]);
     r.ed.spec_mut().topology.outputs[5] = vec![out(20)];
     let mut main_output =
         r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)

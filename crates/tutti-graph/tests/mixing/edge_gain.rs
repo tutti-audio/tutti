@@ -32,17 +32,11 @@ fn key(n: u64) -> NodeKey {
 }
 
 fn at(node: u64, port: u16) -> InputPort {
-    InputPort {
-        node: key(node),
-        port,
-    }
+    InputPort::new(key(node), port)
 }
 
 fn out(node: u64) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: key(node),
-        port: 0,
-    })
+    PortSource::Node(OutputPort::new(key(node), 0))
 }
 
 fn direct(node: u64) -> Edge {

@@ -280,7 +280,7 @@ impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
             Buses::main(self.input),
             Buses::NONE.with(output).expect("one bus"),
         )
-        .with_cost(Cost::Moderate)
+        .cost(Cost::Moderate)
     }
 
     /// Prepares for `rate`: the sweep's top is held at 0.90 of Nyquist there (the authored

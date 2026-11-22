@@ -12,7 +12,7 @@ use tutti_ump::{
     Address, DeviceIdentity, ManufacturerId, Message, MidiChannel, MidiGroup, NoteNumber,
     SoftwareRevision, Sysex7Packets, SysexMessage, U7, Ump,
 };
-use tutti_units::Seconds;
+use tutti_units::{Losses, Seconds};
 
 fn parse(bytes: &[u8]) -> UniversalRead {
     read(SysexMessage::from_framed(bytes).expect("a framed message"))
@@ -530,7 +530,7 @@ fn a_message_of_the_group_ends_an_open_one_and_another_group_does_not() {
     let mut r = reader(0);
     let cut = [umps[0], note].into_iter().chain(umps[1..].iter().copied());
     assert!(feed(&mut r, cut).is_empty());
-    assert_eq!(r.dropped(), 1);
+    assert_eq!(r.losses(), Losses::lost(1));
     let mut r = reader(0);
     let kept = [umps[0], other_group_note]
         .into_iter()
@@ -549,7 +549,7 @@ fn an_overlong_message_is_dropped_counted_and_the_next_is_read() {
     long.push(0xF7);
     let mut r = reader(0);
     assert!(feed(&mut r, packets(0, &long)).is_empty());
-    assert_eq!(r.dropped(), 1);
+    assert_eq!(r.losses(), Losses::lost(1));
     assert_eq!(feed(&mut r, packets(0, &VOLUME)).len(), 1);
 }
 
@@ -573,18 +573,17 @@ fn a_tuning_dump_crosses_the_reader_and_a_corrupt_one_is_counted() {
     let heard = feed(&mut r, packets(0, &framed));
     assert_eq!(heard.len(), 1);
     assert!(matches!(heard[0].message, Universal::Tuning(_)));
-    assert_eq!(r.corrupt(), 0);
+    assert_eq!(r.losses(), Losses::NONE);
 
     // The checksum is wrong, for all devices: counted, not passed on.
     let n = framed.len();
     framed[n - 2] ^= 0x01;
     assert!(feed(&mut r, packets(0, &framed)).is_empty());
-    assert_eq!(r.corrupt(), 1);
+    assert_eq!(r.losses(), Losses::lost(1));
     // For another device it is none of this reader's business.
     framed[2] = 9;
     assert!(feed(&mut r, packets(0, &framed)).is_empty());
-    assert_eq!(r.corrupt(), 1);
-    assert_eq!(r.dropped(), 0);
+    assert_eq!(r.losses(), Losses::lost(1));
 }
 
 /// **A device's own id is `00` to `7E`: `7F` is the all-call** (M1 p.40), which

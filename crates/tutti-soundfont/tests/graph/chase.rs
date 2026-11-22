@@ -78,12 +78,9 @@ impl Rig {
                 port: 0,
             }),
         );
-        ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-            PortSource::Node(OutputPort {
-                node: NodeKey(2),
-                port,
-            })
-        }));
+        ed.spec_mut()
+            .topology
+            .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(2), port))));
         ed.commit().expect("commits");
         Self { ed, exec, tx }
     }
@@ -117,7 +114,7 @@ struct Recorder(Record<Ump>);
 
 impl Recorder {
     const SHAPE: Shape =
-        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::STEREO)).with_events(1, 0);
+        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::STEREO)).events(1, 0);
     const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
