@@ -9,9 +9,8 @@
 //! Not a realtime path: neither end is the audio thread, so a mutex is fine.
 
 use std::collections::VecDeque;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 /// Edits held between two drains. A drain runs every control tick, so this is
 /// seconds of a knob under a hand; past it the oldest are dropped and counted.
@@ -41,7 +40,7 @@ impl ReportedEdits {
     /// Holds one edit, dropping the oldest (and counting it) when the queue is
     /// full, so what survives is where the knob ended up.
     pub(crate) fn push(&self, edit: Edit) {
-        let mut queue = self.queue.lock_recover();
+        let mut queue = self.queue.lock();
         if queue.len() == ROOM {
             queue.pop_front();
             self.dropped.fetch_add(1, Ordering::Relaxed);
@@ -51,7 +50,7 @@ impl ReportedEdits {
 
     /// Moves every held edit, oldest first, to `out`.
     pub(crate) fn drain(&self, out: &mut Vec<Edit>) {
-        let mut queue = self.queue.lock_recover();
+        let mut queue = self.queue.lock();
         out.extend(queue.drain(..));
     }
 

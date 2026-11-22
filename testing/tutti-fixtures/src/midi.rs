@@ -10,7 +10,9 @@
 //! 7-bit value reaches a MIDI 2.0 field through `NoteVelocity::from`,
 //! `ControlValue::from` and `BendValue::from`.
 
-use tutti_midi_protocol::{MpeMode, MpeZone, MpeZoneConfig, MpeZones, PitchBendSensitivity};
+use tutti_midi_protocol::{
+    MemberCount, MpeMode, MpeZone, MpeZoneConfig, MpeZones, PitchBendSensitivity,
+};
 use tutti_ump::{
     Address, Attribute, Bank, BendValue, BlockDirection, CCNumber, ControlValue, DeviceIdentity,
     ManufacturerId, Message, Midi1Port, MidiChannel, NoteNumber, NoteVelocity, Protocol, Rpn,
@@ -190,11 +192,10 @@ fn zones(lower: Option<u8>, upper: Option<u8>) -> MpeMode {
     let config = |zone, n: u8| {
         MpeZoneConfig::new(
             zone,
-            n,
+            MemberCount::new(n).unwrap_or_else(|| panic!("{n} is not an MPE member count")),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
         )
-        .unwrap_or_else(|| panic!("{n} is not an MPE member count"))
     };
     MpeMode::Zones(
         MpeZones::new(

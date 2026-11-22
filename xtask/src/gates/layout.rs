@@ -132,9 +132,10 @@ const ONLY: &[(&str, &[&str])] = &[
         "tutti-rt",
         &["tutti-units", "tutti-buffers", "tutti-platform"],
     ),
+    // `Mutex`, the lock that refuses a wait inside a render.
     (
         "tutti-midi-network",
-        &["tutti-ump", "tutti-units", "tutti-platform"],
+        &["tutti-ump", "tutti-units", "tutti-platform", "tutti-rt"],
     ),
     // The staged files' `Mint` and the encoders' worker threads (`spawn_named`).
     (
@@ -144,7 +145,12 @@ const ONLY: &[(&str, &[&str])] = &[
     ("tutti-tempo", &["tutti-units", "tutti-music"]),
     (
         "tutti-voicing",
-        &["tutti-ump", "tutti-units", "tutti-midi-protocol"],
+        &[
+            "tutti-ump",
+            "tutti-units",
+            "tutti-music",
+            "tutti-midi-protocol",
+        ],
     ),
     (
         "tutti-timeline",

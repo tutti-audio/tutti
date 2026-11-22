@@ -2,8 +2,8 @@
 //! here from the spec, never read from the code under test.
 
 use tutti_midi_protocol::{
-    Midi1Translator, Midi2Translator, MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity,
-    TranslationMode,
+    MemberCount, Midi1Translator, Midi2Translator, MpeZoneConfig, PerNoteTranslation,
+    PitchBendSensitivity, TranslationMode,
 };
 use tutti_ump::{
     Address, Bank, CCNumber, ExtremeValues, Message, Midi1Bytes, MidiChannel, MidiGroup,
@@ -456,11 +456,10 @@ fn avoided_extremes_leave_zero_extended_registered_controllers() {
 
 fn zone() -> MpeZoneConfig {
     MpeZoneConfig::lower(
-        2,
+        MemberCount::of(2),
         PitchBendSensitivity::MPE_MASTER_DEFAULT,
         PitchBendSensitivity::MPE_MEMBER_DEFAULT,
     )
-    .unwrap()
 }
 
 fn mpe(zone: MpeZoneConfig) -> Midi1Translator {
@@ -932,11 +931,10 @@ fn mpe_centres_a_reused_members_slide() {
 
 fn one_member_zone() -> MpeZoneConfig {
     MpeZoneConfig::lower(
-        1,
+        MemberCount::of(1),
         PitchBendSensitivity::MPE_MASTER_DEFAULT,
         PitchBendSensitivity::MPE_MEMBER_DEFAULT,
     )
-    .unwrap()
 }
 
 /// **The Manager Channel is the zone's, not index 0**: the upper zone's Manager
@@ -947,11 +945,10 @@ fn one_member_zone() -> MpeZoneConfig {
 fn mpe_manager_channel_is_the_zones_own() {
     let bend = Message::Midi2(A, Voice2::PitchBend(BendValue::new(0x8000_0000)));
     let upper = MpeZoneConfig::upper(
-        2,
+        MemberCount::of(2),
         PitchBendSensitivity::MPE_MASTER_DEFAULT,
         PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-    )
-    .unwrap();
+    );
     assert_eq!(feed(&mut mpe(upper), bend), [vec![0xEF, 0x00, 0x40]]);
     let span = MpeZoneSpan::new(MidiChannel::of(3), MpeChannels::of(3)).unwrap();
     let profile = MpeZoneConfig::profile(span, PitchBendSensitivity::MPE_PROFILE_DEFAULT);

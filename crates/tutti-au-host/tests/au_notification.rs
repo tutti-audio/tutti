@@ -58,11 +58,11 @@
 
 #![cfg(target_os = "macos")]
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tutti_fixtures::main_thread;
 use tutti_platform::Instant;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 mod support;
 use support::corpus::{DELAY, MATRIX_REVERB, REVERB2, all_finite, peak, render, silence};
@@ -76,13 +76,6 @@ use tutti_au_host::{
 /// same unit. Serializing keeps one test's instantiate/dispose from racing
 /// another's enumeration. Mirrors `AU_LOCK` in `au_conformance.rs`.
 static AU_LOCK: Mutex<()> = Mutex::new(());
-
-/// `AU_LOCK` is poisoned by any panicking test, and a poisoned lock would
-/// convert one real failure into N spurious ones. The guard is only a
-/// serializer — there is no shared state to be left inconsistent — so recover.
-fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock_recover()
-}
 
 const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
@@ -103,19 +96,19 @@ struct EventLog(Arc<Mutex<Vec<AuEvent>>>);
 impl EventLog {
     fn sink(&self) -> impl Fn(AuEvent) + Send + Sync + 'static {
         let inner = Arc::clone(&self.0);
-        move |ev| inner.lock_recover().push(ev)
+        move |ev| inner.lock().push(ev)
     }
 
     fn snapshot(&self) -> Vec<AuEvent> {
-        self.0.lock_recover().clone()
+        self.0.lock().clone()
     }
 
     fn len(&self) -> usize {
-        self.0.lock_recover().len()
+        self.0.lock().len()
     }
 
     fn clear(&self) {
-        self.0.lock_recover().clear();
+        self.0.lock().clear();
     }
 
     /// Block until at least `n` events have arrived, or `SETTLE` elapses.
@@ -162,7 +155,7 @@ impl EventLog {
 /// asserts the value in the event, not the value in the AU.
 #[test]
 fn a_listener_observes_a_parameter_written_by_the_host() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
     let params = au.get_parameter_list();
     assert!(!params.is_empty(), "AUDelay publishes parameters");
@@ -224,7 +217,7 @@ fn a_listener_observes_a_parameter_written_by_the_host() {
 /// this crate owns.
 #[test]
 fn gesture_begin_and_end_are_delivered_in_order() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = DELAY.open(RATE, BLOCK);
     let params = au.get_parameter_list();
     let p = params[0].clone();
@@ -284,7 +277,7 @@ fn gesture_begin_and_end_are_delivered_in_order() {
 /// frozen count is the observable.
 #[test]
 fn a_dropped_listener_stops_delivering() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
     let params = au.get_parameter_list();
     let p = params[0].clone();
@@ -361,7 +354,7 @@ fn a_dropped_listener_stops_delivering() {
 /// of its parameters, first arriving at ~201 ms.
 #[test]
 fn load_state_notifies_listeners() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
     let params = au.get_parameter_list();
     let p = params[0].clone();
@@ -426,7 +419,7 @@ fn load_state_notifies_listeners() {
 /// that errors — currently ignored, but it would be masking a real refusal.
 #[test]
 fn notify_all_parameters_is_accepted_with_no_listener() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = DELAY.open(RATE, BLOCK);
     notify_all_parameters(au.unit())
         .expect("the wildcard notify is legal with no listeners registered");
@@ -501,7 +494,7 @@ fn measure_tail(unit: &support::corpus::AuRef) -> (f32, f32) {
 /// Spec: au.select.AudioUnitReset
 #[test]
 fn reset_clears_a_reverb_tail() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in [MATRIX_REVERB, REVERB2] {
         let (no_reset, after_reset) = measure_tail(&unit);
 
@@ -541,7 +534,7 @@ fn reset_clears_a_reverb_tail() {
 /// needs re-measuring rather than relaxing.
 #[test]
 fn the_reset_residual_is_zero_for_reverb2_and_small_for_matrix_reverb() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
 
     let (_, reverb2_after) = measure_tail(&REVERB2);
     assert_eq!(
@@ -572,7 +565,7 @@ fn the_reset_residual_is_zero_for_reverb2_and_small_for_matrix_reverb() {
 /// user's automation on every playhead jump.
 #[test]
 fn reset_leaves_parameters_untouched() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
     let params = au.get_parameter_list();
     assert!(!params.is_empty());
@@ -623,7 +616,7 @@ fn reset_leaves_parameters_untouched() {
 /// behaviour drifting silently.
 #[test]
 fn reset_is_accepted_before_initialize() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     // Deliberately spans effects and instruments: instruments have no input bus
     // and take a different path through `initialize`, so a typestate assumption
     // that held only for effects would show up here.
@@ -660,7 +653,7 @@ fn reset_is_accepted_before_initialize() {
 /// finding nothing to clear must be a no-op, not an error.
 #[test]
 fn repeated_resets_are_harmless() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = MATRIX_REVERB.open(RATE, BLOCK);
     let n = BLOCK as usize;
     let input = silence(2, n);

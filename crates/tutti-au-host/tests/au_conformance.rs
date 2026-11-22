@@ -31,9 +31,8 @@
 
 #![cfg(target_os = "macos")]
 
-use std::sync::Mutex;
 use tutti_fixtures::main_thread;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 mod support;
 use support::corpus::{
@@ -55,13 +54,6 @@ use tutti_units::Samples;
 /// `au_process_no_alloc.rs` and `PLUGIN_LOCK` in the VST3 suite.
 static AU_LOCK: Mutex<()> = Mutex::new(());
 
-/// `AU_LOCK` is poisoned by any panicking test, and a poisoned lock would
-/// convert one real failure into N spurious ones. The guard is only a
-/// serializer — there is no shared state to be left inconsistent — so recover.
-fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock_recover()
-}
-
 const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
 
@@ -73,7 +65,7 @@ const BLOCK: u32 = 512;
 /// Spec: au.select.AudioUnitRender
 #[test]
 fn render_before_initialize_is_refused() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open_uninitialized(RATE, BLOCK);
     assert!(
         !au.is_initialized(),
@@ -107,7 +99,7 @@ fn render_before_initialize_is_refused() {
 /// Spec: au.select.AudioUnitInitialize, au.select.AudioUnitUninitialize
 #[test]
 fn initialize_and_uninitialize_are_idempotent() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open_uninitialized(RATE, BLOCK);
 
     au.initialize().expect("first initialize");
@@ -140,7 +132,7 @@ fn initialize_and_uninitialize_are_idempotent() {
 /// the AU's own `has_input`.
 #[test]
 fn instrument_with_no_input_bus_initializes() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in INSTRUMENTS {
         let mut au = unit.open_uninitialized(RATE, BLOCK);
         assert_eq!(
@@ -170,7 +162,7 @@ fn instrument_with_no_input_bus_initializes() {
 /// through `AudioComponentGetDescription` and the fourcc mapping.
 #[test]
 fn component_type_classification_matches_the_registry() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in EFFECTS {
         let au = unit.open_uninitialized(RATE, BLOCK);
         assert_eq!(au.au_type(), AuType::Effect, "{}", unit.label);
@@ -198,7 +190,7 @@ fn component_type_classification_matches_the_registry() {
 /// non-finite bound, produces a control the user cannot operate.
 #[test]
 fn parameter_metadata_is_self_consistent() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in EFFECTS {
         let au = unit.open(RATE, BLOCK);
         let params = au.get_parameter_list();
@@ -238,7 +230,7 @@ fn parameter_metadata_is_self_consistent() {
 /// and replays on load. A duplicate id silently overwrites.
 #[test]
 fn parameter_ids_are_unique() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in EFFECTS {
         let au = unit.open(RATE, BLOCK);
         let params = au.get_parameter_list();
@@ -260,7 +252,7 @@ fn parameter_ids_are_unique() {
 /// silently does nothing.
 #[test]
 fn parameter_writes_round_trip() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in EFFECTS {
         let mut au = unit.open(RATE, BLOCK);
         let params = au.get_parameter_list();
@@ -296,7 +288,7 @@ fn parameter_writes_round_trip() {
 /// into the user's preset.
 #[test]
 fn unknown_parameter_id_is_an_error() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = LOWPASS.open(RATE, BLOCK);
     let declared: Vec<u32> = au.get_parameter_list().iter().map(|p| p.id).collect();
     let unknown = (0u32..10_000)
@@ -316,7 +308,7 @@ fn unknown_parameter_id_is_an_error() {
 /// Spec: au.prop.ClassInfo
 #[test]
 fn state_save_restore_round_trips() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in EFFECTS {
         let mut au = unit.open(RATE, BLOCK);
         // Not `continue`: every corpus effect has writable parameters (AUDelay
@@ -380,7 +372,7 @@ fn state_save_restore_round_trips() {
 /// saved before the plugin had state; it must not clobber the AU or error.
 #[test]
 fn loading_empty_state_is_a_noop() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
     let param = au
         .get_parameter_list()
@@ -401,7 +393,7 @@ fn loading_empty_state_is_a_noop() {
 /// truncated and hand-edited.
 #[test]
 fn corrupt_state_is_rejected() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
     // Not a binary plist: no `bplist00` magic, no XML prologue.
     let garbage = vec![0xDEu8, 0xAD, 0xBE, 0xEF, 0x00, 0x01, 0x02, 0x03];
@@ -423,7 +415,7 @@ fn corrupt_state_is_rejected() {
 /// host must catch it rather than pass it through.
 #[test]
 fn oversized_block_is_refused() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, 64);
     let input = silence(2, 128);
     let mut output = silence(2, 128);
@@ -443,7 +435,7 @@ fn oversized_block_is_refused() {
 /// before it is audible.
 #[test]
 fn silence_in_gives_finite_silence_out() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in EFFECTS {
         let mut au = unit.open(RATE, BLOCK);
         let input = silence(2, BLOCK as usize);
@@ -474,7 +466,7 @@ fn silence_in_gives_finite_silence_out() {
 /// untouched — inaudible per block, but a periodic click at block rate.
 #[test]
 fn render_writes_every_requested_frame() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = LOWPASS.open(RATE, BLOCK);
     const SENTINEL: f32 = -12_345.0;
 
@@ -498,7 +490,7 @@ fn render_writes_every_requested_frame() {
 /// host had staged there.
 #[test]
 fn partial_block_does_not_write_past_num_frames() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = LOWPASS.open(RATE, BLOCK);
     const GUARD: f32 = 7.5;
     let frames = 100u32;
@@ -528,7 +520,7 @@ fn partial_block_does_not_write_past_num_frames() {
 /// would fail a signal-present assertion while behaving correctly.
 #[test]
 fn input_reaches_the_plugin() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in [DELAY, LOWPASS, N_BAND_EQ] {
         let mut au = unit.open(RATE, BLOCK);
         let input = impulse(2, BLOCK as usize);
@@ -552,7 +544,7 @@ fn input_reaches_the_plugin() {
 /// Spec: au.prop.Latency
 #[test]
 fn reported_latency_is_the_plugins_own_in_samples() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for rate in [
         tutti_units::SampleRate::SR_44K1,
         tutti_units::SampleRate::SR_48K,
@@ -580,7 +572,7 @@ fn reported_latency_is_the_plugins_own_in_samples() {
 /// render scratch across this transition.
 #[test]
 fn sample_rate_change_reconfigures_and_still_renders() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
     assert_eq!(au.sample_rate(), RATE);
 
@@ -616,7 +608,7 @@ fn sample_rate_change_reconfigures_and_still_renders() {
 /// them and what render consumes is an out-of-bounds read.
 #[test]
 fn channel_counts_are_stable_across_initialize() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in EFFECTS {
         let mut au = unit.open_uninitialized(RATE, BLOCK);
         let (in_before, out_before) = (au.num_inputs(), au.num_outputs());
@@ -643,7 +635,7 @@ fn channel_counts_are_stable_across_initialize() {
 /// initialize at all.
 #[test]
 fn note_on_produces_audio_from_an_instrument() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     use tutti_graph::Offset;
 
     for unit in INSTRUMENTS {
@@ -677,7 +669,7 @@ fn note_on_produces_audio_from_an_instrument() {
 /// dropped note-offs would still pass the test above.
 #[test]
 fn note_off_silences_the_voice() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     use tutti_graph::Offset;
 
     let mut au = DLS_SYNTH.open(RATE, BLOCK);
@@ -743,7 +735,7 @@ fn note_off_silences_the_voice() {
 /// returns an error per event, which the host is documented to swallow.
 #[test]
 fn midi_to_an_effect_is_harmless() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     use tutti_graph::Offset;
 
     let mut au = DELAY.open(RATE, BLOCK);
@@ -767,7 +759,7 @@ fn midi_to_an_effect_is_harmless() {
 /// erroring.
 #[test]
 fn unrepresentable_midi_is_dropped_not_mangled() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     use tutti_graph::Offset;
 
     let mut au = SAMPLER.open(RATE, BLOCK);

@@ -55,10 +55,10 @@
 //! ([`VirtualEndpoint::sender`]).
 
 use std::marker::PhantomData;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::task::Poll;
 use tutti_platform::Instant;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_midi_device::FunctionBlock;
 use tutti_midi_protocol::{Midi1Translator, Midi2Translator};
@@ -281,7 +281,7 @@ impl Outbound {
                 };
                 // The packets go in order under the lock: the MIDI 1.0 translator assumes
                 // that what it emitted was sent before the next message.
-                let mut midi1_translator = midi1_translator.lock_recover();
+                let mut midi1_translator = midi1_translator.lock();
                 let mut sent = Ok(());
                 let count = translate_voice(&mut midi1_translator, message, |packet| {
                     if sent.is_ok() {
@@ -298,7 +298,7 @@ impl Outbound {
                 return sent;
             }
             Conversion::ToMidi2(translator) => {
-                let translated = translator.lock_recover().translate(ump);
+                let translated = translator.lock().translate(ump);
                 match translated {
                     Some(ump) => ump,
                     None => return Ok(()),
@@ -564,8 +564,9 @@ impl VirtualSender {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex};
+    use tutti_rt::Mutex;
 
     use tutti_ump::{ControlValue, MidiChannel, MidiGroup, Rpn, Voice1, Voice2};
 
@@ -584,7 +585,7 @@ mod tests {
             if self.calls.fetch_add(1, Ordering::SeqCst) == self.fail_at {
                 return Err(MidiHardwareError::Unsupported("recorder"));
             }
-            self.sent.lock().unwrap().push(*ump);
+            self.sent.lock().push(*ump);
             Ok(())
         }
     }
@@ -619,7 +620,6 @@ mod tests {
 
     fn controllers(sent: &Mutex<Vec<Ump>>) -> Vec<u8> {
         sent.lock()
-            .unwrap()
             .iter()
             .filter_map(|ump| match ump.decode() {
                 Ok(Message::Midi1(_, Voice1::ControlChange { controller, .. })) => {
@@ -651,15 +651,14 @@ mod tests {
     #[test]
     fn a_failed_send_keeps_an_mpe_notes_channel() {
         use tutti_midi_protocol::{
-            MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
+            MemberCount, MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
         };
         use tutti_ump::{Address, Attribute, BendValue, ExtremeValues, NoteNumber, NoteVelocity};
         let zone = MpeZoneConfig::lower(
-            2,
+            MemberCount::of(2),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-        )
-        .unwrap();
+        );
         let midi1_translator = Midi1Translator::with_mode(TranslationMode {
             extremes: ExtremeValues::Scaled,
             per_note: PerNoteTranslation::Mpe(zone),
@@ -698,7 +697,7 @@ mod tests {
                 .into(),
             )
             .unwrap();
-        let words: Vec<u32> = sent.lock().unwrap().iter().map(|u| u.0[0]).collect();
+        let words: Vec<u32> = sent.lock().iter().map(|u| u.0[0]).collect();
         // Note On on member channel 2 (0x91), then its Pitch Bend, centre 0x2000.
         assert_eq!(words, [0x2091_3C40, 0x20E1_0040]);
     }

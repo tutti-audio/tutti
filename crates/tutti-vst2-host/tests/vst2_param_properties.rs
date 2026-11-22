@@ -17,9 +17,9 @@
 //! default probe as *successfully* reporting a program.
 
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 use tutti_fixtures::main_thread;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_plugin_types::{Control, ParamFlags, ParamSteps};
 use tutti_units::Normalized;
@@ -43,7 +43,7 @@ const BLOCK: usize = 512;
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock_recover()
+    PROBE_LOCK.lock()
 }
 
 /// Call one of the probe's `#[no_mangle]` switch functions.

@@ -865,8 +865,9 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError, StartFailed};
     pub use tutti_midi_protocol::{
-        ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, MmcSegmentError, MpeMode,
-        MpeSpec, MpeZone, MpeZoneConfig, MpeZones, MtcRate, NotFrequencyData, NotSysexDeviceId,
+        ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, Mcm, MemberCount,
+        MmcSegmentCount, MmcSegmentError, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones,
+        MtcRate, NotFrequencyData, NotMemberCount, NotMmcSegmentCount, NotSysexDeviceId,
         PitchBendSensitivity, Recipient, SmpteFrameRate, SmpteTimecode, SysexDeviceId,
         TuningFrequency,
     };
@@ -989,10 +990,10 @@ pub mod midi {
             Ack, AckStatus, ActionError, BodyLimit, BufferLimit, CallError, CallId, CanSet,
             CcIndex, ChangeKind, ChunkNo, ClusterKind, ColumnSource, ConfirmIcon, ConfirmType,
             Confirmation, CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource,
-            EntryError, InvalidValue, JsonPointer, LinkRole, ListedTwice, ModeId, NotABodyLimit,
-            NotABufferLimit, NotAChunkNo, NotAPeChannel, NotAPeMidiMode, NotAPriority,
-            NotARequestId, NotASimultaneousRequests, NotAStateSize, NotAStepCount, NotAStreamLimit,
-            NotATimeoutWait, NotSignificantBits, NotUnixSeconds, NotVendorName, OpaqueBody,
+            EntryError, ExtensionError, InvalidValue, JsonPointer, LinkRole, ListedTwice, ModeId,
+            NotABodyLimit, NotABufferLimit, NotAChunkNo, NotAPeChannel, NotAPeMidiMode,
+            NotAPriority, NotARequestId, NotASimultaneousRequests, NotAStateSize, NotAStepCount,
+            NotAStreamLimit, NotATimeoutWait, NotSignificantBits, NotUnixSeconds, OpaqueBody,
             PaginationFault, ParamPath, PartialError, PartialUpdate, PartialValue, PeAllCtrlEntry,
             PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx,
             PeBodyError, PeCacheTime, PeCapabilities, PeCapabilitiesFailure, PeChCtrlEntry,

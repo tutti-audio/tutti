@@ -11,7 +11,7 @@ use tutti_platform::Executor;
 use tutti_plugin_db::Loadable;
 use tutti_plugin_types::PluginRef;
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use crate::host::node::PluginClient;
 use tutti_plugin_host::{
@@ -545,7 +545,7 @@ pub struct BoundPlugin {
 /// `Clone`: every clone drives the same plugin.
 #[derive(Clone)]
 pub struct PluginRebinder {
-    inner: std::sync::Arc<std::sync::Mutex<dyn Rebind>>,
+    inner: std::sync::Arc<Mutex<dyn Rebind>>,
 }
 
 /// A node [`PluginRebinder::prepare`] built over the plugin's new ports, and
@@ -647,7 +647,7 @@ impl PluginRebinder {
     /// The rebinder of an in-process plugin.
     fn in_process(rebinder: InProcessRebinder) -> Self {
         Self {
-            inner: std::sync::Arc::new(std::sync::Mutex::new(InProcessRebind(rebinder))),
+            inner: std::sync::Arc::new(Mutex::new(InProcessRebind(rebinder))),
         }
     }
 
@@ -656,37 +656,31 @@ impl PluginRebinder {
     #[must_use]
     pub fn out_of_process(client: &crate::PluginClient<crate::host::node::Bound>) -> Self {
         Self {
-            inner: std::sync::Arc::new(std::sync::Mutex::new(ServedRebind {
+            inner: std::sync::Arc::new(Mutex::new(ServedRebind {
                 rebinder: client.rebinder(),
                 fork: crate::host::node::fork::ServedFork::of(client),
             })),
         }
     }
 
-    /// The rebinder, whatever a panic left in its lock: it holds no state of
-    /// its own.
-    fn lock(&self) -> std::sync::MutexGuard<'_, dyn Rebind + 'static> {
-        self.inner.lock_recover()
-    }
-
     /// The ports the plugin has now, as its lifecycle last read them. `None`
     /// for a lost plugin.
     #[must_use]
     pub fn layout(&self) -> Option<tutti_plugin_types::Layout> {
-        self.lock().layout()
+        self.inner.lock().layout()
     }
 
     /// Ticks the plugin's lifecycle where its handle does not (an out-of-process
     /// plugin's): the restart a change of buses plans runs from here. Main
     /// thread.
     pub fn tick(&self, main: MainThreadMarker) {
-        self.lock().tick(main);
+        self.inner.lock().tick(main);
     }
 
     /// Where the Processor's way is after the last commit.
     #[must_use]
     pub fn settled(&self) -> tutti_plugin_host::Settlement {
-        self.lock().settled()
+        self.inner.lock().settled()
     }
 
     /// A node over the plugin's ports as they are now: see
@@ -698,7 +692,7 @@ impl PluginRebinder {
     ///
     /// The refusals of [`Rebinder::prepare`](tutti_plugin_host::Rebinder::prepare).
     pub fn prepare(&self) -> std::result::Result<Rebuilt, tutti_plugin_host::RebindError> {
-        self.lock().prepare()
+        self.inner.lock().prepare()
     }
 }
 

@@ -27,7 +27,8 @@
 
 #![cfg(feature = "conformance")]
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tutti_rt::Mutex;
 
 use tutti_vst3_host::host::{detach_view, platform_type_refused};
 
@@ -60,10 +61,7 @@ impl Class for RecordingView {
 
 impl RecordingView {
     fn record(&self, call: Call) {
-        self.calls
-            .lock()
-            .expect("recording lock poisoned")
-            .push(call);
+        self.calls.lock().push(call);
     }
 }
 
@@ -160,7 +158,7 @@ fn clears_frame_before_removed() {
 
     teardown(&view);
 
-    let calls = calls.lock().expect("recording lock poisoned").clone();
+    let calls = calls.lock().clone();
     let clear = calls
         .iter()
         .position(|c| *c == Call::ClearFrame)
@@ -187,12 +185,12 @@ fn recording_view_observes_calls() {
     });
 
     assert!(
-        calls.lock().expect("recording lock poisoned").is_empty(),
+        calls.lock().is_empty(),
         "no calls should be recorded before teardown"
     );
     teardown(&view);
     assert_eq!(
-        *calls.lock().expect("recording lock poisoned"),
+        *calls.lock(),
         vec![Call::ClearFrame, Call::Removed],
         "teardown should perform exactly these two calls, in this order"
     );

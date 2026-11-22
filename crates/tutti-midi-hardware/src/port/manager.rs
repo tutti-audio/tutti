@@ -8,8 +8,8 @@
 //! the graph's owner adds. Removing the port retires its entry in this list.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
-use tutti_rt::{Bell, LockExt};
+use std::sync::Arc;
+use tutti_rt::{Bell, Mutex};
 
 use tutti_graph::EventInletNode;
 use tutti_midi_runtime::{DeviceWriters, InputId, InputInlets};
@@ -125,7 +125,7 @@ impl HardwareMidiInputs {
 
     fn ports(&self) -> std::sync::MutexGuard<'_, Ports> {
         // A poisoned lock guards nothing inconsistent: every change is whole.
-        self.ports.lock_recover()
+        self.ports.lock()
     }
 
     /// Creates an input port named `name` and returns the **only** producer

@@ -164,7 +164,7 @@ fn assert_poison_reads_as_lost(mut plugin: AnyServer) {
 #[cfg(feature = "clap")]
 #[test]
 fn a_poisoned_clap_plugin_reads_as_lost_and_a_fresh_one_does_not() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let path = Path::new(crate::test_utils::clap_probe_path());
     assert_poison_reads_as_lost(load_any(path, PluginFormat::Clap).expect("load"));
 }
@@ -173,7 +173,7 @@ fn a_poisoned_clap_plugin_reads_as_lost_and_a_fresh_one_does_not() {
 #[cfg(feature = "vst3")]
 #[test]
 fn a_poisoned_vst3_plugin_reads_as_lost_and_a_fresh_one_does_not() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let path = Path::new(crate::test_utils::vst3_probe_path());
     assert_poison_reads_as_lost(load_any(path, PluginFormat::Vst3).expect("load"));
 }

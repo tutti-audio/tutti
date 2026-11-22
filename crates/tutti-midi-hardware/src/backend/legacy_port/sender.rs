@@ -1,10 +1,10 @@
 //! An output's sender: a thread's loop over an [`Outbox`], with the sending and
 //! the waiting left to the platform.
 
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 use std::time::Duration;
 use tutti_platform::Instant;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use super::schedule::{Next, Outbox};
 use tutti_rt::{Counter, CounterWriter, counter};
@@ -35,7 +35,7 @@ impl<T> Mailbox<T> {
 
     /// The outbox, locked. The lock is the sender's too, held for one step.
     pub(in crate::backend) fn state(&self) -> MutexGuard<'_, Outbox<T>> {
-        self.state.lock_recover()
+        self.state.lock()
     }
 
     /// What the sender could not send: refused sends are lost, and what was

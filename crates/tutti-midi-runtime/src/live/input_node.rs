@@ -75,14 +75,14 @@ use tutti_graph::UmpAt;
 use tutti_units::Losses;
 
 use std::num::NonZeroU32;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tutti_graph::{
     Cx, Event, EventDensity, EventKind, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io,
     Node, NodeParts, Offset, Prepare, Shape, Status,
 };
 use tutti_midi_protocol::Midi2Translator;
 use tutti_midi_protocol::{MpeMode, MpeZones};
-use tutti_rt::{Counter, CounterWriter, LockExt, Publisher, Reader, counter};
+use tutti_rt::{Counter, CounterWriter, Mutex, Publisher, Reader, counter};
 use tutti_ump::{Held, Message, MidiChannel, MidiGroup, System, Ump};
 use tutti_units::{Frame, SampleRate, Samples};
 
@@ -565,7 +565,7 @@ impl MidiInputControls {
     /// Publishes the requests with `edit` applied to the device's zones, when it
     /// says it changed them.
     fn edit_profiles(&self, edit: impl FnOnce(&mut GroupProfiles) -> bool) {
-        let _serial = self.serial.lock_recover();
+        let _serial = self.serial.lock();
         let mut request = (*self.request.current()).clone();
         if edit(&mut request.profiles) {
             self.request.publish(request);

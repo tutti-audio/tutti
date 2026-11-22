@@ -18,9 +18,10 @@ use crate::devices::reporter::os_devices;
 use crate::test_support::endpoint;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tutti_alsa_ffi::{Address, ClientId};
 use tutti_midi_device::DeviceEvent;
+use tutti_rt::Mutex;
 
 fn heard(events: &[Announced]) -> Drained {
     Drained {
@@ -162,7 +163,7 @@ struct Capture(Arc<Mutex<Option<ChangeSink>>>);
 
 impl crate::MidiEndpoints for Capture {
     fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
-        *self.0.lock().unwrap() = Some(sink);
+        *self.0.lock() = Some(sink);
         Ok(Box::new(crate::endpoints::NoWatch))
     }
     fn inputs(&self) -> Result<Vec<crate::OsEndpoint>> {
@@ -241,7 +242,7 @@ impl World {
         )
         .unwrap();
         let events = devices.subscribe();
-        let sink = slot.lock().unwrap().take().unwrap();
+        let sink = slot.lock().take().unwrap();
         let model = Model {
             stream: RefCell::new(queued.to_vec()),
             present: RefCell::new(Self::device(name)),

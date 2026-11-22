@@ -531,31 +531,34 @@ wire_enum! {
     }
 }
 
+tutti_units::ranged! {
+    /// The count of segments still to come in a string, `0` to `63`: six bits;
+    /// the last segment carries `0` (RP-013 pp.5, 40 and 73).
+    #[derive(Eq, Hash)]
+    MmcSegmentCount(u8), NotMmcSegmentCount, bits 6
+}
+
 /// One segment of a longer command or response string (RP-013 pp.5, 40 and 73).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MmcSegment {
     place: MmcSegmentPlace,
-    remaining: u8,
+    remaining: MmcSegmentCount,
     bytes: MmcSegmentBytes,
 }
 
 impl MmcSegment {
     /// The segment `bytes` at `place` in its string, with `remaining`
-    /// segments still to come (0..=63; the last is `0`), or `None` above 63.
+    /// segments still to come (the last is `0`).
     #[must_use]
     pub const fn new(
         place: MmcSegmentPlace,
-        remaining: u8,
+        remaining: MmcSegmentCount,
         bytes: MmcSegmentBytes,
-    ) -> Option<Self> {
-        if remaining < 64 {
-            Some(Self {
-                place,
-                remaining,
-                bytes,
-            })
-        } else {
-            None
+    ) -> Self {
+        Self {
+            place,
+            remaining,
+            bytes,
         }
     }
 
@@ -567,7 +570,7 @@ impl MmcSegment {
 
     /// The segments still to come; the last is `0`.
     #[must_use]
-    pub const fn remaining(&self) -> u8 {
+    pub const fn remaining(&self) -> MmcSegmentCount {
         self.remaining
     }
 
