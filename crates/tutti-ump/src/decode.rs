@@ -35,6 +35,7 @@ use crate::{
     RegisteredPerNoteController, Reserved, ReservedAttribute, Sysex8StreamCount, Sysex8StreamId,
     Ump,
 };
+use crate::{FlexTempo, JrTicks};
 
 impl Ump {
     /// Decodes this packet into the [`Message`] it holds.
@@ -128,8 +129,8 @@ fn utility(w0: u32) -> Option<Utility> {
     let low16 = w0 as u16;
     match (w0 >> 20) & 0xf {
         0x0 => Some(Utility::Noop),
-        0x1 => Some(Utility::JrClock(low16)),
-        0x2 => Some(Utility::JrTimestamp(low16)),
+        0x1 => Some(Utility::JrClock(JrTicks::new(low16))),
+        0x2 => Some(Utility::JrTimestamp(JrTicks::new(low16))),
         0x3 => Some(match TicksPerQuarterNote::new(low16) {
             Some(ticks) => Utility::TicksPerQuarterNote(ticks),
             None => Utility::ReservedTicksPerQuarterNote(Reserved::wire(0)),
@@ -445,7 +446,9 @@ fn flex(w: [u32; 4]) -> Option<Flex> {
     // The setup messages are Complete, and the first three Group messages.
     let complete = form(w0, 22) == Form::Complete;
     match (bank, status) {
-        (0x00, 0x00) if complete && address == FlexAddress::Group => Some(Flex::SetTempo(w[1])),
+        (0x00, 0x00) if complete && address == FlexAddress::Group => {
+            Some(Flex::SetTempo(FlexTempo::new(w[1])))
+        }
         (0x00, 0x01) if complete && address == FlexAddress::Group => {
             Some(Flex::SetTimeSignature(FlexTimeSignature {
                 numerator: byte(w[1], 3),
@@ -616,7 +619,7 @@ pub(crate) fn function_block_info(w0: u32, w1: u32) -> FunctionBlockInfo {
         midi1: Midi1Port::from_raw(((w0 >> 2) & 0x3) as u8),
         first_group: Field::from_raw(byte(w1, 3)),
         groups_spanned: Field::from_raw(byte(w1, 2)),
-        midi_ci_version: byte(w1, 1),
+        midi_ci_version: crate::ci_version::read(byte(w1, 1)),
         max_sysex8_streams: Sysex8StreamCount::new(byte(w1, 0)),
     }
 }

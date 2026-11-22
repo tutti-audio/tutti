@@ -7,7 +7,7 @@
 //! ([`BlockRefusal`]), never registered without it. The numbers other apps read are
 //! the ones CoreMIDI gave, which `UmpEndpoint::blocks` reads back.
 
-use tutti_ump::{BlockDirection, FunctionBlockInfo, Midi1Port, UiHint};
+use tutti_ump::{BlockDirection, CiVersion, Field, FunctionBlockInfo, Midi1Port, UiHint};
 
 /// `MIDIUMPFunctionBlockDirection` of `MIDIMessages.h`: the spec's direction field
 /// (M2-104 §7.1.8) `0b01` input, `0b10` output, `0b11` bidirectional.
@@ -74,12 +74,12 @@ pub enum BlockRefusal {
     },
     /// `MIDIUMPMutableFunctionBlock` has no MIDI-CI version, so a block that
     /// declares one cannot say so.
-    #[error("CoreMIDI cannot declare MIDI-CI version {version} on block {id}")]
+    #[error("CoreMIDI cannot declare a MIDI-CI version ({version:?}) on block {id}")]
     MidiCiVersion {
         /// The block's number.
         id: u8,
         /// The MIDI-CI message version it declares.
-        version: u8,
+        version: Field<CiVersion>,
     },
     /// The number of SysEx 8 streams is past the 7 bits CoreMIDI holds.
     #[error("block {id} declares {streams} SysEx 8 streams, and CoreMIDI holds at most 127")]
@@ -147,11 +147,8 @@ fn platform_block(
     info: &FunctionBlockInfo,
     name: Option<&str>,
 ) -> Result<PlatformBlock, BlockRefusal> {
-    if info.midi_ci_version != 0 {
-        return Err(BlockRefusal::MidiCiVersion {
-            id,
-            version: info.midi_ci_version,
-        });
+    if let Some(version) = info.midi_ci_version {
+        return Err(BlockRefusal::MidiCiVersion { id, version });
     }
     if info.max_sysex8_streams.get() > MAX_UINTEGER7 {
         return Err(BlockRefusal::Sysex8Streams {

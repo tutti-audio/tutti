@@ -4,8 +4,8 @@
 //! against the writer.
 
 use tutti_ump::{
-    Flex, FlexAddress, FlexTextAssembler, FlexTextKind, FlexTextStep, Form, Message, MidiGroup,
-    PlainTextKind, System, Text, Ump, Utility, flex_text_packets,
+    Flex, FlexAddress, FlexTempo, FlexTextAssembler, FlexTextKind, FlexTextStep, Form, JrTicks,
+    Message, MidiGroup, PlainTextKind, System, Text, Ump, Utility, flex_text_packets,
 };
 
 const G0: MidiGroup = MidiGroup::of(0);
@@ -186,7 +186,7 @@ fn real_time_and_jr_clock_do_not_interrupt() {
     let mut a = assembler(1);
     let start = packet(G0, LYRICS, Form::Start, b"abcdefghijkl");
     let clock = Ump::from(Message::System(G0, System::TimingClock));
-    let jr = Ump::from(Message::Utility(Utility::JrClock(7)));
+    let jr = Ump::from(Message::Utility(Utility::JrClock(JrTicks::new(7))));
     let end = packet(G0, LYRICS, Form::End, b"mn");
     assert_eq!(feed(&mut a, [start, clock, jr, end]), ["abcdefghijklmn"]);
     assert_eq!(a.dropped(), 0);
@@ -199,7 +199,7 @@ fn real_time_and_jr_clock_do_not_interrupt() {
 fn another_message_of_the_group_drops_the_open_one() {
     for other in [
         Ump::from(Message::System(G0, System::TuneRequest)),
-        Ump::from(Message::Flex(G0, Flex::SetTempo(500_000))),
+        Ump::from(Message::Flex(G0, Flex::SetTempo(FlexTempo::new(500_000)))),
         packet(G0, FlexTextKind::Composer, Form::Complete, b"x"),
     ] {
         let mut a = assembler(1);
@@ -293,7 +293,7 @@ fn orphans_are_skipped_and_other_umps_pass() {
         assert_eq!(step, FlexTextStep::Held);
     }
     assert_eq!((a.dropped(), a.invalid()), (0, 0));
-    let tempo = Ump::from(Message::Flex(G0, Flex::SetTempo(1)));
+    let tempo = Ump::from(Message::Flex(G0, Flex::SetTempo(FlexTempo::new(1))));
     assert_eq!(a.push(tempo), FlexTextStep::NotText);
 }
 

@@ -3,14 +3,14 @@
 
 use super::*;
 use crate::testing::{RATE, Rig};
-use tutti_ump::Utility;
+use tutti_ump::{JrTicks, Utility};
 use tutti_units::Losses;
 use tutti_units::Resyncs;
 
 /// Sender ticks of `ms` milliseconds on a clock of 31 250 ticks a second; the
 /// times used are whole ticks.
-const fn ticks(ms: u64) -> u16 {
-    (ms * 125 / 4) as u16
+const fn ticks(ms: u64) -> JrTicks {
+    JrTicks::new((ms * 125 / 4) as u16)
 }
 
 /// The fake device's latency: a JR Clock sent at `ms` arrives at `ms` plus this.
@@ -361,7 +361,7 @@ fn a_repeated_clock_and_a_jump_are_counted_once_each() {
         (info.losses, info.jr_restarted)
     };
     let before = counts(&wire);
-    let send = |ticks: u16, ms: u64| {
+    let send = |ticks: JrTicks, ms: u64| {
         assert!(wire.counters.send_input(
             wire.raw,
             jr(Utility::JrClock(ticks)),
@@ -375,7 +375,7 @@ fn a_repeated_clock_and_a_jump_are_counted_once_each() {
     send(ticks(200), 205);
     assert_eq!(counts(&wire), (before.0 + Losses::late(1), before.1));
     // The sender's clock jumps half a second ahead.
-    send(ticks(300) + 15_625, 300);
+    send(JrTicks::new(ticks(300).get() + 15_625), 300);
     assert_eq!(
         counts(&wire),
         (before.0 + Losses::late(1), Resyncs::new(before.1.get() + 1))

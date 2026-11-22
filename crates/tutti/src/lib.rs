@@ -908,6 +908,7 @@ pub mod midi {
         NotOnMidiScale, NoteNumberOutOfRange, SharpsFlatsOutOfRange, TicksPerQuarterNoteOutOfRange,
         U4OutOfRange, U7OutOfRange, U14OutOfRange,
     };
+    pub use tutti_ump::{CiVersion, FlexTempo, JrTicks, NotAVersion};
     pub use tutti_ump::{
         FlexTextError, LyricKind, NotASoftwareRevision, PlainTextKind, SoftwareRevision,
     };

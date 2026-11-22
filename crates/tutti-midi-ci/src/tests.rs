@@ -317,7 +317,7 @@ fn a_whole_is_the_device_id_and_profile_target_of_its_byte() {
 }
 
 #[test]
-fn the_device_id_and_version_are_range_checked_values() {
+fn the_device_id_is_a_range_checked_value() {
     use tutti_fixtures::{RangeContract, check_range_contract};
     let c = RangeContract {
         new: CiDeviceId::new,
@@ -325,14 +325,6 @@ fn the_device_id_and_version_are_range_checked_values() {
         of: None,
         valid: &[0x00, 0x05, 0x0F, 0x7E, 0x7F],
         invalid: &[0x10, 0x7D, 0x80, 0xFF],
-    };
-    check_range_contract(&c);
-    let c = RangeContract {
-        new: CiVersion::new,
-        get: CiVersion::get,
-        of: Some(CiVersion::of),
-        valid: &[0x01, 0x02, 0x1F],
-        invalid: &[0x00, 0x20, 0x80, 0xFF],
     };
     check_range_contract(&c);
 }

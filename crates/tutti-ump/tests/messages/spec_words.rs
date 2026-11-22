@@ -7,14 +7,15 @@
 use core::num::NonZeroU8;
 use tutti_ump::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockDirection,
-    BlockFilter, BlockSelect, CCNumber, ChordBass, ChordName, ChordPitch, ChordType, Data128,
-    DeltaTicks, DeviceIdentity, DiscoveryFilter, EndpointInfoNotification, FirstGroup, Flex,
-    FlexAddress, FlexTextKind, FlexTimeSignature, Form, FunctionBlockId, FunctionBlockInfo,
-    GroupSpan, KeySignature, Letter, MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, Message,
-    Metronome, Midi1Port, MidiChannel, MidiGroup, MixedDataHeader, NoteNumber, NoteVelocity,
-    PerNoteManagement, Pitch, Protocol, RegisteredPerNoteController, SharpsFlats, SoftwareRevision,
-    Stream, StreamConfig, Sysex7Packet, Sysex8StreamCount, Sysex8StreamId, SysexStatus, System, U4,
-    U7, U14, UiHint, Ump, UmpVersion, Utility, Voice1, Voice2,
+    BlockFilter, BlockSelect, CCNumber, ChordBass, ChordName, ChordPitch, ChordType, CiVersion,
+    Data128, DeltaTicks, DeviceIdentity, DiscoveryFilter, EndpointInfoNotification, FirstGroup,
+    Flex, FlexAddress, FlexTempo, FlexTextKind, FlexTimeSignature, Form, FunctionBlockId,
+    FunctionBlockInfo, GroupSpan, JrTicks, KeySignature, Letter, MdsChunk, MdsChunkSize, MdsChunks,
+    MdsIdentity, Message, Metronome, Midi1Port, MidiChannel, MidiGroup, MixedDataHeader,
+    NoteNumber, NoteVelocity, PerNoteManagement, Pitch, Protocol, RegisteredPerNoteController,
+    SharpsFlats, SoftwareRevision, Stream, StreamConfig, Sysex7Packet, Sysex8StreamCount,
+    Sysex8StreamId, SysexStatus, System, U4, U7, U14, UiHint, Ump, UmpVersion, Utility, Voice1,
+    Voice2,
 };
 use tutti_ump::{BendValue, ControlValue, FunctionBlockCount, TicksPerQuarterNote};
 use tutti_ump::{ManufacturerId, Unknown};
@@ -52,12 +53,12 @@ fn utility() {
     // JR Clock: status 1, time in bits 15-0.
     pin(
         [0x0010_1234, 0, 0, 0],
-        Message::Utility(Utility::JrClock(0x1234)),
+        Message::Utility(Utility::JrClock(JrTicks::new(0x1234))),
     );
     // JR Timestamp: status 2.
     pin(
         [0x0020_ABCD, 0, 0, 0],
-        Message::Utility(Utility::JrTimestamp(0xABCD)),
+        Message::Utility(Utility::JrTimestamp(JrTicks::new(0xABCD))),
     );
     // Delta Clockstamp Ticks Per Quarter Note: status 3, 480 = 0x01E0.
     pin(
@@ -506,7 +507,7 @@ fn flex_setup() {
     // Set Tempo, 120 bpm: 0.5 s per quarter = 50,000,000 units of 10 ns.
     pin(
         [0xD610_0000, 0x02FA_F080, 0, 0],
-        f(Flex::SetTempo(50_000_000)),
+        f(Flex::SetTempo(FlexTempo::new(50_000_000))),
     );
     // 3/4: numerator 3, denominator 2 (a quarter), 8 thirty-seconds in 24
     // clocks.
@@ -890,7 +891,7 @@ fn stream_function_blocks() {
             midi1: Midi1Port::Restricted,
             first_group: FirstGroup::new(4).unwrap().into(),
             groups_spanned: GroupSpan::new(2).unwrap().into(),
-            midi_ci_version: 1,
+            midi_ci_version: Some(CiVersion::of(1).into()),
             max_sysex8_streams: Sysex8StreamCount::new(16),
         })),
     );
@@ -904,7 +905,7 @@ fn stream_function_blocks() {
             midi1: Midi1Port::Unrestricted,
             first_group: FirstGroup::new(15).unwrap().into(),
             groups_spanned: GroupSpan::new(16).unwrap().into(),
-            midi_ci_version: 0,
+            midi_ci_version: None,
             max_sysex8_streams: Sysex8StreamCount::new(0),
         })),
     );

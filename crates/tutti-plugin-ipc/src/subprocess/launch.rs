@@ -255,6 +255,8 @@ fn spawn_process(locator: &Locator, config: &IpcConfig) -> IpcResult<(Reaped, Re
         )
         .stderr(std::process::Stdio::inherit());
     tutti_plugin_ipc_ffi::own_group(&mut command);
+    // The server runs plugin code: it gets the standard descriptors and nothing else of the host's.
+    tutti_plugin_ipc_ffi::inherit_only_stdio(&mut command);
     let (child, rendezvous) = crate::transport::spawn(command)?;
     // A server that cannot be bound to the host's end could outlive a host
     // that dies: it is ended and the launch refused. A child spawned before the

@@ -7,9 +7,9 @@ use tutti_midi_protocol::channel_voice;
 use tutti_plugin_types::{NoteExpressionType, NoteExpressionValue};
 use tutti_ump::RegisteredPerNoteController;
 use tutti_ump::{
-    Address, BendValue, CCNumber, ControlValue, Message, MidiChannel, MidiGroup, NoteId,
-    NoteNumber, NoteVelocity, PerNoteManagement, Pitch, Sysex7Packets, SysexStatus, System, U7,
-    U14, Ump, Voice2,
+    Address, BendValue, CCNumber, ControlValue, FlexTempo, JrTicks, Message, MidiChannel,
+    MidiGroup, NoteId, NoteNumber, NoteVelocity, PerNoteManagement, Pitch, Sysex7Packets,
+    SysexStatus, System, U7, U14, Ump, Voice2,
 };
 use tutti_units::{Bipolar, Samples};
 use tutti_vst3_ffi::EventList;
@@ -1127,11 +1127,14 @@ mod message {
             raw(&[0x6000_1234]),
             raw(&[0x4070_0000, 0]),
             packet(Message::Utility(Utility::Noop)),
-            packet(Message::Utility(Utility::JrClock(9))),
+            packet(Message::Utility(Utility::JrClock(JrTicks::new(9)))),
             // An Endpoint Discovery (stream) and a SysEx 8 packet (Data128).
             raw(&[0xF000_0101, 0x1F, 0, 0]),
             raw(&[0x5001_0000, 0, 0, 0]),
-            packet(Message::Flex(MidiGroup::FIRST, Flex::SetTempo(50_000_000))),
+            packet(Message::Flex(
+                MidiGroup::FIRST,
+                Flex::SetTempo(FlexTempo::new(50_000_000)),
+            )),
             packet(Message::Midi2(
                 address(0),
                 Voice2::PerNoteManagement {
@@ -1401,7 +1404,7 @@ mod message {
                     value: ControlValue::new(0x1000_0000),
                 },
             ),
-            Message::Flex(MidiGroup::FIRST, Flex::SetTempo(50_000_000)),
+            Message::Flex(MidiGroup::FIRST, Flex::SetTempo(FlexTempo::new(50_000_000))),
             Sysex8StreamIds::undiscovered()
                 .open()
                 .unwrap()

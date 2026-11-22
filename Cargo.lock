@@ -2681,7 +2681,6 @@ dependencies = [
  "libc",
  "libloading 0.9.1",
  "tutti-platform",
- "tutti-rt",
 ]
 
 [[package]]
@@ -3290,6 +3289,7 @@ version = "0.0.1"
 dependencies = [
  "futures-lite",
  "getrandom",
+ "libc",
  "loom",
  "memmap2",
  "rustix",
@@ -3533,7 +3533,6 @@ dependencies = [
  "core-foundation",
  "coreaudio-sys",
  "num-traits",
- "tutti-rt",
  "tutti-vst2-author",
  "vst3",
 ]
@@ -3730,7 +3729,6 @@ version = "0.1.0"
 dependencies = [
  "libloading 0.9.1",
  "num-traits",
- "tutti-rt",
  "tutti-vst2-author",
 ]
 

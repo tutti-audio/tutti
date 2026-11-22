@@ -5,9 +5,8 @@
 #![allow(non_snake_case, non_upper_case_globals)]
 
 use std::ffi::{c_char, c_void};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
-use tutti_rt::LockExt;
+use std::sync::{Mutex, PoisonError};
 
 use vst3::{Class, ComPtr, ComRef, ComWrapper, Steinberg::Vst::*, Steinberg::*, uid};
 
@@ -115,7 +114,7 @@ impl Plugin {
             core::NOTICE_GESTURE_ON_LOAD => &core::GESTURE_VALUES,
             _ => return,
         };
-        let handler = self.handler.lock_recover();
+        let handler = self.handler.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(h) = handler.as_ref() {
             // SAFETY: `h` is the host's handler, held since `setComponentHandler`.
             unsafe {
@@ -342,7 +341,7 @@ impl IAudioProcessorTrait for Plugin {
         // SAFETY, for this function's `unsafe` blocks: `setup` is valid for the call.
         let s = unsafe { &*setup };
         self.core.prepare(
-            &mut self.dsp.lock_recover(),
+            &mut self.dsp.lock().unwrap_or_else(PoisonError::into_inner),
             s.sampleRate,
             s.maxSamplesPerBlock.max(0) as usize,
         );
@@ -353,14 +352,15 @@ impl IAudioProcessorTrait for Plugin {
             return kInternalError;
         }
         if state == 0 {
-            self.core.reset(&mut self.dsp.lock_recover());
+            self.core
+                .reset(&mut self.dsp.lock().unwrap_or_else(PoisonError::into_inner));
         }
         kResultOk
     }
     unsafe fn process(&self, data: *mut ProcessData) -> tresult {
         // SAFETY, for this function's `unsafe` blocks: `data` and the lists, buses and channel pointers in it are valid for the call (ivstaudioprocessor.h); a channel holds `numSamples` samples.
         let d = unsafe { &*data };
-        let mut guard = self.dsp.lock_recover();
+        let mut guard = self.dsp.lock().unwrap_or_else(PoisonError::into_inner);
         let dsp = &mut *guard;
 
         if let Some(ctx) = unsafe { d.processContext.as_ref() } {
@@ -791,7 +791,7 @@ impl IEditControllerTrait for Plugin {
     unsafe fn setComponentHandler(&self, h: *mut IComponentHandler) -> tresult {
         // SAFETY: `h` is the host's handler or null; `ComRef` checks for null.
         let handler = unsafe { ComRef::from_raw(h) }.map(|r| r.to_com_ptr());
-        *self.handler.lock_recover() = handler;
+        *self.handler.lock().unwrap_or_else(PoisonError::into_inner) = handler;
         kResultOk
     }
     unsafe fn createView(&self, _name: *const c_char) -> *mut IPlugView {

@@ -26,7 +26,10 @@ serde = { version = "1", features = ["derive"] }
 getrandom = { workspace = true }
 # `Executor`: the host-watch task; `Instant`, the one clock type.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
-# The host watch yields to its drive between looks.
+
+# The host watch yields to its drive between looks. A loom build leaves the
+# host watch out, with the executor.
+[target.'cfg(not(loom))'.dependencies]
 futures-lite.workspace = true
 
 [target.'cfg(unix)'.dependencies]
@@ -34,6 +37,9 @@ futures-lite.workspace = true
 # `sendmsg`/`recvmsg` and the server's adoption of the socket on its stdin, without
 # a hand-written call.
 rustix = { version = "1", default-features = false, features = ["std", "event", "process", "fs", "net", "stdio"] }
+# `close_range` (Linux) and `fcntl` (the sweep), marking every inherited
+# descriptor close-on-exec at a spawn.
+libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # The slab's POSIX shared memory object.

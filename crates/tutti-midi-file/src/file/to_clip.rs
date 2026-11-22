@@ -10,9 +10,9 @@ use core::num::NonZeroU8;
 
 use tutti_midi_ci::is_property_exchange;
 use tutti_ump::{
-    BarAccents, Flex, FlexAddress, FlexTimeSignature, KeySignature, Letter, Message, Metronome,
-    MidiGroup, PlainTextKind, SharpsFlats, SyllableError, SysexMessage, Text, TicksPerQuarterNote,
-    Ump, flex_text_packets,
+    BarAccents, Flex, FlexAddress, FlexTempo, FlexTimeSignature, KeySignature, Letter, Message,
+    Metronome, MidiGroup, PlainTextKind, SharpsFlats, SyllableError, SysexMessage, Text,
+    TicksPerQuarterNote, Ump, flex_text_packets,
 };
 
 use unicode_normalization::UnicodeNormalization;
@@ -246,9 +246,6 @@ fn bar_step(ticks_per_quarter: TicksPerQuarterNote, numerator: u8, power: u8) ->
     bar >> bar.trailing_zeros().min(u32::from(power))
 }
 
-/// 10 ns units in a microsecond.
-const TEN_NS_PER_MICRO: u32 = 100;
-
 /// Where in a tick's events a message goes: M2-116 sections 7.1.1 and 7.1.2
 /// put the first Set Tempo, then the first Set Time Signature, at the Start
 /// of Clip.
@@ -271,8 +268,9 @@ fn flex(flex: Flex) -> FileEvent {
 }
 
 fn tempo(micros_per_quarter: MicrosPerQuarter) -> FileEvent {
-    // 24 bits of microseconds times 100 is under 2^31.
-    flex(Flex::SetTempo(micros_per_quarter.get() * TEN_NS_PER_MICRO))
+    flex(Flex::SetTempo(FlexTempo::from_micros_per_quarter(
+        micros_per_quarter.get(),
+    )))
 }
 
 /// The four beats of the 4/4 bar a file with no time signature has.

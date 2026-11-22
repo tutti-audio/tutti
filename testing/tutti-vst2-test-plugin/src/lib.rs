@@ -38,8 +38,7 @@ pub mod capture;
 pub mod config;
 pub mod switches;
 
-use std::sync::Arc;
-use tutti_rt::LockExt;
+use std::sync::{Arc, PoisonError};
 
 use num_traits::Float;
 use vst::api::{self, AEffect, HostCallbackProc, Supported};
@@ -134,7 +133,7 @@ impl PluginParameters for ProbeParameters {
             // `can_be_automated` answers false.
             return None;
         }
-        let values = self.values.lock_recover();
+        let values = self.values.lock().unwrap_or_else(PoisonError::into_inner);
         values.get(index as usize).copied()
     }
 
@@ -142,7 +141,7 @@ impl PluginParameters for ProbeParameters {
         if !self.in_range(index) {
             return false;
         }
-        let mut values = self.values.lock_recover();
+        let mut values = self.values.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(slot) = values.get_mut(index as usize) else {
             return false;
         };
@@ -215,11 +214,14 @@ impl PluginParameters for ProbeParameters {
     }
 
     fn get_bank_data(&self) -> Vec<u8> {
-        self.chunk.lock_recover().clone()
+        self.chunk
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     fn load_bank_data(&self, data: &[u8]) {
-        *self.chunk.lock_recover() = data.to_vec();
+        *self.chunk.lock().unwrap_or_else(PoisonError::into_inner) = data.to_vec();
     }
 
     fn get_preset_data(&self) -> Vec<u8> {
@@ -403,7 +405,11 @@ impl ProbePlugin {
         if !self.config.state_dc {
             return 0.0;
         }
-        let chunk = self.params.chunk.lock_recover();
+        let chunk = self
+            .params
+            .chunk
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let param0 = self.params.get_parameter(0).unwrap_or(0.0);
         config::state_dc(
             self.config.preset_chunks,
@@ -446,7 +452,10 @@ impl Plugin for ProbePlugin {
             cap.arrangement_output = capture_arrangement(output);
             cap.arrangement_while_resumed = switches::is_resumed();
         });
-        let mut held = self.arrangements.lock_recover();
+        let mut held = self
+            .arrangements
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         match switches::arrangement_mode() {
             switches::ArrangementMode::Accept | switches::ArrangementMode::AcceptUnreadable => {
                 *held = (input.clone(), output.clone());
@@ -462,7 +471,12 @@ impl Plugin for ProbePlugin {
         if switches::arrangement_mode() == switches::ArrangementMode::AcceptUnreadable {
             return None;
         }
-        Some(self.arrangements.lock_recover().clone())
+        Some(
+            self.arrangements
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone(),
+        )
     }
 
     /// Records `effBeginSetProgram` so a test can check the bracket's *order*,

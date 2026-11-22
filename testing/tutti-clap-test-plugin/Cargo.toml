@@ -23,7 +23,6 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-tutti-rt = { path = "../../crates/tutti-rt" }
 clap-sys = "0.5"
 # `probe`: the typed doors into this plugin's exported probe symbols
 # (`probe.rs`), opened on its cdylib through `libloading`, for the suites that
