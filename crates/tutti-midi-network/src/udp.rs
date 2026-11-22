@@ -56,7 +56,7 @@ struct State<E> {
     /// [`MAX_QUEUED_EVENTS`].
     events: VecDeque<Event>,
     /// Events that found `events` full, each one [lost](Losses::lost).
-    lost: Losses,
+    losses: Losses,
     /// Datagrams dropped because the OS refused them for their destination.
     sends_failed: u64,
     /// The futures waiting for an event, each woken by the next one or the
@@ -109,7 +109,7 @@ impl<E: NetworkEndpoint> State<E> {
             if self.events.len() < MAX_QUEUED_EVENTS {
                 self.events.push_back(event);
             } else {
-                self.lost += Losses::lost(1);
+                self.losses += Losses::lost(1);
             }
         }
         if any { self.take_wakers() } else { Vec::new() }
@@ -218,7 +218,7 @@ impl<E: NetworkEndpoint + Send + 'static> NetworkLink<E> {
             state: Mutex::new(State {
                 endpoint,
                 events: VecDeque::new(),
-                lost: Losses::NONE,
+                losses: Losses::NONE,
                 sends_failed: 0,
                 wakers: Vec::new(),
                 next_id: 0,
@@ -316,11 +316,11 @@ impl<E: NetworkEndpoint + Send + 'static> NetworkLink<E> {
     #[must_use]
     pub fn losses(&self) -> Losses {
         let state = self.shared.state();
-        state.lost + state.endpoint.losses()
+        state.losses + state.endpoint.losses()
     }
 
-    /// How many datagrams (not events: one carries several) were dropped because the OS refused them for their
-    /// destination (the peer's host or network is unreachable, its port
+    /// How many datagrams (not events: one carries several) were dropped
+    /// because the OS refused them for their destination (the peer's host or network is unreachable, its port
     /// refuses, its address is unusable).
     #[must_use]
     pub fn sends_failed(&self) -> u64 {

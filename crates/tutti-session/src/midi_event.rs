@@ -129,8 +129,9 @@ pub enum MidiEvent {
     /// keeps the motion it had, and the project's tempo and meter are published
     /// again if the follower had changed them.
     ClockUnfollowed,
-    /// The transport [refused](tutti_units::Losses::refused) commands a followed MIDI clock or Machine Control asked of it, this
-    /// many in one update: its list of timed commands was full. Nothing was
+    /// The transport [refused](tutti_units::Losses::refused) commands a
+    /// followed MIDI clock or Machine Control asked of it, this many in one
+    /// update: its list of timed commands was full. Nothing was
     /// applied for them (the source says its position again with its next
     /// message), and each is logged.
     ClockCommandsRefused(tutti_units::Losses),
