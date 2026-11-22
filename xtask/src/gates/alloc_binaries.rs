@@ -61,7 +61,7 @@ pub(super) const EXEMPT: &[(&str, &str)] = &[
     ),
     (
         "testing/tutti-web-test/tests/web/main.rs",
-        "wasm32-only, run in a browser; no tutti-fixtures dev-dependency and not runnable on the native host",
+        "wasm32-only, run in a browser: it renders a Session, but RtAllocCheck is not built for wasm32 and the binary cannot run on the native host, so its renders are checked only by the native suites that cover the same paths",
     ),
 ];
 
