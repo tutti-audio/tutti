@@ -137,18 +137,7 @@ fn a_device_session_switches_to_the_timer_and_its_graph_keeps_rendering() {
         "the card's stream stopped"
     );
     play(&s);
-    let limit = Instant::now() + Duration::from_secs(10);
-    let mut tap = loop {
-        let _ = s.update();
-        if let Some(tap) = s.open_heard_tap(Samples::new(4 * BLOCK)).unwrap().reader() {
-            break tap;
-        }
-        assert!(
-            Instant::now() < limit,
-            "the audio side never took the graph"
-        );
-        std::thread::sleep(Duration::from_millis(2));
-    };
+    let mut tap = s.open_heard_tap(Samples::new(4 * BLOCK)).unwrap();
     let mut heard = vec![0.0f32; 2 * BLOCK];
     wait_until("the constant never reached the tap", || {
         let _ = s.update();

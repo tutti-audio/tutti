@@ -533,12 +533,12 @@ pub mod session {
     pub use tutti_session::{
         BackgroundWork, BlockConfig, BusSink, BusWire, ChannelWire, Committed, Connection,
         DeclarationError, Disconnection, EventEdge, EventTapPort, EventWire, Fanin, Feeder, Graph,
-        HeardTapOpen, Inlet, InletError, LIVE_MAX_BLOCK, MainBusWire, MainSink, Meters, NodeSlots,
-        NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer,
-        PeerError, PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer,
-        Reclaims, Removal, RemoveError, Reopened, ReplaceRefused, Replacement, Resource,
-        ResourceFact, RootDeclaration, RootReader, RootTopologyStatus, SessionHeardTapError,
-        SessionNode, SetRateError, SetSources, SetTempoError, Taps, Weighted, Wire, root_width,
+        Inlet, InletError, LIVE_MAX_BLOCK, MainBusWire, MainSink, Meters, NodeSlots, NotReopened,
+        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError,
+        PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
+        Removal, RemoveError, Reopened, ReplaceRefused, Replacement, Resource, ResourceFact,
+        RootDeclaration, RootReader, RootTopologyStatus, SessionHeardTapError, SessionNode,
+        SetRateError, SetSources, SetTempoError, Taps, Weighted, Wire, root_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,

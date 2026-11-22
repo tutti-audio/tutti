@@ -383,7 +383,7 @@ fn sender(wire: &Wire, to: Recipient) -> (Session, tutti_session::MidiSink) {
             rate: MtcRate::Fps30,
             ..SyncMessages::OFF
         });
-    blocks(&s, 1);
+    blocks(&mut s, 1);
     let _ = s.update();
     (s, sink)
 }
@@ -399,12 +399,12 @@ fn the_transport_is_sent_as_play_locate_and_stop() {
     assert!(wire.messages().is_empty(), "nothing before anything moves");
 
     s.play().unwrap();
-    blocks(&s, 1);
+    blocks(&mut s, 1);
     let _ = s.update();
     assert_eq!(wire.messages(), [vec![0x7F, 0x03, 0x06, 0x02]]);
 
     s.locate(Beat::new(4.0)).unwrap();
-    blocks(&s, 1);
+    blocks(&mut s, 1);
     let _ = s.update();
     assert_eq!(
         wire.messages(),
@@ -414,12 +414,12 @@ fn the_transport_is_sent_as_play_locate_and_stop() {
     );
 
     // Rolling on in order sends nothing.
-    blocks(&s, 3);
+    blocks(&mut s, 3);
     let _ = s.update();
     assert!(wire.messages().is_empty(), "no change, no message");
 
     s.stop(FadeOut::Immediate).unwrap();
-    blocks(&s, 1);
+    blocks(&mut s, 1);
     let _ = s.update();
     assert_eq!(wire.messages(), [vec![0x7F, 0x03, 0x06, 0x01]]);
 }
@@ -430,7 +430,7 @@ fn a_locate_while_stopped_sends_a_locate_and_no_play() {
     let wire = Wire::default();
     let (mut s, _sink) = sender(&wire, Recipient::AllCall);
     s.locate(Beat::new(4.0)).unwrap();
-    blocks(&s, 1);
+    blocks(&mut s, 1);
     let _ = s.update();
     assert_eq!(
         wire.messages(),
@@ -451,11 +451,11 @@ fn a_locate_no_time_code_names_is_counted_and_sends_nothing() {
     let refused = |s: &Session| s.midi_nodes().unwrap().sync_controls.losses().refused;
     let before = refused(&s);
     s.locate(Beat::new(4_000_000.0)).unwrap();
-    blocks(&s, 1);
+    blocks(&mut s, 1);
     let _ = s.update();
     assert!(wire.messages().is_empty());
     assert_eq!(refused(&s), before + 1);
-    blocks(&s, 1);
+    blocks(&mut s, 1);
     let _ = s.update();
     assert_eq!(refused(&s), before + 1);
 }
@@ -472,7 +472,7 @@ fn nothing_is_sent_unless_asked_and_it_can_be_stopped() {
         .messages()
         .store(SyncMessages::OFF);
     s.play().unwrap();
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     let _ = s.update();
     assert!(wire.messages().is_empty());
 }

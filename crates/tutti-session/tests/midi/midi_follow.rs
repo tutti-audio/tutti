@@ -154,7 +154,7 @@ fn a_set_tempo_is_a_step_at_the_next_block_start_and_unfollowing_restores() {
     assert_eq!(project.constant_tempo(), Some(Bpm::of(120.0)));
     follow(&mut s, MidiGroup::FIRST, false);
     play(&s);
-    blocks(&s, 4);
+    blocks(&mut s, 4);
 
     send(&fake, flex_tempo(MidiGroup::FIRST, 75.0));
     let found = until_followed(&mut s);
@@ -186,7 +186,7 @@ fn a_set_tempo_is_a_step_at_the_next_block_start_and_unfollowing_restores() {
     );
 
     // The engine takes it: after the step's beat the playhead is at 75 bpm.
-    blocks(&s, 64);
+    blocks(&mut s, 64);
     assert!(s.playhead().beat() > beat);
     assert_eq!(s.playhead().tempo(), Bpm::of(75.0));
 
@@ -205,7 +205,7 @@ fn a_set_tempo_is_a_step_at_the_next_block_start_and_unfollowing_restores() {
     let restored = s.tempo_map();
     assert!(Arc::ptr_eq(&restored, &project), "the project's own map");
     let before = s.playhead().beat();
-    blocks(&s, 4);
+    blocks(&mut s, 4);
     assert_eq!(s.playhead().tempo(), Bpm::of(120.0));
     assert!(s.playhead().beat() > before, "the playhead kept going");
 }
@@ -217,10 +217,10 @@ fn without_a_follow_a_flex_tempo_changes_nothing() {
     let (mut s, fake) = rig();
     let project = s.tempo_map();
     play(&s);
-    blocks(&s, 4);
+    blocks(&mut s, 4);
     send(&fake, flex_tempo(MidiGroup::FIRST, 75.0));
     for _ in 0..40 {
-        blocks(&s, 1);
+        blocks(&mut s, 1);
         let events = s.update();
         assert!(
             !events
@@ -257,7 +257,7 @@ fn a_step_in_a_project_ramp_cuts_the_ramp() {
     let _ = s.update();
     follow(&mut s, MidiGroup::FIRST, false);
     play(&s);
-    blocks(&s, 8);
+    blocks(&mut s, 8);
 
     send(&fake, flex_tempo(MidiGroup::FIRST, 150.0));
     let found = until_followed(&mut s);
@@ -296,7 +296,7 @@ fn a_step_in_a_project_ramp_cuts_the_ramp() {
         );
         assert!((a - n).abs() < 1e-9, "beat {b}: {a} vs {n}");
     }
-    blocks(&s, 32);
+    blocks(&mut s, 32);
     assert_eq!(
         s.playhead().tempo(),
         Bpm::of(150.0),
@@ -315,7 +315,7 @@ fn a_set_time_signature_lands_on_the_next_bar_line() {
     assert_eq!(s.get(project_meter).unwrap().changes().len(), 1);
     follow(&mut s, MidiGroup::FIRST, true);
     play(&s);
-    blocks(&s, 4);
+    blocks(&mut s, 4);
 
     send(&fake, flex_meter(MidiGroup::FIRST, 3, 2));
     let found = until_followed(&mut s);
@@ -361,7 +361,7 @@ fn the_meter_is_followed_only_when_asked() {
     let meter = s.transport_handle().meter();
     follow(&mut s, MidiGroup::FIRST, false);
     play(&s);
-    blocks(&s, 4);
+    blocks(&mut s, 4);
     send(&fake, flex_meter(MidiGroup::FIRST, 3, 2));
     send(&fake, flex_tempo(MidiGroup::FIRST, 75.0));
     let found = until_followed(&mut s);
@@ -383,7 +383,7 @@ fn another_group_is_ignored_and_a_second_follow_replaces_the_first() {
     let project = s.tempo_map();
     follow(&mut s, MidiGroup::of(1), false);
     play(&s);
-    blocks(&s, 4);
+    blocks(&mut s, 4);
 
     send(&fake, flex_tempo(MidiGroup::FIRST, 60.0));
     send(&fake, flex_tempo(MidiGroup::of(1), 75.0));
@@ -424,13 +424,13 @@ fn a_repeated_tempo_adds_no_point() {
     let (mut s, fake) = rig();
     follow(&mut s, MidiGroup::FIRST, false);
     play(&s);
-    blocks(&s, 4);
+    blocks(&mut s, 4);
     send(&fake, flex_tempo(MidiGroup::FIRST, 75.0));
     let _ = until_followed(&mut s);
     let map = s.tempo_map();
     send(&fake, flex_tempo(MidiGroup::FIRST, 75.0));
     for _ in 0..40 {
-        blocks(&s, 1);
+        blocks(&mut s, 1);
         let events = s.update();
         assert!(
             !events

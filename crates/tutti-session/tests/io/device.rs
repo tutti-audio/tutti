@@ -770,11 +770,7 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
         .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
-    let across = s
-        .open_heard_tap(Samples::new(1_024))
-        .expect("opens")
-        .reader()
-        .expect("the audio thread is not behind");
+    let across = s.open_heard_tap(Samples::new(1_024)).expect("opens");
     assert_eq!(across.width(), 2);
 
     let six = OutputSpec::new(
@@ -797,11 +793,7 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
     );
 
     drop(across);
-    let after = s
-        .open_heard_tap(Samples::new(1_024))
-        .expect("reopens")
-        .reader()
-        .expect("the audio thread is not behind");
+    let after = s.open_heard_tap(Samples::new(1_024)).expect("reopens");
     assert_eq!(after.width(), 6, "the device's width now");
     new.render_block(Samples::new(64)).expect("open");
     assert_eq!(after.available(), Samples::new(64));

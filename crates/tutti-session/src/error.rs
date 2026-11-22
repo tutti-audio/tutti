@@ -12,9 +12,6 @@ pub enum SessionHeardTapError {
     /// fed by its `render_frame`).
     #[error("this session has no engine to tap")]
     Detached,
-    /// The engine's tap refused: a reader is alive, or none is open.
-    #[error(transparent)]
-    Tap(#[from] tutti_engine::HeardTapError),
 }
 
 /// Why a declaration was refused: a value declared with a wire or a target

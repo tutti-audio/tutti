@@ -23,14 +23,14 @@ fn offline() -> Session {
 }
 
 /// A stereo block, rendered: the width the offline engine supports.
-fn good_block(s: &Session) {
+fn good_block(s: &mut Session) {
     let mut buf = vec![0.0f32; 64 * 2];
     s.render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
 }
 
 /// A block of a width the engine has no folds for (it builds them up to 16
 /// device channels): silenced.
-fn refused_block(s: &Session) {
+fn refused_block(s: &mut Session) {
     let mut buf = vec![1.0f32; 64 * 40];
     s.render(&mut InterleavedMut::new(&mut buf, ChannelLayout::from(40u16)).unwrap());
     assert!(buf.iter().all(|&x| x == 0.0), "a silenced block is silent");
@@ -68,18 +68,18 @@ impl Node for Slow {
 fn one_event_per_update_with_the_blocks_silenced_since_the_last() {
     let mut s = offline();
     assert!(silenced(&s.update()).is_empty(), "nothing rendered");
-    good_block(&s);
+    good_block(&mut s);
     assert!(silenced(&s.update()).is_empty(), "a good block is no event");
 
     for _ in 0..3 {
-        refused_block(&s);
+        refused_block(&mut s);
     }
-    good_block(&s);
+    good_block(&mut s);
     assert_eq!(silenced(&s.update()), [3]);
     assert!(silenced(&s.update()).is_empty(), "reported once");
 
     for _ in 0..2 {
-        refused_block(&s);
+        refused_block(&mut s);
     }
     assert_eq!(silenced(&s.update()), [2]);
     assert_eq!(s.blocks().expect("engine").get().silenced, 5);
@@ -99,8 +99,8 @@ fn over_budget_alone_is_no_event() {
         .unwrap();
     let events = s.update();
     assert!(silenced(&events).is_empty());
-    good_block(&s);
-    good_block(&s);
+    good_block(&mut s);
+    good_block(&mut s);
     let r = s.blocks().expect("engine").get();
     assert!(r.over_budget >= 1, "the node outran its budget: {r:?}");
     assert_eq!(r.silenced, 0);

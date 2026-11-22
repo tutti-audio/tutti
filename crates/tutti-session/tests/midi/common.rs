@@ -61,7 +61,7 @@ pub fn tap(s: &mut Session) -> (NodeKey, Seen) {
 }
 
 /// Renders `n` 512-frame blocks.
-pub fn blocks(s: &Session, n: usize) {
+pub fn blocks(s: &mut Session, n: usize) {
     let mut buf = vec![0.0f32; 512 * 2];
     for _ in 0..n {
         s.render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
