@@ -42,7 +42,7 @@ fn note_on_at(frame: u64) -> TimedMidiEvent {
 }
 
 /// A clip (key 1) playing a note at `frame` into a synth (key 2) on
-/// the global outputs, committed.
+/// the main outputs, committed.
 fn graph(frame: u64) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),

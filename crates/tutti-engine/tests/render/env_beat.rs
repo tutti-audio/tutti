@@ -120,7 +120,7 @@ impl Node for GraphBeats {
 }
 
 /// Wire a [`BeatPorts`] at key 1 into `sink` (key 2)'s two inputs, and
-/// `sink`'s `width` outputs to the globals.
+/// `sink`'s `width` outputs to the main outputs.
 fn wire_clock(ed: &mut Editor, sink: impl IntoNode<Controls = ()>, width: u16) {
     const CLOCK: NodeKey = NodeKey(1);
     const SINK: NodeKey = NodeKey(2);
@@ -417,7 +417,7 @@ impl Node for EnvLog {
     fn reset(&mut self) {}
 }
 
-/// An `EnvLog` at key 1, on the global output.
+/// An `EnvLog` at key 1, on the main output.
 pub(crate) fn env_graph(max_block: usize, log: &Arc<Mutex<Vec<Env>>>) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),

@@ -66,7 +66,7 @@ fn the_count_in_of_the_settings_reaches_the_block() {
 
 // ---- the metronome -----------------------------------------------------------
 
-/// The click at full volume on the global outputs, in `mode`.
+/// The click at full volume on the main outputs, in `mode`.
 fn click_graph(mode: MetronomeMode) -> (Editor, Executor) {
     let settings = Arc::new(ClickSettings::new());
     settings.mode().store(mode);

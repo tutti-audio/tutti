@@ -54,7 +54,7 @@ const SR: f64 = 48_000.0;
 const FRAMES: usize = 256;
 const WORKERS: [usize; 4] = [1, 2, 4, 8];
 
-/// Adds `from`'s port 0 to the sources of global output 0: the graph sums them.
+/// Adds `from`'s port 0 to the sources of main output 0: the graph sums them.
 fn out(ed: &mut Editor, from: NodeKey) {
     ed.spec_mut().topology.connect_output(
         0,
@@ -90,7 +90,7 @@ fn wide(lanes: usize, depth: usize, workers: usize) -> Executor {
                 .expect("a worker pool"),
         )));
     }
-    // One silent global output, which each lane's end joins as a source: the
+    // One silent main output, which each lane's end joins as a source: the
     // graph's fan-in sums them.
     ed.spec_mut().topology.set_outputs([PortSource::Zero]);
     for lane in 0..lanes {
@@ -180,7 +180,7 @@ fn tiny(lanes: usize, light: bool, workers: usize) -> Executor {
         )));
     }
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
-    // One silent global output, which each lane's end joins as a source: the
+    // One silent main output, which each lane's end joins as a source: the
     // graph's fan-in sums them.
     ed.spec_mut().topology.set_outputs([PortSource::Zero]);
     for lane in 0..lanes {
@@ -188,7 +188,7 @@ fn tiny(lanes: usize, light: bool, workers: usize) -> Executor {
         gain(&mut ed, k, lane, light);
         ed.spec_mut().topology.edges.insert(
             InputPort { node: k, port: 0 },
-            vec![Edge::Direct(PortSource::Global(0))],
+            vec![Edge::Direct(PortSource::MainInput(0))],
         );
         out(&mut ed, k);
     }
@@ -219,7 +219,7 @@ fn mixed(lanes: usize, depth: usize, fan: usize, light: bool, workers: usize) ->
                 .expect("a worker pool"),
         )));
     }
-    // One silent global output, which each lane's end joins as a source: the
+    // One silent main output, which each lane's end joins as a source: the
     // graph's fan-in sums them.
     ed.spec_mut().topology.set_outputs([PortSource::Zero]);
     for lane in 0..lanes {

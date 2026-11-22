@@ -20,6 +20,7 @@
 
 use std::hint::black_box;
 use tutti_buffers::{BusTopology, ChannelLayout, Float, MaxBlock};
+use tutti_dsp::LadderSaturation;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_graph::Node;
@@ -85,7 +86,7 @@ fn run<N: Node>(
 }
 
 /// The graph's fan-in (`Op::Sum`), measured
-/// through the graph: `sources` groups of `width` global input channels, each
+/// through the graph: `sources` groups of `width` main input channels, each
 /// output channel summing its channel of every group. No node runs, so the
 /// figure is the op's.
 fn channel_sum(c: &mut Criterion) {
@@ -104,9 +105,10 @@ fn channel_sum(c: &mut Criterion) {
                 .set_outputs(vec![PortSource::Zero; width as usize]);
             for channel in 0..width {
                 for k in 0..sources {
-                    ed.spec_mut()
-                        .topology
-                        .connect_output(channel as usize, PortSource::Global(k * width + channel));
+                    ed.spec_mut().topology.connect_output(
+                        channel as usize,
+                        PortSource::MainInput(k * width + channel),
+                    );
                 }
             }
             ed.commit().expect("commits");
@@ -209,21 +211,27 @@ fn distortion(c: &mut Criterion) {
     );
 }
 
-/// The 24 dB ladder at 1 kHz with resonance 0.7 (held), two channels.
+/// The 24 dB ladder at 1 kHz with resonance 0.7 (held), two channels, in each saturation model.
 fn ladder(c: &mut Criterion) {
-    run(
-        c,
-        "ladder",
-        "lp24_res07_2",
-        || {
-            LadderFilterNode::<f32>::from(
-                LadderFilterConfig::new(ChannelLayout::STEREO, LadderType::LP24)
-                    .freq(Hz::new(1_000.0))
-                    .res(Resonance::new(0.7)),
-            )
-        },
-        None,
-    );
+    for (case, saturation) in [
+        ("lp24_res07_2", LadderSaturation::PerStage),
+        ("lp24_res07_2_input", LadderSaturation::Input),
+    ] {
+        run(
+            c,
+            "ladder",
+            case,
+            || {
+                LadderFilterNode::<f32>::from(
+                    LadderFilterConfig::new(ChannelLayout::STEREO, LadderType::LP24)
+                        .freq(Hz::new(1_000.0))
+                        .res(Resonance::new(0.7))
+                        .saturation(saturation),
+                )
+            },
+            None,
+        );
+    }
 }
 
 /// A ceiling that moves every frame, between -6 and -1 dB.

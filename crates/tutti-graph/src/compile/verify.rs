@@ -81,7 +81,7 @@ fn accesses(plan: &Plan, op: &Op) -> Vec<Access> {
         write,
     };
     match *op {
-        Op::GlobalIn { dst, .. } => vec![a(dst, true)],
+        Op::MainInput { dst, .. } => vec![a(dst, true)],
         Op::Delay { src, dst, .. } => vec![a(src, false), a(dst, true)],
         Op::Sum { srcs, dst } => plan.audio_list[srcs.range()]
             .iter()

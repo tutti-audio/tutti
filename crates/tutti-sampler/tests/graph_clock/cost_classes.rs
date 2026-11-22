@@ -80,8 +80,8 @@ impl<N: Node> Node for Undeclared<N> {
 /// [`READS`] placed memory reads, each starting a little later, and
 /// [`STRETCHED`] stretched voices, on a pool of `workers` when more than
 /// one. `declared`: the reads as shipped, or wrapped to declare nothing.
-/// `bus`: every node summed by the graph (a fan-in onto each of two global outputs), or
-/// each on two global outputs of its own (a track wired straight out).
+/// `bus`: every node summed by the graph (a fan-in onto each of two main outputs), or
+/// each on two main outputs of its own (a track wired straight out).
 fn graph(wave: &Arc<Wave>, workers: usize, declared: bool, bus: bool) -> Executor {
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
@@ -96,7 +96,7 @@ fn graph(wave: &Arc<Wave>, workers: usize, declared: bool, bus: bool) -> Executo
         )));
     }
     let sources = READS + STRETCHED;
-    // Two silent global outputs, which the fan-in below fills.
+    // Two silent main outputs, which the fan-in below fills.
     ed.spec_mut().topology.set_outputs([PortSource::Zero; 2]);
     let mut outputs = Vec::new();
     for k in 0..sources {

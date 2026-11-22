@@ -58,11 +58,11 @@ fn the_loop_residual_after_the_cap_is_the_derived_bound() {
                 {
                     let x = v * drive;
                     let seed = linear_seed(&c, &state, x);
-                    let at_seed = loop_residual(&c, &state, x, seed).0.abs();
+                    let at_seed = loop_residual(&c, &state, x, seed, f64::tanh).0.abs();
                     let start = at_seed;
-                    let u = solve_loop(&c, &state, x);
-                    let (residual, _) = loop_residual(&c, &state, x, u);
-                    let chain = Chain::at(c.g1, &state, u);
+                    let u = solve_loop(&c, &state, x, f64::tanh);
+                    let (residual, _) = loop_residual(&c, &state, x, u, f64::tanh);
+                    let chain = Chain::at(c.g1, &state, u, f64::tanh);
                     let size = u.abs()
                         + x.abs()
                         + c.k
@@ -81,7 +81,7 @@ fn the_loop_residual_after_the_cap_is_the_derived_bound() {
                     if one_step > 4.0 * bound {
                         informative += 1;
                     }
-                    nonlinear_ladder_step(&c, LadderType::LP24, &mut state, x);
+                    nonlinear_ladder_step(&c, LadderType::LP24, &mut state, x, f64::tanh);
                 }
             }
         }
@@ -111,14 +111,14 @@ fn the_taps_are_bounded_by_the_saturators_before_them() {
             let mut state = [0.0f64; 4];
             let mut rest = 0.0;
             for _ in 0..40_000 {
-                rest = nonlinear_ladder_step(&c, ty, &mut state, 1_000.0);
+                rest = nonlinear_ladder_step(&c, ty, &mut state, 1_000.0, f64::tanh);
             }
             assert!(
                 (rest - bound).abs() < 0.01 * bound,
                 "{ty:?} {fc} Hz: {rest} at rest against {bound}"
             );
             let peak = noise(20_000, 5).iter().fold(0.0f64, |p, v| {
-                p.max(nonlinear_ladder_step(&c, ty, &mut state, 1_000.0 * v).abs())
+                p.max(nonlinear_ladder_step(&c, ty, &mut state, 1_000.0 * v, f64::tanh).abs())
             });
             assert!(peak <= bound, "{ty:?} {fc} Hz: {peak} over {bound}");
         }
@@ -237,7 +237,15 @@ fn a_hot_sine_matches_the_continuous_ladder_ode_integrated_at_64_times_the_rate(
 
     let mut state = [0.0f64; 4];
     let ladder: Vec<f64> = (0..n)
-        .map(|i| nonlinear_ladder_step(&c, LadderType::LP24, &mut state, ode.x(i as f64 * h)))
+        .map(|i| {
+            nonlinear_ladder_step(
+                &c,
+                LadderType::LP24,
+                &mut state,
+                ode.x(i as f64 * h),
+                f64::tanh,
+            )
+        })
         .collect();
 
     // The reference and the predicted error together: the 8-state system `(y, e)`.

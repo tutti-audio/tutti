@@ -10,7 +10,7 @@ use tutti_units::Samples;
 use super::commit::{Crossfade, retire_fade};
 use super::node_op::{Head, OpState, flag, node_dispatch};
 use super::ops::{
-    audio_ring, capture_op, delay_op, event_delay_op, event_merge_op, event_ring, global_in,
+    audio_ring, capture_op, delay_op, event_delay_op, event_merge_op, event_ring, main_input,
     output_op, sum_op,
 };
 use super::state::{Inject, State, Unit};
@@ -86,8 +86,8 @@ pub(super) fn end_fades<F: Float>(
 impl<F: Float> Executor<F> {
     /// Renders one block of `frames` into `outputs`, reading `inputs`.
     ///
-    /// `inputs` must have a slice per global input channel the plan reads, and
-    /// `outputs` one per global output channel; every slice at least `frames`
+    /// `inputs` must have a slice per main input channel the plan reads, and
+    /// `outputs` one per main output channel; every slice at least `frames`
     /// long. Applies queued commits first ([`apply_pending`](Self::apply_pending));
     /// with none queued it never allocates. A caller that sizes the block from
     /// the executor's plan or prepare applies once itself and renders with
@@ -153,7 +153,7 @@ impl<F: Float> Executor<F> {
     /// commit sent in between (a wider plan, a smaller `MaxBlock` from a
     /// re-prepare's resume) would change what the sizes were read from.
     ///
-    /// `inputs` and `outputs` must have one slice per global input and output
+    /// `inputs` and `outputs` must have one slice per main input and output
     /// channel of the plan. Slices past those are ignored, serial or on a
     /// pool. Fewer of either is a caller bug: it panics in debug builds, and
     /// in release the block renders silence into what was given, running no
@@ -273,14 +273,14 @@ impl<F: Float> Executor<F> {
                 return;
             };
             if outputs.len() < plan.rendered_outputs()
-                || inputs.len() < usize::from(plan.global_inputs())
+                || inputs.len() < usize::from(plan.main_inputs())
             {
                 debug_assert!(
                     false,
-                    "{} input and {} output slices for a plan with {} global inputs and {} outputs",
+                    "{} input and {} output slices for a plan with {} main inputs and {} outputs",
                     inputs.len(),
                     outputs.len(),
-                    plan.global_inputs(),
+                    plan.main_inputs(),
                     plan.rendered_outputs()
                 );
                 for o in outputs.iter_mut() {
@@ -413,8 +413,15 @@ impl<F: Float> Executor<F> {
                 };
                 for op in &plan.ops {
                     match *op {
-                        Op::GlobalIn { channel, dst } => {
-                            global_in(&mut *st.arena, &mut *st.flags, inputs, channel, dst, frames);
+                        Op::MainInput { channel, dst } => {
+                            main_input(
+                                &mut *st.arena,
+                                &mut *st.flags,
+                                inputs,
+                                channel,
+                                dst,
+                                frames,
+                            );
                         }
                         Op::Delay { delay, src, dst } => {
                             delay_op(
