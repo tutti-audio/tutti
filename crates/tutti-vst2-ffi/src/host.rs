@@ -1945,10 +1945,11 @@ impl Drop for RenderHandle {
 ///
 /// **A panic that begins under the gate kills the core.** The guard's drop then marks the gate
 /// closed: the plugin may be in any state (the panic came out of an entry mid-call), so every
-/// later entry finds it closed and refuses: the handle renders silence from then on. An entry
-/// made while an earlier panic is already unwinding (from a `Drop`) and that returns normally
-/// leaves the gate open, and the plugin is closed by the instance's drop as ever. Free (not a method), so the
-/// caller can keep borrowing the handle's other fields (the name) across the call.
+/// later entry finds it closed and refuses: the handle renders silence from then on, and the
+/// plugin is closed by the instance's drop as ever. An entry made while an earlier panic is
+/// already unwinding (from a `Drop`) and that returns normally leaves the gate open. Free (not
+/// a method), so the caller can keep borrowing the handle's other fields (the name) across the
+/// call.
 fn gated<R>(
     core: &Core,
     entry: &RenderEntry,
