@@ -2,10 +2,11 @@
 //! over `ManualStreamDriver`s standing for the devices.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tutti_buffers::InterleavedMut;
 use tutti_platform::Instant;
+use tutti_rt::Mutex;
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_cpal::{DeviceDirection, DeviceId, DeviceSelector, Snapshot, SnapshotSource};
@@ -181,7 +182,7 @@ struct Fake(Arc<Mutex<VecDeque<Snapshot>>>);
 
 impl Fake {
     fn show(&self, outputs: &[&str], default: Option<&str>) {
-        self.0.lock().unwrap().push_back(Snapshot::from_names(
+        self.0.lock().push_back(Snapshot::from_names(
             outputs.iter().copied(),
             [],
             default,
@@ -192,7 +193,7 @@ impl Fake {
 
 impl SnapshotSource for Fake {
     fn poll(&mut self) -> Option<Snapshot> {
-        self.0.lock().unwrap().pop_front()
+        self.0.lock().pop_front()
     }
 }
 
@@ -710,7 +711,7 @@ fn the_render_worker_start_hook_runs_once_per_live_helper() {
     let (driver, stream) = ManualStreamDriver::new();
     let session = Session::builder()
         .render_workers(Workers::of(4))
-        .render_worker_start(move |i| hook.lock().unwrap().push(i))
+        .render_worker_start(move |i| hook.lock().push(i))
         .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
@@ -719,7 +720,7 @@ fn the_render_worker_start_hook_runs_once_per_live_helper() {
     // helpers: no hook runs after this.
     drop(session);
     drop(stream);
-    assert_eq!(seen.lock().unwrap().len(), 3, "once per helper");
+    assert_eq!(seen.lock().len(), 3, "once per helper");
 }
 
 /// **`Workers::PerCore` reaches the live pool as one participant per core the
@@ -737,7 +738,7 @@ fn per_core_workers_start_a_helper_for_every_core_but_the_callbacks() {
     let (driver, stream) = ManualStreamDriver::new();
     let live = Session::builder()
         .render_workers(Workers::PerCore)
-        .render_worker_start(move |i| hook.lock().unwrap().push(i))
+        .render_worker_start(move |i| hook.lock().push(i))
         .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
@@ -747,17 +748,17 @@ fn per_core_workers_start_a_helper_for_every_core_but_the_callbacks() {
     // helpers: no hook runs after this.
     drop(live);
     drop(stream);
-    assert_eq!(seen.lock().unwrap().len(), helpers.len(), "once per helper");
+    assert_eq!(seen.lock().len(), helpers.len(), "once per helper");
 }
 
 /// Wait until `seen` holds `n` indices (a hang guard of a minute), then
 /// return them sorted.
 fn indices_after(seen: &Mutex<Vec<usize>>, n: usize) -> Vec<usize> {
     let t = Instant::now();
-    while seen.lock().unwrap().len() < n && t.elapsed() < Duration::from_secs(60) {
+    while seen.lock().len() < n && t.elapsed() < Duration::from_secs(60) {
         std::thread::yield_now();
     }
-    let mut v = seen.lock().unwrap().clone();
+    let mut v = seen.lock().clone();
     v.sort_unstable();
     v
 }
@@ -1168,7 +1169,7 @@ fn start_when_listed(retry_startup: bool) -> Vec<DeviceSelector> {
         let asked = Arc::clone(&asked);
         let driver = &mut driver;
         let ran = watch.retry_start(&mut events, |selector| {
-            asked.lock().unwrap().push(selector);
+            asked.lock().push(selector);
             Session::builder()
                 .device(tutti_cpal::DeviceSelector::Default)
                 .build_device_on(spec_at(48_000.0), driver.take().expect("one start"))
@@ -1180,7 +1181,7 @@ fn start_when_listed(retry_startup: bool) -> Vec<DeviceSelector> {
     let (ran, events) = start(&mut watch);
     assert!(ran.is_none(), "no device is listed: no start");
     assert!(wants(&events).is_empty());
-    assert!(asked.lock().unwrap().is_empty());
+    assert!(asked.lock().is_empty());
 
     fake.show(&["A"], Some("A"));
     let (ran, _) = start(&mut watch);
@@ -1202,7 +1203,7 @@ fn start_when_listed(retry_startup: bool) -> Vec<DeviceSelector> {
             "no stream was started"
         );
     }
-    std::mem::take(&mut *asked.lock().unwrap())
+    std::mem::take(&mut *asked.lock())
 }
 
 /// **A start that failed for want of a device is retried when the device is

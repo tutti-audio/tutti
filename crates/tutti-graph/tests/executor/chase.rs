@@ -51,9 +51,15 @@ fn data(u: &Ump) -> f32 {
     (u.words()[0] & 0x7f) as f32 / 127.0
 }
 
+impl Keeper {
+    const BASE: Shape =
+        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO)).with_events(1, 0);
+    const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
+}
+
 impl Node for Keeper {
     fn shape(&self) -> Shape {
-        let s = Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO)).with_events(1, 0);
+        let s = Self::BASE;
         if self.chases {
             s.with_chase(self.capacity)
         } else {
@@ -62,7 +68,7 @@ impl Node for Keeper {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        for e in io.events(0).iter() {
+        for e in io.events(Self::IN).iter() {
             if let EventKind::Midi(u) = e.kind {
                 self.log
                     .lock()
@@ -132,9 +138,14 @@ fn cc(controller: u8, value: u8) -> Ump {
 /// Writes one message at offset 0 of every block.
 struct Edge0(Ump, Arc<AtomicBool>);
 
+impl Edge0 {
+    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Edge0 {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -142,7 +153,9 @@ impl Node for Edge0 {
             return Status::Silent;
         }
         let at = cx.env.offsets().next().expect("a block has a frame");
-        io.event_out(0).push(Event::midi(at, self.0)).unwrap();
+        io.event_out(Self::OUT)
+            .push(Event::midi(at, self.0))
+            .unwrap();
         Status::Silent
     }
     fn reset(&mut self) {}

@@ -169,10 +169,14 @@ impl Liar {
     }
 }
 
+impl Liar {
+    const BASE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0);
+    const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
+}
+
 impl Node for Liar {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO)
-            .with_events(1, 0)
+        Self::BASE
             .with_latency(Latency::new(Samples::new(self.declared)))
             .with_tail(Tail::Unknown)
             .with_event_resolution(self.resolution)
@@ -180,7 +184,7 @@ impl Node for Liar {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let block = cx.env.frame.get();
-        for e in io.events(0).iter() {
+        for e in io.events(Self::IN).iter() {
             let t = block + e.offset.get() as u64;
             let at = match self.timing {
                 Timing::Exact => t,
@@ -334,14 +338,19 @@ fn a_row_cannot_pass_what_it_does_not_run() {
 /// Records the first UMP word of every event it is handed, in order.
 struct Tags(tutti_fixtures::Record<(u64, u32)>);
 
+impl Tags {
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0);
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for Tags {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
         let mut log = self.0.lock().unwrap();
-        for e in io.events(0).iter() {
+        for e in io.events(Self::IN).iter() {
             if let EventKind::Midi(Ump(w)) = e.kind {
                 log.push((cx.env.frame_at(e.offset).get(), w[0]));
             }

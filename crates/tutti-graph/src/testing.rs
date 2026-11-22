@@ -173,6 +173,9 @@ pub enum SpecBehaviour {
 
 pub struct TestNode<F: Float = f32> {
     kind: Kind,
+    /// The handles its kind's shape issued, in port order.
+    event_inputs: Vec<crate::InEvents>,
+    event_outputs: Vec<crate::OutEvents>,
     ring: VecDeque<F>,
     prev: F,
     count: f32,
@@ -227,8 +230,10 @@ impl<F: Float> TestNode<F> {
             Kind::Lag { latency } => VecDeque::from(vec![F::ZERO; latency]),
             _ => VecDeque::new(),
         };
-        Self {
+        let mut node = Self {
             kind,
+            event_inputs: Vec::new(),
+            event_outputs: Vec::new(),
             ring,
             prev: F::ZERO,
             count: 0.0,
@@ -239,7 +244,11 @@ impl<F: Float> TestNode<F> {
             cost: crate::Cost::default(),
             buses,
             own_bypass,
-        }
+        };
+        let shape = node.kind_shape();
+        node.event_inputs = shape.event_inputs().collect();
+        node.event_outputs = shape.event_outputs().collect();
+        node
     }
 
     /// This node, declaring `cost` (`Shape::cost`).
@@ -431,7 +440,7 @@ impl<F: Float> Node<F> for TestNode<F> {
                     let f = cx.env.frame_at(at).get();
                     if (f + phase).is_multiple_of(period) {
                         let _ = io
-                            .event_out(0)
+                            .event_out(self.event_outputs[0])
                             .push(Event::midi(at, Ump([f as u32, 0, 0, 0])));
                         self.count += 1.0;
                     }
@@ -449,7 +458,7 @@ impl<F: Float> Node<F> for TestNode<F> {
                             Samples::new(0),
                         );
                         let _ = io
-                            .event_out(0)
+                            .event_out(self.event_outputs[0])
                             .push_param(crate::ParamEvent::ramp(at, ramp));
                     }
                 }
@@ -465,7 +474,7 @@ impl<F: Float> Node<F> for TestNode<F> {
                             Samples::new(0),
                         );
                         let _ = io
-                            .event_out(0)
+                            .event_out(self.event_outputs[0])
                             .push_param(crate::ParamEvent::ramp(at, ramp));
                     }
                 }
@@ -482,7 +491,7 @@ impl<F: Float> Node<F> for TestNode<F> {
                     if (f + phase).is_multiple_of(period) {
                         for i in 0..burst {
                             let e = Event::midi(at, Ump([f as u32 + i, 0, 0, 0]));
-                            if io.event_out(0).push(e).is_ok() {
+                            if io.event_out(self.event_outputs[0]).push(e).is_ok() {
                                 self.count += 1.0;
                             }
                         }
@@ -497,7 +506,7 @@ impl<F: Float> Node<F> for TestNode<F> {
                 let mut heads = [0usize; 8];
                 for i in 0..n {
                     for (p, h) in (0..inputs).zip(heads.iter_mut()) {
-                        let evs = io.events(p);
+                        let evs = io.events(self.event_inputs[usize::from(p)]);
                         while *h < evs.len() && evs[*h].offset.index() == i {
                             if let EventKind::Midi(Ump(w)) = evs[*h].kind {
                                 self.state = 0.5 * self.state + (w[0] % 97) as f32 + f32::from(p);
@@ -510,7 +519,7 @@ impl<F: Float> Node<F> for TestNode<F> {
                 Status::Modified
             }
             Kind::EventLag { latency } => {
-                for e in io.events(0) {
+                for e in io.events(self.event_inputs[0]) {
                     // Word 1 counts hops. Forwarding at most `MAX_HOPS`
                     // times bounds how far an event feedback loop can
                     // multiply events -- without it a random graph can
@@ -544,7 +553,9 @@ impl<F: Float> Node<F> for TestNode<F> {
                         None => break,
                     };
                     self.pending.pop_front();
-                    let _ = io.event_out(0).push(Event { offset, ..e });
+                    let _ = io
+                        .event_out(self.event_outputs[0])
+                        .push(Event { offset, ..e });
                 }
                 Status::Modified
             }
@@ -576,7 +587,7 @@ impl<F: Float> Node<F> for TestNode<F> {
                 // (order-sensitive, like `Consumer`), and stays positive so
                 // silence stays `+0.0`.
                 for p in 0..events_in {
-                    for e in io.events(p) {
+                    for e in io.events(self.event_inputs[usize::from(p)]) {
                         if let EventKind::Midi(Ump(w)) = e.kind {
                             self.state =
                                 0.5 * self.state + ((w[0] % 7) as f32 + f32::from(p)) * 0.125;
@@ -590,9 +601,9 @@ impl<F: Float> Node<F> for TestNode<F> {
                 }
                 if events_in > 0 {
                     for q in 0..events_out {
-                        let from = io.events(q % events_in);
+                        let from = io.events(self.event_inputs[usize::from(q % events_in)]);
                         for &e in from {
-                            let _ = io.event_out(q).push(e);
+                            let _ = io.event_out(self.event_outputs[usize::from(q)]).push(e);
                         }
                     }
                 }
@@ -1113,14 +1124,14 @@ impl Drop for TestPool {
 
 /// A shared [`TestPool`] per participant count, for a whole test binary.
 pub fn test_pool(participants: usize) -> Arc<dyn crate::Pool> {
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::OnceLock;
+    use tutti_rt::Mutex;
     static POOLS: OnceLock<Mutex<BTreeMap<usize, Arc<TestPool>>>> = OnceLock::new();
     let pools = POOLS.get_or_init(|| Mutex::new(BTreeMap::new()));
 
     (Arc::clone(
         pools
             .lock()
-            .expect("pool map")
             .entry(participants)
             .or_insert_with(|| TestPool::new(participants)),
     )) as _

@@ -151,6 +151,7 @@ fn each_kind_of_loss_lands_in_the_plugins_losses() {
 /// the 3 past the cap read as `refused` in `losses()`, and nothing else is lost.
 #[test]
 fn chords_the_node_had_no_room_for_land_in_the_plugins_losses() {
+    use tutti_graph::Node as _;
     use tutti_graph::contract::Direct;
     use tutti_graph::{Event, Harmony, Offset};
     use tutti_plugin_types::fake::FakeLoaded;
@@ -181,6 +182,11 @@ fn chords_the_node_had_no_room_for_land_in_the_plugins_losses() {
     )
     .expect("the fake is narrow");
     let mut unit = Direct::new(client.bind(tutti_fixtures::tempo()), SampleRate::SR_48K, 64);
+    let unit_in = unit
+        .node
+        .shape()
+        .event_input(0)
+        .expect("the node declares an event input");
     let over = 3;
     let chords: Vec<Event> = (0..HARMONY_CAPACITY + over)
         .map(|i| {
@@ -191,7 +197,7 @@ fn chords_the_node_had_no_room_for_land_in_the_plugins_losses() {
         })
         .collect();
     assert_eq!(losses(&s, node), Losses::NONE);
-    unit.events(0, &chords);
+    unit.events(unit_in, &chords);
     unit.block();
     assert_eq!(losses(&s, node), Losses::refused(over as u64));
 }

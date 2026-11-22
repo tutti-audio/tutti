@@ -18,6 +18,7 @@ use tutti_rt::Mutex;
 use tutti_vst2_host::Vst2Loaded;
 
 use tutti_fixtures::midi;
+use tutti_graph::Node as _;
 use tutti_graph::contract::Direct;
 use tutti_graph::{Event, Offset, ParamEvent};
 
@@ -104,6 +105,11 @@ fn process_with_midi_does_not_allocate() {
     )
     .expect("load failed");
     let mut unit = Direct::new(unit.bind(tutti_fixtures::tempo()), SampleRate::SR_48K, 64);
+    let unit_in = unit
+        .node
+        .shape()
+        .event_input(0)
+        .expect("the node declares an event input");
 
     // Warm up audio path.
     for _ in 0..32 {
@@ -117,10 +123,10 @@ fn process_with_midi_does_not_allocate() {
         60,
         NoteVelocity::from(U7::of(100)).get(),
     );
-    unit.events(0, &[at_start(warm_event)]);
+    unit.events(unit_in, &[at_start(warm_event)]);
     unit.block();
     let warm_off = midi::note_off(MidiChannel::of(1), 60, 0);
-    unit.events(0, &[at_start(warm_off)]);
+    unit.events(unit_in, &[at_start(warm_off)]);
     unit.block();
 
     // Steady state with periodic MIDI on the event input: no allocation.
@@ -131,11 +137,11 @@ fn process_with_midi_does_not_allocate() {
                 60 + (i as u8 % 12),
                 NoteVelocity::from(U7::of(100)).get(),
             );
-            unit.events(0, &[at_start(ev)]);
+            unit.events(unit_in, &[at_start(ev)]);
         }
         if i % 16 == 8 {
             let ev = midi::note_off(MidiChannel::of(1), 60 + (i as u8 % 12), 0);
-            unit.events(0, &[at_start(ev)]);
+            unit.events(unit_in, &[at_start(ev)]);
         }
         unit.block();
     }
@@ -171,6 +177,11 @@ fn two_hundred_moving_parameters_do_not_allocate() {
     let (unit, handle) = loaded.expect("load failed");
     let controls = unit.controls();
     let mut unit = Direct::new(unit.bind(tutti_fixtures::tempo()), SampleRate::SR_48K, 64);
+    let unit_in = unit
+        .node
+        .shape()
+        .event_input(0)
+        .expect("the node declares an event input");
 
     // Sixteenths, a different one for every parameter, frame and block.
     let value = |b: u32, k: u32, id: u32| f64::from((b * 2 + k + id) % 16) / 16.0;
@@ -184,7 +195,7 @@ fn two_hundred_moving_parameters_do_not_allocate() {
                 events.push(ParamEvent::ramp(at, ramp));
             }
         }
-        unit.param_events(0, &events);
+        unit.param_events(unit_in, &events);
         unit.block();
     };
     for b in 0..8 {

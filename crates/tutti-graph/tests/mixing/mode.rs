@@ -16,12 +16,12 @@
 use crate::rendezvous::Rendezvous;
 use common::spec_of;
 use tutti_buffers::Float;
-use tutti_fixtures::Record;
+use tutti_fixtures::{Record, Shared};
 use tutti_graph::testing as common;
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
 use common::{Kind, Pair, RingingNode, SpecBehaviour, TestNode, bits, prepare};
 use tutti_buffers::FoldError;
@@ -878,8 +878,8 @@ impl Node for Probe {
             self.silent.lock().unwrap().push(io.silent().get(0));
         }
         let mut sent = false;
-        for p in 0..self.events_in {
-            for e in io.events(p) {
+        for port in self.shape().event_inputs() {
+            for e in io.events(port) {
                 sent = true;
                 if let EventKind::Midi(Ump(w)) = e.kind {
                     self.events
@@ -1119,19 +1119,26 @@ const OFF60: [u32; 4] = [0x2080_3C00, 0, 0, 0];
 
 /// A note source: sends what its mailbox holds, as one block's events.
 struct Src {
-    mail: Arc<Mutex<Vec<[u32; 4]>>>,
+    mail: Shared<Vec<[u32; 4]>>,
     calls: Arc<AtomicUsize>,
+}
+
+impl Src {
+    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
 impl Node for Src {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         self.calls.fetch_add(1, Ordering::Relaxed);
         for w in self.mail.lock().unwrap().drain(..) {
-            let _ = io.event_out(0).push(Event::midi(Offset::ZERO, Ump(w)));
+            let _ = io
+                .event_out(Self::OUT)
+                .push(Event::midi(Offset::ZERO, Ump(w)));
         }
         Status::Silent
     }
@@ -1158,14 +1165,14 @@ fn ev_in(n: u64) -> EventInputPort {
 /// fade is over and nothing is held.
 #[test]
 fn a_held_input_note_is_closed_on_bypass() {
-    let mail = Arc::new(Mutex::new(Vec::new()));
+    let mail = Shared::new(Vec::new());
     let mut s = Solo::new(1);
     let mut p = Probe::new(3.0);
     p.events_in = 1;
     s.add(
         1,
         Src {
-            mail: Arc::clone(&mail),
+            mail: mail.clone(),
             calls: Arc::new(AtomicUsize::new(0)),
         },
     );
@@ -1199,7 +1206,7 @@ fn a_held_input_note_is_closed_on_bypass() {
 /// skipped by the executor — and a bypass sends it the off all the same.
 #[test]
 fn a_held_input_note_is_closed_on_an_idle_node() {
-    let mail = Arc::new(Mutex::new(Vec::new()));
+    let mail = Shared::new(Vec::new());
     let mut s = Solo::new(0);
     let mut p = Probe::new(3.0);
     p.events_in = 1;
@@ -1207,7 +1214,7 @@ fn a_held_input_note_is_closed_on_an_idle_node() {
     s.add(
         1,
         Src {
-            mail: Arc::clone(&mail),
+            mail: mail.clone(),
             calls: Arc::new(AtomicUsize::new(0)),
         },
     );
@@ -1239,7 +1246,7 @@ fn a_held_input_note_is_closed_on_an_idle_node() {
 /// output in the first parked block, and nothing after.
 #[test]
 fn a_bypassed_source_closes_its_notes() {
-    let mail = Arc::new(Mutex::new(Vec::new()));
+    let mail = Shared::new(Vec::new());
     let src_calls = Arc::new(AtomicUsize::new(0));
     let mut s = Solo::new(1);
     let mut sink = Probe::new(1.0);
@@ -1247,7 +1254,7 @@ fn a_bypassed_source_closes_its_notes() {
     s.add(
         1,
         Src {
-            mail: Arc::clone(&mail),
+            mail: mail.clone(),
             calls: Arc::clone(&src_calls),
         },
     );

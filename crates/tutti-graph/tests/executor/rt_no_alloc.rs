@@ -469,16 +469,21 @@ fn parallel_crossfades_are_allocation_free() {
 /// messages for its successor when replaced (`Node::chase`).
 struct HeldChaser(Arc<AtomicU64>);
 
+impl HeldChaser {
+    const SHAPE: Shape = Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO))
+        .with_events(1, 0)
+        .with_chase(4);
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for HeldChaser {
     fn shape(&self) -> Shape {
-        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO))
-            .with_events(1, 0)
-            .with_chase(4)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         self.0
-            .fetch_add(io.events(0).len() as u64, Ordering::Relaxed);
+            .fetch_add(io.events(Self::IN).len() as u64, Ordering::Relaxed);
         io.output(0).fill(0.25);
         Status::Modified
     }
@@ -650,11 +655,14 @@ struct Spray {
     refused: Arc<AtomicU64>,
 }
 
+impl Spray {
+    const BASE: Shape = Shape::EMPTY.with_events(0, 1);
+    const OUT: tutti_graph::OutEvents = Self::BASE.event_output(0).expect("declared");
+}
+
 impl Node for Spray {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(tutti_graph::testing::cap_of(self.cap))
+        Self::BASE.with_event_capacity(tutti_graph::testing::cap_of(self.cap))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -668,7 +676,7 @@ impl Node for Spray {
                             Voice1::note_on(NoteNumber::of(60), U7::of(100 | i as u8)),
                         ),
                     );
-                    if io.event_out(0).push(e).is_err() {
+                    if io.event_out(Self::OUT).push(e).is_err() {
                         self.refused.fetch_add(1, Ordering::Relaxed);
                     }
                 }
@@ -706,8 +714,8 @@ impl Node for Tally {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
-        for (p, n) in (0..).zip(self.0.iter()) {
-            n.fetch_add(io.events(p).len() as u64, Ordering::Relaxed);
+        for (port, n) in self.shape().event_inputs().zip(&self.0) {
+            n.fetch_add(io.events(port).len() as u64, Ordering::Relaxed);
         }
         Status::Silent
     }
@@ -874,12 +882,17 @@ impl Node for ParamSink {
 /// class, a resumed one).
 struct RampEvery;
 
+impl RampEvery {
+    const SHAPE: Shape = Shape::EMPTY
+        .with_events(0, 1)
+        .with_param_events()
+        .with_event_capacity(tutti_graph::testing::cap_of(16));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for RampEvery {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_param_events()
-            .with_event_capacity(tutti_graph::testing::cap_of(16))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -921,7 +934,7 @@ impl Node for RampEvery {
                         tutti_graph::ParamEvent::segment(o, seg)
                     }
                 };
-                let _ = io.event_out(0).push_param(event);
+                let _ = io.event_out(Self::OUT).push_param(event);
             }
         }
         Status::Silent
@@ -1056,8 +1069,8 @@ impl Node for ParamTally {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
-        for (p, n) in (0..).zip(self.0.iter()) {
-            n.fetch_add(io.events(p).params().len() as u64, Ordering::Relaxed);
+        for (port, n) in self.shape().event_inputs().zip(&self.0) {
+            n.fetch_add(io.events(port).params().len() as u64, Ordering::Relaxed);
         }
         Status::Silent
     }
@@ -1287,12 +1300,17 @@ impl Node for AzimuthSink {
 /// every shape class.
 struct SeamEvery;
 
+impl SeamEvery {
+    const SHAPE: Shape = Shape::EMPTY
+        .with_events(0, 1)
+        .with_param_events()
+        .with_event_capacity(tutti_graph::testing::cap_of(16));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for SeamEvery {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_param_events()
-            .with_event_capacity(tutti_graph::testing::cap_of(16))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -1312,7 +1330,7 @@ impl Node for SeamEvery {
                     ParamSegment::unit(tutti_units::UnitParam::Azimuth, from, to, Samples::new(40))
                         .law(shape);
                 let _ = io
-                    .event_out(0)
+                    .event_out(Self::OUT)
                     .push_param(tutti_graph::ParamEvent::segment(o, seg));
             }
         }
@@ -1499,6 +1517,11 @@ fn direct_driving_events_does_not_allocate() {
     let rate = SampleRate::SR_48K;
     let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
     let mut pulse = Direct::new(ImpulseSource::new(Latency::ZERO), rate, 64);
+    let pulse_in = pulse
+        .node
+        .shape()
+        .event_input(0)
+        .expect("the pulse's input");
     pulse.set_transport(rolling);
     let events: Vec<Event> = (0..64)
         .map(|k| {
@@ -1516,7 +1539,7 @@ fn direct_driving_events_does_not_allocate() {
     emitter.set_transport(rolling);
     assert_no_alloc::assert_no_alloc(|| {
         for _ in 0..4 {
-            pulse.events(0, &events);
+            pulse.events(pulse_in, &events);
             pulse.block();
             emitter.block();
         }
@@ -1877,14 +1900,24 @@ impl Node for Wire {
                     // events reach, for a bypass to close.
                     let note = 60 + (f / period) % 4;
                     let on = Ump([0x2090_0064 | ((note as u32) << 8), 0, 0, 0]);
-                    let _ = io.event_out(0).push(tutti_graph::Event::midi(at, on));
+                    let out = self
+                        .shape()
+                        .event_outputs()
+                        .next()
+                        .expect("an event output");
+                    let _ = io.event_out(out).push(tutti_graph::Event::midi(at, on));
                 }
             }
         }
         if self.ein > 0 {
-            for q in 0..self.eout {
-                for &e in io.events(q % self.ein) {
-                    let _ = io.event_out(q).push(e);
+            let shape = self.shape();
+            for (q, out) in shape.event_outputs().enumerate() {
+                let input = shape
+                    .event_inputs()
+                    .nth(q % self.ein as usize)
+                    .expect("a declared input");
+                for &e in io.events(input) {
+                    let _ = io.event_out(out).push(e);
                 }
             }
         }
@@ -2305,16 +2338,21 @@ struct Chaser {
 
 const STATE: u8 = 4;
 
+impl Chaser {
+    const SHAPE: Shape = Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO))
+        .with_events(1, 0)
+        .with_chase(STATE as u32);
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for Chaser {
     fn shape(&self) -> Shape {
-        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO))
-            .with_events(1, 0)
-            .with_chase(u32::from(STATE))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         self.seen
-            .fetch_add(io.events(0).len() as u64, Ordering::Relaxed);
+            .fetch_add(io.events(Self::IN).len() as u64, Ordering::Relaxed);
         io.output(0).fill(0.0);
         Status::Modified
     }
@@ -2519,7 +2557,7 @@ impl Node for OffCount {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
-        for port in 0..self.inputs {
+        for port in self.shape().event_inputs() {
             for e in io.events(port) {
                 if let EventKind::Midi(Ump(w)) = e.kind
                     && w[0] >> 28 == 2
@@ -2534,11 +2572,14 @@ impl Node for OffCount {
     fn reset(&mut self) {}
 }
 
+impl Holder {
+    const BASE: Shape = Shape::EMPTY.with_events(0, 1);
+    const OUT: tutti_graph::OutEvents = Self::BASE.event_output(0).expect("declared");
+}
+
 impl Node for Holder {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(tutti_graph::testing::cap_of(self.per_block.max(1) as u32))
+        Self::BASE.with_event_capacity(tutti_graph::testing::cap_of(self.per_block.max(1) as u32))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -2547,7 +2588,7 @@ impl Node for Holder {
             let channel = MidiChannel::of((k / 128) as u8);
             let on = midi::m1_note_on(channel, (k % 128) as u8, U7::of(100));
             let _ = io
-                .event_out(0)
+                .event_out(Self::OUT)
                 .push(tutti_graph::Event::midi(tutti_graph::Offset::ZERO, on));
         }
         self.sent = next;
@@ -3046,9 +3087,14 @@ struct Latch {
     sent: bool,
 }
 
+impl Latch {
+    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Latch {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -3065,7 +3111,7 @@ impl Node for Latch {
             ];
             for ump in held {
                 let _ = io
-                    .event_out(0)
+                    .event_out(Self::OUT)
                     .push(tutti_graph::Event::midi(tutti_graph::Offset::ZERO, ump));
             }
         }
@@ -3082,13 +3128,18 @@ struct Closed {
     bends_centred: Arc<AtomicUsize>,
 }
 
+impl Closed {
+    const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for Closed {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
-        for e in io.events(0) {
+        for e in io.events(Self::IN) {
             let EventKind::Midi(Ump(w)) = e.kind else {
                 continue;
             };

@@ -97,7 +97,10 @@ fn held(cfg: SynthConfig, n: usize) -> Direct<PolySynth<f32>> {
         })
         .map(|e: Ump| Event::midi(at, e))
         .collect();
-    synth.events(0, &events);
+    let input = tutti_graph::Node::shape(&*synth.node)
+        .event_input(0)
+        .expect("an event input");
+    synth.events(input, &events);
 
     // Run past the attack so the benchmark measures sustain.
     for _ in 0..64 {
@@ -282,9 +285,12 @@ fn bench_events(c: &mut Criterion) {
     let mut synth = held(config(), 4);
     group.bench_function("none", |b| b.iter(|| drive(&mut synth)));
     let mut synth = held(config(), 4);
+    let input = tutti_graph::Node::shape(&*synth.node)
+        .event_input(0)
+        .expect("an event input");
     group.bench_function("64-events", |b| {
         b.iter(|| {
-            synth.events(0, &events);
+            synth.events(input, &events);
             drive(&mut synth)
         })
     });

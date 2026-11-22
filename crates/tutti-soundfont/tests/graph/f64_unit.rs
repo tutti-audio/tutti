@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use tutti_fixtures::midi;
 use tutti_graph::contract::Direct;
-use tutti_graph::{Event, Node, Offset, Status};
+use tutti_graph::{Event, InEvents, Node, Offset, Status};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_ump::MidiChannel;
@@ -26,6 +26,11 @@ fn font() -> Arc<SoundFont> {
 /// A note held for a second is audible in both channels of the dry pair, every sample finite;
 /// let go, the unit reports `Idle` within its declared tail (a frame count at the unit's rate)
 /// and the dry pair it then writes is exact zeros.
+/// The unit's one event input.
+fn unit_input(direct: &Direct<SoundFontUnit<f64>, f64>) -> InEvents {
+    direct.node.shape().event_input(0).expect("an event input")
+}
+
 #[test]
 fn an_f64_unit_sounds_a_note_and_idles_within_its_declared_tail() {
     let rate = SampleRate::SR_48K;
@@ -36,8 +41,9 @@ fn an_f64_unit_sounds_a_note_and_idles_within_its_declared_tail() {
     };
     let mut direct = Direct::<_, f64>::with_format(unit, rate, BLOCK);
     let at = Offset::ZERO;
+    let input = unit_input(&direct);
     direct.events(
-        0,
+        input,
         &[Event::midi(
             at,
             midi::note_on(MidiChannel::FIRST, 60, 0xFFFF),
@@ -52,19 +58,19 @@ fn an_f64_unit_sounds_a_note_and_idles_within_its_declared_tail() {
                 *peak = peak.max(x.abs());
             }
         }
-        direct.events(0, &[]);
+        direct.events(input, &[]);
     }
     assert!(peak.iter().all(|&p| p > 1e-3), "peaks {peak:?}");
 
     direct.events(
-        0,
+        input,
         &[Event::midi(at, midi::note_off(MidiChannel::FIRST, 60, 0))],
     );
     let blocks = (tail + Samples::new(BLOCK)).get() / BLOCK + 1;
     let mut status = Status::Modified;
     for _ in 0..blocks {
         status = direct.block();
-        direct.events(0, &[]);
+        direct.events(input, &[]);
     }
     assert_eq!(
         status,

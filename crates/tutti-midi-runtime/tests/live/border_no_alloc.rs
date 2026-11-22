@@ -839,6 +839,9 @@ fn resetting_the_border_nodes_allocates_nothing() {
     });
     let mut sync = Direct::new(sync, rate, 64);
     let sent = |d: &mut Direct<SyncOut>, playing: bool, beat: f64| {
+        let out = tutti_graph::Node::<f32>::shape(&*d.node)
+            .event_output(0)
+            .expect("an event output");
         d.set_transport(TransportPosition::new(
             playing,
             Bpm::of(120.0),
@@ -846,7 +849,7 @@ fn resetting_the_border_nodes_allocates_nothing() {
             None,
         ));
         d.block();
-        d.event_output(0).len()
+        d.event_output(out).len()
     };
     let traffic = |d: &mut Direct<SyncOut>| {
         (0..8)

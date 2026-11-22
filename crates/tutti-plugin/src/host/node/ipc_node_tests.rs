@@ -144,6 +144,16 @@ fn a_late_reply_still_carries_its_midi_out_offline() {
         }
     });
     let (mut unit, _record, _threads) = new_node(rig_gated(Some(gate)), tempo(STEP_BEAT));
+    let unit_in = unit
+        .node
+        .shape()
+        .event_input(0)
+        .expect("the node declares an event input");
+    let unit_out = unit
+        .node
+        .shape()
+        .event_output(0)
+        .expect("the node declares an event output");
     let mut heard = Vec::new();
     for (block, frame) in [(0usize, 0u64), (1, 128), (2, 256)] {
         let events: Vec<Event> = if block == 0 {
@@ -151,10 +161,10 @@ fn a_late_reply_still_carries_its_midi_out_offline() {
         } else {
             Vec::new()
         };
-        unit.events(0, &events);
+        unit.events(unit_in, &events);
         unit.block_in(&block_env(frame, CHUNK));
         heard.push(
-            unit.event_output(0)
+            unit.event_output(unit_out)
                 .iter()
                 .map(|e| e.offset.index())
                 .collect::<Vec<_>>(),
@@ -233,6 +243,16 @@ fn the_server_is_sent_the_schedule_on_the_chunks_frames() {
     let _machine = machine_lock();
     // The step lands on stream frame 200, half a frame inside it.
     let (mut unit, record, _threads) = new_node(rig(), tempo(4.0 + 199.5 * BEATS_PER_FRAME_120));
+    let unit_in = unit
+        .node
+        .shape()
+        .event_input(0)
+        .expect("the node declares an event input");
+    let unit_out = unit
+        .node
+        .shape()
+        .event_output(0)
+        .expect("the node declares an event output");
     let items = [
         Item {
             frame: 130,
@@ -290,11 +310,11 @@ fn the_server_is_sent_the_schedule_on_the_chunks_frames() {
                 Make::Event(_) => None,
             })
             .collect();
-        unit.events(0, &events);
-        unit.param_events(0, &params);
+        unit.events(unit_in, &events);
+        unit.param_events(unit_in, &params);
         unit.block_in(&block_env(frame, len));
         out_events.push(
-            unit.event_output(0)
+            unit.event_output(unit_out)
                 .iter()
                 .map(|e| e.offset.index())
                 .collect::<Vec<_>>(),
