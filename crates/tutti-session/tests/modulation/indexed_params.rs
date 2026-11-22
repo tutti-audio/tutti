@@ -12,7 +12,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::Params;
 use tutti_modulation::Lfo;
 use tutti_session::{MainOutput, OutputPort, ParamRef, RouteSpec, Session, ValueErrorKind};
-use tutti_units::{BeatsPerCycle, Db, Bipolar, ParamAddr, UnitParam};
+use tutti_units::{BeatsPerCycle, Bipolar, Db, ParamAddr, UnitParam};
 
 use common::bands::{BAND1, Bands};
 
