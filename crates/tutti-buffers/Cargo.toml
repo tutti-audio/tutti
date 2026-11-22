@@ -37,6 +37,12 @@ assert_no_alloc = { version = "1", default-features = false }
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 # The `serde` feature's round trip.
 serde_json = "1"
+# The conversion bench.
+criterion.workspace = true
+
+[[bench]]
+name = "convert"
+harness = false
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
