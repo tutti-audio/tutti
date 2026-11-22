@@ -13,7 +13,7 @@ use super::flow::{PE_TIMEOUT, PeMessageKind, PeSignal, PeTerminator};
 use super::header::{PeHeader, PeHeaderError, PeSubscription};
 use crate::Muid;
 use crate::TimeoutWait;
-use crate::deadline::Pending;
+use crate::deadline::Deadline;
 
 tutti_units::ranged! {
     /// The most messages received at once from all peers: 1 to 128, the Request IDs
@@ -179,7 +179,7 @@ struct Stream {
     declared: ChunkTotal,
     /// The number of the last chunk taken.
     last: ChunkNo,
-    wait: Pending,
+    wait: Deadline,
     flow: PeFlowControl,
 }
 
@@ -236,7 +236,7 @@ impl PeReassembler {
     /// The instant the earliest message times out, or `None` when none is held.
     #[must_use]
     pub fn next_deadline(&self) -> Option<Instant> {
-        Pending::earliest(self.streams.iter().map(|s| s.wait))
+        Deadline::earliest(self.streams.iter().map(|s| s.wait))
     }
 
     /// Takes a chunk that arrived at `now`.
@@ -369,7 +369,7 @@ impl PeReassembler {
             header_len: 0,
             declared: chunk.total(),
             last: ChunkNo::FIRST,
-            wait: Pending::after(now, PE_TIMEOUT),
+            wait: Deadline::after(now, PE_TIMEOUT),
             flow: if reply_flow == PeFlowControl::On {
                 PeFlowControl::On
             } else {

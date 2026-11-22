@@ -80,7 +80,7 @@ use super::reassemble::{
     PeFlowControl, PeReassembler, PeReassemblyError, PeReassemblyLimits, PeReceived, PeStep,
 };
 use super::request_ids::RequestIds;
-use crate::deadline::Pending;
+use crate::deadline::Deadline;
 use crate::handshake::Handshake;
 use crate::link::Link;
 use crate::{CiHeader, CiMessage, Decoded, MaxSysexSize, Muid, Nak, TimeoutWait};
@@ -465,7 +465,7 @@ impl Work {
 struct InFlight {
     id: PeRequestId,
     work: Work,
-    wait: Pending,
+    wait: Deadline,
 }
 
 /// The Initiator of Property Exchange with one peer.
@@ -607,7 +607,7 @@ impl PeInitiator {
         self.pending.push(InFlight {
             id,
             work,
-            wait: Pending::after(now, PE_TIMEOUT),
+            wait: Deadline::after(now, PE_TIMEOUT),
         });
         Ok((id, actions))
     }
@@ -660,7 +660,7 @@ impl PeInitiator {
     /// with nothing waiting.
     #[must_use]
     pub fn deadline(&self) -> Option<Instant> {
-        let waits = Pending::earliest(
+        let waits = Deadline::earliest(
             self.phase
                 .wait()
                 .into_iter()
