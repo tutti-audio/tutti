@@ -6,6 +6,9 @@ use tutti_units::{Bpm, Cents, Db, SampleRate};
 
 const SECOND: usize = 48_000;
 
+/// The midpoint of the 16-bit velocity field (M2-115 section 3: MIDI 1.0's 64).
+const CENTER: NonZeroU16 = NonZeroU16::new(0x8000).unwrap();
+
 fn map() -> TempoMap {
     TempoMap::constant(Bpm::of(120.0)).expect("120 BPM is a tempo")
 }
@@ -21,7 +24,7 @@ fn note(cents: f64, start: usize, end: usize, level: f64) -> NoteEvent {
 }
 
 fn fixed() -> NoteMapping {
-    NoteMapping::new(LevelVelocity::Fixed(NoteVelocity::CENTER), NoteCents::Drop)
+    NoteMapping::new(LevelVelocity::Fixed(CENTER), NoteCents::Drop)
 }
 
 /// A bend range of `cents` cents (under 100) through the Channel Pitch Bend
@@ -73,7 +76,7 @@ fn a_note_is_sent_on_the_mappings_address_and_number() {
 #[test]
 fn a_fixed_velocity_is_sent_whatever_the_level() {
     let mapping = NoteMapping::new(
-        LevelVelocity::Fixed(NoteVelocity::new(0x1234)),
+        LevelVelocity::Fixed(NonZeroU16::new(0x1234).unwrap()),
         NoteCents::Drop,
     );
     for level in [-90.0, -30.0, 0.0] {
@@ -83,6 +86,18 @@ fn a_fixed_velocity_is_sent_whatever_the_level() {
         };
         assert_eq!(velocity, NoteVelocity::new(0x1234));
     }
+}
+
+// A fixed velocity of the smallest legal value is sent as velocity 1, never 0
+// (a velocity of 0 is a silent Note On).
+#[test]
+fn the_smallest_fixed_velocity_is_one() {
+    let mapping = NoteMapping::new(LevelVelocity::Fixed(NonZeroU16::MIN), NoteCents::Drop);
+    let e = events(&[note(0.0, 0, SECOND, 0.0)], mapping);
+    let Voice2::NoteOn { velocity, .. } = voice(&e[0]).1 else {
+        panic!("first is a Note On");
+    };
+    assert_eq!(velocity, NoteVelocity::new(1));
 }
 
 #[test]
@@ -115,7 +130,7 @@ fn the_level_maps_floor_is_the_minimum_velocity_and_its_ceiling_the_maximum() {
 
 fn bend_of(cents: f64, range: PitchBendSensitivity) -> BendValue {
     let mapping = NoteMapping::new(
-        LevelVelocity::Fixed(NoteVelocity::CENTER),
+        LevelVelocity::Fixed(CENTER),
         NoteCents::PerNotePitchBend(range),
     );
     events(&[note(cents, 0, SECOND, -10.0)], mapping)
@@ -149,7 +164,7 @@ fn a_range_of_nothing_bends_nothing() {
 #[test]
 fn a_bend_precedes_its_note_on_at_the_same_beat_and_the_range_is_sent_once() {
     let mapping = NoteMapping::new(
-        LevelVelocity::Fixed(NoteVelocity::CENTER),
+        LevelVelocity::Fixed(CENTER),
         NoteCents::PerNotePitchBend(range(50)),
     );
     let e = events(
@@ -220,7 +235,7 @@ fn no_input_gives_no_events() {
     let map = map();
     let mut view = map.view(SampleRate::SR_48K);
     let bent = NoteMapping::new(
-        LevelVelocity::Fixed(NoteVelocity::CENTER),
+        LevelVelocity::Fixed(CENTER),
         NoteCents::PerNotePitchBend(range(50)),
     );
     assert!(clip_from_notes(&[], &mut view, bent).is_empty());
