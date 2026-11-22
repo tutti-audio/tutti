@@ -18,8 +18,8 @@ use crate::{
 };
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
-use tutti_graph::Offset;
 use tutti_platform::Instant;
+use tutti_plugin_types::Offset;
 #[cfg(test)]
 use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{

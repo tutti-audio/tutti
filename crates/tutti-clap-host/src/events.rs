@@ -4650,7 +4650,7 @@ mod tests {
             let want: Vec<(u32, f64)> = q
                 .points
                 .iter()
-                .map(|p| (p.sample_offset.get() as u32, p.value.get()))
+                .map(|p| (p.sample_offset.get(), p.value.get()))
                 .collect();
             assert_eq!(got, want, "parameter {id}");
         }

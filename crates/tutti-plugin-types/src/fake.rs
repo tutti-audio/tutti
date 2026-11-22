@@ -1084,6 +1084,26 @@ impl From<&FakeLoaded> for Layout {
     }
 }
 
+/// The offset of frame `frames` in a block of any length a test uses: a
+/// parameter point's place, for a test that builds points without a block.
+///
+/// # Panics
+///
+/// When `frames` is negative or past a million.
+#[must_use]
+pub fn at_frame(frames: impl TryInto<usize, Error: std::fmt::Debug>) -> Offset {
+    Offset::of(
+        Samples::new(frames.try_into().expect("a frame count")),
+        Samples::new(1 << 20),
+    )
+}
+
+/// `value` as a parameter's normalized value, clamped onto `0..=1`.
+#[must_use]
+pub fn unit_value(value: f64) -> Normalized {
+    Normalized::clamped(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1110,24 +1130,4 @@ mod tests {
         assert_eq!(loaded.parameter(main, meter), None);
         assert_eq!(loaded.parameter(main, open), Some(half));
     }
-}
-
-/// The offset of frame `frames` in a block of any length a test uses: a
-/// parameter point's place, for a test that builds points without a block.
-///
-/// # Panics
-///
-/// When `frames` is negative or past a million.
-#[must_use]
-pub fn at_frame(frames: impl TryInto<usize, Error: std::fmt::Debug>) -> Offset {
-    Offset::of(
-        Samples::new(frames.try_into().expect("a frame count")),
-        Samples::new(1 << 20),
-    )
-}
-
-/// `value` as a parameter's normalized value, clamped onto `0..=1`.
-#[must_use]
-pub fn unit_value(value: f64) -> Normalized {
-    Normalized::clamped(value)
 }

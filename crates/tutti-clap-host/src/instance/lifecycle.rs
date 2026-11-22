@@ -512,11 +512,7 @@ mod tests {
             }
         }
         for (q, got) in chunk.queues.iter().zip(&per) {
-            let want: Vec<u32> = q
-                .points
-                .iter()
-                .map(|p| p.sample_offset.get() as u32)
-                .collect();
+            let want: Vec<u32> = q.points.iter().map(|p| p.sample_offset.get()).collect();
             assert_eq!(got, &want);
         }
     }
