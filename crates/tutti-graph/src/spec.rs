@@ -16,7 +16,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::bus_edge::{BusFeed, NodeBus};
-use crate::gain::EdgeGain;
+use crate::gain::{EdgeFade, EdgeGain};
 use crate::{ChannelFeed, LatencyGraph, PortFeed};
 use crate::{Edge, EdgeId, InputPort, PortSink, PortSource};
 use crate::{Invalid, Valid};
@@ -183,7 +183,7 @@ pub struct GraphSpec {
     ///
     /// The entry is structural: adding or removing one recompiles, because a
     /// one-edge sink with an entry needs an `Op::Sum` of one addend where a
-    /// plain one aliases. Changing the lane's base or range does not
+    /// plain one aliases. Changing the lane's base, range or fade does not
     /// ([`Editor::set_edge_gain`](crate::Editor::set_edge_gain)): they are
     /// values the editor holds. An entry
     /// whose edge does not exist is refused by [`validate`](Self::validate);
@@ -321,37 +321,31 @@ impl GraphSpec {
     }
 
     /// This spec with every declick fade ended where it stands, or `None`
-    /// when no edge fades: an edge fading `Out` is gone and one fading `In` is
-    /// at its weight (a fork starts steady, as it does in every mode: it
-    /// hears the state, not a toggle).
+    /// when no edge fades out: an edge fading `Out` (by `fade`) is gone, and
+    /// one fading `In` is at its weight, which the spec does not hold (a fork
+    /// starts steady, as it does in every mode: it hears the state, not a
+    /// toggle).
     #[must_use]
-    pub(crate) fn settled(&self) -> Option<Self> {
-        use crate::gain::EdgeFade;
-        if self.gains.values().all(|g| g.fade == EdgeFade::None) {
+    pub(crate) fn settled(&self, fade: impl Fn(EdgeId) -> EdgeFade) -> Option<Self> {
+        let leaving: Vec<EdgeId> = self
+            .gains
+            .keys()
+            .copied()
+            .filter(|&id| fade(id) == EdgeFade::Out)
+            .collect();
+        if leaving.is_empty() {
             return None;
         }
         let mut spec = self.clone();
-        for (id, g) in &self.gains {
-            match g.fade {
-                EdgeFade::None => {}
-                EdgeFade::Out => match (id.sink, id.from) {
-                    (PortSink::Port(at), from) => {
-                        spec.disconnect(at, from);
-                    }
-                    (PortSink::Output(c), Edge::Direct(s)) => {
-                        spec.disconnect_output(usize::from(c), s);
-                    }
-                    (PortSink::Output(_), Edge::Feedback(_)) => {}
-                },
-                EdgeFade::In => {
-                    spec.set_edge_gain(
-                        *id,
-                        crate::gain::EdgeGain {
-                            fade: EdgeFade::None,
-                            ..*g
-                        },
-                    );
+        for id in leaving {
+            match (id.sink, id.from) {
+                (PortSink::Port(at), from) => {
+                    spec.disconnect(at, from);
                 }
+                (PortSink::Output(c), Edge::Direct(s)) => {
+                    spec.disconnect_output(usize::from(c), s);
+                }
+                (PortSink::Output(_), Edge::Feedback(_)) => {}
             }
         }
         Some(spec)
@@ -528,10 +522,11 @@ impl GraphSpec {
         }
     }
 
-    /// Whether `self` and `other` compile to the same plan, by value: equal
-    /// but for the declick fades of gain entries, which are controls.
+    /// Whether `self` and `other` compile to the same plan: every field is
+    /// structure, and equal.
     pub(crate) fn same_plan(&self, other: &Self) -> bool {
-        // Destructured, so a field added later is compared or named here.
+        // Every field named and none skipped, so a field added later fails to
+        // compile here until it is decided to be structure.
         let Self {
             topology,
             events,
@@ -553,11 +548,7 @@ impl GraphSpec {
             && *generations == other.generations
             && *required_resolution == other.required_resolution
             && *params == other.params
-            // An entry and its source are structural, its fade is not.
-            && gains
-                .iter()
-                .map(|(id, g)| (id, g.source))
-                .eq(other.gains.iter().map(|(id, g)| (id, g.source)))
+            && *gains == other.gains
     }
 
     /// Checks everything that does not need the nodes' [`Shape`](crate::Shape)s.
