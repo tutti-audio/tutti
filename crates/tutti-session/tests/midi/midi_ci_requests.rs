@@ -87,7 +87,7 @@ impl Wire {
         let now = self.start + Duration::from_millis(self.ms);
         let _ = update_at(&mut self.s, now);
         self.peer.answer(&self.fake, now);
-        blocks(&self.s, 1);
+        blocks(&mut self.s, 1);
     }
 
     /// What `request` resolved to, or `None` while it is pending: polled without
@@ -142,6 +142,57 @@ fn everything() -> ReportRequest {
             notes: NoteData::NOTES,
         },
     )
+}
+
+impl Wire {
+    /// Awaits `request` while a thread plays the device and nothing updates the
+    /// session: the answer reaches the future from the session's MIDI-CI task.
+    /// The bound only guards a hang.
+    fn awaited<F: Future>(&mut self, request: F) -> F::Output {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let (fake, now) = (
+            self.fake.clone(),
+            self.start + Duration::from_millis(self.ms),
+        );
+        let mut peer = std::mem::replace(&mut self.peer, MpePeer::new());
+        let stop = Arc::new(AtomicBool::new(false));
+        let executor = tutti_platform::Executor::new();
+        let device = {
+            let stop = Arc::clone(&stop);
+            executor
+                .spawn_dedicated("device", None, async move {
+                    while !stop.load(Ordering::Relaxed) {
+                        peer.answer(&fake, now);
+                        std::thread::yield_now();
+                    }
+                    peer
+                })
+                .expect("a thread")
+        };
+        let out = tutti_fixtures::block_on_within(request, Duration::from_secs(120));
+        stop.store(true, Ordering::Relaxed);
+        self.peer = tutti_platform::join(device).expect("the device ended");
+        out.expect("the request resolved with no update")
+    }
+}
+
+/// **A future resolves when the device answers, with no update**: the
+/// session's MIDI-CI task reads the Enabled Report and wakes the switch with
+/// the state it reports.
+#[test]
+fn a_switch_resolves_when_the_device_answers_with_no_update() {
+    let mut wire = Wire::new(Reply::Answer, Reply::Answer);
+    let request = wire.profile().enable(four());
+    assert_eq!(wire.awaited(request), Ok(ProfileState::Enabled));
+}
+
+/// As a switch, a report resolves at the peer's End with no update.
+#[test]
+fn a_report_resolves_when_the_device_answers_with_no_update() {
+    let mut wire = Wire::new(Reply::Answer, Reply::Answer);
+    let request = wire.reporter().request(everything());
+    assert_eq!(wire.awaited(request), Ok(()));
 }
 
 /// The peer's Enabled Report resolves the switch with the state it reports, and

@@ -27,7 +27,7 @@ fn the_wire_tag_is_derived_from_the_payload() {
     let payloads = [
         Payload::NoteOn(NoteOn::new(1, 60, 0.5, 7)),
         Payload::NoteOff(NoteOff::new(1, 60, 0.5, 7)),
-        Payload::Data(Data::new(0, &[0x90, 60, 100]).unwrap()),
+        Payload::Data(Data::new(0, [0x90, 60, 100]).unwrap()),
         Payload::PolyPressure(PolyPressure::new(1, 60, 0.5, 7)),
         Payload::ExpressionValue(ExpressionValue::new(2, 7, 0.5)),
         Payload::ExpressionText(ExpressionText {
@@ -237,27 +237,19 @@ fn each_kind_is_the_sdk_ordinal() {
     );
 }
 
-/// `Data::try_from_iter` holds what `Data::new` holds and refuses what it
-/// refuses, from any iterator: 16 bytes fit, a 17th does not, and an iterator
-/// with no end is refused rather than read to the end.
+/// `Data::new` holds up to 16 bytes and refuses a 17th; an iterator with no
+/// end is refused rather than read to the end.
 #[test]
-fn data_from_an_iterator_holds_what_new_holds() {
+fn data_holds_sixteen_bytes_and_refuses_a_seventeenth() {
     for n in 0..=16u8 {
-        let bytes: Vec<u8> = (0..n).collect();
-        let from_iter = Data::try_from_iter(5, bytes.iter().copied()).expect("fits");
-        let from_slice = Data::new(5, &bytes).expect("fits");
-        assert_eq!(from_iter.payload(), from_slice.payload());
+        let data = Data::new(5, 0..n).expect("fits");
         assert_eq!(
-            (from_iter.size(), from_iter.data_type(), from_iter.payload()),
-            (
-                from_slice.size(),
-                from_slice.data_type(),
-                from_slice.payload()
-            )
+            (data.size(), data.data_type(), data.payload()),
+            (u32::from(n), 5, &(0..n).collect::<Vec<u8>>()[..])
         );
     }
-    assert!(Data::try_from_iter(0, 0..17u8).is_none());
-    assert!(Data::try_from_iter(0, std::iter::repeat(1)).is_none());
+    assert!(Data::new(0, 0..17u8).is_none());
+    assert!(Data::new(0, std::iter::repeat(1)).is_none());
 }
 
 /// **A plugin's data event never makes the host claim more than the inline

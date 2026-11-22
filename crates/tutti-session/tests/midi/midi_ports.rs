@@ -79,7 +79,7 @@ fn changed(events: &[SessionEvent], id: tutti_session::PeerResourceId) -> Vec<Re
         .collect()
 }
 
-fn roll(s: &Session, frames: usize) {
+fn roll(s: &mut Session, frames: usize) {
     play(s);
     blocks(s, frames.div_ceil(512));
 }
@@ -331,12 +331,12 @@ fn an_unrouted_port_that_is_removed_leaves_the_graph() {
     for _ in 0..3 {
         let port = input(&mut s, &keys);
         let _ = s.update();
-        blocks(&s, 1);
+        blocks(&mut s, 1);
         nodes.push(port.node());
         drop(port);
         let _ = s.update();
         assert!(s.graph_ref().contains(*nodes.last().unwrap()));
-        blocks(&s, 2);
+        blocks(&mut s, 2);
         let _ = s.update();
     }
     for node in nodes {
@@ -406,7 +406,7 @@ fn a_dropped_output_sends_what_its_node_held() {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });
-    roll(&s, 4_096);
+    roll(&mut s, 4_096);
     assert!(
         fake.take_sent(EndpointId::from_raw(10)).is_empty(),
         "nothing is drained before an update"
@@ -439,7 +439,7 @@ fn a_note_off_sent_just_before_the_last_handle_drops_reaches_the_device() {
     drop(out);
     let _ = s.update();
     assert!(s.graph_ref().contains(node), "no block has rendered it yet");
-    blocks(&s, 3);
+    blocks(&mut s, 3);
     let _ = s.update();
     assert!(!s.graph_ref().contains(node), "the output retired");
     let sent = fake.take_sent(EndpointId::from_raw(10));
@@ -487,7 +487,7 @@ fn a_device_opens_again_while_its_dropped_output_is_retiring() {
     let (mut s, fake, out, mut keys, synth) = retiring_rig();
     keys.note_off(Stamp::NextBlock, MidiChannel::FIRST, NoteNumber::of(60))
         .expect("queued");
-    blocks(&s, 1);
+    blocks(&mut s, 1);
     let node = out.node();
     drop(out);
     let _ = s.update();
@@ -515,7 +515,7 @@ fn reopening_a_device_loses_what_its_retiring_output_had_not_rendered() {
         .expect("queued");
     drop(out);
     let _again = s.open_output(synth).expect("opens at once");
-    blocks(&s, 3);
+    blocks(&mut s, 3);
     let _ = s.update();
     let sent = fake.take_sent(EndpointId::from_raw(10));
     assert!(
@@ -540,7 +540,7 @@ fn a_note_on_sent_after_the_drop_is_ended_before_the_device_closes() {
         tutti_ump::NoteVelocity::new(MF),
     )
     .expect("queued");
-    blocks(&s, 3);
+    blocks(&mut s, 3);
     let _ = s.update();
     assert!(!s.graph_ref().contains(node), "the output retired");
     let sent = fake.take_sent(EndpointId::from_raw(10));
@@ -562,9 +562,9 @@ fn an_event_queued_in_the_update_of_the_drop_reaches_the_device() {
     keys.note_off(Stamp::NextBlock, MidiChannel::FIRST, NoteNumber::of(61))
         .expect("queued");
     drop(out);
-    blocks(&s, 1);
+    blocks(&mut s, 1);
     let _ = s.update();
-    blocks(&s, 3);
+    blocks(&mut s, 3);
     let _ = s.update();
     assert!(!s.graph_ref().contains(node), "the output retired");
     let sent = fake.take_sent(EndpointId::from_raw(10));
@@ -604,7 +604,7 @@ fn a_retiring_output_lets_go_of_a_device_that_unplugs() {
     plug(&fake, 10, "Synth", PortDirection::Output);
     let _ = s.update();
     assert!(fake.connected_outputs().is_empty(), "it did not reopen");
-    blocks(&s, 3);
+    blocks(&mut s, 3);
     let _ = s.update();
     assert!(!s.graph_ref().contains(node), "it ended");
 }
@@ -637,9 +637,9 @@ fn a_retiring_output_survives_a_re_rate() {
     s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     let _ = s.update();
     // The re-prepare's second half lands on a render, then the commit.
-    blocks(&s, 8);
+    blocks(&mut s, 8);
     let _ = s.update();
-    blocks(&s, 4);
+    blocks(&mut s, 4);
     let _ = s.update();
     assert!(!s.graph_ref().contains(node), "the output ended");
     assert!(fake.connected_outputs().is_empty(), "the device closed");
@@ -705,7 +705,7 @@ fn a_port_closes_when_its_last_handle_is_dropped() {
         "the OS peer no longer sees the subscription"
     );
     // The node leaves once it has released what its device held: after a block.
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     let _ = s.update();
     assert!(!s.graph_ref().contains(node), "the input node went");
 }
@@ -728,7 +728,7 @@ fn an_output_port_closes_when_its_last_handle_is_dropped() {
         s.graph_ref().contains(node),
         "the node stays until the graph has rendered past the drop"
     );
-    blocks(&s, 3);
+    blocks(&mut s, 3);
     let _ = s.update();
     assert!(!s.graph_ref().contains(node), "the output node went");
     unplug(&fake, 10);
@@ -743,7 +743,7 @@ fn an_output_port_closes_when_its_last_handle_is_dropped() {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });
-    roll(&s, 4_096);
+    roll(&mut s, 4_096);
     let _ = s.update();
     assert!(
         fake.take_sent(EndpointId::from_raw(10)).is_empty(),
@@ -784,9 +784,9 @@ fn the_same_handle_hears_a_device_that_returns() {
         .expect("routes");
     let keys = device(&mut s, "Keys");
     let port = input(&mut s, &keys);
-    roll(&s, 1_024);
+    roll(&mut s, 1_024);
     assert!(fake.send_input(EndpointId::from_raw(1), key(0, 60), Instant::now()));
-    roll(&s, 4_096);
+    roll(&mut s, 4_096);
     assert_eq!(note_ons(&seen), [60]);
 
     unplug(&fake, 1);
@@ -796,7 +796,7 @@ fn the_same_handle_hears_a_device_that_returns() {
     let _ = s.update();
     assert_eq!(port.presence(), Presence::Live);
     assert!(fake.send_input(EndpointId::from_raw(1), key(0, 62), Instant::now()));
-    roll(&s, 4_096);
+    roll(&mut s, 4_096);
     assert_eq!(note_ons(&seen), [60, 62], "the returned device is heard");
 }
 
@@ -861,7 +861,7 @@ fn held_notes_are_released_when_the_port_is_dropped() {
         .expect("routes");
     let keys = device(&mut s, "Keys");
     let port = input(&mut s, &keys);
-    roll(&s, 1_024);
+    roll(&mut s, 1_024);
     assert!(fake.send_input(EndpointId::from_raw(1), key(2, 60), Instant::now()));
     let pedal = midi::m1_cc(MidiChannel::of(2), CCNumber::SUSTAIN, U7::of(127));
     assert!(fake.send_input(EndpointId::from_raw(1), pedal, Instant::now()));
@@ -870,7 +870,7 @@ fn held_notes_are_released_when_the_port_is_dropped() {
         0xC000_0000,
     );
     assert!(fake.send_input(EndpointId::from_raw(1), bend, Instant::now()));
-    roll(&s, 8_192);
+    roll(&mut s, 8_192);
     assert_eq!(note_ons(&seen), [60]);
     assert!(note_offs(&seen).is_empty(), "the key is still down");
     assert_eq!(pedal_ups(&seen), 0, "the pedal is still down");
@@ -883,7 +883,7 @@ fn held_notes_are_released_when_the_port_is_dropped() {
         s.graph_ref().contains(node),
         "the node stays until its release has gone out"
     );
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     assert_eq!(
         note_offs(&seen),
         [60],
@@ -910,15 +910,15 @@ fn held_notes_are_released_when_the_device_is_unplugged() {
     let keys = device(&mut s, "Keys");
     let port = input(&mut s, &keys);
     let node = port.node();
-    roll(&s, 1_024);
+    roll(&mut s, 1_024);
     hold(&fake, 1, 0, 64);
-    roll(&s, 8_192);
+    roll(&mut s, 8_192);
     assert_eq!(note_ons(&seen), [64]);
     assert_eq!((pedal_ups(&seen), centred_bends(&seen)), (0, 0));
 
     unplug(&fake, 1);
     let _ = s.update();
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     assert_eq!(note_offs(&seen), [64]);
     assert_eq!(pedal_ups(&seen), 1, "the pedal");
     assert_eq!(centred_bends(&seen), 1, "the bend");
@@ -929,7 +929,7 @@ fn held_notes_are_released_when_the_device_is_unplugged() {
 
     plug(&fake, 1, "Keys", PortDirection::Input);
     let _ = s.update();
-    blocks(&s, 4);
+    blocks(&mut s, 4);
     assert_eq!(note_offs(&seen), [64], "nothing is released twice");
     assert_eq!((pedal_ups(&seen), centred_bends(&seen)), (1, 1));
     assert_eq!(port.presence(), Presence::Live);
@@ -956,7 +956,7 @@ fn every_input_port_has_its_own_input_node() {
         .map(|d| s.open_input(d.clone()).expect("opens"))
         .collect();
     let _ = s.update();
-    roll(&s, 1_024);
+    roll(&mut s, 1_024);
     assert!(ports.iter().all(|p| p.presence() == Presence::Live));
     let nodes: BTreeSet<NodeKey> = ports.iter().map(|p| p.node()).collect();
     assert_eq!(nodes.len(), 10, "one node each");
@@ -967,7 +967,7 @@ fn every_input_port_has_its_own_input_node() {
             Instant::now()
         ));
     }
-    roll(&s, 8_192);
+    roll(&mut s, 8_192);
     let mut heard = note_ons(&seen);
     heard.sort_unstable();
     assert_eq!(heard, (40..50).collect::<Vec<u8>>(), "each device once");
@@ -1051,7 +1051,7 @@ fn an_output_port_sends_what_its_node_is_fed_to_the_device() {
         .set_sources(EventInPort::new(out.node(), 0), [clip.events_out()])
         .expect("the port's node takes events");
     let _ = s.update();
-    roll(&s, 1_024);
+    roll(&mut s, 1_024);
     let _ = s.update();
     let sent = fake.take_sent(EndpointId::from_raw(10));
     assert!(
@@ -1081,7 +1081,7 @@ fn an_output_port_follows_its_device_through_an_unplug() {
             ..tutti_midi_runtime::SyncMessages::OFF
         });
     let _ = s.update();
-    roll(&s, 4_096);
+    roll(&mut s, 4_096);
     let _ = s.update();
     assert!(
         !fake.take_sent(EndpointId::from_raw(10)).is_empty(),
@@ -1093,7 +1093,7 @@ fn an_output_port_follows_its_device_through_an_unplug() {
     assert_eq!(changed(&events, out.id()), [ResourceFact::Presence]);
     assert_eq!(out.presence(), Presence::Lost(PortCause::Unplugged));
     let before = out.losses().refused;
-    blocks(&s, 8);
+    blocks(&mut s, 8);
     let _ = s.update();
     assert!(
         out.losses().refused > before,
@@ -1104,7 +1104,7 @@ fn an_output_port_follows_its_device_through_an_unplug() {
     let _ = s.update();
     assert_eq!(out.presence(), Presence::Live);
     let _ = fake.take_sent(EndpointId::from_raw(10));
-    blocks(&s, 8);
+    blocks(&mut s, 8);
     let _ = s.update();
     assert!(
         !fake.take_sent(EndpointId::from_raw(10)).is_empty(),
@@ -1266,7 +1266,7 @@ fn closing_an_output_port_stops_its_active_sensing() {
     drop(out);
     let _ = s.update();
     // The device closes once the graph has rendered past the drop.
-    blocks(&s, 3);
+    blocks(&mut s, 3);
     let _ = s.update();
     let _ = sent_by_the_port(&fake);
     let _ = sent_by(&fake, WITNESS);
@@ -1289,10 +1289,10 @@ fn a_retiring_output_ends_a_held_note_on_a_midi1_device_with_a_midi1_off() {
         tutti_ump::NoteVelocity::new(MF),
     )
     .expect("queued");
-    blocks(&s, 1);
+    blocks(&mut s, 1);
     drop(out);
     let _ = s.update();
-    blocks(&s, 3);
+    blocks(&mut s, 3);
     let _ = s.update();
     let sent = sent_by_the_port(&fake);
     let off = sent
@@ -1365,7 +1365,7 @@ fn an_output_port_counts_what_its_device_refused() {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });
-    roll(&s, 4_096);
+    roll(&mut s, 4_096);
     let _ = s.update();
     let losses = out.losses();
     assert!(losses.refused > 0, "{losses:?}");
@@ -1389,7 +1389,7 @@ fn an_output_port_counts_the_events_its_tap_had_no_room_for() {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });
-    roll(&s, 1_100_000);
+    roll(&mut s, 1_100_000);
     let _ = s.update();
     assert!(out.losses().lost > 0, "{:?}", out.losses());
 }
@@ -1419,17 +1419,17 @@ fn the_sessions_mpe_mode_reaches_a_ports_input_node() {
         .expect("routes");
     let keys = device(&mut s, "Keys");
     let _port = input(&mut s, &keys);
-    roll(&s, 1_024);
+    roll(&mut s, 1_024);
     assert_eq!(registered(&seen), 0);
 
     s.set(s.mpe().to(midi::lower_zone(3))).unwrap();
     let _ = s.update();
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     assert_eq!(registered(&seen), 7);
 
     s.set(s.mpe().to(midi::lower_zone(3))).unwrap();
     let _ = s.update();
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     assert_eq!(registered(&seen), 7, "the same mode: nothing sent");
 }
 
@@ -1467,9 +1467,9 @@ fn an_open_is_ready_on_the_first_poll_and_its_apply_installs_a_live_input() {
     let _ = s.update();
     assert_eq!(port.presence(), Presence::Live);
 
-    roll(&s, 1_024);
+    roll(&mut s, 1_024);
     assert!(fake.send_input(EndpointId::from_raw(1), key(0, 60), Instant::now()));
-    roll(&s, 4_096);
+    roll(&mut s, 4_096);
     assert_eq!(note_ons(&seen), [60], "the installed port hears its device");
 }
 

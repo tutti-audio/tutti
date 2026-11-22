@@ -24,7 +24,7 @@
 //! use tutti::nodes::{LfoConfig, LfoNode};
 //! use tutti::{ChannelLayout, Hz, InterleavedMut, Root, SampleRate, Session};
 //!
-//! let mut session = Session::new(SampleRate::SR_48K).expect("a session builds");
+//! let mut session = Session::builder().sample_rate(SampleRate::SR_48K).build().expect("a session builds");
 //!
 //! // A 440 Hz sine into the session's output. The node's own controls come back
 //! // with its key; they set its parameters live.
@@ -237,7 +237,7 @@ pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
 pub use tutti_session::{DirectionTarget, LoopingTarget, SpeedTarget, WindowTarget};
 #[cfg(all(feature = "session", feature = "capture"))]
 pub use tutti_session::{
-    Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeFile, TakeTarget,
+    Input, InputConfig, Punch, Record, Recorded, Take, TakeError, TakeEvent, TakeFile, TakeTarget,
 };
 #[cfg(all(feature = "session", feature = "midi", feature = "analyze"))]
 pub use tutti_session::{
@@ -536,12 +536,12 @@ pub mod session {
     pub use tutti_session::{
         BackgroundWork, BlockConfig, BusSink, BusWire, ChannelWire, Committed, Connection,
         DeclarationError, Disconnection, EventEdge, EventTapPort, EventWire, Fanin, Feeder, Graph,
-        HeardTapOpen, Inlet, InletError, LIVE_MAX_BLOCK, MainBusWire, MainSink, Meters, NodeSlots,
-        NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer,
-        PeerError, PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer,
-        Reclaims, Removal, RemoveError, Reopened, ReplaceRefused, Replacement, Resource,
-        ResourceFact, RootDeclaration, RootReader, RootTopologyStatus, SessionHeardTapError,
-        SessionNode, SetRateError, SetSources, SetTempoError, Taps, Weighted, Wire, root_width,
+        Inlet, InletError, LIVE_MAX_BLOCK, MainBusWire, MainSink, Meters, NodeSlots, NotReopened,
+        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError,
+        PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
+        Removal, RemoveError, Reopened, ReplaceRefused, Replacement, Resource, ResourceFact,
+        RootDeclaration, RootReader, RootTopologyStatus, SessionHeardTapError, SessionNode,
+        SetRateError, SetSources, SetTempoError, Taps, Weighted, Wire, root_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,

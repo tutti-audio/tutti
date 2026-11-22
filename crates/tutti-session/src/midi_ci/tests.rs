@@ -137,7 +137,7 @@ fn device_id() -> MidiDeviceId {
     let session = tutti_midi_hardware::MidiSession::open_over(
         &executor,
         backend,
-        inlets,
+        tutti_midi_hardware::HardwareMidiInputs::new(inlets),
         tutti_midi_hardware::MidiHardwareConfig::new(),
     )
     .expect("opens over the fake OS");

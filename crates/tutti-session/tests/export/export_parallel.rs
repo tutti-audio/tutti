@@ -142,7 +142,7 @@ fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Rendered>, usize) {
         .clock(ExportClock::frozen())
         .tail(BounceTail::None);
     for &stem in stems {
-        bounce = bounce.stem_with(Stem::buffers(named[stem]));
+        bounce = bounce.stem_with(Stem::new(named[stem]));
     }
     let (master, stems) = bounced(&mut session, bounce).unwrap().into_parts();
     let targets = std::iter::once(master)

@@ -64,7 +64,7 @@ fn sounding() -> (Session, tutti_session::Key<MidiClipNode>, Seen) {
     let clip = s.midi().clip(synth).expect("the target's clip");
     let _ = s.update();
     play(&s);
-    blocks(&s, 1);
+    blocks(&mut s, 1);
     assert_eq!(note_ons(&seen), vec![(0, 60)]);
     (s, clip, seen)
 }
@@ -93,7 +93,7 @@ fn a_clip_written_through_its_target_plays_from_the_next_block() {
     .unwrap();
     let _ = s.update();
     play(&s);
-    blocks(&s, 18);
+    blocks(&mut s, 18);
     assert_eq!(note_ons(&seen), vec![(8_000, 64)]);
 }
 
@@ -122,13 +122,13 @@ fn writing_an_equal_clip_cuts_no_note_and_a_different_one_does() {
     again.reverse();
     s.set(clip.events().to(clip_of(again))).unwrap();
     let _ = s.update();
-    blocks(&s, 1);
+    blocks(&mut s, 1);
     assert_eq!(note_offs(&seen), vec![], "the same clip: nothing cut");
 
     s.set(clip.events().modify(|_| ClipEvents::default().into()))
         .unwrap();
     let _ = s.update();
-    blocks(&s, 1);
+    blocks(&mut s, 1);
     assert_eq!(note_offs(&seen), vec![(1_024, 60)], "a new clip ends it");
 }
 
@@ -137,13 +137,13 @@ fn writing_an_equal_clip_cuts_no_note_and_a_different_one_does() {
 /// the node plays.
 #[test]
 fn a_clip_edit_sees_the_clip_in_force() {
-    let (s, clip, seen) = sounding();
+    let (mut s, clip, seen) = sounding();
     s.set(clip.events().modify(|now| {
         assert_eq!(now.len(), 2, "a note on and its off");
         Arc::clone(now)
     }))
     .unwrap();
-    blocks(&s, 1);
+    blocks(&mut s, 1);
     assert_eq!(note_offs(&seen), vec![]);
 }
 
@@ -235,7 +235,7 @@ fn harmony_session() -> (
 #[test]
 fn harmony_changes_written_through_the_target_reach_the_node() {
     let (mut s, harmony, seen) = harmony_session();
-    blocks(&s, 1);
+    blocks(&mut s, 1);
     assert_eq!(seen.lock().unwrap().to_vec(), vec![]);
     s.set(
         harmony
@@ -244,12 +244,12 @@ fn harmony_changes_written_through_the_target_reach_the_node() {
     )
     .unwrap();
     let _ = s.update();
-    blocks(&s, 1);
+    blocks(&mut s, 1);
     assert_eq!(
         seen.lock().unwrap().to_vec(),
         vec![(512, C), (512, C_MAJOR)]
     );
-    blocks(&s, (BEAT / 512) as usize);
+    blocks(&mut s, (BEAT / 512) as usize);
     let heard = seen.lock().unwrap().to_vec();
     assert_eq!(heard[2], (BEAT, G), "the change on its beat");
     assert_eq!(heard.len(), 3);
@@ -263,17 +263,17 @@ fn writing_equal_harmony_changes_restates_nothing_and_different_ones_do() {
     let in_force = || changes([at(0.0, C), at(0.0, C_MAJOR)]);
     s.set(harmony.changes().to(in_force())).unwrap();
     let _ = s.update();
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     assert_eq!(seen.lock().unwrap().len(), 2);
 
     s.set(harmony.changes().to(in_force())).unwrap();
     let _ = s.update();
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     assert_eq!(seen.lock().unwrap().len(), 2, "the same changes: nothing");
 
     s.set(harmony.changes().to(changes([at(0.0, G)]))).unwrap();
     let _ = s.update();
-    blocks(&s, 1);
+    blocks(&mut s, 1);
     assert_eq!(seen.lock().unwrap()[2..], [(2_048, G)]);
     assert_eq!(s.get(harmony.changes()).unwrap().as_slice(), [at(0.0, G)]);
 }
@@ -330,7 +330,7 @@ fn blocks_adopting_written_values_do_not_allocate() {
         .unwrap();
     let _ = s.update();
     play(&s);
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     let before = (
         notes.load(Ordering::Relaxed),
         chords.load(Ordering::Relaxed),
@@ -389,7 +389,7 @@ fn a_write_after_a_clip_is_replaced_reaches_the_new_node() {
     s.set(clip.events().to(written)).unwrap();
     let _ = s.update();
     play(&s);
-    blocks(&s, 18);
+    blocks(&mut s, 18);
     assert_eq!(
         note_ons(&seen),
         vec![(8_000, 64)],
@@ -401,10 +401,10 @@ fn a_write_after_a_clip_is_replaced_reaches_the_new_node() {
 /// pointer or by value: no note is cut either way.
 #[test]
 fn writing_the_clip_in_force_by_pointer_cuts_no_note() {
-    let (s, clip, seen) = sounding();
+    let (mut s, clip, seen) = sounding();
     let held = s.get(clip.events()).unwrap();
     s.set(clip.events().to(Arc::clone(&held))).unwrap();
-    blocks(&s, 1);
+    blocks(&mut s, 1);
     assert_eq!(note_offs(&seen), vec![]);
 }
 
@@ -424,14 +424,14 @@ fn a_clip_written_is_pending_until_the_update_publishes_it() {
 
     s.set(clip.events().to(Arc::clone(&written))).unwrap();
     assert!(Arc::ptr_eq(&s.get(clip.events()).unwrap(), &written));
-    blocks(&s, 1);
+    blocks(&mut s, 1);
     assert_eq!(
         note_offs(&seen),
         vec![],
         "the node still plays the old clip before the update"
     );
     let _ = s.update();
-    blocks(&s, 1);
+    blocks(&mut s, 1);
     assert_eq!(
         note_offs(&seen),
         vec![(1_024, 60)],

@@ -223,7 +223,7 @@ impl MidiEncoder {
             Message::Sysex7(_, packet) => {
                 if let Some(data) = packet
                     .framed()
-                    .and_then(|framed| Data::try_from_iter(K_DATA_TYPE_MIDI_SYSEX, framed))
+                    .and_then(|framed| Data::new(K_DATA_TYPE_MIDI_SYSEX, framed))
                 {
                     self.out.push(Event::at(offset, Payload::Data(data)));
                 }
