@@ -5,7 +5,7 @@ use std::ffi::c_void;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use tutti_plugin_types::{MAX_STATE_BYTES, ffi_guard};
 
-use parking_lot::Mutex;
+use tutti_rt::Mutex;
 use vst3::Steinberg::{
     IBStream,
     IBStream_::IStreamSeekMode_::{kIBSeekCur, kIBSeekEnd, kIBSeekSet},

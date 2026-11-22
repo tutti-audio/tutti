@@ -14,10 +14,10 @@
 )]
 
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
 use tutti_fixtures::main_thread;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use clap_sys::events::{
     CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE, clap_event_header, clap_event_param_value,
@@ -46,10 +46,6 @@ fn probe_path() -> &'static str {
 }
 
 static PLUGIN_LOCK: Mutex<()> = Mutex::new(());
-
-fn lock() -> MutexGuard<'static, ()> {
-    PLUGIN_LOCK.lock_recover()
-}
 
 /// `RenderMode::TagOnly`: every output sample is a nonzero per-slot tag.
 const RENDER_TAG_ONLY: u32 = 2;
@@ -210,7 +206,7 @@ fn render(
 /// it does not hold rather than loading another plugin.
 #[test]
 fn a_bundle_selects_by_id_and_refuses_an_unknown_one() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     let bundle = Bundle::open(Path::new(probe_path()), None).expect("opens");
     assert!(
         bundle
@@ -227,7 +223,7 @@ fn a_bundle_selects_by_id_and_refuses_an_unknown_one() {
 /// `Sync`.
 #[test]
 fn the_main_thread_half_reads_the_plugins_extensions() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     let plugin = load(Arc::default());
     assert_eq!(
         plugin.latency(main_thread()),
@@ -247,7 +243,7 @@ fn the_main_thread_half_reads_the_plugins_extensions() {
 /// activated again, and the half belongs to the plugin that made it.
 #[test]
 fn activation_hands_out_one_audio_half_and_refuses_a_second_activation() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     let mut plugin = load(Arc::default());
     assert!(plugin.audio_side().is_none(), "inactive: no audio half");
     plugin
@@ -280,7 +276,7 @@ fn activation_hands_out_one_audio_half_and_refuses_a_second_activation() {
 /// channel tables the wrapper bound, and starts processing on the first block.
 #[test]
 fn a_block_runs_the_plugin_through_the_bound_channels() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     set_render_mode(RENDER_TAG_ONLY);
     let mut plugin = load(Arc::default());
     plugin
@@ -308,7 +304,7 @@ fn a_block_runs_the_plugin_through_the_bound_channels() {
 /// it would write past the end.
 #[test]
 fn a_short_channel_is_refused_without_calling_the_plugin() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     let mut plugin = load(Arc::default());
     plugin
         .activate(
@@ -336,7 +332,7 @@ fn a_short_channel_is_refused_without_calling_the_plugin() {
 /// Spec: clap.ext.params.flush, clap.event.param_value, clap.ext.params.get_value
 #[test]
 fn an_event_list_reaches_the_plugin_through_flush() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     let mut plugin = load(Arc::default());
     let info = plugin.param_info(main_thread(), 0).expect("a parameter");
     let target = info.default_value + (info.max_value - info.min_value) * 0.25;
@@ -354,7 +350,7 @@ fn an_event_list_reaches_the_plugin_through_flush() {
 /// Spec: clap.ext.state.save, clap.ext.state.load, clap.stream.istream.read, clap.stream.ostream.write
 #[test]
 fn state_round_trips_through_the_streams() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     let mut plugin = load(Arc::default());
     let mut out = OutputStream::new();
     plugin.state_save(main_thread(), &mut out).expect("saves");
@@ -369,7 +365,7 @@ fn state_round_trips_through_the_streams() {
 /// refusal.
 #[test]
 fn a_missing_extension_is_not_a_refusal() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     let mut plugin = load(Arc::default());
     // The reference plugin has no `preset-load`.
     assert!(!plugin.supports_preset_load());
@@ -383,7 +379,7 @@ fn a_missing_extension_is_not_a_refusal() {
 /// rescan the plugin makes from `on_main_thread` arrives with its flags.
 #[test]
 fn a_plugin_callback_reaches_the_embedder() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     let recorder = Arc::new(Recorder::default());
     let plugin = load(recorder.clone());
     // SAFETY: the reference cdylib's exported switch, documented signature.
@@ -402,7 +398,7 @@ fn a_plugin_callback_reaches_the_embedder() {
 /// freed instance.
 #[test]
 fn a_retired_audio_half_calls_nothing() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     let mut plugin = load(Arc::default());
     plugin
         .activate(
@@ -435,7 +431,7 @@ fn a_retired_audio_half_calls_nothing() {
 /// check, so the answer does not depend on the instance's state.
 #[test]
 fn a_mismatched_block_is_refused_before_the_retired_check() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     let mut plugin = load(Arc::default());
     plugin
         .activate(
@@ -477,7 +473,7 @@ fn a_mismatched_block_is_refused_before_the_retired_check() {
 /// must not start processing on an inactive plugin.
 #[test]
 fn a_deactivated_plugins_audio_half_is_retired() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     let mut plugin = load(Arc::default());
     plugin
         .activate(
@@ -504,7 +500,7 @@ fn a_deactivated_plugins_audio_half_is_retired() {
 /// that is processing tears it down: the library loads again afterwards.
 #[test]
 fn deactivating_a_processing_plugin_stops_it_and_a_drop_tears_it_down() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     {
         let mut plugin = load(Arc::default());
         plugin
@@ -627,7 +623,7 @@ fn render_with_pool(
 /// called with a `clap_plugin` it does not belong to.
 #[test]
 fn a_pool_handle_serves_only_its_own_instance() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     switch_u32(b"tutti_test_plugin_set_thread_pool_tasks\0", 4);
     let mut a = load(Arc::default());
     let mut b = load(Arc::default());
@@ -653,7 +649,7 @@ fn a_pool_handle_serves_only_its_own_instance() {
 /// call, whoever the caller is.
 #[test]
 fn a_block_past_the_activated_size_is_refused() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     let mut plugin = load(Arc::default());
     let (mut side, mut scratch) = start(&mut plugin, FRAMES as u32 / 2);
     scratch.resize_for(&[2], &[2], FRAMES);
@@ -671,7 +667,7 @@ fn a_block_past_the_activated_size_is_refused() {
 /// active (nothing is called), and reach the plugin when it is not.
 #[test]
 fn state_gated_entries_are_refused_while_active() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     let mut plugin = load(Arc::default());
     let request = [tutti_clap_ffi::PortConfigRequest {
         is_input: true,
@@ -718,7 +714,7 @@ fn state_gated_entries_are_refused_while_active() {
 /// unless the plugin said it can activate a port while processing.
 #[test]
 fn a_port_cannot_be_activated_while_processing_unless_the_plugin_allows() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     let mut plugin = load(Arc::default());
     let (mut side, mut scratch) = start(&mut plugin, 512);
     assert_eq!(
@@ -767,7 +763,7 @@ fn gui_reset() {
 /// `destroy` runs once however often the editor is closed.
 #[test]
 fn the_editor_is_created_once_and_destroyed_once() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     switch_u32(b"tutti_test_plugin_set_gui_mode\0", 1);
     gui_reset();
     let mut plugin = load(Arc::default());
@@ -818,7 +814,7 @@ fn the_editor_is_created_once_and_destroyed_once() {
 /// block of the other width is refused before the plugin is called.
 #[test]
 fn one_process_call_runs_either_width_and_refuses_a_mismatch() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     set_render_mode(RENDER_TAG_ONLY);
     // Both widths need every port flagged 64-bit before the plugin loads.
     switch_u32(b"tutti_test_plugin_set_ports_64bit\0", 3);
@@ -914,7 +910,7 @@ fn one_process_call_runs_either_width_and_refuses_a_mismatch() {
 /// re-entered while active.
 #[test]
 fn an_active_plugin_is_not_activated_again_even_with_no_audio_half() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     let mut plugin = load(Arc::default());
     plugin
         .activate(
@@ -946,7 +942,7 @@ fn an_active_plugin_is_not_activated_again_even_with_no_audio_half() {
 /// Spec: clap.plugin.activate
 #[test]
 fn a_one_frame_block_is_a_legal_activation() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     let mut plugin = load(Arc::default());
     plugin
         .activate(
@@ -964,7 +960,7 @@ fn a_one_frame_block_is_a_legal_activation() {
 /// declared.
 #[test]
 fn a_block_outside_the_activation_is_refused_before_the_plugin_is_called() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     set_render_mode(RENDER_TAG_ONLY);
     let mut plugin = load(Arc::default());
     let (mut side, mut scratch) = start(&mut plugin, 512);
@@ -1051,7 +1047,7 @@ impl<F: Fn()> EventSource for AtFlush<F> {
 #[test]
 fn a_flush_holding_the_instance_refuses_a_block_owes_a_reset_and_does_not_wait_for_a_stop() {
     use std::cell::RefCell;
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     set_render_mode(RENDER_TAG_ONLY);
     let mut plugin = load(Arc::default());
     let (side, scratch) = start(&mut plugin, 512);
@@ -1097,7 +1093,7 @@ fn a_flush_holding_the_instance_refuses_a_block_owes_a_reset_and_does_not_wait_f
 /// closed it has no other chance.
 #[test]
 fn dropping_a_plugin_destroys_its_open_editor() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     switch_u32(b"tutti_test_plugin_set_gui_mode\0", 1);
     gui_reset();
     let mut plugin = load(Arc::default());
@@ -1124,7 +1120,7 @@ fn dropping_a_plugin_destroys_its_open_editor() {
 /// drop is counted.
 #[test]
 fn a_drop_off_the_main_thread_is_destroyed_on_the_main_threads_next_tick() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     let main = main_thread();
     switch_u32(b"tutti_test_plugin_set_gui_mode\0", 1);
     gui_reset();
@@ -1182,7 +1178,7 @@ fn entry_calls() -> (u32, u32) {
 /// Spec: clap.entry.init, clap.entry.deinit
 #[test]
 fn the_entry_is_deinitialised_when_the_last_bundle_closes() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     library();
     let (i0, d0) = entry_calls();
 
@@ -1205,7 +1201,7 @@ fn the_entry_is_deinitialised_when_the_last_bundle_closes() {
 /// every path out of `open`.
 #[test]
 fn an_open_that_fails_after_init_deinitialises_the_entry() {
-    let _g = lock();
+    let _g = PLUGIN_LOCK.lock();
     library();
     let set = |refused: u32| {
         // SAFETY: `tutti_test_plugin_set_factory_refused` is `#[no_mangle] pub

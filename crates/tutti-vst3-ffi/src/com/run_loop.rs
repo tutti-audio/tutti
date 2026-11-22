@@ -34,12 +34,12 @@
 //! Steinberg's own `editorhost`, which then crashed identically.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_plugin_ipc_ffi::{FdId, Interest, Ready};
 use tutti_plugin_types::{MainThreadMarker, Wakeups};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use vst3::ComRef;
 use vst3::Steinberg::Linux::{
@@ -170,7 +170,7 @@ pub(crate) struct OwnedScope {
 
 impl Drop for OwnedScope {
     fn drop(&mut self) {
-        self.run_loop.state().scope = self.previous;
+        self.run_loop.state.lock().scope = self.previous;
     }
 }
 
@@ -183,7 +183,7 @@ pub(crate) struct Scope<'a> {
 
 impl Drop for Scope<'_> {
     fn drop(&mut self) {
-        self.run_loop.state().scope = self.previous;
+        self.run_loop.state.lock().scope = self.previous;
     }
 }
 
@@ -192,10 +192,6 @@ impl RunLoop {
     #[must_use]
     pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self::default())
-    }
-
-    fn state(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state.lock_recover()
     }
 
     /// Whether the handler recorded in `due` is still registered.
@@ -212,7 +208,7 @@ impl RunLoop {
     /// every file descriptor a plugin registered an event handler for (read
     /// interest) and the earliest moment a timer is due. Added to `out`.
     pub(crate) fn describe(&self, out: &mut Wakeups) {
-        let state = self.state();
+        let state = self.state.lock();
         for &fd in state.event_handlers.keys() {
             // Registration refused a negative number.
             if let Some(id) = FdId::new(fd) {
@@ -254,7 +250,7 @@ impl RunLoop {
     pub(crate) fn dispatch(&self, main: MainThreadMarker, ready: &[Ready], now: Instant) {
         let mut due: Vec<Due> = Vec::new();
         {
-            let mut state = self.state();
+            let mut state = self.state.lock();
             for (&key, entry) in state.timers.iter_mut() {
                 if now.saturating_duration_since(entry.last_fired) >= entry.period {
                     entry.last_fired = now;
@@ -275,7 +271,7 @@ impl RunLoop {
         for item in due {
             // Re-check under the lock: an earlier callback may have unregistered
             // this handler, and the plugin may free it once it has.
-            if !Self::still_registered(&self.state(), &item) {
+            if !Self::still_registered(&self.state.lock(), &item) {
                 continue;
             }
             match item {
@@ -292,7 +288,7 @@ impl RunLoop {
                     }
                     #[cfg(feature = "conformance")]
                     {
-                        self.state().timers_fired += 1;
+                        self.state.lock().timers_fired += 1;
                     }
                 }
                 Due::Fd(fd, handler, owner) => {
@@ -305,7 +301,7 @@ impl RunLoop {
                     }
                     #[cfg(feature = "conformance")]
                     {
-                        self.state().fds_dispatched += 1;
+                        self.state.lock().fds_dispatched += 1;
                     }
                 }
             }
@@ -340,21 +336,21 @@ impl RunLoop {
     /// Makes the calling thread, which holds `main`, the UI thread: the one
     /// registrations are accepted from.
     pub(crate) fn bind(&self, _main: MainThreadMarker) {
-        self.state().ui = Some(std::thread::current().id());
+        self.state.lock().ui = Some(std::thread::current().id());
     }
 
     /// Makes `owner` the scope and binds the calling thread; returns the scope
     /// it replaced.
     fn enter(&self, owner: Owner, main: MainThreadMarker) -> Option<Owner> {
         self.bind(main);
-        self.state().scope.replace(owner)
+        self.state.lock().scope.replace(owner)
     }
 
     /// Forgets every registration, owned or not. The module calls it as it
     /// closes: whatever a plugin left registered through the module's own
     /// context (owned by no instance) points into code about to be unloaded.
     pub(crate) fn clear_all(&self) -> usize {
-        let mut state = self.state();
+        let mut state = self.state.lock();
         let n = state.timers.len() + state.event_handlers.len();
         state.timers.clear();
         state.event_handlers.clear();
@@ -367,7 +363,7 @@ impl RunLoop {
     /// of the plugin's UI runs, so a registration left behind is a leak of the
     /// plugin's, and calling it would be a call into freed memory.
     pub(crate) fn purge(&self, owner: Owner) -> usize {
-        let mut state = self.state();
+        let mut state = self.state.lock();
         let before = state.timers.len() + state.event_handlers.len();
         state.timers.retain(|_, e| e.owner != Some(owner));
         state.event_handlers.retain(|_, e| e.owner != Some(owner));
@@ -378,7 +374,7 @@ impl RunLoop {
     #[cfg(feature = "conformance")]
     #[must_use]
     pub(crate) fn activity(&self) -> super::RunLoopActivity {
-        let state = self.state();
+        let state = self.state.lock();
         super::RunLoopActivity {
             timers_registered: state.timers.len(),
             event_handlers_registered: state.event_handlers.len(),
@@ -412,7 +408,7 @@ impl RunLoop {
         if FdId::new(fd).is_none() {
             return kResultFalse;
         }
-        let mut state = self.state();
+        let mut state = self.state.lock();
         if !state.on_ui_thread() {
             return kResultFalse;
         }
@@ -424,7 +420,8 @@ impl RunLoop {
     /// `IRunLoop::unregisterEventHandler`: forgets every fd registered with
     /// `handler`. The pointer is only compared, never dereferenced.
     pub(crate) fn unregister_event_handler(&self, handler: *mut IEventHandler) -> tresult {
-        self.state()
+        self.state
+            .lock()
             .event_handlers
             .retain(|_, e| e.handler != handler);
         kResultOk
@@ -451,7 +448,7 @@ impl RunLoop {
         // Zero would mean "every iteration"; clamp so a misbehaving plugin
         // cannot spin the host's UI loop.
         let period = Duration::from_millis(milliseconds.max(1));
-        let mut state = self.state();
+        let mut state = self.state.lock();
         if !state.on_ui_thread() {
             return kResultFalse;
         }
@@ -470,7 +467,7 @@ impl RunLoop {
 
     /// `IRunLoop::unregisterTimer`. The pointer is only compared.
     pub(crate) fn unregister_timer(&self, handler: *mut ITimerHandler) -> tresult {
-        self.state().timers.remove(&(handler as usize));
+        self.state.lock().timers.remove(&(handler as usize));
         kResultOk
     }
 }
@@ -643,9 +640,15 @@ mod tests {
             let _scope = run_loop.scope(a, main);
             run_loop.register_timer(scoped.1, 10, None);
         }
-        assert_eq!(run_loop.state().timers.len(), 4);
+        assert_eq!(run_loop.state.lock().timers.len(), 4);
         assert_eq!(run_loop.purge(a), 2, "the named one and the scoped one");
-        let left: Vec<_> = run_loop.state().timers.values().map(|t| t.owner).collect();
+        let left: Vec<_> = run_loop
+            .state
+            .lock()
+            .timers
+            .values()
+            .map(|t| t.owner)
+            .collect();
         assert_eq!(left.len(), 2);
         assert!(left.contains(&Some(b)) && left.contains(&None));
         assert_eq!(run_loop.purge(a), 0);
@@ -695,11 +698,11 @@ mod tests {
             .unwrap()
         };
         assert_eq!(off, kResultFalse);
-        assert!(run_loop.state().timers.is_empty());
+        assert!(run_loop.state.lock().timers.is_empty());
         // SAFETY: `handler` outlives the registration, cleared below.
         unsafe { run_loop.register_timer(ptr, 1, None) };
         assert_eq!(run_loop.clear_all(), 1);
-        assert!(run_loop.state().timers.is_empty());
+        assert!(run_loop.state.lock().timers.is_empty());
         drop(handler);
     }
 }
