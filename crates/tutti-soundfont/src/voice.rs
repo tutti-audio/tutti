@@ -10,7 +10,7 @@ use tutti_dsp::{
 };
 use tutti_sf2::{SamplePool, Side};
 use tutti_ump::{MidiChannel, NoteNumber, RegisteredPerNoteController};
-use tutti_units::{Amplitude, Cents, Db, Hz, Pan, Q, SampleRate, Seconds, Semitones};
+use tutti_units::{Amplitude, Cents, Db, Hz, Pan, Q, SampleRate, Samples, Seconds, Semitones};
 use tutti_voicing::{ChannelState, Glide, NoteControl};
 
 /// The longest an exclusive class's quick release takes, to fall
