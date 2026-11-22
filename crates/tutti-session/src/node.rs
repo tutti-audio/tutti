@@ -4,7 +4,7 @@
 use tutti_buffers::Float;
 use tutti_graph::{ForkByClone, IntoNode, Node, NodeKey, ParamNode, ParamSet, Params, Unforkable};
 
-use crate::NodeSlots;
+use crate::{NodeSlots, TimelineView};
 
 /// A node that may enter a session's graph: it declares its own ports (event
 /// ports included), its controls and its fork ([`IntoNode`]), and says which
@@ -97,18 +97,19 @@ pub trait SessionNode<F: Float = f32>:
     /// [`Reclaims::Nothing`] says the node publishes nothing.
     fn reclaimer(controls: &Self::Controls) -> Reclaims;
 
-    /// The node reading the session's tempo map through `tempo` (a reader
-    /// the graph hands each node it takes in [`Graph::add`](crate::Graph::add)
-    /// and [`Graph::replace`](crate::Graph::replace); the node clones it).
-    /// The identity, the default, for a node that reads no map: a sampler
-    /// node overrides it, so a placed voice stays where the map puts it
-    /// through a step or a ramp (doc 020, stage 5).
+    /// The node reading the session's timeline through `timeline` (a read-only view the
+    /// graph hands each node it takes in [`Graph::add`](crate::Graph::add) and
+    /// [`Graph::replace`](crate::Graph::replace); the node clones the readers it
+    /// follows). The identity, the default, for a node that reads neither: a sampler node
+    /// takes the tempo map, so a placed voice stays where the map puts it through a step
+    /// or a ramp, and a sampler pool also takes the loop, so the stretched voices under
+    /// it carry the spare vocoder they prime a wrap with.
     #[must_use]
-    fn bind_tempo(self, tempo: &tutti_timeline::TempoReader) -> Self
+    fn bind_timeline(self, timeline: &TimelineView) -> Self
     where
         Self: Sized,
     {
-        let _ = tempo;
+        let _ = timeline;
         self
     }
 }
@@ -439,8 +440,8 @@ fn voice_slots<F: tutti_sampler::SamplerFloat>(
 /// gain as set; the placements it replaced freed by its reclaimer.
 #[cfg(feature = "sampler")]
 impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoiceNode<F> {
-    fn bind_tempo(self, tempo: &tutti_timeline::TempoReader) -> Self {
-        self.tempo(tempo.clone())
+    fn bind_timeline(self, timeline: &TimelineView) -> Self {
+        self.tempo(timeline.tempo().clone())
     }
 
     fn params(controls: &tutti_sampler::VoiceNodeHandle<F>) -> Option<ParamSet> {
@@ -460,8 +461,9 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoiceNode
 /// retired voices its reclaimer frees.
 #[cfg(feature = "sampler")]
 impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoicePool<F> {
-    fn bind_tempo(self, tempo: &tutti_timeline::TempoReader) -> Self {
-        self.tempo(tempo.clone())
+    fn bind_timeline(self, timeline: &TimelineView) -> Self {
+        self.tempo(timeline.tempo().clone())
+            .loops(timeline.loops().clone())
     }
 
     fn reclaimer(controls: &tutti_sampler::VoicePoolHandle<F>) -> Reclaims {
@@ -472,8 +474,8 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoicePool
 /// A bare clip reader as a graph node, its gain addressed by its set.
 #[cfg(feature = "sampler")]
 impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::MemorySource<F> {
-    fn bind_tempo(self, tempo: &tutti_timeline::TempoReader) -> Self {
-        self.tempo(tempo.clone())
+    fn bind_timeline(self, timeline: &TimelineView) -> Self {
+        self.tempo(timeline.tempo().clone())
     }
 
     fn reclaimer(_: &ParamSet) -> Reclaims {
@@ -491,8 +493,8 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::MemorySou
 /// in the graph.
 #[cfg(feature = "sampler")]
 impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::Clip<F> {
-    fn bind_tempo(self, tempo: &tutti_timeline::TempoReader) -> Self {
-        self.tempo(tempo.clone())
+    fn bind_timeline(self, timeline: &TimelineView) -> Self {
+        self.tempo(timeline.tempo().clone())
     }
 
     fn params(controls: &tutti_sampler::VoiceNodeHandle<F>) -> Option<ParamSet> {
@@ -512,8 +514,8 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::Clip<F> {
 /// `DiskVoiceControls`.
 #[cfg(feature = "sampler")]
 impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::DiskVoice<F> {
-    fn bind_tempo(self, tempo: &tutti_timeline::TempoReader) -> Self {
-        self.tempo(tempo.clone())
+    fn bind_timeline(self, timeline: &TimelineView) -> Self {
+        self.tempo(timeline.tempo().clone())
     }
 
     fn reclaimer(_: &tutti_sampler::DiskVoiceControls) -> Reclaims {

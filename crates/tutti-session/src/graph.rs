@@ -489,13 +489,12 @@ pub struct Graph<F: Float = f32> {
     /// fade out keeps rendering until then, and its controls (a voice's
     /// stream) live as long.
     retiring: Vec<(NodeKey, Box<dyn Any + Send>)>,
-    /// A reader of the session's tempo map, the template each plugin and
-    /// each sampler node inserted through the graph is bound with (a clone
-    /// of it: the node lends the map once per block and a fork clones its
-    /// reader on the control side; [`SessionNode::bind_tempo`]). The
-    /// publisher is the session's `TransportSettings`, whose `Reclaim` sweep
-    /// already covers the cell.
-    pub(crate) tempo: tutti_timeline::TempoReader,
+    /// The session's timeline as a node reads it: the template each plugin and each
+    /// sampler node inserted through the graph is bound with (its readers cloned: a node
+    /// lends the tempo map once per block and a fork clones its reader on the control
+    /// side; [`SessionNode::bind_timeline`]). The tempo's publisher is the session's
+    /// `TransportSettings`, whose `Reclaim` sweep already covers the cell.
+    pub(crate) timeline: crate::TimelineView,
     /// A re-prepare resumed in the update's collect: its plan's figures are
     /// published at the commit.
     resumed: bool,
@@ -614,7 +613,7 @@ impl<F: Float> Graph<F> {
         rate: SampleRate,
         max_block: MaxBlock,
         quantum: Option<MaxBlock>,
-        tempo: tutti_timeline::TempoReader,
+        timeline: crate::TimelineView,
     ) -> Self {
         let (mut editor, exec) = Editor::<F>::with_format(prepare_for(rate, max_block, quantum));
         let topology = &mut editor.spec_mut().topology;
@@ -667,7 +666,7 @@ impl<F: Float> Graph<F> {
             #[cfg(feature = "plugin")]
             graveyard: crate::plugin::Graveyard::default(),
             retiring: Vec::new(),
-            tempo,
+            timeline,
             resumed: false,
             compensation: Arc::default(),
             latency: Samples::new(0),
@@ -678,6 +677,11 @@ impl<F: Float> Graph<F> {
     /// device's callback size when the session knows it.
     pub(crate) fn prepared(&self) -> Prepare {
         *self.editor.prepare()
+    }
+
+    /// `node` bound to the session's timeline.
+    fn bound<N: SessionNode<F>>(&self, node: N) -> N {
+        node.bind_timeline(&self.timeline)
     }
 
     pub(crate) fn set_render_workers(&mut self, workers: crate::Workers) {
@@ -872,7 +876,7 @@ impl<F: Float> Graph<F> {
     /// ([`SessionNode::params`], so a [`ParamTarget`](crate::ParamTarget) write and control-rate
     /// modulation find them), its reclaimer is swept by the session's
     /// [`Reclaim`](crate::Phase::Reclaim) phase ([`SessionNode::reclaimer`]), and
-    /// it reads the session's tempo map ([`SessionNode::bind_tempo`]). A node
+    /// it reads the session's tempo map ([`SessionNode::bind_timeline`]). A node
     /// that is only an [`IntoNode`] does not compile here: a host's own is
     /// wrapped as [`ForkByClone`](tutti_graph::ForkByClone) or
     /// [`Unforkable`](tutti_graph::Unforkable), or is a
@@ -889,7 +893,7 @@ impl<F: Float> Graph<F> {
     /// }
     /// ```
     pub fn add<N: SessionNode<F>>(&mut self, node: N) -> Key<N> {
-        let (key, controls) = self.place(node.bind_tempo(&self.tempo));
+        let (key, controls) = self.place(self.bound(node));
         self.address::<N>(key.erase(), controls);
         key
     }
@@ -1097,7 +1101,7 @@ impl Graph {
             client.controls(),
             client.answers(),
         );
-        let tempo = self.tempo.clone();
+        let tempo = self.timeline.tempo().clone();
         let bound = client.bind(tempo);
         let rebinder = tutti_plugin::catalog::PluginRebinder::out_of_process(&bound);
         // A fresh key has no wiring recorded, so nothing is unwired.
@@ -1209,7 +1213,7 @@ impl Graph {
         let controls = client.controls();
         let plugin = client.plugin().clone();
         let answers = client.answers();
-        let tempo = self.tempo.clone();
+        let tempo = self.timeline.tempo().clone();
         let bound = client.bind(tempo);
         let rebinder = tutti_plugin::catalog::PluginRebinder::out_of_process(&bound);
         match self.swap_unit(node, bound, fade, on_shape) {
@@ -1273,7 +1277,7 @@ impl Graph {
         let handle = plugin.handle().clone();
         let controls = plugin.node_controls();
         let plugin_ref = plugin.plugin().clone();
-        let (bound, rebinder) = (*plugin).bind_with_rebinder(self.tempo.clone());
+        let (bound, rebinder) = (*plugin).bind_with_rebinder(self.timeline.tempo().clone());
         match self.swap_unit(node, bound, fade, on_shape) {
             Ok(_) => {
                 match self.plugins.get_mut(&node) {
@@ -1509,7 +1513,7 @@ impl<F: Float> Graph<F> {
             node: unit,
             controls,
             fork,
-        } = incoming.bind_tempo(&self.tempo).into_parts();
+        } = self.bound(incoming).into_parts();
         let unit = Unit::<N, F> {
             parts: NodeParts {
                 node: unit,
@@ -4166,7 +4170,10 @@ mod tail_tests {
             rate,
             MaxBlock::of(Samples::new(64)),
             None,
-            tutti_timeline::TempoReader::fixed(Arc::new(map)),
+            crate::TimelineView::new(
+                tutti_timeline::TempoReader::fixed(Arc::new(map)),
+                tutti_timeline::LoopReader::disarmed(),
+            ),
         )
     }
 
@@ -4301,7 +4308,10 @@ mod main_output_fade_tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
             None,
-            tutti_timeline::TempoReader::fixed(Arc::new(map)),
+            crate::TimelineView::new(
+                tutti_timeline::TempoReader::fixed(Arc::new(map)),
+                tutti_timeline::LoopReader::disarmed(),
+            ),
         );
         let node = g.add(ForkByClone(Const::mono(1.0)));
         let node = NodeKey::from(node);

@@ -35,6 +35,18 @@ pub fn loop_frames(start: usize, end: usize, crossfade: usize) -> Loop {
         .expect("a test's loop is a literal that `Loop` accepts")
 }
 
+/// The spare vocoders `pool`'s voices carry: what a loop under the voices asks of a pool's
+/// memory, for a test of which voices carry one.
+pub fn spare_count<F: crate::SamplerFloat>(pool: &crate::VoicePool<F>) -> usize {
+    pool.spare_count()
+}
+
+/// The voices `handle` has sent a spare vocoder and not taken back: the control side's
+/// accounting of what the transport's loop asks of the pool.
+pub fn spares_sent<F: crate::SamplerFloat>(handle: &crate::VoicePoolHandle<F>) -> usize {
+    handle.spares_sent()
+}
+
 /// A transport a test can move between blocks, as a real one moves.
 ///
 /// Interior-mutable and shared (`Arc`), so a test can move it from inside a

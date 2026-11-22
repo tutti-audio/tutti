@@ -54,7 +54,7 @@ fn every_message_the_os_takes_is_taken() {
         sent,
         Sent {
             taken: Taken::within(&batch(), 5),
-            lost: 0
+            losses: Losses::NONE
         }
     );
 }
@@ -63,12 +63,12 @@ fn every_message_the_os_takes_is_taken() {
 fn a_message_the_os_refuses_whole_is_not_taken_and_nothing_after_it() {
     let sent = by_message(&batch(), "test", os(1, 0));
     assert_eq!(sent.taken.packets(), 1);
-    assert_eq!(sent.lost, 0);
+    assert_eq!(sent.losses, Losses::NONE);
 }
 
 #[test]
 fn a_message_the_os_cut_is_taken_and_its_tail_is_lost() {
     let sent = by_message(&batch(), "test", os(1, 2));
     assert_eq!(sent.taken.packets(), 4, "the cut message is consumed");
-    assert_eq!(sent.lost, 1, "its third packet did not go");
+    assert_eq!(sent.losses, Losses::lost(1), "its third packet did not go");
 }
