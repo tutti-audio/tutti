@@ -329,14 +329,10 @@ tutti-vst3-host  ctor-result  crates/tutti-vst3-host/src/host/controller.rs::Vst
 tutti-vst3-host  option-arg  crates/tutti-vst3-host/src/types/mod.rs::PluginInfo::sub_categories
 tutti-au-host  pub-field-config  crates/tutti-au-host/src/macos/stream.rs::StreamConfig
 tutti-cpal  pub-field-config  crates/tutti-cpal/src/mic.rs::MicConfig
-tutti-dsp  pub-field-config  crates/tutti-dsp/src/dynamics/multiband.rs::BandSettings
-tutti-dsp  pub-field-config  crates/tutti-dsp/src/dynamics/multiband.rs::MultibandSettings
-tutti-measure  pub-field-config  crates/tutti-measure/src/analyses/transform.rs::StftConfig
 tutti-midi-ci  pub-field-config  crates/tutti-midi-ci/src/pe/initiator.rs::PeSettings
 tutti-midi-ci  pub-field-config  crates/tutti-midi-ci/src/pe/resource/server.rs::ResponderSettings
 tutti-midi-hardware  pub-field-config  crates/tutti-midi-hardware/src/session.rs::MidiHardwareConfig
 tutti-midi-network  pub-field-config  crates/tutti-midi-network/src/endpoint.rs::HostConfig
-tutti-nodes  pub-field-config  crates/tutti-nodes/src/automation/recording.rs::RecordingConfig
 tutti-plugin-db  pub-field-config  crates/tutti-plugin-db/src/config.rs::CatalogConfig
 tutti-plugin-ipc  pub-field-config  crates/tutti-plugin-ipc/src/config/audio.rs::AudioConfig
 tutti-plugin-types  pub-field-config  crates/tutti-plugin-types/src/measured.rs::ProbeConfig
