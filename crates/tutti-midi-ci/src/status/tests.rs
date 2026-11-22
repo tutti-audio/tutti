@@ -237,6 +237,7 @@ fn a_quote_in_message_text_is_sent_raw_and_read_back() {
 
 // §5.10.4: up to 103 bytes of Message text is safe to send. The
 // bound counts the escaped bytes.
+/// Spec: m2-101/5.10.4#2, m2-101/5.11.4#2
 #[test]
 fn a_text_is_held_to_103_escaped_bytes() {
     assert!(MessageText::new(&"a".repeat(103)).is_some());

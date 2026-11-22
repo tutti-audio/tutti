@@ -89,6 +89,7 @@ fn the_data_control_is_a_range_checked_value() {
     });
 }
 
+/// Spec: m2-101/9.5#4
 #[test]
 fn a_system_bitmap_is_unwritable_off_the_function_block() {
     let system = SystemMessages::SONG_SELECT.bits();

@@ -66,7 +66,7 @@ fn client(
 /// An invitation to a confirming Host reaches the application as a Confirm
 /// event, the application's accept establishes the Session at both ends, UMP
 /// arrives once and in order each way, and a Bye ends it at both.
-/// Spec: m2-124/6.4#1, m2-124/6.5#1, m2-124/6.16#1
+/// Spec: m2-124/6.4#1, m2-124/6.5#1, m2-124/6.16#1, m2-124/2.2#1, m2-124/3.2#2, m2-124/3.3#1
 #[test]
 fn a_session_runs_over_two_links_from_invitation_to_bye() {
     let executor = Executor::new();
@@ -163,7 +163,7 @@ fn a_device_serves_a_client_and_is_a_client_of_another_host_on_two_ports() {
 
 /// A device with two UMP Endpoints runs a Host for each, each with its own
 /// port and name and the Product Instance Id they share.
-/// Spec: m2-124/10#1
+/// Spec: m2-124/10#1, m2-124/3.2#5, m2-124/4.4#7, m2-124/10#2
 #[test]
 fn a_device_with_two_endpoints_runs_a_host_for_each_on_its_own_port_and_name() {
     let executor = Executor::new();

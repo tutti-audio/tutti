@@ -70,7 +70,7 @@ fn commands(bytes: &[u8]) -> Vec<Command> {
     parse(bytes).unwrap().map(Result::unwrap).collect()
 }
 
-/// Spec: m2-124/8#1
+/// Spec: m2-124/8#1, m2-124/3.2#4
 #[test]
 fn several_clients_hold_sessions_with_one_host_each_known_by_its_address() {
     let now = Instant::now();
@@ -184,7 +184,7 @@ fn a_host_that_takes_no_more_sessions_still_answers_a_ping_from_a_stranger() {
 /// the one identity; the TXT record, the Invitation and every Invitation Reply
 /// carry it, and a Host that Client invites reads the Host's TXT identity back
 /// from it.
-/// Spec: m2-124/9#2, m2-124/9#3
+/// Spec: m2-124/9#2, m2-124/9#3, m2-124/6.5#7, m2-124/6.5#9
 #[test]
 fn a_device_in_both_roles_presents_one_identity_in_the_txt_record_and_every_command() {
     let now = Instant::now();
