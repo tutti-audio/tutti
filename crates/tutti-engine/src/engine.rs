@@ -597,7 +597,7 @@ impl<F: Float> Engine<F> {
     }
 
     /// The control side of the output folds, to keep when this engine moves to
-    /// the audio thread: it declares what the graph main output is
+    /// the audio thread: it declares what the graph's main output is
     /// ([`OutputControl::publish_main_output`]), states what a device is
     /// ([`OutputControl::state_device`]) and adds devices, publishing into the
     /// folds this engine lends.
@@ -670,7 +670,7 @@ impl<F: Float> Engine<F> {
     ///
     /// One executor block per device block (up to its prepared maximum),
     /// under the
-    /// transport as it stands. The graph main output has no inputs. The main output is
+    /// transport as it stands. The graph's main output has no inputs. The main output is
     /// rendered at its **own** output width (at most [`MAX_CHANNELS`],
     /// which the editor's limits enforce) into scratch, then each frame is
     /// folded to the *output's* width — the device / target width — by
@@ -783,7 +783,7 @@ impl<F: Float> Engine<F> {
     ///
     /// How many frames is `output`'s own business — it is `output.len()`,
     /// which cannot disagree with the slice the way a separate `frames`
-    /// argument could. The graph main output is folded to `output`'s width (the device
+    /// argument could. The graph's main output is folded to `output`'s width (the device
     /// / target width, see [`support_output`](Self::support_output)) — see
     /// [`process_segment`](Self::process_segment). Untimed motion
     /// ([`MotionFsm::send`]) applies at the block's first frame; scheduled

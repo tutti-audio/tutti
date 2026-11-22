@@ -17,7 +17,7 @@
 //! - the engine follows by itself: it adopts the new rate on the first block
 //!   that carries it, rescaling its frame clock and every scheduled
 //!   `At::Frame` transport command to the same wall-clock time;
-//! - the graph main output, widened to a wider device as the build widens it
+//! - the graph's main output, widened to a wider device as the build widens it
 //!   ([`main_output_width`](crate::main_output_width)), never narrowed;
 //! - the transport's rate, the hardware MIDI input's timestamp rate, the
 //!   session's disk streamer (every open stream's conversion ratio) and,

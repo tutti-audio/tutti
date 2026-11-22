@@ -25,7 +25,7 @@ pub enum MainOutputTopologyStatus {
 }
 
 impl<K: AppKey, C: Clock> Session<K, C> {
-    /// Declares what the graph main output's channels are: the session's output as the
+    /// Declares what the graph's main output's channels are: the session's output as the
     /// engine and an export place it on the device and in a file.
     /// `Some(`[`ChannelTopology::unassigned`]`)` is independent buses, kept by
     /// index (a 4-wide one on a 6-wide device stays at 0..4, where a bare

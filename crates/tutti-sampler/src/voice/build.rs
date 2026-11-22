@@ -54,9 +54,9 @@ pub fn memory_voice<F: SamplerFloat>(
 /// outputs is one nothing can be wired to, though a layout can represent an
 /// empty bus), and [`PlaceError::WidthTooWide`] past
 /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS), the sampler's own per-read
-/// stack ceiling, deliberately equal to the graph main output's.
+/// stack ceiling, deliberately equal to the graph's main output's.
 ///
-/// Deliberately not a function of the device width. The graph main output folds
+/// Deliberately not a function of the device width. The graph's main output folds
 /// whatever reaches it, so a voice narrowed to the device here would be narrowed
 /// *twice* on a wider project.
 pub fn voice_width(file: ChannelLayout) -> Result<ChannelLayout, PlaceError> {

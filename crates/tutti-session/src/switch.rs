@@ -22,7 +22,7 @@
 //! - **A rate that differs** is [`SessionEvent::RateChanged`].
 //! - **A failure gives the session back, running on its old clock,** with one
 //!   exception. Everything that can be known is refused before the old stream
-//!   stops (the graph main output and the output map on the new channels, a re-prepare
+//!   stops (the graph's main output and the output map on the new channels, a re-prepare
 //!   that cannot run, a run waiting), and a device that will not open fails
 //!   before anything stops. A failure after the stop (the new stream will not
 //!   open, the re-prepare refuses) is undone by starting the old clock again at

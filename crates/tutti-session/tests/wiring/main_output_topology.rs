@@ -1,4 +1,4 @@
-//! The graph main output's declared topology: what the session's output is, as the
+//! The graph's main output's declared topology: what the session's output is, as the
 //! engine places it on the device and an export places it in a file.
 //!
 //! Every figure is analytic: a `Const` writes a known value per channel, and

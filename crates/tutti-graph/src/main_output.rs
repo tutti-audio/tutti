@@ -1,11 +1,11 @@
-//! The graph main output's placement on the world outside it: a width is not a
+//! The graph's main output's placement on the world outside it: a width is not a
 //! topology, so how a main output of known or bare channels reaches a device or a
 //! file of which only the width is known lives here, once.
 
 use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker};
 use tutti_buffers::{Float, Fold, FoldEnd, FoldError, FoldLevels};
 
-/// The generation of the graph main output: each commit that changes the main output's
+/// The generation of the graph's main output: each commit that changes the main output's
 /// declaration carries the next one.
 ///
 /// The plan carries it ([`Plan::main_output_id`](crate::Plan::main_output_id)), so what
@@ -76,11 +76,11 @@ pub struct MainOutputBank {
     pub fade: crate::Fade,
 }
 
-/// Why the graph main output cannot be widened or placed.
+/// Why the graph's main output cannot be widened or placed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum MainOutputError {
-    /// A graph main output's channels were declared at one width and the main output is, or
+    /// A graph's main output's channels were declared at one width and the main output is, or
     /// was asked to be, another: the declaration owns the main output's width.
     #[error("the main output is declared {declared:?} wide and cannot be {requested:?}")]
     Width {

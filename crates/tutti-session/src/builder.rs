@@ -272,7 +272,7 @@ impl<C: Clock<Config = BlockConfig>> SessionBuilder<C> {
     }
 
     /// The width of every block the host pulls with [`Session::render`] (or
-    /// the system clock renders). The graph main output is
+    /// the system clock renders). The graph's main output is
     /// [`main_output_width`]`(outputs_floor, outputs)` wide. Default stereo.
     #[must_use]
     pub fn outputs(mut self, outputs: ChannelLayout) -> Self {
@@ -375,7 +375,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
     /// with [`Session::render`] (`Engine::process`), each up to
     /// [`max_block`](Self::max_block) frames per graph block (a longer one
     /// renders as consecutive graph blocks),
-    /// [`outputs`](Self::outputs) wide; the graph main output is
+    /// [`outputs`](Self::outputs) wide; the graph's main output is
     /// [`main_output_width`]`(outputs_floor, outputs)`.
     ///
     /// # Errors
@@ -709,7 +709,7 @@ impl<C: Clock> SessionBuilder<C> {
         self
     }
 
-    /// The project's output width: the graph main output is at least this wide, and
+    /// The project's output width: the graph's main output is at least this wide, and
     /// at least the device's ([`main_output_width`]). Default stereo.
     #[must_use]
     pub fn outputs_floor(mut self, outputs: ChannelLayout) -> Self {
@@ -717,7 +717,7 @@ impl<C: Clock> SessionBuilder<C> {
         self
     }
 
-    /// Declares the graph main output's channels from the start
+    /// Declares the graph's main output's channels from the start
     /// ([`Session::declare_main_output_topology`]): the main output is exactly as wide as
     /// `main_output`, whatever [`outputs_floor`](Self::outputs_floor) and the device
     /// say, and the build refuses a device that cannot place it
@@ -730,7 +730,7 @@ impl<C: Clock> SessionBuilder<C> {
     }
 
     /// States what the output device's channels are: an interface wired as
-    /// 5.1 on its six outputs, say. The graph main output is folded into it by
+    /// 5.1 on its six outputs, say. The graph's main output is folded into it by
     /// speaker. Without it the device is taken to be the engine's order for
     /// its width ([`ChannelTopology::default_for`]: mono, stereo, quad, 5.1, 7.1,
     /// 7.1.4, and independent channels at any other width) and is read back as
@@ -1155,7 +1155,7 @@ impl<C: Clock> SessionBuilder<C> {
     }
 }
 
-/// How wide the graph main output is built, given what the project asks for and
+/// How wide the graph's main output is built, given what the project asks for and
 /// what the device presents.
 ///
 /// **These are two independent numbers, and neither may narrow the other.**

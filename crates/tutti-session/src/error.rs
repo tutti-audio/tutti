@@ -397,14 +397,14 @@ pub enum Error {
     #[error(transparent)]
     MainOutput(tutti_graph::MainOutputError),
 
-    /// The graph main output cannot be placed on the output: the device has no
+    /// The graph's main output cannot be placed on the output: the device has no
     /// channels, or the main output is wider than a device at least one of whose
     /// widths has no channel order (a 6-wide main output on a 5-channel device would
     /// lose a channel). Wraps `tutti_buffers::FoldError`.
-    #[error("the graph main output cannot be placed on the output: {0}")]
+    #[error("the graph's main output cannot be placed on the device output: {0}")]
     Output(#[from] tutti_buffers::FoldError),
 
-    /// The graph main output has no place on the output device a restart opened: the
+    /// The graph's main output has no place on the output device a restart opened: the
     /// main output in force at `width` channels has no fold into the device's
     /// `device` channels as they are stated or default (a main output with a channel
     /// no speaker names, or one wider than a device where either width has no
