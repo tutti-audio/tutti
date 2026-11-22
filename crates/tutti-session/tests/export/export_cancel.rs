@@ -216,9 +216,11 @@ fn with_stem(r: &Rig, dir: &Path, normalize: bool) -> Bounce<NodeKey, FileMaster
     } else {
         tutti_session::StemGain::None
     };
-    let bounce = bounce()
-        .master(dir.join("master.wav"), FORMAT)
-        .stem_with(tutti_session::Stem::new(r.node, dir.join("stem.wav"), FORMAT).gain(gain));
+    let bounce = bounce().master(dir.join("master.wav"), FORMAT).stem_with(
+        tutti_session::Stem::new(r.node)
+            .file(dir.join("stem.wav"), FORMAT)
+            .gain(gain),
+    );
     if normalize {
         bounce.normalize(Normalize::peak(Db::new(-6.0)))
     } else {

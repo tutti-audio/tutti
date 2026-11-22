@@ -36,7 +36,7 @@ fn offline() -> Session {
 /// `frames` stereo frames of `s` in `block`-frame device blocks, the
 /// transport rolling from the first block, and (with `seek`) a locate to
 /// beat 0.75 between two blocks past the first 60 000 frames.
-fn run(s: &Session, frames: usize, block: usize, seek: bool) -> Vec<f32> {
+fn run(s: &mut Session, frames: usize, block: usize, seek: bool) -> Vec<f32> {
     let transport = s.transport_handle();
     transport.play().expect("room");
     let mut out = Vec::with_capacity(frames * 2);
@@ -85,7 +85,7 @@ fn render_click(frames: usize) -> Vec<f32> {
             .unfaded();
     }
     let _ = s.update();
-    run(&s, frames, 512, true)
+    run(&mut s, frames, 512, true)
 }
 
 /// Frames on which the left channel starts sounding after two silent frames (or the
@@ -259,7 +259,7 @@ fn render_voice(cents: f64, frames: usize, block: usize) -> Vec<f32> {
             .unfaded();
     }
     let _ = s.update();
-    run(&s, frames, block, false)
+    run(&mut s, frames, block, false)
 }
 
 /// The dominant frequency of `x[from..]` between 500 and 900 Hz: the peak
@@ -351,7 +351,7 @@ fn a_voice_plays_in_time_at_every_device_block_size() {
 /// one block per call; a detached session has no engine and no readings.
 #[test]
 fn an_offline_render_feeds_the_load_and_the_block_counts() {
-    let s = offline();
+    let mut s = offline();
     let mut block = vec![0.0f32; 128 * 2];
     for _ in 0..4 {
         s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
@@ -603,33 +603,20 @@ fn closing_a_meter_names_one_that_is_not_open() {
     );
 }
 
-/// The heard tap closes now, with its reader held; closing again, or with
-/// none opened, is `NotOpen`, and a detached session says it has no engine.
+/// Closing the heard tap with none opened, or twice, is a no-op, and a
+/// detached session says it has no engine.
 #[test]
-fn closing_the_heard_tap_names_one_that_is_not_open() {
-    let s = offline();
-    assert_eq!(
-        s.close_heard_tap(),
-        Err(tutti_session::SessionHeardTapError::Tap(
-            tutti_engine::HeardTapError::NotOpen
-        )),
-        "none was opened"
-    );
-    let tap = s
-        .open_heard_tap(Samples::new(64))
-        .expect("an engine")
-        .reader()
-        .expect("the audio thread is not behind");
+fn closing_the_heard_tap_with_none_open_is_a_no_op() {
+    let mut s = offline();
+    assert_eq!(s.close_heard_tap(), Ok(()), "none was opened");
+    let tap = s.open_heard_tap(Samples::new(64)).expect("an engine");
     assert_eq!(s.close_heard_tap(), Ok(()));
-    assert_eq!(
-        s.close_heard_tap(),
-        Err(tutti_session::SessionHeardTapError::Tap(
-            tutti_engine::HeardTapError::NotOpen
-        )),
-        "closed already"
-    );
+    assert_eq!(s.close_heard_tap(), Ok(()), "closed already");
+    let mut block = vec![0.0f32; 64 * 2];
+    s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
+    assert_eq!(tap.available(), Samples::new(0), "closed before it wrote");
     drop(tap);
-    let detached = Session::builder()
+    let mut detached = Session::builder()
         .build_detached(SampleRate::of(RATE))
         .expect("builds");
     assert_eq!(
@@ -901,11 +888,7 @@ fn the_heard_tap_carries_the_fade_at_a_stop() {
         .taps()
         .open_root(Samples::new(16_384))
         .expect("the sources exist");
-    let mut heard = s
-        .open_heard_tap(Samples::new(16_384))
-        .expect("an engine")
-        .reader()
-        .expect("the audio thread is not behind");
+    let mut heard = s.open_heard_tap(Samples::new(16_384)).expect("an engine");
     let _ = s.update();
     let motion = s.transport_handle();
     motion.play().expect("room");
@@ -969,20 +952,15 @@ fn render_feeds_the_heard_tap_and_a_fork_does_not() {
         .unwrap()
         .unfaded();
     let _ = s.update();
-    let tap = s
-        .open_heard_tap(Samples::new(1_024))
-        .expect("an engine")
-        .reader()
-        .expect("the audio thread is not behind");
-    assert_eq!(
-        s.open_heard_tap(Samples::new(8)).err(),
-        Some(tutti_session::SessionHeardTapError::Tap(
-            tutti_engine::HeardTapError::Busy
-        ))
-    );
+    let first = s.open_heard_tap(Samples::new(8)).expect("an engine");
+    // The latest open wins: the first reader ends.
+    let tap = s.open_heard_tap(Samples::new(1_024)).expect("an engine");
     let mut block = vec![0.0f32; 64 * 2];
     s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
     assert_eq!(tap.available(), Samples::new(64));
+    let _ = s.update();
+    assert!(first.writer_gone(), "superseded: its writer was freed");
+    assert_eq!(first.available(), Samples::new(0));
     // An export renders a fork, without the engine: nothing reaches the tap.
     let mut fork = s.graph_ref().testing().fork_live().expect("forks");
     let mut out = [0.0f32; 2];
@@ -992,33 +970,13 @@ fn render_feeds_the_heard_tap_and_a_fork_does_not() {
     assert_eq!(tap.available(), Samples::new(64), "the fork wrote nothing");
     assert_eq!(out, [0.5, 0.5]);
     tap.take_lost();
-    let detached = Session::builder()
+    let mut detached = Session::builder()
         .build_detached(SampleRate::of(RATE))
         .expect("builds");
     assert_eq!(
         detached.open_heard_tap(Samples::new(8)).err(),
         Some(tutti_session::SessionHeardTapError::Detached)
     );
-}
-
-/// A dropped heard reader frees the tap for another open, with the session's
-/// update (and its `Reclaim` phase, which sends the close to the engine)
-/// between. Opening itself sees a dead reader, so the phase's close is not
-/// observable here; it keeps the engine from writing for nobody, which the
-/// writer also checks (`read_is_held`).
-#[test]
-fn a_dropped_heard_reader_frees_the_tap() {
-    let mut s = offline();
-    let tap = s
-        .open_heard_tap(Samples::new(64))
-        .expect("an engine")
-        .reader()
-        .expect("the audio thread is not behind");
-    drop(tap);
-    let _ = s.update();
-    let mut block = vec![0.0f32; 64 * 2];
-    s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
-    assert!(s.open_heard_tap(Samples::new(64)).is_ok());
 }
 
 /// A project the device has no place for is refused when the session is built,

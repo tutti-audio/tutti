@@ -157,8 +157,8 @@ fn stems_are_aligned_with_the_master_and_sum_to_it() {
     let seconds = Samples::new(frames).to_seconds(RATE).get();
     let stems = |bounce: Bounce<NodeKey, BufferMaster>| {
         bounce
-            .stem_with(Stem::buffers(steady.erase()))
-            .stem_with(Stem::buffers(late.erase()))
+            .stem_with(Stem::new(steady.erase()))
+            .stem_with(Stem::new(late.erase()))
     };
 
     // BounceLatency kept: the programme starts `LATE` frames in.
@@ -235,10 +235,10 @@ fn a_stem_is_the_nodes_own_output_and_not_what_is_downstream() {
     let out = planes(bounced(
         &mut session,
         bounce(0.01)
-            .stem_with(Stem::buffers(source.erase()))
-            .stem_with(Stem::buffers(half.erase()))
-            .stem_with(Stem::buffers(wide.erase()))
-            .stem_with(Stem::buffers(wide.erase()).channels([2, 0])),
+            .stem_with(Stem::new(source.erase()))
+            .stem_with(Stem::new(half.erase()))
+            .stem_with(Stem::new(wide.erase()))
+            .stem_with(Stem::new(wide.erase()).channels([2, 0])),
     ));
     let [master, source_stem, half_stem, wide_stem, picked] = out.as_slice() else {
         panic!("the master and four stems")
@@ -276,11 +276,14 @@ fn a_stem_that_cannot_be_placed_is_refused_not_truncated() {
             .connect(OutPort::new(wide, channel), MainOutput::channel(channel))
             .unwrap();
     }
-    let to_mono = Stem::new(wide.erase(), dir.path().join("mono.wav"), float_wav())
+    let to_mono = Stem::new(wide.erase())
+        .file(dir.path().join("mono.wav"), float_wav())
         .layout(ChannelLayout::MONO);
-    let wrong_width = Stem::new(wide.erase(), dir.path().join("two.wav"), float_wav()).topology(
-        tutti_buffers::ChannelTopology::default_for(ChannelLayout::STEREO),
-    );
+    let wrong_width = Stem::new(wide.erase())
+        .file(dir.path().join("two.wav"), float_wav())
+        .topology(tutti_buffers::ChannelTopology::default_for(
+            ChannelLayout::STEREO,
+        ));
     for stem in [to_mono, wrong_width] {
         let b = bounce(0.01).stem_with(stem);
         match refused(&mut session, b) {
@@ -317,7 +320,7 @@ fn every_target_has_the_same_length_and_a_stem_its_own_format() {
         base(0.25)
             .master(&master, Format::Wav(Pcm::Int16))
             .resample(Resample::to(tutti_units::SampleRate::SR_44K1))
-            .stem_with(Stem::new(node.erase(), &stem, float_wav())),
+            .stem_with(Stem::new(node.erase()).file(&stem, float_wav())),
     )
     .expect("renders");
     assert_eq!(done.stems().len(), 1);
@@ -368,8 +371,16 @@ fn shared_gain_keeps_the_balance_and_each_measures_its_own() {
             base(0.1)
                 .master(&paths[0], float_wav())
                 .normalize(target)
-                .stem_with(Stem::new(loud.erase(), &paths[1], float_wav()).gain(gain))
-                .stem_with(Stem::new(quiet.erase(), &paths[2], float_wav()).gain(gain)),
+                .stem_with(
+                    Stem::new(loud.erase())
+                        .file(&paths[1], float_wav())
+                        .gain(gain),
+                )
+                .stem_with(
+                    Stem::new(quiet.erase())
+                        .file(&paths[2], float_wav())
+                        .gain(gain),
+                ),
         )
         .expect("renders");
         let (master, stems) = done.into_parts();
@@ -446,7 +457,9 @@ fn a_request_that_cannot_work_is_refused_by_name() {
         why(
             &mut session,
             base(0.01).master(path("m.wav"), float_wav()).stem_with(
-                Stem::new(node.erase(), path("s.wav"), float_wav()).gain(StemGain::Shared),
+                Stem::new(node.erase())
+                    .file(path("s.wav"), float_wav())
+                    .gain(StemGain::Shared),
             ),
         ),
         BounceConfigError::SharedGainWithoutMaster
@@ -487,7 +500,7 @@ fn a_host_resolves_its_own_names_once() {
     session.graph().connect(kick, MainOutput).unwrap();
     let keys: HashMap<&str, _> = HashMap::from([("kick", kick.erase())]);
 
-    let named = |name| Bounce::<&str>::new().stem_with(Stem::buffers(name));
+    let named = |name| Bounce::<&str>::new().stem_with(Stem::new(name));
     let resolved = named("kick")
         .master_buffers()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01)))
@@ -509,7 +522,7 @@ fn a_node_the_edit_removed_is_refused_where_the_taps_open() {
     let node = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(node, MainOutput).unwrap();
     let b = bounce(0.01)
-        .stem_with(Stem::buffers(node.erase()))
+        .stem_with(Stem::new(node.erase()))
         .edit(Box::new(move |prepared: PreparedGraph<'_>| {
             prepared
                 .editor

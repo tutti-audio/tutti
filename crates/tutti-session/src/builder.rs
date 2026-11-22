@@ -64,6 +64,15 @@ pub struct SessionBuilder<C: Clock = Offline> {
     dates: C::Dates,
 }
 
+/// The heard tap's control end of an engine just built: the session is its one owner.
+fn fresh_heard_taps<F: SessionFloat>(
+    engine: &mut tutti_engine::Engine<F>,
+) -> tutti_engine::HeardTaps<F> {
+    engine
+        .take_heard_taps()
+        .expect("a fresh engine holds its heard tap")
+}
+
 impl<C: Clock> std::fmt::Debug for SessionBuilder<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SessionBuilder")
@@ -243,8 +252,9 @@ pub(crate) struct Parts<F: Float> {
     pub(crate) device_events: Option<tutti_midi_hardware::DeviceEvents>,
 }
 
-impl<F: SessionFloat> Default for SessionBuilder<Offline<F>> {
-    fn default() -> Self {
+impl<F: SessionFloat> SessionBuilder<Offline<F>> {
+    /// The defaults: [`Session::builder`] is the way in.
+    pub(crate) fn new() -> Self {
         Self {
             opts: Options::default(),
             config: BlockConfig::default(),
@@ -384,7 +394,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
         let runtime = Self::session_executor()?;
         let mut parts = self.parts(runtime, rate, max_block, None, root)?;
         // The width of every block the host pulls.
-        let engine = parts.graph.engine(
+        let mut engine = parts.graph.engine(
             &parts.transport,
             layout,
             self.opts.device_topology.clone(),
@@ -392,7 +402,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
         )?;
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
-        let taps = engine.heard_taps();
+        let mut taps = fresh_heard_taps(&mut engine);
         let readings = (engine.load(), engine.blocks());
         let clock = engine.block_clock();
         let mut session = self.session(parts, crate::clock::OfflineEngine { engine }, true)?;
@@ -489,7 +499,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
         let runtime = Self::session_executor()?;
         let timer = tutti_engine::TimerDriver::new(&runtime.0);
         let mut parts = self.parts(runtime, rate, max_block, Some(max_block), root)?;
-        let engine = parts.graph.engine(
+        let mut engine = parts.graph.engine(
             &parts.transport,
             layout,
             self.opts.device_topology.clone(),
@@ -498,7 +508,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
         let readings = (engine.load(), engine.blocks());
-        let taps = engine.heard_taps();
+        let mut taps = fresh_heard_taps(&mut engine);
         let clock = engine.block_clock();
         let spec = tutti_engine::OutputSpec::new(rate, layout, F::FORMAT)
             .with_quantum(tutti_engine::OutputQuantum::try_from(max_block)?);
@@ -628,7 +638,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
             spec.quantum.map(tutti_engine::OutputQuantum::max_block),
             root,
         )?;
-        let engine = parts.graph.engine(
+        let mut engine = parts.graph.engine(
             &parts.transport,
             spec.channels,
             self.opts.device_topology.clone(),
@@ -642,7 +652,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
             true,
         )?;
         session.output.readings = Some((engine.load(), engine.blocks()));
-        let taps = engine.heard_taps();
+        let mut taps = fresh_heard_taps(&mut engine);
         taps.notify_with(session.background.bells().handle());
         session.output.taps = Some((taps, spec.channels));
         let clock = engine.block_clock();

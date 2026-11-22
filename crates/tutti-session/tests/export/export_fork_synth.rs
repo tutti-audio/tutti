@@ -315,7 +315,7 @@ fn an_exported_soundfont_plays_its_clip() {
 fn a_synth_node_export_plays_its_clip() {
     let (mut session, synth) = session_with(poly());
     install_clip(&mut session, synth);
-    let exported = render_stem(&mut session, request(RATE).stem_with(Stem::buffers(synth)));
+    let exported = render_stem(&mut session, request(RATE).stem_with(Stem::new(synth)));
     let reference = reference(poly(), RATE);
     assert_note_at_beat_1("PolySynth node export", RATE, &exported, &reference);
 }

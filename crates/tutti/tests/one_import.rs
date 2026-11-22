@@ -23,7 +23,10 @@ fn one_import_renders_a_block() {
     use tutti::{Hz, InterleavedMut, MainOutput, Session};
     use tutti_nodes::testing::Osc;
 
-    let mut session = Session::new(SampleRate::SR_48K).expect("builds");
+    let mut session = Session::builder()
+        .sample_rate(SampleRate::SR_48K)
+        .build()
+        .expect("builds");
     let tone = session.graph().add(ForkByClone(Osc::sine(Hz::new(440.0))));
     session
         .graph()
@@ -76,7 +79,10 @@ fn a_session_bounces_to_buffers_through_the_umbrella() {
     use tutti::graph::ForkByClone;
     use tutti::{Bounce, MainOutput, Range, Session};
 
-    let mut session = Session::new(SampleRate::SR_48K).expect("builds");
+    let mut session = Session::builder()
+        .sample_rate(SampleRate::SR_48K)
+        .build()
+        .expect("builds");
     let node = session.graph().add(ForkByClone(Const::frame(&[0.5, 0.5])));
     session
         .graph()

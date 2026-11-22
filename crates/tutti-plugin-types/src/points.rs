@@ -13,8 +13,8 @@ use crate::ParameterPoint;
 ///
 /// It reads as the slice of the points it holds (`len`, `iter`, indexing,
 /// `sort_by_key` all go through [`Deref`](core::ops::Deref)). A point is
-/// added only within the capacity: [`try_push`](Self::try_push) and
-/// [`try_push_front`](Self::try_push_front) hand the point back when it is
+/// added only within the capacity: [`push`](Self::push) and
+/// [`push_front`](Self::push_front) hand the point back when it is
 /// full, and [`push_or_replace_last`](Self::push_or_replace_last) is **the
 /// one policy** for a full buffer, which every producer that cannot drop a
 /// point uses: the buffer keeps its latest value.
@@ -67,7 +67,7 @@ impl PointBuf {
     /// # Errors
     ///
     /// Returns `point` unchanged if the buffer is full.
-    pub fn try_push(&mut self, point: ParameterPoint) -> Result<(), ParameterPoint> {
+    pub fn push(&mut self, point: ParameterPoint) -> Result<(), ParameterPoint> {
         match self.slots.get_mut(self.len) {
             Some(slot) => {
                 *slot = point;
@@ -84,7 +84,7 @@ impl PointBuf {
     /// # Errors
     ///
     /// Returns `point` unchanged if the buffer is full.
-    pub fn try_push_front(&mut self, point: ParameterPoint) -> Result<(), ParameterPoint> {
+    pub fn push_front(&mut self, point: ParameterPoint) -> Result<(), ParameterPoint> {
         if !self.has_room() {
             return Err(point);
         }
@@ -130,7 +130,7 @@ impl PointBuf {
     /// was dropped), for the caller to count. See
     /// [`replace_latest`](Self::replace_latest).
     pub fn push_or_replace_last(&mut self, point: ParameterPoint) -> bool {
-        match self.try_push(point) {
+        match self.push(point) {
             Ok(()) => true,
             Err(point) => {
                 self.replace_latest(point);
@@ -257,7 +257,7 @@ impl PointPool {
         };
         for p in points.iter() {
             // Within the block's room, checked above.
-            let _ = block.try_push(*p);
+            let _ = block.push(*p);
         }
         core::mem::swap(points, &mut block);
         *holds = true;
@@ -341,12 +341,12 @@ mod tests {
     fn try_push_on_a_full_buffer_returns_the_point_without_allocating() {
         let mut buf = PointBuf::with_capacity(3);
         for k in 0..3 {
-            assert!(buf.try_push(at(k, 0.25)).is_ok());
+            assert!(buf.push(at(k, 0.25)).is_ok());
         }
         let storage = buf.as_ptr();
         let refused = assert_no_alloc::assert_no_alloc(|| {
-            let refused = buf.try_push(at(9, 0.75));
-            let inserted = buf.try_push_front(at(0, 0.5));
+            let refused = buf.push(at(9, 0.75));
+            let inserted = buf.push_front(at(0, 0.5));
             (refused, inserted)
         });
         assert_eq!(refused.0.map_err(|p| p.sample_offset), Err(9));
@@ -392,13 +392,13 @@ mod tests {
         let storage = buf.as_ptr();
         for _ in 0..3 {
             for k in 0..4 {
-                assert!(buf.try_push(at(k, 0.5)).is_ok());
+                assert!(buf.push(at(k, 0.5)).is_ok());
             }
             buf.clear();
             assert!(buf.is_empty());
             assert_eq!(buf.capacity(), 4);
         }
-        assert!(buf.try_push(at(0, 0.5)).is_ok());
+        assert!(buf.push(at(0, 0.5)).is_ok());
         assert_eq!(buf.as_ptr(), storage);
         assert_eq!(points(&buf), vec![(0, 0.5)]);
     }
@@ -409,7 +409,7 @@ mod tests {
     fn remove_moves_the_later_points_down() {
         let mut buf = PointBuf::with_capacity(4);
         for (k, v) in [(0, 0.0), (10, 0.25), (20, 0.5)] {
-            assert!(buf.try_push(at(k, v)).is_ok());
+            assert!(buf.push(at(k, v)).is_ok());
         }
         let removed = assert_no_alloc::assert_no_alloc(|| buf.remove(1));
         assert_eq!(removed.map(|p| p.sample_offset), Some(10));
@@ -432,14 +432,14 @@ mod tests {
         let mut buf = PointBuf::with_capacity(room);
         let host = 300;
         for k in 0..host {
-            assert!(buf.try_push(at(k as i32 * 16, 0.25)).is_ok());
+            assert!(buf.push(at(k as i32 * 16, 0.25)).is_ok());
         }
         // The second source, appended in a scrambled order: every 7th of
         // its points on a host frame, the rest between.
         for k in 0..room - host {
             let frame = ((k * 37) % (room - host)) as i32 * 48;
             let frame = if k % 7 == 0 { frame } else { frame + 3 };
-            assert!(buf.try_push(at(frame, (k as f64 + 1.0) / 1024.0)).is_ok());
+            assert!(buf.push(at(frame, (k as f64 + 1.0) / 1024.0)).is_ok());
         }
         let mut reference: Vec<ParameterPoint> = buf.iter().copied().collect();
         reference.sort_by_key(|p| p.sample_offset);
@@ -455,15 +455,15 @@ mod tests {
         );
     }
 
-    /// **`try_push_front` puts the point ahead of every point**, shifting
+    /// **`push_front` puts the point ahead of every point**, shifting
     /// them, within the capacity.
     #[test]
-    fn try_push_front_shifts_the_points_after_it() {
+    fn push_front_shifts_the_points_after_it() {
         let mut buf = PointBuf::with_capacity(3);
-        assert!(buf.try_push(at(10, 0.5)).is_ok());
-        assert!(buf.try_push(at(20, 0.75)).is_ok());
-        assert!(buf.try_push_front(at(0, 0.25)).is_ok());
+        assert!(buf.push(at(10, 0.5)).is_ok());
+        assert!(buf.push(at(20, 0.75)).is_ok());
+        assert!(buf.push_front(at(0, 0.25)).is_ok());
         assert_eq!(points(&buf), vec![(0, 0.25), (10, 0.5), (20, 0.75)]);
-        assert!(buf.try_push_front(at(0, 1.0)).is_err());
+        assert!(buf.push_front(at(0, 1.0)).is_err());
     }
 }

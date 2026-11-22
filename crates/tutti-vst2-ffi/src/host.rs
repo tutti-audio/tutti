@@ -2512,7 +2512,7 @@ impl PluginInstance {
     /// # Errors
     ///
     /// [`GetChunkError`] when the plugin attempted the save and failed.
-    pub fn try_get_preset_data(&self, _main: MainThreadMarker) -> Result<Vec<u8>, GetChunkError> {
+    pub fn get_preset_data(&self, _main: MainThreadMarker) -> Result<Vec<u8>, GetChunkError> {
         self.core.get_chunk(1 /*preset*/)
     }
 

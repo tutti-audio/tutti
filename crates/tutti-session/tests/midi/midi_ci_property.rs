@@ -277,7 +277,7 @@ impl Wire {
             }
         }
         self.peer.answer(&self.fake, now);
-        blocks(&self.s, 1);
+        blocks(&mut self.s, 1);
     }
 
     /// What `request` resolved to, or `None` while it is pending: polled without

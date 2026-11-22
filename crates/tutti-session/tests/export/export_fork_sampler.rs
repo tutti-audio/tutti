@@ -65,7 +65,7 @@ fn render_stem(
     node: NodeKey,
 ) -> Vec<Vec<f32>> {
     session.graph().connect(node, MainOutput).unwrap();
-    let (_, mut stems) = bounced(session, bounce.stem_with(Stem::buffers(node)))
+    let (_, mut stems) = bounced(session, bounce.stem_with(Stem::new(node)))
         .expect("the bounce renders")
         .into_parts();
     match stems.pop() {

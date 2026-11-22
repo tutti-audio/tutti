@@ -469,7 +469,7 @@ impl ParameterChanges {
         };
         let p = point(sample_offset, value);
         if room {
-            q.points.try_push(p).is_ok()
+            q.points.push(p).is_ok()
         } else {
             q.points.replace_latest(p);
             false
@@ -490,7 +490,7 @@ impl ParameterChanges {
         let stored = self
             .queues
             .get_mut(queue)
-            .is_some_and(|q| q.points.try_push_front(carried).is_ok());
+            .is_some_and(|q| q.points.push_front(carried).is_ok());
         self.overflowed += u64::from(!stored);
         stored
     }

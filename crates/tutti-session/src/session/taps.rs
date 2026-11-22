@@ -2,11 +2,11 @@
 //! and (feature `midi`) the engine's MIDI nodes and the `Session::midi` handle.
 
 use tutti_engine::{BlockCounts, Load};
-use tutti_graph::MeterReader;
+use tutti_graph::{MeterReader, TapReader};
 use tutti_rt::{Counter, Gauge};
 use tutti_units::Samples;
 
-use crate::{AppKey, Clock, HeardTapOpen, Session, SessionHeardTapError};
+use crate::{AppKey, Clock, Session, SessionHeardTapError};
 
 impl<K: AppKey, C: Clock> Session<K, C> {
     /// Opens the tap on **what the engine renders**: every output channel at
@@ -14,7 +14,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// output buffer, not the device's bytes: the device layer clamps a long
     /// callback to its `MAX_FRAMES` and converts to the device's sample type
     /// after the engine has written the tap. It is read through the same
-    /// [`TapReader`](tutti_graph::TapReader) as a plan tap, and is the default way to record what the
+    /// [`TapReader`] as a plan tap, and is the default way to record what the
     /// output sounds like. A transport stop fades in it as it does in the
     /// engine's output, so a take has no click there; [`Taps::open_root`](crate::Taps::open_root) is the
     /// pre-fader signal of the graph, aligned by the compiler, and steps at a
@@ -24,74 +24,54 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// device callback, [`render`](Self::render), and a block the engine
     /// refuses (silence, whole frames, so a take keeps its timing). An export
     /// forks the graph and renders without the engine, so it never writes to
-    /// it. There is one at a time; its ring holds `capacity` frames and what
-    /// the reader does not drain in time is dropped and counted
-    /// ([`TapReader::take_lost`](tutti_graph::TapReader::take_lost)). It flows from the first
-    /// render that begins after this returns, and is closed by
-    /// [`close_heard_tap`](Self::close_heard_tap) or, once its reader is
-    /// dropped, by the next [`Reclaim`](crate::Phase::Reclaim) phase. The width is
-    /// the device's when the session was built: a restart onto a device of
-    /// another width counts the tap's blocks lost until it is opened again.
+    /// it. There is one at a time, and the latest open wins: opening again
+    /// ends the earlier reader: it answers `Pull::Ended` once drained. Its ring holds `capacity`
+    /// frames and what the reader does not drain in time is dropped and
+    /// counted ([`TapReader::take_lost`](tutti_graph::TapReader::take_lost)).
+    ///
+    /// The reader is returned at once. The tap is the one pending install,
+    /// pushed to the audio thread when it has room, and its writes start at the
+    /// first render that begins after the push, as a plan tap's start at its
+    /// commit. The push is made by this call, or else by the next
+    /// [`Reclaim`](crate::Phase::Reclaim) phase or [`render`](Self::render).
+    /// The tap is closed by [`close_heard_tap`](Self::close_heard_tap) or, once
+    /// its reader is dropped, by the next [`Reclaim`](crate::Phase::Reclaim)
+    /// phase. The width is the device's when the session was built: a restart
+    /// onto a device of another width counts the tap's blocks lost until it is
+    /// opened again.
     ///
     /// # Errors
     ///
-    /// [`SessionHeardTapError::Detached`] on a session without an engine,
-    /// and [`SessionHeardTapError::Tap`]`(Busy)` while another reader is alive. While the
-    /// audio thread has not taken the last installs it is not an error: the
-    /// call returns [`HeardTapOpen::Retry`] and opens nothing.
+    /// [`SessionHeardTapError::Detached`] on a session without an engine.
     pub fn open_heard_tap(
-        &self,
+        &mut self,
         capacity: Samples,
-    ) -> Result<HeardTapOpen<C::Float>, SessionHeardTapError> {
+    ) -> Result<TapReader<C::Float>, SessionHeardTapError> {
         let (taps, layout) = self
             .output
             .taps
-            .as_ref()
+            .as_mut()
             .ok_or(SessionHeardTapError::Detached)?;
-        Ok(taps.open(*layout, capacity)?)
+        Ok(taps.open(*layout, capacity))
     }
 
     /// Closes the tap [`open_heard_tap`](Self::open_heard_tap) opened, now
     /// rather than at the [`Reclaim`](crate::Phase::Reclaim) phase that follows a
-    /// dropped reader. The reader keeps what it was written.
+    /// dropped reader. The reader keeps what it was written, then answers `Pull::Ended`. With no tap open
+    /// it does nothing. The writes stop from the first render that begins after
+    /// the push, as an open's start.
     ///
     /// # Errors
     ///
-    /// [`SessionHeardTapError::Detached`] on a session without an engine;
-    /// [`SessionHeardTapError::Tap`]`(NotOpen)` when no output tap is open (never opened, or
-    /// closed already); nothing changes.
-    pub fn close_heard_tap(&self) -> Result<(), SessionHeardTapError> {
+    /// [`SessionHeardTapError::Detached`] on a session without an engine.
+    pub fn close_heard_tap(&mut self) -> Result<(), SessionHeardTapError> {
         let (taps, _) = self
             .output
             .taps
-            .as_ref()
+            .as_mut()
             .ok_or(SessionHeardTapError::Detached)?;
-        Ok(taps.close()?)
-    }
-
-    /// The master meter: the level of each graph output channel, one
-    /// [`Level`](tutti_graph::Level) per channel, with the peak held since
-    /// the last read. It is an op of the plan on the outputs, declared and **on**
-    /// from the build, so a host that reads it needs to ask for nothing, and every
-    /// render feeds it: a device callback,
-    /// [`render`](Self::render), and a detached session's
-    /// `render_frame`. It reads before the engine's fold
-    /// to the device and its declick, aligned to the outputs' time. A block
-    /// the engine refuses (rendered silent because the control side held the
-    /// graph for that callback) runs no op, so it does not touch the meter:
-    /// the meter holds what it held and counts no frames for it. `None` once
-    /// a host has taken it ([`take_master_meter`](Self::take_master_meter)).
-    ///
-    /// It follows the outputs as they are re-wired or widened (up to
-    /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)). **A declared root of
-    /// another width replaces it**
-    /// ([`Session::declare_root_topology`](crate::Session::declare_root_topology)):
-    /// the one the session holds is swapped in place, and one a host took is
-    /// announced by [`SessionEvent::RootReaderReopened`](crate::SessionEvent::RootReaderReopened),
-    /// claimed with [`Session::take_reopened`](crate::Session::take_reopened),
-    /// and reads closed ([`is_closed`](MeterReader::is_closed)).
-    pub fn master_meter(&mut self) -> Option<&mut MeterReader> {
-        self.graph.meters().master()
+        taps.close();
+        Ok(())
     }
 
     /// Claims the reader reopened under `id`
@@ -107,10 +87,30 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         self.graph.take_reopened(id)
     }
 
-    /// Hands the master meter's reader to its one consumer, which owns it
-    /// from here: dropping it closes the meter at the next
-    /// [`Reclaim`](crate::Phase::Reclaim) phase. See
-    /// [`master_meter`](Self::master_meter).
+    /// The master meter: the level of each graph output channel, one
+    /// [`Level`](tutti_graph::Level) per channel, with the peak held since
+    /// the last read. It is an op of the plan on the outputs, declared and **on**
+    /// from the build, so a host that reads it needs to ask for nothing, and every
+    /// render feeds it: a device callback,
+    /// [`render`](Self::render), and a detached session's
+    /// `render_frame`. It reads before the engine's fold
+    /// to the device and its declick, aligned to the outputs' time. A block
+    /// the engine refuses (rendered silent because the control side held the
+    /// graph for that callback) runs no op, so it does not touch the meter:
+    /// the meter holds what it held and counts no frames for it.
+    ///
+    /// The reader goes to its one consumer, which owns it from here: dropping
+    /// it closes the meter at the next [`Reclaim`](crate::Phase::Reclaim)
+    /// phase. `None` once taken.
+    ///
+    /// It follows the outputs as they are re-wired or widened (up to
+    /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)). **A declared root of
+    /// another width replaces it**
+    /// ([`Session::declare_root_topology`](crate::Session::declare_root_topology)):
+    /// the reader not yet taken is swapped for the new one, and one taken is
+    /// announced by [`SessionEvent::RootReaderReopened`](crate::SessionEvent::RootReaderReopened),
+    /// claimed with [`Session::take_reopened`](crate::Session::take_reopened),
+    /// and reads closed ([`is_closed`](MeterReader::is_closed)).
     pub fn take_master_meter(&mut self) -> Option<MeterReader> {
         self.graph.meters().take_master()
     }

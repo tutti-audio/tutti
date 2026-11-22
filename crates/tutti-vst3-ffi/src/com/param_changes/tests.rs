@@ -34,7 +34,7 @@ fn a_prepended_point_without_room_is_counted_not_grown_into() {
     drop(staging);
 
     let mut out = ParameterChanges::reserved(4, 4);
-    assert!(list.try_fill_changes(&mut out));
+    assert!(list.fill_changes(&mut out));
     let points = |id: u32| -> Vec<(i32, f64)> {
         out.queues
             .iter()
@@ -82,7 +82,7 @@ fn a_refill_leaves_out_the_parameter_it_refuses() {
         .unwrap();
     assert_eq!(list.points_dropped(), 2, "the refused queue's points");
     let mut out = ParameterChanges::reserved(4, 4);
-    assert!(list.try_fill_changes(&mut out));
+    assert!(list.fill_changes(&mut out));
     let ids: Vec<u32> = out.queues.iter().map(|q| q.param_id.get()).collect();
     assert_eq!(ids, [0, 2], "parameter 1 never reaches the list");
 }
@@ -252,7 +252,7 @@ fn add_parameter_data_reuses_pooled_queues() {
     });
     // Reserved: `fill_changes` fills within the set's room.
     let mut out = ParameterChanges::reserved(4, 1);
-    assert!(changes.try_fill_changes(&mut out));
+    assert!(changes.fill_changes(&mut out));
     assert_eq!(out.queues.len(), 1);
     assert_eq!(out.queues[0].points.len(), 1);
     assert_eq!(changes.pooled(), 4);
@@ -352,11 +352,11 @@ fn emitted_changes_drain_into_the_reserved_set_without_allocating() {
         }
     };
     emit(0..pooled, None);
-    assert!(list.try_fill_changes(&mut out));
+    assert!(list.fill_changes(&mut out));
     let storage = out.point_storage();
     assert_no_alloc::assert_no_alloc(|| {
         emit(pooled..2 * pooled, Some(2 * pooled));
-        assert!(list.try_fill_changes(&mut out));
+        assert!(list.fill_changes(&mut out));
     });
     assert_eq!(out.point_storage(), storage);
     assert_eq!(out.points_overflowed(), 1);
@@ -549,7 +549,7 @@ fn a_chunk_at_the_pool_budget_refills_per_parameter_without_allocating() {
     let mut grown =
         tutti_plugin_types::ParameterQueue::with_capacity(last.param_id, last.len() + 2);
     for p in &last.points {
-        assert!(grown.points.try_push(*p).is_ok());
+        assert!(grown.points.push(*p).is_ok());
     }
     assert!(grown.add_point(200, 0.25));
     assert!(grown.add_point(300, 0.875));
@@ -642,7 +642,7 @@ fn staging_while_a_plugin_holds_a_queue_or_the_list_is_refused_and_counted() {
     {
         let _plugin_in_getpoint = list.hold_queue_as_plugin(0);
         let mut out = ParameterChanges::reserved(2, 4);
-        assert!(!list.try_fill_changes(&mut out), "the read is refused");
+        assert!(!list.fill_changes(&mut out), "the read is refused");
         assert!(out.queues.is_empty(), "and leaves nothing half read");
     }
     assert_eq!(list.busy(), 3, "the refused read is counted");

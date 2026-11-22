@@ -78,7 +78,9 @@ pub enum Phase {
     /// length check per cell when nothing is retired. It also closes the
     /// graph's taps whose readers were dropped
     /// ([`Taps::open_ports`](crate::Taps::open_ports),
-    /// [`Taps::open_event`](crate::Taps::open_event)), and emits what the
+    /// [`Taps::open_event`](crate::Taps::open_event)), closes the heard tap
+    /// whose reader was dropped, pushes the heard tap's pending install
+    /// ([`Session::open_heard_tap`](crate::Session::open_heard_tap)), and emits what the
     /// graph's nodes logged on the audio thread as `tracing` events.
     Reclaim,
 }

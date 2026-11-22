@@ -262,7 +262,7 @@ fn a_peers_ump_reaches_a_graph_node() {
     peer.send(&[note_on(60), note_on(64)]);
     peer.barrier(2);
     let _ = s.update();
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     let heard: Vec<Ump> = seen.lock().unwrap().iter().map(|(_, ump)| *ump).collect();
     assert_eq!(heard, [note_on(60), note_on(64)], "once and in order");
     drop(net);
@@ -289,7 +289,7 @@ fn a_graph_event_reaches_the_peer() {
         NoteVelocity::new(0x8000),
     )
     .unwrap();
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     let _ = s.update();
     let got = peer.next_event(|e| match e {
         Event::Ump { packet, .. } => Some(*packet),
@@ -312,7 +312,7 @@ fn an_event_with_no_peer_is_counted_refused() {
         NoteVelocity::new(0x8000),
     )
     .unwrap();
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     let _ = s.update();
     assert_eq!(net.losses().refused, 1);
 }
@@ -348,7 +348,7 @@ fn a_peers_bye_ends_its_input_entry_alone() {
     assert_eq!(net.input_node(leaves), None);
     assert_eq!(net.inputs(), [(stays, stays_node)]);
     // The node stays while the graph renders what it releases, then goes.
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     let _ = s.update();
     assert!(!s.graph().contains(leaves_node));
     assert!(s.graph().contains(stays_node));
@@ -368,7 +368,7 @@ fn dropping_the_network_sends_bye_to_the_peer() {
     let _ = s.update();
     let (by, reason) = peer.closed();
     assert_eq!((by, reason), (EndedBy::Remote, ByeReason::PowerDown));
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     let _ = s.update();
     assert!(!s.graph().contains(node), "the peer's input node left");
 }
@@ -412,7 +412,7 @@ fn a_peer_back_from_another_address_replaces_its_entry() {
     );
     let new = net.input_node(laptop).unwrap();
     assert_ne!(new, old);
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     let _ = s.update();
     assert!(!s.graph().contains(old));
     assert!(s.graph().contains(new));
@@ -467,7 +467,7 @@ fn a_client_session_hears_its_host() {
         .unwrap();
     wait_until("the Host's UMP to reach the graph", HANG_GUARD, || {
         let _ = s.update();
-        blocks(&s, 1);
+        blocks(&mut s, 1);
         !seen.lock().unwrap().is_empty()
     });
     assert_eq!(seen.lock().unwrap()[0].1, note_on(65));

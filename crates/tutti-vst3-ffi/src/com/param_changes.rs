@@ -40,7 +40,7 @@ use tutti_rt::{AudioThreadCell, BorrowGuard};
 ///
 /// The host reaches the list only through [`try_begin`](Self::try_begin)'s
 /// [`ParamStaging`] (to stage a block) or
-/// [`try_fill_changes`](Self::try_fill_changes) (to read what the plugin
+/// [`fill_changes`](Self::fill_changes) (to read what the plugin
 /// wrote); both take `try_` borrows and count a refusal in
 /// [`busy`](Self::busy), so a plugin thread still inside the list or one of
 /// its queues costs the host a skipped block, never a wait or a panic.
@@ -114,7 +114,7 @@ impl ParameterChangesImpl {
 
     /// How many calls the host skipped because a plugin thread held the list
     /// or one of its queues ([`try_begin`](Self::try_begin),
-    /// [`try_fill_changes`](Self::try_fill_changes)).
+    /// [`fill_changes`](Self::fill_changes)).
     pub fn busy(&self) -> u64 {
         self.busy.get()
     }
@@ -205,7 +205,7 @@ impl ParameterChangesImpl {
     /// inside the list or one of its queues: `out` then holds what was read
     /// before, which the caller discards.
     #[must_use = "a refused read leaves `out` partial"]
-    pub fn try_fill_changes(&self, out: &mut ParameterChanges) -> bool {
+    pub fn fill_changes(&self, out: &mut ParameterChanges) -> bool {
         out.clear();
 
         let Some(inner) = self.inner.try_borrow() else {

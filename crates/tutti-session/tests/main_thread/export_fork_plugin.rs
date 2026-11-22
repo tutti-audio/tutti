@@ -302,7 +302,7 @@ fn instrument_at(rate: f64, hosting: Hosting) {
     }));
     let planes = stem_planes(
         &mut session,
-        bounce_of(1.5, rate, ExportClock::timeline(timeline)).stem_with(Stem::buffers(probe)),
+        bounce_of(1.5, rate, ExportClock::timeline(timeline)).stem_with(Stem::new(probe)),
     );
     let open: Vec<usize> = planes[0]
         .iter()

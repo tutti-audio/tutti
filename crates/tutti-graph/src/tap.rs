@@ -96,6 +96,8 @@ pub struct TapWriter<F: Float = f32> {
     lost: Arc<AtomicU64>,
     /// Rung after each block written, for a reader that awaits frames.
     bell: Option<Bell>,
+    /// The reader's end latch, raised by [`close`](Self::close).
+    end: Arc<TapEnd>,
     /// Rings the bell when the writer is gone. Last, so it drops after the rings: the
     /// reader that wakes finds their writers gone.
     _gone: RingOnDrop,
@@ -169,6 +171,17 @@ impl<F: Float> std::fmt::Debug for TapWriter<F> {
 }
 
 impl<F: Float> TapWriter<F> {
+    /// Ends the tap for good and drops the writer. The reader's end latch is
+    /// raised before the writer's rings go, so the reader reads
+    /// [`source_gone`](TapReader::source_gone) and, once it has drained what
+    /// was written, answers [`Pull::Ended`], as
+    /// when the editor removes the tap's sources. A plain drop does not raise
+    /// it: that reader reads [`writer_gone`](TapReader::writer_gone) and keeps
+    /// answering `Starved`. Control side: dropping a writer is never audio-thread work.
+    pub fn close(self) {
+        self.end.raise();
+    }
+
     /// How many lanes (channels) this writer fills.
     #[must_use]
     pub fn width(&self) -> usize {
@@ -404,7 +417,7 @@ impl<F: Float> TapReader<F> {
             left: 0,
             alive: Arc::new(()),
             listener,
-            end,
+            end: Arc::clone(&end),
         };
         let writer = TapWriter {
             _control: ControlDrop::new(),
@@ -414,6 +427,7 @@ impl<F: Float> TapReader<F> {
             lost,
             _gone: RingOnDrop(bell.clone()),
             bell,
+            end,
         };
         (reader, writer)
     }
@@ -684,6 +698,33 @@ impl<F: Float> Source for TapReader<F> {
 mod tests {
     use super::*;
     use crate::arena::Arena;
+
+    /// **A closed writer ends its reader**: the reader drains what was
+    /// written, then answers `Ended`; a dropped one answers `Starved`.
+    #[test]
+    fn a_closed_writer_ends_its_reader_after_the_drain() {
+        use tutti_buffers::{Pull, Source};
+        let mut out = [0.0f32; 4];
+        let (mut reader, mut writer) = TapReader::<f32>::pair(1, Samples::new(8));
+        writer.push_interleaved(Interleaved::new(&[1.0, 2.0], writer.layout()).unwrap());
+        writer.close();
+        assert!(reader.source_gone());
+        let layout = reader.layout();
+        assert!(matches!(
+            Source::pull(&mut reader, InterleavedMut::new(&mut out, layout).unwrap()),
+            Pull::Frames(n) if n.get() == 2
+        ));
+        assert!(matches!(
+            Source::pull(&mut reader, InterleavedMut::new(&mut out, layout).unwrap()),
+            Pull::Ended
+        ));
+        let (mut reader, writer) = TapReader::<f32>::pair(1, Samples::new(8));
+        drop(writer);
+        assert!(matches!(
+            Source::pull(&mut reader, InterleavedMut::new(&mut out, layout).unwrap()),
+            Pull::Starved
+        ));
+    }
 
     /// **A dropped writer rings the bell after its rings are gone**, so the reader that
     /// wakes reads the writer gone with every frame written before it still there.

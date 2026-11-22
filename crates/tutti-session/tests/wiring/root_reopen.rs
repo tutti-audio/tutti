@@ -220,7 +220,7 @@ fn a_meter_nobody_took_is_replaced_without_an_event() {
         .unfaded();
     assert!(reopened(block(&mut s)).is_empty());
     let _ = block(&mut s);
-    let meter = s.master_meter().expect("held");
+    let mut meter = s.take_master_meter().expect("held");
     assert_eq!(meter.channels(), 1);
     assert_eq!(meter.read()[0].peak.get(), 0.25);
 }

@@ -87,7 +87,7 @@ impl Wire {
         let now = self.start + Duration::from_millis(self.ms);
         let _ = update_at(&mut self.s, now);
         self.peer.answer(&self.fake, now);
-        blocks(&self.s, 1);
+        blocks(&mut self.s, 1);
     }
 
     /// What `request` resolved to, or `None` while it is pending: polled without
