@@ -468,6 +468,52 @@ fn get_returns_the_data_in_each_encoding_the_entry_lists() {
     }
 }
 
+// M2-103 §6.1.6: the encodings a Resource supports are found with the ResourceList
+// inquiry: the Initiator knows each entry's, and uses only those.
+/// Spec: m2-103/6.1.6#3
+#[test]
+fn the_encodings_of_a_resource_are_those_the_resource_list_gave() {
+    let mut link = Link::new(store(), 256);
+    let list = link.init.resource_list().expect("the list was got").clone();
+    let encodings = |name: &str| {
+        list.entry(&custom_or_standard(name))
+            .unwrap()
+            .encodings()
+            .to_vec()
+    };
+    assert_eq!(
+        encodings("ChannelList"),
+        [
+            PeEncoding::Ascii,
+            PeEncoding::Mcoded7,
+            PeEncoding::ZlibMcoded7
+        ]
+    );
+    assert_eq!(encodings("DeviceInfo"), [PeEncoding::Ascii]);
+    assert_eq!(encodings("X-Blob"), [PeEncoding::Mcoded7]);
+    // Each one the list gives is used; the ones it does not give are not.
+    for (resource, encoding, listed) in [
+        (PeResource::ChannelList, PeEncoding::ZlibMcoded7, true),
+        (PeResource::DeviceInfo, PeEncoding::ZlibMcoded7, false),
+        (custom("X-Blob"), PeEncoding::Ascii, false),
+    ] {
+        let made = link.init.get(&get(resource).encoded(encoding), link.now);
+        assert_eq!(
+            !matches!(
+                made,
+                Err(CallError::Refused(
+                    RequestRefused::EncodingNotDeclared { .. }
+                ))
+            ),
+            listed
+        );
+    }
+}
+
+fn custom_or_standard(name: &str) -> PeResource {
+    PeResource::from_name(&super::super::limits::ResourceName::new(name).unwrap())
+}
+
 // M2-103 §14.2: an encoding the entry does not list is refused before it is sent.
 #[test]
 fn an_unlisted_encoding_is_refused_by_the_initiator() {
@@ -1247,7 +1293,7 @@ fn a_set_is_announced_to_the_subscribers() {
 
 // M2-103 §11.1.1: when the data does not fit one chunk the Responder sends `notify`,
 // and the Initiator gets the Resource again.
-/// Spec: m2-103/11.1.1#4
+/// Spec: m2-103/11.1.1#4, m2-103/11.1#8
 #[test]
 fn an_update_too_big_for_a_chunk_is_a_notify_and_a_get() {
     let mut link = Link::new(store(), 128);
@@ -1443,32 +1489,35 @@ fn a_full_update_of_a_simple_resource_is_its_value() {
     ));
 }
 
-// M2-103 §11.2: an Initiator that receives a `partial` it cannot handle replies with
-// success and Gets the Resource to stay in step.
+// M2-103 §11.2: an Initiator that receives a `partial` or a `full` it cannot handle
+// replies with success and Gets the Resource to stay in step.
+/// Spec: m2-103/11.2#3
 #[test]
 fn an_update_that_cannot_be_applied_is_answered_and_the_resource_got_again() {
     let (mut script, id) = subscribed_script();
     script.events.clear();
     let gets = sent_gets(&script);
+    let replied_with = |script: &Script| {
+        script.sent.iter().rev().find_map(|m| match m {
+            CiMessage::PropertyExchange {
+                message: PeCiMessage::Chunk { kind, chunk },
+                ..
+            } if *kind == PeMessageKind::SUBSCRIPTION_REPLY => {
+                match PeHeader::try_from(chunk.header()) {
+                    Ok(PeHeader::Reply(r)) => Some(r.status),
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+    };
     // The pointer names no place in a boolean.
     script.subscription(
         6,
         update(PeUpdateCommand::Partial, &id),
         br#"{"/nowhere":1}"#,
     );
-    // The reply to the Subscription message is a success.
-    let reply = script.sent.iter().rev().find_map(|m| match m {
-        CiMessage::PropertyExchange {
-            message: PeCiMessage::Chunk { kind, chunk },
-            ..
-        } if *kind == PeMessageKind::SUBSCRIPTION_REPLY => match PeHeader::try_from(chunk.header())
-        {
-            Ok(PeHeader::Reply(r)) => Some(r.status),
-            _ => None,
-        },
-        _ => None,
-    });
-    assert_eq!(reply, Some(PeStatus::Ok));
+    assert_eq!(replied_with(&script), Some(PeStatus::Ok));
     assert_eq!(sent_gets(&script), gets + 1);
     let get_id = script.last_get_id();
     script.reply(get_id, PeStatus::Ok, None, &PeJson::Bool(true));
@@ -1482,10 +1531,47 @@ fn an_update_that_cannot_be_applied_is_answered_and_the_resource_got_again() {
     ));
     // The same for a `full` whose data is not the Resource's, and for `notify`.
     script.events.clear();
+    script.sent.clear();
     script.subscription(7, update(PeUpdateCommand::Full, &id), b"\"yes\"");
-    assert_eq!(sent_gets(&script), gets + 2);
+    assert_eq!(replied_with(&script), Some(PeStatus::Ok));
+    assert_eq!(sent_gets(&script), 1);
     script.subscription(8, update(PeUpdateCommand::Notify, &id), b"");
-    assert_eq!(sent_gets(&script), gets + 3);
+    assert_eq!(sent_gets(&script), 2);
+}
+
+// M2-103 §11.4: the Initiator refreshes the data of a Subscription with the Header
+// Data it used to get it the first time.
+/// Spec: m2-103/11.4#2
+#[test]
+fn a_refresh_gets_with_the_header_the_first_get_used() {
+    let mut link = Link::new(store(), 128);
+    let blob = custom("X-Blob");
+    let made = link
+        .init
+        .subscribe(&get(blob.clone()).encoded(PeEncoding::Mcoded7), link.now);
+    link.call(made);
+    // The new data does not fit one chunk, so the Responder sends `notify`.
+    let actions = link
+        .resp
+        .publish(
+            &mut link.store,
+            &target(blob.clone()),
+            blob_data("X-Blob", &blob_bytes(200)),
+            link.now,
+        )
+        .unwrap();
+    link.publish(actions);
+    assert_eq!(link.updates().last().unwrap().2, UpdateKind::Refreshed);
+    let gets: Vec<_> = link
+        .get_requests()
+        .into_iter()
+        .filter(|g| g.resource.as_str() == "X-Blob")
+        .collect();
+    assert_eq!(gets.len(), 2, "the first Get and the refresh");
+    assert_eq!(gets[1], gets[0]);
+    // The entry lists Mcoded7 only, so the header says it: the refresh does not
+    // fall back to the default encoding.
+    assert_eq!(gets[0].mutual_encoding, Some(PeEncoding::Mcoded7));
 }
 
 // M2-103 §11.2: a Subscription message for a Subscription the device does not hold
@@ -1604,4 +1690,217 @@ fn a_refusal_carries_a_message() {
         panic!("not a failure");
     };
     assert!(response.header.message.is_some());
+}
+
+/// A Get of `resource` as the Responder's store holds it: in the first encoding its
+/// entry lists, with `entry_id` as the `resId`.
+fn pe_get_of(entry: &ResourceEntry, entry_id: Option<&str>) -> PeGet {
+    let mut get = pe_get(entry.resource().as_str());
+    get.res_id = entry_id.and_then(ResourceId::new);
+    get.encoding = entry.encodings()[0];
+    get
+}
+
+/// The ResourceList a Responder answers a Get of it with, read off the wire.
+fn resource_list_on_the_wire(raw: &mut Raw) -> PeResourceList {
+    let PeOutcome::Success(response) = raw.outcome(PeCall::Get(pe_get("ResourceList"))) else {
+        panic!("ResourceList was not answered");
+    };
+    let body = PeJson::try_from(response.body.as_slice()).unwrap();
+    match PeData::decode(&PeResource::ResourceList, &body) {
+        Ok(PeData::ResourceList(list)) => list,
+        other => panic!("{other:?}"),
+    }
+}
+
+/// The `resId` of the one entry the test store holds of each Resource that has them.
+fn entry_id_of(resource: &PeResource) -> Option<&'static str> {
+    match resource.as_str() {
+        "ProgramList" => Some("general"),
+        "X-ProgramEdit" => Some("abcd"),
+        _ => None,
+    }
+}
+
+// M2-103 §14: the ResourceList reply is the list of every Resource the device
+// supports, the standard ones and the manufacturer's, and no other.
+/// Spec: m2-103/14#1, m2-103/14#3
+#[test]
+fn the_resource_list_reply_has_every_declared_resource() {
+    let mut raw = Raw::new();
+    let list = resource_list_on_the_wire(&mut raw);
+    let names: Vec<&str> = list
+        .entries()
+        .iter()
+        .map(|e| e.resource().as_str())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "DeviceInfo",
+            "ChannelList",
+            "ProgramList",
+            "LocalOn",
+            "ChannelMode",
+            "X-ProgramEdit",
+            "X-Blob",
+            "X-BigBlob",
+        ]
+    );
+    // Each listed Resource is one the Responder serves.
+    for entry in list.entries() {
+        let id = entry_id_of(entry.resource());
+        assert_eq!(
+            raw.status(PeCall::Get(pe_get_of(entry, id))),
+            PeStatus::Ok,
+            "{}",
+            entry.resource()
+        );
+    }
+}
+
+// M2-103 §11: a Resource is subscribable when the ResourceList reply says so, and a
+// Subscription to one the reply does not mark is refused.
+/// Spec: m2-103/11#3
+#[test]
+fn the_resource_list_reply_marks_exactly_the_subscribable_resources() {
+    let mut raw = Raw::new();
+    let list = resource_list_on_the_wire(&mut raw);
+    let marked: Vec<&str> = list
+        .entries()
+        .iter()
+        .filter(|e| e.can_subscribe())
+        .map(|e| e.resource().as_str())
+        .collect();
+    assert_eq!(
+        marked,
+        ["ChannelList", "X-ProgramEdit", "X-Blob", "X-BigBlob"]
+    );
+    let mut raw = Raw::new();
+    for entry in list.entries() {
+        let mut start = pe_get_of(entry, entry_id_of(entry.resource()));
+        start.flow_control = PeFlowControl::Off;
+        let status = raw.status(PeCall::Subscribe(start));
+        let want = if entry.can_subscribe() {
+            PeStatus::Ok
+        } else {
+            PeStatus::NotAllowed
+        };
+        assert_eq!(status, want, "{}", entry.resource());
+    }
+}
+
+// M2-103 §8.6.2: a Resource paginates when its ResourceList entry says canPaginate,
+// and a page of any other is refused.
+/// Spec: m2-103/8.6.2#1
+#[test]
+fn a_page_is_answered_exactly_where_the_resource_list_says_canpaginate() {
+    let mut raw = Raw::new();
+    let list = resource_list_on_the_wire(&mut raw);
+    let mut paginating = Vec::new();
+    for entry in list.entries() {
+        let mut paged = pe_get_of(entry, entry_id_of(entry.resource()));
+        paged.page = Some(PePage {
+            offset: 0,
+            limit: NonZeroU32::new(2).unwrap(),
+        });
+        let want = if entry.can_paginate() {
+            paginating.push(entry.resource().as_str());
+            PeStatus::Ok
+        } else {
+            PeStatus::BadRequest
+        };
+        assert_eq!(raw.status(PeCall::Get(paged)), want, "{}", entry.resource());
+    }
+    assert_eq!(paginating, ["ProgramList"]);
+}
+
+// M2-103 §14.2: requireResId says an inquiry must carry resId, and one that does
+// not is refused with 400, where a resId on a Resource without one is too.
+/// Spec: m2-103/14.2#2
+#[test]
+fn an_inquiry_without_the_res_id_the_entry_requires_is_refused() {
+    let mut raw = Raw::new();
+    let list = resource_list_on_the_wire(&mut raw);
+    let mut required = Vec::new();
+    for entry in list.entries() {
+        let name = entry.resource().as_str();
+        let bare = raw.status(PeCall::Get(pe_get_of(entry, None)));
+        let with = raw.status(PeCall::Get(pe_get_of(entry, Some("abcd"))));
+        if entry.require_res_id() {
+            required.push(name);
+            assert_eq!(bare, PeStatus::BadRequest, "{name} without resId");
+        } else {
+            assert_eq!(bare, PeStatus::Ok, "{name}");
+            assert_eq!(with, PeStatus::BadRequest, "{name} with resId");
+        }
+    }
+    assert_eq!(required, ["ProgramList", "X-ProgramEdit"]);
+}
+
+// M2-103 §7.3: a reply carries Property Data in the mutualEncoding the Get asked
+// for, and names it in its header.
+/// Spec: m2-103/7.3#3
+#[test]
+fn the_reply_is_in_the_mutual_encoding_the_get_asked_for() {
+    use super::super::body::decode_body;
+    use super::super::mcoded7;
+    let mut link = Link::new(store(), 4096);
+    let expected = PeData::ChannelList(PeChannelList::new(vec![
+        channel(1, "Lead"),
+        channel(10, "Drums"),
+    ]))
+    .to_json()
+    .unwrap()
+    .encode();
+    let limit = crate::BodyLimit::new(1 << 16).unwrap();
+    for encoding in [
+        PeEncoding::Mcoded7,
+        PeEncoding::ZlibMcoded7,
+        PeEncoding::Ascii,
+    ] {
+        let mark = link.wire.len();
+        let made = link
+            .init
+            .get(&get(PeResource::ChannelList).encoded(encoding), link.now);
+        let call = link.call(made);
+        assert!(link.got(call).is_ok(), "{encoding:?}");
+        // What the Responder put on the wire: the header's reply and the data of its
+        // chunks, as sent.
+        let mut header = None;
+        let mut wire = Vec::new();
+        for (to_resp, message) in &link.wire[mark..] {
+            if let CiMessage::PropertyExchange {
+                message: PeCiMessage::Chunk { kind, chunk },
+                ..
+            } = message
+                && !to_resp
+                && *kind == PeMessageKind::GET_REPLY
+            {
+                if !chunk.header().is_empty() {
+                    header = PeHeader::try_from(chunk.header()).ok();
+                }
+                wire.extend_from_slice(chunk.data());
+            }
+        }
+        let Some(PeHeader::Reply(reply)) = header else {
+            panic!("{encoding:?}: no reply header");
+        };
+        assert_eq!(reply.mutual_encoding.unwrap_or(PeEncoding::Ascii), encoding);
+        assert_eq!(
+            decode_body(encoding, &wire, limit).as_deref(),
+            Ok(&expected[..]),
+            "{encoding:?}"
+        );
+        match encoding {
+            PeEncoding::Ascii => assert_eq!(wire, expected),
+            _ => {
+                assert!(wire.iter().all(|b| *b < 0x80), "{encoding:?} is 7-bit");
+                assert_ne!(wire, expected, "{encoding:?} is not plain JSON");
+            }
+        }
+        if encoding == PeEncoding::Mcoded7 {
+            assert_eq!(mcoded7::decode_vec(&wire).as_deref(), Ok(&expected[..]));
+        }
+    }
 }

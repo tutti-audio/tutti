@@ -85,6 +85,7 @@ fn device_info_is_written_with_its_ids_in_bytes() {
 
 // M2-105 Table 5 marks the ids and the four names required, and M2-103 §8.3 has a
 // required string not empty.
+/// Spec: m2-103/8.3#4
 #[test]
 fn device_info_requires_its_properties() {
     let full = r#"{"manufacturerId":[125,0,0],"manufacturer":"M","familyId":[0,0],"family":"F",
@@ -107,9 +108,23 @@ fn device_info_requires_its_properties() {
         let error = PeData::decode(&PeResource::DeviceInfo, &object).unwrap_err();
         assert_eq!(error.fault, PeDataFault::Missing, "{key}");
     }
-    let empty = full.replace(r#""manufacturer":"M""#, r#""manufacturer":"""#);
+    // A required string is never empty.
+    for (key, value) in [
+        ("manufacturer", "M"),
+        ("family", "F"),
+        ("model", "X"),
+        ("version", "1"),
+    ] {
+        let empty = full.replace(&format!(r#""{key}":"{value}""#), &format!(r#""{key}":"""#));
+        assert_ne!(empty, full, "{key}");
+        assert_eq!(
+            fails(PeResource::DeviceInfo, &empty).fault,
+            PeDataFault::Missing,
+            "{key}"
+        );
+    }
     assert_eq!(
-        fails(PeResource::DeviceInfo, &empty).fault,
+        fails(PeResource::ChannelList, r#"[{"title":"","channel":1}]"#).fault,
         PeDataFault::Missing
     );
 }
@@ -137,7 +152,7 @@ fn device_info_ids_are_7_bit_arrays_of_the_right_length() {
 
 // M2-103 §6.1.4: a property named `x-` is the manufacturer's, kept inside an AMEI
 // Resource; an unknown property that is not one is a later version's.
-/// Spec: m2-103/6.1.4#2
+/// Spec: m2-103/6.1.4#2, m2-103/6.1.4#3
 #[test]
 fn a_manufacturer_property_is_kept_and_written_back() {
     let text = r#"{"manufacturerId":[125,0,0],"manufacturer":"Educational Use","familyId":[0,0],
@@ -288,6 +303,7 @@ fn a_link_role_is_at_most_32_characters() {
 
 // M2-107 §2.2: ProgramList entries have a title, the Bank Select and Program Change
 // that recall the Program, its categories and its tags.
+/// Spec: m2-103/8.6.1#1
 #[test]
 fn program_list_reads_its_entries() {
     let text = r#"[{"title":"Acoustic Grand Piano","bankPC":[121,0,1],"category":["Piano","Keys"],
@@ -672,6 +688,7 @@ fn json_schema_is_an_object() {
 
 // M2-103 §14: Property Data of a Resource this crate has no type for is kept as
 // JSON, whether the manufacturer's or not modelled; a typed Resource is never opaque.
+/// Spec: m2-103/8.1#1
 #[test]
 fn a_resource_without_a_type_is_opaque_json() {
     let program = custom("X-ProgramEdit");
@@ -742,6 +759,7 @@ fn resource_list_reads_table_82() {
 
 // M2-103 §14.3 Table 84, M2-107 §2.4, M2-106 §3.4: an entry is written without the
 // properties that have their defaults, and a default is the Resource's own.
+/// Spec: m2-103/14.3#2
 #[test]
 fn a_default_entry_is_minimal() {
     let minimal = |resource: PeResource| {
@@ -784,7 +802,7 @@ fn a_default_entry_is_minimal() {
 
 // M2-103 §14.3: canGet, canSet, requireResId, canPaginate and schema keep their
 // defaults on a Resource an AMEI/MMA specification defines.
-/// Spec: m2-103/14.3#3
+/// Spec: m2-103/14.3#3, m2-103/14.4#1
 #[test]
 fn a_standard_resource_keeps_its_defaults() {
     let entry = ResourceEntry::builder;
@@ -849,6 +867,7 @@ fn resource_list_does_not_list_itself_or_repeat() {
 }
 
 // M2-103 §14.2.1: `canPaginate` and `columns` are List Resource properties.
+/// Spec: m2-103/14.2.1#1
 #[test]
 fn only_a_list_resource_paginates_and_has_columns() {
     let x_song = custom("X-Song");
@@ -873,7 +892,7 @@ fn only_a_list_resource_paginates_and_has_columns() {
 
 // M2-103 §14.4, Table 86: a manufacturer JSON Resource gives a schema with at least
 // a title and a type.
-/// Spec: m2-103/14.4#2, m2-103/14.4#3
+/// Spec: m2-103/14.4#2, m2-103/14.4#3, m2-103/14.6#3
 #[test]
 fn a_custom_entry_needs_a_schema_with_a_title() {
     let wifi = custom("X-WIFIOn");
@@ -1142,19 +1161,47 @@ fn a_subscription_needs_can_subscribe() {
     assert_eq!(get.check_subscribe(&subscribable), Ok(()));
 }
 
-// The Resource of the standard names is the name of M2-103 §8: Pascal Case.
+// M2-103 §8: the Resources of the specifications have their spec's names, each
+// Pascal Case, and a name with a space is no Resource name.
+/// Spec: m2-103/8#2
 #[test]
-fn the_wire_names_of_the_resources_are_the_specs() {
+fn the_wire_names_of_the_resources_are_the_specs_and_pascal_case() {
     for (resource, name) in [
         (PeResource::ResourceList, "ResourceList"),
+        (PeResource::DeviceInfo, "DeviceInfo"),
+        (PeResource::ChannelList, "ChannelList"),
         (PeResource::JsonSchema, "JSONSchema"),
-        (PeResource::AllCtrlList, "AllCtrlList"),
+        (PeResource::ModeList, "ModeList"),
+        (PeResource::CurrentMode, "CurrentMode"),
+        (PeResource::ChannelMode, "ChannelMode"),
         (PeResource::BasicChannelRx, "BasicChannelRx"),
+        (PeResource::BasicChannelTx, "BasicChannelTx"),
+        (PeResource::ProgramList, "ProgramList"),
+        (PeResource::LocalOn, "LocalOn"),
         (PeResource::ExternalSync, "ExternalSync"),
+        (PeResource::AllCtrlList, "AllCtrlList"),
+        (PeResource::ChCtrlList, "ChCtrlList"),
+        (PeResource::CtrlMapList, "CtrlMapList"),
+        (PeResource::StateList, "StateList"),
+        (PeResource::State, "State"),
     ] {
         assert_eq!(resource.as_str(), name);
         assert_eq!(PeResource::from_name(&resource.name()), resource);
+        assert!(name.starts_with(|c: char| c.is_ascii_uppercase()), "{name}");
+        assert!(name.chars().all(|c| c.is_ascii_alphanumeric()), "{name}");
     }
+    for spaced in [
+        "Program List",
+        "ProgramList ",
+        " ProgramList",
+        "X-Program Edit",
+    ] {
+        assert!(
+            super::super::limits::ResourceName::new(spaced).is_none(),
+            "{spaced:?}"
+        );
+    }
+    assert!(CustomResource::new("X-Program Edit").is_none());
 }
 
 // M2-103 §14.4, §14: an entry a peer sent is read as it is, where a device building one
@@ -1413,4 +1460,100 @@ fn a_store_refuses_a_link_to_an_undeclared_action_resource() {
         store.put(None, selector),
         Err(StoreError::ActionNotDeclared(custom("X-Nowhere")))
     );
+}
+
+fn programs(n: u8) -> PeData {
+    PeData::ProgramList(PeProgramList::new(vec![super::exchange::program(n)]))
+}
+
+// M2-103 §8.5: a Resource with entries has one entry for each `resId`: data put under
+// a `resId` held already replaces it, and other `resId`s keep theirs.
+/// Spec: m2-103/8.5#3
+#[test]
+fn a_store_keeps_one_entry_for_each_res_id() {
+    let mut store = ResourceStore::new();
+    store.declare(entry_of(PeResource::ProgramList));
+    let target = |name: &str| ResourceTarget::entry(PeResource::ProgramList, id(name)).unwrap();
+    store.put(Some(id("a")), programs(1)).unwrap();
+    store.put(Some(id("b")), programs(2)).unwrap();
+    store.put(Some(id("a")), programs(3)).unwrap();
+    assert_eq!(store.get(&target("a")), Some(&programs(3)));
+    assert_eq!(store.get(&target("b")), Some(&programs(2)));
+    assert_eq!(store.get(&target("c")), None);
+}
+
+// M2-103 §8.5, §14.2: a Resource that has entries says `requireResId` true in the
+// ResourceList, and one that has none says it is not; the store holds each to it.
+/// Spec: m2-103/8.5#5
+#[test]
+fn a_resource_with_entries_says_require_res_id_true_in_the_resource_list() {
+    let mut store = ResourceStore::new();
+    store.declare(entry_of(PeResource::ProgramList));
+    let edit = ResourceEntry::builder(custom("X-Edit"))
+        .schema(json(r#"{"title":"Edit","type":"object"}"#))
+        .require_res_id(true)
+        .build()
+        .unwrap();
+    store.declare(edit);
+    store.declare(entry_of(PeResource::LocalOn));
+    let edit_data = || PeData::decode(&custom("X-Edit"), &json(r#"{"a":1}"#)).unwrap();
+    assert!(store.put(Some(id("a")), programs(1)).is_ok());
+    assert!(store.put(Some(id("a")), edit_data()).is_ok());
+    assert_eq!(
+        store.put(None, programs(1)),
+        Err(StoreError::ResIdDisagrees {
+            resource: PeResource::ProgramList,
+            required: true
+        })
+    );
+    assert_eq!(
+        store.put(None, edit_data()),
+        Err(StoreError::ResIdDisagrees {
+            resource: custom("X-Edit"),
+            required: true
+        })
+    );
+    assert_eq!(
+        store.put(Some(id("a")), PeData::LocalOn(PeLocalOn(true))),
+        Err(StoreError::ResIdDisagrees {
+            resource: PeResource::LocalOn,
+            required: false
+        })
+    );
+    let list = store.resource_list();
+    let requires = |resource: &PeResource| list.entry(resource).unwrap().require_res_id();
+    assert!(requires(&PeResource::ProgramList));
+    assert!(requires(&custom("X-Edit")));
+    assert!(!requires(&PeResource::LocalOn));
+    // On the wire a manufacturer's entry says so.
+    let written = list.entry(&custom("X-Edit")).unwrap().to_json().encode();
+    assert!(
+        String::from_utf8(written)
+            .unwrap()
+            .contains(r#""requireResId":true"#)
+    );
+}
+
+// M2-103 §6.1: a number in Property Data is decimal too: the writer writes the
+// numbers of a Resource as decimal digits and a hexadecimal literal is not JSON.
+/// Spec: m2-103/6.1#4
+#[test]
+fn a_property_data_number_is_written_and_read_in_decimal() {
+    let data = ok(
+        PeResource::ChannelList,
+        r#"[{"title":"T","channel":10,"bankPC":[125,0,127]}]"#,
+    );
+    let written = String::from_utf8(data.to_json().unwrap().encode()).unwrap();
+    assert!(written.contains(r#""channel":10"#), "{written}");
+    assert!(written.contains("[125,0,127]"), "{written}");
+    assert!(
+        !written.contains("0x") && !written.contains("0X"),
+        "{written}"
+    );
+    for hex in ["0x0A", "0X0a", "0Ah", "$0A"] {
+        let text = format!(r#"[{{"title":"T","channel":{hex}}}]"#);
+        assert!(PeJson::try_from(text.as_bytes()).is_err(), "{text}");
+    }
+    assert_eq!(PeJson::Integer(0x7D).encode(), b"125");
+    assert_eq!(PeJson::Integer(-0x10).encode(), b"-16");
 }

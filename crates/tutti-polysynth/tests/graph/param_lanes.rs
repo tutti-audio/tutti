@@ -39,20 +39,23 @@ fn synth(unison: bool, detune: f64) -> PolySynth<f32> {
 
 /// [`synth`] starting at master volume `volume`.
 fn synth_at(unison: bool, detune: f64, volume: tutti_units::Amplitude) -> PolySynth<f32> {
-    PolySynth::<f32>::new(SynthConfig {
-        volume: tutti_polysynth::MasterVolume::of(volume),
-        oscillator: OscillatorType::Saw,
-        envelope: Adsr {
+    let config = SynthConfig::new()
+        .volume(tutti_polysynth::MasterVolume::of(volume))
+        .oscillator(OscillatorType::Saw)
+        .envelope(Adsr {
             attack: Seconds::new(0.0),
             ..Default::default()
-        },
-        unison: unison.then_some(UnisonConfig {
-            voice_count: UnisonVoices::of(3),
-            detune_cents: CentsSpan::of(detune),
-            stereo_spread: Spread::POINT,
-            phase_randomize: false,
-        }),
-        ..Default::default()
+        });
+    PolySynth::<f32>::new(if unison {
+        config.unison(
+            UnisonConfig::new()
+                .voice_count(UnisonVoices::of(3))
+                .detune_cents(CentsSpan::of(detune))
+                .stereo_spread(Spread::POINT)
+                .phase_randomize(false),
+        )
+    } else {
+        config
     })
 }
 

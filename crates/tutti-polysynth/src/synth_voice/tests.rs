@@ -4,18 +4,16 @@ use tutti_units::Semitones;
 const BASE: Hz = Hz::new(1000.0);
 
 fn voice(lfo_rate: Option<Hz>) -> SynthVoice {
-    let config = SynthConfig {
-        filter: FilterType::Moog {
+    let filter_mod = FilterModConfig::new().lfo_depth(Depth::FULL);
+    let config = SynthConfig::new()
+        .filter(FilterType::Moog {
             cutoff: BASE,
             resonance: Resonance::NONE,
-        },
-        filter_mod: FilterModConfig {
-            lfo_depth: Depth::FULL,
-            lfo_rate,
-            ..FilterModConfig::default()
-        },
-        ..SynthConfig::default()
-    };
+        })
+        .filter_mod(match lfo_rate {
+            Some(rate) => filter_mod.lfo_rate(rate),
+            None => filter_mod,
+        });
     SynthVoice::from_config(&config, SampleRate::SR_48K, UnisonVoices::ONE)
 }
 

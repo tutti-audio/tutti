@@ -1,5 +1,9 @@
 //! Filters and dynamics: responses, block independence and non-finite input.
 
+/// An allocation inside an `RtScope` aborts the running test.
+#[global_allocator]
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
+
 mod delay_echoes;
 mod envelope_filter;
 mod filter_block_independence;

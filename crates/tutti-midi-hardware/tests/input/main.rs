@@ -11,23 +11,23 @@ mod ci_wire;
 mod hardware_poll_no_alloc;
 #[cfg(any(
     all(target_os = "linux", feature = "sequencer-tests"),
-    target_os = "macos"
+    all(target_os = "macos", feature = "coremidi")
 ))]
 mod listener;
 #[cfg(any(
     all(target_os = "linux", feature = "sequencer-tests"),
-    target_os = "macos"
+    all(target_os = "macos", feature = "coremidi")
 ))]
 mod listing;
 #[cfg(any(
     all(target_os = "linux", feature = "sequencer-tests"),
-    target_os = "macos"
+    all(target_os = "macos", feature = "coremidi")
 ))]
 mod opening;
 #[cfg(all(target_os = "linux", feature = "sequencer-tests"))]
 mod virtual_endpoint;
 #[cfg(any(
     all(target_os = "linux", feature = "sequencer-tests"),
-    target_os = "macos"
+    all(target_os = "macos", feature = "coremidi")
 ))]
 mod virtual_loopback;

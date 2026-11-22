@@ -57,11 +57,7 @@ fn flat_envelope() -> Adsr {
 }
 
 fn config(osc: OscillatorType) -> SynthConfig {
-    SynthConfig {
-        oscillator: osc,
-        envelope: flat_envelope(),
-        ..Default::default()
-    }
+    SynthConfig::new().oscillator(osc).envelope(flat_envelope())
 }
 
 /// Render `blocks` blocks of the left channel.
@@ -232,13 +228,12 @@ fn velocity_scales_the_output_level() {
 /// would keep the count correct and still be audible.
 #[test]
 fn a_note_off_silences_the_voice_after_release() {
-    let mut cfg = config(OscillatorType::Sine);
-    cfg.envelope = Adsr {
+    let cfg = config(OscillatorType::Sine).envelope(Adsr {
         attack: Seconds::new(0.001),
         decay: Seconds::new(0.0),
         sustain: Amplitude::new(1.0),
         release: Seconds::new(0.05),
-    };
+    });
     let mut synth = Hand::new(PolySynth::<f32>::new(cfg));
 
     synth.queue_midi(&[note_on(69, 100)]);
@@ -307,9 +302,9 @@ fn two_simultaneous_notes_both_sound() {
 /// sound, and the notes already playing must be undisturbed.
 #[test]
 fn nosteal_leaves_the_held_notes_alone() {
-    let mut cfg = config(OscillatorType::Sine);
-    cfg.polyphony = NonZeroUsize::new(2).unwrap();
-    cfg.allocation_strategy = AllocationStrategy::NoSteal;
+    let cfg = config(OscillatorType::Sine)
+        .polyphony(NonZeroUsize::new(2).unwrap())
+        .allocation_strategy(AllocationStrategy::NoSteal);
     let mut synth = Hand::new(PolySynth::<f32>::new(cfg));
 
     synth.queue_midi(&[note_on(60, 100), note_on(64, 100)]);
@@ -342,9 +337,9 @@ fn nosteal_leaves_the_held_notes_alone() {
 /// voice must actually retune, not merely relabel.
 #[test]
 fn a_stolen_voice_plays_the_new_note() {
-    let mut cfg = config(OscillatorType::Sine);
-    cfg.polyphony = NonZeroUsize::MIN;
-    cfg.allocation_strategy = AllocationStrategy::Oldest;
+    let cfg = config(OscillatorType::Sine)
+        .polyphony(NonZeroUsize::MIN)
+        .allocation_strategy(AllocationStrategy::Oldest);
     let mut synth = Hand::new(PolySynth::<f32>::new(cfg));
 
     synth.queue_midi(&[note_on(60, 100)]);
@@ -371,8 +366,7 @@ fn a_stolen_voice_plays_the_new_note() {
 /// mono synth that let a second voice through would sound like a chord.
 #[test]
 fn mono_mode_holds_one_voice() {
-    let mut cfg = config(OscillatorType::Sine);
-    cfg.voice_mode = VoiceMode::Mono;
+    let cfg = config(OscillatorType::Sine).voice_mode(VoiceMode::Mono);
     let mut synth = Hand::new(PolySynth::<f32>::new(cfg));
 
     synth.queue_midi(&[note_on(60, 100), note_on(64, 100), note_on(67, 100)]);
@@ -407,10 +401,9 @@ fn master_volume_scales_the_output() {
     full.queue_midi(&[note_on(69, 100)]);
     let loud = render(&mut full, 100);
 
-    let mut half = Hand::new(PolySynth::<f32>::new(SynthConfig {
-        volume: tutti_polysynth::MasterVolume::of(tutti_units::Amplitude::new(0.5)),
-        ..config(OscillatorType::Sine)
-    }));
+    let mut half = Hand::new(PolySynth::<f32>::new(config(OscillatorType::Sine).volume(
+        tutti_polysynth::MasterVolume::of(tutti_units::Amplitude::new(0.5)),
+    )));
     half.queue_midi(&[note_on(69, 100)]);
     let quiet = render(&mut half, 100);
 
@@ -422,10 +415,9 @@ fn master_volume_scales_the_output() {
     );
 
     // Zero must be silence, not merely quiet.
-    let mut muted = Hand::new(PolySynth::<f32>::new(SynthConfig {
-        volume: tutti_polysynth::MasterVolume::of(tutti_units::Amplitude::SILENT),
-        ..config(OscillatorType::Sine)
-    }));
+    let mut muted = Hand::new(PolySynth::<f32>::new(config(OscillatorType::Sine).volume(
+        tutti_polysynth::MasterVolume::of(tutti_units::Amplitude::SILENT),
+    )));
     muted.queue_midi(&[note_on(69, 100)]);
     let silent = render(&mut muted, 100);
     assert!(
@@ -441,10 +433,9 @@ fn master_volume_scales_the_output() {
 #[test]
 fn a_non_finite_master_volume_write_leaves_the_synth_at_its_volume() {
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        let mut synth = Hand::new(PolySynth::<f32>::new(SynthConfig {
-            volume: tutti_polysynth::MasterVolume::of(tutti_units::Amplitude::new(0.5)),
-            ..config(OscillatorType::Sine)
-        }));
+        let mut synth = Hand::new(PolySynth::<f32>::new(config(OscillatorType::Sine).volume(
+            tutti_polysynth::MasterVolume::of(tutti_units::Amplitude::new(0.5)),
+        )));
         synth.queue_midi(&[note_on(69, 100)]);
         let before = render(&mut synth, 40);
         // A host writes the cell through the synth's `ParamSet`, which stores
