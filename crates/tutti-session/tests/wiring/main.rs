@@ -21,6 +21,7 @@ mod event_ports;
 mod f64_session;
 mod failure_rule;
 mod fan_in;
+mod gesture;
 mod graph;
 mod latency_removal;
 mod loop_region;

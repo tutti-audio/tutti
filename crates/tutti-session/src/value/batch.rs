@@ -104,7 +104,7 @@ impl<'a> Batch<'a> {
 
     /// Stages the value `make` builds from the target's value so far in this
     /// batch, or from its base when it has none.
-    fn apply<T: Store>(
+    pub(super) fn apply<T: Store>(
         &mut self,
         target: T,
         make: impl FnOnce(&T::Value) -> T::Value,
@@ -164,7 +164,7 @@ impl<'a> Batch<'a> {
     }
 
     /// Counts an item that stages nothing (`None`).
-    fn skip(&mut self) {
+    pub(super) fn skip(&mut self) {
         self.index += 1;
     }
 }

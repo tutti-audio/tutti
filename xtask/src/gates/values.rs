@@ -45,6 +45,10 @@ pub(super) const ALLOW: &[(&str, &str)] = &[
         "Values::set",
         "the session's write for any control-side thread: the same assignments",
     ),
+    (
+        "Gesture::set",
+        "a drag's write: absolute values for the targets the gesture was opened over, through the one batch of `set`",
+    ),
 ];
 
 const ROOT: &str = "crates/tutti-session/src";
@@ -381,8 +385,8 @@ mod tests {
     const A: &str = "crates/tutti-session/src/a.rs";
     const SESSION: &str = "crates/tutti-session/src/session.rs";
     const KNOBS: &str = "crates/tutti-session/src/knobs.rs";
-    const ONE_WAY: &str =
-        "impl Session { pub fn set(&self, a: u8) {} }\nimpl Values { pub fn set(&self, a: u8) {} }";
+    const GESTURE: &str = "crates/tutti-session/src/gesture.rs";
+    const ONE_WAY: &str = "impl Session { pub fn set(&self, a: u8) {} }\nimpl Values { pub fn set(&self, a: u8) {} }\nimpl Gesture { pub fn set(&mut self, a: u8) {} }";
 
     fn run(files: &[(&str, &str)], list: &str) -> Report {
         let mut all: Vec<(&str, &str)> = files.to_vec();
@@ -390,6 +394,7 @@ mod tests {
         all.push((HZ, "pub struct Hz(pub f32);\npub struct Seconds(pub f64);"));
         all.push((SESSION, "impl Session { pub fn set(&self, a: u8) {} }"));
         all.push((KNOBS, "impl Values { pub fn set(&self, a: u8) {} }"));
+        all.push((GESTURE, "impl Gesture { pub fn set(&mut self, a: u8) {} }"));
         check(&Mem::with(&all), 0, 0)
     }
 
@@ -416,11 +421,30 @@ mod tests {
 
     #[test]
     fn a_public_set_that_is_not_an_allow_row_fails() {
-        let r = run(&[(A, "impl Gesture { pub fn set(&self, v: u8) {} }")], "");
+        let r = run(&[(A, "impl Dial { pub fn set(&self, v: u8) {} }")], "");
         assert!(fails_on(
             &r,
-            "set  crates/tutti-session/src/a.rs::Gesture::set"
+            "set  crates/tutti-session/src/a.rs::Dial::set"
         ));
+    }
+
+    #[test]
+    fn gesture_set_is_an_allow_row_and_an_idle_one_fails() {
+        let r = run(
+            &[(A, "impl Gesture { pub fn set(&mut self, v: u8) {} }")],
+            "",
+        );
+        assert!(r.passed(), "{:?}", r.findings);
+        let r = check(
+            &Mem::with(&[
+                (LIST, ""),
+                (SESSION, "impl Session { pub fn set(&self, a: u8) {} }"),
+                (KNOBS, "impl Values { pub fn set(&self, a: u8) {} }"),
+            ]),
+            0,
+            0,
+        );
+        assert!(fails_on(&r, "Gesture::set"));
     }
 
     #[test]

@@ -362,7 +362,9 @@ pub use value::{
     PolarityTarget, RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget, Target,
     TargetInfo, TempoTarget, ValueError, ValueErrorKind, Values,
 };
-pub use value::{Change, ChangedBy, GestureId, GestureState, IntoTargets, Watchable, Watcher};
+pub use value::{
+    Change, ChangedBy, Gesture, GestureId, GestureState, IntoTargets, Watchable, Watcher,
+};
 #[cfg(feature = "midi")]
 pub use value::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
 #[cfg(feature = "sampler")]
