@@ -48,7 +48,8 @@ use tutti_buffers::{Interleaved, Sample};
 use tutti_dsp::{ChannelWeight, channel_weights};
 use tutti_units::{Amplitude, Db, SampleRate, Samples};
 
-use crate::convert::{BLOCK, Discard, all_finite, for_blocks, run_len};
+use crate::convert::{BLOCK, all_finite, for_blocks, run_len};
+use crate::measure::measure_buffer;
 use crate::{Measure, MeterError, StreamMeter};
 
 /// What a loudness meter measures: the channel topology of the frames fed to
@@ -388,9 +389,7 @@ pub fn measure_true_peak<S: Sample>(
     buffer: Interleaved<'_, S>,
     rate: impl Into<SampleRate>,
 ) -> Result<Db, MeterError> {
-    let mut meter = TruePeakConfig.measure((rate.into(), buffer.layout()))?;
-    meter.push(buffer, &mut Discard)?;
-    Ok(meter.finish())
+    measure_buffer::<S, _>(&TruePeakConfig, (rate.into(), buffer.layout()), buffer)
 }
 
 /// A true-peak amplitude as dBTP, pinning silence at [`Db::FLOOR`].
@@ -667,9 +666,7 @@ pub fn measure_loudness<S: Sample>(
     buffer: Interleaved<'_, S>,
     rate: impl Into<SampleRate>,
 ) -> Result<Loudness, MeterError> {
-    let mut meter = cfg.measure(rate.into())?;
-    meter.push(buffer, &mut Discard)?;
-    Ok(meter.finish())
+    measure_buffer::<S, _>(cfg, rate.into(), buffer)
 }
 
 #[cfg(test)]
