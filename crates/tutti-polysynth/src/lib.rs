@@ -59,7 +59,7 @@
 //! let synth_key = NodeKey(1);
 //! let params = editor.insert(synth_key, "synth", synth).controls;
 //! editor.spec_mut().topology.set_outputs((0..2)
-//!     .map(|port| PortSource::Node(OutputPort { node: synth_key, port })));
+//!     .map(|port| PortSource::Node(OutputPort::new(synth_key, port))));
 //! editor.commit().expect("a one-node graph commits");
 //!
 //! // Its controls: the live params, by address.

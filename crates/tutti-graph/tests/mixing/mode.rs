@@ -46,17 +46,11 @@ fn key(n: u64) -> NodeKey {
 }
 
 fn at(node: u64, port: u16) -> InputPort {
-    InputPort {
-        node: key(node),
-        port,
-    }
+    InputPort::new(key(node), port)
 }
 
 fn out(node: u64, port: u16) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: key(node),
-        port,
-    })
+    PortSource::Node(OutputPort::new(key(node), port))
 }
 
 fn direct(node: u64) -> Edge {
@@ -815,7 +809,7 @@ struct Probe {
     /// Answers `Status::Idle` ("park me until input") when it was sent no
     /// event: the node the silence skip trusts.
     idle: bool,
-    /// Declares `Shape::with_own_bypass`.
+    /// Declares `Shape::own_bypass`.
     own_bypass: bool,
     events_in: u16,
     state: f32,
@@ -862,11 +856,11 @@ impl Node for Probe {
             tutti_graph::Buses::unassigned(ch(self.ins)),
             tutti_graph::Buses::unassigned(ch(self.outs)),
         )
-        .with_latency(Latency::new(Samples::new(self.latency)))
-        .with_events(self.events_in, 0)
-        .with_tail(Tail::Unbounded);
+        .latency(Latency::new(Samples::new(self.latency)))
+        .events(self.events_in, 0)
+        .tail(Tail::Unbounded);
         if self.own_bypass {
-            shape.with_own_bypass()
+            shape.own_bypass()
         } else {
             shape
         }
@@ -1124,7 +1118,7 @@ struct Src {
 }
 
 impl Src {
-    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -1146,17 +1140,11 @@ impl Node for Src {
 }
 
 fn ev_out(n: u64) -> EventOutputPort {
-    EventOutputPort {
-        node: key(n),
-        port: 0,
-    }
+    EventOutputPort::new(key(n), 0)
 }
 
 fn ev_in(n: u64) -> EventInputPort {
-    EventInputPort {
-        node: key(n),
-        port: 0,
-    }
+    EventInputPort::new(key(n), 0)
 }
 
 /// **A held note on a bypassed node's event input is closed**: the executor

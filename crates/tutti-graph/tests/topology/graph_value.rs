@@ -30,11 +30,11 @@ fn spec(kind: &str, ins: u16, outs: u16) -> NodeSpec {
 }
 
 fn at(node: NodeKey, port: u16) -> InputPort {
-    InputPort { node, port }
+    InputPort::new(node, port)
 }
 
 fn out(node: NodeKey, port: u16) -> OutputPort {
-    OutputPort { node, port }
+    OutputPort::new(node, port)
 }
 
 /// `dc -> gain -> output 0`.
@@ -57,8 +57,8 @@ fn unequal_latency_diamond() -> Topology {
     t.nodes.insert(
         B,
         spec("lookahead", 1, 1)
-            .with_latency(Samples::new(512))
-            .with_tail(Tail::Finite(Samples::new(64))),
+            .latency(Samples::new(512))
+            .tail(Tail::Finite(Samples::new(64))),
     );
     t.nodes.insert(C, spec("mix", 2, 1));
     t.edges
@@ -162,12 +162,12 @@ fn validate_reports_every_fault_at_once() {
 
     assert!(
         errs.iter()
-            .any(|e| matches!(e, Invalid::SourcePortOutOfRange { from, .. } if from.port == 7)),
+            .any(|e| matches!(e, Invalid::SourcePortOutOfRange { from, .. } if from.port() == 7)),
         "{errs:?}"
     );
     assert!(
         errs.iter()
-            .any(|e| matches!(e, Invalid::SinkPortOutOfRange { at, .. } if at.port == 9)),
+            .any(|e| matches!(e, Invalid::SinkPortOutOfRange { at, .. } if at.port() == 9)),
         "{errs:?}"
     );
     assert!(
@@ -441,8 +441,8 @@ fn insertion_order_does_not_change_the_value() {
     backward.nodes.insert(
         B,
         spec("lookahead", 1, 1)
-            .with_latency(Samples::new(512))
-            .with_tail(Tail::Finite(Samples::new(64))),
+            .latency(Samples::new(512))
+            .tail(Tail::Finite(Samples::new(64))),
     );
     backward.nodes.insert(D, spec("dc", 0, 1));
     backward.nodes.insert(A, spec("dc", 0, 1));

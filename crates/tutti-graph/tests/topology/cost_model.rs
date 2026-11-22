@@ -23,7 +23,7 @@ fn gain(cost: Option<Cost>) -> Unforkable<TestNode> {
         width: 1,
     });
     Unforkable(match cost {
-        Some(c) => node.with_cost(c),
+        Some(c) => node.cost(c),
         None => node,
     })
 }
@@ -31,26 +31,20 @@ fn gain(cost: Option<Cost>) -> Unforkable<TestNode> {
 fn sum(inputs: usize, cost: Option<Cost>) -> Unforkable<TestNode> {
     let node = TestNode::new(Kind::Sum { inputs });
     Unforkable(match cost {
-        Some(c) => node.with_cost(c),
+        Some(c) => node.cost(c),
         None => node,
     })
 }
 
 fn wire(ed: &mut Editor, node: u64, port: u16, from: PortSource) {
     ed.spec_mut().topology.edges.insert(
-        InputPort {
-            node: NodeKey(node),
-            port,
-        },
+        InputPort::new(NodeKey(node), port),
         vec![Edge::Direct(from)],
     );
 }
 
 fn node(key: u64) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: NodeKey(key),
-        port: 0,
-    })
+    PortSource::Node(OutputPort::new(NodeKey(key), 0))
 }
 
 /// A fresh editor and executor, the executor on a pool of `workers` when

@@ -53,7 +53,7 @@ use tutti_ump::{
     DeviceIdentity, Message, MidiGroup, Sysex7Packet, SysexAssembler, SysexMessage, SysexStatus,
     SysexStep, U4, U7, U14, UNIVERSAL_NON_REAL_TIME, UNIVERSAL_REAL_TIME, Ump,
 };
-use tutti_units::Seconds;
+use tutti_units::{Losses, Seconds};
 
 tutti_units::ranged! {
     /// A device's own Universal System Exclusive id: `00` to `7E`. `7F` is the
@@ -573,7 +573,7 @@ pub enum UniversalRead {
     /// A tuning dump whose checksum field is not the XOR of the bytes before it
     /// (MTS, Checksum Calculation). The spec says nothing of what a receiver
     /// does with one; an instrument does not apply it ([`UniversalReader`]
-    /// counts it, [`corrupt`](UniversalReader::corrupt)).
+    /// counts it, [`losses`](UniversalReader::losses)).
     BadChecksum(BadChecksum),
     /// Universal (`7E` or `7F`), but not one this crate reads, or one of them
     /// that does not parse (cut short, or with bytes after its end).
@@ -645,7 +645,7 @@ const MAX_MESSAGE: usize = 528;
 ///
 /// It owns its reassembly buffer, sized once, and allocates nothing after
 /// [`new`](Self::new). A message longer than it reads is dropped whole and
-/// counted ([`dropped`](Self::dropped)), as `SysexAssembler` does.
+/// counted ([`losses`](Self::losses)), as `SysexAssembler` does.
 #[derive(Debug)]
 pub struct UniversalReader {
     group: MidiGroup,
@@ -713,18 +713,13 @@ impl UniversalReader {
         }
     }
 
-    /// Messages dropped whole: too long, cut by another message of the Group,
-    /// or open at a [`reset`](Self::reset).
+    /// What the reader did not pass on, every one [lost](Losses::lost): a
+    /// message dropped whole (too long, cut by another message of the Group,
+    /// or open at a [`reset`](Self::reset)), and a dump addressed to this
+    /// device that failed its checksum ([`UniversalRead::BadChecksum`]).
     #[must_use]
-    pub fn dropped(&self) -> u64 {
-        self.assembler.dropped()
-    }
-
-    /// Dumps addressed to this device that failed their checksum and were not
-    /// passed on ([`UniversalRead::BadChecksum`]).
-    #[must_use]
-    pub fn corrupt(&self) -> u64 {
-        self.corrupt
+    pub fn losses(&self) -> Losses {
+        Losses::lost(self.assembler.dropped() + self.corrupt)
     }
 
     /// Forgets an open message.

@@ -63,7 +63,7 @@ struct ParamSink;
 impl Node for ParamSink {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_params(&[tutti_units::UnitParam::Cutoff, tutti_units::UnitParam::Q])
+            .params(&[tutti_units::UnitParam::Cutoff, tutti_units::UnitParam::Q])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -109,15 +109,15 @@ impl RampEvery {
 
 impl RampEvery {
     const BASE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_param_events()
-        .with_event_capacity(tutti_graph::testing::cap_of(16));
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(16));
     const OUT: tutti_graph::OutEvents = Self::BASE.event_output(0).expect("declared");
 }
 
 impl Node for RampEvery {
     fn shape(&self) -> Shape {
-        Self::BASE.with_latency(Latency::new(Samples::new(self.latency)))
+        Self::BASE.latency(Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -161,17 +161,11 @@ impl Node for RampEvery {
 }
 
 fn at(node: u64, port: u16) -> InputPort {
-    InputPort {
-        node: NodeKey(node),
-        port,
-    }
+    InputPort::new(NodeKey(node), port)
 }
 
 fn out(node: u64, port: u16) -> OutputPort {
-    OutputPort {
-        node: NodeKey(node),
-        port,
-    }
+    OutputPort::new(NodeKey(node), port)
 }
 
 fn from(node: u64, port: u16) -> Edge {
@@ -179,17 +173,11 @@ fn from(node: u64, port: u16) -> Edge {
 }
 
 fn ev_out(node: u64) -> EventOutputPort {
-    EventOutputPort {
-        node: NodeKey(node),
-        port: 0,
-    }
+    EventOutputPort::new(NodeKey(node), 0)
 }
 
 fn consumer_in(port: u16) -> EventInputPort {
-    EventInputPort {
-        node: NodeKey(40),
-        port,
-    }
+    EventInputPort::new(NodeKey(40), port)
 }
 
 /// The graph (keys in brackets):
@@ -305,17 +293,11 @@ fn build(ed: &mut Editor) {
         spec.connect_events(to, EventEdge::Direct(ev_out(src)));
     }
     spec.connect_events(
-        EventInputPort {
-            node: NodeKey(22),
-            port: 0,
-        },
+        EventInputPort::new(NodeKey(22), 0),
         EventEdge::Direct(ev_out(20)),
     );
     spec.connect_events(
-        EventInputPort {
-            node: NodeKey(41),
-            port: 0,
-        },
+        EventInputPort::new(NodeKey(41), 0),
         EventEdge::Direct(ev_out(21)),
     );
     let cut = ParamIn {

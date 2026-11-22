@@ -9,7 +9,7 @@
 //! [`Bypassed`](NodeMode::Bypassed) (its audio outputs are its inputs, delayed
 //! by its declared latency, and its `process` is not called). The mode is **the
 //! executor's** for every node but one that declares
-//! [`Shape::with_own_bypass`](crate::Shape::with_own_bypass) (a plugin with a
+//! [`Shape::own_bypass`](crate::Shape::own_bypass) (a plugin with a
 //! native bypass parameter): the executor neither blends nor parks such a node
 //! in `Bypassed`, but calls it as in `Active`, with no crossfade and no reset.
 //! What the node does in `Bypassed` is the node's: it reads the mode from
@@ -1067,8 +1067,7 @@ mod tests {
     const DECLICK_FRAMES: usize = 240;
 
     fn shape(latency: usize) -> Shape {
-        Shape::through_unassigned(ChannelLayout::MONO)
-            .with_latency(Latency::new(Samples::new(latency)))
+        Shape::through_unassigned(ChannelLayout::MONO).latency(Latency::new(Samples::new(latency)))
     }
 
     /// A unit of `shape` at `mix`, steady Active, after the block's snapshot.
@@ -1122,10 +1121,7 @@ mod tests {
     /// behind costs nothing).
     #[test]
     fn a_node_whose_mix_is_not_driven_keeps_the_plain_op() {
-        let from = EventOutputPort {
-            node: NodeKey(1),
-            port: 0,
-        };
+        let from = EventOutputPort::new(NodeKey(1), 0);
         let (cell, mut state) = at(&shape(0), 1.0);
         assert!(state.is_plain(), "never driven");
 

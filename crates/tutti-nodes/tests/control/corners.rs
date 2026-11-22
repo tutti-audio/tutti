@@ -16,9 +16,9 @@ struct Sends(Vec<(u64, ParamSegment)>);
 
 impl Sends {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_param_events()
-        .with_event_capacity(std::num::NonZeroU32::new(16).expect("a capacity"));
+        .events(0, 1)
+        .param_events()
+        .event_capacity(std::num::NonZeroU32::new(16).expect("a capacity"));
     const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -85,7 +85,7 @@ fn render(sends: Vec<(u64, ParamSegment)>, block: usize) -> Vec<f32> {
     };
     r.editor_mut()
         .spec_mut()
-        .connect_param(at, EventOutputPort { node: s, port: 0 });
+        .connect_param(at, EventOutputPort::new(s, 0));
     r.editor_mut().commit().expect("commits");
     let input = vec![1.0f32; FRAMES];
     r.render_input(Planes::new(&[&input]).unwrap()).remove(0)

@@ -20,7 +20,7 @@ use tutti_session::{
 };
 use tutti_timeline::MotionCommand;
 use tutti_ump::{Message, MidiGroup, Sysex7Packets, System, U7, U14, Ump};
-use tutti_units::{At, Bpm, SampleRate};
+use tutti_units::{At, Bpm, Losses, SampleRate};
 
 const RATE: f64 = 48_000.0;
 const BLOCK: f64 = 512.0;
@@ -345,7 +345,7 @@ fn a_clock_command_the_transport_refuses_is_counted() {
     let (mut s, fake) = rig();
     follow(&mut s, ClockKind::BeatClock);
     send(&fake, system(System::Start), Instant::now());
-    let mut refused = 0;
+    let mut refused = Losses::NONE;
     for _ in 0..50 {
         blocks(&mut s, 1);
         // The list is full again before the update that places what the tap held.
@@ -355,11 +355,15 @@ fn a_clock_command_the_transport_refuses_is_counted() {
                 refused += n;
             }
         }
-        if refused > 0 {
+        if refused != Losses::NONE {
             break;
         }
     }
-    assert_eq!(refused, 1, "the Start, placed as one locate-and-play");
+    assert_eq!(
+        refused,
+        Losses::refused(1),
+        "the Start, placed as one locate-and-play"
+    );
 }
 
 /// **The beat error reads only where one can be read**: none before a clock is

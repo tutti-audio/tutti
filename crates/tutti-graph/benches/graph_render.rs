@@ -56,7 +56,7 @@ struct Sine {
 
 impl Node for Sine {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_tail(Tail::Unbounded)
+        Shape::source_unassigned(ChannelLayout::MONO).tail(Tail::Unbounded)
     }
     fn prepare(&mut self, p: &Prepare) {
         self.dt = (1.0 / p.sample_rate().get()) as f32;
@@ -121,8 +121,8 @@ impl Lowpass {
 impl Node for Lowpass {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_tail(Tail::Unknown)
-            .with_in_place()
+            .tail(Tail::Unknown)
+            .in_place()
     }
     fn prepare(&mut self, p: &Prepare) {
         self.coefs(p.sample_rate().get() as f32);
@@ -180,7 +180,7 @@ struct Nop;
 
 impl Node for Nop {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::MONO).with_in_place()
+        Shape::through_unassigned(ChannelLayout::MONO).in_place()
     }
     fn prepare(&mut self, _p: &Prepare) {}
     fn process(&mut self, _cx: &Cx<'_>, io: Io<'_>) -> Status {
@@ -217,9 +217,9 @@ fn executor_for(shape: &Topo) -> Executor {
         ed.spec_mut()
             .topology
             .edges
-            .insert(InputPort { node: sink, port }, vec![Edge::Direct(from)]);
+            .insert(InputPort::new(sink, port), vec![Edge::Direct(from)]);
     };
-    let node = |k: NodeKey| PortSource::Node(OutputPort { node: k, port: 0 });
+    let node = |k: NodeKey| PortSource::Node(OutputPort::new(k, 0));
     let last = match *shape {
         Topo::Chain(depth) => {
             let src = NodeKey(0);
@@ -360,8 +360,8 @@ struct FormNop {
 impl Node for FormNop {
     fn shape(&self) -> Shape {
         let ch = ChannelLayout::from_count(self.width);
-        let s = Shape::through_unassigned(ch).with_events(self.events, 0);
-        if self.in_place { s.with_in_place() } else { s }
+        let s = Shape::through_unassigned(ch).events(self.events, 0);
+        if self.in_place { s.in_place() } else { s }
     }
     fn prepare(&mut self, _p: &Prepare) {}
     fn process(&mut self, _cx: &Cx<'_>, _io: Io<'_>) -> Status {
@@ -383,23 +383,20 @@ fn form_executor(n: usize, nop: impl Fn() -> FormNop) -> Executor {
             let from = if i == 0 {
                 PortSource::MainInput(c)
             } else {
-                PortSource::Node(OutputPort {
-                    node: NodeKey(i as u64 - 1),
-                    port: c,
-                })
+                PortSource::Node(OutputPort::new(NodeKey(i as u64 - 1), c))
             };
             ed.spec_mut()
                 .topology
                 .edges
-                .insert(InputPort { node: k, port: c }, vec![Edge::Direct(from)]);
+                .insert(InputPort::new(k, c), vec![Edge::Direct(from)]);
         }
     }
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(n as u64 - 1),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(
+            NodeKey(n as u64 - 1),
+            0,
+        ))]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

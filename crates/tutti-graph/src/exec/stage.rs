@@ -685,10 +685,7 @@ impl Stager {
                 .old
                 .and_then(|o| o.unit(old_p.key))
                 .and_then(|u| u.shape.chase);
-            let sink = cx.sink_of(EventInputPort {
-                node: new_p.key,
-                port: 0,
-            });
+            let sink = cx.sink_of(EventInputPort::new(new_p.key, 0));
             if let (Some(n), Some(u)) = (chase, sink) {
                 rooms.entry((u, 0)).or_default().flush += n.get() as usize;
             }
@@ -696,10 +693,7 @@ impl Stager {
         // Injections not yet delivered: each buffer counts once, with what
         // flushed into it before, and its room for a fade's end.
         for s in &self.shells {
-            let at = EventInputPort {
-                node: s.key,
-                port: s.port,
-            };
+            let at = EventInputPort::new(s.key, s.port);
             if let Some(u) = cx.sink_of(at) {
                 let r = rooms.entry((u, s.port)).or_default();
                 r.flush += s.flush;
@@ -1294,10 +1288,7 @@ mod tests {
     }
 
     fn source(node: u64) -> PortSource {
-        PortSource::Node(OutputPort {
-            node: NodeKey(node),
-            port: 0,
-        })
+        PortSource::Node(OutputPort::new(NodeKey(node), 0))
     }
 
     /// The longest ring of a source is the one a new channel copies, and of
@@ -1334,10 +1325,7 @@ mod tests {
     /// A ring that is not an output's is no source's origin.
     #[test]
     fn only_output_rings_are_origins() {
-        let at = crate::InputPort {
-            node: NodeKey(9),
-            port: 0,
-        };
+        let at = crate::InputPort::new(NodeKey(9), 0);
         let delays = [DelaySpec {
             key: DelayKey::Audio {
                 at,

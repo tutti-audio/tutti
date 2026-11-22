@@ -47,7 +47,7 @@ struct Undeclared<N>(N);
 
 impl<N: Node> Node for Undeclared<N> {
     fn shape(&self) -> Shape {
-        self.0.shape().with_cost(Cost::Heavy)
+        self.0.shape().cost(Cost::Heavy)
     }
     fn prepare(&mut self, p: &Prepare) {
         self.0.prepare(p);
@@ -114,16 +114,13 @@ fn graph(workers: usize, declared: bool) -> Executor {
             }
         }
         ed.spec_mut().connect_events(
-            EventInputPort { node: key, port: 0 },
-            EventEdge::Direct(EventOutputPort {
-                node: clip,
-                port: 0,
-            }),
+            EventInputPort::new(key, 0),
+            EventEdge::Direct(EventOutputPort::new(clip, 0)),
         );
         // The bus is the graph's fan-in: each output channel holds every
         // synth's matching port, and the graph sums them.
         for c in 0..2u16 {
-            let from = PortSource::Node(OutputPort { node: key, port: c });
+            let from = PortSource::Node(OutputPort::new(key, c));
             ed.spec_mut().topology.connect_output(c as usize, from);
         }
     }

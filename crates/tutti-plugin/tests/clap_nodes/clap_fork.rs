@@ -134,7 +134,6 @@ fn a_fork_renders_like_the_live_instance_from_its_state() {
     let fork = probe
         .client
         .fork_instance(
-            RenderMode::Offline,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
@@ -149,7 +148,7 @@ fn a_fork_renders_like_the_live_instance_from_its_state() {
     );
 
     const BLOCKS: usize = 40;
-    let mut fork = Rig::new(fork, SAMPLE_RATE, BLOCK);
+    let mut fork = Rig::offline(fork, SAMPLE_RATE, BLOCK);
     let forked = drive_fork(&mut fork, BLOCKS);
     assert!(forked[0].iter().all(|&s| s == 0.0), "one block of latency");
     for (b, block) in forked.iter().enumerate().skip(1) {
@@ -203,7 +202,6 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
     let fork = probe
         .client
         .fork_instance(
-            RenderMode::Offline,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
@@ -224,7 +222,7 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
     let fork_thread = {
         let (start, live_done) = (Arc::clone(&start), Arc::clone(&live_done));
         std::thread::spawn(move || {
-            let mut fork = Rig::new(fork, SAMPLE_RATE, BLOCK);
+            let mut fork = Rig::offline(fork, SAMPLE_RATE, BLOCK);
             start.wait();
             let (mut blocks, mut during_live) = (Vec::new(), 0usize);
             while blocks.len() < MIN_FORK_BLOCKS || !live_done.load(Ordering::SeqCst) {
@@ -301,7 +299,6 @@ fn a_state_the_fresh_instance_refuses_is_a_named_fork_error() {
     let err = probe
         .client
         .fork_instance(
-            RenderMode::Offline,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect_err("the fresh instance refuses the state");
@@ -326,7 +323,7 @@ fn a_state_the_fresh_instance_refuses_is_a_named_fork_error() {
     editor
         .spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
     match editor.fork(
         ForkTarget::Node(key),
         prepare.with_render_mode(RenderMode::Offline),
@@ -367,7 +364,6 @@ fn a_fork_is_saved_and_restored_as_a_duplicate_and_a_project_save_is_not() {
     probe
         .client
         .fork_instance(
-            RenderMode::Offline,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the fork saved for a duplicate and restored as one");
@@ -383,7 +379,6 @@ fn a_plugin_that_cannot_save_its_state_is_a_named_fork_error() {
     let err = probe
         .client
         .fork_instance(
-            RenderMode::Realtime,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect_err("the live instance refuses to save");
@@ -424,7 +419,7 @@ fn a_graph_holding_a_plugin_forks_and_renders_offline() {
     editor
         .spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
 
     let (fork_ed, fork_exec) = editor
         .fork(
@@ -465,7 +460,7 @@ fn render_fork_of(client: PluginClient, blocks: usize) -> Editor {
     editor
         .spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
     let (fork_ed, fork_exec) = editor
         .fork(
             ForkTarget::Node(key),
@@ -599,7 +594,6 @@ fn a_dropped_forks_server_is_reaped() {
     let fork = probe
         .client
         .fork_instance(
-            RenderMode::Realtime,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
@@ -636,7 +630,6 @@ fn a_failed_forks_server_is_reaped() {
     let err = probe
         .client
         .fork_instance(
-            RenderMode::Realtime,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .err();
@@ -663,7 +656,7 @@ fn live_graph(client: PluginClient) -> (Editor, tutti_graph::Executor) {
     );
     live.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
     (live, exec)
 }
 
@@ -852,14 +845,8 @@ fn feed_chord(live: &mut Editor, plugin: NodeKey, n: u8, on: usize, off: usize) 
     let clip = NodeKey(1);
     live.insert(clip, "clip", MidiClipNode::new(events));
     live.spec_mut().connect_events(
-        EventInputPort {
-            node: plugin,
-            port: 0,
-        },
-        EventEdge::Direct(EventOutputPort {
-            node: clip,
-            port: 0,
-        }),
+        EventInputPort::new(plugin, 0),
+        EventEdge::Direct(EventOutputPort::new(clip, 0)),
     );
 }
 
@@ -948,14 +935,8 @@ fn feed_note(live: &mut Editor, plugin: NodeKey, frame: usize) {
         .unwrap()]),
     );
     live.spec_mut().connect_events(
-        EventInputPort {
-            node: plugin,
-            port: 0,
-        },
-        EventEdge::Direct(EventOutputPort {
-            node: clip,
-            port: 0,
-        }),
+        EventInputPort::new(plugin, 0),
+        EventEdge::Direct(EventOutputPort::new(clip, 0)),
     );
 }
 
@@ -997,7 +978,7 @@ fn a_clip_note_in_a_chunk_that_begins_mid_block_lands_on_its_frame() {
         feed_note(&mut live, key, NOTE_FRAME);
         live.spec_mut()
             .topology
-            .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
+            .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
         let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
             sample_rate: SampleRate::of(SAMPLE_RATE),
             ..Default::default()
@@ -1081,15 +1062,12 @@ fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
         ),
     );
     live.spec_mut().connect_events(
-        EventInputPort { node: key, port: 0 },
-        EventEdge::Direct(EventOutputPort {
-            node: clip,
-            port: 0,
-        }),
+        EventInputPort::new(key, 0),
+        EventEdge::Direct(EventOutputPort::new(clip, 0)),
     );
     live.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
         sample_rate: SampleRate::of(SAMPLE_RATE),
         ..Default::default()
@@ -1127,7 +1105,7 @@ struct MidiSink(tutti_fixtures::Record<(u64, u32)>);
 
 impl MidiSink {
     const SHAPE: tutti_graph::Shape =
-        tutti_graph::Shape::source_unassigned(tutti_buffers::ChannelLayout::MONO).with_events(1, 0);
+        tutti_graph::Shape::source_unassigned(tutti_buffers::ChannelLayout::MONO).events(1, 0);
     const IN: tutti_graph::InEvents = Self::SHAPE
         .event_input(0)
         .expect("one event input is declared");
@@ -1206,25 +1184,16 @@ fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
             tutti_graph::ForkByClone(MidiSink(seen.clone())),
         );
         live.spec_mut().connect_events(
-            EventInputPort { node: key, port: 0 },
-            EventEdge::Direct(EventOutputPort {
-                node: clip,
-                port: 0,
-            }),
+            EventInputPort::new(key, 0),
+            EventEdge::Direct(EventOutputPort::new(clip, 0)),
         );
         live.spec_mut().connect_events(
-            EventInputPort {
-                node: sink,
-                port: 0,
-            },
-            EventEdge::Direct(EventOutputPort { node: key, port: 0 }),
+            EventInputPort::new(sink, 0),
+            EventEdge::Direct(EventOutputPort::new(key, 0)),
         );
         live.spec_mut().topology.set_outputs(vec![
-            PortSource::Node(OutputPort { node: key, port: 0 }),
-            PortSource::Node(OutputPort {
-                node: sink,
-                port: 0,
-            }),
+            PortSource::Node(OutputPort::new(key, 0)),
+            PortSource::Node(OutputPort::new(sink, 0)),
         ]);
         let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
             sample_rate: SampleRate::of(SAMPLE_RATE),
@@ -1277,7 +1246,7 @@ fn ramp(t: u64) -> f32 {
 impl tutti_graph::Node for RampSource {
     fn shape(&self) -> tutti_graph::Shape {
         tutti_graph::Shape::source_unassigned(tutti_buffers::ChannelLayout::MONO)
-            .with_tail(tutti_units::Tail::Unbounded)
+            .tail(tutti_units::Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(
@@ -1324,19 +1293,15 @@ fn an_export_is_aligned_when_the_plugin_latency_moves_offline() {
     );
     for port in 0..inputs {
         live.spec_mut().topology.edges.insert(
-            tutti_graph::InputPort {
-                node: key,
-                port: port as u16,
-            },
-            vec![tutti_graph::Edge::Direct(PortSource::Node(OutputPort {
-                node: src,
-                port: 0,
-            }))],
+            tutti_graph::InputPort::new(key, port as u16),
+            vec![tutti_graph::Edge::Direct(PortSource::Node(
+                OutputPort::new(src, 0),
+            ))],
         );
     }
     live.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
 
     let graph = fork_graph(&live, rate);
     let latency = graph.reported_latency();
@@ -1507,14 +1472,8 @@ fn an_export_of_plugins_is_bit_identical_on_a_pool() {
         ),
     );
     live.spec_mut().topology.set_outputs(vec![
-        PortSource::Node(OutputPort {
-            node: NodeKey(9),
-            port: 0,
-        }),
-        PortSource::Node(OutputPort {
-            node: NodeKey(10),
-            port: 0,
-        }),
+        PortSource::Node(OutputPort::new(NodeKey(9), 0)),
+        PortSource::Node(OutputPort::new(NodeKey(10), 0)),
     ]);
     let export = |pooled: bool| {
         let rate = SampleRate::of(SAMPLE_RATE);
@@ -1642,7 +1601,7 @@ fn a_fork_of_a_refused_rate_is_silent_and_a_failed_fault() {
     editor
         .spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
     let (fork_ed, fork_exec) = editor
         .fork(
             ForkTarget::Node(key),

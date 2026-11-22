@@ -487,13 +487,13 @@ impl UmpOut {
 /// The writing half of an output's cumulative losses: held by the session beside
 /// the output, written on the session's thread.
 pub(crate) struct LossWriters {
-    losses: tutti_rt::CounterWriter<tutti_graph::Losses>,
+    losses: tutti_rt::CounterWriter<tutti_units::Losses>,
 }
 
 /// The reading half of an output's losses, shared with its handle.
 #[derive(Clone, Debug)]
 pub(crate) struct LossReaders {
-    losses: tutti_rt::Counter<tutti_graph::Losses>,
+    losses: tutti_rt::Counter<tutti_units::Losses>,
 }
 
 /// A fresh pair of loss cells, at zero.
@@ -505,19 +505,19 @@ pub(crate) fn loss_cells() -> (LossWriters, LossReaders) {
 impl LossWriters {
     /// Counts `n` events its node's tap had no room for.
     pub(crate) fn lost(&mut self, n: u64) {
-        self.losses.add(tutti_graph::Losses::lost(n));
+        self.losses.add(tutti_units::Losses::lost(n));
     }
 
     /// Counts `n` events that did not go: refused by the output, scheduled too
     /// far ahead, or with no output to send to.
     pub(crate) fn refused(&mut self, n: u64) {
-        self.losses.add(tutti_graph::Losses::refused(n));
+        self.losses.add(tutti_units::Losses::refused(n));
     }
 }
 
 impl LossReaders {
     /// The losses so far: events the tap lost, events that did not go.
-    pub(crate) fn get(&self) -> tutti_graph::Losses {
+    pub(crate) fn get(&self) -> tutti_units::Losses {
         self.losses.get()
     }
 }
@@ -1365,7 +1365,7 @@ impl<F: Float> Midi<'_, F> {
             .feed(target, Feeder::Instrument)
             .ok()?
             .first()
-            .map(|port| port.node)
+            .map(|port| port.node())
     }
 
     /// The node of `target`'s live input, opened with its keys held if it has
@@ -1564,7 +1564,7 @@ impl<F: Float> Midi<'_, F> {
                 self.state
                     .clips
                     .iter()
-                    .find_map(|(&clip, c)| (c.transform == s.node).then_some(clip))
+                    .find_map(|(&clip, c)| (c.transform == s.node()).then_some(clip))
             })
             .map(Key::new)
     }
@@ -1582,7 +1582,7 @@ impl<F: Float> Midi<'_, F> {
             .feed(target, feeder)
             .ok()?
             .iter()
-            .find_map(|s| ours.get_key_value(&s.node))
+            .find_map(|s| ours.get_key_value(&s.node()))
             .map(|(&node, v)| (node, v))
     }
 
@@ -2249,6 +2249,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
     use tutti_fixtures::midi;
+    use tutti_ump::MessageType;
     use tutti_units::SampleRate;
 
     /// **A device's inlet holds at least a second of a saturated MIDI 1.0
@@ -2265,7 +2266,7 @@ mod tests {
         writers.refused(1);
         assert_eq!(
             readers.get(),
-            tutti_graph::Losses::lost(3) + tutti_graph::Losses::refused(3)
+            tutti_units::Losses::lost(3) + tutti_units::Losses::refused(3)
         );
     }
 
@@ -2525,17 +2526,18 @@ mod tests {
         let sent = log.lock().clone();
         let events: Vec<&Outgoing> = sent
             .iter()
-            .filter(|e| e.ump == note(0).1 || e.ump.message_type() == 0)
+            .filter(|e| e.ump == note(0).1 || e.ump.message_type() == MessageType::Utility)
             .collect();
         assert!(events.len() >= 4, "a stamp for each event");
         for pair in sent.windows(2) {
-            if pair[0].ump.message_type() == 0 && pair[1].ump == note(0).1 {
+            if pair[0].ump.message_type() == MessageType::Utility && pair[1].ump == note(0).1 {
                 assert_eq!(pair[0].send, pair[1].send, "a stamp rides with its event");
             }
         }
         assert!(
             sent.iter()
-                .all(|e| matches!(e.send, SendAt::At(_)) || e.ump.message_type() == 0),
+                .all(|e| matches!(e.send, SendAt::At(_))
+                    || e.ump.message_type() == MessageType::Utility),
             "every note is scheduled"
         );
     }

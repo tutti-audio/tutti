@@ -19,13 +19,13 @@ use tutti_graph::contract::{Direct, HAND_EVENT_CAPACITY};
 use tutti_graph::{
     Edge, Editor, Env, EventCapacity, EventEdge, EventInletNode, EventInletWriter, EventInputPort,
     EventKind, EventOutputPort, EventTapId, EventTapOptions, EventTapReader, Executor, ForkCause,
-    ForkSource, ForkTarget, Forked, InputPort, IntoNode, Losses, Node, NodeKey, NodeParts,
-    OutputPort, PlayClock, PortSource, Prepare, RenderMode, Stamp, TapAlign, TapEvent,
-    TransportChanges, TransportPosition,
+    ForkSource, ForkTarget, Forked, InputPort, IntoNode, Node, NodeKey, NodeParts, OutputPort,
+    PlayClock, PortSource, Prepare, RenderMode, Stamp, TapAlign, TapEvent, TransportChanges,
+    TransportPosition,
 };
 use tutti_rt::PushError;
 use tutti_ump::{CCNumber, MidiChannel, U7, Ump};
-use tutti_units::{Frame, Moment, SampleRate, Samples};
+use tutti_units::{Frame, Losses, Moment, SampleRate, Samples};
 
 const R48: SampleRate = SampleRate::SR_48K;
 const R441: SampleRate = SampleRate::SR_44K1;
@@ -495,10 +495,7 @@ impl IntoNode for Forkable {
 }
 
 fn out(node: u64) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: NodeKey(node),
-        port: 0,
-    })
+    PortSource::Node(OutputPort::new(NodeKey(node), 0))
 }
 
 /// Inlets 1..=n into a `Consumer` (key 10) whose audio is the only output, so
@@ -537,14 +534,8 @@ fn graph(
     );
     for k in 1..=n {
         ed.spec_mut().connect_events(
-            EventInputPort {
-                node: NodeKey(10),
-                port: k - 1,
-            },
-            EventEdge::Direct(EventOutputPort {
-                node: NodeKey(u64::from(k)),
-                port: 0,
-            }),
+            EventInputPort::new(NodeKey(10), k - 1),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(u64::from(k)), 0)),
         );
     }
     // Heavy audio chains beside the inlets, so the cost model has work worth
@@ -569,10 +560,7 @@ fn graph(
                 }),
             );
             ed.spec_mut().topology.connect(
-                InputPort {
-                    node: NodeKey(base + g),
-                    port: 0,
-                },
+                InputPort::new(NodeKey(base + g), 0),
                 Edge::Direct(out(base + g - 1)),
             );
         }
@@ -580,19 +568,10 @@ fn graph(
     let sum = if heavy { 5 } else { 1 };
     ed.insert(NodeKey(30), "sum", Forkable(Kind::Sum { inputs: sum }));
     let topology = &mut ed.spec_mut().topology;
-    topology.connect(
-        InputPort {
-            node: NodeKey(30),
-            port: 0,
-        },
-        Edge::Direct(out(10)),
-    );
+    topology.connect(InputPort::new(NodeKey(30), 0), Edge::Direct(out(10)));
     for c in (0..4u16).filter(|_| heavy) {
         topology.connect(
-            InputPort {
-                node: NodeKey(30),
-                port: c + 1,
-            },
+            InputPort::new(NodeKey(30), c + 1),
             Edge::Direct(out(103 + u64::from(c) * 10)),
         );
     }
@@ -600,10 +579,7 @@ fn graph(
     let tap = tap.then(|| {
         ed.open_event_tap(
             EventTapId::of(1),
-            EventOutputPort {
-                node: NodeKey(1),
-                port: 0,
-            },
+            EventOutputPort::new(NodeKey(1), 0),
             EventTapOptions::new(EventCapacity::of(256)).align(TapAlign::Raw),
         )
         .expect("the port exists")

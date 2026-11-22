@@ -10,20 +10,26 @@ use tutti_midi_protocol::{
     Timing, TuningFrequency, TuningMessage, TuningName, Universal,
 };
 use tutti_ump::{
-    Attribute, CCNumber, MidiChannel, NoteNumber, NoteVelocity, PerNoteManagement,
+    Attribute, CCNumber, MidiChannel, NoteNumber, NoteVelocity, PerNoteManagement, Pitch,
     RegisteredPerNoteController, Rpn, U7, U14, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
 use tutti_units::{Amplitude, Semitones};
 use tutti_voicing::{
-    Mode, Order, Patch, PerNoteState, Steal, TuningCapacity, VoiceAllocator, VoiceCommand,
-    VoiceConfig, VoiceId, VoiceSpec,
+    Mode, Order, Patch, PerNoteState, Steal, TuningCapacity, TuningCount, VoiceAllocator,
+    VoiceCommand, VoiceConfig, VoiceId, VoiceSpec,
 };
 
 /// Two layers, one exclusive class.
 struct Grouped;
 impl Patch for Grouped {
-    fn voices(&self, _: MidiChannel, _: NoteNumber, _: u16, spec: &mut dyn FnMut(VoiceSpec)) {
+    fn voices(
+        &self,
+        _: MidiChannel,
+        _: NoteNumber,
+        _: tutti_ump::NoteVelocity,
+        spec: &mut dyn FnMut(VoiceSpec),
+    ) {
         for tag in 0..2 {
             spec(VoiceSpec {
                 group: NonZeroU16::new(7),
@@ -108,7 +114,7 @@ fn step_is_allocation_free_in_every_mode() {
                     Voice2::NoteOn {
                         note: NoteNumber::of(k),
                         velocity: NoteVelocity::CENTER,
-                        attribute: Attribute::Pitch(60 << 9),
+                        attribute: Attribute::Pitch(Pitch::from_q7_9(60 << 9)),
                     },
                     cc(64, round % 2 * 127),
                     cc(66, round % 3 / 2 * 127),
@@ -200,7 +206,7 @@ fn per_note_state_is_allocation_free() {
                 Voice2::NoteOn {
                     note,
                     velocity: NoteVelocity::CENTER,
-                    attribute: Attribute::Pitch(60 << 9),
+                    attribute: Attribute::Pitch(Pitch::from_q7_9(60 << 9)),
                 },
                 Voice2::PerNoteManagement {
                     note,
@@ -284,7 +290,7 @@ fn mts_is_allocation_free() {
             VoiceConfig::poly(NonZeroUsize::new(6).unwrap())
                 .with_mode(mode)
                 .with_percussion(MidiChannel::of(9))
-                .with_tuning_capacity(TuningCapacity::new(2, 8).unwrap()),
+                .with_tuning_capacity(TuningCapacity::new(TuningCount::of(2), TuningCount::of(8))),
         );
         let on = |k: u8| Voice2::NoteOn {
             note: NoteNumber::of(k),
@@ -367,6 +373,6 @@ fn mts_is_allocation_free() {
                 }
             }
         });
-        assert!(core.tuning_refused() > 0, "the refusals were exercised");
+        assert!(core.losses().refused > 0, "the refusals were exercised");
     }
 }

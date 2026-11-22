@@ -53,7 +53,7 @@ fn data(u: &Ump) -> f32 {
 
 impl Keeper {
     const BASE: Shape =
-        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO)).with_events(1, 0);
+        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO)).events(1, 0);
     const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
 }
 
@@ -61,7 +61,7 @@ impl Node for Keeper {
     fn shape(&self) -> Shape {
         let s = Self::BASE;
         if self.chases {
-            s.with_chase(self.capacity)
+            s.chase(self.capacity)
         } else {
             s
         }
@@ -96,8 +96,8 @@ struct Wide(u8);
 impl Node for Wide {
     fn shape(&self) -> Shape {
         Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO))
-            .with_events(1, 0)
-            .with_chase(3)
+            .events(1, 0)
+            .chase(3)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -139,7 +139,7 @@ fn cc(controller: u8, value: u8) -> Ump {
 struct Edge0(Ump, Arc<AtomicBool>);
 
 impl Edge0 {
-    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -167,10 +167,7 @@ fn rig(old: Keeper) -> (Editor, Executor) {
     ed.insert(NodeKey(1), "keeper", Unforkable(old));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     ed.commit().expect("commits");
     (ed, exec)
 }
@@ -273,21 +270,12 @@ fn the_chase_comes_ahead_of_edge_events_at_offset_zero() {
     );
     ed.insert(NodeKey(2), "edge", Unforkable(Edge0(edge, Arc::clone(&on))));
     ed.spec_mut().connect_events(
-        EventInputPort {
-            node: NodeKey(1),
-            port: 0,
-        },
-        EventEdge::Direct(EventOutputPort {
-            node: NodeKey(2),
-            port: 0,
-        }),
+        EventInputPort::new(NodeKey(1), 0),
+        EventEdge::Direct(EventOutputPort::new(NodeKey(2), 0)),
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     ed.commit().expect("commits");
     block(&mut exec);
     on.store(true, Ordering::Relaxed);
@@ -326,10 +314,7 @@ fn a_chase_past_its_declared_capacity_is_counted() {
     ed.insert(NodeKey(1), "wide", Unforkable(Wide(5)));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     ed.commit().expect("commits");
     block(&mut exec);
     ed.replace(
@@ -369,12 +354,10 @@ fn a_chase_renders_bit_identically_in_parallel() {
                 Unforkable(Keeper::new(Some(cc(k as u8, 10 * k as u8)), true, 8, &log)),
             );
         }
-        ed.spec_mut().topology.set_outputs(keys.clone().map(|k| {
-            PortSource::Node(OutputPort {
-                node: NodeKey(k),
-                port: 0,
-            })
-        }));
+        ed.spec_mut().topology.set_outputs(
+            keys.clone()
+                .map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))),
+        );
         ed.commit().expect("commits");
         let mut all = Vec::new();
         let mut run = |exec: &mut Executor| all.extend(blocks(exec, 6));
@@ -480,7 +463,7 @@ struct Mute;
 
 impl Node for Mute {
     fn shape(&self) -> Shape {
-        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO)).with_chase(3)
+        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO)).chase(3)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -504,10 +487,7 @@ fn a_held_chase_counts_what_the_successor_cannot_take() {
     ed.insert(NodeKey(1), "mute", Unforkable(Mute));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     ed.commit().expect("commits");
     block(&mut exec);
     let fade = || Fade::new(Samples::new(4 * BLOCK)).law(FadeLaw::EqualPower);

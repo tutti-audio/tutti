@@ -50,12 +50,7 @@ fn render(mode: RenderMode, participants: usize) {
     }
     ed.spec_mut()
         .topology
-        .set_outputs((0..SOURCES as u64).map(|k| {
-            PortSource::Node(OutputPort {
-                node: NodeKey(k),
-                port: 0,
-            })
-        }));
+        .set_outputs((0..SOURCES as u64).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))));
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

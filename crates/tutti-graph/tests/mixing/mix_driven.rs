@@ -38,24 +38,15 @@ fn key(n: u64) -> NodeKey {
 }
 
 fn at(node: u64) -> InputPort {
-    InputPort {
-        node: key(node),
-        port: 0,
-    }
+    InputPort::new(key(node), 0)
 }
 
 fn out(node: u64) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: key(node),
-        port: 0,
-    })
+    PortSource::Node(OutputPort::new(key(node), 0))
 }
 
 fn lane_out(node: u64) -> EventOutputPort {
-    EventOutputPort {
-        node: key(node),
-        port: 0,
-    }
+    EventOutputPort::new(key(node), 0)
 }
 
 fn mix_of(node: u64) -> ParamIn {
@@ -527,13 +518,7 @@ fn the_mix_port_is_refused_as_a_param_is() {
     ));
 
     let mut port = rig.spec.clone();
-    port.connect_param(
-        mix_of(2),
-        EventOutputPort {
-            node: key(1),
-            port: 3,
-        },
-    );
+    port.connect_param(mix_of(2), EventOutputPort::new(key(1), 3));
     let err = compile(
         &port.validate().expect("valid"),
         &shapes,

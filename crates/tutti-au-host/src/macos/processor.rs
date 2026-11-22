@@ -23,7 +23,7 @@ use tutti_plugin_types::{
     ProcessContext, ProcessOutput, Processor, TransportInfo, WireMidi,
 };
 use tutti_rt::Reader;
-use tutti_ump::SysexAssembler;
+use tutti_ump::{MessageType, SysexAssembler};
 use tutti_units::ParamId;
 
 use crate::automation::SharedStage;
@@ -284,7 +284,14 @@ fn stage_ump(list: &mut EventList, events: &[UmpAt], mut send: impl FnMut(&Event
     for &(offset, ev) in events {
         // Types with a Group and a musical meaning: System, channel voice,
         // SysEx7 and Data 128. Utility, Flex and Stream are not sent.
-        if !matches!(ev.message_type(), 0x1..=0x5) {
+        if !matches!(
+            ev.message_type(),
+            MessageType::System
+                | MessageType::Midi1ChannelVoice
+                | MessageType::Sysex7
+                | MessageType::Midi2ChannelVoice
+                | MessageType::Data128
+        ) {
             continue;
         }
         let wire = Wire::of_message_type(ev.message_type());

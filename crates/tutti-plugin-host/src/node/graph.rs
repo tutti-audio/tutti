@@ -83,11 +83,11 @@ where
         let latency = Latency::new(Samples::new(latency.get() + this.pipeline.get()));
         this.declared
             .event_shape(this.features)
-            .with_event_input_capacity(this.event_input)
-            .with_latency(latency)
+            .event_input_capacity(this.event_input)
+            .latency(latency)
             // The ceiling: the plugin's claim, raised by what a probe measured
             // (empty until a probe ran with `--measure`), never lowered.
-            .with_tail(Processing::new(tail).ceiling(rate))
+            .tail(Processing::new(tail).ceiling(rate))
     }
 
     /// The rate (pending for the plugin, dispatched from the main thread; a
@@ -103,6 +103,10 @@ where
         // the last one seen while it is away). A served plugin has a second cut
         // at its chunk (`Processor::event_input`).
         this.event_input = this.event_bound();
+        // The wait of an out-of-process fork follows the graph's mode on every
+        // prepare, whether or not the Processor is in hand: the node's only
+        // say over it.
+        this.drive_wait(p);
         // A Processor that follows the graph takes its rate, block and
         // quantum live (no restart, no main thread); one that does not is
         // told the rate by the lifecycle.

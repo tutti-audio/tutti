@@ -35,14 +35,8 @@ fn device(ed: &mut Editor, inlet: u64) -> EventInletWriter {
     let (node, writer) = EventInletNode::pair(LIVE_INLET_CAPACITY);
     ed.insert(NodeKey(inlet), "device", node);
     ed.spec_mut().connect_events(
-        EventInputPort {
-            node: NodeKey(1),
-            port: 0,
-        },
-        EventEdge::Direct(EventOutputPort {
-            node: NodeKey(inlet),
-            port: 0,
-        }),
+        EventInputPort::new(NodeKey(1), 0),
+        EventEdge::Direct(EventOutputPort::new(NodeKey(inlet), 0)),
     );
     writer
 }

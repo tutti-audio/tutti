@@ -20,7 +20,7 @@ struct Logger;
 
 impl Node for Logger {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_tail(Tail::Unbounded)
+        Shape::source_unassigned(ChannelLayout::MONO).tail(Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -47,10 +47,7 @@ fn an_engine_renders_a_nodes_records_to_its_readers_from_the_block_after_the_fil
     ed.insert(NodeKey(1), "logger", Unforkable(Logger));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     ed.commit().expect("commits");
     let mut exec = exec;
     let readers = RtLogReaders::new(&mut exec);

@@ -32,7 +32,7 @@ use tutti_graph::{
 };
 use tutti_rt::{Param, Publisher, Reader};
 use tutti_timeline::TempoReader;
-use tutti_units::{Amplitude, Latency, PlaybackRate, Tail, UnitParam};
+use tutti_units::{Amplitude, PlaybackRate, Tail, UnitParam};
 
 /// Why a [`VoiceNode`] cannot be built over a voice.
 #[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
@@ -171,7 +171,7 @@ impl<F: SamplerFloat> VoiceNode<F> {
     ) -> Result<Self, VoiceNodeError> {
         let channels = crate::voice_width(channels.into())?;
         GainError::check(voice.play.gain)?;
-        let stretch = stretch_wanted(&voice.play).then(|| stretched::vocoder::<F>(channels));
+        let stretch = stretch_wanted(&voice.play).then(|| stretched::vocoder::<F>(channels, true));
         let gain = Param::new(voice.play.gain);
         let window = voice.source.window();
         let play = voice.play;
@@ -399,18 +399,6 @@ impl<F: SamplerFloat> VoiceNode<F> {
         self.slot.voice.ring_out(self.reach)
     }
 
-    /// The processing latency the node declares ([`Shape::latency`]). A memory
-    /// voice reads its source a vocoder's latency ahead, so it has none; a disk
-    /// voice cannot read before its seat, so it declares its vocoder's, which
-    /// is built with the node or never and always runs, so the figure is the same
-    /// for the node's life.
-    fn latency(&self) -> Latency {
-        match (&self.slot.voice.source, &self.slot.stretch) {
-            (VoiceSource::Disk(_), Some(vocoders)) => Latency::new(vocoders.live.latency()),
-            _ => Latency::ZERO,
-        }
-    }
-
     /// What the node declares to the cost model: `Moderate` for a plain
     /// read, `Heavy` with a vocoder.
     ///
@@ -467,10 +455,9 @@ impl<F: SamplerFloat> Node<F> for VoiceNode<F> {
     /// skipped, with the ring-out of `ring_out`.
     fn shape(&self) -> Shape {
         Shape::source_unassigned(self.channels)
-            .with_tail(self.ring_out())
-            .with_latency(self.latency())
-            .with_cost(self.cost())
-            .with_param_addrs(self.declared_ports().as_slice())
+            .tail(self.ring_out())
+            .cost(self.cost())
+            .param_addrs(self.declared_ports().as_slice())
     }
 
     /// The rate the voice's source runs at, and the
@@ -623,7 +610,7 @@ impl<F: SamplerFloat> ForkSource<F> for VoiceNodeFork<F> {
         node.reach = Reach::Frozen;
         let forked = Forked::new(Box::new(node));
         Ok(match health {
-            Some(h) => forked.with_health(Arc::new(h)),
+            Some(h) => forked.health(Arc::new(h)),
             None => forked,
         })
     }
@@ -780,10 +767,10 @@ mod tests {
         );
     }
 
-    /// A standalone disk voice that stretches declares its vocoder's latency (its ring
-    /// cannot be read ahead of its seat), and one that does not declares none.
+    /// A standalone disk voice declares no latency, stretching or not: it reads its history
+    /// from the ring before its seat, so it sounds on time.
     #[test]
-    fn a_standalone_disk_voice_declares_its_vocoders_latency() {
+    fn a_standalone_disk_voice_declares_no_latency() {
         let dir = tempfile::tempdir().expect("a temp dir");
         let path = dir.path().join("tone.wav");
         tutti_fixtures::signal::write_wav_f32(&path, SampleRate::SR_48K, 1, &vec![0.25f32; 4_800]);
@@ -800,19 +787,15 @@ mod tests {
                 .shape()
                 .latency
         };
-        let stretched = latency(Playback {
-            stretch: tutti_units::StretchFactor::new(1.5),
-            ..Playback::default()
-        });
-        let want = stretched::vocoder::<f32>(ChannelLayout::MONO)
-            .live
-            .latency();
-        assert!(want.get() > 0);
-        assert_eq!(stretched.samples(), want);
-        assert_eq!(
-            latency(Playback::default()).samples(),
-            tutti_units::Samples::new(0)
-        );
+        for play in [
+            Playback {
+                stretch: tutti_units::StretchFactor::new(1.5),
+                ..Playback::default()
+            },
+            Playback::default(),
+        ] {
+            assert_eq!(latency(play).samples(), tutti_units::Samples::new(0));
+        }
     }
 
     /// **A streaming node's handle owns its stream.** With every other holder

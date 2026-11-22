@@ -4,7 +4,7 @@
 //! # Why a wrapper and not an extension of `crate`
 //!
 //! Giving `InputPort`/`OutputPort` a kind would break every place
-//! that builds them by literal (`InputPort { node, port }`). Event edges also
+//! that builds them by literal (`InputPort::new(node, port)`). Event edges also
 //! have a different *edge kind* from audio edges (an event edge carries an
 //! offset-merged stream, an audio edge a signal that will be summed), so the
 //! two maps do not share a type.
@@ -31,40 +31,54 @@ use crate::param::{ParamIn, ParamMod, ParamRange};
 /// An event **input** port of a node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EventInputPort {
-    /// The node.
-    pub node: NodeKey,
-    /// Which of its event input ports.
-    pub port: u16,
+    pub(crate) node: NodeKey,
+    pub(crate) port: u16,
 }
 
 impl EventInputPort {
+    /// The node.
+    #[must_use]
+    pub const fn node(self) -> NodeKey {
+        self.node
+    }
+
+    /// Which of its event input ports.
+    #[must_use]
+    pub const fn port(self) -> u16 {
+        self.port
+    }
+
     /// Event input `port` of `node`.
     #[must_use]
-    pub fn new(node: impl Into<NodeKey>, port: u16) -> Self {
-        Self {
-            node: node.into(),
-            port,
-        }
+    pub const fn new(node: NodeKey, port: u16) -> Self {
+        Self { node, port }
     }
 }
 
 /// An event **output** port of a node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EventOutputPort {
-    /// The node.
-    pub node: NodeKey,
-    /// Which of its event output ports.
-    pub port: u16,
+    pub(crate) node: NodeKey,
+    pub(crate) port: u16,
 }
 
 impl EventOutputPort {
+    /// The node.
+    #[must_use]
+    pub const fn node(self) -> NodeKey {
+        self.node
+    }
+
+    /// Which of its event output ports.
+    #[must_use]
+    pub const fn port(self) -> u16 {
+        self.port
+    }
+
     /// Event output `port` of `node`.
     #[must_use]
-    pub fn new(node: impl Into<NodeKey>, port: u16) -> Self {
-        Self {
-            node: node.into(),
-            port,
-        }
+    pub const fn new(node: NodeKey, port: u16) -> Self {
+        Self { node, port }
     }
 }
 
@@ -80,16 +94,16 @@ impl EventOutputPort {
 /// use tutti_graph::OutputPort;
 /// use tutti_graph::NodeKey;
 /// let mut g = GraphSpec::default();
-/// let audio = OutputPort { node: NodeKey(1), port: 0 };
-/// g.connect_events(EventInputPort { node: NodeKey(2), port: 0 }, EventEdge::Direct(audio));
+/// let audio = OutputPort::new(NodeKey(1), 0);
+/// g.connect_events(EventInputPort::new(NodeKey(2), 0), EventEdge::Direct(audio));
 /// ```
 ///
 /// ```
 /// use tutti_graph::{EventEdge, EventInputPort, EventOutputPort, GraphSpec};
 /// use tutti_graph::NodeKey;
 /// let mut g = GraphSpec::default();
-/// let events = EventOutputPort { node: NodeKey(1), port: 0 };
-/// g.connect_events(EventInputPort { node: NodeKey(2), port: 0 }, EventEdge::Direct(events));
+/// let events = EventOutputPort::new(NodeKey(1), 0);
+/// g.connect_events(EventInputPort::new(NodeKey(2), 0), EventEdge::Direct(events));
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EventEdge {

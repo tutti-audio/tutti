@@ -17,9 +17,8 @@ use tutti_graph::{
 use tutti_nodes::testing::{Const, Osc, Through};
 use tutti_rt::Param;
 use tutti_session::{
-    DetachedSession, EventInputPort, Feeder, InputPort, MainInput, MainOutput, OutputPort,
-    RemoveError, ReplaceRefused, Replacement, Session, SessionEvent, SessionNode,
-    main_output_width,
+    DetachedSession, Feeder, InputPort, MainInput, MainOutput, OutputPort, RemoveError,
+    ReplaceRefused, Replacement, Session, SessionEvent, SessionNode, main_output_width,
 };
 use tutti_units::{Drive, Hz, Real, SampleRate, Samples};
 use tutti_units::{Latency, UnitParam};
@@ -86,7 +85,7 @@ impl Knob {
 
 impl Node for Knob {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_params(&[UnitParam::Drive])
+        Shape::source_unassigned(ChannelLayout::MONO).params(&[UnitParam::Drive])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -128,7 +127,7 @@ struct Holder(#[expect(dead_code, reason = "held to be counted")] std::sync::Arc
 
 impl Node for Holder {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_events(0, 1)
+        Shape::source_unassigned(ChannelLayout::MONO).events(0, 1)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -214,7 +213,7 @@ impl<const N: usize> Late<N> {
 
 impl<const N: usize> Node for Late<N> {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::MONO).with_latency(Latency::new(Samples::new(N)))
+        Shape::through_unassigned(ChannelLayout::MONO).latency(Latency::new(Samples::new(N)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -239,7 +238,7 @@ struct Events<const IN: u16, const OUT: u16>;
 
 impl<const IN: u16, const OUT: u16> Node for Events<IN, OUT> {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_events(IN, OUT)
+        Shape::source_unassigned(ChannelLayout::MONO).events(IN, OUT)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -970,7 +969,7 @@ fn move_feeds_moves_every_feeders_sources() {
         both,
         "each feeder kept its own entry"
     );
-    let mut edges = g.sources(EventInputPort::new(old, 0)).unwrap();
+    let mut edges = g.sources(old.event_input(0)).unwrap();
     edges.sort();
     assert_eq!(edges, both, "the union is the sink's event edges");
 
@@ -987,11 +986,11 @@ fn move_feeds_moves_every_feeders_sources() {
         g.feeds(old).unwrap().is_empty(),
         "the old sink is fed by nothing"
     );
-    let mut edges = g.sources(EventInputPort::new(new, 0)).unwrap();
+    let mut edges = g.sources(new.event_input(0)).unwrap();
     edges.sort();
     assert_eq!(edges, both, "the new sink's edges are the union");
     assert!(
-        g.sources(EventInputPort::new(old, 0)).unwrap().is_empty(),
+        g.sources(old.event_input(0)).unwrap().is_empty(),
         "and the old's are gone"
     );
     assert_eq!(s.update().len(), 0);

@@ -112,9 +112,9 @@ impl Script {
 impl Node for Script {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, self.ports)
-            .with_event_capacity(tutti_graph::testing::cap_of(self.cap))
-            .with_latency(Latency::new(Samples::new(self.latency)))
+            .events(0, self.ports)
+            .event_capacity(tutti_graph::testing::cap_of(self.cap))
+            .latency(Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -135,17 +135,11 @@ impl Node for Script {
 }
 
 fn out(node: u64) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: NodeKey(node),
-        port: 0,
-    })
+    PortSource::Node(OutputPort::new(NodeKey(node), 0))
 }
 
 fn port(node: u64, port: u16) -> EventOutputPort {
-    EventOutputPort {
-        node: NodeKey(node),
-        port,
-    }
+    EventOutputPort::new(NodeKey(node), port)
 }
 
 struct Rig {
@@ -175,13 +169,7 @@ fn rig(workers: usize, no_alloc: bool, m: usize) -> Rig {
     );
     ed.insert(NodeKey(91), "lag", Forkable(Kind::Lag { latency: m }));
     let t = &mut ed.spec_mut().topology;
-    t.connect(
-        InputPort {
-            node: NodeKey(91),
-            port: 0,
-        },
-        Edge::Direct(out(90)),
-    );
+    t.connect(InputPort::new(NodeKey(91), 0), Edge::Direct(out(90)));
     t.set_outputs([out(91)]);
     Rig {
         ed,
@@ -717,15 +705,15 @@ struct Probe {
 }
 
 impl Probe {
-    const BASE: Shape = Shape::EMPTY.with_events(1, 0);
+    const BASE: Shape = Shape::EMPTY.events(1, 0);
     const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
 }
 
 impl Node for Probe {
     fn shape(&self) -> Shape {
-        let shape = Shape::EMPTY.with_events(self.ports as u16, 0);
+        let shape = Shape::EMPTY.events(self.ports as u16, 0);
         if self.capacity > 0 {
-            shape.with_event_capacity(tutti_graph::testing::cap_of(self.capacity))
+            shape.event_capacity(tutti_graph::testing::cap_of(self.capacity))
         } else {
             shape
         }
@@ -770,10 +758,7 @@ fn fan_in(r: &mut Rig, probe_ports: usize) -> tutti_fixtures::Record<TapEvent> {
     );
     for from in [1, 2] {
         r.ed.spec_mut().connect_events(
-            EventInputPort {
-                node: NodeKey(3),
-                port: 0,
-            },
+            EventInputPort::new(NodeKey(3), 0),
             EventEdge::Direct(port(from, 0)),
         );
     }
@@ -796,10 +781,7 @@ fn an_input_tap_reads_what_the_node_heard() {
     ] {
         let mut r = rig(workers, false, 40);
         let heard = fan_in(&mut r, 1);
-        let input = EventInputPort {
-            node: NodeKey(3),
-            port: 0,
-        };
+        let input = EventInputPort::new(NodeKey(3), 0);
         let mut raw =
             r.ed.open_event_tap(
                 EventTapId::of(1),
@@ -835,30 +817,19 @@ fn an_input_tap_reads_what_the_node_heard() {
 fn an_input_tap_of_one_source_and_of_none() {
     let mut r = rig(1, false, 0);
     let heard = fan_in(&mut r, 2);
-    r.ed.spec_mut().disconnect_events(
-        EventInputPort {
-            node: NodeKey(3),
-            port: 0,
-        },
-        port(2, 0),
-    );
+    r.ed.spec_mut()
+        .disconnect_events(EventInputPort::new(NodeKey(3), 0), port(2, 0));
     let mut one =
         r.ed.open_event_tap(
             EventTapId::of(1),
-            EventInputPort {
-                node: NodeKey(3),
-                port: 0,
-            },
+            EventInputPort::new(NodeKey(3), 0),
             EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .expect("the input exists");
     let mut none =
         r.ed.open_event_tap(
             EventTapId::of(2),
-            EventInputPort {
-                node: NodeKey(3),
-                port: 1,
-            },
+            EventInputPort::new(NodeKey(3), 1),
             EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .expect("the input exists");
@@ -896,20 +867,14 @@ fn an_aligned_input_tap_is_sized_for_every_source_of_the_input() {
     );
     for from in [1, 2] {
         r.ed.spec_mut().connect_events(
-            EventInputPort {
-                node: NodeKey(3),
-                port: 0,
-            },
+            EventInputPort::new(NodeKey(3), 0),
             EventEdge::Direct(port(from, 0)),
         );
     }
     let mut tap =
         r.ed.open_event_tap(
             EventTapId::of(1),
-            EventInputPort {
-                node: NodeKey(3),
-                port: 0,
-            },
+            EventInputPort::new(NodeKey(3), 0),
             EventTapOptions::new(EventCapacity::of(64)),
         )
         .expect("the input exists");
@@ -935,10 +900,7 @@ fn opening_an_input_tap_refuses_a_port_that_does_not_exist_now() {
     let open = |r: &mut Rig, node: u64, port: u16| {
         r.ed.open_event_tap(
             EventTapId::of(9),
-            EventInputPort {
-                node: NodeKey(node),
-                port,
-            },
+            EventInputPort::new(NodeKey(node), port),
             EventTapOptions::new(EventCapacity::of(8)).align(TapAlign::Raw),
         )
         .err()

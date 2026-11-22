@@ -174,10 +174,10 @@ impl Clone for MidiOutNode {
 
 impl MidiOutNode {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(1, 1)
-        .with_event_capacity(MIDI_OUT_PORT_CAPACITY)
+        .events(1, 1)
+        .event_capacity(MIDI_OUT_PORT_CAPACITY)
         // Event-only: a copy per event, nothing per frame.
-        .with_cost(tutti_graph::Cost::Light);
+        .cost(tutti_graph::Cost::Light);
     const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
     const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
 

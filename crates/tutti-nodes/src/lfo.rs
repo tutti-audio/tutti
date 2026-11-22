@@ -257,9 +257,9 @@ tutti_graph::declare_params!([] LfoNode, n {
 impl<F: Float> Node<F> for LfoNode {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
-            .with_cost(tutti_graph::Cost::Moderate)
-            .with_tail(Tail::None)
-            .with_param_addrs(self.declared_ports().as_slice())
+            .cost(tutti_graph::Cost::Moderate)
+            .tail(Tail::None)
+            .param_addrs(self.declared_ports().as_slice())
     }
 
     fn prepare(&mut self, p: &Prepare) {

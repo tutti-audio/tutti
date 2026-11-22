@@ -34,13 +34,8 @@ impl Pool for Counting {
 /// channels taking `pair`.
 fn wire(ed: &mut Editor, pair: [u64; 2]) {
     ed.spec_mut().topology.set_outputs(
-        pair.map(|k| {
-            PortSource::Node(OutputPort {
-                node: NodeKey(k),
-                port: 0,
-            })
-        })
-        .to_vec(),
+        pair.map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0)))
+            .to_vec(),
     );
 }
 
@@ -71,14 +66,11 @@ fn render(pooled: bool) -> (Vec<f32>, usize) {
             ForkByClone(support::Gain(0.1 * (k + 1) as f32)),
         );
         ed.spec_mut().topology.edges.insert(
-            InputPort {
-                node: NodeKey(k + 11),
-                port: 0,
-            },
-            vec![Edge::Direct(PortSource::Node(OutputPort {
-                node: NodeKey(k + 1),
-                port: 0,
-            }))],
+            InputPort::new(NodeKey(k + 11), 0),
+            vec![Edge::Direct(PortSource::Node(OutputPort::new(
+                NodeKey(k + 1),
+                0,
+            )))],
         );
     }
     wire(&mut ed, [11, 12]);

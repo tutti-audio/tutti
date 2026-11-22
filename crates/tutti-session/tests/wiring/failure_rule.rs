@@ -194,7 +194,7 @@ struct Events {
 
 impl Node for Events {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_events(self.inputs, self.outputs)
+        Shape::source_unassigned(ChannelLayout::MONO).events(self.inputs, self.outputs)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -228,7 +228,7 @@ fn set_feed_refuses_a_sink_that_is_not_there_and_changes_nothing() {
     g.set_feed(gone, Feeder::Routes, fed.clone()).unwrap();
     s.remove(gone).unwrap();
     let g = s.graph();
-    let edges = g.sources(EventInputPort::new(sink, 0)).unwrap();
+    let edges = g.sources(sink.event_input(0)).unwrap();
 
     for missing in [GHOST, gone.erase()] {
         let refused = g.set_feed(missing, Feeder::Routes, fed.clone());
@@ -241,7 +241,7 @@ fn set_feed_refuses_a_sink_that_is_not_there_and_changes_nothing() {
         fed,
         "the feed stands"
     );
-    assert_eq!(g.sources(EventInputPort::new(sink, 0)).unwrap(), edges);
+    assert_eq!(g.sources(sink.event_input(0)).unwrap(), edges);
 }
 
 /// **A read of the feeds of a node that is not there names it.** An empty

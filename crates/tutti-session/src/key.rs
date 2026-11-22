@@ -68,10 +68,7 @@ impl<N: ?Sized> Key<N> {
     /// Event output `index` of the node.
     #[must_use]
     pub const fn event_output(self, index: u16) -> EventOutputPort {
-        EventOutputPort {
-            node: self.node,
-            port: index,
-        }
+        EventOutputPort::new(self.node, index)
     }
 
     /// Event input `index` of the node (a port per MIDI Group, a plugin's note
@@ -82,10 +79,7 @@ impl<N: ?Sized> Key<N> {
     /// delivered there.
     #[must_use]
     pub const fn event_input(self, index: u16) -> EventInputPort {
-        EventInputPort {
-            node: self.node,
-            port: index,
-        }
+        EventInputPort::new(self.node, index)
     }
 
     /// Output bus `bus` of the node, as a source of a bus edge.
@@ -185,7 +179,7 @@ impl OutputPort {
     /// The port the graph's `source` names, `None` for explicit silence.
     pub(crate) fn of_source(source: tutti_graph::PortSource) -> Option<Self> {
         match source {
-            tutti_graph::PortSource::Node(p) => Some(Self::new(p.node, usize::from(p.port))),
+            tutti_graph::PortSource::Node(p) => Some(Self::new(p.node(), usize::from(p.port()))),
             tutti_graph::PortSource::MainInput(c) => Some(MainInput::channel(usize::from(c))),
             tutti_graph::PortSource::Zero => None,
         }
@@ -238,7 +232,7 @@ impl InputPort {
     /// The port the graph's `sink` names.
     pub(crate) fn of_sink(sink: tutti_graph::PortSink) -> Self {
         match sink {
-            tutti_graph::PortSink::Port(p) => Self::new(p.node, usize::from(p.port)),
+            tutti_graph::PortSink::Port(p) => Self::new(p.node(), usize::from(p.port())),
             tutti_graph::PortSink::Output(c) => MainOutput::channel(usize::from(c)),
         }
     }

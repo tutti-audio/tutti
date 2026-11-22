@@ -27,7 +27,7 @@ use tutti_fixtures::midi;
 use tutti_polysynth::{FilterType, OscillatorType, PolySynth, PortamentoConfig, SynthConfig};
 use tutti_ump::{
     Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
-    PerNoteManagement, RegisteredPerNoteController, Rpn, U7, U14, Ump, Voice1, Voice2,
+    PerNoteManagement, Pitch, RegisteredPerNoteController, Rpn, U7, U14, Ump, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
 use tutti_units::{Hz, SampleRate};
@@ -201,7 +201,7 @@ fn polysynth_every_decoded_message_is_allocation_free() {
         m2(Voice2::NoteOn {
             note,
             velocity: NoteVelocity::CENTER,
-            attribute: Attribute::Pitch(60 << 9),
+            attribute: Attribute::Pitch(Pitch::from_q7_9(60 << 9)),
         }),
         m2(Voice2::NoteOn {
             note,
@@ -471,21 +471,14 @@ fn a_clip_into_a_synth_is_allocation_free() {
         ),
     );
     ed.spec_mut().connect_events(
-        EventInputPort {
-            node: NodeKey(2),
-            port: 0,
-        },
-        EventEdge::Direct(EventOutputPort {
-            node: NodeKey(1),
-            port: 0,
+        EventInputPort::new(NodeKey(2), 0),
+        EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
+    );
+    ed.spec_mut().topology.set_outputs(
+        (0..2).map(|port| {
+            tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(NodeKey(2), port))
         }),
     );
-    ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-        tutti_graph::PortSource::Node(tutti_graph::OutputPort {
-            node: NodeKey(2),
-            port,
-        })
-    }));
     ed.commit().expect("commits");
     let at = |frame: usize, playing: bool| {
         TransportPosition::new(

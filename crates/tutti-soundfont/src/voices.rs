@@ -8,7 +8,7 @@ use tutti_buffers::Float;
 use tutti_dsp::SimdLanes;
 
 use tutti_sf2::{SamplePool, SoundFont};
-use tutti_ump::{MidiChannel, NoteVelocity};
+use tutti_ump::MidiChannel;
 use tutti_units::{Amplitude, Semitones};
 use tutti_voicing::{ChannelState, VoiceCommand, VoiceId};
 
@@ -97,7 +97,7 @@ impl<F: Float + SimdLanes> Voices<F> {
                         &RegionPair::new(preset_zone, instrument_zone),
                         i32::from(channel.get()),
                         i32::from(key.get()),
-                        i32::from(NoteVelocity::new(velocity).to_note_on_u7().get()),
+                        i32::from(velocity.to_note_on_u7().get()),
                     );
                     voice.tune(tune);
                     voice.glide(glide);

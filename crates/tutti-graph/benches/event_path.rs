@@ -46,8 +46,8 @@ impl Source {
 
     fn declared(cap: u32) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(std::num::NonZeroU32::new(cap).expect("a capacity"))
+            .events(0, 1)
+            .event_capacity(std::num::NonZeroU32::new(cap).expect("a capacity"))
     }
 }
 
@@ -76,7 +76,7 @@ impl Node for Source {
 struct Sink(InEvents);
 
 impl Sink {
-    const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+    const SHAPE: Shape = Shape::EMPTY.events(1, 0);
 
     fn new() -> Self {
         Self(Self::SHAPE.event_input(0).expect("one event input"))
@@ -103,14 +103,8 @@ fn rig(source: Source) -> Executor {
     ed.insert(NodeKey(1), "source", Unforkable(source));
     ed.insert(NodeKey(2), "sink", Unforkable(Sink::new()));
     ed.spec_mut().connect_events(
-        EventInputPort {
-            node: NodeKey(2),
-            port: 0,
-        },
-        EventEdge::Direct(EventOutputPort {
-            node: NodeKey(1),
-            port: 0,
-        }),
+        EventInputPort::new(NodeKey(2), 0),
+        EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
     );
     ed.commit().expect("commits");
     let mut exec = exec;

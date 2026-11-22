@@ -134,12 +134,9 @@ fn graph_with(
     ));
     ed.insert(NodeKey(1), "voice", pool);
     ed.insert(NodeKey(2), "probe", tutti_graph::Unforkable(Probe(probe)));
-    ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-        PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port,
-        })
-    }));
+    ed.spec_mut()
+        .topology
+        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))));
     ed.commit().expect("commits");
     (ed, exec)
 }

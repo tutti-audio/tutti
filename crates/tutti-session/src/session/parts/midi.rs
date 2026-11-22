@@ -13,7 +13,7 @@ use tutti_platform::Instant;
 use tutti_buffers::Float;
 use tutti_graph::NodeKey;
 use tutti_timeline::MotionCommand;
-use tutti_units::{SampleRate, Samples};
+use tutti_units::{Losses, SampleRate, Samples};
 
 use super::TransportPart;
 use crate::builder::{Options, Parts};
@@ -174,12 +174,12 @@ impl MidiPart {
         handle: &TransportHandle,
         out: &mut Vec<SessionEvent>,
     ) {
-        let refused: u64 = followed
+        let refused: Losses = followed
             .actions
             .into_iter()
-            .map(|placed| u64::from(!Self::send_action(placed, handle)))
+            .map(|placed| Losses::refused(u64::from(!Self::send_action(placed, handle))))
             .sum();
-        if refused > 0 {
+        if refused != Losses::NONE {
             out.push(crate::MidiEvent::ClockCommandsRefused(refused).into());
         }
     }

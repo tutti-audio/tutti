@@ -59,7 +59,7 @@ use alloc::vec::Vec;
 use tutti_midi_protocol::PitchBendSensitivity;
 use tutti_ump::BendValue;
 use tutti_ump::{
-    Address, Attribute, MidiChannel, NoteId, NoteNumber, PerNoteManagement, Pitch,
+    Address, Attribute, ControlValue, MidiChannel, NoteId, NoteNumber, PerNoteManagement, Pitch,
     RegisteredPerNoteController, Rpn, Voice2,
 };
 use tutti_units::Semitones;
@@ -93,12 +93,12 @@ pub enum NoteControl {
     /// key (a note started with nothing told and no bend is sent none); after
     /// a [`Reset`](NoteEvent::Reset) it is the key's again.
     Pitch(Pitch),
-    /// Polyphonic Pressure, 32 bits.
-    Pressure(u32),
-    /// Any other Registered Per-Note Controller (Appendix A), 32 bits.
-    Registered(RegisteredPerNoteController, u32),
-    /// An Assignable Per-Note Controller's index and 32-bit value.
-    Assignable(u8, u32),
+    /// Polyphonic Pressure.
+    Pressure(ControlValue),
+    /// Any other Registered Per-Note Controller (Appendix A).
+    Registered(RegisteredPerNoteController, ControlValue),
+    /// An Assignable Per-Note Controller's index and value.
+    Assignable(u8, ControlValue),
 }
 
 /// What a message did to the per-note state.
@@ -137,44 +137,105 @@ pub enum NoteEvent {
     },
 }
 
-/// What a Note Number was last told, by controller: a code and the wire word.
+/// A controller of a note and the value it was last told.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Told {
+    /// Registered Per-Note Controller #3.
+    Pitch(Pitch),
+    /// Per-Note Pitch Bend.
+    Bend(BendValue),
+    Pressure(ControlValue),
+    /// A Registered Per-Note Controller other than #3 (which is [`Told::Pitch`]).
+    Registered(RegisteredPerNoteController, ControlValue),
+    Assignable(u8, ControlValue),
+}
+
+impl Told {
+    /// A Registered Per-Note Controller's value: #3 is the pitch, its word Q7.25.
+    fn registered(controller: RegisteredPerNoteController, value: ControlValue) -> Self {
+        match controller {
+            RegisteredPerNoteController::Pitch => Self::Pitch(Pitch::from_q7_25(value.get())),
+            controller => Self::Registered(controller, value),
+        }
+    }
+
+    /// Whether both are values of one controller.
+    fn same_controller(self, other: Self) -> bool {
+        match (self, other) {
+            (Self::Pitch(_), Self::Pitch(_))
+            | (Self::Bend(_), Self::Bend(_))
+            | (Self::Pressure(_), Self::Pressure(_)) => true,
+            (Self::Registered(a, _), Self::Registered(b, _)) => a == b,
+            (Self::Assignable(a, _), Self::Assignable(b, _)) => a == b,
+            _ => false,
+        }
+    }
+
+    /// What a note reads of it; the pitch and its bend are read through the
+    /// sounding pitch, so they are none.
+    fn control(self) -> Option<NoteControl> {
+        match self {
+            Self::Pitch(_) | Self::Bend(_) => None,
+            Self::Pressure(v) => Some(NoteControl::Pressure(v)),
+            Self::Registered(c, v) => Some(NoteControl::Registered(c, v)),
+            Self::Assignable(i, v) => Some(NoteControl::Assignable(i, v)),
+        }
+    }
+}
+
+/// What a Note Number was last told, by controller, the most recent last.
 #[derive(Debug, Clone, Copy)]
 struct Held {
     len: usize,
-    set: [(u16, u32); NOTE_CONTROLS],
+    set: [Told; NOTE_CONTROLS],
 }
 
 impl Held {
     const NONE: Held = Held {
         len: 0,
-        set: [(0, 0); NOTE_CONTROLS],
+        set: [Told::Pressure(ControlValue::MIN); NOTE_CONTROLS],
     };
 
-    /// Registered Per-Note Controller #3's code, its number.
-    const PITCH: u16 = RegisteredPerNoteController::Pitch.number() as u16;
-    const BEND: u16 = 0x200;
-    const PRESSURE: u16 = 0x201;
-    const ASSIGNABLE: u16 = 0x100;
-
-    /// Records `value`, the most recent. The oldest goes if the table is full.
-    fn set(&mut self, code: u16, value: u32) {
-        if let Some(e) = self.set[..self.len].iter_mut().find(|e| e.0 == code) {
-            e.1 = value;
+    /// Records `told`, the most recent. The oldest goes if the table is full.
+    fn set(&mut self, told: Told) {
+        if let Some(e) = self.set[..self.len]
+            .iter_mut()
+            .find(|e| e.same_controller(told))
+        {
+            *e = told;
             return;
         }
         if self.len == NOTE_CONTROLS {
             self.set.copy_within(1.., 0);
             self.len -= 1;
         }
-        self.set[self.len] = (code, value);
+        self.set[self.len] = told;
         self.len += 1;
     }
 
-    fn get(&self, code: u16) -> Option<u32> {
-        self.set[..self.len]
-            .iter()
-            .find(|e| e.0 == code)
-            .map(|e| e.1)
+    fn told(&self) -> &[Told] {
+        &self.set[..self.len]
+    }
+
+    fn pitch(&self) -> Option<Pitch> {
+        self.told().iter().find_map(|t| match t {
+            Told::Pitch(p) => Some(*p),
+            _ => None,
+        })
+    }
+
+    fn bend(&self) -> Option<BendValue> {
+        self.told().iter().find_map(|t| match t {
+            Told::Bend(b) => Some(*b),
+            _ => None,
+        })
+    }
+
+    fn pressure(&self) -> Option<ControlValue> {
+        self.told().iter().find_map(|t| match t {
+            Told::Pressure(v) => Some(*v),
+            _ => None,
+        })
     }
 }
 
@@ -242,7 +303,7 @@ pub struct PerNoteState {
     live: Vec<Live>,
     /// Each channel's Per-Note Pitch Bend sensitivity, `group * 16 + channel`.
     ranges: Vec<Semitones>,
-    next: u32,
+    next: NoteId,
     out: Vec<NoteEvent>,
 }
 
@@ -275,7 +336,7 @@ impl PerNoteState {
             held: vec![Held::NONE; groups * CHANNELS * KEYS],
             live: vec![Live::NONE; groups * CHANNELS * KEYS],
             ranges: vec![default_range; groups * CHANNELS],
-            next: NoteId::MAX_CHANNEL_NOTE + 1,
+            next: NoteId::FIRST_MINTED,
             out: Vec::with_capacity(MAX_EVENTS),
         }
     }
@@ -319,22 +380,17 @@ impl PerNoteState {
                 note,
                 controller,
                 value,
-            } => self.control(address, note, u16::from(controller.number()), value.get()),
+            } => self.control(address, note, Told::registered(controller, value)),
             Voice2::AssignablePerNote {
                 note,
                 controller,
                 value,
-            } => self.control(
-                address,
-                note,
-                Held::ASSIGNABLE | u16::from(controller),
-                value.get(),
-            ),
+            } => self.control(address, note, Told::Assignable(controller, value)),
             Voice2::PerNotePitchBend { note, value } => {
-                self.control(address, note, Held::BEND, value.get());
+                self.control(address, note, Told::Bend(value));
             }
             Voice2::PolyPressure { note, value } => {
-                self.control(address, note, Held::PRESSURE, value.get());
+                self.control(address, note, Told::Pressure(value));
             }
             Voice2::PerNoteManagement { note, management } => {
                 self.management(address, note, management);
@@ -342,7 +398,7 @@ impl PerNoteState {
             Voice2::Registered { bank, index, value }
                 if Rpn::new(bank, index) == Rpn::PER_NOTE_PITCH_BEND_SENSITIVITY =>
             {
-                self.sensitivity(address, value.get());
+                self.sensitivity(address, value);
             }
             _ => {}
         }
@@ -364,32 +420,22 @@ impl PerNoteState {
         let Some(at) = self.slot(address, note) else {
             return &self.out;
         };
-        let id = NoteId::from_raw(self.next);
         // Past the last id of u32 the minting returns to the first above the
         // pairs: an id is only ever compared with the ones live.
-        self.next = self
-            .next
-            .checked_add(1)
-            .unwrap_or(NoteId::MAX_CHANNEL_NOTE + 1);
+        let id = self.next;
+        self.next = id.next_minted();
         let held = self.held[at];
         // The attribute overrides what the number holds, for this note alone.
-        let told = attribute
-            .pitch()
-            .or_else(|| held.get(Held::PITCH).map(Pitch::from_q7_25));
+        let told = attribute.pitch().or_else(|| held.pitch());
         self.live[at].push(id, told);
         self.out.push(NoteEvent::Started { id, address, note });
-        for &(code, value) in &held.set[..held.len] {
-            if code != Held::PITCH
-                && code != Held::BEND
-                && let Some(control) = self.resolve(code, value)
-            {
-                self.out.push(NoteEvent::Control { id, note, control });
-            }
+        for control in held.told().iter().filter_map(|t| t.control()) {
+            self.out.push(NoteEvent::Control { id, note, control });
         }
         // A note told nothing sounds at its key, which is the instrument's
         // default: no event.
         let sounding = self.sounding(at, address, told);
-        if sounding.q7_25() != ((at % KEYS) as u32) << 25 {
+        if sounding != Pitch::from(Self::key(at)) {
             let control = NoteControl::Pitch(sounding);
             self.out.push(NoteEvent::Control { id, note, control });
         }
@@ -400,54 +446,48 @@ impl PerNoteState {
     /// pitch (the key's if none) offset by the number's held bend, scaled by
     /// the channel's sensitivity.
     fn sounding(&self, at: usize, address: Address, told: Option<Pitch>) -> Pitch {
-        let told = told.unwrap_or_else(|| Pitch::from_q7_25(((at % KEYS) as u32) << 25));
+        let told = told.unwrap_or_else(|| Pitch::from(Self::key(at)));
         let range = self
             .channel_index(address)
             .map_or(self.default_range, |c| self.ranges[c]);
         let bend = self.held[at]
-            .get(Held::BEND)
-            .map_or(0.0, |v| BendValue::new(v).bipolar().get() * range.get());
+            .bend()
+            .map_or(0.0, |v| v.bipolar().get() * range.get());
         let q = f64::from(told.q7_25()) + bend * f64::from(1u32 << 25);
         Pitch::from_q7_25(libm::round(q).clamp(0.0, f64::from(u32::MAX)) as u32)
     }
 
-    /// The controller a held code and word, other than the pitch and its bend,
-    /// mean.
-    fn resolve(&self, code: u16, value: u32) -> Option<NoteControl> {
-        match code {
-            Held::PRESSURE => Some(NoteControl::Pressure(value)),
-            c if c >= Held::ASSIGNABLE => Some(NoteControl::Assignable(c as u8, value)),
-            c => RegisteredPerNoteController::try_from(c as u8)
-                .ok()
-                .map(|controller| NoteControl::Registered(controller, value)),
-        }
+    /// The Note Number of slot `at`.
+    fn key(at: usize) -> NoteNumber {
+        NoteNumber::masked((at % KEYS) as u8)
     }
 
     /// A controller arrives: it becomes the number's held value and moves
     /// every live note of the number.
-    fn control(&mut self, address: Address, note: NoteNumber, code: u16, value: u32) {
+    fn control(&mut self, address: Address, note: NoteNumber, told: Told) {
         let Some(at) = self.slot(address, note) else {
             return;
         };
-        self.held[at].set(code, value);
-        if code == Held::PITCH {
-            self.live[at].tell_all(Some(Pitch::from_q7_25(value)));
+        self.held[at].set(told);
+        match told {
+            Told::Pitch(pitch) => self.live[at].tell_all(Some(pitch)),
+            Told::Bend(_) => {}
+            _ => {
+                let Some(control) = told.control() else {
+                    return;
+                };
+                for &id in self.live[at].ids() {
+                    self.out.push(NoteEvent::Control { id, note, control });
+                }
+                return;
+            }
         }
-        if code == Held::PITCH || code == Held::BEND {
-            self.sound_all(at, address);
-            return;
-        }
-        let Some(control) = self.resolve(code, value) else {
-            return;
-        };
-        for &id in self.live[at].ids() {
-            self.out.push(NoteEvent::Control { id, note, control });
-        }
+        self.sound_all(at, address);
     }
 
     /// Each live note of slot `at` is told its sounding pitch.
     fn sound_all(&mut self, at: usize, address: Address) {
-        let note = NoteNumber::masked((at % KEYS) as u8);
+        let note = Self::key(at);
         for (id, told) in self.live[at].notes() {
             let control = NoteControl::Pitch(self.sounding(at, address, told));
             self.out.push(NoteEvent::Control { id, note, control });
@@ -470,13 +510,13 @@ impl PerNoteState {
         }
     }
 
-    fn sensitivity(&mut self, address: Address, value: u32) {
+    fn sensitivity(&mut self, address: Address, value: ControlValue) {
         let Some(c) = self.channel_index(address) else {
             return;
         };
-        self.ranges[c] = PitchBendSensitivity::from_rpn_bits(value).semitones();
+        self.ranges[c] = PitchBendSensitivity::from_rpn_bits(value.get()).semitones();
         for at in c * KEYS..(c + 1) * KEYS {
-            if self.held[at].get(Held::BEND).is_some() {
+            if self.held[at].bend().is_some() {
                 self.sound_all(at, address);
             }
         }
@@ -494,8 +534,15 @@ impl PerNoteState {
         };
         for key in 0..KEYS {
             let at = c * KEYS + key;
-            if self.held[at].get(Held::PRESSURE).is_some_and(|v| v != 0) {
-                self.control(address, NoteNumber::masked(key as u8), Held::PRESSURE, 0);
+            if self.held[at]
+                .pressure()
+                .is_some_and(|v| v != ControlValue::MIN)
+            {
+                self.control(
+                    address,
+                    NoteNumber::masked(key as u8),
+                    Told::Pressure(ControlValue::MIN),
+                );
             }
         }
         &self.out
@@ -794,7 +841,11 @@ mod tests {
         let mut s = state();
         let a = at(0, 0);
         let e = s
-            .start(a, NoteNumber::of(0), Attribute::Pitch(60 << 9))
+            .start(
+                a,
+                NoteNumber::of(0),
+                Attribute::Pitch(Pitch::from_q7_9(60 << 9)),
+            )
             .to_vec();
         let id = started(&e);
         assert_eq!(e.last(), Some(&pitch_event(id, 0, 60)));
@@ -980,7 +1031,11 @@ mod tests {
         let a = at(0, 0);
         pitch_of(&mut s, a, 5, PITCH_60);
         let e = s
-            .start(a, NoteNumber::of(5), Attribute::Pitch(70 << 9))
+            .start(
+                a,
+                NoteNumber::of(5),
+                Attribute::Pitch(Pitch::from_q7_9(70 << 9)),
+            )
             .to_vec();
         assert!((sounding(e.last().unwrap()) - 70.0).abs() < 1e-4, "{e:?}");
         let e = bend(&mut s, a, 5, 0xC000_0000);

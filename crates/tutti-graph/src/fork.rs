@@ -393,7 +393,7 @@ impl<F: Float> Forked<F> {
 
     /// Attaches `health`.
     #[must_use]
-    pub fn with_health(mut self, health: Arc<dyn ForkHealth>) -> Self {
+    pub fn health(mut self, health: Arc<dyn ForkHealth>) -> Self {
         self.health = Some(health);
         self
     }
@@ -638,7 +638,7 @@ impl Error for ForkError {
 /// let (mut editor, _exec) = Editor::new(prepare);
 /// editor.insert(NodeKey(1), "silence", ForkByClone(Silence));
 /// editor.spec_mut().topology.set_outputs([tutti_graph::PortSource::Node(
-///     tutti_graph::OutputPort { node: NodeKey(1), port: 0 },
+///     tutti_graph::OutputPort::new(NodeKey(1), 0),
 /// )]);
 /// assert!(editor.fork(ForkTarget::Node(NodeKey(1)), prepare).is_ok());
 /// ```
@@ -718,7 +718,7 @@ impl<F: Float, N: Node<F> + Clone + Send + 'static> IntoNode<F> for ForkByClone<
 /// let (mut editor, _exec) = Editor::new(prepare);
 /// editor.insert(NodeKey(1), "silence", Unforkable(Silence));
 /// editor.spec_mut().topology.set_outputs([tutti_graph::PortSource::Node(
-///     tutti_graph::OutputPort { node: NodeKey(1), port: 0 },
+///     tutti_graph::OutputPort::new(NodeKey(1), 0),
 /// )]);
 /// assert_eq!(
 ///     editor.fork(ForkTarget::MainOutput, prepare).err(),
@@ -840,7 +840,7 @@ impl<F: Float> Editor<F> {
     /// of its own — can fail **while it renders**, and silence is a valid
     /// output, so on its own such a render would finish and write a silent
     /// file. A source may therefore hand over a [`ForkHealth`] probe with the
-    /// unit ([`Forked::with_health`]), and [`fork_health`](Self::fork_health)
+    /// unit ([`Forked::health`]), and [`fork_health`](Self::fork_health)
     /// on the forked editor reports the first [`ForkFault`]. **A renderer of
     /// a fork checks it after rendering** and turns a fault into a failed
     /// render. A unit that faults keeps rendering silence without further
@@ -963,10 +963,10 @@ impl<F: Float> Editor<F> {
                 // Clamp, not wrap (see `Editor::fork`'s docs).
                 let outputs = (0..live.topology.outputs.len())
                     .map(|c| {
-                        vec![PortSource::Node(OutputPort {
-                            node: key,
-                            port: (c as u16).min(outs - 1),
-                        })]
+                        vec![PortSource::Node(OutputPort::new(
+                            key,
+                            (c as u16).min(outs - 1),
+                        ))]
                     })
                     .collect();
                 (Self::upstream(live, [key]), outputs)
@@ -1210,12 +1210,7 @@ impl<F: Float> Editor<F> {
             let audio = spec
                 .topology
                 .edges
-                .range(
-                    InputPort { node, port: 0 }..=InputPort {
-                        node,
-                        port: u16::MAX,
-                    },
-                )
+                .range(InputPort::new(node, 0)..=InputPort::new(node, u16::MAX))
                 .flat_map(|(_, es)| es)
                 .filter_map(|e| match *e {
                     Edge::Direct(PortSource::Node(p))
@@ -1224,12 +1219,7 @@ impl<F: Float> Editor<F> {
                 });
             let events = spec
                 .events
-                .range(
-                    EventInputPort { node, port: 0 }..=EventInputPort {
-                        node,
-                        port: u16::MAX,
-                    },
-                )
+                .range(EventInputPort::new(node, 0)..=EventInputPort::new(node, u16::MAX))
                 .flat_map(|(_, sources)| sources.iter().map(|e| e.from().node));
             let params = spec
                 .params

@@ -1,15 +1,9 @@
 //! [`Wake`]: a wait for a state that another thread changes, ended by the
 //! change and not by a poll.
 
-#![allow(
-    clippy::disallowed_types,
-    reason = "`PluginClient::fork_instance` takes its own mode, so an offline fork can wait here inside a realtime `Prepare`, where `tutti_rt`'s locks panic"
-)]
-
-use std::sync::{Condvar, Mutex, PoisonError};
 use std::time::Duration;
 use tutti_platform::Instant;
-use tutti_rt::LockExt;
+use tutti_rt::{Condvar, Mutex};
 
 /// A gate a thread waits on until a condition holds, and that the threads which
 /// change the condition notify.
@@ -32,7 +26,7 @@ pub(crate) struct Wake {
 impl Wake {
     /// Tells every waiter to check its condition again.
     pub(crate) fn notify(&self) {
-        drop(self.gate.lock_recover());
+        drop(self.gate.lock());
         self.changed.notify_all();
     }
 
@@ -47,12 +41,9 @@ impl Wake {
     /// Waits until `done` is true or `deadline` passes, checking `done` first
     /// and after each [`notify`](Self::notify). `true` when `done` held.
     pub(crate) fn wait_until(&self, deadline: Instant, mut done: impl FnMut() -> bool) -> bool {
-        let gate = self.gate.lock_recover();
+        let gate = self.gate.lock();
         let left = deadline.saturating_duration_since(Instant::now());
-        let (_gate, timeout) = self
-            .changed
-            .wait_timeout_while(gate, left, |()| !done())
-            .unwrap_or_else(PoisonError::into_inner);
+        let (_gate, timeout) = self.changed.wait_timeout_while(gate, left, |()| !done());
         !timeout.timed_out()
     }
 }

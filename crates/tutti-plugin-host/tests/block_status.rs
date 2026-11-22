@@ -153,18 +153,12 @@ fn graph(fake_ring: Samples) -> (Editor, Executor, tutti_graph::EventInletWriter
     ed.insert(inlet_key, "inlet", inlet);
     ed.insert(plugin, "fake", Unforkable(node));
     ed.spec_mut().connect_events(
-        EventInputPort {
-            node: plugin,
-            port: 0,
-        },
-        EventEdge::Direct(EventOutputPort {
-            node: inlet_key,
-            port: 0,
-        }),
+        EventInputPort::new(plugin, 0),
+        EventEdge::Direct(EventOutputPort::new(inlet_key, 0)),
     );
     ed.spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort { node: plugin, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(plugin, port))));
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

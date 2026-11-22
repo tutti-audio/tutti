@@ -364,7 +364,7 @@ struct ParamProbe;
 impl tutti_graph::Node for ParamProbe {
     fn shape(&self) -> tutti_graph::Shape {
         tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
-            .with_params(&[tutti_units::UnitParam::Cutoff])
+            .params(&[tutti_units::UnitParam::Cutoff])
     }
     fn prepare(&mut self, _: &tutti_graph::Prepare) {}
     fn process(
@@ -450,9 +450,9 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
                 node: p,
                 param: UnitParam::Cutoff.into(),
             },
-            EventOutputPort { node: l, port: 0 },
+            EventOutputPort::new(l, 0),
         );
-        outputs.push(PortSource::Node(OutputPort { node: p, port: 0 }));
+        outputs.push(PortSource::Node(OutputPort::new(p, 0)));
     }
     ed.spec_mut().topology.set_outputs(outputs);
     ed.commit().expect("commits");
@@ -592,7 +592,7 @@ struct Probe8;
 
 impl tutti_graph::Node for Probe8 {
     fn shape(&self) -> tutti_graph::Shape {
-        tutti_graph::Shape::source_unassigned(ChannelLayout::from_count(8)).with_params(&PROBE8)
+        tutti_graph::Shape::source_unassigned(ChannelLayout::from_count(8)).params(&PROBE8)
     }
     fn prepare(&mut self, _: &tutti_graph::Prepare) {}
     fn process(
@@ -750,10 +750,10 @@ fn lanes_200(
             ed.spec_mut()
                 .topology
                 .outputs
-                .push(vec![PortSource::Node(OutputPort {
-                    node: NodeKey(1000 + j),
-                    port: p,
-                })]);
+                .push(vec![PortSource::Node(OutputPort::new(
+                    NodeKey(1000 + j),
+                    p,
+                ))]);
         }
     }
     for k in 0..200 {
@@ -767,7 +767,7 @@ fn lanes_200(
         let key = NodeKey(2000 + k as u64);
         controls.push(ed.insert(key, "lane", lane).controls);
         ed.spec_mut()
-            .connect_param(at(k), EventOutputPort { node: key, port: 0 });
+            .connect_param(at(k), EventOutputPort::new(key, 0));
     }
     ed.commit().expect("commits");
     (ed, exec, controls)
@@ -968,7 +968,7 @@ struct Notes {
 }
 
 impl Notes {
-    const SHAPE: tutti_graph::Shape = tutti_graph::Shape::EMPTY.with_events(0, 1);
+    const SHAPE: tutti_graph::Shape = tutti_graph::Shape::EMPTY.events(0, 1);
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -1040,10 +1040,7 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
         ed.spec_mut()
             .topology
             .outputs
-            .push(vec![PortSource::Node(OutputPort {
-                node: probe(k),
-                port: 0,
-            })]);
+            .push(vec![PortSource::Node(OutputPort::new(probe(k), 0))]);
         ed.set_param_range(cutoff(k), ParamRange::new(0.0, 1.0))
             .expect("a probe");
     }
@@ -1069,11 +1066,8 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
             ed.insert(node, "follower", ForkByClone(follower));
             for port in 0..2 {
                 ed.spec_mut().topology.edges.insert(
-                    InputPort { node, port },
-                    vec![Edge::Direct(PortSource::Node(OutputPort {
-                        node: src,
-                        port,
-                    }))],
+                    InputPort::new(node, port),
+                    vec![Edge::Direct(PortSource::Node(OutputPort::new(src, port)))],
                 );
             }
         } else {
@@ -1096,8 +1090,8 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
                 ForkByClone(NoteEnvelopeNode::from(NoteEnvelopeConfig::new(id, adsr))),
             );
             ed.spec_mut().connect_events(
-                EventInputPort { node, port: 0 },
-                EventEdge::Direct(EventOutputPort { node: src, port: 0 }),
+                EventInputPort::new(node, 0),
+                EventEdge::Direct(EventOutputPort::new(src, 0)),
             );
         }
         let input = InputLayer {
@@ -1123,19 +1117,11 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
         let lane_key = NodeKey(6000 + k as u64);
         ed.insert(lane_key, "lane", lane);
         ed.spec_mut().connect_events(
-            EventInputPort {
-                node: lane_key,
-                port: 0,
-            },
-            EventEdge::Direct(EventOutputPort { node, port: 0 }),
+            EventInputPort::new(lane_key, 0),
+            EventEdge::Direct(EventOutputPort::new(node, 0)),
         );
-        ed.spec_mut().connect_param(
-            cutoff(k),
-            EventOutputPort {
-                node: lane_key,
-                port: 0,
-            },
-        );
+        ed.spec_mut()
+            .connect_param(cutoff(k), EventOutputPort::new(lane_key, 0));
     }
     ed.commit().expect("commits");
     (ed, exec)
@@ -1367,19 +1353,10 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
         .controls;
     let topology = &mut ed.spec_mut().topology;
     topology.edges.insert(
-        InputPort {
-            node: filter,
-            port: 0,
-        },
-        vec![Edge::Direct(PortSource::Node(OutputPort {
-            node: saw,
-            port: 0,
-        }))],
+        InputPort::new(filter, 0),
+        vec![Edge::Direct(PortSource::Node(OutputPort::new(saw, 0)))],
     );
-    topology.set_outputs(vec![PortSource::Node(OutputPort {
-        node: filter,
-        port: 0,
-    })]);
+    topology.set_outputs(vec![PortSource::Node(OutputPort::new(filter, 0))]);
     ed.commit().expect("commits");
     let transport = TransportPosition::new(false, Bpm::of(120.0), Beat::new(0.0), None);
     let mut out = vec![0.0f32; 128];

@@ -22,6 +22,10 @@ impl NoteId {
     /// The largest id a `(channel, note)` pair names: channel 16, note 127.
     pub const MAX_CHANNEL_NOTE: u32 = 15 * 128 + 127;
 
+    /// The first id [`from_raw`](Self::from_raw) mints: one above
+    /// [`MAX_CHANNEL_NOTE`](Self::MAX_CHANNEL_NOTE).
+    pub const FIRST_MINTED: Self = Self(Self::MAX_CHANNEL_NOTE + 1);
+
     /// The id of `note` on `channel`: `channel * 128 + note`.
     #[inline]
     #[must_use]
@@ -49,6 +53,18 @@ impl NoteId {
             MidiChannel::masked((self.0 / 128) as u8),
             NoteNumber::masked((self.0 % 128) as u8),
         ))
+    }
+
+    /// The id minted after this one: one more, and past `u32::MAX` the first
+    /// above the pairs again ([`FIRST_MINTED`](Self::FIRST_MINTED)), so a
+    /// minted id never becomes a pair's.
+    #[inline]
+    #[must_use]
+    pub const fn next_minted(self) -> Self {
+        match self.0.checked_add(1) {
+            Some(raw) => Self(raw),
+            None => Self::FIRST_MINTED,
+        }
     }
 
     /// The stored value.

@@ -12,7 +12,7 @@ use tutti_fixtures::midi;
 
 use tutti_ump::{
     Address, Attribute, BendValue, CCNumber, ControlValue, Message, MidiChannel, MidiGroup,
-    NoteNumber, NoteVelocity, PerNoteManagement, U7, U14, Ump, Voice1, Voice2,
+    NoteNumber, NoteVelocity, PerNoteManagement, Pitch, U7, U14, Ump, Voice1, Voice2,
 };
 
 use tutti_units::{Amplitude, Hz, Normalized, Resonance, Seconds, Spread};
@@ -2697,7 +2697,7 @@ fn midi1_values_scale_to_exact_figures() {
                 .allocator
                 .channel_state(MidiChannel::of(1))
                 .modulation(),
-            f32::from(value) * 128.0 / 16383.0,
+            Normalized::clamped(f64::from(value) * 128.0 / 16383.0),
             "CC1 = {value}"
         );
         synth.apply_midi(ump(Message::Midi1(
@@ -2739,12 +2739,12 @@ fn reset_all_controllers_keeps_the_sound_controllers() {
         "the controllers were set"
     );
     let wheel = |s: &PolySynth| s.allocator.channel_state(MidiChannel::of(0)).modulation();
-    assert!(wheel(&s) > 0.5);
+    assert!(wheel(&s).get() > 0.5);
 
     queue_midi(&mut s, &[ev_cc(0, CCNumber::RESET_ALL, 0)]);
     s.tick(&[], &mut out);
     assert_eq!(s.voices[0].sound_controllers(), (cutoff, resonance));
-    assert_eq!(wheel(&s), 0.0);
+    assert_eq!(wheel(&s), Normalized::of(0.0));
 }
 
 /// A channel's bend is its own: the synth holds no MPE zone, so a bend on
@@ -2896,8 +2896,8 @@ fn a_reset_on_one_channel_leaves_the_other_channels_wheel() {
     let mut out = [0.0f32; 2];
     s.tick(&[], &mut out);
     let wheel = |s: &PolySynth, c: u8| s.allocator.channel_state(MidiChannel::of(c)).modulation();
-    assert_eq!(wheel(&s, 1), 0.0);
-    assert_eq!(wheel(&s, 0), 100.0 * 128.0 / 16383.0);
+    assert_eq!(wheel(&s, 1), Normalized::of(0.0));
+    assert_eq!(wheel(&s, 0), Normalized::clamped(100.0 * 128.0 / 16383.0));
 }
 
 /// RP-022: RPN 01 is Channel Fine Tuning and RPN 02 Channel Coarse Tuning: the
@@ -3486,7 +3486,7 @@ fn pitch_7_9_and_7_25_put_note_69_at_a440() {
                 Voice2::NoteOn {
                     note: NoteNumber::of(0),
                     velocity: NoteVelocity::CENTER,
-                    attribute: Attribute::Pitch(q7_9),
+                    attribute: Attribute::Pitch(Pitch::from_q7_9(q7_9)),
                 },
             ))],
         );

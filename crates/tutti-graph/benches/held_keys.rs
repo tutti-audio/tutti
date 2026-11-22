@@ -22,7 +22,7 @@ struct Source {
 }
 
 impl Source {
-    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
 
     fn new(k: u32) -> Self {
         Self {
@@ -60,7 +60,7 @@ impl Node for Source {
 struct Sink(InEvents);
 
 impl Sink {
-    const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+    const SHAPE: Shape = Shape::EMPTY.events(1, 0);
 
     fn new() -> Self {
         Self(Self::SHAPE.event_input(0).expect("one event input"))
@@ -89,11 +89,8 @@ fn rig(k: u32, sinks: u64) -> Executor {
         let n = NodeKey(2 + s);
         ed.insert(n, "sink", Unforkable(Sink::new()));
         ed.spec_mut().connect_events(
-            EventInputPort { node: n, port: 0 },
-            EventEdge::Direct(EventOutputPort {
-                node: NodeKey(1),
-                port: 0,
-            }),
+            EventInputPort::new(n, 0),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
         );
     }
     ed.commit().expect("commits");

@@ -33,8 +33,8 @@ impl Node for Probe {
             tutti_graph::Buses::unassigned(ChannelLayout::MONO),
             tutti_graph::Buses::unassigned(ChannelLayout::MONO),
         )
-        .with_ports(ChannelLayout::MONO, ChannelLayout::from_count(2))
-        .with_params(&[UnitParam::Azimuth, UnitParam::Elevation])
+        .ports(ChannelLayout::MONO, ChannelLayout::from_count(2))
+        .params(&[UnitParam::Azimuth, UnitParam::Elevation])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -61,9 +61,9 @@ struct Sender(Vec<(u64, ParamSegment)>);
 
 impl Sender {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_param_events()
-        .with_event_capacity(tutti_graph::testing::cap_of(16));
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(16));
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -103,20 +103,10 @@ fn graph(
     ed.insert(NodeKey(PROBE), "probe", Unforkable(Probe(0.0)));
     ed.insert(NodeKey(SENDER), "sender", Unforkable(Sender(sends)));
     let s = ed.spec_mut();
-    s.topology.set_outputs((0..2).map(|c| {
-        PortSource::Node(OutputPort {
-            node: NodeKey(PROBE),
-            port: c,
-        })
-    }));
+    s.topology
+        .set_outputs((0..2).map(|c| PortSource::Node(OutputPort::new(NodeKey(PROBE), c))));
     for p in [UnitParam::Azimuth, UnitParam::Elevation] {
-        s.connect_param(
-            at(p),
-            EventOutputPort {
-                node: NodeKey(SENDER),
-                port: 0,
-            },
-        );
+        s.connect_param(at(p), EventOutputPort::new(NodeKey(SENDER), 0));
     }
     for &(p, r) in ranges {
         s.set_param_range(at(p), r);
@@ -337,12 +327,9 @@ fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
         "sender",
         Unforkable(Sender(vec![(64, step)])),
     );
-    ed.spec_mut().topology.set_outputs((0..WIDTH).map(|k| {
-        PortSource::Node(OutputPort {
-            node: probe(k),
-            port: 0,
-        })
-    }));
+    ed.spec_mut()
+        .topology
+        .set_outputs((0..WIDTH).map(|k| PortSource::Node(OutputPort::new(probe(k), 0))));
     ed.commit().expect("commits");
     let run = |ed: &mut Editor, exec: &mut Executor, frames: usize| {
         let mut chans = vec![vec![0.0f32; frames]; WIDTH as usize];
@@ -362,10 +349,7 @@ fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
                 node: probe(k),
                 param: UnitParam::Azimuth.into(),
             },
-            EventOutputPort {
-                node: NodeKey(SENDER),
-                port: 0,
-            },
+            EventOutputPort::new(NodeKey(SENDER), 0),
         );
     }
     ed.commit().expect("commits");

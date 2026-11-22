@@ -36,7 +36,7 @@ impl Node for Ported {
 /// `audio` ports each way and `events` event ports each way.
 fn ported(audio: u16, events: u16) -> Ported {
     let width = ChannelLayout::from_count(audio);
-    Ported(Shape::unassigned(width, width).with_events(events, events))
+    Ported(Shape::unassigned(width, width).events(events, events))
 }
 
 const A: NodeKey = NodeKey(1);
@@ -45,11 +45,11 @@ const B: NodeKey = NodeKey(3);
 const DELAY: Samples = Samples::new(128);
 
 fn out(node: NodeKey, port: u16) -> OutputPort {
-    OutputPort { node, port }
+    OutputPort::new(node, port)
 }
 
 fn inp(node: NodeKey, port: u16) -> InputPort {
-    InputPort { node, port }
+    InputPort::new(node, port)
 }
 
 fn direct(node: NodeKey, port: u16) -> Edge {
@@ -64,11 +64,11 @@ fn id(sink: InputPort, from: Edge) -> EdgeId {
 }
 
 fn eout(node: NodeKey, port: u16) -> EventOutputPort {
-    EventOutputPort { node, port }
+    EventOutputPort::new(node, port)
 }
 
 fn ein(node: NodeKey, port: u16) -> EventInputPort {
-    EventInputPort { node, port }
+    EventInputPort::new(node, port)
 }
 
 /// `A -> X -> B`, three audio and three event ports on each, `X` the key
@@ -428,8 +428,8 @@ fn a_lost_banded_output_bus_drops_its_feeds_by_band_and_to_the_main_output() {
     ed.insert(t, "bused", Unforkable(stereo_bus_node(banded)));
     ed.spec_mut().main_output = Some(stereo());
     let main_to_main_output = BusOutputPort::Node(NodeBus::new(y, 0));
-    let band0 = BusOutputPort::Node(NodeBus::band(y, 1, 0));
-    let band1 = BusOutputPort::Node(NodeBus::band(y, 1, 1));
+    let band0 = BusOutputPort::Node(NodeBus::new(y, 1).with_band(0));
+    let band1 = BusOutputPort::Node(NodeBus::new(y, 1).with_band(1));
     ed.connect_bus_to_main_output(main_to_main_output)
         .expect("declared");
     ed.connect_bus_to_main_output(band1)

@@ -54,7 +54,7 @@ impl From<MidSideConfig> for MidSideNode {
 
 impl<F: Float> Node<F> for MidSideNode {
     fn shape(&self) -> Shape {
-        Shape::through(BusTopology::STEREO).with_cost(Cost::Light)
+        Shape::through(BusTopology::STEREO).cost(Cost::Light)
     }
 
     fn prepare(&mut self, _: &Prepare) {}

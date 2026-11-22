@@ -14,7 +14,7 @@ const MF: u16 = 0x8000;
 /// Stands in for the hardware input: sends what it is mailed on port 0.
 struct Src(tutti_fixtures::Shared<Vec<[u32; 4]>>);
 impl Src {
-    const SHAPE: Shape = Shape::EMPTY.with_events(0, MIDI_INPUT_PORTS);
+    const SHAPE: Shape = Shape::EMPTY.events(0, MIDI_INPUT_PORTS);
     const OUT: tutti_graph::OutEvents = Self::SHAPE
         .event_output(0)
         .expect("one event output is declared");
@@ -169,7 +169,7 @@ impl GroupSrc {
         Self(mail, ports, outs)
     }
     fn declared(ports: MidiInputPorts) -> Shape {
-        Shape::EMPTY.with_events(0, ports.count())
+        Shape::EMPTY.events(0, ports.count())
     }
 }
 impl Node for GroupSrc {

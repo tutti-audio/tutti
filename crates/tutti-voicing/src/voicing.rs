@@ -57,9 +57,9 @@ use core::num::{NonZeroU16, NonZeroUsize};
 use tutti_midi_protocol::{GeneralMidiMode, Heard, KeyTable, Timing, TuningMessage, Universal};
 use tutti_ump::{
     Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteId, NoteNumber,
-    RegisteredData, Rpn, U7, Ump, Voice2,
+    NoteVelocity, RegisteredData, Rpn, U7, Ump, Voice2,
 };
-use tutti_units::{Amplitude, Bipolar, Seconds, Semitones};
+use tutti_units::{Amplitude, Bipolar, Losses, Seconds, Semitones};
 
 use crate::channel::{Bend, ChannelState};
 use crate::master::{Master, MasterGain};
@@ -74,8 +74,7 @@ const CHANNELS: usize = MidiChannel::COUNT as usize;
 /// M2-115 section 4.1): two fields, the semitones in the top 7 bits and the
 /// cents (0 to 99) in the 7 below, the rest unused. It is not the Q7.25 of the
 /// per-note sensitivity (RPN 0/7), whose fraction is binary.
-fn bend_sensitivity(value: u32) -> Semitones {
-    let data = RegisteredData::from_word(value);
+fn bend_sensitivity(data: RegisteredData) -> Semitones {
     Semitones::new(f64::from(data.msb().get()) + f64::from(data.lsb().get()) / 100.0)
 }
 
@@ -88,11 +87,6 @@ const MAX_SPECS: usize = 32;
 
 /// The keys a mono or legato channel remembers as held.
 const HELD_KEYS: usize = 16;
-
-/// The release velocity of a release no note-off gave one to (a pedal lifting,
-/// a panic): the centre of the 16-bit range, M2-104 Appendix D.3.1's value for a
-/// MIDI 1.0 note-off.
-const NEUTRAL_RELEASE: u16 = 0x8000;
 
 /// A voice, named in the order the core started them. Ids only grow and are 64
 /// bits wide, so two voices never share one.
@@ -387,7 +381,7 @@ pub trait Patch {
         &self,
         channel: MidiChannel,
         key: NoteNumber,
-        velocity: u16,
+        velocity: NoteVelocity,
         spec: &mut dyn FnMut(VoiceSpec),
     );
 }
@@ -410,8 +404,8 @@ pub enum VoiceCommand {
         /// channel's own [`Retune`](VoiceCommand::Retune). Zero in equal temperament
         /// and on the percussion channel.
         tune: Semitones,
-        /// The strike's velocity, 16 bits, at least 1.
-        velocity: u16,
+        /// The strike's velocity, at least 1.
+        velocity: NoteVelocity,
         /// What the patch said.
         spec: VoiceSpec,
         /// The voice it takes the slot of.
@@ -430,7 +424,7 @@ pub enum VoiceCommand {
         /// The new key's tuning (see [`VoiceCommand::Start`]'s `tune`).
         tune: Semitones,
         /// The new velocity.
-        velocity: u16,
+        velocity: NoteVelocity,
         /// The glide to the new key, if there is one: the voice's pitch
         /// starts at the glide's key (an immediate jump there, M1 p.16) and
         /// reaches the new key's in the glide's time; without one it moves at
@@ -441,9 +435,10 @@ pub enum VoiceCommand {
     Release {
         /// The voice.
         id: VoiceId,
-        /// The release velocity, 16 bits: the note-off's, or the neutral value
-        /// (0x8000) when a pedal or a panic let it go.
-        velocity: u16,
+        /// The release velocity: the note-off's, or [`NoteVelocity::CENTER`]
+        /// (M2-104 Appendix D.3.1's value for a MIDI 1.0 note-off) when a pedal
+        /// or a panic let it go.
+        velocity: NoteVelocity,
     },
     /// Silence a voice at once and free its slot.
     Cut(VoiceId),
@@ -510,24 +505,24 @@ struct Note {
     /// Already told to fade quickly: told only once.
     damped: bool,
     /// What the note-off said, for the release a pedal later lets through.
-    off_velocity: u16,
+    off_velocity: NoteVelocity,
 }
 
 /// A channel's held keys, most recent last. Fixed capacity.
 #[derive(Debug, Clone, Copy)]
 struct Held {
     len: usize,
-    keys: [(NoteNumber, u16); HELD_KEYS],
+    keys: [(NoteNumber, NoteVelocity); HELD_KEYS],
 }
 
 impl Held {
     const NONE: Held = Held {
         len: 0,
-        keys: [(NoteNumber::MAX, 0); HELD_KEYS],
+        keys: [(NoteNumber::MAX, NoteVelocity::MIN); HELD_KEYS],
     };
 
     /// `key` is the most recent. The oldest goes if the stack is full.
-    fn push(&mut self, key: NoteNumber, velocity: u16) {
+    fn push(&mut self, key: NoteNumber, velocity: NoteVelocity) {
         self.remove(key);
         if self.len == HELD_KEYS {
             self.keys.copy_within(1.., 0);
@@ -547,7 +542,7 @@ impl Held {
         true
     }
 
-    fn top(&self) -> Option<(NoteNumber, u16)> {
+    fn top(&self) -> Option<(NoteNumber, NoteVelocity)> {
         self.len.checked_sub(1).map(|i| self.keys[i])
     }
 }
@@ -780,10 +775,16 @@ impl VoiceAllocator {
                 attribute,
             } => {
                 self.begin(channel, note, attribute);
-                self.note_on(channel, note, velocity.get().max(1), patch, levels);
+                self.note_on(
+                    channel,
+                    note,
+                    velocity.max(NoteVelocity::new(1)),
+                    patch,
+                    levels,
+                );
             }
             Voice2::NoteOff { note, velocity, .. } => {
-                self.note_off(channel, note, velocity.get(), patch, levels);
+                self.note_off(channel, note, velocity, patch, levels);
             }
             Voice2::ControlChange { controller, value } => {
                 let value = value.to_u7();
@@ -805,7 +806,7 @@ impl VoiceAllocator {
             // 1.0 pair zero-extended (M2-115 section 4.1): `MSB << 7 | LSB` in
             // the top 14 bits.
             Voice2::Registered { bank, index, value } => {
-                self.registered(channel, Rpn::new(bank, index), value.get(), message);
+                self.registered(channel, Rpn::new(bank, index), value, message);
             }
             // A change of the same parameters (M2-104 section 7.4.8): a two's
             // complement delta added to the value now held. The spec does not
@@ -815,8 +816,9 @@ impl VoiceAllocator {
             // to add to, and the message is ignored.
             Voice2::RelativeRegistered { bank, index, delta } => {
                 let rpn = Rpn::new(bank, index);
-                if let Some(now) = self.channels[channel.index()].registered_word(rpn) {
-                    self.registered(channel, rpn, now.saturating_add_signed(delta), message);
+                if let Some(now) = self.channels[channel.index()].registered_data(rpn) {
+                    let word = ControlValue::new(now.to_word().saturating_add_signed(delta));
+                    self.registered(channel, rpn, word, message);
                 }
             }
             // The per-note controllers, Per-Note Management and RPN 0/7 are
@@ -863,7 +865,7 @@ impl VoiceAllocator {
     ///   the message has no bank byte); a real-time change (and Scale/Octave Tuning, per
     ///   channel mask) answers a [`VoiceCommand::Tune`] for each sounding note whose key now
     ///   sounds elsewhere, a non-real-time one and a dump tell no voice. A program or bank
-    ///   the core has no room for is ignored and counted ([`tuning_refused`](Self::tuning_refused)).
+    ///   the core has no room for is ignored and counted ([`losses`](Self::losses)).
     ///   A Bulk Tuning Dump Request is answered with nothing: an instrument has no SysEx
     ///   output to reply on.
     /// - Identity Request and Reply are the device inquiry's (M1 p.40), a message
@@ -1011,12 +1013,13 @@ impl VoiceAllocator {
         self.tuning.table(bank, program)
     }
 
-    /// Tuning messages for a bank or program the core has no room for, which
-    /// changed nothing: a dump, a Single Note Tuning Change, or a Tuning Bank or
-    /// Program Select (MTS: such a message is ignored).
+    /// The tuning messages [refused](Losses::refused): for a bank or program
+    /// the core has no room for, which changed nothing: a dump, a Single Note
+    /// Tuning Change, or a Tuning Bank or Program Select (MTS: such a message
+    /// is ignored).
     #[must_use]
-    pub fn tuning_refused(&self) -> u64 {
-        self.tuning.refused()
+    pub fn losses(&self) -> Losses {
+        self.tuning.losses()
     }
 
     /// The gain the instrument's output is multiplied by: the Master Volume and
@@ -1060,33 +1063,31 @@ impl VoiceAllocator {
 
     /// Carries out a Registered Controller's data word on `channel`; `message`
     /// is what a parameter that is the per-note state's is read from.
-    fn registered(&mut self, channel: MidiChannel, rpn: Rpn, value: u32, message: Voice2) {
+    fn registered(&mut self, channel: MidiChannel, rpn: Rpn, value: ControlValue, message: Voice2) {
+        let data = RegisteredData::from_word(value.get());
         match rpn {
             Rpn::PITCH_BEND_SENSITIVITY => {
-                let range = bend_sensitivity(value);
+                let range = bend_sensitivity(data);
                 self.bend(channel, |b| b.range = range);
             }
             Rpn::CHANNEL_FINE_TUNING => {
                 // 14 bits centred at 0x2000, a semitone over the half range.
-                let fine = Semitones::new(
-                    f64::from(RegisteredData::from_word(value).fourteen().get()) / 8192.0 - 1.0,
-                );
+                let fine = Semitones::new(f64::from(data.fourteen().get()) / 8192.0 - 1.0);
                 self.bend(channel, |b| b.fine = fine);
             }
             Rpn::CHANNEL_COARSE_TUNING => {
                 // The MSB, centred at 64, in semitones.
-                let coarse =
-                    Semitones::new(f64::from(RegisteredData::from_word(value).msb().get()) - 64.0);
+                let coarse = Semitones::new(f64::from(data.msb().get()) - 64.0);
                 self.bend(channel, |b| b.coarse = coarse);
             }
             Rpn::MODULATION_DEPTH_RANGE => {
-                self.channels[channel.index()].set_modulation_range(value);
+                self.channels[channel.index()].set_modulation_range(data);
             }
             // Tuning Program and Bank Select (MTS): the channel's current
             // tuning, effective at once on its sounding notes. A number the core
             // holds nothing for is ignored.
             Rpn::TUNING_PROGRAM_SELECT | Rpn::TUNING_BANK_SELECT => {
-                let chosen = RegisteredData::from_word(value).msb();
+                let chosen = data.msb();
                 let state = &mut self.channels[channel.index()];
                 if rpn == Rpn::TUNING_PROGRAM_SELECT && self.tuning.has_program(chosen) {
                     state.tuning_program = chosen;
@@ -1219,7 +1220,7 @@ impl VoiceAllocator {
         patch: &P,
         channel: MidiChannel,
         key: NoteNumber,
-        velocity: u16,
+        velocity: NoteVelocity,
     ) -> ([VoiceSpec; MAX_SPECS], usize) {
         let mut specs = [VoiceSpec {
             group: None,
@@ -1240,7 +1241,7 @@ impl VoiceAllocator {
         &mut self,
         channel: MidiChannel,
         key: NoteNumber,
-        velocity: u16,
+        velocity: NoteVelocity,
         patch: &P,
         levels: Levels<'_>,
     ) {
@@ -1275,7 +1276,7 @@ impl VoiceAllocator {
         channel: MidiChannel,
         from: NoteNumber,
         key: NoteNumber,
-        velocity: u16,
+        velocity: NoteVelocity,
     ) -> bool {
         let glide = self.glide(channel, Some(from), key);
         let tune = self.tune_of(channel, key);
@@ -1368,7 +1369,7 @@ impl VoiceAllocator {
         &mut self,
         channel: MidiChannel,
         key: NoteNumber,
-        velocity: u16,
+        velocity: NoteVelocity,
         spec: VoiceSpec,
         levels: Levels<'_>,
         from: Option<NoteNumber>,
@@ -1393,7 +1394,7 @@ impl VoiceAllocator {
         &mut self,
         channel: MidiChannel,
         key: NoteNumber,
-        velocity: u16,
+        velocity: NoteVelocity,
         patch: &P,
         levels: Levels<'_>,
         source: GlideSource,
@@ -1461,7 +1462,7 @@ impl VoiceAllocator {
         &mut self,
         channel: MidiChannel,
         key: NoteNumber,
-        velocity: u16,
+        velocity: NoteVelocity,
         spec: VoiceSpec,
         steal: Option<VoiceId>,
         from: Option<NoteNumber>,
@@ -1489,7 +1490,7 @@ impl VoiceAllocator {
             holds: Holds::struck(),
             released: false,
             damped: false,
-            off_velocity: NEUTRAL_RELEASE,
+            off_velocity: NoteVelocity::CENTER,
         });
         self.push(VoiceCommand::Start {
             id,
@@ -1539,7 +1540,7 @@ impl VoiceAllocator {
         &mut self,
         channel: MidiChannel,
         key: NoteNumber,
-        velocity: u16,
+        velocity: NoteVelocity,
         patch: &P,
         levels: Levels<'_>,
     ) {
@@ -1711,7 +1712,6 @@ mod tests {
     use crate::LIVE_NOTES;
     use tutti_rt::SplitMix64;
     use tutti_ump::BendValue;
-    use tutti_ump::NoteVelocity;
     use tutti_ump::PerNoteManagement;
     use tutti_ump::{Attribute, CCNumber, Pitch, RegisteredPerNoteController, U7, Voice1, Voice2};
     use tutti_units::Normalized;
@@ -1719,7 +1719,13 @@ mod tests {
     /// One voice per note, no group.
     struct One;
     impl Patch for One {
-        fn voices(&self, _: MidiChannel, _: NoteNumber, _: u16, spec: &mut dyn FnMut(VoiceSpec)) {
+        fn voices(
+            &self,
+            _: MidiChannel,
+            _: NoteNumber,
+            _: NoteVelocity,
+            spec: &mut dyn FnMut(VoiceSpec),
+        ) {
             spec(VoiceSpec {
                 group: None,
                 scope: 0,
@@ -1735,7 +1741,13 @@ mod tests {
         scope: u32,
     }
     impl Patch for Pair {
-        fn voices(&self, _: MidiChannel, _: NoteNumber, _: u16, spec: &mut dyn FnMut(VoiceSpec)) {
+        fn voices(
+            &self,
+            _: MidiChannel,
+            _: NoteNumber,
+            _: NoteVelocity,
+            spec: &mut dyn FnMut(VoiceSpec),
+        ) {
             for tag in 0..2 {
                 spec(VoiceSpec {
                     group: NonZeroU16::new(self.group),
@@ -1751,7 +1763,13 @@ mod tests {
         scope: u32,
     }
     impl Patch for Grouped {
-        fn voices(&self, _: MidiChannel, _: NoteNumber, _: u16, spec: &mut dyn FnMut(VoiceSpec)) {
+        fn voices(
+            &self,
+            _: MidiChannel,
+            _: NoteNumber,
+            _: NoteVelocity,
+            spec: &mut dyn FnMut(VoiceSpec),
+        ) {
             spec(VoiceSpec {
                 group: NonZeroU16::new(7),
                 scope: self.scope,
@@ -1782,7 +1800,7 @@ mod tests {
     fn release(n: u64) -> VoiceCommand {
         VoiceCommand::Release {
             id: id(n),
-            velocity: NEUTRAL_RELEASE,
+            velocity: NoteVelocity::CENTER,
         }
     }
 
@@ -1838,7 +1856,7 @@ mod tests {
                 c,
                 Voice2::NoteOff {
                     note: NoteNumber::of(k),
-                    velocity: NoteVelocity::new(NEUTRAL_RELEASE),
+                    velocity: NoteVelocity::CENTER,
                     attribute: Attribute::None,
                 },
                 p,
@@ -1948,7 +1966,13 @@ mod tests {
     /// A patch that starts `.0` voices for every note.
     struct Layers(u32);
     impl Patch for Layers {
-        fn voices(&self, _: MidiChannel, _: NoteNumber, _: u16, spec: &mut dyn FnMut(VoiceSpec)) {
+        fn voices(
+            &self,
+            _: MidiChannel,
+            _: NoteNumber,
+            _: NoteVelocity,
+            spec: &mut dyn FnMut(VoiceSpec),
+        ) {
             for tag in 0..self.0 {
                 spec(VoiceSpec {
                     group: None,
@@ -2268,7 +2292,7 @@ mod tests {
             off(&mut s, 60, NoteVelocity::new(0x1234)),
             [VoiceCommand::Release {
                 id: id(1),
-                velocity: 0x1234
+                velocity: NoteVelocity::new(0x1234)
             }]
         );
         let mut s = Sim::new(POLY);
@@ -2279,7 +2303,7 @@ mod tests {
             s.cc(0, 64, 0),
             [VoiceCommand::Release {
                 id: id(1),
-                velocity: 0x4321
+                velocity: NoteVelocity::new(0x4321)
             }]
         );
         let mut s = Sim::new(POLY);
@@ -2309,7 +2333,7 @@ mod tests {
         };
         let c = s.send(0, two, &One);
         assert!(
-            matches!(c[..], [VoiceCommand::Start { velocity: 1, .. }]),
+            matches!(c[..], [VoiceCommand::Start { velocity, .. }] if velocity == NoteVelocity::new(1)),
             "{c:?}"
         );
     }
@@ -2400,14 +2424,14 @@ mod tests {
                     id: id(1),
                     key: NoteNumber::of(62),
                     tune: Semitones::new(0.0),
-                    velocity: 0x8000,
+                    velocity: NoteVelocity::CENTER,
                     glide: None,
                 },
                 VoiceCommand::Retarget {
                     id: id(2),
                     key: NoteNumber::of(62),
                     tune: Semitones::new(0.0),
-                    velocity: 0x8000,
+                    velocity: NoteVelocity::CENTER,
                     glide: None,
                 },
             ]
@@ -2423,7 +2447,7 @@ mod tests {
                 &self,
                 _: MidiChannel,
                 k: NoteNumber,
-                _: u16,
+                _: NoteVelocity,
                 spec: &mut dyn FnMut(VoiceSpec),
             ) {
                 spec(VoiceSpec {
@@ -2451,7 +2475,7 @@ mod tests {
                     id: id(1),
                     key: NoteNumber::of(62),
                     tune: Semitones::new(0.0),
-                    velocity: 0x8000,
+                    velocity: NoteVelocity::CENTER,
                     glide: None,
                 },
                 release(2)
@@ -2469,7 +2493,7 @@ mod tests {
                 &self,
                 _: MidiChannel,
                 k: NoteNumber,
-                _: u16,
+                _: NoteVelocity,
                 spec: &mut dyn FnMut(VoiceSpec),
             ) {
                 if k.get() < 61 {
@@ -2531,7 +2555,7 @@ mod tests {
                 id: id(1),
                 key: NoteNumber::of(60),
                 tune: Semitones::new(0.0),
-                velocity: 0x3000,
+                velocity: NoteVelocity::new(0x3000),
                 glide: None,
             }]
         );
@@ -2798,8 +2822,8 @@ mod tests {
         assert_eq!(
             s.core
                 .channel(MidiChannel::of(0))
-                .registered_word(Rpn::CHANNEL_COARSE_TUNING),
-            Some(127 << 25)
+                .registered_data(Rpn::CHANNEL_COARSE_TUNING),
+            Some(RegisteredData::new(U7::of(127), U7::of(0)))
         );
         s.send(0, relative(2, i32::MIN), &One);
         s.send(0, relative(2, i32::MIN), &One);
@@ -2807,8 +2831,8 @@ mod tests {
         assert_eq!(
             s.core
                 .channel(MidiChannel::of(0))
-                .registered_word(Rpn::CHANNEL_COARSE_TUNING),
-            Some(0)
+                .registered_data(Rpn::CHANNEL_COARSE_TUNING),
+            Some(RegisteredData::new(U7::of(0), U7::of(0)))
         );
     }
 
@@ -3427,9 +3451,9 @@ mod tests {
         }
         s.cc(0, 121, 0);
         let ch = s.core.channel(MidiChannel::of(0));
-        let position = |cc: u8| f32::from(cc) * 128.0 / 16383.0;
+        let position = |cc: u8| Normalized::clamped(f64::from(cc) * 128.0 / 16383.0);
         assert_eq!(ch.expression(), position(127));
-        assert_eq!(ch.modulation(), 0.0);
+        assert_eq!(ch.modulation(), Normalized::of(0.0));
         assert_eq!(ch.pressure(), Normalized::of(0.0));
         assert!(!ch.portamento());
         assert_eq!(ch.volume(), position(50));
@@ -3469,7 +3493,7 @@ mod tests {
             c.iter().any(|x| matches!(
                 x,
                 VoiceCommand::Control {
-                    control: NoteControl::Pressure(0),
+                    control: NoteControl::Pressure(ControlValue::MIN),
                     ..
                 }
             )),
@@ -3827,6 +3851,17 @@ mod tests {
         let mut messages = Vec::new();
         a.core.chase(MidiGroup::of(2), |u| messages.push(u));
         assert!(messages.len() <= VoiceAllocator::CHASE_MESSAGES);
+        // A 7-bit value goes out widened to the corners of 32 bits (M2-115):
+        // the portamento switch at 127 is the full-scale word.
+        let switch = messages.iter().find_map(|ump| match ump.decode() {
+            Ok(Message::Midi2(_, Voice2::ControlChange { controller, value }))
+                if controller == CCNumber::PORTAMENTO_SWITCH =>
+            {
+                Some(value)
+            }
+            _ => None,
+        });
+        assert_eq!(switch, Some(ControlValue::MAX));
 
         let mut b = Sim::new(POLY);
         for ump in messages {

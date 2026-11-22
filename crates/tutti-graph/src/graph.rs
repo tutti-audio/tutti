@@ -29,10 +29,10 @@
 //! g.nodes.insert(osc, NodeSpec::new("osc", ChannelLayout::EMPTY, ChannelLayout::MONO));
 //! g.nodes.insert(gain, NodeSpec::new("gain", ChannelLayout::MONO, ChannelLayout::MONO));
 //! g.connect(
-//!     InputPort { node: gain, port: 0 },
-//!     Edge::Direct(PortSource::Node(OutputPort { node: osc, port: 0 })),
+//!     InputPort::new(gain, 0),
+//!     Edge::Direct(PortSource::Node(OutputPort::new(osc, 0))),
 //! );
-//! g.set_outputs([PortSource::Node(OutputPort { node: gain, port: 0 })]);
+//! g.set_outputs([PortSource::Node(OutputPort::new(gain, 0))]);
 //!
 //! let valid = g.validate().expect("well formed");
 //! assert_eq!(valid.get().topo_order(), Ok(vec![osc, gain]));
@@ -75,10 +75,28 @@ impl NodeKey {
 /// Which **output** port of which node a signal leaves from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OutputPort {
+    pub(crate) node: NodeKey,
+    pub(crate) port: u16,
+}
+
+impl OutputPort {
+    /// Output `port` of `node`.
+    #[must_use]
+    pub const fn new(node: NodeKey, port: u16) -> Self {
+        Self { node, port }
+    }
+
     /// The node the signal leaves.
-    pub node: NodeKey,
+    #[must_use]
+    pub const fn node(self) -> NodeKey {
+        self.node
+    }
+
     /// Which of its output ports.
-    pub port: u16,
+    #[must_use]
+    pub const fn port(self) -> u16 {
+        self.port
+    }
 }
 
 /// Which **input** port of which node a signal arrives at.
@@ -86,10 +104,28 @@ pub struct OutputPort {
 /// The key of [`Topology::edges`] — see that field for why.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct InputPort {
+    pub(crate) node: NodeKey,
+    pub(crate) port: u16,
+}
+
+impl InputPort {
+    /// Input `port` of `node`.
+    #[must_use]
+    pub const fn new(node: NodeKey, port: u16) -> Self {
+        Self { node, port }
+    }
+
     /// The node the signal arrives at.
-    pub node: NodeKey,
+    #[must_use]
+    pub const fn node(self) -> NodeKey {
+        self.node
+    }
+
     /// Which of its input ports.
-    pub port: u16,
+    #[must_use]
+    pub const fn port(self) -> u16 {
+        self.port
+    }
 }
 
 /// Where signals arrive: an input port of a node, or a main output channel.
@@ -240,14 +276,14 @@ impl NodeSpec {
 
     /// Returns this spec with `latency` frames of involuntary latency.
     #[must_use]
-    pub fn with_latency(mut self, latency: Samples) -> Self {
+    pub fn latency(mut self, latency: Samples) -> Self {
         self.latency = latency;
         self
     }
 
     /// Returns this spec with the given ring-out, which excludes latency.
     #[must_use]
-    pub fn with_tail(mut self, tail: Tail) -> Self {
+    pub fn tail(mut self, tail: Tail) -> Self {
         self.tail = tail;
         self
     }
@@ -861,7 +897,7 @@ impl Topology {
     pub fn unconnected(&self) -> impl Iterator<Item = InputPort> + '_ {
         self.nodes.iter().flat_map(move |(&node, spec)| {
             (0..spec.inputs.count())
-                .map(move |port| InputPort { node, port })
+                .map(move |port| InputPort::new(node, port))
                 .filter(move |at| self.edges.get(at).is_none_or(Vec::is_empty))
         })
     }
@@ -971,7 +1007,7 @@ impl LatencyGraph for Topology {
         (0..width).flat_map(move |port| {
             let edges = self
                 .edges
-                .get(&InputPort { node, port })
+                .get(&InputPort::new(node, port))
                 .map_or(&[][..], Vec::as_slice);
             let feed = |e: &Edge| match e {
                 Edge::Direct(PortSource::Node(p)) => Feed::Node(p.node),

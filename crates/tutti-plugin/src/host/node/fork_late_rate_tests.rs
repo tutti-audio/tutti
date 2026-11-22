@@ -76,7 +76,6 @@ fn a_late_rate_answer_does_not_silence_an_offline_fork() {
     );
     let fork = live
         .fork_instance(
-            RenderMode::Offline,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
@@ -88,10 +87,10 @@ fn a_late_rate_answer_does_not_silence_an_offline_fork() {
     let (key, _controls) = g.add_with_controls(fork);
     g.pipe_input(key).pipe_output(key);
     let mut renderer: Renderer = g
-        .renderer(Prepare::new(
-            SampleRate::of(SLOW_RATE),
-            MaxBlock::of(Samples::new(BLOCK)),
-        ))
+        .renderer(
+            Prepare::new(SampleRate::of(SLOW_RATE), MaxBlock::of(Samples::new(BLOCK)))
+                .with_render_mode(RenderMode::Offline),
+        )
         .expect("a one-plugin graph compiles");
 
     assert_eq!(

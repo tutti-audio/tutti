@@ -1,4 +1,4 @@
-use tutti_units::{Db, SamplePosition, Samples};
+use tutti_units::{Db, Losses, SamplePosition, Samples};
 
 use super::{Count, Counter, CounterWriter, Gauge, GaugeWriter, Reading, counter, gauge, tally};
 
@@ -351,4 +351,26 @@ fn a_tally_writer_reads_its_own_total_and_mints_a_reader_of_it() {
     lost.add(3);
     assert_eq!(lost.get(), 7);
     assert_eq!(report.get(), 7, "the minted reader reads the same cell");
+}
+
+/// A counter of losses adds field by field, saturating each on its own,
+/// and carries on across a reopened writer.
+#[test]
+fn a_losses_counter_tallies_each_field() {
+    let (mut writer, total) = counter::<Losses>();
+    writer.add(Losses::lost(2) + Losses::late(1));
+    writer.add(Losses::refused(4) + Losses::lost(1));
+    assert_eq!(
+        total.get(),
+        Losses::lost(3) + Losses::refused(4) + Losses::late(1)
+    );
+    writer.add(Losses::evicted(u64::MAX));
+    writer.add(Losses::evicted(1));
+    assert_eq!(total.get().evicted, u64::MAX);
+    assert_eq!(total.get().lost, 3, "a full field does not carry");
+    drop(writer);
+    let mut again = total.reopen().expect("the writer dropped");
+    again.add(Losses::refused(1));
+    assert_eq!(total.get().refused, 5);
+    assert_eq!(total.get().lost, 3);
 }

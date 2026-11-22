@@ -24,7 +24,6 @@ use tutti_graph::{EventKind, SubBlocks};
 use tutti_midi_protocol::channel_voice;
 use tutti_midi_protocol::{PitchBendSensitivity, UniversalReader};
 use tutti_rt::Param;
-use tutti_ump::ControlValue;
 use tutti_ump::NoteId;
 use tutti_ump::{
     Attribute, CCNumber, MidiChannel, NoteNumber, RegisteredPerNoteController, Ump, Voice2,
@@ -366,21 +365,19 @@ impl<F: SynthFloat> PolySynth<F> {
                 self.voices[slot].set_pitch(freq * glide * ratio);
                 return;
             }
-            NoteControl::Pressure(value) => {
-                MpeControl::Pressure(ControlValue::new(value).normalized())
-            }
+            NoteControl::Pressure(value) => MpeControl::Pressure(value.normalized()),
             NoteControl::Registered(RegisteredPerNoteController::Volume, value) => {
-                MpeControl::Gain(ControlValue::new(value).normalized())
+                MpeControl::Gain(value.normalized())
             }
             NoteControl::Registered(RegisteredPerNoteController::Brightness, value) => {
-                MpeControl::Slide(ControlValue::new(value).normalized())
+                MpeControl::Slide(value.normalized())
             }
             // The index is a wire byte, not a 7-bit value: 0xCA is not CC74.
             NoteControl::Assignable(index, value) if index == CCNumber::BRIGHTNESS.get() => {
-                MpeControl::Slide(ControlValue::new(value).normalized())
+                MpeControl::Slide(value.normalized())
             }
             NoteControl::Assignable(index, value) if index == CCNumber::VOLUME.get() => {
-                MpeControl::Gain(ControlValue::new(value).normalized())
+                MpeControl::Gain(value.normalized())
             }
             NoteControl::Registered(..) | NoteControl::Assignable(..) => return,
         };

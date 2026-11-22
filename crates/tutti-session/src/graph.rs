@@ -489,13 +489,12 @@ pub struct Graph<F: Float = f32> {
     /// fade out keeps rendering until then, and its controls (a voice's
     /// stream) live as long.
     retiring: Vec<(NodeKey, Box<dyn Any + Send>)>,
-    /// A reader of the session's tempo map, the template each plugin and
-    /// each sampler node inserted through the graph is bound with (a clone
-    /// of it: the node lends the map once per block and a fork clones its
-    /// reader on the control side; [`SessionNode::bind_tempo`]). The
-    /// publisher is the session's `TransportSettings`, whose `Reclaim` sweep
-    /// already covers the cell.
-    pub(crate) tempo: tutti_timeline::TempoReader,
+    /// The session's timeline as a node reads it: the template each plugin and each
+    /// sampler node inserted through the graph is bound with (its readers cloned: a node
+    /// lends the tempo map once per block and a fork clones its reader on the control
+    /// side; [`SessionNode::bind_timeline`]). The tempo's publisher is the session's
+    /// `TransportSettings`, whose `Reclaim` sweep already covers the cell.
+    pub(crate) timeline: crate::TimelineView,
     /// A re-prepare resumed in the update's collect: its plan's figures are
     /// published at the commit.
     resumed: bool,
@@ -614,7 +613,7 @@ impl<F: Float> Graph<F> {
         rate: SampleRate,
         max_block: MaxBlock,
         quantum: Option<MaxBlock>,
-        tempo: tutti_timeline::TempoReader,
+        timeline: crate::TimelineView,
     ) -> Self {
         let (mut editor, exec) = Editor::<F>::with_format(prepare_for(rate, max_block, quantum));
         let topology = &mut editor.spec_mut().topology;
@@ -667,7 +666,7 @@ impl<F: Float> Graph<F> {
             #[cfg(feature = "plugin")]
             graveyard: crate::plugin::Graveyard::default(),
             retiring: Vec::new(),
-            tempo,
+            timeline,
             resumed: false,
             compensation: Arc::default(),
             latency: Samples::new(0),
@@ -678,6 +677,11 @@ impl<F: Float> Graph<F> {
     /// device's callback size when the session knows it.
     pub(crate) fn prepared(&self) -> Prepare {
         *self.editor.prepare()
+    }
+
+    /// `node` bound to the session's timeline.
+    fn bound<N: SessionNode<F>>(&self, node: N) -> N {
+        node.bind_timeline(&self.timeline)
     }
 
     pub(crate) fn set_render_workers(&mut self, workers: crate::Workers) {
@@ -872,7 +876,7 @@ impl<F: Float> Graph<F> {
     /// ([`SessionNode::params`], so a [`ParamTarget`](crate::ParamTarget) write and control-rate
     /// modulation find them), its reclaimer is swept by the session's
     /// [`Reclaim`](crate::Phase::Reclaim) phase ([`SessionNode::reclaimer`]), and
-    /// it reads the session's tempo map ([`SessionNode::bind_tempo`]). A node
+    /// it reads the session's tempo map ([`SessionNode::bind_timeline`]). A node
     /// that is only an [`IntoNode`] does not compile here: a host's own is
     /// wrapped as [`ForkByClone`](tutti_graph::ForkByClone) or
     /// [`Unforkable`](tutti_graph::Unforkable), or is a
@@ -889,7 +893,7 @@ impl<F: Float> Graph<F> {
     /// }
     /// ```
     pub fn add<N: SessionNode<F>>(&mut self, node: N) -> Key<N> {
-        let (key, controls) = self.place(node.bind_tempo(&self.tempo));
+        let (key, controls) = self.place(self.bound(node));
         self.address::<N>(key.erase(), controls);
         key
     }
@@ -1005,7 +1009,7 @@ impl<F: Float> Graph<F> {
     /// (a live input's is `tutti_midi_runtime::LIVE_INLET_CAPACITY`, 256).
     ///
     /// Nothing blocks and what does not fit is counted in the writer's
-    /// [`Losses`](tutti_graph::Losses) (`EventInletWriter::counts`, then
+    /// [`Losses`](tutti_units::Losses) (`EventInletWriter::counts`, then
     /// `losses()`: `lost`, `evicted`, `refused`, and `late` for what was found
     /// past). A producer
     /// has no rate to match: an event names a frame, or a
@@ -1097,7 +1101,7 @@ impl Graph {
             client.controls(),
             client.answers(),
         );
-        let tempo = self.tempo.clone();
+        let tempo = self.timeline.tempo().clone();
         let bound = client.bind(tempo);
         let rebinder = tutti_plugin::catalog::PluginRebinder::out_of_process(&bound);
         // A fresh key has no wiring recorded, so nothing is unwired.
@@ -1209,7 +1213,7 @@ impl Graph {
         let controls = client.controls();
         let plugin = client.plugin().clone();
         let answers = client.answers();
-        let tempo = self.tempo.clone();
+        let tempo = self.timeline.tempo().clone();
         let bound = client.bind(tempo);
         let rebinder = tutti_plugin::catalog::PluginRebinder::out_of_process(&bound);
         match self.swap_unit(node, bound, fade, on_shape) {
@@ -1273,7 +1277,7 @@ impl Graph {
         let handle = plugin.handle().clone();
         let controls = plugin.node_controls();
         let plugin_ref = plugin.plugin().clone();
-        let (bound, rebinder) = (*plugin).bind_with_rebinder(self.tempo.clone());
+        let (bound, rebinder) = (*plugin).bind_with_rebinder(self.timeline.tempo().clone());
         match self.swap_unit(node, bound, fade, on_shape) {
             Ok(_) => {
                 match self.plugins.get_mut(&node) {
@@ -1509,7 +1513,7 @@ impl<F: Float> Graph<F> {
             node: unit,
             controls,
             fork,
-        } = incoming.bind_tempo(&self.tempo).into_parts();
+        } = self.bound(incoming).into_parts();
         let unit = Unit::<N, F> {
             parts: NodeParts {
                 node: unit,
@@ -1717,8 +1721,8 @@ impl<F: Float> Graph<F> {
         let mut event_edges: Vec<crate::EventEdge> = Vec::new();
         for (at, edge) in &unwired.event_edges {
             let (from, to) = (edge.from(), *at);
-            if at.port == 0
-                && let Some(fed) = self.fed_edges.get_mut(&at.node)
+            if at.port() == 0
+                && let Some(fed) = self.fed_edges.get_mut(&at.node())
             {
                 fed.retain(|s| *s != from);
             }
@@ -1890,23 +1894,23 @@ impl<F: Float> Graph<F> {
 
     /// Whether `port` names an event output the graph has.
     fn check_event_out(&self, port: EventOutputPort) -> Result<(), ConnectError> {
-        if !self.contains(port.node) {
-            return Err(ConnectError::NoSuchNode(port.node));
+        if !self.contains(port.node()) {
+            return Err(ConnectError::NoSuchNode(port.node()));
         }
         let fits = self
-            .shape(port.node)
-            .is_some_and(|s| port.port < s.event_out);
+            .shape(port.node())
+            .is_some_and(|s| port.port() < s.event_out);
         fits.then_some(()).ok_or(ConnectError::NoSuchEventOut(port))
     }
 
     /// Whether `port` names an event input the graph has.
     pub(crate) fn check_event_in(&self, port: EventInputPort) -> Result<(), ConnectError> {
-        if !self.contains(port.node) {
-            return Err(ConnectError::NoSuchNode(port.node));
+        if !self.contains(port.node()) {
+            return Err(ConnectError::NoSuchNode(port.node()));
         }
         let fits = self
-            .shape(port.node)
-            .is_some_and(|s| port.port < s.event_in);
+            .shape(port.node())
+            .is_some_and(|s| port.port() < s.event_in);
         fits.then_some(()).ok_or(ConnectError::NoSuchEventIn(port))
     }
 
@@ -1917,8 +1921,8 @@ impl<F: Float> Graph<F> {
     ) -> Result<(), ConnectError> {
         self.check_event_out(from)?;
         self.check_event_in(to)?;
-        if from.node == to.node {
-            return Err(ConnectError::Itself(from.node));
+        if from.node() == to.node() {
+            return Err(ConnectError::Itself(from.node()));
         }
         Ok(())
     }
@@ -1938,12 +1942,12 @@ impl<F: Float> Graph<F> {
             .events
             .get(&to)
             .is_some_and(|edges| edges.iter().any(|e| e.from() == from));
-        if to.port == 0
-            && let Some(ours) = self.fed_edges.get_mut(&to.node)
+        if to.port() == 0
+            && let Some(ours) = self.fed_edges.get_mut(&to.node())
         {
             ours.retain(|s| *s != from);
             if ours.is_empty() {
-                self.fed_edges.remove(&to.node);
+                self.fed_edges.remove(&to.node());
             }
         }
         if held {
@@ -1960,7 +1964,7 @@ impl<F: Float> Graph<F> {
     pub(crate) fn remove_event_edge(&mut self, from: EventOutputPort, to: EventInputPort) -> bool {
         let removed = self.editor.spec_mut().disconnect_events(to, from);
         if removed {
-            if let Some(ours) = self.fed_edges.get_mut(&to.node) {
+            if let Some(ours) = self.fed_edges.get_mut(&to.node()) {
                 ours.retain(|s| *s != from);
             }
             self.edited = true;
@@ -1985,8 +1989,8 @@ impl<F: Float> Graph<F> {
         for &from in sources {
             self.check_event_wire(from, to)?;
         }
-        let sink = to.node;
-        let port = to.port;
+        let sink = to.node();
+        let port = to.port();
         if port != 0 {
             self.write_event_sources(sink, port, sources);
             return Ok(());
@@ -2004,7 +2008,7 @@ impl<F: Float> Graph<F> {
     /// Feeds `sink`'s event input `port` from exactly `sources`, but for
     /// edges from nodes the graph did not insert.
     fn write_event_sources(&mut self, sink: NodeKey, port: u16, sources: &[EventOutputPort]) {
-        let at = EventInputPort { node: sink, port };
+        let at = EventInputPort::new(sink, port);
         let mut want: Vec<EventOutputPort> = sources.to_vec();
         want.sort();
         want.dedup();
@@ -2016,7 +2020,7 @@ impl<F: Float> Graph<F> {
             .cloned()
             .unwrap_or_default()
             .into_iter()
-            .partition(|e| nodes.contains_key(&e.from().node));
+            .partition(|e| nodes.contains_key(&e.from().node()));
         let have: Vec<EventOutputPort> = have.iter().map(|e| e.from()).collect();
         if have == want {
             return;
@@ -2168,7 +2172,7 @@ impl<F: Float> Graph<F> {
         let mut all: Vec<EventOutputPort> = self
             .event_sources_of(EventInputPort::new(sink, 0))
             .into_iter()
-            .filter(|s| self.nodes.contains_key(&s.node) && !ours.contains(s))
+            .filter(|s| self.nodes.contains_key(&s.node()) && !ours.contains(s))
             .collect();
         let hand = all.len();
         let theirs: Vec<EventOutputPort> = union
@@ -2232,14 +2236,14 @@ impl<F: Float> Graph<F> {
         self.feeds.remove(&node);
         for feeds in self.feeds.values_mut() {
             for sources in feeds.values_mut() {
-                sources.retain(|s| s.node != node);
+                sources.retain(|s| s.node() != node);
             }
             feeds.retain(|_, s| !s.is_empty());
         }
         self.feeds.retain(|_, f| !f.is_empty());
         self.fed_edges.remove(&node);
         for sources in self.fed_edges.values_mut() {
-            sources.retain(|s| s.node != node);
+            sources.retain(|s| s.node() != node);
         }
         self.fed_edges.retain(|_, s| !s.is_empty());
         self.edited = true;
@@ -2384,10 +2388,10 @@ impl<F: Float> Graph<F> {
     /// The graph's raw source for an [`OutputPort`].
     fn raw_source(port: OutputPort) -> Option<PortSource> {
         match port.end() {
-            OutEnd::Node(node, index) => Some(PortSource::Node(RawOut {
+            OutEnd::Node(node, index) => Some(PortSource::Node(RawOut::new(
                 node,
-                port: u16::try_from(index).ok()?,
-            })),
+                u16::try_from(index).ok()?,
+            ))),
             OutEnd::Input(index) => Some(PortSource::MainInput(u16::try_from(index).ok()?)),
         }
     }
@@ -2419,10 +2423,7 @@ impl<F: Float> Graph<F> {
     /// channel or an index no port has.
     fn raw_in(port: InputPort) -> Option<RawIn> {
         match port.end() {
-            InEnd::Node(node, index) => Some(RawIn {
-                node,
-                port: u16::try_from(index).ok()?,
-            }),
+            InEnd::Node(node, index) => Some(RawIn::new(node, u16::try_from(index).ok()?)),
             InEnd::Output(_) => None,
         }
     }
@@ -2446,8 +2447,8 @@ impl<F: Float> Graph<F> {
         match source {
             PortSource::Node(p) => self
                 .nodes
-                .contains_key(&p.node)
-                .then(|| OutputPort::new(p.node, usize::from(p.port))),
+                .contains_key(&p.node())
+                .then(|| OutputPort::new(p.node(), usize::from(p.port()))),
             PortSource::MainInput(port) => Some(MainInput::channel(usize::from(port))),
             PortSource::Zero => None,
         }
@@ -2895,9 +2896,9 @@ impl<F: Float> Graph<F> {
     pub fn bus_sources(&self, to: impl Inlet<BusWire>) -> Result<Vec<BusOutputPort>, ConnectError> {
         let to = to.sink();
         if let BusEnd::Node(bus) = to.0
-            && !self.contains(bus.node)
+            && !self.contains(bus.node())
         {
-            return Err(ConnectError::NoSuchNode(bus.node));
+            return Err(ConnectError::NoSuchNode(bus.node()));
         }
         let spec = self.editor.spec();
         let feeds = match to.0 {
@@ -2920,14 +2921,14 @@ impl<F: Float> Graph<F> {
         to: BusInputPort,
     ) -> Result<(), ConnectError> {
         if let BusOutputPort::Node(bus) = from
-            && !self.contains(bus.node)
+            && !self.contains(bus.node())
         {
-            return Err(ConnectError::NoSuchNode(bus.node));
+            return Err(ConnectError::NoSuchNode(bus.node()));
         }
         if let BusEnd::Node(bus) = to.0
-            && !self.contains(bus.node)
+            && !self.contains(bus.node())
         {
-            return Err(ConnectError::NoSuchNode(bus.node));
+            return Err(ConnectError::NoSuchNode(bus.node()));
         }
         Ok(())
     }
@@ -4169,7 +4170,10 @@ mod tail_tests {
             rate,
             MaxBlock::of(Samples::new(64)),
             None,
-            tutti_timeline::TempoReader::fixed(Arc::new(map)),
+            crate::TimelineView::new(
+                tutti_timeline::TempoReader::fixed(Arc::new(map)),
+                tutti_timeline::LoopReader::disarmed(),
+            ),
         )
     }
 
@@ -4304,14 +4308,17 @@ mod main_output_fade_tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
             None,
-            tutti_timeline::TempoReader::fixed(Arc::new(map)),
+            crate::TimelineView::new(
+                tutti_timeline::TempoReader::fixed(Arc::new(map)),
+                tutti_timeline::LoopReader::disarmed(),
+            ),
         );
         let node = g.add(ForkByClone(Const::mono(1.0)));
         let node = NodeKey::from(node);
-        g.editor.spec_mut().topology.set_outputs([
-            PortSource::Node(OutputPort { node, port: 0 }),
-            PortSource::Zero,
-        ]);
+        g.editor
+            .spec_mut()
+            .topology
+            .set_outputs([PortSource::Node(OutputPort::new(node, 0)), PortSource::Zero]);
         g.commit();
         (g, node)
     }

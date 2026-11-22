@@ -46,10 +46,7 @@ const MAX_BLOCK: usize = 128;
 const CHAINS: u64 = 6;
 
 fn out(node: u64) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: NodeKey(node),
-        port: 0,
-    })
+    PortSource::Node(OutputPort::new(NodeKey(node), 0))
 }
 
 /// `CHAINS` independent chains `MainInput(0) -> Lag(5 * k) -> Gain`, each its own
@@ -77,17 +74,11 @@ fn build(ed: &mut Editor) -> Vec<PortSource> {
         );
         let t = &mut ed.spec_mut().topology;
         t.edges.insert(
-            InputPort {
-                node: NodeKey(lag),
-                port: 0,
-            },
+            InputPort::new(NodeKey(lag), 0),
             vec![Edge::Direct(PortSource::MainInput(0))],
         );
         t.edges.insert(
-            InputPort {
-                node: NodeKey(gain),
-                port: 0,
-            },
+            InputPort::new(NodeKey(gain), 0),
             vec![Edge::Direct(out(lag))],
         );
         gains.push(out(gain));
@@ -1018,10 +1009,7 @@ fn wide(r: &mut Rig, value: f32, width: usize) {
 }
 
 fn port(node: u64, port: u16) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: NodeKey(node),
-        port,
-    })
+    PortSource::Node(OutputPort::new(NodeKey(node), port))
 }
 
 /// A node replaced by one with fewer outputs leaves the tap's lanes past the

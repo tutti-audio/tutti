@@ -42,23 +42,13 @@ fn build_callback_state(sample_rate: f64) -> (Transport, AudioCallbackState) {
         ),
     );
     ed.spec_mut().topology.edges.insert(
-        InputPort {
-            node: filter,
-            port: 0,
-        },
-        vec![Edge::Direct(PortSource::Node(OutputPort {
-            node: source,
-            port: 0,
-        }))],
+        InputPort::new(filter, 0),
+        vec![Edge::Direct(PortSource::Node(OutputPort::new(source, 0)))],
     );
     // The filter's single output on both device channels.
-    ed.spec_mut().topology.set_outputs(vec![
-        PortSource::Node(OutputPort {
-            node: filter,
-            port: 0,
-        });
-        2
-    ]);
+    ed.spec_mut()
+        .topology
+        .set_outputs(vec![PortSource::Node(OutputPort::new(filter, 0)); 2]);
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     let state = AudioCallbackState::new(engine);

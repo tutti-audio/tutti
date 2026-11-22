@@ -589,10 +589,7 @@ impl Row {
         }
 
         // Schedule the command now, when there is one: the plan is in.
-        let to = EventInputPort {
-            node: rig.node,
-            port: self.event_port(),
-        };
+        let to = EventInputPort::new(rig.node, self.event_port());
         match feed {
             Feed::AtFrame => {
                 rig.ed
@@ -1062,10 +1059,9 @@ impl Row {
             )))));
             g.connect(lat, 0, n, 0);
         }
-        let _ = g.spec_mut().connect_param(
-            ParamIn { node: n, param },
-            EventOutputPort { node: src, port: 0 },
-        );
+        let _ = g
+            .spec_mut()
+            .connect_param(ParamIn { node: n, param }, EventOutputPort::new(src, 0));
         g.connect_output(n, self.output as usize, 0);
         let (ed, exec) = g
             .build(Prepare::new(
@@ -1281,7 +1277,7 @@ impl ParamEcho {
 
 impl Node for ParamEcho {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::MONO).with_param_addrs(&[self.param])
+        Shape::through_unassigned(ChannelLayout::MONO).param_addrs(&[self.param])
     }
 
     fn prepare(&mut self, _: &Prepare) {}
@@ -1356,14 +1352,14 @@ impl ImpulseSource {
         self
     }
 
-    const BASE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0);
+    const BASE: Shape = Shape::source_unassigned(ChannelLayout::MONO).events(1, 0);
     const IN: InEvents = Self::BASE.event_input(0).expect("declared");
 
     fn declared(latency: Latency, resolution: Resolution) -> Shape {
         Self::BASE
-            .with_latency(latency)
-            .with_tail(tutti_units::Tail::Unknown)
-            .with_event_resolution(resolution)
+            .latency(latency)
+            .tail(tutti_units::Tail::Unknown)
+            .event_resolution(resolution)
     }
 }
 
@@ -1443,9 +1439,9 @@ impl Lookahead {
 impl Node for Lookahead {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_latency(self.latency)
+            .latency(self.latency)
             // Pure delay: nothing rings once the latency is compensated.
-            .with_tail(tutti_units::Tail::None)
+            .tail(tutti_units::Tail::None)
     }
 
     fn prepare(&mut self, _: &Prepare) {}
@@ -1488,8 +1484,8 @@ impl Latent {
 impl Node for Latent {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
-            .with_events(0, 1)
-            .with_latency(self.latency)
+            .events(0, 1)
+            .latency(self.latency)
     }
 
     fn prepare(&mut self, _: &Prepare) {}
@@ -1576,7 +1572,7 @@ impl Emitter {
         }
     }
 
-    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
     const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -1627,7 +1623,7 @@ impl ParamPulse {
         }
     }
 
-    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1).with_param_events();
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1).param_events();
     const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -1966,8 +1962,8 @@ fn drive_block<F: Float>(
         &mut writers,
     )
     .with_main(main)
-    .with_params(&params)
-    .with_tail(&reported);
+    .params(&params)
+    .tail(&reported);
     let status = {
         let _rt = prepare.enter_rt_scope();
         node.process(&cx, io)
@@ -2217,20 +2213,12 @@ impl<F: Float> BlockRig<F> {
             ChannelLayout::try_from(ins).expect("asserted within RIG_MAX_CHANNELS above");
         for c in 0..ins {
             topology.connect(
-                crate::InputPort {
-                    node: key,
-                    port: c as u16,
-                },
+                crate::InputPort::new(key, c as u16),
                 crate::Edge::Direct(crate::PortSource::MainInput(c as u16)),
             );
         }
         topology.outputs = (0..outs)
-            .map(|c| {
-                vec![crate::PortSource::Node(OutputPort {
-                    node: key,
-                    port: c as u16,
-                })]
-            })
+            .map(|c| vec![crate::PortSource::Node(OutputPort::new(key, c as u16))])
             .collect();
         editor.commit().expect("a one-node graph commits");
         exec.apply_pending();
@@ -2663,7 +2651,7 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
             &mut writers[..n_ev_out],
         )
         .with_main(self.node.shape().main_ports())
-        .with_params(&params[..n_par])
+        .params(&params[..n_par])
         .with_lost(&lost);
         let io = match &self.capture {
             Some(capture) => io.with_log(capture.begin_block()),

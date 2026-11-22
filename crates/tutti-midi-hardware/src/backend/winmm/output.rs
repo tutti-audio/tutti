@@ -7,11 +7,11 @@ use super::super::legacy_port::bytes::{ByteOut, Wire};
 use super::super::legacy_port::sender::{Mailbox, run};
 use crate::endpoints::DeviceOut;
 use crate::error::{MidiHardwareError, MidiThread, Result};
-use tutti_graph::Losses;
 use tutti_midi_runtime::{MidiOut, Outgoing, SendAt, Taken};
 use tutti_platform::{Executor, Task, join};
 use tutti_rt::{Counter, CounterWriter};
 use tutti_ump::Ump;
+use tutti_units::Losses;
 use tutti_winmm_ffi::{MidiOut as Port, OutputPort, TimerWaiter, TimerWaker, waitable_timer};
 
 /// How many events wait at most; a queue past it takes a prefix and says so.
@@ -19,8 +19,8 @@ const MAX_PENDING: usize = 8192;
 
 struct Shared {
     mailbox: Mailbox<Ump>,
-    /// The messages the sender had no MIDI 1.0 form for.
-    unrepresentable: Counter<u64>,
+    /// The messages the sender had no MIDI 1.0 form for, each one refused.
+    unrepresentable: Counter<Losses>,
     /// Ends the thread's wait when an earlier event arrives or the output stops.
     wake: TimerWaker,
 }
@@ -75,11 +75,7 @@ impl DeviceOut for WinMmOutput {
     }
 
     fn losses(&self) -> Losses {
-        self.shared.mailbox.losses()
-    }
-
-    fn unrepresentable(&self) -> u64 {
-        self.shared.unrepresentable.get()
+        self.shared.mailbox.losses() + self.shared.unrepresentable.get()
     }
 
     fn pending(&self) -> usize {

@@ -31,12 +31,13 @@
 use std::num::NonZeroU32;
 use tutti_buffers::Float;
 use tutti_graph::{
-    Cost, Cx, Event, EventKind, ForkCause, ForkSource, Forked, InEvents, IntoNode, Io, Losses,
-    Node, NodeParts, Offset, OutEvents, Prepare, RenderMode, Shape, Status, UmpAt, note_off_room,
+    Cost, Cx, Event, EventKind, ForkCause, ForkSource, Forked, InEvents, IntoNode, Io, Node,
+    NodeParts, Offset, OutEvents, Prepare, RenderMode, Shape, Status, UmpAt, note_off_room,
 };
 use tutti_midi_protocol::{Midi2Translator, MpeMode};
 use tutti_rt::{Counter, CounterWriter, Publisher, Reader, counter};
 use tutti_ump::MidiGroup;
+use tutti_units::Losses;
 
 use super::input_node::{MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORT_CAPACITY, Staging};
 use super::mpe_translator::MpeTranslator;
@@ -114,10 +115,10 @@ fn tell(
 impl MpeTransformNode {
     const fn declared(capacity: NonZeroU32) -> Shape {
         Shape::EMPTY
-            .with_events(1, 1)
-            .with_event_capacity(capacity)
+            .events(1, 1)
+            .event_capacity(capacity)
             // Event-only: a translation per event, nothing per frame.
-            .with_cost(Cost::Light)
+            .cost(Cost::Light)
     }
     const IN: InEvents = Self::declared(MIDI_INPUT_PORT_CAPACITY)
         .event_input(0)

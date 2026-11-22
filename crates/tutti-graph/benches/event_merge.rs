@@ -57,11 +57,11 @@ impl Source {
 
     fn declared(n: u32, mix: Mix) -> Shape {
         let shape = Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(NonZeroU32::new(n * 2).expect("a capacity"));
+            .events(0, 1)
+            .event_capacity(NonZeroU32::new(n * 2).expect("a capacity"));
         match mix {
             Mix::Midi => shape,
-            Mix::Params | Mix::Mixed => shape.with_param_events(),
+            Mix::Params | Mix::Mixed => shape.param_events(),
         }
     }
 }
@@ -91,7 +91,7 @@ impl Node for Source {
 struct Sink(InEvents);
 
 impl Sink {
-    const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+    const SHAPE: Shape = Shape::EMPTY.events(1, 0);
 
     fn new() -> Self {
         Self(Self::SHAPE.event_input(0).expect("one event input"))
@@ -119,14 +119,8 @@ fn rig(k: u64, n: u32, mix: Mix) -> Executor {
     for i in 0..k {
         ed.insert(NodeKey(i + 1), "source", Unforkable(Source::new(n, mix)));
         ed.spec_mut().connect_events(
-            EventInputPort {
-                node: NodeKey(100),
-                port: 0,
-            },
-            EventEdge::Direct(EventOutputPort {
-                node: NodeKey(i + 1),
-                port: 0,
-            }),
+            EventInputPort::new(NodeKey(100), 0),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(i + 1), 0)),
         );
     }
     ed.commit().expect("commits");

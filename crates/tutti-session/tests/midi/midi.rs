@@ -14,7 +14,6 @@ use tutti_session::Stamp;
 
 #[cfg(feature = "midi-hardware")]
 use std::time::Duration;
-use tutti_graph::Losses;
 #[cfg(feature = "midi-hardware")]
 use tutti_graph::NodeKey;
 #[cfg(feature = "midi-hardware")]
@@ -29,9 +28,12 @@ use tutti_rt::PushError;
 use tutti_ump::MidiGroup;
 #[cfg(feature = "midi-hardware")]
 use tutti_ump::Ump;
+#[cfg(feature = "midi-hardware")]
+use tutti_ump::{MessageType, Sysex8StreamCount};
 use tutti_ump::{MidiChannel, NoteKeyEvent, NoteNumber, NoteVelocity};
 #[cfg(feature = "midi-hardware")]
 use tutti_ump::{MpeChannels, MpeZoneSpan};
+use tutti_units::Losses;
 use tutti_units::{Beat, BeatDuration, Frame, SampleRate};
 
 use tutti_fixtures::midi;
@@ -287,7 +289,7 @@ fn a_clip_and_a_live_input_survive_a_re_bind() {
         .unwrap();
     let clip = s.midi().clip(old).expect("the target's clip");
     let mut live = s.midi().input(old).unwrap();
-    let inlet = s.graph_ref().feed(old, Feeder::LiveInput).unwrap()[0].node;
+    let inlet = s.graph_ref().feed(old, Feeder::LiveInput).unwrap()[0].node();
     let _ = s.update();
 
     s.remove(old).unwrap();
@@ -299,7 +301,7 @@ fn a_clip_and_a_live_input_survive_a_re_bind() {
     let _ = s.update();
     assert_eq!(s.midi().clip(new), Some(clip), "the same clip");
     assert_eq!(
-        s.graph_ref().feed(new, Feeder::LiveInput).unwrap()[0].node,
+        s.graph_ref().feed(new, Feeder::LiveInput).unwrap()[0].node(),
         inlet,
         "the same inlet"
     );
@@ -308,11 +310,11 @@ fn a_clip_and_a_live_input_survive_a_re_bind() {
         "its keys were handed out once"
     );
     let mut fed = s.graph_ref().sources(EventInputPort::new(new, 0)).unwrap();
-    fed.sort_by_key(|e| e.node);
+    fed.sort_by_key(|e| e.node());
     // The clip feeds the target through its MPE transform.
     let transform = s.graph_ref().feed(new, Feeder::Sequencer).unwrap()[0];
     let mut want = vec![transform, EventOutputPort::new(inlet, 0)];
-    want.sort_by_key(|e| e.node);
+    want.sort_by_key(|e| e.node());
     assert_eq!(fed, want);
 
     live.push(Stamp::NextBlock, midi::note_on(MidiChannel::FIRST, 72, MF))
@@ -392,8 +394,8 @@ fn route_rules_wire_the_hardware_input() {
             .unwrap()
             .iter()
             .map(|e| {
-                assert_eq!(e.node, input);
-                e.port
+                assert_eq!(e.node(), input);
+                e.port()
             })
             .collect();
         p.sort();
@@ -444,8 +446,8 @@ fn a_route_rule_names_a_group() {
             .unwrap()
             .iter()
             .map(|e| {
-                assert_eq!(e.node, input);
-                e.port
+                assert_eq!(e.node(), input);
+                e.port()
             })
             .collect();
         p.sort();
@@ -1064,7 +1066,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
         FirstGroup::new(0).unwrap(),
         GroupSpan::new(1).unwrap(),
     )
-    .midi_ci(2, 0)
+    .midi_ci(2, Sysex8StreamCount::new(0))
     .name(BlockName::new("Main").unwrap())
     .build()
     .unwrap();
@@ -1219,7 +1221,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
         FirstGroup::new(0).unwrap(),
         GroupSpan::new(1).unwrap(),
     )
-    .midi_ci(2, 0)
+    .midi_ci(2, Sysex8StreamCount::new(0))
     .name(BlockName::new("Main").unwrap())
     .build()
     .unwrap();
@@ -1499,7 +1501,7 @@ impl MpePeer {
             FirstGroup::new(0).unwrap(),
             GroupSpan::new(1).unwrap(),
         )
-        .midi_ci(2, 0)
+        .midi_ci(2, Sysex8StreamCount::new(0))
         .name(tutti_ump::BlockName::new("Main").unwrap())
         .build()
         .unwrap();
@@ -1924,7 +1926,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
         FirstGroup::new(0).unwrap(),
         GroupSpan::new(1).unwrap(),
     )
-    .midi_ci(2, 0)
+    .midi_ci(2, Sysex8StreamCount::new(0))
     .name(BlockName::new("Main").unwrap())
     .build()
     .unwrap();
@@ -2186,7 +2188,8 @@ fn an_output_port_stamps_as_the_devices_configuration_says() {
     let sent = wire_after(&mut s, config(true), 20);
     assert!(out.info().config().rx_jr);
     assert!(
-        sent.iter().any(|u| u.is_jr()) && sent.iter().any(|u| u.message_type() == 1),
+        sent.iter().any(|u| u.is_jr())
+            && sent.iter().any(|u| u.message_type() == MessageType::System),
         "{sent:?}"
     );
     let sent = wire_after(&mut s, config(false), 40);
@@ -2237,7 +2240,7 @@ fn a_device_that_receives_jr_has_every_message_prefixed_by_a_timestamp() {
         _ => None,
     };
     let messages: Vec<usize> = (0..sent.len())
-        .filter(|&i| sent[i].message_type() != 0)
+        .filter(|&i| sent[i].message_type() != MessageType::Utility)
         .collect();
     assert!(!messages.is_empty(), "the clock goes out: {sent:?}");
     let mut last = 0;

@@ -143,11 +143,11 @@ impl Node for Probe {
             tutti_graph::Buses::unassigned(ChannelLayout::MONO),
             tutti_graph::Buses::unassigned(ChannelLayout::MONO),
         )
-        .with_ports(
+        .ports(
             ChannelLayout::MONO,
             ChannelLayout::from_count(if self.corners { 4 } else { 3 }),
         )
-        .with_params(&self.declared)
+        .params(&self.declared)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -222,9 +222,9 @@ struct Signal {
 
 impl Signal {
     const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO)
-        .with_events(0, 1)
-        .with_param_events()
-        .with_event_capacity(tutti_graph::testing::cap_of(256));
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(256));
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -258,9 +258,9 @@ struct Hold {
 
 impl Hold {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_param_events()
-        .with_event_capacity(tutti_graph::testing::cap_of(4));
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(4));
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -299,8 +299,7 @@ impl Lag {
 
 impl Node for Lag {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::MONO)
-            .with_latency(Latency::new(Samples::new(self.n)))
+        Shape::through_unassigned(ChannelLayout::MONO).latency(Latency::new(Samples::new(self.n)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -356,9 +355,9 @@ impl Ramps {
 
 impl Ramps {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_param_events()
-        .with_event_capacity(tutti_graph::testing::cap_of(EVENT_ROOM as u32));
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(EVENT_ROOM as u32));
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -412,18 +411,12 @@ impl Node for Ramps {
 }
 
 fn port(node: u64, port: u16) -> OutputPort {
-    OutputPort {
-        node: NodeKey(node),
-        port,
-    }
+    OutputPort::new(NodeKey(node), port)
 }
 
 /// Event output 0 of `node`.
 fn ev(node: u64) -> EventOutputPort {
-    EventOutputPort {
-        node: NodeKey(node),
-        port: 0,
-    }
+    EventOutputPort::new(NodeKey(node), 0)
 }
 
 fn param(node: u64, p: UnitParam) -> ParamIn {
@@ -662,10 +655,7 @@ fn undeclared_params_and_missing_sources_are_refused() {
     ed.spec_mut().params.clear();
     ed.spec_mut().connect_param(
         param(PROBE, UnitParam::Cutoff),
-        EventOutputPort {
-            node: NodeKey(1),
-            port: 3,
-        },
+        EventOutputPort::new(NodeKey(1), 3),
     );
     assert!(
         matches!(
@@ -727,7 +717,7 @@ fn a_fade_keeps_the_params_it_declares() {
                 tutti_graph::Buses::unassigned(ChannelLayout::MONO),
                 tutti_graph::Buses::unassigned(ChannelLayout::from_count(3)),
             )
-            .with_params(&[UnitParam::Cutoff])
+            .params(&[UnitParam::Cutoff])
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
@@ -991,17 +981,11 @@ fn a_delay_appearing_on_a_param_source_holds_its_last_value() {
     for lag in [100, 150] {
         ed.insert(NodeKey(3), "lag", Unforkable(Lag::new(lag)));
         ed.spec_mut().topology.edges.insert(
-            InputPort {
-                node: NodeKey(3),
-                port: 0,
-            },
+            InputPort::new(NodeKey(3), 0),
             vec![Edge::Direct(PortSource::Node(port(4, 0)))],
         );
         ed.spec_mut().topology.edges.insert(
-            InputPort {
-                node: NodeKey(PROBE),
-                port: 0,
-            },
+            InputPort::new(NodeKey(PROBE), 0),
             vec![Edge::Direct(PortSource::Node(port(3, 0)))],
         );
         ed.commit().expect("the sibling moves the arrival");
@@ -1037,7 +1021,7 @@ impl Node for LatentHold {
     fn shape(&self) -> Shape {
         Hold { value: self.value }
             .shape()
-            .with_latency(Latency::new(Samples::new(self.latency)))
+            .latency(Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
@@ -1101,9 +1085,9 @@ struct OnFirstBlock {
 
 impl OnFirstBlock {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_param_events()
-        .with_event_capacity(tutti_graph::testing::cap_of(4));
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(4));
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -1307,10 +1291,7 @@ fn render_moves(
     );
     ed.spec_mut().connect_param(
         param(PROBE, UnitParam::Cutoff),
-        EventOutputPort {
-            node: NodeKey(1),
-            port: 0,
-        },
+        EventOutputPort::new(NodeKey(1), 0),
     );
     ed.commit().expect("commits");
     let mut out = Vec::new();
@@ -1606,13 +1587,8 @@ fn a_range_clamps_a_segment_without_rewriting_it() {
         }),
     );
     let at = param(PROBE, UnitParam::Cutoff);
-    ed.spec_mut().connect_param(
-        at,
-        EventOutputPort {
-            node: NodeKey(1),
-            port: 0,
-        },
-    );
+    ed.spec_mut()
+        .connect_param(at, EventOutputPort::new(NodeKey(1), 0));
     ed.commit().expect("commits");
     let curve = |f: u64| analytic(0.0, 2.0, shape, 1.0, 640.0, f);
     let mut frame = 0u64;
@@ -1659,9 +1635,9 @@ struct SegmentThenRamp {
 
 impl SegmentThenRamp {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_param_events()
-        .with_event_capacity(tutti_graph::testing::cap_of(4));
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(4));
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -2117,13 +2093,8 @@ fn a_shrinking_range_rewrites_neither_the_base_nor_a_ramp() {
         }),
     );
     let at = param(PROBE, UnitParam::Cutoff);
-    ed.spec_mut().connect_param(
-        at,
-        EventOutputPort {
-            node: NodeKey(1),
-            port: 0,
-        },
-    );
+    ed.spec_mut()
+        .connect_param(at, EventOutputPort::new(NodeKey(1), 0));
     ed.commit().expect("commits");
     // The ramp's value at absolute frame `f`: `Ramp::step`'s arithmetic in
     // `f64`, from the base (the port's value before its first event),
@@ -2431,7 +2402,7 @@ fn run_differential(g: &Gen) {
         ed.insert(k, "probe", Unforkable(probe(i, 0)));
         fresh.insert(k, Box::new(probe(i, 1)));
         for c in 0..4 {
-            outputs.push(PortSource::Node(OutputPort { node: k, port: c }));
+            outputs.push(PortSource::Node(OutputPort::new(k, c)));
         }
         // Every probe has a sibling (of latency 0 when it adds none), so a
         // later latency change has a node to re-insert.
@@ -2441,18 +2412,15 @@ fn run_differential(g: &Gen) {
             fresh.insert(s, Box::new(Lag::new(lag)));
             // Fed by the first signal, so the sibling carries something.
             ed.spec_mut().topology.edges.insert(
-                InputPort { node: s, port: 0 },
-                vec![Edge::Direct(PortSource::Node(OutputPort {
-                    node: NodeKey(100),
-                    port: 0,
-                }))],
+                InputPort::new(s, 0),
+                vec![Edge::Direct(PortSource::Node(OutputPort::new(
+                    NodeKey(100),
+                    0,
+                )))],
             );
             ed.spec_mut().topology.edges.insert(
-                InputPort { node: k, port: 0 },
-                vec![Edge::Direct(PortSource::Node(OutputPort {
-                    node: s,
-                    port: 0,
-                }))],
+                InputPort::new(k, 0),
+                vec![Edge::Direct(PortSource::Node(OutputPort::new(s, 0)))],
             );
         }
     }

@@ -60,7 +60,11 @@ fn controls(packets: &[Ump]) -> Vec<(u8, u8)> {
     packets
         .iter()
         .map(|&ump| {
-            assert_eq!(ump.message_type(), 2, "{ump:?}");
+            assert_eq!(
+                ump.message_type(),
+                MessageType::Midi1ChannelVoice,
+                "{ump:?}"
+            );
             let Ok(Message::Midi1(_, Voice1::ControlChange { controller, value })) = ump.decode()
             else {
                 panic!("not a Control Change: {ump:?}")
@@ -98,7 +102,11 @@ fn a_midi1_endpoint_is_never_sent_type_4() {
             ),
         ],
     );
-    assert!(out.iter().all(|u| u.message_type() != 4), "{out:?}");
+    assert!(
+        out.iter()
+            .all(|u| u.message_type() != MessageType::Midi2ChannelVoice),
+        "{out:?}"
+    );
     let decoded: Vec<_> = out.iter().map(|&u| u.decode().unwrap()).collect();
     // The first three keep their Group and Channel, and the per-note bend,
     // which MIDI 1.0 cannot carry (D.2.8), is gone.
@@ -385,7 +393,11 @@ fn the_events_with_no_wire_form_are_counted_in_the_events_taken() {
     ]);
     wire.convert(&events);
     assert_eq!(wire.batch().len(), 1, "only the note has a form");
-    assert_eq!(wire.unrepresentable_in(3), 2);
-    assert_eq!(wire.unrepresentable_in(1), 1, "the clock, before the note");
-    assert_eq!(wire.unrepresentable_in(0), 0);
+    assert_eq!(wire.unrepresentable_in(3), Losses::refused(2));
+    assert_eq!(
+        wire.unrepresentable_in(1),
+        Losses::refused(1),
+        "the clock, before the note"
+    );
+    assert_eq!(wire.unrepresentable_in(0), Losses::NONE);
 }

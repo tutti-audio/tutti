@@ -31,8 +31,7 @@ declare_params!([] Lane, n { Cutoff => Hz = &n.0 });
 
 impl<F: Float> Node<F> for Lane {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO)
-            .with_param_addrs(self.declared_ports().as_slice())
+        Shape::source_unassigned(ChannelLayout::MONO).param_addrs(self.declared_ports().as_slice())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
@@ -72,9 +71,9 @@ struct Ramp {
 
 impl Ramp {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_param_events()
-        .with_event_capacity(tutti_graph::testing::cap_of(4));
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(4));
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -116,12 +115,9 @@ fn render(ramp: Ramp, range: Option<ParamRange>) -> Vec<f64> {
     };
     ed.spec_mut()
         .topology
-        .set_outputs([PortSource::Node(OutputPort {
-            node: LANE,
-            port: 0,
-        })]);
+        .set_outputs([PortSource::Node(OutputPort::new(LANE, 0))]);
     ed.spec_mut()
-        .connect_param(at, EventOutputPort { node: SRC, port: 0 });
+        .connect_param(at, EventOutputPort::new(SRC, 0));
     if let Some(range) = range {
         ed.spec_mut().set_param_range(at, range);
     }
@@ -247,12 +243,9 @@ fn a_range_change_lands_on_the_next_block() {
     };
     ed.spec_mut()
         .topology
-        .set_outputs([PortSource::Node(OutputPort {
-            node: LANE,
-            port: 0,
-        })]);
+        .set_outputs([PortSource::Node(OutputPort::new(LANE, 0))]);
     ed.spec_mut()
-        .connect_param(at, EventOutputPort { node: SRC, port: 0 });
+        .connect_param(at, EventOutputPort::new(SRC, 0));
     ed.commit().expect("commits");
     exec.apply_pending();
     let mut block = |ed: &mut Editor<f64>| {
@@ -336,10 +329,7 @@ fn an_f64_edge_weight_ramps_in_f64() {
     use tutti_units::Amplitude;
     let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
     ed.insert(LANE, "dc", ForkByClone(Dc(FINE)));
-    let from = PortSource::Node(OutputPort {
-        node: LANE,
-        port: 0,
-    });
+    let from = PortSource::Node(OutputPort::new(LANE, 0));
     ed.spec_mut().topology.set_outputs([from]);
     let id = EdgeId {
         sink: PortSink::Output(0),
@@ -371,21 +361,12 @@ fn an_f64_mix_ramps_in_f64() {
     ed.insert(NodeKey(5), "dc", ForkByClone(Dc(FINE)));
     ed.insert(LANE, "double", ForkByClone(Double));
     ed.spec_mut().topology.connect(
-        tutti_graph::InputPort {
-            node: LANE,
-            port: 0,
-        },
-        tutti_graph::Edge::Direct(PortSource::Node(OutputPort {
-            node: NodeKey(5),
-            port: 0,
-        })),
+        tutti_graph::InputPort::new(LANE, 0),
+        tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(5), 0))),
     );
     ed.spec_mut()
         .topology
-        .set_outputs([PortSource::Node(OutputPort {
-            node: LANE,
-            port: 0,
-        })]);
+        .set_outputs([PortSource::Node(OutputPort::new(LANE, 0))]);
     ed.commit().expect("commits");
     exec.apply_pending();
     let first = block(&mut exec, &mut ed);
@@ -408,9 +389,9 @@ struct Segment(ParamSegment);
 
 impl Segment {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_param_events()
-        .with_event_capacity(tutti_graph::testing::cap_of(4));
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(4));
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -437,7 +418,7 @@ struct Bearing;
 
 impl Node<f64> for Bearing {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_params(&[UnitParam::Azimuth])
+        Shape::source_unassigned(ChannelLayout::MONO).params(&[UnitParam::Azimuth])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, f64>) -> Status {
@@ -464,16 +445,13 @@ fn render_segment(
     ed.insert(SRC, "segment", ForkByClone(Segment(segment)));
     ed.spec_mut()
         .topology
-        .set_outputs([PortSource::Node(OutputPort {
-            node: LANE,
-            port: 0,
-        })]);
+        .set_outputs([PortSource::Node(OutputPort::new(LANE, 0))]);
     ed.spec_mut().connect_param(
         ParamIn {
             node: LANE,
             param: param.into(),
         },
-        EventOutputPort { node: SRC, port: 0 },
+        EventOutputPort::new(SRC, 0),
     );
     ed.commit().expect("commits");
     exec.apply_pending();

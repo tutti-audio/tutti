@@ -8,7 +8,6 @@ use tutti_dsp::{
     svf_step,
 };
 use tutti_sf2::{SamplePool, Side};
-use tutti_ump::ControlValue;
 use tutti_ump::{MidiChannel, NoteNumber, RegisteredPerNoteController};
 use tutti_units::{
     Amplitude, Cents, Db, Hz, Normalized, Pan, Q, SampleRate, Samples, Seconds, Semitones,
@@ -385,12 +384,10 @@ impl<F: Float + SimdLanes> Voice<F> {
                 self.note.pitch = Some(Semitones::new(pitch.note_number()))
             }
             NoteControl::Registered(RegisteredPerNoteController::Volume, value) => {
-                self.note.volume = Amplitude::new(ControlValue::new(value).normalized().get());
+                self.note.volume = Amplitude::new(value.normalized().get());
             }
             NoteControl::Registered(RegisteredPerNoteController::Pan, value) => {
-                self.note.pan = Some(Pan::new(
-                    2.0 * ControlValue::new(value).normalized().get() - 1.0,
-                ));
+                self.note.pan = Some(Pan::new(2.0 * value.normalized().get() - 1.0));
             }
             NoteControl::Pressure(_)
             | NoteControl::Registered(..)

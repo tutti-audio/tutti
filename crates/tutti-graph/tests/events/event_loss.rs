@@ -48,8 +48,8 @@ struct Writer {
 impl Node for Writer {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, self.scripts.len() as u16)
-            .with_event_capacity(tutti_graph::testing::cap_of(self.cap))
+            .events(0, self.scripts.len() as u16)
+            .event_capacity(tutti_graph::testing::cap_of(self.cap))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -78,7 +78,7 @@ struct Counter {
 
 impl Node for Counter {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(self.ports, 0)
+        Shape::EMPTY.events(self.ports, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
@@ -132,14 +132,8 @@ fn rig(
         );
         for p in 0..scripts.len() {
             ed.spec_mut().connect_events(
-                EventInputPort {
-                    node: NodeKey(100),
-                    port: next,
-                },
-                EventEdge::Direct(EventOutputPort {
-                    node: key,
-                    port: p as u16,
-                }),
+                EventInputPort::new(NodeKey(100), next),
+                EventEdge::Direct(EventOutputPort::new(key, p as u16)),
             );
             next += 1;
         }
@@ -258,7 +252,7 @@ struct Recorder {
 }
 
 impl Recorder {
-    const BASE: Shape = Shape::EMPTY.with_events(1, 0);
+    const BASE: Shape = Shape::EMPTY.events(1, 0);
     const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
 }
 
@@ -266,7 +260,7 @@ impl Node for Recorder {
     fn shape(&self) -> Shape {
         let shape = Self::BASE;
         match self.bound {
-            Some(n) => shape.with_event_input_capacity(tutti_graph::testing::cap_of(n)),
+            Some(n) => shape.event_input_capacity(tutti_graph::testing::cap_of(n)),
             None => shape,
         }
     }
@@ -331,17 +325,13 @@ impl Bounded {
             }),
         );
         let input = self.input();
-        self.ed.spec_mut().connect_events(
-            input,
-            EventEdge::Direct(EventOutputPort { node: key, port: 0 }),
-        );
+        self.ed
+            .spec_mut()
+            .connect_events(input, EventEdge::Direct(EventOutputPort::new(key, 0)));
     }
 
     fn input(&self) -> EventInputPort {
-        EventInputPort {
-            node: NodeKey(100),
-            port: 0,
-        }
+        EventInputPort::new(NodeKey(100), 0)
     }
 
     fn commit(&mut self) {
@@ -482,7 +472,7 @@ impl Node for Latent {
     fn shape(&self) -> Shape {
         self.inner
             .shape()
-            .with_latency(tutti_units::Latency::new(Samples::new(self.latency)))
+            .latency(tutti_units::Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
@@ -497,7 +487,7 @@ struct Once {
 }
 
 impl Once {
-    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -534,10 +524,7 @@ fn a_declared_input_bound_covers_flushed_events_and_scheduled_commands() {
             exec.set_pool(Some(test_pool(workers)));
         }
         let blocks = tutti_fixtures::BlockLog::shared();
-        let input = EventInputPort {
-            node: NodeKey(100),
-            port: 0,
-        };
+        let input = EventInputPort::new(NodeKey(100), 0);
         ed.insert(
             NodeKey(100),
             "recorder",
@@ -566,10 +553,7 @@ fn a_declared_input_bound_covers_flushed_events_and_scheduled_commands() {
         for node in [1, 2] {
             ed.spec_mut().connect_events(
                 input,
-                EventEdge::Direct(EventOutputPort {
-                    node: NodeKey(node),
-                    port: 0,
-                }),
+                EventEdge::Direct(EventOutputPort::new(NodeKey(node), 0)),
             );
         }
         ed.commit().expect("commits");
@@ -637,14 +621,8 @@ fn a_lone_writer_within_the_bound_gets_no_merge() {
             }),
         );
         ed.spec_mut().connect_events(
-            EventInputPort {
-                node: NodeKey(100),
-                port: 0,
-            },
-            EventEdge::Direct(EventOutputPort {
-                node: NodeKey(1),
-                port: 0,
-            }),
+            EventInputPort::new(NodeKey(100), 0),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
         );
         ed.commit().expect("commits");
         exec.apply_pending();
@@ -693,13 +671,13 @@ struct Holder {
 }
 
 impl Holder {
-    const BASE: Shape = Shape::EMPTY.with_events(1, 1);
+    const BASE: Shape = Shape::EMPTY.events(1, 1);
     const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
 }
 
 impl Node for Holder {
     fn shape(&self) -> Shape {
-        Self::BASE.with_event_input_capacity(tutti_graph::testing::cap_of(self.bound))
+        Self::BASE.event_input_capacity(tutti_graph::testing::cap_of(self.bound))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
@@ -720,8 +698,8 @@ struct Keys {
 
 impl Keys {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_event_capacity(tutti_graph::testing::cap_of(16));
+        .events(0, 1)
+        .event_capacity(tutti_graph::testing::cap_of(16));
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -775,14 +753,8 @@ fn a_bypassed_node_is_sent_at_most_its_bound_of_closes_a_block() {
             }),
         );
         ed.spec_mut().connect_events(
-            EventInputPort {
-                node: NodeKey(100),
-                port: 0,
-            },
-            EventEdge::Direct(EventOutputPort {
-                node: NodeKey(1),
-                port: 0,
-            }),
+            EventInputPort::new(NodeKey(100), 0),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
         );
         ed.commit().expect("commits");
         exec.apply_pending();
@@ -822,8 +794,8 @@ struct EarlyOnsLateOffs;
 
 impl EarlyOnsLateOffs {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_event_capacity(tutti_graph::testing::cap_of(16));
+        .events(0, 1)
+        .event_capacity(tutti_graph::testing::cap_of(16));
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -862,8 +834,8 @@ struct Trace {
 
 impl Trace {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(1, 0)
-        .with_event_input_capacity(tutti_graph::testing::cap_of(4));
+        .events(1, 0)
+        .event_input_capacity(tutti_graph::testing::cap_of(4));
     const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
@@ -900,10 +872,7 @@ fn a_cut_keeps_late_note_offs_and_delivers_in_frame_order() {
             exec.set_pool(Some(test_pool(workers)));
         }
         let blocks = tutti_fixtures::BlockLog::shared();
-        let input = EventInputPort {
-            node: NodeKey(100),
-            port: 0,
-        };
+        let input = EventInputPort::new(NodeKey(100), 0);
         ed.insert(
             NodeKey(100),
             "trace",
@@ -918,10 +887,7 @@ fn a_cut_keeps_late_note_offs_and_delivers_in_frame_order() {
         );
         ed.spec_mut().connect_events(
             input,
-            EventEdge::Direct(EventOutputPort {
-                node: NodeKey(1),
-                port: 0,
-            }),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
         );
         ed.commit().expect("commits");
         exec.apply_pending();

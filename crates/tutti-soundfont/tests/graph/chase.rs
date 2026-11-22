@@ -18,8 +18,8 @@ use tutti_polysynth::{PolySynth, SynthConfig};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_ump::{
-    Address, Bank, BendValue, CCNumber, Message, MidiChannel, MidiGroup, NoteVelocity, U7, Ump,
-    Voice2,
+    Address, Bank, BendValue, CCNumber, ControlValue, Message, MidiChannel, MidiGroup,
+    NoteVelocity, U7, Ump, Voice2,
 };
 use tutti_units::{SampleRate, Samples};
 
@@ -42,7 +42,7 @@ fn cc(channel: u8, controller: u8, value: u8) -> Ump {
     midi::cc(
         Address::new(G, MidiChannel::of(channel)),
         CCNumber::of(controller),
-        u32::from(value) << 25,
+        ControlValue::from(U7::of(value)).get(),
     )
 }
 
@@ -69,21 +69,12 @@ impl Rig {
         ed.insert(NodeKey(1), "inlet", Unforkable(inlet));
         ed.insert(NodeKey(2), "instrument", instrument);
         ed.spec_mut().connect_events(
-            EventInputPort {
-                node: NodeKey(2),
-                port: 0,
-            },
-            EventEdge::Direct(EventOutputPort {
-                node: NodeKey(1),
-                port: 0,
-            }),
+            EventInputPort::new(NodeKey(2), 0),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
         );
-        ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-            PortSource::Node(OutputPort {
-                node: NodeKey(2),
-                port,
-            })
-        }));
+        ed.spec_mut()
+            .topology
+            .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(2), port))));
         ed.commit().expect("commits");
         Self { ed, exec, tx }
     }
@@ -117,7 +108,7 @@ struct Recorder(Record<Ump>);
 
 impl Recorder {
     const SHAPE: Shape =
-        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::STEREO)).with_events(1, 0);
+        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::STEREO)).events(1, 0);
     const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 

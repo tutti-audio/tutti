@@ -85,15 +85,12 @@ fn automation_reaches_the_plugin_through_its_event_input() {
         ),
     );
     live.spec_mut().connect_events(
-        EventInputPort { node: key, port: 0 },
-        EventEdge::Direct(EventOutputPort {
-            node: auto_key,
-            port: 0,
-        }),
+        EventInputPort::new(key, 0),
+        EventEdge::Direct(EventOutputPort::new(auto_key, 0)),
     );
     live.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
         sample_rate: SampleRate::of(SAMPLE_RATE),
         ..Default::default()
@@ -158,22 +155,13 @@ fn render_gain(
     if let Some(lane) = feeder {
         live.insert(NodeKey(1), "lane", lane);
         live.spec_mut().connect_events(
-            EventInputPort {
-                node: PLUGIN,
-                port: 0,
-            },
-            EventEdge::Direct(EventOutputPort {
-                node: NodeKey(1),
-                port: 0,
-            }),
+            EventInputPort::new(PLUGIN, 0),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
         );
     }
     live.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: PLUGIN,
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(PLUGIN, 0))]);
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
         sample_rate: SampleRate::of(SAMPLE_RATE),
         ..Default::default()
@@ -188,10 +176,7 @@ fn render_gain(
         fork_ed
             .schedule(
                 At::Frame(Frame::new(frame)),
-                EventInputPort {
-                    node: PLUGIN,
-                    port: 0,
-                },
+                EventInputPort::new(PLUGIN, 0),
                 kind,
             )
             .expect("scheduled");

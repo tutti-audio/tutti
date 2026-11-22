@@ -44,17 +44,11 @@ fn key(n: u64) -> NodeKey {
 }
 
 fn at(node: u64, port: u16) -> InputPort {
-    InputPort {
-        node: key(node),
-        port,
-    }
+    InputPort::new(key(node), port)
 }
 
 fn out(node: u64, port: u16) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: key(node),
-        port,
-    })
+    PortSource::Node(OutputPort::new(key(node), port))
 }
 
 /// A signal that is never zero and never repeats within a test.
@@ -815,10 +809,7 @@ fn a_mix_of_a_node_with_no_pass_is_refused() {
         node: key(1),
         param: NodeMix::ADDR,
     };
-    let lane = EventOutputPort {
-        node: key(2),
-        port: 0,
-    };
+    let lane = EventOutputPort::new(key(2), 0);
     ed.spec_mut().connect_param(mix, lane);
     assert_eq!(ed.commit(), refused, "a lane on the mix");
     ed.spec_mut().disconnect_param(mix, lane);

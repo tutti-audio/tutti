@@ -17,13 +17,9 @@ fn block(level: f32) -> OutputBlock<f32> {
     let transport = Transport::new(rate);
     let (mut ed, exec) = Editor::new(Prepare::new(rate, MaxBlock::of(Samples::new(512))));
     ed.insert(NodeKey(1), "dc", Const::mono(level));
-    ed.spec_mut().topology.set_outputs(vec![
-        PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0
-        });
-        2
-    ]);
+    ed.spec_mut()
+        .topology
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0)); 2]);
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     Box::leak(Box::new(ed));

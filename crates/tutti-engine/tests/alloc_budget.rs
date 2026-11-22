@@ -123,20 +123,14 @@ fn graph(nodes: usize) -> (Editor, Executor) {
         // filters are out of reach from here (see `support`).
         ed.insert(NodeKey(i), "gain", ForkByClone(Gain(0.5 + i as f32 * 1e-3)));
         ed.spec_mut().topology.edges.insert(
-            InputPort {
-                node: NodeKey(i),
-                port: 0,
-            },
-            vec![Edge::Direct(PortSource::Node(OutputPort {
-                node: NodeKey(i - 1),
-                port: 0,
-            }))],
+            InputPort::new(NodeKey(i), 0),
+            vec![Edge::Direct(PortSource::Node(OutputPort::new(
+                NodeKey(i - 1),
+                0,
+            )))],
         );
     }
-    let last = PortSource::Node(OutputPort {
-        node: NodeKey(nodes as u64),
-        port: 0,
-    });
+    let last = PortSource::Node(OutputPort::new(NodeKey(nodes as u64), 0));
     ed.spec_mut().topology.set_outputs(vec![last, last]);
     ed.commit().expect("commits");
     (ed, exec)
@@ -241,24 +235,16 @@ fn fan(nodes: usize, pooled: bool) -> (Editor, Executor) {
     for i in 1..=nodes as u64 {
         ed.insert(NodeKey(i), "gain", ForkByClone(Gain(0.5 + i as f32 * 1e-3)));
         ed.spec_mut().topology.edges.insert(
-            InputPort {
-                node: NodeKey(i),
-                port: 0,
-            },
-            vec![Edge::Direct(PortSource::Node(OutputPort {
-                node: NodeKey(0),
-                port: 0,
-            }))],
+            InputPort::new(NodeKey(i), 0),
+            vec![Edge::Direct(PortSource::Node(OutputPort::new(
+                NodeKey(0),
+                0,
+            )))],
         );
     }
     ed.spec_mut().topology.set_outputs(
         [1, 2]
-            .map(|k| {
-                PortSource::Node(OutputPort {
-                    node: NodeKey(k),
-                    port: 0,
-                })
-            })
+            .map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0)))
             .to_vec(),
     );
     ed.commit().expect("commits");

@@ -8,7 +8,7 @@ use crate::support::{note_on, step};
 use tutti_midi_protocol::{Addressee, GeneralMidiMode, Heard, Universal};
 use tutti_ump::{Attribute, CCNumber, MidiChannel, NoteNumber, NoteVelocity, Rpn, U7, U14, Voice2};
 use tutti_ump::{BendValue, ControlValue};
-use tutti_units::Semitones;
+use tutti_units::{Normalized, Semitones};
 use tutti_voicing::{VoiceAllocator, VoiceCommand, VoiceConfig};
 
 fn say(core: &mut VoiceAllocator, to: Addressee, message: Universal) -> Vec<VoiceCommand> {
@@ -207,9 +207,9 @@ fn general_midi_on_mutes_and_returns_every_channel_to_its_defaults() {
     assert_eq!(r.len(), 16);
     assert!(r.iter().all(|&(_, b)| b == 0.0));
     let c = core.channel(MidiChannel::of(0));
-    assert_eq!(c.modulation(), 0.0);
-    assert_eq!(c.volume(), 100.0 * 128.0 / 16383.0);
-    assert_eq!(c.expression(), 127.0 * 128.0 / 16383.0);
+    assert_eq!(c.modulation(), Normalized::of(0.0));
+    assert_eq!(c.volume(), Normalized::clamped(100.0 * 128.0 / 16383.0));
+    assert_eq!(c.expression(), Normalized::clamped(127.0 * 128.0 / 16383.0));
     assert_eq!(c.pan(), core.channel(MidiChannel::of(7)).pan());
     // The range is General MIDI's, not the 12 the instrument was built with
     // nor the 24 a message set: a full wheel is 2 semitones.

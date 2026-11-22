@@ -25,62 +25,37 @@ const MAX_UMPS: u16 = (u16::MAX - UMP_BYTES) / UMP_BYTES;
 /// each Group has one.
 const LANES: usize = 16;
 
-/// The size of a Mixed Data Set chunk in bytes, header included
-/// (section 7.9, "Number of Valid Bytes in this Message Chunk").
-///
-/// A chunk is a header UMP of 16 bytes and then payload UMPs of 16 bytes
-/// each, the last one padded: the size counts the bytes of those UMPs, the
-/// two prefix bytes of every payload UMP among them. This is the reading of
-/// the section's "multiple of 16" and its "16 (header bytes only)". So the
-/// smallest chunk is 16 bytes, a header with no payload, and a size that ends
-/// one byte into a payload UMP's prefix ([`new`](Self::new) refuses
-/// `16 + 16n + 1`) has no data to carry.
-///
-/// ```
-/// use tutti_ump::MdsChunkSize;
-///
-/// let size = MdsChunkSize::from_data_len(30).unwrap();
-/// assert_eq!(size.get(), 16 + 2 * 16 + 4);
-/// assert_eq!((size.payload_umps(), size.data_len()), (3, 30));
-/// assert_eq!(MdsChunkSize::new(15), None);
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "u16", into = "u16"))]
-pub struct MdsChunkSize(u16);
-
-/// A word that is no [`MdsChunkSize`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("{0} is not a Mixed Data Set chunk size: at least 16, and not one byte into a payload UMP")]
-pub struct NotChunkSize(pub u16);
+tutti_units::ranged! {
+    /// The size of a Mixed Data Set chunk in bytes, header included
+    /// (section 7.9, "Number of Valid Bytes in this Message Chunk").
+    ///
+    /// A chunk is a header UMP of 16 bytes and then payload UMPs of 16 bytes
+    /// each, the last one padded: the size counts the bytes of those UMPs, the
+    /// two prefix bytes of every payload UMP among them. This is the reading of
+    /// the section's "multiple of 16" and its "16 (header bytes only)". So the
+    /// smallest chunk is 16 bytes, a header with no payload, and a size that ends
+    /// one byte into a payload UMP's prefix ([`new`](Self::new) refuses
+    /// `16 + 16n + 1`) has no data to carry.
+    ///
+    /// ```
+    /// use tutti_ump::MdsChunkSize;
+    ///
+    /// let size = MdsChunkSize::from_data_len(30).unwrap();
+    /// assert_eq!(size.get(), 16 + 2 * 16 + 4);
+    /// assert_eq!((size.payload_umps(), size.data_len()), (3, 30));
+    /// assert_eq!(MdsChunkSize::new(15), None);
+    /// ```
+    #[derive(Eq, PartialOrd, Ord, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u16", into = "u16"))]
+    MdsChunkSize(u16), NotChunkSize,
+    "a Mixed Data Set chunk size: at least 16, and not one byte into a payload UMP",
+    |raw| raw >= UMP_BYTES && (raw - UMP_BYTES) % UMP_BYTES != 1
+}
 
 impl MdsChunkSize {
     /// A chunk of a header and no payload: 16 bytes.
     pub const HEADER_ONLY: Self = Self(UMP_BYTES);
-
-    /// The size `raw`, or `None` below 16 (a chunk has its header) or when it
-    /// ends one byte into a payload UMP's two prefix bytes. Never clamps.
-    #[must_use]
-    pub const fn new(raw: u16) -> Option<Self> {
-        if raw < UMP_BYTES || (raw - UMP_BYTES) % UMP_BYTES == 1 {
-            None
-        } else {
-            Some(Self(raw))
-        }
-    }
-
-    /// The size of a literal or constant.
-    ///
-    /// # Panics
-    ///
-    /// If `raw` is not a chunk size.
-    #[must_use]
-    pub const fn of(raw: u16) -> Self {
-        match Self::new(raw) {
-            Some(size) => size,
-            None => panic!("not a Mixed Data Set chunk size"),
-        }
-    }
 
     /// The size of a chunk that carries `len` data bytes, or `None` when it
     /// does not fit 16 bits.
@@ -92,12 +67,6 @@ impl MdsChunkSize {
         } else {
             Some(Self(bytes as u16))
         }
-    }
-
-    /// The size in bytes.
-    #[must_use]
-    pub const fn get(self) -> u16 {
-        self.0
     }
 
     /// The payload UMPs that follow the header: as many as it takes to deliver
@@ -112,20 +81,6 @@ impl MdsChunkSize {
     #[must_use]
     pub const fn data_len(self) -> u16 {
         self.0 - UMP_BYTES - 2 * self.payload_umps()
-    }
-}
-
-impl TryFrom<u16> for MdsChunkSize {
-    type Error = NotChunkSize;
-
-    fn try_from(raw: u16) -> Result<Self, NotChunkSize> {
-        Self::new(raw).ok_or(NotChunkSize(raw))
-    }
-}
-
-impl From<MdsChunkSize> for u16 {
-    fn from(size: MdsChunkSize) -> u16 {
-        size.0
     }
 }
 
@@ -210,42 +165,14 @@ pub struct MdsIdentity {
     pub sub_id_2: u16,
 }
 
-/// How many payload UMPs a chunk of [`MixedDataPackets`] holds (`1..=4094`):
-/// the most a 16-bit chunk size reaches.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MdsChunkUmps(u16);
+tutti_units::ranged! {
+    /// How many payload UMPs a chunk of [`MixedDataPackets`] holds (`1..=4094`):
+    /// the most a 16-bit chunk size reaches.
+    #[derive(Eq, PartialOrd, Ord, Hash)]
+    MdsChunkUmps(u16), MdsChunkUmpsOutOfRange, "within 1..=4094", |raw| raw >= 1 && raw <= MAX_UMPS
+}
 
 impl MdsChunkUmps {
-    /// The count, or `None` for zero (a chunk would carry no data) or more
-    /// than 4094 (its size would not fit 16 bits).
-    #[must_use]
-    pub const fn new(raw: u16) -> Option<Self> {
-        if raw >= 1 && raw <= MAX_UMPS {
-            Some(Self(raw))
-        } else {
-            None
-        }
-    }
-
-    /// The count of a literal or constant.
-    ///
-    /// # Panics
-    ///
-    /// If `raw` is zero or above 4094.
-    #[must_use]
-    pub const fn of(raw: u16) -> Self {
-        match Self::new(raw) {
-            Some(n) => n,
-            None => panic!("a chunk holds 1 to 4094 payload UMPs"),
-        }
-    }
-
-    /// The count.
-    #[must_use]
-    pub const fn get(self) -> u16 {
-        self.0
-    }
-
     /// The most data bytes such a chunk carries.
     const fn data_len(self) -> usize {
         self.0 as usize * PAYLOAD_BYTES
@@ -258,12 +185,6 @@ impl MdsChunkUmps {
         let (chunk, rest) = data.split_at(data.len().min(self.data_len()));
         let size = MdsChunkSize(chunk_bytes(chunk.len()) as u16);
         (chunk, size, rest)
-    }
-}
-
-impl From<MdsChunkUmps> for u16 {
-    fn from(n: MdsChunkUmps) -> u16 {
-        n.0
     }
 }
 

@@ -43,9 +43,9 @@ struct Probe {
 
 impl Probe {
     const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO)
-        .with_events(1, 0)
-        .with_param_events()
-        .with_tail(Tail::Unknown);
+        .events(1, 0)
+        .param_events()
+        .tail(Tail::Unknown);
     const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
@@ -106,10 +106,7 @@ fn segment(target: f64) -> ParamKind {
 }
 
 fn to() -> EventInputPort {
-    EventInputPort {
-        node: PROBE,
-        port: 0,
-    }
+    EventInputPort::new(PROBE, 0)
 }
 
 /// An editor and executor running one `Probe`, plus a reference running
@@ -135,10 +132,7 @@ fn rig() -> Rig {
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: PROBE,
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(PROBE, 0))]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -349,19 +343,10 @@ fn scheduling_back_pressures_at_capacity() {
 fn a_command_needs_a_port_and_an_orphan_is_counted() {
     let mut rig = rig();
     assert_eq!(
-        rig.ed.schedule(
-            At::NextBlock,
-            EventInputPort {
-                node: PROBE,
-                port: 1
-            },
-            tag(0)
-        ),
+        rig.ed
+            .schedule(At::NextBlock, EventInputPort::new(PROBE, 1), tag(0)),
         Err(ScheduleError::NoSuchPort {
-            to: EventInputPort {
-                node: PROBE,
-                port: 1
-            }
+            to: EventInputPort::new(PROBE, 1)
         })
     );
     rig.ed
@@ -423,8 +408,8 @@ struct Impulse(tutti_fixtures::Record<(u64, u32)>);
 
 impl Impulse {
     const SHAPE: Shape = Shape::through_unassigned(ChannelLayout::MONO)
-        .with_events(1, 0)
-        .with_tail(Tail::Unknown);
+        .events(1, 0)
+        .tail(Tail::Unknown);
     const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
@@ -477,23 +462,22 @@ fn a_scheduled_command_is_compensated_like_an_upstream_event() {
     let t = &mut ed.spec_mut().topology;
     t.inputs = ChannelLayout::MONO;
     t.edges.insert(
-        tutti_graph::InputPort { node: LAT, port: 0 },
+        tutti_graph::InputPort::new(LAT, 0),
         vec![tutti_graph::Edge::Direct(PortSource::MainInput(0))],
     );
     t.edges.insert(
-        tutti_graph::InputPort { node: A, port: 0 },
-        vec![tutti_graph::Edge::Direct(PortSource::Node(OutputPort {
-            node: LAT,
-            port: 0,
-        }))],
+        tutti_graph::InputPort::new(A, 0),
+        vec![tutti_graph::Edge::Direct(PortSource::Node(
+            OutputPort::new(LAT, 0),
+        ))],
     );
     t.edges.insert(
-        tutti_graph::InputPort { node: B, port: 0 },
+        tutti_graph::InputPort::new(B, 0),
         vec![tutti_graph::Edge::Direct(PortSource::MainInput(0))],
     );
     t.set_outputs(vec![
-        PortSource::Node(OutputPort { node: A, port: 0 }),
-        PortSource::Node(OutputPort { node: B, port: 0 }),
+        PortSource::Node(OutputPort::new(A, 0)),
+        PortSource::Node(OutputPort::new(B, 0)),
     ]);
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -508,7 +492,7 @@ fn a_scheduled_command_is_compensated_like_an_upstream_event() {
         units(&ref_log).into_iter().collect(),
     );
     for (k, t) in [(A, 1), (B, 2)] {
-        let to = EventInputPort { node: k, port: 0 };
+        let to = EventInputPort::new(k, 0);
         ed.schedule(At::Frame(Frame::new(100)), to, tag(t))
             .expect("room");
         reference.schedule(At::Frame(Frame::new(100)), to, tag(t));
@@ -613,12 +597,8 @@ fn a_command_waits_for_the_commit_it_was_checked_against() {
                 Err(e) => panic!("{e}"),
             }
         }
-        ed.schedule(
-            At::NextBlock,
-            EventInputPort { node: key, port: 0 },
-            tag(round),
-        )
-        .expect("one outstanding at a time");
+        ed.schedule(At::NextBlock, EventInputPort::new(key, 0), tag(round))
+            .expect("one outstanding at a time");
         // Wait for it to land before the next round removes its node.
         let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(10);
         while ed.commands_outstanding() > 0 {
@@ -974,18 +954,14 @@ fn beat_resolution_matches_a_hand_computed_table() {
         let t = &mut ed.spec_mut().topology;
         t.inputs = ChannelLayout::MONO;
         t.edges.insert(
-            tutti_graph::InputPort { node: lat, port: 0 },
+            tutti_graph::InputPort::new(lat, 0),
             vec![tutti_graph::Edge::Direct(PortSource::MainInput(0))],
         );
         t.edges.insert(
-            tutti_graph::InputPort {
-                node: sink,
-                port: 0,
-            },
-            vec![tutti_graph::Edge::Direct(PortSource::Node(OutputPort {
-                node: lat,
-                port: 0,
-            }))],
+            tutti_graph::InputPort::new(sink, 0),
+            vec![tutti_graph::Edge::Direct(PortSource::Node(
+                OutputPort::new(lat, 0),
+            ))],
         );
         ed.commit().expect("commits");
         exec.apply_pending();
@@ -999,10 +975,7 @@ fn beat_resolution_matches_a_hand_computed_table() {
         );
         units.insert(sink, Box::new(Impulse(ref_log.clone())));
         reference.set_graph(&ed.spec().validate().unwrap(), units);
-        let to = EventInputPort {
-            node: sink,
-            port: 0,
-        };
+        let to = EventInputPort::new(sink, 0);
         let silence = [0.0f32; 500];
         for (i, tr) in case.transports.iter().enumerate() {
             if i == case.sched_at {
@@ -1050,18 +1023,14 @@ fn an_unroutable_command_is_timed_by_its_nodes_arrival() {
     let t = &mut ed.spec_mut().topology;
     t.inputs = ChannelLayout::MONO;
     t.edges.insert(
-        tutti_graph::InputPort { node: lat, port: 0 },
+        tutti_graph::InputPort::new(lat, 0),
         vec![tutti_graph::Edge::Direct(PortSource::MainInput(0))],
     );
     t.edges.insert(
-        tutti_graph::InputPort {
-            node: sink,
-            port: 0,
-        },
-        vec![tutti_graph::Edge::Direct(PortSource::Node(OutputPort {
-            node: lat,
-            port: 0,
-        }))],
+        tutti_graph::InputPort::new(sink, 0),
+        vec![tutti_graph::Edge::Direct(PortSource::Node(
+            OutputPort::new(lat, 0),
+        ))],
     );
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -1075,10 +1044,7 @@ fn an_unroutable_command_is_timed_by_its_nodes_arrival() {
     units.insert(sink, Box::new(Impulse(tutti_fixtures::Record::new())));
     reference.set_graph(&ed.spec().validate().unwrap(), units);
 
-    let to = EventInputPort {
-        node: sink,
-        port: 0,
-    };
+    let to = EventInputPort::new(sink, 0);
     ed.schedule(At::Frame(Frame::new(100)), to, tag(1))
         .expect("room");
     reference.schedule(At::Frame(Frame::new(100)), to, tag(1));
@@ -1272,7 +1238,7 @@ struct Plain;
 
 impl Node for Plain {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0)
+        Shape::EMPTY.events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
@@ -1470,10 +1436,7 @@ fn a_param_command_to_a_node_without_param_events_is_refused() {
     }
     assert!(!ScheduleError::NoParamEvents { to: to() }.is_transient());
     // A missing port is still a missing port, whatever the payload.
-    let port = EventInputPort {
-        node: PROBE,
-        port: 1,
-    };
+    let port = EventInputPort::new(PROBE, 1);
     assert_eq!(
         ed.schedule(At::NextBlock, port, ramp(1.0)),
         Err(ScheduleError::NoSuchPort { to: port })

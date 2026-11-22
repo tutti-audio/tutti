@@ -48,7 +48,7 @@ struct Logger {
 
 impl Node for Logger {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_tail(Tail::Unbounded)
+        Shape::source_unassigned(ChannelLayout::MONO).tail(Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -108,7 +108,7 @@ fn build(
                 acts,
             }),
         );
-        outputs.push(PortSource::Node(OutputPort { node: key, port: 0 }));
+        outputs.push(PortSource::Node(OutputPort::new(key, 0)));
     }
     ed.spec_mut().topology.set_outputs(outputs);
     ed.commit().expect("commits");

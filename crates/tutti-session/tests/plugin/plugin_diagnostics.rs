@@ -189,8 +189,8 @@ mod vst2 {
 
     use tutti_fixtures::midi;
     use tutti_graph::EventCapacity;
-    use tutti_session::Losses;
     use tutti_ump::MidiChannel;
+    use tutti_units::Losses;
 
     /// **MIDI past the plugin node's declared input bound is the graph's dropped
     /// events, not the plugin's loss.** A block with 300 notes is cut by the

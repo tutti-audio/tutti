@@ -64,8 +64,8 @@ impl Sink {
 
     fn declared(ports: u16, output: Output) -> Shape {
         match output {
-            Output::Mono => Shape::source_unassigned(ChannelLayout::MONO).with_events(ports, 0),
-            Output::None => Shape::EMPTY.with_events(ports, 0),
+            Output::Mono => Shape::source_unassigned(ChannelLayout::MONO).events(ports, 0),
+            Output::None => Shape::EMPTY.events(ports, 0),
         }
     }
 }
@@ -149,10 +149,7 @@ impl EventRig {
             editor
                 .spec_mut()
                 .topology
-                .set_outputs(vec![PortSource::Node(OutputPort {
-                    node: Self::SINK,
-                    port: 0,
-                })]);
+                .set_outputs(vec![PortSource::Node(OutputPort::new(Self::SINK, 0))]);
         }
         Self {
             editor,
@@ -165,14 +162,8 @@ impl EventRig {
     /// Feeds event input `to` of the sink from event output `from_port` of `from`.
     pub fn feed(&mut self, from: NodeKey, from_port: u16, to: u16) {
         self.editor.spec_mut().connect_events(
-            EventInputPort {
-                node: Self::SINK,
-                port: to,
-            },
-            EventEdge::Direct(EventOutputPort {
-                node: from,
-                port: from_port,
-            }),
+            EventInputPort::new(Self::SINK, to),
+            EventEdge::Direct(EventOutputPort::new(from, from_port)),
         );
     }
 

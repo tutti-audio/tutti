@@ -92,11 +92,8 @@ fn input(
         let key = NodeKey(3);
         ed.insert(key, "inlet", inlet);
         ed.spec_mut().connect_events(
-            EventInputPort {
-                node: NodeKey(1),
-                port: 0,
-            },
-            EventEdge::Direct(EventOutputPort { node: key, port: 0 }),
+            EventInputPort::new(NodeKey(1), 0),
+            EventEdge::Direct(EventOutputPort::new(key, 0)),
         );
     })
 }
@@ -385,11 +382,8 @@ fn the_midi_out_node_counts_the_events_it_cannot_pass() {
                 let key = NodeKey(3 + source);
                 ed.insert(key, "source", inlet);
                 ed.spec_mut().connect_events(
-                    EventInputPort {
-                        node: NodeKey(1),
-                        port: 0,
-                    },
-                    EventEdge::Direct(EventOutputPort { node: key, port: 0 }),
+                    EventInputPort::new(NodeKey(1), 0),
+                    EventEdge::Direct(EventOutputPort::new(key, 0)),
                 );
             }
         });
@@ -442,7 +436,7 @@ struct Heavy<N>(N);
 
 impl<N: tutti_graph::Node> tutti_graph::Node for Heavy<N> {
     fn shape(&self) -> tutti_graph::Shape {
-        self.0.shape().with_cost(tutti_graph::Cost::Heavy)
+        self.0.shape().cost(tutti_graph::Cost::Heavy)
     }
     fn prepare(&mut self, prepare: &tutti_graph::Prepare) {
         self.0.prepare(prepare);
@@ -496,14 +490,8 @@ fn retiring_lanes(
             tutti_graph::Unforkable(Heavy(MidiOutNode::new().following(&generation))),
         );
         rig.editor.spec_mut().connect_events(
-            EventInputPort {
-                node: NodeKey(100 + u64::from(lane)),
-                port: 0,
-            },
-            EventEdge::Direct(EventOutputPort {
-                node: NodeKey(10 + u64::from(lane)),
-                port: 0,
-            }),
+            EventInputPort::new(NodeKey(100 + u64::from(lane)), 0),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(10 + u64::from(lane)), 0)),
         );
         rig.feed(NodeKey(100 + u64::from(lane)), 0, lane);
         writers.push((writer, generation_writer));
@@ -1718,14 +1706,8 @@ fn transform_over<N: tutti_graph::IntoNode>(
     rig_with(node, 1, 512, |ed| {
         ed.insert(NodeKey(3), "inlet", inlet);
         ed.spec_mut().connect_events(
-            EventInputPort {
-                node: NodeKey(1),
-                port: 0,
-            },
-            EventEdge::Direct(EventOutputPort {
-                node: NodeKey(3),
-                port: 0,
-            }),
+            EventInputPort::new(NodeKey(1), 0),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(3), 0)),
         );
     })
 }

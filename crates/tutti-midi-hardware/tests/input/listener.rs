@@ -75,11 +75,8 @@ impl Listener {
         let key = NodeKey(100);
         self.rig.editor.insert(key, "inlet", inlet);
         self.rig.editor.spec_mut().connect_events(
-            EventInputPort {
-                node: self.entry,
-                port: 0,
-            },
-            EventEdge::Direct(EventOutputPort { node: key, port: 0 }),
+            EventInputPort::new(self.entry, 0),
+            EventEdge::Direct(EventOutputPort::new(key, 0)),
         );
         self.rig.commit();
     }

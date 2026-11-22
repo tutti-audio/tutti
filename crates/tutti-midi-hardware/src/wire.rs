@@ -33,7 +33,8 @@
 
 use tutti_midi_protocol::Midi1Translator;
 use tutti_midi_runtime::{Outgoing, Taken};
-use tutti_ump::{Join, Message, Protocol, StreamConfig, Ump, Utility, parse_exact};
+use tutti_ump::{Join, Message, MessageType, Protocol, StreamConfig, Ump, Utility, parse_exact};
+use tutti_units::Losses;
 
 /// One device output's wire form: its configuration, the [`Midi1Translator`] that
 /// serves it for as long as it is in MIDI 1.0, and the buffers one batch is
@@ -103,12 +104,12 @@ impl Wire {
                 }
             };
             match ump.message_type() {
-                0 => {
+                MessageType::Utility => {
                     if let Some(kept) = utility(ump, jr) {
                         self.out.push(packet(kept, first));
                     }
                 }
-                4 if speaks_midi1 => {
+                MessageType::Midi2ChannelVoice if speaks_midi1 => {
                     if let Ok(message) = ump.decode() {
                         let out = &mut self.out;
                         let mut next = first;
@@ -147,14 +148,14 @@ impl Wire {
     /// How many of the first `taken` events of the batch became no packet at
     /// all: they have no form on the wire this device is in. Counted once, at
     /// the offer that takes them.
-    pub(crate) fn unrepresentable_in(&self, taken: usize) -> u64 {
+    pub(crate) fn unrepresentable_in(&self, taken: usize) -> Losses {
         let mut before = 0;
         let mut none = 0;
         for &end in &self.ends[..taken] {
             none += u64::from(end == before);
             before = end;
         }
-        none
+        Losses::refused(none)
     }
 }
 

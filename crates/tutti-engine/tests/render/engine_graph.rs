@@ -59,7 +59,7 @@ fn prepare(max_block: usize) -> Prepare {
 fn outputs(ed: &mut Editor, node: NodeKey, width: u16) {
     ed.spec_mut()
         .topology
-        .set_outputs((0..width).map(|port| PortSource::Node(OutputPort { node, port })));
+        .set_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(node, port))));
 }
 
 /// Render `blocks` (frame counts) through `engine` into one interleaved
@@ -83,7 +83,7 @@ struct Clocked;
 
 impl Node for Clocked {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::from_count(3)).with_tail(Tail::Unbounded)
+        Shape::source_unassigned(ChannelLayout::from_count(3)).tail(Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -109,7 +109,7 @@ struct Gate {
 
 impl Node for Gate {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_tail(Tail::Unbounded)
+        Shape::source_unassigned(ChannelLayout::MONO).tail(Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -132,8 +132,8 @@ struct NoteLog(Record<u64>);
 
 impl NoteLog {
     const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO)
-        .with_events(1, 0)
-        .with_tail(Tail::Unbounded);
+        .events(1, 0)
+        .tail(Tail::Unbounded);
     const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
@@ -167,7 +167,7 @@ impl Node for Surround {
         Shape::source_unassigned(
             ChannelLayout::try_from(self.channels).expect("a test width is small"),
         )
-        .with_tail(Tail::Unbounded)
+        .tail(Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -399,7 +399,7 @@ struct DcLog(Record<(u64, f64, bool)>);
 
 impl Node for DcLog {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_tail(Tail::Unbounded)
+        Shape::source_unassigned(ChannelLayout::MONO).tail(Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -421,7 +421,7 @@ struct RecLog(Record<(bool, bool)>);
 
 impl Node for RecLog {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_tail(Tail::Unbounded)
+        Shape::source_unassigned(ChannelLayout::MONO).tail(Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, _: Io<'_>) -> Status {
@@ -757,10 +757,7 @@ fn a_graph_beat_note_after_a_timed_start_lands_on_its_frame() {
     // Install the plan so the editor can schedule against it.
     render(&engine, ChannelLayout::MONO, &[256]);
     ed.collect();
-    let to = EventInputPort {
-        node: NodeKey(1),
-        port: 0,
-    };
+    let to = EventInputPort::new(NodeKey(1), 0);
     let note = EventKind::Midi(midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100)));
     ed.schedule(At::Beat(Beat::new(0.0)), to, note)
         .expect("room");
@@ -986,10 +983,7 @@ fn a_declick_stop_stops_the_transport_on_its_frame() {
     ed2.collect();
     ed2.schedule(
         At::Beat(Beat::new(400.0 / FPB as f64)),
-        EventInputPort {
-            node: NodeKey(1),
-            port: 0,
-        },
+        EventInputPort::new(NodeKey(1), 0),
         EventKind::Midi(midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100))),
     )
     .expect("room");
@@ -1021,14 +1015,9 @@ fn a_graph_engine_refuses_more_outputs_than_it_folds() {
     // One past the cap, off a three-channel node's ports, repeated: a legal
     // graph, wider than the scratch.
     let wide = MAX_CHANNELS + 1;
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..wide as u16).map(|c| {
-            PortSource::Node(OutputPort {
-                node: NodeKey(1),
-                port: c % 3,
-            })
-        }));
+    ed.spec_mut().topology.set_outputs(
+        (0..wide as u16).map(|c| PortSource::Node(OutputPort::new(NodeKey(1), c % 3))),
+    );
     ed.commit().expect("no limits yet");
     assert!(matches!(
         Engine::new(&transport, &mut ed, exec),
@@ -1038,14 +1027,9 @@ fn a_graph_engine_refuses_more_outputs_than_it_folds() {
 
     let (engine, mut ed) = graph_engine(&transport, 256, Unforkable(Clocked), 3);
     render(&engine, ChannelLayout::STEREO, &[256]);
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..MAX_CHANNELS as u16 + 1).map(|c| {
-            PortSource::Node(OutputPort {
-                node: NodeKey(1),
-                port: c % 3,
-            })
-        }));
+    ed.spec_mut().topology.set_outputs(
+        (0..MAX_CHANNELS as u16 + 1).map(|c| PortSource::Node(OutputPort::new(NodeKey(1), c % 3))),
+    );
     assert!(matches!(
         ed.commit(),
         Err(CommitError::TooManyOutputs { outputs, limit })
@@ -1176,7 +1160,7 @@ fn the_published_playhead_is_the_closed_form_over_ten_minutes() {
     struct FirstBeat(Shared<f64>);
     impl Node for FirstBeat {
         fn shape(&self) -> Shape {
-            Shape::source_unassigned(ChannelLayout::MONO).with_tail(Tail::Unbounded)
+            Shape::source_unassigned(ChannelLayout::MONO).tail(Tail::Unbounded)
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {

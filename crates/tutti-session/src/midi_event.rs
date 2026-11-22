@@ -1,6 +1,8 @@
 //! What the session's MIDI reports from [`Session::update`](crate::Session::update):
 //! [`MidiEvent`], nested under [`SessionEvent::Midi`](crate::SessionEvent::Midi).
 
+use tutti_units::Losses;
+
 /// One thing that happened in the session's MIDI, reported once.
 ///
 /// A variant about one device carries its `MidiDeviceId`
@@ -129,11 +131,12 @@ pub enum MidiEvent {
     /// keeps the motion it had, and the project's tempo and meter are published
     /// again if the follower had changed them.
     ClockUnfollowed,
-    /// The transport refused commands a followed MIDI clock or Machine Control asked of it, this
-    /// many in one update: its list of timed commands was full. Nothing was
+    /// The transport [refused](Losses::refused) commands a
+    /// followed MIDI clock or Machine Control asked of it, this many in one
+    /// update: its list of timed commands was full. Nothing was
     /// applied for them (the source says its position again with its next
     /// message), and each is logged.
-    ClockCommandsRefused(u64),
+    ClockCommandsRefused(Losses),
     /// A Machine Control command addressed to the session that it does not act
     /// on ([`Midi::follow_machine_control`](crate::Midi::follow_machine_control)):
     /// record, shuttle, eject, a READ, a speed other than play speed and the

@@ -29,8 +29,7 @@ use tutti_plugin::PluginClient;
 use tutti_plugin_db::Loadable;
 use tutti_plugin_types::PluginRef;
 use tutti_session::{
-    DetachedSession, EventInputPort, EventOutputPort, PHASES, ParamRef, PhaseCx, RouteSpec,
-    Session, SessionEvent,
+    DetachedSession, EventOutputPort, PHASES, ParamRef, PhaseCx, RouteSpec, Session, SessionEvent,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -242,7 +241,7 @@ fn a_modulation_lane_on_the_plugin_survives_its_replacement() {
     let rebuilt = lane_of(&mut drive, &mut s, gain);
     assert!(s.graph_ref().contains(rebuilt), "the lane is in the graph");
     assert_eq!(
-        s.graph_ref().sources(EventInputPort::new(node, 0)).unwrap(),
+        s.graph_ref().sources(node.event_input(0)).unwrap(),
         vec![EventOutputPort::new(rebuilt, 0)],
         "and feeds the replacement's event input"
     );
@@ -282,7 +281,7 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
     }
     let outgoing_lane = lane_of(&mut drive, &mut s, gain);
     assert_eq!(
-        s.graph_ref().sources(EventInputPort::new(node, 0)).unwrap(),
+        s.graph_ref().sources(node.event_input(0)).unwrap(),
         vec![EventOutputPort::new(outgoing_lane, 0)],
         "precondition: the lane feeds the outgoing plugin"
     );
@@ -315,7 +314,7 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
     let lane = lane_of(&mut drive, &mut s, gain);
     drive.update(&mut s);
     assert_eq!(
-        s.graph_ref().sources(EventInputPort::new(node, 0)).unwrap(),
+        s.graph_ref().sources(node.event_input(0)).unwrap(),
         vec![EventOutputPort::new(lane, 0)],
         "the gain's lane feeds the incoming plugin"
     );
