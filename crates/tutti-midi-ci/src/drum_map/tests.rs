@@ -105,8 +105,11 @@ fn each_instrument_matches_its_row_of_table_5() {
             "{name}"
         );
         assert_eq!(
-            instrument.bitmap_position(),
-            BitmapPosition { byte, bit },
+            (
+                instrument.bitmap_position().byte(),
+                instrument.bitmap_position().bit()
+            ),
+            (byte, bit),
             "{name}"
         );
     }
@@ -142,6 +145,18 @@ fn the_mutually_exclusive_sets_are_the_seven_of_section_4_1() {
         let members: Vec<u8> = set.members().map(|i| i.note().get()).collect();
         assert_eq!(members, notes, "MES {number}");
     }
+}
+
+#[test]
+fn a_bitmap_position_is_a_bit_of_data_bytes_2_to_10() {
+    // Table 11: nine data bytes of seven bits.
+    check_range_contract(&RangeContract {
+        valid: &[0, 61, 62],
+        invalid: &[63, 255],
+        new: BitmapPosition::new,
+        get: BitmapPosition::get,
+        of: Some(BitmapPosition::of),
+    });
 }
 
 #[test]

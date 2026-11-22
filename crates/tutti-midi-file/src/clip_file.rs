@@ -45,6 +45,8 @@
 
 use std::vec::Vec;
 
+use crate::Tick;
+
 use tutti_midi_ci::{NotSetProfileOn, is_property_exchange};
 use tutti_ump::{
     DeltaTicks, Flex, FlexTextKind, Form, Message, Stream, SysexStatus, TicksPerQuarterNote, Ump,
@@ -70,16 +72,16 @@ pub(crate) struct ParsedClip {
     /// leading Set Profile On packets at 0, then each message behind its DCS,
     /// ticks counted from the DCTPQ (the header's own clock, which runs
     /// before the sequence).
-    pub(crate) header: Vec<(u64, Ump)>,
+    pub(crate) header: Vec<(Tick, Ump)>,
     /// Every packet between Start of Clip and End of Clip that is not itself
     /// structure (a DCS, a Null, a JR message, the DCTPQ), at its absolute
     /// tick, in file order.
-    pub(crate) events: Vec<(u64, Ump)>,
+    pub(crate) events: Vec<(Tick, Ump)>,
     /// The tick of End of Clip: the clip's length.
-    pub(crate) end: u64,
+    pub(crate) end: Tick,
     /// The tick, on the header's clock, of Start of Clip: the header's last
     /// message's tick plus the Delta Clockstamp before Start of Clip.
-    pub(crate) header_end: u64,
+    pub(crate) header_end: Tick,
 }
 
 /// Why a byte stream failed to parse as a MIDI Clip File (M2-116). Distinguishes
@@ -220,10 +222,10 @@ pub(crate) fn property_exchange(message: &Message) -> bool {
 /// [`MidiFile`]: crate::MidiFile
 pub(crate) fn write(
     ticks_per_quarter: TicksPerQuarterNote,
-    header: &[(u64, Ump)],
-    header_end: u64,
-    events: &[(u64, Ump)],
-    end: u64,
+    header: &[(Tick, Ump)],
+    header_end: Tick,
+    events: &[(Tick, Ump)],
+    end: Tick,
 ) -> Vec<u8> {
     let mut out = Vec::with_capacity(8 + (header.len() + events.len() + 4) * 8);
     out.extend_from_slice(&CLIP_FILE_MAGIC);
@@ -239,15 +241,15 @@ pub(crate) fn write(
     push_words(&mut out, dctpq(ticks_per_quarter).words());
 
     // The rest of the header, each message behind its DCS.
-    let mut at = 0u64;
+    let mut at = Tick(0);
     for &(tick, ump) in &header[pre..] {
-        push_delta(&mut out, tick.saturating_sub(at));
+        push_delta(&mut out, tick.ticks_since(at).unwrap_or(0));
         push_words(&mut out, ump.words());
         at = tick;
     }
 
     // Start of Clip, behind the DCS that ends the header's allotted time.
-    push_delta(&mut out, header_end.saturating_sub(at));
+    push_delta(&mut out, header_end.ticks_since(at).unwrap_or(0));
     push_words(&mut out, start_of_clip().words());
 
     // The timed event stream: each UMP preceded by its delta clockstamp(s),
@@ -256,14 +258,14 @@ pub(crate) fn write(
     // and 7.1.2).
     // A DCS field is only 20 bits, so a delta beyond `DCS_MAX` is expressed as
     // DCS*NOOP restarts (M2-116 section 3.2.2): see `push_delta`.
-    let mut at = 0u64;
+    let mut at = Tick(0);
     let mut previous: Option<Ump> = None;
     let mut lead = Lead::Tempo;
     for &(tick, ump) in events {
         let rides = lead.rides_start(tick, ump);
         let shares = tick == at && (rides || previous.is_some_and(|p| continues_text(p, ump)));
         if !shares {
-            push_delta(&mut out, tick.saturating_sub(at));
+            push_delta(&mut out, tick.ticks_since(at).unwrap_or(0));
         }
         push_words(&mut out, ump.words());
         at = tick;
@@ -271,7 +273,7 @@ pub(crate) fn write(
     }
 
     // End of Clip, behind the DCS that is the clip's length.
-    push_delta(&mut out, end.saturating_sub(at));
+    push_delta(&mut out, end.ticks_since(at).unwrap_or(0));
     push_words(&mut out, end_of_clip().words());
     out
 }
@@ -290,9 +292,9 @@ enum Lead {
 impl Lead {
     /// Whether `ump` at `tick` is the message looked for, and the look moved on:
     /// a message that is not it ends the look.
-    fn rides_start(&mut self, tick: u64, ump: Ump) -> bool {
+    fn rides_start(&mut self, tick: Tick, ump: Ump) -> bool {
         let flex = match ump.decode() {
-            Ok(Message::Flex(_, flex)) if tick == 0 => Some(flex),
+            Ok(Message::Flex(_, flex)) if tick == Tick(0) => Some(flex),
             _ => None,
         };
         let (rides, next) = match (*self, flex) {
@@ -378,8 +380,8 @@ fn push_delta(out: &mut Vec<u8>, mut ticks: u64) {
 /// The bytes of the Delta Clockstamp and Null pairs that restart the count
 /// over `ticks` of gap (8 bytes a restart): what a gap of that length costs to
 /// write beyond its own Delta Clockstamp.
-pub(crate) fn restart_bytes(ticks: u64) -> u64 {
-    ticks / DCS_MAX * 8
+pub(crate) fn restart_bytes(ticks: Tick) -> u64 {
+    ticks.0 / DCS_MAX * 8
 }
 
 fn dctpq(ticks_per_quarter: TicksPerQuarterNote) -> Ump {

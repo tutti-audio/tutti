@@ -47,7 +47,7 @@ use tutti_coremidi_ffi::{
 };
 use tutti_midi_device::{EndpointId, OsDevice, OsEndpointIdentity};
 use tutti_midi_runtime::{MidiOut, Outgoing, Taken};
-use tutti_ump::{FunctionBlockInfo, Protocol, read_protocol};
+use tutti_ump::{FunctionBlockInfo, Protocol};
 
 mod host_time;
 mod virtual_endpoint;
@@ -116,10 +116,9 @@ fn endpoint_capability(endpoint: &OsObject, ump: Option<&UmpEndpointInfo>) -> De
     if let Some(ump) = ump {
         return ump_capability(ump);
     }
-    match endpoint.protocol_id() {
-        // `kMIDIProtocol_1_0` is 1 and `kMIDIProtocol_2_0` is 2; any other value
-        // is reserved, which reads as MIDI 1.0.
-        Some(id) => from_os(read_protocol(u8::try_from(id).unwrap_or(u8::MAX)), None, []),
+    match endpoint.protocol() {
+        // A reserved protocol reads as MIDI 1.0.
+        Some(protocol) => from_os(protocol, None, []),
         None => Described {
             endpoint: legacy(),
             blocks_left_out: 0,
