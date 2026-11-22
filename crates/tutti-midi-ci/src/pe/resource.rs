@@ -25,16 +25,17 @@ pub use client::{
     ResourceFailure, ResourceInitiator, UpdateKind,
 };
 pub use controllers::{
-    CcIndex, CtrlControl, CtrlRange, ListedTwice, PeAllCtrlEntry, PeAllCtrlList, PeChCtrlEntry,
-    PeChCtrlList, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList,
+    CcIndex, ControllerIndexError, CtrlControl, CtrlRange, ListedTwice, PeAllCtrlEntry,
+    PeAllCtrlList, PeChCtrlEntry, PeChCtrlList, PeController, PeCtrl, PeCtrlMapEntry,
+    PeCtrlMapList,
 };
 pub use data::{OpaqueBody, PeData, PeOpaque};
 pub use entry::{EntryError, PeResourceList, ResourceEntry, ResourceEntryBuilder};
 pub use fields::{
     ClusterKind, CtrlKind, CtrlValueKind, InvalidValue, ModeId, NotAPeChannel, NotAPeMidiMode,
-    NotAPriority, NotAStepCount, NotSignificantBits, NotVendorName, ParamPath, PeBankProgram,
-    PeChannel, PeDataError, PeDataFault, PeExtensions, PeMidiMode, PeText, Place, Priority,
-    RoleName, SignificantBits, StepCount, TypeHint, UnlistedText,
+    NotAPriority, NotAStepCount, NotSignificantBits, NotVendorName, ParamPath, ParamPathError,
+    PeBankProgram, PeChannel, PeDataError, PeDataFault, PeExtensions, PeMidiMode, PeText, Place,
+    Priority, RoleName, SignificantBits, StepCount, TypeHint, UnlistedText,
 };
 pub use info::{PeDeviceInfo, PeJsonSchema};
 pub use kind::{CanSet, CustomResource, PeResource, ResIdUse, ResourceDefaults};

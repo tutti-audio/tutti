@@ -5,11 +5,11 @@
 use std::fmt;
 use std::num::TryFromIntError;
 
-use tutti_ump::{Bank, MidiChannelOutOfRange, U7};
+use tutti_ump::{Bank, ManufacturerBytesError, MidiChannelOutOfRange, U7};
 
 use super::super::limits::{PeTextError, PropertyName, PropertyNameError, text_type};
 use super::super::tree::{PeJson, PeJsonError, PeObject};
-use super::controllers::ListedTwice;
+use super::controllers::{ControllerIndexError, ListedTwice};
 use super::entry::EntryError;
 use super::kind::PeResource;
 use super::state::NotUnixSeconds;
@@ -82,21 +82,41 @@ impl ParamPath {
     /// The most bytes a path takes, 256.
     pub const MAX_LEN: usize = 256;
 
-    /// The path `text` spells, or `None` unless it is a JSON Pointer of at most
-    /// [`MAX_LEN`](Self::MAX_LEN) bytes.
-    #[must_use]
-    pub fn new(text: &str) -> Option<Self> {
-        if text.len() > Self::MAX_LEN {
-            return None;
-        }
-        super::super::partial::JsonPointer::new(text).map(Self)
-    }
-
     /// The text.
     #[must_use]
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
+}
+
+/// The path `text` spells: a JSON Pointer of at most [`MAX_LEN`](ParamPath::MAX_LEN)
+/// bytes; [`ParamPathError::TooLong`] past that, and
+/// [`ParamPathError::NotJsonPointer`] for text that is no JSON Pointer.
+impl TryFrom<&str> for ParamPath {
+    type Error = ParamPathError;
+
+    fn try_from(text: &str) -> Result<Self, ParamPathError> {
+        if text.len() > Self::MAX_LEN {
+            return Err(ParamPathError::TooLong { len: text.len() });
+        }
+        super::super::partial::JsonPointer::new(text)
+            .map(Self)
+            .ok_or(ParamPathError::NotJsonPointer)
+    }
+}
+
+/// Text that is no [`ParamPath`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ParamPathError {
+    /// More than [`ParamPath::MAX_LEN`] bytes (M2-117 Table 5).
+    #[error("the path is {len} bytes, and at most 256 fit")]
+    TooLong {
+        /// Its length in bytes.
+        len: usize,
+    },
+    /// Not a JSON Pointer (RFC 6901).
+    #[error("the path is no JSON Pointer")]
+    NotJsonPointer,
 }
 
 impl fmt::Display for ParamPath {
@@ -312,7 +332,12 @@ where
     T: TryFrom<R>,
     InvalidValue: From<T::Error>,
 {
-    Ok(T::try_from(R::try_from(n)?)?)
+    let raw = R::try_from(n).map_err(|source| InvalidValue::Width {
+        value: n,
+        bits: u32::try_from(8 * std::mem::size_of::<R>()).unwrap_or(u32::MAX),
+        source,
+    })?;
+    Ok(T::try_from(raw)?)
 }
 
 /// An array of `N` 7-bit integers.
@@ -402,9 +427,16 @@ pub enum InvalidValue {
     /// A number that is no time in Unix seconds.
     #[error(transparent)]
     UnixSeconds(#[from] NotUnixSeconds),
-    /// An integer outside the width of the value it is read as.
-    #[error("the integer does not fit the width of the value")]
-    Width(#[from] TryFromIntError),
+    /// An integer outside the unsigned width of the value it is read as.
+    #[error("{value} does not fit an unsigned {bits}-bit value")]
+    Width {
+        /// The integer read.
+        value: i64,
+        /// The bits of the width it was read as.
+        bits: u32,
+        /// Why it does not fit.
+        source: TryFromIntError,
+    },
     /// Text that is not JSON of the Property Exchange form.
     #[error(transparent)]
     Json(#[from] PeJsonError),
@@ -414,17 +446,16 @@ pub enum InvalidValue {
     /// A controller list with a controller listed twice.
     #[error(transparent)]
     ListedTwice(#[from] ListedTwice),
-    /// Three bytes that are no Manufacturer id: a one-byte id followed by a
-    /// non-zero byte, or `00 00 00` (M2-104 §7.1.3).
-    #[error("the bytes are no Manufacturer id")]
-    ManufacturerId,
+    /// Three bytes that are no Manufacturer id (M2-104 §7.1.3).
+    #[error(transparent)]
+    ManufacturerId(#[from] ManufacturerBytesError),
     /// A `ctrlIndex` that does not fit the `ctrlType` (M2-117 Table 5).
-    #[error("the index does not fit the controller type")]
-    ControllerIndex,
+    #[error(transparent)]
+    ControllerIndex(#[from] ControllerIndexError),
     /// A `paramPath` that is no JSON Pointer of at most 256 bytes (M2-117
     /// Table 5).
-    #[error("the path is no JSON Pointer of at most 256 bytes")]
-    ParamPath,
+    #[error(transparent)]
+    ParamPath(#[from] ParamPathError),
     /// A `minMax` whose minimum is above its maximum (M2-117 Table 5).
     #[error("the minimum is above the maximum")]
     MinAboveMax,
