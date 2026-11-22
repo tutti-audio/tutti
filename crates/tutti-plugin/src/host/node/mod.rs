@@ -627,7 +627,10 @@ impl<S> PluginClient<S> {
         .refresh_sink(self.refresh_sink().clone())
         .invalidate_sink(self.invalidate_sink().clone())
         .transport_sink(self.transport_sink().clone());
-        pid.map_or(handle, |pid| handle.with_server_pid(pid))
+        match pid {
+            Some(pid) => handle.with_server_pid(pid),
+            None => handle,
+        }
     }
 
     pub(crate) fn param_sink(&self) -> &ParameterChangeSink {
