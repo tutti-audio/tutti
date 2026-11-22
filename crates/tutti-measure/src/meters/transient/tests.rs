@@ -156,14 +156,15 @@ fn a_meter_fed_in_chunks_equals_the_one_shot() {
 /// An attack that does not stand above the slow envelope is not reported, though the fast
 /// envelope rises.
 ///
-/// A 1 kHz sine at 0.8 for 0.3 s, then 0.1 for 20 ms, then 0.3. The fast envelope (mean
-/// rectified level `2/pi` of the amplitude) falls from 0.51 to 0.064 and then rises to 0.19, a
-/// rise of 0.127 within the 5 ms lookback, over the 0.05 threshold. The slow envelope (30 ms)
-/// has decayed from 0.51 only to `0.064 + 0.45 exp(-20/30) = 0.29` at the step, and stays over
-/// the fast one (under 0.19 plus ripple 0.01) until it falls to 0.19 much later, so
-/// `fast - slow` stays negative and the one start is the only attack. With the same step after
-/// the slow envelope has settled at 0.064 (0.3 s at 0.1) the difference reaches about
-/// `0.84 * 0.127 = 0.11` and the step is found.
+/// A 1 kHz sine at 0.6 for 0.3 s, then 0.075 for 20 ms, then 0.25. The fast envelope (mean
+/// rectified level `2/pi` of the amplitude) falls from 0.382 to 0.048 and then rises to 0.159,
+/// a rise of 0.111 within the 5 ms lookback, over the 0.05 threshold. The slow envelope (30 ms)
+/// has decayed from 0.382 only to `0.048 + 0.334 exp(-20/30) = 0.219` at the step, over the
+/// fast one's 0.159 plus ripple 0.009, so `fast - slow` stays negative and the start is the
+/// only attack. (The 0.6 sine's own ripple, `0.84 * 0.6 / 12.6 = 0.04` peak to peak, is under
+/// the threshold.) With the same step after the slow envelope has settled at 0.048 (0.3 s at
+/// 0.075) the difference reaches about `0.84 * 0.111 = 0.093` and the step is found (the 0.075 start itself reaches 0.048, under the
+/// threshold).
 #[test]
 fn a_rise_under_the_slow_envelope_is_not_an_attack() {
     let tone = |parts: &[(f64, usize)]| -> Vec<f64> {
@@ -179,12 +180,13 @@ fn a_rise_under_the_slow_envelope_is_not_an_attack() {
             .collect()
     };
     let cfg = TransientConfig::new();
-    let under = tone(&[(0.8, 14_400), (0.1, 960), (0.3, 9600)]);
+    let under = tone(&[(0.6, 14_400), (0.075, 960), (0.25, 9600)]);
     let found = detect(&cfg, &under);
     assert!(found.len() == 1 && found[0] < 32, "{found:?}");
 
-    let settled = tone(&[(0.1, 14_400), (0.3, 9600)]);
+    let settled = tone(&[(0.075, 14_400), (0.25, 9600)]);
     let found = detect(&cfg, &settled);
-    assert_eq!(found.len(), 2, "{found:?}");
-    assert!((14_400..14_400 + 240).contains(&found[1]), "{}", found[1]);
+    // The 0.075 start rises the fast envelope by only 0.048, under the threshold.
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!((14_400..14_400 + 240).contains(&found[0]), "{}", found[0]);
 }

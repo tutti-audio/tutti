@@ -297,7 +297,8 @@ pub use dynamics::{
     Lookahead, LookaheadError, MultibandBands, MultibandBandsError, MultibandBank,
     MultibandSettings, MultibandSignals, PeakDetection, TransientBank, TransientControls,
     TransientDetector, TransientThreshold, TransientThresholdError, TransientTime,
-    TransientTimeError, TransientTimes, TransientTimesError, amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
+    TransientTimeError, TransientTimes, TransientTimesError, amplitude_to_db,
+    compute_compressor_gain_reduction, compute_limiter_gain,
 };
 pub use early_reflections::{EarlyReflections, EarlyReflectionsError, MAX_TAP_DELAY};
 pub use envelope::{

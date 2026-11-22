@@ -11,8 +11,8 @@ use tutti_units::{Amplitude, Cents, Confidence, Db, Samples, Seconds};
 use crate::{
     Alternatives, BandCount, BandsPerOctave, FiniteLevel, HarmonicCount, HarmonicDecay, NoteSpan,
     OnsetGap, OnsetSensitivity, OnsetThreshold, PeakDecay, PeakFloor, PitchHop, PitchSplit,
-    PriorSpread, SelfTransition, Sharpness, SpectrumFloor, SpectrumTime, Tightness,
-    TuningOffset, YinThreshold,
+    PriorSpread, SelfTransition, Sharpness, SpectrumFloor, SpectrumTime, Tightness, TuningOffset,
+    YinThreshold,
 };
 
 macro_rules! serde_through_try_from {
