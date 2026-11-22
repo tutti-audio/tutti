@@ -16,9 +16,10 @@ use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, Event, EventEdge, EventInputPort, EventOutputPort, Executor, ForkByClone, ForkMode,
+    Cx, Editor, Event, EventEdge, EventInputPort, EventOutputPort, Executor, ForkByClone,
     ForkTarget, InEvents, Io, Node, Offset, OutEvents, ParamIn, ParamKind, ParamRange,
-    ParamSegment, Prepare, Shape, Status, TransportChanges, TransportPosition, control_in,
+    ParamSegment, Prepare, RenderMode, Shape, Status, TransportChanges, TransportPosition,
+    control_in,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_modulation::{
@@ -964,8 +965,8 @@ fn an_export_is_the_live_render_for_signal_sources() {
     let (mut fed, mut fexec) = ed
         .fork(
             ForkTarget::MainOutput,
-            ForkMode::Offline,
-            Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(1024))),
+            Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(1024)))
+                .with_render_mode(RenderMode::Offline),
         )
         .expect("forks");
     let total = 60_000;

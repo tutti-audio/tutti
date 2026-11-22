@@ -8,9 +8,9 @@ use atomic_float::AtomicF64;
 use tutti_buffers::Float;
 use tutti_curve::Piece;
 use tutti_graph::{
-    Cost, Cx, ForkCause, ForkMode, ForkSource, Forked, InEvents, IntoNode, Io, Law, Node,
-    NodeParts, Offset, OutEvents, ParamEvent, ParamKind, ParamRange, ParamRangeCell,
-    ParamRangeReader, ParamSegment, PlayReading, Prepare, Shape, Status, TransportPosition,
+    Cost, Cx, ForkCause, ForkSource, Forked, InEvents, IntoNode, Io, Law, Node, NodeParts, Offset,
+    OutEvents, ParamEvent, ParamKind, ParamRange, ParamRangeCell, ParamRangeReader, ParamSegment,
+    PlayReading, Prepare, RenderMode, Shape, Status, TransportPosition,
 };
 use tutti_modulation::{
     CONTROL_GRID, ControlProgram, CurveSegment, DepthSnapshot, LayerClock, MAX_LANE_INPUTS,
@@ -1241,7 +1241,7 @@ struct LaneFork {
 }
 
 impl<F: Float> ForkSource<F> for LaneFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked<F>, ForkCause> {
         Ok(Forked::new(Box::new(ControlLaneNode::fresh_over(
             &self.shared,
             &self.make,

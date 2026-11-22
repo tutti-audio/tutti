@@ -767,7 +767,7 @@ mod owed_tests {
             .unwrap_or_else(|e| panic!("in-process load of the probe: {e:?}"));
         let fork = client
             .bind(tutti_fixtures::tempo())
-            .fork_instance(main, tutti_graph::ForkMode::Live)
+            .fork_instance(main, tutti_graph::RenderMode::Realtime)
             .expect("the fork loads on the main thread");
         let (fork, refused) = std::thread::spawn(move || {
             let mut fork = fork;
@@ -799,7 +799,7 @@ mod owed_tests {
             .unwrap_or_else(|e| panic!("in-process load of the probe: {e:?}"));
         let fork = client
             .bind(tutti_fixtures::tempo())
-            .fork_instance(main, tutti_graph::ForkMode::Live)
+            .fork_instance(main, tutti_graph::RenderMode::Realtime)
             .expect("the fork loads on the main thread");
         let prepare = tutti_graph::Prepare::new(
             SampleRate::SR_48K,

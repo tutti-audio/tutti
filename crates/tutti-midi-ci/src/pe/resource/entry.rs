@@ -29,8 +29,11 @@ pub enum EntryError {
     NotAList(String),
     /// A manufacturer-specific JSON Resource gives a schema with at least a
     /// `title` and a `type` (M2-103 §14.4).
-    #[error("the schema of {0} has no title or no type")]
+    #[error("the schema of {0} lacks a title or a type")]
     SchemaIncomplete(String),
+    /// The schema of a Resource that is not JSON has a `type` (M2-103 §14.6).
+    #[error("the schema of {0} has a type, and its data is not JSON")]
+    SchemaTypedNonJson(String),
     /// Flow Control on Get needs `canGet`, and on Set needs `canSet`.
     #[error("{0} sets Flow Control for a transaction it does not take")]
     FlowControlWithoutTransaction(String),
@@ -379,7 +382,10 @@ impl ResourceEntryBuilder {
     /// Resource a specification defines, and for a schema of one;
     /// [`EntryError::SchemaIncomplete`] unless a manufacturer-specific
     /// Resource gives a schema that is an object with a `title` string and a
-    /// `type` (a string or an array);
+    /// `type` (a string or an array), or, when its media types leave out
+    /// `application/json`, a `title` and no `type` (or an empty array);
+    /// [`EntryError::SchemaTypedNonJson`] for a `type` on a schema of a Resource
+    /// that is not JSON;
     /// [`EntryError::NotAList`] for pagination or Columns of a Resource that is
     /// no List Resource; [`EntryError::FlowControlWithoutTransaction`] for Flow
     /// Control on a transaction the Resource does not take;
@@ -429,7 +435,7 @@ impl ResourceEntry {
             EntryError::NotOverridable { property, .. } => property,
             EntryError::NotAList(_) if self.can_paginate => "canPaginate",
             EntryError::NotAList(_) => "columns",
-            EntryError::SchemaIncomplete(_) => "schema",
+            EntryError::SchemaIncomplete(_) | EntryError::SchemaTypedNonJson(_) => "schema",
             EntryError::FlowControlWithoutTransaction(_) if self.fc_on_get && !self.can_get => {
                 "fcOnGet"
             }
@@ -459,14 +465,30 @@ impl ResourceEntry {
             return Err(self.refuse_override("schema"));
         }
         let member = |name| schema.as_object().and_then(|o| o.get(name));
-        let complete = member("title").and_then(PeJson::as_str).is_some()
-            && member("type").is_some_and(|t| t.as_str().is_some() || t.as_array().is_some());
-        if complete {
-            Ok(())
-        } else {
-            Err(EntryError::SchemaIncomplete(
-                self.resource.as_str().to_owned(),
-            ))
+        let titled = member("title").and_then(PeJson::as_str).is_some();
+        // A Resource whose media types leave out JSON is not JSON (§14.6): its schema
+        // has a title and no type, and `type` as an empty array counts as none.
+        let json = self
+            .media_types
+            .as_ref()
+            .is_none_or(|types| types.contains(&MediaType::JSON));
+        let name = || self.resource.as_str().to_owned();
+        let typed = member("type");
+        if !titled {
+            return Err(EntryError::SchemaIncomplete(name()));
+        }
+        if json {
+            let typed = typed.is_some_and(|t| t.as_str().is_some() || t.as_array().is_some());
+            return if typed {
+                Ok(())
+            } else {
+                Err(EntryError::SchemaIncomplete(name()))
+            };
+        }
+        match typed {
+            None => Ok(()),
+            Some(t) if t.as_array().is_some_and(<[PeJson]>::is_empty) => Ok(()),
+            Some(_) => Err(EntryError::SchemaTypedNonJson(name())),
         }
     }
 

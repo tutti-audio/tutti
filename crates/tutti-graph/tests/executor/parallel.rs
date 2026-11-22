@@ -21,8 +21,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor, ForkCause,
-    ForkMode, ForkSource, ForkTarget, Forked, IntoNode, Io, Law, Node, NodeParts, ParamIn,
-    ParamRamp, ParamRange, ParamSegment, Prepare, Schedule, Shape, Status, TransportPosition,
+    ForkSource, ForkTarget, Forked, IntoNode, Io, Law, Node, NodeParts, ParamIn, ParamRamp,
+    ParamRange, ParamSegment, Prepare, RenderMode, Schedule, Shape, Status, TransportPosition,
     Unforkable,
 };
 use tutti_graph::{Edge, FeedbackFrom, InputPort, OutputPort, PortSource};
@@ -37,7 +37,7 @@ struct Forkable(Kind);
 struct KindFork(Kind);
 
 impl ForkSource for KindFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked, ForkCause> {
         Ok(Forked::new(Box::new(TestNode::new(self.0.clone()))))
     }
 }
@@ -566,7 +566,10 @@ fn an_offline_fork_renders_the_same_on_a_pool() {
     let pre = prepare(256);
     let fork = |workers: usize| {
         let (ed, mut exec) = live_ed
-            .fork(ForkTarget::MainOutput, ForkMode::Offline, pre)
+            .fork(
+                ForkTarget::MainOutput,
+                pre.with_render_mode(RenderMode::Offline),
+            )
             .expect("every node forks");
         if workers > 1 {
             exec.set_pool(Some(test_pool(workers)));

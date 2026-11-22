@@ -176,7 +176,10 @@ pub use per_note_management::{PerNoteManager, PerNotePolicy};
 pub use sensitivity::PitchBendSensitivity;
 #[cfg(feature = "serde")]
 pub use smpte::InvalidSmpteTimecode;
-pub use smpte::{MtcRate, SmpteFrameRate, SmpteTimecode};
+pub use smpte::{
+    MtcRate, NotTimecodeHours, NotTimecodeMinutes, NotTimecodeSeconds, SmpteFrameRate,
+    SmpteTimecode, TimecodeHours, TimecodeMinutes, TimecodeSeconds,
+};
 pub use song_position::song_position;
 pub use tuning::{
     ChannelMask, InvalidKeyChanges, InvalidKeyTable, KeyChange, KeyChanges, KeyTable,

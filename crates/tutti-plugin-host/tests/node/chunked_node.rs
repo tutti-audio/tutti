@@ -912,7 +912,7 @@ fn a_node_built_over_an_activated_plugin_has_no_origin_to_fork_from() {
     .expect("narrow");
     let node = client.bind(tempo(None));
     let err = node
-        .fork_instance(main, tutti_graph::ForkMode::Live)
+        .fork_instance(main, tutti_graph::RenderMode::Realtime)
         .expect_err("no origin, no fork");
     assert!(
         matches!(err, tutti_plugin_types::PluginForkError::NoOrigin),

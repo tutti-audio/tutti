@@ -17,7 +17,9 @@ use tutti_midi_file::{
     ReadError, SmfDivision, SmfParseError, SmpteFractionalFrames, SmpteOffset, SysEx, TextKind,
     Tick, Timebase, TracksError,
 };
-use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode};
+use tutti_midi_protocol::{
+    SmpteFrameRate, SmpteTimecode, TimecodeHours, TimecodeMinutes, TimecodeSeconds,
+};
 use tutti_ump::{
     Address, ControlValue, Message, MidiChannel, MidiGroup, NoteNumber, TicksPerQuarterNote, U7,
     U14, Voice1,
@@ -152,7 +154,14 @@ fn every_event_kind_survives_a_read_and_a_write() {
             file.smpte_offset(0),
             Some(
                 SmpteOffset::new(
-                    SmpteTimecode::new(1, 30, 15, 10, SmpteFrameRate::Fps25).unwrap(),
+                    SmpteTimecode::new(
+                        TimecodeHours::of(1),
+                        TimecodeMinutes::of(30),
+                        TimecodeSeconds::of(15),
+                        10,
+                        SmpteFrameRate::Fps25
+                    )
+                    .unwrap(),
                     SmpteFractionalFrames::of(50),
                 )
                 .unwrap()

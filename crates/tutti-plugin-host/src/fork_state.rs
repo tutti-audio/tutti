@@ -3,7 +3,6 @@
 //! (`tutti-plugin`'s `PluginClient::fork_instance`) read and restore through
 //! this one type.
 
-use tutti_graph::ForkMode;
 use tutti_plugin_types::{PresetId, RenderMode, StateError};
 
 /// The live plugin's current preset (when it lists any), its saved state and
@@ -38,13 +37,13 @@ impl ForkState {
         self.preset.is_some()
     }
 
-    /// Whether the fork renders offline: a [`ForkMode::Offline`] fork does,
-    /// and a [`ForkMode::Live`] one keeps the mode the live plugin ran in.
+    /// Whether the fork renders offline: a [`RenderMode::Offline`] fork does,
+    /// and a [`RenderMode::Realtime`] one keeps the mode the live plugin ran in.
     #[must_use]
-    pub fn offline(&self, mode: ForkMode) -> bool {
+    pub fn offline(&self, mode: RenderMode) -> bool {
         match mode {
-            ForkMode::Offline => true,
-            ForkMode::Live => self.mode.is_offline(),
+            RenderMode::Offline => true,
+            RenderMode::Realtime => self.mode.is_offline(),
         }
     }
 
@@ -90,10 +89,10 @@ mod tests {
     #[test]
     fn a_live_fork_keeps_the_live_mode_and_an_offline_fork_is_offline() {
         let state = |mode| ForkState::new(None, Vec::new(), mode);
-        assert!(state(RenderMode::Offline).offline(ForkMode::Live));
-        assert!(state(RenderMode::Offline).offline(ForkMode::Offline));
-        assert!(state(RenderMode::Realtime).offline(ForkMode::Offline));
-        assert!(!state(RenderMode::Realtime).offline(ForkMode::Live));
+        assert!(state(RenderMode::Offline).offline(RenderMode::Realtime));
+        assert!(state(RenderMode::Offline).offline(RenderMode::Offline));
+        assert!(state(RenderMode::Realtime).offline(RenderMode::Offline));
+        assert!(!state(RenderMode::Realtime).offline(RenderMode::Realtime));
     }
 
     /// The preset goes in before the state, and the state is the live one's.

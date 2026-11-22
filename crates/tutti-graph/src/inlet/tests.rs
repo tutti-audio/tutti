@@ -128,7 +128,7 @@ fn the_declared_shape_matches_what_the_graph_is_told() {
 #[test]
 fn the_inlet_refuses_to_fork() {
     use crate::NodeKey;
-    use crate::{Editor, ForkError, ForkMode, ForkTarget};
+    use crate::{Editor, ForkError, ForkTarget};
     use crate::{OutputPort, PortSource};
 
     let (node, _prod) = ring_with(&[[1.0, 2.0]]);
@@ -142,7 +142,7 @@ fn the_inlet_refuses_to_fork() {
         })
     }));
     let err = editor
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
+        .fork(ForkTarget::MainOutput, prepare)
         .expect_err("a fork through the live inlet is refused");
     assert_eq!(err, ForkError::NotForkable { key: NodeKey(7) });
 }

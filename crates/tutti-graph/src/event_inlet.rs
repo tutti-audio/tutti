@@ -99,11 +99,12 @@ use tutti_rt::{
 use tutti_ump::Ump;
 use tutti_units::{At, Frame, Moment, SampleRate};
 
+use crate::RenderMode;
 use crate::bus::OutEvents;
 use crate::cost::Cost;
 use crate::event::Event;
 use crate::event_losses::Losses;
-use crate::fork::{ForkCause, ForkMode, ForkSource, Forked};
+use crate::fork::{ForkCause, ForkSource, Forked};
 use crate::io::Io;
 use crate::node::{Cx, IntoNode, Node, NodeParts, Prepare, Shape, Status};
 use crate::time::Due;
@@ -612,7 +613,7 @@ struct SilentInlet {
 }
 
 impl<F: tutti_buffers::Float> ForkSource<F> for SilentInlet {
-    fn fork(&self, _: ForkMode) -> Result<Forked<F>, ForkCause> {
+    fn fork(&self, _: RenderMode) -> Result<Forked<F>, ForkCause> {
         Ok(Forked::new(Box::new(EventInletNode::pair(self.capacity).0)))
     }
 }

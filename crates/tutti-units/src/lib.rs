@@ -136,5 +136,5 @@ pub use units::{
     PlaybackRateOutOfRange, Q, Radians, ReadPosition, ReadRate, Resonance, RunningPhase,
     SamplePosition, SampleRate, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, Seconds,
     Semitones, Speed, SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor,
-    Unit, Velocity,
+    TimecodeFrames, Unit, Velocity,
 };

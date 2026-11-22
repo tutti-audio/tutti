@@ -18,8 +18,9 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor,
-    ForkByClone, ForkMode, ForkTarget, InEvents, Io, Node, Offset, OutEvents, ParamIn, ParamKind,
-    ParamSegment, Prepare, ScheduleError, Shape, Status, TransportChanges, TransportPosition,
+    ForkByClone, ForkTarget, InEvents, Io, Node, Offset, OutEvents, ParamIn, ParamKind,
+    ParamSegment, Prepare, RenderMode, ScheduleError, Shape, Status, TransportChanges,
+    TransportPosition,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_modulation::{
@@ -1430,8 +1431,8 @@ fn an_export_is_the_live_render_on_a_native_param() {
     let (mut fed, mut fexec) = ed
         .fork(
             ForkTarget::MainOutput,
-            ForkMode::Offline,
-            Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(1024))),
+            Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(1024)))
+                .with_render_mode(RenderMode::Offline),
         )
         .expect("forks");
     let total = 48_000;

@@ -26,9 +26,9 @@ use tutti_buffers::FoldError;
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
 use tutti_graph::{
     Bus, BusRole, Buses, Cx, Edge, Editor, Event, EventEdge, EventInputPort, EventKind,
-    EventOutputPort, Executor, FadeLaw, ForkByClone, ForkMode, ForkTarget, GraphInvalid, GraphSpec,
+    EventOutputPort, Executor, FadeLaw, ForkByClone, ForkTarget, GraphInvalid, GraphSpec,
     InputPort, Io, ModeError, Node, NodeKey, NodeMode, Offset, OutputPort, PassError, PortSource,
-    Prepare, Shape, Status, Topology, TransportPosition, Unforkable, ValidGraph,
+    Prepare, RenderMode, Shape, Status, Topology, TransportPosition, Unforkable, ValidGraph,
 };
 use tutti_ump::Ump;
 use tutti_units::{Latency, Samples, Tail};
@@ -1467,8 +1467,7 @@ fn a_fork_copies_the_mode_and_starts_steady() {
     let (fed, mut fexec) = ed
         .fork(
             ForkTarget::MainOutput,
-            ForkMode::Offline,
-            prepare(MAX_BLOCK),
+            prepare(MAX_BLOCK).with_render_mode(RenderMode::Offline),
         )
         .expect("forks");
     assert_eq!(fed.mode(key(1)), NodeMode::Bypassed);

@@ -27,8 +27,8 @@ use super::types::{PlayDirection, Playback, Reach, SlotId, Voice, VoiceSource};
 use crate::{PlaceError, SamplerFloat};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, ParamSet, Prepare,
-    Shape, Status,
+    Cx, ForkCause, ForkSource, Forked, IntoNode, Io, Node, NodeParts, ParamSet, Prepare,
+    RenderMode, Shape, Status,
 };
 use tutti_rt::{Param, Publisher, Reader};
 use tutti_timeline::TempoReader;
@@ -599,7 +599,7 @@ struct VoiceNodeFork<F: SamplerFloat> {
 }
 
 impl<F: SamplerFloat> ForkSource<F> for VoiceNodeFork<F> {
-    fn fork(&self, mode: ForkMode) -> Result<Forked<F>, ForkCause> {
+    fn fork(&self, mode: RenderMode) -> Result<Forked<F>, ForkCause> {
         let mut voice = self.template.fork_copy(mode)?;
         apply_steering(&mut voice, &Steering::default(), &self.steering.current());
         // The window is the source's alone: `Playback` has no window field
@@ -744,7 +744,7 @@ mod tests {
             live.prepare(&prepare);
             let mut fork = fork
                 .expect("forks")
-                .fork(ForkMode::Offline)
+                .fork(RenderMode::Offline)
                 .expect("forks")
                 .node;
             fork.prepare(&prepare);

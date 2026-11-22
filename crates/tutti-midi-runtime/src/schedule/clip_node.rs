@@ -64,8 +64,8 @@ use tutti_buffers::Float;
 use tutti_rt::Mutex;
 
 use tutti_graph::{
-    Cx, EventDensity, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io,
-    MIN_EVENT_PORT_CAPACITY, Node, NodeParts, Offset, OutEvents, Prepare, Shape, Status,
+    Cx, EventDensity, ForkCause, ForkSource, Forked, IntoNode, Io, MIN_EVENT_PORT_CAPACITY, Node,
+    NodeParts, Offset, OutEvents, Prepare, RenderMode, Shape, Status,
 };
 use tutti_midi_protocol::Midi2Translator;
 use tutti_rt::{Publisher, Reader};
@@ -658,7 +658,7 @@ struct ClipFork {
 }
 
 impl<F: Float> ForkSource<F> for ClipFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked<F>, ForkCause> {
         let cell = Publisher::from_arc(self.cell.current());
         Ok(Forked::new(Box::new(MidiClipNode::over(cell))))
     }

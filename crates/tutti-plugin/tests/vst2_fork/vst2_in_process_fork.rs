@@ -28,13 +28,13 @@ use tutti_rt::Mutex;
 use tutti_vst2_host::Vst2Loaded;
 
 use tutti_graph::NodeKey;
-use tutti_graph::{Editor, ForkMode, ForkTarget, IntoNode, Prepare, Renderer, TransportPosition};
+use tutti_graph::{Editor, ForkTarget, IntoNode, Prepare, RenderMode, Renderer, TransportPosition};
 use tutti_graph::{OutputPort, PortSource};
 use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_host::{PluginNode, load_client};
 use tutti_plugin_types::PluginForkError;
-use tutti_plugin_types::{PresetId, RenderMode};
+use tutti_plugin_types::PresetId;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
@@ -211,8 +211,7 @@ fn a_chunk_plugin_forks_with_the_live_chunk_and_renders_offline() {
     let (fork_ed, fork_exec) = editor
         .fork(
             ForkTarget::Node(key),
-            ForkMode::Offline,
-            prepare_at(SAMPLE_RATE),
+            prepare_at(SAMPLE_RATE).with_render_mode(RenderMode::Offline),
         )
         .expect("a graph holding an in-process VST2 plugin forks");
     let out = Renderer::new(fork_ed, fork_exec).render(BLOCK * 4);
@@ -251,7 +250,7 @@ fn a_plugin_without_chunks_forks_with_its_program_and_parameters() {
         .expect("a declared parameter");
 
     let fork = client
-        .fork_instance(main_thread(), ForkMode::Live)
+        .fork_instance(main_thread(), RenderMode::Realtime)
         .expect("the probe forks");
     let key = NodeKey(2);
     let (mut editor, exec) = Editor::new(prepare_at(SAMPLE_RATE));
@@ -296,8 +295,7 @@ fn a_fork_at_another_rate_tells_the_plugin_its_rate() {
     let (fork_ed, fork_exec) = editor
         .fork(
             ForkTarget::Node(key),
-            ForkMode::Offline,
-            prepare_at(96_000.0),
+            prepare_at(96_000.0).with_render_mode(RenderMode::Offline),
         )
         .expect("forks");
     assert_eq!(
@@ -327,7 +325,7 @@ fn a_fork_of_a_dropped_plugin_is_live_gone() {
     drop(parts.node);
     drop(handle);
 
-    let cause = match source.fork(ForkMode::Live) {
+    let cause = match source.fork(RenderMode::Realtime) {
         Ok(_) => panic!("forked a plugin that is gone"),
         Err(cause) => cause,
     };
@@ -376,8 +374,7 @@ fn a_plugin_handed_back_by_into_client_forks() {
     let (fork_ed, fork_exec) = editor
         .fork(
             ForkTarget::Node(key),
-            ForkMode::Offline,
-            prepare_at(SAMPLE_RATE),
+            prepare_at(SAMPLE_RATE).with_render_mode(RenderMode::Offline),
         )
         .expect("forks");
     assert_renders(
@@ -413,8 +410,7 @@ fn a_fork_reads_its_transport_from_the_render() {
     let (fork_ed, fork_exec) = editor
         .fork(
             ForkTarget::Node(key),
-            ForkMode::Offline,
-            prepare_at(SAMPLE_RATE),
+            prepare_at(SAMPLE_RATE).with_render_mode(RenderMode::Offline),
         )
         .expect("forks");
     let mut renderer = Renderer::new(fork_ed, fork_exec);
@@ -457,7 +453,7 @@ fn a_fork_reads_its_transport_from_the_render() {
 }
 
 /// **A live fork keeps the live instance's render mode**: a host that set the
-/// live plugin offline gets an offline fork from `ForkMode::Live` too (and a
+/// live plugin offline gets an offline fork from `RenderMode::Realtime` too (and a
 /// realtime one otherwise).
 fn a_live_fork_keeps_the_live_render_mode() {
     let _lock = lock_probe();
@@ -470,7 +466,7 @@ fn a_live_fork_keeps_the_live_render_mode() {
     ] {
         assert!(client.set_render_mode(mode));
         let fork = client
-            .fork_instance(main_thread(), ForkMode::Live)
+            .fork_instance(main_thread(), RenderMode::Realtime)
             .expect("forks");
         let key = NodeKey(7);
         let (mut editor, exec) = Editor::new(prepare_at(SAMPLE_RATE));
@@ -498,7 +494,7 @@ fn a_second_instance_of_another_plugin_is_refused() {
     let (client, handle) = load();
     env.set("TUTTI_VST2_PROBE_UNIQUE_ID", "4242");
     let err = client
-        .fork_instance(main_thread(), ForkMode::Live)
+        .fork_instance(main_thread(), RenderMode::Realtime)
         .expect_err("a different plugin is not a fork");
     match err {
         PluginForkError::Load { source, .. } => {
@@ -530,7 +526,7 @@ fn a_live_program_out_of_the_second_instances_range_is_a_named_error() {
     );
     env.set("TUTTI_VST2_PROBE_PROGRAMS", "1");
     let err = client
-        .fork_instance(main_thread(), ForkMode::Live)
+        .fork_instance(main_thread(), RenderMode::Realtime)
         .expect_err("program 1 does not exist in the second instance");
     assert!(
         matches!(err, PluginForkError::LoadState(_)),

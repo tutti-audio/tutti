@@ -22,9 +22,9 @@ use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventOutputPort, ForkMode, ForkTarget, IntoNode, Io, MAX_PARAM_PORTS, Node,
-    NodeParts, ParamEvent, ParamIn, ParamInput, ParamNode, ParamPorts, ParamPortsError,
-    ParamSegment, ParamSet, Prepare, Shape, Status, TransportPosition, param_parts,
+    Cx, Editor, EventOutputPort, ForkTarget, IntoNode, Io, MAX_PARAM_PORTS, Node, NodeParts,
+    ParamEvent, ParamIn, ParamInput, ParamNode, ParamPorts, ParamPortsError, ParamSegment,
+    ParamSet, Prepare, Shape, Status, TransportPosition, param_parts,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_rt::Param;
@@ -357,9 +357,7 @@ fn a_fork_starts_from_each_indexs_value() {
     ed.commit().expect("commits");
     exec.apply_pending();
     assert!(controls.set(BAND1, -33.0));
-    let (mut fork_ed, mut fork_exec) = ed
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(64))
-        .expect("forks");
+    let (mut fork_ed, mut fork_exec) = ed.fork(ForkTarget::MainOutput, prepare(64)).expect("forks");
     assert!(controls.set(BAND1, -1.0), "a write after the fork");
     assert!(controls.set(BAND0, -2.0));
     let [f0, f1] = render(&mut fork_ed, &mut fork_exec, 64);

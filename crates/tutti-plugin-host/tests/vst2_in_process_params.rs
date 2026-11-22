@@ -29,7 +29,7 @@ use tutti_vst2_host::Vst2Loaded;
 use tutti_graph::Node as _;
 use tutti_graph::contract::Direct;
 use tutti_graph::{
-    ForkMode, ForkTarget, GraphBuilder, Offset, ParamEvent, ParamRamp, ParamRange, Prepare,
+    ForkTarget, GraphBuilder, Offset, ParamEvent, ParamRamp, ParamRange, Prepare, RenderMode,
     TransportPosition,
 };
 use tutti_modulation::ControlProgram;
@@ -286,7 +286,10 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     }));
     let (_fork_ed, mut fork_exec) = live
         .editor()
-        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare)
+        .fork(
+            ForkTarget::MainOutput,
+            prepare.with_render_mode(RenderMode::Offline),
+        )
         .expect("the lane and the plugin fork");
     let mut out = vec![vec![0.0f32; BLOCK]; 2];
     for _ in 0..8 {

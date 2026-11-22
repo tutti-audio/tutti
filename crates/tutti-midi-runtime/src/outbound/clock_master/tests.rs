@@ -642,7 +642,7 @@ fn mtc_loopback(rate: f64, fps: MtcRate, offset: f64) {
         "{cycles} cycles"
     );
     assert_eq!(
-        decoder.timecode().map(|t| t.minutes()),
+        decoder.timecode().map(|t| t.minutes().get()),
         Some(1),
         "crossed 1:00"
     );

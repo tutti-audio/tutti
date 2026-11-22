@@ -23,8 +23,8 @@ use tutti_fixtures::midi;
 use tutti_graph::{CloseError, EventCapacity, EventTapId, EventTapOptions, EventTapReader};
 use tutti_graph::{
     Cx, Edge, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor,
-    ForkByClone, ForkCause, ForkMode, ForkSource, ForkTarget, Forked, InputPort, IntoNode, Io,
-    MissingSource, Node, NodeKey, NodeParts, Offset, Op, OutputPort, PortSource, Prepare, Shape,
+    ForkByClone, ForkCause, ForkSource, ForkTarget, Forked, InputPort, IntoNode, Io, MissingSource,
+    Node, NodeKey, NodeParts, Offset, Op, OutputPort, PortSource, Prepare, RenderMode, Shape,
     Status, TapAlign, TapEvent, TransportPosition, note_off_room,
 };
 use tutti_ump::{MidiChannel, U7, Ump};
@@ -38,7 +38,7 @@ struct Forkable(Kind);
 struct KindFork(Kind);
 
 impl ForkSource for KindFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked, ForkCause> {
         Ok(Forked::new(Box::new(TestNode::new(self.0.clone()))))
     }
 }
@@ -583,8 +583,7 @@ fn closed_fork_reopen_and_prune() {
     let (fed, _fexec) =
         r.ed.fork(
             ForkTarget::MainOutput,
-            ForkMode::Offline,
-            prepare(MAX_BLOCK),
+            prepare(MAX_BLOCK).with_render_mode(RenderMode::Offline),
         )
         .expect("forks");
     assert!(fed.spec().topology.event_taps.is_empty());

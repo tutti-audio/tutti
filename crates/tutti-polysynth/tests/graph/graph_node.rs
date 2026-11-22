@@ -7,7 +7,7 @@
 use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Editor, EventEdge, EventInputPort, EventOutputPort, Executor, ForkMode, ForkTarget, Prepare,
+    Editor, EventEdge, EventInputPort, EventOutputPort, Executor, ForkTarget, Prepare, RenderMode,
     Renderer, TransportPosition,
 };
 use tutti_graph::{OutputPort, PortSource};
@@ -115,7 +115,10 @@ fn a_forked_graph_plays_the_clip() {
     let (live, _exec) = graph(1_000);
     let prepare = *live.prepare();
     let (fork, fork_exec) = live
-        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare)
+        .fork(
+            ForkTarget::MainOutput,
+            prepare.with_render_mode(RenderMode::Offline),
+        )
         .expect("a clip and a synth fork");
     let out = render(fork, fork_exec, 2_048);
     assert_eq!(onset(&out), Some(1_000 + lead()));

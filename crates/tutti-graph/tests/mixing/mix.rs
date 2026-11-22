@@ -24,9 +24,9 @@ use std::sync::{Arc, Mutex};
 use common::{Kind, Pair, SpecBehaviour, TestNode, bits, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    CommitError, Cx, Edge, Editor, EventOutputPort, FadeLaw, ForkMode, ForkTarget, GraphInvalid,
-    GraphSpec, InputPort, Io, MixError, Node, NodeKey, NodeMix, NodeMode, OutputPort, ParamIn,
-    PassError, PortSource, Prepare, Shape, Status, Topology, TransportPosition, Unforkable,
+    CommitError, Cx, Edge, Editor, EventOutputPort, FadeLaw, ForkTarget, GraphInvalid, GraphSpec,
+    InputPort, Io, MixError, Node, NodeKey, NodeMix, NodeMode, OutputPort, ParamIn, PassError,
+    PortSource, Prepare, RenderMode, Shape, Status, Topology, TransportPosition, Unforkable,
 };
 use tutti_units::{Mix, Samples, Tail};
 
@@ -747,8 +747,7 @@ fn a_fork_copies_the_mix() {
     let (fed, mut fexec) = ed
         .fork(
             ForkTarget::MainOutput,
-            ForkMode::Offline,
-            prepare(MAX_BLOCK),
+            prepare(MAX_BLOCK).with_render_mode(RenderMode::Offline),
         )
         .expect("forks");
     assert_eq!(fed.mix(key(1)), Mix::new(0.5));

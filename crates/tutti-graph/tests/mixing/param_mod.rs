@@ -48,9 +48,9 @@ use proptest::prelude::*;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    CommitError, Cx, Editor, EventOutputPort, Executor, ForkByClone, ForkMode, ForkTarget,
-    GraphInvalid, Io, Law, Node, ParamEvent, ParamIn, ParamInput, ParamRamp, ParamRange,
-    ParamSegment, Prepare, Reference, Shape, Status, TransportPosition, Unforkable,
+    CommitError, Cx, Editor, EventOutputPort, Executor, ForkByClone, ForkTarget, GraphInvalid, Io,
+    Law, Node, ParamEvent, ParamIn, ParamInput, ParamRamp, ParamRange, ParamSegment, Prepare,
+    Reference, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_units::{Hz, Latency, ParamKey, Q, Real, SampleRate, Samples, UnitParam};
@@ -1152,9 +1152,7 @@ fn a_lane_fed_fork_reads_its_value_at_frame_0() {
     let live = render(&mut exec, &mut ed, 600, 64);
     assert_eq!((live[0][599], live[1][599]), (500.0, 3.0), "live, held");
 
-    let (mut fed, mut fexec) = ed
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(64))
-        .expect("forks");
+    let (mut fed, mut fexec) = ed.fork(ForkTarget::MainOutput, prepare(64)).expect("forks");
     let out = render(&mut fexec, &mut fed, 10, 10);
     #[allow(clippy::needless_range_loop, reason = "two outputs at one frame")]
     for i in 0..10 {

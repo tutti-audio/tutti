@@ -95,7 +95,7 @@ pub use modulation::{
 pub use ratios::{
     Cents, CentsSpan, CentsSpanOutOfRange, CompressionRatio, HoldFactor, Q, Resonance, Semitones,
 };
-pub use time::{Hz, SampleRate, SampleRateOutOfRange, Seconds};
+pub use time::{Hz, SampleRate, SampleRateOutOfRange, Seconds, TimecodeFrames};
 pub use transport::{
     Beat, BeatDuration, BeatsPerCycle, BeatsPerCycleOutOfRange, Bpm, BpmOutOfRange, PlaybackRate,
     PlaybackRateOutOfRange, ReadRate, SamplePosition, SrcRatio, StretchFactor,

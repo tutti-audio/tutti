@@ -15,8 +15,8 @@ use tutti_fixtures::midi;
 use tutti_graph::NodeSpec;
 use tutti_graph::{
     Cx, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor, Fade,
-    ForkByClone, ForkMode, ForkTarget, Io, Node, Offset, Prepare, Reference, Shape, Shapes, Status,
-    TransportPosition, Unforkable,
+    ForkByClone, ForkTarget, Io, Node, Offset, Prepare, Reference, RenderMode, Shape, Shapes,
+    Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{NodeKey, Topology};
 use tutti_ump::{
@@ -1873,8 +1873,11 @@ fn forked(log: &Log, blocks: usize, mid_note: bool) -> (Editor, Executor) {
             &mut [&mut out_buf[..]],
         );
     }
-    ed.fork(ForkTarget::MainOutput, ForkMode::Offline, prep)
-        .expect("forks")
+    ed.fork(
+        ForkTarget::MainOutput,
+        prep.with_render_mode(RenderMode::Offline),
+    )
+    .expect("forks")
 }
 
 /// A fork closes what it has seen itself: the live graph has not run, so the
