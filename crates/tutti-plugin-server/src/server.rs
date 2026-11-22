@@ -643,9 +643,9 @@ fn watch_host(
 #[cfg(test)]
 mod beat_tests {
     use super::*;
-    use std::sync::Mutex;
     use std::sync::atomic::AtomicUsize;
     use std::sync::mpsc;
+    use tutti_rt::Mutex;
 
     const ID: ReqId = ReqId::new(9);
     /// A pace for the beat in these tests: a count of beats is what they
@@ -678,7 +678,7 @@ mod beat_tests {
         let (tx, rx) = mpsc::channel();
         let tx = Mutex::new(tx);
         let pulse: Pulser<ControlFrame> = Box::new(move |frame| {
-            let _ = tx.lock().unwrap().send(stage_of(frame));
+            let _ = tx.lock().send(stage_of(frame));
             Ok(())
         });
         let restoring = restoring(false);
@@ -715,8 +715,8 @@ mod beat_tests {
             let (sending, released, sent) =
                 (Mutex::new(sending), Mutex::new(released), Arc::clone(&sent));
             Box::new(move |_| {
-                let _ = sending.lock().unwrap().send(());
-                let _ = released.lock().unwrap().recv();
+                let _ = sending.lock().send(());
+                let _ = released.lock().recv();
                 sent.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             })

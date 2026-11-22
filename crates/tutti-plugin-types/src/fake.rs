@@ -13,16 +13,14 @@
 //! requests on the word the shell would take.
 
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use dpi::{PhysicalSize, Size};
 use tutti_plugin_ipc_ffi::FdId;
 use tutti_rt::AtomicRequestFlags;
 
 use crate::PluginClass;
-use crate::StateError;
 use crate::{
     ChannelLayout, ContentScale, Control, Controller, EditReader, EditWriter, EditorError,
     EditorWindow, Layout, Loaded, MainThreadMarker, ParamEdit, ParamFlags, ParameterInfo,
@@ -295,7 +293,7 @@ struct Shared {
 impl Shared {
     /// The declared parameters, if the fake declares any.
     fn declared(&self) -> Vec<(ParamId, bool)> {
-        self.declared.lock_recover().clone()
+        self.declared.lock().clone()
     }
 
     fn wiring(&self) -> PluginWiring {
@@ -542,7 +540,7 @@ impl FakePlugin {
     /// parameter is [`ReadOnly`](crate::ParamWriteError::ReadOnly). It declares
     /// nothing until this is called.
     pub fn declare(&self, parameters: &[(ParamId, bool)]) {
-        *self.0.declared.lock_recover() = parameters.to_vec();
+        *self.0.declared.lock() = parameters.to_vec();
     }
 
     /// Gives the fake an editor: `open_editor` answers 640 by 480 and the
@@ -554,7 +552,7 @@ impl FakePlugin {
     /// Makes every open of the fake's editor report `error` as its failed state
     /// mirror: the editor still opens.
     pub fn with_editor_mirror_failure(&self, error: crate::EditorMirrorError) {
-        *self.0.mirror_failure.lock_recover() = Some(error);
+        *self.0.mirror_failure.lock() = Some(error);
     }
 
     /// Makes the fake's editor take a new scale live. The default is the trait's
@@ -700,7 +698,7 @@ macro_rules! fake_control {
                 _: $crate::StateUse,
             ) -> PluginResult<Vec<u8>> {
                 self.shared.log.push(Call::SaveState);
-                Ok(self.shared.state.lock().map_err(|_| poisoned())?.clone())
+                Ok(self.shared.state.lock().clone())
             }
 
             fn load_state(
@@ -710,7 +708,7 @@ macro_rules! fake_control {
                 _: $crate::StateUse,
             ) -> PluginResult<()> {
                 self.shared.log.push(Call::LoadState(bytes.len()));
-                *self.shared.state.lock().map_err(|_| poisoned())? = bytes.to_vec();
+                *self.shared.state.lock() = bytes.to_vec();
                 Ok(())
             }
 
@@ -800,7 +798,7 @@ macro_rules! fake_control {
                 }
                 self.shared.log.push(Call::OpenEditor);
                 let opened = crate::EditorOpened::new(PhysicalSize::new(640, 480).into());
-                Ok(match self.shared.mirror_failure.lock_recover().clone() {
+                Ok(match self.shared.mirror_failure.lock().clone() {
                     Some(error) => opened.mirror_failed(error),
                     None => opened,
                 })
@@ -858,10 +856,6 @@ macro_rules! fake_control {
             }
         }
     };
-}
-
-fn poisoned() -> PluginError {
-    PluginError::StateFailed(StateError::PluginCrashed)
 }
 
 fake_control!(FakeLoaded, |_, _, _| {}, |_, _| {});

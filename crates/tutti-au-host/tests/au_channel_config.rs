@@ -33,8 +33,7 @@
 
 #![cfg(target_os = "macos")]
 
-use std::sync::Mutex;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 mod support;
 use support::corpus::{
@@ -52,12 +51,6 @@ use tutti_plugin_types::ChannelLayout;
 /// units, but discovery walks a process-global registry and these tests open the
 /// same units. Serialize.
 static AU_LOCK: Mutex<()> = Mutex::new(());
-
-/// Poison recovery: the guard is only a serializer, so one panicking test must
-/// not convert into N spurious failures.
-fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock_recover()
-}
 
 const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
@@ -88,7 +81,7 @@ fn config_at(layout: ChannelLayout, has_input: bool) -> StreamConfig {
 /// format and initialize at it. `ACCEPTS_MONO` names the corpus members that do.
 #[test]
 fn an_au_opened_in_mono_reports_one_output_channel() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in ACCEPTS_MONO {
         let info = unit.require();
         let has_input = unit.au_type == tutti_au_host::AuType::Effect;
@@ -141,7 +134,7 @@ fn an_au_opened_in_mono_reports_one_output_channel() {
 /// must never happen is a silent agreement.
 #[test]
 fn a_refused_layout_reports_the_width_the_au_kept() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in REFUSES_MONO {
         let info = unit.require();
         let has_input = unit.au_type == tutti_au_host::AuType::Effect;
@@ -187,7 +180,7 @@ fn a_refused_layout_reports_the_width_the_au_kept() {
 /// this asserts per-side against the AU rather than assuming symmetry.
 #[test]
 fn a_quad_request_is_honoured_where_the_au_takes_it() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in ACCEPTS_MONO {
         let info = unit.require();
         let has_input = unit.au_type == tutti_au_host::AuType::Effect;
@@ -217,7 +210,7 @@ fn a_quad_request_is_honoured_where_the_au_takes_it() {
 #[test]
 fn the_wiring_reports_the_configured_widths() {
     use tutti_plugin_types::Control;
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in ACCEPTS_MONO {
         let info = unit.require();
         let has_input = unit.au_type == tutti_au_host::AuType::Effect;
@@ -247,7 +240,7 @@ fn the_wiring_reports_the_configured_widths() {
 /// the one entry point that has to invent a width.
 #[test]
 fn the_layout_less_constructor_still_defaults_to_stereo() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in EFFECTS {
         let au = unit.open_uninitialized(RATE, BLOCK);
         assert_eq!(
@@ -304,7 +297,7 @@ fn the_layout_less_constructor_still_defaults_to_stereo() {
 /// with-input path and 7 the `in == 0` path.
 #[test]
 fn has_input_agrees_with_the_input_element_count() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut with_input = 0usize;
     let mut without_input = 0usize;
 
@@ -386,7 +379,7 @@ fn has_input_agrees_with_the_input_element_count() {
 /// — at the new size, and at a frame count only the new size admits.
 #[test]
 fn set_block_size_changes_the_size_and_the_au_still_renders() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
     assert_eq!(au.block_size(), BLOCK);
 
@@ -423,7 +416,7 @@ fn set_block_size_changes_the_size_and_the_au_still_renders() {
 /// shrink to 256, the AU would write past buffers it re-allocated for 256.
 #[test]
 fn an_oversized_block_is_still_refused_after_a_change() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, 2048);
 
     au.set_block_size(256).expect("shrink");
@@ -456,7 +449,7 @@ fn an_oversized_block_is_still_refused_after_a_change() {
 /// empty buffers, so it is rejected before AudioToolbox ever sees it.
 #[test]
 fn a_zero_block_size_is_refused_and_changes_nothing() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
 
     let err = au
@@ -486,7 +479,7 @@ fn a_zero_block_size_is_refused_and_changes_nothing() {
 /// every plugin.
 #[test]
 fn setting_the_same_block_size_preserves_the_ready_state() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
     au.set_block_size(BLOCK).expect("same size is a no-op");
     assert_eq!(au.block_size(), BLOCK);
@@ -504,7 +497,7 @@ fn setting_the_same_block_size_preserves_the_ready_state() {
 /// path with no uninitialize/re-initialize dance around it at all.
 #[test]
 fn set_block_size_works_before_initialize() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open_uninitialized(RATE, BLOCK);
     assert!(!au.is_initialized());
 
@@ -528,7 +521,7 @@ fn set_block_size_works_before_initialize() {
 /// share `StreamConfig::apply`, so one clobbering the other is a live risk.
 #[test]
 fn block_size_and_sample_rate_do_not_clobber_each_other() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
 
     au.set_block_size(1024).expect("set block size");
@@ -569,7 +562,7 @@ fn block_size_and_sample_rate_do_not_clobber_each_other() {
 /// including on a machine with a pickier one installed.
 #[test]
 fn a_block_size_is_either_applied_or_rolled_back() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in EFFECTS
         .iter()
         .chain(INSTRUMENTS)

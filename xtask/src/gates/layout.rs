@@ -145,7 +145,12 @@ const ONLY: &[(&str, &[&str])] = &[
     ("tutti-tempo", &["tutti-units", "tutti-music"]),
     (
         "tutti-voicing",
-        &["tutti-ump", "tutti-units", "tutti-midi-protocol"],
+        &[
+            "tutti-ump",
+            "tutti-units",
+            "tutti-music",
+            "tutti-midi-protocol",
+        ],
     ),
     (
         "tutti-timeline",

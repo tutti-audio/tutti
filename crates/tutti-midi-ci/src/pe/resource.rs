@@ -32,8 +32,8 @@ pub use controllers::{
 pub use data::{OpaqueBody, PeData, PeOpaque};
 pub use entry::{EntryError, PeResourceList, ResourceEntry, ResourceEntryBuilder};
 pub use fields::{
-    ClusterKind, CtrlKind, CtrlValueKind, InvalidValue, ModeId, NotAPeChannel, NotAPeMidiMode,
-    NotAPriority, NotAStepCount, NotSignificantBits, NotVendorName, ParamPath, ParamPathError,
+    ClusterKind, CtrlKind, CtrlValueKind, ExtensionError, InvalidValue, ModeId, NotAPeChannel,
+    NotAPeMidiMode, NotAPriority, NotAStepCount, NotSignificantBits, ParamPath, ParamPathError,
     PeBankProgram, PeChannel, PeDataError, PeDataFault, PeExtensions, PeMidiMode, PeText, Place,
     Priority, RoleName, SignificantBits, StepCount, TypeHint, UnlistedText,
 };

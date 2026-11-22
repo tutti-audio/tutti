@@ -5,7 +5,7 @@
 //! p.39, the time code of pp.8 and 10 (a drop-frame minute skips two labels)
 //! and the commands of pp.20 to 28.
 
-use tutti_midi_protocol::{MmcSegmentError, MtcRate, Recipient, SysexDeviceId};
+use tutti_midi_protocol::{MmcSegmentCount, MmcSegmentError, MtcRate, Recipient, SysexDeviceId};
 use tutti_midi_runtime::{
     MachineControlEvent, MachineControlFollower, MachineControlSender, NoTimeCode, SegmentFault,
 };
@@ -140,8 +140,8 @@ fn a_segment_that_does_not_belong_is_reported_and_cancels() {
         feed(&mut f, 5, &segment(0x00, &[0x02])),
         [MachineControlEvent::Segmentation(SegmentFault::String(
             MmcSegmentError::OutOfOrder {
-                expected: 1,
-                got: 0
+                expected: MmcSegmentCount::of(1),
+                got: MmcSegmentCount::of(0)
             }
         ))]
     );

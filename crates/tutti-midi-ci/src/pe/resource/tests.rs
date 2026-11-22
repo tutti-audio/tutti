@@ -734,7 +734,7 @@ fn resource_list_reads_table_82() {
     let text = r#"[{"resource":"DeviceInfo"},{"resource":"ChannelList","canSubscribe":true},
         {"resource":"ProgramList"},
         {"resource":"X-Buffer","canSet":"full","mediaTypes":["application/octet-stream"],
-         "encodings":["MCoded7"],"schema":{"title":"Buffer","type":"string"}}]"#;
+         "encodings":["MCoded7"],"schema":{"title":"Buffer"}}]"#;
     let PeData::ResourceList(list) = ok(PeResource::ResourceList, text) else {
         panic!("not ResourceList");
     };
@@ -1411,6 +1411,149 @@ fn a_channel_fault_carries_the_function_block_channel_error() {
     assert_eq!(
         error.fault,
         PeDataFault::NotValid(InvalidValue::FunctionBlockChannel(NotAPeChannel(257)))
+    );
+}
+
+// M2-103 §14.6: a Resource that is not JSON leaves the schema `type` empty, and its
+// `mediaTypes` says what the data is; the schema still has its `title`.
+/// Spec: m2-103/14.6#1
+#[test]
+fn a_non_json_entry_leaves_the_schema_type_empty() {
+    let sample = |schema: &str| {
+        ResourceEntry::builder(custom("X-Sample"))
+            .can_set(CanSet::Full)
+            .media_types(vec![MediaType::new("audio/wav").unwrap()])
+            .encodings(vec![PeEncoding::Mcoded7])
+            .schema(json(schema))
+            .build()
+    };
+    assert!(sample(r#"{"title":"Sample Upload","description":"Upload the sample here"}"#).is_ok());
+    assert!(sample(r#"{"title":"Sample Upload","type":[]}"#).is_ok());
+    assert!(matches!(
+        sample(r#"{"title":"Sample Upload","type":"string"}"#),
+        Err(EntryError::SchemaTypedNonJson(_))
+    ));
+    assert!(matches!(
+        sample(r#"{"type":[]}"#),
+        Err(EntryError::SchemaIncomplete(_))
+    ));
+}
+
+// M2-103 §8.6.1: a list object holds plain values and arrays of plain values or
+// strings, never a nested object; an `x-` property is no exception, read or inserted.
+/// Spec: m2-103/8.6.1#3
+#[test]
+fn a_list_object_extension_holds_no_nested_object() {
+    let entry = |extra: &str| format!(r#"[{{"title":"T","channel":1,{extra}}}]"#);
+    let decode = |extra: &str| PeData::decode(&PeResource::ChannelList, &json(&entry(extra)));
+    for plain in [
+        r#""x-s":"a""#,
+        r#""x-n":null"#,
+        r#""x-a":[1,"b",true,null]"#,
+        r#""x-e":[]"#,
+    ] {
+        assert!(decode(plain).is_ok(), "{plain}");
+    }
+    for nested in [
+        r#""x-obj":{"a":1}"#,
+        r#""x-arrobj":[{"a":1}]"#,
+        r#""x-arrarr":[[1]]"#,
+    ] {
+        assert!(
+            matches!(
+                decode(nested),
+                Err(PeDataError {
+                    fault: PeDataFault::NotValid(InvalidValue::Extension(ExtensionError::Nested)),
+                    ..
+                })
+            ),
+            "{nested}"
+        );
+    }
+    let name = super::super::limits::PropertyName::new("x-obj").unwrap();
+    let mut extensions = PeExtensions::default();
+    assert_eq!(
+        extensions.insert(name.clone(), json(r#"{"a":1}"#)),
+        Err(ExtensionError::Nested)
+    );
+    assert_eq!(
+        extensions.insert(name, json(r#"[{"a":1}]"#)),
+        Err(ExtensionError::Nested)
+    );
+    assert!(extensions.is_empty());
+}
+
+// M2-103 §13.1.2: the options of a selector Link are a List Resource.
+/// Spec: m2-103/13.1.2#5
+#[test]
+fn a_selector_link_needs_a_list_resource_for_its_options() {
+    let entry = |resource: &str| {
+        format!(
+            r#"[{{"title":"T","channel":1,"links":[{{"resource":"{resource}","role":"selectorAction",
+            "actionResource":"X-Set","selectedProperty":"value"}}]}}]"#
+        )
+    };
+    let decode = |resource: &str| PeData::decode(&PeResource::ChannelList, &json(&entry(resource)));
+    assert!(decode("X-OptionList").is_ok());
+    assert!(matches!(
+        decode("X-Options"),
+        Err(PeDataError {
+            fault: PeDataFault::NotValid(InvalidValue::NotAListResource),
+            ..
+        })
+    ));
+}
+
+// M2-103 §13.1.1: an action Resource is listed in the ResourceList, so a store takes no
+// data whose action Link names a Resource it has not declared.
+/// Spec: m2-103/13.1.1#4
+#[test]
+fn a_store_refuses_a_link_to_an_undeclared_action_resource() {
+    let simple = |resource: &str| {
+        let text = format!(
+            r#"[{{"title":"Piano","channel":1,"links":[
+            {{"resource":"{resource}","propData":1,"role":"simpleAction"}}]}}]"#
+        );
+        PeData::decode(&PeResource::ChannelList, &json(&text)).unwrap()
+    };
+    let selector = PeData::decode(
+        &PeResource::ChannelList,
+        &json(
+            r#"[{"title":"Piano","channel":1,"links":[{"resource":"X-OptionList",
+            "role":"selectorAction","actionResource":"X-Nowhere","selectedProperty":"v"}]}]"#,
+        ),
+    )
+    .unwrap();
+    let mut store = ResourceStore::new();
+    store.declare(
+        ResourceEntry::builder(PeResource::ChannelList)
+            .build()
+            .unwrap(),
+    );
+    store.declare(
+        ResourceEntry::builder(custom("X-Copy"))
+            .schema(json(r#"{"title":"Copy","type":"integer"}"#))
+            .build()
+            .unwrap(),
+    );
+    assert_eq!(store.put(None, simple("X-Copy")), Ok(()));
+    assert_eq!(
+        store.put(None, simple("X-Paste")),
+        Err(StoreError::ActionNotDeclared(custom("X-Paste")))
+    );
+    // The options of a selector are a List Resource on write too (§13.1.2).
+    let PeData::ChannelList(list) = selector.clone() else {
+        panic!("not ChannelList");
+    };
+    let mut entries = list.into_entries();
+    entries[0].links[0].resource = custom("X-Options");
+    assert_eq!(
+        store.put(None, PeData::ChannelList(PeChannelList::new(entries))),
+        Err(StoreError::OptionsNotAList(custom("X-Options")))
+    );
+    assert_eq!(
+        store.put(None, selector),
+        Err(StoreError::ActionNotDeclared(custom("X-Nowhere")))
     );
 }
 

@@ -34,9 +34,9 @@
 
 #![cfg(target_os = "macos")]
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 mod support;
 use support::corpus::{
@@ -53,13 +53,6 @@ use tutti_au_host::types::{
 /// discovery walks a process-global registry and several tests here open the
 /// same unit. Mirrors `AU_LOCK` in `au_conformance.rs`.
 static AU_LOCK: Mutex<()> = Mutex::new(());
-
-/// `AU_LOCK` is poisoned by any panicking test, and a poisoned lock would turn
-/// one real failure into N spurious ones. The guard is only a serializer — there
-/// is no shared state to be left inconsistent — so recover.
-fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock_recover()
-}
 
 const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
@@ -129,7 +122,7 @@ impl Observed {
 /// halves reporting 512 frames for a 512-frame render.
 #[test]
 fn pre_and_post_render_both_fire_once_each_in_that_order() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
 
     let obs = Arc::new(Observed::default());
@@ -184,7 +177,7 @@ fn pre_and_post_render_both_fire_once_each_in_that_order() {
 /// free to set `OutputIsSilence` alongside, and AUDelay does on a silent input.
 #[test]
 fn each_half_carries_its_own_phase_flag() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
 
     let obs = Arc::new(Observed::default());
@@ -235,7 +228,7 @@ fn each_half_carries_its_own_phase_flag() {
 /// real effect render rather than assuming it.
 #[test]
 fn post_render_exposes_the_buffers_the_au_produced() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
 
     let obs = Arc::new(Observed::default());
@@ -265,7 +258,7 @@ fn post_render_exposes_the_buffers_the_au_produced() {
 /// be 8 pre and 8 post, not 8 and 9, and not 16 of either.
 #[test]
 fn every_render_delivers_exactly_one_pair() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
 
     let obs = Arc::new(Observed::default());
@@ -302,7 +295,7 @@ fn every_render_delivers_exactly_one_pair() {
 /// way — so only the count separates "stopped" from "never started".
 #[test]
 fn the_notify_stops_after_the_handle_is_dropped() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
 
     let obs = Arc::new(Observed::default());
@@ -367,7 +360,7 @@ fn the_notify_stops_after_the_handle_is_dropped() {
 /// situation where a missed removal aliases a live registration onto dead state.
 #[test]
 fn repeated_install_and_drop_leaves_nothing_registered() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
 
     let input = silence(2, BLOCK as usize);
@@ -407,7 +400,7 @@ fn repeated_install_and_drop_leaves_nothing_registered() {
 /// would silently take out the wrong tap. That is what this pins.
 #[test]
 fn two_notifies_coexist_and_are_removed_independently() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
 
     let a = Arc::new(Observed::default());
@@ -461,7 +454,7 @@ fn two_notifies_coexist_and_are_removed_independently() {
 /// error status from it does not fail the render.
 #[test]
 fn a_panicking_callback_is_contained() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
 
     let calls = Arc::new(AtomicU32::new(0));
@@ -502,7 +495,7 @@ fn a_panicking_callback_is_contained() {
 /// exactly on the scheduled value.
 #[test]
 fn a_scheduled_immediate_change_takes_effect() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DYNAMICS.open(RATE, BLOCK);
 
     let params = au.get_parameter_list();
@@ -566,7 +559,7 @@ fn a_scheduled_immediate_change_takes_effect() {
 /// first iteration.
 #[test]
 fn a_batch_of_scheduled_events_is_accepted() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DYNAMICS.open(RATE, BLOCK);
 
     let params = au.get_parameter_list();
@@ -632,7 +625,7 @@ fn a_batch_of_scheduled_events_is_accepted() {
 /// rather than the claim quietly becoming true.
 #[test]
 fn the_can_ramp_flag_is_a_claim_not_a_guarantee() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let (param_id, lo, hi) = SPATIAL_MIXER_RAMP_PARAM;
 
     // The flag really is advertised — otherwise this test is asserting nothing.
@@ -708,7 +701,7 @@ fn the_can_ramp_flag_is_a_claim_not_a_guarantee() {
 /// currently promise the opposite — need updating.
 #[test]
 fn scheduling_does_not_validate_the_parameter_id() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = DELAY.open(RATE, BLOCK);
 
     let bogus = 999_999u32;
@@ -764,7 +757,7 @@ fn scheduling_does_not_validate_the_parameter_id() {
 /// own unit test, because this is the shape a caller actually uses.
 #[test]
 fn scheduling_an_empty_batch_is_a_no_op() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
     au.schedule_parameters(0, ScheduleAddress::GLOBAL, &[])
         .expect("an empty schedule must succeed without an FFI call");

@@ -6,10 +6,10 @@
 //! holds [`PROBE_LOCK`] and a [`Probe`] guard.
 
 use crate::probe::probe_path;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 use tutti_buffers::InputOutput;
 use tutti_fixtures::main_thread;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use assert_no_alloc::assert_no_alloc;
 use tutti_buffers::FloatWidth;
@@ -60,7 +60,7 @@ impl Probe {
     }
 
     fn enter(code: Option<&str>) -> Self {
-        let lock = PROBE_LOCK.lock_recover();
+        let lock = PROBE_LOCK.lock();
         let previous = std::env::var("TUTTI_PROBE_MISBEHAVIOUR").ok();
         // SAFETY: `PROBE_LOCK` is held for the life of this guard, and this
         // binary's tests are its only readers of the variable.

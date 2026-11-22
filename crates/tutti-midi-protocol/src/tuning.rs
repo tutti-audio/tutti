@@ -17,6 +17,7 @@
 //! [`TuningFrequency::NO_CHANGE`], a value of the same type, and has no pitch.
 
 use alloc::vec::Vec;
+use tutti_music::PitchClass;
 use tutti_ump::{MidiChannel, NoteNumber, U7, U14};
 use tutti_units::{Cents, Semitones};
 
@@ -373,13 +374,15 @@ impl OctaveOffsets {
     /// No offset: equal temperament, in the 1-byte form.
     pub const ZERO: Self = Self::Cents([U7::of(0x40); 12]);
 
-    /// The offset of pitch class `class` (0 is C), in cents.
+    /// The offset of `class`, in cents.
     #[must_use]
-    pub fn offset(&self, class: usize) -> Cents {
+    pub fn offset(&self, class: PitchClass) -> Cents {
+        // The twelve offsets run C to B, the order of `semitones_above_c`.
+        let index = usize::from(class.semitones_above_c());
         match self {
-            Self::Cents(bytes) => Cents::new(f64::from(bytes[class % 12].get()) - 64.0),
+            Self::Cents(bytes) => Cents::new(f64::from(bytes[index].get()) - 64.0),
             Self::Fine(words) => Cents::new(
-                (f64::from(words[class % 12].get()) - 8192.0) * 200.0 / f64::from(FRACTION_STEPS),
+                (f64::from(words[index].get()) - 8192.0) * 200.0 / f64::from(FRACTION_STEPS),
             ),
         }
     }
@@ -517,13 +520,13 @@ mod tests {
     #[test]
     fn octave_offsets_follow_the_stated_scales() {
         let one = OctaveOffsets::Cents([0, 0x40, 0x7F, 0, 0, 0, 0, 0, 0, 0, 0, 0].map(U7::of));
-        assert_eq!(one.offset(0), Cents::new(-64.0));
-        assert_eq!(one.offset(1), Cents::new(0.0));
-        assert_eq!(one.offset(2), Cents::new(63.0));
+        assert_eq!(one.offset(PitchClass::C), Cents::new(-64.0));
+        assert_eq!(one.offset(PitchClass::CSharp), Cents::new(0.0));
+        assert_eq!(one.offset(PitchClass::D), Cents::new(63.0));
         let two = OctaveOffsets::Fine([0, 0x2000, 0x3FFF, 0, 0, 0, 0, 0, 0, 0, 0, 0].map(U14::of));
-        assert_eq!(two.offset(0), Cents::new(-100.0));
-        assert_eq!(two.offset(1), Cents::new(0.0));
-        assert!((two.offset(2).get() - 8191.0 * 0.012207).abs() < 1e-2);
+        assert_eq!(two.offset(PitchClass::C), Cents::new(-100.0));
+        assert_eq!(two.offset(PitchClass::CSharp), Cents::new(0.0));
+        assert!((two.offset(PitchClass::D).get() - 8191.0 * 0.012207).abs() < 1e-2);
     }
 
     /// The channel mask: bit n is channel n.

@@ -139,9 +139,9 @@ pub use resource::SavedStateError;
 pub use resource::{
     ActionError, Arrival, CallError, CallId, CanSet, CcIndex, ChangeKind, ClusterKind,
     ColumnSource, CommonState, ConfirmIcon, ConfirmType, Confirmation, ControllerIndexError,
-    CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource, EntryError, GetStateError,
-    InvalidValue, LinkRole, ListedTwice, MAX_LIST_ENTRIES, ModeId, NotAPeChannel, NotAPeMidiMode,
-    NotAPriority, NotAStateSize, NotAStepCount, NotSignificantBits, NotUnixSeconds, NotVendorName,
+    CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource, EntryError, ExtensionError,
+    GetStateError, InvalidValue, LinkRole, ListedTwice, MAX_LIST_ENTRIES, ModeId, NotAPeChannel,
+    NotAPeMidiMode, NotAPriority, NotAStateSize, NotAStepCount, NotSignificantBits, NotUnixSeconds,
     OpaqueBody, PaginationFault, ParamPath, ParamPathError, PeAllCtrlEntry, PeAllCtrlList,
     PeBankProgram, PeBasicChannelRx, PeBasicChannelTx, PeCacheScope, PeChCtrlEntry, PeChCtrlList,
     PeChannel, PeChannelEntry, PeChannelList, PeChannelMode, PeCluster, PeColumn, PeController,
