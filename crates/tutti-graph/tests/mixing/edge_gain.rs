@@ -18,10 +18,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use common::{Kind, Pair, TestNode, bits, input_signal, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    CommitError, Cx, Edge, EdgeGain, EdgeId, Editor, Executor, ForkByClone, ForkTarget,
-    GraphInvalid, GraphSpec, InputPort, Io, Node, NodeKey, Op, OutputPort, Plan, PortSink,
-    PortSource, Prepare, Renderer, Shape, Status, Topology, TransportPosition, Unforkable,
-    ValidGraph, compile,
+    CommitError, Cx, Edge, EdgeGain, EdgeGainError, EdgeId, Editor, Executor, ForkByClone,
+    ForkTarget, GraphInvalid, GraphSpec, InputPort, Io, Node, NodeKey, Op, OutputPort, Plan,
+    PortSink, PortSource, Prepare, Renderer, Shape, Status, Topology, TransportPosition,
+    Unforkable, ValidGraph, compile,
 };
 use tutti_units::Amplitude;
 
@@ -711,14 +711,14 @@ fn set_edge_gain_refuses_what_a_commit_would() {
     };
     assert_eq!(
         rig.ed.set_edge_gain(missing, amp(1.0)),
-        Err(GraphInvalid::GainWithoutEdge { id: missing })
+        Err(EdgeGainError::NoSuchEdge { id: missing })
     );
     for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
         let err = rig
             .ed
             .set_edge_gain(output_edge(1), amp(bad))
             .expect_err("not finite");
-        assert!(matches!(err, GraphInvalid::BadEdgeGain { .. }), "{bad}");
+        assert!(matches!(err, EdgeGainError::NotFinite { .. }), "{bad}");
     }
     assert_eq!(
         rig.ed.edge_gain(output_edge(1)),
@@ -760,13 +760,13 @@ fn validate_refuses_a_malformed_entry() {
     for bad in [f32::NAN, f32::INFINITY] {
         assert!(matches!(
             rig.ed.set_edge_gain(output_edge(1), amp(bad)),
-            Err(GraphInvalid::BadEdgeGain { .. })
+            Err(EdgeGainError::NotFinite { .. })
         ));
     }
     assert!(matches!(
         rig.ed
             .set_edge_gain_range(output_edge(1), tutti_graph::ParamRange::new(f64::NAN, 1.0)),
-        Err(GraphInvalid::BadEdgeGain { .. })
+        Err(EdgeGainError::InvalidRange { .. })
     ));
     rig.ed
         .set_edge_gain(output_edge(1), amp(-2.0))

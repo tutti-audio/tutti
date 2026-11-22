@@ -18,7 +18,7 @@ use crate::mode::{ModeCell, ModeState, NodeMix, NodeMode};
 use crate::param::{ParamIn, ParamPorts, ParamRange, ParamRangeCell, ParamRanges, ParamState};
 use crate::plan::Plan;
 use crate::spec::GraphSpec;
-use crate::values::Values;
+use crate::values::GraphValues;
 use crate::{EdgeId, NodeKey};
 use tutti_buffers::Float;
 
@@ -42,7 +42,7 @@ impl LiveCells {
     /// Writes every cell from `values` (a gain lane's fade from `spec`). A
     /// base and a mix are never written here: each cell is its one writer's
     /// (a knob a route moves too).
-    pub(super) fn sync(&self, spec: &GraphSpec, values: &Values) {
+    pub(super) fn sync(&self, spec: &GraphSpec, values: &GraphValues) {
         self.modes.sync(values);
         self.gains.sync(spec, values);
         self.ranges.sync(values);
@@ -62,7 +62,7 @@ impl LiveCells {
 
     /// Drops the cells of every key `plan` does not place, and writes each
     /// kept unit's mix range from `values`.
-    pub(super) fn keep_placed(&mut self, plan: &Plan, values: &Values) {
+    pub(super) fn keep_placed(&mut self, plan: &Plan, values: &GraphValues) {
         for (&key, cell) in &self.modes.0 {
             cell.store_range(values.range(mix_at(key)));
         }
@@ -96,7 +96,7 @@ impl RangeCells {
         self.0.len()
     }
 
-    fn sync(&self, values: &Values) {
+    fn sync(&self, values: &GraphValues) {
         for (&node, cells) in &self.0 {
             for &param in cells.declared().as_slice() {
                 cells.store(param, values.range(ParamIn { node, param }));
@@ -115,7 +115,7 @@ impl RangeCells {
         max: usize,
         declick: usize,
         declared: Option<ParamPorts>,
-        values: &Values,
+        values: &GraphValues,
     ) -> ParamState<F> {
         if ports == 0 {
             self.0.remove(&key);
@@ -152,7 +152,7 @@ impl GainCells {
         self.0.values().map(GainCell::reclaim).sum()
     }
 
-    fn sync(&self, spec: &GraphSpec, values: &Values) {
+    fn sync(&self, spec: &GraphSpec, values: &GraphValues) {
         for (id, cell) in &self.0 {
             if let Some(g) = spec.gains.get(id) {
                 cell.store_range(values.gain_range(*id));
@@ -169,7 +169,7 @@ impl GainCells {
         &mut self,
         plan: &Plan,
         spec: &GraphSpec,
-        values: &Values,
+        values: &GraphValues,
         bus_weights: &BusLanes,
     ) -> BTreeMap<EdgeId, GainCell> {
         let lanes: BTreeSet<EdgeId> = plan.sum_lanes.iter().flatten().copied().collect();
@@ -210,7 +210,7 @@ impl ModeCells {
         self.0.values().map(ModeCell::reclaim).sum()
     }
 
-    fn sync(&self, values: &Values) {
+    fn sync(&self, values: &GraphValues) {
         for (&node, cell) in &self.0 {
             cell.store(values.mode(node));
             cell.store_range(values.range(mix_at(node)));
@@ -224,7 +224,7 @@ impl ModeCells {
         &mut self,
         key: NodeKey,
         plan: &Plan,
-        values: &Values,
+        values: &GraphValues,
     ) -> ModeState<F> {
         let cell = self
             .0

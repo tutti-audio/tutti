@@ -48,8 +48,8 @@ use proptest::prelude::*;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    CommitError, Cx, Editor, EventOutputPort, Executor, ForkByClone, ForkTarget, GraphInvalid, Io,
-    Law, Node, ParamEvent, ParamIn, ParamInput, ParamRamp, ParamRange, ParamSegment, Prepare,
+    CommitError, Cx, Editor, EventOutputPort, Executor, ForkByClone, ForkTarget, Io, Law, Node,
+    ParamEvent, ParamIn, ParamInput, ParamRamp, ParamRange, ParamRangeError, ParamSegment, Prepare,
     Reference, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
@@ -1177,7 +1177,7 @@ fn a_nan_range_is_refused() {
         assert!(
             matches!(
                 ed.set_param_range(at, range),
-                Err(GraphInvalid::BadParamRange { at: a, .. }) if a == at
+                Err(ParamRangeError::InvalidRange { at: a }) if a == at
             ),
             "a NaN range was not refused"
         );
@@ -2022,14 +2022,14 @@ fn a_bad_range_move_is_refused() {
     ] {
         assert!(matches!(
             ed.set_param_range(at, range),
-            Err(GraphInvalid::BadParamRange { at: a, .. }) if a == at
+            Err(ParamRangeError::InvalidRange { at: a }) if a == at
         ));
     }
     assert!(ed.spec().params.is_empty(), "nothing recorded");
     let gone = param(99, UnitParam::Cutoff);
     assert!(matches!(
         ed.set_param_range(gone, ParamRange::new(0.0, 1.0)),
-        Err(GraphInvalid::UnknownParamNode { missing, .. }) if missing == NodeKey(99)
+        Err(ParamRangeError::NoSuchNode { node }) if node == NodeKey(99)
     ));
     assert!(ed.spec().params.is_empty(), "nothing recorded");
     ed.commit().expect("the graph is untouched");

@@ -522,8 +522,8 @@ pub mod session {
         ConfigError, JobError, RenderError, Rendered, RenderedError, TargetError, Unmeasured,
     };
     pub use tutti_graph::{
-        BusError, BusOutputPort, CloseError, CommitError, Inserted, MissingSource, MixError,
-        ModeError, PassError, Rewired, Unwired, Wired,
+        BusError, BusOutputPort, CloseError, CommitError, EdgeGainError, Inserted, MissingSource,
+        MixError, ModeError, ParamRangeError, PassError, Rewired, Unwired, Wired,
     };
     pub use tutti_graph::{
         BusFeed, BusFold, BusSide, EdgeFade, EdgeId, EventCapacityError, ForkError, InletCounts,

@@ -150,6 +150,42 @@ impl EdgeGain {
     pub const DEFAULT_RANGE: ParamRange = ParamRange::new(-8.0, 8.0);
 }
 
+/// Why an edge-gain control ([`Editor::set_edge_gain`](crate::Editor::set_edge_gain),
+/// [`set_edge_gain_range`](crate::Editor::set_edge_gain_range),
+/// [`set_edge_fade`](crate::Editor::set_edge_fade)) refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum EdgeGainError {
+    /// The edge is not in the spec.
+    #[error("no edge {id:?} to weight")]
+    NoSuchEdge {
+        /// The edge.
+        id: crate::EdgeId,
+    },
+    /// The edge is a lane a bus edge produced: its weight is the fold's, not
+    /// the author's (fade the bus edge with
+    /// [`Editor::set_bus_fade`](crate::Editor::set_bus_fade)).
+    #[error("edge {id:?} is a bus lane, whose weight is the fold's")]
+    BusLane {
+        /// The lane.
+        id: crate::EdgeId,
+    },
+    /// The base is not finite: an infinite weight turns a silent addend into
+    /// NaN on the audio thread.
+    #[error("the base of edge {id:?} is not finite")]
+    NotFinite {
+        /// The edge.
+        id: crate::EdgeId,
+    },
+    /// The range has a NaN bound (`f32::clamp` panics on one, on the audio
+    /// thread). An infinite bound is fine.
+    #[error("the range of edge {id:?} has a NaN bound")]
+    InvalidRange {
+        /// The edge.
+        id: crate::EdgeId,
+    },
+}
+
 /// One lane's live controls: its base, which [`Editor::set_edge_gain`] stores
 /// into and the executor snapshots once per block, and the range a driven
 /// value is clamped to.

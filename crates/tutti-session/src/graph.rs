@@ -53,7 +53,7 @@ use tutti_graph::NodeParts;
 use tutti_graph::fade_gains;
 use tutti_graph::{BusOutputPort, Buses, EdgeFade, EdgeGain, NodeBus};
 use tutti_graph::{
-    CommitError, Editor, EventEdge, EventInputPort, EventOutputPort, Executor, Fade, GraphInvalid,
+    CommitError, EdgeGainError, Editor, EventEdge, EventInputPort, EventOutputPort, Executor, Fade,
     InletNode, InletRing, IntoNode, MeterReader, Prepare, RenderMode,
 };
 use tutti_graph::{
@@ -134,7 +134,7 @@ impl<N> Replacement<N> {
 }
 
 /// Why [`Graph::replace`] took nothing. The incoming node was dropped.
-#[derive(Clone, Debug, PartialEq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ReplaceRefused {
     /// The graph is poisoned (a re-prepare failed with its units out); the
@@ -555,7 +555,7 @@ impl<F: Float> std::fmt::Debug for Graph<F> {
 }
 
 /// What a commit came to.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Committed {
     /// Sent.
     Sent,
@@ -3098,7 +3098,7 @@ impl<F: Float> Graph<F> {
         let id = Self::edge_id(edge).ok_or(GainTargetError::NoLane(edge))?;
         match self.editor.check_gain_edge(id) {
             Ok(()) => {}
-            Err(GraphInvalid::GainOnBusLane { .. }) => return Err(GainTargetError::BusLane(edge)),
+            Err(EdgeGainError::BusLane { .. }) => return Err(GainTargetError::BusLane(edge)),
             Err(_) => return Err(GainTargetError::NoLane(edge)),
         }
         if !self.has_gain_lane(edge) {

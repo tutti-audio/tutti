@@ -20,7 +20,7 @@ use crate::editor::{CommitError, Editor};
 use crate::exec::Executor;
 use crate::node::{IntoNode, Node, NodeParts, Prepare};
 use crate::spec::{EventInputPort, GraphSpec};
-use crate::values::Values;
+use crate::values::GraphValues;
 use crate::wake::Wake;
 use tutti_buffers::Float;
 
@@ -227,7 +227,7 @@ pub struct PendingFork<F: Float = f32> {
     /// figures, generations).
     spec: GraphSpec,
     /// The mode and mix each unit starts steady in.
-    values: Values,
+    values: GraphValues,
     units: Vec<(NodeKey, Unit<F>)>,
 }
 
@@ -1082,7 +1082,7 @@ impl<F: Float> Editor<F> {
         // cell's (a driving lane's knob writes it, so the editor's value may
         // be behind): the fork starts at the base, a lane's value being the
         // fork's own route's to give.
-        let mut values = Values::default();
+        let mut values = GraphValues::default();
         for &key in &keys {
             values.set_mode(key, self.mode(key));
             values.set_mix(key, self.mix(key));

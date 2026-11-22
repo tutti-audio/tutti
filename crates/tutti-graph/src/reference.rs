@@ -127,7 +127,7 @@ use crate::plan::DelayKey;
 use crate::play::PlayClock;
 use crate::spec::{EventEdge, EventInputPort, EventOutputPort, ValidGraph};
 use crate::time::Offset;
-use crate::values::Values;
+use crate::values::GraphValues;
 use tutti_ump::ControlValue;
 use tutti_ump::{
     Address, BendValue, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7,
@@ -285,7 +285,7 @@ pub struct Reference<F: Float = f32> {
     /// given, as moved by [`set_param_range`](Self::set_param_range),
     /// [`set_edge_gain`](Self::set_edge_gain) and
     /// [`set_edge_gain_range`](Self::set_edge_gain_range) since.
-    values: Values,
+    values: GraphValues,
     /// The weight each edge gain's lane was given by the last block it ran
     /// (`w_prev`), kept while the graph keeps the
     /// edge's entry. The reference's own bookkeeping: none of the executor's.
@@ -417,7 +417,7 @@ impl<F: Float> Reference<F> {
             cancelled: 0,
             params: BTreeMap::new(),
             mix_ports: BTreeMap::new(),
-            values: Values::default(),
+            values: GraphValues::default(),
             lane_prev: BTreeMap::new(),
             gain_ports: BTreeMap::new(),
             wanted: BTreeMap::new(),
@@ -636,7 +636,7 @@ impl<F: Float> Reference<F> {
     ///
     /// If `fresh` lacks a needed unit.
     pub fn set_graph(&mut self, graph: &ValidGraph, fresh: BTreeMap<NodeKey, Box<dyn Node<F>>>) {
-        self.set_graph_with(graph, fresh, &BTreeMap::new(), &Values::default());
+        self.set_graph_with(graph, fresh, &BTreeMap::new(), &GraphValues::default());
     }
 
     /// As [`set_graph`](Self::set_graph), with the regenerated keys in
@@ -655,7 +655,7 @@ impl<F: Float> Reference<F> {
         fresh: BTreeMap<NodeKey, Box<dyn Node<F>>>,
         fades: &BTreeMap<NodeKey, crate::Fade>,
     ) {
-        self.set_graph_with(graph, fresh, fades, &Values::default());
+        self.set_graph_with(graph, fresh, fades, &GraphValues::default());
     }
 
     /// [`set_graph_with_fades`](Self::set_graph_with_fades), with a unit placed
@@ -665,7 +665,7 @@ impl<F: Float> Reference<F> {
         graph: &ValidGraph,
         mut fresh: BTreeMap<NodeKey, Box<dyn Node<F>>>,
         fades: &BTreeMap<NodeKey, crate::Fade>,
-        values: &Values,
+        values: &GraphValues,
     ) {
         let t = graph.topology();
         // Keys whose unit is not the one running now: removed, or replaced.

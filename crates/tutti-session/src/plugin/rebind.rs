@@ -51,7 +51,7 @@ use crate::{Clock, ReplaceRefused, Session, SessionEvent};
 use tutti_graph::NodeKey;
 
 /// Why a plugin's ports were not re-inserted ([`PluginChange::PortsRefused`]).
-#[derive(Debug, Clone, PartialEq, Error)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum PortsRefusal {
     /// The plugin's ports cannot be a node: too wide for a block

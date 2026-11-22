@@ -56,7 +56,7 @@ use crate::mode::NodeMix;
 use crate::node::{IntoNode, NodeParts, Prepare, Shape, TransportPosition};
 use crate::param::{ParamIn, ParamRange};
 use crate::spec::{EventEdge, EventInputPort, EventOutputPort, GraphSpec};
-use crate::values::Values;
+use crate::values::GraphValues;
 use tutti_buffers::{Float, Planes, PlanesMut};
 
 /// One unit waiting for [`GraphBuilder::build`], with its fork source, so a
@@ -167,7 +167,7 @@ struct Pending<F: Float> {
 pub struct GraphBuilder<F: Float = f32> {
     spec: GraphSpec,
     /// Each node's mix, which the built editor starts its units at.
-    values: Values,
+    values: GraphValues,
     /// Every added node's shape, read at `add` — the widths the fan-out
     /// calls use.
     shapes: Vec<Shape>,
@@ -205,7 +205,7 @@ impl<F: Float> GraphBuilder<F> {
         spec.topology.outputs = vec![Vec::new(); outputs.count() as usize];
         Self {
             spec,
-            values: Values::default(),
+            values: GraphValues::default(),
             shapes: Vec::new(),
             units: Vec::new(),
         }

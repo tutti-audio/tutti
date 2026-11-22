@@ -70,7 +70,7 @@ use crate::node::Prepare;
 use crate::plan::{Delta, Plan};
 use crate::spec::{EventInputPort, GraphSpec, ValidGraph};
 use crate::tap::TapWriter;
-use crate::values::Values;
+use crate::values::GraphValues;
 use crate::{EventTapId, MeterId, NodeKey, TapId};
 use tutti_buffers::Float;
 
@@ -258,7 +258,7 @@ pub struct Editor<F: Float = f32> {
     /// and range: what a unit placed by a commit starts in, and what a fork
     /// starts every unit in. Never in the spec, whose commits they do not
     /// move.
-    values: Values,
+    values: GraphValues,
     /// [`revision`](Self::revision): moved by every call that can change
     /// what a reader of the editor sees.
     revision: u64,
@@ -390,7 +390,7 @@ impl<F: Float> Editor<F> {
             event_capacity: cap,
             fork_health: Vec::new(),
             cells: LiveCells::new(),
-            values: Values::default(),
+            values: GraphValues::default(),
             revision: 0,
             stager,
             main_output_fade: None,
@@ -523,14 +523,14 @@ impl<F: Float> Editor<F> {
 
     /// The values: each node's mode and mix, each port's range, and each gain
     /// lane's base and range.
-    pub(crate) fn values(&self) -> &Values {
+    pub(crate) fn values(&self) -> &GraphValues {
         &self.values
     }
 
     /// The values, for a caller that builds the editor whole (a fork) or
     /// follows another graph's nodes (the test harness). Moves the
     /// [`revision`](Self::revision).
-    pub(crate) fn values_mut(&mut self) -> &mut Values {
+    pub(crate) fn values_mut(&mut self) -> &mut GraphValues {
         self.touch();
         &mut self.values
     }

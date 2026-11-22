@@ -8,11 +8,10 @@ use tutti_units::{Amplitude, Mix};
 use super::{CommitError, Editor};
 use crate::NodeKey;
 use crate::bus_edge::{BusOutputPort, NodeBus};
-use crate::gain::{EdgeFade, EdgeGain, GainCell};
+use crate::gain::{EdgeFade, EdgeGain, EdgeGainError, GainCell};
 use crate::mode::{MixError, ModeCell, ModeError, NodeMix, NodeMode};
-use crate::param::{ParamIn, ParamRange, ParamRangeCell};
+use crate::param::{ParamIn, ParamRange, ParamRangeCell, ParamRangeError};
 use crate::pass::Pass;
-use crate::spec::GraphInvalid;
 use crate::{Edge, EdgeId, PortSink};
 
 impl<F: Float> Editor<F> {
@@ -49,19 +48,19 @@ impl<F: Float> Editor<F> {
     ///
     /// # Errors
     ///
-    /// Refused, changing nothing, with the error the commit would fail on:
-    /// [`GraphInvalid::BadParamRange`] for a NaN bound or crossed bounds on a
-    /// circular param (`ParamRange::arc` writes one), and
-    /// [`GraphInvalid::UnknownParamNode`] for a key with no node.
-    pub fn set_param_range(&mut self, at: ParamIn, range: ParamRange) -> Result<(), GraphInvalid> {
+    /// Refused, changing nothing: [`ParamRangeError::InvalidRange`] for a NaN
+    /// bound or crossed bounds on a circular param (`ParamRange::arc` writes
+    /// one), and [`ParamRangeError::NoSuchNode`] for a key with no node.
+    pub fn set_param_range(
+        &mut self,
+        at: ParamIn,
+        range: ParamRange,
+    ) -> Result<(), ParamRangeError> {
         if range.min.is_nan() || range.max.is_nan() || !range.fits(at.param.param) {
-            return Err(GraphInvalid::BadParamRange { at, range });
+            return Err(ParamRangeError::InvalidRange { at });
         }
         if !self.spec.topology.nodes.contains_key(&at.node) {
-            return Err(GraphInvalid::UnknownParamNode {
-                at,
-                missing: at.node,
-            });
+            return Err(ParamRangeError::NoSuchNode { node: at.node });
         }
         self.touch();
         self.values.set_range(at, range);
@@ -118,13 +117,13 @@ impl<F: Float> Editor<F> {
     ///
     /// # Errors
     ///
-    /// Refused, changing nothing: [`GraphInvalid::GainWithoutEdge`] when
-    /// `id` is not an edge of the spec, and [`GraphInvalid::BadEdgeGain`]
-    /// for a base that is not finite.
-    pub fn set_edge_gain(&mut self, id: EdgeId, base: Amplitude) -> Result<(), GraphInvalid> {
-        let range = self.edge_value_range(id);
+    /// Refused, changing nothing: [`EdgeGainError::NotFinite`] for a base
+    /// that is not finite, [`EdgeGainError::NoSuchEdge`] when `id` is not an
+    /// edge of the spec, and [`EdgeGainError::BusLane`] for a lane of a bus
+    /// edge.
+    pub fn set_edge_gain(&mut self, id: EdgeId, base: Amplitude) -> Result<(), EdgeGainError> {
         if !base.get().is_finite() {
-            return Err(GraphInvalid::BadEdgeGain { id, base, range });
+            return Err(EdgeGainError::NotFinite { id });
         }
         self.check_gain_edge(id)?;
         self.touch();
@@ -134,15 +133,6 @@ impl<F: Float> Editor<F> {
             cell.store(base);
         }
         Ok(())
-    }
-
-    /// Edge `id`'s range as held now (the default for an edge with no entry).
-    fn edge_value_range(&self, id: EdgeId) -> ParamRange {
-        if self.spec.gains.contains_key(&id) {
-            self.values.gain_range(id)
-        } else {
-            EdgeGain::DEFAULT_RANGE
-        }
     }
 
     /// Gives edge `id` a gain lane if it has none, starting at unity with the
@@ -167,10 +157,10 @@ impl<F: Float> Editor<F> {
     ///
     /// # Errors
     ///
-    /// [`GraphInvalid::GainWithoutEdge`] when `id` is not an edge of the
-    /// spec, and [`GraphInvalid::GainOnBusLane`] for a lane of a bus edge
-    /// (fade the bus edge with [`set_bus_fade`](Self::set_bus_fade)).
-    pub fn set_edge_fade(&mut self, id: EdgeId, fade: EdgeFade) -> Result<(), GraphInvalid> {
+    /// [`EdgeGainError::NoSuchEdge`] when `id` is not an edge of the spec,
+    /// and [`EdgeGainError::BusLane`] for a lane of a bus edge (fade the bus
+    /// edge with [`set_bus_fade`](Self::set_bus_fade)).
+    pub fn set_edge_fade(&mut self, id: EdgeId, fade: EdgeFade) -> Result<(), EdgeGainError> {
         self.check_gain_edge(id)?;
         self.touch();
         self.declare_lane(id);
@@ -330,16 +320,16 @@ impl<F: Float> Editor<F> {
     ///
     /// # Errors
     ///
-    /// [`GraphInvalid::GainWithoutEdge`] when `id` is not an edge of the spec,
-    /// and [`GraphInvalid::GainOnBusLane`] for a lane of a bus edge.
-    pub fn check_gain_edge(&self, id: EdgeId) -> Result<(), GraphInvalid> {
+    /// [`EdgeGainError::NoSuchEdge`] when `id` is not an edge of the spec,
+    /// and [`EdgeGainError::BusLane`] for a lane of a bus edge.
+    pub fn check_gain_edge(&self, id: EdgeId) -> Result<(), EdgeGainError> {
         if self.spec.has_edge(id) {
             return Ok(());
         }
         if self.spec.has_bus_edges() && self.lowered().is_ok_and(|l| l.lanes.contains_key(&id)) {
-            return Err(GraphInvalid::GainOnBusLane { id });
+            return Err(EdgeGainError::BusLane { id });
         }
-        Err(GraphInvalid::GainWithoutEdge { id })
+        Err(EdgeGainError::NoSuchEdge { id })
     }
 
     /// Clamps edge `id`'s driven value to `range` from the next block on,
@@ -351,21 +341,16 @@ impl<F: Float> Editor<F> {
     ///
     /// # Errors
     ///
-    /// Refused, changing nothing: [`GraphInvalid::GainWithoutEdge`] when `id`
-    /// is not an edge of the spec, and [`GraphInvalid::BadEdgeGain`] for a
-    /// NaN bound.
+    /// Refused, changing nothing: [`EdgeGainError::InvalidRange`] for a NaN
+    /// bound, [`EdgeGainError::NoSuchEdge`] when `id` is not an edge of the
+    /// spec, and [`EdgeGainError::BusLane`] for a lane of a bus edge.
     pub fn set_edge_gain_range(
         &mut self,
         id: EdgeId,
         range: ParamRange,
-    ) -> Result<(), GraphInvalid> {
+    ) -> Result<(), EdgeGainError> {
         if range.min.is_nan() || range.max.is_nan() {
-            let base = if self.spec.gains.contains_key(&id) {
-                self.values.base(id)
-            } else {
-                Amplitude::UNITY
-            };
-            return Err(GraphInvalid::BadEdgeGain { id, base, range });
+            return Err(EdgeGainError::InvalidRange { id });
         }
         self.check_gain_edge(id)?;
         self.touch();

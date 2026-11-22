@@ -9,7 +9,7 @@ use crate::spec::GraphInvalid;
 use crate::{EventTapId, MeterId, NodeKey, TapId};
 
 /// Why [`Editor::commit`](crate::Editor::commit) failed.
-#[derive(Clone, Debug, PartialEq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum CommitError {
     /// The spec is malformed.

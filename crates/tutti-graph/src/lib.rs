@@ -747,7 +747,7 @@ pub use tutti_curve::{Curvature, DECLICK, Exponent, FadeLaw, Law, declick_frames
 // latency pass and is exported as `latency_plan`.
 pub use bus::{Bus, BusRole, Buses, InBus, InEvents, MAX_BUSES, OutBus, OutEvents};
 pub use bus_edge::{BusError, BusFeed, BusFold, BusOutputPort, BusSide, Lowering, NodeBus};
-pub use gain::{EdgeFade, EdgeGain};
+pub use gain::{EdgeFade, EdgeGain, EdgeGainError};
 pub use graph::{
     Edge, EdgeId, EventTapId, EventTapPort, EventTapSpec, FeedbackFrom, InputPort, Invalid,
     MeterId, MeterSpec, NodeKey, NodeSpec, OutputPort, PortSink, PortSource, TapAlign, TapId,
@@ -776,7 +776,7 @@ pub use node::{
 pub use par::Pool;
 pub use param::{
     MAX_PARAM_PORTS, ParamIn, ParamInput, ParamPorts, ParamPortsError, ParamRange, ParamRangeCell,
-    ParamRangeReader, RangeView,
+    ParamRangeError, ParamRangeReader, RangeView,
 };
 pub use param_event::{ParamEvent, ParamKind, ParamRamp, ParamSegment};
 pub use pass::{Pass, PassError};
@@ -830,6 +830,8 @@ mod error_bounds {
         err::<crate::ForkError>();
         err::<crate::ForkFault>();
         err::<crate::ParamPortsError>();
+        err::<crate::ParamRangeError>();
+        err::<crate::EdgeGainError>();
         err::<crate::TransportChangeRejected>();
         err::<crate::VerifyError>();
     }

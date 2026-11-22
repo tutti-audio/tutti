@@ -22,10 +22,10 @@ use crate::{Edge, EdgeId, InputPort, PortSink, PortSource};
 use crate::{Invalid, Valid};
 use crate::{NodeKey, Topology};
 use tutti_buffers::BusTopology;
-use tutti_units::{Amplitude, Samples};
+use tutti_units::Samples;
 
 use crate::node::Resolution;
-use crate::param::{ParamIn, ParamRange};
+use crate::param::ParamIn;
 
 /// An event **input** port of a node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -661,8 +661,8 @@ impl GraphSpec {
     }
 }
 
-/// Why a [`GraphSpec`] is malformed, or a control was refused.
-#[derive(Clone, Debug, PartialEq)]
+/// Why a [`GraphSpec`] is malformed.
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum GraphInvalid {
     /// The embedded `Topology` is invalid. Only fatal faults are carried; an
@@ -704,18 +704,6 @@ pub enum GraphInvalid {
         /// The key that is not there.
         missing: NodeKey,
     },
-    /// A param port's range has crossed bounds on a circular param (an arc
-    /// is written `ParamRange::arc`; ordering `170..-170` would read the
-    /// opposite arc), or a NaN bound. Refused rather than
-    /// ordered where it is applied: a NaN bound clamps every value to NaN or
-    /// to the other bound, and `f32::clamp` panics on it — on the audio
-    /// thread. An infinite bound is fine (no clamp on that side).
-    BadParamRange {
-        /// The param port.
-        at: ParamIn,
-        /// Its range.
-        range: ParamRange,
-    },
     /// A gain entry names an edge that is not in the graph: a stale entry,
     /// which would otherwise weight nothing, or weight a later edge that
     /// reuses the key. [`GraphSpec::disconnect`] removes the entry with the
@@ -723,18 +711,6 @@ pub enum GraphInvalid {
     GainWithoutEdge {
         /// The edge the entry names.
         id: EdgeId,
-    },
-    /// An edge gain whose base is not finite, or whose range has a NaN
-    /// bound: refused rather than multiplied into a signal on the audio
-    /// thread (`f32::clamp` panics on a NaN bound, and an infinite weight
-    /// turns a silent addend into NaN).
-    BadEdgeGain {
-        /// The edge.
-        id: EdgeId,
-        /// The base asked for.
-        base: Amplitude,
-        /// The range asked for.
-        range: ParamRange,
     },
     /// An edge gain is driven from an event output of a node that is not in
     /// the topology.
@@ -748,13 +724,6 @@ pub enum GraphInvalid {
     /// declared buses, which `validate` (it sees no shapes) cannot read:
     /// [`GraphSpec::lowered`] first, and validate its `spec`.
     BusEdgesUnlowered,
-    /// A gain is set on a lane a bus edge produced: its weight is the
-    /// fold's, not the author's
-    /// ([`Editor::set_edge_gain`](crate::Editor::set_edge_gain)).
-    GainOnBusLane {
-        /// The lane.
-        id: EdgeId,
-    },
 }
 
 /// A [`GraphSpec`] that passed [`validate`](GraphSpec::validate).

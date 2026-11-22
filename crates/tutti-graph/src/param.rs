@@ -261,7 +261,7 @@ impl Quantity for CellValue {
 /// `ParamRamp` wire is. Crossed bounds
 /// are ordered where they are applied, never a panic; a NaN bound never
 /// reaches the audio thread
-/// ([`GraphInvalid::BadParamRange`](crate::GraphInvalid::BadParamRange)).
+/// ([`ParamRangeError::InvalidRange`]).
 /// Sixteen bytes, so a port's live range is published whole through a
 /// [`ParamRangeCell`] and a reader sees one publish's `min` and `max`
 /// together.
@@ -283,7 +283,7 @@ impl ParamRange {
     /// `min..=max`. For a circular param ([`UnitParam::is_circular`]) the
     /// bounds read as an arc, `min` to `max` counter-clockwise, and `min` must
     /// not exceed `max` (a crossed range is refused,
-    /// [`GraphInvalid::BadParamRange`](crate::GraphInvalid::BadParamRange));
+    /// [`ParamRangeError::InvalidRange`]);
     /// [`arc`](Self::arc) writes one by its centre.
     #[must_use]
     pub const fn new(min: f64, max: f64) -> Self {
@@ -295,7 +295,7 @@ impl ParamRange {
     /// only way to write a bounded range of one: `new(170.0, -170.0)` would
     /// be ordered into `-170..170`, the opposite arc, and a circular param's
     /// port refuses a crossed range
-    /// ([`GraphInvalid::BadParamRange`](crate::GraphInvalid::BadParamRange)).
+    /// ([`ParamRangeError::InvalidRange`]).
     ///
     /// `half_span` is taken as its magnitude. The stored bounds are
     /// `centre ∓ half_span`, not wrapped, so an arc across ±180° has
@@ -441,6 +441,28 @@ impl RangeView {
             }
         }
     }
+}
+
+/// Why [`Editor::set_param_range`](crate::Editor::set_param_range) refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ParamRangeError {
+    /// The spec has no node at the key.
+    #[error("no node {} to set a param range on", .node.0)]
+    NoSuchNode {
+        /// The key.
+        node: crate::NodeKey,
+    },
+    /// The range has a NaN bound, or crossed bounds on a circular param (an
+    /// arc is written [`ParamRange::arc`]; ordering `170..-170` would read the
+    /// opposite arc). A NaN bound clamps every value to NaN or to the other
+    /// bound, and `f32::clamp` panics on it, on the audio thread. An infinite
+    /// bound is fine (no clamp on that side).
+    #[error("the range of {at:?} has a NaN bound or a crossed arc")]
+    InvalidRange {
+        /// The param port.
+        at: ParamIn,
+    },
 }
 
 impl Default for ParamRange {

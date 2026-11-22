@@ -15,9 +15,9 @@ use std::collections::BTreeMap;
 
 use common::{Kind, Pair, SpecBehaviour, bits, driver_value, input_signal, prepare};
 use tutti_graph::{
-    CompileError, Edge, EdgeId, Editor, EventOutputPort, ForkCause, ForkSource, Forked,
-    GraphInvalid, GraphSpec, InputPort, IntoNode, Node, NodeKey, NodeParts, OutputPort, ParamRange,
-    PortSink, PortSource, RenderMode, Topology, Unforkable, ValidGraph, compile,
+    CompileError, Edge, EdgeGainError, EdgeId, Editor, EventOutputPort, ForkCause, ForkSource,
+    Forked, GraphInvalid, GraphSpec, InputPort, IntoNode, Node, NodeKey, NodeParts, OutputPort,
+    ParamRange, PortSink, PortSource, RenderMode, Topology, Unforkable, ValidGraph, compile,
 };
 use tutti_units::{Amplitude, Samples, Tail};
 
@@ -589,7 +589,7 @@ fn a_source_is_structural_and_a_range_is_a_control() {
     );
     assert!(matches!(
         ed.set_edge_gain_range(id, ParamRange::new(f64::NAN, 1.0)),
-        Err(GraphInvalid::BadEdgeGain { .. })
+        Err(EdgeGainError::InvalidRange { .. })
     ));
 
     assert!(

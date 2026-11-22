@@ -11,8 +11,8 @@
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::testing as common;
 use tutti_graph::{
-    Cx, Editor, EventOutputPort, Executor, FadeLaw, GraphInvalid, Io, Law, Node, NodeKey,
-    ParamEvent, ParamIn, ParamInput, ParamRange, ParamSegment, Prepare, Shape, Status,
+    Cx, Editor, EventOutputPort, Executor, FadeLaw, Io, Law, Node, NodeKey, ParamEvent, ParamIn,
+    ParamInput, ParamRange, ParamRangeError, ParamSegment, Prepare, Shape, Status,
     TransportPosition, Unforkable,
 };
 use tutti_graph::{OutputPort, PortSource};
@@ -253,7 +253,7 @@ fn a_crossed_range_on_a_circular_param_is_refused() {
     let crossed = ParamRange::new(170.0, -170.0);
     assert!(matches!(
         ed.set_param_range(at(UnitParam::Azimuth), crossed),
-        Err(GraphInvalid::BadParamRange { at: a, .. }) if a == at(UnitParam::Azimuth)
+        Err(ParamRangeError::InvalidRange { at: a }) if a == at(UnitParam::Azimuth)
     ));
     ed.set_param_range(
         at(UnitParam::Azimuth),

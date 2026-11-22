@@ -21,7 +21,7 @@ use tutti_units::{Amplitude, Mix};
 /// for a mix), an edge's base ([`Amplitude::UNITY`]) and range
 /// ([`EdgeGain::DEFAULT_RANGE`]).
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct Values {
+pub(crate) struct GraphValues {
     modes: BTreeMap<NodeKey, NodeMode>,
     mixes: BTreeMap<NodeKey, Mix>,
     ranges: BTreeMap<ParamIn, ParamRange>,
@@ -47,7 +47,7 @@ fn default_range(at: ParamIn) -> ParamRange {
     }
 }
 
-impl Values {
+impl GraphValues {
     /// `node`'s mode: [`NodeMode::Active`] unless one was set.
     pub(crate) fn mode(&self, node: NodeKey) -> NodeMode {
         self.modes.get(&node).copied().unwrap_or_default()
