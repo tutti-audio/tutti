@@ -1943,10 +1943,11 @@ impl Drop for RenderHandle {
 /// `refusals`) when the plugin is closed or dead, or the instance's close (or an exclusive
 /// call) holds the gate.
 ///
-/// **A panic under the gate kills the core.** The guard's drop then marks the gate closed: the
-/// plugin may be in any state (the panic came out of an entry mid-call), so every later entry
-/// finds it closed and refuses: the handle renders silence from then
-/// on, and the plugin is closed by the instance's drop as ever. Free (not a method), so the
+/// **A panic that begins under the gate kills the core.** The guard's drop then marks the gate
+/// closed: the plugin may be in any state (the panic came out of an entry mid-call), so every
+/// later entry finds it closed and refuses: the handle renders silence from then on. An entry
+/// made while an earlier panic is already unwinding (from a `Drop`) and that returns normally
+/// leaves the gate open, and the plugin is closed by the instance's drop as ever. Free (not a method), so the
 /// caller can keep borrowing the handle's other fields (the name) across the call.
 fn gated<R>(
     core: &Core,
@@ -1959,24 +1960,37 @@ fn gated<R>(
         refusals.gate.add(1);
         return refused;
     };
-    let gate = KillOnUnwind(gate);
-    if *gate.0 {
+    let gate = KillOnUnwind::new(gate);
+    if *gate.gate {
         refusals.gate.add(1);
         return refused;
     }
     // The guard is held to the end of this function, so for the whole call; a panic out of `f`
-    // unwinds through it and closes the gate.
+    // that begins in it unwinds through the guard and closes the gate.
     f(entry, core)
 }
 
-/// The gate's guard, which closes the gate when dropped by a panic: the plugin may be in any
-/// state after one.
-struct KillOnUnwind<'a>(MutexGuard<'a, bool>);
+/// The gate's guard, which closes the gate when a panic begins while it is held: the plugin may
+/// be in any state after one. A panic already unwinding when the guard was taken is not one.
+struct KillOnUnwind<'a> {
+    gate: MutexGuard<'a, bool>,
+    /// Whether this thread was already unwinding when the guard was taken.
+    panicking: bool,
+}
+
+impl<'a> KillOnUnwind<'a> {
+    fn new(gate: MutexGuard<'a, bool>) -> Self {
+        Self {
+            gate,
+            panicking: std::thread::panicking(),
+        }
+    }
+}
 
 impl Drop for KillOnUnwind<'_> {
     fn drop(&mut self) {
-        if std::thread::panicking() {
-            *self.0 = true;
+        if std::thread::panicking() && !self.panicking {
+            *self.gate = true;
         }
     }
 }

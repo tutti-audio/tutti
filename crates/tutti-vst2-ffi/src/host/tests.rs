@@ -1072,6 +1072,73 @@ fn a_panic_under_the_gate_kills_the_core() {
     );
 }
 
+/// **A render made while an earlier panic unwinds leaves the core alive** when it returns
+/// normally: only a panic that begins under the gate kills it.
+#[test]
+fn a_render_during_an_earlier_unwind_leaves_the_core_alive() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static RENDERS: AtomicUsize = AtomicUsize::new(0);
+
+    extern "C" fn dispatch(
+        _: *mut AEffect,
+        _: i32,
+        _: i32,
+        _: isize,
+        _: *mut c_void,
+        _: f32,
+    ) -> isize {
+        0
+    }
+    extern "C" fn render(_: *mut AEffect, _: *const *const f32, outputs: *mut *mut f32, n: i32) {
+        RENDERS.fetch_add(1, Ordering::SeqCst);
+        // SAFETY: the test's buffer has two output channels of `n` samples.
+        unsafe { std::slice::from_raw_parts_mut(*outputs, n as usize) }.fill(1.0);
+    }
+
+    /// Renders one good block from its `Drop`.
+    struct RenderOnDrop<'a>(&'a mut RenderHandle);
+    impl Drop for RenderOnDrop<'_> {
+        fn drop(&mut self) {
+            let none: Vec<Vec<f32>> = Vec::new();
+            let mut host: HostBuffer<f32> = HostBuffer::new(0, 2);
+            let mut two = vec![vec![0.0f32; 4]; 2];
+            self.0.process(&mut host.bind(&none, &mut two));
+        }
+    }
+
+    let effect = fake_effect(dispatch);
+    // SAFETY: the test's leaked `AEffect`; nothing else touches it yet.
+    unsafe {
+        (*effect).numOutputs = 2;
+        (*effect).processReplacing = Some(render);
+        (*effect).flags = PluginFlags::CAN_REPLACING.bits();
+    }
+    let (instance, main) = instance_over(effect);
+    let mut handle = instance.render_handle(main);
+
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _render = RenderOnDrop(&mut handle);
+        panic!("an unrelated panic, unwinding through the render");
+    }));
+    assert!(panicked.is_err());
+    assert_eq!(
+        RENDERS.load(Ordering::SeqCst),
+        1,
+        "the render during the unwind reached the plugin"
+    );
+
+    let none: Vec<Vec<f32>> = Vec::new();
+    let mut host: HostBuffer<f32> = HostBuffer::new(0, 2);
+    let mut two = vec![vec![9.0f32; 4]; 2];
+    handle.process(&mut host.bind(&none, &mut two));
+    assert_eq!(
+        RENDERS.load(Ordering::SeqCst),
+        2,
+        "a render that returned normally during an earlier unwind killed the core"
+    );
+    drop(instance);
+}
+
 /// **Dropping the instance on its own thread sends the close sequence in order**: the
 /// editor, `effStopProcess` if processing, `effMainsChanged(0)` if resumed, then
 /// `effClose`; a plugin that was not resumed or not processing sees neither.
