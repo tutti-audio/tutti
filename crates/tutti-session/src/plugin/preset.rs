@@ -15,7 +15,7 @@ use tutti_plugin::{Answer, PluginAnswers};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, PresetError, PresetId, PresetSupport};
 
-use super::op::{AwaitingOp, InProcessOp, Op, OutOfProcessOp, PluginOp, Sealed as OpSealed};
+use super::op::{InProcessOp, Op, OutOfProcessOp, PluginOp, Sealed as OpSealed};
 use super::state::{Landed, PluginApplyError};
 use super::{AnyPlugin, HostedPlugin};
 use crate::SessionFloat;
@@ -48,13 +48,13 @@ pub enum PresetStartError {
 /// ```
 /// fn send<T: Send>() {}
 /// send::<tutti_session::LoadPresetOutOfProcess>();
-/// send::<tutti_session::LoadingPresetOutOfProcess>();
+/// send::<tutti_session::AwaitingOp<tutti_session::LoadPresetOp>>();
 /// send::<tutti_session::LoadedPreset>();
 /// ```
 pub type LoadPreset = Op<LoadPresetOp>;
 
-/// A preset to load into a plugin that runs in this process: `!Send`, run on the
-/// main thread. Its [`run`](InProcessOp::run) asks the plugin to load the preset
+/// The value [`Session::load_preset`] and [`Session::load_preset_file`] return for
+/// a plugin in this process: `!Send`, run on the main thread. Its [`run`](InProcessOp::run) asks the plugin to load the preset
 /// and yields the [`LoadedPreset`], which [`Session::apply`] takes back and which
 /// has the session read the plugin's parameters again. It ends in
 /// [`PresetError::Lost`] when the node was removed or the plugin replaced since
@@ -63,22 +63,16 @@ pub type LoadPreset = Op<LoadPresetOp>;
 /// [`PresetError::Refused`] when it declined.
 pub type LoadPresetInProcess = InProcessOp<LoadPresetOp>;
 
-/// A preset to load into a plugin that runs in a `plugin-server` process: `Send`,
-/// and a `Future` through
-/// `IntoFuture` that yields the [`LoadedPreset`],
-/// which [`Session::apply`] takes back on the main thread. Dropping it unawaited
-/// sends nothing.
-pub type LoadPresetOutOfProcess = OutOfProcessOp<LoadPresetOp>;
-
-/// An out-of-process preset load being awaited ([`LoadPresetOutOfProcess`]):
-/// resolves to the [`LoadedPreset`] once the server has taken the preset.
+/// The value [`Session::load_preset`] and [`Session::load_preset_file`] return for
+/// a plugin in a `plugin-server` process: `Send`, and a `Future` through
+/// `IntoFuture` that yields the [`LoadedPreset`], which [`Session::apply`] takes
+/// back on the main thread. Dropping it unawaited sends nothing.
 ///
 /// Dropped after the first poll and before it resolves, the future drops the
 /// receiver, but the request is already queued: **the server may still load the
-/// preset**. No [`LoadedPreset`] exists for it, because one is made only by this
-/// future resolving, so [`Session::apply`] is never run for that load and the
-/// session's view of the plugin's parameters is stale until they are read
-/// again.
+/// preset**. No [`LoadedPreset`] exists for it, so [`Session::apply`] is never
+/// run for that load and the session's view of the plugin's parameters is stale
+/// until they are read again.
 ///
 /// # Errors
 ///
@@ -87,9 +81,13 @@ pub type LoadPresetOutOfProcess = OutOfProcessOp<LoadPresetOp>;
 /// before it answered; [`PresetError::Unsupported`] when the plugin has no such
 /// operation; [`PresetError::Refused`] when it declined;
 /// [`PresetError::Busy`] when the bridge's queue was full (nothing was sent);
-/// [`PresetError::Stalled`] when the server did not answer in time (the
-/// preset may have loaded).
-pub type LoadingPresetOutOfProcess = AwaitingOp<LoadPresetOp>;
+/// [`PresetError::Stalled`] when the server did not answer in time (the preset
+/// may have loaded).
+///
+/// # Panics
+///
+/// When polled after it resolved.
+pub type LoadPresetOutOfProcess = OutOfProcessOp<LoadPresetOp>;
 
 /// The load of a preset into a plugin ([`Session::load_preset`],
 /// [`Session::load_preset_file`]); with `needs`, a plugin whose preset support
@@ -120,9 +118,9 @@ impl PluginOp for LoadPresetOp {
         PresetError::Lost
     }
 
-    fn admit(&self, handle: &PluginHandle) -> Result<(), PresetError> {
+    fn admit(&self, support: PresetSupport) -> Result<(), PresetError> {
         match self.needs {
-            Some(needs) if needs != handle.preset_support() => Err(PresetError::Unsupported),
+            Some(needs) if needs != support => Err(PresetError::Unsupported),
             _ => Ok(()),
         }
     }

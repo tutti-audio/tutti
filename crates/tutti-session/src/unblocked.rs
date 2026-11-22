@@ -12,24 +12,28 @@ use tutti_platform::WeakExecutor;
 
 use crate::loaded::caught_by;
 
-/// An error type that can say why work ended without its output: the session's
-/// executor was gone, or the work panicked. A [`Unblocked`]'s error implements it with
-/// its own variants.
-pub trait Unanswered: sealed::Sealed {
-    /// The session's executor is gone, refused the `unblock` (the OS would not
-    /// start a thread), or dropped the task before it ran: the host is shutting
-    /// down and the work did not fail.
-    #[doc(hidden)]
-    fn shut_down() -> Self;
-
-    /// The work panicked; `message` is the panic's, when it was a string.
-    #[doc(hidden)]
-    fn panicked(message: String) -> Self;
-}
+/// An error type a [`Unblocked`] can end in without the work's output: the
+/// session's executor was gone, or the work panicked. A marker the session's own
+/// errors implement; the trait is sealed and has no methods an app can call.
+///
+/// ```compile_fail
+/// use tutti_session::{LoadError, Unanswered};
+/// let _ = LoadError::shut_down();
+/// ```
+pub trait Unanswered: sealed::Sealed {}
 
 pub(crate) mod sealed {
-    /// Keeps [`Unanswered`](super::Unanswered) to the session's own errors.
-    pub trait Sealed {}
+    /// What an [`Unanswered`](super::Unanswered) error says of work that ended
+    /// without its output; unnameable outside the crate.
+    pub trait Sealed {
+        /// The session's executor is gone, refused the `unblock` (the OS would not
+        /// start a thread), or dropped the task before it ran: the host is shutting
+        /// down and the work did not fail.
+        fn shut_down() -> Self;
+
+        /// The work panicked; `message` is the panic's, when it was a string.
+        fn panicked(message: String) -> Self;
+    }
 }
 
 /// `work` over `input`, run as a task on the session's executor and awaited.
@@ -162,9 +166,9 @@ mod tests {
         Panicked(String),
     }
 
-    impl sealed::Sealed for Toy {}
+    impl Unanswered for Toy {}
 
-    impl Unanswered for Toy {
+    impl sealed::Sealed for Toy {
         fn shut_down() -> Self {
             Self::ShutDown
         }

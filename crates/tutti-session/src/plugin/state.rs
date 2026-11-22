@@ -24,7 +24,7 @@ use tutti_plugin::{Answer, PluginAnswers};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, PluginRef, StateError, StateUse};
 
-use super::op::{AwaitingOp, InProcessOp, Op, OutOfProcessOp, PluginOp, Sealed as OpSealed};
+use super::op::{InProcessOp, Op, OutOfProcessOp, PluginOp, Sealed as OpSealed};
 use super::{AnyPlugin, Gate};
 use crate::SessionFloat;
 use crate::apply::{Cut, Sealed};
@@ -69,11 +69,12 @@ pub enum PluginApplyError {
 /// ```
 /// fn send<T: Send>() {}
 /// send::<tutti_session::SaveStateOutOfProcess>();
-/// send::<tutti_session::SavingStateOutOfProcess>();
+/// send::<tutti_session::AwaitingOp<tutti_session::SaveStateOp>>();
 /// ```
 pub type SaveState = Op<SaveStateOp>;
 
-/// A state to save from a plugin that runs in this process: `!Send`, run on the
+/// The value [`Session::save_state`] returns for a plugin in this process:
+/// `!Send`, run on the
 /// main thread. Its [`run`](InProcessOp::run) asks the plugin for its state and
 /// yields the [`PeerState`]; it ends in [`StateError::Lost`] when the node was
 /// removed or the plugin replaced since the value was made (nothing is asked),
@@ -81,15 +82,14 @@ pub type SaveState = Op<SaveStateOp>;
 /// route.
 pub type SaveStateInProcess = InProcessOp<SaveStateOp>;
 
-/// A state to save from a plugin that runs in a `plugin-server` process: `Send`,
-/// and a `Future` through `IntoFuture`
-/// that yields the [`PeerState`]. Dropping it unawaited asks nothing.
-pub type SaveStateOutOfProcess = OutOfProcessOp<SaveStateOp>;
-
-/// An out-of-process save being awaited ([`SaveStateOutOfProcess`]): resolves to
-/// the plugin's [`PeerState`]. Dropped before it resolves, the future drops the
-/// receiver and the state the server sends is discarded: a save changes nothing
-/// in the plugin.
+/// The value [`Session::save_state`] returns for a plugin in a `plugin-server`
+/// process: `Send`, and a `Future` through `IntoFuture` that yields the
+/// [`PeerState`]. Dropping it unawaited asks nothing; dropped after its first poll
+/// the future drops the reply, and a save changes nothing in the plugin.
+///
+/// The first poll queues the request with the plugin's bridge: its IPC reader
+/// thread fills the reply, and its control lane thread fires the deadline, so a
+/// poll never blocks and `Session::update` is not needed.
 ///
 /// # Errors
 ///
@@ -98,7 +98,11 @@ pub type SaveStateOutOfProcess = OutOfProcessOp<SaveStateOp>;
 /// [`StateError::PluginCrashed`] when the plugin's bridge ended or its server
 /// died before it answered; [`StateError::Stalled`] when the server did not
 /// answer in time; otherwise the plugin's own: busy, refused, or too large.
-pub type SavingStateOutOfProcess = AwaitingOp<SaveStateOp>;
+///
+/// # Panics
+///
+/// When polled after it resolved.
+pub type SaveStateOutOfProcess = OutOfProcessOp<SaveStateOp>;
 
 /// The save of a plugin's state ([`Session::save_state`]).
 #[derive(Debug)]
@@ -153,13 +157,13 @@ impl PluginOp for SaveStateOp {
 /// ```
 /// fn send<T: Send>() {}
 /// send::<tutti_session::RestoreStateOutOfProcess>();
-/// send::<tutti_session::RestoringStateOutOfProcess>();
+/// send::<tutti_session::AwaitingOp<tutti_session::RestoreStateOp>>();
 /// send::<tutti_session::RestoredState>();
 /// ```
 pub type RestoreState = Op<RestoreStateOp>;
 
-/// A saved state to put into a plugin that runs in this process: `!Send`, run on
-/// the main thread. Its [`run`](InProcessOp::run) loads the state and yields the
+/// The value [`Session::restore_state`] returns for a plugin in this process:
+/// `!Send`, run on the main thread. Its [`run`](InProcessOp::run) loads the state and yields the
 /// [`RestoredState`], which [`Session::apply`] takes back and which has the
 /// session read the plugin's parameters again. It ends in [`StateError::Lost`]
 /// when the node was removed or the plugin replaced since the value was made
@@ -168,22 +172,16 @@ pub type RestoreState = Op<RestoreStateOp>;
 /// ([`StateError::Rejected`]) or has no state route.
 pub type RestoreStateInProcess = InProcessOp<RestoreStateOp>;
 
-/// A saved state to put into a plugin that runs in a `plugin-server` process:
-/// `Send`, and a `Future` through
-/// `IntoFuture` that yields the [`RestoredState`],
-/// which [`Session::apply`] takes back on the main thread. Dropping it unawaited
-/// sends nothing.
-pub type RestoreStateOutOfProcess = OutOfProcessOp<RestoreStateOp>;
-
-/// An out-of-process restore being awaited ([`RestoreStateOutOfProcess`]):
-/// resolves to the [`RestoredState`] once the server has taken the state.
+/// The value [`Session::restore_state`] returns for a plugin in a
+/// `plugin-server` process: `Send`, and a `Future` through `IntoFuture` that
+/// yields the [`RestoredState`], which [`Session::apply`] takes back on the main
+/// thread. Dropping it unawaited sends nothing.
 ///
 /// Dropped after the first poll and before it resolves, the future drops the
 /// receiver, but the request is already queued: **the server may still apply
-/// the state**. No [`RestoredState`] exists for it, because one is made only by
-/// this future resolving, so [`Session::apply`] is never run for that restore
-/// and the session's view of the plugin's parameters is stale until they are
-/// read again (a later [`apply`](Session::apply), or the plugin's own report).
+/// the state**. No [`RestoredState`] exists for it, so [`Session::apply`] is
+/// never run for that restore and the session's view of the plugin's parameters
+/// is stale until they are read again.
 ///
 /// # Errors
 ///
@@ -193,7 +191,11 @@ pub type RestoreStateOutOfProcess = OutOfProcessOp<RestoreStateOp>;
 /// died before it answered; [`StateError::Stalled`] when the server did not
 /// answer in time; otherwise the plugin's own: busy, refused
 /// ([`StateError::Rejected`]) or too large.
-pub type RestoringStateOutOfProcess = AwaitingOp<RestoreStateOp>;
+///
+/// # Panics
+///
+/// When polled after it resolved.
+pub type RestoreStateOutOfProcess = OutOfProcessOp<RestoreStateOp>;
 
 /// The restore of a saved state into a plugin ([`Session::restore_state`]).
 #[derive(Debug)]

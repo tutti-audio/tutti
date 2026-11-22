@@ -15,7 +15,7 @@ use std::task::{Context as TaskContext, Poll};
 
 use tutti_plugin::{Answer, PluginAnswers};
 use tutti_plugin_host::PluginHandle;
-use tutti_plugin_types::MainThreadMarker;
+use tutti_plugin_types::{MainThreadMarker, PresetSupport};
 
 use super::HostedPlugin;
 use super::awaiting::Stage;
@@ -52,9 +52,10 @@ pub trait PluginOp: sealed::Sealed + Sized {
     #[doc(hidden)]
     fn crashed() -> Self::Error;
 
-    /// Refuses the call before the plugin is asked: a plugin that cannot take it.
+    /// Refuses the call before the plugin is asked: a plugin whose preset
+    /// `support` cannot take it.
     #[doc(hidden)]
-    fn admit(&self, _handle: &PluginHandle) -> Result<(), Self::Error> {
+    fn admit(&self, _support: PresetSupport) -> Result<(), Self::Error> {
         Ok(())
     }
 
@@ -91,16 +92,17 @@ pub enum Op<O: PluginOp> {
 impl<O: PluginOp> Op<O> {
     /// The call `op` on the plugin `hosted` holds, by where it runs.
     pub(super) fn at(hosted: &HostedPlugin, op: O) -> Self {
-        let handle = Box::new(hosted.handle.clone());
+        let support = hosted.handle.preset_support();
         match &hosted.answers {
             None => Self::InProcess(InProcessOp {
                 op,
-                handle,
+                handle: Box::new(hosted.handle.clone()),
+                support,
                 main_thread: PhantomData,
             }),
             Some(answers) => Self::OutOfProcess(OutOfProcessOp {
                 op,
-                handle,
+                support,
                 answers: answers.clone(),
             }),
         }
@@ -114,6 +116,7 @@ impl<O: PluginOp> Op<O> {
 pub struct InProcessOp<O: PluginOp> {
     op: O,
     handle: Box<PluginHandle>,
+    support: PresetSupport,
     main_thread: PhantomData<*const ()>,
 }
 
@@ -137,7 +140,7 @@ impl<O: PluginOp> InProcessOp<O> {
         if self.op.ended() {
             return Err(O::lost());
         }
-        self.op.admit(&self.handle)?;
+        self.op.admit(self.support)?;
         let reply = self.op.run(&self.handle, main)?;
         Ok(self.op.finish(reply, None))
     }
@@ -152,7 +155,7 @@ impl<O: PluginOp> InProcessOp<O> {
 #[must_use = "work does nothing until it is awaited"]
 pub struct OutOfProcessOp<O: PluginOp> {
     op: O,
-    handle: Box<PluginHandle>,
+    support: PresetSupport,
     answers: PluginAnswers,
 }
 
@@ -171,13 +174,13 @@ impl<O: PluginOp> IntoFuture for OutOfProcessOp<O> {
     fn into_future(self) -> AwaitingOp<O> {
         let Self {
             op,
-            handle,
+            support,
             answers,
         } = self;
         AwaitingOp {
             stage: Stage::Unstarted(()),
             op: Some(op),
-            handle,
+            support,
             answers,
         }
     }
@@ -205,7 +208,7 @@ impl<O: PluginOp> IntoFuture for OutOfProcessOp<O> {
 pub struct AwaitingOp<O: PluginOp> {
     stage: Stage<(), O::Reply, O::Error>,
     op: Option<O>,
-    handle: Box<PluginHandle>,
+    support: PresetSupport,
     answers: PluginAnswers,
 }
 
@@ -223,7 +226,7 @@ impl<O: PluginOp> Future for AwaitingOp<O> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Output> {
         let this = &mut *self;
-        let (op, handle) = (&this.op, &this.handle);
+        let (op, support) = (&this.op, this.support);
         let started = this.stage.poll(
             cx,
             |()| {
@@ -233,7 +236,7 @@ impl<O: PluginOp> Future for AwaitingOp<O> {
                 if op.ended() {
                     return Err(O::lost());
                 }
-                op.admit(handle)?;
+                op.admit(support)?;
                 Ok(op.send(&this.answers))
             },
             O::crashed(),

@@ -295,12 +295,11 @@ pub use peer_state::{OtherPeer, PeerState, SavedPeer};
 pub use plugin::{
     AddPluginError, AnyPlugin, AwaitingOp, InProcessOp, LoadInProcess, LoadOutOfProcess,
     LoadPlugin, LoadPreset, LoadPresetInProcess, LoadPresetOp, LoadPresetOutOfProcess,
-    LoadedPlugin, LoadedPreset, LoadingPlugin, LoadingPresetOutOfProcess, Op, OutOfProcessOp,
-    Plugin, PluginApplyError, PluginCause, PluginChange, PluginEvent, PluginHealth, PluginInfo,
-    PluginInstance, PluginOp, PluginPorts, PortsRefusal, PresetStartError, RestoreState,
-    RestoreStateInProcess, RestoreStateOp, RestoreStateOutOfProcess, RestoredState,
-    RestoringStateOutOfProcess, SaveState, SaveStateInProcess, SaveStateOp, SaveStateOutOfProcess,
-    SavingStateOutOfProcess, StateRestore, StateStartError, StateView, SwapPluginError,
+    LoadedPlugin, LoadedPreset, LoadingPlugin, Op, OutOfProcessOp, Plugin, PluginApplyError,
+    PluginCause, PluginChange, PluginEvent, PluginHealth, PluginInfo, PluginInstance, PluginOp,
+    PluginPorts, PortsRefusal, PresetStartError, RestoreState, RestoreStateInProcess,
+    RestoreStateOp, RestoreStateOutOfProcess, RestoredState, SaveState, SaveStateInProcess,
+    SaveStateOp, SaveStateOutOfProcess, StateRestore, StateStartError, StateView, SwapPluginError,
 };
 pub use timeline_view::TimelineView;
 

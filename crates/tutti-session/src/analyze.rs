@@ -129,9 +129,9 @@ pub enum AnalyzeError {
     ShutDown,
 }
 
-impl crate::unblocked::sealed::Sealed for AnalyzeError {}
+impl Unanswered for AnalyzeError {}
 
-impl Unanswered for AnalyzeError {
+impl crate::unblocked::sealed::Sealed for AnalyzeError {
     fn shut_down() -> Self {
         Self::ShutDown
     }

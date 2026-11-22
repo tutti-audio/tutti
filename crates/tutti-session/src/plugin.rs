@@ -188,13 +188,12 @@ pub use op::{AwaitingOp, InProcessOp, Op, OutOfProcessOp, PluginOp};
 pub use opened::{PluginCause, PluginInfo, PluginPorts};
 pub use preset::{
     LoadPreset, LoadPresetInProcess, LoadPresetOp, LoadPresetOutOfProcess, LoadedPreset,
-    LoadingPresetOutOfProcess, PresetStartError,
+    PresetStartError,
 };
 pub use state::{
     PluginApplyError, RestoreState, RestoreStateInProcess, RestoreStateOp,
-    RestoreStateOutOfProcess, RestoredState, RestoringStateOutOfProcess, SaveState,
-    SaveStateInProcess, SaveStateOp, SaveStateOutOfProcess, SavingStateOutOfProcess,
-    StateStartError,
+    RestoreStateOutOfProcess, RestoredState, SaveState, SaveStateInProcess, SaveStateOp,
+    SaveStateOutOfProcess, StateStartError,
 };
 
 use crate::plugin_diagnostics::Figures;
