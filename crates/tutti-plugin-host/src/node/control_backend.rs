@@ -444,8 +444,8 @@ impl<L: InProcess> Health for ControlBackend<L> {
         None
     }
 
-    fn block_counts(&self) -> tutti_plugin_types::BlockCounts {
-        tutti_plugin_types::BlockCounts::default()
+    fn block_counts(&self) -> tutti_plugin_types::PipelineCounts {
+        tutti_plugin_types::PipelineCounts::default()
     }
 
     fn terminate(&self, _reason: TerminationReason) {}
@@ -904,7 +904,7 @@ mod off_main_tests {
         assert!(matches!(handle.status(), crate::PluginStatus::Alive));
         assert_eq!(
             handle.block_counts(),
-            tutti_plugin_types::BlockCounts::default()
+            tutti_plugin_types::PipelineCounts::default()
         );
         handle.terminate(tutti_plugin_types::TerminationReason::Hung {
             blocks: 16,

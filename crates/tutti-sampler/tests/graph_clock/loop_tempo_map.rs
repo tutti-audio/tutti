@@ -136,10 +136,7 @@ fn render_with(
             ),
         )
         .expect("room");
-    transport
-        .motion()
-        .try_send(MotionCommand::Play)
-        .expect("room");
+    transport.motion().send(MotionCommand::Play).expect("room");
     let mut left = Vec::with_capacity(frames + BLOCK);
     let mut buf = vec![0.0f32; BLOCK * 2];
     while left.len() < frames {

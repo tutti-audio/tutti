@@ -16,8 +16,8 @@ use tutti_plugin_ipc::{
     SlabLayout, SlabWriter, unique_socket_path,
 };
 use tutti_plugin_types::{
-    ChannelLayout, EditorPresence, Features, LoadedPlugin, MaxBlock, ParameterChanges,
-    ParameterInfo, PluginBus, PluginClass, PluginDescriptor, PluginTail, Prepare, PresetId,
+    ChannelLayout, EditorPresence, Features, MaxBlock, ParameterChanges, ParameterInfo, PluginBus,
+    PluginClass, PluginDescriptor, PluginTail, PluginWiring, Prepare, PresetId,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_timeline::TempoReader;
@@ -68,7 +68,7 @@ pub(super) struct Rig {
     pub(super) replies: tutti_plugin_ipc::Replies,
     pub(super) record: Record,
     pub(super) descriptor: PluginDescriptor,
-    pub(super) loaded: LoadedPlugin,
+    pub(super) loaded: PluginWiring,
     pub(super) threads: Threads,
 }
 
@@ -291,7 +291,7 @@ fn build(gate: Option<ReplyGate>, lists: bool) -> Rig {
             measured: None,
             widths: None,
         },
-        loaded: LoadedPlugin {
+        loaded: PluginWiring {
             inputs: vec![PluginBus::main(ChannelLayout::STEREO)],
             outputs: vec![PluginBus::main(ChannelLayout::STEREO)],
             latency_samples: Samples::ZERO,
@@ -300,7 +300,7 @@ fn build(gate: Option<ReplyGate>, lists: bool) -> Rig {
                 | Features::MIDI_OUT
                 | Features::PARAM_AUTOMATION
                 | Features::SEQUENCER_CONTEXT,
-            ..LoadedPlugin::default()
+            ..PluginWiring::default()
         },
         threads: Threads {
             _bridge: thread,

@@ -15,11 +15,11 @@ use tutti_plugin_types::{
     Health, PluginError, PluginFailure, RenderMode, StateError, TerminationReason, UnknownParam,
     WindowHandle,
 };
-use tutti_plugin_types::{BlockCounts, BypassWrite};
+use tutti_plugin_types::{BypassWrite, PipelineCounts};
 use tutti_plugin_types::{ContentScale, KeyEvent, KeyUse};
 use tutti_plugin_types::{Delivered, EditorOpened, TrackInfo};
 use tutti_plugin_types::{
-    LayoutSupport, LoadedPlugin, PluginBus, PluginDescriptor, Preset, PresetError, PresetId,
+    LayoutSupport, PluginBus, PluginDescriptor, PluginPreset, PluginWiring, PresetError, PresetId,
     PresetSupport,
 };
 use tutti_plugin_types::{MainThreadMarker, StateUse};
@@ -216,7 +216,7 @@ pub struct PluginHandle {
     health: Arc<dyn Health>,
     control: Option<Arc<dyn MainThreadControl>>,
     descriptor: PluginDescriptor,
-    loaded: LoadedPlugin,
+    loaded: PluginWiring,
     param_sink: ParameterChangeSink,
     refresh_sink: RefreshSink,
     invalidate_sink: InvalidateSink,
@@ -256,7 +256,7 @@ impl PluginHandle {
         backend: Arc<B>,
         control: Option<Arc<dyn MainThreadControl>>,
         descriptor: PluginDescriptor,
-        loaded: LoadedPlugin,
+        loaded: PluginWiring,
         param_sink: ParameterChangeSink,
     ) -> Self {
         Self {
@@ -495,7 +495,7 @@ impl PluginHandle {
 
     /// Returns what the plugin reported at load: per-bus channel widths,
     /// latency, `f64` support and capability bits.
-    pub fn loaded(&self) -> &LoadedPlugin {
+    pub fn loaded(&self) -> &PluginWiring {
         &self.loaded
     }
 
@@ -570,7 +570,7 @@ impl PluginHandle {
     /// Blocks the audio path abandoned and replies it took. See
     /// [`Health::block_counts`]. Atomic reads.
     #[must_use]
-    pub fn block_counts(&self) -> BlockCounts {
+    pub fn block_counts(&self) -> PipelineCounts {
         self.health.block_counts()
     }
 
@@ -643,7 +643,7 @@ impl PluginHandle {
     ///
     /// [`PresetError::Unsupported`] when this handle carries no route to
     /// presets; [`PresetError::Lost`] when the plugin is gone.
-    pub fn presets(&self, main: MainThreadMarker) -> Result<Vec<Preset>, PresetError> {
+    pub fn presets(&self, main: MainThreadMarker) -> Result<Vec<PluginPreset>, PresetError> {
         let control = self.control.as_deref().ok_or(PresetError::Unsupported)?;
         lent(control, |c| c.presets(main)).ok_or(PresetError::Lost)
     }
@@ -888,7 +888,7 @@ impl PluginHandle {
     /// Writes the plugin's own bypass, `true` bypassed and `false` processing.
     ///
     /// **The node's mode owns the plugin's bypass.** A node whose plugin has one
-    /// ([`LoadedPlugin::own_bypass`], claimed only where the host can read it
+    /// ([`PluginWiring::own_bypass`], claimed only where the host can read it
     /// back) declares [`Shape::with_own_bypass`](tutti_graph::Shape::with_own_bypass),
     /// so the executor leaves it running in
     /// [`NodeMode::Bypassed`](tutti_graph::NodeMode::Bypassed): the session
@@ -973,7 +973,7 @@ impl PluginHandle {
 mod tests {
     use super::*;
     use tutti_plugin_types::{
-        EditorWindow, ParameterInfo, PluginClass, Preset, PresetId, RenderMode,
+        EditorWindow, ParameterInfo, PluginClass, PluginPreset, PresetId, RenderMode,
     };
     use tutti_units::Normalized;
     use tutti_units::ParamId;
@@ -983,7 +983,7 @@ mod tests {
     /// is `Clone` is lent as it is.
     #[derive(Clone)]
     struct FakePresets {
-        listed: Vec<Preset>,
+        listed: Vec<PluginPreset>,
         accepts: bool,
         /// What `set_track_info` answers.
         track: Delivered,
@@ -1047,8 +1047,8 @@ mod tests {
         fn set_track_info(&mut self, _main: MainThreadMarker, _info: &TrackInfo) -> Delivered {
             self.track
         }
-        fn wiring(&self, _main: MainThreadMarker) -> LoadedPlugin {
-            LoadedPlugin::default()
+        fn wiring(&self, _main: MainThreadMarker) -> PluginWiring {
+            PluginWiring::default()
         }
         fn parameters(&self, _main: MainThreadMarker) -> Vec<ParameterInfo> {
             Vec::new()
@@ -1095,7 +1095,7 @@ mod tests {
         ) -> tutti_plugin_types::PluginResult<()> {
             Ok(())
         }
-        fn presets(&mut self, _main: MainThreadMarker) -> Vec<Preset> {
+        fn presets(&mut self, _main: MainThreadMarker) -> Vec<PluginPreset> {
             self.listed.clone()
         }
         fn load_preset(&mut self, _main: MainThreadMarker, _id: &PresetId) -> bool {
@@ -1110,10 +1110,10 @@ mod tests {
     }
 
     fn handle_with(presets: Option<FakePresets>) -> PluginHandle {
-        handle_with_loaded(presets, LoadedPlugin::default())
+        handle_with_loaded(presets, PluginWiring::default())
     }
 
-    fn handle_with_loaded(presets: Option<FakePresets>, loaded: LoadedPlugin) -> PluginHandle {
+    fn handle_with_loaded(presets: Option<FakePresets>, loaded: PluginWiring) -> PluginHandle {
         handle_over(
             presets.map(|p| Arc::new(p) as Arc<dyn MainThreadControl>),
             loaded,
@@ -1123,7 +1123,7 @@ mod tests {
     /// A handle whose main-thread route is `control`.
     fn handle_over(
         control: Option<Arc<dyn MainThreadControl>>,
-        loaded: LoadedPlugin,
+        loaded: PluginWiring,
     ) -> PluginHandle {
         // Only the preset route is under test; the rest of the handle is built
         // from the same fake so no subprocess is needed.
@@ -1194,8 +1194,8 @@ mod tests {
             fn rate_refusal(&self) -> Option<tutti_plugin_types::RateRefusal> {
                 None
             }
-            fn block_counts(&self) -> BlockCounts {
-                BlockCounts::default()
+            fn block_counts(&self) -> PipelineCounts {
+                PipelineCounts::default()
             }
             fn terminate(&self, _reason: TerminationReason) {}
         }
@@ -1213,15 +1213,15 @@ mod tests {
     /// features claim.
     ///
     /// The route and the capability are independent facts, and the route wins:
-    /// a `LoadedPlugin` carrying both preset bits set means nothing if nothing
+    /// a `PluginWiring` carrying both preset bits set means nothing if nothing
     /// carries the call. Deriving `preset_support` from the bits alone would
     /// have a UI offer a browser that cannot be driven.
     #[test]
     fn no_preset_route_reports_no_support() {
         // Both bits probed and set — the plugin claims full preset support —
-        // but nothing carries the call. Without a `LoadedPlugin` saying yes,
+        // but nothing carries the call. Without a `PluginWiring` saying yes,
         // this test could not tell the route guard from the empty default.
-        let mut loaded = LoadedPlugin::default();
+        let mut loaded = PluginWiring::default();
         loaded.probed =
             tutti_plugin_types::Features::PRESET_LIST | tutti_plugin_types::Features::PRESET_LOAD;
         loaded.features = loaded.probed;
@@ -1319,8 +1319,8 @@ mod tests {
     #[test]
     fn the_plugins_own_list_reaches_the_caller_verbatim() {
         let listed = vec![
-            Preset::new(PresetId::Number(9000), "Sparse"),
-            Preset::new(PresetId::Number(0), "First"),
+            PluginPreset::new(PresetId::Number(9000), "Sparse"),
+            PluginPreset::new(PresetId::Number(0), "First"),
         ];
         let handle = handle_with(Some(FakePresets {
             listed: listed.clone(),
@@ -1372,7 +1372,7 @@ mod tests {
         );
         let lost = handle_over(
             Some(Arc::new(Lost) as Arc<dyn MainThreadControl>),
-            LoadedPlugin::default(),
+            PluginWiring::default(),
         );
         assert_eq!(
             lost.set_track_info(main, &info),

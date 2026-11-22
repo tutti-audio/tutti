@@ -1,6 +1,6 @@
 //! An instrument in the session, played live.
 //!
-//! An instrument is a [`tutti_graph::Instrument`]: a node that turns MIDI on its
+//! An instrument is a [`tutti_graph::InstrumentNode`]: a node that turns MIDI on its
 //! event input into audio and names its main output pair. The session adds one
 //! ([`Session::add_instrument`]), makes one of a node already in the graph
 //! ([`Session::instrument`]), or of a hosted plugin whose format says it is one
@@ -36,7 +36,7 @@
 
 use tutti_buffers::BusTopology;
 use tutti_graph::NodeKey;
-use tutti_graph::{EventInletNode, Instrument};
+use tutti_graph::{EventInletNode, InstrumentNode};
 use tutti_midi_runtime::{LIVE_INLET_CAPACITY, MidiKeys};
 use tutti_nodes::{BusStripConfig, BusStripNode};
 use tutti_ump::MidiGroup;
@@ -207,7 +207,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// no event input or lacks the output its main pair names, or the wire's
     /// [`ConnectError`](crate::ConnectError) (the instrument is removed again in
     /// both cases).
-    pub fn add_instrument<I: Instrument<C::Float> + SessionNode<C::Float>>(
+    pub fn add_instrument<I: InstrumentNode<C::Float> + SessionNode<C::Float>>(
         &mut self,
         instrument: I,
     ) -> Result<InstrumentHandle<I>, crate::Error> {
@@ -234,7 +234,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// [`Error::NotInstrument`](crate::Error::NotInstrument) when its shape has
     /// no event input or lacks the output its main pair names (the node is
     /// removed again).
-    pub fn add_instrument_unwired<I: Instrument<C::Float> + SessionNode<C::Float>>(
+    pub fn add_instrument_unwired<I: InstrumentNode<C::Float> + SessionNode<C::Float>>(
         &mut self,
         instrument: I,
     ) -> Result<InstrumentHandle<I>, crate::Error> {

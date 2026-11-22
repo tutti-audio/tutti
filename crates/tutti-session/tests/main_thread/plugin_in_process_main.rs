@@ -411,7 +411,9 @@ impl Rebound {
     }
 }
 
-fn unwired_of(events: &[SessionEvent]) -> Vec<(tutti_graph::NodeKey, Vec<tutti_session::Edge>)> {
+fn unwired_of(
+    events: &[SessionEvent],
+) -> Vec<(tutti_graph::NodeKey, Vec<tutti_session::ChannelEdge>)> {
     events
         .iter()
         .filter_map(|event| match event {
@@ -464,7 +466,7 @@ fn a_plugin_that_widens_its_ports_is_re_inserted_wider() {
 /// layout (no inputs): the two edges into its inputs are `Unwired`, once, and
 /// its outputs, still wired to the root, carry the plugin's tags.
 fn a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost() {
-    use tutti_session::{Edge, OutPort};
+    use tutti_session::{ChannelEdge, OutPort};
     let mut r = rebound(0);
     let node = r.node;
     let (a, b) = (r.a, r.b);
@@ -479,8 +481,8 @@ fn a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost() {
     assert_eq!(unwired_node, node.erase());
     edges.sort();
     let mut want = vec![
-        Edge::new(OutPort::new(a, 0), node.input(0)),
-        Edge::new(OutPort::new(b, 0), node.input(1)),
+        ChannelEdge::new(OutPort::new(a, 0), node.input(0)),
+        ChannelEdge::new(OutPort::new(b, 0), node.input(1)),
     ];
     want.sort();
     assert_eq!(edges, want, "exactly the edges into the inputs it lost");

@@ -20,7 +20,7 @@ use tutti_plugin_host::{
 use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::IpcResult;
 use tutti_plugin_types::PluginFormat;
-use tutti_plugin_types::{LoadedPlugin, PluginDescriptor, StateError};
+use tutti_plugin_types::{PluginDescriptor, PluginWiring, StateError};
 use tutti_units::SampleRate;
 
 /// The audio node, wherever it runs.
@@ -422,7 +422,7 @@ impl Plugin {
     }
 
     /// Returns the load-time wiring: bus widths, latency, tail, capabilities.
-    pub fn loaded(&self) -> &LoadedPlugin {
+    pub fn loaded(&self) -> &PluginWiring {
         self.handle.loaded()
     }
 

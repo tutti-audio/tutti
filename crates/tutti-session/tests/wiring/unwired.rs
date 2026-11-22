@@ -15,7 +15,8 @@ use tutti_graph::{
 };
 use tutti_nodes::testing::Const;
 use tutti_session::{
-    BusSink, Edge, EventEdge, Feeder, InPort, OutPort, Replacement, Root, Session, SessionEvent,
+    BusSink, ChannelEdge, EventEdge, Feeder, InPort, OutPort, Replacement, Root, Session,
+    SessionEvent,
 };
 use tutti_units::{Amplitude, Samples};
 
@@ -70,7 +71,7 @@ fn channel(s: &mut Session, ch: usize) -> Vec<f32> {
     block.iter().skip(ch).step_by(2).copied().collect()
 }
 
-fn unwired(events: &[SessionEvent]) -> Vec<(NodeKey, Vec<Edge>, Vec<EventEdge>)> {
+fn unwired(events: &[SessionEvent]) -> Vec<(NodeKey, Vec<ChannelEdge>, Vec<EventEdge>)> {
     events
         .iter()
         .filter_map(|e| match e {
@@ -123,7 +124,7 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
     ] {
         g.connect(from, to).unwrap();
     }
-    let kept = Edge::new(OutPort::new(a, 0), x.input(0));
+    let kept = ChannelEdge::new(OutPort::new(a, 0), x.input(0));
     // The gain lane is the wire's declaration: the connection is made again
     // with it (the edge is held already, so only its gain is set).
     g.connect(kept.source(), kept.sink())
@@ -153,8 +154,8 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
     edges.sort();
     event_edges.sort();
     let mut want_edges = vec![
-        Edge::new(OutPort::new(b, 0), x.input(1)),
-        Edge::new(x.out(1), Root::output(1)),
+        ChannelEdge::new(OutPort::new(b, 0), x.input(1)),
+        ChannelEdge::new(x.out(1), Root::output(1)),
     ];
     want_edges.sort();
     let mut want_events = vec![
@@ -418,6 +419,6 @@ fn unwired_waits_for_the_commit_that_lands() {
     assert!(!refused(&events), "{events:?}");
     let [(node, edges, _)] = <[_; 1]>::try_from(unwired(&events)).expect("reported once");
     assert_eq!(node, x.erase());
-    assert_eq!(edges, [Edge::new(OutPort::new(a, 0), x.input(1))]);
+    assert_eq!(edges, [ChannelEdge::new(OutPort::new(a, 0), x.input(1))]);
     assert!(unwired(&s.update()).is_empty());
 }

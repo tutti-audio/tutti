@@ -2,7 +2,7 @@
 //!
 //! A command meant to happen during playback says when:
 //! [`MotionFsm::schedule`](super::MotionFsm::schedule) takes an `At` and
-//! there is no untimed overload of it. [`MotionFsm::try_send`](super::MotionFsm::try_send)
+//! there is no untimed overload of it. [`MotionFsm::send`](super::MotionFsm::send)
 //! is `schedule` at `At::NextBlock`, through the same queue, so commands due
 //! on one frame apply in the order they were sent. The
 //! [`TransportSettings`](super::TransportSettings) stores are values read
@@ -44,7 +44,7 @@ use super::motion::MotionCommand;
 /// yet applied or cancelled.
 pub const SCHEDULE_CAPACITY: usize = 64;
 
-/// Credits only `At::NextBlock` commands (and so [`try_send`](super::MotionFsm::try_send))
+/// Credits only `At::NextBlock` commands (and so [`send`](super::MotionFsm::send))
 /// may take beyond [`SCHEDULE_CAPACITY`], so a backlog of commands waiting
 /// for a frame or a beat cannot refuse a stop button.
 pub const IMMEDIATE_RESERVE: usize = 8;
@@ -57,7 +57,7 @@ const IN_FLIGHT_MAX: usize = SCHEDULE_CAPACITY + IMMEDIATE_RESERVE;
 pub enum TransportCommand {
     /// A motion change (play, stop, seek, scrub): the state machine decides
     /// whether it applies, exactly as for
-    /// [`try_send`](super::MotionFsm::try_send).
+    /// [`send`](super::MotionFsm::send).
     Motion(MotionCommand),
     /// Edit the loop region: move its bounds, or arm or disarm it
     /// ([`LoopEdit`]). The engine owns the region, so this is the only way
@@ -318,7 +318,7 @@ impl CommandQueueAudio {
         let cancel_before = self.shared.cancel_before.load(Ordering::Acquire);
         let before = self.pending.len();
         // An `At::NextBlock` command is not waiting for a time, so a cancel
-        // does not take it back (a `try_send(Stop)` stands).
+        // does not take it back (a `send(Stop)` stands).
         self.pending
             .retain(|c| c.seq >= cancel_before || matches!(c.at, At::NextBlock));
         self.shared.release(before - self.pending.len());

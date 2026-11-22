@@ -35,7 +35,7 @@ use tutti_plugin::catalog::ResolvedHosting;
 use tutti_plugin_db::{Catalog, Hosting, Loadable};
 use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::bundle::{ModuleKind, native_module_path};
-use tutti_plugin_types::{IpcError, Preset, PresetError};
+use tutti_plugin_types::{IpcError, PluginPreset, PresetError};
 use tutti_plugin_types::{MainThreadMarker, PluginFailure, PluginFormat, PluginId, PluginRef};
 use tutti_rt::LockExt;
 
@@ -47,7 +47,7 @@ use crate::graph::{OnShape, SwapRefused};
 use crate::loaded::{Stamp, caught};
 use crate::peer::sealed;
 use crate::{AppKey, Clock, GiveUp, Key, LoadError, NoSuchNode, Peer, Presence};
-use crate::{OtherPeer, PeerState, ReplaceRefused, Resource, ResourceId, SavedPeer, Session};
+use crate::{OtherPeer, PeerResourceId, PeerState, ReplaceRefused, Resource, SavedPeer, Session};
 
 /// A plugin to open, built by [`Session::load_plugin`] and not yet run. Where it
 /// runs is decided when it is built, from the catalog's row and the format: a
@@ -96,7 +96,7 @@ impl Request {
     fn open(
         self,
         open: impl FnOnce(PluginLoad) -> Open,
-        presets: impl FnOnce(&HostPlugin) -> Result<Vec<Preset>, PresetError>,
+        presets: impl FnOnce(&HostPlugin) -> Result<Vec<PluginPreset>, PresetError>,
     ) -> Result<LoadedPlugin, LoadError> {
         let stamp = Stamp::take(Asset::from(module_of(self.loadable.plugin())?));
         let cx = self.cx;
@@ -412,7 +412,7 @@ impl PluginInstance {
 impl sealed::Sealed for PluginInstance {}
 
 impl Resource for PluginInstance {
-    fn id(&self) -> ResourceId {
+    fn id(&self) -> PeerResourceId {
         self.shared.id
     }
 }

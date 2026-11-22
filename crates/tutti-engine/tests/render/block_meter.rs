@@ -131,7 +131,7 @@ fn the_click_accents_the_bar_a_meter_change_begins_on_its_frame() {
     let engine = click_engine(&transport, MetronomeMode::Always);
     transport
         .motion()
-        .try_send(MotionCommand::play_from(Beat::new(5.0)))
+        .send(MotionCommand::play_from(Beat::new(5.0)))
         .expect("room");
     let mut out = Vec::new();
     for _ in 0..235 {
@@ -154,7 +154,7 @@ fn the_click_sounds_while_the_transport_counts_in() {
     let engine = click_engine(&transport, MetronomeMode::PrerollOnly);
     transport
         .motion()
-        .try_send(MotionCommand::play_from(Beat::new(0.0)))
+        .send(MotionCommand::play_from(Beat::new(0.0)))
         .expect("room");
     let before = render(&engine, ChannelLayout::STEREO, 2_048);
     assert!(before.iter().all(|&s| s == 0.0), "silent off the count-in");
@@ -237,7 +237,7 @@ fn a_loop_across_a_meter_change_accents_the_same_bars_on_each_pass() {
         .expect("room");
     transport
         .motion()
-        .try_send(MotionCommand::play_from(Beat::new(5.0)))
+        .send(MotionCommand::play_from(Beat::new(5.0)))
         .expect("room");
     let mut out = Vec::new();
     for _ in 0..293 {

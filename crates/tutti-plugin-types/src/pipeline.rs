@@ -22,7 +22,7 @@ pub const MAX_CHUNK: usize = 4096;
 /// What the audio path has made of the blocks it sent a plugin, ever
 /// (`Health::block_counts`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct BlockCounts {
+pub struct PipelineCounts {
     /// Blocks it gave up waiting for.
     pub abandoned: u64,
     /// Of the abandoned blocks, those whose reply it collected afterwards:
@@ -50,7 +50,7 @@ pub struct ServerLosses {
 /// in `tutti-plugin-host`):
 /// written on the audio thread with relaxed atomics, read anywhere.
 ///
-/// Here, beside [`BlockCounts`], because the batcher in `tutti-plugin-ipc`
+/// Here, beside [`PipelineCounts`], because the batcher in `tutti-plugin-ipc`
 /// writes it and `tutti-plugin-host`'s controls read it, and neither crate may
 /// depend on the other.
 #[derive(Default)]

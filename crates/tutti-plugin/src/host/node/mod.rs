@@ -106,8 +106,8 @@ use tutti_plugin_ipc::{
     Restore,
 };
 use tutti_plugin_types::{
-    Features, IpcError, IpcResult, LoadedPlugin, MainWorkHandle, MaxBlock, ParameterChanges,
-    PluginDescriptor, PluginInvalidation, PluginRef, Prepare, ResyncClass,
+    Features, IpcError, IpcResult, MainWorkHandle, MaxBlock, ParameterChanges, PluginDescriptor,
+    PluginInvalidation, PluginRef, PluginWiring, Prepare, ResyncClass,
 };
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
@@ -182,7 +182,7 @@ impl std::fmt::Debug for Bound {
 pub struct PluginClient<S = Unbound> {
     bridge: Arc<PluginBridge>,
     descriptor: PluginDescriptor,
-    loaded: LoadedPlugin,
+    loaded: PluginWiring,
     format: FloatWidth,
     /// Total input ports (main + sidechain/aux) and output ports: the node's
     /// audio widths.
@@ -596,7 +596,7 @@ impl<S> PluginClient<S> {
     /// takes no main thread, bounded by the parameter wait. `None` when the
     /// server is gone or did not answer.
     #[must_use]
-    pub fn presets(&self) -> Option<Vec<tutti_plugin_types::Preset>> {
+    pub fn presets(&self) -> Option<Vec<tutti_plugin_types::PluginPreset>> {
         self.bridge.audio().presets()
     }
 
@@ -667,7 +667,7 @@ impl<S> PluginClient<S> {
 
     /// Returns what the plugin reported at load: per-bus channel widths,
     /// latency and `f64` support.
-    pub fn loaded(&self) -> &LoadedPlugin {
+    pub fn loaded(&self) -> &PluginWiring {
         &self.loaded
     }
 

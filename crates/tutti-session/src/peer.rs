@@ -26,15 +26,15 @@ use thiserror::Error;
 /// matches it. An id means nothing in another session, and an app cannot make
 /// one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ResourceId(u64);
+pub struct PeerResourceId(u64);
 
-impl fmt::Display for ResourceId {
+impl fmt::Display for PeerResourceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "resource {}", self.0)
     }
 }
 
-/// The session's source of [`ResourceId`]s: one counter, from 1. A clone
+/// The session's source of [`PeerResourceId`]s: one counter, from 1. A clone
 /// draws from the same counter, so a load that mints when it lands
 /// (off the session's own call) takes ids no other token has.
 #[derive(Clone, Debug)]
@@ -65,8 +65,8 @@ impl ResourceIds {
             reason = "the ids of plugins and MIDI ports (features `plugin`, `midi-hardware`)"
         )
     )]
-    pub(crate) fn mint(&self) -> ResourceId {
-        ResourceId(self.last.mint().get())
+    pub(crate) fn mint(&self) -> PeerResourceId {
+        PeerResourceId(self.last.mint().get())
     }
 }
 
@@ -85,7 +85,7 @@ pub trait Resource: sealed::Sealed {
     /// The token's identity, the one a
     /// [`SessionEvent::ResourceChanged`](crate::SessionEvent::ResourceChanged)
     /// carries.
-    fn id(&self) -> ResourceId;
+    fn id(&self) -> PeerResourceId;
 }
 
 /// A [`Resource`] with something live behind it: it can change on its own, go

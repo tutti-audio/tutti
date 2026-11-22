@@ -268,8 +268,8 @@ tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/pool.rs::VoicePool::w
 
 # tutti-session
 tutti-session  with-prefix  crates/tutti-session/src/session/phases.rs::PhaseCx::with_mods
-tutti-session  chain-result  crates/tutti-session/src/bounce.rs::Bounce::try_map
-tutti-session  chain-result  crates/tutti-session/src/bounce.rs::Stem::try_map
+tutti-session  chain-result  crates/tutti-session/src/bounce.rs::Bounce::map
+tutti-session  chain-result  crates/tutti-session/src/bounce.rs::Stem::map
 tutti-session  chain-result  crates/tutti-session/src/key.rs::Connection::gain
 tutti-session  chain-result  crates/tutti-session/src/take.rs::Punch::until
 tutti-session  chain-result  crates/tutti-session/src/take.rs::Take::rolling

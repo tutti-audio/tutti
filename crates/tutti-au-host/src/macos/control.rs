@@ -16,11 +16,11 @@ use tutti_au_ffi::{AuEditor, Scope};
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AuComponentType, BypassWrite, ContentScale, Control, EditorCapabilities, EditorError,
-    EditorPresence, EditorWindow, Features, FourCc, LoadedPlugin, MainThreadMarker, OwnBypass,
-    ParamEdit, ParamFlags, ParamMapping, ParamRange, ParamSteps, ParamWriteError, ParameterInfo,
-    PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginId, PluginResult,
-    PluginTail, PluginVersion, Preset, PresetId, RenderModeSupport, Request, RescanScope, StateUse,
-    WindowHandle, Wraps, taken,
+    EditorPresence, EditorWindow, Features, FourCc, MainThreadMarker, OwnBypass, ParamEdit,
+    ParamFlags, ParamMapping, ParamSteps, ParamWriteError, ParameterInfo, PluginBus, PluginBuses,
+    PluginClass, PluginDescriptor, PluginError, PluginId, PluginParamRange, PluginPreset,
+    PluginResult, PluginTail, PluginVersion, PluginWiring, PresetId, RenderModeSupport, Request,
+    RescanScope, StateUse, WindowHandle, Wraps, taken,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -282,8 +282,8 @@ impl Control for AuLoaded {
         self.descriptor()
     }
 
-    fn wiring(&self, _main: MainThreadMarker) -> LoadedPlugin {
-        LoadedPlugin {
+    fn wiring(&self, _main: MainThreadMarker) -> PluginWiring {
+        PluginWiring {
             inputs: self.buses(BusDirection::Input),
             outputs: self.buses(BusDirection::Output),
             latency_samples: self.latency_figure(),
@@ -357,7 +357,7 @@ impl Control for AuLoaded {
                 // `AudioUnitParameterID` is AU's opaque plugin-chosen handle.
                 ParameterInfo::new(ParamId::new(p.id), p.name)
                     .with_unit(p.unit.to_string())
-                    .with_range(ParamRange::Plain {
+                    .with_range(PluginParamRange::Plain {
                         min: p.range.min as f64,
                         max: p.range.max as f64,
                         default: p.range.default as f64,
@@ -496,10 +496,10 @@ impl Control for AuLoaded {
     /// The AU's factory presets. `AuPreset::number` is a **unit-assigned
     /// selector**, not a position, so the id is built from it and never from the
     /// enumeration index. `bank` is `None`: AU exposes one flat factory set.
-    fn presets(&mut self, _main: MainThreadMarker) -> Vec<Preset> {
+    fn presets(&mut self, _main: MainThreadMarker) -> Vec<PluginPreset> {
         self.factory_presets()
             .into_iter()
-            .map(|p| Preset::new(PresetId::Number(p.number), p.name))
+            .map(|p| PluginPreset::new(PresetId::Number(p.number), p.name))
             .collect()
     }
 

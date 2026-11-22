@@ -117,7 +117,7 @@ fn live(map: &Arc<TempoMap>, start: f64, blocks: &[usize], total: usize) -> Seen
     transport.settings().set_tempo_map(Arc::clone(map));
     transport
         .motion()
-        .try_send(MotionCommand::play_from(Beat::new(start)))
+        .send(MotionCommand::play_from(Beat::new(start)))
         .expect("room");
     let mut done = 0;
     for &n in blocks.iter().cycle() {
@@ -284,7 +284,7 @@ fn a_seek_seats_at_the_exact_beat_in_its_step() {
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     transport.settings().set_tempo_map(steps(&points));
     let m = &transport.motion();
-    m.try_send(MotionCommand::play_from(Beat::new(0.0)))
+    m.send(MotionCommand::play_from(Beat::new(0.0)))
         .expect("room");
     render(&engine, 1_000);
     let locate = |beat: f64| MotionCommand::Locate {
@@ -294,7 +294,7 @@ fn a_seek_seats_at_the_exact_beat_in_its_step() {
     };
     let mut at = 1_000;
     let mut check = |beat: f64, frames: usize, want: &dyn Fn(usize) -> f64| {
-        m.try_send(locate(beat)).expect("room");
+        m.send(locate(beat)).expect("room");
         render(&engine, frames);
         let seen = log.lock().expect("log");
         for n in 0..frames {
@@ -338,7 +338,7 @@ fn a_loop_wrap_takes_the_tempo_where_it_lands() {
         .expect("room");
     transport
         .motion()
-        .try_send(MotionCommand::play_from(Beat::new(3.5)))
+        .send(MotionCommand::play_from(Beat::new(3.5)))
         .expect("room");
     let total = 150_000;
     let mut done = 0;

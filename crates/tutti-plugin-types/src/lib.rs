@@ -4,9 +4,9 @@
 //! ## What this is
 //!
 //! Everything a VST2 / VST3 / CLAP / AU host needs to speak that is *not* specific
-//! to one format: [`PluginDescriptor`] and [`LoadedPlugin`] (identity and the
+//! to one format: [`PluginDescriptor`] and [`PluginWiring`] (identity and the
 //! load-time wiring snapshot), [`ParameterInfo`] with its [`ParamId`] /
-//! [`ParamRange`] / [`ParamFlags`] parts, [`ProcessContext`] and [`ProcessOutput`],
+//! [`PluginParamRange`] / [`ParamFlags`] parts, [`ProcessContext`] and [`ProcessOutput`],
 //! [`TransportInfo`], [`ParameterChanges`] automation queues, note expression and
 //! harmony changes, editor vocabulary
 //! ([`WindowHandle`], [`EditorUnit`], [`EditorCapabilities`]), presets, and the
@@ -35,7 +35,7 @@
 //! between four dialects of it.
 //!
 //! The shape here is designed to keep formats' disagreements **representable rather
-//! than averaged away**: [`ParamRange`] is a sum type because there is no safe number
+//! than averaged away**: [`PluginParamRange`] is a sum type because there is no safe number
 //! to substitute when a format declares no range; [`ParamSteps`] separates
 //! "continuous" from "nobody said", which a bare `step_count: u32` fuses at zero;
 //! [`ParamFlags`] is paired with a `known` mask so a flag nobody reported reads as
@@ -140,10 +140,10 @@
 //!   it on in its dev-dependency.
 //!
 //! [`PluginDescriptor`]: crate::PluginDescriptor
-//! [`LoadedPlugin`]: crate::LoadedPlugin
+//! [`PluginWiring`]: crate::PluginWiring
 //! [`ParameterInfo`]: crate::ParameterInfo
 //! [`ParamId`]: tutti_units::ParamId
-//! [`ParamRange`]: crate::ParamRange
+//! [`PluginParamRange`]: crate::PluginParamRange
 //! [`ParamFlags`]: crate::ParamFlags
 //! [`ParamSteps`]: crate::ParamSteps
 //! [`ProcessContext`]: crate::ProcessContext
@@ -334,7 +334,7 @@ pub use measured::{
     LatencyVerdict, Measured, NotChecked, PROBE_FLOOR, ProbeConfig, StateHash, TailVerdict, Verdict,
 };
 pub use metadata::{
-    BusChannels, Layout, LoadedPlugin, MAX_LAYOUT_BUSES, PluginBus, PluginBuses, PluginTail,
+    BusChannels, Layout, MAX_LAYOUT_BUSES, PluginBus, PluginBuses, PluginTail, PluginWiring,
     Processing,
 };
 pub use midi::{
@@ -362,10 +362,10 @@ pub use param_edit::ParamEdit;
 pub use param_mapping::{LinearRange, ParamMapping, PlainMap};
 pub use param_unit::{ParamUnit, PlainUnit};
 pub use parameters::{
-    ParamAccess, ParamFlags, ParamRange, ParamSteps, ParamWriteError, ParameterInfo,
+    ParamAccess, ParamFlags, ParamSteps, ParamWriteError, ParameterInfo, PluginParamRange,
 };
-pub use pipeline::{BlockCounts, ChunkCounters, MAX_CHUNK, ServerLosses};
-pub use presets::{Preset, PresetId, PresetSupport};
+pub use pipeline::{ChunkCounters, MAX_CHUNK, PipelineCounts, ServerLosses};
+pub use presets::{PluginPreset, PresetId, PresetSupport};
 #[cfg(feature = "probe-wire")]
 pub use probe_exit::{ProbeDeath, ProbeExit};
 #[cfg(feature = "probe-wire")]

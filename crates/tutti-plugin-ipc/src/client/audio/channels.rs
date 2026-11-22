@@ -23,8 +23,8 @@ use crossbeam_queue::ArrayQueue;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use tutti_plugin_types::BlockCounts;
 use tutti_plugin_types::EditReader;
+use tutti_plugin_types::PipelineCounts;
 use tutti_rt::AtomicSampleRate;
 use tutti_rt::AudioThreadCell;
 use tutti_rt::{
@@ -594,8 +594,8 @@ impl Channels {
     /// The block counts over the life of the bridge. Separate reads: a reply
     /// landing between them shows up on the next call, which is all a poller
     /// needs. A counted reply is queued.
-    pub(super) fn block_counts(&self) -> BlockCounts {
-        BlockCounts {
+    pub(super) fn block_counts(&self) -> PipelineCounts {
+        PipelineCounts {
             abandoned: self.abandoned.get(),
             late: self.late.get(),
             replies: self.replies.load(Ordering::Acquire),
@@ -982,11 +982,11 @@ mod tests {
     #[test]
     fn blocks_abandoned_late_and_replies_are_counted_apart() {
         let (c, _) = channels();
-        assert_eq!(c.block_counts(), BlockCounts::default());
+        assert_eq!(c.block_counts(), PipelineCounts::default());
         for _ in 0..3 {
             c.note_abandoned();
         }
-        let counts = |abandoned, late, replies| BlockCounts {
+        let counts = |abandoned, late, replies| PipelineCounts {
             abandoned,
             late,
             replies,

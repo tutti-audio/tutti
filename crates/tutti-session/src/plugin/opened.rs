@@ -18,7 +18,9 @@ use tutti_plugin::catalog::ResolvedHosting;
 use tutti_plugin_db::Loadable;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_ipc::AudioConfig;
-use tutti_plugin_types::{Features, IpcError, MainWorkHandle, PluginFailure, Preset, PresetError};
+use tutti_plugin_types::{
+    Features, IpcError, MainWorkHandle, PluginFailure, PluginPreset, PresetError,
+};
 use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRef};
 use tutti_rt::LockExt;
 use tutti_units::SampleRate;
@@ -28,7 +30,7 @@ use crate::PluginPresets;
 use crate::apply::Cut;
 use crate::loaded::Stamp;
 use crate::peer::ResourceIds;
-use crate::{GiveUp, LoadError, ResourceId};
+use crate::{GiveUp, LoadError, PeerResourceId};
 
 /// What a plugin's load needs of the session that built it.
 #[derive(Clone, Debug)]
@@ -182,7 +184,7 @@ pub enum PluginCause {
 /// What a [`PluginInstance`](crate::PluginInstance) shares: the readings of one
 /// opened plugin.
 pub struct Shared {
-    pub(super) id: ResourceId,
+    pub(super) id: PeerResourceId,
     pub(super) stamp: Stamp,
     pub(super) info: Arc<PluginInfo>,
     pub(super) standing: Arc<Standing>,
@@ -209,7 +211,7 @@ impl Shared {
         open: Open,
         loadable: Loadable,
         config: AudioConfig,
-        read: impl FnOnce(&HostPlugin) -> Result<Vec<Preset>, PresetError>,
+        read: impl FnOnce(&HostPlugin) -> Result<Vec<PluginPreset>, PresetError>,
     ) -> Result<(Self, Install), LoadError> {
         let Open {
             plugin,

@@ -52,6 +52,9 @@ mod midi_soundfont;
 // The General MIDI setup of a SoundFont unit (`Session::add_general_midi`).
 #[cfg(feature = "soundfont")]
 mod general_midi;
+// A network endpoint as the session's MIDI: a Host's peers and a Client's Host, over loopback.
+#[cfg(feature = "midi-network")]
+mod midi_network;
 // A sink as an output node read through an event tap.
 #[cfg(feature = "midi")]
 mod midi_out_tap;

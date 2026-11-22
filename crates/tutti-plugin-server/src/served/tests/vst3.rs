@@ -526,7 +526,7 @@ fn a_vst3_program_keeps_its_list_id_and_bank() {
 
     // The same index appears in every list, so an id that dropped its
     // list would be ambiguous.
-    let index_zero: Vec<&Preset> = presets
+    let index_zero: Vec<&PluginPreset> = presets
         .iter()
         .filter(|p| matches!(p.id, PresetId::Program { index: 0, .. }))
         .collect();

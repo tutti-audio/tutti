@@ -115,7 +115,7 @@
 //! Per-block inputs (MIDI, chord/scale context, parameter automation) are gated
 //! on what the plugin reported at load: an accessor answers `None` or `false`
 //! when the plugin declined the input. Capabilities are data — a [`Features`]
-//! bitset on [`LoadedPlugin`](tutti_plugin_types::LoadedPlugin) — never a check of the
+//! bitset on [`PluginWiring`](tutti_plugin_types::PluginWiring) — never a check of the
 //! plugin's format.
 //!
 //! ## Main types
@@ -178,7 +178,7 @@
 //! - **Negotiated** — the plugin answers once at load; the host adapts. A `Features`
 //!   flag: **f64 audio**, **MIDI in/out**, **editor**, **editor resize**, **floating
 //!   editor**. (Bus widths and latency are the numeric half — plain fields on
-//!   `LoadedPlugin`, not flags.)
+//!   `PluginWiring`, not flags.)
 //! - **Best-effort** — sent per block only to plugins that advertise the flag, gated
 //!   on `Features::CONSUMES` and never on format: **transport**, **parameter
 //!   automation**, **note expression**, **sequencer context**.
@@ -248,8 +248,8 @@
 //! ### `probed` — which capabilities a loader actually asked
 //!
 //! A clear `Features` bit answers three questions the same way: the plugin declined,
-//! this loader never asked, or the format has no query. `LoadedPlugin::probed` is the
-//! mask that separates the first from the other two, and `LoadedPlugin::capability()`
+//! this loader never asked, or the format has no query. `PluginWiring::probed` is the
+//! mask that separates the first from the other two, and `PluginWiring::capability()`
 //! reads the pair — `Some(false)` for a refusal, `None` for silence. The per-block
 //! send-gate deliberately keeps reading `features` directly: it has no way to act on
 //! "unknown" and must stay one mask-and-compare.
@@ -345,7 +345,7 @@
 //!
 //! - [`tutti-plugin-types`](https://docs.rs/tutti-plugin-types) — the shared value
 //!   vocabulary ([`ParameterInfo`](tutti_plugin_types::ParameterInfo),
-//!   [`TransportInfo`](tutti_plugin_types::TransportInfo), [`Features`], [`Preset`], …). The
+//!   [`TransportInfo`](tutti_plugin_types::TransportInfo), [`Features`], [`PluginPreset`], …). The
 //!   types a caller cannot avoid naming are re-exported at this crate's root.
 //! - [`tutti-plugin-server`](https://docs.rs/tutti-plugin-server) — the
 //!   subprocess side of the bridge.
@@ -357,7 +357,7 @@
 //!
 //! [`Features`]: tutti_plugin_types::Features
 //! [`PresetId`]: tutti_plugin_types::PresetId
-//! [`Preset`]: tutti_plugin_types::Preset
+//! [`PluginPreset`]: tutti_plugin_types::PluginPreset
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
 #![cfg_attr(

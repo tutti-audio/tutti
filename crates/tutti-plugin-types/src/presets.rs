@@ -189,7 +189,7 @@ impl PresetSupport {
 /// One preset a plugin advertises.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Preset {
+pub struct PluginPreset {
     /// How to ask for this preset back. See [`PresetId`] — opaque, and not an
     /// index into the list this came from.
     pub id: PresetId,
@@ -206,7 +206,7 @@ pub struct Preset {
     pub bank: Option<String>,
 }
 
-impl Preset {
+impl PluginPreset {
     /// Creates a preset in a format with one flat set.
     pub fn new(id: PresetId, name: impl Into<String>) -> Self {
         Self {
@@ -381,9 +381,9 @@ mod tests {
     /// a UI grouping on the field must be able to tell them apart.
     #[test]
     fn a_flat_format_reports_no_bank() {
-        assert_eq!(Preset::new(PresetId::Number(0), "Init").bank, None);
+        assert_eq!(PluginPreset::new(PresetId::Number(0), "Init").bank, None);
         assert_eq!(
-            Preset::in_bank(
+            PluginPreset::in_bank(
                 PresetId::Program {
                     list_id: 1,
                     index: 0
@@ -461,13 +461,13 @@ mod tests {
         );
     }
 
-    /// A whole `Preset` round-trips, banked or not.
+    /// A whole `PluginPreset` round-trips, banked or not.
     #[cfg(feature = "serde")]
     #[test]
     fn a_preset_round_trips_with_and_without_a_bank() {
         for preset in [
-            Preset::new(PresetId::Number(7), "Warm Pad"),
-            Preset::in_bank(
+            PluginPreset::new(PresetId::Number(7), "Warm Pad"),
+            PluginPreset::in_bank(
                 PresetId::Program {
                     list_id: 1,
                     index: 2,
@@ -477,7 +477,7 @@ mod tests {
             ),
         ] {
             let bytes = postcard::to_allocvec(&preset).expect("serialize");
-            let back: Preset = postcard::from_bytes(&bytes).expect("deserialize");
+            let back: PluginPreset = postcard::from_bytes(&bytes).expect("deserialize");
             assert_eq!(back, preset);
         }
     }

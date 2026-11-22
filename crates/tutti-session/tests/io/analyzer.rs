@@ -12,7 +12,7 @@ use tutti_measure::{
     Error as MeasureError, PeakBlocks, PeakConfig, VectorscopeConfig, WindowedLoudnessConfig,
 };
 use tutti_nodes::testing::{Const, Osc, Through};
-use tutti_session::{Analyzer, AnalyzerError, BindError, Session};
+use tutti_session::{Analyzer, AnalyzerError, MeterBindError, Session};
 use tutti_units::{Amplitude, Hz, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -64,7 +64,7 @@ fn a_sine_of_half_amplitude_yields_a_peak_of_half_per_item() {
     let _ = s.update();
     render(&mut s, 10);
 
-    let items: Vec<_> = analyzer.try_iter().collect();
+    let items: Vec<_> = analyzer.pending().collect();
     // 640 frames: thirteen whole blocks of 48.
     assert_eq!(items.len(), 13);
     for item in &items {
@@ -155,7 +155,7 @@ fn a_view_the_tap_width_cannot_make_opens_no_tap() {
         .open_analyzer(&[src.out(0)], scope, tap(64))
         .unwrap_err();
     assert!(
-        matches!(refused, AnalyzerError::Bind(BindError::Width { .. })),
+        matches!(refused, AnalyzerError::Bind(MeterBindError::Width { .. })),
         "{refused:?}"
     );
     let next = s.graph().taps().open_root(Samples::new(64)).unwrap().id();
@@ -190,7 +190,7 @@ fn a_nan_block_is_counted_refused_and_the_next_blocks_items_arrive() {
         .expect("the source exists");
     let _ = s.update();
     render(&mut s, 1);
-    assert_eq!(analyzer.try_iter().count(), 0, "a NaN block yields no item");
+    assert_eq!(analyzer.pending().count(), 0, "a NaN block yields no item");
     assert_eq!(analyzer.refused(), Samples::new(BLOCK));
 
     s.remove(nan).unwrap();
@@ -200,7 +200,7 @@ fn a_nan_block_is_counted_refused_and_the_next_blocks_items_arrive() {
     for _ in 0..200 {
         let _ = s.update();
         render(&mut s, 1);
-        last = analyzer.try_iter().last().or(last);
+        last = analyzer.pending().last().or(last);
     }
     let last = last.expect("the blocks after the NaN yield items");
     assert_eq!(
@@ -227,7 +227,7 @@ fn lost_counts_the_frames_rendered_past_the_capacity() {
 
     assert_eq!(analyzer.lost(), Samples::new(10 * BLOCK - BLOCK));
     // The capacity is what was kept: one block.
-    assert_eq!(analyzer.try_iter().count(), 1);
+    assert_eq!(analyzer.pending().count(), 1);
     // Cumulative: a read does not clear it.
     assert_eq!(analyzer.lost(), Samples::new(10 * BLOCK - BLOCK));
 }
@@ -245,7 +245,7 @@ fn the_analyzer_ends_after_its_source_is_removed() {
         .expect("the source exists");
     let _ = s.update();
     render(&mut s, 2);
-    assert_eq!(analyzer.try_iter().count(), 2);
+    assert_eq!(analyzer.pending().count(), 2);
     assert!(!analyzer.is_finished());
 
     s.remove(src).unwrap();
@@ -253,9 +253,9 @@ fn the_analyzer_ends_after_its_source_is_removed() {
     for _ in 0..200 {
         let _ = s.update();
         render(&mut s, 1);
-        let _ = analyzer.try_iter().count();
+        let _ = analyzer.pending().count();
     }
     assert!(analyzer.is_finished());
     render(&mut s, 1);
-    assert_eq!(analyzer.try_iter().count(), 0);
+    assert_eq!(analyzer.pending().count(), 0);
 }
