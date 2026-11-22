@@ -120,28 +120,26 @@ fn round_trip(s: &Session, node: Key<AnyPlugin>) {
 /// Waits (up to 10 s) for the probe's latency to read `want`: the
 /// `clap.latency` callback reaches the cell from the server's bridge thread.
 fn await_latency(s: &Session, node: Key<AnyPlugin>, want: Samples, why: &str) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while {
-        round_trip(s, node);
-        latency(s, node) != want
-    } {
-        assert!(
-            Instant::now() < deadline,
-            "{why}: the probe's latency stayed {:?}, want {want:?}",
-            latency(s, node)
-        );
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    tutti_fixtures::wait_until(
+        &format!("{why}: the probe's latency to read {want:?}"),
+        tutti_fixtures::HANG_GUARD,
+        || {
+            round_trip(s, node);
+            latency(s, node) == want
+        },
+    );
 }
 
-/// Holds for 200 ms that the probe's latency reads `want`: what an
-/// announcement that did not happen looks like.
+/// Holds across 20 round trips to the server that the probe's latency reads `want`:
+/// what an announcement that did not happen looks like. The session announces a
+/// render mode only from `update` (`tutti_plugin_host::needs_notify`), so a caller
+/// that has not updated since the plugin was added has nothing in flight for the
+/// server to answer; the round trips only give a wrong early announcement the
+/// chance to show.
 fn stays_latency(s: &Session, node: Key<AnyPlugin>, want: Samples, why: &str) {
-    let until = Instant::now() + Duration::from_millis(200);
-    while Instant::now() < until {
+    for _ in 0..20 {
         round_trip(s, node);
         assert_eq!(latency(s, node), want, "{why}");
-        std::thread::sleep(Duration::from_millis(10));
     }
 }
 
@@ -303,12 +301,10 @@ fn a_plugin_dead_for_the_window_stays_silent_at_its_node_and_is_reported_once() 
     // Render until the engine latches the death (the server aborted on its
     // first block; the bridge notices on a later one).
     let mut out = vec![0.0f32; BLOCK * 2];
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while matches!(s.plugin_view(node).unwrap().health(), PluginHealth::Running) {
-        assert!(Instant::now() < deadline, "the probe never died");
+    tutti_fixtures::wait_until("the probe to die", tutti_fixtures::HANG_GUARD, || {
         s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
-        std::thread::sleep(Duration::from_millis(5));
-    }
+        !matches!(s.plugin_view(node).unwrap().health(), PluginHealth::Running)
+    });
 
     let t0 = Instant::now();
     let plugins_at = |s: &mut Session, ms: u64| {
@@ -527,8 +523,10 @@ impl Drive {
         }
     }
 
-    /// One frame: a block rendered (the server gets real time to act), the
-    /// plugins' phase at the clock 20 ms on, landing what the tasks sent.
+    /// One frame: a block rendered, the plugins' phase at the clock 20 ms on,
+    /// landing what the tasks sent. The wait after the block is real time: the
+    /// bridge abandons a block the server has not answered within its budget on
+    /// its own clock, and a hung plugin gives no event to wait on instead.
     fn step(&mut self, s: &mut Session) {
         let _ = renders_sound(s);
         std::thread::sleep(Duration::from_millis(5));
@@ -699,21 +697,27 @@ fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
     assert!(s.plugin_view(node).unwrap().state().last_good().is_some());
 
     // The state came back.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !is_quarter(param(&s, &node, id)) {
-        assert!(
-            Instant::now() < deadline,
-            "the replacement's parameter is {:?}, not the snapshot's 0.25",
-            param(&s, &node, id)
-        );
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    tutti_fixtures::wait_until(
+        "the replacement's parameter to be the snapshot's 0.25",
+        tutti_fixtures::HANG_GUARD,
+        || is_quarter(param(&s, &node, id)),
+    );
 
     // And it stays restored: nothing writes the load-time values over it
-    // (a write rides the next blocks to the server, so render some).
+    // (a write rides the next blocks to the server, so render some, each after
+    // the server answered the one before).
     for _ in 0..40 {
+        tutti_fixtures::wait_until(
+            "the chunk in flight to be answered",
+            tutti_fixtures::HANG_GUARD,
+            || {
+                s.plugin_view(node)
+                    .unwrap()
+                    .diagnostics()
+                    .chunk_in_flight_answered()
+            },
+        );
         let _ = renders_sound(&mut s);
-        std::thread::sleep(Duration::from_millis(2));
     }
     assert!(
         is_quarter(param(&s, &node, id)),
@@ -730,14 +734,11 @@ fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
         total_before.get() + EXTRA,
         "PDC follows the latency"
     );
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !renders_sound(&mut s) {
-        assert!(
-            Instant::now() < deadline,
-            "the recovered plugin renders nothing"
-        );
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    tutti_fixtures::wait_until(
+        "the recovered plugin to render",
+        tutti_fixtures::HANG_GUARD,
+        || renders_sound(&mut s),
+    );
 }
 
 /// **A plugin that fails every load is given up on, and its node stays silent.**
@@ -1033,24 +1034,19 @@ fn a_reload_completes_with_no_host_code_but_update() {
     let (node, _) = wired_probe(&mut s);
 
     let mut events = Vec::new();
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while !events.iter().any(|e| {
-        matches!(
-            e,
-            SessionEvent::Plugin(PluginEvent {
-                change: PluginChange::Recovered { .. },
-                ..
-            })
-        )
-    }) {
-        assert!(
-            Instant::now() < deadline,
-            "the reload never completed: {events:?}"
-        );
+    tutti_fixtures::wait_until("the reload to complete", tutti_fixtures::HANG_GUARD, || {
         let _ = renders_sound(&mut s);
         events.extend(s.update());
-        std::thread::sleep(Duration::from_millis(5));
-    }
+        events.iter().any(|e| {
+            matches!(
+                e,
+                SessionEvent::Plugin(PluginEvent {
+                    change: PluginChange::Recovered { .. },
+                    ..
+                })
+            )
+        })
+    });
     assert!(
         events.iter().any(|e| matches!(
             e,
@@ -1065,12 +1061,14 @@ fn a_reload_completes_with_no_host_code_but_update() {
         s.plugin_view(node).unwrap().health(),
         PluginHealth::Running
     ));
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !renders_sound(&mut s) {
-        assert!(Instant::now() < deadline, "the replacement renders nothing");
-        let _ = s.update();
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    tutti_fixtures::wait_until(
+        "the replacement to render",
+        tutti_fixtures::HANG_GUARD,
+        || {
+            let _ = s.update();
+            renders_sound(&mut s)
+        },
+    );
 }
 
 /// **A killed server reads `Died`, then `Reloading`, through `health()` and
@@ -1096,20 +1094,19 @@ fn a_killed_server_reads_died_then_reloading() {
     );
 
     let mut out = vec![0.0f32; BLOCK * 2];
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while matches!(s.plugin_view(node).unwrap().health(), PluginHealth::Running) {
-        assert!(Instant::now() < deadline, "the probe never died");
+    tutti_fixtures::wait_until("the probe to die", tutti_fixtures::HANG_GUARD, || {
         s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
-        std::thread::sleep(Duration::from_millis(5));
-    }
+        !matches!(s.plugin_view(node).unwrap().health(), PluginHealth::Running)
+    });
     let PluginHealth::Died { cause } = s.plugin_view(node).unwrap().health() else {
         panic!("a latched death reads Died before the session writes it off");
     };
 
     let mut now = Instant::now();
+    let deadline = now + tutti_fixtures::HANG_GUARD;
     let reloading = loop {
         assert!(Instant::now() < deadline, "the death was never declared");
-        std::thread::sleep(Duration::from_millis(20));
+        std::thread::yield_now();
         now += Duration::from_millis(20);
         let mut events = Vec::new();
         s.run_phase(Phase::Plugins, PhaseCx::at(now), &mut events);
@@ -1726,11 +1723,11 @@ fn a_cancelled_export_frees_the_token_and_the_forked_server() {
         "cancelled"
     );
     if let Some(live) = live {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while servers() != Some(live) {
-            assert!(Instant::now() < deadline, "the fork's server never exited");
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        tutti_fixtures::wait_until(
+            "the fork's server to exit",
+            tutti_fixtures::HANG_GUARD,
+            || servers() == Some(live),
+        );
     }
 
     bounced(&mut s, request()).expect("the next export is not refused, and renders to its end");
