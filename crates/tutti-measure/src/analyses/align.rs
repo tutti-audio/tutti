@@ -269,7 +269,7 @@ impl<S: Sample, R: Float> Measure<S> for AlignTo<R> {
     ///
     /// # Errors
     ///
-    /// [`AboveNyquist`](crate::AboveNyquist) when the band's top exceeds half `rate`;
+    /// [`MeterError::Nyquist`] when the band's top exceeds half `rate`;
     /// [`MeterError::ReferenceRate`] when the reference is at another rate;
     /// [`MeterError::ReferenceFold`] when it cannot be folded to mono.
     fn measure(&self, rate: SampleRate) -> Result<AlignMeter<S>, MeterError> {

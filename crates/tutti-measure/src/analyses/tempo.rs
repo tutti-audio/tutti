@@ -56,9 +56,9 @@ const HOP: usize = 512;
 const MIN_BPM: f64 = 1.0;
 const MAX_BPM: f64 = 1000.0;
 
-/// The most frames of novelty one call analyses, bounding the gathered audio
-/// and the curve.
-const MAX_FRAMES: FrameCount = FrameCount(1 << 22);
+/// The most samples of audio one call gathers: 2 GiB as `f64`, about 93 minutes
+/// at 48 kHz, which bounds the novelty curve too.
+const MAX_SAMPLES: FrameCount = FrameCount(1 << 28);
 
 /// The most runner-up tempi kept.
 const MAX_ALTERNATIVES: usize = 16;
@@ -236,7 +236,10 @@ impl TempoConfig {
         OnsetConfig::new(DetectionFunction::SpectralFlux)
             .framing(self.framing)
             .plan(rate)?;
-        Ok(Gathered::new(self.framing, MAX_FRAMES))
+        Ok(Gathered::new(
+            Framing::new(Samples::new(1), Samples::new(1)),
+            MAX_SAMPLES,
+        ))
     }
 }
 

@@ -3,7 +3,7 @@ use crate::test_rng::uniform;
 use crate::{FramingError, TooManyFrames};
 use tutti_dsp::{BinCount, FrameCount};
 use tutti_rt::SplitMix64;
-use tutti_units::Cents;
+use tutti_units::{Cents, Hz};
 
 fn framing(window: usize, hop: usize) -> Framing {
     Framing::new(Samples::new(window), Samples::new(hop))
@@ -397,5 +397,21 @@ fn the_chord_meter_reads_the_triad_and_refuses_a_chroma_it_cannot_hold() {
             rate
         ),
         Err(MeterError::Nyquist(_))
+    ));
+}
+
+/// A chord meter refuses the push that would make more chroma frames than one
+/// call analyses, at a window of 64 samples and a hop of one.
+#[test]
+fn the_chord_meter_refuses_more_chroma_frames_than_one_call_analyses() {
+    let rate = SampleRate::of(22_050.0);
+    let dense = ChromaConfig::new()
+        .framing(framing(64, 1))
+        .band(crate::FrequencyBand::new(Hz::new(400.0), Hz::new(8000.0)).unwrap());
+    let mut meter = Measure::<f64>::measure(&cfg().chroma(dense), rate).unwrap();
+    let long = vec![0.0f64; 64 + crate::meters::chroma::MAX_FRAMES.get()];
+    assert!(matches!(
+        meter.push(Mono::new(&long), &mut Vec::new()),
+        Err(MeterError::TooManyFrames(_))
     ));
 }

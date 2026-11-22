@@ -588,6 +588,12 @@ fn the_tempo_and_beat_meters_read_the_click_train() {
         .fold(0.0, f64::max);
     assert!(worst <= hop, "a beat is {worst} samples off");
 
+    let mut meter = Measure::<f64>::measure(&cfg, rate).unwrap();
+    assert_eq!(
+        meter.push(Mono::new(&[f64::NAN]), &mut Vec::new()),
+        Err(MeterError::NonFiniteInput)
+    );
+
     let zero = cfg.framing(Framing::new(Samples::new(1024), Samples::new(0)));
     assert!(matches!(
         Measure::<f64>::measure(&zero, rate),
