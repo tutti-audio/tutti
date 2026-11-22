@@ -101,6 +101,11 @@
 //!   debug build, that it is not inside an [`RtScope`], so a lock taken in a block
 //!   fails the realtime tests the way an allocation does.
 //!
+//! The `rtsan` feature (Linux and macOS; `cargo xtask rtsan`) makes each [`RtScope`] also
+//! hold LLVM's RealtimeSanitizer region, which sees what those checks cannot: a C `malloc`,
+//! a pthread lock or file I/O inside a block, in a plugin or a dependency. It does nothing
+//! unless `RTSAN_ENABLE` is set when the crate builds.
+//!
 //! **The root is the API.** Every item is re-exported at the root
 //! (`tutti_rt::RtVec`); the modules are private.
 //!

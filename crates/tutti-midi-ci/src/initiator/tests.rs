@@ -352,6 +352,7 @@ fn a_report_at_one_address_leaves_the_same_profile_at_another_alone() {
     );
 }
 
+/// Spec: m2-101/5.3#4
 #[test]
 fn a_version_1_peers_report_has_no_channel_count() {
     let (mut i, _, _) = start();

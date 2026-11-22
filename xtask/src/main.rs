@@ -115,6 +115,7 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let mut deferred = None;
     for step in &steps {
         if dry_run {
             println!("{}", step.display());
@@ -122,16 +123,20 @@ fn main() -> ExitCode {
         }
         eprintln!("+ {}", step.display());
         if let Err(code) = execute(step, &ctx) {
-            return ExitCode::from(code);
+            if matches!(step, Step::RunAll(_)) {
+                deferred.get_or_insert(code);
+            } else {
+                return ExitCode::from(code);
+            }
         }
     }
-    ExitCode::SUCCESS
+    deferred.map_or(ExitCode::SUCCESS, ExitCode::from)
 }
 
 /// Runs one step; an error is the exit code to stop with.
 fn execute(step: &Step, ctx: &Ctx) -> Result<(), u8> {
     match step {
-        Step::Run(c) => run(c, ctx),
+        Step::Run(c) | Step::RunAll(c) => run(c, ctx),
         Step::WriteFile { path, contents } => {
             let dir = path.parent().expect("a file path has a parent");
             std::fs::create_dir_all(dir)

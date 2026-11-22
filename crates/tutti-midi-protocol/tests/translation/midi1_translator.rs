@@ -689,7 +689,7 @@ fn mpe_avoiding() -> Midi1Translator {
 /// sections 4.1 to 4.6): a Pitch Bend, a Program Change with its Bank Select
 /// and a Control Change from source Ch6 (index 5) go on Ch1 (index 0), the
 /// lower zone's Manager, not on Ch6 nor on a member.
-/// Spec: m2-104/d.2.8#1
+/// Spec: m2-104/d.2.8#1, m2-120/4.6#1
 #[test]
 fn mpe_sends_channel_messages_on_the_manager_channel() {
     let mut n = mpe(zone());
