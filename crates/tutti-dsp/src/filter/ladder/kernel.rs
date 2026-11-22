@@ -67,7 +67,7 @@ pub enum LadderSaturation {
     /// resonance 0 settles to `tanh` applied once.
     Input,
     /// A saturator at each stage's input and in the loop: the implicit loop equation is
-    /// solved by a capped Newton iteration ([`nonlinear_ladder_step`]). Per sample, three
+    /// solved by a capped Newton iteration ([`nonlinear_ladder_step`](crate::nonlinear_ladder_step)). Per sample, three
     /// evaluations of the four-stage chain, about 12 `tanh`, an order of magnitude
     /// more than [`Input`](Self::Input). A constant input at resonance 0 settles to `tanh`
     /// applied four times.

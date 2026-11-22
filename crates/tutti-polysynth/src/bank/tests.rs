@@ -459,10 +459,10 @@ fn lane_per_stage_ladder_is_the_scalar_solve<F: SynthFloat + SimdLanes>() {
             *lane = F::from_design(gain * (w * f64::from(n)).sin());
         }
         let y = ladder_lanes(true, &lanes, &mut z, x);
-        for k in 0..L::<F>::LANES {
+        for (k, zk) in zs.iter_mut().enumerate().take(L::<F>::LANES) {
             let xk = x.as_slice()[k];
             loud = loud.max(xk.into().abs());
-            let want = nonlinear_ladder_step(&scalar, LadderType::LP24, &mut zs[k], xk, |v| {
+            let want = nonlinear_ladder_step(&scalar, LadderType::LP24, zk, xk, |v| {
                 kernel::tanh(L::<F>::splat(v)).as_slice()[0]
             });
             assert_eq!(y.as_slice()[k], want, "lane {k}, sample {n}");
