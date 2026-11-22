@@ -10,17 +10,17 @@ use crate::SessionEvent;
 use crate::graph::Graph;
 
 /// What a network reports where there is none: nothing, so no value of it exists.
-/// [`MidiReport::Network`](crate::MidiReport::Network) names it on a web build with
+/// [`MidiEvent::Network`](crate::MidiEvent::Network) names it on a web build with
 /// the feature on.
 #[cfg_attr(
     not(feature = "midi-network"),
     expect(
         dead_code,
-        reason = "named by `MidiReport::Network`, a feature `midi-network` variant"
+        reason = "named by `MidiEvent::Network`, a feature `midi-network` variant"
     )
 )]
 #[derive(Debug)]
-pub enum NetworkReport {}
+pub enum NetworkEvent {}
 
 /// No network is open.
 #[derive(Debug, Default)]

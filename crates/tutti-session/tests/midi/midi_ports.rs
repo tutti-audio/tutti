@@ -14,8 +14,8 @@ use tutti_midi_hardware::InputFault;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint, persistent_endpoint};
 use tutti_midi_runtime::MidiClipNode;
 use tutti_session::{
-    EventInPort, MidiInput, MidiOutput, MidiPortError, MidiRouteRule, Peer, PortCause, Presence,
-    Resource, ResourceFact, Session, SessionEvent, Stamp,
+    EventInPort, MidiInput, MidiOutput, MidiPortError, MidiRouteRule, Peer, PeerEvent, PortCause,
+    Presence, Resource, ResourceFact, Session, SessionEvent, Stamp,
 };
 use tutti_ump::{
     Address, CCNumber, Message, MidiChannel, MidiGroup, NoteKeyEvent, NoteNumber, U7, Voice2,
@@ -73,7 +73,9 @@ fn changed(events: &[SessionEvent], id: tutti_session::PeerResourceId) -> Vec<Re
     events
         .iter()
         .filter_map(|e| match e {
-            SessionEvent::ResourceChanged { id: of, fact } if *of == id => Some(*fact),
+            SessionEvent::Peer(PeerEvent::ResourceChanged { id: of, fact }) if *of == id => {
+                Some(*fact)
+            }
             _ => None,
         })
         .collect()
@@ -127,7 +129,7 @@ fn an_absent_device_opens_lost_unplugged() {
 }
 
 /// **A device that is unplugged and plugged again goes `Lost` and `Live` behind
-/// the same handle**: each change is one `ResourceChanged` of presence, and the
+/// the same handle**: each change is one `PeerEvent::ResourceChanged` of presence, and the
 /// same input node serves the port.
 #[test]
 fn a_replug_goes_live_on_the_same_handle_and_node() {

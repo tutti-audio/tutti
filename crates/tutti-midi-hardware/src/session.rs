@@ -18,8 +18,15 @@
 //!
 //! # Threading
 //!
-//! One owner, on the control thread: the session is a plain value, every call
-//! that changes it takes `&mut self`, and it is `Send` but is not shared.
+//! One owner at a time, off the audio thread: the session is a plain value, every
+//! call that changes it takes `&mut self`, and it is `Send`. A host that steps it
+//! from a task as well as from its control tick shares it under a lock, and the
+//! two callers' clocks may differ: [`poll`](MidiSession::poll) keeps the later
+//! time. A port's reader rings the bell of a [`HardwareMidiInputs::ringing`]
+//! list when it wrote what a poll reads, the session rings it when a call
+//! leaves work for the next poll or moves its deadline earlier, and
+//! [`deadline`](MidiSession::deadline) says when a wait runs out, so the task
+//! polls only when there is something to step.
 //! Inbound **events** never pass through this type — a backend pushes them straight into the
 //! [`InputProducerHandle`] of a [`HardwareMidiInputs`] port, which places each
 //! arrival on a frame and pushes it into the device's event inlet, whose node
@@ -55,7 +62,7 @@ use crate::{HardwareMidiInputs, InputFault};
 use tutti_graph::EventInletNode;
 use tutti_midi_ci::{CiDeviceId, ProfileChange, ProfileId};
 use tutti_midi_device::{DeviceInfo, Learned, MidiDeviceId, MidiIdentity, SavedDevice};
-use tutti_midi_runtime::{InputInlets, InputWriters};
+use tutti_midi_runtime::InputWriters;
 use tutti_ump::ProductInstanceId;
 use tutti_ump::{GroupSpan, MidiGroup};
 
@@ -106,6 +113,9 @@ pub struct MidiSession {
     /// What the MIDI-CI devices' Property Exchange Responders serve
     /// ([`MidiSession::serve_properties`]); empty by default.
     properties: ResourceStore,
+    /// The latest `now` a [`poll`](MidiSession::poll) was given: time never
+    /// steps back across two callers.
+    last_poll: Option<Instant>,
 }
 
 /// An identity and the Groups its one Function Block spans: what
@@ -224,9 +234,13 @@ pub enum Polled {
 
 impl MidiSession {
     /// Opens a session over this platform's backend, whose threads are
-    /// `executor`'s, its input ports inlets made
-    /// by `inlets` (the session builds and owns the [`HardwareMidiInputs`] over
-    /// them: [`ports`](Self::ports)).
+    /// `executor`'s, its input ports the ones `ports` makes (the caller builds
+    /// the [`HardwareMidiInputs`], and the session owns it: [`ports`](Self::ports)).
+    /// A [`HardwareMidiInputs::ringing`] list rings a [`Bell`](tutti_rt::Bell)
+    /// when a port's reader wrote what [`poll`](Self::poll) reads, and the
+    /// session rings it when a call leaves work for the next poll or moves
+    /// [`deadline`](Self::deadline) earlier, so whoever waits on the bell's
+    /// listener polls then.
     ///
     /// `config` is what the session runs with ([`MidiHardwareConfig`]).
     ///
@@ -235,10 +249,10 @@ impl MidiSession {
     /// As [`Devices::open`].
     pub fn open(
         executor: &Executor,
-        inlets: Arc<InputInlets>,
+        ports: HardwareMidiInputs,
         config: MidiHardwareConfig,
     ) -> Result<Self> {
-        Self::open_over(executor, backend::active(executor), inlets, config)
+        Self::open_over(executor, backend::active(executor), ports, config)
     }
 
     /// A session over a supplied backend, whose outputs' Active Sensing runs on
@@ -255,17 +269,18 @@ impl MidiSession {
     pub fn open_over(
         executor: &Executor,
         backend: Box<dyn MidiEndpoints>,
-        inlets: Arc<InputInlets>,
+        ports: HardwareMidiInputs,
         config: MidiHardwareConfig,
     ) -> Result<Self> {
         Ok(Self {
             inputs: HashMap::new(),
-            ports: Arc::new(HardwareMidiInputs::new(inlets)),
+            ports: Arc::new(ports),
             devices: Devices::open_over(executor, backend)?,
             config,
             presented: None,
             generated_instance: None,
             properties: ResourceStore::default(),
+            last_poll: None,
         })
     }
 
@@ -402,6 +417,8 @@ impl MidiSession {
         };
         follow_timing(&self.ports, &held);
         self.inputs.insert(id, held);
+        // The negotiation starts at the next poll.
+        self.ports.ring();
         Ok(Connected::Opened(inlet))
     }
 
@@ -513,11 +530,40 @@ impl MidiSession {
     ///
     /// `now` is the caller's time: nothing here reads a clock or waits, so a
     /// device that never answers costs a few packets over a few seconds of
-    /// polls and then reads as [`Unanswered`](crate::Basis::Unanswered). Call
-    /// it from the control tick (the session's `Phase::Poll`); it only reads
-    /// rings and sends.
+    /// polls and then reads as [`Unanswered`](crate::Basis::Unanswered). A call
+    /// given an earlier `now` than the last one steps at the last (time never
+    /// steps back). Poll again at [`deadline`](Self::deadline) and when the
+    /// bell of a [`HardwareMidiInputs::ringing`] list rings; a poll only reads
+    /// rings and sends. A step that decides the next one (a settle starts
+    /// MIDI-CI) is followed by it in the same call.
     pub fn poll(&mut self, now: Instant) -> std::vec::IntoIter<Polled> {
+        // Two callers may poll, each with its own clock: the later time of the
+        // two is the session's, so no wait is moved back.
+        let now = self.last_poll.map_or(now, |last| last.max(now));
+        self.last_poll = Some(now);
+        let before = self.deadline();
         let mut polled = Vec::new();
+        // A step that decides what the next one does (a settled negotiation
+        // starts MIDI-CI, a decision of the Groups) is followed by that one, at
+        // the same time, until none is left: each step ends what it decided, so
+        // the sequence is finite.
+        loop {
+            self.poll_once(now, &mut polled);
+            if !self.needs_poll() {
+                break;
+            }
+        }
+        // Whoever sleeps until the deadline it read before reads it again.
+        if let Some(after) = self.deadline()
+            && before.is_none_or(|before| after < before)
+        {
+            self.ports.ring();
+        }
+        polled.into_iter()
+    }
+
+    /// One step of every open input at `now`.
+    fn poll_once(&mut self, now: Instant, polled: &mut Vec<Polled>) {
         let generated = self.generated_instance;
         let presented = self.presented.map(|mut who| {
             who.identity.instance = who.identity.instance.or(generated);
@@ -590,7 +636,31 @@ impl MidiSession {
                     .map(|(group, error)| Polled::CiNotStarted(id.clone(), group, error)),
             );
         }
-        polled.into_iter()
+    }
+
+    /// When the next [`poll`](Self::poll) is due for a wait that runs out: the
+    /// earliest of every open input's Stream negotiation or Identity Inquiry
+    /// step, and the waits of its MIDI-CI devices, their Initiators and
+    /// Responders. `None` while nothing waits: only a device's reply, a request
+    /// or a change of the session brings the next poll.
+    ///
+    /// It reads no clock.
+    #[must_use]
+    pub fn deadline(&self) -> Option<Instant> {
+        self.inputs
+            .values()
+            .filter_map(|held| held.stream.deadline())
+            .min()
+    }
+
+    /// Whether the next poll has work no timer and no reply will bring: a step
+    /// decided what the next one does. A retry that waits on something outside
+    /// the session (a JR-stop request a full output refused, a MUID the
+    /// operating system gave no random bytes for) is not one: it goes again at
+    /// the next poll, whichever the caller's next ring or deadline brings, and
+    /// at every poll of a caller that steps on its own tick.
+    fn needs_poll(&self) -> bool {
+        self.inputs.values().any(|held| held.stream.needs_poll())
     }
 
     /// Presents the session as `who` on every open input with an output and on
@@ -626,6 +696,10 @@ impl MidiSession {
                     .ok()
                     .map(|()| ProductInstanceId::from_random(bytes))
             };
+        }
+        if self.presented != who {
+            // The devices start, stop or re-announce at the next poll.
+            self.ports.ring();
         }
         self.presented = who;
     }
@@ -685,6 +759,7 @@ impl MidiSession {
     /// offered.
     pub fn serve_properties(&mut self, store: ResourceStore) {
         self.properties = store.without_subscriptions();
+        self.ports.ring();
     }
 
     /// The store the devices serve: what [`serve_properties`](Self::serve_properties)
@@ -717,7 +792,9 @@ impl MidiSession {
     /// [`PeerRequestError::NotOpen`] when that input has since closed, and
     /// [`PeerRequestError::NoSuchPeer`] when the peer is gone.
     pub fn ask_property(&mut self, ask: PropertyAsk) -> std::result::Result<(), PeerRequestError> {
-        self.input_of(ask.peer.at())?.stream.ask_property(ask)
+        self.input_of(ask.peer.at())?.stream.ask_property(ask)?;
+        self.ports.ring();
+        Ok(())
     }
 
     /// The Profiles of the MIDI-CI peers found on the open input `id` that
@@ -748,7 +825,9 @@ impl MidiSession {
     ///
     /// [`PEER_REPLY_TIMEOUT`]: tutti_midi_ci::PEER_REPLY_TIMEOUT
     pub fn set_profile(&mut self, switch: ProfileSwitch) -> std::result::Result<(), ProfileError> {
-        self.input_of(switch.at())?.stream.set_profile(switch)
+        self.input_of(switch.at())?.stream.set_profile(switch)?;
+        self.ports.ring();
+        Ok(())
     }
 
     /// The MIDI-CI peers of the open input `id` that declared Process Inquiry and
@@ -775,7 +854,9 @@ impl MidiSession {
     /// [`PeerRequestError::NotOpen`] when that input has since closed, and
     /// [`PeerRequestError::NoSuchPeer`] when the peer is gone.
     pub fn report(&mut self, ask: ReportAsk) -> std::result::Result<(), PeerRequestError> {
-        self.input_of(ask.peer.at())?.stream.report(ask)
+        self.input_of(ask.peer.at())?.stream.report(ask)?;
+        self.ports.ring();
+        Ok(())
     }
 
     /// The open input the peer `at` was found on.

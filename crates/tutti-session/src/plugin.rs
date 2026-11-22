@@ -1350,7 +1350,8 @@ impl HostedPlugin {
         use tutti_graph::Losses;
         let points = self.node.param_delivery();
         let bridge = self.controls.as_ref().map_or(Losses::NONE, |c| {
-            Losses::refused(c.refused_commands()) + Losses::lost(c.lost_responses())
+            let bridge = c.bridge_losses();
+            Losses::refused(bridge.commands_refused) + Losses::lost(bridge.responses_lost)
         });
         bridge
             + Losses::lost(self.node.dropped_midi_in())
@@ -1662,7 +1663,7 @@ impl<'a> Plugin<'a> {
     ///
     /// [`late`](crate::Losses::late) stays zero. Audio the plugin's pipeline did
     /// not answer in time is not an event loss: it is counted in chunks, by
-    /// [`Diagnostics::missed_chunks`]; the blocks the node did not render and
+    /// [`Diagnostics::chunks`]; the blocks the node did not render and
     /// the entries the plugin refused are counted in blocks, by
     /// [`Diagnostics::block_losses`].
     #[must_use]

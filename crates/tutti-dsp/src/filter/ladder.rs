@@ -4,6 +4,7 @@
 mod bank;
 mod kernel;
 mod model;
+mod solve;
 
 pub use bank::{LadderBank, LadderBlend};
 pub use kernel::{LadderCoefficients, LadderDesign, LadderType, ladder_step};

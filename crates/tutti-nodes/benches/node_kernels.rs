@@ -1,7 +1,7 @@
 //! **What does one block of each per-sample kernel cost, at 64 and 1024
 //! frames?**
 //!
-//! The nodes here are the waveshaper, the brickwall clip,
+//! The nodes here are the waveshaper, the Moog ladder, the brickwall clip,
 //! the width adapter, the dynamics (the lookahead limiter, the gate and the
 //! compressor) and the ring-buffer family (the feedback delay, the lookahead
 //! limiter's ring and the convolver's dry
@@ -28,11 +28,14 @@ use tutti_nodes::{
     BrickwallLimiterConfig, BrickwallLimiterNode, ChannelTimes, CompressorConfig,
     CompressorControls, CompressorNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
     DistortionConfig, DistortionNode, FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig,
-    GateControls, GateNode, InterpolationMode, KeySource, LimiterConfig, LimiterControls,
-    LimiterNode, MaxDelay, ShapeKind,
+    GateControls, GateNode, InterpolationMode, KeySource, LadderFilterConfig, LadderFilterNode,
+    LadderType, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ShapeKind, TubeStageConfig,
+    TubeStageNode,
 };
 use tutti_rt::SplitMix64;
-use tutti_units::{CompressionRatio, Db, Drive, Feedback, SampleRate, Samples, Seconds};
+use tutti_units::{
+    CompressionRatio, Db, Drive, Feedback, Hz, Resonance, SampleRate, Samples, Seconds,
+};
 
 const BLOCKS: [usize; 2] = [64, 1024];
 const SR: SampleRate = SampleRate::SR_48K;
@@ -203,6 +206,23 @@ fn distortion(c: &mut Criterion) {
             )
         },
         Some(drive_sweep),
+    );
+}
+
+/// The 24 dB ladder at 1 kHz with resonance 0.7 (held), two channels.
+fn ladder(c: &mut Criterion) {
+    run(
+        c,
+        "ladder",
+        "lp24_res07_2",
+        || {
+            LadderFilterNode::<f32>::from(
+                LadderFilterConfig::new(ChannelLayout::STEREO, LadderType::LP24)
+                    .freq(Hz::new(1_000.0))
+                    .res(Resonance::new(0.7)),
+            )
+        },
+        None,
     );
 }
 
@@ -504,6 +524,16 @@ fn reverb(c: &mut Criterion) {
         None,
     );
 }
+/// The tube stage's solve at the default 4 times oversampling, over noise at the default drive.
+fn tube_stage(c: &mut Criterion) {
+    run(
+        c,
+        "tube_stage",
+        "stereo_x4",
+        || TubeStageNode::<f32>::from(TubeStageConfig::new(ChannelLayout::STEREO)),
+        None,
+    );
+}
 fn convolver(c: &mut Criterion) {
     use tutti_buffers::Mono;
     use tutti_fixtures::signal::decay_ir;
@@ -521,11 +551,13 @@ criterion_group!(
     benches,
     channel_sum,
     distortion,
+    ladder,
     brickwall,
     delay,
     limiter,
     dynamics,
     reverb,
+    tube_stage,
     convolver
 );
 criterion_main!(benches);

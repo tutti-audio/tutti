@@ -223,8 +223,9 @@ pub enum EditorCallError {
 ///
 /// An editor that could not be mirrored (`mirrored` is an error) still opens:
 /// it shows the plugin at its defaults, and the plugin keeps its own state.
-/// The failure is counted in `mirror_transfers_refused` of the plugin's
-/// diagnostics too, so an app that reads both does not add the two.
+/// The failure is counted in the plugin's diagnostics too, in
+/// [`BridgeLosses::mirror_transfers_refused`](tutti_plugin_types::BridgeLosses::mirror_transfers_refused),
+/// so an app that reads both does not add the two.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 #[must_use = "`mirrored` says whether the editor holds the plugin's state"]

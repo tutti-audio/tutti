@@ -19,7 +19,7 @@ use tutti_midi_hardware::{MidiHardwareConfig, ProfilesChange};
 use tutti_midi_runtime::MidiClipNode;
 use tutti_session::Peer as _;
 use tutti_session::{
-    EventInPort, MidiPolicy, MidiPolicyError, MidiReport, PHASES, PhaseCx, Session, SessionEvent,
+    EventInPort, MidiEvent, MidiPolicy, MidiPolicyError, PHASES, PhaseCx, Session, SessionEvent,
     SetRefusal, ValueErrorKind,
 };
 use tutti_ump::EndpointName;
@@ -200,7 +200,7 @@ impl Clock {
         std::mem::take(&mut self.2)
             .into_iter()
             .filter_map(|event| match event {
-                SessionEvent::Midi(MidiReport::CiProfiles { change, .. }) => Some(change),
+                SessionEvent::Midi(MidiEvent::CiProfiles { change, .. }) => Some(change),
                 _ => None,
             })
             .collect()

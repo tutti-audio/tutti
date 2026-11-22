@@ -86,6 +86,15 @@
 //! - **Waveshaping** (`waveshape.rs`): [`ShapeKind`], seven memoryless curves, and
 //!   [`WaveshaperBank`], which runs one over a block at a ramping or per-frame drive, with
 //!   [`Antialiasing`] of the first or second order.
+//! - **Diode clipper** (`diode_clipper.rs`): [`DiodeClipper`], the RC-loaded antiparallel diode
+//!   pair of Yeh, Abel and Smith, by the trapezoidal rule with a capped Newton solve seeded from
+//!   the Wright omega closed form (`wright_omega.rs`, `newton.rs`).
+//! - **Hysteresis** (`hysteresis.rs`): [`Hysteresis`], the Jiles-Atherton model of magnetization
+//!   (Jiles and Atherton 1986), by the trapezoidal rule of Holters and Zoelzer (2016) with a
+//!   capped Newton solve (`newton.rs`).
+//! - **Tube stage** (`tube_stage.rs`): [`TubeStage`], a 12AX7 common-cathode stage after Koren's
+//!   model, its plate load solved per sample by a capped Newton iteration from a closed-form
+//!   seed, with [`TubeDrive`] its checked drive.
 //! - **Spatial** (`spatial/`): VBAP ([`SpeakerLayout`], Pulkki's pairs and triplets and the
 //!   gain solve over them, [`SpeakerGeometryError`]; [`VbapKernel`] and [`VbapGains`], one
 //!   direction's gains and one channel rendered along a ramp between two) and the HRTF
@@ -188,6 +197,7 @@ mod dct;
 mod decorrelator;
 mod delay;
 mod design;
+mod diode_clipper;
 mod distance;
 mod dither;
 mod dynamics;
@@ -200,6 +210,7 @@ mod fm;
 mod follower;
 mod frequency_shifter;
 mod granular;
+mod hysteresis;
 mod interp;
 mod karplus_strong;
 mod level;
@@ -207,6 +218,7 @@ mod lfo;
 mod loudness;
 mod modal;
 mod modulation;
+mod newton;
 mod noise;
 mod novelty;
 mod onepole;
@@ -222,9 +234,11 @@ mod shoebox;
 mod stereo;
 mod string_tuning;
 mod tremolo;
+mod tube_stage;
 mod waveguide;
 mod waveshape;
 mod wavetable;
+mod wright_omega;
 
 mod mel;
 mod mfcc;
@@ -269,6 +283,7 @@ pub use delay::{
     FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError, InterpolationMode,
     MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError, NoteTimes, NoteTimesError,
 };
+pub use diode_clipper::{ClipperDrive, ClipperDriveError, DiodeClipper, DiodeClipperControls};
 pub use distance::{
     DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec, ReferenceDistance,
     ReferenceDistanceError,
@@ -312,6 +327,7 @@ pub use frequency_shifter::{
 pub use granular::{
     GrainScheduler, GrainSettings, GrainStart, Granular, MaxGrains, MaxGrainsError,
 };
+pub use hysteresis::{Hysteresis, HysteresisControls, HysteresisDrive, HysteresisDriveError};
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
 pub use karplus_strong::{KarplusStrong, KarplusStrongBank, KarplusStrongControls};
 pub use level::rms;
@@ -393,6 +409,7 @@ pub use stft::vocoder::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
 pub use stft::window::{CosineWindow, Window};
 pub use string_tuning::{LowestPitch, LowestPitchError};
 pub use tremolo::{AutoPan, AutoPanControls, Tremolo, TremoloControls};
+pub use tube_stage::{TubeDrive, TubeDriveError, TubeStage, TubeStageControls};
 pub use viterbi::sticky_viterbi;
 pub use waveguide::{WaveguideBank, WaveguideControls, WaveguidePositions, WaveguideString};
 pub use waveshape::{

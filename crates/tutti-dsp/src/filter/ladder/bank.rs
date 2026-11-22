@@ -5,9 +5,9 @@ use crate::BlockMismatch;
 use crate::block::expect_widths;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, InputOutput, Planes, PlanesMut};
-use tutti_units::Real;
 
-use super::kernel::{LadderCoefficients, ladder_step};
+use super::kernel::LadderCoefficients;
+use super::solve::nonlinear_ladder_step;
 use super::{LadderModel, LadderType};
 use crate::channel_group::group_size;
 use crate::design::along;
@@ -49,8 +49,10 @@ impl<F: Float + SimdLanes> Lerp for LadderBlend<F> {
     }
 }
 
-/// The state of a ladder per channel: its four stage words in the float `F`, every channel
-/// read through one shared [`LadderBlend`].
+/// The state of a ladder per channel: its four stage words in the
+/// float `F`, every channel read through one shared [`LadderBlend`]. Each sample solves the
+/// nonlinear ladder's loop equation with a capped Newton iteration (see the crate's `solve`
+/// module: a `tanh` at each stage's input and in the loop).
 ///
 /// The width is fixed when it is built. [`process`](Self::process) runs a block of audio
 /// through it while the design ramps toward its target and then holds. Channels run in groups
@@ -153,7 +155,7 @@ fn group<F: Float + SimdLanes, const N: usize>(
         ($i:expr, $d:expr) => {
             for k in 0..N {
                 let x = xs[k][$i] * $d.drive;
-                ys[k][$i] = ladder_step(&$d.coefficients, $d.ty, &mut st[k], x, Real::tanh);
+                ys[k][$i] = nonlinear_ladder_step(&$d.coefficients, $d.ty, &mut st[k], x);
             }
         };
     }

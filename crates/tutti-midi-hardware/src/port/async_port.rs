@@ -25,7 +25,7 @@ use tutti_graph::Losses;
 use tutti_midi_device::{ClockHeard, JrReceiver};
 use tutti_midi_runtime::{DeviceInput, InputId};
 use tutti_rt::{
-    Counter, CounterWriter, Overflow, PushError, RingReader, RingWriter, counter, ring,
+    Bell, Counter, CounterWriter, Overflow, PushError, RingReader, RingWriter, counter, ring,
 };
 use tutti_ump::{Message, Ump, Utility};
 use tutti_units::Resyncs;
@@ -190,6 +190,8 @@ pub struct InputProducerHandle {
     /// Where event times come from: shared with the port's entry.
     timing: Arc<SharedTiming>,
     jr: JrInput,
+    /// Rung after a write to `stream`, for whoever waits to read it.
+    bell: Option<Bell>,
 }
 
 /// How many UMP Stream messages a port holds between two looks of the control
@@ -271,6 +273,7 @@ impl InputProducerHandle {
         if event.is_stream() {
             // A message the ring has no room for is counted by the ring.
             let _ = self.stream.push(event);
+            self.ring();
             return Ok(Delivered::Diverted);
         }
         self.jr.follow(self.timing.get());
@@ -282,10 +285,19 @@ impl InputProducerHandle {
         }
         if event.message_type() == SYSEX7 && self.hear_sysex.load(Ordering::Relaxed) {
             let _ = self.stream.push(event);
+            self.ring();
         }
         self.input
             .push(event, self.jr.place(timestamp))
             .map(|()| Delivered::Sent)
+    }
+
+    /// Rings the bell, if the port has one: the stream ring has something to read.
+    #[inline]
+    fn ring(&self) {
+        if let Some(bell) = &self.bell {
+            bell.ring();
+        }
     }
 
     /// The identity of the port this handle feeds: the key to pass to
@@ -346,7 +358,11 @@ pub(crate) struct HardwareMidiInput {
 
 impl HardwareMidiInput {
     /// A port named `name` over `input`, and the producer handle for it.
-    pub(crate) fn new(name: impl Into<String>, input: DeviceInput) -> (Self, InputProducerHandle) {
+    pub(crate) fn new(
+        name: impl Into<String>,
+        input: DeviceInput,
+        bell: Option<Bell>,
+    ) -> (Self, InputProducerHandle) {
         let active = Arc::new(AtomicBool::new(true));
         let hear_sysex = Arc::new(AtomicBool::new(false));
         let timing = Arc::new(SharedTiming::new());
@@ -368,6 +384,7 @@ impl HardwareMidiInput {
                 hear_sysex,
                 timing,
                 jr: JrInput::new(jr_writers),
+                bell,
             },
         )
     }

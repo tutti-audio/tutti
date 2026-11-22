@@ -1,9 +1,12 @@
-//! The Moog-style four-stage ladder: coefficients and the per-sample step ([`ladder_step`]).
+//! The Moog-style four-stage ladder: coefficients and the cheap per-sample step
+//! ([`ladder_step`]).
 //!
 //! Unlike the SVF this is a *nonlinear* filter: the resonance feedback runs
 //! through a `tanh` saturator, so pushing resonance or drive grits and
 //! compresses rather than blowing up. That saturation is the character, not a
-//! safety measure.
+//! safety measure. [`LadderBank`](crate::LadderBank) solves the loop with a `tanh` at each
+//! stage too; [`ladder_step`] is the cheap form for callers that run SIMD lanes, with one
+//! saturator on the solved loop input.
 //!
 //! The resonance loop is closed with **no unit delay** (zero-delay feedback,
 //! Zavalishin, *The Art of VA Filter Design*, the ladder chapter): the loop
@@ -46,10 +49,11 @@ pub enum LadderType {
 ///
 /// Public for the same reason as [`SvfDesign`](crate::SvfDesign): a voice
 /// engine running this topology across SIMD lanes derives its coefficients
-/// from this function rather than a copy of it. The recurrence they feed is
-/// the ladder node's: four one-pole stages each `v = G*(in - s); lp = v + s;
+/// from this function rather than a copy of it. The cheap recurrence they feed is
+/// four one-pole stages each `v = G*(in - s); lp = v + s;
 /// s = lp + v` with `G = g / (1 + g)`, whose input is `u = tanh(u_lin)` for the
-/// delay-free loop's solution `u_lin = (x - k*S) / (1 + k*G^4)` (the kernel's `ladder_step`).
+/// delay-free loop's solution `u_lin = (x - k*S) / (1 + k*G^4)` ([`ladder_step`]); the
+/// bank's recurrence has the same small-signal response.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LadderDesign {
     /// Prewarped integrator gain, `tan(pi * fc / sr)`.
@@ -130,11 +134,12 @@ impl<F: Float + SimdLanes> LadderCoefficients<F> {
 /// `u = x - k*y4` then solves to `u_lin = (x - k*S) / (1 + k*G^4)`. The saturator
 /// is applied to that solution, `u = tanh(u_lin)`: the standard cheap nonlinear
 /// zero-delay form, exact for small signals (where `tanh x = x`, so the response
-/// is the continuous ladder's bilinear image) and a saturating limit past the knee.
+/// is the continuous ladder's bilinear image) and a saturating limit past the knee. It is
+/// one `tanh` a sample against the bank's capped Newton solve with a `tanh` per stage.
 ///
 /// `x` is the driven input (`input * drive`); `saturate` is the nonlinearity on the
-/// solved loop input: `tanh` for a filter node, the lane bank's rational
-/// approximation of it for the polysynth. Written once over [`SimdLanes`].
+/// solved loop input: the lane bank's rational approximation of `tanh` for the polysynth.
+/// Written once over [`SimdLanes`].
 ///
 /// `ty` is matched every frame; a caller with a constant type (the lane bank's
 /// `LP24`) has the match folded away by the inlining, so it costs nothing there.
