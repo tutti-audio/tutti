@@ -232,15 +232,22 @@ impl FunctionBlockBuilder {
         self
     }
 
-    /// The block's MIDI-CI Message Version/Format (`None` is none, the default,
-    /// §7.1.8) and the number of simultaneous SysEx 8 streams it supports (`0`
-    /// none: no System Exclusive 8 at all, `1` one, `2..=255` that many).
+    /// The block's MIDI-CI Message Version/Format (default: none, §7.1.8) and the
+    /// number of simultaneous SysEx 8 streams it supports (`0` none: no System
+    /// Exclusive 8 at all, `1` one, `2..=255` that many).
     pub const fn midi_ci(
         mut self,
-        version: Option<CiVersion>,
+        version: CiVersion,
         max_sysex8_streams: Sysex8StreamCount,
     ) -> Self {
-        self.block.midi_ci_version = version;
+        self.block.midi_ci_version = Some(version);
+        self.block.max_sysex8_streams = max_sysex8_streams;
+        self
+    }
+
+    /// The number of simultaneous SysEx 8 streams the block supports with no
+    /// MIDI-CI version declared (default: `0`, none).
+    pub const fn max_sysex8_streams(mut self, max_sysex8_streams: Sysex8StreamCount) -> Self {
         self.block.max_sysex8_streams = max_sysex8_streams;
         self
     }
@@ -458,8 +465,11 @@ impl FunctionBlock {
         let mut builder = Self::builder(id, info.direction, first_group, groups)
             .active(info.active)
             .ui_hint(info.ui_hint)
-            .midi1(info.midi1)
-            .midi_ci(midi_ci_version, info.max_sysex8_streams);
+            .midi1(info.midi1);
+        builder = match midi_ci_version {
+            Some(version) => builder.midi_ci(version, info.max_sysex8_streams),
+            None => builder.max_sysex8_streams(info.max_sysex8_streams),
+        };
         if let Some(name) = name {
             builder = builder.name(BlockName::try_from(name).map_err(BlockError::Name)?);
         }
@@ -1233,8 +1243,11 @@ mod wire {
             )
             .active(document.active)
             .ui_hint(document.ui_hint)
-            .midi1(document.midi1)
-            .midi_ci(document.midi_ci_version, document.max_sysex8_streams);
+            .midi1(document.midi1);
+            let builder = match document.midi_ci_version {
+                Some(version) => builder.midi_ci(version, document.max_sysex8_streams),
+                None => builder.max_sysex8_streams(document.max_sysex8_streams),
+            };
             let builder = match document.name {
                 Some(name) => builder.name(name),
                 None => builder,

@@ -18,8 +18,30 @@ use tutti_units::{SampleRate, Seconds};
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "serde", serde(try_from = "u16", into = "u16"))]
 pub struct JrTicks(u16);
+
+// Every `u16` is a value the wire carries, so the serde form reads back through
+// a conversion that cannot fail; a value enters through `new` otherwise.
+#[cfg(feature = "serde")]
+#[allow(
+    clippy::infallible_try_from,
+    reason = "no `From<u16>`: a value enters through `new`; this is the serde form"
+)]
+impl TryFrom<u16> for JrTicks {
+    type Error = core::convert::Infallible;
+
+    fn try_from(ticks: u16) -> Result<Self, Self::Error> {
+        Ok(Self(ticks))
+    }
+}
+
+#[cfg(feature = "serde")]
+impl From<JrTicks> for u16 {
+    fn from(ticks: JrTicks) -> u16 {
+        ticks.0
+    }
+}
 
 impl JrTicks {
     /// The tick rate, ticks a second (§7.2.2.1).

@@ -183,7 +183,7 @@ pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
         FirstGroup::new(0).unwrap(),
         GroupSpan::new(1).unwrap(),
     )
-    .midi_ci(Some(CiVersion::of(2)), Sysex8StreamCount::new(1))
+    .midi_ci(CiVersion::of(2), Sysex8StreamCount::new(1))
     .build()
     .unwrap();
     let spec = VirtualSpec::new(

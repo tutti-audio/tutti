@@ -25,8 +25,30 @@ const TEN_NS_UNITS_PER_MICRO: u32 = 100;
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "serde", serde(try_from = "u32", into = "u32"))]
 pub struct FlexTempo(u32);
+
+// Every `u32` is a field the wire carries, so the serde form reads back through
+// a conversion that cannot fail; a value enters through `new` otherwise.
+#[cfg(feature = "serde")]
+#[allow(
+    clippy::infallible_try_from,
+    reason = "no `From<u32>`: a value enters through `new`; this is the serde form"
+)]
+impl TryFrom<u32> for FlexTempo {
+    type Error = core::convert::Infallible;
+
+    fn try_from(units: u32) -> Result<Self, Self::Error> {
+        Ok(Self(units))
+    }
+}
+
+#[cfg(feature = "serde")]
+impl From<FlexTempo> for u32 {
+    fn from(tempo: FlexTempo) -> u32 {
+        tempo.0
+    }
+}
 
 impl FlexTempo {
     /// The field of `units` 10 ns units per quarter note.

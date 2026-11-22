@@ -60,16 +60,17 @@ pub(super) fn polled(wire: &mut Wire, ms: u64) -> Vec<Polled> {
 
 /// A block of one Group at `first_group` that declares MIDI-CI `version`.
 fn ci_block(id: u8, first_group: u8, version: u8) -> FunctionBlock {
-    FunctionBlock::builder(
+    let builder = FunctionBlock::builder(
         FunctionBlockId::new(id).unwrap(),
         BlockDirection::Bidirectional,
         FirstGroup::new(first_group).unwrap(),
         GroupSpan::new(1).unwrap(),
-    )
-    .midi_ci(CiVersion::new(version), Sysex8StreamCount::new(0))
-    .name(BlockName::new("B").unwrap())
-    .build()
-    .unwrap()
+    );
+    let builder = match CiVersion::new(version) {
+        Some(version) => builder.midi_ci(version, Sysex8StreamCount::new(0)),
+        None => builder,
+    };
+    builder.name(BlockName::new("B").unwrap()).build().unwrap()
 }
 
 fn endpoint_of(blocks: &[FunctionBlock]) -> Endpoint {

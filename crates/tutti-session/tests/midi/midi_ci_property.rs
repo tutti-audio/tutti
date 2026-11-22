@@ -70,7 +70,7 @@ impl PePeer {
             FirstGroup::new(0).unwrap(),
             GroupSpan::new(1).unwrap(),
         )
-        .midi_ci(Some(CiVersion::of(2)), Sysex8StreamCount::new(0))
+        .midi_ci(CiVersion::of(2), Sysex8StreamCount::new(0))
         .name(tutti_ump::BlockName::new("Main").unwrap())
         .build()
         .unwrap();

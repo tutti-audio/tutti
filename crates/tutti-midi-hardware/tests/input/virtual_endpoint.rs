@@ -179,7 +179,7 @@ fn block() -> FunctionBlock {
         GroupSpan::new(2).unwrap(),
     )
     .ui_hint(UiHint::Receiver)
-    .midi_ci(Some(CiVersion::of(2)), Sysex8StreamCount::new(3))
+    .midi_ci(CiVersion::of(2), Sysex8StreamCount::new(3))
     .name(BlockName::new("Pads").unwrap())
     .build()
     .unwrap()

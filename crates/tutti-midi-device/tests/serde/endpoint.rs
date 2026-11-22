@@ -18,7 +18,7 @@ fn block(id: u8, direction: BlockDirection) -> FunctionBlock {
     )
     .ui_hint(UiHint::Both)
     .midi1(Midi1Port::Unrestricted)
-    .midi_ci(Some(CiVersion::of(2)), Sysex8StreamCount::new(4))
+    .midi_ci(CiVersion::of(2), Sysex8StreamCount::new(4))
     .name("Keys".parse::<BlockName>().unwrap())
     .build()
     .unwrap()

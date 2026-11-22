@@ -70,7 +70,7 @@ fn device() -> Endpoint {
         .block(block(0, 0, 1, "Keys").build().unwrap())
         .block(
             block(1, 1, 2, "A function block name past thirteen bytes")
-                .midi_ci(Some(CiVersion::of(2)), Sysex8StreamCount::new(2))
+                .midi_ci(CiVersion::of(2), Sysex8StreamCount::new(2))
                 .build()
                 .unwrap(),
         )
