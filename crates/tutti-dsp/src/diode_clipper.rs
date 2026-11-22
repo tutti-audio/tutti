@@ -26,7 +26,7 @@
 //! 1N4148 fit of the paper (`I_s` 2.52 nA, `n` 1.752), the thermal voltage at 300 K
 //! (25.85 mV) and `R` 2.2 kOhm, which give `beta` about `2.4e-4`. The user sets the RC
 //! corner `f_c = w_c / 2 pi` ([`DiodeClipperControls::cutoff`]) and a drive
-//! ([`DiodeClipperControls::drive`]) that scales the signal before the circuit: one unit of
+//! ([`ClipperDrive`]) that scales the signal before the circuit: one unit of
 //! signal at 0 dB is 1 V, and the output is the capacitor voltage in the same
 //! unit (volts). No electrical quantity is a unit type here, so these are named constants.
 //!
@@ -76,7 +76,7 @@
 //! leaves at most `(b / a)^3 / 2 < 1e-12` (at `u` near 0) and the [`NEWTON_CAP`] of two steps
 //! leaves under `1e-24`: below the rounding of `f64`. The residual of the discretized equation
 //! after the cap is that rounding, at every `g` and every drive in
-//! `MIN_DRIVE..=MAX_DRIVE`.
+//! [`ClipperDrive::MIN`]`..=`[`ClipperDrive::MAX`].
 //!
 //! The solver starts from the better of the seed and the previous sample's solution (the one
 //! with the smaller residual): where the signal is slow the solution it follows is the closer.
@@ -115,33 +115,63 @@ const BETA: f64 = 2.0 * RESISTANCE * SATURATION_CURRENT / SLOPE_VOLTAGE;
 /// `u` per unit of signal at 0 dB drive: `FULL_SCALE / (n V_T)`.
 const SCALE: f64 = FULL_SCALE / SLOPE_VOLTAGE;
 
+tutti_units::ranged! {
+    /// The gain into a [`DiodeClipper`], in decibels over 1 V per unit of signal: from
+    /// [`MIN`](Self::MIN) (-60 dB) to [`MAX`](Self::MAX) (+60 dB), the range the solver's
+    /// residual is stated over.
+    ClipperDrive(Db), ClipperDriveError, "a drive from -60 dB to +60 dB",
+    |raw| raw.get() >= -60.0 && raw.get() <= 60.0
+}
+
+impl ClipperDrive {
+    /// The lowest drive: -60 dB.
+    pub const MIN: Self = Self::of(Db::new(-60.0));
+    /// The highest drive: +60 dB, where `u` reaches about 19.
+    pub const MAX: Self = Self::of(Db::new(60.0));
+    /// +12 dB, the [`DiodeClipperControls::DEFAULT`] drive.
+    pub const DEFAULT: Self = Self::of(Db::new(12.0));
+
+    /// The drive a live control value reads as: `raw` held within [`MIN`](Self::MIN) and
+    /// [`MAX`](Self::MAX), and [`DEFAULT`](Self::DEFAULT) for a NaN. A control
+    /// signal arrives every frame with no caller to refuse it to, so this is the one place a
+    /// value out of range is changed; a configured drive is refused by [`new`](Self::new)
+    /// instead.
+    #[must_use]
+    pub fn held(raw: Db) -> Self {
+        Self::new(raw).unwrap_or_else(|| {
+            if raw.get().is_nan() {
+                Self::DEFAULT
+            } else if raw.get() < 0.0 {
+                Self::MIN
+            } else {
+                Self::MAX
+            }
+        })
+    }
+}
+
 /// The controls of a [`DiodeClipper`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DiodeClipperControls {
     /// The RC corner `1 / (2 pi R C)`: the low-pass the circuit is below the diodes' knee.
     /// Held within [`MIN_CUTOFF`](Self::MIN_CUTOFF) and 0.4 of the rate the clipper runs at
     /// (the prewarp `tan(pi f_c / f_s)` diverges at the Nyquist frequency); a value that is not
-    /// finite reads as [`DEFAULT`](Self::DEFAULT)'s.
+    /// finite reads as [`DEFAULT`](Self::DEFAULT)'s. The upper bound depends on the rate, which
+    /// is not known where the controls are written, so it is held when the clipper is built
+    /// for its rate rather than refused as the drive is.
     pub cutoff: Hz,
-    /// The gain into the circuit, in decibels over 1 V per unit of signal.
-    /// Held within [`MIN_DRIVE`](Self::MIN_DRIVE) and [`MAX_DRIVE`](Self::MAX_DRIVE), the range
-    /// the solver's residual is stated over; a value that is not finite reads as
-    /// [`DEFAULT`](Self::DEFAULT)'s.
-    pub drive: Db,
+    /// The gain into the circuit; in range by its type.
+    pub drive: ClipperDrive,
 }
 
 impl DiodeClipperControls {
     /// The lowest cutoff: 20 Hz, the bottom of the audible band; below it the circuit is a
     /// DC-coupled shunt and rings for seconds.
     pub const MIN_CUTOFF: Hz = Hz::new(20.0);
-    /// The lowest drive: -60 dB.
-    pub const MIN_DRIVE: Db = Db::new(-60.0);
-    /// The highest drive: +60 dB, where `u` reaches about 19.
-    pub const MAX_DRIVE: Db = Db::new(60.0);
     /// 5 kHz at +12 dB.
     pub const DEFAULT: Self = Self {
         cutoff: Hz::new(5_000.0),
-        drive: Db::new(12.0),
+        drive: ClipperDrive::DEFAULT,
     };
 
     /// The frames it rings after its input stops, to [`TAIL_FLOOR`], at a clipper running at
@@ -159,12 +189,6 @@ impl DiodeClipperControls {
         self.cutoff
             .finite_or(Self::DEFAULT.cutoff)
             .clamp(Self::MIN_CUTOFF, rate.nyquist_scaled(0.8))
-    }
-
-    fn held_drive(&self) -> Db {
-        self.drive
-            .finite_or(Self::DEFAULT.drive)
-            .clamp(Self::MIN_DRIVE, Self::MAX_DRIVE)
     }
 }
 
@@ -264,7 +288,7 @@ impl<F: Float + Lerp> DiodeClipper<F> {
         let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         let controls = DiodeClipperControls::DEFAULT;
         let cutoff = F::from_unit(controls.held_cutoff(rate));
-        let drive = F::from_design(controls.held_drive().to_amplitude().get());
+        let drive = F::from_design(controls.drive.get().to_amplitude().get());
         let mut clipper = Self {
             rate,
             cutoff: Ramp::new(cutoff),
@@ -281,7 +305,7 @@ impl<F: Float + Lerp> DiodeClipper<F> {
     /// Aims at `controls`: the cutoff and the drive ramp over [`GAIN_RAMP`]. No allocation.
     pub fn retarget(&mut self, controls: &DiodeClipperControls) {
         let cutoff = F::from_unit(controls.held_cutoff(self.rate));
-        let drive = F::from_design(controls.held_drive().to_amplitude().get());
+        let drive = F::from_design(controls.drive.get().to_amplitude().get());
         self.cutoff.retarget_by(cutoff, Steps::Fixed(self.steps));
         self.drive.retarget_by(drive, Steps::Fixed(self.steps));
     }

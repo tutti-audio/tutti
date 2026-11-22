@@ -351,7 +351,7 @@ pub use diode_clipper::{
     DiodeClipperConfig, DiodeClipperKernel, DiodeClipperNode, DiodeClipperSet,
 };
 pub use distortion::{DistortionConfig, DistortionKernel, DistortionNode, DistortionSet};
-pub use tutti_dsp::DiodeClipperControls;
+pub use tutti_dsp::{ClipperDrive, ClipperDriveError, DiodeClipperControls};
 // `ShapeKind` and `OversamplingFactor` are in `DistortionNode`'s signatures; what is behind
 // them is `tutti-dsp`'s.
 pub use tutti_dsp::{Antialiasing, AntialiasingError, OversamplingFactor, ShapeKind};

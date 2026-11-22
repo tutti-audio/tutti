@@ -275,7 +275,7 @@ pub use delay::{
     FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError, InterpolationMode,
     MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError, NoteTimes, NoteTimesError,
 };
-pub use diode_clipper::{DiodeClipper, DiodeClipperControls};
+pub use diode_clipper::{ClipperDrive, ClipperDriveError, DiodeClipper, DiodeClipperControls};
 pub use distance::{
     DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec, ReferenceDistance,
     ReferenceDistanceError,

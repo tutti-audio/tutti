@@ -3,13 +3,15 @@
 use tutti_buffers::Float;
 use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock, Mono};
 use tutti_dsp::{
-    BlockMismatch, COEFF_INTERVAL, DiodeClipper, DiodeClipperControls, Lerp, OversamplingFactor,
+    BlockMismatch, COEFF_INTERVAL, ClipperDrive, DiodeClipper, DiodeClipperControls, Lerp,
+    OversamplingFactor,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_units::{Db, Hz, SampleRate, Samples, Tail};
+use tutti_units::{Db, Hz, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 use crate::oversampled::Oversampled;
+use crate::params::{ControlSet, HasControl};
 
 /// What a [`DiodeClipperNode`] is made from: its width, its controls and its oversampling.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -39,9 +41,9 @@ impl DiodeClipperConfig {
         self
     }
 
-    /// The drive it starts at, held as [`DiodeClipperControls::drive`] says.
+    /// The drive it starts at.
     #[must_use]
-    pub fn drive(mut self, drive: Db) -> Self {
+    pub fn drive(mut self, drive: ClipperDrive) -> Self {
         self.controls.drive = drive;
         self
     }
@@ -60,9 +62,11 @@ impl DiodeClipperConfig {
 /// # Controls
 ///
 /// The RC corner is a live [`Hz`] cell (`UnitParam::Cutoff`) and the drive a live [`Db`] cell
-/// (`UnitParam::GainDb`), both held within [`DiodeClipperControls`]' ranges, sampled at the
-/// stream grid (16 frames) and ramping over [`GAIN_RAMP`](tutti_dsp::GAIN_RAMP); a value that
-/// is not finite reads as the last one that was.
+/// (`UnitParam::GainDb`), sampled at the stream grid (16 frames) and ramping over
+/// [`GAIN_RAMP`](tutti_dsp::GAIN_RAMP). A control signal has no caller to refuse a value to:
+/// a drive out of [`ClipperDrive`]'s range reads as its nearest end
+/// ([`ClipperDrive::held`]), the corner is held as [`DiodeClipperControls::cutoff`] says, and
+/// a value that is not finite reads as the last one that was.
 ///
 /// # Latency and tail
 ///
@@ -97,15 +101,49 @@ impl<F: Float + Lerp> From<DiodeClipperConfig> for DiodeClipperNode<F> {
 #[derive(Clone, Copy, Debug)]
 pub struct DiodeClipperSet;
 
-control_set! {
-    DiodeClipperSet(_s): DiodeClipperControls = DiodeClipperControls::DEFAULT;
-    live: (all);
-    Cutoff => Hz = cutoff,
-    GainDb => Db = drive;
+/// The controls are the corner and the drive; the drive is a range-checked [`ClipperDrive`],
+/// which `control_set!` does not take (its rows are units), so the set is written out.
+impl ControlSet for DiodeClipperSet {
+    type Controls = DiodeClipperControls;
+
+    fn addrs(&self) -> &'static [UnitAddr] {
+        const ALL: &[UnitAddr] = &[
+            UnitAddr::first(UnitParam::Cutoff),
+            UnitAddr::first(UnitParam::GainDb),
+        ];
+        ALL
+    }
 
     fn defaults(&self) -> DiodeClipperControls {
         DiodeClipperControls::DEFAULT
     }
+
+    fn flatten(&self, c: &DiodeClipperControls, out: &mut [f64]) {
+        let all = [c.cutoff.get(), c.drive.get().get()];
+        out.copy_from_slice(&all[..out.len()]);
+    }
+
+    fn assemble(&self, v: &[f64]) -> DiodeClipperControls {
+        let mut c = DiodeClipperControls::DEFAULT;
+        let mut cells = v.iter().copied();
+        if let Some(x) = cells.next() {
+            c.cutoff = Hz::new(x);
+        }
+        if let Some(x) = cells.next() {
+            // The one place a live drive is changed: a cell is written per frame, with no
+            // caller to refuse it to.
+            c.drive = ClipperDrive::held(Db::new(x));
+        }
+        c
+    }
+}
+
+impl HasControl<{ UnitParam::Cutoff as u16 }> for DiodeClipperSet {
+    type Unit = Hz;
+}
+
+impl HasControl<{ UnitParam::GainDb as u16 }> for DiodeClipperSet {
+    type Unit = Db;
 }
 
 /// The [`Kernel`] of a [`DiodeClipperNode`].
@@ -235,7 +273,7 @@ mod tests {
         prepared(DiodeClipperNode::<f32>::from(
             DiodeClipperConfig::new(1u16)
                 .cutoff(Hz::new(cutoff))
-                .drive(Db::new(drive)),
+                .drive(ClipperDrive::of(Db::new(drive))),
         ))
     }
 
@@ -280,7 +318,7 @@ mod tests {
             let mut n = prepared(DiodeClipperNode::<f32>::from(
                 DiodeClipperConfig::new(1u16)
                     .cutoff(Hz::new(1.0e6))
-                    .drive(Db::new(-40.0))
+                    .drive(ClipperDrive::of(Db::new(-40.0)))
                     .oversampling(factor),
             ));
             let latency = n.shape().latency.samples().get();

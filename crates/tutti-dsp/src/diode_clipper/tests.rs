@@ -13,7 +13,7 @@ fn clipper(cutoff: f64, drive: f64) -> DiodeClipper<f64> {
     let mut c = DiodeClipper::new(ChannelLayout::MONO, rate());
     c.retarget(&DiodeClipperControls {
         cutoff: Hz::new(cutoff),
-        drive: Db::new(drive),
+        drive: ClipperDrive::of(Db::new(drive)),
     });
     c.jump_to_target();
     c
@@ -359,7 +359,7 @@ fn the_output_never_exceeds_the_inputs_peak_when_the_prewarp_is_at_most_one() {
 fn the_tail_is_the_frames_the_linear_decay_takes_to_reach_the_floor() {
     let controls = DiodeClipperControls {
         cutoff: Hz::new(300.0),
-        drive: Db::new(-60.0),
+        drive: ClipperDrive::MIN,
     };
     let mut c = clipper(300.0, -60.0);
     let steady = run(&mut c, &vec![1.0; 20_000]);
@@ -379,20 +379,54 @@ fn the_tail_is_the_frames_the_linear_decay_takes_to_reach_the_floor() {
     );
 }
 
-/// A cutoff past 0.4 of the rate is held there, one below the lowest at the lowest, and a
-/// drive past the range at its end; a value that is not finite reads as the default's.
+/// A cutoff past 0.4 of the rate is held there, one below the lowest at the lowest; a value
+/// that is not finite reads as the default's.
 #[test]
-fn controls_are_held_in_their_documented_ranges() {
-    let held = |cutoff: f64, drive: f64| {
-        let c = DiodeClipperControls {
+fn the_cutoff_is_held_in_its_documented_range() {
+    let held = |cutoff: f64| {
+        DiodeClipperControls {
             cutoff: Hz::new(cutoff),
-            drive: Db::new(drive),
-        };
-        (c.held_cutoff(rate()).get(), c.held_drive().get())
+            ..DiodeClipperControls::DEFAULT
+        }
+        .held_cutoff(rate())
+        .get()
     };
-    assert_eq!(held(1.0e9, 1.0e9), (0.4 * FS, 60.0));
-    assert_eq!(held(-5.0, -1.0e9), (20.0, -60.0));
-    assert_eq!(held(f64::NAN, f64::NAN), (5_000.0, 12.0));
+    assert_eq!(held(1.0e9), 0.4 * FS);
+    assert_eq!(held(-5.0), 20.0);
+    assert_eq!(held(f64::NAN), 5_000.0);
+}
+
+/// **The drive runs from -60 dB to +60 dB**, the range the solver's residual is stated over:
+/// both ends are valid, and a value past either, or not a number, is refused.
+#[test]
+fn a_drive_takes_exactly_the_documented_range() {
+    tutti_fixtures::check_range_contract(&tutti_fixtures::RangeContract {
+        new: ClipperDrive::new,
+        get: ClipperDrive::get,
+        of: Some(ClipperDrive::of),
+        valid: &[Db::new(-60.0), Db::new(12.0), Db::new(60.0)],
+        invalid: &[
+            Db::new(-60.001),
+            Db::new(60.001),
+            Db::new(f64::NAN),
+            Db::new(f64::INFINITY),
+            Db::new(f64::NEG_INFINITY),
+        ],
+    });
+}
+
+/// A live drive value (a control signal has no caller to refuse it to) is held in the
+/// range: past an end it reads that end, a NaN reads the default, and a value in range
+/// reads as itself.
+#[test]
+fn a_live_drive_is_held_in_the_range() {
+    let held = |db: f64| ClipperDrive::held(Db::new(db)).get().get();
+    assert_eq!(held(1.0e9), 60.0);
+    assert_eq!(held(f64::INFINITY), 60.0);
+    assert_eq!(held(-1.0e9), -60.0);
+    assert_eq!(held(f64::NEG_INFINITY), -60.0);
+    assert_eq!(held(f64::NAN), 12.0);
+    assert_eq!(held(-17.5), -17.5);
 }
 
 #[test]
