@@ -66,9 +66,9 @@ use crate::param_event::ParamEvent;
 use crate::spec::EventOutputPort;
 
 /// A fade an edge's lane runs over [`DECLICK`](crate::DECLICK), counted from the
-/// lane's first block under it. It is a control of the lane (a cell the
-/// executor snapshots once per block, as the base is), so changing it on an
-/// edge that already has an entry is no recompile.
+/// lane's first block under it. It is a value the editor holds for the lane (a
+/// cell the executor snapshots once per block, as the base is), so changing it
+/// on an edge that already has an entry is no recompile.
 ///
 /// The fade is the lane's own and is not an event: a lane **starts** a fade
 /// when the kind it reads differs from the one it last acted on, from the
@@ -111,17 +111,17 @@ impl EdgeFade {
     }
 }
 
-/// What the spec holds of an edge's gain lane: the `source` that drives it and
-/// the `fade` it runs.
+/// What the spec holds of an edge's gain lane: the `source` that drives it.
 ///
 /// Spec data beside the edge, keyed by [`EdgeId`](crate::EdgeId) in
 /// [`GraphSpec::gains`](crate::GraphSpec::gains), not inside
 /// [`Edge`](crate::Edge). An edge **with** an entry is a weighted lane of its
 /// sink's sum; one without is plain. The lane's base (a linear multiplier, `1.0`
-/// the plain sum, a negative one inverting polarity) and the `range` a driven
-/// value is clamped to are values the editor holds
+/// the plain sum, a negative one inverting polarity), the `range` a driven
+/// value is clamped to and its [`EdgeFade`] are values the editor holds
 /// ([`Editor::set_edge_gain`](crate::Editor::set_edge_gain),
-/// [`Editor::set_edge_gain_range`](crate::Editor::set_edge_gain_range)).
+/// [`Editor::set_edge_gain_range`](crate::Editor::set_edge_gain_range),
+/// [`Editor::set_edge_fade`](crate::Editor::set_edge_fade)).
 ///
 /// The base is a control and is never clamped, as a param's base is not:
 /// the range clamps only a value a `source` drives.
@@ -131,9 +131,6 @@ pub struct EdgeGain {
     /// first event on ([`GraphSpec::connect_edge_gain`](crate::GraphSpec::connect_edge_gain)).
     /// Its node must be in the graph; `None` reads the base.
     pub source: Option<EventOutputPort>,
-    /// The fade the lane runs ([`EdgeFade`]). A control: it needs no
-    /// recompile once the entry exists.
-    pub fade: EdgeFade,
 }
 
 impl EdgeGain {

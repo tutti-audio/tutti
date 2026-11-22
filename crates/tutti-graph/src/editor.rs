@@ -288,6 +288,9 @@ struct Fading {
     was: lifecycle::Committed,
     /// The base of each gain lane of `was`'s spec when the crossfade began.
     bases: BTreeMap<EdgeId, Amplitude>,
+    /// The fade of each gain lane of `was`'s spec that ran one when the
+    /// crossfade began.
+    fades: BTreeMap<EdgeId, EdgeFade>,
     /// The main output generation that fades in.
     main_output: crate::MainOutputId,
     /// The bank the plans carry.

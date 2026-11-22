@@ -68,7 +68,7 @@ use std::ops::Range;
 use tutti_graph::{Env, TransportPosition, declick_frames};
 use tutti_music::{FrameClock, LoopRange, first_frame_at_or_after};
 use tutti_tempo::TempoMap;
-use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples, Seconds};
+use tutti_units::{Beat, BeatDuration, Bpm, FramesPerBeat, SampleRate, Samples, Seconds};
 
 /// How far from where the playhead would have been, in frames, a run may
 /// start and still continue it. Far below anything audible (a thousandth of
@@ -183,8 +183,10 @@ impl Run {
 
     /// Frames per beat at the block's rate (`None` when it does not roll).
     #[inline]
-    pub(crate) fn frames_per_beat(&self) -> Option<f64> {
-        tutti_music::frames_per_beat(self.tempo(), self.sample_rate()).filter(|_| self.rolling)
+    pub(crate) fn frames_per_beat(&self) -> Option<FramesPerBeat> {
+        self.tempo()
+            .frames_per_beat(self.sample_rate())
+            .filter(|_| self.rolling)
     }
 
     /// This run cut to `range`: `None` when they do not meet. A run cut
@@ -222,8 +224,11 @@ fn breaks(prev: Next, to: &TransportPosition, rate: SampleRate) -> bool {
 
 /// Whether `to` is where the playhead would have been at `prev`.
 fn continues(prev: Next, to: &TransportPosition, rate: SampleRate) -> bool {
-    let fpb = rate.get() * 60.0 / to.tempo.get();
-    ((to.beat() - prev.beat).get() * fpb).abs() <= CONTINUES_WITHIN
+    // A tempo with no frames per beat never continues: its playhead does not
+    // move.
+    to.tempo
+        .frames_per_beat(rate)
+        .is_some_and(|f| f.frames_in(to.beat() - prev.beat).abs() <= CONTINUES_WITHIN)
 }
 
 /// The beat `clock` reads `k` frames on, no loop.
@@ -241,8 +246,10 @@ fn wrap_offset(clock: &FrameClock, end: Beat, limit: usize) -> Option<usize> {
     if limit <= 1 || beat_after(clock, limit - 1) < end {
         return None;
     }
-    let fpb = clock.sample_rate().get() * 60.0 / clock.tempo().get();
-    let est = first_frame_at_or_after((end - clock.beat()).get() * fpb);
+    // A tempo with no frames per beat does not move the beat: it stays below
+    // `end` (the precondition), so `beat_after` above has already returned.
+    let fpb = clock.tempo().frames_per_beat(clock.sample_rate())?;
+    let est = first_frame_at_or_after(fpb.frames_in(end - clock.beat()));
     let mut k = if est >= 1 {
         (est as usize).min(limit - 1)
     } else {
@@ -623,7 +630,7 @@ mod tests {
             .runs()
             .next()
             .expect("a run");
-        assert_eq!(run.frames_per_beat(), Some(FPB));
+        assert_eq!(run.frames_per_beat().map(FramesPerBeat::get), Some(FPB));
     }
 
     /// `(start, end, jump, generation)` of each run of the block.

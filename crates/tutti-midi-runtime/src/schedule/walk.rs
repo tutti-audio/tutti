@@ -12,8 +12,8 @@
 //! next block of the same run.
 
 use tutti_graph::{Due, Env, Offset};
-use tutti_music::{FRAME_TOLERANCE, first_frame_at_or_after, frames_per_beat};
-use tutti_units::{At, Beat, BeatDuration, Samples};
+use tutti_music::{FRAME_TOLERANCE, first_frame_at_or_after};
+use tutti_units::{At, Beat, FramesPerBeat, Samples};
 
 /// An event scheduled at a beat.
 pub(crate) trait Beated {
@@ -30,12 +30,24 @@ pub(crate) trait Visit<T> {
     /// walk told to [`forget`](Walk::forget). `events` are the source's, and
     /// `frames_per_beat` the rate the walk places them at
     /// ([`lands_on_first_frame`]).
-    fn jump(&mut self, at: Option<Offset>, beat: Beat, frames_per_beat: f64, events: &[T]);
+    fn jump(
+        &mut self,
+        at: Option<Offset>,
+        beat: Beat,
+        frames_per_beat: FramesPerBeat,
+        events: &[T],
+    );
     /// Playback wrapped its loop inside a segment: the pass starts at `at`,
     /// on `beat` (the loop's start, or a hair past it). A jump the source may
     /// treat as one ([`jump`](Self::jump), the default) or as the next pass
     /// of the same run.
-    fn wrap(&mut self, at: Option<Offset>, beat: Beat, frames_per_beat: f64, events: &[T]) {
+    fn wrap(
+        &mut self,
+        at: Option<Offset>,
+        beat: Beat,
+        frames_per_beat: FramesPerBeat,
+        events: &[T],
+    ) {
         self.jump(at, beat, frames_per_beat, events);
     }
     /// `event` is due at `at`.
@@ -71,18 +83,22 @@ impl Walk {
         let t = seg.transport;
         let len = seg.block_len.get();
         let at = |k: usize| Offset::new(Samples::new(start.index() + k), block.block_len);
-        let Some(fpb) = frames_per_beat(t.tempo, seg.sample_rate).filter(|_| t.playing) else {
+        let Some(fpb) = t
+            .tempo
+            .frames_per_beat(seg.sample_rate)
+            .filter(|_| t.playing)
+        else {
             v.stop(at(0));
             self.expected = None;
             return;
         };
         let now = t.beat();
-        let frame = BeatDuration::new(1.0 / fpb);
+        let frame = fpb.beats_per_frame();
         // A jump is a start more than half a frame away from where the last
         // segment left off (a seek, a wrap at a block edge, a restart).
         let continuous = self
             .expected
-            .is_some_and(|e| ((now - e).get() * fpb).abs() < 0.5);
+            .is_some_and(|e| fpb.frames_in(now - e).abs() < 0.5);
         if !continuous {
             v.jump(at(0), now, fpb, events);
         }
@@ -139,8 +155,8 @@ impl Walk {
 /// [`FRAME_TOLERANCE`] (`first_frame_at_or_after`). Of the events behind,
 /// the walk visits on that frame only those less than a frame behind; the
 /// rest were before playback got there.
-pub(crate) fn lands_on_first_frame(beat: Beat, from: Beat, frames_per_beat: f64) -> bool {
-    (beat - from).get() * frames_per_beat <= FRAME_TOLERANCE
+pub(crate) fn lands_on_first_frame(beat: Beat, from: Beat, frames_per_beat: FramesPerBeat) -> bool {
+    frames_per_beat.frames_in(beat - from) <= FRAME_TOLERANCE
 }
 
 /// Visit the events of one loop pass that playback reaches on its frames
@@ -153,11 +169,11 @@ fn pass<T: Beated>(
     from: Beat,
     k: usize,
     next: usize,
-    fpb: f64,
+    fpb: FramesPerBeat,
     v: &mut impl Visit<T>,
     at: &impl Fn(usize) -> Option<Offset>,
 ) {
-    let frame = BeatDuration::new(1.0 / fpb);
+    let frame = fpb.beats_per_frame();
     let lo = from - frame;
     let hi = from + frame * ((next - k) as f64 + 1.0);
     let first = in_loop.partition_point(|e| e.beat() < lo);
@@ -165,7 +181,7 @@ fn pass<T: Beated>(
         if e.beat() >= hi {
             break;
         }
-        let ahead = (e.beat() - from).get() * fpb;
+        let ahead = fpb.frames_in(e.beat() - from);
         let d = if ahead < 0.0 {
             if -ahead < 1.0 - FRAME_TOLERANCE {
                 0

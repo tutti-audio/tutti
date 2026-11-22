@@ -25,6 +25,13 @@ use super::*;
 ///   quantity it was. Build with `new`, read with `get` (generic code: the
 ///   `Unit` trait's `from_raw` / `to_raw`).
 ///
+/// - `BeatDuration * FramesPerBeat`, `FramesPerBeat * f64`, `FramesPerBeat +
+///   FramesPerBeat` — a beat span becomes frames only through
+///   [`FramesPerBeat::frames_in`] and frames become beats only through
+///   [`FramesPerBeat::beats_over`], so every reader groups the product the same
+///   way; a scaled or summed rate is a different tempo, made with
+///   [`Bpm::frames_per_beat`].
+///
 /// And a beat-synced rate is a [`BeatsPerCycle`] (beats per cycle), never an
 /// [`Hz`]: the two are *inverse*. Doubling
 /// the span halves the rate, so the substitution is a silent reciprocal.
@@ -451,4 +458,26 @@ fn a_read_rate_steps_by_its_rate_in_counts() {
     assert_eq!(ReadRate(-1.0).step(), None);
     assert_eq!(ReadRate(f64::NAN).step(), None);
     assert_eq!(ReadRate(f64::INFINITY).step(), None);
+}
+
+/// One beat at 120 BPM and 48 kHz spans 48 000 × 60 / 120 = 24 000 frames, and
+/// the converters scale by exactly that: half a beat back is 12 000 frames
+/// back, 6 000 frames is a quarter beat, and one frame is 1/24 000 of a beat.
+#[test]
+fn frames_per_beat_converts_beats_and_frames_at_rate_times_sixty_over_tempo() {
+    let fpb = Bpm::of(120.0)
+        .frames_per_beat(SampleRate::of(48_000.0))
+        .expect("a finite count");
+    assert_eq!(fpb.get(), 24_000.0);
+    assert_eq!(fpb.frames_in(BeatDuration(-0.5)), -12_000.0);
+    assert_eq!(fpb.beats_over(6_000.0), BeatDuration(0.25));
+    assert_eq!(fpb.beats_per_frame(), BeatDuration(1.0 / 24_000.0));
+}
+
+/// A tempo so slow that 60 over it overflows has no finite count of frames per
+/// beat: the clock does not move.
+#[test]
+fn the_slowest_tempo_has_no_frames_per_beat() {
+    let rate = SampleRate::of(48_000.0);
+    assert_eq!(Bpm::of(f64::from_bits(1)).frames_per_beat(rate), None);
 }
