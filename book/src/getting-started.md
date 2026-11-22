@@ -112,7 +112,7 @@ First we describe what we want to keep: the first two seconds, in
 stereo.
 
 ```rust,ignore
-Bounce::project()
+Bounce::new()
     .range(Seconds::new(0.0)..Seconds::new(2.0)) // from 0 s to 2 s
     .channels(ChannelLayout::STEREO) // left and right
 ```
@@ -123,7 +123,12 @@ or *stereo mix*). Then we hand it to the session:
 
 ```rust,ignore
 // The file's name picks its format: `.flac` is FLAC.
-tone()?.bounce(two_seconds().master(&path, Format::from_path(&path)?))?;
+let mut session = tone()?;
+let rendering = session.bounce(two_seconds().master(&path, Format::from_path(&path)?))?;
+// The session renders on a thread of its own; we wait for it, then hand
+// what it made back to the session.
+let rendered = block_on(rendering.into_future());
+session.apply(rendered)?;
 ```
 
 The session renders the two seconds as fast as your computer can manage,

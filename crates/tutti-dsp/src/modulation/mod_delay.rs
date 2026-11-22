@@ -32,8 +32,10 @@
 //! The memory is the sweep's own [`MaxDelay`]: a line holds that long, and `base +
 //! depth_max` fits in it by [`SweepBuilder::build`](crate::SweepBuilder::build). The state is the bank's float `F`.
 
+use crate::BlockMismatch;
+use crate::block::expect_widths;
 use tutti_buffers::{BusTopology, MAX_CHANNELS};
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput};
 use tutti_units::{
     Bipolar, Cents, Feedback, Hz, PhaseIncrement, ReadPosition, SampleRate, SampleSpan, Samples,
     Seconds,
@@ -403,24 +405,28 @@ impl<F: Float + Lerp> ModDelayBank<F> {
     /// read.
     ///
     /// Each channel is a feedback delay at its delay: the line's own tap scaled by the
-    /// feedback added to the input. Channel `c` of `input` feeds channel `c` of `output`; a channel
-    /// past the bank's width, or past the narrower of the two views, is not touched. The
+    /// feedback added to the input. Channel `c` of `input` feeds channel `c` of `output`. The
     /// feedback ramp's values must stay below 1 ([`Feedback::MAX_STABLE`] is the bound
     /// [`design`](Self::design) holds them to). No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels.
+    ///
+    /// # Panics
+    ///
+    /// If `delays` has fewer ramps than the bank has channels.
     pub fn process(
         &mut self,
         delays: &mut [Ramp<F>],
         feedback: &mut Ramp<F>,
-        input: Planes<'_, F>,
-        mut output: PlanesMut<'_, '_, F>,
-    ) {
-        let frames = input.frames().get().min(output.frames().get());
-        let run = self
-            .lines
-            .len()
-            .min(input.channels())
-            .min(output.channels())
-            .min(delays.len());
+        block: &mut InputOutput<'_, F>,
+    ) -> Result<(), BlockMismatch> {
+        let run = self.lines.len();
+        expect_widths(block, run, run)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
+        let delays = &mut delays[..run];
         let fb_first = feedback.steps_taken().saturating_add(1);
         let (base, cap) = (self.base, self.cap);
         for (c, ((line, delay), out)) in self
@@ -442,10 +448,11 @@ impl<F: Float + Lerp> ModDelayBank<F> {
             }
         }
         let taken = u32::try_from(frames).unwrap_or(u32::MAX);
-        for ramp in delays.iter_mut().take(run) {
+        for ramp in delays.iter_mut() {
             ramp.advance(taken);
         }
         feedback.advance(taken);
+        Ok(())
     }
 }
 

@@ -76,6 +76,7 @@ mod record;
 mod round_trip;
 mod rt_alloc_check;
 pub mod sf2;
+mod shared;
 pub mod signal;
 pub mod tpt;
 mod unique;
@@ -112,6 +113,7 @@ pub use range_contract::{RangeContract, check_range_contract, check_range_serde}
 pub use record::{BlockLog, Record};
 pub use round_trip::check_round_trip;
 pub use rt_alloc_check::RtAllocCheck;
+pub use shared::Shared;
 pub use unique::unique_name;
 #[cfg(feature = "vst3-cpp")]
 pub use vst3_cpp::{bundle_of, vst3_cpp_module};

@@ -4,6 +4,7 @@ use tutti_units::{Feedback, Hz, Real, SampleRate};
 
 use super::*;
 use crate::{Complex64, allpass_complement};
+use tutti_buffers::InputOutput;
 
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
 // format, so their tolerances are `f32`'s.
@@ -40,12 +41,17 @@ fn run_on(
         let end = (at + block).min(n);
         let ins: Vec<&[f32]> = audio.iter().map(|c| &c[at..end]).collect();
         let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
-        chain.process(
-            coefficients,
-            feedback,
-            Planes::new(&ins).unwrap(),
-            PlanesMut::new(&mut outs).unwrap(),
-        );
+        chain
+            .process(
+                coefficients,
+                feedback,
+                &mut InputOutput::paired(
+                    Planes::new(&ins).unwrap(),
+                    PlanesMut::new(&mut outs).unwrap(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
         at = end;
     }
     out
@@ -574,12 +580,17 @@ fn an_f64_chain_is_the_all_pass_difference_equation_in_f64() {
     let mut coefficients = [Ramp::new(a)];
     let mut feedback = Ramp::new(g);
     let mut y = vec![0.0f64; len];
-    chain.process(
-        &mut coefficients,
-        &mut feedback,
-        Planes::new(&[&x[..]]).unwrap(),
-        PlanesMut::new(&mut [&mut y[..]]).unwrap(),
-    );
+    chain
+        .process(
+            &mut coefficients,
+            &mut feedback,
+            &mut InputOutput::paired(
+                Planes::new(&[&x[..]]).unwrap(),
+                PlanesMut::new(&mut [&mut y[..]]).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
     assert_close_f64(&y, &want, 2.0f64.powi(-45));
 }
 

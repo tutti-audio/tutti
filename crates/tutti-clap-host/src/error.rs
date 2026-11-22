@@ -121,6 +121,11 @@ pub enum ClapError {
     #[error("The plugin was busy on the main thread")]
     Busy,
 
+    /// Host code panicked while it held the instance, which ends it: no
+    /// block runs on it again.
+    #[error("Host code panicked while holding the plugin, so it is never called again")]
+    Poisoned,
+
     /// A requested capability is not advertised by the plugin (e.g. activating
     /// at `f64` when the plugin is 32-bit only).
     #[error("Not supported: {0}")]

@@ -7,6 +7,8 @@
 use std::path::Path;
 
 // ANCHOR: imports
+use futures_lite::future::block_on;
+use std::future::IntoFuture as _;
 use tutti::nodes::{OscillatorConfig, OscillatorNode, OscillatorWave};
 use tutti::{Amplitude, Bounce, ChannelLayout, Format, Hz, Root, SampleRate, Seconds, Session};
 // ANCHOR_END: imports
@@ -32,7 +34,7 @@ fn tone() -> Result<Session, tutti::Error> {
 // ANCHOR: bounce
 /// The first two seconds of the session, in stereo.
 fn two_seconds() -> Bounce {
-    Bounce::project()
+    Bounce::new()
         .range(Seconds::new(0.0)..Seconds::new(2.0)) // from 0 s to 2 s
         .channels(ChannelLayout::STEREO) // left and right
 }
@@ -45,7 +47,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = Path::new(&dir).join("getting_started.flac");
 
     // The file's name picks its format: `.flac` is FLAC.
-    tone()?.bounce(two_seconds().master(&path, Format::from_path(&path)?))?;
+    let mut session = tone()?;
+    let rendering = session.bounce(two_seconds().master(&path, Format::from_path(&path)?))?;
+    // The session renders on a thread of its own; we wait for it, then hand
+    // what it made back to the session.
+    let rendered = block_on(rendering.into_future());
+    session.apply(rendered)?;
 
     println!("wrote {}", path.display());
     Ok(())
@@ -60,9 +67,10 @@ mod tests {
     /// level: a peak of 0.25 and an RMS of 0.25 / √2.
     #[test]
     fn the_bounce_is_a_sine_at_its_level_on_both_channels() {
-        let rendered = tone()
-            .unwrap()
-            .bounce(two_seconds().master_buffers())
+        let mut session = tone().unwrap();
+        let rendering = session.bounce(two_seconds().master_buffers()).unwrap();
+        let rendered = session
+            .apply(block_on(rendering.into_future()))
             .unwrap()
             .into_master();
         let frames = rendered.interleaved();

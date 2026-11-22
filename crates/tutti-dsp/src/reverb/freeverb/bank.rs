@@ -35,8 +35,10 @@
 //! the RT60 with it, by 1.5e-6 of itself; a loop gain multiplies a line's sample, which rounds by
 //! about `u` a trip whatever the form.
 
+use crate::BlockMismatch;
+use crate::block::expect_output_width;
 use core::num::NonZeroUsize;
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput};
 use tutti_units::{Feedback, Gain, Mix, SampleRate, Seconds, Tail};
 
 use super::design::FreeverbControls;
@@ -246,17 +248,22 @@ impl<F: Float + Lerp> FreeverbBank<F> {
 
     /// Runs `input` into `output`, the same number of frames: the input's channels averaged
     /// (a mono input is itself) and scaled by [`FIXED_GAIN`](Self::FIXED_GAIN), through the combs
-    /// and the all-passes of the left channel into plane 0 and of the right into plane 1. A plane
-    /// past the second is not touched, and a view with one plane is its left alone. Each
+    /// and the all-passes of the left channel into plane 0 and of the right into plane 1. Each
     /// chunk's ramp step is taken at its first frame ([`CHUNK`](Self::CHUNK)). No
     /// allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's output is not two channels wide.
     pub fn process(
         &mut self,
         ramps: &mut FreeverbRamps<F>,
-        input: Planes<'_, F>,
-        mut output: PlanesMut<'_, '_, F>,
-    ) {
-        let frames = input.frames().get().min(output.frames().get());
+        block: &mut InputOutput<'_, F>,
+    ) -> Result<(), BlockMismatch> {
+        // Any input is mixed down to the one wet signal, which is a stereo pair.
+        expect_output_width(block, 2)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let width = input.channels();
         let scale = F::from_design(1.0 / width.max(1) as f64);
         let mut planes = output.iter_mut();
@@ -290,6 +297,7 @@ impl<F: Float + Lerp> FreeverbBank<F> {
             self.into = (self.into + run) % CHUNK;
             at += run;
         }
+        Ok(())
     }
 
     /// One run of a chunk: `input` scaled by [`FIXED_GAIN`](Self::FIXED_GAIN) through each

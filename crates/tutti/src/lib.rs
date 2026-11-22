@@ -198,11 +198,12 @@ pub use tutti_session::windows_from_signal;
 pub use tutti_session::{
     AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadInProcess, LoadOutOfProcess,
     LoadPlugin, LoadPreset, LoadPresetInProcess, LoadPresetOutOfProcess, LoadedPlugin,
-    LoadedPreset, LoadingOutOfProcess, LoadingPresetOutOfProcess, Opened, Plugin, PluginApplyError,
-    PluginBuses, PluginChange, PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginPresets,
-    PortCounts, PresetStartError, RestoreState, RestoreStateInProcess, RestoreStateOutOfProcess,
-    RestoredState, RestoringStateOutOfProcess, SaveState, SaveStateInProcess,
-    SaveStateOutOfProcess, SavingStateOutOfProcess, StateStartError, SwapPluginError,
+    LoadedPreset, LoadingPlugin, LoadingPresetOutOfProcess, Opened, Plugin, PluginApplyError,
+    PluginBuses, PluginChange, PluginEvent, PluginHealth, PluginInfo, PluginInstance,
+    PluginPresets, PortCounts, PresetStartError, RestoreState, RestoreStateInProcess,
+    RestoreStateOutOfProcess, RestoredState, RestoringStateOutOfProcess, SaveState,
+    SaveStateInProcess, SaveStateOutOfProcess, SavingStateOutOfProcess, StateStartError,
+    SwapPluginError,
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{
@@ -423,10 +424,9 @@ pub mod types {
     pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
     pub use tutti_music::{
         Adsr, BarPosition, BeatsPerBar, ClockPass, ClockPassEnd, FRAME_TOLERANCE, FrameClock,
-        InvalidBeatsPerBar, InvalidNoteValue, LoopRange, LoopRangeError, MeterChange,
-        NotOnMidiScale, Note, NoteDuration, NoteModifier, NoteNumberOutOfRange, NoteValue,
-        PitchClass, SegmentOrigin, TimelineSegment, beats_per_sample, first_frame_at_or_after,
-        frames_per_beat, snap_to_whole_frame,
+        InvalidBeatsPerBar, InvalidNoteValue, LoopRange, LoopRangeError, MeterChange, Note,
+        NoteDuration, NoteModifier, NoteValue, PitchClass, SegmentOrigin, TimelineSegment,
+        beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
     };
     pub use tutti_platform::{
         Asset, Destination, FileStamp, Identity, Open, Panicked, PriorityRequest, ReadSeek, Staged,
@@ -553,9 +553,10 @@ pub mod session {
     pub use tutti_session::SamplerError;
     #[cfg(feature = "export")]
     pub use tutti_session::{
-        AnyStem, BounceConfigError, BounceHandle, BounceJob, BounceRendered, BufferMaster,
-        BufferStem, EventLossPolicy, ExportClock, FileMaster, FileStem, Master, NoMaster,
-        Normalize, Outcome, PrepareEdit, PreparedGraph, Produced, Progress, Resample, Stage,
+        AnyStem, BounceConfigError, BounceHandle, BounceJob, BounceRendered, Bouncing,
+        BufferMaster, BufferStem, EventLossPolicy, ExportClock, FileMaster, FileStem, Master,
+        NoMaster, Normalize, Outcome, PrepareEdit, PreparedGraph, Produced, Progress, Resample,
+        Stage,
     };
     #[cfg(feature = "capture")]
     pub use tutti_session::{
@@ -885,9 +886,9 @@ pub mod midi {
     pub use tutti_ump::{
         CCNumberOutOfRange, ChordTypeOutOfRange, DeltaTicksOutOfRange, FirstGroupOutOfRange,
         FunctionBlockCountOutOfRange, FunctionBlockIdOutOfRange, GroupSpanOutOfRange,
-        MidiChannelOutOfRange, MidiGroupOutOfRange, MpeChannelsOutOfRange, NoteNumberOutOfRange,
-        SharpsFlatsOutOfRange, TicksPerQuarterNoteOutOfRange, U4OutOfRange, U7OutOfRange,
-        U14OutOfRange,
+        MidiChannelOutOfRange, MidiGroupOutOfRange, MpeChannelsOutOfRange, NotOnMidiScale,
+        NoteNumberOutOfRange, SharpsFlatsOutOfRange, TicksPerQuarterNoteOutOfRange, U4OutOfRange,
+        U7OutOfRange, U14OutOfRange,
     };
     pub use tutti_ump::{
         FlexTextError, LyricKind, NotASoftwareRevision, PlainTextKind, SoftwareRevision,

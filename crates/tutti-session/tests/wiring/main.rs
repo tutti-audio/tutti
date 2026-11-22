@@ -42,3 +42,8 @@ mod typed_params;
 mod unwired;
 mod values;
 mod vocabulary;
+
+// Starts a bounce, awaits its render and applies it.
+#[cfg(feature = "export")]
+#[path = "../support/bounced.rs"]
+mod bounced;

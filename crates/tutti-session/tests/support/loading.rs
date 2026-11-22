@@ -15,7 +15,7 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{Locator, PluginId, PluginRef};
 use tutti_rt::LockExt;
 use tutti_session::{AnyPlugin, Key, LoadError, LoadInProcess, LoadOutOfProcess};
-use tutti_session::{LoadPlugin as Load, LoadedPlugin, PeerState, Session};
+use tutti_session::{LoadPlugin as Load, PeerState, PluginInstance, Session};
 
 /// A plugin to load: its ref, where it runs, and the state it starts from.
 #[derive(Clone, Debug)]
@@ -134,7 +134,7 @@ pub trait LoadPlugin {
         &mut self,
         main: MainThreadMarker,
         spec: Spec,
-    ) -> Result<(LoadedPlugin, Key<AnyPlugin>), LoadError>;
+    ) -> Result<(PluginInstance, Key<AnyPlugin>), LoadError>;
 }
 
 /// A catalog `load_plugin_blocking` loads from: probed once per process, for the
@@ -172,7 +172,7 @@ impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadPlugin 
         &mut self,
         main: MainThreadMarker,
         spec: Spec,
-    ) -> Result<(LoadedPlugin, Key<AnyPlugin>), LoadError> {
+    ) -> Result<(PluginInstance, Key<AnyPlugin>), LoadError> {
         prime(&spec.plugin);
         let primed = PRIMED.lock_recover();
         let file = tutti_plugin_db::canonical_path(spec.plugin.path());
@@ -207,7 +207,7 @@ pub trait LoadFrom {
         id: &PluginId,
         hosting: Hosting,
         state: Option<PeerState>,
-    ) -> Result<(LoadedPlugin, Key<AnyPlugin>), LoadError>;
+    ) -> Result<(PluginInstance, Key<AnyPlugin>), LoadError>;
 }
 
 impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadFrom for Session<K, C> {
@@ -218,7 +218,7 @@ impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadFrom fo
         id: &PluginId,
         hosting: Hosting,
         state: Option<PeerState>,
-    ) -> Result<(LoadedPlugin, Key<AnyPlugin>), LoadError> {
+    ) -> Result<(PluginInstance, Key<AnyPlugin>), LoadError> {
         let load = match hosting {
             Hosting::Auto => self.load_plugin(id, catalog),
             Hosting::InProcess => self.load_plugin_as(id, catalog, ResolvedHosting::InProcess),
@@ -240,10 +240,8 @@ impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadFrom fo
                 load.block()?
             }
         };
-        let handle = opened.handle();
-        let node = self
-            .add_plugin(opened)
-            .expect("a plugin just loaded enters");
+        let handle = opened.instance();
+        let node = self.apply(opened).expect("a plugin just loaded enters");
         Ok((handle, node))
     }
 }
@@ -290,11 +288,11 @@ pub trait Block {
     /// # Errors
     ///
     /// Why the load failed.
-    fn block(self) -> Result<tutti_session::PluginNode, LoadError>;
+    fn block(self) -> Result<tutti_session::LoadedPlugin, LoadError>;
 }
 
 impl Block for LoadOutOfProcess {
-    fn block(self) -> Result<tutti_session::PluginNode, LoadError> {
+    fn block(self) -> Result<tutti_session::LoadedPlugin, LoadError> {
         tutti_fixtures::block_on(self)
     }
 }

@@ -111,8 +111,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         LoadPlugin::InProcess(load) => load.run(main)?,
         LoadPlugin::OutOfProcess(load) => block_on(load.into_future())?,
     };
-    let loaded = opened.handle();
-    let node = session.add_plugin(opened)?;
+    let loaded = opened.instance();
+    let node = session.apply(opened)?;
 
     // 4. Wire it: the plugin's outputs feed the root's channels. `node` is a
     //    `Key<AnyPlugin>`: ports come from it as from any node's key
@@ -238,13 +238,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 10. Bounce four beats to a 24-bit WAV. The plugin hears Offline while it
-    //    renders and Realtime after.
-    let bounce = session.bounce_start(
-        Bounce::project()
+    //    renders, and Realtime from the update after the apply.
+    let rendering = session.bounce(
+        Bounce::new()
             .range(Range::Beats(Beat::new(0.0), Beat::new(4.0)))
             .master(out.as_path(), Format::Wav(Pcm::Int24)),
     )?;
-    let written = session.finish_bounce(bounce.run())?.into_master();
+    let rendered = block_on(rendering.into_future());
+    let written = session.apply(rendered)?.into_master();
     println!("wrote {} ({} bytes)", written.path.display(), written.bytes);
     Ok(())
 }

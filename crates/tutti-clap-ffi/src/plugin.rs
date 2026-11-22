@@ -1528,7 +1528,7 @@ impl crate::AudioSide {
         input: &dyn crate::EventSource,
         output: &mut dyn crate::EventSink,
     ) -> bool {
-        let Some(_claim) = self.core().roles.try_claim() else {
+        let Ok(_claim) = self.core().roles.try_claim() else {
             return false;
         };
         if self.is_retired() {

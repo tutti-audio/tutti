@@ -16,8 +16,10 @@
 //! A control that moves the frequency re-tunes the loop at once: the delay line's length jumps
 //! and the loop's content is kept, so a sweep is not click-free.
 
+use crate::BlockMismatch;
+use crate::block::expect_widths;
 use core::num::NonZeroUsize;
-use tutti_buffers::{ChannelLayout, Float, Planes, PlanesMut};
+use tutti_buffers::{ChannelLayout, Float, InputOutput};
 use tutti_units::{Db, Feedback, Hz, SampleRate, SampleSpan, Samples, Seconds, Tail};
 
 use crate::delay::{DelayRing, ring_seconds, trips};
@@ -171,14 +173,16 @@ impl<F: Float> KarplusStrongBank<F> {
         self.strings[0].tail(controls)
     }
 
-    /// Runs `input` into `output`, channel by channel: the fewer of the two views' channels
-    /// and frames. No allocation.
-    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = input
-            .channels()
-            .min(output.channels())
-            .min(self.strings.len());
+    /// Runs `input` into `output`, channel by channel. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels.
+    pub fn process(&mut self, block: &mut InputOutput<'_, F>) -> Result<(), BlockMismatch> {
+        let width = self.strings.len();
+        expect_widths(block, width, width)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         for (c, string) in self.strings.iter_mut().enumerate().take(width) {
             let x = &input.plane(c).samples()[..frames];
             let mut plane = output.plane_mut(c);
@@ -186,6 +190,7 @@ impl<F: Float> KarplusStrongBank<F> {
                 *y = string.tick(x);
             }
         }
+        Ok(())
     }
 }
 

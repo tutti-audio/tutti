@@ -7,6 +7,7 @@ use tutti_units::{
 use super::*;
 use crate::reverb::network::{Fdn, Network, NetworkStage};
 use crate::{FreezeMode, MaxDecay};
+use tutti_buffers::InputOutput;
 
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
 // format, so their tolerances are `f32`'s.
@@ -86,9 +87,13 @@ fn run(
         let end = at + piece.len();
         bank.process(
             ramps,
-            Planes::new(&[piece]).unwrap(),
-            PlanesMut::new(&mut [&mut l[at..end], &mut r[at..end]]).unwrap(),
-        );
+            &mut InputOutput::paired(
+                Planes::new(&[piece]).unwrap(),
+                PlanesMut::new(&mut [&mut l[at..end], &mut r[at..end]]).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         at = end;
     }
     [l, r]
@@ -475,9 +480,13 @@ fn a_bank_is_silent_until_its_target_is_set_and_averages_its_input() {
         let (mut left, mut right) = (vec![0.0f32; y.len()], vec![0.0f32; y.len()]);
         bank.process(
             &mut ramps,
-            Planes::new(channels).unwrap(),
-            PlanesMut::new(&mut [&mut left, &mut right]).unwrap(),
-        );
+            &mut InputOutput::paired(
+                Planes::new(channels).unwrap(),
+                PlanesMut::new(&mut [&mut left, &mut right]).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         [left, right]
     };
     let cancelled = render(&[&y, &negated]);
@@ -758,9 +767,13 @@ fn an_f64_fdn_is_linear() {
         let (mut l, mut r) = (vec![0.0f64; len], vec![0.0f64; len]);
         bank.process(
             &mut ramps,
-            Planes::new(&[input]).unwrap(),
-            PlanesMut::new(&mut [&mut l[..], &mut r[..]]).unwrap(),
-        );
+            &mut InputOutput::paired(
+                Planes::new(&[input]).unwrap(),
+                PlanesMut::new(&mut [&mut l[..], &mut r[..]]).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         [l, r]
     };
     let (rx, ry, rm) = (render(&x), render(&y), render(&mix));

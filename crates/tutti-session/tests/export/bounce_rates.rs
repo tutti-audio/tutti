@@ -6,6 +6,8 @@ use tutti_graph::{Cx, ForkByClone, ForkError, Io, Node, Prepare, SampleRates, Sh
 use tutti_session::{Bounce, BounceError, DetachedSession, Range, Root, Session};
 use tutti_units::{SampleRate, Seconds};
 
+use crate::bounced::bounced;
+
 /// A source of silence that runs at `rates` only.
 #[derive(Clone)]
 struct Rated(SampleRates);
@@ -24,11 +26,11 @@ impl Node for Rated {
 }
 
 fn bounce_at(session: &mut DetachedSession, rate: SampleRate) -> Result<usize, BounceError> {
-    let bounce = Bounce::project()
+    let bounce = Bounce::new()
         .master_buffers()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.25)))
         .sample_rate(rate);
-    Ok(session.bounce(bounce)?.into_master().into_planes()[0].len())
+    Ok(bounced(session, bounce)?.into_master().into_planes()[0].len())
 }
 
 /// **A fork refuses a rate outside a node's declared rates and renders at one

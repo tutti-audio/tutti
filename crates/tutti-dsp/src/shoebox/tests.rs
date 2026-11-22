@@ -1,6 +1,6 @@
 use super::*;
 use crate::EarlyReflections;
-use tutti_buffers::{Planes, PlanesMut};
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 use tutti_units::Speed;
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -211,10 +211,15 @@ fn the_room_taps_realize_as_a_stage_whose_response_sums_to_the_gains() {
     let mut x = vec![0.0; frames];
     x[0] = 1.0;
     let (input, mut output) = ([x], vec![vec![0.0; frames]; stage.channels()]);
-    stage.process(
-        Planes::from_vecs(&input).unwrap(),
-        PlanesMut::from_vecs(&mut output).unwrap(),
-    );
+    stage
+        .process(
+            &mut InputOutput::paired(
+                Planes::from_vecs(&input).unwrap(),
+                PlanesMut::from_vecs(&mut output).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
     let sum: f64 = output[0].iter().sum();
     assert!((sum - total).abs() <= 1e-12, "{sum} for {total}");
 }

@@ -180,8 +180,8 @@ pub use apply::Apply;
 #[cfg(feature = "export")]
 pub use bounce::{
     AnyStem, Bounce, BounceConfigError, BounceError, BounceHandle, BounceJob, BounceLatency,
-    BounceRendered, BounceTail, Bounced, BufferMaster, BufferStem, ExportClock, FileMaster,
-    FileStem, Master, NoMaster, PrepareEdit, PreparedGraph, Range, Stem, StemGain,
+    BounceRendered, BounceTail, Bounced, Bouncing, BufferMaster, BufferStem, ExportClock,
+    FileMaster, FileStem, Master, NoMaster, PrepareEdit, PreparedGraph, Range, Stem, StemGain,
 };
 pub use builder::{BlockConfig, SessionBuilder, Workers, root_width};
 #[cfg(feature = "device")]
@@ -277,9 +277,9 @@ pub use peer_state::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "plugin")]
 pub use plugin::{
     AddPluginError, AnyPlugin, LoadInProcess, LoadOutOfProcess, LoadPlugin, LoadPreset,
-    LoadPresetInProcess, LoadPresetOutOfProcess, LoadedPlugin, LoadedPreset, LoadingOutOfProcess,
+    LoadPresetInProcess, LoadPresetOutOfProcess, LoadedPlugin, LoadedPreset, LoadingPlugin,
     LoadingPresetOutOfProcess, Plugin, PluginApplyError, PluginCause, PluginChange, PluginEvent,
-    PluginHealth, PluginInfo, PluginNode, PluginPorts, PortsRefusal, PresetStartError,
+    PluginHealth, PluginInfo, PluginInstance, PluginPorts, PortsRefusal, PresetStartError,
     RestoreState, RestoreStateInProcess, RestoreStateOutOfProcess, RestoredState,
     RestoringStateOutOfProcess, SaveState, SaveStateInProcess, SaveStateOutOfProcess,
     SavingStateOutOfProcess, StateRestore, StateStartError, StateView, SwapPluginError,

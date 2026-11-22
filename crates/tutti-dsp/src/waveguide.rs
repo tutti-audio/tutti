@@ -18,8 +18,10 @@
 //! / (fs T60))`, below 1 for any finite decay: the signal falls 60 dB in the decay
 //! time, the average's loss apart. A frequency is held between the string's lowest and `fs / 8`.
 
+use crate::BlockMismatch;
+use crate::block::expect_widths;
 use core::num::NonZeroUsize;
-use tutti_buffers::{ChannelLayout, Float, Planes, PlanesMut};
+use tutti_buffers::{ChannelLayout, Float, InputOutput};
 use tutti_units::{Feedback, Hz, Normalized, SampleRate, SampleSpan, Samples, Seconds, Tail};
 
 use crate::delay::DelayRing;
@@ -236,14 +238,16 @@ impl<F: Float> WaveguideBank<F> {
         self.strings[0].tail(controls)
     }
 
-    /// Runs `input` into `output`, channel by channel: the fewer of the two views' channels
-    /// and frames. No allocation.
-    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = input
-            .channels()
-            .min(output.channels())
-            .min(self.strings.len());
+    /// Runs `input` into `output`, channel by channel. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels.
+    pub fn process(&mut self, block: &mut InputOutput<'_, F>) -> Result<(), BlockMismatch> {
+        let width = self.strings.len();
+        expect_widths(block, width, width)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         for (c, string) in self.strings.iter_mut().enumerate().take(width) {
             let x = &input.plane(c).samples()[..frames];
             let mut plane = output.plane_mut(c);
@@ -251,6 +255,7 @@ impl<F: Float> WaveguideBank<F> {
                 *y = string.tick(x);
             }
         }
+        Ok(())
     }
 }
 

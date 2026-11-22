@@ -1,4 +1,5 @@
 use super::*;
+use tutti_buffers::InputOutput;
 use tutti_buffers::{Mono, Planes, PlanesMut};
 use tutti_fixtures::noise;
 
@@ -36,9 +37,13 @@ fn render(m: &mut MatrixConvolver<f32>, x: &[Vec<f32>], lens: &[usize]) -> Vec<V
         let ins: Vec<&[f32]> = x.iter().map(|c| &c[at..at + n]).collect();
         let mut block = vec![vec![0.0f32; n]; out.len()];
         m.process(
-            Planes::new(&ins).unwrap(),
-            PlanesMut::from_vecs(&mut block).unwrap(),
-        );
+            &mut InputOutput::paired(
+                Planes::new(&ins).unwrap(),
+                PlanesMut::from_vecs(&mut block).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         for (o, b) in out.iter_mut().zip(block) {
             o.extend(b);
         }
@@ -235,9 +240,13 @@ fn an_f64_matrix_of_unit_impulses_is_the_identity_at_its_latency() {
     let right: Vec<f64> = left.iter().rev().map(|v| -v).collect();
     let mut out = vec![vec![0.0f64; frames]; 2];
     m.process(
-        Planes::from_vecs(&[left.clone(), right.clone()]).unwrap(),
-        PlanesMut::from_vecs(&mut out).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::from_vecs(&[left.clone(), right.clone()]).unwrap(),
+            PlanesMut::from_vecs(&mut out).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     for (got, x) in out.iter().zip([&left, &right]) {
         let mut want = vec![0.0f64; frames];
         want[lat..].copy_from_slice(&x[..frames - lat]);
@@ -266,9 +275,13 @@ fn an_f64_matrix_of_delayed_scaled_impulses_delays_and_scales() {
     let right: Vec<f64> = left.iter().rev().map(|v| v * 0.75).collect();
     let mut out = vec![vec![0.0f64; frames]; 2];
     m.process(
-        Planes::from_vecs(&[left.clone(), right.clone()]).unwrap(),
-        PlanesMut::from_vecs(&mut out).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::from_vecs(&[left.clone(), right.clone()]).unwrap(),
+            PlanesMut::from_vecs(&mut out).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     let at = |x: &[f64], n: usize, delay: usize| n.checked_sub(lat + delay).map_or(0.0, |k| x[k]);
     let want_l: Vec<f64> = (0..frames)
         .map(|n| at(&left, n, 0) + 0.25 * at(&right, n, 9))

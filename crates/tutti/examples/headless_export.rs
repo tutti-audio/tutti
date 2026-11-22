@@ -17,6 +17,8 @@
 //! Run: `cargo run -p tutti --features "export,decode-wav" \
 //!        --example headless_export -- <outdir>`
 
+use futures_lite::future::block_on;
+use std::future::IntoFuture as _;
 use tutti::graph::{ForkByClone, Node};
 use tutti::{
     Amplitude, Bounce, ChannelLayout, ChannelTopology, Format, Hz, Interleaved, Pcm, Range, Root,
@@ -55,7 +57,7 @@ const FORMAT: Format = Format::Wav(Pcm::Int24);
 
 /// The first `seconds` of the project.
 fn first(seconds: f64) -> Bounce {
-    Bounce::project().range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
+    Bounce::new().range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -67,13 +69,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 1. A project to a file.
     let path = dir.join("tone.wav");
-    let written = tone()
-        .bounce(first(1.0).master(&path, FORMAT))?
-        .into_master();
+    let mut session = tone();
+    let rendered = block_on(
+        session
+            .bounce(first(1.0).master(&path, FORMAT))?
+            .into_future(),
+    );
+    let written = session.apply(rendered)?.into_master();
     println!("wrote {} ({written:?})", path.display());
 
     // 2. The same project into memory, and a measurement of it.
-    let rendered = tone().bounce(first(1.0).master_buffers())?.into_master();
+    let mut session = tone();
+    let rendered = block_on(session.bounce(first(1.0).master_buffers())?.into_future());
+    let rendered = session.apply(rendered)?.into_master();
     let flat = rendered.interleaved();
     // `tutti` exports no path to `Bed`, so the placement is the default layout for
     // two channels, which is a stereo bed.
@@ -93,11 +101,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 3. A mono project into a stereo file: the fold, which the export layer
     //    does for you and the graph does not.
     let mono_path = dir.join("mono-to-stereo.wav");
-    mono_tone().bounce(
-        first(0.5)
-            .channels(ChannelLayout::STEREO)
-            .master(&mono_path, FORMAT),
-    )?;
+    let mut session = mono_tone();
+    let rendered = block_on(
+        session
+            .bounce(
+                first(0.5)
+                    .channels(ChannelLayout::STEREO)
+                    .master(&mono_path, FORMAT),
+            )?
+            .into_future(),
+    );
+    session.apply(rendered)?;
     println!("wrote {}", mono_path.display());
 
     Ok(())

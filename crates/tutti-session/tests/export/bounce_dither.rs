@@ -5,6 +5,7 @@
 //! does to the quantization: undithered, every sample is the plain rounding;
 //! dithered, the samples scatter around it by at most the shape's peak.
 
+use crate::bounced::bounced;
 use tutti_buffers::ChannelLayout;
 use tutti_codec::{Format, IntDepth, Pcm};
 use tutti_graph::ForkByClone;
@@ -17,7 +18,7 @@ const LEVEL: f32 = 9_830.1 / 32_768.0;
 
 /// The 16-bit samples of a bounce of a constant `LEVEL`, as `configure` sets
 /// its dither.
-fn bounced(
+fn dithered(
     configure: impl FnOnce(
         Bounce<tutti_graph::NodeKey, tutti_session::FileMaster>,
     ) -> Bounce<tutti_graph::NodeKey, tutti_session::FileMaster>,
@@ -44,11 +45,11 @@ fn bounced_node<N: tutti_graph::Node + Clone + Send + 'static>(
     session.graph().connect(dc, Root).unwrap().unfaded();
     let dir = tempfile::tempdir().expect("dir");
     let path = dir.path().join("out.wav");
-    let bounce = Bounce::project()
+    let bounce = Bounce::new()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.1)))
         .master(&path, Format::Wav(Pcm::Int16))
         .tail(tutti_session::BounceTail::None);
-    session.bounce(configure(bounce)).expect("renders");
+    bounced(&mut session, configure(bounce)).expect("renders");
     hound::WavReader::open(&path)
         .expect("readable")
         .samples::<i16>()
@@ -61,7 +62,7 @@ fn bounced_node<N: tutti_graph::Node + Clone + Send + 'static>(
 #[test]
 fn no_dither_writes_the_plain_quantization() {
     let plain = IntDepth::Int16.quantize(LEVEL);
-    let samples = bounced(Bounce::no_dither);
+    let samples = dithered(Bounce::no_dither);
     assert!(!samples.is_empty());
     assert!(samples.iter().all(|&s| s == plain), "{:?}", &samples[..8]);
 }
@@ -84,7 +85,7 @@ fn error_power(samples: &[i32]) -> f64 {
 /// dither moves a sample by at most one step.
 #[test]
 fn the_default_dither_is_triangular() {
-    let default = bounced(|b| b);
+    let default = dithered(|b| b);
     assert!(
         (error_power(&default) - 0.25).abs() < 0.02,
         "{}",
@@ -92,7 +93,7 @@ fn the_default_dither_is_triangular() {
     );
 
     let plain = IntDepth::Int16.quantize(LEVEL);
-    let rectangular = bounced(|b| b.dither(DitherShape::Rectangular));
+    let rectangular = dithered(|b| b.dither(DitherShape::Rectangular));
     assert!(rectangular.iter().any(|&s| s != plain), "it dithers");
     assert!(rectangular.iter().all(|&s| (s - plain).abs() <= 1));
     assert!(

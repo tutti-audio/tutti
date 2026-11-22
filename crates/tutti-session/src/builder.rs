@@ -868,7 +868,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// [`no_plugin_recovery`](Self::no_plugin_recovery) for a host that decides itself.
     ///
     /// It covers out-of-process plugins loaded through the session's load
-    /// path ([`Session::add_plugin`](crate::Session::add_plugin)). It does not
+    /// path ([`Session::apply`](crate::Session::apply)). It does not
     /// cover an in-process VST2 plugin (its crash takes the process, and a
     /// hang in it is not observed), nor one a host inserted itself with
     /// `Graph::add_plugin` (the session does not know its path): those are
