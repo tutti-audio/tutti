@@ -8,6 +8,8 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use tutti_units::Calls;
+
 /// Panics [`ffi_guard`] has contained since the process began.
 static CONTAINED: AtomicU64 = AtomicU64::new(0);
 
@@ -38,15 +40,15 @@ pub fn ffi_guard<R>(fallback: R, f: impl FnOnce() -> R) -> R {
     }
 }
 
-/// How many panics [`ffi_guard`] has contained, process-wide since the process
+/// How many calls panicked and [`ffi_guard`] contained, process-wide since the process
 /// began. Each is a host callback that answered its fallback instead of
 /// unwinding into a plugin, so a nonzero count is a bug in the host.
 ///
 /// A diagnostic only; it changes no behaviour. An app reads it after a session
 /// (or a test run) to learn whether any callback panicked.
 #[must_use]
-pub fn contained_panics() -> u64 {
-    CONTAINED.load(Ordering::Relaxed)
+pub fn contained_panics() -> Calls {
+    Calls::new(CONTAINED.load(Ordering::Relaxed))
 }
 
 #[cfg(test)]
@@ -58,7 +60,7 @@ mod tests {
         let before = contained_panics();
         let answered: i32 = ffi_guard(-1, || panic!("a callback body"));
         assert_eq!(answered, -1);
-        assert_eq!(contained_panics(), before + 1);
+        assert_eq!(contained_panics().get(), before.get() + 1);
     }
 
     #[test]

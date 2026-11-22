@@ -119,15 +119,10 @@ mod clap {
     #[test]
     fn a_loaded_preset_file_moves_the_mirror() {
         let (mut s, _plugin, node) = loaded();
-        let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(10);
-        while !s.plugin_view(node).is_ok_and(|p| p.params().is_ready()) {
-            assert!(
-                tutti_platform::Instant::now() < deadline,
-                "the read never landed"
-            );
+        tutti_fixtures::wait_until("the read to land", tutti_fixtures::HANG_GUARD, || {
             let _ = s.update();
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
+            s.plugin_view(node).is_ok_and(|p| p.params().is_ready())
+        });
         let before = cutoff(&s, node).expect("Cutoff is read");
 
         let main = tutti_fixtures::main_thread();
@@ -138,15 +133,14 @@ mod clap {
             .expect("the plugin takes the preset");
         s.apply(loaded).expect("the node hosts the plugin");
 
-        let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(5);
-        while cutoff(&s, node) == Some(before) {
-            assert!(
-                tutti_platform::Instant::now() < deadline,
-                "the mirror still reads {before} after the preset moved Cutoff"
-            );
-            let _ = s.update_on(main);
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
+        tutti_fixtures::wait_until(
+            "the mirror to leave the value before the preset",
+            tutti_fixtures::HANG_GUARD,
+            || {
+                let _ = s.update_on(main);
+                cutoff(&s, node) != Some(before)
+            },
+        );
     }
 
     /// **A preset awaited off the main thread moves the mirror once the main

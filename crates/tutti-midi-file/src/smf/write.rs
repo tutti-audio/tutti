@@ -107,22 +107,6 @@ fn meta_parts(meta: &Meta) -> (u8, Vec<u8>) {
     }
 }
 
-/// The length of a meta event's data: that of [`meta_parts`], without making it.
-fn meta_data_len(meta: &Meta) -> usize {
-    match meta {
-        Meta::Text { bytes, .. } => bytes.len(),
-        Meta::Tempo { extra, .. } => 3 + extra.len(),
-        Meta::TimeSignature { extra, .. } => 4 + extra.len(),
-        Meta::KeySignature { extra, .. } => 2 + extra.len(),
-        Meta::ChannelPrefix { extra, .. } => 1 + extra.len(),
-        Meta::SequencerSpecific { manufacturer, data } => {
-            data.len() + if manufacturer.is_extended() { 3 } else { 1 }
-        }
-        Meta::Other { data, .. } => data.len(),
-        Meta::Malformed(malformed) => malformed.data().len(),
-    }
-}
-
 /// The bytes of an event of `lead` bytes and `len` bytes of data under their
 /// vlq length, `TooLarge` past the vlq.
 fn counted_len(lead: usize, len: usize) -> Result<usize, TracksError> {
@@ -261,7 +245,7 @@ pub(crate) fn measure(tracks: &[Track], leads: &[Vec<Lead>]) -> Result<(), Track
                 }
                 FileEvent::Meta(meta) => {
                     running = None;
-                    counted_len(2, meta_data_len(meta))?
+                    counted_len(2, meta_parts(meta).1.len())?
                 }
                 FileEvent::Message(_) | FileEvent::Unknown(_) => 0,
             };

@@ -2,23 +2,15 @@
 //! the keys are minted, `routes()` / `routes_to()` / `sources()` read what is
 //! declared, and polarity and curve are part of declaring a route.
 
+use crate::common::session;
 use tutti_buffers::ChannelLayout;
-use tutti_buffers::MaxBlock;
 use tutti_modulation::{Law, Lfo, Polarity, Source};
 use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti_session::{
     DepthTarget, ModTarget, NoSuchModRoute, NoSuchModSource, ParamRef, RouteSpec, Session,
     ValueErrorKind,
 };
-use tutti_units::{Depth, Hz, Q, Samples};
-
-fn session() -> Session {
-    Session::builder()
-        .outputs(tutti_buffers::ChannelLayout::STEREO)
-        .max_block(MaxBlock::of(Samples::new(256)))
-        .build()
-        .expect("builds")
-}
+use tutti_units::{Depth, Hz, Q};
 
 fn filter(s: &mut Session) -> ParamRef {
     let lp = s.graph().add(SvfFilterNode::<f32>::from(

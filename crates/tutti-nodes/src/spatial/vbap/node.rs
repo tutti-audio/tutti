@@ -7,7 +7,7 @@ use tutti_units::UnitParam;
 use tutti_units::{Azimuth, Elevation, SampleRate, Seconds, Spread, StereoWidth, Tail};
 
 use crate::buses::main_bus;
-use crate::ramp::LastGood;
+use crate::last_good::LastGood;
 
 /// The grid the gains are solved on, in frames: the controls are read, and the
 /// gains solved, every `GRID` frames counted from the last reset, and a frame
@@ -279,24 +279,10 @@ impl<F: Float> VbapPannerNode<F> {
         // angles are `f64`, so a driven coordinate widens here, once per grid point, and
         // `Spread` and `StereoWidth` hold an `f32`.
         let signal = |k: usize| driven[k].and_then(|signal| signal.get(at)).copied();
-        let azimuth = self
-            .good
-            .azimuth
-            .read(signal(0).map_or(cells.0.get(), Into::into));
-        let elevation = self
-            .good
-            .elevation
-            .read(signal(1).map_or(cells.1.get(), Into::into));
-        let spread = Spread::new_clamped(
-            self.good
-                .spread
-                .read(signal(2).map_or(cells.2.get(), Into::into)),
-        );
-        let width = StereoWidth::new(
-            self.good
-                .width
-                .read(signal(3).map_or(cells.3.get(), Into::into)),
-        );
+        let azimuth = self.good.azimuth.block(signal(0), cells.0.get());
+        let elevation = self.good.elevation.block(signal(1), cells.1.get());
+        let spread = Spread::new_clamped(self.good.spread.block(signal(2), cells.2.get()));
+        let width = StereoWidth::new(self.good.width.block(signal(3), cells.3.get()));
         let whole = !self.seated;
         steer(
             &mut self.aim_azimuth,

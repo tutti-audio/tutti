@@ -8,14 +8,6 @@ use tutti_units::SampleRate;
 /// owed blocks are dropped.
 pub(crate) const MAX_LAG_BLOCKS: i64 = 4;
 
-/// A clock the timer loop reads and sleeps on.
-pub(crate) trait Timebase {
-    /// The time now, in nanoseconds.
-    fn now_ns(&self) -> i64;
-    /// Returns once [`now_ns`](Self::now_ns) is at least `deadline_ns`.
-    fn sleep_until_ns(&self, deadline_ns: i64);
-}
-
 /// What the loop does next.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Due {

@@ -231,16 +231,12 @@ pub const PERIOD: Duration = Duration::from_nanos((BLOCK as f64 / SAMPLE_RATE * 
 /// silence.
 pub const PACE: Duration = PERIOD.saturating_mul(20);
 
-/// A hang guard on waiting for the server: the wait ends on its event, and this
-/// only decides how long a server that never answers is given.
-pub const HANG_GUARD: Duration = Duration::from_secs(60);
-
 /// Waits until the server has answered the chunk the node submitted last
-/// (`PluginControls::chunk_in_flight_answered`), for at most [`HANG_GUARD`].
+/// (`PluginControls::chunk_in_flight_answered`), for at most [`HANG_GUARD`](tutti_fixtures::HANG_GUARD).
 ///
 /// # Panics
 ///
-/// If it is not answered within [`HANG_GUARD`].
+/// If it is not answered within [`HANG_GUARD`](tutti_fixtures::HANG_GUARD).
 pub fn await_answer(controls: &PluginControls) {
     await_answer_or(controls, "the server to answer the chunk in flight", || {
         false
@@ -252,9 +248,9 @@ pub fn await_answer(controls: &PluginControls) {
 ///
 /// # Panics
 ///
-/// If neither happens within [`HANG_GUARD`], naming `what` was waited for.
+/// If neither happens within [`HANG_GUARD`](tutti_fixtures::HANG_GUARD), naming `what` was waited for.
 pub fn await_answer_or(controls: &PluginControls, what: &str, mut or: impl FnMut() -> bool) {
-    tutti_fixtures::wait_until(what, HANG_GUARD, || {
+    tutti_fixtures::wait_until(what, tutti_fixtures::HANG_GUARD, || {
         controls.chunk_in_flight_answered() || or()
     });
 }

@@ -438,9 +438,11 @@ fn live_disk_playback_is_untouched_while_its_voice_exports() {
         });
         // The export starts once the live voice has settled, so every
         // frame it could disturb is one the assertions below check.
-        while !settled.load(Ordering::Acquire) {
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
+        tutti_fixtures::wait_until(
+            "the live voice to settle",
+            tutti_fixtures::HANG_GUARD,
+            || settled.load(Ordering::Acquire),
+        );
         let rendered = render(&mut session, on(1.0, &timeline(120.0)));
         done.store(true, Ordering::Release);
         (device.join().expect("the live side"), rendered)

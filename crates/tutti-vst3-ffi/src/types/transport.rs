@@ -230,17 +230,17 @@ mod tests {
     /// so a "field was populated" check is unambiguous.
     fn populated_transport() -> TransportInfo {
         TransportInfo::new(SampleRate::of(48_000.0))
-            .with_position_samples(1_234)
-            .with_beat(Beat::new(4.0))
-            .with_bar(Beat::new(8.0), Default::default())
-            .with_loop(LoopRegion::new(
+            .position_samples(1_234)
+            .beat(Beat::new(4.0))
+            .bar(Beat::new(8.0), Default::default())
+            .loop_region(LoopRegion::new(
                 LoopRange::new(Beat::new(2.0), Beat::new(6.0)).expect("a loop"),
             ))
-            .with_tempo(Bpm::of(128.0))
-            .with_time_signature(TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH))
-            .with_playing(true)
-            .with_recording(true)
-            .with_system_time_ns(9_000_000_000)
+            .tempo(Bpm::of(128.0))
+            .time_signature(TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH))
+            .playing(true)
+            .recording(true)
+            .system_time_ns(9_000_000_000)
     }
 
     /// An unusable value is not advertised as valid, however loudly the
@@ -559,7 +559,7 @@ mod tests {
     #[test]
     fn the_midi_clock_and_host_time_are_flagged_only_when_known() {
         let wants = need::NEED_SAMPLES_TO_NEXT_CLOCK | need::NEED_SYSTEM_TIME;
-        let t = populated_transport().with_beat(Beat::new(4.0 + 0.2 / 24.0));
+        let t = populated_transport().beat(Beat::new(4.0 + 0.2 / 24.0));
         let ctx = to_process_context(&t, wants);
         assert_eq!(ctx.samplesToNextClock, -188);
         assert_ne!(
@@ -572,7 +572,7 @@ mod tests {
             0
         );
 
-        let mut bare = populated_transport().with_beat(Beat::new(f64::NAN));
+        let mut bare = populated_transport().beat(Beat::new(f64::NAN));
         bare.system_time_ns = None;
         let ctx = to_process_context(&bare, wants);
         assert_eq!(

@@ -156,7 +156,7 @@ impl sealed::Store for PluginParamTarget {
     }
 }
 
-target_builders!(moved [] PluginParamTarget);
+target_builders!(unwatched moved [] PluginParamTarget);
 
 /// A parameter's map between its position and its plain value in a declared
 /// unit, as the declaration read at the call gives it.
@@ -326,7 +326,7 @@ macro_rules! unit_targets {
             }
         }
 
-        target_builders!([] PluginParamTarget<$ty>);
+        target_builders!(unwatched [] PluginParamTarget<$ty>);
     )+};
 }
 

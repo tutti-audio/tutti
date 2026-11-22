@@ -74,7 +74,10 @@ pub(crate) fn descriptor_of(info: &PluginInfo) -> PluginDescriptor {
 fn placed(channels: ChannelLayout, kept: Option<&ChannelTopology>) -> PluginBuses {
     PluginBus::single(channels)
         .into_iter()
-        .map(|bus| bus.placed(kept.cloned()))
+        .map(|bus| match kept {
+            Some(topology) => bus.placed(topology.clone()),
+            None => bus,
+        })
         .collect()
 }
 
@@ -354,8 +357,8 @@ impl Control for Vst2Loaded {
     }
 
     /// VST2 has no host-side main-thread refusal: none is counted.
-    fn refused_off_thread_calls(&self) -> u64 {
-        0
+    fn refused_off_thread_calls(&self) -> tutti_units::Calls {
+        tutti_units::Calls::ZERO
     }
 }
 
