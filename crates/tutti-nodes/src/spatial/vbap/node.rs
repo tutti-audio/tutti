@@ -56,8 +56,8 @@ fn ramp_steps(rate: SampleRate) -> u32 {
 ///
 /// Build it from a [`VbapPannerConfig`] over a bed, whose speakers sit where
 /// `tutti_buffers::Bed::direction` puts them. It is a
-/// graph node (`tutti_graph::Node` and [`ParamNode`]); inserting it hands back its
-/// [`ParamSet`] ([`UnitParam::Azimuth`], [`Elevation`](tutti_units::UnitParam::Elevation),
+/// graph node (`tutti_graph::Node` and [`ParamNode`](tutti_graph::ParamNode)); inserting it hands back its
+/// [`ParamSet`](tutti_graph::ParamSet) ([`UnitParam::Azimuth`], [`Elevation`](tutti_units::UnitParam::Elevation),
 /// [`Spread`](tutti_units::UnitParam::Spread) and [`StereoWidth`](tutti_units::UnitParam::StereoWidth)),
 /// which move the source lock-free while it renders, and a graph's control
 /// lanes may drive all four. A mono source presents the same sample on both

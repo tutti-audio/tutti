@@ -24,7 +24,7 @@ use tutti_units::{Amplitude, Hz, SampleRate, Tail, UnitParam};
 /// wave), both read per frame: a driven control signal's every frame is heard, and a
 /// non-finite driven value holds the last finite one. Made from an
 /// [`OscillatorConfig`] (`OscillatorNode::from`); inserted, its controls
-/// are a [`ParamSet`]; a fork starts from the values last set through it, at
+/// are a [`ParamSet`](tutti_graph::ParamSet); a fork starts from the values last set through it, at
 /// phase 0.
 ///
 /// The node renders silence until the graph prepares it at the device rate
