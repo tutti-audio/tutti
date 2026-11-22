@@ -9,6 +9,7 @@ use super::entry::PeResourceList;
 use super::fields::{InvalidValue, PeDataError, PeDataFault};
 use super::info::{PeDeviceInfo, PeJsonSchema};
 use super::kind::PeResource;
+use super::link::PeLink;
 use super::programs::{PeModeList, PeProgramList};
 use super::simple::{
     PeBasicChannelRx, PeBasicChannelTx, PeChannelMode, PeCurrentMode, PeExternalSync, PeLocalOn,
@@ -162,6 +163,17 @@ impl PeData {
             Self::StateList(_) => PeResource::StateList,
             Self::State(_) => PeResource::State,
             Self::Opaque(opaque) => opaque.resource.clone(),
+        }
+    }
+
+    /// The Links the data carries: those of DeviceInfo, and of the entries of a
+    /// ChannelList and a ProgramList.
+    pub(super) fn links(&self) -> Vec<&PeLink> {
+        match self {
+            Self::DeviceInfo(info) => info.links.iter().collect(),
+            Self::ChannelList(list) => list.entries().iter().flat_map(|e| &e.links).collect(),
+            Self::ProgramList(list) => list.entries().iter().flat_map(|e| &e.links).collect(),
+            _ => Vec::new(),
         }
     }
 
