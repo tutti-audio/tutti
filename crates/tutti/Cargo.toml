@@ -60,6 +60,11 @@ tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", option
 tutti-session = { version = "0.0.1", path = "../tutti-session", default-features = false, optional = true }
 tutti-measure = { version = "0.0.1", path = "../tutti-measure", optional = true }
 
+# Network MIDI 2.0 over UDP: native only (no sockets on the web), so the feature does
+# nothing on wasm.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tutti-midi-network = { version = "0.0.1", path = "../tutti-midi-network", optional = true }
+
 [dev-dependencies]
 # The `testing` nodes (`Osc`, `Const`) this crate's own tests, examples and README
 # doctest build graphs from. Dev-only: the umbrella exports none of them.
@@ -96,6 +101,7 @@ full = [
     "decode-ogg",
     "midi",
     "midi-hardware",
+    "midi-network",
     "synth",
     "soundfont",
     "sampler",
@@ -172,6 +178,8 @@ midi = [
     "tutti-session?/midi",
 ]
 midi-hardware = ["midi", "dep:tutti-midi-hardware", "dep:tutti-midi-device", "dep:tutti-midi-ci", "tutti-session?/midi-hardware"]
+# Network MIDI 2.0 over UDP in `tutti::midi::network` (implies `midi`; native targets).
+midi-network = ["midi", "dep:tutti-midi-network", "tutti-session?/midi-network"]
 
 # --- subsystems -------------------------------------------------------------
 #

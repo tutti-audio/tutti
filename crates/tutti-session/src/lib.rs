@@ -111,6 +111,17 @@ mod midi_follow;
 mod midi_hardware;
 #[cfg(feature = "midi")]
 mod midi_load;
+// Where UDP sockets exist and the feature is on; its twin is empty of them.
+#[cfg(feature = "midi")]
+#[cfg_attr(
+    all(feature = "midi-network", not(target_arch = "wasm32")),
+    path = "midi_network.rs"
+)]
+#[cfg_attr(
+    not(all(feature = "midi-network", not(target_arch = "wasm32"))),
+    path = "midi_network_none.rs"
+)]
+mod midi_network;
 #[cfg(feature = "midi-hardware")]
 mod midi_port;
 #[cfg(all(feature = "midi", not(feature = "midi-hardware")))]
@@ -244,6 +255,10 @@ pub use midi_port::{
     MidiInput, MidiInputInfo, MidiOpenError, MidiOutput, MidiOutputInfo, MidiPortError, NoHardware,
     OpenedMidiInput, OpenedMidiOutput, OpeningMidiInput, OpeningMidiOutput, PortCause,
 };
+// Everything public in the module: it has no items on a target with no sockets
+// but `NetworkReport`, which `MidiReport` names.
+#[cfg(feature = "midi-network")]
+pub use midi_network::*;
 #[cfg(feature = "midi")]
 pub use midi_report::MidiReport;
 #[cfg(feature = "midi")]

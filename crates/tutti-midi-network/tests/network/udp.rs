@@ -403,3 +403,34 @@ fn a_zero_length_datagram_from_another_port_reaches_the_endpoint_but_the_pokes_d
     other.send_to(b"x", to).unwrap();
     assert_eq!(next_event(&link, from_other), other_addr);
 }
+
+/// Closing a link says Bye to its peer and ends its Session: the peer sees the Bye
+/// from the closing end, and a send after the close finds no Session established.
+/// Closing again changes nothing.
+/// Spec: m2-124/6.16#1
+#[test]
+fn close_says_bye_and_a_send_after_it_fails() {
+    let executor = Executor::new();
+    let host = host(&executor, HostConfig::new(identity("Studio", "HOST-1")));
+    let client = client(
+        &executor,
+        identity("Laptop", "CLIENT-1"),
+        host.local_addr().unwrap(),
+    );
+    established(&host);
+    established(&client);
+
+    client.close();
+    let (ended_by, reason) = next_event(&host, |e| match e {
+        Event::Closed {
+            ended_by, reason, ..
+        } => Some((*ended_by, *reason)),
+        _ => None,
+    });
+    assert_eq!((ended_by, reason), (EndedBy::Remote, ByeReason::PowerDown));
+    assert!(
+        client.with(|c, now| c.send(now, &[note_on(60)])).is_err(),
+        "no Session is established after a close"
+    );
+    client.close();
+}

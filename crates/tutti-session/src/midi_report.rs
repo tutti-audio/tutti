@@ -147,6 +147,12 @@ pub enum MidiReport {
     /// The session stopped following MIDI Machine Control
     /// ([`Midi::unfollow_machine_control`](crate::Midi::unfollow_machine_control)).
     MachineControlUnfollowed,
+    /// A network endpoint's peer was invited, joined, left or failed to
+    /// authenticate ([`Midi::open_network_client`](crate::Midi::open_network_client) and
+    /// [`open_network_host`](crate::Midi::open_network_host)). There is none
+    /// on a target with no UDP sockets.
+    #[cfg(feature = "midi-network")]
+    Network(crate::NetworkReport),
     /// The OS watch for MIDI devices ended on its own (the reason is the
     /// message): the device list is frozen at what it last saw and no further
     /// hot-plug is reported. Reported once.
