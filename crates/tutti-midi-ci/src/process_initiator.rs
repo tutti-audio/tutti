@@ -50,7 +50,7 @@ use super::Initiator;
 use super::handshake::Handshake;
 use super::link::Link;
 use super::{PEER_REPLY_TIMEOUT, TimeoutWait};
-use crate::deadline::Pending;
+use crate::deadline::Deadline;
 
 use super::{
     CiDeviceId, CiHeader, CiMessage, DataControl, Decoded, Muid, Nak, ProcessFeatures, ReportScope,
@@ -127,7 +127,7 @@ enum Stage {
 struct Report {
     request: ReportRequest,
     stage: Stage,
-    wait: Pending,
+    wait: Deadline,
 }
 
 /// The Initiator of Process Inquiry with one peer.
@@ -199,7 +199,7 @@ impl ProcessInitiator {
         self.report = Some(Report {
             request,
             stage: Stage::AwaitingReply,
-            wait: Pending::after(now, PEER_REPLY_TIMEOUT),
+            wait: Deadline::after(now, PEER_REPLY_TIMEOUT),
         });
         let ReportRequest { control, scope } = request;
         Ok(vec![self.send(scope.address(), |header, to| {
@@ -272,7 +272,7 @@ impl Initiator for ProcessInitiator {
     type Action = ProcessAction;
 
     fn deadline(&self) -> Option<Instant> {
-        Pending::earliest(
+        Deadline::earliest(
             self.capabilities
                 .wait()
                 .into_iter()

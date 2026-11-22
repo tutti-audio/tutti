@@ -636,7 +636,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
         ) -> tutti_cpal::Result<()>,
     ) -> Result<crate::LiveSession<&'static str, F>> {
         crate::background::require(crate::BackgroundWork::Device)?;
-        let spec = audio_engine.spec().clone();
+        let spec = audio_engine.stream().spec().clone();
         let main_output = self.main_output_width(spec.channels);
         self.check_placement(main_output, spec.channels)?;
         let mut parts = self.parts(
@@ -672,11 +672,13 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
             .state
             .set_output_clock(crate::midi::OutputClockSource::new(
                 clock.clone(),
-                audio_engine.latency(),
+                audio_engine.stream().latency(),
             ));
         session.transport.handle.set_clock(clock);
         #[cfg(feature = "capture")]
-        session.inputs.set_output_latency(audio_engine.latency());
+        session
+            .inputs
+            .set_output_latency(audio_engine.stream().latency());
         let state = Arc::new(tutti_engine::AudioCallbackState::new(engine));
         start(&mut audio_engine, Arc::clone(&state))?;
         #[cfg(feature = "capture")]

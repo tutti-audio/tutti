@@ -1,5 +1,6 @@
 //! macOS: a kqueue watching the process for the process-exit event.
 
+use crate::Process;
 use rustix::event::Timespec;
 use rustix::event::kqueue::{
     Event, EventFilter, EventFlags, ProcessEvents, kevent_timespec, kqueue,
@@ -7,7 +8,6 @@ use rustix::event::kqueue::{
 use rustix::fd::OwnedFd;
 use rustix::process::Pid;
 use std::mem::MaybeUninit;
-use std::process::Child;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -25,8 +25,8 @@ pub(super) struct Imp {
 impl Imp {
     /// `None` when the queue could not be made or the registration was refused
     /// (the process had ended already, say).
-    pub(super) fn of(child: &Child) -> Option<Self> {
-        Self::watching(Pid::from_child(child))
+    pub(super) fn of(process: &Process) -> Option<Self> {
+        Self::watching(Pid::from_child(process.as_child()))
     }
 
     /// A watch on the process `pid` of any parent. `None` when it has ended

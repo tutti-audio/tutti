@@ -49,6 +49,7 @@ mod slot;
 mod state;
 mod target;
 mod verbs;
+mod watcher;
 
 pub use batch::{IntoAssign, IntoRead};
 pub(crate) use controls::Write;
@@ -90,3 +91,4 @@ pub(crate) use target::target_builders;
 pub use target::{
     AnyAssign, AnyTarget, Assign, Effective, Info, Modify, Modulatable, ScalarTarget, Target,
 };
+pub use watcher::{Change, ChangedBy, GestureId, GestureState, IntoTargets, Watchable, Watcher};

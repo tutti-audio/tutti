@@ -1941,10 +1941,7 @@ impl<F: Float> Midi<'_, F> {
             return Err(MidiError::TempoSourceTaken);
         }
         let tap = self.follow_tap(follow.input(), follow.group(), FOLLOW_TAP_CAPACITY)?;
-        let core = tutti_midi_runtime::TempoFollower::new(
-            tutti_midi_runtime::TempoSource::Flex(follow.group()),
-            follow.follows_meter(),
-        );
+        let core = tutti_midi_runtime::TempoFollower::new(follow.group(), follow.follows_meter());
         self.state.follow = Some(match self.state.follow.take() {
             Some(first) => first.replaced_by(core, tap),
             None => Follow::new(core, tap, self.settings.tempo_map(), self.meter.current()),

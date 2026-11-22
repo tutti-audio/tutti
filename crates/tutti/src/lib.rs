@@ -198,14 +198,13 @@ pub use tutti_session::PluginParams;
 pub use tutti_session::windows_from_signal;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{
-    AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadInProcess, LoadOutOfProcess,
-    LoadPlugin, LoadPreset, LoadPresetInProcess, LoadPresetOutOfProcess, LoadedPlugin,
-    LoadedPreset, LoadingPlugin, LoadingPresetOutOfProcess, Opened, Plugin, PluginApplyError,
-    PluginBuses, PluginChange, PluginEvent, PluginHealth, PluginInfo, PluginInstance,
-    PluginPresets, PortCounts, PresetStartError, RestoreState, RestoreStateInProcess,
-    RestoreStateOutOfProcess, RestoredState, RestoringStateOutOfProcess, SaveState,
-    SaveStateInProcess, SaveStateOutOfProcess, SavingStateOutOfProcess, StateStartError,
-    SwapPluginError,
+    AddPluginError, AnyPlugin, AwaitingOp, Diagnostics, InProcessOp, ListedPreset, LoadInProcess,
+    LoadOutOfProcess, LoadPlugin, LoadPreset, LoadPresetInProcess, LoadPresetOp,
+    LoadPresetOutOfProcess, LoadedPlugin, LoadedPreset, LoadingPlugin, Op, Opened, OutOfProcessOp,
+    Plugin, PluginApplyError, PluginBuses, PluginChange, PluginEvent, PluginHealth, PluginInfo,
+    PluginInstance, PluginOp, PluginPresets, PortCounts, PresetStartError, RestoreState,
+    RestoreStateInProcess, RestoreStateOp, RestoreStateOutOfProcess, RestoredState, SaveState,
+    SaveStateInProcess, SaveStateOp, SaveStateOutOfProcess, StateStartError, SwapPluginError,
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{
@@ -229,6 +228,10 @@ pub use tutti_session::{
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, Bounced, Range, Stem, StemGain, Written,
+};
+#[cfg(feature = "session")]
+pub use tutti_session::{
+    Change, ChangedBy, GestureId, GestureState, IntoTargets, Watchable, Watcher,
 };
 #[cfg(all(feature = "session", feature = "midi"))]
 pub use tutti_session::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
@@ -548,8 +551,8 @@ pub mod session {
         OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError, PeerEvent,
         PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
         Removal, RemoveError, Reopened, ReplaceRefused, Replacement, Resource, ResourceFact,
-        SessionHeardTapError, SessionNode, SetRateError, SetSources, SetTempoError, Taps,
-        TimelineView, Weighted, Wire, main_output_width,
+        SessionHeardTapError, SessionNode, SetRateError, SetSources, Taps, TimelineView, Weighted,
+        Wire, main_output_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, LoopReader, OfflineTimeline, OfflineTimelineConfig, OfflineTransport,
@@ -576,6 +579,14 @@ pub mod session {
     };
     #[cfg(any(feature = "capture", feature = "midi"))]
     pub use tutti_session::{Start, TakeLatency, Trim};
+    #[cfg(any(
+        feature = "sampler",
+        feature = "analyze",
+        feature = "midi",
+        feature = "soundfont",
+        feature = "export"
+    ))]
+    pub use tutti_session::{Unanswered, Unblocked};
     // `load_audio` decodes a file, so it needs a decoder.
     #[cfg(feature = "midi")]
     pub use tutti_session::MidiNodes;
