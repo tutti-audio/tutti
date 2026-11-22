@@ -217,9 +217,9 @@ impl<F: Float> Editor<F> {
             && self
                 .life
                 .committed()
-                .is_some_and(|c| c.shapes == self.shapes && c.spec.same_but_ranges(&self.spec))
+                .is_some_and(|c| c.shapes == self.shapes && c.spec.same_plan(&self.spec))
         {
-            // The plan the executor has is this spec's: at most a range
+            // The plan the executor has is this spec's: at most a fade
             // moved, which is a control.
             if self.life.committed().is_some_and(|c| c.spec != self.spec) {
                 Self::lower_and_validate(&self.spec, &self.shapes)?;
@@ -289,6 +289,9 @@ impl<F: Float> Editor<F> {
         self.sync_ranges();
         self.life
             .set_committed(self.spec.clone(), self.shapes.clone());
+        // A lane the spec no longer has takes its base and range with it.
+        let spec = &self.spec;
+        self.values.retain_edges(|id| spec.gains.contains_key(&id));
         Ok(rewired)
     }
 
@@ -354,6 +357,18 @@ impl<F: Float> Editor<F> {
             }
             _ => return plain(),
         };
+        // The bases the old main output's lanes had when the crossfade began:
+        // the running crossfade's own, or the table's now.
+        let bases: BTreeMap<EdgeId, Amplitude> = continuing.map_or_else(
+            || {
+                was.spec
+                    .gains
+                    .keys()
+                    .map(|&id| (id, self.values.base(id)))
+                    .collect()
+            },
+            |f| f.bases.clone(),
+        );
         let lower = |spec: &GraphSpec, shapes: &Shapes| {
             spec.lowered(shapes)
                 .map_err(|e| CommitError::Compile(CompileError::Bus(e)))
@@ -395,9 +410,14 @@ impl<F: Float> Editor<F> {
                     sink: PortSink::Output((base + c) as u16),
                     from: Edge::Direct(source),
                 };
-                let weight = gain.map_or(Amplitude::UNITY, |g| g.base);
+                let weight = before
+                    .lanes
+                    .get(&was_id)
+                    .or_else(|| bases.get(&was_id))
+                    .copied()
+                    .unwrap_or(Amplitude::UNITY);
                 if weight != Amplitude::UNITY {
-                    now.spec.gains.insert(id, EdgeGain::new(weight));
+                    now.spec.gains.insert(id, EdgeGain::default());
                 }
                 now.lanes.insert(id, weight);
                 bank_sources.push(source);
@@ -424,6 +444,7 @@ impl<F: Float> Editor<F> {
         };
         let fading = Fading {
             was: was.clone(),
+            bases,
             main_output: self.spec.main_output_id,
             bank,
         };
@@ -501,20 +522,16 @@ impl<F: Float> Editor<F> {
             self.fading = None;
         }
         let plan = Arc::new(plan);
-        let committed = self.life.committed().map(|c| &c.spec);
         let spec = &self.spec;
+        let values = &self.values;
         let (ranges, modes_cells) = (&mut self.cells.ranges, &mut self.cells.modes);
         let declick = declick_frames(plan.prepare.sample_rate()).get();
         let params = |key: NodeKey, ports: usize, max: usize| {
             let declared = plan.unit(key).map(|u| u.shape.params);
-            ranges.state(key, ports, max, declick, declared, spec)
+            ranges.state(key, ports, max, declick, declared, values)
         };
-        let gains = self
-            .cells
-            .gains
-            .for_plan(&plan, spec, committed, bus_weights);
-        let values = &self.values;
-        let modes = |key: NodeKey| modes_cells.state(key, &plan, spec, values);
+        let gains = self.cells.gains.for_plan(&plan, spec, values, bus_weights);
+        let modes = |key: NodeKey| modes_cells.state(key, &plan, values);
         let placements = &self.placements;
         // A unit handed in whole (`send`'s callers) was never bound: its flag
         // is a fresh one nothing holds.
@@ -555,7 +572,7 @@ impl<F: Float> Editor<F> {
                 },
             },
         );
-        self.cells.keep_placed(&plan, &self.spec);
+        self.cells.keep_placed(&plan, &self.values);
         self.link.send(commit, fades);
         // `commit` syncs the cells against the spec it last sent, then
         // records this one.

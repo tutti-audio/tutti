@@ -116,6 +116,8 @@ struct Rig {
     spec: GraphSpec,
     /// The mix of the node (key 2) a pair starts at: its base.
     base: Option<Mix>,
+    /// The range of the node's mix a pair starts with.
+    range: Option<ParamRange>,
 }
 
 impl Rig {
@@ -143,6 +145,7 @@ impl Rig {
             kinds,
             spec,
             base: None,
+            range: None,
         }
     }
 
@@ -157,6 +160,9 @@ fn render(rig: &Rig, workers: usize, blocks: usize) -> (Vec<f32>, Vec<f32>) {
     let mut pair = Pair::with_workers(BLOCK, workers);
     if let Some(base) = rig.base {
         pair.start_mix(key(2), base);
+    }
+    if let Some(range) = rig.range {
+        pair.start_param_range(mix_of(2), range);
     }
     pair.switch(&rig.graph(), &rig.kinds);
     run(&mut pair, 0, blocks)
@@ -256,7 +262,7 @@ fn a_driven_block_whose_ends_agree_is_not_static() {
 }
 
 /// The lane's value is clamped to `0..=1` whatever range the entry holds: the
-/// default (`ParamMod::default` is unbounded, narrowed to the blend), a range
+/// default (unbounded, narrowed to the blend), a range
 /// inside it, and one wider than it (`NodeMix::lane_range`).
 #[test]
 fn a_driven_mix_is_clamped_to_its_range_and_to_the_blend() {
@@ -269,7 +275,7 @@ fn a_driven_mix_is_clamped_to_its_range_and_to_the_blend() {
     ] {
         let mut rig = Rig::new(plain(), 0, None);
         if let Some(r) = range {
-            rig.spec.set_param_range(mix_of(2), r);
+            rig.range = Some(r);
         }
         let (got, x) = render_both(&rig, 4);
         for (n, &g) in got.iter().enumerate() {
@@ -502,7 +508,7 @@ fn an_early_lane_is_delayed_to_the_node() {
 
 /// `connect_param` at the mix's address is refused as any param is, and the
 /// address is the graph's alone: a lane at a node that is not there is
-/// `UnknownParamNode`, a NaN range `BadParamRange`, a source port the node does
+/// `UnknownParamNode`, a source port the node does
 /// not have `ParamSourceOutOfRange`, a lane from a node the mix feeds a cycle
 /// (a param edge in it), a node that declares the reserved address cannot
 /// (`ParamPortsError::Reserved`), and an address no node declares other than
@@ -517,13 +523,6 @@ fn the_mix_port_is_refused_as_a_param_is() {
     assert!(matches!(
         ghost.validate().unwrap_err()[..],
         [GraphInvalid::UnknownParamNode { missing, .. }] if missing == key(9)
-    ));
-
-    let mut nan = rig.spec.clone();
-    nan.set_param_range(mix_of(2), ParamRange::new(f64::NAN, 1.0));
-    assert!(matches!(
-        nan.validate().unwrap_err()[..],
-        [GraphInvalid::BadParamRange { at, .. }] if at == mix_of(2)
     ));
 
     let mut port = rig.spec.clone();

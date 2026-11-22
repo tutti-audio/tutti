@@ -54,8 +54,9 @@ use crate::editor::{CommitError, Editor};
 use crate::exec::Executor;
 use crate::mode::NodeMix;
 use crate::node::{IntoNode, NodeParts, Prepare, Shape, TransportPosition};
-use crate::node_values::NodeValues;
+use crate::param::{ParamIn, ParamRange};
 use crate::spec::{EventEdge, EventInputPort, EventOutputPort, GraphSpec};
+use crate::values::GraphValues;
 use tutti_buffers::{Float, Planes, PlanesMut};
 
 /// One unit waiting for [`GraphBuilder::build`], with its fork source, so a
@@ -166,7 +167,7 @@ struct Pending<F: Float> {
 pub struct GraphBuilder<F: Float = f32> {
     spec: GraphSpec,
     /// Each node's mix, which the built editor starts its units at.
-    values: NodeValues,
+    values: GraphValues,
     /// Every added node's shape, read at `add` — the widths the fan-out
     /// calls use.
     shapes: Vec<Shape>,
@@ -204,7 +205,7 @@ impl<F: Float> GraphBuilder<F> {
         spec.topology.outputs = vec![Vec::new(); outputs.count() as usize];
         Self {
             spec,
-            values: NodeValues::default(),
+            values: GraphValues::default(),
             shapes: Vec::new(),
             units: Vec::new(),
         }
@@ -300,7 +301,7 @@ impl<F: Float> GraphBuilder<F> {
 
     /// The graph value, for what the calls here do not spell — a
     /// [`require_resolution`](GraphSpec::require_resolution) mark, a
-    /// parameter value. Nodes are added through [`add`](Self::add), never
+    /// parameter source. Nodes are added through [`add`](Self::add), never
     /// here, so every node has a unit.
     pub fn spec_mut(&mut self) -> &mut GraphSpec {
         &mut self.spec
@@ -320,6 +321,24 @@ impl<F: Float> GraphBuilder<F> {
         self.check_node(node);
         assert!(NodeMix::is_sound(mix), "a mix is finite and in 0..=1");
         self.values.set_mix(node, mix);
+        self
+    }
+
+    /// Sets param port `at`'s range: the built graph starts the port clamping
+    /// a driven value to `range` ([`Editor::set_param_range`]).
+    ///
+    /// # Panics
+    ///
+    /// If `at`'s node is not in the builder, or `range` has a NaN bound or
+    /// crossed bounds on a circular param (make one with
+    /// [`ParamRange::arc`]).
+    pub fn param_range(&mut self, at: ParamIn, range: ParamRange) -> &mut Self {
+        self.check_node(at.node);
+        assert!(
+            !range.min.is_nan() && !range.max.is_nan() && range.fits(at.param.param),
+            "a range has no NaN bound and no crossed arc"
+        );
+        self.values.set_range(at, range);
         self
     }
 

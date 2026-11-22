@@ -12,7 +12,7 @@ use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, prepare};
 use tutti_graph::{
-    Edge, EdgeFade, EdgeGain, EdgeId, Editor, Executor, NodeKey, OutputPort, PortSink, PortSource,
+    Edge, EdgeFade, EdgeId, Editor, Executor, NodeKey, OutputPort, PortSink, PortSource,
     TransportPosition, Unforkable,
 };
 use tutti_units::Amplitude;
@@ -86,10 +86,6 @@ impl Rig {
     }
 }
 
-fn faded(base: f64) -> EdgeGain {
-    EdgeGain::new(Amplitude::new(base))
-}
-
 /// **A fade in leaves 0 and is the weight from `DECLICK` on.** Frame `j` of the
 /// fade is `base * s((j + 1) / 241)`, across the block boundaries (blocks of
 /// 64), strictly inside `(0, base)`, and every frame after the 240th is the
@@ -98,7 +94,9 @@ fn faded(base: f64) -> EdgeGain {
 fn a_fade_in_rises_along_the_smootherstep_and_reaches_its_weight_at_declick() {
     assert_eq!(common::declick(), SPAN, "the rig's rate");
     let mut rig = Rig::new(&[1.0]);
-    rig.ed.spec_mut().set_edge_gain(output_edge(1), faded(0.5));
+    rig.ed
+        .set_edge_gain(output_edge(1), Amplitude::new(0.5))
+        .expect("the edge exists");
     rig.ed
         .set_edge_fade(output_edge(1), EdgeFade::In)
         .expect("the edge exists");

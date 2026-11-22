@@ -487,11 +487,11 @@ pub mod graph {
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,
         Due, Edge, Event, EventKind, EventOrderError, EventRejected, EventWriter, ForkBuild,
         ForkCause, ForkFaultKind, ForkHealth, ForkSource, Forked, GraphInvalid, Harmony,
-        HarmonyKind, InPlaceMask, NodeParts, Offset, ParamEvent, ParamInput, ParamKind, ParamMod,
-        ParamPorts, ParamPortsError, ParamRamp, ParamRange, ParamRangeCell, ParamRangeReader,
-        ParamSegment, Pass, PlayClock, PortSink, PortSource, RenderMode, Resolution, SilenceMask,
-        SortedEvents, SubBlocks, TransportChange, TransportChangeRejected, TransportChanges,
-        TransportHistory, TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
+        HarmonyKind, InPlaceMask, NodeParts, Offset, ParamEvent, ParamInput, ParamKind, ParamPorts,
+        ParamPortsError, ParamRamp, ParamRange, ParamRangeCell, ParamRangeReader, ParamSegment,
+        Pass, PlayClock, PortSink, PortSource, RenderMode, Resolution, SilenceMask, SortedEvents,
+        SubBlocks, TransportChange, TransportChangeRejected, TransportChanges, TransportHistory,
+        TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
     };
     pub use tutti_graph::{EdgeGain, FeedbackFrom, Invalid, NodeMix, RangeView};
 }
@@ -522,8 +522,8 @@ pub mod session {
         ConfigError, JobError, RenderError, Rendered, RenderedError, TargetError, Unmeasured,
     };
     pub use tutti_graph::{
-        BusError, BusOutputPort, CloseError, CommitError, Inserted, MissingSource, MixError,
-        ModeError, PassError, Rewired, Unwired, Wired,
+        BusError, BusOutputPort, CloseError, CommitError, EdgeGainError, Inserted, MissingSource,
+        MixError, ModeError, ParamRangeError, PassError, Rewired, Unwired, Wired,
     };
     pub use tutti_graph::{
         BusFeed, BusFold, BusSide, EdgeFade, EdgeId, EventCapacityError, ForkError, InletCounts,

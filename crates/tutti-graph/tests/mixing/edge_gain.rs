@@ -18,10 +18,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use common::{Kind, Pair, TestNode, bits, input_signal, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    CommitError, Cx, Edge, EdgeGain, EdgeId, Editor, Executor, ForkByClone, ForkTarget,
-    GraphInvalid, GraphSpec, InputPort, Io, Node, NodeKey, Op, OutputPort, Plan, PortSink,
-    PortSource, Prepare, Renderer, Shape, Status, Topology, TransportPosition, Unforkable,
-    ValidGraph, compile,
+    CommitError, Cx, Edge, EdgeGain, EdgeGainError, EdgeId, Editor, Executor, ForkByClone,
+    ForkTarget, GraphInvalid, GraphSpec, InputPort, Io, Node, NodeKey, Op, OutputPort, Plan,
+    PortSink, PortSource, Prepare, Renderer, Shape, Status, Topology, TransportPosition,
+    Unforkable, ValidGraph, compile,
 };
 use tutti_units::Amplitude;
 
@@ -120,13 +120,24 @@ impl Fan {
         }
     }
 
-    /// The spec with `weights[k - 1]` on source `k`.
-    fn spec(&self, weights: &[f32]) -> ValidGraph {
+    /// The spec with an entry on source `k` and `weights[k - 1]` as its base.
+    fn spec(&self, weights: &[f32]) -> Weighed {
         let mut spec = GraphSpec::new(self.topology.clone());
+        let mut bases = Vec::new();
         for (k, &w) in weights.iter().enumerate() {
-            spec.set_edge_gain(self.edge(k as u64 + 1), EdgeGain::new(amp(w)));
+            let id = self.edge(k as u64 + 1);
+            spec.set_edge_gain(id, EdgeGain::default());
+            bases.push((id, amp(w)));
         }
-        spec.validate().expect("valid")
+        Weighed {
+            graph: spec.validate().expect("valid"),
+            bases,
+        }
+    }
+
+    /// The spec with no entry.
+    fn plain(&self) -> Weighed {
+        self.spec(&[])
     }
 
     fn plan(&self, graph: &ValidGraph) -> Plan {
@@ -138,6 +149,30 @@ impl Fan {
         )
         .expect("compiles")
         .0
+    }
+}
+
+/// A graph and the base each lane of it starts at: the bases are the editor's,
+/// not the spec's.
+struct Weighed {
+    graph: ValidGraph,
+    bases: Vec<(EdgeId, Amplitude)>,
+}
+
+impl std::ops::Deref for Weighed {
+    type Target = ValidGraph;
+
+    fn deref(&self) -> &ValidGraph {
+        &self.graph
+    }
+}
+
+impl Weighed {
+    /// Starts `pair`'s lanes at their bases.
+    fn start(&self, pair: &mut Pair) {
+        for &(id, base) in &self.bases {
+            pair.start_edge_gain(id, base);
+        }
     }
 }
 
@@ -158,12 +193,13 @@ fn plain_sums(plan: &Plan) -> usize {
 /// Render `blocks` blocks of `BLOCK` frames of `graph` on `workers`
 /// participants, asserting each block is the reference interpreter's.
 fn render(
-    graph: &ValidGraph,
+    graph: &Weighed,
     kinds: &BTreeMap<NodeKey, Kind>,
     workers: usize,
     blocks: usize,
 ) -> Vec<Vec<f32>> {
     let mut pair = Pair::with_workers(BLOCK, workers);
+    graph.start(&mut pair);
     pair.switch(graph, kinds);
     let mut got: Vec<Vec<f32>> = vec![Vec::new(); pair.outputs];
     let mut frame = 0;
@@ -180,11 +216,7 @@ fn render(
 }
 
 /// Serial and parallel renders, which must be bit for bit the same.
-fn render_both(
-    graph: &ValidGraph,
-    kinds: &BTreeMap<NodeKey, Kind>,
-    blocks: usize,
-) -> Vec<Vec<f32>> {
+fn render_both(graph: &Weighed, kinds: &BTreeMap<NodeKey, Kind>, blocks: usize) -> Vec<Vec<f32>> {
     let serial = render(graph, kinds, 1, blocks);
     let parallel = render(graph, kinds, 4, blocks);
     assert_eq!(
@@ -278,12 +310,17 @@ fn a_wide_weighted_fan_in_is_one_flat_fold() {
     for at_port in [false, true] {
         let fan = Fan::new(&values, at_port);
         let mut spec = GraphSpec::new(fan.topology.clone());
+        let mut bases = Vec::new();
         for k in 0..n {
             if entries[k] {
-                spec.set_edge_gain(fan.edge(k as u64 + 1), EdgeGain::new(amp(weights[k])));
+                spec.set_edge_gain(fan.edge(k as u64 + 1), EdgeGain::default());
+                bases.push((fan.edge(k as u64 + 1), amp(weights[k])));
             }
         }
-        let graph = spec.validate().expect("valid");
+        let graph = Weighed {
+            graph: spec.validate().expect("valid"),
+            bases,
+        };
         let plan = fan.plan(&graph);
         // 64, then 63 per op: two ops, both carrying a weighted lane.
         assert_eq!(weighted_ops(&plan) + plain_sums(&plan), 2);
@@ -307,9 +344,7 @@ fn unity_weights_equal_the_unweighted_sum() {
             .collect();
         for at_port in [false, true] {
             let fan = Fan::new(&values, at_port);
-            let plain = GraphSpec::new(fan.topology.clone())
-                .validate()
-                .expect("valid");
+            let plain = fan.plain();
             let unity = fan.spec(&vec![1.0; n]);
             assert_eq!(weighted_ops(&fan.plan(&plain)), 0);
             assert!(weighted_ops(&fan.plan(&unity)) >= 1);
@@ -329,9 +364,7 @@ fn a_unity_entry_on_a_one_edge_sink_turns_negative_zero_positive() {
     let neg = -0.0f32;
     for at_port in [false, true] {
         let fan = Fan::new(&[neg], at_port);
-        let plain = GraphSpec::new(fan.topology.clone())
-            .validate()
-            .expect("valid");
+        let plain = fan.plain();
         assert_eq!(
             weighted_ops(&fan.plan(&plain)) + plain_sums(&fan.plan(&plain)),
             0
@@ -388,7 +421,7 @@ fn ramp(from: f32, to: f32, frames: usize) -> Vec<f32> {
 
 /// One weighted source of `1.0` into the output: the output *is* the weight,
 /// `+0.0 + w[i] * 1.0`.
-fn one_lane() -> (Fan, ValidGraph) {
+fn one_lane() -> (Fan, Weighed) {
     let fan = Fan::new(&[1.0], false);
     let graph = fan.spec(&[0.5]);
     (fan, graph)
@@ -412,6 +445,7 @@ fn a_move_ramps_across_the_block_from_the_last_weight() {
         let (fan, _) = one_lane();
         let graph = fan.spec(&[a]);
         let mut pair = Pair::with_workers(BLOCK, workers);
+        graph.start(&mut pair);
         pair.switch(&graph, &fan.kinds);
         let id = fan.edge(1);
         let run = |pair: &mut Pair, frames: usize| {
@@ -464,7 +498,9 @@ fn a_ramping_lane_is_not_fused() {
         let fan = Fan::new(&values, at_port);
         for workers in [1usize, 4] {
             let mut pair = Pair::with_workers(BLOCK, workers);
-            pair.switch(&fan.spec(&[first, from]), &fan.kinds);
+            let graph = fan.spec(&[first, from]);
+            graph.start(&mut pair);
+            pair.switch(&graph, &fan.kinds);
             let input = input_signal(0, BLOCK);
             pair.block(BLOCK, &input);
             pair.set_edge_gain(fan.edge(2), amp(to));
@@ -491,6 +527,7 @@ fn a_lane_survives_a_commit_that_keeps_its_edge() {
     for workers in [1usize, 4] {
         let mut pair = Pair::with_workers(BLOCK, workers);
         let first = fan.spec(&[0.25, 1.0]);
+        first.start(&mut pair);
         pair.switch(&first, &fan.kinds);
         let step = |pair: &mut Pair| {
             let (x, y) = pair.block(BLOCK, &input_signal(0, BLOCK));
@@ -504,6 +541,9 @@ fn a_lane_survives_a_commit_that_keeps_its_edge() {
         // a plan of its own) that keeps both edges, so both ramp from the
         // weight they had.
         let second = fan.spec(&[2.0, 0.5]);
+        for &(id, base) in &second.bases {
+            pair.set_edge_gain(id, base);
+        }
         pair.switch(&second, &fan.kinds);
         let b2 = step(&mut pair);
         let (w1, w2) = (ramp(0.25, 2.0, BLOCK), ramp(1.0, 0.5, BLOCK));
@@ -515,13 +555,14 @@ fn a_lane_survives_a_commit_that_keeps_its_edge() {
         // Drop lane 1's entry (the edge stays): plain again.
         let third = {
             let mut spec = GraphSpec::new(fan.topology.clone());
-            spec.set_edge_gain(fan.edge(2), EdgeGain::new(amp(0.5)));
+            spec.set_edge_gain(fan.edge(2), EdgeGain::default());
             spec.validate().expect("valid")
         };
         pair.switch(&third, &fan.kinds);
         step(&mut pair);
         // Add it back at a new value: a new lane, no ramp.
         let fourth = fan.spec(&[4.0, 0.5]);
+        pair.start_edge_gain(fan.edge(1), amp(4.0));
         pair.switch(&fourth, &fan.kinds);
         let b4 = step(&mut pair);
         let want: f32 = (0.0 + 4.0 * 1.0) + 0.5 * 0.5;
@@ -549,8 +590,8 @@ impl Rig {
         ed.insert(key(1), "one", Unforkable(TestNode::new(dc(1.0))));
         ed.insert(key(2), "two", Unforkable(TestNode::new(dc(2.0))));
         ed.spec_mut().topology.outputs = vec![vec![out(1), out(2)]];
-        ed.spec_mut()
-            .set_edge_gain(output_edge(1), EdgeGain::new(amp(base)));
+        ed.set_edge_gain(output_edge(1), amp(base))
+            .expect("the edge exists");
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -576,8 +617,8 @@ impl Rig {
 
 /// `set_edge_gain` is a control: it leaves the plan untouched (the very same
 /// plan `Arc`, and a commit after it sends nothing), and its value lands at the
-/// next block, ramped. A change of the entry's `base` or `range` through the
-/// spec is the same; adding or removing an entry is a recompile.
+/// next block, ramped. A change of the lane's range is the same; adding or
+/// removing an entry is a recompile.
 #[test]
 fn set_edge_gain_leaves_the_plan_untouched_and_lands_next_block() {
     let mut rig = Rig::new(0.5);
@@ -599,17 +640,13 @@ fn set_edge_gain_leaves_the_plan_untouched_and_lands_next_block() {
         assert_eq!(g.to_bits(), want.to_bits(), "frame {i}");
     }
 
-    // The same through the spec: base and range, then a commit.
-    {
-        let g = rig
-            .ed
-            .spec_mut()
-            .gains
-            .get_mut(&output_edge(1))
-            .expect("entry");
-        g.base = amp(0.25);
-        g.range = tutti_graph::ParamRange::new(-2.0, 2.0);
-    }
+    // The same for a base and a range, then a commit.
+    rig.ed
+        .set_edge_gain(output_edge(1), amp(0.25))
+        .expect("an edge with an entry");
+    rig.ed
+        .set_edge_gain_range(output_edge(1), tutti_graph::ParamRange::new(-2.0, 2.0))
+        .expect("an edge with an entry");
     rig.ed.commit().expect("commits");
     assert!(Arc::ptr_eq(&plan, &rig.plan()), "base and range: no plan");
     let got = rig.block();
@@ -631,6 +668,38 @@ fn set_edge_gain_leaves_the_plan_untouched_and_lands_next_block() {
     assert!(!Arc::ptr_eq(&with_both, &rig.plan()), "a removed one too");
 }
 
+/// A gain set before a recompile is the gain after it: adding a node to the
+/// sum recompiles (a new plan), `edge_gain` reads the same base, and the unit
+/// renders it, exactly: `((0 + 0.25 * 1) + 2) + 4`. A lane that had lost its
+/// base to the recompile would read unity and sum to `7`.
+#[test]
+fn a_gain_set_before_a_recompile_keeps_its_base() {
+    let mut rig = Rig::new(0.5);
+    rig.ed
+        .set_edge_gain(output_edge(1), amp(0.25))
+        .expect("an edge with an entry");
+    rig.block();
+    rig.block();
+    let plan = rig.plan();
+
+    rig.ed
+        .insert(key(3), "three", Unforkable(TestNode::new(dc(4.0))));
+    rig.ed.spec_mut().topology.outputs[0].push(out(3));
+    rig.ed.commit().expect("commits");
+    rig.exec.apply_pending();
+    assert!(!Arc::ptr_eq(&plan, &rig.plan()), "a recompile");
+
+    assert_eq!(rig.ed.edge_gain(output_edge(1)), Some(amp(0.25)));
+    for _ in 0..2 {
+        let got = rig.block();
+        assert!(
+            got.iter()
+                .all(|&x| x.to_bits() == (((0.0 + 0.25 * 1.0) + 2.0) + 4.0f32).to_bits()),
+            "the base rides the recompile"
+        );
+    }
+}
+
 /// `Editor::set_edge_gain` refuses what the commit would, changing nothing: an
 /// edge that does not exist, and a base that is not finite.
 #[test]
@@ -642,14 +711,14 @@ fn set_edge_gain_refuses_what_a_commit_would() {
     };
     assert_eq!(
         rig.ed.set_edge_gain(missing, amp(1.0)),
-        Err(GraphInvalid::GainWithoutEdge { id: missing })
+        Err(EdgeGainError::NoSuchEdge { id: missing })
     );
     for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
         let err = rig
             .ed
             .set_edge_gain(output_edge(1), amp(bad))
             .expect_err("not finite");
-        assert!(matches!(err, GraphInvalid::BadEdgeGain { .. }), "{bad}");
+        assert!(matches!(err, EdgeGainError::NotFinite { .. }), "{bad}");
     }
     assert_eq!(
         rig.ed.edge_gain(output_edge(1)),
@@ -663,8 +732,8 @@ fn set_edge_gain_refuses_what_a_commit_would() {
 // ---------------------------------------------------------------------------
 
 /// `validate` refuses an entry whose edge does not exist (a port and an output
-/// edge, a feedback edge's source gone) and one with a base that is not finite
-/// or a range with a NaN bound; an infinite bound is fine.
+/// edge, a feedback edge's source gone); the editor refuses a base that is not
+/// finite and a range with a NaN bound, an infinite bound being fine.
 #[test]
 fn validate_refuses_a_malformed_entry() {
     let fan = Fan::new(&[1.0, 2.0], true);
@@ -687,39 +756,25 @@ fn validate_refuses_a_malformed_entry() {
         [GraphInvalid::GainWithoutEdge { .. }]
     ));
 
+    let mut rig = Rig::new(0.5);
     for bad in [f32::NAN, f32::INFINITY] {
-        let mut spec = base();
-        spec.set_edge_gain(fan.edge(1), EdgeGain::new(amp(bad)));
         assert!(matches!(
-            valid(&spec).unwrap_err()[..],
-            [GraphInvalid::BadEdgeGain { .. }]
+            rig.ed.set_edge_gain(output_edge(1), amp(bad)),
+            Err(EdgeGainError::NotFinite { .. })
         ));
     }
-    let mut spec = base();
-    spec.set_edge_gain(
-        fan.edge(1),
-        EdgeGain {
-            base: amp(1.0),
-            range: tutti_graph::ParamRange::new(f64::NAN, 1.0),
-            source: None,
-            fade: tutti_graph::EdgeFade::None,
-        },
-    );
     assert!(matches!(
-        valid(&spec).unwrap_err()[..],
-        [GraphInvalid::BadEdgeGain { .. }]
+        rig.ed
+            .set_edge_gain_range(output_edge(1), tutti_graph::ParamRange::new(f64::NAN, 1.0)),
+        Err(EdgeGainError::InvalidRange { .. })
     ));
-    let mut spec = base();
-    spec.set_edge_gain(
-        fan.edge(1),
-        EdgeGain {
-            base: amp(-2.0),
-            range: tutti_graph::ParamRange::UNBOUNDED,
-            source: None,
-            fade: tutti_graph::EdgeFade::None,
-        },
-    );
-    assert!(valid(&spec).is_ok(), "a negative weight and an open range");
+    rig.ed
+        .set_edge_gain(output_edge(1), amp(-2.0))
+        .expect("a negative weight");
+    rig.ed
+        .set_edge_gain_range(output_edge(1), tutti_graph::ParamRange::UNBOUNDED)
+        .expect("an open range");
+    rig.ed.commit().expect("commits");
 }
 
 /// `GraphSpec::disconnect` and `disconnect_output` remove the edge's entry
@@ -830,10 +885,8 @@ impl Mixer {
         );
         for k in 1..=n {
             ed.spec_mut().topology.connect(at(n + 1, 0), direct(k));
-            ed.spec_mut().set_edge_gain(
-                port_edge(n + 1, k),
-                EdgeGain::new(amp(weights[k as usize - 1])),
-            );
+            ed.set_edge_gain(port_edge(n + 1, k), amp(weights[k as usize - 1]))
+                .expect("the edge exists");
         }
         ed.spec_mut().topology.set_outputs(vec![out(n + 1)]);
         ed.commit().expect("commits");
@@ -1013,10 +1066,9 @@ fn a_fork_carries_the_edge_gains() {
     ed.insert(key(1), "a", ForkByClone(Level(1.0)));
     ed.insert(key(2), "b", ForkByClone(Level(2.0)));
     ed.spec_mut().topology.outputs = vec![vec![out(1), out(2)]];
-    ed.spec_mut()
-        .set_edge_gain(output_edge(1), EdgeGain::new(amp(0.5)));
-    ed.spec_mut()
-        .set_edge_gain(output_edge(2), EdgeGain::new(amp(-2.0)));
+    ed.set_edge_gain(output_edge(1), amp(0.5)).expect("an edge");
+    ed.set_edge_gain(output_edge(2), amp(-2.0))
+        .expect("an edge");
     ed.commit().expect("commits");
     let (fork_ed, fork_exec) = ed
         .fork(ForkTarget::MainOutput, prepare(BLOCK))
@@ -1032,7 +1084,7 @@ fn a_fork_carries_the_edge_gains() {
 }
 
 /// The base a lane's knob wrote is the one a fork starts at: the knob is the
-/// gain's own cell (`Editor::edge_gain_cell`), the spec's copy is behind it,
+/// gain's own cell (`Editor::edge_gain_cell`), the editor's value is behind it,
 /// and `Editor::edge_gain` and the fork read the cell.
 #[test]
 fn a_fork_starts_at_the_base_the_knob_wrote() {
@@ -1052,8 +1104,7 @@ fn a_fork_starts_at_the_base_the_knob_wrote() {
     let (mut ed, exec) = Editor::new(prepare(BLOCK));
     ed.insert(key(1), "a", ForkByClone(Level(1.0)));
     ed.spec_mut().topology.outputs = vec![vec![out(1)]];
-    ed.spec_mut()
-        .set_edge_gain(output_edge(1), EdgeGain::new(amp(0.5)));
+    ed.set_edge_gain(output_edge(1), amp(0.5)).expect("an edge");
     ed.commit().expect("commits");
     let knob = ed.edge_gain_cell(output_edge(1)).expect("a cell once sent");
     knob.store(0.25, std::sync::atomic::Ordering::Release);

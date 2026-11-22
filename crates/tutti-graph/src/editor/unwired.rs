@@ -73,6 +73,7 @@ impl<F: Float> Editor<F> {
         let (ain, aout) = (shape.audio_in().count(), shape.audio_out().count());
         let (ein, eout) = (shape.event_in, shape.event_out);
         let spec = &mut self.spec;
+        let values = &mut self.values;
         let faded_out = |spec: &crate::GraphSpec, id: EdgeId| {
             spec.gains.get(&id).is_some_and(|g| g.fade == EdgeFade::Out)
         };
@@ -118,6 +119,7 @@ impl<F: Float> Editor<F> {
                 out.edges.push(id);
             }
             spec.gains.remove(&id);
+            values.forget_edge(id);
         }
 
         // Event edges.
@@ -167,24 +169,24 @@ impl<F: Float> Editor<F> {
         // Param ports: a param the shape no longer declares loses its entry,
         // and a source whose port is gone stops driving.
         let params = &mut spec.params;
-        params.retain(|at, m| {
-            let undeclared = at.node == key
-                && at.param != NodeMix::ADDR
-                && shape.params.index_of(at.param).is_none();
-            if undeclared && let Some(from) = m.source {
-                out.params.push((*at, from));
+        let undeclared = |at: &ParamIn| {
+            at.node == key && at.param != NodeMix::ADDR && shape.params.index_of(at.param).is_none()
+        };
+        values.retain_ranges(|at| !undeclared(&at));
+        params.retain(|at, from| {
+            let undeclared = undeclared(at);
+            if undeclared {
+                out.params.push((*at, *from));
             }
             !undeclared
         });
-        for (at, m) in params.iter_mut() {
-            if let Some(from) = m.source
-                && from.node == key
-                && from.port >= eout
-            {
-                m.source = None;
-                out.params.push((*at, from));
+        params.retain(|at, from| {
+            let gone = from.node == key && from.port >= eout;
+            if gone {
+                out.params.push((*at, *from));
             }
-        }
+            !gone
+        });
 
         // A gain driven from an output the shape lacks reads its base.
         for (id, g) in spec.gains.iter_mut() {

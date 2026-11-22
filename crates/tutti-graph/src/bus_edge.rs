@@ -21,7 +21,7 @@
 //!   the user's: it is never in the spec the author edits, it has no knob
 //!   ([`Editor::edge_gain_cell`](crate::Editor::edge_gain_cell) is `None`),
 //!   and [`Editor::set_edge_gain`](crate::Editor::set_edge_gain) refuses the
-//!   lane ([`GraphInvalid::GainOnBusLane`](crate::GraphInvalid::GainOnBusLane)), as does a hand-written entry in
+//!   lane ([`EdgeGainError::BusLane`](crate::EdgeGainError::BusLane)), as does a hand-written entry in
 //!   `gains` at a lane's [`EdgeId`] ([`BusError::GainOnLane`]). A bus edge
 //!   carries no gain of its own in this change.
 //! - A lane at the `(sink port, source)` of an explicit per-port edge is
@@ -568,7 +568,7 @@ impl GraphSpec {
                     id,
                     EdgeGain {
                         fade,
-                        ..EdgeGain::new(weight)
+                        ..EdgeGain::default()
                     },
                 );
             }

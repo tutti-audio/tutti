@@ -18,7 +18,7 @@ use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology};
 use tutti_graph::Node;
 use tutti_graph::{
     Bus, BusError, BusFeed, BusFold, BusOutputPort, BusRole, BusSide, Buses, CommitError,
-    CompileError, DelayKey, Edge, EdgeGain, EdgeId, Editor, GraphInvalid, GraphSpec, InputPort,
+    CompileError, DelayKey, Edge, EdgeGain, EdgeGainError, EdgeId, Editor, GraphSpec, InputPort,
     Lowering, NodeBus, NodeKey, Op, OutputPort, Plan, PortSink, PortSource, TransportPosition,
     Unforkable, ValidGraph, compile,
 };
@@ -173,7 +173,12 @@ impl Rig {
     /// reference interpreter's.
     fn render(&self, workers: usize, blocks: usize) -> Vec<Vec<f32>> {
         let mut pair = Pair::with_workers(BLOCK, workers);
-        pair.switch(&self.valid(), &self.kinds);
+        // A lane's weight is the fold's: the pair starts it at that base.
+        let lowering = self.lowering().expect("lowers");
+        for (&id, &weight) in &lowering.lanes {
+            pair.start_edge_gain(id, weight);
+        }
+        pair.switch(&lowering.spec.validate().expect("valid"), &self.kinds);
         let mut got: Vec<Vec<f32>> = vec![Vec::new(); pair.outputs];
         for b in 0..blocks {
             let input = input_signal((b * BLOCK) as u64, BLOCK);
@@ -652,14 +657,14 @@ fn a_bus_lane_takes_no_gain_of_the_authors() {
     let id = lane(2, 0, out_port(1, 0));
     assert_eq!(
         ed.set_edge_gain(id, Amplitude::new(0.25)),
-        Err(GraphInvalid::GainOnBusLane { id })
+        Err(EdgeGainError::BusLane { id })
     );
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
     assert_eq!(
         ed.set_edge_gain(id, Amplitude::new(0.25)),
-        Err(GraphInvalid::GainOnBusLane { id })
+        Err(EdgeGainError::BusLane { id })
     );
     assert!(ed.edge_gain_cell(id).is_none(), "no knob on a bus lane");
     assert!(ed.spec().gains.is_empty(), "the author's spec has no entry");
@@ -667,7 +672,7 @@ fn a_bus_lane_takes_no_gain_of_the_authors() {
     let none = lane(2, 0, out_port(7, 0));
     assert_eq!(
         ed.set_edge_gain(none, Amplitude::new(0.25)),
-        Err(GraphInvalid::GainWithoutEdge { id: none })
+        Err(EdgeGainError::NoSuchEdge { id: none })
     );
     // A hand-written entry at a lane's edge is the author's weight where the
     // fold's goes.
@@ -754,8 +759,8 @@ fn connecting_and_removing_a_bus_edge_round_trips_through_the_editor() {
     ed.spec_mut()
         .topology
         .connect(at(2, 0), Edge::Direct(out_port(3, 0)));
-    ed.spec_mut()
-        .set_edge_gain(own, EdgeGain::new(Amplitude::new(0.25)));
+    ed.set_edge_gain(own, Amplitude::new(0.25))
+        .expect("the author's edge");
 
     ed.connect_bus(from(1, 0), bus_ref(2, 0)).unwrap();
     ed.commit().expect("commits");
