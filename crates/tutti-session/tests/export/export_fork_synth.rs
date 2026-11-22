@@ -124,10 +124,10 @@ fn session_with<N: tutti_session::SessionNode>(unit: N) -> (DetachedSession, Nod
         .unwrap();
     let synth = session.graph().add(unit);
     // The dry pair; the unit's other outputs are sends.
-    for c in 0..2_u16 {
+    for c in 0..2 {
         session
             .graph()
-            .connect(synth.output(c), MainOutput::channel(usize::from(c)))
+            .connect(synth.output(c), MainOutput::channel(c))
             .unwrap();
     }
     let _ = session.update();

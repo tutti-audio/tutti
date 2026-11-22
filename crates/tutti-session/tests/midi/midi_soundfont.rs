@@ -54,9 +54,9 @@ fn rig() -> (Session, NodeKey) {
         .expect("builds");
     let synth = s.graph().add(unit);
     // The dry pair; the unit's other outputs are sends.
-    for c in 0..2_u16 {
+    for c in 0..2 {
         s.graph()
-            .connect(synth.output(c), MainOutput::channel(usize::from(c)))
+            .connect(synth.output(c), MainOutput::channel(c))
             .unwrap();
     }
     let _ = s.update();
