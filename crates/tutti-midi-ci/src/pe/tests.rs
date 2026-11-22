@@ -106,7 +106,7 @@ fn cache_time_is_a_non_negative_integer() {
 }
 
 // §7.4.1 Table 15 and §12: the codes a header may carry, and no others.
-/// Spec: m2-103/7.4.1#1
+/// Spec: m2-103/7.4.1#1, m2-103/7.3#1
 #[test]
 fn status_is_a_code_of_the_table() {
     let listed = [
@@ -242,7 +242,7 @@ fn whitespace_outside_a_string_is_refused() {
 }
 
 // §7.1.1: a property is a number, a boolean or a string.
-/// Spec: m2-103/7.1.1#1
+/// Spec: m2-103/7.1.1#1, m2-103/7.2#1
 #[test]
 fn a_property_value_is_a_number_boolean_or_string() {
     for bad in [
@@ -464,7 +464,7 @@ fn subscription_messages_read() {
     }
 }
 
-/// Spec: m2-103/7.1.1#4, m2-103/7.1.1#5, m2-103/7.1.1#6
+/// Spec: m2-103/7.1.1#4, m2-103/7.1.1#5, m2-103/7.1.1#6, m2-103/7.4#1
 #[test]
 fn the_writer_puts_the_required_property_first() {
     let mut start = PeRequest::new(ResourceName::new("Mode").unwrap());
@@ -549,6 +549,7 @@ fn everything() -> Vec<PeHeader> {
     ]
 }
 
+/// Spec: m2-103/7.1#1
 #[test]
 fn what_the_writer_writes_the_reader_reads() {
     for header in everything() {

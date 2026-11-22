@@ -7,6 +7,10 @@
 //! `instrument`: the shared plugin's entry points do not link into the binary that links the
 //! reference probe, and that one is `instrument`'s neighbour.
 
+/// An allocation inside an `RtScope` aborts the running test.
+#[global_allocator]
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
+
 #[path = "../support/loading.rs"]
 mod loading;
 

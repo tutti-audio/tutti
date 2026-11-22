@@ -29,7 +29,7 @@ fn through_server<F: Format>(path: PathBuf) {
     // SAFETY: set before any thread of this test reads it.
     unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
     let client = PluginClient::new(
-        IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source")),
+        IpcConfig::new(),
         tutti_fixtures::executor(),
         &tutti_fixtures::detached_work(),
         &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(path)),
@@ -135,7 +135,7 @@ fn served<F: Format>(
     // SAFETY: set before any thread of this test reads it.
     unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
     let Launched { ipc, .. } = Ipc::launch(
-        IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source")),
+        IpcConfig::new(),
         &tutti_plugin_ipc::LoadRequest {
             origin: &tutti_plugin_types::PluginRef::file(path),
             format: F::FORMAT,
