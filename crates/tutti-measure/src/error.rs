@@ -131,6 +131,14 @@ pub enum Error {
         /// The most accepted.
         max: FrameCount,
     },
+    /// A frequency band whose pitch grid holds more bins than a track decodes.
+    #[error("the band spans {bins} pitch bins, more than the {max} a track decodes")]
+    PitchGridTooLarge {
+        /// The bins the band would span.
+        bins: usize,
+        /// The most accepted.
+        max: usize,
+    },
     /// A grid of chroma that is not twelve columns wide.
     #[error("chroma is {columns} columns wide, not 12")]
     NotTwelveClasses {

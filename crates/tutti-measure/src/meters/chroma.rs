@@ -142,6 +142,13 @@ impl FrequencyBand {
         Self::try_from(min.into()..=max.into()).ok()
     }
 
+    /// The four octaves from 55 Hz (A1) to 880 Hz (A5) that pYIN's pitch grid
+    /// spans (Mauch and Dixon, 2014).
+    pub(crate) const PYIN: Self = Self {
+        min: Hz::new(55.0),
+        max: Hz::new(880.0),
+    };
+
     /// The lower edge.
     #[inline]
     #[must_use]
