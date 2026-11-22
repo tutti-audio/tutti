@@ -8,10 +8,10 @@
 //! ([`Graph::apply_controls`](crate::Graph)) when the update commits. The
 //! running node reads it from the block after, with no commit and no edit.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use tutti_graph::{NodeKey, NodeMode, PassError};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 use tutti_units::{Amplitude, Mix};
 
 use super::error::SetRefusal;
@@ -47,7 +47,7 @@ pub(crate) struct Queue(Mutex<Vec<Write>>);
 
 impl Queue {
     fn push(&self, write: Write) {
-        let mut writes = self.0.lock_recover();
+        let mut writes = self.0.lock();
         match writes.iter_mut().find(|w| w.same_control(&write)) {
             Some(held) => *held = write,
             None => writes.push(write),
@@ -56,7 +56,7 @@ impl Queue {
 
     /// Drops the writes to `node`'s mode and mix.
     pub(crate) fn forget_node(&self, node: NodeKey) {
-        self.0.lock_recover().retain(|w| match w {
+        self.0.lock().retain(|w| match w {
             Write::Mode(n, _) | Write::Mix(n, _) => *n != node,
             Write::Gain(..) => true,
         });
@@ -65,14 +65,14 @@ impl Queue {
     /// Drops the writes to `edge`'s gain.
     pub(crate) fn forget_edge(&self, edge: ChannelEdge) {
         self.0
-            .lock_recover()
+            .lock()
             .retain(|w| !matches!(w, Write::Gain(e, _) if *e == edge));
     }
 
     /// Every write since the last call, in the order each control was first
     /// written.
     pub(crate) fn take(&self) -> Vec<Write> {
-        std::mem::take(&mut *self.0.lock_recover())
+        std::mem::take(&mut *self.0.lock())
     }
 }
 
@@ -118,7 +118,7 @@ impl NodeControl {
 
     /// The node's pass, as its shape stands now.
     pub(crate) fn note_pass(&self, no_pass: Option<PassError>, own_bypass: bool) {
-        let mut state = self.state.lock_recover();
+        let mut state = self.state.lock();
         state.no_pass = no_pass;
         state.own_bypass = own_bypass;
     }
@@ -129,11 +129,11 @@ pub(crate) struct ModeSlot(pub(crate) Arc<NodeControl>);
 
 impl Slot<NodeMode> for ModeSlot {
     fn load(&self) -> NodeMode {
-        self.0.state.lock_recover().mode
+        self.0.state.lock().mode
     }
 
     fn check(&self, value: &NodeMode) -> Result<(), SetRefusal> {
-        let state = *self.0.state.lock_recover();
+        let state = *self.0.state.lock();
         match state.no_pass {
             Some(error) if *value == NodeMode::Bypassed && !state.own_bypass => {
                 Err(SetRefusal::Unplaced(error))
@@ -143,7 +143,7 @@ impl Slot<NodeMode> for ModeSlot {
     }
 
     fn store(&self, value: &NodeMode) {
-        self.0.state.lock_recover().mode = *value;
+        self.0.state.lock().mode = *value;
         self.0.queue.push(Write::Mode(self.0.node, *value));
     }
 }
@@ -153,7 +153,7 @@ pub(crate) struct MixSlot(pub(crate) Arc<NodeControl>);
 
 impl Slot<Mix> for MixSlot {
     fn load(&self) -> Mix {
-        self.0.state.lock_recover().mix
+        self.0.state.lock().mix
     }
 
     fn check(&self, value: &Mix) -> Result<(), SetRefusal> {
@@ -163,14 +163,14 @@ impl Slot<Mix> for MixSlot {
         if !(0.0..=1.0).contains(&value.get()) {
             return Err(SetRefusal::OutOfRange);
         }
-        match self.0.state.lock_recover().no_pass {
+        match self.0.state.lock().no_pass {
             Some(error) if *value != Mix::WET => Err(SetRefusal::Unplaced(error)),
             _ => Ok(()),
         }
     }
 
     fn store(&self, value: &Mix) {
-        self.0.state.lock_recover().mix = *value;
+        self.0.state.lock().mix = *value;
         self.0.queue.push(Write::Mix(self.0.node, *value));
     }
 }
@@ -194,7 +194,7 @@ impl GainSlot {
 
 impl Slot<Amplitude> for GainSlot {
     fn load(&self) -> Amplitude {
-        *self.value.lock_recover()
+        *self.value.lock()
     }
 
     fn check(&self, value: &Amplitude) -> Result<(), SetRefusal> {
@@ -205,7 +205,7 @@ impl Slot<Amplitude> for GainSlot {
     }
 
     fn store(&self, value: &Amplitude) {
-        *self.value.lock_recover() = *value;
+        *self.value.lock() = *value;
         self.queue.push(Write::Gain(self.edge, *value));
     }
 }

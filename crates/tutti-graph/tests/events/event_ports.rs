@@ -61,7 +61,7 @@ impl Node for Burst {
         for &(f, port, tag) in &self.plan {
             if let Some(at) = cx.env.offset_of(Frame::new(f))
                 && io
-                    .event_out(port as usize)
+                    .event_out(port)
                     .push(Event::midi(at, Ump([tag, 0, 0, 0])))
                     .is_err()
             {
@@ -135,7 +135,7 @@ impl Node for Sink {
                 let EventKind::Midi(Ump(w)) = e.kind else {
                     panic!("only MIDI is sent")
                 };
-                seen.push((cx.env.frame.get(), e.offset.get(), p as u16, w[0]));
+                seen.push((cx.env.frame.get(), e.offset.get(), p, w[0]));
             }
         }
         Status::Silent

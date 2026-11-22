@@ -833,7 +833,7 @@ mod owed_tests {
     /// Starts a rate change the way one pending for the main thread's pump
     /// does: the Processor is recalled, so the node's next block hands it
     /// back and renders without it.
-    fn recall(inner: &parking_lot::Mutex<crate::node::instance::Instance<Vst2Loaded>>) {
+    fn recall(inner: &tutti_rt::Mutex<crate::node::instance::Instance<Vst2Loaded>>) {
         inner
             .lock()
             .set_sample_rate(main_thread(), SampleRate::SR_44K1, None)
@@ -841,7 +841,7 @@ mod owed_tests {
     }
 
     /// Finishes it: the pump collects the Processor and lends the new one.
-    fn pump(inner: &parking_lot::Mutex<crate::node::instance::Instance<Vst2Loaded>>) {
+    fn pump(inner: &tutti_rt::Mutex<crate::node::instance::Instance<Vst2Loaded>>) {
         let _ = inner.lock().pump(main_thread());
     }
 
