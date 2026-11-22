@@ -66,7 +66,8 @@ impl Deferred {
 pub struct Gesture<K: AppKey, W: IntoTargets> {
     state: Weak<ValueState<K>>,
     id: GestureId,
-    targets: W,
+    /// The targets, `Some` until the drop moves them into the end.
+    targets: Option<W>,
     /// The base each target moved from, at the gesture's first change to it.
     moved: BTreeMap<TargetId, Erased>,
 }
@@ -76,7 +77,7 @@ impl<K: AppKey, W: IntoTargets> Gesture<K, W> {
         Self {
             state: Arc::downgrade(state),
             id,
-            targets,
+            targets: Some(targets),
             moved: BTreeMap::new(),
         }
     }
@@ -89,20 +90,24 @@ impl<K: AppKey, W: IntoTargets> Gesture<K, W> {
     /// Writes an absolute value to each target, in the shape the gesture was
     /// opened with, as one batch of a `set`: every value is checked before any
     /// lands. A value equal to the target's base is no change. A `None` of an
-    /// `Option` writes nothing, and a `Vec` takes one value per target.
+    /// `Option` writes nothing, and a `Vec` takes exactly one value per target.
     ///
     /// # Errors
     ///
     /// As [`Session::set`](crate::Session::set): a [`ValueError`] whose `at` is
     /// the first failing item's position, [`ValueErrorKind::NoSuchTarget`] for a
-    /// target removed since the gesture opened, and
-    /// [`ValueErrorKind::Closed`] once the session is gone.
+    /// target removed since the gesture opened,
+    /// [`ValueErrorKind::Mismatched`] for a `Vec` of values that is not one
+    /// per target, and [`ValueErrorKind::Closed`] once the session is gone.
     pub fn set(&mut self, values: W::Values) -> Result<(), ValueError<K>> {
         let state = self
             .state
             .upgrade()
             .ok_or_else(|| whole_call(ValueErrorKind::Closed))?;
-        for (id, base) in state.write_gesture(self.id, &self.targets, values)? {
+        let Some(targets) = self.targets.as_ref() else {
+            return Ok(());
+        };
+        for (id, base) in state.write_gesture(self.id, targets, values)? {
             self.moved.entry(id).or_insert(base);
         }
         Ok(())
@@ -114,11 +119,13 @@ impl<K: AppKey, W: IntoTargets> Drop for Gesture<K, W> {
         let Some(state) = self.state.upgrade() else {
             return;
         };
+        let Some(targets) = self.targets.take() else {
+            return;
+        };
         if self.moved.is_empty() {
             return;
         }
         let (id, mut moved) = (self.id, std::mem::take(&mut self.moved));
-        let targets = self.targets.clone();
         state.finish(Box::new(move |params, feed| {
             let mut out = Vec::new();
             targets.ended(params, &mut moved, &mut out);

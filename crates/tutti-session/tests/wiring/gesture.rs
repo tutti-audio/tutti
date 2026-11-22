@@ -229,3 +229,31 @@ fn a_gesture_of_a_gone_session_is_closed() {
     let refused = drag.set(Hz::new(2_000.0)).unwrap_err();
     assert!(matches!(refused.kind, ValueErrorKind::Closed));
 }
+
+/// **A `Vec` of values that is not one per target is refused whole**: a short and a
+/// long one each answer `Mismatched` with both counts and write nothing.
+#[test]
+fn a_vec_of_values_not_one_per_target_is_refused_and_writes_nothing() {
+    let mut s = detached();
+    let a = filter(&mut s);
+    let b = filter(&mut s);
+    let mut w = s.watch((a.cutoff(), b.cutoff())).unwrap();
+    let mut drag = s.gesture(vec![a.cutoff(), b.cutoff()]).unwrap();
+
+    for values in [vec![Hz::new(2_000.0)], vec![Hz::new(2_000.0); 3]] {
+        let given = values.len();
+        let refused = drag.set(values).unwrap_err();
+        assert_eq!(
+            refused.kind,
+            ValueErrorKind::Mismatched {
+                targets: 2,
+                values: given
+            }
+        );
+        assert_eq!(refused.at, 0);
+    }
+    assert_eq!(s.get(a.cutoff()).unwrap(), Hz::new(1_000.0));
+    assert_eq!(s.get(b.cutoff()).unwrap(), Hz::new(1_000.0));
+    drop(drag);
+    assert_eq!(w.changes().unwrap(), (None, None));
+}

@@ -385,7 +385,7 @@ use seal::Sealed as Targets;
 /// but a plugin's parameter), or tuples of up to 12 of them (nested too),
 /// arrays, `Vec`s and `Option`s (`None` watches nothing but keeps its
 /// position). It answers in the argument's shape. Sealed.
-pub trait IntoTargets: Targets + Clone + Send + 'static {}
+pub trait IntoTargets: Targets + Send + 'static {}
 
 impl<T: Watchable + Store> Targets for T {
     type Changes = Option<Change<T>>;
@@ -539,6 +539,12 @@ impl<A: Targets> Targets for Vec<A> {
     type Values = Vec<A::Values>;
 
     fn stage(&self, values: Self::Values, batch: &mut Batch<'_>) -> Result<(), Failure> {
+        if values.len() != self.len() {
+            return Err(batch.refuse(ValueErrorKind::Mismatched {
+                targets: self.len(),
+                values: values.len(),
+            }));
+        }
         self.iter()
             .zip(values)
             .try_for_each(|(item, value)| item.stage(value, batch))

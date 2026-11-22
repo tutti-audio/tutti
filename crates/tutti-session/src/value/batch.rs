@@ -85,6 +85,15 @@ impl<'a> Batch<'a> {
         Stored::new(landings)
     }
 
+    /// The failure of the item being staged as a whole, naming no target.
+    pub(super) fn refuse(&self, kind: ValueErrorKind) -> Failure {
+        Failure {
+            at: self.index,
+            target: None,
+            kind,
+        }
+    }
+
     fn fail(&self, target: TargetId, kind: ValueErrorKind) -> Failure {
         Failure {
             at: self.index,
