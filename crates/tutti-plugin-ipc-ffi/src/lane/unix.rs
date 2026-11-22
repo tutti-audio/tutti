@@ -3,7 +3,6 @@
 use crate::descriptor;
 use crate::{Connection, SlabError};
 use std::os::fd::{BorrowedFd, OwnedFd};
-use std::os::unix::net::UnixStream;
 
 /// What `OpenLane` carries of a lane: nothing, as the server's end travels as a
 /// descriptor beside the frame.
@@ -20,17 +19,6 @@ impl LaneWire {
     pub fn fresh() -> Result<Self, SlabError> {
         Ok(Self)
     }
-}
-
-/// A fresh duplex stream's two ends, the host's first: neither is inherited by
-/// a child process.
-///
-/// # Errors
-///
-/// The OS refused the socket pair.
-pub fn lane_pair() -> std::io::Result<(OwnedFd, OwnedFd)> {
-    let (host, server) = UnixStream::pair()?;
-    Ok((host.into(), server.into()))
 }
 
 /// Sends `end`, the server's end of a lane, over `conn` as the message that
@@ -58,6 +46,13 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::os::fd::AsFd;
+    use std::os::unix::net::UnixStream;
+
+    /// A fresh duplex stream's two ends, the host's first.
+    fn lane_pair() -> std::io::Result<(OwnedFd, OwnedFd)> {
+        let (host, server) = UnixStream::pair()?;
+        Ok((host.into(), server.into()))
+    }
 
     /// **A lane end sent over a broker is a live duplex stream**: the broker's
     /// bytes before and after the descriptor arrive in order, and the received end

@@ -253,7 +253,8 @@ pub fn adopt_host_socket() -> Result<OwnedFd, AdoptError> {
     // From 3: a duplicate that took the number of a closed standard descriptor
     // would be replaced with it.
     let socket = fcntl_dupfd_cloexec(stdin(), 3).map_err(os("duplicate"))?;
-    let null = open("/dev/null", OFlags::RDWR, Mode::empty()).map_err(os("open /dev/null for"))?;
+    let null = open("/dev/null", OFlags::RDWR | OFlags::CLOEXEC, Mode::empty())
+        .map_err(os("open /dev/null for"))?;
     dup2_stdin(&null).map_err(os("replace"))?;
     Ok(socket)
 }

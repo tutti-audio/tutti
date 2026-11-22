@@ -49,7 +49,9 @@ fn connection() -> (Stream, Stdio) {
 /// Returns the host's end and the server's answer.
 fn request_audio_lane(broker: &mut Stream, id: u64) -> (Stream, ControlReply) {
     use std::os::fd::AsFd as _;
-    let (host, server) = tutti_plugin_ipc_ffi::lane_pair().expect("a socket pair");
+    let (host, server) = std::os::unix::net::UnixStream::pair()
+        .map(|(h, s)| (std::os::fd::OwnedFd::from(h), std::os::fd::OwnedFd::from(s)))
+        .expect("a socket pair");
     write_frame(
         broker,
         &Request {

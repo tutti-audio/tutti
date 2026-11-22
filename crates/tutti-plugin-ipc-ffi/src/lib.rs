@@ -13,8 +13,8 @@
 //!   and out. A mapping exists only with its one writer, which is what makes the
 //!   copies safe to call. What the data region holds, and where, is
 //!   `tutti-plugin-ipc`'s.
-//! - **The audio lane's wire** ([`LaneWire`], and on unix [`lane_pair`],
-//!   [`send_lane`], [`receive_lane`]): the lane's socket end travels over the
+//! - **The audio lane's wire** ([`LaneWire`], and on unix [`send_lane`],
+//!   [`receive_lane`]): the lane's socket end travels over the
 //!   broker connection as a descriptor on unix, and a fresh pipe's name on Windows.
 //! - **The host's socket on a server's stdin** ([`adopt_host_socket`], unix): the
 //!   stream socket the host handed the server as descriptor 0 moves to a descriptor of

@@ -21,11 +21,20 @@ use tutti_rt::LockExt as _;
 /// socket pair, already connected.
 pub(crate) struct Rendezvous(ControlStream);
 
-/// Held across making the socket pair and spawning the server that is given its
-/// end, so no spawn of this crate's own can inherit another's host end: macOS
-/// sets close-on-exec after `socketpair`, not with it. A spawn by another part
-/// of the process is outside it, the window the slab's descriptors have too.
+/// Held across making a socket pair and, for the server's connection, spawning the
+/// server that is given its end: macOS sets close-on-exec after `socketpair`, not
+/// with it, so a spawn that ran between the two would hand a server both ends of
+/// another plugin's lane. **It covers every socket pair this crate makes in the
+/// host** (the connection, the audio lane, the control wait's bell). The slab's
+/// memfd and `shm_open` are close-on-exec from the call. A spawn by another part
+/// of the process is outside it.
 static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Makes a socket pair under [`SPAWN`].
+fn pair() -> std::io::Result<(UnixStream, UnixStream)> {
+    let _spawning = SPAWN.lock_recover();
+    UnixStream::pair()
+}
 
 /// Spawns `command` with the server's end of a fresh socket pair as its standard
 /// input (the only descriptor it inherits besides the other two standard ones),
@@ -84,7 +93,8 @@ impl PendingLane {
     ///
     /// The OS refused the socket pair.
     pub(crate) fn new() -> IpcResult<Self> {
-        let (host, server) = tutti_plugin_ipc_ffi::lane_pair()?;
+        let (host, server) = pair()?;
+        let (host, server) = (OwnedFd::from(host), OwnedFd::from(server));
         Ok(Self {
             wire: LaneWire::fresh()?,
             host,
@@ -201,7 +211,7 @@ pub struct Woken {
 ///
 /// The OS refused the socket pair.
 pub fn control_unparker() -> std::io::Result<(ControlUnparker, ControlWait)> {
-    let (tx, rx) = UnixStream::pair()?;
+    let (tx, rx) = pair()?;
     tx.set_nonblocking(true)?;
     rx.set_nonblocking(true)?;
     Ok((ControlUnparker { tx: Arc::new(tx) }, ControlWait { rx }))

@@ -572,7 +572,9 @@ mod lane_tests {
     #[test]
     fn an_open_lane_is_delivered_with_its_end_between_two_frames() {
         let (mut host, mut transport) = pair();
-        let (host_end, server_end) = tutti_plugin_ipc_ffi::lane_pair().expect("a lane pair");
+        let (host_end, server_end) = std::os::unix::net::UnixStream::pair()
+            .map(|(h, s)| (std::os::fd::OwnedFd::from(h), std::os::fd::OwnedFd::from(s)))
+            .expect("a lane pair");
         let request = |id| Request {
             id: ReqId::new(id),
             body: ControlRequest::Shutdown,

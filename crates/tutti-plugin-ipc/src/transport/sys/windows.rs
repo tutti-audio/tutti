@@ -37,7 +37,8 @@ pub(crate) struct Rendezvous {
 ///
 /// The OS's random source cannot be read, or the spawn is refused.
 pub(crate) fn spawn(mut command: Command) -> IpcResult<(Child, Rendezvous)> {
-    let name = unique_name("tutti-bridge")?;
+    let name = tutti_plugin_ipc_ffi::unique_name("tutti-bridge")
+        .map_err(|e| IpcError::Io(std::io::Error::other(e)))?;
     let child = command.arg(&name).spawn()?;
     Ok((child, Rendezvous { name }))
 }
@@ -92,31 +93,6 @@ impl Rendezvous {
         let _ = stream.set_send_timeout(Some(super::control::SEND_TIMEOUT));
         Ok(stream)
     }
-}
-
-/// `stem`, this process's id, a count shared by every name this process makes,
-/// and sixty-four bits from the operating system's random source: a name in the
-/// pipe namespace, which every local process shares, that is unique and not
-/// predictable (one that is can be claimed first, and the pipe it names is then a
-/// plugin wire another process speaks).
-///
-/// # Errors
-///
-/// The operating system's random source cannot be read.
-fn unique_name(stem: &str) -> IpcResult<String> {
-    static COUNTER: tutti_rt::Mint = tutti_rt::Mint::new();
-    let mut bytes = [0u8; 8];
-    getrandom::fill(&mut bytes).map_err(|e| {
-        IpcError::Io(std::io::Error::other(format!(
-            "the operating system's random source is unreadable: {e}"
-        )))
-    })?;
-    Ok(format!(
-        "{stem}-{}-{}-{:016x}",
-        std::process::id(),
-        COUNTER.mint(),
-        u64::from_ne_bytes(bytes),
-    ))
 }
 
 /// A lane the host is opening: the name of the pipe the server listens on.
