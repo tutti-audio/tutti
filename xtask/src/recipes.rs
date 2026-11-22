@@ -19,6 +19,9 @@ pub(crate) struct Ctx {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Step {
     Run(Cmd),
+    /// Run the command; a failure is remembered and the recipe goes on, then fails
+    /// at its end (`rtsan`: one run lists every finding).
+    RunAll(Cmd),
     /// Write a file (`check-windows`'s stub header), creating its directory.
     WriteFile {
         path: PathBuf,
@@ -71,7 +74,7 @@ impl Step {
     /// The step as a line a shell could read (for `--dry-run` and the echo).
     pub(crate) fn display(&self) -> String {
         match self {
-            Step::Run(c) => c.display(),
+            Step::Run(c) | Step::RunAll(c) => c.display(),
             Step::WriteFile { path, .. } => format!("write {}", path.display()),
             Step::Gate(g) => g.display(),
             Step::ConformanceInventory(f) => format!("conformance-inventory {f}"),
@@ -160,6 +163,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "run the suites a feature gates, every feature on (see check-features)",
     ),
     ("miri", "", "miri over tutti-rt (needs nightly + miri)"),
+    (
+        "rtsan",
+        "",
+        "RealtimeSanitizer over the plugin-host, plugin, contract, engine and cpal suites, in target/rtsan (local only, never CI; Linux or macOS; needs curl, and network on the first build)",
+    ),
     (
         "fuzz",
         "[<target>|all] [--secs N]",
@@ -543,6 +551,25 @@ impl Planner<'_> {
         }
     }
 
+    /// The suites that reach code `RtScope`'s own checks cannot see (a plugin's C, a
+    /// dependency), built and run with `RTSAN_ENABLE` into `<target>/rtsan`, so the
+    /// normal build never rebuilds. The two plugin binaries are built there too, since a
+    /// test finds them beside its own binary.
+    fn rtsan(&mut self) {
+        let dir = self.ctx.target.join("rtsan").display().to_string();
+        for (i, line) in RTSAN.iter().enumerate() {
+            let cmd = Cmd::sh(line)
+                .env("RTSAN_ENABLE", "1")
+                .env("CARGO_TARGET_DIR", dir.clone());
+            // The builds stop the recipe; the suites each run and report.
+            self.out.push(if i < 2 {
+                Step::Run(cmd)
+            } else {
+                Step::RunAll(cmd)
+            });
+        }
+    }
+
     /// A dependency: planned once per invocation, with no arguments.
     fn dep(&mut self, name: &str) -> Result<(), String> {
         if self.done.insert(name.to_owned()) {
@@ -629,6 +656,12 @@ impl Planner<'_> {
             "check-features" => self.lines(CHECK_FEATURES),
             "test-features" => self.lines(TEST_FEATURES),
             "miri" => self.lines(MIRI),
+            "rtsan" => {
+                if cfg!(windows) {
+                    return Err("`rtsan` runs on Linux and macOS only: RealtimeSanitizer has no Windows runtime".into());
+                }
+                self.rtsan();
+            }
             "fuzz" => {
                 let (target, rest) = match args.split_first() {
                     Some((t, rest)) if !t.starts_with("--") => (Some(t.as_str()), rest),
@@ -974,6 +1007,13 @@ const TEST_FEATURES: &[&str] = &[
 const MIRI: &[&str] = &[
     r#"cargo +nightly miri test --locked -p tutti-rt --lib"#,
     r#"MIRIFLAGS="-Zmiri-many-seeds=0..16" cargo +nightly miri test --locked -p tutti-rt --lib ring"#,
+];
+
+const RTSAN: &[&str] = &[
+    r#"cargo build --locked -p tutti-plugin-server --bin plugin-server"#,
+    r#"cargo build --locked -p tutti-plugin-probe --bin plugin-probe"#,
+    r#"cargo nextest run --locked --no-fail-fast --features tutti-rt/rtsan -p tutti-engine -p tutti-cpal -p tutti-plugin-host -p tutti-plugin-contract --all-features"#,
+    r#"cargo nextest run --locked --no-fail-fast --features tutti-rt/rtsan,tutti-plugin/clap,tutti-plugin/vst2,tutti-plugin/serde -p tutti-plugin"#,
 ];
 
 const LOOM: &[&str] = &[

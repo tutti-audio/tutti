@@ -1247,7 +1247,7 @@ fn a_set_is_announced_to_the_subscribers() {
 
 // M2-103 §11.1.1: when the data does not fit one chunk the Responder sends `notify`,
 // and the Initiator gets the Resource again.
-/// Spec: m2-103/11.1.1#4
+/// Spec: m2-103/11.1.1#4, m2-103/11.1#8
 #[test]
 fn an_update_too_big_for_a_chunk_is_a_notify_and_a_get() {
     let mut link = Link::new(store(), 128);

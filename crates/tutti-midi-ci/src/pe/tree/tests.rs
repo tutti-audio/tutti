@@ -27,7 +27,7 @@ fn property_data_may_have_whitespace_between_tokens() {
 // §6.1.1: a character beyond 7-bit ASCII is written as the `\u` escapes of its
 // UTF-16, and Beats followed by the eighth note is `Beats` and the escape of
 // U+266A.
-/// Spec: m2-103/6.1.1#2
+/// Spec: m2-103/6.1.1#2, m2-103/6.1.2#1
 #[test]
 fn a_non_ascii_character_is_written_as_utf16_escapes() {
     let escape = |hex: &str| format!("\\u{hex}");

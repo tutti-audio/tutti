@@ -175,7 +175,7 @@ impl Unparker {
         // read-modify-write on a line the parker owns.
         if inner.parked.load(Ordering::Relaxed) && inner.parked.swap(false, Ordering::Acquire) {
             if let Some(t) = inner.thread.get() {
-                t.unpark();
+                crate::scope::sanctioned_wake(|| t.unpark());
             }
             return true;
         }
