@@ -112,7 +112,7 @@ impl<F: Float> ManualStream<F> {
     /// interleaved buffer in the graph's format, or `None` if no stream is
     /// open. Allocates the returned buffer.
     pub fn render_block(&self, frames: Samples) -> Option<Vec<F>> {
-        self.render_block_inner(frames, None)
+        self.render_block_inner(frames, None, None)
     }
 
     /// [`render_block`](Self::render_block) as a callback whose timestamp
@@ -120,13 +120,37 @@ impl<F: Float> ManualStream<F> {
     /// backend's callback info does: what
     /// [`OutputStream::latency`](crate::OutputStream::latency) then reads.
     pub fn render_block_delayed(&self, frames: Samples, delay: Duration) -> Option<Vec<F>> {
-        self.render_block_inner(frames, Some(delay))
+        self.render_block_inner(frames, None, Some(delay))
     }
 
-    fn render_block_inner(&self, frames: Samples, delay: Option<Duration>) -> Option<Vec<F>> {
+    /// [`render_block_delayed`](Self::render_block_delayed) as a callback the
+    /// caller dates: the block clock records `os_ns`, a
+    /// [`monotonic_ns`](tutti_platform::monotonic_ns) reading, as the OS time
+    /// the block began, where the other renders read the clock themselves, as a
+    /// device callback stamped with its own timestamp, or a timer's block
+    /// stamped with the instant it was due. `delay` is the delay the callback
+    /// reports (`None`: none, which clears the reading).
+    pub fn render_block_at(
+        &self,
+        frames: Samples,
+        os_ns: i64,
+        delay: Option<Duration>,
+    ) -> Option<Vec<F>> {
+        self.render_block_inner(frames, Some(os_ns), delay)
+    }
+
+    fn render_block_inner(
+        &self,
+        frames: Samples,
+        os_ns: Option<i64>,
+        delay: Option<Duration>,
+    ) -> Option<Vec<F>> {
         let layout = self.with_block(|b| b.layout())?;
         let mut out = vec![F::ZERO; layout.interleaved_len(frames)];
-        self.with_block(|b| b.render_delayed_with(&mut out, delay, |x| x))?;
+        self.with_block(|b| match os_ns {
+            Some(os_ns) => b.render_at(&mut out, os_ns, delay),
+            None => b.render_delayed_with(&mut out, delay, |x| x),
+        })?;
         if let Some(faults) = self.faults.lock().as_ref() {
             faults.delivered();
         }

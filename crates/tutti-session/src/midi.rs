@@ -92,7 +92,7 @@ pub(crate) fn arrival_clock(
     std::sync::Arc::new(move || {
         let reading = clock.read()?;
         Some((
-            crate::os_clock::os_instant(reading.os_ns)?,
+            tutti_platform::instant_of_monotonic_ns(reading.os_ns)?,
             tutti_units::Moment::new(reading.frame, reading.rate),
         ))
     })
@@ -147,7 +147,7 @@ impl OutputClockSource {
         Some(ClockMap::new(
             reading.rate,
             tutti_midi_runtime::ClockReading::new(
-                crate::os_clock::os_instant(reading.os_ns)?,
+                tutti_platform::instant_of_monotonic_ns(reading.os_ns)?,
                 reading.frame,
             ),
         ))

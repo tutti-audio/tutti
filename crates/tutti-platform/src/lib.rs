@@ -99,7 +99,7 @@ pub use asset::{
     Asset, Destination, FileStamp, Identity, Open, ReadSeek, Staged, StagedCommitError, StagedFile,
     StagedKeep,
 };
-pub use clock::monotonic_ns;
+pub use clock::{instant_of_monotonic_ns, monotonic_ns};
 pub use denormals::with_no_denormals;
 #[cfg(not(loom))]
 pub use executor::*;
