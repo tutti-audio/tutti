@@ -585,11 +585,11 @@ impl<S> PluginClient<S> {
         let width = |n: usize| ChannelLayout::from_count(u16::try_from(n).unwrap_or(u16::MAX));
         // Ports only: the node states the plugin's buses when it is bound.
         Shape::EMPTY
-            .with_ports(width(self.inputs), width(self.outputs))
-            .with_events(1, midi_out)
-            .with_param_events()
-            .with_latency(self.controls.declared_latency())
-            .with_tail(self.controls.tail())
+            .ports(width(self.inputs), width(self.outputs))
+            .events(1, midi_out)
+            .param_events()
+            .latency(self.controls.declared_latency())
+            .tail(self.controls.tail())
     }
 
     /// The presets the plugin lists, asked of its server: a round trip that

@@ -19,13 +19,13 @@ use tutti_graph::contract::{Direct, HAND_EVENT_CAPACITY};
 use tutti_graph::{
     Edge, Editor, Env, EventCapacity, EventEdge, EventInletNode, EventInletWriter, EventInputPort,
     EventKind, EventOutputPort, EventTapId, EventTapOptions, EventTapReader, Executor, ForkCause,
-    ForkSource, ForkTarget, Forked, InputPort, IntoNode, Losses, Node, NodeKey, NodeParts,
-    OutputPort, PlayClock, PortSource, Prepare, RenderMode, Stamp, TapAlign, TapEvent,
-    TransportChanges, TransportPosition,
+    ForkSource, ForkTarget, Forked, InputPort, IntoNode, Node, NodeKey, NodeParts, OutputPort,
+    PlayClock, PortSource, Prepare, RenderMode, Stamp, TapAlign, TapEvent, TransportChanges,
+    TransportPosition,
 };
 use tutti_rt::PushError;
 use tutti_ump::{CCNumber, MidiChannel, U7, Ump};
-use tutti_units::{Frame, Moment, SampleRate, Samples};
+use tutti_units::{Frame, Losses, Moment, SampleRate, Samples};
 
 const R48: SampleRate = SampleRate::SR_48K;
 const R441: SampleRate = SampleRate::SR_44K1;
@@ -495,10 +495,7 @@ impl IntoNode for Forkable {
 }
 
 fn out(node: u64) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: NodeKey(node),
-        port: 0,
-    })
+    PortSource::Node(OutputPort::new(NodeKey(node), 0))
 }
 
 /// Inlets 1..=n into a `Consumer` (key 10) whose audio is the only output, so
@@ -569,10 +566,7 @@ fn graph(
                 }),
             );
             ed.spec_mut().topology.connect(
-                InputPort {
-                    node: NodeKey(base + g),
-                    port: 0,
-                },
+                InputPort::new(NodeKey(base + g), 0),
                 Edge::Direct(out(base + g - 1)),
             );
         }
@@ -580,19 +574,10 @@ fn graph(
     let sum = if heavy { 5 } else { 1 };
     ed.insert(NodeKey(30), "sum", Forkable(Kind::Sum { inputs: sum }));
     let topology = &mut ed.spec_mut().topology;
-    topology.connect(
-        InputPort {
-            node: NodeKey(30),
-            port: 0,
-        },
-        Edge::Direct(out(10)),
-    );
+    topology.connect(InputPort::new(NodeKey(30), 0), Edge::Direct(out(10)));
     for c in (0..4u16).filter(|_| heavy) {
         topology.connect(
-            InputPort {
-                node: NodeKey(30),
-                port: c + 1,
-            },
+            InputPort::new(NodeKey(30), c + 1),
             Edge::Direct(out(103 + u64::from(c) * 10)),
         );
     }

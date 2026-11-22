@@ -534,7 +534,7 @@ mod logged {
 
     impl Node for Poison {
         fn shape(&self) -> Shape {
-            Shape::source_unassigned(ChannelLayout::STEREO).with_tail(Tail::Unbounded)
+            Shape::source_unassigned(ChannelLayout::STEREO).tail(Tail::Unbounded)
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -574,14 +574,11 @@ mod logged {
         let topology = &mut ed.spec_mut().topology;
         for port in 0..2u16 {
             topology.edges.insert(
-                InputPort { node: fx, port },
-                vec![Edge::Direct(PortSource::Node(OutputPort {
-                    node: src,
-                    port,
-                }))],
+                InputPort::new(fx, port),
+                vec![Edge::Direct(PortSource::Node(OutputPort::new(src, port)))],
             );
         }
-        topology.set_outputs((0..2).map(|port| PortSource::Node(OutputPort { node: fx, port })));
+        topology.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(fx, port))));
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();

@@ -973,14 +973,14 @@ fn a_locate_past_the_song_position_field_is_skipped_and_counted() {
         !events.iter().any(|e| is_status(e, 0xF2)),
         "no Song Position: {events:?}"
     );
-    assert_eq!(cm.cm.take_refused(), 1);
-    assert_eq!(cm.cm.take_refused(), 0, "taken once");
+    assert_eq!(cm.cm.take_losses(), Losses::refused(1));
+    assert_eq!(cm.cm.take_losses(), Losses::NONE, "taken once");
 
     // A locate while playing, to a beat before the start, counts again.
     transport.set_beat(-8.0);
     cm.tick(512);
     assert!(!drain_all(&cons).iter().any(|e| is_status(e, 0xF2)));
-    assert_eq!(cm.cm.take_refused(), 1);
+    assert_eq!(cm.cm.take_losses(), Losses::refused(1));
 
     // The last position that fits is sent, and counts nothing.
     transport.set_beat(16_383.0 / 4.0);
@@ -993,7 +993,7 @@ fn a_locate_past_the_song_position_field_is_skipped_and_counted() {
         })
         .collect();
     assert_eq!(sent, [16_383]);
-    assert_eq!(cm.cm.take_refused(), 0);
+    assert_eq!(cm.cm.take_losses(), Losses::NONE);
 }
 
 /// **A refused timecode sends no quarter-frame of its cycle and counts one
@@ -1019,7 +1019,11 @@ fn a_refused_timecode_sends_no_quarter_frame_and_counts_one_refusal_a_cycle() {
         .filter(|e| matches!(system(e.1), Some(System::TimeCode(_))))
         .count();
     assert_eq!(sent, 0, "{events:?}");
-    assert_eq!(rig.cm.take_refused(), 3, "two cycles and the Full Message");
+    assert_eq!(
+        rig.cm.take_losses(),
+        Losses::refused(3),
+        "two cycles and the Full Message"
+    );
 }
 
 /// **A transport before beat 0 sends no timecode and counts one refusal for
@@ -1054,8 +1058,8 @@ fn a_transport_before_beat_0_sends_no_timecode_and_counts_the_stretch_once() {
     let count_in = drain_all(&cons);
     assert_eq!(timecodes(&count_in), Vec::<u8>::new(), "{count_in:?}");
     assert_eq!(
-        rig.cm.take_refused(),
-        2,
+        rig.cm.take_losses(),
+        Losses::refused(2),
         "the Full Message at the start and the stretch, once"
     );
 
@@ -1064,7 +1068,7 @@ fn a_transport_before_beat_0_sends_no_timecode_and_counts_the_stretch_once() {
     rig.tick(4_800);
     let pieces = timecodes(&drain_all(&cons));
     assert_eq!(pieces, [0, 1, 2, 3, 4, 5, 6, 7, 0, 1]);
-    assert_eq!(rig.cm.take_refused(), 0);
+    assert_eq!(rig.cm.take_losses(), Losses::NONE);
 }
 
 /// **A master sends on the Group it was built with**: Start, Timing Clocks,

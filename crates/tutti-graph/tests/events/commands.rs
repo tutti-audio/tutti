@@ -43,9 +43,9 @@ struct Probe {
 
 impl Probe {
     const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO)
-        .with_events(1, 0)
-        .with_param_events()
-        .with_tail(Tail::Unknown);
+        .events(1, 0)
+        .param_events()
+        .tail(Tail::Unknown);
     const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
@@ -135,10 +135,7 @@ fn rig() -> Rig {
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: PROBE,
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(PROBE, 0))]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -423,8 +420,8 @@ struct Impulse(tutti_fixtures::Record<(u64, u32)>);
 
 impl Impulse {
     const SHAPE: Shape = Shape::through_unassigned(ChannelLayout::MONO)
-        .with_events(1, 0)
-        .with_tail(Tail::Unknown);
+        .events(1, 0)
+        .tail(Tail::Unknown);
     const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
@@ -477,23 +474,22 @@ fn a_scheduled_command_is_compensated_like_an_upstream_event() {
     let t = &mut ed.spec_mut().topology;
     t.inputs = ChannelLayout::MONO;
     t.edges.insert(
-        tutti_graph::InputPort { node: LAT, port: 0 },
+        tutti_graph::InputPort::new(LAT, 0),
         vec![tutti_graph::Edge::Direct(PortSource::MainInput(0))],
     );
     t.edges.insert(
-        tutti_graph::InputPort { node: A, port: 0 },
-        vec![tutti_graph::Edge::Direct(PortSource::Node(OutputPort {
-            node: LAT,
-            port: 0,
-        }))],
+        tutti_graph::InputPort::new(A, 0),
+        vec![tutti_graph::Edge::Direct(PortSource::Node(
+            OutputPort::new(LAT, 0),
+        ))],
     );
     t.edges.insert(
-        tutti_graph::InputPort { node: B, port: 0 },
+        tutti_graph::InputPort::new(B, 0),
         vec![tutti_graph::Edge::Direct(PortSource::MainInput(0))],
     );
     t.set_outputs(vec![
-        PortSource::Node(OutputPort { node: A, port: 0 }),
-        PortSource::Node(OutputPort { node: B, port: 0 }),
+        PortSource::Node(OutputPort::new(A, 0)),
+        PortSource::Node(OutputPort::new(B, 0)),
     ]);
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -974,18 +970,14 @@ fn beat_resolution_matches_a_hand_computed_table() {
         let t = &mut ed.spec_mut().topology;
         t.inputs = ChannelLayout::MONO;
         t.edges.insert(
-            tutti_graph::InputPort { node: lat, port: 0 },
+            tutti_graph::InputPort::new(lat, 0),
             vec![tutti_graph::Edge::Direct(PortSource::MainInput(0))],
         );
         t.edges.insert(
-            tutti_graph::InputPort {
-                node: sink,
-                port: 0,
-            },
-            vec![tutti_graph::Edge::Direct(PortSource::Node(OutputPort {
-                node: lat,
-                port: 0,
-            }))],
+            tutti_graph::InputPort::new(sink, 0),
+            vec![tutti_graph::Edge::Direct(PortSource::Node(
+                OutputPort::new(lat, 0),
+            ))],
         );
         ed.commit().expect("commits");
         exec.apply_pending();
@@ -1050,18 +1042,14 @@ fn an_unroutable_command_is_timed_by_its_nodes_arrival() {
     let t = &mut ed.spec_mut().topology;
     t.inputs = ChannelLayout::MONO;
     t.edges.insert(
-        tutti_graph::InputPort { node: lat, port: 0 },
+        tutti_graph::InputPort::new(lat, 0),
         vec![tutti_graph::Edge::Direct(PortSource::MainInput(0))],
     );
     t.edges.insert(
-        tutti_graph::InputPort {
-            node: sink,
-            port: 0,
-        },
-        vec![tutti_graph::Edge::Direct(PortSource::Node(OutputPort {
-            node: lat,
-            port: 0,
-        }))],
+        tutti_graph::InputPort::new(sink, 0),
+        vec![tutti_graph::Edge::Direct(PortSource::Node(
+            OutputPort::new(lat, 0),
+        ))],
     );
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -1272,7 +1260,7 @@ struct Plain;
 
 impl Node for Plain {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0)
+        Shape::EMPTY.events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {

@@ -35,7 +35,7 @@ struct Probe;
 impl Node for Probe {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::STEREO)
-            .with_params(&[UnitParam::Azimuth, UnitParam::Elevation])
+            .params(&[UnitParam::Azimuth, UnitParam::Elevation])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -73,10 +73,7 @@ fn rig(azimuth: ParamRange, elevation: ParamRange) -> (Editor, Executor) {
         ed.spec_mut()
             .topology
             .outputs
-            .push(vec![PortSource::Node(OutputPort {
-                node: NodeKey(PROBE),
-                port: c,
-            })]);
+            .push(vec![PortSource::Node(OutputPort::new(NodeKey(PROBE), c))]);
     }
     ed.set_param_range(at(UnitParam::Azimuth), azimuth)
         .expect("a probe");

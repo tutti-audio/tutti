@@ -31,7 +31,7 @@ struct Undeclared<N>(N);
 
 impl<N: Node> Node for Undeclared<N> {
     fn shape(&self) -> Shape {
-        self.0.shape().with_cost(Cost::Heavy)
+        self.0.shape().cost(Cost::Heavy)
     }
     fn prepare(&mut self, p: &Prepare) {
         self.0.prepare(p);
@@ -52,11 +52,11 @@ impl Node for Sum {
     fn shape(&self) -> Shape {
         // Ports with no bus: its inputs are the clicks it sums, not a bus.
         Shape::EMPTY
-            .with_ports(
+            .ports(
                 ChannelLayout::try_from(2 * self.0).expect("a test width is small"),
                 ChannelLayout::STEREO,
             )
-            .with_cost(Cost::Light)
+            .cost(Cost::Light)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -110,11 +110,8 @@ fn graph(workers: usize, declared: bool) -> Executor {
             ed.insert(key, "click", Unforkable(Undeclared(click())));
         }
         for c in 0..2u16 {
-            let port = InputPort {
-                node: SUM,
-                port: k as u16 * 2 + c,
-            };
-            let from = PortSource::Node(OutputPort { node: key, port: c });
+            let port = InputPort::new(SUM, k as u16 * 2 + c);
+            let from = PortSource::Node(OutputPort::new(key, c));
             ed.spec_mut()
                 .topology
                 .edges
@@ -123,7 +120,7 @@ fn graph(workers: usize, declared: bool) -> Executor {
     }
     ed.spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort { node: SUM, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(SUM, port))));
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

@@ -179,7 +179,7 @@ impl<F: Float + Lerp> Kernel for TubeStageKernel<F> {
             Buses::main(self.input),
             Buses::NONE.with(output).expect("one bus"),
         )
-        .with_cost(Cost::Heavy)
+        .cost(Cost::Heavy)
     }
 
     fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock) {

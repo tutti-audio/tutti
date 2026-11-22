@@ -167,7 +167,7 @@ impl<F: FftFloat> Kernel for PitchShifterKernel<F> {
     fn shape(&self) -> Shape {
         let bus = BusTopology::unassigned(self.width)
             .expect("a pitch shifter is at most 16 channels wide");
-        Shape::through(bus).with_cost(Cost::Heavy)
+        Shape::through(bus).cost(Cost::Heavy)
     }
 
     /// Builds the vocoder at `rate`: the one allocation, here and not in `render`.

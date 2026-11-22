@@ -237,8 +237,8 @@ impl<F: Float> GraphBuilder<F> {
         self.spec.topology.nodes.insert(
             key,
             NodeSpec::new(kind, shape.audio_in(), shape.audio_out())
-                .with_latency(shape.latency.samples())
-                .with_tail(shape.tail),
+                .latency(shape.latency.samples())
+                .tail(shape.tail),
         );
         self.shapes.push(shape);
         self.units.push(Pending {
@@ -307,10 +307,7 @@ impl<F: Float> GraphBuilder<F> {
             port < n,
             "{node:?} has {n} audio inputs; port {port} is out of range"
         );
-        InputPort {
-            node,
-            port: port as u16,
-        }
+        InputPort::new(node, port as u16)
     }
 
     fn check_out(&self, node: NodeKey, port: usize) -> OutputPort {
@@ -319,10 +316,7 @@ impl<F: Float> GraphBuilder<F> {
             port < n,
             "{node:?} has {n} audio outputs; port {port} is out of range"
         );
-        OutputPort {
-            node,
-            port: port as u16,
-        }
+        OutputPort::new(node, port as u16)
     }
 
     fn check_source(&self, source: PortSource) -> PortSource {
@@ -513,10 +507,7 @@ impl<F: Float> GraphBuilder<F> {
         let outs = self.output_count(from);
         for c in 0..self.input_count(to) {
             let source = if outs > 0 {
-                PortSource::Node(OutputPort {
-                    node: from,
-                    port: (c % outs) as u16,
-                })
+                PortSource::Node(OutputPort::new(from, (c % outs) as u16))
             } else {
                 PortSource::Zero
             };
@@ -552,10 +543,7 @@ impl<F: Float> GraphBuilder<F> {
         let outs = self.output_count(node);
         for c in 0..self.outputs() {
             let source = if outs > 0 {
-                PortSource::Node(OutputPort {
-                    node,
-                    port: (c % outs) as u16,
-                })
+                PortSource::Node(OutputPort::new(node, (c % outs) as u16))
             } else {
                 PortSource::Zero
             };

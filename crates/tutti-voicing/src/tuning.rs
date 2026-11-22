@@ -20,7 +20,7 @@
 //! 512-byte table a program here), allocated once in
 //! [`VoiceAllocator::new`](crate::VoiceAllocator::new). A message
 //! for a bank or program beyond it changes nothing and is counted
-//! ([`VoiceAllocator::tuning_refused`](crate::VoiceAllocator::tuning_refused)).
+//! ([`VoiceAllocator::losses`](crate::VoiceAllocator::losses)).
 //!
 //! Every program starts as equal temperament (RP-020: the initial tuning is equal temperament, in Bank 0H
 //! and Preset 0H). A message
@@ -36,7 +36,7 @@ use alloc::vec;
 use tutti_midi_protocol::{KeyTable, OctaveOffsets, TuningFrequency};
 use tutti_music::PitchClass;
 use tutti_ump::{NoteNumber, U7};
-use tutti_units::Semitones;
+use tutti_units::{Losses, Semitones};
 
 /// How many tuning banks and programs a bank a core holds: each from 1 to 128
 /// (a bank and a program are 7-bit).
@@ -104,7 +104,7 @@ pub(crate) struct Tunings {
     /// Each channel's Scale/Octave offsets, C to B.
     octave: [[Semitones; 12]; 16],
     /// Messages for a bank or program there is no room for.
-    refused: u64,
+    refused: Losses,
 }
 
 impl Tunings {
@@ -114,17 +114,17 @@ impl Tunings {
             capacity,
             tables: vec![KeyTable::equal_temperament(); n].into_boxed_slice(),
             octave: [[Semitones::new(0.0); 12]; 16],
-            refused: 0,
+            refused: Losses::NONE,
         }
     }
 
-    pub(crate) fn refused(&self) -> u64 {
+    pub(crate) fn losses(&self) -> Losses {
         self.refused
     }
 
     /// Counts one message that named no program or bank we have.
     pub(crate) fn refuse(&mut self) {
-        self.refused += 1;
+        self.refused += Losses::refused(1);
     }
 
     pub(crate) fn has_bank(&self, bank: U7) -> bool {
@@ -149,7 +149,7 @@ impl Tunings {
     /// The table of `bank` and `program`, to change; counted when there is none.
     pub(crate) fn table_mut(&mut self, bank: U7, program: U7) -> Option<&mut KeyTable> {
         let Some(i) = self.index(bank, program) else {
-            self.refused += 1;
+            self.refused += Losses::refused(1);
             return None;
         };
         Some(&mut self.tables[i])

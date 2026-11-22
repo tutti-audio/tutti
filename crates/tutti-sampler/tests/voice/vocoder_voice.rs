@@ -664,9 +664,11 @@ fn a_clip_played_from_frame_zero_without_stopping_is_silent_for_the_priming() {
 /// `wave` placed at beat 0 with a vocoder at unity (a voice turned back to 1.0 keeps it),
 /// rendered `frames` frames under a transport that rolls from beat 0 at 120 BPM and wraps
 /// the loop `region_at(block)` names, `None` for no loop; as the host's clock moves it.
+/// `spares`: the handle is told the loop (`false`: it never is, so the voice has no spare).
 fn render_looped(
     wave: &Arc<Wave>,
     frames: usize,
+    spares: bool,
     region_at: impl Fn(usize) -> Option<(f64, f64)>,
 ) -> Vec<Vec<f32>> {
     let (pool, handle) = VoicePool::with_channels(wave.layout())
@@ -699,6 +701,10 @@ fn render_looped(
             changes: TransportChanges::NONE,
             play: PlayClock::ZERO,
         };
+        // The control side knows the loop before the block that wraps under it.
+        if spares {
+            handle.follow_loop(region);
+        }
         let block = contract::drive_input(&mut pool, &env, Planes::default(), &[], &[]).audio;
         for (channel, plane) in out.iter_mut().zip(&block) {
             channel.extend_from_slice(plane);
@@ -732,7 +738,7 @@ fn assert_sine_blocks(x: &[f32], from: usize) {
 #[test]
 fn a_looping_stretched_clip_sounds_continuously_across_its_wraps() {
     let source = wave(120_000, &[&sine(1500.0, 0.5, 0.0), &sine(1500.0, 0.5, 0.0)]);
-    let out = render_looped(&source, 60_000, |_| Some((0.25, 0.75)));
+    let out = render_looped(&source, 60_000, true, |_| Some((0.25, 0.75)));
     assert_sine_blocks(&out[0], 6_016);
 }
 
@@ -744,8 +750,85 @@ fn a_looping_stretched_clip_sounds_continuously_across_its_wraps() {
 fn a_loop_set_while_playing_is_swapped_in_without_a_gap() {
     let source = wave(120_000, &[&sine(1500.0, 0.5, 0.0), &sine(1500.0, 0.5, 0.0)]);
     // Block 187 starts at frame 11 968: the loop is set from there.
-    let out = render_looped(&source, 60_000, |index| {
+    let out = render_looped(&source, 60_000, true, |index| {
         (index >= 187).then_some((0.25, 0.75))
     });
     assert_sine_blocks(&out[0], 6_016);
+}
+
+/// A voice with no spare that meets a wrap flushes as a seek does (the documented fallback):
+/// the handle is never told the loop, so the first wrap (frame 18 000) leaves the voice
+/// silent while it primes, and it sounds the loop again after that, until the next wrap
+/// (30 000).
+#[test]
+fn a_voice_without_a_spare_flushes_at_a_wrap() {
+    let source = wave(120_000, &[&sine(1500.0, 0.5, 0.0), &sine(1500.0, 0.5, 0.0)]);
+    let out = render_looped(&source, 40_000, false, |_| Some((0.25, 0.75)));
+    assert_sine_blocks(&out[0][..17_900], 6_016);
+    assert!(
+        out[0][18_000..18_000 + HOP].iter().all(|&x| x == 0.0),
+        "the voice is silent after the wrap"
+    );
+    assert_sine_blocks(&out[0][..29_000], 18_000 + 4 * WINDOW);
+}
+
+/// Which voices carry a spare vocoder follows the loop and the windows: a stretched voice
+/// whose window covers the loop's start (beat 0.25) carries one, a stretched voice placed
+/// after the loop and a voice that does not stretch do not; the loop moved off and on
+/// retires the spare (the retirement ring hands it back) and sends a new one; a window
+/// moved under the loop gives its voice one, and one moved off takes it away.
+#[test]
+fn only_a_stretched_voice_under_the_loop_carries_a_spare() {
+    let wave = wave(48_000, &[&sine(1500.0, 0.5, 0.0), &sine(1500.0, 0.5, 0.0)]);
+    let (pool, handle) = VoicePool::with_channels(wave.layout())
+        .expect("a width the sampler reads")
+        .with_handle();
+    let mut pool = contract::prepared(pool, SampleRate::of(SR), BLOCK);
+    let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
+    let stretch = |stretch: f64| Playback {
+        stretch: StretchFactor::new(stretch),
+        ..Default::default()
+    };
+    for (id, start, stretching) in [(1, 0.0, 1.5), (2, 8.0, 1.5), (3, 0.0, 1.0)] {
+        handle
+            .add(SlotId(id), source_from(&wave, start), stretch(stretching))
+            .expect("the command queue has room in a test");
+    }
+    let mut spares = || {
+        // The drain applies the commands at the top of the block.
+        contract::drive_input(
+            &mut pool,
+            &transport.env(BLOCK, SampleRate::of(SR)),
+            Planes::default(),
+            &[],
+            &[],
+        );
+        tutti_sampler::testing::spare_count(&pool)
+    };
+    let looped = || Some(LoopRange::new(Beat::new(0.25), Beat::new(0.75)).expect("a loop"));
+    assert_eq!(spares(), 0, "no loop: no spare");
+    handle.follow_loop(looped());
+    assert_eq!(spares(), 1, "only voice 1 is stretched under the loop");
+    handle.follow_loop(None);
+    assert_eq!(spares(), 0, "the loop off retires the spare");
+    assert_eq!(
+        handle.collect_retired(),
+        1,
+        "and the retirement ring hands it back"
+    );
+    handle.follow_loop(looped());
+    assert_eq!(spares(), 1, "the loop on sends a new one");
+    let at = |start: f64| VoiceWindow::from(Beat::new(start));
+    handle.set_window(SlotId(2), at(0.0)).expect("room");
+    assert_eq!(spares(), 2, "a window moved under the loop gets one");
+    handle.set_window(SlotId(1), at(8.0)).expect("room");
+    assert_eq!(spares(), 1, "a window moved off the loop loses it");
+    handle
+        .set_stretch(SlotId(3), StretchFactor::new(1.5), Cents::new(0.0))
+        .expect("room");
+    assert_eq!(
+        spares(),
+        2,
+        "a voice turned to stretch under the loop gets one"
+    );
 }

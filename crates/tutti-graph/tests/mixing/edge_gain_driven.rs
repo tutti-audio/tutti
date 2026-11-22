@@ -29,17 +29,11 @@ fn key(n: u64) -> NodeKey {
 }
 
 fn at(node: u64) -> InputPort {
-    InputPort {
-        node: key(node),
-        port: 0,
-    }
+    InputPort::new(key(node), 0)
 }
 
 fn out(node: u64) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: key(node),
-        port: 0,
-    })
+    PortSource::Node(OutputPort::new(key(node), 0))
 }
 
 fn lane_out(node: u64) -> EventOutputPort {

@@ -270,8 +270,8 @@ const TAIL: usize = 300;
 impl Node for Late {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(tutti_units::Latency::new(Samples::new(LATE)))
-            .with_tail(Tail::Finite(Samples::new(TAIL)))
+            .latency(tutti_units::Latency::new(Samples::new(LATE)))
+            .tail(Tail::Finite(Samples::new(TAIL)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -352,10 +352,9 @@ fn the_trim_is_read_after_the_prepare_hook() {
             let editor = prepared.editor;
             editor.insert(key, "test:late", ForkByClone(Late { pos: 0 }));
             for out in editor.spec_mut().topology.outputs.iter_mut() {
-                *out = vec![tutti_graph::PortSource::Node(tutti_graph::OutputPort {
-                    node: key,
-                    port: 0,
-                })];
+                *out = vec![tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(
+                    key, 0,
+                ))];
             }
         },
     ));
@@ -501,10 +500,9 @@ fn a_prepare_hook_reaches_the_graph_that_gets_rendered() {
         let editor = prepared.editor;
         editor.insert(key, "test:level", Const::mono(level));
         for out in editor.spec_mut().topology.outputs.iter_mut() {
-            *out = vec![tutti_graph::PortSource::Node(tutti_graph::OutputPort {
-                node: key,
-                port: 0,
-            })];
+            *out = vec![tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(
+                key, 0,
+            ))];
         }
     }));
     let planes = render(&mut session, request);
@@ -637,7 +635,7 @@ impl IntoNode for Counter {
 
 impl Node for Counter {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_tail(Tail::Unknown)
+        Shape::source_unassigned(ChannelLayout::MONO).tail(Tail::Unknown)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

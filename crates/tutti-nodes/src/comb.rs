@@ -118,7 +118,7 @@ impl<F: Float> Kernel for CombFilterKernel<F> {
     /// `width` channels in and out, `Light`: a ring read and a multiply-add per sample.
     fn shape(&self) -> Shape {
         let bus = BusTopology::unassigned(self.width).expect("a comb is at most 16 channels wide");
-        Shape::through(bus).with_cost(Cost::Light)
+        Shape::through(bus).cost(Cost::Light)
     }
 
     /// Sizes the rings at `rate`: the delay rounded up to whole frames (a re-prepare empties

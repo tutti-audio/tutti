@@ -58,10 +58,7 @@ fn engine(spin: Duration, max_block: usize) -> (Engine, Transport, Editor) {
     ed.insert(NodeKey(1), "spin", Unforkable(Spin { spin }));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     (engine, transport, ed)
@@ -132,7 +129,7 @@ struct Burst {
 
 impl Burst {
     const SHAPE: tutti_graph::Shape =
-        tutti_graph::Shape::source_unassigned(ChannelLayout::MONO).with_events(0, 1);
+        tutti_graph::Shape::source_unassigned(ChannelLayout::MONO).events(0, 1);
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -174,10 +171,7 @@ fn events_past_a_ports_capacity_reach_the_block_counts() {
     ed.insert(NodeKey(1), "burst", Unforkable(Burst { per_block }));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     let blocks = engine.blocks();

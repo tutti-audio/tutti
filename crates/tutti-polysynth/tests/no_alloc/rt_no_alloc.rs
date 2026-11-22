@@ -480,12 +480,11 @@ fn a_clip_into_a_synth_is_allocation_free() {
             port: 0,
         }),
     );
-    ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-        tutti_graph::PortSource::Node(tutti_graph::OutputPort {
-            node: NodeKey(2),
-            port,
-        })
-    }));
+    ed.spec_mut().topology.set_outputs(
+        (0..2).map(|port| {
+            tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(NodeKey(2), port))
+        }),
+    );
     ed.commit().expect("commits");
     let at = |frame: usize, playing: bool| {
         TransportPosition::new(

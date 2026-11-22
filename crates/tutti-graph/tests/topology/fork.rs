@@ -68,7 +68,7 @@ impl Sine {
 
 impl Node for Sine {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_tail(Tail::Unbounded)
+        Shape::source_unassigned(ChannelLayout::MONO).tail(Tail::Unbounded)
     }
     fn prepare(&mut self, p: &Prepare) {
         self.dt = (1.0 / p.sample_rate().get()) as f32;
@@ -94,7 +94,7 @@ struct Shared {
 
 impl Node for Shared {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_tail(Tail::Unbounded)
+        Shape::source_unassigned(ChannelLayout::MONO).tail(Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -208,7 +208,7 @@ fn gain() -> Forkable {
 }
 
 fn out(node: NodeKey, port: u16) -> PortSource {
-    PortSource::Node(OutputPort { node, port })
+    PortSource::Node(OutputPort::new(node, port))
 }
 
 fn render(ed: Editor, exec: tutti_graph::Executor, frames: usize) -> Vec<Vec<f32>> {
@@ -370,10 +370,7 @@ fn a_node_without_a_fork_source_is_not_forkable() {
     );
     let t = &mut ed.spec_mut().topology;
     t.edges.insert(
-        InputPort {
-            node: NodeKey(1),
-            port: 0,
-        },
+        InputPort::new(NodeKey(1), 0),
         vec![Edge::Direct(out(NodeKey(2), 0))],
     );
     t.set_outputs(vec![out(NodeKey(1), 0)]);
@@ -466,7 +463,7 @@ impl ForkSource for WatchedFork {
             value: 1.0,
             width: 1,
         }));
-        Ok(Forked::new(node).with_health(Arc::clone(&self.0) as Arc<dyn ForkHealth>))
+        Ok(Forked::new(node).health(Arc::clone(&self.0) as Arc<dyn ForkHealth>))
     }
 }
 
@@ -658,31 +655,19 @@ fn a_node_fork_holds_exactly_what_feeds_the_node() {
     );
     let spec = ed.spec_mut();
     let t = &mut spec.topology;
+    t.edges
+        .insert(InputPort::new(a, 0), vec![Edge::Direct(out(osc, 0))]);
     t.edges.insert(
-        InputPort { node: a, port: 0 },
-        vec![Edge::Direct(out(osc, 0))],
-    );
-    t.edges.insert(
-        InputPort { node: a, port: 1 },
+        InputPort::new(a, 1),
         vec![Edge::Feedback(FeedbackFrom::new(
-            OutputPort { node: fb, port: 0 },
+            OutputPort::new(fb, 0),
             Samples::new(64),
         ))],
     );
-    t.edges.insert(
-        InputPort {
-            node: target,
-            port: 0,
-        },
-        vec![Edge::Direct(out(a, 0))],
-    );
-    t.edges.insert(
-        InputPort {
-            node: after,
-            port: 0,
-        },
-        vec![Edge::Direct(out(target, 0))],
-    );
+    t.edges
+        .insert(InputPort::new(target, 0), vec![Edge::Direct(out(a, 0))]);
+    t.edges
+        .insert(InputPort::new(after, 0), vec![Edge::Direct(out(target, 0))]);
     t.set_outputs(vec![out(after, 0), out(side, 0)]);
     spec.connect_events(
         EventInputPort {
@@ -912,7 +897,7 @@ struct Ramp {
 impl Node for Ramp {
     fn shape(&self) -> tutti_graph::Shape {
         tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
-            .with_tail(tutti_units::Tail::Unbounded)
+            .tail(tutti_units::Tail::Unbounded)
     }
     fn prepare(&mut self, _p: &tutti_graph::Prepare) {}
     fn process(
@@ -1385,10 +1370,7 @@ fn a_build_whose_commit_fails_hands_back_the_graph() {
     let (_, pinned) = witness(&mut ed, NodeKey(1), How::Pinned, 1);
     // Key 1 has no inputs: an edge into its port 0 does not validate.
     ed.spec_mut().topology.edges.insert(
-        InputPort {
-            node: NodeKey(1),
-            port: 0,
-        },
+        InputPort::new(NodeKey(1), 0),
         vec![Edge::Direct(PortSource::MainInput(0))],
     );
     let pending = ed

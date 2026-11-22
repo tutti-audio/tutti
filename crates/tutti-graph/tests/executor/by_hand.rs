@@ -32,7 +32,7 @@ fn m1_note() -> Ump {
 struct Probe;
 
 impl Probe {
-    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::STEREO).with_events(1, 1);
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::STEREO).events(1, 1);
     const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }

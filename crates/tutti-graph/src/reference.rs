@@ -1428,7 +1428,7 @@ impl<F: Float> Reference<F> {
 
         let mut ins: Vec<Vec<F>> = Vec::new();
         for port in 0..shape.audio_in().count() {
-            let at = InputPort { node: key, port };
+            let at = InputPort::new(key, port);
             // The addends in source order, each through its own PDC delay.
             let mut addends: Vec<RefAddend<F>> = Vec::new();
             for edge in sorted(t.edges.get(&at).map_or(&[][..], Vec::as_slice)) {
@@ -1640,7 +1640,7 @@ impl<F: Float> Reference<F> {
                         &mut writers,
                     )
                     .with_main(shape.main_ports())
-                    .with_params(&param_table);
+                    .params(&param_table);
                     f.old.process(&cx, io)
                 };
                 settle(status, &copies, &mut o);
@@ -1718,7 +1718,7 @@ impl<F: Float> Reference<F> {
                 &mut writers,
             )
             .with_main(shape.main_ports())
-            .with_params(&param_table);
+            .params(&param_table);
             let status = self
                 .units
                 .get_mut(&key)
@@ -1784,13 +1784,7 @@ impl<F: Float> Reference<F> {
             self.modes.insert(key, m);
         }
         for (port, o) in outs.into_iter().enumerate() {
-            audio.insert(
-                OutputPort {
-                    node: key,
-                    port: port as u16,
-                },
-                o,
-            );
+            audio.insert(OutputPort::new(key, port as u16), o);
         }
         for (port, e) in ev_bufs.into_iter().enumerate() {
             let from = EventOutputPort {

@@ -57,7 +57,9 @@ use tutti_music::{
     ClockPass, ClockPassEnd, Meter, MeterMap, TimeSignature, first_frame_at_or_after,
 };
 use tutti_ump::{Flex, Message, MidiGroup, System, Ump};
-use tutti_units::{BarCount, Beat, BeatDuration, Bpm, SampleRate, SampleSpan, Samples, Seconds};
+use tutti_units::{
+    BarCount, Beat, BeatDuration, Bpm, Losses, SampleRate, SampleSpan, Samples, Seconds,
+};
 
 use tutti_midi_protocol::{
     MtcFullMessage, MtcRate, MtcTimeCode, QuarterFrameCycle, QuarterFramePiece, SmpteTimecode,
@@ -96,10 +98,10 @@ pub(crate) struct ClockMaster {
     /// What the Flex messages last stated.
     flex: FlexOut,
     /// The Song Position Pointers and MTC timecodes not sent since the host
-    /// last took the count ([`take_refused`](Self::take_refused)): a position
+    /// last took the count ([`take_losses`](Self::take_losses)): a position
     /// the 14-bit pointer or a timecode cannot name. MTC with no time (before
     /// beat 0) counts once from each grid restart, not per quarter-frame.
-    refused: u64,
+    refused: Losses,
 }
 
 /// What the Flex output has stated to the receiver, and what it has seen of
@@ -221,16 +223,16 @@ impl ClockMaster {
             prev: PrevTick::FRESH,
             mtc: MtcGrid::RESTARTED,
             flex: FlexOut::SILENT,
-            refused: 0,
+            refused: Losses::NONE,
         }
     }
 
-    /// The messages refused since the last call, then zero: a Song Position
-    /// Pointer for a beat past its 14-bit field (4096 beats) or before the
-    /// start, and an MTC position for a time before zero or NaN (once from each
-    /// grid restart while the quarter-frames have none). Each is skipped, never
-    /// sent clamped to a position the transport is not at.
-    pub(crate) fn take_refused(&mut self) -> u64 {
+    /// The messages [refused](Losses::refused) since the last call, then none:
+    /// a Song Position Pointer for a beat past its 14-bit field (4096 beats) or
+    /// before the start, and an MTC position for a time before zero or NaN
+    /// (once from each grid restart while the quarter-frames have none). Each
+    /// is skipped, never sent clamped to a position the transport is not at.
+    pub(crate) fn take_losses(&mut self) -> Losses {
         std::mem::take(&mut self.refused)
     }
 
@@ -239,7 +241,7 @@ impl ClockMaster {
     fn emit_song_position(&mut self, beat: Beat, at: Offset, emit: &mut impl FnMut(UmpAt)) {
         match song_position(beat) {
             Some(position) => emit((at, self.system(System::SongPosition(position)))),
-            None => self.refused = self.refused.saturating_add(1),
+            None => self.refused += Losses::refused(1),
         }
     }
 
@@ -516,7 +518,7 @@ impl ClockMaster {
         let Some(position) = samples_at(beat, per_sample).and_then(|samples| {
             MtcTimeCode::at(Seconds::new(samples / sample_rate.get()), self.fps)
         }) else {
-            self.refused = self.refused.saturating_add(1);
+            self.refused += Losses::refused(1);
             return;
         };
         for packet in MtcFullMessage::from(position).packets(self.group) {
@@ -668,7 +670,7 @@ impl ClockMaster {
         // refusal.
         let Some(block_pos) = samples_at(beat, beats_per_sample) else {
             if !self.mtc.skipped {
-                self.refused = self.refused.saturating_add(1);
+                self.refused += Losses::refused(1);
             }
             self.restart_mtc();
             self.mtc.skipped = true;
@@ -716,7 +718,7 @@ impl ClockMaster {
                     cycle = next_cycle;
                 } else {
                     // One refusal for the whole cycle: nothing of it goes out.
-                    self.refused = self.refused.saturating_add(1);
+                    self.refused += Losses::refused(1);
                 }
             }
             if !skipped {

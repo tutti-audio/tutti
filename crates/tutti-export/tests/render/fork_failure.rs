@@ -69,7 +69,7 @@ struct Fork(Arc<Crashed>);
 
 impl ForkSource for Fork {
     fn fork(&self, _: RenderMode) -> Result<Forked, ForkCause> {
-        Ok(Forked::new(Box::new(Dc)).with_health(Arc::clone(&self.0) as Arc<dyn ForkHealth>))
+        Ok(Forked::new(Box::new(Dc)).health(Arc::clone(&self.0) as Arc<dyn ForkHealth>))
     }
 }
 
@@ -96,10 +96,7 @@ fn fork() -> (RenderGraph, Arc<Crashed>, Editor) {
     live.insert(NodeKey(1), "watched", Watched(Arc::clone(&probe)));
     live.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     let graph = support::fork_offline(&live, RATE);
     (graph, probe, live)
 }

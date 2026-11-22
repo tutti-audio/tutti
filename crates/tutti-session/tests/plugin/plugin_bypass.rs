@@ -59,7 +59,7 @@ struct Click {
 
 impl Node for Click {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_cost(tutti_graph::Cost::Light)
+        Shape::source_unassigned(ChannelLayout::MONO).cost(tutti_graph::Cost::Light)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

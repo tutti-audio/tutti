@@ -162,6 +162,7 @@ mod signal_windows;
 mod switch;
 #[cfg(feature = "capture")]
 mod take;
+mod timeline_view;
 #[cfg(all(feature = "midi", feature = "analyze"))]
 mod transcribe;
 mod transport_handle;
@@ -292,6 +293,7 @@ pub use plugin::{
     RestoringStateOutOfProcess, SaveState, SaveStateInProcess, SaveStateOutOfProcess,
     SavingStateOutOfProcess, StateRestore, StateStartError, StateView, SwapPluginError,
 };
+pub use timeline_view::TimelineView;
 
 #[cfg(feature = "plugin")]
 use hang::HangDetector;
@@ -346,7 +348,7 @@ pub use tutti_graph::{
     BusError, BusOutputPort, Buses, HasParam, HasParams, MissingSource, ParamValue, Scalar,
 };
 pub use tutti_graph::{
-    CloseError, CommitError, EventCapacity, Losses, NodeMode, PassError, Stamp, Wired, WiredMask,
+    CloseError, CommitError, EventCapacity, NodeMode, PassError, Stamp, Wired, WiredMask,
 };
 #[cfg(feature = "midi")]
 pub use tutti_ump::{MidiChannel, MidiGroup};

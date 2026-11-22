@@ -29,11 +29,11 @@ fn key(n: u32) -> NodeKey {
 }
 
 fn at(node: NodeKey, port: u16) -> InputPort {
-    InputPort { node, port }
+    InputPort::new(node, port)
 }
 
 fn out(node: NodeKey, port: u16) -> OutputPort {
-    OutputPort { node, port }
+    OutputPort::new(node, port)
 }
 
 fn direct(node: NodeKey) -> Edge {
@@ -52,8 +52,8 @@ fn node(t: &mut Topology, k: NodeKey, ins: u16, lat: usize, tail: usize) {
     t.nodes.insert(
         k,
         spec(ins, 1)
-            .with_latency(Samples::new(lat))
-            .with_tail(Tail::Finite(Samples::new(tail))),
+            .latency(Samples::new(lat))
+            .tail(Tail::Finite(Samples::new(tail))),
     );
 }
 
@@ -147,8 +147,7 @@ fn a_main_input_source_of_a_fan_in_waits_for_the_slowest() {
 #[test]
 fn two_ports_of_one_node_into_a_port_are_one_delay() {
     let mut t = sources();
-    t.nodes
-        .insert(MID, spec(0, 2).with_latency(Samples::new(100)));
+    t.nodes.insert(MID, spec(0, 2).latency(Samples::new(100)));
     t.connect(at(SINK, 0), direct(SLOW));
     t.connect(at(SINK, 0), Edge::Direct(PortSource::Node(out(MID, 0))));
     t.connect(at(SINK, 0), Edge::Direct(PortSource::Node(out(MID, 1))));
@@ -337,7 +336,7 @@ fn lag_into_pass() -> (Topology, BTreeMap<NodeKey, Kind>) {
     };
     let mut kinds = BTreeMap::new();
     t.nodes
-        .insert(LAG, spec(1, 1).with_latency(Samples::new(LAG_FRAMES)));
+        .insert(LAG, spec(1, 1).latency(Samples::new(LAG_FRAMES)));
     kinds.insert(
         LAG,
         Kind::Lag {

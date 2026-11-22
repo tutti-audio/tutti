@@ -14,7 +14,6 @@ use tutti_session::Stamp;
 
 #[cfg(feature = "midi-hardware")]
 use std::time::Duration;
-use tutti_graph::Losses;
 #[cfg(feature = "midi-hardware")]
 use tutti_graph::NodeKey;
 #[cfg(feature = "midi-hardware")]
@@ -34,6 +33,7 @@ use tutti_ump::{MessageType, Sysex8StreamCount};
 use tutti_ump::{MidiChannel, NoteKeyEvent, NoteNumber, NoteVelocity};
 #[cfg(feature = "midi-hardware")]
 use tutti_ump::{MpeChannels, MpeZoneSpan};
+use tutti_units::Losses;
 use tutti_units::{Beat, BeatDuration, Frame, SampleRate};
 
 use tutti_fixtures::midi;

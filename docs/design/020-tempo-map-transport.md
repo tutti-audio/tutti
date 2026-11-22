@@ -479,7 +479,7 @@ not change, and the `Env` holds no earlier tempo, so the voice reads the map:
   owner's). The node lends the map once per block and hands it to its
   `Clock::observe_with`; a fork clones the reader on the control side.
   `tutti-session` binds what it takes in `Graph::add` and `Graph::crossfade`
-  through `SessionNode::bind_tempo` (default: the node as it is), the graph's
+  through `SessionNode::bind_timeline` (default: the node as it is), the graph's
   template reader being the plugins' too; a node the graph puts in without
   `SessionNode` (a bound plugin, a `replace`d node) is unbound and behaves as a
   constant tempo, as it always did.

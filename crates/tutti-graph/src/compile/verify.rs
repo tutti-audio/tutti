@@ -1028,14 +1028,8 @@ mod tests {
             })
             .collect();
         t.set_outputs(vec![
-            PortSource::Node(OutputPort {
-                node: NodeKey(1),
-                port: 0,
-            }),
-            PortSource::Node(OutputPort {
-                node: NodeKey(2),
-                port: 0,
-            }),
+            PortSource::Node(OutputPort::new(NodeKey(1), 0)),
+            PortSource::Node(OutputPort::new(NodeKey(2), 0)),
         ]);
         let valid = GraphSpec::new(t).validate().expect("valid");
         compile(
@@ -1061,10 +1055,10 @@ mod tests {
         use crate::spec::EventOutputPort;
         use tutti_units::UnitParam;
         let generator = Shape::source_unassigned(ChannelLayout::MONO);
-        let sender = Shape::source_unassigned(ChannelLayout::MONO).with_events(0, 1);
+        let sender = Shape::source_unassigned(ChannelLayout::MONO).events(0, 1);
         let thru = Shape::through_unassigned(ChannelLayout::MONO)
-            .with_in_place()
-            .with_params(&[UnitParam::Cutoff]);
+            .in_place()
+            .params(&[UnitParam::Cutoff]);
         let mut t = Topology::default();
         let mut shapes = Shapes::new();
         for (k, s) in [(1, generator), (2, thru), (3, sender), (4, sender)] {
@@ -1073,24 +1067,15 @@ mod tests {
             shapes.insert(NodeKey(k), s);
         }
         t.edges.insert(
-            crate::InputPort {
-                node: NodeKey(2),
-                port: 0,
-            },
-            vec![crate::Edge::Direct(PortSource::Node(OutputPort {
-                node: NodeKey(1),
-                port: 0,
-            }))],
+            crate::InputPort::new(NodeKey(2), 0),
+            vec![crate::Edge::Direct(PortSource::Node(OutputPort::new(
+                NodeKey(1),
+                0,
+            )))],
         );
         t.set_outputs(vec![
-            PortSource::Node(OutputPort {
-                node: NodeKey(2),
-                port: 0,
-            }),
-            PortSource::Node(OutputPort {
-                node: NodeKey(4),
-                port: 0,
-            }),
+            PortSource::Node(OutputPort::new(NodeKey(2), 0)),
+            PortSource::Node(OutputPort::new(NodeKey(4), 0)),
         ]);
         let mut spec = GraphSpec::new(t);
         let _ = spec.connect_param(
@@ -1217,22 +1202,18 @@ mod tests {
         }
         let wire = |t: &mut Topology, sink: NodeKey, from: NodeKey| {
             t.edges.insert(
-                crate::InputPort {
-                    node: sink,
-                    port: 0,
-                },
-                vec![crate::Edge::Direct(PortSource::Node(OutputPort {
-                    node: from,
-                    port: 0,
-                }))],
+                crate::InputPort::new(sink, 0),
+                vec![crate::Edge::Direct(PortSource::Node(OutputPort::new(
+                    from, 0,
+                )))],
             );
         };
         wire(&mut t, b, a);
         wire(&mut t, w, b);
         wire(&mut t, c, a);
         t.set_outputs(vec![
-            PortSource::Node(OutputPort { node: w, port: 0 }),
-            PortSource::Node(OutputPort { node: c, port: 0 }),
+            PortSource::Node(OutputPort::new(w, 0)),
+            PortSource::Node(OutputPort::new(c, 0)),
         ]);
         let shapes: Shapes = t
             .nodes
@@ -1312,7 +1293,7 @@ mod tests {
         t.outputs = vec![
             [NodeKey(1), NodeKey(2)]
                 .into_iter()
-                .map(|node| PortSource::Node(OutputPort { node, port: 0 }))
+                .map(|node| PortSource::Node(OutputPort::new(node, 0)))
                 .collect(),
         ];
         let valid = GraphSpec::new(t).validate().expect("valid");
@@ -1579,19 +1560,12 @@ mod tests {
         t.nodes
             .insert(thru, NodeSpec::new("thru", st.audio_in(), st.audio_out()));
         t.edges.insert(
-            crate::InputPort {
-                node: thru,
-                port: 0,
-            },
-            vec![crate::Edge::Direct(PortSource::Node(OutputPort {
-                node: generator,
-                port: 0,
-            }))],
+            crate::InputPort::new(thru, 0),
+            vec![crate::Edge::Direct(PortSource::Node(OutputPort::new(
+                generator, 0,
+            )))],
         );
-        t.set_outputs(vec![PortSource::Node(OutputPort {
-            node: thru,
-            port: 0,
-        })]);
+        t.set_outputs(vec![PortSource::Node(OutputPort::new(thru, 0))]);
         let shapes: Shapes = [(generator, sg), (thru, st)].into_iter().collect();
         let valid = GraphSpec::new(t).validate().expect("valid");
         let prep = crate::node::Prepare::new(
@@ -1635,22 +1609,15 @@ mod tests {
             .insert(thru, NodeSpec::new("thru", st.audio_in(), st.audio_out()));
         for port in 0..2 {
             t.edges.insert(
-                crate::InputPort { node: thru, port },
-                vec![crate::Edge::Direct(PortSource::Node(OutputPort {
-                    node: generator,
-                    port,
-                }))],
+                crate::InputPort::new(thru, port),
+                vec![crate::Edge::Direct(PortSource::Node(OutputPort::new(
+                    generator, port,
+                )))],
             );
         }
         t.set_outputs(vec![
-            PortSource::Node(OutputPort {
-                node: thru,
-                port: 0,
-            }),
-            PortSource::Node(OutputPort {
-                node: thru,
-                port: 1,
-            }),
+            PortSource::Node(OutputPort::new(thru, 0)),
+            PortSource::Node(OutputPort::new(thru, 1)),
         ]);
         let shapes: Shapes = [(generator, sg), (thru, st)].into_iter().collect();
         let valid = GraphSpec::new(t).validate().expect("valid");
@@ -1721,9 +1688,9 @@ mod tests {
         use crate::spec::{EventEdge, EventInputPort, EventOutputPort};
         let mut t = Topology::default();
         let mut shapes = Shapes::new();
-        let src = Shape::EMPTY.with_events(0, 1);
-        let declared = src.with_event_capacity(crate::testing::cap_of(5));
-        let sink = Shape::EMPTY.with_events(1, 0);
+        let src = Shape::EMPTY.events(0, 1);
+        let declared = src.event_capacity(crate::testing::cap_of(5));
+        let sink = Shape::EMPTY.events(1, 0);
         for (k, s) in [(1, declared), (2, src), (3, sink)] {
             t.nodes
                 .insert(NodeKey(k), NodeSpec::new("n", s.audio_in(), s.audio_out()));
@@ -1801,12 +1768,12 @@ mod tests {
                 .map(|(k, s)| {
                     t.nodes.insert(
                         k,
-                        NodeSpec::new("gen", s.audio_in(), s.audio_out()).with_tail(s.tail),
+                        NodeSpec::new("gen", s.audio_in(), s.audio_out()).tail(s.tail),
                     );
                     (k, s)
                 })
                 .collect();
-            t.set_outputs(vec![PortSource::Node(OutputPort { node: a, port: 0 })]);
+            t.set_outputs(vec![PortSource::Node(OutputPort::new(a, 0))]);
             let mut spec = GraphSpec::new(t);
             spec.generations.insert(a, gen_a);
             let prepare = crate::node::Prepare::new(
@@ -1824,7 +1791,7 @@ mod tests {
         };
 
         assert_eq!(check(generator(), vec![(a, fade)]), Ok(()));
-        let tail = generator().with_tail(tutti_units::Tail::Finite(tutti_units::Samples::new(9)));
+        let tail = generator().tail(tutti_units::Tail::Finite(tutti_units::Samples::new(9)));
         assert_eq!(
             check(tail, vec![(a, fade)]),
             Ok(()),
@@ -1838,14 +1805,13 @@ mod tests {
         let twice = check(generator(), vec![(a, fade), (a, fade)]).unwrap_err();
         assert!(twice.0.contains("twice"), "{twice}");
         let in_place = check(
-            Shape::source_unassigned(ChannelLayout::MONO).with_in_place(),
+            Shape::source_unassigned(ChannelLayout::MONO).in_place(),
             vec![(a, fade)],
         )
         .unwrap_err();
         assert!(in_place.0.contains("only the tail"), "{in_place}");
         let capacity = check(
-            Shape::source_unassigned(ChannelLayout::MONO)
-                .with_event_capacity(crate::testing::cap_of(4)),
+            Shape::source_unassigned(ChannelLayout::MONO).event_capacity(crate::testing::cap_of(4)),
             vec![(a, fade)],
         )
         .unwrap_err();

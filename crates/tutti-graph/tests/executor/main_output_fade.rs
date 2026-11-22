@@ -26,10 +26,7 @@ fn key(n: u64) -> NodeKey {
 }
 
 fn source(n: u64) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: key(n),
-        port: 0,
-    })
+    PortSource::Node(OutputPort::new(key(n), 0))
 }
 
 /// The gains `(out, in)` at frame `k` of an `n`-frame fade: the law written

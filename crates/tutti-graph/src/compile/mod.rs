@@ -788,7 +788,7 @@ pub fn compile(
         // same sources differently render alike. One source is the value itself, none is silence.
         let mut ain = Vec::with_capacity(shape.audio_in().count() as usize);
         for port in 0..shape.audio_in().count() {
-            let at = InputPort { node: key, port };
+            let at = InputPort::new(key, port);
             let mut sources: Vec<Edge> = topology.edges.get(&at).cloned().unwrap_or_default();
             sources.sort();
             let mut refs: Vec<Addend> = Vec::with_capacity(sources.len());
@@ -986,7 +986,7 @@ pub fn compile(
         let aout: Vec<u32> = (0..shape.audio_out().count())
             .map(|port| {
                 let v = em.audio_value(op);
-                audio_out_val.insert(OutputPort { node: key, port }, v);
+                audio_out_val.insert(OutputPort::new(key, port), v);
                 v
             })
             .collect();
@@ -1858,14 +1858,14 @@ fn wired_ports(
 ) -> Wired {
     let mut wired = Wired::default();
     for port in 0..shape.audio_in().count() {
-        let at = InputPort { node: key, port };
+        let at = InputPort::new(key, port);
         let fed = topology.edges.get(&at).is_some_and(|e| !e.is_empty());
         if fed {
             wired.inputs = wired.inputs.with(usize::from(port));
         }
     }
     for port in 0..shape.audio_out().count() {
-        if consumed.contains(&OutputPort { node: key, port }) {
+        if consumed.contains(&OutputPort::new(key, port)) {
             wired.outputs = wired.outputs.with(usize::from(port));
         }
     }

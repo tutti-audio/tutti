@@ -582,7 +582,7 @@ pub struct EventWriter<'a> {
     buf: Option<&'a mut Vec<Event>>,
     // The port's param events: the preallocated buffer beside `buf`, empty
     // of room when no node upstream of it writes any
-    // ([`Shape::with_param_events`](crate::Shape::with_param_events)).
+    // ([`Shape::param_events`](crate::Shape::param_events)).
     params: Option<&'a mut Vec<ParamEvent>>,
     cap: usize,
     // `note_off_room(cap)`, computed once.
@@ -685,7 +685,7 @@ impl<'a> EventWriter<'a> {
     ///
     /// A port holds at most its declared capacity of param events, and none
     /// unless the node declares it writes them
-    /// ([`Shape::with_param_events`](crate::Shape::with_param_events)).
+    /// ([`Shape::param_events`](crate::Shape::param_events)).
     ///
     /// # Errors
     ///

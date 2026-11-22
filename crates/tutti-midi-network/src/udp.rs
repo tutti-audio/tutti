@@ -11,6 +11,7 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 use tutti_platform::{Executor, Instant, Task};
 use tutti_rt::Mutex;
+use tutti_units::Losses;
 
 use crate::{Event, MAX_DATAGRAM_BYTES, MAX_QUEUED_EVENTS, NetworkEndpoint};
 
@@ -54,8 +55,8 @@ struct State<E> {
     /// Events taken from the endpoint and not yet read, at most
     /// [`MAX_QUEUED_EVENTS`].
     events: VecDeque<Event>,
-    /// Events that found `events` full.
-    lost: u64,
+    /// Events that found `events` full, each one [lost](Losses::lost).
+    losses: Losses,
     /// Datagrams dropped because the OS refused them for their destination.
     sends_failed: u64,
     /// The futures waiting for an event, each woken by the next one or the
@@ -108,7 +109,7 @@ impl<E: NetworkEndpoint> State<E> {
             if self.events.len() < MAX_QUEUED_EVENTS {
                 self.events.push_back(event);
             } else {
-                self.lost += 1;
+                self.losses += Losses::lost(1);
             }
         }
         if any { self.take_wakers() } else { Vec::new() }
@@ -177,7 +178,7 @@ impl<E> Shared<E> {
 /// out its bound for a thread that is still reading.
 ///
 /// The link's queue holds at most [`MAX_QUEUED_EVENTS`] events: one that finds
-/// it full is counted in [`events_lost`](Self::events_lost) and dropped, never
+/// it full is counted in [`losses`](Self::losses) and dropped, never
 /// waited on.
 ///
 /// Dropping the link stops the task: the thread leaves its read within
@@ -217,7 +218,7 @@ impl<E: NetworkEndpoint + Send + 'static> NetworkLink<E> {
             state: Mutex::new(State {
                 endpoint,
                 events: VecDeque::new(),
-                lost: 0,
+                losses: Losses::NONE,
                 sends_failed: 0,
                 wakers: Vec::new(),
                 next_id: 0,
@@ -309,18 +310,18 @@ impl<E: NetworkEndpoint + Send + 'static> NetworkLink<E> {
         PendingEvents { link: self }
     }
 
-    /// How many events were dropped before the application read them: those
-    /// that found the link's queue full, and those the endpoint dropped
-    /// ([`NetworkEndpoint::events_lost`]).
+    /// The events dropped before the application read them: those that found
+    /// the link's queue full ([lost](Losses::lost)), and those the endpoint
+    /// dropped ([`NetworkEndpoint::losses`]).
     #[must_use]
-    pub fn events_lost(&self) -> u64 {
+    pub fn losses(&self) -> Losses {
         let state = self.shared.state();
-        state.lost + state.endpoint.events_lost()
+        state.losses + state.endpoint.losses()
     }
 
-    /// How many datagrams were dropped because the OS refused them for their
-    /// destination (the peer's host or network is unreachable, its port
-    /// refuses, its address is unusable).
+    /// How many datagrams (not events: one carries several) were dropped
+    /// because the OS refused them for their destination (the peer's host or
+    /// network is unreachable, its port refuses, its address is unusable).
     #[must_use]
     pub fn sends_failed(&self) -> u64 {
         self.shared.state().sends_failed

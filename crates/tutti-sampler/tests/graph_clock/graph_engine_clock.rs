@@ -90,10 +90,7 @@ fn graph_engine(transport: &Transport, units: Vec<VoicePool<f32>>) -> (Engine, E
     ed.spec_mut()
         .topology
         .set_outputs(routes(n).into_iter().map(|(unit, port)| {
-            PortSource::Node(OutputPort {
-                node: NodeKey(unit as u64 + 1),
-                port: port as u16,
-            })
+            PortSource::Node(OutputPort::new(NodeKey(unit as u64 + 1), port as u16))
         }));
     ed.commit().expect("commits");
     let engine = Engine::new(transport, &mut ed, exec).expect("within the limits");
