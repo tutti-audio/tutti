@@ -115,7 +115,7 @@ finding where the API produces wrong results today, not only friction.
 
 | # | finding | fix | size |
 |---|---|---|---|
-| N1 | A param'd node lists its params four times (`params`, `param_base`, `Io::param(k)`, `ParamSet`), and forgetting `param_base` silently disables modulation | one declaration the others are derived from; a derive (a new proc-macro crate) if a value cannot do it | M |
+| N1 | A param'd node lists its params four times (`with_params`, `param_base`, `Io::param(k)`, `ParamSet`), and forgetting `param_base` silently disables modulation | one declaration the others are derived from; a derive (a new proc-macro crate) if a value cannot do it | M |
 | N2 | A user's `ParamNode` needs a hand-written `SessionNode` before `Graph::add` takes it (the macro the built-in nodes use is private) | a `Params(node)` wrapper, beside `ForkByClone` and `Unforkable` | S |
 | N3 | `Clone` means opposite things to `ForkByClone` (a fork) and to `param_parts` (a shared cell), so `ForkByClone(param'd node)` compiles and forks onto the live cell | `Params(node)` (N2) is the only way in for a param'd node; refuse the other by type | M |
 | N4 | `Shape`, `Io::channel(c).map(..)` and the shortest node bodies are not in the docs | a node-writing guide in `tutti-graph`'s crate docs | S |

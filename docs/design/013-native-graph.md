@@ -3777,7 +3777,7 @@ Decisions:
    node that is replaced (a crossfade, a replace, an insert at an existing
    key: the delta's `replace` entry, which every swap passes through)
    may hand its successor the state it holds: `Node::chase(&self, &mut
-   Chase)` writes MIDI messages, and `Shape::chase(capacity)` declares
+   Chase)` writes MIDI messages, and `Shape::with_chase(capacity)` declares
    how many, so the executor sizes its buffer when it builds a plan, for
    the nodes that declare it, and the swap allocates nothing for it.
    Nothing is shared between the two nodes: the executor calls `chase` at
@@ -5542,7 +5542,7 @@ The graph side of events as ports is in `tutti-graph`. Most of it arrived
 with the graph crate, its runtime and the adapter, and is listed here as
 the one place that says what a ported node can rely on:
 
-- **Ports.** `Shape` declares event inputs and outputs (`events`).
+- **Ports.** `Shape` declares event inputs and outputs (`with_events`).
   Event edges connect an `EventOut` to an `EventIn` (`GraphSpec::events`),
   distinct types from the audio `OutPort`/`InPort`, so an audio↔event edge
   does not compile; `compile` refuses a port past a node's declared count
@@ -5565,7 +5565,7 @@ the one place that says what a ported node can rely on:
   behind a latent path.
 - **Held keys.** The executor tracks the notes and sustain pedals each
   event output of a note-carrying node holds (`Shape::note_events`, on unless
-  `no_note_events`; `held.rs`, a bitset over `tutti_ump::Key`, written by
+  `with_no_note_events`; `held.rs`, a bitset over `tutti_ump::Key`, written by
   the node's own op). A commit that removes an event edge, or replaces or
   removes its source, sends the surviving sink the closing pedal-ups and
   note-offs after the events a vanished delay flushed (through the delay when
@@ -5581,7 +5581,7 @@ the one place that says what a ported node can rely on:
   commit; a re-prepare keeps them for the first block after the resume). A
   block's slot takes only so many closes; the rest follow in the next blocks. The reference interpreter does not model a crossfade.
 - **Declared capacity.** `Shape::event_capacity` is the most events
-  a node writes to each event output per block (`event_capacity(n)`;
+  a node writes to each event output per block (`with_event_capacity(n)`;
   `None` takes the executor's default, `DEFAULT_EVENT_CAPACITY`). Every
   buffer downstream is sized from the declarations at compile and prepare
   time (`Plan::event_slot_capacity`, `EventSlotCapacity`: a node's output
@@ -7634,7 +7634,7 @@ which everything else is derived.** The refusals of #570 stay, for buses that ar
   `sink(topology)`, `EMPTY` for an events-only node, and `through_unassigned(n)`, `source_unassigned(n)`,
   `sink_unassigned(n)` for a node that knows only a width (one `Unassigned` main bus, or past 16 channels ports with no
   bus). `Buses::of_width` is `Buses::unassigned`, which refuses a width past a bus (const panic).
-- `Shape::ports(in, out)` keeps ports past the buses: a plugin's bus wider than 16 or past `MAX_BUSES`, the
+- `Shape::with_ports(in, out)` keeps ports past the buses: a plugin's bus wider than 16 or past `MAX_BUSES`, the
   keyed nodes past 8 channels until T3, and test nodes that sum ports which are not a bus. A side with ports and no
   main bus has a pass only at equal width, as before.
 - `Shape::pass()` returns the public `Pass` (`inputs`, `outputs`, `contributions(c)`) or the `PassError`.
@@ -7676,7 +7676,7 @@ that says "unassigned" for such a channel predates the rename.
 **As built (T2).**
 
 - The shape issues the handles: `Shape::input_bus(i)` / `output_bus(i)` for bus `i` in port order, and
-  `spare_in()` / `spare_out()` for the ports past the buses (`ports`). `input_handles()` / `output_handles()` give
+  `spare_in()` / `spare_out()` for the ports past the buses (`with_ports`). `input_handles()` / `output_handles()` give
   a side's every port that way, one handle a bus. A node builds its shape on the control side, keeps the handles it
   needs as fields, and reads `Io::bus_in(h)` / `bus_out(h)`, or `Inputs::bus` / `Outputs::bus` after `split()`, each
   a `BusIn` / `BusOut` bounded to the bus. `Outputs::buses(&[OutBus])` lends several output buses at once, in port
@@ -8356,7 +8356,7 @@ fourth.
 
 - **Param ports on `Shape`.** A node declares the params the graph may
   modulate, by `UnitAddr` ("Param addresses" below), in port order:
-  `Shape::params` (`ParamPorts`, at most `MAX_PARAM_PORTS` = 32). `ParamRamp` keeps its
+  `Shape::with_params` (`ParamPorts`, at most `MAX_PARAM_PORTS` = 32). `ParamRamp` keeps its
   typed `ParamKey<U>` constructor; a port itself is erased over its unit,
   as the `ParamRamp` wire is.
 - **The value.** `GraphSpec::params: BTreeMap<ParamIn, ParamMod>`: per
@@ -9085,7 +9085,7 @@ files.
 **The recipe, per node** (what the SVF's port did; the diffs are the
 reference):
 
-1. `impl Node`: `shape` (width, `params(&PARAMS)` for the params the
+1. `impl Node`: `shape` (width, `with_params(&PARAMS)` for the params the
    graph modulates, latency and tail as `route`/`tail` reported them),
    `prepare` (rate-derived state: what `set_sample_rate` did; allocation is
    allowed here), `process` over `Io` (`io.split()`, `io.param(k).frames()`
@@ -9831,8 +9831,8 @@ passes a value, so a bare `UnitParam` is index 0):
 - `ParamSet::{set, get, cell}` and `ParamSetBuilder::param`. The duplicate check
   is on the whole address (one address, one cell); the same kind at another
   index is accepted. `ParamSet::params` yields `UnitAddr`.
-- `ParamPorts` and `Shape`: the list holds `UnitAddr` (`Shape::param_addrs`,
-  `ParamPorts::of`; `params`/`new` take bare kinds, index 0). `ParamIn::param`,
+- `ParamPorts` and `Shape`: the list holds `UnitAddr` (`Shape::with_param_addrs`,
+  `ParamPorts::of`; `with_params`/`new` take bare kinds, index 0). `ParamIn::param`,
   `ParamPortOp::param`, the range cells and the fused step key on the address, so a
   port takes the events addressed to its own index and no other's.
 - The event wire: `ParamSegment` packs the `UnitAddr`'s `u16` into its `u32` id
