@@ -311,6 +311,10 @@ impl PortScratch {
 }
 
 /// A block's planar channels at their width.
+///
+/// `'a` borrows the channel list and `'b` the samples behind it, as
+/// [`PlanesMut`] does: a caller's `&mut [&mut [S]]` is invariant in the inner
+/// lifetime, so one lifetime would force every caller's two borrows equal.
 #[derive(Debug)]
 pub enum Planar<'a, 'b> {
     /// 32-bit channels.
@@ -346,7 +350,7 @@ impl Planar<'_, '_> {
     }
 }
 
-/// Everything one block hands the plugin.
+/// Everything one block hands the plugin. `'b` is [`Planar`]'s second lifetime.
 pub struct ProcessCall<'a, 'b> {
     /// The channel tables, at the activation's format.
     pub scratch: &'a mut PortScratch,

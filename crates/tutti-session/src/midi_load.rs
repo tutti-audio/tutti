@@ -5,8 +5,10 @@
 //! The reading, the conversion of every track's events to a [`ClipEvents`], and
 //! the tempo map and meter of its timeline are all the awaited load's; the
 //! control thread publishes the finished values ([`Midi::play_track`]). A
-//! file's ticks become beats over its division, so no sample rate enters and
-//! the load never converts to frames.
+//! metrical file's ticks become beats over its division, so no sample rate
+//! enters and the load never converts to frames. A file in SMPTE time counts
+//! seconds, not beats: its events are placed over the session's tempo map as last
+//! published when [`Midi::load_midi`] was called ([`LoadMidi`]).
 //!
 //! What the read repaired ([`ReadRepair`]) and what the conversion left out
 //! (a [`DroppedEvent`]) is the loaded value's [`report`](LoadedMidi::report),
@@ -20,7 +22,8 @@ use std::task::{Context, Poll};
 
 use tutti_buffers::Float;
 use tutti_midi_file::{
-    FileEvent, MidiFile, ReadRepair, RefusedTimeSignature, Timebase, TimelineDrop, Track,
+    FileEvent, MidiFile, ReadRepair, RefusedTimeSignature, SmfTimeline, Timebase, TimelineDrop,
+    Track,
 };
 use tutti_midi_runtime::{ClipEvents, TimedMidiEvent};
 use tutti_platform::{Asset, WeakExecutor};
@@ -39,17 +42,31 @@ use crate::unblocked::Unblocked;
 /// on the session's executor, and resolves to a [`LoadedMidi`]. There is no
 /// blocking form.
 ///
-/// A file in SMPTE time has seconds and no beats: it resolves with its
-/// [`file`](LoadedMidi::file) and report, and [`TrackError::SmpteTiming`] for
-/// every track.
+/// A file in SMPTE time (SMF 1.0 section 2.1: ticks are fractions of a second
+/// of `fps * ticks per frame`, 29.97 being 30000/1001) has no beats of its own,
+/// and its Set Tempo events move no tick. Its events keep their seconds, and a
+/// clip is placed in beats over **the session's tempo map as last published
+/// when [`Midi::load_midi`] was called** (a `set` of the tempo not yet followed
+/// by `update` is not in it): an event at `s` seconds lands on
+/// `tempo.beat_at_seconds(s)`, the map the transport plays on. Each track's
+/// [`tempo`](LoadedTrack::tempo) is that map and its
+/// [`meter`](LoadedTrack::meter) the session's meter, so the clip plays at the
+/// same times in the session as in the file for as long as the map stays. Unlike
+/// a metrical file's clip, an SMPTE clip does not follow later tempo changes in
+/// absolute time: it stays on the beats it was placed on.
 ///
-/// It holds the asset and a weak handle to the session's executor, and nothing
-/// else of the session. Dropping it unawaited reads nothing.
+/// It holds the asset, the session's tempo map and meter, and a weak handle to
+/// the session's executor, and nothing else of the session. Dropping it
+/// unawaited reads nothing.
 #[derive(Debug)]
 #[must_use = "a load does nothing unless it is awaited"]
 pub struct LoadMidi {
     asset: Asset,
     executor: WeakExecutor,
+    /// The session's tempo map and meter at the call, which an SMPTE file's
+    /// seconds are placed over.
+    tempo: Arc<TempoMap>,
+    meter: ProjectMeter,
 }
 
 impl LoadMidi {
@@ -57,7 +74,7 @@ impl LoadMidi {
     /// full read of the file.
     fn run(self) -> Result<LoadedMidi, LoadError> {
         MidiFile::read(self.asset)
-            .map(convert)
+            .map(|file| convert(file, &self.tempo, &self.meter))
             .map_err(|error| LoadError::Midi(Arc::new(error)))
     }
 }
@@ -126,10 +143,6 @@ pub enum TrackError {
         /// How many tracks the file has.
         tracks: usize,
     },
-    /// The file's ticks are fractions of a second: it has no beats to place a
-    /// clip on, and a file in SMPTE time is not converted to clips.
-    #[error("the file is in SMPTE time: it has no beats, and is not converted to clips")]
-    SmpteTiming,
 }
 
 /// Why a [`LoadedMidi`] has no one tempo map and meter.
@@ -140,10 +153,6 @@ pub enum NoCommonTimelineError {
     /// ([`LoadedTrack::tempo`], [`LoadedTrack::meter`]).
     #[error("the file's tracks are independent sequences, each with its own timeline")]
     PerTrack,
-    /// The file's ticks are fractions of a second: it has no tempo map or
-    /// meter.
-    #[error("the file is in SMPTE time: it has no tempo map or meter")]
-    SmpteTiming,
 }
 
 /// One track of a [`LoadedMidi`] as the values a session plays and follows.
@@ -152,10 +161,12 @@ pub struct LoadedTrack {
     /// The track's events in beats, ready to play ([`Midi::play_track`]).
     pub events: Arc<ClipEvents>,
     /// The tempo map the track plays on: the file's one map in a format 0 or 1
-    /// file, the sequence's own in a format 2 file.
+    /// file, the sequence's own in a format 2 file, and the session's at the
+    /// load in a file in SMPTE time.
     pub tempo: Arc<TempoMap>,
     /// The meter its Time Signature events declare, bars counted from beat 0;
-    /// 4/4 where the track declares none.
+    /// 4/4 where the track declares none; the session's in a file in SMPTE
+    /// time.
     pub meter: Arc<ProjectMeter>,
 }
 
@@ -206,8 +217,6 @@ enum Timeline {
     Common(Arc<TempoMap>, Arc<ProjectMeter>),
     /// Format 2: each track has its own tempo map and meter.
     PerTrack,
-    /// A file in SMPTE time: no beats, so no tempo map or meter.
-    Smpte,
 }
 
 /// What a [`LoadMidi`] returns: the file as read, and each track as a
@@ -231,13 +240,8 @@ impl LoadedMidi {
     ///
     /// # Errors
     ///
-    /// [`TrackError::NoSuch`] when the file has no track `i`;
-    /// [`TrackError::SmpteTiming`] when it is in SMPTE time, which is not
-    /// converted to clips.
+    /// [`TrackError::NoSuch`] when the file has no track `i`.
     pub fn track(&self, i: usize) -> Result<&LoadedTrack, TrackError> {
-        if matches!(self.timeline, Timeline::Smpte) {
-            return Err(TrackError::SmpteTiming);
-        }
         self.tracks.get(i).ok_or(TrackError::NoSuch {
             index: i,
             tracks: self.tracks.len(),
@@ -249,8 +253,7 @@ impl LoadedMidi {
     /// # Errors
     ///
     /// [`NoCommonTimelineError::PerTrack`] for a format 2 file, whose tracks
-    /// each keep their own ([`LoadedTrack::tempo`]);
-    /// [`NoCommonTimelineError::SmpteTiming`] for a file in SMPTE time.
+    /// each keep their own ([`LoadedTrack::tempo`]).
     pub fn tempo(&self) -> Result<&Arc<TempoMap>, NoCommonTimelineError> {
         self.common().map(|(tempo, _)| tempo)
     }
@@ -268,7 +271,6 @@ impl LoadedMidi {
         match &self.timeline {
             Timeline::Common(tempo, meter) => Ok((tempo, meter)),
             Timeline::PerTrack => Err(NoCommonTimelineError::PerTrack),
-            Timeline::Smpte => Err(NoCommonTimelineError::SmpteTiming),
         }
     }
 
@@ -288,12 +290,19 @@ impl<F: Float> Midi<'_, F> {
         LoadMidi {
             asset: asset.into(),
             executor: self.executor.clone(),
+            tempo: self.settings.tempo_map(),
+            meter: self.meter.clone(),
         }
     }
 }
 
-/// The clips, timeline values and report of `file`.
-fn convert(file: MidiFile) -> LoadedMidi {
+/// The clips, timeline values and report of `file`; a file in SMPTE time is
+/// placed over `session_tempo`, with `session_meter` as its meter.
+fn convert(
+    file: MidiFile,
+    session_tempo: &Arc<TempoMap>,
+    session_meter: &ProjectMeter,
+) -> LoadedMidi {
     let mut report = LoadReport {
         repairs: file.repairs().to_vec(),
         ..LoadReport::default()
@@ -338,7 +347,27 @@ fn convert(file: MidiFile) -> LoadedMidi {
             }
             Timeline::PerTrack
         }
-        Timebase::Smpte(_) | Timebase::SmpteSequences(_) => Timeline::Smpte,
+        Timebase::Smpte(view) => {
+            let meter = Arc::new(session_meter.clone());
+            for (index, timeline) in view.timelines(session_tempo).enumerate() {
+                tracks.push(LoadedTrack {
+                    events: clip_from(&mut report, index, timeline),
+                    tempo: Arc::clone(session_tempo),
+                    meter: Arc::clone(&meter),
+                });
+            }
+            Timeline::Common(Arc::clone(session_tempo), meter)
+        }
+        Timebase::SmpteSequences(sequences) => {
+            for (index, sequence) in sequences.sequences().enumerate() {
+                tracks.push(LoadedTrack {
+                    events: clip_from(&mut report, index, sequence.timeline(session_tempo)),
+                    tempo: Arc::clone(session_tempo),
+                    meter: Arc::new(session_meter.clone()),
+                });
+            }
+            Timeline::PerTrack
+        }
     };
     LoadedMidi {
         file,
@@ -355,7 +384,11 @@ fn clip_of(
     track: &Track,
     ticks_per_quarter: TicksPerQuarterNote,
 ) -> Arc<ClipEvents> {
-    let timeline = track.timeline(ticks_per_quarter);
+    clip_from(report, index, track.timeline(ticks_per_quarter))
+}
+
+/// `timeline` as a clip, its dropped events added to `report` as track `index`'s.
+fn clip_from(report: &mut LoadReport, index: usize, timeline: SmfTimeline) -> Arc<ClipEvents> {
     report.dropped.extend(
         timeline
             .dropped

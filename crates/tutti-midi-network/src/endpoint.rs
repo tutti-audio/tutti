@@ -37,12 +37,14 @@ pub trait NetworkEndpoint {
     /// The next event for the application, if one is queued.
     fn poll_event(&mut self) -> Option<Event>;
 
-    /// The events dropped because [`MAX_QUEUED_EVENTS`] were already waiting
-    /// for [`poll_event`](Self::poll_event), since the endpoint was made: a
-    /// data event that found the queue full is [lost](Losses::lost), and an
-    /// event a later session-life event displaced is
-    /// [evicted](Losses::evicted). An application that polls events never sees
-    /// the counts rise.
+    /// What was dropped since the endpoint was made. Events dropped because
+    /// [`MAX_QUEUED_EVENTS`] were already waiting for
+    /// [`poll_event`](Self::poll_event): a data event that found the queue full
+    /// is [lost](Losses::lost), and an event a later session-life event
+    /// displaced is [evicted](Losses::evicted); an application that polls
+    /// events never sees these counts rise. A Bye or NAK whose advisory text a
+    /// peer sent partly unreadable is [lost](Losses::lost) too, though the
+    /// command is acted on.
     fn losses(&self) -> Losses;
 
     /// When [`on_timeout`](Self::on_timeout) next has work, if ever.
@@ -77,7 +79,8 @@ impl Outbox {
     /// Moves a session's output here: its commands packed into datagrams for
     /// `peer`, its events in order.
     fn drain(&mut self, peer: SocketAddr, session: &mut Session) {
-        let (commands, events) = session.take_output();
+        let (commands, events, losses) = session.take_output();
+        self.losses += losses;
         self.transmits.extend(
             pack(&commands)
                 .into_iter()

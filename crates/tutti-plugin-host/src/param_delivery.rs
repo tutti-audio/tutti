@@ -119,7 +119,7 @@ use std::sync::{Arc, OnceLock};
 
 use crate::node_losses::{Count, LossCounts};
 use tutti_plugin_types::{ParameterChanges, ParameterQueue, epoch_before};
-use tutti_rt::Tally;
+use tutti_rt::{CappedVec, Tally};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
@@ -486,10 +486,10 @@ impl GridBits {
 ///
 /// Public for `tutti-plugin`'s node of an out-of-process plugin, which drives the same piece.
 pub struct ParamDelivery {
-    /// Sorted by address; capacity reserved in [`new`](Self::new).
-    slots: Vec<Slot>,
+    /// Sorted by address; capped at `room` in [`new`](Self::new).
+    slots: CappedVec<Slot>,
     /// The slots with a queue in `changes`, in queue order.
-    staged: Vec<u32>,
+    staged: CappedVec<u32>,
     /// The chunk being filled: room for a queue per slot, each with room for
     /// the chunk's point budget ([`prepare`](Self::prepare)).
     changes: ParameterChanges,
@@ -553,14 +553,14 @@ impl ParamDelivery {
         // counters (tests) keeps the first record for the controls' readers
         // and mirrors into its own.
         let _ = counters.record.set(Arc::clone(&record));
-        let mut slots = Vec::with_capacity(room);
+        let mut slots = CappedVec::with_capacity(room);
         slots.extend(addresses.into_iter().enumerate().map(|(i, a)| Slot {
             mirror: u32::try_from(i).unwrap_or(NO_MIRROR),
             ..Slot::new(a)
         }));
         Self {
             slots,
-            staged: Vec::with_capacity(room),
+            staged: CappedVec::with_capacity(room),
             changes: ParameterChanges::reserved_bridged(room, UNPREPARED_POINTS),
             owed: 0,
             walk: 0,
@@ -659,17 +659,18 @@ impl ParamDelivery {
     fn slot(&mut self, address: ParamId) -> Option<usize> {
         match self.slots.binary_search_by(|s| s.address.cmp(&address)) {
             Ok(i) => Some(i),
-            Err(i) if self.slots.len() < self.room => {
-                self.slots.insert(i, Slot::new(address));
+            Err(i) => {
+                self.slots
+                    .insert_within_capacity(i, Slot::new(address))
+                    .ok()?;
                 // The slots after it moved up one.
-                for s in &mut self.staged {
+                for s in self.staged.as_mut_slice() {
                     if *s as usize >= i {
                         *s += 1;
                     }
                 }
                 Some(i)
             }
-            Err(_) => None,
         }
     }
 
@@ -871,7 +872,11 @@ impl ParamDelivery {
                     return;
                 }
                 self.slots[i].queue = queue;
-                self.staged.push(u32::try_from(i).unwrap_or(u32::MAX));
+                if !self.staged.push(u32::try_from(i).unwrap_or(u32::MAX)) {
+                    // Impossible by construction: a staged entry per slot.
+                    self.counters.dropped.add(1);
+                    return;
+                }
                 self.grid.open(queue as usize);
                 queue as usize
             }

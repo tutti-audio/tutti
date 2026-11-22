@@ -10,7 +10,9 @@ use tutti_midi_file::{
     SmfParseError, SmfTicksPerFrame, SmfTicksPerQuarter, SmpteView, Tick, Timebase,
 };
 use tutti_midi_protocol::MtcRate;
+use tutti_tempo::TempoMap;
 use tutti_units::Seconds;
+use tutti_units::{Beat, Bpm};
 
 fn read(bytes: &[u8]) -> MidiFile {
     read_bytes(bytes).expect("reads")
@@ -307,6 +309,49 @@ fn a_file_in_smpte_time_has_no_clip() {
     let file = read(&one_note(Division::Metrical(96)));
     assert!(matches!(file.timebase(), Timebase::Metrical(_)));
     assert!(metrical(&file).to_clip().is_ok());
+}
+
+/// SMF 1.0 section 2.1: at -25 frames a second and 40 ticks a frame a tick is a
+/// millisecond, so tick 1000 is 1.0 s: beat 2.0 over a 120 BPM map, and beat
+/// 1.0 over 60 BPM, whatever Set Tempo the file carries. Each track of a
+/// format 1 file and each sequence of a format 2 file is placed so.
+#[test]
+fn an_smpte_files_tracks_are_placed_in_beats_over_the_given_tempo_map() {
+    let division = Division::Smpte {
+        fps: -25,
+        ticks_per_frame: 40,
+    };
+    let track = || {
+        vec![
+            RawEvent::tempo(0, 1_000_000),
+            RawEvent::note_on(1000, 0, 60, 100),
+        ]
+    };
+    let at = |tempo: f64| TempoMap::constant(Bpm::of(tempo)).expect("a tempo");
+    let note_beats = |timelines: Vec<tutti_midi_file::SmfTimeline>| -> Vec<Beat> {
+        timelines
+            .iter()
+            .map(|timeline| timeline.packets.last().expect("the note").0)
+            .collect()
+    };
+
+    let format_1 = read(&build_smf(1, division, &[track(), track()]));
+    let view = smpte(&format_1);
+    let (at_120, at_60) = (at(120.0), at(60.0));
+    let timelines = view.timelines(&at_120);
+    assert_eq!(timelines.len(), 2);
+    assert_eq!(note_beats(timelines.collect()), [Beat::new(2.0); 2]);
+    assert_eq!(
+        note_beats(view.timelines(&at_60).collect()),
+        [Beat::new(1.0); 2]
+    );
+
+    let format_2 = read(&build_smf(2, division, &[track(), track()]));
+    let Timebase::SmpteSequences(sequences) = format_2.timebase() else {
+        panic!("an SMPTE file of independent sequences");
+    };
+    let beats: Vec<_> = sequences.sequences().map(|s| s.timeline(&at_120)).collect();
+    assert_eq!(note_beats(beats), [Beat::new(2.0); 2]);
 }
 
 /// SMF 1.0 section 2.1: 15 bits of ticks per quarter note, zero is none.

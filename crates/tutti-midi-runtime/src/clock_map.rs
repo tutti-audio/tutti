@@ -199,7 +199,7 @@ impl ClockMap {
     pub fn observe(&mut self, at: ClockReading) -> Observed {
         if at == self.anchor {
             return Observed::Followed {
-                correction: Seconds::new(0.0),
+                correction: Seconds::ZERO,
             };
         }
         if at.os < self.anchor.os || at.frame <= self.anchor.frame {

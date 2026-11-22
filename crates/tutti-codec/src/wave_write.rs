@@ -77,14 +77,15 @@ pub fn write_wave<'a, S: Sample>(
     }
 }
 
-/// Feeds `wave` to `write` in chunks.
+/// Feeds `wave` to `write` in chunks of its own sample format: the encoder
+/// converts each sample once, from what the wave holds to what the file holds.
 fn feed<S: Sample>(
     wave: &Wave<S>,
-    mut write: impl FnMut(Interleaved<'_, f32>) -> Result<()>,
+    mut write: impl FnMut(Interleaved<'_, S>) -> Result<()>,
 ) -> Result<()> {
     let layout = wave.layout();
     let mut rest = wave.planes();
-    let mut chunk = vec![0.0f32; layout.interleaved_len(Samples::new(WRITE_CHUNK))];
+    let mut chunk = vec![S::SILENCE; layout.interleaved_len(Samples::new(WRITE_CHUNK))];
     while !rest.is_empty() {
         let (head, tail) = rest.split_at(rest.frames().min(Samples::new(WRITE_CHUNK)));
         let len = layout.interleaved_len(head.frames());

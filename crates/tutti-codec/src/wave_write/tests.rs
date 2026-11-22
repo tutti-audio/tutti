@@ -74,25 +74,52 @@ fn a_written_wave_reads_back_as_itself() {
     }
 }
 
-/// A wave of 16-bit samples is written at 16 bits and reads back as the same
-/// integers to within the writer's own step (it scales by 32767 and the
-/// reader by 32768), whatever the format it is held in.
+/// A wave of 16-bit samples written at 16 bits reads back as the same
+/// integers: the encoder takes them as they are (an integer-to-integer
+/// conversion of one width is the identity), with no float in between.
 #[test]
 fn an_integer_wave_writes_the_integers_it_holds() {
     use crate::{Pcm, read_wave};
-    let samples = [0i16, 16_384, -16_384, 32_767, -32_768, 1];
+    let samples = [0i16, 16_384, -16_384, 32_767, -32_768, 1, -1];
     let wave = Wave::from_mono(SampleRate::SR_48K, tutti_buffers::Mono::new(&samples));
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ints.wav");
     write_wave(&wave, &path, Format::Wav(Pcm::Int16)).unwrap();
     let back = read_wave::<i16>(&path).unwrap();
-    assert_eq!(back.len(), wave.len());
-    for (&got, &want) in back.channel(0).iter().zip(&samples) {
-        assert!(
-            (i32::from(got) - i32::from(want)).abs() <= 1,
-            "{got} for {want}"
-        );
-    }
+    assert!(back.channel(0).iter().eq(&samples));
+}
+
+/// A wave of `f64` samples written as 64-bit float reads back bit for bit:
+/// `0.1` and `1 + 2^-40` have no `f32` of the same value, so a narrowing on
+/// the way would change both.
+#[test]
+fn an_f64_wave_writes_as_float64_bit_for_bit() {
+    use crate::{Pcm, read_wave};
+    let samples = [0.1f64, 1.0 + 2f64.powi(-40), -0.3];
+    let wave = Wave::from_mono(SampleRate::SR_48K, tutti_buffers::Mono::new(&samples));
+    let mut bytes = Vec::new();
+    write_wave(&wave, &mut bytes, Format::Wav(Pcm::Float64)).unwrap();
+    let back = read_wave::<f64>(bytes).unwrap();
+    let got: Vec<u64> = back.channel(0).iter().map(|x| x.to_bits()).collect();
+    let want: Vec<u64> = samples.iter().map(|x| x.to_bits()).collect();
+    assert_eq!(got, want);
+}
+
+/// An `f64` sample is quantized to 24 bits from its own value: `x` with
+/// `x * 2^23 = 4_194_304.5 + 2^-10` rounds up to `4_194_305`. Through `f32`
+/// (whose step at `0.5` is `2^-24`) it would be the tie `4_194_304.5`, which
+/// rounds half to even down to `4_194_304`.
+#[test]
+fn an_f64_wave_quantizes_to_24_bits_from_its_own_value() {
+    use crate::{Pcm, read_wave};
+    let scale = 8_388_608.0; // 2^23
+    let x = (4_194_304.5 + 2f64.powi(-10)) / scale;
+    let wave = Wave::from_mono(SampleRate::SR_48K, tutti_buffers::Mono::new(&[x]));
+    let mut bytes = Vec::new();
+    write_wave(&wave, &mut bytes, Format::Wav(Pcm::Int24)).unwrap();
+    let back = read_wave::<f64>(bytes).unwrap();
+    let got: Vec<f64> = back.channel(0).iter().copied().collect();
+    assert_eq!(got, [4_194_305.0 / scale]);
 }
 
 /// A path destination replaces an existing file by default, and `create_new`

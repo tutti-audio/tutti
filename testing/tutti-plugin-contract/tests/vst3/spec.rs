@@ -20,7 +20,7 @@ use tutti_plugin_contract::{
 use tutti_plugin_types::{Control, ProcessContext, Processor, Samples};
 use tutti_ump::{CCNumber, ControlValue, MidiChannel, NoteVelocity, U7};
 use tutti_units::Normalized;
-use tutti_vst3_host::{Vst3Loaded, Vst3Processor};
+use tutti_vst3_host::Vst3Loaded;
 
 fn active<F: Format<L = Vst3Loaded>>() -> Active<Vst3Loaded> {
     let mut loaded = F::load();
@@ -204,6 +204,3 @@ vst3_cases!(
     an_editors_edit_reaches_the_processor,
     a_parameter_written_while_not_processing_is_flushed
 );
-
-#[allow(dead_code)]
-fn _typed(_: &Vst3Processor<f32>) {}
