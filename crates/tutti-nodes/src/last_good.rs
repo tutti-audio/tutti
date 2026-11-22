@@ -87,6 +87,7 @@ impl LastGood<f64> {
     /// a non-finite one reads as the last finite level.
     #[inline]
     pub(crate) fn driven_level<F: Float>(&mut self, driven: F) -> F {
+        // The read runs on every frame: a finite `driven` becomes the held value.
         let held = self.read(driven.into());
         if driven.is_finite() {
             driven
