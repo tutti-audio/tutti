@@ -156,7 +156,9 @@ impl<F: Float> Editor<F> {
     /// editor whole does (a builder, a fork, the test harness): an entry
     /// the spec did not hold is declared, its cell made from the values; one
     /// it held keeps its cell; one left out is dropped. The values are set
-    /// first, so a new lane starts from them.
+    /// first, so a new lane starts from them (a caller's values hold nothing
+    /// of an edge it dropped: a fresh editor has none, and the harness
+    /// retains the values of the graph's edges at each switch).
     pub(crate) fn enter_gains(&mut self, entries: BTreeMap<EdgeId, EdgeGain>) {
         self.touch();
         self.spec.gains.retain(|id, _| entries.contains_key(id));

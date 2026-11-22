@@ -836,6 +836,26 @@ fn a_redeclared_entry_is_read_by_the_audio_at_its_new_base() {
     );
 }
 
+/// An entry written raw through `spec_mut` on a connected edge is a lane at
+/// the editor's values, unity and the default range: a commit makes its cell
+/// and renders the plain sum, never a panic.
+#[test]
+fn a_raw_entry_commits_as_a_unity_lane() {
+    let mut rig = Rig::new(0.5);
+    let id = output_edge(2);
+    rig.ed.spec_mut().set_edge_gain(id, EdgeGain::default());
+    rig.ed.commit().expect("commits");
+    rig.exec.apply_pending();
+    rig.block();
+    let got = rig.block();
+    assert!(
+        got.iter().all(|&x| x == (0.0 + 0.5 * 1.0) + 2.0 * 1.0),
+        "the raw lane weighs unity"
+    );
+    assert_eq!(rig.ed.edge_gain(id), Some(amp(1.0)));
+    assert_eq!(rig.ed.edge_gain_range(id), Some(EdgeGain::DEFAULT_RANGE));
+}
+
 // ---------------------------------------------------------------------------
 // Silence, zero, and the constant flag.
 // ---------------------------------------------------------------------------

@@ -224,22 +224,19 @@ impl GainCells {
                     return (id, cell);
                 }
                 let range = values.gain_range(id);
-                // An entry has its cell from its declaration; a lane without
-                // one is derived by this commit (the main output crossfade's),
-                // so its cell is made here.
-                let (cell, fade) = if spec.gains.contains_key(&id) {
-                    let cell = self
-                        .0
-                        .get(&id)
-                        .expect("a gain entry has its cell from its declaration");
-                    (cell, values.fade(id))
+                // An entry has its cell from its declaration; one written
+                // through `spec_mut` has none yet, and a lane without an
+                // entry is derived by this commit (the main output
+                // crossfade's): the cell is made here from the values.
+                let fade = if spec.gains.contains_key(&id) {
+                    values.fade(id)
                 } else {
-                    let cell = self
-                        .0
-                        .entry(id)
-                        .or_insert_with(|| GainCell::new(values.base(id), range));
-                    (&*cell, EdgeFade::None)
+                    EdgeFade::None
                 };
+                let cell = self
+                    .0
+                    .entry(id)
+                    .or_insert_with(|| GainCell::new(values.base(id), range));
                 cell.store_range(range);
                 cell.store_fade(fade);
                 (id, cell.clone())

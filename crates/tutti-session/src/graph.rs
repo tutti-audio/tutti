@@ -3111,7 +3111,7 @@ impl<F: Float> Graph<F> {
         }
         // A fade in is not the author's gain: the edge goes on rising, to unity.
         let cleared = if self.editor.edge_fade(id) == Some(EdgeFade::In) {
-            if let Some(source) = self.editor.spec().gains[&id].source {
+            if let Some(source) = self.editor.spec().gains.get(&id).and_then(|g| g.source) {
                 self.editor.spec_mut().disconnect_edge_gain(id, source);
             }
             self.editor

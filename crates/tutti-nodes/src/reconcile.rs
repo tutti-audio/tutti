@@ -1507,9 +1507,10 @@ fn owe_resyncs(
 }
 
 /// A declared target's bounds as a [`ParamRange`]: `compile` refuses a NaN
-/// bound, so a compiled target has none.
+/// bound (`ProgramCompileError::NanRange`), so a compiled target has none.
 fn declared_range(min: f64, max: f64) -> ParamRange {
-    ParamRange::new(min, max).expect("compile refuses a NaN bound")
+    ParamRange::new(min, max)
+        .expect("a compiled target has no NaN bound: compile refuses it (NanRange)")
 }
 
 /// Stores a range edit: the port's cell for a native lane (a store, no

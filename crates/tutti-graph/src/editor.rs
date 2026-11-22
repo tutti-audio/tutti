@@ -526,14 +526,7 @@ impl<F: Float> Editor<F> {
     /// [`set_edge_fade`](Self::set_edge_fade)): wire a source
     /// ([`GraphSpec::connect_edge_gain`]) only to an edge declared that way,
     /// and never write [`GraphSpec::gains`] through this borrow. A commit
-    /// that finds an entry without its cell panics.
-    ///
-    /// # Panics
-    ///
-    /// The next [`commit`](Self::commit) panics when a gain entry was written
-    /// through this borrow (`GraphSpec::set_edge_gain`, `connect_edge_gain`
-    /// on an edge with no entry, or `gains` itself) and not declared by the
-    /// editor, since the entry has no cell.
+    /// that finds an entry without its cell makes one from the values.
     pub fn spec_mut(&mut self) -> &mut GraphSpec {
         self.touch();
         &mut self.spec

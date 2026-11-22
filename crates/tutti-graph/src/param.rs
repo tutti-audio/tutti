@@ -262,6 +262,7 @@ impl Quantity for CellValue {
 /// one and the fields are private), so a clamp by it cannot panic or yield
 /// NaN; an infinite bound is no clamp on that side. Crossed bounds are
 /// ordered where they are applied, never a panic.
+///
 /// Sixteen bytes, so a port's live range is published whole through a
 /// [`ParamRangeCell`] and a reader sees one publish's `min` and `max`
 /// together.
@@ -1243,6 +1244,27 @@ mod tests {
     use crate::param_event::{ParamEvent, ParamRamp};
     use crate::time::Offset;
     use tutti_units::{Hz, ParamKey, Real, Samples};
+
+    /// A NaN at either end is no range; an infinite end is a range; `of` is
+    /// `new` for bounds that are not NaN.
+    #[test]
+    fn a_range_holds_no_nan_bound() {
+        assert_eq!(ParamRange::new(f64::NAN, 1.0), None);
+        assert_eq!(ParamRange::new(0.0, f64::NAN), None);
+        assert_eq!(ParamRange::new(f64::NAN, f64::NAN), None);
+        let open = ParamRange::new(f64::NEG_INFINITY, f64::INFINITY).expect("infinite bounds");
+        assert_eq!(open, ParamRange::UNBOUNDED);
+        let r = ParamRange::new(-1.0, 2.0).expect("finite bounds");
+        assert_eq!(r, ParamRange::of(-1.0, 2.0));
+        assert_eq!((r.min(), r.max()), (-1.0, 2.0));
+    }
+
+    /// `of` refuses a NaN bound by panicking, as a literal's error.
+    #[test]
+    #[should_panic(expected = "not NaN")]
+    fn of_panics_on_a_nan_bound() {
+        let _ = ParamRange::of(f64::NAN, 0.0);
+    }
 
     const AZ: Option<UnitParam> = Some(UnitParam::Azimuth);
     const EL: Option<UnitParam> = Some(UnitParam::Elevation);
