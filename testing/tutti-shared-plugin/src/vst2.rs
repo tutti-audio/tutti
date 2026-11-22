@@ -4,8 +4,7 @@
 
 extern crate tutti_vst2_author as vst;
 
-use std::sync::{Arc, Mutex};
-use tutti_rt::LockExt;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use vst::api::{self, AEffect, HostCallbackProc, TimeInfoFlags};
 use vst::buffer::AudioBuffer;
@@ -149,14 +148,18 @@ impl Plugin for Shared {
         self.double = double;
     }
     fn resume(&mut self) {
-        self.core
-            .prepare(&mut self.dsp.lock_recover(), self.rate, self.block);
+        self.core.prepare(
+            &mut self.dsp.lock().unwrap_or_else(PoisonError::into_inner),
+            self.rate,
+            self.block,
+        );
     }
     /// What a plugin does on `effStopProcess`: forgets its signal history. The header gives
     /// the opcode no meaning beyond "no arguments" (`aeffectx.h`); a delay or reverb that
     /// clears its buffers when it stops is the practice a host's `reset` relies on.
     fn stop_process(&mut self) {
-        self.core.reset(&mut self.dsp.lock_recover());
+        self.core
+            .reset(&mut self.dsp.lock().unwrap_or_else(PoisonError::into_inner));
     }
     fn can_do(&self, can_do: CanDo) -> api::Supported {
         match can_do {
@@ -172,7 +175,7 @@ impl Plugin for Shared {
     }
 
     fn process_events(&mut self, events: &api::Events) {
-        let mut dsp = self.dsp.lock_recover();
+        let mut dsp = self.dsp.lock().unwrap_or_else(PoisonError::into_inner);
         for i in 0..events.num_events.max(0) as usize {
             // SAFETY: `Events` is a flexible array of `num_events` pointers.
             let ev = unsafe { *events.events.as_ptr().add(i) };
@@ -255,7 +258,7 @@ impl Shared {
             inputs.len().min(MAX_CHANNELS),
             outputs.len().min(MAX_CHANNELS),
         );
-        let mut dsp = self.dsp.lock_recover();
+        let mut dsp = self.dsp.lock().unwrap_or_else(PoisonError::into_inner);
         self.ask_time();
         self.ask_automation();
         let scratch = self

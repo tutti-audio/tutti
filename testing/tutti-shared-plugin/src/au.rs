@@ -48,8 +48,7 @@
 #![allow(clippy::missing_safety_doc)]
 
 use std::ffi::c_void;
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
-use tutti_rt::LockExt;
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use core_foundation::array::CFArrayCreate;
 use core_foundation::base::{CFGetTypeID, CFRetain, TCFType};
@@ -300,7 +299,7 @@ struct Instance {
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock_recover()
+    m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 impl Instance {
