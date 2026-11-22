@@ -19,8 +19,9 @@ use core::marker::PhantomData;
 use tutti_buffers::{Mono, Sample};
 use tutti_units::{Amplitude, SampleRate, Samples, Seconds};
 
-use crate::convert::{for_blocks, widen};
+use crate::convert::for_blocks;
 use crate::framing::{FrameCutter, Framing};
+use crate::measure::measure_buffer;
 use crate::{FramingError, Measure, MeterError, StreamMeter};
 use tutti_dsp::Complex64;
 use tutti_dsp::FftScratch;
@@ -394,8 +395,7 @@ pub fn detect_onsets<S: Sample>(
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
 ) -> Result<Vec<Onset>, MeterError> {
-    let plan = cfg.plan(rate.into())?;
-    Ok(run(plan, &widen(samples.samples())).finish())
+    measure_buffer::<S, _>(cfg, rate.into(), samples)
 }
 
 /// A meter for `plan` fed `samples`: the whole-buffer run of the crate's own
