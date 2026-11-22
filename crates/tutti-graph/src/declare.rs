@@ -510,7 +510,7 @@ pub fn input<'a, F: Float>(
 ///   when the block is left out), and a chained option per param
 ///   (`.field(value)`; `.field([a, b])` for a counted one) for its initial value;
 /// - the params' ports, [`ParamSet`] and [`HasParam`] impls the rows form writes;
-/// - [`ParamNode`] (a fork detaches the cells and resets the node), and
+/// - [`ParamNode`](crate::ParamNode) (a fork detaches the cells and resets the node), and
 ///   [`IntoNode`](crate::IntoNode), whose controls are the node's [`ParamSet`].
 ///
 /// The node's `Node` impl forwards to the declaration: `shape` takes
