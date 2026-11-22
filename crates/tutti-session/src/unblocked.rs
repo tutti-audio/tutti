@@ -15,14 +15,21 @@ use crate::loaded::caught_by;
 /// An error type that can say why work ended without its output: the session's
 /// executor was gone, or the work panicked. A [`Unblocked`]'s error implements it with
 /// its own variants.
-pub trait Unanswered {
+pub trait Unanswered: sealed::Sealed {
     /// The session's executor is gone, refused the `unblock` (the OS would not
     /// start a thread), or dropped the task before it ran: the host is shutting
     /// down and the work did not fail.
+    #[doc(hidden)]
     fn shut_down() -> Self;
 
     /// The work panicked; `message` is the panic's, when it was a string.
+    #[doc(hidden)]
     fn panicked(message: String) -> Self;
+}
+
+pub(crate) mod sealed {
+    /// Keeps [`Unanswered`](super::Unanswered) to the session's own errors.
+    pub trait Sealed {}
 }
 
 /// `work` over `input`, run as a task on the session's executor and awaited.
@@ -154,6 +161,8 @@ mod tests {
         ShutDown,
         Panicked(String),
     }
+
+    impl sealed::Sealed for Toy {}
 
     impl Unanswered for Toy {
         fn shut_down() -> Self {

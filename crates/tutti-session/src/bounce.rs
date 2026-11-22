@@ -1697,6 +1697,8 @@ struct Held {
     _token: Arc<()>,
 }
 
+impl crate::unblocked::sealed::Sealed for BounceError {}
+
 impl Unanswered for BounceError {
     fn shut_down() -> Self {
         Self::ShutDown
