@@ -143,7 +143,7 @@ impl TransportAudio {
 
     /// Moves the commands the control thread sent
     /// ([`schedule`](super::MotionFsm::schedule), and
-    /// [`try_send`](super::MotionFsm::try_send), which is `At::NextBlock`)
+    /// [`send`](super::MotionFsm::send), which is `At::NextBlock`)
     /// into the pending list, dropping what it cancelled. Call at the start
     /// of each walk.
     pub fn drain_commands(&mut self) {

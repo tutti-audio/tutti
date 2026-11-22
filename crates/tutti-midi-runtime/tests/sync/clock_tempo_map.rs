@@ -171,7 +171,7 @@ fn rig(map: &Arc<TempoMap>, mtc: bool) -> Rig {
 
 impl Rig {
     fn send(&self, event: MotionCommand) {
-        self.transport.motion().try_send(event).expect("room");
+        self.transport.motion().send(event).expect("room");
     }
 
     /// Render `frames` in blocks of `block`, draining the ring after each.

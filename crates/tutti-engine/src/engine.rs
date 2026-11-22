@@ -785,7 +785,7 @@ impl<F: Float> Engine<F> {
     /// argument could. The graph root is folded to `output`'s width (the device
     /// / target width, see [`support_output`](Self::support_output)) — see
     /// [`process_segment`](Self::process_segment). Untimed motion
-    /// ([`MotionFsm::try_send`]) applies at the block's first frame; scheduled
+    /// ([`MotionFsm::send`]) applies at the block's first frame; scheduled
     /// commands ([`MotionFsm::schedule`]) on their own frames (module docs).
     /// Called once per block from the audio callback. RT-safe: no
     /// allocation, no locks, no I/O.
@@ -1767,7 +1767,7 @@ mod tests {
             MaxBlock::of(Samples::new(512)),
         ));
         let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
-        let _ = transport.motion().try_send(MotionCommand::Play);
+        let _ = transport.motion().send(MotionCommand::Play);
         let mut buf = vec![1.0f32; 64 * 2];
         let mut seg = vec![1.0f32; 64 * 2];
         {
@@ -1836,7 +1836,7 @@ mod tests {
                 MaxBlock::of(Samples::new(512)),
             ));
             let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
-            let _ = transport.motion().try_send(MotionCommand::Play);
+            let _ = transport.motion().send(MotionCommand::Play);
             engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
             assert!(transport.is_rolling());
         }
@@ -1845,7 +1845,7 @@ mod tests {
             MaxBlock::of(Samples::new(512)),
         ));
         let engine = Engine::new(&transport, &mut ed, exec).expect("the first engine is gone");
-        let _ = transport.motion().try_send(MotionCommand::stop_unfaded());
+        let _ = transport.motion().send(MotionCommand::stop_unfaded());
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
         assert!(!transport.is_rolling(), "the machine knew it was rolling");
     }
@@ -1886,10 +1886,7 @@ mod tests {
             let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
             let stop = MotionCommand::stop_unfaded();
             if first_is_play {
-                transport
-                    .motion()
-                    .try_send(MotionCommand::Play)
-                    .expect("room");
+                transport.motion().send(MotionCommand::Play).expect("room");
                 transport
                     .motion()
                     .schedule(At::NextBlock, stop)
@@ -1899,10 +1896,7 @@ mod tests {
                     .motion()
                     .schedule(At::NextBlock, stop)
                     .expect("room");
-                transport
-                    .motion()
-                    .try_send(MotionCommand::Play)
-                    .expect("room");
+                transport.motion().send(MotionCommand::Play).expect("room");
             }
             let mut buf = vec![0.0f32; 64 * 2];
             engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
@@ -1936,7 +1930,7 @@ mod tests {
         let engine = engine_for(&transport);
         transport
             .motion()
-            .try_send(MotionCommand::play_from(Beat::new(8.0)))
+            .send(MotionCommand::play_from(Beat::new(8.0)))
             .expect("room");
         let mut buf = vec![0.0f32; 64 * 2];
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
@@ -1958,7 +1952,7 @@ mod tests {
             .expect("room");
         transport
             .motion()
-            .try_send(MotionCommand::play_from(Beat::new(3.99)))
+            .send(MotionCommand::play_from(Beat::new(3.99)))
             .expect("room");
         let mut buf = vec![0.0f32; 1024 * 2];
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
@@ -1978,7 +1972,7 @@ mod tests {
             MaxBlock::of(Samples::new(512)),
         ));
         let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
-        let _ = transport.motion().try_send(MotionCommand::Play);
+        let _ = transport.motion().send(MotionCommand::Play);
         let mut render = engine.graph.borrow_mut();
         let mut pieces = GraphPieces {
             changes: TransportChanges::NONE,

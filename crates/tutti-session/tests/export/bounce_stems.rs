@@ -477,7 +477,7 @@ fn a_request_that_cannot_work_is_refused_by_name() {
     );
 }
 
-/// **A host names nodes its own way and resolves them once**: `try_map`
+/// **A host names nodes its own way and resolves them once**: `map`
 /// turns a bounce over names into one over keys, and the first node it cannot
 /// resolve is its error, with nothing started.
 #[test]
@@ -492,12 +492,12 @@ fn a_host_resolves_its_own_names_once() {
         .master_buffers()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01)))
         .clock(ExportClock::frozen())
-        .try_map(|name| keys.get(name).copied().ok_or(name))
+        .map(|name| keys.get(name).copied().ok_or(name))
         .expect("kick is a node");
     let out = planes(bounced(&mut session, resolved));
     assert!(out[1][0].iter().all(|&s| s == 0.5), "the kick's stem");
 
-    let unresolved = named("snare").try_map(|name| keys.get(name).copied().ok_or(name));
+    let unresolved = named("snare").map(|name| keys.get(name).copied().ok_or(name));
     assert_eq!(unresolved.err(), Some("snare"));
 }
 

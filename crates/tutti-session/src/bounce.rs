@@ -298,7 +298,7 @@ pub(crate) enum RootChoice {
 /// ```
 ///
 /// `N` names a stem's node: a [`NodeKey`] for the session, or a host's own
-/// handle that [`try_map`](Self::try_map) resolves to one before the bounce
+/// handle that [`map`](Self::map) resolves to one before the bounce
 /// starts.
 #[must_use = "a bounce renders nothing until the session starts it"]
 pub struct Bounce<N = NodeKey, M = NoMaster, F: Float = f32> {
@@ -333,7 +333,7 @@ impl<N, F: Float> Bounce<N, NoMaster, F> {
     /// ([`master`](Self::master) or [`master_buffers`](Self::master_buffers),
     /// without which it does not start) and a range when no loop is set. Name nodes as
     /// stems with [`stem`](Self::stem); `N` is what names one (a [`NodeKey`],
-    /// or a host's own handle for it: [`try_map`](Self::try_map) resolves them).
+    /// or a host's own handle for it: [`map`](Self::map) resolves them).
     pub fn new() -> Self {
         Self {
             master: NoMaster,
@@ -449,10 +449,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
     /// # Errors
     ///
     /// What `f` returns for the first node it refuses.
-    pub fn try_map<N2, E>(
-        self,
-        mut f: impl FnMut(N) -> Result<N2, E>,
-    ) -> Result<Bounce<N2, M, F>, E> {
+    pub fn map<N2, E>(self, mut f: impl FnMut(N) -> Result<N2, E>) -> Result<Bounce<N2, M, F>, E> {
         let Self {
             master,
             stems,
@@ -475,7 +472,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
         } = self;
         let stems = stems
             .into_iter()
-            .map(|stem| stem.try_map(&mut f))
+            .map(|stem| stem.map(&mut f))
             .collect::<Result<Vec<_>, E>>()?;
         Ok(Bounce {
             master,
@@ -851,7 +848,7 @@ impl<N, K> Stem<N, K> {
     /// # Errors
     ///
     /// What `f` returns.
-    pub fn try_map<M, E>(self, f: impl FnOnce(N) -> Result<M, E>) -> Result<Stem<M, K>, E> {
+    pub fn map<M, E>(self, f: impl FnOnce(N) -> Result<M, E>) -> Result<Stem<M, K>, E> {
         let Self {
             node,
             channels,
@@ -870,8 +867,8 @@ impl<N, K> Stem<N, K> {
 }
 
 impl<N> AnyStem<N> {
-    fn try_map<M, E>(self, f: impl FnOnce(N) -> Result<M, E>) -> Result<AnyStem<M>, E> {
-        self.0.try_map(f).map(AnyStem)
+    fn map<M, E>(self, f: impl FnOnce(N) -> Result<M, E>) -> Result<AnyStem<M>, E> {
+        self.0.map(f).map(AnyStem)
     }
 }
 

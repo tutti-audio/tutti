@@ -104,7 +104,7 @@
 //! transport.settings().set_tempo(Bpm::of(90.0));
 //! transport
 //!     .motion()
-//!     .try_send(MotionCommand::play_from(Beat::new(8.0)))
+//!     .send(MotionCommand::play_from(Beat::new(8.0)))
 //!     .expect("the motion queue has room at startup");
 //!
 //! let mut block = vec![0.0f32; 256 * 2];

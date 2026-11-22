@@ -268,7 +268,7 @@ impl MotionFsm {
     /// pays off: the engine sees it coming and fades the old audio out so it
     /// reaches zero exactly on the command's frame, then fades back in from
     /// there, with no gain step anywhere. The same command sent as `At::NextBlock` (or
-    /// [`try_send`](Self::try_send), or late) has no lead: the old audio ends on the
+    /// [`send`](Self::send), or late) has no lead: the old audio ends on the
     /// block's first frame and the new one fades in. See the engine's module
     /// docs. A frame
     /// already past, a beat continuous playback already crossed, or a
@@ -280,7 +280,7 @@ impl MotionFsm {
     /// playback reaches it, holding its credit;
     /// [`cancel_scheduled`](Self::cancel_scheduled) takes it back.
     ///
-    /// [`try_send`](Self::try_send) is this method at `At::NextBlock`, and the
+    /// [`send`](Self::send) is this method at `At::NextBlock`, and the
     /// two share one queue: commands apply in the order they were sent when
     /// they are due on the same frame. This method has no untimed form of its
     /// own, so "whenever" is spelled out as `At::NextBlock`.
@@ -322,7 +322,7 @@ impl MotionFsm {
 
     /// Takes back every command waiting for a frame or a beat that has not
     /// been applied, and frees their credit. [`At::NextBlock`] commands,
-    /// [`try_send`](Self::try_send) among them, are not waiting for a time
+    /// [`send`](Self::send) among them, are not waiting for a time
     /// and stand: a stop sent just before a cancel still stops. A timed
     /// [`LoopEdit`](super::LoopEdit) is taken back too, so the loop region
     /// stays as the engine last applied it. (A rate change does not drop
@@ -371,7 +371,7 @@ impl MotionFsm {
     ///
     /// Returns [`TimedError::Full`] when the command queue is full. The event was
     /// not queued, and is handed back inside the error so it can be retried.
-    pub fn try_send(&self, event: MotionCommand) -> Result<(), TimedError<MotionCommand>> {
+    pub fn send(&self, event: MotionCommand) -> Result<(), TimedError<MotionCommand>> {
         self.schedule(At::NextBlock, event)
     }
 
@@ -382,11 +382,11 @@ impl MotionFsm {
     /// Returns [`TimedError::Full`] for the first event the full queue refused, and
     /// sends none after it. Events queued before that point still stand, so
     /// the transport may be left partway through the batch.
-    pub fn try_send_all(
+    pub fn send_all(
         &self,
         events: impl IntoIterator<Item = MotionCommand>,
     ) -> Result<(), TimedError<MotionCommand>> {
-        events.into_iter().try_for_each(|e| self.try_send(e))
+        events.into_iter().try_for_each(|e| self.send(e))
     }
 
     /// The current motion, as published by the engine's last applied command.
@@ -643,7 +643,7 @@ mod tests {
         let (m, mut a) = fsm();
         assert!(m.motion() == MotionState::Stopped);
 
-        assert!(m.try_send(MotionCommand::Play).is_ok());
+        assert!(m.send(MotionCommand::Play).is_ok());
         // Nothing happens until the audio thread drains.
         assert!(
             m.motion() == MotionState::Stopped,
@@ -664,12 +664,12 @@ mod tests {
         assert!(m.audio().is_none(), "held: no second half");
         assert!(clone.audio().is_none(), "nor through a clone");
 
-        let _ = m.try_send(MotionCommand::Play);
+        let _ = m.send(MotionCommand::Play);
         a.drain();
         drop(a);
 
         let mut again = Audio::of(&clone);
-        let _ = m.try_send(MotionCommand::stop_unfaded());
+        let _ = m.send(MotionCommand::stop_unfaded());
         again.drain();
         assert!(
             m.motion() == MotionState::Stopped,
@@ -683,10 +683,10 @@ mod tests {
     #[test]
     fn a_seek_after_a_completed_declicked_seek_keeps_rolling() {
         let (m, mut a) = fsm();
-        let _ = m.try_send(MotionCommand::Play);
+        let _ = m.send(MotionCommand::Play);
         a.drain();
         for beat in [4.0, 8.0] {
-            let _ = m.try_send(MotionCommand::locate(Beat::new(beat)));
+            let _ = m.send(MotionCommand::locate(Beat::new(beat)));
             a.drain();
             assert_eq!(m.motion(), MotionState::DeclickToLocate);
             a.complete_declick();
@@ -699,26 +699,26 @@ mod tests {
     fn send_reports_a_full_queue() {
         let (m, _a) = fsm();
         for _ in 0..SCHEDULE_CAPACITY + IMMEDIATE_RESERVE {
-            assert!(m.try_send(MotionCommand::Play).is_ok());
+            assert!(m.send(MotionCommand::Play).is_ok());
         }
         assert_eq!(
-            m.try_send(MotionCommand::Play),
+            m.send(MotionCommand::Play),
             Err(TimedError::Full(MotionCommand::Play)),
             "a full queue must report the drop, and hand the event back"
         );
     }
 
     /// A cancel takes back what waits for a time, never an immediate command:
-    /// a stop sent with `try_send` just before it still stops.
+    /// a stop sent with `send` just before it still stops.
     #[test]
     fn a_cancel_leaves_an_immediate_stop_standing() {
         let (m, mut a) = fsm();
-        m.try_send(MotionCommand::Play).expect("room");
+        m.send(MotionCommand::Play).expect("room");
         a.drain();
         assert!(m.is_playing());
         m.schedule(At::Beat(Beat::new(1000.0)), MotionCommand::Play)
             .expect("room");
-        m.try_send(MotionCommand::stop_unfaded()).expect("room");
+        m.send(MotionCommand::stop_unfaded()).expect("room");
         m.cancel_scheduled();
         a.drain();
         assert!(
@@ -729,13 +729,13 @@ mod tests {
     }
 
     /// A backlog of commands waiting for their time cannot refuse a stop:
-    /// `try_send` has the immediate reserve past the timed limit, applies in
+    /// `send` has the immediate reserve past the timed limit, applies in
     /// send order after the waiting ones, and the reserve's own limit still
     /// hands the event back.
     #[test]
     fn a_backlog_of_timed_commands_does_not_refuse_a_stop() {
         let (m, mut a) = fsm();
-        m.try_send(MotionCommand::Play).expect("room");
+        m.send(MotionCommand::Play).expect("room");
         a.drain();
         assert!(m.is_playing());
         for _ in 0..SCHEDULE_CAPACITY {
@@ -743,12 +743,12 @@ mod tests {
                 .expect("room");
         }
         for _ in 1..IMMEDIATE_RESERVE {
-            m.try_send(MotionCommand::Play).expect("reserve");
+            m.send(MotionCommand::Play).expect("reserve");
         }
-        m.try_send(MotionCommand::stop_unfaded())
+        m.send(MotionCommand::stop_unfaded())
             .expect("the last reserve credit takes the stop");
         assert_eq!(
-            m.try_send(MotionCommand::Play),
+            m.send(MotionCommand::Play),
             Err(TimedError::Full(MotionCommand::Play))
         );
         a.drain();
@@ -756,17 +756,17 @@ mod tests {
             m.motion() == MotionState::Stopped,
             "the stop applied, last in send order"
         );
-        m.try_send(MotionCommand::Play)
+        m.send(MotionCommand::Play)
             .expect("the engine took the credits back");
     }
 
     #[test]
     fn stop_fades_and_stop_now_does_not() {
         let (m, mut a) = fsm();
-        let _ = m.try_send(MotionCommand::Play);
+        let _ = m.send(MotionCommand::Play);
         a.drain();
 
-        let _ = m.try_send(MotionCommand::stop());
+        let _ = m.send(MotionCommand::stop());
         a.drain();
         assert_eq!(m.motion(), MotionState::DeclickToStop);
 
@@ -774,9 +774,9 @@ mod tests {
         a.complete_declick();
         assert!(m.motion() == MotionState::Stopped);
 
-        let _ = m.try_send(MotionCommand::Play);
+        let _ = m.send(MotionCommand::Play);
         a.drain();
-        let _ = m.try_send(MotionCommand::stop_unfaded());
+        let _ = m.send(MotionCommand::stop_unfaded());
         a.drain();
         assert!(
             m.motion() == MotionState::Stopped,
@@ -787,7 +787,7 @@ mod tests {
     #[test]
     fn locate_requests_a_seek_and_moves_the_beat() {
         let (m, mut a) = fsm();
-        let _ = m.try_send(MotionCommand::locate(Beat::new(8.0)));
+        let _ = m.send(MotionCommand::locate(Beat::new(8.0)));
         a.drain();
 
         assert_eq!(
@@ -801,7 +801,7 @@ mod tests {
     #[test]
     fn locate_and_play_rolls_after_the_jump() {
         let (m, mut a) = fsm();
-        let _ = m.try_send(MotionCommand::play_from(Beat::new(4.0)));
+        let _ = m.send(MotionCommand::play_from(Beat::new(4.0)));
         a.drain();
 
         assert_eq!(m.seek.take(), Some(Beat::new(4.0)));
@@ -812,7 +812,7 @@ mod tests {
         // `Stopped` sends both stop arms into their `None` case, and the
         // transport cannot be stopped at all. Proving it *stops* is what pins
         // the real property.
-        let _ = m.try_send(MotionCommand::stop_unfaded());
+        let _ = m.send(MotionCommand::stop_unfaded());
         a.drain();
         assert!(
             m.motion() == MotionState::Stopped,
@@ -829,11 +829,11 @@ mod tests {
     #[test]
     fn stop_and_return_moves_the_playhead_at_once_and_fades_the_audio() {
         let (m, mut a) = fsm();
-        let _ = m.try_send(MotionCommand::Play);
+        let _ = m.send(MotionCommand::Play);
         a.drain();
         m.settings.set_beat(Beat::new(12.0));
 
-        let _ = m.try_send(MotionCommand::stop_then_locate(Beat::new(0.0)));
+        let _ = m.send(MotionCommand::stop_then_locate(Beat::new(0.0)));
         a.drain();
 
         assert_eq!(m.motion(), MotionState::DeclickToLocate);
@@ -851,9 +851,9 @@ mod tests {
     #[test]
     fn a_declick_stop_pauses_the_playhead_at_once() {
         let (m, mut a) = fsm();
-        let _ = m.try_send(MotionCommand::Play);
+        let _ = m.send(MotionCommand::Play);
         a.drain();
-        let _ = m.try_send(MotionCommand::stop());
+        let _ = m.send(MotionCommand::stop());
         a.drain();
         assert_eq!(m.motion(), MotionState::DeclickToStop);
         assert!(m.settings.is_paused());
@@ -868,7 +868,7 @@ mod tests {
         let (m, mut a) = fsm();
         m.settings.set_beat(Beat::new(9.0));
 
-        let _ = m.try_send(MotionCommand::stop_then_locate(Beat::new(0.0)));
+        let _ = m.send(MotionCommand::stop_then_locate(Beat::new(0.0)));
         a.drain();
 
         assert!(m.motion() == MotionState::Stopped);
@@ -880,7 +880,7 @@ mod tests {
         let (m, mut a) = fsm();
         assert!(m.settings.paused.load(Ordering::Acquire));
 
-        let _ = m.try_send(MotionCommand::Play);
+        let _ = m.send(MotionCommand::Play);
         a.drain();
         assert!(
             !m.settings.paused.load(Ordering::Acquire),
@@ -892,7 +892,7 @@ mod tests {
     fn send_all_preserves_order() {
         let (m, mut a) = fsm();
         assert!(
-            m.try_send_all([MotionCommand::locate(Beat::new(16.0)), MotionCommand::Play])
+            m.send_all([MotionCommand::locate(Beat::new(16.0)), MotionCommand::Play])
                 .is_ok()
         );
         a.drain();
@@ -904,14 +904,14 @@ mod tests {
     #[test]
     fn scrub_returns_to_the_previous_motion() {
         let (m, mut a) = fsm();
-        let _ = m.try_send(MotionCommand::Play);
+        let _ = m.send(MotionCommand::Play);
         a.drain();
 
-        let _ = m.try_send(MotionCommand::FastForward);
+        let _ = m.send(MotionCommand::FastForward);
         a.drain();
         assert_eq!(m.motion(), MotionState::FastForward);
 
-        let _ = m.try_send(MotionCommand::EndScrub);
+        let _ = m.send(MotionCommand::EndScrub);
         a.drain();
         assert!(m.is_playing(), "EndScrub restores what was playing before");
     }

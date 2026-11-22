@@ -146,7 +146,7 @@ impl<F: Float> Taps<'_, F> {
     /// Opens a tap on `sources` ([`open_ports`](Self::open_ports)) and an [`Analyzer`] over
     /// it: the meter `analysis` builds, bound to the graph's rate and the tap's
     /// width, fed what the tap holds each time the app drains it
-    /// ([`Analyzer::try_iter`]). The analysis is bound the way
+    /// ([`Analyzer::pending`]). The analysis is bound the way
     /// [`Session::analyze`](crate::Session::analyze) binds it to a wave
     /// ([`AudioContext`], [`AudioInput`]).
     ///
