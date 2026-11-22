@@ -78,7 +78,7 @@ tutti-clap-host = { path = "../tutti-clap-host" }
 # helper that finds it: `tests/conformance/vst3_run_loop.rs` drives its editor modes.
 # `mapping_contract!`: the laws `ControllerMapping` is held to, through the shared
 # test plugin's real controller.
-tutti-plugin-types = { path = "../tutti-plugin-types", features = ["contract"] }
+tutti-plugin-types = { path = "../tutti-plugin-types", features = ["contract", "testing"] }
 # The block views and the sample width (`Float`).
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["plugin", "vst3-cpp", "vst3-sdk"] }

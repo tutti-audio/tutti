@@ -116,9 +116,9 @@ pub(super) fn prepare(id: EndpointId) -> Result<(Client, QueueClock)> {
     let source = super::address_of(id).ok_or(crate::error::NotFound::Endpoint(id))?;
 
     // Non-blocking, so the pump reads until the queue is empty and then waits in
-    // `poll`, which the stop descriptor can interrupt. One client per connection
-    // — see `client::open`.
-    let seq = super::client::open(CLIENT, UmpVersion::Midi2)?;
+    // `poll`, which the stop descriptor can interrupt. One client per connection,
+    // never one shared: a shared client would have every pump contending on one handle.
+    let seq = Client::open(CLIENT, UmpVersion::Midi2)?;
     // What the source can speak decides what this client is delivered: a MIDI
     // 1.0 source arrives as MIDI 1.0 UMP (type 2) and the input node's
     // `Midi2Translator` translates it, so the kernel never converts it.

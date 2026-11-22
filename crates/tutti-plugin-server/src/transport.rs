@@ -22,6 +22,8 @@ use tutti_rt::Mutex;
 
 use crate::main_loop::Bell;
 use crate::main_loop::{LaneEnd, Stream as PlatformStream};
+#[cfg(test)]
+use tutti_plugin_types::fake::{at_frame, unit_value};
 
 /// The longest request the audio connection takes: the protocol's own cap for
 /// a block's request ([`AUDIO_REQUEST_FRAME_BYTES`]). A block's request carries
@@ -1005,8 +1007,8 @@ mod audio_frame_tests {
             for point in 0..room {
                 changes.add_change(
                     ParamId::new(0xF000_0000 + queue),
-                    i32::try_from(point * 28).unwrap(),
-                    point as f64 / room as f64,
+                    at_frame(i32::try_from(point * 28).unwrap()),
+                    unit_value(point as f64 / room as f64),
                 );
             }
         }

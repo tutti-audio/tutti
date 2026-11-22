@@ -16,6 +16,8 @@ use tutti_buffers::{Float, InputOutput};
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_plugin_ipc::{ProcessAudioData, SlabLayout, SlabWriter};
+#[cfg(test)]
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{
     BlockStatus, ChannelTable, ChordChanges, ExpressiveContext, Features, MAX_BLOCK_CHANNELS,
     MIDI_STACK_CAPACITY, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
@@ -1414,8 +1416,8 @@ mod tests {
             for pt in 0..POINTS {
                 emitted_params.add_change(
                     ParamId::new(p as u32),
-                    pt as i32,
-                    pt as f64 / POINTS as f64,
+                    at_frame(pt as i32),
+                    unit_value(pt as f64 / POINTS as f64),
                 );
             }
         }
@@ -1427,7 +1429,11 @@ mod tests {
             out.emit_midi(emitted_midi.iter().copied());
             for queue in &emitted_params.queues {
                 for point in &queue.points {
-                    out.emit_param_point(queue.param_id, point.sample_offset, point.value.get());
+                    out.emit_param_point(
+                        queue.param_id,
+                        at_frame(point.sample_offset.get()),
+                        unit_value(point.value.get()),
+                    );
                 }
             }
         };

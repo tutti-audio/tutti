@@ -17,6 +17,8 @@ use tutti_plugin_ipc::{
     AudioSlab, ControlReply, ControlRequest, News, SlabHandle, SlabLayout, StagedState, Working,
 };
 use tutti_plugin_ipc_ffi::Ready;
+#[cfg(all(test, feature = "clap"))]
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{
     EditorError, IpcResult, MAX_STATE_BYTES, MainThreadMarker, MainWork, MainWorkHandle,
     ParameterQueue, PluginError, PluginFormat, PluginId, PluginRef, PluginResult, RateRefusalCause,
@@ -2729,7 +2731,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn apply_parameter(id: u32, value: f64) -> AudioRequest {
         let mut changes = ParameterChanges::reserved(1, 1);
-        assert!(changes.add_change(ParamId::new(id), 0, value));
+        assert!(changes.add_change(ParamId::new(id), at_frame(0), unit_value(value)));
         AudioRequest::ApplyParameters {
             id: tutti_plugin_ipc::ReqId::new(1),
             param_changes: changes,

@@ -29,6 +29,7 @@ use crate::{
     RestartRules, SampleRate, Samples, Stuck, TimerId, Widths, WindowHandle, edit_slots,
 };
 use tutti_buffers::{Float, FloatWidth};
+use tutti_graph::Offset;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
@@ -1081,6 +1082,31 @@ impl From<&FakeLoaded> for Layout {
     fn from(fake: &FakeLoaded) -> Self {
         Layout::from(&fake.shared.wiring())
     }
+}
+
+/// The offset of frame `frames` in a block of any length a test uses: a
+/// parameter point's place, for a test that builds points without a block.
+///
+/// # Panics
+///
+/// When `frames` is negative or past a million.
+#[must_use]
+pub fn at_frame(frames: impl TryInto<usize, Error: std::fmt::Debug>) -> Offset {
+    Offset::of(
+        Samples::new(frames.try_into().expect("a frame count")),
+        Samples::new(1 << 20),
+    )
+}
+
+/// `value` as a parameter's normalized value.
+///
+/// # Panics
+///
+/// When `value` is outside `0..=1` or not finite: a test's value is never
+/// clamped into range.
+#[must_use]
+pub fn unit_value(value: f64) -> Normalized {
+    Normalized::new(value).expect("a normalized value in 0..=1")
 }
 
 #[cfg(test)]

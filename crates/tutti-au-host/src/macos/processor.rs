@@ -31,6 +31,8 @@ use crate::error::{AuError, Result};
 use crate::midi_out::{self, AuMidiOutput, MidiOutSink};
 use crate::ranges::RangeTable;
 use crate::types::K_AUDIO_UNIT_ERR_UNINITIALIZED;
+#[cfg(test)]
+use tutti_plugin_types::fake::{at_frame, unit_value};
 
 /// Whether the AU raised `OutputIsSilence` for the block just rendered.
 ///
@@ -910,9 +912,9 @@ mod tests {
     fn automation_for_an_undeclared_parameter_is_counted_not_written() {
         let (mut processor, _controller) = delay();
         let mut changes = ParameterChanges::reserved(2, 4);
-        assert!(changes.add_change(ParamId::new(9_999), 3, 0.25));
-        assert!(changes.add_change(ParamId::new(9_999), 25, 0.75));
-        assert!(changes.add_change(ParamId::new(0), 3, 0.5));
+        assert!(changes.add_change(ParamId::new(9_999), at_frame(3), unit_value(0.25)));
+        assert!(changes.add_change(ParamId::new(9_999), at_frame(25), unit_value(0.75)));
+        assert!(changes.add_change(ParamId::new(0), at_frame(3), unit_value(0.5)));
         let ctx = ProcessContext::new().params(&changes);
 
         let input = vec![vec![0.0f32; 64]; 2];
@@ -946,8 +948,8 @@ mod tests {
     fn the_block_points_are_scheduled_by_the_pre_render_notify() {
         let (mut processor, _controller) = delay();
         let mut changes = ParameterChanges::reserved(1, 4);
-        assert!(changes.add_change(ParamId::new(0), 3, 0.25));
-        assert!(changes.add_change(ParamId::new(0), 25, 0.75));
+        assert!(changes.add_change(ParamId::new(0), at_frame(3), unit_value(0.25)));
+        assert!(changes.add_change(ParamId::new(0), at_frame(25), unit_value(0.75)));
         let ctx = ProcessContext::new().params(&changes);
 
         let input = vec![vec![0.0f32; 64]; 2];

@@ -322,8 +322,8 @@ fn session_reporting() -> (
         Default::default(),
         params.clone(),
     )
-    .with_refresh_sink(refresh.clone())
-    .with_invalidate_sink(invalidate.clone());
+    .refresh_sink(refresh.clone())
+    .invalidate_sink(invalidate.clone());
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)

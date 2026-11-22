@@ -18,6 +18,7 @@ use tutti_clap_test_plugin::params_state::probe_params;
 use tutti_clap_test_plugin::{
     PORTS_64BIT_INPUTS, PORTS_64BIT_OUTPUTS, ProcessCapture, Site, ThreadCapture,
 };
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{
     Control, Controller, Loaded, MaxBlock, PluginError, PluginIo, PluginTail, Prepare, PresetId,
     ProcessContext, ProcessOutput, Processor, SampleRate, Samples, Widths, Wraps,
@@ -532,7 +533,7 @@ fn a_write_after_a_flush_is_the_blocks_last_word() {
         .set_parameter(main_thread(), id, Normalized::of(0.25))
         .expect("a declared, writable parameter");
     let mut later = tutti_plugin_types::ParameterChanges::reserved(1, 4);
-    assert!(later.add_change(id, 0, 0.6));
+    assert!(later.add_change(id, at_frame(0), unit_value(0.6)));
     let ctx = ProcessContext::new().params(&later);
     let mut out = ProcessOutput::default();
     let input = [0.0f32; 64];

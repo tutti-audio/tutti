@@ -1653,7 +1653,7 @@ fn many_served_writes_before_a_block_leave_each_parameter_at_its_latest() {
             1,
             "one value per parameter, not a queue"
         );
-        assert_eq!(queue.points[0].sample_offset, 0, "on the first frame");
+        assert_eq!(queue.points[0].sample_offset.get(), 0, "on the first frame");
     }
 }
 
