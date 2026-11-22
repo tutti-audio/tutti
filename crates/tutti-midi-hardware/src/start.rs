@@ -60,17 +60,18 @@ impl Waiting for Done {
 }
 
 /// The wait for the backend to be ready: a `Send` future fed by the backend's
-/// own start thread, which wakes it (ready on the first poll where there is
-/// nothing to start). [`MidiEndpoints::start`](crate::MidiEndpoints::start),
+/// start, with nothing for the caller to drive. Off macOS it is ready on the first
+/// poll; on macOS the device watch's thread wakes it.
+/// [`MidiEndpoints::start`](crate::MidiEndpoints::start),
 /// [`Devices::start`](crate::Devices::start) and
 /// [`MidiSession::start`](crate::MidiSession::start) make one.
 ///
 /// It resolves to [`Started`], or to the error the backend failed to start with. A
 /// backend with nothing to start (ALSA, Windows Multimedia, the stub) is ready on
-/// the first poll. On macOS the process's one CoreMIDI client is made on a thread of
-/// the backend's own, and this resolves when that thread has made it, or fails with
-/// [`StartFailed`]. Making a `Start` after a failed one asks
-/// the backend to start again.
+/// the first poll. On macOS the process's one CoreMIDI client is made on the device
+/// watch's thread, which wakes this when it has made the client, or when it gave up
+/// ([`StartFailed`]). Making a `Start` after a failed one asks the backend to start
+/// again.
 ///
 /// ```
 /// fn crosses_threads<T: Send>() {}
