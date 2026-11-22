@@ -54,8 +54,9 @@
 //! transport has not stood at for 2 049 frames, are silent for 4 097
 //! frames (85 ms at 48 kHz) and then sound on the timeline; a clip placed ahead of the
 //! playhead, or at a position the transport has stood at, primes before it plays and
-//! is on time. A loop wrap does not go silent: a second vocoder primes for it ahead
-//! (unless the loop was set less than 2 049 frames before its first wrap). Nothing ties the stretch to the tempo.
+//! is on time. A loop wrap does not go silent: a second vocoder, which a pool's handle
+//! sends a stretched voice under the loop, primes for it ahead (unless the loop was set less
+//! than 2 049 frames before its first wrap). Nothing ties the stretch to the tempo.
 //! All three are `tutti-units` types.
 //!
 //! ## Quick start

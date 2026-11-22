@@ -111,6 +111,18 @@ pub trait SessionNode<F: Float = f32>:
         let _ = tempo;
         self
     }
+
+    /// The node reading the transport's loop region through `motion` (read on the
+    /// control side only). The identity, the default: a sampler pool overrides it, so
+    /// the stretched voices under a loop carry the spare vocoder they prime a wrap with.
+    #[must_use]
+    fn bind_loop(self, motion: &tutti_timeline::MotionFsm) -> Self
+    where
+        Self: Sized,
+    {
+        let _ = motion;
+        self
+    }
 }
 
 /// What frees the values a node's published cells retired: the answer
@@ -462,6 +474,10 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoiceNode
 impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoicePool<F> {
     fn bind_tempo(self, tempo: &tutti_timeline::TempoReader) -> Self {
         self.tempo(tempo.clone())
+    }
+
+    fn bind_loop(self, motion: &tutti_timeline::MotionFsm) -> Self {
+        self.loops(motion.clone())
     }
 
     fn reclaimer(controls: &tutti_sampler::VoicePoolHandle<F>) -> Reclaims {

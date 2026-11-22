@@ -453,6 +453,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
             None,
             transport.settings().tempo_reader(),
         );
+        graph.set_loops(transport.motion().clone());
         graph.set_render_workers(self.opts.render_workers);
         graph.declare_main_output(self.opts.main_output.clone(), true)?;
         let (executor, background) = Self::session_executor()?;
@@ -983,6 +984,7 @@ impl<C: Clock> SessionBuilder<C> {
             quantum,
             transport.settings().tempo_reader(),
         );
+        graph.set_loops(transport.motion().clone());
         graph.set_render_workers(self.opts.render_workers);
         graph.set_render_worker_start(self.opts.render_worker_start.take());
         let click_settings = Arc::new(ClickSettings::new());

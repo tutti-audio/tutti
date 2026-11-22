@@ -16,16 +16,19 @@ use super::disk_voice::DiskVoice;
 use super::loop_span::Loop;
 use super::memory_source::{MemorySource, VoiceWindow};
 use super::pool::{DrainCounters, PoolDrops, RetireRoom, Retired};
-use super::slot::{stretch_values_want_filter, stretch_wanted};
+use super::slot::{stretch_values_want_filter, stretch_wanted, window_covers};
 use super::stretched::{self, Vocoders};
 use super::types::{PlayDirection, Playback, SlotId, Voice, VoiceSource};
 use crate::SamplerFloat;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
+use tutti_dsp::PhaseVocoder;
 use tutti_graph::ParamSet;
+use tutti_music::LoopRange;
 use tutti_rt::Param;
 use tutti_rt::{Mutex, Publisher, PushError, RingReader, RingWriter};
-use tutti_units::{Amplitude, Cents, PlaybackRate, StretchFactor};
+use tutti_timeline::MotionFsm;
+use tutti_units::{Amplitude, Beat, Cents, PlaybackRate, StretchFactor};
 
 /// Voice slots a pool reserves, and the most its `AddVoice` drain will hold.
 ///
@@ -100,7 +103,7 @@ pub(crate) enum VoiceCommand<F: SamplerFloat> {
     ///
     /// The drain does not drop the slot in the callback — it hands it to the
     /// control thread through the retirement ring, because freeing a
-    /// [`PhaseVocoder`](tutti_dsp::PhaseVocoder) frees its rings. See
+    /// [`PhaseVocoder`] frees its rings. See
     /// [`VoicePoolHandle::collect_retired`].
     Remove(SlotId),
     /// Point an in-memory slot at a different wave, keeping its placement,
@@ -180,6 +183,17 @@ pub(crate) enum VoiceCommand<F: SamplerFloat> {
         /// [`PlayDirection::Forward`] or [`PlayDirection::Reverse`].
         direction: PlayDirection,
     },
+    /// Give the voice a spare vocoder (`Some`), or take its spare away (`None`): the
+    /// vocoder a voice under the transport's loop primes for a wrap with
+    /// ([`Vocoders`]). Built by the handle, control-side, and only moved into the slot; what
+    /// the slot does not keep (the arrival when it already has a spare or no vocoder, the
+    /// spare a `None` takes out) leaves through the retirement ring.
+    SetSpare {
+        /// The slot to set.
+        id: SlotId,
+        /// The spare to adopt, or `None` to retire the slot's.
+        spare: Option<Box<PhaseVocoder<F>>>,
+    },
     /// Set the voice's time-stretch factor and pitch shift — the two controls
     /// that change duration and pitch independently, unlike
     /// [`UpdateSpeed`](Self::UpdateSpeed).
@@ -228,6 +242,7 @@ impl<F: SamplerFloat> VoiceCommand<F> {
         match self {
             Self::AddVoice { .. } | Self::Remove(_) | Self::ReplaceWave { .. } => true,
             Self::UpdateStretch { stretch, .. } => stretch.is_some(),
+            Self::SetSpare { .. } => true,
             _ => false,
         }
     }
@@ -272,6 +287,11 @@ impl<F: SamplerFloat> std::fmt::Debug for VoiceCommand<F> {
                 .debug_struct("UpdateReverse")
                 .field("id", id)
                 .field("direction", direction)
+                .finish(),
+            Self::SetSpare { id, spare } => f
+                .debug_struct("SetSpare")
+                .field("id", id)
+                .field("spare", &spare.is_some())
                 .finish(),
             Self::UpdateStretch {
                 id,
@@ -577,7 +597,7 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
     /// The cell holding the voice's window: `Some` places the voice on the
     /// transport, `None` leaves it free-running.
     ///
-    /// A window is a [`Beat`](tutti_units::Beat) (`f64`) plus an optional
+    /// A window is a [`Beat`] (`f64`) plus an optional
     /// duration: two values, and a precision the transport cannot afford to
     /// lose, so it is no scalar param (an `f32` beat position loses whole
     /// frames past ~2²⁴). The node lends the cell once per block, so a window
@@ -782,15 +802,98 @@ pub struct VoicePoolHandle<F: SamplerFloat> {
     pub(crate) live: Arc<Mutex<HashMap<SlotId, Live>>>,
     /// The last stamp [`stamp`](Self::stamp) gave an add; shared by every clone.
     pub(crate) stamps: Arc<std::sync::atomic::AtomicU64>,
+    /// The transport's loop as the control side knows it, which decides which voices
+    /// carry a spare vocoder (see [`follow_loop`](Self::follow_loop)).
+    pub(crate) loops: Arc<LoopFeed>,
 }
 
 /// A live slot: the tier of its voice, and the stamp of the add that made it,
 /// which tells a refusal of that add from a refusal of an earlier one at the
 /// same id.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Live {
     pub(crate) tier: Tier,
     pub(crate) generation: u64,
+    /// Where the voice sits on the timeline, as the handle last sent it: what decides
+    /// whether a transport loop's start is under it.
+    pub(crate) window: Option<VoiceWindow>,
+    /// Whether the voice has been asked to stretch, so the pool holds a vocoder for it
+    /// (one stays for the voice's life).
+    pub(crate) stretching: bool,
+    /// Whether the handle has sent the voice a spare vocoder it has not taken back.
+    pub(crate) spare: bool,
+}
+
+impl Live {
+    /// A voice of `tier` added by the add stamped `generation`, with no spare yet.
+    pub(crate) fn added(
+        tier: Tier,
+        generation: u64,
+        window: Option<VoiceWindow>,
+        stretching: bool,
+    ) -> Self {
+        Self {
+            tier,
+            generation,
+            window,
+            stretching,
+            spare: false,
+        }
+    }
+
+    /// Whether the voice should carry a spare under a loop starting at `start`: a placed
+    /// memory voice that stretches, whose window covers the start (a disk voice reads
+    /// its wrap through its stream and has no use for one).
+    fn wants_spare(&self, start: Option<Beat>) -> bool {
+        self.tier == Tier::Memory
+            && self.stretching
+            && matches!((start, self.window), (Some(s), Some(w)) if window_covers(w, s))
+    }
+}
+
+/// What the control side knows of the transport's loop: the start of the loop while
+/// looping is armed, and where to read it from.
+///
+/// Shared by a pool and its handles. The loop's start is what decides which voices carry
+/// a spare vocoder, and a handle writes it ([`VoicePoolHandle::follow_loop`]) or
+/// reads it from the transport the pool is bound to ([`VoicePool::loops`](crate::VoicePool::loops)) on its
+/// reclaim tick. The audio thread never reads this: it reads the loop from its block's
+/// `Env`, and a spare arrives through the command ring.
+#[derive(Default)]
+pub(crate) struct LoopFeed {
+    start: Mutex<Option<Beat>>,
+    motion: Mutex<Option<MotionFsm>>,
+}
+
+impl std::fmt::Debug for LoopFeed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoopFeed")
+            .field("start", &*self.start.lock())
+            .field("bound", &self.motion.lock().is_some())
+            .finish()
+    }
+}
+
+impl LoopFeed {
+    /// Reads the loop from `motion` from now on.
+    pub(crate) fn bind(&self, motion: MotionFsm) {
+        *self.motion.lock() = Some(motion);
+    }
+
+    /// The loop's start as last written or read.
+    fn start(&self) -> Option<Beat> {
+        *self.start.lock()
+    }
+
+    fn set(&self, start: Option<Beat>) {
+        *self.start.lock() = start;
+    }
+
+    /// Reads the bound transport's loop, if one is bound.
+    fn read(&self) -> Option<Option<Beat>> {
+        let motion = self.motion.lock().clone()?;
+        Some(motion.loop_region().active().map(|range| range.start()))
+    }
 }
 
 /// Which tier holds a live slot's voice.
@@ -909,6 +1012,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         if free && stretch_wanted(&play) {
             return Err(SendError::FreeRunning);
         }
+        let (window, stretching) = (source.window(), stretch_wanted(&play));
         let mut live = self.live();
         if live.contains_key(&id) {
             return Err(SendError::SlotInUse(id));
@@ -929,11 +1033,9 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         )?;
         live.insert(
             id,
-            Live {
-                tier: Tier::Memory,
-                generation,
-            },
+            Live::added(Tier::Memory, generation, window, stretching),
         );
+        self.reconcile_spares(&mut live);
         Ok(())
     }
 
@@ -991,6 +1093,11 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         self.tier(id)?;
         self.send(VoiceCommand::UpdatePlacement { id, window })?;
         self.free.lock().remove(&id);
+        let mut live = self.live();
+        if let Some(entry) = live.get_mut(&id) {
+            entry.window = Some(window);
+        }
+        self.reconcile_spares(&mut live);
         Ok(())
     }
 
@@ -1072,7 +1179,60 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
             stretch_factor: factor,
             pitch_cents: pitch,
             stretch: None,
-        })
+        })?;
+        if stretch_values_want_filter(factor, pitch) {
+            let mut live = self.live();
+            if let Some(entry) = live.get_mut(&id) {
+                entry.stretching = true;
+            }
+            self.reconcile_spares(&mut live);
+        }
+        Ok(())
+    }
+
+    /// Tells the handle where the transport's loop starts (`None`: not looping), so
+    /// that only the stretched voices whose window covers the start carry a spare
+    /// vocoder, the one a voice primes for a loop wrap with.
+    ///
+    /// A pool bound to a transport ([`VoicePool::loops`](crate::VoicePool::loops)) reads the loop itself on its
+    /// reclaim tick; this is for a pool no transport is bound to. The handle builds a
+    /// spare for each voice the loop newly covers and sends it through the command ring,
+    /// and takes the spare of each voice it no longer covers back through the
+    /// retirement ring ([`collect_retired`](Self::collect_retired) frees it). A voice
+    /// the ring has no room for is retried on the next call or tick; until its spare
+    /// arrives, a wrap it meets flushes as a seek does.
+    ///
+    /// Control thread.
+    pub fn follow_loop(&self, region: Option<LoopRange>) {
+        self.loops.set(region.map(|range| range.start()));
+        self.reconcile_spares(&mut self.live());
+    }
+
+    /// The voices holding a spare the handle sent them.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn spares_sent(&self) -> usize {
+        self.live().values().filter(|l| l.spare).count()
+    }
+
+    /// Sends each voice the spare its window and the loop ask for, and takes the spare of
+    /// each that no longer wants one; a voice the ring has no room for stays as it was.
+    /// At most one spare per resident voice, so at most `MAX_RESIDENT_VOICES`, which is
+    /// what the retirement ring is sized for. Control thread, `live` locked.
+    fn reconcile_spares(&self, live: &mut HashMap<SlotId, Live>) {
+        let start = self.loops.start();
+        for (&id, entry) in live.iter_mut() {
+            let wants = entry.wants_spare(start);
+            if wants == entry.spare {
+                continue;
+            }
+            let spare = wants.then(|| stretched::spare_vocoder::<F>(self.channels));
+            if self
+                .queue(VoiceCommand::SetSpare { id, spare }, None)
+                .is_ok()
+            {
+                entry.spare = wants;
+            }
+        }
     }
 
     /// Queues a command, doing any allocation it implies here, on the calling
@@ -1167,13 +1327,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         };
         let generation = self.stamp();
         self.add_stream_voice(id, voice, stream, stretch, generation)?;
-        live.insert(
-            id,
-            Live {
-                tier: Tier::Disk,
-                generation,
-            },
-        );
+        live.insert(id, Live::added(Tier::Disk, generation, None, false));
         Ok(())
     }
 
@@ -1324,6 +1478,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         // drain when the command retires nothing, or by `collect_retired`
         // when the value is taken. The drain's push therefore always fits.
         let reserves = cmd.may_retire();
+        let is_spare = matches!(cmd, VoiceCommand::SetSpare { .. });
         if reserves && !self.room.reserve(MAX_RESIDENT_VOICES) {
             return Err(SendError::RetirementFull);
         }
@@ -1340,7 +1495,11 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
                 PushError::Full => SendError::Full,
             });
         }
-        self.counters.note_queued();
+        // A spare changes no voice: a pool whose handle has only sent spares still holds
+        // the voices it was built with, which lets a fork copy it.
+        if !is_spare {
+            self.counters.note_queued();
+        }
         Ok(())
     }
 
@@ -1352,7 +1511,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
                 voice,
                 stretch: None,
             } if stretch_wanted(&voice.play) => {
-                let vocoder = stretched::vocoder::<F>(self.channels);
+                let vocoder = stretched::vocoder::<F>(self.channels, false);
                 VoiceCommand::AddVoice {
                     id,
                     voice,
@@ -1372,7 +1531,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
                 pitch_cents,
                 stretch: None,
             } if stretch_values_want_filter(stretch_factor, pitch_cents) => {
-                let vocoder = stretched::vocoder::<F>(self.channels);
+                let vocoder = stretched::vocoder::<F>(self.channels, false);
                 VoiceCommand::UpdateStretch {
                     id,
                     stretch_factor,
@@ -1404,6 +1563,11 @@ impl<F: SamplerFloat> tutti_rt::Reclaim for VoiceNodeHandle<F> {
 impl<F: SamplerFloat> tutti_rt::Reclaim for VoicePoolHandle<F> {
     fn reclaim(&self) -> usize {
         self.collect_retired();
+        // The transport's loop as it stands now, and any spare a full ring held back.
+        if let Some(start) = self.loops.read() {
+            self.loops.set(start);
+        }
+        self.reconcile_spares(&mut self.live());
         let streams: Vec<_> = self.streams().values().cloned().collect();
         streams.iter().map(|s| s.lock().reclaim()).sum()
     }

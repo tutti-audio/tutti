@@ -496,6 +496,10 @@ pub struct Graph<F: Float = f32> {
     /// publisher is the session's `TransportSettings`, whose `Reclaim` sweep
     /// already covers the cell.
     pub(crate) tempo: tutti_timeline::TempoReader,
+    /// The transport's motion handle, which each sampler pool inserted through the graph
+    /// reads the loop region from ([`SessionNode::bind_loop`]); `None` for a graph no
+    /// transport is bound to.
+    loops: Option<tutti_timeline::MotionFsm>,
     /// A re-prepare resumed in the update's collect: its plan's figures are
     /// published at the commit.
     resumed: bool,
@@ -668,6 +672,7 @@ impl<F: Float> Graph<F> {
             graveyard: crate::plugin::Graveyard::default(),
             retiring: Vec::new(),
             tempo,
+            loops: None,
             resumed: false,
             compensation: Arc::default(),
             latency: Samples::new(0),
@@ -678,6 +683,20 @@ impl<F: Float> Graph<F> {
     /// device's callback size when the session knows it.
     pub(crate) fn prepared(&self) -> Prepare {
         *self.editor.prepare()
+    }
+
+    /// Binds the pools inserted from now on to `motion`'s loop region.
+    pub(crate) fn set_loops(&mut self, motion: tutti_timeline::MotionFsm) {
+        self.loops = Some(motion);
+    }
+
+    /// `node` bound to the session's tempo map and, when there is one, its loop region.
+    fn bound<N: SessionNode<F>>(&self, node: N) -> N {
+        let node = node.bind_tempo(&self.tempo);
+        match &self.loops {
+            Some(motion) => node.bind_loop(motion),
+            None => node,
+        }
     }
 
     pub(crate) fn set_render_workers(&mut self, workers: crate::Workers) {
@@ -889,7 +908,7 @@ impl<F: Float> Graph<F> {
     /// }
     /// ```
     pub fn add<N: SessionNode<F>>(&mut self, node: N) -> Key<N> {
-        let (key, controls) = self.place(node.bind_tempo(&self.tempo));
+        let (key, controls) = self.place(self.bound(node));
         self.address::<N>(key.erase(), controls);
         key
     }
@@ -1509,7 +1528,7 @@ impl<F: Float> Graph<F> {
             node: unit,
             controls,
             fork,
-        } = incoming.bind_tempo(&self.tempo).into_parts();
+        } = self.bound(incoming).into_parts();
         let unit = Unit::<N, F> {
             parts: NodeParts {
                 node: unit,

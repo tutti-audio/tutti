@@ -552,8 +552,8 @@ pub mod session {
         Wire, main_output_width,
     };
     pub use tutti_timeline::{
-        AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
-        Timeline,
+        AudioTaken, LoopEdit, MotionFsm, OfflineTimeline, OfflineTimelineConfig, OfflineTransport,
+        TimedError, Timeline, TransportSettings,
     };
 
     #[cfg(feature = "export")]

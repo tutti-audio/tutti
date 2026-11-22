@@ -65,6 +65,9 @@ fn render_with(
         DiskStreamer::manual(SampleRate::of(SR), Default::default()).expect("builds");
     // Held while the voice plays: dropping the stream ends it.
     let mut stream = None;
+    // The pool's handle, whose reclaim tick reads the transport's loop and sends the
+    // voice the spare it primes the wrap with.
+    let mut tick = None;
     if tier == Tier::Disk {
         let path = dir.path().join("ramp.wav");
         let spec = hound::WavSpec {
@@ -93,8 +96,11 @@ fn render_with(
         }
         let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)))
             .expect("a placeable wave");
-        let pool = VoicePool::new().tempo(transport.settings().tempo_reader());
+        let pool = VoicePool::new()
+            .tempo(transport.settings().tempo_reader())
+            .loops(transport.motion().clone());
         let handle = ed.insert(NodeKey(1), "voice", pool).controls;
+        tick = Some(handle.clone());
         handle
             .add(
                 SlotId(1),
@@ -140,6 +146,9 @@ fn render_with(
     let mut left = Vec::with_capacity(frames + BLOCK);
     let mut buf = vec![0.0f32; BLOCK * 2];
     while left.len() < frames {
+        if let Some(handle) = &tick {
+            tutti_rt::Reclaim::reclaim(handle);
+        }
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
         left.extend(buf.as_chunks::<2>().0.iter().map(|f| f[0]));
         let _ = streamer.step();
