@@ -3851,6 +3851,17 @@ mod tests {
         let mut messages = Vec::new();
         a.core.chase(MidiGroup::of(2), |u| messages.push(u));
         assert!(messages.len() <= VoiceAllocator::CHASE_MESSAGES);
+        // A 7-bit value goes out widened to the corners of 32 bits (M2-115):
+        // the portamento switch at 127 is the full-scale word.
+        let switch = messages.iter().find_map(|ump| match ump.decode() {
+            Ok(Message::Midi2(_, Voice2::ControlChange { controller, value }))
+                if controller == CCNumber::PORTAMENTO_SWITCH =>
+            {
+                Some(value)
+            }
+            _ => None,
+        });
+        assert_eq!(switch, Some(ControlValue::MAX));
 
         let mut b = Sim::new(POLY);
         for ump in messages {
