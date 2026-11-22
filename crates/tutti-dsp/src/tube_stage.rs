@@ -9,12 +9,12 @@
 //! plate-to-cathode voltage:
 //!
 //! ```text
-//! E1 = (V_pk / Kp) ln(1 + exp(Kp (1 / mu + V_gk / sqrt(Kvb + V_pk^2))))
-//! I_p = (E1^Ex / Kg1) (1 + sgn E1)
+//! E1 = (V_pk / Kp) ln(1 + exp(Kp (1 / mu + V_gk / sqrt(KVB + V_pk^2))))
+//! I_p = (E1^Ex / KG1) (1 + sgn E1)
 //! ```
 //!
-//! The parameters are the 12AX7 set of Koren's paper (`mu` 100, `Ex` 1.4, `Kg1` 1060, `Kp` 600,
-//! `Kvb` 300); the supply 250 V, the plate load 100 kOhm and the cathode resistor 1.5 kOhm are
+//! The parameters are the 12AX7 set of Koren's paper (`mu` 100, `Ex` 1.4, `KG1` 1060, `Kp` 600,
+//! `KVB` 300); the supply 250 V, the plate load 100 kOhm and the cathode resistor 1.5 kOhm are
 //! the usual values of a 12AX7 gain stage and named constants here (`tutti_units` has no volt
 //! or ohm unit, and the user sets a drive in decibels, not a circuit). The plate voltage is the
 //! root of the load line
@@ -48,8 +48,8 @@
 //! closed-form **seed** of the saturated tube: positive where the tube conducts, and `B+` where it
 //! does not.
 //!
-//! With `z0 = Kp (1 / mu + V_gk / sqrt Kvb)` (the exponent at `V_pk` small against `sqrt Kvb`),
-//! `a = softplus(z0) / Kp` and `c = R_p (2 / Kg1) a^Ex`, the load line reads
+//! With `z0 = Kp (1 / mu + V_gk / sqrt KVB)` (the exponent at `V_pk` small against `sqrt KVB`),
+//! `a = softplus(z0) / Kp` and `c = R_p (2 / KG1) a^Ex`, the load line reads
 //! `V + c V^Ex = B+`. Its first approximation is `V = (B+ / c)^(1 / Ex)` (the term `c V^Ex`
 //! carries the load), refined by two steps of `V <- ((B+ - V) / c)^(1 / Ex)`, a contraction of
 //! ratio `V / (Ex (B+ - V))`. A seed past `B+` (the tube cut off) is `B+`.
@@ -85,11 +85,11 @@ const CHUNK: usize = 16;
 const MU: f64 = 100.0;
 /// Koren's exponent `Ex`.
 const EX: f64 = 1.4;
-/// Koren's current coefficient `Kg1`.
+/// Koren's current coefficient `KG1`.
 const KG1: f64 = 1060.0;
 /// Koren's knee `Kp`.
 const KP: f64 = 600.0;
-/// Koren's `Kvb`, the plate voltage's contribution to the knee, volts squared.
+/// Koren's `KVB`, the plate voltage's contribution to the knee, volts squared.
 const KVB: f64 = 300.0;
 /// The supply `B+`, volts.
 const SUPPLY: f64 = 250.0;
@@ -168,7 +168,7 @@ struct Triode<F: Float> {
     inv_mu: F,
     ex: F,
     inv_ex: F,
-    /// `2 / Kg1`: the current scale with the `1 + sgn` factor of a conducting tube.
+    /// `2 / KG1`: the current scale with the `1 + sgn` factor of a conducting tube.
     scale: F,
     kp: F,
     inv_kp: F,
