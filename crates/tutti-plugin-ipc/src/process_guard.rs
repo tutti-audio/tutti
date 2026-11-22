@@ -3,8 +3,7 @@
 //! [`ProcessGuard`] owns the `plugin-server` child process and its
 //! bridge thread. `Drop` asks the server to shut down, gives it
 //! [`Timeouts::shutdown`](tutti_plugin_types::Timeouts::shutdown) to end by
-//! itself (its plugin is destroyed in that), then kills it and removes the
-//! socket file. `tutti-plugin` holds it behind an `Arc` in the node of a served
+//! itself (its plugin is destroyed in that), then kills it. `tutti-plugin` holds it behind an `Arc` in the node of a served
 //! plugin and in the plugin's handle — the subprocess dies when the LAST Arc
 //! drops (i.e., after both the graph has released the node *and* every
 //! user-held handle has dropped).
@@ -15,7 +14,6 @@
 
 use crate::{IpcConfig, IpcThread, ServerWatch};
 use futures_lite::future::yield_now;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering, fence};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -96,8 +94,6 @@ pub struct ProcessGuard {
     launched: Option<Launched>,
     watch: Arc<ServerWatch>,
     _bridge_thread: Option<IpcThread>,
-    /// The control socket's file, removed when the guard drops.
-    socket_path: PathBuf,
     /// How long a server told to shut down has to end before it is killed.
     shutdown: Duration,
 }
@@ -150,7 +146,6 @@ impl ProcessGuard {
             }),
             watch,
             _bridge_thread: None,
-            socket_path: config.socket_path.clone(),
             shutdown: config.timeouts.shutdown,
         })
     }
@@ -192,12 +187,11 @@ impl ProcessGuard {
     /// served-node and fork tests of `tutti-plugin` over its mock `plugin-server`, and by
     /// this crate's own for `Ipc`.
     #[cfg(any(test, feature = "testing"))]
-    pub fn for_test(socket_path: PathBuf) -> Self {
+    pub fn for_test() -> Self {
         Self {
             launched: None,
             watch: Arc::new(ServerWatch::new()),
             _bridge_thread: None,
-            socket_path,
             shutdown: Duration::ZERO,
         }
     }
@@ -270,7 +264,6 @@ impl Drop for ProcessGuard {
                 reap_elsewhere(process, &executor);
             }
         }
-        let _ = std::fs::remove_file(&self.socket_path);
     }
 }
 
@@ -441,7 +434,7 @@ mod tests {
         let child = command.spawn().expect("the child spawns");
         ProcessGuard::launched(
             Reaped::new(child),
-            &IpcConfig::at(crate::unique_socket_path().expect("the OS has a random source")),
+            &IpcConfig::new(),
             tutti_fixtures::executor(),
         )
         .expect("the exit task starts")
@@ -637,12 +630,8 @@ mod tests {
         let weak = executor.downgrade();
         let child = sleeper().spawn().expect("sleep spawns");
         let pid = child.id();
-        let guard = ProcessGuard::launched(
-            Reaped::new(child),
-            &IpcConfig::at(crate::unique_socket_path().expect("the OS has a random source")),
-            &executor,
-        )
-        .expect("the exit task starts");
+        let guard = ProcessGuard::launched(Reaped::new(child), &IpcConfig::new(), &executor)
+            .expect("the exit task starts");
 
         drop(executor);
 
@@ -694,12 +683,8 @@ mod tests {
         command.stdin(Stdio::piped());
         let mut child = command.spawn().expect("cat spawns");
         let stdin = child.stdin.take();
-        let mut guard = ProcessGuard::launched(
-            Reaped::new(child),
-            &IpcConfig::at(crate::unique_socket_path().expect("the OS has a random source")),
-            &executor,
-        )
-        .expect("the exit task starts");
+        let mut guard = ProcessGuard::launched(Reaped::new(child), &IpcConfig::new(), &executor)
+            .expect("the exit task starts");
         drop(executor);
         let launched = guard.launched.as_mut().expect("launched");
         assert!(

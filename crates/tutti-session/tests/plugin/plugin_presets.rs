@@ -306,9 +306,7 @@ mod vst3 {
         .expect("a .vst3 bundle around the module");
         let client = |rate| {
             tutti_plugin::PluginClient::new(
-                tutti_plugin_ipc::IpcConfig::at(
-                    tutti_plugin_ipc::unique_socket_path().expect("a random source"),
-                ),
+                tutti_plugin_ipc::IpcConfig::new(),
                 tutti_fixtures::executor(),
                 &tutti_fixtures::detached_work(),
                 &tutti_plugin_db::Loadable::uncatalogued(PluginRef::file(bundle.to_path_buf())),

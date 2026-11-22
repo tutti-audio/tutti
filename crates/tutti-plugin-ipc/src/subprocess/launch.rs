@@ -1,5 +1,5 @@
 //! Full launch sequence for a plugin-server subprocess:
-//! spawn → handshake → load plugin → setup shared memory → open the audio lane →
+//! spawn (handing it its end of the connection) → handshake → load plugin → setup shared memory → open the audio lane →
 //! return a [`LaunchedServer`] holding the lane and the broker connection, ready
 //! for the RT bridge thread.
 
@@ -7,13 +7,12 @@ use crate::ProcessGuard;
 use crate::config::IpcConfig;
 use crate::conversation::Conversation;
 use crate::error::unexpected_message;
-use crate::transport::PendingLane;
 use crate::transport::control::{self as ipc, ControlStream};
 use crate::transport::shm::{AudioSlab, SlabLayout, SlabWriter};
+use crate::transport::{PendingLane, Rendezvous};
 use crate::{
     ControlFrame, ControlReply, ControlRequest, Lane, ReqId, Request, StagedState, Working,
 };
-use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 use tutti_buffers::FloatWidth;
@@ -26,13 +25,6 @@ use tutti_plugin_types::{Helper, Locator, PluginFormat, PluginId, PluginRef};
 use tutti_plugin_types::{IpcError, IpcResult, ServerError, StateError};
 use tutti_plugin_types::{PluginDescriptor, PluginWiring};
 use tutti_units::SampleRate;
-
-/// How long to wait between connect attempts.
-///
-/// Short enough that a fast spawn is not rounded up to something a user
-/// notices, long enough that a slow one does not spin the CPU. At this interval
-/// the common case returns in single-digit milliseconds.
-const CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(2);
 
 /// A plugin-server that has loaded its plugin and opened its audio lane, and
 /// waits for the bridge thread to speak on its connections ([`launch`]).
@@ -117,9 +109,9 @@ impl Restore<'_> {
 /// **Every failure after the spawn must reap the child.** The child is held
 /// by a [`ProcessGuard`] from the moment it is spawned, which kills and reaps it
 /// when it drops, so no `?` between the spawn and the end of the launch leaves
-/// a `plugin-server` alive with nothing holding it (it would survive the host,
-/// keep its socket bound, and hold the plugin's audio device claim). The
-/// guard's watch is also what a failed connect asks whether the server died.
+/// a `plugin-server` alive with nothing holding it (it would survive the host
+/// and hold the plugin's audio device claim). The guard's watch is also what a
+/// connect that has to wait (Windows) asks whether the server died.
 ///
 /// # Errors
 ///
@@ -146,7 +138,7 @@ pub fn launch(
 pub(super) fn launch_with(
     locator: &Locator,
     config: &IpcConfig,
-    plugin_path: &Path,
+    plugin_path: &std::path::Path,
     format: PluginFormat,
     sample_rate: SampleRate,
     executor: &Executor,
@@ -176,14 +168,16 @@ pub(super) fn launch_with_state(
     executor: &Executor,
 ) -> IpcResult<LaunchedServer> {
     config.timeouts.validate()?;
-    let server = ProcessGuard::launched(spawn_process(locator, config)?, config, executor)
-        .map_err(IpcError::ExitUnwatched)?;
+    let (process, rendezvous) = spawn_process(locator, config)?;
+    let server =
+        ProcessGuard::launched(process, config, executor).map_err(IpcError::ExitUnwatched)?;
 
-    // The guard is borrowed, not moved: the connect retry asks its watch so a
-    // server that died on startup is reported at once, and the teardown below
-    // still needs to drop it.
+    // The guard is borrowed, not moved: a connect that has to wait for the server
+    // asks its watch so a server that died on startup is reported at once, and
+    // the teardown below still needs to drop it.
     let result = (|server: &ProcessGuard| {
-        let mut launch = Launch::new(handshake(config, server)?, &config.timeouts);
+        let stream = rendezvous.connect(server, config.timeouts.connect)?;
+        let mut launch = Launch::new(hello(stream, config.timeouts.call)?, &config.timeouts);
         // A state the server would not take (over the limit, a broken sequence)
         // is a refusal like any other: the plugin loads at its defaults. A stage
         // that got no answer is not: the stream may have a late reply in flight,
@@ -232,7 +226,7 @@ pub(super) fn launch_with_state(
             })
         }
         Err(e) => {
-            // `server` drops here, killed and reaped, and its socket removed. Best-effort and
+            // `server` drops here, killed and reaped. Best-effort and
             // deliberately un-propagated: the launch error is the one worth
             // reporting, and a failed clean-up must not mask it.
             drop(server);
@@ -243,8 +237,8 @@ pub(super) fn launch_with_state(
 
 /// Starts the server as the leader of a process group of its own, in the
 /// host's kill-on-close job on Windows, so its helpers and the server itself
-/// end with it.
-fn spawn_process(locator: &Locator, config: &IpcConfig) -> IpcResult<Reaped> {
+/// end with it, and with the means to reach it ([`Rendezvous`]).
+fn spawn_process(locator: &Locator, config: &IpcConfig) -> IpcResult<(Reaped, Rendezvous)> {
     let server_path = locator
         .resolve(Helper::Server)
         .ok_or(IpcError::ServerNotFound)?;
@@ -255,14 +249,13 @@ fn spawn_process(locator: &Locator, config: &IpcConfig) -> IpcResult<Reaped> {
     }
     let mut command = Command::new(server_path);
     command
-        .arg(&config.socket_path)
         .env(
             tutti_plugin_ipc_ffi::HOST_PID_ENV,
             std::process::id().to_string(),
         )
         .stderr(std::process::Stdio::inherit());
     tutti_plugin_ipc_ffi::own_group(&mut command);
-    let child = command.spawn().map_err(IpcError::Io)?;
+    let (child, rendezvous) = crate::transport::spawn(command)?;
     // A server that cannot be bound to the host's end could outlive a host
     // that dies: it is ended and the launch refused. A child spawned before the
     // assignment stays outside the job. (Unix binds at the spawn, in
@@ -271,45 +264,7 @@ fn spawn_process(locator: &Locator, config: &IpcConfig) -> IpcResult<Reaped> {
     // On the refusal below `reaped` drops: its group is killed and reaped.
     let reaped = Reaped::leading_group(child);
     bound.map_err(IpcError::ServerNotBound)?;
-    Ok(reaped)
-}
-
-/// Connect as soon as the server is listening, rather than after a fixed wait.
-///
-/// `connect` fails immediately while nothing is bound, so retrying is how the
-/// host learns the socket is up. The path is unique per launch
-/// (`unique_socket_path`), so a successful connect can only be *this* server —
-/// there is no stale socket from a previous run to attach to by mistake.
-///
-/// The server's watch is asked between attempts, and the pause between them
-/// is a wait on it ([`ServerWatch::wait_dead`](crate::ServerWatch::wait_dead)):
-/// a server that died on startup — a missing dynamic library, an immediate
-/// panic — never binds, and the wait ends at its death and not at the end of
-/// a retry period, so the host reports a failure whose cause is known at once
-/// and not after the full timeout. No event says "the socket is bound" (the
-/// server would have to announce it over a channel that exists before the
-/// socket does), so the attempts themselves are the poll, one per
-/// [`CONNECT_RETRY_INTERVAL`].
-fn connect_when_listening(
-    socket: &Path,
-    server: &ProcessGuard,
-    patience: Duration,
-) -> IpcResult<ControlStream> {
-    let deadline = Instant::now() + patience;
-    loop {
-        match ipc::connect(socket) {
-            Ok(stream) => return Ok(stream),
-            Err(e) => {
-                if let Some(cause) = server.watch().cause() {
-                    return Err(IpcError::ServerExited { cause });
-                }
-                if Instant::now() >= deadline {
-                    return Err(e);
-                }
-                server.watch().wait_dead(CONNECT_RETRY_INTERVAL);
-            }
-        }
-    }
+    Ok((reaped, rendezvous))
 }
 
 /// How many times [`Timeouts::load`] a load may be kept waiting by the server's
@@ -317,9 +272,14 @@ fn connect_when_listening(
 /// that works for ever is not.
 const LOAD_CEILING_FACTOR: u32 = 10;
 
-fn handshake(config: &IpcConfig, server: &ProcessGuard) -> IpcResult<ControlStream> {
-    let mut stream = connect_when_listening(&config.socket_path, server, config.timeouts.connect)?;
-    let timeout = config.timeouts.call;
+/// The server's `Hello`, the first frame on `stream`, within `timeout`.
+///
+/// # Errors
+///
+/// No frame within `timeout`, the server ended, a first frame that is not a
+/// `Hello` ([`IpcError::UnexpectedMessage`]), or a protocol version the host does
+/// not speak ([`IpcError::ProtocolMismatch`], [`IpcError::StaleServer`]).
+fn hello(mut stream: ControlStream, timeout: Duration) -> IpcResult<ControlStream> {
     // A server from before version 27 frames its `Hello` in bincode, which does
     // not decode as one message of ours: say which binary is stale rather than
     // report a bare codec error.
@@ -708,8 +668,11 @@ pub(crate) fn swap_slab(
 mod tests {
     use super::*;
     use crate::transport::shm::RING_SLOTS;
-    use std::path::PathBuf;
-    use std::process::Child;
+
+    /// The tests that need what only unix has: a socket pair carrying descriptors,
+    /// and a spawned process's descriptor table.
+    #[cfg(unix)]
+    mod unix;
     use tutti_plugin_types::ChannelLayout;
     use tutti_plugin_types::Timeouts;
 
@@ -719,26 +682,15 @@ mod tests {
     /// reap — so any `?` between the spawn and `ProcessGuard`'s construction
     /// (which happens much later, in `PluginClient::new`) would strand a
     /// `plugin-server` with nothing holding it.
-    /// It outlives the host, keeps its socket bound, and holds the plugin's
-    /// device claim; a user retrying a failing plugin accumulates them.
+    /// It outlives the host and holds the plugin's device claim; a user retrying a failing plugin accumulates them.
     ///
-    /// The stand-in has to satisfy three requirements at once: never speak the
-    /// protocol, so `handshake` fails the way a hung server does; **stay alive
-    /// while doing so**, or there is no leak left to detect; and leave the
-    /// socket path alone, so the failure under test is the ordinary
-    /// connect/handshake one.
-    ///
-    /// The middle requirement is easy to get wrong, because `spawn_process`
-    /// hands the socket path to the stand-in as argv[1]. `sleep` reads it as a
-    /// duration, rejects it, and exits. `cat` reads it as a filename and exits
-    /// too, since nothing has created it. Both looked right and both made this
-    /// test vacuous — caught only by restoring the leak and watching it still
-    /// pass. Creating the path as a FIFO keeps `cat` alive but breaks the third
-    /// requirement: `connect` then fails with ENOTSOCK long before the
-    /// handshake, testing a different path than the one that matters.
-    ///
-    /// So the stand-in is a tiny shell script that ignores its arguments and
-    /// sleeps. It survives, it never speaks, and it never touches the socket.
+    /// The stand-in has to satisfy two requirements at once: never speak the
+    /// protocol, so the wait for the server's `Hello` fails the way a hung server
+    /// does, and **stay alive while doing so**, or there is no leak left to
+    /// detect. It is a tiny shell script that ignores its standard input (the
+    /// host's end of the connection) and sleeps. `sleep` or `cat` run directly
+    /// would also look right, but `cat` reads the connection and exits when it
+    /// closes: a stand-in that ends on its own proves nothing about cleanup.
     ///
     /// # Keeping it deterministic under parallel load
     ///
@@ -792,13 +744,13 @@ mod tests {
                 t.call = Duration::from_millis(200);
                 t
             },
-            ..IpcConfig::at(crate::unique_socket_path().expect("the OS has a random source"))
+            ..IpcConfig::new()
         };
 
         let err = match launch_with(
             &Locator::at(&stand_in),
             &config,
-            Path::new("/nonexistent.vst3"),
+            std::path::Path::new("/nonexistent.vst3"),
             PluginFormat::Vst3,
             SampleRate::SR_48K,
             tutti_fixtures::executor(),
@@ -860,7 +812,7 @@ mod tests {
                 t.state_restore = state_restore;
                 t
             },
-            ..IpcConfig::at(crate::unique_socket_path().expect("the OS has a random source"))
+            ..IpcConfig::new()
         };
         let origin = PluginRef::file(tutti_fixtures::clap_probe());
         launch_with_state(
@@ -892,6 +844,7 @@ mod tests {
     #[cfg(unix)]
     mod held_restore {
         use super::*;
+        use std::path::Path;
 
         fn launch_held(
             call: Duration,
@@ -1233,8 +1186,7 @@ mod tests {
     #[cfg(unix)]
     fn a_library_that_is_not_a_plugin_fails_the_launch_with_the_loaders_reason() {
         let dir = tempfile::tempdir().expect("a private temp dir");
-        let config =
-            IpcConfig::at(crate::unique_socket_path().expect("the OS has a random source"));
+        let config = IpcConfig::new();
         // A copy in this test's own directory, not `publish_with_extension`:
         // that names the link `real.with_extension(..)`, which on Linux is the
         // cdylib's own path.
@@ -1434,52 +1386,17 @@ mod tests {
         );
     }
 
-    /// Drives the real [`handshake`] against a stand-in server whose first frame
+    /// Drives the real [`hello`] against a stand-in server whose first frame
     /// is `body`, and returns the error it must end in.
     fn handshake_against(body: Vec<u8>) -> IpcError {
-        use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
+        use std::io::Write;
 
-        // Unique per run. A fixed name collides with a leftover socket from an
-        // earlier run, and `connect` then fails with EINVAL *before* the version
-        // is ever compared — an IO error that would masquerade as a working gate.
-        let path = crate::unique_socket_path().expect("the OS has a random source");
-        let _ = std::fs::remove_file(&path);
-        let name = crate::transport::control::socket_name(&path).unwrap();
-        let listener = ListenerOptions::new().name(name).create_sync().unwrap();
-
-        let server = std::thread::spawn(move || {
-            use std::io::Write;
-            let Ok(stream) = listener.accept() else {
-                return;
-            };
-            let mut stream = &stream;
-            let _ = stream.write_all(&(body.len() as u32).to_be_bytes());
-            let _ = stream.write_all(&body);
-        });
-
-        let config = IpcConfig {
-            timeouts: {
-                let mut t = Timeouts::default();
-                t.call = Duration::from_secs(2);
-                t
-            },
-            ..IpcConfig::at(path.clone())
-        };
-        // The listener above stands in for the server, so there is no child to
-        // watch — but `handshake` takes a guard to notice a spawn that died. A
-        // lingering stand-in stays alive for the whole test; the guard kills it.
-        let stand_in = ProcessGuard::launched(
-            Reaped::new(spawn_stand_in(StandIn::Lingers)),
-            &config,
-            tutti_fixtures::executor(),
-        )
-        .expect("the exit thread starts");
-        let err = handshake(&config, &stand_in)
-            .expect_err("a stale server must not complete the handshake");
-        drop(stand_in);
-        let _ = server.join();
-        let _ = std::fs::remove_file(&path);
-        err
+        let (host, mut server) = crate::transport::broker_pair();
+        server
+            .write_all(&(body.len() as u32).to_be_bytes())
+            .expect("the length prefix");
+        server.write_all(&body).expect("the body");
+        hello(host, Duration::from_secs(60)).expect_err("a stale server must not be accepted")
     }
 
     /// A leftover v3 `plugin-server` on `PATH` must be refused at the handshake
@@ -1577,176 +1494,6 @@ mod tests {
         }
     }
 
-    /// **A late bind still connects.** The stand-in server binds its socket only
-    /// when the test writes a byte to its stdin, which the test does once the
-    /// connect is running on its own thread, so the connect is retrying when the
-    /// socket appears. A connect that gave up at its first failure fails here
-    /// whenever its first attempt came before the bind.
-    #[test]
-    fn a_late_bind_still_connects() {
-        use std::io::Write as _;
-
-        let path = std::env::temp_dir().join(format!("tutti_late_bind_{}", std::process::id()));
-        let _ = std::fs::remove_file(&path);
-
-        let mut child = spawn_stand_in(StandIn::BindsOnByte(path.clone()));
-        let mut release = child.stdin.take().expect("the stand-in's stdin is piped");
-        let stand_in = ProcessGuard::launched(
-            Reaped::new(child),
-            &IpcConfig::at(path.clone()),
-            tutti_fixtures::executor(),
-        )
-        .expect("the exit thread starts");
-
-        let (running, is_running) = std::sync::mpsc::channel();
-        let result = std::thread::scope(|scope| {
-            let connect = scope.spawn(|| {
-                running.send(()).expect("the test waits");
-                connect_when_listening(&path, &stand_in, Timeouts::default().connect)
-            });
-            is_running.recv().expect("the connect thread starts");
-            release
-                .write_all(&[1])
-                .expect("the stand-in reads its stdin");
-            connect.join().expect("the connect thread ends")
-        });
-        drop(stand_in);
-
-        assert!(
-            result.is_ok(),
-            "the connect must retry until the server binds, got: {:?}",
-            result.err()
-        );
-        let _ = std::fs::remove_file(&path);
-    }
-
-    /// A server that dies before binding is reported as dead, not as an
-    /// unreachable socket after the timeout.
-    ///
-    /// Without the watch on the process this case is indistinguishable from a
-    /// slow spawn, so the host would retry for the whole patience and report the
-    /// connect failure. The patience here is a hang guard far past anything the
-    /// retry needs: only the watch can produce "exited before binding".
-    #[test]
-    fn a_server_that_never_binds_is_reported_dead_not_unreachable() {
-        let path = std::env::temp_dir().join(format!("tutti_never_bound_{}", std::process::id()));
-        let _ = std::fs::remove_file(&path);
-
-        // Exits immediately and binds nothing — the shape of a plugin-server
-        // that dies on a missing dynamic library.
-        let dead = ProcessGuard::launched(
-            Reaped::new(spawn_stand_in(StandIn::Exits)),
-            &IpcConfig::at(path.clone()),
-            tutti_fixtures::executor(),
-        )
-        .expect("the exit thread starts");
-
-        let err = connect_when_listening(&path, &dead, Duration::from_secs(60))
-            .expect_err("a server that never binds cannot connect");
-
-        assert!(
-            matches!(err, IpcError::ServerExited { .. }),
-            "the error must say the server died rather than blaming the socket, got: {err}"
-        );
-
-        let _ = std::fs::remove_file(&path);
-    }
-
-    /// Which throwaway child a connect test needs in place of a plugin-server.
-    enum StandIn {
-        /// Exits at once, binding nothing.
-        Exits,
-        /// Stays alive, binding nothing, until the test kills it.
-        Lingers,
-        /// Binds the socket at this path once its stdin has a byte, accepts a
-        /// connection, and stays until its stdin closes.
-        BindsOnByte(PathBuf),
-    }
-
-    /// Set only in a [`StandIn::Lingers`] child, so that [`stand_in_lingers`]
-    /// waits there and is an instant no-op in an ordinary test run.
-    const STAND_IN_ENV: &str = "TUTTI_LAUNCH_TEST_STAND_IN";
-
-    /// Set only in a [`StandIn::BindsOnByte`] child: the path it binds.
-    const STAND_IN_BIND_ENV: &str = "TUTTI_LAUNCH_TEST_STAND_IN_BIND";
-
-    /// Spawns a stand-in by re-running **this test binary**, never a program
-    /// looked up on `PATH`.
-    ///
-    /// These were `sleep 30` and `true`. Neither is a Windows program: there
-    /// they resolve to whatever `PATH` offers (Git's MSYS `usr/bin` on CI) or to
-    /// nothing. An MSYS `true` can take seconds to start and exit under load,
-    /// and the never-binds test measures exactly that interval — on Windows CI
-    /// it took 5.7 s against its 2.5 s budget and failed, having tested the
-    /// runner's `PATH` rather than `connect_when_listening`. The test binary
-    /// exists on every target by construction, and its harness starts and
-    /// exits in milliseconds.
-    ///
-    /// - `Exits` asks the harness for an `--exact` name no test has: libtest
-    ///   filters everything out and exits 0 without running anything.
-    /// - `Lingers` runs [`stand_in_lingers`] alone, with [`STAND_IN_ENV`] set so
-    ///   it waits. If that name ever stops matching, the child exits at once
-    ///   instead and `the_connect_waits_for_a_socket_that_is_not_bound_yet`
-    ///   fails with `ServerExited` — the drift cannot pass silently.
-    fn spawn_stand_in(kind: StandIn) -> Child {
-        let exe = std::env::current_exe().expect("the test binary's own path");
-        let mut cmd = Command::new(exe);
-        // libtest names a unit test by its path *within* the crate, so drop the
-        // leading `tutti_plugin_ipc::` from `module_path!()`.
-        let module = module_path!()
-            .split_once("::")
-            .map_or(module_path!(), |(_, rest)| rest);
-        match kind {
-            StandIn::BindsOnByte(path) => {
-                cmd.args(["--exact", &format!("{module}::stand_in_binds_late")])
-                    .env(STAND_IN_BIND_ENV, path);
-            }
-            StandIn::Exits => {
-                cmd.args(["--exact", "no test in this binary has this name"]);
-            }
-            StandIn::Lingers => {
-                cmd.args(["--exact", &format!("{module}::stand_in_lingers")])
-                    .env(STAND_IN_ENV, "1");
-            }
-        }
-        cmd.stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .expect("failed to re-run the test binary as a stand-in child")
-    }
-
-    /// The body of a [`StandIn::Lingers`] child; a no-op anywhere else.
-    ///
-    /// It waits for its stdin to close, which its parent's end of the pipe does
-    /// when the test kills it or ends, so a leaked one goes away by itself.
-    #[test]
-    fn stand_in_lingers() {
-        if std::env::var_os(STAND_IN_ENV).is_some() {
-            let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
-        }
-    }
-
-    /// The body of a [`StandIn::BindsOnByte`] child; a no-op anywhere else.
-    #[test]
-    fn stand_in_binds_late() {
-        use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
-        use std::io::Read as _;
-
-        let Some(path) = std::env::var_os(STAND_IN_BIND_ENV) else {
-            return;
-        };
-        let mut stdin = std::io::stdin();
-        stdin.read_exact(&mut [0u8]).expect("the parent's byte");
-        let name = crate::transport::control::socket_name(Path::new(&path)).expect("socket name");
-        let listener = ListenerOptions::new()
-            .name(name)
-            .create_sync()
-            .expect("bind the late listener");
-        let _connection = listener.accept();
-        let _ = std::io::copy(&mut stdin, &mut std::io::sink());
-    }
-
     /// **A real plugin-server that is ended is declared dead by its process's
     /// end**, with a failing status, though nothing reads its socket (no bridge
     /// thread is attached, so the stream's EOF is not a signal here): the watch
@@ -1761,8 +1508,7 @@ mod tests {
     fn an_ended_real_server_is_declared_dead_through_its_exit() {
         use tutti_plugin_types::PluginFailure;
 
-        let config =
-            IpcConfig::at(crate::unique_socket_path().expect("the OS has a random source"));
+        let config = IpcConfig::new();
         let origin = PluginRef::file(tutti_fixtures::clap_probe());
         let launched = launch_with_state(
             &Locator::at(tutti_fixtures::plugin_server()),
@@ -1792,7 +1538,3 @@ mod tests {
         }
     }
 }
-
-/// The audio lane's open, against a mock server over a socket pair.
-#[cfg(all(test, unix))]
-mod lane_tests;

@@ -50,7 +50,7 @@ pub fn send_lane(conn: Connection<'_>, end: BorrowedFd<'_>) -> std::io::Result<(
 /// [`SlabError::NoDescriptor`] when none arrives, [`SlabError::ExtraDescriptors`]
 /// when more than one does, and [`SlabError::Transfer`] for an OS error.
 pub fn receive_lane(conn: Connection<'_>, _: &LaneWire) -> Result<OwnedFd, SlabError> {
-    crate::mapping::receive_descriptor(conn)
+    crate::descriptor::receive(conn)
 }
 
 #[cfg(test)]

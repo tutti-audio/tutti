@@ -4,7 +4,6 @@
 //! schema and its version constant are `tutti_plugin_ipc`'s; this module
 //! only moves bytes.
 //!
-use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
 use std::io::Read;
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -21,7 +20,7 @@ use tutti_plugin_types::{
 };
 
 use crate::main_loop::Bell;
-use crate::main_loop::{LaneEnd, Listener as PlatformListener, Stream as PlatformStream};
+use crate::main_loop::{LaneEnd, Stream as PlatformStream};
 
 /// The longest request the audio connection takes: the protocol's own cap for
 /// a block's request ([`AUDIO_REQUEST_FRAME_BYTES`]). A block's request carries
@@ -403,8 +402,8 @@ pub(crate) struct SocketTransport<In, Out, W = Shared> {
 }
 
 impl<In, Out> SocketTransport<In, Out, Shared> {
-    /// Wrap an already-accepted stream. The stream must be in blocking mode;
-    /// see [`TransportListener::accept`] for why that is not incidental.
+    /// Wrap a connected stream. The stream must be in blocking mode: a reader that
+    /// finds `WouldBlock` on it takes it for a failed read.
     pub(crate) fn new(stream: PlatformStream) -> Self {
         Self {
             stream: Arc::new(stream),
@@ -505,44 +504,6 @@ impl<In: Inbound, Out: Framed, W: Writing> Transport<In, Out> for SocketTranspor
             let _writing = writing.lock().unwrap_or_else(PoisonError::into_inner);
             write_frame(&mut &*stream, msg)
         }))
-    }
-}
-
-/// The listening endpoint the host connects to, once: the broker connection.
-pub(crate) struct TransportListener {
-    listener: PlatformListener,
-}
-
-impl TransportListener {
-    /// Create the socket at `socket_path`, removing any stale file there first.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the path is not a valid socket name, or if the
-    /// socket cannot be created — a directory that does not exist, or one this
-    /// process may not write to.
-    pub(crate) fn bind(socket_path: &std::path::Path) -> IpcResult<Self> {
-        // A no-op on Windows, where the endpoint is a pipe rather than a file.
-        let _ = std::fs::remove_file(socket_path);
-        // Must agree with the host's `connect`, which is why both go through the
-        // one helper: a listener bound to a filesystem path and a client dialling
-        // a pipe name would simply never meet.
-        let name = tutti_plugin_ipc::socket_name(socket_path)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
-        let listener = ListenerOptions::new().name(name).create_sync_as()?;
-        Ok(Self { listener })
-    }
-
-    /// Wait for the host to connect.
-    ///
-    /// The accept is blocking, and the listener is never put into non-blocking
-    /// mode: that is what keeps the accepted stream from inheriting
-    /// `O_NONBLOCK` (on BSD-derived systems, macOS included, the socket
-    /// `accept(2)` returns inherits the listener's flag, and every read on it
-    /// then fails with `WouldBlock`). A host that dies while this waits is the
-    /// host watch's to end the process ([`crate::server`]).
-    pub(crate) fn accept(&self) -> IpcResult<SocketTransport<Incoming, ControlFrame>> {
-        Ok(SocketTransport::new(self.listener.accept()?))
     }
 }
 

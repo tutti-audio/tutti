@@ -1,33 +1,66 @@
 //! The control stream's Unix side: a Unix domain socket, which has a kernel
-//! receive timeout and `poll`.
+//! receive timeout and `poll`. The host makes the socket pair and hands the
+//! server its end as the standard input it is spawned with, so nothing names the
+//! connection.
 
 use super::control::ControlStream;
+use crate::ProcessGuard;
+use interprocess::local_socket::Stream;
 use interprocess::local_socket::traits::Stream as _;
-use interprocess::local_socket::{GenericFilePath, Name, Stream, ToFsName as _};
 use std::io::{Read, Write};
 use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 use tutti_plugin_ipc_ffi::{Connection, LaneWire};
 use tutti_plugin_types::IpcResult;
+use tutti_rt::LockExt as _;
 
-/// Converts a host-chosen socket path into the local-socket name for this
-/// platform.
-///
-/// The host dials and the server binds with this one function, so both ends
-/// name the endpoint the same way. The path is the socket's filesystem path.
+/// The server a host has spawned, as the host reaches it: the host's end of the
+/// socket pair, already connected.
+pub(crate) struct Rendezvous(ControlStream);
+
+/// Held across making the socket pair and spawning the server that is given its
+/// end, so no spawn of this crate's own can inherit another's host end: macOS
+/// sets close-on-exec after `socketpair`, not with it. A spawn by another part
+/// of the process is outside it, the window the slab's descriptors have too.
+static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Spawns `command` with the server's end of a fresh socket pair as its standard
+/// input (the only descriptor it inherits besides the other two standard ones),
+/// and returns the child and the host's end, under the send timeout.
 ///
 /// # Errors
 ///
-/// Returns an I/O error when the path is not a valid local-socket name.
-// `GenericNamespaced` is not used: on Linux it maps to the abstract namespace,
-// but on every other Unix it maps to `SpecialDirUdSocket`, which interprocess
-// itself deprecates, and it would move macOS off the filesystem path that works
-// there.
-pub fn socket_name(socket: &Path) -> std::io::Result<Name<'static>> {
-    socket.to_owned().to_fs_name::<GenericFilePath>()
+/// The OS refused the socket pair or the spawn.
+pub(crate) fn spawn(mut command: Command) -> IpcResult<(Child, Rendezvous)> {
+    let _spawning = SPAWN.lock_recover();
+    let (host, server) = UnixStream::pair()?;
+    command.stdin(Stdio::from(OwnedFd::from(server)));
+    let child = command.spawn()?;
+    // The command's copy of the server's end closes here: the child's is the last
+    // one, so its end of the process is the host's end of stream.
+    drop(command);
+    let host = Stream::UdSocket(OwnedFd::from(host).into());
+    let _ = host.set_send_timeout(Some(super::control::SEND_TIMEOUT));
+    Ok((child, Rendezvous(host)))
+}
+
+impl Rendezvous {
+    /// The host's end of the connection, which exists from the spawn.
+    ///
+    /// # Errors
+    ///
+    /// Never on unix.
+    #[allow(clippy::unnecessary_wraps)]
+    pub(crate) fn connect(
+        self,
+        _server: &ProcessGuard,
+        _patience: Duration,
+    ) -> IpcResult<ControlStream> {
+        Ok(self.0)
+    }
 }
 
 /// What a slab is sent over on `stream`: the socket's descriptor.
@@ -94,30 +127,6 @@ pub fn broker_pair() -> (ControlStream, ControlStream) {
     let host = Stream::UdSocket(OwnedFd::from(host).into());
     let _ = host.set_send_timeout(Some(super::control::SEND_TIMEOUT));
     (host, Stream::UdSocket(OwnedFd::from(server).into()))
-}
-
-/// The longest socket path every Unix takes: `sun_path` is 104 bytes on macOS
-/// and the BSDs and 108 on Linux, and the path needs a terminating NUL in it.
-/// One figure for all, so a path that fits on Linux fits on macOS too.
-const SOCKET_PATH_MAX: usize = 103;
-
-/// `name` in the first of `temp`, `$XDG_RUNTIME_DIR` and `/tmp` where the whole
-/// path fits [`SOCKET_PATH_MAX`]. `/tmp` always fits a name
-/// [`unique_socket_path`](crate::unique_socket_path) makes.
-///
-/// `$XDG_RUNTIME_DIR` comes before `/tmp` because it is the user's own (mode
-/// 0700); `temp` comes first because it is the one the user chose.
-pub fn socket_path_in(temp: &Path, name: &str) -> PathBuf {
-    let fits = |p: &PathBuf| p.as_os_str().len() <= SOCKET_PATH_MAX;
-    let runtime = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .filter(|d| d.is_absolute());
-    std::iter::once(temp.to_path_buf())
-        .chain(runtime)
-        .chain(std::iter::once(PathBuf::from("/tmp")))
-        .map(|dir| dir.join(name))
-        .find(fits)
-        .unwrap_or_else(|| temp.join(name))
 }
 
 /// A second handle on a control stream that only *waits* for it to have
@@ -279,23 +288,13 @@ impl Wakeup {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use interprocess::local_socket::ListenerOptions;
-    use interprocess::local_socket::traits::Listener as _;
 
     /// **The control wait ends on a ring or on a byte from the peer, and says
     /// which**: nothing ends a zero wait, a ring is cleared by the wait that
     /// reads it, and a byte stays until it is read.
     #[test]
     fn the_control_wait_ends_on_a_ring_or_a_byte_and_says_which() {
-        let dir = tempfile::tempdir().expect("a temporary directory");
-        let path = dir.path().join("wait.sock");
-        let name = crate::transport::control::socket_name(&path).expect("a name");
-        let listener = ListenerOptions::new()
-            .name(name)
-            .create_sync()
-            .expect("listen");
-        let host = crate::transport::control::connect(&path).expect("connect");
-        let mut peer = listener.accept().expect("accept");
+        let (host, mut peer) = super::super::broker_pair();
         let (bell, wait) = control_unparker().expect("a bell");
         let now = Some(Duration::ZERO);
 
@@ -327,42 +326,5 @@ mod tests {
             heard,
             "unread: still there"
         );
-    }
-
-    /// A temporary directory too deep for a socket address moves the socket
-    /// to a short one, which a listener binds and a client connects to; one
-    /// that fits keeps it. A deep `TMPDIR` (a worktree's scratch directory,
-    /// macOS's `/var/folders/…/T/`) failed the plugin server's launch with
-    /// "local socket name length exceeds capacity of sun_path".
-    #[test]
-    fn a_deep_temporary_directory_moves_the_socket() {
-        use interprocess::local_socket::ListenerOptions;
-        use interprocess::local_socket::traits::Listener as _;
-
-        let base = tempfile::tempdir().expect("a temporary directory");
-        let deep = base.path().join("d".repeat(SOCKET_PATH_MAX));
-        std::fs::create_dir_all(&deep).expect("the deep directory");
-        let name = format!("{}.sock", tutti_fixtures::unique_name("tutti-bridge"));
-
-        let path = socket_path_in(&deep, &name);
-        assert!(!path.starts_with(&deep), "{path:?}");
-        assert!(path.as_os_str().len() <= SOCKET_PATH_MAX, "{path:?}");
-
-        let listener = ListenerOptions::new()
-            .name(crate::transport::control::socket_name(&path).expect("a name"))
-            .create_sync()
-            .expect("the moved path binds");
-        let connect = path.clone();
-        let client = std::thread::spawn(move || crate::transport::control::connect(&connect));
-        let _peer = listener.accept().expect("a peer");
-        client
-            .join()
-            .expect("no panic")
-            .expect("the client connects");
-        drop(listener);
-        let _ = std::fs::remove_file(&path);
-
-        let root = std::path::Path::new("/");
-        assert_eq!(socket_path_in(root, &name), root.join(&name));
     }
 }

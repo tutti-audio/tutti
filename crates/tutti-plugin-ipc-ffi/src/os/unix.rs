@@ -6,7 +6,7 @@
 //! it (what a failure to ask means, how long to wait) stays with the caller.
 
 use rustix::event::{PollFd, PollFlags, Timespec};
-use std::os::fd::BorrowedFd;
+use std::os::fd::{BorrowedFd, OwnedFd};
 use std::time::Duration;
 
 use crate::{Interest, Ready, Watch};
@@ -188,6 +188,76 @@ pub fn parent_process_id() -> Option<u32> {
     Some(std::os::unix::process::parent_id()).filter(|&pid| pid > 1)
 }
 
+/// Why the socket the host handed this process on its stdin cannot be adopted.
+#[derive(Debug, thiserror::Error)]
+pub enum AdoptError {
+    /// Descriptor 0 is not a socket: the process was started by hand, or by a
+    /// launcher that did not hand it the host's end.
+    #[error(
+        "standard input is not a socket: the plugin server is started by its host, \
+         which hands it the connection on stdin"
+    )]
+    NotASocket,
+    /// Descriptor 0 is a socket that is not a stream.
+    #[error("standard input is a socket of type {found:?}, not a stream")]
+    NotAStream {
+        /// The socket's type.
+        found: rustix::net::SocketType,
+    },
+    /// The OS refused one of the calls that duplicate, inspect or replace the
+    /// descriptor.
+    #[error("failed to {op} standard input: {source}")]
+    Os {
+        /// What was being done, as a verb phrase.
+        op: &'static str,
+        /// The OS error.
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+/// Takes the connection the host handed this process as its standard input: the
+/// stream socket on descriptor 0 moves to a descriptor of its own, closed on
+/// `exec`, and `/dev/null` replaces descriptor 0, so a plugin that reads its
+/// standard input reads end of file and no process a plugin starts inherits the
+/// socket.
+///
+/// Call it first thing in `main`, before any thread starts: replacing descriptor 0
+/// is process-wide. A refusal leaves descriptor 0 as it was.
+///
+/// # Errors
+///
+/// [`AdoptError::NotASocket`] and [`AdoptError::NotAStream`] when descriptor 0 is
+/// not a stream socket, [`AdoptError::Os`] when the OS refuses a call.
+pub fn adopt_host_socket() -> Result<OwnedFd, AdoptError> {
+    use rustix::fs::{FileType, Mode, OFlags, fstat, open};
+    use rustix::io::fcntl_dupfd_cloexec;
+    use rustix::net::SocketType;
+    use rustix::net::sockopt::socket_type;
+    use rustix::stdio::{dup2_stdin, stdin};
+
+    let os = |op| {
+        move |errno: rustix::io::Errno| AdoptError::Os {
+            op,
+            source: errno.into(),
+        }
+    };
+    let stat = fstat(stdin()).map_err(os("inspect"))?;
+    if FileType::from_raw_mode(stat.st_mode) != FileType::Socket {
+        return Err(AdoptError::NotASocket);
+    }
+    let found = socket_type(stdin()).map_err(os("inspect"))?;
+    if found != SocketType::STREAM {
+        return Err(AdoptError::NotAStream { found });
+    }
+    // From 3: a duplicate that took the number of a closed standard descriptor
+    // would be replaced with it.
+    let socket = fcntl_dupfd_cloexec(stdin(), 3).map_err(os("duplicate"))?;
+    let null = open("/dev/null", OFlags::RDWR, Mode::empty()).map_err(os("open /dev/null for"))?;
+    dup2_stdin(&null).map_err(os("replace"))?;
+    Ok(socket)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -335,5 +405,68 @@ mod tests {
                 events: Interest::ERROR
             }]
         );
+    }
+
+    /// Descriptor 0 is the whole process's: these two tests replace it, so each
+    /// runs in a process of its own (nextest's way) and never beside another test.
+    mod adopt {
+        use super::*;
+        use rustix::io::{FdFlags, fcntl_getfd};
+        use rustix::stdio::dup2_stdin;
+        use std::io::{Read, Write};
+        use std::os::unix::net::{UnixDatagram, UnixStream};
+
+        /// **The adopted descriptor is the socket that was on descriptor 0, and
+        /// descriptor 0 is `/dev/null` after**: the adopted end talks to the peer,
+        /// is closed on `exec`, and a read of standard input finds end of file.
+        #[test]
+        fn adopt_takes_fd0_and_leaves_devnull() {
+            let (mut host, server) = UnixStream::pair().unwrap();
+            dup2_stdin(&server).unwrap();
+            drop(server);
+
+            let adopted = adopt_host_socket().expect("a stream socket on fd 0");
+            assert!(fcntl_getfd(&adopted).unwrap().contains(FdFlags::CLOEXEC));
+
+            let mut end = UnixStream::from(adopted);
+            host.write_all(b"to the server").unwrap();
+            let mut got = [0u8; 13];
+            end.read_exact(&mut got).unwrap();
+            assert_eq!(&got, b"to the server");
+            end.write_all(b"to the host").unwrap();
+            let mut back = [0u8; 11];
+            host.read_exact(&mut back).unwrap();
+            assert_eq!(&back, b"to the host");
+
+            // Descriptor 0 no longer holds the socket: closing the adopted end
+            // leaves the host's read at end of file, and a read of standard input
+            // is end of file too.
+            drop(end);
+            assert_eq!(
+                host.read(&mut got).unwrap(),
+                0,
+                "no descriptor holds the end"
+            );
+            assert_eq!(std::io::stdin().read(&mut got).unwrap(), 0);
+        }
+
+        /// **A standard input that is not a stream socket is refused by name**,
+        /// and descriptor 0 is as it was.
+        #[test]
+        fn adopt_refuses_a_stdin_that_is_not_a_stream_socket() {
+            let file = std::fs::File::open("/dev/null").unwrap();
+            dup2_stdin(&file).unwrap();
+            assert!(matches!(adopt_host_socket(), Err(AdoptError::NotASocket)));
+
+            let (datagram, _peer) = UnixDatagram::pair().unwrap();
+            dup2_stdin(&datagram).unwrap();
+            assert!(matches!(
+                adopt_host_socket(),
+                Err(AdoptError::NotAStream { .. })
+            ));
+            // Left as it was: still the datagram socket, not `/dev/null`.
+            let still = rustix::net::sockopt::socket_type(rustix::stdio::stdin()).unwrap();
+            assert_eq!(still, rustix::net::SocketType::DGRAM);
+        }
     }
 }

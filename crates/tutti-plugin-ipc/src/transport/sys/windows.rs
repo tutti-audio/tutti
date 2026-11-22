@@ -1,41 +1,122 @@
 //! The control stream's Windows side: a named pipe, which has no receive
 //! timeout and no `poll`, so every wait here asks the pipe how many bytes it
-//! holds and naps between asks.
+//! holds and naps between asks. A pipe has no inheritable end to hand a child, so
+//! the host names an unguessable pipe in the server's command line, and the
+//! server listens on it.
 
 use super::control::{ControlStream, back_off};
+use crate::ProcessGuard;
 use interprocess::local_socket::traits::Stream as _;
-use interprocess::local_socket::{GenericNamespaced, Name, Stream, ToNsName as _};
+use interprocess::local_socket::{GenericNamespaced, Stream, ToNsName as _};
 use std::os::windows::io::{AsHandle, OwnedHandle};
-use std::path::{Path, PathBuf};
+use std::process::{Child, Command};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_plugin_ipc_ffi::{Connection, LaneWire};
-use tutti_plugin_types::IpcResult;
+use tutti_plugin_types::{IpcError, IpcResult};
 
-/// Converts a host-chosen socket path into the local-socket name for this
-/// platform.
+/// How long to wait between connect attempts.
 ///
-/// The host dials and the server binds with this one function, so both ends
-/// name the endpoint the same way.
-///
-/// A named pipe lives in the `\\.\pipe\` namespace, which is not the
-/// filesystem, so the pipe is named after the path's **final component**
-/// (`tutti-bridge-<pid>-<n>-<random>`, already unique per bridge).
+/// Short enough that a fast spawn is not rounded up to something a user
+/// notices, long enough that a slow one does not spin the CPU. At this interval
+/// the common case returns in single-digit milliseconds.
+const CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(2);
+
+/// The server a host has spawned, as the host reaches it: the name of the pipe
+/// the server listens on.
+pub(crate) struct Rendezvous {
+    name: String,
+}
+
+/// Spawns `command` with the name of a fresh pipe as its only argument, for the
+/// server to listen on.
 ///
 /// # Errors
 ///
-/// Returns an I/O error when the path's final component is missing or is not a
-/// valid local-socket name.
-pub fn socket_name(socket: &Path) -> std::io::Result<Name<'static>> {
-    let leaf = socket.file_name().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("socket path {socket:?} has no final component to name a pipe with"),
-        )
+/// The OS's random source cannot be read, or the spawn is refused.
+pub(crate) fn spawn(mut command: Command) -> IpcResult<(Child, Rendezvous)> {
+    let name = unique_name("tutti-bridge")?;
+    let child = command.arg(&name).spawn()?;
+    Ok((child, Rendezvous { name }))
+}
+
+impl Rendezvous {
+    /// Connects as soon as the server is listening, rather than after a fixed wait.
+    ///
+    /// A connect fails immediately while nothing listens, so retrying is how the
+    /// host learns the pipe is up. The name is unique per launch, so a successful
+    /// connect can only be *this* server.
+    ///
+    /// The server's watch is asked between attempts, and the pause between them
+    /// is a wait on it ([`ServerWatch::wait_dead`](crate::ServerWatch::wait_dead)):
+    /// a server that died on startup (a missing dynamic library, an immediate
+    /// panic) never listens, and the wait ends at its death and not at the end of a
+    /// retry period, so the host reports a failure whose cause is known at once
+    /// and not after the full `patience`. No event says "the pipe is listening", so
+    /// the attempts themselves are the poll.
+    ///
+    /// # Errors
+    ///
+    /// The server ended before it listened ([`IpcError::ServerExited`]), or the
+    /// last connect failure once `patience` is spent.
+    pub(crate) fn connect(
+        self,
+        server: &ProcessGuard,
+        patience: Duration,
+    ) -> IpcResult<ControlStream> {
+        let deadline = Instant::now() + patience;
+        loop {
+            match self.connect_once() {
+                Ok(stream) => return Ok(stream),
+                Err(e) => {
+                    if let Some(cause) = server.watch().cause() {
+                        return Err(IpcError::ServerExited { cause });
+                    }
+                    if Instant::now() >= deadline {
+                        return Err(e);
+                    }
+                    server.watch().wait_dead(CONNECT_RETRY_INTERVAL);
+                }
+            }
+        }
+    }
+
+    /// One attempt to connect, with [`SEND_TIMEOUT`](super::control::SEND_TIMEOUT)
+    /// on writes where the pipe has one (it has none: arming is best-effort, and
+    /// a hung server's writes end when the server is ended and the pipe closes).
+    fn connect_once(&self) -> IpcResult<ControlStream> {
+        let name = self.name.clone().to_ns_name::<GenericNamespaced>()?;
+        let stream = Stream::connect(name)?;
+        let _ = stream.set_send_timeout(Some(super::control::SEND_TIMEOUT));
+        Ok(stream)
+    }
+}
+
+/// `stem`, this process's id, a count shared by every name this process makes,
+/// and sixty-four bits from the operating system's random source: a name in the
+/// pipe namespace, which every local process shares, that is unique and not
+/// predictable (one that is can be claimed first, and the pipe it names is then a
+/// plugin wire another process speaks).
+///
+/// # Errors
+///
+/// The operating system's random source cannot be read.
+fn unique_name(stem: &str) -> IpcResult<String> {
+    static COUNTER: tutti_rt::Mint = tutti_rt::Mint::new();
+    let mut bytes = [0u8; 8];
+    getrandom::fill(&mut bytes).map_err(|e| {
+        IpcError::Io(std::io::Error::other(format!(
+            "the operating system's random source is unreadable: {e}"
+        )))
     })?;
-    leaf.to_owned().to_ns_name::<GenericNamespaced>()
+    Ok(format!(
+        "{stem}-{}-{}-{:016x}",
+        std::process::id(),
+        COUNTER.mint(),
+        u64::from_ne_bytes(bytes),
+    ))
 }
 
 /// A lane the host is opening: the name of the pipe the server listens on.
@@ -137,12 +218,6 @@ fn bytes_available(stream: &ControlStream) -> std::io::Result<u32> {
     // that reason: a wildcard arm would be unreachable code.
     let Stream::NamedPipe(pipe) = stream;
     tutti_plugin_ipc_ffi::pipe_bytes_available(pipe.as_handle())
-}
-
-/// `name` in `temp`: the pipe is named by `name` alone ([`socket_name`]), so
-/// whatever the directory's length, it is the one the user chose.
-pub fn socket_path_in(temp: &Path, name: &str) -> PathBuf {
-    temp.join(name)
 }
 
 /// Whether `stream` has something to read now, asked without blocking or

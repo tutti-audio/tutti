@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
 //! The `plugin-server` binary — one process per hosted plugin.
 //!
-//! Spawned by the host (`tutti-plugin`), never run by hand: it takes the
-//! host-chosen socket path as its sole argument and serves exactly one host,
-//! then exits. Isolation is the point — a plugin that crashes takes this process
+//! Spawned by the host (`tutti-plugin`), never run by hand: the host hands it the
+//! connection (the socket on its standard input, a pipe's name in its arguments on
+//! Windows) and it serves exactly one host, then exits. Isolation is the point — a plugin that crashes takes this process
 //! down and not the DAW.
 //!
 //! Logs go to standard error (which the host passes on), at `info` unless
@@ -21,17 +21,24 @@
     )
 )]
 
-use std::env;
 use std::process::ExitCode;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::LevelFilter;
 use tutti_plugin_server::{
-    EXIT_PLUGIN_LEAKED, EXIT_RENDER_LANE_LOST, EXIT_TASKS_DETACHED, Ended, PluginServer,
-    failure_status,
+    EXIT_PLUGIN_LEAKED, EXIT_RENDER_LANE_LOST, EXIT_TASKS_DETACHED, Ended, HostEnd, PluginServer,
+    adopt_host, failure_status,
 };
 use tutti_plugin_types::IpcResult;
 
 fn main() -> ExitCode {
+    // First, before a thread starts: it replaces the process's standard input.
+    let host = match adopt_host() {
+        Ok(host) => host,
+        Err(error) => {
+            eprintln!("plugin-server: {error}");
+            return ExitCode::from(failure_status(&error));
+        }
+    };
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(
@@ -41,7 +48,7 @@ fn main() -> ExitCode {
         )
         .init();
 
-    match serve() {
+    match serve(host) {
         Ok(Ended::Clean) => ExitCode::SUCCESS,
         Ok(Ended::PluginLeaked) => ExitCode::from(EXIT_PLUGIN_LEAKED),
         Ok(Ended::RenderLaneLost(_)) => ExitCode::from(EXIT_RENDER_LANE_LOST),
@@ -53,10 +60,6 @@ fn main() -> ExitCode {
     }
 }
 
-fn serve() -> IpcResult<Ended> {
-    let socket_path = env::args()
-        .nth(1)
-        .expect("Socket path required as first argument");
-
-    PluginServer::new(socket_path.into())?.run()
+fn serve(host: HostEnd) -> IpcResult<Ended> {
+    PluginServer::new(host)?.run()
 }

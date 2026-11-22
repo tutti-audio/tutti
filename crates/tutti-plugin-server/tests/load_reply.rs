@@ -10,16 +10,17 @@
 
 #![cfg(all(unix, feature = "clap", feature = "vst3"))]
 
+use std::os::fd::OwnedFd;
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use interprocess::local_socket::Stream;
-use interprocess::local_socket::traits::Stream as _;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::{
     ControlFrame, ControlReply, ControlRequest, Lane, LaneWire, ReqId, Request, Working,
-    read_frame, socket_name, write_frame,
+    read_frame, write_frame,
 };
 use tutti_plugin_types::{PluginFormat, PluginId, SampleRate, ServerError};
 
@@ -33,24 +34,14 @@ impl Drop for Server {
     }
 }
 
-fn connect(socket: &Path, server: &mut Server) -> Stream {
-    let mut connected = None;
-    tutti_fixtures::wait_until(
-        "the server to bind its socket",
-        Duration::from_secs(60),
-        || {
-            if let Ok(stream) = Stream::connect(socket_name(socket).expect("a socket name")) {
-                connected = Some(stream);
-                return true;
-            }
-            assert!(
-                server.0.try_wait().expect("poll the server").is_none(),
-                "the server exited before it bound its socket"
-            );
-            false
-        },
-    );
-    connected.expect("the wait ended on a connection")
+/// A socket pair: the host's end as a stream, and the server's end as the
+/// standard input a command is spawned with.
+fn connection() -> (Stream, Stdio) {
+    let (host, server) = UnixStream::pair().expect("a socket pair");
+    (
+        Stream::UdSocket(OwnedFd::from(host).into()),
+        Stdio::from(OwnedFd::from(server)),
+    )
 }
 
 /// Asks for the audio lane over `broker` as the host does: the `OpenLane` frame
@@ -136,21 +127,13 @@ fn fixtures() -> (PathBuf, PathBuf) {
     (not_a_plugin, real)
 }
 
-/// A `plugin-server` process and its broker connection, past `Hello`.
+/// A `plugin-server` process and its broker connection, past `Hello`. The server
+/// is this process's child and takes this process for its host.
 fn start_server() -> (Server, Stream) {
-    let (server, stream, _) = start_server_for_this_process();
-    (server, stream)
-}
-
-/// [`start_server`], and the socket it serves. The server is this process's
-/// child and takes this process for its host.
-fn start_server_for_this_process() -> (Server, Stream, PathBuf) {
-    // A fresh socket path that fits a socket address.
-    let socket = tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source");
-
-    let mut server = Server(
+    let (mut stream, server_end) = connection();
+    let server = Server(
         Command::new(env!("CARGO_BIN_EXE_plugin-server"))
-            .arg(&socket)
+            .stdin(server_end)
             .env(
                 tutti_plugin_ipc_ffi::HOST_PID_ENV,
                 std::process::id().to_string(),
@@ -159,12 +142,14 @@ fn start_server_for_this_process() -> (Server, Stream, PathBuf) {
             .spawn()
             .expect("spawn plugin-server"),
     );
-    let mut stream = connect(&socket, &mut server);
-    assert!(matches!(
-        read_frame::<_, ControlFrame>(&mut stream),
-        Ok(ControlFrame::Hello { .. })
-    ));
-    (server, stream, socket)
+    assert!(
+        matches!(
+            read_frame::<_, ControlFrame>(&mut stream),
+            Ok(ControlFrame::Hello { .. })
+        ),
+        "the server ended before it greeted its host"
+    );
+    (server, stream)
 }
 
 /// **A load is announced as work in progress before it is answered**, under the
@@ -413,13 +398,14 @@ fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
     use std::io::BufRead as _;
 
     let (_not_a_plugin, good) = fixtures();
-    let socket = tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source");
+    let (mut handshake, server_end) = connection();
     let dir = tempfile::tempdir().expect("a scratch directory");
     let log = dir.path().join("server.log");
-    // The shell is the host until its input closes: it states its own pid, prints
-    // the server's, and waits.
+    // The shell is the host until this test ends it: it states its own pid, prints
+    // the server's, and waits. Its standard input is the server's connection (`<&0`
+    // keeps it on a background command), so it waits on `sleep` and not on a read.
     let script = format!(
-        "RUST_LOG=info {env}=$$ {exe:?} {socket:?} >{log:?} 2>&1 & echo $!; read _",
+        "RUST_LOG=info {env}=$$ {exe:?} <&0 >{log:?} 2>&1 & echo $!; exec sleep 600",
         env = tutti_plugin_ipc_ffi::HOST_PID_ENV,
         exe = env!("CARGO_BIN_EXE_plugin-server"),
     );
@@ -427,7 +413,7 @@ fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
         Command::new("/bin/sh")
             .arg("-c")
             .arg(&script)
-            .stdin(Stdio::piped())
+            .stdin(server_end)
             .stdout(Stdio::piped())
             .spawn()
             .expect("spawn the host shell"),
@@ -438,7 +424,6 @@ fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
         .expect("the shell prints the server's pid");
     let server: u32 = line.trim().parse().expect("the server's pid");
 
-    let mut handshake = connect(&socket, &mut host);
     assert!(matches!(
         read_frame::<_, ControlFrame>(&mut handshake),
         Ok(ControlFrame::Hello { .. })
@@ -456,8 +441,8 @@ fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
     })
     .expect("the watch starts");
 
-    drop(host.0.stdin.take());
-    host.0.wait().expect("the host ends");
+    host.0.kill().expect("the host is ended");
+    host.0.wait().expect("the host is reaped");
     // The server's teardown closes its end of the control connection.
     assert!(
         read_frame::<_, ControlFrame>(&mut control).is_err(),

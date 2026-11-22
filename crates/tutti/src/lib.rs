@@ -761,7 +761,6 @@ pub mod plugin {
     };
     pub use tutti_plugin_db::{BindError, BlacklistView, Loadable, PersistError, Resolved};
     pub use tutti_plugin_host::{BlockLosses, RebindError};
-    pub use tutti_plugin_ipc::RandomSourceError;
     pub use tutti_plugin_ipc::{IpcConfig, PluginRenderFault};
     pub use tutti_plugin_types::PresetSupport;
     pub use tutti_plugin_types::bundle::ModuleKind;
