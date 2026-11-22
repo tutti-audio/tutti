@@ -59,6 +59,8 @@ pub struct TransientDetector<F: Float> {
     slow: Follower<F>,
     envelopes: (Smoothed<F>, Smoothed<F>),
     threshold: F,
+    /// The difference under which a disarmed detector arms again.
+    rearm: F,
     min_gap: usize,
     /// The fast envelope at each of the last frames, as a ring of the lookback plus one.
     recent: Vec<F>,
@@ -92,6 +94,7 @@ impl<F: Float> TransientDetector<F> {
             slow: Follower::of(floored(slow, slow), rate),
             envelopes: (Smoothed::ZERO, Smoothed::ZERO),
             threshold: F::from_unit(threshold),
+            rearm: F::from_unit(Amplitude::new(threshold.get() * REARM)),
             min_gap: min_gap.get(),
             recent: vec![F::ZERO; lookback + 1],
             head: 0,
@@ -130,12 +133,13 @@ impl<F: Float> TransientDetector<F> {
 
         let excess = fast - slow;
         if !self.armed {
-            if excess < self.threshold * F::lit(REARM) {
+            if excess < self.rearm {
                 self.armed = true;
             }
             return None;
         }
-        if !(excess > self.threshold) || !(fast - self.lowest() > self.threshold) {
+        let attack = excess > self.threshold && fast - self.lowest() > self.threshold;
+        if !attack {
             return None;
         }
         self.armed = false;
