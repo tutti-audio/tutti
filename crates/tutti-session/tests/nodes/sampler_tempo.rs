@@ -36,7 +36,7 @@ fn run(s: &mut Session, frames: usize, block: usize) -> Vec<f32> {
 
 /// **A sampler node the graph adds reads the session's tempo map** (doc 020,
 /// stage 5): `Graph::add` binds it to the session's reader
-/// ([`SessionNode::bind_timeline`](tutti_session::SessionNode::bind_tempo)), so
+/// ([`SessionNode::bind_timeline`](tutti_session::SessionNode::bind_timeline)), so
 /// a clip placed at beat 0 plays its samples one a frame through a step in
 /// the map instead of being re-seated at the new tempo. The wave is a ramp
 /// (sample `i` is `i / 2^17`), 120 BPM and 60 from beat 1 (frame 24 000): at
