@@ -35,7 +35,7 @@
 //!   fixed.
 
 use tutti_buffers::ChannelLayout;
-use tutti_cpal::{AudioEngine, DeviceHost, DeviceSelector, OutputConfig, TuttiDriver};
+use tutti_cpal::{AudioEngine, DeviceHost, DeviceSelector, OutputConfig, Resolved, TuttiDriver};
 use tutti_engine::{OutputQuantum, OutputSpec, StreamDriver, TimerDriver};
 use tutti_units::SampleRate;
 
@@ -204,8 +204,8 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, SystemClock<F>> {
     {
         let channels = spec.channels;
         self.switch_to_device(channels, DeviceSelector::Default, move |host, session| {
-            AudioEngine::from_spec(spec)
-                .start_on(host, driver, |spec, stopped| {
+            AudioEngine::from_spec(spec.clone())
+                .start_resolved(host, Resolved::supplied(spec, driver), |spec, stopped| {
                     session.rerate(spec, stopped, None, None)
                 })
                 .map_err(Box::new)

@@ -4,6 +4,7 @@
 use super::batch::{IntoAssign, IntoRead};
 use super::error::ValueError;
 use super::state::Values;
+use super::watcher::{IntoTargets, Watcher};
 use crate::{AppKey, Clock, Session};
 
 impl<K: AppKey, C: Clock> Session<K, C> {
@@ -64,6 +65,47 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// `modify`.
     pub fn get<R: IntoRead>(&self, read: R) -> Result<R::Output, ValueError<K>> {
         self.values.get(read)
+    }
+
+    /// A [`Watcher`] of the changes of `targets`: a target, or a tuple, array,
+    /// `Vec` or `Option` of them, each one that is not a plugin's parameter.
+    /// A change is a base that moved: a `set` of the value a target already
+    /// has changes nothing. A batch that moves two or more targets is one
+    /// gesture, its changes sharing a [`GestureId`](crate::GestureId). Only
+    /// writes by the app are reported: a tempo a follower moves, or a value a
+    /// lane drives, is not.
+    ///
+    /// # Errors
+    ///
+    /// A [`ValueError`] whose `at` is the first missing target's position:
+    /// [`NoSuchTarget`](crate::ValueErrorKind::NoSuchTarget), and
+    /// [`Reentrant`](crate::ValueErrorKind::Reentrant) from inside a
+    /// `modify`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tutti_buffers::ChannelLayout;
+    /// use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
+    /// use tutti_session::Session;
+    /// use tutti_units::{Hz, Q};
+    ///
+    /// let mut session = Session::builder().build().unwrap();
+    /// let filter = session
+    ///     .graph()
+    ///     .add(SvfFilterNode::<f32>::from(
+    ///         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+    ///             .freq(Hz::new(500.0))
+    ///             .q(Q::new(0.7)),
+    ///     ));
+    /// let mut watcher = session.watch(filter.cutoff()).unwrap();
+    /// assert!(watcher.changes().unwrap().is_none());
+    /// session.set(filter.cutoff().to(Hz::new(800.0))).unwrap();
+    /// let change = watcher.changes().unwrap().unwrap();
+    /// assert_eq!(change.value, Hz::new(800.0));
+    /// ```
+    pub fn watch<W: IntoTargets>(&self, targets: W) -> Result<Watcher<K, W>, ValueError<K>> {
+        self.values.watch(targets)
     }
 
     /// The session's values for any control-side thread: `Clone + Send`,

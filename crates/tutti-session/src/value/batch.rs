@@ -12,6 +12,7 @@ use std::any::Any;
 use super::error::{SetRefusal, ValueErrorKind};
 use super::state::Params;
 use super::target::{AnyAssign, Assign, Info, Modify, Staged, TargetId, sealed::Store};
+use super::watcher::{Stored, StoredChange};
 
 /// An item that failed: its position, and what failed there.
 #[derive(Debug)]
@@ -27,10 +28,12 @@ impl std::fmt::Debug for dyn Staged {
     }
 }
 
-/// One target's final value in a batch, with the cell it is stored through.
+/// One target's final value in a batch, with the cell it is stored through
+/// and the base it was first read at.
 struct Slot<T: Store> {
     id: TargetId,
     cell: T::Cell,
+    base: T::Value,
     value: T::Value,
 }
 
@@ -50,8 +53,10 @@ impl<T: Store> Staged for Slot<T> {
         T::check(&self.cell, value)
     }
 
-    fn store(self: Box<Self>) {
+    fn store(self: Box<Self>) -> Option<StoredChange> {
         T::store(&self.cell, &self.value);
+        // A value equal to the base is no change.
+        (self.value != self.base).then(|| StoredChange::new(self.id, self.base, self.value))
     }
 }
 
@@ -73,11 +78,11 @@ impl<'a> Batch<'a> {
         }
     }
 
-    /// Stores every target's final value, in the order each was first named.
-    pub fn store(self) {
-        for slot in self.slots {
-            slot.store();
-        }
+    /// Stores every target's final value, in the order each was first named,
+    /// and answers the targets whose value is not the base they had.
+    pub(crate) fn store(self) -> Stored {
+        let landings = self.slots.into_iter().filter_map(Staged::store).collect();
+        Stored::new(landings)
     }
 
     fn fail(&self, target: TargetId, kind: ValueErrorKind) -> Failure {
@@ -136,6 +141,7 @@ impl<'a> Batch<'a> {
                 self.slots.push(Box::new(Slot::<T> {
                     id,
                     cell,
+                    base,
                     value: next,
                 }));
             }
