@@ -17,10 +17,10 @@ use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AuComponentType, BypassWrite, ContentScale, Control, EditorCapabilities, EditorError,
     EditorPresence, EditorWindow, Features, FourCc, LoadedPlugin, MainThreadMarker, OwnBypass,
-    ParamEdit, ParamFlags, ParamMapping, ParamRange, ParamSteps, ParamWriteError, ParameterInfo,
-    PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginId, PluginPreset,
-    PluginResult, PluginTail, PluginVersion, PresetId, RenderModeSupport, Request, RescanScope,
-    StateUse, WindowHandle, Wraps, taken,
+    ParamEdit, ParamFlags, ParamMapping, ParamSteps, ParamWriteError, ParameterInfo, PluginBus,
+    PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginId, PluginParamRange,
+    PluginPreset, PluginResult, PluginTail, PluginVersion, PresetId, RenderModeSupport, Request,
+    RescanScope, StateUse, WindowHandle, Wraps, taken,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -357,7 +357,7 @@ impl Control for AuLoaded {
                 // `AudioUnitParameterID` is AU's opaque plugin-chosen handle.
                 ParameterInfo::new(ParamId::new(p.id), p.name)
                     .with_unit(p.unit.to_string())
-                    .with_range(ParamRange::Plain {
+                    .with_range(PluginParamRange::Plain {
                         min: p.range.min as f64,
                         max: p.range.max as f64,
                         default: p.range.default as f64,

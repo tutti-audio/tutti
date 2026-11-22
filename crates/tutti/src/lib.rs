@@ -756,8 +756,8 @@ pub mod plugin {
         AuComponentType, AutomationModeError, Axis, ClapFeature, ContentScale, ControlRole,
         EditorPresence, EmptyVersionText, Helper, InvalidContentScale, IpcError, IpcResult,
         KeyEvent, KeyUse, LatencyVerdict, LinearRange, Locator, Measured, NotChecked, ParamFlags,
-        ParamRange, ParamSteps, ParamUnit, ParameterInfo, PipelineCounts, PlainMap, PlainUnit,
-        PluginClass, PluginError, PluginFormat, PluginTooWide, PluginVersion, ProbeConfig,
+        ParamSteps, ParamUnit, ParameterInfo, PipelineCounts, PlainMap, PlainUnit, PluginClass,
+        PluginError, PluginFormat, PluginParamRange, PluginTooWide, PluginVersion, ProbeConfig,
         StateError, StateHash, TailVerdict, UnknownExtension, Verdict, VersionText, Vst2Category,
         Vst3PlugType, Vst3SubCategories,
     };

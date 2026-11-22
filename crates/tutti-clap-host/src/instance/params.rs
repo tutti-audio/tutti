@@ -249,7 +249,7 @@ impl ClapLoaded {
 /// parameter values are in the plugin's native plain range, so
 /// `min_value`/`max_value` pass through verbatim.
 pub(super) fn project_param_info(info: ClapParamInfo) -> tutti_plugin_types::ParameterInfo {
-    use tutti_plugin_types::{ParamFlags, ParamRange, ParamSteps};
+    use tutti_plugin_types::{ParamFlags, ParamSteps, PluginParamRange};
 
     // CLAP is the one hosted format that reports every capability we model,
     // including the per-voice modulation bits no other format has.
@@ -316,7 +316,7 @@ pub(super) fn project_param_info(info: ClapParamInfo) -> tutti_plugin_types::Par
     // could not fill.
     let plain_map = crate::ParamBounds::declared(&info).plain_map();
     tutti_plugin_types::ParameterInfo::new(tutti_units::ParamId::new(info.id), info.name)
-        .with_range(ParamRange::Plain {
+        .with_range(PluginParamRange::Plain {
             min: info.min_value,
             max: info.max_value,
             default: info.default_value,

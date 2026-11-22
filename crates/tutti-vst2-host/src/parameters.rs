@@ -13,8 +13,8 @@
 //! is what the ABI alone says.
 
 use tutti_plugin_types::{
-    ParamFlags, ParamMapping, ParamRange, ParamSteps, ParamUnit,
-    ParameterInfo as SharedParameterInfo,
+    ParamFlags, ParamMapping, ParamSteps, ParamUnit, ParameterInfo as SharedParameterInfo,
+    PluginParamRange,
 };
 use tutti_rt::Tally;
 use tutti_units::Normalized;
@@ -183,7 +183,7 @@ impl Vst2Loaded {
     /// Range and steps come from `effGetParameterProperties` (opcode 56) per
     /// parameter that answers it. The query is per-parameter because the opcode
     /// is: a plugin may report an integer range for some and decline others, so
-    /// one may be [`ParamRange::Plain`] while the next is `Normalized`.
+    /// one may be [`PluginParamRange::Plain`] while the next is `Normalized`.
     ///
     /// A plugin that declines — the common case, since the opcode is optional —
     /// stays `Normalized` with [`ParamSteps::Unknown`]. `Unknown` rather than
@@ -245,13 +245,13 @@ impl Vst2Loaded {
         let range = match int_range {
             Some(r) => {
                 let (min, max) = (r.min as f64, r.max as f64);
-                ParamRange::Plain {
+                PluginParamRange::Plain {
                     min,
                     max,
                     default: r.plain(Normalized::clamped(default)),
                 }
             }
-            None => ParamRange::Normalized { default },
+            None => PluginParamRange::Normalized { default },
         };
 
         // `step_count` is `None` for a range the plugin declared but that
@@ -374,7 +374,7 @@ fn declared_steps(
 /// which is what `effGetParameterProperties` gives when the plugin answers it.
 /// VST2's native value is normalized, so a label without a range cannot be
 /// converted and is not typed.
-fn declared_measures(label: &str, range: &ParamRange) -> Option<ParamUnit> {
+fn declared_measures(label: &str, range: &PluginParamRange) -> Option<ParamUnit> {
     ParamUnit::from_label(label).filter(|unit| unit.fits(range))
 }
 
@@ -442,8 +442,8 @@ mod steps_tests {
 mod measures_tests {
     use super::*;
 
-    fn plain(min: f64, max: f64) -> ParamRange {
-        ParamRange::Plain {
+    fn plain(min: f64, max: f64) -> PluginParamRange {
+        PluginParamRange::Plain {
             min,
             max,
             default: min,
@@ -475,7 +475,7 @@ mod measures_tests {
     /// never typed, however exact the label.
     #[test]
     fn a_label_without_a_plain_range_is_none() {
-        let normalized = ParamRange::Normalized { default: 0.5 };
+        let normalized = PluginParamRange::Normalized { default: 0.5 };
         for label in ["Hz", "dB", "%", "BPM"] {
             assert_eq!(declared_measures(label, &normalized), None, "{label:?}");
         }

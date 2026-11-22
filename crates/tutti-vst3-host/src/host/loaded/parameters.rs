@@ -454,8 +454,8 @@ pub(super) fn build_param_info(
     // `defaultNormalizedValue` is normalized; its plain value came from the
     // controller's own map, so a non-linear or decreasing one is exact.
     let range = match plain {
-        Some((PlainRange { min, max }, default)) => ParamRange::Plain { min, max, default },
-        None => ParamRange::Normalized {
+        Some((PlainRange { min, max }, default)) => PluginParamRange::Plain { min, max, default },
+        None => PluginParamRange::Normalized {
             default: info.default_normalized_value(),
         },
     };
@@ -606,8 +606,8 @@ mod requirements_tests {
 mod measures_tests {
     use super::*;
 
-    fn plain(min: f64, max: f64) -> ParamRange {
-        ParamRange::Plain {
+    fn plain(min: f64, max: f64) -> PluginParamRange {
+        PluginParamRange::Plain {
             min,
             max,
             default: min,
@@ -616,7 +616,12 @@ mod measures_tests {
 
     /// Builds the `measures` a plugin's declaration ends in, as
     /// `build_param_info` does: the mapping, then the range check.
-    fn measures(units: &str, is_list: bool, steps: i32, range: ParamRange) -> Option<ParamUnit> {
+    fn measures(
+        units: &str,
+        is_list: bool,
+        steps: i32,
+        range: PluginParamRange,
+    ) -> Option<ParamUnit> {
         ParameterInfo::new(ParamId::new(1), "p")
             .with_range(range)
             .with_measures(declared_measures(units, is_list, steps))
@@ -666,7 +671,7 @@ mod measures_tests {
     #[test]
     fn a_unit_without_a_range_that_fits_is_none() {
         let hz = |range| measures("Hz", false, 0, range);
-        assert_eq!(hz(ParamRange::Normalized { default: 0.0 }), None);
+        assert_eq!(hz(PluginParamRange::Normalized { default: 0.0 }), None);
         assert_eq!(hz(plain(-5.0, 100.0)), None);
         assert_eq!(measures("%", false, 0, plain(0.0, 1000.0)), None);
     }
@@ -675,7 +680,7 @@ mod measures_tests {
     /// `Toggle`; both over a normalized range, which is all VST3 declares.
     #[test]
     fn a_list_is_a_choice_and_one_step_is_a_toggle() {
-        let n = || ParamRange::Normalized { default: 0.0 };
+        let n = || PluginParamRange::Normalized { default: 0.0 };
         assert_eq!(measures("", true, 4, n()), Some(ParamUnit::Choice));
         assert_eq!(
             measures("", true, 1, n()),
