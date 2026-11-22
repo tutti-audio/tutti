@@ -19,7 +19,9 @@ use super::input::{self, AlsaInput};
 use crate::InputProducerHandle;
 use crate::endpoints::InputConnection;
 use crate::error::{MidiHardwareError, Result};
-use crate::virtual_endpoint::{EndpointBackend, SenderBackend, VirtualProtocol, VirtualSpec};
+use crate::virtual_endpoint::{
+    Delivery, EndpointBackend, SenderBackend, VirtualProtocol, VirtualSpec,
+};
 use std::sync::{Arc, PoisonError, RwLock};
 
 /// The sequencer's version for a protocol.
@@ -106,6 +108,19 @@ impl Drop for AlsaVirtualEndpoint {
     }
 }
 
+/// `-EAGAIN`'s errno: a subscriber's queue has no room.
+const EAGAIN: i32 = 11;
+
+/// What a send's result says: a subscriber with no room is [`Delivery::Full`], the
+/// non-blocking client's refusal, and any other failure is the OS's error.
+fn delivery(sent: tutti_alsa_ffi::Result<()>) -> Result<Delivery> {
+    match sent {
+        Ok(()) => Ok(Delivery::Sent),
+        Err(error) if error.errno() == Some(EAGAIN) => Ok(Delivery::Full),
+        Err(error) => Err(error.into()),
+    }
+}
+
 /// A send on a virtual endpoint's client, which it does not keep open.
 struct AlsaSender {
     client: ClientHandle,
@@ -114,15 +129,16 @@ struct AlsaSender {
 }
 
 impl SenderBackend for AlsaSender {
-    fn send(&self, ump: &Ump) -> Result<()> {
+    fn send(&self, ump: &Ump) -> Result<Delivery> {
         let live = self.live.read().unwrap_or_else(PoisonError::into_inner);
         if !*live {
             return Err(MidiHardwareError::EndpointGone);
         }
-        self.client
+        let sent = self
+            .client
             .with(|client| client.send_to_subscribers(self.port, ump))
-            .ok_or(MidiHardwareError::EndpointGone)??;
-        Ok(())
+            .ok_or(MidiHardwareError::EndpointGone)?;
+        delivery(sent)
     }
 }
 
@@ -163,3 +179,6 @@ pub(crate) fn endpoint(
     let live = Arc::new(RwLock::new(true));
     Ok((AlsaVirtualEndpoint { input, port, live }, protocol))
 }
+
+#[cfg(test)]
+mod tests;

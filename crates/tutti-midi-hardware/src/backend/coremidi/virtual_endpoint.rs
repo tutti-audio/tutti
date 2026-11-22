@@ -38,7 +38,7 @@ use crate::InputProducerHandle;
 use crate::error::{MidiHardwareError, Result};
 use crate::start::Started;
 use crate::virtual_endpoint::{
-    EndpointBackend, OpeningBackend, SenderBackend, VirtualProtocol, VirtualSpec,
+    Delivery, EndpointBackend, OpeningBackend, SenderBackend, VirtualProtocol, VirtualSpec,
 };
 
 /// CoreMIDI's protocol for the spec's.
@@ -268,10 +268,11 @@ impl SenderBackend for PairSender {
     /// [`MidiHardwareError::EndpointGone`] once the endpoint is dropped, and
     /// [`MidiHardwareError::Os`] when `MIDIReceivedEventList` returns a non-zero
     /// `OSStatus`.
-    fn send(&self, ump: &Ump) -> Result<()> {
+    fn send(&self, ump: &Ump) -> Result<Delivery> {
         let live = self.live.read().unwrap_or_else(PoisonError::into_inner);
         let source = self.source.upgrade().filter(|_| *live);
-        Ok(source.ok_or(MidiHardwareError::EndpointGone)?.send(ump)?)
+        source.ok_or(MidiHardwareError::EndpointGone)?.send(ump)?;
+        Ok(Delivery::Sent)
     }
 }
 
@@ -284,11 +285,12 @@ impl SenderBackend for EndpointSender {
     /// [`MidiHardwareError::EndpointGone`] once the endpoint is dropped, and
     /// [`MidiHardwareError::Os`] when `MIDIReceivedEventList` returns a non-zero
     /// `OSStatus`.
-    fn send(&self, ump: &Ump) -> Result<()> {
+    fn send(&self, ump: &Ump) -> Result<Delivery> {
         self.0.send(ump).map_err(|error| match error {
             tutti_coremidi_ffi::Error::EndpointGone => MidiHardwareError::EndpointGone,
             other => MidiHardwareError::Os(other),
-        })
+        })?;
+        Ok(Delivery::Sent)
     }
 }
 

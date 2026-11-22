@@ -57,8 +57,9 @@
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 use std::task::Poll;
+use tutti_graph::Losses;
 use tutti_platform::Instant;
-use tutti_rt::LockExt;
+use tutti_rt::{Counter, CounterWriter, LockExt, counter};
 
 use tutti_midi_device::FunctionBlock;
 use tutti_midi_protocol::{Midi1Translator, Midi2Translator};
@@ -187,10 +188,25 @@ pub(crate) trait EndpointBackend {
 
 /// The platform's send on a [`VirtualEndpoint`], from any thread.
 pub(crate) trait SenderBackend: Send + Sync {
-    /// Publishes one UMP message to the endpoint's subscribers. Never called
-    /// from the endpoint's own receive callback: a send holds the endpoint's
-    /// live lock, which its drop waits on.
-    fn send(&self, ump: &Ump) -> Result<()>;
+    /// Publishes one UMP message to the endpoint's subscribers: [`Delivery::Full`]
+    /// when a subscriber's queue has no room (nothing waits for it), an error when
+    /// the OS fails otherwise. Never called from the endpoint's own receive
+    /// callback: a send holds the endpoint's live lock, which its drop waits on.
+    fn send(&self, ump: &Ump) -> Result<Delivery>;
+}
+
+/// What a [`SenderBackend::send`] that did not fail did with the message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the ALSA and macOS backends send; Windows has no virtual endpoint"
+)]
+pub(crate) enum Delivery {
+    /// The OS took it.
+    Sent,
+    /// A subscriber's queue had no room, so it was not sent: the endpoint counts
+    /// it in [`VirtualEndpoint::losses`].
+    Full,
 }
 
 /// The platform's creation of an endpoint, polled until it is made.
@@ -268,24 +284,62 @@ enum Conversion {
 struct Outbound {
     sender: Arc<dyn SenderBackend>,
     conversion: Conversion,
+    /// Counts the packets a full queue refused; one writer behind a lock, since
+    /// senders run on several threads.
+    refused: Mutex<CounterWriter<Losses>>,
+    losses: Counter<Losses>,
 }
 
 impl Outbound {
+    fn new(sender: Arc<dyn SenderBackend>, conversion: Conversion) -> Self {
+        let (refused, losses) = counter();
+        Self {
+            sender,
+            conversion,
+            refused: Mutex::new(refused),
+            losses,
+        }
+    }
+
+    /// One packet to the OS; a full queue is counted, not an error.
+    fn deliver(&self, ump: &Ump) -> Result<()> {
+        if self.sender.send(ump)? == Delivery::Full {
+            self.count_refused(1);
+        }
+        Ok(())
+    }
+
+    fn count_refused(&self, packets: u64) {
+        self.refused.lock_recover().add(Losses::refused(packets));
+    }
+
     fn send(&self, ump: Ump) -> Result<()> {
         let ump = match &self.conversion {
             Conversion::ToMidi1(midi1_translator) => {
                 // A packet no message is defined for, and any that is not MIDI 2.0
                 // voice, is forwarded as it is.
                 let Ok(message @ Message::Midi2(..)) = ump.decode() else {
-                    return self.sender.send(&ump);
+                    return self.deliver(&ump);
                 };
                 // The packets go in order under the lock: the MIDI 1.0 translator assumes
                 // that what it emitted was sent before the next message.
                 let mut midi1_translator = midi1_translator.lock_recover();
                 let mut sent = Ok(());
+                // After a full queue the rest of the message's packets are not
+                // sent (a cut sequence is worse than a lost one) and are counted.
+                let mut cut = false;
                 let count = translate_voice(&mut midi1_translator, message, |packet| {
-                    if sent.is_ok() {
-                        sent = self.sender.send(&packet);
+                    if cut {
+                        self.count_refused(1);
+                    } else if sent.is_ok() {
+                        match self.sender.send(&packet) {
+                            Ok(Delivery::Sent) => {}
+                            Ok(Delivery::Full) => {
+                                cut = true;
+                                self.count_refused(1);
+                            }
+                            Err(error) => sent = Err(error),
+                        }
                     }
                 });
                 if count == 0 {
@@ -305,7 +359,7 @@ impl Outbound {
                 }
             }
         };
-        self.sender.send(&ump)
+        self.deliver(&ump)
     }
 }
 
@@ -386,6 +440,9 @@ impl VirtualEndpoint {
     /// On a MIDI 1.0 endpoint a MIDI 1.0 packet is sent as it is and bypasses
     /// the narrowing state. A send the OS refuses leaves that state as it was.
     ///
+    /// A send a subscriber's full queue refuses is not an error: nothing waits for
+    /// room, and the packet is counted in [`losses`](Self::losses).
+    ///
     /// Not real-time safe: it holds a lock across the OS send. Call it from a
     /// control thread.
     ///
@@ -406,6 +463,13 @@ impl VirtualEndpoint {
         VirtualSender {
             outbound: Arc::clone(&self.outbound),
         }
+    }
+
+    /// The packets a subscriber's full queue refused, counted as
+    /// [`refused`](Losses::refused), across this endpoint and its senders.
+    #[must_use]
+    pub fn losses(&self) -> Losses {
+        self.outbound.losses.get()
     }
 
     /// Whether the endpoint is still delivering: `false` once its reader ended
@@ -516,10 +580,7 @@ impl OpeningVirtualEndpoint {
                 Conversion::ToMidi2(Box::new(Mutex::new(Midi2Translator::new())))
             }
         };
-        let outbound = Arc::new(Outbound {
-            sender: backend.sender(),
-            conversion,
-        });
+        let outbound = Arc::new(Outbound::new(backend.sender(), conversion));
         let blocks = published_numbers(&self.spec, backend.block_numbers());
         VirtualEndpoint {
             backend,
@@ -550,6 +611,12 @@ impl core::fmt::Debug for VirtualSender {
 }
 
 impl VirtualSender {
+    /// The packets a full queue refused, as [`VirtualEndpoint::losses`].
+    #[must_use]
+    pub fn losses(&self) -> Losses {
+        self.outbound.losses.get()
+    }
+
     /// As [`VirtualEndpoint::send`].
     ///
     /// # Errors
@@ -572,34 +639,60 @@ mod tests {
     use super::*;
     use crate::error::MidiHardwareError;
 
-    /// A backend that records what it sent and refuses its `fail_at`th send.
+    /// A backend that records what it sent and refuses its `fail_at`th send: with
+    /// an error, or with `Full` when `full`.
     struct Recorder {
         sent: Arc<Mutex<Vec<Ump>>>,
         calls: AtomicUsize,
         fail_at: usize,
+        full: bool,
     }
 
     impl SenderBackend for Recorder {
-        fn send(&self, ump: &Ump) -> Result<()> {
+        fn send(&self, ump: &Ump) -> Result<Delivery> {
             if self.calls.fetch_add(1, Ordering::SeqCst) == self.fail_at {
+                if self.full {
+                    return Ok(Delivery::Full);
+                }
                 return Err(MidiHardwareError::Unsupported("recorder"));
             }
             self.sent.lock().unwrap().push(*ump);
-            Ok(())
+            Ok(Delivery::Sent)
         }
     }
 
-    fn midi1_source(fail_at: usize) -> (Outbound, Arc<Mutex<Vec<Ump>>>) {
+    fn source(fail_at: usize, full: bool) -> (Outbound, Arc<Mutex<Vec<Ump>>>) {
         let sent = Arc::new(Mutex::new(Vec::new()));
-        let outbound = Outbound {
-            sender: Arc::new(Recorder {
+        let outbound = Outbound::new(
+            Arc::new(Recorder {
                 sent: sent.clone(),
                 calls: AtomicUsize::new(0),
                 fail_at,
+                full,
             }),
-            conversion: Conversion::ToMidi1(Box::new(Mutex::new(Midi1Translator::new()))),
-        };
+            Conversion::ToMidi1(Box::new(Mutex::new(Midi1Translator::new()))),
+        );
         (outbound, sent)
+    }
+
+    fn midi1_source(fail_at: usize) -> (Outbound, Arc<Mutex<Vec<Ump>>>) {
+        source(fail_at, false)
+    }
+
+    // A full queue is counted, never waited on and never an error. The
+    // refused packet and the rest of its message (a cut sequence is worse than a
+    // lost one) are counted; the next message goes whole.
+    #[test]
+    fn a_full_queue_counts_the_cut_messages_packets_and_is_no_error() {
+        // The first controller's second packet (CC 100) meets a full queue.
+        let (outbound, sent) = source(1, true);
+        outbound.send(bend_range(12)).unwrap();
+        // CC 101 went; CC 100, 6 and 38 are the three packets counted.
+        assert_eq!(controllers(&sent), [101]);
+        assert_eq!(outbound.losses.get(), Losses::refused(3));
+        outbound.send(bend_range(7)).unwrap();
+        assert_eq!(controllers(&sent), [101, 101, 100, 6, 38]);
+        assert_eq!(outbound.losses.get(), Losses::refused(3));
     }
 
     fn bend_range(semitones: u32) -> Ump {
