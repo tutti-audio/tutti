@@ -254,7 +254,7 @@ pub(crate) fn info_field(field: &MmcInfoField, out: Out<'_>) -> Done {
 }
 
 fn segment(s: MmcSegment, out: Out<'_>) -> Done {
-    out.push(s.place().wire() << 6 | s.remaining())?;
+    out.push(s.place().wire() << 6 | s.remaining().get())?;
     out.extend(s.bytes().as_bytes())
 }
 

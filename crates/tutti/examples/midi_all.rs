@@ -18,8 +18,8 @@
 //! [`MidiInput`](tutti::midi::MidiInput) lists), which needs a peer device.
 
 use tutti::midi::{
-    FileEvent, Layout, LeadTrack, Message, MidiChannel, MidiFile, MidiGroup, MidiHardwareConfig,
-    MidiRouteRule, MpeMode, MpeZoneConfig, MpeZones, NoteNumber, NoteVelocity,
+    FileEvent, Layout, LeadTrack, MemberCount, Message, MidiChannel, MidiFile, MidiGroup,
+    MidiHardwareConfig, MidiRouteRule, MpeMode, MpeZoneConfig, MpeZones, NoteNumber, NoteVelocity,
     PitchBendSensitivity, SmfDivision, Tick, TicksPerQuarterNote, Track, U7, Voice1,
 };
 use tutti::polysynth::{PolySynth, SynthConfig};
@@ -100,11 +100,11 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
     // MPE is set once, on the session: the hardware input node and every clip's
     // transform read it, and no synth holds a zone.
     let zone = MpeZones::new(
-        MpeZoneConfig::lower(
-            7,
+        Some(MpeZoneConfig::lower(
+            MemberCount::of(7),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-        ),
+        )),
         None,
     )
     .ok_or("one lower zone")?;

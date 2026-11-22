@@ -386,15 +386,15 @@ fn segment(d: &[u8]) -> Option<MmcSegment> {
     if id >= 0x80 {
         return None;
     }
-    MmcSegment::new(
+    Some(MmcSegment::new(
         if id & 0x40 != 0 {
             MmcSegmentPlace::First
         } else {
             MmcSegmentPlace::Later
         },
-        id & 0x3F,
+        MmcSegmentCount::masked(id),
         MmcSegmentBytes::new(rest)?,
-    )
+    ))
 }
 
 fn procedure_response(d: &[u8]) -> Option<MmcProcedureResponse> {

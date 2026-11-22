@@ -2,7 +2,7 @@ use super::*;
 use crate::test_support::at;
 use tutti_fixtures::midi;
 use tutti_graph::UmpAt;
-use tutti_midi_protocol::{MpeZoneConfig, MpeZones};
+use tutti_midi_protocol::{MemberCount, MpeZoneConfig, MpeZones};
 use tutti_ump::{
     Address, BendValue, CCNumber, ControlValue, Message, MpeChannels, MpeZoneSpan, NoteKeyEvent,
     NoteVelocity, U7, U14, Voice2,
@@ -189,11 +189,10 @@ fn mcm_from_the_wire_configures_the_lower_zone() {
     let mcm = at(
         0,
         MpeZoneConfig::lower(
-            7,
+            MemberCount::of(7),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
         )
-        .unwrap()
         .to_mcm(),
     );
 
@@ -230,11 +229,10 @@ fn an_mcm_that_would_overlap_the_zones_is_ignored() {
     let overlapping = at(
         0,
         MpeZoneConfig::upper(
-            5,
+            MemberCount::of(5),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
         )
-        .unwrap()
         .to_mcm(),
     );
     assert_eq!(
@@ -250,11 +248,10 @@ fn an_mcm_that_would_overlap_the_zones_is_ignored() {
     let fits = at(
         0,
         MpeZoneConfig::upper(
-            4,
+            MemberCount::of(4),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
         )
-        .unwrap()
         .to_mcm(),
     );
     assert!(translator.translated(&fits).count() > 0);
@@ -268,7 +265,7 @@ fn an_mcm_that_would_overlap_the_zones_is_ignored() {
 fn mcm_with_zero_members_disables_the_zone() {
     let mut translator = MpeTranslator::new(tutti_fixtures::midi::lower_zone(7));
     // A raw MCM on master channel 0 with member_count == 0 disables the lower
-    // zone. (`MpeZoneConfig::lower` refuses 0, so the disabling value can
+    // zone. (`MemberCount` refuses 0, so the disabling value can
     // only come off the wire: build it directly.)
     let disable = at(
         0,
@@ -370,11 +367,10 @@ fn an_mcm_resets_its_zones_bend_ranges() {
     let mcm = at(
         9,
         MpeZoneConfig::upper(
-            3,
+            MemberCount::of(3),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
         )
-        .unwrap()
         .to_mcm(),
     );
     let reset: Vec<UmpAt> = translator.translated(&mcm).collect();
@@ -400,11 +396,10 @@ fn an_mcm_resets_its_zones_bend_ranges() {
     let mcm = at(
         0,
         MpeZoneConfig::upper(
-            3,
+            MemberCount::of(3),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
         )
-        .unwrap()
         .to_mcm(),
     );
     for ev in translator.translated(&bend_sensitivity(13, 12)) {
@@ -855,11 +850,10 @@ fn program_change_on_a_member_follows_the_zones_midi_mode() {
 #[test]
 fn an_mpe_1_1_zone_starts_in_the_mode_its_response_names() {
     let zone = MpeZoneConfig::lower(
-        5,
+        MemberCount::of(5),
         PitchBendSensitivity::MPE_MASTER_DEFAULT,
         PitchBendSensitivity::MPE_MEMBER_DEFAULT,
     )
-    .unwrap()
     .channel_response(ChannelResponse::Monophonic);
     let mut translator = MpeTranslator::new(MpeMode::Zones(MpeZones::single(zone)));
     let program = at(0, midi::program_change(MidiChannel::of(3), 5, None));
@@ -910,11 +904,10 @@ fn an_mcm_stops_only_the_channels_it_moves() {
     let grow = at(
         0,
         MpeZoneConfig::lower(
-            5,
+            MemberCount::of(5),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
         )
-        .unwrap()
         .to_mcm(),
     );
     let out: Vec<UmpAt> = translator.translated(&grow).collect();
@@ -954,21 +947,19 @@ fn a_channel_that_left_the_zone_forgets_its_note_and_its_bend() {
         translator.translated(&at(
             0,
             MpeZoneConfig::lower(
-                3,
+                MemberCount::of(3),
                 PitchBendSensitivity::MPE_MASTER_DEFAULT,
                 PitchBendSensitivity::MPE_MEMBER_DEFAULT,
             )
-            .unwrap()
             .to_mcm(),
         ));
         translator.translated(&at(
             0,
             MpeZoneConfig::lower(
-                5,
+                MemberCount::of(5),
                 PitchBendSensitivity::MPE_MASTER_DEFAULT,
                 PitchBendSensitivity::MPE_MEMBER_DEFAULT,
             )
-            .unwrap()
             .to_mcm(),
         ));
         translator
@@ -1352,11 +1343,10 @@ fn a_configuration_message_does_nothing_while_the_profile_is_enabled() {
     let mcm = at(
         0,
         MpeZoneConfig::lower(
-            7,
+            MemberCount::of(7),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
         )
-        .unwrap()
         .to_mcm(),
     );
     assert_eq!(
