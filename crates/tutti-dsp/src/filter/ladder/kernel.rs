@@ -4,9 +4,11 @@
 //! Unlike the SVF this is a *nonlinear* filter: the resonance feedback runs
 //! through a `tanh` saturator, so pushing resonance or drive grits and
 //! compresses rather than blowing up. That saturation is the character, not a
-//! safety measure. [`LadderBank`](crate::LadderBank) solves the loop with a `tanh` at each
-//! stage too; [`ladder_step`] is the cheap form for callers that run SIMD lanes, with one
-//! saturator on the solved loop input.
+//! safety measure. Where the saturators sit is a [`LadderSaturation`]: [`ladder_step`] is the
+//! cheap form, with one saturator on the solved loop input, and
+//! [`nonlinear_ladder_step`](crate::nonlinear_ladder_step) puts one at every stage. Both are
+//! written once over [`SimdLanes`] with the saturator passed in, so a caller running SIMD lanes
+//! passes its lane `tanh`; [`LadderBank`](crate::LadderBank) runs either with the float's own.
 //!
 //! The resonance loop is closed with **no unit delay** (zero-delay feedback,
 //! Zavalishin, *The Art of VA Filter Design*, the ladder chapter): the loop
@@ -42,6 +44,34 @@ pub enum LadderType {
     /// High-pass at 24 dB/octave: the binomial stage mix
     /// `u - 4*lp1 + 6*lp2 - 4*lp3 + lp4`, which is `(s / (1 + s))^4`.
     HP24,
+}
+
+/// Where a ladder's `tanh` saturators sit: the two models of its nonlinear zero-delay loop.
+///
+/// Both close the loop within the sample and have the same small-signal response, the
+/// continuous ladder `1 / ((1 + s/wc)^4 + k)` under the bilinear map prewarped at the
+/// cutoff; they differ in how a loud signal is saturated and in what a sample costs. There is
+/// no default: each configuration states its own.
+///
+/// ```
+/// use tutti_dsp::LadderSaturation;
+///
+/// // The cheap model for a voice engine, the full one for a filter node.
+/// let _ = (LadderSaturation::Input, LadderSaturation::PerStage);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LadderSaturation {
+    /// One saturator, on the loop's input: the loop is solved linearly in closed form
+    /// ([`ladder_step`]) and its solution goes through one `tanh`, leaving the four stages
+    /// linear. Per sample, one closed-form solve and one `tanh`. A constant input at
+    /// resonance 0 settles to `tanh` applied once.
+    Input,
+    /// A saturator at each stage's input and in the loop: the implicit loop equation is
+    /// solved by a capped Newton iteration ([`nonlinear_ladder_step`]). Per sample, three
+    /// evaluations of the four-stage chain, about 12 `tanh`, an order of magnitude
+    /// more than [`Input`](Self::Input). A constant input at resonance 0 settles to `tanh`
+    /// applied four times.
+    PerStage,
 }
 
 /// The ladder design: its two coefficients solved in `f64` from its parameters, before they are

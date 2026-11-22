@@ -23,7 +23,7 @@ use crate::{
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_dsp::{
     DelayControls, DelayLayout, FdnLayout, FreeverbControls, FreezeMode, InterpolationMode,
-    LadderType, ShapeKind, Stages, SvfType,
+    LadderSaturation, LadderType, ShapeKind, Stages, SvfType,
 };
 use tutti_dsp::{Inline, Tap, TapSet};
 use tutti_fixtures::signal::{assert_close_f64, wide_signal};
@@ -301,24 +301,37 @@ fn the_crossover_bands_sum_to_a_wide_constant() {
     assert!((sum - DC).abs() <= F64_TOLERANCE, "{sum} against {DC}");
 }
 
-/// A ladder with no resonance is four unity-gain stages, each behind a `tanh`: a constant `c`
-/// settles to `tanh` applied four times at unit drive.
+/// A ladder with no resonance is four unity-gain stages: a constant `c` settles to `tanh`
+/// applied once at unit drive for the input model (the stages are linear) and four times for the
+/// per-stage model (each stage is behind a `tanh`), which is the config's default.
 #[test]
 fn the_ladder_settles_a_wide_constant_to_its_saturation() {
     const DC: f64 = 0x2000_0001 as f64 / 2_147_483_648.0;
     const FRAMES: usize = 4_096;
-    let node = LadderFilterNode::<f64>::from(
-        LadderFilterConfig::new(ChannelLayout::MONO, LadderType::LP24)
-            .freq(Hz::new(5_000.0))
-            .res(Resonance::new(0.0)),
-    );
-    let out = render(node, RATE, &on(1, &vec![DC; FRAMES]));
-    let settled = DC.tanh().tanh().tanh().tanh();
-    assert!(
-        (out[0][FRAMES - 1] - settled).abs() <= F64_TOLERANCE,
-        "{} against {settled}",
-        out[0][FRAMES - 1]
-    );
+    let config = LadderFilterConfig::new(ChannelLayout::MONO, LadderType::LP24)
+        .freq(Hz::new(5_000.0))
+        .res(Resonance::new(0.0));
+    let settled_once = DC.tanh();
+    let settled_four_times = DC.tanh().tanh().tanh().tanh();
+    for (config, settled) in [
+        (config, settled_four_times),
+        (
+            config.saturation(LadderSaturation::PerStage),
+            settled_four_times,
+        ),
+        (config.saturation(LadderSaturation::Input), settled_once),
+    ] {
+        let out = render(
+            LadderFilterNode::<f64>::from(config),
+            RATE,
+            &on(1, &vec![DC; FRAMES]),
+        );
+        assert!(
+            (out[0][FRAMES - 1] - settled).abs() <= F64_TOLERANCE,
+            "{} against {settled}",
+            out[0][FRAMES - 1]
+        );
+    }
 }
 
 /// The linear nodes: lines, modulated lines, the reverbs, the filters and the modulators.

@@ -473,6 +473,7 @@ fn test_basic_dsp_chain() {
     let mut bank = VoiceBank::<f32>::new(
         OscillatorType::Saw,
         &FilterType::None,
+        tutti_dsp::LadderSaturation::PerStage,
         &Adsr::new(
             Seconds::new(0.001),
             Seconds::new(0.1),

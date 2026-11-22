@@ -179,6 +179,7 @@ impl<F: SynthFloat> PolySynth<F> {
         VoiceBank::new(
             config.oscillator,
             &config.filter,
+            config.ladder_saturation,
             &config.envelope,
             sample_rate,
             config.polyphony.get(),
