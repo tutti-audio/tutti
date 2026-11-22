@@ -256,7 +256,8 @@ fn the_environment_block_applies_the_commands_changes_in_order() {
         .env_remove("ComSpec");
     let block = environment::block(&command).expect("the block is made");
     assert_eq!(block[block.len() - 2..], [0, 0]);
-    let entries: Vec<String> = block[..block.len() - 1]
+    // The last entry's terminator and the block's are the final two units.
+    let entries: Vec<String> = block[..block.len() - 2]
         .split(|&unit| unit == 0)
         .map(String::from_utf16_lossy)
         .collect();
@@ -333,10 +334,13 @@ fn handle_count() -> u32 {
 
 /// **A spawn that fails leaves no handle behind**: the process's handle count is
 /// what it was after twenty missing programs and twenty refused arguments.
+///
+/// The count is taken after three warm-up rounds: the OS opens and keeps keys
+/// and sections on a process's first `CreateProcessW` calls, which a per-spawn
+/// leak is told apart from by repeating.
 #[test]
 fn a_failed_spawn_leaves_no_handle() {
-    let before = handle_count();
-    for _ in 0..20 {
+    let round = || {
         let missing = Command::new("C:\\no\\such\\dir\\tutti.exe");
         match spawn(missing, Spawn::Leader) {
             Err(SpawnError::Start(e)) => assert_eq!(e.kind(), ErrorKind::NotFound),
@@ -348,6 +352,13 @@ fn a_failed_spawn_leaves_no_handle() {
             spawn(refused, Spawn::Helper),
             Err(SpawnError::Start(_))
         ));
+    };
+    for _ in 0..3 {
+        round();
+    }
+    let before = handle_count();
+    for _ in 0..20 {
+        round();
     }
     assert_eq!(handle_count(), before);
 }
