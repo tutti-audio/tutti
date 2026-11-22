@@ -66,10 +66,10 @@
 //! Clock the error against the source's beat is closed by a trim of the tempo
 //! published through the overlay; for either kind an error past
 //! `ClockFollower::SLIP` (Beat Clock) or `ClockFollower::MTC_SLIP_FRAMES` (MTC)
-//! locates to the source and is reported ([`MidiReport::ClockSlipped`]). The
+//! locates to the source and is reported ([`MidiEvent::ClockSlipped`]). The
 //! latest error is [`Midi::clock_error`](crate::Midi::clock_error).
 //!
-//! **MTC running backward** is reported ([`MidiReport::ClockReversed`]) and the
+//! **MTC running backward** is reported ([`MidiEvent::ClockReversed`]) and the
 //! transport is stopped: it has no negative rate, so a reverse source cannot be
 //! followed, and the session takes no position from it until its Quarter Frames
 //! ascend again. **A source off its nominal speed** is followed by locates alone
@@ -94,7 +94,7 @@ use tutti_timeline::{ProjectMeter, TransportSettings};
 use tutti_ump::MidiGroup;
 use tutti_units::{At, Beat, Bpm, Frame, Seconds};
 
-use crate::MidiReport;
+use crate::MidiEvent;
 
 /// How many events the follower's tap holds between two polls. Set Tempo and
 /// Set Time Signature are rare; a source that floods them loses the oldest
@@ -407,7 +407,7 @@ impl Overlay {
                 Followed::Tempo(tempo) => match self.tempo.stepped_to(beat, tempo) {
                     Ok(Some(map)) => {
                         self.tempo = Arc::new(map);
-                        out.push(MidiReport::TempoFollowed { tempo, beat }.into());
+                        out.push(MidiEvent::TempoFollowed { tempo, beat }.into());
                     }
                     Ok(None) => {}
                     // The builder refuses only a tempo whose segment duration overflows
@@ -422,7 +422,7 @@ impl Overlay {
                     if let Some(map) = self.meter.with_change_at(at, signature) {
                         self.meter = Arc::new(map);
                         out.push(
-                            MidiReport::MeterFollowed {
+                            MidiEvent::MeterFollowed {
                                 signature,
                                 beat: at,
                             }
@@ -596,12 +596,12 @@ fn lay(
                 });
             }
             ClockEvent::Tempo { tempo, at } => tempos.push((tempo, placed(at))),
-            ClockEvent::Locked => out.push(MidiReport::ClockLocked { kind }.into()),
-            ClockEvent::Unlocked => out.push(MidiReport::ClockUnlocked { kind }.into()),
+            ClockEvent::Locked => out.push(MidiEvent::ClockLocked { kind }.into()),
+            ClockEvent::Unlocked => out.push(MidiEvent::ClockUnlocked { kind }.into()),
             ClockEvent::Slipped { error } => {
-                out.push(MidiReport::ClockSlipped { kind, error }.into());
+                out.push(MidiEvent::ClockSlipped { kind, error }.into());
             }
-            ClockEvent::Reversed => out.push(MidiReport::ClockReversed { kind }.into()),
+            ClockEvent::Reversed => out.push(MidiEvent::ClockReversed { kind }.into()),
         }
     }
     (actions, tempos)
@@ -790,10 +790,10 @@ impl MachineFollow {
                 MachineControlEvent::Play => actions.push(ClockAction::Play),
                 MachineControlEvent::Stop => actions.push(ClockAction::Stop),
                 MachineControlEvent::Ignored(command) => {
-                    out.push(MidiReport::MachineControlIgnored(command).into());
+                    out.push(MidiEvent::MachineControlIgnored(command).into());
                 }
                 MachineControlEvent::Segmentation(error) => {
-                    out.push(MidiReport::MachineControlSegmentation(error).into());
+                    out.push(MidiEvent::MachineControlSegmentation(error).into());
                 }
                 // An event this session has no counterpart for.
                 _ => {}

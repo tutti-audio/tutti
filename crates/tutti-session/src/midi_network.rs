@@ -27,7 +27,7 @@ use tutti_ump::Ump;
 
 use crate::graph::Graph;
 use crate::midi::{Claim, Departure, Held, Retiring, settle};
-use crate::{EventInPort, EventOutPort, MidiError, MidiReport, MidiSink, SessionEvent, Stamping};
+use crate::{EventInPort, EventOutPort, MidiError, MidiEvent, MidiSink, SessionEvent, Stamping};
 
 /// An end of a Session a link runs: a [`Client`] or a [`Host`].
 trait Role: NetworkEndpoint + Send + 'static {
@@ -168,7 +168,7 @@ impl OpenHost {
     }
 
     /// How an Invitation is admitted: with [`Admission::Confirm`] each one is
-    /// reported ([`NetworkReport::Invited`]) and waits for
+    /// reported ([`NetworkEvent::Invited`]) and waits for
     /// [`MidiNetwork::accept`] or [`MidiNetwork::decline`].
     pub fn admission(mut self, admission: Admission) -> Self {
         self.admission = admission;
@@ -223,10 +223,10 @@ impl OpenHost {
 }
 
 /// What happened in a network endpoint's sessions, reported once from
-/// `Phase::Poll` as [`MidiReport::Network`]. Each is about one peer.
+/// `Phase::Poll` as [`MidiEvent::Network`]. Each is about one peer.
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum NetworkReport {
+pub enum NetworkEvent {
     /// A Host that admits with [`Admission::Confirm`] was invited: it waits for
     /// [`MidiNetwork::accept`] or [`MidiNetwork::decline`].
     Invited {
@@ -265,9 +265,9 @@ pub enum NetworkReport {
     },
 }
 
-impl From<NetworkReport> for SessionEvent {
-    fn from(report: NetworkReport) -> Self {
-        MidiReport::Network(report).into()
+impl From<NetworkEvent> for SessionEvent {
+    fn from(report: NetworkEvent) -> Self {
+        MidiEvent::Network(report).into()
     }
 }
 
@@ -421,7 +421,7 @@ impl<R> MidiNetwork<R> {
 
 impl MidiNetwork<Host> {
     /// Accepts the Invitation of `identity` (a Host that admits with
-    /// [`Admission::Confirm`], after [`NetworkReport::Invited`]): the Session is
+    /// [`Admission::Confirm`], after [`NetworkEvent::Invited`]): the Session is
     /// established with the next update.
     ///
     /// # Errors
@@ -638,7 +638,7 @@ impl Net {
                         input: None,
                     });
                     drop(peers);
-                    out.push(NetworkReport::Invited { identity: remote }.into());
+                    out.push(NetworkEvent::Invited { identity: remote }.into());
                 }
                 Event::Established { peer, remote } => {
                     // A peer that comes back under its identity from another address,
@@ -648,7 +648,7 @@ impl Net {
                         if self.entries[at].identity == remote || self.entries[at].addr == peer {
                             let old = self.entries.remove(at);
                             out.push(
-                                NetworkReport::Replaced {
+                                NetworkEvent::Replaced {
                                     identity: old.identity,
                                 }
                                 .into(),
@@ -666,7 +666,7 @@ impl Net {
                     });
                     drop(peers);
                     self.entries.push(entry);
-                    out.push(NetworkReport::Connected { identity: remote }.into());
+                    out.push(NetworkEvent::Connected { identity: remote }.into());
                     edited = true;
                 }
                 Event::Ump { peer, packet } => {
@@ -693,7 +693,7 @@ impl Net {
                     }
                     if let Some(known) = known {
                         out.push(
-                            NetworkReport::Ended {
+                            NetworkEvent::Ended {
                                 identity: known.identity,
                                 by: ended_by,
                                 reason,
@@ -703,7 +703,7 @@ impl Net {
                     }
                 }
                 Event::AuthenticationFailed { peer, cause } => {
-                    out.push(NetworkReport::AuthenticationFailed { peer, cause }.into());
+                    out.push(NetworkEvent::AuthenticationFailed { peer, cause }.into());
                 }
                 // The link counts what it lost; a lost run of UMP, a reset and a NAK
                 // change nothing the session holds, and a nonce the OS could not
@@ -721,7 +721,7 @@ impl Net {
 impl<F: Float> crate::Midi<'_, F> {
     /// Opens the Client `request`: binds its socket, sends its Invitation and
     /// returns at once. The Host's answer, and who joins, leaves or fails, are
-    /// [`NetworkReport`]s of the next updates.
+    /// [`NetworkEvent`]s of the next updates.
     ///
     /// The link runs on the session's executor, and the session owns it: it ends
     /// when the last clone of the returned handle is dropped.
@@ -740,7 +740,7 @@ impl<F: Float> crate::Midi<'_, F> {
     }
 
     /// Opens the Host `request`: binds its socket and returns at once. It listens;
-    /// each Client that joins has an input of its own ([`NetworkReport`]s say who).
+    /// each Client that joins has an input of its own ([`NetworkEvent`]s say who).
     ///
     /// # Errors
     ///

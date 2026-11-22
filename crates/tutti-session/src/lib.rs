@@ -115,6 +115,8 @@ mod midi_link;
 mod midi_load;
 // Where UDP sockets exist and the feature is on; its twin is empty of them.
 #[cfg(feature = "midi")]
+mod midi_event;
+#[cfg(feature = "midi")]
 #[cfg_attr(
     all(feature = "midi-network", not(target_arch = "wasm32")),
     path = "midi_network.rs"
@@ -129,8 +131,6 @@ mod midi_port;
 #[cfg(all(feature = "midi", not(feature = "midi-hardware")))]
 #[path = "midi_port_none.rs"]
 mod midi_port;
-#[cfg(feature = "midi")]
-mod midi_report;
 #[cfg(feature = "midi")]
 mod midi_sink;
 mod modulation;
@@ -258,11 +258,11 @@ pub use midi_port::{
     OpenedMidiInput, OpenedMidiOutput, OpeningMidiInput, OpeningMidiOutput, PortCause,
 };
 // Everything public in the module: it has no items on a target with no sockets
-// but `NetworkReport`, which `MidiReport` names.
+// but `NetworkEvent`, which `MidiEvent` names.
+#[cfg(feature = "midi")]
+pub use midi_event::MidiEvent;
 #[cfg(feature = "midi-network")]
 pub use midi_network::*;
-#[cfg(feature = "midi")]
-pub use midi_report::MidiReport;
 #[cfg(feature = "midi")]
 pub use midi_sink::{MidiSink, OpenMidiSink};
 pub use modulation::{
@@ -273,7 +273,7 @@ pub use modulation::{
 #[cfg(feature = "sampler")]
 pub use node::Handled;
 pub use node::{Reclaimer, Reclaims, SessionNode};
-pub use peer::{Peer, PeerError, PeerResourceId, Presence, Resource, ResourceFact};
+pub use peer::{Peer, PeerError, PeerEvent, PeerResourceId, Presence, Resource, ResourceFact};
 #[cfg(any(feature = "plugin", feature = "midi-hardware"))]
 pub use peer_state::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "plugin")]

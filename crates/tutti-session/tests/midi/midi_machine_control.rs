@@ -16,7 +16,7 @@ use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_midi_protocol::{MtcRate, Recipient, SysexDeviceId};
 use tutti_midi_runtime::{ClockKind, MidiOut, SyncMessages};
 use tutti_session::{
-    FollowClock, FollowMachineControl, MidiError, MidiReport, Session, SessionEvent, SetRefusal,
+    FollowClock, FollowMachineControl, MidiError, MidiEvent, Session, SessionEvent, SetRefusal,
     ValueErrorKind,
 };
 use tutti_timeline::FadeOut;
@@ -58,7 +58,7 @@ fn command(fake: &FakeCounters, device: u8, commands: &[u8]) {
     }
 }
 
-fn pump(s: &mut Session) -> Vec<MidiReport> {
+fn pump(s: &mut Session) -> Vec<MidiEvent> {
     blocks(s, 1);
     s.update()
         .into_iter()
@@ -226,7 +226,7 @@ fn a_command_the_transport_cannot_do_is_reported() {
     assert!(
         seen.iter().any(|e| matches!(
             e,
-            MidiReport::MachineControlIgnored(tutti_midi_protocol::MmcCommand::RecordStrobe)
+            MidiEvent::MachineControlIgnored(tutti_midi_protocol::MmcCommand::RecordStrobe)
         )),
         "{seen:?}"
     );
@@ -252,7 +252,7 @@ fn segmented_commands_act_whole_and_a_stray_segment_is_reported() {
     assert!(
         seen.iter().any(|e| matches!(
             e,
-            MidiReport::MachineControlSegmentation(SegmentFault::String(
+            MidiEvent::MachineControlSegmentation(SegmentFault::String(
                 tutti_midi_protocol::MmcSegmentError::MissingFirst
             ))
         )),
@@ -311,7 +311,7 @@ fn unfollowing_is_reported_and_refused_when_not_following() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, MidiReport::MachineControlUnfollowed)),
+            .any(|e| matches!(e, MidiEvent::MachineControlUnfollowed)),
         "{events:?}"
     );
 }
