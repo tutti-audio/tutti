@@ -33,7 +33,7 @@ use std::time::Duration;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Editor, ForkError, ForkFaultKind, ForkMode, ForkTarget, IntoNode, Prepare, Renderer,
+    Editor, ForkError, ForkFaultKind, ForkTarget, IntoNode, Prepare, RenderMode, Renderer,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_plugin::PluginClient;
@@ -134,7 +134,7 @@ fn a_fork_renders_like_the_live_instance_from_its_state() {
     let fork = probe
         .client
         .fork_instance(
-            ForkMode::Offline,
+            RenderMode::Offline,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
@@ -203,7 +203,7 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
     let fork = probe
         .client
         .fork_instance(
-            ForkMode::Offline,
+            RenderMode::Offline,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
@@ -301,7 +301,7 @@ fn a_state_the_fresh_instance_refuses_is_a_named_fork_error() {
     let err = probe
         .client
         .fork_instance(
-            ForkMode::Offline,
+            RenderMode::Offline,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect_err("the fresh instance refuses the state");
@@ -327,7 +327,10 @@ fn a_state_the_fresh_instance_refuses_is_a_named_fork_error() {
         .spec_mut()
         .topology
         .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
-    match editor.fork(ForkTarget::Node(key), ForkMode::Offline, prepare) {
+    match editor.fork(
+        ForkTarget::Node(key),
+        prepare.with_render_mode(RenderMode::Offline),
+    ) {
         Err(ForkError::Source { key: at, cause }) => {
             assert_eq!(at, key);
             assert!(
@@ -364,7 +367,7 @@ fn a_fork_is_saved_and_restored_as_a_duplicate_and_a_project_save_is_not() {
     probe
         .client
         .fork_instance(
-            ForkMode::Offline,
+            RenderMode::Offline,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the fork saved for a duplicate and restored as one");
@@ -380,7 +383,7 @@ fn a_plugin_that_cannot_save_its_state_is_a_named_fork_error() {
     let err = probe
         .client
         .fork_instance(
-            ForkMode::Live,
+            RenderMode::Realtime,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect_err("the live instance refuses to save");
@@ -424,7 +427,10 @@ fn a_graph_holding_a_plugin_forks_and_renders_offline() {
         .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
 
     let (fork_ed, fork_exec) = editor
-        .fork(ForkTarget::Node(key), ForkMode::Offline, prepare)
+        .fork(
+            ForkTarget::Node(key),
+            prepare.with_render_mode(RenderMode::Offline),
+        )
         .expect("a graph holding a plugin forks");
     let out = Renderer::new(fork_ed, fork_exec).render(BLOCK * 8);
     let want = TAG_P0C0 * amplitude(-6.0);
@@ -461,7 +467,10 @@ fn render_fork_of(client: PluginClient, blocks: usize) -> Editor {
         .topology
         .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
     let (fork_ed, fork_exec) = editor
-        .fork(ForkTarget::Node(key), ForkMode::Offline, prepare)
+        .fork(
+            ForkTarget::Node(key),
+            prepare.with_render_mode(RenderMode::Offline),
+        )
         .expect("forks");
     assert_eq!(fork_ed.fork_health(), Ok(()), "healthy before rendering");
     let mut renderer = Renderer::new(fork_ed, fork_exec);
@@ -545,7 +554,7 @@ fn a_fork_of_a_dropped_plugin_is_live_gone() {
     drop(parts.controls);
     drop(probe.handle);
 
-    let cause = match source.fork(ForkMode::Live) {
+    let cause = match source.fork(RenderMode::Realtime) {
         Ok(_) => panic!("forked a plugin that is gone"),
         Err(cause) => cause,
     };
@@ -590,7 +599,7 @@ fn a_dropped_forks_server_is_reaped() {
     let fork = probe
         .client
         .fork_instance(
-            ForkMode::Live,
+            RenderMode::Realtime,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
@@ -627,7 +636,7 @@ fn a_failed_forks_server_is_reaped() {
     let err = probe
         .client
         .fork_instance(
-            ForkMode::Live,
+            RenderMode::Realtime,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .err();
@@ -663,7 +672,6 @@ fn live_graph(client: PluginClient) -> (Editor, tutti_graph::Executor) {
 fn fork_pair(live: &Editor, rate: SampleRate) -> (Editor, tutti_graph::Executor) {
     live.fork(
         ForkTarget::MainOutput,
-        ForkMode::Offline,
         tutti_export::RenderGraph::prepare(rate),
     )
     .expect("a graph holding a plugin forks")
@@ -995,7 +1003,10 @@ fn a_clip_note_in_a_chunk_that_begins_mid_block_lands_on_its_frame() {
             ..Default::default()
         }));
         let (_fork_ed, mut fork_exec) = live
-            .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare)
+            .fork(
+                ForkTarget::MainOutput,
+                prepare.with_render_mode(RenderMode::Offline),
+            )
             .expect("forks");
 
         let mut out = Vec::new();
@@ -1084,7 +1095,10 @@ fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
         ..Default::default()
     }));
     let (_fork_ed, mut fork_exec) = live
-        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare)
+        .fork(
+            ForkTarget::MainOutput,
+            prepare.with_render_mode(RenderMode::Offline),
+        )
         .expect("a clip node and a plugin fork");
 
     let mut out = Vec::new();
@@ -1209,7 +1223,10 @@ fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
             ..Default::default()
         }));
         let (_fork_ed, mut fork_exec) = live
-            .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare)
+            .fork(
+                ForkTarget::MainOutput,
+                prepare.with_render_mode(RenderMode::Offline),
+            )
             .expect("a clip, a plugin and a sink fork");
 
         let mut out = Vec::new();
@@ -1350,7 +1367,7 @@ fn an_export_is_aligned_when_the_plugin_latency_moves_offline() {
 }
 
 /// **A live fork of a served plugin that was told to render offline renders
-/// offline**: the live plugin is told `Offline`, a `ForkMode::Live` fork is
+/// offline**: the live plugin is told `Offline`, a `RenderMode::Realtime` fork is
 /// made, and the fork's declared latency carries the plugin's offline extra
 /// (which the probe reports only in its offline mode, `clap.latency`). The
 /// fork is the live plugin's mode, not the graph's.
@@ -1370,14 +1387,13 @@ fn a_live_fork_of_a_served_plugin_told_offline_is_offline() {
             .announce_render_mode(tutti_plugin_types::RenderMode::Offline),
         "the live plugin takes the mode"
     );
-    // Forked through the graph in `ForkMode::Live`, prepared in realtime: the
+    // Forked through the graph in `RenderMode::Realtime`, prepared in realtime: the
     // graph does not say offline, so only the live plugin's mode can.
     let rate = SampleRate::of(SAMPLE_RATE);
     let (live, _exec) = live_graph(probe.client);
     let (editor, executor) = live
         .fork(
             ForkTarget::MainOutput,
-            ForkMode::Live,
             Prepare::new(rate, MaxBlock::of(Samples::new(BLOCK))),
         )
         .expect("a graph holding a plugin forks");
@@ -1615,7 +1631,10 @@ fn a_fork_of_a_refused_rate_is_silent_and_a_failed_fault() {
         .topology
         .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
     let (fork_ed, fork_exec) = editor
-        .fork(ForkTarget::Node(key), ForkMode::Offline, prepare)
+        .fork(
+            ForkTarget::Node(key),
+            prepare.with_render_mode(RenderMode::Offline),
+        )
         .expect("forks");
     let mut renderer = Renderer::new(fork_ed, fork_exec);
     let out = renderer.render(BLOCK * 20);

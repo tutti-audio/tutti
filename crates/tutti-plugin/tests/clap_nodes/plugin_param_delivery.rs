@@ -27,7 +27,7 @@ use tutti_buffers::MaxBlock;
 use clap_probe::{ProbeEnv, Rig, load_probe, render};
 use param_probe::{extra, knob, knobs, load_param_probe, until};
 use tutti_fixtures::machine_lock;
-use tutti_graph::{ForkMode, ForkTarget, Prepare, TransportPosition};
+use tutti_graph::{ForkTarget, Prepare, RenderMode, TransportPosition};
 use tutti_nodes::automation::{ControlLaneNode, LaneControls};
 use tutti_plugin_host::PluginHandle;
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig, render_graph};
@@ -317,7 +317,10 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     let (_fork_ed, mut fork_exec) = live
         .renderer()
         .editor()
-        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare)
+        .fork(
+            ForkTarget::MainOutput,
+            prepare.with_render_mode(RenderMode::Offline),
+        )
         .expect("the lane and the plugin fork");
     let silence = vec![0.0f32; FORK_BLOCK];
     let inputs: Vec<&[f32]> = (0..live.inputs()).map(|_| &silence[..]).collect();

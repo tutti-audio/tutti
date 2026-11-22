@@ -458,9 +458,9 @@ fn a_fork_never_touches_the_live_stream() {
     );
 
     let source = DiskVoiceFork(live.clone());
-    assert!(source.fork(ForkMode::Offline).is_ok());
+    assert!(source.fork(RenderMode::Offline).is_ok());
     let refused = source
-        .fork(ForkMode::Live)
+        .fork(RenderMode::Realtime)
         .expect_err("a live fork is refused");
     assert!(refused.downcast_ref::<LiveDiskFork>().is_some());
 }

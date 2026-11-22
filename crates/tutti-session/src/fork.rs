@@ -19,7 +19,7 @@ use tutti_buffers::ChannelTopology;
 use tutti_buffers::Float;
 use tutti_export::{RenderError, RenderGraph, RtLogSink, Setup};
 use tutti_graph::{
-    CommitError, Editor, Executor, ForkError, ForkMode, ForkRemains, ForkTarget, PendingFork, Pool,
+    CommitError, Editor, Executor, ForkError, ForkRemains, ForkTarget, PendingFork, Pool,
 };
 use tutti_units::SampleRate;
 
@@ -67,7 +67,7 @@ impl<F: Float> PendingExport<F> {
         main_output: Option<ChannelTopology>,
     ) -> Result<Self, RenderError> {
         let fork = live
-            .fork_gather(target, ForkMode::Offline, RenderGraph::prepare(rate))
+            .fork_gather(target, RenderGraph::prepare(rate))
             .map_err(fork_error)?;
         let rt_log = Arc::new(crate::rt_log::Emit::of(live));
         Ok(Self {

@@ -21,8 +21,8 @@ use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::contract::Direct;
 use tutti_graph::{
-    Cx, Editor, Event, EventInputPort, EventKind, EventOutputPort, Executor, ForkCause, ForkMode,
-    ForkSource, ForkTarget, Forked, IntoNode, Io, Node, NodeParts, Offset, Prepare, Shape, Status,
+    Cx, Editor, Event, EventInputPort, EventKind, EventOutputPort, Executor, ForkCause, ForkSource,
+    ForkTarget, Forked, IntoNode, Io, Node, NodeParts, Offset, Prepare, RenderMode, Shape, Status,
     TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
@@ -174,7 +174,7 @@ struct ForkableSink {
 struct SinkFork(Arc<Mutex<Vec<Shared>>>);
 
 impl ForkSource for SinkFork {
-    fn fork(&self, _: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, _: RenderMode) -> Result<Forked, ForkCause> {
         let tally = Shared::default();
         self.0.lock().unwrap().push(Arc::clone(&tally));
         Ok(Forked::new(Box::new(Sink {
@@ -748,8 +748,11 @@ fn forkable_rig() -> (
 
 fn fork_of(ed: &Editor) -> (Editor, Executor) {
     let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(256)));
-    ed.fork(ForkTarget::Node(NodeKey(2)), ForkMode::Offline, prepare)
-        .expect("the clip and the sink fork")
+    ed.fork(
+        ForkTarget::Node(NodeKey(2)),
+        prepare.with_render_mode(RenderMode::Offline),
+    )
+    .expect("the clip and the sink fork")
 }
 
 /// The live clip holds note 60 when the graph is forked; the fork renders

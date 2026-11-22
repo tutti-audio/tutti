@@ -52,7 +52,7 @@
 //!    value delivered between the two is in the state and sent to the fork
 //!    once more, harmlessly.
 //! 6. **Report the render mode**: an offline fork is told it renders
-//!    offline; a live fork ([`ForkMode::Live`]) is told what the live
+//!    offline; a live fork ([`RenderMode::Realtime`]) is told what the live
 //!    instance ran in when it was forked (offline if a host had set the live
 //!    one offline).
 //!
@@ -103,7 +103,7 @@ use tutti_buffers::Float;
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 
 use parking_lot::Mutex;
-use tutti_graph::{ForkBuild, ForkCause, ForkMode, ForkSource, Forked};
+use tutti_graph::{ForkBuild, ForkCause, ForkSource, Forked};
 use tutti_plugin_types::{Control, Features, InProcess, PluginRef, RenderMode, StateUse};
 
 use super::client::{PluginNode, RateDelivery, TransportFeed};
@@ -176,7 +176,7 @@ where
     fn instance(
         &self,
         main: MainThreadMarker,
-        mode: ForkMode,
+        mode: RenderMode,
     ) -> Result<PluginNode<L, F>, PluginForkError> {
         // First, so a plugin that cannot save costs no second instance. The
         // `Arc` is dropped straight after: the fork holds no strong reference.
@@ -265,7 +265,7 @@ impl<L: InProcess + 'static, F: Float> ForkSource<F> for Fork<L, F>
 where
     L::Processor: 'static,
 {
-    fn fork(&self, mode: ForkMode) -> Result<Forked<F>, ForkCause> {
+    fn fork(&self, mode: RenderMode) -> Result<Forked<F>, ForkCause> {
         // The gather runs on the main thread (below), which `current` confirms;
         // off it there is no way to load a second instance, so the fork is
         // refused rather than loaded where the format forbids it.
@@ -282,7 +282,7 @@ where
     /// `prepare` (which tells the plugin the fork's rate,
     /// `RateDelivery::InPrepare`) runs there too, on the main thread the
     /// gather is called on. Only rendering it leaves that thread.
-    fn gather(&self, mode: ForkMode) -> Result<ForkBuild<F>, ForkCause> {
+    fn gather(&self, mode: RenderMode) -> Result<ForkBuild<F>, ForkCause> {
         self.fork(mode).map(ForkBuild::pinned)
     }
 }
@@ -307,8 +307,8 @@ where
     /// what the plugin saves ([`Control::save_state`]). The fork reads
     /// its transport from the graph it renders in, as the live node does,
     /// with the meter installed on this node now.
-    /// [`ForkMode::Offline`] tells the plugin it renders offline;
-    /// [`ForkMode::Live`] keeps the live instance's render mode. A fork
+    /// [`RenderMode::Offline`] tells the plugin it renders offline;
+    /// [`RenderMode::Realtime`] keeps the live instance's render mode. A fork
     /// carries no running DSP state (voices, delay lines), so it starts
     /// silent. Its parameter delivery starts from what this node has
     /// delivered, so a host value held still is not sent to it over the
@@ -327,7 +327,7 @@ where
     pub fn fork_instance(
         &self,
         main: MainThreadMarker,
-        mode: ForkMode,
+        mode: RenderMode,
     ) -> Result<PluginNode<L, F>, PluginForkError> {
         Fork::of(self)
             .ok_or(PluginForkError::NoOrigin)?

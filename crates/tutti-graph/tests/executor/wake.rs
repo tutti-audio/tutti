@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex};
 use common::{Burst, WORKERS, bits, prepare, test_pool};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Cx, Editor, Executor, ForkByClone, ForkMode, ForkTarget, Io, Node, NodeKey, OutputPort,
-    PortSource, Prepare, Shape, Status, TransportPosition, Unforkable, Wake,
+    Cx, Editor, Executor, ForkByClone, ForkTarget, Io, Node, NodeKey, OutputPort, PortSource,
+    Prepare, Shape, Status, TransportPosition, Unforkable, Wake,
 };
 
 /// Every `Wake` a placement of a [`Napper`] was given, with that placement's
@@ -156,7 +156,7 @@ fn a_raise_on_an_unparked_node_does_not_wake_it_after_it_parks() {
 fn a_raise_on_the_live_wake_does_not_wake_the_forks_node() {
     let (live_ed, mut live, placements) = one_napper();
     let (mut fork_ed, mut fork) = live_ed
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(BLOCK))
+        .fork(ForkTarget::MainOutput, prepare(BLOCK))
         .expect("the napper forks by clone");
     fork.apply_pending();
     fork_ed.collect();

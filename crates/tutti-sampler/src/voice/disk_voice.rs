@@ -20,8 +20,8 @@ use std::sync::Arc;
 use crate::SamplerFloat;
 use tutti_buffers::{ChannelLayout, MAX_CHANNELS};
 use tutti_graph::{
-    Cx, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, IntoNode, Io, Node,
-    NodeParts, Prepare, RenderMode, Shape, Status, declick_frames,
+    Cx, ForkCause, ForkFaultKind, ForkHealth, ForkSource, Forked, IntoNode, Io, Node, NodeParts,
+    Prepare, RenderMode, Shape, Status, declick_frames,
 };
 use tutti_units::{Amplitude, PlaybackRate, ReadRate, SamplePosition, SampleRate, SrcRatio, Tail};
 
@@ -322,7 +322,7 @@ enum OfflineFault {
 /// Why a disk voice refused a fork.
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "a disk voice forks only for an offline render: a live copy cannot read the \
+    "a disk voice forks only for an offline render: a realtime fork cannot read the \
              stream's ring, and reading its file would block the audio thread"
 )]
 pub(crate) struct LiveDiskFork;
@@ -1061,8 +1061,8 @@ impl DiskVoiceControls {
 struct DiskVoiceFork<F: SamplerFloat>(DiskVoice<F>);
 
 impl<F: SamplerFloat> ForkSource<F> for DiskVoiceFork<F> {
-    fn fork(&self, mode: ForkMode) -> Result<Forked<F>, ForkCause> {
-        if matches!(mode, ForkMode::Live) {
+    fn fork(&self, mode: RenderMode) -> Result<Forked<F>, ForkCause> {
+        if matches!(mode, RenderMode::Realtime) {
             return Err(ForkCause::new(LiveDiskFork));
         }
         let fork = self.0.fork_copy();

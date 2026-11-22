@@ -1355,8 +1355,8 @@ impl Graph {
 impl<F: Float> Graph<F> {
     /// The control-thread half of a copy of the main output for an offline render
     /// at `rate`, sharing no state with this graph: `Editor::fork_gather`
-    /// with `ForkMode::Offline`, prepared as a bounce is
-    /// (`RenderGraph::prepare`). [`PendingExport::build`] makes the rest on a
+    /// prepared as a bounce is (`RenderGraph::prepare`, an offline
+    /// `RenderMode`). [`PendingExport::build`] makes the rest on a
     /// worker.
     ///
     /// The fork renders on the session's render pool unless `serial`, and

@@ -15,7 +15,7 @@ use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Editor, EventCapacity, EventEdge, EventInletNode, EventInputPort, EventOutputPort, Executor,
-    ForkMode, ForkTarget, Offset, Prepare, TransportChanges, TransportPosition,
+    ForkTarget, Offset, Prepare, TransportChanges, TransportPosition,
 };
 use tutti_midi_protocol::{
     MpeMode, MpeZoneConfig, MpeZones, MtcRate, PitchBendSensitivity, Recipient, channel_voice,
@@ -234,10 +234,7 @@ fn a_groups_channels_leave_on_their_own_ports() {
         .collect();
     assert_eq!(got, vec![(1, 60), (usize::from(MIDI_INPUT_PORTS + 1), 61)]);
     let prepare = *live.prepare();
-    assert!(
-        live.fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
-            .is_ok()
-    );
+    assert!(live.fork(ForkTarget::MainOutput, prepare).is_ok());
 }
 
 /// **An (N)RPN run split across blocks assembles into one controller.**
@@ -1313,9 +1310,7 @@ fn an_input_nodes_fork_is_silent() {
     let wire = Script::new(vec![vec![note(0, 60, 0)]]);
     let (live, _exec, _c, seen) = input(Input::new(wire), MIDI_INPUT_PORTS, 512);
     let prepare = *live.prepare();
-    let (_fork, mut fork_exec) = live
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
-        .expect("forks");
+    let (_fork, mut fork_exec) = live.fork(ForkTarget::MainOutput, prepare).expect("forks");
     block(&mut fork_exec, 512);
     assert!(seen.lock().unwrap().is_empty());
 }
@@ -1512,9 +1507,7 @@ fn a_sync_nodes_fork_runs() {
         512,
     );
     let prepare = *live.prepare();
-    let (_fork, mut fork_exec) = live
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
-        .expect("forks");
+    let (_fork, mut fork_exec) = live.fork(ForkTarget::MainOutput, prepare).expect("forks");
     let mut out = vec![0.0f32; 512];
     for playing in [false, true] {
         fork_exec.process(
@@ -1876,7 +1869,7 @@ fn a_reset_transform_sends_the_zones_ranges_again() {
 /// adopts the zone.
 #[test]
 fn a_fork_keeps_the_mode_it_was_forked_in() {
-    use tutti_graph::{ForkMode, NodeParts, Unforkable};
+    use tutti_graph::{NodeParts, RenderMode, Unforkable};
     let member = MidiChannel::of(1);
     let bend = at(0, midi::pitch_bend(member, 0xC000_0000));
     let note = at(
@@ -1889,7 +1882,7 @@ fn a_fork_keeps_the_mode_it_was_forked_in() {
         tutti_graph::IntoNode::<f32>::into_parts(MpeTransformNode::new(&cell));
     let forked = fork
         .expect("a transform forks")
-        .fork(ForkMode::Live)
+        .fork(RenderMode::Realtime)
         .expect("forks");
     cell.publish(midi::lower_zone(6));
 

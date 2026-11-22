@@ -76,8 +76,8 @@ use tutti_graph::{Losses, UmpAt};
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 use tutti_graph::{
-    Cx, Event, EventDensity, EventKind, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io,
-    Node, NodeParts, Offset, Prepare, Shape, Status,
+    Cx, Event, EventDensity, EventKind, ForkCause, ForkSource, Forked, IntoNode, Io, Node,
+    NodeParts, Offset, Prepare, RenderMode, Shape, Status,
 };
 use tutti_midi_protocol::Midi2Translator;
 use tutti_midi_protocol::{MpeMode, MpeZones};
@@ -815,7 +815,7 @@ struct SilentInput {
 }
 
 impl<F: Float> ForkSource<F> for SilentInput {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
+    fn fork(&self, _mode: RenderMode) -> Result<Forked<F>, ForkCause> {
         Ok(Forked::new(Box::new(
             MidiInputNode::new().hearing(self.ports),
         )))

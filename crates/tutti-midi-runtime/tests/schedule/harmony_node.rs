@@ -11,8 +11,8 @@ use tutti_buffers::MaxBlock;
 use crate::common::{beat_of, connect, rolling};
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventKind, Executor, ForkMode, ForkTarget, Harmony, HarmonyKind, Io, Node, Prepare,
-    Shape, Status, TransportPosition,
+    Cx, Editor, EventKind, Executor, ForkTarget, Harmony, HarmonyKind, Io, Node, Prepare, Shape,
+    Status, TransportPosition,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_midi_runtime::{
@@ -284,9 +284,7 @@ fn a_restate_follows_a_publish_and_only_a_publish() {
 fn a_fork_sends_the_lanes_as_they_stood() {
     let (live, _exec, controls, seen) = rig(HarmonyNode::new(changes(lanes())), 512);
     let prepare = *live.prepare();
-    let (_fork, mut fork_exec) = live
-        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
-        .expect("forks");
+    let (_fork, mut fork_exec) = live.fork(ForkTarget::MainOutput, prepare).expect("forks");
     publish(&controls, [at(0, G)]);
     block(&mut fork_exec, 512, rolling(0));
     assert_eq!(seen.lock().unwrap()[..], [(0, C), (0, C_MAJOR)]);

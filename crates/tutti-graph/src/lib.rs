@@ -722,7 +722,7 @@ pub use event_tap::{EventTapOptions, EventTapReader, EventTapWriter, TapEvent};
 pub use exec::{DEFAULT_EVENT_CAPACITY, Executor, FADE_CAPACITY, MainOutputFade, QUEUE_CAPACITY};
 pub use fade::Fade;
 pub use fork::{
-    ForkBuild, ForkByClone, ForkCause, ForkError, ForkFault, ForkFaultKind, ForkHealth, ForkMode,
+    ForkBuild, ForkByClone, ForkCause, ForkError, ForkFault, ForkFaultKind, ForkHealth,
     ForkRemains, ForkSource, ForkTarget, Forked, PendingFork, Unforkable,
 };
 pub use lane::{control_in, fade_gains, fade_in, ramp_in};

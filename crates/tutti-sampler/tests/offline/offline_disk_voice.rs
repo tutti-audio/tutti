@@ -1,7 +1,7 @@
 //! A disk voice forked for an offline render plays its file itself.
 //!
 //! A fork (the node's fork source, as a graph fork takes it:
-//! `ForkMode::Offline`) cannot read the streamer's ring: the live audio thread
+//! `RenderMode::Offline`) cannot read the streamer's ring: the live audio thread
 //! is its one consumer. So it reads the file the streamer's record names, on
 //! demand, as `offline_read` does, on the render's transport from each
 //! block's `Env`. These tests pin what it plays: the file's own samples from
@@ -22,7 +22,9 @@ use std::path::Path;
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 
-use tutti_graph::{Env, ForkHealth, ForkMode, IntoNode, Node, Prepare, TransportChanges, contract};
+use tutti_graph::{
+    Env, ForkHealth, IntoNode, Node, Prepare, RenderMode, TransportChanges, contract,
+};
 use tutti_music::{FrameClock, LoopRange};
 use tutti_platform::Asset;
 use tutti_sampler::testing::wait_for_open;
@@ -152,11 +154,11 @@ impl Fork {
     }
 }
 
-/// Fork `node` for an offline render (`ForkMode::Offline`, the export's), not
+/// Fork `node` for an offline render (`RenderMode::Offline`, the export's), not
 /// yet prepared.
 fn fork_unprepared(node: impl IntoNode) -> Fork {
     let source = node.into_parts().fork.expect("forkable");
-    let forked = source.fork(ForkMode::Offline).expect("forks");
+    let forked = source.fork(RenderMode::Offline).expect("forks");
     Fork {
         node: forked.node,
         health: forked.health,

@@ -59,7 +59,7 @@ fn live_and_fork(node: impl IntoNode) -> (Box<dyn Node>, Box<dyn tutti_graph::Fo
 /// duplicate takes it, prepared at `rate`.
 fn fork_of(source: &dyn tutti_graph::ForkSource, rate: f64) -> Box<dyn Node> {
     let mut node = source
-        .fork(tutti_graph::ForkMode::Live)
+        .fork(tutti_graph::RenderMode::Realtime)
         .expect("a memory voice forks")
         .node;
     node.prepare(&Prepare::new(
@@ -273,7 +273,7 @@ fn a_pools_fork_shares_nothing_with_the_live_pool() {
         MaxBlock::of(Samples::new(64)),
     ));
     let mut fork = source
-        .fork(tutti_graph::ForkMode::Live)
+        .fork(tutti_graph::RenderMode::Realtime)
         .expect("a pool forks")
         .node;
     fork.prepare(&Prepare::new(
@@ -304,7 +304,7 @@ fn a_pools_fork_shares_nothing_with_the_live_pool() {
         );
     }
     assert!(
-        source.fork(tutti_graph::ForkMode::Live).is_err(),
+        source.fork(tutti_graph::RenderMode::Realtime).is_err(),
         "a pool whose handle queued a command has no copy of its voices"
     );
 }
@@ -1381,7 +1381,7 @@ fn a_voices_fork_keeps_its_window_and_reads_the_renders_transport() {
         play: Playback::default(),
     };
     let fork = voice
-        .fork_copy(tutti_graph::ForkMode::Live)
+        .fork_copy(tutti_graph::RenderMode::Realtime)
         .expect("a memory voice forks");
     match &fork.source {
         VoiceSource::Memory(s) => assert_eq!(s.window().map(|w| w.start), Some(Beat::new(2.0))),

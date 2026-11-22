@@ -277,7 +277,7 @@ fn a_stereo_file_is_unchanged() {
 /// live voice does.
 #[test]
 fn a_fork_places_the_file_as_the_live_voice_does() {
-    use tutti_graph::{ForkMode, IntoNode, Prepare};
+    use tutti_graph::{IntoNode, Prepare, RenderMode};
     use tutti_units::Samples;
     let (_dir, _streamer, reader) = stream(8, WAV_7_1);
     let voice = voice_of(reader);
@@ -286,7 +286,7 @@ fn a_fork_places_the_file_as_the_live_voice_does() {
         .into_parts()
         .fork
         .expect("forkable")
-        .fork(ForkMode::Offline)
+        .fork(RenderMode::Offline)
         .expect("forks");
     let mut node = forked.node;
     let prepare = Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples::new(BLOCK)))
@@ -461,13 +461,13 @@ fn render(node: &mut dyn tutti_graph::Node, clock: &MockTransport, n: usize) -> 
 
 /// Fork `voice` as an export does, not yet prepared.
 fn fork_unprepared(voice: &DiskVoice<f32>) -> Box<dyn tutti_graph::Node> {
-    use tutti_graph::{ForkMode, IntoNode};
+    use tutti_graph::{IntoNode, RenderMode};
     voice
         .clone()
         .into_parts()
         .fork
         .expect("forkable")
-        .fork(ForkMode::Offline)
+        .fork(RenderMode::Offline)
         .expect("forks")
         .node
 }
