@@ -795,6 +795,32 @@ fn mpe_translates_midi1_input_by_the_same_rules() {
     );
 }
 
+/// **A MIDI 1.0 Note On at velocity 0 is a Note Off** (M2-104 D.3.1: a MIDI 2.0 Note Off)
+/// and in the MPE mode ends its note on its member: the Note Off goes out on
+/// Ch2, which is then idle, so the next note takes the longest idle member,
+/// Ch3, and the one after that Ch2 again.
+/// Spec: m2-104/d.3.1#1
+#[test]
+fn mpe_releases_a_member_on_a_midi1_note_on_at_velocity_zero() {
+    let mut n = mpe(zone());
+    let on = |note: u8, velocity: u8| {
+        Message::Midi1(
+            A,
+            Voice1::NoteOn {
+                note: NoteNumber::of(note),
+                velocity: U7::of(velocity),
+            },
+        )
+    };
+    assert_eq!(feed(&mut n, on(60, 0x40)), [vec![0x91, 60, 0x40]]);
+    let off = feed(&mut n, on(60, 0));
+    assert_eq!(off.len(), 1);
+    assert_eq!(off[0][0], 0x81, "a Note Off on Ch2");
+    assert_eq!(off[0][1], 60);
+    assert_eq!(feed(&mut n, on(62, 0x40)), [vec![0x92, 62, 0x40]]);
+    assert_eq!(feed(&mut n, on(64, 0x40)), [vec![0x91, 64, 0x40]]);
+}
+
 fn mpe_avoiding() -> Midi1Translator {
     Midi1Translator::with_mode(TranslationMode {
         extremes: ExtremeValues::Avoided,

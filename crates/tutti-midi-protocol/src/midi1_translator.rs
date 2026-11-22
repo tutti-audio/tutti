@@ -46,8 +46,9 @@ mod members;
 /// mode a Note On takes the member idle longest, or shares the member that plays
 /// the fewest notes and was given a note longest ago when all play (M2-120
 /// section 3.6.1); a per-note message for a note that does not sound sends
-/// nothing, and every message that is not per-note goes on the zone's Manager Channel. A MIDI 1.0 message passes unchanged, except
-/// in the MPE mode, where it takes the rules of its MIDI 2.0 equivalent.
+/// nothing, and every message that is not per-note goes on the zone's Manager
+/// Channel. A MIDI 1.0 message passes unchanged, except in the MPE mode, where it
+/// takes the rules of its MIDI 2.0 equivalent.
 ///
 /// It holds no state of the receiver: a message's MIDI 1.0 sequence is the
 /// same whatever went before. It allocates nothing after construction and holds
@@ -85,9 +86,10 @@ impl Default for Midi1Translator {
 
 impl Midi1Translator {
     /// The most MIDI 1.0 messages one [`feed`](Self::feed) sends. An MPE Note
-    /// On sends one Note Off when it strikes its key again, then a centred Pitch Bend, Channel Pressure 0
-    /// and Control Change 74 at 0x40 for each its member's last note moved (only a member that plays no other note),
-    /// then the Note On. The Default Translation sends at most four, a
+    /// On sends one Note Off when it strikes its key again, then a centred Pitch
+    /// Bend, Channel Pressure 0 and Control Change 74 at 0x40 for each its
+    /// member's last note moved (only a member that plays no other note), then
+    /// the Note On. The Default Translation sends at most four, a
     /// controller's sequence (D.2.3).
     pub const MAX_MESSAGES: usize = 5;
 

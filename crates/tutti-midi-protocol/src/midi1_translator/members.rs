@@ -120,14 +120,15 @@ impl Members {
                         .filter(|c| load(c) == 0)
                         .min_by_key(|c| Reverse(tick.wrapping_sub(channels[c.index()].released)));
                     idle.unwrap_or_else(|| {
-                        zone.member_channels()
-                            .min_by_key(|c| {
-                                (
-                                    load(c),
-                                    Reverse(tick.wrapping_sub(channels[c.index()].started)),
-                                )
-                            })
-                            .unwrap_or(zone.first_member())
+                        let key = |c: &MidiChannel| {
+                            (
+                                load(c),
+                                Reverse(tick.wrapping_sub(channels[c.index()].started)),
+                            )
+                        };
+                        zone.member_channels().fold(zone.first_member(), |best, c| {
+                            if key(&c) < key(&best) { c } else { best }
+                        })
                     })
                 });
                 let slot = &mut channels[member.index()];
