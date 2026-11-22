@@ -48,7 +48,7 @@
 //! let streams = tutti_platform::Executor::new();
 //! // Open a device first: it reports the rate the graph must be built at.
 //! let mut audio_engine = AudioEngine::new(&streams, None)?;
-//! let sample_rate = audio_engine.sample_rate();
+//! let sample_rate = audio_engine.stream().sample_rate();
 //!
 //! // The graph: an editor on the control thread, its executor for the audio
 //! // thread. Edits are `commit`ted across.
@@ -143,11 +143,6 @@ pub use output::{AudioEngine, OutputConfig, Resolved};
 pub use poller::{DevicePoller, PollInterval, PollIntervalTooShort};
 pub use roster::{DeviceChange, DeviceDirection, DeviceId, DeviceRoster, Snapshot, SnapshotSource};
 pub use supported::SupportedConfig;
-
-// Re-exported because this crate's public surface already names cpal types
-// (cpal errors inside `DeviceError`), so a consumer needs the vocabulary and should
-// not have to pin a matching cpal version of its own.
-pub use cpal;
 
 #[cfg(feature = "capture")]
 pub use mic::{MONITOR_RING, MicConfig, MicIn};

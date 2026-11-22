@@ -87,7 +87,7 @@ fn starting_a_running_engine_is_an_error() {
     engine
         .start_with(Arc::clone(&state), first)
         .expect("starts");
-    assert!(engine.is_running() && first_stream.is_open());
+    assert!(engine.stream().is_running() && first_stream.is_open());
 
     let (second, second_stream) = ManualStreamDriver::new();
     let err = engine

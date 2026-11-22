@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::ramp::LastGood;
+use crate::last_good::LastGood;
 use tutti_buffers::{ChannelLayout, Float, Wave};
 use tutti_dsp::{GrainSettings, Granular, MaxGrains};
 use tutti_graph::{
@@ -64,7 +64,7 @@ use tutti_units::{Cents, Hz, Normalized, Samples, Seconds, Tail, Unit, UnitParam
 /// assert!(out[0].iter().any(|&x| x > 0.4));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct GranularNode<F: Float> {
     layout: ChannelLayout,
     source: Arc<Wave<F>>,
@@ -248,10 +248,7 @@ impl<F: Float> GranularNode<F> {
             driven: ParamInput<'_, F>,
             good: &mut LastGood<f64>,
         ) -> U {
-            let raw = driven
-                .last_frame()
-                .map_or_else(|| cell.load().to_raw(), Into::into);
-            U::from_raw(good.read(raw))
+            U::from_raw(good.block(driven.last_frame(), cell.load().to_raw()))
         }
         let density = value(
             &self.density,
@@ -288,25 +285,6 @@ impl<F: Float> GranularNode<F> {
             .rate(rate)
             .position_jitter(position_jitter)
             .timing_jitter(timing_jitter)
-    }
-}
-
-/// Shares the cells (the template [`tutti_graph::param_parts`] forks from).
-impl<F: Float> Clone for GranularNode<F> {
-    fn clone(&self) -> Self {
-        Self {
-            layout: self.layout,
-            source: Arc::clone(&self.source),
-            max_grains: self.max_grains,
-            seed: self.seed,
-            density: self.density.handle(),
-            rate: self.rate.handle(),
-            length: self.length.handle(),
-            jitter: [self.jitter[0].handle(), self.jitter[1].handle()],
-            position: self.position.handle(),
-            good: self.good,
-            cloud: self.cloud.clone(),
-        }
     }
 }
 
