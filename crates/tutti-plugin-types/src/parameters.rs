@@ -219,6 +219,7 @@ bitflags! {
 /// ```
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "ParameterInfoWire"))]
 pub struct ParameterInfo {
     /// How this parameter is addressed: the plugin's handle for VST3, CLAP and
     /// AU, its position for VST2. Opaque either way; see [`ParamId`].
@@ -275,12 +276,71 @@ pub struct ParameterInfo {
     /// The plugin marks this parameter as one of its headline controls (AU's
     /// `ParametersForOverview`). `false` is both "not marked" and "the format
     /// has no such list": VST3 and CLAP say nothing of it.
-    #[cfg_attr(feature = "serde", serde(default))]
     overview: bool,
     /// How the plain value follows from the normalized position, as the format
     /// declares it. Read through [`plain_map`](Self::plain_map).
-    #[cfg_attr(feature = "serde", serde(default))]
     plain_map: Option<PlainMap>,
+}
+
+/// What a [`ParameterInfo`] is read from: its fields as the document holds
+/// them, before the conversion checks them.
+#[cfg(feature = "serde")]
+#[derive(Deserialize)]
+struct ParameterInfoWire {
+    pub id: ParamId,
+    pub name: String,
+    pub unit: String,
+    pub range: PluginParamRange,
+    pub steps: ParamSteps,
+    pub flags: ParamFlags,
+    pub known: ParamFlags,
+    pub group: String,
+    pub measures: Option<ParamUnit>,
+    pub role: Option<ControlRole>,
+    #[serde(default)]
+    pub overview: bool,
+    #[serde(default)]
+    pub plain_map: Option<PlainMap>,
+}
+
+/// A document's parameter that breaks one of [`ParameterInfo`]'s invariants.
+#[cfg(feature = "serde")]
+#[derive(Debug, thiserror::Error)]
+enum ParameterInfoInvalid {
+    /// A flag is set that the `known` mask never reported.
+    #[error("a flag is set outside the `known` mask")]
+    FlagOutsideKnown,
+    /// `measures` names a unit the declared range does not fit.
+    #[error("`measures` names a unit the declared range does not fit")]
+    MeasuresOutsideRange,
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<ParameterInfoWire> for ParameterInfo {
+    type Error = ParameterInfoInvalid;
+
+    fn try_from(w: ParameterInfoWire) -> Result<Self, Self::Error> {
+        if !w.known.contains(w.flags) {
+            return Err(ParameterInfoInvalid::FlagOutsideKnown);
+        }
+        if w.measures.is_some_and(|unit| !unit.fits(&w.range)) {
+            return Err(ParameterInfoInvalid::MeasuresOutsideRange);
+        }
+        Ok(Self {
+            id: w.id,
+            name: w.name,
+            unit: w.unit,
+            range: w.range,
+            steps: w.steps,
+            flags: w.flags,
+            known: w.known,
+            group: w.group,
+            measures: w.measures,
+            role: w.role,
+            overview: w.overview,
+            plain_map: w.plain_map,
+        })
+    }
 }
 
 impl ParameterInfo {
@@ -327,7 +387,8 @@ impl ParameterInfo {
 
     /// Sets what the number measures, if the declared [`range`](Self::range)
     /// fits `unit` ([`ParamUnit::fits`]); a unit the range does not fit leaves
-    /// [`measures`](Self::measures) `None`. Call it after the range is set.
+    /// [`measures`](Self::measures) `None`, and so does a later range it does
+    /// not fit.
     #[must_use]
     pub fn with_measures(mut self, unit: Option<ParamUnit>) -> Self {
         self.measures = unit.filter(|u| u.fits(&self.range));
@@ -463,14 +524,14 @@ impl ParameterInfo {
     /// Sets the range exactly as a format host built it.
     #[must_use]
     pub fn with_range(mut self, range: PluginParamRange) -> Self {
-        self.range = range;
+        self.set_range(range);
         self
     }
 
     /// Sets a declared plain range, in the unit [`unit`](Self::unit) names.
     #[must_use]
     pub fn with_plain_range(mut self, min: f64, max: f64, default: f64) -> Self {
-        self.range = PluginParamRange::Plain { min, max, default };
+        self.set_range(PluginParamRange::Plain { min, max, default });
         self
     }
 
@@ -478,8 +539,15 @@ impl ParameterInfo {
     /// that declared no plain range.
     #[must_use]
     pub fn with_normalized_default(mut self, default: f64) -> Self {
-        self.range = PluginParamRange::Normalized { default };
+        self.set_range(PluginParamRange::Normalized { default });
         self
+    }
+
+    /// Replaces the range, dropping a [`measures`](Self::measures) unit the new
+    /// range does not fit: the invariant the deserializer checks.
+    fn set_range(&mut self, range: PluginParamRange) {
+        self.range = range;
+        self.measures = self.measures.filter(|u| u.fits(&self.range));
     }
 
     /// Sets the step information.
@@ -929,5 +997,41 @@ mod measures_serde_tests {
             r#""group": "Filter", "role": "Nope""#,
         );
         assert!(serde_json::from_str::<ParameterInfo>(&json).is_err());
+    }
+
+    /// A document that sets a flag its `known` mask never reported is refused:
+    /// the flag would read as a reported value nobody reported.
+    #[test]
+    fn a_flag_outside_the_known_mask_is_refused() {
+        let json = OLD_JSON.replace(r#""known": "AUTOMATABLE""#, r#""known": """#);
+        assert!(serde_json::from_str::<ParameterInfo>(&json).is_err());
+    }
+
+    /// A document whose `measures` unit its range does not fit is refused:
+    /// Hertz is non-negative, and this range starts at -1.
+    #[test]
+    fn a_measures_unit_the_range_does_not_fit_is_refused() {
+        let with = |min: &str| {
+            OLD_JSON.replace("20.0", min).replace(
+                r#""group": "Filter""#,
+                r#""group": "Filter", "measures": "Hertz""#,
+            )
+        };
+        assert!(serde_json::from_str::<ParameterInfo>(&with("-1.0")).is_err());
+        assert!(serde_json::from_str::<ParameterInfo>(&with("20.0")).is_ok());
+    }
+
+    /// No builder order makes a document the deserializer refuses: a range set
+    /// after the unit, which the unit does not fit, drops the unit.
+    #[test]
+    fn a_range_set_after_a_unit_it_does_not_fit_drops_the_unit() {
+        let p = ParameterInfo::new(ParamId::new(4), "Cutoff")
+            .with_plain_range(20.0, 20_000.0, 1_000.0)
+            .with_measures(Some(ParamUnit::Hertz))
+            .with_plain_range(-1.0, 1.0, 0.0);
+        assert_eq!(p.measures(), None);
+        let json = serde_json::to_string(&p).expect("serializes");
+        let back: ParameterInfo = serde_json::from_str(&json).expect("what was built reads back");
+        assert_eq!(back.measures(), None);
     }
 }

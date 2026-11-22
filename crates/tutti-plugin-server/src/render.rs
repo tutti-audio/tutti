@@ -65,6 +65,8 @@ use crate::main_loop::Bell;
 use crate::served::Render;
 use crate::ties::{Notify, Patience, Ties, ties};
 use crate::transport::AudioTransport;
+#[cfg(test)]
+use tutti_plugin_types::fake::{at_frame, unit_value};
 
 /// How many commands may be queued to the render thread. A load is a handful;
 /// the queue is sized so the handshake, which runs before the thread does,
@@ -1265,7 +1267,7 @@ mod tests {
 
     fn changes_of(value: f64) -> ParameterChanges {
         let mut changes = ParameterChanges::reserved(1, 1);
-        assert!(changes.add_change(tutti_units::ParamId::new(1), 0, value));
+        assert!(changes.add_change(tutti_units::ParamId::new(1), at_frame(0), unit_value(value)));
         changes
     }
 

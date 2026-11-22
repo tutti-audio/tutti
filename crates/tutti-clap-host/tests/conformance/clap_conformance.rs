@@ -35,6 +35,7 @@ use tutti_clap_host::{
 // host dlopens the cdylib, the test reads the capture through this type.
 use tutti_clap_test_plugin::ProcessCapture;
 use tutti_graph::Offset;
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_units::Samples;
 
 /// A block long enough for every offset these tests use. The test that sends
@@ -213,8 +214,8 @@ fn host_delivers_param_points_with_offsets() {
     let mut params = ParameterChanges::reserved(1, 2);
     // Two points on one param, again out of order to confirm sorting + that
     // value/offset survive the trip across the FFI.
-    params.add_change(REAL_PARAM_ID, 192, 0.75);
-    params.add_change(REAL_PARAM_ID, 64, 0.25);
+    params.add_change(REAL_PARAM_ID, at_frame(192), unit_value(0.75));
+    params.add_change(REAL_PARAM_ID, at_frame(64), unit_value(0.25));
     let ctx = ClapProcessContext {
         params: Some(&params),
         ..Default::default()
@@ -246,20 +247,17 @@ fn host_delivers_param_points_with_offsets() {
 /// plugin with a `time` outside `0..frames_count`.
 ///
 /// `header.time` is a sample index the plugin uses to split the block, so an
-/// out-of-range value is an out-of-bounds access *inside the plugin*. Two ways
-/// a host can produce one:
-/// - a NEGATIVE automation `sample_offset` (`i32`) cast bare to `u32`, which
-///   turned -1 into 4_294_967_295;
-/// - an offset simply past the end of the block, forwarded verbatim.
+/// out-of-range value is an out-of-bounds access *inside the plugin*. A host
+/// can produce one with an offset simply past the end of the block, forwarded
+/// verbatim.
 #[test]
 fn host_never_delivers_an_event_time_outside_the_block() {
     let mut inst = load_plugin();
     const FRAMES: u32 = 128;
 
-    let mut params = ParameterChanges::reserved(1, 3);
-    params.add_change(REAL_PARAM_ID, -1, 0.5); // negative → must not wrap
-    params.add_change(REAL_PARAM_ID, 100_000, 0.9); // past the block → must clamp
-    params.add_change(REAL_PARAM_ID, 64, 0.25); // in range → untouched
+    let mut params = ParameterChanges::reserved(1, 2);
+    params.add_change(REAL_PARAM_ID, at_frame(100_000), unit_value(0.9)); // past the block → must clamp
+    params.add_change(REAL_PARAM_ID, at_frame(64), unit_value(0.25)); // in range → untouched
     let midi = [(at(9_999), midi::note_on(MidiChannel::FIRST, 60, 0x8000))];
     let ctx = ClapProcessContext {
         midi: &midi,
@@ -270,7 +268,7 @@ fn host_never_delivers_an_event_time_outside_the_block() {
 
     // Clamp, don't drop: every event still reaches the plugin. Dropping a
     // note-on / param change would trade an OOB bug for a stuck-state bug.
-    assert_eq!(cap.event_count, 4, "no event may be silently dropped");
+    assert_eq!(cap.event_count, 3, "no event may be silently dropped");
 
     for e in &cap.events[..cap.event_count as usize] {
         assert!(
@@ -281,12 +279,12 @@ fn host_never_delivers_an_event_time_outside_the_block() {
         );
     }
 
-    let times: Vec<u32> = cap.events[..4].iter().map(|e| e.time).collect();
+    let times: Vec<u32> = cap.events[..3].iter().map(|e| e.time).collect();
     assert_eq!(
         times,
-        vec![0, 64, 127, 127],
-        "negative saturates to 0, in-range is untouched, past-the-end lands on \
-         the last valid sample, and the list stays sorted"
+        vec![64, 127, 127],
+        "in-range is untouched, past-the-end lands on the last valid sample, \
+         and the list stays sorted"
     );
 }
 

@@ -405,23 +405,6 @@ fn apply_function_roles(
         .collect()
 }
 
-/// What a VST3 parameter's declaration says it measures.
-///
-/// A list (`kIsList`) with at least one step is a [`Choice`](ParamUnit::Choice);
-/// otherwise a step count of 1 is a [`Toggle`](ParamUnit::Toggle) (a two-entry
-/// list is still a choice, because it names its options); otherwise the `units`
-/// string, by [`ParamUnit::from_label`]'s closed list. The range check
-/// ([`ParameterInfo::with_measures`]) is the caller's.
-fn declared_measures(units: &str, is_list: bool, step_count: i32) -> Option<ParamUnit> {
-    if is_list && step_count >= 1 {
-        Some(ParamUnit::Choice)
-    } else if step_count == 1 {
-        Some(ParamUnit::Toggle)
-    } else {
-        ParamUnit::from_label(units)
-    }
-}
-
 /// Builds a shared [`ParameterInfo`] from a VST3 parameter descriptor and the
 /// plain range probed from the plugin's controller.
 ///
@@ -471,7 +454,10 @@ pub(super) fn build_param_info(
         _ => ParamSteps::Unknown,
     };
 
-    let measures = declared_measures(&info.units_string(), info.is_list(), info.step_count());
+    // What the `units` string measures, by [`ParamUnit::from_label`]'s closed
+    // list; the list and toggle shapes are `steps`. The range check
+    // ([`ParameterInfo::with_measures`]) is the caller's.
+    let measures = ParamUnit::from_label(&info.units_string());
 
     // VST3 `ParamID` is opaque and plugin-chosen, not a list position; see the
     // ParamID-vs-index note above.
@@ -616,15 +602,10 @@ mod measures_tests {
 
     /// Builds the `measures` a plugin's declaration ends in, as
     /// `build_param_info` does: the mapping, then the range check.
-    fn measures(
-        units: &str,
-        is_list: bool,
-        steps: i32,
-        range: PluginParamRange,
-    ) -> Option<ParamUnit> {
+    fn measures(units: &str, range: PluginParamRange) -> Option<ParamUnit> {
         ParameterInfo::new(ParamId::new(1), "p")
             .with_range(range)
-            .with_measures(declared_measures(units, is_list, steps))
+            .with_measures(ParamUnit::from_label(units))
             .measures()
     }
 
@@ -641,14 +622,10 @@ mod measures_tests {
             ("st", ParamUnit::Semitones),
             ("BPM", ParamUnit::Bpm),
         ] {
-            assert_eq!(
-                measures(label, false, 0, plain(1.0, 100.0)),
-                Some(unit),
-                "{label:?}"
-            );
+            assert_eq!(measures(label, plain(1.0, 100.0)), Some(unit), "{label:?}");
         }
         assert_eq!(
-            measures("  Hz ", false, 0, plain(20.0, 20_000.0)),
+            measures("  Hz ", plain(20.0, 20_000.0)),
             Some(ParamUnit::Hertz),
             "ASCII spaces are trimmed"
         );
@@ -658,11 +635,7 @@ mod measures_tests {
     #[test]
     fn near_misses_are_not_units() {
         for label in ["kHz", "Db", "dB(A)", "semitones", "", "\u{a0}Hz", "hz"] {
-            assert_eq!(
-                measures(label, false, 0, plain(0.0, 100.0)),
-                None,
-                "{label:?}"
-            );
+            assert_eq!(measures(label, plain(0.0, 100.0)), None, "{label:?}");
         }
     }
 
@@ -670,27 +643,10 @@ mod measures_tests {
     /// VST3 declares only normalized values, so most plugins get `None` here.
     #[test]
     fn a_unit_without_a_range_that_fits_is_none() {
-        let hz = |range| measures("Hz", false, 0, range);
+        let hz = |range| measures("Hz", range);
         assert_eq!(hz(PluginParamRange::Normalized { default: 0.0 }), None);
         assert_eq!(hz(plain(-5.0, 100.0)), None);
-        assert_eq!(measures("%", false, 0, plain(0.0, 1000.0)), None);
-    }
-
-    /// A list flag with a step count is a `Choice`; a step count of 1 is a
-    /// `Toggle`; both over a normalized range, which is all VST3 declares.
-    #[test]
-    fn a_list_is_a_choice_and_one_step_is_a_toggle() {
-        let n = || PluginParamRange::Normalized { default: 0.0 };
-        assert_eq!(measures("", true, 4, n()), Some(ParamUnit::Choice));
-        assert_eq!(
-            measures("", true, 1, n()),
-            Some(ParamUnit::Choice),
-            "a two-entry list names its options"
-        );
-        assert_eq!(measures("", false, 1, n()), Some(ParamUnit::Toggle));
-        assert_eq!(measures("", false, 0, n()), None, "continuous, no unit");
-        assert_eq!(measures("", true, 0, n()), None, "a list with no steps");
-        assert_eq!(measures("", false, 5, n()), None, "stepped, not a list");
+        assert_eq!(measures("%", plain(0.0, 1000.0)), None);
     }
 
     /// Each function a plugin answers for gives its parameter that function's

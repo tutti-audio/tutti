@@ -9,6 +9,8 @@
 use std::sync::Arc;
 use tutti_plugin_host::{DeliveryCounters, ParamDelivery};
 use tutti_plugin_types::ParameterQueue;
+#[cfg(test)]
+use tutti_plugin_types::fake::at_frame;
 use tutti_units::ParamId;
 
 #[cfg(feature = "clap")]
@@ -44,9 +46,9 @@ fn lane_chunk(d: &mut ParamDelivery, latest: &mut [f64], phase: usize) {
         for id in 0..lanes {
             let v = ((k + id as usize + 3 * phase) % 7 + 1) as f64 / 8.0;
             if grid {
-                d.grid_point(op(id), f, v);
+                d.grid_point(op(id), at_frame(f), v);
             } else {
-                d.point(op(id), f, v);
+                d.point(op(id), at_frame(f), v);
             }
             latest[id as usize] = v;
         }
@@ -132,9 +134,9 @@ fn a_buffer_of_the_room_before_a_re_prepare_is_dropped_not_reused() {
                 let v = ((f as usize + id as usize + phase) % 7 + 1) as f64 / 8.0;
                 let address = ParamId::new(id);
                 if f % 32 == 0 {
-                    d.grid_point(address, f, v);
+                    d.grid_point(address, at_frame(f), v);
                 } else {
-                    d.point(address, f, v);
+                    d.point(address, at_frame(f), v);
                 }
             }
         }

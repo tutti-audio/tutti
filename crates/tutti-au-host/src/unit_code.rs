@@ -48,10 +48,11 @@ mod code {
 
 /// What the unit code `raw` (`AudioUnitParameterInfo::unit`) measures.
 ///
-/// `Some` for 18 of the 27 codes: hertz, decibels, seconds, milliseconds,
+/// `Some` for 16 of the 27 codes: hertz, decibels, seconds, milliseconds,
 /// percent, cents, relative semitones, octaves, BPM, beats, degrees, pan,
-/// linear gain, rate, MIDI note number and MIDI controller, and `Indexed`
-/// (`Choice`) and `Boolean` (`Toggle`). Generic, custom, equal-power
+/// linear gain, rate, MIDI note number and MIDI controller. `Indexed` and
+/// `Boolean` are `None`: [`ParamSteps`](tutti_plugin_types::ParamSteps) carries
+/// them. Generic, custom, equal-power
 /// crossfade, mixer fader curve, absolute cents, meters (a distance), phase,
 /// ratio and sample frames are `None`: their algebra is not one of ours, or the
 /// code does not say enough. An unknown code is `None`.
@@ -61,8 +62,6 @@ mod code {
 #[must_use]
 pub fn unit_measures(raw: u32) -> Option<ParamUnit> {
     Some(match raw {
-        code::INDEXED => ParamUnit::Choice,
-        code::BOOLEAN => ParamUnit::Toggle,
         code::PERCENT => ParamUnit::Percent,
         code::SECONDS => ParamUnit::Seconds,
         code::RATE => ParamUnit::PlaybackRate,
@@ -79,7 +78,9 @@ pub fn unit_measures(raw: u32) -> Option<ParamUnit> {
         code::BPM => ParamUnit::Bpm,
         code::BEATS => ParamUnit::Beats,
         code::MILLISECONDS => ParamUnit::Milliseconds,
-        code::GENERIC
+        code::INDEXED
+        | code::BOOLEAN
+        | code::GENERIC
         | code::SAMPLE_FRAMES
         | code::PHASE
         | code::EQUAL_POWER_CROSSFADE
@@ -98,13 +99,13 @@ mod tests {
     use ParamUnit as U;
 
     /// Every one of the 27 codes, by its value in Apple's header. `None` rows
-    /// are the nine whose algebra is not ours.
+    /// are the eleven whose algebra is not ours.
     #[test]
     fn every_code_maps_per_the_table() {
         let table: [(u32, Option<ParamUnit>); 27] = [
             (0, None),                     // Generic
-            (1, Some(U::Choice)),          // Indexed
-            (2, Some(U::Toggle)),          // Boolean
+            (1, None),                     // Indexed
+            (2, None),                     // Boolean
             (3, Some(U::Percent)),         // Percent
             (4, Some(U::Seconds)),         // Seconds
             (5, None),                     // SampleFrames
@@ -133,7 +134,7 @@ mod tests {
         for (raw, want) in table {
             assert_eq!(unit_measures(raw), want, "code {raw}");
         }
-        assert_eq!(table.iter().filter(|(_, w)| w.is_some()).count(), 18);
+        assert_eq!(table.iter().filter(|(_, w)| w.is_some()).count(), 16);
     }
 
     /// A code outside the enumeration is not a unit.
