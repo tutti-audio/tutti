@@ -1,5 +1,6 @@
 use super::*;
 use tutti_buffers::{MaxBlock, Planes};
+use tutti_graph::ParamNode;
 use tutti_graph::contract::{drive, prepared};
 use tutti_units::{Gain, UnitParam};
 
@@ -65,30 +66,30 @@ fn reset_keeps_the_authored_placement() {
         Azimuth::new(45.0),
         Elevation::new(15.0),
     );
-    panner.spread.store(Spread::new(0.3));
-    panner.width.store(StereoWidth::new(1.5));
+    panner.cells.spread.store(Spread::new(0.3));
+    panner.cells.width.store(StereoWidth::new(1.5));
 
     Node::reset(&mut panner);
 
     assert!(
-        (panner.azimuth.load().get() - 45.0).abs() < 0.001,
+        (panner.cells.azimuth.load().get() - 45.0).abs() < 0.001,
         "reset moved the bearing to {}",
-        panner.azimuth.load().get()
+        panner.cells.azimuth.load().get()
     );
     assert!(
-        (panner.elevation.load().get() - 15.0).abs() < 0.001,
+        (panner.cells.elevation.load().get() - 15.0).abs() < 0.001,
         "reset moved the height to {}",
-        panner.elevation.load().get()
+        panner.cells.elevation.load().get()
     );
     assert!(
-        (panner.spread.load().get() - 0.3).abs() < 0.001,
+        (panner.cells.spread.load().get() - 0.3).abs() < 0.001,
         "reset changed the spread to {}",
-        panner.spread.load().get()
+        panner.cells.spread.load().get()
     );
     assert!(
-        (panner.width.load().get() - 1.5).abs() < 0.001,
+        (panner.cells.width.load().get() - 1.5).abs() < 0.001,
         "reset changed the width to {}",
-        panner.width.load().get()
+        panner.cells.width.load().get()
     );
 }
 
@@ -193,14 +194,14 @@ fn reset_on_a_clone_does_not_move_the_original() {
     Node::reset(&mut cloned);
 
     assert!(
-        (panner.azimuth.load().get() - (-60.0)).abs() < 0.001,
+        (panner.cells.azimuth.load().get() - (-60.0)).abs() < 0.001,
         "resetting the clone moved the original to {}",
-        panner.azimuth.load().get()
+        panner.cells.azimuth.load().get()
     );
     assert!(
-        (panner.elevation.load().get() - 20.0).abs() < 0.001,
+        (panner.cells.elevation.load().get() - 20.0).abs() < 0.001,
         "resetting the clone moved the original to {}",
-        panner.elevation.load().get()
+        panner.cells.elevation.load().get()
     );
 }
 
@@ -239,14 +240,14 @@ fn vbap_clone_shares_atomics() {
         Elevation::new(45.0),
     );
     assert!(
-        (cloned.azimuth.load().get() - 90.0).abs() < 0.001,
+        (cloned.cells.azimuth.load().get() - 90.0).abs() < 0.001,
         "the clone did not see the original's bearing: {}",
-        cloned.azimuth.load().get()
+        cloned.cells.azimuth.load().get()
     );
     assert!(
-        (cloned.elevation.load().get() - 45.0).abs() < 0.001,
+        (cloned.cells.elevation.load().get() - 45.0).abs() < 0.001,
         "the clone did not see the original's height: {}",
-        cloned.elevation.load().get()
+        cloned.cells.elevation.load().get()
     );
 
     // And vice versa.
@@ -256,43 +257,43 @@ fn vbap_clone_shares_atomics() {
         Elevation::new(10.0),
     );
     assert!(
-        (panner.azimuth.load().get() - (-60.0)).abs() < 0.001,
+        (panner.cells.azimuth.load().get() - (-60.0)).abs() < 0.001,
         "the original did not see the clone's bearing: {}",
-        panner.azimuth.load().get()
+        panner.cells.azimuth.load().get()
     );
     assert!(
-        (panner.elevation.load().get() - 10.0).abs() < 0.001,
+        (panner.cells.elevation.load().get() - 10.0).abs() < 0.001,
         "the original did not see the clone's height: {}",
-        panner.elevation.load().get()
+        panner.cells.elevation.load().get()
     );
 
     // -- spread: its own cell.
-    panner.spread.store(Spread::new(0.3));
+    panner.cells.spread.store(Spread::new(0.3));
     assert!(
-        (cloned.spread.load().get() - 0.3).abs() < 0.001,
+        (cloned.cells.spread.load().get() - 0.3).abs() < 0.001,
         "the clone did not see the original's spread: {} -- a snapshotting \
          clone would freeze an offline render at the clone-time value",
-        cloned.spread.load().get()
+        cloned.cells.spread.load().get()
     );
-    cloned.spread.store(Spread::new(0.8));
+    cloned.cells.spread.store(Spread::new(0.8));
     assert!(
-        (panner.spread.load().get() - 0.8).abs() < 0.001,
+        (panner.cells.spread.load().get() - 0.8).abs() < 0.001,
         "the original did not see the clone's spread: {}",
-        panner.spread.load().get()
+        panner.cells.spread.load().get()
     );
 
     // -- width: its own cell too.
-    panner.width.store(StereoWidth::new(1.5));
+    panner.cells.width.store(StereoWidth::new(1.5));
     assert!(
-        (cloned.width.load().get() - 1.5).abs() < 0.001,
+        (cloned.cells.width.load().get() - 1.5).abs() < 0.001,
         "the clone did not see the original's width: {}",
-        cloned.width.load().get()
+        cloned.cells.width.load().get()
     );
-    cloned.width.store(StereoWidth::new(0.4));
+    cloned.cells.width.store(StereoWidth::new(0.4));
     assert!(
-        (panner.width.load().get() - 0.4).abs() < 0.001,
+        (panner.cells.width.load().get() - 0.4).abs() < 0.001,
         "the original did not see the clone's width: {}",
-        panner.width.load().get()
+        panner.cells.width.load().get()
     );
 }
 
@@ -343,22 +344,22 @@ fn a_non_finite_control_reads_as_unchanged() {
             };
             run(&mut node, 64);
             match which {
-                0 => node.azimuth.store(Azimuth::new(value)),
-                1 => node.elevation.store(Elevation::new(value)),
-                2 => node.spread.store(Spread::new(value)),
-                _ => node.width.store(StereoWidth::new(value)),
+                0 => node.cells.azimuth.store(Azimuth::new(value)),
+                1 => node.cells.elevation.store(Elevation::new(value)),
+                2 => node.cells.spread.store(Spread::new(value)),
+                _ => node.cells.width.store(StereoWidth::new(value)),
             }
             // Everything else moves in the same block.
             if which != 0 {
-                node.azimuth.store(Azimuth::new(-70.0));
+                node.cells.azimuth.store(Azimuth::new(-70.0));
             }
             if which != 2 {
-                node.spread.store(Spread::new(0.4));
+                node.cells.spread.store(Spread::new(0.4));
             }
             run(&mut node, 4_800);
             aim(&node.param_set(), Azimuth::new(10.0), Elevation::new(5.0));
-            node.spread.store(Spread::new(0.1));
-            node.width.store(StereoWidth::new(1.0));
+            node.cells.spread.store(Spread::new(0.1));
+            node.cells.width.store(StereoWidth::new(1.0));
             run(&mut node, 4_800);
             assert!(all_finite, "control {which} = {value} reached the output");
         }
@@ -424,10 +425,10 @@ fn a_channels_speaker_skips_the_lfe() {
 #[test]
 fn the_panner_declares_its_params() {
     let node = vbap::<f32>(tutti_buffers::Bed::Stereo);
-    node.azimuth.store(Azimuth::new(10.0));
-    node.elevation.store(Elevation::new(20.0));
-    node.spread.store(Spread::new(0.3));
-    node.width.store(StereoWidth::new(1.5));
+    node.cells.azimuth.store(Azimuth::new(10.0));
+    node.cells.elevation.store(Elevation::new(20.0));
+    node.cells.spread.store(Spread::new(0.3));
+    node.cells.width.store(StereoWidth::new(1.5));
     assert_eq!(
         node.shape().params.as_slice(),
         &[
@@ -514,7 +515,7 @@ fn a_signal_driven_bearing_crosses_the_seam_the_short_way() {
     let ones = [1.0f32; 64];
     let at = |bearing: f64| {
         let mut node = prep(vbap::<f32>(tutti_buffers::Bed::Quad));
-        node.azimuth.store(Azimuth::new(bearing));
+        node.cells.azimuth.store(Azimuth::new(bearing));
         Node::reset(&mut node);
         drive(
             &mut node,
@@ -537,7 +538,7 @@ fn a_signal_driven_bearing_crosses_the_seam_the_short_way() {
     );
 
     let mut node = prep(vbap::<f32>(tutti_buffers::Bed::Quad));
-    node.azimuth.store(Azimuth::new(170.0));
+    node.cells.azimuth.store(Azimuth::new(170.0));
     Node::reset(&mut node);
     let signal = [190.0f32; 64];
     let mut loudest_front = 0.0f32;
@@ -734,6 +735,6 @@ fn in_an_f64_graph_the_panner_is_linear_on_wide_signals() {
 
 /// A panner over `bed`.
 fn vbap<F: tutti_buffers::Float>(bed: tutti_buffers::Bed) -> crate::VbapPannerNode<F> {
-    crate::VbapPannerNode::try_from(crate::VbapPannerConfig::new(bed))
+    crate::VbapPannerNode::try_from(crate::VbapPannerConfig::new(bed.into()))
         .expect("a bed with speakers to pan between")
 }

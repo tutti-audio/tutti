@@ -61,7 +61,7 @@ an oscillator: a source that repeats one smooth wave forever.
 ```rust,ignore
 // An A at 440 Hz, a quarter of full scale.
 let sine = session.graph().add(OscillatorNode::from(
-    OscillatorConfig::new(OscillatorWave::Sine, Hz::new(440.0)).level(Amplitude::new(0.25)),
+    OscillatorConfig::new(OscillatorWave::Sine).frequency(Hz::new(440.0)).level(Amplitude::new(0.25)),
 ));
 ```
 
