@@ -273,6 +273,45 @@ impl Count for tutti_units::Resyncs {
     }
 }
 
+/// Audio blocks, as a [`Counter`] counts them.
+impl Count for tutti_units::Blocks {
+    type Words = [u64; 1];
+    #[inline]
+    fn to_words(self) -> [u64; 1] {
+        [self.get()]
+    }
+    #[inline]
+    fn from_words([count]: [u64; 1]) -> Self {
+        Self::new(count)
+    }
+}
+
+/// Transfer chunks, as a [`Counter`] counts them.
+impl Count for tutti_units::Chunks {
+    type Words = [u64; 1];
+    #[inline]
+    fn to_words(self) -> [u64; 1] {
+        [self.get()]
+    }
+    #[inline]
+    fn from_words([count]: [u64; 1]) -> Self {
+        Self::new(count)
+    }
+}
+
+/// Calls, as a [`Counter`] counts them.
+impl Count for tutti_units::Calls {
+    type Words = [u64; 1];
+    #[inline]
+    fn to_words(self) -> [u64; 1] {
+        [self.get()]
+    }
+    #[inline]
+    fn from_words([count]: [u64; 1]) -> Self {
+        Self::new(count)
+    }
+}
+
 /// One tally per count, in field order: a `Counter<Losses>` keeps `lost`,
 /// `evicted`, `refused` and `late` as four words, each saturating on its own,
 /// so a port's losses are one counter. A `Tally<Losses>` wraps per word

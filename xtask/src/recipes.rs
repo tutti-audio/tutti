@@ -31,6 +31,8 @@ pub(crate) enum Step {
     Gate(Gate),
     /// `conformance-inventory <format>`: rewrite an inventory from its spec source.
     ConformanceInventory(String),
+    /// `prune-building`: delete the building baseline's stale rows.
+    PruneBuilding,
     /// `conformance`: the dashboard and badges from per-OS JUnit files
     /// (`gates/conformance_site.rs`).
     Conformance {
@@ -78,6 +80,7 @@ impl Step {
             Step::WriteFile { path, .. } => format!("write {}", path.display()),
             Step::Gate(g) => g.display(),
             Step::ConformanceInventory(f) => format!("conformance-inventory {f}"),
+            Step::PruneBuilding => "prune-building".to_owned(),
             Step::Conformance { results, out } => format!(
                 "conformance: join {}/<os>.xml to the inventories, write {}/index.html, ../index.html and ../badges/*.json",
                 results.display(),
@@ -354,6 +357,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "conformance-inventory",
         "[clap|vst3|midi|sf2]",
         "regenerate an inventory's generated columns from the spec source (vst3: the vendored SDK; midi: TUTTI_MIDI_SPECS; sf2: TUTTI_SF2_SPEC)",
+    ),
+    (
+        "prune-building",
+        "",
+        "delete the rows of xtask/building-baseline.txt that name no violation; never adds one",
     ),
     (
         "check-range-types",
@@ -799,6 +807,7 @@ impl Planner<'_> {
                 let [f] = Self::params(name, args, ["clap"])?;
                 self.out.push(Step::ConformanceInventory(f));
             }
+            "prune-building" => self.out.push(Step::PruneBuilding),
             "check-submodule-pins" => self.out.push(Step::Gate(Gate::SubmodulePins)),
             "check-hosting" => self.out.push(Step::Gate(Gate::Hosting)),
             "check-paths" => self.out.push(Step::Gate(Gate::CanonicalPaths(args.to_vec()))),

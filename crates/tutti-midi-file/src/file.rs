@@ -1149,10 +1149,16 @@ impl Track {
     /// file of division `ticks_per_quarter`, in the track's order. The rule is
     /// [`MetricalView::timeline`]'s.
     pub fn timeline(&self, ticks_per_quarter: TicksPerQuarterNote) -> SmfTimeline {
+        self.timeline_by(|tick| tick.beats(ticks_per_quarter))
+    }
+
+    /// The track's events as the packets a clip plays, at the beats `beat_at`
+    /// gives their ticks, in the track's order.
+    fn timeline_by(&self, beat_at: impl Fn(Tick) -> Beat) -> SmfTimeline {
         SmfTimeline::of(
             self.events
                 .iter()
-                .map(|(tick, event)| (tick.beats(ticks_per_quarter), event)),
+                .map(|(tick, event)| (beat_at(*tick), event)),
         )
     }
 
@@ -1345,7 +1351,9 @@ impl Container {
 ///
 /// An SMF in SMPTE time ([`SmfDivision::Smpte`]) counts its ticks in fractions
 /// of a second and has no beat grid: [`timebase`](Self::timebase) says which
-/// a file is, and only the metrical views have beats, a tempo map and a clip.
+/// a file is, and only the metrical views have beats of their own, a tempo map
+/// and a clip; an SMPTE file's seconds are placed on beats over a tempo map the
+/// caller gives ([`SmpteView::timelines`]).
 ///
 /// ```
 /// use tutti_midi_file::{LeadTrack, Layout, Meta, MidiFile, SmfDivision, Tick, Track};
@@ -1891,7 +1899,8 @@ pub enum Timebase<'a> {
     Metrical(MetricalView<'a>),
     /// Ticks are fractions of a second and the tracks share one timeline: an
     /// SMF of format 0 or 1 with an [`SmfDivision::Smpte`] division. It has no
-    /// beat grid, so no tempo map, beats or clip.
+    /// beat grid, so its beats come from a tempo map the caller gives
+    /// ([`SmpteView::timelines`]).
     Smpte(SmpteView<'a>),
     /// Ticks are fractions of a quarter note and each track is an independent
     /// sequence with its own tempo map: an SMF of format 2, or above 2, with a
@@ -2260,6 +2269,19 @@ impl<'a> SmpteView<'a> {
         smpte_seconds(self.fps, self.ticks_per_frame, tick)
     }
 
+    /// Each track as the packets a clip plays, in track order, placed in beats
+    /// over `tempo`: an event at `s` seconds lands on
+    /// `tempo.beat_at_seconds(s)`, so a Set Tempo of the file moves nothing and
+    /// the map alone sets the beats. The rule is [`Track::timeline`]'s.
+    pub fn timelines<'t>(
+        self,
+        tempo: &'t TempoMap,
+    ) -> impl ExactSizeIterator<Item = SmfTimeline> + use<'a, 't> {
+        self.file.tracks.iter().map(move |track| {
+            track.timeline_by(|tick| tempo.beat_at_seconds(self.seconds_at(tick)))
+        })
+    }
+
     /// Every event of the file's one timeline as `(seconds, event)`, in
     /// order: the tracks merged by tick, ties in track order and then in the
     /// track's own order.
@@ -2346,6 +2368,13 @@ impl<'a> SmpteSequence<'a> {
     #[must_use]
     pub fn seconds_at(self, tick: Tick) -> Seconds {
         smpte_seconds(self.fps, self.ticks_per_frame, tick)
+    }
+
+    /// The sequence as the packets a clip plays, placed in beats over
+    /// `tempo` ([`SmpteView::timelines`]).
+    pub fn timeline(self, tempo: &TempoMap) -> SmfTimeline {
+        self.track
+            .timeline_by(|tick| tempo.beat_at_seconds(self.seconds_at(tick)))
     }
 
     /// The sequence's events as `(seconds, event)`, in the track's order.
