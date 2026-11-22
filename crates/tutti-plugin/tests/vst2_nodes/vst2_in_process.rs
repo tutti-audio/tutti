@@ -14,9 +14,9 @@
 use crate::param_list::ParamList as _;
 use crate::param_reads::ParamReads as _;
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 use tutti_fixtures::main_thread;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 use tutti_vst2_host::Vst2Loaded;
 
 use tutti_fixtures::midi;
@@ -42,7 +42,7 @@ fn n(v: f64) -> Normalized {
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock_recover()
+    PROBE_LOCK.lock()
 }
 
 /// Every `TUTTI_VST2_PROBE_*` key this file sets, cleared between loads so a

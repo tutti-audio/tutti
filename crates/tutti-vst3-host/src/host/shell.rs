@@ -62,7 +62,7 @@
 
 use std::sync::Arc;
 
-use parking_lot::Mutex;
+use tutti_rt::Mutex;
 
 use super::loaded::Vst3Loaded;
 

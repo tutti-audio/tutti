@@ -117,8 +117,8 @@ fn machine_control_sender_observe_is_allocation_free() {
 #[test]
 fn machine_control_follower_segments_are_allocation_free() {
     use tutti_midi_protocol::{
-        MMC_MAX_SEGMENTED, MmcCommand, MmcCommands, MmcSegmentError, MmcSegments, Recipient,
-        SysexDeviceId,
+        MMC_MAX_SEGMENTED, MmcCommand, MmcCommands, MmcSegmentCount, MmcSegmentError, MmcSegments,
+        Recipient, SysexDeviceId,
     };
     use tutti_midi_runtime::{MachineControlEvent, MachineControlFollower, SegmentFault};
     use tutti_ump::{MidiGroup, Sysex7Packets, Ump};
@@ -192,8 +192,8 @@ fn machine_control_follower_segments_are_allocation_free() {
         [
             string(MmcSegmentError::MissingFirst),
             string(MmcSegmentError::OutOfOrder {
-                expected: 1,
-                got: 0
+                expected: MmcSegmentCount::of(1),
+                got: MmcSegmentCount::of(0)
             }),
             string(MmcSegmentError::FirstInsideString),
             MachineControlEvent::Stop,

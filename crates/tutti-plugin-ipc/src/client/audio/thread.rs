@@ -668,6 +668,7 @@ mod tests {
     use tutti_fixtures::midi;
     use tutti_platform::join_within;
     use tutti_plugin_types::ResyncKind;
+    use tutti_rt::Mutex;
     use tutti_ump::MidiChannel;
     use tutti_units::Normalized;
     use tutti_units::ParamId;
@@ -730,7 +731,7 @@ mod tests {
     }
 
     fn silent_listener() -> ListenerSlot {
-        Arc::new(parking_lot::Mutex::new(None))
+        Arc::new(Mutex::new(None))
     }
 
     fn rig(executor: &Executor) -> Rig {
@@ -1008,12 +1009,12 @@ mod tests {
             (patience, patience, patience, patience);
         let lifecycle = Lifecycle::new(Arc::clone(&watch), short);
         let (release, held) = mpsc::channel::<()>();
-        let held = Arc::new(std::sync::Mutex::new(held));
+        let held = Arc::new(Mutex::new(held));
         let blocked = |name| {
             let held = Arc::clone(&held);
             tutti_fixtures::executor()
                 .spawn_dedicated(name, None, async move {
-                    let _ = held.lock().expect("the lock").recv();
+                    let _ = held.lock().recv();
                 })
                 .expect("the lane starts")
         };
@@ -1234,7 +1235,7 @@ mod tests {
     }
 
     /// Records the threads that wake it.
-    struct Recorder(std::sync::Mutex<Vec<std::thread::ThreadId>>);
+    struct Recorder(Mutex<Vec<std::thread::ThreadId>>);
 
     impl std::task::Wake for Recorder {
         fn wake(self: Arc<Self>) {
@@ -1242,7 +1243,7 @@ mod tests {
         }
 
         fn wake_by_ref(self: &Arc<Self>) {
-            self.0.lock().unwrap().push(std::thread::current().id());
+            self.0.lock().push(std::thread::current().id());
         }
     }
 
@@ -1278,7 +1279,7 @@ mod tests {
                 },
             ),
         );
-        let recorder = Arc::new(Recorder(std::sync::Mutex::new(Vec::new())));
+        let recorder = Arc::new(Recorder(Mutex::new(Vec::new())));
         let (polling_tx, polling_rx) = mpsc::channel();
         let poller = {
             let recorder = Arc::clone(&recorder);
@@ -1300,7 +1301,7 @@ mod tests {
         drop(audio_peer);
         poller.join().expect("the lane ended");
 
-        let woken_by = recorder.0.lock().unwrap().clone();
+        let woken_by = recorder.0.lock().clone();
         assert!(
             woken_by.is_empty(),
             "the lane or the thread that fed it woke a Waker: {} wakes, the lane's thread {polling:?}",
@@ -1316,10 +1317,10 @@ mod tests {
         let channels = Channels::new(SampleRate::SR_48K, Arc::default())
             .expect("the channels")
             .0;
-        let heard = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let heard = Arc::new(Mutex::new(Vec::new()));
         let listener: ListenerSlot = {
             let heard = Arc::clone(&heard);
-            Arc::new(parking_lot::Mutex::new(Some(Arc::new(move |ev| {
+            Arc::new(Mutex::new(Some(Arc::new(move |ev| {
                 heard.lock().push(format!("{ev:?}"));
             }))))
         };

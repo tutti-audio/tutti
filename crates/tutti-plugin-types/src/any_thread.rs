@@ -205,7 +205,7 @@ pub trait Health: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
+    use tutti_rt::Mutex;
 
     use super::*;
     use crate::{Answer, AutomationMode, ParamFlags, StateError, bypass_parameter};
@@ -224,7 +224,7 @@ mod tests {
             Answer::ready(None)
         }
         fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
-            self.written.lock().unwrap().push((id, value.get()));
+            self.written.lock().push((id, value.get()));
             Ok(())
         }
         fn bypassed(&self, _: OwnBypass) -> Option<bool> {
@@ -274,7 +274,7 @@ mod tests {
         assert_eq!(plugin.set_bypassed(site, true), BypassWrite::Sent);
         assert_eq!(plugin.set_bypassed(site, false), BypassWrite::Sent);
         assert_eq!(
-            *plugin.written.lock().unwrap(),
+            *plugin.written.lock(),
             [(ParamId::new(9), 1.0), (ParamId::new(9), 0.0)]
         );
     }
@@ -291,7 +291,7 @@ mod tests {
             plugin.set_bypassed(OwnBypass::Property, true),
             BypassWrite::Lost
         );
-        assert!(plugin.written.lock().unwrap().is_empty());
+        assert!(plugin.written.lock().is_empty());
         assert_eq!(plugin.bypassed(OwnBypass::Property), None);
     }
 }

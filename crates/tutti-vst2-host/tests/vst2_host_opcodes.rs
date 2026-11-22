@@ -38,9 +38,9 @@
 //! that cannot fail.
 
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 use tutti_fixtures::main_thread;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_plugin_types::{Control, Request, RescanScope};
 
@@ -92,7 +92,7 @@ struct Probe {
 
 impl Probe {
     fn acquire() -> Self {
-        let lock = PROBE_LOCK.lock_recover();
+        let lock = PROBE_LOCK.lock();
         set_fire_update_display(false);
         Probe { _lock: lock }
     }

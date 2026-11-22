@@ -219,6 +219,23 @@ fn loom_recipes_carry_their_environment() {
     );
 }
 
+/// Every `rtsan` command enables the sanitizer and builds into `<target>/rtsan`, so the
+/// normal build is never invalidated; the suites switch on `tutti-rt`'s feature.
+#[cfg(not(windows))]
+#[test]
+fn rtsan_builds_into_its_own_target_with_the_sanitizer_on() {
+    let s = dry("rtsan", &[]);
+    assert_eq!(s.len(), 4);
+    for l in &s {
+        assert!(
+            l.starts_with("RTSAN_ENABLE=1 CARGO_TARGET_DIR=/repo/target/rtsan cargo "),
+            "{l}"
+        );
+    }
+    assert!(s[2].contains("--features tutti-rt/rtsan"));
+    assert!(s[3].contains("--features tutti-rt/rtsan"));
+}
+
 /// The web suite is one `cargo test` of the harness crate for wasm32; the runner is
 /// `.cargo/config.toml`'s.
 #[test]

@@ -30,14 +30,15 @@ const LIGHT: u64 = 8;
 const HEAVY: u64 = 2;
 
 fn synth(max_voices: usize, unison: u8) -> PolySynth<f32> {
-    PolySynth::<f32>::new(SynthConfig {
-        oscillator: OscillatorType::Saw,
-        polyphony: NonZeroUsize::new(max_voices).expect("at least one voice"),
-        unison: (unison > 1).then(|| UnisonConfig {
-            voice_count: UnisonVoices::new(unison).expect("a unison count"),
-            ..Default::default()
-        }),
-        ..Default::default()
+    let config = SynthConfig::new()
+        .oscillator(OscillatorType::Saw)
+        .polyphony(NonZeroUsize::new(max_voices).expect("at least one voice"));
+    PolySynth::<f32>::new(if unison > 1 {
+        config.unison(
+            UnisonConfig::new().voice_count(UnisonVoices::new(unison).expect("a unison count")),
+        )
+    } else {
+        config
     })
 }
 

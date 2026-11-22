@@ -33,8 +33,8 @@
 //! its whole scenario and calls `thread_reset()` at the top.
 
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
-use tutti_rt::LockExt;
+use std::sync::MutexGuard;
+use tutti_rt::Mutex;
 
 use crate::support;
 
@@ -70,7 +70,7 @@ struct Probe {
 impl Probe {
     /// Take the lock and clear the plugin's recorded sites and counters.
     fn acquire() -> Self {
-        let lock = PROBE_LOCK.lock_recover();
+        let lock = PROBE_LOCK.lock();
         thread_reset();
         Probe { _lock: lock }
     }

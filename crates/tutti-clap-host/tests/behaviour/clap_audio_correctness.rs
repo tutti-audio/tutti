@@ -25,10 +25,10 @@
 //! assumes the symmetric default and runs in the same process.
 
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{Control, RenderMode};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use crate::support;
 use support::active::{Activate, Active, ActiveExt};
@@ -141,7 +141,7 @@ struct ProbeSession<'a> {
 impl ProbeSession<'_> {
     /// Take the lock and select a port layout + render mode.
     fn begin(layout: u32, render: u32) -> Self {
-        let guard = PROBE_LOCK.lock_recover();
+        let guard = PROBE_LOCK.lock();
         let controls = ProbeControls::open();
         controls.set_layout(layout);
         controls.set_render(render);

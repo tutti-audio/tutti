@@ -495,6 +495,7 @@ fn an_invitation_name_that_is_not_utf8_is_refused() {
     assert!(matches!(e.error, ParseError::Utf8(_)));
 }
 
+/// Spec: m2-124/4.4#8
 #[test]
 fn a_product_instance_id_outside_printable_ascii_is_refused() {
     let e = one(&[0x01, 0x02, 0x01, 0x00, b'n', 0, 0, 0, 0x07, 0, 0, 0]).unwrap_err();
@@ -701,4 +702,14 @@ mod props {
 fn a_command_stays_small() {
     let size = std::mem::size_of::<Command>();
     assert!(size <= 160, "{size}");
+}
+
+/// Spec: m2-124/5.3#1
+#[test]
+fn a_leading_byte_order_mark_is_refused_in_every_wire_string() {
+    assert!(ByeText::new("\u{FEFF}Keys").is_none());
+    assert!(NakText::new("\u{FEFF}Keys").is_none());
+    assert!(Username::new("\u{FEFF}Keys").is_none());
+    // U+FEFF inside a string is a zero-width no-break space, not a BOM.
+    assert!(Username::new("Ke\u{FEFF}ys").is_some());
 }

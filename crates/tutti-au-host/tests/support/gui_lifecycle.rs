@@ -9,8 +9,7 @@
 // Each test below is wrapped in `gui_test!`, which the runner defines to emit a
 // plain function for `main` to call.
 
-use tutti_rt::LockExt;
-use std::sync::Mutex;
+use tutti_rt::Mutex;
 
 use tutti_au_host::AuEditor;
 use crate::support::au::Au;
@@ -24,13 +23,6 @@ use support::corpus::{AuRef, DELAY, WITHOUT_COCOA_VIEW, WITH_COCOA_VIEW};
 /// shared view-factory bundle into the process. Serializing keeps one test's
 /// bundle load from racing another's. Mirrors `AU_LOCK` in `au_conformance.rs`.
 static AU_LOCK: Mutex<()> = Mutex::new(());
-
-/// `AU_LOCK` is poisoned by any panicking test, and a poisoned lock would
-/// convert one real failure into N spurious ones. The guard is only a
-/// serializer — there is no shared state to be left inconsistent — so recover.
-fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock_recover()
-}
 
 /// The proof that this thread is the process main thread: the target is
 /// `harness = false`, so `main` runs every case there.
@@ -145,7 +137,7 @@ gui_test! {
 /// — satisfies one group and fails the other. The test refuses to pass unless
 /// both groups were actually exercised.
 fn has_editor_agrees_with_opening_one() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut checked = 0;
     let mut with = 0;
     let mut without = 0;
@@ -210,7 +202,7 @@ gui_test! {
 ///   view is a use-after-free that usually returns plausible garbage, so a host
 ///   sizing a window from it would look fine right up until it did not.
 fn open_size_close_is_idempotent_and_reports_zero_after() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, want_w, want_h) in WITH_COCOA_VIEW {
         let au = ready(unit);
         // SAFETY: as in `has_editor_agrees_with_opening_one`.
@@ -265,7 +257,7 @@ gui_test! {
 /// released `NSView` as live — a use-after-free at the exact moment a user
 /// reopens a plugin window.
 fn is_open_only_until_closed() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, _, _) in WITH_COCOA_VIEW {
         let au = ready(unit);
         // SAFETY: as above.
@@ -311,7 +303,7 @@ gui_test! {
 /// across 8 cycles on every corpus unit; drift would mean the host is
 /// accumulating state between opens.
 fn repeated_open_close_cycles_stay_balanced() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     // Eight cycles: enough that a per-open leak or an over-release shows,
     // while keeping the suite fast — each open loads a real plugin GUI.
     const CYCLES: usize = 8;
@@ -424,7 +416,7 @@ gui_test! {
 /// caller sees what AudioToolbox would have produced. Measured -10879 on both
 /// units.
 fn an_au_without_a_cocoa_view_is_refused_cleanly() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in WITHOUT_COCOA_VIEW {
         let au = ready(unit);
         assert!(
@@ -462,7 +454,7 @@ gui_test! {
 /// the reference `open` took), and the unit is still usable (a new editor opens
 /// on it) afterwards.
 fn dropping_off_the_main_thread_defers_and_counts_the_close() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let (unit, _, _) = &WITH_COCOA_VIEW[0];
     let (work, handle) = tutti_plugin_types::MainWork::new();
     let mut au = Au::new_on(unit.require().component, RATE, BLOCK, &handle)
@@ -536,7 +528,7 @@ gui_test! {
 /// explicit close. Reaching the end of the loop is the result — an
 /// over-release aborts the process rather than failing an assertion.
 fn dropping_without_closing_is_safe() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, _, _) in WITH_COCOA_VIEW {
         let au = ready(unit);
 
@@ -577,7 +569,7 @@ gui_test! {
 /// views — if the host cached one view and handed it out twice, closing either
 /// would release the other's pointer out from under it.
 fn two_editors_on_one_unit_are_independent() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = ready(&DELAY);
 
     // SAFETY: as above.

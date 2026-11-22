@@ -18,9 +18,9 @@
 //! both would see the same number, and the suite would pass either way.
 
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 use tutti_fixtures::main_thread;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_plugin_types::Control;
 use tutti_vst2_host::Samples;
@@ -85,7 +85,7 @@ struct Probe {
 
 impl Probe {
     fn acquire() -> Self {
-        let lock = PROBE_LOCK.lock_recover();
+        let lock = PROBE_LOCK.lock();
         set_late_latency(0);
         Probe { _lock: lock }
     }

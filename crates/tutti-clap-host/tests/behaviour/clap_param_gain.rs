@@ -32,8 +32,8 @@
 //! below are on samples either side of an offset rather than on a final level.
 
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
-use tutti_rt::LockExt;
+use std::sync::MutexGuard;
+use tutti_rt::Mutex;
 
 use crate::support;
 use support::active::{Activate, Active, ActiveExt};
@@ -118,7 +118,7 @@ struct GainSession<'a> {
 
 impl GainSession<'_> {
     fn begin() -> Self {
-        let guard = PROBE_LOCK.lock_recover();
+        let guard = PROBE_LOCK.lock();
         let controls = ProbeControls::open();
         unsafe {
             (controls.reset_params)();

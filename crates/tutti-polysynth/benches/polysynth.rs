@@ -68,10 +68,7 @@ fn flat_envelope() -> Adsr {
 }
 
 fn config() -> SynthConfig {
-    SynthConfig {
-        envelope: flat_envelope(),
-        ..Default::default()
-    }
+    SynthConfig::new().envelope(flat_envelope())
 }
 
 /// A synth with `n` notes held and the attack already elapsed.
@@ -80,10 +77,8 @@ fn config() -> SynthConfig {
 /// voices and measures the same work. Panics above 16, which is the synth's
 /// own hard ceiling — see the module header.
 fn held(cfg: SynthConfig, n: usize) -> Direct<PolySynth<f32>> {
-    let cfg = SynthConfig {
-        polyphony: NonZeroUsize::new(n.max(cfg.polyphony.get())).unwrap(),
-        ..cfg
-    };
+    let cfg =
+        cfg.polyphony(NonZeroUsize::new(n.max(SynthConfig::DEFAULT_POLYPHONY.get())).unwrap());
     let mut synth = Direct::new(PolySynth::<f32>::new(cfg), SampleRate::of(SR), BLOCK);
     let at = Offset::of(Samples::new(0), Samples::new(BLOCK));
     let events: Vec<Event> = (0..n)
@@ -147,13 +142,7 @@ fn bench_oscillator(c: &mut Criterion) {
         ),
         ("triangle", OscillatorType::Triangle),
     ] {
-        let mut synth = held(
-            SynthConfig {
-                oscillator: osc,
-                ..config()
-            },
-            16,
-        );
+        let mut synth = held(config().oscillator(osc), 16);
         group.bench_function(name, |b| b.iter(|| drive(&mut synth)));
     }
     group.finish();
@@ -182,11 +171,7 @@ fn bench_filter(c: &mut Criterion) {
         ("moog-ladder-input", moog, LadderSaturation::Input),
     ] {
         let mut synth = held(
-            SynthConfig {
-                filter,
-                ladder_saturation,
-                ..config()
-            },
+            config().filter(filter).ladder_saturation(ladder_saturation),
             16,
         );
         group.bench_function(name, |b| b.iter(|| drive(&mut synth)));
@@ -200,18 +185,17 @@ fn bench_unison(c: &mut Criterion) {
     let mut group = c.benchmark_group("voices/unison");
     group.throughput(Throughput::Elements(BLOCK as u64));
     for n in [1usize, 3, 7] {
-        let mut synth = held(
-            SynthConfig {
-                // `Option`, not a count: a synth built with `None` has no
-                // unison engine at all, which is the 1-voice baseline.
-                unison: (n > 1).then(|| UnisonConfig {
-                    voice_count: UnisonVoices::new(n as u8).expect("a unison count"),
-                    ..Default::default()
-                }),
-                ..config()
-            },
-            8,
-        );
+        // A synth built without a unison config has no unison engine at all, which
+        // is the 1-voice baseline.
+        let cfg = if n > 1 {
+            config().unison(
+                UnisonConfig::new()
+                    .voice_count(UnisonVoices::new(n as u8).expect("a unison count")),
+            )
+        } else {
+            config()
+        };
+        let mut synth = held(cfg, 8);
         group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, _| {
             b.iter(|| drive(&mut synth))
         });
@@ -229,15 +213,13 @@ fn bench_portamento(c: &mut Criterion) {
         ("square-root", Law::PowerIn(Exponent::of(0.5))),
     ] {
         let mut synth = held(
-            SynthConfig {
-                portamento: Some(PortamentoConfig {
-                    mode: PortamentoMode::Always,
-                    curve,
-                    time: GlideTime::of(Seconds::new(10_000.0)),
-                    constant_time: true,
-                }),
-                ..config()
-            },
+            config().portamento(
+                PortamentoConfig::new()
+                    .mode(PortamentoMode::Always)
+                    .curve(curve)
+                    .time(GlideTime::of(Seconds::new(10_000.0)))
+                    .constant_time(true),
+            ),
             1,
         );
         group.bench_function(name, |b| b.iter(|| drive(&mut synth)));

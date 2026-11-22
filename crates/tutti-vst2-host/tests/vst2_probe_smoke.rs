@@ -5,9 +5,9 @@
 //! proper builds on this rather than living here.
 
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 use tutti_fixtures::main_thread;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_plugin_types::Control;
 use tutti_vst2_host::{Samples, TransportInfo, Vst2ProcessContext};
@@ -31,7 +31,7 @@ const BLOCK: usize = 128;
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock_recover()
+    PROBE_LOCK.lock()
 }
 
 /// Load the probe through the real host, capture and switches reset.

@@ -15,7 +15,6 @@ use tutti_plugin_types::{
     RenderMode, RenderModeSupport, Request, StateError, StateUse, TerminationReason, TrackInfo,
     UnknownParam, WindowHandle, bypass_value,
 };
-use tutti_rt::LockExt;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
@@ -333,7 +332,7 @@ macro_rules! served_control {
             /// What the plugin re-reported since the last call (a latency or
             /// a tail), as the requests the lifecycle answers by re-reading.
             fn take_requests(&mut self, _main: MainThreadMarker, out: &mut Vec<Request>) {
-                let mut asked = self.link.events.requests.lock_recover();
+                let mut asked = self.link.events.requests.lock();
                 out.append(&mut asked);
             }
 

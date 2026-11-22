@@ -23,6 +23,7 @@ cargo test --doc --workspace               # nextest does not run doctests
 cargo xtask test-all                       # every test tier CI runs
 cargo xtask doc                            # rustdoc as CI runs it
 cargo xtask check-loom                     # clippy under --cfg loom
+cargo xtask rtsan                          # RealtimeSanitizer over the FFI/plugin paths; local only, needs curl
 cargo xtask check-windows                  # Windows lints from Linux
 cargo xtask test-wasm                      # the web suite under node (needs `wasm-bindgen-cli` at Cargo.lock's version)
 cargo xtask check-wasm                     # clippy for wasm32-unknown-unknown
@@ -372,3 +373,6 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
   `thread_priority` in `tutti-platform`).
 - A codec format is a cargo feature (`encode-*`, `decode-*`), none on by default; a decode
   feature pulls no encoder.
+- A MIDI OS backend is a cargo feature of `tutti-midi-hardware` (`alsa`, `coremidi`,
+  `winmm`), each a no-op off its OS and forwarded by `tutti-session` and `tutti`; the
+  defaults keep every platform's backend, and `default-features = false` is the stub.

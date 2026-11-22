@@ -6,7 +6,8 @@
 //! beside the allocator it needs.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tutti_fixtures::Record;
 
 use tutti_buffers::MaxBlock;
 use tutti_ump::{MidiChannel, NoteNumber, U7};
@@ -77,11 +78,9 @@ impl Node for Probe {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        match io.param(0).frames() {
-            Some(v) => {
-                let v: Vec<f32> = v.to_vec();
-                io.output(0).copy_from_slice(&v);
-            }
+        let param = io.param(0);
+        match param.frames() {
+            Some(v) => io.output(0).copy_from_slice(v),
             None => {
                 let k = self.knob.load(std::sync::atomic::Ordering::Acquire);
                 io.output(0).fill(k as f32);
@@ -211,7 +210,7 @@ impl Node for Capture2 {
 
 /// Records every segment on its event input, with its executor frame.
 #[derive(Clone)]
-struct Capture(Arc<Mutex<Vec<(u64, ParamSegment)>>>);
+struct Capture(Record<(u64, ParamSegment)>);
 
 impl Capture {
     const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
@@ -956,8 +955,8 @@ fn a_host_key_is_never_taken() {
 fn a_foreign_target_takes_a_lane_on_its_event_input() {
     let (mut ed, mut exec) = editor(128);
     let mut host = Host::default();
-    let log = Arc::new(Mutex::new(Vec::new()));
-    ed.insert(key(50), "plugin", ForkByClone(Capture(Arc::clone(&log))));
+    let log = Record::new();
+    ed.insert(key(50), "plugin", ForkByClone(Capture(log.clone())));
     ed.commit().expect("commits");
     host.foreign.insert(50, key(50));
     let param = TargetKey::param(50, ParamAddr::Id(ParamId::new(7)));
@@ -973,7 +972,7 @@ fn a_foreign_target_takes_a_lane_on_its_event_input() {
     );
     m.commit(&mut ed).expect("commits");
     render(&mut ed, &mut exec, 128, 512);
-    let last = |log: &Mutex<Vec<(u64, ParamSegment)>>| {
+    let last = |log: &Record<(u64, ParamSegment)>| {
         let log = log.lock().expect("unpoisoned");
         let (_, seg) = log.last().copied().expect("a segment");
         assert_eq!(seg.addr(), ParamAddr::Id(ParamId::new(7)));
@@ -1274,8 +1273,8 @@ fn a_replace_with_the_same_params_keeps_modulating() {
 fn a_taken_lanes_unwiring_keeps_the_hosts_edges() {
     let (mut ed, mut exec) = editor(128);
     let mut host = Host::default();
-    let log = Arc::new(Mutex::new(Vec::new()));
-    ed.insert(key(50), "plugin", ForkByClone(Capture(Arc::clone(&log))));
+    let log = Record::new();
+    ed.insert(key(50), "plugin", ForkByClone(Capture(log.clone())));
     ed.commit().expect("commits");
     host.foreign.insert(50, key(50));
     let param = TargetKey::param(50, ParamAddr::Id(ParamId::new(7)));
@@ -1733,7 +1732,7 @@ fn a_play_start_after_a_steady_state_republishes_an_anchored_program() {
 fn foreign_rig() -> (Editor, Host, Decl, Modulation, TargetKey) {
     let (mut ed, _exec) = editor(128);
     let mut host = Host::default();
-    let log = Arc::new(Mutex::new(Vec::new()));
+    let log = Record::new();
     ed.insert(key(50), "plugin", ForkByClone(Capture(log)));
     ed.insert(key(51), "plugin", ForkByClone(Capture2));
     ed.commit().expect("commits");

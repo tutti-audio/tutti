@@ -3,6 +3,10 @@
 //! the text is pinned for every `OsEndpointIdentity`. Run with `--features serde`.
 #![cfg(feature = "serde")]
 
+/// An allocation inside an `RtScope` aborts the running test.
+#[global_allocator]
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
+
 mod device;
 mod endpoint;
 mod learned;

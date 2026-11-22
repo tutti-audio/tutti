@@ -14,17 +14,17 @@ const BLOCK: usize = 64;
 /// A sine synth of one voice with a flat envelope, so the output is the oscillator and the
 /// voice's gain alone.
 fn sine() -> PolySynth<f64> {
-    PolySynth::<f64>::new(SynthConfig {
-        oscillator: OscillatorType::Sine,
-        polyphony: NonZeroUsize::new(1).unwrap(),
-        envelope: Adsr::new(
-            Seconds::new(0.0),
-            Seconds::new(0.0),
-            Amplitude::new(1.0),
-            Seconds::new(0.1),
-        ),
-        ..Default::default()
-    })
+    PolySynth::<f64>::new(
+        SynthConfig::new()
+            .oscillator(OscillatorType::Sine)
+            .polyphony(NonZeroUsize::new(1).unwrap())
+            .envelope(Adsr::new(
+                Seconds::new(0.0),
+                Seconds::new(0.0),
+                Amplitude::new(1.0),
+                Seconds::new(0.1),
+            )),
+    )
 }
 
 /// The left channel of `blocks` blocks after a Note On of `note`, as a graph drives it.

@@ -22,8 +22,8 @@
 //! defaults before releasing it.
 
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
-use tutti_rt::LockExt;
+use std::sync::MutexGuard;
+use tutti_rt::Mutex;
 
 use crate::support;
 use support::main_thread;
@@ -46,7 +46,7 @@ struct Probe {
 
 impl Probe {
     fn acquire() -> Self {
-        let lock = VERSION_LOCK.lock_recover();
+        let lock = VERSION_LOCK.lock();
         reset_clap_version();
         Probe { _lock: lock }
     }

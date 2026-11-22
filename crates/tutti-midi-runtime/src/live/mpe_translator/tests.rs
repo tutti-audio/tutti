@@ -2,7 +2,7 @@ use super::*;
 use crate::test_support::at;
 use tutti_fixtures::midi;
 use tutti_graph::UmpAt;
-use tutti_midi_protocol::{MpeZoneConfig, MpeZones};
+use tutti_midi_protocol::{MemberCount, MpeZoneConfig, MpeZones};
 use tutti_ump::{
     Address, BendValue, CCNumber, ControlValue, Message, MpeChannels, MpeZoneSpan, NoteKeyEvent,
     NoteVelocity, U7, U14, Voice2,
@@ -110,6 +110,7 @@ fn master_channel_bend_passes_through_as_channel_bend() {
     assert_cv2!(out, _, Voice2::PitchBend(_));
 }
 
+/// Spec: m2-120/4.5#3
 #[test]
 fn member_channel_cc74_becomes_per_note_controller() {
     let mut translator = MpeTranslator::new(tutti_fixtures::midi::lower_zone(15));
@@ -126,6 +127,7 @@ fn member_channel_cc74_becomes_per_note_controller() {
     );
 }
 
+/// Spec: m2-120/4.4#2
 #[test]
 fn member_channel_pressure_becomes_per_note_pressure() {
     let mut translator = MpeTranslator::new(tutti_fixtures::midi::lower_zone(15));
@@ -189,11 +191,10 @@ fn mcm_from_the_wire_configures_the_lower_zone() {
     let mcm = at(
         0,
         MpeZoneConfig::lower(
-            7,
+            MemberCount::of(7),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
         )
-        .unwrap()
         .to_mcm(),
     );
 
@@ -230,11 +231,10 @@ fn an_mcm_that_would_overlap_the_zones_is_ignored() {
     let overlapping = at(
         0,
         MpeZoneConfig::upper(
-            5,
+            MemberCount::of(5),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
         )
-        .unwrap()
         .to_mcm(),
     );
     assert_eq!(
@@ -250,11 +250,10 @@ fn an_mcm_that_would_overlap_the_zones_is_ignored() {
     let fits = at(
         0,
         MpeZoneConfig::upper(
-            4,
+            MemberCount::of(4),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
         )
-        .unwrap()
         .to_mcm(),
     );
     assert!(translator.translated(&fits).count() > 0);
@@ -268,7 +267,7 @@ fn an_mcm_that_would_overlap_the_zones_is_ignored() {
 fn mcm_with_zero_members_disables_the_zone() {
     let mut translator = MpeTranslator::new(tutti_fixtures::midi::lower_zone(7));
     // A raw MCM on master channel 0 with member_count == 0 disables the lower
-    // zone. (`MpeZoneConfig::lower` refuses 0, so the disabling value can
+    // zone. (`MemberCount` refuses 0, so the disabling value can
     // only come off the wire: build it directly.)
     let disable = at(
         0,
@@ -370,11 +369,10 @@ fn an_mcm_resets_its_zones_bend_ranges() {
     let mcm = at(
         9,
         MpeZoneConfig::upper(
-            3,
+            MemberCount::of(3),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
         )
-        .unwrap()
         .to_mcm(),
     );
     let reset: Vec<UmpAt> = translator.translated(&mcm).collect();
@@ -400,11 +398,10 @@ fn an_mcm_resets_its_zones_bend_ranges() {
     let mcm = at(
         0,
         MpeZoneConfig::upper(
-            3,
+            MemberCount::of(3),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
         )
-        .unwrap()
         .to_mcm(),
     );
     for ev in translator.translated(&bend_sensitivity(13, 12)) {
@@ -653,6 +650,7 @@ fn a_member_bend_before_the_note_on_is_the_notes_start() {
 /// Channel Pressure most recently received on its Channel before Note On, and
 /// a receiver keeps tracking it while no note sounds; section 2.2.8 the same of Control
 /// Change #74).
+/// Spec: m2-120/4.4#3
 #[test]
 fn member_pressure_and_cc74_before_the_note_on_are_the_notes_start() {
     let mut translator = MpeTranslator::new(tutti_fixtures::midi::lower_zone(15));
@@ -691,6 +689,7 @@ fn what_a_member_was_told_is_its_own() {
 /// Channels after its Note Off; section 2.4: MPE control messages do not
 /// affect a note after its Note Off), while the channel goes on tracking them for
 /// the next note.
+/// Spec: m2-120/4.3#4
 #[test]
 fn a_released_note_ignores_the_members_bend_and_the_next_note_starts_with_it() {
     let mut translator = MpeTranslator::new(tutti_fixtures::midi::lower_zone(15));
@@ -711,6 +710,7 @@ fn a_released_note_ignores_the_members_bend_and_the_next_note_starts_with_it() {
 /// of Control Change #74; Appendix D: Max is one way). The manager's value,
 /// told with no note sounding, is every new note's floor; told while notes
 /// sound, it reaches each of them, as the greater of it and the member's own.
+/// Spec: m2-120/4.4#4, m2-120/4.5#5, m2-120/4.4#2, m2-120/4.5#3
 #[test]
 fn a_managers_pressure_and_cc74_reach_every_members_note() {
     let mut translator = MpeTranslator::new(tutti_fixtures::midi::lower_zone(3));
@@ -855,11 +855,10 @@ fn program_change_on_a_member_follows_the_zones_midi_mode() {
 #[test]
 fn an_mpe_1_1_zone_starts_in_the_mode_its_response_names() {
     let zone = MpeZoneConfig::lower(
-        5,
+        MemberCount::of(5),
         PitchBendSensitivity::MPE_MASTER_DEFAULT,
         PitchBendSensitivity::MPE_MEMBER_DEFAULT,
     )
-    .unwrap()
     .channel_response(ChannelResponse::Monophonic);
     let mut translator = MpeTranslator::new(MpeMode::Zones(MpeZones::single(zone)));
     let program = at(0, midi::program_change(MidiChannel::of(3), 5, None));
@@ -910,11 +909,10 @@ fn an_mcm_stops_only_the_channels_it_moves() {
     let grow = at(
         0,
         MpeZoneConfig::lower(
-            5,
+            MemberCount::of(5),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
         )
-        .unwrap()
         .to_mcm(),
     );
     let out: Vec<UmpAt> = translator.translated(&grow).collect();
@@ -954,21 +952,19 @@ fn a_channel_that_left_the_zone_forgets_its_note_and_its_bend() {
         translator.translated(&at(
             0,
             MpeZoneConfig::lower(
-                3,
+                MemberCount::of(3),
                 PitchBendSensitivity::MPE_MASTER_DEFAULT,
                 PitchBendSensitivity::MPE_MEMBER_DEFAULT,
             )
-            .unwrap()
             .to_mcm(),
         ));
         translator.translated(&at(
             0,
             MpeZoneConfig::lower(
-                5,
+                MemberCount::of(5),
                 PitchBendSensitivity::MPE_MASTER_DEFAULT,
                 PitchBendSensitivity::MPE_MEMBER_DEFAULT,
             )
-            .unwrap()
             .to_mcm(),
         ));
         translator
@@ -1352,11 +1348,10 @@ fn a_configuration_message_does_nothing_while_the_profile_is_enabled() {
     let mcm = at(
         0,
         MpeZoneConfig::lower(
-            7,
+            MemberCount::of(7),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
         )
-        .unwrap()
         .to_mcm(),
     );
     assert_eq!(
@@ -1508,6 +1503,7 @@ fn a_profile_managers_all_sound_off_is_sent_on_every_member() {
 /// (RP-053: the manager's bend moves every note of the zone; a member's own is
 /// per-note and a receiver sums the two, M2-104 section 7.4.13): it goes on,
 /// then the same bend word on each member channel, and none beyond the zone.
+/// Spec: m2-120/4.2#1
 #[test]
 fn a_managers_bend_is_copied_onto_each_member_channel() {
     let mut translator = MpeTranslator::new(midi::dual_zones(3, 2));
