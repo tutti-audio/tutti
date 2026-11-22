@@ -11,7 +11,7 @@ use std::sync::atomic::Ordering;
 use tutti_graph::NodeKey;
 use tutti_music::MeterMap;
 use tutti_nodes::{ClickLevel, ClickSettings, MetronomeMode};
-use tutti_rt::{AtomicCell, AtomicWord, LockExt};
+use tutti_rt::{AtomicCell, AtomicWord, Mutex};
 use tutti_tempo::TempoMap;
 use tutti_timeline::{LoopEdit, LoopRegion, ProjectMeter, Transport, TransportSettings};
 use tutti_units::{Amplitude, At};
@@ -714,21 +714,21 @@ pub(crate) trait Held: Send + Sync + 'static {
 /// value ([`Params::publish_pending`]).
 pub(crate) struct PublishedSlot<C: Held> {
     cell: C,
-    pending: std::sync::Mutex<Option<C::Value>>,
+    pending: Mutex<Option<C::Value>>,
 }
 
 impl<C: Held> PublishedSlot<C> {
     pub(crate) fn new(cell: C) -> Arc<Self> {
         Arc::new(Self {
             cell,
-            pending: std::sync::Mutex::new(None),
+            pending: Mutex::new(None),
         })
     }
 }
 
 impl<C: Held> Slot<C::Value> for PublishedSlot<C> {
     fn load(&self) -> C::Value {
-        let pending = self.pending.lock_recover().clone();
+        let pending = self.pending.lock().clone();
         pending.unwrap_or_else(|| self.cell.current())
     }
 
@@ -737,18 +737,18 @@ impl<C: Held> Slot<C::Value> for PublishedSlot<C> {
     }
 
     fn store(&self, value: &C::Value) {
-        *self.pending.lock_recover() = Some(value.clone());
+        *self.pending.lock() = Some(value.clone());
     }
 }
 
 impl<C: Held> Stage for PublishedSlot<C> {
     #[cfg(feature = "midi")]
     fn discard_pending(&self) {
-        *self.pending.lock_recover() = None;
+        *self.pending.lock() = None;
     }
 
     fn publish_pending(&self) {
-        let mut pending = self.pending.lock_recover();
+        let mut pending = self.pending.lock();
         let Some(value) = pending.take() else {
             return;
         };
@@ -808,14 +808,14 @@ impl Held for ProjectMeter {
 /// edit timed later shows through the reading.
 pub(crate) struct LoopCell {
     transport: Transport,
-    sent: std::sync::Mutex<Option<LoopRegion>>,
+    sent: Mutex<Option<LoopRegion>>,
 }
 
 impl LoopCell {
     pub(crate) fn new(transport: Transport) -> Self {
         Self {
             transport,
-            sent: std::sync::Mutex::new(None),
+            sent: Mutex::new(None),
         }
     }
 }
@@ -826,7 +826,7 @@ impl Held for LoopCell {
     fn current(&self) -> LoopRegion {
         let motion = self.transport.motion();
         let reading = motion.loop_region();
-        let mut sent = self.sent.lock_recover();
+        let mut sent = self.sent.lock();
         match *sent {
             Some(region) if region != reading && motion.scheduled_outstanding() > 0 => region,
             _ => {
@@ -843,7 +843,7 @@ impl Held for LoopCell {
             .schedule(At::NextBlock, LoopEdit::region(*value))
             .is_ok();
         if landed {
-            *self.sent.lock_recover() = Some(*value);
+            *self.sent.lock() = Some(*value);
         }
         landed
     }
@@ -1003,7 +1003,7 @@ impl ClickTargets {
 /// A control-side value the session reads when it applies it: the policy
 /// last written, and whether it was written since it was last taken.
 pub(crate) struct Cell<V> {
-    value: std::sync::Mutex<V>,
+    value: Mutex<V>,
     staged: std::sync::atomic::AtomicBool,
     /// Whether `value` may be stored: the part of the check that reads the
     /// session's own state.
@@ -1023,7 +1023,7 @@ impl<V: Clone> Cell<V> {
         check: impl Fn(&V) -> Result<(), SetRefusal> + Send + Sync + 'static,
     ) -> Arc<Self> {
         Arc::new(Self {
-            value: std::sync::Mutex::new(value),
+            value: Mutex::new(value),
             staged: std::sync::atomic::AtomicBool::new(false),
             check: Box::new(check),
         })
@@ -1031,7 +1031,7 @@ impl<V: Clone> Cell<V> {
 
     /// The value now: the one in force, or the one written and not yet taken.
     pub(crate) fn current(&self) -> V {
-        self.value.lock_recover().clone()
+        self.value.lock().clone()
     }
 
     /// The value written since the last call, once.
@@ -1052,7 +1052,7 @@ impl<V: Clone + Send + Sync + 'static> Slot<V> for Cell<V> {
     }
 
     fn store(&self, value: &V) {
-        *self.value.lock_recover() = value.clone();
+        *self.value.lock() = value.clone();
         self.staged.store(true, Ordering::Release);
     }
 }

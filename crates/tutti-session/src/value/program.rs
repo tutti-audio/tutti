@@ -10,12 +10,12 @@
 
 use std::any::Any;
 use std::marker::PhantomData;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 
 use tutti_modulation::{Curve, Law, LayerClock, LfoRate, Polarity, Source, TargetKey};
 use tutti_nodes::automation::Trajectory;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 use tutti_units::Bipolar;
 
 use super::error::SetRefusal;
@@ -48,19 +48,19 @@ impl<T: Clone> Declared<T> {
 
     /// The value in force.
     pub(crate) fn get(&self) -> T {
-        self.value.lock_recover().clone()
+        self.value.lock().clone()
     }
 
     /// Replaces the value and marks the declarations edited.
     pub(crate) fn set(&self, value: T) {
-        *self.value.lock_recover() = value;
+        *self.value.lock() = value;
         self.edited.store(true, Ordering::Release);
     }
 
     /// Edits the value in place; `edit` answers whether it changed anything,
     /// which marks the declarations edited.
     fn edit(&self, edit: impl FnOnce(&mut T) -> bool) {
-        if edit(&mut self.value.lock_recover()) {
+        if edit(&mut self.value.lock()) {
             self.edited.store(true, Ordering::Release);
         }
     }

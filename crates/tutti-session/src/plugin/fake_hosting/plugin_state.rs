@@ -53,7 +53,7 @@ fn hosted() -> (DetachedSession, Key<AnyPlugin>, FakePlugin) {
 fn refreshes(s: &DetachedSession, node: Key<AnyPlugin>) -> usize {
     let node: NodeKey = node.erase();
     let hosted = s.graph.plugins.get(&node).expect("hosted");
-    let waiting = hosted.notices.lock().unwrap();
+    let waiting = hosted.notices.lock();
     waiting
         .iter()
         .filter(|signal| matches!(signal, PluginSignal::Refresh(_)))
