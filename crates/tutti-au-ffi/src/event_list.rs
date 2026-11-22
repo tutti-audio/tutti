@@ -18,6 +18,8 @@
 //! caller sends the list and starts another. Every other message type is
 //! neutral and rides in either.
 
+use tutti_ump::MessageType;
+
 /// The protocol a list's channel voice messages are in (`MIDIProtocolID`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Wire {
@@ -38,10 +40,10 @@ impl Wire {
 
     /// The protocol a UMP message type puts a list in: `Some` for a channel
     /// voice message, `None` for one that rides in either.
-    pub const fn of_message_type(message_type: u8) -> Option<Self> {
+    pub const fn of_message_type(message_type: MessageType) -> Option<Self> {
         match message_type {
-            0x2 => Some(Self::Midi1),
-            0x4 => Some(Self::Midi2),
+            MessageType::Midi1ChannelVoice => Some(Self::Midi1),
+            MessageType::Midi2ChannelVoice => Some(Self::Midi2),
             _ => None,
         }
     }

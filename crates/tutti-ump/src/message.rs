@@ -11,7 +11,7 @@ use crate::field::{
 use crate::{
     ArticulationAttribute, BendValue, CCNumber, ControlValue, Field, ManufacturerId, MdsChunk,
     MdsChunkSize, MdsChunks, MdsIdentity, MidiChannel, MidiGroup, NoteVelocity, Reserved,
-    ReservedAccents, ReservedAttribute, Rpn, Ump,
+    ReservedAccents, ReservedAttribute, Rpn, Sysex8StreamCount, Sysex8StreamId, Ump,
 };
 
 /// One UMP, decoded.
@@ -116,12 +116,19 @@ impl Address {
     #[must_use]
     pub const fn from_index(index: usize) -> Option<Self> {
         if index < 256 {
-            Some(Address {
-                group: MidiGroup::masked((index >> 4) as u8),
-                channel: MidiChannel::masked(index as u8),
-            })
+            Some(Self::from_lane(index as u8))
         } else {
             None
+        }
+    }
+
+    /// The address of the table position `lane`: the Group in its high four
+    /// bits, the Channel in its low four.
+    #[inline]
+    pub(crate) const fn from_lane(lane: u8) -> Self {
+        Address {
+            group: MidiGroup::masked(lane >> 4),
+            channel: MidiChannel::masked(lane),
         }
     }
 }
@@ -348,11 +355,11 @@ impl From<Sysex7Packet> for (SysexStatus, u8, [U7; 6]) {
 }
 
 #[cfg(feature = "serde")]
-impl TryFrom<(SysexStatus, u8, u8, [u8; 13])> for Sysex8Packet {
+impl TryFrom<(SysexStatus, Sysex8StreamId, u8, [u8; 13])> for Sysex8Packet {
     type Error = &'static str;
 
     fn try_from(
-        (status, stream_id, len, bytes): (SysexStatus, u8, u8, [u8; 13]),
+        (status, stream_id, len, bytes): (SysexStatus, Sysex8StreamId, u8, [u8; 13]),
     ) -> Result<Self, Self::Error> {
         if len > 13 {
             return Err("a SysEx8 packet holds at most 13 bytes");
@@ -370,7 +377,7 @@ impl TryFrom<(SysexStatus, u8, u8, [u8; 13])> for Sysex8Packet {
 }
 
 #[cfg(feature = "serde")]
-impl From<Sysex8Packet> for (SysexStatus, u8, u8, [u8; 13]) {
+impl From<Sysex8Packet> for (SysexStatus, Sysex8StreamId, u8, [u8; 13]) {
     fn from(packet: Sysex8Packet) -> Self {
         (packet.status, packet.stream_id, packet.len, packet.bytes)
     }
@@ -462,13 +469,13 @@ impl Sysex7Packet {
 #[cfg_attr(
     feature = "serde",
     serde(
-        try_from = "(SysexStatus, u8, u8, [u8; 13])",
-        into = "(SysexStatus, u8, u8, [u8; 13])"
+        try_from = "(SysexStatus, Sysex8StreamId, u8, [u8; 13])",
+        into = "(SysexStatus, Sysex8StreamId, u8, [u8; 13])"
     )
 )]
 pub struct Sysex8Packet {
     status: SysexStatus,
-    stream_id: u8,
+    stream_id: Sysex8StreamId,
     len: u8,
     bytes: [u8; 13],
 }
@@ -476,7 +483,7 @@ pub struct Sysex8Packet {
 impl Sysex8Packet {
     /// The packet of the first 13 (or fewer) of `payload`, and the bytes after
     /// them.
-    pub(crate) fn take(started: bool, stream_id: u8, payload: &[u8]) -> (Self, &[u8]) {
+    pub(crate) fn take(started: bool, stream_id: Sysex8StreamId, payload: &[u8]) -> (Self, &[u8]) {
         let (chunk, rest) = payload.split_at(payload.len().min(13));
         let mut bytes = [0; 13];
         bytes[..chunk.len()].copy_from_slice(chunk);
@@ -493,7 +500,7 @@ impl Sysex8Packet {
     /// [`Sysex8Stream`](crate::Sysex8Stream) writes packets; the others are
     /// decoded.
     #[must_use]
-    pub(crate) fn new(status: SysexStatus, stream_id: u8, data: &[u8]) -> Option<Self> {
+    pub(crate) fn new(status: SysexStatus, stream_id: Sysex8StreamId, data: &[u8]) -> Option<Self> {
         if data.len() > 13 {
             return None;
         }
@@ -515,7 +522,7 @@ impl Sysex8Packet {
 
     /// The stream id.
     #[must_use]
-    pub const fn stream_id(&self) -> u8 {
+    pub const fn stream_id(&self) -> Sysex8StreamId {
         self.stream_id
     }
 
@@ -532,16 +539,17 @@ impl Sysex8Packet {
 pub enum Data128 {
     /// A System Exclusive 8 packet.
     Sysex8(Sysex8Packet),
-    /// What a decoder returns for an End packet with `# of bytes` `0xF`; the one
-    /// SysEx 8 variant constructible with a raw Stream ID. A sender aborts with
-    /// [`Sysex8Packets::abort`](crate::Sysex8Packets::abort) or
-    /// [`Sysex8StreamIds::take_abort`](crate::Sysex8StreamIds::take_abort). It is an End packet with `# of bytes` `0xF`: the sender ran out of data and
-    /// the earlier data of this stream is incomplete (§7.8.1).
+    /// What a decoder returns for an End packet with `# of bytes` `0xF`, and the
+    /// one SysEx 8 variant a caller builds with any Stream ID. A sender aborts
+    /// with [`Sysex8Packets::abort`](crate::Sysex8Packets::abort) or
+    /// [`Sysex8StreamIds::take_abort`](crate::Sysex8StreamIds::take_abort). The
+    /// sender ran out of data, and the earlier data of this stream is
+    /// incomplete (§7.8.1).
     /// The stream id is read from byte 3; §7.8.1 does not say it is kept, so a
     /// sender that zeroes it aborts stream 0.
     Sysex8Abort {
         /// The stream being aborted.
-        stream_id: u8,
+        stream_id: Sysex8StreamId,
     },
     /// A Mixed Data Set chunk header.
     MixedDataHeader(MixedDataHeader),
@@ -586,8 +594,10 @@ pub enum Attribute {
     Manufacturer(u16),
     /// Type `0x02`: specific to the active MIDI-CI Profile.
     Profile(u16),
-    /// Type `0x03`: Q7.9 pitch in half-tone units.
-    Pitch(u16),
+    /// Type `0x03`: a pitch, on the wire Q7.9 in half-tone units. Encoding
+    /// keeps the top 16 bits of the [`Pitch`] ([`Pitch::q7_9`]); a finer
+    /// fraction is dropped.
+    Pitch(Pitch),
     /// Types `0x10` to `0x1F`: an articulation of the M2-123 Profile, which
     /// [`NoteArticulation`](crate::NoteArticulation) and
     /// [`NoteOffArticulation`](crate::NoteOffArticulation) write.
@@ -747,7 +757,7 @@ impl Attribute {
     #[must_use]
     pub const fn pitch(self) -> Option<Pitch> {
         match self {
-            Self::Pitch(q7_9) => Some(Pitch::from_q7_9(q7_9)),
+            Self::Pitch(pitch) => Some(pitch),
             _ => None,
         }
     }
@@ -1718,7 +1728,7 @@ pub struct FunctionBlockInfo {
     /// The MIDI-CI message version, `0` for none.
     pub midi_ci_version: u8,
     /// Simultaneous SysEx 8 streams supported.
-    pub max_sysex8_streams: u8,
+    pub max_sysex8_streams: Sysex8StreamCount,
 }
 
 /// UMP Stream messages (M2-104 §7.1). They address the endpoint, so they have

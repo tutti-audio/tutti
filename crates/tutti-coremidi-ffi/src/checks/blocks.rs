@@ -153,10 +153,10 @@ fn platform_block(
             version: info.midi_ci_version,
         });
     }
-    if info.max_sysex8_streams > MAX_UINTEGER7 {
+    if info.max_sysex8_streams.get() > MAX_UINTEGER7 {
         return Err(BlockRefusal::Sysex8Streams {
             id,
-            streams: info.max_sysex8_streams,
+            streams: info.max_sysex8_streams.get(),
         });
     }
     let direction = match info.direction {
@@ -190,7 +190,7 @@ fn platform_block(
         direction,
         first_group: first_group.get(),
         groups_spanned: groups.get(),
-        max_sysex8_streams: info.max_sysex8_streams,
+        max_sysex8_streams: info.max_sysex8_streams.get(),
         midi1,
         ui_hint,
         enabled: info.active,

@@ -6,9 +6,10 @@
 
 use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_ump::{
-    CCNumber, ChordType, DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan,
-    MidiChannel, MidiGroup, MonoChannels, MpeChannels, NoteNumber, SharpsFlats,
-    TicksPerQuarterNote, U4, U4OutOfRange, U7, U14, U28,
+    CCNumber, ChordType, DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId,
+    GroupChannelIndex, GroupSpan, ManufacturerId, MdsChunkSize, MdsChunkUmps, MidiChannel,
+    MidiGroup, MonoChannels, MpeChannels, NoteNumber, SharpsFlats, TicksPerQuarterNote, U4,
+    U4OutOfRange, U7, U14, U28,
 };
 
 /// Every bit-width field: valid up to its all-ones value, refused above it.
@@ -88,6 +89,41 @@ fn each_bounded_field_holds_its_stated_range() {
         valid: &[1, 2, 480, u16::MAX],
         invalid: &[0],
     });
+    // M2-104 section 7.9: a chunk is a 16-byte header and whole 16-byte
+    // payload UMPs, the last padded, and a size one byte into a payload UMP's
+    // prefix has no data. The 4094 payload UMPs the 16 bits reach.
+    check_range_contract(&RangeContract {
+        new: MdsChunkSize::new,
+        get: MdsChunkSize::get,
+        of: Some(MdsChunkSize::of),
+        valid: &[16, 18, 32, 34, 48, u16::MAX],
+        invalid: &[0, 15, 17, 33, 16 + 16 * 5 + 1, 16 + 16 * 4094 + 1],
+    });
+    check_range_contract(&RangeContract {
+        new: MdsChunkUmps::new,
+        get: MdsChunkUmps::get,
+        of: Some(MdsChunkUmps::of),
+        valid: &[1, 2, 2047, 4093, 4094],
+        invalid: &[0, 4095, 4096, u16::MAX],
+    });
+    check_range_contract(&RangeContract {
+        new: GroupChannelIndex::new,
+        get: GroupChannelIndex::get,
+        of: Some(GroupChannelIndex::of),
+        valid: &[0, 1, 255, 256, 511],
+        invalid: &[512, 513, 1023, u16::MAX],
+    });
+    // M2-104 section 7.10: `0x0001..=0x007F`, or the top bit set over two
+    // 7-bit bytes; neither zero id.
+    check_range_contract(&RangeContract {
+        new: ManufacturerId::new,
+        get: ManufacturerId::get,
+        of: Some(ManufacturerId::of),
+        valid: &[0x0001, 0x007F, 0x8001, 0x8100, 0xA109, 0xFF7F],
+        invalid: &[
+            0x0000, 0x0080, 0x0100, 0x7F00, 0x7FFF, 0x8000, 0x8080, 0x80FF, 0xFFFF,
+        ],
+    });
 }
 
 #[test]
@@ -108,6 +144,18 @@ fn serde_refuses_what_new_refuses() {
     assert!(serde_json::from_str::<NoteNumber>("200").is_err());
     assert!(serde_json::from_str::<DeltaTicks>("1048576").is_err());
     assert!(serde_json::from_str::<U4>("16").is_err());
+    assert!(serde_json::from_str::<MdsChunkSize>("33").is_err());
+    assert_eq!(
+        serde_json::from_str::<MdsChunkSize>("34").unwrap().get(),
+        34
+    );
+    assert!(serde_json::from_str::<ManufacturerId>("128").is_err());
+    assert_eq!(
+        serde_json::from_str::<ManufacturerId>("41225")
+            .unwrap()
+            .get(),
+        0xA109
+    );
 }
 
 /// A count of blocks past what an Endpoint holds is the most it holds, never
