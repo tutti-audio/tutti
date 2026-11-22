@@ -95,7 +95,7 @@ impl AlsaEndpoints {
         let mut held = self.enumerator.lock();
         let seq = match held.take() {
             Some(seq) => seq,
-            None => client::open("tutti-enum", UmpVersion::Midi2)?,
+            None => Client::open("tutti-enum", UmpVersion::Midi2)?,
         };
         let listed = enumerate::endpoints(&seq, direction);
         *held = Some(seq);
