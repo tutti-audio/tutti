@@ -999,7 +999,7 @@ mod sensing {
             tx_jr: false,
         });
         if sensing {
-            out.active_sensing();
+            out.active_sensing().unwrap();
         }
         (out, fake, devices, threads)
     }

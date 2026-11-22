@@ -1,7 +1,7 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::Duration;
 
-use super::{Condvar, Mutex};
+use super::{Condvar, Mutex, RwLock};
 use crate::RtScope;
 
 fn panic_text(result: std::thread::Result<()>) -> String {
@@ -62,6 +62,7 @@ fn a_poisoned_lock_outside_a_scope_answers_its_guard_with_the_last_store() {
         panic!("holder panics");
     }));
     assert!(held.is_err());
+    assert!(m.0.is_poisoned());
     assert_eq!(*m.lock(), 2);
     assert_eq!(*m.try_lock().expect("free"), 2);
     assert_eq!(m.into_inner(), 2);
@@ -80,4 +81,35 @@ fn a_condvar_wait_outside_a_scope_returns_when_the_condition_clears() {
         let guard = cv.wait_while(m.lock(), |done| !*done);
         assert!(*guard);
     });
+}
+
+/// A read or a write taken inside a block panics in a debug build, each naming its call.
+#[cfg(debug_assertions)]
+#[test]
+fn reading_or_writing_an_rwlock_inside_a_scope_panics_naming_the_call() {
+    let l = RwLock::new(0);
+    let _block = RtScope::enter();
+    let read = panic_text(catch_unwind(AssertUnwindSafe(|| drop(l.read()))));
+    assert!(read.contains("RwLock::read on the audio thread"), "{read}");
+    let write = panic_text(catch_unwind(AssertUnwindSafe(|| drop(l.write()))));
+    assert!(
+        write.contains("RwLock::write on the audio thread"),
+        "{write}"
+    );
+}
+
+/// A poisoned reader-writer lock answers its guards outside a block, holding
+/// what the panicking writer stored.
+#[test]
+fn a_poisoned_rwlock_outside_a_scope_answers_its_guards_with_the_last_store() {
+    let l = RwLock::new(0);
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let mut g = l.write();
+        *g = 7;
+        panic!("poison the lock");
+    }));
+    assert!(l.0.is_poisoned());
+    assert_eq!(*l.read(), 7);
+    *l.write() = 8;
+    assert_eq!(*l.read(), 8);
 }

@@ -27,9 +27,9 @@
 //! shared cell like the others, and the node's `prepare` updates it for every
 //! holder.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_plugin_types::{
     BridgeLosses, ChunkCounters, ChunkOutcomes, PluginInvalidation, PluginTail, ServerLosses,
@@ -410,7 +410,7 @@ impl PluginControls {
 /// Lock a tail cell. A poisoned lock still holds a whole `PluginTail` (a
 /// `Copy` value written in one assignment), so it is read through.
 fn lock_tail(tail: &Mutex<PluginTail>) -> std::sync::MutexGuard<'_, PluginTail> {
-    tail.lock_recover()
+    tail.lock()
 }
 
 /// The live node's sources as a fork's gather read them

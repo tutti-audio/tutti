@@ -221,8 +221,9 @@ struct Wire {
     /// The port's handle, which keeps it open until it is taken.
     port: Option<MidiInput>,
     peer: PePeer,
-    start: Instant,
-    ms: u64,
+    /// The session's time: never behind the real clock the link's task reads, so
+    /// a wait the task began runs out when the test steps past its length.
+    at: Instant,
     /// What the updates noticed of resources, in order.
     changed: Vec<(PeerResourceId, ResourceFact)>,
 }
@@ -254,8 +255,7 @@ impl Wire {
             fake,
             port: Some(port),
             peer: PePeer::new(store, requests),
-            start: Instant::now(),
-            ms: 0,
+            at: Instant::now(),
             changed: Vec::new(),
         };
         wire.run(120);
@@ -269,8 +269,8 @@ impl Wire {
     }
 
     fn step(&mut self, by: u64) {
-        self.ms += by;
-        let now = self.start + Duration::from_millis(self.ms);
+        let now = self.at.max(Instant::now()) + Duration::from_millis(by);
+        self.at = now;
         for event in update_at(&mut self.s, now) {
             if let SessionEvent::Peer(PeerEvent::ResourceChanged { id, fact }) = event {
                 self.changed.push((id, fact));
@@ -393,7 +393,7 @@ fn a_fetch_whose_peer_leaves_before_it_answers_is_disconnected() {
     .packets(MidiGroup::FIRST)
     .unwrap()
     {
-        let now = wire.start + Duration::from_millis(wire.ms);
+        let now = wire.now();
         assert!(wire.fake.send_input(EndpointId::from_raw(RAW), ump, now));
     }
     wire.run(5);
@@ -786,7 +786,7 @@ fn subscribable() -> ResourceStore {
 
 impl Wire {
     fn now(&self) -> Instant {
-        self.start + Duration::from_millis(self.ms)
+        self.at
     }
 
     /// What the live Subscriptions hold of `resource`, as the port's info reads now.
@@ -1441,7 +1441,7 @@ mod state {
         .packets(tutti_ump::MidiGroup::FIRST)
         .unwrap()
         {
-            let now = wire.start + std::time::Duration::from_millis(wire.ms);
+            let now = wire.now();
             assert!(wire.fake.send_input(EndpointId::from_raw(RAW), ump, now));
         }
         wire.run(20);

@@ -6,12 +6,12 @@
 //! by the next [`Session::update`] (in [`Phase::Commit`](crate::Phase::Commit),
 //! before the commit), live, with no restart.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use tutti_buffers::FoldLevels;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_engine::{OutputLevels, OutputMap, Routing, RoutingError};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use crate::value::{Cell, SetRefusal, Target};
 use crate::{Clock, Session};
@@ -130,7 +130,7 @@ pub(crate) type FactsCell = Arc<Mutex<Option<OutputFacts>>>;
 /// The cell of the session's output policy, checking against `facts`.
 pub(crate) fn output_cell(facts: FactsCell) -> Arc<Cell<OutputPolicy>> {
     Cell::new(OutputPolicy::default(), move |policy| {
-        let facts = facts.lock_recover();
+        let facts = facts.lock();
         let facts = facts.as_ref().ok_or(OutputPolicyError::Detached)?;
         if policy.outputs.len() > usize::from(facts.device.count()) {
             return Err(OutputPolicyError::StripPast {

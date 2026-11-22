@@ -683,10 +683,10 @@ impl OpenInput {
 /// ([`follow`](Self::follow) takes it from a
 /// [`MidiSession::poll`](crate::MidiSession::poll) report). UMP Stream messages pass in every form.
 pub struct OpenOutput {
-    /// The Active Sensing task, once [`active_sensing`](Self::active_sensing)
-    /// started it. Declared first: it is cancelled before the sink drops. A task
-    /// being polled when it is cancelled ends on its driver, which then drops the
-    /// sink it holds, so the connection may close on that thread.
+    /// The Active Sensing thread, once [`active_sensing`](Self::active_sensing)
+    /// started it. Declared first: it ends before the sink drops. A drop on a thread
+    /// that drives an executor does not wait for it, so the thread may drop the
+    /// sink it holds last and the connection may close there.
     heartbeat: Option<Heartbeat>,
     info: DeviceInfo,
     sink: Arc<dyn DeviceOut>,
@@ -696,7 +696,7 @@ pub struct OpenOutput {
     /// The events that became no packet in the device's wire form, for
     /// [`unrepresentable`](Self::unrepresentable).
     unrepresentable: u64,
-    /// What the heartbeat is spawned on. Declared after `sink`: the sink ends its
+    /// What the heartbeat thread belongs to. Declared after `sink`: the sink ends its
     /// sender and frees the port before the last clone of the executor can shut
     /// it down.
     executor: Executor,
@@ -711,28 +711,32 @@ impl core::fmt::Debug for OpenOutput {
 }
 
 impl OpenOutput {
-    /// Starts this output sending Active Sensing (`0xFE`) from a task on the
-    /// executor its [`Devices`] was opened with, whenever it has been silent for
+    /// Starts this output sending Active Sensing (`0xFE`) from a dedicated thread
+    /// of the executor its [`Devices`] was opened with, whenever it has been
+    /// silent for
     /// [`ACTIVE_SENSING_INTERVAL`](tutti_midi_runtime::ACTIVE_SENSING_INTERVAL),
     /// until it is dropped: a transmitter that starts goes on (MIDI 1.0
     /// Detailed Specification p. 32), so there is no stopping it short of
-    /// closing the output. Dropping the output cancels the task without waiting
-    /// for a send under way.
+    /// closing the output. The thread polls only the heartbeat and fires its own
+    /// sleeps, so it keeps its cadence whether or not the app drives the
+    /// executor. Dropping the output stops the thread and waits for it to end.
+    /// The thread sends nothing while the output's Protocol is MIDI 2.0, which
+    /// has no Active Sensing, and sends again if the Protocol returns to
+    /// MIDI 1.0. Starting it on an output that already has one does nothing.
     ///
-    /// **The task runs only while something drives the executor.** On an executor
-    /// the app drives, Active Sensing stops when the app stops driving it, and a
-    /// receiver that has seen one releases its notes after about 300 ms.
-    /// The task sends nothing while the output's
-    /// Protocol is MIDI 2.0, which has no Active Sensing, and sends again if
-    /// the Protocol returns to MIDI 1.0.
-    pub fn active_sensing(&mut self) {
+    /// # Errors
+    ///
+    /// [`MidiHardwareError::Spawn`] when the OS refuses the thread; the output
+    /// sends no Active Sensing.
+    pub fn active_sensing(&mut self) -> Result<()> {
         if self.heartbeat.is_none() {
             self.heartbeat = Some(Heartbeat::start(
                 &self.executor,
                 Arc::clone(&self.sink),
                 self.wire.config().protocol,
-            ));
+            )?);
         }
+        Ok(())
     }
 
     /// Whether the output can still send; see

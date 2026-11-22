@@ -13,10 +13,10 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, MutexGuard};
 use tutti_buffers::{Float, Wave};
 use tutti_platform::Identity;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 /// Bounded LRU cache with entry count and byte limits.
 ///
@@ -120,7 +120,7 @@ impl<F: Float> LruCache<F> {
     /// The map, locked. Poisoning is ignored: nothing runs under the lock that
     /// can leave the map half-changed.
     fn lock(&self) -> MutexGuard<'_, Inner<F>> {
-        self.inner.lock_recover()
+        self.inner.lock()
     }
 
     /// The resident wave for `key`, if any, marking it most-recently-used.

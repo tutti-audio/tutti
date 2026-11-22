@@ -496,11 +496,11 @@ impl<F: Float> Node<F> for TestNode<F> {
                 // event inputs are consumed deterministically too.
                 let mut heads = [0usize; 8];
                 for i in 0..n {
-                    for (p, h) in heads.iter_mut().enumerate().take(inputs as usize) {
+                    for (p, h) in (0..inputs).zip(heads.iter_mut()) {
                         let evs = io.events(p);
                         while *h < evs.len() && evs[*h].offset.index() == i {
                             if let EventKind::Midi(Ump(w)) = evs[*h].kind {
-                                self.state = 0.5 * self.state + (w[0] % 97) as f32 + p as f32;
+                                self.state = 0.5 * self.state + (w[0] % 97) as f32 + f32::from(p);
                             }
                             *h += 1;
                         }
@@ -575,10 +575,11 @@ impl<F: Float> Node<F> for TestNode<F> {
                 // The gain follows every event on every port, in port order
                 // (order-sensitive, like `Consumer`), and stays positive so
                 // silence stays `+0.0`.
-                for p in 0..events_in as usize {
+                for p in 0..events_in {
                     for e in io.events(p) {
                         if let EventKind::Midi(Ump(w)) = e.kind {
-                            self.state = 0.5 * self.state + ((w[0] % 7) as f32 + p as f32) * 0.125;
+                            self.state =
+                                0.5 * self.state + ((w[0] % 7) as f32 + f32::from(p)) * 0.125;
                         }
                     }
                 }
@@ -588,8 +589,8 @@ impl<F: Float> Node<F> for TestNode<F> {
                     io.channel(c).map(|x| x * g);
                 }
                 if events_in > 0 {
-                    for q in 0..events_out as usize {
-                        let from = io.events(q % events_in as usize);
+                    for q in 0..events_out {
+                        let from = io.events(q % events_in);
                         for &e in from {
                             let _ = io.event_out(q).push(e);
                         }

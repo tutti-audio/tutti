@@ -5,8 +5,8 @@
 //! reproducible timeline without a real CPAL callback (tests,
 //! automation scrubbing) can use it.
 
-use std::sync::{Arc, Mutex, MutexGuard};
-use tutti_rt::LockExt;
+use std::sync::{Arc, MutexGuard};
+use tutti_rt::Mutex;
 use tutti_tempo::TempoMap;
 
 use super::walk::TempoWalk;
@@ -207,7 +207,7 @@ impl OfflineTimeline {
     fn lock(&self) -> MutexGuard<'_, Head> {
         // A panic mid-move leaves a whole `FrameClock` (it is `Copy` and
         // moved by value), so a poisoned lock still holds a position.
-        self.clock.lock_recover()
+        self.clock.lock()
     }
 
     /// Publish `clock`'s beat, and its segment's generation, to readers.

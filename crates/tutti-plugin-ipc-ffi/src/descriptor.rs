@@ -20,6 +20,23 @@ use std::time::Duration;
 /// The one payload byte of a descriptor message.
 const MARK: u8 = 0xFD;
 
+/// How long [`receive`] waits for the descriptor's byte once the frame that
+/// announces it has been read: the sender writes both back to back, so this
+/// only ends a peer that announced a descriptor and sent none. It guards a
+/// hang and measures nothing.
+const DESCRIPTOR_PATIENCE: Duration = Duration::from_secs(2);
+
+// How a received descriptor comes to be closed on `exec` is the platform's: the
+// one module chosen here.
+#[cfg(target_os = "linux")]
+#[path = "descriptor/linux.rs"]
+mod platform;
+#[cfg(target_os = "macos")]
+#[path = "descriptor/macos.rs"]
+mod platform;
+
+pub(crate) use platform::receive;
+
 /// Sends `fd` over `socket` as one byte carrying it.
 ///
 /// # Errors

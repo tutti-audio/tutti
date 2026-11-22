@@ -11,21 +11,13 @@ use crate::descriptor::{self, duplicate, file_error};
 use rustix::fs::{
     MemfdFlags, SealFlags, fcntl_add_seals, fcntl_get_seals, ftruncate, memfd_create,
 };
-use rustix::net::RecvFlags;
 use std::fs::File;
 use std::os::fd::OwnedFd;
-use std::time::Duration;
 
 /// The seals every slab carries from the moment it is shared.
 const SEALS: SealFlags = SealFlags::SHRINK
     .union(SealFlags::GROW)
     .union(SealFlags::SEAL);
-
-/// How long [`receive`] waits for the descriptor's byte once the frame that
-/// announces it has been read: the sender writes both back to back, so this
-/// only ends a peer that announced a descriptor and sent none. It guards a
-/// hang and measures nothing.
-const DESCRIPTOR_PATIENCE: Duration = Duration::from_secs(2);
 
 /// What the slab's owner holds, and what a peer receives: the memory file.
 pub(super) type Slab = OwnedFd;
@@ -107,13 +99,7 @@ pub(super) fn send(conn: Connection<'_>, slab: &Slab) -> std::io::Result<()> {
 
 /// Receives the slab a frame announced, over `conn`.
 pub(super) fn receive(conn: Connection<'_>, _: SlabWire) -> Result<Slab, SlabError> {
-    receive_descriptor(conn)
-}
-
-/// Receives the one descriptor a frame announced, over `conn`, closed on `exec`
-/// from the moment it arrives.
-pub(crate) fn receive_descriptor(conn: Connection<'_>) -> Result<OwnedFd, SlabError> {
-    descriptor::recv(conn, RecvFlags::CMSG_CLOEXEC, DESCRIPTOR_PATIENCE)
+    descriptor::receive(conn)
 }
 
 #[cfg(test)]
