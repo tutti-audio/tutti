@@ -90,10 +90,9 @@
 //!    [`RenderMode::Realtime`](tutti_plugin_types::RenderMode) again unless the
 //!    live plugin ran offline. The pipeline reads the armed state at every
 //!    chunk, so a re-prepare in the other mode switches the wait at once. A
-//!    fork is **watched** in either mode: its
-//!    `prepare` (`IpcProcessor::retune`) settles the server's queued rate and
-//!    mode changes and records the
-//!    latency its graph is compiled against.
+//!    fork is **watched** in either mode: its `prepare`
+//!    (`IpcProcessor::retune`) settles the server's queued rate and mode
+//!    changes and records the latency its graph is compiled against.
 //!
 //! Any failure is a [`PluginForkError`] naming the step, and the fresh
 //! instance (if one started) is dropped with it, which kills and reaps its
