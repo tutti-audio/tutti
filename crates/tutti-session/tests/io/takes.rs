@@ -5,9 +5,10 @@
 
 use std::any::Any;
 use std::error::Error as _;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::Instant;
+use tutti_rt::Mutex;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Interleaved, Sink, SinkFailed};
@@ -44,7 +45,7 @@ impl std::fmt::Debug for Capture {
 
 impl InputOpener for Opener {
     fn open(&mut self, config: &MicConfig, rate: SampleRate) -> tutti_cpal::Result<OpenedInput> {
-        let mut capture = self.0.lock().unwrap();
+        let mut capture = self.0.lock();
         let (ring, writer) = InletRing::pair(ChannelLayout::STEREO, Samples::new(1 << 16), rate);
         capture.writer = Some(writer);
         capture.latency = config.latency.clone();
@@ -125,7 +126,6 @@ impl Rig {
             .collect();
         self.capture
             .lock()
-            .unwrap()
             .writer
             .as_mut()
             .expect("opened")
@@ -323,7 +323,6 @@ fn placement_is_the_formula_with_each_term_stated() {
     rig.delay = Some(Duration::from_millis(10));
     rig.capture
         .lock()
-        .unwrap()
         .latency
         .as_ref()
         .expect("handed a cell")

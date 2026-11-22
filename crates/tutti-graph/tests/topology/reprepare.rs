@@ -7,8 +7,9 @@
 use tutti_graph::testing as common;
 
 use std::collections::BTreeSet;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tutti_buffers::MaxBlock;
+use tutti_rt::Mutex;
 
 use common::{Kind, TestNode};
 use tutti_buffers::ChannelLayout;
@@ -366,7 +367,7 @@ impl Node for RateLatency {
     }
     fn prepare(&mut self, p: &Prepare) {
         self.latency = (p.sample_rate().get() / 1000.0) as usize;
-        self.log.lock().unwrap().push(*p);
+        self.log.lock().push(*p);
     }
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         io.channel(0).map(|x| x);
@@ -415,7 +416,7 @@ fn every_unit_is_re_prepared_and_its_new_latency_compiled() {
     ed.spec_mut()
         .topology
         .set_outputs(vec![PortSource::Node(OutputPort { node: SUM, port: 0 })]);
-    log.lock().unwrap().clear();
+    log.lock().clear();
 
     let p = prep(96_000.0, 64);
     ed.reprepare(p).expect("reprepares");
@@ -425,7 +426,7 @@ fn every_unit_is_re_prepared_and_its_new_latency_compiled() {
     exec.apply_pending();
     ed.collect();
     assert_eq!(
-        *log.lock().unwrap(),
+        *log.lock(),
         vec![p, p],
         "each unit once, with the new Prepare"
     );
