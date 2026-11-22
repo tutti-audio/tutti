@@ -15,7 +15,9 @@
 //! is the correlation of their outputs to one white input. The convolution visits only the
 //! nonzero taps.
 
-use tutti_buffers::{ChannelLayout, Float, Planes, PlanesMut};
+use crate::BlockMismatch;
+use crate::block::expect_widths;
+use tutti_buffers::{ChannelLayout, Float, InputOutput};
 use tutti_rt::SplitMix64;
 use tutti_units::{Db, Gain, Hz, SampleRate, SampleSpan, Samples, Seconds};
 
@@ -257,14 +259,16 @@ impl<F: Float> Decorrelator<F> {
         }
     }
 
-    /// Runs `input` into `output`, channel by channel: the fewer of the two views' channels
-    /// and frames. No allocation.
-    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = input
-            .channels()
-            .min(output.channels())
-            .min(self.channels.len());
+    /// Runs `input` into `output`, channel by channel. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels.
+    pub fn process(&mut self, block: &mut InputOutput<'_, F>) -> Result<(), BlockMismatch> {
+        let width = self.channels.len();
+        expect_widths(block, width, width)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         for (c, channel) in self.channels.iter_mut().enumerate().take(width) {
             let x = &input.plane(c).samples()[..frames];
             let mut plane = output.plane_mut(c);
@@ -277,6 +281,7 @@ impl<F: Float> Decorrelator<F> {
                 *y = sum;
             }
         }
+        Ok(())
     }
 }
 

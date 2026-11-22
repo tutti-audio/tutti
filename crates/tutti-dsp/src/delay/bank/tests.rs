@@ -5,6 +5,7 @@ use tutti_units::{Bpm, Feedback, SampleRate, Seconds};
 
 use super::*;
 use crate::{ChannelTimes, FeedbackRouting, GAIN_RAMP, MaxDelay, NoteTimes};
+use tutti_buffers::InputOutput;
 
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
 // format, so their tolerances are `f32`'s.
@@ -85,12 +86,17 @@ impl Rig {
                 time: signals[0].map(|l| Mono::new(&l[at..end])),
                 feedback: signals[1].map(|l| Mono::new(&l[at..end])),
             };
-            self.bank.process(
-                &mut self.ramps,
-                signals,
-                Planes::new(&ins).unwrap(),
-                PlanesMut::new(&mut outs).unwrap(),
-            );
+            self.bank
+                .process(
+                    &mut self.ramps,
+                    signals,
+                    &mut InputOutput::paired(
+                        Planes::new(&ins).unwrap(),
+                        PlanesMut::new(&mut outs).unwrap(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
             at = end;
         }
         out
@@ -513,9 +519,13 @@ fn a_clone_keeps_the_capacity_and_the_echoes_in_flight() {
     copy.process(
         &mut k.ramps,
         DelaySignals::default(),
-        Planes::new(&[&silence[..]]).unwrap(),
-        PlanesMut::new(&mut [&mut out[..]]).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::new(&[&silence[..]]).unwrap(),
+            PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     assert_eq!(out.iter().position(|&s| s != 0.0), Some(1024 - 100));
 }
 
@@ -534,9 +544,13 @@ fn an_f64_impulse_arrives_at_the_delay() {
     bank.process(
         &mut ramps,
         DelaySignals::default(),
-        Planes::new(&ins).unwrap(),
-        PlanesMut::new(&mut outs).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::new(&ins).unwrap(),
+            PlanesMut::new(&mut outs).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     assert_eq!(y.iter().position(|&s| s != 0.0), Some(20));
 }
 
@@ -552,9 +566,13 @@ fn run_wide(layout: &DelayLayout, c: &DelayControls, x: &[Vec<f64>]) -> Vec<Vec<
     bank.process(
         &mut ramps,
         DelaySignals::default(),
-        Planes::new(&ins).unwrap(),
-        PlanesMut::new(&mut outs).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::new(&ins).unwrap(),
+            PlanesMut::new(&mut outs).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     out
 }
 

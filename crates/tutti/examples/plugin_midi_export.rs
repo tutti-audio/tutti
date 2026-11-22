@@ -91,7 +91,7 @@ fn load(
             tutti_fixtures::block_on(load)?
         }
     };
-    Ok(s.add_plugin(loaded)?)
+    Ok(s.apply(loaded)?)
 }
 
 /// Plays `plugin` (restored from `state`, if any)

@@ -129,11 +129,10 @@ impl<F: Float> Kernel for DecorrelatorKernel<F> {
         block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
     ) -> Result<(), BlockMismatch> {
-        let (input, output) = block.split();
-        if let Some(bank) = &mut self.bank {
-            bank.process(input, output);
+        match &mut self.bank {
+            Some(bank) => bank.process(block),
+            None => Ok(()),
         }
-        Ok(())
     }
 
     fn tail(&self) -> Tail {

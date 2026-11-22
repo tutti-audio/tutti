@@ -111,8 +111,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         LoadPlugin::InProcess(load) => load.run(main)?,
         LoadPlugin::OutOfProcess(load) => block_on(load.into_future())?,
     };
-    let loaded = opened.handle();
-    let node = session.add_plugin(opened)?;
+    let loaded = opened.instance();
+    let node = session.apply(opened)?;
 
     // 4. Wire it: the plugin's outputs feed the root's channels. `node` is a
     //    `Key<AnyPlugin>`: ports come from it as from any node's key

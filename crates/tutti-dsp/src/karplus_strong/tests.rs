@@ -2,6 +2,7 @@ use super::*;
 use crate::Complex64;
 use crate::testing::lock_in;
 use core::f64::consts::TAU;
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 
 const LN_1000: f64 = 3.0 * core::f64::consts::LN_10;
 
@@ -272,9 +273,13 @@ fn every_channel_of_a_three_wide_bank_rings() {
         unreachable!()
     };
     bank.process(
-        Planes::new(&[&x[..], &x[..], &x[..]]).unwrap(),
-        PlanesMut::new(&mut [&mut y0[..], &mut y1[..], &mut y2[..]]).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::new(&[&x[..], &x[..], &x[..]]).unwrap(),
+            PlanesMut::new(&mut [&mut y0[..], &mut y1[..], &mut y2[..]]).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     for (c, ch) in y.iter().enumerate() {
         assert!(ch.iter().any(|v| *v != 0.0), "channel {c} is silent");
     }

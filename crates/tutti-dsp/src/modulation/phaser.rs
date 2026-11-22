@@ -17,8 +17,10 @@
 
 use core::ops::RangeInclusive;
 
+use crate::BlockMismatch;
+use crate::block::expect_widths;
 use tutti_buffers::{ChannelLayout, MAX_CHANNELS};
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput};
 use tutti_units::{Depth, Feedback, Hz};
 
 use crate::{Lerp, Ramp};
@@ -246,15 +248,17 @@ impl<F: Float + Lerp> PhaserChain<F> {
     /// Each channel's input plus its last output scaled by the feedback goes through the
     /// stages in turn, a frame at a time and each stage across every channel, and the chain's
     /// output is the frame's and the next frame's feedback. Channel `c` of `input` feeds
-    /// channel `c` of `output`; a channel past the chain's width, or past the narrower of
-    /// the two views, is not touched, and a channel of the chain past the views is not run.
-    /// No allocation.
+    /// channel `c` of `output`. No allocation.
     ///
     /// The loop is `g z^-1 A(z)` with `A` the all-pass chain, `|A| = 1` on the circle, so it
     /// is stable for any feedback `g` below 1 and rings for about `(1 + N tau) / (1 - g)`
     /// frames at the slowest pole, `tau` a stage's greatest group delay, `(1 + |c|) / (1 - |c|)`
     /// for a coefficient `c`. The feedback ramp's values must stay below
     /// 1 ([`Feedback::MAX_STABLE`] is the bound a caller holds them to).
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the chain's width in channels.
     ///
     /// # Panics
     ///
@@ -263,11 +267,12 @@ impl<F: Float + Lerp> PhaserChain<F> {
         &mut self,
         complements: &mut [Ramp<F>],
         feedback: &mut Ramp<F>,
-        input: Planes<'_, F>,
-        mut output: PlanesMut<'_, '_, F>,
-    ) {
-        let frames = input.frames().get().min(output.frames().get());
-        let run = self.width.min(input.channels()).min(output.channels());
+        block: &mut InputOutput<'_, F>,
+    ) -> Result<(), BlockMismatch> {
+        let run = self.width;
+        expect_widths(block, run, run)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let xs: [&[F]; MAX_PHASER_CHANNELS] = core::array::from_fn(|c| {
             if c < run {
                 &input.plane(c).samples()[..frames]
@@ -309,6 +314,7 @@ impl<F: Float + Lerp> PhaserChain<F> {
             ramp.advance(taken);
         }
         feedback.advance(taken);
+        Ok(())
     }
 
     /// Runs `frame` (one sample per channel) through the stages in turn, each stage across

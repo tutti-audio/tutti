@@ -1,5 +1,6 @@
 use super::*;
 use crate::{Inline, Tap};
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 use tutti_units::Gain;
 
 fn tap(delay: f64, gain: f64, channel: u8) -> Tap {
@@ -26,9 +27,13 @@ fn run(er: &mut EarlyReflections<f64>, input: &[Vec<f64>], block: usize) -> Vec<
         let x: Vec<Vec<f64>> = input.iter().map(|c| c[start..end].to_vec()).collect();
         let mut y: Vec<Vec<f64>> = vec![vec![0.0; end - start]; out.len()];
         er.process(
-            Planes::from_vecs(&x).unwrap(),
-            PlanesMut::from_vecs(&mut y).unwrap(),
-        );
+            &mut InputOutput::paired(
+                Planes::from_vecs(&x).unwrap(),
+                PlanesMut::from_vecs(&mut y).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         for (o, y) in out.iter_mut().zip(&y) {
             o[start..end].copy_from_slice(y);
         }

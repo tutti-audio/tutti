@@ -1,6 +1,6 @@
 //! Hosted plugins in the session (feature `plugin`): the load that opens one
-//! ([`Session::load_plugin`]), the add that puts it in the graph
-//! ([`Session::add_plugin`]), the swap that replaces the plugin at a node
+//! ([`Session::load_plugin`]), the apply that puts it in the graph
+//! ([`Session::apply`]), the swap that replaces the plugin at a node
 //! ([`Session::swap_plugin`]), the view of the record the session keeps for each
 //! one ([`Plugin`]), and the work of [`Phase::Plugins`](crate::Phase::Plugins) and
 //! [`Phase::RenderMode`](crate::Phase::RenderMode).
@@ -8,14 +8,14 @@
 //! # The load
 //!
 //! A plugin is a value the app runs ([`LoadPlugin`]): an in-process plugin on the
-//! main thread, an out-of-process one on any thread. It returns a refcounted handle ([`LoadedPlugin`]); [`Session::add_plugin`] puts
+//! main thread, an out-of-process one on any thread. It returns a [`LoadedPlugin`], which has a refcounted [`PluginInstance`]; [`Session::apply`] puts
 //! its node in the graph through the one install, and the node's record holds a
-//! clone of the handle until the record retires.
+//! clone of the instance until the record retires.
 //!
 //! # The record
 //!
 //! Each plugin the graph holds (`Graph::add_plugin`,
-//! [`Session::add_plugin`]) has a record,
+//! [`Session::apply`]) has a record,
 //! keyed by its [`NodeKey`] and lent as a [`Plugin`] ([`Session::plugin_view`]): the [`PluginRef`] it is, its handle, its
 //! controls (an out-of-process plugin's latency and meter cells), its
 //! liveness, whether it was told the render mode, its last good state
@@ -180,8 +180,8 @@ pub(crate) use lost::Lost;
 
 use load::NodeLink;
 pub use load::{
-    AddPluginError, LoadInProcess, LoadOutOfProcess, LoadPlugin, LoadedPlugin, LoadingOutOfProcess,
-    PluginNode, SwapPluginError,
+    AddPluginError, LoadInProcess, LoadOutOfProcess, LoadPlugin, LoadedPlugin, LoadingPlugin,
+    PluginInstance, SwapPluginError,
 };
 pub use opened::{PluginCause, PluginInfo, PluginPorts};
 pub use preset::{
@@ -1561,7 +1561,7 @@ impl HostedPlugin {
     }
 }
 
-/// The type of a hosted plugin's [`Key`]: what [`Session::add_plugin`]
+/// The type of a hosted plugin's [`Key`]: what [`Session::apply`]
 /// and [`Graph::add_plugin`](crate::Graph::add_plugin) return, so a plugin's
 /// ports and parameters are methods of its key as a native node's are.
 ///
@@ -1846,7 +1846,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
 
     /// Puts an opened plugin in the graph, unwired, and hosts it: the one
     /// place a plugin enters the session, through
-    /// [`add_plugin`](Self::add_plugin).
+    /// [`apply`](Self::apply).
     /// Its meter is the metronome's, an out-of-process plugin keeps how it
     /// was loaded for a reload (`origin`) and the session's recovery, and a
     /// parameter read that finished at the load is its mirror.
@@ -1895,7 +1895,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
 
     /// The view of the plugin hosted at `node`, a borrow of its record: its
     /// params, state, diagnostics, buses and health. It reads the
-    /// node's plugin; the handle it was loaded as ([`LoadedPlugin`]) is the
+    /// node's plugin; the instance it was loaded as ([`PluginInstance`]) is the
     /// plugin's, whether or not a node has it.
     ///
     /// # Errors

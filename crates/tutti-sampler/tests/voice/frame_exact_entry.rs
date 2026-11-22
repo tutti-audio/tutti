@@ -31,7 +31,7 @@ use tutti_buffers::Interleaved;
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_sampler::VoiceWindow;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 
 use tutti_buffers::ChannelLayout;
@@ -81,7 +81,7 @@ fn pool(start: Beat) -> VoicePool<f32> {
 
 /// A node that records the beat its block's `Env` gives the frame the clip
 /// starts on: what the voice beside it reads there. No outputs.
-struct Probe(Arc<Mutex<Option<Beat>>>);
+struct Probe(tutti_fixtures::Shared<Option<Beat>>);
 
 impl Node for Probe {
     fn shape(&self) -> Shape {
@@ -126,7 +126,7 @@ fn play(engine: &Engine, t: &Transport) -> Vec<f32> {
 /// The pool on the outputs, and a probe beside it.
 fn graph_with(
     pool: VoicePool<f32>,
-    probe: Arc<Mutex<Option<Beat>>>,
+    probe: tutti_fixtures::Shared<Option<Beat>>,
 ) -> (Editor, tutti_graph::Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
@@ -146,8 +146,8 @@ fn graph_with(
 
 fn live_graph(start: Beat) -> Run {
     let t = transport();
-    let probe = Arc::default();
-    let (mut ed, exec) = graph_with(pool(start), Arc::clone(&probe));
+    let probe = tutti_fixtures::Shared::default();
+    let (mut ed, exec) = graph_with(pool(start), probe.clone());
     let engine = Engine::new(&t, &mut ed, exec).expect("within the limits");
     let left = play(&engine, &t);
     let read = *probe.lock().expect("probe");
@@ -161,8 +161,8 @@ fn offline_graph(start: Beat) -> Run {
         sample_rate: SampleRate::of(SR),
         loop_range: None,
     });
-    let probe = Arc::default();
-    let (_ed, mut exec) = graph_with(pool(start), Arc::clone(&probe));
+    let probe = tutti_fixtures::Shared::default();
+    let (_ed, mut exec) = graph_with(pool(start), probe.clone());
     let mut left = Vec::with_capacity(FRAMES);
     let (mut l, mut r) = (vec![0.0f32; OFFLINE], vec![0.0f32; OFFLINE]);
     while left.len() < FRAMES {
@@ -182,7 +182,7 @@ fn offline_graph(start: Beat) -> Run {
 /// clock (counted, as an engine's).
 fn manual(start: Beat) -> Run {
     let mut node = contract::prepared(pool(start), SampleRate::of(SR), HAND);
-    let mut probe = Probe(Arc::default());
+    let mut probe = Probe(tutti_fixtures::Shared::default());
     let mut host = FrameClock::new(Beat::new(0.0), TEMPO, SampleRate::of(SR));
     let mut left = Vec::with_capacity(FRAMES);
     while left.len() < FRAMES {

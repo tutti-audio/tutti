@@ -8,7 +8,9 @@
 //! fractional one is the linear blend of the two frames around it, so an impulse puts
 //! `g (1 - f)` at `floor(d)` and `g f` one frame later, `f` the fraction of the delay.
 
-use tutti_buffers::{Float, Planes, PlanesMut};
+use crate::BlockMismatch;
+use crate::block::expect_output_width;
+use tutti_buffers::{Float, InputOutput};
 use tutti_units::{ReadPosition, SampleSpan, Samples};
 
 use crate::delay::DelayRing;
@@ -159,11 +161,17 @@ impl<F: Float> EarlyReflections<F> {
         }
     }
 
-    /// Runs `input` into `output`: the mean of the input's channels through the taps, the
-    /// fewer of the two views' frames, each output channel from the taps that feed it and
-    /// silence for a channel no tap feeds. No allocation.
-    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
-        let frames = input.frames().get().min(output.frames().get());
+    /// Runs `input` into `output`: the mean of the input's channels through the taps, each
+    /// output channel from the taps that feed it and silence for a channel no tap feeds. No
+    /// allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's output is not [`channels`](Self::channels) wide.
+    pub fn process(&mut self, block: &mut InputOutput<'_, F>) -> Result<(), BlockMismatch> {
+        expect_output_width(block, self.channels)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let scale = F::from_design(1.0 / input.channels().max(1) as f64);
         let mut planes = output.iter_mut();
         let mut ys: [Option<&mut [F]>; MAX_CHANNELS] =
@@ -189,6 +197,7 @@ impl<F: Float> EarlyReflections<F> {
                 }
             }
         }
+        Ok(())
     }
 }
 
