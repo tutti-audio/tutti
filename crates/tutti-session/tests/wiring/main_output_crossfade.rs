@@ -1,5 +1,5 @@
-//! A root declaration crossfades through the public API: the old root's
-//! output fades out and the new root's fades in over the declick length,
+//! A main output declaration crossfades through the public API: the old main output's
+//! output fades out and the new main output's fades in over the declick length,
 //! unless the declaration is made `.unfaded()`.
 //!
 //! Every figure is analytic: constants of exactly representable values and
@@ -16,7 +16,7 @@ use tutti_units::{SampleRate, Samples};
 
 const FADE: usize = 240;
 
-/// A stereo session whose root is fed (0.25, 0.75), the plan installed.
+/// A stereo session whose main output is fed (0.25, 0.75), the plan installed.
 fn session() -> Session {
     let mut s = Session::builder()
         .sample_rate(SampleRate::SR_48K)
@@ -41,7 +41,7 @@ fn block(s: &mut Session) -> Vec<f32> {
     s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
     assert!(
         out.as_chunks::<2>().0.iter().all(|f| f[0] == 0.25),
-        "the left is the same in both roots"
+        "the left is the same in both main outputs"
     );
     out.as_chunks::<2>().0.iter().map(|f| f[1]).collect()
 }
@@ -51,15 +51,15 @@ fn smootherstep(x: f64) -> f64 {
     x * x * x * (6.0 * x * x - 15.0 * x + 10.0)
 }
 
-/// **A declaration that changes the root crossfades**: the stereo root heard
+/// **A declaration that changes the main output crossfades**: the stereo main output heard
 /// as (0.25, 0.75) is declared mono, which keeps channel 0 (0.25) for both
 /// device channels. The right is `0.75 (1 - s) + 0.25 s` frame by frame over
 /// the 240 frames, and 0.25 from then on.
 #[test]
-fn a_declared_root_change_crossfades_over_the_declick() {
+fn a_declared_main_output_change_crossfades_over_the_declick() {
     let mut s = session();
-    s.declare_root_topology(Some(ChannelTopology::default_for(ChannelLayout::MONO)))
-        .expect("a mono root");
+    s.declare_main_output_topology(Some(ChannelTopology::default_for(ChannelLayout::MONO)))
+        .expect("a mono main output");
     let mut right = Vec::new();
     for _ in 0..5 {
         right.extend(block(&mut s));
@@ -75,12 +75,12 @@ fn a_declared_root_change_crossfades_over_the_declick() {
     }
 }
 
-/// **`.unfaded()` cuts**: the new root is the whole mix from the first frame.
+/// **`.unfaded()` cuts**: the new main output is the whole mix from the first frame.
 #[test]
 fn a_hard_declaration_cuts_at_the_block() {
     let mut s = session();
-    s.declare_root_topology(Some(ChannelTopology::default_for(ChannelLayout::MONO)))
-        .expect("a mono root")
+    s.declare_main_output_topology(Some(ChannelTopology::default_for(ChannelLayout::MONO)))
+        .expect("a mono main output")
         .unfaded();
     assert!(block(&mut s).iter().all(|&r| r == 0.25));
 }

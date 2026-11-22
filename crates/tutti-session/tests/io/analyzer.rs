@@ -130,13 +130,18 @@ fn a_config_the_context_refuses_opens_no_tap() {
         matches!(refused, AnalyzerError::Measure(MeasureError::ZeroBlock)),
         "{refused:?}"
     );
-    let next = s.graph().taps().open_root(Samples::new(64)).unwrap().id();
+    let next = s
+        .graph()
+        .taps()
+        .open_main_output(Samples::new(64))
+        .unwrap()
+        .id();
 
     let mut fresh = offline();
     let first = fresh
         .graph()
         .taps()
-        .open_root(Samples::new(64))
+        .open_main_output(Samples::new(64))
         .unwrap()
         .id();
     assert_eq!(next, first, "the refused open minted no tap");
@@ -158,12 +163,17 @@ fn a_view_the_tap_width_cannot_make_opens_no_tap() {
         matches!(refused, AnalyzerError::Bind(MeterBindError::Width { .. })),
         "{refused:?}"
     );
-    let next = s.graph().taps().open_root(Samples::new(64)).unwrap().id();
+    let next = s
+        .graph()
+        .taps()
+        .open_main_output(Samples::new(64))
+        .unwrap()
+        .id();
     let mut fresh = offline();
     let first = fresh
         .graph()
         .taps()
-        .open_root(Samples::new(64))
+        .open_main_output(Samples::new(64))
         .unwrap()
         .id();
     assert_eq!(next, first);

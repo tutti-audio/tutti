@@ -139,7 +139,7 @@ until it is un-parked. `vendor/` is third-party and never restyled.
   `M-NO-PRELUDE`; owner, 2026-11-13): a crate root names what it re-exports,
   so the surface is reviewable in one file, and no crate defines a `prelude`.
   An application imports from the umbrella's **flat root**
-  (`use tutti::{Session, SessionEvent, Root, Samples};`): `tutti` re-exports
+  (`use tutti::{Session, SessionEvent, MainOutput, Samples};`): `tutti` re-exports
   the app-facing items at its root by name, so a user never needs to know
   which engine crate an item lives in; the curated modules (`tutti::nodes`,
   `tutti::session`, ...) list the rest by name, each item at one path.

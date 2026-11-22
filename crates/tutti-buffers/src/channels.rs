@@ -10,7 +10,7 @@
 
 use tutti_units::Samples;
 
-/// The most channels one bus, the root, a sampler voice or a speaker layout holds: sixteen,
+/// The most channels one bus, the main output, a sampler voice or a speaker layout holds: sixteen,
 /// which is a 7.1.4 bed with room to spare and a third-order ambisonic signal exactly.
 ///
 /// A width past it is refused where it is stated, never truncated.

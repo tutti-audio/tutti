@@ -316,7 +316,7 @@ fn a_restore_applies_the_saved_state_to_a_served_plugin() {
 /// An in-process plugin in a node, in `layout`'s ports, rendering its
 /// closed-form tags (`TagOnly`: output channel `c` of port `p` holds
 /// `probe_tag(p, c)`), its stereo input fed by two constants and its first two
-/// outputs on the root.
+/// outputs on the main output.
 struct Rebound {
     s: Session,
     node: tutti_session::Key<tutti_session::AnyPlugin>,
@@ -384,7 +384,7 @@ impl Rebound {
         }
     }
 
-    /// The root's channel `ch` of one rendered block.
+    /// The main output's channel `ch` of one rendered block.
     fn channel(&mut self, ch: usize) -> Vec<f32> {
         let mut block = vec![f32::NAN; 512 * 2];
         self.s.render(
@@ -427,7 +427,7 @@ fn unwired_of(
 /// and renders through it.** The stereo plugin announces `[2, 1]` buses: the
 /// node at its key declares three outputs, nothing is unwired, the plugin runs
 /// on (it was told to restart once, by its own change, and not again for the
-/// move), and its tags reach the root through the new node.
+/// move), and its tags reach the main output through the new node.
 fn a_plugin_that_widens_its_ports_is_re_inserted_wider() {
     let mut r = rebound(0);
     let node = r.node;
@@ -464,7 +464,7 @@ fn a_plugin_that_widens_its_ports_is_re_inserted_wider() {
 /// **A plugin that narrows its ports gets a node with them, and what it
 /// dropped is reported exactly.** The stereo effect announces an instrument
 /// layout (no inputs): the two edges into its inputs are `Unwired`, once, and
-/// its outputs, still wired to the root, carry the plugin's tags.
+/// its outputs, still wired to the main output, carry the plugin's tags.
 fn a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost() {
     use tutti_session::{ChannelEdge, OutPort};
     let mut r = rebound(0);

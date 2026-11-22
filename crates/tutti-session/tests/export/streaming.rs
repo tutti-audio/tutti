@@ -92,7 +92,7 @@ fn a_bounce_of_a_streamed_ramp_at_unity_reproduces_the_files_frames() {
         .add(Clip::streaming(reader, stream).at(Beat::new(0.0)));
     s.graph()
         .connect(node, MainOutput)
-        .expect("the clip reaches the root");
+        .expect("the clip reaches the main output");
     let _ = s.update();
 
     let rendered = bounced(

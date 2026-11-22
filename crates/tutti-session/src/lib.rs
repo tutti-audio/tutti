@@ -212,8 +212,8 @@ pub use graph::ModKeys;
 #[cfg(feature = "testing")]
 pub use graph::{AudioSide, Testing};
 pub use graph::{
-    Committed, Feeder, Graph, LIVE_MAX_BLOCK, Meters, NotReopened, Reopened, ReplaceRefused,
-    Replacement, RootReader, Taps,
+    Committed, Feeder, Graph, LIVE_MAX_BLOCK, MainOutputReader, Meters, NotReopened, Reopened,
+    ReplaceRefused, Replacement, Taps,
 };
 #[cfg(feature = "capture")]
 pub use input::{Input, InputConfig, InputOpener, OpenedInput};
@@ -222,7 +222,8 @@ pub use instrument::{AnyNode, InstrumentHandle, NotInstrument};
 pub use key::{
     BusSink, BusWire, ChannelEdge, ChannelWire, Connection, Disconnection, EventEdge, EventInPort,
     EventOutPort, EventTapPort, EventWire, Fanin, InPort, Inlet, Key, MainBusWire, MainInput,
-    MainOutput, MainSink, OutPort, Outlet, Removal, RootDeclaration, SetSources, Weighted, Wire,
+    MainOutput, MainOutputDeclaration, MainSink, OutPort, Outlet, Removal, SetSources, Weighted,
+    Wire,
 };
 #[cfg(any(feature = "capture", feature = "midi"))]
 pub use latency::{Start, TakeLatency, Trim};
@@ -312,7 +313,9 @@ pub use sampler::{OpenStream, OpenStreamError, OpenedStream, OpeningStream, Samp
 #[cfg(feature = "midi")]
 pub use session::MidiNodes;
 pub use session::ModInput;
-pub use session::{AppKey, PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent};
+pub use session::{
+    AppKey, MainOutputTopologyStatus, PHASES, Phase, PhaseCx, Session, SessionEvent,
+};
 #[cfg(all(feature = "analyze", feature = "sampler"))]
 pub use signal_windows::windows_from_signal;
 #[cfg(feature = "device")]

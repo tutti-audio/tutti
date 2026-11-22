@@ -4,19 +4,19 @@
 //! methods by job.
 
 mod event;
+mod main_output;
 pub(crate) mod parts;
 mod phases;
-mod root;
 mod taps;
 #[cfg(test)]
 mod tests;
 mod transport;
 
 pub use event::SessionEvent;
+pub use main_output::MainOutputTopologyStatus;
 #[cfg(feature = "midi")]
 pub use parts::MidiNodes;
 pub use phases::{ModInput, PHASES, Phase, PhaseCx};
-pub use root::RootTopologyStatus;
 
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -117,7 +117,7 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     pub(crate) resource_ids: crate::peer::ResourceIds,
     /// The transport and the figures of the plan sent last.
     pub(crate) transport: TransportPart,
-    /// Where the mix lands: the root, the policy, the engine's output readings.
+    /// Where the mix lands: the main output, the policy, the engine's output readings.
     pub(crate) output: OutputPart<C::Float>,
     /// What the last update read, for the next one's reports.
     pub(crate) reports: Reports,

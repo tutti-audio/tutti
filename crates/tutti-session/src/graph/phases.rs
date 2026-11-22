@@ -67,13 +67,13 @@ impl<F: Float> Graph<F> {
         }
     }
 
-    /// What a commit left to report: the root readers reopened and the wiring
+    /// What a commit left to report: the main output readers reopened and the wiring
     /// a re-insert dropped.
     pub(crate) fn report_commit(&mut self, out: &mut Vec<SessionEvent>) {
         out.extend(
             self.announce_reopened()
                 .into_iter()
-                .map(|(id, topology)| SessionEvent::RootReaderReopened { id, topology }),
+                .map(|(id, topology)| SessionEvent::MainOutputReaderReopened { id, topology }),
         );
         for u in self.take_unwired() {
             out.push(SessionEvent::Unwired {

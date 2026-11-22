@@ -16,7 +16,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// after the engine has written the tap. It is read through the same
     /// [`TapReader`] as a plan tap, and is the default way to record what the
     /// output sounds like. A transport stop fades in it as it does in the
-    /// engine's output, so a take has no click there; [`Taps::open_root`](crate::Taps::open_root) is the
+    /// engine's output, so a take has no click there; [`Taps::open_main_output`](crate::Taps::open_main_output) is the
     /// pre-fader signal of the graph, aligned by the compiler, and steps at a
     /// stop for a transport-gated source.
     ///
@@ -75,14 +75,14 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     }
 
     /// Claims the reader reopened under `id`
-    /// ([`crate::SessionEvent::RootReaderReopened`]): held until then.
+    /// ([`crate::SessionEvent::MainOutputReaderReopened`]): held until then.
     ///
     /// # Errors
     ///
     /// [`NotReopened`](crate::NotReopened) when none is held under `id`.
     pub fn take_reopened(
         &mut self,
-        id: crate::RootReader,
+        id: crate::MainOutputReader,
     ) -> Result<crate::Reopened<C::Float>, crate::NotReopened> {
         self.graph.take_reopened(id)
     }
@@ -104,15 +104,15 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// phase. `None` once taken.
     ///
     /// It follows the outputs as they are re-wired or widened (up to
-    /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)). **A declared root of
+    /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)). **A declared main output of
     /// another width replaces it**
-    /// ([`Session::declare_root_topology`](crate::Session::declare_root_topology)):
+    /// ([`Session::declare_main_output_topology`](crate::Session::declare_main_output_topology)):
     /// the reader not yet taken is swapped for the new one, and one taken is
-    /// announced by [`SessionEvent::RootReaderReopened`](crate::SessionEvent::RootReaderReopened),
+    /// announced by [`SessionEvent::MainOutputReaderReopened`](crate::SessionEvent::MainOutputReaderReopened),
     /// claimed with [`Session::take_reopened`](crate::Session::take_reopened),
     /// and reads closed ([`is_closed`](MeterReader::is_closed)).
-    pub fn take_master_meter(&mut self) -> Option<MeterReader> {
-        self.graph.meters().take_master()
+    pub fn take_main_output_meter(&mut self) -> Option<MeterReader> {
+        self.graph.meters().take_main_output()
     }
 
     /// The engine's [`Load`]: each block's render time against its

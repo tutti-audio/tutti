@@ -217,7 +217,7 @@ fn exports_render_their_graph_as_wired_fresh() {
     let forked_master = render(&mut session, buffers(0.25));
     let forked_node = stem_of(&mut session, filter, 0.25);
     let (fresh_master, fresh_node) = chain_fresh(0.25);
-    // The stem is the node's own width: one channel, not the root's two.
+    // The stem is the node's own width: one channel, not the main output's two.
     assert_eq!(forked_node.len(), 1, "the stem is the mono node's width");
     for (what, fresh, forked) in [
         ("master", &fresh_master[..], &forked_master[..]),

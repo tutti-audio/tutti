@@ -294,7 +294,7 @@ fn a_lane_has_no_gain_target_and_a_removed_node_takes_its_bus_edges() {
 }
 
 // ---------------------------------------------------------------------------
-// The root as a bus sink (doc 013, "Buses", B4).
+// The main output as a bus sink (doc 013, "Buses", B4).
 // ---------------------------------------------------------------------------
 
 fn smpte(n: u16) -> ChannelTopology {
@@ -310,10 +310,11 @@ fn stereo_block(s: &mut Session) -> [Vec<f32>; 2] {
 }
 
 /// A 5.1 source (FL .5, FR .25, C .125, LFE 0, Ls .0625, Rs .03125) and a
-/// declared stereo root, committed once.
+/// declared stereo main output, committed once.
 fn main_output_rig() -> (Session, NodeKey) {
     let mut s = offline();
-    s.declare_root_topology(Some(smpte(2))).expect("stereo");
+    s.declare_main_output_topology(Some(smpte(2)))
+        .expect("stereo");
     let src = s.graph().add(Unforkable(Src {
         values: vec![0.5, 0.25, 0.125, 0.0, 0.0625, 0.03125],
         out: named(6),
@@ -322,12 +323,12 @@ fn main_output_rig() -> (Session, NodeKey) {
     (s, src.erase())
 }
 
-/// A 5.1 bus into the declared stereo root renders the ITU rows (front,
+/// A 5.1 bus into the declared stereo main output renders the ITU rows (front,
 /// centre at -3 dB, surround at -3 dB, no LFE) on the outputs, through
-/// `declare_root_topology`; disconnecting it silences them and the graph is
+/// `declare_main_output_topology`; disconnecting it silences them and the graph is
 /// marked edited both ways.
 #[test]
-fn a_bus_into_the_declared_root_renders_the_itu_rows() {
+fn a_bus_into_the_declared_main_output_renders_the_itu_rows() {
     let (mut s, src) = main_output_rig();
     let g = s.graph();
     g.connect(BusSource::Node(bus(src)), MainOutput)
@@ -363,11 +364,11 @@ fn a_bus_into_the_declared_root_renders_the_itu_rows() {
     assert!(all_are(&l, 0.0) && all_are(&r, 0.0));
 }
 
-/// An undeclared root refuses a root edge by name, storing nothing and
-/// marking nothing edited. (No root is too wide for a bus: the engine's is 8
+/// An undeclared main output refuses a main output edge by name, storing nothing and
+/// marking nothing edited. (No main output is too wide for a bus: the engine's is 8
 /// channels, a bus 16.)
 #[test]
-fn an_undeclared_root_refuses_a_bus_edge() {
+fn an_undeclared_main_output_refuses_a_bus_edge() {
     let mut r = rig();
     let g = r.s.graph();
     assert_eq!(
@@ -384,7 +385,8 @@ fn an_undeclared_root_refuses_a_bus_edge() {
 #[test]
 fn a_refused_commit_is_an_event_of_its_update() {
     let mut s = offline();
-    s.declare_root_topology(Some(smpte(2))).expect("stereo");
+    s.declare_main_output_topology(Some(smpte(2)))
+        .expect("stereo");
     let src = s.graph().add(Unforkable(Src {
         values: vec![0.25, 0.75],
         out: named(2),
@@ -402,12 +404,12 @@ fn a_refused_commit_is_an_event_of_its_update() {
     assert_eq!(
         refused(s.update()),
         0,
-        "a stereo bus into a stereo root commits"
+        "a stereo bus into a stereo main output commits"
     );
 
     // Named stereo has no place in one unassigned channel.
-    s.declare_root_topology(Some(ChannelTopology::unassigned(layout(1))))
-        .expect("an unassigned mono root");
+    s.declare_main_output_topology(Some(ChannelTopology::unassigned(layout(1))))
+        .expect("an unassigned mono main output");
     assert_eq!(refused(s.update()), 1, "the refusal is reported once");
     assert_eq!(
         refused(s.update()),
@@ -415,16 +417,16 @@ fn a_refused_commit_is_an_event_of_its_update() {
         "and not again while it fails the same way"
     );
 
-    s.declare_root_topology(Some(smpte(2)))
+    s.declare_main_output_topology(Some(smpte(2)))
         .expect("stereo again");
     assert_eq!(refused(s.update()), 0, "stereo again commits");
-    // A declaration made while that root crossfade runs waits for it, so the
+    // A declaration made while that main output crossfade runs waits for it, so the
     // fade (240 frames) renders through first.
     for _ in 0..5 {
         let _ = out0(&mut s);
     }
-    s.declare_root_topology(Some(ChannelTopology::unassigned(layout(1))))
-        .expect("an unassigned mono root");
+    s.declare_main_output_topology(Some(ChannelTopology::unassigned(layout(1))))
+        .expect("an unassigned mono main output");
     assert_eq!(
         refused(s.update()),
         1,
@@ -432,13 +434,14 @@ fn a_refused_commit_is_an_event_of_its_update() {
     );
 }
 
-/// A re-declaration that changes the root under a root edge re-lowers it at
+/// A re-declaration that changes the main output under a main output edge re-lowers it at
 /// the next commit (stereo to mono is `0.5 L + 0.5 R`), and one the edge no
 /// longer folds to is a refused commit, the plan sent last standing.
 #[test]
-fn a_redeclared_root_relowers_its_edges_and_a_misfit_refuses_the_commit() {
+fn a_redeclared_main_output_relowers_its_edges_and_a_misfit_refuses_the_commit() {
     let mut s = offline();
-    s.declare_root_topology(Some(smpte(2))).expect("stereo");
+    s.declare_main_output_topology(Some(smpte(2)))
+        .expect("stereo");
     let src = s.graph().add(Unforkable(Src {
         values: vec![0.25, 0.75],
         out: named(2),
@@ -450,10 +453,10 @@ fn a_redeclared_root_relowers_its_edges_and_a_misfit_refuses_the_commit() {
     let [l, r] = stereo_block(&mut s);
     assert!(all_are(&l, 0.25) && all_are(&r, 0.75));
 
-    // Same width, another topology: the root's lanes are re-lowered, so the
+    // Same width, another topology: the main output's lanes are re-lowered, so the
     // graph is edited though no width moved (stereo named to stereo unassigned
     // is the identity, so the render is the same).
-    s.declare_root_topology(Some(ChannelTopology::unassigned(layout(2))))
+    s.declare_main_output_topology(Some(ChannelTopology::unassigned(layout(2))))
         .expect("an unassigned pair")
         .unfaded();
     assert!(s.graph_ref().has_uncommitted_edits());
@@ -461,7 +464,7 @@ fn a_redeclared_root_relowers_its_edges_and_a_misfit_refuses_the_commit() {
     assert!(all_are(&l, 0.25) && all_are(&r, 0.75));
 
     // A cut: the render is read at the first block after it.
-    s.declare_root_topology(Some(smpte(1)))
+    s.declare_main_output_topology(Some(smpte(1)))
         .expect("mono")
         .unfaded();
     assert!(s.graph_ref().has_uncommitted_edits());
@@ -469,8 +472,8 @@ fn a_redeclared_root_relowers_its_edges_and_a_misfit_refuses_the_commit() {
     assert!(all_are(&l, 0.5), "{:?}", &l[..2]);
 
     // Named stereo has no place in one unassigned channel.
-    s.declare_root_topology(Some(ChannelTopology::unassigned(layout(1))))
-        .expect("an unassigned mono root");
+    s.declare_main_output_topology(Some(ChannelTopology::unassigned(layout(1))))
+        .expect("an unassigned mono main output");
     assert!(matches!(s.commit(), Committed::Refused(_)));
     let [l, _] = stereo_block(&mut s);
     assert!(all_are(&l, 0.5), "the plan sent last stands");

@@ -1,4 +1,4 @@
-//! The folds from the graph main output to the device: built once on the control side,
+//! The folds from the graph's main output to the device: built once on the control side,
 //! lent to the audio thread.
 //!
 //! The main output renders at the width of its plan (at most
@@ -328,7 +328,7 @@ pub struct OutputPlacement {
 
 /// The control side of the engine's output folds: what the session keeps when
 /// the [`Engine`](crate::Engine) goes to the audio thread, to say what each
-/// graph main output is, what each device is, and which devices it can take.
+/// graph's main output is, what each device is, and which devices it can take.
 ///
 /// Cloneable; every clone publishes into the one cell the engine lends from.
 /// A publish is a read-modify-write, so clones serialize on a lock (control

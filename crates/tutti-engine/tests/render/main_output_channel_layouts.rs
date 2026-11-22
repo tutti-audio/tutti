@@ -1,4 +1,4 @@
-//! The graph main output's channel count must not panic the audio callback, AND a
+//! The graph's main output's channel count must not panic the audio callback, AND a
 //! surround main output must reach the output correctly — either straight through to a
 //! matching-width device, or folded to a narrower one via the ITU/Dolby matrix.
 //!

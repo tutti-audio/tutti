@@ -169,7 +169,7 @@ fn play(clip: tutti_sampler::Clip<f32>, frames: usize) -> Vec<f32> {
     let key = s.graph().add(clip);
     s.graph()
         .set_sources(MainOutput::channel(0), [OutPort::new(key, 0)])
-        .expect("the clip's channel into the root's");
+        .expect("the clip's channel into the main output's");
     let _ = s.update();
     // A streamed clip's ring is filled on the streamer's thread, and an
     // offline render does not wait for it: wait for the stream to say it is

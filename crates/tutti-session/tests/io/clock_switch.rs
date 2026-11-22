@@ -170,11 +170,11 @@ fn a_device_that_will_not_open_returns_the_session_running_on_its_old_clock() {
     wait_past(&mut s, before);
 }
 
-/// **A root the new device cannot place is refused before the timer stops**:
+/// **A main output the new device cannot place is refused before the timer stops**:
 /// six unassigned buses on a stereo card. The error is named, the card's stream
 /// never opened, and the timer renders on.
 #[test]
-fn a_root_the_device_cannot_place_is_refused_before_the_timer_stops() {
+fn a_main_output_the_device_cannot_place_is_refused_before_the_timer_stops() {
     let mut s = system_builder()
         .outputs(ChannelLayout::from(6u16))
         .main_output_topology(ChannelTopology::unassigned(ChannelLayout::from(6u16)))
@@ -185,7 +185,7 @@ fn a_root_the_device_cannot_place_is_refused_before_the_timer_stops() {
     let (driver, stream) = ManualStreamDriver::new();
     let err = s
         .into_device_on(stereo(SampleRate::SR_48K), driver)
-        .expect_err("a six-wide unassigned root has no place on two channels");
+        .expect_err("a six-wide unassigned main output has no place on two channels");
     assert!(
         matches!(err.error().error(), Error::Unplaceable { .. }),
         "{}",

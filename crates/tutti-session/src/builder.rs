@@ -41,7 +41,7 @@ use tutti_engine::BlockDates;
 ///   rate, the width and the callback, so none of those is a setter, and
 ///   `build` returns a `LiveSession` with the stream running.
 ///
-/// Everything else (workers, MIDI, plugins, the root topology) is
+/// Everything else (workers, MIDI, plugins, the main output topology) is
 /// set the same way on every clock.
 ///
 /// ```
@@ -108,7 +108,7 @@ impl Default for BlockConfig {
 pub(crate) struct Options {
     inputs: ChannelLayout,
     outputs_floor: ChannelLayout,
-    root: Option<ChannelTopology>,
+    main_output: Option<ChannelTopology>,
     /// What the output device's channels are, when the host states it
     /// ([`device_topology`](SessionBuilder::device_topology)).
     device_topology: Option<ChannelTopology>,
@@ -152,7 +152,7 @@ impl Default for Options {
         Self {
             inputs: ChannelLayout::EMPTY,
             outputs_floor: ChannelLayout::STEREO,
-            root: None,
+            main_output: None,
             device_topology: None,
             render_workers: Workers::SERIAL,
             #[cfg(feature = "device")]
@@ -281,7 +281,7 @@ impl<C: Clock<Config = BlockConfig>> SessionBuilder<C> {
     }
 
     /// The width of every block the host pulls with [`Session::render`] (or
-    /// the system clock renders). The graph root is
+    /// the system clock renders). The graph's main output is
     /// [`main_output_width`]`(outputs_floor, outputs)` wide. Default stereo.
     #[must_use]
     pub fn outputs(mut self, outputs: ChannelLayout) -> Self {
@@ -384,13 +384,13 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
     /// with [`Session::render`] (`Engine::process`), each up to
     /// [`max_block`](Self::max_block) frames per graph block (a longer one
     /// renders as consecutive graph blocks),
-    /// [`outputs`](Self::outputs) wide; the graph root is
+    /// [`outputs`](Self::outputs) wide; the graph's main output is
     /// [`main_output_width`]`(outputs_floor, outputs)`.
     ///
     /// # Errors
     ///
     /// When the engine refuses the graph, `outputs` has no channels or cannot take
-    /// the root ([`Error::Output`](crate::Error::Output)),
+    /// the main output ([`Error::Output`](crate::Error::Output)),
     /// (`midi-hardware`) the MIDI device watch cannot start, or (`sampler`) the disk streamer cannot start.
     pub fn build(mut self) -> Result<OfflineSession<&'static str, F>> {
         let BlockConfig {
@@ -398,10 +398,10 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
             outputs: layout,
             max_block,
         } = self.config;
-        let root = self.main_output_width(layout);
-        self.check_placement(root, layout)?;
+        let main_output = self.main_output_width(layout);
+        self.check_placement(main_output, layout)?;
         let runtime = Self::session_executor()?;
-        let mut parts = self.parts(runtime, rate, max_block, None, root)?;
+        let mut parts = self.parts(runtime, rate, max_block, None, main_output)?;
         // The width of every block the host pulls.
         let mut engine = parts.graph.engine(
             &parts.transport,
@@ -433,14 +433,14 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
     ///
     /// # Errors
     ///
-    /// [`Error::Output`](crate::Error::Output) when the declared root topology is empty or wider
+    /// [`Error::Output`](crate::Error::Output) when the declared main output topology is empty or wider
     /// than the engine renders; there is no device to place it on.
     #[cfg(feature = "testing")]
     pub fn build_detached(
         mut self,
         rate: SampleRate,
     ) -> Result<Session<&'static str, crate::Detached<F>>> {
-        let outputs = self.opts.root.as_ref().map_or_else(
+        let outputs = self.opts.main_output.as_ref().map_or_else(
             || usize::from(self.opts.outputs_floor.count()),
             |r| usize::from(r.width().count()),
         );
@@ -454,7 +454,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
             transport.settings().tempo_reader(),
         );
         graph.set_render_workers(self.opts.render_workers);
-        graph.declare_root(self.opts.root.clone(), true)?;
+        graph.declare_main_output(self.opts.main_output.clone(), true)?;
         let (executor, background) = Self::session_executor()?;
         let bells = tutti_rt::Bells::new(&executor).map_err(crate::Error::Bells)?;
         self.session(
@@ -492,7 +492,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
     /// # Errors
     ///
     /// When the engine refuses the graph, `outputs` has no channels or cannot
-    /// take the root ([`Error::Output`](crate::Error::Output)),
+    /// take the main output ([`Error::Output`](crate::Error::Output)),
     /// (`midi-hardware`) the MIDI device watch cannot start, (`sampler`) the
     /// disk streamer cannot start, or the OS refuses the timer thread
     /// ([`Error::Clock`](crate::Error::Clock)), or [`max_block`](Self::max_block) is past
@@ -505,11 +505,11 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
             outputs: layout,
             max_block,
         } = self.config;
-        let root = self.main_output_width(layout);
-        self.check_placement(root, layout)?;
+        let main_output = self.main_output_width(layout);
+        self.check_placement(main_output, layout)?;
         let runtime = Self::session_executor()?;
         let timer = tutti_engine::TimerDriver::new(&runtime.0);
-        let mut parts = self.parts(runtime, rate, max_block, Some(max_block), root)?;
+        let mut parts = self.parts(runtime, rate, max_block, Some(max_block), main_output)?;
         let mut engine = parts.graph.engine(
             &parts.transport,
             layout,
@@ -640,14 +640,14 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
     ) -> Result<crate::LiveSession<&'static str, F>> {
         crate::background::require(crate::BackgroundWork::Device)?;
         let spec = audio_engine.spec().clone();
-        let root = self.main_output_width(spec.channels);
-        self.check_placement(root, spec.channels)?;
+        let main_output = self.main_output_width(spec.channels);
+        self.check_placement(main_output, spec.channels)?;
         let mut parts = self.parts(
             runtime,
             spec.sample_rate,
             LIVE_MAX_BLOCK,
             spec.quantum.map(tutti_engine::OutputQuantum::max_block),
-            root,
+            main_output,
         )?;
         let mut engine = parts.graph.engine(
             &parts.transport,
@@ -720,7 +720,7 @@ impl<C: Clock> SessionBuilder<C> {
         self
     }
 
-    /// The project's output width: the graph root is at least this wide, and
+    /// The project's output width: the graph's main output is at least this wide, and
     /// at least the device's ([`main_output_width`]). Default stereo.
     #[must_use]
     pub fn outputs_floor(mut self, outputs: ChannelLayout) -> Self {
@@ -728,20 +728,20 @@ impl<C: Clock> SessionBuilder<C> {
         self
     }
 
-    /// Declares the graph root's channels from the start
-    /// ([`Session::declare_root_topology`]): the root is exactly as wide as
-    /// `root`, whatever [`outputs_floor`](Self::outputs_floor) and the device
+    /// Declares the graph's main output's channels from the start
+    /// ([`Session::declare_main_output_topology`]): the main output is exactly as wide as
+    /// `main_output`, whatever [`outputs_floor`](Self::outputs_floor) and the device
     /// say, and the build refuses a device that cannot place it
-    /// ([`Error::Output`](crate::Error::Output)). Default none: the root is the engine's order for
+    /// ([`Error::Output`](crate::Error::Output)). Default none: the main output is the engine's order for
     /// its width.
     #[must_use]
-    pub fn main_output_topology(mut self, root: ChannelTopology) -> Self {
-        self.opts.root = Some(root);
+    pub fn main_output_topology(mut self, main_output: ChannelTopology) -> Self {
+        self.opts.main_output = Some(main_output);
         self
     }
 
     /// States what the output device's channels are: an interface wired as
-    /// 5.1 on its six outputs, say. The graph root is folded into it by
+    /// 5.1 on its six outputs, say. The graph's main output is folded into it by
     /// speaker. Without it the device is taken to be the engine's order for
     /// its width ([`ChannelTopology::default_for`]: mono, stereo, quad, 5.1, 7.1,
     /// 7.1.4, and independent channels at any other width) and is read back as
@@ -749,7 +749,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// ([`Session::output_device`]).
     ///
     /// The statement is the device's width: a build whose device has another
-    /// is refused ([`Error::Output`](crate::Error::Output)), and so is a root
+    /// is refused ([`Error::Output`](crate::Error::Output)), and so is a main output
     /// the statement cannot place. A restart takes the statement of its own
     /// request (`DeviceRestart::topology`),
     /// since another device is wired another way.
@@ -1074,7 +1074,7 @@ impl<C: Clock> SessionBuilder<C> {
                 parts.click,
             ),
             output: crate::session::parts::OutputPart::new(
-                self.opts.root.clone(),
+                self.opts.main_output.clone(),
                 crate::policy::output_cell(table.output_facts()),
             ),
             reports: Default::default(),
@@ -1110,26 +1110,26 @@ impl<C: Clock> SessionBuilder<C> {
         let _ = (parts, engine);
     }
 
-    /// The root's width for `device`: the declared topology's, or else
+    /// The main output's width for `device`: the declared topology's, or else
     /// [`main_output_width`] of the floor.
     fn main_output_width(&self, device: ChannelLayout) -> usize {
-        self.opts.root.as_ref().map_or_else(
+        self.opts.main_output.as_ref().map_or_else(
             || main_output_width(self.opts.outputs_floor, device),
-            |root| usize::from(root.width().count()),
+            |main_output| usize::from(main_output.width().count()),
         )
     }
 
-    /// Refuses a `(root, device)` pair whose root has a channel the device has
+    /// Refuses a `(main_output, device)` pair whose main output has a channel the device has
     /// no place for, before anything is built: the engine would render it
-    /// silent. A declared root is placed from its topology (and refused if it
+    /// silent. A declared main output is placed from its topology (and refused if it
     /// is empty or wider than the engine renders); an undeclared one is a bare
     /// width.
     ///
-    /// The root is at least as wide as the device up to [`MAX_CHANNELS`],
-    /// so what this refuses of an undeclared root is a project wider than the
+    /// The main output is at least as wide as the device up to [`MAX_CHANNELS`],
+    /// so what this refuses of an undeclared main output is a project wider than the
     /// device where either width has no channel order (a 6-channel project on
     /// a 5-channel interface).
-    fn check_placement(&self, root: usize, device: ChannelLayout) -> Result<()> {
+    fn check_placement(&self, main_output: usize, device: ChannelLayout) -> Result<()> {
         let placed = match &self.opts.device_topology {
             Some(stated) if stated.width() != device => {
                 return Err(tutti_buffers::FoldError::from(
@@ -1143,14 +1143,14 @@ impl<C: Clock> SessionBuilder<C> {
             Some(stated) => stated.clone(),
             None => ChannelTopology::default_for(device),
         };
-        match &self.opts.root {
-            // The same check `Graph::declare_root` makes a step later; made
-            // here so a refused root builds nothing (no engine, no device
+        match &self.opts.main_output {
+            // The same check `Graph::declare_main_output` makes a step later; made
+            // here so a refused main output builds nothing (no engine, no device
             // thread). Removing this arm alone changes no outcome, only
             // how much is built before the refusal.
-            Some(declared) => Graph::<C::Float>::check_root(declared, Some(&placed))?,
+            Some(declared) => Graph::<C::Float>::check_main_output(declared, Some(&placed))?,
             None => {
-                let width = ChannelLayout::try_from(root).map_err(|e| {
+                let width = ChannelLayout::try_from(main_output).map_err(|e| {
                     tutti_buffers::FoldError::from(tutti_buffers::BufferError::from(e))
                 })?;
                 tutti_graph::fold_to_topology::<C::Float>(
@@ -1162,17 +1162,17 @@ impl<C: Clock> SessionBuilder<C> {
         Ok(())
     }
 
-    /// Declares the builder's root on the graph the engine was just built
+    /// Declares the builder's main output on the graph the engine was just built
     /// over, which publishes it to the engine.
     fn declare(&self, graph: &mut Graph<C::Float>) -> Result<()> {
-        if self.opts.root.is_some() {
-            graph.declare_root(self.opts.root.clone(), true)?;
+        if self.opts.main_output.is_some() {
+            graph.declare_main_output(self.opts.main_output.clone(), true)?;
         }
         Ok(())
     }
 }
 
-/// How wide the graph root is built, given what the project asks for and
+/// How wide the graph's main output is built, given what the project asks for and
 /// what the device presents.
 ///
 /// **These are two independent numbers, and neither may narrow the other.**
@@ -1180,16 +1180,16 @@ impl<C: Clock> SessionBuilder<C> {
 /// `project` is the project's width. A 5.1 project on a stereo laptop must
 /// still render six channels: `Engine::process_segment` folds them into the
 /// device buffer through the shared ITU matrices every block. Clamping the
-/// root down to the device would make that fold a no-op that hides real
+/// main output down to the device would make that fold a no-op that hides real
 /// channel loss.
 ///
-/// The device is a **floor** because a root narrower than the device leaves
+/// The device is a **floor** because a main output narrower than the device leaves
 /// the extra device channels permanently silent: the fold zero-fills
 /// rather than upmixing, so nothing downstream can recover them.
 ///
 /// The [`MAX_CHANNELS`] clamp is applied here, at construction:
 /// `Engine::new` bounds the editor to that many global outputs, so a wider
-/// root would be refused at its first commit and never play. An export's
+/// main output would be refused at its first commit and never play. An export's
 /// fork is prepared on its own, with no such cap.
 pub fn main_output_width(project: ChannelLayout, device: ChannelLayout) -> usize {
     usize::from(project.count())
@@ -1207,7 +1207,7 @@ mod tests {
 
     /// **The defaults are 48 kHz, stereo and `LIVE_MAX_BLOCK`.** Each is read
     /// back from the session the bare builder made: the graph's prepared rate
-    /// and block, the root's width, and the width the engine accepts for a
+    /// and block, the main output's width, and the width the engine accepts for a
     /// pulled block.
     #[test]
     fn the_bare_builder_is_48k_stereo_at_the_live_block() {

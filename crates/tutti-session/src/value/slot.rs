@@ -325,7 +325,7 @@ slot_target!(
 slot_target!(
     /// Where the mix lands ([`OutputPolicy`](crate::OutputPolicy)), as
     /// `session.policy::<OutputPolicy>()` names it. A write is checked
-    /// against the device and the root now, staged, and applied by the next
+    /// against the device and the main output now, staged, and applied by the next
     /// [`Session::update`](crate::Session::update), live. It is refused with
     /// [`SetRefusal::OutputPolicy`] when it has no place.
     OutputPolicyTarget,

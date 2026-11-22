@@ -22,7 +22,7 @@ fn first_frame(s: &mut Session) -> [f32; 2] {
     [block[0], block[1]]
 }
 
-fn feed_root(s: &mut Session, node: NodeKey) {
+fn feed_main_output(s: &mut Session, node: NodeKey) {
     for c in 0..2 {
         s.graph()
             .set_sources(MainOutput::channel(c), [OutPort::new(node, c)])
@@ -45,7 +45,7 @@ fn connect_wires_each_channel_to_its_own() {
         .connect(src, through)
         .expect("both are stereo")
         .unfaded();
-    feed_root(&mut s, through.erase());
+    feed_main_output(&mut s, through.erase());
     assert_eq!(first_frame(&mut s), [0.25, 0.5]);
 }
 
@@ -63,7 +63,7 @@ fn connect_wires_each_node_to_the_next() {
         .add(ForkByClone(Through::new(ChannelLayout::STEREO)));
     s.graph().connect(src, a).expect("all stereo");
     s.graph().connect(a, b).expect("all stereo");
-    feed_root(&mut s, b.erase());
+    feed_main_output(&mut s, b.erase());
     // The links fade in over 256 frames: the fifth 64-frame block
     // starts past it.
     for _ in 0..4 {
@@ -84,7 +84,7 @@ fn connect_adds_to_what_feeds_the_input() {
         .add(ForkByClone(Through::new(ChannelLayout::STEREO)));
     s.graph().connect(one, sink).unwrap().unfaded();
     s.graph().connect(two, sink).unwrap().unfaded();
-    feed_root(&mut s, sink.erase());
+    feed_main_output(&mut s, sink.erase());
     assert_eq!(first_frame(&mut s), [0.75, 0.375]);
 }
 

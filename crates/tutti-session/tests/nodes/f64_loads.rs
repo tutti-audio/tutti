@@ -86,7 +86,7 @@ fn a_loaded_resident_wave_holds_f64_frames_and_its_clip_plays_them() {
     let key = s.graph().add(clip.at(Beat::new(0.0)));
     s.graph()
         .set_sources(MainOutput::channel(0), [OutPort::new(key, 0)])
-        .expect("the clip into the root");
+        .expect("the clip into the main output");
     let _ = s.update();
     s.play().expect("room");
     let mut heard = Vec::new();
@@ -123,7 +123,7 @@ fn an_f64_session_streams_a_file_into_f64_frames() {
             MainOutput::channel(0),
             [OutPort::new(dc, 0), OutPort::new(key, 0)],
         )
-        .expect("both into the root");
+        .expect("both into the main output");
     let _ = s.update();
     wait_until("the stream to prime", Duration::from_secs(10), || {
         s.graph_ref()

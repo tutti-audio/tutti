@@ -292,7 +292,7 @@ fn every_source_reads_back_as_written() {
 
 /// Silence is stored as the empty set, never as a `PortSource::Zero` (which the
 /// compiler's validation refuses), whichever call wrote it: a port or output
-/// set to no sources, a cleared sink, and a fresh or widened root. `planned_compensation` is `None` when the spec does not validate.
+/// set to no sources, a cleared sink, and a fresh or widened main output. `planned_compensation` is `None` when the spec does not validate.
 #[test]
 fn every_setter_stores_silence_as_the_empty_set() {
     let mut s = detached(2);
@@ -301,7 +301,7 @@ fn every_setter_stores_silence_as_the_empty_set() {
     let src = graph.add(ForkByClone(Const::frame(&[1.0, 2.0])));
     assert!(
         graph.testing().planned_compensation().is_some(),
-        "fresh root"
+        "fresh main output"
     );
 
     graph
@@ -340,7 +340,7 @@ fn every_setter_stores_silence_as_the_empty_set() {
     graph.widen_outputs(4).expect("widens");
     assert!(
         graph.testing().planned_compensation().is_some(),
-        "widened root"
+        "widened main output"
     );
     assert_eq!(graph.sources(MainOutput::channel(3)).unwrap(), []);
 }
@@ -378,13 +378,13 @@ fn removing_a_stranger_changes_nothing() {
 /// `main_output_width` is `max(project, device)` clamped to
 /// `1..=MAX_CHANNELS`; each row is one way the rule is load-bearing.
 #[test]
-fn root_width_takes_the_wider_side_within_the_scratch_bounds() {
+fn main_output_width_takes_the_wider_side_within_the_scratch_bounds() {
     let cases: &[(ChannelLayout, ChannelLayout, usize, &str)] = &[
         (
             ChannelLayout::STEREO,
             ChannelLayout::from(6u16),
             6,
-            "a wider device widens the root: a stereo project on a 5.1 device \
+            "a wider device widens the main output: a stereo project on a 5.1 device \
              must render all six, or the top four are permanently silent",
         ),
         (
@@ -415,7 +415,7 @@ fn root_width_takes_the_wider_side_within_the_scratch_bounds() {
             ChannelLayout::EMPTY,
             ChannelLayout::EMPTY,
             1,
-            "the root is never zero wide: a zero-output root would render \
+            "the main output is never zero wide: a zero-output main output would render \
              nothing at all",
         ),
     ];
@@ -618,7 +618,7 @@ fn removing_a_node_purges_the_replacements_parked_on_it() {
     }
 }
 
-/// A detached session with a knob playing at the root, its first plan sent,
+/// A detached session with a knob playing at the main output, its first plan sent,
 /// and the audio side taken: the running node a swap fades from.
 fn playing_knob() -> (
     DetachedSession,
@@ -856,7 +856,7 @@ fn removing_a_node_reports_the_parked_swap_it_drops() {
 }
 
 /// **`remove` fades the node out, and `.unfaded()` cuts it**: a removed node
-/// that feeds the root plays on through the declick after the commit that
+/// that feeds the main output plays on through the declick after the commit that
 /// carries the removal, and is gone at that commit with `.unfaded()`.
 #[test]
 fn an_unfaded_removal_cuts_where_the_default_fades_out() {
@@ -1503,7 +1503,7 @@ fn a_handle_is_none_once_its_node_is_removed() {
 /// pool's handle, and the graph's handle still commands it**: the pool's handle
 /// holds each streaming voice's `Stream`, and the last handle dropped closes
 /// it. The graph owns one for the node's life, so the file (a constant
-/// 0.25) still renders at unity gain on the root's left channel (the file is
+/// 0.25) still renders at unity gain on the main output's left channel (the file is
 /// mono) after the streamer has stepped past the drop, and a removal queued
 /// through `Graph::handle` silences it.
 #[cfg(feature = "sampler")]

@@ -142,8 +142,8 @@ impl<N: ?Sized> InstrumentHandle<N> {
     }
 
     /// The instrument's main pair, the output ports a host plays (the
-    /// instrument's `main_outputs`). Feed a wide root from it with
-    /// [`Graph::connect`](crate::Graph::connect), one port to one root channel.
+    /// instrument's `main_outputs`). Feed a wide main output from it with
+    /// [`Graph::connect`](crate::Graph::connect), one port to one main output channel.
     #[must_use]
     pub fn main_outputs(&self) -> [usize; 2] {
         self.main.map(usize::from)
@@ -227,7 +227,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
 
     /// [`add_instrument`](Self::add_instrument) with nothing wired after the
     /// strip: for a mix that routes [`InstrumentHandle::out`] itself (a bus, a
-    /// send, a wide root), as [`instrument`](Self::instrument) leaves a node
+    /// send, a wide main output), as [`instrument`](Self::instrument) leaves a node
     /// it is given. Its keys are live only, as `add_instrument`'s are: a bounce
     /// does not contain what they play.
     ///

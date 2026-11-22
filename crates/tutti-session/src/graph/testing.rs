@@ -61,7 +61,7 @@ impl<F: Float> Testing<'_, F> {
     }
 
     /// The audio wiring as it stands: the nodes, the edges into every input
-    /// port, the root's output sources and its input width, including edits
+    /// port, the main output's output sources and its input width, including edits
     /// no commit has sent yet ([`Graph::has_uncommitted_edits`]). A read-only
     /// view of what [`Graph::connect`] and its kin write; the
     /// graph's other declarations (event edges, params, modes) are not part
@@ -234,7 +234,7 @@ impl<F: Float> AudioSide<F> {
         while done < frames {
             let len = (frames - done).min(block);
             exec.apply_pending();
-            let (ins, outs, root) = exec.plan().map_or((0, 0, 0), |p| {
+            let (ins, outs, main_output) = exec.plan().map_or((0, 0, 0), |p| {
                 (
                     p.global_inputs() as usize,
                     p.rendered_outputs(),
@@ -250,17 +250,17 @@ impl<F: Float> AudioSide<F> {
                 exec.process(len, &self.transport, &inputs, &mut slices);
             }
             for c in 0..output.channels() {
-                let Some(new) = planes.get(c).filter(|_| c < root) else {
+                let Some(new) = planes.get(c).filter(|_| c < main_output) else {
                     continue;
                 };
                 let o = output.plane_mut(c).into_samples_mut();
                 o[done..done + len].copy_from_slice(new);
-                // A root change crossfades by index, the old root's channels
-                // after the new root's.
+                // A main output change crossfades by index, the old main output's channels
+                // after the new main output's.
                 if let Some(f) = fade {
                     for (i, x) in o[done..done + len].iter_mut().enumerate() {
                         let was = if c < f.width {
-                            planes[root + c][i]
+                            planes[main_output + c][i]
                         } else {
                             F::ZERO
                         };

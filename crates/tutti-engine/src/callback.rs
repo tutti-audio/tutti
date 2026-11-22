@@ -111,7 +111,7 @@ fn process_audio_at<F: Float>(
 /// reallocating on the audio thread.
 pub struct OutputBlock<F: Float = f32> {
     state: Arc<AudioCallbackState<F>>,
-    /// The device's true channel layout. The engine folds the graph main output to
+    /// The device's true channel layout. The engine folds the graph's main output to
     /// this width (declared with [`Engine::support_output`](crate::Engine::support_output)
     /// when the block is built). A device wider than
     /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) is refused when its config is
@@ -147,7 +147,7 @@ impl<F: Float> OutputBlock<F> {
     ///
     /// Control-thread only. This is the only allocation on the output path,
     /// and the one place the device's width reaches the engine: it builds the
-    /// engine's fold from the graph main output to the device
+    /// engine's fold from the graph's main output to the device
     /// ([`Engine::support_output`](crate::Engine::support_output)), so the
     /// callback never does.
     ///

@@ -132,7 +132,7 @@ impl ValueTable {
         Some(Held { guard, token })
     }
 
-    /// The cell the graph publishes the output device and root to.
+    /// The cell the graph publishes the output device and main output to.
     pub(crate) fn output_facts(&self) -> crate::policy::FactsCell {
         Arc::clone(&self.output)
     }

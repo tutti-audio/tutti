@@ -54,7 +54,7 @@ pub enum PlaceError {
     EmptyWidth,
     /// The voice's width is past the sampler's per-read ceiling
     /// ([`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)): a voice wider than the
-    /// graph root can render is one nobody can hear, and a narrower one would
+    /// graph's main output can render is one nobody can hear, and a narrower one would
     /// drop channels silently.
     #[error("a voice of {channels} channels is wider than the sampler's {max}")]
     WidthTooWide {

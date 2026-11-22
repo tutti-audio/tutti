@@ -1,7 +1,7 @@
 //! A voice of either tier arrives where the compiler puts it, and nowhere
 //! else: doc 025 stage 5 cut 2 (the preroll left the streamer, §2.9).
 //!
-//! The graph is one `QUAD` root. Outputs 0 and 1 are a stereo voice (the same
+//! The graph is one `QUAD` main output. Outputs 0 and 1 are a stereo voice (the same
 //! file, as a disk stream or in memory) placed at beat 1; output 2 is a
 //! latent path (a limiter's lookahead of `L` frames, whatever it reports), so
 //! the compiler delays outputs 0 and 1 by `L` to line them up with it
