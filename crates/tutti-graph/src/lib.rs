@@ -73,7 +73,7 @@
 //! ```
 //!
 //! - [`GraphSpec`] is the graph as data: a
-//!   [`Topology`] (nodes, audio edges, global inputs
+//!   [`Topology`] (nodes, audio edges, main inputs
 //!   and outputs) plus event edges and each param port's event source.
 //! - [`Editor`] (control thread) holds the spec and the units not yet
 //!   shipped. [`Editor::insert`] adds a node and returns its typed controls;
@@ -517,7 +517,7 @@
 //! buffers its outputs reach have room for them. An event input may have several sources, merged by offset and then
 //! by the source port's `(NodeKey, port)` — a property of the wiring, not of
 //! the order edges were listed in. An audio input port, and a
-//! global output channel, holds a set of sources, which the graph sums
+//! main output channel, holds a set of sources, which the graph sums
 //! (`Op::Sum`).
 //!
 //! - Each event output port declares how many events it writes per block

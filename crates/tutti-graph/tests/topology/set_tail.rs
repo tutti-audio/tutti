@@ -223,7 +223,7 @@ fn set_tail_does_not_cut_a_fade() {
             node: NodeKey(2),
             port: 0,
         },
-        vec![Edge::Direct(PortSource::Global(0))],
+        vec![Edge::Direct(PortSource::MainInput(0))],
     );
     ed.spec_mut()
         .topology

@@ -36,7 +36,7 @@ pub struct Inserted<C> {
 #[must_use = "the edges a placement removed are the caller's to report"]
 pub struct Unwired {
     /// Audio edges, direct and feedback, into an input port or out of an
-    /// output port the shape lacks. A global output channel an edge fed is
+    /// output port the shape lacks. A main output channel an edge fed is
     /// its [`PortSink::Output`].
     pub edges: Vec<EdgeId>,
     /// Event edges, direct and feedback, into an event input or out of an
@@ -100,7 +100,7 @@ impl<F: Float> Editor<F> {
             });
             !list.is_empty()
         });
-        // Edges into the global outputs.
+        // Edges into the main outputs.
         for (c, list) in spec.topology.outputs.iter_mut().enumerate() {
             list.retain(|s| {
                 let gone = gone_source(s);

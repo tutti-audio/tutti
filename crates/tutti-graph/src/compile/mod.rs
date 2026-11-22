@@ -21,7 +21,7 @@
 //! 4. **Latency solve** — `arrival = max(departures)`, `departure = arrival +
 //!    own`: `crate::delays`' solve, over the spec (its
 //!    `LatencyGraph` impl lists event and param sources). **Event and param
-//!    edges count toward arrival**, and **a `PortSource::Global` input is a
+//!    edges count toward arrival**, and **a `PortSource::MainInput` input is a
 //!    merge-point source**, delayed to the node's arrival like any other.
 //!
 //!    Emits a `Delay` op per mismatched audio port and per mismatched event
@@ -272,7 +272,7 @@ enum ERef {
 /// An op before colouring: the same shape as [`Op`] with value ids where
 /// slots will go.
 enum Pre {
-    GlobalIn {
+    MainInput {
         channel: u16,
         dst: u32,
     },
@@ -745,31 +745,31 @@ pub fn compile(
         delays: Vec::new(),
     };
 
-    // Global inputs actually read, each copied into a slot once.
-    let mut global_val: BTreeMap<u16, u32> = BTreeMap::new();
-    let used_globals: BTreeSet<u16> = topology
+    // Main inputs actually read, each copied into a slot once.
+    let mut main_input_val: BTreeMap<u16, u32> = BTreeMap::new();
+    let used_main_inputs: BTreeSet<u16> = topology
         .edges
         .values()
         .flatten()
         .filter_map(|e| match *e {
-            Edge::Direct(PortSource::Global(ch)) => Some(ch),
+            Edge::Direct(PortSource::MainInput(ch)) => Some(ch),
             _ => None,
         })
         .chain(topology.outputs.iter().flatten().filter_map(|s| match *s {
-            PortSource::Global(ch) => Some(ch),
+            PortSource::MainInput(ch) => Some(ch),
             _ => None,
         }))
         .collect();
-    for ch in used_globals {
-        let op = em.push(Pre::GlobalIn {
+    for ch in used_main_inputs {
+        let op = em.push(Pre::MainInput {
             channel: ch,
             dst: 0,
         });
         let v = em.audio_value(op);
-        if let Pre::GlobalIn { dst, .. } = &mut em.pre[op as usize] {
+        if let Pre::MainInput { dst, .. } = &mut em.pre[op as usize] {
             *dst = v;
         }
-        global_val.insert(ch, v);
+        main_input_val.insert(ch, v);
     }
 
     let mut audio_out_val: BTreeMap<OutputPort, u32> = BTreeMap::new();
@@ -798,11 +798,11 @@ pub fn compile(
                     // `+0.0`); `validate` refuses it in a set, so this is a
                     // raw write's.
                     Edge::Direct(PortSource::Zero) => continue,
-                    Edge::Direct(from @ (PortSource::Global(_) | PortSource::Node(_))) => {
-                        // A global input arrives at zero: it is a merge-point
+                    Edge::Direct(from @ (PortSource::MainInput(_) | PortSource::Node(_))) => {
+                        // A main input arrives at zero: it is a merge-point
                         // source like any other (see the module docs, step 4).
                         let (v, dep) = match from {
-                            PortSource::Global(ch) => (global_val[&ch], Latency::ZERO),
+                            PortSource::MainInput(ch) => (main_input_val[&ch], Latency::ZERO),
                             PortSource::Node(p) => (audio_out_val[&p], departure(dense[&p.node])),
                             PortSource::Zero => unreachable!("matched above"),
                         };
@@ -1043,7 +1043,7 @@ pub fn compile(
                 .map(|&source| {
                     let (v, dep) = match source {
                         PortSource::Node(p) => (audio_out_val[&p], departure(dense[&p.node])),
-                        PortSource::Global(ch) => (global_val[&ch], Latency::ZERO),
+                        PortSource::MainInput(ch) => (main_input_val[&ch], Latency::ZERO),
                         PortSource::Zero => unreachable!("filtered above"),
                     };
                     let r = align_audio(
@@ -1084,13 +1084,13 @@ pub fn compile(
         let source = &sources.first().copied().unwrap_or(PortSource::Zero);
         let mut src = match *source {
             PortSource::Node(p) => ARef::Val(audio_out_val[&p]),
-            PortSource::Global(ch) => ARef::Val(global_val[&ch]),
+            PortSource::MainInput(ch) => ARef::Val(main_input_val[&ch]),
             PortSource::Zero => ARef::Zero,
         };
         let d = match (graph.main_output_bank(), source) {
             (Some(bank), _) if usize::from(channel) >= bank.base => match source {
                 PortSource::Node(p) => departure(dense[&p.node]).gap_to(bank_total),
-                PortSource::Global(_) => Latency::ZERO.gap_to(bank_total),
+                PortSource::MainInput(_) => Latency::ZERO.gap_to(bank_total),
                 PortSource::Zero => Samples::ZERO,
             },
             _ => solved.compensation().for_channel(usize::from(channel)),
@@ -1135,7 +1135,7 @@ pub fn compile(
     // gets); a raw one reads the source as it leaves its node. A closed tap
     // is not in the topology, so nothing here is emitted for it. A lane whose
     // port does not exist (a node replaced by a narrower one, a removed node,
-    // a global input past the declared width) reads silence rather than
+    // a main input past the declared width) reads silence rather than
     // failing the commit, as a meter's does; it gets no delay ring, and the
     // other lanes' rings are keyed by their own lane and source.
     let mut tap_ids: Vec<crate::TapId> = Vec::new();
@@ -1172,7 +1172,7 @@ pub fn compile(
                     (Some(&v), Some(&n)) => (ARef::Val(v), departure(n)),
                     _ => (ARef::Zero, Latency::ZERO),
                 },
-                PortSource::Global(ch) => match global_val.get(&ch) {
+                PortSource::MainInput(ch) => match main_input_val.get(&ch) {
                     Some(&v) => (ARef::Val(v), Latency::ZERO),
                     None => (ARef::Zero, Latency::ZERO),
                 },
@@ -1300,7 +1300,7 @@ pub fn compile(
                             (Some(&v), Some(&n)) => (ARef::Val(v), departure(n)),
                             _ => (ARef::Zero, Latency::ZERO),
                         },
-                        PortSource::Global(ch) => match global_val.get(&ch) {
+                        PortSource::MainInput(ch) => match main_input_val.get(&ch) {
                             Some(&v) => (ARef::Val(v), Latency::ZERO),
                             None => (ARef::Zero, Latency::ZERO),
                         },
@@ -1521,7 +1521,7 @@ pub fn compile(
     let mut ops: Vec<Op> = Vec::with_capacity(op_count);
     for pre in &em.pre {
         ops.push(match pre {
-            Pre::GlobalIn { channel, dst } => Op::GlobalIn {
+            Pre::MainInput { channel, dst } => Op::MainInput {
                 channel: *channel,
                 dst: aslot(*dst),
             },
@@ -1795,7 +1795,7 @@ pub fn compile(
         units,
         store_len,
         order: order.iter().map(|&n| keys[n]).collect(),
-        global_inputs: topology.inputs.count(),
+        main_inputs: topology.inputs.count(),
         compensation,
         main_output_id: crate::MainOutputId::GENESIS,
         main_output_bank: graph.main_output_bank(),
@@ -1820,7 +1820,7 @@ pub fn compile(
     Ok((plan, delta))
 }
 
-/// The output ports something reads: an edge (direct or feedback), a global
+/// The output ports something reads: an edge (direct or feedback), a main
 /// output, a tap lane or a meter lane.
 fn consumed_outputs(topology: &crate::Topology) -> BTreeSet<OutputPort> {
     let edges = topology.edges.values().flatten().filter_map(|e| match *e {

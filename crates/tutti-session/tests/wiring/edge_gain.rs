@@ -276,7 +276,7 @@ fn add_source_weighted_adds_the_edge_and_its_weight() {
     );
 }
 
-/// The output-channel twin: weights on what feeds global output 1, read on
+/// The output-channel twin: weights on what feeds main output 1, read on
 /// the right channel.
 #[test]
 fn add_output_source_weighted_weights_the_channel() {

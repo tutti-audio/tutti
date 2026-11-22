@@ -77,7 +77,7 @@ fn driver(latency: usize) -> Kind {
 }
 
 /// Where the summed edge is: at a pass-through's port (node `sink`), or at
-/// global output channel 0.
+/// main output channel 0.
 #[derive(Clone, Copy, Debug)]
 enum Where {
     Port,
@@ -391,7 +391,7 @@ fn an_early_lane_is_delayed_to_the_edge() {
     }
 }
 
-/// A lane that arrives late at a **global output** raises the output time:
+/// A lane that arrives late at a **main output** raises the output time:
 /// the source's audio is delayed to it (an `Output` ring of 32), as the lane
 /// for a port raises a node's arrival.
 #[test]

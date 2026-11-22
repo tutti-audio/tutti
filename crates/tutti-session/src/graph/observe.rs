@@ -178,7 +178,7 @@ impl<F: Float> Taps<'_, F> {
         Analyzer::open(rate, width, &analysis, || self.open_ports(sources, options))
     }
 
-    /// A tap on the graph's global outputs, aligned: lane `c` is output
+    /// A tap on the graph's main outputs, aligned: lane `c` is output
     /// channel `c` as the outputs carry it, **post-sum**: a channel several
     /// sources feed is heard whole, each source delayed to the output time and
     /// added ([`TapSpec::Outputs`](tutti_graph::TapSpec::Outputs)). It follows
