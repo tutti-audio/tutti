@@ -31,13 +31,19 @@ fn m1_note() -> Ump {
 /// every input event is echoed to the one event output.
 struct Probe;
 
+impl Probe {
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::STEREO).with_events(1, 1);
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Probe {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::STEREO).with_events(1, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        let events = io.events(0);
+        let events = io.events(Self::IN);
         for i in 0..io.frames() {
             io.output(0)[i] = 0.0;
             let at = Offset::of(Samples::new(i), cx.env.block_len);
@@ -45,7 +51,7 @@ impl Node for Probe {
         }
         for e in events {
             io.output(0)[e.offset.index()] = 1.0;
-            io.event_out(0).push(*e).expect("room");
+            io.event_out(Self::OUT).push(*e).expect("room");
         }
         Status::Modified
     }
@@ -101,17 +107,17 @@ fn direct_plays_events_once_advances_and_rolls() {
         Beat::new(2.0),
         None,
     ));
-    probe.events(0, &[Event::midi(at(5, 64), m1_note())]);
+    probe.events(Probe::IN, &[Event::midi(at(5, 64), m1_note())]);
     probe.block();
     assert_eq!(probe.output().plane(0).samples()[5], 1.0);
-    assert_eq!(probe.event_output(0).len(), 1);
+    assert_eq!(probe.event_output(Probe::OUT).len(), 1);
     assert_eq!(probe.output().plane(1).samples()[0], 2.0);
     probe.block();
     assert!(
         probe.output().plane(0).iter().all(|&s| s == 0.0),
         "played once"
     );
-    assert!(probe.event_output(0).is_empty());
+    assert!(probe.event_output(Probe::OUT).is_empty());
     probe.set_block_len(16);
     probe.block();
     assert_eq!(probe.output().plane(0).samples().len(), 16);
@@ -119,9 +125,14 @@ fn direct_plays_events_once_advances_and_rolls() {
     // The emitter writes at absolute frame 70: block 1 of 64-frame blocks,
     // offset 6.
     let mut emitter = Direct::new(Emitter::new(Frame::new(70), note()), RATE, 64);
+    let out = emitter
+        .node
+        .shape()
+        .event_output(0)
+        .expect("the emitter's output");
     emitter.block();
-    assert!(emitter.event_output(0).is_empty());
+    assert!(emitter.event_output(out).is_empty());
     emitter.block();
-    assert_eq!(emitter.event_output(0).len(), 1);
-    assert_eq!(emitter.event_output(0)[0].offset.index(), 6);
+    assert_eq!(emitter.event_output(out).len(), 1);
+    assert_eq!(emitter.event_output(out)[0].offset.index(), 6);
 }

@@ -21,10 +21,10 @@
 //!
 //! The allocation gate is in `rt_no_alloc_engine.rs`.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tutti_buffers::MaxBlock;
-use tutti_fixtures::Record;
 use tutti_fixtures::signal::bits;
+use tutti_fixtures::{Record, Shared};
 
 use crate::support;
 
@@ -36,8 +36,8 @@ use tutti_buffers::InterleavedMut;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventInputPort, EventKind, Executor, IntoNode, Io, Node, Prepare, Shape, Status,
-    Unforkable,
+    Cx, Editor, EventInputPort, EventKind, Executor, InEvents, IntoNode, Io, Node, Prepare, Shape,
+    Status, Unforkable,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_music::LoopRange;
@@ -130,16 +130,21 @@ impl Node for Gate {
 /// One event input; logs the absolute frame of every event it receives.
 struct NoteLog(Record<u64>);
 
+impl NoteLog {
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO)
+        .with_events(1, 0)
+        .with_tail(Tail::Unbounded);
+    const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for NoteLog {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO)
-            .with_events(1, 0)
-            .with_tail(Tail::Unbounded)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let mut log = self.0.lock().expect("log");
-        for e in io.events(0).iter() {
+        for e in io.events(Self::IN).iter() {
             log.push(cx.env.frame_at(e.offset).get());
         }
         io.output(0).fill(0.0);
@@ -1168,7 +1173,7 @@ fn a_tempo_wiggle_under_the_clock_hysteresis_does_not_move_the_beat() {
 #[test]
 fn the_published_playhead_is_the_closed_form_over_ten_minutes() {
     // Logs only each block's first beat: 450 000 blocks.
-    struct FirstBeat(Arc<Mutex<f64>>);
+    struct FirstBeat(Shared<f64>);
     impl Node for FirstBeat {
         fn shape(&self) -> Shape {
             Shape::source_unassigned(ChannelLayout::MONO).with_tail(Tail::Unbounded)
@@ -1186,8 +1191,8 @@ fn the_published_playhead_is_the_closed_form_over_ten_minutes() {
     let (loop_start, loop_end) = (800.0, 816.0);
 
     let transport = Transport::new(SampleRate::of(SR));
-    let first = Arc::new(Mutex::new(0.0));
-    let (engine, _ed) = graph_engine(&transport, 64, Unforkable(FirstBeat(Arc::clone(&first))), 1);
+    let first = Shared::new(0.0);
+    let (engine, _ed) = graph_engine(&transport, 64, Unforkable(FirstBeat(first.clone())), 1);
     transport.settings().set_tempo(Bpm::of(123.0));
     transport.motion().send(MotionCommand::Play).expect("room");
     transport

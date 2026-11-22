@@ -45,4 +45,19 @@ impl<T> Shared<T> {
     pub fn lock(&self) -> LockResult<MutexGuard<'_, T>> {
         self.0.lock()
     }
+
+    /// The value, when this is its last handle; `None` while a clone lives.
+    ///
+    /// # Panics
+    ///
+    /// When a holder panicked with the value locked.
+    #[must_use]
+    pub fn into_inner(self) -> Option<T> {
+        let value = Arc::try_unwrap(self.0).ok()?;
+        Some(
+            value
+                .into_inner()
+                .expect("no holder panicked with the value locked"),
+        )
+    }
 }

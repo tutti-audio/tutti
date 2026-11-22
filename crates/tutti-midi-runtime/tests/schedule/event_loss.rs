@@ -11,7 +11,7 @@ use crate::common::{at, beat_of, connect};
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventKind, EventLoss, Executor, Io, Node, Prepare, Shape, Status,
+    Cx, Editor, EventKind, EventLoss, Executor, InEvents, Io, Node, Prepare, Shape, Status,
     TransportPosition, Unforkable,
 };
 use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
@@ -69,14 +69,19 @@ impl Keys {
 
 struct Sink(tutti_fixtures::Shared<Tally>);
 
+impl Sink {
+    const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+    const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for Sink {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _cx: &Cx<'_>, io: Io<'_>) -> Status {
         let mut t = self.0.lock().unwrap();
-        for e in io.events(0) {
+        for e in io.events(Self::IN) {
             let EventKind::Midi(Ump(w)) = e.kind else {
                 panic!("a clip sends MIDI")
             };
