@@ -15,7 +15,7 @@ use tutti_units::{ParamAddr, Samples};
 use tutti_plugin_types::ParameterQueue;
 use tutti_units::ParamId;
 
-use super::param_delivery::ParamDelivery;
+use super::param_delivery::{ParamDelivery, chunk_offset};
 use super::segment_points::SegmentPoints;
 
 /// The events of `events` and the param events of `params_in` (each sorted by
@@ -133,8 +133,7 @@ pub fn take(
                         // A step: it stops a segment in flight on its
                         // parameter.
                         segments.interrupt(id);
-                        let offset = i32::try_from(frame).unwrap_or(i32::MAX);
-                        params.point(id, offset, value);
+                        params.point(id, chunk_offset(frame), value);
                     }
                 }
             }
@@ -282,10 +281,10 @@ mod tests {
             &mut params,
             |_, _| {},
         );
-        let points: Vec<(i32, f64)> = params.changes().queues[0]
+        let points: Vec<(u32, f64)> = params.changes().queues[0]
             .points
             .iter()
-            .map(|p| (p.sample_offset, p.value.get()))
+            .map(|p| (p.sample_offset.get(), p.value.get()))
             .collect();
         let stood = (29.0f64 / 40.0).powi(2);
         let want = [
@@ -362,10 +361,10 @@ mod tests {
             &mut params,
             |_, _| {},
         );
-        let points: Vec<(i32, f64)> = params.changes().queues[0]
+        let points: Vec<(u32, f64)> = params.changes().queues[0]
             .points
             .iter()
-            .map(|p| (p.sample_offset, p.value.get()))
+            .map(|p| (p.sample_offset.get(), p.value.get()))
             .collect();
         let want = [
             (0, 0.2),
@@ -383,7 +382,7 @@ mod tests {
     }
 
     /// The queue of `address` in the chunk being filled, as `(frame, value)`.
-    fn queue(params: &mut ParamDelivery, address: ParamId) -> Vec<(i32, f64)> {
+    fn queue(params: &mut ParamDelivery, address: ParamId) -> Vec<(u32, f64)> {
         params
             .changes()
             .queues
@@ -392,7 +391,7 @@ mod tests {
             .map(|q| {
                 q.points
                     .iter()
-                    .map(|p| (p.sample_offset, p.value.get()))
+                    .map(|p| (p.sample_offset.get(), p.value.get()))
                     .collect()
             })
             .unwrap_or_default()
@@ -533,10 +532,10 @@ mod tests {
         let stats = counters.snapshot();
         assert_eq!(stats.grid_points_dropped, 9, "the nine grid frames");
         assert_eq!(stats.points_merged, 300 - 259 - 9 - 1);
-        let offsets: Vec<i32> = params.changes().queues[0]
+        let offsets: Vec<u32> = params.changes().queues[0]
             .points
             .iter()
-            .map(|p| p.sample_offset)
+            .map(|p| p.sample_offset.get())
             .collect();
         assert_eq!(offsets.len(), room);
         assert!(
@@ -608,10 +607,10 @@ mod tests {
             |_, frame| seen.push(frame),
         );
         assert_eq!(seen, [5, 10], "`other` sees the notes on their frames");
-        let frames: Vec<i32> = delivery.changes().queues[0]
+        let frames: Vec<u32> = delivery.changes().queues[0]
             .points
             .iter()
-            .map(|p| p.sample_offset)
+            .map(|p| p.sample_offset.get())
             .collect();
         assert_eq!(frames, [5, 10], "the param points land on frames 5 and 10");
     }

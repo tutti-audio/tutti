@@ -17,6 +17,7 @@ use tutti_clap_host::ClapLoaded as HostLoaded;
 use tutti_fixtures::midi;
 
 use tutti_plugin_types::ChannelLayout;
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{EditorPresence, Features, PluginTail, RenderModeSupport, Request};
 use tutti_ump::U7;
 
@@ -1923,7 +1924,7 @@ fn test_clap_process_with_param_automation() {
 
     let mut changes = ParameterChanges::new();
     let mut queue = ParameterQueue::with_capacity(params[0].id(), 1);
-    queue.add_point(0, 0.5);
+    queue.add_point(at_frame(0), unit_value(0.5));
     changes.add_queue(queue);
 
     let num_samples = 512;

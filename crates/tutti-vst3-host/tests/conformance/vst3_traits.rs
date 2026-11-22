@@ -13,6 +13,7 @@ use tutti_rt::Mutex;
 
 use assert_no_alloc::assert_no_alloc;
 use tutti_buffers::FloatWidth;
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{
     Control, Controller, Loaded, MaxBlock, ParameterChanges, PluginError, PluginIo, PluginTail,
     Prepare, PresetId, ProcessContext, ProcessOutput, Processor, RenderMode, Request, RescanScope,
@@ -330,7 +331,7 @@ fn automation_in_the_block_overrides_a_queued_write() {
         .set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.25))
         .expect("a declared, writable parameter");
     let mut automation = tutti_plugin_types::ParameterChanges::reserved(1, 4);
-    automation.add_change(ParamId::new(PARAM_RAMP), 0, 0.75);
+    automation.add_change(ParamId::new(PARAM_RAMP), at_frame(0), unit_value(0.75));
     let ctx = ProcessContext::new().params(&automation);
     assert_eq!(
         render(&mut processor, FloatWidth::F32, &ctx).expect("renders"),
@@ -992,7 +993,7 @@ fn a_write_after_a_flush_is_the_blocks_last_word() {
         .set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.3))
         .expect("a declared, writable parameter");
     let mut later = ParameterChanges::reserved(1, 4);
-    assert!(later.add_change(id(PARAM_RAMP), 0, 0.6));
+    assert!(later.add_change(id(PARAM_RAMP), at_frame(0), unit_value(0.6)));
     // The probe renders the parameter's value at the end of the block.
     let rendered = render_last_f32(&mut processor, &ProcessContext::new().params(&later));
     assert!(
@@ -1021,7 +1022,7 @@ fn a_flush_between_blocks_reaches_a_processing_plugin() {
         .expect("a declared, writable parameter");
     render_f32(&mut processor);
     let mut changes = ParameterChanges::reserved(1, 1);
-    assert!(changes.add_change(id(PARAM_RAMP), 0, 0.4));
+    assert!(changes.add_change(id(PARAM_RAMP), at_frame(0), unit_value(0.4)));
     Processor::flush_parameters(&mut processor, &changes).expect("the plugin takes the flush");
     let rendered = render_f32(&mut processor);
     assert!((rendered - 0.4).abs() < 1e-6, "{rendered}");
@@ -1049,7 +1050,7 @@ fn a_flush_while_the_plugin_is_not_processing_is_staged_for_the_next_block_and_s
     render_f32(&mut processor);
     Processor::stop(&mut processor);
     let mut changes = ParameterChanges::reserved(1, 1);
-    assert!(changes.add_change(id(PARAM_RAMP), 0, 0.4));
+    assert!(changes.add_change(id(PARAM_RAMP), at_frame(0), unit_value(0.4)));
     Processor::flush_parameters(&mut processor, &changes).expect("staged");
     let ProcessorAny::F32(inner) = &processor else {
         panic!("activated at f32");

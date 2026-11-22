@@ -56,7 +56,7 @@ pub(super) enum Waited {
 #[cfg(not(loom))]
 pub use host_watch::{HOST_PID_ENV, Host, host_pid, watch_host, watch_spawner};
 
-use std::process::Child;
+use crate::Process;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -66,7 +66,7 @@ const NAP: Duration = Duration::from_millis(10);
 /// A wait for one child process to end.
 ///
 /// It answers "may have ended" rather than "has ended with this status": the
-/// owner of the [`Child`] asks `try_wait` for the status, and this only says
+/// owner of the [`Process`] asks `try_wait` for the status, and this only says
 /// when to ask. Where the OS has no such wake, [`wait`](Self::wait) hands a
 /// short slice to the caller's pause and says "may have ended" at its end, so
 /// the owner's `try_wait` is a poll there.
@@ -82,12 +82,12 @@ pub struct ExitWait {
 }
 
 impl ExitWait {
-    /// A wait on `child`, made while it is still unreaped (a reaped child's
+    /// A wait on `process`, made while it is still unreaped (a reaped child's
     /// process id may name another process).
     #[must_use]
-    pub fn of(child: &Child) -> Self {
+    pub fn of(process: &Process) -> Self {
         Self {
-            inner: platform::Imp::of(child),
+            inner: platform::Imp::of(process.as_child()),
             unasked: AtomicBool::new(true),
         }
     }
@@ -149,6 +149,7 @@ mod tests {
             &mut std::io::sink(),
         )
         .expect("the pipe reads to its end");
+        let mut child = Process::from(child);
         let wait = ExitWait::of(&child);
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {
@@ -172,7 +173,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn the_end_of_a_child_wakes_the_wait() {
-        let mut child = Command::new("sleep").arg("30").spawn().expect("sleep");
+        let mut child = Process::from(Command::new("sleep").arg("30").spawn().expect("sleep"));
         let wait = ExitWait::of(&child);
         assert!(
             wait.wait(Duration::ZERO, std::thread::sleep),
