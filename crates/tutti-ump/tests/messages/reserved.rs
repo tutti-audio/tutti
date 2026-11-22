@@ -14,7 +14,7 @@
 use tutti_ump::ControlValue;
 use tutti_ump::{
     Accidental, Address, Alteration, AlterationKind, Attribute, BlockDirection, BlockSelect,
-    ChordBass, ChordName, ChordPitch, ChordType, Field, FirstGroup, Flex, FlexAddress,
+    ChordBass, ChordName, ChordPitch, ChordType, CiVersion, Field, FirstGroup, Flex, FlexAddress,
     FlexTextKind, FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, FunctionBlocks,
     GroupSpan, KeySignature, Letter, Message, Midi1Port, MidiChannel, MidiGroup, NoteNumber,
     NoteVelocity, OsFunctionBlock, Pitch, Protocol, RegisteredPerNoteController, SharpsFlats,
@@ -786,6 +786,25 @@ fn an_os_value_reads_as_the_decoder_reads_the_wire() {
     assert!(
         matches!(read(|b| b.groups_spanned = 0).groups_spanned, Field::Reserved(r) if r.get() == 0)
     );
+    assert_eq!(defined.midi_ci_version, None);
+    assert_eq!(
+        read(|b| b.midi_ci_version = 0x1F).midi_ci_version,
+        Some(Field::Value(CiVersion::of(0x1F)))
+    );
+    // A reserved MIDI-CI version is kept as read and writes back unchanged.
+    for (raw, block) in [
+        (0x20, read(|b| b.midi_ci_version = 0x20)),
+        (0xFF, read(|b| b.midi_ci_version = 0xFF)),
+    ] {
+        assert!(
+            matches!(block.midi_ci_version, Some(Field::Reserved(r)) if r.get() == raw),
+            "{raw:#x}"
+        );
+        let message = Message::Stream(Stream::FunctionBlockInfo(block));
+        let ump = Ump::from(message);
+        assert_eq!((ump.0[1] >> 8) & 0xFF, u32::from(raw));
+        assert_eq!(ump.decode(), Ok(message));
+    }
     assert!(matches!(read(|b| b.id = 200).id, Field::Reserved(r) if r.get() == 127));
     assert!(matches!(read(|b| b.id = 128).id, Field::Reserved(r) if r.get() == 127));
     assert!(matches!(

@@ -72,7 +72,7 @@ fn what_the_meter_cannot_hold_is_refused() {
 }
 
 /// Section 7.5.3: the field written for a tempo is its beat period in 10 ns units, 120 bpm
-/// 50,000,000 and 60 bpm 100,000,000, and `flex_tempo` reads it back; the
+/// 50,000,000 and 60 bpm 100,000,000, and `FlexTempo::bpm` reads it back; the
 /// slowest and fastest the field holds are its two ends.
 #[test]
 fn a_tempo_writes_its_ten_ns_units_per_quarter() {

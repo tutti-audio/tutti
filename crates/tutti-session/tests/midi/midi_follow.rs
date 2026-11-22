@@ -58,7 +58,8 @@ fn follow(s: &mut Keyed, group: MidiGroup, meter: bool) {
 }
 
 fn flex_tempo(group: MidiGroup, bpm: f64) -> Ump {
-    let field = FlexTempo::from_bpm(Bpm::of(bpm));
+    // The spec field, 10 ns units per quarter note, computed apart from `FlexTempo`.
+    let field = FlexTempo::new((6.0e9 / bpm) as u32);
     Ump::from(Message::Flex(group, Flex::SetTempo(field)))
 }
 

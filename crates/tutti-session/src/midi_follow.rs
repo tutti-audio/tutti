@@ -411,7 +411,7 @@ impl Overlay {
                     }
                     Ok(None) => {}
                     // The builder refuses only a tempo whose segment duration overflows
-                    // an `f64` (below ~1e-300 bpm); a `Bpm` from `flex_tempo` is at least
+                    // an `f64` (below ~1e-300 bpm); a `Bpm` from `FlexTempo::bpm` is at least
                     // 1.397 bpm (field `u32::MAX`), so this is not reached: nothing is
                     // published and nothing reported.
                     Err(_) => {}

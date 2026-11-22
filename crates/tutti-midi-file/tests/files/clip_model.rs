@@ -49,7 +49,7 @@ fn off(note: u8) -> Ump {
 fn set_tempo(bpm: f64) -> Ump {
     Message::Flex(
         MidiGroup::FIRST,
-        Flex::SetTempo(FlexTempo::from_bpm(Bpm::of(bpm))),
+        Flex::SetTempo(FlexTempo::new((6.0e9 / bpm) as u32)),
     )
     .into()
 }

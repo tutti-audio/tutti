@@ -1727,7 +1727,8 @@ pub struct FunctionBlockInfo {
     /// How many Groups it spans.
     pub groups_spanned: Field<GroupSpan>,
     /// The MIDI-CI message version: `None` is `0`, no MIDI-CI; a value above
-    /// `0x1F` is reserved, as read.
+    /// `0x1F` is reserved, as read. A reserved `0` writes as `0` and so reads
+    /// back as `None`.
     pub midi_ci_version: Option<Field<CiVersion>>,
     /// Simultaneous SysEx 8 streams supported.
     pub max_sysex8_streams: Sysex8StreamCount,
