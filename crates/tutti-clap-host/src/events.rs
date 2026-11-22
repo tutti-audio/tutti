@@ -3456,20 +3456,6 @@ mod tests {
     }
 
     #[test]
-    fn add_param_changes_clamps_denormalized_value_into_range() {
-        // A normalized 1.5 (over-range) must clamp to the plain max, not overshoot.
-        let mut changes = ParameterChanges::reserved(1, 1);
-        changes.add_change(ParamId::new(9u32), at_frame(0), unit_value(1.5));
-        let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
-        list.add_param_changes(
-            &changes,
-            &[ParamBounds::continuous(ParamId::new(9), 0.0, 10.0)],
-            true,
-        );
-        assert_eq!(first_param_value(&list), 10.0);
-    }
-
-    #[test]
     fn add_param_changes_survives_a_plugin_reporting_inverted_bounds() {
         // `f64::clamp` panics when `lo > hi`, and these bounds are whatever the
         // plugin reported. A malformed plugin must not take down the audio

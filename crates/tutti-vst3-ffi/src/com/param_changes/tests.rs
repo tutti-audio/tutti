@@ -152,7 +152,7 @@ fn changes_with(num_queues: usize, points_per: usize) -> ParameterChanges {
             changes.add_change(
                 ParamId::new(q as u32),
                 at_frame(p as i32),
-                unit_value(p as f64 * 0.01),
+                unit_value(p as f64 / points_per as f64),
             );
         }
     }

@@ -1098,10 +1098,15 @@ pub fn at_frame(frames: impl TryInto<usize, Error: std::fmt::Debug>) -> Offset {
     )
 }
 
-/// `value` as a parameter's normalized value, clamped onto `0..=1`.
+/// `value` as a parameter's normalized value.
+///
+/// # Panics
+///
+/// When `value` is outside `0..=1` or not finite: a test's value is never
+/// clamped into range.
 #[must_use]
 pub fn unit_value(value: f64) -> Normalized {
-    Normalized::clamped(value)
+    Normalized::new(value).expect("a normalized value in 0..=1")
 }
 
 #[cfg(test)]
