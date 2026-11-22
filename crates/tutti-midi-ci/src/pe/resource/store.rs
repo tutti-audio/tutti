@@ -4,6 +4,7 @@ use super::super::limits::ResourceId;
 use super::data::PeData;
 use super::entry::{PeResourceList, ResourceEntry};
 use super::kind::PeResource;
+use super::link::LinkRole;
 use super::request::ResourceTarget;
 
 /// A value the store refuses.
@@ -21,6 +22,10 @@ pub enum StoreError {
         /// What the entry says.
         required: bool,
     },
+    /// An action Link of the data names a Resource with no entry declared (M2-103
+    /// §13.1.1: an action Resource is listed in the ResourceList).
+    #[error("an action Link names {0}, which has no entry declared")]
+    ActionNotDeclared(PeResource),
 }
 
 #[derive(Clone, Debug)]
@@ -67,20 +72,35 @@ impl ResourceStore {
     ///
     /// [`StoreError::NotDeclared`] for a Resource with no entry, and
     /// [`StoreError::ResIdDisagrees`] when `res_id` is given and the entry says
-    /// there is none, or the reverse.
+    /// there is none, or the reverse, and [`StoreError::ActionNotDeclared`] when
+    /// a Link of the data is an action on a Resource with no entry.
     pub fn put(&mut self, res_id: Option<ResourceId>, data: PeData) -> Result<(), StoreError> {
         let resource = data.resource();
+        let entry = self
+            .entry(&resource)
+            .ok_or_else(|| StoreError::NotDeclared(resource.clone()))?;
+        if entry.require_res_id() != res_id.is_some() {
+            return Err(StoreError::ResIdDisagrees {
+                resource,
+                required: entry.require_res_id(),
+            });
+        }
+        let undeclared = data.links().into_iter().find_map(|link| {
+            let acted = match &link.role {
+                Some(LinkRole::Simple(_)) => &link.resource,
+                Some(LinkRole::Selector(action)) => &action.action_resource,
+                _ => return None,
+            };
+            self.entry(acted).is_none().then(|| acted.clone())
+        });
+        if let Some(acted) = undeclared {
+            return Err(StoreError::ActionNotDeclared(acted));
+        }
         let stored = self
             .resources
             .iter_mut()
             .find(|s| *s.entry.resource() == resource)
             .ok_or_else(|| StoreError::NotDeclared(resource.clone()))?;
-        if stored.entry.require_res_id() != res_id.is_some() {
-            return Err(StoreError::ResIdDisagrees {
-                resource,
-                required: stored.entry.require_res_id(),
-            });
-        }
         match stored.values.iter_mut().find(|(id, _)| *id == res_id) {
             Some((_, old)) => *old = data,
             None => stored.values.push((res_id, data)),

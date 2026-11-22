@@ -30,7 +30,9 @@ pub enum EntryError {
     /// A manufacturer-specific JSON Resource gives a schema with at least a
     /// `title` and a `type`, and the schema of a Resource that is not JSON a
     /// `title` and no `type` (M2-103 §14.4, §14.6).
-    #[error("the schema of {0} has no title, or has no type where it needs one, or has one where it must not")]
+    #[error(
+        "the schema of {0} has no title, or has no type where it needs one, or has one where it must not"
+    )]
     SchemaIncomplete(String),
     /// Flow Control on Get needs `canGet`, and on Set needs `canSet`.
     #[error("{0} sets Flow Control for a transaction it does not take")]
