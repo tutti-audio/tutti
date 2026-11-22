@@ -428,7 +428,7 @@ impl<F: Float> Editor<F> {
     }
 
     /// Whether `key`'s shape declares its own bypass
-    /// ([`Shape::with_own_bypass`](crate::Shape::with_own_bypass)).
+    /// ([`Shape::own_bypass`](crate::Shape::own_bypass)).
     #[must_use]
     pub fn bypasses_itself(&self, key: NodeKey) -> bool {
         self.shapes.get(&key).is_some_and(|shape| shape.own_bypass)

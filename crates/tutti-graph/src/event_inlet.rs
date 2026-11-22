@@ -440,15 +440,15 @@ impl EventInletNode {
         (node, writer)
     }
 
-    const BASE: Shape = Shape::EMPTY.with_events(0, 1);
+    const BASE: Shape = Shape::EMPTY.events(0, 1);
     const OUT: OutEvents = Self::BASE.event_output(0).expect("declared");
 
     fn declared(capacity: EventCapacity) -> Shape {
         Self::BASE
             // `pair` checked that it fits.
-            .with_event_capacity(capacity.non_zero())
+            .event_capacity(capacity.non_zero())
             // Event-only: a ring drain, work per event, nothing per frame.
-            .with_cost(Cost::Light)
+            .cost(Cost::Light)
     }
 
     /// The ring's capacity in events, which is also how many may wait for their

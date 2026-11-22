@@ -57,11 +57,11 @@ impl Source {
 
     fn declared(n: u32, mix: Mix) -> Shape {
         let shape = Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(NonZeroU32::new(n * 2).expect("a capacity"));
+            .events(0, 1)
+            .event_capacity(NonZeroU32::new(n * 2).expect("a capacity"));
         match mix {
             Mix::Midi => shape,
-            Mix::Params | Mix::Mixed => shape.with_param_events(),
+            Mix::Params | Mix::Mixed => shape.param_events(),
         }
     }
 }
@@ -91,7 +91,7 @@ impl Node for Source {
 struct Sink(InEvents);
 
 impl Sink {
-    const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+    const SHAPE: Shape = Shape::EMPTY.events(1, 0);
 
     fn new() -> Self {
         Self(Self::SHAPE.event_input(0).expect("one event input"))

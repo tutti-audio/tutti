@@ -51,7 +51,7 @@ impl Plugin {
 impl Node for Plugin {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_latency(Latency::new(Samples::new(self.probed)))
+            .latency(Latency::new(Samples::new(self.probed)))
     }
     fn prepare(&mut self, _: &Prepare) {
         self.probed = self.reported.load(Ordering::Relaxed);

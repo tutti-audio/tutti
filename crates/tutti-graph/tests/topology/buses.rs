@@ -98,7 +98,7 @@ fn declared_buses_sit_in_port_order() {
     assert!(Buses::new(&[one; MAX_BUSES + 1]).is_none());
 
     // More channels than the buses hold keeps them as ports.
-    let prefix = Shape::buses(buses, Buses::unassigned(width(2))).with_ports(width(12), width(2));
+    let prefix = Shape::buses(buses, Buses::unassigned(width(2))).ports(width(12), width(2));
     assert_eq!(prefix.audio_in(), width(12));
     assert_eq!(prefix.buses_in().width(), 9);
 }
@@ -106,7 +106,7 @@ fn declared_buses_sit_in_port_order() {
 #[test]
 #[should_panic(expected = "ports narrower than the buses")]
 fn ports_narrower_than_the_buses_are_refused() {
-    let _ = Shape::through(BusTopology::STEREO).with_ports(width(1), width(2));
+    let _ = Shape::through(BusTopology::STEREO).ports(width(1), width(2));
 }
 
 /// Declaring buses changes nothing the compiler makes: the same topology,

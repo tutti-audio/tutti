@@ -23,7 +23,7 @@ use tutti_ump::MidiChannel;
 struct Sink(Arc<AtomicUsize>);
 
 impl Sink {
-    const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+    const SHAPE: Shape = Shape::EMPTY.events(1, 0);
     const IN: tutti_graph::InEvents = Self::SHAPE
         .event_input(0)
         .expect("one event input is declared");

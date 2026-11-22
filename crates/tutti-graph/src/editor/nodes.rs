@@ -295,8 +295,8 @@ impl<F: Float> Editor<F> {
         // fork source over makes the key unforkable.
         let generation = self.placements.place(key, unit, wake, fork);
         let spec = NodeSpec::new(kind, shape.audio_in(), shape.audio_out())
-            .with_latency(shape.latency.samples())
-            .with_tail(shape.tail);
+            .latency(shape.latency.samples())
+            .tail(shape.tail);
         self.spec.topology.nodes.insert(key, spec);
         self.spec.generations.insert(key, generation);
         self.shapes.insert(key, shape);

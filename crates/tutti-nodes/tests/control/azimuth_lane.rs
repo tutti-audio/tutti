@@ -35,7 +35,7 @@ struct Probe;
 impl Node for Probe {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::STEREO)
-            .with_params(&[UnitParam::Azimuth, UnitParam::Elevation])
+            .params(&[UnitParam::Azimuth, UnitParam::Elevation])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

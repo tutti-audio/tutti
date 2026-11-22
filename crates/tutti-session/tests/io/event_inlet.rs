@@ -103,7 +103,7 @@ fn pushed_events_come_out_at_their_frames() {
 struct Hear;
 
 impl Hear {
-    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0);
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).events(1, 0);
     const IN: tutti_graph::InEvents = Self::SHAPE
         .event_input(0)
         .expect("one event input is declared");

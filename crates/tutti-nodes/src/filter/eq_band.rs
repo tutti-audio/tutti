@@ -81,8 +81,8 @@ impl<F: Float + SimdLanes> Node<F> for EqBandNode<F> {
     /// Its tail is the inner filter's: [`Tail::Unknown`](tutti_units::Tail::Unknown).
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_cost(tutti_graph::Cost::Moderate)
-            .with_tail(self.svf.shape().tail)
+            .cost(tutti_graph::Cost::Moderate)
+            .tail(self.svf.shape().tail)
     }
 
     fn prepare(&mut self, p: &Prepare) {

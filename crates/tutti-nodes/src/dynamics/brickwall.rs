@@ -134,7 +134,7 @@ impl<F: Float> Kernel for BrickwallKernel<F> {
             Buses::main(self.input),
             Buses::NONE.with(output).expect("one bus"),
         )
-        .with_cost(Cost::Light)
+        .cost(Cost::Light)
     }
 
     fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}

@@ -183,12 +183,12 @@
 //! [`Shape`] is everything the compiler needs to know about a node before it
 //! runs: its audio ports and buses ([`Shape::through_unassigned`],
 //! [`Shape::source_unassigned`], [`Shape::buses`] for a node with a
-//! sidechain or several buses), its event ports ([`with_events`](Shape::with_events)),
-//! its [`Cost`] ([`with_cost`](Shape::with_cost): a cheap node says so, one that
+//! sidechain or several buses), its event ports ([`events`](Shape::events)),
+//! its [`Cost`] ([`cost`](Shape::cost): a cheap node says so, one that
 //! says nothing is `Heavy`, worth a thread), its **processing** latency
-//! ([`with_latency`](Shape::with_latency), which feeds delay compensation: a
+//! ([`latency`](Shape::latency), which feeds delay compensation: a
 //! musical delay is not latency) and its **tail**, the ceiling on how long it
-//! keeps sounding after its input stops ([`with_tail`](Shape::with_tail)).
+//! keeps sounding after its input stops ([`tail`](Shape::tail)).
 //! A node that changes width declares its buses; the graph never guesses a
 //! dry path.
 //!
@@ -212,9 +212,9 @@
 //!             .with(Bus::new(mono, BusRole::Sidechain))
 //!             .unwrap();
 //!         Shape::buses(ins, Buses::unassigned(ChannelLayout::MONO))
-//!             .with_cost(Cost::Light)
-//!             .with_latency(Latency::new(Samples::new(0)))
-//!             .with_tail(Tail::None)
+//!             .cost(Cost::Light)
+//!             .latency(Latency::new(Samples::new(0)))
+//!             .tail(Tail::None)
 //!     }
 //!     fn new() -> Self {
 //!         Self { key: Self::ports().input_bus(1).expect("the sidechain is the second bus") }
@@ -284,7 +284,7 @@
 //! impl Node for Volume {
 //!     fn shape(&self) -> Shape {
 //!         Shape::through_unassigned(ChannelLayout::MONO)
-//!             .with_param_addrs(self.declared_ports().as_slice())
+//!             .param_addrs(self.declared_ports().as_slice())
 //!     }
 //!     fn prepare(&mut self, _: &Prepare) {}
 //!     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -348,7 +348,7 @@
 //! struct Pulse;
 //!
 //! impl Pulse {
-//!     const SHAPE: Shape = Shape::EMPTY.with_events(0, 1).with_event_capacity(CAPACITY);
+//!     const SHAPE: Shape = Shape::EMPTY.events(0, 1).event_capacity(CAPACITY);
 //!     const OUT: OutEvents = match Self::SHAPE.event_output(0) {
 //!         Some(port) => port,
 //!         None => panic!("declared"),
@@ -376,7 +376,7 @@
 //! }
 //!
 //! impl Gate {
-//!     const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0);
+//!     const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).events(1, 0);
 //!     const IN: InEvents = match Self::SHAPE.event_input(0) {
 //!         Some(port) => port,
 //!         None => panic!("declared"),
@@ -448,7 +448,7 @@
 //!     fn shape(&self) -> Shape {
 //!         // The ceiling: never longer than this, whatever the params.
 //!         Shape::through_unassigned(ChannelLayout::MONO)
-//!             .with_tail(Tail::Finite(Samples::new(8 * 4_800)))
+//!             .tail(Tail::Finite(Samples::new(8 * 4_800)))
 //!     }
 //!     fn prepare(&mut self, _: &Prepare) {}
 //!     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -530,7 +530,7 @@
 //! the 32 bytes an [`Event`] is held to, so it travels in a buffer of its own
 //! beside the port's events, merged and delayed with them
 //! ([`SortedEvents::params`], [`EventWriter::push_param`]); a node that
-//! writes them declares it ([`Shape::with_param_events`]), and only the
+//! writes them declares it ([`Shape::param_events`]), and only the
 //! buffers its outputs reach have room for them. An event input may have several sources, merged by offset and then
 //! by the source port's `(NodeKey, port)` — a property of the wiring, not of
 //! the order edges were listed in. An audio input port, and a

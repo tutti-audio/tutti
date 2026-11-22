@@ -244,7 +244,7 @@ impl<F: Float + SimdLanes + Lerp> Kernel for GateKernel<F> {
                 .with(Bus::new(self.input, BusRole::Sidechain))
                 .expect("a main bus and a key are two buses"),
         };
-        Shape::buses(inputs, Buses::NONE.with(output).expect("one bus")).with_cost(Cost::Moderate)
+        Shape::buses(inputs, Buses::NONE.with(output).expect("one bus")).cost(Cost::Moderate)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {

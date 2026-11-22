@@ -163,13 +163,12 @@ fn a_repeated_tempo_is_no_change() {
             .unwrap()
             .is_none()
     );
-    let with_tail = TempoMap::builder(bpm(120.0))
+    let tail = TempoMap::builder(bpm(120.0))
         .step_to(Beat::new(8.0), bpm(90.0))
         .build()
         .unwrap();
     assert!(
-        with_tail
-            .stepped_to(Beat::new(4.0), bpm(120.0))
+        tail.stepped_to(Beat::new(4.0), bpm(120.0))
             .unwrap()
             .is_some()
     );

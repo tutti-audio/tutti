@@ -53,7 +53,7 @@ impl Node for Downmixer {
             Buses::new(&[smpte(6)]).expect("one bus"),
             Buses::new(&[smpte(2)]).expect("one bus"),
         )
-        .with_latency(Latency::new(Samples::new(self.latency)))
+        .latency(Latency::new(Samples::new(self.latency)))
     }
 
     fn prepare(&mut self, _: &Prepare) {}

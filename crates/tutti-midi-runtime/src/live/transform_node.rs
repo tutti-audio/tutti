@@ -115,10 +115,10 @@ fn tell(
 impl MpeTransformNode {
     const fn declared(capacity: NonZeroU32) -> Shape {
         Shape::EMPTY
-            .with_events(1, 1)
-            .with_event_capacity(capacity)
+            .events(1, 1)
+            .event_capacity(capacity)
             // Event-only: a translation per event, nothing per frame.
-            .with_cost(Cost::Light)
+            .cost(Cost::Light)
     }
     const IN: InEvents = Self::declared(MIDI_INPUT_PORT_CAPACITY)
         .event_input(0)
