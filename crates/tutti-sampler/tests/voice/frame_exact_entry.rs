@@ -113,7 +113,7 @@ fn transport() -> Transport {
 /// Render `FRAMES` of `engine` in [`DEVICE`]-frame device blocks, playing; the
 /// left channel.
 fn play(engine: &Engine, t: &Transport) -> Vec<f32> {
-    t.motion().try_send(MotionCommand::Play).expect("room");
+    t.motion().send(MotionCommand::Play).expect("room");
     let mut left = Vec::with_capacity(FRAMES);
     let mut buf = vec![0.0f32; DEVICE * 2];
     while left.len() < FRAMES {

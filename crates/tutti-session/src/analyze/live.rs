@@ -4,7 +4,7 @@
 //! the analysis to the graph's rate and the tap's width, through the same
 //! [`AudioContext`] and [`AudioInput`]
 //! the offline [`Session::analyze`](crate::Session::analyze) binds a wave
-//! with. The app drains it on a thread of its own ([`Analyzer::try_iter`]); the
+//! with. The app drains it on a thread of its own ([`Analyzer::pending`]); the
 //! session starts none.
 
 use tutti_buffers::{ChannelLayout, ChannelTopology, Float, Pull, Source};
@@ -37,7 +37,7 @@ pub enum AnalyzerError {
 }
 
 /// A tap with a meter's state: the app drains it with
-/// [`try_iter`](Self::try_iter) and reads what the tap lost
+/// [`pending`](Self::pending) and reads what the tap lost
 /// ([`lost`](Self::lost)). Opened by [`Taps::open_analyzer`](crate::Taps::open_analyzer).
 ///
 /// Generic over the analysis `A`, never boxed: [`StreamMeter`] is not object-safe.
@@ -50,7 +50,7 @@ pub struct Analyzer<A: Measure<F>, F: Float = f32> {
     reader: TapReader<F>,
     meter: A::Meter,
     chunk: Chunk<'static, F>,
-    /// The items the last drain collected; handed out by `try_iter`.
+    /// The items the last drain collected; handed out by `pending`.
     items: Vec<<A::Meter as StreamMeter>::Item>,
     /// The tap's losses read so far; `lost` adds what the tap counted since.
     lost: std::cell::Cell<Samples>,
@@ -112,14 +112,14 @@ where
     /// on) is skipped and counted ([`refused`](Self::refused)); the chunks
     /// after it are shown as usual. Once the tap has ended
     /// ([`is_finished`](Self::is_finished)) or failed ([`is_failed`](Self::is_failed)) there is nothing more.
-    pub fn try_iter(&mut self) -> impl Iterator<Item = <A::Meter as StreamMeter>::Item> + '_ {
+    pub fn pending(&mut self) -> impl Iterator<Item = <A::Meter as StreamMeter>::Item> + '_ {
         self.drain();
         self.items.drain(..)
     }
 
     /// A future that resolves once the tap has written a block or ended since
     /// the last time one resolved ([`TapReader::notified`](tutti_graph::TapReader::notified)):
-    /// await it, then drain with [`try_iter`](Self::try_iter). `None` for a tap
+    /// await it, then drain with [`pending`](Self::pending). `None` for a tap
     /// opened without bells, which a session's never is.
     ///
     /// The audio thread rings the tap's bell as it writes a block, and the
@@ -131,7 +131,7 @@ where
     }
 
     /// Drains what is left and answers over the whole stream. The items this
-    /// last drain completes are dropped: drain with [`try_iter`](Self::try_iter)
+    /// last drain completes are dropped: drain with [`pending`](Self::pending)
     /// first to keep them.
     #[must_use]
     pub fn finish(mut self) -> <A::Meter as StreamMeter>::Output {
@@ -192,7 +192,7 @@ impl<A: Measure<F>, F: Float> Analyzer<A, F> {
     }
 
     /// Whether the tap has ended: every source was removed and what the tap
-    /// held was drained. Read after a [`try_iter`](Self::try_iter).
+    /// held was drained. Read after a [`pending`](Self::pending).
     #[must_use]
     pub fn is_finished(&self) -> bool {
         self.ended
