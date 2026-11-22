@@ -5,9 +5,9 @@
 
 #[cfg(feature = "midi-hardware")]
 use crate::common::OpenPorts as _;
-#[cfg(feature = "midi-hardware")]
-use crate::common::with_input;
 use crate::common::{MF, Seen, blocks, note, offline, play, tap};
+#[cfg(feature = "midi-hardware")]
+use crate::common::{every_input_port, input_ports, with_input};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_session::Stamp;
@@ -19,7 +19,7 @@ use tutti_graph::NodeKey;
 #[cfg(feature = "midi-hardware")]
 use tutti_midi_device::{EndpointId, PortDirection};
 #[cfg(feature = "midi-hardware")]
-use tutti_midi_runtime::{CHANNELLESS_PORT, MIDI_INPUT_PORTS};
+use tutti_midi_runtime::MidiInputPorts;
 use tutti_midi_runtime::{LIVE_INLET_CAPACITY, TimedMidiEvent};
 #[cfg(feature = "midi-hardware")]
 use tutti_platform::Instant;
@@ -385,15 +385,15 @@ fn route_rules_wire_the_hardware_input() {
     let (mut s, input) = with_input(None);
     let (a, _) = tap(&mut s);
     let (b, _) = tap(&mut s);
-    let ports = |s: &Session, n: NodeKey| -> Vec<u16> {
-        let mut p: Vec<u16> = s
+    let ports = |s: &Session, n: NodeKey| -> Vec<tutti_graph::EventOutputPort> {
+        let mut p: Vec<_> = s
             .graph_ref()
             .feed(n, Feeder::Routes)
             .unwrap()
             .iter()
             .map(|e| {
                 assert_eq!(e.node(), input);
-                e.port()
+                *e
             })
             .collect();
         p.sort();
@@ -401,13 +401,15 @@ fn route_rules_wire_the_hardware_input() {
     };
 
     let all = s.midi().route(MidiRouteRule::new().to(a)).unwrap();
-    assert_eq!(ports(&s, a), (0..MIDI_INPUT_PORTS).collect::<Vec<_>>());
+    let first = MidiInputPorts::FIRST_GROUP;
+    let sorted = |set: std::collections::BTreeSet<_>| set.into_iter().collect::<Vec<_>>();
+    assert_eq!(ports(&s, a), sorted(every_input_port(first, input)));
 
     let ch2 = MidiChannel::of(2);
     s.midi()
         .route(MidiRouteRule::new().channel(ch2).to(b))
         .unwrap();
-    assert_eq!(ports(&s, b), vec![2, CHANNELLESS_PORT]);
+    assert_eq!(ports(&s, b), sorted(input_ports(first, input, 0, &[2])));
 
     s.midi().unroute(all).unwrap();
     assert!(
@@ -417,11 +419,13 @@ fn route_rules_wire_the_hardware_input() {
         ),
         "a removed rule is not there"
     );
-    assert_eq!(ports(&s, a), Vec::<u16>::new(), "unrouted");
+    assert!(ports(&s, a).is_empty(), "unrouted");
 
     s.midi().set_route_fallback(Some(a)).unwrap();
-    let rest: Vec<u16> = (0..MIDI_INPUT_PORTS)
-        .filter(|&p| p != 2 && p != CHANNELLESS_PORT)
+    let taken = input_ports(first, input, 0, &[2]);
+    let rest: Vec<_> = every_input_port(first, input)
+        .into_iter()
+        .filter(|p| !taken.contains(p))
         .collect();
     assert_eq!(ports(&s, a), rest, "the fallback takes what no rule covers");
 }
@@ -437,22 +441,23 @@ fn a_route_rule_names_a_group() {
     let (a, _) = tap(&mut s);
     let (b, _) = tap(&mut s);
     let (c, _) = tap(&mut s);
-    let ports = |s: &Session, n: NodeKey| -> Vec<u16> {
-        let mut p: Vec<u16> = s
+    let ports = |s: &Session, n: NodeKey| -> Vec<tutti_graph::EventOutputPort> {
+        let mut p: Vec<_> = s
             .graph_ref()
             .feed(n, Feeder::Routes)
             .unwrap()
             .iter()
             .map(|e| {
                 assert_eq!(e.node(), input);
-                e.port()
+                *e
             })
             .collect();
         p.sort();
         p
     };
     let ch2 = MidiChannel::of(2);
-    let group = MIDI_INPUT_PORTS;
+    let two = MidiInputPorts::through(MidiGroup::of(1));
+    let sorted = |set: std::collections::BTreeSet<_>| set.into_iter().collect::<Vec<_>>();
     s.midi()
         .route(
             MidiRouteRule::new()
@@ -461,11 +466,11 @@ fn a_route_rule_names_a_group() {
                 .to(a),
         )
         .unwrap();
-    assert_eq!(ports(&s, a), vec![group + 2, group + CHANNELLESS_PORT]);
+    assert_eq!(ports(&s, a), sorted(input_ports(two, input, 1, &[2])));
     s.midi()
         .route(MidiRouteRule::new().channel(ch2).to(b))
         .unwrap();
-    assert_eq!(ports(&s, b), vec![2, CHANNELLESS_PORT]);
+    assert_eq!(ports(&s, b), sorted(input_ports(first, input, 0, &[2])));
     s.midi()
         .route(
             MidiRouteRule::new()
@@ -474,7 +479,7 @@ fn a_route_rule_names_a_group() {
                 .to(c),
         )
         .unwrap();
-    assert_eq!(ports(&s, c), Vec::<u16>::new(), "a Group not heard");
+    assert!(ports(&s, c).is_empty(), "a Group not heard");
 }
 
 /// **The routes have one declarer.** While the session's own rules are

@@ -142,6 +142,33 @@ impl std::ops::DerefMut for Keyed {
 /// (hearing Groups up to `groups`, the first alone with `None`): the port's
 /// input node, which route rules wire from.
 #[cfg(feature = "midi-hardware")]
+/// The ports of `layout`'s input `input` that carry `channels` of `group`, and
+/// the Group's channelless port.
+#[cfg(feature = "midi-hardware")]
+pub fn input_ports(
+    layout: tutti_midi_runtime::MidiInputPorts,
+    input: NodeKey,
+    group: u8,
+    channels: &[u8],
+) -> std::collections::BTreeSet<tutti_graph::EventOutputPort> {
+    use tutti_ump::{MidiChannel, MidiGroup};
+    let group = MidiGroup::of(group);
+    channels
+        .iter()
+        .map(|&c| layout.channel(input, group, MidiChannel::of(c)).unwrap())
+        .chain(layout.channelless(input, group))
+        .collect()
+}
+
+/// Every port of `layout`'s input `input`.
+#[cfg(feature = "midi-hardware")]
+pub fn every_input_port(
+    layout: tutti_midi_runtime::MidiInputPorts,
+    input: NodeKey,
+) -> std::collections::BTreeSet<tutti_graph::EventOutputPort> {
+    layout.listening(input, None, None).collect()
+}
+
 pub fn with_input(groups: Option<tutti_ump::MidiGroup>) -> (Keyed, NodeKey) {
     use tutti_midi_hardware::test_support::{FakeBackend, persistent_endpoint};
     let (backend, _fake) =

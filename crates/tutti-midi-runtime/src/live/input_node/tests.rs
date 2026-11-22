@@ -1,6 +1,7 @@
 use super::*;
 use tutti_fixtures::midi;
 
+use std::collections::BTreeSet;
 use tutti_ump::{NoteVelocity, U7, Utility};
 
 /// The node adopts the mode last published to its cell on its next block.
@@ -53,17 +54,44 @@ fn reclaim_frees_a_request_a_block_held_across_the_next() {
     assert_eq!(controls.request.retired_len(), 0, "freed by the reclaim");
 }
 
+const NODE: NodeKey = NodeKey(1);
+
 /// A listener on one channel of a Group takes that channel's port and the
 /// Group's channelless one; an omni listener of a Group takes its seventeen.
 #[test]
 fn a_listener_takes_its_channel_and_the_channelless_port() {
     let first = MidiInputPorts::FIRST_GROUP;
-    let one: Vec<u16> = first
-        .listening(Some(MidiGroup::FIRST), Some(MidiChannel::of(3)))
+    let one: Vec<_> = first
+        .listening(NODE, Some(MidiGroup::FIRST), Some(MidiChannel::of(3)))
         .collect();
-    assert_eq!(one, vec![3, CHANNELLESS_PORT]);
-    let all: Vec<u16> = first.listening(None, None).collect();
-    assert_eq!(all, (0..MIDI_INPUT_PORTS).collect::<Vec<_>>());
+    assert_eq!(
+        one,
+        vec![
+            first
+                .channel(NODE, MidiGroup::FIRST, MidiChannel::of(3))
+                .unwrap(),
+            first.channelless(NODE, MidiGroup::FIRST).unwrap()
+        ]
+    );
+    let all: Vec<_> = first.listening(NODE, None, None).collect();
+    assert_eq!(all.len(), usize::from(first.count()));
+    let every: BTreeSet<_> = MidiChannel::all()
+        .map(|c| first.channel(NODE, MidiGroup::FIRST, c).unwrap())
+        .chain(first.channelless(NODE, MidiGroup::FIRST))
+        .collect();
+    assert_eq!(all.into_iter().collect::<BTreeSet<_>>(), every);
+}
+
+/// The output of `ports`' shape an event leaves from.
+fn leaves(ports: MidiInputPorts, event: &Ump) -> Option<OutEvents> {
+    let shape = MidiInputNode::declared(ports, MIDI_INPUT_PORT_CAPACITY);
+    ports.output_of(&shape, event)
+}
+
+/// The output of `ports`' shape that is the port `port` names.
+fn out_of(ports: MidiInputPorts, port: Option<EventOutputPort>) -> Option<OutEvents> {
+    let shape = MidiInputNode::declared(ports, MIDI_INPUT_PORT_CAPACITY);
+    port.and_then(|p| shape.event_output(p.port()))
 }
 
 /// A voice message leaves on its channel's port; a system message on
@@ -77,12 +105,14 @@ fn events_leave_on_their_channels_port() {
         60,
         NoteVelocity::from(U7::of(100)).get(),
     );
-    assert_eq!(first.port_of(&on), Some(9));
+    let nine = first.channel(NODE, MidiGroup::FIRST, MidiChannel::of(9));
+    assert_eq!(leaves(first, &on), out_of(first, nine));
     let clock = Ump::from(Message::System(
         tutti_ump::MidiGroup::FIRST,
         System::TimingClock,
     ));
-    assert_eq!(first.port_of(&clock), Some(CHANNELLESS_PORT));
+    let channelless = first.channelless(NODE, MidiGroup::FIRST);
+    assert_eq!(leaves(first, &clock), out_of(first, channelless));
 }
 
 /// **A Group is a channel space of its own** (M2-104 section 2.1.2: a Group
@@ -96,7 +126,7 @@ fn events_leave_on_their_channels_port() {
 #[test]
 fn a_group_has_ports_of_its_own() {
     let two = MidiInputPorts::through(MidiGroup::of(1));
-    assert_eq!(two.count(), 2 * MIDI_INPUT_PORTS);
+    assert_eq!(two.count(), 2 * MidiInputPorts::FIRST_GROUP.count());
     let note = |group: u8, channel: u8| {
         midi::note_on(
             tutti_ump::Address::new(MidiGroup::of(group), MidiChannel::of(channel)),
@@ -104,31 +134,43 @@ fn a_group_has_ports_of_its_own() {
             NoteVelocity::from(U7::of(100)).get(),
         )
     };
-    assert_eq!(two.port_of(&note(0, 1)), Some(1));
-    assert_eq!(two.port_of(&note(1, 1)), Some(MIDI_INPUT_PORTS + 1));
+    let channel = |group: u8, channel: u8| {
+        out_of(
+            two,
+            two.channel(NODE, MidiGroup::of(group), MidiChannel::of(channel)),
+        )
+    };
+    let channelless = |group: u8| out_of(two, two.channelless(NODE, MidiGroup::of(group)));
+    assert_eq!(leaves(two, &note(0, 1)), channel(0, 1));
+    assert_eq!(leaves(two, &note(1, 1)), channel(1, 1));
+    assert_ne!(channel(0, 1), channel(1, 1), "a port of its own");
     assert_eq!(
-        two.port_of(&Ump::from(Message::System(
-            MidiGroup::of(1),
-            System::TimingClock
-        ))),
-        Some(MIDI_INPUT_PORTS + CHANNELLESS_PORT)
+        leaves(
+            two,
+            &Ump::from(Message::System(MidiGroup::of(1), System::TimingClock))
+        ),
+        channelless(1)
     );
     // A Utility NOOP has no Group.
     assert_eq!(
-        two.port_of(&Ump::from(Message::Utility(Utility::Noop))),
-        Some(CHANNELLESS_PORT)
+        leaves(two, &Ump::from(Message::Utility(Utility::Noop))),
+        channelless(0)
     );
-    assert_eq!(two.port_of(&note(2, 1)), None, "not heard");
+    assert_eq!(leaves(two, &note(2, 1)), None, "not heard");
     // A listener on Group 2's channel 1 takes that Group's ports only.
-    let ports: Vec<u16> = two
-        .listening(Some(MidiGroup::of(1)), Some(MidiChannel::of(1)))
+    let ports: Vec<_> = two
+        .listening(NODE, Some(MidiGroup::of(1)), Some(MidiChannel::of(1)))
         .collect();
     assert_eq!(
         ports,
-        vec![MIDI_INPUT_PORTS + 1, MIDI_INPUT_PORTS + CHANNELLESS_PORT]
+        vec![
+            two.channel(NODE, MidiGroup::of(1), MidiChannel::of(1))
+                .unwrap(),
+            two.channelless(NODE, MidiGroup::of(1)).unwrap()
+        ]
     );
     // One that names a Group not heard takes nothing.
-    assert_eq!(two.listening(Some(MidiGroup::of(2)), None).count(), 0);
+    assert_eq!(two.listening(NODE, Some(MidiGroup::of(2)), None).count(), 0);
 }
 
 /// How many events a following node sends at the block in which a device

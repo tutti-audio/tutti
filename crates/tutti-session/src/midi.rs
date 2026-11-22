@@ -1211,6 +1211,7 @@ fn compile_feeds<'r, T: Copy + Ord + 'r, F: Float>(
 ) {
     let ports = compile_routes(
         layout,
+        inputs,
         rules.into_iter().filter(|r| r.enabled).map(|r| RouteRule {
             group: r.group,
             channel: r.channel,
@@ -1223,11 +1224,7 @@ fn compile_feeds<'r, T: Copy + Ord + 'r, F: Float>(
         let Some(sink) = resolve(target).filter(|&n| graph.contains(n)) else {
             continue;
         };
-        wanted.entry(sink).or_default().extend(
-            inputs
-                .iter()
-                .flat_map(|&input| ports.iter().map(move |&p| EventOutputPort::new(input, p))),
-        );
+        wanted.entry(sink).or_default().extend(ports);
     }
     for &fed in routed.iter() {
         // A sink removed since has no feed left to clear.
@@ -1885,12 +1882,12 @@ impl<F: Float> Midi<'_, F> {
         }
         let port = self
             .input_ports()
-            .channelless(group)
+            .channelless(input, group)
             .ok_or(MidiError::GroupNotHeard(group))?;
         self.graph
             .taps()
             .open_event(
-                EventOutputPort::new(input, port),
+                port,
                 EventTapOptions::new(capacity).align(tutti_graph::TapAlign::Raw),
             )
             .map_err(MidiError::Tap)
