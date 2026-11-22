@@ -13,9 +13,9 @@ use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::contract::assert_param_fork;
 use tutti_graph::{
-    Cx, DeclaredNode, Editor, EventOutputPort, Executor, ForkTarget, Io, Node, NodeKey, OutputPort,
-    ParamEvent, ParamIn, ParamInput, ParamNode, ParamSegment, ParamSet, Params, PortSource,
-    Prepare, Shape, Status, TransportPosition, declare_params,
+    Cx, Editor, EventOutputPort, Executor, ForkTarget, Io, Node, NodeKey, OutputPort, ParamEvent,
+    ParamIn, ParamInput, ParamNode, ParamSegment, ParamSet, Params, PortSource, Prepare, Shape,
+    Status, TransportPosition, declare_params,
 };
 use tutti_rt::Param;
 use tutti_units::{Db, Hz, Q, Samples, UnitAddr, UnitParam};
@@ -54,8 +54,7 @@ fn show(out: &mut [f32], input: ParamInput<'_>, base: f64) {
 
 impl Node for Bank {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(self.layout)
-            .param_addrs(DeclaredNode::param_ports(self).as_slice())
+        Shape::source_unassigned(self.layout).param_addrs(self.declared_ports().as_slice())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -71,7 +70,7 @@ impl Node for Bank {
     }
     fn reset(&mut self) {}
     fn param_base(&self, port: usize) -> Option<f64> {
-        DeclaredNode::param_base(self, port)
+        self.declared_base(port)
     }
 }
 
@@ -224,7 +223,7 @@ fn a_counted_read_is_at_its_index() {
 #[test]
 fn the_ports_are_the_params_in_declared_order() {
     let node = bank();
-    let ports = DeclaredNode::param_ports(&node);
+    let ports = node.declared_ports();
     assert_eq!(
         ports.as_slice(),
         [
@@ -234,7 +233,7 @@ fn the_ports_are_the_params_in_declared_order() {
             UnitAddr::new(UnitParam::Threshold, 1),
         ]
     );
-    let bases: Vec<_> = (0..5).map(|k| DeclaredNode::param_base(&node, k)).collect();
+    let bases: Vec<_> = (0..5).map(|k| node.declared_base(k)).collect();
     assert_eq!(
         bases,
         [Some(0.5), Some(1_000.0), Some(-10.0), Some(-20.0), None]

@@ -122,25 +122,6 @@ impl<N: HasParam<P>, const P: u16> HasParam<P> for Params<N> {
 }
 impl<N: HasParams<P>, const P: u16> HasParams<P> for Params<N> {}
 
-/// What a node declared in the cells form of [`declare_params!`](crate::declare_params)
-/// answers for the graph: its param ports and the base of each. The macro
-/// implements it from the declaration, and the node's `Node` impl forwards
-/// `shape` and `param_base` to it, so the declaration is the one place the
-/// ports are stated.
-///
-/// Hidden: a trait a hand-written `Node` impl names only to forward to, and
-/// that a node author never implements (the macro does).
-#[doc(hidden)]
-pub trait DeclaredNode {
-    /// The params the graph may modulate, in port order: what
-    /// [`Shape::param_addrs`](crate::Shape::param_addrs) takes.
-    fn param_ports(&self) -> ParamPorts;
-
-    /// Port `port`'s cell value: what [`Node::param_base`](crate::Node::param_base)
-    /// answers.
-    fn param_base(&self, port: usize) -> Option<f64>;
-}
-
 /// A cell the macro's `Cells` struct holds: one `Param<U>`, or an array of
 /// them for a kind with several indices. What lets the generated `from_config`
 /// and `detached` treat both alike.
@@ -502,7 +483,8 @@ pub fn input<'a, F: Float>(
 /// bare (`graph.add(node)`, never `Params(node)`). Each `params` entry is
 /// `Kind => field: Unit = default`, or `Kind => field[N]: Unit = default` for a
 /// kind with `N` indices (addressed `0..N`, each at `default`). The node holds
-/// a field named `cells` of type `Cells` and derives `Clone`. The macro writes:
+/// a field named `cells` of type `Cells` (and no other `Param`: `fork_fresh`
+/// detaches only `cells`) and derives `Clone`. The macro writes:
 ///
 /// - `Cells`, with a sharing `Clone`, `detached()` (own cells at the values the
 ///   cells hold now) and `from_config(&Config)`;
@@ -514,14 +496,14 @@ pub fn input<'a, F: Float>(
 ///   [`IntoNode`](crate::IntoNode), whose controls are the node's [`ParamSet`].
 ///
 /// The node's `Node` impl forwards to the declaration: `shape` takes
-/// `DeclaredNode::param_ports(self).as_slice()` and `param_base` answers
-/// `DeclaredNode::param_base(self, port)`. The fields of `Cells` and `Config`
+/// `self.declared_ports().as_slice()` and `param_base` answers
+/// `self.declared_base(port)`. The fields of `Cells` and `Config`
 /// are private to the declaring module, where the node's `From<Config>` builds
 /// its cells with `Cells::from_config`.
 ///
 /// ```
 /// use tutti_buffers::{ChannelLayout, Float};
-/// use tutti_graph::{declare_params, Cx, DeclaredNode, Io, Node, ParamNode, Prepare, Shape, Status};
+/// use tutti_graph::{declare_params, Cx, Io, Node, ParamNode, Prepare, Shape, Status};
 /// use tutti_units::{Amplitude, Hz, UnitParam};
 ///
 /// #[derive(Clone)]
@@ -546,7 +528,7 @@ pub fn input<'a, F: Float>(
 /// impl<F: Float> Node<F> for Tone<F> {
 ///     fn shape(&self) -> Shape {
 ///         Shape::source_unassigned(ChannelLayout::MONO)
-///             .param_addrs(DeclaredNode::param_ports(self).as_slice())
+///             .param_addrs(self.declared_ports().as_slice())
 ///     }
 ///     fn prepare(&mut self, _: &Prepare) {}
 ///     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
@@ -555,7 +537,7 @@ pub fn input<'a, F: Float>(
 ///     }
 ///     fn reset(&mut self) {}
 ///     fn param_base(&self, port: usize) -> Option<f64> {
-///         DeclaredNode::param_base(self, port)
+///         self.declared_base(port)
 ///     }
 /// }
 ///
@@ -672,16 +654,6 @@ macro_rules! declare_params {
         }
 
         $crate::declare_params!(@munch [$($g)*] $ty, n, []; $($kind => $field $([$count])? : $unit,)+);
-
-        impl<$($g)*> $crate::DeclaredNode for $ty {
-            fn param_ports(&self) -> $crate::ParamPorts {
-                self.declared_ports()
-            }
-
-            fn param_base(&self, port: usize) -> Option<f64> {
-                self.declared_base(port)
-            }
-        }
 
         impl<__LaneF: $crate::__private::Float, $($g)*> $crate::ParamNode<__LaneF> for $ty
         where
