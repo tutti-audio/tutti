@@ -21,7 +21,7 @@ use super::target::{
 };
 use crate::AppKey;
 
-/// What one gesture is: the writes of one batch of two or more, which an app
+/// What one gesture is: a batch that moved two or more targets, which an app
 /// undoes as one step. Two changes with equal ids are of one batch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GestureId(u64);
@@ -68,7 +68,7 @@ pub struct Change<T: Target> {
 pub struct GestureState<T: Target> {
     /// The gesture, shared by every change of its batch.
     pub id: GestureId,
-    /// The base before the batch: what undoing it restores.
+    /// The base before the first change since the last read: what undoing restores.
     pub base: T::Value,
     /// Whether the gesture is over: a batch ends with its call.
     pub ended: bool,
@@ -151,29 +151,29 @@ impl StoredChange {
     }
 }
 
-/// What a batch changed: how many writes it had, and the targets whose base
-/// moved.
+/// What a batch changed: the targets whose base moved.
 pub(crate) struct Stored {
-    writes: usize,
     landings: Vec<StoredChange>,
 }
 
 impl Stored {
-    pub(super) fn new(writes: usize, landings: Vec<StoredChange>) -> Self {
-        Self { writes, landings }
+    pub(super) fn new(landings: Vec<StoredChange>) -> Self {
+        Self { landings }
     }
 }
 
-/// What a watcher keeps of a target's newest change.
+/// What a watcher keeps of a target since it last read: the newest value, and
+/// the base the first change since then started from.
 pub struct Record {
     by: ChangedBy,
     value: Erased,
+    base: Erased,
     gesture: Option<Gestured>,
 }
 
+/// The gesture of the newest change.
 struct Gestured {
     id: GestureId,
-    base: Erased,
     ended: bool,
 }
 
@@ -192,7 +192,7 @@ opaque_debug!(StoredChange, Stored, Record);
 
 /// A watcher's side of the feed: what it watches, and the changes the feed has
 /// recorded for it since it last read.
-pub struct WatchSlot {
+pub(crate) struct WatchSlot {
     ids: Vec<TargetId>,
     pending: Mutex<BTreeMap<TargetId, Record>>,
 }
@@ -207,7 +207,7 @@ impl WatchSlot {
 /// Behind the value lock: a call lands under it, and the feed's own lock is
 /// taken after it, never before.
 #[derive(Default)]
-pub struct Feed {
+pub(crate) struct Feed {
     inner: Mutex<FeedInner>,
 }
 
@@ -240,14 +240,15 @@ impl Feed {
         self.inner.lock().watchers.retain(|w| !w.ptr_eq(&weak));
     }
 
-    /// Tells every watcher what `landed`. A batch of two or more writes is one
-    /// gesture, which ends with the call.
+    /// Tells every watcher what `landed`. A batch that moved two or more
+    /// targets is one gesture, which ends with the call. A watcher that has not
+    /// read since an earlier change keeps that change's base.
     pub(super) fn land(&self, landed: Stored) {
         if landed.landings.is_empty() {
             return;
         }
         let mut inner = self.inner.lock();
-        let gesture = (landed.writes >= 2).then(|| {
+        let gesture = (landed.landings.len() >= 2).then(|| {
             let id = GestureId(inner.next);
             inner.next += 1;
             id
@@ -257,18 +258,16 @@ impl Feed {
             let mut pending = slot.pending.lock();
             for landing in &landed.landings {
                 if slot.ids.contains(&landing.id) {
-                    pending.insert(
-                        landing.id,
-                        Record {
-                            by: ChangedBy::App,
-                            value: Arc::clone(&landing.value),
-                            gesture: gesture.map(|id| Gestured {
-                                id,
-                                base: Arc::clone(&landing.base),
-                                ended: true,
-                            }),
-                        },
-                    );
+                    let base = pending
+                        .get(&landing.id)
+                        .map_or(&landing.base, |earlier| &earlier.base);
+                    let record = Record {
+                        by: ChangedBy::App,
+                        value: Arc::clone(&landing.value),
+                        base: Arc::clone(base),
+                        gesture: gesture.map(|id| Gestured { id, ended: true }),
+                    };
+                    pending.insert(landing.id, record);
                 }
             }
         }
@@ -364,7 +363,11 @@ impl<T: Watchable + Store> Targets for T {
             by: record.by,
             gesture: record.gesture.as_ref().map(|g| GestureState {
                 id: g.id,
-                base: g.base.downcast_ref::<T::Value>().expect(ONE_TYPE).clone(),
+                base: record
+                    .base
+                    .downcast_ref::<T::Value>()
+                    .expect(ONE_TYPE)
+                    .clone(),
                 ended: g.ended,
             }),
         })
@@ -493,6 +496,11 @@ tuples! {
 ///
 /// A watcher is polled: nothing wakes it. It reads the value lock, so a call
 /// from inside a `modify` is [`ValueErrorKind::Reentrant`].
+///
+/// A read reports the newest value of each target since the last read: writes
+/// in between are coalesced. The change keeps the earliest base of those
+/// writes, which is what undoing them restores, and the gesture of the newest
+/// one (`None` when that was a single move).
 ///
 /// ```
 /// fn send<T: Send>() {}

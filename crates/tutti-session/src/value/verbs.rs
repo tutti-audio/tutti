@@ -70,8 +70,10 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// A [`Watcher`] of the changes of `targets`: a target, or a tuple, array,
     /// `Vec` or `Option` of them, each one that is not a plugin's parameter.
     /// A change is a base that moved: a `set` of the value a target already
-    /// has changes nothing. A batch of two or more writes is one gesture, its
-    /// changes sharing a [`GestureId`](crate::GestureId).
+    /// has changes nothing. A batch that moves two or more targets is one
+    /// gesture, its changes sharing a [`GestureId`](crate::GestureId). Only
+    /// writes by the app are reported: a tempo a follower moves, or a value a
+    /// lane drives, is not.
     ///
     /// # Errors
     ///

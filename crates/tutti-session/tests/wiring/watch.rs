@@ -69,8 +69,8 @@ fn a_batch_shows_one_gesture_id_across_its_writes() {
     assert_eq!(next.base, Hz::new(300.0));
 }
 
-/// **Two edits of one target in one batch are one change**: the value the call built,
-/// over the base before the batch.
+/// **Two edits of one target in one batch are one change and no gesture**: the value the
+/// call built, and one slot moved.
 #[test]
 fn two_edits_of_one_target_are_one_change_over_the_first_base() {
     let mut s = detached();
@@ -81,7 +81,7 @@ fn two_edits_of_one_target_are_one_change_over_the_first_base() {
         .unwrap();
     let change = w.changes().unwrap().unwrap();
     assert_eq!(change.value, Hz::new(1_002.0));
-    assert_eq!(change.gesture.unwrap().base, Hz::new(1_000.0));
+    assert!(change.gesture.is_none());
 }
 
 /// **A set equal to the base shows nothing**, alone, and beside a write that does move.
@@ -98,7 +98,33 @@ fn a_set_equal_to_the_base_shows_nothing() {
         .unwrap();
     let (cutoff, q) = w.changes().unwrap();
     assert!(cutoff.is_none());
-    assert_eq!(q.unwrap().value, Q::new(1.5));
+    let q = q.unwrap();
+    assert_eq!(q.value, Q::new(1.5));
+    // One slot moved, so the batch is no gesture.
+    assert!(q.gesture.is_none());
+}
+
+/// **Between two reads, a target's change keeps the earliest base and the newest
+/// gesture**: undoing restores where the first write found it.
+#[test]
+fn two_gestures_between_reads_give_the_first_base_and_the_second_id() {
+    let mut s = detached();
+    let lp = filter(&mut s);
+    let mut w = s.watch(lp.cutoff()).unwrap();
+    s.set((lp.cutoff().to(Hz::new(2_000.0)), lp.q().to(Q::new(2.0))))
+        .unwrap();
+    let mut other = s.watch(lp.cutoff()).unwrap();
+    s.set((lp.cutoff().to(Hz::new(3_000.0)), lp.q().to(Q::new(3.0))))
+        .unwrap();
+
+    let both = w.changes().unwrap().unwrap();
+    let gesture = both.gesture.unwrap();
+    assert_eq!(both.value, Hz::new(3_000.0));
+    assert_eq!(gesture.base, Hz::new(1_000.0));
+    // A watcher made between the two saw only the second gesture.
+    let late = other.changes().unwrap().unwrap().gesture.unwrap();
+    assert_eq!(late.id, gesture.id);
+    assert_eq!(late.base, Hz::new(2_000.0));
 }
 
 /// **Between two reads, the newest change is the one reported**, even when it brings

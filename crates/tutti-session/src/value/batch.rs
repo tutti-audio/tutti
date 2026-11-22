@@ -67,8 +67,6 @@ pub struct Batch<'a> {
     slots: Vec<Box<dyn Staged>>,
     /// The position of the item being staged.
     index: usize,
-    /// The assignments staged so far: each `Assign`, `Modify` and `AnyAssign`.
-    writes: usize,
 }
 
 impl<'a> Batch<'a> {
@@ -77,16 +75,14 @@ impl<'a> Batch<'a> {
             params,
             slots: Vec::new(),
             index: 0,
-            writes: 0,
         }
     }
 
     /// Stores every target's final value, in the order each was first named,
     /// and answers the targets whose value is not the base they had.
     pub(crate) fn store(self) -> Stored {
-        let writes = self.writes;
         let landings = self.slots.into_iter().filter_map(Staged::store).collect();
-        Stored::new(writes, landings)
+        Stored::new(landings)
     }
 
     fn fail(&self, target: TargetId, kind: ValueErrorKind) -> Failure {
@@ -114,7 +110,6 @@ impl<'a> Batch<'a> {
         make: impl FnOnce(&T::Value) -> T::Value,
     ) -> Result<(), Failure> {
         let id = target.id();
-        self.writes += 1;
         // A target id holds the node type its key names, and one node type
         // declares one unit at an address, so every target of one id has one
         // value type: a key of another node type resolves to no cell and
