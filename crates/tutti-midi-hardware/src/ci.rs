@@ -1196,20 +1196,23 @@ impl Member {
         sends: &mut Vec<(MidiGroup, CiMessage)>,
         changes: &mut CiChanges,
     ) {
-        let Some(initiator) = self.process.get_mut(&ask.peer.muid()) else {
+        let Some(initiator) = self.process.get_mut(&ask.peer.at().peer().muid) else {
             changes
                 .answers
-                .push((self.peer_id(ask.peer.muid()), Answer::ReportLost));
+                .push((self.peer_id(ask.peer.at().peer().muid), Answer::ReportLost));
             return;
         };
         match initiator.report(ask.request, now) {
-            Ok(actions) => self.carry_out_process(ask.peer.muid(), actions, sends, changes),
+            Ok(actions) => {
+                self.carry_out_process(ask.peer.at().peer().muid, actions, sends, changes)
+            }
             // The session sends a report only once the one in flight has
             // ended; a second here has no answer of its own.
             Err(ProcessError::AlreadyAsking) => {}
-            Err(ProcessError::NotSupported) => changes
-                .answers
-                .push((self.peer_id(ask.peer.muid()), Answer::ReportUnsupported)),
+            Err(ProcessError::NotSupported) => changes.answers.push((
+                self.peer_id(ask.peer.at().peer().muid),
+                Answer::ReportUnsupported,
+            )),
             Err(_) => {}
         }
     }

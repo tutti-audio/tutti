@@ -23,16 +23,13 @@
 
 use std::sync::Arc;
 
-use tutti_midi_ci::Muid;
 use tutti_midi_ci::{
     CiDeviceId, ProfileChange, ProfileChannels, ProfileEntry, ProfileId, ProfileRequest,
     ProfileState, ProfileTable, ProfileTarget, SpecificData, Whole,
 };
-use tutti_midi_device::MidiDeviceId;
 use tutti_midi_protocol::{ChannelResponse, MpeZones, PitchBendSensitivity};
-use tutti_ump::{MidiChannel, MidiGroup, MpeOverlap};
+use tutti_ump::{MidiChannel, MpeOverlap};
 
-use crate::ci::PeerId;
 use crate::peer::{PeerRef, PeerRequestError};
 
 tutti_units::ranged! {
@@ -102,18 +99,6 @@ pub struct ProfileSwitch {
 }
 
 impl ProfileSwitch {
-    /// The input device the switch was made from.
-    #[must_use]
-    pub const fn device(&self) -> &MidiDeviceId {
-        self.at.device()
-    }
-
-    /// The peer the switch is for.
-    #[must_use]
-    pub const fn peer(&self) -> PeerId {
-        self.at.peer()
-    }
-
     /// The peer, as every handle of MIDI-CI names one.
     #[must_use]
     pub const fn at(&self) -> &PeerRef {
@@ -308,24 +293,6 @@ pub struct PeerProfiles {
 }
 
 impl PeerProfiles {
-    /// The input device the peer was found on.
-    #[must_use]
-    pub const fn device(&self) -> &MidiDeviceId {
-        self.at.device()
-    }
-
-    /// The Group of the connection the peer answered on.
-    #[must_use]
-    pub const fn group(&self) -> MidiGroup {
-        self.at.peer().group
-    }
-
-    /// The peer's MUID.
-    #[must_use]
-    pub const fn muid(&self) -> Muid {
-        self.at.peer().muid
-    }
-
     /// The peer, as every handle of MIDI-CI names one.
     #[must_use]
     pub const fn at(&self) -> &PeerRef {
