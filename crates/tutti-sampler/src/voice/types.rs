@@ -278,7 +278,7 @@ impl<F: SamplerFloat> Voice<F> {
                 VoiceSource::Memory(s)
             }
             VoiceSource::Disk(_) if matches!(mode, RenderMode::Realtime) => {
-                return Err(ForkCause::new(super::disk_voice::LiveDiskFork));
+                return Err(ForkCause::new(super::disk_voice::RealtimeDiskFork));
             }
             VoiceSource::Disk(voice) => VoiceSource::Disk(voice.fork_copy()),
         };

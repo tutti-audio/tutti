@@ -325,7 +325,7 @@ enum OfflineFault {
     "a disk voice forks only for an offline render: a realtime fork cannot read the \
              stream's ring, and reading its file would block the audio thread"
 )]
-pub(crate) struct LiveDiskFork;
+pub(crate) struct RealtimeDiskFork;
 
 /// A forked voice's failure latch, as the fork's health probe: a failure it
 /// latched is [`ForkFaultKind::Failed`].
@@ -1063,7 +1063,7 @@ struct DiskVoiceFork<F: SamplerFloat>(DiskVoice<F>);
 impl<F: SamplerFloat> ForkSource<F> for DiskVoiceFork<F> {
     fn fork(&self, mode: RenderMode) -> Result<Forked<F>, ForkCause> {
         if matches!(mode, RenderMode::Realtime) {
-            return Err(ForkCause::new(LiveDiskFork));
+            return Err(ForkCause::new(RealtimeDiskFork));
         }
         let fork = self.0.fork_copy();
         let health = fork.fault().map(VoiceHealth);

@@ -33,8 +33,9 @@ use tutti_buffers::Float;
 /// unit something over a control channel it already has: a hosted plugin's
 /// source asks the live instance for its saved state.)
 pub trait ForkSource<F: Float = f32>: Send {
-    /// A fresh unit rendering in `mode`, the fork's prepare's, sharing no state with the live one: severed
-    /// from every live input and reset. The editor prepares it.
+    /// A fresh unit rendering in `mode` (the fork's prepare's), sharing no
+    /// state with the live one: severed from every live input and reset. The
+    /// editor prepares it.
     ///
     /// An `Err` fails the whole fork as [`ForkError::Source`], naming the key.
     /// A source whose copy is a clone cannot fail; one that has to build its
@@ -801,15 +802,16 @@ impl<F: Float> Editor<F> {
     ///   schedules into the fork's executor as into the live one, or drives
     ///   the param's knob instead, which a fork copies.
     /// - **Fresh units** from each node's fork source, prepared for
-    ///   `prepare`, and rendering in its [`RenderMode`]: a source that renders
-    ///   differently offline reads it (a hosted plugin is told it renders
-    ///   offline; a sampler's disk voice refuses
-    ///   [`Realtime`](RenderMode::Realtime)). A fork carries no timeline: a
-    ///   forked node reads musical time from its block's `Env`, which the
-    ///   fork's executor hands it like the live one's. (A render may run at a different rate or block size from
+    ///   `prepare` (a render may run at a different rate or block size from
     ///   the device). Latency and tail are probed again at that `Prepare`, so
     ///   a figure set with [`set_latency`](Self::set_latency) is not carried
     ///   over.
+    /// - **The prepare's [`RenderMode`].** Each source is handed it: one that
+    ///   renders differently offline reads it (a hosted plugin is told it
+    ///   renders offline; a sampler's disk voice refuses
+    ///   [`Realtime`](RenderMode::Realtime)).
+    /// - **No timeline.** A forked node reads musical time from its block's
+    ///   `Env`, which the fork's executor hands it like the live one's.
     /// - **No state.** Delay rings, feedback edges' captured
     ///   blocks and event FIFOs start silent, so a feedback loop in a fork
     ///   does not carry the live loop's circulating signal. The executor's
