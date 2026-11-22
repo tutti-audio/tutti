@@ -231,7 +231,7 @@ pub use sync::{
     MtcDirection, SegmentFault,
 };
 pub use taken::Taken;
-pub use tempo_follower::{Followed, TempoFollower, TempoSource};
+pub use tempo_follower::{Followed, TempoFollower};
 pub use traits::MidiOut;
 // The counts a device's inlet keeps, as `DeviceInput::counts` returns them.
 pub use tutti_graph::InletCounts;
