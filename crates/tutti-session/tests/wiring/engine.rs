@@ -65,7 +65,7 @@ fn run(s: &mut Session, frames: usize, block: usize, seek: bool) -> Vec<f32> {
     out
 }
 
-/// The session's click at full volume on every beat, on both global
+/// The session's click at full volume on every beat, on both main
 /// outputs, rolling from the first block: `frames` stereo frames in
 /// 512-frame device blocks, with a seek past the first second.
 ///
@@ -246,7 +246,7 @@ fn voice(cents: f64) -> tutti_sampler::VoicePool<f32> {
     pool
 }
 
-/// An offline session with one sampler voice ([`voice`]) on both global
+/// An offline session with one sampler voice ([`voice`]) on both main
 /// outputs, the transport rolling from the first block: `frames` stereo
 /// frames in `block`-frame device blocks.
 fn render_voice(cents: f64, frames: usize, block: usize) -> Vec<f32> {
@@ -448,7 +448,7 @@ fn opening_a_tap_or_meter_on_a_missing_source_is_refused() {
             .meters()
             .open(&[MainInput::channel(0)], TapAlign::Raw)
             .err(),
-        Some(MissingSource::Global {
+        Some(MissingSource::MainInput {
             channel: 0,
             width: 0
         })

@@ -42,7 +42,7 @@
 //!   feeds it — its audio ports, and any [`other_sources`] (event and param
 //!   sources, for a graph that has them);
 //! - every source of every audio port, fed by a node or from **outside the
-//!   graph** (a global input, arriving at zero), is delayed by its own gap to
+//!   graph** (a main input, arriving at zero), is delayed by its own gap to
 //!   the node's arrival, so a port that sums several sources aligns each
 //!   before the sum, and the sum itself adds no latency;
 //! - an unconnected port, and a feedback edge, carry nothing to align.
@@ -104,7 +104,7 @@ pub const MAX_NODE_LATENCY: Seconds = Seconds::new(10.0);
 pub enum Feed<N> {
     /// Another node's output: arrives at that node's departure.
     Node(N),
-    /// From outside the graph (a global input): arrives at zero, and is
+    /// From outside the graph (a main input): arrives at zero, and is
     /// aligned at a merge point like any other source.
     Outside,
     /// Nothing to align: an unconnected port, silence, or a feedback edge
@@ -199,7 +199,7 @@ pub trait LatencyGraph {
     }
 
     /// Returns the nodes that drive something at the **output** rather than
-    /// at a node: the lane behind the gain of an edge into a global output
+    /// at a node: the lane behind the gain of an edge into a main output
     /// channel. They count toward the graph's total latency (a later one
     /// raises the output time) but feed no audio, so no channel's
     /// compensation or delay lists them. None by default.
@@ -790,11 +790,11 @@ mod tests {
         assert_eq!(d.compensation().total(), Samples::new(512));
     }
 
-    /// A global input arrives at zero and is **aligned** where it meets a
+    /// A main input arrives at zero and is **aligned** where it meets a
     /// latent path, as the compiler aligns it.
     #[test]
-    fn a_global_input_meeting_a_latent_path_is_delayed() {
-        //   0(48) ─▶ 1 port 0;  global input ─▶ 1 port 1   needs +48
+    fn a_main_input_meeting_a_latent_path_is_delayed() {
+        //   0(48) ─▶ 1 port 0;  main input ─▶ 1 port 1   needs +48
         let g = Toy::with_feeds(
             vec![(48, vec![]), (0, vec![Feed::Node(0), Feed::Outside])],
             vec![Some(1)],
@@ -803,7 +803,7 @@ mod tests {
             delays(&g, R).inputs(),
             &[input(1, 1, Feed::Outside, Samples::new(48))]
         );
-        // Alone, a global input has nothing to align against.
+        // Alone, a main input has nothing to align against.
         let alone = Toy::with_feeds(vec![(48, vec![Feed::Outside])], vec![Some(0)]);
         assert!(delays(&alone, R).inputs().is_empty());
     }

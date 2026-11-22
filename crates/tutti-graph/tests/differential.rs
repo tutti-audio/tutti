@@ -176,7 +176,7 @@ fn wire_node(desc: &mut Desc, j: usize, rng: &mut Rng) {
             rng.pick(&direct).map(|p| Edge::Direct(PortSource::Node(p)))
         } else if roll < 76 {
             let width = u64::from(desc.spec.topology.inputs.count());
-            Some(Edge::Direct(PortSource::Global(rng.below(width) as u16)))
+            Some(Edge::Direct(PortSource::MainInput(rng.below(width) as u16)))
         } else if roll < 80 {
             // Silence is no edge.
             None
@@ -189,7 +189,7 @@ fn wire_node(desc: &mut Desc, j: usize, rng: &mut Rng) {
             None
         };
         // Audio fan-in: a port now and then
-        // takes several distinct sources (direct, global or feedback), which
+        // takes several distinct sources (direct, main input or feedback), which
         // the compiled op sums in `Edge` order, silent addends skipped, and
         // the reference folds from `+0.0`. A hub is wider than `MAX_PORTS`
         // when enough earlier outputs exist (a chain of sum ops).
@@ -206,7 +206,7 @@ fn wire_node(desc: &mut Desc, j: usize, rng: &mut Rng) {
                 let extra = match fan.below(10) {
                     0 | 1 => {
                         let width = u64::from(desc.spec.topology.inputs.count());
-                        Some(Edge::Direct(PortSource::Global(fan.below(width) as u16)))
+                        Some(Edge::Direct(PortSource::MainInput(fan.below(width) as u16)))
                     }
                     2 => {
                         let delay = Samples::new(MAX_BLOCK + 17 * fan.below(3) as usize);
@@ -277,7 +277,7 @@ fn wire_outputs(desc: &mut Desc, rng: &mut Rng) {
         .topology
         .set_outputs((0..1 + rng.below(4)).map(|_| match rng.below(10) {
             0 => PortSource::Zero,
-            1 => PortSource::Global(rng.below(width) as u16),
+            1 => PortSource::MainInput(rng.below(width) as u16),
             _ => rng.pick(&outs).map_or(PortSource::Zero, PortSource::Node),
         }));
     // A channel now and then sums several sources, aligned to the output time
@@ -289,7 +289,7 @@ fn wire_outputs(desc: &mut Desc, rng: &mut Rng) {
         }
         for _ in 0..1 + fan.below(3) {
             let extra = match fan.below(8) {
-                0 => PortSource::Global(fan.below(width) as u16),
+                0 => PortSource::MainInput(fan.below(width) as u16),
                 _ => fan.pick(&outs).map_or(PortSource::Zero, PortSource::Node),
             };
             let set = &mut desc.spec.topology.outputs[ch];
@@ -887,7 +887,7 @@ fn recompile_regression_3280887136571273968() {
 fn the_generator_covers_what_the_suite_claims() {
     let (mut delays, mut event_delays, mut feedback, mut event_fb, mut merges, mut in_place) =
         (0, 0, 0, 0, 0, 0);
-    let (mut wide, mut global_delays, mut bypass_in_place, mut multi_io) = (0, 0, 0, 0);
+    let (mut wide, mut main_input_delays, mut bypass_in_place, mut multi_io) = (0, 0, 0, 0);
     let mut overflowing_wired = 0;
     let mut bounded_merges = 0;
     for seed in 0..512u64 {
@@ -907,11 +907,11 @@ fn the_generator_covers_what_the_suite_claims() {
             if matches!(
                 d.key,
                 tutti_graph::DelayKey::Audio {
-                    from: PortSource::Global(_),
+                    from: PortSource::MainInput(_),
                     ..
                 }
             ) {
-                global_delays += 1;
+                main_input_delays += 1;
             }
         }
         for (k, kind) in &desc.kinds {
@@ -959,7 +959,7 @@ fn the_generator_covers_what_the_suite_claims() {
         ("event fan-in merges", merges),
         ("in-place nodes", in_place),
         ("event fan-ins wider than 3", wide),
-        ("delayed global inputs", global_delays),
+        ("delayed main inputs", main_input_delays),
         ("in-place nodes returning Bypass", bypass_in_place),
         ("graphs with >1 input and >2 outputs", multi_io),
         (
@@ -1509,14 +1509,14 @@ fn every_borrow_form_matches_the_reference() {
         t.edges
             .insert(InputPort { node, port }, vec![Edge::Direct(from)]);
     };
-    wire(split, 0, PortSource::Global(0));
+    wire(split, 0, PortSource::MainInput(0));
     wire(inplace, 0, out(split, 0));
     for c in 0..6 {
         wire(
             six,
             c,
             if c % 2 == 0 {
-                PortSource::Global(1)
+                PortSource::MainInput(1)
             } else {
                 out(src, 0)
             },
@@ -1529,7 +1529,7 @@ fn every_borrow_form_matches_the_reference() {
             if c < 6 {
                 out(six, c)
             } else {
-                PortSource::Global(0)
+                PortSource::MainInput(0)
             },
         );
     }
@@ -1543,16 +1543,16 @@ fn every_borrow_form_matches_the_reference() {
         wire(sum, c, feeds[c as usize / 2 % feeds.len()]);
     }
     // `pre6` and `pre2` feed only their mixer, so the mixer's channels are
-    // aliased in place; `mixwide` reads a global input, which cannot be.
+    // aliased in place; `mixwide` reads a main input, which cannot be.
     for c in 0..6 {
-        wire(pre6, c, PortSource::Global(c % 2));
+        wire(pre6, c, PortSource::MainInput(c % 2));
         wire(mix6, c, out(pre6, c));
     }
     for c in 0..20 {
-        wire(mixwide, c, PortSource::Global(1 - c % 2));
+        wire(mixwide, c, PortSource::MainInput(1 - c % 2));
     }
     for c in 0..2 {
-        wire(pre2, c, PortSource::Global(c));
+        wire(pre2, c, PortSource::MainInput(c));
         wire(mix2, c, out(pre2, c));
     }
     // The direct stereo shapes: a stereo source, mono to stereo, stereo to
@@ -1626,21 +1626,21 @@ fn every_borrow_form_matches_the_reference() {
         t.edges
             .insert(InputPort { node, port }, vec![Edge::Direct(from)]);
     };
-    wire(fan12, 0, PortSource::Global(1));
+    wire(fan12, 0, PortSource::MainInput(1));
     wire(sum2, 0, out(st_src, 0));
     wire(sum2, 1, out(fan12, 1));
-    wire(sum2dup, 0, PortSource::Global(0));
-    wire(sum2dup, 1, PortSource::Global(0));
+    wire(sum2dup, 0, PortSource::MainInput(0));
+    wire(sum2dup, 1, PortSource::MainInput(0));
     for c in 0..2 {
-        wire(st_pre, c, PortSource::Global(c));
+        wire(st_pre, c, PortSource::MainInput(c));
         wire(st_in, c, out(st_pre, c));
     }
     // `half` is the last reader of `fan12`'s port 0 only: channel 0 is in
-    // place, channel 1 reads a global input.
+    // place, channel 1 reads a main input.
     wire(half, 0, out(fan12, 0));
-    wire(half, 1, PortSource::Global(1));
+    wire(half, 1, PortSource::MainInput(1));
     for c in 0..3 {
-        wire(w3, c, PortSource::Global(c % 2));
+        wire(w3, c, PortSource::MainInput(c % 2));
     }
     t.set_outputs(vec![
         out(sum, 0),
@@ -3053,9 +3053,9 @@ fn bus_of(width: usize, named: bool) -> Bus {
 
 fn bus_graph(seed: u64) -> BusGraph {
     let mut rng = Rng::new(seed ^ 0x0B05_ED6E);
-    let globals = 1 + rng.below(6) as usize;
+    let main_inputs = 1 + rng.below(6) as usize;
     let mut spec = GraphSpec::default();
-    spec.topology.inputs = ChannelLayout::from_count(globals as u16);
+    spec.topology.inputs = ChannelLayout::from_count(main_inputs as u16);
     let mut kinds: BTreeMap<NodeKey, Kind> = BTreeMap::new();
     let mut widths: Vec<(NodeKey, usize)> = Vec::new();
     let nodes = 3 + rng.below(6) as usize;
@@ -3085,7 +3085,7 @@ fn bus_graph(seed: u64) -> BusGraph {
             for c in 0..width as u16 {
                 spec.topology.connect(
                     InputPort { node, port: c },
-                    Edge::Direct(PortSource::Global(c % globals as u16)),
+                    Edge::Direct(PortSource::MainInput(c % main_inputs as u16)),
                 );
             }
         } else {

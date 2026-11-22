@@ -143,9 +143,9 @@ fn wave(f: u64) -> f32 {
     ((f % 23) as f32 - 11.0) * 0.0625 + 0.03125 + (f / 23 % 5) as f32 * 0.5
 }
 
-/// One chain of `kinds[0]` fed by global input 0, one output.
+/// One chain of `kinds[0]` fed by main input 0, one output.
 fn chain(t: &mut Topology) {
-    t.connect(at(1, 0), Edge::Direct(PortSource::Global(0)));
+    t.connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
     t.set_outputs(vec![out(1, 0)]);
 }
 
@@ -190,8 +190,8 @@ fn a_steady_bypass_is_the_input_bit_for_bit() {
                 &kinds,
                 1,
                 |t| {
-                    t.connect(at(1, 0), Edge::Direct(PortSource::Global(0)));
-                    t.connect(at(2, 0), Edge::Direct(PortSource::Global(0)));
+                    t.connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
+                    t.connect(at(2, 0), Edge::Direct(PortSource::MainInput(0)));
                     t.set_outputs(vec![out(1, 0), out(2, 0)]);
                 },
                 &[(1, NodeMode::Bypassed), (2, NodeMode::Bypassed)],
@@ -228,7 +228,7 @@ fn a_latent_bypass_is_the_input_delayed_by_the_declared_latency() {
                 ],
                 1,
                 |t| {
-                    t.connect(at(1, 0), Edge::Direct(PortSource::Global(0)));
+                    t.connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
                     t.connect(at(2, 0), direct(1));
                     t.set_outputs(vec![out(2, 0)]);
                 },
@@ -285,8 +285,8 @@ fn a_bypassed_latent_node_stays_aligned_with_an_active_one() {
         },
     ];
     let wire = |t: &mut Topology| {
-        t.connect(at(1, 0), Edge::Direct(PortSource::Global(0)));
-        t.connect(at(2, 0), Edge::Direct(PortSource::Global(0)));
+        t.connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
+        t.connect(at(2, 0), Edge::Direct(PortSource::MainInput(0)));
         t.set_outputs(vec![out(1, 0), out(2, 0)]);
     };
     for workers in WORKERS {
@@ -336,7 +336,7 @@ fn a_bypass_is_by_index_at_one_width_and_by_speaker_across() {
                 &[bused(1, 2, latency, smpte(1), smpte(2))],
                 1,
                 |t| {
-                    t.connect(at(1, 0), Edge::Direct(PortSource::Global(0)));
+                    t.connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
                     t.set_outputs(vec![out(1, 0), out(1, 1)]);
                 },
                 &[(1, NodeMode::Bypassed)],
@@ -347,15 +347,15 @@ fn a_bypass_is_by_index_at_one_width_and_by_speaker_across() {
                 assert_eq!(got[0][n].to_bits(), want, "left, {n}");
                 assert_eq!(got[1][n].to_bits(), want, "right, {n}");
             }
-            // stereo -> stereo, from widths: channel `c` is input `c` (global
+            // stereo -> stereo, from widths: channel `c` is input `c` (main
             // input `c` is the signal scaled by 2^-c).
             let mut rig = Rig::new(
                 workers,
                 &[spec(2, 2, latency)],
                 2,
                 |t| {
-                    t.connect(at(1, 0), Edge::Direct(PortSource::Global(0)));
-                    t.connect(at(1, 1), Edge::Direct(PortSource::Global(1)));
+                    t.connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
+                    t.connect(at(1, 1), Edge::Direct(PortSource::MainInput(1)));
                     t.set_outputs(vec![out(1, 0), out(1, 1)]);
                 },
                 &[(1, NodeMode::Bypassed)],
@@ -404,7 +404,7 @@ fn unassigned(n: u16) -> Bus {
 /// bus is named 5.1 and whose `Main` output bus is named stereo, bypassed,
 /// writes the ITU downmix of its input (delayed by the declared latency), not
 /// its first two channels: `L = FL + 3dB*FC + 3dB*SL`, `R = FR + 3dB*FC +
-/// 3dB*SR`, the LFE dropped. Global input `c` is the signal scaled by `2^-c`,
+/// 3dB*SR`, the LFE dropped. Main input `c` is the signal scaled by `2^-c`,
 /// so every channel is distinct. (Those are `Fold::contributions`' rows for
 /// the pair, written out; a rounding of the sum differs, so the comparison is
 /// to `1e-5`.) The executor is also held to the reference at every block.
@@ -424,7 +424,7 @@ fn a_bypass_is_the_fold_between_the_main_buses() {
                 6,
                 |t| {
                     for c in 0..6 {
-                        t.connect(at(1, c), Edge::Direct(PortSource::Global(c)));
+                        t.connect(at(1, c), Edge::Direct(PortSource::MainInput(c)));
                     }
                     t.set_outputs(vec![out(1, 0), out(1, 1)]);
                 },
@@ -553,7 +553,7 @@ fn a_muted_node_is_positive_zero() {
             ],
             1,
             |t| {
-                t.connect(at(1, 0), Edge::Direct(PortSource::Global(0)));
+                t.connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
                 t.set_outputs(vec![out(1, 0), out(2, 0), out(2, 1)]);
             },
             &[(1, NodeMode::Muted), (2, NodeMode::Muted)],
@@ -963,11 +963,11 @@ impl Solo {
     }
 }
 
-/// `Global(0) → probe 1 → output`, and optionally `probe 1 → probe 2`.
+/// `MainInput(0) → probe 1 → output`, and optionally `probe 1 → probe 2`.
 fn probe_chain(first: Probe, second: Option<Probe>) -> Solo {
     let mut s = Solo::new(1);
     s.add(1, first);
-    s.wire(|t| t.connect(at(1, 0), Edge::Direct(PortSource::Global(0))));
+    s.wire(|t| t.connect(at(1, 0), Edge::Direct(PortSource::MainInput(0))));
     match second {
         Some(q) => {
             s.add(2, q);
@@ -1169,7 +1169,7 @@ fn a_held_input_note_is_closed_on_bypass() {
     );
     s.add(2, p.clone());
     s.wire(|t| {
-        t.connect(at(2, 0), Edge::Direct(PortSource::Global(0)));
+        t.connect(at(2, 0), Edge::Direct(PortSource::MainInput(0)));
         t.set_outputs(vec![out(2, 0)]);
     });
     s.ed.spec_mut()
@@ -1251,7 +1251,7 @@ fn a_bypassed_source_closes_its_notes() {
     );
     s.add(2, sink.clone());
     s.wire(|t| {
-        t.connect(at(2, 0), Edge::Direct(PortSource::Global(0)));
+        t.connect(at(2, 0), Edge::Direct(PortSource::MainInput(0)));
         t.set_outputs(vec![out(2, 0)]);
     });
     s.ed.spec_mut()
@@ -1435,7 +1435,7 @@ fn a_fork_copies_the_mode_and_starts_steady() {
     ed.insert(key(1), "probe", ForkByClone(Probe::new(3.0)));
     ed.spec_mut()
         .topology
-        .connect(at(1, 0), Edge::Direct(PortSource::Global(0)));
+        .connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
     ed.spec_mut().topology.set_outputs(vec![out(1, 0)]);
     ed.commit().expect("commits");
     exec.apply_pending();

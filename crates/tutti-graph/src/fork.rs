@@ -526,12 +526,12 @@ pub enum ForkMode {
 /// What [`Editor::fork`] copies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ForkTarget {
-    /// The graph as the global outputs hear it, outputs as they are: every
+    /// The graph as the main outputs hear it, outputs as they are: every
     /// node an output reaches, walking back along audio, feedback and event
     /// edges. A node no output reaches is not forked, and need not be
     /// forkable.
     MainOutput,
-    /// The sub-graph feeding this node, with every global output reading it
+    /// The sub-graph feeding this node, with every main output reading it
     /// (see "Forking one node" on [`Editor::fork`]).
     Node(NodeKey),
 }
@@ -555,7 +555,7 @@ pub enum ForkError {
         key: NodeKey,
     },
     /// [`ForkTarget::Node`] names a node with no audio outputs, or the graph
-    /// has no global outputs to point at it: there is nothing to render
+    /// has no main outputs to point at it: there is nothing to render
     NoOutputs {
         /// The node.
         key: NodeKey,
@@ -833,12 +833,12 @@ impl<F: Float> Editor<F> {
     /// [`ForkTarget::Node`] forks the node and **exactly** what feeds it —
     /// every node it reaches walking back along audio, feedback and event
     /// edges — and nothing else: a sibling branch that does not feed it need
-    /// not be forkable. Every global output of the fork reads the node:
+    /// not be forkable. Every main output of the fork reads the node:
     /// output channel `c` reads the node's port `min(c, outs - 1)`, so a mono
     /// node fans out to every channel and a wider graph **clamps** its extra
     /// channels to the node's last port (stereo into six is L R R R R R).
     /// That differs on purpose from [`GraphBuilder::pipe_output`](crate::GraphBuilder::pipe_output)'s wrap
-    /// (`c % outs`). The fork keeps the live graph's global input width.
+    /// (`c % outs`). The fork keeps the live graph's main input width.
     ///
     /// # When a forked unit fails
     ///
@@ -954,7 +954,7 @@ impl<F: Float> Editor<F> {
         let settled = live.settled();
         let live = settled.as_ref().unwrap_or(live);
         let (keys, outputs) = match target {
-            // What the global outputs hear, and nothing else: a node no
+            // What the main outputs hear, and nothing else: a node no
             // output reaches renders nothing into the fork, so it is neither
             // copied nor asked to be forkable (an unrouted mic monitor does
             // not refuse the export; an unrouted plugin launches no server).
@@ -1019,7 +1019,7 @@ impl<F: Float> Editor<F> {
 
         // The fork's spec as the live one holds it now: the nodes (their
         // kinds and param values), and every edge into a forked node. An
-        // edge into a forked node comes from a forked node, a global input
+        // edge into a forked node comes from a forked node, a main input
         // or silence: `upstream` closed the set over every edge kind. A
         // driven param's source is upstream of its node too (`upstream`
         // walks it), so the fork drives it as the live graph does.
@@ -1160,7 +1160,7 @@ impl<F: Float> Editor<F> {
         Ok(())
     }
 
-    /// What the global outputs hear, and nothing else: every node an output
+    /// What the main outputs hear, and nothing else: every node an output
     /// (or the lane that drives the gain of an output edge) reads, and
     /// everything upstream of those. The set a main output fork copies.
     fn heard(live: &GraphSpec) -> BTreeSet<NodeKey> {
@@ -1186,7 +1186,7 @@ impl<F: Float> Editor<F> {
     }
 
     /// Whether `node` is in what a [`ForkTarget::MainOutput`] fork copies: it is
-    /// read by a global output, or feeds (by audio, feedback, event, param or
+    /// read by a main output, or feeds (by audio, feedback, event, param or
     /// edge gain) a node that is. A node no output reaches renders nothing
     /// into a main output fork, so it is not in one.
     ///

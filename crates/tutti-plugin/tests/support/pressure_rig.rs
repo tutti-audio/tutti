@@ -31,7 +31,7 @@ impl Planes {
 ///
 /// A block reaches the plugin node through the executor, with the `Env` the
 /// engine would give it.
-/// The global inputs feed its inputs, its outputs feed the global outputs.
+/// The main inputs feed its inputs, its outputs feed the main outputs.
 pub struct GraphUnit {
     renderer: tutti_graph::Renderer,
     /// The plugin's controls: whether the server has answered its chunk.

@@ -33,7 +33,7 @@ fn note_on() -> EventKind {
     EventKind::Midi(midi::note_on(MidiChannel::FIRST, 60, 0xC800))
 }
 
-/// An engine over a graph of two `ImpulseSource`s — `(direct, pdc)` — whose global
+/// An engine over a graph of two `ImpulseSource`s — `(direct, pdc)` — whose main
 /// outputs are `[pdc, direct]`, the second pulse's event input merged with a
 /// silent sibling declaring `D` frames of latency.
 fn engine(

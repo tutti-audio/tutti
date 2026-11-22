@@ -244,7 +244,7 @@ pub(crate) use commit::{Channels, Commit, Crossfade, ExecutorEnds, Opened, chann
 use node_op::{CONSTANT, flag, run_node_op, run_params};
 pub(crate) use node_op::{Head, OpState, SILENT, node_dispatch};
 pub(crate) use ops::{
-    audio_ring, capture_op, delay_op, event_delay_op, event_merge_op, event_ring, global_in,
+    audio_ring, capture_op, delay_op, event_delay_op, event_merge_op, event_ring, main_input,
     output_op, sum_op,
 };
 pub(crate) use stage::{StageIn, Stager};

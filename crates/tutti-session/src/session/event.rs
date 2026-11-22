@@ -68,7 +68,7 @@ pub enum SessionEvent {
     },
     /// A node with a bus besides its main one (an aux or sidechain bus, a
     /// plugin's) had its audio wiring changed: a port gained its first source or
-    /// consumer, or lost its last (an edge, a global output, a tap or a
+    /// consumer, or lost its last (an edge, a main output, a tap or a
     /// meter). Reported once per node by the update that sends the commit
     /// (or the next update, for a commit the host made itself), carrying the
     /// node's first `was` and last `now` of the commits since the last

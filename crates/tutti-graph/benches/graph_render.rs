@@ -198,7 +198,7 @@ enum Topo {
     Chain(usize),
     /// A source into `width` parallel filters, summed.
     Fan(usize),
-    /// A global input through `n` no-op nodes.
+    /// A main input through `n` no-op nodes.
     Nops(usize),
 }
 
@@ -249,7 +249,7 @@ fn executor_for(shape: &Topo) -> Executor {
         }
         Topo::Nops(n) => {
             ed.spec_mut().topology.inputs = ChannelLayout::MONO;
-            let mut from = PortSource::Global(0);
+            let mut from = PortSource::MainInput(0);
             let mut last = NodeKey(0);
             for i in 0..n {
                 let k = NodeKey(i as u64);
@@ -270,7 +270,7 @@ fn executor_for(shape: &Topo) -> Executor {
 }
 
 fn render_graph(exec: &mut Executor, frames: usize, input: &[f32], out: &mut [f32]) {
-    let inputs: &[&[f32]] = if exec.plan().is_some_and(|p| p.global_inputs() > 0) {
+    let inputs: &[&[f32]] = if exec.plan().is_some_and(|p| p.main_inputs() > 0) {
         &[input]
     } else {
         &[]
@@ -370,7 +370,7 @@ impl Node for FormNop {
     fn reset(&mut self) {}
 }
 
-/// A chain of `n` [`FormNop`]s like `nop`, fed by as many global inputs.
+/// A chain of `n` [`FormNop`]s like `nop`, fed by as many main inputs.
 fn form_executor(n: usize, nop: impl Fn() -> FormNop) -> Executor {
     let prepare = Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples::new(MAX_BLOCK)));
     let (mut ed, mut exec) = Editor::new(prepare);
@@ -381,7 +381,7 @@ fn form_executor(n: usize, nop: impl Fn() -> FormNop) -> Executor {
         ed.insert(k, "nop", Unforkable(Box::new(nop()) as Box<dyn Node>));
         for c in 0..width {
             let from = if i == 0 {
-                PortSource::Global(c)
+                PortSource::MainInput(c)
             } else {
                 PortSource::Node(OutputPort {
                     node: NodeKey(i as u64 - 1),

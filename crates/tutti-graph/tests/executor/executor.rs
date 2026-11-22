@@ -340,7 +340,7 @@ fn a_block_past_max_block_is_refused() {
     render(&mut exec, 65, 1);
 }
 
-/// Two const outputs (`0.5`, `0.25`) at the globals, committed and queued
+/// Two const outputs (`0.5`, `0.25`) at the main outputs, committed and queued
 /// without a block run.
 fn queue_two_outputs(ed: &mut Editor) {
     ed.insert(SRC, "a", Unforkable(const_node(0.5)));
@@ -377,7 +377,7 @@ fn render_applied_leaves_a_queued_commit_for_the_next_block() {
 /// no node. Neither panics on an index.
 #[test]
 #[cfg(debug_assertions)]
-#[should_panic(expected = "for a plan with 0 global inputs and 2 outputs")]
+#[should_panic(expected = "for a plan with 0 main inputs and 2 outputs")]
 fn too_few_output_slices_assert_in_debug() {
     let (mut ed, mut exec) = Editor::new(prepare(64));
     queue_two_outputs(&mut ed);
@@ -1124,17 +1124,17 @@ fn an_unchanged_commit_sends_nothing_and_a_change_still_sends() {
 }
 
 /// An input the plan reads, with no slice for it: the same caller bug as a
-/// short `outputs`, caught before `global_in` indexes `inputs`.
+/// short `outputs`, caught before `main_input` indexes `inputs`.
 #[test]
 #[cfg(debug_assertions)]
-#[should_panic(expected = "for a plan with 1 global inputs and 1 outputs")]
+#[should_panic(expected = "for a plan with 1 main inputs and 1 outputs")]
 fn too_few_input_slices_assert_in_debug() {
     let (mut ed, mut exec) = Editor::new(prepare(64));
     ed.insert(SRC, "a", Unforkable(const_node(0.5)));
     ed.spec_mut().topology.inputs = tutti_buffers::ChannelLayout::MONO;
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Global(0)]);
+        .set_outputs(vec![PortSource::MainInput(0)]);
     ed.commit().expect("commits");
     render(&mut exec, 16, 1);
 }
@@ -1147,7 +1147,7 @@ fn too_few_input_slices_render_silence_in_release() {
     ed.spec_mut().topology.inputs = tutti_buffers::ChannelLayout::MONO;
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Global(0)]);
+        .set_outputs(vec![PortSource::MainInput(0)]);
     ed.commit().expect("commits");
     let out = render(&mut exec, 16, 1);
     assert!(out[0].iter().all(|&x| x == 0.0));

@@ -42,7 +42,7 @@
 //!   event delays in key order, event feedback in key order. A flushed event
 //!   can reach a *replaced* unit at that sink — a note-off whose note-on the
 //!   old unit saw — which a unit must tolerate.
-//! - **A global input is delayed** to its node's arrival like any other
+//! - **A main input is delayed** to its node's arrival like any other
 //!   merge-point source.
 //! - **A feedback edge delays by exactly the `delay` its edge declares**,
 //!   whatever the current block length (see [`FeedbackKey`]): audio keeps the
@@ -870,7 +870,7 @@ impl<F: Float> Reference<F> {
         for (&at, e) in flat_edges(t) {
             let dep = match *e {
                 Edge::Direct(PortSource::Node(p)) => departure(p.node).samples(),
-                Edge::Direct(PortSource::Global(_)) => Samples::ZERO,
+                Edge::Direct(PortSource::MainInput(_)) => Samples::ZERO,
                 _ => continue,
             };
             let Edge::Direct(from) = *e else { continue };
@@ -913,7 +913,7 @@ impl<F: Float> Reference<F> {
         // channel; each source of a summed channel is delayed to it on its own.
         let source_departure = |s: &PortSource| match *s {
             PortSource::Node(p) => departure(p.node).samples(),
-            PortSource::Global(_) | PortSource::Zero => Samples::ZERO,
+            PortSource::MainInput(_) | PortSource::Zero => Samples::ZERO,
         };
         let total = t
             .outputs
@@ -1364,7 +1364,7 @@ impl<F: Float> Reference<F> {
                 for source in sorted(sources) {
                     let mut buf = match source {
                         PortSource::Node(p) => audio[&p].clone(),
-                        PortSource::Global(g) => inputs[g as usize][..frames].to_vec(),
+                        PortSource::MainInput(g) => inputs[g as usize][..frames].to_vec(),
                         PortSource::Zero => vec![F::ZERO; frames],
                     };
                     let key = DelayKey::Output {
@@ -1434,7 +1434,7 @@ impl<F: Float> Reference<F> {
             for edge in sorted(t.edges.get(&at).map_or(&[][..], Vec::as_slice)) {
                 let mut buf = match edge {
                     Edge::Direct(PortSource::Zero) => vec![F::ZERO; frames],
-                    Edge::Direct(PortSource::Global(g)) => inputs[g as usize][..frames].to_vec(),
+                    Edge::Direct(PortSource::MainInput(g)) => inputs[g as usize][..frames].to_vec(),
                     Edge::Direct(PortSource::Node(p)) => audio[&p].clone(),
                     Edge::Feedback(f) => {
                         let line =
