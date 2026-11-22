@@ -23,6 +23,7 @@ use tutti_au_host::component::{AuComponentRef, ComponentKey, find_component};
 use tutti_au_host::types::K_AUDIO_UNIT_TYPE_EFFECT;
 use tutti_buffers::InputOutput;
 use tutti_fixtures::main_thread;
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{MainWork, MaxBlock, PluginRef, Prepare, SampleRate};
 use tutti_units::Samples;
 
@@ -476,7 +477,7 @@ mod halves {
         for (normalized, expected_plain) in [(1.0, max), (0.0, min)] {
             let mut changes = ParameterChanges::new();
             let mut queue = ParameterQueue::with_capacity(target.id(), 1);
-            queue.add_point(0, normalized);
+            queue.add_point(at_frame(0), unit_value(normalized));
             changes.add_queue(queue);
             let ctx = ProcessContext::new().params(&changes);
 

@@ -19,6 +19,9 @@ use crate::{
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 use tutti_platform::Instant;
+use tutti_plugin_types::Offset;
+#[cfg(test)]
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{
     EditorError, IpcError, IpcResult, PresetError, ResyncKind, SlabError, StateError,
 };
@@ -220,7 +223,7 @@ impl AudioState {
                 continue;
             };
             let point = ParameterPoint {
-                sample_offset: 0,
+                sample_offset: Offset::ZERO,
                 value: last.value,
             };
             match self.carried.iter_mut().find(|(a, _)| *a == queue.param_id) {
@@ -235,7 +238,7 @@ impl AudioState {
     /// Bridge thread: may allocate.
     fn carry_write(&mut self, id: ParamId, value: Normalized) {
         let point = ParameterPoint {
-            sample_offset: 0,
+            sample_offset: Offset::ZERO,
             value,
         };
         match self.carried.iter_mut().find(|(a, _)| *a == id) {
@@ -267,7 +270,7 @@ impl AudioState {
                     if changes.queues[i]
                         .points
                         .first()
-                        .is_some_and(|p| p.sample_offset > 0) =>
+                        .is_some_and(|p| p.sample_offset > Offset::ZERO) =>
                 {
                     i
                 }
@@ -906,7 +909,7 @@ pub(super) fn host_edit_changes(channels: &Channels) -> ParameterChanges {
     let taken = channels.take_host_edits();
     let mut changes = ParameterChanges::reserved(taken.len(), 1);
     for (id, value) in &taken {
-        let _ = changes.add_change(*id, 0, value.get());
+        let _ = changes.add_change(*id, Offset::ZERO, *value);
     }
     changes
 }
@@ -1737,19 +1740,19 @@ mod tests {
     fn a_carried_value_fills_a_reserved_queue() {
         let (mut state, _replies, _channels) = audio_state();
         let mut skipped = ParameterChanges::reserved(1, 1);
-        skipped.add_change(ParamId::new(7), 3, 0.25);
+        skipped.add_change(ParamId::new(7), at_frame(3), unit_value(0.25));
         state.carry(&skipped);
 
         let mut block = ParameterChanges::reserved(4, 40);
         assert!(block.open_queue(ParamId::new(1)));
         if let Some(q) = block.queues.last_mut() {
-            q.add_point(5, 0.5);
+            q.add_point(at_frame(5), unit_value(0.5));
         }
         state.merge_carried(&mut block);
 
         let carried = block.queue(ParamId::new(7)).expect("carried");
         assert_eq!(carried.points.len(), 1);
-        assert_eq!(carried.points[0].sample_offset, 0);
+        assert_eq!(carried.points[0].sample_offset.get(), 0);
         assert!((carried.points[0].value.get() - 0.25).abs() < 1e-12);
         assert!(
             carried.points.capacity() >= 40,
@@ -1770,13 +1773,13 @@ mod tests {
     #[test]
     fn a_carried_value_past_the_queues_is_dropped_but_the_placeholder_takes_all() {
         let mut skipped = ParameterChanges::reserved(2, 1);
-        skipped.add_change(ParamId::new(7), 3, 0.25);
-        skipped.add_change(ParamId::new(8), 3, 0.5);
+        skipped.add_change(ParamId::new(7), at_frame(3), unit_value(0.25));
+        skipped.add_change(ParamId::new(8), at_frame(3), unit_value(0.5));
 
         let mut state = audio_state().0;
         state.carry(&skipped);
         let mut block = ParameterChanges::reserved_bridged(1, 40);
-        assert!(block.add_change(ParamId::new(1), 5, 0.5));
+        assert!(block.add_change(ParamId::new(1), at_frame(5), unit_value(0.5)));
         assert_no_alloc::assert_no_alloc(|| state.merge_carried(&mut block));
         assert_eq!(block.queues.len(), 1);
         assert_eq!(block.points_overflowed(), 2);
@@ -1791,7 +1794,7 @@ mod tests {
             let q = placeholder.queue(ParamId::new(id as u32)).expect("queued");
             assert_eq!(q.points.len(), 1);
             assert_eq!(
-                (q.points[0].sample_offset, q.points[0].value.get()),
+                (q.points[0].sample_offset.get(), q.points[0].value.get()),
                 (0, value)
             );
         }
@@ -1818,7 +1821,7 @@ mod tests {
 
         let mut skipped = ParameterChanges::reserved(PARAMS, 1);
         for i in 0..PARAMS {
-            assert!(skipped.add_change(addr(i), 7, 0.25));
+            assert!(skipped.add_change(addr(i), at_frame(7), unit_value(0.25)));
         }
         let mut state = audio_state().0;
         state.carry(&skipped);
@@ -1831,12 +1834,12 @@ mod tests {
             if full.contains(&i) {
                 let mut k = 0;
                 while block.make_room(i) {
-                    assert!(block.push_point(i, 1 + k, 0.5));
+                    assert!(block.push_point(i, at_frame(1 + k), unit_value(0.5)));
                     k += 1;
                 }
             } else {
                 for k in 0..ParameterChanges::FLOOR_POINTS {
-                    assert!(block.push_point(i, 1 + k as i32, 0.5));
+                    assert!(block.push_point(i, at_frame(1 + k as i32), unit_value(0.5)));
                 }
             }
         }
@@ -1851,7 +1854,7 @@ mod tests {
         for (i, q) in block.queues.iter().enumerate() {
             let own = before.get(i).copied().unwrap_or(0);
             assert_eq!(q.points.len(), own + 1, "queue {i}");
-            assert_eq!(q.points[0].sample_offset, 0, "queue {i}");
+            assert_eq!(q.points[0].sample_offset.get(), 0, "queue {i}");
             assert!((q.points[0].value.get() - 0.25).abs() < 1e-12);
         }
     }

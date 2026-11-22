@@ -14,6 +14,7 @@ use assert_no_alloc::assert_no_alloc;
 use tutti_buffers::FloatWidth;
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{
     AutomationMode, Control, Controller, Describe, EditorWindow, Event, Hand, HostOp, Lifecycle,
     Loaded, MaxBlock, Notice, ParameterChanges, PluginError, PluginIo, Prepare, ProcessContext,
@@ -432,9 +433,9 @@ fn a_controller_write_is_direct_and_automation_lands_at_the_block_head() {
     );
 
     let mut changes = ParameterChanges::reserved(2, 4);
-    changes.add_change(id, 0, 0.25);
-    changes.add_change(id, 32, 0.75);
-    changes.add_change(ParamId::new(u32::MAX), 0, 0.5);
+    changes.add_change(id, at_frame(0), unit_value(0.25));
+    changes.add_change(id, at_frame(32), unit_value(0.75));
+    changes.add_change(ParamId::new(u32::MAX), at_frame(0), unit_value(0.5));
     render_f32(&mut processor, &ProcessContext::new().params(&changes));
     assert_eq!(
         Control::parameter(&controller, main_thread(), id),
@@ -452,7 +453,7 @@ fn automation_is_a_host_write_and_its_echo_is_not_reported() {
     let (mut processor, mut controller) = probe.activate();
     set_flag("tutti_vst2_probe_set_echo_set_parameter", true);
     let mut changes = ParameterChanges::reserved(1, 2);
-    changes.add_change(ParamId::new(0), 0, 0.5);
+    changes.add_change(ParamId::new(0), at_frame(0), unit_value(0.5));
     render_f32(&mut processor, &ProcessContext::new().params(&changes));
     set_flag("tutti_vst2_probe_set_echo_set_parameter", false);
     let mut edits = Vec::new();
@@ -492,14 +493,14 @@ fn a_write_to_a_parameter_the_plugin_lacks_is_reported_in_the_output() {
     };
 
     let mut lacking = ParameterChanges::reserved(2, 4);
-    lacking.add_change(ParamId::new(0), 0, 0.25);
-    lacking.add_change(ParamId::new(9_999), 0, 0.5);
+    lacking.add_change(ParamId::new(0), at_frame(0), unit_value(0.25));
+    lacking.add_change(ParamId::new(9_999), at_frame(0), unit_value(0.5));
     block(&lacking, &mut out);
     assert_eq!(out.params_refused(), 1, "the undeclared one only");
 
     out.clear();
     let mut declared = ParameterChanges::reserved(1, 4);
-    declared.add_change(ParamId::new(0), 0, 0.75);
+    declared.add_change(ParamId::new(0), at_frame(0), unit_value(0.75));
     block(&declared, &mut out);
     assert_eq!(out.params_refused(), 0);
 }
@@ -511,8 +512,8 @@ fn a_block_with_automation_midi_and_transport_does_not_allocate() {
     let (mut processor, controller) = probe.activate();
 
     let mut changes = ParameterChanges::reserved(2, 4);
-    changes.add_change(ParamId::new(0), 0, 0.25);
-    changes.add_change(ParamId::new(1), 16, 0.75);
+    changes.add_change(ParamId::new(0), at_frame(0), unit_value(0.25));
+    changes.add_change(ParamId::new(1), at_frame(16), unit_value(0.75));
     let midi = [(Offset::ZERO, midi::note_on(MidiChannel::of(1), 60, 100))];
     let ctx = ProcessContext::new().params(&changes).midi(&midi);
 

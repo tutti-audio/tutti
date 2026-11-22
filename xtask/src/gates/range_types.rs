@@ -46,6 +46,11 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "permanent: every u32 is a valid RPN word",
     ),
     (
+        "crates/tutti-graph/src/time.rs",
+        "Offset",
+        "permanent: any u32 is an offset; the block it falls in is the consumer's to check, as `clamped` does for a wire stamp",
+    ),
+    (
         "crates/tutti-units/src/unit_param.rs",
         "ParamId",
         "permanent: every u32 is a valid id",
@@ -149,11 +154,6 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "crates/tutti-plugin-ipc/src/protocol/envelope.rs",
         "ReqId",
         "permanent: a request number is any u64; the host numbers its requests and no value is invalid",
-    ),
-    (
-        "crates/tutti-plugin-types/src/parameters.rs",
-        "ParameterInfo",
-        "temporary: a document can set `flags` outside `known` and a `measures` its range does not fit; `serde(try_from)` removes it",
     ),
     (
         "crates/tutti-plugin-types/src/plugin_ref.rs",

@@ -87,6 +87,8 @@ tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-au-host = { version = "0.0.1", path = "../tutti-au-host", optional = true }
 
 [dev-dependencies]
+# `at_frame` and `unit_value`: the parameter points the tests build.
+tutti-plugin-types = { path = "../tutti-plugin-types", features = ["testing"] }
 # Test reads block on a `ParamRead` (a test may block).
 futures-lite.workspace = true
 tutti-midi-runtime = { path = "../tutti-midi-runtime" }
