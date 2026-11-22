@@ -30,8 +30,8 @@ use tutti_buffers::{Float, InputOutput};
 
 use crate::{
     AutomationMode, BypassWrite, ChannelTable, ContentScale, EditorCapabilities, EditorOpened,
-    EditorWindow, KeyEvent, KeyUse, LoadedPlugin, ParamWriteError, ParameterInfo, PluginDescriptor,
-    PluginError, PluginPreset, PluginResult, PluginTail, PresetId, ProcessContext, ProcessOutput,
+    EditorWindow, KeyEvent, KeyUse, ParamWriteError, ParameterInfo, PluginDescriptor, PluginError,
+    PluginPreset, PluginResult, PluginTail, PluginWiring, PresetId, ProcessContext, ProcessOutput,
     ProcessWake, SampleRate, Samples, WindowHandle,
 };
 use crate::{Delivered, ParamEdit, ParameterChanges, bypass_parameter, bypass_value, is_bypassed};
@@ -68,7 +68,7 @@ pub trait Control: EditorWindow {
     fn info(&self) -> &PluginDescriptor;
 
     /// The wiring read from the plugin now, not a load-time cache.
-    fn wiring(&self, main: MainThreadMarker) -> LoadedPlugin;
+    fn wiring(&self, main: MainThreadMarker) -> PluginWiring;
 
     /// Every parameter the plugin declares.
     fn parameters(&self, main: MainThreadMarker) -> Vec<ParameterInfo>;
@@ -87,7 +87,7 @@ pub trait Control: EditorWindow {
     /// Writes the plugin's own bypass (`true` bypassed, `false` processing).
     /// The result says whether it has one and whether the write was handed to
     /// it; the plugin may still refuse, and
-    /// [`LoadedPlugin::own_bypass`] and a read back tell.
+    /// [`PluginWiring::own_bypass`] and a read back tell.
     ///
     /// The default writes the parameter flagged
     /// [`BYPASS`](crate::ParamFlags::BYPASS) (VST3, CLAP) to its maximum or its
@@ -722,7 +722,7 @@ impl<W: Wraps> Control for W {
         self.plugin().info()
     }
 
-    fn wiring(&self, main: MainThreadMarker) -> LoadedPlugin {
+    fn wiring(&self, main: MainThreadMarker) -> PluginWiring {
         self.plugin().wiring(main)
     }
 

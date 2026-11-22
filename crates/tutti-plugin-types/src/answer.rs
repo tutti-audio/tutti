@@ -13,6 +13,11 @@ use futures_channel::oneshot;
 /// ended): an answer cancelled. A poll never blocks, and the sender's thread
 /// wakes the task.
 ///
+/// **What feeds it.** The plugin's hosting holds the [`AnswerSender`]: for a
+/// served plugin, the bridge's control lane thread sends the server's reply
+/// (bounded by the lane's query deadline); for an in-process plugin, the
+/// main thread sends when it runs the queued work.
+///
 /// Made by [`Answer::channel`] (the hosting) or [`Answer::ready`] (a value already
 /// known). Dropping it discards the answer: a later send is told so.
 #[derive(Debug)]
