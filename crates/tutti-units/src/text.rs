@@ -82,7 +82,7 @@ impl<const MIN: usize, const MAX: usize> Text<MIN, MAX> {
         assert!(MIN <= MAX, "Text: MIN must not exceed MAX");
     };
 
-    /// The text `text`, or `None` for a NUL a leading U+FEFF or a length
+    /// The text `text`, or `None` for a NUL, a leading U+FEFF or a length
     /// outside `MIN..=MAX` bytes; never truncates. [`TryFrom`] says why.
     #[must_use]
     pub const fn new(text: &str) -> Option<Self> {

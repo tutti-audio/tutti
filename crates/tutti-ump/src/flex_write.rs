@@ -93,6 +93,10 @@ impl TryFrom<&[Entry]> for Text {
     ///
     /// [`FlexTextError::TooLong`] past [`FLEX_TEXT_MAX_LEN`] bytes.
     ///
+    /// # Panics
+    ///
+    /// Never: the joined bytes are whole `&str`s, so they are UTF-8.
+    ///
     /// ```
     /// use tutti_ump::{Entry, Text};
     ///
@@ -113,10 +117,9 @@ impl TryFrom<&[Entry]> for Text {
                 len = end;
             }
         }
-        // The bytes are whole `&str`s, so they are UTF-8.
         core::str::from_utf8(&bytes[..len])
-            .map_err(|_| FlexTextError::TooLong)
-            .and_then(Self::try_from)
+            .expect("whole strs are UTF-8")
+            .try_into()
     }
 }
 
