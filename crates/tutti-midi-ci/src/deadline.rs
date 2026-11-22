@@ -1,5 +1,5 @@
-//! The sans-IO timing vocabulary of the initiators and discoverers: a wait that ends at an
-//! instant. Every method takes the `now` it is asked at.
+//! The sans-IO timing vocabulary of the initiators and discoverers: a wait that
+//! ends at an instant. Every method takes the `now` it is asked at.
 
 use std::time::Duration;
 
