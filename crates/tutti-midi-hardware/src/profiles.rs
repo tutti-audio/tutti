@@ -38,6 +38,8 @@ use crate::peer::{PeerRef, PeerRequestError};
 tutti_units::ranged! {
     /// The Channels a Profile is asked to use when it is enabled on a Channel: the
     /// Manager and its Members, at least 1 and at most 14 bits (M2-101 §7.8).
+    /// [`ProfileChannels`] is the wire field, which also holds 0 (the width of
+    /// the address); a request to enable names a count, never 0.
     #[derive(Eq, PartialOrd, Ord, Hash)]
     ChannelCount(u16), NotAChannelCount, "a Channel count (1 to 16383)",
     |raw| raw >= 1 && raw <= 0x3FFF

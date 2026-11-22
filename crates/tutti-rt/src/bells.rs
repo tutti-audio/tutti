@@ -82,6 +82,11 @@
 //! frees it: it is dropped on the control side, never on the audio thread (a
 //! debug build panics otherwise, as [`ControlDrop`] does for any such handle).
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "the set's locks are loom's under loom, so the models see them; the tick and the control side take them, a ring never does"
+)]
+
 #[cfg(not(loom))]
 use std::io;
 use std::sync::PoisonError;
@@ -101,6 +106,10 @@ mod tick;
 #[cfg(any(loom, not(target_arch = "wasm32")))]
 mod tick_body;
 
+#[allow(
+    clippy::disallowed_types,
+    reason = "loom's and std's locks, for the loom models of a bell"
+)]
 mod sync {
     #[cfg(loom)]
     pub(super) use loom::sync::atomic::{AtomicBool, Ordering, fence};

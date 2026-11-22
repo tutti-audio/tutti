@@ -28,6 +28,10 @@
 // asks of its caller.
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 #![warn(unsafe_op_in_unsafe_fn)]
+#![allow(
+    clippy::disallowed_types,
+    reason = "layer 0, below tutti-rt: winmm's callback state is a std lock"
+)]
 
 // The OS-free protocol: tested everywhere, and used by `os`'s input.
 #[cfg(any(windows, test))]

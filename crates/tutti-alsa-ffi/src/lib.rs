@@ -58,6 +58,10 @@
 // Every `unsafe` block says why it is sound, and every `unsafe fn` what it
 // asks of its caller.
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
+#![allow(
+    clippy::disallowed_types,
+    reason = "layer 0, below tutti-rt: the poll thread's handle table is a std lock"
+)]
 #![warn(unsafe_op_in_unsafe_fn)]
 
 mod address;

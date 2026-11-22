@@ -26,6 +26,10 @@
     clippy::disallowed_methods,
     reason = "test support: it starts the threads its tests race"
 )]
+#![allow(
+    clippy::disallowed_types,
+    reason = "a test plugin stands in for a third party's plugin, whose locks are its own"
+)]
 
 use std::ffi::{CStr, c_char, c_void};
 use std::ptr;

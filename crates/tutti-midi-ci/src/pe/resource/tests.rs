@@ -5,7 +5,7 @@
 use std::num::NonZeroU32;
 use tutti_platform::Instant;
 
-use tutti_ump::{ManufacturerBytesError, ManufacturerId, MidiChannel, U7};
+use tutti_ump::{ControlValue, ManufacturerBytesError, ManufacturerId, MidiChannel, U7};
 
 use super::super::header::{PeEncoding, PePage};
 use super::super::limits::{MediaType, PeTextError, PropertyNameError, ResourceId};
@@ -434,7 +434,7 @@ fn all_ctrl_list_reads_table_6() {
     let [volume, cutoff, hold, wave] = list.entries() else {
         panic!("four entries");
     };
-    assert_eq!(volume.ctrl.default, Some(u32::MAX));
+    assert_eq!(volume.ctrl.default, Some(ControlValue::MAX));
     assert_eq!(
         volume.ctrl.controller,
         PeController::ControlChange(CcIndex::Pair {
@@ -663,7 +663,7 @@ fn ctrl_map_list_reads_table_20() {
     let PeData::CtrlMapList(list) = round_trips(PeResource::CtrlMapList, text) else {
         panic!("not CtrlMapList");
     };
-    assert_eq!(list.entries()[2].value, u32::MAX);
+    assert_eq!(list.entries()[2].value, ControlValue::MAX);
     assert!(
         decode(
             &PeResource::CtrlMapList,

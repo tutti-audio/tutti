@@ -55,6 +55,8 @@ required-features = ["server"]
 [dev-dependencies]
 # Test reads block on a `ParamRead` (a test may block).
 futures-lite.workspace = true
+# `tests/server.rs` collects the bridge's parameter edits under a `tutti_rt::Mutex`.
+tutti-rt = { path = "../../crates/tutti-rt" }
 # `tests/server.rs` and `tests/probe.rs` (feature `server`) name it; the library
 # does not, and an optional dependency cannot be a dev-dependency.
 # Those tests need `cargo build -p tutti-plugin-server --no-default-features

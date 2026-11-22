@@ -313,7 +313,8 @@ pub enum Meta {
     },
     /// `59`: Key Signature.
     KeySignature {
-        /// Sharps if positive, flats if negative.
+        /// Sharps if positive, flats if negative. The byte is kept as read, so a
+        /// value outside `-7..=7` (SMF 1.0 section 3.3) survives a round trip.
         sharps: i8,
         /// Whether the key is minor.
         minor: bool,
@@ -1534,8 +1535,7 @@ impl MidiFile {
             }
             Container::Clip(_) => {
                 let track = &tracks[0];
-                if clip_file::restart_bytes(track.header_end.max(track.end).0) > u64::from(u32::MAX)
-                {
+                if clip_file::restart_bytes(track.header_end.max(track.end)) > u64::from(u32::MAX) {
                     return Err(TracksError::TooLarge);
                 }
             }
@@ -1616,7 +1616,7 @@ impl MidiFile {
             }
             Some(MidiFileKind::ClipFile) => {
                 let clip = clip_file::parse(&bytes[clip_file::CLIP_FILE_MAGIC.len()..])?;
-                let events = |packets: Vec<(u64, Ump)>| -> Vec<(Tick, FileEvent)> {
+                let events = |packets: Vec<(Tick, Ump)>| -> Vec<(Tick, FileEvent)> {
                     packets
                         .into_iter()
                         .map(|(tick, ump)| {
@@ -1624,15 +1624,15 @@ impl MidiFile {
                                 Ok(message) => FileEvent::Message(message),
                                 Err(unknown) => FileEvent::Unknown(unknown),
                             };
-                            (Tick(tick), event)
+                            (tick, event)
                         })
                         .collect()
                 };
                 let track = Track::from_read(
                     events(clip.header),
-                    Tick(clip.header_end),
+                    clip.header_end,
                     events(clip.events),
-                    Tick(clip.end),
+                    clip.end,
                 );
                 Ok(Self::build(
                     Container::Clip(clip.ticks_per_quarter),
@@ -1662,9 +1662,9 @@ impl MidiFile {
                 clip_file::write(
                     ticks_per_quarter,
                     &packets(&track.header),
-                    track.header_end.0,
+                    track.header_end,
                     &packets(&track.events),
-                    track.end.0,
+                    track.end,
                 )
             }
         }
@@ -2509,10 +2509,10 @@ impl SmfTimeline {
 
 /// The packets of `events` at their ticks: what the clip layer reads. An
 /// SMF event has none; a Clip File's constructor has refused them.
-fn packets(events: &[(Tick, FileEvent)]) -> Vec<(u64, Ump)> {
+fn packets(events: &[(Tick, FileEvent)]) -> Vec<(Tick, Ump)> {
     events
         .iter()
-        .filter_map(|(tick, event)| event.ump().map(|ump| (tick.0, ump)))
+        .filter_map(|(tick, event)| event.ump().map(|ump| (*tick, ump)))
         .collect()
 }
 

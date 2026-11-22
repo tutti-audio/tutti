@@ -10,6 +10,8 @@
 //! The wrapped types are std's under every cfg: a loom model that needs loom's
 //! `Mutex` names it itself.
 
+#![allow(clippy::disallowed_types, reason = "the module that wraps std's locks")]
+
 use std::fmt;
 use std::sync::{
     self, MutexGuard, PoisonError, RwLockReadGuard, RwLockWriteGuard, WaitTimeoutResult,

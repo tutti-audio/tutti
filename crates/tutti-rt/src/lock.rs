@@ -6,6 +6,8 @@
 //! it: a caller that locks this way keeps the locked state valid at every point
 //! where its holder can panic, so a guard taken after a panic reads valid state.
 
+#![allow(clippy::disallowed_types, reason = "`LockExt` extends std's `Mutex`")]
+
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 /// Takes a `Mutex`'s guard whether or not a panicking holder poisoned it.

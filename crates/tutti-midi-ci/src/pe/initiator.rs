@@ -69,7 +69,7 @@ use tutti_platform::Instant;
 use super::body::{BodyLimit, PeBodyError, decode_body, encode_body};
 use super::capabilities::SimultaneousRequests;
 use super::capabilities::{PeCapabilities, PeCiMessage, SUB_ID2_PE_CAPABILITIES_INQUIRY};
-use super::chunk::{PeChunk, PeChunkError, PeRequestId, split_message};
+use super::chunk::{ChunkNo, PeChunk, PeChunkError, PeRequestId, split_message};
 use super::flow::{PE_TIMEOUT, PeAnswer, PeMessageKind, PeSignal, PeTerminator, PeTransaction};
 use super::header::{
     PeEncoding, PeEndedBy, PeHeader, PePage, PeReply, PeRequest, PeSetScope, PeStatus,
@@ -1101,7 +1101,7 @@ impl PeInitiator {
                 let kind = self.pending[at].work.reply_kind();
                 self.reassembler.extend(self.link.peer, kind, id, wait);
             }
-            PeSignal::SendNext { chunk, .. } => self.on_send_next(at, chunk.get(), now, actions),
+            PeSignal::SendNext { chunk, .. } => self.on_send_next(at, chunk, now, actions),
             PeSignal::Resend { .. } => self.on_resend(at, now, actions),
             PeSignal::Terminate { by, .. } => {
                 self.conclude(at, PeOutcome::Terminated(by), actions);
@@ -1113,7 +1113,13 @@ impl PeInitiator {
     }
 
     /// The ACK that asks for the next chunk of a Set under Flow Control.
-    fn on_send_next(&mut self, at: usize, acked: u16, now: Instant, actions: &mut Vec<PeAction>) {
+    fn on_send_next(
+        &mut self,
+        at: usize,
+        acked: ChunkNo,
+        now: Instant,
+        actions: &mut Vec<PeAction>,
+    ) {
         let Work::Set {
             chunks,
             sent,
@@ -1124,7 +1130,7 @@ impl PeInitiator {
             return;
         };
         // An ACK of an earlier chunk is a repeat; of the last, one nothing waits for.
-        if usize::from(acked) != *sent || *sent >= chunks.len() {
+        if usize::from(acked.get()) != *sent || *sent >= chunks.len() {
             return;
         }
         let chunk = chunks[*sent].clone();
