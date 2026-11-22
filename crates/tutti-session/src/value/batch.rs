@@ -12,6 +12,7 @@ use std::any::Any;
 use super::error::{SetRefusal, ValueErrorKind};
 use super::state::Params;
 use super::target::{AnyAssign, Assign, Info, Modify, Staged, TargetId, sealed::Store};
+use super::watcher::{Landed, Landing};
 
 /// An item that failed: its position, and what failed there.
 #[derive(Debug)]
@@ -27,10 +28,12 @@ impl std::fmt::Debug for dyn Staged {
     }
 }
 
-/// One target's final value in a batch, with the cell it is stored through.
+/// One target's final value in a batch, with the cell it is stored through
+/// and the base it was first read at.
 struct Slot<T: Store> {
     id: TargetId,
     cell: T::Cell,
+    base: T::Value,
     value: T::Value,
 }
 
@@ -50,8 +53,10 @@ impl<T: Store> Staged for Slot<T> {
         T::check(&self.cell, value)
     }
 
-    fn store(self: Box<Self>) {
+    fn store(self: Box<Self>) -> Option<Landing> {
         T::store(&self.cell, &self.value);
+        // A value equal to the base is no change.
+        (self.value != self.base).then(|| Landing::new(self.id, self.base, self.value))
     }
 }
 
@@ -62,6 +67,8 @@ pub struct Batch<'a> {
     slots: Vec<Box<dyn Staged>>,
     /// The position of the item being staged.
     index: usize,
+    /// The assignments staged so far: each `Assign`, `Modify` and `AnyAssign`.
+    writes: usize,
 }
 
 impl<'a> Batch<'a> {
@@ -70,14 +77,16 @@ impl<'a> Batch<'a> {
             params,
             slots: Vec::new(),
             index: 0,
+            writes: 0,
         }
     }
 
-    /// Stores every target's final value, in the order each was first named.
-    pub fn store(self) {
-        for slot in self.slots {
-            slot.store();
-        }
+    /// Stores every target's final value, in the order each was first named,
+    /// and answers the targets whose value is not the base they had.
+    pub fn store(self) -> Landed {
+        let writes = self.writes;
+        let landings = self.slots.into_iter().filter_map(Staged::store).collect();
+        Landed::new(writes, landings)
     }
 
     fn fail(&self, target: TargetId, kind: ValueErrorKind) -> Failure {
@@ -105,6 +114,7 @@ impl<'a> Batch<'a> {
         make: impl FnOnce(&T::Value) -> T::Value,
     ) -> Result<(), Failure> {
         let id = target.id();
+        self.writes += 1;
         // A target id holds the node type its key names, and one node type
         // declares one unit at an address, so every target of one id has one
         // value type: a key of another node type resolves to no cell and
@@ -136,6 +146,7 @@ impl<'a> Batch<'a> {
                 self.slots.push(Box::new(Slot::<T> {
                     id,
                     cell,
+                    base,
                     value: next,
                 }));
             }

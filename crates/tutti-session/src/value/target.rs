@@ -13,6 +13,7 @@ use super::batch::{Batch, Failure, Stageable};
 use super::error::SetRefusal;
 use super::slot::SlotId;
 use super::state::Params;
+use super::watcher::Landing;
 
 /// The crate-private half of [`Target`]: how a target finds its cell, checks
 /// a value and lands it. Nothing outside the crate can name it, so nothing
@@ -249,15 +250,35 @@ pub trait Staged {
     fn value_mut(&mut self) -> &mut dyn Any;
     /// Whether the slot's cell takes `value`, which is of the slot's type.
     fn accepts(&self, value: &dyn Any) -> Result<(), SetRefusal>;
-    /// Stores it.
-    fn store(self: Box<Self>);
+    /// Stores it, and answers the change when the value is not the base the
+    /// slot was read at.
+    fn store(self: Box<Self>) -> Option<Landing>;
 }
 
 /// Writes the builders every target type has, from the target's generics.
 ///
-/// `moved` adds `effective`.
+/// `moved` adds `effective`, and `unwatched` leaves out the
+/// [`Watchable`](crate::Watchable) impl a target otherwise has.
 macro_rules! target_builders {
     ([$($generics:tt)*] $target:ty $(where $($bounds:tt)+)?) => {
+        $crate::value::target_builders!(@builders [$($generics)*] $target $(where $($bounds)+)?);
+        $crate::value::target_builders!(@watchable [$($generics)*] $target $(where $($bounds)+)?);
+    };
+    (moved [$($generics:tt)*] $target:ty $(where $($bounds:tt)+)?) => {
+        $crate::value::target_builders!([$($generics)*] $target $(where $($bounds)+)?);
+        $crate::value::target_builders!(@effective [$($generics)*] $target $(where $($bounds)+)?);
+    };
+    (unwatched moved [$($generics:tt)*] $target:ty $(where $($bounds:tt)+)?) => {
+        $crate::value::target_builders!(@builders [$($generics)*] $target $(where $($bounds)+)?);
+        $crate::value::target_builders!(@effective [$($generics)*] $target $(where $($bounds)+)?);
+    };
+    (unwatched [$($generics:tt)*] $target:ty $(where $($bounds:tt)+)?) => {
+        $crate::value::target_builders!(@builders [$($generics)*] $target $(where $($bounds)+)?);
+    };
+    (@watchable [$($generics:tt)*] $target:ty $(where $($bounds:tt)+)?) => {
+        impl<$($generics)*> $crate::Watchable for $target $(where $($bounds)+)? {}
+    };
+    (@builders [$($generics:tt)*] $target:ty $(where $($bounds:tt)+)?) => {
         impl<$($generics)*> $target $(where $($bounds)+)? {
             /// An assignment of `value`: an absolute write, for
             /// [`Session::set`](crate::Session::set).
@@ -287,9 +308,7 @@ macro_rules! target_builders {
             }
         }
     };
-    (moved [$($generics:tt)*] $target:ty $(where $($bounds:tt)+)?) => {
-        $crate::value::target_builders!([$($generics)*] $target $(where $($bounds)+)?);
-
+    (@effective [$($generics:tt)*] $target:ty $(where $($bounds:tt)+)?) => {
         impl<$($generics)*> $target $(where $($bounds)+)? {
             /// The value the audio thread uses, which a lane or a mapping may
             /// have moved from the base.
