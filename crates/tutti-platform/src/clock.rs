@@ -8,7 +8,7 @@
 //!   `AudioConvertHostTimeToNanos`) is that clock.
 //! - Windows: `QueryPerformanceCounter`, scaled to nanoseconds by its
 //!   frequency (fixed at boot).
-//! - The web (`wasm32`): nanoseconds since the first call, from [`Instant`](crate::Instant)
+//! - The web (`wasm32`): nanoseconds since the first call, from [`Instant`]
 //!   (`performance.now()`). No plugin runs and no second process exists
 //!   there, so an origin at the first call is enough.
 //!
