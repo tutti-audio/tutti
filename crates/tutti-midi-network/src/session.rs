@@ -107,7 +107,7 @@ pub(crate) struct Session {
     link: Link,
     last_heard: Instant,
     last_ping: Option<Instant>,
-    ping_counter: u32,
+    ping_id: PingId,
     outstanding_pings: VecDeque<PingId>,
     out: Vec<Command>,
     events: Vec<Event>,
@@ -135,7 +135,7 @@ impl Session {
             link: Link::new(),
             last_heard: now,
             last_ping: None,
-            ping_counter: 0,
+            ping_id: PingId::new(0),
             outstanding_pings: VecDeque::new(),
             out: Vec::new(),
             events: Vec::new(),
@@ -806,8 +806,8 @@ impl Session {
             return self.close(now, ByeReason::Timeout);
         }
         if now >= self.next_ping() {
-            let id = PingId::new(self.ping_counter);
-            self.ping_counter = self.ping_counter.wrapping_add(1);
+            let id = self.ping_id;
+            self.ping_id = id.next();
             self.outstanding_pings.push_back(id);
             if self.outstanding_pings.len() > OUTSTANDING_PINGS {
                 self.outstanding_pings.pop_front();

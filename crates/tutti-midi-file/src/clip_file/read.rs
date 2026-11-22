@@ -44,7 +44,7 @@ use tutti_ump::{
 };
 
 use super::{ClipFileError, ParsedClip, property_exchange};
-use crate::ReadError;
+use crate::{ReadError, Tick};
 use tutti_midi_ci::is_set_profile_on;
 
 /// Why a rule refused, carried as winnow context and mapped to
@@ -236,10 +236,10 @@ fn set_profile_on(input: &mut Input<'_>) -> Res<Vec<Ump>> {
 
 /// How many packets at the head of `header` are Set Profile On messages at
 /// tick 0: the ones a write puts before the DCTPQ, where they carry no DCS.
-pub(crate) fn leading_profile_len(header: &[(u64, Ump)]) -> usize {
+pub(crate) fn leading_profile_len(header: &[(Tick, Ump)]) -> usize {
     let packets: Vec<Packet> = header
         .iter()
-        .take_while(|(tick, _)| *tick == 0)
+        .take_while(|(tick, _)| *tick == Tick(0))
         .map(|&(_, ump)| classify(ump))
         .collect();
     let mut input = &packets[..];
@@ -518,12 +518,12 @@ fn rule_of(fault: Fault, torn: bool) -> ClipFileError {
 }
 
 /// Packets at absolute ticks: each message's delta added to the one before.
-fn absolute(timed: &[Timed]) -> Vec<(u64, Ump)> {
+fn absolute(timed: &[Timed]) -> Vec<(Tick, Ump)> {
     timed
         .iter()
         .scan(0u64, |tick, t| {
             *tick += t.delta;
-            Some((*tick, t.ump))
+            Some((Tick(*tick), t.ump))
         })
         .collect()
 }
@@ -571,12 +571,16 @@ pub(crate) fn parse(body: &[u8]) -> Result<ParsedClip, ReadError> {
         });
     }
 
-    let mut header: Vec<(u64, Ump)> = clip.preamble.into_iter().map(|ump| (0, ump)).collect();
+    let mut header: Vec<(Tick, Ump)> = clip
+        .preamble
+        .into_iter()
+        .map(|ump| (Tick(0), ump))
+        .collect();
     let after_preamble = absolute(&clip.header);
-    let header_end = after_preamble.last().map_or(0, |&(tick, _)| tick) + clip.header_gap;
+    let header_end = Tick(after_preamble.last().map_or(0, |&(tick, _)| tick.0) + clip.header_gap);
     header.extend(after_preamble);
     let events = absolute(&clip.events);
-    let end = events.last().map_or(0, |&(tick, _)| tick) + clip.end_gap;
+    let end = Tick(events.last().map_or(0, |&(tick, _)| tick.0) + clip.end_gap);
     Ok(ParsedClip {
         ticks_per_quarter: clip.ticks_per_quarter,
         header,
@@ -594,16 +598,16 @@ pub(crate) fn parse(body: &[u8]) -> Result<ParsedClip, ReadError> {
 /// # Errors
 ///
 /// The [`ClipFileError`] naming the rule broken.
-pub(crate) fn check_header(header: &[(u64, Ump)]) -> Result<(), ClipFileError> {
+pub(crate) fn check_header(header: &[(Tick, Ump)]) -> Result<(), ClipFileError> {
     let leading = leading_profile_len(header);
     for message in super::profiles(header[..leading].iter().map(|&(_, ump)| ump)) {
         message.map_err(ClipFileError::ProfileOn)?;
     }
-    let mut at = 0;
+    let mut at = Tick(0);
     let packets: Vec<Packet> = header[leading..]
         .iter()
         .flat_map(|&(tick, ump)| {
-            let delta = u32::try_from(tick.saturating_sub(at)).unwrap_or(u32::MAX);
+            let delta = u32::try_from(tick.ticks_since(at).unwrap_or(0)).unwrap_or(u32::MAX);
             at = tick;
             [
                 Packet {

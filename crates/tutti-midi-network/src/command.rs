@@ -236,6 +236,12 @@ impl PingId {
     pub const fn get(self) -> u32 {
         self.0
     }
+
+    /// The identifier after this one, wrapping from `u32::MAX` to 0.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
 }
 
 /// A Retransmit Request (M2-124 section 7.2.3).
