@@ -29,7 +29,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_plugin_types::PluginRef;
-use tutti_session::{InPort, ModeTarget, NodeMode, OutPort, Root, Session};
+use tutti_session::{InPort, MainOutput, ModeTarget, NodeMode, OutPort, Session};
 use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -102,7 +102,7 @@ fn rig(mode: NodeMode) -> Rig {
     g.set_sources(InPort::new(plugin, 0), [OutPort::new(click, 0)])
         .unwrap()
         .unfaded();
-    g.set_sources(Root::output(0), [OutPort::new(plugin, 0)])
+    g.set_sources(MainOutput::channel(0), [OutPort::new(plugin, 0)])
         .unwrap()
         .unfaded();
     s.set(ModeTarget::of(plugin).to(mode))

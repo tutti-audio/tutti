@@ -14,7 +14,7 @@ use std::time::Duration;
 use tutti_buffers::ChannelLayout;
 use tutti_engine::{ManualStreamDriver, OutputSpec};
 use tutti_plugin_types::PluginRef;
-use tutti_session::{OutPort, Root, Session};
+use tutti_session::{MainOutput, OutPort, Session};
 use tutti_units::{SampleRate, Samples};
 
 /// A hang guard: far past anything a drop takes, asserting completion and never speed.
@@ -57,7 +57,7 @@ fn a_session_drop_ends_the_lanes_of_a_plugin_a_render_feeds() {
                 .expect("the reference CLAP plugin loads");
             session
                 .graph()
-                .set_sources(Root::output(0), [OutPort::new(node, 0)])
+                .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
                 .unwrap();
             let _ = session.update();
 

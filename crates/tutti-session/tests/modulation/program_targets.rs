@@ -370,7 +370,7 @@ fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
     let probe = s.graph().add(ProbeUnit::new(500.0));
     s.graph()
         .set_sources(
-            tutti_session::Root::output(0),
+            tutti_session::MainOutput::channel(0),
             [tutti_session::OutPort::new(probe, 0)],
         )
         .unwrap();

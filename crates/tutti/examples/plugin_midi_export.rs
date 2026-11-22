@@ -37,7 +37,7 @@ use std::path::{Path, PathBuf};
 use tutti::midi::{MidiChannel, MidiFile, NoteNumber, Tick, Timebase, Track};
 use tutti::session::Master;
 use tutti::{
-    Beat, Bounce, Bpm, Format, LoadPlugin, MaxBlock, NodeKey, Pcm, PeerState, Range, Root,
+    Beat, Bounce, Bpm, Format, LoadPlugin, MainOutput, MaxBlock, NodeKey, Pcm, PeerState, Range,
     SampleRate, Samples, Session, SessionEvent, Written,
 };
 
@@ -110,7 +110,7 @@ fn play<M: Master>(
         .build()?;
 
     let synth = load(&mut s, main, plugin, state)?;
-    s.graph().connect(synth, Root).unwrap();
+    s.graph().connect(synth, MainOutput).unwrap();
 
     // The load is a value the app awaits: it reads the file (an SMF or a Clip
     // File) and converts its tracks to clips. A file in SMPTE time or of format 2 has no

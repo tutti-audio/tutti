@@ -14,7 +14,7 @@ use tutti_graph::ForkByClone;
 use tutti_nodes::testing::{Const, Through};
 use tutti_rt::LockExt;
 use tutti_session::{
-    Error, InPort, LiveSession, OutPort, Root, Session, SessionEvent, SystemSession,
+    Error, InPort, LiveSession, MainOutput, OutPort, Session, SessionEvent, SystemSession,
 };
 use tutti_units::{SampleRate, Samples};
 
@@ -47,7 +47,7 @@ fn wire_constant<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>
     let node = s.graph().add(ForkByClone(Const::mono(level)));
     for port in 0..2 {
         s.graph()
-            .set_sources(Root::output(port), [OutPort::new(node, 0)])
+            .set_sources(MainOutput::channel(port), [OutPort::new(node, 0)])
             .unwrap()
             .unfaded();
     }
@@ -221,7 +221,7 @@ fn a_graph_that_no_longer_compiles_fails_the_switch_and_the_timer_runs_again() {
         .set_sources(InPort::new(lim, 0), [OutPort::new(osc, 0)])
         .unwrap();
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(lim, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(lim, 0)])
         .unwrap();
     let _ = s.update();
     let before = wait_past(&mut s, 0);
@@ -730,7 +730,7 @@ fn the_old_driver_renders_its_last_block_before_the_new_one_its_first() {
         inside: Default::default(),
     }));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();

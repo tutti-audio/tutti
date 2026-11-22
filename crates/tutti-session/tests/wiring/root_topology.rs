@@ -11,7 +11,9 @@ use tutti_buffers::{ChannelLayout, ChannelTopology, Placement, Speaker};
 use tutti_buffers::{FoldError, InterleavedMut};
 use tutti_graph::{ForkByClone, RootError};
 use tutti_nodes::testing::Const;
-use tutti_session::{Committed, Error, OutPort, Root, RootTopologyStatus, Session, SessionBuilder};
+use tutti_session::{
+    Committed, Error, MainOutput, OutPort, RootTopologyStatus, Session, SessionBuilder,
+};
 use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -25,7 +27,7 @@ fn feed<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     for c in 0..values.len() {
         session
             .graph()
-            .set_sources(Root::output(c), [OutPort::new(node, c)])
+            .set_sources(MainOutput::channel(c), [OutPort::new(node, c)])
             .unwrap()
             .unfaded();
     }

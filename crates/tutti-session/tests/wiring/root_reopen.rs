@@ -11,7 +11,9 @@ use tutti_buffers::{InterleavedMut, Pull, Source};
 use tutti_graph::ForkByClone;
 use tutti_graph::TapId;
 use tutti_nodes::testing::Const;
-use tutti_session::{NotReopened, OutPort, Reopened, Root, RootReader, Session, SessionEvent};
+use tutti_session::{
+    MainOutput, NotReopened, OutPort, Reopened, RootReader, Session, SessionEvent,
+};
 use tutti_units::{SampleRate, Samples};
 
 const BLOCK: usize = 64;
@@ -26,7 +28,7 @@ fn session() -> Session {
     let node = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.75])));
     for c in 0..2 {
         s.graph()
-            .set_sources(Root::output(c), [OutPort::new(node, c)])
+            .set_sources(MainOutput::channel(c), [OutPort::new(node, c)])
             .unwrap()
             .unfaded();
     }

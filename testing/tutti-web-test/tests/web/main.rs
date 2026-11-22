@@ -9,7 +9,7 @@ use tutti::measure::PeakConfig;
 use tutti::sampler::StreamStart;
 use tutti::session::{BackgroundWork, SamplerError};
 use tutti::{
-    Bounce, ChannelLayout, Clip, Format, Interleaved, MaxBlock, Pcm, Range, Root, SampleRate,
+    Bounce, ChannelLayout, Clip, Format, Interleaved, MainOutput, MaxBlock, Pcm, Range, SampleRate,
     Samples, Seconds, Session, Wave,
 };
 use wasm_bindgen_test::wasm_bindgen_test;
@@ -50,7 +50,7 @@ async fn a_bounce_of_a_clip_to_memory_is_the_ranges_frames_at_the_clips_level() 
     let clip = session
         .graph()
         .add(Clip::new(Arc::new(wave_of(vec![0.25; 2 * 48_000]))).expect("a placeable wave"));
-    session.graph().connect(clip, Root).unwrap().unfaded();
+    session.graph().connect(clip, MainOutput).unwrap().unfaded();
     let bounce = Bounce::new()
         .master_buffers()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(1.0)))

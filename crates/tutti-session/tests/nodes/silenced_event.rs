@@ -10,7 +10,7 @@ use std::time::Duration;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
-use tutti_session::{OutPort, Root, Session, SessionEvent};
+use tutti_session::{MainOutput, OutPort, Session, SessionEvent};
 use tutti_units::SampleRate;
 
 const RATE: f64 = 48_000.0;
@@ -92,10 +92,10 @@ fn over_budget_alone_is_no_event() {
     let mut s = offline();
     let slow = s.graph().add(ForkByClone(Slow));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(slow, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(slow, 0)])
         .unwrap();
     s.graph()
-        .set_sources(Root::output(1), [OutPort::new(slow, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(slow, 0)])
         .unwrap();
     let events = s.update();
     assert!(silenced(&events).is_empty());

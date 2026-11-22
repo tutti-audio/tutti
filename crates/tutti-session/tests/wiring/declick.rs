@@ -13,7 +13,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{ForkByClone, declick_frames};
 use tutti_nodes::testing::Const;
-use tutti_session::{DetachedSession, OutPort, Root, Session};
+use tutti_session::{DetachedSession, MainOutput, OutPort, Session};
 use tutti_units::SampleRate;
 
 /// `DECLICK` at the session's 48 kHz.
@@ -52,7 +52,9 @@ fn a_connect_fades_in_and_reaches_unity_at_declick() {
     assert_eq!(declick_frames(SampleRate::SR_48K).get(), SPAN);
     let mut s = session();
     let src = s.graph().add(ForkByClone(Const::mono(1.0)));
-    s.graph().connect(src.out(0), Root::output(0)).unwrap();
+    s.graph()
+        .connect(src.out(0), MainOutput::channel(0))
+        .unwrap();
     let _ = s.update();
 
     let got = frames(&mut s, SPAN + 64);
@@ -92,7 +94,7 @@ fn hard_connects_at_full_weight_at_once() {
     let mut s = session();
     let src = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
-        .connect(src.out(0), Root::output(0))
+        .connect(src.out(0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -117,7 +119,7 @@ fn a_disconnect_fades_out_inside_the_span_and_leaves_the_plan() {
     let mut s = session();
     let src = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
-        .connect(src.out(0), Root::output(0))
+        .connect(src.out(0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -125,14 +127,19 @@ fn a_disconnect_fades_out_inside_the_span_and_leaves_the_plan() {
 
     assert!(
         s.graph()
-            .disconnect(src.out(0), Root::output(0))
+            .disconnect(src.out(0), MainOutput::channel(0))
             .unwrap()
             .was_connected()
     );
-    assert!(s.graph_ref().sources(Root::output(0)).unwrap().is_empty());
+    assert!(
+        s.graph_ref()
+            .sources(MainOutput::channel(0))
+            .unwrap()
+            .is_empty()
+    );
     assert!(
         !s.graph()
-            .disconnect(src.out(0), Root::output(0))
+            .disconnect(src.out(0), MainOutput::channel(0))
             .unwrap()
             .was_connected(),
         "already on its way out"
@@ -169,14 +176,14 @@ fn disconnect_hard_cuts_and_an_unheard_edge_just_goes() {
     let mut s = session();
     let src = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
-        .connect(src.out(0), Root::output(0))
+        .connect(src.out(0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     let _ = s.update();
     assert!(frames(&mut s, 4).iter().all(|&x| x == 1.0));
     assert!(
         s.graph()
-            .disconnect(src.out(0), Root::output(0))
+            .disconnect(src.out(0), MainOutput::channel(0))
             .unwrap()
             .unfaded()
             .was_connected()
@@ -185,10 +192,12 @@ fn disconnect_hard_cuts_and_an_unheard_edge_just_goes() {
     assert!(frames(&mut s, 4).iter().all(|&x| x == 0.0), "no tail");
 
     // Connected and disconnected inside one edit: nothing was ever heard.
-    s.graph().connect(src.out(0), Root::output(0)).unwrap();
+    s.graph()
+        .connect(src.out(0), MainOutput::channel(0))
+        .unwrap();
     assert!(
         s.graph()
-            .disconnect(src.out(0), Root::output(0))
+            .disconnect(src.out(0), MainOutput::channel(0))
             .unwrap()
             .was_connected()
     );
@@ -203,15 +212,19 @@ fn a_reconnect_during_a_fade_out_rises_from_where_it_was() {
     let mut s = session();
     let src = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
-        .connect(src.out(0), Root::output(0))
+        .connect(src.out(0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     let _ = s.update();
     frames(&mut s, 2);
-    s.graph().disconnect(src.out(0), Root::output(0)).unwrap();
+    s.graph()
+        .disconnect(src.out(0), MainOutput::channel(0))
+        .unwrap();
     let _ = s.update();
     let down = frames(&mut s, 128);
-    s.graph().connect(src.out(0), Root::output(0)).unwrap();
+    s.graph()
+        .connect(src.out(0), MainOutput::channel(0))
+        .unwrap();
     let _ = s.update();
     let up = frames(&mut s, 8);
     assert!(
@@ -222,7 +235,7 @@ fn a_reconnect_during_a_fade_out_rises_from_where_it_was() {
     );
     assert!(up[7] > up[0], "rising");
     assert_eq!(
-        s.graph_ref().sources(Root::output(0)).unwrap(),
+        s.graph_ref().sources(MainOutput::channel(0)).unwrap(),
         [src.out(0)]
     );
 }
@@ -234,7 +247,7 @@ fn set_sources_and_remove_fade_what_leaves() {
     let mut s = session();
     let a = s.graph().add(ForkByClone(Const::mono(1.0)));
     let b = s.graph().add(ForkByClone(Const::mono(2.0)));
-    let sink = Root::output(0);
+    let sink = MainOutput::channel(0);
     s.graph()
         .set_sources(sink, [OutPort::new(a.erase(), 0)])
         .unwrap()

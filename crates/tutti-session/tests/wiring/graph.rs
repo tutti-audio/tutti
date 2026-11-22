@@ -17,8 +17,8 @@ use tutti_graph::{
 use tutti_nodes::testing::{Const, Osc, Through};
 use tutti_rt::Param;
 use tutti_session::{
-    DetachedSession, EventInPort, Feeder, InPort, OutPort, RemoveError, ReplaceRefused,
-    Replacement, Root, Session, SessionEvent, SessionNode, root_width,
+    DetachedSession, EventInPort, Feeder, InPort, MainInput, MainOutput, OutPort, RemoveError,
+    ReplaceRefused, Replacement, Session, SessionEvent, SessionNode, root_width,
 };
 use tutti_units::{Drive, Hz, Real, SampleRate, Samples};
 use tutti_units::{Latency, UnitParam};
@@ -266,7 +266,7 @@ fn every_source_reads_back_as_written() {
     for source in [
         OutPort::new(stereo, 1),
         OutPort::new(stereo, 0),
-        Root::input(0),
+        MainInput::channel(0),
     ] {
         graph
             .set_sources(InPort::new(sink, 0), [source])
@@ -279,11 +279,11 @@ fn every_source_reads_back_as_written() {
             "node port"
         );
         graph
-            .set_sources(Root::output(1), [source])
+            .set_sources(MainOutput::channel(1), [source])
             .unwrap()
             .unfaded();
         assert_eq!(
-            graph.sources(Root::output(1)).unwrap(),
+            graph.sources(MainOutput::channel(1)).unwrap(),
             held,
             "global output"
         );
@@ -318,17 +318,20 @@ fn every_setter_stores_silence_as_the_empty_set() {
     );
 
     graph
-        .set_sources(Root::output(0), [OutPort::new(src, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(src, 0)])
         .unwrap()
         .unfaded();
-    graph.set_sources(Root::output(0), []).unwrap().unfaded();
+    graph
+        .set_sources(MainOutput::channel(0), [])
+        .unwrap()
+        .unfaded();
     assert!(
         graph.testing().planned_compensation().is_some(),
         "set_sources of none after one"
     );
 
-    graph.connect(src, Root).unwrap().unfaded();
-    graph.disconnect(src, Root).unwrap();
+    graph.connect(src, MainOutput).unwrap().unfaded();
+    graph.disconnect(src, MainOutput).unwrap();
     assert!(
         graph.testing().planned_compensation().is_some(),
         "disconnected main bus"
@@ -339,7 +342,7 @@ fn every_setter_stores_silence_as_the_empty_set() {
         graph.testing().planned_compensation().is_some(),
         "widened root"
     );
-    assert_eq!(graph.sources(Root::output(3)).unwrap(), []);
+    assert_eq!(graph.sources(MainOutput::channel(3)).unwrap(), []);
 }
 
 /// `remove` says whether the node was there, so removing a node twice is a
@@ -436,7 +439,7 @@ fn an_edit_between_updates_is_committed_by_the_next() {
     let mut s = detached(1);
     let a = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(a, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(a, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -449,7 +452,7 @@ fn an_edit_between_updates_is_committed_by_the_next() {
 
     let b = s.graph().add(ForkByClone(Const::mono(2.0)));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(b, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(b, 0)])
         .unwrap()
         .unfaded();
     assert!(s.graph_ref().has_uncommitted_edits());
@@ -477,7 +480,7 @@ fn an_update_with_no_edit_sends_no_plan() {
     let mut s = detached(1);
     let a = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(a, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(a, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -525,7 +528,7 @@ fn a_replace_during_a_re_prepare_lands_on_a_later_update() {
     let mut side = s.graph().take_audio_side();
     let knob = s.graph().add(Params(Knob::new()));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(knob, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(knob, 0)])
         .unwrap()
         .unfaded();
     assert!(s.update().is_empty());
@@ -626,7 +629,7 @@ fn playing_knob() -> (
     let mut side = s.graph().take_audio_side();
     let knob = s.graph().add(Params(Knob::new()));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(knob, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(knob, 0)])
         .unwrap()
         .unfaded();
     assert!(s.update().is_empty());
@@ -914,11 +917,11 @@ fn every_param_write_path_reaches_a_fork() {
     let k0 = s.graph().add(Params(Knob::new()));
     let k1 = s.graph().add(Params(Knob::new()));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(k0, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(k0, 0)])
         .unwrap()
         .unfaded();
     s.graph()
-        .set_sources(Root::output(1), [OutPort::new(k1, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(k1, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -1029,7 +1032,7 @@ fn an_offline_session_renders_a_sines_analytic_rms() {
     let osc = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
     for c in 0..s.graph_ref().outputs() {
         s.graph()
-            .connect(osc.out(0), Root::output(c))
+            .connect(osc.out(0), MainOutput::channel(c))
             .unwrap()
             .unfaded();
     }
@@ -1070,11 +1073,11 @@ fn a_latent_branch_is_compensated_on_the_other_to_the_sample() {
         .unwrap()
         .unfaded();
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(osc, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(osc, 0)])
         .unwrap()
         .unfaded();
     s.graph()
-        .set_sources(Root::output(1), [OutPort::new(late, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(late, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -1230,7 +1233,7 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
     let (published, first) = Published::new();
     let node = s.graph().add(published);
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -1327,7 +1330,7 @@ fn a_removed_nodes_controls_live_until_its_fade_out_ends() {
     let (published, controls) = Published::new();
     let node = s.graph().add(published);
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -1366,7 +1369,7 @@ fn a_refused_parked_replace_leaves_the_next_ones_controls_under_the_key() {
     let (published, outgoing) = Published::new();
     let node = s.graph().add(published);
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
         .unwrap()
         .unfaded();
     assert!(s.update().is_empty());
@@ -1457,7 +1460,7 @@ fn the_update_frees_the_slots_a_graph_pool_retired() {
     let bare = s.graph().add(tutti_graph::Unforkable(bare));
     s.graph()
         .set_sources(
-            Root::output(0),
+            MainOutput::channel(0),
             [OutPort::new(pool, 0), OutPort::new(bare, 0)],
         )
         .unwrap()
@@ -1525,7 +1528,7 @@ fn a_streamed_voice_keeps_sounding_after_the_host_drops_its_handle() {
         .handle(&pool)
         .expect("the pool is in the graph")
         .clone();
-    s.graph().connect(pool, Root).unwrap().unfaded();
+    s.graph().connect(pool, MainOutput).unwrap().unfaded();
     host.add_streaming(
         SlotId(1),
         DiskVoice::from_reader(reader, VoiceWindow::from(tutti_units::Beat::new(0.0))),

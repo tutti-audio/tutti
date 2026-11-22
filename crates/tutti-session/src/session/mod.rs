@@ -73,7 +73,7 @@ impl<T: Ord + Clone + Debug + Send + Sync + 'static> AppKey for T {}
 /// use tutti_buffers::ChannelLayout;
 /// use tutti_buffers::InterleavedMut;
 /// use tutti_graph::ForkByClone;
-/// use tutti_session::{OutPort, Root, Session};
+/// use tutti_session::{OutPort, MainOutput, Session};
 /// use tutti_nodes::testing::Const;
 ///
 /// // One global output: the mono device takes it as it is, unfolded.
@@ -82,7 +82,7 @@ impl<T: Ord + Clone + Debug + Send + Sync + 'static> AppKey for T {}
 ///     .outputs(ChannelLayout::MONO).max_block(MaxBlock::of(Samples::new(64))).build()
 ///     .unwrap();
 /// let dc = session.graph().add(ForkByClone(Const::mono(0.5)));
-/// session.graph().set_sources(Root::output(0), [OutPort::new(dc, 0)]).unwrap().unfaded();
+/// session.graph().set_sources(MainOutput::channel(0), [OutPort::new(dc, 0)]).unwrap().unfaded();
 /// session.update();
 ///
 /// let mut block = [0.0f32; 64];

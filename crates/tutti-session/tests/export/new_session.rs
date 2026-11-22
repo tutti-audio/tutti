@@ -5,7 +5,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
-use tutti_session::{Bounce, BounceLatency, BounceTail, Range, Root, Session};
+use tutti_session::{Bounce, BounceLatency, BounceTail, MainOutput, Range, Session};
 use tutti_units::{SampleRate, Seconds};
 
 /// **A session from `Session::new` is a full session.** A constant wired to
@@ -18,7 +18,7 @@ fn a_session_from_new_bounces_a_node_and_renders() {
     let node = session
         .graph()
         .add(ForkByClone(Const::new(0.25, ChannelLayout::STEREO)));
-    session.graph().connect(node, Root).unwrap().unfaded();
+    session.graph().connect(node, MainOutput).unwrap().unfaded();
     let planes = bounced(
         &mut session,
         Bounce::new()

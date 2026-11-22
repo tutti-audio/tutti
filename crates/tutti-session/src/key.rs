@@ -4,8 +4,8 @@
 //! - [`Key<N>`] is a node's identity with its type: [`Graph::add`] returns one, and every call that takes a node takes
 //!   `impl Into<NodeKey>`, so a [`Key`] and an erased [`NodeKey`] both work.
 //! - [`OutPort`] and [`InPort`] name one channel: a node's output or input
-//!   port (`key.out(0)`, `key.input(1)`), a global input channel
-//!   ([`Root::input`]) or a global output channel ([`Root::output`]).
+//!   port (`key.out(0)`, `key.input(1)`), a main input channel
+//!   ([`MainInput::channel`]) or a main output channel ([`MainOutput::channel`]).
 //! - [`EventOutPort`] and [`EventInPort`] name one event port
 //!   (`key.events_out()`, `key.events_in_at(1)`); **event input 0 is the
 //!   node's main event input**, where the chase (`Node::chase`) delivers.
@@ -152,8 +152,8 @@ impl<N: ?Sized> From<Key<N>> for NodeKey {
 }
 
 /// One channel a signal leaves from: an output port of a node, or a channel
-/// of the graph's own global input. Made by [`Key::out`], [`OutPort::new`]
-/// and [`Root::input`].
+/// of the graph's main input. Made by [`Key::out`], [`OutPort::new`]
+/// and [`MainInput::channel`].
 ///
 /// The index is a port number of the node's declared ports, a count and not
 /// a unit.
@@ -198,15 +198,15 @@ impl OutPort {
     pub(crate) fn of_source(source: tutti_graph::PortSource) -> Option<Self> {
         match source {
             tutti_graph::PortSource::Node(p) => Some(Self::new(p.node, usize::from(p.port))),
-            tutti_graph::PortSource::Global(c) => Some(Root::input(usize::from(c))),
+            tutti_graph::PortSource::Global(c) => Some(MainInput::channel(usize::from(c))),
             tutti_graph::PortSource::Zero => None,
         }
     }
 }
 
 /// One channel a signal arrives at: an input port of a node, or a channel of
-/// the graph's global output (the root's). Made by [`Key::input`],
-/// [`InPort::new`] and [`Root::output`].
+/// the graph's main output. Made by [`Key::input`],
+/// [`InPort::new`] and [`MainOutput::channel`].
 ///
 /// The index is a port number of the node's declared ports, a count and not
 /// a unit.
@@ -251,31 +251,40 @@ impl InPort {
     pub(crate) fn of_sink(sink: tutti_graph::PortSink) -> Self {
         match sink {
             tutti_graph::PortSink::Port(p) => Self::new(p.node, usize::from(p.port)),
-            tutti_graph::PortSink::Output(c) => Root::output(usize::from(c)),
+            tutti_graph::PortSink::Output(c) => MainOutput::channel(usize::from(c)),
         }
     }
 }
 
-/// The graph's root: its global inputs and its global outputs.
+/// The graph's main output: the channels the device or the render reads.
 ///
-/// A value of its own rather than a method of [`Graph`], so naming a root
-/// channel borrows nothing: `s.graph().connect(osc.out(0), Root::output(0))`
+/// A value of its own rather than a method of [`Graph`], so naming a channel
+/// borrows nothing: `s.graph().connect(osc.out(0), MainOutput::channel(0))`
 /// is one borrow of the session. As an [`Inlet`] it is the sink of a node's
 /// main bus ([`Graph::connect`] channel by channel onto the outputs) and of a
-/// bus edge (folded to the topology the root was declared with).
+/// bus edge (folded to the topology the main output was declared with).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Root;
+pub struct MainOutput;
 
-impl Root {
-    /// Global output channel `index`, as a sink.
+impl MainOutput {
+    /// Main output channel `index`, as a sink.
     #[must_use]
-    pub const fn output(index: usize) -> InPort {
+    pub const fn channel(index: usize) -> InPort {
         InPort(InEnd::Output(index))
     }
+}
 
-    /// Global input channel `index` (a hardware or host input), as a source.
+/// The graph's main input: the hardware or host input channels.
+///
+/// A value of its own, like [`MainOutput`], so naming a channel borrows
+/// nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MainInput;
+
+impl MainInput {
+    /// Main input channel `index` (a hardware or host input), as a source.
     #[must_use]
-    pub const fn input(index: usize) -> OutPort {
+    pub const fn channel(index: usize) -> OutPort {
         OutPort(OutEnd::Input(index))
     }
 }
@@ -521,7 +530,7 @@ pub trait Wire: Sealed {
 pub struct ChannelWire;
 
 /// A node's whole main output bus into another node's main input bus, or the
-/// root's outputs, channel by channel: one edge per channel, each with a
+/// main output's channels, channel by channel: one edge per channel, each with a
 /// gain.
 #[derive(Clone, Copy, Debug)]
 pub struct MainBusWire;
@@ -554,28 +563,28 @@ pub trait Outlet: Sealed {
 
 /// Something a signal arrives at, for a wire of kind `W`: [`InPort`] (one
 /// channel), a [`Key`] or [`NodeKey`] (the node's whole main bus), a
-/// [`BusRef`], or the [`Root`]. Sealed.
+/// [`BusRef`], or the [`MainOutput`]. Sealed.
 pub trait Inlet<W: Wire>: Sealed {
     #[doc(hidden)]
     fn sink(self) -> W::In;
 }
 
-/// A main-bus sink: a node, or the root.
+/// A main-bus sink: a node, or the main output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MainSink {
     #[doc(hidden)]
     Node(NodeKey),
     #[doc(hidden)]
-    Root,
+    MainOutput,
 }
 
-/// A bus-edge sink: a node's input bus, or the root.
+/// A bus-edge sink: a node's input bus, or the main output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BusSink {
     #[doc(hidden)]
     Node(BusRef),
     #[doc(hidden)]
-    Root,
+    MainOutput,
 }
 
 impl Sealed for OutPort {}
@@ -584,7 +593,7 @@ impl Sealed for NodeKey {}
 impl<N: ?Sized> Sealed for Key<N> {}
 impl Sealed for BusSource {}
 impl Sealed for BusRef {}
-impl Sealed for Root {}
+impl Sealed for MainOutput {}
 impl Sealed for ChannelWire {}
 impl Sealed for MainBusWire {}
 impl Sealed for BusWire {}
@@ -834,9 +843,9 @@ impl<N: ?Sized> Inlet<MainBusWire> for Key<N> {
         MainSink::Node(self.node)
     }
 }
-impl Inlet<MainBusWire> for Root {
+impl Inlet<MainBusWire> for MainOutput {
     fn sink(self) -> MainSink {
-        MainSink::Root
+        MainSink::MainOutput
     }
 }
 impl Inlet<BusWire> for BusRef {
@@ -844,9 +853,9 @@ impl Inlet<BusWire> for BusRef {
         BusSink::Node(self)
     }
 }
-impl Inlet<BusWire> for Root {
+impl Inlet<BusWire> for MainOutput {
     fn sink(self) -> BusSink {
-        BusSink::Root
+        BusSink::MainOutput
     }
 }
 

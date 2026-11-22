@@ -21,7 +21,7 @@ use tutti_fixtures::block_on;
 use tutti_plugin_db::Hosting;
 use tutti_rt::LockExt;
 use tutti_session::InPort;
-use tutti_session::Root;
+use tutti_session::MainOutput;
 use tutti_session::{PluginChange, PluginEvent};
 
 use std::sync::atomic::Ordering;
@@ -174,7 +174,7 @@ fn request() -> Bounce<NodeKey, BufferMaster> {
 /// update: returns its node and its realtime latency.
 fn wired_probe(s: &mut Session) -> (NodeKey, Samples) {
     let node = add_probe(s);
-    s.graph().connect(node, Root).unwrap();
+    s.graph().connect(node, MainOutput).unwrap();
     let _ = s.update();
     // Told Realtime by that update (it was never told): the latency it
     // reports realtime.
@@ -260,7 +260,7 @@ fn a_plugin_added_mid_export_is_told_offline() {
     let dc = s
         .graph()
         .add(ForkByClone(tutti_nodes::testing::Const::mono(0.0)));
-    s.graph().connect(dc, Root).unwrap();
+    s.graph().connect(dc, MainOutput).unwrap();
     let _ = s.update();
     let job = s.bounce(request()).expect("starts");
     assert_eq!(s.render_mode(), RenderMode::Offline);
@@ -423,7 +423,7 @@ fn export_leftovers_drop_on_the_main_thread() {
             [tutti_session::OutPort::new(witness, 1)],
         )
         .unwrap();
-    s.graph().connect(probe, Root).unwrap();
+    s.graph().connect(probe, MainOutput).unwrap();
     let _ = s.update();
     drops.lock().unwrap().clear();
 
@@ -842,7 +842,7 @@ fn a_gave_up_node_is_revived_by_a_load_composed_from_its_state() {
     let (handle, node) = s
         .load_from(main, &catalog, &id, Hosting::OutOfProcess, None)
         .expect("the reference plugin loads");
-    s.graph().connect(node, Root).unwrap();
+    s.graph().connect(node, MainOutput).unwrap();
     let _ = s.update();
     let gain = gain_param(&s, node.erase());
     let target = s
@@ -1696,7 +1696,7 @@ fn a_cancelled_export_frees_the_token_and_the_forked_server() {
             [tutti_session::OutPort::new(probe, 1)],
         )
         .unwrap();
-    s.graph().connect(cancel, Root).unwrap();
+    s.graph().connect(cancel, MainOutput).unwrap();
     let _ = s.update();
     let live = servers();
 

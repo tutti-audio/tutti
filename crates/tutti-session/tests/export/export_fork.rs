@@ -37,7 +37,7 @@ use tutti_session::BufferMaster;
 use tutti_session::SessionNode;
 use tutti_session::{
     Bounce, BounceConfigError, BounceError, BounceLatency, DetachedSession, ExportClock, InPort,
-    OutPort, PreparedGraph, Range, Root, Session, Stem,
+    MainOutput, OutPort, PreparedGraph, Range, Session, Stem,
 };
 use tutti_units::{Amplitude, Hz, Q, SampleRate, Samples, Seconds, Tail};
 
@@ -143,11 +143,11 @@ fn chain(session: &mut DetachedSession) -> NodeKey {
         .unwrap()
         .unfaded();
     graph
-        .set_sources(Root::output(0), [OutPort::new(filter, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(filter, 0)])
         .unwrap()
         .unfaded();
     graph
-        .set_sources(Root::output(1), [OutPort::new(osc, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(osc, 0)])
         .unwrap()
         .unfaded();
     filter.erase()
@@ -289,7 +289,7 @@ impl Node for Late {
 fn latency_and_tail_come_from_the_graph() {
     let mut session = session();
     let late = session.graph().add(ForkByClone(Late { pos: 0 }));
-    session.graph().connect(late, Root).unwrap().unfaded();
+    session.graph().connect(late, MainOutput).unwrap().unfaded();
     let seconds = 0.01;
     let frames = (seconds * RATE) as usize;
     let planes = render(
@@ -308,7 +308,11 @@ fn latency_and_tail_come_from_the_graph() {
     let unknown = session.graph().add(Counter {
         n: Arc::new(AtomicU64::new(0)),
     });
-    session.graph().connect(unknown, Root).unwrap().unfaded();
+    session
+        .graph()
+        .connect(unknown, MainOutput)
+        .unwrap()
+        .unfaded();
     let planes = render(
         &mut session,
         buffers(seconds).tail(tutti_session::BounceTail::Graph {
@@ -331,7 +335,7 @@ fn latency_and_tail_come_from_the_graph() {
 fn the_trim_is_read_after_the_prepare_hook() {
     let mut session = session();
     let dc = session.graph().add(ForkByClone(Const::mono(0.5)));
-    session.graph().connect(dc, Root).unwrap().unfaded();
+    session.graph().connect(dc, MainOutput).unwrap().unfaded();
     let request = buffers(0.01).latency(BounceLatency::Graph).edit(Box::new(
         |prepared: PreparedGraph<'_>| {
             let key = prepared.fresh_key();
@@ -360,7 +364,7 @@ fn the_trim_is_read_after_the_prepare_hook() {
 fn a_prepare_hook_that_swaps_the_editor_fails_the_export() {
     let mut session = session();
     let dc = session.graph().add(ForkByClone(Const::mono(0.5)));
-    session.graph().connect(dc, Root).unwrap().unfaded();
+    session.graph().connect(dc, MainOutput).unwrap().unfaded();
     let request = buffers(0.01).edit(Box::new(|prepared: PreparedGraph<'_>| {
         let (other, _executor) = tutti_graph::Editor::new(Prepare::new(
             SampleRate::of(RATE),
@@ -408,7 +412,11 @@ fn a_graph_with_no_outputs_says_so() {
 fn an_unrenderable_stem_is_refused_by_name() {
     let mut session = session();
     let wired = session.graph().add(ForkByClone(Const::mono(0.5)));
-    session.graph().connect(wired, Root).unwrap().unfaded();
+    session
+        .graph()
+        .connect(wired, MainOutput)
+        .unwrap()
+        .unfaded();
     // `Sink::mono()` consumes one channel and produces nothing.
     let orphan = session.graph().add(ForkByClone(Sink::mono()));
     let loose = session.graph().add(ForkByClone(Const::mono(0.25)));
@@ -458,7 +466,7 @@ fn an_unrenderable_stem_is_refused_by_name() {
 fn graph_with_one_node_on() -> (DetachedSession, NodeKey) {
     let mut session = session();
     let node = session.graph().add(ForkByClone(Const::mono(0.5)));
-    session.graph().connect(node, Root).unwrap().unfaded();
+    session.graph().connect(node, MainOutput).unwrap().unfaded();
     (session, node.erase())
 }
 
@@ -648,7 +656,7 @@ fn live_playback_continues_unaffected_while_an_export_renders() {
     let node = session.graph().add(Counter {
         n: Arc::new(AtomicU64::new(0)),
     });
-    session.graph().connect(node, Root).unwrap().unfaded();
+    session.graph().connect(node, MainOutput).unwrap().unfaded();
     // Commit on this side, then hand the audio side to the "device".
     session.render_frame(InterleavedMut::one_frame(&mut [0.0, 0.0]).unwrap());
     let mut live = session.graph().take_audio_side();
@@ -712,7 +720,7 @@ fn an_unrouted_unforkable_node_does_not_refuse_a_master_export() {
     let mut session = session();
     let _mic = session.graph().add(tutti_graph::Unforkable(Mic));
     let dc = session.graph().add(ForkByClone(Const::mono(0.25)));
-    session.graph().connect(dc, Root).unwrap().unfaded();
+    session.graph().connect(dc, MainOutput).unwrap().unfaded();
     let planes = render(&mut session, buffers(0.01));
     assert!(planes[0].iter().all(|&s| s == 0.25));
 }
@@ -728,12 +736,12 @@ fn an_unforkable_node_refuses_the_export_by_key() {
     let osc = session.graph().add(ForkByClone(Osc::sine(Hz::new(220.0))));
     session
         .graph()
-        .set_sources(Root::output(0), [OutPort::new(mic, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(mic, 0)])
         .unwrap()
         .unfaded();
     session
         .graph()
-        .set_sources(Root::output(1), [OutPort::new(osc, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(osc, 0)])
         .unwrap()
         .unfaded();
 
@@ -771,7 +779,11 @@ fn a_live_audio_inlet_refuses_the_bounce_by_key() {
         SampleRate::of(RATE),
     );
     let inlet = session.graph().add_inlet(ring).expect("the graph's rate");
-    session.graph().connect(inlet, Root).unwrap().unfaded();
+    session
+        .graph()
+        .connect(inlet, MainOutput)
+        .unwrap()
+        .unfaded();
     match refused(&mut session, buffers(0.05)) {
         BounceError::NotForkable { node } => assert_eq!(node, inlet.erase()),
         other => panic!("expected the inlet's refusal by key, got {other:?}"),
@@ -937,12 +949,12 @@ fn an_export_does_not_wait_for_a_slow_fork_and_takes_no_later_edit() {
     let other = session.graph().add(ForkByClone(Const::mono(9.0)));
     session
         .graph()
-        .set_sources(Root::output(0), [OutPort::new(slow_node, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(slow_node, 0)])
         .unwrap()
         .unfaded();
     session
         .graph()
-        .set_sources(Root::output(1), [OutPort::new(level, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(level, 0)])
         .unwrap()
         .unfaded();
 
@@ -955,7 +967,11 @@ fn an_export_does_not_wait_for_a_slow_fork_and_takes_no_later_edit() {
     // Edits after the start: none reaches the fork.
     cell.store(0.25f32.to_bits(), Ordering::SeqCst);
     session.set(volume.to(Amplitude::new(0.25))).unwrap();
-    session.graph().connect(other, Root).unwrap().unfaded();
+    session
+        .graph()
+        .connect(other, MainOutput)
+        .unwrap()
+        .unfaded();
     let _ = release.send(());
 
     let rendered = block_on(job);
@@ -1078,12 +1094,12 @@ fn a_main_thread_only_fork_builds_and_drops_on_the_main_thread() {
     let slow_node = session.graph().add(node);
     session
         .graph()
-        .set_sources(Root::output(0), [OutPort::new(slow_node, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(slow_node, 0)])
         .unwrap()
         .unfaded();
     session
         .graph()
-        .set_sources(Root::output(1), [OutPort::new(pinned, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(pinned, 0)])
         .unwrap()
         .unfaded();
     drop(release); // the slow build goes straight through
@@ -1116,12 +1132,12 @@ fn a_dropped_export_job_drops_its_fork_on_the_main_thread() {
     let pinned = session.graph().add(PinnedNode(Arc::clone(&threads)));
     session
         .graph()
-        .set_sources(Root::output(0), [OutPort::new(pinned, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(pinned, 0)])
         .unwrap()
         .unfaded();
     session
         .graph()
-        .set_sources(Root::output(1), [OutPort::new(pinned, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(pinned, 0)])
         .unwrap()
         .unfaded();
 
@@ -1210,12 +1226,12 @@ fn a_fork_build_that_fails_names_its_node_and_drops_on_the_main_thread() {
     let broken = session.graph().add(Broken);
     session
         .graph()
-        .set_sources(Root::output(0), [OutPort::new(pinned, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(pinned, 0)])
         .unwrap()
         .unfaded();
     session
         .graph()
-        .set_sources(Root::output(1), [OutPort::new(broken, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(broken, 0)])
         .unwrap()
         .unfaded();
 
@@ -1265,7 +1281,11 @@ fn a_prepare_edit_that_never_runs_drops_on_the_main_thread() {
     // A build that fails.
     let mut session = session();
     let broken = session.graph().add(Broken);
-    session.graph().connect(broken, Root).unwrap().unfaded();
+    session
+        .graph()
+        .connect(broken, MainOutput)
+        .unwrap()
+        .unfaded();
     let drops: Arc<Mutex<Vec<ThreadId>>> = Arc::default();
     let job = session
         .bounce(witnessed(&drops))
@@ -1280,7 +1300,7 @@ fn a_prepare_edit_that_never_runs_drops_on_the_main_thread() {
     // A job dropped before it ran.
     let mut session = self::session();
     let dc = session.graph().add(ForkByClone(Const::mono(0.5)));
-    session.graph().connect(dc, Root).unwrap().unfaded();
+    session.graph().connect(dc, MainOutput).unwrap().unfaded();
     let drops: Arc<Mutex<Vec<ThreadId>>> = Arc::default();
     let job = session
         .bounce(witnessed(&drops))

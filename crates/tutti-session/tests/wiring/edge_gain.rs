@@ -13,8 +13,8 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::NodeKey;
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    ChannelEdge, DeclarationError, GainTarget, GainTargetError, InPort, OutPort, Replacement, Root,
-    Session, SetRefusal, ValueErrorKind,
+    ChannelEdge, DeclarationError, GainTarget, GainTargetError, InPort, MainOutput, OutPort,
+    Replacement, Session, SetRefusal, ValueErrorKind,
 };
 use tutti_units::{Amplitude, Samples};
 
@@ -60,7 +60,7 @@ fn rig() -> Rig {
     let a = g.add(ForkByClone(Const::mono(A)));
     let b = g.add(ForkByClone(Const::mono(B)));
     let sink = g.add(ForkByClone(Through::mono()));
-    g.set_sources(Root::output(0), [OutPort::new(sink, 0)])
+    g.set_sources(MainOutput::channel(0), [OutPort::new(sink, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -283,32 +283,32 @@ fn add_output_source_weighted_weights_the_channel() {
     let mut r = rig();
     let (a, b) = (r.a, r.b);
     r.s.graph()
-        .connect(node(a), Root::output(1))
+        .connect(node(a), MainOutput::channel(1))
         .unwrap()
         .unfaded()
         .gain(amp(0.5))
         .unwrap();
     r.s.graph()
-        .connect(node(b), Root::output(1))
+        .connect(node(b), MainOutput::channel(1))
         .unwrap()
         .unfaded()
         .gain(amp(2.0))
         .unwrap();
     assert_eq!(
-        r.s.graph_ref().sources(Root::output(1)).unwrap(),
+        r.s.graph_ref().sources(MainOutput::channel(1)).unwrap(),
         [node(a), node(b)]
     );
     let weight = |r: &Rig, from| {
         r.s.graph_ref()
-            .gain_target(node(from), Root::output(1))
+            .gain_target(node(from), MainOutput::channel(1))
             .expect("a lane")
     };
     assert_eq!(r.s.get(weight(&r, a)).unwrap(), amp(0.5));
     assert!(all_are(&settled(&mut r.s, 1), (0.0 + 0.5 * A) + 2.0 * B));
     r.s.set(weight(&r, b).to(amp(1.0))).unwrap();
     assert!(all_are(&settled(&mut r.s, 1), (0.0 + 0.5 * A) + 1.0 * B));
-    assert!(ChannelEdge::new(node(a), Root::output(1)).clear_gain(r.s.graph()));
-    assert!(ChannelEdge::new(node(b), Root::output(1)).clear_gain(r.s.graph()));
+    assert!(ChannelEdge::new(node(a), MainOutput::channel(1)).clear_gain(r.s.graph()));
+    assert!(ChannelEdge::new(node(b), MainOutput::channel(1)).clear_gain(r.s.graph()));
     assert!(all_are(&settled(&mut r.s, 1), A + B));
 }
 
@@ -364,43 +364,43 @@ fn removing_a_source_drops_its_weight() {
     assert!(all_are(&settled(&mut r.s, 0), B));
 
     r.s.graph()
-        .connect(node(a), Root::output(1))
+        .connect(node(a), MainOutput::channel(1))
         .unwrap()
         .unfaded()
         .gain(amp(0.5))
         .unwrap();
     r.s.graph()
-        .connect(node(b), Root::output(1))
+        .connect(node(b), MainOutput::channel(1))
         .unwrap()
         .unfaded();
     assert!(all_are(&settled(&mut r.s, 1), (0.0 + 0.5 * A) + B));
     r.s.graph()
-        .disconnect(node(a), Root::output(1))
+        .disconnect(node(a), MainOutput::channel(1))
         .unwrap()
         .unfaded();
     assert_eq!(
-        r.s.graph_ref().gain_target(node(a), Root::output(1)),
+        r.s.graph_ref().gain_target(node(a), MainOutput::channel(1)),
         Err(GainTargetError::NoLane(ChannelEdge::new(
             node(a),
-            Root::output(1)
+            MainOutput::channel(1)
         )))
     );
     assert!(all_are(&settled(&mut r.s, 1), B));
     r.s.graph()
-        .connect(node(a), Root::output(1))
+        .connect(node(a), MainOutput::channel(1))
         .unwrap()
         .unfaded()
         .gain(amp(0.5))
         .unwrap();
     r.s.graph()
-        .set_sources(Root::output(1), [node(b)])
+        .set_sources(MainOutput::channel(1), [node(b)])
         .unwrap()
         .unfaded();
     assert_eq!(
-        r.s.graph_ref().gain_target(node(a), Root::output(1)),
+        r.s.graph_ref().gain_target(node(a), MainOutput::channel(1)),
         Err(GainTargetError::NoLane(ChannelEdge::new(
             node(a),
-            Root::output(1)
+            MainOutput::channel(1)
         )))
     );
     assert!(all_are(&settled(&mut r.s, 1), B));

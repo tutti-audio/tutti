@@ -16,7 +16,7 @@
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::signal::rms;
-use tutti_session::Root;
+use tutti_session::MainOutput;
 
 use crate::common::{note, play};
 
@@ -55,7 +55,9 @@ fn rig() -> (Session, NodeKey) {
     let synth = s.graph().add(unit);
     // The dry pair; the unit's other outputs are sends.
     for c in 0..2 {
-        s.graph().connect(synth.out(c), Root::output(c)).unwrap();
+        s.graph()
+            .connect(synth.out(c), MainOutput::channel(c))
+            .unwrap();
     }
     let _ = s.update();
     (s, synth.erase())

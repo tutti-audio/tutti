@@ -18,14 +18,14 @@
 //! use tutti_buffers::InterleavedMut;
 //! use tutti_graph::ForkByClone;
 //! use tutti_nodes::testing::Osc;
-//! use tutti_session::{Root, Session};
+//! use tutti_session::{MainOutput, Session};
 //!
 //! let mut s = Session::builder()
 //!     .outputs_floor(ChannelLayout::MONO)
 //!     .outputs(ChannelLayout::MONO).max_block(MaxBlock::of(Samples::new(512))).build()
 //!     .unwrap();
 //! let osc = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
-//! s.graph().connect(osc, Root).unwrap();
+//! s.graph().connect(osc, MainOutput).unwrap();
 //! s.update(); // commits: the graph was edited
 //!
 //! let mut block = vec![0.0f32; 512];
@@ -219,8 +219,8 @@ pub use input::{Input, InputConfig, InputOpener, OpenedInput};
 pub use instrument::{AnyNode, InstrumentHandle, NotInstrument};
 pub use key::{
     BusSink, BusWire, ChannelEdge, ChannelWire, Connection, Disconnection, EventEdge, EventInPort,
-    EventOutPort, EventTapPort, EventWire, Fanin, InPort, Inlet, Key, MainBusWire, MainSink,
-    OutPort, Outlet, Removal, Root, RootDeclaration, SetSources, Weighted, Wire,
+    EventOutPort, EventTapPort, EventWire, Fanin, InPort, Inlet, Key, MainBusWire, MainInput,
+    MainOutput, MainSink, OutPort, Outlet, Removal, RootDeclaration, SetSources, Weighted, Wire,
 };
 #[cfg(any(feature = "capture", feature = "midi"))]
 pub use latency::{Start, TakeLatency, Trim};

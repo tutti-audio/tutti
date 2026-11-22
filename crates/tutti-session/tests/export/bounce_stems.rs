@@ -20,7 +20,7 @@ use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
 use tutti_session::{
     Bounce, BounceConfigError, BounceError, BounceLatency, BounceTail, DetachedSession,
-    ExportClock, InPort, OutPort, PreparedGraph, Range, Root, Session, Stem, StemGain,
+    ExportClock, InPort, MainOutput, OutPort, PreparedGraph, Range, Session, Stem, StemGain,
 };
 use tutti_session::{Bounced, BufferMaster, Master};
 use tutti_units::{Db, SampleRate, Samples, Seconds};
@@ -146,11 +146,11 @@ fn stems_are_aligned_with_the_master_and_sum_to_it() {
     for channel in 0..2 {
         session
             .graph()
-            .connect(OutPort::new(steady, 0), Root::output(channel))
+            .connect(OutPort::new(steady, 0), MainOutput::channel(channel))
             .unwrap();
         session
             .graph()
-            .connect(OutPort::new(late, 0), Root::output(channel))
+            .connect(OutPort::new(late, 0), MainOutput::channel(channel))
             .unwrap();
     }
     let frames = 2_000;
@@ -221,14 +221,14 @@ fn a_stem_is_the_nodes_own_output_and_not_what_is_downstream() {
         .graph()
         .set_sources(InPort::new(half, 0), [OutPort::new(source, 0)])
         .unwrap();
-    session.graph().connect(half, Root).unwrap();
+    session.graph().connect(half, MainOutput).unwrap();
     let wide = session
         .graph()
         .add(ForkByClone(Const::frame(&[0.25, -0.5, 0.75])));
     for channel in 0..2 {
         session
             .graph()
-            .connect(OutPort::new(wide, channel), Root::output(channel))
+            .connect(OutPort::new(wide, channel), MainOutput::channel(channel))
             .unwrap();
     }
 
@@ -273,7 +273,7 @@ fn a_stem_that_cannot_be_placed_is_refused_not_truncated() {
     for channel in 0..2 {
         session
             .graph()
-            .connect(OutPort::new(wide, channel), Root::output(channel))
+            .connect(OutPort::new(wide, channel), MainOutput::channel(channel))
             .unwrap();
     }
     let to_mono = Stem::new(wide.erase(), dir.path().join("mono.wav"), float_wav())
@@ -309,7 +309,7 @@ fn every_target_has_the_same_length_and_a_stem_its_own_format() {
     let dir = tempfile::tempdir().unwrap();
     let mut session = session();
     let node = session.graph().add(ForkByClone(Const::mono(0.5)));
-    session.graph().connect(node, Root).unwrap();
+    session.graph().connect(node, MainOutput).unwrap();
     let master = dir.path().join("master.wav");
     let stem = dir.path().join("stem.wav");
     let done = bounced(
@@ -351,11 +351,11 @@ fn shared_gain_keeps_the_balance_and_each_measures_its_own() {
     for channel in 0..2 {
         session
             .graph()
-            .connect(OutPort::new(loud, 0), Root::output(channel))
+            .connect(OutPort::new(loud, 0), MainOutput::channel(channel))
             .unwrap();
         session
             .graph()
-            .connect(OutPort::new(quiet, 0), Root::output(channel))
+            .connect(OutPort::new(quiet, 0), MainOutput::channel(channel))
             .unwrap();
     }
     let target = Normalize::peak(Db::new(-6.0));
@@ -434,7 +434,7 @@ fn a_request_that_cannot_work_is_refused_by_name() {
     let path = |n: &str| dir.path().join(n);
     let mut session = session();
     let node = session.graph().add(ForkByClone(Const::mono(0.5)));
-    session.graph().connect(node, Root).unwrap();
+    session.graph().connect(node, MainOutput).unwrap();
     fn why<M: Master>(session: &mut DetachedSession, b: Bounce<NodeKey, M>) -> BounceConfigError {
         match refused(session, b) {
             BounceError::Config(why) => why,
@@ -484,7 +484,7 @@ fn a_request_that_cannot_work_is_refused_by_name() {
 fn a_host_resolves_its_own_names_once() {
     let mut session = session();
     let kick = session.graph().add(ForkByClone(Const::mono(0.5)));
-    session.graph().connect(kick, Root).unwrap();
+    session.graph().connect(kick, MainOutput).unwrap();
     let keys: HashMap<&str, _> = HashMap::from([("kick", kick.erase())]);
 
     let named = |name| Bounce::<&str>::new().stem_with(Stem::buffers(name));
@@ -507,7 +507,7 @@ fn a_host_resolves_its_own_names_once() {
 fn a_node_the_edit_removed_is_refused_where_the_taps_open() {
     let mut session = session();
     let node = session.graph().add(ForkByClone(Const::mono(0.5)));
-    session.graph().connect(node, Root).unwrap();
+    session.graph().connect(node, MainOutput).unwrap();
     let b = bounce(0.01)
         .stem_with(Stem::buffers(node.erase()))
         .edit(Box::new(move |prepared: PreparedGraph<'_>| {

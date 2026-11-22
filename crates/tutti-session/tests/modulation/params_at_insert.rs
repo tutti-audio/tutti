@@ -20,7 +20,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_nodes::{DistortionConfig, DistortionNode, ShapeKind};
 use tutti_rt::ParamCell;
-use tutti_session::{OutPort, ParamRef, Replacement, Root, RouteSpec, Session};
+use tutti_session::{MainOutput, OutPort, ParamRef, Replacement, RouteSpec, Session};
 use tutti_units::{Depth, Drive, UnitParam};
 
 use common::probe::ProbeUnit;
@@ -105,7 +105,7 @@ fn a_crossfade_hands_the_lane_the_incoming_nodes_cell() {
     let old = outgoing.knob();
     let node = s.graph().add(outgoing);
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
         .unwrap();
     modulate_drive(&mut s, node.erase());
     assert_eq!(knob(&s, node.erase()), Some(BASE), "precondition: the lane");

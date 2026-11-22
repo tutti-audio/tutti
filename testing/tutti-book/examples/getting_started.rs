@@ -10,7 +10,9 @@ use std::path::Path;
 use futures_lite::future::block_on;
 use std::future::IntoFuture as _;
 use tutti::nodes::{OscillatorConfig, OscillatorNode, OscillatorWave};
-use tutti::{Amplitude, Bounce, ChannelLayout, Format, Hz, Root, SampleRate, Seconds, Session};
+use tutti::{
+    Amplitude, Bounce, ChannelLayout, Format, Hz, MainOutput, SampleRate, Seconds, Session,
+};
 // ANCHOR_END: imports
 
 // ANCHOR: session
@@ -25,8 +27,12 @@ fn tone() -> Result<Session, tutti::Error> {
     ));
 
     // One mono output, heard in the left and the right channel.
-    session.graph().connect(sine.out(0), Root::output(0))?;
-    session.graph().connect(sine.out(0), Root::output(1))?;
+    session
+        .graph()
+        .connect(sine.out(0), MainOutput::channel(0))?;
+    session
+        .graph()
+        .connect(sine.out(0), MainOutput::channel(1))?;
     Ok(session)
 }
 // ANCHOR_END: session

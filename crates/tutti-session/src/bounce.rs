@@ -2240,7 +2240,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{InPort, Phase, PhaseCx, Root};
+    use crate::{InPort, MainOutput, Phase, PhaseCx};
     use tutti_export::Stage;
     use tutti_fixtures::block_on;
     use tutti_graph::ForkByClone;
@@ -2262,7 +2262,7 @@ mod tests {
         let dc = session
             .graph()
             .add(ForkByClone(tutti_nodes::testing::Const::mono(0.0)));
-        session.graph().connect(dc, Root).unwrap();
+        session.graph().connect(dc, MainOutput).unwrap();
         session
     }
 
@@ -2289,7 +2289,7 @@ mod tests {
         let half = session
             .graph()
             .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
-        session.graph().connect(half, Root).unwrap();
+        session.graph().connect(half, MainOutput).unwrap();
         assert!(session.graph().has_uncommitted_edits(), "no update has run");
         let out = planes(bounced(&mut session, short()));
         assert!(out[0].iter().all(|&s| s == 0.5), "the edit is heard");
@@ -2567,7 +2567,7 @@ mod tests {
             .graph()
             .set_sources(InPort::new(lim, 0), [crate::OutPort::new(dc, 0)])
             .unwrap();
-        session.graph().connect(lim, Root).unwrap();
+        session.graph().connect(lim, MainOutput).unwrap();
         assert_eq!(
             session.graph_ref().node_latency(lim),
             Ok(Samples::new(LATENCY))

@@ -21,8 +21,8 @@ use futures_lite::future::block_on;
 use std::future::IntoFuture as _;
 use tutti::graph::{ForkByClone, Node};
 use tutti::{
-    Amplitude, Bounce, ChannelLayout, ChannelTopology, Format, Hz, Interleaved, Pcm, Range, Root,
-    SampleRate, Seconds, Session,
+    Amplitude, Bounce, ChannelLayout, ChannelTopology, Format, Hz, Interleaved, MainOutput, Pcm,
+    Range, SampleRate, Seconds, Session,
 };
 use tutti_measure::{LoudnessConfig, measure_loudness};
 use tutti_nodes::testing::{Const, Osc};
@@ -34,7 +34,7 @@ const RATE: SampleRate = SampleRate::SR_48K;
 fn session_with(node: impl Node + Clone + 'static) -> Session {
     let mut session = Session::new(RATE).expect("a session builds");
     let node = session.graph().add(ForkByClone(node));
-    session.graph().connect(node, Root).unwrap();
+    session.graph().connect(node, MainOutput).unwrap();
     session
 }
 

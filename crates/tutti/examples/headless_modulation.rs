@@ -20,8 +20,8 @@ use tutti::graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti::modulation::{Follower, Lfo};
 use tutti::nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti::{
-    ChannelLayout, Depth, DepthTarget, Error, Hz, InPort, InterleavedMut, MaxBlock, OutPort, Q,
-    Root, RouteSpec, SampleRate, Samples, Session, SessionEvent,
+    ChannelLayout, Depth, DepthTarget, Error, Hz, InPort, InterleavedMut, MainOutput, MaxBlock,
+    OutPort, Q, RouteSpec, SampleRate, Samples, Session, SessionEvent,
 };
 use tutti_nodes::testing::Osc;
 
@@ -97,7 +97,7 @@ fn main() -> Result<(), Error> {
         .set_sources(InPort::new(filter, 0), [OutPort::new(saw, 0)])
         .unwrap();
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(filter, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(filter, 0)])
         .unwrap();
 
     let cutoff = filter.cutoff();

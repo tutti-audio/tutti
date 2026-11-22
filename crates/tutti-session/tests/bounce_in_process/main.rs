@@ -18,7 +18,7 @@ use tutti_export::Produced;
 use tutti_plugin_db::Hosting;
 use tutti_plugin_types::PluginRef;
 use tutti_session::{
-    Bounce, BounceLatency, BounceTail, ExportClock, PeerState, Range, Root, Session, Stem,
+    Bounce, BounceLatency, BounceTail, ExportClock, MainOutput, PeerState, Range, Session, Stem,
 };
 use tutti_tempo::TempoMap;
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
@@ -61,7 +61,7 @@ fn an_in_process_instrument_without_a_live_render_mode_bounces_its_clip() {
     let node = session
         .load_plugin_blocking(main, request)
         .expect("the shared plugin loads in process");
-    session.graph().connect(node, Root).unwrap();
+    session.graph().connect(node, MainOutput).unwrap();
     let on = tutti_midi_runtime::TimedMidiEvent::new(
         Beat::new(1.0),
         Message::midi2(

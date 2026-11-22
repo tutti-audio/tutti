@@ -9,7 +9,7 @@ use crate::param_reads::ParamReads as _;
 use std::time::Duration;
 use tutti_buffers::PlanesMut;
 use tutti_platform::Instant;
-use tutti_session::Root;
+use tutti_session::MainOutput;
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
@@ -42,7 +42,7 @@ fn session_with_probe() -> (DetachedSession, NodeKey) {
             Spec::new(PluginRef::file(vst2_probe())),
         )
         .expect("the in-process VST2 loads");
-    s.graph().connect(node, Root).unwrap();
+    s.graph().connect(node, MainOutput).unwrap();
     let _ = s.update();
     assert!(
         s.plugin_view(node).is_ok_and(|p| p.params().is_ready()),

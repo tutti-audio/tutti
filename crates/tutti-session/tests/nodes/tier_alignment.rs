@@ -29,7 +29,7 @@ use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
 use tutti_sampler::{DiskVoice, MemorySource, StreamPhase, StreamStart, VoiceWindow};
-use tutti_session::{InPort, OutPort, Root, Session};
+use tutti_session::{InPort, MainOutput, OutPort, Session};
 use tutti_units::{Beat, Db, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
@@ -94,7 +94,7 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
         .set_sources(InPort::new(eff, 0), [OutPort::new(src, 0)])
         .unwrap();
     s.graph()
-        .set_sources(Root::output(2), [OutPort::new(eff, 0)])
+        .set_sources(MainOutput::channel(2), [OutPort::new(eff, 0)])
         .unwrap();
 
     // The voice, on outputs 0 and 1.
@@ -125,10 +125,10 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
         }
     };
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(voice, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(voice, 0)])
         .unwrap();
     s.graph()
-        .set_sources(Root::output(1), [OutPort::new(voice, 1)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(voice, 1)])
         .unwrap();
     let _ = s.update();
 

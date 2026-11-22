@@ -5,7 +5,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{ForkByClone, Params};
 use tutti_rt::Param;
-use tutti_session::{Offline, Root, Session, Workers};
+use tutti_session::{MainOutput, Offline, Session, Workers};
 use tutti_units::{Amplitude, Samples};
 
 #[path = "../support/f64_nodes.rs"]
@@ -38,7 +38,7 @@ fn render(workers: Workers, lanes: usize) -> Vec<f64> {
             .unwrap()
             .unfaded();
         s.graph()
-            .connect(gain.out(0), Root::output(0))
+            .connect(gain.out(0), MainOutput::channel(0))
             .unwrap()
             .unfaded();
         gains.push(gain);
@@ -69,7 +69,7 @@ fn an_f64_session_renders_a_figure_f32_rounds_away_through_a_set_gain() {
         .unwrap()
         .unfaded();
     s.graph()
-        .connect(gain.out(0), Root::output(0))
+        .connect(gain.out(0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     let _ = s.update();

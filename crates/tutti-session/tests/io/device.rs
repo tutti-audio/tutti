@@ -14,8 +14,8 @@ use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
 use tutti_session::{
-    Backoff, DeviceEvent, DevicePolicy, DeviceRestart, DeviceWatch, InPort, LiveSession, OutPort,
-    Phase, PhaseCx, RestartOutcome, Root, Session, SessionEvent, Workers,
+    Backoff, DeviceEvent, DevicePolicy, DeviceRestart, DeviceWatch, InPort, LiveSession,
+    MainOutput, OutPort, Phase, PhaseCx, RestartOutcome, Session, SessionEvent, Workers,
 };
 use tutti_units::{Db, Hz, SampleRate, Samples};
 
@@ -43,7 +43,7 @@ fn the_session_publishes_the_meter_and_taps_its_callback_feeds() {
         .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
     session
         .graph()
-        .set_sources(Root::output(0), [OutPort::new(dc, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(dc, 0)])
         .unwrap()
         .unfaded();
     let mut tap = session
@@ -120,11 +120,11 @@ fn a_rerate_keeps_the_published_compensation_in_step_with_the_plan() {
         .unwrap()
         .unfaded();
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(osc, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(osc, 0)])
         .unwrap()
         .unfaded();
     s.graph()
-        .set_sources(Root::output(1), [OutPort::new(lim, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(lim, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -1025,7 +1025,7 @@ fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a
         .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
     session
         .graph()
-        .set_sources(Root::output(0), [OutPort::new(dc, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(dc, 0)])
         .unwrap()
         .unfaded();
     let _ = session.update();
@@ -1109,7 +1109,7 @@ fn a_panic_in_the_render_is_a_device_fault_event() {
     let node = session.graph().add(ForkByClone(AlwaysPanics));
     session
         .graph()
-        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
         .unwrap()
         .unfaded();
     let _ = session.update();

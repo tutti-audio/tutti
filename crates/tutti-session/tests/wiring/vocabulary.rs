@@ -1,5 +1,5 @@
 //! The wiring vocabulary on typed keys and ports (doc 013, "The session
-//! graph's surface"): what `connect` takes and refuses, `Root`, a connection's
+//! graph's surface"): what `connect` takes and refuses, `MainOutput`, a connection's
 //! gain, and `disconnect`.
 //!
 //! Every figure is analytic: constants of exactly representable values.
@@ -9,7 +9,8 @@ use tutti_buffers::{FoldError, InterleavedMut};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    ChannelEdge, ConnectError, DeclarationError, GainTargetError, OutPort, Root, Session,
+    ChannelEdge, ConnectError, DeclarationError, GainTargetError, MainInput, MainOutput, OutPort,
+    Session,
 };
 use tutti_units::Amplitude;
 
@@ -33,12 +34,12 @@ fn first_frame(s: &mut Session) -> [f32; 2] {
 fn a_main_bus_feeds_the_roots_channels_in_order() {
     let mut s = offline();
     let stereo = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.5])));
-    s.graph().connect(stereo, Root).unwrap().unfaded();
+    s.graph().connect(stereo, MainOutput).unwrap().unfaded();
     assert_eq!(first_frame(&mut s), [0.25, 0.5]);
 
     let mut s = offline();
     let mono = s.graph().add(ForkByClone(Const::mono(0.5)));
-    s.graph().connect(mono, Root).unwrap().unfaded();
+    s.graph().connect(mono, MainOutput).unwrap().unfaded();
     assert_eq!(first_frame(&mut s), [0.5, 0.5]);
 }
 
@@ -50,7 +51,7 @@ fn a_mono_bus_feeds_both_channels_of_a_declared_stereo_root() {
     s.declare_root_topology(Some(ChannelTopology::default_for(ChannelLayout::STEREO)))
         .expect("a stereo root");
     let mono = s.graph().add(ForkByClone(Const::mono(0.5)));
-    s.graph().connect(mono, Root).unwrap().unfaded();
+    s.graph().connect(mono, MainOutput).unwrap().unfaded();
     assert_eq!(first_frame(&mut s), [0.5, 0.5]);
 }
 
@@ -65,7 +66,7 @@ fn a_bus_with_no_place_on_the_root_is_refused() {
     let mono = s.graph().add(ForkByClone(Const::mono(0.5)));
     let _ = s.update();
     assert!(matches!(
-        s.graph().connect(mono, Root).err(),
+        s.graph().connect(mono, MainOutput).err(),
         Some(ConnectError::RootFold { from, cause: FoldError::Unassigned { .. } })
             if from == mono.erase()
     ));
@@ -81,7 +82,7 @@ fn a_bus_wider_than_the_root_is_refused() {
     let _ = s.update();
     let root_width = s.graph_ref().outputs();
     assert_eq!(
-        s.graph().connect(wide, Root).err(),
+        s.graph().connect(wide, MainOutput).err(),
         Some(ConnectError::RootNarrow {
             from: wide.erase(),
             from_width: 3,
@@ -109,12 +110,12 @@ fn a_port_that_is_not_there_is_refused() {
         Some(ConnectError::NoSuchInPort(through.input(1)))
     );
     assert_eq!(
-        g.connect(src.out(0), Root::output(9)).err(),
-        Some(ConnectError::NoSuchInPort(Root::output(9)))
+        g.connect(src.out(0), MainOutput::channel(9)).err(),
+        Some(ConnectError::NoSuchInPort(MainOutput::channel(9)))
     );
     assert_eq!(
-        g.connect(Root::input(3), through.input(0)).err(),
-        Some(ConnectError::NoSuchOutPort(Root::input(3)))
+        g.connect(MainInput::channel(3), through.input(0)).err(),
+        Some(ConnectError::NoSuchOutPort(MainInput::channel(3)))
     );
     assert!(!g.has_uncommitted_edits(), "nothing was stored");
 }
@@ -127,13 +128,13 @@ fn a_connections_gain_weights_the_edge_it_added() {
     let mut s = offline();
     let src = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph()
-        .connect(src.out(0), Root::output(0))
+        .connect(src.out(0), MainOutput::channel(0))
         .unwrap()
         .unfaded()
         .gain(Amplitude::new(0.5))
         .unwrap();
     assert_eq!(first_frame(&mut s), [0.25, 0.0]);
-    let edge = ChannelEdge::new(src.out(0), Root::output(0));
+    let edge = ChannelEdge::new(src.out(0), MainOutput::channel(0));
     let gain = s
         .graph_ref()
         .gain_target(edge.source(), edge.sink())
@@ -149,7 +150,7 @@ fn a_connections_gain_weights_the_edge_it_added() {
     let other = s.graph().add(ForkByClone(Const::mono(0.125)));
     assert_eq!(
         s.graph()
-            .connect(other.out(0), Root::output(1))
+            .connect(other.out(0), MainOutput::channel(1))
             .unwrap()
             .unfaded()
             .gain(Amplitude::new(f64::NAN))
@@ -157,7 +158,10 @@ fn a_connections_gain_weights_the_edge_it_added() {
         Some(DeclarationError::NotFinite)
     );
     assert!(
-        s.graph_ref().sources(Root::output(1)).unwrap().is_empty(),
+        s.graph_ref()
+            .sources(MainOutput::channel(1))
+            .unwrap()
+            .is_empty(),
         "the edge the refused gain came with is gone"
     );
 }
@@ -169,7 +173,7 @@ fn disconnect_removes_one_edge_and_an_empty_set_sources_the_rest() {
     let mut s = offline();
     let a = s.graph().add(ForkByClone(Const::mono(0.5)));
     let b = s.graph().add(ForkByClone(Const::mono(0.25)));
-    let sink = Root::output(0);
+    let sink = MainOutput::channel(0);
     s.graph().connect(a.out(0), sink).unwrap().unfaded();
     s.graph().connect(b.out(0), sink).unwrap().unfaded();
     assert_eq!(first_frame(&mut s), [0.75, 0.0]);
@@ -242,11 +246,14 @@ fn a_main_bus_disconnects_what_it_connected() {
 fn a_key_and_its_erasure_are_one_node() {
     let mut s = offline();
     let src = s.graph().add(ForkByClone(Const::mono(0.5)));
-    s.graph().connect(src, Root).unwrap().unfaded();
+    s.graph().connect(src, MainOutput).unwrap().unfaded();
     let _ = s.update();
-    s.graph().connect(src.erase(), Root).unwrap().unfaded();
     s.graph()
-        .connect(OutPort::new(src.erase(), 0), Root::output(0))
+        .connect(src.erase(), MainOutput)
+        .unwrap()
+        .unfaded();
+    s.graph()
+        .connect(OutPort::new(src.erase(), 0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     assert!(
@@ -254,7 +261,7 @@ fn a_key_and_its_erasure_are_one_node() {
         "the same edge, three spellings"
     );
     assert_eq!(
-        s.graph_ref().sources(Root::output(0)).unwrap(),
+        s.graph_ref().sources(MainOutput::channel(0)).unwrap(),
         [src.out(0)]
     );
 }

@@ -958,7 +958,7 @@ mod process {
 fn dropped_events_at_the_node_accumulate_across_a_reload_of_its_plugin() {
     use tutti_fixtures::midi;
     use tutti_graph::EventCapacity;
-    use tutti_session::{Losses, Root, Stamp};
+    use tutti_session::{Losses, MainOutput, Stamp};
     use tutti_ump::MidiChannel;
 
     let cut = 300 - u64::from(tutti_plugin_types::MIDI_STACK_BOUND.get());
@@ -978,7 +978,7 @@ fn dropped_events_at_the_node_accumulate_across_a_reload_of_its_plugin() {
     };
     let (catalog, _dir) = catalog();
     let (mut s, node) = with_node(&catalog);
-    s.graph().connect(node, Root).unwrap();
+    s.graph().connect(node, MainOutput).unwrap();
     let (inlet, mut writer) = s.graph().open_event_inlet(EventCapacity::of(512));
     s.graph()
         .connect(inlet.events_out(), node.events_in())
@@ -1103,7 +1103,7 @@ fn a_restore_awaited_off_main_takes_effect_when_applied() {
     let mut s = session(false);
     let (_, node) = in_a_node(&mut s, &catalog, &first_id());
     // Rendered, so a host write reaches the plugin with a block.
-    s.graph().connect(node, tutti_session::Root).unwrap();
+    s.graph().connect(node, tutti_session::MainOutput).unwrap();
     let cutoff = |s: &Session| {
         s.plugin_view(node)
             .unwrap()
