@@ -336,8 +336,9 @@ touched.
 - A comment states what the code does and the invariant it holds, in the present tense;
   rustdoc documents the item. No history, no "why it was added", no removed names, no
   design-doc citations. A comment or doc that disagrees with the code is a bug.
-- Prose never cites a line (`file.rs:N`): it states the logic or the invariant itself
-  (`cargo xtask check-pointers`).
+- Prose outside `docs/` never cites a line (`file.rs:N`): it states the logic or the
+  invariant itself; a pointer in `docs/` names a file that has that line (`cargo xtask
+  check-pointers`).
 - A public fieldless enum that is `Eq` also derives `Hash` (`cargo xtask
   check-value-traits`).
 - Before working around a constraint, name it in one sentence and verify it (read the
