@@ -70,7 +70,7 @@ use tutti_graph::NodeKey;
 
 use tutti_plugin_host::{ParamReporter, PluginHandle, PluginSignal};
 use tutti_plugin_types::{ParamEdit, ParameterInfo, UnknownParam};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
@@ -84,7 +84,7 @@ use crate::{PluginParamRefusal, PluginParamTarget, PluginUnit, UnitError};
 /// is absent and a set of it goes to the plugin.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Driven {
-    knobs: std::sync::Arc<std::sync::Mutex<Knobs>>,
+    knobs: std::sync::Arc<Mutex<Knobs>>,
 }
 
 /// The lanes with a knob, by the parameter they drive.
@@ -95,7 +95,7 @@ impl Driven {
     /// with a knob drives it.
     pub(crate) fn write(&self, id: ParamId, value: Normalized) -> bool {
         self.knobs
-            .lock_recover()
+            .lock()
             .get(&id)
             .is_some_and(|lane| lane.store(value.get()))
     }
@@ -103,7 +103,7 @@ impl Driven {
     /// Replaces the driven parameters with `knobs`; nothing is touched while
     /// there were none and there are none.
     pub(crate) fn replace(&self, knobs: Knobs) {
-        let mut held = self.knobs.lock_recover();
+        let mut held = self.knobs.lock();
         if held.is_empty() && knobs.is_empty() {
             return;
         }
@@ -114,7 +114,7 @@ impl Driven {
     /// plugin lands the value it plays (the knob plus the lane's routes), and
     /// the mirror holds the knob.
     pub(crate) fn report_knobs(&self, mirror: &tutti_plugin_host::PluginParamValues) {
-        for (&id, lane) in self.knobs.lock_recover().iter() {
+        for (&id, lane) in self.knobs.lock().iter() {
             if let Some(knob) = lane.value() {
                 mirror.report(id, Normalized::clamped(knob));
             }

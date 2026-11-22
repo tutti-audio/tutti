@@ -147,12 +147,12 @@ impl Node for Sink {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
         let mut seen = self.seen.lock().unwrap();
-        for (p, port) in self.shape().event_inputs().enumerate() {
+        for (p, port) in (0u16..).zip(self.shape().event_inputs()) {
             for e in io.events(port) {
                 let EventKind::Midi(Ump(w)) = e.kind else {
                     panic!("only MIDI is sent")
                 };
-                seen.push((cx.env.frame.get(), e.offset.get(), p as u16, w[0]));
+                seen.push((cx.env.frame.get(), e.offset.get(), p, w[0]));
             }
         }
         Status::Silent

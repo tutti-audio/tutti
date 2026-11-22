@@ -18,8 +18,8 @@
 //! Each fans out to its subscribers, each ended by dropping its
 //! [`Subscription`]; there is no slot to replace and nothing to clear.
 
-use parking_lot::Mutex;
 use std::sync::Arc;
+use tutti_rt::Mutex;
 
 use tutti_plugin_types::ParamEdit;
 use tutti_plugin_types::{PluginInvalidation, PluginRefresh, TransportRequest};

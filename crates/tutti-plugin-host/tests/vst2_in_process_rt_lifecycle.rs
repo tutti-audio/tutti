@@ -27,10 +27,10 @@
 )]
 
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 use tutti_buffers::Planes;
 use tutti_fixtures::main_thread;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 use tutti_vst2_host::Vst2Loaded;
 
 use tutti_plugin_host::PluginHandle;
@@ -46,7 +46,7 @@ const BLOCK: usize = 64;
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock_recover()
+    PROBE_LOCK.lock()
 }
 
 /// Re-open the image the host loaded and call one of the probe's exports.
@@ -586,9 +586,10 @@ fn a_block_past_the_announced_maximum_is_split_before_the_plugin() {
 /// next editor pump (the main-thread tick an in-process plugin has), and the
 /// node's shape declares the new latency.
 fn an_io_change_reaches_a_subscriber_and_the_shape() {
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
     use tutti_graph::Node as _;
     use tutti_plugin_types::PluginInvalidation;
+    use tutti_rt::Mutex;
 
     let _guard = lock_probe();
     let loaded = load();
@@ -596,7 +597,7 @@ fn an_io_change_reaches_a_subscriber_and_the_shape() {
     let sink = Arc::clone(&seen);
     let _subscription = loaded.handle.subscribe(move |n| {
         if let tutti_plugin_host::PluginSignal::Invalidate(e) = n {
-            sink.lock().unwrap().push(e);
+            sink.lock().push(e);
         }
     });
 
@@ -615,7 +616,7 @@ fn an_io_change_reaches_a_subscriber_and_the_shape() {
         f(300, 2)
     });
     assert_eq!(answered, 1);
-    assert!(seen.lock().unwrap().is_empty(), "nothing before the pump");
+    assert!(seen.lock().is_empty(), "nothing before the pump");
 
     // The first pump asks the audio thread for the Processor back; the block hands it over
     // (between blocks), and the next pump restarts the plugin and reads it again.
@@ -624,7 +625,7 @@ fn an_io_change_reaches_a_subscriber_and_the_shape() {
     drive_block(&mut loaded.unit);
     loaded.handle.editor_idle(main_thread());
 
-    let seen = seen.lock().unwrap();
+    let seen = seen.lock();
     assert!(
         seen.iter().any(|n| matches!(
             n,

@@ -258,7 +258,7 @@ fn a_removed_served_plugin_drops_at_once() {
     s.remove(node).unwrap();
     assert_eq!(s.retired_plugins(), 0, "nothing is parked");
     assert_eq!(
-        *dropped_on.lock().unwrap(),
+        *dropped_on.lock(),
         Some(std::thread::current().id()),
         "the removing thread dropped it"
     );
@@ -280,10 +280,10 @@ fn a_removed_in_process_plugin_drops_on_the_main_thread() {
     .unwrap();
     let mut s = remover;
     assert_eq!(s.retired_plugins(), 1, "the record is parked");
-    assert_eq!(*dropped_on.lock().unwrap(), None, "nothing dropped yet");
+    assert_eq!(*dropped_on.lock(), None, "nothing dropped yet");
     let _ = s.update_on(tutti_fixtures::main_thread());
     assert_eq!(
-        *dropped_on.lock().unwrap(),
+        *dropped_on.lock(),
         Some(std::thread::current().id()),
         "the main thread dropped it"
     );

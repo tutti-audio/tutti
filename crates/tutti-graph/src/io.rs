@@ -79,6 +79,8 @@ pub struct Io<'a, F: Float = f32> {
     wired: Wired,
     events_in: &'a [SortedEvents<'a>],
     events_out: &'a mut [EventWriter<'a>],
+    event_inputs: u16,
+    event_outputs: u16,
     /// Per declared param port, what it reads this block; a port past the
     /// end reads its base.
     params: &'a [ParamInput<'a, F>],
@@ -230,7 +232,9 @@ impl<'a, F: Float> Io<'a, F> {
     /// exactly `frames` long, or an input is not (an aliased input is empty):
     /// both executors build every slice from `frames` themselves, so that
     /// check is a guard on this crate's code, not on the caller's, and is not
-    /// worth a per-channel loop on every node call in release.
+    /// worth a per-channel loop on every node call in release. Also if either
+    /// event slice is longer than `u16::MAX`: both come from a shape's `u16`
+    /// event-port counts.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         max: MaxBlock,
@@ -260,6 +264,10 @@ impl<'a, F: Float> Io<'a, F> {
             outputs: PortSpan::new(0, outputs.len()),
         };
         let wired = Wired::all(inputs.len(), outputs.len());
+        let event_inputs =
+            u16::try_from(events_in.len()).expect("event inputs come from a shape's u16 count");
+        let event_outputs =
+            u16::try_from(events_out.len()).expect("event outputs come from a shape's u16 count");
         Self {
             frames,
             inputs,
@@ -271,6 +279,8 @@ impl<'a, F: Float> Io<'a, F> {
             wired,
             events_in,
             events_out,
+            event_inputs,
+            event_outputs,
             params: &[],
             lost: None,
             tail: None,
@@ -628,8 +638,8 @@ impl<'a, F: Float> Io<'a, F> {
     }
 
     /// Number of event input ports.
-    pub fn event_input_count(&self) -> usize {
-        self.events_in.len()
+    pub fn event_input_count(&self) -> u16 {
+        self.event_inputs
     }
 
     /// Event input `port`, sorted by offset, every offset inside the block.
@@ -643,8 +653,8 @@ impl<'a, F: Float> Io<'a, F> {
     }
 
     /// Number of event output ports.
-    pub fn event_output_count(&self) -> usize {
-        self.events_out.len()
+    pub fn event_output_count(&self) -> u16 {
+        self.event_outputs
     }
 
     /// The writer for event output `port`.

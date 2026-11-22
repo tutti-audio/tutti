@@ -6,7 +6,7 @@ use tutti_buffers::{Float, FloatWidth};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 use tutti_rt::PendingSampleRate;
 
-use parking_lot::Mutex;
+use tutti_rt::Mutex;
 
 use super::client::{Declared, InProcessClient, Reload};
 use super::control_backend::{ControlBackend, Reporting};

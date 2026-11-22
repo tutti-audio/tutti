@@ -13,7 +13,6 @@
 use std::sync::{Arc, OnceLock};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 
-use parking_lot::Mutex;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
     Event, Hand, HostOp, InProcess, IpcError, Layout, Lifecycle, Loaded, MaxBlock, Notice,
@@ -21,6 +20,7 @@ use tutti_plugin_types::{
     RateRefusalCause, RenderMode, RenderModeSupport, SampleRate, Samples, State, Successor, Widths,
     standing,
 };
+use tutti_rt::Mutex;
 use tutti_rt::Rt;
 
 use super::rebind::{RebindError, Settlement};

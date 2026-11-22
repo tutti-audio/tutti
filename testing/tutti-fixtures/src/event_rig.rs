@@ -15,7 +15,7 @@ use tutti_units::{Frame, Moment, SampleRate, Samples};
 
 /// `(event input, absolute frame, event)` of every MIDI event a [`Sink`]
 /// received, in the order its inputs and frames were processed.
-pub type Seen = Record<(usize, u64, Ump)>;
+pub type Seen = Record<(u16, u64, Ump)>;
 
 /// The frame and event of each entry of `seen`, the input dropped: what a sink of
 /// one input logged.
@@ -79,7 +79,7 @@ impl Node for Sink {
 
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let mut seen = self.seen.lock().expect("the log is not poisoned");
-        for (port, &input) in self.inputs.iter().enumerate() {
+        for (port, &input) in (0u16..).zip(&self.inputs) {
             for event in io.events(input) {
                 if let EventKind::Midi(ump) = event.kind {
                     seen.push((
@@ -203,7 +203,7 @@ impl EventRig {
     ///
     /// Panics when the log's lock is poisoned.
     #[must_use]
-    pub fn take(&self) -> Vec<(usize, u64, Ump)> {
+    pub fn take(&self) -> Vec<(u16, u64, Ump)> {
         let mut log = self.seen.lock().expect("the log is not poisoned");
         let all = log.to_vec();
         log.clear();

@@ -19,11 +19,11 @@
 //! so the variables are set for the load (and a fork's second instance) and
 //! cleared after.
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, MutexGuard};
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_fixtures::main_thread;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 use tutti_vst2_host::Vst2Loaded;
 
 use tutti_graph::Node as _;
@@ -52,7 +52,7 @@ const BLOCK: usize = 64;
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock_recover()
+    PROBE_LOCK.lock()
 }
 
 /// The probe's environment for one test, cleared when it drops. The caller

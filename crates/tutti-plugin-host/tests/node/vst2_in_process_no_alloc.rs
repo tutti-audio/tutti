@@ -13,8 +13,8 @@
 //! per-block alloc.
 
 use crate::param_reads::ParamReads as _;
-use std::sync::Mutex;
 use tutti_fixtures::main_thread;
+use tutti_rt::Mutex;
 use tutti_vst2_host::Vst2Loaded;
 
 use tutti_fixtures::midi;
@@ -34,7 +34,7 @@ fn at_start(event: Ump) -> Event {
 
 #[test]
 fn process_steady_state_does_not_allocate() {
-    let _lock = PLUGIN_LOAD_LOCK.lock().unwrap();
+    let _lock = PLUGIN_LOAD_LOCK.lock();
     let (unit, handle) = tutti_plugin_host::load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::pumped_work(),
@@ -71,7 +71,7 @@ fn process_with_a_meter_does_not_allocate() {
     use tutti_timeline::ProjectMeter;
     use tutti_units::Beat;
 
-    let _lock = PLUGIN_LOAD_LOCK.lock().unwrap();
+    let _lock = PLUGIN_LOAD_LOCK.lock();
     let (unit, handle) = tutti_plugin_host::load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::pumped_work(),
@@ -96,7 +96,7 @@ fn process_with_a_meter_does_not_allocate() {
 
 #[test]
 fn process_with_midi_does_not_allocate() {
-    let _lock = PLUGIN_LOAD_LOCK.lock().unwrap();
+    let _lock = PLUGIN_LOAD_LOCK.lock();
     let (unit, handle) = tutti_plugin_host::load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::pumped_work(),
@@ -162,7 +162,7 @@ fn two_hundred_moving_parameters_do_not_allocate() {
     use tutti_graph::ParamRamp;
 
     const PARAMS: u32 = 200;
-    let _lock = PLUGIN_LOAD_LOCK.lock().unwrap();
+    let _lock = PLUGIN_LOAD_LOCK.lock();
     // SAFETY: the lock serializes the tests here, and nothing else in this
     // process touches the environment. The probe reads it in its constructor.
     unsafe { std::env::set_var("TUTTI_VST2_PROBE_PARAMS", PARAMS.to_string()) };
@@ -224,7 +224,7 @@ fn two_hundred_moving_parameters_do_not_allocate() {
 /// deliver allocates nothing.
 #[test]
 fn an_idle_pump_does_not_allocate() {
-    let _lock = PLUGIN_LOAD_LOCK.lock().unwrap();
+    let _lock = PLUGIN_LOAD_LOCK.lock();
     let (unit, handle) = tutti_plugin_host::load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::pumped_work(),

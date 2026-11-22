@@ -7,10 +7,10 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::marker::PhantomData;
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, MutexGuard, Weak};
 
 use tutti_graph::{NodeKey, ParamSet, PassError};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 use tutti_rt::ParamCell;
 use tutti_units::UnitAddr;
 
@@ -127,7 +127,7 @@ impl ValueTable {
         if reentrant {
             return None;
         }
-        let guard = self.params.lock_recover();
+        let guard = self.params.lock();
         HELD.with(|held| held.borrow_mut().push(token));
         Some(Held { guard, token })
     }
@@ -150,7 +150,7 @@ impl ValueTable {
             .collect();
         let old = self
             .params
-            .lock_recover()
+            .lock()
             .nodes
             .insert(node, NodeParams { owner, set, seeds });
         drop(old);
@@ -159,10 +159,7 @@ impl ValueTable {
     /// Registers the session's own value `id`, held in `slot`. Once, as the
     /// session is built.
     pub(crate) fn provide<V: 'static>(&self, id: SlotId, slot: SlotCell<V>) {
-        self.params
-            .lock_recover()
-            .slots
-            .insert(id, slot::erase(slot));
+        self.params.lock().slots.insert(id, slot::erase(slot));
     }
 
     /// Registers the session's own staging value `id`, held in `slot`. Once,
@@ -173,7 +170,7 @@ impl ValueTable {
         slot: Arc<slot::PublishedSlot<C>>,
     ) {
         self.params
-            .lock_recover()
+            .lock()
             .slots
             .insert(id, slot::erase_staged(slot));
     }
@@ -182,7 +179,7 @@ impl ValueTable {
     /// yet published. Control thread.
     pub(crate) fn unprovide(&self, ids: &[SlotId]) {
         let gone: Vec<_> = {
-            let mut params = self.params.lock_recover();
+            let mut params = self.params.lock();
             ids.iter()
                 .filter_map(|id| params.slots.remove(id))
                 .collect()
@@ -211,7 +208,7 @@ impl ValueTable {
     /// Registers the values of a node, from its [`NodeSlots`]. Control
     /// thread.
     pub(crate) fn provide_node(&self, slots: NodeSlots) {
-        self.params.lock_recover().slots.extend(slots.0);
+        self.params.lock().slots.extend(slots.0);
     }
 
     /// Writes `assign` as [`Session::set`](crate::Session::set) does, for the
@@ -234,7 +231,7 @@ impl ValueTable {
         no_pass: Option<PassError>,
         own_bypass: bool,
     ) {
-        let mut params = self.params.lock_recover();
+        let mut params = self.params.lock();
         if let Some(control) = params.controls.get(&node) {
             control.note_pass(no_pass, own_bypass);
             return;
@@ -263,7 +260,7 @@ impl ValueTable {
         };
         let gone: Vec<_> = self
             .params
-            .lock_recover()
+            .lock()
             .slots
             .extract_if(.., |id, _| match id {
                 SlotId::Range(target) | SlotId::RouteDepth((_, target)) => touches(target),
@@ -277,7 +274,7 @@ impl ValueTable {
     /// and not yet handed to the editor. Control thread.
     pub(crate) fn retire_node_controls(&self, node: NodeKey) {
         let gone = {
-            let mut params = self.params.lock_recover();
+            let mut params = self.params.lock();
             (
                 params.controls.remove(&node),
                 params.slots.remove(&SlotId::Mode(node)),
@@ -291,7 +288,7 @@ impl ValueTable {
     /// Gives `edge` a gain target holding `seed`, unless it has one. Control
     /// thread.
     pub(crate) fn provide_gain(&self, edge: crate::ChannelEdge, seed: tutti_units::Amplitude) {
-        let mut params = self.params.lock_recover();
+        let mut params = self.params.lock();
         params.slots.entry(SlotId::Gain(edge)).or_insert_with(|| {
             slot::erase(GainSlot::new(edge, seed, Arc::clone(&self.queue)) as SlotCell<_>)
         });
@@ -300,7 +297,7 @@ impl ValueTable {
     /// The edges that have a gain target.
     pub(crate) fn gain_edges(&self) -> Vec<crate::ChannelEdge> {
         self.params
-            .lock_recover()
+            .lock()
             .slots
             .keys()
             .filter_map(|id| match id {
@@ -313,7 +310,7 @@ impl ValueTable {
     /// Forgets the gain target of `edge`, and what was written to it and not
     /// yet handed to the editor. Control thread.
     pub(crate) fn retire_gain(&self, edge: crate::ChannelEdge) {
-        let gone = self.params.lock_recover().slots.remove(&SlotId::Gain(edge));
+        let gone = self.params.lock().slots.remove(&SlotId::Gain(edge));
         self.queue.forget_edge(edge);
         drop(gone);
     }
@@ -333,7 +330,7 @@ impl ValueTable {
         entry: super::PluginEntry,
         mode: Option<SlotCell<tutti_plugin_types::AutomationMode>>,
     ) {
-        let mut params = self.params.lock_recover();
+        let mut params = self.params.lock();
         let slot = SlotId::automation_mode(node);
         let old = (
             params.plugins.insert(node, Arc::new(entry)),
@@ -369,7 +366,7 @@ impl ValueTable {
     /// Forgets `node`'s params and slots: its targets are gone.
     pub(crate) fn retire(&self, node: NodeKey) {
         let (gone, slots, plugin) = {
-            let mut params = self.params.lock_recover();
+            let mut params = self.params.lock();
             #[cfg(feature = "plugin")]
             let plugin = params.plugins.remove(&node);
             #[cfg(not(feature = "plugin"))]
@@ -386,7 +383,7 @@ impl ValueTable {
 
     /// `addr`'s cell on `node`, whatever its type, for the graph's own use.
     pub(crate) fn cell(&self, node: NodeKey, addr: UnitAddr) -> Option<ParamCell> {
-        self.params.lock_recover().nodes.get(&node)?.set.cell(addr)
+        self.params.lock().nodes.get(&node)?.set.cell(addr)
     }
 }
 

@@ -83,12 +83,12 @@ impl Node for Counter {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
         let mut seen = self.seen.lock().unwrap();
-        for (p, port) in self.shape().event_inputs().enumerate() {
+        for (port, tally) in self.shape().event_inputs().zip(seen.iter_mut()) {
             for e in io.events(port) {
                 if e.is_note_off() {
-                    seen[p].1 += 1;
+                    tally.1 += 1;
                 } else if matches!(e.kind, EventKind::Midi(Ump(_))) {
-                    seen[p].0 += 1;
+                    tally.0 += 1;
                 }
             }
         }

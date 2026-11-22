@@ -3,15 +3,15 @@
 
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 
 use tutti_graph::NodeKey;
 use tutti_plugin_host::{ParamReporter, PluginHandle, PluginParamValues};
 use tutti_plugin_types::{
     AutomationMode, ParamAccess, ParamMapping, ParamUnit, ParameterInfo, PlainMap, PlainUnit,
 };
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 use tutti_units::{
     Amplitude, ArcDegrees, BeatDuration, Bpm, Cents, Db, Hz, Mix, Normalized, Pan, ParamId,
     PlaybackRate, Seconds, Semitones,
@@ -529,7 +529,7 @@ impl AutomationModeSlot {
 
 impl Slot<AutomationMode> for AutomationModeSlot {
     fn load(&self) -> AutomationMode {
-        *self.mode.lock_recover()
+        *self.mode.lock()
     }
 
     fn check(&self, _: &AutomationMode) -> Result<(), SetRefusal> {
@@ -537,7 +537,7 @@ impl Slot<AutomationMode> for AutomationModeSlot {
     }
 
     fn store(&self, value: &AutomationMode) {
-        *self.mode.lock_recover() = *value;
+        *self.mode.lock() = *value;
         // An advisory for the plugin's editor: the mode the host holds is the
         // value, and a push the plugin's transport did not take is not retried.
         let _ = self.handle.set_automation_mode(*value);
