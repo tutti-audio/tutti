@@ -17,7 +17,7 @@ fn hop() -> PitchHop {
 const FRAME: usize = 580;
 
 fn track(cfg: &PyinConfig, x: &[f32]) -> Vec<PyinFrame> {
-    pyin_track(cfg, Mono::new(x), RATE, hop()).unwrap()
+    pyin_track(&cfg.hop(hop()), Mono::new(x), RATE).unwrap()
 }
 
 fn cents_between(a: f64, b: f64) -> f64 {
@@ -226,10 +226,9 @@ fn a_band_above_nyquist_a_short_buffer_and_a_huge_grid_are_refused() {
     let wide = FrequencyBand::new(Hz::new(55.0), Hz::new(9000.0)).unwrap();
     assert_eq!(
         pyin_track(
-            &PyinConfig::new().band(wide),
+            &PyinConfig::new().band(wide).hop(hop()),
             Mono::new(&[0.0f32; 4096]),
-            RATE,
-            hop()
+            RATE
         ),
         Err(PitchError::Nyquist(AboveNyquist {
             freq: Hz::new(9000.0),
@@ -237,7 +236,11 @@ fn a_band_above_nyquist_a_short_buffer_and_a_huge_grid_are_refused() {
         }))
     );
     assert_eq!(
-        pyin_track(&PyinConfig::new(), Mono::new(&[0.0f32; 100]), RATE, hop()),
+        pyin_track(
+            &PyinConfig::new().hop(hop()),
+            Mono::new(&[0.0f32; 100]),
+            RATE
+        ),
         Err(PitchError::InsufficientInput {
             needed: Samples::new(FRAME),
             got: Samples::new(100),
@@ -248,4 +251,20 @@ fn a_band_above_nyquist_a_short_buffer_and_a_huge_grid_are_refused() {
         PyinConfig::new().band(tiny).model(),
         Err(PitchError::PitchGridTooLarge { .. })
     ));
+}
+
+/// The meter fed uneven chunks decodes the track `pyin_track` decodes of the
+/// whole buffer.
+#[test]
+fn the_pyin_meter_over_uneven_chunks_equals_pyin_track() {
+    let cfg = PyinConfig::new().hop(hop());
+    let x = tone(220.0, 4000);
+    let whole = pyin_track(&cfg, Mono::new(&x), RATE).unwrap();
+    assert!(whole.iter().any(|f| f.frequency.is_some()));
+    let (items, track) = crate::fold_uneven(&cfg, RATE, x.len(), |meter, at, out| {
+        meter.push(Mono::new(&x[at]), out)
+    })
+    .unwrap();
+    assert!(items.is_empty());
+    assert_eq!(track, Ok(whole));
 }

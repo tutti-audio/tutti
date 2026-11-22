@@ -921,3 +921,23 @@ fn the_defaults_are_the_documented_ones() {
     );
     assert_eq!(d.hop.get(), d.frame().get() / 8);
 }
+
+/// The meter fed uneven chunks reads the notes `transcribe` reads of the whole
+/// buffer.
+#[test]
+fn the_note_meter_over_uneven_chunks_equals_transcribe() {
+    let c = cfg();
+    let x = render(
+        RATE,
+        &[tone(0.2, 0.45, 440.0, 0.5), tone(0.6, 0.85, 523.2511, 0.5)],
+        1.0,
+    );
+    let whole = transcribe(&c, &x).unwrap();
+    assert_eq!(whole.len(), 2);
+    let (items, notes) = crate::fold_uneven(&c.cfg, c.rate, x.len(), |meter, at, out| {
+        meter.push(Mono::new(&x[at]), out)
+    })
+    .unwrap();
+    assert!(items.is_empty());
+    assert_eq!(notes, Ok(whole));
+}

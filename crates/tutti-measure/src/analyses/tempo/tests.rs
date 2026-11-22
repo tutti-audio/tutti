@@ -565,3 +565,24 @@ fn an_absurd_range_is_refused() {
         Err(TempoEstimateError::InsufficientInput { .. })
     ));
 }
+
+/// The tempo and beat meters fed uneven chunks read what `estimate_tempo` and
+/// `track_beats` read of the whole buffer.
+#[test]
+fn the_tempo_and_beat_meters_over_uneven_chunks_equal_the_whole_buffer() {
+    let x = clicks(120.0, 0.0, 8.0);
+    let rate = SampleRate::of(RATE);
+    let cfg = TempoConfig::new();
+    let tempo = estimate_tempo(&cfg, Mono::new(&x), rate).unwrap();
+    let (_, read) = crate::fold_uneven(&cfg, rate, x.len(), |meter, at, out| {
+        meter.push(Mono::new(&x[at]), out)
+    })
+    .unwrap();
+    assert_eq!(read, Ok(tempo));
+    let grid = track_beats(&cfg, Mono::new(&x), rate).unwrap();
+    let (_, beats) = crate::fold_uneven(&BeatConfig::new(cfg), rate, x.len(), |meter, at, out| {
+        meter.push(Mono::new(&x[at]), out)
+    })
+    .unwrap();
+    assert_eq!(beats, Ok(grid));
+}

@@ -167,3 +167,19 @@ fn a_grid_is_read_as_its_mean() {
     );
     assert_eq!(est.key.to_string(), "F minor");
 }
+
+/// The meter fed uneven chunks reads the key of the chroma of the whole buffer.
+#[test]
+fn the_key_meter_over_uneven_chunks_equals_estimate_key_of_the_chroma() {
+    let rate = SampleRate::of(22_050.0);
+    let x = crate::test_rng::tones(22_050.0, &[261.63, 329.63, 392.0], 44_100);
+    let cfg = KeyConfig::new(KeyProfile::Krumhansl);
+    let made = chroma(&cfg.chroma, Mono::new(&x), rate).unwrap();
+    let whole = estimate_key(KeyProfile::Krumhansl, made.grid()).unwrap();
+    let (items, key) = crate::fold_uneven(&cfg, rate, x.len(), |meter, at, out| {
+        meter.push(Mono::new(&x[at]), out)
+    })
+    .unwrap();
+    assert!(items.is_empty());
+    assert_eq!(key, Ok(whole));
+}

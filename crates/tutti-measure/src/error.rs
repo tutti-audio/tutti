@@ -267,6 +267,10 @@ pub enum TempoEstimateError {
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum KeyEstimateError {
+    /// The chroma of the audio, which a [`KeyMeter`](crate::KeyMeter) reads
+    /// the key from, was refused.
+    #[error(transparent)]
+    Chroma(#[from] MeterError),
     /// A grid of chroma that is not twelve columns wide.
     #[error("chroma is {columns} columns wide, not 12")]
     NotTwelveClasses {
@@ -292,6 +296,10 @@ pub enum ChordError {
     /// A window or hop of zero.
     #[error(transparent)]
     Framing(#[from] FramingError),
+    /// The chroma of the audio, which a [`ChordMeter`](crate::ChordMeter) reads
+    /// the chords from, was refused.
+    #[error(transparent)]
+    Chroma(#[from] MeterError),
     /// More frames than one call analyses.
     #[error(transparent)]
     TooManyFrames(#[from] TooManyFrames),
@@ -351,6 +359,26 @@ pub enum MeterError {
     /// More frames than one call analyses.
     #[error(transparent)]
     TooManyFrames(#[from] TooManyFrames),
+    /// What a note analysis refuses at the rate it is bound to
+    /// ([`NoteConfig`](crate::NoteConfig)).
+    #[error(transparent)]
+    Note(#[from] NoteError),
+    /// What a pitch track refuses at the rate it is bound to
+    /// ([`PyinConfig`](crate::PyinConfig)).
+    #[error(transparent)]
+    Pitch(#[from] PitchError),
+    /// The reference of an alignment is at another sample rate than the take:
+    /// nothing resamples.
+    #[error("the reference is at {reference}, and the take at {take}")]
+    ReferenceRate {
+        /// The reference's rate.
+        reference: SampleRate,
+        /// The take's rate.
+        take: SampleRate,
+    },
+    /// The reference of an alignment cannot be folded to one channel.
+    #[error("the reference cannot be folded to mono: {0}")]
+    ReferenceFold(#[from] tutti_buffers::FoldError),
     /// A waveform block of zero samples.
     #[error("block size is zero: a block would summarize nothing")]
     ZeroBlock,

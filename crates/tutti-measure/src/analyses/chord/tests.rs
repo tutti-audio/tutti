@@ -364,3 +364,21 @@ fn spans_follow_the_chromas_own_framing() {
         assert_eq!(spans[1].span.end(), Samples::new(11 * hop + window));
     }
 }
+
+/// The meter fed uneven chunks reads the chords of the chroma of the whole
+/// buffer.
+#[test]
+fn the_chord_meter_over_uneven_chunks_equals_detect_chords_of_the_chroma() {
+    let rate = SampleRate::of(22_050.0);
+    let x = crate::test_rng::tones(22_050.0, &[261.63, 329.63, 392.0], 44_100);
+    let cfg = cfg();
+    let made = chroma(&cfg.chroma, Mono::new(&x), rate).unwrap();
+    let whole = detect_chords(&cfg, &made).unwrap();
+    assert!(!whole.is_empty());
+    let (items, chords) = crate::fold_uneven(&cfg, rate, x.len(), |meter, at, out| {
+        meter.push(Mono::new(&x[at]), out)
+    })
+    .unwrap();
+    assert!(items.is_empty());
+    assert_eq!(chords, Ok(whole));
+}

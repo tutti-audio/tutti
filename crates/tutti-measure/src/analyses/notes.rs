@@ -73,11 +73,13 @@ use tutti_music::Note;
 use tutti_units::{Amplitude, Cents, Db, FrequencyRatio, SampleRate, Samples, Seconds};
 
 use crate::analyses::yin::{PitchEstimate, YinConfig, YinPlan, yin_track_at};
-use crate::convert::widen;
+use crate::convert::{Gathered, widen};
 use crate::framing::{Framing, check_frame_count, check_hop_within, check_overlap};
 use crate::meters::onset::{DetectionFunction, OnsetConfig, OnsetPlan, onset_lag, run};
 use crate::meters::silence::FiniteLevel;
-use crate::{EmptyVelocityRange, FramingError, NoteError, Region, StreamMeter};
+use crate::{
+    EmptyVelocityRange, FramingError, Measure, MeterError, NoteError, Region, StreamMeter,
+};
 use tutti_dsp::{median, median_of_sorted};
 use tutti_units::ranged;
 
@@ -94,6 +96,11 @@ const MAX_SMOOTHING_FRAMES: FrameCount = FrameCount(1024);
 
 ranged! {
     /// A time setting of a note analysis: within `0..=60` seconds.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "Seconds", into = "Seconds")
+    )]
     NoteSpan(Seconds), NoteSpanError, "a note time within 0..=60 s",
     |raw| raw.get() >= 0.0 && raw.get() <= 60.0
 }
@@ -102,12 +109,22 @@ ranged! {
     /// How far the pitch track advances per frame: at least one sample. Whether
     /// the hop suits the YIN frame (not wider than it, not under a sixty-fourth
     /// of it) is checked by the call that takes the config.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "Samples", into = "Samples")
+    )]
     PitchHop(Samples), PitchHopError, "a hop of at least one sample",
     |raw| raw.get() >= 1
 }
 
 ranged! {
     /// A pitch change that splits a note: within `(0, 1200]` cents.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "Cents", into = "Cents")
+    )]
     PitchSplit(Cents), PitchSplitError, "a pitch split within (0, 1200] cents",
     |raw| raw.get() > 0.0 && raw.get() <= 1200.0
 }
@@ -411,8 +428,11 @@ pub fn transcribe<S: Sample>(
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
 ) -> Result<Vec<NoteEvent>, NoteError> {
-    let cfg = &cfg.plan(rate.into())?;
-    let samples = &widen(samples.samples());
+    transcribe_at(&cfg.plan(rate.into())?, &widen(samples.samples()))
+}
+
+/// [`transcribe`] over a resolved config and `f64` samples.
+fn transcribe_at(cfg: &NotePlan, samples: &[f64]) -> Result<Vec<NoteEvent>, NoteError> {
     cfg.check_hop()?;
     if samples.iter().any(|s| !s.is_finite()) {
         return Err(NoteError::NonFiniteInput);
@@ -441,6 +461,53 @@ pub fn transcribe<S: Sample>(
         .map(|o| cfg.attack(o.position))
         .collect();
     segment(cfg, &track, &levels, &onsets)
+}
+
+impl<S: Sample> Measure<S> for NoteConfig {
+    type Context = SampleRate;
+    type Meter = NoteMeter<S>;
+
+    /// A meter that transcribes the audio at `rate`, once it has all of it.
+    ///
+    /// # Errors
+    ///
+    /// [`MeterError::Note`] for what [`NoteConfig`] refuses at `rate`: a pitch
+    /// band above Nyquist, a YIN frame that is too long, an onset function that
+    /// is not spectral flux, a zero onset window or hop.
+    fn measure(&self, rate: SampleRate) -> Result<NoteMeter<S>, MeterError> {
+        Ok(NoteMeter {
+            plan: self.plan(rate)?,
+            audio: Gathered::new(),
+        })
+    }
+}
+
+/// A running transcription at one rate: gathers the audio and reads its notes
+/// at [`finish`](StreamMeter::finish), as [`transcribe`] does.
+///
+/// Not for the audio thread: it holds the whole stream, so it grows with the
+/// audio and allocates.
+#[derive(Debug)]
+pub struct NoteMeter<S: Sample> {
+    plan: NotePlan,
+    audio: Gathered<S>,
+}
+
+impl<S: Sample> StreamMeter for NoteMeter<S> {
+    type Input<'a> = Mono<'a, S>;
+    type Item = ();
+    type Output = Result<Vec<NoteEvent>, NoteError>;
+
+    /// Gathers the next chunk of the audio; no note is complete before the end.
+    fn push(&mut self, chunk: Mono<'_, S>, _: &mut impl Extend<()>) -> Result<(), MeterError> {
+        self.audio.push(chunk);
+        Ok(())
+    }
+
+    /// The notes of the audio gathered, or what [`transcribe`] refuses it for.
+    fn finish(self) -> Result<Vec<NoteEvent>, NoteError> {
+        transcribe_at(&self.plan, self.audio.samples())
+    }
 }
 
 /// The RMS of every pitch frame of `samples`: frame `i` covers

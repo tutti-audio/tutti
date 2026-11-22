@@ -1,6 +1,8 @@
 //! Reading any sample format as `f64` without allocating.
 
-use tutti_buffers::Sample;
+use core::marker::PhantomData;
+
+use tutti_buffers::{Mono, Sample};
 
 /// Samples converted per step of [`for_blocks`].
 pub(crate) const BLOCK: usize = 4096;
@@ -43,6 +45,34 @@ pub(crate) fn for_blocks<S: Sample>(data: &[S], channels: usize, mut f: impl FnM
             *slot = s.convert_to::<f64>();
         }
         f(out);
+    }
+}
+
+/// The folded mono of a stream, gathered whole as `f64`: what a meter of a
+/// whole-buffer analysis holds until it finishes. Grows with the audio.
+#[derive(Debug)]
+pub(crate) struct Gathered<S: Sample> {
+    samples: Vec<f64>,
+    sample: PhantomData<fn(S)>,
+}
+
+impl<S: Sample> Gathered<S> {
+    pub(crate) fn new() -> Self {
+        Self {
+            samples: Vec::new(),
+            sample: PhantomData,
+        }
+    }
+
+    /// Appends the next chunk, converted to `f64`.
+    pub(crate) fn push(&mut self, chunk: Mono<'_, S>) {
+        self.samples
+            .extend(chunk.samples().iter().map(|s| s.convert_to::<f64>()));
+    }
+
+    /// Everything gathered, in order.
+    pub(crate) fn samples(&self) -> &[f64] {
+        &self.samples
     }
 }
 

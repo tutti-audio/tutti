@@ -45,15 +45,20 @@ use tutti_buffers::{Mono, Sample};
 use tutti_dsp::{BandedTransition, FrameCount, viterbi};
 use tutti_units::{Cents, Confidence, Hz, SampleRate, Samples, ranged};
 
-use crate::PitchError;
 use crate::analyses::notes::PitchHop;
-use crate::analyses::yin::{PitchDetector, YinConfig};
-use crate::convert::widen;
+use crate::analyses::yin::{PitchDetector, YinConfig, YinPlan};
+use crate::convert::{Gathered, widen};
 use crate::framing::{Framing, check_frame_count};
 use crate::meters::chroma::FrequencyBand;
+use crate::{Measure, MeterError, PitchError, StreamMeter};
 
 ranged! {
     /// The mean of pYIN's Beta prior on the threshold: within `0.02..=0.5`.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "Confidence", into = "Confidence")
+    )]
     PyinThresholdMean(Confidence), PyinThresholdMeanError,
     "a mean threshold within 0.02..=0.5",
     |raw| raw.get() >= 0.02 && raw.get() <= 0.5
@@ -62,6 +67,11 @@ ranged! {
 ranged! {
     /// The probability of changing between voiced and unvoiced from one frame
     /// to the next: within `(0, 0.5]`.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "Confidence", into = "Confidence")
+    )]
     PyinSwitch(Confidence), PyinSwitchError,
     "a voiced/unvoiced switch probability within (0, 0.5]",
     |raw| raw.get() > 0.0 && raw.get() <= 0.5
@@ -70,6 +80,11 @@ ranged! {
 ranged! {
     /// The largest pitch change from one frame to the next: within
     /// `10..=1200` cents, from one grid step to an octave.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "Cents", into = "Cents")
+    )]
     PyinTransitionWidth(Cents), PyinTransitionWidthError,
     "a transition width within 10..=1200 cents",
     |raw| raw.get() >= 10.0 && raw.get() <= 1200.0
@@ -103,6 +118,7 @@ pub struct PyinConfig {
     threshold_mean: Confidence,
     switch: Confidence,
     transition_width: Cents,
+    hop: Option<PitchHop>,
 }
 
 impl PyinConfig {
@@ -115,6 +131,7 @@ impl PyinConfig {
             threshold_mean: Confidence::new(0.1),
             switch: Confidence::new(0.01),
             transition_width: Cents::new(250.0),
+            hop: None,
         }
     }
 
@@ -150,6 +167,19 @@ impl PyinConfig {
     #[must_use]
     pub fn transition_width(mut self, width: PyinTransitionWidth) -> Self {
         self.transition_width = width.get();
+        self
+    }
+
+    /// The band's YIN analysis at `rate`.
+    fn plan(&self, rate: SampleRate) -> Result<YinPlan, PitchError> {
+        YinConfig::new().band(self.band).plan(rate)
+    }
+
+    /// How far the track advances per frame: an eighth of the YIN frame by
+    /// default. A hop wider than the frame leaves samples no frame reads.
+    #[must_use]
+    pub fn hop(mut self, hop: PitchHop) -> Self {
+        self.hop = Some(hop);
         self
     }
 
@@ -223,10 +253,10 @@ fn threshold_weights(mean: f64) -> [f64; THRESHOLDS] {
     weights
 }
 
-/// Tracks the pitch at `hop` intervals across a buffer at `rate`.
+/// Tracks the pitch at the config's hop across a buffer at `rate`.
 ///
 /// Every frame is a YIN buffer of [`PyinConfig::buffer_size`] samples starting
-/// at a multiple of `hop`, so a frame reads `buffer_size` samples from its
+/// at a multiple of the hop, so a frame reads `buffer_size` samples from its
 /// start. It allocates the decoding's back pointers and runs off the audio
 /// thread; a frame costs about `1000 * (transition width / 10 cents) * 2`
 /// moves scored.
@@ -242,19 +272,81 @@ pub fn pyin_track<S: Sample>(
     cfg: &PyinConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-    hop: PitchHop,
 ) -> Result<Vec<PyinFrame>, PitchError> {
-    let plan = YinConfig::new().band(cfg.band).plan(rate.into())?;
-    let (bins, transition) = cfg.model()?;
+    let plan = cfg.plan(rate.into())?;
+    pyin_at(cfg, plan, cfg.model()?, &widen(samples.samples()))
+}
+
+impl<S: Sample> Measure<S> for PyinConfig {
+    type Context = SampleRate;
+    type Meter = PyinMeter<S>;
+
+    /// A meter that tracks the pitch of the audio at `rate`, once it has all
+    /// of it.
+    ///
+    /// # Errors
+    ///
+    /// [`AboveNyquist`](crate::AboveNyquist) when the band's top exceeds half `rate`;
+    /// [`PitchError::PitchGridTooLarge`] (as [`MeterError::Pitch`]) for a band
+    /// of too many bins.
+    fn measure(&self, rate: SampleRate) -> Result<PyinMeter<S>, MeterError> {
+        Ok(PyinMeter {
+            cfg: *self,
+            plan: self.plan(rate)?,
+            model: self.model()?,
+            audio: Gathered::new(),
+        })
+    }
+}
+
+/// A running pYIN track at one rate: gathers the audio and decodes the track
+/// at [`finish`](StreamMeter::finish), as [`pyin_track`] does.
+///
+/// Not for the audio thread: it holds the whole stream, so it grows with the
+/// audio and allocates.
+#[derive(Debug)]
+pub struct PyinMeter<S: Sample> {
+    cfg: PyinConfig,
+    plan: YinPlan,
+    model: (usize, BandedTransition<f64>),
+    audio: Gathered<S>,
+}
+
+impl<S: Sample> StreamMeter for PyinMeter<S> {
+    type Input<'a> = Mono<'a, S>;
+    type Item = ();
+    type Output = Result<Vec<PyinFrame>, PitchError>;
+
+    /// Gathers the next chunk of the audio; no frame is decoded before the end.
+    fn push(&mut self, chunk: Mono<'_, S>, _: &mut impl Extend<()>) -> Result<(), MeterError> {
+        self.audio.push(chunk);
+        Ok(())
+    }
+
+    /// The track of the audio gathered, or what [`pyin_track`] refuses it for.
+    fn finish(self) -> Result<Vec<PyinFrame>, PitchError> {
+        pyin_at(&self.cfg, self.plan, self.model, self.audio.samples())
+    }
+}
+
+/// [`pyin_track`] over a resolved band and `f64` samples.
+fn pyin_at(
+    cfg: &PyinConfig,
+    plan: YinPlan,
+    (bins, transition): (usize, BandedTransition<f64>),
+    samples: &[f64],
+) -> Result<Vec<PyinFrame>, PitchError> {
     let frame = plan.buffer_size();
-    if samples.frames() < frame {
+    let hop = cfg
+        .hop
+        .map_or(Samples::new((frame.get() / 8).max(1)), PitchHop::get);
+    if samples.len() < frame.get() {
         return Err(PitchError::InsufficientInput {
             needed: frame,
-            got: samples.frames(),
+            got: Samples::new(samples.len()),
         });
     }
-    let samples = widen(samples.samples());
-    let frames = Framing::new(frame, hop.get()).frames_for(Samples::new(samples.len()));
+    let frames = Framing::new(frame, hop).frames_for(Samples::new(samples.len()));
     check_frame_count(frames, MAX_FRAMES)?;
 
     let weights = threshold_weights(cfg.threshold_mean.get());
@@ -263,7 +355,7 @@ pub fn pyin_track<S: Sample>(
     let mut voiced = Vec::with_capacity(frames.get());
     let mut candidates = vec![0.0f64; bins];
     let path = viterbi(transition, frames.get(), |t, row| {
-        let start = t * hop.get().get();
+        let start = t * hop.get();
         candidates.fill(0.0);
         let found = candidate_weights(
             &mut detector,

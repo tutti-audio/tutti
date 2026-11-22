@@ -13,14 +13,18 @@
 //! An offline or UI-thread API: it allocates the padded spectra and the
 //! correlation on every call, through [`cross_correlate_shaped`].
 
-use tutti_buffers::{Mono, Sample};
+use std::sync::Arc;
+
+use tutti_buffers::{
+    ChannelLayout, ChannelTopology, Float, Fold, FoldError, Mono, MonoMut, Sample, Wave,
+};
 use tutti_units::{Confidence, SampleRate, Samples, Seconds};
 
-use crate::AlignError;
 use crate::analyses::xcorr::{CrossCorrelation, cross_correlate_shaped};
-use crate::convert::widen;
+use crate::convert::{Gathered, widen};
 use crate::framing::check_nyquist;
 use crate::meters::chroma::FrequencyBand;
+use crate::{AlignError, Measure, MeterError, StreamMeter};
 
 use tutti_dsp::Complex64;
 use tutti_dsp::FftScratch;
@@ -74,16 +78,35 @@ impl AlignConfig {
 /// Where a take sits against its reference.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Alignment {
+    lag: isize,
+    offset: f64,
+    confidence: Confidence,
+}
+
+impl Alignment {
     /// The whole-sample lag: positive means the take is a **delayed** copy of
     /// the reference, so shifting it earlier by this much aligns it.
-    pub lag: isize,
-    /// The sub-sample correction to `lag`, in samples, within `-0.5..=0.5`.
-    /// A parabola through the peak and its two neighbours; zero when a
-    /// neighbour is outside the overlap or the three do not bend down.
+    ///
+    /// Signed, where [`Samples`] is a count: [`delay`](Self::delay) is the
+    /// reading in [`Seconds`].
+    #[inline]
+    #[must_use]
+    pub fn lag(&self) -> isize {
+        self.lag
+    }
+
+    /// The sub-sample correction to [`lag`](Self::lag), in samples, within
+    /// `-0.5..=0.5`. A parabola through the peak and its two neighbours; zero
+    /// when a neighbour is outside the overlap or the three do not bend down.
     ///
     /// A bare `f64`: [`Samples`] is a whole-sample count, and a fraction of a
     /// sample has no unit type of its own.
-    pub offset: f64,
+    #[inline]
+    #[must_use]
+    pub fn offset(&self) -> f64 {
+        self.offset
+    }
+
     /// How distinct the peak is: `1 - second / peak`, where `second` is the
     /// strongest value in the search window outside the peak's own lobe (the
     /// run around it that stays above half its height, down to the next local
@@ -91,10 +114,12 @@ pub struct Alignment {
     /// near one for a sharp peak over a quiet floor, near zero for unrelated
     /// signals, and zero when the window holds no competitor (a bound of
     /// zero, or a lobe that fills it).
-    pub confidence: Confidence,
-}
+    #[inline]
+    #[must_use]
+    pub fn confidence(&self) -> Confidence {
+        self.confidence
+    }
 
-impl Alignment {
     /// The delay in samples, `lag + offset`.
     ///
     /// The sum is taken in `f64`, so a long lag keeps its sub-sample offset.
@@ -138,12 +163,24 @@ pub fn align<S: Sample>(
     take: Mono<'_, S>,
     rate: impl Into<SampleRate>,
 ) -> Result<Alignment, AlignError> {
-    let rate = rate.into();
+    align_at(
+        config,
+        &widen(reference.samples()),
+        &widen(take.samples()),
+        rate.into(),
+    )
+}
+
+/// [`align`] over `f64` samples.
+fn align_at(
+    config: &AlignConfig,
+    reference: &[f64],
+    take: &[f64],
+    rate: SampleRate,
+) -> Result<Alignment, AlignError> {
     if let Some(band) = config.band {
         check_nyquist(band.max(), rate)?;
     }
-    let (reference, take) = (widen(reference.samples()), widen(take.samples()));
-    let (reference, take) = (&reference[..], &take[..]);
     for buffer in [reference, take] {
         if buffer.is_empty() {
             return Err(AlignError::InsufficientInput {
@@ -169,15 +206,119 @@ pub fn align<S: Sample>(
         .peak_within(config.max_lag)
         .ok_or(AlignError::NoSignal)?;
     Ok(Alignment {
-        lag: peak.lag,
-        offset: parabolic_offset(&correlation, peak.lag),
+        lag: peak.lag(),
+        offset: parabolic_offset(&correlation, peak.lag()),
         confidence: distinctness(
             |l| correlation.at(l).unwrap_or(f64::NEG_INFINITY),
-            peak.lag,
-            peak.value,
+            peak.lag(),
+            peak.value(),
             window(&correlation, config.max_lag),
         ),
     })
+}
+
+/// An alignment of takes against one reference: the [`AlignConfig`] and the
+/// reference [`Wave`], where the audio analyzed is the take. As a [`Measure`]
+/// it is [`align`] with the reference fixed.
+///
+/// A reference of more than one channel is folded to mono by its own topology,
+/// as the audio a mono analysis reads is.
+#[derive(Debug, Clone)]
+pub struct AlignTo<R: Float> {
+    config: AlignConfig,
+    reference: Arc<Wave<R>>,
+}
+
+impl<R: Float> AlignTo<R> {
+    /// Aligns takes against `reference` as `config` says.
+    #[must_use]
+    pub fn new(config: AlignConfig, reference: impl Into<Arc<Wave<R>>>) -> Self {
+        Self {
+            config,
+            reference: reference.into(),
+        }
+    }
+
+    /// The reference as `f64` samples of one channel.
+    fn mono_reference(&self) -> Result<Vec<f64>, FoldError> {
+        let wave = &self.reference;
+        if wave.channels() == 1 {
+            return Ok(widen(wave.channel(0).samples()));
+        }
+        let fold = Fold::<R>::between(
+            wave.topology(),
+            &ChannelTopology::default_for(ChannelLayout::MONO),
+        )?;
+        let mut mono = vec![R::ZERO; wave.len().get()];
+        fold.fold_planar_channel(wave.planes(), 0, MonoMut::new(&mut mono))?;
+        Ok(widen(&mono))
+    }
+}
+
+impl<S: Sample, R: Float> Measure<S> for AlignTo<R> {
+    type Context = SampleRate;
+    type Meter = AlignMeter<S>;
+
+    /// A meter that aligns the audio it is fed, as the take, against the
+    /// reference, once it has all of it.
+    ///
+    /// # Errors
+    ///
+    /// [`AboveNyquist`](crate::AboveNyquist) when the band's top exceeds half `rate`;
+    /// [`MeterError::ReferenceRate`] when the reference is at another rate;
+    /// [`MeterError::ReferenceFold`] when it cannot be folded to mono.
+    fn measure(&self, rate: SampleRate) -> Result<AlignMeter<S>, MeterError> {
+        if let Some(band) = self.config.band {
+            check_nyquist(band.max(), rate)?;
+        }
+        if self.reference.sample_rate() != rate {
+            return Err(MeterError::ReferenceRate {
+                reference: self.reference.sample_rate(),
+                take: rate,
+            });
+        }
+        Ok(AlignMeter {
+            config: self.config,
+            reference: self.mono_reference()?,
+            rate,
+            take: Gathered::new(),
+        })
+    }
+}
+
+/// A running alignment at one rate: gathers the take and finds its delay
+/// against the reference at [`finish`](StreamMeter::finish), as [`align`] does.
+///
+/// Not for the audio thread: it holds the whole take, so it grows with the
+/// audio and allocates.
+#[derive(Debug)]
+pub struct AlignMeter<S: Sample> {
+    config: AlignConfig,
+    reference: Vec<f64>,
+    rate: SampleRate,
+    take: Gathered<S>,
+}
+
+impl<S: Sample> StreamMeter for AlignMeter<S> {
+    type Input<'a> = Mono<'a, S>;
+    type Item = ();
+    type Output = Result<Alignment, AlignError>;
+
+    /// Gathers the next chunk of the take; no lag is found before the end.
+    fn push(&mut self, chunk: Mono<'_, S>, _: &mut impl Extend<()>) -> Result<(), MeterError> {
+        self.take.push(chunk);
+        Ok(())
+    }
+
+    /// The alignment of the take gathered, or what [`align`] refuses it for.
+    fn finish(self) -> Result<Alignment, AlignError> {
+        align_at(
+            &self.config,
+            &self.reference,
+            self.take.samples(),
+            self.rate,
+        )
+    }
 }
 
 /// The lags `peak_within(max_lag)` searches: `-max_lag..=max_lag` clamped to the

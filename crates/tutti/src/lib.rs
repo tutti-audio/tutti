@@ -74,7 +74,7 @@
 //! | `tutti::midi` | the common MIDI path: files, messages, keys, routes, devices, profiles | `midi` |
 //! | `tutti::codec` | audio file settings: `Spec`, `FlacLevel`, `IntDepth` and the decode errors | `codec` |
 //! | `tutti::sampler` | sample playback voices and loops | `sampler` |
-//! | `tutti::measure` | the analyses `Session::analyze` runs: loudness, peaks, silence, onsets, spectrum, chroma, the vectorscope | `analyze` |
+//! | `tutti::measure` | the analyses `Session::analyze` runs: loudness, peaks, silence, onsets, spectrum, chroma, the vectorscope, notes, pitch, tempo, beats, chords, key, alignment | `analyze` |
 //! | `tutti::modulation` | modulation sources, curves and their errors | always |
 //! | `tutti::polysynth` | the polyphonic synth node and its configs | `synth` |
 //! | `tutti::soundfont` | the SoundFont playback node and its config | `soundfont` |
@@ -530,7 +530,6 @@ pub mod session {
         BusFeed, BusFold, BusSide, EdgeFade, EdgeId, EventCapacityError, ForkError, InletCounts,
         InstrumentNode, MainOutputError, MainOutputId, MeterId, NodeBus, ParamIn, PrerollTable,
     };
-    pub use tutti_modulation::PeriodPoint;
     pub use tutti_session::Apply;
     #[cfg(feature = "device")]
     pub use tutti_session::ClockError;
@@ -666,7 +665,8 @@ pub mod sampler {
 /// Audio measurement (`tutti-measure`): the analyses `Session::analyze` runs.
 /// Each is a config (`PeakConfig`, `OnsetConfig`, `LoudnessConfig`, ...) that is
 /// a `Measure`, whose meter folds chunks into a result: loudness, peaks,
-/// silence, onsets, spectrum, chroma and the vectorscope. Feature `analyze`.
+/// silence, onsets, spectrum, chroma, the vectorscope, notes, pitch, tempo,
+/// beats, chords, key and take alignment. Feature `analyze`.
 #[cfg(feature = "analyze")]
 pub mod measure {
     pub use tutti_measure::{
@@ -688,6 +688,37 @@ pub mod measure {
         PeakFloor, PeakFloorError, Smoothing, SpectrumConfig, SpectrumFloor, SpectrumFloorError,
         SpectrumMeter, SpectrumTime, SpectrumTimeError, TuningOffset, TuningOffsetError,
         TuningReference,
+    };
+    // Notes and pitch.
+    pub use tutti_measure::{
+        NoteConfig, NoteError, NoteEvent, NoteMeter, NoteSpan, NoteSpanError, PitchError, PitchHop,
+        PitchHopError, PitchSplit, PitchSplitError, PyinConfig, PyinFrame, PyinMeter, PyinSwitch,
+        PyinSwitchError, PyinThresholdMean, PyinThresholdMeanError, PyinTransitionWidth,
+        PyinTransitionWidthError, VelocityRange, pyin_track, transcribe,
+    };
+    // Tempo and beats.
+    pub use tutti_measure::{
+        Alternatives, AlternativesError, BeatConfig, BeatGrid, BeatMeter, EmptyTempoRange,
+        PriorSpread, PriorSpreadError, Tempo, TempoCandidate, TempoConfig, TempoEstimateError,
+        TempoMeter, TempoRange, Tightness, TightnessError, estimate_tempo, track_beats,
+    };
+    // Chords and key.
+    pub use tutti_measure::{
+        ChordConfig, ChordError, ChordMeter, ChordQuality, ChordSpan, KeyConfig, KeyEstimate,
+        KeyEstimateError, KeyMeter, KeyProfile, SelfTransition, SelfTransitionError, Sharpness,
+        SharpnessError, detect_chords, estimate_key,
+    };
+    // A key and its mode, named apart from the session's `Key` and the dsp `Mode`.
+    pub use tutti_measure::{Key as MusicalKey, Mode as KeyMode};
+    // Alignment and cross-correlation.
+    pub use tutti_measure::{
+        AlignConfig, AlignError, AlignMeter, AlignTo, Alignment, CorrelationPeak, CrossCorrelation,
+        cross_correlate,
+    };
+    // Spectral shape and cepstrum, over the magnitudes of a short-time transform.
+    pub use tutti_measure::{
+        MfccConfig, MfccError, SpectralFeatures, StftConfig, StftMagnitude, mfcc,
+        spectral_features, stft_magnitude,
     };
     // Loudness, waveform blocks and the vectorscope.
     pub use tutti_measure::{
@@ -712,7 +743,7 @@ pub mod modulation {
         SignalKind, TargetDecl,
     };
     pub use tutti_modulation::{
-        ControlProgram, InputLayer, Layer, LfoShape, SignalSource, SourceId, Waveform,
+        ControlProgram, InputLayer, Layer, LfoShape, PeriodPoint, SignalSource, SourceId, Waveform,
     };
     pub use tutti_modulation::{
         DepthSnapshot, LayerClock, LayerId, Leg, PlayGrid, ProgramTime, RateAnchor, RouteKey,

@@ -61,10 +61,13 @@ use tutti_units::Samples;
 
 use tutti_units::ranged;
 
-use crate::ChordError;
-use crate::Region;
+use tutti_buffers::{Mono, Sample};
+use tutti_units::SampleRate;
+
+use crate::convert::Gathered;
 use crate::framing::{Framing, check_frame_count};
-use crate::meters::chroma::{CLASSES, Chroma};
+use crate::meters::chroma::{CLASSES, Chroma, ChromaConfig, chroma};
+use crate::{ChordError, Measure, MeterError, Region, StreamMeter};
 use tutti_dsp::{FrameCount, FrameIndex, Grid, median, sticky_viterbi};
 
 /// The most frames one call smooths, bounding the backpointers (50 bytes a
@@ -119,6 +122,11 @@ ranged! {
     /// The probability of staying in a chord from one frame to the next: finite
     /// and in `(0, 1)`. 1/25 is the even share, which leaves each frame to its
     /// own best state.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "f64", into = "f64")
+    )]
     SelfTransition(f64), SelfTransitionError,
     "a self-transition probability within (0, 1)",
     |raw| raw > 0.0 && raw < 1.0
@@ -128,28 +136,43 @@ ranged! {
     /// How strongly a frame's similarity weighs against the transition prior:
     /// finite and in `(0, 100]`. The Viterbi scores are summed over every frame,
     /// so the upper bound keeps their sum within what `f64` resolves.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "f64", into = "f64")
+    )]
     Sharpness(f64), SharpnessError, "a sharpness within (0, 100]",
     |raw| raw > 0.0 && raw <= 100.0
 }
 
-/// What [`detect_chords`] smooths with. Immutable once built. The framing the
-/// spans are placed on is the chroma's own ([`Chroma::framing`](crate::Chroma::framing)),
-/// so the config holds none.
+/// What [`detect_chords`] smooths with, and the chroma a [`ChordMeter`] reads the
+/// chords from. Immutable once built. The framing the spans are placed on is
+/// the chroma's own ([`Chroma::framing`](crate::Chroma::framing)).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ChordConfig {
+    chroma: ChromaConfig,
     self_transition: SelfTransition,
     sharpness: Sharpness,
 }
 
 impl ChordConfig {
-    /// A self-transition of 0.9 and a sharpness of 8: a chord must last about
-    /// three frames to be kept.
+    /// The default [`ChromaConfig`], a self-transition of 0.9 and a sharpness
+    /// of 8: a chord must last about three frames to be kept.
     #[must_use]
     pub fn new() -> Self {
         Self {
+            chroma: ChromaConfig::new(),
             self_transition: SelfTransition::of(0.9),
             sharpness: Sharpness::of(8.0),
         }
+    }
+
+    /// The chroma a meter reads the chords from. [`detect_chords`] takes a
+    /// chroma already made and ignores it.
+    #[must_use]
+    pub fn chroma(mut self, chroma: ChromaConfig) -> Self {
+        self.chroma = chroma;
+        self
     }
 
     /// The probability of staying in a state from one frame to the next.
@@ -170,6 +193,58 @@ impl ChordConfig {
 impl Default for ChordConfig {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<S: Sample> Measure<S> for ChordConfig {
+    type Context = SampleRate;
+    type Meter = ChordMeter<S>;
+
+    /// A meter that reads the chords of the audio at `rate`, once it has all
+    /// of it.
+    ///
+    /// # Errors
+    ///
+    /// What [`ChromaConfig`] refuses at `rate`.
+    fn measure(&self, rate: SampleRate) -> Result<ChordMeter<S>, MeterError> {
+        self.chroma.plan(rate)?;
+        Ok(ChordMeter {
+            cfg: *self,
+            rate,
+            audio: Gathered::new(),
+        })
+    }
+}
+
+/// A running chord detection at one rate: gathers the audio and, at
+/// [`finish`](StreamMeter::finish), takes its [`chroma()`] and reads the chords
+/// from it with [`detect_chords`].
+///
+/// Not for the audio thread: it holds the whole stream, so it grows with the
+/// audio and allocates.
+#[derive(Debug)]
+pub struct ChordMeter<S: Sample> {
+    cfg: ChordConfig,
+    rate: SampleRate,
+    audio: Gathered<S>,
+}
+
+impl<S: Sample> StreamMeter for ChordMeter<S> {
+    type Input<'a> = Mono<'a, S>;
+    type Item = ();
+    type Output = Result<Vec<ChordSpan>, ChordError>;
+
+    /// Gathers the next chunk of the audio; no chord is read before the end.
+    fn push(&mut self, chunk: Mono<'_, S>, _: &mut impl Extend<()>) -> Result<(), MeterError> {
+        self.audio.push(chunk);
+        Ok(())
+    }
+
+    /// The chords of the audio gathered, or what its chroma or
+    /// [`detect_chords`] refuses it for.
+    fn finish(self) -> Result<Vec<ChordSpan>, ChordError> {
+        let made = chroma(&self.cfg.chroma, Mono::new(self.audio.samples()), self.rate)?;
+        detect_chords(&self.cfg, &made)
     }
 }
 

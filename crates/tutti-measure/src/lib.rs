@@ -118,9 +118,26 @@
 //! is part of the analysis, and check the view's width against it
 //! ([`MeterError::ChunkLayoutMismatch`]).
 //!
-//! The rest are stateless: `yin`, `correlate`, `cross_correlate`, `align`,
-//! `estimate_tempo`, `transcribe` and `spectral_features` are pure functions of
-//! their input, and `stft` is batch-only: there is no incremental transform.
+//! The whole-buffer analyses are configs too, and their meters gather the
+//! folded mono and run the one-shot's algorithm at [`finish`](StreamMeter::finish), so a
+//! meter fed chunks reads exactly what the one-shot reads of the whole buffer.
+//! Their [`Output`](StreamMeter::Output) is a `Result` of the analysis's own
+//! error, since what they refuse (a silent buffer, one too short) is known only
+//! at the end:
+//!
+//! | Analysis | Config | One-shot | Meter | Output |
+//! |---|---|---|---|---|
+//! | notes | [`NoteConfig`] | [`transcribe`] | [`NoteMeter`] | `Result<Vec<NoteEvent>, NoteError>` |
+//! | pitch track | [`PyinConfig`] | [`pyin_track`] | [`PyinMeter`] | `Result<Vec<PyinFrame>, PitchError>` |
+//! | tempo | [`TempoConfig`] | [`estimate_tempo()`] | [`TempoMeter`] | `Result<Tempo, TempoEstimateError>` |
+//! | beats | [`BeatConfig`] | [`track_beats()`] | [`BeatMeter`] | `Result<BeatGrid, TempoEstimateError>` |
+//! | chords | [`ChordConfig`] | [`chroma()`] then [`detect_chords`] | [`ChordMeter`] | `Result<Vec<ChordSpan>, ChordError>` |
+//! | key | [`KeyConfig`] | [`chroma()`] then [`estimate_key`] | [`KeyMeter`] | `Result<KeyEstimate, KeyEstimateError>` |
+//! | alignment | [`AlignTo`] | [`align()`] | [`AlignMeter`] | `Result<Alignment, AlignError>` |
+//!
+//! The rest are stateless: `yin`, `correlate`, `cross_correlate`, `mfcc` and
+//! `spectral_features` are pure functions of their input, and `stft` is
+//! batch-only: there is no incremental transform.
 //!
 //! ## Quick start
 //!
@@ -337,26 +354,29 @@ mod range_contracts;
 #[cfg(test)]
 mod test_rng;
 
-pub use analyses::align::{AlignConfig, Alignment, align};
+pub use analyses::align::{AlignConfig, AlignMeter, AlignTo, Alignment, align};
 pub use analyses::chord::{
-    ChordConfig, ChordQuality, ChordSpan, SelfTransition, SelfTransitionError, Sharpness,
-    SharpnessError, detect_chords,
+    ChordConfig, ChordMeter, ChordQuality, ChordSpan, SelfTransition, SelfTransitionError,
+    Sharpness, SharpnessError, detect_chords,
 };
 pub use analyses::features::{SpectralFeatures, spectral_features};
-pub use analyses::key::{Key, KeyEstimate, KeyProfile, Mode, estimate_key, estimate_key_from_mean};
+pub use analyses::key::{
+    Key, KeyConfig, KeyEstimate, KeyMeter, KeyProfile, Mode, estimate_key, estimate_key_from_mean,
+};
 pub use analyses::mfcc::{MfccConfig, mfcc};
 pub use analyses::notes::{
-    NoteConfig, NoteEvent, NoteSpan, NoteSpanError, PitchHop, PitchHopError, PitchSplit,
+    NoteConfig, NoteEvent, NoteMeter, NoteSpan, NoteSpanError, PitchHop, PitchHopError, PitchSplit,
     PitchSplitError, VelocityRange, frame_levels, notes_from_track, transcribe,
 };
 pub use analyses::pyin::{
-    PyinConfig, PyinFrame, PyinSwitch, PyinSwitchError, PyinThresholdMean, PyinThresholdMeanError,
-    PyinTransitionWidth, PyinTransitionWidthError, pyin_track,
+    PyinConfig, PyinFrame, PyinMeter, PyinSwitch, PyinSwitchError, PyinThresholdMean,
+    PyinThresholdMeanError, PyinTransitionWidth, PyinTransitionWidthError, pyin_track,
 };
 pub use analyses::tempo::{
-    Alternatives, AlternativesError, BeatGrid, PriorSpread, PriorSpreadError, Tempo,
-    TempoCandidate, TempoConfig, TempoRange, Tightness, TightnessError, estimate_tempo,
-    estimate_tempo_from_novelty, track_beats, track_beats_from_novelty,
+    Alternatives, AlternativesError, BeatConfig, BeatGrid, BeatMeter, PriorSpread,
+    PriorSpreadError, Tempo, TempoCandidate, TempoConfig, TempoMeter, TempoRange, Tightness,
+    TightnessError, estimate_tempo, estimate_tempo_from_novelty, track_beats,
+    track_beats_from_novelty,
 };
 pub use analyses::transform::{
     HopPolicy, NormalizedMagnitudes, RawMagnitudes, SampleRange, Stft, StftConfig, StftMagnitude,

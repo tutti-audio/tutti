@@ -29,12 +29,12 @@
 //! autocorrelation and the tracker's tables.
 
 use crate::level::SILENCE_FLOOR;
-use crate::{EmptyTempoRange, FramingError, TempoEstimateError};
+use crate::{EmptyTempoRange, FramingError, Measure, MeterError, StreamMeter, TempoEstimateError};
 use tutti_buffers::{Float, Mono, Sample};
 use tutti_units::{Bpm, Confidence, SampleRate, Samples, Seconds};
 
 use crate::analyses::xcorr::cross_correlate;
-use crate::convert::widen;
+use crate::convert::{Gathered, widen};
 use crate::framing::Framing;
 use crate::meters::onset::{DetectionFunction, OnsetConfig, onset_lag, run};
 
@@ -64,6 +64,11 @@ const FLAT: f64 = f64::EPSILON;
 
 ranged! {
     /// How many runner-up tempi a tempo estimate holds: within `0..=16`.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "usize", into = "usize")
+    )]
     Alternatives(usize), AlternativesError, "an alternatives count within 0..=16",
     |raw| raw <= MAX_ALTERNATIVES
 }
@@ -72,6 +77,11 @@ ranged! {
     /// How wide the tempo prior is, in octaves (a factor of two in tempo per
     /// octave): finite and above zero. A ratio between two tempi, which no unit
     /// type covers.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "f64", into = "f64")
+    )]
     PriorSpread(f64), PriorSpreadError, "a prior spread above zero",
     |raw| raw > 0.0 && raw.is_finite()
 }
@@ -80,6 +90,11 @@ ranged! {
     /// How hard the beat tracker holds to the tempo: finite and not negative.
     /// The weight of a penalty against a novelty score of unit standard
     /// deviation, which no unit type covers.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "f64", into = "f64")
+    )]
     Tightness(f64), TightnessError, "a tightness of zero or more",
     |raw| raw >= 0.0 && raw.is_finite()
 }
@@ -207,6 +222,129 @@ impl TempoConfig {
     }
 }
 
+impl TempoConfig {
+    /// Checks the framing against `rate`, as the analyses do before reading audio.
+    fn check(&self, rate: SampleRate) -> Result<(), MeterError> {
+        OnsetConfig::new(DetectionFunction::SpectralFlux)
+            .framing(self.framing)
+            .plan(rate)?;
+        Ok(())
+    }
+}
+
+impl<S: Sample> Measure<S> for TempoConfig {
+    type Context = SampleRate;
+    type Meter = TempoMeter<S>;
+
+    /// A meter that estimates the tempo of the audio at `rate`, once it has
+    /// all of it.
+    ///
+    /// # Errors
+    ///
+    /// [`FramingError::ZeroWindow`] or [`FramingError::ZeroHop`] for a zero
+    /// window or hop.
+    fn measure(&self, rate: SampleRate) -> Result<TempoMeter<S>, MeterError> {
+        self.check(rate)?;
+        Ok(TempoMeter {
+            cfg: *self,
+            rate,
+            audio: Gathered::new(),
+        })
+    }
+}
+
+/// A running tempo estimate at one rate: gathers the audio and estimates the
+/// tempo at [`finish`](StreamMeter::finish), as [`estimate_tempo`] does.
+///
+/// Not for the audio thread: it holds the whole stream, so it grows with the
+/// audio and allocates.
+#[derive(Debug)]
+pub struct TempoMeter<S: Sample> {
+    cfg: TempoConfig,
+    rate: SampleRate,
+    audio: Gathered<S>,
+}
+
+impl<S: Sample> StreamMeter for TempoMeter<S> {
+    type Input<'a> = Mono<'a, S>;
+    type Item = ();
+    type Output = Result<Tempo, TempoEstimateError>;
+
+    /// Gathers the next chunk of the audio; no tempo is read before the end.
+    fn push(&mut self, chunk: Mono<'_, S>, _: &mut impl Extend<()>) -> Result<(), MeterError> {
+        self.audio.push(chunk);
+        Ok(())
+    }
+
+    /// The tempo of the audio gathered, or what [`estimate_tempo`] refuses it for.
+    fn finish(self) -> Result<Tempo, TempoEstimateError> {
+        estimate_tempo_at(&self.cfg, self.audio.samples(), self.rate)
+    }
+}
+
+/// What [`track_beats`] reads: a [`TempoConfig`], whose beat grid a meter
+/// places where [`TempoConfig`]'s own meter reads the tempo.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BeatConfig(TempoConfig);
+
+impl BeatConfig {
+    /// Tracks beats at the tempo `tempo` estimates.
+    #[must_use]
+    pub fn new(tempo: TempoConfig) -> Self {
+        Self(tempo)
+    }
+}
+
+impl<S: Sample> Measure<S> for BeatConfig {
+    type Context = SampleRate;
+    type Meter = BeatMeter<S>;
+
+    /// A meter that places the beats of the audio at `rate`, once it has all
+    /// of it.
+    ///
+    /// # Errors
+    ///
+    /// [`FramingError::ZeroWindow`] or [`FramingError::ZeroHop`] for a zero
+    /// window or hop.
+    fn measure(&self, rate: SampleRate) -> Result<BeatMeter<S>, MeterError> {
+        self.0.check(rate)?;
+        Ok(BeatMeter {
+            cfg: self.0,
+            rate,
+            audio: Gathered::new(),
+        })
+    }
+}
+
+/// A running beat grid at one rate: gathers the audio and places the beats at
+/// [`finish`](StreamMeter::finish), as [`track_beats`] does.
+///
+/// Not for the audio thread: it holds the whole stream, so it grows with the
+/// audio and allocates.
+#[derive(Debug)]
+pub struct BeatMeter<S: Sample> {
+    cfg: TempoConfig,
+    rate: SampleRate,
+    audio: Gathered<S>,
+}
+
+impl<S: Sample> StreamMeter for BeatMeter<S> {
+    type Input<'a> = Mono<'a, S>;
+    type Item = ();
+    type Output = Result<BeatGrid, TempoEstimateError>;
+
+    /// Gathers the next chunk of the audio; no beat is placed before the end.
+    fn push(&mut self, chunk: Mono<'_, S>, _: &mut impl Extend<()>) -> Result<(), MeterError> {
+        self.audio.push(chunk);
+        Ok(())
+    }
+
+    /// The beats of the audio gathered, or what [`track_beats`] refuses it for.
+    fn finish(self) -> Result<BeatGrid, TempoEstimateError> {
+        track_beats_at(&self.cfg, self.audio.samples(), self.rate)
+    }
+}
+
 /// A tempo other than the winner.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TempoCandidate {
@@ -277,10 +415,17 @@ pub fn estimate_tempo<S: Sample>(
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
 ) -> Result<Tempo, TempoEstimateError> {
-    let rate = rate.into();
-    let hop = cfg.framing.hop();
-    let novelty = novelty(cfg, &widen(samples.samples()), rate)?.0;
-    estimate_tempo_from_novelty(cfg, &novelty, rate, hop)
+    estimate_tempo_at(cfg, &widen(samples.samples()), rate.into())
+}
+
+/// [`estimate_tempo`] over `f64` samples.
+fn estimate_tempo_at(
+    cfg: &TempoConfig,
+    samples: &[f64],
+    rate: SampleRate,
+) -> Result<Tempo, TempoEstimateError> {
+    let novelty = novelty(cfg, samples, rate)?.0;
+    estimate_tempo_from_novelty(cfg, &novelty, rate, cfg.framing.hop())
 }
 
 /// Estimates the tempo from a novelty curve of one value per `hop` samples.
@@ -324,8 +469,16 @@ pub fn track_beats<S: Sample>(
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
 ) -> Result<BeatGrid, TempoEstimateError> {
-    let rate = rate.into();
-    let (novelty, geometry) = novelty(cfg, &widen(samples.samples()), rate)?;
+    track_beats_at(cfg, &widen(samples.samples()), rate.into())
+}
+
+/// [`track_beats`] over `f64` samples.
+fn track_beats_at(
+    cfg: &TempoConfig,
+    samples: &[f64],
+    rate: SampleRate,
+) -> Result<BeatGrid, TempoEstimateError> {
+    let (novelty, geometry) = novelty(cfg, samples, rate)?;
     let mut grid = track_beats_from_novelty(cfg, &novelty, rate, geometry.hop(), None)?;
     let shift = onset_lag(geometry);
     for beat in &mut grid.beats {

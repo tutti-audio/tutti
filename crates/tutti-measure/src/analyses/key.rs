@@ -11,11 +11,13 @@
 //! chroma with no spread, which is why silence and a flat chroma are errors
 //! rather than an arbitrary key.
 
+use tutti_buffers::{Mono, Sample};
 use tutti_music::PitchClass;
-use tutti_units::Confidence;
+use tutti_units::{Confidence, SampleRate};
 
-use crate::KeyEstimateError;
-use crate::meters::chroma::{CLASSES, mean_of_rows};
+use crate::convert::Gathered;
+use crate::meters::chroma::{CLASSES, ChromaConfig, chroma, mean_of_rows};
+use crate::{KeyEstimateError, Measure, MeterError, StreamMeter};
 
 use tutti_dsp::Grid;
 
@@ -97,6 +99,83 @@ pub struct KeyEstimate {
     pub confidence: Confidence,
     /// The second best key.
     pub runner_up: Key,
+}
+
+/// What a [`KeyMeter`] reads a key with: the [`KeyProfile`] and the
+/// [`ChromaConfig`] whose mean it is correlated with.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KeyConfig {
+    profile: KeyProfile,
+    chroma: ChromaConfig,
+}
+
+impl KeyConfig {
+    /// Reads the key of the default [`ChromaConfig`] against `profile`.
+    #[must_use]
+    pub fn new(profile: KeyProfile) -> Self {
+        Self {
+            profile,
+            chroma: ChromaConfig::new(),
+        }
+    }
+
+    /// The chroma the key is read from.
+    #[must_use]
+    pub fn chroma(mut self, chroma: ChromaConfig) -> Self {
+        self.chroma = chroma;
+        self
+    }
+}
+
+impl<S: Sample> Measure<S> for KeyConfig {
+    type Context = SampleRate;
+    type Meter = KeyMeter<S>;
+
+    /// A meter that reads the key of the audio at `rate`, once it has all of it.
+    ///
+    /// # Errors
+    ///
+    /// What [`ChromaConfig`] refuses at `rate`.
+    fn measure(&self, rate: SampleRate) -> Result<KeyMeter<S>, MeterError> {
+        self.chroma.plan(rate)?;
+        Ok(KeyMeter {
+            cfg: *self,
+            rate,
+            audio: Gathered::new(),
+        })
+    }
+}
+
+/// A running key estimate at one rate: gathers the audio and, at
+/// [`finish`](StreamMeter::finish), takes its [`chroma()`] and reads the key of
+/// it with [`estimate_key`].
+///
+/// Not for the audio thread: it holds the whole stream, so it grows with the
+/// audio and allocates.
+#[derive(Debug)]
+pub struct KeyMeter<S: Sample> {
+    cfg: KeyConfig,
+    rate: SampleRate,
+    audio: Gathered<S>,
+}
+
+impl<S: Sample> StreamMeter for KeyMeter<S> {
+    type Input<'a> = Mono<'a, S>;
+    type Item = ();
+    type Output = Result<KeyEstimate, KeyEstimateError>;
+
+    /// Gathers the next chunk of the audio; no key is read before the end.
+    fn push(&mut self, chunk: Mono<'_, S>, _: &mut impl Extend<()>) -> Result<(), MeterError> {
+        self.audio.push(chunk);
+        Ok(())
+    }
+
+    /// The key of the audio gathered, or what its chroma or [`estimate_key`]
+    /// refuses it for.
+    fn finish(self) -> Result<KeyEstimate, KeyEstimateError> {
+        let made = chroma(&self.cfg.chroma, Mono::new(self.audio.samples()), self.rate)?;
+        estimate_key(self.cfg.profile, made.grid())
+    }
 }
 
 /// The key of a chromagram's mean.
