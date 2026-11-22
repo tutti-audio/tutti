@@ -1,9 +1,7 @@
 //! The one vocabulary an event holder reports its losses in.
 
-use std::iter::Sum;
-use std::ops::{Add, AddAssign};
-
-use tutti_rt::Count;
+use core::iter::Sum;
+use core::ops::{Add, AddAssign};
 
 /// What an event path lost, in four cumulative counts of **events**.
 ///
@@ -27,7 +25,7 @@ use tutti_rt::Count;
 /// kin, added together) or read a holder's.
 ///
 /// ```
-/// use tutti_graph::Losses;
+/// use tutti_units::Losses;
 ///
 /// let a = Losses::lost(1);
 /// let b = Losses::evicted(2) + Losses::refused(3) + Losses::late(4);
@@ -135,27 +133,6 @@ impl Sum for Losses {
     }
 }
 
-/// One tally per count, in field order: a `Counter<Losses>` keeps `lost`,
-/// `evicted`, `refused` and `late` as four words, each saturating on its own,
-/// so a port's losses are one counter. A `Tally<Losses>` wraps per word
-/// instead (see `Tally`); only the counter saturates.
-impl Count for Losses {
-    type Words = [u64; 4];
-
-    fn to_words(self) -> [u64; 4] {
-        [self.lost, self.evicted, self.refused, self.late]
-    }
-
-    fn from_words([lost, evicted, refused, late]: [u64; 4]) -> Self {
-        Self {
-            lost,
-            evicted,
-            refused,
-            late,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,32 +163,5 @@ mod tests {
                 ..Losses::NONE
             }
         );
-    }
-
-    /// A counter of losses adds field by field, saturating each on its own,
-    /// and carries on across a reopened writer.
-    #[test]
-    fn a_losses_counter_tallies_each_field() {
-        let (mut writer, total) = tutti_rt::counter::<Losses>();
-        writer.add(Losses::lost(2) + Losses::late(1));
-        writer.add(Losses::refused(4) + Losses::lost(1));
-        assert_eq!(
-            total.get(),
-            Losses {
-                lost: 3,
-                refused: 4,
-                late: 1,
-                ..Losses::NONE
-            }
-        );
-        writer.add(Losses::evicted(u64::MAX));
-        writer.add(Losses::evicted(1));
-        assert_eq!(total.get().evicted, u64::MAX);
-        assert_eq!(total.get().lost, 3, "a full field does not carry");
-        drop(writer);
-        let mut again = total.reopen().expect("the writer dropped");
-        again.add(Losses::refused(1));
-        assert_eq!(total.get().refused, 5);
-        assert_eq!(total.get().lost, 3);
     }
 }

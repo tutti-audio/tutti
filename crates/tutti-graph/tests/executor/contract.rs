@@ -170,16 +170,16 @@ impl Liar {
 }
 
 impl Liar {
-    const BASE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0);
+    const BASE: Shape = Shape::source_unassigned(ChannelLayout::MONO).events(1, 0);
     const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
 }
 
 impl Node for Liar {
     fn shape(&self) -> Shape {
         Self::BASE
-            .with_latency(Latency::new(Samples::new(self.declared)))
-            .with_tail(Tail::Unknown)
-            .with_event_resolution(self.resolution)
+            .latency(Latency::new(Samples::new(self.declared)))
+            .tail(Tail::Unknown)
+            .event_resolution(self.resolution)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -339,7 +339,7 @@ fn a_row_cannot_pass_what_it_does_not_run() {
 struct Tags(tutti_fixtures::Record<(u64, u32)>);
 
 impl Tags {
-    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0);
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).events(1, 0);
     const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
@@ -506,7 +506,7 @@ fn the_tail_contract_catches_a_report_that_is_too_short() {
     );
     assert!(check(RingingNode::new(ceiling, 300, 300).wide(2)));
     assert!(check(
-        RingingNode::new(ceiling, 300, 300).with_latency(Samples::new(37))
+        RingingNode::new(ceiling, 300, 300).latency(Samples::new(37))
     ));
     assert!(check(RingingNode::new(
         Tail::Unbounded,

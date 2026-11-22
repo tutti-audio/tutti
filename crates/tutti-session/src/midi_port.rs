@@ -35,7 +35,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use tutti_graph::{EventTapReader, Losses, NodeKey};
+use tutti_graph::{EventTapReader, NodeKey};
 use tutti_midi_ci::{Nak, PeData, PeStatus, ProfileState};
 use tutti_midi_device::{DeviceInfo, Learned, Match, MidiDeviceId, Resolved, SavedDevice};
 use tutti_midi_hardware::{
@@ -48,6 +48,7 @@ use tutti_midi_runtime::{
 };
 use tutti_rt::{Bell, Counter, Gauge, Mutex};
 use tutti_ump::StreamConfig;
+use tutti_units::Losses;
 use tutti_units::{Resyncs, Seconds};
 
 use crate::apply::{Cut, Sealed};

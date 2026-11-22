@@ -100,7 +100,7 @@ impl<F: Float> Kernel for AdditiveKernel<F> {
 
     /// One mono output and no inputs; a sine a frame for each partial, `Moderate`.
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_cost(Cost::Moderate)
+        Shape::source_unassigned(ChannelLayout::MONO).cost(Cost::Moderate)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {

@@ -21,7 +21,7 @@ use tutti_units::{Frame, SampleRate};
 struct Every4;
 
 impl Every4 {
-    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
     const OUT: tutti_graph::OutEvents = Self::SHAPE
         .event_output(0)
         .expect("one event output is declared");
@@ -224,7 +224,7 @@ struct Hears;
 
 impl Node for Hears {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0)
+        Shape::EMPTY.events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {

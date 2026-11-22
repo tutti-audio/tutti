@@ -442,7 +442,7 @@ struct Heavy<N>(N);
 
 impl<N: tutti_graph::Node> tutti_graph::Node for Heavy<N> {
     fn shape(&self) -> tutti_graph::Shape {
-        self.0.shape().with_cost(tutti_graph::Cost::Heavy)
+        self.0.shape().cost(tutti_graph::Cost::Heavy)
     }
     fn prepare(&mut self, prepare: &tutti_graph::Prepare) {
         self.0.prepare(prepare);

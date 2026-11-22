@@ -3,8 +3,8 @@
 
 use super::*;
 use crate::testing::{RATE, Rig};
-use tutti_graph::Losses;
 use tutti_ump::Utility;
+use tutti_units::Losses;
 use tutti_units::Resyncs;
 
 /// Sender ticks of `ms` milliseconds on a clock of 31 250 ticks a second; the

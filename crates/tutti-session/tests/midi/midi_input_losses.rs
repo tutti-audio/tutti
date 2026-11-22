@@ -8,11 +8,11 @@ use tutti_platform::Instant;
 
 use crate::common::OpenPorts as _;
 use crate::common::blocks;
-use tutti_graph::Losses;
 use tutti_midi_device::{DeviceInfo, EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, persistent_endpoint};
 use tutti_session::Session;
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
+use tutti_units::Losses;
 use tutti_units::SampleRate;
 
 const KEYS: u32 = 1;

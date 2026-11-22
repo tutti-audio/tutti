@@ -53,7 +53,7 @@ fn data(u: &Ump) -> f32 {
 
 impl Keeper {
     const BASE: Shape =
-        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO)).with_events(1, 0);
+        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO)).events(1, 0);
     const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
 }
 
@@ -61,7 +61,7 @@ impl Node for Keeper {
     fn shape(&self) -> Shape {
         let s = Self::BASE;
         if self.chases {
-            s.with_chase(self.capacity)
+            s.chase(self.capacity)
         } else {
             s
         }
@@ -96,8 +96,8 @@ struct Wide(u8);
 impl Node for Wide {
     fn shape(&self) -> Shape {
         Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO))
-            .with_events(1, 0)
-            .with_chase(3)
+            .events(1, 0)
+            .chase(3)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -139,7 +139,7 @@ fn cc(controller: u8, value: u8) -> Ump {
 struct Edge0(Ump, Arc<AtomicBool>);
 
 impl Edge0 {
-    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -480,7 +480,7 @@ struct Mute;
 
 impl Node for Mute {
     fn shape(&self) -> Shape {
-        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO)).with_chase(3)
+        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO)).chase(3)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

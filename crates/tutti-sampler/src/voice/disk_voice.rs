@@ -960,10 +960,10 @@ impl<F: SamplerFloat> Node<F> for DiskVoice<F> {
     /// ring-out.
     fn shape(&self) -> Shape {
         Shape::source_unassigned(self.inner.channels())
-            .with_tail(Tail::None)
+            .tail(Tail::None)
             // A `DiskSource`'s read, placed on the transport as a memory
             // voice is: `Moderate` for the same reason.
-            .with_cost(tutti_graph::Cost::Moderate)
+            .cost(tutti_graph::Cost::Moderate)
     }
 
     /// The render rate, and the block's position scratch sized from
@@ -1069,7 +1069,7 @@ impl<F: SamplerFloat> ForkSource<F> for DiskVoiceFork<F> {
         let health = fork.fault().map(VoiceHealth);
         let forked = Forked::new(Box::new(fork));
         Ok(match health {
-            Some(h) => forked.with_health(Arc::new(h)),
+            Some(h) => forked.health(Arc::new(h)),
             None => forked,
         })
     }

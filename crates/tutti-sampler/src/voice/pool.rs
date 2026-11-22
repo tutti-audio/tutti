@@ -1036,11 +1036,11 @@ impl<F: SamplerFloat> Node<F> for VoicePool<F> {
     /// `ring_out`.
     fn shape(&self) -> Shape {
         Shape::source_unassigned(self.channels)
-            .with_tail(self.ring_out())
+            .tail(self.ring_out())
             // Its voices arrive while it plays, each a `VoiceNode`'s cost:
             // measured 13 ns per frame and channel at one plain voice, 82 at
             // eight, and one stretched voice alone is 288.
-            .with_cost(tutti_graph::Cost::Heavy)
+            .cost(tutti_graph::Cost::Heavy)
     }
 
     /// The rate every slot and its source run at, and

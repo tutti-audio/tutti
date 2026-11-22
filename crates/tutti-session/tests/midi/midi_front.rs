@@ -25,7 +25,7 @@ struct Probe(ForkByClone<Five>);
 struct Five;
 impl Node for Five {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::STEREO).with_events(1, 0)
+        Shape::source_unassigned(ChannelLayout::STEREO).events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
@@ -55,7 +55,7 @@ struct Latent;
 impl Node for Latent {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::STEREO)
-            .with_latency(tutti_units::Latency::new(Samples::new(256)))
+            .latency(tutti_units::Latency::new(Samples::new(256)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {

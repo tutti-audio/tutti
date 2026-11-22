@@ -200,7 +200,7 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
             Buses::main(input),
             Buses::NONE.with(output).expect("one bus"),
         )
-        .with_cost(Cost::Moderate)
+        .cost(Cost::Moderate)
     }
 
     /// Sizes a line per channel at `rate` (`ceil(max_delay * rate)` frames: a re-prepare

@@ -34,7 +34,7 @@ struct Undeclared<N>(N);
 
 impl<N: Node> Node for Undeclared<N> {
     fn shape(&self) -> Shape {
-        self.0.shape().with_cost(Cost::Heavy)
+        self.0.shape().cost(Cost::Heavy)
     }
     fn prepare(&mut self, p: &Prepare) {
         self.0.prepare(p);
@@ -56,7 +56,7 @@ type Seen = tutti_fixtures::Record<(u64, Ump)>;
 struct Recorder(Seen);
 
 impl Recorder {
-    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0);
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).events(1, 0);
     const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
