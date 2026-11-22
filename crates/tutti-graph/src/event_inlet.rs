@@ -100,6 +100,7 @@ use tutti_ump::Ump;
 use tutti_units::{At, Frame, Losses, Moment, SampleRate};
 
 use crate::RenderMode;
+use crate::bus::OutEvents;
 use crate::cost::Cost;
 use crate::event::Event;
 use crate::fork::{ForkCause, ForkSource, Forked};
@@ -379,6 +380,7 @@ impl From<EventCapacity> for u32 {
 /// assert_eq!(node.capacity(), EventCapacity::of(256));
 /// ```
 pub struct EventInletNode {
+    port: OutEvents,
     ring: RingReader<Pushed>,
     /// The writer of the owner's evicted, refused and late totals.
     losses: TallyWriter<Losses>,
@@ -426,6 +428,7 @@ impl EventInletNode {
             totals: totals.clone(),
         };
         let node = Self {
+            port: Self::OUT,
             ring: consumer,
             losses: totals.writer(),
             clock,
@@ -435,6 +438,17 @@ impl EventInletNode {
             waiting: Vec::with_capacity(capacity.slots()),
         };
         (node, writer)
+    }
+
+    const BASE: Shape = Shape::EMPTY.with_events(0, 1);
+    const OUT: OutEvents = Self::BASE.event_output(0).expect("declared");
+
+    fn declared(capacity: EventCapacity) -> Shape {
+        Self::BASE
+            // `pair` checked that it fits.
+            .with_event_capacity(capacity.non_zero())
+            // Event-only: a ring drain, work per event, nothing per frame.
+            .with_cost(Cost::Light)
     }
 
     /// The ring's capacity in events, which is also how many may wait for their
@@ -496,12 +510,7 @@ fn must_arrive(ump: Ump) -> bool {
 impl<F: tutti_buffers::Float> Node<F> for EventInletNode {
     /// No audio; one event output of [`capacity`](EventInletNode::capacity).
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            // `pair` checked that it fits.
-            .with_event_capacity(self.capacity.non_zero())
-            // Event-only: a ring drain, work per event, nothing per frame.
-            .with_cost(Cost::Light)
+        Self::declared(self.capacity)
     }
 
     /// A new rate moves what waits, and the clock it published, to the same
@@ -570,7 +579,7 @@ impl<F: tutti_buffers::Float> Node<F> for EventInletNode {
             };
             self.keep(pushed.ump, frame);
         }
-        let out = io.event_out(0);
+        let out = io.event_out(self.port);
         let mut sent = 0;
         let mut refused = 0u64;
         for w in &self.waiting {

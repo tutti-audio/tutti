@@ -45,9 +45,14 @@ struct Emitter {
     stop: Arc<AtomicBool>,
 }
 
+impl Emitter {
+    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Emitter {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -57,7 +62,7 @@ impl Node for Emitter {
         for at in cx.env.offsets() {
             let f = cx.env.frame_at(at).get();
             if f % self.period == u64::from(self.id) % self.period {
-                io.event_out(0)
+                io.event_out(Self::OUT)
                     .push(Event::midi(
                         at,
                         Ump([self.id, f as u32, (f >> 32) as u32, 0]),
@@ -86,8 +91,8 @@ impl Node for Recorder {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
         let mut inbox = self.inbox.lock().unwrap();
-        for p in 0..io.event_input_count() {
-            for e in io.events(p) {
+        for (p, port) in (0u16..).zip(self.shape().event_inputs()) {
+            for e in io.events(port) {
                 let EventKind::Midi(Ump(w)) = e.kind else {
                     panic!("only MIDI is sent")
                 };
@@ -592,9 +597,14 @@ fn wide_event_fan_in_is_a_merge_tree_in_source_order() {
 /// Outputs the absolute frame index; feeds a feedback edge.
 struct Clock;
 
+impl Clock {
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(0, 1);
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Clock {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_events(0, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -604,7 +614,7 @@ impl Node for Clock {
         }
         for at in cx.env.offsets() {
             let f = cx.env.frame_at(at).get();
-            io.event_out(0)
+            io.event_out(Self::OUT)
                 .push(Event::midi(at, Ump([0, f as u32, 0, 0])))
                 .expect("one per frame fits");
         }
@@ -617,15 +627,20 @@ impl Node for Clock {
 /// frames.
 struct Tap(Inbox);
 
+impl Tap {
+    const SHAPE: Shape = Shape::through_unassigned(ChannelLayout::MONO)
+        .with_events(1, 0)
+        .with_tail(Tail::Unknown);
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for Tap {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::MONO)
-            .with_events(1, 0)
-            .with_tail(Tail::Unknown)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        for e in io.events(0) {
+        for e in io.events(Self::IN) {
             let EventKind::Midi(Ump(w)) = e.kind else {
                 unreachable!()
             };

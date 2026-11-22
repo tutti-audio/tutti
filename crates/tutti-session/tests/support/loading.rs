@@ -7,13 +7,12 @@
 #![allow(dead_code)]
 
 use std::path::PathBuf;
-use std::sync::Mutex;
 use tutti_plugin::catalog::ResolvedHosting;
 use tutti_plugin_db::PluginDb;
 use tutti_plugin_db::{Catalog, CatalogConfig, Hosting};
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{Locator, PluginId, PluginRef};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 use tutti_session::{AnyPlugin, Key, LoadError, LoadInProcess, LoadOutOfProcess};
 use tutti_session::{LoadPlugin as Load, PeerState, PluginInstance, Session};
 
@@ -152,7 +151,7 @@ static PRIMED: Mutex<Vec<Primed>> = Mutex::new(Vec::new());
 /// Probes `plugin`'s file for the loads of this process. A test that sets a
 /// `TUTTI_CLAP_PROBE_*` variable calls it first, before the variable.
 pub fn prime(plugin: &PluginRef) {
-    let mut primed = PRIMED.lock_recover();
+    let mut primed = PRIMED.lock();
     let file = tutti_plugin_db::canonical_path(plugin.path());
     let id = plugin.id().cloned();
     if !primed.iter().any(|p| p.file == file && p.id == id) {
@@ -174,7 +173,7 @@ impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadPlugin 
         spec: Spec,
     ) -> Result<(PluginInstance, Key<AnyPlugin>), LoadError> {
         prime(&spec.plugin);
-        let primed = PRIMED.lock_recover();
+        let primed = PRIMED.lock();
         let file = tutti_plugin_db::canonical_path(spec.plugin.path());
         let id = spec.plugin.id().cloned();
         let found = primed

@@ -498,23 +498,23 @@ mod tests {
     /// Helpers carry the builder's names.
     #[test]
     fn helpers_are_named_by_the_builder() {
-        let names = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let names = Arc::new(tutti_rt::Mutex::new(Vec::new()));
         let seen = Arc::clone(&names);
         let pool = WorkerPool::builder()
             .num_threads(3)
             .thread_name(|i| format!("custom-{i}"))
             .start_handler(move |_| {
                 let name = std::thread::current().name().map(str::to_owned);
-                seen.lock().unwrap().push(name.unwrap());
+                seen.lock().push(name.unwrap());
             })
             .build()
             .expect("a worker pool");
         let t = Instant::now();
-        while names.lock().unwrap().len() < 2 && t.elapsed() < Duration::from_secs(60) {
+        while names.lock().len() < 2 && t.elapsed() < Duration::from_secs(60) {
             std::thread::yield_now();
         }
         drop(pool);
-        let mut names = names.lock().unwrap().clone();
+        let mut names = names.lock().clone();
         names.sort();
         assert_eq!(names, ["custom-1", "custom-2"]);
     }

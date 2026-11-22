@@ -6,7 +6,8 @@
 //! Every figure is the MIDI spec's: a 24-PPQN tick at 120 BPM is 1/48 s, so
 //! 1 000 frames at 48 kHz.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tutti_rt::Mutex;
 
 use crate::common::{MF, note};
 use tutti_buffers::ChannelLayout;
@@ -32,14 +33,14 @@ struct Wire(Arc<Mutex<Vec<Vec<UmpAt>>>>);
 impl MidiOut for Wire {
     fn queue_timed(&self, batch: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
         let events: Vec<tutti_graph::UmpAt> = batch.iter().map(|e| (e.at, e.ump)).collect();
-        self.0.lock().unwrap().push(events.to_vec());
+        self.0.lock().push(events.to_vec());
         tutti_midi_runtime::Taken::within(batch, batch.len())
     }
 }
 
 impl Wire {
     fn batches(&self) -> Vec<Vec<UmpAt>> {
-        std::mem::take(&mut *self.0.lock().unwrap())
+        std::mem::take(&mut *self.0.lock())
     }
 }
 

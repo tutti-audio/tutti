@@ -36,8 +36,8 @@ use tutti_buffers::InterleavedMut;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventInputPort, EventKind, Executor, IntoNode, Io, Node, Prepare, Shape, Status,
-    Unforkable,
+    Cx, Editor, EventInputPort, EventKind, Executor, InEvents, IntoNode, Io, Node, Prepare, Shape,
+    Status, Unforkable,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_music::LoopRange;
@@ -130,16 +130,21 @@ impl Node for Gate {
 /// One event input; logs the absolute frame of every event it receives.
 struct NoteLog(Record<u64>);
 
+impl NoteLog {
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO)
+        .with_events(1, 0)
+        .with_tail(Tail::Unbounded);
+    const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for NoteLog {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO)
-            .with_events(1, 0)
-            .with_tail(Tail::Unbounded)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let mut log = self.0.lock().expect("log");
-        for e in io.events(0).iter() {
+        for e in io.events(Self::IN).iter() {
             log.push(cx.env.frame_at(e.offset).get());
         }
         io.output(0).fill(0.0);

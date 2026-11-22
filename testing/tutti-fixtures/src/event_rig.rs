@@ -1,14 +1,14 @@
 //! [`Sink`] and [`EventRig`]: a graph whose one node logs the MIDI its event
 //! inputs receive, for the tests of what feeds a graph's event inputs.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tutti_platform::Instant;
 
-use crate::Record;
+use crate::{Record, Shared};
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{
-    Cx, Editor, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor, ForkByClone, Io,
-    Node, NodeKey, OutputPort, PortSource, Prepare, Shape, Status, TransportPosition,
+    Cx, Editor, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor, ForkByClone,
+    InEvents, Io, Node, NodeKey, OutputPort, PortSource, Prepare, Shape, Status, TransportPosition,
 };
 use tutti_ump::Ump;
 use tutti_units::{Frame, Moment, SampleRate, Samples};
@@ -46,7 +46,7 @@ pub enum Output {
 /// logs into the same list.
 #[derive(Clone, Debug)]
 pub struct Sink {
-    ports: u16,
+    inputs: Vec<InEvents>,
     seen: Seen,
     output: Output,
 }
@@ -56,29 +56,31 @@ impl Sink {
     #[must_use]
     pub fn new(ports: u16, seen: &Seen, output: Output) -> Self {
         Self {
-            ports,
+            inputs: Self::declared(ports, output).event_inputs().collect(),
             seen: seen.clone(),
             output,
+        }
+    }
+
+    fn declared(ports: u16, output: Output) -> Shape {
+        match output {
+            Output::Mono => Shape::source_unassigned(ChannelLayout::MONO).with_events(ports, 0),
+            Output::None => Shape::EMPTY.with_events(ports, 0),
         }
     }
 }
 
 impl Node for Sink {
     fn shape(&self) -> Shape {
-        match self.output {
-            Output::Mono => {
-                Shape::source_unassigned(ChannelLayout::MONO).with_events(self.ports, 0)
-            }
-            Output::None => Shape::EMPTY.with_events(self.ports, 0),
-        }
+        Self::declared(self.inputs.len() as u16, self.output)
     }
 
     fn prepare(&mut self, _: &Prepare) {}
 
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let mut seen = self.seen.lock().expect("the log is not poisoned");
-        for port in 0..self.ports {
-            for event in io.events(port) {
+        for (port, &input) in (0u16..).zip(&self.inputs) {
+            for event in io.events(input) {
                 if let EventKind::Midi(ump) = event.kind {
                     seen.push((
                         port,
@@ -214,17 +216,13 @@ type Reading = Option<(Instant, Moment)>;
 
 /// A block clock a test writes by hand, as the engine does each render call.
 #[derive(Debug)]
-pub struct BlockClock(Arc<Mutex<Reading>>);
+pub struct BlockClock(Shared<Reading>);
 
 impl Default for BlockClock {
     fn default() -> Self {
-        let clock = Self(Arc::default());
-        // On macOS std's `Mutex` boxes its pthread mutex on the first `lock`,
-        // so a first read from the driver thread would allocate there. The
-        // engine's own clock is lock-free; this stand-in takes its lock once
-        // here, on the control side, where a real one is built.
-        drop(clock.0.lock().expect("the clock is not poisoned"));
-        clock
+        // The engine's own clock is lock-free; this stand-in is a `Shared`
+        // value, whose lock is taken once here, on the control side.
+        Self(Shared::new(None))
     }
 }
 
@@ -242,7 +240,7 @@ impl BlockClock {
     /// The reader panics when the clock's lock is poisoned.
     #[must_use]
     pub fn reader(&self) -> Arc<dyn Fn() -> Option<(Instant, Moment)> + Send + Sync> {
-        let cell = Arc::clone(&self.0);
+        let cell = self.0.clone();
         Arc::new(move || *cell.lock().expect("the clock is not poisoned"))
     }
 
