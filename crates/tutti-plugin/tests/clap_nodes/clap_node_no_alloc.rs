@@ -106,7 +106,7 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
         .build()
         .expect("a valid program");
     let lfo = ControlLaneNode::from(
-        ForeignLaneConfig::new(ParamId::new(77), program, ParamRange::new(0.0, 1.0)).knob(0.5),
+        ForeignLaneConfig::new(ParamId::new(77), program, ParamRange::of(0.0, 1.0)).knob(0.5),
     );
     let prepare = tutti_graph::Prepare::new(
         tutti_units::SampleRate::of(SAMPLE_RATE),
@@ -126,7 +126,7 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
     let lane = ControlLaneNode::from(ForeignLaneConfig::new(
         ParamId::new(78),
         ControlProgram::from_curve(Arc::new(env)),
-        ParamRange::new(0.0, 1.0),
+        ParamRange::of(0.0, 1.0),
     ));
     let (mut rig, mut sender) = Rig::prepared_with_keys(
         probe

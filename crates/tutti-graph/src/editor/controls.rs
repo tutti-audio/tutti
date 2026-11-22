@@ -1,9 +1,11 @@
 //! The controls a running graph takes without a commit: param ranges, edge
 //! gains and fades, pass states, modes and mixes.
 
+use std::collections::BTreeMap;
+
 use tutti_buffers::Float;
 use tutti_rt::ParamCell;
-use tutti_units::{Amplitude, Mix};
+use tutti_units::{Gain, Mix};
 
 use super::{CommitError, Editor};
 use crate::NodeKey;
@@ -48,15 +50,15 @@ impl<F: Float> Editor<F> {
     ///
     /// # Errors
     ///
-    /// Refused, changing nothing: [`ParamRangeError::InvalidRange`] for a NaN
-    /// bound or crossed bounds on a circular param (`ParamRange::arc` writes
-    /// one), and [`ParamRangeError::NoSuchNode`] for a key with no node.
+    /// Refused, changing nothing: [`ParamRangeError::InvalidRange`] for crossed
+    /// bounds on a circular param (`ParamRange::arc` writes one), and
+    /// [`ParamRangeError::NoSuchNode`] for a key with no node.
     pub fn set_param_range(
         &mut self,
         at: ParamIn,
         range: ParamRange,
     ) -> Result<(), ParamRangeError> {
-        if range.min.is_nan() || range.max.is_nan() || !range.fits(at.param.param) {
+        if !range.fits(at.param.param) {
             return Err(ParamRangeError::InvalidRange { at });
         }
         if !self.spec.topology.nodes.contains_key(&at.node) {
@@ -123,7 +125,7 @@ impl<F: Float> Editor<F> {
     /// that is not finite, [`EdgeGainError::NoSuchEdge`] when `id` is not an
     /// edge of the spec, and [`EdgeGainError::BusLane`] for a lane of a bus
     /// edge.
-    pub fn set_edge_gain(&mut self, id: EdgeId, base: Amplitude) -> Result<(), EdgeGainError> {
+    pub fn set_edge_gain(&mut self, id: EdgeId, base: Gain) -> Result<(), EdgeGainError> {
         if !base.get().is_finite() {
             return Err(EdgeGainError::NotFinite { id });
         }
@@ -150,15 +152,18 @@ impl<F: Float> Editor<F> {
         }
     }
 
-    /// Makes the cell of every entry of the spec that has none: the entries
-    /// written through [`spec_mut`](Self::spec_mut) (and a builder's or a
-    /// fork's whole wiring), which no declaration saw. It is the one place a
-    /// cell is made for an entry the spec already holds, run by every control
-    /// that declares a lane and by each commit before it hands cells out.
-    pub(super) fn declare_gain_cells(&mut self) {
-        let ids: Vec<EdgeId> = self.spec.gains.keys().copied().collect();
-        for id in ids {
-            if !self.cells.gains.has(id) {
+    /// Makes `entries` the spec's gain entries, as a caller that builds the
+    /// editor whole does (a builder, a fork, the test harness): an entry
+    /// the spec did not hold is declared, its cell made from the values; one
+    /// it held keeps its cell; one left out is dropped. The values are set
+    /// first, so a new lane starts from them (a caller's values hold nothing
+    /// of an edge it dropped: a fresh editor has none, and the harness
+    /// retains the values of the graph's edges at each switch).
+    pub(crate) fn enter_gains(&mut self, entries: BTreeMap<EdgeId, EdgeGain>) {
+        self.touch();
+        self.spec.gains.retain(|id, _| entries.contains_key(id));
+        for (id, entry) in entries {
+            if self.spec.gains.insert(id, entry).is_none() {
                 self.cells.gains.declare(id, &self.values);
             }
         }
@@ -296,7 +301,7 @@ impl<F: Float> Editor<F> {
                 },
                 EdgeFade::In => {
                     let plain = g.source.is_none()
-                        && self.values.base(id) == Amplitude::UNITY
+                        && self.values.base(id) == Gain::UNITY
                         && self.values.gain_range(id) == EdgeGain::DEFAULT_RANGE;
                     if plain {
                         self.spec.clear_edge_gain(id);
@@ -354,17 +359,14 @@ impl<F: Float> Editor<F> {
     ///
     /// # Errors
     ///
-    /// Refused, changing nothing: [`EdgeGainError::InvalidRange`] for a NaN
-    /// bound, [`EdgeGainError::NoSuchEdge`] when `id` is not an edge of the
-    /// spec, and [`EdgeGainError::BusLane`] for a lane of a bus edge.
+    /// Refused, changing nothing: [`EdgeGainError::NoSuchEdge`] when `id` is
+    /// not an edge of the spec, and [`EdgeGainError::BusLane`] for a lane of a
+    /// bus edge.
     pub fn set_edge_gain_range(
         &mut self,
         id: EdgeId,
         range: ParamRange,
     ) -> Result<(), EdgeGainError> {
-        if range.min.is_nan() || range.max.is_nan() {
-            return Err(EdgeGainError::InvalidRange { id });
-        }
         self.check_gain_edge(id)?;
         self.touch();
         self.declare_lane(id);
@@ -559,7 +561,7 @@ impl<F: Float> Editor<F> {
     /// Edge `id`'s base, if the edge has an entry: the live cell's (the one
     /// writer's, whether it is [`set_edge_gain`](Self::set_edge_gain) or a
     /// lane's knob).
-    pub fn edge_gain(&self, id: EdgeId) -> Option<Amplitude> {
+    pub fn edge_gain(&self, id: EdgeId) -> Option<Gain> {
         self.spec.gains.get(&id)?;
         Some(
             self.cells

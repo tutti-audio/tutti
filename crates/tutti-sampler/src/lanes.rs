@@ -218,7 +218,14 @@ pub(crate) struct Gather<F: Float> {
     /// Whether frame `i` has a sample (a position inside the file).
     pub(crate) live: Vec<bool>,
     pub(crate) y: [Lane<F>; 4],
+    /// One channel of a stretch of ring positions, which a block's taps
+    /// are read from: [`GATHER_TAPS`] past `frames()`, so a block at a rate
+    /// of at most one frame per frame is one stretch.
+    pub(crate) run: Lane<F>,
 }
+
+/// The taps of the cubic along time: the frames a gathered frame reads.
+pub(crate) const GATHER_TAPS: usize = 4;
 
 impl<F: Float> Gather<F> {
     /// No frames. Allocation-free.
@@ -228,6 +235,7 @@ impl<F: Float> Gather<F> {
             frac: Vec::new(),
             live: Vec::new(),
             y: std::array::from_fn(|_| Vec::new()),
+            run: Vec::new(),
         }
     }
 
@@ -246,6 +254,7 @@ impl<F: Float> Gather<F> {
         for lane in &mut self.y {
             fit(lane, frames, F::ZERO);
         }
+        fit(&mut self.run, frames + GATHER_TAPS, F::ZERO);
     }
 }
 

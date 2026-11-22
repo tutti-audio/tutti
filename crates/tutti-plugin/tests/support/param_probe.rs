@@ -37,7 +37,7 @@ pub fn extra(i: usize) -> ParamId {
 /// (`LaneControls::store`), and again on `LaneControls::resync`.
 pub fn knob(id: ParamId, value: f32) -> ControlLaneNode {
     ControlLaneNode::from(
-        ForeignLaneConfig::new(id, ControlProgram::default(), ParamRange::new(0.0, 1.0))
+        ForeignLaneConfig::new(id, ControlProgram::default(), ParamRange::of(0.0, 1.0))
             .knob(f64::from(value)),
     )
 }

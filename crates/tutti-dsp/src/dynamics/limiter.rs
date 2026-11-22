@@ -52,6 +52,7 @@ use tutti_units::{Amplitude, Db, SampleRate, Samples, Seconds};
 use super::curves::{FloatCurve, LimiterCurve, level_db, limiter_gain};
 use super::gain_pass::{CHUNK, level};
 use super::lookahead::{LookaheadRing, fold_peak};
+use crate::delay::DelayRing;
 use crate::follower::{Pole, Smoothed};
 use crate::{FirError, Oversampler, Oversampling, OversamplingFactor, OversamplingPlan};
 
@@ -266,30 +267,29 @@ pub struct LimiterBank<F: Float> {
     envelope: Smoothed<F>,
     ring: LookaheadRing<F>,
     /// The true-peak detector; `None` reads the sample peak.
-    detector: Option<Detector<F>>,
+    detector: Option<TruePeakDetector<F>>,
 }
 
 /// The state of a true-peak bank's detection.
 #[derive(Clone, Debug)]
-struct Detector<F: Float> {
+struct TruePeakDetector<F: Float> {
     /// One 4x up-sampler per channel.
     states: Vec<Oversampler<F>>,
     /// The linked sample peaks of the last frames, as many as the groups a frame's window
-    /// starts after it: a frame's own sample joins the groups of its window.
-    lag: Vec<F>,
-    /// Where `lag` is read and written next.
-    at: usize,
+    /// starts after it: a frame's own sample joins the groups of its window. `None` when
+    /// that is none.
+    lag: Option<DelayRing<F>>,
 }
 
-impl<F: Float> Detector<F> {
+impl<F: Float> TruePeakDetector<F> {
     /// `peak` of the newest frame in, the peak of the frame `lag.len()` before it out.
     #[inline]
     fn delayed(&mut self, peak: F) -> F {
-        if self.lag.is_empty() {
+        let Some(lag) = &mut self.lag else {
             return peak;
-        }
-        let out = std::mem::replace(&mut self.lag[self.at], peak);
-        self.at = (self.at + 1) % self.lag.len();
+        };
+        let out = lag.oldest();
+        lag.push(peak);
         out
     }
 }
@@ -317,7 +317,7 @@ impl<F: Float> LimiterBank<F> {
         frames: usize,
         window: usize,
         rate: SampleRate,
-        detector: Option<Detector<F>>,
+        detector: Option<TruePeakDetector<F>>,
     ) -> Self {
         Self {
             design: Design::of(&LimiterControls::DEFAULT, rate),
@@ -371,10 +371,9 @@ impl<F: Float> LimiterBank<F> {
         let first = plan.upsample_delay().saturating_sub(7).div_ceil(4);
         let channels = usize::from(width.count());
         let block = MaxBlock::of(Samples::new(CHUNK));
-        let detector = Detector {
+        let detector = TruePeakDetector {
             states: (0..channels).map(|_| plan.state(block)).collect(),
-            lag: vec![F::ZERO; first],
-            at: 0,
+            lag: (first > 0).then(|| DelayRing::new(first)),
         };
         Self::build(width, frames, frames - first + 1, rate, Some(detector))
     }
@@ -391,8 +390,9 @@ impl<F: Float> LimiterBank<F> {
         self.ring.clear();
         if let Some(d) = &mut self.detector {
             d.states.iter_mut().for_each(Oversampler::reset);
-            d.lag.fill(F::ZERO);
-            d.at = 0;
+            if let Some(lag) = &mut d.lag {
+                lag.clear();
+            }
         }
     }
 

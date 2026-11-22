@@ -2,42 +2,38 @@
 // MeltySynth (Copyright (C) 2021 Nobuaki Tanaka). The MIT notice is
 // LICENSE-RUSTYSYNTH.txt, at the root of this crate.
 
+//! The SoundFont units (SF2 2.04 section 9.3) as `tutti_units` quantities, in `f64`: a
+//! generator is a raw integer, and a voice crosses to its float once, at its start.
+
 use tutti_units::{Amplitude, Cents, Hz, Seconds};
 
-/// The SoundFont units (SF2 2.04 section 9.3) as `tutti_units` quantities, in `f64`: a
-/// generator is a raw integer, and a voice crosses to its float once, at its start.
-#[non_exhaustive]
-pub(crate) struct SoundFontMath {}
+/// The level (-60 dB) below which a voice's envelope is dropped: tutti's
+/// threshold, not the spec's. A release time is the time to -100 dB, so a
+/// released voice is dropped at 0.6 of it.
+pub(crate) const NON_AUDIBLE: Amplitude = Amplitude::new(1.0e-3);
 
-impl SoundFontMath {
-    /// The level (-60 dB) below which a voice's envelope is dropped: tutti's
-    /// threshold, not the spec's. A release time is the time to -100 dB, so a
-    /// released voice is dropped at 0.6 of it.
-    pub(crate) const NON_AUDIBLE: Amplitude = Amplitude::new(1.0e-3);
+/// A time in absolute timecents as seconds: `2^(x / 1200)`, the 1200th root
+/// of two per timecent.
+pub(crate) fn timecents_to_seconds(timecents: i32) -> Seconds {
+    Seconds::new(Cents::new(f64::from(timecents)).to_pitch_ratio())
+}
 
-    /// A time in absolute timecents as seconds: `2^(x / 1200)`, the 1200th root
-    /// of two per timecent.
-    pub(crate) fn timecents_to_seconds(timecents: i32) -> Seconds {
-        Seconds::new(Cents::new(f64::from(timecents)).to_pitch_ratio())
-    }
+/// A frequency in absolute cents (section 9.3): 8.176 Hz at 0, an octave per 1200.
+pub(crate) fn cents_to_hertz(cents: i32) -> Hz {
+    Hz::new(8.176 * Cents::new(f64::from(cents)).to_pitch_ratio())
+}
 
-    /// A frequency in absolute cents (section 9.3): 8.176 Hz at 0, an octave per 1200.
-    pub(crate) fn cents_to_hertz(cents: i32) -> Hz {
-        Hz::new(8.176 * Cents::new(f64::from(cents)).to_pitch_ratio())
-    }
-
-    /// A key-number scaling of a time (generators 39 and 40 and their volume and
-    /// modulation siblings): the factor for `key`, `2^(cents (60 - key) / 1200)`.
-    pub(crate) fn key_number_to_multiplying_factor(cents: i32, key: i32) -> f64 {
-        Cents::new(f64::from(cents * (60 - key))).to_pitch_ratio()
-    }
+/// A key-number scaling of a time (generators 39 and 40 and their volume and
+/// modulation siblings): the factor for `key`, `2^(cents (60 - key) / 1200)`.
+pub(crate) fn key_number_to_multiplying_factor(cents: i32, key: i32) -> f64 {
+    Cents::new(f64::from(cents * (60 - key))).to_pitch_ratio()
 }
 
 /// SF2 2.04 section 9.3 defines the units generators are written in. The
 /// figures below are the definitions' own, not another render's.
 #[cfg(test)]
 mod tests {
-    use super::SoundFontMath;
+    use super::{cents_to_hertz, key_number_to_multiplying_factor, timecents_to_seconds};
 
     fn close(a: f64, b: f64, relative: f64) -> bool {
         ((a - b) / b).abs() < relative
@@ -48,7 +44,7 @@ mod tests {
     /// Spec: sf2.units.timecent.absolute, sf2.synth.lfo.delay-example
     #[test]
     fn timecents_are_one_second_at_zero_and_double_every_1200() {
-        let seconds = |timecents| SoundFontMath::timecents_to_seconds(timecents).get();
+        let seconds = |timecents| timecents_to_seconds(timecents).get();
         assert_eq!(seconds(0), 1.0);
         assert!(close(seconds(1200), 2.0, 1e-14));
         assert!(close(seconds(-1200), 0.5, 1e-14));
@@ -60,7 +56,7 @@ mod tests {
     /// Spec: sf2.units.cent.absolute
     #[test]
     fn absolute_cents_6900_is_440_hz_and_an_octave_is_1200() {
-        let hertz = |cents| SoundFontMath::cents_to_hertz(cents).get();
+        let hertz = |cents| cents_to_hertz(cents).get();
         assert!(close(hertz(6900), 440.0, 1e-3));
         assert!(close(hertz(8100) / hertz(6900), 2.0, 1e-14));
     }
@@ -73,8 +69,8 @@ mod tests {
     /// Spec: sf2.synth.env.keynum-tracking, sf2.synth.env.keynum-example
     #[test]
     fn key_number_scaling_follows_the_spec_example() {
-        let base = SoundFontMath::timecents_to_seconds(-7973).get();
-        let factor = SoundFontMath::key_number_to_multiplying_factor(50, 36);
+        let base = timecents_to_seconds(-7973).get();
+        let factor = key_number_to_multiplying_factor(50, 36);
         assert!(close(base * factor, 0.02, 1e-3), "{}", base * factor);
     }
 }

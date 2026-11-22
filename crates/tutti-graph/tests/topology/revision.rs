@@ -80,7 +80,7 @@ fn every_edit_moves_the_revision_and_nothing_else_does() {
                 node: one,
                 param: UnitParam::Cutoff.into(),
             },
-            ParamRange::new(0.0, 1.0),
+            ParamRange::of(0.0, 1.0),
         )
         .expect("a node");
     });

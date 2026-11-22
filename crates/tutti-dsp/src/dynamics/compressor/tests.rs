@@ -251,7 +251,7 @@ fn the_member_floors_what_cannot_be_run() {
     assert_eq!((m.knee, m.ratio), (Db::UNITY, CompressionRatio::new(1.0)));
     // A time under 0 is the follower of time 0: instant.
     assert_eq!(
-        Detector::<f32>::of(&m).ballistics,
+        CompressorStage::<f32>::of(&m).ballistics,
         Follower::<f32>::of(floored(Seconds::ZERO, Seconds::ZERO), RATE)
     );
     let d = CompressorControls::DEFAULT;

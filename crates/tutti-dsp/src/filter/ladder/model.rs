@@ -28,6 +28,7 @@ use tutti_units::{Db, Drive, Hz, Resonance, SampleRate, Samples};
 
 use super::{LadderDesign, LadderType};
 use crate::filter::biquad::decay_time;
+use crate::model::{peak_magnitude, single_output};
 use crate::{Complex64, DecayTime, Lti, System};
 
 /// What a ladder's controls are: its type, cutoff, resonance and the drive into
@@ -222,14 +223,12 @@ impl System for LadderModel {
 
 impl Lti for LadderModel {
     fn frequency_response(&self, output: usize, freqs: &[Hz], gain: &mut [Complex64]) {
-        for (g, f) in gain.iter_mut().zip(freqs) {
-            let w = f.angle_per_frame(self.rate).get();
-            *g = if output == 0 {
-                self.at(Complex64::from_polar(1.0, -w))
-            } else {
-                Complex64::new(f64::NAN, f64::NAN)
-            };
-        }
+        single_output(output, freqs, gain, |f| {
+            self.at(Complex64::from_polar(
+                1.0,
+                -f.angle_per_frame(self.rate).get(),
+            ))
+        });
     }
 
     /// The largest pole modulus of the linearisation, as the root iteration
@@ -265,29 +264,7 @@ impl Lti for LadderModel {
                 pts.extend([w0 + d, w0 - d]);
             }
         }
-        pts.retain(|w| (0.0..=PI).contains(w));
-        pts.sort_by(f64::total_cmp);
-        pts.dedup();
-        let mag = |w: f64| self.at(Complex64::from_polar(1.0, -w)).norm();
-        let best = pts
-            .iter()
-            .enumerate()
-            .max_by(|a, b| mag(*a.1).total_cmp(&mag(*b.1)))
-            .map_or(0, |(i, _)| i);
-        let (mut a, mut b) = (
-            pts[best.saturating_sub(1)],
-            pts[(best + 1).min(pts.len() - 1)],
-        );
-        let phi = 0.618_033_988_749_894_9;
-        for _ in 0..80 {
-            let (x, y) = (b - phi * (b - a), a + phi * (b - a));
-            if mag(x) < mag(y) {
-                a = x;
-            } else {
-                b = y;
-            }
-        }
-        mag(pts[best]).max(mag(0.5 * (a + b))) * (1.0 + 1e-6)
+        peak_magnitude(pts, |w| self.at(Complex64::from_polar(1.0, -w)).norm())
     }
 }
 

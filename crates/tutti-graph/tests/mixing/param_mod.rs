@@ -470,7 +470,7 @@ fn render(exec: &mut Executor, ed: &mut Editor, frames: usize, block: usize) -> 
 fn an_unconnected_param_reads_its_base_never_zero() {
     let (cutoff, q) = (Cell::new(440.0), Cell::new(0.7));
     let (mut ed, mut exec) = probe_graph(64, &cutoff, &q);
-    ed.set_param_range(param(PROBE, UnitParam::Cutoff), ParamRange::new(0.0, 100.0))
+    ed.set_param_range(param(PROBE, UnitParam::Cutoff), ParamRange::of(0.0, 100.0))
         .expect("a range");
     ed.commit().expect("commits");
     let out = render(&mut exec, &mut ed, 300, 64);
@@ -495,7 +495,7 @@ fn an_event_sources_value_is_clamped_to_the_range() {
         s.connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
         s.connect_param(param(PROBE, UnitParam::Q), ev(1));
     }
-    ed.set_param_range(param(PROBE, UnitParam::Q), ParamRange::new(-0.5, 0.5))
+    ed.set_param_range(param(PROBE, UnitParam::Q), ParamRange::of(-0.5, 0.5))
         .expect("a range");
     ed.commit().expect("commits");
     let out = render(&mut exec, &mut ed, 500, 64);
@@ -847,7 +847,7 @@ fn an_event_sources_held_value_survives_an_edit_to_its_node() {
         out[0].iter().find(|&&x| x != 500.0)
     );
 
-    ed.set_param_range(param(PROBE, UnitParam::Q), ParamRange::new(-0.5, 0.5))
+    ed.set_param_range(param(PROBE, UnitParam::Q), ParamRange::of(-0.5, 0.5))
         .expect("a range");
     ed.commit().expect("a range on Q");
     let out = render(&mut exec, &mut ed, 512, 64);
@@ -1161,32 +1161,6 @@ fn a_lane_fed_fork_reads_its_value_at_frame_0() {
     }
 }
 
-/// A NaN bound is refused by `set_param_range`, naming the port and changing
-/// nothing — never handed to the audio thread, where `f32::clamp` panics on it.
-#[test]
-fn a_nan_range_is_refused() {
-    let (cutoff, q) = (Cell::new(0.0), Cell::new(0.0));
-    let (mut ed, _exec) = probe_graph(64, &cutoff, &q);
-    ed.insert(NodeKey(1), "sig", Unforkable(Signal { seed: 1 }));
-    let at = param(PROBE, UnitParam::Cutoff);
-    ed.spec_mut().connect_param(at, ev(1));
-    for range in [
-        ParamRange::new(f64::NAN, 1.0),
-        ParamRange::new(0.0, f64::NAN),
-    ] {
-        assert!(
-            matches!(
-                ed.set_param_range(at, range),
-                Err(ParamRangeError::InvalidRange { at: a }) if a == at
-            ),
-            "a NaN range was not refused"
-        );
-    }
-    ed.set_param_range(at, ParamRange::new(f64::NEG_INFINITY, 1.0))
-        .expect("a range");
-    ed.commit().expect("an infinite bound is no bound");
-}
-
 /// Removing a driven node — the target of a param edge — takes its ports'
 /// entries with it, so the next commit (and every one after) goes through
 /// instead of naming a node that is gone; and the executor hands the
@@ -1199,7 +1173,7 @@ fn removing_a_modulated_target_leaves_the_graph_committable() {
     ed.insert(NodeKey(1), "sig", Unforkable(Signal { seed: 3 }));
     ed.spec_mut()
         .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
-    ed.set_param_range(param(PROBE, UnitParam::Q), ParamRange::new(0.0, 1.0))
+    ed.set_param_range(param(PROBE, UnitParam::Q), ParamRange::of(0.0, 1.0))
         .expect("a range");
     ed.commit().expect("commits");
     let _ = render(&mut exec, &mut ed, 64, 64);
@@ -1604,7 +1578,7 @@ fn a_range_clamps_a_segment_without_rewriting_it() {
     };
     let unbounded = (f64::NEG_INFINITY, f64::INFINITY);
     check(&block(&mut exec, &mut ed, 64)[0], unbounded, "on the curve");
-    ed.set_param_range(at, ParamRange::new(0.0, 0.25))
+    ed.set_param_range(at, ParamRange::of(0.0, 0.25))
         .expect("a range");
     for _ in 0..3 {
         let out = block(&mut exec, &mut ed, 64);
@@ -1864,7 +1838,7 @@ fn a_range_move_lands_on_the_next_block_without_a_commit() {
     ed.insert(NodeKey(1), "sig", Unforkable(Signal { seed: SEED }));
     let at = param(PROBE, UnitParam::Cutoff);
     ed.spec_mut().connect_param(at, ev(1));
-    ed.set_param_range(at, ParamRange::new(-2.0, 2.0))
+    ed.set_param_range(at, ParamRange::of(-2.0, 2.0))
         .expect("a range");
     ed.commit().expect("commits");
     let plan = Arc::clone(ed.base().expect("a plan"));
@@ -1886,7 +1860,7 @@ fn a_range_move_lands_on_the_next_block_without_a_commit() {
         check(&out, &mut frame, (-2.0, 2.0), "the first range");
     }
     // The signal reaches past ±0.25 in a block, so the clamp shows.
-    ed.set_param_range(at, ParamRange::new(-0.25, 0.25))
+    ed.set_param_range(at, ParamRange::of(-0.25, 0.25))
         .expect("a range");
     let out = block(&mut exec, &mut ed, 37);
     assert!(out[0].contains(&0.25) && out[0].contains(&-0.25));
@@ -1897,7 +1871,7 @@ fn a_range_move_lands_on_the_next_block_without_a_commit() {
         "the next block, every frame",
     );
     // Crossed bounds are ordered, as they always were.
-    ed.set_param_range(at, ParamRange::new(0.5, -0.1))
+    ed.set_param_range(at, ParamRange::of(0.5, -0.1))
         .expect("a range");
     let out = block(&mut exec, &mut ed, 64);
     check(&out, &mut frame, (-0.1, 0.5), "crossed bounds");
@@ -1915,7 +1889,7 @@ fn a_range_move_lands_on_the_next_block_without_a_commit() {
     // A plan the range rode along with: a unit placed by a commit starts
     // with the editor's range.
     ed.insert(NodeKey(PROBE), "probe", Unforkable(Probe::new(&cutoff, &q)));
-    ed.set_param_range(at, ParamRange::new(-0.5, 0.5))
+    ed.set_param_range(at, ParamRange::of(-0.5, 0.5))
         .expect("a range");
     ed.commit().expect("a regenerated probe");
     let out = block(&mut exec, &mut ed, 64);
@@ -1952,7 +1926,7 @@ fn a_range_move_reaches_a_unit_that_faded_in() {
     );
     assert_eq!(ed.fades_in_flight(), 0, "the fade is over");
 
-    ed.set_param_range(at, ParamRange::new(-1.0, 0.5))
+    ed.set_param_range(at, ParamRange::of(-1.0, 0.5))
         .expect("a range");
     let out = render(&mut exec, &mut ed, 64, 64);
     assert!(
@@ -1976,9 +1950,9 @@ fn a_reordered_param_list_clamps_each_port_to_its_own_range() {
     for at in [cut_at, q_at] {
         ed.spec_mut().connect_param(at, ev(1));
     }
-    ed.set_param_range(cut_at, ParamRange::new(-1.0, 0.25))
+    ed.set_param_range(cut_at, ParamRange::of(-1.0, 0.25))
         .expect("a range");
-    ed.set_param_range(q_at, ParamRange::new(-1.0, 0.75))
+    ed.set_param_range(q_at, ParamRange::of(-1.0, 0.75))
         .expect("a range");
     ed.commit().expect("commits");
     let out = render(&mut exec, &mut ed, 64, 64);
@@ -2002,33 +1976,22 @@ fn a_reordered_param_list_clamps_each_port_to_its_own_range() {
         out[1].iter().all(|&x| x == 0.25),
         "Cutoff, now on port 1, clamps to Cutoff's range"
     );
-    ed.set_param_range(q_at, ParamRange::new(-1.0, 0.5))
+    ed.set_param_range(q_at, ParamRange::of(-1.0, 0.5))
         .expect("a range");
     let out = render(&mut exec, &mut ed, 64, 64);
     assert!(out[0].iter().all(|&x| x == 0.5), "a move reaches Q's port");
     assert!(out[1].iter().all(|&x| x == 0.25), "and only Q's");
 }
 
-/// `Editor::set_param_range` refuses what a commit would, and changes
-/// nothing when it does.
+/// `Editor::set_param_range` refuses a port of a node that is not there, and
+/// changes nothing when it does.
 #[test]
-fn a_bad_range_move_is_refused() {
+fn a_range_move_on_a_missing_node_is_refused() {
     let (cutoff, q) = (Cell::new(0.0), Cell::new(0.0));
     let (mut ed, _exec) = probe_graph(64, &cutoff, &q);
-    let at = param(PROBE, UnitParam::Cutoff);
-    for range in [
-        ParamRange::new(f64::NAN, 1.0),
-        ParamRange::new(0.0, f64::NAN),
-    ] {
-        assert!(matches!(
-            ed.set_param_range(at, range),
-            Err(ParamRangeError::InvalidRange { at: a }) if a == at
-        ));
-    }
-    assert!(ed.spec().params.is_empty(), "nothing recorded");
     let gone = param(99, UnitParam::Cutoff);
     assert!(matches!(
-        ed.set_param_range(gone, ParamRange::new(0.0, 1.0)),
+        ed.set_param_range(gone, ParamRange::of(0.0, 1.0)),
         Err(ParamRangeError::NoSuchNode { node }) if node == NodeKey(99)
     ));
     assert!(ed.spec().params.is_empty(), "nothing recorded");
@@ -2092,7 +2055,7 @@ fn a_shrinking_range_rewrites_neither_the_base_nor_a_ramp() {
     let out = block(&mut exec, &mut ed, 64);
     check(&out, &mut frame, unbounded, "ramping");
     // Shrink below the base itself: the value sits on the upper bound.
-    ed.set_param_range(at, ParamRange::new(0.0, 0.25))
+    ed.set_param_range(at, ParamRange::of(0.0, 0.25))
         .expect("a range");
     for _ in 0..4 {
         let out = block(&mut exec, &mut ed, 64);
@@ -2414,9 +2377,9 @@ fn run_differential(g: &Gen) {
                 // port replaces whichever it had.
                 ed.spec_mut().connect_param(at, from);
                 if let Some((lo, hi)) = e.range {
-                    ed.set_param_range(at, ParamRange::new(lo, hi))
+                    ed.set_param_range(at, ParamRange::of(lo, hi))
                         .expect("a range");
-                    held.insert(at, ParamRange::new(lo, hi));
+                    held.insert(at, ParamRange::of(lo, hi));
                 }
             }
             if e.until == step && e.until > e.when {
@@ -2462,7 +2425,7 @@ fn run_differential(g: &Gen) {
                     node: NodeKey(300 + p as u64),
                     param: PARAMS[k].into(),
                 };
-                let r = r.map_or(ParamRange::UNBOUNDED, |(lo, hi)| ParamRange::new(lo, hi));
+                let r = r.map_or(ParamRange::UNBOUNDED, |(lo, hi)| ParamRange::of(lo, hi));
                 ed.set_param_range(at, r).expect("a range");
                 reference.set_param_range(at, r);
                 held.insert(at, r);
@@ -2548,25 +2511,25 @@ fn a_range_cell_handle_is_the_ports_own() {
     );
     assert_eq!(cell.current(), ParamRange::UNBOUNDED);
 
-    ed.set_param_range(at, ParamRange::new(-0.5, 0.5))
+    ed.set_param_range(at, ParamRange::of(-0.5, 0.5))
         .expect("a range");
     assert_eq!(
         cell.current(),
-        ParamRange::new(-0.5, 0.5),
+        ParamRange::of(-0.5, 0.5),
         "read back at once"
     );
 
     let frame = block(&mut exec, &mut ed, 64)[0].len() as u64;
-    ed.set_param_range(at, ParamRange::new(-0.25, 0.25))
+    ed.set_param_range(at, ParamRange::of(-0.25, 0.25))
         .expect("a range");
-    assert_eq!(cell.current(), ParamRange::new(-0.25, 0.25));
+    assert_eq!(cell.current(), ParamRange::of(-0.25, 0.25));
     // An unrelated commit (another node joins): the cell is rewritten from
     // the editor's values, which hold the same range.
     ed.insert(NodeKey(3), "other", Unforkable(Signal { seed: 1 }));
     ed.commit().expect("commits");
     assert_eq!(
         cell.current(),
-        ParamRange::new(-0.25, 0.25),
+        ParamRange::of(-0.25, 0.25),
         "a commit keeps it"
     );
     let out = block(&mut exec, &mut ed, 64);

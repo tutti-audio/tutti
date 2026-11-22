@@ -110,7 +110,7 @@ use crate::{Edge, EdgeId, InputPort, OutputPort, PortSink, PortSource};
 use tutti_buffers::Float;
 use tutti_curve::{FadeLaw, declick_frames};
 use tutti_platform::with_no_denormals;
-use tutti_units::{Amplitude, At, Frame, Latency, Mix, Normalized, Samples};
+use tutti_units::{At, Frame, Gain, Latency, Mix, Normalized, Samples};
 
 use crate::command::Scheduled;
 use crate::event::{Event, EventKind, EventWriter, SortedEvents};
@@ -607,7 +607,7 @@ impl<F: Float> Reference<F> {
     /// `Editor::set_edge_gain`'s contract. The next
     /// [`set_graph`](Self::set_graph) replaces it with the values it is given
     /// (the editor's table records the move, so the two agree).
-    pub fn set_edge_gain(&mut self, id: EdgeId, base: Amplitude) {
+    pub fn set_edge_gain(&mut self, id: EdgeId, base: Gain) {
         self.values.set_base(id, base);
     }
 
@@ -1215,7 +1215,7 @@ impl<F: Float> Reference<F> {
         let t = graph.topology();
         // Each weighted lane's base for this block, as it stands at its start
         // (a lane's weights are made where its addend is, `lane_weight`).
-        let targets: BTreeMap<EdgeId, Amplitude> = graph
+        let targets: BTreeMap<EdgeId, Gain> = graph
             .gains()
             .iter()
             .map(|(&id, _)| (id, self.values.base(id)))
@@ -1420,7 +1420,7 @@ impl<F: Float> Reference<F> {
         inputs: &[&[F]],
         audio: &mut BTreeMap<OutputPort, Vec<F>>,
         events: &mut BTreeMap<EventOutputPort, RefOut>,
-        targets: &BTreeMap<EdgeId, Amplitude>,
+        targets: &BTreeMap<EdgeId, Gain>,
     ) {
         let t = graph.topology();
         let shape = self.units[&key].1.shape();
@@ -1805,7 +1805,7 @@ impl<F: Float> Reference<F> {
         &mut self,
         graph: &ValidGraph,
         id: EdgeId,
-        targets: &BTreeMap<EdgeId, Amplitude>,
+        targets: &BTreeMap<EdgeId, Gain>,
         frames: usize,
         events: &BTreeMap<EventOutputPort, RefOut>,
     ) -> Option<RefWeight<F>> {
@@ -2013,11 +2013,7 @@ fn ref_port<F: Float>(
         }
     };
     let bound = |v: f64| F::from_unit(CellValue(v));
-    let (lo, hi) = if range.min <= range.max {
-        (bound(range.min), bound(range.max))
-    } else {
-        (bound(range.max), bound(range.min))
-    };
+    let (lo, hi) = (bound(range.ordered().0), bound(range.ordered().1));
     // The event source's value at every frame, the base before its
     // first event; it replaces the base, clamped.
     let mut vals = vec![F::ZERO; frames];

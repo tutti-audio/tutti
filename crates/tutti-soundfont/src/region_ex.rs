@@ -2,12 +2,10 @@
 // MeltySynth (Copyright (C) 2021 Nobuaki Tanaka). The MIT notice is
 // LICENSE-RUSTYSYNTH.txt, at the root of this crate.
 
-use crate::lfo::Lfo;
-use crate::modulation_envelope::ModulationEnvelope;
+use crate::envelope::SoundFontEnvelope;
 use crate::oscillator::Oscillator;
 use crate::region_pair::RegionPair;
-use crate::soundfont_math::SoundFontMath;
-use crate::volume_envelope::VolumeEnvelope;
+use crate::soundfont_math::key_number_to_multiplying_factor;
 use tutti_units::Normalized;
 
 #[non_exhaustive]
@@ -41,7 +39,7 @@ impl RegionEx {
     }
 
     pub(crate) fn start_volume_envelope(
-        envelope: &mut VolumeEnvelope,
+        envelope: &mut SoundFontEnvelope,
         region: &RegionPair,
         key: i32,
         _velocity: i32,
@@ -51,15 +49,9 @@ impl RegionEx {
         let delay = region.delay_volume_envelope();
         let attack = region.attack_volume_envelope();
         let hold = region.hold_volume_envelope()
-            * SoundFontMath::key_number_to_multiplying_factor(
-                region.key_number_to_volume_envelope_hold(),
-                key,
-            );
+            * key_number_to_multiplying_factor(region.key_number_to_volume_envelope_hold(), key);
         let decay = region.decay_volume_envelope()
-            * SoundFontMath::key_number_to_multiplying_factor(
-                region.key_number_to_volume_envelope_decay(),
-                key,
-            );
+            * key_number_to_multiplying_factor(region.key_number_to_volume_envelope_decay(), key);
         let sustain = Normalized::clamped((-region.sustain_volume_envelope()).to_amplitude().get());
         let release = region.release_time();
 
@@ -67,7 +59,7 @@ impl RegionEx {
     }
 
     pub(crate) fn start_modulation_envelope(
-        envelope: &mut ModulationEnvelope,
+        envelope: &mut SoundFontEnvelope,
         region: &RegionPair,
         key: i32,
         velocity: i32,
@@ -77,12 +69,12 @@ impl RegionEx {
         let delay = region.delay_modulation_envelope();
         let attack = region.attack_modulation_envelope() * (f64::from(145 - velocity) / 144.0);
         let hold = region.hold_modulation_envelope()
-            * SoundFontMath::key_number_to_multiplying_factor(
+            * key_number_to_multiplying_factor(
                 region.key_number_to_modulation_envelope_hold(),
                 key,
             );
         let decay = region.decay_modulation_envelope()
-            * SoundFontMath::key_number_to_multiplying_factor(
+            * key_number_to_multiplying_factor(
                 region.key_number_to_modulation_envelope_decay(),
                 key,
             );
@@ -90,16 +82,5 @@ impl RegionEx {
         let release = region.release_modulation_envelope();
 
         envelope.start(delay, attack, hold, decay, sustain, release);
-    }
-
-    pub(crate) fn start_vibrato(lfo: &mut Lfo, region: &RegionPair, _key: i32, _velocity: i32) {
-        lfo.start(region.delay_vibrato_lfo(), region.frequency_vibrato_lfo());
-    }
-
-    pub(crate) fn start_modulation(lfo: &mut Lfo, region: &RegionPair, _key: i32, _velocity: i32) {
-        lfo.start(
-            region.delay_modulation_lfo(),
-            region.frequency_modulation_lfo(),
-        );
     }
 }

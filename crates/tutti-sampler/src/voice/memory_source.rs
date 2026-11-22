@@ -869,6 +869,7 @@ impl<F: Float> MemorySource<F> {
             frac,
             live,
             y,
+            ..
         } = gather;
         let (index, frac, live) = (
             &mut index[..frames],
