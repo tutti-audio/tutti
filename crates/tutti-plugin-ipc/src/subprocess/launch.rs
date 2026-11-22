@@ -685,12 +685,14 @@ mod tests {
     /// It outlives the host and holds the plugin's device claim; a user retrying a failing plugin accumulates them.
     ///
     /// The stand-in has to satisfy two requirements at once: never speak the
-    /// protocol, so the wait for the server's `Hello` fails the way a hung server
-    /// does, and **stay alive while doing so**, or there is no leak left to
-    /// detect. It is a tiny shell script that ignores its standard input (the
-    /// host's end of the connection) and sleeps. `sleep` or `cat` run directly
-    /// would also look right, but `cat` reads the connection and exits when it
-    /// closes: a stand-in that ends on its own proves nothing about cleanup.
+    /// protocol, so the launch fails at the wait for the server's `Hello`, and
+    /// **stay alive while doing so**, or there is no leak left to detect. It is a
+    /// tiny shell script: it records its pid, closes its standard input (the host's
+    /// end of the connection), and sleeps. **The close is what fails the launch,
+    /// and it comes after the pid is written**, so the launch cannot fail before
+    /// the stand-in ran: the order is the stand-in's, not a timeout's. `sleep` or
+    /// `cat` run directly would exit on their own, which proves nothing about
+    /// cleanup.
     ///
     /// # Keeping it deterministic under parallel load
     ///
@@ -710,7 +712,8 @@ mod tests {
     /// killed-and-reaped child answers `ESRCH`. A zombie also answers `Ok`, so
     /// this catches a missing `wait` as well as a missing `kill`.
     ///
-    /// **No wall-clock budget.** `launch` kills and waits *synchronously*
+    /// **No wall-clock budget.** The launch ends on the stand-in's close of the
+    /// connection, never on a timeout, and `launch` kills and waits *synchronously*
     /// before returning, so by the time it has returned the child is already
     /// reaped — there is nothing to wait for, and a retry loop would hide that
     /// certainty behind a deadline a loaded machine could exhaust. The pid is
@@ -728,7 +731,7 @@ mod tests {
         std::fs::write(
             &stand_in,
             format!(
-                "#!/bin/sh\necho $$ > {}\nexec sleep 120\n",
+                "#!/bin/sh\necho $$ > {}\nexec 0<&-\nexec sleep 120\n",
                 pid_file.display()
             ),
         )
@@ -738,14 +741,7 @@ mod tests {
             std::fs::set_permissions(&stand_in, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
 
-        let config = IpcConfig {
-            timeouts: {
-                let mut t = Timeouts::default();
-                t.call = Duration::from_millis(200);
-                t
-            },
-            ..IpcConfig::new()
-        };
+        let config = IpcConfig::new();
 
         let err = match launch_with(
             &Locator::at(&stand_in),
@@ -764,10 +760,10 @@ mod tests {
             }
         };
 
-        // The stand-in records its pid before `exec`, and `launch` cannot return
-        // until it has connected-or-timed-out against a server it spawned — so
-        // an absent file means the stand-in was never run, which would make
-        // every assertion below vacuous.
+        // The stand-in records its pid before it closes the connection that ends
+        // the launch, so the file is there by the time `launch` has failed; an
+        // absent one means the stand-in never ran, which would make every
+        // assertion below vacuous.
         let pid: i32 = std::fs::read_to_string(&pid_file)
             .unwrap_or_else(|e| {
                 panic!(

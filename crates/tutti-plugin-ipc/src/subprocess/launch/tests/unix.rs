@@ -122,13 +122,14 @@ fn a_lane_answered_with_another_reply_is_refused() {
 const STAND_IN_ENV: &str = "TUTTI_LAUNCH_TEST_STAND_IN";
 
 /// What a server spawned by [`crate::transport::spawn`] sees of its
-/// inheritance, as its own report: the lines `fd N`, `arg A` and `env K`,
+/// inheritance, as its own report, with this process's own inheritable
+/// descriptors from before the spawn: the lines `fd N`, `arg A` and `env K`,
 /// then `byte B` for the first byte the host wrote to its standard input.
 ///
 /// The server is **this test binary**, re-run on [`stand_in_reports`] (a program
 /// looked up on `PATH` is not one on every runner), under the same
 /// `spawn` a launch uses, and the report is on its standard output.
-fn stand_in_report() -> (Vec<String>, Vec<String>) {
+fn stand_in_report() -> (Vec<String>, Vec<u32>, Vec<String>) {
     use std::io::{Read as _, Write as _};
 
     let module = module_path!()
@@ -139,6 +140,13 @@ fn stand_in_report() -> (Vec<String>, Vec<String>) {
         format!("{module}::stand_in_reports"),
         "--nocapture".to_owned(),
     ];
+    // What this process holds open without close-on-exec, whatever the runner
+    // left: a spawn hands all of it on.
+    let inheritable = tutti_plugin_ipc_ffi::inheritable_descriptors()
+        .expect("the descriptor table")
+        .into_iter()
+        .map(|fd| u32::try_from(fd).expect("a descriptor number"))
+        .collect();
     let mut command = Command::new(std::env::current_exe().expect("the test binary's path"));
     command
         .args(&args)
@@ -166,7 +174,7 @@ fn stand_in_report() -> (Vec<String>, Vec<String>) {
         .filter_map(|l| l.strip_prefix("report: "))
         .map(str::to_owned)
         .collect();
-    (args, lines)
+    (args, inheritable, lines)
 }
 
 /// The body of the stand-in [`stand_in_report`] spawns; a no-op anywhere else.
@@ -207,20 +215,24 @@ fn stand_in_reports() {
     }
 }
 
-/// **A spawned server inherits its end of the connection as standard input and
-/// no other descriptor**: the descriptors it holds are 0, 1 and 2, and the byte
-/// the host wrote arrives on 0. Any other (the host's end of the pair, a slab,
-/// a lane) would let the server, and the plugin in it, hold what is not its.
+/// **The spawn adds no descriptor but standard input**: the descriptors the server
+/// holds are 0, 1, 2 and exactly the ones the host process held without
+/// close-on-exec before the spawn (whatever its runner leaked; the server's own
+/// startup closes those), and the byte the host wrote arrives on 0. The host's
+/// end of the pair, a slab or a lane among them would let the server, and the
+/// plugin in it, hold what is not its.
 #[test]
-fn a_spawned_server_inherits_only_stdin_and_the_standard_streams() {
-    let (_, report) = stand_in_report();
+fn the_spawn_adds_no_descriptor_but_stdin() {
+    let (_, inheritable, report) = stand_in_report();
     let mut fds: Vec<u32> = report
         .iter()
         .filter_map(|l| l.strip_prefix("fd "))
         .map(|n| n.parse().expect("a descriptor number"))
         .collect();
     fds.sort_unstable();
-    assert_eq!(fds, [0, 1, 2], "{report:?}");
+    let mut expected: Vec<u32> = [0, 1, 2].into_iter().chain(inheritable).collect();
+    expected.sort_unstable();
+    assert_eq!(fds, expected, "{report:?}");
     assert!(
         report.contains(&"byte 90".to_owned()),
         "the host's byte arrives on stdin: {report:?}"
@@ -233,7 +245,7 @@ fn a_spawned_server_inherits_only_stdin_and_the_standard_streams() {
 /// server's watch).
 #[test]
 fn argv_and_env_name_no_endpoint() {
-    let (args, report) = stand_in_report();
+    let (args, _, report) = stand_in_report();
     let seen = |kind: &str| -> Vec<String> {
         report
             .iter()
