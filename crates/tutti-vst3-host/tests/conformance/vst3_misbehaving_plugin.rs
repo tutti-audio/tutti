@@ -41,9 +41,8 @@
 use crate::probe::probe_path;
 use tutti_buffers::{InputOutput, Planes, PlanesMut};
 
-use std::sync::Mutex;
 use tutti_fixtures::main_thread;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use crate::active;
 #[allow(unused_imports)]
@@ -114,7 +113,7 @@ impl Misbehaviour {
     }
 
     fn enter(code: Option<&str>) -> Self {
-        let guard = PROBE_ENV_LOCK.lock_recover();
+        let guard = PROBE_ENV_LOCK.lock();
         let previous = std::env::var("TUTTI_PROBE_MISBEHAVIOUR").ok();
         match code {
             // SAFETY: `PROBE_ENV_LOCK` is held for the life of this guard, so no other

@@ -39,10 +39,9 @@
 use crate::probe::probe_path;
 use tutti_buffers::{InputOutput, Planes, PlanesMut};
 
-use std::sync::Mutex;
 use tutti_fixtures::main_thread;
 use tutti_graph::UmpAt;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_graph::Offset;
 use tutti_ump::{MidiChannel, MidiGroup, U7};
@@ -83,7 +82,7 @@ fn param_address(tag: u32) -> ParamId {
 static PLUGIN_LOCK: Mutex<()> = Mutex::new(());
 
 fn plugin_guard() -> std::sync::MutexGuard<'static, ()> {
-    PLUGIN_LOCK.lock_recover()
+    PLUGIN_LOCK.lock()
 }
 
 // ── Probe contract (mirrors audio-probe/source/probeids.h) ───────────────────

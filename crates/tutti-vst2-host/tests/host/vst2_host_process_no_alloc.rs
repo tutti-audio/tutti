@@ -17,11 +17,11 @@
 //! model (`tutti-rt/tests/seq_cell_loom.rs`).
 
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 use tutti_buffers::FloatWidth;
 use tutti_fixtures::main_thread;
 use tutti_graph::UmpAt;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_graph::Offset;
 use tutti_plugin_types::{MaxBlock, Samples};
@@ -42,7 +42,7 @@ const BLOCK: usize = 64;
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock_recover()
+    PROBE_LOCK.lock()
 }
 
 fn load_probe() -> (Active, PathBuf) {

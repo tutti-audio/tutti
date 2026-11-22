@@ -61,11 +61,12 @@ use crate::{
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, PoisonError, RwLock};
 use tutti_platform::WeakExecutor;
 use tutti_plugin_types::{IpcError, IpcResult};
 use tutti_plugin_types::{PluginDescriptor, PluginFormat, PluginId, PluginRef};
+use tutti_rt::RwLock;
 
 /// Why the persistence a catalog was given could not store the database.
 ///
@@ -253,10 +254,7 @@ impl BlacklistView {
     /// file is blacklisted and unchanged.
     pub fn check(&self, plugin: &PluginRef) -> IpcResult<()> {
         let canonical = key(plugin.path());
-        let row = blacklist_row(
-            &self.rows.read().unwrap_or_else(PoisonError::into_inner),
-            &canonical,
-        );
+        let row = blacklist_row(&self.rows.read(), &canonical);
         refusal(row, &canonical, plugin)
     }
 }
@@ -284,18 +282,9 @@ impl Catalog {
     /// alone and only when the blacklist moved, so the poll that ends every UI
     /// tick of a scan does not stop a reader otherwise.
     fn republish_blacklist(&self) {
-        let moved = moved_blacklist(
-            &self
-                .blacklist
-                .read()
-                .unwrap_or_else(PoisonError::into_inner),
-            &self.db,
-        );
+        let moved = moved_blacklist(&self.blacklist.read(), &self.db);
         if let Some(rows) = moved {
-            *self
-                .blacklist
-                .write()
-                .unwrap_or_else(PoisonError::into_inner) = rows;
+            *self.blacklist.write() = rows;
         }
     }
 
@@ -782,6 +771,7 @@ impl Catalog {
 mod tests {
     use super::*;
     use tutti_plugin_types::Described;
+    use tutti_rt::Mutex;
 
     fn clap(id: &str) -> PluginId {
         PluginId::Clap(id.into())
@@ -1168,19 +1158,18 @@ mod tests {
         std::fs::write(&crashy, b"x").unwrap();
         std::fs::write(config.pedal_path(), crashy.to_str().unwrap()).unwrap();
         let pedal = config.pedal_path();
-        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = Arc::new(Mutex::new(Vec::new()));
         let log = Arc::clone(&seen);
         let key_path = key(&crashy);
 
         let mut plugins = Catalog::new(PluginDb::new(), config, move |db| {
             log.lock()
-                .unwrap()
                 .push((db.is_blacklisted(&key_path), pedal.exists()));
             Ok(())
         });
         assert_eq!(plugins.recover_crash().unwrap().files, vec![key(&crashy)]);
 
-        assert_eq!(*seen.lock().unwrap(), vec![(true, true)]);
+        assert_eq!(*seen.lock(), vec![(true, true)]);
         assert!(!plugins.config.pedal_path().exists());
     }
 
@@ -1214,11 +1203,11 @@ mod tests {
     #[test]
     fn a_save_writes_the_table_as_cloned_at_save() {
         let dir = tempfile::TempDir::new().unwrap();
-        let written = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let written = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&written);
         let mut plugins =
             Catalog::new(PluginDb::new(), CatalogConfig::new(dir.path()), move |db| {
-                sink.lock().unwrap().push(db.rows().count());
+                sink.lock().push(db.rows().count());
                 Ok(())
             });
         let (before, after) = (dir.path().join("a.clap"), dir.path().join("b.clap"));
@@ -1230,7 +1219,7 @@ mod tests {
         plugins.record(RowChange::put(key(&after), blacklisted_row(&after, "b")));
         save.run().unwrap();
 
-        assert_eq!(*written.lock().unwrap(), vec![1]);
+        assert_eq!(*written.lock(), vec![1]);
         assert_eq!(
             plugins.db().rows().count(),
             2,
@@ -1261,10 +1250,10 @@ mod tests {
     fn a_save_runs_on_another_thread() {
         fn is_send<T: Send>(_: &T) {}
         let dir = tempfile::TempDir::new().unwrap();
-        let writer = Arc::new(std::sync::Mutex::new(None));
+        let writer = Arc::new(Mutex::new(None));
         let sink = Arc::clone(&writer);
         let plugins = Catalog::new(PluginDb::new(), CatalogConfig::new(dir.path()), move |_| {
-            *sink.lock().unwrap() = Some(std::thread::current().id());
+            *sink.lock() = Some(std::thread::current().id());
             Ok(())
         });
         let save = plugins.save();
@@ -1277,7 +1266,7 @@ mod tests {
         .join()
         .unwrap();
 
-        assert_eq!(*writer.lock().unwrap(), Some(spawned));
+        assert_eq!(*writer.lock(), Some(spawned));
         assert_ne!(spawned, std::thread::current().id());
     }
 

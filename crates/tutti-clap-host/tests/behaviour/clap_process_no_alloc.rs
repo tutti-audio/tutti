@@ -15,9 +15,8 @@
 //! race no allocation-sampling test can pin.
 
 use std::path::Path;
-use std::sync::Mutex;
 use tutti_graph::UmpAt;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_buffers::InputOutput;
 use tutti_clap_host::{ClapLoaded, ClapProcessContext, LoadOptions, TransportInfo};
@@ -221,7 +220,7 @@ fn drive(
 /// common path rather than any of the hazard corners below.
 #[test]
 fn process_steady_state_does_not_allocate() {
-    let _lock = PROBE_LOCK.lock_recover();
+    let _lock = PROBE_LOCK.lock();
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
@@ -248,7 +247,7 @@ fn process_steady_state_does_not_allocate() {
 /// regression in those would not show up in a silent block.
 #[test]
 fn process_with_midi_does_not_allocate() {
-    let _lock = PROBE_LOCK.lock_recover();
+    let _lock = PROBE_LOCK.lock();
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
@@ -303,7 +302,7 @@ fn process_with_midi_does_not_allocate() {
 /// packet `decode` cannot frame.
 #[test]
 fn process_with_every_message_kind_does_not_allocate() {
-    let _lock = PROBE_LOCK.lock_recover();
+    let _lock = PROBE_LOCK.lock();
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
@@ -392,7 +391,7 @@ fn process_with_every_message_kind_does_not_allocate() {
 /// re-excited by fresh input reports exactly this.
 #[test]
 fn alternating_continue_tail_does_not_allocate() {
-    let _lock = PROBE_LOCK.lock_recover();
+    let _lock = PROBE_LOCK.lock();
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
@@ -430,7 +429,7 @@ fn alternating_continue_tail_does_not_allocate() {
 /// plugin built against a newer header is legal, not misbehaviour.
 #[test]
 fn alternating_unknown_status_does_not_allocate() {
-    let _lock = PROBE_LOCK.lock_recover();
+    let _lock = PROBE_LOCK.lock();
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
@@ -459,7 +458,7 @@ fn alternating_unknown_status_does_not_allocate() {
 /// TAIL is still caught.
 #[test]
 fn alternating_continue_sleep_does_not_allocate() {
-    let _lock = PROBE_LOCK.lock_recover();
+    let _lock = PROBE_LOCK.lock();
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
@@ -491,7 +490,7 @@ fn alternating_continue_sleep_does_not_allocate() {
 #[test]
 fn the_plugins_status_becomes_the_blocks_status() {
     use tutti_plugin_types::{BlockStatus, ProcessContext, ProcessOutput};
-    let _lock = PROBE_LOCK.lock_recover();
+    let _lock = PROBE_LOCK.lock();
     reset_probe();
     let mut inst = load_probe();
     let ctx = ProcessContext::new();
@@ -526,7 +525,7 @@ fn the_plugins_status_becomes_the_blocks_status() {
 /// stop driving a decaying plugin could not see it.
 #[test]
 fn tail_and_sleep_are_observable_by_a_caller() {
-    let _lock = PROBE_LOCK.lock_recover();
+    let _lock = PROBE_LOCK.lock();
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
@@ -577,7 +576,7 @@ fn tail_and_sleep_are_observable_by_a_caller() {
 /// audio does not leak.
 #[test]
 fn plugin_error_status_does_not_allocate() {
-    let _lock = PROBE_LOCK.lock_recover();
+    let _lock = PROBE_LOCK.lock();
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
@@ -632,7 +631,7 @@ fn plugin_error_status_does_not_allocate() {
 /// asserts the error is still raised and still carries both numbers.
 #[test]
 fn oversized_block_rejection_does_not_allocate() {
-    let _lock = PROBE_LOCK.lock_recover();
+    let _lock = PROBE_LOCK.lock();
     reset_probe();
     let mut inst = load_probe();
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
@@ -703,7 +702,7 @@ fn oversized_block_rejection_does_not_allocate() {
 /// nothing to amortise against and the same event allocated and freed per block.
 #[test]
 fn sysex_output_events_do_not_allocate() {
-    let _lock = PROBE_LOCK.lock_recover();
+    let _lock = PROBE_LOCK.lock();
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
@@ -791,7 +790,7 @@ const OUTPUT_QUEUES: u32 = 16;
 /// blocks, so the second and later reuse the queues the first returned.
 #[test]
 fn param_output_burst_does_not_allocate() {
-    let _lock = PROBE_LOCK.lock_recover();
+    let _lock = PROBE_LOCK.lock();
     reset_probe();
     let mut inst = load_probe();
     assert!(
@@ -853,7 +852,7 @@ fn param_output_burst_does_not_allocate() {
 /// (it was 30); the property is the same.
 #[test]
 fn param_output_past_the_room_is_counted_not_grown() {
-    let _lock = PROBE_LOCK.lock_recover();
+    let _lock = PROBE_LOCK.lock();
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
@@ -922,7 +921,7 @@ fn param_output_past_the_room_is_counted_not_grown() {
 /// the same.
 #[test]
 fn output_events_past_the_room_are_refused_not_grown() {
-    let _lock = PROBE_LOCK.lock_recover();
+    let _lock = PROBE_LOCK.lock();
     reset_probe();
     let mut inst = load_probe();
     assert!(inst.loaded().parameter_count(main_thread()) <= OUTPUT_QUEUES as usize);
@@ -985,7 +984,7 @@ fn set_param_output_own(points: u32) {
 /// are table-only.
 #[test]
 fn a_param_flood_keeps_note_offs_and_final_values() {
-    let _lock = PROBE_LOCK.lock_recover();
+    let _lock = PROBE_LOCK.lock();
     reset_probe();
     set_switch_u32(b"tutti_test_plugin_set_render_mode\0", 4); // Notes: MIDI thru
     let mut inst = load_probe();
@@ -1081,7 +1080,7 @@ fn start_processing_failure_is_allocation_free() {
 /// audio-thread logs would fail here rather than pass.
 #[test]
 fn audio_thread_logging_does_not_allocate() {
-    let _lock = PROBE_LOCK.lock_recover();
+    let _lock = PROBE_LOCK.lock();
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
@@ -1122,7 +1121,7 @@ fn audio_thread_logging_does_not_allocate() {
 /// demand the host preallocate for an unbounded payload.
 #[test]
 fn varying_sysex_payload_sizes_do_not_allocate() {
-    let _lock = PROBE_LOCK.lock_recover();
+    let _lock = PROBE_LOCK.lock();
     reset_probe();
     let mut inst = load_probe();
     let mut bufs = StereoBufs::new();
@@ -1242,7 +1241,7 @@ fn drive_wide(inst: &mut Active<f32>, channels: usize, iters: usize) {
 /// that scales with channel count. This pins the "just below the cliff" side.
 #[test]
 fn exactly_sixteen_channels_per_side_does_not_allocate() {
-    let _lock = PROBE_LOCK.lock_recover();
+    let _lock = PROBE_LOCK.lock();
     reset_probe();
     // The layout is read at load time, so it must be set BEFORE loading.
     set_wide_layout(WideLayout::Exactly16);
@@ -1267,7 +1266,7 @@ fn exactly_sixteen_channels_per_side_does_not_allocate() {
 /// 20 is what a 7.1.4 bed plus an unassigned stereo pair presents.
 #[test]
 fn twenty_channels_per_side_does_not_allocate() {
-    let _lock = PROBE_LOCK.lock_recover();
+    let _lock = PROBE_LOCK.lock();
     reset_probe();
     set_wide_layout(WideLayout::Wide20);
     let mut inst = load_probe();
@@ -1287,7 +1286,7 @@ fn twenty_channels_per_side_does_not_allocate() {
 /// single-port case passes the test above and fails this one.
 #[test]
 fn two_twelve_channel_ports_per_side_do_not_allocate() {
-    let _lock = PROBE_LOCK.lock_recover();
+    let _lock = PROBE_LOCK.lock();
     reset_probe();
     set_wide_layout(WideLayout::Split12Plus12);
     let mut inst = load_probe();

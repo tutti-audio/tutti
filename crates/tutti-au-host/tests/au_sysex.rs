@@ -56,9 +56,8 @@
 
 mod support;
 
-use std::sync::{Mutex, MutexGuard};
 use tutti_graph::UmpAt;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use support::corpus::{AuRef, SAMPLER};
 use tutti_graph::Offset;
@@ -80,12 +79,6 @@ const BLOCK: u32 = 512;
 /// CoreAudio — not from anything SysEx-specific, but because two tests
 /// instantiating corpus units concurrently is what the lock exists to prevent.
 static AU_LOCK: Mutex<()> = Mutex::new(());
-
-/// Poison-tolerant: the guard only serializes, so one panicking test must not
-/// convert into N spurious failures.
-fn lock() -> MutexGuard<'static, ()> {
-    AU_LOCK.lock_recover()
-}
 
 /// Instruments that survive `MusicDeviceSysEx` on this machine.
 ///
@@ -120,7 +113,7 @@ const IDENTITY_REQUEST: [u8; 4] = [0x7E, 0x00, 0x06, 0x01];
 /// behaviour, where the call was never made at all.
 #[test]
 fn an_instrument_accepts_a_single_packet_sysex() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in SYSEX_SAFE_INSTRUMENTS {
         let au = unit.open(RATE, BLOCK);
         let events = vec![sysex7_packet(SYSEX7_STATUS_SINGLE, &IDENTITY_REQUEST)];
@@ -138,7 +131,7 @@ fn an_instrument_accepts_a_single_packet_sysex() {
 /// block. A stuck note is the audible form of that.
 #[test]
 fn a_multi_packet_sysex_does_not_disturb_the_notes_around_it() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     // 14 bytes — more than the 6 one packet carries, so this is a genuine
     // START / CONTINUE / END run.
     let body: Vec<u8> = (0..14u8).map(|i| 0x10 + i).collect();
@@ -172,7 +165,7 @@ fn a_multi_packet_sysex_does_not_disturb_the_notes_around_it() {
 /// parsing it as a complete message acts on a truncated payload.
 #[test]
 fn an_orphaned_continuation_is_not_sent() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in SYSEX_SAFE_INSTRUMENTS {
         let au = unit.open(RATE, BLOCK);
         let events = vec![

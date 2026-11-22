@@ -3806,7 +3806,6 @@ dependencies = [
  "crossbeam-queue",
  "dpi",
  "keyboard-types",
- "parking_lot",
  "raw-window-handle",
  "thiserror 2.0.21",
  "tutti-buffers",
