@@ -116,7 +116,7 @@ fn a_load_gives_a_node_whose_handle_observes_it_and_renders() {
         "an out-of-process plugin has its server"
     );
     s.graph()
-        .connect(node.out(0), MainOutput::channel(0))
+        .connect(node.output(0), MainOutput::channel(0))
         .unwrap();
     render_until(&mut s, "the plugin's tag", |left| {
         left.iter().all(|&x| x == 1.0)
@@ -156,7 +156,7 @@ fn an_out_of_process_load_runs_on_a_spawned_thread_and_its_node_renders() {
 
     let node = s.apply(opened).expect("its session adds it");
     s.graph()
-        .connect(node.out(0), MainOutput::channel(0))
+        .connect(node.output(0), MainOutput::channel(0))
         .unwrap();
     render_until(&mut s, "the plugin's tag", |left| {
         left.iter().all(|&x| x == 1.0)
@@ -336,7 +336,7 @@ mod process {
         let pid = watch.info().server_pid().expect("a served plugin");
         let node = s.apply(opened).unwrap();
         s.graph()
-            .connect(node.out(0), MainOutput::channel(0))
+            .connect(node.output(0), MainOutput::channel(0))
             .unwrap();
         let kept = watch.clone();
         drop(watch);

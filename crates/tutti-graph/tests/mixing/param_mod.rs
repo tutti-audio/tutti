@@ -167,10 +167,14 @@ impl Node for Probe {
         };
         let (p0, p1) = (io.param(0), io.param(1));
         let mut framed = u32::from(write(io.output(0), p0, self.bases[0].get()));
-        framed |= u32::from(write(io.bus_out(readouts).get(0), p1, self.bases[1].get())) << 1;
-        io.bus_out(readouts).get(1).fill(framed as f32);
+        framed |= u32::from(write(
+            io.bus_output(readouts).get(0),
+            p1,
+            self.bases[1].get(),
+        )) << 1;
+        io.bus_output(readouts).get(1).fill(framed as f32);
         if self.corners {
-            let mut bus = io.bus_out(readouts);
+            let mut bus = io.bus_output(readouts);
             let out = bus.get(2);
             out.fill(0.0);
             for (k, p) in [p0, p1].into_iter().enumerate() {

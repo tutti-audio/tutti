@@ -122,7 +122,7 @@ impl<N: ?Sized> std::fmt::Debug for InstrumentHandle<N> {
 impl<N: ?Sized> InstrumentHandle<N> {
     /// The instrument's own node, with all of its outputs and its event
     /// ports: wire a source of your own into
-    /// [`events_in`](Key::events_in).
+    /// [`event_input`](Key::event_input).
     #[must_use]
     pub fn node(&self) -> Key<N> {
         self.node
@@ -151,7 +151,7 @@ impl<N: ?Sized> InstrumentHandle<N> {
 
     /// The strip after the main pair: what a mix wires from.
     #[must_use]
-    pub fn out(&self) -> Key<BusStripNode> {
+    pub fn output(&self) -> Key<BusStripNode> {
         self.strip
     }
 
@@ -201,7 +201,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// A strip is a stereo pair, so a main output of another width refuses the wire
     /// ([`ConnectError::Width`](crate::ConnectError::Width)): add the instrument
     /// with [`add_instrument_unwired`](Self::add_instrument_unwired) and wire
-    /// [`InstrumentHandle::out`] as the mix wants.
+    /// [`InstrumentHandle::output`] as the mix wants.
     ///
     /// # Errors
     ///
@@ -214,7 +214,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         instrument: I,
     ) -> Result<InstrumentHandle<I>, crate::Error> {
         let added = self.add_instrument_unwired(instrument)?;
-        if let Err(e) = self.graph().connect(added.out(), MainOutput) {
+        if let Err(e) = self.graph().connect(added.output(), MainOutput) {
             let node = added.node().erase();
             let handle = self.remove_instrument(added);
             let removed = self.remove(node);
@@ -226,7 +226,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     }
 
     /// [`add_instrument`](Self::add_instrument) with nothing wired after the
-    /// strip: for a mix that routes [`InstrumentHandle::out`] itself (a bus, a
+    /// strip: for a mix that routes [`InstrumentHandle::output`] itself (a bus, a
     /// send, a wide main output), as [`instrument`](Self::instrument) leaves a node
     /// it is given. Its keys are live only, as `add_instrument`'s are: a bounce
     /// does not contain what they play.
@@ -338,7 +338,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         let graph = self.graph();
         let (queue, keys) = open_keys(graph);
         // `contains` above found the node, so it is in the graph.
-        let fed = graph.set_feed(node, Feeder::Instrument, vec![queue.events_out()]);
+        let fed = graph.set_feed(node, Feeder::Instrument, vec![queue.event_output(0)]);
         debug_assert!(fed.is_ok(), "the instrument is in the graph");
         let strip = graph.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
         graph.connect(OutputPort::new(node, usize::from(main[0])), strip.input(0))?;

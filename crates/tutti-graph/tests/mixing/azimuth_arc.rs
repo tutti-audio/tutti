@@ -46,7 +46,7 @@ impl Node for Probe {
         };
         let (a, e) = (io.param(0), io.param(1));
         write(io.output(0), a);
-        write(io.bus_out(spare).get(0), e);
+        write(io.bus_output(spare).get(0), e);
         Status::Modified
     }
     fn reset(&mut self) {}

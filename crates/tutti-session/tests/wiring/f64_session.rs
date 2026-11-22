@@ -34,11 +34,11 @@ fn render(workers: Workers, lanes: usize) -> Vec<f64> {
     for _ in 0..lanes {
         let gain = s.graph().add(Params(Gain(Param::new(Amplitude::new(1.0)))));
         s.graph()
-            .connect(dc.out(0), gain.input(0))
+            .connect(dc.output(0), gain.input(0))
             .unwrap()
             .unfaded();
         s.graph()
-            .connect(gain.out(0), MainOutput::channel(0))
+            .connect(gain.output(0), MainOutput::channel(0))
             .unwrap()
             .unfaded();
         gains.push(gain);
@@ -65,11 +65,11 @@ fn an_f64_session_renders_a_figure_f32_rounds_away_through_a_set_gain() {
     let dc = s.graph().add(ForkByClone(Dc(FINE)));
     let gain = s.graph().add(Params(Gain(Param::new(Amplitude::new(1.0)))));
     s.graph()
-        .connect(dc.out(0), gain.input(0))
+        .connect(dc.output(0), gain.input(0))
         .unwrap()
         .unfaded();
     s.graph()
-        .connect(gain.out(0), MainOutput::channel(0))
+        .connect(gain.output(0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     let _ = s.update();

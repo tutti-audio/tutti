@@ -1007,7 +1007,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
 
         let (sink, path) = open_target(target, layout, rate)?;
 
-        let ports: Vec<_> = (0..width).map(|channel| node.out(channel)).collect();
+        let ports: Vec<_> = (0..width).map(|channel| node.output(channel)).collect();
         // A second of frames: the pump moves what the tap holds each time it wakes.
         let capacity = rate.one_second();
         let reader = self

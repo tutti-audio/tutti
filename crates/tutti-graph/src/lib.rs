@@ -730,7 +730,7 @@ pub use tutti_curve::{Curvature, DECLICK, Exponent, FadeLaw, Law, declick_frames
 // The audio graph as a value, and the two passes over it. `plan` is the
 // latency pass and is exported as `latency_plan`.
 pub use bus::{Bus, BusRole, Buses, InBus, MAX_BUSES, OutBus};
-pub use bus_edge::{BusError, BusFeed, BusFold, BusRef, BusSide, BusSource, Lowering};
+pub use bus_edge::{BusError, BusFeed, BusFold, BusOutputPort, BusSide, Lowering, NodeBus};
 pub use gain::{EdgeFade, EdgeGain};
 pub use graph::{
     Edge, EdgeId, EventTapId, EventTapPort, EventTapSpec, FeedbackFrom, InputPort, Invalid,
@@ -740,7 +740,7 @@ pub use graph::{
 pub use history::TransportHistory;
 pub use inlet::{InletNode, InletRing};
 pub use instrument::InstrumentNode;
-pub use io::{BusIn, BusOut, Channel, Inputs, Io, Outputs, PortKind};
+pub use io::{BusInput, BusOutput, Channel, Inputs, Io, Outputs, PortKind};
 pub use latency::{
     ChannelFeed, Compensation, Delays, Feed, InputDelay, LatencyGraph, MAX_NODE_LATENCY,
     OutputDelay, PortFeed, delays, plan as latency_plan,

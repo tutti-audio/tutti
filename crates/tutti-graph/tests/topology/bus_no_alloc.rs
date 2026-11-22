@@ -12,7 +12,7 @@ use tutti_graph::testing as common;
 use common::{Kind, TestNode, prepare};
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology};
 use tutti_graph::{
-    Bus, BusRef, BusRole, BusSource, Buses, Cx, Edge, Editor, Executor, InputPort, Io, Node,
+    Bus, BusOutputPort, BusRole, Buses, Cx, Edge, Editor, Executor, InputPort, Io, Node, NodeBus,
     NodeKey, NodeMode, OutputPort, PortSource, Prepare, Shape, Status, TransportPosition,
     Unforkable,
 };
@@ -110,8 +110,8 @@ fn rig(workers: usize) -> (Editor, Executor) {
         }
     }
     ed.connect_bus(
-        BusSource::Node(BusRef::new(key(1), 0)),
-        BusRef::new(key(2), 0),
+        BusOutputPort::Node(NodeBus::new(key(1), 0)),
+        NodeBus::new(key(2), 0),
     )
     .expect("5.1 folds into stereo");
     ed.set_mode(key(3), NodeMode::Bypassed).expect("folds");

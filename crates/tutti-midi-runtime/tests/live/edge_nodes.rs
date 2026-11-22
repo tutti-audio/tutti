@@ -1864,7 +1864,7 @@ fn a_reset_transform_sends_the_zones_ranges_again() {
     let ranges = |d: &mut Direct<tutti_midi_runtime::MpeTransformNode>| {
         d.events(0, &[pedal]);
         let _ = d.block();
-        d.events_out(0)
+        d.event_output(0)
             .iter()
             .filter(|e| {
                 matches!(e.kind, tutti_graph::EventKind::Midi(u)
