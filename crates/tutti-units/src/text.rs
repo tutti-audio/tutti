@@ -22,9 +22,15 @@ pub enum TextError {
     /// The string holds a NUL, which ends a string on a wire that pads with it.
     #[error("the text holds a NUL")]
     Nul,
+    /// The string starts with U+FEFF, a byte order mark, which UTF-8 text on a
+    /// wire does not carry. U+FEFF later in a string is a zero-width no-break
+    /// space and is kept.
+    #[error("the text starts with a byte order mark")]
+    Bom,
 }
 
-/// A UTF-8 string of `MIN` to `MAX` bytes with no NUL, held inline.
+/// A UTF-8 string of `MIN` to `MAX` bytes with no NUL and no leading byte order
+/// mark (U+FEFF), held inline.
 ///
 /// The bounds are in **bytes**: a multi-byte character counts all its bytes,
 /// and one that would straddle `MAX` is refused, never split. Construction
@@ -43,6 +49,9 @@ pub enum TextError {
 /// // "é" is two bytes, so four of them are eight and five are ten.
 /// assert!(Name::new("éééé").is_some());
 /// assert!(Name::new("ééééé").is_none());
+/// // A leading byte order mark is refused; U+FEFF inside the text is kept.
+/// assert_eq!(Name::try_from("\u{FEFF}a"), Err(TextError::Bom));
+/// assert!(Name::new("a\u{FEFF}b").is_some());
 /// ```
 ///
 /// A bound that cannot hold is a compile error:
@@ -73,8 +82,8 @@ impl<const MIN: usize, const MAX: usize> Text<MIN, MAX> {
         assert!(MIN <= MAX, "Text: MIN must not exceed MAX");
     };
 
-    /// The text `text`, or `None` for a NUL or a length outside `MIN..=MAX`
-    /// bytes; never truncates. [`TryFrom`] says why.
+    /// The text `text`, or `None` for a NUL a leading U+FEFF or a length
+    /// outside `MIN..=MAX` bytes; never truncates. [`TryFrom`] says why.
     #[must_use]
     pub const fn new(text: &str) -> Option<Self> {
         match Self::check(text) {
@@ -84,6 +93,7 @@ impl<const MIN: usize, const MAX: usize> Text<MIN, MAX> {
     }
 
     /// The text `text`, or why it is not one: [`TextError::Nul`] for a NUL,
+    /// [`TextError::Bom`] for a leading U+FEFF,
     /// [`TextError::TooShort`] under `MIN` bytes, [`TextError::TooLong`] over
     /// `MAX` bytes.
     const fn check(text: &str) -> Result<Self, TextError> {
@@ -96,6 +106,10 @@ impl<const MIN: usize, const MAX: usize> Text<MIN, MAX> {
                 return Err(TextError::Nul);
             }
             i += 1;
+        }
+        // U+FEFF is `EF BB BF` in UTF-8.
+        if len >= 3 && src[0] == 0xEF && src[1] == 0xBB && src[2] == 0xBF {
+            return Err(TextError::Bom);
         }
         if len < MIN {
             return Err(TextError::TooShort { min: MIN });
@@ -223,7 +237,10 @@ impl<'de, const MIN: usize, const MAX: usize> serde::Deserialize<'de> for Text<M
             type Value = Text<MIN, MAX>;
 
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "a string of {MIN} to {MAX} bytes with no NUL")
+                write!(
+                    f,
+                    "a string of {MIN} to {MAX} bytes with no NUL or leading byte order mark"
+                )
             }
 
             fn visit_str<E: serde::de::Error>(self, text: &str) -> Result<Self::Value, E> {
@@ -261,6 +278,18 @@ mod tests {
             assert_eq!(Name::new(case).is_none(), Name::try_from(case).is_err());
         }
         assert_eq!(Name::try_from("a\0b"), Err(TextError::Nul));
+    }
+
+    #[test]
+    fn a_leading_byte_order_mark_is_refused_and_one_inside_is_kept() {
+        assert_eq!(Name::try_from("\u{FEFF}"), Err(TextError::Bom));
+        assert_eq!(Name::try_from("\u{FEFF}ab"), Err(TextError::Bom));
+        assert_eq!(Name::new("\u{FEFF}ab"), None);
+        assert_eq!(Name::new("a\u{FEFF}b").unwrap().as_str(), "a\u{FEFF}b");
+        assert_eq!(Name::new("ab\u{FEFF}").unwrap().as_str(), "ab\u{FEFF}");
+        // Another character that starts with 0xEF is not a BOM.
+        assert!(Name::new("\u{FF21}").is_some());
+        assert!(Text::<0, 8>::new("\u{FEFF}").is_none());
     }
 
     #[test]
@@ -342,6 +371,7 @@ mod tests {
         assert!(serde_json::from_str::<Name>("\"\"").is_err());
         assert!(serde_json::from_str::<Name>("\"123456789\"").is_err());
         assert!(serde_json::from_str::<Name>("\"a\\u0000b\"").is_err());
+        assert!(serde_json::from_str::<Name>("\"\\ufeffa\"").is_err());
         assert!(serde_json::from_str::<Name>("5").is_err());
     }
 }

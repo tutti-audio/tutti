@@ -42,6 +42,9 @@ impl From<TextError> for PeTextError {
             TextError::Nul => Self::Character {
                 allowed: "text without a NUL",
             },
+            TextError::Bom => Self::Character {
+                allowed: "text without a leading byte order mark",
+            },
         }
     }
 }
