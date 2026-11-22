@@ -1845,8 +1845,8 @@ fn a_host_naks_a_pending_or_a_challenge_as_not_expected() {
 
 /// Spec: m2-124/6.17#3
 #[test]
-fn a_bye_reply_with_no_bye_sent_changes_nothing() {
-    let mut sim = established();
+fn a_bye_reply_outside_an_established_session_is_ignored() {
+    let mut sim = Sim::open();
     sim.client
         .on_message(host_addr(), &datagram(&Command::ByeReply), sim.now);
     sim.host
@@ -1854,8 +1854,8 @@ fn a_bye_reply_with_no_bye_sent_changes_nothing() {
     sim.flush();
     assert_eq!(sim.log, vec![]);
     assert!(sim.client_events.is_empty() && sim.host_events.is_empty());
-    assert_eq!(sim.client.state(), SessionState::Established);
-    assert_eq!(sim.host.state(client_addr()), SessionState::Established);
+    assert_eq!(sim.client.state(), SessionState::Idle);
+    assert_eq!(sim.host.state(client_addr()), SessionState::Idle);
 }
 
 /// Spec: m2-124/6.12#4, m2-124/7.2.3#12, m2-124/7.2.4#4

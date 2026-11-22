@@ -175,30 +175,40 @@ fn identity_padding(start: usize, identity: &EndpointIdentity) -> Vec<std::ops::
 /// Specific Data byte that carries a value is not listed.
 fn reserved_bytes(command: &Command) -> Vec<std::ops::Range<usize>> {
     match command {
+        // Table 10: the name and Product Instance Id fields are padded.
         Command::Invitation(inv) => identity_padding(4, &inv.identity),
+        // Tables 18, 20, 21, 22, 23 and 28: Command Specific Data 1 and 2
+        // are reserved.
         Command::InvitationWithAuth(_)
         | Command::Ping(_)
         | Command::PingReply(_)
         | Command::SessionReset
         | Command::SessionResetReply
         | Command::ByeReply => at(2..4),
+        // Table 19: Command Specific Data 1 and 2, and the user name padding.
         Command::InvitationWithUserAuth(auth) => {
             let mut ranges = at(2..4);
             ranges.push(padding(4 + 32, auth.username.as_str().len(), true).0);
             ranges
         }
+        // Tables 12 and 13: Command Specific Data 2, and the field padding.
         Command::Accepted(identity) | Command::Pending(identity) => {
             let mut ranges = at(3..4);
             ranges.extend(identity_padding(4, identity));
             ranges
         }
+        // Tables 14 and 16: the field padding after the 16-byte nonce.
         Command::AuthRequired(c) => identity_padding(4 + 16, &c.identity),
         Command::UserAuthRequired(c) => identity_padding(4 + 16, &c.identity),
-        // The payload word is the count and 16 reserved bits.
+        // Table 30: the payload word is the count and 16 reserved bits.
         Command::RetransmitRequest(_) => at(6..8),
+        // Table 31: Command Specific Data 2, and the low half of the payload word.
         Command::RetransmitError(_) => vec![3..4, 6..8],
+        // Table 24: Command Specific Data 2, and the text padding.
         Command::Nak(nak) => vec![3..4, padding(8, nak.text.as_str().len(), false).0],
+        // Table 26: Command Specific Data 2, and the text padding.
         Command::Bye(bye) => vec![3..4, padding(4, bye.text.as_str().len(), false).0],
+        // Table 29: no reserved byte.
         Command::UmpData(_) => vec![],
     }
 }
