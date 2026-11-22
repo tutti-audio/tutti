@@ -2,7 +2,7 @@
 //! every unit out for a re-prepare.
 
 use tutti_buffers::Float;
-use tutti_rt::{CappedVec, RtScope};
+use tutti_rt::CappedVec;
 
 use super::commit::{Commit, Incoming, Relined, cut_fades, retire_fade, send_back};
 use super::stage::{RingFrom, Route, Staged, sort_by_offset};
@@ -32,7 +32,7 @@ impl<F: Float> Executor<F> {
     /// executor's (only possible through
     /// [`Editor::package`](crate::Editor::package)).
     pub fn apply_pending(&mut self) {
-        let _rt = RtScope::enter();
+        let _rt = self.prepare.enter_rt_scope();
         while let Some(mut commit) = self.stash.pop_front() {
             self.apply(&mut commit);
             send_back(&mut self.inbox.back, commit);

@@ -79,7 +79,7 @@ use std::sync::atomic::AtomicU8;
 use tutti_buffers::Float;
 
 use tutti_platform::with_no_denormals;
-use tutti_rt::{BlockWaits, ClaimTable, Held, Participant, RtScope, SplitMut, SplitRw, TaskGraph};
+use tutti_rt::{BlockWaits, ClaimTable, Held, Participant, SplitMut, SplitRw, TaskGraph};
 
 use crate::arena::{Arena, Line};
 use crate::command::{Deliveries, Overlay};
@@ -475,7 +475,7 @@ impl<F: Float> Shared<'_, '_, F> {
         if w >= self.workers.len() || w >= self.logs.len() {
             return;
         }
-        let _rt = RtScope::enter();
+        let _rt = self.plan.prepare.enter_rt_scope();
         // Per participant, per block: a plugin on this thread may have
         // cleared it since the last one.
         with_no_denormals(|| {

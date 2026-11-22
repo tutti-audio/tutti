@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tutti_buffers::{Float, Planes};
 
-use tutti_graph::{Env, Node, TransportChanges, TransportPosition, contract};
+use tutti_graph::{Env, Node, Prepare, TransportChanges, TransportPosition, contract};
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 
 use crate::Loop;
@@ -142,6 +142,18 @@ pub fn block<F: Float>(
 ) -> Vec<Vec<F>> {
     let env = t.env(frames, rate);
     contract::drive_input(node, &env, Planes::default(), &[], &[]).audio
+}
+
+/// [`block`] for a node prepared under `prepare`: an offline one renders
+/// outside `RtScope`, so it may allocate.
+pub fn block_in<F: Float>(
+    node: &mut dyn Node<F>,
+    prepare: &Prepare,
+    t: &MockTransport,
+    frames: usize,
+) -> Vec<Vec<F>> {
+    let env = t.env(frames, prepare.sample_rate());
+    contract::drive_input_in(node, prepare, &env, Planes::default(), &[], &[]).audio
 }
 
 /// `frames` of `node` in blocks of `block_len`, the transport moved after
