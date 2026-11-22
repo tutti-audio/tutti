@@ -16,14 +16,20 @@ use tutti_ump::{
 use tutti_ump::{BendValue, ControlValue};
 use tutti_units::{Amplitude, Semitones};
 use tutti_voicing::{
-    Mode, Order, Patch, PerNoteState, Steal, TuningCapacity, VoiceAllocator, VoiceCommand,
-    VoiceConfig, VoiceId, VoiceSpec,
+    Mode, Order, Patch, PerNoteState, Steal, TuningCapacity, TuningCount, VoiceAllocator,
+    VoiceCommand, VoiceConfig, VoiceId, VoiceSpec,
 };
 
 /// Two layers, one exclusive class.
 struct Grouped;
 impl Patch for Grouped {
-    fn voices(&self, _: MidiChannel, _: NoteNumber, _: u16, spec: &mut dyn FnMut(VoiceSpec)) {
+    fn voices(
+        &self,
+        _: MidiChannel,
+        _: NoteNumber,
+        _: tutti_ump::NoteVelocity,
+        spec: &mut dyn FnMut(VoiceSpec),
+    ) {
         for tag in 0..2 {
             spec(VoiceSpec {
                 group: NonZeroU16::new(7),
@@ -284,7 +290,7 @@ fn mts_is_allocation_free() {
             VoiceConfig::poly(NonZeroUsize::new(6).unwrap())
                 .with_mode(mode)
                 .with_percussion(MidiChannel::of(9))
-                .with_tuning_capacity(TuningCapacity::new(2, 8).unwrap()),
+                .with_tuning_capacity(TuningCapacity::new(TuningCount::of(2), TuningCount::of(8))),
         );
         let on = |k: u8| Voice2::NoteOn {
             note: NoteNumber::of(k),

@@ -55,7 +55,7 @@ pub use holds::{Holds, Release};
 pub use master::MasterGain;
 pub use per_note::{LIVE_NOTES, NOTE_CONTROLS, NoteControl, NoteEvent, PerNoteState};
 pub use phase::Phase;
-pub use tuning::{NoSuchTuning, TuningCapacity};
+pub use tuning::{NoSuchTuning, TuningCapacity, TuningCount, TuningCountOutOfRange};
 pub use voicing::{
     Glide, Mode, Order, Patch, Retrigger, Steal, VoiceAllocator, VoiceCommand, VoiceConfig,
     VoiceId, VoiceSpec,

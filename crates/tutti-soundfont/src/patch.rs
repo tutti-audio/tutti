@@ -35,12 +35,12 @@ impl Patch for PresetPatch<'_> {
         &self,
         _channel: MidiChannel,
         key: NoteNumber,
-        velocity: u16,
+        velocity: NoteVelocity,
         spec: &mut dyn FnMut(VoiceSpec),
     ) {
         // A region's range is 7 bits: the 16-bit velocity is downscaled as the
         // voice's will be, and never to a Note Off's 0.
-        let velocity = NoteVelocity::new(velocity).to_note_on_u7();
+        let velocity = velocity.to_note_on_u7();
         let preset = &self.font.presets()[self.preset];
         for (p, preset_zone) in preset.regions().iter().enumerate() {
             if !preset_zone.contains(key, velocity) {
