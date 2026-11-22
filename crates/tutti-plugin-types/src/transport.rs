@@ -373,7 +373,9 @@ impl TransportInfo {
         let clocks = quarters * clocks_per_quarter;
         let to_nearest = (clocks.round() - clocks) / clocks_per_quarter;
         let frames_per_beat = self.timing.tempo.frames_per_beat(self.sample_rate)?;
-        let frames = frames_per_beat.frames_in(BeatDuration::new(to_nearest)).round();
+        let frames = frames_per_beat
+            .frames_in(BeatDuration::new(to_nearest))
+            .round();
         // Half a clock at the slowest tempo a plugin is told is far inside
         // `i32`; a pathological tempo saturates rather than wraps.
         Some(frames.clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32)

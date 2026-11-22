@@ -134,10 +134,7 @@ tutti-music  setter  crates/tutti-music/src/frame_clock.rs::FrameClock::set_temp
 
 
 # tutti-plugin-host
-tutti-plugin-host  with-prefix  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_invalidate_sink
-tutti-plugin-host  with-prefix  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_refresh_sink
 tutti-plugin-host  with-prefix  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_server_pid
-tutti-plugin-host  with-prefix  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_transport_sink
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::set_automation_mode
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::set_bypassed
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::set_editor_scale
@@ -147,7 +144,6 @@ tutti-plugin-host  setter  crates/tutti-plugin-host/src/controls.rs::NodeControl
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/controls.rs::PluginControls::set_pipeline
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/in_process_erased.rs::AnyInProcessClient::set_render_mode
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/node/client.rs::InProcessClient::set_render_mode
-tutti-plugin-host  option-arg  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_server_pid
 
 # tutti-plugin-ipc
 tutti-plugin-ipc  ctor-result  crates/tutti-plugin-ipc/src/process_guard.rs::ProcessGuard::launched

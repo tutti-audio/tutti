@@ -368,8 +368,12 @@ pub(crate) mod tests {
             tutti_plugin_types::PluginDescriptor::new("", tutti_plugin_types::PluginClass::Unknown),
             loaded,
             ParameterChangeSink::default(),
-        )
-        .with_server_pid(served.then_some(1234));
+        );
+        let handle = if served {
+            handle.with_server_pid(1234)
+        } else {
+            handle
+        };
         let (mut mirror, read) = PluginParamValues::start(&handle);
         mirror.land(
             futures_lite::future::block_on(std::future::IntoFuture::into_future(read))

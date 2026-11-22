@@ -1004,9 +1004,10 @@ mod measures_serde_tests {
     #[test]
     fn a_measures_unit_the_range_does_not_fit_is_refused() {
         let with = |min: &str| {
-            OLD_JSON
-                .replace("20.0", min)
-                .replace(r#""group": "Filter""#, r#""group": "Filter", "measures": "Hertz""#)
+            OLD_JSON.replace("20.0", min).replace(
+                r#""group": "Filter""#,
+                r#""group": "Filter", "measures": "Hertz""#,
+            )
         };
         assert!(serde_json::from_str::<ParameterInfo>(&with("-1.0")).is_err());
         assert!(serde_json::from_str::<ParameterInfo>(&with("20.0")).is_ok());
