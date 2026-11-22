@@ -7,7 +7,7 @@ use tutti_rt::CappedVec;
 use super::commit::{Commit, Incoming, Relined, cut_fades, retire_fade, send_back};
 use super::stage::{RingFrom, Route, Staged, sort_by_offset};
 use super::state::{Gone, Inject, Ring, State, Unit};
-use super::{Executor, RootFadeRun, Suspension, place, place_all};
+use super::{Executor, MainOutputFadeRun, Suspension, place, place_all};
 use crate::NodeKey;
 use crate::event::Event;
 use crate::gain::SumLane;
@@ -361,16 +361,21 @@ impl<F: Float> Executor<F> {
             std::mem::swap(&mut self.parked, &mut c.parked);
         }
         c.staged = Some(st);
-        // A root crossfade starts with the plan that carries it, and a plan
-        // that carries none ends one running. A plan that carries the old root
-        // the running plan carries, under the same new root, continues the
+        // A main output crossfade starts with the plan that carries it, and a plan
+        // that carries none ends one running. A plan that carries the old main output
+        // the running plan carries, under the same new main output, continues the
         // crossfade from the frames it has rendered.
-        let continues = |old: &Plan, bank: crate::RootBank| {
-            old.root_id() == plan.root_id() && old.root_bank().is_some_and(|b| b.old == bank.old)
+        let continues = |old: &Plan, bank: crate::MainOutputBank| {
+            old.main_output_id() == plan.main_output_id()
+                && old.main_output_bank().is_some_and(|b| b.old == bank.old)
         };
-        self.root_fade = match (plan.root_bank(), old_plan.as_deref(), self.root_fade) {
+        self.main_output_fade = match (
+            plan.main_output_bank(),
+            old_plan.as_deref(),
+            self.main_output_fade,
+        ) {
             (Some(bank), Some(old), Some(run)) if continues(old, bank) => Some(run),
-            (Some(_), ..) => Some(RootFadeRun {
+            (Some(_), ..) => Some(MainOutputFadeRun {
                 seq: c.seq,
                 done: 0,
             }),

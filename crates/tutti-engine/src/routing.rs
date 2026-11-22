@@ -1,7 +1,7 @@
-//! Where the mix lands: the format the root is heard in, the root's channels
+//! Where the mix lands: the format the main output is heard in, the main output's channels
 //! to the device's, and a gain, mute and solo per device output.
 //!
-//! The routing is composed into the one fold per `(RootId, device)` pair the
+//! The routing is composed into the one fold per `(MainOutputId, device)` pair the
 //! callback applies ([`Routing::fold`]); the output gains are the stage after
 //! it ([`OutputLevels`]), whose changes ramp over
 //! the declick length ([`declick_frames`](tutti_graph::declick_frames)) instead of swapping folds.
@@ -13,7 +13,7 @@ use tutti_units::Amplitude;
 
 /// The device channel each channel of what is heard goes to.
 ///
-/// [`identity`](Self::identity), the default, sets no map: the root reaches the
+/// [`identity`](Self::identity), the default, sets no map: the main output reaches the
 /// device by speaker, into the device's topology (the identity wherever the two
 /// match). A [`channels`](Self::channels) map is by index: heard channel `c`
 /// is device output `to[c]`, and an output nothing is sent to is silent. Two
@@ -47,7 +47,7 @@ pub enum OutputMapError {
 }
 
 impl OutputMap {
-    /// No map: the root reaches the device by speaker.
+    /// No map: the main output reaches the device by speaker.
     #[must_use]
     pub fn identity() -> Self {
         Self(None)
@@ -91,7 +91,7 @@ impl OutputMap {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum RoutingError {
-    /// The root cannot be folded into the monitor format, or what is heard into
+    /// The main output cannot be folded into the monitor format, or what is heard into
     /// the device.
     #[error(transparent)]
     Fold(#[from] FoldError),
@@ -100,7 +100,7 @@ pub enum RoutingError {
     MapWidth {
         /// The channels the map names.
         map: usize,
-        /// The width of what is heard (the monitor format, or the root).
+        /// The width of what is heard (the monitor format, or the main output).
         heard: ChannelLayout,
     },
     /// The map sends a channel to an output the device does not have.
@@ -121,11 +121,11 @@ impl RoutingError {
     }
 }
 
-/// The root's way to the device: the format it is heard in, the map, and the
+/// The main output's way to the device: the format it is heard in, the map, and the
 /// levels the monitor fold takes.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Routing {
-    /// The format the root is heard in; `None` is the root's own.
+    /// The format the main output is heard in; `None` is the main output's own.
     pub monitor: Option<ChannelTopology>,
     /// The device channel each heard channel goes to.
     pub map: OutputMap,
@@ -134,7 +134,7 @@ pub struct Routing {
 }
 
 impl Routing {
-    /// The one fold from `root` into `device`: root to monitor, then the map's
+    /// The one fold from `main_output` into `device`: main output to monitor, then the map's
     /// routing or else the fold by speaker into the device's topology, composed
     /// as one matrix ([`Fold::then`]).
     ///
@@ -144,12 +144,12 @@ impl Routing {
     /// width or outputs, or the fold into the device.
     pub fn fold<F: Float>(
         &self,
-        root: &ChannelTopology,
+        main_output: &ChannelTopology,
         device: &ChannelTopology,
     ) -> Result<Fold<F>, RoutingError> {
-        let heard = self.monitor.as_ref().unwrap_or(root);
+        let heard = self.monitor.as_ref().unwrap_or(main_output);
         let to_heard = match &self.monitor {
-            Some(monitor) => Some(fold_to_topology_with(root, monitor, self.levels)?),
+            Some(monitor) => Some(fold_to_topology_with(main_output, monitor, self.levels)?),
             None => None,
         };
         let to_device = match self.map.targets() {

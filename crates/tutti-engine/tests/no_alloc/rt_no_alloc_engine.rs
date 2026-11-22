@@ -619,11 +619,11 @@ impl tutti_graph::Node for TwelveWide {
     fn reset(&mut self) {}
 }
 
-/// A 7.1.4 root (twelve channels, the widest the cap allows past the old
+/// A 7.1.4 main output (twelve channels, the widest the cap allows past the old
 /// eight) renders into a twelve-wide device straight and into a stereo one
 /// through its fold without allocating, and the blocks carry the signal.
 #[test]
-fn a_714_root_block_is_allocation_free() {
+fn a_714_main_output_block_is_allocation_free() {
     use tutti_graph::{Editor, NodeKey, OutPort, PortSource, Prepare, Unforkable};
 
     let transport = Transport::new(SampleRate::of(48_000.0));
@@ -659,7 +659,7 @@ fn a_714_root_block_is_allocation_free() {
             assert_eq!(s, (c + 1) as f32 / 16.0, "channel {c}");
         }
     }
-    // The 7.1.4 root (FL FR FC LFE SL SR BL BR TFL TFR TBL TBR) into stereo by
+    // The 7.1.4 main output (FL FR FC LFE SL SR BL BR TFL TFR TBL TBR) into stereo by
     // `Fold`'s documented rule: ITU-R BS.775 for the fronts (straight), the
     // centre (-3 dB into both) and the surrounds (-3 dB into the front on their
     // side), the LFE omitted, and tutti's table for the heights (-3 dB into the
@@ -682,12 +682,12 @@ fn a_714_root_block_is_allocation_free() {
     }
 }
 
-/// A published root and a stated device are looked up and applied without
-/// allocating: a 7.1.4 root declared as the next generation, into a twelve-wide
+/// A published main output and a stated device are looked up and applied without
+/// allocating: a 7.1.4 main output declared as the next generation, into a twelve-wide
 /// device stated with its front pair swapped, renders the swapped fronts and
 /// every other channel straight, in blocks that allocate nothing.
 #[test]
-fn a_declared_root_into_a_stated_device_is_allocation_free() {
+fn a_declared_main_output_into_a_stated_device_is_allocation_free() {
     use tutti_buffers::{Bed, ChannelTopology, Speaker};
     use tutti_graph::{Editor, NodeKey, OutPort, PortSource, Prepare, Unforkable};
 
@@ -713,15 +713,15 @@ fn a_declared_root_into_a_stated_device_is_allocation_free() {
     control
         .state_device(twelve, Some(ChannelTopology::new(speakers).unwrap()))
         .expect("a stated device");
-    let id = ed.spec().root_id.next();
+    let id = ed.spec().main_output_id.next();
     control
-        .publish_root(id, Some(Bed::Surround714.topology()), twelve)
+        .publish_main_output(id, Some(Bed::Surround714.topology()), twelve)
         .expect("places");
-    ed.spec_mut().root_id = id;
+    ed.spec_mut().main_output_id = id;
     ed.commit().expect("commits");
 
     let mut out = vec![0.0f32; 512 * 12];
-    // The first guarded block adopts the plan that carries the new root, lends
+    // The first guarded block adopts the plan that carries the new main output, lends
     // its folds and renders with them: the swap block allocates nothing.
     for _ in 0..16 {
         engine.process(&mut InterleavedMut::new(&mut out, twelve).unwrap());
@@ -779,7 +779,7 @@ fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
             map: OutputMap::channels([2, 3]).unwrap(),
             ..Routing::default()
         })
-        .expect("the routing places the roots");
+        .expect("the routing places the main outputs");
     let strip = |mute| OutputStrip {
         mute,
         ..OutputStrip::default()
@@ -859,7 +859,7 @@ fn a_routing_crossfade_is_allocation_free() {
     // Reversed: a full fade, over blocks that straddle its length.
     control
         .set_routing(to([11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]))
-        .expect("the routing places the roots");
+        .expect("the routing places the main outputs");
     for _ in 0..6 {
         block(&engine);
         let _ = engine.reclaim();
@@ -867,12 +867,12 @@ fn a_routing_crossfade_is_allocation_free() {
     // A second change two blocks in, and a third one block after it.
     control
         .set_routing(to([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]))
-        .expect("the routing places the roots");
+        .expect("the routing places the main outputs");
     block(&engine);
     block(&engine);
     control
         .set_routing(to([1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10]))
-        .expect("the routing places the roots");
+        .expect("the routing places the main outputs");
     block(&engine);
     for _ in 0..6 {
         block(&engine);
@@ -888,7 +888,7 @@ fn a_routing_crossfade_is_allocation_free() {
 }
 
 /// Silence that reports 16 frames of latency, so the graph delays every other
-/// output of a root it is in by 16 with a ring.
+/// output of a main output it is in by 16 with a ring.
 struct Latent;
 
 impl tutti_graph::Node for Latent {
@@ -909,16 +909,16 @@ impl tutti_graph::Node for Latent {
     fn reset(&mut self) {}
 }
 
-/// A root change that crossfades over several blocks is applied without
-/// allocating, a latent source in the old root included, whose delay rings
-/// the install block copies into the old root's channels: a 7.1.4 root fades
-/// out as a 5.1 root fades in over the 240-frame declick, which 64-frame blocks
+/// A main output change that crossfades over several blocks is applied without
+/// allocating, a latent source in the old main output included, whose delay rings
+/// the install block copies into the old main output's channels: a 7.1.4 main output fades
+/// out as a 5.1 main output fades in over the 240-frame declick, which 64-frame blocks
 /// cross in four, and every block (the one that installs the plan with the old
-/// root's channels, the ones that fold both roots, and the one that ends the
+/// main output's channels, the ones that fold both main outputs, and the one that ends the
 /// fade) is guarded. The blocks after the
-/// fade are the new root's fold alone, by its own rule.
+/// fade are the new main output's fold alone, by its own rule.
 #[test]
-fn a_root_change_crossfaded_across_several_blocks_is_allocation_free() {
+fn a_main_output_change_crossfaded_across_several_blocks_is_allocation_free() {
     use tutti_buffers::{Bed, MaxBlock};
     use tutti_graph::{Editor, Fade, NodeKey, OutPort, PortSource, Prepare, Unforkable};
     use tutti_units::{Samples, Seconds};
@@ -932,8 +932,8 @@ fn a_root_change_crossfaded_across_several_blocks_is_allocation_free() {
     ed.insert(NodeKey(2), "latent", Unforkable(Latent));
     let wire = |ed: &mut Editor, width: u16| {
         ed.spec_mut().topology.set_outputs((0..width).map(|port| {
-            // The old root's last channel is the latent source's, so every
-            // other channel of it is aligned by a ring; the new root has none.
+            // The old main output's last channel is the latent source's, so every
+            // other channel of it is aligned by a ring; the new main output has none.
             let node = if width == 12 && port == 11 { 2 } else { 1 };
             PortSource::Node(OutPort {
                 node: NodeKey(node),
@@ -944,7 +944,7 @@ fn a_root_change_crossfaded_across_several_blocks_is_allocation_free() {
     wire(&mut ed, 12);
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
-    ed.set_root_fade(Some(Fade::seconds(
+    ed.set_main_output_fade(Some(Fade::seconds(
         Seconds::new(0.005),
         SampleRate::of(48_000.0),
     )));
@@ -953,11 +953,11 @@ fn a_root_change_crossfaded_across_several_blocks_is_allocation_free() {
     engine.process(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
 
     let control = engine.output_control();
-    let id = ed.spec().root_id.next();
+    let id = ed.spec().main_output_id.next();
     control
-        .publish_root(id, Some(Bed::Surround51.topology()), ChannelLayout::STEREO)
+        .publish_main_output(id, Some(Bed::Surround51.topology()), ChannelLayout::STEREO)
         .expect("places");
-    ed.spec_mut().root_id = id;
+    ed.spec_mut().main_output_id = id;
     wire(&mut ed, 6);
     ed.commit().expect("commits");
     for _ in 0..8 {

@@ -3356,7 +3356,7 @@ fn an_output_tap_opened_again_at_another_width_swaps_without_allocating() {
     };
     run(&mut exec, 4);
 
-    // The root narrows to one channel and its tap is opened again.
+    // The main output narrows to one channel and its tap is opened again.
     ed.spec_mut().topology.set_outputs(vec![port(0)]);
     let mut narrow = ed
         .open_heard_tap(TapId::of(1), 1, Samples::new(1024))

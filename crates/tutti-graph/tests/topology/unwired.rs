@@ -418,27 +418,28 @@ fn stereo_bus_node(aux: Option<Bus>) -> Ported {
 }
 
 /// A banded output bus the new shape lacks drops the feeds of every band into
-/// the root and into another node's bus; the main bus's feeds stay.
+/// the main output and into another node's bus; the main bus's feeds stay.
 #[test]
-fn a_lost_banded_output_bus_drops_its_feeds_by_band_and_to_the_root() {
+fn a_lost_banded_output_bus_drops_its_feeds_by_band_and_to_the_main_output() {
     let (mut ed, _exec) = Editor::new(prepare(128));
     let (y, t) = (NodeKey(2), NodeKey(3));
     let banded = Some(Bus::new(stereo(), BusRole::Aux));
     ed.insert(y, "bused", Unforkable(stereo_bus_node(banded)));
     ed.insert(t, "bused", Unforkable(stereo_bus_node(banded)));
-    ed.spec_mut().root = Some(stereo());
-    let main_to_root = BusSource::Node(BusRef::new(y, 0));
+    ed.spec_mut().main_output = Some(stereo());
+    let main_to_main_output = BusSource::Node(BusRef::new(y, 0));
     let band0 = BusSource::Node(BusRef::band(y, 1, 0));
     let band1 = BusSource::Node(BusRef::band(y, 1, 1));
-    ed.connect_bus_to_root(main_to_root).expect("declared");
-    ed.connect_bus_to_root(band1)
-        .expect("a band folds to the root");
+    ed.connect_bus_to_main_output(main_to_main_output)
+        .expect("declared");
+    ed.connect_bus_to_main_output(band1)
+        .expect("a band folds to the main output");
     ed.connect_bus(band0, BusRef::new(t, 1)).expect("declared");
     let placed = ed.insert(y, "bused", Unforkable(stereo_bus_node(None)));
     assert_eq!(
         placed
             .unwired
-            .root_buses
+            .main_output_buses
             .iter()
             .map(|f| f.source)
             .collect::<Vec<_>>(),
@@ -455,11 +456,11 @@ fn a_lost_banded_output_bus_drops_its_feeds_by_band_and_to_the_root() {
     );
     assert_eq!(
         ed.spec()
-            .root_sources
+            .main_output_sources
             .iter()
             .map(|f| f.source)
             .collect::<Vec<_>>(),
-        vec![main_to_root]
+        vec![main_to_main_output]
     );
     ed.commit()
         .expect("the lowering names only buses that exist");
@@ -506,15 +507,15 @@ fn a_tap_lane_on_a_lost_port_reads_silence() {
     assert!(buf.chunks(2).all(|f| f[0] == 0.5 && f[1] == 0.0));
 }
 
-/// A narrower re-insert while a root crossfade is set drops the new spec's
-/// edges to the lost ports and nothing of the old root's bank: the bank is
+/// A narrower re-insert while a main output crossfade is set drops the new spec's
+/// edges to the lost ports and nothing of the old main output's bank: the bank is
 /// built from the committed wiring over the ports the units still have, and
 /// the commit carries it.
 #[test]
-fn a_narrower_reinsert_during_a_root_fade_prunes_the_spec_and_not_the_bank() {
+fn a_narrower_reinsert_during_a_main_output_fade_prunes_the_spec_and_not_the_bank() {
     let (mut ed, _exec) = rig();
-    ed.set_root_fade(Some(tutti_graph::Fade::new(Samples::new(64))));
-    ed.spec_mut().root_id = ed.spec().root_id.next();
+    ed.set_main_output_fade(Some(tutti_graph::Fade::new(Samples::new(64))));
+    ed.spec_mut().main_output_id = ed.spec().main_output_id.next();
     let placed = ed.insert(X, "ported", Unforkable(narrow()));
     let lost = EdgeId {
         sink: PortSink::Output(1),
@@ -529,17 +530,17 @@ fn a_narrower_reinsert_during_a_root_fade_prunes_the_spec_and_not_the_bank() {
             .filter(|e| matches!(e.sink, PortSink::Output(_)))
             .count(),
         1,
-        "only the new root's own output edge: nothing of the bank is in the spec"
+        "only the new main output's own output edge: nothing of the bank is in the spec"
     );
     ed.commit().expect("commits with the bank");
     let plan = ed.base().expect("sent");
     assert!(
-        plan.root_bank().is_some(),
-        "the old root's surviving output is carried"
+        plan.main_output_bank().is_some(),
+        "the old main output's surviving output is carried"
     );
     assert_eq!(
         plan.rendered_outputs(),
         4,
-        "the new root's two channels and the old root's two"
+        "the new main output's two channels and the old main output's two"
     );
 }

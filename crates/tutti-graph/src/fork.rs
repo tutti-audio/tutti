@@ -1071,9 +1071,9 @@ impl<F: Float> Editor<F> {
             // The fork is of the lowered spec: a bus edge is already its
             // lanes.
             bus_edges: BTreeMap::new(),
-            root: None,
-            root_id: crate::RootId::GENESIS,
-            root_sources: Vec::new(),
+            main_output: None,
+            main_output_id: crate::MainOutputId::GENESIS,
+            main_output_sources: Vec::new(),
         };
         // The edge gains whose edge the fork kept (an output channel the
         // fork rewired to one node has none): the fork sums as the live graph

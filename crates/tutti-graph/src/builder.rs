@@ -670,9 +670,9 @@ impl<F: Float> GraphBuilder<F> {
             modes,
             mixes,
             bus_edges,
-            root,
-            root_id,
-            root_sources,
+            main_output,
+            main_output_id,
+            main_output_sources,
         } = self.spec;
         let live = editor.spec_mut();
         live.topology.edges = topology.edges;
@@ -685,9 +685,9 @@ impl<F: Float> GraphBuilder<F> {
         live.modes = modes;
         live.mixes = mixes;
         live.bus_edges = bus_edges;
-        live.root = root;
-        live.root_id = root_id;
-        live.root_sources = root_sources;
+        live.main_output = main_output;
+        live.main_output_id = main_output_id;
+        live.main_output_sources = main_output_sources;
         editor.commit()?;
         executor.apply_pending();
         editor.collect();
@@ -902,8 +902,8 @@ impl<F: Float> Renderer<F> {
             let n = (frames - done).min(self.block);
             let transport = (self.transport)(self.executor.frame());
             let block_in: Vec<&[F]> = input.iter().map(|c| &c[done..done + n]).collect();
-            // The plan renders an old root's channels beside the root's while a
-            // root change crossfades: scratch for them, not returned.
+            // The plan renders an old main output's channels beside the main output's while a
+            // main output change crossfades: scratch for them, not returned.
             self.executor.apply_pending();
             let rendered = self.rendered_outputs();
             let mut spare = vec![vec![F::ZERO; n]; rendered.saturating_sub(outs)];
@@ -927,8 +927,8 @@ impl<F: Float> Renderer<F> {
         self.editor.spec().topology.outputs.len()
     }
 
-    /// The channels the executor renders: the root's and, while a root change
-    /// crossfades, the old root's after them. The renderer returns the root's.
+    /// The channels the executor renders: the main output's and, while a main output change
+    /// crossfades, the old main output's after them. The renderer returns the main output's.
     fn rendered_outputs(&self) -> usize {
         self.executor
             .plan()

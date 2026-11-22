@@ -296,15 +296,15 @@ fn a_block_longer_than_the_capacity_is_measured_whole() {
     }
 }
 
-/// **A stereo root reaches a stereo device unchanged.**
+/// **A stereo main output reaches a stereo device unchanged.**
 ///
 /// The engine folds the graph's outputs to the device's width with
-/// `fold_to_width` over the engine's order for the root's width; a stereo root to a stereo device is the identity, which
+/// `fold_to_width` over the engine's order for the main output's width; a stereo main output to a stereo device is the identity, which
 /// must stay a passthrough. (This pinned the premise of the meter's
 /// stereo shortcut, which went with the fold; the passthrough is still the
 /// engine's own.)
 #[test]
-fn a_stereo_root_folds_to_a_stereo_device_unchanged() {
+fn a_stereo_main_output_folds_to_a_stereo_device_unchanged() {
     let mut folded = [0.0f32; 2];
     let stereo = tutti_buffers::ChannelLayout::STEREO;
     let fold =
@@ -315,6 +315,6 @@ fn a_stereo_root_folds_to_a_stereo_device_unchanged() {
     assert_eq!(
         folded,
         [0.25, -0.75],
-        "a stereo root plays unchanged on a stereo device"
+        "a stereo main output plays unchanged on a stereo device"
     );
 }

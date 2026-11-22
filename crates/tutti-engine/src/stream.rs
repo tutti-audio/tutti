@@ -62,7 +62,7 @@ impl TryFrom<MaxBlock> for OutputQuantum {
 pub struct OutputSpec {
     /// Frames per second the stream runs at.
     pub sample_rate: SampleRate,
-    /// The device's channel count; the graph root is folded to this width.
+    /// The device's channel count; the graph main output is folded to this width.
     pub channels: ChannelLayout,
     /// The device's native sample type, which only the driver converts to: the
     /// engine renders `f32`. A backend's offset-binary unsigned type reports its

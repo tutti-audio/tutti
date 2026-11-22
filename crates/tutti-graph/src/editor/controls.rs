@@ -197,7 +197,7 @@ impl<F: Float> Editor<F> {
         Ok(())
     }
 
-    /// Sets the declick fade of the bus edge `from -> to` (`None`: the root):
+    /// Sets the declick fade of the bus edge `from -> to` (`None`: the main output):
     /// every lane of its fold fades by [`set_edge_fade`](Self::set_edge_fade)'s
     /// rule. Unlike an edge's, a bus edge's fade is part of the spec's
     /// structure (its lanes are made at the commit), so the next commit
@@ -216,7 +216,7 @@ impl<F: Float> Editor<F> {
     }
 
     /// As [`edge_is_live`](Self::edge_is_live) for the bus edge `from -> to`
-    /// (`None`: the root).
+    /// (`None`: the main output).
     #[must_use]
     pub fn bus_edge_is_live(&self, from: BusSource, to: Option<BusRef>) -> bool {
         self.life.plan().is_some()
@@ -226,12 +226,12 @@ impl<F: Float> Editor<F> {
                 .is_none_or(|c| c.spec.bus_fade(from, to).is_some())
     }
 
-    /// Whether the plan sent last carries an old root whose crossfade the
+    /// Whether the plan sent last carries an old main output whose crossfade the
     /// executor has not yet been reported through ([`finish_fades`](Self::finish_fades)
-    /// reports it): a declaration of the root made now would end that fade at
+    /// reports it): a declaration of the main output made now would end that fade at
     /// its block.
     #[must_use]
-    pub fn root_fade_running(&self) -> bool {
+    pub fn main_output_fade_running(&self) -> bool {
         self.bank.is_some_and(|b| !b.ended)
     }
 
@@ -263,9 +263,9 @@ impl<F: Float> Editor<F> {
                 changed = true;
             }
         }
-        // A root change's crossfade the executor has rendered through: the
-        // commit that follows compiles the old root's channels away.
-        let ended = self.link.root_fade_ended();
+        // A main output change's crossfade the executor has rendered through: the
+        // commit that follows compiles the old main output's channels away.
+        let ended = self.link.main_output_fade_ended();
         if let Some(bank) = self.bank.as_mut().filter(|b| !b.ended && b.seq <= ended) {
             bank.ended = true;
             changed = true;
@@ -321,7 +321,7 @@ impl<F: Float> Editor<F> {
         match kind {
             EdgeFade::Out => match to {
                 Some(to) => self.spec.disconnect_bus(from, to),
-                None => self.spec.disconnect_bus_from_root(from),
+                None => self.spec.disconnect_bus_from_main_output(from),
             },
             EdgeFade::In => self.spec.set_bus_fade(from, to, EdgeFade::None),
             EdgeFade::None => false,

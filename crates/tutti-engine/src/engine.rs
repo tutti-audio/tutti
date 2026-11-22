@@ -70,21 +70,21 @@
 //! machine's own fade ramp is not used; the engine settles it the moment the
 //! command lands.
 //!
-//! # A root change
+//! # A main output change
 //!
-//! A commit that changes the root's generation can carry the old root's
-//! outputs beside the new root's ([`Plan::root_bank`](tutti_graph::Plan::root_bank),
-//! [`Editor::set_root_fade`]). Over the fade's length the engine folds each root
-//! with its own fold, `(RootId, device)`, and mixes them by the fade law's
-//! gains: the old root's channels fade out as the new root's fade in, frame by
-//! frame, and past the fade the new root is heard alone. The old root's
+//! A commit that changes the main output's generation can carry the old main output's
+//! outputs beside the new main output's ([`Plan::main_output_bank`](tutti_graph::Plan::main_output_bank),
+//! [`Editor::set_main_output_fade`]). Over the fade's length the engine folds each main output
+//! with its own fold, `(MainOutputId, device)`, and mixes them by the fade law's
+//! gains: the old main output's channels fade out as the new main output's fade in, frame by
+//! frame, and past the fade the new main output is heard alone. The old main output's
 //! channels align to the previous plan's total latency, so when the two totals
-//! differ a source present in both roots is heard at two delays during the
+//! differ a source present in both main outputs is heard at two delays during the
 //! fade and shifts once at its end. A commit with no fade
 //! cuts at its block. A commit that installs while the fade runs and leaves
-//! the root's generation alone continues it from the frames already mixed. One
-//! that declares the root again ends it at its block and begins another from
-//! the root that was fading in: the root that was fading out is dropped, a
+//! the main output's generation alone continues it from the frames already mixed. One
+//! that declares the main output again ends it at its block and begins another from
+//! the main output that was fading in: the main output that was fading out is dropped, a
 //! step the session avoids by declaring only after the running fade ends.
 //!
 //! # A routing change
@@ -92,7 +92,7 @@
 //! A change of the output routing ([`OutputControl::set_routing`]) crossfades
 //! the same rendered channels from the old routing's fold to the new one over the
 //! declick length along [`FadeLaw::EqualAmplitude`], and a change made while a
-//! root change crossfades, or while the last routing change still fades, cuts.
+//! main output change crossfades, or while the last routing change still fades, cuts.
 //! See the `output` module's docs.
 //!
 //! # Limits
@@ -107,7 +107,7 @@
 //! callback never meets a graph it cannot render.
 
 use tutti_graph::{
-    BeatCrossings, CommitError, Due, Editor, Env, Executor, FadeLaw, Limits, Offset, RootId,
+    BeatCrossings, CommitError, Due, Editor, Env, Executor, FadeLaw, Limits, MainOutputId, Offset,
     TransportChanges, declick_frames, fade_gains, fade_in,
 };
 
@@ -204,7 +204,7 @@ pub struct Engine<F: Float = f32> {
     heard_taps: tutti_rt::Exclusive<Option<crate::HeardTaps<F>>>,
     /// A reader of the block clock the graph render writes.
     clock_reader: BlockClockReader,
-    /// The folds from the root to the device, published by
+    /// The folds from the main output to the device, published by
     /// [`support_output`](Self::support_output).
     output: OutputControl<F>,
     /// The audio thread's reader of `output`, lent once per call.
@@ -247,8 +247,8 @@ struct GraphRender<F: Float> {
     clock: BlockClock,
     /// What dates each call the clock publishes.
     dates: DateKeeper,
-    /// The root of the plan the last block rendered, for the control side to
-    /// retire the older roots' folds by ([`OutputControl::reclaim`]).
+    /// The main output of the plan the last block rendered, for the control side to
+    /// retire the older main outputs' folds by ([`OutputControl::reclaim`]).
     installed: Arc<AtomicU64>,
     /// The widths of the pair the last block rendered
     /// ([`OutputControl::set_routing`] checks the new routing against it).
@@ -282,21 +282,21 @@ struct Lent<'a, F: Float> {
     stage: &'a StageTargets,
 }
 
-/// The root banks a plan renders at most: the root's channels and, while a
-/// root change crossfades, the old root's.
-const ROOT_BANKS: usize = 2;
+/// The main output banks a plan renders at most: the main output's channels and, while a
+/// main output change crossfades, the old main output's.
+const MAIN_OUTPUT_BANKS: usize = 2;
 
 /// Planar chunks of the fold scratch: the rendered channels of both banks and
-/// the root crossfade's four.
-const SCRATCH_CHUNKS: usize = ROOT_BANKS * MAX_CHANNELS + 4;
+/// the main output crossfade's four.
+const SCRATCH_CHUNKS: usize = MAIN_OUTPUT_BANKS * MAX_CHANNELS + 4;
 
-/// The scratch a crossfade folds through (a root change's, or a routing
+/// The scratch a crossfade folds through (a main output change's, or a routing
 /// change's): the block's worth of each.
 struct Mixing<'a, F: Float> {
-    /// One device channel of the new root's fold.
+    /// One device channel of the new main output's fold.
     fold: &'a mut [F],
-    /// The same channel of the old fold: the old root's, or the replaced
-    /// routing's of the same root.
+    /// The same channel of the old fold: the old main output's, or the replaced
+    /// routing's of the same main output.
     old: &'a mut [F],
     /// The gain of the old side at each frame of the block, and the new
     /// side's.
@@ -304,14 +304,14 @@ struct Mixing<'a, F: Float> {
     gain_new: &'a mut [F],
 }
 
-/// The two roots a block folds into the device, and how far their fade has
+/// The two main outputs a block folds into the device, and how far their fade has
 /// got.
 struct Crossfaded<'a, 'p, F: Float> {
-    /// The new root's fold into the device, and its channels.
+    /// The new main output's fold into the device, and its channels.
     new: (&'a tutti_buffers::Fold<F>, &'p [&'p [F]]),
-    /// The old fold of the same channels: the old root's, or the replaced
-    /// routing's of the same root. `None` when the old root's fold is not
-    /// published, which fades the new root in from silence.
+    /// The old fold of the same channels: the old main output's, or the replaced
+    /// routing's of the same main output. `None` when the old main output's fold is not
+    /// published, which fades the new main output in from silence.
     old: Option<(&'a tutti_buffers::Fold<F>, &'p [&'p [F]])>,
     /// The fade's law and length, and the frames of it already rendered.
     fade: FadeRun,
@@ -326,17 +326,17 @@ struct FadeRun {
 }
 
 impl<F: Float> Mixing<'_, F> {
-    /// Folds the two roots into `device` and sums them under the fade's
+    /// Folds the two main outputs into `device` and sums them under the fade's
     /// gains: frame `k` of the fade is `old * g_old + new * g_new` with
     /// `(g_old, g_new)` the fade law's gains at `k`, and from the fade's last
-    /// frame on the new root is the whole mix. Every sample of `device` is
+    /// frame on the new main output is the whole mix. Every sample of `device` is
     /// written. Allocation-free.
     fn crossfade(
         &mut self,
-        roots: Crossfaded<'_, '_, F>,
+        main_outputs: Crossfaded<'_, '_, F>,
         mut device: InterleavedMut<'_, F>,
     ) -> Result<(), tutti_buffers::BufferError> {
-        let Crossfaded { new, old, fade } = roots;
+        let Crossfaded { new, old, fade } = main_outputs;
         let frames = device.frames().get();
         let channels = device.channels();
         let FadeRun {
@@ -511,10 +511,10 @@ impl<F: Float> Engine<F> {
         let (heard_taps, hearing) = crate::hearing::link();
         let clock = BlockClock::new();
         let clock_reader = clock.reader();
-        // Every bare root width places into every bare device width up to
-        // `DEFAULT_DEVICE_WIDTHS` (`every_root_width_places_into_any_device`).
+        // Every bare main output width places into every bare device width up to
+        // `DEFAULT_DEVICE_WIDTHS` (`every_main_output_width_places_into_any_device`).
         let output = OutputControl::new(OutputFolds::up_to(DEFAULT_DEVICE_WIDTHS));
-        editor.set_root_gate(Arc::new(output.clone()));
+        editor.set_main_output_gate(Arc::new(output.clone()));
         let folds = AudioThreadCell::new(output.cell().reader());
         let stage = AudioThreadCell::new(output.stage().reader());
         Ok(Self {
@@ -549,28 +549,28 @@ impl<F: Float> Engine<F> {
         })
     }
 
-    /// Builds the fold from every root width into a device of `device`
+    /// Builds the fold from every main output width into a device of `device`
     /// channels, so the engine can render into a buffer of that width.
     ///
     /// A new engine renders into buffers of up to 16 channels without being
-    /// asked: the folds from each root width (1 to `MAX_CHANNELS`) to each
+    /// asked: the folds from each main output width (1 to `MAX_CHANNELS`) to each
     /// device width are built on the control side, in
     /// [`Engine::new`](Self::new), and published through a `Publisher` that each
     /// call lends once, so a plan change needs no rebuild and the audio thread
     /// never builds a fold. Call this when a stream is built for a device
     /// wider than that (or at all, to say so); it is a no-op for a width
     /// already supported. The device is taken to be the engine's order for its
-    /// width where it has one, and the root the same: see
+    /// width where it has one, and the main output the same: see
     /// [`fold_to_width`](tutti_graph::fold_to_width). A buffer of a width not
     /// supported is not rendered into: the call is silent and counted in
     /// [`BlockCounts::silenced`], in
     /// every build.
     ///
-    /// Where a mono root lands: the centre of a 6, 8 or 12-wide device, the
+    /// Where a mono main output lands: the centre of a 6, 8 or 12-wide device, the
     /// front pair of a 4-wide (quad) or a stereo one. An undeclared 4-wide
-    /// root is **treated as quad** into a 6, 8 or 12-wide device (its rears are
-    /// the back pair, not the centre and LFE); a root of independent buses says
-    /// so with [`OutputControl::publish_root`] and stays by index.
+    /// main output is **treated as quad** into a 6, 8 or 12-wide device (its rears are
+    /// the back pair, not the centre and LFE); a main output of independent buses says
+    /// so with [`OutputControl::publish_main_output`] and stays by index.
     ///
     /// A callback mid-block keeps the folds it lent, and the next call reads
     /// the new ones. Returns at once, publishing nothing, for a width already
@@ -597,8 +597,8 @@ impl<F: Float> Engine<F> {
     }
 
     /// The control side of the output folds, to keep when this engine moves to
-    /// the audio thread: it declares what the graph root is
-    /// ([`OutputControl::publish_root`]), states what a device is
+    /// the audio thread: it declares what the graph main output is
+    /// ([`OutputControl::publish_main_output`]), states what a device is
     /// ([`OutputControl::state_device`]) and adds devices, publishing into the
     /// folds this engine lends.
     pub fn output_control(&self) -> OutputControl<F> {
@@ -670,21 +670,21 @@ impl<F: Float> Engine<F> {
     ///
     /// One executor block per device block (up to its prepared maximum),
     /// under the
-    /// transport as it stands. The graph root has no inputs. The root is
+    /// transport as it stands. The graph main output has no inputs. The main output is
     /// rendered at its **own** output width (at most [`MAX_CHANNELS`],
     /// which the editor's limits enforce) into scratch, then each frame is
     /// folded to the *output's* width — the device / target width — by
     /// [`fold_to_width`](tutti_graph::fold_to_width), built in
-    /// [`support_output`](Self::support_output): a surround root plays folded to a
+    /// [`support_output`](Self::support_output): a surround main output plays folded to a
     /// stereo device by the ITU/Dolby matrix, or straight through to a
-    /// matching-width one; a mono root feeds the centre of a surround device
+    /// matching-width one; a mono main output feeds the centre of a surround device
     /// (its front pair, if it has no centre) and is not copied to every channel;
-    /// a root wider than a surround device is placed by position.
+    /// a main output wider than a surround device is placed by position.
     ///
     /// # Two widths are live here; only one is the buffer's
     ///
     /// The output width (`out_ch`) comes from `output`'s own layout; the
-    /// root's from the plan's global outputs. They are different numbers
+    /// main output's from the plan's global outputs. They are different numbers
     /// from different sources, and confusing them writes past the end of one
     /// buffer or reads garbage from the other. The output width arrives
     /// welded to the buffer it strides, which is what makes a third
@@ -755,7 +755,7 @@ impl<F: Float> Engine<F> {
             });
             g.transport.advance(len, &t);
             // Lent after `settle` installed the plan this segment renders:
-            // the root's folds were published before the commit that
+            // the main output's folds were published before the commit that
             // carries its id, so a snapshot taken now holds them. The loan
             // ends with the segment.
             let (folds, stage) = (reader.lend(), stages.lend());
@@ -783,7 +783,7 @@ impl<F: Float> Engine<F> {
     ///
     /// How many frames is `output`'s own business — it is `output.len()`,
     /// which cannot disagree with the slice the way a separate `frames`
-    /// argument could. The graph root is folded to `output`'s width (the device
+    /// argument could. The graph main output is folded to `output`'s width (the device
     /// / target width, see [`support_output`](Self::support_output)) — see
     /// [`process_segment`](Self::process_segment). Untimed motion
     /// ([`MotionFsm::send`]) applies at the block's first frame; scheduled
@@ -1475,13 +1475,14 @@ impl<F: Float> GraphRender<F> {
         // block, so the width, the block bound and the rate read here are the
         // ones the block renders with. The editor's limits refuse a graph
         // wider than the scratch.
-        let (root, width, rendered) = self.exec.plan().map_or((RootId::GENESIS, 0, 0), |p| {
-            (p.root_id(), p.global_outputs(), p.rendered_outputs())
-        });
-        // While a root change crossfades, the old root's folds are still in
-        // use: the control side retires none past the oldest root rendered.
-        let fade = self.exec.root_fade();
-        let held = fade.map_or(root, |f| f.old);
+        let (main_output, width, rendered) =
+            self.exec.plan().map_or((MainOutputId::GENESIS, 0, 0), |p| {
+                (p.main_output_id(), p.global_outputs(), p.rendered_outputs())
+            });
+        // While a main output change crossfades, the old main output's folds are still in
+        // use: the control side retires none past the oldest main output rendered.
+        let fade = self.exec.main_output_fade();
+        let held = fade.map_or(main_output, |f| f.old);
         // A relaxed store: the control side only needs it to catch up.
         self.installed.store(held.get(), Ordering::Relaxed);
         debug_assert!(width <= MAX_CHANNELS, "the editor's limits refuse this");
@@ -1493,13 +1494,21 @@ impl<F: Float> GraphRender<F> {
         let block = &mut output[at * out_ch..(at + len) * out_ch];
         let stride = self.stride;
         let mut chunks = self.scratch.chunks_mut(stride);
-        let mut outs: [&mut [F]; ROOT_BANKS * MAX_CHANNELS] =
+        let mut outs: [&mut [F]; MAIN_OUTPUT_BANKS * MAX_CHANNELS] =
             std::array::from_fn(|_| chunks.next().expect("a chunk per rendered channel"));
         let mut mixing = Mixing {
-            fold: chunks.next().expect("a chunk to fold the new root into"),
-            old: chunks.next().expect("a chunk to fold the old root into"),
-            gain_old: chunks.next().expect("a chunk for the old root's gains"),
-            gain_new: chunks.next().expect("a chunk for the new root's gains"),
+            fold: chunks
+                .next()
+                .expect("a chunk to fold the new main output into"),
+            old: chunks
+                .next()
+                .expect("a chunk to fold the old main output into"),
+            gain_old: chunks
+                .next()
+                .expect("a chunk for the old main output's gains"),
+            gain_new: chunks
+                .next()
+                .expect("a chunk for the new main output's gains"),
         };
         // The project's meter, lent once for this block and dropped with it.
         {
@@ -1509,14 +1518,17 @@ impl<F: Float> GraphRender<F> {
                 transport,
                 changes,
                 &[],
-                &mut outs[..rendered.min(ROOT_BANKS * MAX_CHANNELS)],
+                &mut outs[..rendered.min(MAIN_OUTPUT_BANKS * MAX_CHANNELS)],
                 Some(&*meter),
             );
         }
-        // The block that ends the fade is the old root's last: from here the
-        // new root is the oldest in use.
+        // The block that ends the fade is the old main output's last: from here the
+        // new main output is the oldest in use.
         self.installed.store(
-            self.exec.root_fade().map_or(root, |f| f.old).get(),
+            self.exec
+                .main_output_fade()
+                .map_or(main_output, |f| f.old)
+                .get(),
             Ordering::Relaxed,
         );
         // Published after the block, not by the walk before it: through the
@@ -1544,7 +1556,7 @@ impl<F: Float> GraphRender<F> {
         // The fold of this width into the device, built on the control side.
         // `width` is within `1..=MAX_CHANNELS` (the editor's limits), so a
         // fold is there.
-        match lent.folds.get(root, out_ch, width) {
+        match lent.folds.get(main_output, out_ch, width) {
             Some(fold) => {
                 let mut device = ChannelLayout::try_from(out_ch)
                     .ok()
@@ -1557,13 +1569,13 @@ impl<F: Float> GraphRender<F> {
                     *slot = &out[..len];
                 }
                 // The routing change's fade: the table it replaced folds the
-                // same channels. A root fade, or a root the replaced table
+                // same channels. A main output fade, or a main output the replaced table
                 // never held, cuts it.
                 let old_routing = lent
                     .folds
                     .previous()
                     .filter(|_| fade.is_none() && self.routing.done < length)
-                    .and_then(|previous| previous.get(root, out_ch, width));
+                    .and_then(|previous| previous.get(main_output, out_ch, width));
                 let folded = match fade {
                     None => match old_routing {
                         Some(old) => mixing.crossfade(
@@ -1583,7 +1595,7 @@ impl<F: Float> GraphRender<F> {
                         }),
                     },
                     Some(fade) => {
-                        // The old root's channels follow the new root's.
+                        // The old main output's channels follow the new main output's.
                         let old = fade.width.min(MAX_CHANNELS);
                         let mut old_table: [&[F]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
                         for (slot, out) in old_table.iter_mut().zip(&outs[width..]).take(old) {
@@ -1606,7 +1618,7 @@ impl<F: Float> GraphRender<F> {
                         )
                     }
                 };
-                // Past the fade, or cut by a root fade or a missing fold: the
+                // Past the fade, or cut by a main output fade or a missing fold: the
                 // control side may drop the replaced table.
                 if old_routing.is_some() {
                     self.routing.done += len;
@@ -1618,7 +1630,7 @@ impl<F: Float> GraphRender<F> {
                 }
                 debug_assert!(
                     folded.is_ok(),
-                    "the root's channels are a block long and the fold is for its width: {folded:?}"
+                    "the main output's channels are a block long and the fold is for its width: {folded:?}"
                 );
                 if folded.is_err() {
                     // Not placed: silent, and the caller counts it.
@@ -1631,7 +1643,7 @@ impl<F: Float> GraphRender<F> {
                     .apply(device.samples_mut(), out_ch, lent.stage, ramp);
                 true
             }
-            // A root width that cannot be placed on this device: silent, and
+            // A main output width that cannot be placed on this device: silent, and
             // the caller counts it.
             None => {
                 self.routing.done = length;
@@ -2080,18 +2092,18 @@ mod tests {
         ed.commit().expect("commits");
     }
 
-    /// Declares `root` as the next root generation the way a session does:
+    /// Declares `main_output` as the next main output generation the way a session does:
     /// its folds are published first, then the spec carries the id and the
     /// commit is sent.
     fn declare(
         ed: &mut Editor,
         control: &OutputControl,
-        root: Option<ChannelTopology>,
+        main_output: Option<ChannelTopology>,
         device: ChannelLayout,
-    ) -> Result<RootId, tutti_graph::RootError> {
-        let id = ed.spec().root_id.next();
-        control.publish_root(id, root, device)?;
-        ed.spec_mut().root_id = id;
+    ) -> Result<MainOutputId, tutti_graph::MainOutputError> {
+        let id = ed.spec().main_output_id.next();
+        control.publish_main_output(id, main_output, device)?;
+        ed.spec_mut().main_output_id = id;
         ed.commit().expect("commits");
         Ok(id)
     }
@@ -2141,50 +2153,52 @@ mod tests {
         out
     }
 
-    /// Every root width that can be placed has a fold into every supported
-    /// device width, and the fold's figures are the analytic ones: a 5.1 root
-    /// on a stereo device is the ITU fold, a mono root on a 5.1 device is its
-    /// centre, a 3-wide root (no order) on a 5-wide device is its channels
+    /// Every main output width that can be placed has a fold into every supported
+    /// device width, and the fold's figures are the analytic ones: a 5.1 main output
+    /// on a stereo device is the ITU fold, a mono main output on a 5.1 device is its
+    /// centre, a 3-wide main output (no order) on a 5-wide device is its channels
     /// zero-filled. A narrowing with an unordered end (5 into 3, 8 into 7, 6
     /// into 5) has no fold, and renders a silent counted block rather than a
     /// truncation.
     #[test]
-    fn every_root_width_places_into_any_device() {
+    fn every_main_output_width_places_into_any_device() {
         let folds = OutputFolds::up_to(DEFAULT_DEVICE_WIDTHS);
-        for root in 1..=MAX_CHANNELS {
+        for main_output in 1..=MAX_CHANNELS {
             for device in 1..=DEFAULT_DEVICE_WIDTHS {
                 let ordered = |w: usize| [1, 2, 4, 6, 8, 12].contains(&w);
-                let refused = root > device && !(ordered(root) && ordered(device));
-                let Some(fold) = folds.get(RootId::GENESIS, device, root) else {
-                    assert!(refused, "{root} -> {device} has no fold");
+                let refused = main_output > device && !(ordered(main_output) && ordered(device));
+                let Some(fold) = folds.get(MainOutputId::GENESIS, device, main_output) else {
+                    assert!(refused, "{main_output} -> {device} has no fold");
                     continue;
                 };
-                assert!(!refused, "{root} -> {device} must have no fold");
-                assert_eq!(usize::from(fold.src_layout().count()), root);
+                assert!(!refused, "{main_output} -> {device} must have no fold");
+                assert_eq!(usize::from(fold.src_layout().count()), main_output);
                 assert_eq!(usize::from(fold.dst_layout().count()), device);
             }
         }
-        for (root, device) in [(5, 3), (6, 5), (8, 7), (3, 1), (4, 3)] {
+        for (main_output, device) in [(5, 3), (6, 5), (8, 7), (3, 1), (4, 3)] {
             assert!(
-                folds.get(RootId::GENESIS, device, root).is_none(),
-                "{root} -> {device}"
+                folds
+                    .get(MainOutputId::GENESIS, device, main_output)
+                    .is_none(),
+                "{main_output} -> {device}"
             );
             assert!(folds.has_device(device));
         }
-        let first = |device, root| folds.get(RootId::GENESIS, device, root);
+        let first = |device, main_output| folds.get(MainOutputId::GENESIS, device, main_output);
         assert!(first(DEFAULT_DEVICE_WIDTHS + 1, 2).is_none());
         assert!(first(2, MAX_CHANNELS + 1).is_none());
         assert!(first(0, 2).is_none() && first(2, 0).is_none());
         assert!(
-            folds.get(RootId::GENESIS.next(), 2, 2).is_none(),
-            "a root never published has no fold"
+            folds.get(MainOutputId::GENESIS.next(), 2, 2).is_none(),
+            "a main output never published has no fold"
         );
 
         let m = <f32 as Float>::MINUS_3_DB;
-        let run = |root: usize, device: usize, frame: &[f32]| {
+        let run = |main_output: usize, device: usize, frame: &[f32]| {
             let mut out = vec![9.0f32; device];
             folds
-                .get(RootId::GENESIS, device, root)
+                .get(MainOutputId::GENESIS, device, main_output)
                 .unwrap()
                 .frame(frame, &mut out);
             out
@@ -2231,12 +2245,12 @@ mod tests {
         assert_eq!(engine.blocks().get().silenced, 1);
     }
 
-    /// A root the device has no place for (five channels into three: either
+    /// A main output the device has no place for (five channels into three: either
     /// width has no order, and two channels would be dropped) renders a silent
     /// block, counted, instead of its first three channels; into a wider device
-    /// the same root plays.
+    /// the same main output plays.
     #[test]
-    fn a_root_the_device_cannot_take_is_silent_and_counted() {
+    fn a_main_output_the_device_cannot_take_is_silent_and_counted() {
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::SR_48K,
@@ -2275,11 +2289,11 @@ mod tests {
         first_frame(engine, device)
     }
 
-    /// A root of four independent buses, declared, stays by index on a 6-wide
-    /// device: channels 2 and 3 land at 2 and 3. Undeclared, the same root is
+    /// A main output of four independent buses, declared, stays by index on a 6-wide
+    /// device: channels 2 and 3 land at 2 and 3. Undeclared, the same main output is
     /// quad, and its rears land on the side pair at 4 and 5.
     #[test]
-    fn a_declared_unassigned_root_keeps_its_channels_by_index() {
+    fn a_declared_unassigned_main_output_keeps_its_channels_by_index() {
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::SR_48K,
@@ -2301,14 +2315,14 @@ mod tests {
         assert_eq!(first_frame(&engine, 6), [41.0, 42.0, 0.0, 0.0, 43.0, 44.0]);
     }
 
-    /// A declared 5.1 root folds into stereo by the 5.1 rules (the ITU matrix:
+    /// A declared 5.1 main output folds into stereo by the 5.1 rules (the ITU matrix:
     /// centre and each side at -3 dB).
     ///
     /// The declared 5.1 is the figure the bare width gives, so the last row
     /// declares the same channels with the front pair swapped to show the
     /// declaration is what is folded.
     #[test]
-    fn a_declared_surround_root_folds_by_its_speakers() {
+    fn a_declared_surround_main_output_folds_by_its_speakers() {
         use tutti_buffers::Speaker::*;
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) = Editor::new(Prepare::new(
@@ -2342,13 +2356,13 @@ mod tests {
         );
     }
 
-    /// The fold follows the plan, not the publication history: roots published
+    /// The fold follows the plan, not the publication history: main outputs published
     /// and never committed (a quad of buses, a 5.1, a 7.1) leave the plan
-    /// rendering on the fold of the root it carries, and the commit that
-    /// carries a published root's id is the block where that root's fold
+    /// rendering on the fold of the main output it carries, and the commit that
+    /// carries a published main output's id is the block where that main output's fold
     /// takes over, with the plan.
     #[test]
-    fn a_published_root_takes_over_with_the_plan_that_carries_its_id() {
+    fn a_published_main_output_takes_over_with_the_plan_that_carries_its_id() {
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::SR_48K,
@@ -2361,26 +2375,28 @@ mod tests {
         let control = engine.output_control();
         let quad_on_eight = [41.0, 42.0, 0.0, 0.0, 0.0, 0.0, 43.0, 44.0];
         assert_eq!(first_frame(&engine, 8), quad_on_eight);
-        let mut id = ed.spec().root_id;
-        for root in [
+        let mut id = ed.spec().main_output_id;
+        for main_output in [
             ChannelTopology::unassigned(ChannelLayout::QUAD),
             ChannelTopology::default_for(ChannelLayout::from(6u16)),
             ChannelTopology::default_for(eight),
         ] {
             id = id.next();
-            control.publish_root(id, Some(root), eight).unwrap();
+            control
+                .publish_main_output(id, Some(main_output), eight)
+                .unwrap();
             assert_eq!(first_frame(&engine, 8), quad_on_eight, "{id}");
         }
         // The plan that carries the by-index quad's id: its fold, at once.
         id = id.next();
         control
-            .publish_root(
+            .publish_main_output(
                 id,
                 Some(ChannelTopology::unassigned(ChannelLayout::QUAD)),
                 eight,
             )
             .unwrap();
-        ed.spec_mut().root_id = id;
+        ed.spec_mut().main_output_id = id;
         ed.commit().unwrap();
         assert_eq!(
             first_frame(&engine, 8),
@@ -2388,10 +2404,10 @@ mod tests {
         );
     }
 
-    /// A root change is bit-exact at the plan swap: in one engine block the
-    /// plan of the old root renders with the old root's fold, and the next
-    /// block, the first of the new plan, with the new root's, with no block of
-    /// the new plan folded by the old root or the other way round.
+    /// A main output change is bit-exact at the plan swap: in one engine block the
+    /// plan of the old main output renders with the old main output's fold, and the next
+    /// block, the first of the new plan, with the new main output's, with no block of
+    /// the new plan folded by the old main output or the other way round.
     #[test]
     fn the_fold_swaps_at_the_block_the_plan_swaps() {
         use std::cell::RefCell;
@@ -2425,10 +2441,10 @@ mod tests {
         assert_eq!(block_with(&engine, 6, || {}), frames(buses));
     }
 
-    /// The first block of a root committed right after its publish is
+    /// The first block of a main output committed right after its publish is
     /// rendered with its own fold, and nothing is counted unplaced.
     #[test]
-    fn a_root_committed_after_its_publish_renders_its_first_block_folded() {
+    fn a_main_output_committed_after_its_publish_renders_its_first_block_folded() {
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::SR_48K,
@@ -2446,18 +2462,18 @@ mod tests {
         assert_eq!(
             engine.blocks().get().silenced,
             before,
-            "the first block of the new root is not silenced"
+            "the first block of the new main output is not silenced"
         );
     }
 
     /// The fold set is lent after the plan is installed, not before: with the
-    /// control side publishing and committing a new root generation while the
+    /// control side publishing and committing a new main output generation while the
     /// audio side renders (on another thread, as in production) calls of many
-    /// segments, no block is counted unplaced. A set lent at the callback's entry misses a root
+    /// segments, no block is counted unplaced. A set lent at the callback's entry misses a main output
     /// published after it whose plan `settle` then installs, and that block is
     /// silent.
     #[test]
-    fn a_root_published_while_blocks_render_is_never_unplaced() {
+    fn a_main_output_published_while_blocks_render_is_never_unplaced() {
         use std::sync::atomic::AtomicBool;
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) = Editor::new(Prepare::new(
@@ -2482,18 +2498,19 @@ mod tests {
                 engine.blocks().get().silenced
             });
             for i in 0..2_000 {
-                let root = (i % 2 == 0).then(|| ChannelTopology::unassigned(ChannelLayout::QUAD));
-                let id = ed.spec().root_id.next();
-                match control.publish_root(id, root, six) {
+                let main_output =
+                    (i % 2 == 0).then(|| ChannelTopology::unassigned(ChannelLayout::QUAD));
+                let id = ed.spec().main_output_id.next();
+                match control.publish_main_output(id, main_output, six) {
                     Ok(()) => {
-                        ed.spec_mut().root_id = id;
+                        ed.spec_mut().main_output_id = id;
                         // The queue can be full while the callback lags.
                         while ed.commit().is_err() {
                             std::thread::yield_now();
                         }
                     }
-                    // Too many roots await a plan: let a block render.
-                    Err(tutti_graph::RootError::TooManyPending { .. }) => {
+                    // Too many main outputs await a plan: let a block render.
+                    Err(tutti_graph::MainOutputError::TooManyPending { .. }) => {
                         std::thread::yield_now();
                     }
                     Err(e) => panic!("{e}"),
@@ -2509,10 +2526,10 @@ mod tests {
         );
     }
 
-    /// A root id that is not past every published one is refused by name, at
+    /// A main output id that is not past every published one is refused by name, at
     /// the call, and publishes nothing.
     #[test]
-    fn a_root_id_not_past_the_published_ones_is_refused() {
+    fn a_main_output_id_not_past_the_published_ones_is_refused() {
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::SR_48K,
@@ -2521,12 +2538,12 @@ mod tests {
         let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let control = engine.output_control();
         let stereo = ChannelLayout::STEREO;
-        let first = RootId::GENESIS.next();
-        control.publish_root(first, None, stereo).unwrap();
-        for stale in [RootId::GENESIS, first] {
+        let first = MainOutputId::GENESIS.next();
+        control.publish_main_output(first, None, stereo).unwrap();
+        for stale in [MainOutputId::GENESIS, first] {
             assert_eq!(
-                control.publish_root(stale, None, stereo),
-                Err(tutti_graph::RootError::NotPast {
+                control.publish_main_output(stale, None, stereo),
+                Err(tutti_graph::MainOutputError::NotPast {
                     id: stale,
                     last: first
                 })
@@ -2534,12 +2551,12 @@ mod tests {
         }
     }
 
-    /// With no plan rendering (a stopped stream) the published roots are
-    /// bounded: past `MAX_PENDING_ROOTS` a publish is refused by name and the
-    /// table stops growing, and one rendered block (which advances the root in
+    /// With no plan rendering (a stopped stream) the published main outputs are
+    /// bounded: past `MAX_PENDING_MAIN_OUTPUTS` a publish is refused by name and the
+    /// table stops growing, and one rendered block (which advances the main output in
     /// force) frees the room.
     #[test]
-    fn roots_published_while_nothing_renders_are_bounded() {
+    fn main_outputs_published_while_nothing_renders_are_bounded() {
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::SR_48K,
@@ -2550,31 +2567,33 @@ mod tests {
         let _ = first_frame(&engine, 2);
         let control = engine.output_control();
         let stereo = ChannelLayout::STEREO;
-        let mut id = RootId::GENESIS;
-        for _ in 0..crate::MAX_PENDING_ROOTS {
+        let mut id = MainOutputId::GENESIS;
+        for _ in 0..crate::MAX_PENDING_MAIN_OUTPUTS {
             id = id.next();
-            control.publish_root(id, None, stereo).unwrap();
+            control.publish_main_output(id, None, stereo).unwrap();
         }
         assert_eq!(
-            control.publish_root(id.next(), None, stereo),
-            Err(tutti_graph::RootError::TooManyPending {
-                limit: crate::MAX_PENDING_ROOTS
+            control.publish_main_output(id.next(), None, stereo),
+            Err(tutti_graph::MainOutputError::TooManyPending {
+                limit: crate::MAX_PENDING_MAIN_OUTPUTS
             })
         );
         assert!(
             !control.has_fold(id.next(), 2, stereo),
             "nothing was published"
         );
-        // The newest pending root is committed and rendered: the older ones
+        // The newest pending main output is committed and rendered: the older ones
         // are retired and the room is back.
-        ed.spec_mut().root_id = id;
+        ed.spec_mut().main_output_id = id;
         ed.commit().unwrap();
         let _ = first_frame(&engine, 2);
         let _ = control.reclaim();
-        control.publish_root(id.next(), None, stereo).unwrap();
+        control
+            .publish_main_output(id.next(), None, stereo)
+            .unwrap();
     }
 
-    /// An idle `reclaim` (no root to retire) neither clones nor republishes
+    /// An idle `reclaim` (no main output to retire) neither clones nor republishes
     /// the fold table: the set the callback lends is the same allocation.
     #[test]
     fn an_idle_reclaim_leaves_the_published_set_alone() {
@@ -2592,11 +2611,11 @@ mod tests {
         assert!(Arc::ptr_eq(&before, &control.cell().current()));
     }
 
-    /// An editor attached to an engine refuses a commit whose root id no fold
+    /// An editor attached to an engine refuses a commit whose main output id no fold
     /// was published for, by name: the plan is not sent and the last one goes
     /// on sounding.
     #[test]
-    fn a_commit_of_an_unpublished_root_is_refused() {
+    fn a_commit_of_an_unpublished_main_output_is_refused() {
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::SR_48K,
@@ -2605,25 +2624,25 @@ mod tests {
         let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 2);
         let _ = first_frame(&engine, 2);
-        let unheard = RootId::GENESIS.next();
-        ed.spec_mut().root_id = unheard;
+        let unheard = MainOutputId::GENESIS.next();
+        ed.spec_mut().main_output_id = unheard;
         assert_eq!(
             ed.commit(),
-            Err(CommitError::RootNotPublished {
-                root: unheard,
+            Err(CommitError::MainOutputNotPublished {
+                main_output: unheard,
                 outputs: 2
             })
         );
         assert_eq!(first_frame(&engine, 2), [21.0, 22.0]);
         engine
             .output_control()
-            .publish_root(unheard, None, ChannelLayout::STEREO)
+            .publish_main_output(unheard, None, ChannelLayout::STEREO)
             .unwrap();
         ed.commit().expect("published, so it commits");
     }
 
-    /// The monitor format folds the root into what is heard, and the map places
-    /// the heard channels on the device: a 5.1 root heard as stereo on outputs 3
+    /// The monitor format folds the main output into what is heard, and the map places
+    /// the heard channels on the device: a 5.1 main output heard as stereo on outputs 3
     /// and 4 of a six-output device is the ITU stereo fold on those two outputs
     /// and silence elsewhere, at the analytic figures.
     #[test]
@@ -2650,7 +2669,7 @@ mod tests {
                 map: OutputMap::channels([2, 3]).unwrap(),
                 ..Routing::default()
             })
-            .expect("the routing places the roots");
+            .expect("the routing places the main outputs");
         let (l, r) = (61.0 + m * 63.0 + m * 65.0, 62.0 + m * 63.0 + m * 66.0);
         assert_eq!(
             first_frame_after_fade(&engine, 6),
@@ -2658,23 +2677,23 @@ mod tests {
         );
         // The same routing on a stereo device has no place for outputs 3 and 4:
         // no fold, so a commit or restart would name it.
-        assert!(!control.has_fold(RootId::GENESIS, 6, ChannelLayout::STEREO));
+        assert!(!control.has_fold(MainOutputId::GENESIS, 6, ChannelLayout::STEREO));
         // Taken back: by speaker again.
         control
             .set_routing(Routing::default())
-            .expect("the routing places the roots");
+            .expect("the routing places the main outputs");
         assert_eq!(
             first_frame_after_fade(&engine, 6),
             [61.0, 62.0, 63.0, 64.0, 65.0, 66.0]
         );
     }
 
-    /// **A routing that cannot place the root on the device in use is refused
+    /// **A routing that cannot place the main output on the device in use is refused
     /// and installs nothing.** A map sending a heard channel to output 3 of a
     /// device of two names that channel and that device, and the routing in
     /// force still folds the next block.
     #[test]
-    fn a_routing_that_cannot_place_the_root_on_the_device_in_use_is_refused() {
+    fn a_routing_that_cannot_place_the_main_output_on_the_device_in_use_is_refused() {
         use crate::{OutputMap, Routing, RoutingError};
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) = Editor::new(Prepare::new(
@@ -2777,7 +2796,7 @@ mod tests {
                 },
                 ..Routing::default()
             })
-            .expect("the routing places the roots");
+            .expect("the routing places the main outputs");
         // Channels 61..66: L = 61 + 0.5 * 63 + 0.25 * 65, R likewise.
         assert_eq!(
             first_frame_after_fade(&engine, 2),
@@ -2861,9 +2880,9 @@ mod tests {
         assert!(out[0] > 0.0 && out[0] < 21.0 * 0.5, "mid-ramp: {}", out[0]);
     }
 
-    /// A root with no fold into the device (five buses into three) is
+    /// A main output with no fold into the device (five buses into three) is
     /// reported by `has_fold` before any block runs, so the session can
-    /// refuse the commit that would make it; a width a declared root does not
+    /// refuse the commit that would make it; a width a declared main output does not
     /// have is not one it renders.
     #[test]
     fn has_fold_names_the_pairs_a_commit_would_make() {
@@ -2875,7 +2894,7 @@ mod tests {
         let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let control = engine.output_control();
         let three = ChannelLayout::from(3u16);
-        let genesis = RootId::GENESIS;
+        let genesis = MainOutputId::GENESIS;
         assert!(control.has_fold(genesis, 3, three));
         assert!(
             control.has_fold(genesis, 2, three),
@@ -2884,7 +2903,7 @@ mod tests {
         assert!(!control.has_fold(genesis, 5, three), "5 into 3 drops two");
         let id = genesis.next();
         control
-            .publish_root(
+            .publish_main_output(
                 id,
                 Some(ChannelTopology::unassigned(ChannelLayout::from(2u16))),
                 three,
@@ -2893,14 +2912,14 @@ mod tests {
         assert!(control.has_fold(id, 2, three));
         assert!(
             !control.has_fold(id, 3, three),
-            "the root is declared 2 wide"
+            "the main output is declared 2 wide"
         );
         assert!(control.has_width(id, 2) && !control.has_width(id, 3));
         assert!(!control.has_fold(id.next(), 2, three), "not published");
     }
 
     /// A device whose wiring is stated is folded into by speaker, and is
-    /// reported `Stated`; the width's default layout is `Default`. A stereo root into
+    /// reported `Stated`; the width's default layout is `Default`. A stereo main output into
     /// a device stated right then left lands its left on the device's second
     /// channel, and taking the statement back is the identity again.
     #[test]
@@ -2915,7 +2934,7 @@ mod tests {
         rewire(&mut ed, 2);
         let control = engine.output_control();
         let _ = first_frame(&engine, 2);
-        // Default stereo; a 2-wide root passes through.
+        // Default stereo; a 2-wide main output passes through.
         let stereo = ChannelLayout::STEREO;
         assert_eq!(
             control.device(stereo).map(|d| d.placement),
@@ -2923,7 +2942,7 @@ mod tests {
         );
         assert_eq!(first_frame(&engine, 2), [21.0, 22.0]);
         // A 2-wide device stated as a left-right swap of the front pair: the
-        // root's left lands on the device's channel 1.
+        // main output's left lands on the device's channel 1.
         let swapped = ChannelTopology::new([FrontRight, FrontLeft]).unwrap();
         control.state_device(stereo, Some(swapped.clone())).unwrap();
         let placed = control.device(stereo).unwrap();
@@ -2946,12 +2965,12 @@ mod tests {
         ));
     }
 
-    /// A root generation's folds are published until a plan of a later root
-    /// has rendered: `reclaim` keeps the older root while its plan is the one
+    /// A main output generation's folds are published until a plan of a later main output
+    /// has rendered: `reclaim` keeps the older main output while its plan is the one
     /// rendering, drops it after the new plan's first block, and frees what the
     /// replaced set held once no block holds it.
     #[test]
-    fn the_old_roots_folds_go_at_the_first_reclaim_after_the_new_plan_renders() {
+    fn the_old_main_outputs_folds_go_at_the_first_reclaim_after_the_new_plan_renders() {
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::SR_48K,
@@ -2962,15 +2981,18 @@ mod tests {
         let control = engine.output_control();
         let stereo = ChannelLayout::STEREO;
         let _ = first_frame(&engine, 2);
-        let old = ed.spec().root_id;
+        let old = ed.spec().main_output_id;
         let new = declare(&mut ed, &control, None, stereo).unwrap();
-        // Committed and published, not yet rendered: both roots are held.
+        // Committed and published, not yet rendered: both main outputs are held.
         let _ = control.reclaim();
         assert!(control.has_fold(old, 2, stereo) && control.has_fold(new, 2, stereo));
         // The new plan's first block.
         let _ = first_frame(&engine, 2);
         let _ = control.reclaim();
-        assert!(!control.has_fold(old, 2, stereo), "the old root is gone");
+        assert!(
+            !control.has_fold(old, 2, stereo),
+            "the old main output is gone"
+        );
         assert!(control.has_fold(new, 2, stereo));
         assert_eq!(control.reclaim(), 0, "nothing is left pinned");
     }
@@ -2996,7 +3018,7 @@ mod tests {
     }
 
     /// Feeds the constant at key 1 to channel `channel` of a `width`-wide
-    /// root, the others silent, in the editor's spec.
+    /// main output, the others silent, in the editor's spec.
     fn feed(ed: &mut Editor, width: usize, channel: usize) {
         use tutti_graph::{NodeKey, OutPort, PortSource};
         let dc = PortSource::Node(OutPort {
@@ -3016,8 +3038,8 @@ mod tests {
         ((1.0 - s) as f32, s as f32)
     }
 
-    /// An engine of the constant at key 1 into the left of a stereo root, the
-    /// root fade set to `fade` frames of equal amplitude, and the plan
+    /// An engine of the constant at key 1 into the left of a stereo main output, the
+    /// main output fade set to `fade` frames of equal amplitude, and the plan
     /// rendered once.
     fn crossfading_engine(fade: usize) -> (Engine, Editor) {
         let (mut ed, exec) = Editor::new(Prepare::new(
@@ -3029,25 +3051,25 @@ mod tests {
         ed.commit().expect("commits");
         let engine =
             Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).expect("within limits");
-        ed.set_root_fade(Some(tutti_graph::Fade::new(Samples::new(fade))));
+        ed.set_main_output_fade(Some(tutti_graph::Fade::new(Samples::new(fade))));
         assert_eq!(block_with(&engine, 2, || {}), [1.0, 0.0].repeat(8));
         (engine, ed)
     }
 
-    /// Declares a root of `width` channels (`None` the engine's order) with
+    /// Declares a main output of `width` channels (`None` the engine's order) with
     /// the constant on its channel `channel`, and commits.
-    fn move_root(
+    fn move_main_output(
         ed: &mut Editor,
         control: &OutputControl,
-        root: Option<ChannelTopology>,
+        main_output: Option<ChannelTopology>,
         width: usize,
         channel: usize,
     ) {
-        let id = ed.spec().root_id.next();
+        let id = ed.spec().main_output_id.next();
         control
-            .publish_root(id, root, ChannelLayout::STEREO)
+            .publish_main_output(id, main_output, ChannelLayout::STEREO)
             .expect("places");
-        ed.spec_mut().root_id = id;
+        ed.spec_mut().main_output_id = id;
         feed(ed, width, channel);
         ed.commit().expect("commits");
     }
@@ -3070,7 +3092,7 @@ mod tests {
                 map: OutputMap::channels(map).unwrap(),
                 ..Routing::default()
             })
-            .expect("the routing places the roots");
+            .expect("the routing places the main outputs");
         let _ = first_frame_after_fade(&engine, 4);
         engine
     }
@@ -3092,7 +3114,7 @@ mod tests {
                 map: OutputMap::channels(map).unwrap(),
                 ..Routing::default()
             })
-            .expect("the routing places the roots");
+            .expect("the routing places the main outputs");
     }
 
     /// A map change from outputs 0 and 1 to 2 and 3 ramps: frame `k` of the
@@ -3141,23 +3163,23 @@ mod tests {
         );
     }
 
-    /// A routing change during a root fade cuts: the next block folds both
-    /// roots under the new routing from its first frame (the old root is the
+    /// A routing change during a main output fade cuts: the next block folds both
+    /// main outputs under the new routing from its first frame (the old main output is the
     /// constant on the left, the new on the right, heard swapped), and the
-    /// routing does not fade in after the root fade ends.
+    /// routing does not fade in after the main output fade ends.
     #[test]
-    fn a_routing_change_during_a_root_fade_cuts() {
+    fn a_routing_change_during_a_main_output_fade_cuts() {
         use crate::{OutputMap, Routing};
         let (engine, mut ed) = crossfading_engine(20);
         let control = engine.output_control();
-        move_root(&mut ed, &control, None, 2, 1);
+        move_main_output(&mut ed, &control, None, 2, 1);
         let mut heard = block_with(&engine, 2, || {});
         control
             .set_routing(Routing {
                 map: OutputMap::channels([1, 0]).unwrap(),
                 ..Routing::default()
             })
-            .expect("the routing places the roots");
+            .expect("the routing places the main outputs");
         heard.extend((0..2).flat_map(|_| block_with(&engine, 2, || {})));
         for (k, frame) in frames_of(&heard, 2).enumerate() {
             let (out, new) = if k < 20 {
@@ -3211,7 +3233,7 @@ mod tests {
     }
 
     /// A routing change's replaced table is reclaimed even when no fold plays:
-    /// a block with no plan (width 0) and one whose root has no placed fold
+    /// a block with no plan (width 0) and one whose main output has no placed fold
     /// both end the fade, so `previous` is not held while the stream is silent.
     #[test]
     fn the_replaced_routing_table_is_reclaimed_while_no_fold_plays() {
@@ -3231,7 +3253,7 @@ mod tests {
         let _ = first_frame(&engine, 2);
         control
             .set_routing(change())
-            .expect("the routing places the roots");
+            .expect("the routing places the main outputs");
         assert!(control.cell().current().previous().is_some());
         let _ = first_frame(&engine, 2);
         let _ = control.reclaim();
@@ -3247,7 +3269,7 @@ mod tests {
         rewire(&mut ed, 5);
         let control = engine.output_control();
         let _ = first_frame(&engine, 3);
-        assert!(!control.has_fold(RootId::GENESIS, 5, ChannelLayout::from(3u16)));
+        assert!(!control.has_fold(MainOutputId::GENESIS, 5, ChannelLayout::from(3u16)));
         assert!(control.set_routing(change()).is_err());
         let swapped = ChannelTopology::new([
             tutti_buffers::Speaker::FrontRight,
@@ -3258,7 +3280,7 @@ mod tests {
         control
             .state_device(ChannelLayout::from(3u16), Some(swapped))
             .unwrap();
-        assert!(!control.has_fold(RootId::GENESIS, 5, ChannelLayout::from(3u16)));
+        assert!(!control.has_fold(MainOutputId::GENESIS, 5, ChannelLayout::from(3u16)));
         assert!(control.cell().current().previous().is_some());
         let _ = first_frame(&engine, 3);
         let _ = control.reclaim();
@@ -3333,17 +3355,17 @@ mod tests {
         }
     }
 
-    /// A root change crossfades: the old root's lanes ramp out by the
-    /// equal-amplitude gains while the new root's ramp in, frame by frame
-    /// over four 8-frame blocks, each root folded by its own fold. The old
-    /// root is the constant on the left, the new the same constant on the
+    /// A main output change crossfades: the old main output's lanes ramp out by the
+    /// equal-amplitude gains while the new main output's ramp in, frame by frame
+    /// over four 8-frame blocks, each main output folded by its own fold. The old
+    /// main output is the constant on the left, the new the same constant on the
     /// right, so each frame of the left is the outgoing gain and of the right
     /// the incoming one; past the fade's 20 frames the right is the whole mix.
     #[test]
-    fn a_root_change_crossfades_the_old_root_out_and_the_new_in() {
+    fn a_main_output_change_crossfades_the_old_main_output_out_and_the_new_in() {
         let (engine, mut ed) = crossfading_engine(20);
         let control = engine.output_control();
-        move_root(&mut ed, &control, None, 2, 1);
+        move_main_output(&mut ed, &control, None, 2, 1);
         let heard: Vec<f32> = (0..4).flat_map(|_| block_with(&engine, 2, || {})).collect();
         for (k, frame) in frames_of(&heard, 2).enumerate() {
             let (out, new) = if k < 20 {
@@ -3358,15 +3380,15 @@ mod tests {
         }
     }
 
-    /// The two roots are folded each by its own fold: a stereo root fading
-    /// out to a 5.1 root whose constant is on the centre, into a stereo
+    /// The two main outputs are folded each by its own fold: a stereo main output fading
+    /// out to a 5.1 main output whose constant is on the centre, into a stereo
     /// device. The centre folds to both sides at -3 dB (BS.775), so the left
     /// is `out + new / sqrt(2)` and the right `new / sqrt(2)`.
     #[test]
-    fn each_root_is_folded_by_its_own_fold_through_the_crossfade() {
+    fn each_main_output_is_folded_by_its_own_fold_through_the_crossfade() {
         let (engine, mut ed) = crossfading_engine(20);
         let control = engine.output_control();
-        move_root(&mut ed, &control, Some(Bed::Surround51.topology()), 6, 2);
+        move_main_output(&mut ed, &control, Some(Bed::Surround51.topology()), 6, 2);
         let heard: Vec<f32> = (0..3).flat_map(|_| block_with(&engine, 2, || {})).collect();
         let centre = std::f32::consts::FRAC_1_SQRT_2;
         for (k, frame) in frames_of(&heard, 2).enumerate().take(24) {
@@ -3383,65 +3405,68 @@ mod tests {
         }
     }
 
-    /// A root change with no root fade is a cut: the first frame of the block
-    /// the commit lands on is the new root alone.
+    /// A main output change with no main output fade is a cut: the first frame of the block
+    /// the commit lands on is the new main output alone.
     #[test]
-    fn a_root_change_without_a_fade_cuts_at_the_block() {
+    fn a_main_output_change_without_a_fade_cuts_at_the_block() {
         let (engine, mut ed) = crossfading_engine(20);
-        ed.set_root_fade(None);
+        ed.set_main_output_fade(None);
         let control = engine.output_control();
-        move_root(&mut ed, &control, None, 2, 1);
+        move_main_output(&mut ed, &control, None, 2, 1);
         assert_eq!(block_with(&engine, 2, || {}), [0.0, 1.0].repeat(8));
         assert!(
-            ed.base().is_some_and(|p| p.root_bank().is_none()),
-            "the plan carries no old root"
+            ed.base().is_some_and(|p| p.main_output_bank().is_none()),
+            "the plan carries no old main output"
         );
     }
 
-    /// The old root's folds stay published while the fade runs and go at the
+    /// The old main output's folds stay published while the fade runs and go at the
     /// first reclaim after the block that ends it, not after the commit's
     /// first block; the plan is then compiled again without the old channels.
     #[test]
-    fn the_old_roots_folds_go_at_the_first_reclaim_after_the_crossfade_ends() {
+    fn the_old_main_outputs_folds_go_at_the_first_reclaim_after_the_crossfade_ends() {
         let (engine, mut ed) = crossfading_engine(20);
         let control = engine.output_control();
         let stereo = ChannelLayout::STEREO;
-        let old = ed.spec().root_id;
-        move_root(&mut ed, &control, None, 2, 1);
-        let new = ed.spec().root_id;
+        let old = ed.spec().main_output_id;
+        move_main_output(&mut ed, &control, None, 2, 1);
+        let new = ed.spec().main_output_id;
         // Frames 0..8, 8..16 and 16..24: the third ends the 20-frame fade.
         for block in 0..2 {
             let _ = block_with(&engine, 2, || {});
             let _ = control.reclaim();
             assert!(
                 control.has_fold(old, 2, stereo),
-                "the old root is folded until the fade ends (block {block})"
+                "the old main output is folded until the fade ends (block {block})"
             );
         }
         let _ = block_with(&engine, 2, || {});
         let _ = control.reclaim();
-        assert!(!control.has_fold(old, 2, stereo), "the old root is gone");
+        assert!(
+            !control.has_fold(old, 2, stereo),
+            "the old main output is gone"
+        );
         assert!(control.has_fold(new, 2, stereo));
         assert_eq!(control.reclaim(), 0, "nothing is left pinned");
         // The editor learns the fade is over and compiles the old channels away.
         let _ = ed.collect();
         assert!(ed.finish_fades(), "the fade's end is reported once");
-        assert!(ed.base().is_some_and(|p| p.root_bank().is_some()));
+        assert!(ed.base().is_some_and(|p| p.main_output_bank().is_some()));
         ed.commit().expect("commits");
-        assert!(ed.base().is_some_and(|p| p.root_bank().is_none()));
+        assert!(ed.base().is_some_and(|p| p.main_output_bank().is_none()));
         assert_eq!(block_with(&engine, 2, || {}), [0.0, 1.0].repeat(8));
         assert!(!ed.finish_fades(), "and once only");
     }
 
-    /// A commit that lands while the fade runs, and leaves the root alone,
+    /// A commit that lands while the fade runs, and leaves the main output alone,
     /// continues it: the rewire to both channels brings the right in by the
     /// fade's gains from frame 8 on, not at once, while the left stays the sum
-    /// of the old root going out and the new coming in, which is one.
+    /// of the old main output going out and the new coming in, which is one.
     #[test]
     fn a_commit_that_lands_mid_fade_continues_it() {
         let (engine, mut ed) = crossfading_engine(20);
         let control = engine.output_control();
-        move_root(&mut ed, &control, None, 2, 1);
+        move_main_output(&mut ed, &control, None, 2, 1);
         let mut heard: Vec<f32> = block_with(&engine, 2, || {});
         let dc = tutti_graph::PortSource::Node(tutti_graph::OutPort {
             node: tutti_graph::NodeKey(1),
@@ -3456,7 +3481,7 @@ mod tests {
             } else {
                 (0.0, 1.0)
             };
-            // The old root is the constant on the left; the new root, from
+            // The old main output is the constant on the left; the new main output, from
             // frame 8, the constant on both sides.
             let (left, right) = if k < 8 { (out, new) } else { (out + new, new) };
             assert!(
@@ -3511,14 +3536,14 @@ mod tests {
         fn reset(&mut self) {}
     }
 
-    /// A compensated old root fades out with no gap: the counter on the left
+    /// A compensated old main output fades out with no gap: the counter on the left
     /// is delayed by 16 frames to the output time, and its history crosses
-    /// into the old root's channel of the bank, so frame `t` of the fade is
+    /// into the old main output's channel of the bank, so frame `t` of the fade is
     /// the counter's value 16 frames before, times the outgoing gain, with no
-    /// dip to silence. The new root, which has the same source on its right,
+    /// dip to silence. The new main output, which has the same source on its right,
     /// starts from the same history, so it has no gap either.
     #[test]
-    fn a_compensated_old_root_crossfades_out_with_its_history() {
+    fn a_compensated_old_main_output_crossfades_out_with_its_history() {
         use tutti_graph::{NodeKey, OutPort, PortSource};
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::SR_48K,
@@ -3538,17 +3563,17 @@ mod tests {
         ed.commit().expect("commits");
         let engine =
             Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).expect("within limits");
-        ed.set_root_fade(Some(tutti_graph::Fade::new(Samples::new(20))));
+        ed.set_main_output_fade(Some(tutti_graph::Fade::new(Samples::new(20))));
         let control = engine.output_control();
-        // 16 frames of the old root, whose left is the counter 16 behind.
+        // 16 frames of the old main output, whose left is the counter 16 behind.
         for _ in 0..2 {
             let _ = block_with(&engine, 2, || {});
         }
-        let id = ed.spec().root_id.next();
+        let id = ed.spec().main_output_id.next();
         control
-            .publish_root(id, None, ChannelLayout::STEREO)
+            .publish_main_output(id, None, ChannelLayout::STEREO)
             .unwrap();
-        ed.spec_mut().root_id = id;
+        ed.spec_mut().main_output_id = id;
         ed.spec_mut().topology.set_outputs([late, count]);
         ed.commit().expect("commits");
         let heard: Vec<f32> = (0..3).flat_map(|_| block_with(&engine, 2, || {})).collect();
@@ -3573,14 +3598,14 @@ mod tests {
         }
     }
 
-    /// An old root's latent source the new root lacks does not move the new
-    /// root: the old root has the counter and a 16-frame latent source, the
-    /// new root the counter alone on the left. The new root's counter is
+    /// An old main output's latent source the new main output lacks does not move the new
+    /// main output: the old main output has the counter and a 16-frame latent source, the
+    /// new main output the counter alone on the left. The new main output's counter is
     /// undelayed from its first frame, through the fade and after the commit
     /// that compiles the old channels away, and the plan's reported latency is
-    /// the new root's (none), not the old root's 16.
+    /// the new main output's (none), not the old main output's 16.
     #[test]
-    fn a_latent_source_the_new_root_lacks_does_not_move_the_new_root() {
+    fn a_latent_source_the_new_main_output_lacks_does_not_move_the_new_main_output() {
         use tutti_graph::{NodeKey, OutPort, PortSource};
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::SR_48K,
@@ -3600,7 +3625,7 @@ mod tests {
         ed.commit().expect("commits");
         let engine =
             Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).expect("within limits");
-        ed.set_root_fade(Some(tutti_graph::Fade::new(Samples::new(20))));
+        ed.set_main_output_fade(Some(tutti_graph::Fade::new(Samples::new(20))));
         let control = engine.output_control();
         for _ in 0..2 {
             let _ = block_with(&engine, 2, || {});
@@ -3609,11 +3634,11 @@ mod tests {
             ed.base().map(|p| p.total_latency().samples()),
             Some(Samples::new(16))
         );
-        let id = ed.spec().root_id.next();
+        let id = ed.spec().main_output_id.next();
         control
-            .publish_root(id, None, ChannelLayout::STEREO)
+            .publish_main_output(id, None, ChannelLayout::STEREO)
             .unwrap();
-        ed.spec_mut().root_id = id;
+        ed.spec_mut().main_output_id = id;
         ed.spec_mut()
             .topology
             .set_outputs([count, PortSource::Zero]);
@@ -3621,7 +3646,7 @@ mod tests {
         assert_eq!(
             ed.base().map(|p| p.total_latency().samples()),
             Some(Samples::new(0)),
-            "the reported latency is the new root's"
+            "the reported latency is the new main output's"
         );
         let mut heard: Vec<f32> = (0..3).flat_map(|_| block_with(&engine, 2, || {})).collect();
         // The fade is over: compile the old channels away and keep rendering.
@@ -3629,7 +3654,7 @@ mod tests {
         assert!(ed.finish_fades());
         ed.commit().expect("commits");
         heard.extend((0..2).flat_map(|_| block_with(&engine, 2, || {})));
-        // The counter at absolute frame `t` is `t + 1`; the old root's copy is
+        // The counter at absolute frame `t` is `t + 1`; the old main output's copy is
         // 16 behind from frame 16 on.
         for (k, frame) in frames_of(&heard, 2).enumerate() {
             let t = 16 + k;
@@ -3661,8 +3686,8 @@ mod tests {
         let mut reader = loan_holder.borrow_mut();
         let loan = reader.lend();
         control
-            .publish_root(
-                ed.spec().root_id.next(),
+            .publish_main_output(
+                ed.spec().main_output_id.next(),
                 Some(ChannelTopology::unassigned(ChannelLayout::QUAD)),
                 ChannelLayout::from(6u16),
             )
@@ -3687,14 +3712,14 @@ mod tests {
         let _ = first_frame(&engine, 2);
         let before = first_frame(&engine, 2);
         let control = engine.output_control();
-        let next = ed.spec().root_id.next();
+        let next = ed.spec().main_output_id.next();
         assert_eq!(
-            control.publish_root(
+            control.publish_main_output(
                 next,
                 Some(ChannelTopology::unassigned(ChannelLayout::QUAD)),
                 ChannelLayout::STEREO
             ),
-            Err(tutti_graph::RootError::Fold(FoldError::Unplaced {
+            Err(tutti_graph::MainOutputError::Fold(FoldError::Unplaced {
                 channel: 2,
                 speaker: tutti_buffers::Speaker::Unassigned
             }))
@@ -3707,8 +3732,10 @@ mod tests {
         ])
         .unwrap();
         assert!(matches!(
-            control.publish_root(next, Some(lfe2), ChannelLayout::STEREO),
-            Err(tutti_graph::RootError::Fold(FoldError::Unnamed { .. }))
+            control.publish_main_output(next, Some(lfe2), ChannelLayout::STEREO),
+            Err(tutti_graph::MainOutputError::Fold(
+                FoldError::Unnamed { .. }
+            ))
         ));
         assert!(!control.has_fold(next, 4, ChannelLayout::STEREO));
         assert_eq!(first_frame(&engine, 2), before);

@@ -265,10 +265,10 @@ pub enum ConfigError {
     /// states cannot take them, or is not as wide as the file.
     #[error("the graph's channels cannot be placed into the file's: {0}")]
     Placement(tutti_buffers::FoldError),
-    /// The declared root is not as wide as the graph
-    /// ([`RootError::Width`](tutti_graph::RootError::Width)).
-    #[error("the graph's root cannot be placed into the file's: {0}")]
-    Root(tutti_graph::RootError),
+    /// The declared main output is not as wide as the graph
+    /// ([`MainOutputError::Width`](tutti_graph::MainOutputError::Width)).
+    #[error("the graph's main output cannot be placed into the file's: {0}")]
+    MainOutput(tutti_graph::MainOutputError),
 }
 
 impl From<tutti_codec::EncodeError> for RenderError {

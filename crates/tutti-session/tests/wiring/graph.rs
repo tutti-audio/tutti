@@ -18,7 +18,7 @@ use tutti_nodes::testing::{Const, Osc, Through};
 use tutti_rt::Param;
 use tutti_session::{
     DetachedSession, EventInPort, Feeder, InPort, MainInput, MainOutput, OutPort, RemoveError,
-    ReplaceRefused, Replacement, Session, SessionEvent, SessionNode, root_width,
+    ReplaceRefused, Replacement, Session, SessionEvent, SessionNode, main_output_width,
 };
 use tutti_units::{Drive, Hz, Real, SampleRate, Samples};
 use tutti_units::{Latency, UnitParam};
@@ -375,7 +375,7 @@ fn removing_a_stranger_changes_nothing() {
     assert!(!s.graph_ref().has_uncommitted_edits(), "nothing was edited");
 }
 
-/// `root_width` is `max(project, device)` clamped to
+/// `main_output_width` is `max(project, device)` clamped to
 /// `1..=MAX_CHANNELS`; each row is one way the rule is load-bearing.
 #[test]
 fn root_width_takes_the_wider_side_within_the_scratch_bounds() {
@@ -421,9 +421,9 @@ fn root_width_takes_the_wider_side_within_the_scratch_bounds() {
     ];
     for &(project, device, expected, why) in cases {
         assert_eq!(
-            root_width(project, device),
+            main_output_width(project, device),
             expected,
-            "root_width({} channels, {} channels): {why}",
+            "main_output_width({} channels, {} channels): {why}",
             project.count(),
             device.count()
         );
