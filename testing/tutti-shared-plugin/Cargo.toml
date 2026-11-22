@@ -17,7 +17,6 @@ crate-type = ["cdylib", "rlib"]
 # VST2 shell: `tutti-vst2-author` for the authoring side. VST3 shell: the `vst3` crate's
 # COM wrappers.
 [dependencies]
-tutti-rt = { path = "../../crates/tutti-rt" }
 clap-sys = "0.5"
 tutti-vst2-author = { path = "../tutti-vst2-author" }
 num-traits = "0.2"

@@ -22,10 +22,9 @@
 
 use std::ffi::{CStr, c_char};
 use std::ptr;
-use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use tutti_rt::LockExt;
+use std::sync::{Mutex, PoisonError};
 
 use clap_sys::color::clap_color;
 use clap_sys::events::{
@@ -490,7 +489,7 @@ static PARAM_CAPTURE: Mutex<ParamStateCapture> = Mutex::new(ParamStateCapture {
 });
 
 fn with_capture<R>(f: impl FnOnce(&mut ParamStateCapture) -> R) -> R {
-    let mut guard = PARAM_CAPTURE.lock_recover();
+    let mut guard = PARAM_CAPTURE.lock().unwrap_or_else(PoisonError::into_inner);
     f(&mut guard)
 }
 
@@ -574,7 +573,7 @@ pub unsafe extern "C" fn tutti_test_plugin_param_peek(id: u32, out: *mut f64) ->
 /// Safe to call from any thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tutti_test_plugin_queue_output(kind: u32, param_id: u32, value: f64) {
-    let mut guard = OUTPUT_QUEUE.lock_recover();
+    let mut guard = OUTPUT_QUEUE.lock().unwrap_or_else(PoisonError::into_inner);
     let slot = guard.len;
     if slot < MAX_QUEUED_OUTPUT {
         guard.items[slot] = QueuedOutput {
@@ -844,7 +843,7 @@ pub(crate) unsafe fn emit_queued_output(out: *const clap_output_events) {
     };
 
     let queued: Vec<QueuedOutput> = {
-        let mut guard = OUTPUT_QUEUE.lock_recover();
+        let mut guard = OUTPUT_QUEUE.lock().unwrap_or_else(PoisonError::into_inner);
         let items = guard.items[..guard.len].to_vec();
         guard.len = 0;
         items

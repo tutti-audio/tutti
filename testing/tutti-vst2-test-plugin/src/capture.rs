@@ -5,8 +5,7 @@
 //! directly, or `dlopen` the cdylib and mirror them, and both must agree on
 //! layout.
 
-use std::sync::Mutex;
-use tutti_rt::LockExt;
+use std::sync::{Mutex, PoisonError};
 
 /// One MIDI event as the host delivered it. `delta_frames` is the field the
 /// routing tests care about: VST 2.4 requires it be relative to the *current*
@@ -280,7 +279,7 @@ pub(crate) static CAPTURE: Mutex<ProcessCapture> = Mutex::new(ProcessCapture::em
 /// Run `f` against the global capture, recovering from a poisoned lock so a
 /// panic in one test cannot cascade into every later one.
 pub(crate) fn with_capture<R>(f: impl FnOnce(&mut ProcessCapture) -> R) -> R {
-    let mut guard = CAPTURE.lock_recover();
+    let mut guard = CAPTURE.lock().unwrap_or_else(PoisonError::into_inner);
     f(&mut guard)
 }
 

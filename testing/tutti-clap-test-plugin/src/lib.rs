@@ -33,9 +33,8 @@
 
 use std::ffi::{CStr, c_char, c_void};
 use std::ptr;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use tutti_rt::LockExt;
+use std::sync::{Mutex, PoisonError};
 
 use clap_sys::audio_buffer::clap_audio_buffer;
 use clap_sys::entry::clap_plugin_entry;
@@ -297,7 +296,7 @@ pub unsafe extern "C" fn tutti_test_plugin_capture(out: *mut ProcessCapture) -> 
     if out.is_null() {
         return false;
     }
-    let guard = CAPTURE.lock_recover();
+    let guard = CAPTURE.lock().unwrap_or_else(PoisonError::into_inner);
     unsafe { *out = *guard };
     guard.valid
 }
@@ -473,7 +472,7 @@ unsafe extern "C" fn plugin_reset(plugin: *const clap_plugin) {
     // tail no longer emerges — the observable that distinguishes a host which
     // calls `reset` from one which does not.
     clear_delay_lines();
-    *NOTE_GATE.lock_recover() = NoteGate::SILENT;
+    *NOTE_GATE.lock().unwrap_or_else(PoisonError::into_inner) = NoteGate::SILENT;
 }
 
 unsafe extern "C" fn plugin_process(
@@ -553,7 +552,7 @@ unsafe extern "C" fn plugin_process(
         }
     }
 
-    *CAPTURE.lock_recover() = cap;
+    *CAPTURE.lock().unwrap_or_else(PoisonError::into_inner) = cap;
     unsafe { record_sysex_input(p) };
 
     // AUDIO-CORRECTNESS: write the closed-form output the routing oracle
@@ -1595,7 +1594,7 @@ unsafe fn record_sysex_input(p: &clap_process) {
     let (Some(size_fn), Some(get_fn)) = (unsafe { (*list).size }, unsafe { (*list).get }) else {
         return;
     };
-    let mut capture = SYSEX_IN.lock_recover();
+    let mut capture = SYSEX_IN.lock().unwrap_or_else(PoisonError::into_inner);
     for i in 0..unsafe { size_fn(list) } {
         let hdr = unsafe { get_fn(list, i) };
         if hdr.is_null() || unsafe { (*hdr).type_ } != CLAP_EVENT_MIDI_SYSEX {
@@ -1628,7 +1627,7 @@ pub unsafe extern "C" fn tutti_test_plugin_take_sysex_input(
     time: *mut u32,
     len: *mut usize,
 ) -> u32 {
-    let mut capture = SYSEX_IN.lock_recover();
+    let mut capture = SYSEX_IN.lock().unwrap_or_else(PoisonError::into_inner);
     let n = capture.len.min(cap).min(SYSEX_CAPTURE_BYTES);
     unsafe { std::ptr::copy_nonoverlapping(capture.bytes.as_ptr(), out, n) };
     unsafe { *time = capture.time };
@@ -1643,7 +1642,7 @@ pub unsafe extern "C" fn tutti_test_plugin_take_sysex_input(
 /// processing state. Shared by the test-facing export below and by
 /// `plugin_reset`, which is the plugin honouring CLAP's `reset()` contract.
 fn clear_delay_lines() {
-    let mut d = DELAY.lock_recover();
+    let mut d = DELAY.lock().unwrap_or_else(PoisonError::into_inner);
     d.lines = [[0.0; MAX_DELAY_LEN]; MAX_DELAY_SLOTS];
     d.cursor = 0;
 }
@@ -1692,12 +1691,13 @@ unsafe fn render_output<T: ProbeSample>(p: &clap_process) {
     let frames = p.frames_count as usize;
 
     // Latency mode keeps cross-block state; take the lock once for the block.
-    let mut delay = (mode == RenderMode::Latency).then(|| DELAY.lock_recover());
+    let mut delay =
+        (mode == RenderMode::Latency).then(|| DELAY.lock().unwrap_or_else(PoisonError::into_inner));
     // Every slot advances the same shared cursor, so snapshot the block's
     // start and let each slot walk from there.
     let cursor_start = delay.as_ref().map(|d| d.cursor).unwrap_or(0);
     // The note gate as the previous block left it, for the same reason.
-    let gate_start = *NOTE_GATE.lock_recover();
+    let gate_start = *NOTE_GATE.lock().unwrap_or_else(PoisonError::into_inner);
 
     for port in 0..p.audio_outputs_count {
         let out: &clap_audio_buffer = unsafe { &*p.audio_outputs.add(port as usize) };
@@ -1841,7 +1841,7 @@ unsafe fn render_output<T: ProbeSample>(p: &clap_process) {
             gate.apply(change);
             next += 1;
         }
-        *NOTE_GATE.lock_recover() = gate;
+        *NOTE_GATE.lock().unwrap_or_else(PoisonError::into_inner) = gate;
     }
 
     // GAIN: scale what the mode just wrote, sample by sample, honouring each
