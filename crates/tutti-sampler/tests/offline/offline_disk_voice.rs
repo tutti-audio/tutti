@@ -853,7 +853,8 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
 /// A stretched fork sounds from the frame its beat falls on, as the live voice does, at every
 /// varispeed: nothing before frame 24 000 (beat 1), and a tone that starts 4 000 frames into
 /// the file starts `4 000 x 1.5 / speed` frames after it, where its half-level crossing falls
-/// within two blocks of the 64 frames the RMS is taken in. The fork reads its file for the
+/// within the edge's smear (`stretched_edge_spread`) and the 64 frames the RMS is taken in.
+/// The fork reads its file for the
 /// vocoder's history as well as along it, so the seat is on time without a latency.
 #[test]
 fn a_stretched_fork_sounds_from_the_frame_its_beat_falls_on() {
@@ -907,8 +908,14 @@ fn a_stretched_fork_sounds_from_the_frame_its_beat_falls_on() {
             * RES
             + RES / 2;
         let want = AT as f64 * 1.5 / speed;
+        let bound = tutti_fixtures::signal::stretched_edge_spread(
+            tutti_units::StretchFactor::new(1.5),
+            Samples::new(2_048),
+        )
+        .get()
+            + RES;
         assert!(
-            (first as f64 - want).abs() <= (2 * RES) as f64,
+            (first as f64 - want).abs() <= bound as f64,
             "speed {speed}: the tone starts {first} frames in, want {want}"
         );
     }

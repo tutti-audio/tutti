@@ -160,7 +160,7 @@ impl<F: Float> Kernel for DistanceKernel<F> {
     fn shape(&self) -> Shape {
         let bus = BusTopology::unassigned(self.width)
             .expect("a distance node is at most 16 channels wide");
-        Shape::through(bus).with_cost(Cost::Moderate)
+        Shape::through(bus).cost(Cost::Moderate)
     }
 
     /// Builds the delay lines at `rate`: the one allocation, here and not in `render`.

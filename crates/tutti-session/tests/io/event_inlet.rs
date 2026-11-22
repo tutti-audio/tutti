@@ -15,8 +15,9 @@ use tutti_fixtures::midi;
 use tutti_fixtures::midi::key_of;
 use tutti_graph::{Cx, EventTapOptions, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_graph::{EventCapacity, EventInletNode, EventTapReader, TapAlign, TapEvent};
-use tutti_session::{DetachedSession, Losses, MainOutput, OutputPort, Session, Stamp};
+use tutti_session::{DetachedSession, MainOutput, OutputPort, Session, Stamp};
 use tutti_ump::{MidiChannel, U7, Ump};
+use tutti_units::Losses;
 use tutti_units::{Frame, SampleRate};
 
 fn session() -> DetachedSession {
@@ -102,7 +103,7 @@ fn pushed_events_come_out_at_their_frames() {
 struct Hear;
 
 impl Hear {
-    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0);
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).events(1, 0);
     const IN: tutti_graph::InEvents = Self::SHAPE
         .event_input(0)
         .expect("one event input is declared");

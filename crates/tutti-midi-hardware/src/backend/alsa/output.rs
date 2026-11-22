@@ -6,8 +6,8 @@
 //! filling up between two of its packets cuts it; that is the one way a message
 //! goes in part, and the packets it lost are counted ([`DeviceOut::losses`]).
 
-use tutti_graph::Losses;
 use tutti_rt::{Counter, CounterWriter, Mutex, counter};
+use tutti_units::Losses;
 
 use crate::backend::by_message::{Refused, by_message};
 use crate::endpoints::DeviceOut;

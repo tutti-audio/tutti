@@ -92,7 +92,7 @@ impl TryFrom<PolarityConfig> for PolarityNode {
 
 impl<F: Float> Node<F> for PolarityNode {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(self.polarity.width()).with_cost(Cost::Light)
+        Shape::through_unassigned(self.polarity.width()).cost(Cost::Light)
     }
 
     fn prepare(&mut self, _: &Prepare) {}

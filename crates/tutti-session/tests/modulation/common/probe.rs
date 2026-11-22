@@ -75,8 +75,8 @@ impl Node for ProbeUnit {
     fn shape(&self) -> Shape {
         let shape = Shape::source_unassigned(ChannelLayout::MONO);
         match self.extra {
-            None => shape.with_params(&[self.param]),
-            Some(extra) => shape.with_params(&[self.param, extra]),
+            None => shape.params(&[self.param]),
+            Some(extra) => shape.params(&[self.param, extra]),
         }
     }
 

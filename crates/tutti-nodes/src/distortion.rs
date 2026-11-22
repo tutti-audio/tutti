@@ -227,7 +227,7 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
             Buses::main(self.input),
             Buses::NONE.with(output).expect("one bus"),
         )
-        .with_cost(cost)
+        .cost(cost)
     }
 
     fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock) {

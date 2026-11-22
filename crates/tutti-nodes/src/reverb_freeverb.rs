@@ -168,7 +168,7 @@ impl<F: Float + Lerp> Kernel for FreeverbKernel<F> {
             Buses::main(BusTopology::MONO),
             Buses::NONE.with(output).expect("one bus"),
         )
-        .with_cost(Cost::Moderate)
+        .cost(Cost::Moderate)
     }
 
     /// Sizes the lines at `rate` (Freeverb's tunings scaled to it): a re-prepare empties them.

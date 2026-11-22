@@ -45,14 +45,14 @@ use std::sync::Arc;
 use tutti_buffers::Float;
 
 use tutti_graph::{
-    Cx, Event, ForkCause, ForkSource, Forked, IntoNode, Io, Losses, Node, NodeParts, Offset,
-    OutEvents, Prepare, RenderMode, Shape, Status, UmpAt, declare_params,
+    Cx, Event, ForkCause, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Offset, OutEvents,
+    Prepare, RenderMode, Shape, Status, UmpAt, declare_params,
 };
 use tutti_midi_protocol::{MtcRate, Recipient};
 use tutti_music::MeterMap;
 use tutti_rt::{AtomicCell, Counter, CounterWriter, Publisher, Reader, RtVec, counter};
 use tutti_ump::{MidiGroup, Sysex7Packets};
-use tutti_units::{Beat, SampleRate};
+use tutti_units::{Beat, Losses, SampleRate};
 
 use super::clock_master::ClockMaster;
 use super::machine_control_out::MachineControlSender;
@@ -151,12 +151,12 @@ pub struct SyncOut {
 
 impl SyncOut {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_event_capacity(SYNC_OUT_PORT_CAPACITY)
+        .events(0, 1)
+        .event_capacity(SYNC_OUT_PORT_CAPACITY)
         // Event-only: a few pulses a block, nothing per frame (measured
         // about 0.3 µs a block at any length; a gain's 256 frames, 0.2).
-        .with_cost(tutti_graph::Cost::Light)
-        .with_no_note_events();
+        .cost(tutti_graph::Cost::Light)
+        .no_note_events();
     const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
 
     /// A node that sends on `group`, sending nothing until

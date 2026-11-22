@@ -32,8 +32,7 @@ type Seen = tutti_fixtures::Record<(u64, Harmony)>;
 struct Sink(Seen);
 
 impl Sink {
-    const SHAPE: Shape =
-        Shape::source_unassigned(tutti_buffers::ChannelLayout::MONO).with_events(1, 0);
+    const SHAPE: Shape = Shape::source_unassigned(tutti_buffers::ChannelLayout::MONO).events(1, 0);
     const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 

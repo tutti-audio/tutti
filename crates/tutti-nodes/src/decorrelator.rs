@@ -101,7 +101,7 @@ impl<F: Float> Kernel for DecorrelatorKernel<F> {
     fn shape(&self) -> Shape {
         let bus = BusTopology::unassigned(self.config.width)
             .expect("a decorrelator is at most 16 channels wide");
-        Shape::through(bus).with_cost(Cost::Heavy)
+        Shape::through(bus).cost(Cost::Heavy)
     }
 
     /// Draws the sequences at `rate`: a re-prepare empties the rings. `prepare` has no refusal

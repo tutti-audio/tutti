@@ -382,9 +382,10 @@ fn an_onset_lands_at_its_timeline_frame_through_a_pool() {
 
 /// The same through a standalone node at a stretch of 1.5: a tone that starts at source
 /// frame 4000 starts at output frame 4000 x 1.5 = 6000, where the edge is: its half-level
-/// crossing within two of the 128-frame blocks the RMS is taken in (the vocoder's output at
-/// a stretch centres its window on the stretched input, which the seat is aligned to; a seat
-/// a window times the stretch back lands 170 frames off).
+/// crossing within the edge's smear (`stretched_edge_spread`, 97 frames at 1.5 on this
+/// window) and the 128 frames the RMS is taken in: the vocoder centres its window on the
+/// stretched input, which the seat is aligned to, and a seat a window times the stretch
+/// back lands outside the bound.
 #[test]
 fn an_onset_lands_at_its_timeline_frame_through_a_node() {
     const AT: usize = 4000;
@@ -431,8 +432,14 @@ fn an_onset_lands_at_its_timeline_frame_through_a_node() {
         .expect("the tone sounds")
         * RES;
     let want = AT as f64 * 1.5;
+    let bound = tutti_fixtures::signal::stretched_edge_spread(
+        StretchFactor::new(1.5),
+        Samples::new(WINDOW),
+    )
+    .get()
+        + RES;
     assert!(
-        (first as f64 - want).abs() <= (2 * RES) as f64,
+        (first as f64 - want).abs() <= bound as f64,
         "the tone starts at {first}, want {want}"
     );
 }

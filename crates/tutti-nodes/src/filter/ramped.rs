@@ -19,7 +19,7 @@ pub(super) fn filter_shape(input: BusTopology) -> Shape {
         Buses::main(input),
         Buses::NONE.with(output).expect("one bus"),
     )
-    .with_cost(Cost::Moderate)
+    .cost(Cost::Moderate)
 }
 
 /// The cascade of a [`Sos`] per channel, the design in progress and the ramp of the

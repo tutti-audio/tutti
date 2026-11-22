@@ -47,7 +47,7 @@ pub(super) const MODERATE_LANES: usize = 16;
 
 impl<F: SynthFloat> PolySynth<F> {
     /// The ports every shape declares: stereo out and the MIDI event input.
-    const PORTS: Shape = Shape::source(BusTopology::STEREO).with_events(1, 0);
+    const PORTS: Shape = Shape::source(BusTopology::STEREO).events(1, 0);
     const EVENTS: InEvents = Self::PORTS
         .event_input(0)
         .expect("declared one event input");
@@ -75,11 +75,11 @@ impl<F: SynthFloat> Node<F> for PolySynth<F> {
         // The unison engine is built with the synth or never (`&mut`
         // setters only), so every read of the shape declares the same ports.
         Self::PORTS
-            .with_tail(self.release_tail())
-            .with_cost(self.cost())
-            .with_param_addrs(self.declared_ports().as_slice())
+            .tail(self.release_tail())
+            .cost(self.cost())
+            .param_addrs(self.declared_ports().as_slice())
             // The channel state it hands the synth that replaces it (`chase`).
-            .with_chase(VoiceAllocator::CHASE_MESSAGES as u32)
+            .chase(VoiceAllocator::CHASE_MESSAGES as u32)
     }
 
     fn prepare(&mut self, p: &Prepare) {

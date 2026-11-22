@@ -332,7 +332,11 @@ impl<F: SamplerFloat> Stretch<'_, F> {
 
 /// The input frames per window frame the seat starts back by, at the vocoder's
 /// `consumption` (source frames per output frame): the mean of the window's two halves,
-/// whose centre moves by the consumption and whose half-width does not.
+/// whose centre moves by the consumption and whose half-width does not. With it the centroid
+/// of a step edge's smear through the vocoder lands on `edge / consumption` frames after the
+/// voice's first, and its half-level frame within `|1 - consumption| sigma` of that (`sigma`,
+/// about `0.146 window`, is the spread of the window's energy; the tests' bound,
+/// `tutti_fixtures::signal::stretched_edge_spread`, derives it).
 fn seat_reach(consumption: ReadRate) -> ReadRate {
     ReadRate::new(0.5 * (1.0 + consumption.get()))
 }

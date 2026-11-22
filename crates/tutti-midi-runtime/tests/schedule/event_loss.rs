@@ -70,7 +70,7 @@ impl Keys {
 struct Sink(tutti_fixtures::Shared<Tally>);
 
 impl Sink {
-    const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+    const SHAPE: Shape = Shape::EMPTY.events(1, 0);
     const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 

@@ -176,9 +176,9 @@ impl<F: FftFloat> HrtfBinauralNode<F> {
 impl<F: FftFloat> Node<F> for HrtfBinauralNode<F> {
     fn shape(&self) -> Shape {
         Shape::through(BusTopology::STEREO)
-            .with_param_addrs(self.declared_ports().as_slice())
-            .with_latency(Latency::new(Samples::new(HRTF_LATENCY)))
-            .with_tail(match self.panner.as_ref().map(HrtfBinaural::ring_out) {
+            .param_addrs(self.declared_ports().as_slice())
+            .latency(Latency::new(Samples::new(HRTF_LATENCY)))
+            .tail(match self.panner.as_ref().map(HrtfBinaural::ring_out) {
                 // The response length follows the graph's rate, known at `prepare`.
                 None => Tail::Unbounded,
                 Some(0) => Tail::None,
@@ -189,7 +189,7 @@ impl<F: FftFloat> Node<F> for HrtfBinauralNode<F> {
             // block carries twice the mean, past the Heavy boundary for a
             // moving source with 512-tap HRIRs, and the schedule must price
             // the worst block, not the mean. Longer HRIRs cost more.
-            .with_cost(tutti_graph::Cost::Heavy)
+            .cost(tutti_graph::Cost::Heavy)
     }
 
     /// Resamples the sphere to the graph's rate (allocates; control thread).

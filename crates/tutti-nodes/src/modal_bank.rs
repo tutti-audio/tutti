@@ -106,7 +106,7 @@ impl<F: Float> Kernel for ModalBankKernel<F> {
     fn shape(&self) -> Shape {
         let bus =
             BusTopology::unassigned(self.width).expect("a modal bank is at most 16 channels wide");
-        Shape::through(bus).with_cost(Cost::Heavy)
+        Shape::through(bus).cost(Cost::Heavy)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {

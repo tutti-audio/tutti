@@ -156,7 +156,7 @@ impl<F: Float> Kernel for WaveguideStringKernel<F> {
     fn shape(&self) -> Shape {
         let bus =
             BusTopology::unassigned(self.width).expect("a string is at most 16 channels wide");
-        Shape::through(bus).with_cost(Cost::Moderate)
+        Shape::through(bus).cost(Cost::Moderate)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {

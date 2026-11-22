@@ -132,7 +132,7 @@ struct Burst {
 
 impl Burst {
     const SHAPE: tutti_graph::Shape =
-        tutti_graph::Shape::source_unassigned(ChannelLayout::MONO).with_events(0, 1);
+        tutti_graph::Shape::source_unassigned(ChannelLayout::MONO).events(0, 1);
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
