@@ -315,9 +315,9 @@ const PENDING_BYTES: usize = 12;
 ///
 /// A plugin with no controller state at all packs to `component` alone, with no header, unless
 /// the component's own bytes begin with the magic: then the container is written with an
-/// empty controller half, so the blob is never read as a container it is not. That keeps the
-/// common case byte-identical to what this host saved before the controller stream existed,
-/// so nothing re-saves a project merely for having been opened.
+/// empty controller half, so the blob is never read as a container it is not. The common
+/// case stays the component's own bytes, so nothing re-saves a project merely for having been
+/// opened.
 ///
 /// # Errors
 ///

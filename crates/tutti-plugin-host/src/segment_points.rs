@@ -52,6 +52,7 @@
 //! A re-prepare or a reset drops every segment in flight.
 
 use tutti_graph::ParamSegment;
+use tutti_rt::CappedVec;
 use tutti_units::Samples;
 
 use super::param_delivery::ParamDelivery;
@@ -79,7 +80,7 @@ struct Track {
 #[derive(Debug, Default)]
 pub struct SegmentPoints {
     /// The slots, sized by [`prepare`](Self::prepare); live ones first.
-    tracks: Vec<Track>,
+    tracks: CappedVec<Track>,
     /// The current chunk's length: where its last frame is.
     chunk: usize,
 }
@@ -88,8 +89,11 @@ impl SegmentPoints {
     /// Size the slots for `slots` segments and drop any in flight. Control
     /// thread: allocates (once; a later call with the same size reuses).
     pub fn prepare(&mut self, slots: usize) {
-        self.tracks.clear();
-        self.tracks.reserve_exact(slots);
+        if self.tracks.capacity() == slots {
+            self.tracks.clear();
+        } else {
+            self.tracks = CappedVec::with_capacity(slots);
+        }
     }
 
     /// Drop every segment in flight (a reset). Allocation-free.
@@ -105,7 +109,7 @@ impl SegmentPoints {
     /// A ramp or segment for `address` lands: the segment it was on, if
     /// any, stops here.
     pub(super) fn interrupt(&mut self, address: ParamId) {
-        self.tracks.retain(|t| t.address != address);
+        self.tracks.retain_mut(|t| t.address != address);
     }
 
     /// The value the segment in flight on `address` gives absolute frame
@@ -149,9 +153,8 @@ impl SegmentPoints {
             );
             return;
         }
-        // `len < capacity`: a push that cannot allocate. Past it, the
-        // fallback (module docs).
-        if self.tracks.len() >= self.tracks.capacity() {
+        // Past the cap the fallback (module docs), not a refused push.
+        if self.tracks.is_full() {
             let end = segment.raw_value_after(Samples::new(u32::MAX as usize));
             point(changes, address, at, end);
             return;

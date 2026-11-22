@@ -49,11 +49,11 @@ impl IntoNode for Forkable {
         (Box::new(TestNode::new(self.0)), ())
     }
     fn into_parts(self) -> NodeParts<()> {
-        NodeParts {
-            node: Box::new(TestNode::new(self.0.clone())),
-            controls: (),
-            fork: Some(Box::new(KindFork(self.0))),
-        }
+        NodeParts::new(
+            Box::new(TestNode::new(self.0.clone())),
+            (),
+            Some(Box::new(KindFork(self.0))),
+        )
     }
 }
 

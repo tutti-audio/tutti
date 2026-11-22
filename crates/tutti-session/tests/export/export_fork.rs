@@ -625,11 +625,7 @@ impl SessionNode for Counter {
 impl IntoNode for Counter {
     type Controls = ();
     fn into_parts(self) -> NodeParts<()> {
-        NodeParts {
-            node: Box::new(self),
-            controls: (),
-            fork: Some(Box::new(CounterFork)),
-        }
+        NodeParts::new(Box::new(self), (), Some(Box::new(CounterFork)))
     }
 }
 
@@ -881,11 +877,7 @@ impl IntoNode for Slow {
             wait: Mutex::new(self.wait.lock().take()),
             built: Arc::clone(&self.built),
         };
-        NodeParts {
-            node: Box::new(self),
-            controls: (),
-            fork: Some(Box::new(fork)),
-        }
+        NodeParts::new(Box::new(self), (), Some(Box::new(fork)))
     }
 }
 
@@ -1068,13 +1060,13 @@ impl SessionNode for PinnedNode {
 impl IntoNode for PinnedNode {
     type Controls = ();
     fn into_parts(self) -> NodeParts<()> {
-        NodeParts {
-            node: Box::new(Pinned {
+        NodeParts::new(
+            Box::new(Pinned {
                 threads: Arc::default(),
             }),
-            controls: (),
-            fork: Some(Box::new(PinnedFork(self.0))),
-        }
+            (),
+            Some(Box::new(PinnedFork(self.0))),
+        )
     }
 }
 
@@ -1214,11 +1206,7 @@ impl SessionNode for Broken {
 impl IntoNode for Broken {
     type Controls = ();
     fn into_parts(self) -> NodeParts<()> {
-        NodeParts {
-            node: Box::new(self),
-            controls: (),
-            fork: Some(Box::new(BrokenFork)),
-        }
+        NodeParts::new(Box::new(self), (), Some(Box::new(BrokenFork)))
     }
 }
 

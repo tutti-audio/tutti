@@ -446,6 +446,43 @@ fn a_failed_start_leaves_the_watch_to_be_seeded_by_the_next_start() {
     assert_eq!(registry.len(), 0);
 }
 
+/// **A notification that changes the devices has the watches look, and any other
+/// does not**: a device that comes is reported by the first and not by the second.
+#[test]
+fn a_notification_has_the_watches_look_only_when_it_changes_the_devices() {
+    let registry = Arc::new(Registry::new());
+    *PRESENT.lock() = vec![crate::test_support::endpoint(1, "Keys")];
+    let devices = crate::Devices::open_over(
+        &tutti_platform::Executor::new(),
+        Box::new(OverRegistry {
+            registry: Arc::clone(&registry),
+            client: Arc::new(AtomicBool::new(true)),
+        }),
+    )
+    .unwrap();
+    let events = devices.subscribe();
+    registry.look_all();
+    let _ = events.pending().count();
+
+    PRESENT
+        .lock()
+        .push(crate::test_support::endpoint(2, "Pads"));
+    registry.notified(false);
+    assert_eq!(
+        events.pending().count(),
+        0,
+        "a notification that leaves the devices alone looks at nothing"
+    );
+    registry.notified(true);
+    assert!(
+        events.pending().any(|event| matches!(
+            event,
+            tutti_midi_device::DeviceEvent::Added(info) if info.name.contains("Pads")
+        )),
+        "a notification that changes the devices has the watches look"
+    );
+}
+
 /// **A future made once the client exists is not left waiting for the thread's own
 /// publication**: `begin` moves a round to `Ready` itself, and the waiters hear it
 /// then, because the thread's `publish_ready` finds the state already `Ready` and
