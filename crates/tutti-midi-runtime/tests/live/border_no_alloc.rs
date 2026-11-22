@@ -335,22 +335,20 @@ fn the_mpe_expression_paths_process_without_allocating() {
 /// An upper-zone MPE Configuration Message for block `block` when `upper`, a
 /// lower-zone one otherwise.
 fn mcm(device: &mut EventInletWriter, block: u64, upper: bool) {
-    use tutti_midi_protocol::{MpeZoneConfig, PitchBendSensitivity};
+    use tutti_midi_protocol::{MemberCount, MpeZoneConfig, PitchBendSensitivity};
     let message = if upper {
         MpeZoneConfig::upper(
-            3,
+            MemberCount::of(3),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
         )
-        .unwrap()
         .to_mcm()
     } else {
         MpeZoneConfig::lower(
-            3,
+            MemberCount::of(3),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
         )
-        .unwrap()
         .to_mcm()
     };
     device.push(frame_of(block, 0), message).unwrap();

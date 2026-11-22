@@ -32,7 +32,7 @@ tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 # The probe's exit wake (`oneshot`) and the race of that wake against the deadline.
 futures-channel.workspace = true
 futures-lite.workspace = true
-# `LockExt`, `Tally`: the catalog's lock and the scan's loss count.
+# `Mutex`, `RwLock`, `Tally`: the catalog's and scanner's locks and the scan's loss count.
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 serde = { version = "1", features = ["derive"], optional = true }
 thiserror = { workspace = true, features = ["std"] }

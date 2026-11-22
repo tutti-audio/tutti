@@ -303,7 +303,7 @@ fn run_ticking(fixture: &mut Fixture, script: &mut Script, tick: Duration) {
 /// that waits for the host serves it once and the script's guard fails.
 #[test]
 fn a_quiet_host_does_not_stop_the_plugins_timers() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let probe = crate::test_utils::clap();
     probe.thread_reset();
     let _cmd =
@@ -342,7 +342,7 @@ fn timer_period(millis: u32) -> crate::test_utils::Restore {
 /// loop that served it only at the tick would not within the script's guard.
 #[test]
 fn a_timer_is_served_at_its_deadline_not_the_tick() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let probe = crate::test_utils::clap();
     probe.thread_reset();
     let _period = timer_period(50);
@@ -375,7 +375,7 @@ fn a_timer_is_served_at_its_deadline_not_the_tick() {
 /// script's guard.
 #[test]
 fn a_message_after_silence_is_answered() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let (mut session, _slab) = session();
     let waits = std::sync::Arc::<std::sync::atomic::AtomicU64>::default();
     let mut script = Script::new([
@@ -411,7 +411,7 @@ fn a_message_after_silence_is_answered() {
 /// host gets).
 #[test]
 fn a_lost_plugin_ends_the_server_abnormally() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let (mut fixture, _slab) = session();
     let main = main_thread();
     assert!(matches!(
@@ -546,13 +546,14 @@ fn slow_paint(millis: u32) -> crate::test_utils::Restore {
 /// been sent and answered inside a single such stretch.
 #[test]
 fn a_slow_paint_on_the_main_loop_delays_no_block() {
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-    use std::sync::{Arc, Mutex};
+    use tutti_rt::Mutex;
 
     const PAINT_MS: u32 = 250;
     const BLOCKS_IN_ONE_PAINT: usize = 5;
 
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let probe = crate::test_utils::clap();
     probe.thread_reset();
     let _cmd =
@@ -592,7 +593,7 @@ fn a_slow_paint_on_the_main_loop_delays_no_block() {
                 // The first block asks the plugin for its callback, which
                 // registers the timer the paint runs in.
                 assert!(host.block(1, 64, HANG_GUARD).is_some());
-                *sender.lock().unwrap() = Some(std::thread::spawn(move || {
+                *sender.lock() = Some(std::thread::spawn(move || {
                     for seq in 2.. {
                         if stop.load(Ordering::SeqCst) {
                             break;
@@ -600,7 +601,7 @@ fn a_slow_paint_on_the_main_loop_delays_no_block() {
                         let sent_at = waits.load(Ordering::SeqCst);
                         assert!(host.block(seq, 64, HANG_GUARD).is_some());
                         if waits.load(Ordering::SeqCst) == sent_at {
-                            within.lock().unwrap().push(sent_at);
+                            within.lock().push(sent_at);
                         }
                         // Each block is a round trip to the render thread, whose
                         // ring has no unparker, so the thread polls it.
@@ -617,8 +618,8 @@ fn a_slow_paint_on_the_main_loop_delays_no_block() {
                 if done.load(Ordering::SeqCst) {
                     return true;
                 }
-                let painted = painted.lock().unwrap();
-                let within = within.lock().unwrap();
+                let painted = painted.lock();
+                let within = within.lock();
                 if painted
                     .iter()
                     .any(|p| within.iter().filter(|w| *w == p).count() >= BLOCKS_IN_ONE_PAINT)
@@ -637,17 +638,11 @@ fn a_slow_paint_on_the_main_loop_delays_no_block() {
             let served = probe_visits(probe);
             if served > seen {
                 seen = served;
-                painted.lock().unwrap().push(waits.load(Ordering::SeqCst));
+                painted.lock().push(waits.load(Ordering::SeqCst));
             }
         }
     }));
 
     run(&mut session, &mut script);
-    sender
-        .lock()
-        .unwrap()
-        .take()
-        .expect("the host ran")
-        .join()
-        .unwrap();
+    sender.lock().take().expect("the host ran").join().unwrap();
 }

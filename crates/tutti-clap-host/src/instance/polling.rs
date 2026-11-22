@@ -307,7 +307,8 @@ impl ClapLoaded {
             .posix_fds
             .entries
             .lock()
-            .is_ok_and(|fds| fds.iter().any(|e| e.fd == fd));
+            .iter()
+            .any(|e| e.fd == fd);
         if registered {
             self.plugin.fire_fd(main, fd, ready);
         }
@@ -320,10 +321,7 @@ impl ClapLoaded {
     pub(crate) fn fire_timer(&mut self, main: MainThreadMarker, id: u32) -> bool {
         let on_timer = self.plugin.has_on_timer();
         let state = &self.host_state.timer;
-        let registered = state
-            .timers
-            .lock()
-            .is_ok_and(|timers| timers.iter().any(|t| t.id == id));
+        let registered = state.timers.lock().iter().any(|t| t.id == id);
         if registered && on_timer {
             self.plugin.fire_timer(main, id);
         }
@@ -336,9 +334,8 @@ impl ClapLoaded {
     /// (`timer-support`), each only while the plugin has the callback that
     /// would serve it. Added to `out`.
     pub(crate) fn describe_wakeups(&mut self, out: &mut Wakeups) {
-        if self.plugin.has_on_fd()
-            && let Ok(fds) = self.host_state.posix_fds.entries.lock()
-        {
+        if self.plugin.has_on_fd() {
+            let fds = self.host_state.posix_fds.entries.lock();
             for entry in fds.iter() {
                 // Registration refused a negative number, so every entry names a descriptor.
                 if let Some(id) = FdId::new(entry.fd) {
@@ -359,7 +356,8 @@ impl ClapLoaded {
     /// them when [`take_requests_now`](Self::take_requests_now) hands them to
     /// the lifecycle, which serves them within its budget.
     pub(crate) fn latch_wakeups(&mut self, ready: &[Ready], now: tutti_platform::Instant) {
-        if let Ok(registered) = self.host_state.posix_fds.entries.lock() {
+        {
+            let registered = self.host_state.posix_fds.entries.lock();
             for r in ready {
                 let Some(entry) = registered.iter().find(|e| e.fd == r.fd.get()) else {
                     continue;
@@ -433,10 +431,7 @@ fn collect_due_timers(
     state: &crate::host::state::TimerState,
     now: tutti_platform::Instant,
 ) -> Vec<u32> {
-    let due = match state.timers.lock() {
-        Ok(mut timers) => take_due_timers(&mut timers, now),
-        Err(_) => Vec::new(),
-    };
+    let due = take_due_timers(&mut state.timers.lock(), now);
     cache_next_deadline(state);
     due
 }
@@ -444,10 +439,8 @@ fn collect_due_timers(
 /// Stores the earliest deadline among the registered timers, exactly.
 /// Stored under the lock, so a registration's `note_due` is not overwritten.
 fn cache_next_deadline(state: &crate::host::state::TimerState) {
-    if let Ok(timers) = state.timers.lock() {
-        let next = timers.iter().map(TimerEntry::wake_at).min();
-        state.set_next_due(next);
-    }
+    let next = state.timers.lock().iter().map(TimerEntry::wake_at).min();
+    state.set_next_due(next);
 }
 
 /// Fires each due timer through `fire`, skipping one an earlier callback in
@@ -458,17 +451,11 @@ fn fire_due_timers(
     now: tutti_platform::Instant,
     mut fire: impl FnMut(u32),
 ) -> usize {
-    let due = match state.timers.lock() {
-        Ok(mut timers) => take_due_timers(&mut timers, now),
-        Err(_) => Vec::new(),
-    };
+    let due = take_due_timers(&mut state.timers.lock(), now);
     let mut fired = 0usize;
     for id in due {
         // An earlier `on_timer` may have unregistered this one.
-        let registered = state
-            .timers
-            .lock()
-            .is_ok_and(|timers| timers.iter().any(|t| t.id == id));
+        let registered = state.timers.lock().iter().any(|t| t.id == id);
         if registered {
             fire(id);
             fired += 1;
@@ -720,7 +707,7 @@ mod main_thread_work_tests {
     fn state_with(timers: &[(u32, u32)]) -> TimerState {
         let state = TimerState::new();
         let at = state.epoch();
-        let mut list = state.timers.lock().unwrap();
+        let mut list = state.timers.lock();
         for &(id, period_ms) in timers {
             list.push(TimerEntry {
                 id,
@@ -742,7 +729,7 @@ mod main_thread_work_tests {
         let n = fire_due_timers(&state, start, |id| {
             fired.push(id);
             // Timer 1's callback unregisters timer 2.
-            state.timers.lock().unwrap().retain(|t| t.id != 2);
+            state.timers.lock().retain(|t| t.id != 2);
         });
         assert_eq!(fired, [1]);
         assert_eq!(n, 1);
@@ -785,7 +772,7 @@ mod main_thread_work_tests {
         let t0 = state.epoch();
         fire_due_timers(&state, t0, |_| {});
         assert_eq!(state.next_due_nanos(), 10_000_000);
-        state.timers.lock().unwrap().clear();
+        state.timers.lock().clear();
         fire_due_timers(&state, t0, |_| {});
         assert_eq!(state.next_due_nanos(), TimerState::NONE);
     }

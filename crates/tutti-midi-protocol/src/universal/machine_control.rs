@@ -67,10 +67,12 @@ pub use segmentation::{
     MmcResponseReassembler, MmcSegmentError, MmcSegments, MmcSegmentsRefused, MmcString,
 };
 pub use values::{
-    MMC_MAX_TRACK_BITMAP_BYTES, MMC_SEGMENT_BYTES, MmcCodeStatus, MmcDirection, MmcExtension,
-    MmcFragment, MmcName, MmcPosition, MmcSegmentBytes, MmcSelection, MmcShortTimeCode, MmcSign,
-    MmcSlot, MmcSpeed, MmcStep, MmcSubframes, MmcTimeCode, MmcTimeLabel, MmcTimeTail, MmcTrack,
-    MmcTrackBitmap, MmcUserBitFlags, MmcUserBits, NotMmcPosition, NotMmcSlot, NotMmcSubframes,
+    MMC_MAX_TRACK_BITMAP_BYTES, MMC_SEGMENT_BYTES, MmcAudioTrack, MmcCodeStatus, MmcDirection,
+    MmcExtension, MmcFragment, MmcMantissa, MmcName, MmcPosition, MmcSegmentBytes, MmcSelection,
+    MmcShift, MmcShortTimeCode, MmcSign, MmcSlot, MmcSpeed, MmcStep, MmcStepCount, MmcSubframes,
+    MmcTimeCode, MmcTimeLabel, MmcTimeTail, MmcTrack, MmcTrackBitmap, MmcUserBitFlags, MmcUserBits,
+    NotMmcAudioTrack, NotMmcMantissa, NotMmcPosition, NotMmcShift, NotMmcSlot, NotMmcStepCount,
+    NotMmcSubframes,
 };
 
 pub(crate) use read::{commands, fields, truncated_segment};

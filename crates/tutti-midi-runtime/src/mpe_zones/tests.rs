@@ -49,7 +49,7 @@ fn an_enabled_profile_is_a_profile_zone_with_the_default_bend_range() {
     let zones = mpe_zones(&dialect(&[(2, 6)])).unwrap();
     let zone = zones.zone_of(MidiChannel::of(2)).unwrap();
     assert_eq!(zone.master_channel(), MidiChannel::of(2));
-    assert_eq!(zone.channel_count(), 6);
+    assert_eq!(zone.channel_count().get(), 6);
     assert_eq!(
         zone.pitch_bend_range_for(MidiChannel::of(5)),
         PitchBendSensitivity::MPE_PROFILE_DEFAULT

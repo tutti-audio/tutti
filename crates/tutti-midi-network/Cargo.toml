@@ -24,6 +24,8 @@ tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = f
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 # `Instant`, the one clock type, and the `Executor` the socket task runs on.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
+# `Mutex`, the lock that refuses a wait inside a render.
+tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 
 [dev-dependencies]
 proptest = "1.9.0"

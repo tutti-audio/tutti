@@ -19,10 +19,10 @@
 //! - a speaker arrangement is proposed to a suspended plugin and read back;
 //! - a block longer than the announced maximum is split before the plugin.
 
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 use tutti_fixtures::main_thread;
 use tutti_graph::UmpAt;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use keyboard_types::{Code, Key, KeyState, Modifiers, NamedKey};
 use tutti_buffers::{Bed, ChannelTopology, Speaker};
@@ -62,7 +62,7 @@ const SET_PROCESS_PRECISION: i32 = 77;
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock_recover()
+    PROBE_LOCK.lock()
 }
 
 /// Every `TUTTI_VST2_PROBE_*` key this file sets.

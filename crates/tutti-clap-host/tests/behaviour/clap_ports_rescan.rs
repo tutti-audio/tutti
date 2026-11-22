@@ -11,8 +11,8 @@
 //! they are reached through `dlopen` handles, as the other suites here do.
 
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
-use tutti_rt::LockExt;
+use std::sync::MutexGuard;
+use tutti_rt::Mutex;
 
 use crate::support::active::{Activate, Active, ActiveExt};
 use crate::support::main_thread;
@@ -52,7 +52,7 @@ const LAYOUT_ASYMMETRIC_AUX: u32 = 1;
 
 impl Probe {
     fn acquire() -> Self {
-        let lock = PROBE_LOCK.lock_recover();
+        let lock = PROBE_LOCK.lock();
         unsafe {
             let lib = libloading::Library::new(tutti_fixtures::clap_probe())
                 .expect("re-open reference plugin");

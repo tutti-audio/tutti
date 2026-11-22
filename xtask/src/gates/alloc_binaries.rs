@@ -77,24 +77,12 @@ pub(super) const DEBT: &[(&str, &str)] = &[
         "mode::a_mode_stored_mid_block_lands_on_the_next_block: GraphSpec::set_mode called from a node's process, src/spec.rs:559 via tests/mixing/mode.rs:1335",
     ),
     (
-        "crates/tutti-nodes/tests/control/main.rs",
-        "control_lane::a_constant_layer_is_one_held_value: Vec growth in SegSink::process, tests/control/control_lane.rs:94",
-    ),
-    (
-        "crates/tutti-nodes/tests/node_contract/main.rs",
-        "matrix_tail::a_burst_after_a_parked_gap_is_a_fresh_nodes_at_any_block_size: Recording::process, tests/node_contract/matrix_tail.rs:70",
-    ),
-    (
         "crates/tutti-session/tests/io/main.rs",
         "clock_switch::the_old_driver_renders_its_last_block_before_the_new_one_its_first: Renderer::process, tests/io/clock_switch.rs:628",
     ),
     (
         "crates/tutti-soundfont/tests/graph/main.rs",
         "contract::soundfont::direct: tutti_graph::contract::Recorder::process, tutti-graph src/contract.rs:1534",
-    ),
-    (
-        "crates/tutti-soundfont/tests/player/main.rs",
-        "universal::general_midi_off_also_returns_to_the_initial_status: Player::universal, tutti-soundfont src/player.rs:389",
     ),
 ];
 

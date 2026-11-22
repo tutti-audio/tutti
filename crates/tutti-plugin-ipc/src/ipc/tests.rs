@@ -3,9 +3,10 @@
 //! node, and the real-server suites, are `tutti-plugin`'s.
 
 use std::num::NonZeroUsize;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::Instant;
+use tutti_rt::Mutex;
 
 use tutti_buffers::FloatWidth;
 use tutti_fixtures::{machine_lock, main_thread};
@@ -76,17 +77,17 @@ impl<T> Default for Log<T> {
 
 impl<T> Log<T> {
     fn push(&self, item: T) {
-        self.items.lock().unwrap().push(item);
+        self.items.lock().push(item);
         self.appended.notify();
     }
 
-    fn lock(&self) -> std::sync::LockResult<std::sync::MutexGuard<'_, Vec<T>>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<T>> {
         self.items.lock()
     }
 
     /// Whether the record satisfies `found` now.
     fn holds(&self, found: impl Fn(&[T]) -> bool) -> bool {
-        found(&self.items.lock().unwrap())
+        found(&self.items.lock())
     }
 
     /// Waits until the record satisfies `found`. `false` when [`POLL_GUARD`],
@@ -301,7 +302,7 @@ fn mock_with(
                     )
                     .and_then(|object| object.read(*len, tutti_plugin_types::MAX_STATE_BYTES));
                     match state {
-                        Ok(bytes) => stored.lock().unwrap().push(bytes),
+                        Ok(bytes) => stored.lock().push(bytes),
                         Err(_) => break,
                     }
                 }
@@ -332,7 +333,7 @@ fn mock_with(
                     },
                 ),
                 ControlRequest::SetupSharedMemory { .. } => {
-                    if let Some(layout) = announcing.lock().unwrap().take() {
+                    if let Some(layout) = announcing.lock().take() {
                         reply(
                             &served,
                             &ControlFrame::News(News::PluginIoChanged {
@@ -362,7 +363,7 @@ fn mock_with(
                 ControlRequest::LoadState { .. } => {
                     reply_control(&served, id, &ControlReply::StateLoaded { error: None })
                 }
-                ControlRequest::SaveState { .. } => match saving.lock().unwrap().clone() {
+                ControlRequest::SaveState { .. } => match saving.lock().clone() {
                     Some(bytes) => {
                         let object = tutti_plugin_ipc_ffi::Blob::create(&bytes).unwrap();
                         reply_control(
@@ -403,7 +404,7 @@ fn mock_with(
                     &served,
                     id,
                     &ControlReply::ParameterList {
-                        parameters: answers.lock().unwrap().clone(),
+                        parameters: answers.lock().clone(),
                     },
                 ),
                 _ => {}
@@ -665,7 +666,6 @@ fn slab_setups(server: &Mock) -> Vec<SlabLayout> {
     server
         .received
         .lock()
-        .unwrap()
         .iter()
         .filter_map(|m| match m {
             Sent::Control(ControlRequest::SetupSharedMemory { layout, .. }) => Some(layout.clone()),
@@ -727,7 +727,7 @@ fn a_change_inside_an_activation_waits_for_the_next_restart() {
         ],
         outputs: second.outputs.clone(),
     };
-    *server.announce_during_setup.lock().unwrap() = Some(third.clone());
+    *server.announce_during_setup.lock() = Some(third.clone());
     let (processor, mut controller) = activate(ipc, 32);
     // The later layout is heard (a command's reply reads it), after the
     // activation read the second.
@@ -868,7 +868,7 @@ fn recording_editor(
     plugin: &tutti_plugin_types::PluginRef,
     format: tutti_plugin_types::PluginFormat,
 ) -> tutti_plugin_types::IpcResult<Box<dyn tutti_plugin_types::Editor>> {
-    *EDITOR_LOAD.lock().unwrap() = Some((plugin.clone(), format));
+    *EDITOR_LOAD.lock() = Some((plugin.clone(), format));
     Err(tutti_plugin_types::IpcError::LoadFailed {
         path: Some(plugin.path().to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
@@ -898,7 +898,7 @@ fn the_editor_instance_is_loaded_with_the_choice_the_bridge_was_made_for() {
     let refused = ipc.bridge().editor().open_floating_editor(main_thread());
     assert!(refused.is_err(), "the recording loader loads no editor");
     assert_eq!(
-        *EDITOR_LOAD.lock().unwrap(),
+        *EDITOR_LOAD.lock(),
         Some((chosen, tutti_plugin_types::PluginFormat::Clap))
     );
 }
@@ -1021,7 +1021,6 @@ fn what_the_servers_editor_says_unprompted_is_heard() {
         !server
             .received
             .lock()
-            .unwrap()
             .iter()
             .any(|m| matches!(m, Sent::Control(ControlRequest::CloseEditor))),
         "no close for an editor that is not open"
@@ -1051,7 +1050,6 @@ fn a_client_with_a_loader_sends_no_editor_message() {
         !server
             .received
             .lock()
-            .unwrap()
             .iter()
             .any(|m| matches!(m, Sent::Control(ControlRequest::OpenEditor { .. }))),
         "the editor is the host's"
@@ -1095,7 +1093,7 @@ fn process_seqs(server: &Mock, count: usize) -> Vec<u64> {
         server.wait_for(|log| seqs(log).len() >= count),
         "{count} chunks reach the server"
     );
-    seqs(&server.received.lock().unwrap())
+    seqs(&server.received.lock())
 }
 
 /// **A reactivation never reuses a chunk sequence.** The slab outlives an
@@ -1161,7 +1159,7 @@ fn render_chunks(processor: &mut IpcProcessor, server: &Mock, chunks: usize) {
             .filter(|m| matches!(m, Sent::Audio(AudioRequest::ProcessAudio(_))))
             .count()
     };
-    let mut taken = sent(&server.received.lock().unwrap());
+    let mut taken = sent(&server.received.lock());
     for _ in 0..chunks {
         render_silence(processor, 32);
         taken += 1;
@@ -1232,7 +1230,6 @@ fn list_asks(server: &Mock) -> usize {
     server
         .received
         .lock()
-        .unwrap()
         .iter()
         .filter(|m| matches!(m, Sent::Control(ControlRequest::GetParameterList)))
         .count()
@@ -1258,7 +1255,7 @@ fn a_served_write_is_checked_against_one_ask() {
     use tutti_units::Normalized;
     let _machine = machine_lock();
     let (mut ipc, server) = mock();
-    *server.parameters.lock().unwrap() = vec![param(3, false), param(4, true)];
+    *server.parameters.lock() = vec![param(3, false), param(4, true)];
     let main = main_thread();
     let half = Normalized::of(0.5);
     let id = ParamId::new;
@@ -1289,7 +1286,7 @@ fn a_resync_with_a_changed_list_flips_the_answer() {
     use tutti_units::Normalized;
     let _machine = machine_lock();
     let (mut ipc, server) = mock();
-    *server.parameters.lock().unwrap() = vec![param(3, false)];
+    *server.parameters.lock() = vec![param(3, false)];
     let main = main_thread();
     let half = Normalized::of(0.5);
     assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));
@@ -1300,7 +1297,7 @@ fn a_resync_with_a_changed_list_flips_the_answer() {
             heard.push(());
         }
     })));
-    *server.parameters.lock().unwrap() = vec![param(3, true)];
+    *server.parameters.lock() = vec![param(3, true)];
     server.say(News::PluginParamTitlesChanged);
     assert!(
         arrived.wait_for(|log| !log.is_empty()),
@@ -1338,7 +1335,7 @@ fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
             .count()
     };
     let (mut ipc, server) = mock();
-    *server.parameters.lock().unwrap() = vec![param(3, false)];
+    *server.parameters.lock() = vec![param(3, false)];
     let main = main_thread();
     let half = Normalized::of(0.5);
     assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));
@@ -1357,8 +1354,8 @@ fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
     let held_tx = Mutex::new(held_tx);
     ipc.forward_events(Some(Arc::new(move |event| {
         if matches!(event, IpcEvent::LatencyChanged { .. }) && first.swap(false, Ordering::SeqCst) {
-            held_tx.lock().unwrap().send(()).unwrap();
-            let _ = release_rx.lock().unwrap().recv();
+            held_tx.lock().send(()).unwrap();
+            let _ = release_rx.lock().recv();
         }
     })));
     server.say(News::LatencyChanged {
@@ -1369,7 +1366,7 @@ fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
         .expect("the bridge reached its listener");
 
     // The list changes and the plugin says so, behind the held bridge.
-    *server.parameters.lock().unwrap() = vec![param(3, true)];
+    *server.parameters.lock() = vec![param(3, true)];
     server.say(News::PluginParamTitlesChanged);
 
     std::thread::scope(|scope| {
@@ -1392,7 +1389,7 @@ fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
     // the refused one had put on it would be on the record.
     let _ = ipc.parameter(main, ParamId::new(3));
     assert_eq!(
-        sets(&server.received.lock().unwrap()),
+        sets(&server.received.lock()),
         1,
         "the refused write reached the server"
     );
@@ -1407,7 +1404,7 @@ fn a_values_resync_keeps_the_declared_list() {
     use tutti_units::Normalized;
     let _machine = machine_lock();
     let (mut ipc, server) = mock();
-    *server.parameters.lock().unwrap() = vec![param(3, false)];
+    *server.parameters.lock() = vec![param(3, false)];
     let main = main_thread();
     let half = Normalized::of(0.5);
     assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));
@@ -1502,7 +1499,6 @@ fn changes_sent_with_block(
     server
         .received
         .lock()
-        .unwrap()
         .iter()
         .find_map(|m| match m {
             Sent::Audio(AudioRequest::ProcessAudio(d)) if d.seq == seq => {
@@ -1533,7 +1529,7 @@ fn many_served_writes_before_a_block_leave_each_parameter_at_its_latest() {
     use tutti_units::Normalized;
     let _machine = machine_lock();
     let (ipc, server) = mock();
-    *server.parameters.lock().unwrap() = vec![param(1, false), param(2, false), param(3, false)];
+    *server.parameters.lock() = vec![param(1, false), param(2, false), param(3, false)];
     let ids = [ParamId::new(1), ParamId::new(2), ParamId::new(3)];
     let writes = 3 * crate::client::audio::COMMAND_QUEUE_SIZE;
     for n in 0..writes {
@@ -1568,7 +1564,7 @@ fn a_served_write_to_an_unknown_parameter_is_unknown_at_the_call_without_asking_
     use tutti_units::Normalized;
     let _machine = machine_lock();
     let (ipc, server) = mock();
-    *server.parameters.lock().unwrap() = vec![param(3, false)];
+    *server.parameters.lock() = vec![param(3, false)];
     let half = Normalized::of(0.5);
     assert_eq!(
         AnyThread::set_parameter_value(&ipc, ParamId::new(3), half),
@@ -1597,7 +1593,7 @@ fn a_served_write_queued_before_a_state_load_does_not_land_after_it() {
     use tutti_units::Normalized;
     let _machine = machine_lock();
     let (ipc, server) = mock();
-    *server.parameters.lock().unwrap() = vec![param(1, false), param(2, false)];
+    *server.parameters.lock() = vec![param(1, false), param(2, false)];
     assert_eq!(
         AnyThread::set_parameter_value(&ipc, ParamId::new(1), Normalized::of(0.25)),
         Ok(())
@@ -1627,7 +1623,7 @@ fn a_write_in_a_block_pushed_before_a_load_reaches_the_server_before_the_load() 
     use tutti_units::Normalized;
     let _machine = machine_lock();
     let (ipc, server) = mock();
-    *server.parameters.lock().unwrap() = vec![param(1, false)];
+    *server.parameters.lock() = vec![param(1, false)];
     assert_eq!(
         AnyThread::set_parameter_value(&ipc, ParamId::new(1), Normalized::of(0.25)),
         Ok(())
@@ -1636,7 +1632,7 @@ fn a_write_in_a_block_pushed_before_a_load_reaches_the_server_before_the_load() 
     // the load is asked for once the lane has drained it.
     let _ = changes_sent_with_block(&ipc, &server, 1);
     assert!(ipc.load_state(&[1], StateUse::Project).is_ok());
-    let log = server.received.lock().unwrap();
+    let log = server.received.lock();
     let block = log
         .iter()
         .position(|m| matches!(m, Sent::Audio(AudioRequest::ProcessAudio(d)) if d.seq == 1))
@@ -1667,7 +1663,7 @@ fn a_loaded_state_reaches_the_server_as_one_object() {
         .map(|i| (i % 251) as u8)
         .collect();
     assert!(ipc.load_state(&state, StateUse::Project).is_ok());
-    let states = server.states.lock().unwrap();
+    let states = server.states.lock();
     assert_eq!(states.len(), 1, "one object for the one load");
     assert!(
         states[0] == state,
@@ -1685,14 +1681,14 @@ fn a_flush_rides_the_audio_lane_behind_the_blocks_pushed_before_it() {
     use tutti_units::Normalized;
     let _machine = machine_lock();
     let (ipc, server) = mock();
-    *server.parameters.lock().unwrap() = vec![param(1, false)];
+    *server.parameters.lock() = vec![param(1, false)];
     let _ = changes_sent_with_block(&ipc, &server, 1);
     assert_eq!(
         AnyThread::set_parameter_value(&ipc, ParamId::new(1), Normalized::of(0.5)),
         Ok(())
     );
     let _ = ipc.parameter(main_thread(), ParamId::new(1));
-    let log = server.received.lock().unwrap();
+    let log = server.received.lock();
     let block = log
         .iter()
         .position(|m| matches!(m, Sent::Audio(AudioRequest::ProcessAudio(_))))
@@ -1830,13 +1826,13 @@ mod editor_mirror {
         _: &tutti_plugin_types::PluginRef,
         _: tutti_plugin_types::PluginFormat,
     ) -> tutti_plugin_types::IpcResult<Box<dyn tutti_plugin_types::Editor>> {
-        let script = SCRIPT.lock().unwrap().take().unwrap_or_default();
+        let script = SCRIPT.lock().take().unwrap_or_default();
         Ok(Box::new(Scripted(script)))
     }
 
     /// A served plugin whose editor is `script`'s.
     fn with_editor(script: Script) -> (Ipc, Mock) {
-        *SCRIPT.lock().unwrap() = Some(script);
+        *SCRIPT.lock() = Some(script);
         mock_loading(
             tutti_plugin_types::PluginRef::file("test.clap"),
             tutti_plugin_types::PluginFormat::Clap,
@@ -1895,7 +1891,7 @@ mod editor_mirror {
     fn an_unreadable_audio_state_is_reported_by_the_open() {
         let _machine = machine_lock();
         let (ipc, server) = with_editor(Script::default());
-        *server.saved_state.lock().unwrap() = None;
+        *server.saved_state.lock() = None;
         let opened = ipc
             .bridge()
             .editor()
@@ -2011,6 +2007,6 @@ fn a_server_that_gives_no_parameter_list_is_unlisted() {
 fn a_plugin_with_no_parameters_lists_none_and_loads() {
     let _machine = machine_lock();
     let (ipc, server) = mock();
-    server.parameters.lock().unwrap().clear();
+    server.parameters.lock().clear();
     assert_eq!(super::listed_parameters(ipc.bridge()).ok(), Some(0));
 }

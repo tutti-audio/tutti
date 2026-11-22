@@ -36,7 +36,6 @@ enum Sent {
 fn sent(record: &Record) -> Vec<Sent> {
     record
         .lock()
-        .unwrap()
         .iter()
         .map(|said| match said {
             Said::Audio(AudioRequest::ProcessAudio(data)) => Sent::Chunk(Box::new(data.clone())),

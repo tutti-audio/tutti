@@ -45,11 +45,10 @@
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_double, c_int, c_longlong, c_uint, c_void};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use tutti_buffers::{InputOutput, Planes, PlanesMut};
 use tutti_fixtures::main_thread;
 use tutti_graph::UmpAt;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_units::ParamId;
 use tutti_vst3_host::{
@@ -103,7 +102,7 @@ static HOSTCHECK: Mutex<()> = Mutex::new(());
 
 /// Acquire the `HostCheck` lock, ignoring poisoning.
 pub fn hostcheck_lock() -> std::sync::MutexGuard<'static, ()> {
-    HOSTCHECK.lock_recover()
+    HOSTCHECK.lock()
 }
 
 /// Serialises every test of `vst3_conformance_modes`, the one conformance
@@ -115,7 +114,7 @@ pub static PLUGIN_LOCK: Mutex<()> = Mutex::new(());
 /// Acquire [`PLUGIN_LOCK`], ignoring poisoning (a failed test elsewhere must
 /// not cascade into spurious failures here).
 pub fn plugin_guard() -> std::sync::MutexGuard<'static, ()> {
-    PLUGIN_LOCK.lock_recover()
+    PLUGIN_LOCK.lock()
 }
 
 pub const AVAILABLE: &str = env!("VST3_HOSTCHECK_AVAILABLE");
@@ -468,15 +467,15 @@ pub fn drive_blocks_in_mode<T: Vst3Sample + Default + Copy>(
         // min in/out buffer counts: the host must supply at least the bus
         // counts the component declares.
         unsafe { hc_validate(ptr, data.numInputs, data.numOutputs, counts.as_mut_ptr()) };
-        *counts_cell.lock().unwrap() = counts;
-        *seen.lock().unwrap() = true;
+        *counts_cell.lock() = counts;
+        *seen.lock() = true;
     }));
 
     let mut per_block = Vec::with_capacity(blocks.len());
     let default_transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
 
     for block in blocks {
-        *seen.lock().unwrap() = false;
+        *seen.lock() = false;
 
         let ins: Vec<Vec<T>> = (0..info.num_inputs.max(1))
             .map(|_| vec![T::default(); block.frames])
@@ -505,12 +504,12 @@ pub fn drive_blocks_in_mode<T: Vst3Sample + Default + Copy>(
             block.transport.unwrap_or(&default_transport),
         );
 
-        if !*seen.lock().unwrap() {
+        if !*seen.lock() {
             return Err(
                 "observer never fired — process() bailed before building ProcessData".into(),
             );
         }
-        per_block.push(findings_from(&counts_cell.lock().unwrap()));
+        per_block.push(findings_from(&counts_cell.lock()));
     }
 
     conformance::clear_observer();

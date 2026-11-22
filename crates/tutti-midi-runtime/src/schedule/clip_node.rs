@@ -59,9 +59,9 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroU32;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tutti_buffers::Float;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_graph::{
     Cx, EventDensity, ForkCause, ForkSource, Forked, IntoNode, Io, MIN_EVENT_PORT_CAPACITY, Node,
@@ -428,7 +428,7 @@ impl MidiClipControls {
     /// note-on) changes nothing: no note is cut. Control thread.
     pub fn set(&self, events: impl Into<Arc<ClipEvents>>) {
         let events = events.into();
-        let _serial = self.serial.lock_recover();
+        let _serial = self.serial.lock();
         let current = self.cell.current();
         if Arc::ptr_eq(&current, &events) || *current == *events {
             return;

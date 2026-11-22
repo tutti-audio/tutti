@@ -16,10 +16,10 @@
 //!
 //! [`HardwareMidiInputs`]: super::HardwareMidiInputs
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::{Arc, Mutex};
 use tutti_platform::Instant;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_graph::Losses;
 use tutti_midi_device::{ClockHeard, JrReceiver};
@@ -391,7 +391,7 @@ impl HardwareMidiInput {
 
     /// How many Stream messages the ring had no room for.
     pub(crate) fn stream_lost(&self) -> u64 {
-        self.stream.lock_recover().lost()
+        self.stream.lock().lost()
     }
 
     /// Whether the stream ring also takes a copy of the SysEx7 packets.
@@ -417,7 +417,7 @@ impl HardwareMidiInput {
 
     /// The oldest Stream message held, if any.
     pub(crate) fn pop_stream(&self) -> Option<Ump> {
-        self.stream.lock_recover().pop()
+        self.stream.lock().pop()
     }
 
     pub(crate) fn name(&self) -> &str {

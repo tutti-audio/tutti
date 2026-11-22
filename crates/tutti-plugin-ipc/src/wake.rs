@@ -1,6 +1,7 @@
 //! [`Wake`]: a wait for a state that another thread changes, ended by the
 //! change and not by a poll.
 
+// std locks: an offline fork waits here inside a realtime `Prepare`, where `tutti_rt`'s locks panic.
 use std::sync::{Condvar, Mutex, PoisonError};
 use std::time::Duration;
 use tutti_platform::Instant;

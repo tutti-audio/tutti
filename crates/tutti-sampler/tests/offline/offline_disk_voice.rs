@@ -165,28 +165,41 @@ fn fork_unprepared(node: impl IntoNode) -> Fork {
     }
 }
 
+/// The prepare an offline render at `rate` gives a fork.
+fn offline_prepare(rate: SampleRate) -> Prepare {
+    Prepare::new(rate, MaxBlock::of(Samples::new(BLOCK)))
+        .with_render_mode(tutti_graph::RenderMode::Offline)
+}
+
 /// Fork `voice` for a render at `rate`, as a graph fork does: forked, then
 /// prepared.
 fn fork(voice: &DiskVoice<f32>, rate: f64) -> Fork {
     let mut f = fork_unprepared(voice.clone());
-    f.node.prepare(
-        &Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples::new(BLOCK)))
-            .with_render_mode(tutti_graph::RenderMode::Offline),
-    );
+    f.node.prepare(&offline_prepare(SampleRate::of(rate)));
     f
 }
 
-/// Render `frames` of `node`'s two channels offline, the clock moved after
-/// each block.
+/// Drive one block of a fork prepared by [`offline_prepare`]: outside the
+/// realtime scope, as an offline render runs it.
+fn drive_offline(node: &mut dyn Node, env: &Env) -> Vec<Vec<f32>> {
+    contract::drive_input_in(
+        node,
+        &offline_prepare(env.sample_rate),
+        env,
+        Planes::default(),
+        &[],
+        &[],
+    )
+    .audio
+}
+
+/// Render `frames` of `node`'s two channels, the clock moved after each block.
 fn render(node: &mut dyn Node, clock: &Clock, frames: usize) -> [Vec<f32>; 2] {
     let mut planes = [Vec::new(), Vec::new()];
     let mut done = 0;
     while done < frames {
         let n = BLOCK.min(frames - done);
-        let env = clock.env(n);
-        let prepare = Prepare::new(env.sample_rate, MaxBlock::of(Samples::new(BLOCK)))
-            .with_render_mode(tutti_graph::RenderMode::Offline);
-        let out = contract::drive_input_in(node, &prepare, &env, Planes::default(), &[], &[]).audio;
+        let out = drive_offline(node, &clock.env(n));
         for (plane, c) in planes.iter_mut().zip(out) {
             plane.extend(c);
         }
@@ -234,10 +247,7 @@ fn a_fork_plays_the_file_from_the_frame_its_beat_falls_on() {
     .expect("a finite gain and a nonempty width");
 
     let mut node_fork = fork_unprepared(node);
-    node_fork.node.prepare(
-        &Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples::new(BLOCK)))
-            .with_render_mode(tutti_graph::RenderMode::Offline),
-    );
+    node_fork.node.prepare(&offline_prepare(SampleRate::of(SR)));
     for (what, mut copy) in [
         ("a bare voice", fork(&voice, SR)),
         ("a voice node", node_fork),
@@ -819,17 +829,7 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
         // Beat 1, then two file lengths: past the end of every case's file.
         for block in 0..(24_000 + 2 * LEN) / BLOCK {
             let env = clock.env(BLOCK);
-            let offline = Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples::new(BLOCK)))
-                .with_render_mode(tutti_graph::RenderMode::Offline);
-            let a = contract::drive_input_in(
-                &mut *copy.node,
-                &offline,
-                &env,
-                Planes::default(),
-                &[],
-                &[],
-            )
-            .audio;
+            let a = drive_offline(&mut *copy.node, &env);
             let b = contract::drive_input(&mut *memory, &env, Planes::default(), &[], &[]).audio;
             for c in 0..2 {
                 for i in 0..BLOCK {

@@ -340,11 +340,7 @@ impl Control for ClapLoaded {
     /// answers.
     fn set_track_info(&mut self, main: MainThreadMarker, info: &TrackInfo) -> Delivered {
         {
-            // A poisoned lock means a thread died holding the value: the
-            // instance's host state is lost, which is the plugin's death here.
-            let Ok(mut held) = self.host_state.track.info.lock() else {
-                return Delivered::PluginDead;
-            };
+            let mut held = self.host_state.track.info.lock();
             if held.as_ref() == Some(info) {
                 return Delivered::Yes;
             }

@@ -4,11 +4,11 @@
 //! Nothing here reads the platform, so it is tested everywhere; only the CoreMIDI
 //! backend uses it as a backend.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 use std::task::{Poll, Waker};
 use tutti_platform::Instant;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use crate::devices::ChangeSink;
 use crate::devices::reporter::Reporter;
@@ -199,7 +199,7 @@ impl StartGate {
     /// Runs `change` on the state. When it says the state changed, the waiting
     /// futures' wakers are returned to be woken, whatever the change was.
     fn transition<R>(&self, change: impl FnOnce(&mut HubState) -> (R, bool)) -> (R, Wakers) {
-        let mut cell = self.cell.lock_recover();
+        let mut cell = self.cell.lock();
         let (result, changed) = change(&mut cell.0);
         let wakers = if changed {
             std::mem::take(&mut cell.1)
@@ -236,7 +236,7 @@ impl StartGate {
 
     /// See [`HubState::wanted`].
     pub(crate) fn wanted(&self, done: Option<u64>) -> Option<(u64, Option<Instant>)> {
-        self.cell.lock_recover().0.wanted(done)
+        self.cell.lock().0.wanted(done)
     }
 
     /// A start over this gate, waiting on `round`.
@@ -247,7 +247,7 @@ impl StartGate {
 
 impl Waiting for StartGate {
     fn poll(&self, from: u64, waker: &Waker) -> Poll<Result<(), Arc<MidiHardwareError>>> {
-        let mut cell = self.cell.lock_recover();
+        let mut cell = self.cell.lock();
         if let Some(outcome) = cell.0.outcome(from) {
             return Poll::Ready(outcome);
         }
@@ -293,7 +293,7 @@ type Shared = Arc<Mutex<Watcher>>;
 /// the OS, and a thread holding the registry lock across such a call would block
 /// the notification callback that the OS may be waiting on.
 fn look(watcher: &Shared) {
-    let mut watcher = watcher.lock_recover();
+    let mut watcher = watcher.lock();
     if !watcher.live {
         return;
     }
@@ -344,7 +344,7 @@ impl Registry {
 
     fn all(&self) -> Vec<Shared> {
         self.watches
-            .lock_recover()
+            .lock()
             .iter()
             .map(|(_, w)| Arc::clone(w))
             .collect()
@@ -360,7 +360,7 @@ impl Registry {
     /// How many watches are registered.
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
-        self.watches.lock_recover().len()
+        self.watches.lock().len()
     }
 
     /// Registers `sink`, which reports `snapshot()` against what it reported before.
@@ -383,9 +383,7 @@ impl Registry {
             live: true,
         }));
         let key = self.next.fetch_add(1, Ordering::Relaxed);
-        self.watches
-            .lock_recover()
-            .push((key, Arc::clone(&watcher)));
+        self.watches.lock().push((key, Arc::clone(&watcher)));
         if client_made() {
             look(&watcher);
         }
@@ -410,9 +408,9 @@ impl Drop for Registration {
     fn drop(&mut self) {
         self.registry
             .watches
-            .lock_recover()
+            .lock()
             .retain(|(key, _)| *key != self.key);
-        self.watcher.lock_recover().live = false;
+        self.watcher.lock().live = false;
     }
 }
 

@@ -11,11 +11,11 @@
 //! reply wakes the awaiting task, and a reply dropped unanswered resolves it as
 //! canceled.
 
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
-use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 use tutti_plugin_types::{Answer, AnswerSender};
-use tutti_rt::LockExt;
+use tutti_rt::{Condvar, Mutex};
 
 /// Whether a control request is owed a reply: at most one is, and a caller who
 /// finds it held waits for it, up to a bound of its own, instead of queueing a
@@ -40,7 +40,7 @@ struct Owing(Arc<SlotState>);
 
 impl Drop for Owing {
     fn drop(&mut self) {
-        self.0.held.lock_recover().owed = false;
+        self.0.held.lock().owed = false;
         self.0.freed.notify_one();
     }
 }
@@ -132,13 +132,9 @@ impl ControlSlot {
     /// held then.
     pub(super) fn ask<T>(&self, wait: Duration) -> Option<(Ask<T>, Reply<T>)> {
         let state = &self.0;
-        let mut held = state.held.lock_recover();
+        let mut held = state.held.lock();
         if held.owed {
-            held = state
-                .freed
-                .wait_timeout_while(held, wait, |h| h.owed)
-                .unwrap_or_else(PoisonError::into_inner)
-                .0;
+            held = state.freed.wait_timeout_while(held, wait, |h| h.owed).0;
             if held.owed {
                 return None;
             }

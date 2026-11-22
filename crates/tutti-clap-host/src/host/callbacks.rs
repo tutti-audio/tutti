@@ -152,7 +152,7 @@ impl HostCallbacks for HostState {
 
     fn timer_register(&self, period_ms: u32) -> Option<u32> {
         let id = self.timer.next_id.fetch_add(1, Ordering::Relaxed);
-        let mut timers = self.timer.timers.lock().ok()?;
+        let mut timers = self.timer.timers.lock();
         // `register_timer` is `[main-thread]`, where reading the clock is
         // allowed; the entry's period runs from this instant.
         let entry = TimerEntry {
@@ -166,16 +166,14 @@ impl HostCallbacks for HostState {
     }
 
     fn timer_unregister(&self, timer_id: u32) -> bool {
-        let Ok(mut timers) = self.timer.timers.lock() else {
-            return false;
-        };
+        let mut timers = self.timer.timers.lock();
         let len_before = timers.len();
         timers.retain(|t| t.id != timer_id);
         timers.len() < len_before
     }
 
     fn track_info(&self) -> Option<TrackInfo> {
-        self.track.info.lock().ok()?.clone()
+        self.track.info.lock().clone()
     }
 
     fn transport_request(&self, request: TransportRequest) {
@@ -195,9 +193,7 @@ impl HostCallbacks for HostState {
         if FdId::new(fd).is_none() {
             return false;
         }
-        let Ok(mut fds) = self.posix_fds.entries.lock() else {
-            return false;
-        };
+        let mut fds = self.posix_fds.entries.lock();
         if fds.iter().any(|e| e.fd == fd) {
             return false;
         }
@@ -206,9 +202,7 @@ impl HostCallbacks for HostState {
     }
 
     fn posix_fd_modify(&self, fd: i32, flags: u32) -> bool {
-        let Ok(mut fds) = self.posix_fds.entries.lock() else {
-            return false;
-        };
+        let mut fds = self.posix_fds.entries.lock();
         match fds.iter_mut().find(|e| e.fd == fd) {
             Some(entry) => {
                 entry.flags = flags;
@@ -219,9 +213,7 @@ impl HostCallbacks for HostState {
     }
 
     fn posix_fd_unregister(&self, fd: i32) -> bool {
-        let Ok(mut fds) = self.posix_fds.entries.lock() else {
-            return false;
-        };
+        let mut fds = self.posix_fds.entries.lock();
         let len_before = fds.len();
         fds.retain(|e| e.fd != fd);
         fds.len() < len_before

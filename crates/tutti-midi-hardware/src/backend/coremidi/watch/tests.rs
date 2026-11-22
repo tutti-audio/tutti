@@ -160,7 +160,7 @@ fn begin(gate: &StartGate) -> crate::backend::hub::Round {
 fn a_hub_thread_that_ends_before_answering_fails_the_start() {
     let hub = Hub::new();
     let start = hub.gate.start(begin(&hub.gate));
-    *hub.unparker.lock_recover() = Some(parker().0);
+    *hub.unparker.lock() = Some(parker().0);
     hub.thread_ended();
     let Err(why) = tutti_fixtures::block_on(start) else {
         panic!("the start fails");
@@ -172,7 +172,7 @@ fn a_hub_thread_that_ends_before_answering_fails_the_start() {
         }
     ));
     assert!(
-        hub.unparker.lock_recover().is_none(),
+        hub.unparker.lock().is_none(),
         "the next start makes a thread"
     );
 }

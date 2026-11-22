@@ -5,9 +5,9 @@
 //! The plugin's state is process-global, so every test holds [`PROBE_LOCK`].
 
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 use tutti_buffers::InputOutput;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use crate::support::main_thread;
 
@@ -43,7 +43,7 @@ struct Probe {
 
 impl Probe {
     fn acquire() -> Self {
-        let lock = PROBE_LOCK.lock_recover();
+        let lock = PROBE_LOCK.lock();
         let image = unsafe { libloading::Library::new(tutti_fixtures::clap_probe()) }
             .expect("opens the plugin");
         call("tutti_test_plugin_param_reset");

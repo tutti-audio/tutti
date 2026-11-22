@@ -10,8 +10,8 @@
 
 use alloc::vec::Vec;
 use tutti_ump::{
-    Address, ControlValue, Message, MidiChannel, MidiGroup, MpeZoneSet, MpeZoneSpan, Rpn, Ump,
-    Voice2,
+    Address, ControlValue, Message, MidiChannel, MidiGroup, MpeChannels, MpeZoneSet, MpeZoneSpan,
+    Rpn, Ump, Voice2,
 };
 
 use crate::{ChannelResponse, PitchBendSensitivity};
@@ -50,6 +50,37 @@ impl MpeZone {
             Self::Upper => MidiChannel::LAST,
         }
     }
+}
+
+tutti_units::ranged! {
+    /// How many Member Channels an MPE zone claims: `1..=15`, the sixteen
+    /// channels less the zone's own master (RP-053). A count of `0` is not a
+    /// zone: in an MPE Configuration Message it disables one
+    /// ([`Mcm::Disable`]). A Profile zone has at most the channels above its
+    /// Manager.
+    #[derive(Eq, PartialOrd, Ord, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    MemberCount(u8), NotMemberCount, "within 1..=15", |raw| raw >= 1 && raw <= 15
+}
+
+/// An MPE Configuration Message (RP-053, M2-104 section 7.4.7) read off the
+/// wire: the zone it addresses, and either its Number of Member Channels or the
+/// value `0` that disables the zone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Mcm {
+    /// Configure `zone` with `members` Member Channels.
+    Configure {
+        /// The zone the message addresses, by its master channel.
+        zone: MpeZone,
+        /// The zone's new member count.
+        members: MemberCount,
+    },
+    /// Disable `zone`: the message carried a count of `0`.
+    Disable {
+        /// The zone the message addresses, by its master channel.
+        zone: MpeZone,
+    },
 }
 
 /// Where a zone sits, and the bend ranges it keeps: one of MPE 1.1's two
@@ -91,7 +122,7 @@ enum Placement {
 )]
 pub struct MpeZoneConfig {
     placement: Placement,
-    member_count: u8,
+    member_count: MemberCount,
     response: ChannelResponse,
 }
 
@@ -101,7 +132,7 @@ pub struct MpeZoneConfig {
 #[derive(serde::Serialize, serde::Deserialize)]
 struct MpeZoneConfigRaw {
     placement: Placement,
-    member_count: u8,
+    member_count: MemberCount,
     response: ChannelResponse,
 }
 
@@ -133,67 +164,56 @@ impl TryFrom<MpeZoneConfigRaw> for MpeZoneConfig {
     }
 }
 
+#[cfg(feature = "serde")]
 impl MpeZoneConfig {
-    /// The most member channels an MPE 1.1 zone can claim: the sixteen
-    /// channels less the zone's own master (RP-053). A Profile zone has at
-    /// most the channels above its Manager.
-    pub const MAX_MEMBERS: u8 = 15;
-
-    /// An MPE 1.1 zone of `member_count` members, its master channel's bend
-    /// range `master` and its members' `member`, with a polyphonic response, or
-    /// `None` for a count outside `1..=`[`MAX_MEMBERS`](Self::MAX_MEMBERS).
-    /// A receiver of an MPE Configuration Message resets the ranges to
-    /// [`PitchBendSensitivity::MPE_MASTER_DEFAULT`] and
-    /// [`PitchBendSensitivity::MPE_MEMBER_DEFAULT`].
-    ///
-    /// `0` is not a zone: in an MPE Configuration Message it means disable
-    /// this zone ([`from_mcm`](Self::from_mcm) reports it as such), and no
-    /// configuration describes a disabled zone.
-    #[must_use]
-    pub const fn new(
-        zone: MpeZone,
-        member_count: u8,
-        master: PitchBendSensitivity,
-        member: PitchBendSensitivity,
-    ) -> Option<Self> {
-        Self::placed(
-            Placement::Side {
-                side: zone,
-                master,
-                member,
-            },
-            member_count,
-        )
-    }
-
-    /// A zone at `placement` with `member_count` members, or `None` when the
-    /// layout is not one the specification allows: no member, or members past
+    /// A persisted zone at `placement`, or `None` when its members run past
     /// channel 16.
-    const fn placed(placement: Placement, member_count: u8) -> Option<Self> {
+    fn placed(placement: Placement, member_count: MemberCount) -> Option<Self> {
         let first_free = match placement {
             Placement::Side { .. } => 0,
             Placement::Managed { manager, .. } => manager.get(),
         };
-        let Some(end) = first_free.checked_add(member_count) else {
-            return None;
-        };
-        if member_count == 0 || end > Self::MAX_MEMBERS {
-            return None;
-        }
-        Some(Self {
+        (first_free + member_count.get() <= 15).then_some(Self {
             placement,
             member_count,
             response: ChannelResponse::Polyphonic,
         })
     }
+}
+
+impl MpeZoneConfig {
+    /// An MPE 1.1 zone of `member_count` members, its master channel's bend
+    /// range `master` and its members' `member`, with a polyphonic response.
+    /// A receiver of an MPE Configuration Message resets the ranges to
+    /// [`PitchBendSensitivity::MPE_MASTER_DEFAULT`] and
+    /// [`PitchBendSensitivity::MPE_MEMBER_DEFAULT`].
+    ///
+    /// No configuration describes a disabled zone ([`Mcm::Disable`]).
+    #[must_use]
+    pub const fn new(
+        zone: MpeZone,
+        member_count: MemberCount,
+        master: PitchBendSensitivity,
+        member: PitchBendSensitivity,
+    ) -> Self {
+        Self {
+            placement: Placement::Side {
+                side: zone,
+                master,
+                member,
+            },
+            member_count,
+            response: ChannelResponse::Polyphonic,
+        }
+    }
 
     /// [`new`](Self::new) for the lower zone: master Ch1 (0), members from Ch2.
     #[must_use]
     pub const fn lower(
-        member_count: u8,
+        member_count: MemberCount,
         master: PitchBendSensitivity,
         member: PitchBendSensitivity,
-    ) -> Option<Self> {
+    ) -> Self {
         Self::new(MpeZone::Lower, member_count, master, member)
     }
 
@@ -201,10 +221,10 @@ impl MpeZoneConfig {
     /// Ch15 counting down.
     #[must_use]
     pub const fn upper(
-        member_count: u8,
+        member_count: MemberCount,
         master: PitchBendSensitivity,
         member: PitchBendSensitivity,
-    ) -> Option<Self> {
+    ) -> Self {
         Self::new(MpeZone::Upper, member_count, master, member)
     }
 
@@ -221,7 +241,7 @@ impl MpeZoneConfig {
                 range,
             },
             // A span has two channels at least, so the Manager has a Member.
-            member_count: zone.channels().get() - 1,
+            member_count: MemberCount::of(zone.channels().get() - 1),
             response: ChannelResponse::Polyphonic,
         }
     }
@@ -260,18 +280,18 @@ impl MpeZoneConfig {
         }
     }
 
-    /// How many member channels the zone claims, at least 1.
+    /// How many member channels the zone claims.
     #[inline]
     #[must_use]
-    pub const fn member_count(&self) -> u8 {
+    pub const fn member_count(&self) -> MemberCount {
         self.member_count
     }
 
     /// How many channels the zone has, the master and its members.
     #[inline]
     #[must_use]
-    pub const fn channel_count(&self) -> u8 {
-        self.member_count + 1
+    pub const fn channel_count(&self) -> MpeChannels {
+        MpeChannels::of(self.member_count.get() + 1)
     }
 
     /// How the member channels take notes: MPE 1.1's MIDI Mode 3 (polyphonic)
@@ -360,15 +380,15 @@ impl MpeZoneConfig {
             Placement::Side {
                 side: MpeZone::Lower,
                 ..
-            } => 1..=self.member_count,
-            // `member_count <= 15`, so the subtraction cannot wrap.
+            } => 1..=self.member_count.get(),
+            // `MemberCount` holds at most 15, so the subtraction cannot wrap.
             Placement::Side {
                 side: MpeZone::Upper,
                 ..
-            } => (15 - self.member_count)..=14,
+            } => (15 - self.member_count.get())..=14,
             // `placed` keeps `manager + member_count <= 15`.
             Placement::Managed { manager, .. } => {
-                (manager.get() + 1)..=(manager.get() + self.member_count)
+                (manager.get() + 1)..=(manager.get() + self.member_count.get())
             }
         }
     }
@@ -407,24 +427,23 @@ impl MpeZoneConfig {
             Voice2::Registered {
                 bank: Rpn::MPE_CONFIGURATION.bank(),
                 index: Rpn::MPE_CONFIGURATION.index(),
-                value: ControlValue::new(u32::from(self.member_count) << 25),
+                value: ControlValue::new(u32::from(self.member_count.get()) << 25),
             },
         )
         .into()
     }
 
-    /// Decodes an MCM into the zone it configures and its member count, if
-    /// `ump` is an MPE Configuration Message (RPN bank `0x00`, index `0x06`) on
-    /// a zone's master channel. `None` for any other message.
+    /// Decodes an MCM into the zone it addresses and what it asks, if `ump` is
+    /// an MPE Configuration Message (RPN bank `0x00`, index `0x06`) on a zone's
+    /// master channel. `None` for any other message.
     ///
-    /// A count of `0` is the spec's disable-this-zone value and is returned as `0`,
-    /// which [`new`](Self::new) would refuse. A message is rejected, not
-    /// clamped, when RP-053 does not allow it: an MCM goes on Ch1 or Ch16 only,
-    /// and a zone has at most 15 members. Clamping would silently reconfigure
-    /// the zone to something the sender never asked for; `None` lets the caller
-    /// keep the zone it had.
+    /// A count of `0` is the spec's disable-this-zone value, an
+    /// [`Mcm::Disable`]. A message is rejected, not clamped, when RP-053 does
+    /// not allow it: an MCM goes on Ch1 or Ch16 only, and a zone has at most
+    /// 15 members. Clamping would silently reconfigure the zone to something
+    /// the sender never asked for; `None` lets the caller keep the zone it had.
     #[must_use]
-    pub fn from_mcm(ump: &Ump) -> Option<(MpeZone, u8)> {
+    pub fn from_mcm(ump: &Ump) -> Option<Mcm> {
         let Ok(Message::Midi2(address, Voice2::Registered { bank, index, value })) =
             (*ump).decode()
         else {
@@ -436,8 +455,11 @@ impl MpeZoneConfig {
         let zone = [MpeZone::Lower, MpeZone::Upper]
             .into_iter()
             .find(|z| z.master_channel() == address.channel)?;
-        let member_count = (value.get() >> 25) as u8;
-        (member_count <= Self::MAX_MEMBERS).then_some((zone, member_count))
+        // The member count is the top 7 bits of the 32-bit data.
+        match (value.get() >> 25) as u8 {
+            0 => Some(Mcm::Disable { zone }),
+            count => MemberCount::new(count).map(|members| Mcm::Configure { zone, members }),
+        }
     }
 }
 

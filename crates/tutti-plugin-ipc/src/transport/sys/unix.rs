@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tutti_plugin_ipc_ffi::{Connection, LaneWire};
 use tutti_plugin_types::IpcResult;
-use tutti_rt::LockExt as _;
+use tutti_rt::Mutex;
 
 /// The server a host has spawned, as the host reaches it: the host's end of the
 /// socket pair, already connected.
@@ -28,11 +28,11 @@ pub(crate) struct Rendezvous(ControlStream);
 /// host** (the connection, the audio lane, the control wait's bell). The slab's
 /// memfd and `shm_open` are close-on-exec from the call. A spawn by another part
 /// of the process is outside it.
-static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static SPAWN: Mutex<()> = Mutex::new(());
 
 /// Makes a socket pair under [`SPAWN`].
 fn pair() -> std::io::Result<(UnixStream, UnixStream)> {
-    let _spawning = SPAWN.lock_recover();
+    let _spawning = SPAWN.lock();
     UnixStream::pair()
 }
 
@@ -44,7 +44,7 @@ fn pair() -> std::io::Result<(UnixStream, UnixStream)> {
 ///
 /// The OS refused the socket pair or the spawn.
 pub(crate) fn spawn(mut command: Command) -> IpcResult<(Child, Rendezvous)> {
-    let _spawning = SPAWN.lock_recover();
+    let _spawning = SPAWN.lock();
     let (host, server) = UnixStream::pair()?;
     command.stdin(Stdio::from(OwnedFd::from(server)));
     let child = command.spawn()?;

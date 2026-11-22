@@ -499,11 +499,12 @@ mod machine_control {
     use tutti_midi_protocol::{
         MMC_MAX_DATA, McpSuccess, McsSuccess, MmcCodeStatus, MmcCommand, MmcCommandReassembler,
         MmcCommands, MmcDirection, MmcErrorCode, MmcErrorKind, MmcEventDirection, MmcEventFlags,
-        MmcFields, MmcGroup, MmcInfoField, MmcLocate, MmcName, MmcPosition, MmcProcedure,
-        MmcResponseReassembler, MmcSegment, MmcSegmentBytes, MmcSegmentError, MmcSegmentPlace,
-        MmcSegments, MmcSegmentsRefused, MmcSelection, MmcShortTimeCode, MmcSign, MmcSlot,
-        MmcSpeed, MmcStep, MmcSubframes, MmcTimeCode, MmcTimeCodeName, MmcTimeLabel, MmcTimeTail,
-        MmcUpdate, MotionControlTally, MotionProcess, MotionState, MtcRate, MtcTimeCode,
+        MmcFields, MmcGroup, MmcInfoField, MmcLocate, MmcMantissa, MmcName, MmcPosition,
+        MmcProcedure, MmcResponseReassembler, MmcSegment, MmcSegmentBytes, MmcSegmentCount,
+        MmcSegmentError, MmcSegmentPlace, MmcSegments, MmcSegmentsRefused, MmcSelection, MmcShift,
+        MmcShortTimeCode, MmcSign, MmcSlot, MmcSpeed, MmcStep, MmcStepCount, MmcSubframes,
+        MmcTimeCode, MmcTimeCodeName, MmcTimeLabel, MmcTimeTail, MmcUpdate, MotionControlTally,
+        MotionProcess, MotionState, MtcRate, MtcTimeCode,
     };
 
     fn framed(device: u8, sub_id: u8, data: &[u8]) -> Vec<u8> {
@@ -730,13 +731,20 @@ mod machine_control {
             panic!()
         };
         assert_eq!(reverse.direction(), MmcDirection::Reverse);
-        assert_eq!((reverse.shift(), reverse.mantissa()), (0, 1 << 14));
+        assert_eq!(
+            (reverse.shift().get(), reverse.mantissa().get()),
+            (0, 1 << 14)
+        );
         // Shift 7: ten integer bits, seven fraction bits.
         let MmcCommand::Search(fast) = one_command(&[0x46, 0x03, 0x3F, 0x7F, 0x7F]) else {
             panic!()
         };
         assert_eq!(
-            (fast.shift(), fast.fraction_bits(), fast.mantissa()),
+            (
+                fast.shift().get(),
+                fast.fraction_bits(),
+                fast.mantissa().get()
+            ),
             (7, 7, 0x1FFFF)
         );
         let mut list = MmcCommands::new();
@@ -888,13 +896,13 @@ mod machine_control {
             panic!()
         };
         assert_eq!(segment.place(), MmcSegmentPlace::First);
-        assert_eq!(segment.remaining(), 2);
+        assert_eq!(segment.remaining().get(), 2);
         assert_eq!(segment.bytes().as_bytes(), [1, 2, 3, 4]);
         let MmcCommand::CommandSegment(last) = one_command(&[0x53, 0x04, 0x00, 0x0A, 0x0B, 0x0C])
         else {
             panic!()
         };
-        assert!(last.place() == MmcSegmentPlace::Later && last.remaining() == 0);
+        assert!(last.place() == MmcSegmentPlace::Later && last.remaining().get() == 0);
     }
 
     /// RP-013 p.6: a code the specification leaves undefined is skipped by its
@@ -1124,26 +1132,21 @@ mod machine_control {
     /// tracks to a byte.
     #[test]
     fn a_track_bitmap_places_each_track() {
-        use tutti_midi_protocol::{MmcTrack, MmcTrackBitmap};
+        use tutti_midi_protocol::{MmcAudioTrack, MmcTrack, MmcTrackBitmap};
+        let audio = |n| MmcTrack::Audio(MmcAudioTrack::of(n));
         let [MmcInfoField::TrackRecordReady(bitmap)] =
             fields(1, &[0x4F, 0x02, 0b0100000, 0b0000001])[..]
         else {
             panic!()
         };
-        assert!(bitmap.contains(MmcTrack::Audio(1)));
-        assert!(bitmap.contains(MmcTrack::Audio(3)));
-        assert!(!bitmap.contains(MmcTrack::Audio(2)) && !bitmap.contains(MmcTrack::Video));
-        assert!(
-            !bitmap.contains(MmcTrack::Audio(300)),
-            "past the bytes sent"
-        );
-        let built = MmcTrackBitmap::NONE
-            .with(MmcTrack::Audio(1))
-            .and_then(|b| b.with(MmcTrack::Audio(10)))
-            .unwrap();
+        assert!(bitmap.contains(audio(1)));
+        assert!(bitmap.contains(audio(3)));
+        assert!(!bitmap.contains(audio(2)) && !bitmap.contains(MmcTrack::Video));
+        assert!(!bitmap.contains(audio(300)), "past the bytes sent");
+        let built = MmcTrackBitmap::NONE.with(audio(1)).with(audio(10));
         assert_eq!(built.as_bytes(), [0b0100000, 0, 1]);
-        assert!(MmcTrackBitmap::NONE.with(MmcTrack::Audio(0)).is_none());
-        assert!(MmcTrackBitmap::NONE.with(MmcTrack::Audio(318)).is_none());
+        // The last audio track fills the last byte.
+        assert_eq!(MmcTrackBitmap::NONE.with(audio(317)).as_bytes().len(), 46);
         assert!(
             MmcTrackBitmap::from_bytes(&[0b10]).is_none(),
             "the reserved bit"
@@ -1178,7 +1181,7 @@ mod machine_control {
                 n.push(&MmcName::of(0x48)).unwrap();
                 n
             })),
-            MmcCommand::Step(MmcStep::new(MmcDirection::Reverse, 3).unwrap()),
+            MmcCommand::Step(MmcStep::new(MmcDirection::Reverse, MmcStepCount::of(3))),
             MmcCommand::AssignSystemMaster(tutti_midi_protocol::MmcSystemMaster::Nobody),
             MmcCommand::GeneratorCommand(tutti_midi_protocol::GeneratorAction::CopyJam),
             MmcCommand::MtcCommand(tutti_midi_protocol::MtcAction::Follow),
@@ -1210,10 +1213,13 @@ mod machine_control {
         assert_eq!(MmcDirection::Reverse.wire(), 1);
         let mut list = MmcCommands::new();
         for direction in [MmcDirection::Forward, MmcDirection::Reverse] {
-            let speed = MmcSpeed::new(direction, 0, 1 << 14).unwrap();
+            let speed = MmcSpeed::new(direction, MmcShift::of(0), MmcMantissa::of(1 << 14));
             list.push(&MmcCommand::Shuttle(speed)).unwrap();
-            list.push(&MmcCommand::Step(MmcStep::new(direction, 3).unwrap()))
-                .unwrap();
+            list.push(&MmcCommand::Step(MmcStep::new(
+                direction,
+                MmcStepCount::of(3),
+            )))
+            .unwrap();
         }
         let MmcCommand::Shuttle(speed) = one_command(&[0x47, 0x03, 0x41, 0x00, 0x00]) else {
             panic!()
@@ -1252,7 +1258,11 @@ mod machine_control {
 
     /// The segment `place`, `remaining`, `bytes` as the command that carries it.
     fn segment(place: MmcSegmentPlace, remaining: u8, bytes: &[u8]) -> MmcSegment {
-        MmcSegment::new(place, remaining, MmcSegmentBytes::new(bytes).unwrap()).unwrap()
+        MmcSegment::new(
+            place,
+            MmcSegmentCount::of(remaining),
+            MmcSegmentBytes::new(bytes).unwrap(),
+        )
     }
 
     /// The wire bytes of `segment` as a COMMAND SEGMENT message to all.
@@ -1349,8 +1359,8 @@ mod machine_control {
         assert_eq!(
             reassemble(&mut r, &[first, third]),
             Err(MmcSegmentError::OutOfOrder {
-                expected: 1,
-                got: 0
+                expected: MmcSegmentCount::of(1),
+                got: MmcSegmentCount::of(0)
             })
         );
         assert!(!r.in_progress());
@@ -1359,8 +1369,8 @@ mod machine_control {
         assert_eq!(
             r.push(third).unwrap_err(),
             MmcSegmentError::OutOfOrder {
-                expected: 1,
-                got: 0
+                expected: MmcSegmentCount::of(1),
+                got: MmcSegmentCount::of(0)
             }
         );
         // The string was cancelled, so the second now has no first.
@@ -1494,7 +1504,7 @@ mod machine_control {
         let segments: Vec<MmcSegment> = MmcSegments::new(&string).unwrap().collect();
         let shape: Vec<_> = segments
             .iter()
-            .map(|s| (s.place(), s.remaining(), s.bytes().as_bytes().len()))
+            .map(|s| (s.place(), s.remaining().get(), s.bytes().as_bytes().len()))
             .collect();
         assert_eq!(
             shape,
@@ -1523,8 +1533,8 @@ mod machine_control {
         let longest = vec![0x02; 2880];
         let segments: Vec<MmcSegment> = MmcSegments::new(&longest).unwrap().collect();
         assert_eq!(segments.len(), 64);
-        assert_eq!(segments[0].remaining(), 63);
-        assert_eq!(segments[63].remaining(), 0);
+        assert_eq!(segments[0].remaining().get(), 63);
+        assert_eq!(segments[63].remaining().get(), 0);
         let mut r = MmcCommandReassembler::new();
         let done = reassemble(&mut r, &segments).unwrap().unwrap();
         assert_eq!(done.len(), 2880);
@@ -1622,4 +1632,49 @@ fn a_device_id_and_a_slot_keep_the_range_contract() {
     };
     check_range_contract(&slots);
     check_range_serde(&slots);
+}
+
+/// RP-013 pp.11, 30: a speed's shift is three bits, its mantissa 17, a step's
+/// count and a segment count six, and an audio track of the bitmap is 1 to 317.
+#[test]
+fn the_machine_control_fields_keep_the_range_contract() {
+    use tutti_fixtures::{RangeContract, check_range_contract};
+    use tutti_midi_protocol::{
+        MmcAudioTrack, MmcMantissa, MmcSegmentCount, MmcShift, MmcStepCount,
+    };
+    check_range_contract(&RangeContract {
+        new: MmcShift::new,
+        get: MmcShift::get,
+        of: Some(MmcShift::of),
+        valid: &[0, 7],
+        invalid: &[8, 255],
+    });
+    check_range_contract(&RangeContract {
+        new: MmcMantissa::new,
+        get: MmcMantissa::get,
+        of: Some(MmcMantissa::of),
+        valid: &[0, 1 << 14, 0x1_FFFF],
+        invalid: &[0x2_0000, u32::MAX],
+    });
+    check_range_contract(&RangeContract {
+        new: MmcStepCount::new,
+        get: MmcStepCount::get,
+        of: Some(MmcStepCount::of),
+        valid: &[0, 63],
+        invalid: &[64, 255],
+    });
+    check_range_contract(&RangeContract {
+        new: MmcSegmentCount::new,
+        get: MmcSegmentCount::get,
+        of: Some(MmcSegmentCount::of),
+        valid: &[0, 63],
+        invalid: &[64, 255],
+    });
+    check_range_contract(&RangeContract {
+        new: MmcAudioTrack::new,
+        get: MmcAudioTrack::get,
+        of: Some(MmcAudioTrack::of),
+        valid: &[1, 2, 317],
+        invalid: &[0, 318, u16::MAX],
+    });
 }

@@ -5,6 +5,7 @@ use tutti_midi_protocol::{
     BadChecksum, ChannelMask, KeyTable, OctaveOffsets, Timing, TuningFrequency, TuningMessage,
     Universal, UniversalRead, read,
 };
+use tutti_music::PitchClass;
 use tutti_ump::{MidiChannel, NoteNumber, SysexMessage, U7, U14};
 
 fn parse(payload: &[u8]) -> UniversalRead {
@@ -360,9 +361,9 @@ fn scale_octave_tuning_has_two_forms_and_two_timings() {
         panic!()
     };
     assert_eq!(timing, Timing::RealTime);
-    assert_eq!(offsets.offset(0).get(), -64.0);
-    assert_eq!(offsets.offset(1).get(), 0.0);
-    assert_eq!(offsets.offset(2).get(), 63.0);
+    assert_eq!(offsets.offset(PitchClass::C).get(), -64.0);
+    assert_eq!(offsets.offset(PitchClass::CSharp).get(), 0.0);
+    assert_eq!(offsets.offset(PitchClass::D).get(), 63.0);
 
     let mut two = vec![0x7E, 0x7F, 0x08, 0x09, 0x00, 0x00, 0x01];
     for i in 0..12u8 {
@@ -375,8 +376,8 @@ fn scale_octave_tuning_has_two_forms_and_two_timings() {
         panic!()
     };
     assert_eq!(timing, Timing::NonRealTime);
-    assert_eq!(offsets.offset(0).get(), 0.0);
-    assert!((offsets.offset(4).get() - 100.0).abs() < 0.02);
+    assert_eq!(offsets.offset(PitchClass::C).get(), 0.0);
+    assert!((offsets.offset(PitchClass::E).get() - 100.0).abs() < 0.02);
     // Twelve offsets and no fewer.
     two.truncate(two.len() - 2);
     assert_eq!(parse(&two), UniversalRead::Unread);

@@ -50,11 +50,9 @@ impl Node for Probe {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        match io.param(0).frames() {
-            Some(v) => {
-                let v: Vec<f32> = v.to_vec();
-                io.output(0).copy_from_slice(&v);
-            }
+        let param = io.param(0);
+        match param.frames() {
+            Some(v) => io.output(0).copy_from_slice(v),
             None => io.output(0).fill(0.0),
         }
         Status::Modified
@@ -83,29 +81,25 @@ impl Node for SegSink {
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let n = io.frames();
         let base = cx.env.frame.get();
-        let events: Vec<(usize, ParamSegment)> = io
-            .events(0)
-            .params()
-            .iter()
-            .filter_map(|e| match e.kind {
-                ParamKind::Segment(s) => Some((e.offset.index(), s)),
-                ParamKind::Ramp(_) => None,
-            })
-            .collect();
-        let (mut vals, mut marks) = (vec![0.0f32; n], vec![0.0f32; n]);
+        let events = io.events(0).params();
         let mut k = 0;
         for i in 0..n {
-            while let Some(&(_, s)) = events.get(k).filter(|e| e.0 == i) {
-                self.last = Some((s, base + i as u64));
-                marks[i] = if s.shape() == Law::Linear { 1.0 } else { 2.0 };
+            let mut mark = 0.0f32;
+            while let Some(s) = events
+                .get(k)
+                .filter(|e| e.offset.index() == i)
+                .map(|e| e.kind)
+            {
                 k += 1;
+                let ParamKind::Segment(s) = s else { continue };
+                self.last = Some((s, base + i as u64));
+                mark = if s.shape() == Law::Linear { 1.0 } else { 2.0 };
             }
-            vals[i] = control_in(self.last.map_or(0.0, |(s, at)| {
+            io.output(0)[i] = control_in(self.last.map_or(0.0, |(s, at)| {
                 s.raw_value_after(Samples::new((base + i as u64 - at) as usize))
             }));
+            io.output(1)[i] = mark;
         }
-        io.output(0).copy_from_slice(&vals);
-        io.output(1).copy_from_slice(&marks);
         Status::Modified
     }
     fn reset(&mut self) {
