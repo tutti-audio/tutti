@@ -19,12 +19,12 @@
 //! rings the bell itself when a call leaves it work or moves its deadline.
 
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, MutexGuard, Weak};
 use std::task::{Context, Poll};
 
 use tutti_midi_hardware::{MidiSession, Polled};
 use tutti_platform::{Executor, Instant, Task, Timer};
-use tutti_rt::{Bell, Listener, LockExt};
+use tutti_rt::{Bell, Listener, Mutex};
 
 use crate::midi_port::InputShared;
 
@@ -68,7 +68,7 @@ impl MidiLink {
 
     /// The layer, locked for a call of the control side.
     pub(crate) fn lock(&self) -> MutexGuard<'_, MidiSession> {
-        self.io.lock_recover()
+        self.io.lock()
     }
 
     /// The bell that wakes the task: a handle's request rings it.
@@ -78,14 +78,14 @@ impl MidiLink {
 
     /// Adds an input port to the ports the link routes to.
     pub(crate) fn register(&self, port: &Arc<InputShared>) {
-        let mut ports = self.ports.lock_recover();
+        let mut ports = self.ports.lock();
         ports.retain(|port| port.strong_count() > 0);
         ports.push(Arc::downgrade(port));
     }
 
     /// What the task polled since `update` last took it.
     pub(crate) fn take_queued(&self) -> Vec<Polled> {
-        std::mem::take(&mut *self.queued.lock_recover())
+        std::mem::take(&mut *self.queued.lock())
     }
 
     /// One step at `now`, for the task and for `update`: sends what the ports'
@@ -93,7 +93,7 @@ impl MidiLink {
     /// its port, and queues the rest for `update`.
     pub(crate) fn step(&self, io: &mut MidiSession, now: Instant) {
         let ports: Vec<Arc<InputShared>> = {
-            let mut ports = self.ports.lock_recover();
+            let mut ports = self.ports.lock();
             ports.retain(|port| port.strong_count() > 0);
             ports.iter().filter_map(Weak::upgrade).collect()
         };
@@ -110,7 +110,7 @@ impl MidiLink {
                 found.push(polled);
             }
         }
-        self.queued.lock_recover().extend(found);
+        self.queued.lock().extend(found);
     }
 }
 

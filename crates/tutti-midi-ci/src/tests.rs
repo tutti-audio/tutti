@@ -161,7 +161,7 @@ fn reserved_version_bits_are_nakked_with_0x02_in_the_receivers_version() {
 }
 
 // §5.4: Message Format Version 0x00 is deprecated.
-/// Spec: m2-101/5.4#3
+/// Spec: m2-101/5.4#3, m2-101/5.4#2
 #[test]
 fn version_zero_is_refused() {
     let mut bytes = invalidate();
@@ -172,7 +172,7 @@ fn version_zero_is_refused() {
 // §5.3: a device that receives a version higher than its own processes only the
 // fields of its own version and ignores any appended ones: a version the reserved bits do not
 // forbid is read, with what it appended.
-/// Spec: m2-101/5.3#5, m2-101/5.4#6
+/// Spec: m2-101/5.3#5, m2-101/5.4#6, m2-101/5.4.1#1, m2-101/5.4.1#2
 #[test]
 fn a_higher_version_is_read_and_its_appended_fields_ignored() {
     let mut bytes = invalidate();

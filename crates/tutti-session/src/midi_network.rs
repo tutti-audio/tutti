@@ -10,7 +10,7 @@ use std::io;
 use std::marker::PhantomData;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
 use std::num::NonZeroUsize;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Weak};
 
 use tutti_buffers::Float;
 use tutti_graph::{EventInletWriter, Losses, NodeKey, Stamp};
@@ -22,7 +22,7 @@ use tutti_midi_runtime::{
     LIVE_INLET_CAPACITY, MidiInputNode, MidiInputPorts, MidiOut, Outgoing, Taken,
 };
 use tutti_platform::{Executor, Instant};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 use tutti_ump::Ump;
 
 use crate::graph::Graph;
@@ -303,7 +303,7 @@ struct NetShared {
 impl std::fmt::Debug for NetShared {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NetShared")
-            .field("peers", &self.peers.lock_recover().len())
+            .field("peers", &self.peers.lock().len())
             .finish_non_exhaustive()
     }
 }
@@ -311,7 +311,7 @@ impl std::fmt::Debug for NetShared {
 impl NetShared {
     fn established(&self) -> Vec<SocketAddr> {
         self.peers
-            .lock_recover()
+            .lock()
             .iter()
             .filter(|peer| peer.input.is_some())
             .map(|peer| peer.addr)
@@ -398,7 +398,7 @@ impl<R> MidiNetwork<R> {
         self.claim
             .shared
             .peers
-            .lock_recover()
+            .lock()
             .iter()
             .filter_map(|peer| peer.input.map(|node| (peer.identity, node)))
             .collect()
@@ -448,7 +448,7 @@ impl MidiNetwork<Host> {
     fn answer(&self, identity: EndpointIdentity, accept: bool) -> Result<(), NetworkError> {
         let shared = &self.claim.shared;
         let addr = {
-            let peers = shared.peers.lock_recover();
+            let peers = shared.peers.lock();
             let peer = peers
                 .iter()
                 .find(|peer| peer.identity == identity)
@@ -635,7 +635,7 @@ impl Net {
         for event in shared.link.pending() {
             match event {
                 Event::Confirm { peer, remote } => {
-                    let mut peers = shared.peers.lock_recover();
+                    let mut peers = shared.peers.lock();
                     peers.retain(|known| known.addr != peer);
                     peers.push(Peer {
                         addr: peer,
@@ -662,7 +662,7 @@ impl Net {
                         }
                     }
                     let entry = Entry::open(graph, cx, peer, remote);
-                    let mut peers = shared.peers.lock_recover();
+                    let mut peers = shared.peers.lock();
                     peers.retain(|known| known.addr != peer && known.identity != remote);
                     peers.push(Peer {
                         addr: peer,
@@ -688,7 +688,7 @@ impl Net {
                     reason,
                 } => {
                     let known = {
-                        let mut peers = shared.peers.lock_recover();
+                        let mut peers = shared.peers.lock();
                         let at = peers.iter().position(|known| known.addr == peer);
                         at.map(|at| peers.remove(at))
                     };

@@ -33,9 +33,9 @@
 use std::collections::HashMap;
 use std::future::{Future, IntoFuture};
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::task::{Context, Poll};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use crate::{PluginHandle, PluginSignal, Subscription};
 use tutti_plugin_types::{Answer, ParameterInfo, PluginParamRange};
@@ -56,7 +56,7 @@ pub struct ParamReporter(Edits);
 impl ParamReporter {
     /// Queues a value as if the plugin had reported it.
     pub fn report(&self, id: ParamId, value: Normalized) {
-        self.0.lock_recover().push((id, value));
+        self.0.lock().push((id, value));
     }
 }
 
@@ -279,7 +279,7 @@ impl PluginParamValues {
             if let PluginSignal::Param(edit) = notice
                 && let Some(value) = edit.value()
             {
-                queue.lock_recover().push((edit.id(), value));
+                queue.lock().push((edit.id(), value));
             }
         });
         let mirror = Self {
@@ -317,7 +317,7 @@ impl PluginParamValues {
     /// Queues a value as if the plugin had reported it: the host set it, and
     /// reads of it answer it at once.
     pub fn report(&self, id: ParamId, value: Normalized) {
-        self.edits.lock_recover().push((id, value));
+        self.edits.lock().push((id, value));
     }
 
     /// A handle that reports into this mirror without borrowing it.
@@ -362,7 +362,7 @@ impl PluginParamValues {
     /// The newest value queued for `id`, if one is.
     fn latest(&self, id: ParamId) -> Option<Normalized> {
         self.edits
-            .lock_recover()
+            .lock()
             .iter()
             .rev()
             .find_map(|&(at, value)| (at == id).then_some(value))
@@ -413,7 +413,7 @@ impl PluginParamValues {
         let Some(declared) = self.declared.as_mut() else {
             return;
         };
-        let edits = std::mem::take(&mut *self.edits.lock_recover());
+        let edits = std::mem::take(&mut *self.edits.lock());
         for (id, value) in edits {
             if let Some(&at) = declared.index.get(&id) {
                 declared.values[at] = value;
@@ -491,7 +491,7 @@ mod tests {
             match &self.mode {
                 Mode::Held(parked) => {
                     let (tx, rx) = Answer::channel();
-                    parked.lock().unwrap().push(Box::new((tx, value)));
+                    parked.lock().push(Box::new((tx, value)));
                     rx
                 }
                 _ => tutti_plugin_types::Answer::ready(value),
@@ -808,11 +808,7 @@ mod tests {
         let read = executor.spawn(ParamRead::of(&plugin).into_future());
 
         executor.run_until_stalled();
-        assert_eq!(
-            parked.lock().unwrap().len(),
-            1,
-            "asked for the list, waiting"
-        );
+        assert_eq!(parked.lock().len(), 1, "asked for the list, waiting");
 
         let free = Arc::new(AtomicBool::new(false));
         let other = Arc::clone(&free);
@@ -826,16 +822,16 @@ mod tests {
         );
         assert!(!read.is_finished(), "the read is still waiting");
 
-        parked.lock().unwrap().remove(0).fill();
+        parked.lock().remove(0).fill();
         executor.run_until_stalled();
         assert_eq!(
-            parked.lock().unwrap().len(),
+            parked.lock().len(),
             1,
             "the list woke it: the value is asked"
         );
         assert!(!read.is_finished());
 
-        parked.lock().unwrap().remove(0).fill();
+        parked.lock().remove(0).fill();
         executor.run_until_stalled();
         assert!(read.is_finished(), "the value woke it: the read ended");
         let mut read = read;
@@ -858,29 +854,29 @@ mod tests {
 
         let mut first = ParamRead::of(&plugin).into_future();
         assert!(poll_once(&mut first).is_pending());
-        assert_eq!(parked.lock().unwrap().len(), 1);
+        assert_eq!(parked.lock().len(), 1);
         drop(first);
         assert!(
-            parked.lock().unwrap()[0].canceled(),
+            parked.lock()[0].canceled(),
             "dropping the read cancels the question in flight"
         );
 
         let mut second = ParamRead::of(&plugin).into_future();
         assert!(poll_once(&mut second).is_pending());
         // The plugin answers the first read's question late: discarded quietly.
-        let late = parked.lock().unwrap().remove(0);
+        let late = parked.lock().remove(0);
         late.fill();
         assert!(
             poll_once(&mut second).is_pending(),
             "not the second read's answer"
         );
         // Its own answers.
-        parked.lock().unwrap().remove(0).fill();
+        parked.lock().remove(0).fill();
         assert!(
             poll_once(&mut second).is_pending(),
             "the value is asked next"
         );
-        parked.lock().unwrap().remove(0).fill();
+        parked.lock().remove(0).fill();
         let Poll::Ready(Ok(snapshot)) = poll_once(&mut second) else {
             panic!("the second read ends with its own answers")
         };

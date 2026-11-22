@@ -1,5 +1,9 @@
 //! Every seed of every target replays through it, and every target has seeds.
 
+/// An allocation inside an `RtScope` aborts the running test.
+#[global_allocator]
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
+
 use std::path::PathBuf;
 use tutti_fuzz::TARGETS;
 

@@ -30,7 +30,7 @@
 //! call: its future is returned already resolved, as [`PeerError::Disconnected`].
 
 use std::collections::BTreeMap;
-use std::sync::{Mutex, Weak};
+use std::sync::Weak;
 
 use tutti_midi_ci::{
     BodyLimit, CallError, CiDeviceId, Muid, Nak, PeData, PeOutcome, PeReply, PeResource, PeSignal,
@@ -43,7 +43,7 @@ use tutti_midi_hardware::{
     ProfileSwitch, PropertyAsk, PropertyCall, PropertyPeer, ReportAsk, ReportEnd,
     Reporter as ListedReporter, WholeSwitcher as ListedWhole,
 };
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 use tutti_ump::{MidiChannel, MidiGroup};
 
 use crate::PeerError;
@@ -814,7 +814,7 @@ impl Pending {
     /// The ids of the peers `listed`, in its order: minted when a peer is first
     /// listed, and dropped for the peers `listed` no longer holds.
     pub(crate) fn peer_ids(&self, listed: &[PeerId]) -> Vec<PeerResourceId> {
-        let mut ids = self.peer_ids.lock_recover();
+        let mut ids = self.peer_ids.lock();
         ids.retain(|peer, _| listed.contains(peer));
         listed
             .iter()

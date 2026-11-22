@@ -876,7 +876,7 @@ impl Node for Probe {
             self.silent.lock().unwrap().push(io.silent().get(0));
         }
         let mut sent = false;
-        for p in 0..self.events_in as usize {
+        for p in 0..self.events_in {
             for e in io.events(p) {
                 sent = true;
                 if let EventKind::Midi(Ump(w)) = e.kind {

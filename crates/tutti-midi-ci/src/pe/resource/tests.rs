@@ -137,7 +137,7 @@ fn device_info_ids_are_7_bit_arrays_of_the_right_length() {
 
 // M2-103 §6.1.4: a property named `x-` is the manufacturer's, kept inside an AMEI
 // Resource; an unknown property that is not one is a later version's.
-/// Spec: m2-103/6.1.4#2
+/// Spec: m2-103/6.1.4#2, m2-103/6.1.4#3
 #[test]
 fn a_manufacturer_property_is_kept_and_written_back() {
     let text = r#"{"manufacturerId":[125,0,0],"manufacturer":"Educational Use","familyId":[0,0],
@@ -288,6 +288,7 @@ fn a_link_role_is_at_most_32_characters() {
 
 // M2-107 §2.2: ProgramList entries have a title, the Bank Select and Program Change
 // that recall the Program, its categories and its tags.
+/// Spec: m2-103/8.6.1#1
 #[test]
 fn program_list_reads_its_entries() {
     let text = r#"[{"title":"Acoustic Grand Piano","bankPC":[121,0,1],"category":["Piano","Keys"],
@@ -672,6 +673,7 @@ fn json_schema_is_an_object() {
 
 // M2-103 §14: Property Data of a Resource this crate has no type for is kept as
 // JSON, whether the manufacturer's or not modelled; a typed Resource is never opaque.
+/// Spec: m2-103/8.1#1
 #[test]
 fn a_resource_without_a_type_is_opaque_json() {
     let program = custom("X-ProgramEdit");
@@ -742,6 +744,7 @@ fn resource_list_reads_table_82() {
 
 // M2-103 §14.3 Table 84, M2-107 §2.4, M2-106 §3.4: an entry is written without the
 // properties that have their defaults, and a default is the Resource's own.
+/// Spec: m2-103/14.3#2
 #[test]
 fn a_default_entry_is_minimal() {
     let minimal = |resource: PeResource| {
@@ -784,7 +787,7 @@ fn a_default_entry_is_minimal() {
 
 // M2-103 §14.3: canGet, canSet, requireResId, canPaginate and schema keep their
 // defaults on a Resource an AMEI/MMA specification defines.
-/// Spec: m2-103/14.3#3
+/// Spec: m2-103/14.3#3, m2-103/14.4#1
 #[test]
 fn a_standard_resource_keeps_its_defaults() {
     let entry = ResourceEntry::builder;
@@ -849,6 +852,7 @@ fn resource_list_does_not_list_itself_or_repeat() {
 }
 
 // M2-103 §14.2.1: `canPaginate` and `columns` are List Resource properties.
+/// Spec: m2-103/14.2.1#1
 #[test]
 fn only_a_list_resource_paginates_and_has_columns() {
     let x_song = custom("X-Song");
@@ -873,7 +877,7 @@ fn only_a_list_resource_paginates_and_has_columns() {
 
 // M2-103 §14.4, Table 86: a manufacturer JSON Resource gives a schema with at least
 // a title and a type.
-/// Spec: m2-103/14.4#2, m2-103/14.4#3
+/// Spec: m2-103/14.4#2, m2-103/14.4#3, m2-103/14.6#3
 #[test]
 fn a_custom_entry_needs_a_schema_with_a_title() {
     let wifi = custom("X-WIFIOn");

@@ -215,7 +215,7 @@ fn a_reply_from_our_muid_to_us_is_a_collision_on_us() {
     assert_eq!(device.peers().count(), 0);
 }
 
-/// Spec: m2-101/5.9#1, m2-101/5.9#2, m2-101/5.9#4
+/// Spec: m2-101/5.9#1, m2-101/5.9#2, m2-101/5.9#4, m2-101/5.9.1#6, m2-101/5.9.2#2
 #[test]
 fn an_invalidate_of_our_muid_ends_everything_changes_it_and_discovers_again_without_replying() {
     // §5.9: terminate transactions, new MUID, no reply, new Discovery.
@@ -708,7 +708,7 @@ fn a_device_declaring_process_inquiry_reports_midi_message_report_supported() {
     assert_eq!(*features, ProcessFeatures::MIDI_MESSAGE_REPORT);
 }
 
-/// Spec: m2-101/9.6#1, m2-101/9.6#5, m2-101/9.8#1
+/// Spec: m2-101/9.6#1, m2-101/9.6#5, m2-101/9.8#1, m2-101/9.6#6
 #[test]
 fn a_report_of_the_function_block_or_group_is_an_empty_reply_and_the_end_on_that_address() {
     // §9.6: a bit is 0 for a kind the Responder cannot provide, and the Device ID is

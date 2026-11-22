@@ -21,6 +21,17 @@
 //! is the app's choice and off by default). On macOS the equivalent is the app's
 //! hardened-runtime signing, which is the app's to do.
 //!
+//! ## How a server is reached
+//!
+//! Nothing names the connection. On unix the host makes a socket pair and spawns
+//! the server with one end as its standard input, so its command line and
+//! environment say nothing and no other process can dial it; the server takes the
+//! end as its first act, and `/dev/null` replaces its standard input. Windows has
+//! no end to hand a child, so the host names an unguessable pipe in the server's
+//! command line and the server listens on it. The first frame the server sends is
+//! `Hello`, which carries the protocol version; the audio lane is a second
+//! connection opened over the first.
+//!
 //! ## How a server ends
 //!
 //! Dropping the [`ProcessGuard`] asks the server to shut down (`Shutdown`), so
@@ -79,7 +90,7 @@ pub(crate) use wake::Wake;
 // fills it the way the node does.
 #[doc(hidden)]
 pub use client::audio::{PARAM_BUFFERS, PayloadPool};
-pub use config::{AudioConfig, IpcConfig, RandomSourceError, unique_socket_path};
+pub use config::{AudioConfig, IpcConfig};
 pub use error::PluginRenderFault;
 pub use ipc::{Ipc, IpcController, IpcParts, IpcProcessor, LaunchSpec, Launched};
 pub use offline_wait::OfflineWait;
@@ -98,6 +109,5 @@ pub use transport::broker_pair;
 pub use transport::control::ControlStream;
 #[cfg(feature = "testing")]
 pub use transport::control::send_state_reply;
-pub use transport::control::socket_name;
 pub use transport::shm::{AudioSlab, BlobWire, RING_SLOTS, SlabHandle, SlabWire, SlabWriter};
 pub use tutti_plugin_ipc_ffi::LaneWire;

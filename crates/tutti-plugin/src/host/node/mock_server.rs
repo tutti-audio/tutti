@@ -355,9 +355,7 @@ pub(super) fn new_node(
 
 /// The served plugin over the mock server's bridge, not yet activated.
 pub(super) fn served(rig: Rig) -> (Ipc, Record, Threads) {
-    let guard = Arc::new(ProcessGuard::for_test(
-        tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
-    ));
+    let guard = Arc::new(ProcessGuard::for_test());
     let record = Arc::clone(&rig.record);
     let threads = rig.threads;
     let mut ipc = Ipc::new(IpcParts {

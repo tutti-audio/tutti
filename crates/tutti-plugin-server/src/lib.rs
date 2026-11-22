@@ -7,8 +7,8 @@
 //! [`tutti-plugin`](https://docs.rs/tutti-plugin) spawns one `plugin-server`
 //! process per loaded plugin. This crate is that process: it hosts one VST3, CLAP
 //! or AU plugin in isolation, speaks [`tutti_plugin_ipc`]'s wire protocol over a
-//! Unix socket (a named pipe on Windows), and moves audio through a shared-memory
-//! slab. A plugin that crashes takes down this process and nothing else.
+//! Unix socket the host hands it as its standard input (a named pipe on Windows),
+//! and moves audio through a shared-memory slab. A plugin that crashes takes down this process and nothing else.
 //!
 //! It is one generic shell, `Server<L: OutOfProcess>`, over what each served
 //! format's host crate implements (`Loaded`, `Processor`, `Controller`, `Control`):
@@ -31,30 +31,32 @@
 //!
 //! ## Running a server yourself
 //!
-//! The library has one entry point, [`PluginServer`]. The host chooses the socket
-//! path and passes it in; [`run`][`PluginServer::run`] binds it, serves one host
-//! and returns when the host disconnects or asks for shutdown.
+//! The library has one entry point, [`PluginServer`]. The host makes the
+//! connection and hands this process its end: [`adopt_host`] takes it (the stream
+//! socket on standard input on unix, after which standard input is `/dev/null`;
+//! the pipe name in the first argument on Windows), and [`run`][`PluginServer::run`]
+//! serves one host and returns when the host disconnects or asks for shutdown.
 //!
 //! ```rust,no_run
-//! use tutti_plugin_server::PluginServer;
+//! use tutti_plugin_server::{PluginServer, adopt_host};
 //!
-//! let socket = std::env::args().nth(1).expect("socket path");
+//! // First thing the process does: it replaces standard input.
+//! let host = adopt_host().expect("started by a host");
 //!
-//! PluginServer::new(socket.into())
+//! PluginServer::new(host)
 //!     .expect("on the process's main thread")
 //!     .run()
 //!     .expect("session");
 //! ```
 //!
-//! The path is the one the host chose: a path this process derived itself could
-//! never meet the host that spawned it. `IpcError` is `tutti-plugin-types`';
-//! the wire protocol and its version are defined in `tutti-plugin-ipc`. A load
-//! carries which plugin of a file that exports several to load
-//! (`LoadPlugin::load`).
+//! Nothing names the connection: a process that was not handed one has nothing to
+//! meet. `IpcError` is `tutti-plugin-types`'; the wire protocol and its version are
+//! defined in `tutti-plugin-ipc`. A load carries which plugin of a file that
+//! exports several to load (`LoadPlugin::load`).
 //!
 //! ## How a session runs
 //!
-//! The host connects once, and that connection is the broker. It opens with a
+//! The host's connection, made before it spawned this process, is the broker. It opens with a
 //! `Hello` message carrying the protocol version, which the host refuses when it
 //! does not know it. Over it the host does the handshake (plugin load, format
 //! negotiation and shared-memory setup) and then opens the audio lane, handing the
@@ -134,6 +136,7 @@ mod session;
 mod ties;
 mod transport;
 
+pub use main_loop::{HostEnd, adopt_host};
 pub use server::{
     EXIT_HOST_UNWATCHED, EXIT_PLUGIN_LEAKED, EXIT_RENDER_LANE_LOST, EXIT_TASKS_DETACHED, Ended,
     PluginServer, failure_status,

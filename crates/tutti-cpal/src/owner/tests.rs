@@ -1,9 +1,10 @@
 use super::*;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
 use std::thread::{self, ThreadId};
 use tutti_platform::Executor;
+use tutti_rt::Mutex;
 
 /// A `!Send` value that records the thread it is created and dropped on.
 struct Probe {
@@ -15,7 +16,7 @@ impl Drop for Probe {
     fn drop(&mut self) {
         // Slow, so a handle drop that does not wait is observable.
         thread::sleep(std::time::Duration::from_millis(100));
-        *self.dropped_on.lock().unwrap() = Some(thread::current().id());
+        *self.dropped_on.lock() = Some(thread::current().id());
     }
 }
 
@@ -29,7 +30,7 @@ fn the_value_is_dropped_on_its_creating_thread() {
     let dropped = Arc::new(Mutex::new(None));
     let (c, d) = (Arc::clone(&created), Arc::clone(&dropped));
     let owned = Owned::spawn(&executor, "probe", move || {
-        *c.lock().unwrap() = Some(thread::current().id());
+        *c.lock() = Some(thread::current().id());
         Ok(Probe {
             _not_send: Rc::new(()),
             dropped_on: d,
@@ -40,11 +41,8 @@ fn the_value_is_dropped_on_its_creating_thread() {
     let from_other_thread = thread::spawn(move || drop(owned));
     from_other_thread.join().unwrap();
 
-    let created = created.lock().unwrap().expect("created");
-    let dropped = dropped
-        .lock()
-        .unwrap()
-        .expect("dropped before drop returned");
+    let created = created.lock().expect("created");
+    let dropped = dropped.lock().expect("dropped before drop returned");
     assert_eq!(created, dropped);
     assert_ne!(created, thread::current().id());
 }
@@ -58,7 +56,7 @@ fn a_failed_build_is_reported() {
     impl Drop for Guard {
         fn drop(&mut self) {
             thread::sleep(std::time::Duration::from_millis(100));
-            *self.0.lock().unwrap() = Some(thread::current().id());
+            *self.0.lock() = Some(thread::current().id());
         }
     }
     let dropped = Arc::new(Mutex::new(None));
@@ -68,10 +66,7 @@ fn a_failed_build_is_reported() {
         Err(DeviceError::InvalidConfig("no".into()))
     });
     assert!(matches!(r, Err(DeviceError::InvalidConfig(_))));
-    let id = dropped
-        .lock()
-        .unwrap()
-        .expect("closure dropped before return");
+    let id = dropped.lock().expect("closure dropped before return");
     assert_ne!(id, thread::current().id());
 }
 

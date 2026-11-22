@@ -64,8 +64,6 @@ use crate::SlabError;
 use crate::header::{SLAB_HEADER_BYTES, SlabHeader};
 pub use blob::{Blob, BlobWire, Lease, Received};
 use memmap2::{MmapOptions, MmapRaw};
-#[cfg(unix)]
-pub(crate) use platform::receive_descriptor;
 pub use platform::{Connection, SlabWire};
 use std::fs::File;
 use std::sync::Arc;

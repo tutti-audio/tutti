@@ -5,7 +5,7 @@
 
 use super::host;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::{
     AnyPlugin, DetachedSession, Key, PluginChange, PluginEvent, PluginParamRefusal, Session,
@@ -19,7 +19,7 @@ use tutti_plugin_types::{
     AnyThread, AutomationMode, AutomationModeError, Health, LinearRange, ParamFlags, ParamUnit,
     ParameterInfo, PlainMap, PluginFailure, PluginRefresh, PluginTail, RenderMode,
 };
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{Db, Hz, SampleRate, Samples, Seconds, Semitones};
@@ -79,7 +79,7 @@ struct Fake {
 impl Fake {
     fn new() -> Arc<Self> {
         let fake = Arc::new(Self::default());
-        *fake.infos.lock_recover() = declared();
+        *fake.infos.lock() = declared();
         for (id, value) in [
             (CUTOFF, 0.5),
             (LEVEL, 0.25),
@@ -88,14 +88,14 @@ impl Fake {
             (TRANSPOSE, 0.5),
             (OPAQUE, 0.5),
         ] {
-            fake.values.lock_recover().insert(id, Normalized::of(value));
+            fake.values.lock().insert(id, Normalized::of(value));
         }
         fake
     }
 
     fn range(&self, id: ParamId) -> Option<(f64, f64)> {
         self.infos
-            .lock_recover()
+            .lock()
             .iter()
             .find(|i| i.id() == id)
             .and_then(|i| i.bounds())
@@ -104,19 +104,19 @@ impl Fake {
     /// Makes the plugin take the writes held back, in order.
     fn take_held(&self) {
         self.held.store(false, std::sync::atomic::Ordering::SeqCst);
-        for (id, value) in std::mem::take(&mut *self.pending.lock_recover()) {
+        for (id, value) in std::mem::take(&mut *self.pending.lock()) {
             self.take(id, value);
         }
     }
 
     fn take(&self, id: ParamId, value: Normalized) {
-        self.values.lock_recover().insert(id, value);
-        self.sets.lock_recover().push((id, value));
+        self.values.lock().insert(id, value);
+        self.sets.lock().push((id, value));
     }
 
     fn sets(&self) -> Vec<(ParamId, f64)> {
         self.sets
-            .lock_recover()
+            .lock()
             .iter()
             .map(|&(id, v)| (id, v.get()))
             .collect()
@@ -125,10 +125,10 @@ impl Fake {
 
 impl AnyThread for Fake {
     fn parameter_descriptors(&self) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
-        tutti_plugin_types::Answer::ready(Some(self.infos.lock_recover().clone()))
+        tutti_plugin_types::Answer::ready(Some(self.infos.lock().clone()))
     }
     fn parameter_value(&self, id: ParamId) -> tutti_plugin_types::Answer<Option<Normalized>> {
-        tutti_plugin_types::Answer::ready(self.values.lock_recover().get(&id).copied())
+        tutti_plugin_types::Answer::ready(self.values.lock().get(&id).copied())
     }
 
     fn set_parameter_value(
@@ -136,11 +136,11 @@ impl AnyThread for Fake {
         id: ParamId,
         value: Normalized,
     ) -> Result<(), tutti_plugin_types::UnknownParam> {
-        if !self.infos.lock_recover().iter().any(|i| i.id() == id) {
+        if !self.infos.lock().iter().any(|i| i.id() == id) {
             return Err(tutti_plugin_types::UnknownParam(id));
         }
         if self.held.load(std::sync::atomic::Ordering::SeqCst) {
-            self.pending.lock_recover().push((id, value));
+            self.pending.lock().push((id, value));
         } else {
             self.take(id, value);
         }
@@ -472,7 +472,7 @@ fn a_rescan_that_removes_the_unit_refuses_a_unit_target_made_before_it() {
     let written = s.get(key.param(CUTOFF)).unwrap();
 
     let rescan = |s: &mut DetachedSession, info: ParameterInfo| {
-        *fake.infos.lock_recover() = vec![info];
+        *fake.infos.lock() = vec![info];
         refresh.fire(PluginRefresh::ParamTitles);
         let _ = update(s);
     };
@@ -542,16 +542,12 @@ fn a_rescan_replaces_the_declarations_and_the_values_with_them() {
 
     // The plugin drops `mode` and gains `shape`, and moves `cutoff`.
     let shape = ParamId::new(7);
-    *fake.infos.lock_recover() = vec![
+    *fake.infos.lock() = vec![
         cutoff_info(),
         ParameterInfo::new(shape, "Shape").with_normalized_default(0.5),
     ];
-    fake.values
-        .lock_recover()
-        .insert(CUTOFF, Normalized::of(0.75));
-    fake.values
-        .lock_recover()
-        .insert(shape, Normalized::of(0.5));
+    fake.values.lock().insert(CUTOFF, Normalized::of(0.75));
+    fake.values.lock().insert(shape, Normalized::of(0.5));
     refresh.fire(PluginRefresh::ParamTitles);
 
     // The notice is heard by this update, which submits the read; the old
@@ -720,8 +716,7 @@ fn a_gesture_spans_updates_and_refuses_once_the_plugin_is_gone() {
 fn a_gesture_on_a_parameter_the_rescan_dropped_is_refused() {
     let (mut s, node, fake, refresh) = ready();
     let gesture = cutoff(&s, node).edit().unwrap();
-    *fake.infos.lock_recover() =
-        vec![ParameterInfo::new(MODE, "Mode").with_normalized_default(0.0)];
+    *fake.infos.lock() = vec![ParameterInfo::new(MODE, "Mode").with_normalized_default(0.0)];
     refresh.fire(PluginRefresh::ParamTitles);
     let _ = update(&mut s);
     assert_eq!(
@@ -864,9 +859,7 @@ fn a_state_load_replaces_the_values_written_before_it() {
     let _ = update(&mut s);
     assert_eq!(s.get(key.param(CUTOFF)).unwrap(), Normalized::of(0.9));
 
-    fake.values
-        .lock_recover()
-        .insert(CUTOFF, Normalized::of(0.1));
+    fake.values.lock().insert(CUTOFF, Normalized::of(0.1));
     refresh.fire(PluginRefresh::ParamValues);
     let _ = update(&mut s);
     let _ = update(&mut s);
@@ -921,10 +914,7 @@ fn a_replace_by_the_same_plugin_keeps_its_parameters_settable_until_the_read_lan
         "the carried declaration keeps its access"
     );
 
-    again
-        .values
-        .lock_recover()
-        .insert(LEVEL, Normalized::of(0.75));
+    again.values.lock().insert(LEVEL, Normalized::of(0.75));
     let _ = update(&mut s);
     assert_eq!(s.get(key.param(LEVEL)).unwrap(), Normalized::of(0.75));
     assert_eq!(s.get(key.param(CUTOFF)).unwrap(), Normalized::of(0.3));
@@ -958,8 +948,7 @@ fn a_write_to_a_parameter_a_rescan_dropped_is_counted_and_then_no_target() {
     let refused = |s: &DetachedSession| s.plugin_view(key).unwrap().losses().refused;
     assert_eq!(refused(&s), 0);
 
-    *fake.infos.lock_recover() =
-        vec![ParameterInfo::new(MODE, "Mode").with_normalized_default(0.0)];
+    *fake.infos.lock() = vec![ParameterInfo::new(MODE, "Mode").with_normalized_default(0.0)];
     s.set(key.param(CUTOFF).to(Normalized::of(0.8))).unwrap();
     assert_eq!(refused(&s), 1, "the plugin's refusal is counted");
     assert!(fake.sets().is_empty(), "the plugin took nothing");
@@ -1018,7 +1007,7 @@ fn a_rescan_to_another_range_converts_a_target_made_before_it_with_the_new_map()
     let _ = update(&mut s);
     let cutoff = cutoff(&s, key.erase()).unit::<Hz>().unwrap();
 
-    *fake.infos.lock_recover() = vec![
+    *fake.infos.lock() = vec![
         cutoff_info()
             .with_plain_range(100.0, 200.0, 100.0)
             .with_plain_map(PlainMap::Linear(LinearRange::new(100.0, 200.0))),

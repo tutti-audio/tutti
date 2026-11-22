@@ -137,14 +137,14 @@
 //! mode, or if it was never told.
 
 use std::future::{Future as _, IntoFuture as _};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
 use std::time::Duration;
 
 use tutti_platform::Instant;
 use tutti_plugin_types::{MainThreadMarker, StateUse};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_graph::NodeKey;
 use tutti_plugin::catalog::Plugin as HostPlugin;
@@ -737,14 +737,14 @@ pub(crate) type Signals = Arc<Mutex<Vec<PluginSignal>>>;
 
 /// Queues `notice` as if the plugin had reported it.
 pub(crate) fn queue(notices: &Signals, notice: PluginSignal) {
-    notices.lock_recover().push(notice);
+    notices.lock().push(notice);
 }
 
 /// A queue for what `handle` reports and the subscription that fills it.
 fn hear(handle: &PluginHandle) -> (Signals, Subscription) {
     let notices = Signals::default();
     let queue = Arc::clone(&notices);
-    let hearing = handle.subscribe(move |notice| queue.lock_recover().push(notice));
+    let hearing = handle.subscribe(move |notice| queue.lock().push(notice));
     (notices, hearing)
 }
 
@@ -1074,12 +1074,12 @@ struct GateState {
 impl Gate {
     /// The plugin is gone: removed or replaced.
     pub(crate) fn end(&self) {
-        self.0.lock_recover().ended = true;
+        self.0.lock().ended = true;
     }
 
     /// Whether the plugin is gone: removed or replaced.
     pub(crate) fn is_ended(&self) -> bool {
-        self.0.lock_recover().ended
+        self.0.lock().ended
     }
 
     /// Whether `other` is this same plugin instance's gate: a replaced plugin
@@ -1090,12 +1090,12 @@ impl Gate {
 
     /// The ids the mirror declares now (a read landed).
     pub(crate) fn declare(&self, mirror: &tutti_plugin_host::PluginParamValues) {
-        self.0.lock_recover().declared = mirror.descriptors().iter().map(|p| p.id()).collect();
+        self.0.lock().declared = mirror.descriptors().iter().map(|p| p.id()).collect();
     }
 
     /// Whether the plugin is still there and declares `id`.
     pub(crate) fn holds(&self, id: ParamId) -> bool {
-        let state = self.0.lock_recover();
+        let state = self.0.lock();
         !state.ended && state.declared.contains(&id)
     }
 }
@@ -1510,7 +1510,7 @@ impl HostedPlugin {
     /// plugin's own would arrive: a load the host made moves values the plugin
     /// may not report, and the next `Phase::Plugins` reads them again.
     pub(crate) fn refresh_values(&self) {
-        let mut waiting = self.notices.lock_recover();
+        let mut waiting = self.notices.lock();
         // One read serves every request made before the next phase.
         if !waiting
             .iter()
@@ -2536,7 +2536,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             }
             // What the plugin reported since the last update, in the order
             // it reported it.
-            let heard = std::mem::take(&mut *hosted.notices.lock_recover());
+            let heard = std::mem::take(&mut *hosted.notices.lock());
             // A rescan the plugin announced re-reads what it declares and the
             // value of each, as a task below.
             if heard.iter().any(|notice| {
@@ -3284,7 +3284,6 @@ mod tests {
             }
             if let Some(hold) = &self.hold {
                 hold.lock()
-                    .unwrap()
                     .recv_timeout(HANG_GUARD)
                     .expect("the test released the round trip");
             }
@@ -3313,7 +3312,6 @@ mod tests {
             let (tx, answer) = tutti_plugin_types::Answer::channel();
             std::thread::spawn(move || {
                 hold.lock()
-                    .unwrap()
                     .recv_timeout(HANG_GUARD)
                     .expect("the test released the round trip");
                 drop(tx.send(listed));
