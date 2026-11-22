@@ -490,6 +490,7 @@ fn a_get_under_flow_control_acknowledges_every_chunk_including_the_last() {
 // M2-103 §12.2: the time to a reply is under 3 seconds: the request is over at its
 // deadline, a message arriving at that instant is late, and the NAK 0x42 says so
 // (§12.2.3); the Request ID is free again.
+/// Spec: m2-103/12.2.3#2
 #[test]
 fn a_request_times_out_at_three_seconds_and_its_id_is_free() {
     let (mut i, now) = ready(1);
@@ -512,8 +513,47 @@ fn a_request_times_out_at_three_seconds_and_its_id_is_free() {
     );
     assert_eq!(i.in_flight(), 0);
     assert_eq!(i.deadline(), None);
+    // The Transaction is concluded: a reply that comes after it is for nothing, and
+    // draws no answer.
+    let late = reply_chunks(request, ok(PeStatus::Ok), b"{}");
+    assert!(deliver(&mut i, late, now + 3 * SECOND).is_empty());
     // The one request the peer takes can be made again.
     assert!(i.start(get("State"), now + 3 * SECOND).is_ok());
+}
+
+// M2-103 §12.1.2: an Initiator that terminates a Get sends the Terminate NAK and
+// concludes the Transaction without waiting for a reply: the chunks that follow are
+// for nothing and draw no answer.
+/// Spec: m2-103/12.1.2#4
+#[test]
+fn a_get_the_initiator_terminates_is_concluded_without_a_reply() {
+    let (mut i, now) = ready(1);
+    let mut get = PeGet::new(name("State"));
+    get.reply_limit = Some(BodyLimit::new(20).unwrap());
+    let (request, _) = i.start(PeCall::Get(get), now).unwrap();
+    let chunks = reply_chunks(request, ok(PeStatus::Ok), &[b'1'; 300]);
+    assert!(chunks.len() >= 3, "{} chunks", chunks.len());
+    let mut at = 0;
+    let ended = loop {
+        let (kind, chunk) = chunks[at].clone();
+        let actions = i.on_message(&chunk_from_peer(kind, chunk), now);
+        at += 1;
+        if !finished(&actions).is_empty() {
+            break actions;
+        }
+        assert!(at < chunks.len(), "the limit never ended the request");
+    };
+    let [nak] = naks(&ended)[..] else {
+        panic!("one NAK, got {ended:?}");
+    };
+    assert_eq!(nak.status, NakStatus::Terminate(PeTerminator::Initiator));
+    assert!(matches!(one_finished(&ended).2, PeOutcome::TooLarge(_)));
+    assert_eq!(i.in_flight(), 0);
+    assert_eq!(i.deadline(), None);
+    for (kind, chunk) in chunks[at..].iter().cloned() {
+        let after = i.on_message(&chunk_from_peer(kind, chunk), now);
+        assert!(after.is_empty(), "{after:?}");
+    }
 }
 
 // M2-103 §12.2: the time between chunks is under 3 seconds, from each chunk.

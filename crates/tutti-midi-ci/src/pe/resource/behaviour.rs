@@ -944,11 +944,6 @@ fn a_simple_action_is_a_set_of_its_prop_data() {
         panic!("not a full set");
     };
     assert_eq!(data.to_wire(), (None, br#""0_1_1""#.to_vec()));
-    // A Link that is no simple action is not one.
-    assert!(matches!(
-        ResourceSet::try_from(&PeLink::new(custom("X-Copy"))),
-        Err(ActionError::NotThatAction(_))
-    ));
 }
 
 // M2-103 §13.1.1 Table 68: `propData` is required of a `simpleAction`; the question
@@ -1084,4 +1079,172 @@ fn a_header_property_and_a_change_are_scalars_of_the_one_json_type() {
     assert!(PeHeader::try_from(br#"{"resource": "A"}"#.as_slice()).is_err());
     assert!(PeHeader::try_from(br#"{"resource":"A","x-n":[1]}"#.as_slice()).is_err());
     assert!(PeJson::try_from(br#"{"resource": "A", "x-n": [1]}"#.as_slice()).is_ok());
+}
+
+// M2-103 §12.1.2, §12.2.3: on the Initiator's Terminate NAK of a Get, or its NAK that
+// a timeout has occurred, the Responder stops sending chunks of that Request Id, and
+// answers the NAK with nothing: the Transaction is concluded.
+/// Spec: m2-103/12.1.2#2, m2-103/12.1.2#4, m2-103/12.2.3#2
+#[test]
+fn a_nak_that_ends_a_get_stops_the_chunks_and_gets_no_reply() {
+    let next = |n: u16| {
+        signal_message(
+            PeTransaction::Get,
+            PeSignal::SendNext {
+                request_id: PeRequestId::of(9),
+                chunk: super::super::chunk::ChunkNo::of(n),
+            },
+        )
+    };
+    // Without a NAK the ACK of chunk 1 draws chunk 2.
+    let (mut link, _) = started_stream();
+    assert_eq!(
+        chunks_of(&link.resp.on_message(&mut link.store, &next(1), link.now)).len(),
+        1
+    );
+    for signal in [
+        PeSignal::Terminate {
+            request_id: PeRequestId::of(9),
+            by: PeTerminator::Initiator,
+        },
+        PeSignal::TimedOut {
+            request_id: PeRequestId::of(9),
+        },
+    ] {
+        let (mut link, _) = started_stream();
+        let answer = link.resp.on_message(
+            &mut link.store,
+            &signal_message(PeTransaction::Get, signal),
+            link.now,
+        );
+        assert!(answer.is_empty(), "{signal:?} was answered: {answer:?}");
+        assert!(link.resp.deadline().is_none(), "{signal:?}: still timed");
+        let after = link.resp.on_message(&mut link.store, &next(1), link.now);
+        assert!(chunks_of(&after).is_empty(), "{signal:?}");
+    }
+}
+
+// M2-103 §13.1: an Initiator makes an action only of a role the Link declares: a
+// Link with no role, with another role or with the other action's cannot be made
+// into the Set of either.
+/// Spec: m2-103/13.1#5
+#[test]
+fn an_action_is_made_only_of_the_role_the_link_declares() {
+    let simple = PeLink {
+        role: Some(LinkRole::Simple(SimpleAction {
+            prop_data: PeJson::Bool(true),
+            confirmation: None,
+        })),
+        ..PeLink::new(PeResource::LocalOn)
+    };
+    let PeData::ChannelList(list) =
+        PeData::decode(&PeResource::ChannelList, &json(selector_channels())).unwrap()
+    else {
+        panic!("not ChannelList");
+    };
+    let selector = list.entries()[0].links[0].clone();
+    let chosen = match json(r#"{"output":"LA"}"#) {
+        PeJson::Object(o) => o,
+        _ => panic!("not an object"),
+    };
+    assert!(ResourceSet::try_from(&simple).is_ok());
+    assert!(ResourceSet::from_selection(&selector, &chosen).is_ok());
+    let other = |role| PeLink {
+        role,
+        ..PeLink::new(custom("X-Copy"))
+    };
+    let undeclared = [
+        other(None),
+        other(Some(LinkRole::Cluster)),
+        other(Some(LinkRole::Other(
+            RoleName::try_from("x-vendorRole").unwrap(),
+        ))),
+    ];
+    for link in undeclared.iter().chain([&selector]) {
+        assert_eq!(
+            ResourceSet::try_from(link),
+            Err(ActionError::NotThatAction("simpleAction")),
+            "{link:?}"
+        );
+    }
+    for link in undeclared.iter().chain([&simple]) {
+        assert_eq!(
+            ResourceSet::from_selection(link, &chosen),
+            Err(ActionError::NotThatAction("selectorAction")),
+            "{link:?}"
+        );
+    }
+}
+
+// M2-103 §13.1.1, §13.1.2: an Initiator fills the `resId` the Link has, for the
+// Resource it Sets, and a Resource that needs one is refused without it.
+/// Spec: m2-103/13.1.1#5, m2-103/13.1.2#6
+#[test]
+fn an_action_sets_the_entry_its_link_names() {
+    let action = |res_id: Option<&str>| PeLink {
+        res_id: res_id.map(id),
+        role: Some(LinkRole::Simple(SimpleAction {
+            prop_data: json("[]"),
+            confirmation: None,
+        })),
+        ..PeLink::new(PeResource::ProgramList)
+    };
+    // ProgramList has entries, so its Set names one.
+    let set = ResourceSet::try_from(&action(Some("general"))).unwrap();
+    assert_eq!(set.target().res_id(), Some(&id("general")));
+    assert_eq!(
+        ResourceSet::try_from(&action(None)),
+        Err(ActionError::Refused(RequestRefused::ResIdRequired(
+            PeResource::ProgramList
+        )))
+    );
+    // The selector's action Resource is filled the same way.
+    let selector = |action_res_id: Option<&str>| PeLink {
+        role: Some(LinkRole::Selector(SelectorAction {
+            action_resource: PeResource::ProgramList,
+            action_res_id: action_res_id.map(id),
+            selected_property: super::super::limits::PropertyName::new("output").unwrap(),
+        })),
+        ..PeLink::new(custom("X-AudioOutList"))
+    };
+    let chosen = match json(r#"{"output":[]}"#) {
+        PeJson::Object(o) => o,
+        _ => panic!("not an object"),
+    };
+    let set = ResourceSet::from_selection(&selector(Some("ch1")), &chosen).unwrap();
+    assert_eq!(set.target().res_id(), Some(&id("ch1")));
+    assert_eq!(
+        ResourceSet::from_selection(&selector(None), &chosen),
+        Err(ActionError::Refused(RequestRefused::ResIdRequired(
+            PeResource::ProgramList
+        )))
+    );
+    // The list Resource's own `resId` is read from the Link as the Link has it.
+    let PeData::ChannelList(list) =
+        PeData::decode(&PeResource::ChannelList, &json(selector_channels())).unwrap()
+    else {
+        panic!("not ChannelList");
+    };
+    assert_eq!(list.entries()[0].links[0].res_id, Some(id("ch1")));
+}
+
+// M2-103 Table 72: a `resId` of a Link, and the `actionResId` of a selector, are 1 to
+// 36 characters of letters, digits and underscores, and no other.
+/// Spec: m2-103/13.1.2#7
+#[test]
+fn a_link_res_id_has_only_the_characters_of_a_res_id() {
+    let entry = |res_id: &str, action_res_id: &str| {
+        format!(
+            r#"[{{"title":"T","channel":1,"links":[{{"resource":"X-L","resId":"{res_id}",
+            "role":"selectorAction","actionResource":"X-O","actionResId":"{action_res_id}",
+            "selectedProperty":"p"}}]}}]"#
+        )
+    };
+    let reads = |text: String| PeData::decode(&PeResource::ChannelList, &json(&text)).is_ok();
+    assert!(reads(entry("a_1", "b_2")));
+    let too_long = "a".repeat(37);
+    for bad in ["", "a b", "a-b", "a/b", "a.b", too_long.as_str()] {
+        assert!(!reads(entry(bad, "b_2")), "resId {bad:?}");
+        assert!(!reads(entry("a_1", bad)), "actionResId {bad:?}");
+    }
 }
