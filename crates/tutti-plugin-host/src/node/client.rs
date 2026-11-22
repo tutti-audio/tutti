@@ -20,6 +20,7 @@
 //! `assert_no_alloc` test in `tests/`).
 
 use crate::node_losses::LossCounts;
+use crate::param_delivery::chunk_offset;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -700,7 +701,7 @@ pub(super) fn take_edits(edits: Option<&EditPort>, params: &mut ParamDelivery, a
     let Some(edits) = edits else {
         return;
     };
-    let offset = i32::try_from(at).unwrap_or(i32::MAX);
+    let offset = chunk_offset(at);
     edits.drain(|id, value, epoch| {
         params.write(id, offset, value.get(), epoch);
     });

@@ -113,7 +113,10 @@ The reviewer checks:
     `Source` for audio, not events). The change adds no second way to do what an
     existing item does and duplicates no helper. It uses the crate's constructor, error
     and module shapes. A new pattern replaces the old one everywhere in the same pull
-    request, or is not introduced.
+    request, or is not introduced. For each new trait method, hook, phase, setter or
+    handle field, the reviewer names the fact it carries and finds every other entry
+    that already delivers that fact; a second entry is blocking, even when it carries
+    the fact to another place, time or thread.
 12. **Idiomatic Rust.** `rustfmt` and `clippy -D warnings` clean; `?`, iterators and
     borrowing where they fit; generics and `impl Trait` as the guidelines advise; no
     `unwrap` or `expect` in library code except on a stated invariant; no `as` cast

@@ -28,11 +28,14 @@ use vst3::Steinberg::{
 };
 use vst3::{Class, ComWrapper};
 
+use tutti_graph::Offset;
+#[cfg(test)]
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{ParameterPoint, ParameterQueue};
 use tutti_plugin_types::{PointBuf, PointPool};
 use tutti_rt::{AudioThreadCell, BorrowGuard};
-use tutti_units::Normalized;
 use tutti_units::ParamId;
+use tutti_units::{Normalized, Samples};
 
 /// The least point room a queue is built with. Typical automation carries a
 /// handful of points per buffer; past a queue's room it keeps its latest
@@ -238,7 +241,8 @@ impl IParamValueQueueTrait for ParamValueQueueImpl {
                 return kInvalidArgument;
             }
             let point = &points[index as usize];
-            offset_out.set(point.sample_offset);
+            // VST3's `getPoint` writes an `i32` frame offset: the ABI's own type.
+            offset_out.set(i32::try_from(point.sample_offset.get()).unwrap_or(i32::MAX));
             value_out.set(point.value.get());
             kResultOk
         })
@@ -265,7 +269,13 @@ impl IParamValueQueueTrait for ParamValueQueueImpl {
             };
             let points = &mut state.points;
             let point = ParameterPoint {
-                sample_offset,
+                // VST3's `addPoint` hands an `i32` frame offset within the
+                // plugin's block, which the queue does not know: any `i32`
+                // is in range, and a negative one reads as the first frame.
+                sample_offset: Offset::clamped(
+                    u32::try_from(sample_offset).unwrap_or(0),
+                    Samples::new(i32::MAX as usize),
+                ),
                 // Inbound across the ABI: the *plugin* calls this, so the value is
                 // as untrusted as anything else crossing that edge. `Normalized`
                 // clamps it, which is a guard this direction never had.
@@ -355,7 +365,7 @@ mod tests {
     fn queue_with_points(count: usize) -> ParameterQueue {
         let mut q = ParameterQueue::with_capacity(ParamId::new(42u32), count);
         for i in 0..count {
-            q.add_point(i as i32, i as f64 * 0.01);
+            q.add_point(at_frame(i as i32), unit_value(i as f64 * 0.01));
         }
         q
     }
@@ -371,9 +381,9 @@ mod tests {
     #[test]
     fn refill_from_queue_sorts_points_by_sample_offset() {
         let mut source = ParameterQueue::with_capacity(ParamId::new(7u32), 3);
-        source.add_point(384, 0.75);
-        source.add_point(0, 0.25);
-        source.add_point(128, 0.5);
+        source.add_point(at_frame(384), unit_value(0.75));
+        source.add_point(at_frame(0), unit_value(0.25));
+        source.add_point(at_frame(128), unit_value(0.5));
 
         let queue = ParamValueQueueImpl::with_room(ParamId::new(0), MIN_POINT_ROOM);
         queue.stage().refill(&source);
@@ -381,7 +391,7 @@ mod tests {
         let mut got = Vec::new();
         queue
             .stage()
-            .for_each_point(|p| got.push((p.sample_offset, p.value.get())));
+            .for_each_point(|p| got.push((p.sample_offset.get(), p.value.get())));
         assert_eq!(
             got,
             vec![(0, 0.25), (128, 0.5), (384, 0.75)],
@@ -398,16 +408,18 @@ mod tests {
         const RUN: i32 = 150;
         let mut source = ParameterQueue::with_capacity(ParamId::new(7u32), 2 * RUN as usize);
         for i in 0..RUN {
-            source.add_point(2 * i, 0.25);
+            source.add_point(at_frame(2 * i), unit_value(0.25));
         }
         for i in 0..RUN {
-            source.add_point(2 * i + 1, 0.75);
+            source.add_point(at_frame(2 * i + 1), unit_value(0.75));
         }
         let queue = ParamValueQueueImpl::with_room(ParamId::new(0), 2 * RUN as usize);
         let left_out = assert_no_alloc::assert_no_alloc(|| queue.stage().refill(&source));
         assert_eq!(left_out, 0);
         let mut got = Vec::new();
-        queue.stage().for_each_point(|p| got.push(p.sample_offset));
+        queue
+            .stage()
+            .for_each_point(|p| got.push(p.sample_offset.get() as i32));
         assert_eq!(got, (0..2 * RUN).collect::<Vec<_>>());
     }
 
@@ -417,8 +429,8 @@ mod tests {
     #[test]
     fn refill_from_queue_is_stable_for_equal_offsets() {
         let mut source = ParameterQueue::with_capacity(ParamId::new(7u32), 2);
-        source.add_point(64, 0.1); // old value
-        source.add_point(64, 0.9); // new value at the same instant
+        source.add_point(at_frame(64), unit_value(0.1)); // old value
+        source.add_point(at_frame(64), unit_value(0.9)); // new value at the same instant
 
         let queue = ParamValueQueueImpl::with_room(ParamId::new(0), MIN_POINT_ROOM);
         queue.stage().refill(&source);
@@ -439,7 +451,7 @@ mod tests {
     fn refill_from_queue_unsorted_is_allocation_free() {
         let mut source = ParameterQueue::with_capacity(ParamId::new(7u32), 16);
         for i in (0..16i32).rev() {
-            source.add_point(i * 8, f64::from(i) * 0.01);
+            source.add_point(at_frame(i * 8), unit_value(f64::from(i) * 0.01));
         }
 
         let queue = ParamValueQueueImpl::with_room(ParamId::new(0), MIN_POINT_ROOM);
@@ -493,7 +505,7 @@ mod tests {
         let mut last = None;
         queue
             .stage()
-            .for_each_point(|p| last = Some(p.sample_offset));
+            .for_each_point(|p| last = Some(p.sample_offset.get()));
         assert_eq!(last, Some(32), "ends on its latest");
     }
 
@@ -529,7 +541,7 @@ mod tests {
         let mut last = None;
         queue
             .stage()
-            .for_each_point(|p| last = Some((p.sample_offset, p.value.get())));
+            .for_each_point(|p| last = Some((p.sample_offset.get(), p.value.get())));
         assert_eq!(last, Some((100, 0.75)));
     }
 }

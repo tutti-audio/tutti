@@ -33,6 +33,8 @@
 
 use std::sync::Arc;
 
+#[cfg(test)]
+use tutti_plugin_types::fake::at_frame;
 use tutti_plugin_types::{
     Control, EditReader, EditWriter, MainThreadMarker, UnknownParam, edit_slots,
 };
@@ -291,7 +293,7 @@ mod tests {
         params.begin();
         post.write(id(1), Normalized::of(0.75)).unwrap();
         port.drain(|param, value, epoch| {
-            params.write(param, 0, value.get(), epoch);
+            params.write(param, at_frame(0), value.get(), epoch);
         });
         post.reset();
         let held = post.0.reader.try_borrow_mut().expect("free");
