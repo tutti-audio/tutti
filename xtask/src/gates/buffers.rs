@@ -502,7 +502,7 @@ fn source_files(tree: &dyn Tree) -> Vec<String> {
 /// (`pending`, `ffi`) or `not-audio` with a `: <why>`.
 /// The reason kinds that carry a judgement, written `<kind>: <why>` with a
 /// non-empty why.
-const JUDGED: [&str; 2] = ["not-audio", "not-interleave"];
+const JUDGED: [&str; 3] = ["not-audio", "not-interleave", "atomic"];
 
 pub(super) fn reason_error(reason: &str, allowed: &[&str]) -> Option<String> {
     let (kind, why) = match reason.split_once(':') {
