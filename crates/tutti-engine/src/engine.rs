@@ -200,8 +200,8 @@ pub struct Engine<F: Float = f32> {
     readings: (Gauge<Load>, Counter<BlockCounts>),
     /// The tap after the fader, the audio thread's ends.
     hearing: AudioThreadCell<crate::hearing::Hearing<F>>,
-    /// Its control side.
-    heard_taps: crate::HeardTaps<F>,
+    /// Its control side, until the owner takes it.
+    heard_taps: tutti_rt::Exclusive<Option<crate::HeardTaps<F>>>,
     /// A reader of the block clock the graph render writes.
     clock_reader: BlockClockReader,
     /// The folds from the root to the device, published by
@@ -541,7 +541,7 @@ impl<F: Float> Engine<F> {
             load: AudioThreadCell::new(writers),
             readings: (load, blocks),
             hearing: AudioThreadCell::new(hearing),
-            heard_taps,
+            heard_taps: tutti_rt::Exclusive::new(Some(heard_taps)),
             clock_reader,
             output,
             folds,
@@ -656,9 +656,10 @@ impl<F: Float> Engine<F> {
     /// The control side of the tap after the fader ("what I'm hearing"): the
     /// device-width output of every [`process`](Self::process) and
     /// [`process_segment`](Self::process_segment) call, read through a
-    /// [`TapReader`](tutti_graph::TapReader). See [`HeardTaps`](crate::HeardTaps).
-    pub fn heard_taps(&self) -> crate::HeardTaps<F> {
-        self.heard_taps.clone()
+    /// [`TapReader`](tutti_graph::TapReader). The one owner takes it: `None`
+    /// once taken. See [`HeardTaps`](crate::HeardTaps).
+    pub fn take_heard_taps(&mut self) -> Option<crate::HeardTaps<F>> {
+        self.heard_taps.get_mut().take()
     }
 
     /// Renders the whole of `output` with no transport motion and no declick.
@@ -1796,13 +1797,11 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(512)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        let mut engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let mut tap = engine
-            .heard_taps()
-            .open(ChannelLayout::STEREO, Samples::new(256))
-            .expect("opens")
-            .reader()
-            .expect("the audio thread is not behind");
+            .take_heard_taps()
+            .expect("a fresh engine holds it")
+            .open(ChannelLayout::STEREO, Samples::new(256));
         let mut buf = vec![1.0f32; 64 * 2];
         let mut seg = vec![1.0f32; 32 * 2];
         {

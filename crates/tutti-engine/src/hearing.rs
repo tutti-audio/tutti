@@ -17,121 +17,58 @@
 //! at the start of each call, and the writer it replaces goes back over a
 //! second queue to be freed on the control side: the audio thread never
 //! drops one (`TapWriter` panics in debug if it is dropped inside
-//! [`RtScope`](tutti_rt::RtScope), which the engine enters). The control ends
-//! of both queues sit behind a `Mutex` that only control threads take.
+//! [`RtScope`](tutti_rt::RtScope), which the engine enters).
 //!
-//! **When the first frame arrives.** An install is seen at the start of the
-//! next [`process`](crate::Engine::process) call that begins after
-//! [`open`](HeardTaps::open) returns, and that call's whole block is the first
-//! thing written: a call already in progress when `open` ran is not. A
-//! [`close`](HeardTaps::close) stops the writes from the next call on, the
-//! same way. Opens and closes are applied in the order they took the lock, so
-//! racing ones leave the state the last of them asked for.
+//! **One pending install, latest wins.** [`open`](HeardTaps::open) and
+//! [`close`](HeardTaps::close) always succeed: each sets the one pending
+//! install, replacing the one not yet pushed (a replaced writer is dropped on
+//! the control side, and its reader ends once drained), and then pushes it if
+//! the queue has room. With no room (the audio thread is behind) it stays
+//! pending until a later push: [`reclaim`](HeardTaps::reclaim), or another
+//! open or close. Opening while a reader is alive supersedes it: the audio
+//! thread swaps the writer, the old one is freed on the control side, and the
+//! old reader ends after its drain.
+//!
+//! **When the first frame arrives.** The writes start at the first
+//! [`process`](crate::Engine::process) call that begins after the install is
+//! pushed, as a plan tap's start at its commit, and that call's whole block is
+//! the first thing written: a call already in progress when the push ran is
+//! not. A close stops the writes from the next call after its push on, the
+//! same way.
 //!
 //! A block of another width than the tap's counts as lost, whole.
 
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::Weak;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Interleaved};
 use tutti_graph::{TapReader, TapWriter};
-use tutti_rt::{LockExt, Overflow, PushError, RingReader, RingWriter, ring};
+use tutti_rt::{Overflow, PushError, RingReader, RingWriter, ring};
 use tutti_units::Samples;
 
-/// Opens that can be in flight at once. The install queue holds one more: a
-/// slot kept for a close, so closing a tap never fails for want of room while
-/// opens fill the queue (the audio thread behind).
-const INSTALLS: usize = 4;
+/// Installs that can be queued for the audio thread at once.
+const INSTALLS: usize = 2;
 
 /// An install: a writer, or `None` to close.
 type Install<F> = Option<Box<TapWriter<F>>>;
 
-/// Why [`HeardTaps::open`] or [`HeardTaps::close`] refused.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
-#[non_exhaustive]
-pub enum HeardTapError {
-    /// A reader of the engine's tap is alive. Close it first (or drop it:
-    /// the session's reclaim phase closes a tap whose reader is gone).
-    #[error("the heard tap already has a reader; close it before opening again")]
-    Busy,
-    /// [`HeardTaps::close`] found no tap open (none was opened, or it was
-    /// closed, or its dropped reader was reclaimed).
-    #[error("no heard tap is open")]
-    NotOpen,
-}
-
-/// What [`HeardTaps::open`] did: opened the tap, or found the audio thread
-/// behind. Not a [`HeardTapError`]: that says a call was refused for good (a
-/// reader is alive, nothing is open), and this one is a moment that passes.
-#[derive(Debug)]
-#[must_use = "a Retry opened nothing"]
-pub enum HeardTapOpen<F: Float = f32> {
-    /// The tap is open: this reads it. It flows from the first render that
-    /// begins after the call returned.
-    Opened(TapReader<F>),
-    /// The audio thread has not yet taken the last installs (it is not
-    /// rendering). Nothing was opened or changed; call again once it has.
-    Retry,
-}
-
-impl<F: Float> HeardTapOpen<F> {
-    /// The reader, or `None` for a [`Retry`](Self::Retry).
-    pub fn reader(self) -> Option<TapReader<F>> {
-        match self {
-            Self::Opened(reader) => Some(reader),
-            Self::Retry => None,
-        }
-    }
-}
-
-/// The control side of the engine's after-the-fader tap: cheap to clone,
-/// usable from any control thread. Get it from
-/// [`Engine::heard_taps`](crate::Engine::heard_taps).
-#[derive(Clone, Debug)]
-pub struct HeardTaps<F: Float = f32>(Arc<Mutex<Control<F>>>);
-
-struct Control<F: Float> {
+/// The control side of the engine's after-the-fader tap. The session owns it
+/// ([`Engine::take_heard_taps`](crate::Engine::take_heard_taps)).
+pub struct HeardTaps<F: Float = f32> {
     install: RingWriter<Install<F>>,
     retired: RingReader<Box<TapWriter<F>>>,
     /// The open tap's reader, to see when it was dropped.
     reader: Option<Weak<()>>,
-    /// A close the install queue had no room for, owed to the audio thread:
-    /// sent on the next open, close or reclaim, whichever comes first.
-    owed_close: bool,
+    /// The install not yet in the queue: the latest open or close, waiting for
+    /// room.
+    pending: Option<Install<F>>,
     /// Where each tap opened takes its bell ([`HeardTaps::notify_with`]).
     bells: Option<tutti_rt::BellsHandle>,
 }
 
-impl<F: Float> std::fmt::Debug for Control<F> {
+impl<F: Float> std::fmt::Debug for HeardTaps<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Control").finish_non_exhaustive()
-    }
-}
-
-impl<F: Float> Control<F> {
-    /// Frees what the audio thread retired.
-    fn free(&mut self) {
-        while self.retired.pop().is_some() {}
-    }
-
-    fn alive(&self) -> bool {
-        self.reader.as_ref().is_some_and(|r| r.strong_count() > 0)
-    }
-
-    /// Sends a close the audio thread must see: now if the queue has room,
-    /// else it stays owed and the next control call sends it. The old writer
-    /// keeps feeding its reader (which no longer exists for the caller) until
-    /// then.
-    fn send_close(&mut self) {
-        self.owed_close = self.install.push(None).is_err();
-    }
-
-    /// Settles what is owed before anything new is queued behind it.
-    fn settle(&mut self) {
-        self.free();
-        if self.owed_close {
-            self.send_close();
-        }
+        f.debug_struct("HeardTaps").finish_non_exhaustive()
     }
 }
 
@@ -148,18 +85,18 @@ pub(crate) struct Hearing<F: Float> {
 
 /// A linked pair, built with the engine.
 pub(crate) fn link<F: Float>() -> (HeardTaps<F>, Hearing<F>) {
-    let (install_tx, install_rx) = ring::<Install<F>>(INSTALLS + 1, Overflow::Refuse);
+    let (install_tx, install_rx) = ring::<Install<F>>(INSTALLS, Overflow::Refuse);
     // A retired writer waits here for the control side; this holds every
     // install that can be in flight and the live one.
-    let (retire_tx, retire_rx) = ring::<Box<TapWriter<F>>>(INSTALLS + 3, Overflow::Refuse);
+    let (retire_tx, retire_rx) = ring::<Box<TapWriter<F>>>(INSTALLS + 2, Overflow::Refuse);
     (
-        HeardTaps(Arc::new(Mutex::new(Control {
+        HeardTaps {
             install: install_tx,
             retired: retire_rx,
             reader: None,
-            owed_close: false,
+            pending: None,
             bells: None,
-        }))),
+        },
         Hearing {
             install: install_rx,
             retire: retire_tx,
@@ -169,91 +106,80 @@ pub(crate) fn link<F: Float>() -> (HeardTaps<F>, Hearing<F>) {
 }
 
 impl<F: Float> HeardTaps<F> {
-    fn control(&self) -> std::sync::MutexGuard<'_, Control<F>> {
-        self.0.lock_recover()
+    /// Frees what the audio thread retired.
+    fn free(&mut self) {
+        while self.retired.pop().is_some() {}
+    }
+
+    /// Moves the pending install into the queue when it has room; otherwise it
+    /// stays pending.
+    fn push_pending(&mut self) {
+        self.free();
+        let Some(install) = self.pending.take() else {
+            return;
+        };
+        if let Err(refused) = self.install.push(install) {
+            // With the engine gone the install is dropped here, as one pushed
+            // just before the engine went would be.
+            if refused.error == PushError::Full {
+                self.pending = Some(refused.value);
+            }
+        }
     }
 
     /// Makes every tap opened from now on carry a bell from `bells`: the audio
     /// thread rings it after each block it writes and when the writer drops, and
     /// the reader awaits it ([`TapReader::notified`]). Without it a tap carries
     /// none.
-    pub fn notify_with(&self, bells: tutti_rt::BellsHandle) {
-        self.control().bells = Some(bells);
+    pub fn notify_with(&mut self, bells: tutti_rt::BellsHandle) {
+        self.bells = Some(bells);
     }
 
     /// Opens the tap: `width` channels (the device's, so every output channel
     /// is kept, no fold), each lane's ring `capacity` frames. What the reader
     /// does not drain in time is dropped and counted
-    /// ([`TapReader::take_lost`]). Flows from the first call of the engine's
-    /// render that begins after this returns.
+    /// ([`TapReader::take_lost`]).
     ///
-    /// Returns [`HeardTapOpen::Retry`], opening nothing, while the audio thread
-    /// has not taken the last installs.
-    ///
-    /// # Errors
-    ///
-    /// [`HeardTapError::Busy`] while another reader of the tap is alive.
-    pub fn open(
-        &self,
-        width: ChannelLayout,
-        capacity: Samples,
-    ) -> Result<HeardTapOpen<F>, HeardTapError> {
-        let mut c = self.control();
-        c.settle();
-        if c.alive() {
-            return Err(HeardTapError::Busy);
-        }
-        // One slot stays free for a close.
-        if c.owed_close || c.install.vacant() <= 1 {
-            return Ok(HeardTapOpen::Retry);
-        }
+    /// It always opens and returns the reader at once. The writer becomes the
+    /// one pending install, replacing a pending install not yet pushed, and
+    /// supersedes the tap that is open: the old reader ends once drained. The
+    /// writes start at the first render that begins after the install is
+    /// pushed, as a plan tap's start at its commit: the push is made by this
+    /// call when the audio thread has room for it, else by a later
+    /// [`reclaim`](Self::reclaim) (the session's update, and an offline
+    /// render, make it).
+    pub fn open(&mut self, width: ChannelLayout, capacity: Samples) -> TapReader<F> {
         let width = usize::from(width.count());
-        let (reader, writer) = match c.bells.as_ref().map(tutti_rt::BellsHandle::bell) {
+        let (reader, writer) = match self.bells.as_ref().map(tutti_rt::BellsHandle::bell) {
             Some(bell) => TapReader::pair_notified(width, capacity, bell),
             None => TapReader::pair(width, capacity),
         };
-        // Full cannot happen (the vacancy was checked). With the engine gone the
-        // writer is dropped here and the reader stays open, as one opened just
-        // before the engine went would be.
-        if let Err(refused) = c.install.push(Some(Box::new(writer))) {
-            debug_assert_eq!(
-                refused.error,
-                PushError::Disconnected,
-                "the queue has a free slot"
-            );
-        }
-        c.reader = Some(reader.watch());
-        Ok(HeardTapOpen::Opened(reader))
+        self.reader = Some(reader.watch());
+        self.pending = Some(Some(Box::new(writer)));
+        self.push_pending();
+        reader
     }
 
-    /// Closes the tap from the next call of the engine's render on. The
-    /// reader keeps what it was written.
-    ///
-    /// # Errors
-    ///
-    /// [`HeardTapError::NotOpen`] when no tap is open; nothing is sent.
-    pub fn close(&self) -> Result<(), HeardTapError> {
-        let mut c = self.control();
-        c.settle();
-        if c.reader.take().is_none() {
-            return Err(HeardTapError::NotOpen);
+    /// Closes the tap: the writes stop from the first render that begins after
+    /// the close is pushed, and the reader keeps what it was written. It
+    /// replaces the pending install. With no tap open it does nothing.
+    pub fn close(&mut self) {
+        if self.reader.take().is_some() {
+            self.pending = Some(None);
         }
-        // A full queue means the audio thread is behind: the close stays owed
-        // and goes out on the next open, close or [`reclaim`](Self::reclaim).
-        c.send_close();
-        Ok(())
+        self.push_pending();
     }
 
-    /// Frees the writers the audio thread retired, and closes the tap if its
-    /// reader was dropped. A control-side tick (the session's `Reclaim`
-    /// phase).
-    pub fn reclaim(&self) {
-        let mut c = self.control();
-        c.settle();
-        if c.reader.is_some() && !c.alive() {
-            c.reader = None;
-            c.send_close();
+    /// Frees the writers the audio thread retired, closes the tap if its
+    /// reader was dropped, and pushes the pending install if the queue has
+    /// room. A control-side tick (the session's `Reclaim` phase, and each
+    /// offline render).
+    pub fn reclaim(&mut self) {
+        if self.reader.as_ref().is_some_and(|r| r.strong_count() == 0) {
+            self.reader = None;
+            self.pending = Some(None);
         }
+        self.push_pending();
     }
 }
 
@@ -308,13 +234,13 @@ mod tests {
     /// first), so the queues are filled by hand.
     #[test]
     fn a_full_retire_queue_holds_the_install_and_drops_nothing() {
-        let (taps, mut h) = link();
+        let (mut taps, mut h) = link();
         h.writer = Some(writer(2));
         while h.retire.vacant() > 0 {
             assert!(h.retire.push(writer(9)).is_ok());
         }
         let full = h.retire.len();
-        taps.control().install.push(Some(writer(3))).expect("room");
+        taps.install.push(Some(writer(3))).expect("room");
         {
             let _rt = tutti_rt::RtScope::enter();
             h.swap();

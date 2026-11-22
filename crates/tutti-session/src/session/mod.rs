@@ -167,8 +167,10 @@ impl Session<&'static str, Offline> {
 impl<K: AppKey, F: SessionFloat> Session<K, Offline<F>> {
     /// Renders one block into `output`, as a device callback would: what an
     /// offline session's host pulls. Every update's commit lands at the
-    /// start of the next block.
-    pub fn render(&self, output: &mut tutti_buffers::InterleavedMut<'_, F>) {
+    /// start of the next block, and a heard tap opened or closed since the last
+    /// render is pushed first, so this render already writes it.
+    pub fn render(&mut self, output: &mut tutti_buffers::InterleavedMut<'_, F>) {
+        self.output.reclaim();
         self.running.engine.process(output);
     }
 }

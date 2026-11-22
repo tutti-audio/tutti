@@ -89,14 +89,14 @@ fn retarget_with_a_held_clip_note() {
     let clip = s.midi().clip(a).expect("the clip a target has");
     let _ = s.update();
     s.play().unwrap();
-    blocks(&s, 20); // the note starts at about frame 2,400
+    blocks(&mut s, 20); // the note starts at about frame 2,400
     assert_eq!(ons(&a_seen), 1, "A heard the note start");
     s.midi().retarget(clip, b).unwrap();
     let _ = s.update();
-    blocks(&s, 20);
+    blocks(&mut s, 20);
     assert_eq!(offs(&a_seen), 1, "A is told the note ended");
     // The clip's own off comes at beat 8.1 (about 194,000 frames): render on.
-    blocks(&s, 400);
+    blocks(&mut s, 400);
     assert_eq!(offs(&a_seen), 1, "A is told once");
     assert_eq!(ons(&b_seen), 0, "B never started it");
     assert_eq!(
@@ -123,27 +123,27 @@ fn set_routes_with_a_held_key() {
     s.midi().set_routes(src, &to(1), None, resolve).unwrap();
     let _ = s.update();
     mail.lock().unwrap().push([0x2090_3c64, 0, 0, 0]);
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     assert_eq!(ons(&a_seen), 1);
 
     s.midi().set_routes(src, &to(2), None, resolve).unwrap();
     let _ = s.update();
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     assert_eq!(offs(&a_seen), 1, "A is told the note ended");
 
     mail.lock().unwrap().push([0x2080_3c00, 0, 0, 0]);
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     assert_eq!(offs(&b_seen), 1, "B hears the orphan off");
 
     // And a key held across the unrouting.
     mail.lock().unwrap().push([0x2090_3d64, 0, 0, 0]);
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     assert_eq!(ons(&b_seen), 1);
     s.midi()
         .set_routes(src, &[] as &[MidiRouteRule<u8>], None, resolve)
         .unwrap();
     let _ = s.update();
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     assert_eq!(offs(&b_seen), 2, "B is told when the routes go");
 }
 
@@ -209,7 +209,7 @@ fn a_group_route_cut_with_keys_held_ends_them_at_the_next_block_then_nothing() {
         mail.push([0x2190_3e64, 0, 0, 0]); // note 62 on
         mail.push([0x2090_4064, 0, 0, 0]); // Group 1: not routed
     }
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     assert_eq!(
         ons(&a_seen),
         2,
@@ -220,7 +220,7 @@ fn a_group_route_cut_with_keys_held_ends_them_at_the_next_block_then_nothing() {
         .set_routes(src, &[] as &[MidiRouteRule<u8>], None, resolve)
         .unwrap();
     let _ = s.update();
-    blocks(&s, 4);
+    blocks(&mut s, 4);
     let offs_seen: Vec<u64> = a_seen
         .lock()
         .unwrap()
@@ -235,7 +235,7 @@ fn a_group_route_cut_with_keys_held_ends_them_at_the_next_block_then_nothing() {
     );
     mail.lock().unwrap().push([0x2180_3c00, 0, 0, 0]); // the key comes up later
     mail.lock().unwrap().push([0x2090_4264, 0, 0, 0]); // and Group 1 plays on
-    blocks(&s, 4);
+    blocks(&mut s, 4);
     assert_eq!(offs(&a_seen), 2, "and nothing after");
     assert_eq!(ons(&a_seen), 2);
 }

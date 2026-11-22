@@ -66,13 +66,13 @@ fn an_input_and_an_output_port_render_without_allocating() {
         });
     play(&s);
     let mut buf = vec![0.0f32; 512 * 2];
-    let mut block = |s: &Session| {
+    let mut block = |s: &mut Session| {
         s.render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
     };
     // Warm up outside the gate: the first blocks publish the clock the devices'
     // threads place arrivals by.
     for _ in 0..4 {
-        block(&s);
+        block(&mut s);
         let _ = s.update();
     }
 
@@ -83,7 +83,7 @@ fn an_input_and_an_output_port_render_without_allocating() {
         assert!(fake.send_input(EndpointId::from_raw(1), note, Instant::now()));
     }
     for _ in 0..200 {
-        block(&s);
+        block(&mut s);
     }
     let _ = s.update();
     assert!(

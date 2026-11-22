@@ -82,11 +82,6 @@ const INTERNAL: &[(&str, &str, &str)] = &[
         "the host's control handle of a plugin; `Plugin` wraps it",
     ),
     (
-        "tutti_engine",
-        "HeardTapError",
-        "the payload of session's SessionHeardTapError::Tap, matched through its variants",
-    ),
-    (
         "tutti_graph",
         "Executor",
         "the graph's executor; an app renders through `Session` or `Bounce`",

@@ -380,35 +380,27 @@ fn the_heard_tap_is_allocation_free() {
         })
     }));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
+    let mut engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     let _ = transport.motion().try_send(MotionCommand::Play);
-    let taps = engine.heard_taps();
+    let mut taps = engine.take_heard_taps().expect("a fresh engine holds it");
     let mut output = vec![0.0f32; 1024 * 2];
     let layout = ChannelLayout::STEREO;
     engine.process(&mut InterleavedMut::new(&mut output, layout).unwrap());
     ed.collect();
 
     // 16 frames of ring against 1024-frame blocks: every block overflows.
-    let first = taps
-        .open(layout, tutti_units::Samples::new(16))
-        .expect("opens")
-        .reader()
-        .expect("the audio thread is not behind");
+    let first = taps.open(layout, tutti_units::Samples::new(16));
     for _ in 0..8 {
         engine.process(&mut InterleavedMut::new(&mut output, layout).unwrap());
     }
     drop(first);
     taps.reclaim();
-    // The reclaim queued a close; a new open queues a replacement behind it.
-    let second = taps
-        .open(layout, tutti_units::Samples::new(4096))
-        .expect("reopens")
-        .reader()
-        .expect("the audio thread is not behind");
+    // The reclaim pushed a close; a new open replaces it.
+    let second = taps.open(layout, tutti_units::Samples::new(4096));
     for _ in 0..8 {
         engine.process(&mut InterleavedMut::new(&mut output, layout).unwrap());
     }
-    taps.close().unwrap();
+    taps.close();
     engine.process(&mut InterleavedMut::new(&mut output, layout).unwrap());
     taps.reclaim();
     assert_eq!(

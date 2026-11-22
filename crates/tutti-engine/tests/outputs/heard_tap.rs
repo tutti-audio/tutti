@@ -8,7 +8,8 @@
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::MaxBlock;
-use tutti_engine::{Engine, HeardTapError, HeardTapOpen};
+use tutti_buffers::{Pull, Source};
+use tutti_engine::{Engine, HeardTaps};
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, TapReader, Unforkable};
 use tutti_graph::{OutPort, PortSource};
@@ -40,7 +41,7 @@ impl Node for Ramp {
     fn reset(&mut self) {}
 }
 
-fn engine(width: u16) -> Engine {
+fn rig(width: u16) -> (Engine, HeardTaps) {
     let transport = Transport::new(SampleRate::of(RATE));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
@@ -54,9 +55,10 @@ fn engine(width: u16) -> Engine {
         })
     }));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec).expect("within limits");
+    let mut engine = Engine::new(&transport, &mut ed, exec).expect("within limits");
     Box::leak(Box::new((ed, transport)));
-    engine
+    let taps = engine.take_heard_taps().expect("a fresh engine holds it");
+    (engine, taps)
 }
 
 fn render(engine: &Engine, frames: usize, width: u16, segment: bool) -> Vec<f32> {
@@ -102,13 +104,8 @@ fn drain(tap: &mut TapReader, into: &mut Vec<f32>) {
 #[test]
 fn the_tap_is_the_device_output_on_every_channel() {
     for segment in [false, true] {
-        let engine = engine(6);
-        let mut tap = engine
-            .heard_taps()
-            .open(ChannelLayout::from_count(6), Samples::new(8192))
-            .expect("opens")
-            .reader()
-            .expect("the audio thread is not behind");
+        let (engine, mut taps) = rig(6);
+        let mut tap = taps.open(ChannelLayout::from_count(6), Samples::new(8192));
         let mut heard = Vec::new();
         let mut tapped = Vec::new();
         for frames in [64, 1500, 1, 700] {
@@ -124,27 +121,18 @@ fn the_tap_is_the_device_output_on_every_channel() {
     }
 }
 
-/// The first frame is the first of the first call that begins after `open`
-/// returns; a close stops the next call's writes. A second open is refused
-/// while the reader lives, and allowed once it is dropped.
+/// The first frame is the first of the first call that begins after the
+/// install is pushed; a close stops the next call's writes; a dropped reader
+/// is closed by the next reclaim; and closing with nothing open is a no-op.
 #[test]
 fn a_tap_flows_from_the_next_call_and_stops_at_a_close() {
-    let engine = engine(2);
-    let taps = engine.heard_taps();
+    let (engine, mut taps) = rig(2);
     render(&engine, 64, 2, false);
-    let mut tap = taps
-        .open(ChannelLayout::STEREO, Samples::new(1024))
-        .expect("opens")
-        .reader()
-        .expect("the audio thread is not behind");
+    let mut tap = taps.open(ChannelLayout::STEREO, Samples::new(1024));
     assert_eq!(
         tap.available(),
         Samples::new(0),
         "nothing before a call renders"
-    );
-    assert_eq!(
-        taps.open(ChannelLayout::STEREO, Samples::new(1024)).err(),
-        Some(HeardTapError::Busy)
     );
     let second = render(&engine, 64, 2, false);
     assert_eq!(
@@ -156,18 +144,100 @@ fn a_tap_flows_from_the_next_call_and_stops_at_a_close() {
     tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
         .unwrap();
     assert_eq!(got, second);
-    taps.close().unwrap();
+    taps.close();
     render(&engine, 64, 2, false);
     assert_eq!(
         tap.available(),
         Samples::new(0),
         "a closed tap gets nothing more"
     );
+    taps.close();
+    render(&engine, 64, 2, false);
+
+    let tap = taps.open(ChannelLayout::STEREO, Samples::new(1024));
     drop(tap);
-    let again = taps.open(ChannelLayout::STEREO, Samples::new(8));
+    taps.reclaim();
+    render(&engine, 64, 2, false);
+    let third = taps.open(ChannelLayout::STEREO, Samples::new(1024));
+    render(&engine, 64, 2, false);
+    assert_eq!(third.available(), Samples::new(64), "open after a drop");
+}
+
+/// A second open supersedes the first: its reader ends once drained, and the
+/// first writer was handed back to the control side (the engine's `RtScope`
+/// makes a drop on the audio thread a debug panic).
+#[test]
+fn a_second_open_ends_the_first_reader_after_its_drain() {
+    let (engine, mut taps) = rig(2);
+    let mut first = taps.open(ChannelLayout::STEREO, Samples::new(1024));
+    render(&engine, 64, 2, false);
+    let second = taps.open(ChannelLayout::STEREO, Samples::new(1024));
+    render(&engine, 32, 2, false);
+    taps.reclaim(); // frees the retired first writer on this thread
+    assert_eq!(
+        first.available(),
+        Samples::new(64),
+        "only what it was written"
+    );
+    assert_eq!(second.available(), Samples::new(32), "the latest writes");
+    let mut buf = vec![0.0f32; 128 * 2];
+    let layout = first.layout();
     assert!(
-        matches!(again, Ok(HeardTapOpen::Opened(_))),
-        "a dropped reader frees the tap"
+        matches!(
+            first.pull(InterleavedMut::new(&mut buf, layout).unwrap()),
+            Pull::Frames(n) if n == Samples::new(64)
+        ),
+        "the drain"
+    );
+    assert!(first.writer_gone(), "then it ends: its writer is gone");
+    assert!(!second.writer_gone(), "the latest does not end");
+}
+
+/// Closing with nothing open sends nothing: the next open still writes from
+/// the first render after its push.
+#[test]
+fn closing_with_none_open_is_a_no_op() {
+    let (engine, mut taps) = rig(2);
+    taps.close();
+    taps.close();
+    let tap = taps.open(ChannelLayout::STEREO, Samples::new(1024));
+    render(&engine, 64, 2, false);
+    assert_eq!(tap.available(), Samples::new(64));
+}
+
+/// With the audio thread behind (no render since two installs filled the
+/// queue) an open still returns its reader. It is the pending install: it
+/// writes from the first render after the push, a later open replaces it
+/// (the replaced reader ends, nothing was written to it), and the writer the
+/// replacement displaced was dropped on the control side.
+#[test]
+fn an_open_while_behind_is_pending_and_the_latest_wins() {
+    let (engine, mut taps) = rig(2);
+    let layout = ChannelLayout::STEREO;
+    let _a = taps.open(layout, Samples::new(256));
+    let _b = taps.open(layout, Samples::new(256));
+    // The queue is full: this one waits.
+    let mut c = taps.open(layout, Samples::new(256));
+    let d = taps.open(layout, Samples::new(256));
+    let mut buf = vec![0.0f32; 8];
+    assert!(
+        c.writer_gone(),
+        "the replaced pending writer was dropped here"
+    );
+    assert_eq!(
+        c.pop_into(InterleavedMut::new(&mut buf, c.layout()).unwrap())
+            .unwrap(),
+        Samples::new(0)
+    );
+    assert_eq!(d.available(), Samples::new(0), "nothing before the push");
+    render(&engine, 64, 2, false); // takes a and b
+    assert_eq!(d.available(), Samples::new(0), "not yet pushed");
+    taps.reclaim(); // pushes d
+    render(&engine, 64, 2, false);
+    assert_eq!(
+        d.available(),
+        Samples::new(64),
+        "the first render after the push"
     );
 }
 
@@ -175,13 +245,8 @@ fn a_tap_flows_from_the_next_call_and_stops_at_a_close() {
 /// once, and a block of another width than the tap's is counted whole.
 #[test]
 fn drops_are_counted_and_a_wrong_width_is_lost_whole() {
-    let engine = engine(2);
-    let mut tap = engine
-        .heard_taps()
-        .open(ChannelLayout::STEREO, Samples::new(100))
-        .expect("opens")
-        .reader()
-        .expect("the audio thread is not behind");
+    let (engine, mut taps) = rig(2);
+    let mut tap = taps.open(ChannelLayout::STEREO, Samples::new(100));
     render(&engine, 300, 2, false);
     assert_eq!(tap.available(), Samples::new(100));
     assert_eq!(tap.take_lost(), Samples::new(200));
@@ -192,20 +257,11 @@ fn drops_are_counted_and_a_wrong_width_is_lost_whole() {
     assert_eq!(got[..4], [1.0, 2.0, 2.0, 4.0], "the first frames were kept");
 
     // The device now hands a 6-wide block to a 2-wide tap.
-    let wide = engine_wide();
-    let narrow = wide
-        .heard_taps()
-        .open(ChannelLayout::STEREO, Samples::new(1024))
-        .expect("opens")
-        .reader()
-        .expect("the audio thread is not behind");
+    let (wide, mut wide_taps) = rig(6);
+    let narrow = wide_taps.open(ChannelLayout::STEREO, Samples::new(1024));
     render(&wide, 50, 6, false);
     assert_eq!(narrow.available(), Samples::new(0));
     assert_eq!(narrow.take_lost(), Samples::new(50));
-}
-
-fn engine_wide() -> Engine {
-    engine(6)
 }
 
 /// Lanes cannot tear under a concurrent drain: a reader thread pops in small
@@ -216,13 +272,8 @@ fn engine_wide() -> Engine {
 fn channels_do_not_tear_under_a_concurrent_drain() {
     const CALLS: usize = 200;
     const FRAMES: usize = 64;
-    let engine = engine(6);
-    let mut tap = engine
-        .heard_taps()
-        .open(ChannelLayout::from_count(6), Samples::new(256))
-        .expect("opens")
-        .reader()
-        .expect("the audio thread is not behind");
+    let (engine, mut taps) = rig(6);
+    let mut tap = taps.open(ChannelLayout::from_count(6), Samples::new(256));
     let done = std::sync::atomic::AtomicBool::new(false);
     let (got, lost) = std::thread::scope(|scope| {
         let reader = scope.spawn(|| {
@@ -263,26 +314,22 @@ fn channels_do_not_tear_under_a_concurrent_drain() {
 
 /// Installing, replacing and closing a tap while blocks render never frees on
 /// the audio thread (the engine enters `RtScope`, where a `TapWriter`'s drop
-/// is a debug panic) and never loses the hand-over: a control thread opens,
-/// drops and closes while the main thread renders.
+/// is a debug panic) and never loses the hand-over: the control thread opens,
+/// drops and closes while another thread renders.
 #[test]
 fn opening_and_closing_while_rendering_never_frees_on_the_audio_thread() {
-    let engine = engine(2);
-    let taps = engine.heard_taps();
+    let (engine, mut taps) = rig(2);
     let stop = std::sync::atomic::AtomicBool::new(false);
     std::thread::scope(|scope| {
         let control = scope.spawn(|| {
             let mut opened = 0;
             while !stop.load(std::sync::atomic::Ordering::Acquire) {
-                if let Ok(HeardTapOpen::Opened(tap)) =
-                    taps.open(ChannelLayout::STEREO, Samples::new(64))
-                {
-                    opened += 1;
-                    std::thread::yield_now();
-                    drop(tap);
-                }
+                let tap = taps.open(ChannelLayout::STEREO, Samples::new(64));
+                opened += 1;
+                std::thread::yield_now();
+                drop(tap);
                 taps.reclaim();
-                taps.close().ok(); // the reclaim above may have closed it
+                taps.close();
             }
             opened
         });
@@ -293,66 +340,4 @@ fn opening_and_closing_while_rendering_never_frees_on_the_audio_thread() {
         drop(finished);
         assert!(control.join().expect("control finished") > 0);
     });
-}
-
-/// A close is never lost to a full install queue. With no render in between,
-/// opens fill the queue (the readers dropped, bar the last); the close still
-/// has its reserved slot, so the next render installs everything in order and
-/// ends on the close: the last reader gets nothing.
-#[test]
-fn a_close_is_not_lost_to_a_full_install_queue() {
-    let engine = engine(2);
-    let taps = engine.heard_taps();
-    let layout = ChannelLayout::STEREO;
-    // No render between: four opens, each reader dropped before the next.
-    let mut last = None;
-    for _ in 0..4 {
-        drop(last.take());
-        last = taps
-            .open(layout, Samples::new(256))
-            .expect("room for four")
-            .reader();
-        assert!(last.is_some(), "room for four");
-    }
-    let last = last.expect("opened");
-    taps.close().unwrap();
-    render(&engine, 64, 2, false);
-    assert_eq!(
-        last.available(),
-        Samples::new(0),
-        "the close came after its open"
-    );
-    // The queue drained; a new open works again.
-    assert!(matches!(
-        taps.open(layout, Samples::new(8)),
-        Ok(HeardTapOpen::Opened(_))
-    ));
-}
-
-/// An open the audio thread is too far behind for is a moment, not a refusal:
-/// with the install queue full (no render since four opens) the next open
-/// returns `Retry` and opens nothing, where a refusal for good
-/// (`HeardTapError::Busy`) is an `Err`. After a render has taken the installs
-/// the same call opens.
-#[test]
-fn a_full_install_queue_asks_for_a_retry_and_is_not_an_error() {
-    let engine = engine(2);
-    let taps = engine.heard_taps();
-    let layout = ChannelLayout::STEREO;
-    for _ in 0..4 {
-        let opened = taps.open(layout, Samples::new(256)).expect("room for four");
-        assert!(matches!(opened, HeardTapOpen::Opened(_)), "room for four");
-    }
-    assert!(
-        matches!(
-            taps.open(layout, Samples::new(256)),
-            Ok(HeardTapOpen::Retry)
-        ),
-        "the audio thread is behind: retry, not an error"
-    );
-    render(&engine, 64, 2, false);
-    assert!(matches!(
-        taps.open(layout, Samples::new(256)),
-        Ok(HeardTapOpen::Opened(_))
-    ));
 }

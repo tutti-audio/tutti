@@ -312,7 +312,7 @@ pub use transport_handle::TransportHandle;
 pub use tutti_dsp::DitherShape;
 #[cfg(feature = "record")]
 pub use tutti_dsp::{DitherSink, NoiseShaping};
-pub use tutti_engine::{BlockDates, HeardTapOpen, OutputPlacement, Playhead};
+pub use tutti_engine::{BlockDates, OutputPlacement, Playhead};
 #[cfg(feature = "export")]
 pub use tutti_export::{
     EventLossPolicy, Normalize, Outcome, Produced, Progress, Rendered, Resample, Stage, Written,

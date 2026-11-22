@@ -95,7 +95,7 @@ fn the_lost_count_survives_an_unplug_and_keeps_counting_after_the_replug() {
 
     plug(&fake);
     let _ = s.update();
-    blocks(&s, 4);
+    blocks(&mut s, 4);
     assert_eq!(port.losses().lost, first, "a connect counts nothing");
     push(&fake, 3_000);
     assert_eq!(
@@ -137,16 +137,16 @@ fn an_inlet_eviction_raises_the_ports_count_and_carries_across_a_replug() {
     let _ = s.update();
     assert_eq!(port.losses(), Losses::NONE);
     // The engine's clock reads, so an arrival is placed ahead of its block.
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     push_ahead(&fake, INLET);
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     push_ahead(&fake, 100);
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     assert_eq!(port.losses().evicted, 100);
 
     fake.unplug(EndpointId::from_raw(u64::from(KEYS)));
     let _ = s.update();
-    blocks(&s, 4);
+    blocks(&mut s, 4);
     let _ = s.update();
     assert_eq!(
         port.losses().evicted,
@@ -157,11 +157,11 @@ fn an_inlet_eviction_raises_the_ports_count_and_carries_across_a_replug() {
     plug(&fake);
     let _ = s.update();
     assert!(!port.timing().is_closed(), "the cells reopened");
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     push_ahead(&fake, INLET);
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     push_ahead(&fake, 100);
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     assert_eq!(port.losses().evicted, 200, "cumulative across the replug");
 }
 
@@ -176,9 +176,9 @@ fn an_input_node_mailbox_overflow_counts_as_refused_on_the_port() {
     let saved = keys(&mut s);
     let port = s.open_input(saved).expect("opens");
     let _ = s.update();
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     push(&fake, 2_000);
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     let losses = port.losses();
     assert!(losses.refused > 0, "{losses:?}");
     assert_eq!(losses.lost, 0);
@@ -202,17 +202,17 @@ fn a_late_arrival_is_counted_on_the_port_across_a_replug() {
         let at = Instant::now() - Duration::from_millis(500);
         let _ = fake.send_input(EndpointId::from_raw(u64::from(KEYS)), ump, at);
     };
-    blocks(&s, 400);
+    blocks(&mut s, 400);
     late(&fake);
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     assert_eq!(port.losses().late, 1);
 
     fake.unplug(EndpointId::from_raw(u64::from(KEYS)));
     let _ = s.update();
     plug(&fake);
     let _ = s.update();
-    blocks(&s, 400);
+    blocks(&mut s, 400);
     late(&fake);
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     assert_eq!(port.losses().late, 2, "cumulative across the replug");
 }

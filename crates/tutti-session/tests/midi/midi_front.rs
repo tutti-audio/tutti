@@ -87,7 +87,7 @@ fn a_take_records_the_live_input_on_its_frames_and_the_target_still_hears_it() {
     live.note_on(Frame::new(600), c, k, NoteVelocity::CENTER)
         .unwrap();
     live.note_off(Frame::new(900), c, k).unwrap();
-    blocks(&s, 3);
+    blocks(&mut s, 3);
 
     let got: Vec<_> = take.drain().map(|e| (e.frame, e.ump)).collect();
     assert_eq!(
@@ -123,7 +123,7 @@ fn a_take_of_an_instrument_records_what_its_handle_plays() {
         .note_on(Frame::new(600), c, k, NoteVelocity::CENTER)
         .unwrap();
     synth.keys_mut().note_off(Frame::new(900), c, k).unwrap();
-    blocks(&s, 3);
+    blocks(&mut s, 3);
     let got: Vec<_> = take.drain().map(|e| (e.frame, e.ump)).collect();
     assert_eq!(
         got,

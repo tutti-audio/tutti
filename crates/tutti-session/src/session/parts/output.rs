@@ -131,9 +131,10 @@ impl<F: Float> OutputPart<F> {
         }
     }
 
-    /// Frees what the audio thread let go of in the heard tap.
-    pub(crate) fn reclaim(&self) {
-        if let Some((taps, _)) = &self.taps {
+    /// Frees what the audio thread let go of in the heard tap, closes it if its
+    /// reader was dropped, and pushes its pending install.
+    pub(crate) fn reclaim(&mut self) {
+        if let Some((taps, _)) = &mut self.taps {
             taps.reclaim();
         }
     }
