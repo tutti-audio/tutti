@@ -106,6 +106,10 @@ where
         // the last one seen while it is away). A served plugin has a second cut
         // at its chunk (`Processor::event_input`).
         this.event_input = this.event_bound();
+        // The graph's mode reaches the plugin's control surface first, with no
+        // Processor needed: what makes a served fork wait for a chunk follows
+        // every prepare.
+        this.follow_graph_mode(p);
         // A Processor that follows the graph takes its rate, block and
         // quantum live (no restart, no main thread); one that does not is
         // told the rate by the lifecycle.

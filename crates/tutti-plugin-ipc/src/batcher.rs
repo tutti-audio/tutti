@@ -470,8 +470,9 @@ impl Batcher {
         self.chunk
     }
 
-    /// Make every collect wait for its chunk, up to `budget` per chunk: the
-    /// offline mode of a forked instance.
+    /// Make every collect wait for its chunk, up to `budget` per chunk, while
+    /// the wait is armed ([`OfflineWait::armed`]): the offline mode of a forked
+    /// instance.
     ///
     /// The pipeline never waits because it runs on the audio thread, where a
     /// wait is a dropout (module docs). An offline fork runs on a render
@@ -519,7 +520,10 @@ impl Batcher {
         let (Some(watch), Some(seq)) = (&self.offline_wait, self.expect_seq) else {
             return;
         };
-        if watch.stopped_waiting() {
+        // Read live: the graph's render mode is followed by the control side
+        // (`Control::follow_graph_mode`), which may disarm between two chunks,
+        // and a realtime graph's audio thread never waits.
+        if !watch.armed() || watch.stopped_waiting() {
             return;
         }
         // A plugin that refused its rate publishes nothing, by design: the
@@ -1035,6 +1039,7 @@ mod tests {
             slab(MAX_CHUNK),
             response_ring().1,
         );
+        wait.arm(true);
         b.set_offline_wait(Arc::clone(&wait));
         b.expect_seq = Some(1);
         assert_eq!(wait.refusal(), None, "nothing latched before the wait");

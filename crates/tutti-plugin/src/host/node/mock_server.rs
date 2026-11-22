@@ -349,7 +349,15 @@ pub(super) fn new_node(
     )
     .expect("the wiring is within a block's width");
     client.go_offline();
-    (Direct::new(client.bind(tempo), SR, CHUNK), record, threads)
+    // The graph's prepare is what makes the served pipeline wait for a chunk.
+    let offline =
+        tutti_graph::Prepare::new(SR, MaxBlock::new(Samples::new(CHUNK)).expect("a block"))
+            .with_render_mode(tutti_graph::RenderMode::Offline);
+    (
+        Direct::with_prepare(client.bind(tempo), &offline),
+        record,
+        threads,
+    )
 }
 
 /// The served plugin over the mock server's bridge, not yet activated.
@@ -371,7 +379,7 @@ pub(super) fn served(rig: Rig) -> (Ipc, Record, Threads) {
         timeout: Duration::from_secs(5),
         origin: None,
     });
-    let _ = ipc.watch(true);
+    let _ = ipc.watch(false);
     (ipc, record, threads)
 }
 

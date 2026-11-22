@@ -365,6 +365,10 @@ macro_rules! served_control {
                 AnyThread::set_render_mode(self, mode)
             }
 
+            fn follow_graph_mode(&mut self, mode: RenderMode) {
+                self.link.follow_graph_mode(mode);
+            }
+
             /// The edits the host lost: counted by the bridge, which forwards
             /// a served plugin's edits through its listener
             /// ([`Ipc::forward_events`]).

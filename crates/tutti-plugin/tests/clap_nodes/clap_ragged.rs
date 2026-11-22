@@ -23,7 +23,7 @@ use crate::clap_probe;
 use clap_probe::{ProbeEnv, Rig, load_probe, render};
 use tutti_fixtures::machine_lock;
 
-use tutti_graph::{RenderMode, TransportPosition};
+use tutti_graph::TransportPosition;
 use tutti_units::Samples;
 
 const SAMPLE_RATE: f64 = 48_000.0;
@@ -42,11 +42,10 @@ fn fork_rig(max_block: usize) -> (Rig, tutti_plugin_host::PluginHandle) {
     let fork = probe
         .client
         .fork_instance(
-            RenderMode::Offline,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
-    (Rig::new(fork, SAMPLE_RATE, max_block), probe.handle)
+    (Rig::offline(fork, SAMPLE_RATE, max_block), probe.handle)
 }
 
 /// Render `blocks` (frame counts) of the ramp through `rig`, one executor

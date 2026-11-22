@@ -134,7 +134,6 @@ fn a_fork_renders_like_the_live_instance_from_its_state() {
     let fork = probe
         .client
         .fork_instance(
-            RenderMode::Offline,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
@@ -149,7 +148,7 @@ fn a_fork_renders_like_the_live_instance_from_its_state() {
     );
 
     const BLOCKS: usize = 40;
-    let mut fork = Rig::new(fork, SAMPLE_RATE, BLOCK);
+    let mut fork = Rig::offline(fork, SAMPLE_RATE, BLOCK);
     let forked = drive_fork(&mut fork, BLOCKS);
     assert!(forked[0].iter().all(|&s| s == 0.0), "one block of latency");
     for (b, block) in forked.iter().enumerate().skip(1) {
@@ -203,7 +202,6 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
     let fork = probe
         .client
         .fork_instance(
-            RenderMode::Offline,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
@@ -224,7 +222,7 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
     let fork_thread = {
         let (start, live_done) = (Arc::clone(&start), Arc::clone(&live_done));
         std::thread::spawn(move || {
-            let mut fork = Rig::new(fork, SAMPLE_RATE, BLOCK);
+            let mut fork = Rig::offline(fork, SAMPLE_RATE, BLOCK);
             start.wait();
             let (mut blocks, mut during_live) = (Vec::new(), 0usize);
             while blocks.len() < MIN_FORK_BLOCKS || !live_done.load(Ordering::SeqCst) {
@@ -301,7 +299,6 @@ fn a_state_the_fresh_instance_refuses_is_a_named_fork_error() {
     let err = probe
         .client
         .fork_instance(
-            RenderMode::Offline,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect_err("the fresh instance refuses the state");
@@ -367,7 +364,6 @@ fn a_fork_is_saved_and_restored_as_a_duplicate_and_a_project_save_is_not() {
     probe
         .client
         .fork_instance(
-            RenderMode::Offline,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the fork saved for a duplicate and restored as one");
@@ -383,7 +379,6 @@ fn a_plugin_that_cannot_save_its_state_is_a_named_fork_error() {
     let err = probe
         .client
         .fork_instance(
-            RenderMode::Realtime,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect_err("the live instance refuses to save");
@@ -599,7 +594,6 @@ fn a_dropped_forks_server_is_reaped() {
     let fork = probe
         .client
         .fork_instance(
-            RenderMode::Realtime,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
@@ -636,7 +630,6 @@ fn a_failed_forks_server_is_reaped() {
     let err = probe
         .client
         .fork_instance(
-            RenderMode::Realtime,
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .err();

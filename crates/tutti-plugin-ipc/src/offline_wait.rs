@@ -35,6 +35,11 @@ pub struct OfflineWait {
     /// The latency the fork's graph was compiled against, recorded once the
     /// plugin has settled (`usize::MAX`: not planned yet).
     planned: AtomicUsize,
+    /// Whether the pipeline waits for each chunk: set from the render mode of
+    /// the graph the fork is prepared in ([`arm`](Self::arm)), never from
+    /// anywhere else, so a fork prepared for realtime never blocks the audio
+    /// thread.
+    armed: AtomicBool,
     budget: Duration,
 }
 
@@ -57,8 +62,22 @@ impl OfflineWait {
             refusal: Mutex::new(None),
             refused: AtomicBool::new(false),
             planned: AtomicUsize::new(usize::MAX),
+            armed: AtomicBool::new(false),
             budget,
         }
+    }
+
+    /// Whether the pipeline waits for each chunk, up to
+    /// [`budget`](Self::budget). Not armed until a prepare in an offline graph
+    /// arms it.
+    pub(crate) fn armed(&self) -> bool {
+        self.armed.load(Ordering::Acquire)
+    }
+
+    /// Arms the wait for an offline graph's prepare and disarms it for a
+    /// realtime one.
+    pub(crate) fn arm(&self, offline: bool) {
+        self.armed.store(offline, Ordering::Release);
     }
 
     /// Record the whole latency (the plugin's own and the pipeline's chunk)
@@ -82,11 +101,12 @@ impl OfflineWait {
     }
 
     /// How long the bridge thread holds a block for its reply while this wait
-    /// is in force: the budget, until a block has missed it or the server has
-    /// died, then `None` (the live bound: nothing is awaited past a few block
-    /// periods, so a hung server costs one budget, not one per chunk).
+    /// is in force: the budget while armed, until a block has missed it or the
+    /// server has died, then `None` (the live bound: nothing is awaited past a
+    /// few block periods, so a hung server costs one budget, not one per
+    /// chunk).
     pub(crate) fn reply_wait(&self) -> Option<Duration> {
-        (!self.stopped_waiting()).then_some(self.budget)
+        (self.armed() && !self.stopped_waiting()).then_some(self.budget)
     }
 
     /// Whether the wait should not wait at all any more: a block already
@@ -152,17 +172,26 @@ mod tests {
         OfflineWait::new(Duration::from_secs(7), Arc::new(ServerWatch::new()))
     }
 
-    /// The bridge holds a block for the budget while the wait is in force.
+    /// An armed wait, as an offline graph's prepare leaves it.
+    fn armed() -> OfflineWait {
+        let wait = wait();
+        wait.arm(true);
+        wait
+    }
+
+    /// The bridge holds a block for the budget while the wait is armed, and
+    /// holds none while it is not.
     #[test]
     fn a_wait_in_force_holds_the_bridge_for_the_budget() {
-        assert_eq!(wait().reply_wait(), Some(Duration::from_secs(7)));
+        assert_eq!(armed().reply_wait(), Some(Duration::from_secs(7)));
+        assert_eq!(wait().reply_wait(), None, "not armed: the live bound");
     }
 
     /// One missed budget returns the bridge to the live bound for good, so a
     /// reactivation that reads the latch stays off the budget too.
     #[test]
     fn a_missed_budget_returns_the_bridge_to_the_live_bound() {
-        let wait = wait();
+        let wait = armed();
         wait.give_up();
         assert_eq!(wait.reply_wait(), None);
     }

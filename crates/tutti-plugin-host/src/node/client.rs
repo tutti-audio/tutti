@@ -753,6 +753,16 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
         tutti_plugin_types::MIDI_STACK_BOUND.min(self.event_room)
     }
 
+    /// Tells the plugin's control surface the render mode of the graph `p`
+    /// prepares ([`Control::follow_graph_mode`](tutti_plugin_types::Control::follow_graph_mode)),
+    /// whether or not its Processor is in hand: what a wait on the audio
+    /// thread follows. Any thread.
+    pub(super) fn follow_graph_mode(&mut self, p: &tutti_graph::Prepare) {
+        if let Some(control) = self.inner.lock().control() {
+            control.follow_graph_mode(p.render_mode());
+        }
+    }
+
     /// Tells the plugin the render mode `p` carries when it is not the mode
     /// the plugin runs in and not the one the last `prepare` carried. What the
     /// node's `prepare` does with its mode; main thread only, as a mode change
@@ -766,6 +776,11 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
         // carries a change.
         if self.prepared_mode == mode {
             return;
+        }
+        if mode.is_offline() {
+            // An offline render runs at its own speed: no host clock relates
+            // to it.
+            self.transport.go_offline();
         }
         let mut inner = self.inner.lock();
         if inner.render_mode() != mode {
