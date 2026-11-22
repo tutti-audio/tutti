@@ -9,11 +9,7 @@
 //! One walker serves every reader: `check-session` reads the whole-crate leaves of
 //! each statement ([`statements`]) and `umbrella-api` the exported items ([`uses`]).
 
-use super::lex::{blank, find_word_from, line_of, matching};
-
-pub(super) fn is_word(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
+use super::lex::{blank, find_word_from, line_of, matching, word};
 
 /// `(::|\w+|[{},*])` tokens of a `use` body.
 fn tokens(body: &str) -> Vec<&str> {
@@ -24,9 +20,9 @@ fn tokens(body: &str) -> Vec<&str> {
         if b[i] == b':' && b.get(i + 1) == Some(&b':') {
             out.push(&body[i..i + 2]);
             i += 2;
-        } else if is_word(b[i]) {
+        } else if word(b[i]) {
             let s = i;
-            while i < b.len() && is_word(b[i]) {
+            while i < b.len() && word(b[i]) {
                 i += 1;
             }
             out.push(&body[s..i]);
@@ -45,7 +41,7 @@ fn pub_uses(code: &str) -> Vec<(usize, usize)> {
     let b = code.as_bytes();
     let mut out = Vec::new();
     for (at, _) in code.match_indices("pub") {
-        if at > 0 && (is_word(b[at - 1]) || b[at - 1] == b')') {
+        if at > 0 && (word(b[at - 1]) || b[at - 1] == b')') {
             continue;
         }
         let rest = &code[at + 3..];
@@ -56,7 +52,7 @@ fn pub_uses(code: &str) -> Vec<(usize, usize)> {
         let Some(kw) = after.strip_prefix("use") else {
             continue;
         };
-        if kw.bytes().next().is_some_and(is_word) {
+        if kw.bytes().next().is_some_and(word) {
             continue;
         }
         let body = code.len() - kw.len();
@@ -116,7 +112,7 @@ fn leaves(t: &[&str], k: &mut usize, pre: &[String], out: &mut Vec<Leaf>) {
             return;
         }
         let glob = tok == "*";
-        if !glob && !tok.bytes().all(is_word) {
+        if !glob && !tok.bytes().all(word) {
             *k += 1;
             return;
         }
@@ -192,7 +188,7 @@ pub(super) fn item_uses(code: &str) -> Vec<(usize, Vec<Leaf>)> {
             Some(b';' | b'}' | b'{' | b']' | b')') => true,
             Some(_) => before.ends_with("pub"),
         };
-        if !starts_item || b.get(from).is_some_and(|c| is_word(*c)) {
+        if !starts_item || b.get(from).is_some_and(|c| word(*c)) {
             continue;
         }
         let Some(semi) = code[from..].find(';') else {
@@ -255,7 +251,7 @@ pub(super) fn inline_mods(code: &str) -> Vec<(String, usize, usize)> {
             i += 1;
         }
         let s = i;
-        while i < b.len() && is_word(b[i]) {
+        while i < b.len() && word(b[i]) {
             i += 1;
         }
         let name = &code[s..i];

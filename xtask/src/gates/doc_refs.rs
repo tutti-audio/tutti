@@ -20,8 +20,8 @@
 //! in the wrong place passes. Only the first number of a list (`docs 013,
 //! 014`) is read.
 
-use super::lex::{blank, line_of};
-use super::prose::{prose, word};
+use super::lex::{blank, line_of, skipped, word};
+use super::prose::prose;
 use super::{Report, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -31,10 +31,6 @@ struct Krate {
     idents: BTreeSet<String>,
     /// `pub use <crate> as <alias>;`: alias to crate name.
     aliases: BTreeMap<String, String>,
-}
-
-fn skipped(dir: &str) -> bool {
-    dir == "target"
 }
 
 /// The identifier starting at `at`, or `""`.

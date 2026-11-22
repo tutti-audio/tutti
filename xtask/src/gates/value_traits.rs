@@ -12,7 +12,7 @@
 //! An enum behind `pub(crate)` or no `pub` is not public. A derive written as a
 //! path (`std::hash::Hash`) counts by its last segment.
 
-use super::lex::{blank, line_of, matching, test_ranges};
+use super::lex::{blank, line_of, matching, skipped, strip_attrs, test_ranges, word};
 use super::{Report, Tree};
 use std::collections::BTreeSet;
 
@@ -21,14 +21,6 @@ pub(super) const MIN_FILES: usize = 100;
 
 /// `(file, type, reason)`.
 pub(super) const ALLOW: &[(&str, &str, &str)] = &[];
-
-fn skipped(dir: &str) -> bool {
-    matches!(dir, "target" | ".git")
-}
-
-fn word(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
 
 /// The attribute bodies (`derive(Debug)`) written before `at`, and whether the
 /// item is introduced by a bare `pub`.
@@ -121,20 +113,6 @@ fn only_unit_variants(body: &str) -> bool {
         }
     }
     any
-}
-
-fn strip_attrs(v: &str) -> String {
-    let mut out = String::new();
-    let mut rest = v;
-    while let Some(p) = rest.find("#[") {
-        out.push_str(&rest[..p]);
-        match matching(rest, p + 1, b'[', b']') {
-            Some(end) => rest = &rest[end + 1..],
-            None => return out,
-        }
-    }
-    out.push_str(rest);
-    out
 }
 
 /// One enum the gate has an opinion on: public, fieldless, `PartialEq + Eq`.

@@ -22,15 +22,9 @@
 
 use std::collections::BTreeSet;
 
-use super::lex::{blank, find_word_from, line_of, test_ranges};
+use super::lex::{blank, find_word_from, line_of, skipped, test_ranges};
 use super::toml::Toml;
 use super::{Report, Tree};
-
-const SKIPPED_DIRS: &[&str] = &["target", ".git"];
-
-fn skipped(dir: &str) -> bool {
-    SKIPPED_DIRS.contains(&dir)
-}
 
 /// The fewest manifests a real run finds; fewer means the walk is broken.
 pub(super) const MIN_MANIFESTS: usize = 20;
