@@ -99,7 +99,7 @@ fn beat_notes_after_a_timed_start_leave_both_paths_on_one_frame() {
             for b in beats {
                 ed.schedule(
                     At::Beat(Beat::new(b)),
-                    EventInputPort { node, port: 0 },
+                    EventInputPort::new(node, 0),
                     note_on(),
                 )
                 .expect("room");

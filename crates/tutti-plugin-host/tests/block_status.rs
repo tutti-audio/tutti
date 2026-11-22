@@ -153,14 +153,8 @@ fn graph(fake_ring: Samples) -> (Editor, Executor, tutti_graph::EventInletWriter
     ed.insert(inlet_key, "inlet", inlet);
     ed.insert(plugin, "fake", Unforkable(node));
     ed.spec_mut().connect_events(
-        EventInputPort {
-            node: plugin,
-            port: 0,
-        },
-        EventEdge::Direct(EventOutputPort {
-            node: inlet_key,
-            port: 0,
-        }),
+        EventInputPort::new(plugin, 0),
+        EventEdge::Direct(EventOutputPort::new(inlet_key, 0)),
     );
     ed.spec_mut()
         .topology

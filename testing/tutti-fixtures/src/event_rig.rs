@@ -162,14 +162,8 @@ impl EventRig {
     /// Feeds event input `to` of the sink from event output `from_port` of `from`.
     pub fn feed(&mut self, from: NodeKey, from_port: u16, to: u16) {
         self.editor.spec_mut().connect_events(
-            EventInputPort {
-                node: Self::SINK,
-                port: to,
-            },
-            EventEdge::Direct(EventOutputPort {
-                node: from,
-                port: from_port,
-            }),
+            EventInputPort::new(Self::SINK, to),
+            EventEdge::Direct(EventOutputPort::new(from, from_port)),
         );
     }
 

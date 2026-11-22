@@ -764,10 +764,7 @@ mod tests {
 
         ed.insert(NodeKey(2), "b", crate::Unforkable(Count(Arc::clone(&seen))));
         ed.commit().expect("queued, not applied");
-        let to = crate::EventInputPort {
-            node: NodeKey(2),
-            port: 0,
-        };
+        let to = crate::EventInputPort::new(NodeKey(2), 0);
         ed.schedule(At::NextBlock, to, EventKind::Midi(Ump([1, 0, 0, 0])))
             .expect("checked against the queued commit");
 

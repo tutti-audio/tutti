@@ -91,7 +91,7 @@ fn event_port_zero_is_the_main_port_and_an_index_names_another() {
     let sink = g.add(ForkByClone(Events::<2, 0>));
     assert_eq!(sink.event_input(0), sink.event_input(0));
     assert_eq!(src.event_output(0), src.event_output(0));
-    assert_eq!(sink.event_input(0).port, 0);
+    assert_eq!(sink.event_input(0).port(), 0);
 
     g.connect(src.event_output(0), sink.event_input(1)).unwrap();
     assert!(

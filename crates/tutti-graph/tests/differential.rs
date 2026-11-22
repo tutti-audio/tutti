@@ -156,7 +156,7 @@ fn event_outs(desc: &Desc, among: &[NodeKey]) -> Vec<EventOutputPort> {
     among
         .iter()
         .flat_map(|&k| {
-            (0..shape(&desc.kinds[&k]).event_out).map(move |port| EventOutputPort { node: k, port })
+            (0..shape(&desc.kinds[&k]).event_out).map(move |port| EventOutputPort::new(k, port))
         })
         .collect()
 }
@@ -233,7 +233,7 @@ fn wire_node(desc: &mut Desc, j: usize, rng: &mut Rng) {
     let direct_ev = event_outs(desc, &earlier);
     let any_ev = event_outs(desc, &all);
     for port in 0..s.event_in {
-        let at = EventInputPort { node: key, port };
+        let at = EventInputPort::new(key, port);
         let mut seen = BTreeSet::new();
         let mut sources = Vec::new();
         // Up to six sources, so fan-in wider than the common two or three is
@@ -380,9 +380,9 @@ fn mutate(desc: &Desc, rng: &mut Rng) -> Desc {
         for s in &mut t.outputs {
             s.retain(|src| !matches!(src, PortSource::Node(p) if p.node() == victim));
         }
-        d.spec.events.retain(|at, _| at.node != victim);
+        d.spec.events.retain(|at, _| at.node() != victim);
         for v in d.spec.events.values_mut() {
-            v.retain(|e| e.from().node != victim);
+            v.retain(|e| e.from().node() != victim);
         }
     }
     if rng.chance(40) {
@@ -661,7 +661,7 @@ proptest! {
             let ports: Vec<EventInputPort> = desc
                 .kinds
                 .keys()
-                .flat_map(|&k| (0..shape(&desc.kinds[&k]).event_in).map(move |port| EventInputPort { node: k, port }))
+                .flat_map(|&k| (0..shape(&desc.kinds[&k]).event_in).map(move |port| EventInputPort::new(k, port)))
                 .collect();
             let mut rng = Rng::new(seed ^ 0xC0DE);
             let mut script = Script {
@@ -752,8 +752,7 @@ fn transport_case(seed: u64, which: usize) -> Result<(), TestCaseError> {
             .kinds
             .keys()
             .flat_map(|&k| {
-                (0..shape(&desc.kinds[&k]).event_in)
-                    .map(move |port| EventInputPort { node: k, port })
+                (0..shape(&desc.kinds[&k]).event_in).map(move |port| EventInputPort::new(k, port))
             })
             .collect();
         let mut rng = Rng::new(seed ^ 0x7A45);
@@ -927,7 +926,7 @@ fn the_generator_covers_what_the_suite_claims() {
                     .events
                     .values()
                     .flatten()
-                    .any(|e| e.from().node == *k)
+                    .any(|e| e.from().node() == *k)
             {
                 overflowing_wired += 1;
             }
@@ -1148,9 +1147,9 @@ fn close_a_cycle(desc: &mut Desc, rng: &mut Rng) -> bool {
                 }
                 for (at, v) in &d.spec.events {
                     if v.iter()
-                        .any(|e| matches!(e, EventEdge::Direct(f) if f.node == k))
+                        .any(|e| matches!(e, EventEdge::Direct(f) if f.node() == k))
                     {
-                        stack.push(at.node);
+                        stack.push(at.node());
                     }
                 }
             }
@@ -1166,28 +1165,16 @@ fn close_a_cycle(desc: &mut Desc, rng: &mut Rng) -> bool {
             );
             return true;
         }
-        let from = EventOutputPort {
-            node: late,
-            port: 0,
-        };
+        let from = EventOutputPort::new(late, 0);
         let listed = desc
             .spec
             .events
-            .get(&EventInputPort {
-                node: early,
-                port: 0,
-            })
+            .get(&EventInputPort::new(early, 0))
             .is_some_and(|v| v.iter().any(|e| e.from() == from));
         if se.event_in > 0 && sl.event_out > 0 && !listed {
             desc.spec.connect_events(
-                EventInputPort {
-                    node: early,
-                    port: 0,
-                },
-                EventEdge::Direct(EventOutputPort {
-                    node: late,
-                    port: 0,
-                }),
+                EventInputPort::new(early, 0),
+                EventEdge::Direct(EventOutputPort::new(late, 0)),
             );
             return true;
         }
@@ -1651,9 +1638,9 @@ fn every_borrow_form_matches_the_reference() {
         out(w3, 2),
     ]);
     let mut g = GraphSpec::new(t);
-    let ev = |node, port| EventOutputPort { node, port };
+    let ev = |node, port| EventOutputPort::new(node, port);
     let mut connect = |node, port, from| {
-        g.connect_events(EventInputPort { node, port }, EventEdge::Direct(from));
+        g.connect_events(EventInputPort::new(node, port), EventEdge::Direct(from));
     };
     connect(consume, 0, ev(emit, 0));
     connect(mix6, 0, ev(emit, 0));
@@ -1902,7 +1889,7 @@ proptest! {
             let ports: Vec<EventInputPort> = desc
                 .kinds
                 .keys()
-                .flat_map(|&k| (0..shape(&desc.kinds[&k]).event_in).map(move |port| EventInputPort { node: k, port }))
+                .flat_map(|&k| (0..shape(&desc.kinds[&k]).event_in).map(move |port| EventInputPort::new(k, port)))
                 .collect();
             let mut rng = Rng::new(seed ^ 0xFA11);
             for _ in 0..rng.below(12) {
@@ -2466,9 +2453,11 @@ fn drive(desc: &mut Desc, rng: &mut Rng) {
             continue;
         }
         let g = desc.spec.gains.get_mut(&id).expect("listed");
-        g.source = rng.chance(80).then(|| EventOutputPort {
-            node: NodeKey(LANE_KEYS + rng.below(LANE_LATENCIES.len() as u64)),
-            port: 0,
+        g.source = rng.chance(80).then(|| {
+            EventOutputPort::new(
+                NodeKey(LANE_KEYS + rng.below(LANE_LATENCIES.len() as u64)),
+                0,
+            )
         });
         let (min, max) = LANE_RANGES[rng.below(LANE_RANGES.len() as u64) as usize];
         g.range = tutti_graph::ParamRange::new(min, max);
@@ -2800,10 +2789,10 @@ fn drive_mixes(desc: &mut Desc, rng: &mut Rng) {
         }
         let at = mix_port(key);
         if rng.chance(80) {
-            let from = EventOutputPort {
-                node: NodeKey(MIX_LANE_KEYS + rng.below(LANE_LATENCIES.len() as u64)),
-                port: 0,
-            };
+            let from = EventOutputPort::new(
+                NodeKey(MIX_LANE_KEYS + rng.below(LANE_LATENCIES.len() as u64)),
+                0,
+            );
             desc.spec.connect_param(at, from);
         } else if let Some(m) = desc.spec.params.get_mut(&at) {
             m.source = None;

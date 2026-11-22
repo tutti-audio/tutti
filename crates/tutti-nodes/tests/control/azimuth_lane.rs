@@ -92,13 +92,8 @@ fn lane(ed: &mut Editor, key: u64, param: UnitParam, program: &ControlProgram, k
             .range(ed.param_range_cell(at(param)).expect("committed")),
     );
     ed.insert(NodeKey(key), "lane", node);
-    ed.spec_mut().connect_param(
-        at(param),
-        EventOutputPort {
-            node: NodeKey(key),
-            port: 0,
-        },
-    );
+    ed.spec_mut()
+        .connect_param(at(param), EventOutputPort::new(NodeKey(key), 0));
 }
 
 /// Rolls `blocks` blocks of `n` frames from `start`; each output's frames.

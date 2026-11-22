@@ -168,13 +168,8 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
             .range(range),
     );
     ed.insert(NodeKey(2), "lane", lane);
-    ed.spec_mut().connect_param(
-        at,
-        EventOutputPort {
-            node: NodeKey(2),
-            port: 0,
-        },
-    );
+    ed.spec_mut()
+        .connect_param(at, EventOutputPort::new(NodeKey(2), 0));
     ed.commit().expect("the lane commits");
 
     let mut r = Renderer::new(ed, exec);
@@ -257,13 +252,8 @@ fn render_chorus(
                 .range(range),
         );
         ed.insert(NodeKey(9_000), "lane", lane);
-        ed.spec_mut().connect_param(
-            at,
-            EventOutputPort {
-                node: NodeKey(9_000),
-                port: 0,
-            },
-        );
+        ed.spec_mut()
+            .connect_param(at, EventOutputPort::new(NodeKey(9_000), 0));
         ed.commit().expect("the lane commits");
     }
     (
@@ -431,13 +421,8 @@ fn render_lfo(param: UnitParam, range: ParamRange, depth: f64) -> (Vec<f32>, f64
             .range(range),
     );
     ed.insert(NodeKey(9_000), "lane", lane);
-    ed.spec_mut().connect_param(
-        at,
-        EventOutputPort {
-            node: NodeKey(9_000),
-            port: 0,
-        },
-    );
+    ed.spec_mut()
+        .connect_param(at, EventOutputPort::new(NodeKey(9_000), 0));
     ed.commit().expect("the lane commits");
     let out = r.render(60_000).swap_remove(0);
     (out, knob.load(Ordering::Acquire))
@@ -538,13 +523,8 @@ where
         .expect("the node declares it as a port");
     let lane = ControlLaneNode::from(UnitLaneConfig::new(param, program).knob(knob).range(range));
     ed.insert(NodeKey(9_000), "lane", lane);
-    ed.spec_mut().connect_param(
-        at,
-        EventOutputPort {
-            node: NodeKey(9_000),
-            port: 0,
-        },
-    );
+    ed.spec_mut()
+        .connect_param(at, EventOutputPort::new(NodeKey(9_000), 0));
     ed.commit().expect("the lane commits");
     r.render_input(Planes::new(&[input]).unwrap())
         .swap_remove(0)
@@ -742,10 +722,7 @@ fn an_lfo_reads_a_driven_depth_per_frame() {
             node: n,
             param: UnitParam::Depth.into(),
         },
-        EventOutputPort {
-            node: pulse,
-            port: 0,
-        },
+        EventOutputPort::new(pulse, 0),
     );
     let mut r = g
         .renderer(Prepare::new(
@@ -811,10 +788,7 @@ fn shelf_handed_back(block: usize) -> Vec<f32> {
             .knob(knob)
             .range(range),
     );
-    let lane_out = EventOutputPort {
-        node: NodeKey(9_000),
-        port: 0,
-    };
+    let lane_out = EventOutputPort::new(NodeKey(9_000), 0);
     ed.insert(NodeKey(9_000), "lane", lane);
     ed.spec_mut().connect_param(at, lane_out);
     ed.commit().expect("the lane commits");

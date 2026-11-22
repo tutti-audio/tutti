@@ -319,8 +319,8 @@ fn ties_break_by_key_across_edge_kinds() {
     edge(&mut t, at(b, 0), out(x, 0));
     let mut g = GraphSpec::new(t);
     g.connect_events(
-        EventInputPort { node: a, port: 0 },
-        EventEdge::Direct(EventOutputPort { node: x, port: 0 }),
+        EventInputPort::new(a, 0),
+        EventEdge::Direct(EventOutputPort::new(x, 0)),
     );
     let shapes: Shapes = [
         (
@@ -516,8 +516,8 @@ fn a_cycle_through_an_event_edge_is_an_error_naming_its_edges() {
     let mut g = two_node_spec();
     edge(&mut g.topology, at(B, 0), out(A, 0));
     g.connect_events(
-        EventInputPort { node: A, port: 0 },
-        EventEdge::Direct(EventOutputPort { node: B, port: 0 }),
+        EventInputPort::new(A, 0),
+        EventEdge::Direct(EventOutputPort::new(B, 0)),
     );
     let valid = g.validate().expect("the value alone cannot see it");
     let err =
@@ -528,8 +528,8 @@ fn a_cycle_through_an_event_edge_is_an_error_naming_its_edges() {
             edges: vec![
                 CycleEdge::Audio(at(B, 0)),
                 CycleEdge::Event {
-                    at: EventInputPort { node: A, port: 0 },
-                    from: EventOutputPort { node: B, port: 0 }
+                    at: EventInputPort::new(A, 0),
+                    from: EventOutputPort::new(B, 0)
                 },
             ]
         }
@@ -541,8 +541,8 @@ fn a_cycle_through_an_event_edge_is_an_error_naming_its_edges() {
 fn an_event_self_loop_is_a_cycle() {
     let mut g = two_node_spec();
     g.connect_events(
-        EventInputPort { node: A, port: 0 },
-        EventEdge::Direct(EventOutputPort { node: A, port: 0 }),
+        EventInputPort::new(A, 0),
+        EventEdge::Direct(EventOutputPort::new(A, 0)),
     );
     let valid = g.validate().expect("valid value");
     assert!(matches!(
@@ -565,8 +565,8 @@ fn feedback_edges_break_cycles() {
         ))],
     );
     g.connect_events(
-        EventInputPort { node: A, port: 0 },
-        EventEdge::feedback(EventOutputPort { node: B, port: 0 }, Samples::new(PREP)),
+        EventInputPort::new(A, 0),
+        EventEdge::feedback(EventOutputPort::new(B, 0), Samples::new(PREP)),
     );
     let valid = g.validate().expect("feedback breaks the cycle");
     let (plan, _) =
@@ -614,14 +614,14 @@ fn shape_disagreements_are_errors() {
 
     let mut g = two_node_spec();
     g.connect_events(
-        EventInputPort { node: A, port: 3 },
-        EventEdge::Direct(EventOutputPort { node: B, port: 0 }),
+        EventInputPort::new(A, 3),
+        EventEdge::Direct(EventOutputPort::new(B, 0)),
     );
     let valid = g.validate().unwrap();
     assert_eq!(
         compile(&valid, &gain_kinds(&[A, B]), &common::prepare(PREP), None).unwrap_err(),
         CompileError::EventPortOutOfRange {
-            at: EventInputPort { node: A, port: 3 },
+            at: EventInputPort::new(A, 3),
             from: None
         }
     );
@@ -927,8 +927,8 @@ fn an_event_source_counts_toward_arrival_in_both_solves() {
     t.set_outputs(vec![PortSource::Node(out(C, 0))]);
     let mut g = GraphSpec::new(t.clone());
     g.connect_events(
-        EventInputPort { node: C, port: 0 },
-        EventEdge::Direct(EventOutputPort { node: A, port: 0 }),
+        EventInputPort::new(C, 0),
+        EventEdge::Direct(EventOutputPort::new(A, 0)),
     );
     let mut shapes = shapes_of_spec(&t);
     shapes.insert(
@@ -1022,10 +1022,7 @@ fn automation_into(
     required: Option<tutti_graph::Resolution>,
 ) -> Result<(), CompileError> {
     let mut g = two_node_spec();
-    let (lane, target) = (
-        EventOutputPort { node: A, port: 0 },
-        EventInputPort { node: B, port: 0 },
-    );
+    let (lane, target) = (EventOutputPort::new(A, 0), EventInputPort::new(B, 0));
     g.connect_events(target, EventEdge::Direct(lane));
     if let Some(r) = required {
         g.require_resolution(target, lane, r);
@@ -1049,8 +1046,8 @@ fn a_sample_accurate_edge_into_a_block_node_is_refused() {
     assert_eq!(
         automation_into(Block, Some(Sample)),
         Err(CompileError::ResolutionTooCoarse {
-            at: EventInputPort { node: B, port: 0 },
-            from: EventOutputPort { node: A, port: 0 },
+            at: EventInputPort::new(B, 0),
+            from: EventOutputPort::new(A, 0),
             required: Sample,
             sink: Block,
         })
@@ -1068,10 +1065,7 @@ fn a_sample_accurate_edge_into_a_block_node_is_refused() {
 #[test]
 fn a_resolution_mark_without_its_edge_is_invalid() {
     let mut g = two_node_spec();
-    let (from, at) = (
-        EventOutputPort { node: A, port: 0 },
-        EventInputPort { node: B, port: 0 },
-    );
+    let (from, at) = (EventOutputPort::new(A, 0), EventInputPort::new(B, 0));
     g.require_resolution(at, from, tutti_graph::Resolution::Sample);
     assert_eq!(
         g.validate().err(),
@@ -1105,10 +1099,7 @@ fn removing_a_node_removes_its_resolution_marks() {
         "consume",
         Unforkable(common::TestNode::new(Kind::Consumer { inputs: 1 })),
     );
-    let (from, at) = (
-        EventOutputPort { node: A, port: 0 },
-        EventInputPort { node: B, port: 0 },
-    );
+    let (from, at) = (EventOutputPort::new(A, 0), EventInputPort::new(B, 0));
     ed.spec_mut().connect_events(at, EventEdge::Direct(from));
     ed.spec_mut()
         .require_resolution(at, from, tutti_graph::Resolution::Sample);
@@ -1137,10 +1128,7 @@ fn disconnecting_an_edge_drops_its_resolution_mark() {
         "consume",
         Unforkable(common::TestNode::new(Kind::Consumer { inputs: 1 })),
     );
-    let (from, at) = (
-        EventOutputPort { node: A, port: 0 },
-        EventInputPort { node: B, port: 0 },
-    );
+    let (from, at) = (EventOutputPort::new(A, 0), EventInputPort::new(B, 0));
     ed.spec_mut().connect_events(at, EventEdge::Direct(from));
     ed.spec_mut()
         .require_resolution(at, from, tutti_graph::Resolution::Sample);

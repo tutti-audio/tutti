@@ -107,28 +107,10 @@ fn wire(ed: &mut Editor) {
         vec![Edge::Direct(PortSource::MainInput(0))],
     );
     t.set_outputs(vec![PortSource::Node(OutputPort::new(SUM, 0))]);
-    let emit = EventOutputPort {
-        node: EMIT,
-        port: 0,
-    };
-    spec.connect_events(
-        EventInputPort {
-            node: EVLAG,
-            port: 0,
-        },
-        EventEdge::Direct(emit),
-    );
-    for from in [
-        EventOutputPort {
-            node: EVLAG,
-            port: 0,
-        },
-        emit,
-    ] {
-        spec.connect_events(
-            EventInputPort { node: REC, port: 0 },
-            EventEdge::Direct(from),
-        );
+    let emit = EventOutputPort::new(EMIT, 0);
+    spec.connect_events(EventInputPort::new(EVLAG, 0), EventEdge::Direct(emit));
+    for from in [EventOutputPort::new(EVLAG, 0), emit] {
+        spec.connect_events(EventInputPort::new(REC, 0), EventEdge::Direct(from));
     }
 }
 
@@ -559,10 +541,7 @@ fn assert_poisoned(mut ed: Editor, mut exec: Executor, cause: &str) {
     assert_eq!(
         ed.schedule(
             tutti_units::At::NextBlock,
-            EventInputPort {
-                node: NodeKey(1),
-                port: 0
-            },
+            EventInputPort::new(NodeKey(1), 0),
             EventKind::Midi(Ump([0; 4]))
         ),
         Err(tutti_graph::ScheduleError::Poisoned)
@@ -610,14 +589,8 @@ fn a_resolution_that_coarsens_on_prepare_poisons_the_editor() {
         Unforkable(CoarseAt96k(tutti_graph::Resolution::Sample)),
     );
     let (from, at) = (
-        EventOutputPort {
-            node: NodeKey(0),
-            port: 0,
-        },
-        EventInputPort {
-            node: NodeKey(1),
-            port: 0,
-        },
+        EventOutputPort::new(NodeKey(0), 0),
+        EventInputPort::new(NodeKey(1), 0),
     );
     ed.spec_mut().connect_events(at, EventEdge::Direct(from));
     ed.spec_mut()
@@ -641,7 +614,7 @@ fn a_resolution_that_coarsens_on_prepare_poisons_the_editor() {
 fn a_rate_change_keeps_pending_commands_at_their_wall_clock_time() {
     let mut rig = rig(prep(48_000.0, 64));
     rig.render(&[64, 64, 64]);
-    let to = EventInputPort { node: REC, port: 0 };
+    let to = EventInputPort::new(REC, 0);
     let note = |t: u32| EventKind::Midi(Ump([t, 9, 0, 0]));
     let old_rate = tutti_units::At::Frame(tutti_units::Frame::new(1_000));
     rig.ed.schedule(old_rate, to, note(70_000)).expect("room");
@@ -686,7 +659,7 @@ fn a_rate_change_keeps_pending_commands_at_their_wall_clock_time() {
 fn frames_a_rate_change_merges_keep_their_order() {
     let mut rig = rig(prep(96_000.0, 64));
     rig.render(&[64, 64, 64]);
-    let to = EventInputPort { node: REC, port: 0 };
+    let to = EventInputPort::new(REC, 0);
     for (frame, tag) in [(1_000u64, 80_000u32), (999, 80_001)] {
         let at = tutti_units::At::Frame(tutti_units::Frame::new(frame));
         let note = EventKind::Midi(Ump([tag, 9, 0, 0]));

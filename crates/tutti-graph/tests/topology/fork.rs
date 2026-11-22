@@ -670,14 +670,8 @@ fn a_node_fork_holds_exactly_what_feeds_the_node() {
         .insert(InputPort::new(after, 0), vec![Edge::Direct(out(target, 0))]);
     t.set_outputs(vec![out(after, 0), out(side, 0)]);
     spec.connect_events(
-        EventInputPort {
-            node: target,
-            port: 0,
-        },
-        EventEdge::Direct(EventOutputPort {
-            node: emit,
-            port: 0,
-        }),
+        EventInputPort::new(target, 0),
+        EventEdge::Direct(EventOutputPort::new(emit, 0)),
     );
     ed.commit().expect("the live graph commits");
 
@@ -836,23 +830,14 @@ fn a_fork_carries_event_capacity_and_its_own_marks() {
     let spec = ed.spec_mut();
     spec.topology.set_outputs(vec![out(fold, 0), out(fold2, 0)]);
     for (e, f) in [(emit, fold), (emit2, fold2)] {
-        let at = EventInputPort { node: f, port: 0 };
-        let from = EventOutputPort { node: e, port: 0 };
+        let at = EventInputPort::new(f, 0);
+        let from = EventOutputPort::new(e, 0);
         spec.connect_events(at, EventEdge::Direct(from));
         spec.require_resolution(at, from, Resolution::Sample);
     }
 
     let (fe, mut fx) = ed.fork(ForkTarget::Node(fold), pre).expect("forks");
-    let mark = (
-        EventInputPort {
-            node: fold,
-            port: 0,
-        },
-        EventOutputPort {
-            node: emit,
-            port: 0,
-        },
-    );
+    let mark = (EventInputPort::new(fold, 0), EventOutputPort::new(emit, 0));
     assert_eq!(
         fe.spec()
             .required_resolution

@@ -119,14 +119,8 @@ fn rig(k: u64, n: u32, mix: Mix) -> Executor {
     for i in 0..k {
         ed.insert(NodeKey(i + 1), "source", Unforkable(Source::new(n, mix)));
         ed.spec_mut().connect_events(
-            EventInputPort {
-                node: NodeKey(100),
-                port: 0,
-            },
-            EventEdge::Direct(EventOutputPort {
-                node: NodeKey(i + 1),
-                port: 0,
-            }),
+            EventInputPort::new(NodeKey(100), 0),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(i + 1), 0)),
         );
     }
     ed.commit().expect("commits");

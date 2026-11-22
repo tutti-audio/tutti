@@ -1083,10 +1083,7 @@ mod tests {
                 node: NodeKey(2),
                 param: UnitParam::Cutoff.into(),
             },
-            EventOutputPort {
-                node: NodeKey(3),
-                port: 0,
-            },
+            EventOutputPort::new(NodeKey(3), 0),
         );
         let valid = spec.validate().expect("valid");
         let plan = compile(
@@ -1699,14 +1696,8 @@ mod tests {
         let mut g = GraphSpec::new(t);
         for k in [1, 2] {
             g.connect_events(
-                EventInputPort {
-                    node: NodeKey(3),
-                    port: 0,
-                },
-                EventEdge::Direct(EventOutputPort {
-                    node: NodeKey(k),
-                    port: 0,
-                }),
+                EventInputPort::new(NodeKey(3), 0),
+                EventEdge::Direct(EventOutputPort::new(NodeKey(k), 0)),
             );
         }
         let prep = crate::node::Prepare::new(

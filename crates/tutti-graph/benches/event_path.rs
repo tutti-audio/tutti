@@ -103,14 +103,8 @@ fn rig(source: Source) -> Executor {
     ed.insert(NodeKey(1), "source", Unforkable(source));
     ed.insert(NodeKey(2), "sink", Unforkable(Sink::new()));
     ed.spec_mut().connect_events(
-        EventInputPort {
-            node: NodeKey(2),
-            port: 0,
-        },
-        EventEdge::Direct(EventOutputPort {
-            node: NodeKey(1),
-            port: 0,
-        }),
+        EventInputPort::new(NodeKey(2), 0),
+        EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
     );
     ed.commit().expect("commits");
     let mut exec = exec;

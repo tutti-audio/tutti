@@ -757,10 +757,7 @@ fn a_graph_beat_note_after_a_timed_start_lands_on_its_frame() {
     // Install the plan so the editor can schedule against it.
     render(&engine, ChannelLayout::MONO, &[256]);
     ed.collect();
-    let to = EventInputPort {
-        node: NodeKey(1),
-        port: 0,
-    };
+    let to = EventInputPort::new(NodeKey(1), 0);
     let note = EventKind::Midi(midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100)));
     ed.schedule(At::Beat(Beat::new(0.0)), to, note)
         .expect("room");
@@ -986,10 +983,7 @@ fn a_declick_stop_stops_the_transport_on_its_frame() {
     ed2.collect();
     ed2.schedule(
         At::Beat(Beat::new(400.0 / FPB as f64)),
-        EventInputPort {
-            node: NodeKey(1),
-            port: 0,
-        },
+        EventInputPort::new(NodeKey(1), 0),
         EventKind::Midi(midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100))),
     )
     .expect("room");

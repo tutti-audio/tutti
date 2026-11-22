@@ -293,13 +293,8 @@ fn drive_volume(ed: &mut tutti_graph::Editor, at: ParamIn, knob: tutti_rt::Param
             .range(range),
     );
     ed.insert(NodeKey(9_000), "lane", lane);
-    ed.spec_mut().connect_param(
-        at,
-        EventOutputPort {
-            node: NodeKey(9_000),
-            port: 0,
-        },
-    );
+    ed.spec_mut()
+        .connect_param(at, EventOutputPort::new(NodeKey(9_000), 0));
     ed.commit().expect("the lane commits");
 }
 

@@ -417,10 +417,7 @@ fn port(node: u64, port: u16) -> OutputPort {
 
 /// Event output 0 of `node`.
 fn ev(node: u64) -> EventOutputPort {
-    EventOutputPort {
-        node: NodeKey(node),
-        port: 0,
-    }
+    EventOutputPort::new(NodeKey(node), 0)
 }
 
 fn param(node: u64, p: UnitParam) -> ParamIn {
@@ -659,10 +656,7 @@ fn undeclared_params_and_missing_sources_are_refused() {
     ed.spec_mut().params.clear();
     ed.spec_mut().connect_param(
         param(PROBE, UnitParam::Cutoff),
-        EventOutputPort {
-            node: NodeKey(1),
-            port: 3,
-        },
+        EventOutputPort::new(NodeKey(1), 3),
     );
     assert!(
         matches!(
@@ -1298,10 +1292,7 @@ fn render_moves(
     );
     ed.spec_mut().connect_param(
         param(PROBE, UnitParam::Cutoff),
-        EventOutputPort {
-            node: NodeKey(1),
-            port: 0,
-        },
+        EventOutputPort::new(NodeKey(1), 0),
     );
     ed.commit().expect("commits");
     let mut out = Vec::new();
@@ -1597,13 +1588,8 @@ fn a_range_clamps_a_segment_without_rewriting_it() {
         }),
     );
     let at = param(PROBE, UnitParam::Cutoff);
-    ed.spec_mut().connect_param(
-        at,
-        EventOutputPort {
-            node: NodeKey(1),
-            port: 0,
-        },
-    );
+    ed.spec_mut()
+        .connect_param(at, EventOutputPort::new(NodeKey(1), 0));
     ed.commit().expect("commits");
     let curve = |f: u64| analytic(0.0, 2.0, shape, 1.0, 640.0, f);
     let mut frame = 0u64;
@@ -2108,13 +2094,8 @@ fn a_shrinking_range_rewrites_neither_the_base_nor_a_ramp() {
         }),
     );
     let at = param(PROBE, UnitParam::Cutoff);
-    ed.spec_mut().connect_param(
-        at,
-        EventOutputPort {
-            node: NodeKey(1),
-            port: 0,
-        },
-    );
+    ed.spec_mut()
+        .connect_param(at, EventOutputPort::new(NodeKey(1), 0));
     ed.commit().expect("commits");
     // The ramp's value at absolute frame `f`: `Ramp::step`'s arithmetic in
     // `f64`, from the base (the port's value before its first event),

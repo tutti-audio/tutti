@@ -64,11 +64,11 @@ fn id(sink: InputPort, from: Edge) -> EdgeId {
 }
 
 fn eout(node: NodeKey, port: u16) -> EventOutputPort {
-    EventOutputPort { node, port }
+    EventOutputPort::new(node, port)
 }
 
 fn ein(node: NodeKey, port: u16) -> EventInputPort {
-    EventInputPort { node, port }
+    EventInputPort::new(node, port)
 }
 
 /// `A -> X -> B`, three audio and three event ports on each, `X` the key

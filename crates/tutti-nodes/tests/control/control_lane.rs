@@ -189,13 +189,8 @@ fn native(ed: &Editor, probe: u64, program: ControlProgram, knob: Option<f64>) -
 /// Inserts `lane` at `key`, wired to `probe`'s cutoff; returns its controls.
 fn wire(ed: &mut Editor, key: u64, lane: ControlLaneNode, probe: u64) -> LaneControls {
     let controls = ed.insert(NodeKey(key), "lane", lane).controls;
-    ed.spec_mut().connect_param(
-        cutoff(probe),
-        EventOutputPort {
-            node: NodeKey(key),
-            port: 0,
-        },
-    );
+    ed.spec_mut()
+        .connect_param(cutoff(probe), EventOutputPort::new(NodeKey(key), 0));
     controls
 }
 
@@ -206,14 +201,8 @@ fn wire_sink(ed: &mut Editor, key: u64, lane: ControlLaneNode, sink: u64) -> Lan
     ed.insert(NodeKey(sink), "sink", ForkByClone(SegSink::default()));
     let s = ed.spec_mut();
     s.connect_events(
-        EventInputPort {
-            node: NodeKey(sink),
-            port: 0,
-        },
-        EventEdge::Direct(EventOutputPort {
-            node: NodeKey(key),
-            port: 0,
-        }),
+        EventInputPort::new(NodeKey(sink), 0),
+        EventEdge::Direct(EventOutputPort::new(NodeKey(key), 0)),
     );
     s.topology
         .outputs
@@ -1140,14 +1129,8 @@ fn an_input_offset_is_exact_from_its_frame() {
 /// Connects the `Feed` at `feed` to the lane at `lane`'s event input.
 fn feed_into(ed: &mut Editor, feed: u64, lane: u64) {
     ed.spec_mut().connect_events(
-        EventInputPort {
-            node: NodeKey(lane),
-            port: 0,
-        },
-        EventEdge::Direct(EventOutputPort {
-            node: NodeKey(feed),
-            port: 0,
-        }),
+        EventInputPort::new(NodeKey(lane), 0),
+        EventEdge::Direct(EventOutputPort::new(NodeKey(feed), 0)),
     );
 }
 
@@ -1308,10 +1291,7 @@ fn a_resync_sends_a_steady_lane_to_its_new_target() {
     }
     let got = run(&mut ed, &mut exec);
     assert!(got[0].iter().all(|&v| v == 250.0), "probe 2 has it");
-    let from = EventOutputPort {
-        node: NodeKey(1),
-        port: 0,
-    };
+    let from = EventOutputPort::new(NodeKey(1), 0);
     assert!(ed.spec_mut().disconnect_param(cutoff(2), from));
     ed.spec_mut().connect_param(cutoff(3), from);
     ed.commit().expect("commits");

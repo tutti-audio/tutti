@@ -1717,8 +1717,8 @@ impl<F: Float> Graph<F> {
         let mut event_edges: Vec<crate::EventEdge> = Vec::new();
         for (at, edge) in &unwired.event_edges {
             let (from, to) = (edge.from(), *at);
-            if at.port == 0
-                && let Some(fed) = self.fed_edges.get_mut(&at.node)
+            if at.port() == 0
+                && let Some(fed) = self.fed_edges.get_mut(&at.node())
             {
                 fed.retain(|s| *s != from);
             }
@@ -1890,23 +1890,23 @@ impl<F: Float> Graph<F> {
 
     /// Whether `port` names an event output the graph has.
     fn check_event_out(&self, port: EventOutputPort) -> Result<(), ConnectError> {
-        if !self.contains(port.node) {
-            return Err(ConnectError::NoSuchNode(port.node));
+        if !self.contains(port.node()) {
+            return Err(ConnectError::NoSuchNode(port.node()));
         }
         let fits = self
-            .shape(port.node)
-            .is_some_and(|s| port.port < s.event_out);
+            .shape(port.node())
+            .is_some_and(|s| port.port() < s.event_out);
         fits.then_some(()).ok_or(ConnectError::NoSuchEventOut(port))
     }
 
     /// Whether `port` names an event input the graph has.
     pub(crate) fn check_event_in(&self, port: EventInputPort) -> Result<(), ConnectError> {
-        if !self.contains(port.node) {
-            return Err(ConnectError::NoSuchNode(port.node));
+        if !self.contains(port.node()) {
+            return Err(ConnectError::NoSuchNode(port.node()));
         }
         let fits = self
-            .shape(port.node)
-            .is_some_and(|s| port.port < s.event_in);
+            .shape(port.node())
+            .is_some_and(|s| port.port() < s.event_in);
         fits.then_some(()).ok_or(ConnectError::NoSuchEventIn(port))
     }
 
@@ -1917,8 +1917,8 @@ impl<F: Float> Graph<F> {
     ) -> Result<(), ConnectError> {
         self.check_event_out(from)?;
         self.check_event_in(to)?;
-        if from.node == to.node {
-            return Err(ConnectError::Itself(from.node));
+        if from.node() == to.node() {
+            return Err(ConnectError::Itself(from.node()));
         }
         Ok(())
     }
@@ -1938,12 +1938,12 @@ impl<F: Float> Graph<F> {
             .events
             .get(&to)
             .is_some_and(|edges| edges.iter().any(|e| e.from() == from));
-        if to.port == 0
-            && let Some(ours) = self.fed_edges.get_mut(&to.node)
+        if to.port() == 0
+            && let Some(ours) = self.fed_edges.get_mut(&to.node())
         {
             ours.retain(|s| *s != from);
             if ours.is_empty() {
-                self.fed_edges.remove(&to.node);
+                self.fed_edges.remove(&to.node());
             }
         }
         if held {
@@ -1960,7 +1960,7 @@ impl<F: Float> Graph<F> {
     pub(crate) fn remove_event_edge(&mut self, from: EventOutputPort, to: EventInputPort) -> bool {
         let removed = self.editor.spec_mut().disconnect_events(to, from);
         if removed {
-            if let Some(ours) = self.fed_edges.get_mut(&to.node) {
+            if let Some(ours) = self.fed_edges.get_mut(&to.node()) {
                 ours.retain(|s| *s != from);
             }
             self.edited = true;
@@ -1985,8 +1985,8 @@ impl<F: Float> Graph<F> {
         for &from in sources {
             self.check_event_wire(from, to)?;
         }
-        let sink = to.node;
-        let port = to.port;
+        let sink = to.node();
+        let port = to.port();
         if port != 0 {
             self.write_event_sources(sink, port, sources);
             return Ok(());
@@ -2004,7 +2004,7 @@ impl<F: Float> Graph<F> {
     /// Feeds `sink`'s event input `port` from exactly `sources`, but for
     /// edges from nodes the graph did not insert.
     fn write_event_sources(&mut self, sink: NodeKey, port: u16, sources: &[EventOutputPort]) {
-        let at = EventInputPort { node: sink, port };
+        let at = EventInputPort::new(sink, port);
         let mut want: Vec<EventOutputPort> = sources.to_vec();
         want.sort();
         want.dedup();
@@ -2016,7 +2016,7 @@ impl<F: Float> Graph<F> {
             .cloned()
             .unwrap_or_default()
             .into_iter()
-            .partition(|e| nodes.contains_key(&e.from().node));
+            .partition(|e| nodes.contains_key(&e.from().node()));
         let have: Vec<EventOutputPort> = have.iter().map(|e| e.from()).collect();
         if have == want {
             return;
@@ -2168,7 +2168,7 @@ impl<F: Float> Graph<F> {
         let mut all: Vec<EventOutputPort> = self
             .event_sources_of(EventInputPort::new(sink, 0))
             .into_iter()
-            .filter(|s| self.nodes.contains_key(&s.node) && !ours.contains(s))
+            .filter(|s| self.nodes.contains_key(&s.node()) && !ours.contains(s))
             .collect();
         let hand = all.len();
         let theirs: Vec<EventOutputPort> = union
@@ -2232,14 +2232,14 @@ impl<F: Float> Graph<F> {
         self.feeds.remove(&node);
         for feeds in self.feeds.values_mut() {
             for sources in feeds.values_mut() {
-                sources.retain(|s| s.node != node);
+                sources.retain(|s| s.node() != node);
             }
             feeds.retain(|_, s| !s.is_empty());
         }
         self.feeds.retain(|_, f| !f.is_empty());
         self.fed_edges.remove(&node);
         for sources in self.fed_edges.values_mut() {
-            sources.retain(|s| s.node != node);
+            sources.retain(|s| s.node() != node);
         }
         self.fed_edges.retain(|_, s| !s.is_empty());
         self.edited = true;

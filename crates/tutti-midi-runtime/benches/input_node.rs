@@ -64,14 +64,8 @@ fn rig() -> (Executor, DeviceInput) {
     );
     editor.insert(NodeKey(2), "inlet", inlet);
     editor.spec_mut().connect_events(
-        EventInputPort {
-            node: NodeKey(1),
-            port: 0,
-        },
-        EventEdge::Direct(EventOutputPort {
-            node: NodeKey(2),
-            port: 0,
-        }),
+        EventInputPort::new(NodeKey(1), 0),
+        EventEdge::Direct(EventOutputPort::new(NodeKey(2), 0)),
     );
     editor.commit().expect("commits");
     (exec, device)

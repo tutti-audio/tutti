@@ -173,17 +173,11 @@ fn from(node: u64, port: u16) -> Edge {
 }
 
 fn ev_out(node: u64) -> EventOutputPort {
-    EventOutputPort {
-        node: NodeKey(node),
-        port: 0,
-    }
+    EventOutputPort::new(NodeKey(node), 0)
 }
 
 fn consumer_in(port: u16) -> EventInputPort {
-    EventInputPort {
-        node: NodeKey(40),
-        port,
-    }
+    EventInputPort::new(NodeKey(40), port)
 }
 
 /// The graph (keys in brackets):
@@ -299,17 +293,11 @@ fn build(ed: &mut Editor) {
         spec.connect_events(to, EventEdge::Direct(ev_out(src)));
     }
     spec.connect_events(
-        EventInputPort {
-            node: NodeKey(22),
-            port: 0,
-        },
+        EventInputPort::new(NodeKey(22), 0),
         EventEdge::Direct(ev_out(20)),
     );
     spec.connect_events(
-        EventInputPort {
-            node: NodeKey(41),
-            port: 0,
-        },
+        EventInputPort::new(NodeKey(41), 0),
         EventEdge::Direct(ev_out(21)),
     );
     let cut = ParamIn {

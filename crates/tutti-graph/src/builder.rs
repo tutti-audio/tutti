@@ -613,14 +613,8 @@ impl<F: Float> GraphBuilder<F> {
             "{to:?} has {ins} event inputs; port {to_port} is out of range"
         );
         self.spec.connect_events(
-            EventInputPort {
-                node: to,
-                port: to_port as u16,
-            },
-            EventEdge::Direct(EventOutputPort {
-                node: from,
-                port: from_port as u16,
-            }),
+            EventInputPort::new(to, to_port as u16),
+            EventEdge::Direct(EventOutputPort::new(from, from_port as u16)),
         );
         self
     }
