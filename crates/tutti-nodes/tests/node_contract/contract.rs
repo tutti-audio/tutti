@@ -29,8 +29,8 @@ use tutti_graph::contract::{Detect, Excite, Row};
 use tutti_graph::contract_tests;
 use tutti_nodes::{
     CrossoverConfig, CrossoverControls, CrossoverNode, DelayConfig, DelayControls, DelayLayout,
-    DelayNode, InterpolationMode, LimiterConfig, LimiterControls, LimiterNode, MaxDelay,
-    MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
+    DelayNode, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, MultibandBands,
+    MultibandCompressorConfig, MultibandCompressorNode,
 };
 use tutti_units::{Db, Feedback, Hz, Samples, Seconds};
 
@@ -93,7 +93,6 @@ fn delay_line_row() -> Row {
                 DelayConfig::new(DelayLayout::new(
                     BusTopology::MONO,
                     MaxDelay::of(Seconds::new(1.0_f64)),
-                    InterpolationMode::Linear,
                 ))
                 .controls(DelayControls {
                     time: Seconds::new(0.0_f64),

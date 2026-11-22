@@ -11,10 +11,10 @@ use tutti_graph::testing as common;
 use common::{Kind, TestNode, prepare};
 use tutti_buffers::{BusTopology, ChannelLayout, Speaker};
 use tutti_graph::{
-    Bus, BusRef, BusRole, BusSource, Buses, Cx, Edge, EdgeFade, EdgeGain, EdgeId, Editor,
-    EventEdge, EventInputPort, EventOutputPort, Executor, FeedbackFrom, InputPort, Io, Node,
-    NodeKey, OutputPort, PortSink, PortSource, Prepare, Shape, Status, TapAlign, TapId, TapOptions,
-    TapSpec, TransportPosition, Unforkable, Unwired,
+    Bus, BusOutputPort, BusRole, Buses, Cx, Edge, EdgeFade, EdgeGain, EdgeId, Editor, EventEdge,
+    EventInputPort, EventOutputPort, Executor, FeedbackFrom, InputPort, Io, Node, NodeBus, NodeKey,
+    OutputPort, PortSink, PortSource, Prepare, Shape, Status, TapAlign, TapId, TapOptions, TapSpec,
+    TransportPosition, Unforkable, Unwired,
 };
 use tutti_units::{Amplitude, Samples, UnitAddr, UnitParam};
 
@@ -313,22 +313,22 @@ fn bus_edges_to_a_missing_bus_are_dropped() {
     ed.insert(y, "bused", Unforkable(bused(true)));
     ed.insert(t, "bused", Unforkable(bused(true)));
     let feeds = [
-        (BusSource::Node(BusRef::new(s, 0)), BusRef::new(y, 0)),
-        (BusSource::Node(BusRef::new(s, 1)), BusRef::new(y, 1)),
-        (BusSource::Node(BusRef::new(y, 0)), BusRef::new(t, 0)),
-        (BusSource::Node(BusRef::new(y, 1)), BusRef::new(t, 1)),
+        (BusOutputPort::Node(NodeBus::new(s, 0)), NodeBus::new(y, 0)),
+        (BusOutputPort::Node(NodeBus::new(s, 1)), NodeBus::new(y, 1)),
+        (BusOutputPort::Node(NodeBus::new(y, 0)), NodeBus::new(t, 0)),
+        (BusOutputPort::Node(NodeBus::new(y, 1)), NodeBus::new(t, 1)),
     ];
     for (from, to) in feeds {
         ed.connect_bus(from, to).expect("declared");
     }
     let placed = ed.insert(y, "bused", Unforkable(bused(false)));
-    let dropped: BTreeSet<(BusRef, BusSource)> = placed
+    let dropped: BTreeSet<(NodeBus, BusOutputPort)> = placed
         .unwired
         .bus_edges
         .iter()
         .map(|(to, feed)| (*to, feed.source))
         .collect();
-    let expected: BTreeSet<(BusRef, BusSource)> = [feeds[1], feeds[3]]
+    let expected: BTreeSet<(NodeBus, BusOutputPort)> = [feeds[1], feeds[3]]
         .into_iter()
         .map(|(from, to)| (to, from))
         .collect();
@@ -336,7 +336,7 @@ fn bus_edges_to_a_missing_bus_are_dropped() {
     assert_eq!(placed.unwired.bus_edges.len(), 2);
     assert!(placed.unwired.edges.is_empty());
 
-    let kept: BTreeSet<(BusRef, BusSource)> = ed
+    let kept: BTreeSet<(NodeBus, BusOutputPort)> = ed
         .spec()
         .bus_edges
         .iter()
@@ -427,14 +427,14 @@ fn a_lost_banded_output_bus_drops_its_feeds_by_band_and_to_the_main_output() {
     ed.insert(y, "bused", Unforkable(stereo_bus_node(banded)));
     ed.insert(t, "bused", Unforkable(stereo_bus_node(banded)));
     ed.spec_mut().main_output = Some(stereo());
-    let main_to_main_output = BusSource::Node(BusRef::new(y, 0));
-    let band0 = BusSource::Node(BusRef::band(y, 1, 0));
-    let band1 = BusSource::Node(BusRef::band(y, 1, 1));
+    let main_to_main_output = BusOutputPort::Node(NodeBus::new(y, 0));
+    let band0 = BusOutputPort::Node(NodeBus::band(y, 1, 0));
+    let band1 = BusOutputPort::Node(NodeBus::band(y, 1, 1));
     ed.connect_bus_to_main_output(main_to_main_output)
         .expect("declared");
     ed.connect_bus_to_main_output(band1)
         .expect("a band folds to the main output");
-    ed.connect_bus(band0, BusRef::new(t, 1)).expect("declared");
+    ed.connect_bus(band0, NodeBus::new(t, 1)).expect("declared");
     let placed = ed.insert(y, "bused", Unforkable(stereo_bus_node(None)));
     assert_eq!(
         placed
@@ -452,7 +452,7 @@ fn a_lost_banded_output_bus_drops_its_feeds_by_band_and_to_the_main_output() {
             .iter()
             .map(|(to, f)| (*to, f.source))
             .collect::<Vec<_>>(),
-        vec![(BusRef::new(t, 1), band0)]
+        vec![(NodeBus::new(t, 1), band0)]
     );
     assert_eq!(
         ed.spec()

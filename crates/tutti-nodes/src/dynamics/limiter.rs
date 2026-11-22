@@ -125,7 +125,7 @@ impl LimiterConfig {
     /// oversampler's passband. The [lookahead](Self::lookahead) is then a floor: the detection
     /// needs the up-sampler's delay (about 20 frames) of lookahead, and a shorter lookahead is
     /// raised to that at the rate the node is prepared at, computed once there. The latency the
-    /// node declares is the frames used ([`LimiterBank::detecting`] does the raise). The up-sampler designs at every rate a device runs at; a rate whose
+    /// node declares is the frames used ([`LimiterBank::true_peak`] does the raise). The up-sampler designs at every rate a device runs at; a rate whose
     /// transition width does not fit `f32` panics at prepare.
     #[must_use]
     pub fn detection(self, detection: PeakDetection) -> Self {
@@ -212,8 +212,11 @@ impl<F: Float> Kernel for LimiterKernel<F> {
         let (layout, detection) = (self.input.layout(), self.detection);
         // `prepare` has no refusal path: the up-sampler fails to design only at a rate whose
         // transition width does not fit `f32` (a rate no device has).
-        let bank = LimiterBank::detecting(layout, self.lookahead, rate, detection)
-            .expect("the true-peak up-sampler designs at every rate a device runs at");
+        let bank = match detection {
+            PeakDetection::Sample => LimiterBank::new(layout, self.lookahead, rate),
+            PeakDetection::TruePeak => LimiterBank::true_peak(layout, self.lookahead, rate)
+                .expect("the true-peak up-sampler designs at every rate a device runs at"),
+        };
         self.bank = Some(bank);
     }
 
@@ -904,15 +907,10 @@ mod tests {
         );
         let frames = tp.shape().latency.samples().get();
         assert!(frames > 10, "{frames}");
-        let needed = LimiterBank::<f32>::detecting(
-            ChannelLayout::MONO,
-            short,
-            SampleRate::SR_48K,
-            PeakDetection::TruePeak,
-        )
-        .unwrap()
-        .latency()
-        .get();
+        let needed = LimiterBank::<f32>::true_peak(ChannelLayout::MONO, short, SampleRate::SR_48K)
+            .unwrap()
+            .latency()
+            .get();
         assert_eq!(frames, needed, "the node declares the floor itself");
     }
 

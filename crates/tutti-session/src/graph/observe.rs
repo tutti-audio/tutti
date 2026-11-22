@@ -242,8 +242,8 @@ impl<F: Float> Taps<'_, F> {
     }
 
     /// Opens a tap on one event port of a node, an output
-    /// ([`Key::events_out`](crate::Key::events_out)) or an input
-    /// ([`Key::events_in`](crate::Key::events_in)), and returns its reader: the
+    /// ([`Key::event_output`](crate::Key::event_output)) or an input
+    /// ([`Key::event_input`](crate::Key::event_input)), and returns its reader: the
     /// MIDI events the port carries, each with the frame it was due on
     /// ([`TapEvent`](tutti_graph::TapEvent)), on the clock of the rate the
     /// graph is prepared at now ([`EventTapReader::rate`]). The tap is

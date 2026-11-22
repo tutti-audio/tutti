@@ -104,14 +104,14 @@ fn direct_plays_events_once_advances_and_rolls() {
     probe.events(0, &[Event::midi(at(5, 64), m1_note())]);
     probe.block();
     assert_eq!(probe.output().plane(0).samples()[5], 1.0);
-    assert_eq!(probe.events_out(0).len(), 1);
+    assert_eq!(probe.event_output(0).len(), 1);
     assert_eq!(probe.output().plane(1).samples()[0], 2.0);
     probe.block();
     assert!(
         probe.output().plane(0).iter().all(|&s| s == 0.0),
         "played once"
     );
-    assert!(probe.events_out(0).is_empty());
+    assert!(probe.event_output(0).is_empty());
     probe.set_block_len(16);
     probe.block();
     assert_eq!(probe.output().plane(0).samples().len(), 16);
@@ -120,8 +120,8 @@ fn direct_plays_events_once_advances_and_rolls() {
     // offset 6.
     let mut emitter = Direct::new(Emitter::new(Frame::new(70), note()), RATE, 64);
     emitter.block();
-    assert!(emitter.events_out(0).is_empty());
+    assert!(emitter.event_output(0).is_empty());
     emitter.block();
-    assert_eq!(emitter.events_out(0).len(), 1);
-    assert_eq!(emitter.events_out(0)[0].offset.index(), 6);
+    assert_eq!(emitter.event_output(0).len(), 1);
+    assert_eq!(emitter.event_output(0)[0].offset.index(), 6);
 }

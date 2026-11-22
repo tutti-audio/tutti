@@ -27,7 +27,7 @@ use tutti_units::{Feedback, Hz, Normalized, SampleRate, SampleSpan, Samples, Sec
 use crate::delay::DelayRing;
 use crate::karplus_strong::ring_tail;
 use crate::string_tuning::{LowestPitch, Tuned, per_trip_decay, period, tune};
-use crate::{AllPassFilter, AllPassForm, TAIL_FLOOR};
+use crate::{AllPassFilter, TAIL_FLOOR};
 
 /// The controls of a [`WaveguideString`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -114,7 +114,7 @@ impl<F: Float> WaveguideString<F> {
             positions,
             right: DelayRing::new(rail + 2),
             left: DelayRing::new(rail + 2),
-            all_pass: AllPassFilter::new(AllPassForm::Lattice, NonZeroUsize::MIN, Feedback::NONE),
+            all_pass: AllPassFilter::new(NonZeroUsize::MIN, Feedback::NONE),
             tuned: Tuned {
                 whole: Samples::new(2),
                 delay: SampleSpan::of(1.0),

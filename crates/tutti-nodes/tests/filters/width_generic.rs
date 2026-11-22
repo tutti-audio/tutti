@@ -156,11 +156,13 @@ fn ladder(layout: ChannelLayout) -> LadderFilterNode<f32> {
 
 fn delay(layout: ChannelLayout) -> DelayNode<f32> {
     DelayNode::<f32>::from(
-        DelayConfig::new(DelayLayout::new(
-            BusTopology::default_for(layout).expect("a test width is one bus"),
-            MaxDelay::of(Seconds::new(0.5)),
-            InterpolationMode::CubicHermite,
-        ))
+        DelayConfig::new(
+            DelayLayout::new(
+                BusTopology::default_for(layout).expect("a test width is one bus"),
+                MaxDelay::of(Seconds::new(0.5)),
+            )
+            .interpolation(InterpolationMode::CubicHermite),
+        )
         .controls(DelayControls {
             time: Seconds::new(0.0123),
             feedback: Feedback::new(0.55),

@@ -56,7 +56,7 @@ fn rig() -> (Session, NodeKey) {
     // The dry pair; the unit's other outputs are sends.
     for c in 0..2 {
         s.graph()
-            .connect(synth.out(c), MainOutput::channel(c))
+            .connect(synth.output(c), MainOutput::channel(c))
             .unwrap();
     }
     let _ = s.update();
@@ -187,7 +187,7 @@ fn routed_level(channel: MidiChannel) -> f32 {
     let (inlet, mut device) = s.graph().open_event_inlet(EventCapacity::of(64));
     let input = s.graph().add(MidiInputNode::new());
     s.graph()
-        .connect(inlet.events_out(), EventInputPort::new(input, 0))
+        .connect(inlet.event_output(0), EventInputPort::new(input, 0))
         .unwrap();
     let rule = MidiRouteRule::new().channel(channel).to(synth);
     s.midi()

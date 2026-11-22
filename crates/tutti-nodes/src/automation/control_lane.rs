@@ -591,7 +591,9 @@ fn value_along(seg: &ParamSegment, from: f64, to: f64, j: f64) -> f64 {
     }
     let t = (p + j) / l;
     if t < 1.0 {
-        Piece::new(from, to, seg.shape()).value(seg.unit_param(), Normalized::clamped(t))
+        Piece::new(from, to)
+            .law(seg.shape())
+            .value(seg.unit_param(), Normalized::clamped(t))
     } else {
         to
     }

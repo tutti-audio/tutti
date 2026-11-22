@@ -89,7 +89,7 @@ pub enum PeakDetection {
     /// `m + ceil((U - 7) / 4)` through `m + 1 + floor(U / 4)`, the newest of which must
     /// have been seen by the time the audio leaves, `lookahead` frames after it. (A
     /// frame's reach of one frame either side is an approximation, valid while the gain
-    /// varies slowly across it.) [`LimiterBank::detecting`] raises a lookahead under
+    /// varies slowly across it.) [`LimiterBank::true_peak`] raises a lookahead under
     /// `1 + floor(U / 4)` frames, about 20, to it. The latency is the lookahead used; only the
     /// window narrows.
     TruePeak,
@@ -329,30 +329,26 @@ impl<F: Float> LimiterBank<F> {
         }
     }
 
-    /// A limiter that reads its peak by `detection`: [`new`](Self::new) for
-    /// [`Sample`](PeakDetection::Sample), a true-peak one for
-    /// [`TruePeak`](PeakDetection::TruePeak). Allocates: build it on the control side.
+    /// A limiter that reads its peak as a [`TruePeak`](PeakDetection::TruePeak) one,
+    /// [`new`](Self::new) being the [`Sample`](PeakDetection::Sample) one. Allocates: build
+    /// it on the control side.
     ///
-    /// For true-peak detection `lookahead` is a floor. The detection needs `1 + floor(U / 4)`
-    /// frames of lookahead for the up-sampler's delay `U` (about 20), and a shorter `lookahead`
-    /// is raised to that, computed once here. The latency, [`latency`](Self::latency), is the
-    /// frames used, which is longer than `lookahead` then. Sample detection has no floor.
+    /// `lookahead` is a floor. The detection needs `1 + floor(U / 4)` frames of lookahead
+    /// for the up-sampler's delay `U` (about 20), and a shorter `lookahead` is raised to
+    /// that, computed once here. The latency, [`latency`](Self::latency), is the frames
+    /// used, which is longer than `lookahead` then.
     ///
     /// # Errors
     ///
     /// [`FirError`] when the true-peak up-sampler cannot be designed at `rate`.
-    pub fn detecting(
+    pub fn true_peak(
         width: ChannelLayout,
         lookahead: Lookahead,
         rate: SampleRate,
-        detection: PeakDetection,
     ) -> Result<Self, FirError> {
-        if detection == PeakDetection::Sample {
-            return Ok(Self::new(width, lookahead, rate));
-        }
         let plan = Self::true_peak_plan(rate)?;
         let frames = lookahead_frames(lookahead, rate).max(Self::true_peak_frames(&plan));
-        Ok(Self::true_peak(width, frames, rate, &plan))
+        Ok(Self::with_plan(width, frames, rate, &plan))
     }
 
     /// The 4x up-sampler plan the true-peak detector reads through.
@@ -366,7 +362,7 @@ impl<F: Float> LimiterBank<F> {
     }
 
     /// A true-peak limiter of `frames` of lookahead, at least [`true_peak_frames`](Self::true_peak_frames).
-    fn true_peak(
+    fn with_plan(
         width: ChannelLayout,
         frames: usize,
         rate: SampleRate,

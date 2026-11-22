@@ -479,13 +479,13 @@ impl Shape {
     }
 
     /// Input bus `index`, in port order: the handle a node reads it through
-    /// ([`Io::bus_in`](crate::Io::bus_in)). `None` past the declared buses.
+    /// ([`Io::bus_input`](crate::Io::bus_input)). `None` past the declared buses.
     #[must_use]
     pub fn input_bus(&self, index: usize) -> Option<crate::InBus> {
         span_of(&self.buses_in, index).map(crate::InBus)
     }
 
-    /// Output bus `index`, in port order ([`Io::bus_out`](crate::Io::bus_out)).
+    /// Output bus `index`, in port order ([`Io::bus_output`](crate::Io::bus_output)).
     #[must_use]
     pub fn output_bus(&self, index: usize) -> Option<crate::OutBus> {
         span_of(&self.buses_out, index).map(crate::OutBus)

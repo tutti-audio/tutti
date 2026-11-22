@@ -27,7 +27,7 @@ use tutti_buffers::{ChannelLayout, Float, InputOutput};
 use tutti_units::{Feedback, Hz, Phase, Radians, SampleRate, Samples, Tail};
 
 use crate::delay::{ring_seconds, trips};
-use crate::{AllPassFilter, AllPassForm, Oscillator, OscillatorStep, OscillatorWave, TAIL_FLOOR};
+use crate::{AllPassFilter, Oscillator, OscillatorStep, OscillatorWave, TAIL_FLOOR};
 
 /// The coefficients `a_k` of the first chain: the sections are `a_k^2` in `z^-2`.
 const FIRST: [f64; 4] = [
@@ -87,9 +87,7 @@ const TWO: NonZeroUsize = NonZeroUsize::new(2).unwrap();
 
 impl<F: Float> Network<F> {
     fn new() -> Self {
-        let chain = |a: [f64; 4]| {
-            a.map(|a| AllPassFilter::new(AllPassForm::Lattice, TWO, Feedback::new(a * a)))
-        };
+        let chain = |a: [f64; 4]| a.map(|a| AllPassFilter::new(TWO, Feedback::new(a * a)));
         Self {
             first: chain(FIRST),
             second: chain(SECOND),

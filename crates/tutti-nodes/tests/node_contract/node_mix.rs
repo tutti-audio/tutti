@@ -26,9 +26,8 @@ use tutti_nodes::{
     ChannelTimes, CompressorConfig, CompressorControls, CompressorNode, CrossoverConfig,
     CrossoverControls, CrossoverNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
     FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig, GateControls, GateNode,
-    InterpolationMode, KeySource, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode,
-    PlateReverbConfig, PlateReverbNode, ShimmerConfig, ShimmerNode, SpringReverbConfig,
-    SpringReverbNode, Stages,
+    KeySource, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, PlateReverbConfig,
+    PlateReverbNode, ShimmerConfig, ShimmerNode, SpringReverbConfig, SpringReverbNode, Stages,
 };
 use tutti_units::{CompressionRatio, Db, Feedback, Hz, Mix, SampleRate, Samples, Seconds};
 
@@ -208,14 +207,10 @@ fn the_delay_is_blended_by_the_graph() {
     check(
         "delay (stereo, cross-fed)",
         &|| {
-            let layout = DelayLayout::builder(
-                BusTopology::STEREO,
-                MaxDelay::of(Seconds::new(0.1)),
-                InterpolationMode::Linear,
-            )
-            .times(ChannelTimes::try_from(&[Seconds::new(0.021)][..]).unwrap())
-            .build()
-            .unwrap();
+            let layout = DelayLayout::builder(BusTopology::STEREO, MaxDelay::of(Seconds::new(0.1)))
+                .times(ChannelTimes::try_from(&[Seconds::new(0.021)][..]).unwrap())
+                .build()
+                .unwrap();
             DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
                 time: Seconds::new(0.013),
                 feedback: Feedback::new(0.5),
@@ -232,7 +227,6 @@ fn the_delay_is_blended_by_the_graph() {
                 DelayConfig::new(DelayLayout::new(
                     BusTopology::MONO,
                     MaxDelay::of(Seconds::new(0.1)),
-                    InterpolationMode::Linear,
                 ))
                 .controls(DelayControls {
                     time: Seconds::new(0.01),
@@ -328,7 +322,6 @@ fn a_mix_move_on_a_delay_ramps_across_the_block() {
                 BusTopology::default_for(ChannelLayout::from(6u16))
                     .expect("six channels are one bus"),
                 MaxDelay::of(Seconds::new(0.1)),
-                InterpolationMode::Linear,
             ))
             .controls(DelayControls {
                 time: Seconds::new(0.0005),

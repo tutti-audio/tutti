@@ -84,7 +84,7 @@ fn controls(threshold: f64, knee: f64, ratio: f64, range: f64, q: f64) -> Dynami
 }
 
 fn bank(mode: DynamicMode, width: usize, c: &DynamicEqControls) -> DynamicEqBank<f32> {
-    let mut bank = DynamicEqBank::<f32>::new(mode, ChannelLayout::clamped(width), RATE);
+    let mut bank = DynamicEqBank::<f32>::new(ChannelLayout::clamped(width), RATE).mode(mode);
     bank.retarget(c);
     bank.jump_to_target();
     bank
@@ -468,7 +468,7 @@ fn an_f64_band_with_zero_range_is_the_identity() {
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
     let x = wide_signal(4_800);
     for mode in [DynamicMode::Downward, DynamicMode::Upward] {
-        let mut b = DynamicEqBank::<f64>::new(mode, ChannelLayout::MONO, RATE);
+        let mut b = DynamicEqBank::<f64>::new(ChannelLayout::MONO, RATE).mode(mode);
         b.retarget(&controls(-60.0, 0.0, 4.0, 0.0, 1.0));
         b.jump_to_target();
         let mut out = vec![0.0f64; x.len()];

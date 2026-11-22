@@ -263,7 +263,7 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
             sent: 0,
         }));
         s.graph()
-            .connect(hold.events_out(), synth.events_in())
+            .connect(hold.event_output(0), synth.event_input(0))
             .unwrap();
         strips.push(synth.erase());
     }

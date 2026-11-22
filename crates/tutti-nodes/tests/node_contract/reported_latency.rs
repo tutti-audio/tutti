@@ -16,9 +16,8 @@ use tutti_graph::{GraphBuilder, IntoNode, Node, Prepare};
 use tutti_nodes::testing::Through;
 use tutti_nodes::{
     ChannelTimes, CrossoverConfig, CrossoverControls, CrossoverNode, DelayConfig, DelayControls,
-    DelayLayout, DelayNode, InterpolationMode, MaxDelay, ModDelayConfig, ModDelayNode,
-    MultibandBands, MultibandCompressorConfig, MultibandCompressorNode, PitchShifterConfig,
-    PitchShifterNode,
+    DelayLayout, DelayNode, MaxDelay, ModDelayConfig, ModDelayNode, MultibandBands,
+    MultibandCompressorConfig, MultibandCompressorNode, PitchShifterConfig, PitchShifterNode,
 };
 use tutti_nodes::{
     DecorrelatorConfig, DecorrelatorNode, EarlyReflectionsConfig, EarlyReflectionsNode,
@@ -171,7 +170,6 @@ fn delay_line_reports_zero_latency_and_its_dry_path_is_immediate() {
         DelayConfig::new(DelayLayout::new(
             BusTopology::MONO,
             MaxDelay::of(Seconds::new(1.0_f64)),
-            InterpolationMode::Linear,
         ))
         .controls(DelayControls {
             time: Seconds::new(0.5_f64),
@@ -200,14 +198,10 @@ fn delay_line_reports_zero_latency_and_its_dry_path_is_immediate() {
 /// at its own time.
 #[test]
 fn stereo_delay_line_reports_zero_latency_and_its_dry_path_is_immediate() {
-    let layout = DelayLayout::builder(
-        BusTopology::STEREO,
-        MaxDelay::of(Seconds::new(1.0_f64)),
-        InterpolationMode::Linear,
-    )
-    .times(ChannelTimes::try_from(&[Seconds::new(0.5_f64)][..]).unwrap())
-    .build()
-    .unwrap();
+    let layout = DelayLayout::builder(BusTopology::STEREO, MaxDelay::of(Seconds::new(1.0_f64)))
+        .times(ChannelTimes::try_from(&[Seconds::new(0.5_f64)][..]).unwrap())
+        .build()
+        .unwrap();
     let node = DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
         time: Seconds::new(0.25_f64),
         ..DelayControls::DEFAULT
@@ -277,7 +271,6 @@ fn a_delay_insert_adds_no_compensation_to_the_other_paths() {
         DelayConfig::new(DelayLayout::new(
             BusTopology::MONO,
             MaxDelay::of(Seconds::new(1.0_f64)),
-            InterpolationMode::Linear,
         ))
         .controls(DelayControls {
             time: Seconds::new(0.5_f64),
@@ -578,7 +571,6 @@ mod convolver {
             DelayConfig::new(DelayLayout::new(
                 BusTopology::MONO,
                 MaxDelay::of(Seconds::new(1.0_f64)),
-                InterpolationMode::Linear,
             ))
             .controls(DelayControls {
                 time: Seconds::new(0.5_f64),
@@ -590,7 +582,6 @@ mod convolver {
             DelayConfig::new(DelayLayout::new(
                 BusTopology::MONO,
                 MaxDelay::of(Seconds::new(1.0_f64)),
-                InterpolationMode::Linear,
             ))
             .controls(DelayControls {
                 time: Seconds::new(0.5_f64),

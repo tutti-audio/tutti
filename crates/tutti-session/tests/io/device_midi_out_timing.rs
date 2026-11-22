@@ -278,7 +278,7 @@ fn a_clips_notes_are_sent_when_their_frames_are_heard() {
         note(false, Beat::new(2.0)),
     ]));
     s.graph()
-        .set_sources(EventInputPort::new(sink.node(), 0), [clip.events_out()])
+        .set_sources(EventInputPort::new(sink.node(), 0), [clip.event_output(0)])
         .expect("the sink's node takes events");
     let _ = s.update();
     let latency = Duration::from_millis(1500);

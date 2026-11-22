@@ -22,8 +22,8 @@ use crate::{
 };
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_dsp::{
-    DelayControls, DelayLayout, FdnLayout, FreeverbControls, FreezeMode, InterpolationMode,
-    LadderSaturation, LadderType, ShapeKind, Stages, SvfType,
+    DelayControls, DelayLayout, FdnLayout, FreeverbControls, FreezeMode, LadderSaturation,
+    LadderType, ShapeKind, Stages, SvfType,
 };
 use tutti_dsp::{Inline, Tap, TapSet};
 use tutti_fixtures::signal::{assert_close_f64, wide_signal};
@@ -59,7 +59,6 @@ fn the_delay_returns_a_wide_signal_sixteen_frames_on() {
         DelayConfig::new(DelayLayout::new(
             BusTopology::MONO,
             MaxDelay::of(Seconds::new(0.5)),
-            InterpolationMode::Linear,
         ))
         .controls(DelayControls {
             time: Seconds::new(16.0 / RATE.get()),
@@ -343,7 +342,6 @@ fn the_linear_nodes_satisfy_superposition() {
                 DelayConfig::new(DelayLayout::new(
                     BusTopology::MONO,
                     MaxDelay::of(Seconds::new(0.05)),
-                    InterpolationMode::Linear,
                 ))
                 .controls(DelayControls {
                     time: Seconds::new(0.01),

@@ -33,7 +33,7 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// waits on one. Its key is a second bus after the audio inputs, **and it must be wired**:
 /// the graph feeds an unconnected input silence, which compresses nothing, so a compressor
 /// whose key nobody wired does nothing. Wire it with a bus edge, for example
-/// `graph.connect(kick.bus_out(0), comp.bus_in(1))` in `tutti-session`, or each key channel
+/// `graph.connect(kick.bus_output(0), comp.bus_input(1))` in `tutti-session`, or each key channel
 /// into the inputs after the audio.
 ///
 /// The node declares no tail: the release decays after the key goes silent, but it only

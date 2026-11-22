@@ -167,26 +167,16 @@ fn frames_per_beat() -> f64 {
 /// breakpoints between frames.
 fn shaped() -> Trajectory<Hz> {
     let mut e = Trajectory::new();
-    e.add_breakpoint(Breakpoint::with_law(
-        Beat::new(0.0),
-        Hz::new(0.0),
-        Law::PowerIn(Exponent::of(2.0)),
-    ));
-    e.add_breakpoint(Breakpoint::with_law(
-        Beat::new(0.25),
-        Hz::new(1.0),
-        Law::PowerOut(Exponent::of(3.0)),
-    ));
-    e.add_breakpoint(Breakpoint::with_law(
-        Beat::new(0.4),
-        Hz::new(0.2),
-        Law::PowerInOut(Exponent::of(2.0)),
-    ));
-    e.add_breakpoint(Breakpoint::with_law(
-        Beat::new(0.55),
-        Hz::new(0.9),
-        Law::Linear,
-    ));
+    e.add_breakpoint(
+        Breakpoint::new(Beat::new(0.0), Hz::new(0.0)).law(Law::PowerIn(Exponent::of(2.0))),
+    );
+    e.add_breakpoint(
+        Breakpoint::new(Beat::new(0.25), Hz::new(1.0)).law(Law::PowerOut(Exponent::of(3.0))),
+    );
+    e.add_breakpoint(
+        Breakpoint::new(Beat::new(0.4), Hz::new(0.2)).law(Law::PowerInOut(Exponent::of(2.0))),
+    );
+    e.add_breakpoint(Breakpoint::new(Beat::new(0.55), Hz::new(0.9)));
     e.add_breakpoint(Breakpoint::new(Beat::new(0.6), Hz::new(0.4)));
     e
 }
@@ -310,11 +300,9 @@ fn check_grid(curve: &dyn Curve, lane: ControlLaneNode, blocks: &[usize], tol: f
 #[test]
 fn an_unrepresentable_piece_is_linear_on_the_grid() {
     let mut curve = Trajectory::new().with_range(Hz::new(0.0), Hz::new(0.5));
-    curve.add_breakpoint(Breakpoint::with_law(
-        Beat::new(0.0),
-        Hz::new(0.0),
-        Law::PowerIn(Exponent::of(2.0)),
-    ));
+    curve.add_breakpoint(
+        Breakpoint::new(Beat::new(0.0), Hz::new(0.0)).law(Law::PowerIn(Exponent::of(2.0))),
+    );
     curve.add_breakpoint(Breakpoint::new(Beat::new(0.2), Hz::new(1.0)));
     let total = (0.15 * frames_per_beat()) as usize;
     let lane = || automation(curve.clone());

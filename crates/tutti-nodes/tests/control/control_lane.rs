@@ -461,21 +461,15 @@ fn an_export_is_the_live_render_bit_for_bit() {
             // A range cutting into the 1500 breakpoint bends its two pieces, which
             // go as grid pieces beside the exact ones.
             let mut e = Trajectory::new().with_range(Hz::new(0.0), Hz::new(1200.0));
-            e.add_breakpoint(Breakpoint::with_law(
-                Beat::new(0.0),
-                Hz::new(300.0),
-                Law::PowerIn(Exponent::of(2.0)),
-            ));
-            e.add_breakpoint(Breakpoint::with_law(
-                Beat::new(0.37),
-                Hz::new(1500.0),
-                Law::PowerInOut(Exponent::of(2.0)),
-            ));
-            e.add_breakpoint(Breakpoint::with_law(
-                Beat::new(1.1),
-                Hz::new(900.0),
-                Law::Hold,
-            ));
+            e.add_breakpoint(
+                Breakpoint::new(Beat::new(0.0), Hz::new(300.0))
+                    .law(Law::PowerIn(Exponent::of(2.0))),
+            );
+            e.add_breakpoint(
+                Breakpoint::new(Beat::new(0.37), Hz::new(1500.0))
+                    .law(Law::PowerInOut(Exponent::of(2.0))),
+            );
+            e.add_breakpoint(Breakpoint::new(Beat::new(1.1), Hz::new(900.0)).law(Law::Hold));
             e.add_breakpoint(Breakpoint::new(Beat::new(1.9), Hz::new(600.0)));
             Arc::new(e)
         };
@@ -849,16 +843,12 @@ fn a_lane_sees_two_depths_stored_in_one_block_whatever_their_bits() {
 #[test]
 fn a_plugin_lane_sends_linear_grid_pieces() {
     let mut e = Trajectory::new();
-    e.add_breakpoint(Breakpoint::with_law(
-        Beat::new(0.0),
-        Hz::new(0.1),
-        Law::PowerIn(Exponent::of(2.0)),
-    ));
-    e.add_breakpoint(Breakpoint::with_law(
-        Beat::new(0.3),
-        Hz::new(0.9),
-        Law::PowerInOut(Exponent::of(2.0)),
-    ));
+    e.add_breakpoint(
+        Breakpoint::new(Beat::new(0.0), Hz::new(0.1)).law(Law::PowerIn(Exponent::of(2.0))),
+    );
+    e.add_breakpoint(
+        Breakpoint::new(Beat::new(0.3), Hz::new(0.9)).law(Law::PowerInOut(Exponent::of(2.0))),
+    );
     e.add_breakpoint(Breakpoint::new(Beat::new(0.6), Hz::new(0.4)));
     let curve: Arc<dyn Curve> = Arc::new(e);
     let (mut ed, mut exec) = Editor::new(Prepare::new(

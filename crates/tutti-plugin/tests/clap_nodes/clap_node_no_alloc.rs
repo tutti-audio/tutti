@@ -118,11 +118,10 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
     let mut env = Trajectory::new();
     for k in 0..200 {
         let v = if k % 2 == 0 { 0.2 } else { 0.9 };
-        env.add_breakpoint(Breakpoint::with_law(
-            Beat::new(f64::from(k) * 2.0),
-            Hz::new(v),
-            Law::PowerIn(Exponent::of(2.0)),
-        ));
+        env.add_breakpoint(
+            Breakpoint::new(Beat::new(f64::from(k) * 2.0), Hz::new(v))
+                .law(Law::PowerIn(Exponent::of(2.0))),
+        );
     }
     let lane = ControlLaneNode::from(ForeignLaneConfig::new(
         ParamId::new(78),

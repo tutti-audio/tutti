@@ -65,7 +65,7 @@ mod clap {
     /// **A plugin's buses are the graph's bus handles.** The probe with a mono aux
     /// input beside its stereo main: `main_input` is bus 0 and the aux input is
     /// bus 1 through `input(1)`,
-    /// the same handle `key.bus_in(1)` names; the output buses likewise; a
+    /// the same handle `key.bus_input(1)` names; the output buses likewise; a
     /// source's bus connects into it and the graph says what feeds it; a bus
     /// the plugin lacks is not a handle and the graph refuses it as a bus the
     /// node does not declare.
@@ -74,10 +74,10 @@ mod clap {
         let (mut s, node) = loaded(Some("1"));
         let key = node;
         let buses = s.plugin_view(node).unwrap().buses();
-        assert_eq!(buses.main_input(), Some(key.bus_in(0)));
-        assert_eq!(buses.input(1), Some(key.bus_in(1)));
-        assert_eq!(buses.output(0), Some(key.bus_out(0)));
-        assert_eq!(buses.output(1), Some(key.bus_out(1)));
+        assert_eq!(buses.main_input(), Some(key.bus_input(0)));
+        assert_eq!(buses.input(1), Some(key.bus_input(1)));
+        assert_eq!(buses.output(0), Some(key.bus_output(0)));
+        assert_eq!(buses.output(1), Some(key.bus_output(1)));
         assert_eq!((buses.input_count(), buses.output_count()), (2, 2));
         assert_eq!(buses.output(2), None);
         assert_eq!(buses.input(2), None);
@@ -85,12 +85,12 @@ mod clap {
         let aux = buses.input(1).expect("the probe has an aux input");
         let kick = s.graph().add(ForkByClone(Const::mono(0.5)));
         s.graph()
-            .connect(kick.bus_out(0), aux)
+            .connect(kick.bus_output(0), aux)
             .expect("a mono source feeds the mono aux input");
-        assert_eq!(s.graph().bus_sources(aux).unwrap(), [kick.bus_out(0)]);
+        assert_eq!(s.graph().bus_sources(aux).unwrap(), [kick.bus_output(0)]);
         let _ = s.update();
 
-        let refused = s.graph().connect(kick.bus_out(0), key.bus_in(2));
+        let refused = s.graph().connect(kick.bus_output(0), key.bus_input(2));
         assert!(
             matches!(refused, Err(ConnectError::Bus(BusError::NoSuchBus { .. }))),
             "a bus past the plugin's own is no input: {:?}",
@@ -212,7 +212,7 @@ mod vst2 {
         s.graph().connect(node, MainOutput).unwrap();
         let (inlet, mut writer) = s.graph().open_event_inlet(EventCapacity::of(512));
         s.graph()
-            .connect(inlet.events_out(), node.events_in())
+            .connect(inlet.event_output(0), node.event_input(0))
             .unwrap();
         let _ = s.update();
 

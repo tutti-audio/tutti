@@ -219,13 +219,13 @@ pub struct DynamicEqBank<F: Float + SimdLanes> {
 }
 
 impl<F: Float + SimdLanes + Lerp> DynamicEqBank<F> {
-    /// A band of `mode` over `width` channels at `rate` that does nothing, to be set.
-    /// Allocates: build it on the control side.
+    /// A [`Downward`](DynamicMode::Downward) band over `width` channels at `rate` that does
+    /// nothing, to be set. Allocates: build it on the control side.
     #[must_use]
-    pub fn new(mode: DynamicMode, width: ChannelLayout, rate: SampleRate) -> Self {
+    pub fn new(width: ChannelLayout, rate: SampleRate) -> Self {
         let d = DynamicEqControls::DEFAULT;
         Self {
-            mode,
+            mode: DynamicMode::default(),
             design: Design::neutral(),
             center: d.center,
             q: d.q,
@@ -239,6 +239,13 @@ impl<F: Float + SimdLanes + Lerp> DynamicEqBank<F> {
             designed: None,
             phase: Samples::ZERO,
         }
+    }
+
+    /// The band moving the `mode` way from flat.
+    #[must_use]
+    pub fn mode(mut self, mode: DynamicMode) -> Self {
+        self.mode = mode;
+        self
     }
 
     /// The bell at `center` and `q` with `gain` dB.

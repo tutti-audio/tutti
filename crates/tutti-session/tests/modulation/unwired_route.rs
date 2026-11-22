@@ -56,10 +56,10 @@ fn a_route_onto_a_dropped_edge_reads_unresolved() {
     g.connect(OutputPort::new(p, 0), x.input(1))
         .unwrap()
         .unfaded();
-    g.connect(x.out(0), MainOutput::channel(0))
+    g.connect(x.output(0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
-    g.connect(x.out(1), MainOutput::channel(1))
+    g.connect(x.output(1), MainOutput::channel(1))
         .unwrap()
         .unfaded();
     let lost = ChannelEdge::new(OutputPort::new(p, 0), x.input(1));

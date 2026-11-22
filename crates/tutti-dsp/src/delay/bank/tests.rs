@@ -27,17 +27,17 @@ fn bus(width: u16) -> BusTopology {
 }
 
 fn mono(mode: InterpolationMode) -> DelayLayout {
-    DelayLayout::new(BusTopology::MONO, MAX, mode)
+    DelayLayout::new(BusTopology::MONO, MAX).interpolation(mode)
 }
 
 /// A stereo delay: the default swap routing, the channels linked in time.
 fn stereo() -> DelayLayout {
-    DelayLayout::new(BusTopology::STEREO, MAX, InterpolationMode::Linear)
+    DelayLayout::new(BusTopology::STEREO, MAX)
 }
 
 /// A stereo delay with no routing between the channels and a time of its own for the right.
 fn stereo_apart(right: f64) -> DelayLayout {
-    DelayLayout::builder(BusTopology::STEREO, MAX, InterpolationMode::Linear)
+    DelayLayout::builder(BusTopology::STEREO, MAX)
         .routing(FeedbackRouting::none(BusTopology::STEREO))
         .times(ChannelTimes::try_from(&[Seconds::new(right)][..]).unwrap())
         .build()
@@ -243,7 +243,7 @@ fn channel_times_are_linked_or_each_their_own() {
     );
     assert_eq!(heard(&k.run(&both)), [10, 40]);
     // Linked: every channel follows the control.
-    let linked = DelayLayout::builder(BusTopology::STEREO, MAX, InterpolationMode::Linear)
+    let linked = DelayLayout::builder(BusTopology::STEREO, MAX)
         .routing(FeedbackRouting::none(BusTopology::STEREO))
         .build()
         .unwrap();
@@ -251,7 +251,7 @@ fn channel_times_are_linked_or_each_their_own() {
     assert_eq!(heard(&k.run(&both)), [10, 10]);
     // Six channels with no routing never recirculate across channels, whatever the
     // cross-feedback says: an impulse in channel 3 is heard on channel 3 alone.
-    let wide = DelayLayout::new(bus(6), MAX, InterpolationMode::Linear);
+    let wide = DelayLayout::new(bus(6), MAX);
     let mut k = runner(&wide, &controls(10.0 / 1024.0, 0.0, 0.9));
     let mut x = vec![vec![0.0; 60]; 6];
     x[3] = impulse(60);
@@ -635,14 +635,10 @@ fn an_f64_ping_pong_runs_the_coupled_loop_in_f64() {
 
 /// A mono synced delay of `note` that holds up to four seconds.
 fn synced(note: NoteDuration) -> DelayLayout {
-    DelayLayout::builder(
-        BusTopology::MONO,
-        MaxDelay::of(Seconds::new(4.0)),
-        InterpolationMode::Linear,
-    )
-    .synced(NoteTimes::all(note))
-    .build()
-    .unwrap()
+    DelayLayout::builder(BusTopology::MONO, MaxDelay::of(Seconds::new(4.0)))
+        .synced(NoteTimes::all(note))
+        .build()
+        .unwrap()
 }
 
 /// A rig of a synced `layout` at rest on `tempo`.

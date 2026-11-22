@@ -70,7 +70,7 @@ fn pushed_events_come_out_at_their_frames() {
         .graph()
         .taps()
         .open_event(
-            key.events_out(),
+            key.event_output(0),
             EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .expect("the port exists");
@@ -78,7 +78,7 @@ fn pushed_events_come_out_at_their_frames() {
         .graph()
         .taps()
         .open_event(
-            key2.events_out(),
+            key2.event_output(0),
             EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .expect("the port exists");
@@ -123,7 +123,7 @@ fn an_export_fork_is_accepted_and_silent() {
     let (key, mut writer) = s.graph().open_event_inlet(EventCapacity::of(8));
     let hear = s.graph().add(ForkByClone(Hear));
     s.graph()
-        .connect(key.events_out(), hear.events_in())
+        .connect(key.event_output(0), hear.event_input(0))
         .unwrap();
     s.graph()
         .set_sources(MainOutput::channel(0), [OutputPort::new(hear, 0)])
@@ -155,7 +155,7 @@ fn an_event_edge_is_cut_with_one_commit_and_not_faded() {
     let (key, mut writer) = s.graph().open_event_inlet(EventCapacity::of(8));
     let hear = s.graph().add(ForkByClone(Hear));
     s.graph()
-        .connect(key.events_out(), hear.events_in())
+        .connect(key.event_output(0), hear.event_input(0))
         .unwrap();
     s.graph()
         .set_sources(MainOutput::channel(0), [OutputPort::new(hear, 0)])
@@ -170,12 +170,15 @@ fn an_event_edge_is_cut_with_one_commit_and_not_faded() {
 
     assert!(
         s.graph()
-            .disconnect(key.events_out(), hear.events_in())
+            .disconnect(key.event_output(0), hear.event_input(0))
             .unwrap()
             .was_connected()
     );
     assert!(
-        s.graph_ref().sources(hear.events_in()).unwrap().is_empty(),
+        s.graph_ref()
+            .sources(hear.event_input(0))
+            .unwrap()
+            .is_empty(),
         "cut at once"
     );
     let _ = s.update();

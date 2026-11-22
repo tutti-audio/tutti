@@ -2,10 +2,10 @@
 
 use tutti_buffers::ChannelTopology;
 use tutti_engine::StreamFault;
-use tutti_graph::{BusSource, CommitError, NodeKey, Wired};
+use tutti_graph::{BusOutputPort, CommitError, NodeKey, Wired};
 use tutti_units::SampleRate;
 
-use crate::{BusSink, ChannelEdge, EventEdge, MainOutputReader, Problem, ReplaceRefused};
+use crate::{BusInputPort, ChannelEdge, EventEdge, MainOutputReader, Problem, ReplaceRefused};
 
 /// Something an [`update`](crate::Session::update) found for the host.
 #[derive(Debug)]
@@ -64,7 +64,7 @@ pub enum SessionEvent {
         /// The bus edges dropped, into or out of the node, as the app wired
         /// them: the source bus and the sink, a node's input bus or the
         /// main output.
-        bus_edges: Vec<(BusSource, BusSink)>,
+        bus_edges: Vec<(BusOutputPort, BusInputPort)>,
     },
     /// A node with a bus besides its main one (an aux or sidechain bus, a
     /// plugin's) had its audio wiring changed: a port gained its first source or

@@ -21,13 +21,18 @@ impl<U: Unit<Raw = f64>> Breakpoint<U> {
     /// A breakpoint whose piece is [`Law::Linear`].
     #[must_use]
     pub const fn new(time: Beat, value: U) -> Self {
-        Self::with_law(time, value, Law::Linear)
+        Self {
+            time,
+            value,
+            law: Law::Linear,
+        }
     }
 
-    /// A breakpoint whose piece follows `law`.
+    /// The breakpoint whose piece follows `law`.
     #[must_use]
-    pub const fn with_law(time: Beat, value: U, law: Law) -> Self {
-        Self { time, value, law }
+    pub const fn law(mut self, law: Law) -> Self {
+        self.law = law;
+        self
     }
 }
 

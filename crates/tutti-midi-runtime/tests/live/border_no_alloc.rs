@@ -848,7 +848,7 @@ fn resetting_the_border_nodes_allocates_nothing() {
             None,
         ));
         d.block();
-        d.events_out(0).len()
+        d.event_output(0).len()
     };
     let traffic = |d: &mut Direct<SyncOut>| {
         (0..8)

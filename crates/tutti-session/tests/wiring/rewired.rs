@@ -75,7 +75,7 @@ fn a_connect_and_the_loss_of_the_last_source_are_each_reported_once() {
     g.connect(OutputPort::new(a, 0), x.input(2))
         .unwrap()
         .unfaded();
-    g.connect(x.out(2), MainOutput::channel(0))
+    g.connect(x.output(2), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     let events = s.update();
