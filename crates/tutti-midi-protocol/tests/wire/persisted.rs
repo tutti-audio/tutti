@@ -131,3 +131,20 @@ fn the_tuning_values_read_back_and_a_frequency_above_21_bits_is_refused() {
         assert_eq!(round_trip(&offsets), offsets);
     }
 }
+
+/// **A zone has 1 to 15 member channels** (RP-053): the count type holds exactly
+/// that range, and a persisted zone with another count is refused.
+#[test]
+fn a_member_count_keeps_the_range_contract() {
+    use tutti_fixtures::{RangeContract, check_range_contract, check_range_serde};
+    use tutti_midi_protocol::MemberCount;
+    let counts = RangeContract {
+        new: MemberCount::new,
+        get: MemberCount::get,
+        of: Some(MemberCount::of),
+        valid: &[1, 7, 15],
+        invalid: &[0, 16, 255],
+    };
+    check_range_contract(&counts);
+    check_range_serde(&counts);
+}

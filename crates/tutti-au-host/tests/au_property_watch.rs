@@ -43,12 +43,13 @@
 
 #![cfg(target_os = "macos")]
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tutti_au_ffi::Property;
 use tutti_au_ffi::property::{Latency, ParameterList, TailTime};
 use tutti_platform::Instant;
+use tutti_rt::Mutex;
 
 use tutti_au_host::{AuEvent, AuParameterListener, EventAddress};
 use tutti_units::Samples;
@@ -85,7 +86,7 @@ impl Log {
         let me = Arc::clone(self);
         move |ev| {
             if let AuEvent::PropertyChanged { id, .. } = ev {
-                me.ids.lock().unwrap().push(id);
+                me.ids.lock().push(id);
                 me.count.fetch_add(1, Ordering::Release);
             }
         }
@@ -95,7 +96,7 @@ impl Log {
     fn wait_for(&self, id: u32) -> bool {
         let deadline = Instant::now() + SETTLE;
         while Instant::now() < deadline {
-            if self.ids.lock().unwrap().contains(&id) {
+            if self.ids.lock().contains(&id) {
                 return true;
             }
             std::thread::sleep(Duration::from_millis(10));
@@ -104,7 +105,7 @@ impl Log {
     }
 
     fn snapshot(&self) -> Vec<u32> {
-        self.ids.lock().unwrap().clone()
+        self.ids.lock().clone()
     }
 }
 

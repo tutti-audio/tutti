@@ -4,11 +4,11 @@
 //! The plugin's switches, capture and trace are process-global, so every test
 //! holds [`PROBE_LOCK`].
 
+use std::sync::MutexGuard;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::{Mutex, MutexGuard};
 use tutti_buffers::InputOutput;
 use tutti_fixtures::main_thread;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use assert_no_alloc::assert_no_alloc;
 use tutti_buffers::FloatWidth;
@@ -47,7 +47,7 @@ struct Probe {
 
 impl Probe {
     fn acquire() -> Self {
-        let lock = PROBE_LOCK.lock_recover();
+        let lock = PROBE_LOCK.lock();
         // SAFETY: the lock is held, so nothing else reads or writes the
         // environment.
         unsafe { std::env::remove_var("TUTTI_VST2_PROBE_F64") };

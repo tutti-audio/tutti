@@ -36,7 +36,6 @@ conformance = ["tutti-vst3-ffi/conformance"]
 # The editor's sizes, which name their unit (`dpi::Size`).
 dpi.workspace = true
 thiserror = "2"
-parking_lot = "0.13"
 crossbeam-queue = "0.3"
 # The editor key vocabulary a `KeyEvent` is written in.
 keyboard-types.workspace = true

@@ -374,12 +374,14 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> FlexTextAssembler<B> {
             Some(lane) => &self.buf.as_ref()[lane * self.max_text..][..len],
         };
         match core::str::from_utf8(bytes) {
-            Ok(text) if !text.starts_with('\u{FEFF}') => FlexTextStep::Done(FlexText {
-                group,
-                address,
-                kind,
-                text,
-            }),
+            Ok(text) if crate::flex_write::Text::try_from(text).is_ok() => {
+                FlexTextStep::Done(FlexText {
+                    group,
+                    address,
+                    kind,
+                    text,
+                })
+            }
             _ => {
                 self.invalid += 1;
                 FlexTextStep::Held

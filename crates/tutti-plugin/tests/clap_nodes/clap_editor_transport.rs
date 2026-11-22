@@ -11,7 +11,8 @@
 use crate::clap_probe::{SAMPLE_RATE, load_probe};
 use tutti_fixtures::{StandInWindow, machine_lock, main_thread};
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tutti_rt::Mutex;
 
 use tutti_clap_test_plugin::{ClapProbe, GuiMode, HOSTEXT_CMD_START, HOSTEXT_CMD_STOP};
 use tutti_plugin_host::PluginSignal;
@@ -37,7 +38,7 @@ fn served_a_request_the_editor_instance_makes_reaches_subscribers_in_order() {
         let heard = Arc::clone(&heard);
         move |notice| {
             if let PluginSignal::Transport(request) = notice {
-                heard.lock().expect("the list").push(request);
+                heard.lock().push(request);
             }
         }
     });
@@ -59,7 +60,7 @@ fn served_a_request_the_editor_instance_makes_reaches_subscribers_in_order() {
     }
 
     assert_eq!(
-        *heard.lock().expect("the list"),
+        *heard.lock(),
         [TransportRequest::Start, TransportRequest::Stop]
     );
 }
@@ -91,7 +92,7 @@ fn in_process_a_request_the_plugin_makes_reaches_subscribers() {
         let heard = Arc::clone(&heard);
         move |notice| {
             if let PluginSignal::Transport(request) = notice {
-                heard.lock().expect("the list").push(request);
+                heard.lock().push(request);
             }
         }
     });
@@ -101,5 +102,5 @@ fn in_process_a_request_the_plugin_makes_reaches_subscribers() {
     handle.editor_idle(main);
     handle.editor_idle(main);
 
-    assert_eq!(*heard.lock().expect("the list"), [TransportRequest::Start]);
+    assert_eq!(*heard.lock(), [TransportRequest::Start]);
 }

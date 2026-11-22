@@ -45,8 +45,7 @@
 
 #![cfg(target_os = "macos")]
 
-use std::sync::Mutex;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 mod support;
 use support::corpus::{
@@ -65,12 +64,6 @@ use tutti_ump::MidiChannel;
 /// process-global registry and these tests open the same units the conformance
 /// suite does.
 static AU_LOCK: Mutex<()> = Mutex::new(());
-
-/// Recover from poisoning: the guard only serializes, it protects no shared
-/// state, so one panicking test must not convert into N spurious failures.
-fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock_recover()
-}
 
 const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
@@ -108,7 +101,7 @@ fn assert_invalid_element<T: std::fmt::Debug>(result: Result<T, AuError>, what: 
 /// holding the render path needs revisiting rather than this assertion relaxing.
 #[test]
 fn effects_have_exactly_one_bus_per_direction() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in EFFECTS {
         let au = unit.open_uninitialized(RATE, BLOCK);
         assert_eq!(
@@ -138,7 +131,7 @@ fn effects_have_exactly_one_bus_per_direction() {
 /// both.
 #[test]
 fn the_dls_synth_reports_no_inputs_and_two_output_buses() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = DLS_SYNTH.open_uninitialized(RATE, BLOCK);
     assert_eq!(
         au.bus_count(BusDirection::Input),
@@ -169,7 +162,7 @@ fn the_dls_synth_reports_no_inputs_and_two_output_buses() {
 /// initialize failure.
 #[test]
 fn instruments_report_no_input_buses() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in INSTRUMENTS {
         let au = unit.open_uninitialized(RATE, BLOCK);
         assert_eq!(
@@ -220,7 +213,7 @@ fn instruments_report_no_input_buses() {
 /// Spec: au.prop.ElementCount
 #[test]
 fn has_input_is_derived_from_the_element_count() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut with_input = 0;
     let mut without_input = 0;
 
@@ -263,7 +256,7 @@ fn has_input_is_derived_from_the_element_count() {
 /// and a silently-halved count would still satisfy an inequality.
 #[test]
 fn mixers_report_their_full_bus_topology() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, expect_in, expect_out) in [
         (MATRIX_MIXER, 64, 4),
         (MULTI_CHANNEL_MIXER, 8, 1),
@@ -292,7 +285,7 @@ fn mixers_report_their_full_bus_topology() {
 /// always returning `Err` passes the second.
 #[test]
 fn every_declared_bus_has_a_layout_and_the_next_one_errors() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in EFFECTS.iter().chain(INSTRUMENTS).chain(MIXERS) {
         let au = unit.open_uninitialized(RATE, BLOCK);
         for direction in BusDirection::ALL {
@@ -326,7 +319,7 @@ fn every_declared_bus_has_a_layout_and_the_next_one_errors() {
 /// return a plausible layout.
 #[test]
 fn a_far_out_of_range_bus_does_not_alias_onto_a_real_one() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = DLS_SYNTH.open_uninitialized(RATE, BLOCK);
     for bus in [2u32, 3, 99, 65_536, u32::MAX] {
         assert_invalid_element(
@@ -344,7 +337,7 @@ fn a_far_out_of_range_bus_does_not_alias_onto_a_real_one() {
 /// code had, where every query was hard-wired to bus 0.
 #[test]
 fn each_output_bus_of_a_multi_bus_unit_is_addressable() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = DLS_SYNTH.open_uninitialized(RATE, BLOCK);
     for bus in 0..2 {
         let layout = au
@@ -366,7 +359,7 @@ fn each_output_bus_of_a_multi_bus_unit_is_addressable() {
 /// the topology query cannot recreate that mistake.
 #[test]
 fn an_instrument_has_no_input_bus_zero() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in INSTRUMENTS {
         let au = unit.open_uninitialized(RATE, BLOCK);
         assert_invalid_element(
@@ -390,7 +383,7 @@ fn an_instrument_has_no_input_bus_zero() {
 /// value that came from a negative field.
 #[test]
 fn declared_channel_configs_decode_without_coercing_sentinels() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in EFFECTS.iter().chain(INSTRUMENTS).chain(MIXERS) {
         let au = unit.open_uninitialized(RATE, BLOCK);
         for config in au.supported_channel_configs() {
@@ -434,7 +427,7 @@ fn declared_channel_configs_decode_without_coercing_sentinels() {
 /// host offer a 16-channel output bus on a unit whose only bus is stereo.
 #[test]
 fn the_samplers_negative_entry_is_a_total_not_a_channel_count() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = SAMPLER.open_uninitialized(RATE, BLOCK);
     let configs = au.supported_channel_configs();
     assert_eq!(
@@ -475,7 +468,7 @@ fn the_samplers_negative_entry_is_a_total_not_a_channel_count() {
 /// the whole property as sentinels would fail this one.
 #[test]
 fn the_dls_synth_declares_a_literal_stereo_output() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = DLS_SYNTH.open_uninitialized(RATE, BLOCK);
     let configs = au.supported_channel_configs();
     assert_eq!(
@@ -503,7 +496,7 @@ fn the_dls_synth_declares_a_literal_stereo_output() {
 /// here against live units, not only against synthetic values in the unit tests.
 #[test]
 fn the_matching_constraint_survives_a_real_au() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
 
     let splitter = MULTI_SPLITTER.open_uninitialized(RATE, BLOCK);
     let configs = splitter.supported_channel_configs();
@@ -553,7 +546,7 @@ fn the_matching_constraint_survives_a_real_au() {
 /// effects keep everything and where this mixer keeps nothing.
 #[test]
 fn a_mixer_publishes_a_parameter_strip_per_input_bus() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = MULTI_CHANNEL_MIXER.open_uninitialized(RATE, BLOCK);
     let unit = au.unit().clone();
 
@@ -598,7 +591,7 @@ fn a_mixer_publishes_a_parameter_strip_per_input_bus() {
 /// (id 0) to 0.25 and element 1's to 0.75 reads back exactly 0.25 and 0.75.
 #[test]
 fn the_same_parameter_id_on_two_elements_holds_two_values() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = MULTI_CHANNEL_MIXER.open_uninitialized(RATE, BLOCK);
     let raw = au.unit().clone();
 
@@ -637,7 +630,7 @@ fn the_same_parameter_id_on_two_elements_holds_two_values() {
 /// 9999 on AUMultiChannelMixer.
 #[test]
 fn a_parameter_write_to_a_missing_element_fails_rather_than_aliasing() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = MULTI_CHANNEL_MIXER.open_uninitialized(RATE, BLOCK);
     let raw = au.unit().clone();
 
@@ -676,7 +669,7 @@ fn a_parameter_write_to_a_missing_element_fails_rather_than_aliasing() {
 /// parameters live on the global scope.
 #[test]
 fn the_default_parameter_address_is_still_global_element_zero() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = support::corpus::DELAY.open(RATE, BLOCK);
     let raw = au.unit().clone();
 
@@ -719,7 +712,7 @@ fn the_default_parameter_address_is_still_global_element_zero() {
 /// `au_conformance.rs::note_on_produces_audio_from_an_instrument` requires.
 #[test]
 fn a_multi_bus_instrument_still_renders_its_primary_bus() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     use tutti_graph::Offset;
 
     let mut au = DLS_SYNTH.open(RATE, BLOCK);
@@ -761,7 +754,7 @@ fn a_multi_bus_instrument_still_renders_its_primary_bus() {
 /// again, asserting the audio is unchanged.
 #[test]
 fn querying_the_topology_does_not_reconfigure_the_unit() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     use tutti_graph::Offset;
 
     let mut au = DLS_SYNTH.open(RATE, BLOCK);

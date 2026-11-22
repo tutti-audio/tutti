@@ -11,10 +11,10 @@
 //! without it the no-alloc test below would pass unconditionally.
 
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::Instant;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_buffers::InputOutput;
 use tutti_clap_ffi::GraphPool;
@@ -147,7 +147,7 @@ fn until_spread(mut one: impl FnMut()) -> ThreadPoolCapture {
 /// itself (`ext/thread-pool.h`: `false` means the host did not run them).
 #[test]
 fn without_a_pool_every_request_is_refused() {
-    let _l = PROBE_LOCK.lock_recover();
+    let _l = PROBE_LOCK.lock();
     let mut inst = load(8, 0, false);
     for _ in 0..4 {
         block(&mut inst);
@@ -161,7 +161,7 @@ fn without_a_pool_every_request_is_refused() {
 /// well, so the request is refused.
 #[test]
 fn a_pool_of_one_is_refused() {
-    let _l = PROBE_LOCK.lock_recover();
+    let _l = PROBE_LOCK.lock();
     let mut inst = load(8, 0, false);
     inst.set_thread_pool(Some(pool(1)));
     for _ in 0..4 {
@@ -177,7 +177,7 @@ fn a_pool_of_one_is_refused() {
 #[test]
 #[cfg_attr(miri, ignore = "threads and a dlopen'd plugin")]
 fn a_pool_runs_every_task_once_before_the_request_returns() {
-    let _l = PROBE_LOCK.lock_recover();
+    let _l = PROBE_LOCK.lock();
     let mut inst = load(16, 50, false);
     assert!(inst.set_thread_pool(Some(pool(4))).is_none());
     let cap = until_spread(|| block(&mut inst));
@@ -195,7 +195,7 @@ fn a_pool_runs_every_task_once_before_the_request_returns() {
 /// Taking the pool back makes the next request refused again.
 #[test]
 fn removing_the_pool_refuses_again() {
-    let _l = PROBE_LOCK.lock_recover();
+    let _l = PROBE_LOCK.lock();
     let mut inst = load(4, 0, false);
     inst.set_thread_pool(Some(pool(2)));
     block(&mut inst);
@@ -211,7 +211,7 @@ fn removing_the_pool_refuses_again() {
 #[test]
 #[cfg_attr(miri, ignore = "threads and a dlopen'd plugin")]
 fn a_request_from_inside_a_task_is_refused() {
-    let _l = PROBE_LOCK.lock_recover();
+    let _l = PROBE_LOCK.lock();
     let mut inst = load(8, 0, true);
     inst.set_thread_pool(Some(pool(4)));
     for _ in 0..50 {
@@ -230,7 +230,7 @@ fn a_request_from_inside_a_task_is_refused() {
 #[test]
 #[cfg_attr(miri, ignore = "threads and a dlopen'd plugin")]
 fn a_request_from_a_pool_worker_is_refused() {
-    let _l = PROBE_LOCK.lock_recover();
+    let _l = PROBE_LOCK.lock();
     let shared = pool(4);
     let mut inst = load(16, 0, false);
     inst.set_thread_pool(Some(shared.clone()));
@@ -240,7 +240,7 @@ fn a_request_from_a_pool_worker_is_refused() {
         // The outer job stands for a graph block: the participant that
         // takes the plugin runs its `process` inside the job.
         shared.run(4, &|_| {
-            if let Ok(mut inst) = slot.try_lock() {
+            if let Some(mut inst) = slot.try_lock() {
                 block(&mut inst);
                 processed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
@@ -256,7 +256,7 @@ fn a_request_from_a_pool_worker_is_refused() {
 /// this instance's `process` on the thread serving its request.
 #[test]
 fn a_request_naming_another_instance_is_refused() {
-    let _l = PROBE_LOCK.lock_recover();
+    let _l = PROBE_LOCK.lock();
     let mut a = load(4, 0, false);
     let mut b = load(4, 0, false);
     a.set_thread_pool(Some(pool(2)));
@@ -281,7 +281,7 @@ fn a_request_naming_another_instance_is_refused() {
 /// Spec: clap.ext.thread_pool.host.request_exec
 #[test]
 fn a_request_after_process_returns_is_refused() {
-    let _l = PROBE_LOCK.lock_recover();
+    let _l = PROBE_LOCK.lock();
     let mut inst = load(4, 0, false);
     inst.set_thread_pool(Some(pool(2)));
     block(&mut inst);
@@ -331,7 +331,7 @@ fn gated(participants: usize) -> Arc<GraphPool> {
 #[test]
 #[cfg_attr(miri, ignore = "threads and a dlopen'd plugin")]
 fn serving_requests_does_not_allocate() {
-    let _l = PROBE_LOCK.lock_recover();
+    let _l = PROBE_LOCK.lock();
     let mut inst = load(16, 20, false);
     inst.set_task_pool(Some(gated(4)));
     // Warm-up outside the gate: the first block starts processing.
@@ -353,7 +353,7 @@ fn serving_requests_does_not_allocate() {
 #[test]
 #[cfg_attr(miri, ignore = "threads and a dlopen'd plugin")]
 fn a_task_that_logs_does_not_allocate() {
-    let _l = PROBE_LOCK.lock_recover();
+    let _l = PROBE_LOCK.lock();
     let mut inst = load(16, 20, false);
     inst.set_task_pool(Some(gated(4)));
     block(&mut inst);

@@ -1,11 +1,12 @@
 //! A `tracing` collector for the `tutti::plugin` events a host emits.
 
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Level, Subscriber};
 use tracing_subscriber::Layer;
 use tracing_subscriber::layer::{Context, SubscriberExt};
+use tutti_rt::Mutex;
 
 /// One event: its level, target, message and the `plugin` and `severity` fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,7 +60,7 @@ impl<S: Subscriber> Layer<S> for Collect {
         let mut logged = fields.0;
         logged.level = *event.metadata().level();
         logged.target = event.metadata().target().to_owned();
-        self.0.lock().unwrap().push(logged);
+        self.0.lock().push(logged);
     }
 }
 
@@ -69,7 +70,7 @@ pub fn plugin_events(f: impl FnOnce()) -> Vec<Logged> {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let subscriber = tracing_subscriber::registry().with(Collect(seen.clone()));
     tracing::subscriber::with_default(subscriber, f);
-    let all = std::mem::take(&mut *seen.lock().unwrap());
+    let all = std::mem::take(&mut *seen.lock());
     all.into_iter()
         .filter(|e| e.target == "tutti::plugin")
         .collect()

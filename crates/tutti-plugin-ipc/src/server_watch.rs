@@ -15,11 +15,11 @@
 //! follow-on errors, and the first is the diagnosis.
 
 use crate::Wake;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tutti_plugin_types::PluginFailure;
-use tutti_rt::{LockExt, Tally, TallyWriter, tally};
+use tutti_rt::{Mutex, Tally, TallyWriter, tally};
 
 /// The latch for "this server is gone": set once, with the cause that set it.
 ///
@@ -74,7 +74,7 @@ impl ServerWatch {
     /// the latch; `false` when it was set already, in which case the first
     /// cause stands.
     pub fn declare(&self, cause: PluginFailure) -> bool {
-        let mut slot = self.cause.lock_recover();
+        let mut slot = self.cause.lock();
         if slot.is_some() {
             return false;
         }
@@ -83,7 +83,7 @@ impl ServerWatch {
         self.dead.store(true, Ordering::Release);
         drop(slot);
         self.wake.notify();
-        for wake in &self.wakers.lock_recover().0 {
+        for wake in &self.wakers.lock().0 {
             wake();
         }
         true
@@ -94,7 +94,7 @@ impl ServerWatch {
     /// [`wake`](Self::wake)'s gate does not reach, hears the server's end.
     /// Called on whichever thread declares, so it takes no lock and does not wait.
     pub(crate) fn on_declared(&self, wake: impl Fn() + Send + Sync + 'static) {
-        let mut wakers = self.wakers.lock_recover();
+        let mut wakers = self.wakers.lock();
         wakers.0.push(Box::new(wake));
         // A declaration that landed before the registration called nothing.
         if self.is_dead()
@@ -142,7 +142,7 @@ impl ServerWatch {
     /// every [`declare`](Self::declare) passes one.
     #[must_use]
     pub fn cause(&self) -> Option<PluginFailure> {
-        self.cause.lock_recover().clone()
+        self.cause.lock().clone()
     }
 }
 

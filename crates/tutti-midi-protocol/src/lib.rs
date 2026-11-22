@@ -169,8 +169,8 @@ pub use mode::{PerNoteTranslation, TranslationMode};
 pub use mpe::InvalidMpeZoneConfig;
 pub use mpe::InvalidMpeZones;
 pub use mpe::{
-    ChannelResponse, ControllerSupport, MpeFeatures, MpeMode, MpeSpec, MpeZone, MpeZoneConfig,
-    MpeZones, PitchBendSupport,
+    ChannelResponse, ControllerSupport, Mcm, MemberCount, MpeFeatures, MpeMode, MpeSpec, MpeZone,
+    MpeZoneConfig, MpeZones, NotMemberCount, PitchBendSupport,
 };
 pub use per_note_management::{PerNoteManager, PerNotePolicy};
 pub use sensitivity::PitchBendSensitivity;
@@ -192,23 +192,24 @@ pub use universal::{
     Addressed, Addressee, BadChecksum, GeneralMidiMode, GeneratorAction, GeneratorSetUp,
     GeneratorTally, Heard, JamMode, JamReference, MMC_MAX_DATA, MMC_MAX_SEGMENTED,
     MMC_MAX_SEGMENTS, MMC_MAX_TRACK_BITMAP_BYTES, MMC_SEGMENT_BYTES, McpSuccess, McsSuccess,
-    MmcArithmetic, MmcBytes, MmcBytesRefused, MmcChaseMode, MmcCodeStatus, MmcCommand,
-    MmcCommandReassembler, MmcCommandSuccess, MmcCommands, MmcControlDisable, MmcDevices,
-    MmcDirection, MmcErrorCode, MmcErrorCommand, MmcErrorFlags, MmcErrorKind, MmcErrorReport,
-    MmcEvent, MmcEventDirection, MmcEventFlags, MmcEventResponse, MmcExtension, MmcFastMode,
-    MmcFields, MmcFragment, MmcGlobalMonitor, MmcGroup, MmcInfoField, MmcItem, MmcItems,
-    MmcLifterDefeat, MmcLocate, MmcMaskedWrite, MmcMove, MmcName, MmcNames, MmcOtherField,
-    MmcPayload, MmcPlaySpeedReference, MmcPosition, MmcProcedure, MmcProcedureResponse,
-    MmcReassembler, MmcRecordActivity, MmcRecordMode, MmcRecordMonitor, MmcRecordStatus,
-    MmcReservedCommand, MmcResolvedPlayMode, MmcResponseReassembler, MmcSegment, MmcSegmentBytes,
-    MmcSegmentError, MmcSegmentPlace, MmcSegments, MmcSegmentsRefused, MmcSelection, MmcSequence,
-    MmcShortTimeCode, MmcSign, MmcSignature, MmcSlot, MmcSpeed, MmcStep, MmcStopMode, MmcString,
-    MmcSubframes, MmcSupportBitmap, MmcSystemMaster, MmcTimeCode, MmcTimeCodeName,
-    MmcTimeCodeSource, MmcTimeLabel, MmcTimeTail, MmcTrack, MmcTrackBitmap, MmcUpdate,
-    MmcUserBitFlags, MmcUserBits, MotionControlTally, MotionProcess, MotionState, MtcAction,
-    MtcFlags, MtcFullMessage, MtcSetUp, MtcTally, MtcTimeCode, NotMmcPosition, NotMmcSlot,
-    NotMmcSubframes, NotQuarterFramePiece, NotSysexDeviceId, QuarterFrame, QuarterFrameCycle,
-    QuarterFramePiece, Recipient, RunReference, SysexDeviceId, Universal, UniversalRead,
-    UniversalReader, VitcInsert, read,
+    MmcArithmetic, MmcAudioTrack, MmcBytes, MmcBytesRefused, MmcChaseMode, MmcCodeStatus,
+    MmcCommand, MmcCommandReassembler, MmcCommandSuccess, MmcCommands, MmcControlDisable,
+    MmcDevices, MmcDirection, MmcErrorCode, MmcErrorCommand, MmcErrorFlags, MmcErrorKind,
+    MmcErrorReport, MmcEvent, MmcEventDirection, MmcEventFlags, MmcEventResponse, MmcExtension,
+    MmcFastMode, MmcFields, MmcFragment, MmcGlobalMonitor, MmcGroup, MmcInfoField, MmcItem,
+    MmcItems, MmcLifterDefeat, MmcLocate, MmcMantissa, MmcMaskedWrite, MmcMove, MmcName, MmcNames,
+    MmcOtherField, MmcPayload, MmcPlaySpeedReference, MmcPosition, MmcProcedure,
+    MmcProcedureResponse, MmcReassembler, MmcRecordActivity, MmcRecordMode, MmcRecordMonitor,
+    MmcRecordStatus, MmcReservedCommand, MmcResolvedPlayMode, MmcResponseReassembler, MmcSegment,
+    MmcSegmentBytes, MmcSegmentCount, MmcSegmentError, MmcSegmentPlace, MmcSegments,
+    MmcSegmentsRefused, MmcSelection, MmcSequence, MmcShift, MmcShortTimeCode, MmcSign,
+    MmcSignature, MmcSlot, MmcSpeed, MmcStep, MmcStepCount, MmcStopMode, MmcString, MmcSubframes,
+    MmcSupportBitmap, MmcSystemMaster, MmcTimeCode, MmcTimeCodeName, MmcTimeCodeSource,
+    MmcTimeLabel, MmcTimeTail, MmcTrack, MmcTrackBitmap, MmcUpdate, MmcUserBitFlags, MmcUserBits,
+    MotionControlTally, MotionProcess, MotionState, MtcAction, MtcFlags, MtcFullMessage, MtcSetUp,
+    MtcTally, MtcTimeCode, NotMmcAudioTrack, NotMmcMantissa, NotMmcPosition, NotMmcSegmentCount,
+    NotMmcShift, NotMmcSlot, NotMmcStepCount, NotMmcSubframes, NotQuarterFramePiece,
+    NotSysexDeviceId, QuarterFrame, QuarterFrameCycle, QuarterFramePiece, Recipient, RunReference,
+    SysexDeviceId, Universal, UniversalRead, UniversalReader, VitcInsert, read,
 };
 pub use voice::channel_voice;

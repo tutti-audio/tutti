@@ -147,9 +147,10 @@ fn a_non_realtime_parameter_is_written_between_blocks_not_by_the_render() {
 /// block has only rendered, and then the block's last value after the tick.
 #[test]
 fn the_blocks_last_value_reaches_other_listeners_at_the_tick_not_the_render() {
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
     use tutti_au_ffi::{AuEvent, AuParameterListener, EventAddress};
     use tutti_plugin_types::Control;
+    use tutti_rt::Mutex;
 
     let main = tutti_fixtures::main_thread();
     let (mut processor, mut controller) = activate(delay_loaded());
@@ -157,7 +158,7 @@ fn the_blocks_last_value_reaches_other_listeners_at_the_tick_not_the_render() {
     let sink = Arc::clone(&heard);
     let editor = AuParameterListener::new(controller.unit(), move |event| {
         if let AuEvent::ParameterChanged { id, value, .. } = event {
-            sink.lock().unwrap().push((id, value));
+            sink.lock().push((id, value));
         }
     })
     .expect("a listener registers");
@@ -173,16 +174,16 @@ fn the_blocks_last_value_reaches_other_listeners_at_the_tick_not_the_render() {
     // The plugin's edit of another parameter, after the render, is told to the
     // listener; by the time it is heard, the render's own would have been.
     plugin_edits_cutoff(&controller, 1000.0);
-    wait_until(|| heard.lock().unwrap().iter().any(|(id, _)| *id == CUTOFF));
+    wait_until(|| heard.lock().iter().any(|(id, _)| *id == CUTOFF));
     assert!(
-        heard.lock().unwrap().iter().all(|(id, _)| *id == CUTOFF),
+        heard.lock().iter().all(|(id, _)| *id == CUTOFF),
         "the render notified a listener: {:?}",
-        heard.lock().unwrap()
+        heard.lock()
     );
 
     Control::flush_edits(&mut controller, main);
-    wait_until(|| heard.lock().unwrap().iter().any(|(id, _)| *id == DRY_WET));
-    let heard = heard.lock().unwrap();
+    wait_until(|| heard.lock().iter().any(|(id, _)| *id == DRY_WET));
+    let heard = heard.lock();
     assert_eq!(
         heard.last().copied(),
         Some((DRY_WET, 75.0)),
@@ -221,9 +222,10 @@ fn the_tick_does_not_write_the_value_back_over_a_later_one() {
 /// each parameter exactly once and none dropped: a flag is a level, not a count.
 #[test]
 fn many_blocks_between_ticks_tell_each_parameter_once() {
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
     use tutti_au_ffi::{AuEvent, AuParameterListener, EventAddress};
     use tutti_plugin_types::Control;
+    use tutti_rt::Mutex;
 
     let main = tutti_fixtures::main_thread();
     let (mut processor, mut controller) = activate(delay_loaded());
@@ -231,7 +233,7 @@ fn many_blocks_between_ticks_tell_each_parameter_once() {
     let sink = Arc::clone(&heard);
     let editor = AuParameterListener::new(controller.unit(), move |event| {
         if let AuEvent::ParameterChanged { id, value, .. } = event {
-            sink.lock().unwrap().push((id, value));
+            sink.lock().push((id, value));
         }
     })
     .expect("a listener registers");
@@ -254,15 +256,15 @@ fn many_blocks_between_ticks_tell_each_parameter_once() {
     // The plugin's edit of another parameter, after the renders, is told to the
     // listener; by the time it is heard, the renders' own would have been.
     plugin_edits_cutoff(&controller, 1000.0);
-    wait_until(|| heard.lock().unwrap().iter().any(|(id, _)| *id == CUTOFF));
+    wait_until(|| heard.lock().iter().any(|(id, _)| *id == CUTOFF));
     assert!(
-        heard.lock().unwrap().iter().all(|(id, _)| *id == CUTOFF),
+        heard.lock().iter().all(|(id, _)| *id == CUTOFF),
         "the render notified a listener"
     );
 
     Control::flush_edits(&mut controller, main);
     wait_until(|| {
-        let heard = heard.lock().unwrap();
+        let heard = heard.lock();
         [DRY_WET, DELAY_TIME]
             .iter()
             .all(|want| heard.iter().any(|(id, _)| id == want))
@@ -270,16 +272,8 @@ fn many_blocks_between_ticks_tell_each_parameter_once() {
     // A surplus notification of the tick would be delivered before the plugin's
     // next edit is.
     plugin_edits_cutoff(&controller, 2000.0);
-    wait_until(|| {
-        heard
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|(id, _)| *id == CUTOFF)
-            .count()
-            >= 2
-    });
-    let heard = heard.lock().unwrap();
+    wait_until(|| heard.lock().iter().filter(|(id, _)| *id == CUTOFF).count() >= 2);
+    let heard = heard.lock();
     for id in [DRY_WET, DELAY_TIME] {
         let told: Vec<_> = heard.iter().filter(|(i, _)| *i == id).collect();
         assert_eq!(

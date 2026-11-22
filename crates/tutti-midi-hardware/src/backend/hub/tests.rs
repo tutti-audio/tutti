@@ -326,10 +326,10 @@ fn a_round_restarted_onto_a_thread_that_then_ends_fails_for_the_future_that_aske
 }
 
 /// A device list that a test changes, as the OS's enumeration.
-static PRESENT: std::sync::Mutex<Vec<crate::OsEndpoint>> = std::sync::Mutex::new(Vec::new());
+static PRESENT: tutti_rt::Mutex<Vec<crate::OsEndpoint>> = tutti_rt::Mutex::new(Vec::new());
 
 fn present() -> Vec<tutti_midi_device::OsDevice> {
-    crate::devices::reporter::os_devices(&PRESENT.lock().unwrap(), &[])
+    crate::devices::reporter::os_devices(&PRESENT.lock(), &[])
 }
 
 /// A backend over a registry, whose enumeration needs a client the test makes.
@@ -380,7 +380,7 @@ fn a_failed_start_leaves_the_watch_to_be_seeded_by_the_next_start() {
     let gate = Arc::new(StartGate::new());
     let registry = Arc::new(Registry::new());
     let client = Arc::new(AtomicBool::new(false));
-    *PRESENT.lock().unwrap() = vec![crate::test_support::endpoint(1, "Keys")];
+    *PRESENT.lock() = vec![crate::test_support::endpoint(1, "Keys")];
     // A `Devices` opened while the first round is under way.
     let devices = crate::Devices::open_over(
         &tutti_platform::Executor::new(),
@@ -432,7 +432,6 @@ fn a_failed_start_leaves_the_watch_to_be_seeded_by_the_next_start() {
     // The watch is live: a device that comes is reported.
     PRESENT
         .lock()
-        .unwrap()
         .push(crate::test_support::endpoint(2, "Pads"));
     registry.look_all();
     let seen: Vec<_> = events.pending().collect();

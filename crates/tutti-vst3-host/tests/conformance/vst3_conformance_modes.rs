@@ -9,8 +9,8 @@ use crate::conformance_support;
 use tutti_buffers::{InputOutput, Planes, PlanesMut};
 
 use std::os::raw::{c_int, c_uint, c_void};
-use std::sync::Mutex;
 use tutti_fixtures::main_thread;
+use tutti_rt::Mutex;
 
 use tutti_vst3_host::{
     InputEvents, LoadOptions, ProcessMode, TransportInfo, Vst3Loaded, host::conformance,
@@ -212,11 +212,8 @@ fn live_realtime_prefetch_toggle_is_spec_clean() {
         let mut counts = vec![0i64; n];
         let ptr = std::ptr::from_ref(data).cast::<c_void>();
         unsafe { hc_validate(ptr, data.numInputs, data.numOutputs, counts.as_mut_ptr()) };
-        observed
-            .lock()
-            .unwrap()
-            .push((setup.processMode, data.processMode));
-        *counts_cell.lock().unwrap() = counts;
+        observed.lock().push((setup.processMode, data.processMode));
+        *counts_cell.lock() = counts;
     }));
 
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
@@ -244,7 +241,7 @@ fn live_realtime_prefetch_toggle_is_spec_clean() {
         .expect("equal lengths");
         inst.process(&mut buffer, &InputEvents::default(), None, &transport);
 
-        let findings = findings_from(&counts_cell.lock().unwrap());
+        let findings = findings_from(&counts_cell.lock());
         let errs = errors(&findings);
         if !errs.is_empty() {
             failures.push(format!(
@@ -259,7 +256,7 @@ fn live_realtime_prefetch_toggle_is_spec_clean() {
 
     conformance::clear_observer();
 
-    let seen = observed.lock().unwrap().clone();
+    let seen = observed.lock().clone();
     assert_eq!(seen.len(), 5, "observer did not fire once per block");
     // The setup half must never move: the whole point of the exception is that
     // a toggle does *not* re-run `setupProcessing`.
