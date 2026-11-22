@@ -3,7 +3,7 @@
 //! in `flex_write`.
 
 use crate::flex_write::BYTES_PER_PACKET;
-use crate::lanes::{LanePool, Run as LaneRun};
+use crate::lanes::LanePool;
 use crate::{Flex, FlexAddress, FlexTextKind, Form, Message, MidiGroup, Ump};
 
 /// What the assembler holds for one Group with a message open.
@@ -24,8 +24,8 @@ enum Run {
     },
 }
 
-impl LaneRun for Run {
-    fn is_assembling(&self) -> bool {
+impl Run {
+    const fn is_assembling(&self) -> bool {
         matches!(self, Self::Assembling { .. })
     }
 }
@@ -127,7 +127,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> FlexTextAssembler<B> {
     #[must_use]
     pub fn new(buf: B, max_text: usize, lanes: usize) -> Self {
         Self {
-            pool: LanePool::new(buf, max_text, lanes),
+            pool: LanePool::new(buf, max_text, lanes, Run::is_assembling),
             single: [0; BYTES_PER_PACKET],
             invalid: 0,
         }
@@ -166,7 +166,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> FlexTextAssembler<B> {
                 self.start(g, address, kind, &bytes);
                 FlexTextStep::Held
             }
-            Form::Continue | Form::End => match self.pool.slots[g] {
+            Form::Continue | Form::End => match self.pool.slot(g) {
                 Some(Run::Assembling {
                     lane,
                     len,
@@ -185,7 +185,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> FlexTextAssembler<B> {
                     kind: k,
                 }) if same(a, k) => {
                     if form == Form::End {
-                        self.pool.slots[g] = None;
+                        self.pool.clear(g);
                     }
                     FlexTextStep::Held
                 }
@@ -215,7 +215,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> FlexTextAssembler<B> {
     /// [`lost_tail`](Self::lost_tail) or open at a [`reset`](Self::reset).
     #[must_use]
     pub fn dropped(&self) -> u64 {
-        self.pool.dropped
+        self.pool.dropped()
     }
 
     /// Messages refused since this assembler was made for breaking the text
@@ -231,7 +231,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> FlexTextAssembler<B> {
         if bytes.contains(&0) {
             // Zero is the padding, and only an End or a Complete has any.
             self.invalid += 1;
-            self.pool.slots[g] = Some(Run::Discarding { address, kind });
+            self.pool.set(g, Run::Discarding { address, kind });
             return;
         }
         let free = self.pool.free_lane(|run| match run {
@@ -239,16 +239,19 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> FlexTextAssembler<B> {
             Run::Discarding { .. } => None,
         });
         let Some(lane) = free else {
-            self.pool.dropped += 1;
-            self.pool.slots[g] = Some(Run::Discarding { address, kind });
+            self.pool.count_drop();
+            self.pool.set(g, Run::Discarding { address, kind });
             return;
         };
-        self.pool.slots[g] = Some(Run::Assembling {
-            lane,
-            len: 0,
-            address,
-            kind,
-        });
+        self.pool.set(
+            g,
+            Run::Assembling {
+                lane,
+                len: 0,
+                address,
+                kind,
+            },
+        );
         self.extend(g, lane, 0, bytes, false);
     }
 
@@ -256,26 +259,29 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> FlexTextAssembler<B> {
     /// `len` bytes in `lane`. `last` says the bytes are an End's, whose zeros
     /// are checked by the caller.
     fn extend(&mut self, g: usize, lane: usize, len: usize, bytes: &[u8], last: bool) -> bool {
-        let Some(Run::Assembling { address, kind, .. }) = self.pool.slots[g] else {
+        let Some(Run::Assembling { address, kind, .. }) = self.pool.slot(g) else {
             return false;
         };
         if !last && bytes.contains(&0) {
             self.invalid += 1;
-            self.pool.slots[g] = Some(Run::Discarding { address, kind });
+            self.pool.set(g, Run::Discarding { address, kind });
             return false;
         }
         if len + bytes.len() > self.pool.lane_len() {
-            self.pool.dropped += 1;
-            self.pool.slots[g] = Some(Run::Discarding { address, kind });
+            self.pool.count_drop();
+            self.pool.set(g, Run::Discarding { address, kind });
             return false;
         }
         self.pool.lane_mut(lane)[len..len + bytes.len()].copy_from_slice(bytes);
-        self.pool.slots[g] = Some(Run::Assembling {
-            lane,
-            len: len + bytes.len(),
-            address,
-            kind,
-        });
+        self.pool.set(
+            g,
+            Run::Assembling {
+                lane,
+                len: len + bytes.len(),
+                address,
+                kind,
+            },
+        );
         true
     }
 
@@ -293,20 +299,20 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> FlexTextAssembler<B> {
         bytes: &[u8; 12],
     ) -> FlexTextStep<'_> {
         let g = group.index();
-        let Some(Run::Assembling { address, kind, .. }) = self.pool.slots[g] else {
+        let Some(Run::Assembling { address, kind, .. }) = self.pool.slot(g) else {
             return FlexTextStep::Held;
         };
         let Some(tail) = Self::padded(bytes) else {
             self.invalid += 1;
-            self.pool.slots[g] = None;
+            self.pool.clear(g);
             return FlexTextStep::Held;
         };
         let tail = tail.len();
         if !self.extend(g, lane, len, &bytes[..tail], true) {
-            self.pool.slots[g] = None;
+            self.pool.clear(g);
             return FlexTextStep::Held;
         }
-        self.pool.slots[g] = None;
+        self.pool.clear(g);
         let total = len + tail;
         self.deliver(group, address, kind, Some(lane), total)
     }

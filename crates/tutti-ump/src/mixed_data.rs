@@ -5,7 +5,7 @@
 use core::iter::FusedIterator;
 use core::num::NonZeroU16;
 
-use crate::lanes::{Entry, LanePool, Run as LaneRun};
+use crate::lanes::{Entry, LanePool};
 use crate::{Data128, ManufacturerId, Message, MidiGroup, MixedDataHeader, U4, Ump};
 
 /// The bytes of a Mixed Data Set UMP: a chunk's header is one UMP.
@@ -357,8 +357,8 @@ struct Open {
     ends: bool,
 }
 
-impl LaneRun for Run {
-    fn is_assembling(&self) -> bool {
+impl Run {
+    const fn is_assembling(&self) -> bool {
         matches!(self, Self::Assembling(_))
     }
 }
@@ -443,7 +443,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> MixedDataAssembler<B> {
     #[must_use]
     pub fn new(buf: B, max_data: usize, lanes: usize) -> Self {
         Self {
-            pool: LanePool::new(buf, max_data, lanes),
+            pool: LanePool::new(buf, max_data, lanes, |e| e.run.is_assembling()),
         }
     }
 
@@ -459,7 +459,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> MixedDataAssembler<B> {
     /// found no lane.
     #[must_use]
     pub fn dropped(&self) -> u64 {
-        self.pool.dropped
+        self.pool.dropped()
     }
 
     /// An upstream queue dropped UMPs after the ones just pushed: drop every
@@ -485,13 +485,13 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> MixedDataAssembler<B> {
     }
 
     fn find(&self, group: MidiGroup, mds_id: U4) -> Option<usize> {
-        self.pool.find_stream(group, mds_id)
+        self.pool.find_key(group, mds_id)
     }
 
     /// Set `i` is dropped: counted if it was being collected, then skipped.
     fn discard(&mut self, i: usize, group: MidiGroup, h: &MixedDataHeader, count: bool) {
         if count {
-            self.pool.dropped += 1;
+            self.pool.count_drop();
         }
         self.skip(i, group, h.mds_id, h.chunk_size.payload_umps(), ends(h));
     }
@@ -501,10 +501,10 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> MixedDataAssembler<B> {
     /// lane is free.
     fn skip(&mut self, i: usize, group: MidiGroup, mds_id: U4, skip: u16, ends: bool) {
         if skip == 0 && ends {
-            self.pool.slots[i] = None;
+            self.pool.clear(i);
         } else {
             self.pool
-                .set_stream(i, group, mds_id, Run::Discarding { skip, ends });
+                .set_key(i, group, mds_id, Run::Discarding { skip, ends });
         }
     }
 
@@ -516,15 +516,15 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> MixedDataAssembler<B> {
                 if let Some(i) = self.pool.free() {
                     return self.begin(i, group, &h);
                 }
-                self.pool.dropped += 1;
+                self.pool.count_drop();
             } else if let Some(i) = self.pool.free() {
                 self.discard(i, group, &h, h.chunk != MdsChunk::Unverified);
             } else if h.chunk != MdsChunk::Unverified {
-                self.pool.dropped += 1;
+                self.pool.count_drop();
             }
             return MixedDataStep::Held;
         };
-        let Some(Entry { run, .. }) = self.pool.slots[i] else {
+        let Some(Entry { run, .. }) = self.pool.slot(i) else {
             return MixedDataStep::Held;
         };
         match run {
@@ -534,7 +534,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> MixedDataAssembler<B> {
                 MixedDataStep::Held
             }
             Run::Assembling(_) if first => {
-                self.pool.dropped += 1;
+                self.pool.count_drop();
                 self.begin(i, group, &h)
             }
             Run::Assembling(open) => {
@@ -582,8 +582,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> MixedDataAssembler<B> {
         open.umps = h.chunk_size.payload_umps();
         open.data_left = h.chunk_size.data_len();
         open.ends = ends(h);
-        self.pool
-            .set_stream(i, group, h.mds_id, Run::Assembling(open));
+        self.pool.set_key(i, group, h.mds_id, Run::Assembling(open));
         if open.umps == 0 && open.ends {
             return self.deliver(i);
         }
@@ -593,9 +592,9 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> MixedDataAssembler<B> {
     fn payload(&mut self, group: MidiGroup, mds_id: U4, bytes: &[u8; 14]) -> MixedDataStep<'_> {
         let Some(i) = self.find(group, mds_id) else {
             // A payload UMP with no header before it.
-            self.pool.dropped += 1;
+            self.pool.count_drop();
             if let Some(i) = self.pool.free() {
-                self.pool.set_stream(
+                self.pool.set_key(
                     i,
                     group,
                     mds_id,
@@ -607,7 +606,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> MixedDataAssembler<B> {
             }
             return MixedDataStep::Held;
         };
-        let Some(Entry { run, .. }) = self.pool.slots[i] else {
+        let Some(Entry { run, .. }) = self.pool.slot(i) else {
             return MixedDataStep::Held;
         };
         match run {
@@ -619,7 +618,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> MixedDataAssembler<B> {
                 let take = usize::from(open.data_left).min(PAYLOAD_BYTES);
                 if open.umps == 0 || open.len + take > self.pool.lane_len() {
                     // Past the chunk's payload, or past the buffer.
-                    self.pool.dropped += 1;
+                    self.pool.count_drop();
                     let skip = open.umps.saturating_sub(1);
                     self.skip(i, group, mds_id, skip, open.ends && open.umps != 0);
                     return MixedDataStep::Held;
@@ -629,8 +628,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> MixedDataAssembler<B> {
                 open.len += take;
                 open.umps -= 1;
                 open.data_left -= take as u16;
-                self.pool
-                    .set_stream(i, group, mds_id, Run::Assembling(open));
+                self.pool.set_key(i, group, mds_id, Run::Assembling(open));
                 if open.umps == 0 && open.ends {
                     return self.deliver(i);
                 }
@@ -643,9 +641,9 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> MixedDataAssembler<B> {
     fn deliver(&mut self, i: usize) -> MixedDataStep<'_> {
         let Some(Entry {
             group,
-            id: mds_id,
+            key: mds_id,
             run: Run::Assembling(open),
-        }) = self.pool.slots[i].take()
+        }) = self.pool.take(i)
         else {
             return MixedDataStep::Held;
         };

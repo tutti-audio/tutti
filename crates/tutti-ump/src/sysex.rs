@@ -6,7 +6,7 @@ use core::iter::FusedIterator;
 use alloc::boxed::Box;
 
 use crate::field::first_non_seven_bit;
-use crate::lanes::{LanePool, Run as LaneRun};
+use crate::lanes::LanePool;
 use crate::{Message, MessageType, MidiGroup, Sysex7Packet, SysexStatus, U7, Ump};
 
 /// The longest SysEx7 payload (the bytes between `0xF0` and `0xF7`) a host
@@ -373,8 +373,8 @@ enum Run {
     Discarding,
 }
 
-impl LaneRun for Run {
-    fn is_assembling(&self) -> bool {
+impl Run {
+    const fn is_assembling(&self) -> bool {
         matches!(self, Self::Assembling { .. })
     }
 }
@@ -493,7 +493,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> SysexAssembler<B> {
     #[must_use]
     pub fn new(buf: B, max_message: usize, lanes: usize) -> Self {
         Self {
-            pool: LanePool::new(buf, max_message, lanes),
+            pool: LanePool::new(buf, max_message, lanes, Run::is_assembling),
             len: 0,
         }
     }
@@ -538,15 +538,15 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> SysexAssembler<B> {
                 SysexStep::Held
             }
             SysexStatus::Continue => {
-                if let Some(Run::Assembling { lane, len }) = self.pool.slots[g] {
+                if let Some(Run::Assembling { lane, len }) = self.pool.slot(g) {
                     self.extend(g, lane, len, payload);
                 }
                 SysexStep::Held
             }
-            SysexStatus::End => match self.pool.slots[g] {
+            SysexStatus::End => match self.pool.slot(g) {
                 Some(Run::Assembling { lane, len }) => self.finish(g, lane, len, payload),
                 Some(Run::Discarding) => {
-                    self.pool.slots[g] = None;
+                    self.pool.clear(g);
                     SysexStep::Held
                 }
                 None => SysexStep::Held,
@@ -597,7 +597,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> SysexAssembler<B> {
     /// than it was sized for).
     #[must_use]
     pub fn dropped(&self) -> u64 {
-        self.pool.dropped
+        self.pool.dropped()
     }
 
     /// A UMP that is not a well-formed SysEx7 packet.
@@ -613,8 +613,8 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> SysexAssembler<B> {
             Run::Discarding => None,
         });
         let Some(lane) = free else {
-            self.pool.slots[g] = Some(Run::Discarding);
-            self.pool.dropped += 1;
+            self.pool.set(g, Run::Discarding);
+            self.pool.count_drop();
             return;
         };
         let base = self.pool.lane_start(lane);
@@ -628,28 +628,28 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> SysexAssembler<B> {
     fn extend(&mut self, g: usize, lane: usize, len: usize, payload: &[u8]) {
         let new_len = len + payload.len();
         if new_len + 1 > self.max_message() {
-            self.pool.slots[g] = Some(Run::Discarding);
-            self.pool.dropped += 1;
+            self.pool.set(g, Run::Discarding);
+            self.pool.count_drop();
             return;
         }
         let at = self.pool.lane_start(lane) + len;
         self.pool.buf_mut()[at..at + payload.len()].copy_from_slice(payload);
-        self.pool.slots[g] = Some(Run::Assembling { lane, len: new_len });
+        self.pool.set(g, Run::Assembling { lane, len: new_len });
     }
 
     /// Close Group `g`'s message with `payload` and `0xF7`, and move it into
     /// the completed messages.
     fn finish(&mut self, g: usize, lane: usize, len: usize, payload: &[u8]) -> SysexStep {
         self.extend(g, lane, len, payload);
-        let Some(Run::Assembling { len, .. }) = self.pool.slots[g] else {
+        let Some(Run::Assembling { len, .. }) = self.pool.slot(g) else {
             // Over capacity: `extend` dropped it and counted.
-            self.pool.slots[g] = None;
+            self.pool.clear(g);
             return SysexStep::Held;
         };
-        self.pool.slots[g] = None;
+        self.pool.clear(g);
         let size = len + 1;
         if self.len + size > self.pool.base() {
-            self.pool.dropped += 1;
+            self.pool.count_drop();
             return SysexStep::Held;
         }
         let base = self.pool.lane_start(lane);
@@ -668,7 +668,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> SysexAssembler<B> {
     fn single(&mut self, payload: &[u8]) -> SysexStep {
         let size = payload.len() + 2;
         if size > self.max_message() || self.len + size > self.pool.base() {
-            self.pool.dropped += 1;
+            self.pool.count_drop();
             return SysexStep::Held;
         }
         let start = self.len;
