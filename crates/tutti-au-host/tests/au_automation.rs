@@ -225,6 +225,7 @@ fn many_blocks_between_ticks_tell_each_parameter_once() {
     use std::sync::Arc;
     use tutti_au_ffi::{AuEvent, AuParameterListener, EventAddress};
     use tutti_plugin_types::Control;
+    use tutti_rt::Mutex;
 
     let main = tutti_fixtures::main_thread();
     let (mut processor, mut controller) = activate(delay_loaded());
