@@ -32,7 +32,7 @@ use tutti_units::{SampleRate, Samples};
 /// How long a wake that never comes is waited for.
 const PATIENCE: Duration = Duration::from_secs(60);
 
-/// `node` as the only node of a graph with no global input, its outputs the
+/// `node` as the only node of a graph with no main input, its outputs the
 /// graph's: its inputs are silent, which is what lets the executor park it.
 fn one_plugin_graph<N: tutti_graph::IntoNode>(node: N, outputs: usize) -> (Renderer, N::Controls) {
     let layout = |n: usize| ChannelLayout::from_count(u16::try_from(n).expect("a few ports"));

@@ -85,7 +85,7 @@ fn run<N: Node>(
 }
 
 /// The graph's fan-in (`Op::Sum`), measured
-/// through the graph: `sources` groups of `width` global input channels, each
+/// through the graph: `sources` groups of `width` main input channels, each
 /// output channel summing its channel of every group. No node runs, so the
 /// figure is the op's.
 fn channel_sum(c: &mut Criterion) {
@@ -104,9 +104,10 @@ fn channel_sum(c: &mut Criterion) {
                 .set_outputs(vec![PortSource::Zero; width as usize]);
             for channel in 0..width {
                 for k in 0..sources {
-                    ed.spec_mut()
-                        .topology
-                        .connect_output(channel as usize, PortSource::Global(k * width + channel));
+                    ed.spec_mut().topology.connect_output(
+                        channel as usize,
+                        PortSource::MainInput(k * width + channel),
+                    );
                 }
             }
             ed.commit().expect("commits");

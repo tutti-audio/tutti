@@ -81,7 +81,7 @@ fn bused(inner: Kind, ins: &[Bus], outs: &[Bus]) -> Kind {
     }
 }
 
-/// A source of `n` channels: global input `c` scaled by one, on `n` ports,
+/// A source of `n` channels: main input `c` scaled by one, on `n` ports,
 /// declaring `out` as its output bus.
 fn source(n: usize, out: Bus) -> Kind {
     bused(
@@ -137,12 +137,12 @@ impl Rig {
         self.kinds.insert(key(node), kind);
     }
 
-    /// Global input channel `c` into port `c` of `node`, for every port.
-    fn feed_globals(&mut self, node: u64, width: usize) {
+    /// Main input channel `c` into port `c` of `node`, for every port.
+    fn feed_main_inputs(&mut self, node: u64, width: usize) {
         for c in 0..width as u16 {
             self.spec
                 .topology
-                .connect(at(node, c), Edge::Direct(PortSource::Global(c)));
+                .connect(at(node, c), Edge::Direct(PortSource::MainInput(c)));
         }
     }
 
@@ -205,22 +205,22 @@ impl Rig {
     }
 }
 
-/// Global input channel `c` over `blocks` blocks: the signal scaled by `2^-c`
+/// Main input channel `c` over `blocks` blocks: the signal scaled by `2^-c`
 /// (the harness's rule), exact.
-fn global(c: usize, blocks: usize) -> Vec<f32> {
+fn main_input(c: usize, blocks: usize) -> Vec<f32> {
     (0..blocks)
         .flat_map(|b| input_signal::<f32>((b * BLOCK) as u64, BLOCK))
         .map(|x| x * 0.5f32.powi(c as i32))
         .collect()
 }
 
-/// `src` channels of SMPTE global input through a source node (key 1) into a
+/// `src` channels of SMPTE main input through a source node (key 1) into a
 /// pass-through (key 2) of `dst` SMPTE channels by one bus edge; every channel
 /// of the pass-through is an output.
 fn fold_rig(src: usize, dst: usize) -> Rig {
     let mut rig = Rig::new(src);
     rig.add(1, source(src, smpte(src)));
-    rig.feed_globals(1, src);
+    rig.feed_main_inputs(1, src);
     rig.add(2, sink(dst, smpte(dst)));
     assert!(rig.spec.connect_bus(from(1, 0), bus_ref(2, 0)));
     rig.output_all(2, dst);
@@ -260,7 +260,7 @@ fn stereo_into_mono_is_half_left_plus_half_right() {
     );
     let blocks = 6;
     let got = rig.render_both(blocks);
-    let (l, r) = (global(0, blocks), global(1, blocks));
+    let (l, r) = (main_input(0, blocks), main_input(1, blocks));
     let expected: Vec<u32> = (0..l.len())
         .map(|i| weighted_fold(&[(0.5, &l), (0.5, &r)], i).to_bits())
         .collect();
@@ -295,7 +295,7 @@ fn five_one_into_stereo_follows_the_itu_rows() {
 
     let blocks = 6;
     let got = rig.render_both(blocks);
-    let ch6: Vec<Vec<f32>> = (0..6).map(|c| global(c, blocks)).collect();
+    let ch6: Vec<Vec<f32>> = (0..6).map(|c| main_input(c, blocks)).collect();
     let side = |front: usize, surround: usize| -> Vec<u32> {
         (0..ch6[0].len())
             .map(|i| {
@@ -334,7 +334,7 @@ fn mono_into_stereo_copies_to_both_sides() {
 
     let blocks = 4;
     let got = rig.render_both(blocks);
-    let x: Vec<u32> = global(0, blocks).iter().map(|v| v.to_bits()).collect();
+    let x: Vec<u32> = main_input(0, blocks).iter().map(|v| v.to_bits()).collect();
     assert_eq!(bits(&got), [x.clone(), x]);
 }
 
@@ -376,7 +376,7 @@ fn widening_zero_fills_the_new_channels() {
     );
     let blocks = 4;
     let got = rig.render_both(blocks);
-    let (l, r) = (global(0, blocks), global(1, blocks));
+    let (l, r) = (main_input(0, blocks), main_input(1, blocks));
     assert_eq!(bits(&got[..2]), [bits_of(&l), bits_of(&r)]);
     assert!(l.iter().any(|&x| x != 0.0), "not a vacuous test");
     for (c, channel) in got.iter().enumerate().skip(2) {
@@ -394,7 +394,7 @@ fn widening_zero_fills_the_new_channels() {
 fn a_same_topology_bus_edge_is_the_hand_wired_plan() {
     let mut bus = Rig::new(2);
     bus.add(1, source(2, smpte(2)));
-    bus.feed_globals(1, 2);
+    bus.feed_main_inputs(1, 2);
     bus.add(2, sink(2, smpte(2)));
     bus.spec.connect_bus(from(1, 0), bus_ref(2, 0));
     bus.output_all(2, 2);
@@ -437,7 +437,7 @@ fn a_bus_edge_sums_with_a_plain_source_on_the_same_channel() {
         .connect(at(2, 0), Edge::Direct(out_port(3, 0)));
     let blocks = 6;
     let got = rig.render_both(blocks);
-    let (l, r) = (global(0, blocks), global(1, blocks));
+    let (l, r) = (main_input(0, blocks), main_input(1, blocks));
     let expected: Vec<u32> = (0..l.len())
         .map(|i| {
             let fold = weighted_fold(&[(0.5, &l), (0.5, &r)], i);
@@ -500,10 +500,10 @@ fn an_unfoldable_bus_edge_is_refused_at_the_call_and_stores_nothing() {
     assert!(ed.spec().bus_edges.is_empty(), "nothing is stored");
 }
 
-/// The global input is an unassigned bus: with no global input at all there is
+/// The main input is an unassigned bus: with no main input at all there is
 /// nothing to read (`Empty`), and one wider than a bus is refused by name.
 #[test]
-fn the_global_input_is_a_unassigned_bus() {
+fn the_main_input_is_an_unassigned_bus() {
     let (mut ed, _exec) = editor(&[(1, sink(2, unassigned(2)))], 0);
     let refused = ed
         .connect_bus(BusOutputPort::MainInput, bus_ref(1, 0))
@@ -752,7 +752,7 @@ fn connecting_and_removing_a_bus_edge_round_trips_through_the_editor() {
     for c in 0..2u16 {
         ed.spec_mut()
             .topology
-            .connect(at(1, c), Edge::Direct(PortSource::Global(c)));
+            .connect(at(1, c), Edge::Direct(PortSource::MainInput(c)));
     }
     ed.spec_mut().topology.set_outputs(vec![out_port(2, 0)]);
     // The author's own lane: the constant into the sink at a weight of 0.25.
@@ -854,9 +854,9 @@ fn delays(plan: &Plan) -> BTreeMap<DelayKey, Samples> {
 fn a_bus_edges_lanes_align_like_any_edges() {
     let mut rig = Rig::new(2);
     rig.add(1, latent(2, 4, smpte(2)));
-    rig.feed_globals(1, 2);
+    rig.feed_main_inputs(1, 2);
     rig.add(4, latent(2, 9, smpte(2)));
-    rig.feed_globals(4, 2);
+    rig.feed_main_inputs(4, 2);
     rig.add(
         3,
         Kind::Const {
@@ -962,13 +962,13 @@ fn main_output_lane(channel: u16, from: PortSource) -> EdgeId {
     }
 }
 
-/// `src` channels of SMPTE global input through a source node (key 1) into a
+/// `src` channels of SMPTE main input through a source node (key 1) into a
 /// declared main output of `dst` SMPTE channels by one bus edge, and nothing else:
 /// the outputs are the main output's width and no ordinary source feeds them.
 fn main_output_rig(src: usize, dst: usize) -> Rig {
     let mut rig = Rig::new(src);
     rig.add(1, source(src, smpte(src)));
-    rig.feed_globals(1, src);
+    rig.feed_main_inputs(1, src);
     rig.spec.main_output = Some(smpte(dst).topology);
     rig.spec.topology.outputs = vec![Vec::new(); dst];
     assert!(rig.spec.connect_bus_to_main_output(from(1, 0)));
@@ -1001,7 +1001,7 @@ fn five_one_into_a_stereo_main_output_follows_the_itu_rows() {
 
     let blocks = 6;
     let got = rig.render_both(blocks);
-    let ch6: Vec<Vec<f32>> = (0..6).map(|c| global(c, blocks)).collect();
+    let ch6: Vec<Vec<f32>> = (0..6).map(|c| main_input(c, blocks)).collect();
     let side = |front: usize, surround: usize| -> Vec<u32> {
         (0..ch6[0].len())
             .map(|i| {
@@ -1105,7 +1105,7 @@ fn a_redeclared_main_output_that_no_longer_folds_fails_the_commit() {
     for c in 0..2u16 {
         ed.spec_mut()
             .topology
-            .connect(at(1, c), Edge::Direct(PortSource::Global(c)));
+            .connect(at(1, c), Edge::Direct(PortSource::MainInput(c)));
     }
     ed.spec_mut().main_output = Some(smpte(2).topology);
     ed.spec_mut().topology.outputs = vec![Vec::new(); 2];
@@ -1227,7 +1227,7 @@ fn a_bus_edge_reads_the_band_it_names() {
     let bands = Bus::banded(stereo.topology, BusRole::Main, 2).expect("two bands");
     let mut rig = Rig::new(4);
     rig.add(1, source(4, bands));
-    rig.feed_globals(1, 4);
+    rig.feed_main_inputs(1, 4);
     rig.add(2, sink(2, stereo));
     let band_1 = BusOutputPort::Node(NodeBus::band(key(1), 0, 1));
     assert!(rig.spec.connect_bus(band_1, bus_ref(2, 0)));

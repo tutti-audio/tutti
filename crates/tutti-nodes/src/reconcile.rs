@@ -305,7 +305,7 @@ impl Bind {
 
     /// The node whose input the lane's value reaches: the param's node, the
     /// node of the port an edge goes into, and none for an edge into a
-    /// global output channel (nothing a node reads).
+    /// main output channel (nothing a node reads).
     fn node(&self) -> Option<NodeKey> {
         match self {
             Self::Native { at, .. } | Self::Mix { at, .. } => Some(at.node),

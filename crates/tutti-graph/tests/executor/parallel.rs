@@ -265,7 +265,7 @@ fn build(ed: &mut Editor) {
     ed.insert(NodeKey(51), "fbsmooth", Forkable(Kind::Smooth));
     let spec = ed.spec_mut();
     let t = &mut spec.topology;
-    let g = Edge::Direct(PortSource::Global(0));
+    let g = Edge::Direct(PortSource::MainInput(0));
     for k in [2, 3, 4, 5, 6, 30, 50] {
         t.edges.insert(at(k, 0), vec![g]);
     }
@@ -621,7 +621,7 @@ fn a_panic_on_a_worker_reaches_the_caller() {
         ed.spec_mut()
             .topology
             .edges
-            .insert(at(k, 0), vec![Edge::Direct(PortSource::Global(0))]);
+            .insert(at(k, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
     }
     ed.spec_mut()
         .topology
@@ -753,8 +753,8 @@ fn the_executor_waits_by_its_pools_budget() {
         );
     }
     let edges = &mut ed.spec_mut().topology.edges;
-    edges.insert(at(1, 0), vec![Edge::Direct(PortSource::Global(0))]);
-    edges.insert(at(2, 0), vec![Edge::Direct(PortSource::Global(0))]);
+    edges.insert(at(1, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
+    edges.insert(at(2, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
     edges.insert(at(3, 0), vec![Edge::Direct(PortSource::Node(out(1, 0)))]);
     ed.spec_mut().topology.set_outputs(vec![
         PortSource::Node(out(2, 0)),

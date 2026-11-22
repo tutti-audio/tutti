@@ -98,7 +98,7 @@
 //! # Limits
 //!
 //! [`Engine::new`] bounds the graph's editor ([`Editor::set_limits`]) to
-//! what its fold scratch holds: at most [`MAX_CHANNELS`] global
+//! what its fold scratch holds: at most [`MAX_CHANNELS`] main
 //! outputs, and a `MaxBlock` no larger than its block capacity (the larger
 //! of the prepared maximum and [`DEFAULT_BLOCK_CAPACITY`], or the
 //! capacity given to [`Engine::with_capacity`]). A commit or a re-prepare
@@ -145,7 +145,7 @@ pub enum GraphEngineError {
     #[error("the executor is not the editor's")]
     NotAPair,
     /// What the editor already sent is past what the engine can run: more
-    /// than [`MAX_CHANNELS`] global outputs, or a `MaxBlock` above the
+    /// than [`MAX_CHANNELS`] main outputs, or a `MaxBlock` above the
     /// block capacity.
     #[error("the graph is past the engine's limits: {0}")]
     Limits(CommitError),
@@ -439,7 +439,7 @@ impl<F: Float> Engine<F> {
     /// it publishes the playhead, steady time and tempo in force.
     ///
     /// **Bounds the editor** ([`Editor::set_limits`]) to at most
-    /// [`MAX_CHANNELS`] global outputs and a `MaxBlock` of at most the
+    /// [`MAX_CHANNELS`] main outputs and a `MaxBlock` of at most the
     /// capacity, so every later commit or re-prepare past them is refused
     /// there, with a `CommitError`. Refused here, building nothing, when
     /// `executor` is not `editor`'s, or when what the editor already sent is
@@ -475,7 +475,7 @@ impl<F: Float> Engine<F> {
     ///   `transport` (or a clone of it, or a transport sharing its `motion`
     ///   handle) is alive.
     /// - [`GraphEngineError::Limits`]: what the editor already sent has more
-    ///   than [`MAX_CHANNELS`] global outputs or a `MaxBlock` above the
+    ///   than [`MAX_CHANNELS`] main outputs or a `MaxBlock` above the
     ///   capacity.
     pub fn with_capacity(
         transport: &tutti_timeline::Transport,
@@ -500,7 +500,7 @@ impl<F: Float> Engine<F> {
             .max(editor.prepare().max_block().get());
         editor
             .set_limits(Limits {
-                max_global_outputs: MAX_CHANNELS,
+                max_main_outputs: MAX_CHANNELS,
                 max_block: stride,
             })
             .map_err(GraphEngineError::Limits)?;
@@ -684,7 +684,7 @@ impl<F: Float> Engine<F> {
     /// # Two widths are live here; only one is the buffer's
     ///
     /// The output width (`out_ch`) comes from `output`'s own layout; the
-    /// main output's from the plan's global outputs. They are different numbers
+    /// main output's from the plan's main outputs. They are different numbers
     /// from different sources, and confusing them writes past the end of one
     /// buffer or reads garbage from the other. The output width arrives
     /// welded to the buffer it strides, which is what makes a third
@@ -1477,7 +1477,7 @@ impl<F: Float> GraphRender<F> {
         // wider than the scratch.
         let (main_output, width, rendered) =
             self.exec.plan().map_or((MainOutputId::GENESIS, 0, 0), |p| {
-                (p.main_output_id(), p.global_outputs(), p.rendered_outputs())
+                (p.main_output_id(), p.main_outputs(), p.rendered_outputs())
             });
         // While a main output change crossfades, the old main output's folds are still in
         // use: the control side retires none past the oldest main output rendered.
@@ -2077,7 +2077,7 @@ mod tests {
         fn reset(&mut self) {}
     }
 
-    /// Wire the globals to a `Ramp` of `width` at key 1, replacing any, and
+    /// Wire the main outputs to a `Ramp` of `width` at key 1, replacing any, and
     /// commit.
     fn rewire(ed: &mut Editor, width: u16) {
         use tutti_graph::NodeKey;

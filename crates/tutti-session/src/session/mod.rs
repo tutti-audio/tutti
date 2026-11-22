@@ -76,7 +76,7 @@ impl<T: Ord + Clone + Debug + Send + Sync + 'static> AppKey for T {}
 /// use tutti_session::{OutputPort, MainOutput, Session};
 /// use tutti_nodes::testing::Const;
 ///
-/// // One global output: the mono device takes it as it is, unfolded.
+/// // One main output: the mono device takes it as it is, unfolded.
 /// let mut session = Session::builder()
 ///     .outputs_floor(ChannelLayout::MONO)
 ///     .outputs(ChannelLayout::MONO).max_block(MaxBlock::of(Samples::new(64))).build()
@@ -190,7 +190,7 @@ impl<K: AppKey, C: RealTime> Session<K, C> {
 #[cfg(feature = "testing")]
 impl<K: AppKey, F: SessionFloat> Session<K, crate::Detached<F>> {
     /// Renders one frame on the calling thread under a stopped transport:
-    /// no inputs, `output` one sample per global output. Commits any edit
+    /// no inputs, `output` one sample per main output. Commits any edit
     /// first.
     ///
     /// # Panics

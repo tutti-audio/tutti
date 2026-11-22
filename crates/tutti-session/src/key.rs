@@ -161,7 +161,7 @@ impl OutputPort {
         Self(OutEnd::Node(node.into(), index))
     }
 
-    /// The node it leaves, `None` for a global input channel.
+    /// The node it leaves, `None` for a main input channel.
     #[must_use]
     pub const fn node(self) -> Option<NodeKey> {
         match self.0 {
@@ -170,7 +170,7 @@ impl OutputPort {
         }
     }
 
-    /// The port's index on its node, or the global input channel.
+    /// The port's index on its node, or the main input channel.
     #[must_use]
     pub const fn index(self) -> usize {
         match self.0 {
@@ -186,7 +186,7 @@ impl OutputPort {
     pub(crate) fn of_source(source: tutti_graph::PortSource) -> Option<Self> {
         match source {
             tutti_graph::PortSource::Node(p) => Some(Self::new(p.node, usize::from(p.port))),
-            tutti_graph::PortSource::Global(c) => Some(MainInput::channel(usize::from(c))),
+            tutti_graph::PortSource::MainInput(c) => Some(MainInput::channel(usize::from(c))),
             tutti_graph::PortSource::Zero => None,
         }
     }
@@ -214,7 +214,7 @@ impl InputPort {
         Self(InEnd::Node(node.into(), index))
     }
 
-    /// The node it arrives at, `None` for a global output channel.
+    /// The node it arrives at, `None` for a main output channel.
     #[must_use]
     pub const fn node(self) -> Option<NodeKey> {
         match self.0 {
@@ -223,7 +223,7 @@ impl InputPort {
         }
     }
 
-    /// The port's index on its node, or the global output channel.
+    /// The port's index on its node, or the main output channel.
     #[must_use]
     pub const fn index(self) -> usize {
         match self.0 {

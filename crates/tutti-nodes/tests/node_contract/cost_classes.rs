@@ -83,7 +83,7 @@ fn click() -> ClickNode<f32> {
 }
 
 /// [`CLICKS`] declared clicks and [`HEAVY`] undeclared ones, summed onto
-/// two global outputs; on a pool of `workers` when more than one.
+/// two main outputs; on a pool of `workers` when more than one.
 /// `declared`: the clicks as shipped, or every one wrapped to declare
 /// nothing.
 fn graph(workers: usize, declared: bool) -> Executor {

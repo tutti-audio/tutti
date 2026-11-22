@@ -62,12 +62,12 @@ pub enum CommitError {
         /// What it would need to declare.
         error: crate::PassError,
     },
-    /// The graph has more global outputs than the host running the executor
-    /// can take ([`Limits::max_global_outputs`](crate::Limits::max_global_outputs), set with
+    /// The graph has more main outputs than the host running the executor
+    /// can take ([`Limits::max_main_outputs`](crate::Limits::max_main_outputs), set with
     /// [`Editor::set_limits`](crate::Editor::set_limits)). Nothing was compiled or sent.
-    #[error("{outputs} global outputs; the host takes {limit}")]
+    #[error("{outputs} main outputs; the host takes {limit}")]
     TooManyOutputs {
-        /// The graph's global outputs.
+        /// The graph's main outputs.
         outputs: usize,
         /// The host's limit.
         limit: usize,
@@ -82,7 +82,7 @@ pub enum CommitError {
     MainOutputNotPublished {
         /// The main output generation the spec carries.
         main_output: crate::MainOutputId,
-        /// The plan's global outputs.
+        /// The plan's main outputs.
         outputs: usize,
     },
     /// The main output has no fold into the device it renders to: `main_output` at `width`
@@ -97,7 +97,7 @@ pub enum CommitError {
     Unplaceable {
         /// The main output generation the spec carries.
         main_output: crate::MainOutputId,
-        /// The plan's global outputs.
+        /// The plan's main outputs.
         width: usize,
         /// The device's channels.
         device: ChannelLayout,
@@ -239,9 +239,9 @@ pub enum MissingSource {
         /// The node's output width.
         width: usize,
     },
-    /// The graph has no such global input channel.
-    #[error("no global input {channel} (the graph has {width})")]
-    Global {
+    /// The graph has no such main input channel.
+    #[error("no main input {channel} (the graph has {width})")]
+    MainInput {
         /// The channel asked for.
         channel: u16,
         /// The graph's input width.
