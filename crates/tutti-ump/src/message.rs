@@ -539,11 +539,12 @@ impl Sysex8Packet {
 pub enum Data128 {
     /// A System Exclusive 8 packet.
     Sysex8(Sysex8Packet),
-    /// What a decoder returns for an End packet with `# of bytes` `0xF`; the one
-    /// SysEx 8 variant constructible with a Stream ID of its own. A sender aborts with
-    /// [`Sysex8Packets::abort`](crate::Sysex8Packets::abort) or
-    /// [`Sysex8StreamIds::take_abort`](crate::Sysex8StreamIds::take_abort). It is an End packet with `# of bytes` `0xF`: the sender ran out of data and
-    /// the earlier data of this stream is incomplete (§7.8.1).
+    /// What a decoder returns for an End packet with `# of bytes` `0xF`, and the
+    /// one SysEx 8 variant a caller builds with any Stream ID. A sender aborts
+    /// with [`Sysex8Packets::abort`](crate::Sysex8Packets::abort) or
+    /// [`Sysex8StreamIds::take_abort`](crate::Sysex8StreamIds::take_abort). The
+    /// sender ran out of data, and the earlier data of this stream is
+    /// incomplete (§7.8.1).
     /// The stream id is read from byte 3; §7.8.1 does not say it is kept, so a
     /// sender that zeroes it aborts stream 0.
     Sysex8Abort {
@@ -593,7 +594,9 @@ pub enum Attribute {
     Manufacturer(u16),
     /// Type `0x02`: specific to the active MIDI-CI Profile.
     Profile(u16),
-    /// Type `0x03`: a pitch, on the wire Q7.9 in half-tone units.
+    /// Type `0x03`: a pitch, on the wire Q7.9 in half-tone units. Encoding
+    /// keeps the top 16 bits of the [`Pitch`] ([`Pitch::q7_9`]); a finer
+    /// fraction is dropped.
     Pitch(Pitch),
     /// Types `0x10` to `0x1F`: an articulation of the M2-123 Profile, which
     /// [`NoteArticulation`](crate::NoteArticulation) and
