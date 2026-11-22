@@ -424,6 +424,7 @@ fn the_node_reports_the_decoded_tail_rather_than_unknown() {
 /// other 44. A block within the cap adds nothing.
 #[test]
 fn midi_past_the_blocks_capacity_is_counted() {
+    use tutti_graph::Node as _;
     use tutti_graph::contract::Direct;
     use tutti_graph::{Event, Offset};
     use tutti_plugin_types::MIDI_STACK_CAPACITY;
@@ -447,6 +448,11 @@ fn midi_past_the_blocks_capacity_is_counted() {
         SampleRate::of(SAMPLE_RATE),
         512,
     );
+    let unit_in = unit
+        .node
+        .shape()
+        .event_input(0)
+        .expect("the node declares an event input");
     let notes = |n: usize| -> Vec<Event> {
         (0..n)
             .map(|i| {
@@ -455,13 +461,13 @@ fn midi_past_the_blocks_capacity_is_counted() {
             })
             .collect()
     };
-    unit.events(0, &notes(300));
+    unit.events(unit_in, &notes(300));
     unit.block();
     assert_eq!(
         controls.dropped_midi_in(),
         (300 - MIDI_STACK_CAPACITY) as u64
     );
-    unit.events(0, &notes(10));
+    unit.events(unit_in, &notes(10));
     unit.block();
     assert_eq!(
         controls.dropped_midi_in(),

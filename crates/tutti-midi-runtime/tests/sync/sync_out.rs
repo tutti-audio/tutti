@@ -518,9 +518,12 @@ fn set_metronome_is_a_complete_group_packet_and_off_by_default() {
 
 /// One block of 64 frames under `transport` through `node`; what it sent.
 fn drive(d: &mut Direct<SyncOut>, transport: TransportPosition) -> Vec<Ump> {
+    let out = tutti_graph::Node::<f32>::shape(&*d.node)
+        .event_output(0)
+        .expect("an event output");
     d.set_transport(transport);
     d.block();
-    d.event_output(0)
+    d.event_output(out)
         .iter()
         .filter_map(|e| match e.kind {
             EventKind::Midi(ump) => Some(ump),

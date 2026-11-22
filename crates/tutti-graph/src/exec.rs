@@ -727,13 +727,19 @@ mod tests {
     /// Counts the events it receives.
     struct Count(Arc<AtomicUsize>);
 
+    impl Count {
+        const SHAPE: crate::node::Shape = crate::node::Shape::EMPTY.with_events(1, 0);
+        const IN: crate::InEvents = Self::SHAPE.event_input(0).expect("declared");
+    }
+
     impl Node for Count {
         fn shape(&self) -> crate::node::Shape {
-            crate::node::Shape::EMPTY.with_events(1, 0)
+            Self::SHAPE
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
-            self.0.fetch_add(io.events(0).len(), Ordering::Relaxed);
+            self.0
+                .fetch_add(io.events(Self::IN).len(), Ordering::Relaxed);
             Status::Silent
         }
         fn reset(&mut self) {}

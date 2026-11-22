@@ -31,7 +31,7 @@ use arrayvec::ArrayVec;
 use tutti_buffers::Float;
 use tutti_graph::{
     BusOutput, Cx, Event, EventKind, Harmony, HarmonyKind, InBus, IntoNode, Io, MAX_BUSES, Node,
-    NodeParts, Offset, OutBus, Prepare, RtLevel, Shape, SortedEvents, Status,
+    NodeParts, Offset, OutBus, Prepare, RtLevel, Shape, Status,
 };
 use tutti_units::{Latency, Samples, Tail};
 
@@ -68,7 +68,6 @@ where
     fn shape(&self) -> Shape {
         let this = &self.client;
         let rate = this.sample_rate;
-        let midi_out = u16::from(this.features.contains(Features::MIDI_OUT));
         // The plugin's figures as the control side last re-read them, whether
         // or not it holds the instance now: nothing is dispatched to the
         // plugin here.
@@ -83,9 +82,7 @@ where
         // served pipeline's chunk).
         let latency = Latency::new(Samples::new(latency.get() + this.pipeline.get()));
         this.declared
-            .ports
-            .with_events(1, midi_out)
-            .with_param_events()
+            .event_shape(this.features)
             .with_event_input_capacity(this.event_input)
             .with_latency(latency)
             // The ceiling: the plugin's claim, raised by what a probe measured
@@ -178,12 +175,9 @@ where
             .map(NonZeroUsize::get);
         // No clamp and no size check: the Processor splits a block longer than
         // the one the plugin was told.
-        let events = if io.event_input_count() > 0 {
-            io.events(0)
-        } else {
-            SortedEvents::EMPTY
-        };
-        let sends = features.contains(Features::MIDI_OUT) && io.event_output_count() > 0;
+        let events = io.events(this.event_in);
+        let out = this.event_out;
+        let sends = out.is_some();
         // One lend of the project's tempo map for the block, ended with it.
         let map = tempo.lend();
         let mut view = map.view(cx.env.sample_rate);
@@ -402,8 +396,8 @@ where
             if let Some(why) = failure {
                 io.log_plugin(RtLevel::Warn, why, Offset::ZERO, &[]);
             }
-            if sends {
-                let writer = io.event_out(0);
+            if let Some(out) = out {
+                let writer = io.event_out(out);
                 let block = Samples::new(size);
                 for e in this.out_events.iter() {
                     let _ = writer.push(Event::midi(Offset::clamped(e.offset, block), e.ump));
@@ -538,10 +532,10 @@ where
             io.count_lost(block_midi as u64);
             this.intake.lost();
         }
-        if sends && processed {
+        if let (Some(out), true) = (out, processed) {
             let out_events = &mut this.out.midi_events;
             tutti_plugin_types::insertion_sort_by_key(out_events, |e| e.offset);
-            let writer = io.event_out(0);
+            let writer = io.event_out(out);
             let block = Samples::new(size);
             for e in out_events.iter() {
                 let at = (e.offset as usize).min(size - 1);
@@ -728,6 +722,7 @@ mod owed_tests {
     use tutti_plugin_types::MainThreadMarker;
     use tutti_vst2_host::Vst2Loaded;
 
+    use tutti_graph::Node as _;
     use tutti_graph::contract::Direct;
     use tutti_graph::{Event, Offset, ParamEvent, ParamRamp};
     use tutti_units::SampleRate;
@@ -872,13 +867,18 @@ mod owed_tests {
             SampleRate::SR_48K,
             BLOCK,
         );
+        let unit_in = unit
+            .node
+            .shape()
+            .event_input(0)
+            .expect("the node declares an event input");
         assert_eq!(read(&handle, 1), Some(1.0 / 16.0), "the probe's default");
         // The realtime end takes the Processor it was lent.
         unit.block();
 
         recall(&inner);
         unit.param_events(
-            0,
+            unit_in,
             &[ParamEvent::ramp(
                 Offset::of(
                     tutti_units::Samples::new(0),
@@ -953,16 +953,21 @@ mod owed_tests {
             SampleRate::SR_48K,
             BLOCK,
         );
+        let unit_in = unit
+            .node
+            .shape()
+            .event_input(0)
+            .expect("the node declares an event input");
         let (cut, next) = dumps();
 
-        unit.events(0, &cut[..3]);
+        unit.events(unit_in, &cut[..3]);
         unit.block();
         recall(&inner);
-        unit.events(0, &cut[3..6]);
+        unit.events(unit_in, &cut[3..6]);
         unit.block();
         pump(&inner);
         let tail: Vec<Event> = cut[6..].iter().chain(&next).copied().collect();
-        unit.events(0, &tail);
+        unit.events(unit_in, &tail);
         unit.block();
 
         // The host keeps one SysEx reassembler across activations, so the
@@ -999,13 +1004,18 @@ mod owed_tests {
             SampleRate::SR_48K,
             BLOCK,
         );
+        let unit_in = unit
+            .node
+            .shape()
+            .event_input(0)
+            .expect("the node declares an event input");
         let (cut, next) = dumps();
 
-        unit.events(0, &cut[..3]);
+        unit.events(unit_in, &cut[..3]);
         unit.block();
         unit.node.reset();
         let tail: Vec<Event> = cut[3..].iter().chain(&next).copied().collect();
-        unit.events(0, &tail);
+        unit.events(unit_in, &tail);
         unit.block();
 
         let processor = unit.node.rt.held().expect("lent");
@@ -1038,20 +1048,25 @@ mod owed_tests {
             SampleRate::SR_48K,
             BLOCK,
         );
+        let unit_in = unit
+            .node
+            .shape()
+            .event_input(0)
+            .expect("the node declares an event input");
         let (cut, next) = dumps();
         assert!(next.len() >= 2, "fixture: a START and an END");
 
-        unit.events(0, &cut[..3]);
+        unit.events(unit_in, &cut[..3]);
         unit.block();
         unit.node.reset();
-        unit.events(0, &cut[3..]);
+        unit.events(unit_in, &cut[3..]);
         unit.block();
         let lost = controls.dropped_midi_in();
         assert_eq!(lost, (cut.len() - 3) as u64, "the reset's tail only");
 
-        unit.events(0, &next[..1]);
+        unit.events(unit_in, &next[..1]);
         unit.block();
-        unit.events(0, &next[1..]);
+        unit.events(unit_in, &next[1..]);
         unit.block();
 
         assert_eq!(
