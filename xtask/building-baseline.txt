@@ -329,7 +329,6 @@ tutti-vst3-host  ctor-result  crates/tutti-vst3-host/src/host/controller.rs::Vst
 tutti-vst3-host  option-arg  crates/tutti-vst3-host/src/types/mod.rs::PluginInfo::sub_categories
 tutti-au-host  pub-field-config  crates/tutti-au-host/src/macos/stream.rs::StreamConfig
 tutti-cpal  pub-field-config  crates/tutti-cpal/src/mic.rs::MicConfig
-tutti-cpal  pub-field-config  crates/tutti-cpal/src/supported.rs::SupportedConfig
 tutti-dsp  pub-field-config  crates/tutti-dsp/src/dynamics/multiband.rs::BandSettings
 tutti-dsp  pub-field-config  crates/tutti-dsp/src/dynamics/multiband.rs::MultibandSettings
 tutti-measure  pub-field-config  crates/tutti-measure/src/analyses/transform.rs::StftConfig

@@ -69,7 +69,7 @@
 //!   (`set_mode(&mut self, mode)`), and a `set_*` function's last parameter (a keyed
 //!   setter, `set_mode(&mut self, key, mode)`): those calls exist to pass that value.
 //! - `pub-field-config`: a `pub struct` (a `pub(..)` item is not public) whose name ends
-//!   in `Config`, `Settings` or `Options` (and is longer than the suffix) and that has at
+//!   in `Config`, `Settings` or `Options` (the bare name too) and that has at
 //!   least one `pub` field (a `pub(..)` field is not public), named or tuple, outside a
 //!   `macro_rules!` body. A configured thing is `Type::new(required..)` plus chained
 //!   options; a struct of public fields filled with `..Default::default()` has no
@@ -887,6 +887,12 @@ pub(super) const ALLOW: &[Allow] = &[
         "the decoded pair of an AudioUnit `AUChannelInfo` (input and output counts): a mirror of the C ABI record the unit reports, not an app's configuration",
     ),
     ty(
+        "crates/tutti-cpal/src/supported.rs",
+        "SupportedConfig",
+        FIELDS,
+        "a reading the device reports (rate range, sample formats, channels), not a configuration an app sets",
+    ),
+    ty(
         "crates/tutti-midi-runtime/src/live/mpe_translator.rs",
         "MpeTranslator::set_mode",
         SETTER,
@@ -1484,7 +1490,7 @@ fn parse_file(path: &str, src: &str) -> Parsed {
         let (name, mut cur) = ident_at(&code, e + 6);
         let suffixed = ["Config", "Settings", "Options"]
             .iter()
-            .any(|x| name.ends_with(x) && name.len() > x.len());
+            .any(|x| name.ends_with(x));
         if !suffixed {
             continue;
         }
@@ -2240,6 +2246,7 @@ mod tests {
             "pub struct VoiceSettings<F> { #[doc = \"x\"] pub gain: F }",
             "pub struct RunOptions(pub u8);",
             "pub struct RunOptions(u8, pub u8);",
+            "pub struct Config { pub gain: f32 }",
         ] {
             let name = bad
                 .split_whitespace()
@@ -2255,7 +2262,6 @@ mod tests {
             "pub struct SynthConfig(pub(crate) u8);",
             "pub struct SynthConfig { gain: f32 } impl SynthConfig { pub fn new() -> Self { todo!() } pub fn gain(self, g: f32) -> Self { self } }",
             "pub struct Synth { pub gain: f32 }",
-            "pub struct Config { pub gain: f32 }",
             "pub struct SynthConfigs { pub gain: f32 }",
             "struct SynthConfig { pub gain: f32 }",
             "pub(crate) struct SynthConfig { pub gain: f32 }",
