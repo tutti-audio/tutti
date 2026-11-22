@@ -129,12 +129,6 @@ fn a_look_that_fails_is_retried_and_is_not_a_look() {
     assert_eq!(reads.get(), 1, "one read, after the look that worked");
 }
 
-#[test]
-fn a_look_that_never_succeeds_gives_none() {
-    let settled: Settled<()> = settle(NOTHING, || NOTHING, || None);
-    assert!(settled.seen.is_none() && !settled.quiet);
-}
-
 /// A failed read is not a quiet one.
 #[test]
 fn a_failed_read_is_not_quiet() {

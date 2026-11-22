@@ -104,54 +104,60 @@ fn names(pairs: &[(&str, &str)]) -> Vec<String> {
 }
 
 #[test]
-fn ports_that_share_a_friendly_name_take_their_distinct_driver_names() {
+fn ports_are_named_apart_by_driver_name_then_number_and_a_name_of_their_own_is_kept() {
+    let rows: [(&str, &[(&str, &str)], &[&str]); 8] = [
+        (
+            "a shared friendly name takes the distinct driver names",
+            &[
+                ("Pad (USB)", "Pad"),
+                ("Pad (USB)", "MIDIIN2 (Pad)"),
+                ("Pad (USB)", "MIDIIN3 (Pad)"),
+            ],
+            &["Pad", "MIDIIN2 (Pad)", "MIDIIN3 (Pad)"],
+        ),
+        (
+            "a shared name and driver name are numbered in list order",
+            &[("Twin", "Twin"), ("Twin", "Twin"), ("Twin", "Twin")],
+            &["Twin", "Twin 2", "Twin 3"],
+        ),
+        (
+            "only the ports that still clash are numbered (X twice clashes, Y is alone)",
+            &[("G", "X"), ("G", "X"), ("G", "Y")],
+            &["G", "G 2", "Y"],
+        ),
+        (
+            "a name of its own is kept whatever the neighbours are",
+            &[("Solo (USB)", "Solo"), ("Twin", "Twin"), ("Twin", "Twin")],
+            &["Solo (USB)", "Twin", "Twin 2"],
+        ),
+        (
+            "a lone port keeps its shown name",
+            &[("Solo (USB)", "Solo")],
+            &["Solo (USB)"],
+        ),
+        (
+            "a unique name is kept after a group that would take it",
+            &[("USB MIDI", "USB MIDI"), ("USB MIDI", "X"), ("X", "X")],
+            &["USB MIDI", "USB MIDI 2", "X"],
+        ),
+        (
+            "a unique name is kept before a group that would take it",
+            &[("X", "X"), ("USB MIDI", "USB MIDI"), ("USB MIDI", "X")],
+            &["X", "USB MIDI", "USB MIDI 2"],
+        ),
+        (
+            "a blank driver name is absent and the shown name is numbered",
+            &[("Pad", ""), ("Pad", "  "), ("Pad", "\t")],
+            &["Pad", "Pad 2", "Pad 3"],
+        ),
+    ];
+    for (case, listed, expected) in rows {
+        assert_eq!(names(listed), expected, "{case}");
+    }
     assert_eq!(
-        names(&[
-            ("Pad (USB)", "Pad"),
-            ("Pad (USB)", "MIDIIN2 (Pad)"),
-            ("Pad (USB)", "MIDIIN3 (Pad)"),
-        ]),
-        ["Pad", "MIDIIN2 (Pad)", "MIDIIN3 (Pad)"]
-    );
-}
-
-#[test]
-fn ports_that_share_a_name_and_a_driver_name_get_numbers_in_list_order() {
-    assert_eq!(
-        names(&[("Twin", "Twin"), ("Twin", "Twin"), ("Twin", "Twin")]),
-        ["Twin", "Twin 2", "Twin 3"]
-    );
-}
-
-#[test]
-fn only_the_ports_that_still_clash_are_numbered() {
-    // X twice clashes; Y is alone in the group.
-    assert_eq!(
-        names(&[("G", "X"), ("G", "X"), ("G", "Y")]),
-        ["G", "G 2", "Y"]
-    );
-}
-
-#[test]
-fn a_port_with_a_name_of_its_own_keeps_it_whatever_its_neighbours_are() {
-    assert_eq!(
-        names(&[("Solo (USB)", "Solo"), ("Twin", "Twin"), ("Twin", "Twin")]),
-        ["Solo (USB)", "Twin", "Twin 2"]
-    );
-    assert_eq!(names(&[("Solo (USB)", "Solo")]), ["Solo (USB)"]);
-}
-
-#[test]
-fn a_unique_name_is_kept_before_or_after_a_group_that_would_take_it() {
-    let group = [("USB MIDI", "USB MIDI"), ("USB MIDI", "X")];
-    let unique = ("X", "X");
-    assert_eq!(
-        names(&[group[0], group[1], unique]),
-        ["USB MIDI", "USB MIDI 2", "X"]
-    );
-    assert_eq!(
-        names(&[unique, group[0], group[1]]),
-        ["X", "USB MIDI", "USB MIDI 2"]
+        names(&[("Pad", ""), ("Pad", "Pad B")]),
+        ["Pad", "Pad B"],
+        "one blank driver name beside a distinct one"
     );
 }
 
@@ -182,15 +188,6 @@ fn two_groups_never_take_the_same_driver_name() {
         sorted.dedup();
         assert_eq!(sorted.len(), all.len(), "{got:?}");
     }
-}
-
-#[test]
-fn a_blank_driver_name_is_absent_and_the_shown_name_is_numbered() {
-    assert_eq!(
-        names(&[("Pad", ""), ("Pad", "  "), ("Pad", "\t")]),
-        ["Pad", "Pad 2", "Pad 3"]
-    );
-    assert_eq!(names(&[("Pad", ""), ("Pad", "Pad B")]), ["Pad", "Pad B"]);
 }
 
 #[test]
