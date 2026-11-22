@@ -346,8 +346,7 @@ impl Capture {
         // Watched before it is activated: a `prepare` settles and records the
         // plan. The wait for each chunk is the node's: its switch goes to the
         // node below, and the node's `prepare` is its only writer.
-        let wait = ipc.watch();
-        let switch = wait.switch();
+        let (wait, switch) = ipc.watch();
         let mut fork = PluginClient::over(ipc).map_err(|source| PluginForkError::Load {
             path: path.clone(),
             source,
@@ -481,12 +480,11 @@ mod tests {
     fn a_latency_moved_after_the_plan_is_a_fault() {
         let (controls, reports) =
             PluginControls::new(Samples::new(137), PluginTail::default(), SampleRate::SR_48K);
+        let (wait, _switch) =
+            OfflineWait::new(Duration::from_secs(1), Arc::new(ServerWatch::new()));
         let watch = ForkWatch {
             controls: controls.clone(),
-            wait: Arc::new(OfflineWait::new(
-                Duration::from_secs(1),
-                Arc::new(ServerWatch::new()),
-            )),
+            wait: Arc::new(wait),
         };
         assert!(watch.fault().is_none(), "not planned yet");
         controls.set_pipeline(Samples::new(64));

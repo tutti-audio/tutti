@@ -382,7 +382,7 @@ pub use transport::{
     BarInfo, LoopRegion, MusicalTiming, PlayheadWatch, TransportChange, TransportChanges,
     TransportFlags, TransportInfo, TransportPosition,
 };
-pub use wait_switch::WaitSwitch;
+pub use wait_switch::{WaitArmed, WaitSwitch};
 pub use widths::Widths;
 pub use written_values::WrittenValues;
 // The session's render mode, which a plugin's `Prepare` carries and `Control::set_render_mode` takes.

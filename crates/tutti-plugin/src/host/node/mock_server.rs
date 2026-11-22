@@ -349,7 +349,7 @@ pub(super) struct ForkNode {
 
 pub(super) fn fork_node(rig: Rig, tempo: TempoReader, mode: tutti_graph::RenderMode) -> ForkNode {
     let (mut ipc, record, threads) = served(rig);
-    let wait = ipc.watch();
+    let (wait, switch) = ipc.watch();
     let prepare = Prepare::new(SR, MaxBlock::new(Samples::new(CHUNK)).expect("a block"));
     let descriptor = ipc.descriptor().clone();
     let wiring = ipc.loaded().clone();
@@ -369,7 +369,7 @@ pub(super) fn fork_node(rig: Rig, tempo: TempoReader, mode: tutti_graph::RenderM
     )
     .expect("the wiring is within a block's width");
     client.go_offline();
-    client.adopt_wait_switch(wait.switch());
+    client.adopt_wait_switch(switch);
     // The graph's prepare is what makes the served pipeline wait for a chunk.
     let graph = tutti_graph::Prepare::new(SR, MaxBlock::new(Samples::new(CHUNK)).expect("a block"))
         .with_render_mode(mode);

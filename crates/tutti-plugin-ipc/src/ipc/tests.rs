@@ -1183,8 +1183,8 @@ fn render_chunks(processor: &mut IpcProcessor, server: &Mock, chunks: usize) {
 
 /// The graph's prepare for an offline render, as the node makes it: the one
 /// thing that arms a watched fork's wait.
-fn prepare_offline(wait: &crate::OfflineWait) {
-    wait.switch().arm(true);
+fn prepare_offline(switch: &tutti_plugin_types::WaitSwitch) {
+    switch.arm(true);
 }
 
 /// **A fork waits for a chunk only while its node's prepare has armed the
@@ -1197,7 +1197,7 @@ fn prepare_offline(wait: &crate::OfflineWait) {
 fn a_fork_waits_for_a_chunk_only_when_its_graph_is_prepared_offline() {
     let _machine = machine_lock();
     let (mut ipc, server) = mock();
-    let wait = ipc.watch();
+    let (wait, switch) = ipc.watch();
     let (mut processor, _controller) = activate(ipc, 32);
 
     assert!(!wait.armed(), "a fork not prepared offline does not wait");
@@ -1206,14 +1206,14 @@ fn a_fork_waits_for_a_chunk_only_when_its_graph_is_prepared_offline() {
     }
     assert!(!wait.gave_up(), "a realtime fork never waited for a chunk");
 
-    prepare_offline(&wait);
+    prepare_offline(&switch);
     render_chunks(&mut processor, &server, 2);
     assert!(
         wait.gave_up(),
         "an offline fork waits, and misses its budget"
     );
 
-    wait.switch().arm(false);
+    switch.arm(false);
     assert!(!wait.armed(), "a realtime prepare disarms it again");
 }
 
@@ -1225,11 +1225,11 @@ fn a_fork_waits_for_a_chunk_only_when_its_graph_is_prepared_offline() {
 fn a_realtime_reprepare_with_the_processor_away_stops_the_wait() {
     let _machine = machine_lock();
     let (mut ipc, _server) = mock();
-    let wait = ipc.watch();
+    let (wait, switch) = ipc.watch();
     let (mut processor, _controller) = activate(ipc, 32);
-    prepare_offline(&wait);
+    prepare_offline(&switch);
     assert!(wait.armed());
-    wait.switch().arm(false);
+    switch.arm(false);
     for _ in 0..3 {
         render_silence_as(&mut processor, 32, true);
     }
@@ -1246,7 +1246,7 @@ fn a_realtime_reprepare_with_the_processor_away_stops_the_wait() {
 fn telling_a_fork_offline_does_not_make_its_realtime_graph_wait() {
     let _machine = machine_lock();
     let (mut ipc, server) = mock();
-    let wait = ipc.watch();
+    let (wait, _switch) = ipc.watch();
     let (mut processor, mut controller) = activate(ipc, 32);
     assert!(AnyThread::set_render_mode(&controller, RenderMode::Offline));
     assert!(Control::set_render_mode(
@@ -1281,9 +1281,9 @@ fn a_silent_server_holds_the_bridge_for_one_budget_not_one_per_chunk() {
     let _machine = machine_lock();
     let (mut ipc, server) = mock();
     let bridge = Arc::clone(ipc.bridge());
-    let wait = ipc.watch();
+    let (wait, switch) = ipc.watch();
     let (mut processor, _controller) = activate(ipc, 32);
-    prepare_offline(&wait);
+    prepare_offline(&switch);
     render_chunks(&mut processor, &server, 2);
     assert!(
         wait.gave_up(),
@@ -1308,9 +1308,9 @@ fn a_reactivation_after_a_give_up_does_not_wait_the_budget_again() {
     let main = main_thread();
     let (mut ipc, server) = mock();
     let bridge = Arc::clone(ipc.bridge());
-    let wait = ipc.watch();
+    let (wait, switch) = ipc.watch();
     let (mut processor, controller) = activate(ipc, 32);
-    prepare_offline(&wait);
+    prepare_offline(&switch);
     render_chunks(&mut processor, &server, 2);
     assert!(
         wait.gave_up(),

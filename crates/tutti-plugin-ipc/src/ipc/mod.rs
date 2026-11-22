@@ -57,7 +57,7 @@ use tutti_plugin_types::{
     ParamWriteError, ParameterChanges, ParameterQueue, PluginDescriptor, PluginError, PluginFormat,
     PluginRef, PluginResult, PluginTail, PluginWiring, Prepare, PresetId, ProcessWake, Refused,
     Reopen, Request, RestartRules, ResyncKind, SampleRate, Samples, StateError, StateUse, Stuck,
-    Widths,
+    WaitSwitch, Widths,
 };
 use tutti_rt::AtomicSampleRate;
 use tutti_units::ParamId;
@@ -690,17 +690,19 @@ impl Ipc {
     /// health reports a later move as a fault.
     ///
     /// The pipeline waits for each chunk, up to the configuration's timeout,
-    /// only while the wait is armed ([`OfflineWait::switch`]), and the only
-    /// writer of that switch is the node's `prepare`: armed for a graph
-    /// prepared offline (the offline mode of a forked instance), disarmed
-    /// otherwise, so the audio thread of a realtime graph never blocks. The
-    /// plugin's own render mode is separate: telling it offline arms nothing.
-    /// Call before [`activate`](Loaded::activate).
-    pub fn watch(&mut self) -> Arc<OfflineWait> {
-        let wait = Arc::new(OfflineWait::new(
+    /// only while the wait is armed, and the [`WaitSwitch`] returned beside it
+    /// is the only writer: the one the fork's node owns, which its `prepare`
+    /// writes (armed for a graph prepared offline, the offline mode of a forked
+    /// instance, and disarmed otherwise, so the audio thread of a realtime
+    /// graph never blocks). The wait only reads it, so nothing that holds the
+    /// wait can arm it. The plugin's own render mode is separate: telling it
+    /// offline arms nothing. Call before [`activate`](Loaded::activate).
+    pub fn watch(&mut self) -> (Arc<OfflineWait>, WaitSwitch) {
+        let (wait, switch) = OfflineWait::new(
             self.link.timeout,
             Arc::clone(self.link.bridge.audio().watch()),
-        ));
+        );
+        let wait = Arc::new(wait);
         self.link
             .bridge
             .audio()
@@ -708,7 +710,7 @@ impl Ipc {
         *self.link.wait.lock() = Some(Watch {
             wait: Arc::clone(&wait),
         });
-        wait
+        (wait, switch)
     }
 
     /// Sends every event the bridge's thread reports (a latency change, a

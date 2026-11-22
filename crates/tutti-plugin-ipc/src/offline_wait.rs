@@ -5,7 +5,7 @@ use crate::ServerWatch;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
-use tutti_plugin_types::{PluginFailure, RateRefusal, WaitSwitch};
+use tutti_plugin_types::{PluginFailure, RateRefusal, WaitArmed, WaitSwitch};
 use tutti_rt::Mutex;
 use tutti_units::Samples;
 
@@ -15,8 +15,10 @@ use tutti_units::Samples;
 /// every signal of the death sets.
 ///
 /// Whether the pipeline waits at all is the node's: the wait is armed through
-/// [`switch`](Self::switch) by the node's `prepare` alone, for a graph prepared
-/// offline. The plugin's own render mode is separate and never arms it.
+/// the [`WaitSwitch`] [`new`](Self::new) returns beside it, which the fork's
+/// node owns and its `prepare` alone writes, for a graph prepared offline.
+/// Holding an `OfflineWait` yields no writer, and the plugin's own render mode
+/// never arms it.
 ///
 /// The batcher records the failure here and whoever probes the fork's health
 /// reads it back ([`gave_up`](Self::gave_up), [`death`](Self::death),
@@ -39,10 +41,11 @@ pub struct OfflineWait {
     /// The latency the fork's graph was compiled against, recorded once the
     /// plugin has settled (`usize::MAX`: not planned yet).
     planned: AtomicUsize,
-    /// Whether the pipeline waits for each chunk: written only by the node's
-    /// `prepare` from the graph's render mode ([`switch`](Self::switch)), so a
-    /// fork prepared for realtime never blocks the audio thread.
-    armed: WaitSwitch,
+    /// Whether the pipeline waits for each chunk: the reading end of the
+    /// switch the fork's node owns, which its `prepare` writes from the graph's
+    /// render mode, so a fork prepared for realtime never blocks the audio
+    /// thread.
+    armed: WaitArmed,
     budget: Duration,
 }
 
@@ -57,31 +60,28 @@ impl std::fmt::Debug for OfflineWait {
 
 impl OfflineWait {
     /// A wait of `budget` per chunk on the server `server` watches, with
-    /// nothing latched.
-    pub fn new(budget: Duration, server: Arc<ServerWatch>) -> Self {
-        Self {
+    /// nothing latched, and the switch that drives it: the one writer, which
+    /// the fork's node owns. The wait itself only reads it.
+    #[must_use]
+    pub fn new(budget: Duration, server: Arc<ServerWatch>) -> (Self, WaitSwitch) {
+        let (switch, armed) = WaitSwitch::pair();
+        let wait = Self {
             server,
             gave_up: AtomicBool::new(false),
             refusal: Mutex::new(None),
             refused: AtomicBool::new(false),
             planned: AtomicUsize::new(usize::MAX),
-            armed: WaitSwitch::new(),
+            armed,
             budget,
-        }
+        };
+        (wait, switch)
     }
 
     /// Whether the pipeline waits for each chunk, up to
     /// [`budget`](Self::budget). Not until the node's `prepare` in an offline
-    /// graph arms it. The plugin's own render mode has no say.
+    /// graph arms the switch it owns. The plugin's own render mode has no say.
     pub fn armed(&self) -> bool {
         self.armed.armed()
-    }
-
-    /// The switch the node's `prepare` drives: the only source of the wait. A
-    /// clone is the same switch.
-    #[must_use]
-    pub fn switch(&self) -> WaitSwitch {
-        self.armed.clone()
     }
 
     /// Record the whole latency (the plugin's own and the pipeline's chunk)
@@ -172,30 +172,31 @@ impl OfflineWait {
 mod tests {
     use super::*;
 
-    fn wait() -> OfflineWait {
+    fn wait() -> (OfflineWait, WaitSwitch) {
         OfflineWait::new(Duration::from_secs(7), Arc::new(ServerWatch::new()))
     }
 
-    /// An armed wait, as an offline graph's prepare leaves it.
-    fn armed() -> OfflineWait {
-        let wait = wait();
-        wait.switch().arm(true);
-        wait
+    /// An armed wait, as an offline graph's prepare leaves it (the node's
+    /// switch is kept alive beside it).
+    fn armed() -> (OfflineWait, WaitSwitch) {
+        let (wait, switch) = wait();
+        switch.arm(true);
+        (wait, switch)
     }
 
     /// The bridge holds a block for the budget while the wait is armed, and
     /// holds none while it is not.
     #[test]
     fn a_wait_in_force_holds_the_bridge_for_the_budget() {
-        assert_eq!(armed().reply_wait(), Some(Duration::from_secs(7)));
-        assert_eq!(wait().reply_wait(), None, "not armed: the live bound");
+        assert_eq!(armed().0.reply_wait(), Some(Duration::from_secs(7)));
+        assert_eq!(wait().0.reply_wait(), None, "not armed: the live bound");
     }
 
     /// One missed budget returns the bridge to the live bound for good, so a
     /// reactivation that reads the latch stays off the budget too.
     #[test]
     fn a_missed_budget_returns_the_bridge_to_the_live_bound() {
-        let wait = armed();
+        let (wait, _switch) = armed();
         wait.give_up();
         assert_eq!(wait.reply_wait(), None);
     }
@@ -207,7 +208,7 @@ mod tests {
     #[test]
     fn a_refusal_cleared_before_the_latch_is_still_reported_once_latched() {
         use tutti_plugin_types::RateRefusalCause;
-        let wait = wait();
+        let (wait, _switch) = wait();
         let refusal = RateRefusal::new(
             tutti_units::SampleRate::SR_96K,
             RateRefusalCause::Unconfigured,

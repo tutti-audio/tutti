@@ -788,9 +788,12 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
         }
     }
 
-    /// Hands the node the switch of its fork's per-chunk wait, at the fork's
-    /// build: from then on its `prepare` drives it
-    /// ([`WaitSwitch`](tutti_plugin_types::WaitSwitch)).
+    /// Hands the node the switch of its fork's per-chunk wait: the one writer
+    /// ([`WaitSwitch`](tutti_plugin_types::WaitSwitch), moved in and not
+    /// cloneable), which its `prepare` then drives. Only a served fork's build calls
+    /// this, after the node exists (the node is made by `client_over`, which
+    /// takes no switch); a node that is not such a fork never gets one, and
+    /// nothing about it waits.
     pub fn adopt_wait_switch(&mut self, switch: tutti_plugin_types::WaitSwitch) {
         self.wait_switch = Some(switch);
     }

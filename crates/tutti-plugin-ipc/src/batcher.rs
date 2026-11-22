@@ -1029,10 +1029,11 @@ mod tests {
             _ => Action::Silent,
         });
         let audio = mock.bridge.audio();
-        let wait = Arc::new(OfflineWait::new(
+        let (wait, switch) = OfflineWait::new(
             std::time::Duration::from_secs(60),
             Arc::clone(audio.watch()),
-        ));
+        );
+        let wait = Arc::new(wait);
         audio.offer_refusals_to(Arc::clone(&wait));
         assert!(audio.set_sample_rate(SampleRate::SR_96K));
         tutti_fixtures::wait_until(
@@ -1049,7 +1050,7 @@ mod tests {
             slab(MAX_CHUNK),
             response_ring().1,
         );
-        wait.switch().arm(true);
+        switch.arm(true);
         b.set_offline_wait(Arc::clone(&wait));
         b.expect_seq = Some(1);
         assert_eq!(wait.refusal(), None, "nothing latched before the wait");

@@ -272,10 +272,11 @@ mod tests {
     #[test]
     fn a_refusal_cleared_before_the_audio_latch_is_still_reported() {
         let life = Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default());
-        let wait = Arc::new(OfflineWait::new(
+        let (wait, _switch) = OfflineWait::new(
             std::time::Duration::from_secs(1),
             Arc::new(ServerWatch::new()),
-        ));
+        );
+        let wait = Arc::new(wait);
         life.offer_refusals_to(Arc::clone(&wait));
         let refusal = RateRefusal::new(
             tutti_units::SampleRate::SR_44K1,
@@ -292,10 +293,11 @@ mod tests {
     #[test]
     fn a_refusal_cleared_and_never_latched_is_not_reported() {
         let life = Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default());
-        let wait = Arc::new(OfflineWait::new(
+        let (wait, _switch) = OfflineWait::new(
             std::time::Duration::from_secs(1),
             Arc::new(ServerWatch::new()),
-        ));
+        );
+        let wait = Arc::new(wait);
         life.offer_refusals_to(Arc::clone(&wait));
         life.set_rate_refusal(Some(RateRefusal::new(
             tutti_units::SampleRate::SR_44K1,
