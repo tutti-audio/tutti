@@ -148,7 +148,7 @@ fn load_probe(
 }
 
 /// `client`, bound, as the only node of a graph rendering `BLOCK`-frame
-/// blocks: the global inputs feed its inputs, its outputs the global outputs.
+/// blocks: the main inputs feed its inputs, its outputs the main outputs.
 fn graph_of(client: PluginClient) -> (Renderer, tutti_plugin_host::PluginControls) {
     let layout = |n: usize| ChannelLayout::from_count(u16::try_from(n).expect("a few ports"));
     let mut g = GraphBuilder::new(layout(client.inputs()), layout(client.outputs()));

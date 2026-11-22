@@ -71,28 +71,61 @@ impl RecordMode {
 /// thinned when it ends.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RecordingConfig {
-    /// Minimum beat gap between recorded points. A `record` closer than this to
-    /// the previous point is dropped, so a control dragged at frame rate does
-    /// not write one point per frame.
-    pub min_point_interval: BeatDuration,
-    /// Douglas-Peucker tolerance applied by [`AutomationRecorder::finish`] when
-    /// [`auto_simplify`](Self::auto_simplify) is set. A distance in the
-    /// unit's raw value, not beats.
-    pub simplify_tolerance: f64,
-    /// Whether [`AutomationRecorder::finish`] thins the take before handing it back.
-    pub auto_simplify: bool,
-    /// Curve type stamped on each recorded point.
-    pub default_curve: Law,
+    min_point_interval: BeatDuration,
+    simplify_tolerance: f64,
+    auto_simplify: bool,
+    default_curve: Law,
 }
 
 impl Default for RecordingConfig {
     fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RecordingConfig {
+    /// The capture policy a recorder starts with: points at least 0.01 beat apart, the take
+    /// thinned on `finish` to a tolerance of 0.01, and linear curves.
+    #[must_use]
+    pub fn new() -> Self {
         Self {
             min_point_interval: BeatDuration::new(0.01),
             simplify_tolerance: 0.01,
             auto_simplify: true,
             default_curve: Law::Linear,
         }
+    }
+
+    /// The minimum beat gap between recorded points. A `record` closer than this to the
+    /// previous point is dropped, so a control dragged at frame rate does not write one
+    /// point per frame.
+    #[must_use]
+    pub fn min_point_interval(mut self, gap: BeatDuration) -> Self {
+        self.min_point_interval = gap;
+        self
+    }
+
+    /// The Douglas-Peucker tolerance [`AutomationRecorder::finish`] thins with when
+    /// [`auto_simplify`](Self::auto_simplify) is set: a distance in the unit's raw value, not
+    /// beats.
+    #[must_use]
+    pub fn simplify_tolerance(mut self, tolerance: f64) -> Self {
+        self.simplify_tolerance = tolerance;
+        self
+    }
+
+    /// Whether [`AutomationRecorder::finish`] thins the take before handing it back.
+    #[must_use]
+    pub fn auto_simplify(mut self, on: bool) -> Self {
+        self.auto_simplify = on;
+        self
+    }
+
+    /// The curve type stamped on each recorded point.
+    #[must_use]
+    pub fn default_curve(mut self, curve: Law) -> Self {
+        self.default_curve = curve;
+        self
     }
 }
 
@@ -133,7 +166,7 @@ impl<U: Unit<Raw = f64>> AutomationRecorder<U> {
     /// A recorder over an empty trajectory clamped to `[min, max]`.
     #[must_use]
     pub fn new(mode: RecordMode, min: U, max: U) -> Self {
-        Self::with_config(mode, min, max, RecordingConfig::default())
+        Self::with_config(mode, min, max, RecordingConfig::new())
     }
 
     /// [`new`](Self::new) with an explicit capture policy.
@@ -154,18 +187,13 @@ impl<U: Unit<Raw = f64>> AutomationRecorder<U> {
             trajectory,
             mode,
             take: None,
-            config: RecordingConfig::default(),
+            config: RecordingConfig::new(),
         }
     }
 
     /// The capture discipline currently in force.
     pub fn mode(&self) -> RecordMode {
         self.mode
-    }
-
-    /// The capture tuning currently in force — thinning tolerance and the like.
-    pub fn config(&self) -> &RecordingConfig {
-        &self.config
     }
 
     /// Whether a take is currently open (capturing, or latch-held).
@@ -285,8 +313,17 @@ mod tests {
     fn recorder(mode: RecordMode) -> AutomationRecorder<Db> {
         let mut r = AutomationRecorder::new(mode, Db::new(0.0), Db::new(1.0));
         // Point-count assertions below are about capture, not thinning.
-        r.config.auto_simplify = false;
+        r.config = r.config.auto_simplify(false);
         r
+    }
+
+    #[test]
+    fn a_new_policy_writes_points_a_hundredth_of_a_beat_apart_and_thins_linear_takes() {
+        let c = RecordingConfig::new();
+        assert_eq!(c.min_point_interval, BeatDuration::new(0.01));
+        assert_eq!(c.simplify_tolerance, 0.01);
+        assert!(c.auto_simplify);
+        assert_eq!(c.default_curve, Law::Linear);
     }
 
     // ── mode ──
@@ -440,11 +477,9 @@ mod tests {
             RecordMode::Write,
             Db::new(0.0),
             Db::new(1.0),
-            RecordingConfig {
-                min_point_interval: BeatDuration::new(0.5),
-                auto_simplify: false,
-                ..Default::default()
-            },
+            RecordingConfig::new()
+                .min_point_interval(BeatDuration::new(0.5))
+                .auto_simplify(false),
         );
 
         r.record(Beat::new(0.0), Db::new(0.5)); // opens the take, writes
@@ -462,11 +497,9 @@ mod tests {
             RecordMode::Write,
             Db::new(0.0),
             Db::new(1.0),
-            RecordingConfig {
-                min_point_interval: BeatDuration::new(0.5),
-                auto_simplify: false,
-                ..Default::default()
-            },
+            RecordingConfig::new()
+                .min_point_interval(BeatDuration::new(0.5))
+                .auto_simplify(false),
         );
         r.record(Beat::new(4.0), Db::new(0.5));
         r.record(Beat::new(0.0), Db::new(0.9));
@@ -476,9 +509,9 @@ mod tests {
     #[test]
     fn finish_simplifies_when_configured() {
         let mut r = AutomationRecorder::new(RecordMode::Write, Db::new(0.0), Db::new(1.0));
-        r.config.auto_simplify = true;
+        r.config = r.config.auto_simplify(true);
         // A dead-straight ramp: every interior point is redundant.
-        r.config.min_point_interval = BeatDuration::new(0.0);
+        r.config = r.config.min_point_interval(BeatDuration::new(0.0));
         for i in 0..=10 {
             r.record(Beat::new(i as f64), Db::new(f64::from(i) / 10.0));
         }

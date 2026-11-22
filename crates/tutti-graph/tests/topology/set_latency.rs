@@ -75,7 +75,7 @@ impl Node for Plugin {
 const PLUGIN: NodeKey = NodeKey(1);
 const DRY: NodeKey = NodeKey(2);
 
-/// Global input → `PLUGIN` → output 0, and global input → a unity gain
+/// Main input → `PLUGIN` → output 0, and main input → a unity gain
 /// (`DRY`, latency 0) → output 1. The two outputs are aligned by PDC.
 fn graph(plugin: Plugin) -> (Editor, Executor) {
     graph_at(plugin, prepare(64))
@@ -97,7 +97,7 @@ fn graph_at(plugin: Plugin, prepared: Prepare) -> (Editor, Executor) {
     for k in [PLUGIN, DRY] {
         t.edges.insert(
             InputPort { node: k, port: 0 },
-            vec![Edge::Direct(PortSource::Global(0))],
+            vec![Edge::Direct(PortSource::MainInput(0))],
         );
     }
     t.set_outputs(vec![

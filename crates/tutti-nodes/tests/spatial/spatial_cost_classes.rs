@@ -63,7 +63,7 @@ fn wire(ed: &mut Editor, to: NodeKey, port: u16, from: PortSource) {
 }
 
 /// [`PANNERS`] declared panners and [`HEAVY`] undeclared ones, each off the
-/// stereo global input, summed by the graph (a fan-in onto each of two global outputs); on
+/// stereo main input, summed by the graph (a fan-in onto each of two main outputs); on
 /// a pool of `workers` when more than one. `declared`: the panners as
 /// shipped, or every one wrapped to declare nothing.
 fn graph(workers: usize, declared: bool) -> Executor {
@@ -81,7 +81,7 @@ fn graph(workers: usize, declared: bool) -> Executor {
     }
     ed.spec_mut().topology.inputs = ChannelLayout::STEREO;
     let sources = PANNERS + HEAVY;
-    // Two silent global outputs, which the fan-in below fills.
+    // Two silent main outputs, which the fan-in below fills.
     ed.spec_mut().topology.set_outputs([PortSource::Zero; 2]);
     for k in 0..sources {
         let key = NodeKey(k + 1);
@@ -91,7 +91,7 @@ fn graph(workers: usize, declared: bool) -> Executor {
             ed.insert(key, "vbap", Unforkable(Undeclared(panner(k))));
         }
         for c in 0..2u16 {
-            wire(&mut ed, key, c, PortSource::Global(c));
+            wire(&mut ed, key, c, PortSource::MainInput(c));
             // The graph's fan-in: output channel `c` holds every panner's
             // port `c`, and the graph sums them.
             ed.spec_mut().topology.connect_output(

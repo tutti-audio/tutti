@@ -13,8 +13,8 @@
 use tutti_buffers::Float;
 use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{
-    BlockMismatch, LadderBank, LadderBlend, LadderControls, LadderModel, LadderType, Ramp,
-    SimdLanes,
+    BlockMismatch, LadderBank, LadderBlend, LadderControls, LadderModel, LadderSaturation,
+    LadderType, Ramp, SimdLanes,
 };
 use tutti_graph::{Bus, BusRole, Buses, Shape};
 use tutti_units::{Drive, Hz, Resonance, SampleRate, Tail};
@@ -84,11 +84,12 @@ pub type LadderFilterNode<F> = KernelNode<LadderKernel<F>>;
 /// What a [`LadderFilterNode`] is made from: its width and its controls' start.
 ///
 /// A config starts at a 1 kHz ladder of the given type with no resonance and unity
-/// [`Drive`] ([`LadderControls::DEFAULT`]); the options set the cutoff and the resonance.
+/// [`Drive`] ([`LadderControls::DEFAULT`]); the options set the cutoff, the resonance and the saturation model.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LadderFilterConfig {
     width: ChannelLayout,
     controls: LadderControls,
+    saturation: LadderSaturation,
 }
 
 impl LadderFilterConfig {
@@ -104,6 +105,7 @@ impl LadderFilterConfig {
                 ty: ladder_type,
                 ..LadderControls::DEFAULT
             },
+            saturation: LadderSaturation::PerStage,
         }
     }
 
@@ -124,12 +126,21 @@ impl LadderFilterConfig {
         self.controls.res = Resonance::new_clamped(resonance.get());
         self
     }
+
+    /// Where the saturators sit, [`PerStage`](LadderSaturation::PerStage) unless set: the
+    /// cheap [`Input`](LadderSaturation::Input) model costs an order of magnitude less per
+    /// sample. Not a live control: the model is fixed when the node is made.
+    #[must_use]
+    pub fn saturation(mut self, saturation: LadderSaturation) -> Self {
+        self.saturation = saturation;
+        self
+    }
 }
 
 impl<F: Float + SimdLanes> From<LadderFilterConfig> for LadderFilterNode<F> {
     fn from(config: LadderFilterConfig) -> Self {
         Self::with_kernel(
-            LadderKernel::new(filter_bus(config.width)),
+            LadderKernel::new(filter_bus(config.width), config.saturation),
             LadderSet(config.controls.ty),
             config.controls,
         )
@@ -156,11 +167,11 @@ impl<F: Float + SimdLanes> LadderKernel<F> {
     /// A filter on the bus `input`, its output where it is. Allocates the state. Its design
     /// until `prepare` is a placeholder at 48 kHz: an unprepared node renders nothing, and
     /// `prepare` designs for the rate it is given.
-    fn new(input: BusTopology) -> Self {
+    fn new(input: BusTopology, saturation: LadderSaturation) -> Self {
         let rate = SampleRate::SR_48K;
         Self {
             input,
-            bank: LadderBank::new(input.layout()),
+            bank: LadderBank::new(input.layout()).saturation(saturation),
             blend: Ramp::new(Self::design(&LadderControls::DEFAULT, rate)),
             rate,
             applied: false,

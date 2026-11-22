@@ -95,7 +95,7 @@ fn ramp(from: f64, to: f64, i: usize, frames: usize) -> f32 {
     from + (to - from) * ((i + 1) as f32 / frames as f32)
 }
 
-/// A `Pair` over one node (key 1) fed by global input 0, with its mix (and
+/// A `Pair` over one node (key 1) fed by main input 0, with its mix (and
 /// mode) set before the first block: a unit starts steady in the spec's.
 struct Rig {
     pair: Pair,
@@ -107,7 +107,7 @@ impl Rig {
         let mut t = Topology::default();
         t.nodes.insert(key(1), spec_of(kind));
         t.inputs = ChannelLayout::MONO;
-        t.connect(at(1, 0), Edge::Direct(PortSource::Global(0)));
+        t.connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
         t.set_outputs(vec![out(1, 0)]);
         let mut spec = GraphSpec::new(t);
         if let Some(m) = mix {
@@ -258,7 +258,7 @@ fn dry_is_the_aligned_input_bit_for_bit_and_the_node_keeps_running() {
     );
     ed.spec_mut()
         .topology
-        .connect(at(1, 0), Edge::Direct(PortSource::Global(0)));
+        .connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
     ed.spec_mut().topology.set_outputs(vec![out(1, 0)]);
     ed.set_mix(key(1), Mix::DRY).expect("a node");
     ed.commit().expect("commits");
@@ -624,14 +624,14 @@ impl Node for Triple {
     fn reset(&mut self) {}
 }
 
-/// An editor and executor over one `Triple` node, fed by global input 0.
+/// An editor and executor over one `Triple` node, fed by main input 0.
 fn solo(mix: Option<Mix>) -> (Editor, tutti_graph::Executor) {
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
     ed.insert(key(1), "gain", tutti_graph::ForkByClone(Triple));
     ed.spec_mut()
         .topology
-        .connect(at(1, 0), Edge::Direct(PortSource::Global(0)));
+        .connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
     ed.spec_mut().topology.set_outputs(vec![out(1, 0)]);
     if let Some(m) = mix {
         ed.set_mix(key(1), m).expect("a node");
@@ -810,7 +810,7 @@ fn a_mix_of_a_node_with_no_pass_is_refused() {
     );
     ed.spec_mut()
         .topology
-        .connect(at(1, 0), Edge::Direct(PortSource::Global(0)));
+        .connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
     ed.spec_mut()
         .topology
         .set_outputs(vec![out(1, 0), out(1, 1)]);

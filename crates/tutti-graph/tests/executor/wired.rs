@@ -170,7 +170,7 @@ fn scenario(workers: usize) -> Vec<(Vec<Rewired>, Read)> {
     steps.push(step(&mut ed, &mut exec, &seen, 0));
     ed.spec_mut().connect(at(2), from(1));
     steps.push(step(&mut ed, &mut exec, &seen, 0));
-    // A tap alone consumes main output 1; a global output takes aux out.
+    // A tap alone consumes main output 1; a main output takes aux out.
     let tap = ed
         .open_tap(
             TapId::of(1),
@@ -214,7 +214,7 @@ fn a_node_reads_its_ports_unwired_then_wired_then_unwired() {
             (0b01, 0, 0b1, 0),
             // A tap on `PROBE.out1` alone: main output 1.
             (0b01, 0b10, 0b1, 0),
-            // A global output on `PROBE.out2`: the aux output's bit 0.
+            // A main output on `PROBE.out2`: the aux output's bit 0.
             (0b01, 0b10, 0b1, 0b1),
             // Every edge, the output and the tap gone.
             (0, 0, 0, 0),

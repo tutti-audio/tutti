@@ -6,7 +6,7 @@ use core::fmt;
 use std::num::NonZeroUsize;
 
 use crate::{AllocationStrategy, PortamentoConfig, Tuning, UnisonConfig, VoiceMode};
-use tutti_dsp::SvfControls;
+use tutti_dsp::{LadderSaturation, SvfControls};
 use tutti_midi_protocol::SysexDeviceId;
 use tutti_music::Adsr;
 use tutti_ump::MidiGroup;
@@ -237,6 +237,12 @@ pub struct SynthConfig {
     /// cutoff moves at runtime under [`filter_mod`](Self::filter_mod), CC74 and
     /// MPE slide.
     pub filter: FilterType,
+    /// Where the [`Moog`](FilterType::Moog) ladder's `tanh` saturators sit: the cheap
+    /// [`Input`](LadderSaturation::Input) model or the [`PerStage`](LadderSaturation::PerStage)
+    /// one, which costs several times more per sample and saturates the way
+    /// `LadderFilterNode` does. Default `PerStage`. Construction-only; no other filter reads it.
+    /// Both run the lanes' approximate `tanh` (see [`LadderSaturation`]).
+    pub ladder_saturation: LadderSaturation,
     /// The amplitude envelope every voice's gate drives. Construction-only, and
     /// its release sets the synth's reported `tail()`.
     pub envelope: Adsr,
@@ -301,6 +307,7 @@ impl Default for SynthConfig {
             voice_mode: VoiceMode::Poly,
             oscillator: OscillatorType::default(),
             filter: FilterType::default(),
+            ladder_saturation: LadderSaturation::PerStage,
             envelope: Adsr::default(),
             portamento: None,
             unison: None,

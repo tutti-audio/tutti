@@ -1,5 +1,5 @@
 //! Audio fan-in, the op: several
-//! sources wired to one input port, or to one global output channel, are
+//! sources wired to one input port, or to one main output channel, are
 //! **summed** by `Op::Sum`, in `Edge` order, as the left fold
 //! `((+0.0 + a_0) + a_1) + ..` in `f32`; one source is an alias and none is
 //! silence.
@@ -347,10 +347,10 @@ fn a_feedback_addend_sums_last() {
     );
 }
 
-/// A global source takes part like any other: `Node` sources sort before
-/// `Global` ones, so `(0 + 0.25) + x`. At an output channel and at a port.
+/// A main-input source takes part like any other: `Node` sources sort before
+/// `MainInput` ones, so `(0 + 0.25) + x`. At an output channel and at a port.
 #[test]
-fn a_global_source_is_an_addend() {
+fn a_main_input_source_is_an_addend() {
     let mut t = Topology {
         inputs: ChannelLayout::MONO,
         ..Topology::default()
@@ -358,8 +358,8 @@ fn a_global_source_is_an_addend() {
     let kinds: Vec<Kind> = vec![dc(0.25), Kind::Thru { width: 1 }];
     let (nt, map) = nodes(&kinds);
     t.nodes = nt.nodes;
-    t.outputs = vec![vec![PortSource::Global(0), out(1)]];
-    t.connect(at(2, 0), Edge::Direct(PortSource::Global(0)));
+    t.outputs = vec![vec![PortSource::MainInput(0), out(1)]];
+    t.connect(at(2, 0), Edge::Direct(PortSource::MainInput(0)));
     t.connect(at(2, 0), direct(1));
     t.outputs.push(vec![out(2)]);
     let got = render_both(&t, &map, 3);

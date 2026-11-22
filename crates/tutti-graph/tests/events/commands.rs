@@ -468,7 +468,7 @@ fn a_scheduled_command_is_compensated_like_an_upstream_event() {
     t.inputs = ChannelLayout::MONO;
     t.edges.insert(
         tutti_graph::InputPort { node: LAT, port: 0 },
-        vec![tutti_graph::Edge::Direct(PortSource::Global(0))],
+        vec![tutti_graph::Edge::Direct(PortSource::MainInput(0))],
     );
     t.edges.insert(
         tutti_graph::InputPort { node: A, port: 0 },
@@ -479,7 +479,7 @@ fn a_scheduled_command_is_compensated_like_an_upstream_event() {
     );
     t.edges.insert(
         tutti_graph::InputPort { node: B, port: 0 },
-        vec![tutti_graph::Edge::Direct(PortSource::Global(0))],
+        vec![tutti_graph::Edge::Direct(PortSource::MainInput(0))],
     );
     t.set_outputs(vec![
         PortSource::Node(OutputPort { node: A, port: 0 }),
@@ -965,7 +965,7 @@ fn beat_resolution_matches_a_hand_computed_table() {
         t.inputs = ChannelLayout::MONO;
         t.edges.insert(
             tutti_graph::InputPort { node: lat, port: 0 },
-            vec![tutti_graph::Edge::Direct(PortSource::Global(0))],
+            vec![tutti_graph::Edge::Direct(PortSource::MainInput(0))],
         );
         t.edges.insert(
             tutti_graph::InputPort {
@@ -1041,7 +1041,7 @@ fn an_unroutable_command_is_timed_by_its_nodes_arrival() {
     t.inputs = ChannelLayout::MONO;
     t.edges.insert(
         tutti_graph::InputPort { node: lat, port: 0 },
-        vec![tutti_graph::Edge::Direct(PortSource::Global(0))],
+        vec![tutti_graph::Edge::Direct(PortSource::MainInput(0))],
     );
     t.edges.insert(
         tutti_graph::InputPort {

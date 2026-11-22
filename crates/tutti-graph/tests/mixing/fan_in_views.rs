@@ -127,14 +127,14 @@ fn each_source_of_a_fan_in_port_is_delayed_to_the_arrival() {
     );
 }
 
-/// A global input in a fan-in is aligned like any other source: it arrives at
+/// A main input in a fan-in is aligned like any other source: it arrives at
 /// zero, so it waits for the slowest.
 #[test]
-fn a_global_source_of_a_fan_in_waits_for_the_slowest() {
+fn a_main_input_source_of_a_fan_in_waits_for_the_slowest() {
     let mut t = sources();
     t.inputs = ChannelLayout::MONO;
     t.connect(at(SINK, 0), direct(MID));
-    t.connect(at(SINK, 0), Edge::Direct(PortSource::Global(0)));
+    t.connect(at(SINK, 0), Edge::Direct(PortSource::MainInput(0)));
     t.set_outputs([PortSource::Node(out(SINK, 0))]);
 
     assert_eq!(
@@ -344,7 +344,7 @@ fn lag_into_pass() -> (Topology, BTreeMap<NodeKey, Kind>) {
             latency: LAG_FRAMES,
         },
     );
-    t.connect(at(LAG, 0), Edge::Direct(PortSource::Global(0)));
+    t.connect(at(LAG, 0), Edge::Direct(PortSource::MainInput(0)));
     t.nodes.insert(PASS, spec(1, 1));
     kinds.insert(
         PASS,
@@ -357,14 +357,14 @@ fn lag_into_pass() -> (Topology, BTreeMap<NodeKey, Kind>) {
 }
 
 /// **Per-source PDC at an input port.** The impulse goes down `LAG` (8
-/// frames of latency) and straight from the global input into the same port;
+/// frames of latency) and straight from the main input into the same port;
 /// the direct source is delayed to the sink's arrival, so both meet at frame
 /// 8 + 60 = 68 (the next block) and sum to 2.0, and nothing is heard at 60.
 #[test]
 fn a_fan_in_input_port_aligns_its_sources_across_blocks() {
     let (mut t, kinds) = lag_into_pass();
     t.connect(at(PASS, 0), direct(LAG));
-    t.connect(at(PASS, 0), Edge::Direct(PortSource::Global(0)));
+    t.connect(at(PASS, 0), Edge::Direct(PortSource::MainInput(0)));
     t.set_outputs([PortSource::Node(out(PASS, 0))]);
     let input = impulse_input(60, 2);
     let got = render(t, kinds, &input, 2);
@@ -373,7 +373,7 @@ fn a_fan_in_input_port_aligns_its_sources_across_blocks() {
     assert_eq!(got, want);
 }
 
-/// **Per-source PDC at a global output**: the same sources summed straight
+/// **Per-source PDC at a main output**: the same sources summed straight
 /// onto the output channel, each delayed to the output time first.
 #[test]
 fn a_fan_in_output_channel_aligns_its_sources() {
@@ -382,7 +382,7 @@ fn a_fan_in_output_channel_aligns_its_sources() {
     let mut kinds = kinds;
     kinds.remove(&PASS);
     t.set_outputs([PortSource::Node(out(LAG, 0))]);
-    t.outputs[0].push(PortSource::Global(0));
+    t.outputs[0].push(PortSource::MainInput(0));
     let input = impulse_input(3, 1);
     let got = render(t, kinds, &input, 1);
     let mut want = vec![0.0f32; BLOCK];

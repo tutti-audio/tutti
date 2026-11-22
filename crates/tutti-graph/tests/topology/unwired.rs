@@ -73,7 +73,7 @@ fn ein(node: NodeKey, port: u16) -> EventInputPort {
 
 /// `A -> X -> B`, three audio and three event ports on each, `X` the key
 /// that is placed again; the wiring touches ports 0 and 2 of `X`, and a
-/// global output takes `X`'s port 1.
+/// main output takes `X`'s port 1.
 ///
 /// Audio: `A.0 -> X.0` and `A.2 -> X.2` (both weighted), `X.0 -> B.0`,
 /// `X.2 -> B.2`, `X.1 -> output 1`, `X.0 -> output 0`, and the feedback edges
@@ -229,7 +229,7 @@ fn the_commit_after_a_narrower_shape_goes_through() {
     exec.apply_pending();
     ed.collect();
     let plan = exec.plan().expect("applied");
-    assert_eq!(plan.global_outputs(), 2);
+    assert_eq!(plan.main_outputs(), 2);
 }
 
 /// A wider shape unwires nothing, and the wiring is bit for bit what it was.
