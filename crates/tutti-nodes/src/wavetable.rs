@@ -4,11 +4,11 @@
 //! The node holds the params, the sample rate and the shared table; the algorithm is
 //! `tutti_dsp::WavetableOscillator`.
 
-use crate::ramp::LastGood;
+use crate::last_good::LastGood;
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, Float};
 use tutti_dsp::{Wavetable, WavetableOscillator, WavetableStep};
-use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
+use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_rt::Param;
 use tutti_units::{Amplitude, Hz, Normalized, SampleRate, Tail, UnitParam};
 
@@ -58,7 +58,7 @@ use tutti_units::{Amplitude, Hz, Normalized, SampleRate, Tail, UnitParam};
 /// assert!(out[0][0].abs() < 1e-6);
 /// assert!(out[0][1] > 0.0);
 /// ```
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct WavetableNode<F: Float> {
     width: ChannelLayout,
     wave: WavetableOscillator<F>,
@@ -80,7 +80,7 @@ tutti_graph::declare_params!([F: Float] WavetableNode<F>, n {
     Frequency => Hz = &n.frequency,
     Volume => Amplitude = &n.level,
     Position => Normalized = &n.position,
-});
+} nodes F);
 
 /// What a [`WavetableNode`] is made from: its width, its table and its starting params.
 #[derive(Clone, Debug)]
@@ -164,23 +164,6 @@ impl<F: Float> WavetableNode<F> {
     }
 }
 
-/// Shares the cells (the template [`tutti_graph::param_parts`] forks from) and the table.
-impl<F: Float> Clone for WavetableNode<F> {
-    fn clone(&self) -> Self {
-        Self {
-            width: self.width,
-            wave: self.wave.clone(),
-            frequency: self.frequency.handle(),
-            level: self.level.handle(),
-            position: self.position.handle(),
-            rate: self.rate,
-            good_frequency: self.good_frequency,
-            good_level: self.good_level,
-            good_position: self.good_position,
-        }
-    }
-}
-
 impl<F: Float> Node<F> for WavetableNode<F> {
     /// No inputs, `width` outputs, no latency, no ring-out; four table reads and a blend a
     /// frame at most, `Light`.
@@ -220,9 +203,7 @@ impl<F: Float> Node<F> for WavetableNode<F> {
         // designed again only where the frequency or the position moved.
         let mut step = design(hz, at);
         let mut gain = if level.is_none() {
-            F::from_unit(Amplitude::new(
-                self.good_level.read(self.level.load().get()),
-            ))
+            self.good_level.level(self.level.load().get())
         } else {
             F::ZERO
         };
@@ -247,13 +228,7 @@ impl<F: Float> Node<F> for WavetableNode<F> {
                 step = design(hz, at);
             }
             if let Some(signal) = level {
-                // A finite control signal value is the level in `F` as it is.
-                let good = self.good_level.read(signal[i].into());
-                gain = if signal[i].is_finite() {
-                    signal[i]
-                } else {
-                    F::from_unit(Amplitude::new(good))
-                };
+                gain = self.good_level.driven_level(signal[i]);
             }
             *o = self.wave.step(step) * gain;
         }
@@ -269,33 +244,6 @@ impl<F: Float> Node<F> for WavetableNode<F> {
 
     fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
-    }
-}
-
-impl<F: Float> ParamNode<F> for WavetableNode<F> {
-    /// The frequency, the level and the frame position.
-    fn param_set(&self) -> ParamSet {
-        self.declared_set()
-    }
-
-    /// A clone with its cells detached (at their values now), at phase 0.
-    fn fork_fresh(&self) -> Self {
-        let mut fork = self.clone();
-        fork.frequency.detach();
-        fork.level.detach();
-        fork.position.detach();
-        Node::<F>::reset(&mut fork);
-        fork
-    }
-}
-
-/// Inserted with its [`ParamSet`] as its controls and a fork from the values last set through
-/// it ([`tutti_graph::param_parts`]).
-impl<F: Float> IntoNode<F> for WavetableNode<F> {
-    type Controls = ParamSet;
-
-    fn into_parts(self) -> NodeParts<ParamSet, F> {
-        tutti_graph::param_parts(self)
     }
 }
 

@@ -1,6 +1,7 @@
 use super::*;
 use crate::test_support::{RATE, render_f64};
 use tutti_buffers::{Mono, Planes};
+use tutti_graph::ParamNode;
 use tutti_graph::contract::{Direct, assert_param_fork, drive};
 
 /// A table of one frame per slice of `frames`, in `F`.

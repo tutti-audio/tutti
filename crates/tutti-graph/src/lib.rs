@@ -808,7 +808,7 @@ pub use wake::Wake;
 /// What [`declare_params!`] expands to, and nothing a caller names.
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::declare::{Cells, Row, Visit, base, input, ports, row, set};
+    pub use crate::declare::{Cells, Detach, Row, Visit, base, detach, input, ports, row, set};
     pub use tutti_buffers::Float;
     pub use tutti_rt::{AtomicCell, AtomicWord};
     pub use tutti_units::{UnitAddr, UnitParam};

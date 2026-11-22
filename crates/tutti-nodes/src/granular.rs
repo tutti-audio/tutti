@@ -5,12 +5,10 @@
 
 use std::sync::Arc;
 
-use crate::ramp::LastGood;
+use crate::last_good::LastGood;
 use tutti_buffers::{ChannelLayout, Float, Wave};
 use tutti_dsp::{GrainSettings, Granular, MaxGrains};
-use tutti_graph::{
-    Cx, IntoNode, Io, Node, NodeParts, ParamInput, ParamNode, ParamSet, Prepare, Shape, Status,
-};
+use tutti_graph::{Cx, Io, Node, ParamInput, Prepare, Shape, Status};
 use tutti_rt::Param;
 use tutti_units::{Cents, Hz, Normalized, Samples, Seconds, Tail, Unit, UnitParam};
 
@@ -64,7 +62,7 @@ use tutti_units::{Cents, Hz, Normalized, Samples, Seconds, Tail, Unit, UnitParam
 /// assert!(out[0].iter().any(|&x| x > 0.4));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct GranularNode<F: Float> {
     layout: ChannelLayout,
     source: Arc<Wave<F>>,
@@ -89,7 +87,7 @@ tutti_graph::declare_params!([F: Float] GranularNode<F>, n {
     GrainLength => Seconds = &n.length,
     [i in 0..2u8] { Jitter => Normalized = &n.jitter[usize::from(i)] },
     Position => Normalized = &n.position,
-});
+} nodes F);
 
 /// What a [`GranularNode`] is made from: the shared source and the starting values of its
 /// params.
@@ -248,10 +246,7 @@ impl<F: Float> GranularNode<F> {
             driven: ParamInput<'_, F>,
             good: &mut LastGood<f64>,
         ) -> U {
-            let raw = driven
-                .last_frame()
-                .map_or_else(|| cell.load().to_raw(), Into::into);
-            U::from_raw(good.read(raw))
+            U::from_raw(good.block(driven.last_frame(), cell.load().to_raw()))
         }
         let density = value(
             &self.density,
@@ -288,25 +283,6 @@ impl<F: Float> GranularNode<F> {
             .rate(rate)
             .position_jitter(position_jitter)
             .timing_jitter(timing_jitter)
-    }
-}
-
-/// Shares the cells (the template [`tutti_graph::param_parts`] forks from).
-impl<F: Float> Clone for GranularNode<F> {
-    fn clone(&self) -> Self {
-        Self {
-            layout: self.layout,
-            source: Arc::clone(&self.source),
-            max_grains: self.max_grains,
-            seed: self.seed,
-            density: self.density.handle(),
-            rate: self.rate.handle(),
-            length: self.length.handle(),
-            jitter: [self.jitter[0].handle(), self.jitter[1].handle()],
-            position: self.position.handle(),
-            good: self.good,
-            cloud: self.cloud.clone(),
-        }
     }
 }
 
@@ -355,35 +331,6 @@ impl<F: Float> Node<F> for GranularNode<F> {
 
     fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
-    }
-}
-
-impl<F: Float> ParamNode<F> for GranularNode<F> {
-    /// The density, the pitch, the grain length and the two jitters.
-    fn param_set(&self) -> ParamSet {
-        self.declared_set()
-    }
-
-    /// A clone with its cells detached (at their values now), its cloud at the start.
-    fn fork_fresh(&self) -> Self {
-        let mut fork = self.clone();
-        fork.density.detach();
-        fork.rate.detach();
-        fork.length.detach();
-        fork.jitter.iter_mut().for_each(Param::detach);
-        fork.position.detach();
-        Node::<F>::reset(&mut fork);
-        fork
-    }
-}
-
-/// Inserted with its [`ParamSet`] as its controls and a fork from the values last set through
-/// it ([`tutti_graph::param_parts`]).
-impl<F: Float> IntoNode<F> for GranularNode<F> {
-    type Controls = ParamSet;
-
-    fn into_parts(self) -> NodeParts<ParamSet, F> {
-        tutti_graph::param_parts(self)
     }
 }
 

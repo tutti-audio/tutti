@@ -42,11 +42,9 @@
 //! exactly on the new gain at the block's last sample. See
 //! `BusStripNode::render`.
 
-use crate::ramp::LastGood;
+use crate::last_good::LastGood;
 use tutti_buffers::{BusTopology, Float, MAX_CHANNELS};
-use tutti_graph::{
-    Cx, Inputs, IntoNode, Io, Node, NodeParts, Outputs, ParamNode, ParamSet, Prepare, Shape, Status,
-};
+use tutti_graph::{Cx, Inputs, Io, Node, Outputs, Prepare, Shape, Status};
 use tutti_rt::Param;
 use tutti_units::UnitParam;
 use tutti_units::{Amplitude, Balance, Tail};
@@ -54,8 +52,8 @@ use tutti_units::{Amplitude, Balance, Tail};
 // The params a [`BusStripNode`] lets the graph modulate, in port order.
 tutti_graph::declare_params!([] BusStripNode, n {
     Volume => Amplitude = &n.volume,
-    Balance => Balance = n.balance.as_ref(),
-});
+    Balance => Balance = &n.balance,
+} nodes [F: Float] F);
 
 /// A mixer strip: volume and balance over `channels` audio ports.
 ///
@@ -484,42 +482,13 @@ impl<F: Float> Node<F> for BusStripNode {
     }
 }
 
-impl<F: Float> ParamNode<F> for BusStripNode {
-    /// Volume, and balance on a bus with a left/right pair.
-    fn param_set(&self) -> ParamSet {
-        self.declared_set()
-    }
-
-    /// A clone with its two cells detached (at their values now), so a
-    /// fork renders the strip as it was set, not a fader ride made while it
-    /// runs; its ramp history cleared.
-    fn fork_fresh(&self) -> Self {
-        let mut fork = self.clone();
-        fork.volume.detach();
-        if let Some(cell) = &mut fork.balance {
-            cell.detach();
-        }
-        Node::<F>::reset(&mut fork);
-        fork
-    }
-}
-
-/// Inserted with its [`ParamSet`] as its controls and a fork from the values
-/// last set through it ([`tutti_graph::param_parts`]).
-impl<F: Float> IntoNode<F> for BusStripNode {
-    type Controls = ParamSet;
-
-    fn into_parts(self) -> NodeParts<ParamSet, F> {
-        tutti_graph::param_parts(self)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_support::{RATE, tick};
     use tutti_buffers::Planes;
     use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, Speaker, Speaker::*};
+    use tutti_graph::ParamNode;
     use tutti_graph::contract::{assert_param_fork, drive};
 
     /// The strip on `bus`.

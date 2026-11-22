@@ -1,13 +1,13 @@
 use super::error::{Result, VbapError};
 use tutti_buffers::{Bed, BusTopology, ChannelLayout, ChannelTopology, Float, Fold, Mono, MonoMut};
 use tutti_dsp::{COEFF_INTERVAL, Lerp, Ramp, SpeakerLayout, VbapGains, VbapKernel};
-use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
+use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_rt::Param;
 use tutti_units::UnitParam;
 use tutti_units::{Azimuth, Elevation, SampleRate, Seconds, Spread, StereoWidth, Tail};
 
 use crate::buses::main_bus;
-use crate::ramp::LastGood;
+use crate::last_good::LastGood;
 
 /// The grid the gains are solved on, in frames: the controls are read, and the
 /// gains solved, every `GRID` frames counted from the last reset, and a frame
@@ -29,7 +29,7 @@ tutti_graph::declare_params!([F: Float] VbapPannerNode<F>, n {
     Elevation => Elevation = &n.elevation,
     Spread => Spread = &n.spread,
     StereoWidth => StereoWidth = &n.width,
-});
+} nodes F);
 
 /// The last finite value each control cell held.
 #[derive(Clone, Copy, Debug)]
@@ -279,24 +279,10 @@ impl<F: Float> VbapPannerNode<F> {
         // angles are `f64`, so a driven coordinate widens here, once per grid point, and
         // `Spread` and `StereoWidth` hold an `f32`.
         let signal = |k: usize| driven[k].and_then(|signal| signal.get(at)).copied();
-        let azimuth = self
-            .good
-            .azimuth
-            .read(signal(0).map_or(cells.0.get(), Into::into));
-        let elevation = self
-            .good
-            .elevation
-            .read(signal(1).map_or(cells.1.get(), Into::into));
-        let spread = Spread::new_clamped(
-            self.good
-                .spread
-                .read(signal(2).map_or(cells.2.get(), Into::into)),
-        );
-        let width = StereoWidth::new(
-            self.good
-                .width
-                .read(signal(3).map_or(cells.3.get(), Into::into)),
-        );
+        let azimuth = self.good.azimuth.block(signal(0), cells.0.get());
+        let elevation = self.good.elevation.block(signal(1), cells.1.get());
+        let spread = Spread::new_clamped(self.good.spread.block(signal(2), cells.2.get()));
+        let width = StereoWidth::new(self.good.width.block(signal(3), cells.3.get()));
         let whole = !self.seated;
         steer(
             &mut self.aim_azimuth,
@@ -467,35 +453,6 @@ impl<F: Float> Node<F> for VbapPannerNode<F> {
 
     fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
-    }
-}
-
-impl<F: Float> ParamNode<F> for VbapPannerNode<F> {
-    /// The bearing, height, spread and width.
-    fn param_set(&self) -> ParamSet {
-        self.declared_set()
-    }
-
-    /// A clone with its four cells detached (at their values now) and its
-    /// grid restarted.
-    fn fork_fresh(&self) -> Self {
-        let mut fork = self.clone();
-        fork.azimuth.detach();
-        fork.elevation.detach();
-        fork.spread.detach();
-        fork.width.detach();
-        Node::<F>::reset(&mut fork);
-        fork
-    }
-}
-
-/// Inserted with its [`ParamSet`] as its controls and a fork from the values
-/// last set through it ([`tutti_graph::param_parts`]).
-impl<F: Float> IntoNode<F> for VbapPannerNode<F> {
-    type Controls = ParamSet;
-
-    fn into_parts(self) -> NodeParts<ParamSet, F> {
-        tutti_graph::param_parts(self)
     }
 }
 

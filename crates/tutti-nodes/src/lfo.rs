@@ -17,7 +17,7 @@ use tutti_units::UnitParam;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
-use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
+use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_rt::Param;
 use tutti_units::{BeatsPerCycle, Depth, Hz, PhaseIncrement, PhaseStep, RunningPhase, SampleRate};
 use tutti_units::{Latency, Tail};
@@ -90,13 +90,13 @@ impl core::fmt::Display for LfoClock {
 /// construction and the beat it reads is its block's own; a consumer behind a
 /// latent path is aligned by the compiler, which delays this node's edge into
 /// it like any other source's.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LfoNode {
     wave: Waveform,
     clock: LfoClock,
-    /// The free-running rate: read only by [`LfoClock::Free`], and declared as
-    /// a param only then.
-    rate: Param<Hz>,
+    /// The free-running rate: `Some` only for [`LfoClock::Free`], and declared as a
+    /// param only then.
+    rate: Option<Param<Hz>>,
     depth: Param<Depth>,
     /// Added to the clock position before the wave reads it.
     phase_offset: PhaseIncrement,
@@ -220,7 +220,7 @@ impl From<LfoConfig> for LfoNode {
                 seed: config.seed,
             },
             clock: config.clock,
-            rate: Param::new(config.rate),
+            rate: matches!(config.clock, LfoClock::Free).then(|| Param::new(config.rate)),
             depth: Param::new(config.depth),
             phase_offset: config.phase_offset,
             phase: RunningPhase::START,
@@ -251,8 +251,8 @@ impl LfoNode {
 // only), so its shape never changes.
 tutti_graph::declare_params!([] LfoNode, n {
     Depth => Depth = &n.depth,
-    Rate => Hz = matches!(n.clock, LfoClock::Free).then_some(&n.rate),
-});
+    Rate => Hz = &n.rate,
+} nodes [F: Float] F);
 
 impl<F: Float> Node<F> for LfoNode {
     fn shape(&self) -> Shape {
@@ -290,7 +290,7 @@ impl<F: Float> Node<F> for LfoNode {
         let offset = self.phase_offset;
         match self.clock {
             LfoClock::Free => {
-                let rate_cell = self.rate.load().get();
+                let rate_cell = self.rate.as_ref().map_or(0.0, |rate| rate.load().get());
                 let rate_signal = self
                     .declared_param::<{ UnitParam::Rate as u16 }, _>(&io)
                     .frames();
@@ -346,54 +346,11 @@ impl<F: Float> Node<F> for LfoNode {
     }
 }
 
-impl<F: Float> ParamNode<F> for LfoNode {
-    /// The depth, and the rate while free-running (a beat-synced node's span is
-    /// its clock).
-    fn param_set(&self) -> ParamSet {
-        self.declared_set()
-    }
-
-    /// A clone with every control cell detached (at its value now), at cycle
-    /// zero: a free-running fork replays the original's values from its
-    /// start.
-    fn fork_fresh(&self) -> Self {
-        let mut fork = self.clone();
-        fork.rate.detach();
-        fork.depth.detach();
-        Node::<F>::reset(&mut fork);
-        fork
-    }
-}
-
-/// Inserted with its [`ParamSet`] as its controls and a fork that starts
-/// from the values last set through it ([`tutti_graph::param_parts`]).
-impl<F: Float> IntoNode<F> for LfoNode {
-    type Controls = ParamSet;
-
-    fn into_parts(self) -> NodeParts<ParamSet, F> {
-        tutti_graph::param_parts(self)
-    }
-}
-
-impl Clone for LfoNode {
-    fn clone(&self) -> Self {
-        Self {
-            wave: self.wave.clone(),
-            clock: self.clock,
-            rate: self.rate.handle(),
-            depth: self.depth.handle(),
-            phase_offset: self.phase_offset,
-            phase: self.phase,
-            cycle: self.cycle,
-            sample_rate: self.sample_rate,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use tutti_buffers::MaxBlock;
+    use tutti_graph::ParamNode;
     use tutti_graph::contract::{Direct, assert_param_fork};
     use tutti_graph::{Standalone, TransportPosition};
     use tutti_units::UnitParam;
@@ -480,7 +437,7 @@ mod tests {
                 .rate(Hz::new(2.0)),
         );
         assert_eq!(lfo.clock(), LfoClock::Free);
-        assert_eq!(lfo.rate.load(), Hz::new(2.0));
+        assert_eq!(lfo.rate.as_ref().map(Param::load), Some(Hz::new(2.0)));
         let lfo = LfoNode::from(
             LfoConfig::new(LfoShape::Sine)
                 .rate(Hz::new(2.0))

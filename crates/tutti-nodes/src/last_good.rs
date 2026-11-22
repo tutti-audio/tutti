@@ -1,19 +1,13 @@
-//! Per-block control reads and the ramps that keep them from stepping.
+//! A control a node reads once per block, or per frame, without a non-finite value reaching its
+//! state: [`LastGood`].
 //!
-//! The width-generic nodes read every [`Param`](tutti_rt::Param) **once per
-//! `process` call** instead of once per sample — a per-sample load would be up
-//! to four atomics per channel per sample on the ladder, and none of them can
-//! change faster than a block anyway, since the control thread writes between
-//! callbacks. What a block-rate read *can* do is step:
-//! a cutoff or a delay time that jumps at a block edge clicks. So a value that
-//! moved since the last block is ramped **linearly across the block**, from the
-//! value the previous block ended on to the new one, arriving exactly on the
-//! block's last sample.
-//!
-//! Ending exactly on the target is what makes a block of one agree with a
-//! per-sample read: a one-sample ramp *is* the new value.
+//! A node reads every [`Param`](tutti_rt::Param) once per `process` call (a per-sample load
+//! would be several atomics a channel a sample), and a control signal that drives it replaces
+//! the cell's value at its frames. A cell is a raw `AtomicF64` any thread may write, so
+//! each read, from the cell or from the signal, goes through its [`LastGood`].
 
 use tutti_buffers::Float;
+use tutti_units::Amplitude;
 
 /// The last finite value a control cell held — what a non-finite write reads
 /// as.
@@ -72,5 +66,32 @@ impl<F: Float> LastGood<F> {
             self.0 = value;
         }
         self.0
+    }
+}
+
+impl LastGood<f64> {
+    /// A block's value of a control the graph may drive: the signal's `driven` value (its last
+    /// frame), else the `cell`'s, held at the last finite one.
+    #[inline]
+    pub(crate) fn block<F: Float>(&mut self, driven: Option<F>, cell: f64) -> f64 {
+        self.read(driven.map_or(cell, Into::into))
+    }
+
+    /// A level the cell holds, as the output's float: held at the last finite one.
+    #[inline]
+    pub(crate) fn level<F: Float>(&mut self, cell: f64) -> F {
+        F::from_unit(Amplitude::new(self.read(cell)))
+    }
+
+    /// A control signal's level at a frame: a finite value is the level in `F` as it is, and
+    /// a non-finite one reads as the last finite level.
+    #[inline]
+    pub(crate) fn driven_level<F: Float>(&mut self, driven: F) -> F {
+        let held = self.read(driven.into());
+        if driven.is_finite() {
+            driven
+        } else {
+            F::from_unit(Amplitude::new(held))
+        }
     }
 }

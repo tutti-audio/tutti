@@ -3,11 +3,11 @@
 //!
 //! The node holds the level cell and the generator; the algorithm is `tutti_dsp::Noise`.
 
-use crate::ramp::LastGood;
+use crate::last_good::LastGood;
 use tutti_buffers::Float;
 use tutti_buffers::{ChannelLayout, MonoMut};
 use tutti_dsp::{Noise, NoiseColour};
-use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
+use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_rt::Param;
 use tutti_units::{Amplitude, Tail, UnitParam};
 
@@ -44,7 +44,7 @@ use tutti_units::{Amplitude, Tail, UnitParam};
 /// let out = r.render_input(Planes::new(&[&[0.0; 64]]).unwrap());
 /// assert!(out[0].iter().all(|s| s.abs() < 0.5));
 /// ```
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct NoiseNode<F: Float> {
     noise: Noise<F>,
     level: Param<Amplitude>,
@@ -55,7 +55,7 @@ pub struct NoiseNode<F: Float> {
 // The params a [`NoiseNode`] lets the graph modulate: its level.
 tutti_graph::declare_params!([F: Float] NoiseNode<F>, n {
     Volume => Amplitude = &n.level,
-});
+} nodes F);
 
 /// What a [`NoiseNode`] is made from: its colour, its seed and its level.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -109,17 +109,6 @@ impl<F: Float> NoiseNode<F> {
     }
 }
 
-/// Shares the cells (the template [`tutti_graph::param_parts`] forks from).
-impl<F: Float> Clone for NoiseNode<F> {
-    fn clone(&self) -> Self {
-        Self {
-            noise: self.noise.clone(),
-            level: self.level.handle(),
-            good_level: self.good_level,
-        }
-    }
-}
-
 impl<F: Float> Node<F> for NoiseNode<F> {
     /// No inputs, one output, no latency, no ring-out; arithmetic only, `Light`.
     fn shape(&self) -> Shape {
@@ -142,20 +131,14 @@ impl<F: Float> Node<F> for NoiseNode<F> {
         match level {
             // A level that holds crosses into `F` once per block.
             None => {
-                let gain = F::from_unit(Amplitude::new(self.good_level.read(cell)));
+                let gain = self.good_level.level(cell);
                 for o in out {
                     *o *= gain;
                 }
             }
             Some(signal) => {
                 for (o, &l) in out.iter_mut().zip(signal) {
-                    // A finite control signal value is the level in `F` as it is.
-                    let good = self.good_level.read(l.into());
-                    *o *= if l.is_finite() {
-                        l
-                    } else {
-                        F::from_unit(Amplitude::new(good))
-                    };
+                    *o *= self.good_level.driven_level(l);
                 }
             }
         }
@@ -168,31 +151,6 @@ impl<F: Float> Node<F> for NoiseNode<F> {
 
     fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
-    }
-}
-
-impl<F: Float> ParamNode<F> for NoiseNode<F> {
-    /// The level.
-    fn param_set(&self) -> ParamSet {
-        self.declared_set()
-    }
-
-    /// A clone with its cell detached (at its value now), at the start of the stream.
-    fn fork_fresh(&self) -> Self {
-        let mut fork = self.clone();
-        fork.level.detach();
-        Node::<F>::reset(&mut fork);
-        fork
-    }
-}
-
-/// Inserted with its [`ParamSet`] as its controls and a fork from the values last set through
-/// it ([`tutti_graph::param_parts`]).
-impl<F: Float> IntoNode<F> for NoiseNode<F> {
-    type Controls = ParamSet;
-
-    fn into_parts(self) -> NodeParts<ParamSet, F> {
-        tutti_graph::param_parts(self)
     }
 }
 

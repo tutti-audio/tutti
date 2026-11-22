@@ -6,13 +6,13 @@
 use std::sync::Arc;
 use tutti_buffers::{BusTopology, MonoMut, StereoPlanes};
 use tutti_dsp::{FftFloat, HRTF_LATENCY, HRTF_STEP, HrirSphere, HrtfBinaural};
-use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
+use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_rt::Param;
 use tutti_units::Latency;
 use tutti_units::UnitParam;
 use tutti_units::{Azimuth, Direction, Elevation, Mix, SampleRate, Samples, Tail};
 
-use crate::ramp::LastGood;
+use crate::last_good::LastGood;
 use crate::spatial::target::AngleSmoother;
 
 // The params an [`HrtfBinauralNode`] lets the graph modulate, in port order.
@@ -20,7 +20,7 @@ tutti_graph::declare_params!([F: FftFloat] HrtfBinauralNode<F>, n {
     Azimuth => Azimuth = &n.azimuth,
     Elevation => Elevation = &n.elevation,
     Wet => Mix = &n.blend,
-});
+} nodes F);
 
 /// A binaural panner for headphones: FFT convolution against a measured HRIR
 /// sphere, stereo in, stereo out.
@@ -142,14 +142,11 @@ impl<F: FftFloat> HrtfBinauralNode<F> {
     fn placement(&mut self, [azimuth, elevation]: [Option<F>; 2]) -> Direction {
         // A driven value is the graph's `F` control signal; the angles are `f64`, so
         // it widens here, once per block.
-        let azimuth = self
-            .good
-            .azimuth
-            .read(azimuth.map_or_else(|| self.azimuth.load().get(), Into::into));
+        let azimuth = self.good.azimuth.block(azimuth, self.azimuth.load().get());
         let elevation = self
             .good
             .elevation
-            .read(elevation.map_or_else(|| self.elevation.load().get(), Into::into));
+            .block(elevation, self.elevation.load().get());
         Direction::new(
             Azimuth::new(azimuth).wrap(),
             Elevation::new_clamped(elevation),
@@ -220,10 +217,10 @@ impl<F: FftFloat> Node<F> for HrtfBinauralNode<F> {
         ]);
         // `Mix::new_clamped` passes a NaN through, so the blend is held too.
         let blend = Mix::new(
-            self.good.blend.read(
+            self.good.blend.block(
                 self.declared_param::<{ UnitParam::Wet as u16 }, _>(&io)
-                    .last_frame()
-                    .map_or_else(|| self.blend.load().get(), Into::into),
+                    .last_frame(),
+                self.blend.load().get(),
             ),
         );
         let size = io.frames();
@@ -269,34 +266,6 @@ impl<F: FftFloat> Node<F> for HrtfBinauralNode<F> {
 
     fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
-    }
-}
-
-impl<F: FftFloat> ParamNode<F> for HrtfBinauralNode<F> {
-    /// The bearing, height and blend.
-    fn param_set(&self) -> ParamSet {
-        self.declared_set()
-    }
-
-    /// A clone (a rebuilt renderer) with its three cells detached at their
-    /// values now, and reset.
-    fn fork_fresh(&self) -> Self {
-        let mut fork = self.clone();
-        fork.azimuth.detach();
-        fork.elevation.detach();
-        fork.blend.detach();
-        Node::<F>::reset(&mut fork);
-        fork
-    }
-}
-
-/// Inserted with its [`ParamSet`] as its controls and a fork from the values
-/// last set through it ([`tutti_graph::param_parts`]).
-impl<F: FftFloat> IntoNode<F> for HrtfBinauralNode<F> {
-    type Controls = ParamSet;
-
-    fn into_parts(self) -> NodeParts<ParamSet, F> {
-        tutti_graph::param_parts(self)
     }
 }
 
