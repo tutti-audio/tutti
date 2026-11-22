@@ -603,8 +603,8 @@ mod tests {
     /// never ran.
     #[test]
     fn an_exit_task_dropped_unpolled_resolves_its_task() {
-        let mut child = sleeper().spawn().expect("sleep spawns");
-        let wait = Arc::new(ExitWait::of(&child));
+        let mut process = Reaped::new(sleeper().spawn().expect("sleep spawns"));
+        let wait = Arc::new(process.exit_wait());
         let executor = Executor::new();
         let task = executor.spawn(exit_task(
             Arc::new(Mutex::new(None)),
@@ -619,8 +619,8 @@ mod tests {
             matches!(join_within(task, HANG_GUARD), Ok(None)),
             "the task never resolved"
         );
-        child.kill().expect("the sleeper is killed");
-        child.wait().expect("reaped");
+        process.kill_all().expect("the sleeper is killed");
+        process.wait().expect("reaped");
     }
 
     /// **A guard keeps no executor alive**: with every strong handle dropped

@@ -3,24 +3,11 @@
 
 use rustix::process::{Pid, Signal};
 use std::os::unix::process::CommandExt;
-use std::process::{Child, Command};
+use std::process::Command;
 
 /// Makes `command` start its process as the leader of a new process group.
 pub fn own_group(command: &mut Command) {
     command.process_group(0);
-}
-
-/// Nothing to do after the spawn: the group was made at it ([`own_group`]).
-///
-/// # Errors
-///
-/// Never on unix.
-#[allow(
-    clippy::unnecessary_wraps,
-    reason = "the signature of the Windows module"
-)]
-pub fn bind_to_host(_child: &Child) -> std::io::Result<()> {
-    Ok(())
 }
 
 /// Ends every process of the group `leader` leads (`SIGKILL`). Call it while

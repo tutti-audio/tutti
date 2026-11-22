@@ -37,6 +37,7 @@ use tutti_clap_test_plugin::{
     PARAM_CMD_REQUEST_FLUSH, PARAM_CMD_RESCAN_ALL, PARAM_CMD_RESCAN_VALUES, ParamStateCapture,
     ProcessCapture, STATE_MAGIC,
 };
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{AutomationMode, Control, StateUse};
 use tutti_plugin_types::{ParamFlags, ParamSteps, Request, RescanScope};
 use tutti_units::Normalized;
@@ -552,8 +553,8 @@ fn host_denormalizes_automation_against_the_parameter_range() {
 
     let mut params = ParameterChanges::reserved(1, 2);
     // Deliberately out of offset order, so the sort is exercised too.
-    params.add_change(ParamId::new(p.id), 192, 0.75);
-    params.add_change(ParamId::new(p.id), 64, 0.25);
+    params.add_change(ParamId::new(p.id), at_frame(192), unit_value(0.75));
+    params.add_change(ParamId::new(p.id), at_frame(64), unit_value(0.25));
     let ctx = ClapProcessContext {
         params: Some(&params),
         ..Default::default()
@@ -588,8 +589,8 @@ fn host_denormalizes_each_parameter_against_its_own_range() {
     let b = param(1); // -12 .. 12
 
     let mut params = ParameterChanges::reserved(2, 1);
-    params.add_change(ParamId::new(a.id), 0, 0.5);
-    params.add_change(ParamId::new(b.id), 0, 0.5);
+    params.add_change(ParamId::new(a.id), at_frame(0), unit_value(0.5));
+    params.add_change(ParamId::new(b.id), at_frame(0), unit_value(0.5));
     let ctx = ClapProcessContext {
         params: Some(&params),
         ..Default::default()
@@ -627,7 +628,11 @@ fn a_stepped_parameter_automated_at_each_position_reaches_that_position() {
     for k in 0..=22u32 {
         param_reset();
         let mut params = ParameterChanges::reserved(1, 1);
-        params.add_change(ParamId::new(mode.id), 0, f64::from(k) / 22.0);
+        params.add_change(
+            ParamId::new(mode.id),
+            at_frame(0),
+            unit_value(f64::from(k) / 22.0),
+        );
         let ctx = ClapProcessContext {
             params: Some(&params),
             ..Default::default()
@@ -701,8 +706,8 @@ fn automation_is_not_written_to_a_read_only_parameter() {
     let (ro, rw) = (param(0), param(1));
 
     let mut params = ParameterChanges::reserved(2, 1);
-    params.add_change(ParamId::new(ro.id), 0, 0.5);
-    params.add_change(ParamId::new(rw.id), 0, 0.5);
+    params.add_change(ParamId::new(ro.id), at_frame(0), unit_value(0.5));
+    params.add_change(ParamId::new(rw.id), at_frame(0), unit_value(0.5));
     let ctx = ClapProcessContext {
         params: Some(&params),
         ..Default::default()

@@ -1109,7 +1109,7 @@ fn copy_process_output(output: ProcessOutputRef<'_>, out: &mut tutti_plugin_type
             // draws its queues from `out`'s own pool, so a warm block reuses the
             // `points` buffers rather than allocating one per automated
             // parameter.
-            out.emit_param_point(queue.param_id, point.sample_offset, point.value.get());
+            out.emit_param_point(queue.param_id, point.sample_offset, point.value);
         }
     }
 }

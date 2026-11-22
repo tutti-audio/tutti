@@ -216,40 +216,6 @@ pub enum AdoptError {
     },
 }
 
-/// The descriptors from 3 up that an `exec` would pass on (not close-on-exec):
-/// what a spawn hands the child beyond the standard three. Read from `/dev/fd`
-/// (the descriptor table on Linux and macOS); the directory's own descriptor is
-/// close-on-exec, so it is not in the list.
-///
-/// # Errors
-///
-/// The descriptor table cannot be read.
-#[cfg(feature = "testing")]
-pub fn inheritable_descriptors() -> std::io::Result<Vec<std::os::fd::RawFd>> {
-    let mut found = Vec::new();
-    for entry in std::fs::read_dir("/dev/fd")? {
-        let Some(fd) = entry?
-            .file_name()
-            .to_str()
-            .and_then(|n| n.parse::<std::os::fd::RawFd>().ok())
-        else {
-            continue;
-        };
-        if fd < 3 {
-            continue;
-        }
-        // SAFETY: `fd` is only asked about (`fcntl(F_GETFD)`), never owned or
-        // closed through this borrow, and it is listed as open.
-        let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
-        if let Ok(flags) = rustix::io::fcntl_getfd(borrowed)
-            && !flags.contains(rustix::io::FdFlags::CLOEXEC)
-        {
-            found.push(fd);
-        }
-    }
-    Ok(found)
-}
-
 /// Takes the connection the host handed this process as its standard input: the
 /// stream socket on descriptor 0 moves to a descriptor of its own, closed on
 /// `exec`, and `/dev/null` replaces

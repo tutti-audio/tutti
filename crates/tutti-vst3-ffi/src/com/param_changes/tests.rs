@@ -1,6 +1,8 @@
 use super::*;
 
 use super::super::MIN_POINT_ROOM;
+#[cfg(test)]
+use tutti_plugin_types::fake::{at_frame, unit_value};
 
 /// **A queued write that has no room is counted, not grown into**, and
 /// reported with the other input-list drops
@@ -14,8 +16,8 @@ fn a_prepended_point_without_room_is_counted_not_grown_into() {
     // Two queues of two points: one is full of automation for 7, one is free.
     let list = unpooled(2, 2);
     let mut changes = ParameterChanges::reserved(1, 2);
-    changes.add_change(ParamId::new(7u32), 0, 0.1);
-    changes.add_change(ParamId::new(7u32), 4, 0.2);
+    changes.add_change(ParamId::new(7u32), at_frame(0), unit_value(0.1));
+    changes.add_change(ParamId::new(7u32), at_frame(4), unit_value(0.2));
     let mut staging = list.begin();
     staging.refill(&changes).unwrap();
 
@@ -42,7 +44,7 @@ fn a_prepended_point_without_room_is_counted_not_grown_into() {
             .map(|q| {
                 q.points
                     .iter()
-                    .map(|p| (p.sample_offset, p.value.get()))
+                    .map(|p| (i32::try_from(p.sample_offset.get()).unwrap(), p.value.get()))
                     .collect()
             })
             .unwrap_or_default()
@@ -147,7 +149,11 @@ fn changes_with(num_queues: usize, points_per: usize) -> ParameterChanges {
     let mut changes = ParameterChanges::reserved(num_queues, points_per);
     for q in 0..num_queues {
         for p in 0..points_per {
-            changes.add_change(ParamId::new(q as u32), p as i32, p as f64 * 0.01);
+            changes.add_change(
+                ParamId::new(q as u32),
+                at_frame(p as i32),
+                unit_value(p as f64 / points_per as f64),
+            );
         }
     }
     changes
@@ -370,8 +376,11 @@ fn emitted_changes_drain_into_the_reserved_set_without_allocating() {
         assert_eq!(q.points.len(), want, "parameter {id}");
     }
     let third = out.queue(ParamId::new(2 * pooled)).expect("queued");
-    let last = floor as i32;
-    assert_eq!(third.points.last().map(|p| p.sample_offset), Some(last));
+    let last = floor as u32;
+    assert_eq!(
+        third.points.last().map(|p| p.sample_offset.get()),
+        Some(last)
+    );
 }
 
 /// The host's chunk at the pool budget: `params` parameters with a room
@@ -392,8 +401,8 @@ fn pooled_chunk(params: u32, room: usize, first: u32) -> ParameterChanges {
             }
             changes.add_change(
                 ParamId::new(id),
-                2 * k as i32,
-                ((id as usize + k) % 5) as f64 / 8.0,
+                at_frame(2 * k as i32),
+                unit_value(((id as usize + k) % 5) as f64 / 8.0),
             );
         }
     }
@@ -472,7 +481,7 @@ fn a_chunk_with_carried_values_refills_whole() {
         assert!(chunk.prepend_carried(
             i,
             tutti_plugin_types::ParameterPoint {
-                sample_offset: 0,
+                sample_offset: at_frame(0),
                 value: tutti_units::Normalized::of(0.25),
             },
         ));
@@ -484,7 +493,7 @@ fn a_chunk_with_carried_values_refills_whole() {
         let want: Vec<(i32, f64)> = q
             .points
             .iter()
-            .map(|p| (p.sample_offset, p.value.get()))
+            .map(|p| (i32::try_from(p.sample_offset.get()).unwrap(), p.value.get()))
             .collect();
         assert_eq!(points, &want, "parameter {id}");
     }
@@ -533,7 +542,7 @@ fn a_chunk_at_the_pool_budget_refills_per_parameter_without_allocating() {
         let want: Vec<(i32, f64)> = q
             .points
             .iter()
-            .map(|p| (p.sample_offset, p.value.get()))
+            .map(|p| (i32::try_from(p.sample_offset.get()).unwrap(), p.value.get()))
             .collect();
         assert_eq!(points, &want, "parameter {id}");
         assert!(points.windows(2).all(|w| w[0].0 <= w[1].0));
@@ -551,8 +560,8 @@ fn a_chunk_at_the_pool_budget_refills_per_parameter_without_allocating() {
     for p in &last.points {
         assert!(grown.points.push(*p).is_ok());
     }
-    assert!(grown.add_point(200, 0.25));
-    assert!(grown.add_point(300, 0.875));
+    assert!(grown.add_point(at_frame(200), unit_value(0.25)));
+    assert!(grown.add_point(at_frame(300), unit_value(0.875)));
     *last = grown;
     assert_no_alloc::assert_no_alloc(|| list.begin().refill(&over).unwrap());
     assert_eq!(list.points_dropped(), 1);
