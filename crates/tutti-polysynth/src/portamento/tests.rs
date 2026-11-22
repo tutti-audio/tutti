@@ -3,10 +3,7 @@ use tutti_curve::Exponent;
 
 #[test]
 fn test_no_glide() {
-    let config = PortamentoConfig {
-        mode: PortamentoMode::Off,
-        ..Default::default()
-    };
+    let config = PortamentoConfig::new().mode(PortamentoMode::Off);
     let mut porta = Portamento::new(config, SampleRate::SR_44K1, Hz::new(440.0));
 
     porta.retarget(Hz::new(880.0), false);
@@ -16,11 +13,10 @@ fn test_no_glide() {
 
 #[test]
 fn test_always_glide() {
-    let config = PortamentoConfig {
-        mode: PortamentoMode::Always,
-        time: GlideTime::of(Seconds::new(0.01)), // 10ms
-        ..Default::default()
-    };
+    let config = PortamentoConfig::new()
+        .mode(PortamentoMode::Always)
+        // 10ms
+        .time(GlideTime::of(Seconds::new(0.01)));
     let mut porta = Portamento::new(config, SampleRate::SR_44K1, Hz::new(440.0));
 
     porta.reset(Hz::new(440.0));
@@ -41,11 +37,9 @@ fn test_always_glide() {
 
 #[test]
 fn test_legato_only() {
-    let config = PortamentoConfig {
-        mode: PortamentoMode::LegatoOnly,
-        time: GlideTime::of(Seconds::new(0.01)),
-        ..Default::default()
-    };
+    let config = PortamentoConfig::new()
+        .mode(PortamentoMode::LegatoOnly)
+        .time(GlideTime::of(Seconds::new(0.01)));
     let mut porta = Portamento::new(config, SampleRate::SR_44K1, Hz::new(440.0));
 
     porta.reset(Hz::new(440.0));
@@ -67,12 +61,10 @@ fn test_curve_shapes() {
         Law::PowerIn(Exponent::of(2.0)),
         Law::PowerIn(Exponent::of(0.5)),
     ] {
-        let config = PortamentoConfig {
-            mode: PortamentoMode::Always,
-            curve,
-            time: GlideTime::of(Seconds::new(0.01)),
-            ..Default::default()
-        };
+        let config = PortamentoConfig::new()
+            .mode(PortamentoMode::Always)
+            .curve(curve)
+            .time(GlideTime::of(Seconds::new(0.01)));
         let mut porta = Portamento::new(config, SampleRate::SR_44K1, Hz::new(440.0));
 
         porta.reset(Hz::new(440.0));
@@ -99,13 +91,11 @@ fn advance_is_that_many_ticks() {
         Law::PowerIn(Exponent::of(2.0)),
         Law::PowerIn(Exponent::of(0.5)),
     ] {
-        let config = PortamentoConfig {
-            mode: PortamentoMode::Always,
-            curve,
+        let config = PortamentoConfig::new()
+            .mode(PortamentoMode::Always)
+            .curve(curve)
             // 44.1 frames: a glide that ends mid-step.
-            time: GlideTime::of(Seconds::new(0.001)),
-            ..Default::default()
-        };
+            .time(GlideTime::of(Seconds::new(0.001)));
         let (mut by_tick, mut by_advance) = (
             Portamento::new(config.clone(), SampleRate::SR_44K1, Hz::new(440.0)),
             Portamento::new(config, SampleRate::SR_44K1, Hz::new(440.0)),
@@ -164,11 +154,9 @@ fn a_glide_follows_its_law_in_cents() {
             (95.0, 97.0, 0.05),
         ] {
             let mut porta = Portamento::new(
-                PortamentoConfig {
-                    mode: PortamentoMode::Always,
-                    curve: law,
-                    ..Default::default()
-                },
+                PortamentoConfig::new()
+                    .mode(PortamentoMode::Always)
+                    .curve(law),
                 rate,
                 Hz::new(440.0),
             );
@@ -258,12 +246,10 @@ fn a_constant_rate_glide_scales_with_the_interval_and_floors_at_a_tenth() {
     let rate = SampleRate::SR_48K;
     let frames_of = |from: f64, to: f64| {
         let mut porta = Portamento::new(
-            PortamentoConfig {
-                mode: PortamentoMode::Always,
-                time: GlideTime::of(Seconds::new(1.0)),
-                constant_time: false,
-                ..Default::default()
-            },
+            PortamentoConfig::new()
+                .mode(PortamentoMode::Always)
+                .time(GlideTime::of(Seconds::new(1.0)))
+                .constant_time(false),
             rate,
             Hz::new(from),
         );
@@ -292,10 +278,7 @@ fn a_constant_rate_glide_scales_with_the_interval_and_floors_at_a_tenth() {
 #[test]
 fn a_glider_rests_on_the_pitch_it_is_given() {
     let mut porta = Portamento::new(
-        PortamentoConfig {
-            mode: PortamentoMode::Always,
-            ..Default::default()
-        },
+        PortamentoConfig::new().mode(PortamentoMode::Always),
         SampleRate::SR_48K,
         Hz::new(330.0),
     );

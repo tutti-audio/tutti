@@ -4,6 +4,10 @@
 //! needs an audio endpoint: those tests are `synth-tests`', and CI installs a
 //! virtual audio driver before it runs them.
 
+/// An allocation inside an `RtScope` aborts the running test.
+#[global_allocator]
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
+
 #[cfg(windows)]
 mod gs_synth;
 #[cfg(all(windows, feature = "synth-tests"))]

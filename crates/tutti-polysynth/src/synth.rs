@@ -180,34 +180,73 @@ impl fmt::Display for FilterType {
 ///
 /// Evaluated once per control step (at most 16 frames apart), on the audio
 /// thread; the filter coefficients are ramped per sample between steps.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FilterModConfig {
+    pub(crate) mod_wheel_depth: Depth,
+    pub(crate) velocity_depth: Depth,
+    pub(crate) lfo_rate: Option<Hz>,
+    pub(crate) lfo_depth: Depth,
+}
+
+impl FilterModConfig {
+    /// No routing: every depth zero and no LFO, which skips the modulation block.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            mod_wheel_depth: Depth::of(0.0),
+            velocity_depth: Depth::of(0.0),
+            lfo_rate: None,
+            lfo_depth: Depth::of(0.0),
+        }
+    }
+
     /// How far the mod wheel (CC1) opens the filter, as a [`Depth`] in 0.0..1.0.
     /// At 1.0 a fully-open wheel doubles the cutoff frequency; at 0.0 (the
     /// default) the wheel is unrouted.
-    pub mod_wheel_depth: Depth,
+    #[must_use]
+    pub const fn mod_wheel_depth(mut self, depth: Depth) -> Self {
+        self.mod_wheel_depth = depth;
+        self
+    }
+
     /// How far note velocity opens the filter, as a [`Depth`] in 0.0..1.0.
     /// At 1.0 the softest note halves the cutoff and the hardest leaves it at
-    /// the base value — velocity only ever darkens. Per-note, latched at
+    /// the base value: velocity only ever darkens. Per-note, latched at
     /// note-on from that voice's velocity.
-    pub velocity_depth: Depth,
-    /// LFO rate in [`Hz`], above zero. `None` (the default) has no LFO — the
-    /// sweep block is skipped, so a nonzero [`lfo_depth`](Self::lfo_depth)
-    /// alone does nothing.
-    ///
-    /// The one [`Hz`] among three [`Depth`]s, sitting between two depths that
-    /// read nothing like a frequency — as bare floats any permutation of the
-    /// four compiles.
-    pub lfo_rate: Option<Hz>,
+    #[must_use]
+    pub const fn velocity_depth(mut self, depth: Depth) -> Self {
+        self.velocity_depth = depth;
+        self
+    }
+
+    /// The LFO rate in [`Hz`], above zero. Without one (the default) there is no LFO:
+    /// the sweep block is skipped, so a nonzero [`lfo_depth`](Self::lfo_depth) alone
+    /// does nothing.
+    #[must_use]
+    pub const fn lfo_rate(mut self, rate: Hz) -> Self {
+        self.lfo_rate = Some(rate);
+        self
+    }
+
     /// How far the LFO sweeps the cutoff, as a [`Depth`] in 0.0..1.0. At 1.0
     /// the sine sweeps cutoff ±50% around its base. Needs an
     /// [`lfo_rate`](Self::lfo_rate) to do anything.
-    pub lfo_depth: Depth,
+    #[must_use]
+    pub const fn lfo_depth(mut self, depth: Depth) -> Self {
+        self.lfo_depth = depth;
+        self
+    }
+}
+
+impl Default for FilterModConfig {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Everything a [`PolySynth`](crate::PolySynth) is built from.
 ///
-/// Fill it with `Default` plus struct update, and hand it to
+/// Start from [`SynthConfig::new`], chain the options that differ, and hand it to
 /// [`PolySynth::new`](crate::PolySynth::new). The rate is not here: the synth
 /// renders at the rate its graph prepares it at.
 ///
@@ -223,85 +262,33 @@ pub struct FilterModConfig {
 /// synth is built.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SynthConfig {
-    /// How many notes may sound at once. At least 1 (the type refuses 0); there
-    /// is no upper bound. Every voice is fully constructed up front, so this is
-    /// a memory and CPU budget rather than just a ceiling: 64 voices of saw
-    /// through a ladder filter is real work every block.
-    pub polyphony: NonZeroUsize,
-    /// Poly, mono or legato. Under mono and legato only slot 0 is ever used,
-    /// whatever `polyphony` says.
-    pub voice_mode: VoiceMode,
-    /// The waveform every voice generates. Construction-only.
-    pub oscillator: OscillatorType,
-    /// The filter every voice runs. The variant is construction-only; its
-    /// cutoff moves at runtime under [`filter_mod`](Self::filter_mod), CC74 and
-    /// MPE slide.
-    pub filter: FilterType,
-    /// Where the [`Moog`](FilterType::Moog) ladder's `tanh` saturators sit: the cheap
-    /// [`Input`](LadderSaturation::Input) model or the [`PerStage`](LadderSaturation::PerStage)
-    /// one, which costs several times more per sample and saturates the way
-    /// `LadderFilterNode` does. Default `PerStage`. Construction-only; no other filter reads it.
-    /// Both run the lanes' approximate `tanh` (see [`LadderSaturation`]).
-    pub ladder_saturation: LadderSaturation,
-    /// The amplitude envelope every voice's gate drives. Construction-only, and
-    /// its release sets the synth's reported `tail()`.
-    pub envelope: Adsr,
-    /// The glide the synth gives a note on its own, whatever the stream says, or
-    /// `None` for none. A note also glides when the MIDI stream asks for it:
-    /// Portamento On/Off (CC 65) with Portamento Time (CC 5) on its channel, or a
-    /// Portamento Control (CC 84), which `tutti-voicing` resolves; that glide
-    /// is the stream's and replaces this one for the note it is for. Each voice
-    /// glides alone.
-    pub portamento: Option<PortamentoConfig>,
-    /// Detuned stacked sub-voices per note, or `None` for one oscillator per
-    /// voice. `Some` allocates that many sub-voice lanes *per voice*, so
-    /// the real oscillator count is `polyphony * voice_count`. As with
-    /// portamento, a synth built with `None` has no unison engine to configure
-    /// later.
-    pub unison: Option<UnisonConfig>,
-    /// Which voice gets taken when all `polyphony` voices are busy and another
-    /// note arrives.
-    pub allocation_strategy: AllocationStrategy,
-    /// The scale the synth starts with: stored as tuning program 0 of bank 0
-    /// (the MIDI Tuning Standard's table, [`Tuning::table`]), which every channel
-    /// plays until a Tuning Program or Bank Select says otherwise. The note
-    /// logic keeps every later change to it; defaults to 12-tone equal
-    /// temperament with A4 = 440 Hz.
-    pub tuning: Tuning,
-    /// How far a full-scale channel pitch bend sweeps, in [`Semitones`],
-    /// applied symmetrically either side of the note: each channel's default,
-    /// which its Pitch Bend Sensitivity RPN (0) sets. Default 2.0, the MIDI
-    /// convention of a whole tone. Applied as a frequency ratio,
-    /// so it bends by the same interval in every [`tuning`](Self::tuning).
-    pub pitch_bend_range: Semitones,
-    /// Cutoff modulation sources. All depths default to zero, which skips the
-    /// per-sample modulation work entirely.
-    pub filter_mod: FilterModConfig,
-    /// The Group whose sixteen channels this synth plays; a message in
-    /// another Group is not read. A Group is a channel space of its own (M2-104
-    /// section 2.1.2, Appendix B.1), so its channels' notes, wheels, pedals and
-    /// MPE zones are not another Group's. Default the first.
-    pub group: MidiGroup,
-    /// The Universal System Exclusive device id this synth answers to besides
-    /// the all-call (M1 p.40): a message addressed to it, or to all, is read
-    /// (Master Volume, Balance and Tuning, General MIDI System On and Off).
-    /// Master Volume and Balance keep what arrives on this id apart from what
-    /// arrives on the all-call (M1 p.57). Default [`SysexDeviceId::DEFAULT`].
-    pub device: SysexDeviceId,
-    /// The master output gain the synth starts at, a linear [`Amplitude`]: `1.0` (the
-    /// default) is unity, `0.0` silence, and values above unity boost. Applied once per block to the summed mix, not per voice. Once the synth
-    /// is in a graph its gain is its `ParamSet` entry, `Volume`, which a host writes and a
-    /// modulation lane takes as its knob.
-    pub volume: MasterVolume,
+    pub(crate) polyphony: NonZeroUsize,
+    pub(crate) voice_mode: VoiceMode,
+    pub(crate) oscillator: OscillatorType,
+    pub(crate) filter: FilterType,
+    pub(crate) ladder_saturation: LadderSaturation,
+    pub(crate) envelope: Adsr,
+    pub(crate) portamento: Option<PortamentoConfig>,
+    pub(crate) unison: Option<UnisonConfig>,
+    pub(crate) allocation_strategy: AllocationStrategy,
+    pub(crate) tuning: Tuning,
+    pub(crate) pitch_bend_range: Semitones,
+    pub(crate) filter_mod: FilterModConfig,
+    pub(crate) group: MidiGroup,
+    pub(crate) device: SysexDeviceId,
+    pub(crate) volume: MasterVolume,
 }
 
 impl SynthConfig {
-    /// The polyphony of [`Default`]: 8 voices.
+    /// The polyphony of [`new`](Self::new): 8 voices.
     pub const DEFAULT_POLYPHONY: NonZeroUsize = NonZeroUsize::new(8).unwrap();
-}
 
-impl Default for SynthConfig {
-    fn default() -> Self {
+    /// A synth of 8 poly voices playing a saw with no filter, no portamento and no unison,
+    /// the default envelope, the oldest voice stolen first, 12-tone equal temperament, a
+    /// whole-tone bend, no filter modulation, the first Group, the default device id and
+    /// unity volume.
+    #[must_use]
+    pub fn new() -> Self {
         Self {
             polyphony: Self::DEFAULT_POLYPHONY,
             voice_mode: VoiceMode::Poly,
@@ -314,11 +301,162 @@ impl Default for SynthConfig {
             allocation_strategy: AllocationStrategy::Oldest,
             tuning: Tuning::equal_temperament(),
             pitch_bend_range: Semitones::new(2.0),
-            filter_mod: FilterModConfig::default(),
+            filter_mod: FilterModConfig::new(),
             group: MidiGroup::FIRST,
             device: SysexDeviceId::DEFAULT,
             volume: MasterVolume::UNITY,
         }
+    }
+
+    /// How many notes may sound at once. At least 1 (the type refuses 0); there
+    /// is no upper bound. Every voice is fully constructed up front, so this is
+    /// a memory and CPU budget rather than just a ceiling: 64 voices of saw
+    /// through a ladder filter is real work every block.
+    #[must_use]
+    pub fn polyphony(mut self, polyphony: NonZeroUsize) -> Self {
+        self.polyphony = polyphony;
+        self
+    }
+
+    /// Poly, mono or legato. Under mono and legato only slot 0 is ever used,
+    /// whatever `polyphony` says.
+    #[must_use]
+    pub fn voice_mode(mut self, voice_mode: VoiceMode) -> Self {
+        self.voice_mode = voice_mode;
+        self
+    }
+
+    /// The waveform every voice generates. Construction-only.
+    #[must_use]
+    pub fn oscillator(mut self, oscillator: OscillatorType) -> Self {
+        self.oscillator = oscillator;
+        self
+    }
+
+    /// The filter every voice runs. The variant is construction-only; its
+    /// cutoff moves at runtime under [`filter_mod`](Self::filter_mod), CC74 and
+    /// MPE slide.
+    #[must_use]
+    pub fn filter(mut self, filter: FilterType) -> Self {
+        self.filter = filter;
+        self
+    }
+
+    /// Where the [`Moog`](FilterType::Moog) ladder's `tanh` saturators sit: the cheap
+    /// [`Input`](LadderSaturation::Input) model or the [`PerStage`](LadderSaturation::PerStage)
+    /// one, which costs several times more per sample and saturates the way
+    /// `LadderFilterNode` does. Default `PerStage`. Construction-only; no other filter reads it.
+    /// Both run the lanes' approximate `tanh` (see [`LadderSaturation`]).
+    #[must_use]
+    pub fn ladder_saturation(mut self, ladder_saturation: LadderSaturation) -> Self {
+        self.ladder_saturation = ladder_saturation;
+        self
+    }
+
+    /// The amplitude envelope every voice's gate drives. Construction-only, and
+    /// its release sets the synth's reported `tail()`.
+    #[must_use]
+    pub fn envelope(mut self, envelope: Adsr) -> Self {
+        self.envelope = envelope;
+        self
+    }
+
+    /// The glide the synth gives a note on its own, whatever the stream says; without
+    /// one (the default) the synth has no glide state. A note also glides when the MIDI stream asks for it:
+    /// Portamento On/Off (CC 65) with Portamento Time (CC 5) on its channel, or a
+    /// Portamento Control (CC 84), which `tutti-voicing` resolves; that glide
+    /// is the stream's and replaces this one for the note it is for. Each voice
+    /// glides alone.
+    #[must_use]
+    pub fn portamento(mut self, portamento: PortamentoConfig) -> Self {
+        self.portamento = Some(portamento);
+        self
+    }
+
+    /// Detuned stacked sub-voices per note; without it (the default) each voice runs one
+    /// oscillator. It allocates that many sub-voice lanes *per voice*, so
+    /// the real oscillator count is `polyphony * voice_count`. As with
+    /// portamento, a synth built without it has no unison engine to configure
+    /// later.
+    #[must_use]
+    pub fn unison(mut self, unison: UnisonConfig) -> Self {
+        self.unison = Some(unison);
+        self
+    }
+
+    /// Which voice gets taken when all `polyphony` voices are busy and another
+    /// note arrives.
+    #[must_use]
+    pub fn allocation_strategy(mut self, allocation_strategy: AllocationStrategy) -> Self {
+        self.allocation_strategy = allocation_strategy;
+        self
+    }
+
+    /// The scale the synth starts with: stored as tuning program 0 of bank 0
+    /// (the MIDI Tuning Standard's table, [`Tuning::table`]), which every channel
+    /// plays until a Tuning Program or Bank Select says otherwise. The note
+    /// logic keeps every later change to it; defaults to 12-tone equal
+    /// temperament with A4 = 440 Hz.
+    #[must_use]
+    pub fn tuning(mut self, tuning: Tuning) -> Self {
+        self.tuning = tuning;
+        self
+    }
+
+    /// How far a full-scale channel pitch bend sweeps, in [`Semitones`],
+    /// applied symmetrically either side of the note: each channel's default,
+    /// which its Pitch Bend Sensitivity RPN (0) sets. Default 2.0, the MIDI
+    /// convention of a whole tone. Applied as a frequency ratio,
+    /// so it bends by the same interval in every [`tuning`](Self::tuning).
+    #[must_use]
+    pub fn pitch_bend_range(mut self, pitch_bend_range: Semitones) -> Self {
+        self.pitch_bend_range = pitch_bend_range;
+        self
+    }
+
+    /// Cutoff modulation sources. All depths default to zero, which skips the
+    /// per-sample modulation work entirely.
+    #[must_use]
+    pub fn filter_mod(mut self, filter_mod: FilterModConfig) -> Self {
+        self.filter_mod = filter_mod;
+        self
+    }
+
+    /// The Group whose sixteen channels this synth plays; a message in
+    /// another Group is not read. A Group is a channel space of its own (M2-104
+    /// section 2.1.2, Appendix B.1), so its channels' notes, wheels, pedals and
+    /// MPE zones are not another Group's. Default the first.
+    #[must_use]
+    pub fn group(mut self, group: MidiGroup) -> Self {
+        self.group = group;
+        self
+    }
+
+    /// The Universal System Exclusive device id this synth answers to besides
+    /// the all-call (M1 p.40): a message addressed to it, or to all, is read
+    /// (Master Volume, Balance and Tuning, General MIDI System On and Off).
+    /// Master Volume and Balance keep what arrives on this id apart from what
+    /// arrives on the all-call (M1 p.57). Default [`SysexDeviceId::DEFAULT`].
+    #[must_use]
+    pub fn device(mut self, device: SysexDeviceId) -> Self {
+        self.device = device;
+        self
+    }
+
+    /// The master output gain the synth starts at, a linear [`Amplitude`]: `1.0` (the
+    /// default) is unity, `0.0` silence, and values above unity boost. Applied once per block to the summed mix, not per voice. Once the synth
+    /// is in a graph its gain is its `ParamSet` entry, `Volume`, which a host writes and a
+    /// modulation lane takes as its knob.
+    #[must_use]
+    pub fn volume(mut self, volume: MasterVolume) -> Self {
+        self.volume = volume;
+        self
+    }
+}
+
+impl Default for SynthConfig {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

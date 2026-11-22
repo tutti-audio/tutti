@@ -53,7 +53,7 @@ fn data_commands(sim: &Sim, dir: Direction) -> Vec<UmpData> {
 
 // ---- Establishing a Session ----
 
-/// Spec: m2-124/6.4#1, m2-124/6.5#1, m2-124/6.5#5, m2-124/6.5#8
+/// Spec: m2-124/6.4#1, m2-124/6.5#1, m2-124/6.5#5, m2-124/6.5#8, m2-124/6.4#6
 #[test]
 fn an_invitation_to_an_open_host_establishes_both_ends_and_each_learns_the_other() {
     let mut sim = Sim::open();
@@ -76,7 +76,7 @@ fn an_invitation_to_an_open_host_establishes_both_ends_and_each_learns_the_other
     );
 }
 
-/// Spec: m2-124/6.6#1, m2-124/6.6#2
+/// Spec: m2-124/6.6#1, m2-124/6.6#2, m2-124/6.4#6
 #[test]
 fn a_pending_reply_waits_for_the_application_then_accepts() {
     let mut sim = Sim::new(
@@ -103,6 +103,7 @@ fn a_pending_reply_waits_for_the_application_then_accepts() {
     assert_eq!(sim.host.state(client_addr()), SessionState::Established);
 }
 
+/// Spec: m2-124/6.4#6
 #[test]
 fn a_declined_invitation_ends_with_the_user_declined_reason() {
     let mut sim = Sim::new(
@@ -147,7 +148,7 @@ fn a_lost_invitation_is_repeated_and_the_lost_reply_is_answered_again() {
     assert_eq!(invitations, 2);
 }
 
-/// Spec: m2-124/6.4#4, m2-124/6.4#5
+/// Spec: m2-124/6.4#4, m2-124/6.4#5, m2-124/6.2#3
 #[test]
 fn an_unanswered_invitation_is_cancelled_with_a_bye_after_the_timeout() {
     let mut sim = Sim::open();
@@ -272,7 +273,7 @@ fn secret_sim(client_secret: &str) -> Sim {
     )
 }
 
-/// Spec: m2-124/6.7#1, m2-124/6.7#3, m2-124/6.7#4, m2-124/6.7#12, m2-124/6.9#1, m2-124/6.9#3
+/// Spec: m2-124/6.7#1, m2-124/6.7#3, m2-124/6.7#4, m2-124/6.7#12, m2-124/6.9#1, m2-124/6.9#3, m2-124/6.4#6
 #[test]
 fn the_right_shared_secret_establishes_the_session() {
     let mut sim = secret_sim("5483");
@@ -544,7 +545,7 @@ fn users_sim(user: &str, password: &str) -> Sim {
     )
 }
 
-/// Spec: m2-124/6.8#1, m2-124/6.8#3, m2-124/6.8#4, m2-124/6.8#10, m2-124/6.10#1
+/// Spec: m2-124/6.8#1, m2-124/6.8#3, m2-124/6.8#4, m2-124/6.8#10, m2-124/6.10#1, m2-124/6.10#4
 #[test]
 fn a_known_user_with_the_right_password_establishes_the_session() {
     let mut sim = users_sim("Rosa", "RPBqBno");
@@ -556,7 +557,7 @@ fn a_known_user_with_the_right_password_establishes_the_session() {
     ));
 }
 
-/// Spec: m2-124/6.8#11, m2-124/6.10#5
+/// Spec: m2-124/6.8#11, m2-124/6.10#5, m2-124/6.10#4
 #[test]
 fn an_unknown_user_is_told_the_user_was_not_found() {
     let mut sim = users_sim("Bob", "RPBqBno");
@@ -1524,7 +1525,7 @@ fn data_outside_a_session_gets_a_bye_for_session_not_established() {
 
 // ---- Session reset ----
 
-/// Spec: m2-124/6.11#4, m2-124/6.11#8, m2-124/6.11#11, m2-124/6.11#12, m2-124/6.12#1, m2-124/6.12#2
+/// Spec: m2-124/6.11#4, m2-124/6.11#8, m2-124/6.11#10, m2-124/6.11#11, m2-124/6.11#12, m2-124/6.12#1, m2-124/6.12#2
 #[test]
 fn a_reset_zeroes_both_sequence_numbers_and_flushes_the_buffers() {
     let mut sim = established();

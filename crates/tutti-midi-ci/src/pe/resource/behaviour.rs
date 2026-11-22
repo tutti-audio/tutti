@@ -168,6 +168,7 @@ fn request_id(actions: &[ResponderAction]) -> PeRequestId {
 // M2-103 §5.3, §11.1: a Subscription message waits for a Request ID when the
 // Initiator takes one at a time, goes when the reply to the one before arrives,
 // and carries the data as it is then.
+/// Spec: m2-103/11#9
 #[test]
 fn an_update_waits_for_a_free_request_id_and_carries_the_data_as_it_is_then() {
     let (mut link, target) = subscribed_link(1, PeResource::ChannelList, None);
@@ -457,7 +458,7 @@ fn long_channel_link() -> Link {
 
 // M2-103 §15.2: under Flow Control the Responder sends a chunk, waits for the ACK that
 // asks for the next, and the last chunk needs its ACK too.
-/// Spec: m2-103/15.2#1
+/// Spec: m2-103/15.2#1, m2-101/8.8#1
 #[test]
 fn a_flow_controlled_reply_goes_a_chunk_for_each_ack() {
     let mut link = long_channel_link();
@@ -610,7 +611,7 @@ fn a_set_under_flow_control_is_acked_a_chunk_at_a_time() {
 
 // M2-103 §15.3, Table 15: a Set that does not use Flow Control on a Resource with
 // `fcOnSet` is 407, and one that does on a Resource without it is 406.
-/// Spec: m2-103/15.3#2, m2-103/15.3#3
+/// Spec: m2-103/15.3#2, m2-103/15.3#3, m2-101/8.10#1, m2-103/7.4#5
 #[test]
 fn a_set_answers_407_without_flow_control_and_406_with_it_unasked() {
     let mut raw = Raw::new();
@@ -639,7 +640,7 @@ fn a_set_answers_407_without_flow_control_and_406_with_it_unasked() {
 
 // M2-103 §12.2.1: a Responder that cannot answer in time sends an ACK that asks the
 // Initiator to wait, and answers when it can.
-/// Spec: m2-103/12.2.1#1
+/// Spec: m2-103/12.2.1#1, m2-103/12.2#1
 #[test]
 fn a_busy_resource_is_answered_with_a_timeout_wait_and_then_the_reply() {
     let mut link = Link::new(store(), 256);
@@ -733,6 +734,7 @@ fn reply_header(link: &Link, to_initiator: bool) -> Vec<super::super::header::Pe
 
 // M2-103 §6.1.5, §7.5: Property Data that is not JSON comes with its `mediaType` and
 // reaches the caller as bytes with that type.
+/// Spec: m2-103/6.1.5#1, m2-103/7.1#3, m2-103/7.5#1, m2-103/14.6#2
 #[test]
 fn binary_property_data_reaches_the_caller_with_its_media_type() {
     let mut link = Link::new(store(), 256);
@@ -978,6 +980,7 @@ fn selector_channels() -> &'static str {
 }
 
 // M2-103 §13.1.2 Table 73: a ChannelList with a `selectorAction` Link.
+/// Spec: m2-103/13.1.2#2
 #[test]
 fn a_selector_action_link_reads_table_73() {
     let data = PeData::decode(&PeResource::ChannelList, &json(selector_channels())).unwrap();
@@ -1045,6 +1048,7 @@ fn a_selector_action_requires_its_properties() {
 
 // M2-103 §13 Table 64: any other role is kept by its name, of at most 32
 // characters, the manufacturer's `x-` roles among them.
+/// Spec: m2-103/13#4
 #[test]
 fn another_role_is_kept_by_name() {
     let entry = |role: &str| {

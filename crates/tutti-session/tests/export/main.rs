@@ -4,6 +4,10 @@
     reason = "a test starts the threads it races, outside any executor"
 )]
 
+/// An allocation inside an `RtScope` aborts the running test.
+#[global_allocator]
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
+
 // `Session::new` is a full session: it bounces.
 #[cfg(feature = "export")]
 mod new_session;

@@ -4,6 +4,10 @@
 //! the OS), and the default harness runs every test on a thread it spawns: this target sets
 //! `harness = false` and owns `main()` (`tutti_fixtures::main_thread_cases`).
 
+/// An allocation inside an `RtScope` aborts the running test.
+#[global_allocator]
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
+
 #[path = "../support/param_reads.rs"]
 mod param_reads;
 mod vst2_in_process_fork;

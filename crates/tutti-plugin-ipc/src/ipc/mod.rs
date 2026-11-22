@@ -65,7 +65,7 @@ use tutti_units::ParamId;
 use crate::subprocess::swap_slab;
 use crate::{
     AudioSlab, Batcher, EditorLoader, IpcConfig, IpcEvent, IpcListener, LoadRequest, OfflineWait,
-    PluginBridge, ProcessGuard, Replies, Restore, SlabWriter, launch, unique_socket_path,
+    PluginBridge, ProcessGuard, Replies, Restore, SlabWriter, launch,
 };
 
 /// Where a served plugin came from: what [`Ipc::reopen_restoring`] launches
@@ -98,12 +98,7 @@ impl LaunchSpec {
     /// [`Ipc::launch`].
     pub fn reopen(&self, rate: SampleRate, state: Option<&[u8]>) -> IpcResult<Launched> {
         let executor = self.executor.upgrade().ok_or(IpcError::ShutDown)?;
-        let config = IpcConfig {
-            // Its own rendezvous: two bridges on one socket path is the
-            // collision `unique_socket_path` exists to prevent.
-            socket_path: unique_socket_path()?,
-            ..self.config.clone()
-        };
+        let config = self.config.clone();
         Ipc::launch(
             config,
             &LoadRequest {
