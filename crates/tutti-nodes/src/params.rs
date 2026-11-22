@@ -22,7 +22,7 @@ use tutti_graph::{Io, MAX_PARAM_PORTS, ParamSetBuilder};
 use tutti_units::{SampleRate, UnitAddr};
 
 use crate::kernel::MAX_SIGNALS;
-use crate::ramp::LastGood;
+use crate::last_good::LastGood;
 
 /// The most controls a kernel has: as many as a node has param ports, which the 31-band
 /// graphic equalizer's gains fill but for one.
