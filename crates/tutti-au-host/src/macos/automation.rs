@@ -23,6 +23,8 @@ use tutti_plugin_types::ParameterQueue;
 use tutti_rt::AudioThreadCell;
 
 use crate::ranges::ParamBounds;
+#[cfg(test)]
+use tutti_plugin_types::fake::{at_frame, unit_value};
 
 /// Events one block can stage across every parameter: past it a queue is
 /// written at the block head instead (the last point), which costs timing and
@@ -78,7 +80,8 @@ impl Stage {
             return false;
         }
         let points = &queue.points[..];
-        let offset = |i: usize| points[i].sample_offset.max(0);
+        // `AudioUnitParameterEvent`'s buffer offsets are `i32`: the ABI's own type.
+        let offset = |i: usize| i32::try_from(points[i].sample_offset.get()).unwrap_or(i32::MAX);
         let plain = |i: usize| bounds.word(points[i].value);
         for i in 0..points.len() {
             let next = i + 1;
@@ -154,7 +157,7 @@ mod tests {
     fn queue(id: u32, points: &[(i32, f64)]) -> ParameterQueue {
         let mut queue = ParameterQueue::with_capacity(ParamId::new(id), points.len());
         for &(offset, value) in points {
-            assert!(queue.add_point(offset, value));
+            assert!(queue.add_point(at_frame(offset), unit_value(value)));
         }
         queue
     }
@@ -262,7 +265,7 @@ mod tests {
         let bounds = ParamBounds { min: 0.0, max: 1.0 };
         let mut too_many = ParameterQueue::with_capacity(ParamId::new(1), EVENT_ROOM + 1);
         for offset in 0..=EVENT_ROOM as i32 {
-            assert!(too_many.add_point(offset, 0.5));
+            assert!(too_many.add_point(at_frame(offset), unit_value(0.5)));
         }
         assert!(!stage.stage(&too_many, bounds));
         assert!(drained(&mut stage).is_empty());

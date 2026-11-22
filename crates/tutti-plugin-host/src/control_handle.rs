@@ -267,7 +267,7 @@ impl PluginHandle {
             loaded,
             param_sink,
             // The default sinks: an in-process backend emits no refresh signal,
-            // and raises invalidations through `with_invalidate_sink`.
+            // and raises invalidations through `invalidate_sink`.
             refresh_sink: RefreshSink::default(),
             invalidate_sink: InvalidateSink::default(),
             transport_sink: TransportSink::default(),
@@ -283,7 +283,7 @@ impl PluginHandle {
     /// [`PluginInvalidation`]s.
     ///
     /// Public for `tutti-plugin`'s out-of-process-plugin handle, which also hears invalidations over its wire.
-    pub fn with_invalidate_sink(mut self, sink: InvalidateSink) -> Self {
+    pub fn invalidate_sink(mut self, sink: InvalidateSink) -> Self {
         self.invalidate_sink = sink;
         self
     }
@@ -292,7 +292,7 @@ impl PluginHandle {
     /// delivers the plugin's [`TransportRequest`]s.
     ///
     /// Public for `tutti-plugin`'s out-of-process-plugin handle, which hears them over its wire.
-    pub fn with_transport_sink(mut self, sink: TransportSink) -> Self {
+    pub fn transport_sink(mut self, sink: TransportSink) -> Self {
         self.transport_sink = sink;
         self
     }
@@ -302,7 +302,7 @@ impl PluginHandle {
     /// client, over its wire) delivers [`PluginRefresh`]es.
     ///
     /// Public for `tutti-plugin`'s out-of-process-plugin handle, which hears refreshes over its wire.
-    pub fn with_refresh_sink(mut self, sink: RefreshSink) -> Self {
+    pub fn refresh_sink(mut self, sink: RefreshSink) -> Self {
         self.refresh_sink = sink;
         self
     }
@@ -312,8 +312,8 @@ impl PluginHandle {
     /// in a process of its own.
     ///
     /// Public for `tutti-plugin`'s out-of-process-plugin handle, the only one with a subprocess to name.
-    pub fn with_server_pid(mut self, pid: Option<u32>) -> Self {
-        self.server_pid = pid;
+    pub fn with_server_pid(mut self, pid: u32) -> Self {
+        self.server_pid = Some(pid);
         self
     }
 

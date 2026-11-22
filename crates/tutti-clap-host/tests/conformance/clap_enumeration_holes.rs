@@ -46,6 +46,7 @@ use tutti_buffers::InputOutput;
 use tutti_clap_host::{ClapLoaded, ClapProcessContext, LoadOptions, ParameterChanges};
 use tutti_clap_test_plugin::params_state::probe_params;
 use tutti_clap_test_plugin::{HOLE_NONE, ProcessCapture};
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_units::ParamId;
 
 /// CLAP's `PARAM_VALUE` wire type, pinned rather than imported: it is the value
@@ -240,7 +241,7 @@ fn hole_in_params_still_denormalizes_surviving_params() {
     let expected = min + NORMALIZED * (max - min);
 
     let mut changes = ParameterChanges::reserved(1, 1);
-    changes.add_change(ParamId::new(survivor), 0, NORMALIZED);
+    changes.add_change(ParamId::new(survivor), at_frame(0), unit_value(NORMALIZED));
 
     drive_block(
         &mut inst,
@@ -313,7 +314,7 @@ fn hole_in_params_does_not_deliver_undenormalized_automation() {
 
     const NORMALIZED: f64 = 0.25;
     let mut changes = ParameterChanges::reserved(1, 1);
-    changes.add_change(ParamId::new(holed), 0, NORMALIZED);
+    changes.add_change(ParamId::new(holed), at_frame(0), unit_value(NORMALIZED));
 
     drive_block(
         &mut inst,
