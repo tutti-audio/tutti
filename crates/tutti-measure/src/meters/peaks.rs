@@ -33,7 +33,8 @@ use tutti_units::{Amplitude, Samples};
 
 use core::marker::PhantomData;
 
-use crate::convert::{Discard, for_blocks};
+use crate::convert::for_blocks;
+use crate::measure::measure_buffer;
 use crate::{Measure, MeterError, StreamMeter};
 use tutti_dsp::rms;
 
@@ -487,9 +488,7 @@ pub fn summarize<S: Sample>(
     cfg: &PeakConfig,
     buffer: Interleaved<'_, S>,
 ) -> Result<PeakBlocks, MeterError> {
-    let mut meter = Measure::<S>::measure(cfg, buffer.layout())?;
-    meter.push(buffer, &mut Discard)?;
-    Ok(meter.finish())
+    measure_buffer::<S, _>(cfg, buffer.layout(), buffer)
 }
 
 #[cfg(test)]
