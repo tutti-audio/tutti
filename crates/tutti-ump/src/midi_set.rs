@@ -2,6 +2,8 @@
 //! groups, one bit each. [`FunctionBlockSet`]: a subset of the thirty-two
 //! Function Block numbers.
 
+use crate::{FunctionBlockCount, FunctionBlockId};
+
 macro_rules! midi_set {
     ($(#[$meta:meta])* $set:ident of $item:ident) => {
         $(#[$meta])*
@@ -59,7 +61,7 @@ midi_set! {
     MidiGroupSet of MidiGroup
 }
 
-/// A set of [`FunctionBlockId`](crate::FunctionBlockId)s.
+/// A set of [`FunctionBlockId`]s: 32 bits wide, one for each block number 0 to 31.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct FunctionBlockSet(u32);
 
@@ -69,14 +71,15 @@ impl FunctionBlockSet {
 
     /// Adds `block`.
     #[inline]
-    pub const fn insert(&mut self, block: crate::FunctionBlockId) {
+    pub const fn insert(&mut self, block: FunctionBlockId) {
         self.0 |= 1 << block.get();
     }
 
-    /// Whether every block numbered below `count` is a member: the blocks an
-    /// Endpoint declares are numbered from 0.
+    /// Whether every block numbered below `count` is a member. An Endpoint that
+    /// declares `count` blocks numbers them from 0, so this answers whether all of
+    /// them are in the set.
     #[must_use]
-    pub const fn covers(self, count: crate::FunctionBlockCount) -> bool {
+    pub const fn covers(self, count: FunctionBlockCount) -> bool {
         let n = count.get();
         let below = if n >= 32 { u32::MAX } else { (1u32 << n) - 1 };
         self.0 & below == below
@@ -86,7 +89,7 @@ impl FunctionBlockSet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FunctionBlockCount, FunctionBlockId, MidiChannel, MidiGroup};
+    use crate::{MidiChannel, MidiGroup};
 
     #[test]
     fn a_function_block_set_covers_the_blocks_below_a_count() {

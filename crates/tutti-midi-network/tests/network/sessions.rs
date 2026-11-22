@@ -1458,7 +1458,8 @@ fn a_bye_with_the_longest_message_the_wire_allows_ends_the_session() {
     );
 }
 
-/// The message is advisory: a message that is not UTF-8 does not keep the Session open.
+/// The message is advisory: a Bye or NAK message that is not UTF-8 does not keep the Session open,
+/// and is counted as lost.
 /// Spec: m2-124/6.16#1, m2-124/6.16#5
 #[test]
 fn a_bye_whose_message_is_not_utf8_still_ends_the_session() {
@@ -1476,6 +1477,17 @@ fn a_bye_whose_message_is_not_utf8_still_ends_the_session() {
         sim.commands(Direction::ClientToHost)
             .contains(&Command::ByeReply)
     );
+    assert_eq!(sim.client.losses(), Losses::lost(1));
+
+    // A NAK's message is read the same way and counted the same.
+    let mut sim = established();
+    let nak = [
+        b"MIDI".as_slice(),
+        &[0x8F, 0x02, 0x03, 0x00, 0x20, 1, 0, 0],
+        b"ok\xFF\xFE",
+    ]
+    .concat();
+    sim.client.on_message(host_addr(), &nak, sim.now);
     assert_eq!(sim.client.losses(), Losses::lost(1));
 }
 
