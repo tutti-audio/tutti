@@ -397,12 +397,14 @@ pub mod dsp {
         ReferenceDistanceError, ReflectionOrder, ResampleError, Rotation, Route, ShoeboxConfig,
         ShoeboxError, ShoeboxRoom, SimdLanes, Sos, SosError, SpeakerGeometryError, SpeakerLayout,
         SpringLength, SpringLengthError, StopbandAttenuation, StopbandAttenuationError,
-        StreamCounts, System, TableSize, TableSizeError, Tap, TapSet, Tilt, TubeDrive,
-        TubeDriveError, VariableRate, VariableRateError, VariableResampler, VelvetDensity,
-        VelvetDensityError, VelvetLength, VelvetLengthError, VelvetNoise, VelvetNoiseError,
-        VelvetPulse, Wall, WaveguideBank, WaveguideControls, WaveguidePositions, WaveguideString,
-        WaveshaperControls, Wavetable, WavetableError, WavetableOscillator, WavetableStep,
-        quadrature_band,
+        StreamCounts, System, TableSize, TableSizeError, Tap, TapSet, Tilt, TransientDetector,
+        TransientThreshold, TransientThresholdError, TransientTime, TransientTimeError,
+        TransientTimes, TransientTimesError, TubeDrive, TubeDriveError, VariableRate,
+        VariableRateError, VariableResampler, VelvetDensity, VelvetDensityError, VelvetLength,
+        VelvetLengthError, VelvetNoise, VelvetNoiseError, VelvetPulse, Wall, WaveguideBank,
+        WaveguideControls, WaveguidePositions, WaveguideString, WaveshaperControls, Wavetable,
+        WavetableError, WavetableOscillator, WavetableStep, quadrature_band, spectral_bandwidth,
+        spectral_crest, spectral_slope,
     };
 }
 
@@ -670,7 +672,8 @@ pub mod measure {
     pub use tutti_measure::{
         DetectionFunction, FiniteLevel, FiniteLevelError, Framing, Novelty, Onset, OnsetConfig,
         OnsetGap, OnsetGapError, OnsetMeter, OnsetSensitivity, OnsetSensitivityError,
-        OnsetThreshold, OnsetThresholdError, Region, SilenceConfig, SilenceMeter,
+        OnsetThreshold, OnsetThresholdError, Region, SilenceConfig, SilenceMeter, TransientConfig,
+        TransientMeter, detect_transients,
     };
     // Spectrum and chroma.
     pub use tutti_measure::{

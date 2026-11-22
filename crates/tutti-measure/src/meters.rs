@@ -10,4 +10,5 @@ pub(crate) mod peaks;
 pub(crate) mod silence;
 pub(crate) mod spectrum;
 pub(crate) mod stereo;
+pub(crate) mod transient;
 pub(crate) mod vectorscope;

@@ -1130,6 +1130,34 @@ fn build_state(context: u32) -> Vec<u8> {
     bytes
 }
 
+/// The plain value a saved state holds for the table parameter `id`, `None` for an
+/// id outside the table or a state without the plugin's payload.
+///
+/// `state` is what a host stored: the payload (from [`STATE_MAGIC`]) may sit inside
+/// a wrapper, and is found by its magic. The value is the one the plugin held when it
+/// saved, in the parameter's own unit, so it is the plugin's view and not the host's.
+pub fn saved_value(state: &[u8], id: u32) -> Option<f64> {
+    let at = state
+        .windows(STATE_MAGIC.len())
+        .position(|w| w == STATE_MAGIC)?;
+    let records = state.get(at + STATE_MAGIC.len() + 1..)?;
+    let (records, _) = records.as_chunks::<12>();
+    records.iter().take(PARAMS.len()).find_map(|record| {
+        let (head, value) = record.split_at(4);
+        if u32::from_le_bytes(head.try_into().ok()?) != id {
+            return None;
+        }
+        Some(f64::from_le_bytes(value.try_into().ok()?))
+    })
+}
+
+/// [`saved_value`] over the parameter's declared range: `(plain - min) / (max - min)`.
+pub fn saved_normalized(state: &[u8], id: u32) -> Option<f64> {
+    let param = PARAMS.iter().find(|p| p.id == id)?;
+    let plain = saved_value(state, id)?;
+    Some((plain - param.min) / (param.max - param.min))
+}
+
 /// Write `bytes` to the host's ostream **in several small chunks**.
 ///
 /// Deliberately not one `write`: `clap_ostream::write` returns the bytes
@@ -1323,4 +1351,34 @@ unsafe extern "C" fn state_context_load(
     // SAFETY: a CLAP plugin entry point: the host passes the plugin pointer it was handed and
     // arguments valid per the CLAP ABI.
     unsafe { load_impl(stream, context_type) }
+}
+
+#[cfg(test)]
+mod saved_state_tests {
+    use super::*;
+
+    /// **A saved state holds each parameter's plain value at its id.** The defaults are
+    /// the table's: Cutoff 600 over `100..1100`, Gain 0 dB over `-60..12`.
+    #[test]
+    fn a_saved_state_reads_back_the_plain_value_at_each_id() {
+        ensure_values_init();
+        let state = build_state(0);
+        assert_eq!(saved_value(&state, 101), Some(600.0));
+        assert_eq!(saved_value(&state, GAIN_PARAM_ID), Some(0.0));
+        assert_eq!(saved_value(&state, 9_999), None);
+        assert_eq!(saved_value(b"TCP", 101), None);
+    }
+
+    /// **The normalized read is the plain value over the declared range**, and the
+    /// payload is found inside a wrapper.
+    #[test]
+    fn the_normalized_read_is_the_position_in_the_declared_range() {
+        ensure_values_init();
+        let mut wrapped = b"wrapper".to_vec();
+        wrapped.extend_from_slice(&build_state(0));
+        assert_eq!(saved_normalized(&wrapped, 101), Some(0.5));
+        let gain = saved_normalized(&wrapped, GAIN_PARAM_ID).unwrap();
+        assert!((gain - 60.0 / 72.0).abs() < 1e-12, "{gain}");
+        assert_eq!(saved_normalized(&wrapped, 9_999), None);
+    }
 }

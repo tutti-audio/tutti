@@ -272,7 +272,7 @@ fn a_swapped_in_plugins_latency_is_the_incoming_ones() {
     let outgoing_handle = outgoing.handle();
     let node = s.graph().add_plugin(Box::new(outgoing));
     s.graph()
-        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(node, 0)])
         .unwrap();
     let _ = s.update();
     told(&outgoing_handle, tutti_plugin_types::RenderMode::Offline);
