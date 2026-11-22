@@ -1,9 +1,10 @@
 //! Moog-style four-stage ladder filter with resonance and drive.
 //!
-//! Unlike the SVF this is a *nonlinear* filter: the resonance feedback runs
-//! through a `tanh` saturator, so pushing resonance or drive grits and
+//! Unlike the SVF this is a *nonlinear* filter: a `tanh` saturator sits at each of the four
+//! stages' inputs and in the resonance feedback, so pushing resonance or drive grits and
 //! compresses rather than blowing up. That saturation is the character, not a
-//! safety measure.
+//! safety measure. The implicit feedback loop is solved every sample, so the node is
+//! [`Cost::Heavy`](tutti_graph::Cost::Heavy).
 //!
 //! One width-generic node, [`LadderFilterNode`]. The algorithm is `tutti-dsp`'s
 //! ([`LadderBank`]); the node is a [`KernelNode`] over it, and this file holds the
@@ -15,7 +16,7 @@ use tutti_dsp::{
     BlockMismatch, LadderBank, LadderBlend, LadderControls, LadderModel, LadderType, Ramp,
     SimdLanes,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_graph::{Bus, BusRole, Buses, Shape};
 use tutti_units::{Drive, Hz, Resonance, SampleRate, Tail};
 
 use super::filter_bus;
@@ -42,9 +43,9 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// **Resonance is `0.0..=1.0`, not a [`Q`](tutti_units::Q).** It scales the
 /// ladder's feedback: `0.0` is no emphasis, and toward `1.0` the filter
 /// resonates hard at the cutoff and approaches self-oscillation. The feedback
-/// runs through a `tanh` saturator, so it grits rather than blowing up.
+/// and each stage run through a `tanh` saturator, so it grits rather than blowing up.
 ///
-/// [`Drive`] multiplies the input into that same saturator, so it is a
+/// [`Drive`] multiplies the input into the loop's saturator, so it is a
 /// distortion control rather than a level one: above unity it adds harmonics
 /// and compresses. `1.0` is clean.
 ///
@@ -184,7 +185,6 @@ impl<F: Float + SimdLanes> Kernel for LadderKernel<F> {
             Buses::main(self.input),
             Buses::NONE.with(output).expect("one bus"),
         )
-        .with_cost(Cost::Moderate)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
@@ -302,7 +302,7 @@ mod tests {
                 .res(Resonance::new(res)),
         );
         let n = 44100;
-        let amp = 0.01;
+        let amp = 1e-4;
         let x: Vec<f64> = (0..2 * n)
             .map(|i| amp * (2.0 * core::f64::consts::PI * f * i as f64 / 44100.0).sin())
             .collect();
@@ -318,7 +318,9 @@ mod tests {
 
     /// Well below the cutoff the high-passes fall 12 and 24 dB per octave
     /// (`(s/(1+s))^2` and `^4`), and resonance still lifts the cutoff above
-    /// the same filter without it.
+    /// the same filter without it. The probe is `1e-4` so the stages' saturators stay linear:
+    /// each leaves `y^2 / 3` of its signal (3e-9 here) in the tap mix, against the 24 dB
+    /// high-pass's gain of `(100 / 5000)^4 = 1.6e-7` at its lowest probe (2% of it).
     #[test]
     fn the_high_passes_have_their_documented_slopes() {
         for (ty, want) in [(LadderType::HP12, 12.0), (LadderType::HP24, 24.0)] {

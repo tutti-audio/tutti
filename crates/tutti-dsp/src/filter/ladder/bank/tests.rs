@@ -321,7 +321,7 @@ fn any_split_renders_the_frames_of_one_block() {
 
 /// A ramp is the linear blend of the two designs, coefficients and drive alike, arriving
 /// exactly on the new design at its last frame: an impulse at frame `i` into a bank with no
-/// state comes out as one `ladder_step` at the set `(i + 1) / 16` of the way from the old
+/// state comes out as one `nonlinear_ladder_step` at the set `(i + 1) / 16` of the way from the old
 /// to the new, written out here (`g1` and `k` linearly, the drive `1 -> 4`), and at frame
 /// 15 as the held render of the new design gives it, bit for bit.
 #[test]
@@ -348,12 +348,11 @@ fn a_ramp_is_linear_and_arrives_on_the_new_design() {
             g1: blend(old.coefficients.g1, new.coefficients.g1),
             k: blend(old.coefficients.k, new.coefficients.k),
         };
-        let want = ladder_step(
+        let want = nonlinear_ladder_step(
             &c,
             LadderType::HP12,
-            &mut [0.0; 4],
+            &mut LadderState::silent(),
             0.5 * blend(1.0, 4.0),
-            f64::tanh,
         );
         assert!(
             (y[i] - want).abs() <= 1e-13 * want.abs(),
@@ -406,7 +405,7 @@ fn a_retarget_in_flight_goes_on_from_where_the_ramp_was() {
         g1: mid + (a.coefficients.g1 - mid) / 16.0,
         k: a.coefficients.k,
     };
-    let want = ladder_step(&c, LadderType::HP12, &mut [0.0; 4], 0.5, f64::tanh);
+    let want = nonlinear_ladder_step(&c, LadderType::HP12, &mut LadderState::silent(), 0.5);
     assert!(
         (got - want).abs() <= 1e-13 * want.abs(),
         "{got} against {want}"

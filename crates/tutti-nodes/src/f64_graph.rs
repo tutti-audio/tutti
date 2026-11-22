@@ -301,8 +301,8 @@ fn the_crossover_bands_sum_to_a_wide_constant() {
     assert!((sum - DC).abs() <= F64_TOLERANCE, "{sum} against {DC}");
 }
 
-/// A ladder with no resonance is a saturator `tanh(drive x)` into four unity-gain stages: a
-/// constant `c` settles to `tanh(c)` at unit drive.
+/// A ladder with no resonance is four unity-gain stages, each behind a `tanh`: a constant `c`
+/// settles to `tanh` applied four times at unit drive.
 #[test]
 fn the_ladder_settles_a_wide_constant_to_its_saturation() {
     const DC: f64 = 0x2000_0001 as f64 / 2_147_483_648.0;
@@ -313,11 +313,11 @@ fn the_ladder_settles_a_wide_constant_to_its_saturation() {
             .res(Resonance::new(0.0)),
     );
     let out = render(node, RATE, &on(1, &vec![DC; FRAMES]));
+    let settled = DC.tanh().tanh().tanh().tanh();
     assert!(
-        (out[0][FRAMES - 1] - DC.tanh()).abs() <= F64_TOLERANCE,
-        "{} against {}",
-        out[0][FRAMES - 1],
-        DC.tanh()
+        (out[0][FRAMES - 1] - settled).abs() <= F64_TOLERANCE,
+        "{} against {settled}",
+        out[0][FRAMES - 1]
     );
 }
 

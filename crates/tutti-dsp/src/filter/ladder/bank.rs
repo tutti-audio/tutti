@@ -5,9 +5,9 @@ use crate::BlockMismatch;
 use crate::block::expect_widths;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, InputOutput, Planes, PlanesMut};
-use tutti_units::Real;
 
-use super::kernel::{LadderCoefficients, ladder_step};
+use super::kernel::LadderCoefficients;
+use super::solve::{LadderState, nonlinear_ladder_step};
 use super::{LadderModel, LadderType};
 use crate::channel_group::group_size;
 use crate::design::along;
@@ -49,8 +49,10 @@ impl<F: Float + SimdLanes> Lerp for LadderBlend<F> {
     }
 }
 
-/// The state of a ladder per channel: its four stage words in the float `F`, every channel
-/// read through one shared [`LadderBlend`].
+/// The state of a ladder per channel: its four stage words and its last loop solution in the
+/// float `F`, every channel read through one shared [`LadderBlend`]. Each sample solves the
+/// nonlinear ladder's loop equation with a capped Newton iteration (see the crate's `solve`
+/// module: a `tanh` at each stage's input and in the loop).
 ///
 /// The width is fixed when it is built. [`process`](Self::process) runs a block of audio
 /// through it while the design ramps toward its target and then holds. Channels run in groups
@@ -58,7 +60,7 @@ impl<F: Float + SimdLanes> Lerp for LadderBlend<F> {
 /// waits for the last), so independent channels fill that latency.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LadderBank<F> {
-    state: Box<[[F; 4]]>,
+    state: Box<[LadderState<F>]>,
 }
 
 impl<F: Float + SimdLanes> LadderBank<F> {
@@ -66,13 +68,13 @@ impl<F: Float + SimdLanes> LadderBank<F> {
     #[must_use]
     pub fn new(width: ChannelLayout) -> Self {
         Self {
-            state: vec![[F::ZERO; 4]; usize::from(width.count())].into_boxed_slice(),
+            state: vec![LadderState::silent(); usize::from(width.count())].into_boxed_slice(),
         }
     }
 
     /// Back to silence. No allocation.
     pub fn reset(&mut self) {
-        self.state.fill([F::ZERO; 4]);
+        self.state.fill(LadderState::silent());
     }
 
     /// Runs `input` into `output`, frame `i` at `blend.at(taken + 1 + i)`, then takes the
@@ -132,7 +134,7 @@ impl<F: Float + SimdLanes> LadderBank<F> {
 #[inline]
 fn group<F: Float + SimdLanes, const N: usize>(
     ramp: &Ramp<LadderBlend<F>>,
-    state: &mut [[F; 4]],
+    state: &mut [LadderState<F>],
     first: usize,
     input: &Planes<'_, F>,
     output: &mut PlanesMut<'_, '_, F>,
@@ -148,12 +150,12 @@ fn group<F: Float + SimdLanes, const N: usize>(
             .expect("a group's channels are below the output's width");
         &mut plane.into_samples_mut()[..frames]
     });
-    let mut st: [[F; 4]; N] = core::array::from_fn(|k| state[k]);
+    let mut st: [LadderState<F>; N] = core::array::from_fn(|k| state[k]);
     macro_rules! frame {
         ($i:expr, $d:expr) => {
             for k in 0..N {
                 let x = xs[k][$i] * $d.drive;
-                ys[k][$i] = ladder_step(&$d.coefficients, $d.ty, &mut st[k], x, Real::tanh);
+                ys[k][$i] = nonlinear_ladder_step(&$d.coefficients, $d.ty, &mut st[k], x);
             }
         };
     }
