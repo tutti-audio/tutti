@@ -165,11 +165,11 @@ pub enum BusError {
     },
     /// A bus edge into the main output, and the main output's topology is not declared
     /// ([`GraphSpec::main_output`] is `None`).
-    #[error("the main output's topology is not declared")]
+    #[error("the topology of the graph's main output is not declared")]
     MainOutputUndeclared,
     /// A bus edge into the main output, and the source cannot be folded to the
     /// main output's declared topology.
-    #[error("bus edge {from:?} -> main output cannot be folded: {error}")]
+    #[error("bus edge {from:?} -> the graph's main output cannot be folded: {error}")]
     MainOutputFold {
         /// The source bus.
         from: BusSource,
