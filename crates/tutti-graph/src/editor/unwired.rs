@@ -7,7 +7,7 @@ use crate::gain::EdgeFade;
 use crate::mode::NodeMix;
 use crate::node::Shape;
 use crate::param::ParamIn;
-use crate::spec::{EventEdge, EventIn, EventOut};
+use crate::spec::{EventEdge, EventInputPort, EventOutputPort};
 use crate::{Edge, EdgeId, FeedbackFrom, NodeKey, PortSink, PortSource};
 use tutti_buffers::Float;
 
@@ -41,7 +41,7 @@ pub struct Unwired {
     pub edges: Vec<EdgeId>,
     /// Event edges, direct and feedback, into an event input or out of an
     /// event output the shape lacks, by the sink port they fed.
-    pub event_edges: Vec<(EventIn, EventEdge)>,
+    pub event_edges: Vec<(EventInputPort, EventEdge)>,
     /// Bus edges into a bus the shape lacks or out of one, by the sink bus.
     pub bus_edges: Vec<(BusRef, BusFeed)>,
     /// Bus edges into the main output out of an output bus the shape lacks.
@@ -50,11 +50,11 @@ pub struct Unwired {
     /// port is gone: the port, and the event output that drove it. The
     /// source is cleared; a param the shape no longer declares loses its
     /// entry.
-    pub params: Vec<(ParamIn, EventOut)>,
+    pub params: Vec<(ParamIn, EventOutputPort)>,
     /// Edge gains driven from an event output the shape lacks: the edge, and
     /// the output that drove it. The edge keeps its gain entry and reads its
     /// base.
-    pub gains: Vec<(EdgeId, EventOut)>,
+    pub gains: Vec<(EdgeId, EventOutputPort)>,
 }
 
 impl Unwired {
@@ -121,7 +121,7 @@ impl<F: Float> Editor<F> {
         }
 
         // Event edges.
-        let mut gone_marks: Vec<(EventIn, EventOut)> = Vec::new();
+        let mut gone_marks: Vec<(EventInputPort, EventOutputPort)> = Vec::new();
         spec.events.retain(|&at, list| {
             let sink_gone = at.node == key && at.port >= ein;
             list.retain(|e| {

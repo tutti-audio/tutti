@@ -6,8 +6,8 @@
 
 use tutti_buffers::MaxBlock;
 use tutti_graph::{
-    Editor, EventEdge, EventIn, EventInletNode, EventInletWriter, EventOut, Harmony, Prepare,
-    TransportPosition,
+    Editor, EventEdge, EventInletNode, EventInletWriter, EventInputPort, EventOutputPort, Harmony,
+    Prepare, TransportPosition,
 };
 use tutti_graph::{ForkByClone, NodeKey, Stamp};
 use tutti_midi_runtime::{
@@ -35,11 +35,11 @@ fn device(ed: &mut Editor, inlet: u64) -> EventInletWriter {
     let (node, writer) = EventInletNode::pair(LIVE_INLET_CAPACITY);
     ed.insert(NodeKey(inlet), "device", node);
     ed.spec_mut().connect_events(
-        EventIn {
+        EventInputPort {
             node: NodeKey(1),
             port: 0,
         },
-        EventEdge::Direct(EventOut {
+        EventEdge::Direct(EventOutputPort {
             node: NodeKey(inlet),
             port: 0,
         }),

@@ -36,7 +36,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tutti_platform::Instant;
 
-use tutti_graph::{EventOut, NodeKey};
+use tutti_graph::{EventOutputPort, NodeKey};
 use tutti_modulation::{
     Curve, Declarations, Follower, Law, Lfo, Macro, NoteEnvelope, Polarity, RouteDecl, RouteKey,
     RouteTarget, Source, SourceKey, TargetDecl, TargetKey,
@@ -1215,7 +1215,7 @@ impl ModKeys for OwnKeys<'_> {
     fn feed(&self, source: SourceKey) -> Option<Feed> {
         Some(match self.0.sources.get(&source)?.feed? {
             OwnFeed::Audio(node) => Feed::Audio(node),
-            OwnFeed::Events(node, port) => Feed::Events(EventOut { node, port }),
+            OwnFeed::Events(node, port) => Feed::Events(EventOutputPort { node, port }),
         })
     }
 

@@ -17,8 +17,8 @@ use tutti_buffers::MaxBlock;
 use tutti_fixtures::midi;
 use tutti_graph::contract::{Direct, HAND_EVENT_CAPACITY};
 use tutti_graph::{
-    Edge, Editor, Env, EventCapacity, EventEdge, EventIn, EventInletNode, EventInletWriter,
-    EventKind, EventOut, EventTapId, EventTapOptions, EventTapReader, Executor, ForkCause,
+    Edge, Editor, Env, EventCapacity, EventEdge, EventInletNode, EventInletWriter, EventInputPort,
+    EventKind, EventOutputPort, EventTapId, EventTapOptions, EventTapReader, Executor, ForkCause,
     ForkMode, ForkSource, ForkTarget, Forked, InputPort, IntoNode, Losses, Node, NodeKey,
     NodeParts, OutputPort, PlayClock, PortSource, Prepare, Stamp, TapAlign, TapEvent,
     TransportChanges, TransportPosition,
@@ -534,11 +534,11 @@ fn graph(
     );
     for k in 1..=n {
         ed.spec_mut().connect_events(
-            EventIn {
+            EventInputPort {
                 node: NodeKey(10),
                 port: k - 1,
             },
-            EventEdge::Direct(EventOut {
+            EventEdge::Direct(EventOutputPort {
                 node: NodeKey(u64::from(k)),
                 port: 0,
             }),
@@ -597,7 +597,7 @@ fn graph(
     let tap = tap.then(|| {
         ed.open_event_tap(
             EventTapId::of(1),
-            EventOut {
+            EventOutputPort {
                 node: NodeKey(1),
                 port: 0,
             },

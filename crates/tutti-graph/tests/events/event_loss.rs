@@ -14,8 +14,8 @@ use common::test_pool;
 use tutti_fixtures::{Shared, midi};
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, Event, EventEdge, EventIn, EventKind, EventLoss, EventOut, Executor, Io, Node,
-    Prepare, Shape, Status, TransportPosition, note_off_room,
+    Cx, Editor, Event, EventEdge, EventInputPort, EventKind, EventLoss, EventOutputPort, Executor,
+    Io, Node, Prepare, Shape, Status, TransportPosition, note_off_room,
 };
 use tutti_ump::{MidiChannel, U7, Ump};
 use tutti_units::{SampleRate, Samples};
@@ -132,11 +132,11 @@ fn rig(
         );
         for p in 0..scripts.len() {
             ed.spec_mut().connect_events(
-                EventIn {
+                EventInputPort {
                     node: NodeKey(100),
                     port: next,
                 },
-                EventEdge::Direct(EventOut {
+                EventEdge::Direct(EventOutputPort {
                     node: key,
                     port: p as u16,
                 }),
@@ -326,13 +326,14 @@ impl Bounded {
             }),
         );
         let input = self.input();
-        self.ed
-            .spec_mut()
-            .connect_events(input, EventEdge::Direct(EventOut { node: key, port: 0 }));
+        self.ed.spec_mut().connect_events(
+            input,
+            EventEdge::Direct(EventOutputPort { node: key, port: 0 }),
+        );
     }
 
-    fn input(&self) -> EventIn {
-        EventIn {
+    fn input(&self) -> EventInputPort {
+        EventInputPort {
             node: NodeKey(100),
             port: 0,
         }
@@ -521,7 +522,7 @@ fn a_declared_input_bound_covers_flushed_events_and_scheduled_commands() {
             exec.set_pool(Some(test_pool(workers)));
         }
         let blocks = tutti_fixtures::BlockLog::shared();
-        let input = EventIn {
+        let input = EventInputPort {
             node: NodeKey(100),
             port: 0,
         };
@@ -553,7 +554,7 @@ fn a_declared_input_bound_covers_flushed_events_and_scheduled_commands() {
         for node in [1, 2] {
             ed.spec_mut().connect_events(
                 input,
-                EventEdge::Direct(EventOut {
+                EventEdge::Direct(EventOutputPort {
                     node: NodeKey(node),
                     port: 0,
                 }),
@@ -624,11 +625,11 @@ fn a_lone_writer_within_the_bound_gets_no_merge() {
             }),
         );
         ed.spec_mut().connect_events(
-            EventIn {
+            EventInputPort {
                 node: NodeKey(100),
                 port: 0,
             },
-            EventEdge::Direct(EventOut {
+            EventEdge::Direct(EventOutputPort {
                 node: NodeKey(1),
                 port: 0,
             }),
@@ -754,11 +755,11 @@ fn a_bypassed_node_is_sent_at_most_its_bound_of_closes_a_block() {
             }),
         );
         ed.spec_mut().connect_events(
-            EventIn {
+            EventInputPort {
                 node: NodeKey(100),
                 port: 0,
             },
-            EventEdge::Direct(EventOut {
+            EventEdge::Direct(EventOutputPort {
                 node: NodeKey(1),
                 port: 0,
             }),
@@ -869,7 +870,7 @@ fn a_cut_keeps_late_note_offs_and_delivers_in_frame_order() {
             exec.set_pool(Some(test_pool(workers)));
         }
         let blocks = tutti_fixtures::BlockLog::shared();
-        let input = EventIn {
+        let input = EventInputPort {
             node: NodeKey(100),
             port: 0,
         };
@@ -887,7 +888,7 @@ fn a_cut_keeps_late_note_offs_and_delivers_in_frame_order() {
         );
         ed.spec_mut().connect_events(
             input,
-            EventEdge::Direct(EventOut {
+            EventEdge::Direct(EventOutputPort {
                 node: NodeKey(1),
                 port: 0,
             }),

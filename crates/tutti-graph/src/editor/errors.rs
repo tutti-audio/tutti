@@ -249,7 +249,7 @@ pub enum MissingSource {
     },
     /// The node has no such event input port.
     #[error("node {} has no event input {port} (it has {width})", .node.0)]
-    EventInPort {
+    EventInputPort {
         /// The node.
         node: NodeKey,
         /// The port asked for.

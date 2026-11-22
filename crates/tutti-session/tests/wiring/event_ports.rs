@@ -8,7 +8,7 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
-use tutti_session::{ConnectError, DetachedSession, EventInPort, EventOutPort, Session};
+use tutti_session::{ConnectError, DetachedSession, EventInputPort, EventOutputPort, Session};
 use tutti_units::SampleRate;
 
 /// A node with `IN` event inputs and `OUT` event outputs and nothing else.
@@ -88,7 +88,7 @@ fn event_port_zero_is_the_main_port_and_an_index_names_another() {
     let sink = g.add(ForkByClone(Events::<2, 0>));
     assert_eq!(sink.events_in(), sink.events_in_at(0));
     assert_eq!(src.events_out(), src.events_out_at(0));
-    assert_eq!(sink.events_in().index(), 0);
+    assert_eq!(sink.events_in().port, 0);
 
     g.connect(src.events_out(), sink.events_in_at(1)).unwrap();
     assert!(
@@ -166,13 +166,13 @@ fn set_sources_covers_event_inputs() {
 
     // The refusal names the port and changes nothing.
     assert_eq!(
-        g.set_sources(input, [EventOutPort::new(a, 5)]).err(),
-        Some(ConnectError::NoSuchEventOut(EventOutPort::new(a, 5)))
+        g.set_sources(input, [EventOutputPort::new(a, 5)]).err(),
+        Some(ConnectError::NoSuchEventOut(EventOutputPort::new(a, 5)))
     );
     assert_eq!(
-        g.set_sources(EventInPort::new(sink, 3), [a.events_out()])
+        g.set_sources(EventInputPort::new(sink, 3), [a.events_out()])
             .err(),
-        Some(ConnectError::NoSuchEventIn(EventInPort::new(sink, 3)))
+        Some(ConnectError::NoSuchEventIn(EventInputPort::new(sink, 3)))
     );
     assert!(g.sources(input).unwrap().is_empty());
 }

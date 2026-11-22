@@ -13,7 +13,7 @@ use tutti_graph::{
     Cx, Event, EventCapacity, EventTapOptions, Io, MissingSource, Node, Op, Prepare, Shape, Status,
     TapAlign, TapEvent, Unforkable,
 };
-use tutti_session::{CloseError, DetachedSession, EventInPort, EventOutPort, Session};
+use tutti_session::{CloseError, DetachedSession, EventInputPort, EventOutputPort, Session};
 use tutti_ump::Ump;
 use tutti_units::{Frame, SampleRate};
 
@@ -39,7 +39,7 @@ impl Node for Every4 {
     fn reset(&mut self) {}
 }
 
-fn session() -> (DetachedSession, EventOutPort) {
+fn session() -> (DetachedSession, EventOutputPort) {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::SR_48K)
@@ -114,12 +114,12 @@ fn opening_refuses_a_port_the_graph_does_not_have() {
         s.graph()
             .taps()
             .open_event(
-                EventOutPort::new(source.node(), 3),
+                EventOutputPort::new(source.node, 3),
                 EventTapOptions::new(EventCapacity::of(8)).align(TapAlign::Raw)
             )
             .err(),
         Some(MissingSource::EventPort {
-            node: source.node(),
+            node: source.node,
             port: 3,
             width: 1
         })
@@ -241,11 +241,11 @@ fn a_tap_of_an_event_input_hears_what_the_node_hears() {
         s.graph()
             .taps()
             .open_event(
-                EventInPort::new(hears.erase(), 1),
+                EventInputPort::new(hears.erase(), 1),
                 EventTapOptions::new(EventCapacity::of(8)).align(TapAlign::Raw)
             )
             .err(),
-        Some(MissingSource::EventInPort {
+        Some(MissingSource::EventInputPort {
             node: hears.erase(),
             port: 1,
             width: 1

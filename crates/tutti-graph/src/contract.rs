@@ -102,7 +102,7 @@ use crate::node::{
 use crate::param::{ParamIn, ParamInput};
 use crate::param_event::{ParamEvent, ParamSegment};
 use crate::rtlog::{LogCapture, LogFilter, RtRecord};
-use crate::spec::{EventIn, EventOut};
+use crate::spec::{EventInputPort, EventOutputPort};
 
 mod snapshot;
 pub use snapshot::{IsolateRow, SNAPSHOT_FRAMES};
@@ -587,7 +587,7 @@ impl Row {
         }
 
         // Schedule the command now, when there is one: the plan is in.
-        let to = EventIn {
+        let to = EventInputPort {
             node: rig.node,
             port: self.event_port(),
         };
@@ -1056,9 +1056,10 @@ impl Row {
             )))));
             g.connect(lat, 0, n, 0);
         }
-        let _ = g
-            .spec_mut()
-            .connect_param(ParamIn { node: n, param }, EventOut { node: src, port: 0 });
+        let _ = g.spec_mut().connect_param(
+            ParamIn { node: n, param },
+            EventOutputPort { node: src, port: 0 },
+        );
         g.connect_output(n, self.output as usize, 0);
         let (ed, exec) = g
             .build(Prepare::new(

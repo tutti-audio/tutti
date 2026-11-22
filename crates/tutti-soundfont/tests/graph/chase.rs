@@ -9,9 +9,9 @@ use std::sync::{Arc, Mutex};
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_fixtures::midi;
 use tutti_graph::{
-    Buses, Chase, Cx, Editor, EventCapacity, EventEdge, EventIn, EventInletNode, EventInletWriter,
-    EventKind, EventOut, Executor, Fade, FadeLaw, Io, Node, OutputPort, PortSource, Prepare, Shape,
-    Status, TransportPosition, Unforkable,
+    Buses, Chase, Cx, Editor, EventCapacity, EventEdge, EventInletNode, EventInletWriter,
+    EventInputPort, EventKind, EventOutputPort, Executor, Fade, FadeLaw, Io, Node, OutputPort,
+    PortSource, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{NodeKey, Stamp};
 
@@ -70,11 +70,11 @@ impl Rig {
         ed.insert(NodeKey(1), "inlet", Unforkable(inlet));
         ed.insert(NodeKey(2), "instrument", instrument);
         ed.spec_mut().connect_events(
-            EventIn {
+            EventInputPort {
                 node: NodeKey(2),
                 port: 0,
             },
-            EventEdge::Direct(EventOut {
+            EventEdge::Direct(EventOutputPort {
                 node: NodeKey(1),
                 port: 0,
             }),

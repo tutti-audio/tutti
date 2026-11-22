@@ -22,9 +22,9 @@ use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventOut, ForkMode, ForkTarget, IntoNode, Io, MAX_PARAM_PORTS, Node, NodeParts,
-    ParamEvent, ParamIn, ParamInput, ParamNode, ParamPorts, ParamPortsError, ParamSegment,
-    ParamSet, Prepare, Shape, Status, TransportPosition, param_parts,
+    Cx, Editor, EventOutputPort, ForkMode, ForkTarget, IntoNode, Io, MAX_PARAM_PORTS, Node,
+    NodeParts, ParamEvent, ParamIn, ParamInput, ParamNode, ParamPorts, ParamPortsError,
+    ParamSegment, ParamSet, Prepare, Shape, Status, TransportPosition, param_parts,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_rt::Param;
@@ -136,8 +136,8 @@ fn param(addr: UnitAddr) -> ParamIn {
     }
 }
 
-fn src_out() -> EventOut {
-    EventOut { node: SRC, port: 0 }
+fn src_out() -> EventOutputPort {
+    EventOutputPort { node: SRC, port: 0 }
 }
 
 /// Renders `frames` of the graph's two outputs in one block.

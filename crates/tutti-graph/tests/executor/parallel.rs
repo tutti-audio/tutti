@@ -20,9 +20,10 @@ use common::{Kind, TestNode, WORKERS, bits, test_pool};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventEdge, EventIn, EventKind, EventOut, Executor, ForkCause, ForkMode, ForkSource,
-    ForkTarget, Forked, IntoNode, Io, Law, Node, NodeParts, ParamIn, ParamRamp, ParamRange,
-    ParamSegment, Prepare, Schedule, Shape, Status, TransportPosition, Unforkable,
+    Cx, Editor, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor, ForkCause,
+    ForkMode, ForkSource, ForkTarget, Forked, IntoNode, Io, Law, Node, NodeParts, ParamIn,
+    ParamRamp, ParamRange, ParamSegment, Prepare, Schedule, Shape, Status, TransportPosition,
+    Unforkable,
 };
 use tutti_graph::{Edge, FeedbackFrom, InputPort, OutputPort, PortSource};
 use tutti_ump::Ump;
@@ -173,15 +174,15 @@ fn from(node: u64, port: u16) -> Edge {
     Edge::Direct(PortSource::Node(out(node, port)))
 }
 
-fn ev_out(node: u64) -> EventOut {
-    EventOut {
+fn ev_out(node: u64) -> EventOutputPort {
+    EventOutputPort {
         node: NodeKey(node),
         port: 0,
     }
 }
 
-fn consumer_in(port: u16) -> EventIn {
-    EventIn {
+fn consumer_in(port: u16) -> EventInputPort {
+    EventInputPort {
         node: NodeKey(40),
         port,
     }
@@ -300,14 +301,14 @@ fn build(ed: &mut Editor) {
         spec.connect_events(to, EventEdge::Direct(ev_out(src)));
     }
     spec.connect_events(
-        EventIn {
+        EventInputPort {
             node: NodeKey(22),
             port: 0,
         },
         EventEdge::Direct(ev_out(20)),
     );
     spec.connect_events(
-        EventIn {
+        EventInputPort {
             node: NodeKey(41),
             port: 0,
         },

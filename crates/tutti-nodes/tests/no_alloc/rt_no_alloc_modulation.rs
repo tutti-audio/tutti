@@ -399,7 +399,7 @@ impl tutti_nodes::automation::Curve for SineCurve {
 fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     use std::sync::Arc;
     use tutti_graph::NodeKey;
-    use tutti_graph::{EventOut, ParamIn, Prepare, Unforkable};
+    use tutti_graph::{EventOutputPort, ParamIn, Prepare, Unforkable};
     use tutti_graph::{OutputPort, PortSource};
     use tutti_modulation::ControlProgram;
     use tutti_nodes::automation::Exponent;
@@ -450,7 +450,7 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
                 node: p,
                 param: UnitParam::Cutoff.into(),
             },
-            EventOut { node: l, port: 0 },
+            EventOutputPort { node: l, port: 0 },
         );
         outputs.push(PortSource::Node(OutputPort { node: p, port: 0 }));
     }
@@ -733,7 +733,7 @@ fn lanes_200(
     Vec<tutti_nodes::automation::LaneControls>,
 ) {
     use tutti_graph::NodeKey;
-    use tutti_graph::{EventOut, ParamIn, ParamRange, Prepare, Unforkable};
+    use tutti_graph::{EventOutputPort, ParamIn, ParamRange, Prepare, Unforkable};
     use tutti_graph::{OutputPort, PortSource};
     use tutti_units::Samples;
     let (mut ed, exec) = tutti_graph::Editor::new(Prepare::new(
@@ -767,7 +767,7 @@ fn lanes_200(
         let key = NodeKey(2000 + k as u64);
         controls.push(ed.insert(key, "lane", lane).controls);
         ed.spec_mut()
-            .connect_param(at(k), EventOut { node: key, port: 0 });
+            .connect_param(at(k), EventOutputPort { node: key, port: 0 });
     }
     ed.commit().expect("commits");
     (ed, exec, controls)
@@ -1007,7 +1007,9 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     use std::sync::Arc;
     use tutti_graph::NodeKey;
     use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
-    use tutti_graph::{EventEdge, EventIn, EventOut, ForkByClone, ParamIn, ParamRange, Prepare};
+    use tutti_graph::{
+        EventEdge, EventInputPort, EventOutputPort, ForkByClone, ParamIn, ParamRange, Prepare,
+    };
     use tutti_modulation::{
         Adsr, Amount, ControlProgramBuilder, InputLayer, Law, LayerId, Polarity, SourceId,
     };
@@ -1087,8 +1089,8 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
                 ForkByClone(NoteEnvelopeNode::from(NoteEnvelopeConfig::new(id, adsr))),
             );
             ed.spec_mut().connect_events(
-                EventIn { node, port: 0 },
-                EventEdge::Direct(EventOut { node: src, port: 0 }),
+                EventInputPort { node, port: 0 },
+                EventEdge::Direct(EventOutputPort { node: src, port: 0 }),
             );
         }
         let input = InputLayer {
@@ -1114,15 +1116,15 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
         let lane_key = NodeKey(6000 + k as u64);
         ed.insert(lane_key, "lane", lane);
         ed.spec_mut().connect_events(
-            EventIn {
+            EventInputPort {
                 node: lane_key,
                 port: 0,
             },
-            EventEdge::Direct(EventOut { node, port: 0 }),
+            EventEdge::Direct(EventOutputPort { node, port: 0 }),
         );
         ed.spec_mut().connect_param(
             cutoff(k),
-            EventOut {
+            EventOutputPort {
                 node: lane_key,
                 port: 0,
             },

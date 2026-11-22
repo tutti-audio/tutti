@@ -20,8 +20,8 @@ use std::sync::Arc;
 
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Editor, EventEdge, EventIn, EventOut, ForkMode, ForkTarget, Law, ParamKind, ParamRamp,
-    ParamRange, ParamSegment, Prepare,
+    Editor, EventEdge, EventInputPort, EventOutputPort, ForkMode, ForkTarget, Law, ParamKind,
+    ParamRamp, ParamRange, ParamSegment, Prepare,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_modulation::ControlProgram;
@@ -85,8 +85,8 @@ fn automation_reaches_the_plugin_through_its_event_input() {
         ),
     );
     live.spec_mut().connect_events(
-        EventIn { node: key, port: 0 },
-        EventEdge::Direct(EventOut {
+        EventInputPort { node: key, port: 0 },
+        EventEdge::Direct(EventOutputPort {
             node: auto_key,
             port: 0,
         }),
@@ -155,11 +155,11 @@ fn render_gain(
     if let Some(lane) = feeder {
         live.insert(NodeKey(1), "lane", lane);
         live.spec_mut().connect_events(
-            EventIn {
+            EventInputPort {
                 node: PLUGIN,
                 port: 0,
             },
-            EventEdge::Direct(EventOut {
+            EventEdge::Direct(EventOutputPort {
                 node: NodeKey(1),
                 port: 0,
             }),
@@ -182,7 +182,7 @@ fn render_gain(
         fork_ed
             .schedule(
                 At::Frame(Frame::new(frame)),
-                EventIn {
+                EventInputPort {
                     node: PLUGIN,
                     port: 0,
                 },

@@ -72,7 +72,7 @@ use crate::plan::{
     GainPortOp, InputBound, NodeTables, Op, ParamPortOp, Placement, Plan, PlanUnit, Span, UnitIdx,
     Value, ZERO_SLOT,
 };
-use crate::spec::{EventEdge, EventIn, EventOut, ValidGraph};
+use crate::spec::{EventEdge, EventInputPort, EventOutputPort, ValidGraph};
 
 pub use verify::VerifyError;
 
@@ -88,9 +88,9 @@ pub enum CycleEdge {
     /// An event edge from `from` into `at`.
     Event {
         /// The sink port.
-        at: EventIn,
+        at: EventInputPort,
         /// The source port.
-        from: EventOut,
+        from: EventOutputPort,
     },
     /// A param edge from `from` into `at`. Param edges are always direct: a
     /// node cannot drive itself, or anything upstream of it.
@@ -98,7 +98,7 @@ pub enum CycleEdge {
         /// The param port.
         at: ParamIn,
         /// The event output that drives it.
-        from: EventOut,
+        from: EventOutputPort,
     },
     /// A lane driving the gain of an edge into input port `at`, from `from`:
     /// it runs before the sum at the port, so before its node. Like a param
@@ -108,7 +108,7 @@ pub enum CycleEdge {
         /// The port the weighted edge goes into.
         at: InputPort,
         /// The event output that drives the gain.
-        from: EventOut,
+        from: EventOutputPort,
     },
 }
 
@@ -154,9 +154,9 @@ pub enum CompileError {
     #[error("{}", event_port_out_of_range(.at, .from))]
     EventPortOutOfRange {
         /// The sink port of the bad edge.
-        at: EventIn,
+        at: EventInputPort,
         /// The source, when it is the source that is out of range.
-        from: Option<EventOut>,
+        from: Option<EventOutputPort>,
     },
     /// A node has more than [`MAX_PORTS`] channels or event ports on a side.
     #[error("node {} has {count} ports on one side; the limit is {}", .node.0, MAX_PORTS)]
@@ -195,9 +195,9 @@ pub enum CompileError {
                  timing, but the sink honours only {sink:?}", .from.node.0, .from.port, .at.node.0, .at.port)]
     ResolutionTooCoarse {
         /// The sink port.
-        at: EventIn,
+        at: EventInputPort,
         /// The source port.
-        from: EventOut,
+        from: EventOutputPort,
         /// What the edge requires.
         required: Resolution,
         /// What the sink declares.
@@ -216,7 +216,7 @@ pub enum CompileError {
         /// The param port.
         at: ParamIn,
         /// The source.
-        from: EventOut,
+        from: EventOutputPort,
     },
     /// An edge gain's source names an event output its node does not have.
     #[error("gain of an edge into {sink:?}: source {from:?} is not an output of its node")]
@@ -224,7 +224,7 @@ pub enum CompileError {
         /// The sink of the edge whose gain it drives.
         sink: PortSink,
         /// The source.
-        from: EventOut,
+        from: EventOutputPort,
     },
     /// A cycle that no feedback edge breaks. Every direct edge inside the
     /// cycle's strongly connected component is listed, in key order.
@@ -244,7 +244,7 @@ pub enum CompileError {
 /// Where an audio input reads from, before colouring.
 /// The message of a [`CompileError::EventPortOutOfRange`]: the source's port
 /// when the edge has a source, else the sink's own.
-fn event_port_out_of_range(at: &EventIn, from: &Option<EventOut>) -> String {
+fn event_port_out_of_range(at: &EventInputPort, from: &Option<EventOutputPort>) -> String {
     match from {
         Some(from) => format!(
             "event edge into node {} port {}: source node {} has no event output {}",
@@ -343,7 +343,7 @@ enum Pre {
 struct PPort {
     port: u16,
     param: tutti_units::UnitAddr,
-    from: EventOut,
+    from: EventOutputPort,
     value: u32,
 }
 
@@ -352,7 +352,7 @@ struct PPort {
 #[derive(Clone, Copy)]
 struct GPort {
     lane: u16,
-    from: EventOut,
+    from: EventOutputPort,
     value: u32,
 }
 
@@ -702,12 +702,13 @@ pub fn compile(
         generation: graph.generation(f.from.node),
         delay: f.delay,
     };
-    let event_fb_key = |at: EventIn, from: EventOut, delay: Samples| FeedbackKey::Event {
-        at,
-        from,
-        generation: graph.generation(from.node),
-        delay,
-    };
+    let event_fb_key =
+        |at: EventInputPort, from: EventOutputPort, delay: Samples| FeedbackKey::Event {
+            at,
+            from,
+            generation: graph.generation(from.node),
+            delay,
+        };
     let audio_fb: Vec<FeedbackKey> = topology
         .edges
         .values()
@@ -772,10 +773,10 @@ pub fn compile(
     }
 
     let mut audio_out_val: BTreeMap<OutputPort, u32> = BTreeMap::new();
-    let mut event_out_val: BTreeMap<EventOut, u32> = BTreeMap::new();
+    let mut event_out_val: BTreeMap<EventOutputPort, u32> = BTreeMap::new();
     // What each event input reads, after its sources' delays and merge: the
     // stream an event tap of an input copies.
-    let mut event_in_val: BTreeMap<EventIn, ERef> = BTreeMap::new();
+    let mut event_in_val: BTreeMap<EventInputPort, ERef> = BTreeMap::new();
 
     for &n in &order {
         let key = keys[n];
@@ -856,7 +857,7 @@ pub fn compile(
         // (`GraphSpec::validate`), so the order is total.
         let mut ein = Vec::with_capacity(shape.event_in as usize);
         for port in 0..shape.event_in {
-            let at = EventIn { node: key, port };
+            let at = EventInputPort { node: key, port };
             let mut sources: Vec<EventEdge> = graph.events().get(&at).cloned().unwrap_or_default();
             sources.sort_by_key(|e| e.from());
             let mut refs: Vec<ERef> = Vec::with_capacity(sources.len());
@@ -992,7 +993,7 @@ pub fn compile(
         let eout: Vec<u32> = (0..shape.event_out)
             .map(|port| {
                 let v = em.event_value(op);
-                event_out_val.insert(EventOut { node: key, port }, v);
+                event_out_val.insert(EventOutputPort { node: key, port }, v);
                 v
             })
             .collect();
@@ -1236,13 +1237,13 @@ pub fn compile(
         // What the port carries, and when it departs (an output) or arrives
         // (an input, which an aligned tap delays to the output time too).
         let (carried, at_time) = match from {
-            crate::EventTapSource::Out(port) => {
+            crate::EventTapPort::Out(port) => {
                 let (Some(&v), Some(&n)) = (event_out_val.get(&port), dense.get(&port.node)) else {
                     continue;
                 };
                 (ERef::Val(v), departure(n))
             }
-            crate::EventTapSource::In(at) => {
+            crate::EventTapPort::In(at) => {
                 let (Some(&r), Some(&n)) = (event_in_val.get(&at), dense.get(&at.node)) else {
                     continue;
                 };
@@ -1452,9 +1453,9 @@ pub fn compile(
                 };
                 // An output's own capacity, or, for an input, every port with an
                 // edge into it.
-                let ports: Vec<EventOut> = match from {
-                    crate::EventTapSource::Out(port) => vec![port],
-                    crate::EventTapSource::In(at) => graph
+                let ports: Vec<EventOutputPort> = match from {
+                    crate::EventTapPort::Out(port) => vec![port],
+                    crate::EventTapPort::In(at) => graph
                         .events()
                         .get(&at)
                         .map(|edges| edges.iter().map(|e| e.from()).collect())
@@ -1783,7 +1784,7 @@ pub fn compile(
         event_taps: event_tap_ids,
         meters: meter_ids,
         event_edges: {
-            let mut v: Vec<(EventOut, EventIn)> = graph
+            let mut v: Vec<(EventOutputPort, EventInputPort)> = graph
                 .events()
                 .iter()
                 .flat_map(|(&at, edges)| edges.iter().map(move |e| (e.from(), at)))
@@ -1928,7 +1929,7 @@ struct Addend {
 /// carries it to the sum.
 #[derive(Clone, Copy)]
 struct GainDrive {
-    from: EventOut,
+    from: EventOutputPort,
     value: u32,
 }
 

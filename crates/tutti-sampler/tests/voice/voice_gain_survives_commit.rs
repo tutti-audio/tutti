@@ -37,7 +37,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    EventOut, ForkMode, ForkTarget, ParamIn, ParamRange, Prepare, Standalone, TransportPosition,
+    EventOutputPort, ForkMode, ForkTarget, ParamIn, ParamRange, Prepare, Standalone,
+    TransportPosition,
 };
 use tutti_modulation::{Amount, ControlProgramBuilder, Law, Layer, LayerClock, LayerId, Polarity};
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
@@ -296,7 +297,7 @@ fn drive_volume(ed: &mut tutti_graph::Editor, at: ParamIn, knob: tutti_rt::Param
     ed.insert(NodeKey(9_000), "lane", lane);
     ed.spec_mut().connect_param(
         at,
-        EventOut {
+        EventOutputPort {
             node: NodeKey(9_000),
             port: 0,
         },

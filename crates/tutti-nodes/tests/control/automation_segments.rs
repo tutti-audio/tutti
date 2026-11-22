@@ -24,7 +24,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_curve::{Breakpoint, Law, Trajectory};
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventOut, Executor, Io, Node, Offset, ParamIn, Prepare, Shape, Status,
+    Cx, Editor, EventOutputPort, Executor, Io, Node, Offset, ParamIn, Prepare, Shape, Status,
     TransportChanges, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutputPort, PortSource};
@@ -92,7 +92,7 @@ fn graph(lane: ControlLaneNode) -> (Editor, Executor) {
             node: NodeKey(2),
             param: UnitParam::Cutoff.into(),
         },
-        EventOut {
+        EventOutputPort {
             node: NodeKey(1),
             port: 0,
         },

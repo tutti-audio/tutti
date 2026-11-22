@@ -19,7 +19,7 @@ use tutti_midi_hardware::{MidiHardwareConfig, ProfilesChange};
 use tutti_midi_runtime::MidiClipNode;
 use tutti_session::Peer as _;
 use tutti_session::{
-    EventInPort, MidiEvent, MidiPolicy, MidiPolicyError, PHASES, PhaseCx, Session, SessionEvent,
+    EventInputPort, MidiEvent, MidiPolicy, MidiPolicyError, PHASES, PhaseCx, Session, SessionEvent,
     SetRefusal, ValueErrorKind,
 };
 use tutti_ump::EndpointName;
@@ -469,7 +469,7 @@ fn a_granted_request_moves_the_sessions_output_to_the_protocol_asked() {
         BeatDuration::new(1.0),
     )));
     s.graph()
-        .set_sources(EventInPort::new(out.node(), 0), [clip.events_out()])
+        .set_sources(EventInputPort::new(out.node(), 0), [clip.events_out()])
         .expect("the port's node takes events");
     let _ = s.update();
     play(&s);

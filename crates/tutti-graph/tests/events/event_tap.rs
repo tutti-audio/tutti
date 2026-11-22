@@ -22,10 +22,10 @@ use common::{Kind, TestNode, prepare};
 use tutti_fixtures::midi;
 use tutti_graph::{CloseError, EventCapacity, EventTapId, EventTapOptions, EventTapReader};
 use tutti_graph::{
-    Cx, Edge, Editor, Event, EventEdge, EventIn, EventKind, EventOut, Executor, ForkByClone,
-    ForkCause, ForkMode, ForkSource, ForkTarget, Forked, InputPort, IntoNode, Io, MissingSource,
-    Node, NodeKey, NodeParts, Offset, Op, OutputPort, PortSource, Prepare, Shape, Status, TapAlign,
-    TapEvent, TransportPosition, note_off_room,
+    Cx, Edge, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor,
+    ForkByClone, ForkCause, ForkMode, ForkSource, ForkTarget, Forked, InputPort, IntoNode, Io,
+    MissingSource, Node, NodeKey, NodeParts, Offset, Op, OutputPort, PortSource, Prepare, Shape,
+    Status, TapAlign, TapEvent, TransportPosition, note_off_room,
 };
 use tutti_ump::{MidiChannel, U7, Ump};
 use tutti_units::{Frame, Latency, Samples};
@@ -141,8 +141,8 @@ fn out(node: u64) -> PortSource {
     })
 }
 
-fn port(node: u64, port: u16) -> EventOut {
-    EventOut {
+fn port(node: u64, port: u16) -> EventOutputPort {
+    EventOutputPort {
         node: NodeKey(node),
         port,
     }
@@ -674,7 +674,7 @@ fn only_midi_is_copied() {
 fn opening_refuses_a_port_that_does_not_exist_now() {
     let mut r = rig(1, false, 0);
     script(&mut r, 1, Script::new(vec![]).ports(2));
-    let open = |r: &mut Rig, p: EventOut| {
+    let open = |r: &mut Rig, p: EventOutputPort| {
         r.ed.open_event_tap(
             EventTapId::of(9),
             p,
@@ -766,7 +766,7 @@ fn fan_in(r: &mut Rig, probe_ports: usize) -> tutti_fixtures::Record<TapEvent> {
     );
     for from in [1, 2] {
         r.ed.spec_mut().connect_events(
-            EventIn {
+            EventInputPort {
                 node: NodeKey(3),
                 port: 0,
             },
@@ -792,7 +792,7 @@ fn an_input_tap_reads_what_the_node_heard() {
     ] {
         let mut r = rig(workers, false, 40);
         let heard = fan_in(&mut r, 1);
-        let input = EventIn {
+        let input = EventInputPort {
             node: NodeKey(3),
             port: 0,
         };
@@ -832,7 +832,7 @@ fn an_input_tap_of_one_source_and_of_none() {
     let mut r = rig(1, false, 0);
     let heard = fan_in(&mut r, 2);
     r.ed.spec_mut().disconnect_events(
-        EventIn {
+        EventInputPort {
             node: NodeKey(3),
             port: 0,
         },
@@ -841,7 +841,7 @@ fn an_input_tap_of_one_source_and_of_none() {
     let mut one =
         r.ed.open_event_tap(
             EventTapId::of(1),
-            EventIn {
+            EventInputPort {
                 node: NodeKey(3),
                 port: 0,
             },
@@ -851,7 +851,7 @@ fn an_input_tap_of_one_source_and_of_none() {
     let mut none =
         r.ed.open_event_tap(
             EventTapId::of(2),
-            EventIn {
+            EventInputPort {
                 node: NodeKey(3),
                 port: 1,
             },
@@ -892,7 +892,7 @@ fn an_aligned_input_tap_is_sized_for_every_source_of_the_input() {
     );
     for from in [1, 2] {
         r.ed.spec_mut().connect_events(
-            EventIn {
+            EventInputPort {
                 node: NodeKey(3),
                 port: 0,
             },
@@ -902,7 +902,7 @@ fn an_aligned_input_tap_is_sized_for_every_source_of_the_input() {
     let mut tap =
         r.ed.open_event_tap(
             EventTapId::of(1),
-            EventIn {
+            EventInputPort {
                 node: NodeKey(3),
                 port: 0,
             },
@@ -931,7 +931,7 @@ fn opening_an_input_tap_refuses_a_port_that_does_not_exist_now() {
     let open = |r: &mut Rig, node: u64, port: u16| {
         r.ed.open_event_tap(
             EventTapId::of(9),
-            EventIn {
+            EventInputPort {
                 node: NodeKey(node),
                 port,
             },
@@ -941,7 +941,7 @@ fn opening_an_input_tap_refuses_a_port_that_does_not_exist_now() {
     };
     assert_eq!(
         open(&mut r, 3, 1),
-        Some(MissingSource::EventInPort {
+        Some(MissingSource::EventInputPort {
             node: NodeKey(3),
             port: 1,
             width: 1
@@ -949,7 +949,7 @@ fn opening_an_input_tap_refuses_a_port_that_does_not_exist_now() {
     );
     assert_eq!(
         open(&mut r, 1, 0),
-        Some(MissingSource::EventInPort {
+        Some(MissingSource::EventInputPort {
             node: NodeKey(1),
             port: 0,
             width: 0

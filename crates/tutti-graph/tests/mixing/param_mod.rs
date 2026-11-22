@@ -48,9 +48,9 @@ use proptest::prelude::*;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    CommitError, Cx, Editor, EventOut, Executor, ForkByClone, ForkMode, ForkTarget, GraphInvalid,
-    Io, Law, Node, ParamEvent, ParamIn, ParamInput, ParamRamp, ParamRange, ParamSegment, Prepare,
-    Reference, Shape, Status, TransportPosition, Unforkable,
+    CommitError, Cx, Editor, EventOutputPort, Executor, ForkByClone, ForkMode, ForkTarget,
+    GraphInvalid, Io, Law, Node, ParamEvent, ParamIn, ParamInput, ParamRamp, ParamRange,
+    ParamSegment, Prepare, Reference, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_units::{Hz, Latency, ParamKey, Q, Real, SampleRate, Samples, UnitParam};
@@ -387,8 +387,8 @@ fn port(node: u64, port: u16) -> OutputPort {
 }
 
 /// Event output 0 of `node`.
-fn ev(node: u64) -> EventOut {
-    EventOut {
+fn ev(node: u64) -> EventOutputPort {
+    EventOutputPort {
         node: NodeKey(node),
         port: 0,
     }
@@ -629,7 +629,7 @@ fn undeclared_params_and_missing_sources_are_refused() {
     ed.spec_mut().params.clear();
     ed.spec_mut().connect_param(
         param(PROBE, UnitParam::Cutoff),
-        EventOut {
+        EventOutputPort {
             node: NodeKey(1),
             port: 3,
         },
@@ -903,7 +903,7 @@ fn an_event_source_replaces_the_base_from_its_first_event() {
 /// (and hands it back), the port follows the new one after the declick,
 /// and disconnecting the one no longer there is a no-op.
 ///
-/// A port's source is one `Option<EventOut>`, so two cannot be represented.
+/// A port's source is one `Option<EventOutputPort>`, so two cannot be represented.
 #[test]
 fn a_second_event_source_replaces_the_first() {
     let (cutoff, q) = (Cell::new(0.0), Cell::new(0.0));
@@ -1263,7 +1263,7 @@ fn render_moves(
     );
     ed.spec_mut().connect_param(
         param(PROBE, UnitParam::Cutoff),
-        EventOut {
+        EventOutputPort {
             node: NodeKey(1),
             port: 0,
         },
@@ -1563,7 +1563,7 @@ fn a_range_clamps_a_segment_without_rewriting_it() {
     let at = param(PROBE, UnitParam::Cutoff);
     ed.spec_mut().connect_param(
         at,
-        EventOut {
+        EventOutputPort {
             node: NodeKey(1),
             port: 0,
         },
@@ -2061,7 +2061,7 @@ fn a_shrinking_range_rewrites_neither_the_base_nor_a_ramp() {
     let at = param(PROBE, UnitParam::Cutoff);
     ed.spec_mut().connect_param(
         at,
-        EventOut {
+        EventOutputPort {
             node: NodeKey(1),
             port: 0,
         },

@@ -27,8 +27,8 @@ use tutti_fixtures::midi;
 use tutti_graph::EventInletNode;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Editor, EventEdge, EventIn, EventOut, EventTapId, EventTapOptions, EventTapReader, Executor,
-    Prepare, TapAlign, TapEvent, TransportPosition,
+    Editor, EventEdge, EventInputPort, EventOutputPort, EventTapId, EventTapOptions,
+    EventTapReader, Executor, Prepare, TapAlign, TapEvent, TransportPosition,
 };
 use tutti_midi_hardware::{HardwareMidiInputs, InputProducerHandle};
 use tutti_midi_runtime::{InputInlets, InputWriters, MidiInputNode};
@@ -68,17 +68,17 @@ impl Rig {
             let key = NodeKey(100 + input as u64);
             editor.insert(key, "inlet", node);
             editor.spec_mut().connect_events(
-                EventIn {
+                EventInputPort {
                     node: input_node,
                     port: 0,
                 },
-                EventEdge::Direct(EventOut { node: key, port: 0 }),
+                EventEdge::Direct(EventOutputPort { node: key, port: 0 }),
             );
         }
         let out = editor
             .open_event_tap(
                 EventTapId::of(1),
-                EventOut {
+                EventOutputPort {
                     node: INPUT,
                     port: 0,
                 },

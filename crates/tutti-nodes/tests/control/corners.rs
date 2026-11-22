@@ -4,8 +4,8 @@
 use tutti_buffers::Planes;
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_graph::{
-    Cx, EventOut, GraphBuilder, IntoNode, Io, Node, NodeParts, ParamEvent, ParamIn, ParamSegment,
-    Prepare, Shape, Status,
+    Cx, EventOutputPort, GraphBuilder, IntoNode, Io, Node, NodeParts, ParamEvent, ParamIn,
+    ParamSegment, Prepare, Shape, Status,
 };
 use tutti_nodes::{CompressorConfig, CompressorControls, CompressorNode};
 use tutti_units::{CompressionRatio, Db, SampleRate, Samples, Seconds, UnitParam};
@@ -80,7 +80,7 @@ fn render(sends: Vec<(u64, ParamSegment)>, block: usize) -> Vec<f32> {
     };
     r.editor_mut()
         .spec_mut()
-        .connect_param(at, EventOut { node: s, port: 0 });
+        .connect_param(at, EventOutputPort { node: s, port: 0 });
     r.editor_mut().commit().expect("commits");
     let input = vec![1.0f32; FRAMES];
     r.render_input(Planes::new(&[&input]).unwrap()).remove(0)

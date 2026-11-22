@@ -17,7 +17,7 @@ use tutti_graph::{
 use tutti_nodes::testing::{Const, Osc, Through};
 use tutti_rt::Param;
 use tutti_session::{
-    DetachedSession, EventInPort, Feeder, InputPort, MainInput, MainOutput, OutputPort,
+    DetachedSession, EventInputPort, Feeder, InputPort, MainInput, MainOutput, OutputPort,
     RemoveError, ReplaceRefused, Replacement, Session, SessionEvent, SessionNode,
     main_output_width,
 };
@@ -970,7 +970,7 @@ fn move_feeds_moves_every_feeders_sources() {
         both,
         "each feeder kept its own entry"
     );
-    let mut edges = g.sources(EventInPort::new(old, 0)).unwrap();
+    let mut edges = g.sources(EventInputPort::new(old, 0)).unwrap();
     edges.sort();
     assert_eq!(edges, both, "the union is the sink's event edges");
 
@@ -981,11 +981,11 @@ fn move_feeds_moves_every_feeders_sources() {
         g.feeds(old).unwrap().is_empty(),
         "the old sink is fed by nothing"
     );
-    let mut edges = g.sources(EventInPort::new(new, 0)).unwrap();
+    let mut edges = g.sources(EventInputPort::new(new, 0)).unwrap();
     edges.sort();
     assert_eq!(edges, both, "the new sink's edges are the union");
     assert!(
-        g.sources(EventInPort::new(old, 0)).unwrap().is_empty(),
+        g.sources(EventInputPort::new(old, 0)).unwrap().is_empty(),
         "and the old's are gone"
     );
     assert_eq!(s.update().len(), 0);
