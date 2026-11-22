@@ -16,8 +16,8 @@ pub const LOAD_MEAN_TIME_CONSTANT: Seconds = Seconds::new(0.3);
 /// anything above `1.0` missed the deadline.
 ///
 /// It is a plain `f64` behind [`get`](Self::get): no unit in `tutti_units` is a
-/// fraction of a time budget (`Mix` and `Bipolar` are controls with a `0..=1`
-/// range, and a load has no upper bound). The smoothed value hides a single
+/// fraction of a time budget (`Mix` and `Bipolar` are bounded controls, `0..=1`
+/// and `-1..=1`, and a load has no upper bound). The smoothed value hides a single
 /// late block; the blocks that missed their budget are counted exactly in
 /// [`BlockCounts::over_budget`].
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]

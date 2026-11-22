@@ -587,7 +587,7 @@ mod tests {
 
     /// Negative depth inverts the wave rather than silencing it.
     ///
-    /// `Bipolar` is bipolar: `LfoConfig::depth(-1.0)` stores `-1.0` and phase-flips the
+    /// The depth is signed: `LfoConfig::depth(-1.0)` stores `-1.0` and phase-flips the
     /// shape. Clamping to `0.0..=1.0` instead would store `0.0` and take the
     /// LFO flat, which is silent in both senses.
     #[test]
