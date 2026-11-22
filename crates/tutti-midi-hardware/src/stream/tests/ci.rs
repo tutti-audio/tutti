@@ -79,8 +79,8 @@ fn endpoint_of(blocks: &[FunctionBlock]) -> Endpoint {
     blocks.iter().cloned().fold(device, Endpoint::block)
 }
 
-/// A negotiated UMP Endpoint with `blocks`, and the poll after the settle,
-/// which starts MIDI-CI.
+/// A negotiated UMP Endpoint with `blocks`, and MIDI-CI started by the poll
+/// that settled it.
 fn endpoint_wire(blocks: &[FunctionBlock]) -> Wire {
     let mut wire = session_over_ci(
         midi2(),
@@ -92,10 +92,6 @@ fn endpoint_wire(blocks: &[FunctionBlock]) -> Wire {
     // One Function Block Discovery per declared block takes a few ticks.
     let settled = (0..32).any(|ms| !wire.tick(ms).1.is_empty());
     assert!(settled, "the negotiation settled");
-    assert!(
-        payloads(&received(&wire)).is_empty(),
-        "the poll that settles starts nothing: the port is told to listen first"
-    );
     let _ = polled(&mut wire, 100);
     wire
 }
@@ -106,9 +102,8 @@ pub(super) fn midi1_running() -> (Wire, Muid) {
     let mut wire = midi1_wire_ci(Some(identity()));
     let _ = polled(&mut wire, 0);
     reply_at(&wire, identity_reply(0), 10);
+    // The poll that ends the inquiry starts MIDI-CI.
     let _ = polled(&mut wire, 20);
-    let _ = received(&wire);
-    let _ = polled(&mut wire, 30);
     let sent = ci_sent(&wire);
     let [(group, CiMessage::Discovery { header, .. })] = sent.as_slice() else {
         panic!("one Discovery expected");

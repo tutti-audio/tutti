@@ -35,8 +35,12 @@ fn spec(tag: &str) -> VirtualSpec {
 fn session(executor: &Executor) -> (MidiSession, Listener) {
     let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let listener = Listener::over(&inlets);
-    let session =
-        MidiSession::open(executor, inlets, MidiHardwareConfig::new()).expect("a session");
+    let session = MidiSession::open(
+        executor,
+        tutti_midi_hardware::HardwareMidiInputs::new(inlets),
+        MidiHardwareConfig::new(),
+    )
+    .expect("a session");
     (session, listener)
 }
 
@@ -129,7 +133,12 @@ fn a_midi1_endpoint_delivers_what_the_input_node_widens() {
     let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let mut graph = Listener::over_input(&inlets);
     let executor = Executor::new();
-    let io = MidiSession::open(&executor, inlets, MidiHardwareConfig::new()).expect("a session");
+    let io = MidiSession::open(
+        &executor,
+        tutti_midi_hardware::HardwareMidiInputs::new(inlets),
+        MidiHardwareConfig::new(),
+    )
+    .expect("a session");
     let (producer, inlet) = Arc::clone(io.ports()).open_input_port("virtual");
     graph.attach(inlet);
     let _endpoint = super::opening::open(&executor, &spec, producer, plain_endpoint_main())
