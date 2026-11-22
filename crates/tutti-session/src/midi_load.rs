@@ -7,8 +7,8 @@
 //! control thread publishes the finished values ([`Midi::play_track`]). A
 //! metrical file's ticks become beats over its division, so no sample rate
 //! enters and the load never converts to frames. A file in SMPTE time counts
-//! seconds, not beats: its events are placed over the session's tempo map as it
-//! stood when [`Midi::load_midi`] was called ([`LoadMidi`]).
+//! seconds, not beats: its events are placed over the session's tempo map as last
+//! published when [`Midi::load_midi`] was called ([`LoadMidi`]).
 //!
 //! What the read repaired ([`ReadRepair`]) and what the conversion left out
 //! (a [`DroppedEvent`]) is the loaded value's [`report`](LoadedMidi::report),
@@ -45,14 +45,15 @@ use crate::unblocked::Unblocked;
 /// A file in SMPTE time (SMF 1.0 section 2.1: ticks are fractions of a second
 /// of `fps * ticks per frame`, 29.97 being 30000/1001) has no beats of its own,
 /// and its Set Tempo events move no tick. Its events keep their seconds, and a
-/// clip is placed in beats over **the session's tempo map as it stood when
-/// [`Midi::load_midi`] was called**: an event at `s` seconds lands on
+/// clip is placed in beats over **the session's tempo map as last published
+/// when [`Midi::load_midi`] was called** (a `set` of the tempo not yet followed
+/// by `update` is not in it): an event at `s` seconds lands on
 /// `tempo.beat_at_seconds(s)`, the map the transport plays on. Each track's
 /// [`tempo`](LoadedTrack::tempo) is that map and its
 /// [`meter`](LoadedTrack::meter) the session's meter, so the clip plays at the
-/// same times in the session as in the file for as long as the map stays; a
-/// later tempo change moves the beats a clip sits on, not its seconds in the
-/// file.
+/// same times in the session as in the file for as long as the map stays. Unlike
+/// a metrical file's clip, an SMPTE clip does not follow later tempo changes in
+/// absolute time: it stays on the beats it was placed on.
 ///
 /// It holds the asset, the session's tempo map and meter, and a weak handle to
 /// the session's executor, and nothing else of the session. Dropping it
@@ -348,9 +349,9 @@ fn convert(
         }
         Timebase::Smpte(view) => {
             let meter = Arc::new(session_meter.clone());
-            for index in 0..file.tracks().len() {
+            for (index, timeline) in view.timelines(session_tempo).enumerate() {
                 tracks.push(LoadedTrack {
-                    events: clip_from(&mut report, index, view.timeline(index, session_tempo)),
+                    events: clip_from(&mut report, index, timeline),
                     tempo: Arc::clone(session_tempo),
                     meter: Arc::clone(&meter),
                 });

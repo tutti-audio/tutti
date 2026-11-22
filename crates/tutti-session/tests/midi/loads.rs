@@ -272,6 +272,15 @@ fn an_smpte_file_places_its_seconds_on_the_sessions_tempo_map() {
     let tempo = loaded.tempo().expect("one timeline");
     assert_eq!(tempo.seconds_at(Beat::new(2.0)), Seconds::new(1.0));
     assert_eq!(loaded.track(0).unwrap().tempo, *tempo);
+
+    // Format 2: each sequence is placed over the same map.
+    let mut bytes = b"MThd\0\0\0\x06\0\x02\0\x02\xE7\x28".to_vec();
+    bytes.extend(track(&[&ESCAPE_AT_1000]));
+    bytes.extend(track(&[&note(0, 60)]));
+    let loaded = tutti_fixtures::block_on(s.midi().load_midi(bytes)).expect("loads");
+    assert_eq!(loaded.tempo().unwrap_err(), NoCommonTimelineError::PerTrack);
+    assert_eq!(escape_beat(&loaded), Beat::new(2.0));
+    assert_eq!(loaded.track(1).unwrap().events.len(), 2);
 }
 
 /// **SMF 1.0 section 2.1: "-29 corresponds to 30 drop frame"**, the
@@ -303,18 +312,6 @@ fn a_tempo_change_in_the_session_moves_an_smpte_files_beats_not_its_seconds() {
         loaded.tempo().unwrap().seconds_at(Beat::new(1.0)),
         Seconds::new(1.0)
     );
-}
-
-/// A format 2 file in SMPTE time lands each sequence over the session's map.
-#[test]
-fn an_smpte_format_2_file_lands_each_sequence_over_the_sessions_map() {
-    let mut bytes = b"MThd\0\0\0\x06\0\x02\0\x02\xE7\x28".to_vec();
-    bytes.extend(track(&[&ESCAPE_AT_1000]));
-    bytes.extend(track(&[&note(0, 60)]));
-    let loaded = tutti_fixtures::block_on(session().midi().load_midi(bytes)).expect("loads");
-    assert_eq!(loaded.tempo().unwrap_err(), NoCommonTimelineError::PerTrack);
-    assert_eq!(escape_beat(&loaded), Beat::new(2.0));
-    assert_eq!(loaded.track(1).unwrap().events.len(), 2);
 }
 
 #[test]

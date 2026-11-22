@@ -83,7 +83,7 @@
 //!   29.97 being 30000/1001: [`SmpteView::seconds_at`] and [`SmpteView::events`]
 //!   answer in seconds. It has no beat grid and no tempo map of its own, so
 //!   [`MidiFile::timebase`] gives it a [`SmpteView`] whose
-//!   [`timeline`](SmpteView::timeline) takes the tempo map that places its seconds
+//!   [`timelines`](SmpteView::timelines) takes the tempo map that places its seconds
 //!   on beats; the clip conversion is the [`MetricalView`]'s.
 //!
 //! - **To a Clip File.** [`MetricalView::to_clip`] converts a format 0 or 1 SMF: its meta
