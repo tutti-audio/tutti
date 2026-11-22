@@ -3,9 +3,10 @@
 //! figure `f32` cannot hold survives the whole way.
 
 use std::any::Any;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::Instant;
+use tutti_rt::Mutex;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Interleaved, SampleFormat};
@@ -32,7 +33,7 @@ struct Opener(Writer);
 impl InputOpener<f64> for Opener {
     fn open(&mut self, _: &MicConfig, rate: SampleRate) -> tutti_cpal::Result<OpenedInput<f64>> {
         let (ring, writer) = InletRing::pair(ChannelLayout::STEREO, Samples::new(1 << 16), rate);
-        *self.0.lock().unwrap() = Some(writer);
+        *self.0.lock() = Some(writer);
         Ok(OpenedInput {
             ring,
             keep: Box::new(()) as Box<dyn Any + Send>,
@@ -91,7 +92,7 @@ fn an_f64_take_reads_back_as_a_clip_holding_a_figure_f32_rounds_away() {
     };
     while !finished(&events) {
         assert!(Instant::now() < deadline, "never finished: {events:?}");
-        let mut guard = writer.lock().unwrap();
+        let mut guard = writer.lock();
         guard
             .as_mut()
             .expect("opened")

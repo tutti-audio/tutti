@@ -33,7 +33,10 @@ fn note_on() -> Ump {
 fn peak(synth: PolySynth, frames: usize) -> f32 {
     let mut hand = Direct::new(synth, RATE, 64);
     let on = Offset::of(tutti_units::Samples::new(0), tutti_units::Samples::new(64));
-    hand.events(0, &[Event::midi(on, note_on())]);
+    let input = tutti_graph::Node::shape(&*hand.node)
+        .event_input(0)
+        .expect("an event input");
+    hand.events(input, &[Event::midi(on, note_on())]);
     let mut peak = 0.0f32;
     for _ in 0..frames / 64 {
         hand.block();

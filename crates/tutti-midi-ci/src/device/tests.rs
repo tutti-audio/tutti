@@ -15,8 +15,7 @@ use tutti_ump::SoftwareRevision;
 
 fn identity() -> DeviceIdentity {
     DeviceIdentity {
-        manufacturer: ManufacturerId::from_sysex_bytes([U7::of(0), U7::of(0x21), U7::of(0x09)])
-            .unwrap(),
+        manufacturer: ManufacturerId::try_from([U7::of(0), U7::of(0x21), U7::of(0x09)]).unwrap(),
         family: [U7::of(1), U7::of(2)],
         model: [U7::of(3), U7::of(4)],
         revision: SoftwareRevision::from([U7::of(5), U7::of(6), U7::of(7), U7::of(8)]),

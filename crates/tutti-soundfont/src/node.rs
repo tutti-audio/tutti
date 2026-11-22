@@ -9,20 +9,29 @@
 use tutti_buffers::{ChannelLayout, Float};
 use tutti_dsp::SimdLanes;
 use tutti_graph::{
-    Chase, ConstantMask, Cx, IntoNode, Io, Node, NodeParts, Prepare, Resolution, Shape,
+    Chase, ConstantMask, Cx, InEvents, IntoNode, Io, Node, NodeParts, Prepare, Resolution, Shape,
     SilenceMask, Status,
 };
 
 use crate::SoundFontUnit;
 use crate::player::{CHASE_MESSAGES, Plane, RATES};
 
+impl<F: Float + SimdLanes> SoundFontUnit<F> {
+    /// The ports every shape declares: the dry, send and reverb planes and
+    /// the MIDI event input.
+    const PORTS: Shape =
+        Shape::source_unassigned(ChannelLayout::from_count(Plane::COUNT as u16)).with_events(1, 0);
+    const EVENTS: InEvents = Self::PORTS
+        .event_input(0)
+        .expect("declared one event input");
+}
+
 impl<F: Float + SimdLanes> Node<F> for SoundFontUnit<F> {
     /// No audio in, five out (dry left and right, chorus send left and right,
     /// reverb send), one MIDI event input, placed to the 8-frame chunk the
     /// voices render in, and the tail of the longest release.
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::from_count(Plane::COUNT as u16))
-            .with_events(1, 0)
+        Self::PORTS
             .with_event_resolution(Resolution::Frames(crate::SYNTH_BLOCK_FRAMES as u32))
             // Sample playback and filters per voice: measured 76 ns
             // per frame and channel with one note held, 140 with eight,
@@ -72,7 +81,7 @@ impl<F: Float + SimdLanes> Node<F> for SoundFontUnit<F> {
         // No clamp: `prepare` sized the scratch to the prepared `MaxBlock`,
         // and the graph never hands a node a longer block.
         let size = io.frames();
-        self.render_events(io.sub_blocks(0));
+        self.render_events(io.sub_blocks(Self::EVENTS));
         let heard = self.take_heard();
         if self.is_idle() && !heard.has_any() {
             return Status::Idle;

@@ -505,7 +505,12 @@ fn feed(
             _ => unreachable!("only MIDI is fed"),
         })
         .collect();
-    unit.events(0, &events);
+    let unit_in = unit
+        .node
+        .shape()
+        .event_input(0)
+        .expect("the node declares an event input");
+    unit.events(unit_in, &events);
     let _ = unit.block();
 }
 

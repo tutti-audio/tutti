@@ -1118,9 +1118,17 @@ fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
 #[derive(Clone)]
 struct MidiSink(tutti_fixtures::Record<(u64, u32)>);
 
+impl MidiSink {
+    const SHAPE: tutti_graph::Shape =
+        tutti_graph::Shape::source_unassigned(tutti_buffers::ChannelLayout::MONO).with_events(1, 0);
+    const IN: tutti_graph::InEvents = Self::SHAPE
+        .event_input(0)
+        .expect("one event input is declared");
+}
+
 impl tutti_graph::Node for MidiSink {
     fn shape(&self) -> tutti_graph::Shape {
-        tutti_graph::Shape::source_unassigned(tutti_buffers::ChannelLayout::MONO).with_events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(
@@ -1129,7 +1137,7 @@ impl tutti_graph::Node for MidiSink {
         mut io: tutti_graph::Io<'_>,
     ) -> tutti_graph::Status {
         let mut seen = self.0.lock().unwrap();
-        for e in io.events(0) {
+        for e in io.events(Self::IN) {
             if let tutti_graph::EventKind::Midi(ump) = e.kind {
                 seen.push((cx.env.frame.get() + u64::from(e.offset.get()), ump.0[0]));
             }
@@ -1572,6 +1580,11 @@ fn midi_past_the_chunks_capacity_is_counted() {
         SampleRate::of(SAMPLE_RATE),
         512,
     );
+    let node_in = node
+        .node
+        .shape()
+        .event_input(0)
+        .expect("the node declares an event input");
     let notes = |n: usize| -> Vec<Event> {
         (0..n)
             .map(|i| {
@@ -1580,13 +1593,13 @@ fn midi_past_the_chunks_capacity_is_counted() {
             })
             .collect()
     };
-    node.events(0, &notes(300));
+    node.events(node_in, &notes(300));
     node.block();
     assert_eq!(
         controls.dropped_midi_in(),
         (300 - MIDI_STACK_CAPACITY) as u64
     );
-    node.events(0, &notes(10));
+    node.events(node_in, &notes(10));
     node.block();
     assert_eq!(
         controls.dropped_midi_in(),

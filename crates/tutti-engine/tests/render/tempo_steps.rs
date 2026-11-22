@@ -8,9 +8,10 @@
 //! (block-size independence; live equals offline), and those are also held to
 //! the arithmetic.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{Planes, PlanesMut};
+use tutti_rt::CappedVec;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
@@ -30,13 +31,22 @@ const SR: f64 = 48_000.0;
 
 /// What the node saw: the beat of every frame of every block, and each block's
 /// length and number of transport changes.
-#[derive(Default)]
 struct Seen {
-    beats: Vec<f64>,
-    blocks: Vec<(usize, usize)>,
+    beats: CappedVec<f64>,
+    blocks: CappedVec<(usize, usize)>,
 }
 
-type Log = Arc<Mutex<Seen>>;
+impl Default for Seen {
+    /// Room reserved here, on the control side, for the longest run a test renders.
+    fn default() -> Self {
+        Self {
+            beats: CappedVec::with_capacity(1 << 18),
+            blocks: CappedVec::with_capacity(1 << 14),
+        }
+    }
+}
+
+type Log = tutti_fixtures::Shared<Seen>;
 
 /// Logs the beat `Env::for_each_beat` gives every frame.
 struct BeatLog(Log);
@@ -48,7 +58,9 @@ impl Node for BeatLog {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let mut seen = self.0.lock().expect("log");
-        cx.env.for_each_beat(|_, beat| seen.beats.push(beat.get()));
+        cx.env.for_each_beat(|_, beat| {
+            seen.beats.push(beat.get());
+        });
         seen.blocks
             .push((cx.env.block_len.get(), cx.env.changes.len()));
         io.output(0).fill(0.0);
@@ -62,7 +74,7 @@ fn graph(log: &Log) -> (Editor, Executor) {
         SampleRate::of(SR),
         MaxBlock::of(Samples::new(512)),
     ));
-    ed.insert(NodeKey(1), "beats", Unforkable(BeatLog(Arc::clone(log))));
+    ed.insert(NodeKey(1), "beats", Unforkable(BeatLog(log.clone())));
     ed.spec_mut()
         .topology
         .set_outputs(vec![PortSource::Node(OutputPort {
@@ -129,11 +141,7 @@ fn live(map: &Arc<TempoMap>, start: f64, blocks: &[usize], total: usize) -> Seen
         done += n;
     }
     drop(engine);
-    Arc::try_unwrap(log)
-        .ok()
-        .expect("the engine is gone")
-        .into_inner()
-        .expect("log")
+    log.into_inner().expect("the engine is gone")
 }
 
 fn assert_on_the_line(points: &[(f64, f64)], beats: &[f64], from: u64, what: &str) {

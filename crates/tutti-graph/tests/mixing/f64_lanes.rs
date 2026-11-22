@@ -70,12 +70,17 @@ struct Ramp {
     len: usize,
 }
 
+impl Ramp {
+    const SHAPE: Shape = Shape::EMPTY
+        .with_events(0, 1)
+        .with_param_events()
+        .with_event_capacity(tutti_graph::testing::cap_of(4));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl<F: Float> Node<F> for Ramp {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_param_events()
-            .with_event_capacity(tutti_graph::testing::cap_of(4))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
@@ -86,7 +91,9 @@ impl<F: Float> Node<F> for Ramp {
                 Hz::new(self.target),
                 Samples::new(self.len),
             );
-            let _ = io.event_out(0).push_param(ParamEvent::ramp(offset, ramp));
+            let _ = io
+                .event_out(Self::OUT)
+                .push_param(ParamEvent::ramp(offset, ramp));
         }
         Status::Silent
     }
@@ -399,19 +406,24 @@ fn an_f64_mix_ramps_in_f64() {
 #[derive(Clone)]
 struct Segment(ParamSegment);
 
+impl Segment {
+    const SHAPE: Shape = Shape::EMPTY
+        .with_events(0, 1)
+        .with_param_events()
+        .with_event_capacity(tutti_graph::testing::cap_of(4));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl<F: Float> Node<F> for Segment {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_param_events()
-            .with_event_capacity(tutti_graph::testing::cap_of(4))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         if cx.env.frame.get() == 0 {
             let offset = io.offset(0).expect("inside the block");
             let _ = io
-                .event_out(0)
+                .event_out(Self::OUT)
                 .push_param(ParamEvent::segment(offset, self.0));
         }
         Status::Silent

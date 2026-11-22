@@ -18,28 +18,46 @@ use tutti_ump::Ump;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, Event, EventEdge, EventInputPort, EventOutputPort, Executor, Io, Node, Prepare,
-    Shape, Status, TransportPosition, Unforkable,
+    Cx, Editor, Event, EventEdge, EventInputPort, EventOutputPort, Executor, InEvents, Io, Node,
+    OutEvents, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_units::{SampleRate, Samples};
 
 const BLOCK: usize = 1024;
 
 struct Source {
+    out: OutEvents,
     cap: u32,
     ons: u32,
     offs: u32,
 }
 
-impl Node for Source {
-    fn shape(&self) -> Shape {
+impl Source {
+    fn new(cap: u32, ons: u32, offs: u32) -> Self {
+        Self {
+            out: Self::declared(cap)
+                .event_output(0)
+                .expect("one event output"),
+            cap,
+            ons,
+            offs,
+        }
+    }
+
+    fn declared(cap: u32) -> Shape {
         Shape::EMPTY
             .with_events(0, 1)
-            .with_event_capacity(std::num::NonZeroU32::new(self.cap).expect("a capacity"))
+            .with_event_capacity(std::num::NonZeroU32::new(cap).expect("a capacity"))
+    }
+}
+
+impl Node for Source {
+    fn shape(&self) -> Shape {
+        Self::declared(self.cap)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        let out = io.event_out(0);
+        let out = io.event_out(self.out);
         let total = (self.ons + self.offs) as usize;
         for i in 0..self.ons + self.offs {
             let word = if i < self.ons {
@@ -55,15 +73,23 @@ impl Node for Source {
     fn reset(&mut self) {}
 }
 
-struct Sink;
+struct Sink(InEvents);
+
+impl Sink {
+    const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+
+    fn new() -> Self {
+        Self(Self::SHAPE.event_input(0).expect("one event input"))
+    }
+}
 
 impl Node for Sink {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
-        black_box(io.events(0).len());
+        black_box(io.events(self.0).len());
         Status::Modified
     }
     fn reset(&mut self) {}
@@ -75,7 +101,7 @@ fn rig(source: Source) -> Executor {
         MaxBlock::of(Samples::new(BLOCK)),
     ));
     ed.insert(NodeKey(1), "source", Unforkable(source));
-    ed.insert(NodeKey(2), "sink", Unforkable(Sink));
+    ed.insert(NodeKey(2), "sink", Unforkable(Sink::new()));
     ed.spec_mut().connect_events(
         EventInputPort {
             node: NodeKey(2),
@@ -104,7 +130,7 @@ fn bench(c: &mut Criterion) {
             ("over", n, 4 * n, 0),
         ];
         for (name, cap, ons, offs) in cases {
-            let mut exec = rig(Source { cap, ons, offs });
+            let mut exec = rig(Source::new(cap, ons, offs));
             g.bench_with_input(BenchmarkId::new(name, n), &n, |b, _| {
                 b.iter(|| exec.process(BLOCK, &transport, &[], &mut []));
             });
@@ -118,15 +144,7 @@ fn bench(c: &mut Criterion) {
             MaxBlock::of(Samples::new(BLOCK)),
         ));
         for i in 0..k {
-            ed.insert(
-                NodeKey(i + 1),
-                "source",
-                Unforkable(Source {
-                    cap: 64,
-                    ons: 16,
-                    offs: 0,
-                }),
-            );
+            ed.insert(NodeKey(i + 1), "source", Unforkable(Source::new(64, 16, 0)));
         }
         ed.commit().expect("commits");
         exec.apply_pending();

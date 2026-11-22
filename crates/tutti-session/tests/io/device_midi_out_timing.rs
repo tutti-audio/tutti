@@ -12,9 +12,10 @@
 //! either way.
 
 use std::ops::Range;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::Instant;
+use tutti_rt::Mutex;
 
 use tutti_buffers::ChannelLayout;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
@@ -37,14 +38,14 @@ struct Wire(Arc<Mutex<Vec<Outgoing>>>);
 
 impl MidiOut for Wire {
     fn queue_timed(&self, events: &[Outgoing]) -> Taken {
-        self.0.lock().unwrap().extend_from_slice(events);
+        self.0.lock().extend_from_slice(events);
         Taken::within(events, events.len())
     }
 }
 
 impl Wire {
     fn take(&self) -> Vec<Outgoing> {
-        std::mem::take(&mut *self.0.lock().unwrap())
+        std::mem::take(&mut *self.0.lock())
     }
 
     /// The send times of the ticks among `events`, in order; panics on a tick

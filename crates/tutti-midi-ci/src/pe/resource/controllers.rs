@@ -92,12 +92,16 @@ impl PeController {
         }
     }
 
-    /// The controller of `kind` the `ctrlIndex` names, or `None` when the index
-    /// does not fit the kind.
-    fn from_parts(kind: CtrlKind, index: Option<&[i64]>) -> Option<Self> {
-        let byte = |n: i64| u8::try_from(n).ok();
-        let seven = |n: i64| byte(n).and_then(U7::new);
-        Some(match (kind, index) {
+    /// The controller of `kind` the `ctrlIndex` names.
+    fn from_parts(kind: CtrlKind, index: Option<&[i64]>) -> Result<Self, ControllerIndexError> {
+        let byte = |n: i64| u8::try_from(n).map_err(|_| ControllerIndexError::NotAByte(n));
+        let seven = |n: i64| {
+            byte(n)
+                .ok()
+                .and_then(U7::new)
+                .ok_or(ControllerIndexError::NotSevenBit(n))
+        };
+        Ok(match (kind, index) {
             (CtrlKind::ChannelPressure, _) => Self::ChannelPressure,
             (CtrlKind::PolyPressure, _) => Self::PolyPressure,
             (CtrlKind::PitchBend, _) => Self::PitchBend,
@@ -119,9 +123,40 @@ impl PeController {
             },
             (CtrlKind::PerNoteRegistered, Some(&[n])) => Self::PerNoteRegistered(byte(n)?),
             (CtrlKind::PerNoteAssignable, Some(&[n])) => Self::PerNoteAssignable(byte(n)?),
-            _ => return None,
+            (kind, None) => return Err(ControllerIndexError::Missing { kind }),
+            (kind, Some(index)) => {
+                return Err(ControllerIndexError::Shape {
+                    kind,
+                    integers: index.len(),
+                });
+            }
         })
     }
+}
+
+/// A `ctrlIndex` that does not fit its `ctrlType` (M2-117 Table 5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ControllerIndexError {
+    /// The type needs an index and the entry has none.
+    #[error("a `{}` controller needs a ctrlIndex", .kind.as_str())]
+    Missing {
+        /// The `ctrlType`.
+        kind: CtrlKind,
+    },
+    /// The index has the wrong number of integers for the type.
+    #[error("a `{}` controller takes no ctrlIndex of length {integers}", .kind.as_str())]
+    Shape {
+        /// The `ctrlType`.
+        kind: CtrlKind,
+        /// How many integers the index had.
+        integers: usize,
+    },
+    /// An index integer that is no 7-bit value.
+    #[error("the index {0} is not a 7-bit value")]
+    NotSevenBit(i64),
+    /// An index integer that is no byte.
+    #[error("the index {0} is not a byte")]
+    NotAByte(i64),
 }
 
 /// How a controller is meant to be shown and driven (`typeHint`, `ctrlMapId`;
@@ -277,7 +312,7 @@ impl PeCtrl {
                 .collect::<Option<Vec<i64>>>()
         })?;
         let controller = PeController::from_parts(kind, index.as_deref())
-            .ok_or_else(|| f.invalid("ctrlIndex", InvalidValue::ControllerIndex))?;
+            .map_err(|e| f.invalid("ctrlIndex", e))?;
         let priority = f
             .optional("priority", "an integer", integer)?
             .map(|n| narrowed::<u8, Priority>(n).map_err(|e| f.invalid("priority", e)))
@@ -291,9 +326,7 @@ impl PeCtrl {
             .transpose()?;
         let param_path = f
             .optional("paramPath", "a string", text)?
-            .map(|t| {
-                ParamPath::new(t).ok_or_else(|| f.invalid("paramPath", InvalidValue::ParamPath))
-            })
+            .map(|t| ParamPath::try_from(t).map_err(|e| f.invalid("paramPath", e)))
             .transpose()?;
         let hint_text = f.optional("typeHint", "a string", |j| text(j).map(str::to_owned))?;
         let map = f

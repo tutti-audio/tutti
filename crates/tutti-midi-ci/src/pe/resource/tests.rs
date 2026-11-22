@@ -5,7 +5,7 @@
 use std::num::NonZeroU32;
 use tutti_platform::Instant;
 
-use tutti_ump::{ManufacturerId, MidiChannel, U7};
+use tutti_ump::{ManufacturerBytesError, ManufacturerId, MidiChannel, U7};
 
 use super::super::header::{PeEncoding, PePage};
 use super::super::limits::{MediaType, PeTextError, PropertyNameError, ResourceId};
@@ -1277,11 +1277,106 @@ fn a_priority_fault_carries_the_range_error() {
     let error = fails(PeResource::AllCtrlList, &entry(r#""priority":300"#));
     assert!(matches!(
         error.fault,
-        PeDataFault::NotValid(InvalidValue::Width(_))
+        PeDataFault::NotValid(InvalidValue::Width {
+            value: 300,
+            bits: 8,
+            ..
+        })
     ));
+    assert_eq!(
+        error.fault.to_string(),
+        "not valid: 300 does not fit an unsigned 8-bit value"
+    );
     assert_eq!(
         fails(PeResource::AllCtrlList, &entry(r#""minMax":[200,10]"#)).fault,
         PeDataFault::NotValid(InvalidValue::MinAboveMax)
+    );
+}
+
+/// Spec: m2-117/2.1.1#5
+#[test]
+fn a_controller_entry_fault_names_the_index_and_the_path_that_failed() {
+    let entry = |extra: &str| format!(r#"[{{"title":"T","channel":1,{extra}}}]"#);
+    let fault = |extra: &str| fails(PeResource::AllCtrlList, &entry(extra)).fault;
+    // `rpn` takes a bank and an index: one integer is the wrong shape.
+    assert_eq!(
+        fault(r#""ctrlType":"rpn","ctrlIndex":[0]"#),
+        PeDataFault::NotValid(InvalidValue::ControllerIndex(ControllerIndexError::Shape {
+            kind: CtrlKind::Rpn,
+            integers: 1
+        }))
+    );
+    assert_eq!(
+        ControllerIndexError::Shape {
+            kind: CtrlKind::Rpn,
+            integers: 1
+        }
+        .to_string(),
+        "a `rpn` controller takes no ctrlIndex of length 1"
+    );
+    assert_eq!(
+        fault(r#""ctrlType":"cc""#),
+        PeDataFault::NotValid(InvalidValue::ControllerIndex(
+            ControllerIndexError::Missing {
+                kind: CtrlKind::ControlChange
+            }
+        ))
+    );
+    assert_eq!(
+        ControllerIndexError::Missing {
+            kind: CtrlKind::ControlChange
+        }
+        .to_string(),
+        "a `cc` controller needs a ctrlIndex"
+    );
+    assert_eq!(
+        fault(r#""ctrlType":"nrpn","ctrlIndex":[128,0]"#),
+        PeDataFault::NotValid(InvalidValue::ControllerIndex(
+            ControllerIndexError::NotSevenBit(128)
+        ))
+    );
+    assert_eq!(
+        fault(r#""ctrlType":"pnrc","ctrlIndex":[256]"#),
+        PeDataFault::NotValid(InvalidValue::ControllerIndex(
+            ControllerIndexError::NotAByte(256)
+        ))
+    );
+    let path = |text: &str| fault(&format!(r#""ctrlType":"pBend","paramPath":"{text}""#));
+    assert_eq!(
+        path("no-slash"),
+        PeDataFault::NotValid(InvalidValue::ParamPath(ParamPathError::NotJsonPointer))
+    );
+    assert_eq!(
+        path(&format!("/{}", "a".repeat(256))),
+        PeDataFault::NotValid(InvalidValue::ParamPath(ParamPathError::TooLong {
+            len: 257
+        }))
+    );
+    assert_eq!(
+        ParamPathError::TooLong { len: 257 }.to_string(),
+        "the path is 257 bytes, and at most 256 fit"
+    );
+}
+
+/// Spec: m2-104/7.1.3#1
+#[test]
+fn a_device_info_fault_carries_the_manufacturer_bytes_error() {
+    let text = |id: &str| {
+        format!(
+            r#"{{"manufacturerId":{id},"manufacturer":"M","familyId":[0,0],"family":"F","modelId":[0,0],"model":"X","versionId":[0,0,0,0],"version":"1"}}"#
+        )
+    };
+    assert_eq!(
+        fails(PeResource::DeviceInfo, &text("[0,0,0]")).fault,
+        PeDataFault::NotValid(InvalidValue::ManufacturerId(
+            ManufacturerBytesError::AllZero
+        ))
+    );
+    assert_eq!(
+        fails(PeResource::DeviceInfo, &text("[65,1,0]")).fault,
+        PeDataFault::NotValid(InvalidValue::ManufacturerId(
+            ManufacturerBytesError::TrailingBytes { first: 65 }
+        ))
     );
 }
 
