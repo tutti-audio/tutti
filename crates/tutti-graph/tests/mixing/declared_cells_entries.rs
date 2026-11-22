@@ -335,24 +335,100 @@ fn a_settings_store_is_read_in_the_next_block() {
 }
 
 /// A clone's settings are the same cell and a fork's are its own, at the
-/// value they held at the fork.
+/// value they held when it was forked (not the config's initial value).
 #[test]
 fn a_clone_shares_a_setting_and_a_fork_owns_it() {
     let node = Switched::from(SwitchedConfig::new().mode(Mode::Slow));
     let shared = node.clone();
-    let fork = ParamNode::<f32>::fork_fresh(&node);
     node.cells.mode().store(Mode::Fast);
+    let fork = ParamNode::<f32>::fork_fresh(&node);
     assert_eq!(shared.cells.mode().load(), Mode::Fast, "a clone shares");
     assert_eq!(
         fork.cells.mode().load(),
-        Mode::Slow,
-        "a fork holds its copy"
+        Mode::Fast,
+        "a fork holds the value at the fork, not the initial one"
     );
-    fork.cells.mode().store(Mode::Off);
+    node.cells.mode().store(Mode::Off);
+    assert_eq!(
+        fork.cells.mode().load(),
+        Mode::Fast,
+        "a later store on the original is not seen by the fork"
+    );
+    fork.cells.mode().store(Mode::Slow);
+    assert_eq!(node.cells.mode().load(), Mode::Off, "nor the reverse");
+}
+
+/// One declaration with a param and a setting.
+#[derive(Clone)]
+struct Mixed {
+    cells: MixedCells,
+}
+
+declare_params!([] Mixed, MixedConfig, MixedCells {
+    params {
+        Cutoff => cutoff: Hz = Hz::new(1_000.0),
+    }
+    settings { mode: Mode = Mode::Slow }
+});
+
+impl From<MixedConfig> for Mixed {
+    fn from(config: MixedConfig) -> Self {
+        Self {
+            cells: MixedCells::from_config(&config),
+        }
+    }
+}
+
+impl Node for Mixed {
+    fn shape(&self) -> Shape {
+        Shape::source_unassigned(ChannelLayout::MONO).param_addrs(self.declared_ports().as_slice())
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+        io.output(0).fill(self.cells.mode.load().to_word() as f32);
+        Status::Modified
+    }
+    fn reset(&mut self) {}
+    fn param_base(&self, port: usize) -> Option<f64> {
+        self.declared_base(port)
+    }
+}
+
+/// A setting is not a param: with one param and one setting declared, the set
+/// and the ports hold the param alone, the config sets each independently,
+/// and a fork copies each at its current value.
+#[test]
+fn a_param_and_a_setting_in_one_declaration_stay_apart() {
+    let node = Mixed::from(MixedConfig::new().cutoff(Hz::new(250.0)));
     assert_eq!(
         node.cells.mode().load(),
-        Mode::Fast,
-        "and shares nothing after"
+        Mode::Slow,
+        "the setting's default"
+    );
+    let set = node.param_set();
+    assert_eq!(set.params().count(), 1, "the setting has no address");
+    assert_eq!(set.get(UnitParam::Cutoff), Some(250.0));
+    assert_eq!(node.declared_ports().as_slice().len(), 1);
+
+    let node = Mixed::from(MixedConfig::new().mode(Mode::Fast));
+    assert_eq!(
+        node.cells.cutoff.load(),
+        Hz::new(1_000.0),
+        "the param's default"
+    );
+    assert_eq!(node.cells.mode().load(), Mode::Fast);
+
+    node.cells.cutoff.store(Hz::new(42.0));
+    node.cells.mode().store(Mode::Off);
+    let fork = ParamNode::<f32>::fork_fresh(&node);
+    node.cells.cutoff.store(Hz::new(7.0));
+    node.cells.mode().store(Mode::Slow);
+    assert_eq!(fork.cells.cutoff.load(), Hz::new(42.0));
+    assert_eq!(fork.cells.mode().load(), Mode::Off);
+    assert_eq!(
+        Rig::new(fork).block()[0],
+        0.0,
+        "the fork renders its setting"
     );
 }
 

@@ -690,8 +690,9 @@ macro_rules! declare_params {
         impl $cells {
             /// The cells at the values `config` holds.
             #[must_use]
-            #[allow(unused_variables)]
             pub fn from_config(config: &$cfg) -> Self {
+                // A node with no params and no settings reads nothing from it.
+                let _ = config;
                 Self {
                     $($field: $crate::__private::OwnedCell::from_value(config.$field),)*
                     $($sname: $crate::__private::Arc::new(
@@ -887,9 +888,11 @@ macro_rules! declare_params {
 
     ([$($g:tt)*] $ty:ty, $n:ident { $($rows:tt)* }) => {
         impl<$($g)*> $ty {
-            #[allow(dead_code, unused_variables)]
+            #[allow(dead_code)]
             fn declared_visit(&self, visit: $crate::__private::Visit<'_>) -> bool {
                 let $n = self;
+                // A node with no rows visits nothing.
+                let _ = (&$n, &visit);
                 $crate::declare_params!(@walk $n visit [] true; $($rows)*);
                 true
             }
