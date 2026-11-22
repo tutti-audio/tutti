@@ -210,7 +210,7 @@ pub use live::{
     MIDI_INPUT_EVENT_CAPACITY, MidiInputControls, MidiInputNode, MidiInputPorts, MidiKeys,
     MpeTransformControls, MpeTransformNode, MpeTranslator, RouteRule, compile_routes,
 };
-pub use mpe_features::{MpeFeaturesError, mpe_features};
+pub use mpe_features::{MpeFeaturesError, ask_mpe_features, mpe_features};
 pub use mpe_zones::mpe_zones;
 pub use outbound::{
     ACTIVE_SENSING_INTERVAL, ActiveSensingSender, JrClock, JrStream, MIDI_OUT_EVENT_CAPACITY,
