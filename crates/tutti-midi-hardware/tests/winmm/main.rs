@@ -4,7 +4,7 @@
 //! needs an audio endpoint: those tests are `synth-tests`', and CI installs a
 //! virtual audio driver before it runs them.
 
-#[cfg(windows)]
+#[cfg(all(windows, feature = "winmm"))]
 mod gs_synth;
 #[cfg(all(windows, feature = "synth-tests"))]
 mod synth_open;

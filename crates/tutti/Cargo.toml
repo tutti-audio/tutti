@@ -41,7 +41,7 @@ tutti-polysynth = { version = "0.0.1", path = "../tutti-polysynth", optional = t
 tutti-soundfont = { version = "0.0.1", path = "../tutti-soundfont", optional = true }
 tutti-midi-runtime = { version = "0.0.1", path = "../tutti-midi-runtime", default-features = false, optional = true }
 tutti-midi-file = { version = "0.0.1", path = "../tutti-midi-file", optional = true }
-tutti-midi-hardware = { version = "0.0.1", path = "../tutti-midi-hardware", optional = true }
+tutti-midi-hardware = { version = "0.0.1", path = "../tutti-midi-hardware", default-features = false, optional = true }
 tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device", optional = true }
 tutti-midi-ci = { version = "0.0.1", path = "../tutti-midi-ci", optional = true }
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol", optional = true }
@@ -85,9 +85,9 @@ tutti-shared-plugin = { path = "../../testing/tutti-shared-plugin" }
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 
 [features]
-# `default = ["session"]`: the API layer is what this umbrella is for. Set
+# `default = ["session", "alsa", "coremidi", "winmm"]`: the API layer is what this umbrella is for. Set
 # `default-features = false` for the raw crates alone.
-default = ["session"]
+default = ["session", "alsa", "coremidi", "winmm"]
 session = ["dep:tutti-session", "dep:tutti-engine"]
 
 # Everything a headless host can have. Plugin FORMATS stay opt-in — each
@@ -178,6 +178,12 @@ midi = [
     "tutti-session?/midi",
 ]
 midi-hardware = ["midi", "dep:tutti-midi-hardware", "dep:tutti-midi-device", "dep:tutti-midi-ci", "tutti-session?/midi-hardware"]
+# The OS MIDI backend of `midi-hardware`, one per OS and a no-op off it (and without
+# `midi-hardware`); all on by default. `default-features = false` leaves the stub, which
+# lists no device.
+alsa = ["tutti-midi-hardware?/alsa", "tutti-session?/alsa"]
+coremidi = ["tutti-midi-hardware?/coremidi", "tutti-session?/coremidi"]
+winmm = ["tutti-midi-hardware?/winmm", "tutti-session?/winmm"]
 # Network MIDI 2.0 over UDP in `tutti::midi::network` (implies `midi`; native targets).
 midi-network = ["midi", "dep:tutti-midi-network", "tutti-session?/midi-network"]
 

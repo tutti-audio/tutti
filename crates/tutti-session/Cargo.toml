@@ -55,7 +55,7 @@ tutti-measure = { version = "0.0.1", path = "../tutti-measure", optional = true 
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol", optional = true }
 tutti-midi-runtime = { version = "0.0.1", path = "../tutti-midi-runtime", default-features = false, optional = true }
 tutti-midi-file = { version = "0.0.1", path = "../tutti-midi-file", optional = true }
-tutti-midi-hardware = { version = "0.0.1", path = "../tutti-midi-hardware", optional = true }
+tutti-midi-hardware = { version = "0.0.1", path = "../tutti-midi-hardware", default-features = false, optional = true }
 # The device vocabulary (`MidiDeviceId`, `DeviceInfo`, ...) the OS MIDI layer reports in,
 # and the `MediaType` a peer's saved state names its encoding by.
 tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device", optional = true }
@@ -109,6 +109,11 @@ midi = [
 # Network MIDI 2.0: a Client or a Host as MIDI input and output over UDP (native targets).
 midi-network = ["midi", "dep:tutti-midi-network"]
 midi-hardware = ["midi", "dep:tutti-midi-hardware", "dep:tutti-midi-device", "dep:tutti-midi-ci"]
+# The OS MIDI backends of `tutti-midi-hardware`, each a no-op off its OS; with none of
+# them (and `tutti` is the only dependent) `midi-hardware` lists no device.
+alsa = ["tutti-midi-hardware?/alsa"]
+coremidi = ["tutti-midi-hardware?/coremidi"]
+winmm = ["tutti-midi-hardware?/winmm"]
 # `serde` for `MidiRouteRule<T>` (keyed by the app's own stable id, not a
 # `NodeKey`): its Group and channel are `tutti-ump`'s, with its `serde`; and for
 # `PeerState`, whose plugin and device are `tutti-plugin`'s and `tutti-midi-device`'s.

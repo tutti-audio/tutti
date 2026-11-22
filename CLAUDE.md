@@ -372,3 +372,6 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
   `thread_priority` in `tutti-platform`).
 - A codec format is a cargo feature (`encode-*`, `decode-*`), none on by default; a decode
   feature pulls no encoder.
+- A MIDI OS backend is a cargo feature of `tutti-midi-hardware` (`alsa`, `coremidi`,
+  `winmm`), each a no-op off its OS and forwarded by `tutti-session` and `tutti`; the
+  defaults keep every platform's backend, and `default-features = false` is the stub.
