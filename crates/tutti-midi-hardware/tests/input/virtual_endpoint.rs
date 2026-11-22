@@ -21,8 +21,9 @@ use tutti_midi_hardware::{HardwareMidiInputs, VirtualEndpoint, VirtualProtocol, 
 use tutti_midi_runtime::InputInlets;
 use tutti_platform::MainThreadMarker;
 use tutti_ump::{
-    Bank, BlockDirection, CCNumber, FirstGroup, FunctionBlockId, GroupSpan, Message, MidiChannel,
-    ProductInstanceId, Protocol, Rpn, Sysex8StreamCount, U7, UiHint, Ump, Utility, Voice1,
+    Bank, BlockDirection, CCNumber, CiVersion, FirstGroup, FunctionBlockId, GroupSpan, JrTicks,
+    Message, MidiChannel, ProductInstanceId, Protocol, Rpn, Sysex8StreamCount, U7, UiHint, Ump,
+    Utility, Voice1,
 };
 use tutti_ump::{BlockName, EndpointName};
 
@@ -160,8 +161,8 @@ fn jr_messages_a_client_sends_are_not_heard_by_an_arrival_port() {
     let found = find(&peer, &spec).expect("the endpoint is listed");
     peer.connect_to(port, found.address).expect("subscribes");
 
-    let clock = Ump::from(Message::Utility(Utility::JrClock(0x1234)));
-    let stamp = Ump::from(Message::Utility(Utility::JrTimestamp(0x1300)));
+    let clock = Ump::from(Message::Utility(Utility::JrClock(JrTicks::new(0x1234))));
+    let stamp = Ump::from(Message::Utility(Utility::JrTimestamp(JrTicks::new(0x1300))));
     let note = note_on(MidiChannel::of(2), 60, 0x8000);
     for ump in [clock, stamp, note] {
         peer.send_to_subscribers(port, &ump).expect("sends");
@@ -178,7 +179,7 @@ fn block() -> FunctionBlock {
         GroupSpan::new(2).unwrap(),
     )
     .ui_hint(UiHint::Receiver)
-    .midi_ci(2, Sysex8StreamCount::new(3))
+    .midi_ci(CiVersion::of(2), Sysex8StreamCount::new(3))
     .name(BlockName::new("Pads").unwrap())
     .build()
     .unwrap()

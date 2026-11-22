@@ -3,7 +3,9 @@
 //! positions (Figures 70 to 72), and nothing else decodes as one.
 
 use core::num::NonZeroU8;
-use tutti_ump::{BarAccents, Flex, FlexTimeSignature, Message, Metronome, MidiGroup, Ump};
+use tutti_ump::{
+    BarAccents, Flex, FlexTempo, FlexTimeSignature, Message, Metronome, MidiGroup, Ump,
+};
 
 /// The first word of a Complete, Group-addressed Flex Data message of Status
 /// Bank 0: message type 0xD, Format 0 in bits 23-22, Address 1 in bits 21-20.
@@ -20,7 +22,7 @@ fn setup(flex: Flex) -> Ump {
 /// Spec: m2-104/7.5.3#5, m2-104/7.5.3#6, m2-104/7.5.4#4, m2-104/7.5.4#5, m2-104/7.5.5#3, m2-104/7.5.5#4
 #[test]
 fn setup_messages_are_complete_and_group_addressed() {
-    let tempo = setup(Flex::SetTempo(0x0262_5A00));
+    let tempo = setup(Flex::SetTempo(FlexTempo::new(0x0262_5A00)));
     assert_eq!(tempo.0, [head(2, 0x0000), 0x0262_5A00, 0, 0]);
     let signature = setup(Flex::SetTimeSignature(FlexTimeSignature {
         numerator: 7,

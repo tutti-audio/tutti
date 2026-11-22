@@ -20,7 +20,7 @@ use std::io::{ErrorKind, Write as _};
 use std::sync::Arc;
 
 use tutti_midi_ci::ProfileOnRequest;
-use tutti_midi_protocol::{MtcRate, channel_voice, flex_tempo};
+use tutti_midi_protocol::{MtcRate, channel_voice};
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_platform::{Asset, Destination};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
@@ -2754,7 +2754,7 @@ fn text_interrupted(events: &[(Tick, FileEvent)]) -> Option<Tick> {
 /// field of `0` (M2-104 section 7.5.3).
 fn set_tempo(message: &Message) -> Option<Bpm> {
     match message {
-        Message::Flex(_, Flex::SetTempo(field)) => flex_tempo(*field),
+        Message::Flex(_, Flex::SetTempo(field)) => field.bpm(),
         _ => None,
     }
 }

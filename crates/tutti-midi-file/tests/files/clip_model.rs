@@ -13,8 +13,8 @@ use tutti_midi_file::{
 };
 use tutti_ump::ControlValue;
 use tutti_ump::{
-    Address, DeltaTicks, Flex, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Stream,
-    TicksPerQuarterNote, U7, Ump, Utility, Voice1,
+    Address, DeltaTicks, Flex, FlexTempo, JrTicks, Message, MidiChannel, MidiGroup, NoteNumber,
+    NoteVelocity, Stream, TicksPerQuarterNote, U7, Ump, Utility, Voice1,
 };
 use tutti_units::{Beat, Bpm, Seconds};
 
@@ -47,7 +47,11 @@ fn off(note: u8) -> Ump {
     midi::note_off(MidiChannel::FIRST, note, 0)
 }
 fn set_tempo(bpm: f64) -> Ump {
-    Message::Flex(MidiGroup::FIRST, Flex::SetTempo((6.0e9 / bpm) as u32)).into()
+    Message::Flex(
+        MidiGroup::FIRST,
+        Flex::SetTempo(FlexTempo::new((6.0e9 / bpm) as u32)),
+    )
+    .into()
 }
 
 /// The bytes of a clip made of exactly `parts`, in order.
@@ -345,7 +349,11 @@ fn a_clip_without_end_of_clip_is_refused() {
 /// messages may come before the DCTPQ and Start of Clip.
 #[test]
 fn clockstamps_and_jr_messages_do_not_count_as_content() {
-    let mut parts = vec![utility(Utility::Noop), utility(Utility::JrClock(7)), dcs(5)];
+    let mut parts = vec![
+        utility(Utility::Noop),
+        utility(Utility::JrClock(JrTicks::new(7))),
+        dcs(5),
+    ];
     parts.extend(valid());
     assert!(read_bytes(clip(&parts)).is_ok());
 }

@@ -3,7 +3,7 @@
 //! map, and a JR Timestamp into the host time of the message it precedes
 //! (M2-104 §7.2.2).
 //!
-//! A sender's clock counts [`TICK_RATE`] ticks a second in 16 bits, so it wraps
+//! A sender's clock counts [`JrTicks::RATE`] ticks a second in 16 bits, so it wraps
 //! every 2.097 s, and a clock message arrives at least every 250 ms with the
 //! jitter of the connection. The receiver keeps the last [`WINDOW`] clock
 //! messages as pairs of (unwrapped sender time, arrival) and fits one line
@@ -11,7 +11,7 @@
 //!
 //! - **Drift** is the slope of a least-squares fit, used once the window spans
 //!   [`DRIFT_SPAN`] and while it stays within [`MAX_DRIFT`] of 1; otherwise the
-//!   sender's clock is taken as exactly [`TICK_RATE`], since a short span or heavy
+//!   sender's clock is taken as exactly [`JrTicks::RATE`], since a short span or heavy
 //!   jitter would read jitter as drift.
 //! - **Offset** is the line's lowest point: a message is never sent after it
 //!   arrives, so the arrival nearest the line is the one with the least delay,
@@ -32,23 +32,15 @@ use std::time::Duration;
 
 use tutti_platform::Instant;
 
-use tutti_units::{SampleRate, Seconds};
-
-/// The sender clock's tick rate (M2-104 §7.2.2.1: ticks of 1/31250 s).
-pub const TICK_RATE: SampleRate = SampleRate::of(31_250.0);
-
-/// The time `ticks` sender ticks take.
-#[must_use]
-pub fn tick_time(ticks: u16) -> Seconds {
-    ticks_to_seconds(f64::from(ticks))
-}
+use tutti_ump::JrTicks;
+use tutti_units::Seconds;
 
 fn ticks_to_seconds(ticks: f64) -> Seconds {
-    Seconds::new(ticks / TICK_RATE.get())
+    Seconds::new(ticks / JrTicks::RATE.get())
 }
 
 fn seconds_to_ticks(seconds: Seconds) -> f64 {
-    seconds.get() * TICK_RATE.get()
+    seconds.get() * JrTicks::RATE.get()
 }
 
 /// How many JR Clock messages the fit keeps: 3.2 s of them at the 100 ms
@@ -195,12 +187,12 @@ pub struct JrReceiver {
     origin: Option<Instant>,
     /// The last clock message's 16 bits and arrival, for the wrap and the
     /// silence.
-    last: Option<(u16, Instant)>,
+    last: Option<(JrTicks, Instant)>,
     /// The line the window fits, kept until the window changes.
     fit: Option<Line>,
     /// The last JR Timestamp and its arrival: it times every message after it
     /// until the next.
-    stamp: Option<(u16, Instant)>,
+    stamp: Option<(JrTicks, Instant)>,
 }
 
 impl Default for JrReceiver {
@@ -253,9 +245,9 @@ impl JrReceiver {
 
     /// Takes a JR Clock message of sender time `ticks` that arrived at
     /// `arrival`.
-    pub fn clock(&mut self, ticks: u16, arrival: Instant) -> ClockHeard {
+    pub fn clock(&mut self, ticks: JrTicks, arrival: Instant) -> ClockHeard {
         let mut heard = ClockHeard::Taken;
-        let mut unwrapped = i64::from(ticks);
+        let mut unwrapped = i64::from(ticks.get());
         let mut late = false;
         match self.last {
             None => {}
@@ -267,11 +259,11 @@ impl JrReceiver {
             Some((last, _)) => {
                 // The sender's step, a signed 16-bit difference: under half a
                 // wrap, because the silence is.
-                let step = i64::from(ticks.wrapping_sub(last).cast_signed());
+                let step = i64::from(ticks.since(last));
                 unwrapped = self.newest().map_or(unwrapped, |r| r.ticks + step);
                 if self.off_line(unwrapped, arrival) {
                     self.restart();
-                    unwrapped = i64::from(ticks);
+                    unwrapped = i64::from(ticks.get());
                     heard = ClockHeard::Restarted;
                 } else {
                     late = step <= 0;
@@ -324,7 +316,7 @@ impl JrReceiver {
 
     /// Takes a JR Timestamp of sender time `ticks` that arrived at `arrival`: it
     /// times the messages after it, until the next ([`resolve_held`](Self::resolve_held)).
-    pub fn timestamp(&mut self, ticks: u16, arrival: Instant) {
+    pub fn timestamp(&mut self, ticks: JrTicks, arrival: Instant) {
         self.stamp = Some((ticks, arrival));
     }
 
@@ -343,7 +335,7 @@ impl JrReceiver {
 
     /// The host time of a message that a JR Timestamp of sender time `ticks`
     /// precedes and that arrived at `arrival`.
-    pub fn resolve(&self, ticks: u16, arrival: Instant) -> JrTime {
+    pub fn resolve(&self, ticks: JrTicks, arrival: Instant) -> JrTime {
         match self.lock(arrival) {
             JrLock::Waiting => return JrTime::Arrival(Unmapped::NoClock),
             JrLock::Lost => return JrTime::Arrival(Unmapped::ClockLost),
@@ -356,8 +348,8 @@ impl JrReceiver {
         // wrap nearest it.
         let seen = seconds_to_ticks((seconds_from(origin, arrival) - line.offset) / line.slope)
             + line.ticks0 as f64;
-        let wraps = ((seen - f64::from(ticks)) / WRAP).round();
-        let sender = f64::from(ticks) + wraps * WRAP;
+        let wraps = ((seen - f64::from(ticks.get())) / WRAP).round();
+        let sender = f64::from(ticks.get()) + wraps * WRAP;
         let host = ticks_to_seconds(sender - line.ticks0 as f64) * line.slope + line.offset;
         let sent = instant_at(origin, host).map(|at| at.min(arrival));
         match sent {

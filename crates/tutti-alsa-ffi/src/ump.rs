@@ -11,7 +11,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_uint};
 
 use tutti_ump::{
-    BlockDirection, DeviceIdentity, EndpointInfoNotification, Field, FirstGroup,
+    BlockDirection, CiVersion, DeviceIdentity, EndpointInfoNotification, Field, FirstGroup,
     FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, FunctionBlocks, GroupSpan,
     ManufacturerId, Midi1Port, OsFunctionBlock, ProductInstanceId, Protocol, SoftwareRevision,
     Sysex8StreamCount, U7, UiHint, UmpVersion, read_function_block, read_protocol,
@@ -217,6 +217,8 @@ impl BlockFields {
             midi1,
             first_group: byte(self.first_group),
             groups_spanned: byte(self.num_groups),
+            // The record's number as the kernel holds it; `read_function_block` reads it
+            // as the wire does, `0` being none and a byte above 0x1F reserved.
             midi_ci_version: byte(self.midi_ci_version),
             max_sysex8_streams: Sysex8StreamCount::new(byte(self.sysex8_streams)),
         })
@@ -227,7 +229,7 @@ impl BlockFields {
     /// # Errors
     ///
     /// [`Error::Reserved`] for a reserved field (the block number, direction,
-    /// first Group, Group span or MIDI 1.0 port), which the record cannot hold.
+    /// first Group, Group span, MIDI-CI version or MIDI 1.0 port), which the record cannot hold.
     fn of(info: &FunctionBlockInfo) -> Result<Self> {
         let flags = match info.midi1 {
             Midi1Port::No => 0,
@@ -253,7 +255,10 @@ impl BlockFields {
             },
             first_group: defined(info.first_group, "first Group", FirstGroup::get)?,
             num_groups: defined(info.groups_spanned, "Group span", GroupSpan::get)?,
-            midi_ci_version: u32::from(info.midi_ci_version),
+            midi_ci_version: match info.midi_ci_version {
+                None => 0,
+                Some(version) => defined(version, "MIDI-CI version", CiVersion::get)?,
+            },
             sysex8_streams: u32::from(info.max_sysex8_streams.get()),
             ui_hint: match info.ui_hint {
                 UiHint::Unknown => 0,
@@ -715,8 +720,11 @@ mod tests {
         assert_eq!(info.groups_spanned.value().map(GroupSpan::get), Some(2));
         assert_eq!(info.ui_hint, UiHint::Both);
         assert_eq!(
-            (info.midi_ci_version, info.max_sysex8_streams.get()),
-            (2, 5)
+            (
+                info.midi_ci_version.and_then(Field::value),
+                info.max_sysex8_streams.get()
+            ),
+            (Some(CiVersion::of(2)), 5)
         );
     }
 

@@ -90,15 +90,18 @@ extern crate alloc;
 mod articulation;
 mod bend_value;
 mod cc_number;
+mod ci_version;
 mod control_value;
 mod decode;
 mod encode;
 mod field;
+mod flex_tempo;
 mod flex_text;
 mod flex_write;
 mod held_controllers;
 mod held_keys;
 mod iso8601;
+mod jr_ticks;
 mod manufacturer;
 mod message;
 mod messages;
@@ -130,6 +133,7 @@ pub use articulation::{
 };
 pub use bend_value::BendValue;
 pub use cc_number::{CCNumber, CCNumberOutOfRange};
+pub use ci_version::{CiVersion, NotAVersion};
 pub use control_value::ControlValue;
 pub use field::{
     ChordType, ChordTypeOutOfRange, DeltaTicks, DeltaTicksOutOfRange, FirstGroup,
@@ -140,6 +144,7 @@ pub use field::{
     TicksPerQuarterNoteOutOfRange, U4, U4OutOfRange, U7, U7OutOfRange, U14, U14OutOfRange, U28,
     U28OutOfRange, first_non_seven_bit,
 };
+pub use flex_tempo::FlexTempo;
 pub use flex_text::{FlexText, FlexTextAssembler, FlexTextStep};
 pub use flex_write::{
     Entry, EntryError, FLEX_TEXT_MAX_LEN, FlexTextError, FlexTextPackets, Iso8601Date,
@@ -150,6 +155,7 @@ pub use flex_write::{
 };
 pub use held_controllers::HeldControllers;
 pub use held_keys::{GroupChannelIndex, GroupChannelIndexOutOfRange, Held, KeyBitset};
+pub use jr_ticks::JrTicks;
 pub use manufacturer::{ManufacturerBytesError, ManufacturerId, NotManufacturerId};
 pub use message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockDirection,

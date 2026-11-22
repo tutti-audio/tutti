@@ -511,7 +511,9 @@ mod tests {
                 },
             ))
         };
-        let clock = Ump::from(Message::Utility(crate::Utility::JrClock(9)));
+        let clock = Ump::from(Message::Utility(crate::Utility::JrClock(
+            crate::JrTicks::new(9),
+        )));
         assert_eq!(lens(&[text(Form::Start), clock, text(Form::End)]), [3]);
     }
 
@@ -525,7 +527,9 @@ mod tests {
     #[test]
     fn a_utility_packet_inside_a_run_belongs_to_it_and_one_after_it_does_not() {
         use SysexStatus::{End, Start};
-        let stamp = Ump::from(Message::Utility(crate::Utility::JrTimestamp(5)));
+        let stamp = Ump::from(Message::Utility(crate::Utility::JrTimestamp(
+            crate::JrTicks::new(5),
+        )));
         let batch = [sysex7(Start), stamp, sysex7(End), stamp, note()];
         assert_eq!(lens(&batch), [3, 1, 1]);
     }

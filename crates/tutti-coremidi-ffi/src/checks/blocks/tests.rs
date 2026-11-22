@@ -1,5 +1,5 @@
 use super::*;
-use tutti_ump::{OsFunctionBlock, Sysex8StreamCount, read_function_block};
+use tutti_ump::{CiVersion, Field, OsFunctionBlock, Sysex8StreamCount, read_function_block};
 
 /// A block as an operating system would hold it; the fields a test varies are
 /// overridden.
@@ -136,7 +136,10 @@ fn a_midi_ci_version_is_refused_by_name() {
     };
     assert_eq!(
         platform_blocks(&[(info(block), None)]),
-        Err(BlockRefusal::MidiCiVersion { id: 0, version: 2 })
+        Err(BlockRefusal::MidiCiVersion {
+            id: 0,
+            version: Field::Value(CiVersion::of(2))
+        })
     );
 }
 
