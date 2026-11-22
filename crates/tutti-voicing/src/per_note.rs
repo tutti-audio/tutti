@@ -841,7 +841,11 @@ mod tests {
         let mut s = state();
         let a = at(0, 0);
         let e = s
-            .start(a, NoteNumber::of(0), Attribute::Pitch(60 << 9))
+            .start(
+                a,
+                NoteNumber::of(0),
+                Attribute::Pitch(Pitch::from_q7_9(60 << 9)),
+            )
             .to_vec();
         let id = started(&e);
         assert_eq!(e.last(), Some(&pitch_event(id, 0, 60)));
@@ -1027,7 +1031,11 @@ mod tests {
         let a = at(0, 0);
         pitch_of(&mut s, a, 5, PITCH_60);
         let e = s
-            .start(a, NoteNumber::of(5), Attribute::Pitch(70 << 9))
+            .start(
+                a,
+                NoteNumber::of(5),
+                Attribute::Pitch(Pitch::from_q7_9(70 << 9)),
+            )
             .to_vec();
         assert!((sounding(e.last().unwrap()) - 70.0).abs() < 1e-4, "{e:?}");
         let e = bend(&mut s, a, 5, 0xC000_0000);

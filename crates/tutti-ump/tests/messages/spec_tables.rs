@@ -21,8 +21,8 @@ use tutti_ump::{
     Accidental, Alteration, AlterationKind, BarAccents, BlockDirection, ChordBass, ChordName,
     ChordPitch, ChordType, DiscoveryFilter, EndpointInfoNotification, FirstGroup, Flex,
     FlexAddress, FlexTextKind, Form, FunctionBlockId, FunctionBlockInfo, GroupSpan, Letter,
-    Message, Metronome, Midi1Port, MidiGroup, Protocol, Stream, StreamConfig, U4, UiHint, Ump,
-    UmpVersion,
+    Message, Metronome, Midi1Port, MidiGroup, Protocol, Stream, StreamConfig, Sysex8StreamCount,
+    U4, UiHint, Ump, UmpVersion,
 };
 
 /// Decode gives the message, and encode gives the words back.
@@ -155,7 +155,7 @@ fn function_block_fields() {
             first_group: FirstGroup::new(0).unwrap().into(),
             groups_spanned: GroupSpan::new(1).unwrap().into(),
             midi_ci_version: 0,
-            max_sysex8_streams: 0,
+            max_sysex8_streams: Sysex8StreamCount::new(0),
         }))
     };
     let word2 = 0x0001_0000;
