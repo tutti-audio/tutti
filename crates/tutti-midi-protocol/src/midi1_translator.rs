@@ -22,7 +22,7 @@ mod members;
 ///   Registered Controller of index 0 to 31 (any bank) is a fixed-point number
 ///   or a pair of fields, upscaled by zero-extension (M2-115 section 4.1:
 ///   Zero-Extension Scaling for every Registered Controller whose index is
-///   0 to 31), and downscales **with rounding** (section 4.4, `ControlValue::to_registered_u14`).
+///   0 to 31), and downscales **with rounding** (section 4.4, `ExtremeValues::registered`).
 ///   Every other controller was scaled
 ///   Min-Center-Max and downscales by the plain right shift of section 3.4
 ///   (`ControlValue::to_u7`), which returns the value it was upscaled from.
@@ -188,7 +188,7 @@ impl Midi1Translator {
         };
         match voice {
             Voice2::Registered { bank, index, value } => {
-                let data = value.to_registered_u14(index, extremes);
+                let data = extremes.registered(index, value);
                 run(
                     (CCNumber::RPN_MSB, bank),
                     (CCNumber::RPN_LSB, index),
@@ -200,7 +200,7 @@ impl Midi1Translator {
                 run(
                     (CCNumber::NRPN_MSB, bank),
                     (CCNumber::NRPN_LSB, index),
-                    value.to_assignable_u14(extremes),
+                    extremes.assignable(value),
                     &mut cc,
                 );
             }
