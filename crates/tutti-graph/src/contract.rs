@@ -84,6 +84,7 @@ use crate::OutputPort;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{BufferError, Float, Planes, PlanesMut};
+use tutti_rt::{Overflow, RingReader, RingWriter, ring};
 use tutti_ump::{Message, NoteKeyEvent, NoteNumber, Ump, Voice2};
 use tutti_units::{At, Beat, Bpm, Frame, Latency, SampleRate, Samples, Tail, UnitAddr};
 
@@ -734,7 +735,8 @@ impl Row {
         ctx: &str,
     ) {
         let log = rig.log.as_ref().expect("the row records its node's events");
-        let seen = log.lock().expect("the log").clone();
+        assert_eq!(log.lost(), 0, "{ctx}: the recorder's ring overflowed");
+        let seen: Vec<(u64, EventKind)> = log.iter().copied().collect();
         let kind = self.event_kind();
         let EventKind::Midi(on) = kind else {
             panic!("{ctx}: an onset-release row is excited by a note");
@@ -1488,8 +1490,12 @@ impl Node for Latent {
 }
 
 /// The events a [`Recorder`] saw: `(absolute frame, event)`, in the order the
-/// node was handed them.
-type EventLog = std::sync::Arc<std::sync::Mutex<Vec<(u64, EventKind)>>>;
+/// node was handed them. The reader end; a push past [`EVENT_LOG_CAPACITY`]
+/// is counted lost, and the reading assert fails on any loss.
+type EventLog = RingReader<(u64, EventKind)>;
+
+/// The events a [`Recorder`] holds: far more than an onset-release row sends.
+const EVENT_LOG_CAPACITY: usize = 1024;
 
 /// A wrapper around the node under test that records what its event input
 /// `port` is handed, then delegates every call. It is in the harness so that
@@ -1497,20 +1503,13 @@ type EventLog = std::sync::Arc<std::sync::Mutex<Vec<(u64, EventKind)>>>;
 struct Recorder {
     inner: Box<dyn Node>,
     port: u16,
-    log: EventLog,
+    log: RingWriter<(u64, EventKind)>,
 }
 
 impl Recorder {
     fn wrap(inner: Box<dyn Node>, port: u16) -> (Self, EventLog) {
-        let log = EventLog::default();
-        (
-            Self {
-                inner,
-                port,
-                log: log.clone(),
-            },
-            log,
-        )
+        let (log, reader) = ring(EVENT_LOG_CAPACITY, Overflow::DropNewest);
+        (Self { inner, port, log }, reader)
     }
 }
 
@@ -1529,11 +1528,11 @@ impl Node for Recorder {
 
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
         let block = cx.env.frame.get();
-        let mut log = self.log.lock().expect("the log");
-        for e in io.events(self.port).iter() {
-            log.push((block + e.offset.index() as u64, e.kind));
-        }
-        drop(log);
+        self.log.push_iter(
+            io.events(self.port)
+                .iter()
+                .map(|e| (block + e.offset.index() as u64, e.kind)),
+        );
         self.inner.process(cx, io)
     }
 

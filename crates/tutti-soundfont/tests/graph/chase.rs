@@ -4,10 +4,9 @@
 //!
 //! Against the committed `TimGM6mb.sf2`; a missing fixture fails.
 
-use std::sync::{Arc, Mutex};
-
+use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, MaxBlock};
-use tutti_fixtures::midi;
+use tutti_fixtures::{Record, midi};
 use tutti_graph::{
     Buses, Chase, Cx, Editor, EventCapacity, EventEdge, EventInletNode, EventInletWriter,
     EventInputPort, EventKind, EventOutputPort, Executor, Fade, FadeLaw, Io, Node, OutputPort,
@@ -114,7 +113,7 @@ impl Rig {
 }
 
 /// A successor that writes down what it is sent.
-struct Recorder(Arc<Mutex<Vec<Ump>>>);
+struct Recorder(Record<Ump>);
 
 impl Node for Recorder {
     fn shape(&self) -> Shape {
@@ -124,7 +123,7 @@ impl Node for Recorder {
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         for e in io.events(0).iter() {
             if let EventKind::Midi(u) = e.kind {
-                self.0.lock().unwrap().push(u);
+                self.0.lock().expect("the record").push(u);
             }
         }
         for c in 0..2 {
@@ -168,10 +167,16 @@ fn the_unit_chases_its_programs_banks_controllers_and_wheels() {
         cc(5, 0, 7),
     ]);
     rig.block();
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    rig.swap(Unforkable(Recorder(Arc::clone(&seen))));
+    let seen = Record::new();
+    rig.swap(Unforkable(Recorder(seen.clone())));
     rig.block();
-    let got: Vec<_> = seen.lock().unwrap().iter().map(|&u| decoded(u)).collect();
+    let got: Vec<_> = seen
+        .lock()
+        .expect("the record")
+        .as_slice()
+        .iter()
+        .map(|&u| decoded(u))
+        .collect();
     let on = |c: u8| MidiChannel::of(c);
     let wants = [
         (

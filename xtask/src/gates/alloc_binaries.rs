@@ -93,10 +93,6 @@ pub(super) const DEBT: &[(&str, &str)] = &[
         "clock_switch::the_old_driver_renders_its_last_block_before_the_new_one_its_first: Renderer::process, tests/io/clock_switch.rs:628",
     ),
     (
-        "crates/tutti-soundfont/tests/graph/main.rs",
-        "contract::soundfont::direct: tutti_graph::contract::Recorder::process, tutti-graph src/contract.rs:1534",
-    ),
-    (
         "crates/tutti-soundfont/tests/player/main.rs",
         "universal::general_midi_off_also_returns_to_the_initial_status: Player::universal, tutti-soundfont src/player.rs:389",
     ),
