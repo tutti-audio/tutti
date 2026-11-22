@@ -675,15 +675,19 @@ impl<F: Float + SimdLanes + Lerp> IntoNode<F> for MultibandCompressorNode<F> {
             node,
             controls,
             fork,
+            params,
+            reclaimer,
         } = tutti_graph::param_parts(self);
-        NodeParts::new(
+        NodeParts {
             node,
-            MultibandControls {
+            controls: MultibandControls {
                 params: controls,
                 reductions,
             },
             fork,
-        )
+            params,
+            reclaimer,
+        }
     }
 }
 

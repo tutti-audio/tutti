@@ -25,6 +25,7 @@ use tutti_music::{FrameClock, LoopRange, MeterMap, SegmentOrigin};
 use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
 use crate::bus::{Buses, InEvents, OutEvents, PortSpan};
+use crate::controls::ParamSet;
 use crate::cost::Cost;
 use crate::fork::ForkSource;
 use crate::history::TransportHistory;
@@ -36,6 +37,7 @@ use crate::render_mode::RenderMode;
 use crate::time::Offset;
 use crate::wake::Wake;
 use tutti_buffers::Float;
+use tutti_rt::Reclaim;
 use tutti_units::PlayReading;
 
 /// Most audio channels, or event ports, on one side of one node.
@@ -1809,17 +1811,42 @@ pub struct NodeParts<C, F: Float = f32> {
     pub controls: C,
     /// Where a fork of this node comes from; `None` if it cannot be forked.
     pub fork: Option<Box<dyn ForkSource<F>>>,
+    /// The node's params by address; `None` for a node with none.
+    pub params: Option<ParamSet>,
+    /// What frees the values the node's published cells retired; `None` for a
+    /// node that publishes nothing.
+    pub reclaimer: Option<Box<dyn Reclaim + Send>>,
 }
 
 impl<C, F: Float> NodeParts<C, F> {
-    /// The unit, its controls and its fork source.
+    /// The unit, its controls and its fork source; no params and nothing to
+    /// reclaim until [`params`](Self::params) and [`reclaimer`](Self::reclaimer) say so.
     #[must_use]
     pub fn new(node: Box<dyn Node<F>>, controls: C, fork: Option<Box<dyn ForkSource<F>>>) -> Self {
         Self {
             node,
             controls,
             fork,
+            params: None,
+            reclaimer: None,
         }
+    }
+
+    /// The node's params by address: what a session's param write goes
+    /// through and what a fork of the node starts from.
+    #[must_use]
+    pub fn params(mut self, params: ParamSet) -> Self {
+        self.params = Some(params);
+        self
+    }
+
+    /// What frees the values the node's published cells retired: a clone of
+    /// the node's controls (or of the cells they hold). The session runs it
+    /// on every update, on the control thread, for as long as the node is in.
+    #[must_use]
+    pub fn reclaimer(mut self, reclaimer: impl Reclaim + Send + 'static) -> Self {
+        self.reclaimer = Some(Box::new(reclaimer));
+        self
     }
 }
 

@@ -1161,6 +1161,6 @@ impl<F: SamplerFloat> IntoNode<F> for VoicePool<F> {
             counters: Arc::clone(&self.counters),
         };
         let (pool, handle) = self.with_handle();
-        NodeParts::new(Box::new(pool), handle, Some(Box::new(fork)))
+        NodeParts::new(Box::new(pool), handle.clone(), Some(Box::new(fork))).reclaimer(handle)
     }
 }

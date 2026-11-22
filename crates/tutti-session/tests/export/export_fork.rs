@@ -616,11 +616,7 @@ impl ForkSource for CounterFork {
     }
 }
 
-impl SessionNode for Counter {
-    fn reclaimer(_: &()) -> tutti_session::Reclaims {
-        tutti_session::Reclaims::Nothing
-    }
-}
+impl SessionNode for Counter {}
 
 impl IntoNode for Counter {
     type Controls = ();
@@ -863,11 +859,7 @@ impl ForkSource for SlowFork {
     }
 }
 
-impl SessionNode for Slow {
-    fn reclaimer(_: &()) -> tutti_session::Reclaims {
-        tutti_session::Reclaims::Nothing
-    }
-}
+impl SessionNode for Slow {}
 
 impl IntoNode for Slow {
     type Controls = ();
@@ -1051,11 +1043,7 @@ impl ForkSource for PinnedFork {
 /// `threads`.
 struct PinnedNode(Arc<Threads>);
 
-impl SessionNode for PinnedNode {
-    fn reclaimer(_: &()) -> tutti_session::Reclaims {
-        tutti_session::Reclaims::Nothing
-    }
-}
+impl SessionNode for PinnedNode {}
 
 impl IntoNode for PinnedNode {
     type Controls = ();
@@ -1197,11 +1185,7 @@ impl ForkSource for BrokenFork {
     }
 }
 
-impl SessionNode for Broken {
-    fn reclaimer(_: &()) -> tutti_session::Reclaims {
-        tutti_session::Reclaims::Nothing
-    }
-}
+impl SessionNode for Broken {}
 
 impl IntoNode for Broken {
     type Controls = ();

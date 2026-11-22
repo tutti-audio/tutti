@@ -41,11 +41,7 @@ impl InstrumentNode<f32> for Dressed {
         [2, 3]
     }
 }
-impl SessionNode for Dressed {
-    fn reclaimer(_: &()) -> tutti_session::Reclaims {
-        tutti_session::Reclaims::Nothing
-    }
-}
+impl SessionNode for Dressed {}
 
 #[test]
 fn the_pair_a_node_names_is_the_one_played() {
@@ -97,11 +93,7 @@ fn a_pair_past_the_outputs_is_refused() {
             [4, 5]
         }
     }
-    impl SessionNode for Short {
-        fn reclaimer(_: &()) -> tutti_session::Reclaims {
-            tutti_session::Reclaims::Nothing
-        }
-    }
+    impl SessionNode for Short {}
     let mut session = crate::instrument_support::rig::offline_session();
     match session.add_instrument(Short) {
         Err(tutti_session::Error::NotInstrument {

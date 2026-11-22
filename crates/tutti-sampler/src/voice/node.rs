@@ -632,7 +632,10 @@ impl<F: SamplerFloat> IntoNode<F> for VoiceNode<F> {
             params: handle.params.clone(),
             tempo: node.tempo.clone(),
         };
-        NodeParts::new(Box::new(node), handle, Some(Box::new(fork)))
+        let params = handle.params().clone();
+        NodeParts::new(Box::new(node), handle.clone(), Some(Box::new(fork)))
+            .params(params)
+            .reclaimer(handle)
     }
 }
 
