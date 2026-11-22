@@ -154,6 +154,47 @@ fn a_route_onto_a_mix_modulates_around_the_base_the_mix_target_writes() {
     figure(&mut s, 0.875, "the route gone: the base the knob left");
 }
 
+/// **A route onto the mix of a node added in the same update goes out in
+/// that update's one plan, and modulates from its first frame.** The node, its
+/// base mix (`0.25`) and a route of macro `0.5` at depth `0.5` over `0..=1`
+/// are all declared before one update: the lane binds to the mix cell the
+/// node made when it was staged, so exactly one plan is sent and its first
+/// frame is the blend at `0.25 + 0.5 * 0.5 * 1 = 0.5`.
+#[test]
+fn a_route_onto_the_mix_of_a_node_added_in_the_update_sends_one_plan() {
+    let mut s = offline();
+    settle(&mut s);
+    let plans = s.graph_ref().testing().commits_sent();
+
+    let g = s.graph();
+    let a = g.add(ForkByClone(Const::mono(A)));
+    let halve = g.add(ForkByClone(Halve));
+    g.set_sources(InputPort::new(halve, 0), [OutputPort::new(a, 0)])
+        .unwrap()
+        .unfaded();
+    g.set_sources(MainOutput::channel(0), [OutputPort::new(halve, 0)])
+        .unwrap()
+        .unfaded();
+    s.set(halve.mix().to(Mix::new(0.25))).expect("a node");
+    let mix = MixRef::of(halve);
+    let mut m = s.mods_mut();
+    m.range(mix, Mix::new(0.0)..Mix::new(1.0)).unwrap();
+    let source = m.macro_(0.5);
+    m.route(RouteSpec::new(source, mix, Depth::of(0.5)))
+        .unwrap();
+
+    let _ = s.update();
+    assert_eq!(s.mod_state().problems().next(), None, "the route resolved");
+    assert_eq!(
+        s.graph_ref().testing().commits_sent(),
+        plans + 1,
+        "one plan for the node and its lane"
+    );
+    let got = render(&mut s, 1);
+    assert_eq!(got[0].to_bits(), blend(0.5).to_bits(), "the first frame");
+    assert_eq!(got[BLOCK - 1].to_bits(), blend(0.5).to_bits());
+}
+
 /// A mix target keys once per node, apart from a param's of the same node and
 /// from an edge's, and is no param.
 #[test]

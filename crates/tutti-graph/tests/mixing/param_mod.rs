@@ -2517,8 +2517,9 @@ proptest! {
 /// `Editor::param_range_cell` hands out a read-only view of the very cell
 /// the port clamps to: `set_param_range` is read back through it on the
 /// spot, the next block clamps to it, and a later commit (which rewrites
-/// every cell from the editor's values) leaves it reading the same range. A param the
-/// node does not declare, or a key no commit has placed, has none.
+/// every cell from the editor's values) leaves it reading the same range. The
+/// cell exists once the node is staged and is the one the commit hands the
+/// unit. A param the node does not declare, or a key not staged, has none.
 ///
 /// The handle is read-only: a store into the cell alone would be undone by
 /// the next commit, so the test writes through the supported path,
@@ -2531,7 +2532,9 @@ fn a_range_cell_handle_is_the_ports_own() {
     ed.insert(NodeKey(1), "sig", Unforkable(Signal { seed: SEED }));
     let at = param(PROBE, UnitParam::Cutoff);
     let q_at = param(PROBE, UnitParam::Q);
-    assert!(ed.param_range_cell(at).is_none(), "no commit has placed it");
+    let staged = ed
+        .param_range_cell(at)
+        .expect("a staged node's port has its cell");
     for p in [at, q_at] {
         ed.spec_mut().connect_param(p, ev(1));
     }
@@ -2539,7 +2542,10 @@ fn a_range_cell_handle_is_the_ports_own() {
     assert!(ed.param_range_cell(param(PROBE, UnitParam::Wet)).is_none());
     assert!(ed.param_range_cell(param(1, UnitParam::Cutoff)).is_none());
     let cell = ed.param_range_cell(at).expect("a declared, committed port");
-    assert!(cell.same_cell(&ed.param_range_cell(at).expect("again")));
+    assert!(
+        cell.same_cell(&staged),
+        "the commit hands the unit the staged cell"
+    );
     assert_eq!(cell.current(), ParamRange::UNBOUNDED);
 
     ed.set_param_range(at, ParamRange::new(-0.5, 0.5))

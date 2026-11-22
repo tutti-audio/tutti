@@ -101,8 +101,8 @@ pub enum Target {
     /// (`Editor::set_edge_gain`, [`LaneControls::store`]: one cell, so one
     /// writer). A route modulates around the base and its removal returns to
     /// it. The edge's entry is made when the target first resolves (an edge
-    /// with none is a plain addend), and the lane is built once the commit
-    /// that sends it has landed.
+    /// with none is a plain addend), and the lane binds to the cells the entry
+    /// made.
     Edge {
         /// The edge.
         id: EdgeId,
@@ -116,7 +116,7 @@ pub enum Target {
     /// lane's offsets add to, written by whoever sets the mix
     /// ([`Editor::set_mix`], [`LaneControls::store`]: one cell, so one
     /// writer). A route modulates around the base and its removal returns to
-    /// it. The lane is built once a commit has placed the node's unit.
+    /// it. The lane binds to the cell the node made when it was staged.
     Mix {
         /// The node.
         node: NodeKey,
@@ -201,12 +201,10 @@ pub struct Applied {
     /// The targets whose program was republished to their running lane
     /// (no commit).
     pub republished: Vec<TargetKey>,
-    /// Targets with a program whose node the host did not resolve, whose
-    /// node is not in the last plan committed yet, or whose node was
-    /// replaced since by a unit declaring another param list (its param
-    /// port's range cell is not the one the next commit hands out). No lane
-    /// until a later `apply` resolves them, and a lane they had is removed.
-    /// **A host re-applies after each commit while this is not empty.**
+    /// Targets with a program whose node the host did not resolve, or whose
+    /// node or edge is not in the editor (never added, or removed since). No
+    /// lane until a later `apply` resolves them, and a lane they had is
+    /// removed. A node staged by the editor, committed or not, resolves.
     pub unresolved_targets: Vec<TargetKey>,
     /// Followers with no feed, or whose feed node is not in the graph: no
     /// node until a later `apply`.
@@ -234,10 +232,9 @@ enum Bind {
     },
     Edge {
         id: EdgeId,
-        /// The edge's live gain cell.
-        knob: ParamCell,
-        /// The edge's live range cell: a new entry has a new one.
-        range: ParamRangeCell,
+        /// The edge's live cells, `None` while the apply has yet to declare
+        /// its entry: it does, before it builds the lane.
+        cells: Option<EdgeCells>,
     },
     Mix {
         /// The node's mix port.
@@ -248,6 +245,23 @@ enum Bind {
         /// Its live range cell.
         range: ParamRangeCell,
     },
+}
+
+/// An edge's live gain cell and range cell: a new entry has new ones.
+#[derive(Clone, Debug)]
+struct EdgeCells {
+    knob: ParamCell,
+    range: ParamRangeCell,
+}
+
+impl EdgeCells {
+    /// `id`'s cells, once its entry is declared.
+    fn of<F: Float>(editor: &Editor<F>, id: EdgeId) -> Option<Self> {
+        Some(Self {
+            knob: editor.edge_gain_cell(id)?,
+            range: editor.edge_gain_range_cell(id)?,
+        })
+    }
 }
 
 impl Bind {
@@ -286,11 +300,15 @@ impl Bind {
                 },
             ) => to == t2 && id == i2 && generation == g2,
             (
-                Self::Edge { id, range, .. },
                 Self::Edge {
-                    id: i2, range: r2, ..
+                    id,
+                    cells: Some(cells),
                 },
-            ) => id == i2 && range.same_cell(r2),
+                Self::Edge {
+                    id: i2,
+                    cells: Some(c2),
+                },
+            ) => id == i2 && cells.range.same_cell(&c2.range),
             (
                 Self::Mix { at, knob, range },
                 Self::Mix {
@@ -380,18 +398,16 @@ struct SourcePlan {
 /// ring and starts idle. A follower needs none: it sends on every grid
 /// point while it is not silent.
 ///
-/// **Rebinds and re-applying.** A native target resolves once the last
-/// plan committed has a unit at its node declaring the params the node
-/// declares now: a node new since the last commit, or replaced by a unit
-/// with another param list (which the commit gives fresh range cells),
-/// leaves the target unresolved, and the lane it had goes (its port reads
-/// the node's knob meanwhile). A host re-applies after each commit while
-/// [`Applied::unresolved_targets`] is not empty, and the lane is rebuilt
-/// on the cells that commit handed out. A replace with the same list keeps
-/// its cells: the lane is rebuilt at once (a fresh lane sends at its first
-/// frame, so the new unit hears it). Two targets on one param port are
-/// refused ([`ReconcileError::SharedPort`]); a target moved from one key to
-/// another on the same port in one `apply` is not two.
+/// **Rebinds.** A native target resolves against the node the editor holds
+/// at its key, staged or committed: the unit declares its param ranges when
+/// it is placed, so a node new since the last commit, or replaced by a unit
+/// with another param list (which gets fresh range cells), resolves in the
+/// same apply, and its lane goes out in the commit that sends the node. A
+/// replace rebuilds the lane (a fresh lane sends at its first frame, so the
+/// new unit hears it). An edge's gain and a node's mix resolve the same way;
+/// an edge with no gain entry gets one from the apply. Two targets on one
+/// param port are refused ([`ReconcileError::SharedPort`]); a target moved
+/// from one key to another on the same port in one `apply` is not two.
 /// A node this reconciler built whose key the host has since taken (a
 /// replace or a removal) is forgotten, the wiring around it undone, and
 /// built again at a fresh key.
@@ -441,8 +457,6 @@ struct SourcePlan {
 ///     ),
 /// )
 /// .controls;
-/// // A native target's range cell exists once its node is placed.
-/// editor.commit().expect("commits");
 ///
 /// struct Host(NodeKey, Option<ParamCell>);
 /// impl ModHost for Host {
@@ -528,9 +542,8 @@ pub struct Modulation {
 ///   compared: it only seeds a new lane, and a standing lane keeps its own.
 /// - **The editor**, by [`Editor::revision`]: the spec, the shapes and
 ///   generations (a node inserted, replaced, crossfaded or removed, by the
-///   host or over one of this reconciler's own keys), the plan sent last
-///   (a commit: what a native target resolves against), param ranges and
-///   their cells, and the `Prepare` (a sample-rate change). Recorded after
+///   host or over one of this reconciler's own keys), param ranges and their
+///   cells, and the `Prepare` (a sample-rate change). Recorded after
 ///   the apply's own edits, which its records already hold.
 /// - **The play clock's epoch** (`Editor::play_reading`): the compile
 ///   carries a rate edit's anchor only within its epoch, so a new play
@@ -545,8 +558,9 @@ pub struct Modulation {
 /// again, so a `Modulation` must be applied to one editor for its life
 /// (a session builds one editor and a restart reuses it).
 ///
-/// Not kept while a target or a source is unresolved: those resolve on a
-/// later commit, and a host re-applies to find out (and times how long).
+/// Not kept while a target or a source is unresolved: it resolves when its
+/// node or edge is added, and a host applies again to find out (and times how
+/// long).
 #[derive(Debug)]
 struct Memo {
     sources: Vec<(SourceKey, ModSource)>,
@@ -710,8 +724,8 @@ impl Modulation {
     /// keys through `host`. Control thread; it may allocate. Commit
     /// afterwards when [`Applied::commit`] or [`Applied::resync`] says so,
     /// through [`commit`](Self::commit), or through `editor.commit()`
-    /// followed by [`send_resyncs`](Self::send_resyncs); apply again after
-    /// that commit while [`Applied::unresolved_targets`] is not empty.
+    /// followed by [`send_resyncs`](Self::send_resyncs). A lane and its
+    /// target staged since the last commit go out in that one plan.
     ///
     /// # Errors
     ///
@@ -789,18 +803,18 @@ impl Modulation {
                 _ => None,
             })
             .collect();
-        let mut binds = BTreeMap::new();
+        let mut binds: BTreeMap<TargetKey, Bind> = BTreeMap::new();
         let mut claimed: BTreeMap<ParamIn, TargetKey> = BTreeMap::new();
         let mut claimed_edges: BTreeMap<EdgeId, TargetKey> = BTreeMap::new();
-        // Edges that have no entry yet: it is made below, and the target
-        // resolves once the commit that sends it has landed.
+        // Edges that have no entry yet: it is made below, once the apply has
+        // checked out, and the target binds to its cells there.
         let mut to_enter: Vec<(EdgeId, TargetKey)> = Vec::new();
         for &target in compiled.programs.keys() {
             let to = host.target(target);
             resolved.push((target, Resolved::of(&to)));
             if let Some(Target::Edge { id, .. }) = &to
                 && editor.spec().has_edge(*id)
-                && !editor.spec().gains.contains_key(id)
+                && editor.edge_gain_cell(*id).is_none()
             {
                 to_enter.push((*id, target));
             }
@@ -855,7 +869,24 @@ impl Modulation {
         self.check_cycles(decl, editor, &binds, &plans, &edges, &taken_keys)?;
 
         // Apply.
+        let targets: BTreeMap<TargetKey, (f64, f64)> = decl
+            .targets
+            .iter()
+            .map(|(k, d)| (*k, (d.min, d.max)))
+            .collect();
         let commit = &mut applied.commit;
+        // The entries of the edges that had none, and the cells the targets
+        // bind to.
+        for (id, target) in to_enter {
+            let (min, max) = targets[&target];
+            editor
+                .set_edge_gain_range(id, ParamRange::new(min, max))
+                .expect("checked: the edge exists, and compile refuses a NaN bound");
+            if let Some(Bind::Edge { cells, .. }) = binds.get_mut(&target) {
+                *cells = EdgeCells::of(editor, id);
+            }
+            *commit = true;
+        }
         // Undo what was wired around a taken node, leaving the host's node
         // and its own wiring alone, then forget it.
         for &(s, t) in &self.edges {
@@ -996,18 +1027,6 @@ impl Modulation {
             *commit = true;
         }
 
-        let targets: BTreeMap<TargetKey, (f64, f64)> = decl
-            .targets
-            .iter()
-            .map(|(k, d)| (*k, (d.min, d.max)))
-            .collect();
-        for (id, target) in to_enter {
-            let (min, max) = targets[&target];
-            editor
-                .set_edge_gain_range(id, ParamRange::new(min, max))
-                .expect("checked: the edge exists, and compile refuses a NaN bound");
-            *commit = true;
-        }
         for (target, bind) in binds {
             let program = &compiled.programs[&target];
             let (min, max) = targets[&target];
@@ -1036,12 +1055,10 @@ impl Modulation {
                         .set_param_range(*at, ParamRange::new(min, max))
                         .expect("checked: a node, and compile refuses a NaN bound");
                     let cell = editor.param_range_cell(*at);
-                    let mut config = UnitLaneConfig::new(at.param, program.clone());
+                    let mut config = UnitLaneConfig::new(at.param, program.clone())
+                        .range(cell.expect("a bound param has its range cell from its staging"));
                     if let Some(knob) = knob.clone() {
                         config = config.knob(knob);
-                    }
-                    if let Some(cell) = cell {
-                        config = config.range(cell);
                     }
                     let node = ControlLaneNode::from(config);
                     let controls = editor.insert(key, "control-lane", node).controls;
@@ -1050,14 +1067,15 @@ impl Modulation {
                         .connect_param(*at, EventOutputPort::new(key, 0));
                     controls
                 }
-                Bind::Edge { id, knob, range } => {
+                Bind::Edge { id, cells } => {
                     editor
                         .set_edge_gain_range(*id, ParamRange::new(min, max))
                         .expect("checked: the edge, and compile refuses a NaN bound");
+                    let cells = cells.as_ref().expect("declared above");
                     let node = ControlLaneNode::from(
                         UnitLaneConfig::new(EdgeGain::ADDR, program.clone())
-                            .knob(knob.clone())
-                            .range(range.clone()),
+                            .knob(cells.knob.clone())
+                            .range(cells.range.clone()),
                     );
                     let controls = editor.insert(key, "control-lane", node).controls;
                     editor
@@ -1234,14 +1252,10 @@ impl Modulation {
                 if other {
                     return Err(ReconcileError::PortTaken(target));
                 }
-                // The cells are the unit's once a commit has placed it: a
-                // node not in the last plan yet has none, and a host
-                // re-applies after the commit.
-                let (Some(knob), Some(range)) =
-                    (editor.mix_cell(node), editor.param_range_cell(at))
-                else {
-                    return Ok(None);
-                };
+                let (knob, range) = editor
+                    .mix_cell(node)
+                    .zip(editor.param_range_cell(at))
+                    .expect("a node in the spec has its mix cells from its staging");
                 Ok(Some(Bind::Mix { at, knob, range }))
             }
             (Target::Edge { id }, None) if matches!(target, TargetKey::Edge(_)) => {
@@ -1260,19 +1274,10 @@ impl Modulation {
                 if other {
                     return Err(ReconcileError::PortTaken(target));
                 }
-                // The range cell is the one the last commit sent with the
-                // entry: no entry or no commit yet, no lane (the entry is
-                // made by this apply, and a host re-applies after the commit).
-                let Some(range) = editor.edge_gain_range_cell(id) else {
-                    return Ok(None);
-                };
-                let Some(knob) = editor.edge_gain_cell(id) else {
-                    return Ok(None);
-                };
-                if !editor.spec().gains.contains_key(&id) {
-                    return Ok(None);
-                }
-                Ok(Some(Bind::Edge { id, knob, range }))
+                // An edge with no entry has no cells: the apply declares the
+                // entry before it builds the lane.
+                let cells = EdgeCells::of(editor, id);
+                Ok(Some(Bind::Edge { id, cells }))
             }
             (Target::Native { node, knob }, Some(addr)) => {
                 // A foreign id is no native param, whatever the host resolved.
@@ -1295,21 +1300,6 @@ impl Modulation {
                     .is_some_and(|out| !own.contains(&(at, out.node())));
                 if other {
                     return Err(ReconcileError::PortTaken(target));
-                }
-                // The port's range cell is the one a commit handed out for
-                // the unit the last plan has at the node. The next commit
-                // keeps the key's cells for a unit declaring the same params
-                // and gives fresh ones for another list. So a
-                // node not in that plan yet, or replaced since by a unit
-                // with another list, waits for the commit: a lane built on
-                // the cell now would read one nothing writes. A replace
-                // with the same list keeps its cells and resolves at once.
-                let committed = editor
-                    .base()
-                    .and_then(|plan| plan.unit(node))
-                    .map(|u| u.shape.params);
-                if committed != Some(shape.params) || editor.param_range_cell(at).is_none() {
-                    return Ok(None);
                 }
                 Ok(Some(Bind::Native {
                     at,

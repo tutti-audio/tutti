@@ -33,6 +33,8 @@ pub enum MidiThread {
     MidiOut,
     /// An output's Active Sensing heartbeat.
     ActiveSensing,
+    /// The session's MIDI-CI link.
+    MidiCi,
 }
 
 impl MidiThread {
@@ -44,6 +46,7 @@ impl MidiThread {
             Self::MidiIn => "tutti-midi-in",
             Self::MidiOut => "tutti-midi-out",
             Self::ActiveSensing => "tutti-active-sensing",
+            Self::MidiCi => "tutti-midi-ci",
         }
     }
 }

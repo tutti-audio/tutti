@@ -977,17 +977,16 @@ fn a_foreign_target_takes_a_lane_on_its_event_input() {
     assert!((last(&log) - 0.675).abs() < 1e-6, "{}", last(&log));
 }
 
-/// **A rebind to a node with another param list waits for its commit.**
-/// Probe 1 declares `[Cutoff]`; a macro of 1 at depth 0.25 over `0..=1000`
-/// reads 250. The host replaces it at its key with a probe declaring
-/// `[Cutoff, Q]` (the same knob cell), then applies and commits (spawn, then
-/// commit). Until that commit the port's range
-/// cell is the old unit's, which the commit replaces (another list), so
-/// the target is unresolved and its lane goes; the host re-applies after
-/// the commit, and the lane is rebuilt on the new cell. A range edit to
-/// `0..=2000` is then a store the lane reads: 500.
+/// **A rebind to a node with another param list resolves in the apply that
+/// stages it.** Probe 1 declares `[Cutoff]`; a macro of 1 at depth 0.25 over
+/// `0..=1000` reads 250. The host replaces it at its key with a probe
+/// declaring `[Cutoff, Q]` (the same knob cell), then applies and commits
+/// once. The staged unit's range cell is the one its commit hands the unit,
+/// so the lane is rebuilt on it in that apply and reads 250 in the first block
+/// after the one commit. A range edit to `0..=2000` is then a store the lane
+/// reads: 500.
 #[test]
-fn a_rebind_to_another_param_list_waits_for_its_commit() {
+fn a_rebind_to_another_param_list_rebinds_in_the_same_apply() {
     let (mut ed, mut exec) = editor(128);
     let mut host = Host::default();
     probe(&mut ed, &mut host, 1, 0.0);
@@ -1012,13 +1011,9 @@ fn a_rebind_to_another_param_list_waits_for_its_commit() {
         }),
     );
     let applied = m.apply(&decl.get(), &mut ed, &host).expect("applies");
-    assert_eq!(applied.unresolved_targets, vec![cutoff_of(1)]);
-    assert!(m.lane(cutoff_of(1)).is_none(), "the lane went");
-    m.commit(&mut ed).expect("commits");
-    render(&mut ed, &mut exec, 128, 128);
-    let applied = m.apply(&decl.get(), &mut ed, &host).expect("re-applies");
     assert!(applied.unresolved_targets.is_empty());
-    assert!(applied.commit, "a lane on the new unit");
+    assert!(applied.commit, "a lane on the new unit's cell");
+    assert!(m.lane(cutoff_of(1)).is_some(), "the lane is rebuilt");
     m.commit(&mut ed).expect("commits");
     let got = render(&mut ed, &mut exec, 128, 1_024);
     assert_eq!(got[0][1_023], 250.0);

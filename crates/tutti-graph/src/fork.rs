@@ -322,6 +322,9 @@ impl<F: Float> PendingFork<F> {
         }
 
         let (mut editor, mut executor) = Editor::<F>::with_event_capacity(prepare, event_capacity);
+        // Before the nodes are placed: a placed node's cells start from the
+        // values.
+        *editor.values_mut() = values;
         for (key, (forked, wake)) in built {
             let kind = &spec.topology.nodes[&key].kind;
             // Not forkable itself (module docs: a fork is not a fork source).
@@ -355,7 +358,6 @@ impl<F: Float> PendingFork<F> {
         fork.required_resolution = spec.required_resolution;
         fork.params = spec.params;
         fork.gains = spec.gains;
-        *editor.values_mut() = values;
         if let Err(e) = editor.commit() {
             let remains = ForkRemains {
                 units: Vec::new(),

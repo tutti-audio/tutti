@@ -9,8 +9,9 @@
 //! a device would.
 //!
 //! Tests that exist in
-//! `modulation.rs` (the §8.1 render, a lane built by a re-apply publishing
-//! its latency, a target placed an update late) are not repeated here.
+//! `modulation.rs` (the §8.1 render, a lane in the plan of its node's update
+//! publishing its latency, a target added an update late) are not repeated
+//! here.
 
 use crate::common;
 use tutti_buffers::{BusTopology, ChannelLayout};
@@ -747,13 +748,49 @@ fn two_ranges_or_automations_on_one_param_are_refused() {
 
 // ----------------------------------------------------------- rebind --
 
+/// **A route onto a param of a node added in the same update goes out in that
+/// update's one plan, and moves the param by `depth * range` from its first
+/// frame.** The probe (cutoff knob 500), the cutoff's range `0..=1000` and a
+/// macro of 1 at depth 0.25 are declared before one update: the lane binds to
+/// the range cell the probe made when it was staged, so exactly one plan is
+/// sent, and the first block reads `500 + 0.25 * 1000`.
+#[test]
+fn a_route_onto_a_param_of_a_node_added_in_the_update_sends_one_plan() {
+    let (mut s, mut side) = rig(1);
+    settle(&mut s);
+    let plans = s.graph_ref().testing().commits_sent();
+
+    let probe = s.graph().add(ProbeUnit::new(500.0));
+    s.graph()
+        .set_sources(MainOutput::channel(0), [OutputPort::new(probe, 0)])
+        .unwrap()
+        .unfaded();
+    let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
+    let mut m = s.mods_mut();
+    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    let offset = m.macro_(1.0);
+    m.route(RouteSpec::new(offset, cutoff, Depth::of(0.25)))
+        .unwrap();
+
+    let _ = s.update();
+    assert_eq!(s.mod_state().problems().next(), None, "the route resolved");
+    assert_eq!(
+        s.graph_ref().testing().commits_sent(),
+        plans + 1,
+        "one plan for the node and its lane"
+    );
+    let out = render(&mut side, 128, 128);
+    assert_eq!(out[0][0], 750.0, "the first frame");
+    assert_eq!(out[0][127], 750.0);
+}
+
 /// **A node swapped for one with another param list keeps modulating.** A
 /// macro's `+250` on a cutoff probe (knob 500); the node is swapped, with a
 /// zero fade (a fade over another shape is refused), for a probe that
 /// declares the cutoff and a Q (another param list, knob 400).
-/// After the re-apply that follows the commit (doc 014 §8.2: the rebound
-/// target is unresolved until its node is in a plan) the new node plays
-/// `400 + 250`, and a range edit after it lands on the new node (`+500`).
+/// The update that sends the swap sends one plan (the lane is bound to the new
+/// unit's staged range cell), the new node plays `400 + 250`, and a range edit
+/// after it lands on the new node (`+500`).
 #[test]
 fn a_node_swapped_for_another_param_list_keeps_modulating() {
     let (mut s, mut side) = rig(1);
@@ -769,6 +806,7 @@ fn a_node_swapped_for_another_param_list_keeps_modulating() {
     settle(&mut s);
     let out = render(&mut side, 1_024, 128);
     assert_eq!(*out[0].last().unwrap(), 750.0, "precondition: modulated");
+    let plans = s.graph_ref().testing().commits_sent();
 
     s.graph()
         .replace(
@@ -777,15 +815,17 @@ fn a_node_swapped_for_another_param_list_keeps_modulating() {
                 .fade(Fade::new(Samples::ZERO)),
         )
         .expect("the swap is accepted");
-    // The update that commits the new node re-applies after its commit: the
-    // first block it plays is modulated.
+    // The update's one commit sends the node and the rebound lane: the first
+    // block it plays is modulated.
     let _ = s.update();
-    let out = render(&mut side, 1_024, 128);
+    assert_eq!(s.mod_state().problems().next(), None, "the route resolved");
     assert_eq!(
-        *out[0].last().unwrap(),
-        650.0,
-        "the new node, modulated from its first frame"
+        s.graph_ref().testing().commits_sent(),
+        plans + 1,
+        "one plan for the swap and the rebound lane"
     );
+    let out = render(&mut side, 1_024, 128);
+    assert_eq!(*out[0].last().unwrap(), 650.0, "the new node, modulated");
     settle(&mut s);
     let out = render(&mut side, 4_096, 128);
     assert_eq!(*out[0].last().unwrap(), 650.0, "the new node, modulated");
@@ -804,7 +844,7 @@ fn a_node_swapped_for_another_param_list_keeps_modulating() {
 /// updates, a latent node on the outputs and a probe it then modulates: the
 /// probe's target is unresolved when the update applies. The update's commit
 /// sends the host's edit with the lanes, and the session's latency is that
-/// plan's on that update; the re-apply after it resolves the target.
+/// plan's on that update, which also carries the target's lane.
 #[test]
 fn a_host_edit_committed_for_a_target_publishes_its_latency() {
     let (mut s, mut side) = rig(1);
