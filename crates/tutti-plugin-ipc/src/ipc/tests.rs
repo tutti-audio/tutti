@@ -15,7 +15,7 @@ use tutti_plugin_types::{
     ParameterInfo, PluginBus, PluginClass, PluginDescriptor, PluginWiring, Prepare, Processor,
     RenderMode, Reopen, Request, SampleRate, Samples,
 };
-use tutti_units::ParamId;
+use tutti_units::{Chunks, ParamId};
 
 use super::DeclaredCache;
 use crate::Request as WireRequest;
@@ -1149,8 +1149,8 @@ const CHUNKS_AFTER: usize = 90;
 /// what it had when it did not. [`render_chunks`] has the server hold every
 /// chunk before it returns, and the bridge counts a block abandoned before it
 /// sends the next, so the count is settled when the render is.
-fn assert_off_the_budget(bridge: &PluginBridge, before: u64) {
-    let abandoned = bridge.audio().block_counts().abandoned - before;
+fn assert_off_the_budget(bridge: &PluginBridge, before: Chunks) {
+    let abandoned = bridge.audio().block_counts().abandoned.get() - before.get();
     assert!(
         abandoned >= OFF_THE_BUDGET,
         "the bridge abandoned {abandoned} blocks after {CHUNKS_AFTER} chunks, wanted \
@@ -1290,7 +1290,7 @@ fn a_silent_server_holds_the_bridge_for_one_budget_not_one_per_chunk() {
         "the second render's collect misses its budget"
     );
     assert!(
-        bridge.audio().block_counts().abandoned >= 1,
+        bridge.audio().block_counts().abandoned >= Chunks::new(1),
         "the first block is abandoned at the budget"
     );
     let before = bridge.audio().block_counts().abandoned;
@@ -1317,7 +1317,7 @@ fn a_reactivation_after_a_give_up_does_not_wait_the_budget_again() {
         "the second render's collect misses its budget"
     );
     assert!(
-        bridge.audio().block_counts().abandoned >= 1,
+        bridge.audio().block_counts().abandoned >= Chunks::new(1),
         "the first block is abandoned at the budget"
     );
     let ipc = Ipc::deactivate(main, processor, controller).expect("the halves rejoin");

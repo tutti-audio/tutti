@@ -931,10 +931,10 @@ pub(crate) struct HostedPlugin {
     /// Round trips of the plugin's session tasks (a parameter read, a state
     /// snapshot) that panicked: [`Diagnostics::panicked_round_trips`]. Added to
     /// from the pool's threads.
-    pub(crate) panicked_round_trips: tutti_rt::Tally<u64>,
+    pub(crate) panicked_round_trips: tutti_rt::Tally<tutti_units::Calls>,
     /// Periodic state snapshots the plugin failed:
     /// [`Diagnostics::failed_snapshots`].
-    pub(crate) failed_snapshots: u64,
+    pub(crate) failed_snapshots: tutti_rt::TallyWriter<tutti_units::Calls>,
     /// What the plugins before the held one had refused off their thread:
     /// banked when a plugin is replaced, so
     /// [`Diagnostics::refused_off_thread_calls`] only grows.
@@ -1206,7 +1206,7 @@ impl HostedPlugin {
             banked: tutti_units::Losses::NONE,
             banked_blocks: tutti_plugin_host::BlockLosses::default(),
             panicked_round_trips: tutti_rt::tally(),
-            failed_snapshots: 0,
+            failed_snapshots: tutti_rt::tally().writer(),
             banked_off_thread: 0,
             liveness: Liveness::new(),
             hang: HangDetector::default(),
@@ -1972,7 +1972,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             }
             Err(e) => {
                 tracing::warn!("plugin {node:?}: periodic state snapshot failed: {e}");
-                hosted.failed_snapshots += 1;
+                hosted.failed_snapshots.add(tutti_units::Calls::new(1));
                 false
             }
         }
@@ -2638,10 +2638,12 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             // ended here, and dies by the path above.
             if cause.is_none()
                 && let counts = hosted.handle.block_counts()
-                && let Some(reason) =
-                    hosted
-                        .hang
-                        .observe(hang_policy, counts.abandoned, counts.replies, now)
+                && let Some(reason) = hosted.hang.observe(
+                    hang_policy,
+                    counts.abandoned.get(),
+                    counts.replies.get(),
+                    now,
+                )
             {
                 tracing::error!(
                     "plugin '{}' ({node:?}): {reason}; ending its server",

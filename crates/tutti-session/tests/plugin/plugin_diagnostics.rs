@@ -12,7 +12,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_plugin_types::PluginRef;
 use tutti_session::{MainOutput, Session};
-use tutti_units::{SampleRate, Samples};
+use tutti_units::{Chunks, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 512;
@@ -220,7 +220,11 @@ mod vst2 {
         let losses = || s.plugin_view(node).unwrap().losses();
         assert_eq!(losses(), Losses::NONE, "nothing sent yet");
         assert_eq!(diag().server_pid(), None, "no server in process");
-        assert_eq!(diag().chunks().missed, 0, "no pipeline in process");
+        assert_eq!(
+            diag().chunks().missed,
+            Chunks::ZERO,
+            "no pipeline in process"
+        );
         assert!(diag().follows_project_meter());
         assert_eq!(
             diag().tail(),

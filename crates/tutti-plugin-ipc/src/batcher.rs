@@ -654,7 +654,7 @@ impl Batcher {
                     && !bridge.is_crashed()
                     && !bridge.rate_refused()
                 {
-                    self.counters.missed.fetch_add(1, Ordering::Relaxed);
+                    self.counters.note_missed(tutti_units::Chunks::new(1));
                     self.remember_unanswered(seq);
                 }
                 self.wire.silence_ring(chunk);
@@ -682,14 +682,13 @@ impl Batcher {
         let missing = self.wire.read_ring(self.slab.slab(), seq, self.chunk);
         if missing > 0 {
             self.counters
-                .missed
-                .fetch_add(missing as u64, Ordering::Relaxed);
+                .note_missed(tutti_units::Chunks::new(missing as u64));
         }
     }
 
     /// Notes `seq`, collected unanswered, to be resolved when the server's
     /// answer is seen: into an empty entry, else over the oldest, which is
-    /// counted [`unanswered`](ChunkCounters::unanswered).
+    /// counted ([`ChunkCounters::note_unanswered`]).
     fn remember_unanswered(&mut self, seq: u64) {
         let at = self
             .unanswered
@@ -701,16 +700,16 @@ impl Batcher {
                     .unwrap_or(0)
             });
         if self.unanswered[at] != 0 {
-            self.counters.unanswered.fetch_add(1, Ordering::Relaxed);
+            self.counters.note_unanswered();
         }
         self.unanswered[at] = seq;
     }
 
     /// Resolves the chunks collected unanswered whose fate is known: published
-    /// ([`ChunkCounters::late`]), refused ([`ChunkCounters::refused`]) or
+    /// ([`ChunkCounters::note_late`]), refused ([`ChunkCounters::note_refused`]) or
     /// skipped (counted by the bridge). A chunk whose fate the bridge never
     /// learned within the last [`BATCH_OUTCOMES`] chunks is
-    /// [`unanswered`](ChunkCounters::unanswered). Relaxed adds and loads of
+    /// unanswered ([`ChunkCounters::note_unanswered`]). Relaxed adds and loads of
     /// the slab's sequence words and the bridge's fate words: RT-safe.
     fn watch_late(&mut self, bridge: &AudioBridge) {
         for seq in &mut self.unanswered {
@@ -718,22 +717,22 @@ impl Batcher {
                 continue;
             }
             if self.slab.has_output(*seq) {
-                self.counters.late.fetch_add(1, Ordering::Relaxed);
+                self.counters.note_late();
                 *seq = 0;
                 continue;
             }
             match bridge.batch_outcome(*seq) {
                 Some(BatchOutcome::Published) => {
-                    self.counters.late.fetch_add(1, Ordering::Relaxed);
+                    self.counters.note_late();
                     *seq = 0;
                 }
                 Some(BatchOutcome::Refused) => {
-                    self.counters.refused.fetch_add(1, Ordering::Relaxed);
+                    self.counters.note_refused();
                     *seq = 0;
                 }
                 Some(BatchOutcome::Skipped) => *seq = 0,
                 None if *seq + (BATCH_OUTCOMES as u64) / 2 < self.next_seq => {
-                    self.counters.unanswered.fetch_add(1, Ordering::Relaxed);
+                    self.counters.note_unanswered();
                     *seq = 0;
                 }
                 None => {}
@@ -753,7 +752,7 @@ impl Batcher {
         let seq = self.next_seq;
         let staged = self.wire.stage(&mut self.slab, seq, chunk);
         if !staged {
-            self.counters.missed.fetch_add(1, Ordering::Relaxed);
+            self.counters.note_missed(tutti_units::Chunks::new(1));
             // The chunk will never be collectable (a channel the slab lacks
             // lands here too, and counts); its output plays as silence.
             // Its parameter changes did not go either: the host keeps them for
@@ -915,7 +914,7 @@ mod tests {
         assert_eq!(
             b.counters.outcomes(),
             ChunkOutcomes {
-                missed: 1,
+                missed: tutti_units::Chunks::new(1),
                 ..ChunkOutcomes::default()
             },
             "one miss, with no fate"
@@ -1080,7 +1079,7 @@ mod tests {
     /// **A full list of unanswered chunks counts the oldest unanswered**: the
     /// newest misses are the ones whose fate can still be learned, so one more
     /// than the list holds replaces the earliest, which is counted
-    /// ([`ChunkCounters::unanswered`]); `reset` forgets them all.
+    /// ([`ChunkCounters::note_unanswered`]); `reset` forgets them all.
     #[test]
     fn a_full_unanswered_list_counts_the_oldest() {
         let counters = Arc::new(ChunkCounters::default());
@@ -1098,13 +1097,13 @@ mod tests {
         }
         assert_eq!(
             counters.outcomes().unanswered,
-            0,
+            tutti_units::Chunks::ZERO,
             "the list was not full yet"
         );
         b.remember_unanswered(BATCH_OUTCOMES as u64 + 1);
         assert_eq!(
             counters.outcomes().unanswered,
-            1,
+            tutti_units::Chunks::new(1),
             "chunk 1, the oldest, is replaced"
         );
         assert!(!b.unanswered.contains(&1));

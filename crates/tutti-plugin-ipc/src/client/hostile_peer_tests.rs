@@ -41,6 +41,7 @@ use tutti_plugin_types::{
     IpcError, PluginFailure, RateRefusal, RateRefusalCause, StateError, Timeouts,
 };
 use tutti_rt::Mutex;
+use tutti_units::Chunks;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::SampleRate;
@@ -1350,7 +1351,7 @@ fn a_wrong_kind_reply_to_a_block_is_a_protocol_error_and_not_an_answer() {
     mock.wait_for_crash("the junk reply to end the connection");
     assert_eq!(
         mock.bridge.audio().block_counts().replies,
-        0,
+        Chunks::ZERO,
         "a reply of the wrong kind was counted as the plugin answering"
     );
 }
@@ -1382,7 +1383,7 @@ fn a_reply_to_a_block_never_sent_is_a_protocol_error() {
     mock.bridge.audio().set_reply_wait(Some(NOTICE_TIMEOUT));
     submit_block(&mock.bridge, 1);
     mock.wait_for_crash("the reply to a block never sent to end the connection");
-    assert_eq!(mock.bridge.audio().block_counts().replies, 0);
+    assert_eq!(mock.bridge.audio().block_counts().replies, Chunks::ZERO);
 }
 
 /// A server that accepts requests but never answers must not hang the host.

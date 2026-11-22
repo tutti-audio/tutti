@@ -115,15 +115,15 @@ impl<'a> Diagnostics<'a> {
     /// periodic state snapshot) that panicked, over the life of the node. A
     /// panicked read is asked again; a panicked snapshot leaves the last good
     /// one as the recovery point.
-    pub fn panicked_round_trips(&self) -> u64 {
+    pub fn panicked_round_trips(&self) -> tutti_units::Calls {
         self.hosted.panicked_round_trips.get()
     }
 
     /// Periodic state snapshots the plugin failed (it refused or did not
     /// answer the save), over the life of the node. The last good snapshot
     /// stays the recovery point.
-    pub fn failed_snapshots(&self) -> u64 {
-        self.hosted.failed_snapshots
+    pub fn failed_snapshots(&self) -> tutti_units::Calls {
+        self.hosted.failed_snapshots.get()
     }
 
     /// The callbacks the plugin made from a thread its format forbids, which the
