@@ -1,5 +1,5 @@
 //! **An in-process VST2 plugin is given the project meter**, as an
-//! out-of-process one is: `Session::add_plugin` captures its meter cell on
+//! out-of-process one is: `Session::apply` captures its meter cell on
 //! the way in and installs the project's (the click settings') through it,
 //! and the plugin's `audioMasterGetTime` answers in the project's 7/8, read
 //! back out of the reference VST2 probe.
