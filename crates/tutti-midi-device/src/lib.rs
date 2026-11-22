@@ -63,6 +63,7 @@ mod deadline;
 mod dialect;
 mod endpoint;
 mod endpoint_discovery;
+mod fit;
 mod id;
 mod inquiry;
 mod jr;
@@ -80,6 +81,7 @@ pub use endpoint::{
 pub use endpoint_discovery::{
     DiscoveryAction, DiscoveryEnding, EndpointDiscovery, MAX_ATTEMPTS, NAME_GRACE, STEP_TIMEOUT,
 };
+pub use fit::slope;
 pub use id::{
     DeviceInfo, EndpointId, MidiDeviceId, OsEndpointIdentity, PortDirection, WinMmDevice,
 };

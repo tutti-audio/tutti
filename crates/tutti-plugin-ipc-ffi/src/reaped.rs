@@ -27,10 +27,7 @@ impl Reaped {
     /// Own `child` from now on.
     #[must_use]
     pub fn new(child: Child) -> Self {
-        Self {
-            child: child.into(),
-            group: false,
-        }
+        Self::of(child.into(), false)
     }
 
     /// Own `child`, which leads a process group of its own
@@ -39,10 +36,13 @@ impl Reaped {
     /// helpers a plugin spawned).
     #[must_use]
     pub fn leading_group(child: Child) -> Self {
-        Self {
-            child: child.into(),
-            group: true,
-        }
+        Self::of(child.into(), true)
+    }
+
+    /// Own `child`, which leads a process group (or sits in the host's job)
+    /// when `group` is true.
+    pub(crate) fn of(child: Process, group: bool) -> Self {
+        Self { child, group }
     }
 
     /// The child's process id.
