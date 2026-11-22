@@ -72,7 +72,7 @@ use tutti_rt::{Publisher, Reader};
 use tutti_ump::{
     Bank, CCNumber, Message, MidiChannel, MidiGroup, NoteKey, U7, Ump, Voice1, Voice2,
 };
-use tutti_units::Beat;
+use tutti_units::{Beat, FramesPerBeat};
 
 use crate::ledger::{Class, NoteLedger, Sending};
 
@@ -573,7 +573,7 @@ impl Visit<ClipEvent> for Playing<'_, '_, '_> {
     /// clip that sets many states on many channels can have its chase cut
     /// short on a short block, and the states it set first (lower groups and
     /// channels, a channel's program first) are the ones that land.
-    fn jump(&mut self, at: Option<Offset>, beat: Beat, _fpb: f64, _events: &[ClipEvent]) {
+    fn jump(&mut self, at: Option<Offset>, beat: Beat, _fpb: FramesPerBeat, _events: &[ClipEvent]) {
         let Some(o) = at else { return };
         self.sending.release_all(o);
         for setters in self.chase {
