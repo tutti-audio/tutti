@@ -336,6 +336,14 @@ touched.
 - Before working around a constraint, name it in one sentence and verify it (read the
   manifest, grep, run the probe). An indirection whose only job is to avoid a change is
   the finding: make the change.
+- **One entry per fact.** A fact something follows (a render mode, a rate, a tempo or loop
+  reading, a plan, a value) reaches it through one entry: one trait method, hook, setter,
+  phase or handle. Needing the fact at a new place, time or thread widens that entry (its
+  argument, its view, its callers), never adds a second beside it: `bind_tempo` plus a
+  `bind_loop` is one `bind_timeline(&TimelineView)`, and a prepare-time hook that tells a
+  plugin the render mode joins the call that already tells it. Before adding a trait
+  method, hook, phase, setter or handle field, name the fact it carries and grep for what
+  delivers it already. Two entries each correct alone still disagree in order and default.
 
 ## Workspace
 
