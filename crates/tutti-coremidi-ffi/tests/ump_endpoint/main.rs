@@ -16,6 +16,10 @@
     reason = "a test starts the threads it races, outside any executor"
 )]
 
+/// An allocation inside an `RtScope` aborts the running test.
+#[global_allocator]
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
+
 #[cfg_attr(target_os = "macos", path = "macos.rs")]
 #[cfg_attr(not(target_os = "macos"), path = "other.rs")]
 mod platform;
