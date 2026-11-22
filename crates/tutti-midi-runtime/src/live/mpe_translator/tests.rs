@@ -110,6 +110,7 @@ fn master_channel_bend_passes_through_as_channel_bend() {
     assert_cv2!(out, _, Voice2::PitchBend(_));
 }
 
+/// Spec: m2-120/4.5#3
 #[test]
 fn member_channel_cc74_becomes_per_note_controller() {
     let mut translator = MpeTranslator::new(tutti_fixtures::midi::lower_zone(15));
@@ -126,6 +127,7 @@ fn member_channel_cc74_becomes_per_note_controller() {
     );
 }
 
+/// Spec: m2-120/4.4#2
 #[test]
 fn member_channel_pressure_becomes_per_note_pressure() {
     let mut translator = MpeTranslator::new(tutti_fixtures::midi::lower_zone(15));
@@ -648,6 +650,7 @@ fn a_member_bend_before_the_note_on_is_the_notes_start() {
 /// Channel Pressure most recently received on its Channel before Note On, and
 /// a receiver keeps tracking it while no note sounds; section 2.2.8 the same of Control
 /// Change #74).
+/// Spec: m2-120/4.4#3
 #[test]
 fn member_pressure_and_cc74_before_the_note_on_are_the_notes_start() {
     let mut translator = MpeTranslator::new(tutti_fixtures::midi::lower_zone(15));
@@ -686,6 +689,7 @@ fn what_a_member_was_told_is_its_own() {
 /// Channels after its Note Off; section 2.4: MPE control messages do not
 /// affect a note after its Note Off), while the channel goes on tracking them for
 /// the next note.
+/// Spec: m2-120/4.3#4
 #[test]
 fn a_released_note_ignores_the_members_bend_and_the_next_note_starts_with_it() {
     let mut translator = MpeTranslator::new(tutti_fixtures::midi::lower_zone(15));
@@ -706,6 +710,7 @@ fn a_released_note_ignores_the_members_bend_and_the_next_note_starts_with_it() {
 /// of Control Change #74; Appendix D: Max is one way). The manager's value,
 /// told with no note sounding, is every new note's floor; told while notes
 /// sound, it reaches each of them, as the greater of it and the member's own.
+/// Spec: m2-120/4.4#4, m2-120/4.5#5, m2-120/4.4#2, m2-120/4.5#3
 #[test]
 fn a_managers_pressure_and_cc74_reach_every_members_note() {
     let mut translator = MpeTranslator::new(tutti_fixtures::midi::lower_zone(3));
@@ -1498,6 +1503,7 @@ fn a_profile_managers_all_sound_off_is_sent_on_every_member() {
 /// (RP-053: the manager's bend moves every note of the zone; a member's own is
 /// per-note and a receiver sums the two, M2-104 section 7.4.13): it goes on,
 /// then the same bend word on each member channel, and none beyond the zone.
+/// Spec: m2-120/4.2#1
 #[test]
 fn a_managers_bend_is_copied_onto_each_member_channel() {
     let mut translator = MpeTranslator::new(midi::dual_zones(3, 2));

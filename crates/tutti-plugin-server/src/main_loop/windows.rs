@@ -14,8 +14,38 @@ mod bell;
 
 pub(crate) use bell::Bell;
 
-pub(crate) type Listener = interprocess::local_socket::Listener;
+type Listener = interprocess::local_socket::Listener;
 pub(crate) type Stream = interprocess::local_socket::Stream;
+
+/// What the server is given to reach the host by: the name of the pipe the host
+/// chose, which the server listens on.
+pub type HostEnd = String;
+
+/// The pipe's name, the one argument the host spawned this process with. Call it
+/// first thing in `main`.
+///
+/// # Errors
+///
+/// The host's argument is missing, or is not a pipe name.
+pub fn adopt_host() -> IpcResult<HostEnd> {
+    std::env::args()
+        .nth(1)
+        .ok_or(tutti_plugin_types::IpcError::ProtocolError(
+            "the host's pipe name is required as the first argument",
+        ))
+}
+
+/// The host's connection: a pipe of the host's name, listened on until the host
+/// connects.
+///
+/// # Errors
+///
+/// The pipe could not be created or accepted.
+pub(crate) fn meet(host: HostEnd) -> IpcResult<Stream> {
+    let name = host.to_ns_name::<GenericNamespaced>()?;
+    let listener = ListenerOptions::new().name(name).create_sync()?;
+    Ok(listener.accept()?)
+}
 
 /// What a slab is received over on `stream`: nothing, as its name is in the frame.
 pub(crate) fn connection(_: &Stream) -> tutti_plugin_ipc_ffi::Connection<'_> {

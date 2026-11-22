@@ -31,6 +31,8 @@ pub enum MidiThread {
     MidiIn,
     /// An output's sender.
     MidiOut,
+    /// An output's Active Sensing heartbeat.
+    ActiveSensing,
 }
 
 impl MidiThread {
@@ -41,6 +43,7 @@ impl MidiThread {
             Self::DeviceWatch => "tutti-devwatch",
             Self::MidiIn => "tutti-midi-in",
             Self::MidiOut => "tutti-midi-out",
+            Self::ActiveSensing => "tutti-active-sensing",
         }
     }
 }

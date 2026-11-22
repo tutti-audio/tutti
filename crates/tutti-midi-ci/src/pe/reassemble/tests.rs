@@ -120,7 +120,7 @@ fn a_header_only_message_is_complete_at_once() {
 
 // M2-101 §8.3, Table 29, "Unknown Number": the count is 0 until the final chunk
 // declares it equal to its own number.
-/// Spec: m2-101/8.3#7, m2-101/8.3#9
+/// Spec: m2-101/8.3#7, m2-101/8.3#9, m2-101/8.3#8
 #[test]
 fn an_unknown_count_ends_at_the_chunk_that_names_it() {
     let now = Instant::now();
@@ -139,7 +139,7 @@ fn an_unknown_count_ends_at_the_chunk_that_names_it() {
 
 // M2-101 §8.3, Table 29, "Unexpected End Before Chunk 6, Property Data Remains
 // Good": a message that declared 6 ends at chunk 3 by naming 3.
-/// Spec: m2-101/8.3#11
+/// Spec: m2-101/8.3#11, m2-101/8.3#10
 #[test]
 fn a_known_count_may_end_early_by_naming_a_smaller_one() {
     let now = Instant::now();
@@ -152,7 +152,7 @@ fn a_known_count_may_end_early_by_naming_a_smaller_one() {
 
 // M2-101 §8.3, Table 29, "Property Data is Bad": a final chunk numbered 0, for a
 // declared count and for an unknown one, abandons the message and its data.
-/// Spec: m2-101/8.3#12
+/// Spec: m2-101/8.3#12, m2-101/8.3#10
 #[test]
 fn a_final_chunk_numbered_zero_abandons_the_message() {
     for total in [6, 0] {

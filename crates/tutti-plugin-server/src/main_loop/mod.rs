@@ -86,8 +86,8 @@ impl Ticker {
 }
 
 // One backend per OS, chosen here and nowhere else in the crate: what the loop
-// waits with, the bell it is woken by and the platform's `Listener` and
-// `Stream`. These attributes carry the only platform `cfg` of the server's
+// waits with, the bell it is woken by, the platform's `Stream` and how the host's
+// connection becomes one. These attributes carry the only platform `cfg` of the server's
 // non-test code. A native loop (`MsgWaitForMultipleObjectsEx` with overlapped
 // pipe I/O on Windows, `CFRunLoop` with the socket as a source on macOS)
 // replaces one file and changes nothing in the loop below.
@@ -96,8 +96,9 @@ impl Ticker {
 mod sys;
 
 pub(crate) use sys::{
-    Bell, LaneEnd, Listener, Native, Stream, connection, receive_lane, wait_readable,
+    Bell, LaneEnd, Native, Stream, connection, meet, receive_lane, wait_readable,
 };
+pub use sys::{HostEnd, adopt_host};
 
 impl Native {
     /// Waits until `transport` has a frame to read (`Ok(true)`), the `bell`

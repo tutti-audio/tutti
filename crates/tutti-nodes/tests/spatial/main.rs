@@ -1,5 +1,9 @@
 //! The panner nodes: HRTF and VBAP.
 
+/// An allocation inside an `RtScope` aborts the running test.
+#[global_allocator]
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
+
 mod hrtf_panner;
 mod hrtf_render;
 mod spatial_contract;

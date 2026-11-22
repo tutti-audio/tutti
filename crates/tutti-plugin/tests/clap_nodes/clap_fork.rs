@@ -511,7 +511,7 @@ fn a_fork_whose_server_hangs_is_a_timed_out_fault() {
             t.call = Duration::from_secs(1);
             t
         },
-        ..IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"))
+        ..IpcConfig::new()
     };
     let probe = load_probe_with(config, SAMPLE_RATE);
     let _hang = ProbeEnv::new().block_from(5);
@@ -730,7 +730,7 @@ fn an_export_through_a_failing_fork_fails_by_name() {
             t.call = Duration::from_secs(1);
             t
         },
-        ..IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"))
+        ..IpcConfig::new()
     };
     let probe = load_probe_with(config, SAMPLE_RATE);
     probe
@@ -1398,7 +1398,7 @@ fn a_live_fork_of_a_served_plugin_told_offline_is_offline() {
 #[test]
 fn a_served_restore_loads_the_preset_and_the_state_into_a_fresh_served_instance() {
     use tutti_plugin_host::ForkState;
-    use tutti_plugin_ipc::{Ipc, unique_socket_path};
+    use tutti_plugin_ipc::Ipc;
     use tutti_plugin_types::{PluginFormat, PresetId, RenderMode, StateUse};
 
     let _lock = machine_lock();
@@ -1418,7 +1418,7 @@ fn a_served_restore_loads_the_preset_and_the_state_into_a_fresh_served_instance(
     std::fs::write(&preset, b"x").expect("a preset file");
 
     let launched = Ipc::launch(
-        IpcConfig::at(unique_socket_path().expect("a socket path")),
+        IpcConfig::new(),
         &tutti_plugin_ipc::LoadRequest {
             origin: &tutti_plugin_types::PluginRef::file(tutti_fixtures::clap_probe()),
             format: PluginFormat::Clap,

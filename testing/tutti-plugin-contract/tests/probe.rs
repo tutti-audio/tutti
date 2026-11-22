@@ -238,7 +238,7 @@ fn served_id(plugin: &PluginRef) -> PluginId {
     let mut env = tutti_fixtures::ScopedEnv::new();
     env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     let Launched { ipc, .. } = Ipc::launch(
-        IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source")),
+        IpcConfig::new(),
         &tutti_plugin_ipc::LoadRequest {
             origin: plugin,
             format: plugin.format().expect("the ref names its format"),

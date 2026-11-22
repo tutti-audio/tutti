@@ -52,9 +52,7 @@ fn handle_over(
     descriptor: PluginDescriptor,
     loaded: PluginWiring,
 ) -> PluginHandle {
-    let guard = Arc::new(crate::ProcessGuard::for_test(
-        crate::unique_socket_path().expect("the OS has a random source"),
-    ));
+    let guard = Arc::new(crate::ProcessGuard::for_test());
     let ipc = crate::Ipc::new(crate::IpcParts {
         bridge,
         guard,

@@ -69,10 +69,11 @@ use tutti_ump::{GroupSpan, MidiGroup};
 /// The set of open MIDI inputs, and the endpoints available to open.
 ///
 /// The background work (an input's pump, the device watch, Active Sensing, the
-/// legacy ports' poll) runs on the [`Executor`] it is opened with. Until
-/// core-engine's R2-last, an executor the app drives (a session built
-/// with its own) runs that work only while the app drives it: in `tutti-session`,
-/// only inside `update`.
+/// legacy ports' poll) runs on the [`Executor`] it is opened with. An input's
+/// pump, the device watch and each output's Active Sensing have dedicated
+/// threads, which run whether or not the app drives the executor; the legacy
+/// ports' poll runs only while the app drives it: in `tutti-session`, inside
+/// `update`.
 ///
 /// One owner holds it (the host's resource, or the session's) and changes it
 /// through `&mut self`; it is not `Clone`. The output is not part of it:
