@@ -256,12 +256,13 @@ impl tutti_graph::Node for Grenade {
     fn reset(&mut self) {}
 }
 
-/// **A re-prepare that poisons the graph is the one failure that leaves the
-/// session stopped**: the switch onto a 96 kHz card panics a node's `prepare`,
-/// the way back to the timer cannot re-prepare either, and the session comes
-/// back stopped with the error, its host in its slot.
+/// **A re-prepare that poisons the graph is named and keeps its host**: the
+/// switch onto a 96 kHz card panics a node's `prepare`, the way back to the
+/// timer cannot re-prepare either, and the session comes back with
+/// `SwitchNotUndone`, the card never opened, and its host in its slot at the
+/// graph's rate.
 #[test]
-fn a_poisoned_graph_comes_back_stopped() {
+fn a_poisoned_graph_names_the_double_failure_and_keeps_its_host() {
     let mut s = system();
     play(&s);
     s.graph().add(tutti_graph::Unforkable(Grenade));
