@@ -2961,6 +2961,7 @@ name = "tutti-midi-hardware"
 version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
+ "futures-channel",
  "futures-core",
  "futures-lite",
  "getrandom",
