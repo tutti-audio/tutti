@@ -33,7 +33,9 @@ use std::time::Duration;
 use tutti_platform::Instant;
 
 use tutti_ump::JrTicks;
-use tutti_units::{Seconds, slope};
+use tutti_units::Seconds;
+
+use crate::slope;
 
 fn ticks_to_seconds(ticks: f64) -> Seconds {
     Seconds::new(ticks / JrTicks::RATE.get())
