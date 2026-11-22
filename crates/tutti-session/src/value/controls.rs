@@ -20,14 +20,14 @@ use super::state::Params;
 use super::target::{
     Effective, Modulatable, ScalarTarget, Target, TargetId, sealed, target_builders,
 };
-use crate::Edge;
+use crate::ChannelEdge;
 
 /// A control written and not yet handed to the editor.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Write {
     Mode(NodeKey, NodeMode),
     Mix(NodeKey, Mix),
-    Gain(Edge, Amplitude),
+    Gain(ChannelEdge, Amplitude),
 }
 
 impl Write {
@@ -63,7 +63,7 @@ impl Queue {
     }
 
     /// Drops the writes to `edge`'s gain.
-    pub(crate) fn forget_edge(&self, edge: Edge) {
+    pub(crate) fn forget_edge(&self, edge: ChannelEdge) {
         self.0
             .lock_recover()
             .retain(|w| !matches!(w, Write::Gain(e, _) if *e == edge));
@@ -177,13 +177,13 @@ impl Slot<Mix> for MixSlot {
 
 /// One edge's gain lane: the [`Slot`] of its [`GainTarget`].
 pub(crate) struct GainSlot {
-    edge: Edge,
+    edge: ChannelEdge,
     value: Mutex<Amplitude>,
     queue: Arc<Queue>,
 }
 
 impl GainSlot {
-    pub(crate) fn new(edge: Edge, seed: Amplitude, queue: Arc<Queue>) -> Arc<Self> {
+    pub(crate) fn new(edge: ChannelEdge, seed: Amplitude, queue: Arc<Queue>) -> Arc<Self> {
         Arc::new(Self {
             edge,
             value: Mutex::new(seed),
@@ -296,7 +296,7 @@ keyed_slot_target!(
     /// The gain of one audio edge, a weight of the sum its sink holds, as
     /// [`Graph::gain_target`](crate::Graph::gain_target) names it: `1.0` is the plain sum, `0.0` mutes the
     /// edge and a negative gain inverts it. A route onto the edge
-    /// ([`Edge`]) moves the gain around this value.
+    /// ([`ChannelEdge`]) moves the gain around this value.
     ///
     /// Stored and landed as [`ModeTarget`] is, and a move ramps over one
     /// block. NaN and infinity are refused with [`SetRefusal::NotFinite`].
@@ -304,7 +304,7 @@ keyed_slot_target!(
     /// an edge whose lane is gone fails with `NoSuchTarget`.
     GainTarget,
     Amplitude,
-    Edge,
+    ChannelEdge,
     Gain
 );
 
@@ -322,7 +322,7 @@ impl GainTarget {
 
     /// The edge the gain is of.
     #[must_use]
-    pub const fn edge(self) -> Edge {
+    pub const fn edge(self) -> ChannelEdge {
         self.0
     }
 }
@@ -335,10 +335,10 @@ pub enum GainTargetError {
     /// the wire's declaration ([`Connection::gain`](crate::Connection::gain))
     /// and is never added by a write.
     #[error("no gain lane on {0:?}")]
-    NoLane(Edge),
+    NoLane(ChannelEdge),
     /// The edge is a lane a bus edge lowers to
     /// ([`Graph::connect`](crate::Graph::connect) between buses): its weight is
     /// the fold's, and a bus edge carries no gain of its own.
     #[error("the edge is a lane of a bus edge: {0:?}")]
-    BusLane(Edge),
+    BusLane(ChannelEdge),
 }

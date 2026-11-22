@@ -22,9 +22,9 @@ use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::News;
 use tutti_plugin_types::{
     AutomationMode, Control, Delivered, Effect, Event, Features, Hand, HostOp, Layout, Lifecycle,
-    LoadStage, LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock, Notice, OutOfProcess,
-    ParamEdit, ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginIo, PluginPreset,
-    PluginRef, PluginResult, Prepare, PresetId, ProcessWake, RateRefusal, RateRefusalCause,
+    LoadStage, MainThreadMarker, MainWorkHandle, MaxBlock, Notice, OutOfProcess, ParamEdit,
+    ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginIo, PluginPreset, PluginRef,
+    PluginResult, PluginWiring, Prepare, PresetId, ProcessWake, RateRefusal, RateRefusalCause,
     RenderMode, RenderModeSupport, Request, SampleRate, Samples, Seat, ServerLosses, Stage, State,
     StateError, StateUse, TrackInfo, Widths,
 };
@@ -83,7 +83,7 @@ pub(crate) trait ServerPlugin {
     /// The plugin's catalog identity.
     fn descriptor(&self) -> &PluginDescriptor;
     /// The plugin's wiring as last read: buses, latency, tail, capabilities.
-    fn loaded(&self) -> &LoadedPlugin;
+    fn loaded(&self) -> &PluginWiring;
     /// The sample format the session renders this plugin in: 64-bit only when
     /// it was asked for **and** the plugin runs at it ([`Features::F64_AUDIO`]),
     /// never the request alone.
@@ -204,7 +204,7 @@ pub(crate) struct Server<L: OutOfProcess> {
     /// The file and plugin the load opened.
     origin: PluginRef,
     descriptor: PluginDescriptor,
-    wiring: LoadedPlugin,
+    wiring: PluginWiring,
     /// The buses the host was last told: at load, or by `PluginIoChanged`.
     announced: Layout,
     /// What the plugin asked of the host since the last pass, reused.
@@ -358,7 +358,7 @@ impl<L: ServerSide> Server<L> {
             state: Lifecycle::<L>::initial_state(),
             hand,
             descriptor: PluginDescriptor::new("", PluginClass::Unknown),
-            wiring: LoadedPlugin::default(),
+            wiring: PluginWiring::default(),
             announced: Layout::default(),
             requests: Vec::new(),
             edits: Vec::new(),
@@ -713,7 +713,7 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
         &self.descriptor
     }
 
-    fn loaded(&self) -> &LoadedPlugin {
+    fn loaded(&self) -> &PluginWiring {
         &self.wiring
     }
 

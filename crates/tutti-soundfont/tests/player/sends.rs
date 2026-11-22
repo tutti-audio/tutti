@@ -9,7 +9,7 @@ use crate::support;
 
 use support::font::{Inst, Preset, font};
 use support::rig::Rig;
-use tutti_graph::{Instrument, Node, SilenceMask, Status};
+use tutti_graph::{InstrumentNode, Node, SilenceMask, Status};
 use tutti_soundfont::SoundFontUnit;
 use tutti_ump::CCNumber;
 

@@ -9,8 +9,8 @@
 //! should not be sent it, so capability and want collapse to one bit.
 //!
 //! Numeric wiring (bus widths, latency samples) is not here: it lives on
-//! [`LoadedPlugin`](crate::LoadedPlugin) as plain fields, with
-//! [`latency`](crate::LoadedPlugin::latency) derived from them.
+//! [`PluginWiring`](crate::PluginWiring) as plain fields, with
+//! [`latency`](crate::PluginWiring::latency) derived from them.
 //!
 //! With the `serde` feature, [`Features`] serializes as its underlying bits.
 //!
@@ -213,7 +213,7 @@ impl FeatureReport {
 // inside, below.
 pub mod probed {
     //! What each format's loader probes — the `probed` half of
-    //! [`LoadedPlugin`](crate::LoadedPlugin).
+    //! [`PluginWiring`](crate::PluginWiring).
     //!
     //! Named constants rather than expressions inside the load paths, which sit
     //! behind per-format `cfg`s and need a real plugin to reach. A claim about

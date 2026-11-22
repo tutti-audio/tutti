@@ -15,7 +15,7 @@ use super::width_error::WidthError;
 use crate::PluginHandle;
 use crate::{ParameterChangeSink, PluginControls};
 use tutti_plugin_types::{
-    Features, InProcess, Loaded, LoadedPlugin, PluginDescriptor, PluginRef, PluginTooWide, Prepare,
+    Features, InProcess, Loaded, PluginDescriptor, PluginRef, PluginTooWide, PluginWiring, Prepare,
 };
 use tutti_plugin_types::{IpcError, IpcResult, StateError};
 use tutti_units::ParamId;
@@ -226,7 +226,7 @@ struct Wired<L: Loaded, F: Float> {
     post: super::host_edits::EditPost,
     descriptor: PluginDescriptor,
     /// The wiring as the plugin reports it, with the presets it can list.
-    loaded: LoadedPlugin,
+    loaded: PluginWiring,
 }
 
 /// The client over an activated plugin: its declared widths, latency, tail and
@@ -354,7 +354,7 @@ pub fn client_over<L, F>(
     controller: L::Controller,
     prepare: Prepare,
     descriptor: PluginDescriptor,
-    wiring: &LoadedPlugin,
+    wiring: &PluginWiring,
     parameters: impl IntoIterator<Item = ParamId>,
     spares: usize,
     controls: Option<PluginControls>,

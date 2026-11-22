@@ -1,6 +1,6 @@
 //! Format-agnostic plugin load data.
 //!
-//! [`LoadedPlugin`] is the wiring data produced when a plugin is actually
+//! [`PluginWiring`] is the wiring data produced when a plugin is actually
 //! instantiated (its buses, latency, tail, capability flags). It rides the
 //! plugin-load IPC reply, so it is serializable under the `serde` feature.
 
@@ -290,7 +290,7 @@ impl Processing {
 /// and placement, latency, tail, and the [`Features`] capability flags.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct LoadedPlugin {
+pub struct PluginWiring {
     /// The input buses, in bus-index order; see [`PluginBuses`].
     pub inputs: PluginBuses,
     /// The output buses.
@@ -346,7 +346,7 @@ pub struct LoadedPlugin {
     pub assignments: Vec<MidiAssignment>,
 }
 
-impl LoadedPlugin {
+impl PluginWiring {
     /// Whether every direction is within the width a block serves.
     ///
     /// # Errors
@@ -442,7 +442,7 @@ mod tests {
     /// two would let a caller read an aux bus's speakers it never reported.
     #[test]
     fn a_multi_bus_plugin_round_trips() {
-        let loaded = LoadedPlugin {
+        let loaded = PluginWiring {
             inputs: main_and_aux(),
             outputs: vec![PluginBus::new(ChannelLayout::STEREO, BusRole::Main)],
             latency_samples: Samples::new(128),
@@ -457,7 +457,7 @@ mod tests {
             }],
         };
         let bytes = postcard::to_allocvec(&loaded).unwrap();
-        let back: LoadedPlugin = postcard::from_bytes(&bytes).unwrap();
+        let back: PluginWiring = postcard::from_bytes(&bytes).unwrap();
         assert_eq!(back, loaded);
         assert_eq!(back.inputs[1].topology, None);
         assert_eq!(back.total_inputs(), 3);
@@ -493,7 +493,7 @@ mod tests {
     fn topology_is_complete_only_when_every_bus_agrees_with_its_count() {
         let mono = ChannelTopology::default_for(ChannelLayout::MONO);
         let bus = |topology| PluginBus::new(ChannelLayout::STEREO, BusRole::Main).placed(topology);
-        let of = |input, output| LoadedPlugin {
+        let of = |input, output| PluginWiring {
             inputs: vec![bus(input)],
             outputs: vec![bus(output)],
             ..Default::default()
@@ -516,13 +516,13 @@ mod tests {
     #[test]
     fn the_probed_mask_crosses_the_wire() {
         // A report with one capability probed.
-        let loaded = LoadedPlugin {
+        let loaded = PluginWiring {
             features: Features::EDITOR,
             probed: Features::EDITOR,
             ..Default::default()
         };
         let bytes = postcard::to_allocvec(&loaded).unwrap();
-        let back: LoadedPlugin = postcard::from_bytes(&bytes).unwrap();
+        let back: PluginWiring = postcard::from_bytes(&bytes).unwrap();
 
         assert_eq!(back.capability(Features::EDITOR), Some(true));
         assert_eq!(
@@ -532,11 +532,11 @@ mod tests {
         );
     }
 
-    /// A default `LoadedPlugin` claims nothing, rather than claiming that every
+    /// A default `PluginWiring` claims nothing, rather than claiming that every
     /// capability was probed and declined.
     #[test]
     fn a_defaulted_plugin_claims_no_capability() {
-        let loaded = LoadedPlugin::default();
+        let loaded = PluginWiring::default();
         assert_eq!(loaded.capability(Features::EDITOR), None);
         assert_eq!(loaded.capability(Features::TRANSPORT), None);
     }
@@ -544,9 +544,9 @@ mod tests {
     /// A plugin with no buses round-trips and has no width.
     #[test]
     fn empty_buses_round_trip() {
-        let loaded = LoadedPlugin::default();
+        let loaded = PluginWiring::default();
         let bytes = postcard::to_allocvec(&loaded).unwrap();
-        let back: LoadedPlugin = postcard::from_bytes(&bytes).unwrap();
+        let back: PluginWiring = postcard::from_bytes(&bytes).unwrap();
         assert_eq!(back, loaded);
         assert!(back.inputs.is_empty());
         assert_eq!(back.total_inputs(), 0);

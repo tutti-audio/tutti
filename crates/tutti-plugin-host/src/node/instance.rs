@@ -253,7 +253,7 @@ impl<L: Loaded> Instance<L> {
         processor: L::Processor,
         controller: L::Controller,
         prepare: Prepare,
-        wiring: &tutti_plugin_types::LoadedPlugin,
+        wiring: &tutti_plugin_types::PluginWiring,
     ) -> (Self, Rt<L::Processor>) {
         let (mut hand, rt) = Hand::threaded();
         let (lifecycle, state) =

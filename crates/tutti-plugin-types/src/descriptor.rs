@@ -1,7 +1,7 @@
 //! Catalog identity for a discovered plugin: the static, scan-time data a
 //! plugin catalog persists and a host reads for browsing and deduplication.
 //!
-//! Distinct from [`LoadedPlugin`](crate::LoadedPlugin), which carries the
+//! Distinct from [`PluginWiring`](crate::PluginWiring), which carries the
 //! runtime wiring data (bus widths, latency) produced at *load* time and never
 //! persisted.
 
@@ -14,7 +14,7 @@ use crate::{ClapFeature, PluginRole, PluginVersion, Vst3SubCategories, Widths};
 ///
 /// This is the static, scan-time data a plugin catalog persists and a host
 /// reads for its browser listing and deduplication.
-/// Distinct from [`LoadedPlugin`](crate::LoadedPlugin), which carries the
+/// Distinct from [`PluginWiring`](crate::PluginWiring), which carries the
 /// runtime engine-wiring data (bus widths, latency) produced at *load* time and
 /// never persisted.
 #[derive(Debug, Clone, PartialEq)]
@@ -34,7 +34,7 @@ pub struct PluginDescriptor {
     ///
     /// Persisted in the catalog and read at **browse time, before any load**,
     /// so the app can show a GUI badge without instantiating the plugin. The
-    /// post-load authoritative copy is `LoadedPlugin.features` /
+    /// post-load authoritative copy is `PluginWiring.features` /
     /// [`Features::EDITOR`](crate::Features); the loader sets both.
     ///
     /// Three-valued because the scan path cannot answer it: AU and VST3 probe

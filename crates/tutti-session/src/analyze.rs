@@ -33,7 +33,7 @@ use tutti_platform::Asset;
 use tutti_platform::WeakExecutor;
 use tutti_units::{SampleRate, Samples};
 
-pub use feed::{AudioContext, AudioInput, BindError};
+pub use feed::{AudioContext, AudioInput, MeterBindError};
 use feed::{Bind, Chunk, View};
 pub use live::{Analyzer, AnalyzerError};
 
@@ -118,7 +118,7 @@ pub enum AnalyzeError {
     Decode(#[from] tutti_codec::DecodeError),
     /// The audio's channels cannot be shown to the meter in the view it takes.
     #[error(transparent)]
-    Bind(#[from] BindError),
+    Bind(#[from] MeterBindError),
     /// The analysis panicked (a decoder, a meter); `message` is the panic's, when
     /// it was a string.
     #[error("the analysis panicked: {message}")]

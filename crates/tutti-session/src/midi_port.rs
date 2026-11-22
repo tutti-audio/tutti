@@ -59,8 +59,8 @@ use crate::midi_ci::{
     Subscription, at_peer, resolve,
 };
 use crate::{
-    EventInPort, EventOutPort, MidiReport, Peer, PeerError, Presence, Resource, ResourceFact,
-    ResourceId, Session, SessionEvent,
+    EventInPort, EventOutPort, MidiReport, Peer, PeerError, PeerResourceId, Presence, Resource,
+    ResourceFact, Session, SessionEvent,
 };
 
 /// Why a port whose input could not be reopened is lost: the fault the reader
@@ -245,7 +245,7 @@ struct Cell<I> {
 /// An input port's record: shared by its handles and the session's
 /// table.
 pub(crate) struct InputShared {
-    id: ResourceId,
+    id: PeerResourceId,
     cell: Mutex<Cell<MidiInputInfo>>,
     requests: Mutex<Inbox>,
     /// What the handles its info lists make requests through.
@@ -394,7 +394,7 @@ impl InputShared {
 
 /// An output port's record.
 pub(crate) struct OutputShared {
-    id: ResourceId,
+    id: PeerResourceId,
     cell: Mutex<Cell<MidiOutputInfo>>,
     /// What the port did not send, counted by the session.
     losses: LossReaders,
@@ -501,7 +501,7 @@ impl MidiInput {
 impl crate::peer::sealed::Sealed for MidiInput {}
 
 impl Resource for MidiInput {
-    fn id(&self) -> ResourceId {
+    fn id(&self) -> PeerResourceId {
         self.claim.shared.id
     }
 }
@@ -578,7 +578,7 @@ impl MidiOutput {
 impl crate::peer::sealed::Sealed for MidiOutput {}
 
 impl Resource for MidiOutput {
-    fn id(&self) -> ResourceId {
+    fn id(&self) -> PeerResourceId {
         self.claim.shared.id
     }
 }
@@ -986,14 +986,14 @@ impl std::ops::BitOrAssign for Edits {
     }
 }
 
-fn changed(out: &mut Vec<SessionEvent>, id: ResourceId, fact: ResourceFact) {
+fn changed(out: &mut Vec<SessionEvent>, id: PeerResourceId, fact: ResourceFact) {
     out.push(SessionEvent::ResourceChanged { id, fact });
 }
 
 /// Sets a record's presence, saying so once when it changed.
 fn set_presence<I>(
     cell: &Mutex<Cell<I>>,
-    id: ResourceId,
+    id: PeerResourceId,
     presence: Presence<PortCause>,
     out: &mut Vec<SessionEvent>,
 ) {
@@ -1007,7 +1007,7 @@ fn set_presence<I>(
 /// The snapshot of the open input `device`, as the OS layer reads it now.
 fn input_info(
     io: &MidiSession,
-    port: ResourceId,
+    port: PeerResourceId,
     device: &DeviceInfo,
     link: &PortLink,
     pending: &Pending,

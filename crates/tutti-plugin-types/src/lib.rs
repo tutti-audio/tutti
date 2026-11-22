@@ -4,7 +4,7 @@
 //! ## What this is
 //!
 //! Everything a VST2 / VST3 / CLAP / AU host needs to speak that is *not* specific
-//! to one format: [`PluginDescriptor`] and [`LoadedPlugin`] (identity and the
+//! to one format: [`PluginDescriptor`] and [`PluginWiring`] (identity and the
 //! load-time wiring snapshot), [`ParameterInfo`] with its [`ParamId`] /
 //! [`PluginParamRange`] / [`ParamFlags`] parts, [`ProcessContext`] and [`ProcessOutput`],
 //! [`TransportInfo`], [`ParameterChanges`] automation queues, note expression and
@@ -140,7 +140,7 @@
 //!   it on in its dev-dependency.
 //!
 //! [`PluginDescriptor`]: crate::PluginDescriptor
-//! [`LoadedPlugin`]: crate::LoadedPlugin
+//! [`PluginWiring`]: crate::PluginWiring
 //! [`ParameterInfo`]: crate::ParameterInfo
 //! [`ParamId`]: tutti_units::ParamId
 //! [`PluginParamRange`]: crate::PluginParamRange
@@ -334,7 +334,7 @@ pub use measured::{
     LatencyVerdict, Measured, NotChecked, PROBE_FLOOR, ProbeConfig, StateHash, TailVerdict, Verdict,
 };
 pub use metadata::{
-    BusChannels, Layout, LoadedPlugin, MAX_LAYOUT_BUSES, PluginBus, PluginBuses, PluginTail,
+    BusChannels, Layout, MAX_LAYOUT_BUSES, PluginBus, PluginBuses, PluginTail, PluginWiring,
     Processing,
 };
 pub use midi::{
