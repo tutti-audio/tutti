@@ -19,8 +19,9 @@ use core::marker::PhantomData;
 use tutti_buffers::{Mono, Sample};
 use tutti_units::{Amplitude, SampleRate, Samples, Seconds};
 
-use crate::convert::{for_blocks, widen};
+use crate::convert::for_blocks;
 use crate::framing::{FrameCutter, Framing};
+use crate::measure::measure_buffer;
 use crate::{FramingError, Measure, MeterError, StreamMeter};
 use tutti_dsp::Complex64;
 use tutti_dsp::FftScratch;
@@ -243,6 +244,7 @@ pub(crate) fn onset_lag(geometry: StftGeometry) -> Samples {
 ///
 /// Not for the audio thread: it keeps one novelty value per frame, so it grows
 /// with the audio and allocates.
+#[derive(Debug)]
 pub struct OnsetMeter<S: Sample> {
     plan: OnsetPlan,
     cutter: FrameCutter,
@@ -257,15 +259,6 @@ pub struct OnsetMeter<S: Sample> {
     /// can only be picked once the run is complete.
     novelty: Vec<Novelty>,
     sample: PhantomData<fn(S)>,
-}
-
-impl<S: Sample> core::fmt::Debug for OnsetMeter<S> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("OnsetMeter")
-            .field("plan", &self.plan)
-            .field("frames", &self.novelty.len())
-            .finish_non_exhaustive()
-    }
 }
 
 impl<S: Sample> OnsetMeter<S> {
@@ -394,8 +387,7 @@ pub fn detect_onsets<S: Sample>(
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
 ) -> Result<Vec<Onset>, MeterError> {
-    let plan = cfg.plan(rate.into())?;
-    Ok(run(plan, &widen(samples.samples())).finish())
+    measure_buffer::<S, _>(cfg, rate.into(), samples)
 }
 
 /// A meter for `plan` fed `samples`: the whole-buffer run of the crate's own
