@@ -321,8 +321,8 @@ pub mod nodes {
         StaggerError, StereoWidthConfig, StereoWidthNode, SvfFilterConfig, SvfFilterNode, SvfType,
         Sweep, SweepBuilder, SweepError, SweepRange, SweepRangeError, TiltFilterConfig,
         TiltFilterNode, TransientShaperConfig, TransientShaperNode, TremoloConfig, TremoloNode,
-        VbapError, VbapPannerConfig, VbapPannerNode, WaveguideStringConfig, WaveguideStringNode,
-        WavetableConfig, WavetableNode,
+        TubeStageConfig, TubeStageNode, VbapError, VbapPannerConfig, VbapPannerNode,
+        WaveguideStringConfig, WaveguideStringNode, WavetableConfig, WavetableNode,
     };
 
     /// Writing a node over the kernels (`tutti-nodes`): the `Kernel` and `KernelNode`
@@ -357,7 +357,8 @@ pub mod nodes {
             SpringReverbSet, StereoWidthKernel, StereoWidthSet, SvfControls, SvfKernel, SvfSet,
             TiltFilterControls, TiltFilterKernel, TiltFilterSet, TransientControls,
             TransientShaperKernel, TransientShaperSet, TremoloControls, TremoloKernel, TremoloSet,
-            WaveguideStringKernel, WaveguideStringSet, WidthControls,
+            TubeStageControls, TubeStageKernel, TubeStageSet, WaveguideStringKernel,
+            WaveguideStringSet, WidthControls,
         };
     }
 }
@@ -394,11 +395,11 @@ pub mod dsp {
         ReflectionOrder, ResampleError, Rotation, Route, ShoeboxConfig, ShoeboxError, ShoeboxRoom,
         SimdLanes, Sos, SosError, SpeakerGeometryError, SpeakerLayout, SpringLength,
         SpringLengthError, StopbandAttenuation, StopbandAttenuationError, StreamCounts, System,
-        TableSize, TableSizeError, Tap, TapSet, Tilt, VariableRate, VariableRateError,
-        VariableResampler, VelvetDensity, VelvetDensityError, VelvetLength, VelvetLengthError,
-        VelvetNoise, VelvetNoiseError, VelvetPulse, Wall, WaveguideBank, WaveguideControls,
-        WaveguidePositions, WaveguideString, WaveshaperControls, Wavetable, WavetableError,
-        WavetableOscillator, WavetableStep, quadrature_band,
+        TableSize, TableSizeError, Tap, TapSet, Tilt, TubeDrive, TubeDriveError, VariableRate,
+        VariableRateError, VariableResampler, VelvetDensity, VelvetDensityError, VelvetLength,
+        VelvetLengthError, VelvetNoise, VelvetNoiseError, VelvetPulse, Wall, WaveguideBank,
+        WaveguideControls, WaveguidePositions, WaveguideString, WaveshaperControls, Wavetable,
+        WavetableError, WavetableOscillator, WavetableStep, quadrature_band,
     };
 }
 

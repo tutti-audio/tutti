@@ -48,7 +48,8 @@
 //!   with no feedback and a finite tail) and `PhaserNode` (a `KernelNode` over `PhaserKernel`, its `Stages`
 //!   and `SweepRange` checked; the rate is floored at 0.01 Hz, a control signal's value and a cell's alike), both any width.
 //! - **Distortion** — `DistortionNode` and its `ShapeKind` waveshapers; `DiodeClipperNode`, an
-//!   RC-loaded antiparallel diode pair solved by a capped Newton iteration, oversampled.
+//!   RC-loaded antiparallel diode pair solved by a capped Newton iteration, oversampled;
+//!   `TubeStageNode`, a 12AX7 common-cathode stage with a plate load, solved the same way.
 //! - **Bit crusher** — `BitCrusherNode`, a sample-and-hold and a quantizer, with no tail,
 //!   from a `BitCrusherConfig`.
 //! - **DC blocker** — `DcBlockerNode`, a first-order high-pass with a finite tail, from a
@@ -347,11 +348,14 @@ pub use tutti_dsp::{
 mod diode_clipper;
 mod distortion;
 mod oversampled;
+mod tube_stage;
 pub use diode_clipper::{
     DiodeClipperConfig, DiodeClipperKernel, DiodeClipperNode, DiodeClipperSet,
 };
 pub use distortion::{DistortionConfig, DistortionKernel, DistortionNode, DistortionSet};
+pub use tube_stage::{TubeStageConfig, TubeStageKernel, TubeStageNode, TubeStageSet};
 pub use tutti_dsp::{ClipperDrive, ClipperDriveError, DiodeClipperControls};
+pub use tutti_dsp::{TubeDrive, TubeDriveError, TubeStageControls};
 // `ShapeKind` and `OversamplingFactor` are in `DistortionNode`'s signatures; what is behind
 // them is `tutti-dsp`'s.
 pub use tutti_dsp::{Antialiasing, AntialiasingError, OversamplingFactor, ShapeKind};

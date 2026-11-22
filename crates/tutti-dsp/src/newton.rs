@@ -24,6 +24,18 @@ pub(crate) const NEWTON_CAP: usize = 2;
 #[inline]
 #[must_use]
 pub(crate) fn capped_newton<F: Float>(f: impl Fn(F) -> (F, F), seed: F, warm: F) -> F {
+    capped_newton_steps::<F, NEWTON_CAP>(f, seed, warm)
+}
+
+/// [`capped_newton`] with `CAP` steps, for a kernel whose seed is not a closed form and which
+/// states its own cap with its reason.
+#[inline]
+#[must_use]
+pub(crate) fn capped_newton_steps<F: Float, const CAP: usize>(
+    f: impl Fn(F) -> (F, F),
+    seed: F,
+    warm: F,
+) -> F {
     let (at_seed, _) = f(seed);
     let (at_warm, _) = f(warm);
     let mut u = if at_seed.abs() <= at_warm.abs() || at_warm.is_nan() {
@@ -31,7 +43,7 @@ pub(crate) fn capped_newton<F: Float>(f: impl Fn(F) -> (F, F), seed: F, warm: F)
     } else {
         warm
     };
-    for _ in 0..NEWTON_CAP {
+    for _ in 0..CAP {
         let (value, slope) = f(u);
         u -= value / slope;
     }

@@ -38,7 +38,8 @@ use tutti_nodes::{
     LfoNode, LfoShape, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayConfig,
     ModDelayNode, PhaserConfig, PhaserControls, PhaserNode, PitchShifterConfig, PitchShifterNode,
     RingModConfig, RingModNode, ShapeKind, ShimmerConfig, ShimmerNode, Stages, SvfFilterConfig,
-    SvfFilterNode, SvfType, TremoloConfig, TremoloNode, WavetableConfig, WavetableNode,
+    SvfFilterNode, SvfType, TremoloConfig, TremoloNode, TubeStageConfig, TubeStageNode,
+    WavetableConfig, WavetableNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -938,4 +939,15 @@ fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>
 /// The AmbiX bus of `order`: ACN, SN3D.
 fn ambix(order: AmbisonicOrder) -> BusTopology {
     BusTopology::ambisonic(AmbisonicFormat::ambix(order))
+}
+
+#[test]
+fn tube_stage() {
+    IsolateRow::new("TubeStageNode (stereo)", || {
+        TubeStageNode::<f32>::from(TubeStageConfig::new(ChannelLayout::STEREO))
+    })
+    .control("drive", |d| {
+        assert!(d.param_set().set(UnitParam::GainDb, 24.0))
+    })
+    .check();
 }

@@ -89,6 +89,9 @@
 //! - **Diode clipper** (`diode_clipper.rs`): [`DiodeClipper`], the RC-loaded antiparallel diode
 //!   pair of Yeh, Abel and Smith, by the trapezoidal rule with a capped Newton solve seeded from
 //!   the Wright omega closed form (`wright_omega.rs`, `newton.rs`).
+//! - **Tube stage** (`tube_stage.rs`): [`TubeStage`], a 12AX7 common-cathode stage after Koren's
+//!   model, its plate load solved per sample by a capped Newton iteration from a closed-form
+//!   seed, with [`TubeDrive`] its checked drive.
 //! - **Spatial** (`spatial/`): VBAP ([`SpeakerLayout`], Pulkki's pairs and triplets and the
 //!   gain solve over them, [`SpeakerGeometryError`]; [`VbapKernel`] and [`VbapGains`], one
 //!   direction's gains and one channel rendered along a ramp between two) and the HRTF
@@ -227,6 +230,7 @@ mod shoebox;
 mod stereo;
 mod string_tuning;
 mod tremolo;
+mod tube_stage;
 mod waveguide;
 mod waveshape;
 mod wavetable;
@@ -400,6 +404,7 @@ pub use stft::vocoder::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
 pub use stft::window::{CosineWindow, Window};
 pub use string_tuning::{LowestPitch, LowestPitchError};
 pub use tremolo::{AutoPan, AutoPanControls, Tremolo, TremoloControls};
+pub use tube_stage::{TubeDrive, TubeDriveError, TubeStage, TubeStageControls};
 pub use viterbi::sticky_viterbi;
 pub use waveguide::{WaveguideBank, WaveguideControls, WaveguidePositions, WaveguideString};
 pub use waveshape::{

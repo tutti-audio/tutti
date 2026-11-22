@@ -21,7 +21,7 @@ use tutti_nodes::{
     MultibandCompressorNode, PeakDetection, PhaserConfig, PhaserNode, PitchShifterConfig,
     PitchShifterNode, PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode,
     ShimmerConfig, ShimmerNode, SpringReverbConfig, SpringReverbNode, SvfFilterConfig,
-    SvfFilterNode, TremoloConfig, TremoloNode,
+    SvfFilterNode, TremoloConfig, TremoloNode, TubeStageConfig, TubeStageNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -104,6 +104,12 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "diode clipper",
             Box::new(DiodeClipperNode::<f32>::from(DiodeClipperConfig::new(
+                ChannelLayout::STEREO,
+            ))),
+        ),
+        (
+            "tube stage",
+            Box::new(TubeStageNode::<f32>::from(TubeStageConfig::new(
                 ChannelLayout::STEREO,
             ))),
         ),
