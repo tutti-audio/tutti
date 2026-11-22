@@ -90,7 +90,7 @@ pub use params_state::{
     CapturedIndication, CapturedParamEvent, EXTRA_PARAM_BASE, EXTRA_PARAMS_ENV,
     MAX_CAPTURED_INDICATIONS, MAX_CAPTURED_PARAM_EVENTS, MAX_CAPTURED_STATE, MAX_EXTRA_PARAMS,
     PARAM_CMD_CLEAR, PARAM_CMD_NONE, PARAM_CMD_REQUEST_FLUSH, PARAM_CMD_RESCAN_ALL,
-    PARAM_CMD_RESCAN_VALUES, ParamStateCapture, STATE_MAGIC,
+    PARAM_CMD_RESCAN_VALUES, ParamStateCapture, STATE_MAGIC, saved_normalized, saved_value,
 };
 
 /// RT-HAZARD probe: the switches that make the host's audio thread take the
