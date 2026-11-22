@@ -3,10 +3,9 @@
 //! another session's read is refused as stale, and a clip over a `load_audio`
 //! handle plays the file's own samples from either tier.
 
+use crate::offline::offline_48k;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
-use tutti_platform::Instant;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
@@ -31,13 +30,6 @@ fn write_ramp(path: &Path) {
     tutti_fixtures::signal::write_wav_f32(path, SampleRate::of(RATE), 1, &samples);
 }
 
-fn session() -> Session {
-    Session::builder()
-        .sample_rate(SampleRate::of(RATE))
-        .build()
-        .expect("builds")
-}
-
 /// **Two opens are two streams.** Each read file applies to a stream of its own,
 /// whose control side and reader name one stream, and the two differ.
 #[test]
@@ -45,7 +37,7 @@ fn two_opens_apply_to_two_streams() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
-    let mut s = session();
+    let mut s = offline_48k();
     let first = s.open_stream(&path, StreamStart::HEAD).expect("a streamer");
     let second = s.open_stream(&path, StreamStart::HEAD).expect("a streamer");
     let (first, second) = (
@@ -64,7 +56,7 @@ fn two_opens_apply_to_two_streams() {
 #[test]
 fn a_missing_file_fails_its_open_with_the_typed_error() {
     let dir = tempfile::tempdir().expect("a temp dir");
-    let s = session();
+    let s = offline_48k();
     let opened = tutti_fixtures::block_on(
         s.open_stream(dir.path().join("absent.wav"), StreamStart::HEAD)
             .expect("a streamer"),
@@ -86,7 +78,7 @@ fn an_open_of_a_dropped_session_is_shut_down() {
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
     let open = {
-        let s = session();
+        let s = offline_48k();
         s.open_stream(&path, StreamStart::HEAD).expect("a streamer")
     };
     assert!(matches!(
@@ -109,7 +101,7 @@ fn a_file_read_for_another_session_is_stale() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
-    let (a, mut b) = (session(), session());
+    let (a, mut b) = (offline_48k(), offline_48k());
     let opened =
         tutti_fixtures::block_on(a.open_stream(&path, StreamStart::HEAD).expect("a streamer"))
             .expect("reads");
@@ -137,7 +129,7 @@ fn a_session_without_a_streamer_refuses_an_open_at_the_call() {
 /// The session is returned with the clip: it owns the streamer that feeds a
 /// streamed clip's ring, which ends with it.
 fn clip_of(path: &Path, streamed: bool) -> (Session, tutti_sampler::Clip<f32>) {
-    let mut s = session();
+    let mut s = offline_48k();
     let audio = tutti_fixtures::block_on(s.load_audio(path).tier(if streamed {
         Tier::Streamed
     } else {
@@ -165,7 +157,7 @@ fn clip_of(path: &Path, streamed: bool) -> (Session, tutti_sampler::Clip<f32>) {
 /// Renders `clip` at beat 0 on a rolling session for `frames` frames,
 /// waiting first for a streamed clip's ring to prime.
 fn play(clip: tutti_sampler::Clip<f32>, frames: usize) -> Vec<f32> {
-    let mut s = session();
+    let mut s = offline_48k();
     let key = s.graph().add(clip);
     s.graph()
         .set_sources(MainOutput::channel(0), [OutputPort::new(key, 0)])
@@ -174,14 +166,16 @@ fn play(clip: tutti_sampler::Clip<f32>, frames: usize) -> Vec<f32> {
     // A streamed clip's ring is filled on the streamer's thread, and an
     // offline render does not wait for it: wait for the stream to say it is
     // primed.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while let Some(status) = s.graph_ref().handle(&key).and_then(|h| h.status()) {
-        if status.phase != StreamPhase::Opening {
-            break;
-        }
-        assert!(Instant::now() < deadline, "the stream was not primed");
-        std::thread::sleep(Duration::from_millis(1));
-    }
+    tutti_fixtures::wait_until(
+        "the stream to be primed",
+        tutti_fixtures::HANG_GUARD,
+        || {
+            s.graph_ref()
+                .handle(&key)
+                .and_then(|h| h.status())
+                .is_none_or(|status| status.phase != StreamPhase::Opening)
+        },
+    );
     s.play().expect("room");
     let mut out = Vec::new();
     let mut block = vec![0.0f32; BLOCK * 2];
@@ -273,7 +267,7 @@ fn auto_streams_a_file_past_the_threshold_and_holds_a_short_one() {
     }
     w.finalize().expect("finalizes");
 
-    let s = session();
+    let s = offline_48k();
     let short = tutti_fixtures::block_on(s.load_audio(&short)).expect("loads");
     let long = tutti_fixtures::block_on(s.load_audio(&long)).expect("loads");
     let AudioData::Resident(wave) = short.data() else {
@@ -296,7 +290,7 @@ fn the_threshold_is_the_files_decoded_size() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
-    let s = session();
+    let s = offline_48k();
     let decoded = (LEN as u64) * 4;
     let load = |above| tutti_fixtures::block_on(s.load_audio(&path).tier(Tier::Auto { above }));
     assert!(matches!(

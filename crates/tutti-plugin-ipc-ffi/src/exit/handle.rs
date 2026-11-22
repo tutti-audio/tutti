@@ -1,10 +1,10 @@
 //! Windows: a process handle is signalled when the process ends.
 
-use std::os::windows::io::{AsHandle, AsRawHandle, OwnedHandle};
-use std::process::Child;
+use std::os::windows::io::{AsRawHandle, OwnedHandle};
 use std::time::Duration;
 
 use super::Waited;
+use crate::Process;
 use windows_sys::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows_sys::Win32::System::Threading::WaitForSingleObject;
 
@@ -17,8 +17,8 @@ pub(super) struct Imp {
 
 impl Imp {
     /// `None` when the handle could not be duplicated.
-    pub(super) fn of(child: &Child) -> Option<Self> {
-        let handle = child.as_handle().try_clone_to_owned().ok()?;
+    pub(super) fn of(process: &Process) -> Option<Self> {
+        let handle = process.as_handle().try_clone_to_owned().ok()?;
         Some(Self { handle })
     }
 

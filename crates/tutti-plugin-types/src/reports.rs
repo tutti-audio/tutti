@@ -95,7 +95,7 @@ impl ReportSink {
 #[derive(Debug)]
 pub struct ReportDrain {
     reader: RingReader<[u64; 2]>,
-    undecodable: u32,
+    undecodable: u64,
 }
 
 impl ReportDrain {
@@ -120,7 +120,7 @@ impl ReportDrain {
 
     /// Entries dropped because they decoded to no known edit.
     #[must_use]
-    pub fn undecodable(&self) -> u32 {
+    pub fn undecodable(&self) -> u64 {
         self.undecodable
     }
 }

@@ -1,10 +1,7 @@
 //! A session on the system clock: an OS timer thread renders the graph, with
 //! no device and no host pulling blocks.
 
-use std::time::Duration;
-
 use tutti_buffers::InterleavedMut;
-use tutti_platform::Instant;
 
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_engine::StreamFaultKind;
@@ -39,24 +36,23 @@ fn a_system_session_renders_its_graph_with_no_device() {
             .unwrap()
             .unfaded();
     }
-    let limit = Instant::now() + Duration::from_secs(10);
     let mut tap = s.open_heard_tap(Samples::new(4 * BLOCK)).unwrap();
     assert_eq!(tap.width(), 2);
 
     s.play().expect("room");
     let mut heard = vec![0.0f32; 2 * BLOCK];
-    loop {
-        let _ = s.update();
-        let frames = tap
-            .pop_into(InterleavedMut::new(&mut heard, tap.layout()).unwrap())
-            .unwrap()
-            .get();
-        if frames > 0 && heard[..2 * frames].iter().all(|&x| x == 0.25) {
-            break;
-        }
-        assert!(Instant::now() < limit, "the constant never reached the tap");
-        std::thread::sleep(Duration::from_millis(2));
-    }
+    tutti_fixtures::wait_until(
+        "the constant to reach the tap",
+        tutti_fixtures::HANG_GUARD,
+        || {
+            let _ = s.update();
+            let frames = tap
+                .pop_into(InterleavedMut::new(&mut heard, tap.layout()).unwrap())
+                .unwrap()
+                .get();
+            frames > 0 && heard[..2 * frames].iter().all(|&x| x == 0.25)
+        },
+    );
     let head = s.playhead();
     assert!(head.playing(), "the transport rolls on the timer's blocks");
     assert_eq!(head.frame().get() % BLOCK as u64, 0);
@@ -110,16 +106,17 @@ fn a_panic_on_the_timer_thread_is_reported_once_as_a_fault_event() {
             })
             .count()
     };
-    let limit = Instant::now() + Duration::from_secs(10);
     let mut reported = 0;
-    while reported == 0 {
-        reported += panics(&system.update());
-        assert!(Instant::now() < limit, "the panic was never reported");
-        std::thread::sleep(Duration::from_millis(2));
-    }
+    tutti_fixtures::wait_until(
+        "the panic to be reported",
+        tutti_fixtures::HANG_GUARD,
+        || {
+            reported += panics(&system.update());
+            reported > 0
+        },
+    );
     for _ in 0..20 {
         reported += panics(&system.update());
-        std::thread::sleep(Duration::from_millis(2));
     }
     assert_eq!(reported, 1, "the panic is one event");
     assert!(system.faults().count() >= 1);

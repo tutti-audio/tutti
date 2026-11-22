@@ -20,6 +20,7 @@ use std::time::Duration;
 use tutti_platform::Instant;
 
 use tutti_plugin_types::TerminationReason;
+use tutti_units::Chunks;
 
 /// When a plugin's unanswered blocks are a hang. Times are measured on the
 /// `now` each observation is given.
@@ -60,10 +61,10 @@ impl Default for HangPolicy {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct HangDetector {
     /// The previous observation's totals.
-    last: Option<(u64, u64)>,
+    last: Option<(Chunks, Chunks)>,
     /// When the current unbroken starvation began, with the abandoned total
     /// then.
-    since: Option<(Instant, u64)>,
+    since: Option<(Instant, Chunks)>,
     /// When an abandoned block was last seen to be new.
     grew_at: Option<Instant>,
     /// Whether the hang was declared: it is declared once.
@@ -83,8 +84,8 @@ impl HangDetector {
     pub(crate) fn observe(
         &mut self,
         policy: HangPolicy,
-        abandoned: u64,
-        replies: u64,
+        abandoned: Chunks,
+        replies: Chunks,
         now: Instant,
     ) -> Option<TerminationReason> {
         let before = self.last.replace((abandoned, replies));
@@ -111,9 +112,15 @@ impl HangDetector {
         let (at, base) = self.since?;
         let blocks = abandoned.saturating_sub(base);
         let held = now.saturating_duration_since(at);
-        if blocks >= u64::from(policy.blocks) && held >= policy.window && !self.declared {
+        if blocks >= Chunks::new(u64::from(policy.blocks))
+            && held >= policy.window
+            && !self.declared
+        {
             self.declared = true;
-            return Some(TerminationReason::Hung { blocks, held });
+            return Some(TerminationReason::Hung {
+                blocks: blocks.get(),
+                held,
+            });
         }
         None
     }
@@ -136,7 +143,8 @@ mod tests {
     }
 
     fn hung(d: &mut HangDetector, at: Instant, abandoned: u64, replies: u64) -> bool {
-        d.observe(policy(), abandoned, replies, at).is_some()
+        d.observe(policy(), Chunks::new(abandoned), Chunks::new(replies), at)
+            .is_some()
     }
 
     /// A hang is declared only when blocks keep being abandoned, with no

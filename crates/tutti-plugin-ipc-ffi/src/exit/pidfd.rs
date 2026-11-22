@@ -1,9 +1,9 @@
 //! Linux: a pidfd, readable once the process has ended (reaped or not).
 
+use crate::Process;
 use rustix::event::{PollFd, PollFlags, Timespec};
 use rustix::process::{Pid, PidfdFlags};
 use std::os::fd::OwnedFd;
-use std::process::Child;
 use std::time::Duration;
 
 use super::Waited;
@@ -16,8 +16,8 @@ pub(super) struct Imp {
 impl Imp {
     /// `None` when the kernel refused a pidfd (before 5.3, or a sandbox that
     /// filters the call).
-    pub(super) fn of(child: &Child) -> Option<Self> {
-        rustix::process::pidfd_open(Pid::from_child(child), PidfdFlags::empty())
+    pub(super) fn of(process: &Process) -> Option<Self> {
+        rustix::process::pidfd_open(Pid::from_child(process.as_child()), PidfdFlags::empty())
             .ok()
             .map(|pidfd| Self { pidfd })
     }

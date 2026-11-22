@@ -161,10 +161,10 @@ impl Subject for Plugin {
             .diagnostics()
             .chunks();
         Chunks {
-            missed: d.missed,
-            late: d.late,
-            refused: d.refused,
-            skipped: d.skipped,
+            missed: d.missed.get(),
+            late: d.late.get(),
+            refused: d.refused.get(),
+            skipped: d.skipped.get(),
         }
     }
 
@@ -175,7 +175,6 @@ impl Subject for Plugin {
             .expect("the plugin declares itself an instrument");
         let mut rig = Rig::wired(session, handle);
         rig.plugin = Some(node);
-        rig.pace = std::time::Duration::from_millis(10);
         rig
     }
 }

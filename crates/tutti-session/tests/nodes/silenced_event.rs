@@ -5,22 +5,13 @@
 //! The figures are counts of blocks rendered, so they stand on no oracle but
 //! the render calls the test makes.
 
+use crate::offline::offline_48k;
 use std::time::Duration;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_session::{MainOutput, OutputPort, Session, SessionEvent};
-use tutti_units::SampleRate;
-
-const RATE: f64 = 48_000.0;
-
-fn offline() -> Session {
-    Session::builder()
-        .sample_rate(SampleRate::of(RATE))
-        .build()
-        .expect("builds")
-}
 
 /// A stereo block, rendered: the width the offline engine supports.
 fn good_block(s: &mut Session) {
@@ -66,7 +57,7 @@ impl Node for Slow {
 
 #[test]
 fn one_event_per_update_with_the_blocks_silenced_since_the_last() {
-    let mut s = offline();
+    let mut s = offline_48k();
     assert!(silenced(&s.update()).is_empty(), "nothing rendered");
     good_block(&mut s);
     assert!(silenced(&s.update()).is_empty(), "a good block is no event");
@@ -89,7 +80,7 @@ fn one_event_per_update_with_the_blocks_silenced_since_the_last() {
 /// session says nothing.
 #[test]
 fn over_budget_alone_is_no_event() {
-    let mut s = offline();
+    let mut s = offline_48k();
     let slow = s.graph().add(ForkByClone(Slow));
     s.graph()
         .set_sources(MainOutput::channel(0), [OutputPort::new(slow, 0)])

@@ -1,5 +1,6 @@
 //! `tutti_sampler::Clip`, a placed sample that is a graph node as it stands.
 
+use crate::offline::offline_48k;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Interleaved;
 use tutti_buffers::InterleavedMut;
@@ -9,13 +10,6 @@ use tutti_session::{MainOutput, OutputPort, Session};
 use tutti_units::{Amplitude, Beat, SampleRate};
 
 const RATE: f64 = 48_000.0;
-
-fn offline() -> Session {
-    Session::builder()
-        .sample_rate(SampleRate::of(RATE))
-        .build()
-        .expect("builds")
-}
 
 /// One second of a constant mono wave.
 fn level(value: f32) -> tutti_buffers::Wave {
@@ -53,7 +47,7 @@ fn wire(s: &mut Session, clip: NodeKey) {
 /// the wave's level (scaled by the clip's gain) on both channels from it.
 #[test]
 fn a_clip_starts_on_its_beat_at_its_gain() {
-    let mut s = offline();
+    let mut s = offline_48k();
     let clip = s.graph().add(
         Clip::new(level(0.5))
             .and_then(|c| c.channels(ChannelLayout::STEREO))
@@ -71,7 +65,7 @@ fn a_clip_starts_on_its_beat_at_its_gain() {
     let first = out.iter().position(|&x| x != 0.0).expect("it plays") / 2;
     assert_eq!(first, 24_000, "on the frame of beat 1");
     // The clip's gain is a scalar on the wave's level: half of the unscaled.
-    let (mut full, _) = (offline(), ());
+    let (mut full, _) = (offline_48k(), ());
     let whole = full.graph().add(
         Clip::new(level(0.5))
             .and_then(|c| c.channels(ChannelLayout::STEREO))
@@ -92,7 +86,7 @@ fn a_clip_starts_on_its_beat_at_its_gain() {
 /// at another width.
 #[test]
 fn a_clip_is_as_wide_as_its_wave_unless_placed() {
-    let mut s = offline();
+    let mut s = offline_48k();
     let outputs = |s: &mut Session, clip: Clip<f32>| {
         let node = s.graph().add(clip);
         s.graph().node_buses(node).expect("in the graph").1.width()

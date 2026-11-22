@@ -6,6 +6,7 @@
 //! Every figure is analytic: constants of exactly representable values, whose
 //! sum is exact in `f32`.
 
+use crate::offline::offline;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
@@ -16,10 +17,6 @@ use tutti_units::Samples;
 const A: f32 = 0.25;
 const B: f32 = 0.5;
 const C: f32 = 0.125;
-
-fn offline() -> Session {
-    Session::builder().build().expect("builds")
-}
 
 /// Commits and renders one 64-frame block; returns output channel 0.
 fn left(s: &mut Session) -> Vec<f32> {
