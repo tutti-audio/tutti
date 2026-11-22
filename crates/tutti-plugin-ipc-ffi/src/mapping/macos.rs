@@ -170,6 +170,10 @@ pub(super) fn receive(conn: Connection<'_>, _: SlabWire) -> Result<Slab, SlabErr
 
 /// Receives the one descriptor a frame announced, over `conn`, closed on `exec`
 /// as soon as it is received (the platform's `recvmsg` cannot do it atomically).
+///
+/// A thread that forks between the receive and the flag can hand the descriptor
+/// to its child. Nothing reads a lane's or a slab's end-of-file as the peer's
+/// death: the host learns that from the process's exit wait.
 pub(crate) fn receive_descriptor(conn: Connection<'_>) -> Result<OwnedFd, SlabError> {
     let fd = descriptor::recv(conn, RecvFlags::empty(), DESCRIPTOR_PATIENCE)?;
     fcntl_setfd(&fd, FdFlags::CLOEXEC).map_err(|e| SlabError::Transfer { source: e.into() })?;
