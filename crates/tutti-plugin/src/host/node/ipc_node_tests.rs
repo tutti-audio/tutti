@@ -441,7 +441,7 @@ fn a_served_plugin_reopens_and_restores_off_the_main_thread() {
     let mut env = tutti_fixtures::ScopedEnv::new();
     env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     let first = Ipc::launch(
-        IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source")),
+        IpcConfig::new(),
         &LoadRequest {
             origin: &PluginRef::file(tutti_fixtures::clap_probe()),
             format: tutti_plugin_types::PluginFormat::Clap,
@@ -502,7 +502,7 @@ fn a_chosen_plugin_is_the_one_a_reopen_loads() {
         .to_str()
         .expect("utf-8");
     let first = Ipc::launch(
-        IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source")),
+        IpcConfig::new(),
         &LoadRequest {
             origin: &PluginRef::new(tutti_fixtures::clap_probe(), PluginId::Clap(second.into())),
             format: tutti_plugin_types::PluginFormat::Clap,

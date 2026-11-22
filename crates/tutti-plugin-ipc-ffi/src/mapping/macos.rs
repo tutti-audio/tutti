@@ -32,19 +32,13 @@ use crate::descriptor::{self, duplicate, file_error};
 use memmap2::MmapOptions;
 use rustix::fs::{Mode, ftruncate};
 use rustix::io::{FdFlags, fcntl_setfd};
-use rustix::net::RecvFlags;
 use rustix::shm::{OFlags, open as shm_open, unlink as shm_unlink};
 use std::fs::File;
 use std::os::fd::{AsFd, OwnedFd};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
 
 /// `PSHMNAMLEN`: the longest name `shm_open` takes, the slash included.
 const NAME_MAX: usize = 31;
-
-/// How long [`receive`] waits for the descriptor's byte once the frame that
-/// announces it has been read (a guard against a hang, not a measure).
-const DESCRIPTOR_PATIENCE: Duration = Duration::from_secs(2);
 
 /// What the slab's owner holds, and what a peer receives: the shared memory
 /// object.
@@ -165,19 +159,7 @@ pub(super) fn send(conn: Connection<'_>, slab: &Slab) -> std::io::Result<()> {
 
 /// Receives the slab a frame announced, over `conn`.
 pub(super) fn receive(conn: Connection<'_>, _: SlabWire) -> Result<Slab, SlabError> {
-    receive_descriptor(conn)
-}
-
-/// Receives the one descriptor a frame announced, over `conn`, closed on `exec`
-/// as soon as it is received (the platform's `recvmsg` cannot do it atomically).
-///
-/// A thread that forks between the receive and the flag can hand the descriptor
-/// to its child. Nothing reads a lane's or a slab's end-of-file as the peer's
-/// death: the host learns that from the process's exit wait.
-pub(crate) fn receive_descriptor(conn: Connection<'_>) -> Result<OwnedFd, SlabError> {
-    let fd = descriptor::recv(conn, RecvFlags::empty(), DESCRIPTOR_PATIENCE)?;
-    fcntl_setfd(&fd, FdFlags::CLOEXEC).map_err(|e| SlabError::Transfer { source: e.into() })?;
-    Ok(fd)
+    descriptor::receive(conn)
 }
 
 #[cfg(test)]

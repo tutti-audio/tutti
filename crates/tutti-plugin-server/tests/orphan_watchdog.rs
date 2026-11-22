@@ -27,13 +27,12 @@
 #![cfg(unix)]
 
 use std::io::BufRead as _;
-use std::path::Path;
+use std::os::fd::OwnedFd;
+use std::os::unix::net::UnixStream;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use interprocess::local_socket::Stream;
-use interprocess::local_socket::traits::Stream as _;
-use tutti_plugin_ipc::{ControlFrame, read_frame, socket_name};
+use tutti_plugin_ipc::{ControlFrame, read_frame};
 
 /// The guard on an orphaned server's exit: it is a hang guard, and a server
 /// that watches the wrong process never exits at all, so it fails whatever this
@@ -87,26 +86,11 @@ impl Drop for Reaper {
     }
 }
 
-/// A socket path unique per test.
-///
-/// **Kept short deliberately.** `sockaddr_un::sun_path` is ~108 bytes, and a
-/// path over that makes `TransportListener::bind` fail outright: the server
-/// then exits *immediately*, for a reason that has nothing to do with the
-/// watch, and every test that expects an exit passes for the wrong reason.
-/// [`a_server_with_a_live_parent_serves_its_host`] is the guard that makes such
-/// a regression visible rather than green.
-fn dead_socket_path(tag: &str) -> std::path::PathBuf {
-    let path = std::path::PathBuf::from("/tmp").join(format!(
-        "tw-{tag}-{}-{:?}.sock",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    assert!(
-        path.as_os_str().len() < 100,
-        "socket path {path:?} is too long for sun_path; the server would fail \
-         to bind and exit for a reason unrelated to the watchdog"
-    );
-    path
+/// A socket pair: the host's end, and the server's end as the standard input
+/// a command is spawned with.
+fn connection() -> (UnixStream, Stdio) {
+    let (host, server) = UnixStream::pair().expect("a socket pair");
+    (host, Stdio::from(OwnedFd::from(server)))
 }
 
 /// Spawn `plugin-server` from a shell that exits immediately, and return the
@@ -122,21 +106,28 @@ fn dead_socket_path(tag: &str) -> std::path::PathBuf {
 ///
 /// The shell must not linger: the host dying *during* the child's startup is
 /// the scenario.
-fn spawn_orphaned_server(tag: &str) -> Reaper {
+///
+/// The host's end of the connection is returned, and the caller holds it: the
+/// server then sees no end of stream and no request, so only the watch on the
+/// host process can end it. (A shell may point a background command's standard
+/// input at `/dev/null` before its own redirections, as dash does: the connection
+/// moves to descriptor 3 first and `<&3` hands it to the server.)
+fn spawn_orphaned_server() -> (Reaper, UnixStream) {
     let exe = env!("CARGO_BIN_EXE_plugin-server");
-    let socket = dead_socket_path(tag);
+    let (host, server) = connection();
     let script = format!(
         // `exec` is deliberately absent: the shell must remain a distinct
         // process that spawns the server and *then* dies, which is the
         // orphaning. `$$` is the shell's own PID — the host, as far as the
         // server is concerned. `echo $!` hands the server's PID back; the
         // shell then exits at once.
-        "{env}=$$ {exe:?} {socket:?} >/dev/null 2>&1 & echo $!",
+        "exec 3<&0; {env}=$$ {exe:?} <&3 3<&- >/dev/null 2>&1 & echo $!",
         env = tutti_plugin_ipc_ffi::HOST_PID_ENV
     );
     let out = Command::new("/bin/sh")
         .arg("-c")
         .arg(&script)
+        .stdin(server)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .output()
@@ -145,7 +136,7 @@ fn spawn_orphaned_server(tag: &str) -> Reaper {
         .trim()
         .parse()
         .expect("the shell should print the server's PID");
-    Reaper(pid)
+    (Reaper(pid), host)
 }
 
 /// (a) The parent dies → the server exits.
@@ -154,7 +145,7 @@ fn spawn_orphaned_server(tag: &str) -> Reaper {
 /// per loaded plugin, every time a DAW crashes or is force-quit.
 #[test]
 fn an_orphaned_server_exits_without_a_host() {
-    let server = spawn_orphaned_server("orphan");
+    let (server, _host) = spawn_orphaned_server();
 
     tutti_fixtures::wait_until(
         &format!(
@@ -166,28 +157,17 @@ fn an_orphaned_server_exits_without_a_host() {
     );
 }
 
-/// Connects to the server's socket once it is bound, and reads its `Hello`:
-/// the server is then past binding and accepted this connection. Panics if the
-/// server ends first.
-fn connect(socket: &Path, mut server_gone: impl FnMut() -> bool) -> Stream {
-    let mut connected = None;
-    tutti_fixtures::wait_until("the server to bind its socket", EXIT_DEADLINE, || {
-        if let Ok(stream) = Stream::connect(socket_name(socket).expect("a socket name")) {
-            connected = Some(stream);
-            return true;
-        }
-        assert!(
-            !server_gone(),
-            "the server ended before it bound its socket"
-        );
-        false
-    });
-    let mut stream = connected.expect("the wait ended on a connection");
-    assert!(matches!(
-        read_frame::<_, ControlFrame>(&mut stream),
-        Ok(ControlFrame::Hello { .. })
-    ));
-    stream
+/// Reads the server's `Hello` from the host's end of its connection: the server
+/// is then past its start and greeted this connection. Panics if the server ends
+/// first (the connection ends with it).
+fn greeted(host: &mut UnixStream) {
+    assert!(
+        matches!(
+            read_frame::<_, ControlFrame>(host),
+            Ok(ControlFrame::Hello { .. })
+        ),
+        "the server ended before it greeted its host"
+    );
 }
 
 /// (b) The parent is alive → the server keeps serving.
@@ -195,20 +175,20 @@ fn connect(socket: &Path, mut server_gone: impl FnMut() -> bool) -> Stream {
 /// The safe direction of the tradeoff, and the one a too-eager watch breaks: a
 /// host that is slow to connect (loading a large plugin, a cold page cache)
 /// must not have its server quit underneath it. The server here is a direct
-/// child of this test process, which stays alive: it binds, accepts the
-/// connection and greets it, which an ended server cannot.
+/// child of this test process, which stays alive: it greets the connection it was
+/// given, which an ended server cannot.
 ///
 /// **This test also carries the file's premise.** The others assert that a
 /// server *exits*, which a server crashing on startup satisfies just as well (a
-/// missing library, a socket path over `sun_path`'s ~108 bytes). Only here is a
-/// server required to reach `accept`, so only here does the suite prove that
+/// missing library, a standard input that is not a socket). Only here is a
+/// server required to greet its host, so only here does the suite prove that
 /// `plugin-server` gets that far. If this one fails, read the others as vacuous.
 #[test]
 fn a_server_with_a_live_parent_serves_its_host() {
     let exe = env!("CARGO_BIN_EXE_plugin-server");
-    let socket = dead_socket_path("live-parent");
+    let (mut host, server) = connection();
     let mut child = Command::new(exe)
-        .arg(&socket)
+        .stdin(server)
         .env(
             tutti_plugin_ipc_ffi::HOST_PID_ENV,
             std::process::id().to_string(),
@@ -218,14 +198,13 @@ fn a_server_with_a_live_parent_serves_its_host() {
         .spawn()
         .expect("spawning the server as our own child");
 
-    let _greeted = connect(&socket, || child.try_wait().expect("polling").is_some());
+    greeted(&mut host);
     assert!(
         child.try_wait().expect("polling").is_none(),
         "the server ended while its host was running"
     );
     let _ = child.kill();
     let _ = child.wait();
-    let _ = std::fs::remove_file(&socket);
 }
 
 /// **A server behind a wrapper does not take the wrapper for an ended host.** A
@@ -237,14 +216,15 @@ fn a_server_with_a_live_parent_serves_its_host() {
 #[test]
 fn a_server_behind_a_wrapper_does_not_take_its_host_for_gone() {
     let exe = env!("CARGO_BIN_EXE_plugin-server");
-    let socket = dead_socket_path("wrapper");
+    let (mut host, server) = connection();
     let dir = std::env::temp_dir().join(format!("tw-wrapper-log-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("a scratch directory");
     let log = dir.join("server.log");
     // `true` after it keeps the shell from replacing itself with the server.
     let mut wrapper = Command::new("/bin/sh")
         .arg("-c")
-        .arg(format!("{exe:?} {socket:?} >{log:?} 2>&1; true"))
+        .arg(format!("{exe:?} >{log:?} 2>&1; true"))
+        .stdin(server)
         .env("RUST_LOG", "info")
         .env(
             tutti_plugin_ipc_ffi::HOST_PID_ENV,
@@ -253,9 +233,9 @@ fn a_server_behind_a_wrapper_does_not_take_its_host_for_gone() {
         .spawn()
         .expect("spawning the wrapper");
 
-    let mut stream = connect(&socket, || wrapper.try_wait().expect("polling").is_some());
+    greeted(&mut host);
     tutti_plugin_ipc::write_frame(
-        &mut stream,
+        &mut host,
         &tutti_plugin_ipc::Request {
             id: tutti_plugin_ipc::ReqId::new(1),
             body: tutti_plugin_ipc::ControlRequest::Shutdown,
@@ -272,26 +252,26 @@ fn a_server_behind_a_wrapper_does_not_take_its_host_for_gone() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// (e) **A host that ends after it connected ends the server, though the
-/// connection stays open.** A watch that covered only the wait for the first
-/// connection leaves a server that is past it, parked reading the handshake, an
-/// orphan for ever: here this test process holds the host's end of the
-/// connection open, so the server sees no end of stream, and only the watch on
-/// the host process can end it.
+/// (e) **A host that ends after it greeted ends the server, though the
+/// connection stays open.** A watch that covered only the start leaves a server
+/// that is past it, parked reading the handshake, an orphan for ever: here this
+/// test process holds the host's end of the connection open, so the server sees
+/// no end of stream, and only the watch on the host process can end it.
 #[test]
 fn a_host_that_ends_after_connecting_ends_the_server() {
     let exe = env!("CARGO_BIN_EXE_plugin-server");
-    let socket = dead_socket_path("after-connect");
-    // The shell is the host until its stdin closes: it prints the server's PID
-    // and waits for the end of its input.
+    let (mut connection, server) = connection();
+    // The shell is the host until this test kills it: it prints the server's PID
+    // and waits. Its standard input is the server's connection, so it waits on
+    // `sleep` and not on a read.
     let script = format!(
-        "{env}=$$ {exe:?} {socket:?} >/dev/null 2>&1 & echo $!; read _",
+        "exec 3<&0; {env}=$$ {exe:?} <&3 3<&- >/dev/null 2>&1 & echo $!; exec sleep 600",
         env = tutti_plugin_ipc_ffi::HOST_PID_ENV
     );
     let mut host = Command::new("/bin/sh")
         .arg("-c")
         .arg(&script)
-        .stdin(Stdio::piped())
+        .stdin(server)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -302,21 +282,17 @@ fn a_host_that_ends_after_connecting_ends_the_server() {
         .expect("the shell prints the server's PID");
     let server = Reaper(line.trim().parse().expect("the server's PID"));
 
-    // Connected, and greeted: the server is past its first accept.
-    let _connection = connect(&socket, || has_exited(server.0));
+    // Greeted: the server is past its start.
+    greeted(&mut connection);
 
     // The host ends; its connection to the server stays open in this process.
-    drop(host.stdin.take());
-    host.wait().expect("the host shell ends");
+    host.kill().expect("the host shell is ended");
+    host.wait().expect("the host shell is reaped");
     tutti_fixtures::wait_until(
-        &format!(
-            "server {} to end with its host, past its first accept",
-            server.0
-        ),
+        &format!("server {} to end with its host, past its start", server.0),
         EXIT_DEADLINE,
         || has_exited(server.0),
     );
-    let _ = std::fs::remove_file(&socket);
 }
 
 /// The subreaper case needs `prctl` and `/proc`: Linux's.
@@ -346,7 +322,7 @@ mod subreaper {
         let rc = unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1) };
         assert_eq!(rc, 0, "PR_SET_CHILD_SUBREAPER failed: this test needs it");
 
-        let server = spawn_orphaned_server("subreaper");
+        let (server, _host) = spawn_orphaned_server();
         let me = std::process::id() as i32;
 
         // First: prove the premise. Once the shell is gone, the server must have
@@ -409,7 +385,7 @@ fn the_host_watch_takes_down_only_its_own_process() {
         .expect("spawning the bystander");
     let bystander_pid = bystander.id() as i32;
 
-    let server = spawn_orphaned_server("bystander");
+    let (server, _host) = spawn_orphaned_server();
     tutti_fixtures::wait_until(
         &format!("server {} to exit", server.0),
         EXIT_DEADLINE,

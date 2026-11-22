@@ -5,12 +5,11 @@
 //! render thread serves (`ProcessAudio` and `Reset`, nothing else). The broker
 //! stays the control connection, which the main thread's event loop serves.
 
-use crate::main_loop::LaneEnd;
+use crate::main_loop::{HostEnd, LaneEnd};
 use crate::render::{NotHome, RenderSide, RenderThread};
 use crate::session::{Reaction, Session};
 use crate::transport::Pulser;
-use crate::transport::{ControlTransport, Incoming, SocketTransport, Transport, TransportListener};
-use std::path::PathBuf;
+use crate::transport::{ControlTransport, Incoming, SocketTransport, Transport};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -122,11 +121,10 @@ enum Handshake {
 ///
 /// Construct with [`PluginServer::new`] and hand control to
 /// [`PluginServer::run`], which does not return until the host disconnects or
-/// asks for shutdown. Dropping it closes any open editor window and unlinks the
-/// socket.
+/// asks for shutdown. Dropping it closes any open editor window.
 pub struct PluginServer {
-    /// The socket the host connects to, unlinked on drop.
-    socket: PathBuf,
+    /// The server's end of the connection the host made, until it is served.
+    host: Option<HostEnd>,
     session: Session,
     /// What renders the blocks, until the audio connection is there to hand it
     /// to a thread.
@@ -149,28 +147,26 @@ pub struct PluginServer {
 
 impl std::fmt::Debug for PluginServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PluginServer")
-            .field("socket", &self.socket)
-            .finish_non_exhaustive()
+        f.debug_struct("PluginServer").finish_non_exhaustive()
     }
 }
 
 impl PluginServer {
-    /// Creates a server that listens at `socket`, and starts the watch on the spawning host:
-    /// a host that ends is told to the main loop, which shuts down as it does
-    /// when the control connection ends. A server that has not done so within
-    /// two seconds (blocked in an accept, a plugin's modal dialog, a
-    /// block) is ended outright, without running a plugin library's exit
-    /// handlers, and its socket file is removed.
+    /// Creates a server that serves the host through `host` (what [`adopt_host`](crate::adopt_host)
+    /// returns), and starts the watch on the spawning host: a host that ends is
+    /// told to the main loop, which shuts down as it does when the control
+    /// connection ends. A server that has not done so within two seconds (blocked
+    /// in a plugin's modal dialog, a block) is ended outright, without running a
+    /// plugin library's exit handlers.
     ///
-    /// The socket is not created until [`PluginServer::run`]. Call this early.
+    /// Nothing is read from `host` until [`PluginServer::run`]. Call this early.
     ///
     /// # Errors
     ///
     /// The thread is not the process's main thread, the OS refused the
     /// session's bells, or the thread that watches the host could not start
     /// ([`IpcError::HostUnwatched`], [`EXIT_HOST_UNWATCHED`]).
-    pub fn new(socket: PathBuf) -> IpcResult<Self> {
+    pub fn new(host: HostEnd) -> IpcResult<Self> {
         let main = MainThreadMarker::new().ok_or(IpcError::ProtocolError(
             "the plugin server must be built on the process's main thread",
         ))?;
@@ -179,14 +175,13 @@ impl PluginServer {
         let executor = Executor::new();
         let host_watch = watch_host(
             &executor,
-            socket.clone(),
             Arc::clone(&session.ties().host_gone),
             session.ties().bell.clone(),
             shutdown_under_way,
         )
         .map_err(IpcError::HostUnwatched)?;
         Ok(Self {
-            socket,
+            host: Some(host),
             session,
             render: Some(render),
             main,
@@ -201,7 +196,7 @@ impl PluginServer {
     ///
     /// # The connection dance
     ///
-    /// The host connects once, and opens the lane that lets the blocks run at the
+    /// The host's connection is there from the spawn, and it opens the lane that lets the blocks run at the
     /// highest priority the OS grants (not real time) on a thread that nothing
     /// else shares:
     ///
@@ -222,7 +217,7 @@ impl PluginServer {
     ///
     /// # Errors
     ///
-    /// Returns an error if the socket cannot be bound, if a handshake frame
+    /// Returns an error if the host's connection cannot be taken, if a handshake frame
     /// does not decode (a host of another protocol), or if the control
     /// connection fails. The host leaving the connection before it opens the
     /// audio lane is not an error. However it ends, the plugin is
@@ -251,10 +246,13 @@ impl PluginServer {
 
     /// The phases of [`run`](Self::run), up to the plugin's release.
     fn serve(&mut self) -> IpcResult<()> {
-        let listener = TransportListener::bind(&self.socket)?;
-
-        // The broker: the handshake connection, which stays the control one.
-        let mut control = listener.accept()?;
+        // The broker: the connection the host made, which stays the control one.
+        let host = self
+            .host
+            .take()
+            .ok_or(IpcError::ProtocolError("a server serves one host"))?;
+        let mut control =
+            SocketTransport::<Incoming, ControlFrame>::new(crate::main_loop::meet(host)?);
         control.send(&ControlFrame::Hello {
             protocol_version: PROTOCOL_VERSION,
         })?;
@@ -315,7 +313,6 @@ impl PluginServer {
                     "plugin-server: the render lane is stuck in the plugin; ending the process"
                 );
                 crate::leak::note();
-                let _ = std::fs::remove_file(&self.socket);
                 // The group this server leads (the host spawned it as its leader)
                 // goes with it: the helpers a plugin spawned must not outlive it.
                 tutti_plugin_ipc_ffi::kill_group(std::process::id());
@@ -582,12 +579,6 @@ fn beat_while<R>(
     work()
 }
 
-impl Drop for PluginServer {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.socket);
-    }
-}
-
 /// How long a stopped render thread is given to return: it ends at its next
 /// step, so this is a thread stuck inside the plugin or in a read.
 /// How often the server tells the host it is at work on a load.
@@ -620,8 +611,7 @@ fn note_lane_lost(lost: &NotHome) {
 
 /// Starts the watch on the host. When the host ends, `host_gone` is set and
 /// `bell` rung so the main loop shuts down; if `shutdown_under_way` is not sent to within
-/// [`HOST_GONE_GRACE`] the socket file at `socket_path` is removed and the
-/// process ended outright. A server whose host is unknown cannot watch it: that
+/// [`HOST_GONE_GRACE`] the process is ended outright. A server whose host is unknown cannot watch it: that
 /// is logged, and only the host's connections end it.
 ///
 /// # Errors
@@ -629,7 +619,6 @@ fn note_lane_lost(lost: &NotHome) {
 /// The watch's thread could not be started.
 fn watch_host(
     executor: &Executor,
-    socket_path: std::path::PathBuf,
     host_gone: Arc<AtomicBool>,
     bell: crate::main_loop::Bell,
     shutdown_under_way: mpsc::Receiver<()>,
@@ -642,7 +631,6 @@ fn watch_host(
         // ended: a plugin library's exit handlers must not run on an orphan
         // whose other threads are killed mid-call.
         if shutdown_under_way.recv_timeout(HOST_GONE_GRACE) == Err(RecvTimeoutError::Timeout) {
-            let _ = std::fs::remove_file(&socket_path);
             tutti_plugin_ipc_ffi::terminate_process()
         }
     });
