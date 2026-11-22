@@ -37,7 +37,6 @@ use tutti_ump::{MidiChannel, U7};
 use tutti_units::ParamId;
 
 use crate::error::Result;
-use crate::types::*;
 use tutti_au_ffi::Unit;
 
 /// Apple's `AUParameterMIDIMapping` from `AudioUnitProperties.h`.
@@ -63,6 +62,21 @@ pub(crate) struct AuParameterMidiMappingRaw {
 }
 
 /// The record's size in bytes.
+// `AUParameterMIDIMappingFlags`, `1 << 0` .. `1 << 5`.
+/// Match the message on any MIDI channel, ignoring the status byte's low nibble.
+const K_AU_PARAMETER_MIDI_MAPPING_ANY_CHANNEL: u32 = 1 << 0;
+/// For a note command, match any note number.
+const K_AU_PARAMETER_MIDI_MAPPING_ANY_NOTE: u32 = 1 << 1;
+/// Confine the controller to `mSubRangeMin..=mSubRangeMax` of the parameter.
+const K_AU_PARAMETER_MIDI_MAPPING_SUB_RANGE: u32 = 1 << 2;
+/// The message flips the parameter rather than setting it from the value.
+const K_AU_PARAMETER_MIDI_MAPPING_TOGGLE: u32 = 1 << 3;
+/// The parameter takes only two states, thresholded at controller 64/65.
+const K_AU_PARAMETER_MIDI_MAPPING_BIPOLAR: u32 = 1 << 4;
+/// Which end of the controller is the parameter's "on" state. Only meaningful
+/// with [`K_AU_PARAMETER_MIDI_MAPPING_BIPOLAR`] set.
+const K_AU_PARAMETER_MIDI_MAPPING_BIPOLAR_ON: u32 = 1 << 5;
+
 const RAW_SIZE: usize = size_of::<AuParameterMidiMappingRaw>();
 
 impl AuParameterMidiMappingRaw {

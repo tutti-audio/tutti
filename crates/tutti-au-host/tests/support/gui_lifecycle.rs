@@ -13,7 +13,7 @@ use tutti_rt::Mutex;
 
 use tutti_au_host::AuEditor;
 use crate::support::au::Au;
-use tutti_au_host::types::K_AUDIO_UNIT_ERR_INVALID_PROPERTY;
+use coreaudio_sys::kAudioUnitErr_InvalidProperty;
 use tutti_au_host::AuError;
 
 use support::corpus::{AuRef, DELAY, WITHOUT_COCOA_VIEW, WITH_COCOA_VIEW};
@@ -435,12 +435,12 @@ fn an_au_without_a_cocoa_view_is_refused_cleanly() {
             matches!(
                 err,
                 AuError::OsStatus {
-                    code: K_AUDIO_UNIT_ERR_INVALID_PROPERTY,
+                    code: kAudioUnitErr_InvalidProperty,
                     ..
                 }
             ),
             "{}: expected kAudioUnitErr_InvalidProperty \
-             ({K_AUDIO_UNIT_ERR_INVALID_PROPERTY}), got {err:?}",
+             ({kAudioUnitErr_InvalidProperty}), got {err:?}",
             unit.label
         );
     }

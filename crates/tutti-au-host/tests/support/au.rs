@@ -17,9 +17,9 @@
 use std::cell::RefCell;
 use std::ops::{Deref, DerefMut};
 
+use coreaudio_sys::{AudioUnitRenderActionFlags, kAudioUnitErr_Uninitialized};
 use tutti_au_ffi::{Element, Scope};
 use tutti_au_host::offline::PushScratch;
-use tutti_au_host::types::{AudioUnitRenderActionFlags, K_AUDIO_UNIT_ERR_UNINITIALIZED};
 use tutti_au_host::{AuComponentInfo, AuController, AuError, AuLoaded, AuProcessor, StreamConfig};
 use tutti_buffers::{Float, InputOutput, Planes, PlanesMut};
 use tutti_fixtures::main_thread;
@@ -255,7 +255,7 @@ impl Au {
     fn uninitialized(function: &'static str) -> AuError {
         AuError::OsStatus {
             function,
-            code: K_AUDIO_UNIT_ERR_UNINITIALIZED,
+            code: kAudioUnitErr_Uninitialized,
         }
     }
 

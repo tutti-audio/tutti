@@ -29,7 +29,8 @@ use tutti_au_ffi::property::{AudioChannelLayoutProperty, ElementName, SupportedC
 
 use crate::bus::BusDirection;
 use crate::error::{AuError, Result};
-use crate::types::*;
+use coreaudio_sys as sys;
+use coreaudio_sys::{AudioChannelDescription, AudioChannelLayout};
 use tutti_au_ffi::Unit;
 
 /// A channel *order* an AU can run a bus in — an `AudioChannelLayoutTag`.
@@ -156,26 +157,26 @@ impl AuLayoutTag {
     pub fn from_raw(raw: u32) -> Self {
         // Local consts so these are `match` patterns (which reject duplicates)
         // rather than guard expressions (which would not).
-        const USE_DESC: u32 = K_AUDIO_CHANNEL_LAYOUT_TAG_USE_CHANNEL_DESCRIPTIONS;
-        const USE_BITMAP: u32 = K_AUDIO_CHANNEL_LAYOUT_TAG_USE_CHANNEL_BITMAP;
-        const MONO: u32 = K_AUDIO_CHANNEL_LAYOUT_TAG_MONO;
-        const STEREO: u32 = K_AUDIO_CHANNEL_LAYOUT_TAG_STEREO;
-        const HEADPHONES: u32 = K_AUDIO_CHANNEL_LAYOUT_TAG_STEREO_HEADPHONES;
-        const MATRIX: u32 = K_AUDIO_CHANNEL_LAYOUT_TAG_MATRIX_STEREO;
-        const MID_SIDE: u32 = K_AUDIO_CHANNEL_LAYOUT_TAG_MID_SIDE;
-        const XY: u32 = K_AUDIO_CHANNEL_LAYOUT_TAG_XY;
-        const BINAURAL: u32 = K_AUDIO_CHANNEL_LAYOUT_TAG_BINAURAL;
-        const AMBISONIC: u32 = K_AUDIO_CHANNEL_LAYOUT_TAG_AMBISONIC_B_FORMAT;
-        const QUAD: u32 = K_AUDIO_CHANNEL_LAYOUT_TAG_QUADRAPHONIC;
-        const PENTAGONAL: u32 = K_AUDIO_CHANNEL_LAYOUT_TAG_PENTAGONAL;
-        const HEXAGONAL: u32 = K_AUDIO_CHANNEL_LAYOUT_TAG_HEXAGONAL;
-        const OCTAGONAL: u32 = K_AUDIO_CHANNEL_LAYOUT_TAG_OCTAGONAL;
-        const CUBE: u32 = K_AUDIO_CHANNEL_LAYOUT_TAG_CUBE;
-        const AU_5_0: u32 = K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_5_0;
-        const AU_5_1: u32 = K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_5_1;
-        const AU_6_0: u32 = K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_6_0;
-        const AU_7_0: u32 = K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_7_0;
-        const AU_7_1: u32 = K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_7_1;
+        const USE_DESC: u32 = sys::kAudioChannelLayoutTag_UseChannelDescriptions;
+        const USE_BITMAP: u32 = sys::kAudioChannelLayoutTag_UseChannelBitmap;
+        const MONO: u32 = sys::kAudioChannelLayoutTag_Mono;
+        const STEREO: u32 = sys::kAudioChannelLayoutTag_Stereo;
+        const HEADPHONES: u32 = sys::kAudioChannelLayoutTag_StereoHeadphones;
+        const MATRIX: u32 = sys::kAudioChannelLayoutTag_MatrixStereo;
+        const MID_SIDE: u32 = sys::kAudioChannelLayoutTag_MidSide;
+        const XY: u32 = sys::kAudioChannelLayoutTag_XY;
+        const BINAURAL: u32 = sys::kAudioChannelLayoutTag_Binaural;
+        const AMBISONIC: u32 = sys::kAudioChannelLayoutTag_Ambisonic_B_Format;
+        const QUAD: u32 = sys::kAudioChannelLayoutTag_Quadraphonic;
+        const PENTAGONAL: u32 = sys::kAudioChannelLayoutTag_Pentagonal;
+        const HEXAGONAL: u32 = sys::kAudioChannelLayoutTag_Hexagonal;
+        const OCTAGONAL: u32 = sys::kAudioChannelLayoutTag_Octagonal;
+        const CUBE: u32 = sys::kAudioChannelLayoutTag_Cube;
+        const AU_5_0: u32 = sys::kAudioChannelLayoutTag_AudioUnit_5_0;
+        const AU_5_1: u32 = sys::kAudioChannelLayoutTag_AudioUnit_5_1;
+        const AU_6_0: u32 = sys::kAudioChannelLayoutTag_AudioUnit_6_0;
+        const AU_7_0: u32 = sys::kAudioChannelLayoutTag_AudioUnit_7_0;
+        const AU_7_1: u32 = sys::kAudioChannelLayoutTag_AudioUnit_7_1;
 
         match raw {
             USE_DESC => Self::UseChannelDescriptions,
@@ -209,26 +210,26 @@ impl AuLayoutTag {
     /// set it on another.
     pub fn to_raw(self) -> u32 {
         match self {
-            Self::UseChannelDescriptions => K_AUDIO_CHANNEL_LAYOUT_TAG_USE_CHANNEL_DESCRIPTIONS,
-            Self::UseChannelBitmap => K_AUDIO_CHANNEL_LAYOUT_TAG_USE_CHANNEL_BITMAP,
-            Self::Mono => K_AUDIO_CHANNEL_LAYOUT_TAG_MONO,
-            Self::Stereo => K_AUDIO_CHANNEL_LAYOUT_TAG_STEREO,
-            Self::StereoHeadphones => K_AUDIO_CHANNEL_LAYOUT_TAG_STEREO_HEADPHONES,
-            Self::MatrixStereo => K_AUDIO_CHANNEL_LAYOUT_TAG_MATRIX_STEREO,
-            Self::MidSide => K_AUDIO_CHANNEL_LAYOUT_TAG_MID_SIDE,
-            Self::XY => K_AUDIO_CHANNEL_LAYOUT_TAG_XY,
-            Self::Binaural => K_AUDIO_CHANNEL_LAYOUT_TAG_BINAURAL,
-            Self::AmbisonicBFormat => K_AUDIO_CHANNEL_LAYOUT_TAG_AMBISONIC_B_FORMAT,
-            Self::Quadraphonic => K_AUDIO_CHANNEL_LAYOUT_TAG_QUADRAPHONIC,
-            Self::Pentagonal => K_AUDIO_CHANNEL_LAYOUT_TAG_PENTAGONAL,
-            Self::Hexagonal => K_AUDIO_CHANNEL_LAYOUT_TAG_HEXAGONAL,
-            Self::Octagonal => K_AUDIO_CHANNEL_LAYOUT_TAG_OCTAGONAL,
-            Self::Cube => K_AUDIO_CHANNEL_LAYOUT_TAG_CUBE,
-            Self::AudioUnit5_0 => K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_5_0,
-            Self::AudioUnit5_1 => K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_5_1,
-            Self::AudioUnit6_0 => K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_6_0,
-            Self::AudioUnit7_0 => K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_7_0,
-            Self::AudioUnit7_1 => K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_7_1,
+            Self::UseChannelDescriptions => sys::kAudioChannelLayoutTag_UseChannelDescriptions,
+            Self::UseChannelBitmap => sys::kAudioChannelLayoutTag_UseChannelBitmap,
+            Self::Mono => sys::kAudioChannelLayoutTag_Mono,
+            Self::Stereo => sys::kAudioChannelLayoutTag_Stereo,
+            Self::StereoHeadphones => sys::kAudioChannelLayoutTag_StereoHeadphones,
+            Self::MatrixStereo => sys::kAudioChannelLayoutTag_MatrixStereo,
+            Self::MidSide => sys::kAudioChannelLayoutTag_MidSide,
+            Self::XY => sys::kAudioChannelLayoutTag_XY,
+            Self::Binaural => sys::kAudioChannelLayoutTag_Binaural,
+            Self::AmbisonicBFormat => sys::kAudioChannelLayoutTag_Ambisonic_B_Format,
+            Self::Quadraphonic => sys::kAudioChannelLayoutTag_Quadraphonic,
+            Self::Pentagonal => sys::kAudioChannelLayoutTag_Pentagonal,
+            Self::Hexagonal => sys::kAudioChannelLayoutTag_Hexagonal,
+            Self::Octagonal => sys::kAudioChannelLayoutTag_Octagonal,
+            Self::Cube => sys::kAudioChannelLayoutTag_Cube,
+            Self::AudioUnit5_0 => sys::kAudioChannelLayoutTag_AudioUnit_5_0,
+            Self::AudioUnit5_1 => sys::kAudioChannelLayoutTag_AudioUnit_5_1,
+            Self::AudioUnit6_0 => sys::kAudioChannelLayoutTag_AudioUnit_6_0,
+            Self::AudioUnit7_0 => sys::kAudioChannelLayoutTag_AudioUnit_7_0,
+            Self::AudioUnit7_1 => sys::kAudioChannelLayoutTag_AudioUnit_7_1,
             Self::Unknown(raw) => raw,
         }
     }
@@ -361,7 +362,7 @@ pub(crate) fn layout_tag(unit: &Unit, direction: BusDirection, bus: u32) -> Resu
     if bytes.len() < size_of::<u32>() {
         return Err(AuError::OsStatus {
             function: "channel_layout::layout_tag",
-            code: K_AUDIO_UNIT_ERR_INVALID_PROPERTY_VALUE,
+            code: sys::kAudioUnitErr_InvalidPropertyValue,
         });
     }
     Ok(AuLayoutTag::from_raw(u32::from_ne_bytes([
@@ -479,7 +480,7 @@ pub(crate) fn element_name(unit: &Unit, direction: BusDirection, bus: u32) -> Re
         Some(name) => Ok(name),
         None => Err(AuError::OsStatus {
             function: "channel_layout::element_name",
-            code: K_AUDIO_UNIT_ERR_INVALID_PROPERTY_VALUE,
+            code: sys::kAudioUnitErr_InvalidPropertyValue,
         }),
     }
 }
@@ -495,28 +496,34 @@ mod tests {
     #[test]
     fn the_aliased_tags_really_are_the_same_value() {
         assert_eq!(
-            K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_4, K_AUDIO_CHANNEL_LAYOUT_TAG_QUADRAPHONIC,
+            sys::kAudioChannelLayoutTag_AudioUnit_4,
+            sys::kAudioChannelLayoutTag_Quadraphonic,
             "AudioUnit_4 and Quadraphonic are one value; listing both in a match \
              is an unreachable-pattern error"
         );
         assert_eq!(
-            K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_5_1, K_AUDIO_CHANNEL_LAYOUT_TAG_MPEG_5_1_A,
+            sys::kAudioChannelLayoutTag_AudioUnit_5_1,
+            K_AUDIO_CHANNEL_LAYOUT_TAG_MPEG_5_1_A,
             "AudioUnit_5_1 == MPEG_5_1_A"
         );
         assert_eq!(
-            K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_7_1, K_AUDIO_CHANNEL_LAYOUT_TAG_MPEG_7_1_C,
+            sys::kAudioChannelLayoutTag_AudioUnit_7_1,
+            K_AUDIO_CHANNEL_LAYOUT_TAG_MPEG_7_1_C,
             "AudioUnit_7_1 == MPEG_7_1_C"
         );
         assert_eq!(
-            K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_5_0, K_AUDIO_CHANNEL_LAYOUT_TAG_MPEG_5_0_B,
+            sys::kAudioChannelLayoutTag_AudioUnit_5_0,
+            K_AUDIO_CHANNEL_LAYOUT_TAG_MPEG_5_0_B,
             "AudioUnit_5_0 == MPEG_5_0_B"
         );
         assert_eq!(
-            K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_6, K_AUDIO_CHANNEL_LAYOUT_TAG_HEXAGONAL,
+            K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_6,
+            sys::kAudioChannelLayoutTag_Hexagonal,
             "AudioUnit_6 == Hexagonal"
         );
         assert_eq!(
-            K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_8, K_AUDIO_CHANNEL_LAYOUT_TAG_OCTAGONAL,
+            K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_8,
+            sys::kAudioChannelLayoutTag_Octagonal,
             "AudioUnit_8 == Octagonal"
         );
 
@@ -525,15 +532,18 @@ mod tests {
         // below share a channel *width* while meaning different orders — which is
         // the entire reason a width cannot substitute for a tag.
         assert_ne!(
-            K_AUDIO_CHANNEL_LAYOUT_TAG_QUADRAPHONIC, K_AUDIO_CHANNEL_LAYOUT_TAG_AMBISONIC_B_FORMAT,
+            sys::kAudioChannelLayoutTag_Quadraphonic,
+            sys::kAudioChannelLayoutTag_Ambisonic_B_Format,
             "quad speaker feeds and 4-channel B-format are different layouts"
         );
         assert_ne!(
-            K_AUDIO_CHANNEL_LAYOUT_TAG_PENTAGONAL, K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_5_0,
+            sys::kAudioChannelLayoutTag_Pentagonal,
+            sys::kAudioChannelLayoutTag_AudioUnit_5_0,
             "two five-channel layouts with different speaker orders"
         );
         assert_ne!(
-            K_AUDIO_CHANNEL_LAYOUT_TAG_STEREO, K_AUDIO_CHANNEL_LAYOUT_TAG_MATRIX_STEREO,
+            sys::kAudioChannelLayoutTag_Stereo,
+            sys::kAudioChannelLayoutTag_MatrixStereo,
             "matrix-encoded stereo is not plain stereo"
         );
     }
