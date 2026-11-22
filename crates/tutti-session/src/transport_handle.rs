@@ -85,9 +85,7 @@ impl TransportHandle {
     /// [`TimedError::Full`] when the transport's command queue is full; the
     /// event is handed back in it.
     pub fn play(&self) -> Result<(), TimedError<MotionCommand>> {
-        self.transport.motion().send(MotionCommand::Play)?;
-        self.record(true);
-        Ok(())
+        self.schedule(At::NextBlock, MotionCommand::Play)
     }
 
     /// Stops the transport where it stands, at the next block, after the
@@ -97,9 +95,7 @@ impl TransportHandle {
     ///
     /// [`TimedError::Full`], as [`play`](Self::play).
     pub fn stop(&self, fade: FadeOut) -> Result<(), TimedError<MotionCommand>> {
-        self.transport.motion().send(MotionCommand::Stop { fade })?;
-        self.record(false);
-        Ok(())
+        self.schedule(At::NextBlock, MotionCommand::Stop { fade })
     }
 
     /// Jumps to `beat` at the next block, keeping whatever the transport was
@@ -109,8 +105,7 @@ impl TransportHandle {
     ///
     /// [`TimedError::Full`], as [`play`](Self::play).
     pub fn locate(&self, beat: Beat) -> Result<(), TimedError<MotionCommand>> {
-        self.transport.motion().send(MotionCommand::locate(beat))?;
-        Ok(())
+        self.schedule(At::NextBlock, MotionCommand::locate(beat))
     }
 
     /// Sends a motion `event` to take effect at `at`: a frame, a beat, or the
@@ -140,32 +135,18 @@ impl TransportHandle {
         event: MotionCommand,
     ) -> Result<(), TimedError<MotionCommand>> {
         let at = at.into();
-        let starts = matches!(
-            event,
-            MotionCommand::Play
-                | MotionCommand::Locate {
-                    then: AfterLocate::Play,
-                    ..
-                }
-        );
-        let rolling = self.rolling();
+        let rolls = rolls_after(event);
         if let At::Beat(_) = at
-            && starts
-            && !rolling
+            && rolls == Some(true)
+            && !self.rolling()
         {
             return Err(TimedError::BeatWhileStopped(event));
         }
         self.transport.motion().schedule(at, event)?;
-        if at == At::NextBlock {
-            match event {
-                MotionCommand::Play
-                | MotionCommand::Locate {
-                    then: AfterLocate::Play,
-                    ..
-                } => self.record(true),
-                MotionCommand::Stop { .. } => self.record(false),
-                _ => {}
-            }
+        if at == At::NextBlock
+            && let Some(rolling) = rolls
+        {
+            self.record(rolling);
         }
         Ok(())
     }
@@ -232,5 +213,21 @@ impl Sent {
 
     fn decode(word: u64) -> Option<(u64, bool)> {
         (word != Self::NONE).then_some((word >> 1, word & 1 == 1))
+    }
+}
+
+/// Whether the transport rolls once `event` applies: `Some(true)` for a
+/// command that starts it (a play, or a locate that then plays),
+/// `Some(false)` for a stop, `None` for a command that keeps whatever it
+/// was doing.
+fn rolls_after(event: MotionCommand) -> Option<bool> {
+    match event {
+        MotionCommand::Play
+        | MotionCommand::Locate {
+            then: AfterLocate::Play,
+            ..
+        } => Some(true),
+        MotionCommand::Stop { .. } => Some(false),
+        _ => None,
     }
 }
