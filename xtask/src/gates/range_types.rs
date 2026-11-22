@@ -31,7 +31,7 @@
 //!   (?:<[^>]*>)?[ \t]*\([ \t\n]*(pub(?![\w(])|\))?
 //! ```
 
-use super::lex::{skipped_library, word_char};
+use super::lex::{skipped_unless_examples, word_char};
 use super::{Report, Tree, under_skipped_dir};
 
 /// `(file, type, what removes the entry)`.
@@ -187,8 +187,8 @@ pub(super) fn check(tree: &dyn Tree, exceptions: &[(&str, &str, &str)]) -> Repor
     let mut bad: Vec<String> = Vec::new();
     let mut seen: Vec<(&str, &str)> = Vec::new();
     for top in ["crates", "testing"] {
-        for path in tree.files(top, &skipped_library) {
-            if !path.ends_with(".rs") || under_skipped_dir(&path, &skipped_library) {
+        for path in tree.files(top, &skipped_unless_examples) {
+            if !path.ends_with(".rs") || under_skipped_dir(&path, &skipped_unless_examples) {
                 continue;
             }
             let Some(text) = tree.read(&path) else {
@@ -680,6 +680,13 @@ mod tests {
             &[],
         );
         assert!(r.passed(), "{:?}", r.findings);
+    }
+
+    #[test]
+    fn a_violation_under_examples_is_still_refused() {
+        let bad = "#[derive(serde::Deserialize)] struct P(u8);\n";
+        let r = run(&[("crates/c/examples/e.rs", bad)], &[]);
+        assert!(!r.passed(), "{:?}", r.findings);
     }
 
     #[test]

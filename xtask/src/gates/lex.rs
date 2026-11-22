@@ -26,6 +26,11 @@ pub(super) fn skipped_library(dir: &str) -> bool {
     skipped(dir) || matches!(dir, "tests" | "benches" | "examples")
 }
 
+/// [`skipped`], and the `tests` and `benches` directories: `examples` is read.
+pub(super) fn skipped_unless_examples(dir: &str) -> bool {
+    skipped(dir) || matches!(dir, "tests" | "benches")
+}
+
 /// Whether `path` is a test file: `tests.rs`, or under a `tests` directory.
 pub(super) fn is_test_file(path: &str) -> bool {
     path.split('/').any(|c| c == "tests" || c == "tests.rs")

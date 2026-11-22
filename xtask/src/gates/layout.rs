@@ -557,10 +557,12 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
 
     // A crate's code names none of its banned words.
     for (krate, words, why) in NAME_BANS.iter().filter(|(k, ..)| by_name.contains_key(k)) {
+        let mut read = 0;
         for path in tree.files(&format!("crates/{krate}/src"), &skipped) {
             if !path.ends_with(".rs") || is_test_file(&path) {
                 continue;
             }
+            read += 1;
             let code = blank(&tree.read(&path).unwrap_or_default());
             let ranges = test_ranges(&code);
             let mut at = 0;
@@ -583,6 +585,11 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
                 }
                 at = end;
             }
+        }
+        if read == 0 {
+            bad.push(format!(
+                "{krate}: no source file under crates/{krate}/src; the scan is broken"
+            ));
         }
     }
 
@@ -786,6 +793,20 @@ mod tests {
             m.files.insert((*path).to_owned(), (*text).to_owned());
         }
         check(&m)
+    }
+
+    #[test]
+    fn a_tutti_units_without_sources_fails_the_scan() {
+        let mut m = ws(&base());
+        m.files.remove(UNITS_LIB);
+        let r = check(&m);
+        assert!(
+            r.findings
+                .iter()
+                .any(|l| l.contains("tutti-units: no source file under crates/tutti-units/src")),
+            "{:?}",
+            r.findings
+        );
     }
 
     #[test]

@@ -329,6 +329,20 @@ mod tests {
     }
 
     #[test]
+    fn attributes_between_derives_and_on_variants_change_no_verdict() {
+        let between = |hash: &str| {
+            format!(
+                "#[derive(PartialEq, Eq{hash})]\n#[cfg_attr(feature = \"x\", derive(Debug))]\n#[non_exhaustive]\npub enum E {{\n    #[serde(rename = \"a\")]\n    A,\n    #[cfg_attr(x, doc = \"(y)\")]\n    B,\n}}\n"
+            )
+        };
+        assert!(!run(&between(""), &[]).passed());
+        assert!(run(&between(", Hash"), &[]).passed());
+        // An attribute inside a field is not a leading one: the variant has data.
+        let data = "#[derive(PartialEq, Eq)]\npub enum E { A(#[serde(skip)] u8), B }\n";
+        assert!(run(data, &[]).passed());
+    }
+
+    #[test]
     fn a_cfg_test_module_is_skipped() {
         let src =
             "#[cfg(test)]\nmod tests {\n    #[derive(PartialEq, Eq)]\n    pub enum E { A }\n}\n";
