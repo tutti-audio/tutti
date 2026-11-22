@@ -44,8 +44,9 @@ mod members;
 /// runs an Alternate Translation Mode (D.4): near-extreme values kept off the
 /// minimum and maximum (D.1.5, [`ExtremeValues`]) and the per-note messages sent
 /// as MPE on a zone's member channels (D.2.8, [`PerNoteTranslation`]). In the MPE
-/// mode a Note On takes the member idle longest, or steals the oldest note's
-/// when all play; a per-note message for a note that does not sound sends
+/// mode a Note On takes the member idle longest, or shares the member that plays
+/// the fewest notes and was given a note longest ago when all play (M2-120
+/// section 3.6.1); a per-note message for a note that does not sound sends
 /// nothing, and every message that is not per-note goes on the zone's Manager Channel. A MIDI 1.0 message passes unchanged.
 ///
 /// It holds no state of the receiver: a message's MIDI 1.0 sequence is the
@@ -84,9 +85,8 @@ impl Default for Midi1Translator {
 
 impl Midi1Translator {
     /// The most MIDI 1.0 messages one [`feed`](Self::feed) sends. An MPE Note
-    /// On sends one Note Off when it steals a sounding member or strikes its
-    /// key again (never both), then a centred Pitch Bend, Channel Pressure 0
-    /// and Control Change 74 at 0x40 for each its member's last note moved,
+    /// On sends one Note Off when it strikes its key again, then a centred Pitch Bend, Channel Pressure 0
+    /// and Control Change 74 at 0x40 for each its member's last note moved (only a member that plays no other note),
     /// then the Note On. The Default Translation sends at most four, a
     /// controller's sequence (D.2.3).
     pub const MAX_MESSAGES: usize = 5;
@@ -209,6 +209,11 @@ impl Midi1Translator {
                 cc(CCNumber::BANK_SELECT_LSB, bank.lsb);
                 out(Voice1::ProgramChange(program).bytes(address.channel));
             }
+            // Omni Off, Omni On, Mono Mode On and Poly Mode On are sent on no
+            // MPE Channel (M2-120 section 4.7).
+            Voice2::ControlChange { controller, .. }
+                if matches!(self.mode.per_note, PerNoteTranslation::Mpe(_))
+                    && (124..=127).contains(&controller.get()) => {}
             _ => plain(&mut out),
         }
     }
