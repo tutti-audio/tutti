@@ -78,8 +78,9 @@ std only. A rule the compiler already enforces is not a gate.
   binary installs `tutti_fixtures::RtAllocCheck` once: any allocation or free inside a
   `tutti_rt::RtScope` aborts the test with its name. A render prepared `Realtime` (the
   executor, `Direct`, `drive_input`) runs inside one, so every realtime render test is an
-  allocation test; a render prepared `Offline` may block and allocate. A file is its own binary only for a different allocator (counting,
-  no-free), `harness = false`, or `cfg(loom)`.
+  allocation test; a render prepared `Offline` may block and allocate. A file is its own
+  binary only for a different allocator (counting, no-free), `harness = false`, or
+  `cfg(loom)`.
 - **A test must be able to fail.** It asserts a spec property, an analytic figure or an
   invariant, and its name says which. Delete a test that cannot fail: one that is always
   true, asserts only that nothing panicked, or compares a value with the function that

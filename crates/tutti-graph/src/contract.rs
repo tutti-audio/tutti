@@ -2265,8 +2265,6 @@ pub struct Direct<N: ?Sized, F: Float = f32> {
     /// The node, prepared.
     pub node: Box<N>,
     prepare: Prepare,
-    rate: SampleRate,
-    frames: usize,
     len: usize,
     frame: Frame,
     transport: TransportPosition,
@@ -2287,8 +2285,7 @@ pub struct Direct<N: ?Sized, F: Float = f32> {
 impl<N: ?Sized, F: Float> std::fmt::Debug for Direct<N, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Direct")
-            .field("rate", &self.rate)
-            .field("frames", &self.frames)
+            .field("prepare", &self.prepare)
             .field("len", &self.len)
             .field("frame", &self.frame)
             .field("transport", &self.transport)
@@ -2375,7 +2372,7 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
     ///
     /// As [`new`](Direct::new).
     pub fn boxed_with_prepare(mut node: Box<N>, prepare: &Prepare) -> Self {
-        let (rate, frames) = (prepare.sample_rate(), prepare.max_block().get());
+        let frames = prepare.max_block().get();
         node.prepare(prepare);
         let shape = node.shape();
         let (ins, outs) = (
@@ -2410,8 +2407,6 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
             params_out: param_events(shape.event_out, param_room(&shape)),
             node,
             prepare: *prepare,
-            rate,
-            frames,
             len: frames,
             frame: Frame::new(0),
             transport: TransportPosition::default(),
@@ -2472,7 +2467,11 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
     /// If `values` is not one block long.
     pub fn feed(&mut self, k: usize, values: Option<&[F]>) {
         if let Some(v) = values {
-            assert_eq!(v.len(), self.frames, "one value per frame");
+            assert_eq!(
+                v.len(),
+                self.prepare.max_block().get(),
+                "one value per frame"
+            );
         }
         self.params[k] = values.map(<[F]>::to_vec);
     }
@@ -2524,9 +2523,9 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
     /// If `len` is zero or past the prepared frames.
     pub fn set_block_len(&mut self, len: usize) {
         assert!(
-            len > 0 && len <= self.frames,
+            len > 0 && len <= self.prepare.max_block().get(),
             "a block of {len} frames against a prepared maximum of {}",
-            self.frames
+            self.prepare.max_block().get()
         );
         self.len = len;
     }
@@ -2553,7 +2552,7 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
     pub fn block(&mut self) -> Status {
         let env = Env {
             frame: self.frame,
-            sample_rate: self.rate,
+            sample_rate: self.prepare.sample_rate(),
             block_len: Samples::new(self.len),
             transport: self.transport,
             changes: TransportChanges::NONE,
