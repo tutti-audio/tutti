@@ -214,7 +214,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 // shapes are new (a lookahead is a time, so a rate change moves
                 // latencies): its figures are published at the commit.
                 self.graph.collect_noting_resume();
-                self.sync_root_refusal();
+                self.sync_main_output_refusal();
                 // Closes a plugin that was dropped off its own thread (a pool thread at an
                 // export's end, say): it handed the close to this session's collector, which
                 // runs on the main thread (`PhaseCx::main` is `Some` only there).

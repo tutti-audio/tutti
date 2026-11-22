@@ -129,7 +129,7 @@ fn play<M: Master>(
 
     // Everything else is derived: the clock is the project's tempo map from
     // beat 0, the latency is the plan's, the tail is the plugin's declared
-    // one, and the file is as wide as the root.
+    // one, and the file is as wide as the main output.
     let job = s.bounce(master(
         Bounce::new().range(Range::Beats(Beat::new(0.0), end)),
     ))?; // the plugin hears Offline from here

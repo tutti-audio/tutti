@@ -30,7 +30,7 @@ fn spec_at(rate: f64) -> OutputSpec {
 /// **The session publishes the meter and the taps its callback feeds**, not
 /// disconnected ones: a host opens a tap with `Graph::open_heard_tap` and
 /// sees the frames the callback renders, and reads the level they carry from
-/// `Session::take_master_meter`.
+/// `Session::take_main_output_meter`.
 #[test]
 fn the_session_publishes_the_meter_and_taps_its_callback_feeds() {
     let (driver, stream) = ManualStreamDriver::new();
@@ -49,10 +49,12 @@ fn the_session_publishes_the_meter_and_taps_its_callback_feeds() {
     let mut tap = session
         .graph()
         .taps()
-        .open_root(Samples::new(1_024))
+        .open_main_output(Samples::new(1_024))
         .expect("the sources exist");
     let _ = session.update();
-    let mut meter = session.take_master_meter().expect("declared at the build");
+    let mut meter = session
+        .take_main_output_meter()
+        .expect("declared at the build");
     stream
         .render_block(Samples::new(64))
         .expect("the stream is open");
@@ -852,12 +854,12 @@ fn the_session_lists_the_outputs_once() {
     );
 }
 
-/// A declared root is placed on the device it is declared for, and a restart to
+/// A declared main output is placed on the device it is declared for, and a restart to
 /// a device that cannot place it is refused rather than rendering silence: four
 /// buses on a six-wide device restart onto another six-wide one, and not onto
 /// a stereo one.
 #[test]
-fn a_restart_onto_a_device_that_cannot_place_the_declared_root_is_refused() {
+fn a_restart_onto_a_device_that_cannot_place_the_declared_main_output_is_refused() {
     let wide = |rate| {
         OutputSpec::new(
             SampleRate::of(rate),
@@ -966,17 +968,21 @@ fn a_restart_states_or_defaults_the_new_devices_placement() {
 /// `Refused` status on stereo and `Applied` after a restart onto six channels.
 #[test]
 fn a_refused_declaration_is_retried_on_a_restart() {
-    use tutti_session::RootTopologyStatus;
+    use tutti_session::MainOutputTopologyStatus;
     let buses = tutti_buffers::ChannelTopology::unassigned(ChannelLayout::QUAD);
     let (driver, _stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
         .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
-    assert!(session.declare_root_topology(Some(buses.clone())).is_err());
+    assert!(
+        session
+            .declare_main_output_topology(Some(buses.clone()))
+            .is_err()
+    );
     assert!(matches!(
-        session.root_topology_status(),
-        RootTopologyStatus::Refused(_)
+        session.main_output_topology_status(),
+        MainOutputTopologyStatus::Refused(_)
     ));
     assert_eq!(session.graph_ref().outputs(), 2);
 
@@ -987,17 +993,20 @@ fn a_refused_declaration_is_retried_on_a_restart() {
     );
     let (driver, _new) = ManualStreamDriver::new();
     session.restart_on(wide, driver, None, None).unwrap();
-    assert_eq!(session.root_topology_status(), RootTopologyStatus::Applied);
+    assert_eq!(
+        session.main_output_topology_status(),
+        MainOutputTopologyStatus::Applied
+    );
     assert_eq!(session.main_output_topology(), Some(&buses));
     assert_eq!(session.graph_ref().outputs(), 4);
 }
 
-/// A declaration that waited for a root crossfade and is refused when it
+/// A declaration that waited for a main output crossfade and is refused when it
 /// applies, because the device it finds no longer places it, is a `Refused`
 /// status that a later widening does not erase, and a restart asks again.
 #[test]
 fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a_restart() {
-    use tutti_session::RootTopologyStatus;
+    use tutti_session::MainOutputTopologyStatus;
     let wide = OutputSpec::new(
         SampleRate::SR_48K,
         ChannelLayout::from(6u16),
@@ -1010,7 +1019,7 @@ fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a
         .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(wide.clone(), driver)
         .unwrap();
-    // Something is heard, so the old root has outputs to fade; the root in
+    // Something is heard, so the old main output has outputs to fade; the main output in
     // force fits both devices, and the change to it starts a fade.
     let dc = session
         .graph()
@@ -1021,47 +1030,57 @@ fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a
         .unwrap()
         .unfaded();
     let _ = session.update();
-    session.declare_root_topology(Some(stereo.clone())).unwrap();
+    session
+        .declare_main_output_topology(Some(stereo.clone()))
+        .unwrap();
     let _ = session.update();
     stream.render_block(Samples::new(64)).expect("open");
     // Four buses place on six channels, so the declaration is taken, and waits.
-    session.declare_root_topology(Some(buses.clone())).unwrap();
-    assert_eq!(session.root_topology_status(), RootTopologyStatus::Pending);
-    assert_eq!(session.requested_root_topology(), Some(&buses));
+    session
+        .declare_main_output_topology(Some(buses.clone()))
+        .unwrap();
+    assert_eq!(
+        session.main_output_topology_status(),
+        MainOutputTopologyStatus::Pending
+    );
+    assert_eq!(session.requested_main_output_topology(), Some(&buses));
 
     // The device changes under it to one that cannot place four buses.
     let (driver, narrow) = ManualStreamDriver::new();
     session
         .restart_on(spec_at(48_000.0), driver, None, None)
-        .expect("the root in force places on stereo");
+        .expect("the main output in force places on stereo");
     for _ in 0..5 {
         narrow.render_block(Samples::new(64)).expect("open");
         let _ = session.update();
     }
     assert!(
         matches!(
-            session.root_topology_status(),
-            RootTopologyStatus::Refused(tutti_graph::MainOutputError::Fold(_))
+            session.main_output_topology_status(),
+            MainOutputTopologyStatus::Refused(tutti_graph::MainOutputError::Fold(_))
         ),
         "{:?}",
-        session.root_topology_status()
+        session.main_output_topology_status()
     );
     assert_eq!(
         session.main_output_topology(),
         Some(&stereo),
-        "the root in force stays"
+        "the main output in force stays"
     );
-    let refusal = session.root_topology_status();
+    let refusal = session.main_output_topology_status();
     let _ = session.graph().widen_outputs(8);
     assert_eq!(
-        session.root_topology_status(),
+        session.main_output_topology_status(),
         refusal,
         "a widening does not replace the declaration's refusal"
     );
 
     let (driver, _wide) = ManualStreamDriver::new();
     session.restart_on(wide, driver, None, None).unwrap();
-    assert_eq!(session.root_topology_status(), RootTopologyStatus::Applied);
+    assert_eq!(
+        session.main_output_topology_status(),
+        MainOutputTopologyStatus::Applied
+    );
     assert_eq!(
         session.main_output_topology(),
         Some(&buses),

@@ -9,7 +9,7 @@
 //! session when the bounce starts and stored once: the range from
 //! the transport's loop, the clock from the project's tempo map, the render
 //! rate from the session's, the latency and the tail from the compiled graph,
-//! the master's width from the root. Each has one explicit method.
+//! the master's width from the main output. Each has one explicit method.
 //!
 //! **One bounce at a time**: [`Session::bounce`] mints a bounce token, a
 //! clone of an `Arc<()>` the session holds, which rides in the job, in the
@@ -264,8 +264,8 @@ impl Master for BufferMaster {
 
 /// The channel placement a bounce gives the graph's outputs.
 #[derive(Debug, Clone, Default)]
-pub(crate) enum RootChoice {
-    /// The session's declared root topology.
+pub(crate) enum MainOutputChoice {
+    /// The session's declared main output topology.
     #[default]
     Session,
     /// The engine's order for the width.
@@ -310,7 +310,7 @@ pub struct Bounce<N = NodeKey, M = NoMaster, F: Float = f32> {
     resample: Option<Resample>,
     latency: BounceLatency,
     tail: BounceTail,
-    main_output_topology: RootChoice,
+    main_output_topology: MainOutputChoice,
     channels: Option<ChannelLayout>,
     file_topology: Option<ChannelTopology>,
     serial: bool,
@@ -344,7 +344,7 @@ impl<N, F: Float> Bounce<N, NoMaster, F> {
             resample: None,
             latency: BounceLatency::default(),
             tail: BounceTail::default(),
-            main_output_topology: RootChoice::Session,
+            main_output_topology: MainOutputChoice::Session,
             channels: None,
             file_topology: None,
             serial: false,
@@ -533,20 +533,20 @@ impl<N, M, F: Float> Bounce<N, M, F> {
     }
 
     /// What the graph's output channels are, in place of the session's declared
-    /// root topology.
-    pub fn main_output_topology(mut self, root: ChannelTopology) -> Self {
-        self.main_output_topology = RootChoice::Placed(root);
+    /// main output topology.
+    pub fn main_output_topology(mut self, main_output: ChannelTopology) -> Self {
+        self.main_output_topology = MainOutputChoice::Placed(main_output);
         self
     }
 
     /// The graph's output channels are the engine's order for the width,
-    /// whatever root topology the session declares.
-    pub fn undeclared_root(mut self) -> Self {
-        self.main_output_topology = RootChoice::Engine;
+    /// whatever main output topology the session declares.
+    pub fn undeclared_main_output(mut self) -> Self {
+        self.main_output_topology = MainOutputChoice::Engine;
         self
     }
 
-    /// The master file's width. Without it, the root's: a wider graph folds
+    /// The master file's width. Without it, the main output's: a wider graph folds
     /// onto a narrower file, never truncates, and a narrowing with no placement
     /// is an error ([`tutti_export::RenderError`]). It replaces a
     /// [`file_topology`](Self::file_topology) named before it.
@@ -724,7 +724,7 @@ pub struct BufferStem;
 /// # }
 /// ```
 ///
-/// The master's root declaration is never applied to a stem: it describes the
+/// The master's main output declaration is never applied to a stem: it describes the
 /// graph's output bus, not a node's output.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stem<N = NodeKey, K = BufferStem> {
@@ -1205,7 +1205,7 @@ impl From<tutti_export::RenderError> for BounceError {
 /// commits whatever the edit leaves, and a commit the fork refuses fails the
 /// bounce with the reason. A fork's units are on its executor by now, so a
 /// unit already in it cannot be refilled: insert a new one. The fork's
-/// executor, pool and root are the job's; the edit does not see them.
+/// executor, pool and main output are the job's; the edit does not see them.
 #[derive(Debug)]
 pub struct PreparedGraph<'a, F: Float = f32> {
     /// The fork's editor.
@@ -2043,7 +2043,7 @@ where
         if self.graph.outputs() == 0 {
             return Err(BounceConfigError::GraphHasNoOutputs.into());
         }
-        // The width the master file has without being told: the root's.
+        // The width the master file has without being told: the main output's.
         let outputs = self.graph.outputs();
         let rate = sample_rate.unwrap_or_else(|| self.transport.sample_rate());
 

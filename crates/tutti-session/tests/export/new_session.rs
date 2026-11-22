@@ -9,7 +9,7 @@ use tutti_session::{Bounce, BounceLatency, BounceTail, MainOutput, Range, Sessio
 use tutti_units::{SampleRate, Seconds};
 
 /// **A session from `Session::new` is a full session.** A constant wired to
-/// the root bounces to buffers holding that constant on every frame, and
+/// the main output bounces to buffers holding that constant on every frame, and
 /// `render`, which only a session with an engine has, answers instead of
 /// panicking.
 #[test]

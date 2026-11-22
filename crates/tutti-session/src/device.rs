@@ -17,7 +17,7 @@
 //! - the engine follows by itself: it adopts the new rate on the first block
 //!   that carries it, rescaling its frame clock and every scheduled
 //!   `At::Frame` transport command to the same wall-clock time;
-//! - the graph root, widened to a wider device as the build widens it
+//! - the graph main output, widened to a wider device as the build widens it
 //!   ([`main_output_width`](crate::main_output_width)), never narrowed;
 //! - the transport's rate, the hardware MIDI input's timestamp rate, the
 //!   session's disk streamer (every open stream's conversion ratio) and,
@@ -204,7 +204,7 @@ impl<K: crate::AppKey, F: SessionFloat> Session<K, DeviceClock<F>> {
     ///   later update), or a poisoned graph;
     /// - what resolving or opening the device reports ([`Error::Device`]);
     /// - [`Error::Reprepare`] or [`Error::Output`] from the re-prepare itself
-    ///   (a graph that no longer compiles, a declared root the device cannot
+    ///   (a graph that no longer compiles, a declared main output the device cannot
     ///   place): the stream is then left **stopped**. Restart again with
     ///   another `max_block`, or onto the old device and rate, which moves
     ///   nothing and plays again.
@@ -700,7 +700,7 @@ impl DeviceRestart {
     }
 
     /// This restart stating what the new device's channels are: the graph
-    /// root is folded into `topology` by speaker. The restart is refused
+    /// main output is folded into `topology` by speaker. The restart is refused
     /// ([`RestartError`]) when `topology` is not the new device's width.
     #[must_use]
     pub fn topology(mut self, topology: ChannelTopology) -> Self {
@@ -885,7 +885,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         Ok(())
     }
 
-    /// Whether the root in force can be placed on a device of `channels`, as
+    /// Whether the main output in force can be placed on a device of `channels`, as
     /// `topology` states them or as the engine's order for the width: what a
     /// restart or a clock switch refuses before anything moves.
     pub(crate) fn check_device(
@@ -905,12 +905,12 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
             )
             .into());
         }
-        // A map names the root's own channels, so a device swap does not widen
-        // a root that has one; without it a wider device widens an undeclared
-        // root by the build's rule.
+        // A map names the main output's own channels, so a device swap does not widen
+        // a main output that has one; without it a wider device widens an undeclared
+        // main output by the build's rule.
         let policy = self.output.policy.current();
         let mapped = policy.map.targets().is_some();
-        let root = self
+        let main_output = self
             .graph
             .main_output_topology()
             .cloned()
@@ -922,16 +922,16 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
                 };
                 ChannelTopology::default_for(ChannelLayout::clamped(width))
             });
-        // The policy in force has to place the root on the new device too: a
+        // The policy in force has to place the main output on the new device too: a
         // device a map does not fit is refused, never reset to the identity;
         // the host sets a new map.
         policy
             .routing()
-            .fold::<C::Float>(&root, &placed)
+            .fold::<C::Float>(&main_output, &placed)
             .map_err(|refusal| match refusal {
                 tutti_engine::RoutingError::Fold(source) => Error::Unplaceable {
-                    root: self.graph.main_output_id(),
-                    width: root.width(),
+                    main_output: self.graph.main_output_id(),
+                    width: main_output.width(),
                     device: channels,
                     source,
                 },
@@ -954,11 +954,11 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         topology: Option<ChannelTopology>,
     ) -> Result<()> {
         let rate = spec.sample_rate;
-        // The root in force has to be placeable on the new device, as the
+        // The main output in force has to be placeable on the new device, as the
         // request states it or as the engine's order for its width: refused
         // before the graph moves, the stream still stopped, like any refusal
-        // here. The root a wider device will widen an undeclared one to is
-        // the root in force.
+        // here. The main output a wider device will widen an undeclared one to is
+        // the main output in force.
         self.check_device(spec.channels, topology.as_ref())?;
         // The new device's callback size too: a hosted plugin's pipeline
         // follows it, and its declared latency with it.
@@ -973,7 +973,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         // sends the resumed plan, and the executor adopts it.
         stopped.apply_pending();
         self.graph.collect();
-        self.sync_root_refusal();
+        self.sync_main_output_refusal();
         // A unit that panicked in `prepare`, or shapes that no longer
         // compile, poison the editor here: refuse, the stream still stopped.
         self.graph.check_reprepare(None)?;
@@ -994,11 +994,11 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         if self.output.reattempt(&mut self.graph) {
             self.commit();
         }
-        // A wider device widens the root, by the build's rule; a narrower one
+        // A wider device widens the main output, by the build's rule; a narrower one
         // keeps it, and the engine folds. Committed and settled here too, so
         // the first block has the width. A commit refused for now leaves the
         // edit flag set, and the next update retries.
-        // A declared root keeps the width it declared: the device is no floor
+        // A declared main output keeps the width it declared: the device is no floor
         // under it.
         let mapped = self.output.policy.current().map.targets().is_some();
         let width =

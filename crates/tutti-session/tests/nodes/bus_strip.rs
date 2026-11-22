@@ -73,10 +73,10 @@ fn a_mono_source_reaches_both_sides_of_a_stereo_strip() {
     assert_eq!(heard(&mut s, 2), [0.5, 0.5]);
 }
 
-/// A stereo strip's bus folds onto a declared 5.1 root: its pair lands on the
+/// A stereo strip's bus folds onto a declared 5.1 main output: its pair lands on the
 /// front left and right, and the other four speakers are silent.
 #[test]
-fn a_stereo_strip_feeds_a_declared_surround_root() {
+fn a_stereo_strip_feeds_a_declared_surround_main_output() {
     let five_one = ChannelTopology::default_for(ChannelLayout::from(6u16));
     let mut s = offline(Session::builder().main_output_topology(five_one), 6);
     let g = s.graph();

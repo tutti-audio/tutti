@@ -25,7 +25,7 @@ fn session(workers: Workers) -> Session<&'static str, Offline<f64>> {
         .expect("an f64 session builds")
 }
 
-/// `FINE` through `lanes` gains into the root: set each lane's gain to
+/// `FINE` through `lanes` gains into the main output: set each lane's gain to
 /// `0.125 * (lane + 1)` with `Session::set`, render one block and return it.
 fn render(workers: Workers, lanes: usize) -> Vec<f64> {
     let mut s = session(workers);

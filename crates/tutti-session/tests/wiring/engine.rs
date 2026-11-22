@@ -371,9 +371,9 @@ fn an_offline_render_feeds_the_load_and_the_block_counts() {
 /// a detached session's [`Session::render_frame`] (it had no meter while the
 /// engine fed it).
 #[test]
-fn an_offline_render_feeds_the_master_meter() {
+fn an_offline_render_feeds_the_main_output_meter() {
     let mut s = offline();
-    let mut meter = s.take_master_meter().expect("declared at the build");
+    let mut meter = s.take_main_output_meter().expect("declared at the build");
     let dc = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph()
         .set_sources(MainOutput::channel(0), [OutPort::new(dc, 0)])
@@ -395,7 +395,9 @@ fn an_offline_render_feeds_the_master_meter() {
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::of(RATE))
         .expect("builds");
-    let mut meter = detached.take_master_meter().expect("declared at the build");
+    let mut meter = detached
+        .take_main_output_meter()
+        .expect("declared at the build");
     let dc = detached.graph().add(ForkByClone(Const::mono(0.5)));
     detached
         .graph()
@@ -406,7 +408,7 @@ fn an_offline_render_feeds_the_master_meter() {
     detached.render_frame(InterleavedMut::one_frame(&mut frame).unwrap());
     assert_eq!(meter.read()[0].peak.get(), 0.5);
     assert!(
-        detached.take_master_meter().is_none(),
+        detached.take_main_output_meter().is_none(),
         "taken once: one consumer"
     );
 }
@@ -471,7 +473,7 @@ fn opening_a_tap_or_meter_on_a_missing_source_is_refused() {
         .expect("it exists, uncommitted");
     s.graph()
         .taps()
-        .open_root(Samples::new(64))
+        .open_main_output(Samples::new(64))
         .expect("the outputs exist");
 }
 
@@ -641,7 +643,7 @@ fn an_offline_render_feeds_an_output_tap() {
     let mut tap = s
         .graph()
         .taps()
-        .open_root(Samples::new(1_024))
+        .open_main_output(Samples::new(1_024))
         .expect("the sources exist");
     assert_eq!(tap.width(), 2);
     let _ = s.update();
@@ -676,7 +678,7 @@ fn an_output_tap_follows_a_rewired_output() {
     let mut tap = s
         .graph()
         .taps()
-        .open_root(Samples::new(1_024))
+        .open_main_output(Samples::new(1_024))
         .expect("the sources exist");
     let _ = s.update();
     let mut block = vec![0.0f32; 64 * 2];
@@ -717,7 +719,7 @@ fn a_dropped_reader_leaves_the_plan_at_the_reclaim_phase() {
     let tap = s
         .graph()
         .taps()
-        .open_root(Samples::new(64))
+        .open_main_output(Samples::new(64))
         .expect("the sources exist");
     let _ = s.update();
     assert_eq!(taps(&s), 1, "one op a tap while it is open");
@@ -748,7 +750,7 @@ fn a_detached_render_feeds_a_tap() {
     let mut tap = s
         .graph()
         .taps()
-        .open_root(Samples::new(16))
+        .open_main_output(Samples::new(16))
         .expect("the sources exist");
     let mut frame = [0.0f32];
     for _ in 0..3 {
@@ -819,7 +821,7 @@ fn a_tap_steps_at_a_transport_stop_where_the_output_fades() {
     let mut tap = s
         .graph()
         .taps()
-        .open_root(Samples::new(16_384))
+        .open_main_output(Samples::new(16_384))
         .expect("the sources exist");
     let _ = s.update();
     let motion = s.transport_handle();
@@ -886,7 +888,7 @@ fn the_heard_tap_carries_the_fade_at_a_stop() {
     let mut plan = s
         .graph()
         .taps()
-        .open_root(Samples::new(16_384))
+        .open_main_output(Samples::new(16_384))
         .expect("the sources exist");
     let mut heard = s.open_heard_tap(Samples::new(16_384)).expect("an engine");
     let _ = s.update();

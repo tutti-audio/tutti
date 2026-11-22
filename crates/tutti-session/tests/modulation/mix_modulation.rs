@@ -60,7 +60,7 @@ fn settle(s: &mut Session) {
     );
 }
 
-/// Output channel 0 (the left of the stereo root) for `blocks` blocks.
+/// Output channel 0 (the left of the stereo main output) for `blocks` blocks.
 fn render(s: &mut Session, blocks: usize) -> Vec<f32> {
     let mut all = Vec::new();
     let mut buf = vec![0.0f32; BLOCK * 2];

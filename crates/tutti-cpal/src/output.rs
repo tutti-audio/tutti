@@ -369,7 +369,7 @@ impl AudioEngine {
 
     /// Resolves the selected device and reads its config, without opening a
     /// stream: the device is found and its config known, so a host that moves
-    /// a running graph onto it can refuse what the device cannot take (a root
+    /// a running graph onto it can refuse what the device cannot take (a main output
     /// it cannot place) while the old stream still plays.
     ///
     /// # Errors

@@ -183,33 +183,35 @@ pub enum ConnectError {
         /// Its main input's width.
         to_width: usize,
     },
-    /// A main bus is wider than the root it connects to: a connection never
+    /// A main bus is wider than the main output it connects to: a connection never
     /// truncates.
     #[error(
-        "{from:?}'s main output is {from_width} wide and the root {main_output_width}; \
+        "{from:?}'s main output is {from_width} wide and the graph's main output {main_output_width}; \
          a width change is a bus edge"
     )]
-    RootNarrow {
+    MainOutputNarrow {
         /// The source node.
         from: tutti_graph::NodeKey,
         /// Its main output's width.
         from_width: usize,
-        /// The root's width.
+        /// The main output's width.
         main_output_width: usize,
     },
-    /// A main bus narrower than the root has no placement on the root's
+    /// A main bus narrower than the main output has no placement on the main output's
     /// channels.
-    #[error("{from:?}'s main output has no place on the root: {cause}")]
+    #[error("{from:?}'s main output has no place on the graph's main output: {cause}")]
     MainOutputFold {
         /// The source node.
         from: tutti_graph::NodeKey,
-        /// Why its topology does not fold onto the root's.
+        /// Why its topology does not fold onto the main output's.
         cause: tutti_buffers::FoldError,
     },
-    /// A main bus narrower than the root folds onto it only with weights (a
-    /// centre into a root with none): a weighted fold is a bus edge.
-    #[error("{from:?}'s main output folds onto the root only with weights; that is a bus edge")]
-    RootWeighted {
+    /// A main bus narrower than the main output folds onto it only with weights (a
+    /// centre into a main output with none): a weighted fold is a bus edge.
+    #[error(
+        "{from:?}'s main output folds onto the graph's main output only with weights; that is a bus edge"
+    )]
+    MainOutputWeighted {
         /// The source node.
         from: tutti_graph::NodeKey,
     },
@@ -388,31 +390,33 @@ pub enum Error {
     #[error("graph engine: {0}")]
     Graph(#[from] tutti_engine::GraphEngineError),
 
-    /// The root's declaration was refused by the engine's fold table, other
-    /// than for a fold: its id is not past the published roots, or too many
-    /// published roots are waiting for a plan to carry them (the stream is not
+    /// The main output's declaration was refused by the engine's fold table, other
+    /// than for a fold: its id is not past the published main outputs, or too many
+    /// published main outputs are waiting for a plan to carry them (the stream is not
     /// rendering). Wraps `tutti_graph::MainOutputError`.
     #[error(transparent)]
     MainOutput(tutti_graph::MainOutputError),
 
-    /// The graph root cannot be placed on the output: the device has no
-    /// channels, or the root is wider than a device at least one of whose
-    /// widths has no channel order (a 6-wide root on a 5-channel device would
+    /// The graph main output cannot be placed on the output: the device has no
+    /// channels, or the main output is wider than a device at least one of whose
+    /// widths has no channel order (a 6-wide main output on a 5-channel device would
     /// lose a channel). Wraps `tutti_buffers::FoldError`.
-    #[error("the graph root cannot be placed on the output: {0}")]
+    #[error("the graph main output cannot be placed on the output: {0}")]
     Output(#[from] tutti_buffers::FoldError),
 
-    /// The graph root has no place on the output device a restart opened: the
-    /// root in force at `width` channels has no fold into the device's
-    /// `device` channels as they are stated or default (a root with a channel
+    /// The graph main output has no place on the output device a restart opened: the
+    /// main output in force at `width` channels has no fold into the device's
+    /// `device` channels as they are stated or default (a main output with a channel
     /// no speaker names, or one wider than a device where either width has no
     /// order). Nothing moved, and the stream is left stopped
     /// (`LiveSession::restart`).
-    #[error("root {root} ({width:?} wide) has no place on a {device:?} device: {source}")]
+    #[error(
+        "main output {main_output} ({width:?} wide) has no place on a {device:?} device: {source}"
+    )]
     Unplaceable {
-        /// The root generation in force.
-        root: tutti_graph::MainOutputId,
-        /// The root's channels.
+        /// The main output generation in force.
+        main_output: tutti_graph::MainOutputId,
+        /// The main output's channels.
         width: tutti_buffers::ChannelLayout,
         /// The device's channels.
         device: tutti_buffers::ChannelLayout,

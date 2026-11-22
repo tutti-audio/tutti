@@ -1,7 +1,7 @@
 //! A restart of the output device, at whatever rate it now runs, through a
 //! session on `ManualStreamDriver`s standing for the devices: the graph and
 //! the transport are re-rated and every scheduled command keeps its wall-clock
-//! time, a refused restart keeps playing, a wider device widens the root, a
+//! time, a refused restart keeps playing, a wider device widens the main output, a
 //! graph that no longer compiles leaves the stream stopped but recoverable,
 //! and a crossfade asked for right after a restart lands at once.
 //!
@@ -239,7 +239,7 @@ fn a_restart_past_the_block_capacity_is_refused_and_keeps_playing() {
     assert!(play(&mut s, &old, 441, 10).iter().any(|&x| x != 0.0));
 
     // Within it, the same restart goes through (the widening onto the 5.1
-    // device it picks is `a_restart_onto_a_wider_device_widens_the_root`'s).
+    // device it picks is `a_restart_onto_a_wider_device_widens_the_main_output`'s).
     let (driver, new) = ManualStreamDriver::new();
     s.restart_on(
         spec_with(NEW, 6),
@@ -251,16 +251,16 @@ fn a_restart_past_the_block_capacity_is_refused_and_keeps_playing() {
     assert!(new.is_open());
 }
 
-/// **A restart onto a wider device widens the root, as the build does; onto a
+/// **A restart onto a wider device widens the main output, as the build does; onto a
 /// narrower one it keeps it.** Stereo at 44.1 kHz, then a 5.1 device at
-/// 48 kHz: the root is six wide (the device a floor), so a host routing to the
+/// 48 kHz: the main output is six wide (the device a floor), so a host routing to the
 /// surround channels finds them there rather than zero-filled by the fold,
 /// the device reports its six, and the audio side renders six: the
 /// compensation table, which the committed graph's figures fill, has an entry
-/// per root channel. Then back onto a stereo device: the root keeps its six
+/// per main output channel. Then back onto a stereo device: the main output keeps its six
 /// and the engine folds.
 #[test]
-fn a_restart_onto_a_wider_device_widens_the_root() {
+fn a_restart_onto_a_wider_device_widens_the_main_output() {
     let (mut s, _old, _, _) = engine();
     assert_eq!(s.graph_ref().outputs(), 2);
 
@@ -270,7 +270,7 @@ fn a_restart_onto_a_wider_device_widens_the_root() {
     assert_eq!(
         s.graph_ref().outputs(),
         6,
-        "the root takes the device's six"
+        "the main output takes the device's six"
     );
     assert_eq!(s.device().spec().channels, ChannelLayout::from(6u16));
     for _ in 0..4 {
@@ -283,7 +283,7 @@ fn a_restart_onto_a_wider_device_widens_the_root() {
     assert_eq!(
         s.compensation().to_vec().len(),
         6,
-        "the committed root is six wide"
+        "the committed main output is six wide"
     );
 
     let (driver, stereo) = ManualStreamDriver::new();
@@ -367,7 +367,7 @@ fn a_restart_the_hook_refuses_leaves_the_device_placement_as_it_was() {
     assert_eq!(
         s.graph_ref().outputs(),
         2,
-        "and the root was not widened for the refused device"
+        "and the main output was not widened for the refused device"
     );
 }
 

@@ -350,13 +350,13 @@ fn a_narrower_reinsert_reports_the_bus_edges_it_dropped() {
     }
 }
 
-/// **A root feed from a lost bus is reported as `(source, MainOutput)`.**
+/// **A main output feed from a lost bus is reported as `(source, MainOutput)`.**
 #[test]
-fn a_narrower_reinsert_reports_the_root_feed_it_dropped() {
+fn a_narrower_reinsert_reports_the_main_output_feed_it_dropped() {
     let mut s = Session::builder().build().expect("builds");
     let g = s.graph();
     let y = g.add(ForkByClone(Bused { aux: true }));
-    s.declare_root_topology(Some(ChannelTopology::default_for(ChannelLayout::STEREO)))
+    s.declare_main_output_topology(Some(ChannelTopology::default_for(ChannelLayout::STEREO)))
         .expect("stereo");
     let g = s.graph();
     g.connect(y.bus_out(0), MainOutput).unwrap().unfaded();

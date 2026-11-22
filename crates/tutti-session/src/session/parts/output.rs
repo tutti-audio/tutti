@@ -1,4 +1,4 @@
-//! [`OutputPart`]: the root asked for, the policy, and the engine's output-side readings (the
+//! [`OutputPart`]: the main output asked for, the policy, and the engine's output-side readings (the
 //! heard tap, the load meter and its silenced count).
 
 #![cfg_attr(
@@ -19,16 +19,16 @@ use crate::graph::Graph;
 use crate::value::Cell;
 use crate::{OutputPolicy, SessionEvent};
 
-/// The root topology asked for, the output policy in force, and the engine's
+/// The main output topology asked for, the output policy in force, and the engine's
 /// output-side readings.
 #[derive(Debug)]
 pub(crate) struct OutputPart<F: Float> {
-    /// The root topology last asked for
-    /// ([`Session::declare_root_topology`](crate::Session::declare_root_topology)),
+    /// The main output topology last asked for
+    /// ([`Session::declare_main_output_topology`](crate::Session::declare_main_output_topology)),
     /// applied or not.
-    pub(crate) root_request: Option<ChannelTopology>,
-    /// Why `root_request` is not in force, if it is not.
-    pub(crate) root_refusal: Option<MainOutputError>,
+    pub(crate) main_output_request: Option<ChannelTopology>,
+    /// Why `main_output_request` is not in force, if it is not.
+    pub(crate) main_output_refusal: Option<MainOutputError>,
     /// Where the mix lands, as set ([`Session::policy`](crate::Session::policy)).
     pub(crate) policy: Arc<Cell<OutputPolicy>>,
     /// The engine's tap after the fader and the device width it was built
@@ -44,12 +44,12 @@ pub(crate) struct OutputPart<F: Float> {
 
 impl<F: Float> OutputPart<F> {
     pub(crate) fn new(
-        root_request: Option<ChannelTopology>,
+        main_output_request: Option<ChannelTopology>,
         policy: Arc<Cell<OutputPolicy>>,
     ) -> Self {
         Self {
-            root_request,
-            root_refusal: None,
+            main_output_request,
+            main_output_refusal: None,
             policy,
             taps: None,
             readings: None,
@@ -58,33 +58,33 @@ impl<F: Float> OutputPart<F> {
     }
 
     /// Takes the refusal of a declaration that waited and could not be
-    /// applied into `root_refusal`, where a device restart re-attempts it.
+    /// applied into `main_output_refusal`, where a device restart re-attempts it.
     pub(crate) fn sync_refusal(&mut self, graph: &mut Graph<F>) {
         if let Some(e) = graph.take_apply_refusal() {
-            self.root_refusal = Some(e);
+            self.main_output_refusal = Some(e);
         }
     }
 
-    /// Declares `root` on `graph` unless the same request is already in force.
+    /// Declares `main_output` on `graph` unless the same request is already in force.
     ///
     /// # Errors
     ///
-    /// The graph's refusal, which is kept as `root_refusal`.
+    /// The graph's refusal, which is kept as `main_output_refusal`.
     pub(crate) fn declare(
         &mut self,
         graph: &mut Graph<F>,
-        root: Option<ChannelTopology>,
+        main_output: Option<ChannelTopology>,
     ) -> Result<(), MainOutputError> {
         self.sync_refusal(graph);
         // The same request again, in force, is nothing to do.
-        if root == self.root_request && self.root_refusal.is_none() {
+        if main_output == self.main_output_request && self.main_output_refusal.is_none() {
             return Ok(());
         }
-        self.root_request = root.clone();
-        match graph.declare_root(root, false) {
-            Ok(()) => self.root_refusal = None,
+        self.main_output_request = main_output.clone();
+        match graph.declare_main_output(main_output, false) {
+            Ok(()) => self.main_output_refusal = None,
             Err(e) => {
-                self.root_refusal = Some(e);
+                self.main_output_refusal = Some(e);
                 return Err(e);
             }
         }
@@ -94,16 +94,16 @@ impl<F: Float> OutputPart<F> {
     /// A declaration a device refused is asked again, hard, of the device the
     /// graph is now placed on. Whether it is in force now, so the caller commits.
     pub(crate) fn reattempt(&mut self, graph: &mut Graph<F>) -> bool {
-        if self.root_refusal.is_none() {
+        if self.main_output_refusal.is_none() {
             return false;
         }
-        match graph.declare_root(self.root_request.clone(), true) {
+        match graph.declare_main_output(self.main_output_request.clone(), true) {
             Ok(()) => {
-                self.root_refusal = None;
+                self.main_output_refusal = None;
                 true
             }
             Err(e) => {
-                self.root_refusal = Some(e);
+                self.main_output_refusal = Some(e);
                 false
             }
         }

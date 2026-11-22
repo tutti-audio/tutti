@@ -59,7 +59,7 @@ fn the_pair_a_node_names_is_the_one_played() {
 }
 
 /// `add_instrument` wires the strip to the master and `add_instrument_unwired`
-/// leaves it for the mix: the unwired one is silent at the root until its strip
+/// leaves it for the mix: the unwired one is silent at the main output until its strip
 /// is connected, then plays the same pair.
 #[test]
 fn only_add_instrument_wires_the_strip_to_the_master() {
@@ -70,7 +70,11 @@ fn only_add_instrument_wires_the_strip_to_the_master() {
     let strip = handle.out();
     let mut rig = Rig::played(session, handle);
     rig.render_to(4 * crate::instrument_support::BLOCK);
-    assert_eq!(rig.peak(0..rig.frame()), 0.0, "nothing reaches the root");
+    assert_eq!(
+        rig.peak(0..rig.frame()),
+        0.0,
+        "nothing reaches the main output"
+    );
     rig.session.graph().connect(strip, MainOutput).unwrap();
     rig.render_to(8 * crate::instrument_support::BLOCK);
     let at = rig.frame() - 1;
@@ -138,19 +142,22 @@ fn the_handle_counts_what_its_queue_dropped() {
     assert_eq!(rig.handle.keys().losses(), Losses::evicted(3));
 }
 
-/// A root of five channels or more fed from an instrument with sends takes its
+/// A main output of five channels or more fed from an instrument with sends takes its
 /// main pair, repeated, and never a send: connecting the node's whole main bus
-/// to the root feeds every output (a five-output node on a five-wide root feeds
-/// the speakers its sends), wiring the handle's pair onto each root channel
+/// to the main output feeds every output (a five-output node on a five-wide main output feeds
+/// the speakers its sends), wiring the handle's pair onto each main output channel
 /// does not. Read from the graph's own topology.
 #[test]
-fn a_wide_root_is_fed_from_the_main_pair_not_the_sends() {
+fn a_wide_main_output_is_fed_from_the_main_pair_not_the_sends() {
     use tutti_session::OutPort;
     let mut session = crate::instrument_support::rig::offline_session();
     let handle = session
         .add_instrument_unwired(Dressed(ForkByClone(Five)))
         .expect("an instrument");
-    session.graph().widen_outputs(5).expect("a wider root");
+    session
+        .graph()
+        .widen_outputs(5)
+        .expect("a wider main output");
     let node = handle.node();
     session.graph().connect(node, MainOutput).unwrap();
     let wrapped: Vec<_> = (0..5)

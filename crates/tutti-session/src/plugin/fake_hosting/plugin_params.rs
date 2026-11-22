@@ -642,7 +642,7 @@ fn a_plugin_key_names_a_parameter_a_route_targets() {
 }
 
 /// **A hosted plugin's key wires like a native node's**: `connect` takes the
-/// key of a hosted plugin (and its ports) and the root, and the edge is in the
+/// key of a hosted plugin (and its ports) and the main output, and the edge is in the
 /// graph.
 #[test]
 fn a_hosted_plugin_key_wires_like_a_native_key() {

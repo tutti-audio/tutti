@@ -362,7 +362,7 @@ fn the_output_tap_hears_the_sum() {
     let mut tap =
         r.s.graph()
             .taps()
-            .open_root(Samples::new(1_024))
+            .open_main_output(Samples::new(1_024))
             .expect("the sources exist");
     assert!(left(&mut r.s).iter().all(|&x| x == A + B));
     r.s.graph()

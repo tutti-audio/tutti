@@ -107,7 +107,7 @@
 //! ## Channel ceiling
 //!
 //! `tutti_buffers::MAX_CHANNELS` is the widest frame a voice reads or emits, the
-//! same cap as a bus and the graph root: a voice wider than the root could
+//! same cap as a bus and the graph main output: a voice wider than the main output could
 //! render would be truncated downstream, so the sampler refuses it here instead
 //! (`VoicePool::with_channels` returns `PlaceError::WidthTooWide`).
 //!

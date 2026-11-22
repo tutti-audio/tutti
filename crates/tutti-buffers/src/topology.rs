@@ -498,7 +498,7 @@ impl ChannelTopology {
     ///
     /// The one count-to-placement map: an edge that uses it reports
     /// [`Placement::Default`], and an edge that knows better states its own
-    /// topology instead. The quad is a guess a four-channel device or root
+    /// topology instead. The quad is a guess a four-channel device or main output
     /// invites over B-format; an unlisted width names no speaker, so a fold
     /// places each channel by index.
     #[must_use]

@@ -38,7 +38,7 @@ fn pushed_frames_reach_the_outputs_in_order() {
     let mut tap = s
         .graph()
         .taps()
-        .open_root(Samples::new(1_024))
+        .open_main_output(Samples::new(1_024))
         .expect("the sources exist");
     let _ = s.update();
 

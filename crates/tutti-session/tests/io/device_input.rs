@@ -120,7 +120,7 @@ fn first_frame(session: &mut LiveSession, stream: &ManualStream) -> [f32; 2] {
 }
 
 /// **A restart onto another rate reopens an added input at that rate into the
-/// same node.** The input is monitored (wired to the root); after a restart from
+/// same node.** The input is monitored (wired to the main output); after a restart from
 /// 48 kHz to 44.1 kHz the capture was closed first, opened again at 44.1 kHz,
 /// and what its new callback pushes is heard through the node the host holds,
 /// which was never rewired. The old ring is no longer read.

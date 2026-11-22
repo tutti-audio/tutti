@@ -859,26 +859,26 @@ impl Inlet<BusWire> for MainOutput {
     }
 }
 
-/// A root declaration just made ([`Session::declare_root_topology`](crate::Session::declare_root_topology)),
+/// A main output declaration just made ([`Session::declare_main_output_topology`](crate::Session::declare_main_output_topology)),
 /// borrowing the graph so it can be made a cut:
-/// `session.declare_root_topology(root)?.unfaded()`.
+/// `session.declare_main_output_topology(main_output)?.unfaded()`.
 ///
-/// Dropping it keeps the declaration as made, which crossfades the old root
+/// Dropping it keeps the declaration as made, which crossfades the old main output
 /// into the new over [`DECLICK`](tutti_graph::DECLICK).
 #[derive(Debug)]
-pub struct RootDeclaration<'g, F: Float = f32> {
+pub struct MainOutputDeclaration<'g, F: Float = f32> {
     pub(crate) graph: &'g mut Graph<F>,
 }
 
-impl<F: Float> RootDeclaration<'_, F> {
-    /// Takes the new root at one block, a cut: no old root is rendered beside
+impl<F: Float> MainOutputDeclaration<'_, F> {
+    /// Takes the new main output at one block, a cut: no old main output is rendered beside
     /// it. The default is a crossfade over [`DECLICK`](tutti_graph::DECLICK)
     /// (5 ms), so a change of layout never steps the sound; `unfaded` is for a
-    /// test, an analysis graph or a root changed before anything is listening.
+    /// test, an analysis graph or a main output changed before anything is listening.
     /// A declaration that waits for a running crossfade applies at once, and
     /// the cut is its.
     pub fn unfaded(self) -> Self {
-        self.graph.harden_root();
+        self.graph.harden_main_output();
         self
     }
 }

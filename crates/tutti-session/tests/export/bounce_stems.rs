@@ -243,14 +243,18 @@ fn a_stem_is_the_nodes_own_output_and_not_what_is_downstream() {
     let [master, source_stem, half_stem, wide_stem, picked] = out.as_slice() else {
         panic!("the master and four stems")
     };
-    assert_eq!(master.len(), 2, "the master is the root's width");
+    assert_eq!(master.len(), 2, "the master is the main output's width");
     assert!(master[0].iter().all(|&s| s == 0.25 + 0.25), "0.25 and 0.25");
     assert!(
         source_stem[0].iter().all(|&s| s == 0.5),
         "before the halver"
     );
     assert!(half_stem[0].iter().all(|&s| s == 0.25), "the halver's own");
-    assert_eq!(wide_stem.len(), 3, "the node's width, not the root's");
+    assert_eq!(
+        wide_stem.len(),
+        3,
+        "the node's width, not the main output's"
+    );
     for (plane, level) in wide_stem.iter().zip([0.25, -0.5, 0.75]) {
         assert!(plane.iter().all(|&s| s == level), "channel at {level}");
     }
