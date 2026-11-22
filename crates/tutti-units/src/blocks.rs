@@ -1,7 +1,8 @@
 //! [`Blocks`]: a count of audio blocks.
 
 unit! {
-    /// A count of audio blocks. How many audio blocks something happened to: a plugin bridge's blocks that found no lent buffer, failed, or wrote a non-finite sample.
+    /// A count of audio blocks: how many of a graph node's process calls
+    /// something happened to.
     ///
     /// One count unit per thing counted, so a count of blocks cannot be added
     /// to a count of frames ([`Samples`](crate::Samples)) or of any other

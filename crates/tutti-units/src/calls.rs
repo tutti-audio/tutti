@@ -1,7 +1,7 @@
 //! [`Calls`]: a count of calls.
 
 unit! {
-    /// A count of calls. How many calls something happened to: calls refused because they came from the wrong thread, round trips that panicked, snapshots that failed.
+    /// A count of calls: how many calls something happened to.
     ///
     /// One count unit per thing counted, so a count of calls cannot be added
     /// to a count of frames ([`Samples`](crate::Samples)) or of any other

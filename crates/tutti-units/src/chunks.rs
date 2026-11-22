@@ -1,7 +1,8 @@
 //! [`Chunks`]: a count of transfer chunks.
 
 unit! {
-    /// A count of transfer chunks. How many chunks of a pipelined transfer something happened to: a plugin-server pipeline's abandoned, late or answered chunks.
+    /// A count of transfer chunks: how many chunks of a pipelined transfer
+    /// something happened to.
     ///
     /// One count unit per thing counted, so a count of chunks cannot be added
     /// to a count of frames ([`Samples`](crate::Samples)) or of any other
