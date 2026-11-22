@@ -1,6 +1,8 @@
 use tutti_units::SampleRate;
 
+use super::overran;
 use super::pacer::{Due, MAX_LAG_BLOCKS, Pacer};
+use crate::faults::{StreamFaultKind, StreamFaults};
 
 const MS: i64 = 1_000_000;
 
@@ -136,4 +138,18 @@ fn a_stall_re_anchors_once_and_paces_from_the_new_anchor() {
     let gaps: Vec<i64> = rendered.windows(2).map(|w| w[1] - w[0]).collect();
     assert_eq!(gaps.iter().filter(|g| **g != 10 * MS).count(), 1);
     assert!(gaps.iter().all(|g| *g >= 10 * MS));
+}
+
+/// A re-anchor reaches the stream's faults as one overrun, and an overrun does
+/// not end the stream.
+#[test]
+fn a_re_anchor_records_one_overrun_and_does_not_disconnect() {
+    let faults = StreamFaults::new();
+    overran(&faults);
+    assert_eq!(faults.count(), 1);
+    assert_eq!(
+        faults.last().map(|f| f.kind),
+        Some(StreamFaultKind::Overrun)
+    );
+    assert!(!faults.is_disconnected());
 }

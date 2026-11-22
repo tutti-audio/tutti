@@ -1653,7 +1653,7 @@ mod tests {
     use tutti_graph::Prepare;
     use tutti_timeline::Timeline;
     use tutti_timeline::{MotionCommand, Transport};
-    use tutti_units::{Amplitude, Bpm};
+    use tutti_units::Amplitude;
 
     /// `GraphEngineError` is an `Error` a caller can box and move; the bound is
     /// checked where the function is written, so a non-`Send` field fails the build.
@@ -1686,53 +1686,6 @@ mod tests {
         engine.process_at(&mut out, 1_000_000_000_000);
         let second = reader.read().expect("dated").os_ns;
         assert_eq!(second - first, 10_666_667);
-    }
-
-    /// A tempo stored after the walk read it does not land at a cut: the change a
-    /// timed `Play` records mid-block carries the tempo read at the block's
-    /// start, and only the command's own effect (rolling). The store lands
-    /// at the next block.
-    #[test]
-    fn an_untimed_store_after_the_walk_waits_for_the_next_block() {
-        let transport = Transport::new(SampleRate::SR_48K);
-        let (mut ed, exec) = Editor::new(Prepare::new(
-            SampleRate::SR_48K,
-            MaxBlock::of(Samples::new(512)),
-        ));
-        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
-        transport
-            .motion()
-            .schedule(At::Frame(Frame::new(100)), MotionCommand::Play)
-            .expect("room");
-        let mut render = engine.graph.borrow_mut();
-        let mut pieces = GraphPieces {
-            changes: TransportChanges::NONE,
-        };
-        let mut crossings = BeatCrossings::new();
-        let walk = engine.walk(
-            Track {
-                transport: &mut render.transport,
-                crossings: &mut crossings,
-            },
-            Frame::ZERO,
-            512,
-            SampleRate::SR_48K,
-            None,
-            &mut pieces,
-        );
-        transport.settings().set_tempo(Bpm::of(200.0));
-        assert!(!walk.start.playing);
-        let changes = pieces.changes;
-        let change = changes.as_slice()[0];
-        assert_eq!(change.at.index(), 100);
-        assert!(change.to.playing, "the command's effect");
-        assert_eq!(
-            change.to.tempo,
-            Bpm::of(120.0),
-            "the tempo read at the block start"
-        );
-        // The next block reads it.
-        assert_eq!(render.transport.begin_block().tempo, Bpm::of(200.0));
     }
 
     /// The audio thread is never the side that panics: a block that meets

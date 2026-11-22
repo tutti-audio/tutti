@@ -413,6 +413,26 @@ mod tests {
         assert_eq!(a.begin_block().tempo, Bpm::of(143.5), "set_tempo is a map");
     }
 
+    /// A tempo stored after the block began does not land at a command's cut: the
+    /// position a timed `Play` reports carries the tempo `begin_block` read, and
+    /// only the command's own effect (rolling). The store lands at the next block.
+    #[test]
+    fn a_tempo_stored_after_begin_block_waits_for_the_next_block() {
+        let t = Transport::new(SampleRate::SR_48K);
+        let mut a = t.audio(SampleRate::SR_48K).expect("first");
+        t.motion
+            .schedule(At::Frame(Frame::new(100)), MotionCommand::Play)
+            .expect("room");
+        let start = a.begin_block();
+        assert_eq!(start.tempo, Bpm::of(120.0));
+        a.drain_commands();
+        t.settings.set_tempo(Bpm::of(200.0));
+        let (_, at_cut) = a.apply_command(0, false);
+        assert!(at_cut.playing, "the command's effect");
+        assert_eq!(at_cut.tempo, Bpm::of(120.0), "not the stored tempo");
+        assert_eq!(a.begin_block().tempo, Bpm::of(200.0), "the next block");
+    }
+
     /// A rolling transport over `points` (steps), at `rate`.
     fn rolling(rate: f64, points: &[(f64, f64)]) -> (Transport, TransportAudio) {
         rolling_on(rate, steps(points))

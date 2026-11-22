@@ -156,8 +156,7 @@ impl<F: Float> StreamDriver<F> for TimerDriver {
                             block.render_at(&mut scratch, os_ns, Some(Duration::ZERO));
                             faults.delivered();
                         }
-                        Due::Reanchored => faults
-                            .record_overrun("the timer fell behind and began its schedule again"),
+                        Due::Reanchored => overran(&faults),
                     }
                 }
             },
@@ -167,6 +166,12 @@ impl<F: Float> StreamDriver<F> for TimerDriver {
             task: Some(task),
         })
     }
+}
+
+/// What the loop records when the pacer re-anchors: one overrun, which does not
+/// end the stream.
+fn overran(faults: &StreamFaults) {
+    faults.record_overrun("the timer fell behind and began its schedule again");
 }
 
 #[cfg(test)]
