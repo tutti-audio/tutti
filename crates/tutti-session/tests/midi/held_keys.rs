@@ -5,7 +5,7 @@
 
 use crate::common::{Seen, blocks, offline, tap};
 use tutti_graph::{Cx, Event, IntoNode, Io, Node, NodeParts, Offset, Prepare, Shape, Status};
-use tutti_midi_runtime::{MIDI_INPUT_PORTS, MidiInputPorts, TimedMidiEvent};
+use tutti_midi_runtime::{MidiInputPorts, TimedMidiEvent};
 use tutti_session::{MidiRouteRule, Session, SessionNode};
 use tutti_ump::{Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Ump, Voice2};
 use tutti_units::{Beat, BeatDuration};
@@ -14,7 +14,7 @@ const MF: u16 = 0x8000;
 /// Stands in for the hardware input: sends what it is mailed on port 0.
 struct Src(tutti_fixtures::Shared<Vec<[u32; 4]>>);
 impl Src {
-    const SHAPE: Shape = Shape::EMPTY.events(0, MIDI_INPUT_PORTS);
+    const SHAPE: Shape = Shape::EMPTY.events(0, MidiInputPorts::FIRST_GROUP.count());
     const OUT: tutti_graph::OutEvents = Self::SHAPE
         .event_output(0)
         .expect("one event output is declared");
@@ -158,15 +158,10 @@ fn set_routes_with_a_held_key() {
 
 /// Stands in for a hardware input that hears Groups 1 and 2: sends each packet
 /// it is mailed out of the port its address names.
-struct GroupSrc(
-    tutti_fixtures::Shared<Vec<[u32; 4]>>,
-    MidiInputPorts,
-    Vec<tutti_graph::OutEvents>,
-);
+struct GroupSrc(tutti_fixtures::Shared<Vec<[u32; 4]>>, MidiInputPorts);
 impl GroupSrc {
     fn new(mail: tutti_fixtures::Shared<Vec<[u32; 4]>>, ports: MidiInputPorts) -> Self {
-        let outs = Self::declared(ports).event_outputs().collect();
-        Self(mail, ports, outs)
+        Self(mail, ports)
     }
     fn declared(ports: MidiInputPorts) -> Shape {
         Shape::EMPTY.events(0, ports.count())
@@ -180,10 +175,11 @@ impl Node for GroupSrc {
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         for w in self.0.lock().unwrap().drain(..) {
             let ump = Ump(w);
-            let port = self.1.port_of(&ump).expect("a Group the node hears");
-            let _ = io
-                .event_out(self.2[usize::from(port)])
-                .push(Event::midi(Offset::ZERO, ump));
+            let port = self
+                .1
+                .output_of(&Self::declared(self.1), &ump)
+                .expect("a Group the node hears");
+            let _ = io.event_out(port).push(Event::midi(Offset::ZERO, ump));
         }
         Status::Modified
     }

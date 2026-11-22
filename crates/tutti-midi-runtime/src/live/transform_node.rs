@@ -36,7 +36,7 @@ use tutti_graph::{
 };
 use tutti_midi_protocol::{Midi2Translator, MpeMode};
 use tutti_rt::{Counter, CounterWriter, Publisher, Reader, counter};
-use tutti_ump::MidiGroup;
+use tutti_ump::{MidiGroup, MidiGroupSet};
 use tutti_units::Losses;
 
 use super::input_node::{MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORT_CAPACITY, Staging};
@@ -73,10 +73,10 @@ pub struct MpeTransformNode {
     out: Box<[UmpAt]>,
     /// The events a block translates and the port holds.
     capacity: NonZeroU32,
-    /// The Groups that have carried an event, one bit each.
-    active: u16,
-    /// The Groups that were sent the mode in force, one bit each.
-    told: u16,
+    /// The Groups that have carried an event.
+    active: MidiGroupSet,
+    /// The Groups that were sent the mode in force.
+    told: MidiGroupSet,
     /// Translated events a block had no room for.
     dropped: CounterWriter<Losses>,
     /// The reading end of `dropped`, given to the controls.
@@ -92,23 +92,18 @@ impl std::fmt::Debug for MpeTransformNode {
     }
 }
 
-/// `group`'s bit in a mask of Groups.
-const fn bit(group: MidiGroup) -> u16 {
-    1 << group.get()
-}
-
 /// Sends `group` the mode's stops and default ranges at `at`; the Group is
 /// `told` if they all fit, and is otherwise sent them again ahead of its next
 /// event.
 fn tell(
     mpe: &MpeTranslator,
-    told: &mut u16,
+    told: &mut MidiGroupSet,
     group: MidiGroup,
     at: Offset,
     staging: &mut Staging<'_>,
 ) {
     if staging.whole(false, |send| mpe.zone_defaults(group, at, send)) {
-        *told |= bit(group);
+        told.insert(group);
     }
 }
 
@@ -147,8 +142,8 @@ impl MpeTransformNode {
             request_cell: mode.clone(),
             out: vec![BLANK; note_off_room(MIDI_INPUT_EVENT_CAPACITY)].into_boxed_slice(),
             capacity: MIDI_INPUT_PORT_CAPACITY,
-            active: 0,
-            told: 0,
+            active: MidiGroupSet::EMPTY,
+            told: MidiGroupSet::EMPTY,
             dropped,
             dropped_reader,
         }
@@ -194,11 +189,9 @@ impl<F: Float> Node<F> for MpeTransformNode {
         if requested != self.mode {
             self.mode = requested;
             self.mpe.set_mode(requested);
-            self.told = 0;
-            for group in MidiGroup::all() {
-                if self.active & bit(group) != 0 {
-                    tell(&self.mpe, &mut self.told, group, Offset::ZERO, &mut staging);
-                }
+            self.told = MidiGroupSet::EMPTY;
+            for group in self.active.iter() {
+                tell(&self.mpe, &mut self.told, group, Offset::ZERO, &mut staging);
             }
         }
         for event in io.events(Self::IN) {
@@ -208,8 +201,8 @@ impl<F: Float> Node<F> for MpeTransformNode {
             // A Group's first event since the mode was set starts it at the
             // mode's ranges.
             if let Some(group) = raw.group() {
-                self.active |= bit(group);
-                if self.told & bit(group) == 0 {
+                self.active.insert(group);
+                if !self.told.contains(group) {
                     tell(&self.mpe, &mut self.told, group, event.offset, &mut staging);
                 }
             }
@@ -242,7 +235,7 @@ impl<F: Float> Node<F> for MpeTransformNode {
     fn reset(&mut self) {
         self.translator.reset();
         self.mpe.reset();
-        self.told = 0;
+        self.told = MidiGroupSet::EMPTY;
     }
 }
 

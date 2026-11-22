@@ -29,8 +29,7 @@ pub use input_inlets::{
     ArrivalClock, DeviceInput, DeviceWriters, InputId, InputInlets, InputReaders, InputWriters,
 };
 pub use input_node::{
-    CHANNELLESS_PORT, MIDI_INPUT_DENSITY, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS,
-    MidiInputControls, MidiInputNode, MidiInputPorts,
+    MIDI_INPUT_DENSITY, MIDI_INPUT_EVENT_CAPACITY, MidiInputControls, MidiInputNode, MidiInputPorts,
 };
 pub use keys::{LIVE_INLET_CAPACITY, MidiKeys};
 pub use mpe_translator::MpeTranslator;

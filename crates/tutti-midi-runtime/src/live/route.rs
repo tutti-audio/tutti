@@ -13,6 +13,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use tutti_graph::{EventOutputPort, NodeKey};
 use tutti_ump::{MidiChannel, MidiGroup};
 
 use super::input_node::MidiInputPorts;
@@ -34,8 +35,8 @@ pub struct RouteRule<'a, T> {
     pub targets: &'a [T],
 }
 
-/// Compiles inbound routing rules into the input-node ports each listener
-/// takes edges from.
+/// Compiles inbound routing rules into the ports of the input nodes `inputs`
+/// (each laid out as `layout`) that each listener takes edges from.
 ///
 /// - A rule gives each of its targets [`MidiInputPorts::listening`] of its
 ///   Group and channel: that channel's port and its Group's channelless one,
@@ -50,12 +51,16 @@ pub struct RouteRule<'a, T> {
 /// in the result takes at least one port.
 ///
 /// ```
-/// use tutti_midi_runtime::{compile_routes, MidiInputPorts, RouteRule, CHANNELLESS_PORT};
+/// use tutti_graph::NodeKey;
+/// use tutti_midi_runtime::{compile_routes, MidiInputPorts, RouteRule};
 /// use tutti_ump::{MidiChannel, MidiGroup};
 ///
+/// let input = NodeKey(1);
+/// let layout = MidiInputPorts::FIRST_GROUP;
 /// let (lead, sampler) = ("lead", "sampler");
 /// let ports = compile_routes(
-///     MidiInputPorts::FIRST_GROUP,
+///     layout,
+///     &[input],
 ///     [RouteRule {
 ///         group: Some(MidiGroup::FIRST),
 ///         channel: Some(MidiChannel::FIRST),
@@ -63,18 +68,25 @@ pub struct RouteRule<'a, T> {
 ///     }],
 ///     Some(sampler),
 /// );
-/// assert_eq!(ports[&lead], [0, CHANNELLESS_PORT].into());
-/// assert_eq!(ports[&sampler], (1..16).collect()); // the unrouted channels
+/// let channel = |c| layout.channel(input, MidiGroup::FIRST, MidiChannel::of(c)).unwrap();
+/// let channelless = layout.channelless(input, MidiGroup::FIRST).unwrap();
+/// assert_eq!(ports[&lead], [channel(0), channelless].into());
+/// // The unrouted channels.
+/// assert_eq!(ports[&sampler], (1..16).map(channel).collect());
 /// ```
 pub fn compile_routes<'a, T: Copy + Ord + 'a>(
-    input: MidiInputPorts,
+    layout: MidiInputPorts,
+    inputs: &[NodeKey],
     rules: impl IntoIterator<Item = RouteRule<'a, T>>,
     fallback: Option<T>,
-) -> BTreeMap<T, BTreeSet<u16>> {
-    let mut ports: BTreeMap<T, BTreeSet<u16>> = BTreeMap::new();
-    let mut covered: BTreeSet<u16> = BTreeSet::new();
+) -> BTreeMap<T, BTreeSet<EventOutputPort>> {
+    let mut ports: BTreeMap<T, BTreeSet<EventOutputPort>> = BTreeMap::new();
+    let mut covered: BTreeSet<EventOutputPort> = BTreeSet::new();
     for rule in rules.into_iter().filter(|r| !r.targets.is_empty()) {
-        let theirs: BTreeSet<u16> = input.listening(rule.group, rule.channel).collect();
+        let theirs: BTreeSet<EventOutputPort> = inputs
+            .iter()
+            .flat_map(|&node| layout.listening(node, rule.group, rule.channel))
+            .collect();
         if theirs.is_empty() {
             // A Group the node does not hear: nothing to take.
             continue;
@@ -88,7 +100,9 @@ pub fn compile_routes<'a, T: Copy + Ord + 'a>(
         }
     }
     if let Some(target) = fallback {
-        let uncovered: BTreeSet<u16> = (0..input.count())
+        let uncovered: BTreeSet<EventOutputPort> = inputs
+            .iter()
+            .flat_map(|&node| layout.listening(node, None, None))
             .filter(|p| !covered.contains(p))
             .collect();
         if !uncovered.is_empty() {

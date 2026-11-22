@@ -8,7 +8,7 @@
 //! and inferred tempo) is [`MidiClockDecoder`](crate::MidiClockDecoder). A device sends one or the
 //! other, and which you decode is decided by the source, not by preference.
 
-use tutti_midi_protocol::{MtcTimeCode, QuarterFrame, SmpteTimecode};
+use tutti_midi_protocol::{MtcTimeCode, QuarterFrame, QuarterFramePiece, SmpteTimecode};
 use tutti_ump::{Message, System, Ump};
 
 /// Frames the eight pieces of a cycle take to send, and so how old the
@@ -50,7 +50,7 @@ pub struct MtcDecoder {
     /// The direction of the cycle being collected; `None` between cycles.
     partial: Option<MtcDirection>,
     /// The piece accepted last; `None` before the first, so a decoder may join mid-cycle.
-    last_piece: Option<u8>,
+    last_piece: Option<QuarterFramePiece>,
     /// The way the last step ran, and how many steps in a row ran that way.
     run: Option<(MtcDirection, u8)>,
     cycle: Option<MtcCycle>,
@@ -102,15 +102,15 @@ impl MtcDecoder {
     }
 
     fn piece(&mut self, quarter_frame: QuarterFrame) {
-        let piece = quarter_frame.piece.get();
+        let piece = quarter_frame.piece;
         let nibble = quarter_frame.nibble.get();
 
         // The step from the piece before: one up is forward, one down is
         // reverse (modulo 8: 7 to 0 starts the next forward cycle).
         let step = self.last_piece.and_then(|last| {
-            if piece == (last + 1) % 8 {
+            if piece == QuarterFramePiece::masked(last.get() + 1) {
                 Some(MtcDirection::Forward)
-            } else if piece == (last + 7) % 8 {
+            } else if piece == QuarterFramePiece::masked(last.get() + 7) {
                 Some(MtcDirection::Reverse)
             } else {
                 None
@@ -129,7 +129,7 @@ impl MtcDecoder {
         // discards it. Any other piece must continue the cycle in the direction
         // it began in, or the partial frame is discarded and the decoder waits
         // for the next start.
-        let begins = match (step, piece) {
+        let begins = match (step, piece.get()) {
             (Some(MtcDirection::Reverse) | None, 7) => Some(MtcDirection::Reverse),
             (Some(MtcDirection::Forward) | None, 0) => Some(MtcDirection::Forward),
             _ => None,
@@ -143,7 +143,7 @@ impl MtcDecoder {
             return;
         }
 
-        self.nibbles[piece as usize] = nibble;
+        self.nibbles[usize::from(piece.get())] = nibble;
         self.count += 1;
 
         if self.count >= 8 {
@@ -190,7 +190,7 @@ impl MtcDecoder {
 
     /// The piece (0 to 7) fed last, or `None` before the first.
     #[must_use]
-    pub fn last_piece(&self) -> Option<u8> {
+    pub fn last_piece(&self) -> Option<QuarterFramePiece> {
         self.last_piece
     }
 

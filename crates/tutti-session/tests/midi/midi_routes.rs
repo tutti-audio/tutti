@@ -10,10 +10,10 @@
 
 use std::collections::BTreeSet;
 
-use crate::common::{Keyed, with_input};
-use tutti_graph::NodeKey;
+use crate::common::{Keyed, every_input_port, input_ports, with_input};
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
-use tutti_midi_runtime::{CHANNELLESS_PORT, MIDI_INPUT_PORTS};
+use tutti_graph::{EventOutputPort, NodeKey};
+use tutti_midi_runtime::MidiInputPorts;
 use tutti_session::{Feeder, MidiError, MidiRouteRule, Session};
 use tutti_ump::MidiChannel;
 
@@ -37,14 +37,14 @@ fn session() -> (Keyed, NodeKey) {
 }
 
 /// The input ports that feed `node` by the routes.
-fn ports(s: &Session, input: NodeKey, node: NodeKey) -> BTreeSet<u16> {
+fn ports(s: &Session, input: NodeKey, node: NodeKey) -> BTreeSet<EventOutputPort> {
     s.graph_ref()
         .feed(node, Feeder::Routes)
         .unwrap()
         .iter()
         .map(|e| {
             assert_eq!(e.node(), input);
-            e.port()
+            *e
         })
         .collect()
 }
@@ -76,11 +76,11 @@ fn two_rules_on_one_target_take_the_union() {
         .unwrap();
     assert_eq!(
         ports(&s, input, lead.erase()),
-        BTreeSet::from([2, 5, CHANNELLESS_PORT])
+        input_ports(MidiInputPorts::FIRST_GROUP, input, 0, &[2, 5])
     );
     assert_eq!(
         ports(&s, input, pad.erase()),
-        (0..MIDI_INPUT_PORTS).collect()
+        every_input_port(MidiInputPorts::FIRST_GROUP, input)
     );
 }
 
