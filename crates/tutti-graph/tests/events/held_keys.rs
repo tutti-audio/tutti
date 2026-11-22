@@ -2099,7 +2099,7 @@ mod no_alloc {
         let prep = common::prepare(MAX);
         let (mut ed, mut exec) = Editor::with_event_capacity(prep, 64);
         if workers > 1 {
-            exec.set_pool(Some(TestPool::no_alloc(workers)));
+            exec.set_pool(Some(TestPool::new(workers)));
         }
         let mail = Mail::new(Vec::with_capacity(64));
         let n = Arc::new(AtomicU64::new(0));

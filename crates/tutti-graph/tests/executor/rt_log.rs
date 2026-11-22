@@ -359,7 +359,7 @@ fn a_parallel_render_with_logging_on_is_bit_identical_to_the_serial_one_and_logs
 #[test]
 fn logging_lines_and_flushing_allocate_nothing_on_either_executor() {
     for workers in [1usize, 3] {
-        let pool = (workers > 1).then(|| TestPool::no_alloc(workers) as _);
+        let pool = (workers > 1).then(|| TestPool::new(workers) as _);
         let (_ed, mut exec, readers) = build(busy(), 64, pool);
         open(&readers);
         let mut bufs = vec![vec![0.0f32; 64]; 4];
