@@ -45,7 +45,6 @@ mod read;
 use crate::smpte::{MtcRate, SmpteTimecode, TimecodeHours, TimecodeMinutes, TimecodeSeconds};
 use crate::tuning::TuningMessage;
 use alloc::boxed::Box;
-use alloc::vec;
 
 pub use machine_control::*;
 
@@ -658,11 +657,10 @@ impl UniversalReader {
     /// A reader of `group`'s System Exclusive for the device `device`.
     #[must_use]
     pub fn new(group: MidiGroup, device: SysexDeviceId) -> Self {
-        let room = SysexAssembler::room_for(MAX_MESSAGE, 1, 1);
         Self {
             group,
             device,
-            assembler: SysexAssembler::new(vec![0; room].into_boxed_slice(), MAX_MESSAGE, 1),
+            assembler: SysexAssembler::boxed(MAX_MESSAGE, 1, 1),
             corrupt: 0,
         }
     }
