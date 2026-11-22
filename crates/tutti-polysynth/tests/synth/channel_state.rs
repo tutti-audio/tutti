@@ -16,9 +16,7 @@ use tutti_fixtures::midi;
 use tutti_fixtures::signal::peak;
 use tutti_graph::Node;
 use tutti_midi_protocol::PitchBendSensitivity;
-use tutti_polysynth::{
-    Adsr, AllocationStrategy, OscillatorType, PolySynth, SynthConfig, VoiceMode,
-};
+use tutti_polysynth::{Adsr, Order, OscillatorType, PolySynth, Steal, SynthConfig, VoiceMode};
 use tutti_ump::{CCNumber, ControlValue, MidiChannel, NoteVelocity, RegisteredData, Rpn, Ump};
 use tutti_units::{Amplitude, Seconds, Semitones};
 
@@ -324,10 +322,10 @@ fn reset_returns_the_per_note_range_to_its_default() {
     assert_hz(&play(&mut h, &[], 0.5), A4 * ratio(12.0));
 }
 
-fn config_with(mode: VoiceMode, strategy: AllocationStrategy, voices: usize) -> SynthConfig {
+fn config_with(mode: VoiceMode, steal: Steal, voices: usize) -> SynthConfig {
     config()
         .voice_mode(mode)
-        .allocation_strategy(strategy)
+        .steal(steal)
         .polyphony(NonZeroUsize::new(voices).unwrap())
 }
 
@@ -371,7 +369,7 @@ fn a_retrigger_of_a_sostenuto_key_cuts_the_captured_note() {
 #[test]
 fn a_mono_or_legato_retrigger_sounds_and_ends_with_its_note_off() {
     for mode in [VoiceMode::Mono, VoiceMode::Legato] {
-        let mut h = hand(config_with(mode, AllocationStrategy::Oldest, 4));
+        let mut h = hand(config_with(mode, Steal::By(Order::Oldest), 4));
         play(&mut h, &[on(0, 60)], 0.1);
         play(&mut h, &[on(0, 60)], 0.1);
         assert!(peak(&play(&mut h, &[], 0.05)) > 0.1, "{mode:?} sounds");
@@ -381,11 +379,11 @@ fn a_mono_or_legato_retrigger_sounds_and_ends_with_its_note_off() {
     }
 }
 
-/// With every voice in use and `NoSteal`, a key struck again is released and
+/// With every voice in use and `Steal::Never`, a key struck again is released and
 /// finds no slot, so it goes silent while the other note sounds on.
 #[test]
 fn a_retrigger_in_a_full_nosteal_pool_silences_the_key() {
-    let mut h = hand(config_with(VoiceMode::Poly, AllocationStrategy::NoSteal, 2));
+    let mut h = hand(config_with(VoiceMode::Poly, Steal::Never, 2));
     play(&mut h, &[on(0, 60), on(0, 67)], 0.1);
     play(&mut h, &[on(0, 60)], RELEASE + 0.1);
     assert_eq!(h.active_voice_count(), 1);

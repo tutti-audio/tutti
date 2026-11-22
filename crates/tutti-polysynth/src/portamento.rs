@@ -9,7 +9,7 @@
 //! than in [`Hz`]; the [`Law`] of [`PortamentoConfig::curve`] reshapes only how far along
 //! that interval the glide has travelled.
 
-use tutti_curve::Law;
+use tutti_curve::{FrameProgress, Law};
 use tutti_units::{FrequencyRatio, Hz, Normalized, SampleRate, Seconds, Semitones};
 
 /// When a new note glides from the previous pitch rather than jumping to its
@@ -173,15 +173,13 @@ enum Glide {
     /// At rest. `current` is the pitch the last step computed, which an
     /// arrival leaves within rounding of `target`, the pitch last glided to.
     Idle { current: Hz, target: Hz },
-    /// Between `from` and `to`, `done` frames into a glide `length` frames
-    /// long (`done < length`). `current` is the pitch at `done / length` of
-    /// the way.
+    /// Between `from` and `to`, `progress` of the way (not arrived).
+    /// `current` is the pitch at that progress.
     Gliding {
         from: Hz,
         to: Hz,
         current: Hz,
-        done: f64,
-        length: f64,
+        progress: FrameProgress,
     },
 }
 
@@ -233,19 +231,11 @@ impl Portamento {
                 self.config.time.get().get() * interval.max(MIN_INTERVAL_OCTAVES)
             };
 
-            // The glide length in frames, fractional: progress is `done / length`.
-            let glide_samples = glide_time * self.sample_rate.get();
-            let length = if glide_samples > 0.0 {
-                glide_samples
-            } else {
-                1.0
-            };
             self.glide = Glide::Gliding {
                 from,
                 to: freq,
                 current: from,
-                done: 0.0,
-                length,
+                progress: FrameProgress::new(glide_time * self.sample_rate.get()),
             };
         } else {
             self.glide = Glide::Idle {
@@ -271,8 +261,7 @@ impl Portamento {
                 from,
                 to,
                 current: from,
-                done: 0.0,
-                length: glide_samples,
+                progress: FrameProgress::new(glide_samples),
             }
         };
     }
@@ -296,13 +285,12 @@ impl Portamento {
             Glide::Gliding {
                 from,
                 to,
-                done,
-                length,
+                mut progress,
                 ..
             } => {
-                let done = done + 1.0;
-                let current = glide_at(self.config.curve, from, to, done / length);
-                self.glide = Self::after_step(from, to, current, done, length);
+                progress.advance(1);
+                let current = glide_at(self.config.curve, from, to, progress.get());
+                self.glide = Self::after_step(from, to, current, progress);
                 current
             }
         }
@@ -320,33 +308,23 @@ impl Portamento {
             from,
             to,
             mut current,
-            mut done,
-            length,
+            mut progress,
         } = self.glide
         else {
             return self.target();
         };
-        let mut stepped = false;
-        let mut arrived_early = false;
-        for _ in 0..frames {
-            if done >= length {
-                // `tick` returns the target here, and every later tick too.
-                arrived_early = true;
-                break;
-            }
-            done += 1.0;
-            stepped = true;
+        // `tick` returns the target once arrived, and every later tick too.
+        let taken = progress.advance(frames);
+        if taken > 0 {
+            current = glide_at(self.config.curve, from, to, progress.get());
         }
-        if stepped {
-            current = glide_at(self.config.curve, from, to, done / length);
-        }
-        self.glide = Self::after_step(from, to, current, done, length);
-        if arrived_early { to } else { current }
+        self.glide = Self::after_step(from, to, current, progress);
+        if taken < frames { to } else { current }
     }
 
-    /// The state after a step that left the glide `done` frames into `length`.
-    fn after_step(from: Hz, to: Hz, current: Hz, done: f64, length: f64) -> Glide {
-        if done >= length {
+    /// The state after a step that left the glide at `progress`.
+    fn after_step(from: Hz, to: Hz, current: Hz, progress: FrameProgress) -> Glide {
+        if progress.has_arrived() {
             Glide::Idle {
                 current,
                 target: to,
@@ -356,8 +334,7 @@ impl Portamento {
                 from,
                 to,
                 current,
-                done,
-                length,
+                progress,
             }
         }
     }
@@ -400,8 +377,8 @@ impl Portamento {
 /// The pitch at `progress` along the glide from `from` to `to`, through
 /// `curve`.
 #[inline]
-fn glide_at(curve: Law, from: Hz, to: Hz, progress: f64) -> Hz {
-    let t = curve.eval(Normalized::clamped(progress));
+fn glide_at(curve: Law, from: Hz, to: Hz, progress: Normalized) -> Hz {
+    let t = curve.eval(progress);
     // Equal steps in pitch: `from` moved `t` of the way along its interval to `to`.
     // A pitch with no ratio (not above zero) stays at `from`.
     let interval =

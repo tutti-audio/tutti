@@ -356,12 +356,8 @@ fn svf_gain_matches_the_closed_form<F: SynthFloat>() {
 }
 
 #[test]
-fn the_lane_svf_gain_is_the_closed_form_at_f32() {
+fn the_lane_svf_gain_is_the_closed_form_at_both_widths() {
     svf_gain_matches_the_closed_form::<f32>();
-}
-
-#[test]
-fn the_lane_svf_gain_is_the_closed_form_at_f64() {
     svf_gain_matches_the_closed_form::<f64>();
 }
 
@@ -512,22 +508,14 @@ fn a_bank_peaks_at_the_saturation_of_its_model() {
 }
 
 #[test]
-fn the_lane_per_stage_ladder_is_the_scalar_solve_at_f32() {
+fn the_lane_per_stage_ladder_is_the_scalar_solve_at_both_widths() {
     lane_per_stage_ladder_is_the_scalar_solve::<f32>();
-}
-
-#[test]
-fn the_lane_per_stage_ladder_is_the_scalar_solve_at_f64() {
     lane_per_stage_ladder_is_the_scalar_solve::<f64>();
 }
 
 #[test]
-fn the_lane_ladder_gain_is_the_closed_form_at_f32() {
+fn the_lane_ladder_gain_is_the_closed_form_at_both_widths() {
     ladder_gain_matches_the_closed_form::<f32>();
-}
-
-#[test]
-fn the_lane_ladder_gain_is_the_closed_form_at_f64() {
     ladder_gain_matches_the_closed_form::<f64>();
 }
 
@@ -645,12 +633,8 @@ fn a_db_linear_release_is_a_straight_line_in_decibels<F: SynthFloat>(epsilon: f6
 }
 
 #[test]
-fn a_db_linear_release_is_a_straight_line_in_decibels_at_f64() {
+fn a_db_linear_release_is_a_straight_line_in_decibels_at_both_widths() {
     a_db_linear_release_is_a_straight_line_in_decibels::<f64>(f64::EPSILON);
-}
-
-#[test]
-fn a_db_linear_release_is_a_straight_line_in_decibels_at_f32() {
     a_db_linear_release_is_a_straight_line_in_decibels::<f32>(f64::from(f32::EPSILON));
 }
 
@@ -752,61 +736,10 @@ fn release_level(from: f64, elapsed: usize, length: usize) -> f64 {
 /// the voice never ends. The level adds its slope compensated, so after a hundredth
 /// of the release it is a hundredth of the way down.
 ///
-/// The bound is 4 steps of `f32` at the starting level (`4 * 3e-8 = 1.2e-7`): the
-/// level's own rounding (1 step), the slope's relative rounding (`6e-8` of `0.27`),
-/// and the final rounding of the tail of the compensated sum (1 step) with margin.
-#[test]
-fn a_100_second_release_at_192_khz_moves_at_its_authored_slope_at_f32() {
-    const RELEASE: usize = 19_200_000;
-    /// One second of it, a hundredth of the release.
-    const ELAPSED: usize = RELEASE / 100;
-    let sustain = 0.27;
-    let env = Adsr::new(
-        Seconds::new(0.0),
-        Seconds::new(0.0),
-        Amplitude::new(sustain),
-        Seconds::new(100.0),
-    );
-    let mut b = extreme_bank::<f32>(SampleRate::SR_192K, env);
-    start(
-        &mut b,
-        0,
-        Hz::new(440.0),
-        Hz::new(20_000.0),
-        Resonance::NONE,
-    );
-    run(&mut b, 32);
-    let from = b.envelope(0).get();
-    assert_eq!(from, f64::from(sustain as f32), "the sustain level");
-    b.gate_off(0);
-    run(&mut b, ELAPSED);
-
-    let level = b.envelope(0).get();
-    let want = release_level(from, ELAPSED, RELEASE);
-    let bound = 4.0 * f64::from(f32::EPSILON) / 2.0 * 0.5;
-    assert!(
-        (level - want).abs() < bound,
-        "mid-release level {level}, closed form {want}, bound {bound}"
-    );
-
-    // The plain sum of the same slope, `level += slope`, which the envelope no longer
-    // does, stays where it began.
-    let slope = -(from as f32) / RELEASE as f32;
-    let mut plain = from as f32;
-    for _ in 0..ELAPSED {
-        plain += slope;
-    }
-    assert_eq!(
-        plain, from as f32,
-        "a plain f32 sum stalls at the starting level"
-    );
-}
-
-/// The same release at `f64`: the level is a closed form to a few ulp of `f64`.
-///
-/// The bound is 4 steps of `f64` at the starting level, `4 * 2^-54`.
-#[test]
-fn a_100_second_release_at_192_khz_moves_at_its_authored_slope_at_f64() {
+/// The bound is 4 steps of `F` at the starting level (`4 * 3e-8 = 1.2e-7` at `f32`, the
+/// level's own rounding, the slope's relative rounding and the final rounding of the
+/// compensated sum, with margin; `4 * 2^-54` at `f64`). Returns the starting level.
+fn a_100_second_release_moves_at_its_authored_slope<F: SynthFloat>(epsilon: f64) -> f64 {
     const RELEASE: usize = 19_200_000;
     /// One second of it, a hundredth of the release.
     const ELAPSED: usize = RELEASE / 100;
@@ -816,7 +749,7 @@ fn a_100_second_release_at_192_khz_moves_at_its_authored_slope_at_f64() {
         Amplitude::new(0.27),
         Seconds::new(100.0),
     );
-    let mut b = extreme_bank::<f64>(SampleRate::SR_192K, env);
+    let mut b = extreme_bank::<F>(SampleRate::SR_192K, env);
     start(
         &mut b,
         0,
@@ -826,17 +759,39 @@ fn a_100_second_release_at_192_khz_moves_at_its_authored_slope_at_f64() {
     );
     run(&mut b, 32);
     let from = b.envelope(0).get();
-    assert_eq!(from, 0.27);
     b.gate_off(0);
     run(&mut b, ELAPSED);
 
     let level = b.envelope(0).get();
     let want = release_level(from, ELAPSED, RELEASE);
-    let bound = 4.0 * f64::EPSILON / 2.0 * 0.5;
+    let bound = 4.0 * epsilon / 2.0 * 0.5;
     assert!(
         (level - want).abs() < bound,
         "mid-release level {level}, closed form {want}, bound {bound}"
     );
+    from
+}
+
+#[test]
+fn a_100_second_release_at_192_khz_moves_at_its_authored_slope_at_both_widths() {
+    let from = a_100_second_release_moves_at_its_authored_slope::<f32>(f64::from(f32::EPSILON));
+    assert_eq!(from, f64::from(0.27_f32), "the sustain level");
+    let from = a_100_second_release_moves_at_its_authored_slope::<f64>(f64::EPSILON);
+    assert_eq!(from, 0.27);
+}
+
+/// The plain sum of the slope, `level += slope`, which the envelope no longer does,
+/// stays where it began at `f32`.
+#[test]
+fn a_plain_f32_sum_of_a_100_second_releases_slope_stalls_at_the_starting_level() {
+    const RELEASE: usize = 19_200_000;
+    let from = 0.27_f32;
+    let slope = -from / RELEASE as f32;
+    let mut plain = from;
+    for _ in 0..RELEASE / 100 {
+        plain += slope;
+    }
+    assert_eq!(plain, from);
 }
 
 /// The distance between two phases on the unit circle.
@@ -898,12 +853,8 @@ fn pitch_after<F: SynthFloat>(freq: Hz, rate: SampleRate, frames: usize) {
 /// part of every sum to the phase's `6e-8` step, and drifts; the compensated one holds
 /// the pitch to the increment's own rounding.
 #[test]
-fn a_20_hz_voice_at_192_khz_keeps_its_phase_for_a_second_and_a_half_cycle_at_f32() {
+fn a_20_hz_voice_at_192_khz_keeps_its_phase_for_a_second_and_a_half_cycle_at_both_widths() {
     pitch_after::<f32>(Hz::new(20.0), SampleRate::SR_192K, 192_000 + 4_800);
-}
-
-#[test]
-fn a_20_hz_voice_at_192_khz_keeps_its_phase_for_a_second_and_a_half_cycle_at_f64() {
     pitch_after::<f64>(Hz::new(20.0), SampleRate::SR_192K, 192_000 + 4_800);
 }
 

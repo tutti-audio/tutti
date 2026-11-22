@@ -20,11 +20,11 @@ use crate::Portamento;
 use crate::bank::VoiceBank;
 use crate::lane::SynthFloat;
 use crate::mpe::{MpeControl, SLIDE_CENTER};
-use crate::tuning::A4_FREQ;
 use crate::unison::MAX_UNISON_VOICES;
 use crate::{FilterModConfig, FilterType, SynthConfig};
 use crate::{MpeVoiceState, UnisonEngine, UnisonVoiceParams, UnisonVoices};
 use tutti_dsp::{Lfo, LfoWave, PanLaw, pan_gains};
+use tutti_music::Note;
 use tutti_ump::{MidiChannel, NoteNumber};
 use tutti_units::{
     Amplitude, Depth, Hz, Normalized, Pan, Phase, Resonance, SampleRate, Samples, Seconds,
@@ -234,7 +234,7 @@ impl SynthVoice {
             snap_tone: false,
             snap_gain: false,
             start_phases: [Phase::START; MAX_UNISON_VOICES],
-            pitch: A4_FREQ,
+            pitch: Note::A4_HZ,
             base_filter_cutoff,
             base_filter_resonance,
             velocity_mod_value: Velocity::MAX,
@@ -249,13 +249,13 @@ impl SynthVoice {
             envelope_level: Amplitude::SILENT,
             active: false,
             mpe: MpeVoiceState::new(),
-            base_note_freq: A4_FREQ,
+            base_note_freq: Note::A4_HZ,
             tuned: None,
             tune: Semitones::UNISON,
             glide: Portamento::new(
                 config.portamento.clone().unwrap_or_default(),
                 sample_rate,
-                A4_FREQ,
+                Note::A4_HZ,
             ),
             sub_voices: unison_count,
         }
@@ -313,11 +313,11 @@ impl SynthVoice {
         self.cc_resonance_value = Normalized::of(0.0);
         self.lfo.reset();
         self.mpe.reset();
-        self.base_note_freq = A4_FREQ;
+        self.base_note_freq = Note::A4_HZ;
         self.tuned = None;
         self.tune = Semitones::UNISON;
-        self.pitch = A4_FREQ;
-        self.glide.reset(A4_FREQ);
+        self.pitch = Note::A4_HZ;
+        self.glide.reset(Note::A4_HZ);
     }
 
     /// Re-rates the glide.
