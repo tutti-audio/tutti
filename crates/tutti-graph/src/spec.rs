@@ -10,8 +10,8 @@
 //! two maps do not share a type.
 //!
 //! [`GraphSpec`] therefore **embeds** the `Topology` unchanged (a set of audio
-//! sources per sink port) and adds what is new beside it, with distinct port types ([`EventIn`],
-//! [`EventOut`]) so an audio port cannot be used as an event port by accident.
+//! sources per sink port) and adds what is new beside it, with distinct port types ([`EventInputPort`],
+//! [`EventOutputPort`]) so an audio port cannot be used as an event port by accident.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -30,7 +30,7 @@ use crate::param::{ParamIn, ParamMod, ParamRange};
 
 /// An event **input** port of a node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct EventIn {
+pub struct EventInputPort {
     /// The node.
     pub node: NodeKey,
     /// Which of its event input ports.
@@ -39,7 +39,7 @@ pub struct EventIn {
 
 /// An event **output** port of a node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct EventOut {
+pub struct EventOutputPort {
     /// The node.
     pub node: NodeKey,
     /// Which of its event output ports.
@@ -48,38 +48,38 @@ pub struct EventOut {
 
 /// One source of an event input port.
 ///
-/// Port kinds match by type: an event edge runs from an [`EventOut`] to an
-/// [`EventIn`], and an audio port is a different type, so an audio↔event
+/// Port kinds match by type: an event edge runs from an [`EventOutputPort`] to an
+/// [`EventInputPort`], and an audio port is a different type, so an audio↔event
 /// edge is not a graph error for `compile` to catch — it does not
 /// type-check:
 ///
 /// ```compile_fail
-/// use tutti_graph::{EventEdge, EventIn, GraphSpec};
+/// use tutti_graph::{EventEdge, EventInputPort, GraphSpec};
 /// use tutti_graph::OutputPort;
 /// use tutti_graph::NodeKey;
 /// let mut g = GraphSpec::default();
 /// let audio = OutputPort { node: NodeKey(1), port: 0 };
-/// g.connect_events(EventIn { node: NodeKey(2), port: 0 }, EventEdge::Direct(audio));
+/// g.connect_events(EventInputPort { node: NodeKey(2), port: 0 }, EventEdge::Direct(audio));
 /// ```
 ///
 /// ```
-/// use tutti_graph::{EventEdge, EventIn, EventOut, GraphSpec};
+/// use tutti_graph::{EventEdge, EventInputPort, EventOutputPort, GraphSpec};
 /// use tutti_graph::NodeKey;
 /// let mut g = GraphSpec::default();
-/// let events = EventOut { node: NodeKey(1), port: 0 };
-/// g.connect_events(EventIn { node: NodeKey(2), port: 0 }, EventEdge::Direct(events));
+/// let events = EventOutputPort { node: NodeKey(1), port: 0 };
+/// g.connect_events(EventInputPort { node: NodeKey(2), port: 0 }, EventEdge::Direct(events));
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EventEdge {
     /// This block's events from the named port.
-    Direct(EventOut),
+    Direct(EventOutputPort),
     /// The named port's events delayed by exactly `delay` frames — a
     /// declared cycle, exactly as `crate::FeedbackFrom` is for
     /// audio, with the same rule: the delay belongs to the edge, and must be
     /// at least the interpreter's maximum block (see `FeedbackFrom`).
     Feedback {
         /// The source port.
-        from: EventOut,
+        from: EventOutputPort,
         /// How far back, in frames.
         delay: Samples,
     },
@@ -88,14 +88,14 @@ pub enum EventEdge {
 impl EventEdge {
     /// The port the events leave from.
     #[must_use]
-    pub const fn from(self) -> EventOut {
+    pub const fn from(self) -> EventOutputPort {
         match self {
             Self::Direct(p) | Self::Feedback { from: p, .. } => p,
         }
     }
 
     /// A feedback edge from `from`, delayed by `delay` frames.
-    pub const fn feedback(from: EventOut, delay: Samples) -> Self {
+    pub const fn feedback(from: EventOutputPort, delay: Samples) -> Self {
         Self::Feedback { from, delay }
     }
 }
@@ -112,7 +112,7 @@ impl EventEdge {
 /// Audio edges live in the embedded `Topology`, a set of sources per input
 /// port; the compiler sums a set of two or more in source
 /// order (`Op::Sum`). Event ports
-/// ([`EventIn`], [`EventOut`]) are separate types, so an audio port cannot be
+/// ([`EventInputPort`], [`EventOutputPort`]) are separate types, so an audio port cannot be
 /// used as an event port by accident, and an event input may have several
 /// sources, merged by offset.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -125,11 +125,11 @@ pub struct GraphSpec {
     ///
     /// The `Vec`'s order does **not** matter: fan-in merges by offset, and
     /// events at equal offsets go in **source order**, the source's
-    /// `(NodeKey, port)` ([`EventOut`]'s `Ord`), whatever order they are
+    /// `(NodeKey, port)` ([`EventOutputPort`]'s `Ord`), whatever order they are
     /// listed in. [`connect_events`](Self::connect_events) keeps the list in
     /// that order, so two specs with the same wiring built in different
     /// orders compare equal.
-    pub events: BTreeMap<EventIn, Vec<EventEdge>>,
+    pub events: BTreeMap<EventInputPort, Vec<EventEdge>>,
     /// Unit generation per node. Bumping it is how a value says "same key, new
     /// unit" — a rebind or a replacement. Absent
     /// means generation 0.
@@ -137,7 +137,7 @@ pub struct GraphSpec {
     /// Event edges that require their sink to honour offsets at least this
     /// finely, keyed `(sink, source)` — see
     /// [`require_resolution`](Self::require_resolution).
-    pub required_resolution: BTreeMap<(EventIn, EventOut), Resolution>,
+    pub required_resolution: BTreeMap<(EventInputPort, EventOutputPort), Resolution>,
     /// Driven params, keyed on the param port (see
     /// [`connect_param`](Self::connect_param)): each one's range and event
     /// source. A port with no entry, or an entry with no source, reads its
@@ -275,14 +275,18 @@ impl GraphSpec {
     /// [`GraphInvalid::GainWithoutEdge`]), `from`'s node must be in the graph
     /// ([`GraphInvalid::UnknownGainNode`]), and `from`'s port must be an
     /// event output of it (`compile`'s `CompileError::GainSourceOutOfRange`).
-    pub fn connect_edge_gain(&mut self, id: EdgeId, from: EventOut) -> Option<EventOut> {
+    pub fn connect_edge_gain(
+        &mut self,
+        id: EdgeId,
+        from: EventOutputPort,
+    ) -> Option<EventOutputPort> {
         self.gains.entry(id).or_default().source.replace(from)
     }
 
     /// Stops driving edge `id`'s gain from `from`. Returns whether `from`
     /// was its source. The edge keeps its entry (its base and range, and so
     /// its place in the sum); with no source it reads its base.
-    pub fn disconnect_edge_gain(&mut self, id: EdgeId, from: EventOut) -> bool {
+    pub fn disconnect_edge_gain(&mut self, id: EdgeId, from: EventOutputPort) -> bool {
         let Some(g) = self.gains.get_mut(&id) else {
             return false;
         };
@@ -355,7 +359,7 @@ impl GraphSpec {
     /// Adds one event source to `at`, in source order (see
     /// [`events`](Self::events)). A source already listed at `at` is added
     /// again, and [`validate`](Self::validate) refuses the duplicate.
-    pub fn connect_events(&mut self, at: EventIn, edge: EventEdge) {
+    pub fn connect_events(&mut self, at: EventInputPort, edge: EventEdge) {
         let sources = self.events.entry(at).or_default();
         let i = sources.partition_point(|e| e.from() <= edge.from());
         sources.insert(i, edge);
@@ -375,12 +379,17 @@ impl GraphSpec {
     /// checks it): remove edges with [`disconnect_events`](Self::disconnect_events),
     /// which drops the mark too (editing `events` by hand does not), or drop
     /// a mark alone with [`clear_resolution`](Self::clear_resolution).
-    pub fn require_resolution(&mut self, at: EventIn, from: EventOut, resolution: Resolution) {
+    pub fn require_resolution(
+        &mut self,
+        at: EventInputPort,
+        from: EventOutputPort,
+        resolution: Resolution,
+    ) {
         self.required_resolution.insert((at, from), resolution);
     }
 
     /// Drops the resolution mark on `from → at`, if any.
-    pub fn clear_resolution(&mut self, at: EventIn, from: EventOut) {
+    pub fn clear_resolution(&mut self, at: EventInputPort, from: EventOutputPort) {
         self.required_resolution.remove(&(at, from));
     }
 
@@ -388,7 +397,7 @@ impl GraphSpec {
     /// resolution mark with it — so a disconnect can never leave a stale mark
     /// that fails every later [`validate`](Self::validate). Returns whether an
     /// edge was removed.
-    pub fn disconnect_events(&mut self, at: EventIn, from: EventOut) -> bool {
+    pub fn disconnect_events(&mut self, at: EventInputPort, from: EventOutputPort) -> bool {
         let Some(sources) = self.events.get_mut(&at) else {
             return false;
         };
@@ -480,14 +489,14 @@ impl GraphSpec {
     ///   (one source, replaces the base, the declick, PDC), with the mix cell
     ///   (`Editor::set_mix`) as the base and the value clamped to `0..=1`
     ///   whatever range [`set_param_range`](Self::set_param_range) is given.
-    pub fn connect_param(&mut self, at: ParamIn, from: EventOut) -> Option<EventOut> {
+    pub fn connect_param(&mut self, at: ParamIn, from: EventOutputPort) -> Option<EventOutputPort> {
         self.params.entry(at).or_default().source.replace(from)
     }
 
     /// Stops driving param port `at` from `from`. Returns whether `from`
     /// was its source. The port keeps its range; with no source it reads its
     /// base.
-    pub fn disconnect_param(&mut self, at: ParamIn, from: EventOut) -> bool {
+    pub fn disconnect_param(&mut self, at: ParamIn, from: EventOutputPort) -> bool {
         let Some(m) = self.params.get_mut(&at) else {
             return false;
         };
@@ -567,7 +576,9 @@ impl GraphSpec {
             modes: _,
             mixes: _,
         } = self;
-        fn wired(p: &BTreeMap<ParamIn, ParamMod>) -> impl Iterator<Item = (&ParamIn, EventOut)> {
+        fn wired(
+            p: &BTreeMap<ParamIn, ParamMod>,
+        ) -> impl Iterator<Item = (&ParamIn, EventOutputPort)> {
             p.iter().filter_map(|(at, m)| Some((at, m.source?)))
         }
         *topology == other.topology
@@ -723,7 +734,7 @@ pub enum GraphInvalid {
     /// An event edge names a node that is not in the topology.
     UnknownEventNode {
         /// The sink port whose edge names it.
-        at: EventIn,
+        at: EventInputPort,
         /// The key that is not there.
         missing: NodeKey,
     },
@@ -732,9 +743,9 @@ pub enum GraphInvalid {
     /// per-edge PDC state is keyed by `(sink, source)`.
     DuplicateEventSource {
         /// The sink port.
-        at: EventIn,
+        at: EventInputPort,
         /// The repeated source.
-        from: EventOut,
+        from: EventOutputPort,
     },
     /// A generation is recorded for a node that does not exist.
     UnknownGeneration {
@@ -745,9 +756,9 @@ pub enum GraphInvalid {
     /// graph — a stale mark, which would otherwise pass unchecked.
     RequirementWithoutEdge {
         /// The sink port.
-        at: EventIn,
+        at: EventInputPort,
         /// The source port.
-        from: EventOut,
+        from: EventOutputPort,
     },
     /// A param edge names a node that is not in the topology.
     UnknownParamNode {
@@ -828,9 +839,9 @@ pub enum GraphInvalid {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ValidGraph {
     valid: Valid,
-    events: BTreeMap<EventIn, Vec<EventEdge>>,
+    events: BTreeMap<EventInputPort, Vec<EventEdge>>,
     generations: BTreeMap<NodeKey, u32>,
-    required_resolution: BTreeMap<(EventIn, EventOut), Resolution>,
+    required_resolution: BTreeMap<(EventInputPort, EventOutputPort), Resolution>,
     params: BTreeMap<ParamIn, ParamMod>,
     gains: BTreeMap<EdgeId, EdgeGain>,
     modes: BTreeMap<NodeKey, NodeMode>,
@@ -862,7 +873,7 @@ impl ValidGraph {
     }
 
     /// The checked event edges.
-    pub fn events(&self) -> &BTreeMap<EventIn, Vec<EventEdge>> {
+    pub fn events(&self) -> &BTreeMap<EventInputPort, Vec<EventEdge>> {
         &self.events
     }
 
@@ -872,7 +883,7 @@ impl ValidGraph {
     }
 
     /// The checked resolution requirements, keyed `(sink, source)`.
-    pub fn required_resolution(&self) -> &BTreeMap<(EventIn, EventOut), Resolution> {
+    pub fn required_resolution(&self) -> &BTreeMap<(EventInputPort, EventOutputPort), Resolution> {
         &self.required_resolution
     }
 
@@ -968,12 +979,12 @@ impl LatencyGraph for ValidGraph {
 /// The nodes that drive `node` through an event input or a param: its
 /// non-audio sources, as [`LatencyGraph::other_sources`].
 fn driving_nodes<'a>(
-    events: &'a BTreeMap<EventIn, Vec<EventEdge>>,
+    events: &'a BTreeMap<EventInputPort, Vec<EventEdge>>,
     params: &'a BTreeMap<ParamIn, ParamMod>,
     gains: &'a BTreeMap<EdgeId, EdgeGain>,
     node: NodeKey,
 ) -> impl Iterator<Item = NodeKey> + 'a {
-    let ports = EventIn { node, port: 0 }..=EventIn {
+    let ports = EventInputPort { node, port: 0 }..=EventInputPort {
         node,
         port: u16::MAX,
     };

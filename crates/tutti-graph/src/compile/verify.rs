@@ -1058,7 +1058,7 @@ mod tests {
     /// node 2's op index.
     fn modulated_plan() -> (Plan, usize) {
         use crate::param::ParamIn;
-        use crate::spec::EventOut;
+        use crate::spec::EventOutputPort;
         use tutti_units::UnitParam;
         let generator = Shape::source_unassigned(ChannelLayout::MONO);
         let sender = Shape::source_unassigned(ChannelLayout::MONO).with_events(0, 1);
@@ -1098,7 +1098,7 @@ mod tests {
                 node: NodeKey(2),
                 param: UnitParam::Cutoff.into(),
             },
-            EventOut {
+            EventOutputPort {
                 node: NodeKey(3),
                 port: 0,
             },
@@ -1718,7 +1718,7 @@ mod tests {
     /// 5 events, the other takes the default.
     #[test]
     fn the_verifier_rejects_a_merge_slot_too_small() {
-        use crate::spec::{EventEdge, EventIn, EventOut};
+        use crate::spec::{EventEdge, EventInputPort, EventOutputPort};
         let mut t = Topology::default();
         let mut shapes = Shapes::new();
         let src = Shape::EMPTY.with_events(0, 1);
@@ -1732,11 +1732,11 @@ mod tests {
         let mut g = GraphSpec::new(t);
         for k in [1, 2] {
             g.connect_events(
-                EventIn {
+                EventInputPort {
                     node: NodeKey(3),
                     port: 0,
                 },
-                EventEdge::Direct(EventOut {
+                EventEdge::Direct(EventOutputPort {
                     node: NodeKey(k),
                     port: 0,
                 }),

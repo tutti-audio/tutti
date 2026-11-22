@@ -758,7 +758,7 @@ mod tests {
 
         ed.insert(NodeKey(2), "b", crate::Unforkable(Count(Arc::clone(&seen))));
         ed.commit().expect("queued, not applied");
-        let to = crate::EventIn {
+        let to = crate::EventInputPort {
             node: NodeKey(2),
             port: 0,
         };

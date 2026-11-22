@@ -25,10 +25,10 @@ use common::{Kind, Pair, RingingNode, SpecBehaviour, TestNode, bits, prepare};
 use tutti_buffers::FoldError;
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
 use tutti_graph::{
-    Bus, BusRole, Buses, Cx, Edge, Editor, Event, EventEdge, EventIn, EventKind, EventOut,
-    Executor, FadeLaw, ForkByClone, ForkMode, ForkTarget, GraphInvalid, GraphSpec, InputPort, Io,
-    ModeError, Node, NodeKey, NodeMode, Offset, OutputPort, PassError, PortSource, Prepare, Shape,
-    Status, Topology, TransportPosition, Unforkable, ValidGraph,
+    Bus, BusRole, Buses, Cx, Edge, Editor, Event, EventEdge, EventInputPort, EventKind,
+    EventOutputPort, Executor, FadeLaw, ForkByClone, ForkMode, ForkTarget, GraphInvalid, GraphSpec,
+    InputPort, Io, ModeError, Node, NodeKey, NodeMode, Offset, OutputPort, PassError, PortSource,
+    Prepare, Shape, Status, Topology, TransportPosition, Unforkable, ValidGraph,
 };
 use tutti_ump::Ump;
 use tutti_units::{Latency, Samples, Tail};
@@ -1136,15 +1136,15 @@ impl Node for Src {
     fn reset(&mut self) {}
 }
 
-fn ev_out(n: u64) -> EventOut {
-    EventOut {
+fn ev_out(n: u64) -> EventOutputPort {
+    EventOutputPort {
         node: key(n),
         port: 0,
     }
 }
 
-fn ev_in(n: u64) -> EventIn {
-    EventIn {
+fn ev_in(n: u64) -> EventInputPort {
+    EventInputPort {
         node: key(n),
         port: 0,
     }

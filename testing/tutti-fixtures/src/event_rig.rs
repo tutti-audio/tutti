@@ -7,8 +7,8 @@ use tutti_platform::Instant;
 use crate::Record;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{
-    Cx, Editor, EventEdge, EventIn, EventKind, EventOut, Executor, ForkByClone, Io, Node, NodeKey,
-    OutputPort, PortSource, Prepare, Shape, Status, TransportPosition,
+    Cx, Editor, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor, ForkByClone, Io,
+    Node, NodeKey, OutputPort, PortSource, Prepare, Shape, Status, TransportPosition,
 };
 use tutti_ump::Ump;
 use tutti_units::{Frame, Moment, SampleRate, Samples};
@@ -163,11 +163,11 @@ impl EventRig {
     /// Feeds event input `to` of the sink from event output `from_port` of `from`.
     pub fn feed(&mut self, from: NodeKey, from_port: u16, to: u16) {
         self.editor.spec_mut().connect_events(
-            EventIn {
+            EventInputPort {
                 node: Self::SINK,
                 port: to,
             },
-            EventEdge::Direct(EventOut {
+            EventEdge::Direct(EventOutputPort {
                 node: from,
                 port: from_port,
             }),

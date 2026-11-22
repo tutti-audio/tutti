@@ -70,7 +70,7 @@ use crate::mode::NodeMix;
 use crate::node::Prepare;
 use crate::param::{ParamIn, ParamRange};
 use crate::plan::{Delta, Plan};
-use crate::spec::{EventIn, GraphSpec, ValidGraph};
+use crate::spec::{EventInputPort, GraphSpec, ValidGraph};
 use crate::tap::TapWriter;
 use crate::{EventTapId, MeterId, NodeKey, TapId};
 use tutti_buffers::Float;
@@ -743,7 +743,7 @@ impl<F: Float> Editor<F> {
     pub fn schedule(
         &mut self,
         at: At,
-        to: EventIn,
+        to: EventInputPort,
         payload: impl Into<Scheduled>,
     ) -> Result<CommandId, ScheduleError> {
         let payload = payload.into();

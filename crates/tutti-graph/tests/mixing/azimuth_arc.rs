@@ -11,8 +11,8 @@
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::testing as common;
 use tutti_graph::{
-    CommitError, Cx, Editor, EventOut, Executor, FadeLaw, GraphInvalid, Io, Law, Node, NodeKey,
-    ParamEvent, ParamIn, ParamInput, ParamRange, ParamSegment, Prepare, Shape, Status,
+    CommitError, Cx, Editor, EventOutputPort, Executor, FadeLaw, GraphInvalid, Io, Law, Node,
+    NodeKey, ParamEvent, ParamIn, ParamInput, ParamRange, ParamSegment, Prepare, Shape, Status,
     TransportPosition, Unforkable,
 };
 use tutti_graph::{OutputPort, PortSource};
@@ -105,7 +105,7 @@ fn graph(
     for p in [UnitParam::Azimuth, UnitParam::Elevation] {
         s.connect_param(
             at(p),
-            EventOut {
+            EventOutputPort {
                 node: NodeKey(SENDER),
                 port: 0,
             },
@@ -355,7 +355,7 @@ fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
                 node: probe(k),
                 param: UnitParam::Azimuth.into(),
             },
-            EventOut {
+            EventOutputPort {
                 node: NodeKey(SENDER),
                 port: 0,
             },

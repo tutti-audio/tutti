@@ -18,8 +18,8 @@ use tutti_ump::Ump;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, Event, EventEdge, EventIn, EventOut, Executor, Io, Node, Prepare, Shape, Status,
-    TransportPosition, Unforkable,
+    Cx, Editor, Event, EventEdge, EventInputPort, EventOutputPort, Executor, Io, Node, Prepare,
+    Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_units::{SampleRate, Samples};
 
@@ -77,11 +77,11 @@ fn rig(source: Source) -> Executor {
     ed.insert(NodeKey(1), "source", Unforkable(source));
     ed.insert(NodeKey(2), "sink", Unforkable(Sink));
     ed.spec_mut().connect_events(
-        EventIn {
+        EventInputPort {
             node: NodeKey(2),
             port: 0,
         },
-        EventEdge::Direct(EventOut {
+        EventEdge::Direct(EventOutputPort {
             node: NodeKey(1),
             port: 0,
         }),

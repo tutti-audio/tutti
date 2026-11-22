@@ -18,8 +18,8 @@ use std::num::NonZeroU32;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_buffers::MaxBlock;
 use tutti_graph::{
-    Cx, Editor, Event, EventEdge, EventIn, EventOut, Executor, Io, Node, NodeKey, ParamEvent,
-    ParamSegment, Prepare, Shape, Status, TransportPosition, Unforkable,
+    Cx, Editor, Event, EventEdge, EventInputPort, EventOutputPort, Executor, Io, Node, NodeKey,
+    ParamEvent, ParamSegment, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_ump::Ump;
 use tutti_units::{ParamId, SampleRate, Samples};
@@ -93,11 +93,11 @@ fn rig(k: u64, n: u32, mix: Mix) -> Executor {
     for i in 0..k {
         ed.insert(NodeKey(i + 1), "source", Unforkable(Source { n, mix }));
         ed.spec_mut().connect_events(
-            EventIn {
+            EventInputPort {
                 node: NodeKey(100),
                 port: 0,
             },
-            EventEdge::Direct(EventOut {
+            EventEdge::Direct(EventOutputPort {
                 node: NodeKey(i + 1),
                 port: 0,
             }),

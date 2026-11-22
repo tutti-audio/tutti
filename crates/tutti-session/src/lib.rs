@@ -221,10 +221,10 @@ pub use input::{Input, InputConfig, InputOpener, OpenedInput};
 #[cfg(feature = "midi")]
 pub use instrument::{AnyNode, InstrumentHandle, NotInstrument};
 pub use key::{
-    BusSink, BusWire, ChannelEdge, ChannelWire, Connection, Disconnection, EventEdge, EventInPort,
-    EventOutPort, EventTapPort, EventWire, Fanin, Inlet, InputPort, Key, MainBusWire, MainInput,
-    MainOutput, MainOutputDeclaration, MainSink, Outlet, OutputPort, Removal, SetSources, Weighted,
-    Wire,
+    BusSink, BusWire, ChannelEdge, ChannelWire, Connection, Disconnection, EventEdge,
+    EventInputPort, EventOutputPort, EventTapPort, EventWire, Fanin, Inlet, InputPort, Key,
+    MainBusWire, MainInput, MainOutput, MainOutputDeclaration, MainSink, Outlet, OutputPort,
+    Removal, SetSources, Weighted, Wire,
 };
 #[cfg(any(feature = "capture", feature = "midi"))]
 pub use latency::{Start, TakeLatency, Trim};

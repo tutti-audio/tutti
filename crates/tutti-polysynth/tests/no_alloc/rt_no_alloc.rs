@@ -453,7 +453,9 @@ fn a_first_block_on_a_cold_thread_is_allocation_free() {
 #[test]
 fn a_clip_into_a_synth_is_allocation_free() {
     use tutti_graph::NodeKey;
-    use tutti_graph::{Editor, EventEdge, EventIn, EventOut, Prepare, TransportPosition};
+    use tutti_graph::{
+        Editor, EventEdge, EventInputPort, EventOutputPort, Prepare, TransportPosition,
+    };
     use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
     use tutti_units::{Beat, Bpm, Samples};
 
@@ -482,11 +484,11 @@ fn a_clip_into_a_synth_is_allocation_free() {
         }),
     );
     ed.spec_mut().connect_events(
-        EventIn {
+        EventInputPort {
             node: NodeKey(2),
             port: 0,
         },
-        EventEdge::Direct(EventOut {
+        EventEdge::Direct(EventOutputPort {
             node: NodeKey(1),
             port: 0,
         }),

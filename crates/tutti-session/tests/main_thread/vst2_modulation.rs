@@ -16,7 +16,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_plugin_types::PluginRef;
 use tutti_session::{
-    DetachedSession, EventInPort, Feeder, PHASES, ParamRef, PhaseCx, RouteSpec, Session,
+    DetachedSession, EventInputPort, Feeder, PHASES, ParamRef, PhaseCx, RouteSpec, Session,
     SessionEvent,
 };
 use tutti_units::Normalized;
@@ -211,7 +211,7 @@ fn a_plugins_midi_rewiring_keeps_its_lanes() {
         side.render(128, PlanesMut::from_vecs(&mut out).unwrap());
         let mut sources: Vec<_> = s
             .graph_ref()
-            .sources(EventInPort::new(node, 0))
+            .sources(EventInputPort::new(node, 0))
             .unwrap()
             .into_iter()
             .map(|e| e.node())

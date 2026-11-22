@@ -4,7 +4,7 @@
 //! # The path
 //!
 //! ```text
-//!   Editor::schedule(At, EventIn, EventKind | ParamKind)
+//!   Editor::schedule(At, EventInputPort, EventKind | ParamKind)
 //!       │  checked against the plan sent last; stamped with its sequence
 //!       ▼
 //!   [ command ring, COMMAND_CAPACITY ]   plain `Copy` values: nothing boxed,
@@ -103,7 +103,7 @@ use crate::node::Env;
 use crate::node::MAX_PORTS;
 use crate::param_event::{ParamEvent, ParamKind};
 use crate::plan::Plan;
-use crate::spec::EventIn;
+use crate::spec::EventInputPort;
 use crate::time::{BeatCrossings, Due, Offset};
 
 /// Commands that may be outstanding at once: sent, and not yet delivered
@@ -142,7 +142,7 @@ pub enum ScheduleError {
     #[error("node {} has no event input {}", .to.node.0, .to.port)]
     NoSuchPort {
         /// The port asked for.
-        to: EventIn,
+        to: EventInputPort,
     },
     /// The node has an event input of that number but does not declare
     /// [`Shape::param_events`](crate::Shape::param_events), so a param ramp or
@@ -150,7 +150,7 @@ pub enum ScheduleError {
     #[error("node {} does not take param events: its shape does not declare them", .to.node.0)]
     NoParamEvents {
         /// The port asked for.
-        to: EventIn,
+        to: EventInputPort,
     },
     /// [`COMMAND_CAPACITY`] commands are outstanding (or, for a cancel,
     /// [`CANCEL_CAPACITY`] cancels are queued). Nothing was sent; retry once
@@ -220,7 +220,7 @@ pub(crate) struct Command {
     /// The commit it was checked against: it waits until that is applied.
     plan_seq: u64,
     at: At,
-    to: EventIn,
+    to: EventInputPort,
     payload: Scheduled,
     /// Its timeline position, unrounded — the tie-break after the offset:
     /// the frame it was scheduled for (rescaled, unrounded, on a rate
@@ -359,7 +359,7 @@ impl CommandTx {
         &mut self,
         plan_seq: u64,
         at: At,
-        to: EventIn,
+        to: EventInputPort,
         payload: Scheduled,
     ) -> Result<CommandId, ScheduleError> {
         if self.outstanding() >= COMMAND_CAPACITY as u64 {
@@ -799,7 +799,7 @@ mod tests {
 
     #[test]
     fn only_a_missing_plan_or_a_full_queue_is_transient() {
-        let to = EventIn {
+        let to = EventInputPort {
             node: NodeKey(1),
             port: 0,
         };
@@ -814,7 +814,7 @@ mod tests {
         tx.send(
             0,
             At::Frame(Frame::new(frame)),
-            EventIn {
+            EventInputPort {
                 node: NodeKey(1),
                 port: 0,
             },

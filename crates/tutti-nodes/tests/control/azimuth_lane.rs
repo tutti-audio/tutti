@@ -11,7 +11,7 @@ use atomic_float::AtomicF64;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_curve::{Breakpoint, Law, Trajectory};
 use tutti_graph::{
-    Cx, Editor, EventOut, Executor, ForkByClone, Io, Node, NodeKey, ParamIn, ParamInput,
+    Cx, Editor, EventOutputPort, Executor, ForkByClone, Io, Node, NodeKey, ParamIn, ParamInput,
     ParamRange, Prepare, Shape, Status, TransportChanges, TransportPosition,
 };
 use tutti_graph::{OutputPort, PortSource};
@@ -98,7 +98,7 @@ fn lane(ed: &mut Editor, key: u64, param: UnitParam, program: &ControlProgram, k
     ed.insert(NodeKey(key), "lane", node);
     ed.spec_mut().connect_param(
         at(param),
-        EventOut {
+        EventOutputPort {
             node: NodeKey(key),
             port: 0,
         },

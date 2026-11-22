@@ -16,9 +16,9 @@ use tutti_buffers::MaxBlock;
 use tutti_fixtures::midi;
 use tutti_graph::contract::{self, Direct, assert_declared_tail, drive_input};
 use tutti_graph::{
-    Editor, Env, EventCapacity, EventEdge, EventIn, EventInletNode, EventOut, Executor, Node,
-    NodeKey, OutputPort, PlayClock, PortSource, Prepare as GraphPrepare, Status, TransportChanges,
-    TransportPosition, Unforkable,
+    Editor, Env, EventCapacity, EventEdge, EventInletNode, EventInputPort, EventOutputPort,
+    Executor, Node, NodeKey, OutputPort, PlayClock, PortSource, Prepare as GraphPrepare, Status,
+    TransportChanges, TransportPosition, Unforkable,
 };
 use tutti_plugin_host::{ClientOverError, PluginNode, client_over};
 use tutti_plugin_types::fake::{Call, FakeLoaded, FakePlugin};
@@ -153,11 +153,11 @@ fn graph(fake_ring: Samples) -> (Editor, Executor, tutti_graph::EventInletWriter
     ed.insert(inlet_key, "inlet", inlet);
     ed.insert(plugin, "fake", Unforkable(node));
     ed.spec_mut().connect_events(
-        EventIn {
+        EventInputPort {
             node: plugin,
             port: 0,
         },
-        EventEdge::Direct(EventOut {
+        EventEdge::Direct(EventOutputPort {
             node: inlet_key,
             port: 0,
         }),

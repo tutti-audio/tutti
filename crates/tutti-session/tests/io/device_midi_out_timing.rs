@@ -14,7 +14,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
 use tutti_midi_runtime::{MidiOut, Outgoing, OutputLatency, OutputOffset, SendAt, Taken};
-use tutti_session::{EventInPort, LiveSession, Session};
+use tutti_session::{EventInputPort, LiveSession, Session};
 use tutti_ump::{Message, MidiGroup, System, Ump};
 use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity, Voice2};
 use tutti_units::{Beat, SampleRate, Samples, Seconds};
@@ -278,7 +278,7 @@ fn a_clips_notes_are_sent_when_their_frames_are_heard() {
         note(false, Beat::new(2.0)),
     ]));
     s.graph()
-        .set_sources(EventInPort::new(sink.node(), 0), [clip.events_out()])
+        .set_sources(EventInputPort::new(sink.node(), 0), [clip.events_out()])
         .expect("the sink's node takes events");
     let _ = s.update();
     let latency = Duration::from_millis(1500);

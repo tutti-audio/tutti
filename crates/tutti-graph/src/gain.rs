@@ -64,7 +64,7 @@ use tutti_units::{Amplitude, Samples, UnitAddr, UnitParam};
 use crate::lane::{fade_in, ramp_in};
 use crate::param::{ParamPorts, ParamRange, ParamRangeCell, ParamRanges, ParamState};
 use crate::param_event::ParamEvent;
-use crate::spec::EventOut;
+use crate::spec::EventOutputPort;
 
 /// A fade an edge's lane runs over [`DECLICK`](crate::DECLICK), counted from the
 /// lane's first block under it. It is a control of the lane (a cell the
@@ -138,7 +138,7 @@ pub struct EdgeGain {
     /// The event output that drives the gain, replacing the base from its
     /// first event on ([`GraphSpec::connect_edge_gain`](crate::GraphSpec::connect_edge_gain)).
     /// Its node must be in the graph; `None` reads the base.
-    pub source: Option<EventOut>,
+    pub source: Option<EventOutputPort>,
     /// The fade the lane runs ([`EdgeFade`]). A control: it needs no
     /// recompile once the entry exists.
     pub fade: EdgeFade,
@@ -489,7 +489,7 @@ impl<F: Float> SumLane<F> {
     pub(crate) fn weight<'a>(
         &'a mut self,
         frames: usize,
-        source: Option<(EventOut, &[ParamEvent])>,
+        source: Option<(EventOutputPort, &[ParamEvent])>,
     ) -> Weight<'a, F> {
         if self.cell.is_none() {
             return Weight::Unit;

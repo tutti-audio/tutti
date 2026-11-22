@@ -35,7 +35,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventIn, EventKind, Executor, IntoNode, Io, Node, Prepare, Shape, Status,
+    Cx, Editor, EventInputPort, EventKind, Executor, IntoNode, Io, Node, Prepare, Shape, Status,
     Unforkable,
 };
 use tutti_graph::{OutputPort, PortSource};
@@ -752,7 +752,7 @@ fn a_graph_beat_note_after_a_timed_start_lands_on_its_frame() {
     // Install the plan so the editor can schedule against it.
     render(&engine, ChannelLayout::MONO, &[256]);
     ed.collect();
-    let to = EventIn {
+    let to = EventInputPort {
         node: NodeKey(1),
         port: 0,
     };
@@ -978,7 +978,7 @@ fn a_declick_stop_stops_the_transport_on_its_frame() {
     ed2.collect();
     ed2.schedule(
         At::Beat(Beat::new(400.0 / FPB as f64)),
-        EventIn {
+        EventInputPort {
             node: NodeKey(1),
             port: 0,
         },

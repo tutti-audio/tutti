@@ -15,9 +15,9 @@ use tutti_buffers::ChannelLayout;
 use tutti_curve::{Breakpoint, Trajectory};
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventEdge, EventIn, EventOut, Executor, ForkByClone, ForkMode, ForkTarget, Io, Law,
-    Node, Offset, ParamEvent, ParamIn, ParamKind, ParamRange, ParamSegment, Prepare, Shape, Status,
-    TransportChanges, TransportPosition, control_in, declick_frames,
+    Cx, Editor, EventEdge, EventInputPort, EventOutputPort, Executor, ForkByClone, ForkMode,
+    ForkTarget, Io, Law, Node, Offset, ParamEvent, ParamIn, ParamKind, ParamRange, ParamSegment,
+    Prepare, Shape, Status, TransportChanges, TransportPosition, control_in, declick_frames,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_modulation::{
@@ -189,7 +189,7 @@ fn wire(ed: &mut Editor, key: u64, lane: ControlLaneNode, probe: u64) -> LaneCon
     let controls = ed.insert(NodeKey(key), "lane", lane).controls;
     ed.spec_mut().connect_param(
         cutoff(probe),
-        EventOut {
+        EventOutputPort {
             node: NodeKey(key),
             port: 0,
         },
@@ -204,11 +204,11 @@ fn wire_sink(ed: &mut Editor, key: u64, lane: ControlLaneNode, sink: u64) -> Lan
     ed.insert(NodeKey(sink), "sink", ForkByClone(SegSink::default()));
     let s = ed.spec_mut();
     s.connect_events(
-        EventIn {
+        EventInputPort {
             node: NodeKey(sink),
             port: 0,
         },
-        EventEdge::Direct(EventOut {
+        EventEdge::Direct(EventOutputPort {
             node: NodeKey(key),
             port: 0,
         }),
@@ -1148,11 +1148,11 @@ fn an_input_offset_is_exact_from_its_frame() {
 /// Connects the `Feed` at `feed` to the lane at `lane`'s event input.
 fn feed_into(ed: &mut Editor, feed: u64, lane: u64) {
     ed.spec_mut().connect_events(
-        EventIn {
+        EventInputPort {
             node: NodeKey(lane),
             port: 0,
         },
-        EventEdge::Direct(EventOut {
+        EventEdge::Direct(EventOutputPort {
             node: NodeKey(feed),
             port: 0,
         }),
@@ -1316,7 +1316,7 @@ fn a_resync_sends_a_steady_lane_to_its_new_target() {
     }
     let got = run(&mut ed, &mut exec);
     assert!(got[0].iter().all(|&v| v == 250.0), "probe 2 has it");
-    let from = EventOut {
+    let from = EventOutputPort {
         node: NodeKey(1),
         port: 0,
     };

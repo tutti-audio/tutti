@@ -17,7 +17,7 @@ use tutti_engine::Engine;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::contract::{ImpulseSource, Latent};
-use tutti_graph::{EventIn, EventKind, GraphBuilder, Prepare, Unforkable};
+use tutti_graph::{EventInputPort, EventKind, GraphBuilder, Prepare, Unforkable};
 use tutti_timeline::{MotionCommand, Transport};
 use tutti_ump::MidiChannel;
 use tutti_units::Latency;
@@ -97,8 +97,12 @@ fn beat_notes_after_a_timed_start_leave_both_paths_on_one_frame() {
         let beats = [0.0, 0.001, 0.5];
         for node in [direct, pdc] {
             for b in beats {
-                ed.schedule(At::Beat(Beat::new(b)), EventIn { node, port: 0 }, note_on())
-                    .expect("room");
+                ed.schedule(
+                    At::Beat(Beat::new(b)),
+                    EventInputPort { node, port: 0 },
+                    note_on(),
+                )
+                .expect("room");
             }
         }
         transport
