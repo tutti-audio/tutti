@@ -396,13 +396,14 @@ impl<F: Float + Lerp> ModDelayBank<F> {
     #[inline]
     #[must_use]
     pub fn position(&self, excursion: F) -> ReadPosition {
-        read_at(self.base, self.cap, excursion)
+        at_least_a_frame(self.base, excursion).min(self.cap)
     }
 
     /// Runs `input` into `output`, frame `i` at the excursion `delays[c].at(taken + 1 + i)` for
     /// channel `c` ([`position`](Self::position) of it) and `feedback.at(taken + 1 + i)`, then
-    /// takes the block's steps from the ramps. Each delay is floored at one frame where it is
-    /// read.
+    /// takes the block's steps from the ramps. Each frame's delay is driven, so it is held
+    /// between one frame (the feedback tap is read one before it) and the line's length where it
+    /// is read: a value past either end reads that end, with nothing to refuse it to.
     ///
     /// Each channel is a feedback delay at its delay: the line's own tap scaled by the
     /// feedback added to the input. Channel `c` of `input` feeds channel `c` of `output`. The
@@ -411,11 +412,9 @@ impl<F: Float + Lerp> ModDelayBank<F> {
     ///
     /// # Errors
     ///
-    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels.
-    ///
-    /// # Panics
-    ///
-    /// If `delays` has fewer ramps than the bank has channels.
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in
+    /// channels, or [`BlockMismatch::Ramps`] when `delays` has fewer ramps than the bank has
+    /// channels (more are not read).
     pub fn process(
         &mut self,
         delays: &mut [Ramp<F>],
@@ -424,11 +423,17 @@ impl<F: Float + Lerp> ModDelayBank<F> {
     ) -> Result<(), BlockMismatch> {
         let run = self.lines.len();
         expect_widths(block, run, run)?;
+        if delays.len() < run {
+            return Err(BlockMismatch::Ramps {
+                expected: run,
+                found: delays.len(),
+            });
+        }
         let frames = block.frames().get();
         let (input, mut output) = block.split();
         let delays = &mut delays[..run];
         let fb_first = feedback.steps_taken().saturating_add(1);
-        let (base, cap) = (self.base, self.cap);
+        let base = self.base;
         for (c, ((line, delay), out)) in self
             .lines
             .iter_mut()
@@ -442,7 +447,7 @@ impl<F: Float + Lerp> ModDelayBank<F> {
             let ys = &mut out.into_samples_mut()[..frames];
             for (i, (y, x)) in ys.iter_mut().zip(xs).enumerate() {
                 let step = u32::try_from(i).unwrap_or(u32::MAX);
-                let d = read_at(base, cap, delay.at(first.saturating_add(step)));
+                let d = at_least_a_frame(base, delay.at(first.saturating_add(step)));
                 let g = feedback.at(fb_first.saturating_add(step));
                 *y = delay_step(line, *x, d, g, READ);
             }
@@ -456,12 +461,11 @@ impl<F: Float + Lerp> ModDelayBank<F> {
     }
 }
 
-/// The delay of a read `excursion` frames from `base`, held between one frame and `cap`.
+/// The delay of a read `excursion` frames from `base`, held at one frame at least: the line's
+/// end holds it from the other side where it is read.
 #[inline(always)]
-fn read_at<F: Float>(base: ReadPosition, cap: ReadPosition, excursion: F) -> ReadPosition {
-    F::offset_position(base, excursion)
-        .max(ReadPosition::from_frames(Samples::new(1)))
-        .min(cap)
+fn at_least_a_frame<F: Float>(base: ReadPosition, excursion: F) -> ReadPosition {
+    F::offset_position(base, excursion).max(ReadPosition::from_frames(Samples::new(1)))
 }
 
 #[cfg(test)]

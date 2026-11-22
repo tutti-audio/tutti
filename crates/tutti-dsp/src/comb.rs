@@ -17,10 +17,38 @@ use crate::BlockMismatch;
 use crate::block::expect_widths;
 use core::num::NonZeroUsize;
 use tutti_buffers::{ChannelLayout, Float, InputOutput};
-use tutti_units::{Feedback, SampleRate, Samples, Tail};
+use tutti_units::{Feedback, SampleRate, Samples, Seconds, Tail};
 
+use crate::MaxDelay;
 use crate::TAIL_FLOOR;
-use crate::delay::{DelayRing, ring_seconds, trips};
+use crate::delay::{DelayRing, MAX_FRAMES, ring_seconds, trips};
+
+tutti_units::ranged! {
+    /// The delay of a comb: the time its ring holds.
+    ///
+    /// A range-checked value: finite, above zero and at most [`CAP`](Self::CAP).
+    /// [`new`](Self::new) refuses anything else and never clamps: the delay becomes an
+    /// allocation (a ring per channel), so a NaN, a negative time or one of 1e30 seconds must
+    /// not reach it.
+    #[derive(PartialOrd)]
+    CombDelay(Seconds), CombDelayError, "a comb delay, above zero and at most 10 seconds",
+    |raw| raw.get().is_finite() && raw.get() > 0.0 && raw.get() <= CombDelay::CAP.get()
+}
+
+impl CombDelay {
+    /// The longest delay [`new`](Self::new) accepts: 10 s, a [`MaxDelay`]'s
+    /// longest.
+    pub const CAP: Seconds = MaxDelay::CAP;
+
+    /// The frames of the ring at `rate`: `ceil(delay * rate)`, which is at least one for a
+    /// delay above zero. Saturated where [`MaxDelay::frames`] saturates, so an absurd rate
+    /// cannot make an allocation that aborts.
+    #[must_use]
+    pub fn frames(self, rate: SampleRate) -> NonZeroUsize {
+        NonZeroUsize::new(self.0.to_samples_ceil(rate).get().min(MAX_FRAMES))
+            .unwrap_or(NonZeroUsize::MIN)
+    }
+}
 
 /// Which way a [`CombFilter`] sums its delay in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -29,6 +57,24 @@ pub enum CombForm {
     Feedforward,
     /// The delay recirculates through the gain: an echo every `D` frames, falling by `g`.
     Feedback,
+}
+
+impl CombForm {
+    /// The coefficient of a comb of this form that a driven `gain` is held to: a gain that is
+    /// not finite is 0, a feedforward comb's is at least 0 and a feedback comb's is within
+    /// `0..=`[`Feedback::MAX_STABLE`] (the loop must decay).
+    ///
+    /// The hold of a coefficient driven live (a cell or a control signal sets it with no
+    /// control side to refuse a value): [`CombBank::retarget`] applies it.
+    #[must_use]
+    pub fn held(self, gain: Feedback) -> Feedback {
+        let gain = gain.get();
+        let gain = if gain.is_finite() { gain } else { 0.0 };
+        match self {
+            Self::Feedforward => Feedback::new(gain.max(0.0)),
+            Self::Feedback => Feedback::new_clamped(gain),
+        }
+    }
 }
 
 /// One comb filter of `D` frames over the float `F`.
@@ -126,8 +172,9 @@ impl<F: Float> CombFilter<F> {
 /// The controls of a [`CombBank`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CombControls {
-    /// The coefficient `g`. A feedback comb holds it inside [`Feedback::MAX_STABLE`] (the
-    /// loop must decay). One that is not finite reads as 0.
+    /// The coefficient `g`, driven live and held by the comb's form ([`CombForm::held`]): one
+    /// that is not finite reads as 0, a feedforward comb's is at least 0 and a feedback
+    /// comb's is inside [`Feedback::MAX_STABLE`] (the loop must decay).
     pub gain: Feedback,
 }
 
@@ -160,15 +207,10 @@ impl<F: Float> CombBank<F> {
         }
     }
 
-    /// Takes `controls` on every channel. No allocation.
+    /// Takes `controls` on every channel, the coefficient held by the form
+    /// ([`CombForm::held`]). No allocation.
     pub fn retarget(&mut self, controls: &CombControls) {
-        let gain = controls.gain.get();
-        let gain = if gain.is_finite() { gain } else { 0.0 };
-        let gain = match self.combs[0].form {
-            CombForm::Feedforward => Feedback::new(gain.max(0.0)),
-            CombForm::Feedback => Feedback::new_clamped(gain),
-        };
-        let gain = F::from_unit(gain);
+        let gain = F::from_unit(self.combs[0].form.held(controls.gain));
         for comb in &mut self.combs {
             comb.set_gain(gain);
         }

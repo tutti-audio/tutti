@@ -18,6 +18,7 @@ use std::sync::Arc;
 use tutti_buffers::Mono;
 use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, BusTopology, ChannelLayout};
 use tutti_buffers::{Interleaved, Wave};
+use tutti_dsp::CombDelay;
 use tutti_dsp::Wavetable;
 use tutti_dsp::{
     Algorithm, FmPatch, Operator, OperatorCount, OperatorFrequency, OperatorSpec, Partial,
@@ -518,7 +519,7 @@ fn comb_filter() {
             CombFilterNode::from(CombFilterConfig::new(
                 ChannelLayout::STEREO,
                 form,
-                Seconds::new(0.004),
+                CombDelay::of(Seconds::new(0.004)),
             ))
         })
         .control("coefficient", |r| {

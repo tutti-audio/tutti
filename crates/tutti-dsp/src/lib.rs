@@ -267,7 +267,7 @@ pub use beat::track_beat_frames;
 pub use bit_crush::{BitCrusher, BitCrusherControls, hold_frames, quantize};
 pub use block::BlockMismatch;
 pub use channel_group::CHANNEL_GROUP;
-pub use comb::{CombBank, CombControls, CombFilter, CombForm};
+pub use comb::{CombBank, CombControls, CombDelay, CombDelayError, CombFilter, CombForm};
 pub use control_rate::COEFF_INTERVAL;
 pub use convolver::{
     Convolver, IrSpectra, MatrixConvolver, MatrixConvolverConfig, MatrixConvolverError,
@@ -280,9 +280,9 @@ pub use decorrelator::{
 };
 pub(crate) use delay::delay_step;
 pub use delay::{
-    ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayLayout,
+    ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayError, DelayLayout,
     DelayLayoutBuilder, DelayLayoutError, DelayLine, DelayRamps, DelaySignals, DelayTiming,
-    FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError, InterpolationMode,
+    FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError, InterpolationMode, LinePosition,
     MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError, NoteTimes, NoteTimesError,
 };
 pub use diode_clipper::{ClipperDrive, ClipperDriveError, DiodeClipper, DiodeClipperControls};

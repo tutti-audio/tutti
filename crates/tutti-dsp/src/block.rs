@@ -51,6 +51,14 @@ pub enum BlockMismatch {
         /// The key's.
         found: Samples,
     },
+    /// A swept delay is given fewer delay ramps than it has channels.
+    #[error("{found} delay ramps for {expected} channels")]
+    Ramps {
+        /// The channels, one ramp each.
+        expected: usize,
+        /// The ramps given.
+        found: usize,
+    },
 }
 
 /// `block` has `input` channels in and `output` out.

@@ -1,11 +1,10 @@
 //! [`CombFilterNode`]: a delay summed with the signal, forward or back.
 
-use core::num::NonZeroUsize;
 use tutti_buffers::Float;
 use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
-use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, CombBank, CombControls, CombForm};
+use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, CombBank, CombControls, CombDelay, CombForm};
 use tutti_graph::{Cost, Shape};
-use tutti_units::{Feedback, SampleRate, Seconds, Tail};
+use tutti_units::{Feedback, SampleRate, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
@@ -15,16 +14,16 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 pub struct CombFilterConfig {
     width: ChannelLayout,
     form: CombForm,
-    delay: Seconds,
+    delay: CombDelay,
     controls: CombControls,
 }
 
 impl CombFilterConfig {
     /// A comb of `width` channels of `form` and `delay`, at
-    /// [`CombControls::DEFAULT`]. The delay rounds up to whole frames at the prepared rate and
-    /// is at least one; a delay that is not finite or is negative reads as one frame.
+    /// [`CombControls::DEFAULT`]. The delay rounds up to whole frames at the prepared rate; a
+    /// [`CombDelay`] is above zero, so it is at least one.
     #[must_use]
-    pub fn new(width: impl Into<ChannelLayout>, form: CombForm, delay: Seconds) -> Self {
+    pub fn new(width: impl Into<ChannelLayout>, form: CombForm, delay: CombDelay) -> Self {
         Self {
             width: width.into(),
             form,
@@ -92,14 +91,14 @@ control_set! {
 pub struct CombFilterKernel<F: Float> {
     width: ChannelLayout,
     form: CombForm,
-    delay: Seconds,
+    delay: CombDelay,
     rate: SampleRate,
     /// `None` until [`prepare`](Kernel::prepare).
     bank: Option<CombBank<F>>,
 }
 
 impl<F: Float> CombFilterKernel<F> {
-    fn new(width: ChannelLayout, form: CombForm, delay: Seconds) -> Self {
+    fn new(width: ChannelLayout, form: CombForm, delay: CombDelay) -> Self {
         Self {
             width,
             form,
@@ -125,15 +124,10 @@ impl<F: Float> Kernel for CombFilterKernel<F> {
     /// Sizes the rings at `rate`: the delay rounded up to whole frames (a re-prepare empties
     /// them).
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-        let delay = if self.delay.get() >= 0.0 {
-            self.delay
-        } else {
-            Seconds::ZERO
-        };
         self.rate = rate;
         self.bank = Some(CombBank::new(
             self.form,
-            NonZeroUsize::new(delay.to_samples_ceil(rate).get()).unwrap_or(NonZeroUsize::MIN),
+            self.delay.frames(rate),
             CombControls::DEFAULT.gain,
             self.width,
         ));
@@ -182,14 +176,18 @@ mod tests {
     use tutti_buffers::MaxBlock;
     use tutti_graph::Node;
     use tutti_graph::contract::{assert_declared_tail, assert_param_fork, prepared};
-    use tutti_units::{Samples, UnitParam};
+    use tutti_units::{Samples, Seconds, UnitParam};
+
+    fn delay(secs: f64) -> CombDelay {
+        CombDelay::of(Seconds::new(secs))
+    }
 
     /// 1 kHz: a delay of 4 ms is 4 frames.
     const RATE: SampleRate = SampleRate::of(1_000.0);
 
     fn node(form: CombForm, gain: f64) -> CombFilterNode<f32> {
         CombFilterNode::from(
-            CombFilterConfig::new(1u16, form, Seconds::new(0.004)).gain(Feedback::new(gain)),
+            CombFilterConfig::new(1u16, form, delay(0.004)).gain(Feedback::new(gain)),
         )
     }
 
@@ -212,7 +210,7 @@ mod tests {
         let empty = CombFilterNode::<f32>::from(CombFilterConfig::new(
             ChannelLayout::EMPTY,
             CombForm::Feedback,
-            Seconds::new(0.004),
+            delay(0.004),
         ));
         assert_eq!(empty.shape().audio_in().count(), 0);
     }
@@ -230,8 +228,7 @@ mod tests {
     #[test]
     fn the_node_is_the_comb_of_its_form() {
         let run = |form, gain| {
-            let mut k =
-                CombFilterKernel::<f32>::new(ChannelLayout::MONO, form, Seconds::new(0.004));
+            let mut k = CombFilterKernel::<f32>::new(ChannelLayout::MONO, form, delay(0.004));
             k.prepare(RATE, MaxBlock::of(Samples::new(32)));
             let mut x = vec![0.0f32; 32];
             x[0] = 1.0;

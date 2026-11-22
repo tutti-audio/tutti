@@ -1,6 +1,7 @@
 use super::*;
 use core::f64::consts::TAU;
 use tutti_buffers::{InputOutput, Planes, PlanesMut};
+use tutti_units::Seconds;
 
 /// The magnitude of the DTFT `sum h[n] e^{-j w n}` of an impulse response at the angular
 /// frequency `w`, in radians a frame.
@@ -150,4 +151,46 @@ fn a_one_frame_comb_is_one_frame_and_the_response_has_its_closed_form() {
         let want = if n == 0 { 0.0 } else { g.powi(n as i32 - 1) };
         assert!((got - want).abs() < 1e-15, "h[{n}] = {got}, want {want}");
     }
+}
+
+/// **A comb delay is above zero and at most 10 s**: zero, a negative time, a non-finite one
+/// and one past the cap are refused rather than raised to a frame, and the cap is accepted.
+/// It rounds up to whole frames at the rate: 4 ms at 1 kHz is 4 frames, 4.1 ms is 5, and one
+/// far under a frame is one.
+#[test]
+fn a_comb_delay_takes_exactly_the_finite_times_above_zero_to_the_cap() {
+    tutti_fixtures::check_range_contract(&tutti_fixtures::RangeContract {
+        new: CombDelay::new,
+        get: CombDelay::get,
+        of: Some(CombDelay::of),
+        valid: &[Seconds::new(1e-9), Seconds::new(0.004), CombDelay::CAP],
+        invalid: &[
+            Seconds::ZERO,
+            Seconds::new(-0.004),
+            Seconds::new(f64::NAN),
+            Seconds::new(f64::INFINITY),
+            Seconds::new(10.000_001),
+        ],
+    });
+    let rate = SampleRate::of(1_000.0);
+    let frames = |s: f64| CombDelay::of(Seconds::new(s)).frames(rate).get();
+    assert_eq!((frames(0.004), frames(0.004_1), frames(1e-9)), (4, 5, 1));
+}
+
+/// A driven coefficient is held by the comb's form: not finite is 0, a feedforward comb's is
+/// at least 0 and is not capped, a feedback comb's is within `0..=MAX_STABLE`; a coefficient
+/// inside is unchanged, the bounds included.
+#[test]
+fn a_driven_coefficient_is_held_by_the_form() {
+    let held = |form: CombForm, g: f64| form.held(Feedback::new(g)).get();
+    for form in [CombForm::Feedforward, CombForm::Feedback] {
+        assert_eq!(held(form, f64::NAN), 0.0);
+        assert_eq!(held(form, f64::INFINITY), 0.0);
+        assert_eq!(held(form, -0.5), 0.0);
+        assert_eq!(held(form, 0.0), 0.0);
+        assert_eq!(held(form, 0.5), 0.5);
+        assert_eq!(held(form, 0.99), 0.99);
+    }
+    assert_eq!(held(CombForm::Feedforward, 3.0), 3.0);
+    assert_eq!(held(CombForm::Feedback, 3.0), Feedback::MAX_STABLE.get());
 }

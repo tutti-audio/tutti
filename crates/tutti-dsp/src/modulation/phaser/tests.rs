@@ -13,6 +13,11 @@ const RATE: SampleRate = SampleRate::SR_48K;
 
 /// A chain of `stages` on `coefficients.len()` channels, run over `audio` (one slice per
 /// channel) in blocks of `block`.
+/// A bus of `width` channels.
+fn bus(width: usize) -> BusTopology {
+    BusTopology::default_for(ChannelLayout::clamped(width)).expect("a test width is one bus")
+}
+
 fn run(
     stages: usize,
     coefficients: &mut [Ramp<f32>],
@@ -20,10 +25,7 @@ fn run(
     audio: &[Vec<f32>],
     block: usize,
 ) -> Vec<Vec<f32>> {
-    let mut chain = PhaserChain::new(
-        Stages::of(stages),
-        ChannelLayout::clamped(coefficients.len()),
-    );
+    let mut chain = PhaserChain::new(Stages::of(stages), bus(coefficients.len()));
     run_on(&mut chain, coefficients, feedback, audio, block)
 }
 
@@ -442,7 +444,7 @@ fn a_silent_channel_stays_silent_and_each_channel_keeps_its_own_state() {
 #[test]
 fn reset_empties_the_chain() {
     let c = allpass_complement(Hz::new(1_000.0), RATE);
-    let mut chain = PhaserChain::new(Stages::of(6), ChannelLayout::clamped(2));
+    let mut chain = PhaserChain::new(Stages::of(6), bus(2));
     let mut coefficients = [Ramp::new(c); 2];
     let mut fb = Ramp::new(0.9);
     let loud = vec![vec![1.0f32; 300]; 2];
@@ -463,7 +465,7 @@ fn reset_empties_the_chain() {
 #[test]
 fn a_clone_continues_where_the_original_is() {
     let c = allpass_complement(Hz::new(1_000.0), RATE);
-    let mut chain = PhaserChain::new(Stages::of(4), ChannelLayout::clamped(1));
+    let mut chain = PhaserChain::new(Stages::of(4), bus(1));
     let mut coefficients = [Ramp::new(c)];
     let mut fb = Ramp::new(0.5);
     run_on(
@@ -576,7 +578,7 @@ fn an_f64_chain_is_the_all_pass_difference_equation_in_f64() {
         last = u;
         want[n] = u;
     }
-    let mut chain = PhaserChain::<f64>::new(Stages::of(stages), ChannelLayout::clamped(1));
+    let mut chain = PhaserChain::<f64>::new(Stages::of(stages), bus(1));
     let mut coefficients = [Ramp::new(a)];
     let mut feedback = Ramp::new(g);
     let mut y = vec![0.0f64; len];
@@ -678,4 +680,18 @@ fn an_f32_chain_at_its_lowest_sweeps_at_192_khz_inverts_a_sine_at_the_centre() {
         worst_old > 2.0 * worst_bound,
         "the stored coefficient's worst error {worst_old} against the bound {worst_bound} (chain {worst_new})"
     );
+}
+
+/// A chain takes a bus's widest width, and a bus is no wider: a chain at
+/// `MAX_PHASER_CHANNELS` is built and a bus past it is refused by its type.
+#[test]
+fn the_widest_chain_is_a_bus_and_a_wider_bus_is_refused() {
+    assert!(BusTopology::default_for(ChannelLayout::clamped(MAX_PHASER_CHANNELS + 1)).is_none());
+    let c = allpass_complement(Hz::new(1_000.0), RATE);
+    let mut chain = PhaserChain::new(Stages::of(2), bus(MAX_PHASER_CHANNELS));
+    let mut coefficients = [Ramp::new(c); MAX_PHASER_CHANNELS];
+    let mut fb = Ramp::new(0.0);
+    let x = vec![vec![1.0f32; 8]; MAX_PHASER_CHANNELS];
+    let y = run_on(&mut chain, &mut coefficients, &mut fb, &x, 8);
+    assert_eq!(y.len(), MAX_PHASER_CHANNELS);
 }
