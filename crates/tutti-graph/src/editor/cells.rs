@@ -171,6 +171,11 @@ impl GainCells {
         self.0.values().map(GainCell::reclaim).sum()
     }
 
+    /// Whether edge `id` has a cell.
+    pub(super) fn has(&self, id: EdgeId) -> bool {
+        self.0.contains_key(&id)
+    }
+
     /// Makes edge `id`'s cell from `values`, in place of any it had: a lane
     /// declared again starts from unity, the default range and no fade.
     pub(super) fn declare(&mut self, id: EdgeId, values: &GraphValues) {
@@ -209,16 +214,23 @@ impl GainCells {
                     cell.store_fade(fade);
                     return (id, cell);
                 }
-                let fade = if spec.gains.contains_key(&id) {
-                    values.fade(id)
-                } else {
-                    EdgeFade::None
-                };
                 let range = values.gain_range(id);
-                let cell = self
-                    .0
-                    .entry(id)
-                    .or_insert_with(|| GainCell::new(values.base(id), range));
+                // An entry has its cell from its declaration; a lane without
+                // one is derived by this commit (the main output crossfade's),
+                // so its cell is made here.
+                let (cell, fade) = if spec.gains.contains_key(&id) {
+                    let cell = self
+                        .0
+                        .get(&id)
+                        .expect("a gain entry has its cell from its declaration");
+                    (cell, values.fade(id))
+                } else {
+                    let cell = self
+                        .0
+                        .entry(id)
+                        .or_insert_with(|| GainCell::new(values.base(id), range));
+                    (&*cell, EdgeFade::None)
+                };
                 cell.store_range(range);
                 cell.store_fade(fade);
                 (id, cell.clone())

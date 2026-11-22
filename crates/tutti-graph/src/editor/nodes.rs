@@ -511,8 +511,7 @@ impl<F: Float> Editor<F> {
         }
         self.remove_keeping(key, Some((&edges, &feeds)));
         for id in edges {
-            let gain = self.spec.gains.get(&id).copied().unwrap_or_default();
-            self.spec.set_edge_gain(id, gain);
+            self.declare_lane(id);
             self.values.set_fade(id, EdgeFade::Out);
         }
         for (from, to) in feeds {

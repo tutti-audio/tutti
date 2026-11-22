@@ -137,17 +137,28 @@ impl<F: Float> Editor<F> {
 
     /// Gives edge `id` a gain lane if it has none, starting at unity with the
     /// default range: a value left from an earlier lane is dropped. The lane's
-    /// cell is made here, so it can be bound before a commit; an entry written
-    /// through [`spec_mut`](Self::spec_mut) gets its cell the first time a
-    /// control reaches the edge.
-    fn declare_lane(&mut self, id: EdgeId) {
-        let fresh = !self.spec.gains.contains_key(&id);
-        if fresh {
+    /// cell is made here, so it can be bound before a commit.
+    pub(super) fn declare_lane(&mut self, id: EdgeId) {
+        if !self.spec.gains.contains_key(&id) {
             self.values.forget_edge(id);
             self.spec.set_edge_gain(id, EdgeGain::default());
-        }
-        if fresh || self.cells.gains.get(id).is_none() {
             self.cells.gains.declare(id, &self.values);
+        } else if !self.cells.gains.has(id) {
+            self.cells.gains.declare(id, &self.values);
+        }
+    }
+
+    /// Makes the cell of every entry of the spec that has none: the entries
+    /// written through [`spec_mut`](Self::spec_mut) (and a builder's or a
+    /// fork's whole wiring), which no declaration saw. It is the one place a
+    /// cell is made for an entry the spec already holds, run by every control
+    /// that declares a lane and by each commit before it hands cells out.
+    pub(super) fn declare_gain_cells(&mut self) {
+        let ids: Vec<EdgeId> = self.spec.gains.keys().copied().collect();
+        for id in ids {
+            if !self.cells.gains.has(id) {
+                self.cells.gains.declare(id, &self.values);
+            }
         }
     }
 
