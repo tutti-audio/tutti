@@ -706,7 +706,7 @@ impl Node for Tally {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
-        for (p, n) in self.0.iter().enumerate() {
+        for (p, n) in (0..).zip(self.0.iter()) {
             n.fetch_add(io.events(p).len() as u64, Ordering::Relaxed);
         }
         Status::Silent
@@ -1056,7 +1056,7 @@ impl Node for ParamTally {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
-        for (p, n) in self.0.iter().enumerate() {
+        for (p, n) in (0..).zip(self.0.iter()) {
             n.fetch_add(io.events(p).params().len() as u64, Ordering::Relaxed);
         }
         Status::Silent
@@ -1882,8 +1882,8 @@ impl Node for Wire {
             }
         }
         if self.ein > 0 {
-            for q in 0..self.eout as usize {
-                for &e in io.events(q % self.ein as usize) {
+            for q in 0..self.eout {
+                for &e in io.events(q % self.ein) {
                     let _ = io.event_out(q).push(e);
                 }
             }
@@ -2520,7 +2520,7 @@ impl Node for OffCount {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
         for port in 0..self.inputs {
-            for e in io.events(usize::from(port)) {
+            for e in io.events(port) {
                 if let EventKind::Midi(Ump(w)) = e.kind
                     && w[0] >> 28 == 2
                     && (w[0] >> 20) & 0xf == 8

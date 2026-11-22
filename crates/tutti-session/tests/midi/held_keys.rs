@@ -159,9 +159,7 @@ impl Node for GroupSrc {
         for w in self.0.lock().unwrap().drain(..) {
             let ump = Ump(w);
             let port = self.1.port_of(&ump).expect("a Group the node hears");
-            let _ = io
-                .event_out(usize::from(port))
-                .push(Event::midi(Offset::ZERO, ump));
+            let _ = io.event_out(port).push(Event::midi(Offset::ZERO, ump));
         }
         Status::Modified
     }
