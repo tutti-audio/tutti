@@ -48,7 +48,7 @@ mod tally;
 pub use tally::{Tally, TallyWriter, tally};
 
 use sync::{Arc, AtomicBool, AtomicU64, Ordering};
-use tutti_units::Unit;
+use tutti_units::{Losses, Unit};
 
 use crate::ControlDrop;
 
@@ -270,6 +270,26 @@ impl Count for tutti_units::Resyncs {
     #[inline]
     fn from_words([count]: [u64; 1]) -> Self {
         Self::new(count)
+    }
+}
+
+/// One tally per count, in field order: a `Counter<Losses>` keeps `lost`,
+/// `evicted`, `refused` and `late` as four words, each saturating on its own,
+/// so a port's losses are one counter. A `Tally<Losses>` wraps per word
+/// instead (see `Tally`); only the counter saturates.
+impl Count for Losses {
+    type Words = [u64; 4];
+    #[inline]
+    fn to_words(self) -> [u64; 4] {
+        [self.lost, self.evicted, self.refused, self.late]
+    }
+    #[inline]
+    fn from_words([lost, evicted, refused, late]: [u64; 4]) -> Self {
+        // `Losses` is `non_exhaustive`: built one count at a time.
+        Losses::lost(lost)
+            + Losses::evicted(evicted)
+            + Losses::refused(refused)
+            + Losses::late(late)
     }
 }
 

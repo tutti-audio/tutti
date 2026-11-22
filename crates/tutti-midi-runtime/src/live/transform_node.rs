@@ -31,12 +31,13 @@
 use std::num::NonZeroU32;
 use tutti_buffers::Float;
 use tutti_graph::{
-    Cost, Cx, Event, EventKind, ForkCause, ForkSource, Forked, InEvents, IntoNode, Io, Losses,
-    Node, NodeParts, Offset, OutEvents, Prepare, RenderMode, Shape, Status, UmpAt, note_off_room,
+    Cost, Cx, Event, EventKind, ForkCause, ForkSource, Forked, InEvents, IntoNode, Io, Node,
+    NodeParts, Offset, OutEvents, Prepare, RenderMode, Shape, Status, UmpAt, note_off_room,
 };
 use tutti_midi_protocol::{Midi2Translator, MpeMode};
 use tutti_rt::{Counter, CounterWriter, Publisher, Reader, counter};
 use tutti_ump::MidiGroup;
+use tutti_units::Losses;
 
 use super::input_node::{MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORT_CAPACITY, Staging};
 use super::mpe_translator::MpeTranslator;

@@ -562,7 +562,7 @@ fn a_sender_that_panics_leaves_a_dead_mailbox_that_counts_what_it_dropped() {
     assert_eq!(state.pending(), 0);
     drop(state);
     // The second was in hand and the third held: both are refused.
-    assert_eq!(mailbox.losses(), tutti_graph::Losses::refused(2));
+    assert_eq!(mailbox.losses(), tutti_units::Losses::refused(2));
     assert_eq!(mailbox.state().take(8, [(now, 4)]), 0);
 }
 
@@ -580,7 +580,7 @@ fn a_sender_whose_setup_panics_is_a_dead_mailbox_too() {
     }));
     assert!(ended.is_err());
     assert!(!mailbox.state().alive());
-    assert_eq!(mailbox.losses(), tutti_graph::Losses::refused(1));
+    assert_eq!(mailbox.losses(), tutti_units::Losses::refused(1));
 }
 
 #[test]
@@ -600,7 +600,7 @@ fn a_send_the_device_refuses_is_lost_and_the_sender_goes_on() {
         )
     });
     assert_eq!(waits, 1);
-    assert_eq!(mailbox.losses(), tutti_graph::Losses::lost(1));
+    assert_eq!(mailbox.losses(), tutti_units::Losses::lost(1));
     assert_eq!(mailbox.state().pending(), 0);
 }
 

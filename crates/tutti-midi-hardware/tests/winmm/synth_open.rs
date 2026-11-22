@@ -2,10 +2,11 @@ use std::time::Duration;
 use tutti_platform::Instant;
 
 use tutti_fixtures::midi::GS_RESET;
-use tutti_graph::{Losses, Offset};
+use tutti_graph::Offset;
 use tutti_midi_hardware::{Devices, OpenOutput};
 use tutti_midi_runtime::{Outgoing, SendAt};
 use tutti_ump::{MidiGroup, SysexMessage, Ump};
+use tutti_units::Losses;
 
 use super::gs_synth::synth;
 

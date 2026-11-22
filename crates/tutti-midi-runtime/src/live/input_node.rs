@@ -71,7 +71,8 @@
 //! Its fork is silent: an offline render reads no wire.
 
 use tutti_buffers::Float;
-use tutti_graph::{Losses, UmpAt};
+use tutti_graph::UmpAt;
+use tutti_units::Losses;
 
 use std::num::NonZeroU32;
 use std::sync::Arc;

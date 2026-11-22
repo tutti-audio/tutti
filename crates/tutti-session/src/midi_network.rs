@@ -13,7 +13,7 @@ use std::num::NonZeroUsize;
 use std::sync::{Arc, Weak};
 
 use tutti_buffers::Float;
-use tutti_graph::{EventInletWriter, Losses, NodeKey, Stamp};
+use tutti_graph::{EventInletWriter, NodeKey, Stamp};
 use tutti_midi_network::{
     Admission, AuthFailure, ByeReason, Client, Credentials, EndedBy, EndpointIdentity, Event,
     FoundHost, Host, HostConfig, NetworkEndpoint, NetworkLink, SessionConfig,
@@ -24,6 +24,7 @@ use tutti_midi_runtime::{
 use tutti_platform::{Executor, Instant};
 use tutti_rt::Mutex;
 use tutti_ump::Ump;
+use tutti_units::Losses;
 
 use crate::graph::Graph;
 use crate::midi::{Claim, Departure, Held, Retiring, settle};

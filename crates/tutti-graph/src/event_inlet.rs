@@ -97,13 +97,12 @@ use tutti_rt::{
     ring, tally,
 };
 use tutti_ump::Ump;
-use tutti_units::{At, Frame, Moment, SampleRate};
+use tutti_units::{At, Frame, Losses, Moment, SampleRate};
 
 use crate::RenderMode;
 use crate::bus::OutEvents;
 use crate::cost::Cost;
 use crate::event::Event;
-use crate::event_losses::Losses;
 use crate::fork::{ForkCause, ForkSource, Forked};
 use crate::io::Io;
 use crate::node::{Cx, IntoNode, Node, NodeParts, Prepare, Shape, Status};

@@ -6,8 +6,9 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, ForkByClone, InstrumentNode, IntoNode, Io, Node, NodeParts, Prepare, Shape, Status,
 };
+use tutti_session::MainOutput;
 use tutti_session::SessionNode;
-use tutti_session::{Losses, MainOutput};
+use tutti_units::Losses;
 
 /// Output `c` is the constant `c + 1`, whatever it is played.
 #[derive(Clone)]

@@ -42,10 +42,10 @@ use crate::devices::ChangeSink;
 use crate::error::Result;
 use crate::start::{Start, Started};
 use crate::{InputFault, InputProducerHandle};
-use tutti_graph::Losses;
 use tutti_midi_device::EndpointId;
 use tutti_midi_runtime::MidiOut;
 use tutti_ump::Protocol;
+use tutti_units::Losses;
 
 /// An open input connection: a live subscription to one endpoint.
 ///
