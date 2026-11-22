@@ -1,17 +1,17 @@
 //! What the session's MIDI reports from [`Session::update`](crate::Session::update):
-//! [`MidiReport`], nested under [`SessionEvent::Midi`](crate::SessionEvent::Midi).
+//! [`MidiEvent`], nested under [`SessionEvent::Midi`](crate::SessionEvent::Midi).
 
 /// One thing that happened in the session's MIDI, reported once.
 ///
 /// A variant about one device carries its `MidiDeviceId`
 /// as a field; a count over every input or the output has no device, and is its
 /// own variant. What happens to a port (its device gone or back, what it
-/// learned) is a [`ResourceChanged`](crate::SessionEvent::ResourceChanged) of
+/// learned) is a [`ResourceChanged`](crate::PeerEvent::ResourceChanged) of
 /// its handle. Reported in the order they were seen, from `Phase::Poll` and
 /// `Phase::MidiOut`.
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum MidiReport {
+pub enum MidiEvent {
     /// A MIDI device was added to the list, in the order the OS reported.
     /// The session reads the devices in `Phase::Poll`; the
     /// list at any time is [`Midi::devices`](crate::Midi::devices).
@@ -38,7 +38,7 @@ pub enum MidiReport {
     /// Configuration, and reports each change once, from `Phase::Poll`. The
     /// Profiles now are the input's
     /// [`ListedPeer::profiles`](crate::ListedPeer::profiles), and a change
-    /// is also a [`ResourceChanged`](crate::SessionEvent::ResourceChanged) of its
+    /// is also a [`ResourceChanged`](crate::PeerEvent::ResourceChanged) of its
     /// input.
     #[cfg(feature = "midi-hardware")]
     CiProfiles {
@@ -152,7 +152,7 @@ pub enum MidiReport {
     /// [`open_network_host`](crate::Midi::open_network_host)). There is none
     /// on a target with no UDP sockets.
     #[cfg(feature = "midi-network")]
-    Network(crate::NetworkReport),
+    Network(crate::NetworkEvent),
     /// The OS watch for MIDI devices ended on its own (the reason is the
     /// message): the device list is frozen at what it last saw and no further
     /// hot-plug is reported. Reported once.
@@ -161,7 +161,7 @@ pub enum MidiReport {
 }
 
 #[cfg(feature = "midi-hardware")]
-impl MidiReport {
+impl MidiEvent {
     /// The event a change of the device list is.
     pub(crate) fn of_device(event: tutti_midi_device::DeviceEvent) -> Self {
         use tutti_midi_device::DeviceEvent;
@@ -173,8 +173,8 @@ impl MidiReport {
     }
 }
 
-impl From<MidiReport> for crate::SessionEvent {
-    fn from(event: MidiReport) -> Self {
+impl From<MidiEvent> for crate::SessionEvent {
+    fn from(event: MidiEvent) -> Self {
         Self::Midi(event)
     }
 }

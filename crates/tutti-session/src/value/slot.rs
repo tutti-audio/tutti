@@ -608,7 +608,7 @@ slot_target!(
     /// A device that enables the MIDI-CI MPE Profile (M2-120) is not under this
     /// mode: its input follows the Profile's zones and rules, in the Groups it
     /// enabled them on, until it disables the Profile or goes. The session
-    /// does that from the peer's Profile reports (`MidiReport::CiProfiles`).
+    /// does that from the peer's Profile reports (`MidiEvent::CiProfiles`).
     MpeModeTarget,
     tutti_midi_protocol::MpeMode,
     SlotId::MpeMode

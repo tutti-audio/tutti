@@ -37,7 +37,7 @@ use tutti_units::{Beat, BeatDuration, Frame, SampleRate};
 use tutti_fixtures::midi;
 use tutti_session::{EventInPort, EventOutPort, Feeder, MidiError, Session, SessionEvent};
 #[cfg(feature = "midi-hardware")]
-use tutti_session::{MidiReport, PHASES, PhaseCx};
+use tutti_session::{MidiEvent, PHASES, PeerEvent, PhaseCx};
 #[cfg(feature = "midi-hardware")]
 use tutti_session::{MidiRouteRule, RouteDeclarer};
 #[cfg(feature = "midi-hardware")]
@@ -669,13 +669,9 @@ fn device_events(events: &[SessionEvent]) -> Vec<(&'static str, String)> {
     events
         .iter()
         .filter_map(|e| match e {
-            SessionEvent::Midi(MidiReport::Added { info }) => Some(("added", info.name.clone())),
-            SessionEvent::Midi(MidiReport::Removed { info }) => {
-                Some(("removed", info.name.clone()))
-            }
-            SessionEvent::Midi(MidiReport::Changed { info }) => {
-                Some(("changed", info.name.clone()))
-            }
+            SessionEvent::Midi(MidiEvent::Added { info }) => Some(("added", info.name.clone())),
+            SessionEvent::Midi(MidiEvent::Removed { info }) => Some(("removed", info.name.clone())),
+            SessionEvent::Midi(MidiEvent::Changed { info }) => Some(("changed", info.name.clone())),
             _ => None,
         })
         .collect()
@@ -893,7 +889,7 @@ fn a_dead_device_watch_is_reported_once() {
         events
             .iter()
             .filter_map(|e| match e {
-                SessionEvent::Midi(MidiReport::WatchFailed(why)) => Some(why.clone()),
+                SessionEvent::Midi(MidiEvent::WatchFailed(why)) => Some(why.clone()),
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -1107,7 +1103,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
     for ms in 0..40 {
         let now = start + Duration::from_millis(ms);
         for event in update_at(&mut s, now) {
-            if let SessionEvent::ResourceChanged { id, fact } = event
+            if let SessionEvent::Peer(PeerEvent::ResourceChanged { id, fact }) = event
                 && id == port.id()
                 && fact == tutti_session::ResourceFact::Info
                 && !port.info().peers().is_empty()
@@ -1189,7 +1185,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
 /// **A MIDI-CI peer's Profiles are the session's, and it switches them as the
 /// Initiator** (M2-101 section 7): a peer whose Discovery Reply declares Profile
 /// Configuration is sent a Profile Inquiry by the session's tick; its Replies
-/// make the Profiles the port's info lists (`MidiReport::CiProfiles`, `Known`
+/// make the Profiles the port's info lists (`MidiEvent::CiProfiles`, `Known`
 /// at the final Reply on the Function Block); `enable` of a listed handle is
 /// sent as a Set Profile On (Sub-ID#2 `0x22`) with the Channel count asked, and
 /// the peer's Profile Enabled Report resolves the request with `Enabled` and updates
@@ -1262,7 +1258,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     for ms in 0..80 {
         let now = start + Duration::from_millis(ms);
         for event in update_at(&mut s, now) {
-            if let SessionEvent::Midi(MidiReport::CiProfiles { change, .. }) = event {
+            if let SessionEvent::Midi(MidiEvent::CiProfiles { change, .. }) = event {
                 seen.push(change);
             }
         }
@@ -1774,7 +1770,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
             clock.set(clock.get() + 1);
             let now = start + Duration::from_millis(clock.get());
             for event in update_at(s, now) {
-                if let SessionEvent::Midi(MidiReport::CiProfiles { device, change, .. }) = event {
+                if let SessionEvent::Midi(MidiEvent::CiProfiles { device, change, .. }) = event {
                     changes.push((device, change));
                 }
             }
@@ -1898,7 +1894,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
 /// (M2-101 section 9): a peer whose Discovery Reply declares Process Inquiry is
 /// sent an Inquiry: Process Inquiry Capabilities by the session's tick; its reply
 /// with MIDI Message Report makes it a `MidiInputInfo::report_peers` handle
-/// (`MidiReport::CiProcess`); `ReportPeer::request` sends an Inquiry: MIDI
+/// (`MidiEvent::CiProcess`); `ReportPeer::request` sends an Inquiry: MIDI
 /// Message Report (Sub-ID#2 `0x42`) with the bitmaps asked, and the peer's End
 /// resolves the request.
 #[cfg(feature = "midi-hardware")]
@@ -1966,7 +1962,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
     for ms in 0..80 {
         let now = start + Duration::from_millis(ms);
         for event in update_at(&mut s, now) {
-            if let SessionEvent::Midi(MidiReport::CiProcess { change, .. }) = event {
+            if let SessionEvent::Midi(MidiEvent::CiProcess { change, .. }) = event {
                 seen.push(change);
             }
         }

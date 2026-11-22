@@ -12,7 +12,7 @@ use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_session::{
-    FollowTempo, MidiError, MidiReport, Session, SessionEvent, SetRefusal, ValueErrorKind,
+    FollowTempo, MidiError, MidiEvent, Session, SessionEvent, SetRefusal, ValueErrorKind,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_ump::{Flex, Message, MidiGroup, Ump};
@@ -81,7 +81,7 @@ fn send(fake: &FakeCounters, ump: Ump) {
 /// What the update that found a change saw: the playhead of the last block and
 /// the tempo map then in force.
 struct Found {
-    events: Vec<MidiReport>,
+    events: Vec<MidiEvent>,
     playhead: tutti_engine::Playhead,
     before: Arc<TempoMap>,
 }
@@ -94,7 +94,7 @@ fn until_followed(s: &mut Session) -> Found {
         blocks(s, 1);
         let playhead = s.playhead();
         let before = s.tempo_map();
-        let events: Vec<MidiReport> = s
+        let events: Vec<MidiEvent> = s
             .update()
             .into_iter()
             .filter_map(|e| match e {
@@ -105,7 +105,7 @@ fn until_followed(s: &mut Session) -> Found {
         if events.iter().any(|e| {
             matches!(
                 e,
-                MidiReport::TempoFollowed { .. } | MidiReport::MeterFollowed { .. }
+                MidiEvent::TempoFollowed { .. } | MidiEvent::MeterFollowed { .. }
             )
         }) {
             return Found {
@@ -118,11 +118,11 @@ fn until_followed(s: &mut Session) -> Found {
     panic!("no follow event in {LIMIT} updates");
 }
 
-fn followed_tempo(events: &[MidiReport]) -> (Bpm, Beat) {
+fn followed_tempo(events: &[MidiEvent]) -> (Bpm, Beat) {
     events
         .iter()
         .find_map(|e| match e {
-            MidiReport::TempoFollowed { tempo, beat } => Some((*tempo, *beat)),
+            MidiEvent::TempoFollowed { tempo, beat } => Some((*tempo, *beat)),
             _ => None,
         })
         .expect("a TempoFollowed")
@@ -199,7 +199,7 @@ fn a_set_tempo_is_a_step_at_the_next_block_start_and_unfollowing_restores() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, SessionEvent::Midi(MidiReport::TempoUnfollowed))),
+            .any(|e| matches!(e, SessionEvent::Midi(MidiEvent::TempoUnfollowed))),
         "the update reports it"
     );
     let restored = s.tempo_map();
@@ -225,7 +225,7 @@ fn without_a_follow_a_flex_tempo_changes_nothing() {
         assert!(
             !events
                 .iter()
-                .any(|e| matches!(e, SessionEvent::Midi(MidiReport::TempoFollowed { .. }))),
+                .any(|e| matches!(e, SessionEvent::Midi(MidiEvent::TempoFollowed { .. }))),
             "{events:?}"
         );
     }
@@ -323,7 +323,7 @@ fn a_set_time_signature_lands_on_the_next_bar_line() {
         .events
         .iter()
         .find_map(|e| match e {
-            MidiReport::MeterFollowed { signature, beat } => Some((*signature, *beat)),
+            MidiEvent::MeterFollowed { signature, beat } => Some((*signature, *beat)),
             _ => None,
         })
         .expect("a MeterFollowed");
@@ -369,7 +369,7 @@ fn the_meter_is_followed_only_when_asked() {
         !found
             .events
             .iter()
-            .any(|e| matches!(e, MidiReport::MeterFollowed { .. }))
+            .any(|e| matches!(e, MidiEvent::MeterFollowed { .. }))
     );
     assert_eq!(*s.get(meter).unwrap(), MeterMap::default());
 }
@@ -393,7 +393,7 @@ fn another_group_is_ignored_and_a_second_follow_replaces_the_first() {
         found
             .events
             .iter()
-            .filter(|e| matches!(e, MidiReport::TempoFollowed { .. }))
+            .filter(|e| matches!(e, MidiEvent::TempoFollowed { .. }))
             .count(),
         1,
         "Group 0's tempo is not followed"
@@ -435,7 +435,7 @@ fn a_repeated_tempo_adds_no_point() {
         assert!(
             !events
                 .iter()
-                .any(|e| matches!(e, SessionEvent::Midi(MidiReport::TempoFollowed { .. }))),
+                .any(|e| matches!(e, SessionEvent::Midi(MidiEvent::TempoFollowed { .. }))),
             "{events:?}"
         );
     }

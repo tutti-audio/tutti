@@ -30,7 +30,7 @@ macro_rules! peer_future {
     ) => {
         /// Resolves when the device answers, on the session's MIDI-CI task, with no
         /// [`update`](crate::Session::update); the session's view of the peer (the
-        /// port's info, [`MidiReport`](crate::MidiReport)) changes at the next
+        /// port's info, [`MidiEvent`](crate::MidiEvent)) changes at the next
         /// `update`, so the future may resolve before it.
         ///
         $(#[$meta])*

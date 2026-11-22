@@ -321,8 +321,9 @@ pub mod nodes {
         SpringStagesError, Stages, StagesError, Stagger, StaggerError, StereoWidthConfig,
         StereoWidthNode, SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError,
         SweepRange, SweepRangeError, TiltFilterConfig, TiltFilterNode, TransientShaperConfig,
-        TransientShaperNode, TremoloConfig, TremoloNode, VbapError, VbapPannerConfig,
-        VbapPannerNode, WaveguideStringConfig, WaveguideStringNode, WavetableConfig, WavetableNode,
+        TransientShaperNode, TremoloConfig, TremoloNode, TubeStageConfig, TubeStageNode, VbapError,
+        VbapPannerConfig, VbapPannerNode, WaveguideStringConfig, WaveguideStringNode,
+        WavetableConfig, WavetableNode,
     };
 
     /// Writing a node over the kernels (`tutti-nodes`): the `Kernel` and `KernelNode`
@@ -357,8 +358,9 @@ pub mod nodes {
             ShimmerKernel, ShimmerSet, SpringControls, SpringReverbKernel, SpringReverbSet,
             StereoWidthKernel, StereoWidthSet, SvfControls, SvfKernel, SvfSet, TiltFilterControls,
             TiltFilterKernel, TiltFilterSet, TransientControls, TransientShaperKernel,
-            TransientShaperSet, TremoloControls, TremoloKernel, TremoloSet, WaveguideStringKernel,
-            WaveguideStringSet, WidthControls,
+            TransientShaperSet, TremoloControls, TremoloKernel, TremoloSet, TubeStageControls,
+            TubeStageKernel, TubeStageSet, WaveguideStringKernel, WaveguideStringSet,
+            WidthControls,
         };
     }
 }
@@ -397,11 +399,12 @@ pub mod dsp {
         SpringLength, SpringLengthError, StopbandAttenuation, StopbandAttenuationError,
         StreamCounts, System, TableSize, TableSizeError, Tap, TapSet, Tilt, TransientDetector,
         TransientThreshold, TransientThresholdError, TransientTime, TransientTimeError,
-        TransientTimes, TransientTimesError, VariableRate, VariableRateError, VariableResampler,
-        VelvetDensity, VelvetDensityError, VelvetLength, VelvetLengthError, VelvetNoise,
-        VelvetNoiseError, VelvetPulse, Wall, WaveguideBank, WaveguideControls, WaveguidePositions,
-        WaveguideString, WaveshaperControls, Wavetable, WavetableError, WavetableOscillator,
-        WavetableStep, quadrature_band, spectral_bandwidth, spectral_crest, spectral_slope,
+        TransientTimes, TransientTimesError, TubeDrive, TubeDriveError, VariableRate,
+        VariableRateError, VariableResampler, VelvetDensity, VelvetDensityError, VelvetLength,
+        VelvetLengthError, VelvetNoise, VelvetNoiseError, VelvetPulse, Wall, WaveguideBank,
+        WaveguideControls, WaveguidePositions, WaveguideString, WaveshaperControls, Wavetable,
+        WavetableError, WavetableOscillator, WavetableStep, quadrature_band, spectral_bandwidth,
+        spectral_crest, spectral_slope,
     };
 }
 
@@ -541,10 +544,11 @@ pub mod session {
         DeclarationError, Disconnection, EventEdge, EventTapPort, EventWire, Fanin, Feeder, Graph,
         Inlet, InletError, LIVE_MAX_BLOCK, MainBusWire, MainSink, Meters, NodeSlots, NotReopened,
         Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError,
-        PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
-        Removal, RemoveError, Reopened, ReplaceRefused, Replacement, Resource, ResourceFact,
-        RootDeclaration, RootReader, RootTopologyStatus, SessionHeardTapError, SessionNode,
-        SetRateError, SetSources, SetTempoError, Taps, Weighted, Wire, main_output_width,
+        PeerEvent, PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer,
+        Reclaims, Removal, RemoveError, Reopened, ReplaceRefused, Replacement, Resource,
+        ResourceFact, RootDeclaration, RootReader, RootTopologyStatus, SessionHeardTapError,
+        SessionNode, SetRateError, SetSources, SetTempoError, Taps, Weighted, Wire,
+        main_output_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
@@ -803,7 +807,7 @@ pub mod plugin {
 /// `MidiChannel`, `MidiGroup`, `NoteNumber`, `NoteVelocity`, `Voice1`, `SysexAssembler`, `Midi1Parser`), a timed event, the keys
 /// that play an instrument or a live input (`MidiKeys`),
 /// the session's MIDI (`Midi`, `InstrumentHandle`), its route rule, events and
-/// errors (`MidiRouteRule`, `MidiRouteId`, `MidiReport`, `MidiError`), its
+/// errors (`MidiRouteRule`, `MidiRouteId`, `MidiEvent`, `MidiError`), its
 /// followers (`FollowTempo`, `FollowClock`, `FollowMachineControl`), the
 /// sync node that sends the transport (`SyncOut`, `SyncMessages`), a host's own output (`MidiSink`, `OpenMidiSink`, `Stamping`), and under `midi-hardware` a device (`MidiDeviceId`,
 /// `DeviceInfo`), the ports a session opens for them
@@ -912,7 +916,7 @@ pub mod midi {
     #[cfg(feature = "session")]
     pub use tutti_session::{
         AnyNode, DroppedEvent, FollowClock, FollowMachineControl, FollowTempo, InstrumentHandle,
-        LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi, Midi, MidiReport, MidiRouteId,
+        LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi, Midi, MidiEvent, MidiRouteId,
         MidiRouteRule, MidiSink, NoCommonTimelineError, NotInstrument, OpenMidiSink, Stamping,
         TrackError,
     };
@@ -966,7 +970,7 @@ pub mod midi {
             PendingHosts, Requests, Retransmit, SessionConfig, Timer, TimerOutOfRange, Username,
         };
         #[cfg(feature = "session")]
-        pub use tutti_session::{MidiNetwork, NetworkError, NetworkReport, OpenClient, OpenHost};
+        pub use tutti_session::{MidiNetwork, NetworkError, NetworkEvent, OpenClient, OpenHost};
     }
 
     /// MIDI-CI Property Exchange (M2-103 and its resource specifications): a
