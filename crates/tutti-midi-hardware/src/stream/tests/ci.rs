@@ -118,7 +118,7 @@ pub(super) fn midi1_running() -> (Wire, Muid) {
 /// opens with a Discovery to the Broadcast MUID from the Function Block's
 /// Device ID (`7F`): the bytes of Table 6. A block that declares none (M2-104
 /// §7.1.8) is sent nothing.
-/// Spec: m2-101/4.1#1, m2-101/5.5#1
+/// Spec: m2-101/4.1#1, m2-101/5.5#1, m2-101/5.5.3#2
 #[test]
 fn a_function_block_that_declares_midi_ci_is_sent_discovery_on_its_first_group() {
     let wire = endpoint_wire(&[ci_block(0, 2, 2), ci_block(1, 4, 0)]);
@@ -207,6 +207,7 @@ fn an_endpoint_with_no_blocks_or_no_answer_gets_discovery_on_group_0() {
 
 /// M2-101 routes by Group: a Discovery on the Group of a block is answered, one
 /// on a Group with no MIDI-CI Device is not.
+/// Spec: m2-101/5.2.1#3
 #[test]
 fn messages_are_routed_by_group() {
     let mut wire = endpoint_wire(&[ci_block(0, 2, 2)]);
@@ -1038,7 +1039,7 @@ fn profile_events(polled: &[Polled]) -> Vec<&ProfilesChange> {
 /// Configuration for its Profiles, with a Profile Inquiry (Sub-ID#2 `0x20`) to
 /// the Function Block (`0x7F`), from its own MUID to the peer's. A peer that
 /// declared none is not asked.
-/// Spec: m2-101/7.2#1
+/// Spec: m2-101/7.2#1, m2-101/2.2#4
 #[test]
 fn a_peer_that_declares_profile_configuration_is_sent_a_profile_inquiry() {
     let (mut wire, ours) = midi1_running();

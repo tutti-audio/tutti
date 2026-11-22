@@ -31,17 +31,15 @@ fn blocks(seconds: f64) -> usize {
 }
 
 fn config() -> SynthConfig {
-    SynthConfig {
-        oscillator: OscillatorType::Sine,
-        envelope: Adsr {
+    SynthConfig::new()
+        .oscillator(OscillatorType::Sine)
+        .envelope(Adsr {
             attack: Seconds::new(0.001),
             decay: Seconds::new(0.0),
             sustain: Amplitude::new(1.0),
             release: Seconds::new(RELEASE),
-        },
-        polyphony: NonZeroUsize::new(8).unwrap(),
-        ..Default::default()
-    }
+        })
+        .polyphony(NonZeroUsize::new(8).unwrap())
 }
 
 fn hand(config: SynthConfig) -> Hand {
@@ -245,10 +243,7 @@ fn rpn_0_sets_the_bend_range_per_channel() {
 /// Without an RPN the config's range is the default.
 #[test]
 fn the_configured_range_is_the_default() {
-    let mut h = hand(SynthConfig {
-        pitch_bend_range: Semitones::new(5.0),
-        ..config()
-    });
+    let mut h = hand(config().pitch_bend_range(Semitones::new(5.0)));
     play(&mut h, &[on(0, 69), bend_up(0)], 0.2);
     assert_hz(&play(&mut h, &[], 0.5), A4 * ratio(5.0));
 }
@@ -330,12 +325,10 @@ fn reset_returns_the_per_note_range_to_its_default() {
 }
 
 fn config_with(mode: VoiceMode, strategy: AllocationStrategy, voices: usize) -> SynthConfig {
-    SynthConfig {
-        voice_mode: mode,
-        allocation_strategy: strategy,
-        polyphony: NonZeroUsize::new(voices).unwrap(),
-        ..config()
-    }
+    config()
+        .voice_mode(mode)
+        .allocation_strategy(strategy)
+        .polyphony(NonZeroUsize::new(voices).unwrap())
 }
 
 /// A key struck again under the sustain pedal: the old note releases at once

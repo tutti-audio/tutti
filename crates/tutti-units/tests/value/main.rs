@@ -1,5 +1,9 @@
 //! The value types' range contracts.
 
+/// An allocation inside an `RtScope` aborts the running test.
+#[global_allocator]
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
+
 mod beats_per_cycle_range;
 mod bits_range;
 mod bpm_range;

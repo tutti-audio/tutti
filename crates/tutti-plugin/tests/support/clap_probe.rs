@@ -455,10 +455,7 @@ pub struct LoadedProbe {
 /// If the load fails — these tests are about what a *loaded* plugin does, so a
 /// failure to load is a broken fixture rather than an outcome worth asserting.
 pub fn load_probe(sample_rate: f64) -> LoadedProbe {
-    load_probe_with(
-        IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source")),
-        sample_rate,
-    )
+    load_probe_with(IpcConfig::new(), sample_rate)
 }
 
 /// [`load_probe`] with a bridge config of the caller's (shorter

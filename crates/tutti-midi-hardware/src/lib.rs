@@ -11,6 +11,19 @@
 //! endpoint is sent MIDI 1.0 and never type `0x4`, and JR Timestamps go only to a
 //! device that receives them.
 //!
+//! ## Features
+//!
+//! A backend is a cargo feature, each a no-op off its OS: `alsa` (Linux, needing
+//! alsa-lib 1.2.10 or later), `coremidi` (macOS) and `winmm` (Windows). All three are
+//! on by default, so every platform keeps its backend; with
+//! `default-features = false` the backend is a stub that lists no device and fails
+//! to open one with [`MidiHardwareError::Unsupported`]. `build.rs` picks the
+//! backend from the target OS and these features: there is no runtime fallback.
+//! `serde` adds `Serialize` and `Deserialize` on `MidiHardwareConfig` and
+//! `InputTiming`; `testing` exports `test_support::FakeBackend`; `sequencer-tests` and
+//! `synth-tests` gate the suites that need a real ALSA sequencer or Windows' GS
+//! Wavetable Synth, and turn their backend on.
+//!
 //! ## Devices
 //!
 //! [`Devices`] lists the MIDI devices and keeps the list current while it lives:
@@ -121,11 +134,11 @@
 //!
 //! The work that waits on the OS (an ALSA input's pump, the device watch, Active
 //! Sensing, the legacy ports' poll) runs as futures on the [`Executor`](tutti_platform::Executor)
-//! the session is opened with: the ALSA input and watch each on a dedicated thread of
-//! it, Active Sensing and the poll as timer loops. Each component holds its task and
-//! drops it to stop. Until core-engine's R2-last, an
-//! executor the app drives (a session built with its own) runs this work only while
-//! the app drives it: in `tutti-session`, only inside `update`.
+//! the session is opened with: the ALSA input and watch and each output's Active
+//! Sensing each on a dedicated thread of it, the poll as a timer loop. Each
+//! component holds its task and drops it to stop. A dedicated thread runs whether
+//! or not the app drives the executor; the poll runs only while the app drives
+//! it: in `tutti-session`, inside `update`.
 //!
 //! ## Quick start
 //!
@@ -266,6 +279,10 @@
 // `//!` and re-resolves its intra-doc links in this scope.
 mod answer;
 mod backend;
+// The decision `build.rs` makes, compiled here so its table is a unit test.
+#[cfg(test)]
+#[path = "../backend_choice.rs"]
+mod backend_choice;
 // Compiled everywhere so its tests run on every platform; only the native
 // backends (ALSA, CoreMIDI) convert an OS block, so it is dead where the stub
 // or winmm is the backend.

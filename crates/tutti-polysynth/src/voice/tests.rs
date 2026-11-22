@@ -6,10 +6,7 @@ use tutti_units::Velocity;
 
 #[test]
 fn test_basic_allocation() {
-    let config = SynthVoicesConfig {
-        max_voices: NonZeroUsize::new(4).unwrap(),
-        ..Default::default()
-    };
+    let config = SynthVoicesConfig::new().max_voices(NonZeroUsize::new(4).unwrap());
     let mut alloc = SynthVoices::new(config);
 
     // Allocate first note
@@ -43,11 +40,9 @@ fn test_basic_allocation() {
 
 #[test]
 fn test_voice_stealing_oldest() {
-    let config = SynthVoicesConfig {
-        max_voices: NonZeroUsize::new(2).unwrap(),
-        strategy: AllocationStrategy::Oldest,
-        ..Default::default()
-    };
+    let config = SynthVoicesConfig::new()
+        .max_voices(NonZeroUsize::new(2).unwrap())
+        .strategy(AllocationStrategy::Oldest);
     let mut alloc = SynthVoices::new(config);
 
     // Fill all voices
@@ -79,7 +74,7 @@ fn test_voice_stealing_oldest() {
 
 #[test]
 fn test_release() {
-    let config = SynthVoicesConfig::default();
+    let config = SynthVoicesConfig::new();
     let mut alloc = SynthVoices::new(config);
 
     alloc.allocate(
@@ -106,7 +101,7 @@ fn test_release() {
 
 #[test]
 fn test_sustain_pedal() {
-    let config = SynthVoicesConfig::default();
+    let config = SynthVoicesConfig::new();
     let mut alloc = SynthVoices::new(config);
 
     alloc.allocate(
@@ -134,11 +129,9 @@ fn test_sustain_pedal() {
 
 #[test]
 fn test_mono_mode() {
-    let config = SynthVoicesConfig {
-        max_voices: NonZeroUsize::new(4).unwrap(),
-        mode: VoiceMode::Mono,
-        ..Default::default()
-    };
+    let config = SynthVoicesConfig::new()
+        .max_voices(NonZeroUsize::new(4).unwrap())
+        .mode(VoiceMode::Mono);
     let mut alloc = SynthVoices::new(config);
 
     let result1 = alloc.allocate(
@@ -194,11 +187,9 @@ fn test_mono_mode() {
 
 #[test]
 fn test_legato_mode() {
-    let config = SynthVoicesConfig {
-        max_voices: NonZeroUsize::new(4).unwrap(),
-        mode: VoiceMode::Legato,
-        ..Default::default()
-    };
+    let config = SynthVoicesConfig::new()
+        .max_voices(NonZeroUsize::new(4).unwrap())
+        .mode(VoiceMode::Legato);
     let mut alloc = SynthVoices::new(config);
 
     // First note triggers normally
@@ -228,11 +219,9 @@ fn test_legato_mode() {
 
 #[test]
 fn test_no_steal() {
-    let config = SynthVoicesConfig {
-        max_voices: NonZeroUsize::new(2).unwrap(),
-        strategy: AllocationStrategy::NoSteal,
-        ..Default::default()
-    };
+    let config = SynthVoicesConfig::new()
+        .max_voices(NonZeroUsize::new(2).unwrap())
+        .strategy(AllocationStrategy::NoSteal);
     let mut alloc = SynthVoices::new(config);
 
     alloc.allocate(
@@ -263,11 +252,9 @@ fn test_no_steal() {
 
 #[test]
 fn test_voice_stealing_quietest() {
-    let config = SynthVoicesConfig {
-        max_voices: NonZeroUsize::new(2).unwrap(),
-        strategy: AllocationStrategy::Quietest,
-        ..Default::default()
-    };
+    let config = SynthVoicesConfig::new()
+        .max_voices(NonZeroUsize::new(2).unwrap())
+        .strategy(AllocationStrategy::Quietest);
     let mut alloc = SynthVoices::new(config);
 
     // Allocate two voices
@@ -317,11 +304,9 @@ fn test_voice_stealing_quietest() {
 
 #[test]
 fn test_voice_stealing_highest_note() {
-    let config = SynthVoicesConfig {
-        max_voices: NonZeroUsize::new(2).unwrap(),
-        strategy: AllocationStrategy::HighestNote,
-        ..Default::default()
-    };
+    let config = SynthVoicesConfig::new()
+        .max_voices(NonZeroUsize::new(2).unwrap())
+        .strategy(AllocationStrategy::HighestNote);
     let mut alloc = SynthVoices::new(config);
 
     // Allocate C4 (60) and G4 (67)
@@ -358,11 +343,9 @@ fn test_voice_stealing_highest_note() {
 
 #[test]
 fn test_voice_stealing_lowest_note() {
-    let config = SynthVoicesConfig {
-        max_voices: NonZeroUsize::new(2).unwrap(),
-        strategy: AllocationStrategy::LowestNote,
-        ..Default::default()
-    };
+    let config = SynthVoicesConfig::new()
+        .max_voices(NonZeroUsize::new(2).unwrap())
+        .strategy(AllocationStrategy::LowestNote);
     let mut alloc = SynthVoices::new(config);
 
     // Allocate C4 (60) and G4 (67)
@@ -399,11 +382,9 @@ fn test_voice_stealing_lowest_note() {
 
 #[test]
 fn test_voice_stealing_newest() {
-    let config = SynthVoicesConfig {
-        max_voices: NonZeroUsize::new(2).unwrap(),
-        strategy: AllocationStrategy::Newest,
-        ..Default::default()
-    };
+    let config = SynthVoicesConfig::new()
+        .max_voices(NonZeroUsize::new(2).unwrap())
+        .strategy(AllocationStrategy::Newest);
     let mut alloc = SynthVoices::new(config);
 
     alloc.allocate(
@@ -439,7 +420,7 @@ fn test_voice_stealing_newest() {
 
 #[test]
 fn test_sostenuto_pedal() {
-    let config = SynthVoicesConfig::default();
+    let config = SynthVoicesConfig::new();
     let mut alloc = SynthVoices::new(config);
 
     // Play note, then press sostenuto
@@ -492,7 +473,7 @@ fn test_sostenuto_pedal() {
 
 #[test]
 fn test_sostenuto_key_still_held() {
-    let config = SynthVoicesConfig::default();
+    let config = SynthVoicesConfig::new();
     let mut alloc = SynthVoices::new(config);
 
     // Play note, then press sostenuto
@@ -514,7 +495,7 @@ fn test_sostenuto_key_still_held() {
 
 #[test]
 fn test_all_notes_off() {
-    let config = SynthVoicesConfig::default();
+    let config = SynthVoicesConfig::new();
     let mut alloc = SynthVoices::new(config);
 
     // Play notes on channel 0 and 1
@@ -554,7 +535,7 @@ fn test_all_notes_off() {
 
 #[test]
 fn test_all_sound_off() {
-    let config = SynthVoicesConfig::default();
+    let config = SynthVoicesConfig::new();
     let mut alloc = SynthVoices::new(config);
 
     // Play notes
@@ -584,7 +565,7 @@ fn test_all_sound_off() {
 
 #[test]
 fn test_reset() {
-    let config = SynthVoicesConfig::default();
+    let config = SynthVoicesConfig::new();
     let mut alloc = SynthVoices::new(config);
 
     // Play notes with pedals
@@ -629,7 +610,7 @@ fn test_reset() {
 
 #[test]
 fn test_retrigger_same_note() {
-    let config = SynthVoicesConfig::default();
+    let config = SynthVoicesConfig::new();
     let mut alloc = SynthVoices::new(config);
 
     // Play same note twice
@@ -661,11 +642,9 @@ fn test_retrigger_same_note() {
 
 #[test]
 fn test_prefer_stealing_releasing_voices() {
-    let config = SynthVoicesConfig {
-        max_voices: NonZeroUsize::new(2).unwrap(),
-        strategy: AllocationStrategy::Oldest,
-        ..Default::default()
-    };
+    let config = SynthVoicesConfig::new()
+        .max_voices(NonZeroUsize::new(2).unwrap())
+        .strategy(AllocationStrategy::Oldest);
     let mut alloc = SynthVoices::new(config);
 
     // Allocate and release one voice
@@ -761,12 +740,12 @@ fn random_streams_keep_their_invariants() {
         let strategy = strategies[(stream % 6) as usize];
         let mode = modes[((stream / 6) % 4) as usize];
         let max = 4;
-        let mut alloc = SynthVoices::new(SynthVoicesConfig {
-            max_voices: NonZeroUsize::new(max).unwrap(),
-            strategy,
-            mode,
-            ..Default::default()
-        });
+        let mut alloc = SynthVoices::new(
+            SynthVoicesConfig::new()
+                .max_voices(NonZeroUsize::new(max).unwrap())
+                .strategy(strategy)
+                .mode(mode),
+        );
         // The test's own model of the held keys of each channel.
         let mut held: [Vec<u8>; 2] = [vec![], vec![]];
         let mut pedal = [false; 2];
@@ -986,11 +965,11 @@ fn expected_victim(
 #[test]
 fn a_return_after_the_voice_ended_starts_a_fresh_one() {
     for mode in [VoiceMode::Mono, VoiceMode::Legato] {
-        let mut alloc = SynthVoices::new(SynthVoicesConfig {
-            max_voices: NonZeroUsize::new(4).unwrap(),
-            mode,
-            ..Default::default()
-        });
+        let mut alloc = SynthVoices::new(
+            SynthVoicesConfig::new()
+                .max_voices(NonZeroUsize::new(4).unwrap())
+                .mode(mode),
+        );
         let ch = MidiChannel::of(0);
         for k in [60, 64] {
             alloc.allocate(
@@ -1025,11 +1004,11 @@ fn a_return_after_the_voice_ended_starts_a_fresh_one() {
 /// A mono return to a held key plays that word back, so it is observable.
 #[test]
 fn a_velocity_is_quantised_to_the_nearest_word() {
-    let mut alloc = SynthVoices::new(SynthVoicesConfig {
-        max_voices: NonZeroUsize::new(4).unwrap(),
-        mode: VoiceMode::Mono,
-        ..Default::default()
-    });
+    let mut alloc = SynthVoices::new(
+        SynthVoicesConfig::new()
+            .max_voices(NonZeroUsize::new(4).unwrap())
+            .mode(VoiceMode::Mono),
+    );
     let ch = MidiChannel::of(0);
     let id = |n| NoteId::from_channel_note(ch, NoteNumber::of(n));
     alloc.allocate(

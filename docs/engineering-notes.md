@@ -519,6 +519,18 @@ only where the OS grants the raise: GitHub's runners are unprivileged
 stayed where an unraised thread does. Run it as root, or with `CAP_SYS_NICE`,
 to cover the call.
 
+### What `cargo xtask rtsan` sees and misses
+
+`RtAllocCheck` sees Rust allocations and `tutti_rt::Mutex` sees our locks; neither
+sees a C `malloc`, a pthread lock or file I/O inside a plugin or a dependency.
+`cargo xtask rtsan` builds with `RTSAN_ENABLE` and the `tutti-rt/rtsan` feature, so
+every `RtScope` also holds LLVM's RealtimeSanitizer region (the `rtsan-standalone`
+crate: libc interceptors, no compiler flag, no nightly). It catches those calls,
+and a std or `parking_lot` lock only when contended. It misses an uncontended lock
+and `thread::sleep`. The one syscall it is told to ignore is `Unparker`'s wake: a wake never waits, and the doorbells and the worker pool wake from the audio thread by design. It is a local recipe, never a CI job: the runtime is a
+prebuilt download (curl, network on the first build), Linux and macOS only, and
+without `RTSAN_ENABLE` the crate's functions are empty and download nothing.
+
 ## Check the constraint before designing around it
 
 Before writing anything that *works around* an obstacle, **name the obstacle in
@@ -581,6 +593,20 @@ knowing because the same shapes recur:
   *between* syscalls, so a budget of any size was unenforceable. The fix is
   `PeekNamedPipe`: ask how many bytes are buffered, and only read when the
   answer is "some". See `tutti-plugin-ipc`'s `transport::control`.
+- **The plugin server's connection has no name on unix.** The host makes a socket
+  pair and spawns the server with one end as its standard input
+  (`Command::stdin(Stdio::from(OwnedFd))`, safe std, no `pre_exec`), so nothing is
+  in `argv` or the environment and there is no path to bind, unlink or race. The
+  server's first act is `adopt_host_socket`: it duplicates descriptor 0 close-on-exec,
+  refuses (by name) a descriptor that is not a stream socket, and puts `/dev/null` on 0, so
+  a plugin that reads its standard input reads end of file and no helper a plugin
+  starts inherits the connection. A server run by hand fails with that error rather
+  than waiting on the terminal. std sets close-on-exec after `socketpair` on macOS,
+  not with it, so a static mutex is held across making the pair and spawning; a
+  spawn by another part of the process is outside it, the window the slab's
+  descriptors have. The audio lane is a second socket pair whose server end rides
+  the first connection as a descriptor. Windows has no end to hand a child, so
+  it keeps a pipe the host names in `argv`, behind the one `sys` seam.
 - **The audio slab is anonymous on unix, and its descriptor is its own message.**
   The plugin process loads untrusted code, so a slab it could open by name, or
   `ftruncate` once opened, would fault the host's audio thread (SIGBUS on the next

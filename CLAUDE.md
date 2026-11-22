@@ -23,6 +23,7 @@ cargo test --doc --workspace               # nextest does not run doctests
 cargo xtask test-all                       # every test tier CI runs
 cargo xtask doc                            # rustdoc as CI runs it
 cargo xtask check-loom                     # clippy under --cfg loom
+cargo xtask rtsan                          # RealtimeSanitizer over the FFI/plugin paths; local only, needs curl
 cargo xtask check-windows                  # Windows lints from Linux
 cargo xtask test-wasm                      # the web suite under node (needs `wasm-bindgen-cli` at Cargo.lock's version)
 cargo xtask check-wasm                     # clippy for wasm32-unknown-unknown
@@ -314,8 +315,8 @@ touched.
   `tutti-measure`); a node file holds only the `Node` adapter.
 - A new trait states its boundary in one sentence without "and".
 - A configured thing is `Type::new(required..)` plus chained options (`self`, a bare
-  name, `-> Self`); a separate builder with `build()` only where finishing does work
-  or can fail.
+  name, `-> Self`), never a struct of public fields filled with `..Default::default()`;
+  a separate builder with `build()` only where finishing does work or can fail.
   See `docs/style-guide.md` T5; `cargo xtask check-building` holds it.
 - An error type derives `thiserror::Error` with its text in `#[error(..)]`; a hand
   `impl Error for` is a row of the gate's allow-list with its reason (`cargo xtask
@@ -372,3 +373,6 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
   `thread_priority` in `tutti-platform`).
 - A codec format is a cargo feature (`encode-*`, `decode-*`), none on by default; a decode
   feature pulls no encoder.
+- A MIDI OS backend is a cargo feature of `tutti-midi-hardware` (`alsa`, `coremidi`,
+  `winmm`), each a no-op off its OS and forwarded by `tutti-session` and `tutti`; the
+  defaults keep every platform's backend, and `default-features = false` is the stub.

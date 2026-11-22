@@ -43,18 +43,18 @@ fn peak(samples: &[f64]) -> f64 {
 }
 
 fn sine_synth() -> PolySynth<f64> {
-    PolySynth::new(SynthConfig {
-        polyphony: std::num::NonZeroUsize::new(4).unwrap(),
-        oscillator: OscillatorType::Sine,
-        filter: FilterType::None,
-        envelope: Adsr {
-            attack: Seconds::new(0.001),
-            decay: Seconds::new(0.0),
-            sustain: Amplitude::new(1.0),
-            release: Seconds::new(0.05),
-        },
-        ..SynthConfig::default()
-    })
+    PolySynth::new(
+        SynthConfig::new()
+            .polyphony(std::num::NonZeroUsize::new(4).unwrap())
+            .oscillator(OscillatorType::Sine)
+            .filter(FilterType::None)
+            .envelope(Adsr {
+                attack: Seconds::new(0.001),
+                decay: Seconds::new(0.0),
+                sustain: Amplitude::new(1.0),
+                release: Seconds::new(0.05),
+            }),
+    )
 }
 
 fn play(handle: &mut InstrumentHandle<impl ?Sized>, note: u8) {

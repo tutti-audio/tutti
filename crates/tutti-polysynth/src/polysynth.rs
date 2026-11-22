@@ -63,12 +63,12 @@ use tutti_voicing::{Controller, Effect, Glide, MasterGain, NoteControl, Stop};
 /// use tutti_graph::{Prepare, Standalone};
 /// use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};
 ///
-/// let synth = PolySynth::<f32>::new(SynthConfig {
-///     oscillator: OscillatorType::Saw,
-///     polyphony: NonZeroUsize::new(8).unwrap(),
-///     filter: FilterType::Moog { cutoff: Hz::new(2_000.0), resonance: Resonance::new(0.5) },
-///     ..Default::default()
-/// });
+/// let synth = PolySynth::<f32>::new(
+///     SynthConfig::new()
+///         .oscillator(OscillatorType::Saw)
+///         .polyphony(NonZeroUsize::new(8).unwrap())
+///         .filter(FilterType::Moog { cutoff: Hz::new(2_000.0), resonance: Resonance::new(0.5) }),
+/// );
 /// assert_eq!(synth.active_voice_count(), 0);
 ///
 /// // Alone in a graph; a host wires a clip or keyboard to its event input.
@@ -115,9 +115,8 @@ impl<F: SynthFloat> PolySynth<F> {
     /// rate is the graph's, not the config's (`Node::prepare`).
     pub const INITIAL_RATE: SampleRate = SampleRate::SR_44K1;
 
-    /// Creates a synth from a [`SynthConfig`], usually written as `Default`
-    /// plus struct update:
-    /// `SynthConfig { oscillator: OscillatorType::Saw, ..Default::default() }`.
+    /// Creates a synth from a [`SynthConfig`], usually written as `SynthConfig::new()`
+    /// plus the options that differ: `SynthConfig::new().oscillator(OscillatorType::Saw)`.
     ///
     /// Every voice, and every unison sub-voice within it, is built here, so
     /// this allocates in proportion to `polyphony * unison.voice_count` and
@@ -127,13 +126,12 @@ impl<F: SynthFloat> PolySynth<F> {
     #[must_use]
     pub fn new(config: SynthConfig) -> Self {
         let polyphony = config.polyphony.get();
-        let allocator_config = SynthVoicesConfig {
-            max_voices: config.polyphony,
-            mode: config.voice_mode,
-            strategy: config.allocation_strategy,
-            bend_range: config.pitch_bend_range,
-            per_note_bend_range: PitchBendSensitivity::MPE_MEMBER_DEFAULT.semitones(),
-        };
+        let allocator_config = SynthVoicesConfig::new()
+            .max_voices(config.polyphony)
+            .mode(config.voice_mode)
+            .strategy(config.allocation_strategy)
+            .bend_range(config.pitch_bend_range)
+            .per_note_bend_range(PitchBendSensitivity::MPE_MEMBER_DEFAULT.semitones());
         let mut allocator = SynthVoices::new(allocator_config);
         allocator.store_initial_tuning(config.tuning.table());
 

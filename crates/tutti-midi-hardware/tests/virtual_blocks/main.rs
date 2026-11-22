@@ -10,8 +10,12 @@
 //! The class exists from macOS 15: each case opens the endpoint on 15 or later
 //! and asserts the refusal by name before it. Off macOS the target has no case.
 
-#[cfg_attr(target_os = "macos", path = "macos.rs")]
-#[cfg_attr(not(target_os = "macos"), path = "other.rs")]
+/// An allocation inside an `RtScope` aborts the running test.
+#[global_allocator]
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
+
+#[cfg_attr(all(target_os = "macos", feature = "coremidi"), path = "macos.rs")]
+#[cfg_attr(not(all(target_os = "macos", feature = "coremidi")), path = "other.rs")]
 mod platform;
 
 fn main() {

@@ -37,21 +37,21 @@
 //! use tutti_graph::{Editor, Prepare};
 //!
 //! // `Moog` takes `Resonance`; the `Svf` variant takes `Q` instead.
-//! let synth = PolySynth::new(SynthConfig {
-//!     oscillator: OscillatorType::Saw,
-//!     polyphony: NonZeroUsize::new(8).unwrap(),
-//!     filter: FilterType::Moog {
-//!         cutoff: Hz::new(2000.0),
-//!         resonance: Resonance::new(0.7),
-//!     },
-//!     envelope: Adsr {
-//!         attack: Seconds::new(0.01),
-//!         decay: Seconds::new(0.2),
-//!         sustain: Amplitude::new(0.6),
-//!         release: Seconds::new(0.3),
-//!     },
-//!     ..Default::default()
-//! });
+//! let synth = PolySynth::new(
+//!     SynthConfig::new()
+//!         .oscillator(OscillatorType::Saw)
+//!         .polyphony(NonZeroUsize::new(8).unwrap())
+//!         .filter(FilterType::Moog {
+//!             cutoff: Hz::new(2000.0),
+//!             resonance: Resonance::new(0.7),
+//!         })
+//!         .envelope(Adsr {
+//!             attack: Seconds::new(0.01),
+//!             decay: Seconds::new(0.2),
+//!             sustain: Amplitude::new(0.6),
+//!             release: Seconds::new(0.3),
+//!         }),
+//! );
 //!
 //! // Into the graph: no audio input, stereo out, one MIDI event input (wire a
 //! // clip or a keyboard's queue node to it with `GraphSpec::connect_events`).

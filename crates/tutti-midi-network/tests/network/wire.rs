@@ -495,6 +495,7 @@ fn an_invitation_name_that_is_not_utf8_is_refused() {
     assert!(matches!(e.error, ParseError::Utf8(_)));
 }
 
+/// Spec: m2-124/4.4#8
 #[test]
 fn a_product_instance_id_outside_printable_ascii_is_refused() {
     let e = one(&[0x01, 0x02, 0x01, 0x00, b'n', 0, 0, 0, 0x07, 0, 0, 0]).unwrap_err();
