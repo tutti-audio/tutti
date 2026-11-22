@@ -16,7 +16,7 @@ use tutti_graph::{
     CommitError, Cx, Editor, EventIn, EventKind, Executor, Fade, FadeLaw, Io, Node, Prepare, Shape,
     Status, TransportPosition, Unforkable, compile,
 };
-use tutti_graph::{Edge, InPort, OutPort, PortSource};
+use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_rt::RtScope;
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{At, Samples};
@@ -34,7 +34,7 @@ fn gain_graph(g: f32) -> (Editor, Executor) {
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
     ed.insert(NODE, "gain", Unforkable(gain(g)));
     ed.spec_mut().topology.edges.insert(
-        InPort {
+        InputPort {
             node: NODE,
             port: 0,
         },
@@ -42,7 +42,7 @@ fn gain_graph(g: f32) -> (Editor, Executor) {
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutputPort {
             node: NODE,
             port: 0,
         })]);
@@ -186,7 +186,7 @@ fn the_outgoing_unit_retires_on_the_control_thread() {
         }),
     );
     ed.spec_mut().topology.edges.insert(
-        InPort {
+        InputPort {
             node: NODE,
             port: 0,
         },
@@ -194,7 +194,7 @@ fn the_outgoing_unit_retires_on_the_control_thread() {
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutputPort {
             node: NODE,
             port: 0,
         })]);
@@ -319,7 +319,7 @@ fn a_shape_mismatch_is_refused() {
     ed.spec_mut()
         .topology
         .outputs
-        .push(vec![PortSource::Node(OutPort {
+        .push(vec![PortSource::Node(OutputPort {
             node: lagged,
             port: 0,
         })]);
@@ -373,7 +373,7 @@ fn a_shape_mismatch_is_refused() {
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutputPort {
             node: lagged,
             port: 0,
         })]);
@@ -516,7 +516,7 @@ fn events_go_to_the_incoming_unit_only() {
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutputPort {
             node: NODE,
             port: 0,
         })]);
@@ -660,13 +660,13 @@ fn the_reference_cuts_a_fade_on_a_latency_change() {
                 .with_latency(Samples::new(latency)),
         );
         t.edges.insert(
-            InPort {
+            InputPort {
                 node: NODE,
                 port: 0,
             },
             vec![Edge::Direct(PortSource::Global(0))],
         );
-        t.set_outputs(vec![PortSource::Node(OutPort {
+        t.set_outputs(vec![PortSource::Node(OutputPort {
             node: NODE,
             port: 0,
         })]);

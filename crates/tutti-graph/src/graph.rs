@@ -20,7 +20,7 @@
 //! # Examples
 //!
 //! ```
-//! use tutti_graph::{Edge, InPort, NodeSpec, OutPort, PortSource};
+//! use tutti_graph::{Edge, InputPort, NodeSpec, OutputPort, PortSource};
 //! use tutti_buffers::ChannelLayout;
 //! use tutti_graph::{NodeKey, Topology};
 //!
@@ -29,10 +29,10 @@
 //! g.nodes.insert(osc, NodeSpec::new("osc", ChannelLayout::EMPTY, ChannelLayout::MONO));
 //! g.nodes.insert(gain, NodeSpec::new("gain", ChannelLayout::MONO, ChannelLayout::MONO));
 //! g.connect(
-//!     InPort { node: gain, port: 0 },
-//!     Edge::Direct(PortSource::Node(OutPort { node: osc, port: 0 })),
+//!     InputPort { node: gain, port: 0 },
+//!     Edge::Direct(PortSource::Node(OutputPort { node: osc, port: 0 })),
 //! );
-//! g.set_outputs([PortSource::Node(OutPort { node: gain, port: 0 })]);
+//! g.set_outputs([PortSource::Node(OutputPort { node: gain, port: 0 })]);
 //!
 //! let valid = g.validate().expect("well formed");
 //! assert_eq!(valid.get().topo_order(), Ok(vec![osc, gain]));
@@ -74,7 +74,7 @@ impl NodeKey {
 
 /// Which **output** port of which node a signal leaves from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct OutPort {
+pub struct OutputPort {
     /// The node the signal leaves.
     pub node: NodeKey,
     /// Which of its output ports.
@@ -85,7 +85,7 @@ pub struct OutPort {
 ///
 /// The key of [`Topology::edges`] — see that field for why.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct InPort {
+pub struct InputPort {
     /// The node the signal arrives at.
     pub node: NodeKey,
     /// Which of its input ports.
@@ -97,7 +97,7 @@ pub struct InPort {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PortSink {
     /// An input port of a node.
-    Port(InPort),
+    Port(InputPort),
     /// A global output channel.
     Output(u16),
 }
@@ -118,13 +118,13 @@ pub struct EdgeId {
 
 /// What feeds one sink port.
 ///
-/// An [`InPort`] is a map *key* and its value is a list of sources
+/// An [`InputPort`] is a map *key* and its value is a list of sources
 /// ([`Topology::edges`]), so the representation holds several, and the compiler sums them
 /// in source order (`Op::Sum`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PortSource {
     /// An output port of another node in this topology.
-    Node(OutPort),
+    Node(OutputPort),
     /// A channel of the topology's own global input.
     Global(u16),
     /// Explicit silence. Distinct from *absent*: an author who wired a port to
@@ -163,7 +163,7 @@ pub enum PortSource {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FeedbackFrom {
     /// The port whose delayed output feeds the sink.
-    pub from: OutPort,
+    pub from: OutputPort,
     /// How far back, in frames. See the type docs for the lower bound.
     pub delay: Samples,
 }
@@ -171,14 +171,14 @@ pub struct FeedbackFrom {
 impl FeedbackFrom {
     /// Creates a feedback edge from `from`, delayed by `delay` frames.
     #[must_use]
-    pub const fn new(from: OutPort, delay: Samples) -> Self {
+    pub const fn new(from: OutputPort, delay: Samples) -> Self {
         Self { from, delay }
     }
 
     /// Creates a feedback edge from `from`, delayed by one block of `block` frames —
     /// the block size the author designed the loop for, fixed here so every
     /// interpreter (live or offline) renders the same loop.
-    pub const fn one_block(from: OutPort, block: Samples) -> Self {
+    pub const fn one_block(from: OutputPort, block: Samples) -> Self {
         Self { from, delay: block }
     }
 }
@@ -272,7 +272,7 @@ pub struct Topology {
     /// [`validate`](Self::validate) checks it: the same edge twice is
     /// [`Invalid::DuplicateEdge`], and a stored `PortSource::Zero` is
     /// [`Invalid::StoredSilence`].
-    pub edges: BTreeMap<InPort, Vec<Edge>>,
+    pub edges: BTreeMap<InputPort, Vec<Edge>>,
     /// The sources of each global output channel, in channel order, with the
     /// same rules as [`edges`](Self::edges) (a sink is a sink).
     pub outputs: Vec<Vec<PortSource>>,
@@ -537,30 +537,30 @@ pub enum Invalid {
     /// An edge names a node that is not in [`Topology::nodes`].
     UnknownNode {
         /// The sink port whose edge names it.
-        at: InPort,
+        at: InputPort,
         /// The key that is not in the map.
         missing: NodeKey,
     },
     /// An edge arrives at a port past the sink's declared input width.
     SinkPortOutOfRange {
         /// The out-of-range sink port.
-        at: InPort,
+        at: InputPort,
         /// The sink's declared width.
         width: ChannelLayout,
     },
     /// An edge leaves from a port past the source's declared output width.
     SourcePortOutOfRange {
         /// The sink port whose edge is bad.
-        at: InPort,
+        at: InputPort,
         /// The out-of-range source port.
-        from: OutPort,
+        from: OutputPort,
         /// The source's declared width.
         width: ChannelLayout,
     },
     /// A global-input edge names a channel past [`Topology::inputs`].
     GlobalInputOutOfRange {
         /// The sink port whose edge is bad.
-        at: InPort,
+        at: InputPort,
         /// The named global channel.
         channel: u16,
         /// The topology's declared input width.
@@ -591,7 +591,7 @@ pub enum Invalid {
         /// Which output channel.
         channel: usize,
         /// The port it names.
-        from: OutPort,
+        from: OutputPort,
     },
     /// A cycle **not** broken by an [`Edge::Feedback`] edge.
     Cycle {
@@ -605,7 +605,7 @@ pub enum Invalid {
     /// mid-edit.
     Unconnected {
         /// The port nothing feeds.
-        at: InPort,
+        at: InputPort,
     },
 }
 
@@ -771,7 +771,7 @@ impl Topology {
     ///
     /// `Edge::Direct(PortSource::Zero)` adds nothing: silence is the empty set and
     /// is never stored.
-    pub fn connect(&mut self, at: InPort, edge: Edge) {
+    pub fn connect(&mut self, at: InputPort, edge: Edge) {
         if edge == Edge::Direct(PortSource::Zero) {
             return;
         }
@@ -784,7 +784,7 @@ impl Topology {
     /// Removes `edge` from the sources of `at`, and the key itself when it was
     /// the last, so the derived `Eq` and `Hash` see an unfed port as one.
     /// Returns whether it was there.
-    pub fn disconnect(&mut self, at: InPort, edge: Edge) -> bool {
+    pub fn disconnect(&mut self, at: InputPort, edge: Edge) -> bool {
         let Some(list) = self.edges.get_mut(&at) else {
             return false;
         };
@@ -858,10 +858,10 @@ impl Topology {
     /// Not a fault (see [`validate`](Self::validate)) — exposed so a caller that
     /// wants to warn about a half-wired graph has an answer that does not depend
     /// on validation having failed.
-    pub fn unconnected(&self) -> impl Iterator<Item = InPort> + '_ {
+    pub fn unconnected(&self) -> impl Iterator<Item = InputPort> + '_ {
         self.nodes.iter().flat_map(move |(&node, spec)| {
             (0..spec.inputs.count())
-                .map(move |port| InPort { node, port })
+                .map(move |port| InputPort { node, port })
                 .filter(move |at| self.edges.get(at).is_none_or(Vec::is_empty))
         })
     }
@@ -971,7 +971,7 @@ impl LatencyGraph for Topology {
         (0..width).flat_map(move |port| {
             let edges = self
                 .edges
-                .get(&InPort { node, port })
+                .get(&InputPort { node, port })
                 .map_or(&[][..], Vec::as_slice);
             let feed = |e: &Edge| match e {
                 Edge::Direct(PortSource::Node(p)) => Feed::Node(p.node),

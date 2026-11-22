@@ -21,7 +21,7 @@ use tutti_graph::{
     Cx, Editor, Executor, ForkByClone, ForkMode, ForkTarget, Io, Node, Offset, PlayReading,
     Prepare, Reference, Shape, Status, TransportChanges, TransportPosition, Unforkable,
 };
-use tutti_graph::{Edge, InPort, OutPort, PortSource};
+use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_units::{Beat, Bpm, Frame, Latency, Samples};
 
 const MAX: usize = 64;
@@ -103,16 +103,16 @@ fn rig(lat: usize, forkable: bool) -> Rig {
     }
     let t = &mut ed.spec_mut().topology;
     t.edges.insert(
-        InPort {
+        InputPort {
             node: PROBE,
             port: 0,
         },
-        vec![Edge::Direct(PortSource::Node(OutPort {
+        vec![Edge::Direct(PortSource::Node(OutputPort {
             node: LATENT,
             port: 0,
         }))],
     );
-    t.set_outputs((0..2).map(|port| PortSource::Node(OutPort { node: PROBE, port })));
+    t.set_outputs((0..2).map(|port| PortSource::Node(OutputPort { node: PROBE, port })));
     ed.commit().expect("commits");
     let mut reference = Reference::new(prepare(MAX));
     let mut units: BTreeMap<NodeKey, Box<dyn Node>> = BTreeMap::new();

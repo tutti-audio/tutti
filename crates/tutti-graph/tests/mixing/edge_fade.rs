@@ -12,7 +12,7 @@ use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, prepare};
 use tutti_graph::{
-    Edge, EdgeFade, EdgeGain, EdgeId, Editor, Executor, NodeKey, OutPort, PortSink, PortSource,
+    Edge, EdgeFade, EdgeGain, EdgeId, Editor, Executor, NodeKey, OutputPort, PortSink, PortSource,
     TransportPosition, Unforkable,
 };
 use tutti_units::Amplitude;
@@ -31,7 +31,7 @@ fn key(n: u64) -> NodeKey {
 }
 
 fn out(node: u64) -> PortSource {
-    PortSource::Node(OutPort {
+    PortSource::Node(OutputPort {
         node: key(node),
         port: 0,
     })

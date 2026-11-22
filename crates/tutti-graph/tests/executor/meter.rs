@@ -17,7 +17,7 @@ use tutti_graph::{
     Forked, IntoNode, Io, Level, MeterReader, Node, NodeParts, Op, Shape, Status,
     TransportPosition, Unforkable,
 };
-use tutti_graph::{Edge, InPort, OutPort, PortSource};
+use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_graph::{MeterId, MeterSpec, NodeKey};
 use tutti_units::{Beat, Bpm, Samples};
 
@@ -49,7 +49,7 @@ impl IntoNode for Forkable {
 const MAX_BLOCK: usize = 1024;
 
 fn out(node: u64) -> PortSource {
-    PortSource::Node(OutPort {
+    PortSource::Node(OutputPort {
         node: NodeKey(node),
         port: 0,
     })
@@ -463,14 +463,14 @@ fn output_bits(workers: usize, main_output: bool, track: bool) -> Vec<u32> {
         );
         let t = &mut r.ed.spec_mut().topology;
         t.edges.insert(
-            InPort {
+            InputPort {
                 node: NodeKey(lag),
                 port: 0,
             },
             vec![Edge::Direct(PortSource::Global(0))],
         );
         t.edges.insert(
-            InPort {
+            InputPort {
                 node: NodeKey(gain),
                 port: 0,
             },
@@ -559,7 +559,7 @@ fn a_narrowed_node_silences_the_lanes_past_its_width_and_commits() {
         }),
     );
     let port = |p| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port: p,
         })
@@ -626,7 +626,7 @@ fn the_main_output_reads_at_the_outputs_time() {
     r.ed.insert(NodeKey(2), "pulse", Unforkable(Burst { len: 50, done: 0 }));
     r.ed.insert(NodeKey(3), "lag", Forkable(Kind::Lag { latency: 30 }));
     r.ed.spec_mut().topology.edges.insert(
-        InPort {
+        InputPort {
             node: NodeKey(3),
             port: 0,
         },
@@ -813,7 +813,7 @@ fn run(r: &mut Rig, blocks: usize) -> Vec<Vec<Level>> {
     // A chain with latency so the compiler aligns the outputs.
     r.ed.insert(NodeKey(20), "lag", Forkable(Kind::Lag { latency: 7 }));
     r.ed.spec_mut().topology.edges.insert(
-        InPort {
+        InputPort {
             node: NodeKey(20),
             port: 0,
         },

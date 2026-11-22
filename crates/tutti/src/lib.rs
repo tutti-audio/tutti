@@ -220,9 +220,9 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    AppKey, BlockDates, ChannelEdge, Clock, ConnectError, EventInPort, EventOutPort, InPort, Key,
-    MainInput, MainOutput, NoSuchNode, Offline, OfflineSession, OutPort, Playhead, RealTime,
-    Session, SessionBuilder, SessionEvent, SessionFloat, SystemClock, SystemSession,
+    AppKey, BlockDates, ChannelEdge, Clock, ConnectError, EventInPort, EventOutPort, InputPort,
+    Key, MainInput, MainOutput, NoSuchNode, Offline, OfflineSession, OutputPort, Playhead,
+    RealTime, Session, SessionBuilder, SessionEvent, SessionFloat, SystemClock, SystemSession,
     TransportHandle, Workers,
 };
 #[cfg(all(feature = "session", feature = "export"))]

@@ -20,7 +20,7 @@ use tutti_graph::{
     Io, Node, Offset, ParamIn, ParamKind, ParamRange, ParamSegment, Prepare, Shape, Status,
     TransportChanges, TransportPosition, control_in,
 };
-use tutti_graph::{Edge, InPort, OutPort, PortSource};
+use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_modulation::{
     Adsr, Amount, ControlProgramBuilder, InputLayer, Law, LayerId, Polarity, SignalKind,
     SignalSource, SourceId,
@@ -278,7 +278,7 @@ impl Node for Probe {
 // ---------------------------------------------------------------- rigs ---
 
 fn out(node: u64, port: u16) -> PortSource {
-    PortSource::Node(OutPort {
+    PortSource::Node(OutputPort {
         node: NodeKey(node),
         port,
     })
@@ -295,7 +295,7 @@ fn editor(max: usize) -> (Editor, Executor) {
 fn wire_audio(ed: &mut Editor, from: u64, to: u64, ports: u16) {
     for port in 0..ports {
         ed.spec_mut().topology.edges.insert(
-            InPort {
+            InputPort {
                 node: NodeKey(to),
                 port,
             },
@@ -852,7 +852,7 @@ fn a_kick_ducks_the_pad_through_a_lane() {
     // the peak is not the first channel.
     for (from, to) in [(0, 1), (1, 0)] {
         ed.spec_mut().topology.edges.insert(
-            InPort {
+            InputPort {
                 node: NodeKey(2),
                 port: to,
             },

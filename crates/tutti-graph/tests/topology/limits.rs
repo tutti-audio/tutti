@@ -8,7 +8,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;
 use tutti_graph::{CommitError, Cx, Editor, Io, Limits, Node, Prepare, Shape, Status, Unforkable};
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_units::{SampleRate, Samples};
 
 struct Wide(u16);
@@ -30,7 +30,7 @@ fn prep(max: usize) -> Prepare {
 
 fn wire(ed: &mut Editor, width: u16) {
     ed.spec_mut().topology.set_outputs((0..width).map(|port| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port,
         })

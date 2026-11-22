@@ -32,7 +32,7 @@ use tutti_nodes::automation::{Breakpoint, RecordMode, Trajectory};
 use tutti_nodes::{Feed, ModDelayConfig, PhaserConfig, ReconcileError};
 use tutti_session::{
     AudioSide, AutomationTake, DepthTarget, DetachedSession, MainOutput, MixRef, ModInput, ModKeys,
-    ModRefusal, ModRouteId, ModSourceId, ModTarget, NoSuchModRoute, NoSuchModSource, OutPort,
+    ModRefusal, ModRouteId, ModSourceId, ModTarget, NoSuchModRoute, NoSuchModSource, OutputPort,
     PHASES, ParamRef, ParamTarget, PhaseCx, Problem, Replacement, RouteSpec, Session, SessionEvent,
     TargetName, declare_targets,
 };
@@ -66,7 +66,7 @@ pub(crate) fn rig(outputs: usize) -> (DetachedSession, AudioSide) {
 pub(crate) fn main_output(s: &mut DetachedSession, nodes: &[NodeKey]) {
     for (c, &n) in nodes.iter().enumerate() {
         s.graph()
-            .set_sources(MainOutput::channel(c), [OutPort::new(n, 0)])
+            .set_sources(MainOutput::channel(c), [OutputPort::new(n, 0)])
             .unwrap();
     }
 }

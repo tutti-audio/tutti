@@ -16,7 +16,7 @@ use tutti_graph::{
     Cx, Editor, EventEdge, EventIn, EventOut, ForkByClone, GraphBuilder, Io, Node, Prepare,
     Renderer, Shape, Status, TransportPosition, Unforkable,
 };
-use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, PortSource};
+use tutti_graph::{Edge, FeedbackFrom, InputPort, OutputPort, PortSource};
 use tutti_units::{Beat, Frame, Samples};
 
 fn signal(n: usize) -> Vec<f32> {
@@ -73,7 +73,7 @@ fn source_of(g: &GraphBuilder, node: NodeKey, port: u16) -> PortSource {
         .spec()
         .topology
         .edges
-        .get(&InPort { node, port })
+        .get(&InputPort { node, port })
         .map(Vec::as_slice)
     {
         Some([Edge::Direct(s)]) => *s,
@@ -148,7 +148,7 @@ mod net_rule {
     }
 
     fn port(node: NodeKey, port: usize) -> PortSource {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node,
             port: port as u16,
         })
@@ -239,7 +239,7 @@ mod net_rule {
     pub fn constants(nodes: &[(NodeKey, Node)], outputs: &[PortSource]) -> Vec<f32> {
         let mut value: Vec<(NodeKey, Vec<f32>)> = Vec::new();
         let read = |value: &[(NodeKey, Vec<f32>)], s: &PortSource| match s {
-            PortSource::Node(OutPort { node, port }) => {
+            PortSource::Node(OutputPort { node, port }) => {
                 value
                     .iter()
                     .find(|(k, _)| k == node)
@@ -278,7 +278,7 @@ fn builder_builds_what_a_hand_written_spec_builds() {
     g.connect_input(0, mix, 0)
         .feedback(lp, 0, mix, 1, fb_delay)
         .connect(mix, 0, lp, 0)
-        .set_output(0, PortSource::Node(OutPort { node: lp, port: 0 }))
+        .set_output(0, PortSource::Node(OutputPort { node: lp, port: 0 }))
         .connect_output(fold, 0, 1)
         .connect_events(emit, 0, fold, 0);
     assert_eq!(
@@ -315,11 +315,11 @@ fn builder_builds_what_a_hand_written_spec_builds() {
     );
     let spec = ed.spec_mut();
     spec.topology.inputs = ChannelLayout::MONO;
-    let at = |node: u64, port: u16| InPort {
+    let at = |node: u64, port: u16| InputPort {
         node: NodeKey(node),
         port,
     };
-    let from = |node: u64, port: u16| OutPort {
+    let from = |node: u64, port: u16| OutputPort {
         node: NodeKey(node),
         port,
     };
@@ -413,7 +413,7 @@ fn pipe_connects_ports_in_order_as_net_pipe_all() {
     for c in 0..3 {
         assert_eq!(
             source_of(&g, b, c),
-            PortSource::Node(OutPort { node: a, port: c })
+            PortSource::Node(OutputPort { node: a, port: c })
         );
     }
 }
@@ -448,7 +448,7 @@ fn pipe_output_fans_out_as_net_does() {
     g.pipe_output(key);
     let ports: Vec<PortSource> = (0..6)
         .map(|c| {
-            PortSource::Node(OutPort {
+            PortSource::Node(OutputPort {
                 node: key,
                 port: c % 2,
             })
@@ -616,7 +616,7 @@ fn every_writer_normalises_silence_to_the_empty_set() {
         t.hash(&mut h);
         h.finish()
     };
-    let at = InPort {
+    let at = InputPort {
         node: NodeKey(0),
         port: 0,
     };
@@ -636,7 +636,7 @@ fn every_writer_normalises_silence_to_the_empty_set() {
     let mut t = tutti_graph::Topology::default();
     t.set_outputs([
         PortSource::Zero,
-        PortSource::Node(OutPort { node: a, port: 0 }),
+        PortSource::Node(OutputPort { node: a, port: 0 }),
     ]);
     assert_eq!(t.outputs[0], Vec::<PortSource>::new());
     t.connect(at, Edge::Direct(PortSource::Zero));
@@ -657,7 +657,7 @@ fn every_writer_normalises_silence_to_the_empty_set() {
     ed.insert(NodeKey(1), "w", node(0, 1));
     ed.spec_mut()
         .topology
-        .set_outputs([PortSource::Node(OutPort {
+        .set_outputs([PortSource::Node(OutputPort {
             node: NodeKey(1),
             port: 0,
         })]);
@@ -676,12 +676,12 @@ fn connect_adds_and_set_source_replaces() {
     let one = g.add(node(0, 1));
     let two = g.add(node(0, 2));
     let sink = g.add(node(1, 1));
-    let at = InPort {
+    let at = InputPort {
         node: sink,
         port: 0,
     };
-    let from_one = PortSource::Node(OutPort { node: one, port: 0 });
-    let from_two = PortSource::Node(OutPort { node: two, port: 1 });
+    let from_one = PortSource::Node(OutputPort { node: one, port: 0 });
+    let from_two = PortSource::Node(OutputPort { node: two, port: 1 });
     let held = |g: &GraphBuilder| {
         g.spec()
             .topology
@@ -735,7 +735,7 @@ fn connect_adds_and_set_source_replaces() {
     let sink = g.add(node(1, 1));
     g.connect(one, 0, sink, 0)
         .feedback(sink, 0, sink, 0, Samples::new(64));
-    let at = InPort {
+    let at = InputPort {
         node: sink,
         port: 0,
     };

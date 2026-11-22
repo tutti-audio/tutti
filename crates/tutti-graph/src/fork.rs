@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tutti_units::SampleRate;
 
 use crate::NodeKey;
-use crate::{Edge, FeedbackFrom, InPort, OutPort, PortSink, PortSource, Topology};
+use crate::{Edge, FeedbackFrom, InputPort, OutputPort, PortSink, PortSource, Topology};
 
 use crate::CompileError;
 use crate::editor::{CommitError, Editor};
@@ -650,7 +650,7 @@ impl Error for ForkError {
 /// let (mut editor, _exec) = Editor::new(prepare);
 /// editor.insert(NodeKey(1), "silence", ForkByClone(Silence));
 /// editor.spec_mut().topology.set_outputs([tutti_graph::PortSource::Node(
-///     tutti_graph::OutPort { node: NodeKey(1), port: 0 },
+///     tutti_graph::OutputPort { node: NodeKey(1), port: 0 },
 /// )]);
 /// assert!(editor.fork(ForkTarget::Node(NodeKey(1)), ForkMode::Live, prepare).is_ok());
 /// ```
@@ -730,7 +730,7 @@ impl<F: Float, N: Node<F> + Clone + Send + 'static> IntoNode<F> for ForkByClone<
 /// let (mut editor, _exec) = Editor::new(prepare);
 /// editor.insert(NodeKey(1), "silence", Unforkable(Silence));
 /// editor.spec_mut().topology.set_outputs([tutti_graph::PortSource::Node(
-///     tutti_graph::OutPort { node: NodeKey(1), port: 0 },
+///     tutti_graph::OutputPort { node: NodeKey(1), port: 0 },
 /// )]);
 /// assert_eq!(
 ///     editor.fork(ForkTarget::MainOutput, ForkMode::Live, prepare).err(),
@@ -971,7 +971,7 @@ impl<F: Float> Editor<F> {
                 // Clamp, not wrap (see `Editor::fork`'s docs).
                 let outputs = (0..live.topology.outputs.len())
                     .map(|c| {
-                        vec![PortSource::Node(OutPort {
+                        vec![PortSource::Node(OutputPort {
                             node: key,
                             port: (c as u16).min(outs - 1),
                         })]
@@ -1218,7 +1218,7 @@ impl<F: Float> Editor<F> {
                 .topology
                 .edges
                 .range(
-                    InPort { node, port: 0 }..=InPort {
+                    InputPort { node, port: 0 }..=InputPort {
                         node,
                         port: u16::MAX,
                     },

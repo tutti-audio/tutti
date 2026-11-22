@@ -151,7 +151,7 @@ pub enum PumpPass {
 /// use tutti_codec::{FileOut, Format, Pcm, Spec};
 /// use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable};
 /// use tutti_session::{PumpLoop, PumpPass};
-/// use tutti_graph::{OutPort, PortSource};
+/// use tutti_graph::{OutputPort, PortSource};
 /// use tutti_units::{Beat, Bpm, SampleRate, Samples};
 /// use tutti_buffers::{ChannelLayout, MaxBlock};
 /// use tutti_buffers::Sink;
@@ -176,7 +176,7 @@ pub enum PumpPass {
 /// // A tap on both of the graph's outputs, copied as the graph renders.
 /// let (mut editor, mut executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
 /// editor.insert(NodeKey(1), "tone", Unforkable(Tone));
-/// let out = |port| PortSource::Node(OutPort { node: NodeKey(1), port });
+/// let out = |port| PortSource::Node(OutputPort { node: NodeKey(1), port });
 /// editor.spec_mut().topology.set_outputs([out(0), out(1)]);
 /// let reader = editor
 ///     .open_tap(TapId::of(1), vec![out(0), out(1)], TapOptions::new(Samples::new(1024)))

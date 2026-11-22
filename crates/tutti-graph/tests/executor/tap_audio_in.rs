@@ -9,7 +9,7 @@ use tutti_graph::{
     Unforkable,
 };
 use tutti_graph::{NodeKey, TapAlign, TapId, TapOptions};
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 /// A stereo source that plays `frames` in order, then silence: the graph the
@@ -61,7 +61,7 @@ fn tap_with_ring(frames: &[(f32, f32)], ring: usize) -> TapReader {
         }),
     );
     let port = |port| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port,
         })

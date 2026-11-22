@@ -115,13 +115,13 @@ const INTERNAL: &[(&str, &str, &str)] = &[
     ),
     (
         "tutti_graph",
-        "InPort",
-        "the compiler's port; the session's `InPort` is another",
+        "InputPort",
+        "the compiler's port; the session's `InputPort` is another",
     ),
     (
         "tutti_graph",
-        "OutPort",
-        "the compiler's port; the session's `OutPort` is another",
+        "OutputPort",
+        "the compiler's port; the session's `OutputPort` is another",
     ),
     (
         "tutti_plugin",

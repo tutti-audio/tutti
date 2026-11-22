@@ -20,7 +20,7 @@ use tutti_buffers::MaxBlock;
 
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Executor, Prepare, TransportPosition, WorkerPool};
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_music::{FrameClock, LoopRange};
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, Wave};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
@@ -85,7 +85,7 @@ fn graph(wave: &Arc<Wave>, workers: usize, host: Host) -> Executor {
             }
         }
         for port in 0..2u16 {
-            outputs.push(PortSource::Node(OutPort { node: key, port }));
+            outputs.push(PortSource::Node(OutputPort { node: key, port }));
         }
     }
     ed.spec_mut().topology.set_outputs(outputs);

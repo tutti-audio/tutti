@@ -5,7 +5,7 @@ use tutti_buffers::Interleaved;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::NodeKey;
 use tutti_sampler::Clip;
-use tutti_session::{MainOutput, OutPort, Session};
+use tutti_session::{MainOutput, OutputPort, Session};
 use tutti_units::{Amplitude, Beat, SampleRate};
 
 const RATE: f64 = 48_000.0;
@@ -43,7 +43,7 @@ fn run(s: &mut Session, frames: usize) -> Vec<f32> {
 fn wire(s: &mut Session, clip: NodeKey) {
     for port in 0..2 {
         s.graph()
-            .set_sources(MainOutput::channel(port), [OutPort::new(clip, port)])
+            .set_sources(MainOutput::channel(port), [OutputPort::new(clip, port)])
             .unwrap();
     }
 }

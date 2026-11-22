@@ -17,7 +17,7 @@ use tutti_buffers::Float;
 use super::Graph;
 #[cfg(feature = "analyze")]
 use crate::{Analyzer, AnalyzerError, AudioContext, AudioInput};
-use crate::{EventTapPort, OutPort};
+use crate::{EventTapPort, OutputPort};
 
 /// What a reader of the main output is named by: the id of the tap or of the meter.
 /// The reader a reopen opens takes the id of the one it supersedes.
@@ -133,7 +133,7 @@ impl<F: Float> Taps<'_, F> {
     /// [`MissingSource`] for the first source that is not in the graph now.
     pub fn open_ports(
         &mut self,
-        sources: &[OutPort],
+        sources: &[OutputPort],
         options: TapOptions,
     ) -> Result<TapReader<F>, MissingSource> {
         let sources = self.graph.raw_sources(sources)?;
@@ -164,7 +164,7 @@ impl<F: Float> Taps<'_, F> {
     #[cfg(feature = "analyze")]
     pub fn open_analyzer<A>(
         &mut self,
-        sources: &[OutPort],
+        sources: &[OutputPort],
         analysis: A,
         options: TapOptions,
     ) -> Result<Analyzer<A, F>, AnalyzerError>
@@ -391,7 +391,7 @@ impl<F: Float> Meters<'_, F> {
     /// [`MissingSource`] for the first source that is not in the graph now.
     pub fn open(
         &mut self,
-        sources: &[OutPort],
+        sources: &[OutputPort],
         align: TapAlign,
     ) -> Result<MeterReader, MissingSource> {
         let sources = self.graph.raw_sources(sources)?;

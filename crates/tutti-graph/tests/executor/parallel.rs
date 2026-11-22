@@ -24,7 +24,7 @@ use tutti_graph::{
     ForkTarget, Forked, IntoNode, Io, Law, Node, NodeParts, ParamIn, ParamRamp, ParamRange,
     ParamSegment, Prepare, Schedule, Shape, Status, TransportPosition, Unforkable,
 };
-use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, PortSource};
+use tutti_graph::{Edge, FeedbackFrom, InputPort, OutputPort, PortSource};
 use tutti_ump::Ump;
 use tutti_units::{At, Beat, Bpm, Frame, Latency, SampleRate, Samples, UnitParam};
 
@@ -155,15 +155,15 @@ impl Node for RampEvery {
     fn reset(&mut self) {}
 }
 
-fn at(node: u64, port: u16) -> InPort {
-    InPort {
+fn at(node: u64, port: u16) -> InputPort {
+    InputPort {
         node: NodeKey(node),
         port,
     }
 }
 
-fn out(node: u64, port: u16) -> OutPort {
-    OutPort {
+fn out(node: u64, port: u16) -> OutputPort {
+    OutputPort {
         node: NodeKey(node),
         port,
     }

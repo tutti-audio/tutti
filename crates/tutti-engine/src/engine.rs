@@ -2081,10 +2081,10 @@ mod tests {
     /// commit.
     fn rewire(ed: &mut Editor, width: u16) {
         use tutti_graph::NodeKey;
-        use tutti_graph::{OutPort, PortSource};
+        use tutti_graph::{OutputPort, PortSource};
         ed.insert(NodeKey(1), "ramp", tutti_graph::Unforkable(Ramp(width)));
         ed.spec_mut().topology.set_outputs((0..width).map(|port| {
-            PortSource::Node(OutPort {
+            PortSource::Node(OutputPort {
                 node: NodeKey(1),
                 port,
             })
@@ -3020,8 +3020,8 @@ mod tests {
     /// Feeds the constant at key 1 to channel `channel` of a `width`-wide
     /// main output, the others silent, in the editor's spec.
     fn feed(ed: &mut Editor, width: usize, channel: usize) {
-        use tutti_graph::{NodeKey, OutPort, PortSource};
-        let dc = PortSource::Node(OutPort {
+        use tutti_graph::{NodeKey, OutputPort, PortSource};
+        let dc = PortSource::Node(OutputPort {
             node: NodeKey(1),
             port: 0,
         });
@@ -3468,7 +3468,7 @@ mod tests {
         let control = engine.output_control();
         move_main_output(&mut ed, &control, None, 2, 1);
         let mut heard: Vec<f32> = block_with(&engine, 2, || {});
-        let dc = tutti_graph::PortSource::Node(tutti_graph::OutPort {
+        let dc = tutti_graph::PortSource::Node(tutti_graph::OutputPort {
             node: tutti_graph::NodeKey(1),
             port: 0,
         });
@@ -3544,18 +3544,18 @@ mod tests {
     /// starts from the same history, so it has no gap either.
     #[test]
     fn a_compensated_old_main_output_crossfades_out_with_its_history() {
-        use tutti_graph::{NodeKey, OutPort, PortSource};
+        use tutti_graph::{NodeKey, OutputPort, PortSource};
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(8)),
         ));
         ed.insert(NodeKey(1), "count", tutti_graph::Unforkable(Count(0.0)));
         ed.insert(NodeKey(2), "late", tutti_graph::Unforkable(Late));
-        let count = PortSource::Node(OutPort {
+        let count = PortSource::Node(OutputPort {
             node: NodeKey(1),
             port: 0,
         });
-        let late = PortSource::Node(OutPort {
+        let late = PortSource::Node(OutputPort {
             node: NodeKey(2),
             port: 0,
         });
@@ -3606,18 +3606,18 @@ mod tests {
     /// the new main output's (none), not the old main output's 16.
     #[test]
     fn a_latent_source_the_new_main_output_lacks_does_not_move_the_new_main_output() {
-        use tutti_graph::{NodeKey, OutPort, PortSource};
+        use tutti_graph::{NodeKey, OutputPort, PortSource};
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(8)),
         ));
         ed.insert(NodeKey(1), "count", tutti_graph::Unforkable(Count(0.0)));
         ed.insert(NodeKey(2), "late", tutti_graph::Unforkable(Late));
-        let count = PortSource::Node(OutPort {
+        let count = PortSource::Node(OutputPort {
             node: NodeKey(1),
             port: 0,
         });
-        let late = PortSource::Node(OutPort {
+        let late = PortSource::Node(OutputPort {
             node: NodeKey(2),
             port: 0,
         });

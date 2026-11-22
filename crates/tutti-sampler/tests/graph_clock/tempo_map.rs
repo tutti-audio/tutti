@@ -38,7 +38,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::Wave;
 use tutti_engine::Engine;
-use tutti_graph::{Editor, NodeKey, OutPort, PortSource, Prepare};
+use tutti_graph::{Editor, NodeKey, OutputPort, PortSource, Prepare};
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_timeline::{MotionCommand, Transport};
@@ -150,7 +150,7 @@ fn render(
         }
     }
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port,
         })
@@ -344,7 +344,7 @@ fn a_clip_placed_ahead_of_a_tempo_change_lands_its_first_frame_on_its_start() {
         .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
         .expect("room");
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port,
         })

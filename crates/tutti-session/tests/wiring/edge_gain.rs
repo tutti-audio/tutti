@@ -13,7 +13,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::NodeKey;
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    ChannelEdge, DeclarationError, GainTarget, GainTargetError, InPort, MainOutput, OutPort,
+    ChannelEdge, DeclarationError, GainTarget, GainTargetError, InputPort, MainOutput, OutputPort,
     Replacement, Session, SetRefusal, ValueErrorKind,
 };
 use tutti_units::{Amplitude, Samples};
@@ -60,7 +60,7 @@ fn rig() -> Rig {
     let a = g.add(ForkByClone(Const::mono(A)));
     let b = g.add(ForkByClone(Const::mono(B)));
     let sink = g.add(ForkByClone(Through::mono()));
-    g.set_sources(MainOutput::channel(0), [OutPort::new(sink, 0)])
+    g.set_sources(MainOutput::channel(0), [OutputPort::new(sink, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -73,13 +73,13 @@ fn rig() -> Rig {
     }
 }
 
-fn node(k: NodeKey) -> OutPort {
-    OutPort::new(k, 0)
+fn node(k: NodeKey) -> OutputPort {
+    OutputPort::new(k, 0)
 }
 
 impl Rig {
     fn edge_from(&self, from: NodeKey) -> ChannelEdge {
-        ChannelEdge::new(node(from), InPort::new(self.sink, 0))
+        ChannelEdge::new(node(from), InputPort::new(self.sink, 0))
     }
 
     /// The value of the gain lane of `from`'s edge into the sink.
@@ -112,11 +112,11 @@ impl Rig {
 fn an_edge_gain_is_declared_written_read_and_cleared() {
     let mut r = rig();
     r.s.graph()
-        .connect(node(r.a), InPort::new(r.sink, 0))
+        .connect(node(r.a), InputPort::new(r.sink, 0))
         .unwrap()
         .unfaded();
     r.s.graph()
-        .connect(node(r.b), InPort::new(r.sink, 0))
+        .connect(node(r.b), InputPort::new(r.sink, 0))
         .unwrap()
         .unfaded();
     assert!(all_are(&settled(&mut r.s, 0), A + B));
@@ -128,7 +128,7 @@ fn an_edge_gain_is_declared_written_read_and_cleared() {
     );
 
     r.s.graph()
-        .connect(node(r.a), InPort::new(r.sink, 0))
+        .connect(node(r.a), InputPort::new(r.sink, 0))
         .unwrap()
         .unfaded()
         .gain(amp(0.5))
@@ -171,7 +171,7 @@ fn an_edge_gain_is_declared_written_read_and_cleared() {
 fn a_gain_target_needs_a_lane_and_a_number() {
     let mut r = rig();
     r.s.graph()
-        .connect(node(r.a), InPort::new(r.sink, 0))
+        .connect(node(r.a), InputPort::new(r.sink, 0))
         .unwrap()
         .unfaded()
         .gain(amp(0.5))
@@ -207,7 +207,7 @@ fn a_gain_target_needs_a_lane_and_a_number() {
     );
 
     r.s.graph()
-        .disconnect(node(r.a), InPort::new(r.sink, 0))
+        .disconnect(node(r.a), InputPort::new(r.sink, 0))
         .unwrap()
         .unfaded();
     let _ = r.s.update();
@@ -227,19 +227,19 @@ fn add_source_weighted_adds_the_edge_and_its_weight() {
     let mut r = rig();
     let (a, b, sink) = (r.a, r.b, r.sink);
     r.s.graph()
-        .connect(node(a), InPort::new(sink, 0))
+        .connect(node(a), InputPort::new(sink, 0))
         .unwrap()
         .unfaded()
         .gain(amp(0.5))
         .unwrap();
     r.s.graph()
-        .connect(node(b), InPort::new(sink, 0))
+        .connect(node(b), InputPort::new(sink, 0))
         .unwrap()
         .unfaded()
         .gain(amp(-0.25))
         .unwrap();
     assert_eq!(
-        r.s.graph_ref().sources(InPort::new(sink, 0)).unwrap(),
+        r.s.graph_ref().sources(InputPort::new(sink, 0)).unwrap(),
         [node(a), node(b)]
     );
     assert_eq!(r.gain_of(a), amp(0.5));
@@ -248,13 +248,13 @@ fn add_source_weighted_adds_the_edge_and_its_weight() {
 
     // Held already: the weight is set, nothing else changes.
     r.s.graph()
-        .connect(node(a), InPort::new(sink, 0))
+        .connect(node(a), InputPort::new(sink, 0))
         .unwrap()
         .unfaded()
         .gain(amp(2.0))
         .unwrap();
     assert_eq!(
-        r.s.graph_ref().sources(InPort::new(sink, 0)).unwrap(),
+        r.s.graph_ref().sources(InputPort::new(sink, 0)).unwrap(),
         [node(a), node(b)]
     );
     assert!(all_are(&settled(&mut r.s, 0), (0.0 + 2.0 * A) + -0.25 * B));
@@ -263,7 +263,7 @@ fn add_source_weighted_adds_the_edge_and_its_weight() {
     let c = r.s.graph().add(ForkByClone(Const::mono(0.125)));
     assert_eq!(
         r.s.graph()
-            .connect(node(c.erase()), InPort::new(sink, 0))
+            .connect(node(c.erase()), InputPort::new(sink, 0))
             .unwrap()
             .unfaded()
             .gain(amp(f64::NAN))
@@ -271,7 +271,7 @@ fn add_source_weighted_adds_the_edge_and_its_weight() {
         Some(DeclarationError::NotFinite)
     );
     assert_eq!(
-        r.s.graph_ref().sources(InPort::new(sink, 0)).unwrap(),
+        r.s.graph_ref().sources(InputPort::new(sink, 0)).unwrap(),
         [node(a), node(b)]
     );
 }
@@ -322,13 +322,13 @@ fn removing_a_source_drops_its_weight() {
     let (a, b, sink) = (r.a, r.b, r.sink);
     let g = |r: &mut Rig| {
         r.s.graph()
-            .connect(node(a), InPort::new(sink, 0))
+            .connect(node(a), InputPort::new(sink, 0))
             .unwrap()
             .unfaded()
             .gain(amp(0.5))
             .unwrap();
         r.s.graph()
-            .connect(node(b), InPort::new(sink, 0))
+            .connect(node(b), InputPort::new(sink, 0))
             .unwrap()
             .unfaded();
     };
@@ -336,13 +336,13 @@ fn removing_a_source_drops_its_weight() {
     assert!(all_are(&settled(&mut r.s, 0), (0.0 + 0.5 * A) + B));
 
     r.s.graph()
-        .disconnect(node(a), InPort::new(sink, 0))
+        .disconnect(node(a), InputPort::new(sink, 0))
         .unwrap()
         .unfaded();
     assert!(r.no_lane(a));
     assert!(all_are(&settled(&mut r.s, 0), B), "valid, and just b");
     r.s.graph()
-        .connect(node(a), InPort::new(sink, 0))
+        .connect(node(a), InputPort::new(sink, 0))
         .unwrap()
         .unfaded();
     assert!(
@@ -351,13 +351,13 @@ fn removing_a_source_drops_its_weight() {
     );
 
     r.s.graph()
-        .connect(node(a), InPort::new(sink, 0))
+        .connect(node(a), InputPort::new(sink, 0))
         .unwrap()
         .unfaded()
         .gain(amp(0.5))
         .unwrap();
     r.s.graph()
-        .set_sources(InPort::new(sink, 0), [node(b)])
+        .set_sources(InputPort::new(sink, 0), [node(b)])
         .unwrap()
         .unfaded();
     assert!(r.no_lane(a));
@@ -414,13 +414,13 @@ fn moving_a_weight_marks_no_recompile() {
     let mut r = rig();
     let (a, sink) = (r.a, r.sink);
     r.s.graph()
-        .connect(node(a), InPort::new(sink, 0))
+        .connect(node(a), InputPort::new(sink, 0))
         .unwrap()
         .unfaded()
         .gain(amp(0.5))
         .unwrap();
     r.s.graph()
-        .connect(node(r.b), InPort::new(sink, 0))
+        .connect(node(r.b), InputPort::new(sink, 0))
         .unwrap()
         .unfaded();
     assert!(all_are(&settled(&mut r.s, 0), (0.0 + 0.5 * A) + B));
@@ -429,7 +429,7 @@ fn moving_a_weight_marks_no_recompile() {
 
     let gain =
         r.s.graph_ref()
-            .gain_target(node(a), InPort::new(sink, 0))
+            .gain_target(node(a), InputPort::new(sink, 0))
             .expect("a lane");
     r.s.set(gain.to(amp(1.5))).unwrap();
     assert!(
@@ -452,7 +452,7 @@ fn moving_a_weight_marks_no_recompile() {
 fn a_gain_target_of_a_removed_lane_is_refused_at_the_call() {
     let lane = |r: &mut Rig| {
         r.s.graph()
-            .connect(node(r.a), InPort::new(r.sink, 0))
+            .connect(node(r.a), InputPort::new(r.sink, 0))
             .unwrap()
             .unfaded()
             .gain(amp(0.5))
@@ -479,7 +479,7 @@ fn a_gain_target_of_a_removed_lane_is_refused_at_the_call() {
     let mut r = rig();
     let gain = lane(&mut r);
     r.s.graph()
-        .disconnect(node(r.a), InPort::new(r.sink, 0))
+        .disconnect(node(r.a), InputPort::new(r.sink, 0))
         .unwrap();
     refused(&mut r, gain, "disconnect");
 
@@ -501,7 +501,7 @@ fn a_gain_target_of_a_removed_lane_is_refused_at_the_call() {
     let mut r = rig();
     let gain = lane(&mut r);
     r.s.graph()
-        .set_sources(InPort::new(r.sink, 0), [node(r.b)])
+        .set_sources(InputPort::new(r.sink, 0), [node(r.b)])
         .unwrap();
     refused(&mut r, gain, "set_sources");
 }

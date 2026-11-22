@@ -77,7 +77,7 @@ use tutti_export::{
     JobError, Normalize, NormalizeSpec, Outcome, Output, Placement, Produced, Progress, Rendered,
     Resample, Target, Written,
 };
-use tutti_graph::{CommitError, Editor, MissingSource, NodeKey, OutPort, TapId, TapOptions};
+use tutti_graph::{CommitError, Editor, MissingSource, NodeKey, OutputPort, TapId, TapOptions};
 use tutti_rt::LockExt;
 use tutti_tempo::TempoMap;
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig, OfflineTransport, RenderClock};
@@ -1803,7 +1803,7 @@ fn open_stem_taps<F: Float>(
                 .ports
                 .iter()
                 .map(|&port| {
-                    tutti_graph::PortSource::Node(OutPort {
+                    tutti_graph::PortSource::Node(OutputPort {
                         node: stem.node,
                         port,
                     })
@@ -2247,7 +2247,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{InPort, MainOutput, Phase, PhaseCx};
+    use crate::{InputPort, MainOutput, Phase, PhaseCx};
     use tutti_export::Stage;
     use tutti_fixtures::block_on;
     use tutti_graph::ForkByClone;
@@ -2572,7 +2572,7 @@ mod tests {
         ));
         session
             .graph()
-            .set_sources(InPort::new(lim, 0), [crate::OutPort::new(dc, 0)])
+            .set_sources(InputPort::new(lim, 0), [crate::OutputPort::new(dc, 0)])
             .unwrap();
         session.graph().connect(lim, MainOutput).unwrap();
         assert_eq!(

@@ -24,7 +24,7 @@ use tutti_graph::{
     Cx, Editor, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, IntoNode, Io,
     Node, NodeParts, Prepare, Shape, Status,
 };
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_timeline::FrozenClock;
 use tutti_units::{Db, SampleRate};
 
@@ -96,7 +96,7 @@ fn fork() -> (RenderGraph, Arc<Crashed>, Editor) {
     live.insert(NodeKey(1), "watched", Watched(Arc::clone(&probe)));
     live.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutputPort {
             node: NodeKey(1),
             port: 0,
         })]);

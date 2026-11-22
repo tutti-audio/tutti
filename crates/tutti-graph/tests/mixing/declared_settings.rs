@@ -13,7 +13,7 @@ use tutti_graph::testing as common;
 use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Cx, Editor, Executor, ForkByClone, Io, Node, OutPort, PortSource, Prepare, Shape, Status,
+    Cx, Editor, Executor, ForkByClone, Io, Node, OutputPort, PortSource, Prepare, Shape, Status,
     TransportPosition, declare_params,
 };
 use tutti_rt::{AtomicCell, AtomicWord, atomic_word};
@@ -81,7 +81,7 @@ impl Rig {
         );
         ed.spec_mut()
             .topology
-            .set_outputs([PortSource::Node(OutPort {
+            .set_outputs([PortSource::Node(OutputPort {
                 node: NODE,
                 port: 0,
             })]);

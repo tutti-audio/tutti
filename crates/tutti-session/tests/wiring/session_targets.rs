@@ -8,7 +8,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_nodes::MetronomeMode;
-use tutti_session::{MainOutput, OutPort, Session, SetRefusal, ValueErrorKind};
+use tutti_session::{MainOutput, OutputPort, Session, SetRefusal, ValueErrorKind};
 use tutti_tempo::TempoMap;
 use tutti_units::{Amplitude, Beat, Bpm, SampleRate};
 
@@ -55,7 +55,7 @@ fn peaks(s: &mut Session, beats: usize) -> Vec<f32> {
     let click = s.click_node().expect("the builder inserts the click");
     for port in 0..2 {
         s.graph()
-            .set_sources(MainOutput::channel(port), [OutPort::new(click, port)])
+            .set_sources(MainOutput::channel(port), [OutputPort::new(click, port)])
             .unwrap()
             .unfaded();
     }

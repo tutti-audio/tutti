@@ -15,7 +15,7 @@ use tutti_graph::{
     ParamSegment, Prepare, Reference, ScheduleError, Scheduled, Shape, Status, TransportPosition,
     Unforkable,
 };
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_music::LoopRange;
 use tutti_ump::Ump;
 use tutti_units::{At, Beat, Bpm, Frame, ParamId, Samples, Tail};
@@ -130,7 +130,7 @@ fn rig() -> Rig {
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutputPort {
             node: PROBE,
             port: 0,
         })]);
@@ -467,23 +467,23 @@ fn a_scheduled_command_is_compensated_like_an_upstream_event() {
     let t = &mut ed.spec_mut().topology;
     t.inputs = ChannelLayout::MONO;
     t.edges.insert(
-        tutti_graph::InPort { node: LAT, port: 0 },
+        tutti_graph::InputPort { node: LAT, port: 0 },
         vec![tutti_graph::Edge::Direct(PortSource::Global(0))],
     );
     t.edges.insert(
-        tutti_graph::InPort { node: A, port: 0 },
-        vec![tutti_graph::Edge::Direct(PortSource::Node(OutPort {
+        tutti_graph::InputPort { node: A, port: 0 },
+        vec![tutti_graph::Edge::Direct(PortSource::Node(OutputPort {
             node: LAT,
             port: 0,
         }))],
     );
     t.edges.insert(
-        tutti_graph::InPort { node: B, port: 0 },
+        tutti_graph::InputPort { node: B, port: 0 },
         vec![tutti_graph::Edge::Direct(PortSource::Global(0))],
     );
     t.set_outputs(vec![
-        PortSource::Node(OutPort { node: A, port: 0 }),
-        PortSource::Node(OutPort { node: B, port: 0 }),
+        PortSource::Node(OutputPort { node: A, port: 0 }),
+        PortSource::Node(OutputPort { node: B, port: 0 }),
     ]);
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -960,15 +960,15 @@ fn beat_resolution_matches_a_hand_computed_table() {
         let t = &mut ed.spec_mut().topology;
         t.inputs = ChannelLayout::MONO;
         t.edges.insert(
-            tutti_graph::InPort { node: lat, port: 0 },
+            tutti_graph::InputPort { node: lat, port: 0 },
             vec![tutti_graph::Edge::Direct(PortSource::Global(0))],
         );
         t.edges.insert(
-            tutti_graph::InPort {
+            tutti_graph::InputPort {
                 node: sink,
                 port: 0,
             },
-            vec![tutti_graph::Edge::Direct(PortSource::Node(OutPort {
+            vec![tutti_graph::Edge::Direct(PortSource::Node(OutputPort {
                 node: lat,
                 port: 0,
             }))],
@@ -1036,15 +1036,15 @@ fn an_unroutable_command_is_timed_by_its_nodes_arrival() {
     let t = &mut ed.spec_mut().topology;
     t.inputs = ChannelLayout::MONO;
     t.edges.insert(
-        tutti_graph::InPort { node: lat, port: 0 },
+        tutti_graph::InputPort { node: lat, port: 0 },
         vec![tutti_graph::Edge::Direct(PortSource::Global(0))],
     );
     t.edges.insert(
-        tutti_graph::InPort {
+        tutti_graph::InputPort {
             node: sink,
             port: 0,
         },
-        vec![tutti_graph::Edge::Direct(PortSource::Node(OutPort {
+        vec![tutti_graph::Edge::Direct(PortSource::Node(OutputPort {
             node: lat,
             port: 0,
         }))],

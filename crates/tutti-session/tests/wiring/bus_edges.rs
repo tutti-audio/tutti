@@ -11,8 +11,8 @@ use tutti_buffers::{FoldError, InterleavedMut};
 use tutti_graph::{BusError, BusRef, BusSource, Buses, NodeKey, Unforkable};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_session::{
-    ChannelEdge, Committed, ConnectError, GainTargetError, InPort, MainOutput, OutPort, Session,
-    SessionEvent,
+    ChannelEdge, Committed, ConnectError, GainTargetError, InputPort, MainOutput, OutputPort,
+    Session, SessionEvent,
 };
 
 const BLOCK: usize = 64;
@@ -109,7 +109,7 @@ fn rig() -> Rig {
         out: named(1),
     }));
     let sink = g.add(Unforkable(Pass { input: named(1) }));
-    g.set_sources(MainOutput::channel(0), [OutPort::new(sink, 0)])
+    g.set_sources(MainOutput::channel(0), [OutputPort::new(sink, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -138,7 +138,7 @@ fn connecting_and_disconnecting_a_bus_edge_round_trips() {
         NodeKey(u64::MAX)
     );
 
-    g.connect(OutPort::new(r.own, 0), InPort::new(r.sink, 0))
+    g.connect(OutputPort::new(r.own, 0), InputPort::new(r.sink, 0))
         .unwrap()
         .unfaded();
     assert!(all_are(&out0(&mut r.s), 0.125));
@@ -179,8 +179,8 @@ fn connecting_and_disconnecting_a_bus_edge_round_trips() {
     assert!(g.has_uncommitted_edits());
     assert!(g.bus_sources(BusRef::new(r.sink, 0)).unwrap().is_empty());
     assert_eq!(
-        g.sources(InPort::new(r.sink, 0)).unwrap(),
-        [OutPort::new(r.own, 0)],
+        g.sources(InputPort::new(r.sink, 0)).unwrap(),
+        [OutputPort::new(r.own, 0)],
         "the author's own source stays"
     );
     assert!(all_are(&out0(&mut r.s), 0.125));
@@ -278,7 +278,7 @@ fn a_lane_has_no_gain_target_and_a_removed_node_takes_its_bus_edges() {
     g.connect(BusSource::Node(bus(r.stereo)), bus(r.sink))
         .unwrap()
         .unfaded();
-    let lane = ChannelEdge::new(OutPort::new(r.stereo, 0), InPort::new(r.sink, 0));
+    let lane = ChannelEdge::new(OutputPort::new(r.stereo, 0), InputPort::new(r.sink, 0));
     assert_eq!(
         g.gain_target(lane.source(), lane.sink()),
         Err(GainTargetError::BusLane(lane))

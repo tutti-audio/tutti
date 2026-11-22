@@ -23,8 +23,8 @@ use tutti_fixtures::midi;
 use tutti_graph::{CloseError, EventCapacity, EventTapId, EventTapOptions, EventTapReader};
 use tutti_graph::{
     Cx, Edge, Editor, Event, EventEdge, EventIn, EventKind, EventOut, Executor, ForkByClone,
-    ForkCause, ForkMode, ForkSource, ForkTarget, Forked, InPort, IntoNode, Io, MissingSource, Node,
-    NodeKey, NodeParts, Offset, Op, OutPort, PortSource, Prepare, Shape, Status, TapAlign,
+    ForkCause, ForkMode, ForkSource, ForkTarget, Forked, InputPort, IntoNode, Io, MissingSource,
+    Node, NodeKey, NodeParts, Offset, Op, OutputPort, PortSource, Prepare, Shape, Status, TapAlign,
     TapEvent, TransportPosition, note_off_room,
 };
 use tutti_ump::{MidiChannel, U7, Ump};
@@ -135,7 +135,7 @@ impl Node for Script {
 }
 
 fn out(node: u64) -> PortSource {
-    PortSource::Node(OutPort {
+    PortSource::Node(OutputPort {
         node: NodeKey(node),
         port: 0,
     })
@@ -176,7 +176,7 @@ fn rig(workers: usize, no_alloc: bool, m: usize) -> Rig {
     ed.insert(NodeKey(91), "lag", Forkable(Kind::Lag { latency: m }));
     let t = &mut ed.spec_mut().topology;
     t.connect(
-        InPort {
+        InputPort {
             node: NodeKey(91),
             port: 0,
         },

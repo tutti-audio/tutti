@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use common::{Burst, WORKERS, bits, prepare, test_pool};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Cx, Editor, Executor, ForkByClone, ForkMode, ForkTarget, Io, Node, NodeKey, OutPort,
+    Cx, Editor, Executor, ForkByClone, ForkMode, ForkTarget, Io, Node, NodeKey, OutputPort,
     PortSource, Prepare, Shape, Status, TransportPosition, Unforkable, Wake,
 };
 
@@ -79,7 +79,7 @@ fn one_napper() -> (Editor, Executor, Placements) {
     ed.insert(NAP, "napper", ForkByClone(Napper::new(&placements)));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort { node: NAP, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort { node: NAP, port: 0 })]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -211,7 +211,7 @@ fn run(workers: usize) -> (Vec<Vec<f32>>, Vec<[usize; 3]>) {
     let outputs: Vec<PortSource> = keys
         .iter()
         .chain([&pulse])
-        .map(|&node| PortSource::Node(OutPort { node, port: 0 }))
+        .map(|&node| PortSource::Node(OutputPort { node, port: 0 }))
         .collect();
     ed.spec_mut().topology.set_outputs(outputs);
     ed.commit().expect("commits");

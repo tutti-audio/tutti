@@ -8,7 +8,7 @@ use tutti_buffers::Interleaved;
 use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Fade, InletNode, Prepare, TapReader, TransportPosition};
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const KEY: NodeKey = NodeKey(7);
@@ -29,7 +29,7 @@ fn render(exec: &mut tutti_graph::Executor, blocks: usize) {
 fn outputs(ed: &mut Editor) {
     ed.spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutPort { node: KEY, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort { node: KEY, port })));
 }
 
 /// Replacing an inlet through a cut and through a crossfade, then removing

@@ -16,8 +16,8 @@ use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::ReconcileError;
 use tutti_nodes::testing::Const;
 use tutti_session::{
-    InPort, Key, MainOutput, MixRef, ModRefusal, ModTarget, OutPort, ParamRef, PassError, Problem,
-    RouteSpec, Session, SetRefusal, TargetName, ValueErrorKind,
+    InputPort, Key, MainOutput, MixRef, ModRefusal, ModTarget, OutputPort, ParamRef, PassError,
+    Problem, RouteSpec, Session, SetRefusal, TargetName, ValueErrorKind,
 };
 use tutti_units::{Bipolar, Depth, Mix, UnitParam};
 
@@ -76,9 +76,9 @@ fn rig(s: &mut Session) -> Key<ForkByClone<Halve>> {
     let g = s.graph();
     let a = g.add(ForkByClone(Const::mono(A)));
     let halve = g.add(ForkByClone(Halve));
-    g.set_sources(InPort::new(halve, 0), [OutPort::new(a, 0)])
+    g.set_sources(InputPort::new(halve, 0), [OutputPort::new(a, 0)])
         .unwrap();
-    g.set_sources(MainOutput::channel(0), [OutPort::new(halve, 0)])
+    g.set_sources(MainOutput::channel(0), [OutputPort::new(halve, 0)])
         .unwrap();
     halve
 }
@@ -220,9 +220,9 @@ fn a_route_onto_the_mix_of_a_node_with_no_pass_is_refused() {
     let g = s.graph();
     let a = g.add(ForkByClone(Const::mono(A)));
     let spread = g.add(ForkByClone(Spread));
-    g.set_sources(InPort::new(spread, 0), [OutPort::new(a, 0)])
+    g.set_sources(InputPort::new(spread, 0), [OutputPort::new(a, 0)])
         .unwrap();
-    g.set_sources(MainOutput::channel(0), [OutPort::new(spread, 0)])
+    g.set_sources(MainOutput::channel(0), [OutputPort::new(spread, 0)])
         .unwrap();
     settle(&mut s);
     assert!(

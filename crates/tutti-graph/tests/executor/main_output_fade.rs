@@ -11,7 +11,7 @@ use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, declick, prepare};
 use tutti_graph::{
-    Edge, EdgeGain, EdgeId, Editor, Executor, Fade, FadeLaw, MainOutputFade, NodeKey, OutPort,
+    Edge, EdgeGain, EdgeId, Editor, Executor, Fade, FadeLaw, MainOutputFade, NodeKey, OutputPort,
     PortSink, PortSource, Renderer, TransportPosition, Unforkable,
 };
 use tutti_units::{Amplitude, Latency, Samples};
@@ -26,7 +26,7 @@ fn key(n: u64) -> NodeKey {
 }
 
 fn source(n: u64) -> PortSource {
-    PortSource::Node(OutPort {
+    PortSource::Node(OutputPort {
         node: key(n),
         port: 0,
     })

@@ -9,7 +9,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::{Fade, ForkByClone};
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    ChannelEdge, MainOutput, ModTarget, OutPort, Problem, Replacement, RouteSpec, Session,
+    ChannelEdge, MainOutput, ModTarget, OutputPort, Problem, Replacement, RouteSpec, Session,
     SessionEvent, TargetName,
 };
 use tutti_units::{Amplitude, Depth, Samples};
@@ -50,15 +50,19 @@ fn a_route_onto_a_dropped_edge_reads_unresolved() {
         level: 0.5,
     }));
     let x = g.add(ForkByClone(Through::new(ChannelLayout::STEREO)));
-    g.connect(OutPort::new(a, 0), x.input(0)).unwrap().unfaded();
-    g.connect(OutPort::new(p, 0), x.input(1)).unwrap().unfaded();
+    g.connect(OutputPort::new(a, 0), x.input(0))
+        .unwrap()
+        .unfaded();
+    g.connect(OutputPort::new(p, 0), x.input(1))
+        .unwrap()
+        .unfaded();
     g.connect(x.out(0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     g.connect(x.out(1), MainOutput::channel(1))
         .unwrap()
         .unfaded();
-    let lost = ChannelEdge::new(OutPort::new(p, 0), x.input(1));
+    let lost = ChannelEdge::new(OutputPort::new(p, 0), x.input(1));
     let mut m = s.mods_mut();
     m.range(lost, Amplitude::new(-2.0)..Amplitude::new(2.0))
         .unwrap();

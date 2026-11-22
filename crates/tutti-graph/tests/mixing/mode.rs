@@ -26,8 +26,8 @@ use tutti_buffers::FoldError;
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
 use tutti_graph::{
     Bus, BusRole, Buses, Cx, Edge, Editor, Event, EventEdge, EventIn, EventKind, EventOut,
-    Executor, FadeLaw, ForkByClone, ForkMode, ForkTarget, GraphInvalid, GraphSpec, InPort, Io,
-    ModeError, Node, NodeKey, NodeMode, Offset, OutPort, PassError, PortSource, Prepare, Shape,
+    Executor, FadeLaw, ForkByClone, ForkMode, ForkTarget, GraphInvalid, GraphSpec, InputPort, Io,
+    ModeError, Node, NodeKey, NodeMode, Offset, OutputPort, PassError, PortSource, Prepare, Shape,
     Status, Topology, TransportPosition, Unforkable, ValidGraph,
 };
 use tutti_ump::Ump;
@@ -43,15 +43,15 @@ fn key(n: u64) -> NodeKey {
     NodeKey(n)
 }
 
-fn at(node: u64, port: u16) -> InPort {
-    InPort {
+fn at(node: u64, port: u16) -> InputPort {
+    InputPort {
         node: key(node),
         port,
     }
 }
 
 fn out(node: u64, port: u16) -> PortSource {
-    PortSource::Node(OutPort {
+    PortSource::Node(OutputPort {
         node: key(node),
         port,
     })

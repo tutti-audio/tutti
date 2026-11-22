@@ -77,7 +77,7 @@ impl tutti_graph::Node for TransportTone {
 fn graph_engine_with_timed_transport_is_allocation_free() {
     use tutti_graph::NodeKey;
     use tutti_graph::{Editor, EventIn, EventKind, Prepare, Unforkable};
-    use tutti_graph::{OutPort, PortSource};
+    use tutti_graph::{OutputPort, PortSource};
     use tutti_timeline::{MotionCommand, TransportCommand};
     use tutti_ump::{MidiChannel, U7};
     use tutti_units::{At, Beat, Frame};
@@ -90,7 +90,7 @@ fn graph_engine_with_timed_transport_is_allocation_free() {
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port,
         })
@@ -167,7 +167,7 @@ fn graph_engine_with_timed_transport_is_allocation_free() {
 fn a_published_tempo_map_is_taken_without_allocating() {
     use tutti_graph::NodeKey;
     use tutti_graph::{Editor, Prepare, Unforkable};
-    use tutti_graph::{OutPort, PortSource};
+    use tutti_graph::{OutputPort, PortSource};
     use tutti_units::Bpm;
 
     let transport = Transport::new(SampleRate::SR_48K);
@@ -177,7 +177,7 @@ fn a_published_tempo_map_is_taken_without_allocating() {
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port,
         })
@@ -215,7 +215,7 @@ fn a_published_tempo_map_is_taken_without_allocating() {
 fn a_step_map_is_followed_without_allocating() {
     use tutti_graph::NodeKey;
     use tutti_graph::{Editor, Prepare, Unforkable};
-    use tutti_graph::{OutPort, PortSource};
+    use tutti_graph::{OutputPort, PortSource};
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
     use tutti_timeline::MotionCommand;
     use tutti_units::{At, Beat, Bpm};
@@ -242,7 +242,7 @@ fn a_step_map_is_followed_without_allocating() {
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port,
         })
@@ -305,7 +305,7 @@ fn a_step_map_is_followed_without_allocating() {
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port,
         })
@@ -364,7 +364,7 @@ fn a_step_map_is_followed_without_allocating() {
 fn the_heard_tap_is_allocation_free() {
     use tutti_graph::NodeKey;
     use tutti_graph::{Editor, Prepare, Unforkable};
-    use tutti_graph::{OutPort, PortSource};
+    use tutti_graph::{OutputPort, PortSource};
     use tutti_timeline::MotionCommand;
 
     let transport = Transport::new(SampleRate::SR_48K);
@@ -374,7 +374,7 @@ fn the_heard_tap_is_allocation_free() {
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port,
         })
@@ -431,7 +431,7 @@ fn the_heard_tap_is_allocation_free() {
 fn graph_engine_with_env_clock_and_metronome_is_allocation_free() {
     use tutti_graph::NodeKey;
     use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, Unforkable};
-    use tutti_graph::{OutPort, PortSource};
+    use tutti_graph::{OutputPort, PortSource};
     use tutti_timeline::{MotionCommand, TransportCommand};
     use tutti_units::Tail;
     use tutti_units::{At, Beat, Frame};
@@ -473,7 +473,7 @@ fn graph_engine_with_env_clock_and_metronome_is_allocation_free() {
     topology.set_outputs(
         [(sink, 0), (sink, 1), (clock, 0), (clock, 1)]
             .into_iter()
-            .map(|(node, port)| PortSource::Node(OutPort { node, port })),
+            .map(|(node, port)| PortSource::Node(OutputPort { node, port })),
     );
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
@@ -526,7 +526,7 @@ fn graph_engine_with_env_clock_and_metronome_is_allocation_free() {
 #[test]
 fn graph_engine_on_a_worker_pool_is_allocation_free() {
     use tutti_graph::NodeKey;
-    use tutti_graph::{Edge, InPort, OutPort, PortSource};
+    use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
     use tutti_graph::{Editor, ForkByClone, Prepare};
 
     let sample_rate = 48_000.0;
@@ -557,11 +557,11 @@ fn graph_engine_on_a_worker_pool_is_allocation_free() {
             ForkByClone(crate::support::Gain(0.1 * (k + 1) as f32)),
         );
         ed.spec_mut().topology.edges.insert(
-            InPort {
+            InputPort {
                 node: NodeKey(k + 11),
                 port: 0,
             },
-            vec![Edge::Direct(PortSource::Node(OutPort {
+            vec![Edge::Direct(PortSource::Node(OutputPort {
                 node: NodeKey(k + 1),
                 port: 0,
             }))],
@@ -570,7 +570,7 @@ fn graph_engine_on_a_worker_pool_is_allocation_free() {
     ed.spec_mut().topology.set_outputs(
         [11, 12]
             .map(|k| {
-                PortSource::Node(OutPort {
+                PortSource::Node(OutputPort {
                     node: NodeKey(k),
                     port: 0,
                 })
@@ -624,7 +624,7 @@ impl tutti_graph::Node for TwelveWide {
 /// through its fold without allocating, and the blocks carry the signal.
 #[test]
 fn a_714_main_output_block_is_allocation_free() {
-    use tutti_graph::{Editor, NodeKey, OutPort, PortSource, Prepare, Unforkable};
+    use tutti_graph::{Editor, NodeKey, OutputPort, PortSource, Prepare, Unforkable};
 
     let transport = Transport::new(SampleRate::of(48_000.0));
     let (mut ed, exec) = Editor::new(Prepare::new(
@@ -633,7 +633,7 @@ fn a_714_main_output_block_is_allocation_free() {
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
     ed.spec_mut().topology.set_outputs((0..12).map(|port| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port,
         })
@@ -689,7 +689,7 @@ fn a_714_main_output_block_is_allocation_free() {
 #[test]
 fn a_declared_main_output_into_a_stated_device_is_allocation_free() {
     use tutti_buffers::{Bed, ChannelTopology, Speaker};
-    use tutti_graph::{Editor, NodeKey, OutPort, PortSource, Prepare, Unforkable};
+    use tutti_graph::{Editor, NodeKey, OutputPort, PortSource, Prepare, Unforkable};
 
     let transport = Transport::new(SampleRate::of(48_000.0));
     let (mut ed, exec) = Editor::new(Prepare::new(
@@ -698,7 +698,7 @@ fn a_declared_main_output_into_a_stated_device_is_allocation_free() {
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
     ed.spec_mut().topology.set_outputs((0..12).map(|port| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port,
         })
@@ -745,7 +745,7 @@ fn a_declared_main_output_into_a_stated_device_is_allocation_free() {
 fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
     use tutti_buffers::Bed;
     use tutti_engine::{OutputLevels, OutputMap, OutputStrip, Routing};
-    use tutti_graph::{Editor, NodeKey, OutPort, PortSource, Prepare, Unforkable};
+    use tutti_graph::{Editor, NodeKey, OutputPort, PortSource, Prepare, Unforkable};
     use tutti_units::Amplitude;
 
     let transport = Transport::new(SampleRate::of(48_000.0));
@@ -755,7 +755,7 @@ fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
     ed.spec_mut().topology.set_outputs((0..12).map(|port| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port,
         })
@@ -826,7 +826,7 @@ fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
 #[test]
 fn a_routing_crossfade_is_allocation_free() {
     use tutti_engine::{OutputMap, Routing};
-    use tutti_graph::{Editor, NodeKey, OutPort, PortSource, Prepare, Unforkable};
+    use tutti_graph::{Editor, NodeKey, OutputPort, PortSource, Prepare, Unforkable};
 
     let transport = Transport::new(SampleRate::of(48_000.0));
     let (mut ed, exec) = Editor::new(Prepare::new(
@@ -835,7 +835,7 @@ fn a_routing_crossfade_is_allocation_free() {
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
     ed.spec_mut().topology.set_outputs((0..12).map(|port| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port,
         })
@@ -920,7 +920,7 @@ impl tutti_graph::Node for Latent {
 #[test]
 fn a_main_output_change_crossfaded_across_several_blocks_is_allocation_free() {
     use tutti_buffers::{Bed, MaxBlock};
-    use tutti_graph::{Editor, Fade, NodeKey, OutPort, PortSource, Prepare, Unforkable};
+    use tutti_graph::{Editor, Fade, NodeKey, OutputPort, PortSource, Prepare, Unforkable};
     use tutti_units::{Samples, Seconds};
 
     let transport = Transport::new(SampleRate::of(48_000.0));
@@ -935,7 +935,7 @@ fn a_main_output_change_crossfaded_across_several_blocks_is_allocation_free() {
             // The old main output's last channel is the latent source's, so every
             // other channel of it is aligned by a ring; the new main output has none.
             let node = if width == 12 && port == 11 { 2 } else { 1 };
-            PortSource::Node(OutPort {
+            PortSource::Node(OutputPort {
                 node: NodeKey(node),
                 port: if node == 2 { 0 } else { port },
             })

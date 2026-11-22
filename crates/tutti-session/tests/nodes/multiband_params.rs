@@ -19,7 +19,7 @@ use tutti_graph::ForkByClone;
 use tutti_modulation::Lfo;
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{MultibandBands, MultibandCompressorConfig, MultibandCompressorNode};
-use tutti_session::{InPort, Key, MainOutput, OutPort, Session};
+use tutti_session::{InputPort, Key, MainOutput, OutputPort, Session};
 use tutti_session::{RouteSpec, ValueErrorKind};
 use tutti_units::{Amplitude, SampleRate};
 use tutti_units::{BeatsPerCycle, Depth};
@@ -68,13 +68,13 @@ fn rig() -> (Session, Key<MultibandCompressorNode<f32>>) {
     let mb = g.add(MultibandCompressorNode::<f32>::from(
         MultibandCompressorConfig::new(BusTopology::STEREO, MultibandBands::of(2)),
     ));
-    g.set_sources(InPort::new(mb, 0), [OutPort::new(low, 0)])
+    g.set_sources(InputPort::new(mb, 0), [OutputPort::new(low, 0)])
         .unwrap();
-    g.set_sources(InPort::new(mb, 1), [OutPort::new(high, 0)])
+    g.set_sources(InputPort::new(mb, 1), [OutputPort::new(high, 0)])
         .unwrap();
-    g.set_sources(MainOutput::channel(0), [OutPort::new(mb, 0)])
+    g.set_sources(MainOutput::channel(0), [OutputPort::new(mb, 0)])
         .unwrap();
-    g.set_sources(MainOutput::channel(1), [OutPort::new(mb, 1)])
+    g.set_sources(MainOutput::channel(1), [OutputPort::new(mb, 1)])
         .unwrap();
     // Unity ratio on both bands: nothing is reduced, the make-ups are the gains.
     for band in 0..2 {

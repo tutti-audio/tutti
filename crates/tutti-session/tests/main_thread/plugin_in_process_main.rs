@@ -345,8 +345,8 @@ fn rebound(layout: u32) -> Rebound {
     let a = g.add(ForkByClone(Const::mono(0.25)));
     let b = g.add(ForkByClone(Const::mono(0.5)));
     for (from, to) in [
-        (tutti_session::OutPort::new(a, 0), node.input(0)),
-        (tutti_session::OutPort::new(b, 0), node.input(1)),
+        (tutti_session::OutputPort::new(a, 0), node.input(0)),
+        (tutti_session::OutputPort::new(b, 0), node.input(1)),
         (node.out(0), MainOutput::channel(0)),
         (node.out(1), MainOutput::channel(1)),
     ] {
@@ -466,7 +466,7 @@ fn a_plugin_that_widens_its_ports_is_re_inserted_wider() {
 /// layout (no inputs): the two edges into its inputs are `Unwired`, once, and
 /// its outputs, still wired to the main output, carry the plugin's tags.
 fn a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost() {
-    use tutti_session::{ChannelEdge, OutPort};
+    use tutti_session::{ChannelEdge, OutputPort};
     let mut r = rebound(0);
     let node = r.node;
     let (a, b) = (r.a, r.b);
@@ -481,8 +481,8 @@ fn a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost() {
     assert_eq!(unwired_node, node.erase());
     edges.sort();
     let mut want = vec![
-        ChannelEdge::new(OutPort::new(a, 0), node.input(0)),
-        ChannelEdge::new(OutPort::new(b, 0), node.input(1)),
+        ChannelEdge::new(OutputPort::new(a, 0), node.input(0)),
+        ChannelEdge::new(OutputPort::new(b, 0), node.input(1)),
     ];
     want.sort();
     assert_eq!(edges, want, "exactly the edges into the inputs it lost");

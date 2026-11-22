@@ -12,7 +12,7 @@ use tutti_buffers::{Pull, Source};
 use tutti_engine::{Engine, HeardTaps};
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, TapReader, Unforkable};
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_timeline::Transport;
 use tutti_units::{SampleRate, Samples};
 
@@ -49,7 +49,7 @@ fn rig(width: u16) -> (Engine, HeardTaps) {
     ));
     ed.insert(NodeKey(1), "ramp", Unforkable(Ramp { width, at: 0 }));
     ed.spec_mut().topology.set_outputs((0..width).map(|port| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port,
         })

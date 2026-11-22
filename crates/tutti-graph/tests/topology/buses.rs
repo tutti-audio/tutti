@@ -11,8 +11,8 @@ use std::collections::BTreeMap;
 use common::{Kind, prepare};
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
 use tutti_graph::{
-    Bus, BusRole, Buses, Edge, GraphSpec, InPort, MAX_BUSES, NodeKey, NodeSpec, OutPort, PortKind,
-    PortSource, Shape, Topology, compile,
+    Bus, BusRole, Buses, Edge, GraphSpec, InputPort, MAX_BUSES, NodeKey, NodeSpec, OutputPort,
+    PortKind, PortSource, Shape, Topology, compile,
 };
 
 fn width(n: u16) -> ChannelLayout {
@@ -157,11 +157,11 @@ fn declaring_buses_changes_no_plan() {
     }
     for p in 0..6u16 {
         t.connect(
-            InPort {
+            InputPort {
                 node: NodeKey(2),
                 port: p,
             },
-            Edge::Direct(PortSource::Node(OutPort {
+            Edge::Direct(PortSource::Node(OutputPort {
                 node: NodeKey(1),
                 port: p,
             })),
@@ -170,7 +170,7 @@ fn declaring_buses_changes_no_plan() {
     t.outputs = vec![
         (0..6u16)
             .map(|p| {
-                PortSource::Node(OutPort {
+                PortSource::Node(OutputPort {
                     node: NodeKey(2),
                     port: p,
                 })

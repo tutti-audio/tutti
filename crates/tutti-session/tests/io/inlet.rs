@@ -5,7 +5,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::Interleaved;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::InletRing;
-use tutti_session::{InletError, MainOutput, OutPort, Session};
+use tutti_session::{InletError, MainOutput, OutputPort, Session};
 use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -28,11 +28,11 @@ fn pushed_frames_reach_the_outputs_in_order() {
         .add_inlet(ring)
         .expect("the producer runs at the graph's rate");
     s.graph()
-        .set_sources(MainOutput::channel(0), [OutPort::new(key, 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(key, 0)])
         .unwrap()
         .unfaded();
     s.graph()
-        .set_sources(MainOutput::channel(1), [OutPort::new(key, 1)])
+        .set_sources(MainOutput::channel(1), [OutputPort::new(key, 1)])
         .unwrap()
         .unfaded();
     let mut tap = s
@@ -134,7 +134,7 @@ fn an_f64_inlet_carries_a_figure_f32_rounds_away() {
         .add_inlet(ring)
         .expect("the producer runs at the graph's rate");
     s.graph()
-        .set_sources(MainOutput::channel(0), [OutPort::new(key, 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(key, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();

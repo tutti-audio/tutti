@@ -8,7 +8,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_graph::NodeKey;
 use tutti_nodes::testing::{Const, Through};
-use tutti_session::{ConnectError, MainOutput, OutPort, Session};
+use tutti_session::{ConnectError, MainOutput, OutputPort, Session};
 
 fn offline() -> Session {
     Session::builder().build().expect("builds")
@@ -25,7 +25,7 @@ fn first_frame(s: &mut Session) -> [f32; 2] {
 fn feed_main_output(s: &mut Session, node: NodeKey) {
     for c in 0..2 {
         s.graph()
-            .set_sources(MainOutput::channel(c), [OutPort::new(node, c)])
+            .set_sources(MainOutput::channel(c), [OutputPort::new(node, c)])
             .unwrap()
             .unfaded();
     }
@@ -151,7 +151,7 @@ fn a_node_that_is_not_there_or_feeds_itself_is_refused() {
 /// an unwired port has none.
 #[test]
 fn topology_shows_the_edge_a_connect_wrote() {
-    use tutti_graph::{Edge, InPort, OutPort as RawOut, PortSource};
+    use tutti_graph::{Edge, InputPort, OutputPort as RawOut, PortSource};
 
     let mut s = offline();
     let src = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.5])));
@@ -165,7 +165,7 @@ fn topology_shows_the_edge_a_connect_wrote() {
     s.graph().connect(src, through).expect("both are stereo");
     for c in 0..2 {
         assert_eq!(
-            s.graph().testing().topology().edges.get(&InPort {
+            s.graph().testing().topology().edges.get(&InputPort {
                 node: through.erase(),
                 port: c,
             }),

@@ -3,11 +3,11 @@
 
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
-use tutti_session::InPort;
+use tutti_session::InputPort;
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
-use tutti_session::{GeneralMidi, MainOutput, NodeMode, OutPort, Session};
+use tutti_session::{GeneralMidi, MainOutput, NodeMode, OutputPort, Session};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_units::{SampleRate, Samples, Tail};
@@ -29,10 +29,10 @@ fn unit() -> SoundFontUnit<f32> {
 }
 
 /// The one source a port holds (these tests wire one).
-fn source(session: &Session, node: NodeKey, port: usize) -> OutPort {
+fn source(session: &Session, node: NodeKey, port: usize) -> OutputPort {
     let held = session
         .graph_ref()
-        .sources(InPort::new(node, port))
+        .sources(InputPort::new(node, port))
         .unwrap();
     assert!(held.len() == 1, "one source a port: {held:?}");
     held[0]
@@ -87,34 +87,34 @@ fn the_sends_feed_the_effects_and_the_effects_feed_the_fader() {
     let strip = gm.instrument().out();
     assert_eq!(
         source(&session, gm.chorus().erase(), 0),
-        OutPort::new(unit, 2)
+        OutputPort::new(unit, 2)
     );
     assert_eq!(
         source(&session, gm.chorus().erase(), 1),
-        OutPort::new(unit, 3)
+        OutputPort::new(unit, 3)
     );
     assert_eq!(
         source(&session, gm.reverb().erase(), 0),
-        OutPort::new(unit, 4)
+        OutputPort::new(unit, 4)
     );
     for (port, channel) in [(0, 0), (1, 1)] {
         let mut held = session
             .graph_ref()
-            .sources(InPort::new(gm.out(), port))
+            .sources(InputPort::new(gm.out(), port))
             .unwrap();
         let mut want = vec![
-            OutPort::new(strip, channel),
-            OutPort::new(gm.chorus(), channel),
-            OutPort::new(gm.reverb(), channel),
+            OutputPort::new(strip, channel),
+            OutputPort::new(gm.chorus(), channel),
+            OutputPort::new(gm.reverb(), channel),
         ];
-        let key = |s: &OutPort| format!("{s:?}");
+        let key = |s: &OutputPort| format!("{s:?}");
         held.sort_by_key(key);
         want.sort_by_key(key);
         assert_eq!(held, want, "fader input {port}");
     }
     // The strip carries the dry pair: outputs 0 and 1 of the unit.
-    assert_eq!(source(&session, strip.erase(), 0), OutPort::new(unit, 0));
-    assert_eq!(source(&session, strip.erase(), 1), OutPort::new(unit, 1));
+    assert_eq!(source(&session, strip.erase(), 0), OutputPort::new(unit, 0));
+    assert_eq!(source(&session, strip.erase(), 1), OutputPort::new(unit, 1));
 }
 
 /// Nothing is wired to the graph's outputs: the mix is the host's to place, so
@@ -199,11 +199,11 @@ fn a_note_through_the_setup_rings_out_within_the_summed_tails() {
     let mut gm = session.add_general_midi(unit).expect("a SoundFont unit");
     session
         .graph()
-        .set_sources(MainOutput::channel(0), [OutPort::new(gm.out(), 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(gm.out(), 0)])
         .unwrap();
     session
         .graph()
-        .set_sources(MainOutput::channel(1), [OutPort::new(gm.out(), 1)])
+        .set_sources(MainOutput::channel(1), [OutputPort::new(gm.out(), 1)])
         .unwrap();
     let _ = session.update();
     let tail = |node| match session.graph_ref().node_tail(node).unwrap() {
@@ -298,7 +298,7 @@ fn short_release_setup() -> (Session, GeneralMidi<f32>) {
     for c in 0..2 {
         session
             .graph()
-            .set_sources(MainOutput::channel(c), [OutPort::new(gm.out(), c)])
+            .set_sources(MainOutput::channel(c), [OutputPort::new(gm.out(), c)])
             .unwrap();
     }
     let _ = session.update();

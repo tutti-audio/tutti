@@ -26,7 +26,7 @@ use tutti_graph::{
     Cx, Editor, Executor, ForkByClone, ForkMode, ForkTarget, IntoNode, Io, Node, Prepare, Shape,
     Status, TransportPosition,
 };
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_sampler::{MemorySource, Playback, SlotId, Voice, VoiceNode, VoicePool, VoiceSource};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
@@ -64,7 +64,7 @@ fn graph<N: IntoNode>(node: N, width: u16) -> (Editor, Executor, N::Controls) {
     let (mut ed, mut exec) = Editor::new(prepare());
     let controls = ed.insert(NodeKey(1), "under test", node).controls;
     ed.spec_mut().topology.set_outputs((0..width).map(|port| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port,
         })
@@ -236,18 +236,18 @@ fn a_voice_behind_another_node_is_forked_too() {
     );
     ed.insert(NodeKey(2), "pass", ForkByClone(Pass));
     ed.spec_mut().topology.edges.insert(
-        tutti_graph::InPort {
+        tutti_graph::InputPort {
             node: NodeKey(2),
             port: 0,
         },
-        vec![tutti_graph::Edge::Direct(PortSource::Node(OutPort {
+        vec![tutti_graph::Edge::Direct(PortSource::Node(OutputPort {
             node: NodeKey(1),
             port: 0,
         }))],
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutputPort {
             node: NodeKey(2),
             port: 0,
         })]);

@@ -16,7 +16,7 @@ use tutti_graph::{
     Forked, GraphBuilder, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, PendingFork, Prepare,
     Renderer, Shape, Status, Unforkable, param_parts,
 };
-use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, PortSource};
+use tutti_graph::{Edge, FeedbackFrom, InputPort, OutputPort, PortSource};
 use tutti_rt::Param;
 use tutti_units::{Amplitude, Samples, Tail, UnitParam};
 
@@ -208,7 +208,7 @@ fn gain() -> Forkable {
 }
 
 fn out(node: NodeKey, port: u16) -> PortSource {
-    PortSource::Node(OutPort { node, port })
+    PortSource::Node(OutputPort { node, port })
 }
 
 fn render(ed: Editor, exec: tutti_graph::Executor, frames: usize) -> Vec<Vec<f32>> {
@@ -369,7 +369,7 @@ fn a_node_without_a_fork_source_is_not_forkable() {
     );
     let t = &mut ed.spec_mut().topology;
     t.edges.insert(
-        InPort {
+        InputPort {
             node: NodeKey(1),
             port: 0,
         },
@@ -667,24 +667,26 @@ fn a_node_fork_holds_exactly_what_feeds_the_node() {
     );
     let spec = ed.spec_mut();
     let t = &mut spec.topology;
-    t.edges
-        .insert(InPort { node: a, port: 0 }, vec![Edge::Direct(out(osc, 0))]);
     t.edges.insert(
-        InPort { node: a, port: 1 },
+        InputPort { node: a, port: 0 },
+        vec![Edge::Direct(out(osc, 0))],
+    );
+    t.edges.insert(
+        InputPort { node: a, port: 1 },
         vec![Edge::Feedback(FeedbackFrom::new(
-            OutPort { node: fb, port: 0 },
+            OutputPort { node: fb, port: 0 },
             Samples::new(64),
         ))],
     );
     t.edges.insert(
-        InPort {
+        InputPort {
             node: target,
             port: 0,
         },
         vec![Edge::Direct(out(a, 0))],
     );
     t.edges.insert(
-        InPort {
+        InputPort {
             node: after,
             port: 0,
         },
@@ -1402,7 +1404,7 @@ fn a_build_whose_commit_fails_hands_back_the_graph() {
     let (_, pinned) = witness(&mut ed, NodeKey(1), How::Pinned, 1);
     // Key 1 has no inputs: an edge into its port 0 does not validate.
     ed.spec_mut().topology.edges.insert(
-        InPort {
+        InputPort {
             node: NodeKey(1),
             port: 0,
         },

@@ -20,8 +20,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use common::{Kind, Pair, TestNode, bits, input_signal, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Cx, Edge, Editor, Executor, FeedbackFrom, GraphSpec, InPort, Io, Node, NodeKey, Op, OutPort,
-    Plan, PortSource, Prepare, Shape, Status, Topology, TransportPosition, Unforkable, compile,
+    Cx, Edge, Editor, Executor, FeedbackFrom, GraphSpec, InputPort, Io, Node, NodeKey, Op,
+    OutputPort, Plan, PortSource, Prepare, Shape, Status, Topology, TransportPosition, Unforkable,
+    compile,
 };
 use tutti_units::Samples;
 
@@ -31,15 +32,15 @@ fn key(n: u64) -> NodeKey {
     NodeKey(n)
 }
 
-fn at(node: u64, port: u16) -> InPort {
-    InPort {
+fn at(node: u64, port: u16) -> InputPort {
+    InputPort {
         node: key(node),
         port,
     }
 }
 
 fn out(node: u64) -> PortSource {
-    PortSource::Node(OutPort {
+    PortSource::Node(OutputPort {
         node: key(node),
         port: 0,
     })
@@ -324,7 +325,7 @@ fn a_feedback_addend_sums_last() {
         at(4, 0),
         vec![
             Edge::Feedback(FeedbackFrom::new(
-                OutPort {
+                OutputPort {
                     node: key(2),
                     port: 0,
                 },

@@ -16,7 +16,7 @@ use tutti_buffers::MaxBlock;
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Prepare, Unforkable};
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_platform::Instant;
 use tutti_timeline::Transport;
 use tutti_units::{SampleRate, Samples};
@@ -58,7 +58,7 @@ fn engine(spin: Duration, max_block: usize) -> (Engine, Transport, Editor) {
     ed.insert(NodeKey(1), "spin", Unforkable(Spin { spin }));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutputPort {
             node: NodeKey(1),
             port: 0,
         })]);
@@ -168,7 +168,7 @@ fn events_past_a_ports_capacity_reach_the_block_counts() {
     ed.insert(NodeKey(1), "burst", Unforkable(Burst { per_block }));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutputPort {
             node: NodeKey(1),
             port: 0,
         })]);

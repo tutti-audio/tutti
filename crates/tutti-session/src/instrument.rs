@@ -43,7 +43,7 @@ use tutti_ump::MidiGroup;
 use tutti_units::Amplitude;
 
 use crate::{
-    Feeder, Graph, Key, MainOutput, OutPort, ParamTarget, RemoveError, Session, SessionNode,
+    Feeder, Graph, Key, MainOutput, OutputPort, ParamTarget, RemoveError, Session, SessionNode,
 };
 
 /// The type of an instrument's key when the session was given a node by its
@@ -341,8 +341,8 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         let fed = graph.set_feed(node, Feeder::Instrument, vec![queue.events_out()]);
         debug_assert!(fed.is_ok(), "the instrument is in the graph");
         let strip = graph.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
-        graph.connect(OutPort::new(node, usize::from(main[0])), strip.input(0))?;
-        graph.connect(OutPort::new(node, usize::from(main[1])), strip.input(1))?;
+        graph.connect(OutputPort::new(node, usize::from(main[0])), strip.input(0))?;
+        graph.connect(OutputPort::new(node, usize::from(main[1])), strip.input(1))?;
         Ok(InstrumentHandle {
             node: key,
             main,

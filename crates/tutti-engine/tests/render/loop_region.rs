@@ -21,7 +21,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, Unforkable};
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_music::LoopRange;
 use tutti_timeline::{LoopEdit, LoopRegion, Transport};
 use tutti_units::{At, Beat, Frame, SampleRate, Samples, Tail};
@@ -68,7 +68,7 @@ fn engine_logging(transport: &Transport, log: Option<Arc<Mutex<Vec<Seen>>>>) -> 
     ed.insert(NodeKey(1), "probe", Unforkable(LoopProbe(log)));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutputPort {
             node: NodeKey(1),
             port: 0,
         })]);

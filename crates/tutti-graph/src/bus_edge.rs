@@ -39,7 +39,7 @@ use tutti_units::Amplitude;
 
 use crate::gain::{EdgeFade, EdgeGain};
 use crate::spec::GraphSpec;
-use crate::{Edge, EdgeId, InPort, NodeKey, OutPort, PortSink, PortSource, Shapes};
+use crate::{Edge, EdgeId, InputPort, NodeKey, OutputPort, PortSink, PortSource, Shapes};
 
 /// One bus of one node: bus `bus` of `node`'s declared
 /// [`Shape::buses_in`](crate::Shape::buses_in) (as a sink) or
@@ -373,7 +373,7 @@ impl GraphSpec {
         };
         let (sink_topology, sink_first) = to.resolve(sink_shape.buses_in()).ok_or(no_sink)?;
         self.fold_lanes(shapes, from, sink_topology, fold, |c| {
-            PortSink::Port(InPort {
+            PortSink::Port(InputPort {
                 node: to.node,
                 port: (sink_first + c) as u16,
             })
@@ -447,7 +447,7 @@ impl GraphSpec {
         for c in 0..usize::from(sink.layout().count()) {
             for (k, gain) in fold.contributions(c) {
                 let source = match source_node {
-                    Some(node) => PortSource::Node(OutPort {
+                    Some(node) => PortSource::Node(OutputPort {
                         node,
                         port: (source_first + k) as u16,
                     }),

@@ -863,7 +863,7 @@ mod tests {
     /// come out as their exact `f64` sum times the gain, `3 * (1 + 1.5 * 2^-40)`.
     #[test]
     fn an_f64_executor_sums_and_scales_in_f64() {
-        use crate::graph::{Edge, InPort, NodeSpec, OutPort, PortSource, Topology};
+        use crate::graph::{Edge, InputPort, NodeSpec, OutputPort, PortSource, Topology};
         use crate::mode::{ModeCell, ModeState, NodeMode};
         use crate::param::ParamState;
         use crate::spec::GraphSpec;
@@ -886,14 +886,14 @@ mod tests {
                 NodeSpec::new("node", shape.audio_in(), shape.audio_out()).with_tail(shape.tail),
             );
         }
-        topology.set_outputs(vec![PortSource::Node(OutPort { node: g, port: 0 })]);
+        topology.set_outputs(vec![PortSource::Node(OutputPort { node: g, port: 0 })]);
         let mut spec = GraphSpec::new(topology);
         for from in [a, b] {
-            let edge = Edge::Direct(PortSource::Node(OutPort {
+            let edge = Edge::Direct(PortSource::Node(OutputPort {
                 node: from,
                 port: 0,
             }));
-            spec.connect(InPort { node: g, port: 0 }, edge);
+            spec.connect(InputPort { node: g, port: 0 }, edge);
         }
         let (plan, delta) =
             crate::compile(&spec.validate().expect("valid"), &shapes, &prepare, None)

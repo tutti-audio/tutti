@@ -106,7 +106,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use crate::MAX_NODE_LATENCY;
 use crate::NodeKey;
 use crate::lane::fade_gains;
-use crate::{Edge, EdgeId, InPort, OutPort, PortSink, PortSource};
+use crate::{Edge, EdgeId, InputPort, OutputPort, PortSink, PortSource};
 use tutti_buffers::Float;
 use tutti_curve::{FadeLaw, declick_frames};
 use tutti_platform::with_no_denormals;
@@ -247,7 +247,7 @@ pub struct Reference<F: Float = f32> {
     delays: BTreeMap<DelayKey, Samples>,
     audio_lines: BTreeMap<DelayKey, VecDeque<F>>,
     event_lines: BTreeMap<DelayKey, RefFifo>,
-    fb_audio: BTreeMap<(OutPort, u32, Samples), VecDeque<F>>,
+    fb_audio: BTreeMap<(OutputPort, u32, Samples), VecDeque<F>>,
     fb_event: BTreeMap<(EventIn, EventOut, u32, Samples), RefFifo>,
     inject: BTreeMap<EventIn, Vec<Event>>,
     /// The keys each tracked event output holds (see `Executor`'s
@@ -1095,7 +1095,7 @@ impl<F: Float> Reference<F> {
             }
         }
 
-        let audio_fb: BTreeSet<(OutPort, u32, Samples)> = t
+        let audio_fb: BTreeSet<(OutputPort, u32, Samples)> = t
             .edges
             .values()
             .flatten()
@@ -1271,7 +1271,7 @@ impl<F: Float> Reference<F> {
             }
             self.scheduled = waiting;
 
-            let mut audio: BTreeMap<OutPort, Vec<F>> = BTreeMap::new();
+            let mut audio: BTreeMap<OutputPort, Vec<F>> = BTreeMap::new();
             let mut events: BTreeMap<EventOut, RefOut> = BTreeMap::new();
             let mut done: BTreeSet<NodeKey> = BTreeSet::new();
 
@@ -1419,7 +1419,7 @@ impl<F: Float> Reference<F> {
         frames: usize,
         env: &Env,
         inputs: &[&[F]],
-        audio: &mut BTreeMap<OutPort, Vec<F>>,
+        audio: &mut BTreeMap<OutputPort, Vec<F>>,
         events: &mut BTreeMap<EventOut, RefOut>,
         targets: &BTreeMap<EdgeId, Amplitude>,
     ) {
@@ -1428,7 +1428,7 @@ impl<F: Float> Reference<F> {
 
         let mut ins: Vec<Vec<F>> = Vec::new();
         for port in 0..shape.audio_in().count() {
-            let at = InPort { node: key, port };
+            let at = InputPort { node: key, port };
             // The addends in source order, each through its own PDC delay.
             let mut addends: Vec<RefAddend<F>> = Vec::new();
             for edge in sorted(t.edges.get(&at).map_or(&[][..], Vec::as_slice)) {
@@ -1785,7 +1785,7 @@ impl<F: Float> Reference<F> {
         }
         for (port, o) in outs.into_iter().enumerate() {
             audio.insert(
-                OutPort {
+                OutputPort {
                     node: key,
                     port: port as u16,
                 },
@@ -3027,7 +3027,7 @@ fn fifo_run_params(f: &mut RefFifo, input: &[ParamEvent], frames: usize) -> Vec<
 }
 
 /// Every audio edge with its sink port, in port then sorted order.
-fn flat_edges(t: &crate::Topology) -> impl Iterator<Item = (&InPort, &Edge)> {
+fn flat_edges(t: &crate::Topology) -> impl Iterator<Item = (&InputPort, &Edge)> {
     t.edges
         .iter()
         .flat_map(|(at, es)| es.iter().map(move |e| (at, e)))

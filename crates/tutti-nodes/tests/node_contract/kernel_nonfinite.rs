@@ -510,7 +510,7 @@ mod logged {
     use super::{BLOCK, POISONED, SR};
     use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
     use tutti_graph::{
-        Cx, Edge, Editor, Executor, InPort, IntoNode, Io, LogFilter, Node, NodeKey, OutPort,
+        Cx, Edge, Editor, Executor, InputPort, IntoNode, Io, LogFilter, Node, NodeKey, OutputPort,
         PortSource, Prepare, RtLevel, RtLogReaders, RtRecord, RtValue, Shape, Status,
         TransportPosition, Unforkable,
     };
@@ -575,11 +575,14 @@ mod logged {
         let topology = &mut ed.spec_mut().topology;
         for port in 0..2u16 {
             topology.edges.insert(
-                InPort { node: fx, port },
-                vec![Edge::Direct(PortSource::Node(OutPort { node: src, port }))],
+                InputPort { node: fx, port },
+                vec![Edge::Direct(PortSource::Node(OutputPort {
+                    node: src,
+                    port,
+                }))],
             );
         }
-        topology.set_outputs((0..2).map(|port| PortSource::Node(OutPort { node: fx, port })));
+        topology.set_outputs((0..2).map(|port| PortSource::Node(OutputPort { node: fx, port })));
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();

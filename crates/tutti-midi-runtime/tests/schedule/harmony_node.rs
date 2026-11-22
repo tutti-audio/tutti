@@ -14,7 +14,7 @@ use tutti_graph::{
     Cx, Editor, EventKind, Executor, ForkMode, ForkTarget, Harmony, HarmonyKind, Io, Node, Prepare,
     Shape, Status, TransportPosition,
 };
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_midi_runtime::{
     HarmonyChanges, HarmonyChangesError, HarmonyControls, HarmonyNode, TimedHarmony,
 };
@@ -74,7 +74,7 @@ fn rig(node: HarmonyNode, max: usize) -> (Editor, Executor, HarmonyControls, See
     connect(&mut ed, 1, 2);
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutputPort {
             node: NodeKey(2),
             port: 0,
         })]);

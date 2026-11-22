@@ -17,7 +17,7 @@ use tutti_graph::{
     CommitError, CompileError, Cx, CycleEdge, Editor, EventEdge, EventIn, EventKind, EventOut,
     Executor, Io, Node, Prepare, Reference, Shape, Status, TransportPosition, Unforkable,
 };
-use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, PortSource};
+use tutti_graph::{Edge, FeedbackFrom, InputPort, OutputPort, PortSource};
 use tutti_ump::Ump;
 use tutti_units::{Latency, SampleRate, Samples, Tail};
 
@@ -88,21 +88,21 @@ fn wire(ed: &mut Editor) {
     spec.topology.inputs = ChannelLayout::MONO;
     let t = &mut spec.topology;
     t.edges.insert(
-        InPort { node: LAG, port: 0 },
+        InputPort { node: LAG, port: 0 },
         vec![Edge::Direct(PortSource::Global(0))],
     );
     t.edges.insert(
-        InPort { node: SUM, port: 0 },
-        vec![Edge::Direct(PortSource::Node(OutPort {
+        InputPort { node: SUM, port: 0 },
+        vec![Edge::Direct(PortSource::Node(OutputPort {
             node: LAG,
             port: 0,
         }))],
     );
     t.edges.insert(
-        InPort { node: SUM, port: 1 },
+        InputPort { node: SUM, port: 1 },
         vec![Edge::Direct(PortSource::Global(0))],
     );
-    t.set_outputs(vec![PortSource::Node(OutPort { node: SUM, port: 0 })]);
+    t.set_outputs(vec![PortSource::Node(OutputPort { node: SUM, port: 0 })]);
     let emit = EventOut {
         node: EMIT,
         port: 0,
@@ -322,11 +322,11 @@ fn a_rate_change_resets_rings_and_flushes_pending_events() {
 fn a_feedback_edge_shorter_than_the_new_block_is_refused_first() {
     let (mut ed, mut exec) = Editor::new(prep(48_000.0, 64));
     ed.insert(LAG, "smooth", Unforkable(TestNode::new(Kind::Smooth)));
-    let at = InPort { node: LAG, port: 0 };
+    let at = InputPort { node: LAG, port: 0 };
     ed.spec_mut().topology.edges.insert(
         at,
         vec![Edge::Feedback(FeedbackFrom::new(
-            OutPort { node: LAG, port: 0 },
+            OutputPort { node: LAG, port: 0 },
             Samples::new(96),
         ))],
     );
@@ -385,12 +385,12 @@ fn every_unit_is_re_prepared_and_its_new_latency_compiled() {
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
     ed.insert(LAG, "look", Unforkable(unit(&log)));
     ed.spec_mut().topology.edges.insert(
-        InPort { node: LAG, port: 0 },
+        InputPort { node: LAG, port: 0 },
         vec![Edge::Direct(PortSource::Global(0))],
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort { node: LAG, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort { node: LAG, port: 0 })]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -402,15 +402,15 @@ fn every_unit_is_re_prepared_and_its_new_latency_compiled() {
     // Uncommitted: inserted and wired, then the rate changes.
     ed.insert(SUM, "look", Unforkable(unit(&log)));
     ed.spec_mut().topology.edges.insert(
-        InPort { node: SUM, port: 0 },
-        vec![Edge::Direct(PortSource::Node(OutPort {
+        InputPort { node: SUM, port: 0 },
+        vec![Edge::Direct(PortSource::Node(OutputPort {
             node: LAG,
             port: 0,
         }))],
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort { node: SUM, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort { node: SUM, port: 0 })]);
     log.lock().unwrap().clear();
 
     let p = prep(96_000.0, 64);
@@ -580,7 +580,7 @@ fn a_panic_in_prepare_poisons_the_editor() {
     ed.insert(NodeKey(1), "fragile", Unforkable(FragileAt96k));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutputPort {
             node: NodeKey(1),
             port: 0,
         })]);
@@ -623,7 +623,7 @@ fn a_resolution_that_coarsens_on_prepare_poisons_the_editor() {
         .require_resolution(at, from, tutti_graph::Resolution::Sample);
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutputPort {
             node: NodeKey(0),
             port: 0,
         })]);

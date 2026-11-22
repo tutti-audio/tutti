@@ -46,7 +46,7 @@
 //! editor's own [`CommitError`].
 
 use crate::NodeKey;
-use crate::{Edge, FeedbackFrom, InPort, NodeSpec, OutPort, PortSource};
+use crate::{Edge, FeedbackFrom, InputPort, NodeSpec, OutputPort, PortSource};
 use tutti_buffers::ChannelLayout;
 use tutti_units::{Frame, Samples};
 
@@ -301,25 +301,25 @@ impl<F: Float> GraphBuilder<F> {
         &mut self.spec
     }
 
-    fn check_in(&self, node: NodeKey, port: usize) -> InPort {
+    fn check_in(&self, node: NodeKey, port: usize) -> InputPort {
         let n = self.input_count(node);
         assert!(
             port < n,
             "{node:?} has {n} audio inputs; port {port} is out of range"
         );
-        InPort {
+        InputPort {
             node,
             port: port as u16,
         }
     }
 
-    fn check_out(&self, node: NodeKey, port: usize) -> OutPort {
+    fn check_out(&self, node: NodeKey, port: usize) -> OutputPort {
         let n = self.output_count(node);
         assert!(
             port < n,
             "{node:?} has {n} audio outputs; port {port} is out of range"
         );
-        OutPort {
+        OutputPort {
             node,
             port: port as u16,
         }
@@ -513,7 +513,7 @@ impl<F: Float> GraphBuilder<F> {
         let outs = self.output_count(from);
         for c in 0..self.input_count(to) {
             let source = if outs > 0 {
-                PortSource::Node(OutPort {
+                PortSource::Node(OutputPort {
                     node: from,
                     port: (c % outs) as u16,
                 })
@@ -552,7 +552,7 @@ impl<F: Float> GraphBuilder<F> {
         let outs = self.output_count(node);
         for c in 0..self.outputs() {
             let source = if outs > 0 {
-                PortSource::Node(OutPort {
+                PortSource::Node(OutputPort {
                     node,
                     port: (c % outs) as u16,
                 })

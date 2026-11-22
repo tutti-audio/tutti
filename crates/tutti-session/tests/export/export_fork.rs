@@ -36,8 +36,8 @@ use tutti_rt::Param;
 use tutti_session::BufferMainOutput;
 use tutti_session::SessionNode;
 use tutti_session::{
-    Bounce, BounceConfigError, BounceError, BounceLatency, DetachedSession, ExportClock, InPort,
-    MainOutput, OutPort, PreparedGraph, Range, Session, Stem,
+    Bounce, BounceConfigError, BounceError, BounceLatency, DetachedSession, ExportClock, InputPort,
+    MainOutput, OutputPort, PreparedGraph, Range, Session, Stem,
 };
 use tutti_units::{Amplitude, Hz, Q, SampleRate, Samples, Seconds, Tail};
 
@@ -145,15 +145,15 @@ fn chain(session: &mut DetachedSession) -> NodeKey {
             .q(Q::new(1.0)),
     ));
     graph
-        .set_sources(InPort::new(filter, 0), [OutPort::new(osc, 0)])
+        .set_sources(InputPort::new(filter, 0), [OutputPort::new(osc, 0)])
         .unwrap()
         .unfaded();
     graph
-        .set_sources(MainOutput::channel(0), [OutPort::new(filter, 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(filter, 0)])
         .unwrap()
         .unfaded();
     graph
-        .set_sources(MainOutput::channel(1), [OutPort::new(osc, 0)])
+        .set_sources(MainOutput::channel(1), [OutputPort::new(osc, 0)])
         .unwrap()
         .unfaded();
     filter.erase()
@@ -352,7 +352,7 @@ fn the_trim_is_read_after_the_prepare_hook() {
             let editor = prepared.editor;
             editor.insert(key, "test:late", ForkByClone(Late { pos: 0 }));
             for out in editor.spec_mut().topology.outputs.iter_mut() {
-                *out = vec![tutti_graph::PortSource::Node(tutti_graph::OutPort {
+                *out = vec![tutti_graph::PortSource::Node(tutti_graph::OutputPort {
                     node: key,
                     port: 0,
                 })];
@@ -501,7 +501,7 @@ fn a_prepare_hook_reaches_the_graph_that_gets_rendered() {
         let editor = prepared.editor;
         editor.insert(key, "test:level", Const::mono(level));
         for out in editor.spec_mut().topology.outputs.iter_mut() {
-            *out = vec![tutti_graph::PortSource::Node(tutti_graph::OutPort {
+            *out = vec![tutti_graph::PortSource::Node(tutti_graph::OutputPort {
                 node: key,
                 port: 0,
             })];
@@ -746,12 +746,12 @@ fn an_unforkable_node_refuses_the_export_by_key() {
     let osc = session.graph().add(ForkByClone(Osc::sine(Hz::new(220.0))));
     session
         .graph()
-        .set_sources(MainOutput::channel(0), [OutPort::new(mic, 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(mic, 0)])
         .unwrap()
         .unfaded();
     session
         .graph()
-        .set_sources(MainOutput::channel(1), [OutPort::new(osc, 0)])
+        .set_sources(MainOutput::channel(1), [OutputPort::new(osc, 0)])
         .unwrap()
         .unfaded();
 
@@ -959,12 +959,12 @@ fn an_export_does_not_wait_for_a_slow_fork_and_takes_no_later_edit() {
     let other = session.graph().add(ForkByClone(Const::mono(9.0)));
     session
         .graph()
-        .set_sources(MainOutput::channel(0), [OutPort::new(slow_node, 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(slow_node, 0)])
         .unwrap()
         .unfaded();
     session
         .graph()
-        .set_sources(MainOutput::channel(1), [OutPort::new(level, 0)])
+        .set_sources(MainOutput::channel(1), [OutputPort::new(level, 0)])
         .unwrap()
         .unfaded();
 
@@ -1104,12 +1104,12 @@ fn a_main_thread_only_fork_builds_and_drops_on_the_main_thread() {
     let slow_node = session.graph().add(node);
     session
         .graph()
-        .set_sources(MainOutput::channel(0), [OutPort::new(slow_node, 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(slow_node, 0)])
         .unwrap()
         .unfaded();
     session
         .graph()
-        .set_sources(MainOutput::channel(1), [OutPort::new(pinned, 0)])
+        .set_sources(MainOutput::channel(1), [OutputPort::new(pinned, 0)])
         .unwrap()
         .unfaded();
     drop(release); // the slow build goes straight through
@@ -1142,12 +1142,12 @@ fn a_dropped_export_job_drops_its_fork_on_the_main_thread() {
     let pinned = session.graph().add(PinnedNode(Arc::clone(&threads)));
     session
         .graph()
-        .set_sources(MainOutput::channel(0), [OutPort::new(pinned, 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(pinned, 0)])
         .unwrap()
         .unfaded();
     session
         .graph()
-        .set_sources(MainOutput::channel(1), [OutPort::new(pinned, 0)])
+        .set_sources(MainOutput::channel(1), [OutputPort::new(pinned, 0)])
         .unwrap()
         .unfaded();
 
@@ -1236,12 +1236,12 @@ fn a_fork_build_that_fails_names_its_node_and_drops_on_the_main_thread() {
     let broken = session.graph().add(Broken);
     session
         .graph()
-        .set_sources(MainOutput::channel(0), [OutPort::new(pinned, 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(pinned, 0)])
         .unwrap()
         .unfaded();
     session
         .graph()
-        .set_sources(MainOutput::channel(1), [OutPort::new(broken, 0)])
+        .set_sources(MainOutput::channel(1), [OutputPort::new(broken, 0)])
         .unwrap()
         .unfaded();
 

@@ -14,7 +14,7 @@ use tutti_graph::ForkByClone;
 use tutti_graph::NodeKey;
 use tutti_nodes::testing::{Osc, Through};
 use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
-use tutti_session::{Error, InPort, LiveSession, MainOutput, OutPort, Replacement, Session};
+use tutti_session::{Error, InputPort, LiveSession, MainOutput, OutputPort, Replacement, Session};
 use tutti_timeline::MotionCommand;
 use tutti_units::{At, Db, Frame, Hz, SampleRate, Samples};
 
@@ -51,13 +51,13 @@ fn engine() -> (LiveSession, ManualStream, NodeKey, NodeKey) {
         }),
     ));
     s.graph()
-        .set_sources(InPort::new(lim, 0), [OutPort::new(osc, 0)])
+        .set_sources(InputPort::new(lim, 0), [OutputPort::new(osc, 0)])
         .unwrap();
     s.graph()
-        .set_sources(MainOutput::channel(0), [OutPort::new(osc, 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(osc, 0)])
         .unwrap();
     s.graph()
-        .set_sources(MainOutput::channel(1), [OutPort::new(lim, 0)])
+        .set_sources(MainOutput::channel(1), [OutputPort::new(lim, 0)])
         .unwrap();
     let _ = s.update();
     (s, stream, osc.erase(), lim.erase())
@@ -309,10 +309,10 @@ fn a_restart_after_a_failed_hook_recovers_on_the_old_device() {
     let (mut s, old, osc, lim) = engine();
     let loop_back = s.graph().add(ForkByClone(Through::mono()));
     s.graph()
-        .set_sources(InPort::new(loop_back, 0), [OutPort::new(lim, 0)])
+        .set_sources(InputPort::new(loop_back, 0), [OutputPort::new(lim, 0)])
         .unwrap();
     s.graph()
-        .set_sources(InPort::new(lim, 0), [OutPort::new(loop_back, 0)])
+        .set_sources(InputPort::new(lim, 0), [OutputPort::new(loop_back, 0)])
         .unwrap();
     let (driver, new) = ManualStreamDriver::new();
     s.restart_on(spec_at(NEW), driver, None, None)
@@ -323,7 +323,7 @@ fn a_restart_after_a_failed_hook_recovers_on_the_old_device() {
 
     // The declared wiring writes the limiter's input back.
     s.graph()
-        .set_sources(InPort::new(lim, 0), [OutPort::new(osc, 0)])
+        .set_sources(InputPort::new(lim, 0), [OutputPort::new(osc, 0)])
         .unwrap();
     s.remove(loop_back).unwrap();
     let _ = s.update();
@@ -350,10 +350,10 @@ fn a_restart_the_hook_refuses_leaves_the_device_placement_as_it_was() {
     assert_eq!(before.placement, Placement::Default);
     let loop_back = s.graph().add(ForkByClone(Through::mono()));
     s.graph()
-        .set_sources(InPort::new(loop_back, 0), [OutPort::new(lim, 0)])
+        .set_sources(InputPort::new(loop_back, 0), [OutputPort::new(lim, 0)])
         .unwrap();
     s.graph()
-        .set_sources(InPort::new(lim, 0), [OutPort::new(loop_back, 0)])
+        .set_sources(InputPort::new(lim, 0), [OutputPort::new(loop_back, 0)])
         .unwrap();
     let (driver, _new) = ManualStreamDriver::new();
     s.restart_on(

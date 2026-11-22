@@ -13,7 +13,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{ForkByClone, declick_frames};
 use tutti_nodes::testing::Const;
-use tutti_session::{DetachedSession, MainOutput, OutPort, Session};
+use tutti_session::{DetachedSession, MainOutput, OutputPort, Session};
 use tutti_units::SampleRate;
 
 /// `DECLICK` at the session's 48 kHz.
@@ -249,13 +249,13 @@ fn set_sources_and_remove_fade_what_leaves() {
     let b = s.graph().add(ForkByClone(Const::mono(2.0)));
     let sink = MainOutput::channel(0);
     s.graph()
-        .set_sources(sink, [OutPort::new(a.erase(), 0)])
+        .set_sources(sink, [OutputPort::new(a.erase(), 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
     frames(&mut s, 2);
     s.graph()
-        .set_sources(sink, [OutPort::new(b.erase(), 0)])
+        .set_sources(sink, [OutputPort::new(b.erase(), 0)])
         .unwrap();
     let _ = s.update();
     let got = frames(&mut s, SPAN);

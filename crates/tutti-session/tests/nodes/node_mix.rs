@@ -16,7 +16,8 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, Fade, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
 use tutti_session::{
-    InPort, Key, MainOutput, NodeMode, OutPort, Replacement, Session, SetRefusal, ValueErrorKind,
+    InputPort, Key, MainOutput, NodeMode, OutputPort, Replacement, Session, SetRefusal,
+    ValueErrorKind,
 };
 use tutti_units::{Mix, Samples};
 
@@ -56,10 +57,10 @@ fn rig() -> Rig {
     let g = s.graph();
     let a = g.add(ForkByClone(Const::mono(A)));
     let halve = g.add(ForkByClone(Halve));
-    g.set_sources(InPort::new(halve, 0), [OutPort::new(a, 0)])
+    g.set_sources(InputPort::new(halve, 0), [OutputPort::new(a, 0)])
         .unwrap()
         .unfaded();
-    g.set_sources(MainOutput::channel(0), [OutPort::new(halve, 0)])
+    g.set_sources(MainOutput::channel(0), [OutputPort::new(halve, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -286,10 +287,10 @@ fn a_node_with_no_pass_refuses_a_bypass_and_a_blend_and_lands_nothing() {
     let g = s.graph();
     let a = g.add(ForkByClone(Const::mono(A)));
     let q = g.add(ForkByClone(Quarter));
-    g.set_sources(InPort::new(q, 0), [OutPort::new(a, 0)])
+    g.set_sources(InputPort::new(q, 0), [OutputPort::new(a, 0)])
         .unwrap()
         .unfaded();
-    g.set_sources(MainOutput::channel(0), [OutPort::new(q, 0)])
+    g.set_sources(MainOutput::channel(0), [OutputPort::new(q, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();

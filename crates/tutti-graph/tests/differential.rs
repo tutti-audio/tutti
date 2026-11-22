@@ -21,7 +21,7 @@ use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology};
 use tutti_graph::Topology;
 use tutti_graph::{Bus, BusRef, BusRole, BusSource, Buses, NodeKey, TapId, TapOptions, TapSpec};
 use tutti_graph::{
-    Edge, EdgeGain, EdgeId, FeedbackFrom, InPort, NodeSpec, OutPort, PortSink, PortSource,
+    Edge, EdgeGain, EdgeId, FeedbackFrom, InputPort, NodeSpec, OutputPort, PortSink, PortSource,
 };
 use tutti_graph::{EventEdge, EventIn, EventOut, GraphSpec, Unforkable};
 use tutti_units::{Amplitude, Samples};
@@ -140,12 +140,12 @@ fn shape(kind: &Kind) -> tutti_graph::Shape {
     common::TestNode::new(kind.clone()).shape()
 }
 
-fn audio_outs(desc: &Desc, among: &[NodeKey]) -> Vec<OutPort> {
+fn audio_outs(desc: &Desc, among: &[NodeKey]) -> Vec<OutputPort> {
     among
         .iter()
         .flat_map(|&k| {
             (0..shape(&desc.kinds[&k]).audio_out().count())
-                .map(move |port| OutPort { node: k, port })
+                .map(move |port| OutputPort { node: k, port })
         })
         .collect()
 }
@@ -168,7 +168,7 @@ fn wire_node(desc: &mut Desc, j: usize, rng: &mut Rng) {
     let direct = audio_outs(desc, &earlier);
     let any = audio_outs(desc, &all);
     for port in 0..s.audio_in().count() {
-        let at = InPort { node: key, port };
+        let at = InputPort { node: key, port };
         let roll = rng.below(100);
         let edge = if roll < 64 {
             rng.pick(&direct).map(|p| Edge::Direct(PortSource::Node(p)))
@@ -1158,11 +1158,11 @@ fn close_a_cycle(desc: &mut Desc, rng: &mut Rng) -> bool {
         }
         if se.audio_in().count() > 0 && sl.audio_out().count() > 0 {
             desc.spec.topology.edges.insert(
-                InPort {
+                InputPort {
                     node: early,
                     port: 0,
                 },
-                vec![Edge::Direct(PortSource::Node(OutPort {
+                vec![Edge::Direct(PortSource::Node(OutputPort {
                     node: late,
                     port: 0,
                 }))],
@@ -1319,19 +1319,21 @@ fn an_unrelated_edit_does_not_disturb_the_running_graph() {
     for (&k, kind) in &kinds {
         t.nodes.insert(k, spec_for(kind));
     }
-    let src = |node| Edge::Direct(PortSource::Node(OutPort { node, port: 0 }));
-    t.edges.insert(InPort { node: b, port: 0 }, vec![src(a)]);
-    t.edges.insert(InPort { node: c, port: 0 }, vec![src(a)]);
-    t.edges.insert(InPort { node: mix, port: 0 }, vec![src(b)]);
-    t.edges.insert(InPort { node: mix, port: 1 }, vec![src(c)]);
+    let src = |node| Edge::Direct(PortSource::Node(OutputPort { node, port: 0 }));
+    t.edges.insert(InputPort { node: b, port: 0 }, vec![src(a)]);
+    t.edges.insert(InputPort { node: c, port: 0 }, vec![src(a)]);
+    t.edges
+        .insert(InputPort { node: mix, port: 0 }, vec![src(b)]);
+    t.edges
+        .insert(InputPort { node: mix, port: 1 }, vec![src(c)]);
     t.edges.insert(
-        InPort { node: mix, port: 2 },
+        InputPort { node: mix, port: 2 },
         vec![Edge::Feedback(FeedbackFrom::one_block(
-            OutPort { node: c, port: 0 },
+            OutputPort { node: c, port: 0 },
             Samples::new(MAX_BLOCK),
         ))],
     );
-    t.set_outputs(vec![PortSource::Node(OutPort { node: mix, port: 0 })]);
+    t.set_outputs(vec![PortSource::Node(OutputPort { node: mix, port: 0 })]);
     let before = GraphSpec::new(t.clone());
     let mut after_t = t;
     let mut kinds_after = kinds.clone();
@@ -1357,8 +1359,8 @@ fn an_unrelated_edit_does_not_disturb_the_running_graph() {
             .as_ref()
             .unwrap()
             .delay(tutti_graph::DelayKey::Audio {
-                at: InPort { node: mix, port: 1 },
-                from: PortSource::Node(OutPort { node: c, port: 0 })
+                at: InputPort { node: mix, port: 1 },
+                from: PortSource::Node(OutputPort { node: c, port: 0 })
             }),
         tutti_units::Samples::new(37),
         "the edit must land while a PDC ring is full of signal"
@@ -1499,10 +1501,10 @@ fn every_borrow_form_matches_the_reference() {
     for (&k, kind) in &kinds {
         t.nodes.insert(k, spec_for(kind));
     }
-    let out = |node, port| PortSource::Node(OutPort { node, port });
+    let out = |node, port| PortSource::Node(OutputPort { node, port });
     let mut wire = |node, port, from| {
         t.edges
-            .insert(InPort { node, port }, vec![Edge::Direct(from)]);
+            .insert(InputPort { node, port }, vec![Edge::Direct(from)]);
     };
     wire(split, 0, PortSource::Global(0));
     wire(inplace, 0, out(split, 0));
@@ -1619,7 +1621,7 @@ fn every_borrow_form_matches_the_reference() {
     }
     let mut wire = |node, port, from| {
         t.edges
-            .insert(InPort { node, port }, vec![Edge::Direct(from)]);
+            .insert(InputPort { node, port }, vec![Edge::Direct(from)]);
     };
     wire(fan12, 0, PortSource::Global(1));
     wire(sum2, 0, out(st_src, 0));
@@ -3079,7 +3081,7 @@ fn bus_graph(seed: u64) -> BusGraph {
         if source {
             for c in 0..width as u16 {
                 spec.topology.connect(
-                    InPort { node, port: c },
+                    InputPort { node, port: c },
                     Edge::Direct(PortSource::Global(c % globals as u16)),
                 );
             }
@@ -3101,11 +3103,11 @@ fn bus_graph(seed: u64) -> BusGraph {
             {
                 let mut trial = spec.clone();
                 trial.topology.connect(
-                    InPort {
+                    InputPort {
                         node,
                         port: rng.below(width as u64) as u16,
                     },
-                    Edge::Direct(PortSource::Node(OutPort {
+                    Edge::Direct(PortSource::Node(OutputPort {
                         node: from,
                         port: rng.below(w as u64) as u16,
                     })),
@@ -3120,7 +3122,7 @@ fn bus_graph(seed: u64) -> BusGraph {
     let &(last, width) = widths.last().expect("a node");
     spec.topology.set_outputs(
         (0..width as u16)
-            .map(|port| PortSource::Node(OutPort { node: last, port }))
+            .map(|port| PortSource::Node(OutputPort { node: last, port }))
             .collect::<Vec<_>>(),
     );
     BusGraph { spec, kinds }

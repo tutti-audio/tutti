@@ -15,7 +15,7 @@ use tutti_graph::{
     PortKind, Shape, Shapes, Unforkable, compile,
 };
 use tutti_graph::{
-    Edge, Feed, FeedbackFrom, InPort, InputDelay, Invalid, NodeSpec, OutPort, PortSource,
+    Edge, Feed, FeedbackFrom, InputDelay, InputPort, Invalid, NodeSpec, OutputPort, PortSource,
 };
 use tutti_graph::{NodeKey, Topology, delays, latency_plan};
 use tutti_units::{Latency, SampleRate, Samples, Tail};
@@ -37,15 +37,15 @@ fn spec(kind: &str, ins: u16, outs: u16) -> NodeSpec {
     .with_tail(Tail::None)
 }
 
-fn at(node: NodeKey, port: u16) -> InPort {
-    InPort { node, port }
+fn at(node: NodeKey, port: u16) -> InputPort {
+    InputPort { node, port }
 }
 
-fn out(node: NodeKey, port: u16) -> OutPort {
-    OutPort { node, port }
+fn out(node: NodeKey, port: u16) -> OutputPort {
+    OutputPort { node, port }
 }
 
-fn edge(t: &mut Topology, sink: InPort, from: OutPort) {
+fn edge(t: &mut Topology, sink: InputPort, from: OutputPort) {
     t.edges
         .insert(sink, vec![Edge::Direct(PortSource::Node(from))]);
 }

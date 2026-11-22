@@ -80,7 +80,7 @@
 //! `src/contract/snapshot.rs`.
 
 use crate::NodeKey;
-use crate::OutPort;
+use crate::OutputPort;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{BufferError, Float, Planes, PlanesMut};
@@ -2191,7 +2191,7 @@ impl<F: Float> BlockRig<F> {
             ChannelLayout::try_from(ins).expect("asserted within RIG_MAX_CHANNELS above");
         for c in 0..ins {
             topology.connect(
-                crate::InPort {
+                crate::InputPort {
                     node: key,
                     port: c as u16,
                 },
@@ -2200,7 +2200,7 @@ impl<F: Float> BlockRig<F> {
         }
         topology.outputs = (0..outs)
             .map(|c| {
-                vec![crate::PortSource::Node(OutPort {
+                vec![crate::PortSource::Node(OutputPort {
                     node: key,
                     port: c as u16,
                 })]

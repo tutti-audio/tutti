@@ -12,7 +12,7 @@ use common::{Kind, TestNode, WORKERS, bits, test_pool};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{Cost, Editor, Executor, Schedule, TransportPosition, Unforkable};
-use tutti_graph::{Edge, InPort, OutPort, PortSource};
+use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_units::{Beat, Bpm, Samples};
 
 const MAX_BLOCK: usize = 256;
@@ -38,7 +38,7 @@ fn sum(inputs: usize, cost: Option<Cost>) -> Unforkable<TestNode> {
 
 fn wire(ed: &mut Editor, node: u64, port: u16, from: PortSource) {
     ed.spec_mut().topology.edges.insert(
-        InPort {
+        InputPort {
             node: NodeKey(node),
             port,
         },
@@ -47,7 +47,7 @@ fn wire(ed: &mut Editor, node: u64, port: u16, from: PortSource) {
 }
 
 fn node(key: u64) -> PortSource {
-    PortSource::Node(OutPort {
+    PortSource::Node(OutputPort {
         node: NodeKey(key),
         port: 0,
     })

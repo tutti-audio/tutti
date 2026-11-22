@@ -44,7 +44,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::WorkerPool;
-use tutti_graph::{Edge, InPort, OutPort, PortSource};
+use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_graph::{Editor, Executor, Prepare, TransportPosition, Unforkable};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
@@ -58,7 +58,7 @@ const WORKERS: [usize; 4] = [1, 2, 4, 8];
 fn out(ed: &mut Editor, from: NodeKey) {
     ed.spec_mut().topology.connect_output(
         0,
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: from,
             port: 0,
         }),
@@ -67,8 +67,8 @@ fn out(ed: &mut Editor, from: NodeKey) {
 
 fn wire(ed: &mut Editor, node: NodeKey, port: u16, from: NodeKey) {
     ed.spec_mut().topology.edges.insert(
-        InPort { node, port },
-        vec![Edge::Direct(PortSource::Node(OutPort {
+        InputPort { node, port },
+        vec![Edge::Direct(PortSource::Node(OutputPort {
             node: from,
             port: 0,
         }))],
@@ -187,7 +187,7 @@ fn tiny(lanes: usize, light: bool, workers: usize) -> Executor {
         let k = NodeKey(lane as u64 + 1);
         gain(&mut ed, k, lane, light);
         ed.spec_mut().topology.edges.insert(
-            InPort { node: k, port: 0 },
+            InputPort { node: k, port: 0 },
             vec![Edge::Direct(PortSource::Global(0))],
         );
         out(&mut ed, k);

@@ -12,7 +12,7 @@ use tutti_buffers::{FoldError, InterleavedMut};
 use tutti_graph::{ForkByClone, MainOutputError};
 use tutti_nodes::testing::Const;
 use tutti_session::{
-    Committed, Error, MainOutput, MainOutputTopologyStatus, OutPort, Session, SessionBuilder,
+    Committed, Error, MainOutput, MainOutputTopologyStatus, OutputPort, Session, SessionBuilder,
 };
 use tutti_units::{SampleRate, Samples};
 
@@ -27,7 +27,7 @@ fn feed<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     for c in 0..values.len() {
         session
             .graph()
-            .set_sources(MainOutput::channel(c), [OutPort::new(node, c)])
+            .set_sources(MainOutput::channel(c), [OutputPort::new(node, c)])
             .unwrap()
             .unfaded();
     }

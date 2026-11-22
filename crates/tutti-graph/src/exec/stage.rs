@@ -1283,7 +1283,7 @@ fn copy_origin(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DelaySpec, NodeKey, OutPort, PortSource};
+    use crate::{DelaySpec, NodeKey, OutputPort, PortSource};
     use tutti_units::Samples;
 
     fn ring(channel: u16, from: PortSource, len: usize) -> DelaySpec {
@@ -1294,7 +1294,7 @@ mod tests {
     }
 
     fn source(node: u64) -> PortSource {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(node),
             port: 0,
         })
@@ -1334,7 +1334,7 @@ mod tests {
     /// A ring that is not an output's is no source's origin.
     #[test]
     fn only_output_rings_are_origins() {
-        let at = crate::InPort {
+        let at = crate::InputPort {
             node: NodeKey(9),
             port: 0,
         };

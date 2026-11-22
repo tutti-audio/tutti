@@ -371,7 +371,7 @@ fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
     s.graph()
         .set_sources(
             tutti_session::MainOutput::channel(0),
-            [tutti_session::OutPort::new(probe, 0)],
+            [tutti_session::OutputPort::new(probe, 0)],
         )
         .unwrap();
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);

@@ -33,7 +33,7 @@ use tutti_nodes::{
     SvfFilterConfig, SvfFilterNode, SvfType,
 };
 use tutti_session::{
-    AudioSide, DetachedSession, InPort, Key, MainOutput, OutPort, Replacement, Session,
+    AudioSide, DetachedSession, InputPort, Key, MainOutput, OutputPort, Replacement, Session,
 };
 use tutti_units::{Db, Drive, Hz, Q, SampleRate, Samples};
 
@@ -99,26 +99,26 @@ fn scene_driven(with_limiter: bool, drive: f64) -> Scene {
     let g = session.graph();
     let osc = g.add(saw());
     let filter = g.add(low_pass(1_200.0));
-    g.set_sources(InPort::new(filter, 0), [OutPort::new(osc, 0)])
+    g.set_sources(InputPort::new(filter, 0), [OutputPort::new(osc, 0)])
         .unwrap()
         .unfaded();
     let drive = g.add(shaper(drive));
-    g.set_sources(InPort::new(drive, 0), [OutPort::new(filter, 0)])
+    g.set_sources(InputPort::new(drive, 0), [OutputPort::new(filter, 0)])
         .unwrap()
         .unfaded();
     let right = if with_limiter {
         let lim = g.add(limiter());
-        g.set_sources(InPort::new(lim, 0), [OutPort::new(osc, 0)])
+        g.set_sources(InputPort::new(lim, 0), [OutputPort::new(osc, 0)])
             .unwrap()
             .unfaded();
         lim.erase()
     } else {
         osc.erase()
     };
-    g.set_sources(MainOutput::channel(0), [OutPort::new(drive, 0)])
+    g.set_sources(MainOutput::channel(0), [OutputPort::new(drive, 0)])
         .unwrap()
         .unfaded();
-    g.set_sources(MainOutput::channel(1), [OutPort::new(right, 0)])
+    g.set_sources(MainOutput::channel(1), [OutputPort::new(right, 0)])
         .unwrap()
         .unfaded();
     let _ = session.update();

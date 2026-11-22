@@ -9,7 +9,7 @@ use tutti_graph::{
     WiredMask,
 };
 use tutti_nodes::testing::Const;
-use tutti_session::{MainOutput, OutPort, Session, SessionEvent};
+use tutti_session::{MainOutput, OutputPort, Session, SessionEvent};
 
 /// A stereo main bus and a mono aux bus on each side: ports 0 and 1 are the
 /// main bus, port 2 the aux.
@@ -72,7 +72,9 @@ fn a_connect_and_the_loss_of_the_last_source_are_each_reported_once() {
     assert_eq!(rewired(&s.update()), [], "unwired nodes: nothing moved");
 
     let g = s.graph();
-    g.connect(OutPort::new(a, 0), x.input(2)).unwrap().unfaded();
+    g.connect(OutputPort::new(a, 0), x.input(2))
+        .unwrap()
+        .unfaded();
     g.connect(x.out(2), MainOutput::channel(0))
         .unwrap()
         .unfaded();
@@ -84,7 +86,7 @@ fn a_connect_and_the_loss_of_the_last_source_are_each_reported_once() {
     assert_eq!(rewired(&s.update()), [], "reported once");
 
     let g = s.graph();
-    g.disconnect(OutPort::new(a, 0), x.input(2))
+    g.disconnect(OutputPort::new(a, 0), x.input(2))
         .unwrap()
         .unfaded();
     assert_eq!(

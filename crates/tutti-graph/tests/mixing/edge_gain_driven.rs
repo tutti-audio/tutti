@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use common::{Kind, Pair, SpecBehaviour, bits, driver_value, input_signal, prepare};
 use tutti_graph::{
     CompileError, Edge, EdgeId, Editor, EventOut, ForkCause, ForkMode, ForkSource, Forked,
-    GraphInvalid, GraphSpec, InPort, IntoNode, Node, NodeKey, NodeParts, OutPort, ParamRange,
+    GraphInvalid, GraphSpec, InputPort, IntoNode, Node, NodeKey, NodeParts, OutputPort, ParamRange,
     PortSink, PortSource, Topology, Unforkable, ValidGraph, compile,
 };
 use tutti_units::{Amplitude, Samples, Tail};
@@ -28,15 +28,15 @@ fn key(n: u64) -> NodeKey {
     NodeKey(n)
 }
 
-fn at(node: u64) -> InPort {
-    InPort {
+fn at(node: u64) -> InputPort {
+    InputPort {
         node: key(node),
         port: 0,
     }
 }
 
 fn out(node: u64) -> PortSource {
-    PortSource::Node(OutPort {
+    PortSource::Node(OutputPort {
         node: key(node),
         port: 0,
     })
@@ -145,7 +145,7 @@ impl Rig {
     }
 }
 
-fn at_port(node: u64) -> InPort {
+fn at_port(node: u64) -> InputPort {
     at(node)
 }
 

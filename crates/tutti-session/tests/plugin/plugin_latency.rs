@@ -24,8 +24,8 @@ use tutti_plugin::PluginClient;
 use tutti_plugin_db::Loadable;
 use tutti_plugin_types::PluginRef;
 use tutti_session::{
-    Bounce, BounceLatency, BounceTail, BufferMainOutput, ExportClock, MainOutput, OutPort, PHASES,
-    Phase, PhaseCx, Range, Replacement, Session, SessionEvent,
+    Bounce, BounceLatency, BounceTail, BufferMainOutput, ExportClock, MainOutput, OutputPort,
+    PHASES, Phase, PhaseCx, Range, Replacement, Session, SessionEvent,
 };
 use tutti_session::{PluginChange, PluginEvent};
 use tutti_units::{SampleRate, Samples};
@@ -59,7 +59,7 @@ fn add_probe_on_outputs(s: &mut Session) -> tutti_session::Key<tutti_session::An
         )
         .expect("the reference CLAP plugin loads");
     s.graph()
-        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(node, 0)])
         .unwrap();
     let _ = s.update();
     node
@@ -272,7 +272,7 @@ fn a_swapped_in_plugins_latency_is_the_incoming_ones() {
     let outgoing_handle = outgoing.handle();
     let node = s.graph().add_plugin(Box::new(outgoing));
     s.graph()
-        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(node, 0)])
         .unwrap();
     let _ = s.update();
     told(&outgoing_handle, tutti_plugin_types::RenderMode::Offline);
@@ -359,7 +359,7 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
     .expect("the reference plugin loads");
     let node = s.graph().add_plugin(Box::new(client)).erase();
     s.graph()
-        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(node, 0)])
         .unwrap();
     let _ = s.update();
     let _ = stream
@@ -414,7 +414,7 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
     .expect("the reference plugin loads");
     let node = s.graph().add_plugin(Box::new(client));
     s.graph()
-        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(node, 0)])
         .unwrap();
     let _ = s.update();
     std::thread::sleep(std::time::Duration::from_millis(100));

@@ -17,7 +17,7 @@ use tutti_graph::{
     Cost, Cx, Editor, Executor, Io, Node, Prepare, Schedule, Shape, Status, TransportPosition,
     Unforkable,
 };
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoicePool, VoiceSource, Wave};
 use tutti_units::{Beat, Bpm, SampleRate, Samples, StretchFactor};
 
@@ -116,7 +116,7 @@ fn graph(wave: &Arc<Wave>, workers: usize, declared: bool, bus: bool) -> Executo
             ed.insert(key, "stretched", stretched(wave));
         }
         for c in 0..2u16 {
-            let from = PortSource::Node(OutPort { node: key, port: c });
+            let from = PortSource::Node(OutputPort { node: key, port: c });
             if bus {
                 // The graph's fan-in: output channel `c` holds every
                 // source's port `c`, and the graph sums them.

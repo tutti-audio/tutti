@@ -6,8 +6,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, SampleRates, Shape, Status};
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    ConnectError, DetachedSession, EventInPort, EventOutPort, Feeder, InPort, MainOutput, OutPort,
-    ReplaceRefused, Replacement, Session, SetRateError,
+    ConnectError, DetachedSession, EventInPort, EventOutPort, Feeder, InputPort, MainOutput,
+    OutputPort, ReplaceRefused, Replacement, Session, SetRateError,
 };
 use tutti_units::SampleRate;
 
@@ -61,8 +61,8 @@ fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
     let a = s.graph().add(ForkByClone(Const::frame(&[0.5])));
     let g = s.graph();
 
-    let ghost_out = OutPort::new(GHOST, 0);
-    let ghost_in = InPort::new(GHOST, 0);
+    let ghost_out = OutputPort::new(GHOST, 0);
+    let ghost_in = InputPort::new(GHOST, 0);
     assert_eq!(
         g.disconnect(ghost_out, MainOutput::channel(0)).err(),
         Some(ConnectError::NoSuchNode(GHOST))
@@ -110,8 +110,8 @@ fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
     assert_eq!(g.sources(MainOutput::channel(0)), Ok(Vec::new()));
     // A port a real node does not have is a named error too.
     assert_eq!(
-        g.sources(InPort::new(a.erase(), 9)),
-        Err(ConnectError::NoSuchInPort(InPort::new(a.erase(), 9)))
+        g.sources(InputPort::new(a.erase(), 9)),
+        Err(ConnectError::NoSuchInPort(InputPort::new(a.erase(), 9)))
     );
 }
 
@@ -150,7 +150,7 @@ fn a_tap_source_past_what_a_port_index_holds_is_refused() {
     use tutti_units::Samples;
     let mut s = detached();
     let a = s.graph().add(ForkByClone(Const::frame(&[0.5])));
-    let far = OutPort::new(a.erase(), 70_000);
+    let far = OutputPort::new(a.erase(), 70_000);
     let refused = s
         .graph()
         .taps()

@@ -26,7 +26,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_export::{Produced, Rendered};
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_session::{
-    Bounce, BounceTail, ExportClock, InPort, OutPort, Range, Session, Stem, Workers,
+    Bounce, BounceTail, ExportClock, InputPort, OutputPort, Range, Session, Stem, Workers,
 };
 use tutti_units::{SampleRate, Samples, Seconds};
 
@@ -127,7 +127,7 @@ fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Rendered>, usize) {
         }));
         session
             .graph()
-            .set_sources(InPort::new(sum, i), [OutPort::new(branch, 0)])
+            .set_sources(InputPort::new(sum, i), [OutputPort::new(branch, 0)])
             .unwrap();
         named.push(branch.erase());
     }
