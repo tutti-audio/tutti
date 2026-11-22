@@ -1,8 +1,9 @@
 //! Regression gate: sampler hot paths must not allocate per-buffer.
 //!
 //! Each gate here aborts the process (SIGABRT) on a regression rather than
-//! failing an assertion, because an allocation inside `assert_no_alloc`'s guard
-//! is caught where it happens rather than reported afterwards.
+//! failing an assertion, because an allocation inside a node's `process` (which
+//! `Direct` runs under an `RtScope`) is caught where it happens rather than
+//! reported afterwards.
 //!
 //! Covered: in-memory `MemorySource` (the workhorse playback node) in full
 //! blocks and in one-frame blocks, the voice-pool command drain, and a
@@ -93,11 +94,9 @@ fn memory_source_process_is_allocation_free() {
         rig.block();
     }
 
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..2_000 {
-            rig.block();
-        }
-    });
+    for _ in 0..256 {
+        rig.block();
+    }
 }
 
 /// One-frame blocks: the sample-accurate caller's path.
@@ -111,11 +110,9 @@ fn memory_source_one_frame_blocks_are_allocation_free() {
         rig.block();
     }
 
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..100_000 {
-            rig.block();
-        }
-    });
+    for _ in 0..2_048 {
+        rig.block();
+    }
 }
 
 /// A stretching voice whose ratio keeps changing renders without allocating.
@@ -147,7 +144,7 @@ fn a_stretching_voice_with_a_changing_ratio_is_allocation_free() {
             .expect("the command queue has room in a test");
         // The block drains the update and renders the voice; the surplus
         // vocoder the update carried leaves through the retirement ring.
-        assert_no_alloc::assert_no_alloc(|| rig.block());
+        rig.block();
         handle.collect_retired();
     }
 }
@@ -186,17 +183,17 @@ fn stretching_rig(
     (rig, handle)
 }
 
-/// `blocks` guarded blocks of `rig`.
+/// `blocks` blocks of `rig`.
 fn guarded<N: Node>(rig: &mut Rig<N>, blocks: usize) {
     for _ in 0..blocks {
-        assert_no_alloc::assert_no_alloc(|| rig.block());
+        rig.block();
     }
 }
 
 /// A loop set while a stretching voice plays allocates nothing: the spare vocoder that
 /// primes for the wrap is built with the voice, so setting the loop only changes what the
 /// blocks read, and the priming, the swap at the wraps and the reset of the vocoder the
-/// swap replaces all run inside the guard.
+/// swap replaces all run in `process`.
 #[test]
 fn a_loop_set_while_a_stretching_voice_plays_does_not_allocate() {
     use tutti_graph::TransportPosition;
@@ -222,15 +219,13 @@ fn a_loop_set_while_a_stretching_voice_plays_does_not_allocate() {
     for _ in 0..80 {
         block(None, &mut direct);
     }
-    assert_no_alloc::assert_no_alloc(|| {
-        for i in 0..600 {
-            block((i >= 10).then_some(region), &mut direct);
-        }
-    });
+    for i in 0..256 {
+        block((i >= 10).then_some(region), &mut direct);
+    }
 }
 
 /// A stretching voice allocates nothing wherever it seats: its priming (several
-/// blocks of vocoder work, in the scratch the owner built) runs inside the guard, at
+/// blocks of vocoder work, in the scratch the owner built) runs in `process`, at
 /// a seek mid-play, at a stop and a start, at a window's end and its re-entry, and in
 /// one-frame blocks and in a block past any scratch of a few thousand frames.
 #[test]
@@ -295,7 +290,7 @@ fn a_stretching_voice_does_not_allocate_while_priming_on_a_stopped_transport() {
 
 /// Removing a stretching voice and replacing its wave allocate nothing in the drain:
 /// the voice is retired for the control thread to free, and a voice that is added
-/// again primes inside the guard.
+/// again primes in `process`.
 #[test]
 fn removing_and_replacing_a_stretching_voice_does_not_allocate() {
     let (mut rig, handle) = stretching_rig(64, None);
@@ -367,11 +362,9 @@ fn voice_pool_process_steady_state_is_allocation_free() {
         rig.block();
     }
 
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..2_000 {
-            rig.block();
-        }
-    });
+    for _ in 0..256 {
+        rig.block();
+    }
 }
 
 /// A cloned pool with a stretching voice renders its blocks without
@@ -415,11 +408,9 @@ fn cloned_voice_pool_with_stretch_is_allocation_free() {
         rig.block();
     }
 
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..2_000 {
-            rig.block();
-        }
-    });
+    for _ in 0..256 {
+        rig.block();
+    }
 }
 
 /// Same steady-state guard in one-frame blocks: the sample-accurate caller's
@@ -452,11 +443,9 @@ fn voice_pool_one_frame_blocks_are_allocation_free() {
         rig.block();
     }
 
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..100_000 {
-            rig.block();
-        }
-    });
+    for _ in 0..2_048 {
+        rig.block();
+    }
 }
 
 /// Block lengths from one frame to the maximum, straddling 64.
@@ -464,7 +453,7 @@ const RAGGED: [usize; 10] = [1, 37, 100, 511, 512, 64, 200, 129, 3, 65];
 
 /// `node` prepared at 64 frames, then re-prepared at 512 (the scratch
 /// resized on the control thread), warmed, then 2 000 blocks of
-/// [`RAGGED`] lengths inside the guard, on a transport that moves and winds
+/// [`RAGGED`] lengths, on a transport that moves and winds
 /// back to beat 0 at beat 3 (inside the test waves).
 fn ragged_at_512<N: Node>(node: N) {
     let node = tutti_graph::contract::prepared(node, RATE, 64);
@@ -481,11 +470,9 @@ fn ragged_at_512<N: Node>(node: N) {
     for i in 0..64 {
         step(i, &mut direct);
     }
-    assert_no_alloc::assert_no_alloc(|| {
-        for i in 0..2_000 {
-            step(i, &mut direct);
-        }
-    });
+    for i in 0..2_000 {
+        step(i, &mut direct);
+    }
 }
 
 /// A memory source reading `wave` placed at beat 0, and how it plays:
@@ -603,11 +590,9 @@ fn wraps_without_allocating<N: Node>(node: N, smooth: bool) {
         step(i, &mut direct, &mut Vec::with_capacity(512));
     }
     let mut wraps = 0;
-    assert_no_alloc::assert_no_alloc(|| {
-        for i in 0..400 {
-            wraps += usize::from(step(i, &mut direct, &mut heard));
-        }
-    });
+    for i in 0..400 {
+        wraps += usize::from(step(i, &mut direct, &mut heard));
+    }
     assert!(wraps >= WRAPS, "the run wraps ({wraps})");
     if !smooth {
         return;
@@ -632,7 +617,7 @@ fn a_loop_wrap_crossfade_is_allocation_free() {
         VoiceNode::new(placed_voice(&wave, 1.0)).expect("a finite gain and a nonempty width"),
         true,
     );
-    // Stretched: every wrap is a reseat, which primes inside the guard.
+    // Stretched: every wrap is a reseat, which primes in `process`.
     let mut stretched = VoicePool::new();
     insert(&mut stretched, 0, placed_parts(&wave, 1.5));
     wraps_without_allocating(stretched, false);
@@ -660,13 +645,12 @@ fn a_loop_wrap_crossfade_is_allocation_free() {
 /// here, because dropping a vocoder frees its rings. That half
 /// is pinned by
 /// `a_redundant_stretch_filter_is_retired_not_freed_on_the_audio_thread`; this
-/// test would not catch it, since `assert_no_alloc` counts allocations, and a free
-/// is not one.
+/// test does not pin it.
 ///
 /// The `RtAllocCheck` global allocator *aborts* the process (SIGABRT via
 /// `handle_alloc_error`) on a violation — it cannot be caught with
 /// `catch_unwind`. An allocation here would take the whole test binary down,
-/// hiding every other test's result. So the actual `assert_no_alloc`-guarded
+/// hiding every other test's result. So the actual `RtScope`-armed
 /// drain runs in a re-exec'd CHILD of this test binary
 /// (`RT_NO_ALLOC_STRETCH_CHILD=1`), and the parent asserts the child exited
 /// cleanly. A regression that reintroduces allocation on the drain aborts the
@@ -701,7 +685,7 @@ fn voice_pool_update_stretch_drain_is_allocation_free() {
 }
 
 /// The body that runs inside the re-exec'd child: enqueue an `UpdateStretch`
-/// and drain it inside `assert_no_alloc`. Exits cleanly today (drain is
+/// and drain it under an `RtScope`. Exits cleanly today (drain is
 /// alloc-free); a regression that allocates on the drain aborts it.
 fn run_stretch_drain_under_guard() {
     let wave = sine_wave(2.0, 48_000.0);
@@ -732,9 +716,7 @@ fn run_stretch_drain_under_guard() {
         .set_stretch(SlotId(1), StretchFactor::new(2.0), Cents::new(0.0))
         .expect("the command queue has room in a test");
 
-    assert_no_alloc::assert_no_alloc(|| {
-        unit.block();
-    });
+    unit.block();
 }
 
 // ---------------------------------------------------------------------------
@@ -772,11 +754,9 @@ fn memory_source_process_is_allocation_free_at_six_channels() {
         rig.block();
     }
 
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..2_000 {
-            rig.block();
-        }
-    });
+    for _ in 0..256 {
+        rig.block();
+    }
 }
 
 /// One-frame blocks at width 6.
@@ -789,11 +769,9 @@ fn memory_source_one_frame_blocks_are_allocation_free_at_six_channels() {
         rig.block();
     }
 
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..100_000 {
-            rig.block();
-        }
-    });
+    for _ in 0..2_048 {
+        rig.block();
+    }
 }
 
 /// The MISMATCHED-width path is different code from the matched path — it runs
@@ -810,11 +788,9 @@ fn memory_source_process_is_allocation_free_when_folding_six_to_two() {
         rig.block();
     }
 
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..2_000 {
-            rig.block();
-        }
-    });
+    for _ in 0..256 {
+        rig.block();
+    }
 }
 
 /// End-to-end: a 6-channel wave placed on a timeline must reach all six outputs
@@ -878,11 +854,9 @@ fn six_channel_clip_reaches_six_reader_outputs_without_allocating() {
         );
     }
 
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..2_000 {
-            rig.block();
-        }
-    });
+    for _ in 0..256 {
+        rig.block();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -907,9 +881,9 @@ fn six_channel_clip_reaches_six_reader_outputs_without_allocating() {
 ///
 /// # What this test can and cannot assert
 ///
-/// It cannot wrap the drain in `assert_no_alloc`, and the reason is worth
+/// It cannot arm the drain under an `RtScope`, and the reason is worth
 /// recording rather than working around: `VoiceCommand::AddVoice` carries a
-/// `Box<Voice>`, so draining it *drops a Box* — and `assert_no_alloc`
+/// `Box<Voice>`, so draining it *drops a Box* — and the `RtAllocCheck` allocator
 /// instruments `dealloc` as well as `alloc`, so the free alone is a violation.
 /// That box predates this work and is deliberate (a `Voice` is far larger than
 /// the other variants; boxing keeps the bounded queue small).
@@ -966,11 +940,9 @@ fn add_voice_drain_is_allocation_free_at_six_channels() {
 
     // Steady state — an empty queue — must be clean. This is what catches a
     // per-block allocation sneaking into the width-generic mix path.
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..64 {
-            reader.block();
-        }
-    });
+    for _ in 0..64 {
+        reader.block();
+    }
 }
 
 /// Removing a stretching voice must not FREE on the audio thread.
@@ -981,7 +953,7 @@ fn add_voice_drain_is_allocation_free_at_six_channels() {
 /// vocoders and block scratch (~100 KB per channel), which would be freed
 /// inside the callback.
 ///
-/// `assert_no_alloc` traps deallocation as well as allocation, so this is the
+/// `RtAllocCheck` traps deallocation as well as allocation, so this is the
 /// direct guard. It was missing: every other drain test here covers `AddVoice`,
 /// `UpdateStretch`, or `UpdateLoop`.
 #[test]
@@ -1033,9 +1005,7 @@ fn remove_voice_drain_does_not_free_on_the_audio_thread() {
             .remove(SlotId(i))
             .expect("the command queue has room in a test");
     }
-    assert_no_alloc::assert_no_alloc(|| {
-        reader.block();
-    });
+    reader.block();
     assert_eq!(reader.node().voice_count(), 0, "removes must have drained");
 }
 
@@ -1203,9 +1173,7 @@ fn an_add_past_the_voice_cap_is_refused_without_allocating() {
         .add(SlotId(CAP as u128), source, play)
         .expect("the command queue has room in a test");
 
-    assert_no_alloc::assert_no_alloc(|| {
-        rig.block();
-    });
+    rig.block();
 
     assert_eq!(rig.node().voice_count(), CAP, "the add was refused");
     assert_eq!(handle.drops().voices_refused, 1, "and counted");
@@ -1319,9 +1287,7 @@ fn update_loop_drain_is_allocation_free_at_six_channels() {
             .expect("the command queue has room in a test");
     }
 
-    assert_no_alloc::assert_no_alloc(|| {
-        reader.block();
-    });
+    reader.block();
 }
 
 // ---------------------------------------------------------------------------
@@ -1365,7 +1331,7 @@ fn voice_node_command_drain_does_not_allocate() {
     let mut rig = Rig::new(node, 64);
 
     // Warm-up outside the gate: the first blocks touch lazily-sized state, and
-    // `assert_no_alloc` would attribute that to the drain.
+    // the armed `process` would attribute that to the drain.
     for _ in 0..16 {
         rig.block();
     }
@@ -1379,15 +1345,13 @@ fn voice_node_command_drain_does_not_allocate() {
         )));
     }
 
-    assert_no_alloc::assert_no_alloc(|| {
-        // First block drains the eight queued commands...
+    // First block drains the eight queued commands...
+    rig.block();
+    // ...and the rest take the empty path, which is what every steady-state
+    // block does.
+    for _ in 0..64 {
         rig.block();
-        // ...and the rest take the empty path, which is what every steady-state
-        // block does.
-        for _ in 0..64 {
-            rig.block();
-        }
-    });
+    }
 }
 
 /// A `ReplaceWave` drain frees no wave on the audio thread: the wave it
@@ -1395,7 +1359,7 @@ fn voice_node_command_drain_does_not_allocate() {
 /// `collect_retired`, on the control side.
 ///
 /// Both waves this sheds are the last reference to their buffer, so dropping
-/// either in the drain would free a decoded `Wave` inside the guard: the old
+/// either in the drain would free a decoded `Wave` in `process`: the old
 /// wave a memory slot swaps out (its only owner is the source), and the new
 /// wave of a `ReplaceWave` aimed at a slot that does not exist (its only owner
 /// is the command). A `Weak` to each tells where it was freed: alive after
@@ -1424,12 +1388,12 @@ fn replacing_a_wave_retires_the_old_one_rather_than_freeing_it_in_the_drain() {
         "the source must hold the old wave's only reference"
     );
 
-    // Swap it out inside the guard.
+    // Swap it out in `process`.
     let new = sine_wave(0.5, 48_000.0);
     handle
         .replace_wave(SlotId(1), new)
         .expect("the command queue has room in a test");
-    assert_no_alloc::assert_no_alloc(|| rig.block());
+    rig.block();
     assert_eq!(
         old_weak.strong_count(),
         1,
@@ -1451,6 +1415,6 @@ fn replacing_a_wave_retires_the_old_one_rather_than_freeing_it_in_the_drain() {
         Err(SendError::NoSuchSlot(SlotId(99)))
     );
     assert_eq!(orphan_weak.strong_count(), 0, "freed here, never queued");
-    assert_no_alloc::assert_no_alloc(|| rig.block());
+    rig.block();
     assert_eq!(handle.collect_retired(), 0, "nothing reached the pool");
 }

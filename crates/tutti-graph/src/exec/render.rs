@@ -5,7 +5,6 @@ use tutti_buffers::Float;
 
 use tutti_platform::with_no_denormals;
 use tutti_rt::RingWriter;
-use tutti_rt::RtScope;
 use tutti_units::Samples;
 
 use super::commit::{Crossfade, retire_fade};
@@ -92,8 +91,9 @@ impl<F: Float> Executor<F> {
     /// long. Applies queued commits first ([`apply_pending`](Self::apply_pending));
     /// with none queued it never allocates. A caller that sizes the block from
     /// the executor's plan or prepare applies once itself and renders with
-    /// [`render_applied`](Self::render_applied). Marks the thread with
-    /// [`RtScope::enter`] for the duration.
+    /// [`render_applied`](Self::render_applied). A render prepared
+    /// [`Realtime`](crate::RenderMode::Realtime) marks the thread with
+    /// [`RtScope::enter`](tutti_rt::RtScope::enter) for the duration.
     ///
     /// # Panics
     ///
@@ -139,6 +139,12 @@ impl<F: Float> Executor<F> {
     /// the executor holds now, and a commit sent later waits for the next
     /// block.
     ///
+    /// A render prepared [`Realtime`](crate::RenderMode::Realtime) runs inside
+    /// [`RtScope`](tutti_rt::RtScope): it never allocates, frees or waits. One
+    /// prepared [`Offline`](crate::RenderMode::Offline) runs outside it and
+    /// may block and allocate, on the calling thread and on a pool's
+    /// participants alike.
+    ///
     /// For a caller that reads [`plan`](Self::plan) or
     /// [`prepare`](Self::prepare) to size the block (its length, `outputs`)
     /// and must have them still true when it renders: it calls
@@ -169,7 +175,7 @@ impl<F: Float> Executor<F> {
         outputs: &mut [&mut [F]],
         meter: Option<&MeterMap>,
     ) {
-        let _rt = RtScope::enter();
+        let _rt = self.prepare.enter_rt_scope();
         // `move` captures `self` as one pointer; the precise capture of every
         // field the body names is a large struct built per block.
         with_no_denormals(move || {

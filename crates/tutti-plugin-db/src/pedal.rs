@@ -126,7 +126,7 @@ impl Pedal {
                 warn!("could not read the dead-man's pedal: {e}");
                 return Recovered {
                     files: Vec::new(),
-                    failure: Some(RecoveryFailure::Unreadable(e.kind())),
+                    failure: Some(CrashRecoveryFailure::Unreadable(e.kind())),
                 };
             }
         };
@@ -150,12 +150,12 @@ impl Pedal {
             warn!("could not save the blacklist for {crashed:?}; keeping the pedal: {e}");
             return Recovered {
                 files: crashed,
-                failure: Some(RecoveryFailure::Unsaved(e.kind())),
+                failure: Some(CrashRecoveryFailure::Unsaved(e.kind())),
             };
         }
         let failure = match std::fs::remove_file(&self.path) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-                Some(RecoveryFailure::Kept(e.kind()))
+                Some(CrashRecoveryFailure::Kept(e.kind()))
             }
             _ => None,
         };
@@ -175,13 +175,13 @@ pub struct Recovered {
     /// canonical path.
     pub files: Vec<PathBuf>,
     /// Why the recovery did not finish, if it did not.
-    pub failure: Option<RecoveryFailure>,
+    pub failure: Option<CrashRecoveryFailure>,
 }
 
 /// Why a crash recovery did not finish.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
-pub enum RecoveryFailure {
+pub enum CrashRecoveryFailure {
     /// The sentinel exists and could not be read, so the crash it records is
     /// unknown. It is left in place.
     #[error("the crash sentinel could not be read: {0}")]
@@ -272,7 +272,7 @@ mod tests {
         assert_eq!(crashed.files.len(), 1);
         assert_eq!(
             crashed.failure,
-            Some(RecoveryFailure::Unsaved(std::io::ErrorKind::Other))
+            Some(CrashRecoveryFailure::Unsaved(std::io::ErrorKind::Other))
         );
         assert!(db.is_blacklisted(Path::new("/plugins/crashy.vst3")));
         assert!(pedal.path.exists());
@@ -393,7 +393,7 @@ mod tests {
         assert!(recovered.files.is_empty());
         assert!(matches!(
             recovered.failure,
-            Some(RecoveryFailure::Unreadable(_))
+            Some(CrashRecoveryFailure::Unreadable(_))
         ));
         assert!(unreadable.path.exists(), "an unreadable pedal is kept");
     }

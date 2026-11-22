@@ -7,9 +7,5 @@
 # list only shrinks. A spec's own name is a row of umbrella-collisions-allow.txt instead.
 
 crates  Bank  tutti_sf2,tutti_ump
-crates  BlockCounts  tutti_engine,tutti_plugin_types
 crates  Error  tutti_measure,tutti_sampler,tutti_session,tutti_sf2
-crates  ParamRange  tutti_graph,tutti_plugin_types
-crates  Preset  tutti_plugin_types,tutti_sf2
-crates  RecoveryFailure  tutti_plugin_db,tutti_session
 crates  System  tutti_dsp,tutti_ump

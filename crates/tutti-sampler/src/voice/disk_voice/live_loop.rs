@@ -33,7 +33,7 @@ use tutti_graph::{Node, Offset, Prepare, TransportChanges};
 use tutti_units::{Beat, Bpm, PlaybackRate, SamplePosition, SampleRate, Samples};
 
 use super::DiskVoice;
-use crate::testing::{MockTransport, block};
+use crate::testing::{MockTransport, block, block_in};
 use crate::{DiskStreamer, DiskStreamerConfig, Loop, Manual, MemorySource, StreamHandle};
 
 const SR: f64 = 48_000.0;
@@ -718,13 +718,12 @@ fn a_fork_after_a_loop_edit_renders_the_edited_loop() {
 
     let clock = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let mut fork = live.voice.fork_copy();
-    fork.prepare(
-        &Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples::new(BLOCK)))
-            .with_render_mode(tutti_graph::RenderMode::Offline),
-    );
+    let offline = Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples::new(BLOCK)))
+        .with_render_mode(tutti_graph::RenderMode::Offline);
+    fork.prepare(&offline);
     let mut forked = Vec::new();
     for _ in 0..81 + 150 {
-        forked.extend(block(&mut fork, &clock, SampleRate::of(SR), BLOCK).swap_remove(0));
+        forked.extend(block_in(&mut fork, &offline, &clock, BLOCK).swap_remove(0));
         clock.advance(BLOCK as i64, SampleRate::of(SR));
     }
     let want = Memory::new(ramp_wave(SR as u32, LEN), b, 1.0, 0.0).render(81 + 150);

@@ -23,6 +23,7 @@ mod no_denormals;
 mod parallel;
 mod parked_poll;
 mod pool_spawn_refusal;
+mod render_mode_scope;
 mod root_fade;
 mod rt_log;
 mod rt_no_alloc;

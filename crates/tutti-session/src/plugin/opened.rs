@@ -18,7 +18,9 @@ use tutti_plugin::catalog::ResolvedHosting;
 use tutti_plugin_db::Loadable;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_ipc::AudioConfig;
-use tutti_plugin_types::{Features, IpcError, MainWorkHandle, PluginFailure, Preset, PresetError};
+use tutti_plugin_types::{
+    Features, IpcError, MainWorkHandle, PluginFailure, PluginPreset, PresetError,
+};
 use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRef};
 use tutti_rt::LockExt;
 use tutti_units::SampleRate;
@@ -209,7 +211,7 @@ impl Shared {
         open: Open,
         loadable: Loadable,
         config: AudioConfig,
-        read: impl FnOnce(&HostPlugin) -> Result<Vec<Preset>, PresetError>,
+        read: impl FnOnce(&HostPlugin) -> Result<Vec<PluginPreset>, PresetError>,
     ) -> Result<(Self, Install), LoadError> {
         let Open {
             plugin,

@@ -15,11 +15,11 @@ use tutti_plugin_types::{
     Health, PluginError, PluginFailure, RenderMode, StateError, TerminationReason, UnknownParam,
     WindowHandle,
 };
-use tutti_plugin_types::{BlockCounts, BypassWrite};
+use tutti_plugin_types::{BypassWrite, PipelineCounts};
 use tutti_plugin_types::{ContentScale, KeyEvent, KeyUse};
 use tutti_plugin_types::{Delivered, EditorOpened, TrackInfo};
 use tutti_plugin_types::{
-    LayoutSupport, LoadedPlugin, PluginBus, PluginDescriptor, Preset, PresetError, PresetId,
+    LayoutSupport, LoadedPlugin, PluginBus, PluginDescriptor, PluginPreset, PresetError, PresetId,
     PresetSupport,
 };
 use tutti_plugin_types::{MainThreadMarker, StateUse};
@@ -570,7 +570,7 @@ impl PluginHandle {
     /// Blocks the audio path abandoned and replies it took. See
     /// [`Health::block_counts`]. Atomic reads.
     #[must_use]
-    pub fn block_counts(&self) -> BlockCounts {
+    pub fn block_counts(&self) -> PipelineCounts {
         self.health.block_counts()
     }
 
@@ -643,7 +643,7 @@ impl PluginHandle {
     ///
     /// [`PresetError::Unsupported`] when this handle carries no route to
     /// presets; [`PresetError::Lost`] when the plugin is gone.
-    pub fn presets(&self, main: MainThreadMarker) -> Result<Vec<Preset>, PresetError> {
+    pub fn presets(&self, main: MainThreadMarker) -> Result<Vec<PluginPreset>, PresetError> {
         let control = self.control.as_deref().ok_or(PresetError::Unsupported)?;
         lent(control, |c| c.presets(main)).ok_or(PresetError::Lost)
     }
@@ -973,7 +973,7 @@ impl PluginHandle {
 mod tests {
     use super::*;
     use tutti_plugin_types::{
-        EditorWindow, ParameterInfo, PluginClass, Preset, PresetId, RenderMode,
+        EditorWindow, ParameterInfo, PluginClass, PluginPreset, PresetId, RenderMode,
     };
     use tutti_units::Normalized;
     use tutti_units::ParamId;
@@ -983,7 +983,7 @@ mod tests {
     /// is `Clone` is lent as it is.
     #[derive(Clone)]
     struct FakePresets {
-        listed: Vec<Preset>,
+        listed: Vec<PluginPreset>,
         accepts: bool,
         /// What `set_track_info` answers.
         track: Delivered,
@@ -1095,7 +1095,7 @@ mod tests {
         ) -> tutti_plugin_types::PluginResult<()> {
             Ok(())
         }
-        fn presets(&mut self, _main: MainThreadMarker) -> Vec<Preset> {
+        fn presets(&mut self, _main: MainThreadMarker) -> Vec<PluginPreset> {
             self.listed.clone()
         }
         fn load_preset(&mut self, _main: MainThreadMarker, _id: &PresetId) -> bool {
@@ -1194,8 +1194,8 @@ mod tests {
             fn rate_refusal(&self) -> Option<tutti_plugin_types::RateRefusal> {
                 None
             }
-            fn block_counts(&self) -> BlockCounts {
-                BlockCounts::default()
+            fn block_counts(&self) -> PipelineCounts {
+                PipelineCounts::default()
             }
             fn terminate(&self, _reason: TerminationReason) {}
         }
@@ -1319,8 +1319,8 @@ mod tests {
     #[test]
     fn the_plugins_own_list_reaches_the_caller_verbatim() {
         let listed = vec![
-            Preset::new(PresetId::Number(9000), "Sparse"),
-            Preset::new(PresetId::Number(0), "First"),
+            PluginPreset::new(PresetId::Number(9000), "Sparse"),
+            PluginPreset::new(PresetId::Number(0), "First"),
         ];
         let handle = handle_with(Some(FakePresets {
             listed: listed.clone(),

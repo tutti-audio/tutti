@@ -31,6 +31,9 @@ thread_local! {
 /// Cheap enough to set every block: entering is a `const`-initialised
 /// thread-local counter, so it neither allocates nor registers a destructor.
 ///
+/// A render prepared for realtime runs inside the scope; one prepared offline
+/// does not, because an offline render may block and allocate.
+///
 /// # Examples
 ///
 /// ```

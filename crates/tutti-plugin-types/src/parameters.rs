@@ -7,7 +7,7 @@
 //! The formats disagree about parameters more than about anything else, so the
 //! shape here keeps the disagreement *representable* rather than averaged away:
 //!
-//! - [`ParamRange`] is a sum type because there is no safe number to substitute
+//! - [`PluginParamRange`] is a sum type because there is no safe number to substitute
 //!   when a format declares no range. Every pair a host could invent is a claim
 //!   the ABI never made — so the `Normalized` arm has no bounds to read.
 //! - [`ParamSteps`] separates "continuous" from "nobody said", which a bare
@@ -43,7 +43,7 @@ use serde::{Deserialize, Serialize};
 /// check a sibling field. Here the `Normalized` arm has no bounds *to read*.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum ParamRange {
+pub enum PluginParamRange {
     /// The ABI speaks normalized `0..=1` and the plugin declared no plain range.
     ///
     /// VST2 that declines `effGetParameterProperties`; VST3 with no edit
@@ -72,13 +72,13 @@ pub enum ParamRange {
     },
 }
 
-impl Default for ParamRange {
+impl Default for PluginParamRange {
     fn default() -> Self {
         Self::Normalized { default: 0.0 }
     }
 }
 
-impl ParamRange {
+impl PluginParamRange {
     /// Returns the plugin's declared bounds, or [`None`] if it declared none.
     pub fn bounds(&self) -> Option<(f64, f64)> {
         match *self {
@@ -232,7 +232,7 @@ pub struct ParameterInfo {
     /// What the plugin declared about the value range, including the case where
     /// it declared nothing. Read through [`bounds`](Self::bounds) and
     /// [`default_value`](Self::default_value) rather than matching.
-    range: ParamRange,
+    range: PluginParamRange,
     /// How many positions the parameter has, distinguishing "continuous" from
     /// "the format never said". Read through [`step_count`](Self::step_count).
     steps: ParamSteps,
@@ -293,7 +293,7 @@ impl ParameterInfo {
             id,
             name: name.into(),
             unit: String::new(),
-            range: ParamRange::default(),
+            range: PluginParamRange::default(),
             steps: ParamSteps::Unknown,
             flags: ParamFlags::empty(),
             known: ParamFlags::empty(),
@@ -405,7 +405,7 @@ impl ParameterInfo {
     /// where it declared nothing. A coverage report matches on it; a consumer
     /// reads [`bounds`](Self::bounds) and [`default_value`](Self::default_value).
     #[must_use]
-    pub const fn range(&self) -> ParamRange {
+    pub const fn range(&self) -> PluginParamRange {
         self.range
     }
 
@@ -447,7 +447,7 @@ impl ParameterInfo {
     /// ```
     #[must_use]
     pub fn typed<U: PlainUnit>(&self, plain: f64) -> Option<U> {
-        if !matches!(self.range, ParamRange::Plain { .. }) || !plain.is_finite() {
+        if !matches!(self.range, PluginParamRange::Plain { .. }) || !plain.is_finite() {
             return None;
         }
         U::from_plain(self.measures?, plain)
@@ -462,7 +462,7 @@ impl ParameterInfo {
 
     /// Sets the range exactly as a format host built it.
     #[must_use]
-    pub fn with_range(mut self, range: ParamRange) -> Self {
+    pub fn with_range(mut self, range: PluginParamRange) -> Self {
         self.range = range;
         self
     }
@@ -470,7 +470,7 @@ impl ParameterInfo {
     /// Sets a declared plain range, in the unit [`unit`](Self::unit) names.
     #[must_use]
     pub fn with_plain_range(mut self, min: f64, max: f64, default: f64) -> Self {
-        self.range = ParamRange::Plain { min, max, default };
+        self.range = PluginParamRange::Plain { min, max, default };
         self
     }
 
@@ -478,7 +478,7 @@ impl ParameterInfo {
     /// that declared no plain range.
     #[must_use]
     pub fn with_normalized_default(mut self, default: f64) -> Self {
-        self.range = ParamRange::Normalized { default };
+        self.range = PluginParamRange::Normalized { default };
         self
     }
 
@@ -798,8 +798,8 @@ mod tests {
     #[test]
     fn the_range_survives_the_postcard_round_trip() {
         for want in [
-            ParamRange::Normalized { default: 0.25 },
-            ParamRange::Plain {
+            PluginParamRange::Normalized { default: 0.25 },
+            PluginParamRange::Plain {
                 min: -96.0,
                 max: 6.0,
                 default: 0.0,
@@ -838,7 +838,7 @@ mod tests {
         assert_eq!(back.qualified_name(), "Ring Modulation / Mix");
     }
 
-    /// A consumer asks `ParameterInfo` and never destructures `ParamRange`.
+    /// A consumer asks `ParameterInfo` and never destructures `PluginParamRange`.
     /// Which format declined to declare a range is the host's problem, not the
     /// caller's — the whole point of normalizing here.
     #[test]

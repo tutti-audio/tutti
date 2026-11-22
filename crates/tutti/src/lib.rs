@@ -741,9 +741,10 @@ pub mod soundfont {
 #[cfg(feature = "plugin")]
 pub mod plugin {
     pub use tutti_plugin_db::{
-        BeforeEpoch, BlacklistedFile, FileFacts, FileFailure, FileFailureCause, FileRow, FileState,
-        FilesError, Mtime, PedalError, PluginEntry, ProbeFailure, Recovered, RecoveryFailure,
-        RowChange, ScanBusy, ScanOutcome, ScanProgress, ScannedFile, UnmeasuredPlugin,
+        BeforeEpoch, BlacklistedFile, CrashRecoveryFailure, FileFacts, FileFailure,
+        FileFailureCause, FileRow, FileState, FilesError, Mtime, PedalError, PluginEntry,
+        ProbeFailure, Recovered, RowChange, ScanBusy, ScanOutcome, ScanProgress, ScannedFile,
+        UnmeasuredPlugin,
     };
     pub use tutti_plugin_db::{BindError, BlacklistView, Loadable, PersistError, Resolved};
     pub use tutti_plugin_host::{BlockLosses, RebindError};
@@ -753,16 +754,16 @@ pub mod plugin {
     pub use tutti_plugin_types::bundle::ModuleKind;
     pub use tutti_plugin_types::features::{FeatureReport, Features};
     pub use tutti_plugin_types::{
-        AuComponentType, AutomationModeError, Axis, BlockCounts, ClapFeature, ContentScale,
-        ControlRole, EditorPresence, EmptyVersionText, Helper, InvalidContentScale, IpcError,
-        IpcResult, KeyEvent, KeyUse, LatencyVerdict, LinearRange, Locator, Measured, NotChecked,
-        ParamFlags, ParamRange, ParamSteps, ParamUnit, ParameterInfo, PlainMap, PlainUnit,
-        PluginClass, PluginError, PluginFormat, PluginTooWide, PluginVersion, ProbeConfig,
+        AuComponentType, AutomationModeError, Axis, ClapFeature, ContentScale, ControlRole,
+        EditorPresence, EmptyVersionText, Helper, InvalidContentScale, IpcError, IpcResult,
+        KeyEvent, KeyUse, LatencyVerdict, LinearRange, Locator, Measured, NotChecked, ParamFlags,
+        ParamSteps, ParamUnit, ParameterInfo, PipelineCounts, PlainMap, PlainUnit, PluginClass,
+        PluginError, PluginFormat, PluginParamRange, PluginTooWide, PluginVersion, ProbeConfig,
         StateError, StateHash, TailVerdict, UnknownExtension, Verdict, VersionText, Vst2Category,
         Vst3PlugType, Vst3SubCategories,
     };
     pub use tutti_plugin_types::{
-        AutomationMode, MainThreadMarker, MainWork, MainWorkHandle, Preset,
+        AutomationMode, MainThreadMarker, MainWork, MainWorkHandle, PluginPreset,
     };
     pub use tutti_plugin_types::{
         EditorError, EditorMirrorError, EditorOpened, LoadStage, NoEditorHost, RateRefusal,

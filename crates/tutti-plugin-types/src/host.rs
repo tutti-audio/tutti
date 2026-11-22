@@ -31,7 +31,7 @@ use tutti_buffers::{Float, InputOutput};
 use crate::{
     AutomationMode, BypassWrite, ChannelTable, ContentScale, EditorCapabilities, EditorOpened,
     EditorWindow, KeyEvent, KeyUse, LoadedPlugin, ParamWriteError, ParameterInfo, PluginDescriptor,
-    PluginError, PluginResult, PluginTail, Preset, PresetId, ProcessContext, ProcessOutput,
+    PluginError, PluginPreset, PluginResult, PluginTail, PresetId, ProcessContext, ProcessOutput,
     ProcessWake, SampleRate, Samples, WindowHandle,
 };
 use crate::{Delivered, ParamEdit, ParameterChanges, bypass_parameter, bypass_value, is_bypassed};
@@ -242,7 +242,7 @@ pub trait Control: EditorWindow {
     ) -> PluginResult<()>;
 
     /// The plugin's factory presets. Empty when the format has none.
-    fn presets(&mut self, main: MainThreadMarker) -> Vec<Preset> {
+    fn presets(&mut self, main: MainThreadMarker) -> Vec<PluginPreset> {
         let _ = main;
         Vec::new()
     }
@@ -837,7 +837,7 @@ impl<W: Wraps> Control for W {
         result
     }
 
-    fn presets(&mut self, main: MainThreadMarker) -> Vec<Preset> {
+    fn presets(&mut self, main: MainThreadMarker) -> Vec<PluginPreset> {
         self.plugin_mut().presets(main)
     }
 

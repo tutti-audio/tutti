@@ -52,11 +52,9 @@ fn process_steady_state_does_not_allocate() {
     }
 
     // Steady state: no allocation per block.
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..256 {
-            unit.block();
-        }
-    });
+    for _ in 0..256 {
+        unit.block();
+    }
 
     // Keep the handle alive past the assertion — dropping it would
     // free the Arc and could allocate as part of teardown. (Outside
@@ -89,11 +87,9 @@ fn process_with_a_meter_does_not_allocate() {
     for _ in 0..32 {
         unit.block();
     }
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..256 {
-            unit.block();
-        }
-    });
+    for _ in 0..256 {
+        unit.block();
+    }
     drop(handle);
 }
 
@@ -128,23 +124,21 @@ fn process_with_midi_does_not_allocate() {
     unit.block();
 
     // Steady state with periodic MIDI on the event input: no allocation.
-    assert_no_alloc::assert_no_alloc(|| {
-        for i in 0..128 {
-            if i % 16 == 0 {
-                let ev = midi::note_on(
-                    MidiChannel::of(1),
-                    60 + (i as u8 % 12),
-                    NoteVelocity::from(U7::of(100)).get(),
-                );
-                unit.events(0, &[at_start(ev)]);
-            }
-            if i % 16 == 8 {
-                let ev = midi::note_off(MidiChannel::of(1), 60 + (i as u8 % 12), 0);
-                unit.events(0, &[at_start(ev)]);
-            }
-            unit.block();
+    for i in 0..128 {
+        if i % 16 == 0 {
+            let ev = midi::note_on(
+                MidiChannel::of(1),
+                60 + (i as u8 % 12),
+                NoteVelocity::from(U7::of(100)).get(),
+            );
+            unit.events(0, &[at_start(ev)]);
         }
-    });
+        if i % 16 == 8 {
+            let ev = midi::note_off(MidiChannel::of(1), 60 + (i as u8 % 12), 0);
+            unit.events(0, &[at_start(ev)]);
+        }
+        unit.block();
+    }
 
     drop(handle);
 }
@@ -196,11 +190,9 @@ fn two_hundred_moving_parameters_do_not_allocate() {
     for b in 0..8 {
         block(&mut unit, b);
     }
-    assert_no_alloc::assert_no_alloc(|| {
-        for b in 8..72 {
-            block(&mut unit, b);
-        }
-    });
+    for b in 8..72 {
+        block(&mut unit, b);
+    }
 
     for id in 0..PARAMS {
         assert_eq!(
