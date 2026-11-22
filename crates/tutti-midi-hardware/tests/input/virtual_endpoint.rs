@@ -90,7 +90,11 @@ fn read(peer: &Client, count: usize) -> Vec<Ump> {
         match peer.read_event().expect("a read") {
             Read::Event(Event::Ump { ump, .. }) => got.push(ump),
             Read::Event(_) => {}
-            Read::Empty => std::thread::sleep(Duration::from_millis(1)),
+            // Empty: wait for the sequencer to deliver more, until the hang guard.
+            Read::Empty => {
+                let left = deadline.saturating_duration_since(Instant::now());
+                peer.wait_input(left).expect("a wait");
+            }
         }
     }
     got
