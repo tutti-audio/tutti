@@ -1223,7 +1223,7 @@ fn a_bus_edge_reads_the_band_it_names() {
     rig.add(1, source(4, bands));
     rig.feed_main_inputs(1, 4);
     rig.add(2, sink(2, stereo));
-    let band_1 = BusOutputPort::Node(NodeBus::band(key(1), 0, 1));
+    let band_1 = BusOutputPort::Node(NodeBus::new(key(1), 0).with_band(1));
     assert!(rig.spec.connect_bus(band_1, bus_ref(2, 0)));
     rig.output_all(2, 2);
     let lowering = rig.lowering().unwrap();
@@ -1233,7 +1233,7 @@ fn a_bus_edge_reads_the_band_it_names() {
     );
 
     let (mut ed, _exec) = editor(&[(1, source(4, bands)), (2, sink(2, stereo))], 4);
-    let past = NodeBus::band(key(1), 0, 2);
+    let past = NodeBus::new(key(1), 0).with_band(2);
     assert_eq!(
         ed.connect_bus(BusOutputPort::Node(past), bus_ref(2, 0)),
         Err(BusError::NoSuchBus {

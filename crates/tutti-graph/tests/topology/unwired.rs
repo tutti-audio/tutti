@@ -428,8 +428,8 @@ fn a_lost_banded_output_bus_drops_its_feeds_by_band_and_to_the_main_output() {
     ed.insert(t, "bused", Unforkable(stereo_bus_node(banded)));
     ed.spec_mut().main_output = Some(stereo());
     let main_to_main_output = BusOutputPort::Node(NodeBus::new(y, 0));
-    let band0 = BusOutputPort::Node(NodeBus::band(y, 1, 0));
-    let band1 = BusOutputPort::Node(NodeBus::band(y, 1, 1));
+    let band0 = BusOutputPort::Node(NodeBus::new(y, 1).with_band(0));
+    let band1 = BusOutputPort::Node(NodeBus::new(y, 1).with_band(1));
     ed.connect_bus_to_main_output(main_to_main_output)
         .expect("declared");
     ed.connect_bus_to_main_output(band1)

@@ -2892,9 +2892,9 @@ impl<F: Float> Graph<F> {
     pub fn bus_sources(&self, to: impl Inlet<BusWire>) -> Result<Vec<BusOutputPort>, ConnectError> {
         let to = to.sink();
         if let BusEnd::Node(bus) = to.0
-            && !self.contains(bus.node)
+            && !self.contains(bus.node())
         {
-            return Err(ConnectError::NoSuchNode(bus.node));
+            return Err(ConnectError::NoSuchNode(bus.node()));
         }
         let spec = self.editor.spec();
         let feeds = match to.0 {
@@ -2917,14 +2917,14 @@ impl<F: Float> Graph<F> {
         to: BusInputPort,
     ) -> Result<(), ConnectError> {
         if let BusOutputPort::Node(bus) = from
-            && !self.contains(bus.node)
+            && !self.contains(bus.node())
         {
-            return Err(ConnectError::NoSuchNode(bus.node));
+            return Err(ConnectError::NoSuchNode(bus.node()));
         }
         if let BusEnd::Node(bus) = to.0
-            && !self.contains(bus.node)
+            && !self.contains(bus.node())
         {
-            return Err(ConnectError::NoSuchNode(bus.node));
+            return Err(ConnectError::NoSuchNode(bus.node()));
         }
         Ok(())
     }
