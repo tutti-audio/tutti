@@ -50,7 +50,8 @@
 //!   itself) through a [`KeyFilter`] if built with one; the lookahead limiter ([`LimiterBank`],
 //!   its threshold and ceiling [`LimiterSignals`], its lookahead its latency); the brickwall
 //!   clipper ([`BrickwallBank`], its ceiling a per-frame control signal); the transient shaper
-//!   ([`TransientBank`]: one gain from a fast and a slow one-pole envelope); the loudness
+//!   ([`TransientBank`]: one gain from a fast and a slow one-pole envelope; [`TransientDetector`]:
+//!   the sample positions of attacks from the same two envelopes); the loudness
 //!   leveller ([`LevellerBank`]: one gain moving the BS.1770 short-term loudness, over the
 //!   [`ChannelWeight`] of each channel, to a target); the dynamic EQ
 //!   band ([`DynamicEqBank`]: an SVF bell whose gain follows the level of a band-passed key
@@ -147,10 +148,11 @@
 //! - **Bit crusher and DC blocker** (`bit_crush.rs`, `dc_block.rs`): [`BitCrusher`], a
 //!   sample-and-hold every [`hold_frames`] frames, then [`quantize`] to a bit depth;
 //!   [`DcBlocker`], a first-order high-pass with its pole `exp(-2 pi fc / fs)`.
-//! - **Spectral features and onset novelty** (`spectral.rs`, `novelty.rs`): the shape of one
-//!   magnitude spectrum ([`spectral_centroid`], [`spectral_flatness`], [`spectral_rolloff`]) and
+//! - **Spectral features, onset novelty and transients** (`spectral.rs`, `novelty.rs`): the shape of one
+//!   magnitude spectrum ([`spectral_centroid`], [`spectral_bandwidth`], [`spectral_flatness`], [`spectral_crest`],
+//!   [`spectral_slope`], [`spectral_rolloff`]) and
 //!   how much a frame differs from the one before ([`spectral_flux`],
-//!   [`high_frequency_content`], [`complex_domain_deviation`], [`spectral_energy`]), and
+//!   [`high_frequency_content`], [`spectral_distance`], [`spectral_energy`]), and
 //!   [`bin_magnitude`], the modulus they take of a bin.
 //! - **Mel bank, DCT-II and MFCC** (`mel.rs`, `dct.rs`, `mfcc.rs`): [`MelFilterbank`]
 //!   (from a [`MelConfig`], in a [`MelScale`] and [`MelNorm`]), the orthonormal [`Dct2`], and
@@ -294,7 +296,7 @@ pub use dynamics::{
     LevellerBank, LevellerControls, LimiterBank, LimiterControls, LimiterCurve, LimiterSignals,
     Lookahead, LookaheadError, MultibandBands, MultibandBandsError, MultibandBank,
     MultibandSettings, MultibandSignals, PeakDetection, TransientBank, TransientControls,
-    amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
+    TransientDetector, amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
 };
 pub use early_reflections::{EarlyReflections, EarlyReflectionsError, MAX_TAP_DELAY};
 pub use envelope::{
@@ -347,7 +349,7 @@ pub use modulation::phaser::{
 pub use modulation::sweep::{Stagger, StaggerError, Sweep, SweepBuilder, SweepError};
 pub use noise::{Noise, NoiseColour};
 pub use novelty::{
-    bin_magnitude, complex_domain_deviation, high_frequency_content, spectral_energy, spectral_flux,
+    bin_magnitude, high_frequency_content, spectral_distance, spectral_energy, spectral_flux,
 };
 pub use oscillator::{Oscillator, OscillatorStep, OscillatorWave};
 pub use oversample::{
@@ -394,7 +396,10 @@ pub use spatial::{
     HrtfBinauralError, MAX_PREPARED_RATE, MAX_SPHERE_RATE, MIN_SPHERE_RATE, Rotation,
     SpeakerGeometryError, SpeakerLayout, VbapGains, VbapKernel,
 };
-pub use spectral::{spectral_centroid, spectral_flatness, spectral_rolloff};
+pub use spectral::{
+    spectral_bandwidth, spectral_centroid, spectral_crest, spectral_flatness, spectral_rolloff,
+    spectral_slope,
+};
 pub use stereo::{MidSide, WidthBank, WidthControls};
 pub use stft::error::StftError;
 pub use stft::geometry::{

@@ -665,7 +665,9 @@ pub mod measure {
     pub use tutti_measure::{
         DetectionFunction, FiniteLevel, FiniteLevelError, Framing, Novelty, Onset, OnsetConfig,
         OnsetGap, OnsetGapError, OnsetMeter, OnsetSensitivity, OnsetSensitivityError,
-        OnsetThreshold, OnsetThresholdError, Region, SilenceConfig, SilenceMeter,
+        OnsetThreshold, OnsetThresholdError, Region, SilenceConfig, SilenceMeter, TransientConfig,
+        TransientMeter, TransientThreshold, TransientThresholdError, TransientTime,
+        TransientTimeError, detect_transients,
     };
     // Spectrum and chroma.
     pub use tutti_measure::{

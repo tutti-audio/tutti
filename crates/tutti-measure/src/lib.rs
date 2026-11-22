@@ -24,7 +24,9 @@
 //! - `SpectrumConfig` — a streaming spectrum: power in dB per bin, or per
 //!   third-octave or log band, with smoothing, peak hold and a rolling
 //!   spectrogram.
-//! - `spectral_features` — centroid, flatness and rolloff of every STFT frame.
+//! - `spectral_features` — centroid, bandwidth, flatness, crest, slope and rolloff of every
+//!   STFT frame.
+//! - `detect_transients` — attack positions to the sample, from a fast and a slow envelope.
 //! - `mfcc` — mel-frequency cepstral coefficients of every STFT frame.
 //! - `strip_silence` — the sample ranges that hold signal, with a minimum silence
 //!   length and padding.
@@ -96,6 +98,7 @@
 //! |---|---|---|---|---|---|---|---|---|
 //! | silence | [`SilenceConfig`] | [`strip_silence`] | [`SilenceMeter`] | `SampleRate` | `Mono` | `()` | `Vec<Region>` | no: grows per region |
 //! | onsets | [`OnsetConfig`] | [`detect_onsets`] | [`OnsetMeter`] | `SampleRate` | `Mono` | [`Novelty`], a frame's novelty | `Vec<Onset>` | no: grows per frame |
+//! | transients | [`TransientConfig`] | [`detect_transients`] | [`TransientMeter`] | `SampleRate` | `Mono` | [`Samples`](tutti_units::Samples), an attack's position | `Vec<Samples>` | no: grows per attack |
 //! | spectrum | [`SpectrumConfig`] | none | [`SpectrumMeter`] | `SampleRate` | `Mono` | `()` per analysed frame | `Vec<Db>`, the levels | no: a transform per frame, but no allocation |
 //! | chroma | [`ChromaConfig`] | [`chroma()`] | [`ChromaMeter`] | `SampleRate` | `Mono` | [`ChromaFrame`], a frame's chroma | [`ChromaSummary`] | no: a transform per frame, no allocation |
 //! | loudness | [`LoudnessConfig`] | [`measure_loudness`] | [`LoudnessMeter`] | `SampleRate` | `Interleaved` | `()` | [`Loudness`] | no: grows with the run |
@@ -287,8 +290,10 @@
 //!   [`StereoSmoother`].
 //! - Spectral shape: [`spectral_features`] over every frame of a
 //!   [`StftMagnitude`], into [`SpectralFeatures`]; the per-spectrum kernels
-//!   are [`tutti_dsp`]'s (`spectral_centroid`, `spectral_flatness`,
-//!   `spectral_rolloff`).
+//!   are [`tutti_dsp`]'s (`spectral_centroid`, `spectral_bandwidth`, `spectral_flatness`,
+//!   `spectral_crest`, `spectral_slope`, `spectral_rolloff`).
+//! - Transients: [`detect_transients`] with a [`TransientConfig`], or incrementally with a
+//!   [`TransientMeter`]; positions are to the sample, where onsets are to the frame hop.
 //! - Cepstrum: [`mfcc`] from an [`MfccConfig`] over every frame of a
 //!   [`StftMagnitude`], into a `frames x coefficients` `Grid`; the per-spectrum
 //!   kernel is [`tutti_dsp`]'s `Mfcc`.
@@ -387,6 +392,10 @@ pub use meters::spectrum::{
     SpectrumTime, SpectrumTimeError,
 };
 pub use meters::stereo::{StereoLevels, StereoReading, StereoSmoother, correlate};
+pub use meters::transient::{
+    TransientConfig, TransientMeter, TransientThreshold, TransientThresholdError, TransientTime,
+    TransientTimeError, detect_transients,
+};
 pub use meters::vectorscope::{
     ScopePoint, VectorscopeConfig, VectorscopeMeter, vectorscope_points,
 };

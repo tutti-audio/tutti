@@ -177,7 +177,7 @@ fn onsets_land_near_the_known_spikes() {
     for function in [
         DetectionFunction::SpectralFlux,
         DetectionFunction::HighFrequencyContent,
-        DetectionFunction::ComplexDomain,
+        DetectionFunction::SpectralDistance,
     ] {
         let cfg = OnsetConfig::new(function)
             .threshold(amplitude(0.2))

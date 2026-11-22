@@ -64,13 +64,14 @@ pub fn spectral_energy<S: Sample>(frame: Mono<'_, S>) -> f64 {
         .sqrt()
 }
 
-/// Euclidean distance between successive magnitude spectra.
+/// Euclidean distance between successive magnitude spectra:
+/// `sqrt(sum((|X_k| - previous_k)^2))`.
 ///
 /// Unlike [`spectral_flux`] this counts decreases too, which is what makes it
 /// sensitive to tonal onsets where energy moves between bins rather than
 /// simply arriving. It compares magnitudes only (`previous` holds the last
 /// frame's magnitudes); no phase enters it.
-pub fn complex_domain_deviation<F: Float>(previous: &[F], current: &[Complex<F>]) -> f64 {
+pub fn spectral_distance<F: Float>(previous: &[F], current: &[Complex<F>]) -> f64 {
     current
         .iter()
         .zip(previous)

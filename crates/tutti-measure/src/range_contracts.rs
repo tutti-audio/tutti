@@ -11,8 +11,8 @@ use tutti_units::{Amplitude, Cents, Confidence, Db, Samples, Seconds};
 use crate::{
     Alternatives, BandCount, BandsPerOctave, FiniteLevel, HarmonicCount, HarmonicDecay, NoteSpan,
     OnsetGap, OnsetSensitivity, OnsetThreshold, PeakDecay, PeakFloor, PitchHop, PitchSplit,
-    PriorSpread, SelfTransition, Sharpness, SpectrumFloor, SpectrumTime, Tightness, TuningOffset,
-    YinThreshold,
+    PriorSpread, SelfTransition, Sharpness, SpectrumFloor, SpectrumTime, Tightness,
+    TransientThreshold, TransientTime, TuningOffset, YinThreshold,
 };
 
 macro_rules! serde_through_try_from {
@@ -54,6 +54,8 @@ serde_through_try_from! {
     PitchHop: Samples,
     Alternatives: usize,
     YinThreshold: Confidence,
+    TransientThreshold: Amplitude,
+    TransientTime: Seconds,
 }
 
 const NAN: f64 = f64::NAN;
@@ -296,6 +298,30 @@ fn onset_gap_keeps_the_range_checked_shape() {
         of: Some(OnsetGap::of),
         valid: &seconds(&[0.0, 0.05, 60.0]),
         invalid: &seconds(&[-0.001, 60.001, f64::NAN, f64::INFINITY]),
+    });
+}
+
+/// Above zero, finite.
+#[test]
+fn transient_threshold_keeps_the_range_checked_shape() {
+    check_range_contract(&RangeContract {
+        new: TransientThreshold::new,
+        get: TransientThreshold::get,
+        of: Some(TransientThreshold::of),
+        valid: &amplitudes(&[f64::MIN_POSITIVE, 0.05, 1.0, f64::MAX]),
+        invalid: &amplitudes(&[0.0, -1.0, f64::NAN, f64::INFINITY]),
+    });
+}
+
+/// `0.1 ms..=1 s`.
+#[test]
+fn transient_time_keeps_the_range_checked_shape() {
+    check_range_contract(&RangeContract {
+        new: TransientTime::new,
+        get: TransientTime::get,
+        of: Some(TransientTime::of),
+        valid: &seconds(&[1e-4, 0.001, 1.0]),
+        invalid: &seconds(&[0.0, 9.9e-5, 1.001, -0.5, f64::NAN, f64::INFINITY]),
     });
 }
 
