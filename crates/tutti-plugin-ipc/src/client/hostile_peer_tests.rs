@@ -2658,6 +2658,9 @@ fn a_render_mode_is_applied_before_the_next_block() {
         log_blocks(Arc::clone(&log), block_seen),
         control,
     );
+    // No block is abandoned at the live deadline: a block the bridge gave up on
+    // is answered by the bridge itself, before the server has logged it.
+    mock.bridge.audio().set_reply_wait(Some(NOTICE_TIMEOUT));
 
     assert!(
         mock.bridge
@@ -2695,6 +2698,9 @@ fn a_rate_change_is_applied_before_the_next_block() {
         log_blocks(Arc::clone(&log), block_seen),
         control,
     );
+    // No block is abandoned at the live deadline: a block the bridge gave up on
+    // is answered by the bridge itself, before the server has logged it.
+    mock.bridge.audio().set_reply_wait(Some(NOTICE_TIMEOUT));
 
     assert!(mock.bridge.audio().set_sample_rate(SampleRate::SR_96K));
     submit_block(&mock.bridge, 1);
@@ -2746,6 +2752,9 @@ fn a_control_command_pushed_after_a_block_reaches_the_server_after_it() {
         }
     };
     let mut mock = MockServer::start_lanes("control-after-block", audio, control);
+    // No block is abandoned at the live deadline: a block the bridge gave up on
+    // is answered by the bridge itself, before the server has logged it.
+    mock.bridge.audio().set_reply_wait(Some(NOTICE_TIMEOUT));
 
     assert!(
         mock.bridge
