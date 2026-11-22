@@ -3184,21 +3184,21 @@ fn the_bus_generator_reaches_folds_copies_and_mixes() {
 }
 
 // ---------------------------------------------------------------------------
-// Bus edges into the root.
+// Bus edges into the main output.
 // ---------------------------------------------------------------------------
 
-/// `bus_graph(seed)` with a declared root and bus edges into it, drawn from a
+/// `bus_graph(seed)` with a declared main output and bus edges into it, drawn from a
 /// stream of their own (`seed ^ 0x0B05_4007`), after the graph, so neither
-/// `bus_graph`'s draws nor any other generator's move. The root is 1, 2 or 6
+/// `bus_graph`'s draws nor any other generator's move. The main output is 1, 2 or 6
 /// channels, named or unassigned; its ordinary output sources past its width
-/// are dropped, and a root edge is kept when the spec still lowers (an
+/// are dropped, and a main output edge is kept when the spec still lowers (an
 /// unfoldable pair, or a lane on an ordinary output source, is not).
-fn root_bus_graph(seed: u64) -> BusGraph {
+fn main_output_bus_graph(seed: u64) -> BusGraph {
     let mut graph = bus_graph(seed);
     let mut rng = Rng::new(seed ^ 0x0B05_4007);
     let width = rng.pick(&[1usize, 2, 2, 6]).expect("a width");
-    let root = bus_of(width, rng.chance(75)).topology;
-    graph.spec.root = Some(root);
+    let main_output = bus_of(width, rng.chance(75)).topology;
+    graph.spec.main_output = Some(main_output);
     graph.spec.topology.outputs.truncate(width);
     let nodes: Vec<NodeKey> = graph.kinds.keys().copied().collect();
     for _ in 0..1 + rng.below(3) {
@@ -3206,7 +3206,7 @@ fn root_bus_graph(seed: u64) -> BusGraph {
             continue;
         };
         let mut trial = graph.spec.clone();
-        trial.connect_bus_to_root(BusSource::Node(BusRef::new(node, 0)));
+        trial.connect_bus_to_main_output(BusSource::Node(BusRef::new(node, 0)));
         if trial.lowered(&common::shapes_of(&graph.kinds)).is_ok() {
             graph.spec = trial;
         }
@@ -3217,18 +3217,18 @@ fn root_bus_graph(seed: u64) -> BusGraph {
 proptest! {
     #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(256), ..ProptestConfig::default() })]
 
-    /// A bus edge into the root is lanes on the output channels and nothing
+    /// A bus edge into the main output is lanes on the output channels and nothing
     /// the interpreters know: the lowered spec renders the same on the
     /// executor, serial and parallel, as on the reference, bit for bit, with
     /// PDC aligning each lane to the outputs' time.
     #[test]
-    fn root_bus_edges_are_bit_identical_to_the_reference(seed in any::<u64>(), which in 0usize..5) {
+    fn main_output_bus_edges_are_bit_identical_to_the_reference(seed in any::<u64>(), which in 0usize..5) {
         for workers in modes(seed) {
-            let graph = root_bus_graph(seed);
+            let graph = main_output_bus_graph(seed);
             let lowered = graph
                 .spec
                 .lowered(&common::shapes_of(&graph.kinds))
-                .expect("every kept root edge lowers");
+                .expect("every kept main output edge lowers");
             let valid = lowered.spec.validate().expect("generated graphs are valid");
             let mut pair = Pair::with_workers(MAX_BLOCK, workers);
             pair.switch(&valid, &graph.kinds);
@@ -3238,28 +3238,28 @@ proptest! {
     }
 }
 
-/// The root generator is not vacuous: over a fixed range of seeds it makes
-/// root edges, weighted root lanes, unity root lanes, and a root lane beside
+/// The main output generator is not vacuous: over a fixed range of seeds it makes
+/// main output edges, weighted main output lanes, unity main output lanes, and a main output lane beside
 /// an ordinary output source on one channel.
 #[test]
-fn the_root_generator_reaches_folds_copies_and_mixes() {
+fn the_main_output_generator_reaches_folds_copies_and_mixes() {
     let (mut with_edges, mut weighted, mut unity, mut mixed) = (0, 0, 0, 0);
     for seed in 0..400u64 {
-        let graph = root_bus_graph(seed);
+        let graph = main_output_bus_graph(seed);
         let lowering = graph
             .spec
             .lowered(&common::shapes_of(&graph.kinds))
             .expect("lowers");
-        with_edges += usize::from(!graph.spec.root_sources.is_empty());
-        let roots = || {
+        with_edges += usize::from(!graph.spec.main_output_sources.is_empty());
+        let main_outputs = || {
             lowering
                 .lanes
                 .iter()
                 .filter(|(id, _)| matches!(id.sink, PortSink::Output(_)))
         };
-        weighted += usize::from(roots().any(|(_, w)| w.get() != 1.0));
-        unity += usize::from(roots().any(|(_, w)| w.get() == 1.0));
-        mixed += usize::from(roots().any(|(id, _)| {
+        weighted += usize::from(main_outputs().any(|(_, w)| w.get() != 1.0));
+        unity += usize::from(main_outputs().any(|(_, w)| w.get() == 1.0));
+        mixed += usize::from(main_outputs().any(|(id, _)| {
             match id.sink {
                 PortSink::Output(c) => graph
                     .spec
@@ -3271,6 +3271,6 @@ fn the_root_generator_reaches_folds_copies_and_mixes() {
             }
         }));
     }
-    eprintln!("root edges {with_edges}, weighted {weighted}, unity {unity}, mixed {mixed}");
+    eprintln!("main output edges {with_edges}, weighted {weighted}, unity {unity}, mixed {mixed}");
     assert!(with_edges > 200 && weighted > 50 && unity > 50 && mixed > 10);
 }

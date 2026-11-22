@@ -12,7 +12,7 @@ use tutti_buffers::Float;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_engine::HeardTaps;
 use tutti_engine::{BlockCounts, Load};
-use tutti_graph::RootError;
+use tutti_graph::MainOutputError;
 use tutti_rt::{Counter, Gauge};
 
 use crate::graph::Graph;
@@ -28,7 +28,7 @@ pub(crate) struct OutputPart<F: Float> {
     /// applied or not.
     pub(crate) root_request: Option<ChannelTopology>,
     /// Why `root_request` is not in force, if it is not.
-    pub(crate) root_refusal: Option<RootError>,
+    pub(crate) root_refusal: Option<MainOutputError>,
     /// Where the mix lands, as set ([`Session::policy`](crate::Session::policy)).
     pub(crate) policy: Arc<Cell<OutputPolicy>>,
     /// The engine's tap after the fader and the device width it was built
@@ -74,7 +74,7 @@ impl<F: Float> OutputPart<F> {
         &mut self,
         graph: &mut Graph<F>,
         root: Option<ChannelTopology>,
-    ) -> Result<(), RootError> {
+    ) -> Result<(), MainOutputError> {
         self.sync_refusal(graph);
         // The same request again, in force, is nothing to do.
         if root == self.root_request && self.root_refusal.is_none() {

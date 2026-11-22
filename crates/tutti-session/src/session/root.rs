@@ -2,7 +2,7 @@
 //! to be, and the `Session` calls declare it, read it back and place it on the output device.
 
 use tutti_buffers::ChannelTopology;
-use tutti_graph::RootError;
+use tutti_graph::MainOutputError;
 
 use crate::{AppKey, Clock, RootDeclaration, Session};
 
@@ -21,7 +21,7 @@ pub enum RootTopologyStatus {
     /// then.
     Pending,
     /// Not in force, and why. The previous state stands.
-    Refused(RootError),
+    Refused(MainOutputError),
 }
 
 impl<K: AppKey, C: Clock> Session<K, C> {
@@ -37,7 +37,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// The declaration states the root, so it **sets the root's width**: the
     /// graph's outputs become exactly as many as `root` has, widened or
     /// narrowed (channels past it are dropped), with no floor of the device's
-    /// ([`root_width`](crate::root_width)). Afterwards the width and the
+    /// ([`main_output_width`](crate::main_output_width)). Afterwards the width and the
     /// declaration cannot disagree: [`crate::Graph::widen_outputs`] refuses to widen a
     /// declared root. Declare again to change both.
     ///
@@ -54,7 +54,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// the fade has ended applies it, and the root's width and readers
     /// ([`RootReaderReopened`](crate::SessionEvent::RootReaderReopened)) change in
     /// that update with the audio; until then the root in force, its taps and
-    /// [`root_topology`](Self::root_topology) are the running fade's, and
+    /// [`main_output_topology`](Self::main_output_topology) are the running fade's, and
     /// [`requested_root_topology`](Self::requested_root_topology) is the
     /// waiting one ([`Pending`](RootTopologyStatus::Pending)). It is heard up
     /// to one fade length (5 ms) late, and the fade only ends as blocks render:
@@ -99,7 +99,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
 
     /// The topology last asked for with
     /// [`declare_root_topology`](Self::declare_root_topology) (or
-    /// [`SessionBuilder::root_topology`](crate::SessionBuilder::root_topology)),
+    /// [`SessionBuilder::main_output_topology`](crate::SessionBuilder::main_output_topology)),
     /// whether or not it is in force: see
     /// [`root_topology_status`](Self::root_topology_status).
     pub fn requested_root_topology(&self) -> Option<&ChannelTopology> {
@@ -112,7 +112,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// - [`RootTopologyStatus::Refused`] with the declaration's own
     ///   [`FoldError`](tutti_buffers::FoldError) when the last request could not
     ///   be placed on the device. The previous declaration (the one
-    ///   [`root_topology`](Self::root_topology) reads) stays in force, and a
+    ///   [`main_output_topology`](Self::main_output_topology) reads) stays in force, and a
     ///   **device restart re-attempts the request**: it is
     ///   [`Applied`](RootTopologyStatus::Applied) as soon as the new device
     ///   places it.
@@ -121,10 +121,10 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ///   placed once the fade ended; a later widening does not replace it.
     /// - Otherwise `Refused` with [`crate::Graph::widen_outputs`]'s last refusal: a
     ///   widening the declared root could not take
-    ///   ([`RootError::Width`]), or
+    ///   ([`MainOutputError::Width`]), or
     ///   channels past `MAX_CHANNELS`
     ///   ([`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced), as a
-    ///   [`RootError::Fold`]); that
+    ///   [`MainOutputError::Fold`]); that
     ///   is what a host's `MasterSources` longer than the root comes to.
     /// - Otherwise [`Pending`](RootTopologyStatus::Pending) while a declaration
     ///   waits for a root crossfade, and `Applied`.
@@ -146,8 +146,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
 
     /// The topology the root was declared with
     /// ([`declare_root_topology`](Self::declare_root_topology)), if one was.
-    pub fn root_topology(&self) -> Option<&ChannelTopology> {
-        self.graph.root_topology()
+    pub fn main_output_topology(&self) -> Option<&ChannelTopology> {
+        self.graph.main_output_topology()
     }
 
     /// What the output device's channels are as the session folds the root

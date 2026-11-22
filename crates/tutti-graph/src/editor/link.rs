@@ -73,11 +73,11 @@ impl<F: Float> Link<F> {
         Ok(())
     }
 
-    /// The `seq` of the newest commit whose root crossfade the executor has
+    /// The `seq` of the newest commit whose main output crossfade the executor has
     /// rendered through, 0 before any.
-    pub(super) fn root_fade_ended(&self) -> u64 {
+    pub(super) fn main_output_fade_ended(&self) -> u64 {
         self.channels
-            .root_fade_ended
+            .main_output_fade_ended
             .load(std::sync::atomic::Ordering::Acquire)
     }
 

@@ -572,7 +572,7 @@ fn a_source_is_structural_and_a_range_is_a_control() {
 }
 
 /// A fork of the master carries a driven lane and its driver (the lane's
-/// node is a root of the fork), and its first block starts at the driven
+/// node is a main output of the fork), and its first block starts at the driven
 /// value.
 #[test]
 fn a_fork_carries_the_driven_lane() {

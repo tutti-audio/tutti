@@ -443,7 +443,7 @@ impl<F: Float> Graph<F> {
     /// replaced in place; one a host took is held under its id to be claimed.
     pub(super) fn reopen_root_readers(&mut self, resized: bool) {
         let width = self.outputs();
-        let topology = self.root_in_force();
+        let topology = self.main_output_in_force();
         let stale: Vec<(TapId, Samples)> = self
             .output_taps
             .iter()
