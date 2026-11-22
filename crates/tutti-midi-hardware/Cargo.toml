@@ -32,6 +32,8 @@ tracing.workspace = true
 getrandom = { workspace = true }
 # `Stream`: `DeviceEvents` is one.
 futures-core = { workspace = true }
+# `oneshot`: the heartbeat's stop.
+futures-channel = { workspace = true }
 
 tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device" }
 tutti-midi-ci = { version = "0.0.1", path = "../tutti-midi-ci" }

@@ -90,9 +90,9 @@ impl MidiOut for Idle {
 
 impl DeviceOut for Idle {}
 
-/// Dropping a heartbeat cancels its task, which drops the clone of the sink the
-/// task holds: once the executor has run the cancellation, the caller's `Arc` is
-/// the only one. A heartbeat that kept running would still hold the sink.
+/// Dropping a heartbeat stops its task and waits for it, which drops the clone
+/// of the sink the task holds: once the drop returns, the caller's `Arc` is the
+/// only one. A heartbeat that kept running would still hold the sink.
 #[test]
 fn dropping_a_heartbeat_releases_the_sink_its_task_held() {
     let executor = Executor::new();
@@ -101,15 +101,14 @@ fn dropping_a_heartbeat_releases_the_sink_its_task_held() {
         &executor,
         Arc::clone(&sink) as Arc<dyn DeviceOut>,
         Protocol::Midi1,
-    );
-    executor.run_until_stalled();
+    )
+    .unwrap();
     assert_eq!(
         Arc::strong_count(&sink),
         2,
         "the task holds the sink while it runs"
     );
     drop(heartbeat);
-    executor.run_until_stalled();
     assert_eq!(
         Arc::strong_count(&sink),
         1,
@@ -127,7 +126,8 @@ fn a_heartbeat_ends_when_its_executor_has_shut_down() {
     let sink: Arc<dyn DeviceOut> = Arc::new(Idle);
     let (done, finished) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let mut ended = std::pin::pin!(beat(&timer, &sink, &pulse));
+        let (_stop, stopped) = futures_channel::oneshot::channel();
+        let mut ended = std::pin::pin!(beat(&timer, &sink, &pulse, stopped));
         let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
         let _ = done.send(ended.as_mut().poll(&mut cx).is_ready());
     });
@@ -136,4 +136,50 @@ fn a_heartbeat_ends_when_its_executor_has_shut_down() {
         Ok(true),
         "the heartbeat ends with its executor"
     );
+}
+
+/// An output that records what it is sent.
+struct Recording(std::sync::mpsc::Sender<Ump>);
+
+impl MidiOut for Recording {
+    fn queue_timed(&self, events: &[Outgoing]) -> Taken {
+        let mut taken = Taken::NONE;
+        for message in Outgoing::messages(events) {
+            taken = taken.through(message);
+        }
+        for event in events {
+            let _ = self.0.send(event.ump);
+        }
+        taken
+    }
+}
+
+impl DeviceOut for Recording {}
+
+/// **The heartbeat does not depend on the app driving the executor.** The
+/// executor here is never driven (no `run_until_stalled`, no `Threads`), yet
+/// Active Sensing arrives, one message per interval of the schedule: each
+/// message moved the schedule's deadline to an interval past the send, so after
+/// `n` messages the deadline is at least `n` intervals past the start. A
+/// heartbeat that sent without waiting its interval would leave it earlier. Real
+/// time only guards a hang.
+#[test]
+fn the_heartbeat_keeps_sending_while_the_executor_is_never_driven() {
+    const MESSAGES: u32 = 3;
+    let executor = Executor::new();
+    let (sent, received) = std::sync::mpsc::channel();
+    let start = Instant::now();
+    let heartbeat = Heartbeat::start(&executor, Arc::new(Recording(sent)), Protocol::Midi1)
+        .expect("the heartbeat thread starts");
+    for n in 1..=MESSAGES {
+        assert_eq!(
+            received.recv_timeout(Duration::from_secs(30)),
+            Ok(active_sensing()),
+            "message {n}"
+        );
+        assert!(
+            heartbeat.pulse.deadline() >= start + ACTIVE_SENSING_INTERVAL * n,
+            "message {n} was sent before its interval"
+        );
+    }
 }
