@@ -155,7 +155,7 @@
 //! - **Mel bank, DCT-II and MFCC** (`mel.rs`, `dct.rs`, `mfcc.rs`): [`MelFilterbank`]
 //!   (from a [`MelConfig`], in a [`MelScale`] and [`MelNorm`]), the orthonormal [`Dct2`], and
 //!   [`Mfcc`], the cepstral coefficients of one magnitude spectrum.
-//! - **Sequence decoding** (`viterbi.rs`, `beat.rs`, `sequence.rs`): [`sticky_viterbi`], the best
+//! - **Sequence decoding** (`viterbi.rs`, `beat.rs`, `sequence.rs`): [`viterbi`] over a [`Transition`] ([`StickyTransition`], [`BandedTransition`]), and [`sticky_viterbi`], the best
 //!   state path when every switch costs the same; [`track_beat_frames`], beat placement by
 //!   dynamic programming over a novelty curve (Ellis, 2007); the [`median`] of a set and the
 //!   [`local_maxima`] of a curve.
@@ -405,7 +405,7 @@ pub use stft::vocoder::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
 pub use stft::window::{CosineWindow, Window};
 pub use string_tuning::{LowestPitch, LowestPitchError};
 pub use tremolo::{AutoPan, AutoPanControls, Tremolo, TremoloControls};
-pub use viterbi::sticky_viterbi;
+pub use viterbi::{BandedTransition, StickyTransition, Transition, sticky_viterbi, viterbi};
 pub use waveguide::{WaveguideBank, WaveguideControls, WaveguidePositions, WaveguideString};
 pub use waveshape::{
     Antialiasing, AntialiasingError, ShapeKind, WaveshaperBank, WaveshaperControls,

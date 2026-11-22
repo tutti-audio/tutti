@@ -7,6 +7,7 @@ pub(crate) mod features;
 pub(crate) mod key;
 pub(crate) mod mfcc;
 pub(crate) mod notes;
+pub(crate) mod pyin;
 pub(crate) mod tempo;
 pub(crate) mod transform;
 pub(crate) mod xcorr;
