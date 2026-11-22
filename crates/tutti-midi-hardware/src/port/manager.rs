@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
-use tutti_rt::LockExt;
+use tutti_rt::{Bell, LockExt};
 
 use tutti_graph::{EventInletNode, Losses};
 use tutti_midi_runtime::{DeviceWriters, InputId, InputInlets};
@@ -77,6 +77,8 @@ impl PortInfo {
 pub struct HardwareMidiInputs {
     inlets: Arc<InputInlets>,
     ports: Mutex<Ports>,
+    /// Rung by each port's reader after it writes the stream ring.
+    bell: Option<Bell>,
 }
 
 /// The port list, keyed by each port's id (in the order they opened).
@@ -92,7 +94,18 @@ impl HardwareMidiInputs {
         Self {
             inlets,
             ports: Mutex::new(Ports::default()),
+            bell: None,
         }
+    }
+
+    /// This list with every port's reader ringing `bell` after it writes what
+    /// [`MidiSession::poll`](crate::MidiSession::poll) reads (a UMP Stream
+    /// message, or a copy of a SysEx7 packet): the reader may be an OS callback
+    /// thread, and [`Bell::ring`] never allocates, locks or waits.
+    #[must_use]
+    pub fn ringing(mut self, bell: Bell) -> Self {
+        self.bell = Some(bell);
+        self
     }
 
     /// The inlets the ports are made by: the owner of the graph sets their
@@ -100,6 +113,13 @@ impl HardwareMidiInputs {
     #[must_use]
     pub fn inlets(&self) -> &Arc<InputInlets> {
         &self.inlets
+    }
+
+    /// Rings the bell, if the list has one: whoever waits on it polls the session.
+    pub(crate) fn ring(&self) {
+        if let Some(bell) = &self.bell {
+            bell.ring();
+        }
     }
 
     fn ports(&self) -> std::sync::MutexGuard<'_, Ports> {
@@ -138,7 +158,7 @@ impl HardwareMidiInputs {
         let mut ports = self.ports();
         let (input, node) = self.inlets.open_with(writers);
         let id = input.id();
-        let (port, handle) = HardwareMidiInput::new(name, input);
+        let (port, handle) = HardwareMidiInput::new(name, input, self.bell.clone());
         ports.live.insert(id, Arc::new(port));
         (handle, node)
     }

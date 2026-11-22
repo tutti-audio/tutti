@@ -1256,7 +1256,7 @@ fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
         tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), Duration::ZERO);
     let mut session = crate::MidiSession::open(
         &tutti_platform::Executor::new(),
-        inlets,
+        crate::HardwareMidiInputs::new(inlets),
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();
