@@ -68,7 +68,7 @@ impl Sine {
 
 impl Node for Sine {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_tail(Tail::Unbounded)
+        Shape::source_unassigned(ChannelLayout::MONO).tail(Tail::Unbounded)
     }
     fn prepare(&mut self, p: &Prepare) {
         self.dt = (1.0 / p.sample_rate().get()) as f32;
@@ -94,7 +94,7 @@ struct Shared {
 
 impl Node for Shared {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_tail(Tail::Unbounded)
+        Shape::source_unassigned(ChannelLayout::MONO).tail(Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -468,7 +468,7 @@ impl ForkSource for WatchedFork {
             value: 1.0,
             width: 1,
         }));
-        Ok(Forked::new(node).with_health(Arc::clone(&self.0) as Arc<dyn ForkHealth>))
+        Ok(Forked::new(node).health(Arc::clone(&self.0) as Arc<dyn ForkHealth>))
     }
 }
 
@@ -927,7 +927,7 @@ struct Ramp {
 impl Node for Ramp {
     fn shape(&self) -> tutti_graph::Shape {
         tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
-            .with_tail(tutti_units::Tail::Unbounded)
+            .tail(tutti_units::Tail::Unbounded)
     }
     fn prepare(&mut self, _p: &tutti_graph::Prepare) {}
     fn process(

@@ -50,9 +50,9 @@ struct Burst {
 
 impl Node for Burst {
     fn shape(&self) -> Shape {
-        let s = Shape::EMPTY.with_events(0, self.ports);
+        let s = Shape::EMPTY.events(0, self.ports);
         match self.cap {
-            Some(c) => s.with_event_capacity(tutti_graph::testing::cap_of(c)),
+            Some(c) => s.event_capacity(tutti_graph::testing::cap_of(c)),
             None => s,
         }
     }
@@ -79,7 +79,7 @@ struct Relay;
 
 impl Node for Relay {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 1)
+        Shape::EMPTY.events(1, 1)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -107,8 +107,8 @@ struct Late {
 impl Node for Late {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
-            .with_latency(Latency::new(Samples::new(self.latency)))
+            .events(0, 1)
+            .latency(Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
@@ -125,7 +125,7 @@ struct Sink {
 
 impl Node for Sink {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(self.ports, 0)
+        Shape::EMPTY.events(self.ports, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
@@ -162,8 +162,8 @@ impl Rig {
             t.nodes.insert(
                 *k,
                 NodeSpec::new("n", s.audio_in(), s.audio_out())
-                    .with_latency(s.latency.samples())
-                    .with_tail(s.tail),
+                    .latency(s.latency.samples())
+                    .tail(s.tail),
             );
             shapes.insert(*k, s);
         }
@@ -633,7 +633,7 @@ impl Node for CappedRelay {
     fn shape(&self) -> Shape {
         Relay
             .shape()
-            .with_event_capacity(tutti_graph::testing::cap_of(8))
+            .event_capacity(tutti_graph::testing::cap_of(8))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {

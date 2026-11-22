@@ -33,7 +33,7 @@ struct Probe;
 
 impl Node for Probe {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::STEREO).with_events(1, 1)
+        Shape::source_unassigned(ChannelLayout::STEREO).events(1, 1)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {

@@ -271,7 +271,7 @@ impl Declared {
         // `NodeMode::Bypassed`: the host writes that bypass
         // ([`PluginHandle::set_bypassed`](crate::PluginHandle::set_bypassed)).
         if loaded.own_bypass.is_some() {
-            declared.ports = declared.ports.with_own_bypass();
+            declared.ports = declared.ports.own_bypass();
         }
         Ok(declared)
     }
@@ -287,7 +287,7 @@ impl Declared {
     pub(super) fn from_layout(layout: &Layout) -> Result<Self, PluginTooWide> {
         layout.check_width()?;
         Ok(Self {
-            ports: Shape::buses(buses_of(&layout.inputs), buses_of(&layout.outputs)).with_ports(
+            ports: Shape::buses(buses_of(&layout.inputs), buses_of(&layout.outputs)).ports(
                 ChannelLayout::clamped(layout.total_inputs()),
                 ChannelLayout::clamped(layout.total_outputs()),
             ),

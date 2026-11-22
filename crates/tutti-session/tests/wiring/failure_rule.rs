@@ -194,7 +194,7 @@ struct Events {
 
 impl Node for Events {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_events(self.inputs, self.outputs)
+        Shape::source_unassigned(ChannelLayout::MONO).events(self.inputs, self.outputs)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

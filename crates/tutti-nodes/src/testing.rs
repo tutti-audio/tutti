@@ -128,7 +128,7 @@ impl Node for Const {
         Shape::source_unassigned(
             ChannelLayout::try_from(self.values.len()).expect("a stimulus has few channels"),
         )
-        .with_cost(tutti_graph::Cost::Light)
+        .cost(tutti_graph::Cost::Light)
     }
 
     fn prepare(&mut self, _: &Prepare) {}
@@ -265,7 +265,7 @@ impl Osc {
 impl Node for Osc {
     /// A generator at zero latency; `Tail::None`, as [`Const`]'s.
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(self.layout).with_cost(tutti_graph::Cost::Moderate)
+        Shape::source_unassigned(self.layout).cost(tutti_graph::Cost::Moderate)
     }
 
     fn prepare(&mut self, prepare: &Prepare) {
@@ -314,7 +314,7 @@ impl Through {
 impl Node for Through {
     /// A copy stops with its input: `Tail::None`.
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(self.layout).with_cost(tutti_graph::Cost::Light)
+        Shape::through_unassigned(self.layout).cost(tutti_graph::Cost::Light)
     }
 
     fn prepare(&mut self, _: &Prepare) {}
@@ -352,7 +352,7 @@ impl Node for Split {
             tutti_graph::Buses::unassigned(ChannelLayout::MONO),
             tutti_graph::Buses::unassigned(self.layout),
         )
-        .with_cost(tutti_graph::Cost::Light)
+        .cost(tutti_graph::Cost::Light)
     }
 
     fn prepare(&mut self, _: &Prepare) {}
@@ -390,7 +390,7 @@ impl Sink {
 
 impl Node for Sink {
     fn shape(&self) -> Shape {
-        Shape::sink_unassigned(self.layout).with_cost(tutti_graph::Cost::Light)
+        Shape::sink_unassigned(self.layout).cost(tutti_graph::Cost::Light)
     }
 
     fn prepare(&mut self, _: &Prepare) {}

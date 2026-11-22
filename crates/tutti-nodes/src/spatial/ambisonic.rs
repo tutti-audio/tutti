@@ -131,7 +131,7 @@ impl<F: Float> Kernel for AmbisonicEncoderKernel<F> {
             Buses::main(BusTopology::MONO),
             Buses::main(bus(self.order, self.normalization)),
         )
-        .with_cost(Cost::Moderate)
+        .cost(Cost::Moderate)
     }
 
     fn prepare(&mut self, _: SampleRate, _: MaxBlock) {
@@ -251,7 +251,7 @@ impl<F: Float> Kernel for AmbisonicRotatorKernel<F> {
 
     /// The order's channels in and out, `Moderate`: a block-diagonal product per frame.
     fn shape(&self) -> Shape {
-        Shape::through(bus(self.order, self.normalization)).with_cost(Cost::Moderate)
+        Shape::through(bus(self.order, self.normalization)).cost(Cost::Moderate)
     }
 
     fn prepare(&mut self, _: SampleRate, _: MaxBlock) {
@@ -443,7 +443,7 @@ impl<F: Float> Kernel for AmbisonicDecoderKernel<F> {
 
     /// The order's channels in, the bed's out, `Moderate`: a gain per channel and speaker.
     fn shape(&self) -> Shape {
-        Shape::buses(Buses::main(self.input), Buses::main(self.output)).with_cost(Cost::Moderate)
+        Shape::buses(Buses::main(self.input), Buses::main(self.output)).cost(Cost::Moderate)
     }
 
     fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}

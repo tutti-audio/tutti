@@ -53,7 +53,7 @@ pub const MAX_PORTS: usize = 64;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Shape {
     /// Audio input channels: the input buses' width, or more where
-    /// [`with_ports`](Self::with_ports) said so. Read with
+    /// [`ports`](Self::ports) said so. Read with
     /// [`audio_in`](Self::audio_in).
     audio_in: ChannelLayout,
     /// Audio output channels. Read with [`audio_out`](Self::audio_out).
@@ -74,7 +74,7 @@ pub struct Shape {
     /// `None` takes the executor's default
     /// ([`DEFAULT_EVENT_CAPACITY`](crate::DEFAULT_EVENT_CAPACITY), or what
     /// [`Editor::with_event_capacity`](crate::Editor::with_event_capacity)
-    /// set). Set it with [`with_event_capacity`](Self::with_event_capacity).
+    /// set). Set it with [`event_capacity`](Self::event_capacity).
     ///
     /// It is also the port's declared **rate** — at most this many events
     /// per [`MaxBlock`] frames — which is what a PDC delay or a feedback
@@ -113,12 +113,12 @@ pub struct Shape {
     /// [`push_param`](crate::EventWriter::push_param). A node that declares it
     /// is also the one [`Editor::schedule`](crate::Editor::schedule) takes a
     /// param ramp or segment for, into its event inputs. Set it with
-    /// [`with_param_events`](Self::with_param_events).
+    /// [`param_events`](Self::param_events).
     pub param_events: bool,
     /// The most events per block this node accepts on its event inputs,
     /// **all of them together**: the size a host may allocate for what it is
     /// sent. `None` is unbounded: each input is sized from the edges into it.
-    /// Set it with [`with_event_input_capacity`](Self::with_event_input_capacity).
+    /// Set it with [`event_input_capacity`](Self::event_input_capacity).
     ///
     /// # Overflow: drop the latest, and count it
     ///
@@ -193,38 +193,38 @@ pub struct Shape {
     /// About how much work the node does per sample and channel: the compiler's
     /// cost model packs cheap siblings into one task and keeps a graph too
     /// cheap to spread on one thread. [`Cost::Heavy`] unless set with
-    /// [`with_cost`](Self::with_cost): a node that declares nothing is assumed
+    /// [`cost`](Self::cost): a node that declares nothing is assumed
     /// worth a thread of its own. A speed hint only — it never changes a
     /// sample.
     pub cost: Cost,
     /// Whether its event outputs may carry notes, hold pedals or a bend. The
     /// executor tracks what such a port holds so that an edge that ends
     /// can close them at its sink (see
-    /// [`with_no_note_events`](Self::with_no_note_events)). `true` unless set
+    /// [`no_note_events`](Self::no_note_events)). `true` unless set
     /// otherwise: a node that declares nothing is assumed to carry them.
     ///
     /// The tracking costs about 9 KiB (8 KiB of keys and 1 KiB of controllers)
     /// for each of the unit's event output ports, in each of the tables it
     /// keeps: the running one, the one that owes closes, and, while a replace
     /// waits behind a fade, the waiting unit's. A node that never carries notes
-    /// declares [`with_no_note_events`](Self::with_no_note_events).
+    /// declares [`no_note_events`](Self::no_note_events).
     pub note_events: bool,
     /// The most events this node writes into its successor's first event
     /// input when it is replaced (see [`Node::chase`] and
-    /// [`with_chase`](Self::with_chase)). `None`: the node carries no state
+    /// [`chase`](Self::chase)). `None`: the node carries no state
     /// across a swap, and the executor sizes nothing for it.
     pub chase: Option<NonZeroU32>,
     /// Whether the node bypasses itself: the executor neither blends nor
     /// parks it in [`NodeMode::Bypassed`](crate::NodeMode::Bypassed), and it
     /// needs no pass to be bypassed. `false` unless set with
-    /// [`with_own_bypass`](Self::with_own_bypass).
+    /// [`own_bypass`](Self::own_bypass).
     pub own_bypass: bool,
     /// The sample rates the node runs at. Read with [`rates`](Self::rates).
     rates: SampleRates,
 }
 
 /// Where a node writes its state for its successor ([`Node::chase`]): a
-/// buffer the executor sized from [`Shape::with_chase`], of MIDI messages at
+/// buffer the executor sized from [`Shape::chase`], of MIDI messages at
 /// offset 0.
 ///
 /// Writing past the declared capacity refuses the message, and the executor
@@ -327,7 +327,7 @@ impl Resolution {
 
 impl Shape {
     /// No audio and no event ports: the start of a node that only has events
-    /// (`Shape::EMPTY.with_events(1, 0)`).
+    /// (`Shape::EMPTY.events(1, 0)`).
     pub const EMPTY: Self = Self::buses(Buses::NONE, Buses::NONE);
 
     /// A shape of these buses: its audio widths are theirs, and its dry path
@@ -381,7 +381,7 @@ impl Shape {
     /// ports with no bus, passed by index all the same.
     #[must_use]
     pub const fn through_unassigned(width: ChannelLayout) -> Self {
-        Self::buses(Buses::unplaced(width), Buses::unplaced(width)).with_ports(width, width)
+        Self::buses(Buses::unplaced(width), Buses::unplaced(width)).ports(width, width)
     }
 
     /// `inputs` channels in and `outputs` out that name no speaker: a node built
@@ -401,7 +401,7 @@ impl Shape {
     /// ```
     #[must_use]
     pub const fn unassigned(inputs: ChannelLayout, outputs: ChannelLayout) -> Self {
-        Self::buses(Buses::unplaced(inputs), Buses::unplaced(outputs)).with_ports(inputs, outputs)
+        Self::buses(Buses::unplaced(inputs), Buses::unplaced(outputs)).ports(inputs, outputs)
     }
 
     /// No audio input, one bus of `topology` out: nothing passes.
@@ -414,7 +414,7 @@ impl Shape {
     /// no bus past a bus's width).
     #[must_use]
     pub const fn source_unassigned(width: ChannelLayout) -> Self {
-        Self::buses(Buses::NONE, Buses::unplaced(width)).with_ports(ChannelLayout::EMPTY, width)
+        Self::buses(Buses::NONE, Buses::unplaced(width)).ports(ChannelLayout::EMPTY, width)
     }
 
     /// One bus of `topology` in, no audio output: nothing passes.
@@ -426,7 +426,7 @@ impl Shape {
     /// `width` channels in that name no speaker, no audio output.
     #[must_use]
     pub const fn sink_unassigned(width: ChannelLayout) -> Self {
-        Self::buses(Buses::unplaced(width), Buses::NONE).with_ports(width, ChannelLayout::EMPTY)
+        Self::buses(Buses::unplaced(width), Buses::NONE).ports(width, ChannelLayout::EMPTY)
     }
 
     /// This shape with `audio_in` and `audio_out` ports, of which its buses
@@ -441,7 +441,7 @@ impl Shape {
     /// If a side is narrower than its buses (in a `const` context, at compile
     /// time): a bus over ports the node does not have.
     #[must_use]
-    pub const fn with_ports(mut self, audio_in: ChannelLayout, audio_out: ChannelLayout) -> Self {
+    pub const fn ports(mut self, audio_in: ChannelLayout, audio_out: ChannelLayout) -> Self {
         assert!(
             self.buses_in.width() <= audio_in.count() as usize
                 && self.buses_out.width() <= audio_out.count() as usize,
@@ -492,7 +492,7 @@ impl Shape {
     }
 
     /// The input ports past the declared buses
-    /// ([`with_ports`](Self::with_ports)): a plugin's channels a bus cannot
+    /// ([`ports`](Self::ports)): a plugin's channels a bus cannot
     /// describe. `None` when the buses cover every port.
     #[must_use]
     pub fn spare_in(&self) -> Option<crate::InBus> {
@@ -559,7 +559,7 @@ impl Shape {
 
     /// This shape with `event_in` / `event_out` event ports.
     #[must_use]
-    pub const fn with_events(mut self, event_in: u16, event_out: u16) -> Self {
+    pub const fn events(mut self, event_in: u16, event_out: u16) -> Self {
         self.event_in = event_in;
         self.event_out = event_out;
         self
@@ -574,12 +574,12 @@ impl Shape {
     /// use tutti_buffers::ChannelLayout;
     /// use std::num::NonZeroU32;
     /// let arp = Shape::EMPTY
-    ///     .with_events(1, 1)
-    ///     .with_event_capacity(NonZeroU32::new(16).unwrap());
+    ///     .events(1, 1)
+    ///     .event_capacity(NonZeroU32::new(16).unwrap());
     /// assert_eq!(arp.event_capacity.map(|n| n.get()), Some(16));
     /// ```
     #[must_use]
-    pub const fn with_event_capacity(mut self, per_block: NonZeroU32) -> Self {
+    pub const fn event_capacity(mut self, per_block: NonZeroU32) -> Self {
         self.event_capacity = Some(per_block);
         self
     }
@@ -589,11 +589,11 @@ impl Shape {
     ///
     /// ```
     /// use tutti_graph::Shape;
-    /// let lane = Shape::EMPTY.with_events(0, 1).with_param_events();
+    /// let lane = Shape::EMPTY.events(0, 1).param_events();
     /// assert!(lane.param_events);
     /// ```
     #[must_use]
-    pub const fn with_param_events(mut self) -> Self {
+    pub const fn param_events(mut self) -> Self {
         self.param_events = true;
         self
     }
@@ -606,12 +606,12 @@ impl Shape {
     /// use tutti_graph::Shape;
     /// use std::num::NonZeroU32;
     /// let sink = Shape::EMPTY
-    ///     .with_events(2, 0)
-    ///     .with_event_input_capacity(NonZeroU32::new(64).unwrap());
+    ///     .events(2, 0)
+    ///     .event_input_capacity(NonZeroU32::new(64).unwrap());
     /// assert_eq!(sink.event_input_capacity.map(|n| n.get()), Some(64));
     /// ```
     #[must_use]
-    pub const fn with_event_input_capacity(mut self, per_block: NonZeroU32) -> Self {
+    pub const fn event_input_capacity(mut self, per_block: NonZeroU32) -> Self {
         self.event_input_capacity = Some(per_block);
         self
     }
@@ -623,7 +623,7 @@ impl Shape {
     ///
     /// ```
     /// use tutti_graph::Shape;
-    /// let synth = Shape::EMPTY.with_events(1, 0).with_chase(512);
+    /// let synth = Shape::EMPTY.events(1, 0).chase(512);
     /// assert_eq!(synth.chase.map(|n| n.get()), Some(512));
     /// ```
     ///
@@ -632,7 +632,7 @@ impl Shape {
     /// If `events` is zero: a node that chases nothing declares nothing. (In
     /// a `const` context, at compile time.)
     #[must_use]
-    pub const fn with_chase(mut self, events: u32) -> Self {
+    pub const fn chase(mut self, events: u32) -> Self {
         match NonZeroU32::new(events) {
             Some(n) => self.chase = Some(n),
             None => panic!("a chase of zero events: declare nothing instead"),
@@ -650,7 +650,7 @@ impl Shape {
     /// use tutti_units::Samples;
     /// use tutti_buffers::ChannelLayout;
     /// let echo_time = Samples::new(24_000);
-    /// let _ = Shape::through_unassigned(ChannelLayout::MONO).with_latency(echo_time);
+    /// let _ = Shape::through_unassigned(ChannelLayout::MONO).latency(echo_time);
     /// ```
     ///
     /// — and there is no conversion that would make it one silently:
@@ -667,11 +667,11 @@ impl Shape {
     /// use tutti_units::{Latency, Samples};
     /// use tutti_buffers::ChannelLayout;
     /// let lookahead = Latency::new(Samples::new(512));
-    /// let s = Shape::through_unassigned(ChannelLayout::MONO).with_latency(lookahead);
+    /// let s = Shape::through_unassigned(ChannelLayout::MONO).latency(lookahead);
     /// assert_eq!(s.latency.samples(), Samples::new(512));
     /// ```
     #[must_use]
-    pub const fn with_latency(mut self, latency: Latency) -> Self {
+    pub const fn latency(mut self, latency: Latency) -> Self {
         self.latency = latency;
         self
     }
@@ -680,7 +680,7 @@ impl Shape {
     /// frames the node keeps sounding after its input stops, counted once its
     /// [`latency`](Self::latency) is compensated (see [`tail`](Self::tail)).
     #[must_use]
-    pub const fn with_tail(mut self, tail: Tail) -> Self {
+    pub const fn tail(mut self, tail: Tail) -> Self {
         self.tail = tail;
         self
     }
@@ -717,14 +717,14 @@ impl Shape {
 
     /// This shape, accepting in-place channels.
     #[must_use]
-    pub const fn with_in_place(mut self) -> Self {
+    pub const fn in_place(mut self) -> Self {
         self.in_place = true;
         self
     }
 
     /// This shape, honouring event offsets only as finely as `resolution`.
     #[must_use]
-    pub const fn with_event_resolution(mut self, resolution: Resolution) -> Self {
+    pub const fn event_resolution(mut self, resolution: Resolution) -> Self {
         self.event_resolution = resolution;
         self
     }
@@ -735,11 +735,11 @@ impl Shape {
     /// ```
     /// use tutti_graph::{Cost, Shape};
     /// use tutti_buffers::ChannelLayout;
-    /// let gain = Shape::through_unassigned(ChannelLayout::STEREO).with_cost(Cost::Light);
+    /// let gain = Shape::through_unassigned(ChannelLayout::STEREO).cost(Cost::Light);
     /// assert_eq!(gain.cost, Cost::Light);
     /// ```
     #[must_use]
-    pub const fn with_cost(mut self, cost: Cost) -> Self {
+    pub const fn cost(mut self, cost: Cost) -> Self {
         self.cost = cost;
         self
     }
@@ -763,11 +763,11 @@ impl Shape {
     ///
     /// ```
     /// use tutti_graph::Shape;
-    /// assert!(Shape::EMPTY.with_own_bypass().own_bypass);
+    /// assert!(Shape::EMPTY.own_bypass().own_bypass);
     /// assert!(!Shape::EMPTY.own_bypass);
     /// ```
     #[must_use]
-    pub const fn with_own_bypass(mut self) -> Self {
+    pub const fn own_bypass(mut self) -> Self {
         self.own_bypass = true;
         self
     }
@@ -782,12 +782,12 @@ impl Shape {
     /// use tutti_graph::Shape;
     /// use tutti_buffers::ChannelLayout;
     /// let lane = Shape::EMPTY
-    ///     .with_events(0, 1)
-    ///     .with_no_note_events();
+    ///     .events(0, 1)
+    ///     .no_note_events();
     /// assert!(!lane.note_events);
     /// ```
     #[must_use]
-    pub const fn with_no_note_events(mut self) -> Self {
+    pub const fn no_note_events(mut self) -> Self {
         self.note_events = false;
         self
     }
@@ -800,12 +800,12 @@ impl Shape {
     /// If `params` holds more than [`MAX_PARAM_PORTS`](crate::MAX_PARAM_PORTS),
     /// or one param twice (in a `const` context, at compile time).
     #[must_use]
-    pub const fn with_params(mut self, params: &[UnitParam]) -> Self {
+    pub const fn params(mut self, params: &[UnitParam]) -> Self {
         self.params = ParamPorts::new(params);
         self
     }
 
-    /// [`with_params`](Self::with_params) for a node with several params of
+    /// [`params`](Self::params) for a node with several params of
     /// one kind: each [`UnitAddr`] is a kind and an index (a threshold per
     /// band is `UnitAddr::new(UnitParam::Threshold, band)`), in this port
     /// order.
@@ -816,7 +816,7 @@ impl Shape {
     /// or one address (kind and index) twice (in a `const` context, at
     /// compile time).
     #[must_use]
-    pub const fn with_param_addrs(mut self, params: &[UnitAddr]) -> Self {
+    pub const fn param_addrs(mut self, params: &[UnitAddr]) -> Self {
         self.params = ParamPorts::of(params);
         self
     }
@@ -1617,7 +1617,7 @@ pub trait Node<F: Float = f32>: Send + 'static {
     /// controllers and bends as the MIDI messages that set them.
     ///
     /// The default writes nothing. A node that overrides it declares
-    /// [`Shape::with_chase`], and the executor calls it **once, where the
+    /// [`Shape::chase`], and the executor calls it **once, where the
     /// commit is applied**, before the block's first task runs: the events
     /// reach the successor at offset 0 of its first block, ahead of every
     /// other event there (they travel as flushed events, see the module

@@ -46,7 +46,7 @@ struct Probe;
 
 impl Node for Probe {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_params(&[UnitParam::Cutoff])
+        Shape::source_unassigned(ChannelLayout::MONO).params(&[UnitParam::Cutoff])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -77,7 +77,7 @@ struct SegSink {
 
 impl Node for SegSink {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::STEREO).with_events(1, 0)
+        Shape::source_unassigned(ChannelLayout::STEREO).events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -122,7 +122,7 @@ struct Feed {
 
 impl Node for Feed {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_param_events()
+        Shape::EMPTY.events(0, 1).param_events()
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {

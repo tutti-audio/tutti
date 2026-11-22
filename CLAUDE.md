@@ -116,7 +116,7 @@ std only. A rule the compiler already enforces is not a gate.
 - Musical delay is not latency: report only processing latency.
 - Nodes communicate only through ports. Two nodes sharing mutable state outside the graph
   are unordered on the parallel executor: share through an edge, or make it one node.
-- A cheap node declares its cost (`Shape::with_cost`); one that declares none is `Heavy`.
+- A cheap node declares its cost (`Shape::cost`); one that declares none is `Heavy`.
 - Op code reaches the arena, event slots, units, rings and outputs only through
   `AudioSlots`/`EventSlots` or a claim, which keeps `tutti-graph` `#![forbid(unsafe_code)]`.
 - A parallel render is bit-identical to the serial one; a parallel test compares against

@@ -128,7 +128,7 @@ struct Held {
 
 impl Node for Held {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1)
+        Shape::EMPTY.events(0, 1)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -157,7 +157,7 @@ const LATE: usize = 100;
 impl Node for Late {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(tutti_units::Latency::new(Samples::new(LATE)))
+            .latency(tutti_units::Latency::new(Samples::new(LATE)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

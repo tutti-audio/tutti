@@ -356,10 +356,10 @@ mod tests {
         );
         let mut changes = ParameterChanges::reserved(1, 4);
         assert!(changes.add_change(ParamId::new(1), 3, 0.5));
-        let with_params = ProcessContext::new().params(&changes);
+        let params = ProcessContext::new().params(&changes);
         let one = [&silence[..]];
         assert!(
-            carries_input(&with_params, Planes::new(&one).expect("one")),
+            carries_input(&params, Planes::new(&one).expect("one")),
             "a parameter"
         );
     }

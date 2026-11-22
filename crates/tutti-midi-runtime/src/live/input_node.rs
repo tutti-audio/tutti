@@ -590,10 +590,10 @@ impl<F: Float> Node<F> for MidiInputNode {
     /// [`MIDI_INPUT_DENSITY`] per frame of a long block).
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(1, self.ports.count())
-            .with_event_capacity(self.capacity)
+            .events(1, self.ports.count())
+            .event_capacity(self.capacity)
             // Event-only: a translation per event, nothing per frame.
-            .with_cost(tutti_graph::Cost::Light)
+            .cost(tutti_graph::Cost::Light)
     }
 
     fn prepare(&mut self, p: &Prepare) {

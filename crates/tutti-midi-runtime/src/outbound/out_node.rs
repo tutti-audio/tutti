@@ -234,10 +234,10 @@ impl<F: tutti_buffers::Float> Node<F> for MidiOutNode {
     /// [`MIDI_OUT_EVENT_CAPACITY`] events.
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(1, 1)
-            .with_event_capacity(MIDI_OUT_PORT_CAPACITY)
+            .events(1, 1)
+            .event_capacity(MIDI_OUT_PORT_CAPACITY)
             // Event-only: a copy per event, nothing per frame.
-            .with_cost(tutti_graph::Cost::Light)
+            .cost(tutti_graph::Cost::Light)
     }
 
     fn prepare(&mut self, _: &Prepare) {}

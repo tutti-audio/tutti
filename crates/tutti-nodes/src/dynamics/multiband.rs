@@ -526,9 +526,9 @@ impl<F: Float + SimdLanes + Lerp> Node<F> for MultibandCompressorNode<F> {
     /// filters': the crossover rings after the input stops.
     fn shape(&self) -> Shape {
         Shape::through_unassigned(self.rig.shape.width())
-            .with_cost(Cost::Heavy)
-            .with_tail(Tail::Unknown)
-            .with_param_addrs(self.declared_ports().as_slice())
+            .cost(Cost::Heavy)
+            .tail(Tail::Unknown)
+            .param_addrs(self.declared_ports().as_slice())
     }
 
     fn prepare(&mut self, p: &Prepare) {

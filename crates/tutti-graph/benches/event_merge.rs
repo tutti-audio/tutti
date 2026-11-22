@@ -45,11 +45,11 @@ struct Source {
 impl Node for Source {
     fn shape(&self) -> Shape {
         let shape = Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(NonZeroU32::new(self.n * 2).expect("a capacity"));
+            .events(0, 1)
+            .event_capacity(NonZeroU32::new(self.n * 2).expect("a capacity"));
         match self.mix {
             Mix::Midi => shape,
-            Mix::Params | Mix::Mixed => shape.with_param_events(),
+            Mix::Params | Mix::Mixed => shape.param_events(),
         }
     }
     fn prepare(&mut self, _: &Prepare) {}
@@ -74,7 +74,7 @@ struct Sink;
 
 impl Node for Sink {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0)
+        Shape::EMPTY.events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {

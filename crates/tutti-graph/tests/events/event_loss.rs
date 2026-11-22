@@ -48,8 +48,8 @@ struct Writer {
 impl Node for Writer {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, self.scripts.len() as u16)
-            .with_event_capacity(tutti_graph::testing::cap_of(self.cap))
+            .events(0, self.scripts.len() as u16)
+            .event_capacity(tutti_graph::testing::cap_of(self.cap))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -78,7 +78,7 @@ struct Counter {
 
 impl Node for Counter {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(self.ports, 0)
+        Shape::EMPTY.events(self.ports, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
@@ -259,9 +259,9 @@ struct Recorder {
 
 impl Node for Recorder {
     fn shape(&self) -> Shape {
-        let shape = Shape::EMPTY.with_events(1, 0);
+        let shape = Shape::EMPTY.events(1, 0);
         match self.bound {
-            Some(n) => shape.with_event_input_capacity(tutti_graph::testing::cap_of(n)),
+            Some(n) => shape.event_input_capacity(tutti_graph::testing::cap_of(n)),
             None => shape,
         }
     }
@@ -477,7 +477,7 @@ impl Node for Latent {
     fn shape(&self) -> Shape {
         self.inner
             .shape()
-            .with_latency(tutti_units::Latency::new(Samples::new(self.latency)))
+            .latency(tutti_units::Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
@@ -493,7 +493,7 @@ struct Once {
 
 impl Node for Once {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1)
+        Shape::EMPTY.events(0, 1)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -683,8 +683,8 @@ struct Holder {
 impl Node for Holder {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(1, 1)
-            .with_event_input_capacity(tutti_graph::testing::cap_of(self.bound))
+            .events(1, 1)
+            .event_input_capacity(tutti_graph::testing::cap_of(self.bound))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
@@ -706,8 +706,8 @@ struct Keys {
 impl Node for Keys {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(tutti_graph::testing::cap_of(16))
+            .events(0, 1)
+            .event_capacity(tutti_graph::testing::cap_of(16))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -803,8 +803,8 @@ struct EarlyOnsLateOffs;
 impl Node for EarlyOnsLateOffs {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(tutti_graph::testing::cap_of(16))
+            .events(0, 1)
+            .event_capacity(tutti_graph::testing::cap_of(16))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -838,8 +838,8 @@ struct Trace {
 impl Node for Trace {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(1, 0)
-            .with_event_input_capacity(tutti_graph::testing::cap_of(4))
+            .events(1, 0)
+            .event_input_capacity(tutti_graph::testing::cap_of(4))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {

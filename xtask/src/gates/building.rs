@@ -166,9 +166,6 @@ const FFI: &str = "crates/*-ffi/";
 
 const GRAPH: &str = "crates/tutti-graph/";
 
-const NODE_AUTHOR: &str = "tutti-graph's node-author API: what a node declares and what a \
-    node is prepared with, not what an app configures";
-
 const CTOR: &[Rule] = &[Rule::CtorResult];
 const CHAIN: &[Rule] = &[Rule::ChainResult];
 const RANGE: &[Rule] = &[Rule::RangeMacro];
@@ -214,24 +211,6 @@ const TEST_SUPPORT: &str =
 /// The allow-list. A row is permanent policy: it covers the violations it names and
 /// stays when none exist.
 pub(super) const ALLOW: &[Allow] = &[
-    Allow {
-        path: GRAPH,
-        owner: "Shape",
-        rules: &[],
-        reason: NODE_AUTHOR,
-    },
-    Allow {
-        path: GRAPH,
-        owner: "Prepare",
-        rules: &[],
-        reason: NODE_AUTHOR,
-    },
-    Allow {
-        path: GRAPH,
-        owner: "Forked",
-        rules: &[],
-        reason: NODE_AUTHOR,
-    },
     Allow {
         path: GRAPH,
         owner: "Row",
@@ -825,6 +804,36 @@ pub(super) const ALLOW: &[Allow] = &[
         "FoundHost::from_service",
         CTOR,
         "reading a resolved service record as a Host: the failure is the record's, not a value's",
+    ),
+    ty(
+        "crates/tutti-graph/src/node.rs",
+        "Shape::with_rates",
+        &[Rule::WithPrefix],
+        "a copy with one field replaced (std's `with_` as in `Path::with_extension`), whose getter holds the bare name",
+    ),
+    ty(
+        "crates/tutti-graph/src/node.rs",
+        "Prepare::with_render_mode",
+        &[Rule::WithPrefix],
+        "a copy with one field replaced (std's `with_` as in `Path::with_extension`), whose getter holds the bare name",
+    ),
+    ty(
+        "crates/tutti-graph/src/node.rs",
+        "Prepare::with_quantum",
+        &[Rule::WithPrefix],
+        "a copy with one field replaced (std's `with_` as in `Path::with_extension`), whose getter holds the bare name",
+    ),
+    ty(
+        "crates/tutti-graph/src/node.rs",
+        "TransportPosition::with_recording",
+        &[Rule::WithPrefix],
+        "a copy with one field replaced (std's `with_` as in `Path::with_extension`), whose getter holds the bare name",
+    ),
+    ty(
+        "crates/tutti-graph/src/param_event.rs",
+        "ParamRamp::with_shape",
+        &[Rule::WithPrefix],
+        "a copy with one field replaced (std's `with_` as in `Path::with_extension`), whose getter holds the bare name",
     ),
     ty(
         "crates/tutti-midi-protocol/src/universal/machine_control/segmentation.rs",

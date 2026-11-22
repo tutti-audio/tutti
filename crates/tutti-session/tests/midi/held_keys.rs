@@ -15,7 +15,7 @@ const MF: u16 = 0x8000;
 struct Src(tutti_fixtures::Shared<Vec<[u32; 4]>>);
 impl Node for Src {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, MIDI_INPUT_PORTS)
+        Shape::EMPTY.events(0, MIDI_INPUT_PORTS)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -152,7 +152,7 @@ fn set_routes_with_a_held_key() {
 struct GroupSrc(tutti_fixtures::Shared<Vec<[u32; 4]>>, MidiInputPorts);
 impl Node for GroupSrc {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, self.1.count())
+        Shape::EMPTY.events(0, self.1.count())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

@@ -69,12 +69,12 @@ impl<F: SynthFloat> Node<F> for PolySynth<F> {
         // The unison engine is built with the synth or never (`&mut`
         // setters only), so every read of the shape declares the same ports.
         Shape::source(BusTopology::STEREO)
-            .with_events(1, 0)
-            .with_tail(self.release_tail())
-            .with_cost(self.cost())
-            .with_param_addrs(self.declared_ports().as_slice())
+            .events(1, 0)
+            .tail(self.release_tail())
+            .cost(self.cost())
+            .param_addrs(self.declared_ports().as_slice())
             // The channel state it hands the synth that replaces it (`chase`).
-            .with_chase(VoiceAllocator::CHASE_MESSAGES as u32)
+            .chase(VoiceAllocator::CHASE_MESSAGES as u32)
     }
 
     fn prepare(&mut self, p: &Prepare) {

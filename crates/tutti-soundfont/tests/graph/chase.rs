@@ -118,7 +118,7 @@ struct Recorder(Arc<Mutex<Vec<Ump>>>);
 
 impl Node for Recorder {
     fn shape(&self) -> Shape {
-        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::STEREO)).with_events(1, 0)
+        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::STEREO)).events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

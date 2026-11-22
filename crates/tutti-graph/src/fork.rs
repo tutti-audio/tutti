@@ -391,7 +391,7 @@ impl<F: Float> Forked<F> {
 
     /// Attaches `health`.
     #[must_use]
-    pub fn with_health(mut self, health: Arc<dyn ForkHealth>) -> Self {
+    pub fn health(mut self, health: Arc<dyn ForkHealth>) -> Self {
         self.health = Some(health);
         self
     }
@@ -846,7 +846,7 @@ impl<F: Float> Editor<F> {
     /// of its own — can fail **while it renders**, and silence is a valid
     /// output, so on its own such a render would finish and write a silent
     /// file. A source may therefore hand over a [`ForkHealth`] probe with the
-    /// unit ([`Forked::with_health`]), and [`fork_health`](Self::fork_health)
+    /// unit ([`Forked::health`]), and [`fork_health`](Self::fork_health)
     /// on the forked editor reports the first [`ForkFault`]. **A renderer of
     /// a fork checks it after rendering** and turns a fault into a failed
     /// render. A unit that faults keeps rendering silence without further

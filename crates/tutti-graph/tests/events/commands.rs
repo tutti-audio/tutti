@@ -44,9 +44,9 @@ struct Probe {
 impl Node for Probe {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
-            .with_events(1, 0)
-            .with_param_events()
-            .with_tail(Tail::Unknown)
+            .events(1, 0)
+            .param_events()
+            .tail(Tail::Unknown)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -419,8 +419,8 @@ struct Impulse(tutti_fixtures::Record<(u64, u32)>);
 impl Node for Impulse {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_events(1, 0)
-            .with_tail(Tail::Unknown)
+            .events(1, 0)
+            .tail(Tail::Unknown)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -1262,7 +1262,7 @@ struct Plain;
 
 impl Node for Plain {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0)
+        Shape::EMPTY.events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {

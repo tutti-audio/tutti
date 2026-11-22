@@ -132,7 +132,7 @@ impl<F: Float> Node<F> for Sink {
             tutti_graph::Buses::unassigned(layout(self.audio_in)),
             tutti_graph::Buses::unassigned(layout(self.audio_out)),
         )
-        .with_events(1, 0)
+        .events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
@@ -202,8 +202,7 @@ struct Latent(usize);
 
 impl<F: Float> Node<F> for Latent {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(Latency::new(Samples::new(self.0)))
+        Shape::source_unassigned(ChannelLayout::MONO).latency(Latency::new(Samples::new(self.0)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
@@ -275,8 +274,8 @@ struct Script {
 impl<F: Float> Node<F> for Script {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(std::num::NonZeroU32::new(2048).expect("a capacity"))
+            .events(0, 1)
+            .event_capacity(std::num::NonZeroU32::new(2048).expect("a capacity"))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
@@ -301,8 +300,8 @@ struct Relay {
 impl<F: Float> Node<F> for Relay {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(1, 1)
-            .with_event_capacity(std::num::NonZeroU32::new(self.capacity).expect("a capacity"))
+            .events(1, 1)
+            .event_capacity(std::num::NonZeroU32::new(self.capacity).expect("a capacity"))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
@@ -816,8 +815,8 @@ struct Probe {
 impl<F: Float> Node<F> for Probe {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(std::num::NonZeroU32::new(8).expect("a capacity"))
+            .events(0, 1)
+            .event_capacity(std::num::NonZeroU32::new(8).expect("a capacity"))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
@@ -1169,8 +1168,8 @@ struct SendThenRelease {
 impl<F: Float> Node<F> for SendThenRelease {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(std::num::NonZeroU32::new(64).expect("a capacity"))
+            .events(0, 1)
+            .event_capacity(std::num::NonZeroU32::new(64).expect("a capacity"))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {

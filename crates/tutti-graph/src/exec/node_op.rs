@@ -213,7 +213,7 @@ pub(super) fn fading_node_op<
         )
         .with_main(h.rec.main)
         .with_wired(h.rec.wired)
-        .with_params(params);
+        .params(params);
         let cx = Cx {
             env: h.env,
             arrival: h.rec.arrival,
@@ -775,8 +775,8 @@ impl<'p, F: Float> Call<'p, '_, F> {
         )
         .with_main(self.rec.main)
         .with_wired(self.rec.wired)
-        .with_params(self.params)
-        .with_tail(self.reported)
+        .params(self.params)
+        .tail(self.reported)
         .with_log(self.log);
         node.process(&self.cx(), io)
     }
@@ -902,9 +902,9 @@ impl<'p, F: Float> Call<'p, '_, F> {
         )
         .with_main(rec.main)
         .with_wired(rec.wired)
-        .with_params(self.params)
+        .params(self.params)
         .with_lost(&unplaced)
-        .with_tail(self.reported)
+        .tail(self.reported)
         .with_log(self.log);
         let status = node.process(&self.cx(), io);
         if unplaced.get() != 0 {

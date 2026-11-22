@@ -316,7 +316,7 @@ impl<'a, F: Float> Io<'a, F> {
     /// These buffers, with [`report_tail`](Self::report_tail) storing into
     /// `tail`.
     #[inline]
-    pub(crate) fn with_tail(mut self, tail: &'a std::cell::Cell<Option<Tail>>) -> Self {
+    pub(crate) fn tail(mut self, tail: &'a std::cell::Cell<Option<Tail>>) -> Self {
         self.tail = Some(tail);
         self
     }
@@ -336,7 +336,7 @@ impl<'a, F: Float> Io<'a, F> {
     /// the ceiling is clamped to it, [`Tail::Unknown`] says nothing (the
     /// ceiling stands), and [`Tail::Unbounded`] under an `Unbounded` ceiling
     /// is never skipped. A node whose shape does not declare a tail with
-    /// [`with_tail`](crate::Shape::with_tail) has the default ceiling and is
+    /// [`tail`](crate::Shape::tail) has the default ceiling and is
     /// never narrowed below it; one that forgets to declare any tail at all
     /// (`Tail::Unknown`) is never skipped, whatever it reports, because an
     /// `Unknown` ceiling bounds nothing for a report to clamp to.
@@ -361,7 +361,7 @@ impl<'a, F: Float> Io<'a, F> {
     /// These buffers, with `params` as the declared params' inputs (every
     /// port past `params`' end reads its base).
     #[inline]
-    pub(crate) fn with_params(mut self, params: &'a [ParamInput<'a, F>]) -> Self {
+    pub(crate) fn params(mut self, params: &'a [ParamInput<'a, F>]) -> Self {
         self.params = params;
         self
     }
@@ -947,7 +947,7 @@ mod tests {
         );
         let ins = Buses::new(&[main, key]).expect("two buses");
         Shape::buses(ins, Buses::main(BusTopology::STEREO))
-            .with_ports(ChannelLayout::from_count(4), ChannelLayout::from_count(3))
+            .ports(ChannelLayout::from_count(4), ChannelLayout::from_count(3))
     }
 
     /// Runs `f` over an `Io` of [`shape`]: input port `p` holds `p + 1`, every

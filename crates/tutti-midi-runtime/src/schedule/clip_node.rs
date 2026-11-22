@@ -583,12 +583,12 @@ impl<F: Float> Node<F> for MidiClipNode {
     /// the block it was prepared for.
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(self.capacity)
+            .events(0, 1)
+            .event_capacity(self.capacity)
             // Event-only: a walk over the block's events, nothing per frame
             // (measured about 0.3 µs a block at any length; a gain's 256
             // frames, 0.2).
-            .with_cost(tutti_graph::Cost::Light)
+            .cost(tutti_graph::Cost::Light)
     }
 
     fn prepare(&mut self, p: &Prepare) {

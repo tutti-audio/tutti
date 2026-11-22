@@ -31,8 +31,7 @@ declare_params!([] Lane, n { Cutoff => Hz = &n.0 });
 
 impl<F: Float> Node<F> for Lane {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO)
-            .with_param_addrs(self.declared_ports().as_slice())
+        Shape::source_unassigned(ChannelLayout::MONO).param_addrs(self.declared_ports().as_slice())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
@@ -73,9 +72,9 @@ struct Ramp {
 impl<F: Float> Node<F> for Ramp {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
-            .with_param_events()
-            .with_event_capacity(tutti_graph::testing::cap_of(4))
+            .events(0, 1)
+            .param_events()
+            .event_capacity(tutti_graph::testing::cap_of(4))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
@@ -402,9 +401,9 @@ struct Segment(ParamSegment);
 impl<F: Float> Node<F> for Segment {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
-            .with_param_events()
-            .with_event_capacity(tutti_graph::testing::cap_of(4))
+            .events(0, 1)
+            .param_events()
+            .event_capacity(tutti_graph::testing::cap_of(4))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
@@ -425,7 +424,7 @@ struct Bearing;
 
 impl Node<f64> for Bearing {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_params(&[UnitParam::Azimuth])
+        Shape::source_unassigned(ChannelLayout::MONO).params(&[UnitParam::Azimuth])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, f64>) -> Status {

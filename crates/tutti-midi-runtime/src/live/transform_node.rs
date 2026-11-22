@@ -161,10 +161,10 @@ impl<F: Float> Node<F> for MpeTransformNode {
     /// a clip's events pass whole (a fan-out may reach past it, and is counted).
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(1, 1)
-            .with_event_capacity(self.capacity)
+            .events(1, 1)
+            .event_capacity(self.capacity)
             // Event-only: a translation per event, nothing per frame.
-            .with_cost(Cost::Light)
+            .cost(Cost::Light)
     }
 
     fn prepare(&mut self, p: &Prepare) {

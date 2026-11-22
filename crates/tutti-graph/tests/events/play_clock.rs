@@ -35,8 +35,7 @@ struct Latent(usize);
 
 impl Node for Latent {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(Latency::new(Samples::new(self.0)))
+        Shape::source_unassigned(ChannelLayout::MONO).latency(Latency::new(Samples::new(self.0)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

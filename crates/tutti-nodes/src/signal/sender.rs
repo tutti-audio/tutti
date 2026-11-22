@@ -253,11 +253,11 @@ impl<F: Float, S: SourcePorts> Node<F> for SourceNode<S> {
             Shape::sink_unassigned(self.input)
         };
         shape
-            .with_events(u16::from(S::MIDI_IN), 1)
-            .with_param_events()
-            .with_event_capacity(SOURCE_EVENT_CAPACITY)
-            .with_cost(S::COST)
-            .with_no_note_events()
+            .events(u16::from(S::MIDI_IN), 1)
+            .param_events()
+            .event_capacity(SOURCE_EVENT_CAPACITY)
+            .cost(S::COST)
+            .no_note_events()
     }
 
     fn prepare(&mut self, prepare: &Prepare) {

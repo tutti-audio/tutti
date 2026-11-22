@@ -49,7 +49,7 @@ fn show(out: &mut [f32], input: ParamInput<'_>, base: f32) {
 impl Node for Declared {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::from_count(4))
-            .with_param_addrs(self.declared_ports().as_slice())
+            .param_addrs(self.declared_ports().as_slice())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -100,9 +100,9 @@ struct Steps {
 impl Node for Steps {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
-            .with_param_events()
-            .with_event_capacity(tutti_graph::testing::cap_of(8))
+            .events(0, 1)
+            .param_events()
+            .event_capacity(tutti_graph::testing::cap_of(8))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

@@ -387,8 +387,8 @@ fn a_shape_mismatch_is_refused() {
     spec.topology.nodes.insert(
         lagged,
         tutti_graph::NodeSpec::new("lag", shape.audio_in(), shape.audio_out())
-            .with_latency(shape.latency.samples())
-            .with_tail(shape.tail),
+            .latency(shape.latency.samples())
+            .tail(shape.tail),
     );
     let shapes: tutti_graph::Shapes = [(lagged, shape)].into_iter().collect();
     let valid = spec.validate().expect("valid");
@@ -473,7 +473,7 @@ struct EventCount(Arc<AtomicUsize>);
 
 impl Node for EventCount {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0)
+        Shape::source_unassigned(ChannelLayout::MONO).events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -657,7 +657,7 @@ fn the_reference_cuts_a_fade_on_a_latency_change() {
         t.nodes.insert(
             NODE,
             NodeSpec::new("gain", ChannelLayout::MONO, ChannelLayout::MONO)
-                .with_latency(Samples::new(latency)),
+                .latency(Samples::new(latency)),
         );
         t.edges.insert(
             InputPort {

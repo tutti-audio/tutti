@@ -350,7 +350,7 @@ pub fn input<'a, F: Float>(
 ///
 /// It generates, on the type, `declared_ports` (a
 /// [`ParamPorts`] for the shape's
-/// [`with_param_addrs`](crate::Shape::with_param_addrs)), `declared_set` (the
+/// [`param_addrs`](crate::Shape::param_addrs)), `declared_set` (the
 /// node's [`ParamSet`], for [`ParamNode::param_set`](crate::ParamNode::param_set)) and
 /// `declared_base` (port `k`'s cell value, for
 /// [`Node::param_base`](crate::Node::param_base)), and the type's
@@ -458,7 +458,7 @@ pub fn input<'a, F: Float>(
 /// impl Node for Tone {
 ///     fn shape(&self) -> Shape {
 ///         Shape::source_unassigned(ChannelLayout::MONO)
-///             .with_param_addrs(self.declared_ports().as_slice())
+///             .param_addrs(self.declared_ports().as_slice())
 ///     }
 ///     fn prepare(&mut self, _: &Prepare) {}
 ///     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

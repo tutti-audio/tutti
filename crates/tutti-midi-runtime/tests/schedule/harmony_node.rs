@@ -33,7 +33,7 @@ struct Sink(Seen);
 
 impl Node for Sink {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(tutti_buffers::ChannelLayout::MONO).with_events(1, 0)
+        Shape::source_unassigned(tutti_buffers::ChannelLayout::MONO).events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {

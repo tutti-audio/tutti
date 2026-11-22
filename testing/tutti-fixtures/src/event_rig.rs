@@ -66,10 +66,8 @@ impl Sink {
 impl Node for Sink {
     fn shape(&self) -> Shape {
         match self.output {
-            Output::Mono => {
-                Shape::source_unassigned(ChannelLayout::MONO).with_events(self.ports, 0)
-            }
-            Output::None => Shape::EMPTY.with_events(self.ports, 0),
+            Output::Mono => Shape::source_unassigned(ChannelLayout::MONO).events(self.ports, 0),
+            Output::None => Shape::EMPTY.events(self.ports, 0),
         }
     }
 

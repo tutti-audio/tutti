@@ -87,10 +87,6 @@ tutti-export  ctor-result  crates/tutti-export/src/job.rs::Job::new
 tutti-export  ctor-result  crates/tutti-export/src/rendered.rs::Rendered::new
 
 # tutti-graph
-tutti-graph  with-prefix  crates/tutti-graph/src/param_event.rs::ParamRamp::with_shape
-tutti-graph  with-prefix  crates/tutti-graph/src/graph.rs::NodeSpec::with_latency
-tutti-graph  with-prefix  crates/tutti-graph/src/graph.rs::NodeSpec::with_tail
-tutti-graph  with-prefix  crates/tutti-graph/src/node.rs::TransportPosition::with_recording
 tutti-graph  setter  crates/tutti-graph/src/builder.rs::GraphBuilder::set_output
 tutti-graph  setter  crates/tutti-graph/src/builder.rs::GraphBuilder::set_source
 tutti-graph  setter  crates/tutti-graph/src/builder.rs::GraphBuilder::set_sources

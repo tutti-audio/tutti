@@ -395,11 +395,11 @@ impl<F: Float> Node<F> for HarmonyNode {
     /// the block it was prepared for.
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(self.capacity)
+            .events(0, 1)
+            .event_capacity(self.capacity)
             // Event-only: the clip node's walk over its changes, nothing per
             // frame.
-            .with_cost(tutti_graph::Cost::Light)
+            .cost(tutti_graph::Cost::Light)
     }
 
     fn prepare(&mut self, p: &Prepare) {

@@ -63,7 +63,7 @@ struct ParamSink;
 impl Node for ParamSink {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_params(&[tutti_units::UnitParam::Cutoff, tutti_units::UnitParam::Q])
+            .params(&[tutti_units::UnitParam::Cutoff, tutti_units::UnitParam::Q])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -110,10 +110,10 @@ impl RampEvery {
 impl Node for RampEvery {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
-            .with_param_events()
-            .with_event_capacity(tutti_graph::testing::cap_of(16))
-            .with_latency(Latency::new(Samples::new(self.latency)))
+            .events(0, 1)
+            .param_events()
+            .event_capacity(tutti_graph::testing::cap_of(16))
+            .latency(Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {

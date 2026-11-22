@@ -156,8 +156,8 @@ impl<F: Float> Node<F> for AutomationLaneNode {
     /// One audio output.
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
-            .with_cost(tutti_graph::Cost::Moderate)
-            .with_tail(Tail::None)
+            .cost(tutti_graph::Cost::Moderate)
+            .tail(Tail::None)
     }
 
     /// Nothing is derived from the rate: the beat arrives in each block's

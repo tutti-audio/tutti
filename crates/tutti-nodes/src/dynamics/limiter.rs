@@ -204,7 +204,7 @@ impl<F: Float> Kernel for LimiterKernel<F> {
             Buses::main(self.input),
             Buses::NONE.with(output).expect("one bus"),
         )
-        .with_cost(Cost::Moderate)
+        .cost(Cost::Moderate)
     }
 
     /// Sizes the delay from the lookahead at `rate`: a re-prepare empties it.

@@ -497,11 +497,11 @@ impl<F: tutti_buffers::Float> Node<F> for EventInletNode {
     /// No audio; one event output of [`capacity`](EventInletNode::capacity).
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
+            .events(0, 1)
             // `pair` checked that it fits.
-            .with_event_capacity(self.capacity.non_zero())
+            .event_capacity(self.capacity.non_zero())
             // Event-only: a ring drain, work per event, nothing per frame.
-            .with_cost(Cost::Light)
+            .cost(Cost::Light)
     }
 
     /// A new rate moves what waits, and the clock it published, to the same

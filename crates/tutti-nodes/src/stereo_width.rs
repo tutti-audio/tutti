@@ -105,7 +105,7 @@ impl<F: Float + Lerp> Kernel for StereoWidthKernel<F> {
     const GRID: usize = COEFF_INTERVAL;
 
     fn shape(&self) -> Shape {
-        Shape::through(BusTopology::STEREO).with_cost(Cost::Light)
+        Shape::through(BusTopology::STEREO).cost(Cost::Light)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {

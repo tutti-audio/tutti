@@ -1465,15 +1465,15 @@ impl<F: Float> Node<F> for MemorySource<F> {
     /// skipped. Its tail is `ring_out`: none when placed.
     fn shape(&self) -> Shape {
         Shape::source_unassigned(self.channels)
-            .with_tail(self.ring_out(StretchFactor::UNITY))
+            .tail(self.ring_out(StretchFactor::UNITY))
             // A cubic Hermite read per frame and channel, behind the
             // placement gate: measured 16–17 ns per frame and channel,
             // placed or free-running, against `SvfFilterNode`'s 7.2 and
             // `Heavy`'s 256.
-            .with_cost(tutti_graph::Cost::Moderate)
+            .cost(tutti_graph::Cost::Moderate)
             // Its gain, as a voice's: block-rate, read on the block's last
             // frame.
-            .with_param_addrs(self.declared_ports().as_slice())
+            .param_addrs(self.declared_ports().as_slice())
     }
 
     /// The session rate: the conversion from the wave's rate is derived from

@@ -34,7 +34,7 @@ struct Undeclared<N>(N);
 
 impl<N: Node> Node for Undeclared<N> {
     fn shape(&self) -> Shape {
-        self.0.shape().with_cost(Cost::Heavy)
+        self.0.shape().cost(Cost::Heavy)
     }
     fn prepare(&mut self, p: &Prepare) {
         self.0.prepare(p);
@@ -57,7 +57,7 @@ struct Recorder(Seen);
 
 impl Node for Recorder {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0)
+        Shape::source_unassigned(ChannelLayout::MONO).events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {

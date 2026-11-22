@@ -53,9 +53,9 @@ fn data(u: &Ump) -> f32 {
 
 impl Node for Keeper {
     fn shape(&self) -> Shape {
-        let s = Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO)).with_events(1, 0);
+        let s = Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO)).events(1, 0);
         if self.chases {
-            s.with_chase(self.capacity)
+            s.chase(self.capacity)
         } else {
             s
         }
@@ -90,8 +90,8 @@ struct Wide(u8);
 impl Node for Wide {
     fn shape(&self) -> Shape {
         Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO))
-            .with_events(1, 0)
-            .with_chase(3)
+            .events(1, 0)
+            .chase(3)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -134,7 +134,7 @@ struct Edge0(Ump, Arc<AtomicBool>);
 
 impl Node for Edge0 {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1)
+        Shape::EMPTY.events(0, 1)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -467,7 +467,7 @@ struct Mute;
 
 impl Node for Mute {
     fn shape(&self) -> Shape {
-        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO)).with_chase(3)
+        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO)).chase(3)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

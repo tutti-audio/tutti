@@ -172,10 +172,10 @@ impl Liar {
 impl Node for Liar {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
-            .with_events(1, 0)
-            .with_latency(Latency::new(Samples::new(self.declared)))
-            .with_tail(Tail::Unknown)
-            .with_event_resolution(self.resolution)
+            .events(1, 0)
+            .latency(Latency::new(Samples::new(self.declared)))
+            .tail(Tail::Unknown)
+            .event_resolution(self.resolution)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -336,7 +336,7 @@ struct Tags(tutti_fixtures::Record<(u64, u32)>);
 
 impl Node for Tags {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0)
+        Shape::source_unassigned(ChannelLayout::MONO).events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
@@ -497,7 +497,7 @@ fn the_tail_contract_catches_a_report_that_is_too_short() {
     );
     assert!(check(RingingNode::new(ceiling, 300, 300).wide(2)));
     assert!(check(
-        RingingNode::new(ceiling, 300, 300).with_latency(Samples::new(37))
+        RingingNode::new(ceiling, 300, 300).latency(Samples::new(37))
     ));
     assert!(check(RingingNode::new(
         Tail::Unbounded,

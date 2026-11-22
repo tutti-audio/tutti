@@ -52,7 +52,7 @@ impl Bands {
 
 impl Node for Bands {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::from_count(2)).with_param_addrs(&[BAND0, BAND1])
+        Shape::source_unassigned(ChannelLayout::from_count(2)).param_addrs(&[BAND0, BAND1])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -106,9 +106,9 @@ struct Steps {
 impl Node for Steps {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
-            .with_param_events()
-            .with_event_capacity(tutti_graph::testing::cap_of(8))
+            .events(0, 1)
+            .param_events()
+            .event_capacity(tutti_graph::testing::cap_of(8))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -427,7 +427,7 @@ struct Wide(Vec<UnitAddr>);
 
 impl Node for Wide {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::from_count(2)).with_param_addrs(&self.0)
+        Shape::source_unassigned(ChannelLayout::from_count(2)).param_addrs(&self.0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

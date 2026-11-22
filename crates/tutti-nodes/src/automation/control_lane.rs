@@ -1083,12 +1083,12 @@ impl<F: Float> Node<F> for ControlLaneNode {
     /// `Moderate`'s model is 200 + 8 a frame and `Light`'s 100 + 1.
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(1, 1)
-            .with_param_events()
-            .with_event_capacity(SOURCE_EVENT_CAPACITY)
-            .with_cost(Cost::Moderate)
-            .with_tail(Tail::None)
-            .with_no_note_events()
+            .events(1, 1)
+            .param_events()
+            .event_capacity(SOURCE_EVENT_CAPACITY)
+            .cost(Cost::Moderate)
+            .tail(Tail::None)
+            .no_note_events()
     }
 
     fn prepare(&mut self, _: &Prepare) {
