@@ -12,9 +12,9 @@ use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::contract::assert_param_fork;
 use tutti_graph::{
-    Cx, DeclaredNode, Editor, EventOutputPort, Executor, HasParam, Io, Node, OutputPort,
-    ParamEvent, ParamIn, ParamInput, ParamNode, ParamSegment, PortSource, Prepare, Shape, Status,
-    TransportPosition, declare_params,
+    Cx, Editor, EventOutputPort, Executor, HasParam, Io, Node, OutputPort, ParamEvent, ParamIn,
+    ParamInput, ParamNode, ParamSegment, PortSource, Prepare, Shape, Status, TransportPosition,
+    declare_params,
 };
 use tutti_rt::{AtomicWord, atomic_word};
 use tutti_units::{Amplitude, Db, Hz, Mix, Q, Samples, UnitAddr, UnitParam};
@@ -53,7 +53,7 @@ fn show(out: &mut [f32], input: ParamInput<'_>, base: f64) {
 impl Node for Sparse {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::from_count(3))
-            .param_addrs(DeclaredNode::param_ports(self).as_slice())
+            .param_addrs(self.declared_ports().as_slice())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -68,7 +68,7 @@ impl Node for Sparse {
     }
     fn reset(&mut self) {}
     fn param_base(&self, port: usize) -> Option<f64> {
-        DeclaredNode::param_base(self, port)
+        self.declared_base(port)
     }
 }
 
@@ -163,7 +163,7 @@ fn present() -> Sparse {
 fn an_absent_option_entry_is_no_port_and_a_read_follows_its_row() {
     let node = sparse();
     assert_eq!(
-        DeclaredNode::param_ports(&node).as_slice(),
+        node.declared_ports().as_slice(),
         [
             UnitAddr::from(UnitParam::Q),
             UnitAddr::from(UnitParam::Cutoff)
@@ -190,14 +190,14 @@ fn an_absent_option_entry_is_no_port_and_a_read_follows_its_row() {
 fn a_present_option_entry_is_a_port_at_its_row() {
     let node = present();
     assert_eq!(
-        DeclaredNode::param_ports(&node).as_slice(),
+        node.declared_ports().as_slice(),
         [
             UnitAddr::from(UnitParam::Volume),
             UnitAddr::from(UnitParam::Q),
             UnitAddr::from(UnitParam::Cutoff),
         ]
     );
-    assert_eq!(DeclaredNode::param_base(&node, 0), Some(0.8));
+    assert_eq!(node.declared_base(0), Some(0.8));
     assert_eq!(node.param_set().get(UnitParam::Volume), Some(0.8));
 
     let [cutoff, q, volume] = render(present(), &[(UnitAddr::from(UnitParam::Volume), 0.3)]);
@@ -215,9 +215,9 @@ fn a_set_only_entry_is_addressable_and_no_port() {
     unit_of::<_, Mix, { UnitParam::Wet as u16 }>(&node);
     unit_of::<_, Db, { UnitParam::Threshold as u16 }>(&node);
 
-    let ports = DeclaredNode::param_ports(&node);
+    let ports = node.declared_ports();
     assert_eq!(ports.as_slice().len(), 2, "no port past the `;`");
-    assert_eq!(DeclaredNode::param_base(&node, 2), None);
+    assert_eq!(node.declared_base(2), None);
 
     let set = node.param_set();
     assert_eq!(set.get(UnitParam::Wet), Some(0.0));
@@ -265,8 +265,7 @@ impl From<SwitchedConfig> for Switched {
 
 impl Node for Switched {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO)
-            .param_addrs(DeclaredNode::param_ports(self).as_slice())
+        Shape::source_unassigned(ChannelLayout::MONO).param_addrs(self.declared_ports().as_slice())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -276,7 +275,7 @@ impl Node for Switched {
     }
     fn reset(&mut self) {}
     fn param_base(&self, port: usize) -> Option<f64> {
-        DeclaredNode::param_base(self, port)
+        self.declared_base(port)
     }
 }
 
@@ -380,8 +379,7 @@ impl From<LonelyConfig> for Lonely {
 
 impl Node for Lonely {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(self.layout)
-            .param_addrs(DeclaredNode::param_ports(self).as_slice())
+        Shape::source_unassigned(self.layout).param_addrs(self.declared_ports().as_slice())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -397,7 +395,7 @@ impl Node for Lonely {
 fn a_node_with_no_params_is_added_bare_and_renders() {
     let node = Lonely::from(LonelyConfig::new(ChannelLayout::MONO));
     assert_eq!(node.layout, ChannelLayout::MONO);
-    assert!(DeclaredNode::param_ports(&node).as_slice().is_empty());
+    assert!(node.declared_ports().as_slice().is_empty());
     assert_eq!(node.param_set().params().count(), 0);
     assert!(Rig::new(node).block().iter().all(|&x| x == 2.0));
 }
