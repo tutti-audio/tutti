@@ -236,7 +236,7 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
         ForeignLaneConfig::new(
             ParamId::new(0),
             ControlProgram::default(),
-            ParamRange::new(0.0, 1.0),
+            ParamRange::of(0.0, 1.0),
         )
         .knob(0.25),
     );

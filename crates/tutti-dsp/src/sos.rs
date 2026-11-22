@@ -23,6 +23,7 @@ mod tilt;
 use tutti_units::{Db, Hz, SampleRate, Samples, Seconds};
 
 use crate::filter::{integrator_gains, section_l1};
+use crate::model::single_output;
 use crate::{Biquad, Complex64, DecayTime, Lti, SvfDesign, System, svf_step};
 
 pub use analog::{
@@ -200,16 +201,12 @@ impl Lti for Sos {
     /// The product of the sections' responses, each read from its state-variable form.
     fn frequency_response(&self, output: usize, freqs: &[Hz], gain: &mut [Complex64]) {
         let forms: Vec<_> = self.sections.iter().map(svf_form).collect();
-        for (g, f) in gain.iter_mut().zip(freqs) {
-            *g = if output == 0 {
-                let w = f.angle_per_frame(self.rate).get();
-                forms
-                    .iter()
-                    .fold(Complex64::new(1.0, 0.0), |h, s| h * s.response(w))
-            } else {
-                Complex64::new(f64::NAN, f64::NAN)
-            };
-        }
+        single_output(output, freqs, gain, |f| {
+            let w = f.angle_per_frame(self.rate).get();
+            forms
+                .iter()
+                .fold(Complex64::new(1.0, 0.0), |h, s| h * s.response(w))
+        });
     }
 
     /// The slowest section's pole modulus: the cascade's poles are the sections'.

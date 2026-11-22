@@ -225,7 +225,7 @@ impl Member {
         sends: &mut Vec<(MidiGroup, CiMessage)>,
         changes: &mut CiChanges,
     ) {
-        let muid = ask.peer.muid();
+        let muid = ask.peer.at().peer().muid;
         let Some(initiator) = self.properties.get_mut(&muid) else {
             changes.answers.push((
                 self.peer_id(muid),
@@ -344,7 +344,7 @@ impl Running {
             let Some(member) = self
                 .members
                 .iter_mut()
-                .find(|m| m.group == ask.peer.group())
+                .find(|m| m.group == ask.peer.at().peer().group)
             else {
                 changes.answers.push((
                     ask.peer.at().peer(),

@@ -25,13 +25,12 @@ use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, U7, Ump, Voi
 use tutti_units::{Amplitude, SampleRate, Seconds, Semitones};
 use tutti_voicing::{MasterGain, VoiceAllocator, VoiceConfig};
 
-use crate::array_math::ArrayMath;
 use crate::channel::Channel;
 use crate::config::SoundFontConfig;
 use crate::error::{Error, Result};
 use crate::patch::PresetPatch;
 use crate::render::Render;
-use crate::soundfont_math::SoundFontMath;
+use crate::soundfont_math::NON_AUDIBLE;
 use crate::voices::Voices;
 use tutti_ump::ControlValue;
 
@@ -288,7 +287,7 @@ impl<F: Float + SimdLanes> Player<F> {
             heard: Heard::default(),
             block_read: render.block_len(),
             inverse_block_size: F::from_design(1.0 / render.block_len() as f64),
-            audible_floor: F::from_unit(SoundFontMath::NON_AUDIBLE),
+            audible_floor: F::from_unit(NON_AUDIBLE),
         })
     }
 
@@ -674,10 +673,26 @@ fn write_block<F: Float>(
     }
 
     if (current_gain - previous_gain).abs() < F::lit(1.0e-3) {
-        ArrayMath::multiply_add(current_gain, source, destination);
+        multiply_add(current_gain, source, destination);
     } else {
         let step = inverse_block_size * (current_gain - previous_gain);
-        ArrayMath::multiply_add_slope(previous_gain, step, source, destination);
+        multiply_add_slope(previous_gain, step, source, destination);
     }
     true
+}
+
+/// `destination += a * x`, frame by frame.
+fn multiply_add<F: Float>(a: F, x: &[F], destination: &mut [F]) {
+    for (x, destination) in x.iter().zip(destination.iter_mut()) {
+        *destination += a * *x;
+    }
+}
+
+/// [`multiply_add`] with `a` rising by `step` a frame.
+fn multiply_add_slope<F: Float>(a: F, step: F, x: &[F], destination: &mut [F]) {
+    let mut a = a;
+    for (x, destination) in x.iter().zip(destination.iter_mut()) {
+        *destination += a * *x;
+        a += step;
+    }
 }

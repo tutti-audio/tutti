@@ -4,8 +4,8 @@
 
 use tutti_buffers::Float;
 use tutti_dsp::{
-    PanLaw, SOLVE_CEILING, SimdLanes, SvfCoefficients, SvfControls, SvfModel, SvfType, pan_gains,
-    svf_step,
+    Lfo, LfoWave, PanLaw, SOLVE_CEILING, SimdLanes, SvfCoefficients, SvfControls, SvfModel,
+    SvfType, pan_gains, svf_step,
 };
 use tutti_sf2::{SamplePool, Side};
 use tutti_ump::{MidiChannel, NoteNumber, RegisteredPerNoteController};
@@ -22,14 +22,24 @@ use tutti_voicing::{ChannelState, Glide, NoteControl};
 pub(crate) const QUICK_RELEASE: Seconds = Seconds::new(0.01);
 
 use crate::channel::Channel;
-use crate::lfo::Lfo;
-use crate::modulation_envelope::ModulationEnvelope;
+use crate::envelope::SoundFontEnvelope;
 use crate::oscillator::Oscillator;
 use crate::region_ex::RegionEx;
 use crate::region_pair::RegionPair;
 use crate::render::Render;
-use crate::soundfont_math::SoundFontMath;
-use crate::volume_envelope::VolumeEnvelope;
+use crate::soundfont_math::NON_AUDIBLE;
+
+/// A triangle LFO (SF2 2.04 section 8.1.2, generators 21 to 24) after `delay`, read once a
+/// chunk: its value is a closed form of the frames elapsed, so it does not drift however long
+/// the voice sounds. A frequency of a millihertz or less is no LFO: `None`, which reads zero.
+fn triangle_lfo(delay: Seconds, frequency: Hz, rate: SampleRate) -> Option<Lfo> {
+    (frequency > Hz::new(1.0e-3)).then(|| Lfo::new(LfoWave::Triangle, frequency, rate).delay(delay))
+}
+
+/// The LFO's value in `-1..=1` at the last chunk, zero for none.
+fn lfo_value(lfo: &Option<Lfo>) -> f64 {
+    lfo.as_ref().map_or(0.0, |lfo| lfo.value().get())
+}
 
 /// The voice's low-pass for a cutoff and a resonance as a linear peak
 /// height above the DC gain (SF2 2.04 section 8.1.3, generators 8 and 9: the
@@ -117,11 +127,12 @@ struct GlideRun {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub(crate) struct Voice<F: Float + SimdLanes> {
-    vol_env: VolumeEnvelope,
-    mod_env: ModulationEnvelope,
+    vol_env: SoundFontEnvelope,
+    mod_env: SoundFontEnvelope,
 
-    vib_lfo: Lfo,
-    mod_lfo: Lfo,
+    /// The vibrato and modulation LFOs: `None` for one with no frequency, which reads zero.
+    vib_lfo: Option<Lfo>,
+    mod_lfo: Option<Lfo>,
 
     oscillator: Oscillator,
     rate: SampleRate,
@@ -199,10 +210,10 @@ pub(crate) struct Voice<F: Float + SimdLanes> {
 impl<F: Float + SimdLanes> Voice<F> {
     pub(crate) fn new(settings: &Render) -> Self {
         Self {
-            vol_env: VolumeEnvelope::new(settings),
-            mod_env: ModulationEnvelope::new(settings),
-            vib_lfo: Lfo::new(settings),
-            mod_lfo: Lfo::new(settings),
+            vol_env: SoundFontEnvelope::volume(settings),
+            mod_env: SoundFontEnvelope::modulation(settings),
+            vib_lfo: None,
+            mod_lfo: None,
             oscillator: Oscillator::new(settings),
             rate: settings.rate(),
             low_pass: None,
@@ -306,8 +317,16 @@ impl<F: Float + SimdLanes> Voice<F> {
 
         RegionEx::start_volume_envelope(&mut self.vol_env, region, key, velocity);
         RegionEx::start_modulation_envelope(&mut self.mod_env, region, key, velocity);
-        RegionEx::start_vibrato(&mut self.vib_lfo, region, key, velocity);
-        RegionEx::start_modulation(&mut self.mod_lfo, region, key, velocity);
+        self.vib_lfo = triangle_lfo(
+            region.delay_vibrato_lfo(),
+            region.frequency_vibrato_lfo(),
+            self.rate,
+        );
+        self.mod_lfo = triangle_lfo(
+            region.delay_modulation_lfo(),
+            region.frequency_modulation_lfo(),
+            self.rate,
+        );
         RegionEx::start_oscillator(&mut self.oscillator, region);
         self.history = [F::ZERO; 2];
         self.low_pass = low_pass(self.cutoff, self.resonance, self.rate);
@@ -426,7 +445,7 @@ impl<F: Float + SimdLanes> Voice<F> {
 
     /// The volume envelope's level now: what the core steals by.
     pub(crate) fn level(&self) -> Amplitude {
-        self.vol_env.value()
+        self.vol_env.level()
     }
 
     pub(crate) fn process(
@@ -436,27 +455,30 @@ impl<F: Float + SimdLanes> Voice<F> {
         states: &[ChannelState; MidiChannel::COUNT as usize],
         bends: &[Semitones; MidiChannel::COUNT as usize],
     ) -> bool {
-        if self.note_gain < SoundFontMath::NON_AUDIBLE {
+        if self.note_gain < NON_AUDIBLE {
             return false;
         }
 
         let channel_info = &channels[self.channel as usize];
         let state = &states[self.channel as usize];
 
-        if !self.vol_env.process(self.block.len()) {
+        self.vol_env.advance(self.block.len());
+        if !self.vol_env.audible() {
             return false;
         }
 
-        self.mod_env.process(self.block.len());
-        self.vib_lfo.process();
-        self.mod_lfo.process();
+        self.mod_env.advance(self.block.len());
+        let chunk = Samples::new(self.block.len());
+        for lfo in [&mut self.vib_lfo, &mut self.mod_lfo].into_iter().flatten() {
+            lfo.advance(chunk);
+        }
 
         // The wheel's depth (the Modulation Depth Range of RPN 5 over its
         // position) and the generator's.
         let vib_pitch_change = (Semitones::from(state.modulation_depth()) + self.vib_lfo_to_pitch)
-            * self.vib_lfo.value().get();
-        let mod_pitch_change = self.mod_lfo_to_pitch * self.mod_lfo.value().get()
-            + self.mod_env_to_pitch * self.mod_env.value().get();
+            * lfo_value(&self.vib_lfo);
+        let mod_pitch_change = self.mod_lfo_to_pitch * lfo_value(&self.mod_lfo)
+            + self.mod_env_to_pitch * self.mod_env.position().get();
         // The core's pitch for the channel: the wheel over its sensitivity and
         // the Channel Tuning (RP-022).
         let channel_pitch_change = bends[self.channel as usize];
@@ -475,8 +497,8 @@ impl<F: Float + SimdLanes> Voice<F> {
         }
 
         if self.dynamic_cutoff {
-            let cents = self.mod_lfo_to_cutoff * self.mod_lfo.value().get()
-                + self.mod_env_to_cutoff * self.mod_env.value().get();
+            let cents = self.mod_lfo_to_cutoff * lfo_value(&self.mod_lfo)
+                + self.mod_env_to_cutoff * self.mod_env.position().get();
             let new_cutoff = self.cutoff * cents.to_pitch_ratio();
 
             // The cutoff change is limited within x0.5 and x2 to reduce pop noise.
@@ -514,9 +536,9 @@ impl<F: Float + SimdLanes> Voice<F> {
         // the one note.
         let note_volume = self.note.volume.get();
         let mut mix_gain = self.note_gain
-            * (channel_gain * note_volume * note_volume * self.vol_env.value().get());
+            * (channel_gain * note_volume * note_volume * self.vol_env.level().get());
         if self.dynamic_volume {
-            let level = Db::new(self.mod_lfo_to_volume.get() * self.mod_lfo.value().get());
+            let level = Db::new(self.mod_lfo_to_volume.get() * lfo_value(&self.mod_lfo));
             mix_gain *= level.to_amplitude().get();
         }
 

@@ -25,13 +25,10 @@
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-use tutti_midi_ci::Muid;
 use tutti_midi_ci::{
     PeResource, PeResourceList, ResourceEvent, ResourceGet, ResourceSet, ResponderEvent,
     SubscribeId,
 };
-use tutti_midi_device::MidiDeviceId;
-use tutti_ump::MidiGroup;
 
 use crate::peer::{PeerRef, PeerRequestError};
 
@@ -49,24 +46,6 @@ impl PropertyPeer {
     #[must_use]
     pub fn resources(&self) -> &PeResourceList {
         &self.resources
-    }
-
-    /// The input device the peer was found on.
-    #[must_use]
-    pub const fn device(&self) -> &MidiDeviceId {
-        self.at.device()
-    }
-
-    /// The Group of the connection the peer answered on.
-    #[must_use]
-    pub const fn group(&self) -> MidiGroup {
-        self.at.peer().group
-    }
-
-    /// The peer's MUID.
-    #[must_use]
-    pub const fn muid(&self) -> Muid {
-        self.at.peer().muid
     }
 
     /// The peer, as every handle of MIDI-CI names one: the ResourceList the

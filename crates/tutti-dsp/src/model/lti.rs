@@ -64,3 +64,48 @@ pub trait Lti: System {
         self.spectral_radius() < 1.0
     }
 }
+
+/// Fills `gain` for a one-output system: `response(f)` at each of `freqs` for output 0, NaN
+/// for any other output, as [`Lti::frequency_response`] answers.
+pub(crate) fn single_output(
+    output: usize,
+    freqs: &[Hz],
+    gain: &mut [Complex64],
+    mut response: impl FnMut(Hz) -> Complex64,
+) {
+    for (g, f) in gain.iter_mut().zip(freqs) {
+        *g = if output == 0 {
+            response(*f)
+        } else {
+            Complex64::new(f64::NAN, f64::NAN)
+        };
+    }
+}
+
+/// The peak of `mag` over `pts` (angles in `0..=pi`, any order, duplicates allowed): the
+/// largest at a point, refined by golden section between its neighbours, then raised by a
+/// part in a million so that it is a sufficient bound to that figure.
+pub(crate) fn peak_magnitude(mut pts: Vec<f64>, mag: impl Fn(f64) -> f64) -> f64 {
+    pts.retain(|w| (0.0..=core::f64::consts::PI).contains(w));
+    pts.sort_by(f64::total_cmp);
+    pts.dedup();
+    let best = pts
+        .iter()
+        .enumerate()
+        .max_by(|a, b| mag(*a.1).total_cmp(&mag(*b.1)))
+        .map_or(0, |(i, _)| i);
+    let (mut a, mut b) = (
+        pts[best.saturating_sub(1)],
+        pts[(best + 1).min(pts.len() - 1)],
+    );
+    let phi = 0.618_033_988_749_894_9;
+    for _ in 0..80 {
+        let (x, y) = (b - phi * (b - a), a + phi * (b - a));
+        if mag(x) < mag(y) {
+            a = x;
+        } else {
+            b = y;
+        }
+    }
+    mag(pts[best]).max(mag(0.5 * (a + b))) * (1.0 + 1e-6)
+}

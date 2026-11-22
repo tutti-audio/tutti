@@ -219,7 +219,7 @@ impl NodeMix {
     pub const ADDR: UnitAddr = UnitAddr::new(UnitParam::Wet, u8::MAX);
 
     /// The range a mix's port gets without an entry: the whole blend.
-    pub const DEFAULT_RANGE: ParamRange = ParamRange::new(0.0, 1.0);
+    pub const DEFAULT_RANGE: ParamRange = ParamRange::of(0.0, 1.0);
 
     /// `range` as the lane clamps to it: inside `0..=1` whatever was asked (a
     /// mix off the ends is not a blend), so a range a host sets wider than
@@ -228,7 +228,7 @@ impl NodeMix {
     #[must_use]
     pub fn lane_range(range: ParamRange) -> ParamRange {
         let (lo, hi) = range.ordered();
-        ParamRange::new(lo.clamp(0.0, 1.0), hi.clamp(0.0, 1.0))
+        ParamRange::of(lo.clamp(0.0, 1.0), hi.clamp(0.0, 1.0))
     }
 
     /// Whether `mix` can be one: finite and in `0..=1` (what
