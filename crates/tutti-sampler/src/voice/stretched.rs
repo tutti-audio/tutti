@@ -76,13 +76,14 @@
 //! position at the loop's start, on the history before it, and primes like a clip placed
 //! ahead (`preroll`). At the wrap the two swap: the spare, primed to sound the loop's start
 //! on the wrap's frame, is the voice's, and the vocoder it replaces seats again for the
-//! next wrap. A disk voice's wrap is a seek: its ring follows the voice's reads and holds
-//! nothing of the loop's start ahead of the wrap, so no spare primes and the voice is
-//! silent for the priming after the wrap. The spare is built
-//! with the voice, control-side, whether or not a loop comes (a voice cannot see the
-//! transport's loop before the audio thread does), so a loop set while the voice plays
-//! allocates nothing, and is primed for from the first wrap that is far enough off. A
-//! wrap that comes sooner than that after the loop is set flushes as a seek does.
+//! next wrap. A pool's handle allocates the spare control-side when the transport's loop is
+//! set (or the voice is added or moved) under a loop whose start the voice's window covers,
+//! and sends it through the command ring; it retires it the same way when the loop moves
+//! off the voice. A loop set while the voice plays is primed for from the first wrap that
+//! is far enough off once the spare has arrived. A wrap that comes sooner than that, or
+//! that finds no spare, flushes as a seek does. A disk voice never has a spare (its ring
+//! follows the voice's reads and holds nothing of the loop's start ahead of the wrap), so
+//! its wrap is a seek, and a voice without a spare is silent for the priming after one.
 //!
 //! The cursor is an origin and the frames taken since: a position is the origin
 //! plus the step times all of them, one product, so the frames a source is read at
@@ -127,28 +128,43 @@ const WAVE_START: SamplePosition = SamplePosition::new(0.0);
 /// never reads it.
 const NOMINAL_RATE: SampleRate = SampleRate::SR_48K;
 
-/// A stretching voice's vocoders: the one it sounds through, and a second that primes
-/// for a loop wrap ahead of it and takes over at the wrap (see the module docs).
+/// A stretching voice's vocoders: the one it sounds through, and, for a voice whose
+/// window covers the start of the transport's loop, a second that primes for a loop wrap
+/// ahead of it and takes over at the wrap (see the module docs).
 ///
-/// Every stretched voice carries the spare, built with it control-side, because the loop
-/// region is known only on the audio thread, in the block's `Env`: a voice cannot tell
-/// before then whether a loop comes, and nothing may be built there.
+/// A pool's handle builds the spare control-side and sends it through the command ring
+/// ([`VoicePoolHandle`](crate::VoicePoolHandle)): it knows the loop region and each voice's
+/// window, so only a voice under a loop carries one, at most one per resident voice
+/// (`MAX_RESIDENT_VOICES`), and the audio thread neither builds nor frees one (a spare
+/// that leaves goes back through the retirement ring). A standalone
+/// [`VoiceNode`](crate::VoiceNode) has no command ring, so it carries its spare from
+/// construction. A voice with no spare that meets a wrap flushes as a seek does: it is
+/// silent for [`prime`] frames after the wrap.
 pub(crate) struct Vocoders<F: SamplerFloat> {
     pub(crate) live: PhaseVocoder<F>,
-    pub(crate) spare: PhaseVocoder<F>,
+    pub(crate) spare: Option<Box<PhaseVocoder<F>>>,
+}
+
+fn geometry() -> ColaGeometry {
+    let window = WindowLength::new(WINDOW).expect("BUG: a nonzero window");
+    let hop = HopSize::new(HOP).expect("BUG: a nonzero hop");
+    ColaGeometry::try_from(StftGeometry::new(NOMINAL_RATE, window, hop))
+        .expect("BUG: a hop of a quarter window is COLA-valid")
 }
 
 /// A voice's vocoders over `width` channels on its fixed geometry (a 2048-frame Hann
-/// window, hop 512). Allocates: control thread only.
-pub(crate) fn vocoder<F: SamplerFloat>(width: ChannelLayout) -> Box<Vocoders<F>> {
-    let window = WindowLength::new(WINDOW).expect("BUG: a nonzero window");
-    let hop = HopSize::new(HOP).expect("BUG: a nonzero hop");
-    let geometry = ColaGeometry::try_from(StftGeometry::new(NOMINAL_RATE, window, hop))
-        .expect("BUG: a hop of a quarter window is COLA-valid");
+/// window, hop 512), with a spare when `spare`. Allocates: control thread only.
+pub(crate) fn vocoder<F: SamplerFloat>(width: ChannelLayout, spare: bool) -> Box<Vocoders<F>> {
     Box::new(Vocoders {
-        live: PhaseVocoder::new(width, geometry),
-        spare: PhaseVocoder::new(width, geometry),
+        live: PhaseVocoder::new(width, geometry()),
+        spare: spare.then(|| spare_vocoder(width)),
     })
+}
+
+/// A spare vocoder over `width` channels, on the voices' geometry. Allocates: control
+/// thread only.
+pub(crate) fn spare_vocoder<F: SamplerFloat>(width: ChannelLayout) -> Box<PhaseVocoder<F>> {
+    Box::new(PhaseVocoder::new(width, geometry()))
 }
 
 /// The output frames a seat primes: a window, the ramp a seated stream takes to fill

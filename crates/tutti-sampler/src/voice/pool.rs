@@ -11,7 +11,7 @@ use tutti_buffers::MAX_CHANNELS;
 
 use super::clock::{BlockClock, Clock};
 use super::command::{
-    COMMAND_CAPACITY, GainError, Live, MAX_RESIDENT_VOICES, Queued, Tier, VoiceCommand,
+    COMMAND_CAPACITY, GainError, Live, LoopFeed, MAX_RESIDENT_VOICES, Queued, Tier, VoiceCommand,
     VoicePoolHandle,
 };
 use super::loop_span::Loop;
@@ -30,7 +30,7 @@ use tutti_graph::{
     Status,
 };
 use tutti_rt::{CappedVec, Mutex, Overflow, RingReader, RingWriter, ring};
-use tutti_timeline::TempoReader;
+use tutti_timeline::{LoopReader, TempoReader};
 use tutti_units::{SampleRate, Tail};
 
 // ---------------------------------------------------------------------------
@@ -88,6 +88,9 @@ pub(crate) enum Retired<F: SamplerFloat> {
     /// The box the command carried: the drain moves it to the ring and the
     /// control thread frees it.
     Stretch(Box<Vocoders<F>>),
+    /// A spare vocoder a `SetSpare` took out of a slot (the loop moved off the voice), or
+    /// found no use for (the slot has one, or no vocoder, or is gone).
+    Spare(Box<tutti_dsp::PhaseVocoder<F>>),
     /// A wave a `ReplaceWave` let go of: the one a memory slot swapped out,
     /// or the new one when no memory slot took it.
     ///
@@ -145,6 +148,10 @@ pub struct PoolDrops {
     /// bound is wrong: a reservation exists for every value, and values
     /// retired after the handles are gone are parked in the pool.
     pub leaked: u64,
+    /// Spare vocoders (or their withdrawal) the handle could not queue because the
+    /// command ring or the retirement room was full. Nothing was sent: the next tick
+    /// retries, and a wrap met meanwhile flushes as a seek does.
+    pub spares_deferred: u64,
 }
 
 /// The retirement slots one handle has reserved of its ring: values in the
@@ -169,6 +176,11 @@ impl RetireRoom {
         true
     }
 
+    /// Whether a slot of `capacity` is left to reserve.
+    pub(crate) fn has_room(&self, capacity: usize) -> bool {
+        self.reserved.load(Ordering::Acquire) < capacity
+    }
+
     /// Gives `n` reserved slots back: by the drain for a command that
     /// retired nothing, by `collect_retired` for the values it took.
     pub(crate) fn release(&self, n: usize) {
@@ -186,6 +198,7 @@ pub(crate) struct DrainCounters {
     wave_swaps_ignored: AtomicU64,
     voices_refused: AtomicU64,
     leaked: AtomicU64,
+    pub(crate) spares_deferred: AtomicU64,
     /// Commands the handle has queued: not a drop, so not in [`PoolDrops`]. A
     /// pool whose count is zero holds the voices it was built with and no
     /// others, which is what lets a fork copy it.
@@ -215,6 +228,7 @@ impl DrainCounters {
             wave_swaps_ignored: load(&self.wave_swaps_ignored),
             voices_refused: load(&self.voices_refused),
             leaked: load(&self.leaked),
+            spares_deferred: load(&self.spares_deferred),
         }
     }
 }
@@ -280,11 +294,11 @@ impl<F: SamplerFloat> Voice<F> {
 /// source's own history (the file's, for a disk voice, from its ring) and sounds on time.
 ///
 /// A stretching voice's seat (a seek, or play from a position the transport has not stood
-/// at for 1 024 frames; a memory voice's loop wrap is primed for, by a second vocoder the
-/// voice carries) primes the vocoder over blocks and is silent for 1 024 frames (21 ms at
-/// 48 kHz) before it sounds on the timeline; a clip placed ahead of the playhead, or at a
-/// position the transport has stood at, primes before it plays and is not silent. A disk
-/// voice's loop wrap is a seek.
+/// at for 1 024 frames; a loop wrap is primed for, by a second vocoder the handle sends a
+/// memory voice under the loop) primes the vocoder over blocks and is silent for 1 024
+/// frames (21 ms at 48 kHz) before it sounds on the timeline; a clip placed ahead of the
+/// playhead, or at a position the transport has stood at, primes before it plays and is not
+/// silent. A voice without a spare, a disk voice's loop wrap included, reseats as a seek.
 pub struct VoicePool<F: SamplerFloat> {
     /// The resident slots, one per voice, summed in order. Reserved to
     /// `MAX_RESIDENT_VOICES` at construction, and the audio-thread
@@ -355,6 +369,8 @@ pub struct VoicePool<F: SamplerFloat> {
     /// lent once per block to the clock every slot's placement reads. Without
     /// one, a voice takes the tempo of the transport as the block carries it.
     tempo: Option<TempoReader>,
+    /// The transport's loop as the control side knows it, shared with the pool's handles.
+    loops: Arc<LoopFeed>,
 
     /// The lanes every slot's block read renders through, one voice at a
     /// time (`PlaybackSlot::render_into`). Built with the pool and sized
@@ -406,6 +422,7 @@ impl<F: SamplerFloat> VoicePool<F> {
             channels,
             clock: Clock::new(),
             tempo: None,
+            loops: Arc::default(),
             scratch: BlockScratch::new(UNPREPARED_FRAMES, channels.count() as usize),
             reach: Reach::Live,
         }
@@ -425,6 +442,26 @@ impl<F: SamplerFloat> VoicePool<F> {
     pub fn tempo(mut self, tempo: TempoReader) -> Self {
         self.tempo = Some(tempo);
         self
+    }
+
+    /// This pool reading the transport's loop through `reader`
+    /// ([`MotionFsm::loop_reader`](tutti_timeline::MotionFsm::loop_reader)).
+    ///
+    /// The pool's handle reads the loop region on its reclaim tick, control-side, and sends a spare
+    /// vocoder to each stretched voice whose window covers the loop's start (see
+    /// [`VoicePoolHandle::follow_loop`], which does the same for a pool no
+    /// transport is bound to). A fork reads no transport: its voices keep the spares
+    /// they were built with.
+    #[must_use]
+    pub fn loops(self, reader: LoopReader) -> Self {
+        self.loops.bind(reader);
+        self
+    }
+
+    /// The spare vocoders the pool's voices carry.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn spare_count(&self) -> usize {
+        self.voices.iter().filter(|s| s.has_spare()).count()
     }
 
     /// Output width — the node's audio outputs, as a [`ChannelLayout`]
@@ -491,6 +528,7 @@ impl<F: SamplerFloat> VoicePool<F> {
             streams: Arc::default(),
             free: Arc::default(),
             // Voices inserted before the handle was made are live too.
+            loops: Arc::clone(&self.loops),
             live: Arc::new(Mutex::new(
                 self.voices
                     .iter()
@@ -500,13 +538,13 @@ impl<F: SamplerFloat> VoicePool<F> {
                             VoiceSource::Disk(_) => Tier::Disk,
                         };
                         // Stamp 0: no add of the handle's, never refused.
-                        (
-                            s.id,
-                            Live {
-                                tier,
-                                generation: 0,
-                            },
-                        )
+                        let window = match &s.voice.source {
+                            VoiceSource::Memory(source) => source.window(),
+                            VoiceSource::Disk(_) => None,
+                        };
+                        let mut live = Live::added(tier, 0, window, s.stretch.is_some());
+                        live.spare = s.has_spare();
+                        (s.id, live)
                     })
                     .collect(),
             )),
@@ -706,7 +744,9 @@ impl<F: SamplerFloat> VoicePool<F> {
     /// stream's, set by the control thread first, then recorded). A streaming
     /// voice's direction is the stream's too, so it is only recorded.
     pub(crate) fn insert_voice(&mut self, id: SlotId, voice: Voice<F>) {
-        let stretch = stretch_wanted(&voice.play).then(|| stretched::vocoder::<F>(self.channels));
+        // A pool driven by hand has no handle to send a spare later: it carries one.
+        let stretch =
+            stretch_wanted(&voice.play).then(|| stretched::vocoder::<F>(self.channels, true));
         // Control side: a slot this replaces is freed here.
         drop(self.insert_voice_inner(id, Box::new(voice), stretch));
     }
@@ -903,6 +943,16 @@ impl<F: SamplerFloat> VoicePool<F> {
                     // both, so a host sends reverse ONCE.
                     self.apply_queued_direction(id, direction, forwarded);
                 }
+                VoiceCommand::SetSpare { id, spare } => {
+                    // Whatever the slot does not keep is retired, never dropped here.
+                    let left = match self.slot_mut(id) {
+                        Some(slot) => slot.set_spare(spare),
+                        None => spare,
+                    };
+                    if let Some(unit) = left {
+                        self.retire(Retired::Spare(unit));
+                    }
+                }
                 VoiceCommand::UpdateStretch {
                     id,
                     stretch_factor,
@@ -960,7 +1010,7 @@ impl<F: SamplerFloat> Clone for VoicePool<F> {
                         stretch: s
                             .stretch
                             .as_ref()
-                            .map(|_| stretched::vocoder::<F>(s.channels)),
+                            .map(|v| stretched::vocoder::<F>(s.channels, v.spare.is_some())),
                         cursor: None,
                         spare_cursor: None,
                         seats: 0,
@@ -975,6 +1025,7 @@ impl<F: SamplerFloat> Clone for VoicePool<F> {
             render_mode: self.render_mode,
             clock: Clock::new(),
             tempo: self.tempo.clone(),
+            loops: Arc::default(),
             channels: self.channels,
             scratch: BlockScratch::sized_like(&self.scratch),
             reach: self.reach,

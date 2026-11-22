@@ -171,7 +171,7 @@ impl<F: SamplerFloat> VoiceNode<F> {
     ) -> Result<Self, VoiceNodeError> {
         let channels = crate::voice_width(channels.into())?;
         GainError::check(voice.play.gain)?;
-        let stretch = stretch_wanted(&voice.play).then(|| stretched::vocoder::<F>(channels));
+        let stretch = stretch_wanted(&voice.play).then(|| stretched::vocoder::<F>(channels, true));
         let gain = Param::new(voice.play.gain);
         let window = voice.source.window();
         let play = voice.play;

@@ -21,6 +21,7 @@ use super::stretched::{
 use super::types::{Playback, SlotId, Voice, VoiceSource};
 use crate::SamplerFloat;
 use tutti_buffers::ChannelLayout;
+use tutti_dsp::PhaseVocoder;
 use tutti_units::{Beat, Bpm, Cents, ReadRate, SamplePosition, StretchFactor};
 
 /// A [`Voice`] plus the resident time-stretch DSP processor, and the read that
@@ -60,9 +61,8 @@ pub(crate) struct PlaybackSlot<F: SamplerFloat> {
     pub(crate) voice: Box<Voice<F>>,
     /// The phase vocoder, present once the voice has been asked to stretch or
     /// transpose: `None` reads the source dry, the common case. From then on it
-    /// always runs, at unity too, so the voice's latency
-    /// ([`PhaseVocoder::latency`](tutti_dsp::PhaseVocoder::latency)) is constant. It owns no copy of the
-    /// audio source: the read feeds it the source frames it asks for (see
+    /// always runs, at unity too, so the voice's sound does not change with its stretch. It owns
+    /// no copy of the audio source: the read feeds it the source frames it asks for (see
     /// `stretched`).
     ///
     /// Built on the control thread, never in the callback. A vocoder is built
@@ -198,9 +198,41 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
         let (Some(vocoders), Some(next)) = (&mut self.stretch, self.spare_cursor.take()) else {
             return false;
         };
-        std::mem::swap(&mut vocoders.live, &mut vocoders.spare);
+        let Some(spare) = &mut vocoders.spare else {
+            return false;
+        };
+        std::mem::swap(&mut vocoders.live, &mut **spare);
         self.cursor = Some(next);
         true
+    }
+
+    /// Adopts `incoming` as the spare vocoder (`Some`), or takes the spare out (`None`),
+    /// and returns what is left over for the caller to retire: the arrival when the slot
+    /// has no vocoder or already has a spare, else the spare taken out. Taking it out
+    /// unseats it. Allocation-free and free-free.
+    pub(crate) fn set_spare(
+        &mut self,
+        incoming: Option<Box<PhaseVocoder<F>>>,
+    ) -> Option<Box<PhaseVocoder<F>>> {
+        let Some(vocoders) = &mut self.stretch else {
+            return incoming;
+        };
+        match incoming {
+            Some(spare) if vocoders.spare.is_none() => {
+                vocoders.spare = Some(spare);
+                None
+            }
+            Some(surplus) => Some(surplus),
+            None => {
+                self.spare_cursor = None;
+                vocoders.spare.take()
+            }
+        }
+    }
+
+    /// Whether the slot carries a spare vocoder.
+    pub(crate) fn has_spare(&self) -> bool {
+        self.stretch.as_ref().is_some_and(|v| v.spare.is_some())
     }
 
     /// Update the stretch factors — the only entry point for mutating them.
@@ -367,7 +399,9 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
         let (stretch, mut spare) = match self.stretch.as_deref_mut() {
             Some(Vocoders { live, spare }) => {
                 live.retarget(&stretched::controls(&play));
-                spare.retarget(&stretched::controls(&play));
+                if let Some(spare) = spare.as_deref_mut() {
+                    spare.retarget(&stretched::controls(&play));
+                }
                 (
                     Some(Stretch {
                         consumption: live.read_rate(),
@@ -375,7 +409,7 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
                         cursor: &mut self.cursor,
                         seats: &mut self.seats,
                     }),
-                    Some(Stretch {
+                    spare.as_deref_mut().map(|spare| Stretch {
                         consumption: spare.read_rate(),
                         vocoder: spare,
                         cursor: &mut self.spare_cursor,
@@ -615,11 +649,16 @@ fn wrap_ahead(
     }
     let beat = run.beat_at(from.max(run.start));
     let (start, end) = (region.start(), region.end());
-    let covers = window.start <= start && window.duration.is_none_or(|d| start < window.start + d);
-    (covers && beat < end).then(|| {
+    (window_covers(window, start) && beat < end).then(|| {
         let frames = clock.frames_between(beat, end, run.tempo(), run.sample_rate());
         (frames.get(), start, run.tempo())
     })
+}
+
+/// Whether `window` covers `beat`: the test a voice's wrap is primed for under, and a
+/// pool's handle sends it a spare by.
+pub(crate) fn window_covers(window: VoiceWindow, beat: Beat) -> bool {
+    window.start <= beat && window.duration.is_none_or(|d| beat < window.start + d)
 }
 
 /// What [`PlaybackSlot::render_lanes`] left for its piece.
