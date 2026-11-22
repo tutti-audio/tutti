@@ -144,7 +144,7 @@ pub enum ControllerIndexError {
         kind: CtrlKind,
     },
     /// The index has the wrong number of integers for the type.
-    #[error("a `{}` controller takes no ctrlIndex of {integers} integers", .kind.as_str())]
+    #[error("a `{}` controller's ctrlIndex does not take {integers} integers", .kind.as_str())]
     Shape {
         /// The `ctrlType`.
         kind: CtrlKind,
