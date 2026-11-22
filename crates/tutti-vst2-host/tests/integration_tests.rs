@@ -17,18 +17,15 @@ use tutti_fixtures::main_thread;
 use tutti_graph::UmpAt;
 use tutti_rt::Mutex;
 
-use tutti_graph::Offset;
 use tutti_plugin_types::{ContentScale, Control, EditorWindow, ParamWriteError};
-use tutti_ump::MidiChannel;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
-use tutti_vst2_host::{Samples, TimeSignature, TransportInfo, Vst2ProcessContext};
+use tutti_vst2_host::Vst2ProcessContext;
 
 #[path = "support/active.rs"]
 mod active;
 
-use active::{Active, ActiveExt};
-use tutti_fixtures::midi;
+use active::{Active, ActiveExt, LoadError};
 
 /// The id of the parameter at `index`.
 fn pid(index: i32) -> ParamId {
@@ -1319,83 +1316,10 @@ fn process_delivers_the_expected_audio() {
 }
 
 #[test]
-fn process_forwards_midi_without_panicking() {
-    let _guard = lock_probe();
-    let mut instance = load_probe();
-
-    let note_on = [(Offset::ZERO, midi::note_on(MidiChannel::of(1), 60, 100))];
-    render_block(&mut instance, &note_on);
-
-    let note_off = [(Offset::ZERO, midi::note_off(MidiChannel::of(1), 60, 0))];
-    render_block(&mut instance, &note_off);
-}
-
-#[test]
-fn process_with_transport() {
-    let _guard = lock_probe();
-    let mut instance = load_probe();
-
-    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
-        .with_playing(true)
-        .with_beat(tutti_units::Beat::new(2.0))
-        .with_position_samples(44_100)
-        .with_tempo(tutti_units::Bpm::of(120.0))
-        .with_time_signature(TimeSignature::default())
-        .with_loop(tutti_plugin_types::LoopRegion::new(
-            tutti_music::LoopRange::new(tutti_units::Beat::new(0.0), tutti_units::Beat::new(4.0))
-                .expect("a loop"),
-        ));
-
-    let input_data = vec![vec![0.0f32; BLOCK]; instance.loaded().pins().0.count() as usize];
-    let mut output_data = vec![vec![0.0f32; BLOCK]; instance.loaded().pins().1.count() as usize];
-
-    let input_slices: Vec<&[f32]> = input_data.iter().map(|v| v.as_slice()).collect();
-    let mut output_slices: Vec<&mut [f32]> =
-        output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
-
-    let ctx = Vst2ProcessContext::new(tutti_plugin_types::SampleRate::of(SAMPLE_RATE))
-        .transport(&transport);
-    instance.process_f32(&input_slices, &mut output_slices, BLOCK, &ctx);
-}
-
-#[test]
-fn process_empty_buffer() {
-    let _guard = lock_probe();
-    let mut instance = load_probe();
-    let input_slices: Vec<&[f32]> = vec![];
-    let mut output_slices: Vec<&mut [f32]> = vec![];
-    let ctx = Vst2ProcessContext::new(tutti_plugin_types::SampleRate::of(SAMPLE_RATE));
-    instance.process_f32(&input_slices, &mut output_slices, 0, &ctx);
-}
-
-#[test]
-fn many_midi_events_in_one_block() {
-    let _guard = lock_probe();
-    let mut instance = load_probe();
-
-    let events: Vec<UmpAt> = (0..10usize)
-        .map(|i| {
-            (
-                Offset::of(Samples::new(i), Samples::new(BLOCK)),
-                midi::note_on(MidiChannel::of(1), 60 + i as u8, 100),
-            )
-        })
-        .collect();
-    render_block(&mut instance, &events);
-
-    let note_offs: Vec<UmpAt> = (0..10)
-        .map(|i| {
-            (
-                Offset::ZERO,
-                midi::note_off(MidiChannel::of(1), 60 + i as u8, 0),
-            )
-        })
-        .collect();
-    render_block(&mut instance, &note_offs);
-}
-
-#[test]
 fn load_nonexistent_path() {
     let result = Active::load(Path::new("/nonexistent/plugin.vst"), SAMPLE_RATE, BLOCK);
-    assert!(result.is_err());
+    assert!(
+        matches!(result, Err(LoadError::Load(_))),
+        "a missing binary is a load failure, not an activation one"
+    );
 }

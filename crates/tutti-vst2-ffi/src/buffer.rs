@@ -90,52 +90,46 @@ impl<'a, T: 'a + Float> AudioBuffer<'a, T> {
 
     /// Create an iterator over pairs of input buffers and output buffers.
     #[inline]
-    pub fn zip<'b>(&'b mut self) -> AudioBufferIterator<'a, 'b, T> {
+    pub fn zip<'b>(&'b mut self) -> AudioBufferIterator<'b, T> {
         AudioBufferIterator {
-            audio_buffer: self,
+            inputs: self.inputs,
+            outputs: self.outputs,
+            samples: self.samples,
             index: 0,
         }
     }
 }
 
 /// Iterator over pairs of buffers of input channels and output channels.
+///
+/// Not `Clone`: a copy would yield each output channel's `&mut` twice.
 #[derive(Debug)]
-pub struct AudioBufferIterator<'a, 'b, T>
+pub struct AudioBufferIterator<'a, T>
 where
     T: 'a + Float,
-    'a: 'b,
 {
-    audio_buffer: &'b mut AudioBuffer<'a, T>,
+    inputs: &'a [*const T],
+    outputs: &'a [*mut T],
+    samples: usize,
     index: usize,
 }
 
-impl<'a, 'b, T> Iterator for AudioBufferIterator<'a, 'b, T>
+impl<'a, T> Iterator for AudioBufferIterator<'a, T>
 where
-    T: 'b + Float,
+    T: 'a + Float,
 {
-    type Item = (&'b [T], &'b mut [T]);
+    type Item = (&'a [T], &'a mut [T]);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index < self.audio_buffer.inputs.len()
-            && self.index < self.audio_buffer.outputs.len()
-        {
+        if self.index < self.inputs.len() && self.index < self.outputs.len() {
             // SAFETY: `AudioBuffer`'s constructor contract (`from_raw`) says
             // each channel pointer addresses at least `samples` live elements; the index
             // is bounds-checked by the `if` above.
-            let input = unsafe {
-                slice::from_raw_parts(
-                    self.audio_buffer.inputs[self.index],
-                    self.audio_buffer.samples,
-                )
-            };
+            let input = unsafe { slice::from_raw_parts(self.inputs[self.index], self.samples) };
             // SAFETY: as for `input`; output channels do not alias each other or the
             // inputs (constructor contract), and the iterator yields each index once.
-            let output = unsafe {
-                slice::from_raw_parts_mut(
-                    self.audio_buffer.outputs[self.index],
-                    self.audio_buffer.samples,
-                )
-            };
+            let output =
+                unsafe { slice::from_raw_parts_mut(self.outputs[self.index], self.samples) };
             let val = (input, output);
             self.index += 1;
             Some(val)
@@ -309,30 +303,31 @@ impl<'a, T> IndexMut<usize> for Outputs<'a, T> {
 }
 
 /// Iterator over buffers for output channels of an `AudioBuffer`.
+///
+/// Not `Clone`: a copy would yield each channel's `&mut` twice.
 #[derive(Debug)]
-pub struct OutputIterator<'a, 'b, T>
+pub struct OutputIterator<'a, T>
 where
     T: 'a,
-    'a: 'b,
 {
-    data: &'b mut Outputs<'a, T>,
+    bufs: &'a [*mut T],
+    samples: usize,
     i: usize,
 }
 
-impl<'a, 'b, T> Iterator for OutputIterator<'a, 'b, T>
+impl<'a, T> Iterator for OutputIterator<'a, T>
 where
-    T: 'b,
+    T: 'a,
 {
-    type Item = &'b mut [T];
+    type Item = &'a mut [T];
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.i < self.data.len() {
-            // SAFETY: `i` is in bounds (checked above). `data` is borrowed mutably for `'b`
+        if self.i < self.bufs.len() {
+            // SAFETY: `i` is in bounds (checked above). The `Outputs` is borrowed mutably for `'a`
             // and `i` only grows, so each channel is handed out once per iterator and no
             // two items overlap; the output channels do not alias each other (the
             // `AudioBuffer` constructor contract), each addressing `samples` elements.
-            let val =
-                unsafe { slice::from_raw_parts_mut(self.data.bufs[self.i], self.data.samples) };
+            let val = unsafe { slice::from_raw_parts_mut(self.bufs[self.i], self.samples) };
             self.i += 1;
             Some(val)
         } else {
@@ -343,10 +338,14 @@ where
 
 impl<'a, 'b, T: Sized> IntoIterator for &'b mut Outputs<'a, T> {
     type Item = &'b mut [T];
-    type IntoIter = OutputIterator<'a, 'b, T>;
+    type IntoIter = OutputIterator<'b, T>;
 
     fn into_iter(self) -> Self::IntoIter {
-        OutputIterator { data: self, i: 0 }
+        OutputIterator {
+            bufs: self.bufs,
+            samples: self.samples,
+            i: 0,
+        }
     }
 }
 

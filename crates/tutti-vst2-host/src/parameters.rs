@@ -32,7 +32,7 @@ impl Vst2Loaded {
     /// ordered index rather than an opaque id — `getParameter(effect, index)`
     /// and `numParams` are both `i32` in the ABI — so a [`ParamId`] here *is*
     /// that index, widened. Nothing bounds-checks it before the number reaches
-    /// the plugin's own array indexing, neither this crate nor the forked
+    /// the plugin's own array indexing, neither this crate nor the
     /// dispatch, which is what this guards. An id past `i32::MAX` is refused for
     /// the same reason.
     ///
