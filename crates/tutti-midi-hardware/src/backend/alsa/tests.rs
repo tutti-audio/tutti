@@ -1307,11 +1307,11 @@ fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
                 }
                 // Any other event is consumed; only an empty read waits.
                 Ok(Read::Event(_)) => {}
-                _ => {
-                    if poller.wait().expect("a wait") == Wait::Stopped {
-                        break;
-                    }
-                }
+                _ => match poller.wait().expect("a wait") {
+                    Wait::Stopped => break,
+                    Wait::Broken => panic!("the device's sequencer descriptor failed"),
+                    _ => {}
+                },
             }
         }
     });
