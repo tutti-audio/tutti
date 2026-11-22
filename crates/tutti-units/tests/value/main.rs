@@ -8,6 +8,7 @@ mod beats_per_cycle_range;
 mod bits_range;
 mod bpm_range;
 mod distance_range;
+mod frames_per_beat_range;
 mod modulation_range;
 mod normalized_range;
 mod playback_rate_range;

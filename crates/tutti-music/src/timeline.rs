@@ -39,7 +39,7 @@
 //! neither.
 
 use tutti_units::Frame;
-use tutti_units::{Beat, BeatDuration, Bpm, SampleRate};
+use tutti_units::{Beat, BeatDuration, Bpm, FramesPerBeat, SampleRate};
 
 /// How far past a frame a beat may fall, in frames, and still land on it.
 ///
@@ -111,20 +111,6 @@ pub fn first_frame_at_or_after(frames_ahead: f64) -> i64 {
 #[inline]
 pub fn beats_per_sample(tempo: Bpm, sample_rate: impl Into<SampleRate>) -> BeatDuration {
     BeatDuration::new((tempo.get() / 60.0) / sample_rate.into().get())
-}
-
-/// Frames one beat spans at `tempo` and `rate`: the one rule for whether a
-/// tempo moves.
-///
-/// `None` when the count is not finite (a tempo too slow for an `f64` count of
-/// frames, such as the smallest `Bpm`): the clock does not move. Neither the
-/// rate nor the tempo needs a check, each being finite and above zero.
-///
-/// Raw `f64` on purpose: the frame counts it scales run past what an `f32`
-/// unit type holds exactly.
-#[inline]
-pub fn frames_per_beat(tempo: Bpm, rate: SampleRate) -> Option<f64> {
-    Some(rate.get() * 60.0 / tempo.get()).filter(|frames| frames.is_finite())
 }
 
 /// Returns a fractional frame position landed on the whole frame it is within
@@ -201,12 +187,9 @@ impl TimelineSegment {
     /// Returns the frames per beat, when the count is finite (`None`
     /// otherwise: the segment does not move, as at a tempo too slow for an
     /// `f64` count of frames).
-    ///
-    /// Raw `f64` on purpose: the frame counts it scales run past what an `f32`
-    /// unit type holds exactly.
     #[inline]
-    pub fn frames_per_beat(&self) -> Option<f64> {
-        frames_per_beat(self.tempo, self.sample_rate)
+    pub fn frames_per_beat(&self) -> Option<FramesPerBeat> {
+        self.tempo.frames_per_beat(self.sample_rate)
     }
 
     /// Returns the beat at `frame`, in closed form: `origin_beat + n × tempo /
@@ -262,7 +245,7 @@ impl TimelineSegment {
     fn offset_of(&self, beat: Beat) -> Option<i64> {
         let fpb = self.frames_per_beat()?;
         Some(first_frame_at_or_after(
-            (beat - self.origin_beat).get() * fpb,
+            fpb.frames_in(beat - self.origin_beat),
         ))
     }
 }
@@ -370,14 +353,6 @@ mod tests {
             }
             assert_eq!(hits, 1, "beat at {frames} frames");
         }
-    }
-
-    /// **One rule for whether a tempo moves**: a non-finite frame count is
-    /// `None`.
-    #[test]
-    fn frames_per_beat_is_none_when_nothing_moves() {
-        assert_eq!(frames_per_beat(Bpm::of(120.0), SR), Some(24_000.0));
-        assert_eq!(frames_per_beat(Bpm::of(f64::from_bits(1)), SR), None);
     }
 
     /// The slowest tempo a `Bpm` holds is infinitely many frames a beat (a

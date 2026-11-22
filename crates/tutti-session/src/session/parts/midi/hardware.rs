@@ -38,15 +38,11 @@ pub(crate) struct Hardware {
 }
 
 impl Hardware {
-    /// The layer the builder opened, the task on the session's executor that
-    /// drives it (woken by `bells`' bell), and the state that receives its
-    /// device events.
+    /// The layer the builder opened and started, the MIDI-CI task on its own
+    /// thread that drives it, and the state that receives its device events.
     pub(crate) fn new<F: Float>(parts: &mut Parts<F>) -> (Self, MidiState) {
         let (task, io) = match parts.midi_io.take() {
-            Some((io, bell, listener)) => {
-                let (link, task) = MidiLink::start(io, &parts.executor, bell, listener);
-                (Some(task), Some(link))
-            }
+            Some((link, task)) => (Some(task), Some(link)),
             None => (None, None),
         };
         let policy = crate::midi_hardware::policy_cell(io.is_some());

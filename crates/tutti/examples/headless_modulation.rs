@@ -110,8 +110,8 @@ fn main() -> Result<(), Error> {
     let hits = m.follower(Follower::default(), kick);
     m.route(RouteSpec::new(hits, resonance, Depth::of(0.5)))?;
 
-    // The nodes commit on the first update, the lanes on the re-apply after
-    // it (their targets resolve once the filter is in a plan).
+    // The first update's one plan carries the nodes and their lanes (a target
+    // resolves as soon as its node is staged).
     report(s.update());
     assert_eq!(
         s.mod_state().problems().next(),

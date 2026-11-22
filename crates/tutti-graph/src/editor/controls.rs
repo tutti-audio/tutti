@@ -82,11 +82,13 @@ impl<F: Float> Editor<F> {
     /// `set_param_range`, which keeps the table and the cell together (a
     /// commit rewrites every cell from the table).
     ///
-    /// `None` until a commit has placed a unit declaring `at.param` at
-    /// `at.node`. The view stays the port's while the units placed at the
-    /// key declare the same params; a commit that places one with another
-    /// list gives the key fresh cells, and an old view then reads ranges
-    /// nothing writes. Ask again after such a commit (a rebind).
+    /// `None` for a node not staged, or one whose unit does not declare
+    /// `at.param`. The view stays the port's while the units placed at the
+    /// key declare the same params; staging one with another list gives the
+    /// key fresh cells, and an old view then reads ranges nothing writes. Ask
+    /// again after such a replace (a rebind). From that replace to its commit,
+    /// a range set reaches the new unit's cells only: the old unit, still
+    /// running, keeps the range it had.
     pub fn param_range_cell(&self, at: ParamIn) -> Option<ParamRangeCell> {
         if at.param == NodeMix::ADDR {
             return self.cells.modes.get(at.node).map(ModeCell::range_cell);
@@ -136,11 +138,29 @@ impl<F: Float> Editor<F> {
     }
 
     /// Gives edge `id` a gain lane if it has none, starting at unity with the
-    /// default range: a value left from an earlier lane is dropped.
-    fn declare_lane(&mut self, id: EdgeId) {
+    /// default range: a value left from an earlier lane is dropped. The lane's
+    /// cell is made here, so it can be bound before a commit.
+    pub(super) fn declare_lane(&mut self, id: EdgeId) {
         if !self.spec.gains.contains_key(&id) {
             self.values.forget_edge(id);
             self.spec.set_edge_gain(id, EdgeGain::default());
+            self.cells.gains.declare(id, &self.values);
+        } else if !self.cells.gains.has(id) {
+            self.cells.gains.declare(id, &self.values);
+        }
+    }
+
+    /// Makes the cell of every entry of the spec that has none: the entries
+    /// written through [`spec_mut`](Self::spec_mut) (and a builder's or a
+    /// fork's whole wiring), which no declaration saw. It is the one place a
+    /// cell is made for an entry the spec already holds, run by every control
+    /// that declares a lane and by each commit before it hands cells out.
+    pub(super) fn declare_gain_cells(&mut self) {
+        let ids: Vec<EdgeId> = self.spec.gains.keys().copied().collect();
+        for id in ids {
+            if !self.cells.gains.has(id) {
+                self.cells.gains.declare(id, &self.values);
+            }
         }
     }
 
@@ -359,21 +379,28 @@ impl<F: Float> Editor<F> {
     /// driven lane clamps to and
     /// [`set_edge_gain_range`](Self::set_edge_gain_range) publishes to: the
     /// edge's counterpart of [`param_range_cell`](Self::param_range_cell), for
-    /// a control lane. `None` until a commit has sent a plan with the edge's
-    /// entry (and again once a commit drops the entry: the view then reads a
-    /// range nothing writes).
+    /// a control lane. `None` while the edge has no entry (and again once
+    /// the entry is dropped: the view then reads a range nothing writes).
     pub fn edge_gain_range_cell(&self, id: EdgeId) -> Option<ParamRangeCell> {
-        self.cells.gains.get(id).map(GainCell::range_cell)
+        self.gain_cell(id).map(GainCell::range_cell)
+    }
+
+    /// Edge `id`'s cell, while its entry is in the spec.
+    fn gain_cell(&self, id: EdgeId) -> Option<&GainCell> {
+        self.cells
+            .gains
+            .get(id)
+            .filter(|_| self.spec.gains.contains_key(&id))
     }
 
     /// Edge `id`'s live base: the very cell [`set_edge_gain`](Self::set_edge_gain)
     /// stores into, which a control lane reads as its knob (a native param's
-    /// knob is the node's own cell; an edge's is its gain). `None` until a
-    /// commit has sent a plan with the edge's entry. Writing it moves the
+    /// knob is the node's own cell; an edge's is its gain). `None` while the
+    /// edge has no entry. Writing it moves the
     /// base without touching the editor's value: [`edge_gain`](Self::edge_gain)
     /// reads the cell, never the value, once there is one.
     pub fn edge_gain_cell(&self, id: EdgeId) -> Option<ParamCell> {
-        self.cells.gains.get(id).map(GainCell::knob)
+        self.gain_cell(id).map(GainCell::knob)
     }
 
     /// Whether `key` has a pass: where its input goes when it does not run (a
@@ -508,9 +535,9 @@ impl<F: Float> Editor<F> {
     }
 
     /// `key`'s mix: [`Mix::WET`] unless [`set_mix`](Self::set_mix) set another.
-    /// The live cell's once a commit has placed the unit (the one writer's,
-    /// whether it is `set_mix` or a lane's knob), the editor's value before;
-    /// it is the base a driving lane modulates around, not the lane's value.
+    /// The live cell's (the one writer's, whether it is `set_mix` or a lane's
+    /// knob); it is the base a driving lane modulates around, not the lane's
+    /// value.
     pub fn mix(&self, key: NodeKey) -> Mix {
         self.cells
             .modes
@@ -522,17 +549,16 @@ impl<F: Float> Editor<F> {
     /// `key`'s live mix: the very cell [`set_mix`](Self::set_mix) stores into,
     /// which a control lane reads as its knob (a native param's knob is the
     /// node's own cell; a node's mix is this), so `set_mix` and a route are
-    /// one writer. `None` until a commit has placed the unit. Writing it moves
+    /// one writer. `None` for a key not staged. Writing it moves
     /// the mix without touching the editor's value: [`mix`](Self::mix) reads
     /// the cell.
     pub fn mix_cell(&self, key: NodeKey) -> Option<ParamCell> {
         self.cells.modes.get(key).map(ModeCell::knob)
     }
 
-    /// Edge `id`'s base, if the edge has an entry: the live cell's once a
-    /// commit has sent one (the one writer's, whether it is
-    /// [`set_edge_gain`](Self::set_edge_gain) or a lane's knob), the editor's
-    /// value before.
+    /// Edge `id`'s base, if the edge has an entry: the live cell's (the one
+    /// writer's, whether it is [`set_edge_gain`](Self::set_edge_gain) or a
+    /// lane's knob).
     pub fn edge_gain(&self, id: EdgeId) -> Option<Amplitude> {
         self.spec.gains.get(&id)?;
         Some(
