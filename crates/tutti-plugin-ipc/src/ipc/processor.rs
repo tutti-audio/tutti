@@ -117,7 +117,7 @@ impl Processor for IpcProcessor {
         let _ = self.intake.lose(&mut self.pending.midi);
         self.pending = BlockPayload::new(self.link.rate());
         self.params.clear();
-        // A refused reset is counted (`PluginControls::refused_commands`).
+        // A refused reset is counted (`BridgeLosses::commands_refused`).
         let _ = self.link.bridge.audio().reset_rt();
     }
 
@@ -149,7 +149,7 @@ impl Processor for IpcProcessor {
         let (queues, points) = self.link.param_room(chunk);
         self.params = ParameterChanges::reserved_bridged(queues, points);
         self.pending = BlockPayload::new(rate);
-        // A refused rate command is counted (`PluginControls::refused_commands`).
+        // A refused rate command is counted (`BridgeLosses::commands_refused`).
         let _ = self.link.bridge.audio().set_sample_rate(rate);
         self.link.set_rate(rate);
         // A fork's graph is compiled from the shape read right after this, and

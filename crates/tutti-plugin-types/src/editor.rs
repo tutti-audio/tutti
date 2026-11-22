@@ -402,8 +402,8 @@ pub enum EditorMirrorError {
 /// An editor that could not be mirrored still opens (the user would have no
 /// window at all otherwise); `mirrored` says the editor shows the plugin at its
 /// defaults and the audio instance stays the source of truth. An open whose
-/// mirror failed is also counted in `mirror_transfers_refused` of the plugin's
-/// controls, so an app that reads both does not add the two.
+/// mirror failed is also counted in the plugin's
+/// [`BridgeLosses::mirror_transfers_refused`](crate::BridgeLosses::mirror_transfers_refused), so an app that reads both does not add the two.
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct EditorOpened<W> {

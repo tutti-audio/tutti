@@ -840,18 +840,18 @@ mod event_route_tests {
             refused_off_thread_calls: 4,
         }));
         assert_eq!(
-            (
-                controls.server_refused_commands(),
-                controls.server_refused_edits(),
-                chunks.server_refused_off_thread_calls()
-            ),
-            (2, 1, 4)
+            controls.server_losses(),
+            tutti_plugin_types::ServerLosses {
+                commands_refused: 2,
+                edits_refused: 1,
+                refused_off_thread_calls: 4,
+            }
         );
         route.hear(IpcEvent::ServerLosses(tutti_plugin_types::ServerLosses {
             commands_refused: 5,
             edits_refused: 1,
             refused_off_thread_calls: 4,
         }));
-        assert_eq!(controls.server_refused_commands(), 5);
+        assert_eq!(controls.server_losses().commands_refused, 5);
     }
 }

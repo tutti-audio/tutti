@@ -154,10 +154,10 @@ fn a_refused_rate_is_silent_visible_and_retried() {
     let status = wait_for(&mut unit, &handle, |s| !s.is_alive());
     assert!(refused_at(&status, REFUSED_RATE), "{status:?}");
     assert!(!status.is_dead() && !handle.is_crashed());
-    let missed = unit.controls.missed_chunks();
+    let missed = unit.controls.chunk_outcomes().missed;
     assert_silent(&mut unit, &handle, "refused");
     assert_eq!(
-        unit.controls.missed_chunks(),
+        unit.controls.chunk_outcomes().missed,
         missed,
         "a refused plugin's silence is deliberate, not a dropout"
     );
