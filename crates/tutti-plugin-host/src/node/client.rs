@@ -1457,12 +1457,12 @@ mod declared_buses {
     fn a_plugins_buses_are_the_nodes_in_order_placed_and_with_their_roles() {
         let loaded = PluginWiring {
             inputs: vec![
-                PluginBus::new(width(2), BusRole::Main).placed(Some(stereo())),
+                PluginBus::new(width(2), BusRole::Main).placed(stereo()),
                 PluginBus::new(width(1), BusRole::Sidechain),
                 // Declares two speakers for a three-channel bus.
-                PluginBus::new(width(3), BusRole::Aux).placed(Some(stereo())),
+                PluginBus::new(width(3), BusRole::Aux).placed(stereo()),
             ],
-            outputs: vec![PluginBus::main(width(2)).placed(Some(stereo()))],
+            outputs: vec![PluginBus::main(width(2)).placed(stereo())],
             ..PluginWiring::default()
         };
         let shape = Declared::of(&loaded).unwrap().ports;

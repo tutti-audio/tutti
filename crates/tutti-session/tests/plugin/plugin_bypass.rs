@@ -135,6 +135,7 @@ impl Rig {
             .diagnostics()
             .block_counts()
             .replies
+            .get()
     }
 }
 

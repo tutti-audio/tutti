@@ -948,7 +948,7 @@ fn the_chunk_counters_report_misses_and_answers() {
     drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
     assert_eq!(
         counters.outcomes().missed,
-        0,
+        tutti_units::Chunks::ZERO,
         "an answered chunk was counted missed"
     );
 
@@ -957,7 +957,7 @@ fn the_chunk_counters_report_misses_and_answers() {
         drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
     }
     assert!(
-        counters.outcomes().missed > 0,
+        counters.outcomes().missed > tutti_units::Chunks::ZERO,
         "blocks that outran a stalled server were not counted"
     );
 
@@ -992,12 +992,12 @@ fn a_chunk_published_after_its_miss_is_counted_late() {
     drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
     assert_eq!(
         counters.outcomes().missed,
-        1,
+        tutti_units::Chunks::new(1),
         "chunk 1 was collected unanswered"
     );
     assert_eq!(
         counters.outcomes().late,
-        0,
+        tutti_units::Chunks::ZERO,
         "and had not been published yet"
     );
 
@@ -1006,7 +1006,7 @@ fn a_chunk_published_after_its_miss_is_counted_late() {
     drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
     assert_eq!(
         counters.outcomes().late,
-        1,
+        tutti_units::Chunks::new(1),
         "chunk 1, published after its miss, is counted late"
     );
     assert!(counters.outcomes().late <= counters.outcomes().missed);
@@ -1039,12 +1039,12 @@ fn a_chunk_never_published_is_missed_and_never_late() {
     }
     assert_eq!(
         counters.outcomes().missed,
-        5,
+        tutti_units::Chunks::new(5),
         "every chunk but the first collect"
     );
     assert_eq!(
         counters.outcomes().late,
-        0,
+        tutti_units::Chunks::ZERO,
         "none of them was ever published"
     );
 
@@ -1133,11 +1133,11 @@ fn a_chunk_the_server_refuses_is_counted_refused() {
     assert_eq!(
         counters.outcomes(),
         tutti_plugin_types::ChunkOutcomes {
-            missed: 2,
-            late: 1,
-            refused: 1,
-            unanswered: 0,
-            skipped: 0,
+            missed: tutti_units::Chunks::new(2),
+            late: tutti_units::Chunks::new(1),
+            refused: tutti_units::Chunks::new(1),
+            unanswered: tutti_units::Chunks::ZERO,
+            skipped: tutti_units::Chunks::ZERO,
         }
     );
 
@@ -1169,13 +1169,23 @@ fn a_chunk_the_server_never_accounts_for_is_counted_unanswered() {
     for sent in 1..=2 * BATCH_OUTCOMES as u64 {
         drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
         wait_for(&bridge, "the bridge to deal with the chunk", || {
-            bridge.audio().block_counts().abandoned + bridge.audio().skipped_cell().get() >= sent
+            bridge.audio().block_counts().abandoned.get()
+                + bridge.audio().skipped_cell().get().get()
+                >= sent
         });
     }
-    assert_eq!(counters.outcomes().refused, 0, "the server said nothing");
-    assert_eq!(counters.outcomes().late, 0, "nothing was published");
+    assert_eq!(
+        counters.outcomes().refused,
+        tutti_units::Chunks::ZERO,
+        "the server said nothing"
+    );
+    assert_eq!(
+        counters.outcomes().late,
+        tutti_units::Chunks::ZERO,
+        "nothing was published"
+    );
     assert!(
-        counters.outcomes().unanswered >= 1,
+        counters.outcomes().unanswered >= tutti_units::Chunks::new(1),
         "chunks the server never answered, past the window, are unanswered"
     );
 
@@ -1363,7 +1373,7 @@ fn a_late_reply_does_not_permanently_crash_the_bridge() {
     // server answer: what is under test is what the host did with the missed
     // deadline, not whether the server ever answered.
     wait_for(&bridge, "the bridge never abandoned the block", || {
-        bridge.audio().block_counts().abandoned >= 1
+        bridge.audio().block_counts().abandoned >= tutti_units::Chunks::new(1)
     });
     permits.send(()).expect("the server waits for a permit");
     wait_for(&bridge, "the server never answered", || {
@@ -1448,7 +1458,7 @@ fn a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block() {
         stamps.push(midi_out.iter().map(|e| e.ump.0[0]).collect());
         if block == 0 {
             wait_for(&bridge, "the bridge never abandoned block 1", || {
-                bridge.audio().block_counts().abandoned >= 1
+                bridge.audio().block_counts().abandoned >= tutti_units::Chunks::new(1)
             });
             permits.send(()).expect("the server waits for a permit");
         }
@@ -1472,12 +1482,12 @@ fn a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block() {
     // block miss its few-ms budget too, so neither count is pinned.
     let counts = bridge.audio().block_counts();
     assert!(
-        counts.abandoned >= 1,
+        counts.abandoned >= tutti_units::Chunks::new(1),
         "block 1 was held past its budget, yet no reply was abandoned — the rig \
          did not stage the timeout this test is about",
     );
     assert!(
-        counts.late >= 1,
+        counts.late >= tutti_units::Chunks::new(1),
         "the drain collected no owed reply although {} blocks were abandoned. \
          `AudioState::hear` never ran or never collected anything, and the abandoned \
          frame is still queued — which the stamps below cannot reliably detect.",
@@ -1709,6 +1719,7 @@ fn a_blocks_status_reaches_the_host_with_its_chunk() {
                 .audio()
                 .block_counts()
                 .replies
+                .get()
                 >= block),
             "block {block}'s reply never arrived within {WAIT_BUDGET:?} \
              ({} blocks abandoned, {} replies); a block the bridge abandoned \
@@ -2010,7 +2021,7 @@ fn two_stale_blocks(
     let (seq, four) = got.recv_timeout(wait).expect("block 5 sent");
     assert_eq!(seq, 5);
     let dropped = bridge.audio().dropped_midi_cell().get();
-    let skipped = bridge.audio().skipped_cell().get();
+    let skipped = bridge.audio().skipped_cell().get().get();
     drop(thread);
     drop(bridge);
     server.join().unwrap();

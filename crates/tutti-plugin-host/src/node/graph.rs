@@ -891,7 +891,7 @@ mod owed_tests {
         pump(&inner);
         assert_eq!(
             controls.block_losses().unlent,
-            1,
+            tutti_units::Blocks::new(1),
             "the block had no Processor"
         );
         assert_eq!(read(&handle, 1), Some(1.0 / 16.0), "not yet delivered");

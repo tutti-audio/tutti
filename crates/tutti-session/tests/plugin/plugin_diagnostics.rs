@@ -220,7 +220,11 @@ mod vst2 {
         let losses = || s.plugin_view(node).unwrap().losses();
         assert_eq!(losses(), Losses::NONE, "nothing sent yet");
         assert_eq!(diag().server_pid(), None, "no server in process");
-        assert_eq!(diag().chunks().missed, 0, "no pipeline in process");
+        assert_eq!(
+            diag().chunks().missed,
+            tutti_units::Chunks::ZERO,
+            "no pipeline in process"
+        );
         assert!(diag().follows_project_meter());
         assert_eq!(
             diag().tail(),

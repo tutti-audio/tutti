@@ -44,7 +44,7 @@ use tutti_session::{
 };
 use tutti_session::{Peer as _, PeerState};
 use tutti_session::{RecoveryFailure, ReloadCause};
-use tutti_units::{SampleRate, Samples};
+use tutti_units::{Chunks, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 512;
@@ -1246,10 +1246,13 @@ fn a_slow_plugin_that_still_answers_is_not_declared_hung() {
     }
     let counts = s.plugin_view(node).unwrap().diagnostics().block_counts();
     assert!(
-        counts.abandoned > 16,
+        counts.abandoned > Chunks::new(16),
         "{counts:?}: the plugin is not slow enough"
     );
-    assert!(counts.replies > 0, "{counts:?}: it never answered");
+    assert!(
+        counts.replies > Chunks::ZERO,
+        "{counts:?}: it never answered"
+    );
     assert_eq!(
         drive.count(|e| matches!(
             e,
