@@ -107,8 +107,8 @@ pub(crate) fn plugin_error(error: AuError) -> PluginError {
     }
 }
 
-fn editor_error(what: &str, error: impl std::fmt::Display) -> PluginError {
-    PluginError::Editor(EditorError::PluginError(format!("{what}: {error}")))
+pub(crate) fn editor_error(reason: impl Into<String>) -> PluginError {
+    PluginError::Editor(EditorError::PluginError(reason.into()))
 }
 
 /// The AU selector an id names, or `None` when it names none.
@@ -592,7 +592,7 @@ impl EditorWindow for AuLoaded {
             let (width, height) = tutti_plugin_types::EditorUnit::DEFAULT_EXTENT;
             LogicalSize::new(width, height)
         })
-        .map_err(|e| editor_error("AU open_editor failed", e))?;
+        .map_err(|e| editor_error(format!("AU open_editor failed: {e}")))?;
         let size = editor.editor_size(main);
         *self.editor_slot() = Some(editor);
         Ok(tutti_plugin_types::EditorOpened::new(size.into()))

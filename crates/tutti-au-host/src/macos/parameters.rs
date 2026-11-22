@@ -136,32 +136,26 @@ pub struct AuParameter {
     /// difference: on AULowpass's cutoff (10 Hz … 22.05 kHz, logarithmic) the
     /// linear midpoint lands at 11 kHz where the musical midpoint is ~470 Hz, so
     /// nearly the whole useful range is crushed into the first few percent of
-    /// travel. 39 parameters across the corpus carry a non-linear curve.
+    /// travel.
     pub display: DisplayCurve,
     /// Whether this parameter is a **meter reading**, not a control
     /// (`kAudioUnitParameterFlag_MeterReadOnly`).
     ///
-    /// A host must keep these out of its automation menu. Measured on macOS 15.6:
-    /// AUMultibandCompressor publishes 12 of them ("Comp Amount 1-4", "Input
-    /// Amplitude 1-4", "Output Amplitude 1-4") and AUSampler 2 ("Output Amp
-    /// 0/1"), all of which would otherwise appear as automatable targets that
-    /// silently discard writes.
+    /// A host must keep these out of its automation menu: they would otherwise
+    /// appear as automatable targets that silently discard writes.
     pub meter_read_only: bool,
     /// Group this parameter belongs to, if the AU advertises
     /// `kAudioUnitParameterFlag_HasClump`.
     ///
     /// `None` means ungrouped. Resolve the id to a label with
     /// [`clump_name`] — a 400-parameter synth is otherwise one flat list.
-    /// Measured on macOS 15.6: AUDistortion groups its 22 parameters into 7
-    /// clumps ("Delay", "Ring Modulation", "Decimation", …).
     pub clump: Option<u32>,
     /// Whether the AU sets `kAudioUnitParameterFlag_ValuesHaveStrings`.
     ///
-    /// **Do not gate a [`value_strings`] call on this.** Measured on macOS 15.6,
-    /// AUNBandEQ's "Type" parameter returns 11 value strings while leaving this
-    /// flag *clear* (flags `0xd8100000`); gating on it would show the user
-    /// "0.000/1.000/2.000" for a filter-type menu. It is carried for reporting
-    /// only — the property read is the authority.
+    /// **Do not gate a [`value_strings`] call on this.** An AU can return value
+    /// strings while leaving this flag clear (AUNBandEQ's "Type" does); gating on
+    /// it would show "0.000/1.000/2.000" for a filter-type menu. It is carried
+    /// for reporting only — the property read is the authority.
     pub values_have_strings: bool,
     /// Whether the AU can ramp this parameter over a render block
     /// (`kAudioUnitParameterFlag_CanRamp`) — i.e. whether a scheduled
@@ -180,13 +174,6 @@ pub struct AuParameter {
     /// A host that caches parameter values must re-read after writing one of
     /// these, because the AU sends no notification for the parameters it moved
     /// as a side effect. [`dependents_of`] names which ones, when the AU says.
-    ///
-    /// Measured on macOS 15.6: 28 meta-flagged parameters across the 39
-    /// instantiable registered units — AUNBandEQ's 8 per-band "Type" controls,
-    /// AUGraphicEQ's "Number of Bands", AUPitch's 9, AURoundTripAAC's 3,
-    /// AURogerBeep's "Sensitivity", AUNewPitch's "Spectral Coherence", and TDR
-    /// Nova's 5. So the flag is *not* rare surface even though
-    /// [`dependents_of`] is unanswered by every one of them.
     pub meta: Option<MetaScope>,
 }
 
@@ -284,8 +271,7 @@ impl DisplayCurve {
     /// Masks with Apple's own `kAudioUnitParameterFlag_DisplayMask`, which spans
     /// bits 16..=18 **and** bit 22 — the field is not contiguous. Masking with
     /// `7 << 16` alone compiles, looks right, and silently drops every
-    /// logarithmic parameter, which is the majority of them (24 of the 39
-    /// curve-carrying parameters measured on macOS 15.6).
+    /// logarithmic parameter.
     pub fn from_flags(flags: u32) -> Self {
         match flags & K_AUDIO_UNIT_PARAMETER_FLAG_DISPLAY_MASK {
             K_AUDIO_UNIT_PARAMETER_FLAG_DISPLAY_LOGARITHMIC => Self::Logarithmic,
@@ -334,10 +320,6 @@ pub enum ParameterUnit {
     /// number loses the only thing that makes it readable. It is also the unit a
     /// parameter carries when it selects *which* controller drives something —
     /// the parameter side of `crate::midi_map`.
-    ///
-    /// Measured on macOS 15.6: no installed AU reports it, so nothing on this
-    /// machine exercises it end-to-end. It is decoded anyway because the cost is
-    /// one arm and the failure mode without it is silent mis-formatting.
     MidiController,
     /// An AU-specific unit code this crate doesn't recognize.
     Unknown(u32),
@@ -586,10 +568,9 @@ pub fn info_at(unit: &Unit, addr: ParamAddress, param_id: u32) -> Result<AuParam
 /// an empty list are the same answer to the caller's question.
 ///
 /// **Never gate this call on
-/// [`AuParameter::values_have_strings`].** Measured on macOS 15.6: AUNBandEQ's
-/// "Type" parameter (id 2000) returns all 11 filter names while leaving
-/// `kAudioUnitParameterFlag_ValuesHaveStrings` clear. The flag under-reports; the
-/// property read is the authority.
+/// [`AuParameter::values_have_strings`].** The flag under-reports (AUNBandEQ's
+/// "Type" returns its filter names with the flag clear); the property read is the
+/// authority.
 ///
 /// # Errors
 /// None — see above. Every failure path yields an empty vec.
@@ -619,14 +600,8 @@ pub fn value_strings_at(unit: &Unit, addr: ParamAddress, id: u32) -> Vec<String>
 /// answer for most parameters and is not an error. Distinct from `Some("")`,
 /// which would be an AU claiming the empty string is the right label.
 ///
-/// ## Measured absence
-///
-/// **No Apple AU on macOS 15.6 implements this property.** Probed across 15 units
-/// × every parameter × the min/mid/max of each range: every call returned an
-/// error status. It is implemented here because third-party AUs do use it and the
-/// alternative is a host that cannot display their values — but the round-trip
-/// cannot be demonstrated against the corpus, and the tests assert the honest
-/// `None` rather than a fabricated success.
+/// No Apple AU implements this property; third-party AUs do, and without it a
+/// host cannot display their values.
 ///
 /// # Errors
 /// None — an unimplemented property, an unknown id, and "no string for this
@@ -658,14 +633,8 @@ pub fn string_from_value_at(
 /// fallback — a mis-parsed `0.0` would be silently committed to the user's
 /// preset.
 ///
-/// ## Measured absence
-///
-/// As [`string_from_value`]: no Apple AU on macOS 15.6 implements this. Probed
-/// across 15 units × every parameter × 5 candidate strings (`"1.0"`,
-/// `"Band Pass"`, `"-6"`, `"Parametric"`, `"8"`), every call failed. Note that
-/// AUNBandEQ answers `ParameterValueStrings` for the very parameter whose names
-/// those are — the enumeration property and the parsing property are independent,
-/// and Apple implements only the former.
+/// As [`string_from_value`]: no Apple AU implements this. The enumeration
+/// property (`ParameterValueStrings`) and the parsing property are independent.
 ///
 /// # Errors
 /// None, by the same reasoning as [`string_from_value`].
@@ -687,9 +656,6 @@ pub fn value_from_string_at(unit: &Unit, addr: ParamAddress, id: u32, text: &str
 /// which Apple's header reserves as "no clump" and which therefore has no label
 /// by construction.
 ///
-/// Measured on macOS 15.6: AUDistortion names 7 clumps, AUMultibandCompressor 6,
-/// AUMatrixReverb 4, AUSampler 3.
-///
 /// # Errors
 /// None — an unimplemented property or an unknown clump id both yield `None`.
 pub fn clump_name(unit: &Unit, clump: u32) -> Option<String> {
@@ -709,8 +675,8 @@ pub fn clump_name_at(unit: &Unit, addr: ParamAddress, clump: u32) -> Option<Stri
 
 /// Which parameters the meta-parameter `id` may move when it is written.
 ///
-/// [`dependents_of_at`] against [`ParamAddress::GLOBAL`], which is where every
-/// meta-flagged parameter measured on this machine lives.
+/// [`dependents_of_at`] against [`ParamAddress::GLOBAL`], where meta-flagged
+/// parameters live.
 pub fn dependents_of(unit: &Unit, id: u32) -> Option<Vec<DependentParam>> {
     dependents_of_at(unit, ParamAddress::GLOBAL, id)
 }
@@ -740,15 +706,7 @@ pub fn dependents_of(unit: &Unit, id: u32) -> Option<Vec<DependentParam>> {
 /// and the stale cached range would then never be refreshed. That is the same
 /// absent-versus-reported discipline the parameter-info surface follows.
 ///
-/// # Measured: no unit on this machine implements it
-///
-/// macOS 15.6, all 39 instantiable registered units (35 Apple plus TDR Nova,
-/// TAL Reverb 4, TAL-NoiseMaker). `AudioUnitGetPropertyInfo` answers
-/// `kAudioUnitErr_InvalidProperty` (-10879) at every address tried, including
-/// once per each of the **28 parameters that do carry a meta flag** — AUNBandEQ's
-/// 8 band "Type" controls, AUGraphicEQ's "Number of Bands", AUPitch's 9,
-/// AURoundTripAAC's 3, AURogerBeep's "Sensitivity", AUNewPitch's "Spectral
-/// Coherence" and TDR Nova's 5.
+/// # The meta flag is the reliable signal
 ///
 /// That combination is the useful finding, and it is why
 /// [`AuParameter::meta`] is carried separately rather than being derived from
@@ -862,7 +820,7 @@ mod tests {
     /// wide enough to be a choice list rather than a toggle.
     ///
     /// AUFilter's two "Filter Type" parameters are `0..1`; AUTimePitch's
-    /// "Overlap" is `0..10` (measured, macOS 15.6). Without this, the decode
+    /// "Overlap" is `0..10`. Without this, the decode
     /// above could be correct against a constant no installed unit ever sends.
     #[test]
     fn a_real_au_reports_an_indexed_parameter() {
@@ -921,7 +879,7 @@ mod tests {
 
     /// The display field is non-contiguous: bits 16..=18 plus bit 22. Decoding it
     /// with `7 << 16` alone would map every logarithmic parameter to `Linear`,
-    /// which is the majority of the curve-carrying ones (24 of 39 measured).
+    /// which is the majority of the curve-carrying ones.
     #[test]
     fn the_display_mask_spans_the_logarithmic_bit_too() {
         // Ground truth from Apple's header: (7 << 16) | (1 << 22).
@@ -943,11 +901,8 @@ mod tests {
     /// `kAudioUnitParameterUnit_MIDIController` (12) must decode to its own
     /// variant, not to `Unknown(12)`.
     ///
-    /// A unit test rather than an AU probe, and deliberately so: measured on
-    /// macOS 15.6, **no** installed AU reports unit 12 — the `Unknown` codes
-    /// that do appear are 1, 5, 7, 9, 10, 16, 18, 21, 24 and 25. So nothing on
-    /// this machine can exercise the arm end-to-end, and a real-AU test would be
-    /// vacuous. This one is not: deleting the match arm makes it fail.
+    /// A unit test rather than an AU probe: no Apple AU reports unit 12, so a
+    /// real-AU test would be vacuous. Deleting the match arm makes this fail.
     ///
     /// The `Display` output is asserted too, because that is the whole reason
     /// the arm exists — `Unknown(12)` prints `unit(12)`, and a value of `74`
@@ -962,21 +917,14 @@ mod tests {
         assert_eq!(K_AUDIO_UNIT_PARAMETER_UNIT_MIDI_CONTROLLER, 12);
         assert_eq!(ParameterUnit::from_raw(12), ParameterUnit::MidiController);
         assert_eq!(ParameterUnit::MidiController.to_string(), "CC");
-        // And the codes actually observed on this machine still fall through to
-        // `Unknown`, so the new arm did not swallow a neighbour.
-        //
-        // Code 1 was in this list when it was measured and is deliberately no
-        // longer: it is `kAudioUnitParameterUnit_Indexed` (pinned from Apple's
-        // header at `AudioUnitProperties.h:1499`), and it now decodes to its own
-        // variant — see `the_indexed_unit_is_not_unknown`. Two suites merged
-        // independently, one measuring code 1 as unhandled and the other adding
-        // the arm that handles it; the arm is right, so the measurement is what
-        // moved on.
+        // The unhandled codes still fall through to `Unknown`, so the arm does
+        // not swallow a neighbour. Code 1 is `kAudioUnitParameterUnit_Indexed`
+        // and has its own variant (`the_indexed_unit_is_not_unknown`).
         for code in [5u32, 7, 9, 10, 16, 18, 21, 24, 25] {
             assert_eq!(
                 ParameterUnit::from_raw(code),
                 ParameterUnit::Unknown(code),
-                "code {code} is measured on this machine and must stay Unknown"
+                "code {code} is not handled and must stay Unknown"
             );
         }
     }
@@ -984,8 +932,8 @@ mod tests {
     /// Every documented curve decodes to its own variant, and the flags word
     /// carries other bits that must not disturb it.
     ///
-    /// The concrete flag words are the ones measured on macOS 15.6, so this pins
-    /// the decode against reality rather than against reconstructed constants.
+    /// The flag words are real ones read from Apple AUs, not reconstructed
+    /// constants.
     #[test]
     fn each_display_curve_decodes_to_its_own_variant() {
         use DisplayCurve as C;
@@ -1043,7 +991,7 @@ mod tests {
     #[test]
     fn a_clump_id_is_only_read_when_the_au_advertises_one() {
         let unit = apple_delay_unit();
-        // AUDelay's parameters are measured to carry no clump flag.
+        // AUDelay's parameters carry no clump flag.
         for p in list(&unit) {
             assert!(
                 p.clump.is_none(),
@@ -1062,13 +1010,6 @@ mod tests {
     fn clump_zero_is_never_named() {
         let unit = apple_delay_unit();
         assert_eq!(clump_name(&unit, 0), None);
-    }
-
-    #[test]
-    fn test_list() {
-        let unit = apple_delay_unit();
-        let params = list(&unit);
-        assert!(!params.is_empty());
     }
 
     #[test]

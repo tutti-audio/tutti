@@ -47,8 +47,6 @@ use crate::preset::AuPreset;
 use crate::ranges::RangeTable;
 use crate::stream::{AuBusLayout, StreamConfig};
 use crate::transport;
-#[cfg(feature = "testing")]
-use crate::types::AudioUnit;
 use crate::watch::PropertyWatch;
 
 /// An AU that has been instantiated but not yet initialized.
@@ -357,15 +355,6 @@ impl AuLoaded {
         self.handle.unit()
     }
 
-    /// The raw `AudioUnit` pointer, for a test that makes an AudioToolbox call
-    /// this crate does not wrap. Using it is the caller's `unsafe`. A render
-    /// made through it is not counted: hold `unit().rendering()` across it, or
-    /// keep it from overlapping `AuMidiOutput::withdraw`.
-    #[cfg(feature = "testing")]
-    pub fn raw_unit(&self) -> AudioUnit {
-        self.unit().as_raw()
-    }
-
     /// Installs the host transport callbacks (`kAudioUnitProperty_HostCallbacks`)
     /// so the AU can pull tempo, beat and transport state during its render,
     /// returning the state the host publishes into.
@@ -585,7 +574,7 @@ impl AuLoaded {
     /// This instance's unit, wrapped so a render-notify callback can capture it.
     ///
     /// A pre-render callback's whole job is usually to schedule automation on the
-    /// unit that is rendering, but `raw_unit` returns a bare
+    /// unit that is rendering, but the raw `AudioUnit` is a bare
     /// pointer that is neither `Send` nor `Sync`, so capturing it in the callback
     /// does not compile. This is the wrapper that makes it possible — see
     /// [`RenderUnit`](crate::render_notify::RenderUnit) for why the assertion is

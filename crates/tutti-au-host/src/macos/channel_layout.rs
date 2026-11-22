@@ -47,7 +47,7 @@ use tutti_au_ffi::Unit;
 /// # The alias trap
 ///
 /// Several of Apple's constants are **the same numeric value under two names**
-/// — read off this SDK (macOS 15.6), not copied from documentation:
+/// in this SDK:
 ///
 /// | value | names |
 /// |---|---|
@@ -73,8 +73,7 @@ use tutti_au_ffi::Unit;
 pub enum AuLayoutTag {
     /// `kAudioChannelLayoutTag_UseChannelDescriptions`: the layout is not a tag
     /// at all — the AU wants an explicit per-channel description array. This is
-    /// what AUMultiChannelMixer and AUNetSend publish (measured, macOS 15.6),
-    /// and it is why `channel_count` returns `None`: the count lives in
+    /// what AUMultiChannelMixer and AUNetSend publish, and it is why `channel_count` returns `None`: the count lives in
     /// `mNumberChannelDescriptions`, not in the tag.
     UseChannelDescriptions,
     /// `kAudioChannelLayoutTag_UseChannelBitmap`: the channels are named by an
@@ -107,7 +106,7 @@ pub enum AuLayoutTag {
     AmbisonicBFormat,
     /// Four channels, L R Ls Rs. **Also `kAudioChannelLayoutTag_AudioUnit_4`** —
     /// the two constants are the same value, so this one variant answers for
-    /// both. Measured: AUMatrixReverb publishes this on its output.
+    /// both.
     Quadraphonic,
     /// Five channels, L R C Ls Rs (pentagonal placement).
     Pentagonal,
@@ -119,8 +118,7 @@ pub enum AuLayoutTag {
     Cube,
     /// Five channels, L R C Ls Rs — the **AU** 5.0 order. Also
     /// `kAudioChannelLayoutTag_MPEG_5_0_B`; NOT the same value as
-    /// [`Self::Pentagonal`] despite both being five channels. Measured:
-    /// AUMatrixReverb publishes this on its output.
+    /// [`Self::Pentagonal`] despite both being five channels.
     AudioUnit5_0,
     /// Six channels, **L R C LFE Ls Rs** — the AU 5.1 order, and the layout
     /// whose order the module docs are about. Also
@@ -290,10 +288,8 @@ impl std::fmt::Display for AuLayoutTag {
 /// for a tag-only layout ("is only expected to have set ... the layout tag as
 /// the valid field").
 ///
-/// Measured on macOS 15.6: AUMatrixReverb accepts **both** 12 and 32 bytes for a
-/// tag-only write, so the smaller size is used because it is *correct*, not
-/// because it is required — 32 bytes claims a description array that was never
-/// populated, which a stricter AU validating `mNumberChannelDescriptions`
+/// The smaller size is *correct*: 32 bytes claims a description array that was
+/// never populated, which a stricter AU validating `mNumberChannelDescriptions`
 /// against the byte count would rightly refuse.
 const TAG_ONLY_LAYOUT_SIZE: usize =
     size_of::<AudioChannelLayout>() - size_of::<AudioChannelDescription>();
@@ -304,20 +300,16 @@ const TAG_ONLY_LAYOUT_SIZE: usize =
 ///
 /// Same reading as [`crate::bus::supported_channel_configs`]:
 /// `kAudioUnitProperty_SupportedChannelLayoutTags` is optional and most units
-/// simply refuse it. Measured on macOS 15.6, of ~38 units only **11** answer at
-/// all — AUMatrixReverb, AUSampler, AUMIDISynth, AUNewPitch, AURoundTripAAC,
-/// AUNetSend, AUMixer3D, AUMultiChannelMixer and the three third-party units.
-/// AUDelay, AUNBandEQ, AUMatrixMixer and the rest all report
-/// `kAudioUnitErr_InvalidProperty` (-10879), absorbed into an empty vec rather
-/// than an error — the common case is an AU with no opinion, not a failed read.
+/// simply refuse it with `kAudioUnitErr_InvalidProperty` (-10879), absorbed
+/// into an empty vec rather than an error — the common case is an AU with no opinion, not a failed read.
 ///
 /// A published tag is not a settable tag: the list is what the AU understands
 /// *in principle*, and whether it accepts a given entry right now depends on
 /// the bus's configured width — see [`set_layout_tag`]'s width gate.
 ///
-/// Duplicates are returned verbatim rather than deduplicated: AUNewPitch
-/// publishes `Quadraphonic` twice (measured), the AU describing its own table,
-/// and collapsing it would hide that from a host displaying the list.
+/// Duplicates are returned verbatim rather than deduplicated: an AU that
+/// publishes `Quadraphonic` twice is describing its own table, and collapsing it
+/// would hide that from a host displaying the list.
 pub(crate) fn supported_layout_tags(
     unit: &Unit,
     direction: BusDirection,
@@ -347,27 +339,23 @@ pub(crate) fn supported_layout_tags(
 /// flattened into a default:
 ///
 /// * `kAudioUnitErr_InvalidProperty` (-10879) — the AU has no channel-layout
-///   property at all. Measured: AUDelay, AUNBandEQ, AUMatrixMixer, and every
-///   other Apple effect bar AUMatrixReverb.
+///   property at all.
 /// * `kAudioUnitErr_PropertyNotInUse` (-10851) — the property exists but no
-///   layout has been set. Apple's header names this case explicitly. Measured on
-///   AUSampler's output, which *does* publish `[Mono, Stereo]` as supported.
+///   layout has been set. Apple's header names this case explicitly.
 /// * `kAudioUnitErr_InvalidElement` (-10877) — no such bus.
 ///
 /// A default would mean picking a speaker order for a bus whose order is
 /// genuinely unknown — how centre dialog ends up in the LFE — so the absence is
 /// reported and the caller decides.
 ///
-/// Only the tag is returned, not the whole `AudioChannelLayout`: every unit
-/// measured answers with a tag-only layout (`mNumberChannelDescriptions == 0`),
-/// and a description array would need an owned allocation whose only consumer —
-/// a `UseChannelDescriptions` unit — none of them sets. If that changes, this
-/// returns the tag `UseChannelDescriptions` and a caller can tell.
+/// Only the tag is returned, not the whole `AudioChannelLayout`: a description
+/// array would need an owned allocation whose only consumer is a
+/// `UseChannelDescriptions` unit. Such a unit returns the tag
+/// `UseChannelDescriptions`, so a caller can tell.
 pub(crate) fn layout_tag(unit: &Unit, direction: BusDirection, bus: u32) -> Result<AuLayoutTag> {
     let bytes = unit.get_bytes::<AudioChannelLayoutProperty>(direction.scope(), Element(bus))?;
-    // The AU controls this length, and measured sizes differ per unit for the
-    // same logical value (AUMatrixReverb: 32 bytes; AUMultiChannelMixer and
-    // AUSampler: 12), so a fixed-`size_of` `get_property::<AudioChannelLayout>`
+    // The AU controls this length, and sizes differ per unit for the same
+    // logical value (32 bytes or 12), so a fixed-`size_of` `get_property::<AudioChannelLayout>`
     // would read a length neither agreed to. Anything shorter than the 4-byte
     // tag has no tag to report.
     if bytes.len() < size_of::<u32>() {
@@ -383,13 +371,12 @@ pub(crate) fn layout_tag(unit: &Unit, direction: BusDirection, bus: u32) -> Resu
 
 /// Asks the AU to run bus `bus` of `direction` in the `tag` channel order.
 ///
-/// # The width gate — the measurement that shapes this API
+/// # The width gate
 ///
 /// A tag from [`supported_layout_tags`] is **not** automatically settable. The
 /// AU checks the tag's channel count against the width already configured on
-/// that bus, and refuses any disagreement. Measured on macOS 15.6 against
-/// AUMatrixReverb's output, which publishes `[Stereo, Quadraphonic,
-/// AudioUnit_5_0]`:
+/// that bus, and refuses any disagreement. For an output that publishes
+/// `[Stereo, Quadraphonic, AudioUnit_5_0]`:
 ///
 /// | configured width | tag | result |
 /// |---|---|---|
@@ -419,8 +406,7 @@ pub(crate) fn layout_tag(unit: &Unit, direction: BusDirection, bus: u32) -> Resu
 ///
 /// * `kAudioUnitErr_InvalidPropertyValue` (-10851) — the tag is not one this bus
 ///   will take at its current width, per the table above. Also what an
-///   unpublished tag returns (measured: `AudioUnit_5_1` on AUMatrixReverb at
-///   6 channels, and `Quadraphonic` on AUSampler).
+///   unpublished tag returns.
 /// * `kAudioUnitErr_InvalidProperty` (-10879) — the AU has no channel-layout
 ///   property, so there is no order to set.
 ///
@@ -481,15 +467,8 @@ pub(crate) fn set_layout_tag(
 /// an empty string:
 ///
 /// * `kAudioUnitErr_PropertyNotInUse` (-10850) — the bus exists but the AU gave
-///   it no name. Measured: **every Apple mixer**. AUMultiChannelMixer returns
-///   -10850 for inputs 0..=7 and AUMatrixMixer for 0..=63 — i.e. for exactly
-///   their real buses. So Apple's mixers publish no element names at all on
-///   this machine; the units that do are DLSMusicDevice (`out[0]` "stereo
-///   mix", `out[1]` "unused") plus the third-party effects (TDR Nova `in[1]`
-///   "Sidechain").
-/// * `kAudioUnitErr_InvalidElement` (-10877) — no such bus. Measured:
-///   AUMultiChannelMixer input 8, AUMatrixMixer input 64, DLSMusicDevice output
-///   2 — one past each unit's real count in every case.
+///   it no name; Apple's mixers answer this for every real bus.
+/// * `kAudioUnitErr_InvalidElement` (-10877) — no such bus.
 ///
 /// The split is the useful part — a name-less bus versus one that does not
 /// exist — and `Ok(String::new())` for either would erase it.

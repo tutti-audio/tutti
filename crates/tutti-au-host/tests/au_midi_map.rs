@@ -230,7 +230,7 @@ fn nothing_implements_the_deprecated_midi_control_mapping_property() {
                 // to check nothing needs one.
                 let status = unsafe {
                     tutti_au_host::types::AudioUnitGetPropertyInfo(
-                        au.raw_unit(),
+                        au.unit().as_raw(),
                         MidiControlMapping::ID,
                         scope.raw(),
                         0,
@@ -894,7 +894,7 @@ fn an_unarmed_hot_map_read_answers_noerr_not_the_documented_error() {
         let mut size = buf.len() as u32;
         let status = unsafe {
             tutti_au_host::types::AudioUnitGetProperty(
-                au.raw_unit(),
+                au.unit().as_raw(),
                 44, // kAudioUnitProperty_HotMapParameterMIDIMapping
                 Scope::GLOBAL.raw(),
                 0,
