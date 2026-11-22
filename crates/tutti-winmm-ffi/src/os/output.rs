@@ -142,7 +142,7 @@ impl MidiOut {
     /// voice message is one), with nothing sent; otherwise `midiOutShortMsg`'s.
     pub fn send(&mut self, ump: &Ump) -> Result<(), Error> {
         let message = pack(ump).ok_or(Error::NoMidi1Form {
-            message_type: ump.message_type(),
+            message_type: ump.message_type().get(),
         })?;
         // SAFETY: `handle` is the open output.
         let code = unsafe { midiOutShortMsg(self.handle, message) };

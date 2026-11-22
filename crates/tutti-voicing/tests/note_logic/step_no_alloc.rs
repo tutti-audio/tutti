@@ -10,7 +10,7 @@ use tutti_midi_protocol::{
     Timing, TuningFrequency, TuningMessage, TuningName, Universal,
 };
 use tutti_ump::{
-    Attribute, CCNumber, MidiChannel, NoteNumber, NoteVelocity, PerNoteManagement,
+    Attribute, CCNumber, MidiChannel, NoteNumber, NoteVelocity, PerNoteManagement, Pitch,
     RegisteredPerNoteController, Rpn, U7, U14, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
@@ -108,7 +108,7 @@ fn step_is_allocation_free_in_every_mode() {
                     Voice2::NoteOn {
                         note: NoteNumber::of(k),
                         velocity: NoteVelocity::CENTER,
-                        attribute: Attribute::Pitch(60 << 9),
+                        attribute: Attribute::Pitch(Pitch::from_q7_9(60 << 9)),
                     },
                     cc(64, round % 2 * 127),
                     cc(66, round % 3 / 2 * 127),
@@ -200,7 +200,7 @@ fn per_note_state_is_allocation_free() {
                 Voice2::NoteOn {
                     note,
                     velocity: NoteVelocity::CENTER,
-                    attribute: Attribute::Pitch(60 << 9),
+                    attribute: Attribute::Pitch(Pitch::from_q7_9(60 << 9)),
                 },
                 Voice2::PerNoteManagement {
                     note,

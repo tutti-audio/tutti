@@ -12,7 +12,7 @@ use tutti_fixtures::midi;
 
 use tutti_ump::{
     Address, Attribute, BendValue, CCNumber, ControlValue, Message, MidiChannel, MidiGroup,
-    NoteNumber, NoteVelocity, PerNoteManagement, U7, U14, Ump, Voice1, Voice2,
+    NoteNumber, NoteVelocity, PerNoteManagement, Pitch, U7, U14, Ump, Voice1, Voice2,
 };
 
 use tutti_units::{Amplitude, Hz, Normalized, Resonance, Seconds, Spread};
@@ -3486,7 +3486,7 @@ fn pitch_7_9_and_7_25_put_note_69_at_a440() {
                 Voice2::NoteOn {
                     note: NoteNumber::of(0),
                     velocity: NoteVelocity::CENTER,
-                    attribute: Attribute::Pitch(q7_9),
+                    attribute: Attribute::Pitch(Pitch::from_q7_9(q7_9)),
                 },
             ))],
         );

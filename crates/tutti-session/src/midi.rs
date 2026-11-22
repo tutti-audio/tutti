@@ -2249,6 +2249,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
     use tutti_fixtures::midi;
+    use tutti_ump::MessageType;
     use tutti_units::SampleRate;
 
     /// **A device's inlet holds at least a second of a saturated MIDI 1.0
@@ -2525,17 +2526,18 @@ mod tests {
         let sent = log.lock().clone();
         let events: Vec<&Outgoing> = sent
             .iter()
-            .filter(|e| e.ump == note(0).1 || e.ump.message_type() == 0)
+            .filter(|e| e.ump == note(0).1 || e.ump.message_type() == MessageType::Utility)
             .collect();
         assert!(events.len() >= 4, "a stamp for each event");
         for pair in sent.windows(2) {
-            if pair[0].ump.message_type() == 0 && pair[1].ump == note(0).1 {
+            if pair[0].ump.message_type() == MessageType::Utility && pair[1].ump == note(0).1 {
                 assert_eq!(pair[0].send, pair[1].send, "a stamp rides with its event");
             }
         }
         assert!(
             sent.iter()
-                .all(|e| matches!(e.send, SendAt::At(_)) || e.ump.message_type() == 0),
+                .all(|e| matches!(e.send, SendAt::At(_))
+                    || e.ump.message_type() == MessageType::Utility),
             "every note is scheduled"
         );
     }

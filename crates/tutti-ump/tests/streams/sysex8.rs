@@ -5,7 +5,7 @@
 
 use tutti_ump::{
     Data128, Message, MidiChannel, MidiGroup, Sysex7Packet, Sysex8Assembler, Sysex8Step,
-    Sysex8StreamIds, SysexStatus, Ump, Voice1,
+    Sysex8StreamCount, Sysex8StreamIds, SysexStatus, Ump, Voice1,
 };
 
 const G0: MidiGroup = MidiGroup::of(0);
@@ -13,7 +13,7 @@ const G0: MidiGroup = MidiGroup::of(0);
 /// The packets of `payload` on stream `id`, from a receiver that takes every
 /// stream: the streams below `id` are held open meanwhile.
 fn written(id: u8, group: MidiGroup, payload: &[u8]) -> Vec<Ump> {
-    let ids = Sysex8StreamIds::discovered(255);
+    let ids = Sysex8StreamIds::discovered(Sysex8StreamCount::new(255));
     let held: Vec<_> = (0..id)
         .map(|_| ids.open().unwrap().packets(group, &[]))
         .collect();
@@ -62,7 +62,7 @@ fn feed(
 ) -> Vec<(u8, u8, Vec<u8>)> {
     umps.into_iter()
         .filter_map(|u| match a.push(u) {
-            Sysex8Step::Complete(m) => Some((m.group.get(), m.stream_id, m.payload.to_vec())),
+            Sysex8Step::Complete(m) => Some((m.group.get(), m.stream_id.get(), m.payload.to_vec())),
             _ => None,
         })
         .collect()
@@ -390,7 +390,7 @@ fn only_sysex8_packets_are_taken() {
         unreachable!()
     };
     assert_eq!(
-        (p.status(), p.stream_id(), p.bytes()),
+        (p.status(), p.stream_id().get(), p.bytes()),
         (SysexStatus::Start, 0, &[1][..])
     );
 }
@@ -440,9 +440,9 @@ fn start<'a>(
 fn a_one_stream_device_uses_stream_id_0() {
     for ids in [
         Sysex8StreamIds::undiscovered(),
-        Sysex8StreamIds::discovered(1),
+        Sysex8StreamIds::discovered(Sysex8StreamCount::new(1)),
     ] {
-        assert_eq!(ids.count(), 1);
+        assert_eq!(ids.count(), Sysex8StreamCount::new(1));
         for ump in ids.open().unwrap().packets(G0, &[0x80; 40]) {
             assert_eq!(wire_id(ump), 0);
         }
@@ -467,7 +467,7 @@ fn without_discovery_a_second_concurrent_stream_is_refused() {
 /// Spec: m2-104/7.8#7
 #[test]
 fn n_streams_use_only_stream_ids_0_to_n_minus_1() {
-    let ids = Sysex8StreamIds::discovered(3);
+    let ids = Sysex8StreamIds::discovered(Sysex8StreamCount::new(3));
     let open: Vec<_> = (0..3).map(|_| start(&ids, &[0x80; 40]).unwrap()).collect();
     assert_eq!(
         open.iter().map(|(u, _)| wire_id(*u)).collect::<Vec<_>>(),
@@ -478,7 +478,7 @@ fn n_streams_use_only_stream_ids_0_to_n_minus_1() {
     let (_, middle) = open.remove(1);
     drop(middle.collect::<Vec<_>>());
     assert_eq!(wire_id(start(&ids, &[1]).unwrap().0), 1);
-    let all = Sysex8StreamIds::discovered(255);
+    let all = Sysex8StreamIds::discovered(Sysex8StreamCount::new(255));
     let streams: Vec<_> = std::iter::from_fn(|| all.open()).collect();
     assert_eq!(streams.len(), 255);
 }
@@ -487,7 +487,11 @@ fn n_streams_use_only_stream_ids_0_to_n_minus_1() {
 /// takes no System Exclusive 8, so it hands out no stream.
 #[test]
 fn a_receiver_declaring_zero_streams_gets_none() {
-    assert!(Sysex8StreamIds::discovered(0).open().is_none());
+    assert!(
+        Sysex8StreamIds::discovered(Sysex8StreamCount::new(0))
+            .open()
+            .is_none()
+    );
 }
 
 /// Section 7.8.1: the abort is an End with `# of bytes` 0xF and zero data on
@@ -495,7 +499,7 @@ fn a_receiver_declaring_zero_streams_gets_none() {
 /// Spec: m2-104/7.8.1#1
 #[test]
 fn an_abort_ends_the_message_and_frees_its_id() {
-    let ids = Sysex8StreamIds::discovered(2);
+    let ids = Sysex8StreamIds::discovered(Sysex8StreamCount::new(2));
     let (_, _held) = start(&ids, &[0x80; 40]).unwrap();
     let (_, packets) = start(&ids, &[0x80; 40]).unwrap();
     assert_eq!(packets.abort(), Ump([0x503F_0100, 0, 0, 0]));
@@ -508,7 +512,7 @@ fn an_abort_ends_the_message_and_frees_its_id() {
 /// Spec: m2-104/7.8.1#1
 #[test]
 fn an_unfinished_message_keeps_its_id_until_its_abort_is_taken() {
-    let ids = Sysex8StreamIds::discovered(2);
+    let ids = Sysex8StreamIds::discovered(Sysex8StreamCount::new(2));
     let g5 = MidiGroup::of(5);
     let mut packets = ids.open().unwrap().packets(g5, &[0x80; 40]);
     packets.next().unwrap();

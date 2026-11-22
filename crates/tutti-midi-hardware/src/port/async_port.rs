@@ -27,7 +27,7 @@ use tutti_midi_runtime::{DeviceInput, InputId};
 use tutti_rt::{
     Bell, Counter, CounterWriter, Overflow, PushError, RingReader, RingWriter, counter, ring,
 };
-use tutti_ump::{Message, Ump, Utility};
+use tutti_ump::{Message, MessageType, Ump, Utility};
 use tutti_units::Resyncs;
 
 use crate::InputTiming;
@@ -201,9 +201,6 @@ pub struct InputProducerHandle {
 /// again when its step times out.
 pub(crate) const STREAM_CAPACITY: usize = 512;
 
-/// The UMP message type of a 7-bit System Exclusive packet (M2-104 §7.7).
-const SYSEX7: u8 = 0x3;
-
 impl core::fmt::Debug for InputProducerHandle {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("InputProducerHandle")
@@ -283,7 +280,7 @@ impl InputProducerHandle {
             }
             return Ok(Delivered::Diverted);
         }
-        if event.message_type() == SYSEX7 && self.hear_sysex.load(Ordering::Relaxed) {
+        if event.message_type() == MessageType::Sysex7 && self.hear_sysex.load(Ordering::Relaxed) {
             let _ = self.stream.push(event);
             self.ring();
         }

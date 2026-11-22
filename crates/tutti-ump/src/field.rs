@@ -485,7 +485,7 @@ mod tests {
     #[test]
     fn only_the_pitch_attribute_has_a_pitch() {
         assert_eq!(
-            Attribute::Pitch(61 << 9).pitch(),
+            Attribute::Pitch(Pitch::from_q7_9(61 << 9)).pitch(),
             Some(Pitch::from_q7_25(61 << 25))
         );
         assert_eq!(Attribute::None.pitch(), None);

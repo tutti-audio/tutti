@@ -24,8 +24,8 @@ use tutti_session::{
 };
 use tutti_ump::EndpointName;
 use tutti_ump::{
-    DeviceIdentity, DiscoveryFilter, ManufacturerId, Message, MidiGroup, Protocol, Stream,
-    StreamConfig, SysexAssembler, SysexStep, U7, Ump, UmpVersion,
+    DeviceIdentity, DiscoveryFilter, ManufacturerId, Message, MessageType, MidiGroup, Protocol,
+    Stream, StreamConfig, SysexAssembler, SysexStep, U7, Ump, UmpVersion,
 };
 use tutti_units::SampleRate;
 use tutti_units::{Beat, BeatDuration};
@@ -481,7 +481,11 @@ fn a_granted_request_moves_the_sessions_output_to_the_protocol_asked() {
         .filter(|u| u.note_key_event().is_some())
         .map(|u| u.message_type())
         .collect();
-    assert_eq!(notes, [2], "the note on, as MIDI 1.0");
+    assert_eq!(
+        notes,
+        [MessageType::Midi1ChannelVoice],
+        "the note on, as MIDI 1.0"
+    );
 }
 
 /// M2-104 §7.1.6.3: under JR timing the device sends JR Timestamps to the

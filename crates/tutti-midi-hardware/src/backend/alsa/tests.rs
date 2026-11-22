@@ -17,7 +17,8 @@ use tutti_midi_device::{
 use tutti_midi_runtime::DeviceWriters;
 use tutti_ump::{
     BlockDirection, EndpointInfoNotification, Field, FirstGroup, FunctionBlockCount,
-    FunctionBlockId, FunctionBlockInfo, FunctionBlocks, GroupSpan, Midi1Port, Protocol, UiHint,
+    FunctionBlockId, FunctionBlockInfo, FunctionBlocks, GroupSpan, MessageType, Midi1Port,
+    Protocol, Sysex8StreamCount, UiHint,
 };
 
 /// Long enough to be a failure, not a race: the announce arrives at once.
@@ -917,7 +918,7 @@ fn next_note(device: &Virtual, patience: Duration) -> Option<(u32, Instant)> {
     while Instant::now() < deadline {
         match device.0.read_event() {
             Ok(tutti_alsa_ffi::Read::Event(tutti_alsa_ffi::Event::Ump { ump, .. }))
-                if ump.message_type() == 2 =>
+                if ump.message_type() == MessageType::Midi1ChannelVoice =>
             {
                 return Some((ump.0[0], Instant::now()));
             }
@@ -1181,7 +1182,7 @@ fn plug_ump(name: &str, protocol: Protocol) -> Virtual {
                     first_group: Field::Value(FirstGroup::of(2)),
                     groups_spanned: Field::Value(GroupSpan::of(2)),
                     midi_ci_version: 0,
-                    max_sysex8_streams: 0,
+                    max_sysex8_streams: Sysex8StreamCount::new(0),
                 },
                 name: Some("Keys".into()),
             }],

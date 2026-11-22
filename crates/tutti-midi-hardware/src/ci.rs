@@ -172,7 +172,7 @@ use tutti_midi_ci::{
 use tutti_midi_device::MidiDeviceId;
 use tutti_rt::CounterWriter;
 use tutti_rt::SplitMix64;
-use tutti_ump::{DeviceIdentity, MidiGroup, SysexAssembler, SysexStep, Ump};
+use tutti_ump::{DeviceIdentity, MessageType, MidiGroup, SysexAssembler, SysexStep, Ump};
 
 use crate::answer::{Answer, ReportEnd};
 use crate::devices::OpenOutput;
@@ -936,7 +936,9 @@ impl Running {
         for &ump in heard.sysex() {
             // Only a message of a Group that has a device is read.
             let Some(group) = ump.group() else { continue };
-            if ump.message_type() != 0x3 || !self.members.iter().any(|m| m.group == group) {
+            if ump.message_type() != MessageType::Sysex7
+                || !self.members.iter().any(|m| m.group == group)
+            {
                 continue;
             }
             self.assembler.begin_block();
