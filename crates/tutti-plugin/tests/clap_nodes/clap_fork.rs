@@ -35,7 +35,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     Editor, ForkError, ForkFaultKind, ForkMode, ForkTarget, IntoNode, Prepare, Renderer,
 };
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_plugin::PluginClient;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_ipc::{IpcConfig, PluginRenderFault};
@@ -326,7 +326,7 @@ fn a_state_the_fresh_instance_refuses_is_a_named_fork_error() {
     editor
         .spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort { node: key, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
     match editor.fork(ForkTarget::Node(key), ForkMode::Offline, prepare) {
         Err(ForkError::Source { key: at, cause }) => {
             assert_eq!(at, key);
@@ -421,7 +421,7 @@ fn a_graph_holding_a_plugin_forks_and_renders_offline() {
     editor
         .spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort { node: key, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
 
     let (fork_ed, fork_exec) = editor
         .fork(ForkTarget::Node(key), ForkMode::Offline, prepare)
@@ -459,7 +459,7 @@ fn render_fork_of(client: PluginClient, blocks: usize) -> Editor {
     editor
         .spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort { node: key, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
     let (fork_ed, fork_exec) = editor
         .fork(ForkTarget::Node(key), ForkMode::Offline, prepare)
         .expect("forks");
@@ -654,7 +654,7 @@ fn live_graph(client: PluginClient) -> (Editor, tutti_graph::Executor) {
     );
     live.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort { node: key, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
     (live, exec)
 }
 
@@ -989,7 +989,7 @@ fn a_clip_note_in_a_chunk_that_begins_mid_block_lands_on_its_frame() {
         feed_note(&mut live, key, NOTE_FRAME);
         live.spec_mut()
             .topology
-            .set_outputs(vec![PortSource::Node(OutPort { node: key, port: 0 })]);
+            .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
         let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
             sample_rate: SampleRate::of(SAMPLE_RATE),
             ..Default::default()
@@ -1078,7 +1078,7 @@ fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
     );
     live.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort { node: key, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
         sample_rate: SampleRate::of(SAMPLE_RATE),
         ..Default::default()
@@ -1198,8 +1198,8 @@ fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
             EventEdge::Direct(EventOut { node: key, port: 0 }),
         );
         live.spec_mut().topology.set_outputs(vec![
-            PortSource::Node(OutPort { node: key, port: 0 }),
-            PortSource::Node(OutPort {
+            PortSource::Node(OutputPort { node: key, port: 0 }),
+            PortSource::Node(OutputPort {
                 node: sink,
                 port: 0,
             }),
@@ -1299,11 +1299,11 @@ fn an_export_is_aligned_when_the_plugin_latency_moves_offline() {
     );
     for port in 0..inputs {
         live.spec_mut().topology.edges.insert(
-            tutti_graph::InPort {
+            tutti_graph::InputPort {
                 node: key,
                 port: port as u16,
             },
-            vec![tutti_graph::Edge::Direct(PortSource::Node(OutPort {
+            vec![tutti_graph::Edge::Direct(PortSource::Node(OutputPort {
                 node: src,
                 port: 0,
             }))],
@@ -1311,7 +1311,7 @@ fn an_export_is_aligned_when_the_plugin_latency_moves_offline() {
     }
     live.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort { node: key, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
 
     let graph = fork_graph(&live, rate);
     let latency = graph.reported_latency();
@@ -1483,11 +1483,11 @@ fn an_export_of_plugins_is_bit_identical_on_a_pool() {
         ),
     );
     live.spec_mut().topology.set_outputs(vec![
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(9),
             port: 0,
         }),
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(10),
             port: 0,
         }),
@@ -1613,7 +1613,7 @@ fn a_fork_of_a_refused_rate_is_silent_and_a_failed_fault() {
     editor
         .spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort { node: key, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
     let (fork_ed, fork_exec) = editor
         .fork(ForkTarget::Node(key), ForkMode::Offline, prepare)
         .expect("forks");

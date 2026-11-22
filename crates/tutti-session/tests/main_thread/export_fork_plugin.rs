@@ -29,8 +29,8 @@ use tutti_plugin_types::PluginForkError;
 use tutti_plugin_types::PluginRef;
 use tutti_session::BufferMainOutput;
 use tutti_session::{
-    Bounce, BounceError, BounceLatency, BounceTail, DetachedSession, ExportClock, InPort, OutPort,
-    Range, Session, Stem,
+    Bounce, BounceError, BounceLatency, BounceTail, DetachedSession, ExportClock, InputPort,
+    OutputPort, Range, Session, Stem,
 };
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_ump::MidiChannel;
@@ -158,11 +158,11 @@ fn feed_with(
     let source = session.graph().add(node);
     session
         .graph()
-        .set_sources(InPort::new(probe, 0), [OutPort::new(source, 0)])
+        .set_sources(InputPort::new(probe, 0), [OutputPort::new(source, 0)])
         .unwrap();
     session
         .graph()
-        .set_sources(InPort::new(probe, 1), [OutPort::new(source, 0)])
+        .set_sources(InputPort::new(probe, 1), [OutputPort::new(source, 0)])
         .unwrap();
     let _ = session.update();
 }

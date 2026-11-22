@@ -62,7 +62,7 @@ fn graph(unit: SoundFontUnit<f32>, rate: f64, frame: u64) -> (Editor, Executor) 
         }),
     );
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-        tutti_graph::PortSource::Node(tutti_graph::OutPort {
+        tutti_graph::PortSource::Node(tutti_graph::OutputPort {
             node: NodeKey(2),
             port,
         })

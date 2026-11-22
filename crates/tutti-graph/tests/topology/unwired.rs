@@ -12,7 +12,7 @@ use common::{Kind, TestNode, prepare};
 use tutti_buffers::{BusTopology, ChannelLayout, Speaker};
 use tutti_graph::{
     Bus, BusRef, BusRole, BusSource, Buses, Cx, Edge, EdgeFade, EdgeGain, EdgeId, Editor,
-    EventEdge, EventIn, EventOut, Executor, FeedbackFrom, InPort, Io, Node, NodeKey, OutPort,
+    EventEdge, EventIn, EventOut, Executor, FeedbackFrom, InputPort, Io, Node, NodeKey, OutputPort,
     PortSink, PortSource, Prepare, Shape, Status, TapAlign, TapId, TapOptions, TapSpec,
     TransportPosition, Unforkable, Unwired,
 };
@@ -44,19 +44,19 @@ const X: NodeKey = NodeKey(2);
 const B: NodeKey = NodeKey(3);
 const DELAY: Samples = Samples::new(128);
 
-fn out(node: NodeKey, port: u16) -> OutPort {
-    OutPort { node, port }
+fn out(node: NodeKey, port: u16) -> OutputPort {
+    OutputPort { node, port }
 }
 
-fn inp(node: NodeKey, port: u16) -> InPort {
-    InPort { node, port }
+fn inp(node: NodeKey, port: u16) -> InputPort {
+    InputPort { node, port }
 }
 
 fn direct(node: NodeKey, port: u16) -> Edge {
     Edge::Direct(PortSource::Node(out(node, port)))
 }
 
-fn id(sink: InPort, from: Edge) -> EdgeId {
+fn id(sink: InputPort, from: Edge) -> EdgeId {
     EdgeId {
         sink: PortSink::Port(sink),
         from,

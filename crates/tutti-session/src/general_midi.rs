@@ -23,7 +23,7 @@ use tutti_nodes::{
 use tutti_soundfont::SoundFontUnit;
 use tutti_units::Amplitude;
 
-use crate::{InstrumentHandle, Key, OutPort, ParamTarget, RemoveError, Session, SessionNode};
+use crate::{InstrumentHandle, Key, OutputPort, ParamTarget, RemoveError, Session, SessionNode};
 
 /// A SoundFont unit wired to its chorus and reverb, and what they sum to.
 ///
@@ -150,15 +150,15 @@ where
         ));
         let strip = graph.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
         // The unit's outputs: dry L/R, chorus send L/R, reverb send.
-        graph.connect(OutPort::new(unit, 2), chorus.input(0))?;
-        graph.connect(OutPort::new(unit, 3), chorus.input(1))?;
-        graph.connect(OutPort::new(unit, 4), reverb.input(0))?;
+        graph.connect(OutputPort::new(unit, 2), chorus.input(0))?;
+        graph.connect(OutputPort::new(unit, 3), chorus.input(1))?;
+        graph.connect(OutputPort::new(unit, 4), reverb.input(0))?;
         // The fader's inputs sum the dry pair, the chorus and the reverb,
         // each stereo, left on port 0 and right on port 1.
         let dry = instrument.out().erase();
         for (channel, port) in [(0, 0), (1, 1)] {
             for node in [dry, chorus.erase(), reverb.erase()] {
-                graph.connect(OutPort::new(node, channel), strip.input(port))?;
+                graph.connect(OutputPort::new(node, channel), strip.input(port))?;
             }
         }
         Ok(GeneralMidi {

@@ -13,7 +13,7 @@ use tutti_graph::testing as common;
 use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Cx, Editor, EventOut, Executor, IntoNode, Io, Node, NodeKey, NodeParts, OutPort, ParamEvent,
+    Cx, Editor, EventOut, Executor, IntoNode, Io, Node, NodeKey, NodeParts, OutputPort, ParamEvent,
     ParamIn, ParamInput, ParamNode, ParamSegment, ParamSet, PortSource, Prepare, Shape, Status,
     TransportPosition, declare_params, param_parts,
 };
@@ -135,7 +135,7 @@ fn render(to: &[(UnitAddr, f64)]) -> [Vec<f32>; 4] {
     );
     ed.spec_mut().topology.set_outputs(
         (0..4)
-            .map(|port| PortSource::Node(OutPort { node: NODE, port }))
+            .map(|port| PortSource::Node(OutputPort { node: NODE, port }))
             .collect::<Vec<_>>(),
     );
     for &(addr, _) in to {

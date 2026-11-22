@@ -17,7 +17,7 @@
 use std::sync::{Arc, Mutex};
 use tutti_buffers::{ChannelLayout, MaxBlock, Planes, PlanesMut};
 use tutti_engine::Engine;
-use tutti_graph::{Editor, Executor, NodeKey, OutPort, PortSource, Prepare};
+use tutti_graph::{Editor, Executor, NodeKey, OutputPort, PortSource, Prepare};
 use tutti_music::LoopRange;
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_nodes::{ClickNode, ClickNodeConfig, ClickSettings, MetronomeMode};
@@ -83,7 +83,7 @@ fn click_graph(mode: MetronomeMode) -> (Editor, Executor) {
     );
     ed.spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutPort { node: CLICK, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort { node: CLICK, port })));
     ed.commit().expect("commits");
     (ed, exec)
 }

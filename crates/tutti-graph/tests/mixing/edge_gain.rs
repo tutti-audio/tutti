@@ -19,8 +19,9 @@ use common::{Kind, Pair, TestNode, bits, input_signal, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     CommitError, Cx, Edge, EdgeGain, EdgeId, Editor, Executor, ForkByClone, ForkMode, ForkTarget,
-    GraphInvalid, GraphSpec, InPort, Io, Node, NodeKey, Op, OutPort, Plan, PortSink, PortSource,
-    Prepare, Renderer, Shape, Status, Topology, TransportPosition, Unforkable, ValidGraph, compile,
+    GraphInvalid, GraphSpec, InputPort, Io, Node, NodeKey, Op, OutputPort, Plan, PortSink,
+    PortSource, Prepare, Renderer, Shape, Status, Topology, TransportPosition, Unforkable,
+    ValidGraph, compile,
 };
 use tutti_units::Amplitude;
 
@@ -30,15 +31,15 @@ fn key(n: u64) -> NodeKey {
     NodeKey(n)
 }
 
-fn at(node: u64, port: u16) -> InPort {
-    InPort {
+fn at(node: u64, port: u16) -> InputPort {
+    InputPort {
         node: key(node),
         port,
     }
 }
 
 fn out(node: u64) -> PortSource {
-    PortSource::Node(OutPort {
+    PortSource::Node(OutputPort {
         node: key(node),
         port: 0,
     })

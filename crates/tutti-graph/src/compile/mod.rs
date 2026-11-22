@@ -61,7 +61,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::NodeKey;
 use crate::NodeMix;
-use crate::{Edge, EdgeId, FeedbackFrom, InPort, OutPort, PortSink, PortSource};
+use crate::{Edge, EdgeId, FeedbackFrom, InputPort, OutputPort, PortSink, PortSource};
 use tutti_buffers::ChannelLayout;
 use tutti_units::{Latency, Samples, Tail};
 
@@ -84,7 +84,7 @@ pub type Shapes = BTreeMap<NodeKey, Shape>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CycleEdge {
     /// An audio edge into this port.
-    Audio(InPort),
+    Audio(InputPort),
     /// An event edge from `from` into `at`.
     Event {
         /// The sink port.
@@ -106,7 +106,7 @@ pub enum CycleEdge {
     /// name, which would make every `CompileError` larger.)
     Gain {
         /// The port the weighted edge goes into.
-        at: InPort,
+        at: InputPort,
         /// The event output that drives the gain.
         from: EventOut,
     },
@@ -771,7 +771,7 @@ pub fn compile(
         global_val.insert(ch, v);
     }
 
-    let mut audio_out_val: BTreeMap<OutPort, u32> = BTreeMap::new();
+    let mut audio_out_val: BTreeMap<OutputPort, u32> = BTreeMap::new();
     let mut event_out_val: BTreeMap<EventOut, u32> = BTreeMap::new();
     // What each event input reads, after its sources' delays and merge: the
     // stream an event tap of an input copies.
@@ -787,7 +787,7 @@ pub fn compile(
         // same sources differently render alike. One source is the value itself, none is silence.
         let mut ain = Vec::with_capacity(shape.audio_in().count() as usize);
         for port in 0..shape.audio_in().count() {
-            let at = InPort { node: key, port };
+            let at = InputPort { node: key, port };
             let mut sources: Vec<Edge> = topology.edges.get(&at).cloned().unwrap_or_default();
             sources.sort();
             let mut refs: Vec<Addend> = Vec::with_capacity(sources.len());
@@ -985,7 +985,7 @@ pub fn compile(
         let aout: Vec<u32> = (0..shape.audio_out().count())
             .map(|port| {
                 let v = em.audio_value(op);
-                audio_out_val.insert(OutPort { node: key, port }, v);
+                audio_out_val.insert(OutputPort { node: key, port }, v);
                 v
             })
             .collect();
@@ -1821,7 +1821,7 @@ pub fn compile(
 
 /// The output ports something reads: an edge (direct or feedback), a global
 /// output, a tap lane or a meter lane.
-fn consumed_outputs(topology: &crate::Topology) -> BTreeSet<OutPort> {
+fn consumed_outputs(topology: &crate::Topology) -> BTreeSet<OutputPort> {
     let edges = topology.edges.values().flatten().filter_map(|e| match *e {
         Edge::Direct(PortSource::Node(p)) => Some(p),
         Edge::Feedback(f) => Some(f.from),
@@ -1853,18 +1853,18 @@ fn wired_ports(
     topology: &crate::Topology,
     key: NodeKey,
     shape: &Shape,
-    consumed: &BTreeSet<OutPort>,
+    consumed: &BTreeSet<OutputPort>,
 ) -> Wired {
     let mut wired = Wired::default();
     for port in 0..shape.audio_in().count() {
-        let at = InPort { node: key, port };
+        let at = InputPort { node: key, port };
         let fed = topology.edges.get(&at).is_some_and(|e| !e.is_empty());
         if fed {
             wired.inputs = wired.inputs.with(usize::from(port));
         }
     }
     for port in 0..shape.audio_out().count() {
-        if consumed.contains(&OutPort { node: key, port }) {
+        if consumed.contains(&OutputPort { node: key, port }) {
             wired.outputs = wired.outputs.with(usize::from(port));
         }
     }

@@ -149,10 +149,10 @@ pub enum ConnectError {
     NoSuchNode(tutti_graph::NodeKey),
     /// An output port that the node (or the graph's input) does not have.
     #[error("no such output port: {0:?}")]
-    NoSuchOutPort(crate::OutPort),
+    NoSuchOutPort(crate::OutputPort),
     /// An input port that the node (or the graph's output) does not have.
     #[error("no such input port: {0:?}")]
-    NoSuchInPort(crate::InPort),
+    NoSuchInPort(crate::InputPort),
     /// An event output that the node does not have.
     #[error("no such event output: {0:?}")]
     NoSuchEventOut(crate::EventOutPort),

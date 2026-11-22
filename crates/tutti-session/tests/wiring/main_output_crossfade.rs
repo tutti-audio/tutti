@@ -11,7 +11,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
-use tutti_session::{MainOutput, OutPort, Session};
+use tutti_session::{MainOutput, OutputPort, Session};
 use tutti_units::{SampleRate, Samples};
 
 const FADE: usize = 240;
@@ -26,7 +26,7 @@ fn session() -> Session {
     let node = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.75])));
     for c in 0..2 {
         s.graph()
-            .set_sources(MainOutput::channel(c), [OutPort::new(node, c)])
+            .set_sources(MainOutput::channel(c), [OutputPort::new(node, c)])
             .unwrap()
             .unfaded();
     }

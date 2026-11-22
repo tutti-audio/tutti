@@ -220,8 +220,8 @@ pub use input::{Input, InputConfig, InputOpener, OpenedInput};
 pub use instrument::{AnyNode, InstrumentHandle, NotInstrument};
 pub use key::{
     BusSink, BusWire, ChannelEdge, ChannelWire, Connection, Disconnection, EventEdge, EventInPort,
-    EventOutPort, EventTapPort, EventWire, Fanin, InPort, Inlet, Key, MainBusWire, MainInput,
-    MainOutput, MainOutputDeclaration, MainSink, OutPort, Outlet, Removal, SetSources, Weighted,
+    EventOutPort, EventTapPort, EventWire, Fanin, Inlet, InputPort, Key, MainBusWire, MainInput,
+    MainOutput, MainOutputDeclaration, MainSink, Outlet, OutputPort, Removal, SetSources, Weighted,
     Wire,
 };
 #[cfg(any(feature = "capture", feature = "midi"))]

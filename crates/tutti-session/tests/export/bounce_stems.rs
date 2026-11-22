@@ -20,7 +20,7 @@ use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
 use tutti_session::{
     Bounce, BounceConfigError, BounceError, BounceLatency, BounceTail, DetachedSession,
-    ExportClock, InPort, MainOutput, OutPort, PreparedGraph, Range, Session, Stem, StemGain,
+    ExportClock, InputPort, MainOutput, OutputPort, PreparedGraph, Range, Session, Stem, StemGain,
 };
 use tutti_session::{Bounced, BufferMainOutput, MainOutputKind};
 use tutti_units::{Db, SampleRate, Samples, Seconds};
@@ -149,11 +149,11 @@ fn stems_are_aligned_with_the_main_output_and_sum_to_it() {
     for channel in 0..2 {
         session
             .graph()
-            .connect(OutPort::new(steady, 0), MainOutput::channel(channel))
+            .connect(OutputPort::new(steady, 0), MainOutput::channel(channel))
             .unwrap();
         session
             .graph()
-            .connect(OutPort::new(late, 0), MainOutput::channel(channel))
+            .connect(OutputPort::new(late, 0), MainOutput::channel(channel))
             .unwrap();
     }
     let frames = 2_000;
@@ -230,7 +230,7 @@ fn a_stem_is_the_nodes_own_output_and_not_what_is_downstream() {
     let half = session.graph().add(ForkByClone(Half));
     session
         .graph()
-        .set_sources(InPort::new(half, 0), [OutPort::new(source, 0)])
+        .set_sources(InputPort::new(half, 0), [OutputPort::new(source, 0)])
         .unwrap();
     session.graph().connect(half, MainOutput).unwrap();
     let wide = session
@@ -239,7 +239,7 @@ fn a_stem_is_the_nodes_own_output_and_not_what_is_downstream() {
     for channel in 0..2 {
         session
             .graph()
-            .connect(OutPort::new(wide, channel), MainOutput::channel(channel))
+            .connect(OutputPort::new(wide, channel), MainOutput::channel(channel))
             .unwrap();
     }
 
@@ -295,7 +295,7 @@ fn a_stem_that_cannot_be_placed_is_refused_not_truncated() {
     for channel in 0..2 {
         session
             .graph()
-            .connect(OutPort::new(wide, channel), MainOutput::channel(channel))
+            .connect(OutputPort::new(wide, channel), MainOutput::channel(channel))
             .unwrap();
     }
     let to_mono = Stem::new(wide.erase())
@@ -379,11 +379,11 @@ fn shared_gain_keeps_the_balance_and_each_measures_its_own() {
     for channel in 0..2 {
         session
             .graph()
-            .connect(OutPort::new(loud, 0), MainOutput::channel(channel))
+            .connect(OutputPort::new(loud, 0), MainOutput::channel(channel))
             .unwrap();
         session
             .graph()
-            .connect(OutPort::new(quiet, 0), MainOutput::channel(channel))
+            .connect(OutputPort::new(quiet, 0), MainOutput::channel(channel))
             .unwrap();
     }
     let target = Normalize::peak(Db::new(-6.0));

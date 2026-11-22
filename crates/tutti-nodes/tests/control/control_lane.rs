@@ -19,7 +19,7 @@ use tutti_graph::{
     Node, Offset, ParamEvent, ParamIn, ParamKind, ParamRange, ParamSegment, Prepare, Shape, Status,
     TransportChanges, TransportPosition, control_in, declick_frames,
 };
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_modulation::{
     Amount, ControlProgram, ControlProgramBuilder, Curve, DepthBy, InputLayer, Layer, LayerClock,
     LayerId, LfoShape, PeriodPoint, Polarity, RateAnchor, SourceId, Waveform,
@@ -148,7 +148,7 @@ fn cutoff(node: u64) -> ParamIn {
 }
 
 fn out(node: u64, port: u16) -> PortSource {
-    PortSource::Node(OutPort {
+    PortSource::Node(OutputPort {
         node: NodeKey(node),
         port,
     })

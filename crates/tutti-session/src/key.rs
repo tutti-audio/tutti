@@ -3,7 +3,7 @@
 //!
 //! - [`Key<N>`] is a node's identity with its type: [`Graph::add`] returns one, and every call that takes a node takes
 //!   `impl Into<NodeKey>`, so a [`Key`] and an erased [`NodeKey`] both work.
-//! - [`OutPort`] and [`InPort`] name one channel: a node's output or input
+//! - [`OutputPort`] and [`InputPort`] name one channel: a node's output or input
 //!   port (`key.out(0)`, `key.input(1)`), a main input channel
 //!   ([`MainInput::channel`]) or a main output channel ([`MainOutput::channel`]).
 //! - [`EventOutPort`] and [`EventInPort`] name one event port
@@ -55,14 +55,14 @@ impl<N: ?Sized> Key<N> {
 
     /// Output port `index` of the node.
     #[must_use]
-    pub const fn out(self, index: usize) -> OutPort {
-        OutPort(OutEnd::Node(self.node, index))
+    pub const fn out(self, index: usize) -> OutputPort {
+        OutputPort(OutEnd::Node(self.node, index))
     }
 
     /// Input port `index` of the node.
     #[must_use]
-    pub const fn input(self, index: usize) -> InPort {
-        InPort(InEnd::Node(self.node, index))
+    pub const fn input(self, index: usize) -> InputPort {
+        InputPort(InEnd::Node(self.node, index))
     }
 
     /// The node's main event output (port 0), as a source of an event edge.
@@ -152,13 +152,13 @@ impl<N: ?Sized> From<Key<N>> for NodeKey {
 }
 
 /// One channel a signal leaves from: an output port of a node, or a channel
-/// of the graph's main input. Made by [`Key::out`], [`OutPort::new`]
+/// of the graph's main input. Made by [`Key::out`], [`OutputPort::new`]
 /// and [`MainInput::channel`].
 ///
 /// The index is a port number of the node's declared ports, a count and not
 /// a unit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct OutPort(OutEnd);
+pub struct OutputPort(OutEnd);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum OutEnd {
@@ -166,7 +166,7 @@ pub(crate) enum OutEnd {
     Input(usize),
 }
 
-impl OutPort {
+impl OutputPort {
     /// Output port `index` of `node`.
     #[must_use]
     pub fn new(node: impl Into<NodeKey>, index: usize) -> Self {
@@ -206,12 +206,12 @@ impl OutPort {
 
 /// One channel a signal arrives at: an input port of a node, or a channel of
 /// the graph's main output. Made by [`Key::input`],
-/// [`InPort::new`] and [`MainOutput::channel`].
+/// [`InputPort::new`] and [`MainOutput::channel`].
 ///
 /// The index is a port number of the node's declared ports, a count and not
 /// a unit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct InPort(InEnd);
+pub struct InputPort(InEnd);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum InEnd {
@@ -219,7 +219,7 @@ pub(crate) enum InEnd {
     Output(usize),
 }
 
-impl InPort {
+impl InputPort {
     /// Input port `index` of `node`.
     #[must_use]
     pub fn new(node: impl Into<NodeKey>, index: usize) -> Self {
@@ -269,8 +269,8 @@ pub struct MainOutput;
 impl MainOutput {
     /// Main output channel `index`, as a sink.
     #[must_use]
-    pub const fn channel(index: usize) -> InPort {
-        InPort(InEnd::Output(index))
+    pub const fn channel(index: usize) -> InputPort {
+        InputPort(InEnd::Output(index))
     }
 }
 
@@ -284,8 +284,8 @@ pub struct MainInput;
 impl MainInput {
     /// Main input channel `index` (a hardware or host input), as a source.
     #[must_use]
-    pub const fn channel(index: usize) -> OutPort {
-        OutPort(OutEnd::Input(index))
+    pub const fn channel(index: usize) -> OutputPort {
+        OutputPort(OutEnd::Input(index))
     }
 }
 
@@ -457,26 +457,26 @@ impl From<EventInPort> for EventTapPort {
 /// is unresolved until it is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ChannelEdge {
-    from: OutPort,
-    to: InPort,
+    from: OutputPort,
+    to: InputPort,
 }
 
 impl ChannelEdge {
     /// The edge from `from` into `to`.
     #[must_use]
-    pub const fn new(from: OutPort, to: InPort) -> Self {
+    pub const fn new(from: OutputPort, to: InputPort) -> Self {
         Self { from, to }
     }
 
     /// What feeds it.
     #[must_use]
-    pub const fn source(self) -> OutPort {
+    pub const fn source(self) -> OutputPort {
         self.from
     }
 
     /// Where it goes.
     #[must_use]
-    pub const fn sink(self) -> InPort {
+    pub const fn sink(self) -> InputPort {
         self.to
     }
 
@@ -524,7 +524,7 @@ pub trait Wire: Sealed {
     );
 }
 
-/// One channel to one channel: an [`OutPort`] into an [`InPort`], and an edge
+/// One channel to one channel: an [`OutputPort`] into an [`InputPort`], and an edge
 /// with a gain.
 #[derive(Clone, Copy, Debug)]
 pub struct ChannelWire;
@@ -552,7 +552,7 @@ pub trait Weighted: Wire {}
 impl Weighted for ChannelWire {}
 impl Weighted for MainBusWire {}
 
-/// Something a signal leaves from: [`OutPort`] (one channel), a [`Key`] or
+/// Something a signal leaves from: [`OutputPort`] (one channel), a [`Key`] or
 /// [`NodeKey`] (the node's whole main bus) or a [`BusSource`]. Sealed.
 pub trait Outlet: Sealed {
     /// The kind of wire it starts.
@@ -561,7 +561,7 @@ pub trait Outlet: Sealed {
     fn out(self) -> <Self::Wire as Wire>::Out;
 }
 
-/// Something a signal arrives at, for a wire of kind `W`: [`InPort`] (one
+/// Something a signal arrives at, for a wire of kind `W`: [`InputPort`] (one
 /// channel), a [`Key`] or [`NodeKey`] (the node's whole main bus), a
 /// [`BusRef`], or the [`MainOutput`]. Sealed.
 pub trait Inlet<W: Wire>: Sealed {
@@ -587,8 +587,8 @@ pub enum BusSink {
     MainOutput,
 }
 
-impl Sealed for OutPort {}
-impl Sealed for InPort {}
+impl Sealed for OutputPort {}
+impl Sealed for InputPort {}
 impl Sealed for NodeKey {}
 impl<N: ?Sized> Sealed for Key<N> {}
 impl Sealed for BusSource {}
@@ -602,20 +602,20 @@ impl Sealed for EventOutPort {}
 impl Sealed for EventInPort {}
 
 impl Wire for ChannelWire {
-    type Out = OutPort;
-    type In = InPort;
+    type Out = OutputPort;
+    type In = InputPort;
     fn connect<F: Float>(
         graph: &mut Graph<F>,
-        from: OutPort,
-        to: InPort,
+        from: OutputPort,
+        to: InputPort,
     ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError> {
         let added = graph.add_edge(from, to)?;
         Ok(vec![(ChannelEdge::new(from, to), added)])
     }
     fn disconnect<F: Float>(
         graph: &mut Graph<F>,
-        from: OutPort,
-        to: InPort,
+        from: OutputPort,
+        to: InputPort,
         hard: bool,
     ) -> Result<bool, ConnectError> {
         graph.check_wire(from, to)?;
@@ -623,8 +623,8 @@ impl Wire for ChannelWire {
     }
     fn harden<F: Float>(
         graph: &mut Graph<F>,
-        _: OutPort,
-        _: InPort,
+        _: OutputPort,
+        _: InputPort,
         edges: &[(ChannelEdge, bool)],
     ) {
         for (edge, _) in edges {
@@ -754,7 +754,7 @@ impl Inlet<EventWire> for EventInPort {
 
 /// A port with a set of sources: what [`Graph::sources`],
 /// [`Graph::set_sources`] takes, so one
-/// vocabulary covers an audio [`InPort`] (its sources sum) and an
+/// vocabulary covers an audio [`InputPort`] (its sources sum) and an
 /// [`EventInPort`] (its sources merge). Sealed.
 pub trait Fanin: Sealed + Copy {
     /// What feeds it.
@@ -770,16 +770,16 @@ pub trait Fanin: Sealed + Copy {
     ) -> Result<Vec<EdgeId>, ConnectError>;
 }
 
-impl Fanin for InPort {
-    type Source = OutPort;
-    fn sources<F: Float>(self, graph: &Graph<F>) -> Result<Vec<OutPort>, ConnectError> {
+impl Fanin for InputPort {
+    type Source = OutputPort;
+    fn sources<F: Float>(self, graph: &Graph<F>) -> Result<Vec<OutputPort>, ConnectError> {
         graph.check_in(self)?;
         Ok(graph.channel_sources(self))
     }
     fn set_sources<F: Float>(
         self,
         graph: &mut Graph<F>,
-        from: Vec<OutPort>,
+        from: Vec<OutputPort>,
         hard: bool,
     ) -> Result<Vec<EdgeId>, ConnectError> {
         graph.set_channel_sources(self, from, hard)
@@ -803,9 +803,9 @@ impl Fanin for EventInPort {
     }
 }
 
-impl Outlet for OutPort {
+impl Outlet for OutputPort {
     type Wire = ChannelWire;
-    fn out(self) -> OutPort {
+    fn out(self) -> OutputPort {
         self
     }
 }
@@ -828,8 +828,8 @@ impl Outlet for BusSource {
     }
 }
 
-impl Inlet<ChannelWire> for InPort {
-    fn sink(self) -> InPort {
+impl Inlet<ChannelWire> for InputPort {
+    fn sink(self) -> InputPort {
         self
     }
 }

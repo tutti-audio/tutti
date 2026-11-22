@@ -20,7 +20,7 @@ use tutti_graph::{
     ForkTarget, Io, Node, Offset, ParamIn, ParamKind, ParamSegment, Prepare, ScheduleError, Shape,
     Status, TransportChanges, TransportPosition,
 };
-use tutti_graph::{Edge, InPort, OutPort, PortSource};
+use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_modulation::{
     Adsr, Declarations, Law, LayerClock, LfoShape, Polarity, RouteDecl, RouteKey, RouteTarget,
     Source as ModSource, SourceKey, TargetDecl, TargetKey, Waveform,
@@ -389,7 +389,7 @@ fn probe_of(ed: &mut Editor, host: &mut Host, id: u64, p: Probe) {
     ed.spec_mut()
         .topology
         .outputs
-        .push(vec![PortSource::Node(OutPort {
+        .push(vec![PortSource::Node(OutputPort {
             node: key(id),
             port: 0,
         })]);
@@ -901,7 +901,7 @@ fn a_host_key_is_never_taken() {
     ed.spec_mut()
         .topology
         .outputs
-        .push(vec![PortSource::Node(OutPort {
+        .push(vec![PortSource::Node(OutputPort {
             node: NodeKey(1),
             port: 0,
         })]);
@@ -1337,11 +1337,11 @@ fn a_follower_downstream_of_its_target_is_refused_by_route() {
         ForkByClone(Through::new(ChannelLayout::MONO)),
     );
     r.ed.spec_mut().topology.edges.insert(
-        InPort {
+        InputPort {
             node: key(20),
             port: 0,
         },
-        vec![Edge::Direct(PortSource::Node(OutPort {
+        vec![Edge::Direct(PortSource::Node(OutputPort {
             node: key(1),
             port: 0,
         }))],
@@ -1676,11 +1676,11 @@ fn a_feed_moved_after_a_steady_state_is_rewired() {
     assert!(reapply(&mut r).commit);
     let follower = r.m.source(SourceKey(2)).expect("a follower");
     assert_eq!(
-        r.ed.spec().topology.edges.get(&InPort {
+        r.ed.spec().topology.edges.get(&InputPort {
             node: follower,
             port: 0
         }),
-        Some(&vec![Edge::Direct(PortSource::Node(OutPort {
+        Some(&vec![Edge::Direct(PortSource::Node(OutputPort {
             node: key(11),
             port: 0
         }))])

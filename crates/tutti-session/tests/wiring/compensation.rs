@@ -14,7 +14,7 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
-use tutti_session::{DetachedSession, InPort, MainOutput, OutPort, Session};
+use tutti_session::{DetachedSession, InputPort, MainOutput, OutputPort, Session};
 use tutti_units::{Db, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_44K1;
@@ -44,13 +44,13 @@ fn skewed(s: &mut DetachedSession) -> (tutti_graph::NodeKey, Samples) {
     let eff = s.graph().add(limiter());
     let b = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
-        .set_sources(InPort::new(eff, 0), [OutPort::new(a, 0)])
+        .set_sources(InputPort::new(eff, 0), [OutputPort::new(a, 0)])
         .unwrap();
     s.graph()
-        .set_sources(MainOutput::channel(0), [OutPort::new(eff, 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(eff, 0)])
         .unwrap();
     s.graph()
-        .set_sources(MainOutput::channel(1), [OutPort::new(b, 0)])
+        .set_sources(MainOutput::channel(1), [OutputPort::new(b, 0)])
         .unwrap();
     let lat = s.graph_ref().node_latency(eff).unwrap();
     // Every test built on this graph compares against `lat`; if the limiter
@@ -67,10 +67,10 @@ fn a_graph_with_no_latency_reports_none() {
     let mut s = detached();
     let a = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
-        .set_sources(MainOutput::channel(0), [OutPort::new(a, 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(a, 0)])
         .unwrap();
     s.graph()
-        .set_sources(MainOutput::channel(1), [OutPort::new(a, 0)])
+        .set_sources(MainOutput::channel(1), [OutputPort::new(a, 0)])
         .unwrap();
     let _ = s.update();
 
@@ -201,13 +201,13 @@ fn a_re_prepare_republishes_the_figures_once_it_resumes() {
     let a = s.graph().add(ForkByClone(Const::mono(1.0)));
     let eff = s.graph().add(limiter());
     s.graph()
-        .set_sources(InPort::new(eff, 0), [OutPort::new(a, 0)])
+        .set_sources(InputPort::new(eff, 0), [OutputPort::new(a, 0)])
         .unwrap();
     s.graph()
-        .set_sources(MainOutput::channel(0), [OutPort::new(eff, 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(eff, 0)])
         .unwrap();
     s.graph()
-        .set_sources(MainOutput::channel(1), [OutPort::new(a, 0)])
+        .set_sources(MainOutput::channel(1), [OutputPort::new(a, 0)])
         .unwrap();
     let at_44k = s.graph_ref().node_latency(eff).unwrap();
     let mut side = s.graph().take_audio_side();

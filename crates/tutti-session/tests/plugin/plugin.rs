@@ -20,7 +20,7 @@ use crate::support;
 use tutti_fixtures::block_on;
 use tutti_plugin_db::Hosting;
 use tutti_rt::LockExt;
-use tutti_session::InPort;
+use tutti_session::InputPort;
 use tutti_session::MainOutput;
 use tutti_session::{PluginChange, PluginEvent};
 
@@ -416,14 +416,14 @@ fn export_leftovers_drop_on_the_main_thread() {
     let probe = add_probe(&mut s);
     s.graph()
         .set_sources(
-            InPort::new(probe, 0),
-            [tutti_session::OutPort::new(witness, 0)],
+            InputPort::new(probe, 0),
+            [tutti_session::OutputPort::new(witness, 0)],
         )
         .unwrap();
     s.graph()
         .set_sources(
-            InPort::new(probe, 1),
-            [tutti_session::OutPort::new(witness, 1)],
+            InputPort::new(probe, 1),
+            [tutti_session::OutputPort::new(witness, 1)],
         )
         .unwrap();
     s.graph().connect(probe, MainOutput).unwrap();
@@ -1689,14 +1689,14 @@ fn a_cancelled_export_frees_the_token_and_the_forked_server() {
     }));
     s.graph()
         .set_sources(
-            InPort::new(cancel, 0),
-            [tutti_session::OutPort::new(probe, 0)],
+            InputPort::new(cancel, 0),
+            [tutti_session::OutputPort::new(probe, 0)],
         )
         .unwrap();
     s.graph()
         .set_sources(
-            InPort::new(cancel, 1),
-            [tutti_session::OutPort::new(probe, 1)],
+            InputPort::new(cancel, 1),
+            [tutti_session::OutputPort::new(probe, 1)],
         )
         .unwrap();
     s.graph().connect(cancel, MainOutput).unwrap();

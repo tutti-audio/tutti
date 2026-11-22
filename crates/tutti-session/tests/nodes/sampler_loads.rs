@@ -12,7 +12,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_sampler::{OpenError, StreamPhase, StreamStart};
 use tutti_session::{
-    AudioData, LoadError, MainOutput, OpenStreamError, OutPort, SamplerError, Session, Tier,
+    AudioData, LoadError, MainOutput, OpenStreamError, OutputPort, SamplerError, Session, Tier,
 };
 use tutti_units::{Beat, SampleRate};
 
@@ -168,7 +168,7 @@ fn play(clip: tutti_sampler::Clip<f32>, frames: usize) -> Vec<f32> {
     let mut s = session();
     let key = s.graph().add(clip);
     s.graph()
-        .set_sources(MainOutput::channel(0), [OutPort::new(key, 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(key, 0)])
         .expect("the clip's channel into the main output's");
     let _ = s.update();
     // A streamed clip's ring is filled on the streamer's thread, and an

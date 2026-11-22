@@ -12,7 +12,7 @@ use tutti_graph::{
     Cx, Editor, Executor, Io, LogFilter, Node, NodeKey, Prepare, RtLevel, RtLogReaders, RtRecord,
     RtTarget, RtValue, Shape, Status, TransportPosition, Unforkable,
 };
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_units::{Frame, SampleRate, Tail};
 
 /// Sites are statics: coalescing compares the literal's address, which the
@@ -108,7 +108,7 @@ fn build(
                 acts,
             }),
         );
-        outputs.push(PortSource::Node(OutPort { node: key, port: 0 }));
+        outputs.push(PortSource::Node(OutputPort { node: key, port: 0 }));
     }
     ed.spec_mut().topology.set_outputs(outputs);
     ed.commit().expect("commits");

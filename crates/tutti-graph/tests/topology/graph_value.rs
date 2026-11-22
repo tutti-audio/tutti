@@ -11,8 +11,8 @@ use std::hash::{Hash, Hasher};
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Edge, Feed, FeedbackFrom, InPort, Invalid, LatencyGraph, NodeKey, NodeSpec, OutPort, PortFeed,
-    PortSink, PortSource, TapAlign, TapId, TapSpec, Topology, graph_tail, latency_plan,
+    Edge, Feed, FeedbackFrom, InputPort, Invalid, LatencyGraph, NodeKey, NodeSpec, OutputPort,
+    PortFeed, PortSink, PortSource, TapAlign, TapId, TapSpec, Topology, graph_tail, latency_plan,
 };
 use tutti_units::{SampleRate, Samples, Tail};
 
@@ -29,12 +29,12 @@ fn spec(kind: &str, ins: u16, outs: u16) -> NodeSpec {
     )
 }
 
-fn at(node: NodeKey, port: u16) -> InPort {
-    InPort { node, port }
+fn at(node: NodeKey, port: u16) -> InputPort {
+    InputPort { node, port }
 }
 
-fn out(node: NodeKey, port: u16) -> OutPort {
-    OutPort { node, port }
+fn out(node: NodeKey, port: u16) -> OutputPort {
+    OutputPort { node, port }
 }
 
 /// `dc -> gain -> output 0`.
@@ -407,7 +407,7 @@ fn unconnected_is_reported_but_not_fatal() {
     let mut t = chain();
     t.nodes.insert(C, spec("mix", 2, 1));
 
-    let unconnected: Vec<InPort> = t.unconnected().collect();
+    let unconnected: Vec<InputPort> = t.unconnected().collect();
     assert_eq!(unconnected, vec![at(C, 0), at(C, 1)]);
 
     let valid = t.validate().expect("unconnected is not fatal");

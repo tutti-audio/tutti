@@ -179,7 +179,7 @@ impl Limits {
 /// ```
 /// use tutti_buffers::MaxBlock;
 /// use tutti_graph::{Cx, Editor, ForkByClone, Io, Node, Prepare, Shape, Status, TransportPosition};
-/// use tutti_graph::{Edge, InPort, OutPort, PortSource};
+/// use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 /// use tutti_units::{Beat, Bpm, SampleRate, Samples};
 /// use tutti_buffers::ChannelLayout;
 /// use tutti_graph::NodeKey;
@@ -206,8 +206,8 @@ impl Limits {
 /// editor.insert(half, "half", ForkByClone(Half));
 /// let topology = &mut editor.spec_mut().topology;
 /// topology.inputs = ChannelLayout::MONO;
-/// topology.connect(InPort { node: half, port: 0 }, Edge::Direct(PortSource::Global(0)));
-/// topology.set_outputs([PortSource::Node(OutPort { node: half, port: 0 })]);
+/// topology.connect(InputPort { node: half, port: 0 }, Edge::Direct(PortSource::Global(0)));
+/// topology.set_outputs([PortSource::Node(OutputPort { node: half, port: 0 })]);
 /// editor.commit().expect("compiles");
 ///
 /// // On the audio thread:

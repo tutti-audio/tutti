@@ -7,7 +7,7 @@
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, InterleavedMut, MaxBlock};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::{BusStripConfig, BusStripNode};
-use tutti_session::{MainOutput, OutPort, Session, SessionBuilder, ValueErrorKind};
+use tutti_session::{MainOutput, OutputPort, Session, SessionBuilder, ValueErrorKind};
 use tutti_units::{Balance, Samples};
 
 /// Constant `values` on its output channels, declaring `out` as its bus.
@@ -66,7 +66,7 @@ fn a_mono_source_reaches_both_sides_of_a_stereo_strip() {
         .expect("a mono bus folds onto a stereo one")
         .unfaded();
     for c in 0..2 {
-        g.set_sources(MainOutput::channel(c), [OutPort::new(strip, c)])
+        g.set_sources(MainOutput::channel(c), [OutputPort::new(strip, c)])
             .unwrap()
             .unfaded();
     }

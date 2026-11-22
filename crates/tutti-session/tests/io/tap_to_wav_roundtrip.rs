@@ -31,7 +31,7 @@ use tutti_graph::{
     Unforkable,
 };
 use tutti_graph::{NodeKey, TapId, TapOptions};
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_session::{PumpLoop, PumpPass};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
@@ -117,7 +117,7 @@ fn graph_tap(capacity: usize) -> (Graph, TapReader) {
     ));
     ed.insert(NodeKey(1), "ramp", Unforkable(Ramp { at: 0 }));
     let port = |port| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port,
         })

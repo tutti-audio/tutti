@@ -149,7 +149,7 @@ fn the_handle_counts_what_its_queue_dropped() {
 /// does not. Read from the graph's own topology.
 #[test]
 fn a_wide_main_output_is_fed_from_the_main_pair_not_the_sends() {
-    use tutti_session::OutPort;
+    use tutti_session::OutputPort;
     let mut session = crate::instrument_support::rig::offline_session();
     let handle = session
         .add_instrument_unwired(Dressed(ForkByClone(Five)))
@@ -163,13 +163,17 @@ fn a_wide_main_output_is_fed_from_the_main_pair_not_the_sends() {
     let wrapped: Vec<_> = (0..5)
         .map(|c| session.graph_ref().sources(MainOutput::channel(c)).unwrap())
         .collect();
-    assert_eq!(wrapped[4], [OutPort::new(node, 4)], "the wrap feeds a send");
+    assert_eq!(
+        wrapped[4],
+        [OutputPort::new(node, 4)],
+        "the wrap feeds a send"
+    );
 
     let main = handle.main_outputs();
     for c in 0..5 {
         session
             .graph()
-            .set_sources(MainOutput::channel(c), [OutPort::new(node, main[c % 2])])
+            .set_sources(MainOutput::channel(c), [OutputPort::new(node, main[c % 2])])
             .unwrap();
     }
     assert_eq!(main, [2, 3]);
@@ -177,7 +181,7 @@ fn a_wide_main_output_is_fed_from_the_main_pair_not_the_sends() {
         let want = 2 + c % 2;
         assert_eq!(
             session.graph_ref().sources(MainOutput::channel(c)).unwrap(),
-            [OutPort::new(node, want)],
+            [OutputPort::new(node, want)],
             "channel {c}"
         );
     }

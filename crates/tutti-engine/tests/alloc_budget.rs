@@ -40,7 +40,7 @@ mod support;
 
 use support::{Gain, Sine};
 use tutti_graph::NodeKey;
-use tutti_graph::{Edge, InPort, OutPort, PortSource};
+use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_graph::{Editor, Executor, ForkByClone, Prepare};
 use tutti_units::Hz;
 use tutti_units::{SampleRate, Samples};
@@ -123,17 +123,17 @@ fn graph(nodes: usize) -> (Editor, Executor) {
         // filters are out of reach from here (see `support`).
         ed.insert(NodeKey(i), "gain", ForkByClone(Gain(0.5 + i as f32 * 1e-3)));
         ed.spec_mut().topology.edges.insert(
-            InPort {
+            InputPort {
                 node: NodeKey(i),
                 port: 0,
             },
-            vec![Edge::Direct(PortSource::Node(OutPort {
+            vec![Edge::Direct(PortSource::Node(OutputPort {
                 node: NodeKey(i - 1),
                 port: 0,
             }))],
         );
     }
-    let last = PortSource::Node(OutPort {
+    let last = PortSource::Node(OutputPort {
         node: NodeKey(nodes as u64),
         port: 0,
     });
@@ -241,11 +241,11 @@ fn fan(nodes: usize, pooled: bool) -> (Editor, Executor) {
     for i in 1..=nodes as u64 {
         ed.insert(NodeKey(i), "gain", ForkByClone(Gain(0.5 + i as f32 * 1e-3)));
         ed.spec_mut().topology.edges.insert(
-            InPort {
+            InputPort {
                 node: NodeKey(i),
                 port: 0,
             },
-            vec![Edge::Direct(PortSource::Node(OutPort {
+            vec![Edge::Direct(PortSource::Node(OutputPort {
                 node: NodeKey(0),
                 port: 0,
             }))],
@@ -254,7 +254,7 @@ fn fan(nodes: usize, pooled: bool) -> (Editor, Executor) {
     ed.spec_mut().topology.set_outputs(
         [1, 2]
             .map(|k| {
-                PortSource::Node(OutPort {
+                PortSource::Node(OutputPort {
                     node: NodeKey(k),
                     port: 0,
                 })

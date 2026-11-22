@@ -19,9 +19,9 @@ use tutti_graph::contract::{Direct, HAND_EVENT_CAPACITY};
 use tutti_graph::{
     Edge, Editor, Env, EventCapacity, EventEdge, EventIn, EventInletNode, EventInletWriter,
     EventKind, EventOut, EventTapId, EventTapOptions, EventTapReader, Executor, ForkCause,
-    ForkMode, ForkSource, ForkTarget, Forked, InPort, IntoNode, Losses, Node, NodeKey, NodeParts,
-    OutPort, PlayClock, PortSource, Prepare, Stamp, TapAlign, TapEvent, TransportChanges,
-    TransportPosition,
+    ForkMode, ForkSource, ForkTarget, Forked, InputPort, IntoNode, Losses, Node, NodeKey,
+    NodeParts, OutputPort, PlayClock, PortSource, Prepare, Stamp, TapAlign, TapEvent,
+    TransportChanges, TransportPosition,
 };
 use tutti_rt::PushError;
 use tutti_ump::{CCNumber, MidiChannel, U7, Ump};
@@ -492,7 +492,7 @@ impl IntoNode for Forkable {
 }
 
 fn out(node: u64) -> PortSource {
-    PortSource::Node(OutPort {
+    PortSource::Node(OutputPort {
         node: NodeKey(node),
         port: 0,
     })
@@ -566,7 +566,7 @@ fn graph(
                 }),
             );
             ed.spec_mut().topology.connect(
-                InPort {
+                InputPort {
                     node: NodeKey(base + g),
                     port: 0,
                 },
@@ -578,7 +578,7 @@ fn graph(
     ed.insert(NodeKey(30), "sum", Forkable(Kind::Sum { inputs: sum }));
     let topology = &mut ed.spec_mut().topology;
     topology.connect(
-        InPort {
+        InputPort {
             node: NodeKey(30),
             port: 0,
         },
@@ -586,7 +586,7 @@ fn graph(
     );
     for c in (0..4u16).filter(|_| heavy) {
         topology.connect(
-            InPort {
+            InputPort {
                 node: NodeKey(30),
                 port: c + 1,
             },

@@ -14,7 +14,7 @@ use tutti_graph::{
     Cost, Cx, Editor, EventEdge, EventIn, EventOut, Executor, Io, Node, Prepare, Schedule, Shape,
     Status, TransportPosition, Unforkable,
 };
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
 use tutti_polysynth::{OscillatorType, PolySynth, SynthConfig, UnisonConfig, UnisonVoices};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Voice2};
@@ -122,7 +122,7 @@ fn graph(workers: usize, declared: bool) -> Executor {
         // The bus is the graph's fan-in: each output channel holds every
         // synth's matching port, and the graph sums them.
         for c in 0..2u16 {
-            let from = PortSource::Node(OutPort { node: key, port: c });
+            let from = PortSource::Node(OutputPort { node: key, port: c });
             ed.spec_mut().topology.connect_output(c as usize, from);
         }
     }

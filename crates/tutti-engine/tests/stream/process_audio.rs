@@ -6,7 +6,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_buffers::MaxBlock;
 use tutti_engine::{AudioCallbackState, Engine, process_audio};
 use tutti_graph::NodeKey;
-use tutti_graph::{Edge, InPort, OutPort, PortSource};
+use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_graph::{Editor, Prepare};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
@@ -42,18 +42,18 @@ fn build_callback_state(sample_rate: f64) -> (Transport, AudioCallbackState) {
         ),
     );
     ed.spec_mut().topology.edges.insert(
-        InPort {
+        InputPort {
             node: filter,
             port: 0,
         },
-        vec![Edge::Direct(PortSource::Node(OutPort {
+        vec![Edge::Direct(PortSource::Node(OutputPort {
             node: source,
             port: 0,
         }))],
     );
     // The filter's single output on both device channels.
     ed.spec_mut().topology.set_outputs(vec![
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: filter,
             port: 0,
         });

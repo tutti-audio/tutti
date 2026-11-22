@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use tutti_buffers::{ChannelLayout, Interleaved, InterleavedMut, MaxBlock, Wave};
 use tutti_engine::Engine;
-use tutti_graph::{Editor, NodeKey, OutPort, PortSource, Prepare};
+use tutti_graph::{Editor, NodeKey, OutputPort, PortSource, Prepare};
 use tutti_sampler::testing::wait_for_open;
 use tutti_sampler::{
     DiskStreamer, DiskVoice, MemorySource, Playback, SlotId, StreamStart, VoicePool, VoiceWindow,
@@ -113,7 +113,7 @@ fn render_with(
         }
     }
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port,
         })

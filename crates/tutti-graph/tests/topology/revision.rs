@@ -12,7 +12,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Fade, FadeLaw, Io, Node, ParamIn, ParamRange, Prepare, Shape, Status, Unforkable,
 };
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_units::{Latency, SampleRate, Samples, UnitParam};
 
 struct Out;
@@ -58,7 +58,7 @@ fn every_edit_moves_the_revision_and_nothing_else_does() {
     moves(&mut ed, "spec_mut", |ed| {
         ed.spec_mut()
             .topology
-            .set_outputs(vec![PortSource::Node(OutPort { node: one, port: 0 })]);
+            .set_outputs(vec![PortSource::Node(OutputPort { node: one, port: 0 })]);
     });
     moves(&mut ed, "a commit that sends", |ed| {
         ed.commit().expect("commits");

@@ -23,8 +23,8 @@ use common::{Kind, Pair, SpecBehaviour, bits, driver_value, input_signal, prepar
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     CompileError, CycleEdge, Edge, Editor, EventOut, ForkMode, ForkTarget, GraphInvalid, GraphSpec,
-    InPort, NodeKey, NodeMix, NodeMode, OutPort, ParamIn, ParamPorts, ParamPortsError, ParamRange,
-    PortSource, Topology, TransportPosition, ValidGraph, compile,
+    InputPort, NodeKey, NodeMix, NodeMode, OutputPort, ParamIn, ParamPorts, ParamPortsError,
+    ParamRange, PortSource, Topology, TransportPosition, ValidGraph, compile,
 };
 use tutti_units::{Mix, Tail, UnitAddr, UnitParam};
 
@@ -37,15 +37,15 @@ fn key(n: u64) -> NodeKey {
     NodeKey(n)
 }
 
-fn at(node: u64) -> InPort {
-    InPort {
+fn at(node: u64) -> InputPort {
+    InputPort {
         node: key(node),
         port: 0,
     }
 }
 
 fn out(node: u64) -> PortSource {
-    PortSource::Node(OutPort {
+    PortSource::Node(OutputPort {
         node: key(node),
         port: 0,
     })

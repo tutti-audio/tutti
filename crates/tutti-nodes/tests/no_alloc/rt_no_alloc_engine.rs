@@ -19,7 +19,7 @@
 use tutti_buffers::{BusTopology, ChannelLayout, InterleavedMut, MaxBlock};
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
-use tutti_graph::{Edge, InPort, OutPort, PortSource};
+use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_graph::{Editor, Prepare};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{
@@ -72,8 +72,8 @@ fn build_engine_with_chain() -> Engine {
     let topology = &mut ed.spec_mut().topology;
     let mut wire = |node: NodeKey, port: u16, from: NodeKey, out: u16| {
         topology.edges.insert(
-            InPort { node, port },
-            vec![Edge::Direct(PortSource::Node(OutPort {
+            InputPort { node, port },
+            vec![Edge::Direct(PortSource::Node(OutputPort {
                 node: from,
                 port: out,
             }))],
@@ -87,7 +87,7 @@ fn build_engine_with_chain() -> Engine {
     wire(limiter, 0, strip, 0);
     wire(limiter, 1, strip, 1);
     topology.set_outputs((0..2).map(|port| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: limiter,
             port,
         })

@@ -22,7 +22,7 @@ use tutti_export::{
     RenderError, RenderGraph, Setup, TargetError, render,
 };
 use tutti_graph::{
-    Cx, Editor, Executor, ForkByClone, GraphBuilder, Io, Node, NodeKey, OutPort, PortSource,
+    Cx, Editor, Executor, ForkByClone, GraphBuilder, Io, Node, NodeKey, OutputPort, PortSource,
     Prepare, Shape, Status, TapId, TapOptions, TapReader,
 };
 use tutti_nodes::testing::{Const, Osc};
@@ -72,7 +72,7 @@ impl Rig {
     /// A tap on both channels of `node`, on the outputs' time, committed.
     fn tap(&mut self, id: u64, node: NodeKey) -> TapReader {
         let sources = (0..2)
-            .map(|port| PortSource::Node(OutPort { node, port }))
+            .map(|port| PortSource::Node(OutputPort { node, port }))
             .collect();
         let reader = self
             .editor

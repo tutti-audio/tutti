@@ -9,8 +9,8 @@ use tutti_graph::testing as common;
 use common::{WORKERS, test_pool};
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{
-    Cx, Editor, Io, Node, NodeKey, OutPort, PortSource, Prepare, Shape, Status, TransportChanges,
-    TransportPosition, Unforkable,
+    Cx, Editor, Io, Node, NodeKey, OutputPort, PortSource, Prepare, Shape, Status,
+    TransportChanges, TransportPosition, Unforkable,
 };
 use tutti_music::{Meter, MeterChange, MeterMap, TimeSignature};
 use tutti_units::{Beat, SampleRate, Samples};
@@ -49,7 +49,7 @@ fn render(workers: usize, meter: Option<&MeterMap>) -> Vec<Vec<f32>> {
         ed.insert(NodeKey(k), "probe", Unforkable(Probe));
     }
     ed.spec_mut().topology.set_outputs((1..=PROBES).map(|k| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(k),
             port: 0,
         })

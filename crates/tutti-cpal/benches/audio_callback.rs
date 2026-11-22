@@ -23,7 +23,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_engine::{AudioCallbackState, Engine, OutputBlock, process_audio};
 use tutti_graph::{Editor, Prepare, TapReader};
 use tutti_graph::{NodeKey, TapId, TapOptions};
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_nodes::testing::Osc;
 use tutti_timeline::Transport;
 use tutti_units::SampleRate;
@@ -38,7 +38,7 @@ fn state(outputs: usize, tap_open: bool) -> (Arc<AudioCallbackState>, Option<Tap
     ));
     ed.insert(NodeKey(1), "sine", Osc::sine(Hz::new(440.0)));
     ed.spec_mut().topology.set_outputs(vec![
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port: 0,
         });

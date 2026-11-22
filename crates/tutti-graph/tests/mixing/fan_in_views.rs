@@ -16,8 +16,9 @@ use std::collections::BTreeMap;
 use common::{Kind, TestNode, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Edge, Feed, FeedbackFrom, InPort, InputDelay, Node, NodeKey, NodeSpec, OutPort, OutputDelay,
-    PortSource, Reference, Topology, TransportPosition, delays, graph_tail, latency_plan,
+    Edge, Feed, FeedbackFrom, InputDelay, InputPort, Node, NodeKey, NodeSpec, OutputDelay,
+    OutputPort, PortSource, Reference, Topology, TransportPosition, delays, graph_tail,
+    latency_plan,
 };
 use tutti_units::{SampleRate, Samples, Tail};
 
@@ -27,12 +28,12 @@ fn key(n: u32) -> NodeKey {
     NodeKey(n.into())
 }
 
-fn at(node: NodeKey, port: u16) -> InPort {
-    InPort { node, port }
+fn at(node: NodeKey, port: u16) -> InputPort {
+    InputPort { node, port }
 }
 
-fn out(node: NodeKey, port: u16) -> OutPort {
-    OutPort { node, port }
+fn out(node: NodeKey, port: u16) -> OutputPort {
+    OutputPort { node, port }
 }
 
 fn direct(node: NodeKey) -> Edge {

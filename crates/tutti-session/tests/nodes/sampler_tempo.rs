@@ -7,7 +7,7 @@ use tutti_buffers::Interleaved;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
-use tutti_session::{MainOutput, OutPort, Session};
+use tutti_session::{MainOutput, OutputPort, Session};
 use tutti_units::SampleRate;
 
 const RATE: f64 = 48_000.0;
@@ -76,7 +76,7 @@ fn a_sampler_node_added_to_the_graph_follows_the_sessions_tempo_map() {
     let voice = s.graph().add(pool);
     for port in 0..2 {
         s.graph()
-            .set_sources(MainOutput::channel(port), [OutPort::new(voice, port)])
+            .set_sources(MainOutput::channel(port), [OutputPort::new(voice, port)])
             .unwrap()
             .unfaded();
     }

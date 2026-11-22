@@ -11,7 +11,9 @@ use tutti_buffers::Float;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_engine::{AudioCallbackState, Engine};
 use tutti_graph::NodeKey;
-use tutti_graph::{Cx, Editor, ForkByClone, Io, Node, OutPort, PortSource, Prepare, Shape, Status};
+use tutti_graph::{
+    Cx, Editor, ForkByClone, Io, Node, OutputPort, PortSource, Prepare, Shape, Status,
+};
 use tutti_nodes::testing::Const;
 use tutti_timeline::Transport;
 use tutti_units::{SampleRate, Samples};
@@ -27,7 +29,7 @@ pub fn dc_state(level: f32, outputs: usize) -> Arc<AudioCallbackState> {
     ));
     ed.insert(NodeKey(1), "dc", Const::mono(level));
     ed.spec_mut().topology.set_outputs(vec![
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port: 0
         });
@@ -66,7 +68,7 @@ pub fn dc_state_f64(level: f64, outputs: usize) -> Arc<AudioCallbackState<f64>> 
     ));
     ed.insert(NodeKey(1), "dc", ForkByClone(Dc(level)));
     ed.spec_mut().topology.set_outputs(vec![
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port: 0
         });

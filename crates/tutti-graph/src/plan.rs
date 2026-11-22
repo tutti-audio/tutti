@@ -47,7 +47,7 @@
 use std::num::NonZeroU32;
 
 use crate::NodeKey;
-use crate::{EdgeId, InPort, OutPort, PortSource};
+use crate::{EdgeId, InputPort, OutputPort, PortSource};
 use tutti_units::{Latency, Samples, Tail, UnitAddr};
 
 use crate::arena::Role;
@@ -100,7 +100,7 @@ pub enum DelayKey {
     /// An audio input port, delayed to align with the node's latest input.
     Audio {
         /// The sink port.
-        at: InPort,
+        at: InputPort,
         /// What feeds it: a node port or a global input channel.
         from: PortSource,
     },
@@ -205,7 +205,7 @@ pub enum FeedbackKey {
     /// An audio output port of a unit generation. Shared by every reader.
     Audio {
         /// The source port.
-        from: OutPort,
+        from: OutputPort,
         /// The source unit's generation.
         generation: u32,
         /// The edge's delay.

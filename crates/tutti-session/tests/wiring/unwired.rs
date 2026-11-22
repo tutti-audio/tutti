@@ -15,8 +15,8 @@ use tutti_graph::{
 };
 use tutti_nodes::testing::Const;
 use tutti_session::{
-    BusSink, ChannelEdge, EventEdge, Feeder, InPort, MainOutput, OutPort, Replacement, Session,
-    SessionEvent,
+    BusSink, ChannelEdge, EventEdge, Feeder, InputPort, MainOutput, OutputPort, Replacement,
+    Session, SessionEvent,
 };
 use tutti_units::{Amplitude, Samples};
 
@@ -109,8 +109,8 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
     let src = g.add(ForkByClone(Ports::<0, 2>));
     let sink = g.add(ForkByClone(Ports::<2, 0>));
     for (from, to) in [
-        (OutPort::new(a, 0), x.input(0)),
-        (OutPort::new(b, 0), x.input(1)),
+        (OutputPort::new(a, 0), x.input(0)),
+        (OutputPort::new(b, 0), x.input(1)),
         (x.out(0), MainOutput::channel(0)),
         (x.out(1), MainOutput::channel(1)),
     ] {
@@ -124,7 +124,7 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
     ] {
         g.connect(from, to).unwrap();
     }
-    let kept = ChannelEdge::new(OutPort::new(a, 0), x.input(0));
+    let kept = ChannelEdge::new(OutputPort::new(a, 0), x.input(0));
     // The gain lane is the wire's declaration: the connection is made again
     // with it (the edge is held already, so only its gain is set).
     g.connect(kept.source(), kept.sink())
@@ -154,7 +154,7 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
     edges.sort();
     event_edges.sort();
     let mut want_edges = vec![
-        ChannelEdge::new(OutPort::new(b, 0), x.input(1)),
+        ChannelEdge::new(OutputPort::new(b, 0), x.input(1)),
         ChannelEdge::new(x.out(1), MainOutput::channel(1)),
     ];
     want_edges.sort();
@@ -184,7 +184,7 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
         "the surviving edge keeps its gain"
     );
     assert!(
-        s.graph().sources(InPort::new(x, 0)).is_ok(),
+        s.graph().sources(InputPort::new(x, 0)).is_ok(),
         "the kept port is still wired"
     );
     assert_eq!(
@@ -205,7 +205,9 @@ fn a_wider_reinsert_reports_nothing() {
     let g = s.graph();
     let a = g.add(ForkByClone(Const::mono(A)));
     let x = g.add(ForkByClone(Pass::<1, 1>));
-    g.connect(OutPort::new(a, 0), x.input(0)).unwrap().unfaded();
+    g.connect(OutputPort::new(a, 0), x.input(0))
+        .unwrap()
+        .unfaded();
     g.connect(x.out(0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
@@ -394,7 +396,9 @@ fn unwired_waits_for_the_commit_that_lands() {
     let x = g.add(ForkByClone(Pass::<2, 1>));
     let u = g.add(ForkByClone(Pass::<1, 1>));
     let v = g.add(ForkByClone(Pass::<1, 1>));
-    g.connect(OutPort::new(a, 0), x.input(1)).unwrap().unfaded();
+    g.connect(OutputPort::new(a, 0), x.input(1))
+        .unwrap()
+        .unfaded();
     let _ = s.update();
 
     let g = s.graph();
@@ -421,6 +425,6 @@ fn unwired_waits_for_the_commit_that_lands() {
     assert!(!refused(&events), "{events:?}");
     let [(node, edges, _)] = <[_; 1]>::try_from(unwired(&events)).expect("reported once");
     assert_eq!(node, x.erase());
-    assert_eq!(edges, [ChannelEdge::new(OutPort::new(a, 0), x.input(1))]);
+    assert_eq!(edges, [ChannelEdge::new(OutputPort::new(a, 0), x.input(1))]);
     assert!(unwired(&s.update()).is_empty());
 }

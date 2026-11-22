@@ -733,9 +733,9 @@ pub use bus::{Bus, BusRole, Buses, InBus, MAX_BUSES, OutBus};
 pub use bus_edge::{BusError, BusFeed, BusFold, BusRef, BusSide, BusSource, Lowering};
 pub use gain::{EdgeFade, EdgeGain};
 pub use graph::{
-    Edge, EdgeId, EventTapId, EventTapSource, EventTapSpec, FeedbackFrom, InPort, Invalid, MeterId,
-    MeterSpec, NodeKey, NodeSpec, OutPort, PortSink, PortSource, TapAlign, TapId, TapSpec,
-    Topology, Valid,
+    Edge, EdgeId, EventTapId, EventTapSource, EventTapSpec, FeedbackFrom, InputPort, Invalid,
+    MeterId, MeterSpec, NodeKey, NodeSpec, OutputPort, PortSink, PortSource, TapAlign, TapId,
+    TapSpec, Topology, Valid,
 };
 pub use history::TransportHistory;
 pub use inlet::{InletNode, InletRing};

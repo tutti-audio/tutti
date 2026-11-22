@@ -15,7 +15,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_session::{
-    ChannelEdge, GainTarget, MainOutput, ModTarget, OutPort, ParamRef, RangeTarget, RouteSpec,
+    ChannelEdge, GainTarget, MainOutput, ModTarget, OutputPort, ParamRef, RangeTarget, RouteSpec,
     Session,
 };
 use tutti_units::{Amplitude, Depth, SampleRate, UnitParam};
@@ -77,16 +77,16 @@ fn mixer(s: &mut Session) -> ChannelEdge {
     let a = s.graph().add(level(A));
     let b = s.graph().add(level(B));
     s.graph()
-        .connect(OutPort::new(a, 0), MainOutput::channel(0))
+        .connect(OutputPort::new(a, 0), MainOutput::channel(0))
         .unwrap()
         .unfaded()
         .gain(Amplitude::UNITY)
         .unwrap();
     s.graph()
-        .connect(OutPort::new(b, 0), MainOutput::channel(0))
+        .connect(OutputPort::new(b, 0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
-    ChannelEdge::new(OutPort::new(a, 0), MainOutput::channel(0))
+    ChannelEdge::new(OutputPort::new(a, 0), MainOutput::channel(0))
 }
 
 /// A route onto an edge's gain modulates the sum by the analytic amount. The

@@ -13,7 +13,7 @@ use tutti_graph::{
     Cost, Cx, Editor, Executor, Io, Node, Prepare, Schedule, Shape, Status, TransportPosition,
     Unforkable,
 };
-use tutti_graph::{Edge, InPort, OutPort, PortSource};
+use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_nodes::VbapPannerNode;
 use tutti_nodes::testing::aim;
 use tutti_units::{Azimuth, Beat, Bpm, Elevation, SampleRate, Samples};
@@ -59,7 +59,7 @@ fn wire(ed: &mut Editor, to: NodeKey, port: u16, from: PortSource) {
     ed.spec_mut()
         .topology
         .edges
-        .insert(InPort { node: to, port }, vec![Edge::Direct(from)]);
+        .insert(InputPort { node: to, port }, vec![Edge::Direct(from)]);
 }
 
 /// [`PANNERS`] declared panners and [`HEAVY`] undeclared ones, each off the
@@ -94,9 +94,10 @@ fn graph(workers: usize, declared: bool) -> Executor {
             wire(&mut ed, key, c, PortSource::Global(c));
             // The graph's fan-in: output channel `c` holds every panner's
             // port `c`, and the graph sums them.
-            ed.spec_mut()
-                .topology
-                .connect_output(c as usize, PortSource::Node(OutPort { node: key, port: c }));
+            ed.spec_mut().topology.connect_output(
+                c as usize,
+                PortSource::Node(OutputPort { node: key, port: c }),
+            );
         }
     }
     ed.commit().expect("commits");

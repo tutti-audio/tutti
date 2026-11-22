@@ -34,7 +34,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Env, Executor, IntoNode, Io, Node, Prepare, Shape, Status, Unforkable,
 };
-use tutti_graph::{Edge, InPort, OutPort, PortSource};
+use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_music::LoopRange;
 use tutti_nodes::{ClickNode, ClickNodeConfig, ClickSettings, MetronomeMode};
 use tutti_timeline::{
@@ -129,14 +129,14 @@ fn wire_clock(ed: &mut Editor, sink: impl IntoNode<Controls = ()>, width: u16) {
     let topology = &mut ed.spec_mut().topology;
     for port in 0..2 {
         topology.edges.insert(
-            InPort { node: SINK, port },
-            vec![Edge::Direct(PortSource::Node(OutPort {
+            InputPort { node: SINK, port },
+            vec![Edge::Direct(PortSource::Node(OutputPort {
                 node: CLOCK,
                 port,
             }))],
         );
     }
-    topology.set_outputs((0..width).map(|port| PortSource::Node(OutPort { node: SINK, port })));
+    topology.set_outputs((0..width).map(|port| PortSource::Node(OutputPort { node: SINK, port })));
     ed.commit().expect("commits");
 }
 
@@ -346,7 +346,7 @@ fn click_clicks_on_the_model_beats() {
     ed.insert(CLICK, "click", click);
     ed.spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutPort { node: CLICK, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort { node: CLICK, port })));
     ed.commit().expect("commits");
     let graph = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     let m = &transport.motion();
@@ -426,7 +426,7 @@ pub(crate) fn env_graph(max_block: usize, log: &Arc<Mutex<Vec<Env>>>) -> (Editor
     ed.insert(NodeKey(1), "env", Unforkable(EnvLog(Arc::clone(log))));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutputPort {
             node: NodeKey(1),
             port: 0,
         })]);

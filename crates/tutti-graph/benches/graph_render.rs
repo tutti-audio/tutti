@@ -34,7 +34,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
-use tutti_graph::{Edge, InPort, OutPort, PortSource};
+use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_units::{SampleRate, Samples, Tail};
 
 const SR: f64 = 48_000.0;
@@ -217,9 +217,9 @@ fn executor_for(shape: &Topo) -> Executor {
         ed.spec_mut()
             .topology
             .edges
-            .insert(InPort { node: sink, port }, vec![Edge::Direct(from)]);
+            .insert(InputPort { node: sink, port }, vec![Edge::Direct(from)]);
     };
-    let node = |k: NodeKey| PortSource::Node(OutPort { node: k, port: 0 });
+    let node = |k: NodeKey| PortSource::Node(OutputPort { node: k, port: 0 });
     let last = match *shape {
         Topo::Chain(depth) => {
             let src = NodeKey(0);
@@ -383,7 +383,7 @@ fn form_executor(n: usize, nop: impl Fn() -> FormNop) -> Executor {
             let from = if i == 0 {
                 PortSource::Global(c)
             } else {
-                PortSource::Node(OutPort {
+                PortSource::Node(OutputPort {
                     node: NodeKey(i as u64 - 1),
                     port: c,
                 })
@@ -391,12 +391,12 @@ fn form_executor(n: usize, nop: impl Fn() -> FormNop) -> Executor {
             ed.spec_mut()
                 .topology
                 .edges
-                .insert(InPort { node: k, port: c }, vec![Edge::Direct(from)]);
+                .insert(InputPort { node: k, port: c }, vec![Edge::Direct(from)]);
         }
     }
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutputPort {
             node: NodeKey(n as u64 - 1),
             port: 0,
         })]);

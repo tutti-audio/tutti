@@ -20,7 +20,7 @@ use tutti_graph::{
     CommitError, EdgeGain, EdgeId, Editor, EventEdge, EventIn, EventKind, EventOut, ForkByClone,
     NodeMix, ParamIn, ParamRange, ParamRangeCell, PassError, PortSink, ScheduleError,
 };
-use tutti_graph::{Edge, InPort, OutPort, PortSource};
+use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_modulation::{
     Compiled, ControlProgram, Declarations, LayerId, ProgramCompileError, RouteDecl, RouteKey,
     RouteTarget, SignalKind, SignalSource, Source as ModSource, SourceId, SourceKey, TargetDecl,
@@ -1578,8 +1578,11 @@ fn wire_feed<F: Float>(editor: &mut Editor<F>, key: NodeKey, feed: Option<Feed>)
             let t = &mut editor.spec_mut().topology;
             for port in 0..width {
                 t.edges.insert(
-                    InPort { node: key, port },
-                    vec![Edge::Direct(PortSource::Node(OutPort { node: from, port }))],
+                    InputPort { node: key, port },
+                    vec![Edge::Direct(PortSource::Node(OutputPort {
+                        node: from,
+                        port,
+                    }))],
                 );
             }
         }
@@ -1605,8 +1608,8 @@ fn unwire_feed<F: Float>(
             // wired the port itself since.
             let t = &mut editor.spec_mut().topology;
             for port in 0..width.count() {
-                let at = InPort { node: key, port };
-                let ours = Edge::Direct(PortSource::Node(OutPort { node: from, port }));
+                let at = InputPort { node: key, port };
+                let ours = Edge::Direct(PortSource::Node(OutputPort { node: from, port }));
                 t.disconnect(at, ours);
             }
         }

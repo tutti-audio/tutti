@@ -241,12 +241,12 @@ impl Rig {
                 );
                 if lag {
                     ed.spec_mut().topology.edges.insert(
-                        tutti_graph::InPort {
+                        tutti_graph::InputPort {
                             node: NodeKey(s),
                             port: 0,
                         },
                         vec![tutti_graph::Edge::Direct(tutti_graph::PortSource::Node(
-                            tutti_graph::OutPort {
+                            tutti_graph::OutputPort {
                                 node: NodeKey(LAG),
                                 port: 0,
                             },
@@ -326,12 +326,12 @@ impl Rig {
                 if self.lag {
                     for &s in &self.sinks {
                         t.edges.insert(
-                            tutti_graph::InPort {
+                            tutti_graph::InputPort {
                                 node: NodeKey(s),
                                 port: 0,
                             },
                             vec![tutti_graph::Edge::Direct(tutti_graph::PortSource::Node(
-                                tutti_graph::OutPort {
+                                tutti_graph::OutputPort {
                                     node: NodeKey(LAG),
                                     port: 0,
                                 },
@@ -1819,10 +1819,12 @@ fn forked(log: &Log, blocks: usize, mid_note: bool) -> (Editor, Executor) {
         .connect_events(at(2), EventEdge::Direct(out(1)));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![tutti_graph::PortSource::Node(tutti_graph::OutPort {
-            node: NodeKey(2),
-            port: 0,
-        })]);
+        .set_outputs(vec![tutti_graph::PortSource::Node(
+            tutti_graph::OutputPort {
+                node: NodeKey(2),
+                port: 0,
+            },
+        )]);
     ed.commit().unwrap();
     exec.apply_pending();
     ed.collect();

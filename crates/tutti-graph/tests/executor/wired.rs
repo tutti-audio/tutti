@@ -13,7 +13,7 @@ use common::{Kind, TestNode, WORKERS, prepare, test_pool};
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::{
     Bus, BusRef, BusRole, BusSource, Buses, Cx, Edge, EdgeFade, EdgeId, Editor, Executor,
-    FeedbackFrom, InPort, Io, Node, NodeKey, OutPort, PortSink, PortSource, Prepare, Rewired,
+    FeedbackFrom, InputPort, Io, Node, NodeKey, OutputPort, PortSink, PortSource, Prepare, Rewired,
     Shape, Status, TapAlign, TapId, TapOptions, TransportPosition, Unforkable, Wired, WiredMask,
 };
 use tutti_units::{Samples, Tail};
@@ -99,8 +99,8 @@ impl Node for Probe {
     fn reset(&mut self) {}
 }
 
-fn out(node: NodeKey, port: u16) -> OutPort {
-    OutPort { node, port }
+fn out(node: NodeKey, port: u16) -> OutputPort {
+    OutputPort { node, port }
 }
 
 fn wired(inputs: u64, outputs: u64) -> Wired {
@@ -157,7 +157,7 @@ fn scenario(workers: usize) -> Vec<(Vec<Rewired>, Read)> {
             width: 1,
         })),
     );
-    let at = |port| InPort { node: PROBE, port };
+    let at = |port| InputPort { node: PROBE, port };
     let from = |port| Edge::Direct(PortSource::Node(out(SRC, port)));
     let mut steps = Vec::new();
 
@@ -348,7 +348,7 @@ fn a_bus_edge_marks_every_channel_port_of_its_bus() {
 fn a_feedback_edge_marks_the_input_and_the_source_output() {
     let (mut ed, mut exec, a, _b) = pair();
     ed.spec_mut().connect(
-        InPort {
+        InputPort {
             node: PROBE,
             port: 1,
         },
@@ -391,7 +391,7 @@ fn a_shape_with_64_ports_reads_bit_63() {
     );
     ed.insert(PROBE, "wide", Unforkable(Wide(Arc::clone(&seen))));
     ed.spec_mut().connect(
-        InPort {
+        InputPort {
             node: PROBE,
             port: 63,
         },
@@ -429,7 +429,7 @@ fn heard_edge() -> (Editor, Executor, Arc<Seen>, EdgeId) {
         }),
     );
     let from = Edge::Direct(PortSource::Node(out(SRC, 0)));
-    let sink = InPort {
+    let sink = InputPort {
         node: PROBE,
         port: 0,
     };
@@ -481,7 +481,7 @@ fn a_fade_out_keeps_the_input_wired_until_the_commit_that_removes_the_edge() {
 #[test]
 fn a_fade_in_counts_as_wired_at_once() {
     let (mut ed, mut exec, seen, _) = heard_edge();
-    let sink = InPort {
+    let sink = InputPort {
         node: PROBE,
         port: 1,
     };

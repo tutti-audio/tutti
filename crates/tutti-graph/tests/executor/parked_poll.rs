@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Cx, Editor, Executor, Io, Node, NodeKey, NodeMode, OutPort, PortSource, Prepare, Shape, Status,
-    TransportPosition, Unforkable,
+    Cx, Editor, Executor, Io, Node, NodeKey, NodeMode, OutputPort, PortSource, Prepare, Shape,
+    Status, TransportPosition, Unforkable,
 };
 use tutti_rt::{Handoff, Rt, handoff};
 
@@ -78,7 +78,7 @@ fn rig() -> Rig {
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutputPort {
             node: NODE,
             port: 0,
         })]);
@@ -203,7 +203,7 @@ fn four_holders(workers: usize) -> (Vec<Vec<u32>>, Vec<(usize, usize)>) {
                 returned: Arc::default(),
             }),
         );
-        outputs.push(PortSource::Node(OutPort {
+        outputs.push(PortSource::Node(OutputPort {
             node: NodeKey(k),
             port: 0,
         }));

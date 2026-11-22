@@ -10,7 +10,7 @@ use tutti_graph::{
     Editor, EventEdge, EventIn, EventOut, Executor, ForkMode, ForkTarget, Prepare, Renderer,
     TransportPosition,
 };
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
 use tutti_polysynth::{Adsr, OscillatorType, PolySynth, SynthConfig};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Voice2};
@@ -61,7 +61,7 @@ fn graph(frame: u64) -> (Editor, Executor) {
         }),
     );
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(2),
             port,
         })

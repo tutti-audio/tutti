@@ -11,7 +11,7 @@ use std::process::Command;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::testing::{self as common, prepare};
 use tutti_graph::{
-    Cx, Editor, Executor, Io, Node, NodeKey, OutPort, PortSource, Prepare, RenderMode, Shape,
+    Cx, Editor, Executor, Io, Node, NodeKey, OutputPort, PortSource, Prepare, RenderMode, Shape,
     Status, TransportPosition, Unforkable,
 };
 
@@ -51,7 +51,7 @@ fn render(mode: RenderMode, participants: usize) {
     ed.spec_mut()
         .topology
         .set_outputs((0..SOURCES as u64).map(|k| {
-            PortSource::Node(OutPort {
+            PortSource::Node(OutputPort {
                 node: NodeKey(k),
                 port: 0,
             })

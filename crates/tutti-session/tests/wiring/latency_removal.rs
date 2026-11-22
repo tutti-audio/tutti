@@ -13,7 +13,7 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
-use tutti_session::{InPort, MainOutput, OutPort, Session};
+use tutti_session::{InputPort, MainOutput, OutputPort, Session};
 use tutti_units::{Db, SampleRate, Samples};
 
 #[test]
@@ -32,15 +32,15 @@ fn the_published_latency_shrinks_when_the_latency_bearing_node_leaves() {
         }),
     ));
     s.graph()
-        .set_sources(InPort::new(lim, 0), [OutPort::new(src, 0)])
+        .set_sources(InputPort::new(lim, 0), [OutputPort::new(src, 0)])
         .unwrap()
         .unfaded();
     s.graph()
-        .set_sources(MainOutput::channel(0), [OutPort::new(lim, 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(lim, 0)])
         .unwrap()
         .unfaded();
     s.graph()
-        .set_sources(MainOutput::channel(1), [OutPort::new(dry, 0)])
+        .set_sources(MainOutput::channel(1), [OutputPort::new(dry, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();

@@ -3,8 +3,8 @@
 //!
 //! # Why a wrapper and not an extension of `crate`
 //!
-//! Giving `InPort`/`OutPort` a kind would break every place
-//! that builds them by literal (`InPort { node, port }`). Event edges also
+//! Giving `InputPort`/`OutputPort` a kind would break every place
+//! that builds them by literal (`InputPort { node, port }`). Event edges also
 //! have a different *edge kind* from audio edges (an event edge carries an
 //! offset-merged stream, an audio edge a signal that will be summed), so the
 //! two maps do not share a type.
@@ -19,7 +19,7 @@ use crate::bus_edge::{BusFeed, BusRef};
 use crate::gain::EdgeGain;
 use crate::mode::{NodeMix, NodeMode};
 use crate::{ChannelFeed, LatencyGraph, PortFeed};
-use crate::{Edge, EdgeId, InPort, PortSink, PortSource};
+use crate::{Edge, EdgeId, InputPort, PortSink, PortSource};
 use crate::{Invalid, Valid};
 use crate::{NodeKey, Topology};
 use tutti_buffers::BusTopology;
@@ -55,10 +55,10 @@ pub struct EventOut {
 ///
 /// ```compile_fail
 /// use tutti_graph::{EventEdge, EventIn, GraphSpec};
-/// use tutti_graph::OutPort;
+/// use tutti_graph::OutputPort;
 /// use tutti_graph::NodeKey;
 /// let mut g = GraphSpec::default();
-/// let audio = OutPort { node: NodeKey(1), port: 0 };
+/// let audio = OutputPort { node: NodeKey(1), port: 0 };
 /// g.connect_events(EventIn { node: NodeKey(2), port: 0 }, EventEdge::Direct(audio));
 /// ```
 ///
@@ -211,14 +211,14 @@ impl GraphSpec {
 
     /// Adds `edge` to the audio sources of input port `at`
     /// ([`Topology::connect`]).
-    pub fn connect(&mut self, at: InPort, edge: Edge) {
+    pub fn connect(&mut self, at: InputPort, edge: Edge) {
         self.topology.connect(at, edge);
     }
 
     /// Removes `edge` from the audio sources of input port `at`, and its gain
     /// entry with it (a stale entry would fail every later
     /// [`validate`](Self::validate)). Returns whether the edge was there.
-    pub fn disconnect(&mut self, at: InPort, edge: Edge) -> bool {
+    pub fn disconnect(&mut self, at: InputPort, edge: Edge) -> bool {
         self.gains.remove(&EdgeId {
             sink: PortSink::Port(at),
             from: edge,

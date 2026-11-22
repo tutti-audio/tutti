@@ -1010,7 +1010,7 @@ mod tests {
     use crate::node::Shape;
     use crate::spec::GraphSpec;
     use crate::{NodeKey, Topology};
-    use crate::{NodeSpec, OutPort, PortSource};
+    use crate::{NodeSpec, OutputPort, PortSource};
     use tutti_buffers::ChannelLayout;
 
     /// Two independent generators, each to its own output: the ops touching
@@ -1028,11 +1028,11 @@ mod tests {
             })
             .collect();
         t.set_outputs(vec![
-            PortSource::Node(OutPort {
+            PortSource::Node(OutputPort {
                 node: NodeKey(1),
                 port: 0,
             }),
-            PortSource::Node(OutPort {
+            PortSource::Node(OutputPort {
                 node: NodeKey(2),
                 port: 0,
             }),
@@ -1073,21 +1073,21 @@ mod tests {
             shapes.insert(NodeKey(k), s);
         }
         t.edges.insert(
-            crate::InPort {
+            crate::InputPort {
                 node: NodeKey(2),
                 port: 0,
             },
-            vec![crate::Edge::Direct(PortSource::Node(OutPort {
+            vec![crate::Edge::Direct(PortSource::Node(OutputPort {
                 node: NodeKey(1),
                 port: 0,
             }))],
         );
         t.set_outputs(vec![
-            PortSource::Node(OutPort {
+            PortSource::Node(OutputPort {
                 node: NodeKey(2),
                 port: 0,
             }),
-            PortSource::Node(OutPort {
+            PortSource::Node(OutputPort {
                 node: NodeKey(4),
                 port: 0,
             }),
@@ -1217,11 +1217,11 @@ mod tests {
         }
         let wire = |t: &mut Topology, sink: NodeKey, from: NodeKey| {
             t.edges.insert(
-                crate::InPort {
+                crate::InputPort {
                     node: sink,
                     port: 0,
                 },
-                vec![crate::Edge::Direct(PortSource::Node(OutPort {
+                vec![crate::Edge::Direct(PortSource::Node(OutputPort {
                     node: from,
                     port: 0,
                 }))],
@@ -1231,8 +1231,8 @@ mod tests {
         wire(&mut t, w, b);
         wire(&mut t, c, a);
         t.set_outputs(vec![
-            PortSource::Node(OutPort { node: w, port: 0 }),
-            PortSource::Node(OutPort { node: c, port: 0 }),
+            PortSource::Node(OutputPort { node: w, port: 0 }),
+            PortSource::Node(OutputPort { node: c, port: 0 }),
         ]);
         let shapes: Shapes = t
             .nodes
@@ -1312,7 +1312,7 @@ mod tests {
         t.outputs = vec![
             [NodeKey(1), NodeKey(2)]
                 .into_iter()
-                .map(|node| PortSource::Node(OutPort { node, port: 0 }))
+                .map(|node| PortSource::Node(OutputPort { node, port: 0 }))
                 .collect(),
         ];
         let valid = GraphSpec::new(t).validate().expect("valid");
@@ -1579,16 +1579,16 @@ mod tests {
         t.nodes
             .insert(thru, NodeSpec::new("thru", st.audio_in(), st.audio_out()));
         t.edges.insert(
-            crate::InPort {
+            crate::InputPort {
                 node: thru,
                 port: 0,
             },
-            vec![crate::Edge::Direct(PortSource::Node(OutPort {
+            vec![crate::Edge::Direct(PortSource::Node(OutputPort {
                 node: generator,
                 port: 0,
             }))],
         );
-        t.set_outputs(vec![PortSource::Node(OutPort {
+        t.set_outputs(vec![PortSource::Node(OutputPort {
             node: thru,
             port: 0,
         })]);
@@ -1635,19 +1635,19 @@ mod tests {
             .insert(thru, NodeSpec::new("thru", st.audio_in(), st.audio_out()));
         for port in 0..2 {
             t.edges.insert(
-                crate::InPort { node: thru, port },
-                vec![crate::Edge::Direct(PortSource::Node(OutPort {
+                crate::InputPort { node: thru, port },
+                vec![crate::Edge::Direct(PortSource::Node(OutputPort {
                     node: generator,
                     port,
                 }))],
             );
         }
         t.set_outputs(vec![
-            PortSource::Node(OutPort {
+            PortSource::Node(OutputPort {
                 node: thru,
                 port: 0,
             }),
-            PortSource::Node(OutPort {
+            PortSource::Node(OutputPort {
                 node: thru,
                 port: 1,
             }),
@@ -1806,7 +1806,7 @@ mod tests {
                     (k, s)
                 })
                 .collect();
-            t.set_outputs(vec![PortSource::Node(OutPort { node: a, port: 0 })]);
+            t.set_outputs(vec![PortSource::Node(OutputPort { node: a, port: 0 })]);
             let mut spec = GraphSpec::new(t);
             spec.generations.insert(a, gen_a);
             let prepare = crate::node::Prepare::new(

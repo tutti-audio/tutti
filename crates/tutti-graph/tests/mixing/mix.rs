@@ -25,8 +25,8 @@ use common::{Kind, Pair, SpecBehaviour, TestNode, bits, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     CommitError, Cx, Edge, Editor, EventOut, FadeLaw, ForkMode, ForkTarget, GraphInvalid,
-    GraphSpec, InPort, Io, MixError, Node, NodeKey, NodeMix, NodeMode, OutPort, ParamIn, PassError,
-    PortSource, Prepare, Shape, Status, Topology, TransportPosition, Unforkable,
+    GraphSpec, InputPort, Io, MixError, Node, NodeKey, NodeMix, NodeMode, OutputPort, ParamIn,
+    PassError, PortSource, Prepare, Shape, Status, Topology, TransportPosition, Unforkable,
 };
 use tutti_units::{Mix, Samples, Tail};
 
@@ -42,15 +42,15 @@ fn key(n: u64) -> NodeKey {
     NodeKey(n)
 }
 
-fn at(node: u64, port: u16) -> InPort {
-    InPort {
+fn at(node: u64, port: u16) -> InputPort {
+    InputPort {
         node: key(node),
         port,
     }
 }
 
 fn out(node: u64, port: u16) -> PortSource {
-    PortSource::Node(OutPort {
+    PortSource::Node(OutputPort {
         node: key(node),
         port,
     })

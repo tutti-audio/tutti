@@ -10,7 +10,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     Editor, EventEdge, EventIn, EventOut, ParamIn, ParamRange, Prepare, Renderer, TransportPosition,
 };
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
 use tutti_modulation::{
     Amount, ControlProgram, ControlProgramBuilder, Law, Layer, LayerClock, LayerId, Polarity,
@@ -122,7 +122,7 @@ fn render_with_knob(synth: PolySynth<f32>, drive: Option<Drive>) -> ([Vec<f32>; 
     );
     ed.spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutPort { node: SYNTH, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort { node: SYNTH, port })));
     ed.commit().expect("commits");
     let driven = drive.as_ref().map(|d| d.param);
     if let Some(d) = drive {

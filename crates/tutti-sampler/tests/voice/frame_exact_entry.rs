@@ -40,7 +40,7 @@ use tutti_buffers::Wave;
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Editor, Env, Io, Node, Prepare, Shape, Status, TransportChanges, contract};
-use tutti_graph::{OutPort, PortSource};
+use tutti_graph::{OutputPort, PortSource};
 use tutti_music::FrameClock;
 use tutti_sampler::{MemorySource, SlotId, VoicePool};
 use tutti_tempo::TempoMap;
@@ -135,7 +135,7 @@ fn graph_with(
     ed.insert(NodeKey(1), "voice", pool);
     ed.insert(NodeKey(2), "probe", tutti_graph::Unforkable(Probe(probe)));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(1),
             port,
         })

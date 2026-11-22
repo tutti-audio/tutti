@@ -9,8 +9,8 @@ use tutti_buffers::{FoldError, InterleavedMut};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    ChannelEdge, ConnectError, DeclarationError, GainTargetError, MainInput, MainOutput, OutPort,
-    Session,
+    ChannelEdge, ConnectError, DeclarationError, GainTargetError, MainInput, MainOutput,
+    OutputPort, Session,
 };
 use tutti_units::Amplitude;
 
@@ -253,7 +253,7 @@ fn a_key_and_its_erasure_are_one_node() {
         .unwrap()
         .unfaded();
     s.graph()
-        .connect(OutPort::new(src.erase(), 0), MainOutput::channel(0))
+        .connect(OutputPort::new(src.erase(), 0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     assert!(

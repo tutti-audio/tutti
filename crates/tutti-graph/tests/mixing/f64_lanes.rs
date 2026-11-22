@@ -9,9 +9,9 @@ use tutti_graph::testing as common;
 use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Cx, Editor, EventOut, Executor, ForkByClone, Io, Node, NodeKey, OutPort, ParamEvent, ParamIn,
-    ParamNode, ParamRamp, ParamRange, ParamSegment, ParamSet, Params, PortSource, Prepare, Shape,
-    Status, TransportPosition, declare_params,
+    Cx, Editor, EventOut, Executor, ForkByClone, Io, Node, NodeKey, OutputPort, ParamEvent,
+    ParamIn, ParamNode, ParamRamp, ParamRange, ParamSegment, ParamSet, Params, PortSource, Prepare,
+    Shape, Status, TransportPosition, declare_params,
 };
 use tutti_rt::Param;
 use tutti_units::{Azimuth, Hz, ParamKey, Samples, UnitParam};
@@ -109,7 +109,7 @@ fn render(ramp: Ramp, range: Option<ParamRange>) -> Vec<f64> {
     };
     ed.spec_mut()
         .topology
-        .set_outputs([PortSource::Node(OutPort {
+        .set_outputs([PortSource::Node(OutputPort {
             node: LANE,
             port: 0,
         })]);
@@ -240,7 +240,7 @@ fn a_range_change_lands_on_the_next_block() {
     };
     ed.spec_mut()
         .topology
-        .set_outputs([PortSource::Node(OutPort {
+        .set_outputs([PortSource::Node(OutputPort {
             node: LANE,
             port: 0,
         })]);
@@ -329,7 +329,7 @@ fn an_f64_edge_weight_ramps_in_f64() {
     use tutti_units::Amplitude;
     let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
     ed.insert(LANE, "dc", ForkByClone(Dc(FINE)));
-    let from = PortSource::Node(OutPort {
+    let from = PortSource::Node(OutputPort {
         node: LANE,
         port: 0,
     });
@@ -364,18 +364,18 @@ fn an_f64_mix_ramps_in_f64() {
     ed.insert(NodeKey(5), "dc", ForkByClone(Dc(FINE)));
     ed.insert(LANE, "double", ForkByClone(Double));
     ed.spec_mut().topology.connect(
-        tutti_graph::InPort {
+        tutti_graph::InputPort {
             node: LANE,
             port: 0,
         },
-        tutti_graph::Edge::Direct(PortSource::Node(OutPort {
+        tutti_graph::Edge::Direct(PortSource::Node(OutputPort {
             node: NodeKey(5),
             port: 0,
         })),
     );
     ed.spec_mut()
         .topology
-        .set_outputs([PortSource::Node(OutPort {
+        .set_outputs([PortSource::Node(OutputPort {
             node: LANE,
             port: 0,
         })]);
@@ -452,7 +452,7 @@ fn render_segment(
     ed.insert(SRC, "segment", ForkByClone(Segment(segment)));
     ed.spec_mut()
         .topology
-        .set_outputs([PortSource::Node(OutPort {
+        .set_outputs([PortSource::Node(OutputPort {
             node: LANE,
             port: 0,
         })]);

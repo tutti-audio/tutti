@@ -6,7 +6,7 @@
 use tutti_buffers::{ChannelLayout, Interleaved, InterleavedMut, Wave};
 use tutti_graph::NodeKey;
 use tutti_sampler::{Clip, PlayError, VoiceWindow};
-use tutti_session::{MainOutput, OutPort, Session, ValueErrorKind};
+use tutti_session::{MainOutput, OutputPort, Session, ValueErrorKind};
 use tutti_units::{Amplitude, Beat, SampleRate};
 
 const RATE: f64 = 48_000.0;
@@ -52,7 +52,7 @@ fn first_sound(out: &[f32]) -> Option<usize> {
 fn wire(s: &mut Session, node: NodeKey) {
     for port in 0..2 {
         s.graph()
-            .set_sources(MainOutput::channel(port), [OutPort::new(node, port)])
+            .set_sources(MainOutput::channel(port), [OutputPort::new(node, port)])
             .unwrap()
             .unfaded();
     }
@@ -311,7 +311,10 @@ impl Rig {
         let handle = handle_of(&s, &clip);
         for port in 0..2 {
             s.graph()
-                .set_sources(MainOutput::channel(port), [OutPort::new(clip.erase(), 0)])
+                .set_sources(
+                    MainOutput::channel(port),
+                    [OutputPort::new(clip.erase(), 0)],
+                )
                 .unwrap()
                 .unfaded();
         }

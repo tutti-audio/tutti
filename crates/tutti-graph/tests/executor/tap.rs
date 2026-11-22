@@ -9,7 +9,7 @@ use tutti_graph::testing as common;
 use common::{Kind, TestNode, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{InterleavedMut, Pull, Source as _};
-use tutti_graph::{CloseError, Edge, InPort, OutPort, PortSource};
+use tutti_graph::{CloseError, Edge, InputPort, OutputPort, PortSource};
 use tutti_graph::{
     Editor, Executor, ForkCause, ForkMode, ForkSource, ForkTarget, Forked, IntoNode, MissingSource,
     Node, NodeParts, Op, TapReader, TransportPosition,
@@ -46,7 +46,7 @@ const MAX_BLOCK: usize = 128;
 const CHAINS: u64 = 6;
 
 fn out(node: u64) -> PortSource {
-    PortSource::Node(OutPort {
+    PortSource::Node(OutputPort {
         node: NodeKey(node),
         port: 0,
     })
@@ -77,14 +77,14 @@ fn build(ed: &mut Editor) -> Vec<PortSource> {
         );
         let t = &mut ed.spec_mut().topology;
         t.edges.insert(
-            InPort {
+            InputPort {
                 node: NodeKey(lag),
                 port: 0,
             },
             vec![Edge::Direct(PortSource::Global(0))],
         );
         t.edges.insert(
-            InPort {
+            InputPort {
                 node: NodeKey(gain),
                 port: 0,
             },
@@ -1019,7 +1019,7 @@ fn wide(r: &mut Rig, value: f32, width: usize) {
 }
 
 fn port(node: u64, port: u16) -> PortSource {
-    PortSource::Node(OutPort {
+    PortSource::Node(OutputPort {
         node: NodeKey(node),
         port,
     })

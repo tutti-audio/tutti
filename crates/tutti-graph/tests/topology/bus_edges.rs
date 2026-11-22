@@ -18,8 +18,8 @@ use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology};
 use tutti_graph::Node;
 use tutti_graph::{
     Bus, BusError, BusFeed, BusFold, BusRef, BusRole, BusSide, BusSource, Buses, CommitError,
-    CompileError, DelayKey, Edge, EdgeGain, EdgeId, Editor, GraphInvalid, GraphSpec, InPort,
-    Lowering, NodeKey, Op, OutPort, Plan, PortSink, PortSource, TransportPosition, Unforkable,
+    CompileError, DelayKey, Edge, EdgeGain, EdgeId, Editor, GraphInvalid, GraphSpec, InputPort,
+    Lowering, NodeKey, Op, OutputPort, Plan, PortSink, PortSource, TransportPosition, Unforkable,
     ValidGraph, compile,
 };
 use tutti_units::{Amplitude, SampleRate, Samples, Tail};
@@ -34,15 +34,15 @@ fn ch(n: usize) -> ChannelLayout {
     ChannelLayout::try_from(n).expect("a test width is small")
 }
 
-fn at(node: u64, port: u16) -> InPort {
-    InPort {
+fn at(node: u64, port: u16) -> InputPort {
+    InputPort {
         node: key(node),
         port,
     }
 }
 
 fn out_port(node: u64, port: u16) -> PortSource {
-    PortSource::Node(OutPort {
+    PortSource::Node(OutputPort {
         node: key(node),
         port,
     })

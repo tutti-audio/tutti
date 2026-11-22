@@ -30,7 +30,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Io, Node, Prepare, Shape, Status, TransportChanges, TransportPosition, Unforkable,
 };
-use tutti_graph::{Edge, InPort, OutPort, PortSource};
+use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_units::{SampleRate, Samples};
 
 const MAX_BLOCK: usize = 64;
@@ -82,7 +82,7 @@ fn render_probes(workers: usize, entry: Entry) {
     for k in 1..=PROBES {
         ed.insert(NodeKey(k), "probe", Unforkable(Probe));
         ed.spec_mut().topology.edges.insert(
-            InPort {
+            InputPort {
                 node: NodeKey(k),
                 port: 0,
             },
@@ -90,7 +90,7 @@ fn render_probes(workers: usize, entry: Entry) {
         );
     }
     ed.spec_mut().topology.set_outputs((1..=PROBES).map(|k| {
-        PortSource::Node(OutPort {
+        PortSource::Node(OutputPort {
             node: NodeKey(k),
             port: 0,
         })
