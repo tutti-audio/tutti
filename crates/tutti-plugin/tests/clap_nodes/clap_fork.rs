@@ -845,14 +845,8 @@ fn feed_chord(live: &mut Editor, plugin: NodeKey, n: u8, on: usize, off: usize) 
     let clip = NodeKey(1);
     live.insert(clip, "clip", MidiClipNode::new(events));
     live.spec_mut().connect_events(
-        EventInputPort {
-            node: plugin,
-            port: 0,
-        },
-        EventEdge::Direct(EventOutputPort {
-            node: clip,
-            port: 0,
-        }),
+        EventInputPort::new(plugin, 0),
+        EventEdge::Direct(EventOutputPort::new(clip, 0)),
     );
 }
 
@@ -941,14 +935,8 @@ fn feed_note(live: &mut Editor, plugin: NodeKey, frame: usize) {
         .unwrap()]),
     );
     live.spec_mut().connect_events(
-        EventInputPort {
-            node: plugin,
-            port: 0,
-        },
-        EventEdge::Direct(EventOutputPort {
-            node: clip,
-            port: 0,
-        }),
+        EventInputPort::new(plugin, 0),
+        EventEdge::Direct(EventOutputPort::new(clip, 0)),
     );
 }
 
@@ -1074,11 +1062,8 @@ fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
         ),
     );
     live.spec_mut().connect_events(
-        EventInputPort { node: key, port: 0 },
-        EventEdge::Direct(EventOutputPort {
-            node: clip,
-            port: 0,
-        }),
+        EventInputPort::new(key, 0),
+        EventEdge::Direct(EventOutputPort::new(clip, 0)),
     );
     live.spec_mut()
         .topology
@@ -1199,18 +1184,12 @@ fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
             tutti_graph::ForkByClone(MidiSink(seen.clone())),
         );
         live.spec_mut().connect_events(
-            EventInputPort { node: key, port: 0 },
-            EventEdge::Direct(EventOutputPort {
-                node: clip,
-                port: 0,
-            }),
+            EventInputPort::new(key, 0),
+            EventEdge::Direct(EventOutputPort::new(clip, 0)),
         );
         live.spec_mut().connect_events(
-            EventInputPort {
-                node: sink,
-                port: 0,
-            },
-            EventEdge::Direct(EventOutputPort { node: key, port: 0 }),
+            EventInputPort::new(sink, 0),
+            EventEdge::Direct(EventOutputPort::new(key, 0)),
         );
         live.spec_mut().topology.set_outputs(vec![
             PortSource::Node(OutputPort::new(key, 0)),

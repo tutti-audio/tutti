@@ -290,17 +290,15 @@ impl<F: SamplerFloat> Voice<F> {
 ///
 /// # Stretched voices
 ///
-/// The pool declares no latency. A stretched memory voice reads its source the
-/// vocoder's [`latency`](tutti_dsp::PhaseVocoder::latency) ahead and sounds on
-/// time. A stretched disk voice cannot read before its seat, so it sounds that
-/// latency late and the pool does not compensate it, nor any voice started with
-/// no timeline position to read ahead of.
+/// The pool declares no latency. A stretched voice of either tier seats its vocoder on the
+/// source's own history (the file's, for a disk voice, from its ring) and sounds on time.
 ///
-/// A stretching voice's seat (a seek, play from a position the transport has not stood
-/// at for 2 049 frames; a loop wrap is primed for, by a second vocoder the handle sends a voice under the loop) primes the vocoder over blocks and is silent for
-/// 4 097 frames (85 ms at 48 kHz) before it sounds on the timeline; a clip placed ahead
-/// of the playhead, or at a position the transport has stood at, primes before it
-/// plays and is not silent.
+/// A stretching voice's seat (a seek, or play from a position the transport has not stood
+/// at for 1 024 frames; a loop wrap is primed for, by a second vocoder the handle sends a
+/// memory voice under the loop) primes the vocoder over blocks and is silent for 1 024
+/// frames (21 ms at 48 kHz) before it sounds on the timeline; a clip placed ahead of the
+/// playhead, or at a position the transport has stood at, primes before it plays and is not
+/// silent. A voice without a spare, a disk voice's loop wrap included, reseats as a seek.
 pub struct VoicePool<F: SamplerFloat> {
     /// The resident slots, one per voice, summed in order. Reserved to
     /// `MAX_RESIDENT_VOICES` at construction, and the audio-thread

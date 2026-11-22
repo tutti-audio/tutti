@@ -815,11 +815,8 @@ fn run_synth(synth: Synth, on_at: u64, off_at: u64, blocks: usize) -> Vec<f32> {
     let spec = ed.spec_mut();
     for from in [on, off] {
         spec.connect_events(
-            tutti_graph::EventInputPort { node: key, port: 0 },
-            tutti_graph::EventEdge::Direct(tutti_graph::EventOutputPort {
-                node: from,
-                port: 0,
-            }),
+            tutti_graph::EventInputPort::new(key, 0),
+            tutti_graph::EventEdge::Direct(tutti_graph::EventOutputPort::new(from, 0)),
         );
     }
     spec.topology
@@ -920,14 +917,8 @@ fn a_merge_holds_all_its_inputs_so_no_note_off_is_lost() {
     ed.insert(NodeKey(3), "count", Unforkable(Count(Arc::clone(&seen))));
     for from in [1, 2] {
         ed.spec_mut().connect_events(
-            tutti_graph::EventInputPort {
-                node: NodeKey(3),
-                port: 0,
-            },
-            tutti_graph::EventEdge::Direct(tutti_graph::EventOutputPort {
-                node: NodeKey(from),
-                port: 0,
-            }),
+            tutti_graph::EventInputPort::new(NodeKey(3), 0),
+            tutti_graph::EventEdge::Direct(tutti_graph::EventOutputPort::new(NodeKey(from), 0)),
         );
     }
     ed.commit().expect("commits");

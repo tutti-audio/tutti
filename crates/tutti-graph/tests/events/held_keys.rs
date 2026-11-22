@@ -112,16 +112,10 @@ impl Node for Sink {
 }
 
 fn out(n: u64) -> EventOutputPort {
-    EventOutputPort {
-        node: NodeKey(n),
-        port: 0,
-    }
+    EventOutputPort::new(NodeKey(n), 0)
 }
 fn at(n: u64) -> EventInputPort {
-    EventInputPort {
-        node: NodeKey(n),
-        port: 0,
-    }
+    EventInputPort::new(NodeKey(n), 0)
 }
 
 /// A MIDI 1.0 Note On, group 0, velocity 100.

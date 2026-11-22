@@ -114,11 +114,8 @@ fn graph(workers: usize, declared: bool) -> Executor {
             }
         }
         ed.spec_mut().connect_events(
-            EventInputPort { node: key, port: 0 },
-            EventEdge::Direct(EventOutputPort {
-                node: clip,
-                port: 0,
-            }),
+            EventInputPort::new(key, 0),
+            EventEdge::Direct(EventOutputPort::new(clip, 0)),
         );
         // The bus is the graph's fan-in: each output channel holds every
         // synth's matching port, and the graph sums them.

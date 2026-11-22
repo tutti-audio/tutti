@@ -1,8 +1,9 @@
 use tutti_ump::ManufacturerId;
 use tutti_ump::{
     BlockDirection, BlockFilter, BlockSelect, DeviceIdentity, DiscoveryFilter, FirstGroup,
-    FunctionBlockId, FunctionBlockInfo, GroupSpan, Message, Midi1Port, OsFunctionBlock, Protocol,
-    SoftwareRevision, Stream, StreamConfig, U7, UiHint, Ump, read_function_block,
+    FunctionBlockId, FunctionBlockInfo, GroupSpan, Message, MessageType, Midi1Port,
+    OsFunctionBlock, Protocol, SoftwareRevision, Stream, StreamConfig, U7, UiHint, Ump,
+    read_function_block,
 };
 
 use super::*;
@@ -71,7 +72,7 @@ fn device() -> Endpoint {
         .block(
             block(3, 4, 2)
                 .ui_hint(UiHint::Both)
-                .midi_ci(2, 2)
+                .midi_ci(2, Sysex8StreamCount::new(2))
                 .name(BlockName::new("Piano").unwrap())
                 .build()
                 .unwrap(),
@@ -92,7 +93,7 @@ fn discovery(filter: DiscoveryFilter) -> Stream {
 }
 
 fn status(u: &Ump) -> u32 {
-    assert_eq!(u.message_type(), 0xF);
+    assert_eq!(u.message_type(), MessageType::Stream);
     (u.0[0] >> 16) & 0x3FF
 }
 
@@ -260,8 +261,12 @@ fn function_block_info_and_name_words() {
 
     // The other way round: MIDI-CI version 1, 16 streams, block 7, Groups 5 to 7,
     // so a swapped pair of bytes shows. 0x8000 | 0x0700 | 0b11, then 5, 3, 1, 16.
-    let mut e =
-        Endpoint::new(Supports::of(FULL)).block(block(7, 5, 3).midi_ci(1, 16).build().unwrap());
+    let mut e = Endpoint::new(Supports::of(FULL)).block(
+        block(7, 5, 3)
+            .midi_ci(1, Sysex8StreamCount::new(16))
+            .build()
+            .unwrap(),
+    );
     let out = ask(
         &mut e,
         block_discovery(BlockSelect::One(id(7)), true, false),
@@ -1010,8 +1015,11 @@ fn merge(ids: &Sysex8StreamIds, sources: &[Vec<u8>]) -> (Vec<u8>, Vec<Vec<u8>>) 
 #[test]
 fn a_block_declares_the_streams_a_sender_may_use() {
     for (declared, count) in [(0, 0), (1, 1), (2, 2), (3, 3), (255, 255)] {
-        let block = block(0, 0, 1).midi_ci(0, declared).build().unwrap();
-        assert_eq!(block.sysex8_streams().count(), count);
+        let block = block(0, 0, 1)
+            .midi_ci(0, Sysex8StreamCount::new(declared))
+            .build()
+            .unwrap();
+        assert_eq!(block.sysex8_streams().count().get(), count);
     }
 }
 
@@ -1020,7 +1028,7 @@ fn a_block_declares_the_streams_a_sender_may_use() {
 #[test]
 fn a_block_with_no_sysex8_gives_a_sender_no_stream() {
     let block = block(0, 0, 1).build().unwrap();
-    assert_eq!(block.max_sysex8_streams(), 0);
+    assert_eq!(block.max_sysex8_streams(), Sysex8StreamCount::new(0));
     assert!(block.sysex8_streams().open().is_none());
 }
 
@@ -1041,7 +1049,10 @@ fn a_merger_without_discovery_sends_one_stream_at_a_time() {
 /// Spec: m2-104/7.8#7, m2-104/7.8#8
 #[test]
 fn a_merger_after_discovery_uses_only_stream_ids_below_the_count() {
-    let block = block(0, 0, 1).midi_ci(1, 3).build().unwrap();
+    let block = block(0, 0, 1)
+        .midi_ci(1, Sysex8StreamCount::new(3))
+        .build()
+        .unwrap();
     let sources: Vec<Vec<u8>> = (0..5)
         .map(|i| vec![0x90 + i; 40 + usize::from(i)])
         .collect();
@@ -1067,7 +1078,7 @@ fn os() -> OsFunctionBlock {
         first_group: 4,
         groups_spanned: 2,
         midi_ci_version: 2,
-        max_sysex8_streams: 2,
+        max_sysex8_streams: Sysex8StreamCount::new(2),
     }
 }
 

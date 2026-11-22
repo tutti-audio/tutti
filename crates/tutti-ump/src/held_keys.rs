@@ -3,15 +3,15 @@
 
 use alloc::boxed::Box;
 
-use crate::{
-    Address, HeldControllers, MidiChannel, MidiGroup, NoteKey, NoteKeyEvent, Protocol, Ump,
-};
+use crate::{Address, HeldControllers, MidiGroup, NoteKey, NoteKeyEvent, Protocol, Ump};
 
-/// A channel of one protocol: the position of a (protocol, Group, Channel) in a
-/// table of 512 entries, MIDI 1.0 lanes first. The index is the one a
-/// [`NoteKey`] packs above its note.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct GroupChannelIndex(u16);
+tutti_units::ranged! {
+    /// A channel of one protocol: the position of a (protocol, Group, Channel) in a
+    /// table of 512 entries, MIDI 1.0 lanes first. The index is the one a
+    /// [`NoteKey`] packs above its note.
+    #[derive(Eq, PartialOrd, Ord, Hash)]
+    GroupChannelIndex(u16), GroupChannelIndexOutOfRange, "within 0..512", |raw| raw < 512
+}
 
 impl GroupChannelIndex {
     /// How many lanes there are: two protocols, sixteen Groups, sixteen Channels.
@@ -20,7 +20,7 @@ impl GroupChannelIndex {
     /// The lane of `address` in `protocol`, or `None` for a protocol that has
     /// no channel voice message ([`Protocol::Reserved`]).
     #[must_use]
-    pub const fn new(protocol: Protocol, address: Address) -> Option<Self> {
+    pub const fn at(protocol: Protocol, address: Address) -> Option<Self> {
         match protocol {
             Protocol::Midi1 => Some(Self(address.index() as u16)),
             Protocol::Midi2 => Some(Self(256 + address.index() as u16)),
@@ -45,16 +45,6 @@ impl GroupChannelIndex {
         (0..Self::COUNT as u16).map(GroupChannelIndex)
     }
 
-    /// The lane at table position `index`, or `None` from [`COUNT`](Self::COUNT) up.
-    #[must_use]
-    pub const fn from_index(index: usize) -> Option<Self> {
-        if index < Self::COUNT {
-            Some(Self(index as u16))
-        } else {
-            None
-        }
-    }
-
     /// The table position, `0..`[`COUNT`](Self::COUNT).
     #[must_use]
     pub const fn index(self) -> usize {
@@ -74,11 +64,7 @@ impl GroupChannelIndex {
     /// The Group and Channel.
     #[must_use]
     pub const fn address(self) -> Address {
-        let lane = (self.0 & 0xff) as u8;
-        Address {
-            group: MidiGroup::masked(lane >> 4),
-            channel: MidiChannel::masked(lane),
-        }
+        Address::from_lane((self.0 & 0xff) as u8)
     }
 }
 
@@ -357,8 +343,8 @@ impl Held {
 mod tests {
     use super::*;
     use crate::{
-        BendValue, CCNumber, ControlValue, Message, NoteNumber, NoteVelocity, U7, U14, Voice1,
-        Voice2,
+        BendValue, CCNumber, ControlValue, Message, MidiChannel, NoteNumber, NoteVelocity, U7, U14,
+        Voice1, Voice2,
     };
 
     fn key(protocol: Protocol, index: usize, note: u8) -> NoteKey {
@@ -434,8 +420,8 @@ mod tests {
     #[test]
     fn a_lane_is_the_protocol_then_the_address_and_names_both_back() {
         let address = Address::from_index(0x2B).unwrap();
-        let m1 = GroupChannelIndex::new(Protocol::Midi1, address).unwrap();
-        let m2 = GroupChannelIndex::new(Protocol::Midi2, address).unwrap();
+        let m1 = GroupChannelIndex::at(Protocol::Midi1, address).unwrap();
+        let m2 = GroupChannelIndex::at(Protocol::Midi2, address).unwrap();
         assert_eq!((m1.index(), m2.index()), (0x2B, 256 + 0x2B));
         assert_eq!(
             (m1.protocol(), m2.protocol()),
@@ -443,14 +429,9 @@ mod tests {
         );
         assert_eq!((m1.address(), m2.address()), (address, address));
         assert_eq!(
-            GroupChannelIndex::new(Protocol::Reserved(crate::Reserved::wire(3)), address),
+            GroupChannelIndex::at(Protocol::Reserved(crate::Reserved::wire(3)), address),
             None
         );
-        assert_eq!(
-            GroupChannelIndex::from_index(511).map(GroupChannelIndex::index),
-            Some(511)
-        );
-        assert_eq!(GroupChannelIndex::from_index(512), None);
         assert_eq!(key(Protocol::Midi2, 0x2B, 5).lane(), m2);
     }
 

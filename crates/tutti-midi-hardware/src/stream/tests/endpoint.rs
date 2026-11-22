@@ -9,7 +9,7 @@ use tutti_midi_ci::CiCategories;
 use tutti_midi_ci::CiMessage;
 use tutti_midi_device::MidiIdentity;
 use tutti_ump::ProductInstanceId;
-use tutti_ump::{BlockFilter, BlockSelect, DiscoveryFilter, Form, UmpVersion};
+use tutti_ump::{BlockFilter, BlockSelect, DiscoveryFilter, Form, MessageType, UmpVersion};
 
 const ASKING: UmpVersion = UmpVersion { major: 1, minor: 1 };
 
@@ -42,7 +42,7 @@ fn presented_over(groups: u8) -> crate::Presented {
 fn stream_sent(wire: &Wire) -> Vec<Stream> {
     received(wire)
         .into_iter()
-        .filter(|ump| ump.message_type() == 0xF)
+        .filter(|ump| ump.message_type() == MessageType::Stream)
         .filter_map(|ump| match ump.decode() {
             Ok(Message::Stream(stream)) => Some(stream),
             _ => None,
@@ -401,7 +401,7 @@ fn a_new_name_is_announced_and_leaves_midi_ci_alone() {
     let sent = received(&wire);
     let stream: Vec<_> = sent
         .iter()
-        .filter(|ump| ump.message_type() == 0xF)
+        .filter(|ump| ump.message_type() == MessageType::Stream)
         .filter_map(|ump| match ump.decode() {
             Ok(Message::Stream(stream)) => Some(stream),
             _ => None,
@@ -414,7 +414,8 @@ fn a_new_name_is_announced_and_leaves_midi_ci_alone() {
         "{stream:?}"
     );
     assert!(
-        sent.iter().all(|ump| ump.message_type() != 3),
+        sent.iter()
+            .all(|ump| ump.message_type() != MessageType::Sysex7),
         "no MIDI-CI message: {sent:?}"
     );
 }
@@ -430,11 +431,19 @@ fn a_granted_request_moves_the_output_to_the_protocol_asked() {
     wire.connect_output();
     let note = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 0xFFFF))];
     wire.send(&note);
-    assert_eq!(received(&wire)[0].message_type(), 4, "negotiated MIDI 2.0");
+    assert_eq!(
+        received(&wire)[0].message_type(),
+        MessageType::Midi2ChannelVoice,
+        "negotiated MIDI 2.0"
+    );
 
     let _ = answered(&mut wire, request(Protocol::Midi1, false, false), 100);
     wire.send(&note);
-    assert_eq!(received(&wire)[0].message_type(), 2, "granted MIDI 1.0");
+    assert_eq!(
+        received(&wire)[0].message_type(),
+        MessageType::Midi1ChannelVoice,
+        "granted MIDI 1.0"
+    );
     assert_eq!(
         wire.session.stream(&wire.id).unwrap().config().protocol,
         Protocol::Midi1
@@ -442,7 +451,11 @@ fn a_granted_request_moves_the_output_to_the_protocol_asked() {
 
     let _ = answered(&mut wire, request(Protocol::Midi2, false, false), 200);
     wire.send(&note);
-    assert_eq!(received(&wire)[0].message_type(), 4, "granted MIDI 2.0");
+    assert_eq!(
+        received(&wire)[0].message_type(),
+        MessageType::Midi2ChannelVoice,
+        "granted MIDI 2.0"
+    );
 }
 
 /// What the session asks of a device after its peer's request moved the

@@ -117,7 +117,7 @@ fn render(ramp: Ramp, range: Option<ParamRange>) -> Vec<f64> {
         .topology
         .set_outputs([PortSource::Node(OutputPort::new(LANE, 0))]);
     ed.spec_mut()
-        .connect_param(at, EventOutputPort { node: SRC, port: 0 });
+        .connect_param(at, EventOutputPort::new(SRC, 0));
     if let Some(range) = range {
         ed.spec_mut().set_param_range(at, range);
     }
@@ -245,7 +245,7 @@ fn a_range_change_lands_on_the_next_block() {
         .topology
         .set_outputs([PortSource::Node(OutputPort::new(LANE, 0))]);
     ed.spec_mut()
-        .connect_param(at, EventOutputPort { node: SRC, port: 0 });
+        .connect_param(at, EventOutputPort::new(SRC, 0));
     ed.commit().expect("commits");
     exec.apply_pending();
     let mut block = |ed: &mut Editor<f64>| {
@@ -451,7 +451,7 @@ fn render_segment(
             node: LANE,
             param: param.into(),
         },
-        EventOutputPort { node: SRC, port: 0 },
+        EventOutputPort::new(SRC, 0),
     );
     ed.commit().expect("commits");
     exec.apply_pending();

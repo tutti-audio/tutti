@@ -151,7 +151,7 @@ fn render(to: &[(UnitAddr, f64)]) -> [Vec<f32>; 4] {
                 node: NODE,
                 param: addr,
             },
-            EventOutputPort { node: SRC, port: 0 },
+            EventOutputPort::new(SRC, 0),
         );
     }
     ed.commit().expect("commits");

@@ -146,7 +146,7 @@ impl HeldControllers {
             }
             _ => return,
         };
-        let Some(lane) = GroupChannelIndex::new(protocol, address) else {
+        let Some(lane) = GroupChannelIndex::at(protocol, address) else {
             return;
         };
         let state = &mut self.lanes[lane.index()];

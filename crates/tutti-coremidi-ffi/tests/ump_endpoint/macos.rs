@@ -11,7 +11,8 @@ use tutti_platform::{Instant, MainThreadMarker};
 use tutti_ump::{
     BlockDirection, DeviceIdentity, FirstGroup, FunctionBlockCount, FunctionBlockInfo,
     FunctionBlocks, GroupSpan, ManufacturerId, Message, Midi1Port, OsFunctionBlock,
-    ProductInstanceId, Protocol, SoftwareRevision, U7, UiHint, Ump, Utility, read_function_block,
+    ProductInstanceId, Protocol, SoftwareRevision, Sysex8StreamCount, U7, UiHint, Ump, Utility,
+    read_function_block,
 };
 
 const KEYS: &str = "tutti-ffi-test Keys";
@@ -76,14 +77,14 @@ fn base(id: u8) -> OsFunctionBlock {
         first_group: 0,
         groups_spanned: 1,
         midi_ci_version: 0,
-        max_sysex8_streams: 0,
+        max_sysex8_streams: Sysex8StreamCount::new(0),
     }
 }
 
 fn keys() -> FunctionBlockInfo {
     block(OsFunctionBlock {
         groups_spanned: 2,
-        max_sysex8_streams: 3,
+        max_sysex8_streams: Sysex8StreamCount::new(3),
         ..base(0)
     })
 }
@@ -190,7 +191,7 @@ pub fn an_endpoint_lists_the_blocks_it_was_created_with() {
     assert_eq!(keys.midi1, Midi1Port::No);
     assert_eq!(
         (keys.ui_hint, keys.max_sysex8_streams, keys.active),
-        (UiHint::Both, 3, true)
+        (UiHint::Both, Sysex8StreamCount::new(3), true)
     );
     let port = named(PORT);
     assert_eq!(port.direction, BlockDirection::Input);

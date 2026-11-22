@@ -5,7 +5,7 @@
 use tutti_ump::{
     Address, Articulation, ArticulationError, Attribute, Classification, ColorSound, CoreSound,
     CustomClassification as Cc, EffectSound, GestureSound, IntervallicTrill, Message, MidiChannel,
-    MidiGroup, NoteArticulation, NoteEnding, NoteNumber, NoteOffArticulation, NoteVelocity,
+    MidiGroup, NoteArticulation, NoteEnding, NoteNumber, NoteOffArticulation, NoteVelocity, Pitch,
     ReleaseTime, RunSound, SameNoteSound, ShortSound, StringAssignment, Stroke, U4, Ump, Voice2,
 };
 
@@ -558,7 +558,7 @@ fn an_attribute_that_is_not_an_articulation_is_refused() {
         Err(ArticulationError::NotAnArticulation(0x01))
     );
     assert_eq!(
-        NoteArticulation::from_attribute(Attribute::Pitch(0)),
+        NoteArticulation::from_attribute(Attribute::Pitch(Pitch::from_q7_9(0))),
         Err(ArticulationError::NotAnArticulation(0x03))
     );
     assert_eq!(

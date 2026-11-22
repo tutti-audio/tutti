@@ -799,10 +799,7 @@ mod tests {
 
     #[test]
     fn only_a_missing_plan_or_a_full_queue_is_transient() {
-        let to = EventInputPort {
-            node: NodeKey(1),
-            port: 0,
-        };
+        let to = EventInputPort::new(NodeKey(1), 0);
         assert!(ScheduleError::NoPlan.is_transient());
         assert!(ScheduleError::Backpressure.is_transient());
         assert!(!ScheduleError::NoSuchPort { to }.is_transient());
@@ -814,10 +811,7 @@ mod tests {
         tx.send(
             0,
             At::Frame(Frame::new(frame)),
-            EventInputPort {
-                node: NodeKey(1),
-                port: 0,
-            },
+            EventInputPort::new(NodeKey(1), 0),
             Scheduled::Event(EventKind::Midi(Ump([0; 4]))),
         )
         .expect("room")

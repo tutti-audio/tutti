@@ -8,8 +8,8 @@ use tutti_midi_protocol::midi1;
 use tutti_ump::{
     Address, Attribute, Bank, CCNumber, DeltaTicks, ManufacturerId, MdsChunkUmps, MdsIdentity,
     Message, MidiChannel, MidiGroup, MixedDataSet, NoMidi1Form, NoteNumber, NoteVelocity,
-    PerNoteManagement, RegisteredPerNoteController, Sysex7Packet, Sysex8StreamIds, SysexStatus,
-    System, TicksPerQuarterNote, U4, U7, U14, Utility, Voice1, Voice2,
+    PerNoteManagement, Pitch, RegisteredPerNoteController, Sysex7Packet, Sysex8StreamIds,
+    SysexStatus, System, TicksPerQuarterNote, U4, U7, U14, Utility, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
 
@@ -75,7 +75,7 @@ fn a_note_with_any_attribute_type_sends_bytes() {
         Attribute::None,
         Attribute::Manufacturer(0x1234),
         Attribute::Profile(7),
-        Attribute::Pitch(0x3C00),
+        Attribute::Pitch(Pitch::from_q7_9(0x3C00)),
         midi::reserved_attribute(4, 1),
         midi::reserved_attribute(255, 0xFFFF),
     ];

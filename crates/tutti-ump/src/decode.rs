@@ -17,7 +17,7 @@
 //! SysEx 7 data), which is part of the byte being 7-bit, not a reserved bit.
 
 use crate::field::{
-    ChordType, DeltaTicks, FunctionBlockCount, FunctionBlockId, NoteNumber, SharpsFlats,
+    ChordType, DeltaTicks, FunctionBlockCount, FunctionBlockId, NoteNumber, Pitch, SharpsFlats,
     TicksPerQuarterNote, U4, U7, U14,
 };
 use crate::message::{
@@ -32,7 +32,8 @@ use crate::message::{
 use crate::{
     ArticulationAttribute, BendValue, CCNumber, ControlValue, Field, ManufacturerId, MdsChunk,
     MdsChunkSize, MdsChunks, MdsIdentity, MidiChannel, MidiGroup, NoteVelocity,
-    RegisteredPerNoteController, Reserved, ReservedAttribute, Ump,
+    RegisteredPerNoteController, Reserved, ReservedAttribute, Sysex8StreamCount, Sysex8StreamId,
+    Ump,
 };
 
 impl Ump {
@@ -224,7 +225,7 @@ fn data128(w: [u32; 4]) -> Option<Data128> {
     let low = ((w[0] >> 16) & 0xf) as u8;
     match (w[0] >> 20) & 0xf {
         status @ 0x0..=0x3 => {
-            let stream_id = byte(w[0], 1);
+            let stream_id = Sysex8StreamId::new(byte(w[0], 1));
             // §7.8.1 says an End with `# of bytes` 0xF aborts and has all data
             // bytes zero, and is silent on the stream id. Keeping the id (byte 3)
             // is an inference: a sender that zeroes it aborts stream 0.
@@ -282,7 +283,7 @@ fn attribute(kind: u8, data: u16) -> Attribute {
         0x00 => Attribute::None,
         0x01 => Attribute::Manufacturer(data),
         0x02 => Attribute::Profile(data),
-        0x03 => Attribute::Pitch(data),
+        0x03 => Attribute::Pitch(Pitch::from_q7_9(data)),
         0x10..=0x1F => Attribute::Articulation(ArticulationAttribute::wire(kind, data)),
         _ => Attribute::Reserved(ReservedAttribute::wire(kind, data)),
     }
@@ -616,7 +617,7 @@ pub(crate) fn function_block_info(w0: u32, w1: u32) -> FunctionBlockInfo {
         first_group: Field::from_raw(byte(w1, 3)),
         groups_spanned: Field::from_raw(byte(w1, 2)),
         midi_ci_version: byte(w1, 1),
-        max_sysex8_streams: byte(w1, 0),
+        max_sysex8_streams: Sysex8StreamCount::new(byte(w1, 0)),
     }
 }
 

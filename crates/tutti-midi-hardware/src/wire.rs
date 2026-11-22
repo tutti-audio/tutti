@@ -33,7 +33,7 @@
 
 use tutti_midi_protocol::Midi1Translator;
 use tutti_midi_runtime::{Outgoing, Taken};
-use tutti_ump::{Join, Message, Protocol, StreamConfig, Ump, Utility, parse_exact};
+use tutti_ump::{Join, Message, MessageType, Protocol, StreamConfig, Ump, Utility, parse_exact};
 use tutti_units::Losses;
 
 /// One device output's wire form: its configuration, the [`Midi1Translator`] that
@@ -104,12 +104,12 @@ impl Wire {
                 }
             };
             match ump.message_type() {
-                0 => {
+                MessageType::Utility => {
                     if let Some(kept) = utility(ump, jr) {
                         self.out.push(packet(kept, first));
                     }
                 }
-                4 if speaks_midi1 => {
+                MessageType::Midi2ChannelVoice if speaks_midi1 => {
                     if let Ok(message) = ump.decode() {
                         let out = &mut self.out;
                         let mut next = first;

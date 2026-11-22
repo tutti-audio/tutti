@@ -125,9 +125,9 @@ fn the_fdns_design_into_needs_no_network_sized_stack() {
     assert_eq!(handle.join().unwrap(), 1);
 }
 
-/// The phase vocoder's `retarget`, `input_needed` and `process` allocate nothing, with every
-/// control moving each block (hostile ones among them) and every block fed what it asks, after
-/// the one `PhaseVocoder::new` that sizes it.
+/// The phase vocoder's `retarget`, `input_needed`, `process`, `seat` and `discard` allocate
+/// nothing, with every control moving each block (hostile ones among them) and every block fed
+/// what it asks, after the one `PhaseVocoder::new` that sizes it.
 #[test]
 fn the_phase_vocoder_retargets_and_renders_without_allocating() {
     use tutti_buffers::{ChannelLayout, Planes, PlanesMut};
@@ -152,6 +152,14 @@ fn the_phase_vocoder_retargets_and_renders_without_allocating() {
         };
         let n = allocations(|| {
             vocoder.retarget(&c);
+            if block % 24 == 0 {
+                // A seat, and its first frame taken without synthesis.
+                vocoder.seat();
+                let history = &source[..1024];
+                std::hint::black_box(
+                    vocoder.discard(Planes::new(&[history, history]).unwrap(), Samples::new(1)),
+                );
+            }
             let needed = vocoder
                 .input_needed(Samples::new(300))
                 .get()

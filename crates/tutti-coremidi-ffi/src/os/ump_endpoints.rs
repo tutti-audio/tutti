@@ -26,8 +26,8 @@ use objc2_core_midi::{
 };
 use tutti_ump::{
     DeviceIdentity, EndpointInfoNotification, FunctionBlockCount, FunctionBlockInfo,
-    FunctionBlocks, ManufacturerId, OsFunctionBlock, Protocol, SoftwareRevision, U7, UiHint,
-    UmpVersion, read_function_block, read_protocol,
+    FunctionBlocks, ManufacturerId, OsFunctionBlock, Protocol, SoftwareRevision, Sysex8StreamCount,
+    U7, UiHint, UmpVersion, read_function_block, read_protocol,
 };
 
 /// One Function Block as CoreMIDI reports it (`MIDIUMPFunctionBlock`).
@@ -239,7 +239,7 @@ fn block_info(block: &MIDIUMPFunctionBlock) -> UmpBlockInfo {
             first_group,
             groups_spanned: groups,
             midi_ci_version: 0,
-            max_sysex8_streams: sysex8_streams,
+            max_sysex8_streams: Sysex8StreamCount::new(sysex8_streams),
         }),
         name: (!name.is_empty()).then_some(name),
     }

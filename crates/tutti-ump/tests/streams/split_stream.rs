@@ -55,7 +55,7 @@ fn every_type_has_its_table_4_size() {
     let split: Vec<Ump> = split_stream(&words).collect();
     assert_eq!(split.len(), 16, "one packet per message type");
     for (mt, packet) in split.iter().enumerate() {
-        assert_eq!(packet.message_type() as usize, mt);
+        assert_eq!(usize::from(packet.message_type().get()), mt);
         assert_eq!(packet.words().len(), sizes[mt], "type {mt:#x}");
     }
 }

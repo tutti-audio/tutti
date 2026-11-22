@@ -225,17 +225,11 @@ impl Rig {
 }
 
 fn at(node: u64, port: u16) -> EventInputPort {
-    EventInputPort {
-        node: NodeKey(node),
-        port,
-    }
+    EventInputPort::new(NodeKey(node), port)
 }
 
 fn out(node: u64, port: u16) -> EventOutputPort {
-    EventOutputPort {
-        node: NodeKey(node),
-        port,
-    }
+    EventOutputPort::new(NodeKey(node), port)
 }
 
 fn burst(

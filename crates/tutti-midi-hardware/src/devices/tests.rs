@@ -592,7 +592,7 @@ fn an_event_with_no_wire_form_is_taken_and_counted() {
 /// the three an OS declares are past the spec's range, and the app reads the two.
 #[test]
 fn the_blocks_left_out_of_a_device_are_readable() {
-    use tutti_ump::{OsFunctionBlock, UiHint, read_function_block};
+    use tutti_ump::{OsFunctionBlock, Sysex8StreamCount, UiHint, read_function_block};
     let block = |id| {
         read_function_block(OsFunctionBlock {
             active: true,
@@ -603,7 +603,7 @@ fn the_blocks_left_out_of_a_device_are_readable() {
             first_group: 0,
             groups_spanned: 1,
             midi_ci_version: 0,
-            max_sysex8_streams: 0,
+            max_sysex8_streams: Sysex8StreamCount::new(0),
         })
     };
     let described = crate::capability::from_os(

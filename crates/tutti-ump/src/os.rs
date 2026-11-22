@@ -2,14 +2,16 @@
 //! the wire.
 //!
 //! An OS keeps a Function Block or an Endpoint's protocol as plain numbers, and
-//! a number the spec does not define is a reserved value, as it is on the wire.
+//! a number the spec does not define is a reserved value, as it is on the wire:
+//! the block's table fields stay numbers here because a typed value cannot hold
+//! one outside its table.
 //! The readers here put the numbers in the words the wire carries them in and
 //! read those words with the decoder, so a value outside a field's table is
 //! kept as [`Reserved`](crate::Reserved) as read and a value in range is never
 //! reserved.
 
 use crate::decode::{function_block_info, stream_config};
-use crate::{FunctionBlockInfo, Protocol, UiHint};
+use crate::{FunctionBlockInfo, Protocol, Sysex8StreamCount, UiHint};
 
 /// The numbers an operating system holds of a Function Block: the fields of a
 /// Function Block Info Notification (M2-104 §7.1.8), each as the OS keeps it.
@@ -33,7 +35,7 @@ pub struct OsFunctionBlock {
     /// The MIDI-CI message version, `0` for none.
     pub midi_ci_version: u8,
     /// The simultaneous SysEx 8 streams.
-    pub max_sysex8_streams: u8,
+    pub max_sysex8_streams: Sysex8StreamCount,
 }
 
 /// The Function Block Info the numbers of `block` read as. A number outside its
@@ -64,7 +66,7 @@ pub fn read_function_block(block: OsFunctionBlock) -> FunctionBlockInfo {
     let w1 = (u32::from(block.first_group) << 24)
         | (u32::from(block.groups_spanned) << 16)
         | (u32::from(block.midi_ci_version) << 8)
-        | u32::from(block.max_sysex8_streams);
+        | u32::from(block.max_sysex8_streams.get());
     function_block_info(w0, w1)
 }
 

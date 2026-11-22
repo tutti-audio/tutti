@@ -382,7 +382,10 @@ fn an_onset_lands_at_its_timeline_frame_through_a_pool() {
 
 /// The same through a standalone node at a stretch of 1.5: a tone that starts at source
 /// frame 4000 starts at output frame 4000 x 1.5 = 6000, where the edge is: its half-level
-/// crossing within the hop a frame steps by and the 128 frames the RMS is taken in.
+/// crossing within the edge's smear (`stretched_edge_spread`, 97 frames at 1.5 on this
+/// window) and the 128 frames the RMS is taken in: the vocoder centres its window on the
+/// stretched input, which the seat is aligned to, and a seat a window times the stretch
+/// back lands outside the bound.
 #[test]
 fn an_onset_lands_at_its_timeline_frame_through_a_node() {
     const AT: usize = 4000;
@@ -429,8 +432,14 @@ fn an_onset_lands_at_its_timeline_frame_through_a_node() {
         .expect("the tone sounds")
         * RES;
     let want = AT as f64 * 1.5;
+    let bound = tutti_fixtures::signal::stretched_edge_spread(
+        StretchFactor::new(1.5),
+        Samples::new(WINDOW),
+    )
+    .get()
+        + RES;
     assert!(
-        (first as f64 - want).abs() <= (HOP + RES) as f64,
+        (first as f64 - want).abs() <= bound as f64,
         "the tone starts at {first}, want {want}"
     );
 }
@@ -489,15 +498,18 @@ fn a_non_finite_source_sample_does_not_latch() {
     );
 }
 
-/// The vocoder's priming at a seat, `latency + window` output frames.
-fn prime() -> usize {
-    vocoder_latency().get() + WINDOW
+/// The frames of priming a seat does per frame that goes by, the sampler's.
+const PRIME_SPEED: usize = 3;
+
+/// The frames a seat is silent for: the seat owes a window of output frames, each frame
+/// that goes by adds one, and the priming runs `PRIME_SPEED` a frame.
+pub(crate) fn priming() -> usize {
+    WINDOW.div_ceil(PRIME_SPEED - 1)
 }
 
 /// A seek reseats the voice, which primes over blocks and is silent until it is done,
-/// then sounds the timeline: the seat owes `prime` frames, each frame that goes by adds
-/// one and the priming runs 2 a frame, so the voice sounds exactly `prime` (4 097)
-/// frames after the seek. The block of the seek, and everything up to then, is exactly
+/// then sounds the timeline: the seat owes a window of frames, so the voice sounds
+/// exactly `priming()` frames after the seek. The block of the seek, and everything up to then, is exactly
 /// zero; after it the voice plays the source at its place on the timeline (a vocoder at
 /// unity, which a voice turned back to 1.0 keeps, reproduces it to the transforms'
 /// rounding, four overlapped frames of it).
@@ -516,7 +528,7 @@ fn a_reseat_sounds_after_the_priming_closed_form() {
             transport.seek(Beat::new(5.0));
         }
     });
-    let silent = prime();
+    let silent = priming();
     assert!(
         out[0][seek..seek + silent].iter().all(|&x| x == 0.0),
         "silent for the {silent} frames the priming takes"
@@ -541,40 +553,54 @@ fn a_reseat_sounds_after_the_priming_closed_form() {
     }
 }
 
-/// A clip placed at beat 1 (frame 24 000) with a hit on its first frame sounds it on
-/// that frame: the voice primes ahead of its window, from a transport that rolls, so
-/// the frame lands where it is due, within the transforms' rounding (the vocoder at
-/// unity, as in the seek above), and nothing sounds before it.
+/// A seat with less than a window of history behind it seats on what exists, and silence
+/// before it: a seek to source frame 1 200 (beat 0.05), with 848 frames short of a window
+/// of source behind it, then a hit placed on the first frame the voice sounds,
+/// `1 200 + priming()`. It comes out on that frame to the kernel's bound (four overlapped
+/// frames), the frames before it are exactly zero, and the 500 after it are within the
+/// bound of zero.
 #[test]
-fn a_clip_placed_ahead_lands_its_first_frame_on_its_frame() {
-    let hit = |i: usize| if i == 0 { 1.0 } else { 0.0 };
+fn a_seat_short_of_a_window_of_history_sounds_on_time() {
+    const ORIGIN: usize = 1_200;
+    let at = ORIGIN + priming();
+    let hit = |i: usize| if i == at { 1.0 } else { 0.0 };
     let source = wave(20_000, &[&hit, &hit]);
-    let out = render_from(&source, 1.0, 1.5, 0.0, 30_000, |index, handle, _| {
+    let out = render(&source, 1.5, 0.0, 6_000, |index, handle, transport| {
         if index == 0 {
+            transport.seek(Beat::new(0.05));
             handle
                 .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
                 .expect("the command queue has room in a test");
         }
     });
+    let due = priming();
+    assert!(
+        out[0][..due].iter().all(|&x| x == 0.0),
+        "sounded before frame {due}"
+    );
     let bound = 4.0 * f32_transform_error();
-    for (n, &y) in out[0].iter().enumerate() {
-        let want = if n == 24_000 { 1.0 } else { 0.0 };
-        assert!(
-            (f64::from(y) - want).abs() < bound,
-            "frame {n}: {y}, the hit is due at 24000"
-        );
-    }
+    assert!(
+        (f64::from(out[0][due]) - 1.0).abs() < bound,
+        "the hit is {}",
+        out[0][due]
+    );
+    assert!(
+        out[0][due + 1..due + 500]
+            .iter()
+            .all(|&y| f64::from(y).abs() < bound),
+        "the frames after the hit are silent"
+    );
 }
 
 /// A voice whose window covers a stopped playhead seats there and primes at the same
 /// rate, so play from where it stands sounds at once: a hit on the first frame of a clip
 /// at frame 0 comes out on the first frame the transport rolls, after it stood for 40
-/// blocks (2 560 frames, past `prime / 2`), within the kernel's bound, and nothing sounds
+/// blocks (2 560 frames, past `priming / 2`), within the kernel's bound, and nothing sounds
 /// before it. (A vocoder at unity, as in the seek above.)
 #[test]
 fn a_clip_at_frame_zero_sounds_from_frame_zero_after_the_transport_stood() {
     const STOOD: usize = 40;
-    assert!(STOOD * BLOCK >= prime().div_ceil(2));
+    assert!(STOOD * BLOCK >= priming().div_ceil(2));
     let hit = |i: usize| if i == 0 { 1.0 } else { 0.0 };
     let source = wave(20_000, &[&hit, &hit]);
     let out = render(&source, 1.5, 0.0, 12_000, |index, handle, transport| {
@@ -632,9 +658,8 @@ fn a_locate_while_stopped_primes_the_new_place() {
     }
 }
 
-/// With no time stopped first, a clip at frame 0 is silent for exactly the documented
-/// priming (`prime`, 4 097 frames at speed 2), then plays the source on the timeline.
-/// This pins the figure in the docs.
+/// With no time stopped first, a clip at frame 0 is silent for exactly the closed form
+/// of the priming (`priming()`), then plays the source on the timeline.
 #[test]
 fn a_clip_played_from_frame_zero_without_stopping_is_silent_for_the_priming() {
     let f = 1000.0;
@@ -646,8 +671,7 @@ fn a_clip_played_from_frame_zero_without_stopping_is_silent_for_the_priming() {
                 .expect("the command queue has room in a test");
         }
     });
-    let silent = prime();
-    assert_eq!(silent, 4_097, "the figure the docs state");
+    let silent = priming();
     assert!(out[0][..silent].iter().all(|&x| x == 0.0));
     let tone = sine(f, 0.5, 0.0);
     let bound = 8.0 * f32_transform_error();
@@ -743,8 +767,8 @@ fn a_looping_stretched_clip_sounds_continuously_across_its_wraps() {
 }
 
 /// A loop set while the voice plays: set 6 000 frames before the first wrap (beat 0.75,
-/// frame 18 000), after the voice has sounded, it is primed for in time (`prime / 2` is
-/// 2 049), and every wrap from that first one on is seamless. The spare vocoder is built
+/// frame 18 000), after the voice has sounded, it is primed for in time (`priming` is
+/// 2 048), and every wrap from that first one on is seamless. The spare vocoder is built
 /// with the voice, so nothing is allocated when the loop is set.
 #[test]
 fn a_loop_set_while_playing_is_swapped_in_without_a_gap() {

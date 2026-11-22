@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
 use tutti_ump::{
     BlockDirection, DeviceIdentity, FirstGroup, FunctionBlockId, GroupSpan, ManufacturerId,
-    Midi1Port, SoftwareRevision, U7, UiHint,
+    Midi1Port, SoftwareRevision, Sysex8StreamCount, U7, UiHint,
 };
 use tutti_ump::{BlockName, EndpointName, ProductInstanceId};
 
@@ -18,7 +18,7 @@ fn block(id: u8, direction: BlockDirection) -> FunctionBlock {
     )
     .ui_hint(UiHint::Both)
     .midi1(Midi1Port::Unrestricted)
-    .midi_ci(2, 4)
+    .midi_ci(2, Sysex8StreamCount::new(4))
     .name("Keys".parse::<BlockName>().unwrap())
     .build()
     .unwrap()

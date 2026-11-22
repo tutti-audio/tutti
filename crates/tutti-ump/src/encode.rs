@@ -140,7 +140,7 @@ fn data128(g: MidiGroup, d: Data128) -> [u32; 4] {
             [
                 h | (sysex_status(p.status()) << 20)
                     | (n << 16)
-                    | (u32::from(p.stream_id()) << 8)
+                    | (u32::from(p.stream_id().get()) << 8)
                     | u32::from(b[0]),
                 word([b[1], b[2], b[3], b[4]]),
                 word([b[5], b[6], b[7], b[8]]),
@@ -148,7 +148,7 @@ fn data128(g: MidiGroup, d: Data128) -> [u32; 4] {
             ]
         }
         Data128::Sysex8Abort { stream_id } => [
-            h | (0x3 << 20) | (0xF << 16) | (u32::from(stream_id) << 8),
+            h | (0x3 << 20) | (0xF << 16) | (u32::from(stream_id.get()) << 8),
             0,
             0,
             0,
@@ -178,7 +178,7 @@ fn attribute(a: Attribute) -> (u32, u32) {
         Attribute::None => (0x00, 0),
         Attribute::Manufacturer(d) => (0x01, u32::from(d)),
         Attribute::Profile(d) => (0x02, u32::from(d)),
-        Attribute::Pitch(d) => (0x03, u32::from(d)),
+        Attribute::Pitch(d) => (0x03, u32::from(d.q7_9())),
         Attribute::Articulation(a) => (u32::from(a.kind()), u32::from(a.data())),
         Attribute::Reserved(r) => (u32::from(r.kind()), u32::from(r.data())),
     }
@@ -529,7 +529,7 @@ fn stream(s: Stream) -> [u32; 4] {
                 (u32::from(i.first_group.raw(FirstGroup::get)) << 24)
                     | (u32::from(i.groups_spanned.raw(GroupSpan::get)) << 16)
                     | (u32::from(i.midi_ci_version) << 8)
-                    | u32::from(i.max_sysex8_streams),
+                    | u32::from(i.max_sysex8_streams.get()),
                 0,
                 0,
             ]

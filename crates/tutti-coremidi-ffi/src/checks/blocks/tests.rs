@@ -1,5 +1,5 @@
 use super::*;
-use tutti_ump::{OsFunctionBlock, read_function_block};
+use tutti_ump::{OsFunctionBlock, Sysex8StreamCount, read_function_block};
 
 /// A block as an operating system would hold it; the fields a test varies are
 /// overridden.
@@ -13,7 +13,7 @@ fn os_block(id: u8) -> OsFunctionBlock {
         first_group: 0,
         groups_spanned: 1,
         midi_ci_version: 0,
-        max_sysex8_streams: 0,
+        max_sysex8_streams: Sysex8StreamCount::new(0),
     }
 }
 
@@ -44,7 +44,7 @@ fn a_blocks_fields_become_the_platform_numbers_of_the_same_spec_values() {
         midi1: 2,
         first_group: 5,
         groups_spanned: 3,
-        max_sysex8_streams: 7,
+        max_sysex8_streams: Sysex8StreamCount::new(7),
         ..os_block(0)
     };
     let blocks = platform_blocks(&[(info(block), Some("Keys"))]).unwrap();
@@ -144,7 +144,7 @@ fn a_midi_ci_version_is_refused_by_name() {
 #[test]
 fn sysex8_streams_past_seven_bits_are_refused() {
     let streams = |n| OsFunctionBlock {
-        max_sysex8_streams: n,
+        max_sysex8_streams: Sysex8StreamCount::new(n),
         ..os_block(0)
     };
     assert!(platform_blocks(&[(info(streams(127)), None)]).is_ok());
