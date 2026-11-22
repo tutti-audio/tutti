@@ -2120,8 +2120,9 @@ fn or_empty<T: Default>(planes: Result<T, BufferError>) -> T {
 pub const RIG_MAX_CHANNELS: usize = 2 * tutti_buffers::MAX_CHANNELS;
 
 /// One node alone in a graph, driven block by block **without allocating**:
-/// the harness for a node's allocation gate (`assert_no_alloc` around
-/// [`block`](Self::block)). Its inputs read [`inputs_mut`](Self::inputs_mut)
+/// the harness for a node's allocation gate (a render prepared
+/// [`Realtime`](crate::RenderMode::Realtime) runs inside
+/// [`RtScope`](tutti_rt::RtScope)). Its inputs read [`inputs_mut`](Self::inputs_mut)
 /// and its outputs land in [`output`](Self::output), channel for channel.
 ///
 /// Everything is built in [`new`](Self::new); a block after that touches

@@ -7,7 +7,7 @@
 //! Each gate runs twice: on the serial executor and on the parallel one
 //! (`src/par.rs`), whose every participant — the helper
 //! threads as well as the caller — runs its share of each block inside
-//! `assert_no_alloc` (`common::TestPool::no_alloc`), so an allocation or a
+//! `RtScope` (the graph is prepared `Realtime`), so an allocation or a
 //! free on any of them aborts. What the parallel gate cannot see: the pool's
 //! own idle loop between jobs (the test pool spins; `tutti_graph::WorkerPool`'s
 //! park and wake are covered by `tutti-engine`'s `rt_no_alloc_engine`).
@@ -38,13 +38,13 @@ use tutti_ump::{CCNumber, Message, MidiChannel, NoteNumber, U7, U14, Ump, Voice1
 use tutti_units::{At, Beat, Frame, Latency, Samples, Tail};
 
 /// Run `exec`'s blocks on a [`common::TestPool`] of `workers` participants
-/// whose every participant runs its share inside `assert_no_alloc` — the
+/// whose every participant runs its share inside `RtScope` — the
 /// parallel path, helpers included (`1`: serial, no pool). Set before the
 /// first commit is applied, so the parallel state is built with the plan,
 /// outside the gate, as applying is.
 fn use_pool(exec: &mut tutti_graph::Executor, workers: usize) {
     if workers > 1 {
-        exec.set_pool(Some(common::TestPool::no_alloc(workers)));
+        exec.set_pool(Some(common::TestPool::new(workers)));
     }
 }
 

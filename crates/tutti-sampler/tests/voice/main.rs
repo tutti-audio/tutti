@@ -16,6 +16,6 @@ mod voice_gain_survives_commit;
 mod voice_node_commands;
 mod wrap_fade_modes;
 
-/// Aborts inside an `assert_no_alloc` region (`disk_placement`, `rt_no_alloc`); inert elsewhere.
+/// Aborts inside an `RtScope`; inert elsewhere.
 #[global_allocator]
 static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;

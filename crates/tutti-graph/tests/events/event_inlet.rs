@@ -4,7 +4,7 @@
 //! `process` on blocks of chosen length and frame, which is what pins offsets,
 //! the late rule, the counts and the rate), and through an `Editor` and an
 //! `Executor` (the silent fork, and the serial-against-pooled render with the
-//! ring pre-filled, every participant inside `assert_no_alloc`).
+//! ring pre-filled, every participant inside `RtScope`).
 //!
 //! Every figure is analytic (a frame, an offset, a capacity), none read from
 //! another render.
@@ -516,7 +516,7 @@ fn graph(
     let (mut ed, mut exec) = Editor::new(common::prepare(MAX_BLOCK));
     if workers > 1 {
         exec.set_pool(Some(if no_alloc {
-            common::TestPool::no_alloc(workers)
+            common::TestPool::new(workers)
         } else {
             common::test_pool(workers)
         }));
@@ -652,7 +652,7 @@ fn script(k: u32) -> Vec<(Stamp, Ump)> {
 /// A pooled render with the rings pre-filled equals the serial one, bit for
 /// bit in its audio, with inlet 1's tap listing every pushed event at its
 /// frame (the serial run is also checked against the script); every
-/// participant runs inside `assert_no_alloc`.
+/// participant runs inside `RtScope`.
 #[test]
 fn the_parallel_render_equals_the_serial_one_and_allocates_nothing() {
     let run = |workers: usize, gated: bool| {
