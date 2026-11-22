@@ -2236,7 +2236,7 @@ fn a_device_that_receives_jr_has_every_message_prefixed_by_a_timestamp() {
     update_at(&mut s, start + Duration::from_millis(21));
     let sent = fake.take_sent(raw);
     let stamp = |u: &Ump| match u.decode() {
-        Ok(Message::Utility(Utility::JrTimestamp(t))) => Some(t),
+        Ok(Message::Utility(Utility::JrTimestamp(t))) => Some(t.get()),
         _ => None,
     };
     let messages: Vec<usize> = (0..sent.len())

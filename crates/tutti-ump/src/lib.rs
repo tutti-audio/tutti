@@ -101,6 +101,7 @@ mod flex_write;
 mod held_controllers;
 mod held_keys;
 mod iso8601;
+mod jr_ticks;
 mod manufacturer;
 mod message;
 mod messages;
@@ -153,6 +154,7 @@ pub use flex_write::{
 };
 pub use held_controllers::HeldControllers;
 pub use held_keys::{GroupChannelIndex, GroupChannelIndexOutOfRange, Held, KeyBitset};
+pub use jr_ticks::JrTicks;
 pub use manufacturer::{ManufacturerBytesError, ManufacturerId, NotManufacturerId};
 pub use message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockDirection,

@@ -576,7 +576,9 @@ fn an_event_with_no_wire_form_is_taken_and_counted() {
     let mut out = devices
         .open_output(crate::testing::started(), &id_of(&devices, "Synth"))
         .unwrap();
-    let clock = tutti_ump::Ump::from(tutti_ump::Message::Utility(tutti_ump::Utility::JrClock(1)));
+    let clock = tutti_ump::Ump::from(tutti_ump::Message::Utility(tutti_ump::Utility::JrClock(
+        tutti_ump::JrTicks::new(1),
+    )));
     let note = tutti_fixtures::midi::note_on(tutti_ump::MidiChannel::FIRST, 60, 0xFFFF);
     let at = |ump| (tutti_graph::Offset::ZERO, ump);
     let taken = out.queue(&[at(clock), at(note)]);

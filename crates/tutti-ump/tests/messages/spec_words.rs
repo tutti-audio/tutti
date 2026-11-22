@@ -10,7 +10,7 @@ use tutti_ump::{
     BlockFilter, BlockSelect, CCNumber, ChordBass, ChordName, ChordPitch, ChordType, CiVersion,
     Data128, DeltaTicks, DeviceIdentity, DiscoveryFilter, EndpointInfoNotification, FirstGroup,
     Flex, FlexAddress, FlexTempo, FlexTextKind, FlexTimeSignature, Form, FunctionBlockId,
-    FunctionBlockInfo, GroupSpan, KeySignature, Letter, MdsChunk, MdsChunkSize, MdsChunks,
+    FunctionBlockInfo, GroupSpan, JrTicks, KeySignature, Letter, MdsChunk, MdsChunkSize, MdsChunks,
     MdsIdentity, Message, Metronome, Midi1Port, MidiChannel, MidiGroup, MixedDataHeader,
     NoteNumber, NoteVelocity, PerNoteManagement, Pitch, Protocol, RegisteredPerNoteController,
     SharpsFlats, SoftwareRevision, Stream, StreamConfig, Sysex7Packet, Sysex8StreamCount,
@@ -53,12 +53,12 @@ fn utility() {
     // JR Clock: status 1, time in bits 15-0.
     pin(
         [0x0010_1234, 0, 0, 0],
-        Message::Utility(Utility::JrClock(0x1234)),
+        Message::Utility(Utility::JrClock(JrTicks::new(0x1234))),
     );
     // JR Timestamp: status 2.
     pin(
         [0x0020_ABCD, 0, 0, 0],
-        Message::Utility(Utility::JrTimestamp(0xABCD)),
+        Message::Utility(Utility::JrTimestamp(JrTicks::new(0xABCD))),
     );
     // Delta Clockstamp Ticks Per Quarter Note: status 3, 480 = 0x01E0.
     pin(

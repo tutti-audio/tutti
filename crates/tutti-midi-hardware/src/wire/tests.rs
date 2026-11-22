@@ -10,8 +10,8 @@ use tutti_midi_runtime::SendAt;
 use tutti_ump::Bank;
 use tutti_ump::ControlValue;
 use tutti_ump::{
-    Address, MidiChannel, MidiGroup, NoteNumber, Sysex7Packet, SysexStatus, System, U7, Voice1,
-    Voice2,
+    Address, JrTicks, MidiChannel, MidiGroup, NoteNumber, Sysex7Packet, SysexStatus, System, U7,
+    Voice1, Voice2,
 };
 
 const MIDI1: StreamConfig = StreamConfig {
@@ -211,8 +211,8 @@ fn system_sysex7_and_stream_messages_pass_in_either_protocol() {
 #[test]
 fn jr_goes_only_where_the_configuration_enables_it() {
     let jr = [
-        Ump::from(Message::Utility(Utility::JrClock(100))),
-        Ump::from(Message::Utility(Utility::JrTimestamp(200))),
+        Ump::from(Message::Utility(Utility::JrClock(JrTicks::new(100)))),
+        Ump::from(Message::Utility(Utility::JrTimestamp(JrTicks::new(200)))),
     ];
     let note = midi::note_on(MidiChannel::FIRST, 60, 0xFFFF);
     for protocol in [Protocol::Midi1, Protocol::Midi2] {
@@ -267,7 +267,7 @@ fn a_clips_utility_messages_are_never_sent() {
 #[test]
 fn the_accepted_count_is_in_the_callers_events() {
     let mut wire = Wire::new(MIDI1);
-    let jr = Ump::from(Message::Utility(Utility::JrClock(1)));
+    let jr = Ump::from(Message::Utility(Utility::JrClock(JrTicks::new(1))));
     let note = midi::note_on(MidiChannel::FIRST, 60, 0xFFFF);
     let events: Vec<UmpAt> = [jr, rpn(0, 0, 0), note].into_iter().map(at).collect();
     let events = Outgoing::now_batch(&events);
@@ -387,7 +387,9 @@ fn the_events_with_no_wire_form_are_counted_in_the_events_taken() {
     let mut wire = Wire::new(MIDI1);
     let g = Address::new(MidiGroup::FIRST, MidiChannel::FIRST);
     let events = Outgoing::now_batch(&[
-        at(Ump::from(Message::Utility(Utility::JrClock(1)))),
+        at(Ump::from(Message::Utility(Utility::JrClock(JrTicks::new(
+            1,
+        ))))),
         at(midi::note_on(MidiChannel::FIRST, 60, 0xFFFF)),
         at(midi::per_note_pitch_bend(g, 60, 0x9000_0000)),
     ]);

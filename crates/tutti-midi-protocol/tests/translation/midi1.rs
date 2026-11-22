@@ -6,10 +6,11 @@
 use tutti_fixtures::midi;
 use tutti_midi_protocol::midi1;
 use tutti_ump::{
-    Address, Attribute, Bank, CCNumber, DeltaTicks, ManufacturerId, MdsChunkUmps, MdsIdentity,
-    Message, MidiChannel, MidiGroup, MixedDataSet, NoMidi1Form, NoteNumber, NoteVelocity,
-    PerNoteManagement, Pitch, RegisteredPerNoteController, Sysex7Packet, Sysex8StreamIds,
-    SysexStatus, System, TicksPerQuarterNote, U4, U7, U14, Utility, Voice1, Voice2,
+    Address, Attribute, Bank, CCNumber, DeltaTicks, JrTicks, ManufacturerId, MdsChunkUmps,
+    MdsIdentity, Message, MidiChannel, MidiGroup, MixedDataSet, NoMidi1Form, NoteNumber,
+    NoteVelocity, PerNoteManagement, Pitch, RegisteredPerNoteController, Sysex7Packet,
+    Sysex8StreamIds, SysexStatus, System, TicksPerQuarterNote, U4, U7, U14, Utility, Voice1,
+    Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
 
@@ -350,8 +351,8 @@ fn sysex8_mixed_data_and_utility_have_no_midi1_bytes() {
     assert!(mixed.len() > 2, "a set of several chunks");
     let utility = [
         Utility::Noop,
-        Utility::JrClock(0x1234),
-        Utility::JrTimestamp(0x0100),
+        Utility::JrClock(JrTicks::new(0x1234)),
+        Utility::JrTimestamp(JrTicks::new(0x0100)),
         Utility::TicksPerQuarterNote(TicksPerQuarterNote::of(96)),
         Utility::DeltaClockstamp(DeltaTicks::masked(5)),
     ]

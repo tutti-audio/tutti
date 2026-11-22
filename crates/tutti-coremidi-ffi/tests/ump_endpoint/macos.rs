@@ -10,7 +10,7 @@ use tutti_coremidi_ffi::{
 use tutti_platform::{Instant, MainThreadMarker};
 use tutti_ump::{
     BlockDirection, CiVersion, DeviceIdentity, Field, FirstGroup, FunctionBlockCount,
-    FunctionBlockInfo, FunctionBlocks, GroupSpan, ManufacturerId, Message, Midi1Port,
+    FunctionBlockInfo, FunctionBlocks, GroupSpan, JrTicks, ManufacturerId, Message, Midi1Port,
     OsFunctionBlock, ProductInstanceId, Protocol, SoftwareRevision, Sysex8StreamCount, U7, UiHint,
     Ump, Utility, read_function_block,
 };
@@ -111,7 +111,7 @@ fn identity() -> DeviceIdentity {
 }
 
 fn jr() -> Ump {
-    Ump::from(Message::Utility(Utility::JrTimestamp(0x1234)))
+    Ump::from(Message::Utility(Utility::JrTimestamp(JrTicks::new(0x1234))))
 }
 
 /// Creates the endpoint of the cases with its Product Instance Id: `Some` on

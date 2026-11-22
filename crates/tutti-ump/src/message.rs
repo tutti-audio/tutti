@@ -9,7 +9,7 @@ use crate::field::{
     Pitch, SharpsFlats, TicksPerQuarterNote, U4, U7, U14,
 };
 use crate::{
-    ArticulationAttribute, BendValue, CCNumber, CiVersion, ControlValue, Field, FlexTempo,
+    ArticulationAttribute, BendValue, CCNumber, CiVersion, ControlValue, Field, FlexTempo, JrTicks,
     ManufacturerId, MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, MidiChannel, MidiGroup,
     NoteVelocity, Reserved, ReservedAccents, ReservedAttribute, Rpn, Sysex8StreamCount,
     Sysex8StreamId, Ump,
@@ -73,10 +73,10 @@ pub struct Address {
 pub enum Utility {
     /// No operation.
     Noop,
-    /// The sender's clock, in ticks of 1/31250 s (wraps).
-    JrClock(u16),
-    /// The time of the following messages, in ticks of 1/31250 s.
-    JrTimestamp(u16),
+    /// The sender's clock (wraps).
+    JrClock(JrTicks),
+    /// The time of the following messages.
+    JrTimestamp(JrTicks),
     /// Delta Clockstamp ticks per quarter note.
     TicksPerQuarterNote(TicksPerQuarterNote),
     /// A Ticks Per Quarter Note of the reserved `0`, as read from the wire.

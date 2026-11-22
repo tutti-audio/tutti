@@ -16,7 +16,6 @@
 //! its high bit set where the figure draws that bit as `0` (System messages,
 //! SysEx 7 data), which is part of the byte being 7-bit, not a reserved bit.
 
-use crate::FlexTempo;
 use crate::field::{
     ChordType, DeltaTicks, FunctionBlockCount, FunctionBlockId, NoteNumber, Pitch, SharpsFlats,
     TicksPerQuarterNote, U4, U7, U14,
@@ -36,6 +35,7 @@ use crate::{
     RegisteredPerNoteController, Reserved, ReservedAttribute, Sysex8StreamCount, Sysex8StreamId,
     Ump,
 };
+use crate::{FlexTempo, JrTicks};
 
 impl Ump {
     /// Decodes this packet into the [`Message`] it holds.
@@ -129,8 +129,8 @@ fn utility(w0: u32) -> Option<Utility> {
     let low16 = w0 as u16;
     match (w0 >> 20) & 0xf {
         0x0 => Some(Utility::Noop),
-        0x1 => Some(Utility::JrClock(low16)),
-        0x2 => Some(Utility::JrTimestamp(low16)),
+        0x1 => Some(Utility::JrClock(JrTicks::new(low16))),
+        0x2 => Some(Utility::JrTimestamp(JrTicks::new(low16))),
         0x3 => Some(match TicksPerQuarterNote::new(low16) {
             Some(ticks) => Utility::TicksPerQuarterNote(ticks),
             None => Utility::ReservedTicksPerQuarterNote(Reserved::wire(0)),

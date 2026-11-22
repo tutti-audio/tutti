@@ -57,8 +57,8 @@ fn word(b: [u8; 4]) -> u32 {
 fn utility(u: Utility) -> u32 {
     match u {
         Utility::Noop => 0,
-        Utility::JrClock(t) => (0x1 << 20) | u32::from(t),
-        Utility::JrTimestamp(t) => (0x2 << 20) | u32::from(t),
+        Utility::JrClock(t) => (0x1 << 20) | u32::from(t.get()),
+        Utility::JrTimestamp(t) => (0x2 << 20) | u32::from(t.get()),
         Utility::TicksPerQuarterNote(n) => (0x3 << 20) | u32::from(n.get()),
         Utility::ReservedTicksPerQuarterNote(r) => (0x3 << 20) | u32::from(r.get()),
         Utility::DeltaClockstamp(t) => (0x4 << 20) | t.get(),

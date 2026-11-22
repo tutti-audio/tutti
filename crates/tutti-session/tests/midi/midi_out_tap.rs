@@ -388,6 +388,6 @@ fn a_stamped_sink_stamps_at_the_new_rate_after_a_re_rate() {
         }
     }
     assert_eq!(notes.len(), 2, "{notes:?}");
-    let ticks = notes[1].wrapping_sub(notes[0]);
+    let ticks = notes[1].since(notes[0]);
     assert!((15_624..=15_626).contains(&ticks), "{ticks} ticks apart");
 }

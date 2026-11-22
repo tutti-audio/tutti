@@ -4,8 +4,8 @@
 //! against the writer.
 
 use tutti_ump::{
-    Flex, FlexAddress, FlexTempo, FlexTextAssembler, FlexTextKind, FlexTextStep, Form, Message,
-    MidiGroup, PlainTextKind, System, Text, Ump, Utility, flex_text_packets,
+    Flex, FlexAddress, FlexTempo, FlexTextAssembler, FlexTextKind, FlexTextStep, Form, JrTicks,
+    Message, MidiGroup, PlainTextKind, System, Text, Ump, Utility, flex_text_packets,
 };
 
 const G0: MidiGroup = MidiGroup::of(0);
@@ -186,7 +186,7 @@ fn real_time_and_jr_clock_do_not_interrupt() {
     let mut a = assembler(1);
     let start = packet(G0, LYRICS, Form::Start, b"abcdefghijkl");
     let clock = Ump::from(Message::System(G0, System::TimingClock));
-    let jr = Ump::from(Message::Utility(Utility::JrClock(7)));
+    let jr = Ump::from(Message::Utility(Utility::JrClock(JrTicks::new(7))));
     let end = packet(G0, LYRICS, Form::End, b"mn");
     assert_eq!(feed(&mut a, [start, clock, jr, end]), ["abcdefghijklmn"]);
     assert_eq!(a.dropped(), 0);
