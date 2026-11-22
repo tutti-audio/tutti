@@ -105,7 +105,7 @@ impl std::fmt::Debug for ClaimTable {
 }
 
 fn claim_shared(word: &ClaimWord, index: usize) -> Result<(), ClaimConflict> {
-    if word.try_shared() {
+    if word.claim_shared() {
         Ok(())
     } else {
         Err(ClaimConflict { index })
@@ -113,7 +113,7 @@ fn claim_shared(word: &ClaimWord, index: usize) -> Result<(), ClaimConflict> {
 }
 
 fn claim_exclusive(word: &ClaimWord, index: usize) -> Result<(), ClaimConflict> {
-    if word.try_exclusive() {
+    if word.claim_exclusive() {
         Ok(())
     } else {
         Err(ClaimConflict { index })
@@ -122,7 +122,7 @@ fn claim_exclusive(word: &ClaimWord, index: usize) -> Result<(), ClaimConflict> 
 
 /// A sole shared claim, made exclusive.
 fn upgrade(word: &ClaimWord, index: usize) -> Result<(), ClaimConflict> {
-    if word.try_upgrade() {
+    if word.upgrade() {
         Ok(())
     } else {
         Err(ClaimConflict { index })

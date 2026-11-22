@@ -106,7 +106,7 @@ impl<T> AudioThreadCell<T> {
     pub fn try_borrow_mut(&self) -> Option<BorrowGuard<'_, T>> {
         // Not `then_some`: that builds the guard eagerly, and dropping the
         // unused one on the `None` path would release a borrow never taken.
-        if self.state.try_exclusive() {
+        if self.state.claim_exclusive() {
             Some(BorrowGuard {
                 cell: self,
                 _lent: PhantomData,
@@ -146,7 +146,7 @@ impl<T> AudioThreadCell<T> {
     where
         T: Sync,
     {
-        if self.state.try_shared() {
+        if self.state.claim_shared() {
             Some(BorrowRef {
                 cell: self,
                 _lent: PhantomData,
@@ -195,7 +195,7 @@ impl<T> Deref for BorrowGuard<'_, T> {
     type Target = T;
     #[inline]
     fn deref(&self) -> &T {
-        // SAFETY: this guard exists only because `try_exclusive` took the
+        // SAFETY: this guard exists only because `claim_exclusive` took the
         // word with nothing borrowed, and no other
         // borrow is granted until its drop clears it, so nothing else
         // references the value.
@@ -232,7 +232,7 @@ impl<T> Deref for BorrowRef<'_, T> {
     type Target = T;
     #[inline]
     fn deref(&self) -> &T {
-        // SAFETY: this guard exists only because `try_shared` counted it
+        // SAFETY: this guard exists only because `claim_shared` counted it
         // with no exclusive claim held, and no mutable borrow is granted while
         // the count is nonzero, so only `&T`s reference the value.
         unsafe { &*self.cell.inner.get() }
