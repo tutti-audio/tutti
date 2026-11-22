@@ -2222,6 +2222,7 @@ fn send_builds_the_stretch_filter_not_the_drain() {
             free: Default::default(),
             live: Default::default(),
             stamps: Default::default(),
+            loops: Default::default(),
         };
         probe
             .send(VoiceCommand::AddVoice {

@@ -377,6 +377,14 @@ impl From<Pitch> for u32 {
     }
 }
 
+/// The pitch of a whole note number: `note << 25` in Q7.25.
+impl From<NoteNumber> for Pitch {
+    #[inline]
+    fn from(note: NoteNumber) -> Self {
+        Self(u32::from(note.get()) << 25)
+    }
+}
+
 impl Pitch {
     /// The pitch of a Q7.9 word.
     #[inline]
@@ -480,6 +488,10 @@ mod tests {
         assert_eq!(Pitch::from_q7_25(69 << 25).note_number(), 69.0);
         assert_eq!(Pitch::from_q7_25(1 << 24).note_number(), 0.5);
         assert_eq!(Pitch::from_q7_25(127 << 25).note_number(), 127.0);
+        assert_eq!(
+            Pitch::from(crate::NoteNumber::of(127)),
+            Pitch::from_q7_25(127 << 25)
+        );
     }
 
     #[test]

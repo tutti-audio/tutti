@@ -42,7 +42,6 @@ use tutti_units::{Normalized, Semitones, Velocity};
 
 use crate::types::RtNoteExpressions;
 use tutti_midi_protocol::{Midi1Translator, Midi2Translator, PitchBendSensitivity};
-use tutti_ump::ControlValue;
 use tutti_ump::{
     Address, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity, Rpn,
     SysexAssembler, SysexStep, U7, Ump, Voice1, Voice2, parse_exact,
@@ -764,23 +763,16 @@ fn control_expression(
             NoteExpressionType::Tuning,
             pitch.note_number() - f64::from(note.get()),
         )),
-        NoteControl::Pressure(value) => Some((
-            NoteExpressionType::Pressure,
-            ControlValue::new(value).normalized().get(),
-        )),
+        NoteControl::Pressure(value) => {
+            Some((NoteExpressionType::Pressure, value.normalized().get()))
+        }
         NoteControl::Registered(controller, value) => {
             let ty = expression_of_per_note_controller(controller.number())?;
-            Some((
-                ty,
-                expression_value_from_unit(ty, ControlValue::new(value).normalized()),
-            ))
+            Some((ty, expression_value_from_unit(ty, value.normalized())))
         }
         NoteControl::Assignable(index, value) => {
             let ty = expression_of_per_note_controller(index)?;
-            Some((
-                ty,
-                expression_value_from_unit(ty, ControlValue::new(value).normalized()),
-            ))
+            Some((ty, expression_value_from_unit(ty, value.normalized())))
         }
     }
 }

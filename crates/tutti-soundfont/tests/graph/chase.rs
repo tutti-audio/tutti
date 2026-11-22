@@ -18,8 +18,8 @@ use tutti_polysynth::{PolySynth, SynthConfig};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_ump::{
-    Address, Bank, BendValue, CCNumber, Message, MidiChannel, MidiGroup, NoteVelocity, U7, Ump,
-    Voice2,
+    Address, Bank, BendValue, CCNumber, ControlValue, Message, MidiChannel, MidiGroup,
+    NoteVelocity, U7, Ump, Voice2,
 };
 use tutti_units::{SampleRate, Samples};
 
@@ -42,7 +42,7 @@ fn cc(channel: u8, controller: u8, value: u8) -> Ump {
     midi::cc(
         Address::new(G, MidiChannel::of(channel)),
         CCNumber::of(controller),
-        u32::from(value) << 25,
+        ControlValue::from(U7::of(value)).get(),
     )
 }
 

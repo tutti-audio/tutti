@@ -382,7 +382,10 @@ fn an_onset_lands_at_its_timeline_frame_through_a_pool() {
 
 /// The same through a standalone node at a stretch of 1.5: a tone that starts at source
 /// frame 4000 starts at output frame 4000 x 1.5 = 6000, where the edge is: its half-level
-/// crossing within the hop a frame steps by and the 128 frames the RMS is taken in.
+/// crossing within the edge's smear (`stretched_edge_spread`, 97 frames at 1.5 on this
+/// window) and the 128 frames the RMS is taken in: the vocoder centres its window on the
+/// stretched input, which the seat is aligned to, and a seat a window times the stretch
+/// back lands outside the bound.
 #[test]
 fn an_onset_lands_at_its_timeline_frame_through_a_node() {
     const AT: usize = 4000;
@@ -429,8 +432,14 @@ fn an_onset_lands_at_its_timeline_frame_through_a_node() {
         .expect("the tone sounds")
         * RES;
     let want = AT as f64 * 1.5;
+    let bound = tutti_fixtures::signal::stretched_edge_spread(
+        StretchFactor::new(1.5),
+        Samples::new(WINDOW),
+    )
+    .get()
+        + RES;
     assert!(
-        (first as f64 - want).abs() <= (HOP + RES) as f64,
+        (first as f64 - want).abs() <= bound as f64,
         "the tone starts at {first}, want {want}"
     );
 }
@@ -489,15 +498,18 @@ fn a_non_finite_source_sample_does_not_latch() {
     );
 }
 
-/// The vocoder's priming at a seat, `latency + window` output frames.
-fn prime() -> usize {
-    vocoder_latency().get() + WINDOW
+/// The frames of priming a seat does per frame that goes by, the sampler's.
+const PRIME_SPEED: usize = 3;
+
+/// The frames a seat is silent for: the seat owes a window of output frames, each frame
+/// that goes by adds one, and the priming runs `PRIME_SPEED` a frame.
+pub(crate) fn priming() -> usize {
+    WINDOW.div_ceil(PRIME_SPEED - 1)
 }
 
 /// A seek reseats the voice, which primes over blocks and is silent until it is done,
-/// then sounds the timeline: the seat owes `prime` frames, each frame that goes by adds
-/// one and the priming runs 2 a frame, so the voice sounds exactly `prime` (4 097)
-/// frames after the seek. The block of the seek, and everything up to then, is exactly
+/// then sounds the timeline: the seat owes a window of frames, so the voice sounds
+/// exactly `priming()` frames after the seek. The block of the seek, and everything up to then, is exactly
 /// zero; after it the voice plays the source at its place on the timeline (a vocoder at
 /// unity, which a voice turned back to 1.0 keeps, reproduces it to the transforms'
 /// rounding, four overlapped frames of it).
@@ -516,7 +528,7 @@ fn a_reseat_sounds_after_the_priming_closed_form() {
             transport.seek(Beat::new(5.0));
         }
     });
-    let silent = prime();
+    let silent = priming();
     assert!(
         out[0][seek..seek + silent].iter().all(|&x| x == 0.0),
         "silent for the {silent} frames the priming takes"
@@ -541,40 +553,54 @@ fn a_reseat_sounds_after_the_priming_closed_form() {
     }
 }
 
-/// A clip placed at beat 1 (frame 24 000) with a hit on its first frame sounds it on
-/// that frame: the voice primes ahead of its window, from a transport that rolls, so
-/// the frame lands where it is due, within the transforms' rounding (the vocoder at
-/// unity, as in the seek above), and nothing sounds before it.
+/// A seat with less than a window of history behind it seats on what exists, and silence
+/// before it: a seek to source frame 1 200 (beat 0.05), with 848 frames short of a window
+/// of source behind it, then a hit placed on the first frame the voice sounds,
+/// `1 200 + priming()`. It comes out on that frame to the kernel's bound (four overlapped
+/// frames), the frames before it are exactly zero, and the 500 after it are within the
+/// bound of zero.
 #[test]
-fn a_clip_placed_ahead_lands_its_first_frame_on_its_frame() {
-    let hit = |i: usize| if i == 0 { 1.0 } else { 0.0 };
+fn a_seat_short_of_a_window_of_history_sounds_on_time() {
+    const ORIGIN: usize = 1_200;
+    let at = ORIGIN + priming();
+    let hit = |i: usize| if i == at { 1.0 } else { 0.0 };
     let source = wave(20_000, &[&hit, &hit]);
-    let out = render_from(&source, 1.0, 1.5, 0.0, 30_000, |index, handle, _| {
+    let out = render(&source, 1.5, 0.0, 6_000, |index, handle, transport| {
         if index == 0 {
+            transport.seek(Beat::new(0.05));
             handle
                 .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
                 .expect("the command queue has room in a test");
         }
     });
+    let due = priming();
+    assert!(
+        out[0][..due].iter().all(|&x| x == 0.0),
+        "sounded before frame {due}"
+    );
     let bound = 4.0 * f32_transform_error();
-    for (n, &y) in out[0].iter().enumerate() {
-        let want = if n == 24_000 { 1.0 } else { 0.0 };
-        assert!(
-            (f64::from(y) - want).abs() < bound,
-            "frame {n}: {y}, the hit is due at 24000"
-        );
-    }
+    assert!(
+        (f64::from(out[0][due]) - 1.0).abs() < bound,
+        "the hit is {}",
+        out[0][due]
+    );
+    assert!(
+        out[0][due + 1..due + 500]
+            .iter()
+            .all(|&y| f64::from(y).abs() < bound),
+        "the frames after the hit are silent"
+    );
 }
 
 /// A voice whose window covers a stopped playhead seats there and primes at the same
 /// rate, so play from where it stands sounds at once: a hit on the first frame of a clip
 /// at frame 0 comes out on the first frame the transport rolls, after it stood for 40
-/// blocks (2 560 frames, past `prime / 2`), within the kernel's bound, and nothing sounds
+/// blocks (2 560 frames, past `priming / 2`), within the kernel's bound, and nothing sounds
 /// before it. (A vocoder at unity, as in the seek above.)
 #[test]
 fn a_clip_at_frame_zero_sounds_from_frame_zero_after_the_transport_stood() {
     const STOOD: usize = 40;
-    assert!(STOOD * BLOCK >= prime().div_ceil(2));
+    assert!(STOOD * BLOCK >= priming().div_ceil(2));
     let hit = |i: usize| if i == 0 { 1.0 } else { 0.0 };
     let source = wave(20_000, &[&hit, &hit]);
     let out = render(&source, 1.5, 0.0, 12_000, |index, handle, transport| {
@@ -632,9 +658,8 @@ fn a_locate_while_stopped_primes_the_new_place() {
     }
 }
 
-/// With no time stopped first, a clip at frame 0 is silent for exactly the documented
-/// priming (`prime`, 4 097 frames at speed 2), then plays the source on the timeline.
-/// This pins the figure in the docs.
+/// With no time stopped first, a clip at frame 0 is silent for exactly the closed form
+/// of the priming (`priming()`), then plays the source on the timeline.
 #[test]
 fn a_clip_played_from_frame_zero_without_stopping_is_silent_for_the_priming() {
     let f = 1000.0;
@@ -646,8 +671,7 @@ fn a_clip_played_from_frame_zero_without_stopping_is_silent_for_the_priming() {
                 .expect("the command queue has room in a test");
         }
     });
-    let silent = prime();
-    assert_eq!(silent, 4_097, "the figure the docs state");
+    let silent = priming();
     assert!(out[0][..silent].iter().all(|&x| x == 0.0));
     let tone = sine(f, 0.5, 0.0);
     let bound = 8.0 * f32_transform_error();
@@ -664,9 +688,11 @@ fn a_clip_played_from_frame_zero_without_stopping_is_silent_for_the_priming() {
 /// `wave` placed at beat 0 with a vocoder at unity (a voice turned back to 1.0 keeps it),
 /// rendered `frames` frames under a transport that rolls from beat 0 at 120 BPM and wraps
 /// the loop `region_at(block)` names, `None` for no loop; as the host's clock moves it.
+/// `spares`: the handle is told the loop (`false`: it never is, so the voice has no spare).
 fn render_looped(
     wave: &Arc<Wave>,
     frames: usize,
+    spares: bool,
     region_at: impl Fn(usize) -> Option<(f64, f64)>,
 ) -> Vec<Vec<f32>> {
     let (pool, handle) = VoicePool::with_channels(wave.layout())
@@ -699,6 +725,10 @@ fn render_looped(
             changes: TransportChanges::NONE,
             play: PlayClock::ZERO,
         };
+        // The control side knows the loop before the block that wraps under it.
+        if spares {
+            handle.follow_loop(region);
+        }
         let block = contract::drive_input(&mut pool, &env, Planes::default(), &[], &[]).audio;
         for (channel, plane) in out.iter_mut().zip(&block) {
             channel.extend_from_slice(plane);
@@ -732,20 +762,97 @@ fn assert_sine_blocks(x: &[f32], from: usize) {
 #[test]
 fn a_looping_stretched_clip_sounds_continuously_across_its_wraps() {
     let source = wave(120_000, &[&sine(1500.0, 0.5, 0.0), &sine(1500.0, 0.5, 0.0)]);
-    let out = render_looped(&source, 60_000, |_| Some((0.25, 0.75)));
+    let out = render_looped(&source, 60_000, true, |_| Some((0.25, 0.75)));
     assert_sine_blocks(&out[0], 6_016);
 }
 
 /// A loop set while the voice plays: set 6 000 frames before the first wrap (beat 0.75,
-/// frame 18 000), after the voice has sounded, it is primed for in time (`prime / 2` is
-/// 2 049), and every wrap from that first one on is seamless. The spare vocoder is built
+/// frame 18 000), after the voice has sounded, it is primed for in time (`priming` is
+/// 2 048), and every wrap from that first one on is seamless. The spare vocoder is built
 /// with the voice, so nothing is allocated when the loop is set.
 #[test]
 fn a_loop_set_while_playing_is_swapped_in_without_a_gap() {
     let source = wave(120_000, &[&sine(1500.0, 0.5, 0.0), &sine(1500.0, 0.5, 0.0)]);
     // Block 187 starts at frame 11 968: the loop is set from there.
-    let out = render_looped(&source, 60_000, |index| {
+    let out = render_looped(&source, 60_000, true, |index| {
         (index >= 187).then_some((0.25, 0.75))
     });
     assert_sine_blocks(&out[0], 6_016);
+}
+
+/// A voice with no spare that meets a wrap flushes as a seek does (the documented fallback):
+/// the handle is never told the loop, so the first wrap (frame 18 000) leaves the voice
+/// silent while it primes, and it sounds the loop again after that, until the next wrap
+/// (30 000).
+#[test]
+fn a_voice_without_a_spare_flushes_at_a_wrap() {
+    let source = wave(120_000, &[&sine(1500.0, 0.5, 0.0), &sine(1500.0, 0.5, 0.0)]);
+    let out = render_looped(&source, 40_000, false, |_| Some((0.25, 0.75)));
+    assert_sine_blocks(&out[0][..17_900], 6_016);
+    assert!(
+        out[0][18_000..18_000 + HOP].iter().all(|&x| x == 0.0),
+        "the voice is silent after the wrap"
+    );
+    assert_sine_blocks(&out[0][..29_000], 18_000 + 4 * WINDOW);
+}
+
+/// Which voices carry a spare vocoder follows the loop and the windows: a stretched voice
+/// whose window covers the loop's start (beat 0.25) carries one, a stretched voice placed
+/// after the loop and a voice that does not stretch do not; the loop moved off and on
+/// retires the spare (the retirement ring hands it back) and sends a new one; a window
+/// moved under the loop gives its voice one, and one moved off takes it away.
+#[test]
+fn only_a_stretched_voice_under_the_loop_carries_a_spare() {
+    let wave = wave(48_000, &[&sine(1500.0, 0.5, 0.0), &sine(1500.0, 0.5, 0.0)]);
+    let (pool, handle) = VoicePool::with_channels(wave.layout())
+        .expect("a width the sampler reads")
+        .with_handle();
+    let mut pool = contract::prepared(pool, SampleRate::of(SR), BLOCK);
+    let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
+    let stretch = |stretch: f64| Playback {
+        stretch: StretchFactor::new(stretch),
+        ..Default::default()
+    };
+    for (id, start, stretching) in [(1, 0.0, 1.5), (2, 8.0, 1.5), (3, 0.0, 1.0)] {
+        handle
+            .add(SlotId(id), source_from(&wave, start), stretch(stretching))
+            .expect("the command queue has room in a test");
+    }
+    let mut spares = || {
+        // The drain applies the commands at the top of the block.
+        contract::drive_input(
+            &mut pool,
+            &transport.env(BLOCK, SampleRate::of(SR)),
+            Planes::default(),
+            &[],
+            &[],
+        );
+        tutti_sampler::testing::spare_count(&pool)
+    };
+    let looped = || Some(LoopRange::new(Beat::new(0.25), Beat::new(0.75)).expect("a loop"));
+    assert_eq!(spares(), 0, "no loop: no spare");
+    handle.follow_loop(looped());
+    assert_eq!(spares(), 1, "only voice 1 is stretched under the loop");
+    handle.follow_loop(None);
+    assert_eq!(spares(), 0, "the loop off retires the spare");
+    assert_eq!(
+        handle.collect_retired(),
+        1,
+        "and the retirement ring hands it back"
+    );
+    handle.follow_loop(looped());
+    assert_eq!(spares(), 1, "the loop on sends a new one");
+    let at = |start: f64| VoiceWindow::from(Beat::new(start));
+    handle.set_window(SlotId(2), at(0.0)).expect("room");
+    assert_eq!(spares(), 2, "a window moved under the loop gets one");
+    handle.set_window(SlotId(1), at(8.0)).expect("room");
+    assert_eq!(spares(), 1, "a window moved off the loop loses it");
+    handle
+        .set_stretch(SlotId(3), StretchFactor::new(1.5), Cents::new(0.0))
+        .expect("room");
+    assert_eq!(
+        spares(),
+        2,
+        "a voice turned to stretch under the loop gets one"
+    );
 }
