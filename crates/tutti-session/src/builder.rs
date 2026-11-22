@@ -252,13 +252,8 @@ pub(crate) struct Parts<F: Float> {
     #[cfg(feature = "midi")]
     pub(crate) midi: Option<crate::MidiNodes>,
     #[cfg(feature = "midi-hardware")]
-    /// The OS MIDI layer, with the bell its ports ring and the listener the
-    /// session's MIDI-CI task waits on.
-    pub(crate) midi_io: Option<(
-        tutti_midi_hardware::MidiSession,
-        tutti_rt::Bell,
-        tutti_rt::Listener,
-    )>,
+    /// The OS MIDI layer, shared with the MIDI-CI task that drives it.
+    pub(crate) midi_io: Option<(Arc<crate::midi_link::MidiLink>, tutti_platform::Task<()>)>,
     #[cfg(feature = "midi-hardware")]
     pub(crate) device_events: Option<tutti_midi_hardware::DeviceEvents>,
 }
@@ -971,7 +966,9 @@ impl<C: Clock> SessionBuilder<C> {
             // Subscribed before anything can plug in unseen: `Phase::Poll`
             // is this subscription's only reader.
             let events = io.devices().subscribe();
-            Ok(((io, bell, listener), events))
+            let link = crate::midi_link::MidiLink::start(io, &executor, bell, listener)
+                .map_err(crate::Error::MidiHardware)?;
+            Ok((link, events))
         });
         #[cfg(feature = "midi-hardware")]
         let (midi_io, device_events) = midi_io.transpose()?.unzip();
@@ -1103,8 +1100,9 @@ impl<C: Clock> SessionBuilder<C> {
     /// each places its arrivals on frames.
     fn clock_midi(parts: &Parts<C::Float>, engine: &tutti_engine::Engine<C::Float>) {
         #[cfg(feature = "midi-hardware")]
-        if let Some((io, ..)) = &parts.midi_io {
-            io.ports()
+        if let Some((link, _)) = &parts.midi_io {
+            link.lock()
+                .ports()
                 .inlets()
                 .set_clock(Some(crate::midi::arrival_clock(engine.block_clock())));
         }
