@@ -17,6 +17,8 @@ pub const BLOCK: usize = 128;
 pub struct Rig {
     pub session: Session,
     pub node: NodeKey,
+    /// The key of the hosted plugin the instrument is, when it is one.
+    pub plugin: Option<tutti_session::Key<tutti_session::AnyPlugin>>,
     pub handle: InstrumentHandle,
     /// Left channel of everything rendered, from frame 0.
     pub left: Vec<f32>,
@@ -60,6 +62,7 @@ impl Rig {
         Self {
             session,
             node: handle.node().erase(),
+            plugin: None,
             handle,
             left: Vec::new(),
             right: Vec::new(),

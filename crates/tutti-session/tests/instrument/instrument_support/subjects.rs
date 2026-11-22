@@ -1,6 +1,6 @@
 //! The three instruments, as subjects.
 
-use crate::loading::{LoadPlugin, Spec};
+use crate::loading::{LoadPlugin, Perform, Spec};
 use tutti_music::Adsr;
 use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};
 use tutti_sf2::SoundFont;
@@ -142,15 +142,14 @@ impl Subject for Plugin {
     fn transcript(rig: &Rig) -> Option<tutti_shared_plugin::transcript::Transcript> {
         let state = rig
             .session
-            .plugin_view(rig.node)
-            .ok()?
-            .handle()
-            .save_state(tutti_plugin_types::StateUse::Project)
+            .save_state(&rig.plugin?, tutti_plugin_types::StateUse::Project)
+            .expect("the plugin is hosted")
+            .perform(tutti_fixtures::main_thread())
             .expect("the plugin saves its state");
         // Not `complete()`: its overflow flag is also set by more blocks than the
         // log keeps, and a case this long renders more. The events are few.
         Some(tutti_shared_plugin::transcript::Transcript::parse(
-            &tutti_shared_plugin::transcript::find_blob(&state),
+            &tutti_shared_plugin::transcript::find_blob(state.bytes()),
         ))
     }
 
@@ -175,6 +174,7 @@ impl Subject for Plugin {
             .instrument(node)
             .expect("the plugin declares itself an instrument");
         let mut rig = Rig::wired(session, handle);
+        rig.plugin = Some(node);
         rig.pace = std::time::Duration::from_millis(10);
         rig
     }
