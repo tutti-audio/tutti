@@ -131,9 +131,28 @@ impl<V: NoteVoice> VoiceTable<V> {
         &self.allocator
     }
 
-    /// The note logic, for what is not a message: forgetting notes, a reset.
-    pub fn allocator_mut(&mut self) -> &mut VoiceAllocator {
-        &mut self.allocator
+    /// Forgets every note, pedal and held key (see
+    /// [`VoiceAllocator::forget_notes`]), keeping the channels' controllers.
+    /// The sounding voices are the caller's to end: [`clear`](Self::clear) or
+    /// [`release_all`](Self::release_all).
+    pub fn forget_notes(&mut self) {
+        self.allocator.forget_notes();
+    }
+
+    /// A table of idle voices, each made by `voice`, that keeps this one's
+    /// channel state (controllers, wheels, tunings) and none of its notes.
+    /// The allocator is never moved under sounding voices: the copy has none.
+    #[must_use]
+    pub fn fork(&self, mut voice: impl FnMut() -> V) -> Self {
+        let mut copy = Self {
+            allocator: self.allocator.clone(),
+            polyphony: self.polyphony,
+            active: Vec::with_capacity(self.polyphony),
+            free: Vec::with_capacity(self.polyphony),
+        };
+        copy.free.extend((0..self.polyphony).map(|_| voice()));
+        copy.allocator.forget_notes();
+        copy
     }
 
     /// Hands one channel voice message to the allocator and carries out what

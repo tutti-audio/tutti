@@ -454,7 +454,7 @@ impl<F: Float + SimdLanes> Player<F> {
     /// the pedals and keys: a fork's start.
     pub(crate) fn release_all(&mut self) {
         self.voices.release_all();
-        self.voices.allocator_mut().forget_notes();
+        self.voices.forget_notes();
     }
 
     /// Cuts every voice, forgets the pedals and keys, and returns every
@@ -464,7 +464,7 @@ impl<F: Float + SimdLanes> Player<F> {
     /// sends.
     pub(crate) fn reset(&mut self) {
         self.voices.clear();
-        self.voices.allocator_mut().forget_notes();
+        self.voices.forget_notes();
         for channel in (0..MidiChannel::COUNT).filter_map(MidiChannel::new) {
             self.apply(
                 channel,
@@ -620,8 +620,7 @@ impl<F: Float + SimdLanes> Player<F> {
         player.missing = self.missing.clone();
         // The core's channel state (wheel, sensitivity); its notes are not
         // the new player's, which has no voice.
-        *player.voices.allocator_mut() = self.voices.allocator().clone();
-        player.voices.allocator_mut().forget_notes();
+        player.voices = self.voices.fork(|| Voice::new(&player.render));
         player.master_applied = self.master_applied;
         Some(player)
     }

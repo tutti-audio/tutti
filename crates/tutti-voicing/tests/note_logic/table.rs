@@ -165,3 +165,18 @@ fn stepping_allocates_nothing_after_construction() {
         table.clear();
     });
 }
+
+#[test]
+fn a_fork_has_no_sounding_voice_and_plays_on_its_own() {
+    let mut table = table(2, Steal::Never);
+    send(&mut table, note_on(60));
+    let mut fork = table.fork(|| Probe {
+        key: 0,
+        starts: 0,
+        released: false,
+    });
+    assert!(fork.is_empty());
+    send(&mut fork, note_on(64));
+    assert_eq!(keys(&fork), [64]);
+    assert_eq!(keys(&table), [60]);
+}
