@@ -109,8 +109,8 @@ midi = [
 # Network MIDI 2.0: a Client or a Host as MIDI input and output over UDP (native targets).
 midi-network = ["midi", "dep:tutti-midi-network"]
 midi-hardware = ["midi", "dep:tutti-midi-hardware", "dep:tutti-midi-device", "dep:tutti-midi-ci"]
-# The OS MIDI backends of `tutti-midi-hardware`, each a no-op off its OS; with none of
-# them (and `tutti` is the only dependent) `midi-hardware` lists no device.
+# The OS MIDI backends of `tutti-midi-hardware`, each a no-op off its OS. Without one,
+# `midi-hardware` lists no device.
 alsa = ["tutti-midi-hardware?/alsa"]
 coremidi = ["tutti-midi-hardware?/coremidi"]
 winmm = ["tutti-midi-hardware?/winmm"]

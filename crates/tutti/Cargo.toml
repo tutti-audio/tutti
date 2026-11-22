@@ -85,8 +85,8 @@ tutti-shared-plugin = { path = "../../testing/tutti-shared-plugin" }
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 
 [features]
-# `default = ["session", "alsa", "coremidi", "winmm"]`: the API layer is what this umbrella is for. Set
-# `default-features = false` for the raw crates alone.
+# The defaults are the API layer, which is what this umbrella is for, and every OS MIDI
+# backend. Set `default-features = false` for the raw crates alone.
 default = ["session", "alsa", "coremidi", "winmm"]
 session = ["dep:tutti-session", "dep:tutti-engine"]
 
