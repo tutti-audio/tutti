@@ -384,9 +384,9 @@ impl<F: Float + SimdLanes> Player<F> {
         let commands = self.allocator.universal(heard);
         self.voices.execute(commands, &self.config.font);
         if matches!(heard.message, Universal::GeneralMidi(_)) {
-            self.channels = (0..MidiChannel::COUNT)
-                .map(|i| Channel::new(i == PERCUSSION_CHANNEL.get()))
-                .collect();
+            for (i, channel) in self.channels.iter_mut().enumerate() {
+                *channel = Channel::new(i == PERCUSSION_CHANNEL.index());
+            }
         }
     }
 

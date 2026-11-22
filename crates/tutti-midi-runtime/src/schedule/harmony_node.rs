@@ -23,9 +23,9 @@
 //! ([`HarmonyControls::set`]); the node reads them once per block.
 
 use std::num::NonZeroU32;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tutti_buffers::Float;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_graph::{
     Cx, Event, EventDensity, EventWriter, ForkCause, ForkMode, ForkSource, Forked, Harmony,
@@ -270,7 +270,7 @@ impl HarmonyControls {
     /// force change nothing. Control thread.
     pub fn set(&self, changes: impl Into<Arc<HarmonyChanges>>) {
         let changes = changes.into();
-        let _serial = self.serial.lock_recover();
+        let _serial = self.serial.lock();
         let current = self.cell.current();
         if Arc::ptr_eq(&current, &changes) || *current == *changes {
             return;

@@ -6,10 +6,11 @@ use std::collections::VecDeque;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, MutexGuard};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 use tutti_platform::{Executor, Instant, Task};
+use tutti_rt::Mutex;
 
 use crate::{Event, MAX_DATAGRAM_BYTES, MAX_QUEUED_EVENTS, NetworkEndpoint};
 
@@ -158,7 +159,7 @@ impl<E> Shared<E> {
     /// holder leaves the state consistent where it can panic (the endpoint's
     /// own calls).
     fn state(&self) -> MutexGuard<'_, State<E>> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock()
     }
 }
 

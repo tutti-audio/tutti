@@ -14,11 +14,11 @@ use futures_channel::oneshot;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, MutexGuard};
 use std::task::Poll;
 use std::time::Duration;
 use tutti_platform::{Executor, Instant, PriorityRequest, Task, Timer, Unjoined, join_within};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_graph::Offset;
 use tutti_midi_runtime::ActiveSensingSender;
@@ -146,7 +146,7 @@ impl Drop for Heartbeat {
 }
 
 fn lock(schedule: &Mutex<ActiveSensingSender>) -> MutexGuard<'_, ActiveSensingSender> {
-    schedule.lock_recover()
+    schedule.lock()
 }
 
 /// Sleeps to the schedule's deadline, sends what is due, and repeats until

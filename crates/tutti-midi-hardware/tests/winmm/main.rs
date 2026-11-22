@@ -8,7 +8,7 @@
 #[global_allocator]
 static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
-#[cfg(windows)]
+#[cfg(all(windows, feature = "winmm"))]
 mod gs_synth;
 #[cfg(all(windows, feature = "synth-tests"))]
 mod synth_open;
