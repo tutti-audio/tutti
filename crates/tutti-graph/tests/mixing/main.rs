@@ -9,6 +9,7 @@
 static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
 mod azimuth_arc;
+mod declared_cells;
 mod declared_reads;
 mod declared_settings;
 mod edge_fade;
