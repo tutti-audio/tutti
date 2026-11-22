@@ -5,20 +5,12 @@
 //! and whether the streamer can serve arbitrary ranges from it. Both come from the
 //! container header, and neither needs a single audio packet decoded.
 //!
-//! # Why this lives in the sampler
-//!
-//! The answer is a fact about this crate's streaming machinery, not about the
-//! file in isolation. "Can it stream" means "can the streamer's incremental decoder
-//! seek in it, given the codecs compiled into this build" — three conditions the
-//! streamer already applies internally when a stream is registered
-//! (`streamer::handlers::open_stream`). A host deriving the same verdict from
-//! `read_wave_metadata` would be re-implementing a rule it cannot see, and the
-//! two would drift the moment the streamer's capabilities changed. Streamer and host
-//! read the same function — which is the point of it being public.
-//!
-//! This is not a decode: `read_wave_metadata` reads the container head and
-//! stops. Deciding *how much* of a file to keep resident is the caller's policy;
-//! this only reports what the file allows.
+//! "Can it stream" is a fact about this crate's machinery: the streamer's
+//! incremental decoder can seek in the file, given the codecs compiled into
+//! this build. The streamer applies the same rule when it registers a stream,
+//! and a host reads the same function. Nothing is decoded: the container head
+//! is read and no more; how much of a file to keep resident is the caller's
+//! policy.
 
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_platform::Asset;
