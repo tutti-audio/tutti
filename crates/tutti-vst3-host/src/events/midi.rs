@@ -414,15 +414,15 @@ fn control_event(
             channel,
             note,
             id,
-            ControlValue::new(value).normalized(),
+            value.normalized(),
         )),
         NoteControl::Registered(controller, value) => expression(
             expression_of_per_note_controller(controller.number())?,
-            ControlValue::new(value).normalized().get(),
+            value.normalized().get(),
         ),
         NoteControl::Assignable(index, value) => expression(
             expression_of_per_note_controller(index)?,
-            ControlValue::new(value).normalized().get(),
+            value.normalized().get(),
         ),
     }
 }

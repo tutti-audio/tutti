@@ -6,6 +6,7 @@
 use std::num::NonZeroUsize;
 
 use crate::support::{One, note_on, step};
+use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_midi_protocol::{
     Addressee, ChannelMask, Heard, KeyChange, KeyChanges, KeyTable, OctaveOffsets, Timing,
     TuningFrequency, TuningMessage, TuningName, Universal,
@@ -14,7 +15,7 @@ use tutti_ump::ControlValue;
 use tutti_ump::{CCNumber, MidiChannel, NoteNumber, Rpn, U7, U14, Voice2};
 use tutti_units::{Losses, Seconds};
 use tutti_voicing::{
-    NoSuchTuning, TuningCapacity, VoiceAllocator, VoiceCommand, VoiceConfig, VoiceId,
+    NoSuchTuning, TuningCapacity, TuningCount, VoiceAllocator, VoiceCommand, VoiceConfig, VoiceId,
 };
 
 fn on(core: &mut VoiceAllocator, channel: u8, key: u8) -> Vec<VoiceCommand> {
@@ -223,7 +224,7 @@ fn a_non_real_time_change_leaves_the_sounding_note() {
 fn rpn_3_and_4_select_the_channels_tuning_and_retune_its_sounding_notes() {
     let mut core = VoiceAllocator::new(
         VoiceConfig::poly(NonZeroUsize::new(8).unwrap())
-            .with_tuning_capacity(TuningCapacity::new(2, 4).unwrap()),
+            .with_tuning_capacity(TuningCapacity::new(TuningCount::of(2), TuningCount::of(4))),
     );
     // Program 2 of bank 1 raises key 60 by a semitone; program 2 of bank 0 by two.
     for (bank, up) in [(0, 62), (1, 61)] {
@@ -260,7 +261,7 @@ fn rpn_3_and_4_select_the_channels_tuning_and_retune_its_sounding_notes() {
 fn a_program_or_bank_the_core_has_none_of_is_ignored_and_counted() {
     let mut core = VoiceAllocator::new(
         VoiceConfig::poly(NonZeroUsize::new(4).unwrap())
-            .with_tuning_capacity(TuningCapacity::new(1, 4).unwrap()),
+            .with_tuning_capacity(TuningCapacity::new(TuningCount::of(1), TuningCount::of(4))),
     );
     on(&mut core, 0, 60);
     assert!(rpn(&mut core, 0, Rpn::TUNING_PROGRAM_SELECT, 4).is_empty());
@@ -281,7 +282,7 @@ fn a_program_or_bank_the_core_has_none_of_is_ignored_and_counted() {
 fn a_change_for_a_program_there_is_no_room_for_is_refused_and_counted() {
     let mut core = VoiceAllocator::new(
         VoiceConfig::poly(NonZeroUsize::new(4).unwrap())
-            .with_tuning_capacity(TuningCapacity::new(1, 4).unwrap()),
+            .with_tuning_capacity(TuningCapacity::new(TuningCount::of(1), TuningCount::of(4))),
     );
     let refused = |core: &mut VoiceAllocator, bank: Option<u8>, program: u8| {
         let before = core.losses().refused;
@@ -318,17 +319,19 @@ fn a_change_for_a_program_there_is_no_room_for_is_refused_and_counted() {
     );
 }
 
-/// `TuningCapacity` is 1 to 128 of each.
+/// A tuning count is 1 to 128: `new`, `TryFrom` and `of` agree.
 #[test]
-fn a_capacity_is_one_to_128_banks_and_programs() {
-    assert!(TuningCapacity::new(0, 1).is_none());
-    assert!(TuningCapacity::new(1, 0).is_none());
-    assert!(TuningCapacity::new(129, 1).is_none());
-    assert!(TuningCapacity::new(1, 129).is_none());
-    assert_eq!(TuningCapacity::new(128, 128).unwrap().banks(), 128);
+fn a_tuning_count_is_one_to_128() {
+    check_range_contract(&RangeContract {
+        new: TuningCount::new,
+        get: TuningCount::get,
+        of: Some(TuningCount::of),
+        valid: &[1, 2, 127, 128],
+        invalid: &[0, 129, 255],
+    });
     assert_eq!(
         TuningCapacity::DEFAULT,
-        TuningCapacity::new(1, 128).unwrap()
+        TuningCapacity::new(TuningCount::of(1), TuningCount::of(128))
     );
 }
 
@@ -612,7 +615,7 @@ fn a_relative_registered_controller_steps_the_program() {
 fn the_chase_carries_the_selected_program_and_bank() {
     let mut core = VoiceAllocator::new(
         VoiceConfig::poly(NonZeroUsize::new(4).unwrap())
-            .with_tuning_capacity(TuningCapacity::new(3, 8).unwrap()),
+            .with_tuning_capacity(TuningCapacity::new(TuningCount::of(3), TuningCount::of(8))),
     );
     rpn(&mut core, 5, Rpn::TUNING_PROGRAM_SELECT, 6);
     rpn(&mut core, 5, Rpn::TUNING_BANK_SELECT, 2);
@@ -620,7 +623,7 @@ fn the_chase_carries_the_selected_program_and_bank() {
     core.chase(tutti_ump::MidiGroup::FIRST, |ump| sent.push(ump));
     let mut heir = VoiceAllocator::new(
         VoiceConfig::poly(NonZeroUsize::new(4).unwrap())
-            .with_tuning_capacity(TuningCapacity::new(3, 8).unwrap()),
+            .with_tuning_capacity(TuningCapacity::new(TuningCount::of(3), TuningCount::of(8))),
     );
     for ump in sent {
         let tutti_ump::Message::Midi2(address, message) = ump.decode().unwrap() else {
@@ -643,7 +646,7 @@ fn the_chase_carries_the_selected_program_and_bank() {
 fn rpn_3_and_4_read_only_the_top_seven_bits() {
     let mut core = VoiceAllocator::new(
         VoiceConfig::poly(NonZeroUsize::new(8).unwrap())
-            .with_tuning_capacity(TuningCapacity::new(3, 4).unwrap()),
+            .with_tuning_capacity(TuningCapacity::new(TuningCount::of(3), TuningCount::of(4))),
     );
     let select = |core: &mut VoiceAllocator, which: Rpn, number: u32, below: u32| {
         step(

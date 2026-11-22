@@ -108,8 +108,8 @@ pub(crate) struct SynthVoice {
 /// product, relative to the defaults (Volume 100, Expression 127), so a channel
 /// that has been told nothing sounds at the voice's own level.
 fn channel_level(channel: &ChannelState) -> Amplitude {
-    let relative = f64::from(channel.volume()) * f64::from(channel.expression())
-        / f64::from(ChannelState::DEFAULT_LEVEL);
+    let relative =
+        channel.volume().get() * channel.expression().get() / ChannelState::DEFAULT_LEVEL.get();
     Amplitude::new(relative * relative)
 }
 

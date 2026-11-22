@@ -38,41 +38,39 @@ use tutti_music::PitchClass;
 use tutti_ump::{NoteNumber, U7};
 use tutti_units::{Losses, Semitones};
 
-/// How many tuning banks and programs a bank a core holds: each from 1 to 128
-/// (a bank and a program are 7-bit).
+tutti_units::ranged! {
+    /// A count of tuning banks, or of programs in a bank: 1 to 128, since a bank
+    /// and a program are 7-bit.
+    #[derive(Eq, Hash, PartialOrd, Ord)]
+    TuningCount(u8), TuningCountOutOfRange, "within 1..=128", |raw| raw >= 1 && raw <= 128
+}
+
+/// How many tuning banks and programs a bank a core holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TuningCapacity {
-    banks: u8,
-    programs: u8,
+    banks: TuningCount,
+    programs: TuningCount,
 }
 
 impl TuningCapacity {
     /// One bank of all 128 programs.
-    pub const DEFAULT: Self = Self {
-        banks: 1,
-        programs: 128,
-    };
+    pub const DEFAULT: Self = Self::new(TuningCount::of(1), TuningCount::of(128));
 
-    /// `banks` banks of `programs` programs each, `None` for a count of 0 or
-    /// above 128.
+    /// `banks` banks of `programs` programs each.
     #[must_use]
-    pub const fn new(banks: u8, programs: u8) -> Option<Self> {
-        if banks == 0 || banks > 128 || programs == 0 || programs > 128 {
-            None
-        } else {
-            Some(Self { banks, programs })
-        }
+    pub const fn new(banks: TuningCount, programs: TuningCount) -> Self {
+        Self { banks, programs }
     }
 
     /// The number of banks.
     #[must_use]
-    pub const fn banks(self) -> u8 {
+    pub const fn banks(self) -> TuningCount {
         self.banks
     }
 
     /// The number of programs in a bank.
     #[must_use]
-    pub const fn programs(self) -> u8 {
+    pub const fn programs(self) -> TuningCount {
         self.programs
     }
 }
@@ -109,7 +107,7 @@ pub(crate) struct Tunings {
 
 impl Tunings {
     pub(crate) fn new(capacity: TuningCapacity) -> Self {
-        let n = usize::from(capacity.banks) * usize::from(capacity.programs);
+        let n = usize::from(capacity.banks.get()) * usize::from(capacity.programs.get());
         Self {
             capacity,
             tables: vec![KeyTable::equal_temperament(); n].into_boxed_slice(),
@@ -128,16 +126,16 @@ impl Tunings {
     }
 
     pub(crate) fn has_bank(&self, bank: U7) -> bool {
-        bank.get() < self.capacity.banks
+        bank.get() < self.capacity.banks.get()
     }
 
     pub(crate) fn has_program(&self, program: U7) -> bool {
-        program.get() < self.capacity.programs
+        program.get() < self.capacity.programs.get()
     }
 
     fn index(&self, bank: U7, program: U7) -> Option<usize> {
         (self.has_bank(bank) && self.has_program(program)).then(|| {
-            usize::from(bank.get()) * usize::from(self.capacity.programs)
+            usize::from(bank.get()) * usize::from(self.capacity.programs.get())
                 + usize::from(program.get())
         })
     }
