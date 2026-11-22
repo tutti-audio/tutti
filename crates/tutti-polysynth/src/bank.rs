@@ -40,8 +40,8 @@ use crate::lane::{Lane, SynthFloat};
 use crate::{Adsr, FilterType, OscillatorType, SvfMode, UnisonVoices};
 use tutti_dsp::{
     EnvelopeDesign, EnvelopeLeg, EnvelopePace, EnvelopeStage, EnvelopeStages, EnvelopeStep,
-    LadderCoefficients, LadderDesign, LadderType, SimdLanes, SvfCoefficients, SvfControls, SvfType,
-    ladder_step, svf_step,
+    LadderCoefficients, LadderDesign, LadderSaturation, LadderType, SimdLanes, SvfCoefficients,
+    SvfControls, SvfType, ladder_step, nonlinear_ladder_step, svf_step,
 };
 use tutti_rt::SplitMix64;
 use tutti_units::{
@@ -144,8 +144,8 @@ enum Filter<F> {
         m: [F; 3],
     },
     /// Four-stage ladder with zero-delay `tanh` feedback (`LadderFilterNode`'s topology),
-    /// read at the fourth stage: the 24 dB/octave Moog response.
-    Ladder,
+    /// read at the fourth stage: the 24 dB/octave Moog response, in the given saturation model.
+    Ladder(LadderSaturation),
 }
 
 /// The narrowest pulse the oscillator renders, as a fraction of the cycle.
@@ -158,7 +158,8 @@ const OSC_TRIANGLE: u8 = 3;
 const OSC_NOISE: u8 = 4;
 const FILTER_NONE: u8 = 0;
 const FILTER_SVF: u8 = 1;
-const FILTER_LADDER: u8 = 2;
+const FILTER_LADDER_PER_STAGE: u8 = 2;
+const FILTER_LADDER_INPUT: u8 = 3;
 
 /// Every sub-voice's DSP state, in groups of [`SynthFloat::Lanes`].
 #[derive(Clone)]
@@ -238,6 +239,18 @@ impl<F: SynthFloat> std::fmt::Debug for VoiceBank<F> {
     }
 }
 
+/// One sample of the 24 dB ladder across the lanes, in the per-stage model when `per_stage` and
+/// the input model otherwise (the caller's constant, folded by the inlining): both saturate with [`kernel::tanh`], the lane approximation, so
+/// the per-stage model's residual bound holds for the approximated equation.
+#[inline(always)]
+fn ladder_lanes<V: Lane>(per_stage: bool, c: &LadderCoefficients<V>, z: &mut [V; 4], x: V) -> V {
+    if per_stage {
+        nonlinear_ladder_step(c, LadderType::LP24, z, x, kernel::tanh)
+    } else {
+        ladder_step(c, LadderType::LP24, z, x, kernel::tanh)
+    }
+}
+
 impl<F: SynthFloat> VoiceBank<F> {
     /// Build a bank for `voices` voices of `stride` sub-voices each.
     ///
@@ -245,6 +258,7 @@ impl<F: SynthFloat> VoiceBank<F> {
     pub(crate) fn new(
         oscillator: OscillatorType,
         filter: &FilterType,
+        saturation: LadderSaturation,
         envelope: &Adsr,
         sample_rate: SampleRate,
         voices: usize,
@@ -268,7 +282,7 @@ impl<F: SynthFloat> VoiceBank<F> {
         };
         let filter = match *filter {
             FilterType::None => Filter::None,
-            FilterType::Moog { .. } => Filter::Ladder,
+            FilterType::Moog { .. } => Filter::Ladder(saturation),
             FilterType::Svf { q, mode, .. } => {
                 let ty = match mode {
                     SvfMode::Lowpass => SvfType::LowPass,
@@ -460,7 +474,7 @@ impl<F: SynthFloat> VoiceBank<F> {
                 let s = svf_controls(ty, cutoff, q).design_clamped(self.sample_rate);
                 [s.d, s.a2, s.a3].map(F::from_design)
             }
-            Filter::Ladder => {
+            Filter::Ladder(_) => {
                 let l = LadderDesign::new(cutoff, resonance, self.sample_rate);
                 [l.g / (1.0 + l.g), l.k, 0.0].map(F::from_design)
             }
@@ -628,7 +642,8 @@ impl<F: SynthFloat> VoiceBank<F> {
         let filter = match self.filter {
             Filter::None => FILTER_NONE,
             Filter::Svf { .. } => FILTER_SVF,
-            Filter::Ladder => FILTER_LADDER,
+            Filter::Ladder(LadderSaturation::PerStage) => FILTER_LADDER_PER_STAGE,
+            Filter::Ladder(LadderSaturation::Input) => FILTER_LADDER_INPUT,
         };
         for g in 0..self.live.len() {
             if !self.live[g] {
@@ -655,7 +670,7 @@ impl<F: SynthFloat> VoiceBank<F> {
                 };
             }
             dispatch!(OSC_SINE, OSC_SAW, OSC_PULSE, OSC_TRIANGLE, OSC_NOISE;
-                      FILTER_NONE, FILTER_SVF, FILTER_LADDER);
+                      FILTER_NONE, FILTER_SVF, FILTER_LADDER_PER_STAGE, FILTER_LADDER_INPUT);
         }
         for (i, frame) in acc.iter().enumerate().take(n) {
             self.out[0][i] = frame[0].sum();
@@ -742,11 +757,11 @@ impl<F: SynthFloat> VoiceBank<F> {
                     [z[0], z[1]] = s;
                     y
                 }
-                FILTER_LADDER => {
+                FILTER_LADDER_PER_STAGE | FILTER_LADDER_INPUT => {
                     c[0] += c_step[0];
                     c[1] += c_step[1];
                     let coefficients = LadderCoefficients { g1: c[0], k: c[1] };
-                    ladder_step(&coefficients, LadderType::LP24, &mut z, x, kernel::tanh)
+                    ladder_lanes(FILTER == FILTER_LADDER_PER_STAGE, &coefficients, &mut z, x)
                 }
                 _ => x,
             };

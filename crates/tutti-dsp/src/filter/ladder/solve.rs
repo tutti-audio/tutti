@@ -55,8 +55,6 @@
 //!
 //! plus the rounding of the terms of `F` (`8 eps` of their sum of magnitudes).
 
-use tutti_buffers::Float;
-
 use super::kernel::{LadderCoefficients, LadderType};
 use crate::SimdLanes;
 use crate::newton::{NEWTON_CAP, newton_steps};
@@ -70,19 +68,19 @@ struct Chain<F> {
     v: [F; 4],
 }
 
-impl<F: Float + SimdLanes> Chain<F> {
+impl<F: SimdLanes> Chain<F> {
     /// The stages in the increment form `v = G (a - s)`, which keeps a small `G` exact where
     /// `G a + (1 - G) s` would round `1 - G`.
     #[inline(always)]
-    fn at(g1: F, s: &[F; 4], u: F) -> Self {
-        let mut a = [u.tanh(); 4];
-        let mut y = [F::ZERO; 4];
-        let mut v = [F::ZERO; 4];
+    fn at(g1: F, s: &[F; 4], u: F, tanh: impl Fn(F) -> F) -> Self {
+        let mut a = [tanh(u); 4];
+        let mut y = [F::lit(0.0); 4];
+        let mut v = [F::lit(0.0); 4];
         for n in 0..4 {
             v[n] = g1 * (a[n] - s[n]);
             y[n] = s[n] + v[n];
             if n < 3 {
-                a[n + 1] = y[n].tanh();
+                a[n + 1] = tanh(y[n]);
             }
         }
         Self { a, y, v }
@@ -92,55 +90,72 @@ impl<F: Float + SimdLanes> Chain<F> {
 /// `F(u)` and `F'(u)` of the loop equation at `u`, for the stage words `s` and the driven
 /// input `x`.
 #[inline(always)]
-pub(crate) fn loop_residual<F: Float + SimdLanes>(
+pub(crate) fn loop_residual<F: SimdLanes>(
     c: &LadderCoefficients<F>,
     s: &[F; 4],
     x: F,
     u: F,
+    tanh: impl Fn(F) -> F,
 ) -> (F, F) {
-    let chain = Chain::at(c.g1, s, u);
-    let one = F::ONE;
+    let chain = Chain::at(c.g1, s, u, tanh);
+    let one = F::lit(1.0);
     let g2 = c.g1 * c.g1;
     let mut gain = g2 * g2;
     for a in chain.a {
-        gain *= one - a * a;
+        gain = gain * (one - a * a);
     }
     (u - x + c.k * chain.y[3], one + c.k * gain)
 }
 
 /// The loop solved with the saturators removed: the closed form every sample starts from.
 #[inline(always)]
-pub(crate) fn linear_seed<F: Float + SimdLanes>(c: &LadderCoefficients<F>, s: &[F; 4], x: F) -> F {
+pub(crate) fn linear_seed<F: SimdLanes>(c: &LadderCoefficients<F>, s: &[F; 4], x: F) -> F {
     let g1 = c.g1;
     let g2 = g1 * g1;
-    let tail = (F::ONE - g1) * (g1 * (g1 * (g1 * s[0] + s[1]) + s[2]) + s[3]);
-    (x - c.k * tail) / (F::ONE + c.k * g2 * g2)
+    let one = F::lit(1.0);
+    let tail = (one - g1) * (g1 * (g1 * (g1 * s[0] + s[1]) + s[2]) + s[3]);
+    (x - c.k * tail) / (one + c.k * g2 * g2)
 }
 
 /// The loop variable of the sample: [`NEWTON_CAP`] Newton steps on [`loop_residual`] from
 /// [`linear_seed`], with no tolerance test (the cost per sample is fixed, the output a
 /// function of the inputs alone).
 #[inline(always)]
-pub(crate) fn solve_loop<F: Float + SimdLanes>(c: &LadderCoefficients<F>, s: &[F; 4], x: F) -> F {
-    newton_steps::<F, NEWTON_CAP>(|u| loop_residual(c, s, x, u), linear_seed(c, s, x))
+pub(crate) fn solve_loop<F: SimdLanes>(
+    c: &LadderCoefficients<F>,
+    s: &[F; 4],
+    x: F,
+    tanh: impl Fn(F) -> F + Copy,
+) -> F {
+    newton_steps::<F, NEWTON_CAP>(|u| loop_residual(c, s, x, u, tanh), linear_seed(c, s, x))
 }
 
-/// One sample: the loop solved, the stages advanced, the tap `ty` returned. `x` is the driven
-/// input (`input * drive`).
+/// One sample of the per-stage model ([`LadderSaturation::PerStage`](super::LadderSaturation)):
+/// the loop solved, the stages advanced, the tap `ty` returned. `x` is the driven input
+/// (`input * drive`).
+///
+/// Written once over [`SimdLanes`], scalar or SIMD lanes: the solve is a fixed count of Newton
+/// steps with no tolerance test and no branch. `tanh` is the saturator, at every stage and in
+/// the loop, and the loop's slope is read from it as `1 - tanh^2`. A scalar caller passes the
+/// float's own `tanh`. A lane caller may pass an approximation: the residual after the cap is
+/// then the bound of the module's derivation for the *approximated* equation (its `F` built
+/// from the approximation), and the slope `1 - a^2` is the Newton slope of the true `tanh`
+/// taken at the approximated value, within the approximation's own error of the
+/// slope of that equation, which a Newton step tolerates as a quasi-Newton step.
 #[inline(always)]
-pub(crate) fn nonlinear_ladder_step<F: Float + SimdLanes>(
+pub fn nonlinear_ladder_step<F: SimdLanes>(
     c: &LadderCoefficients<F>,
     ty: LadderType,
     s: &mut [F; 4],
     x: F,
+    tanh: impl Fn(F) -> F + Copy,
 ) -> F {
-    let u = solve_loop(c, s, x);
-    let chain = Chain::at(c.g1, s, u);
+    let u = solve_loop(c, s, x, tanh);
+    let chain = Chain::at(c.g1, s, u, tanh);
     for ((s, y), v) in s.iter_mut().zip(chain.y).zip(chain.v) {
         *s = y + v;
     }
-    let two = F::ONE + F::ONE;
-    let (four, six) = (two + two, two + two + two);
+    let (four, six) = (F::lit(4.0), F::lit(6.0));
     let [a0, ..] = chain.a;
     let [y1, y2, y3, y4] = chain.y;
     match ty {

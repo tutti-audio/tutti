@@ -20,6 +20,7 @@
 
 use std::hint::black_box;
 use tutti_buffers::{BusTopology, ChannelLayout, Float, MaxBlock};
+use tutti_dsp::LadderSaturation;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_graph::Node;
@@ -210,21 +211,27 @@ fn distortion(c: &mut Criterion) {
     );
 }
 
-/// The 24 dB ladder at 1 kHz with resonance 0.7 (held), two channels.
+/// The 24 dB ladder at 1 kHz with resonance 0.7 (held), two channels, in each saturation model.
 fn ladder(c: &mut Criterion) {
-    run(
-        c,
-        "ladder",
-        "lp24_res07_2",
-        || {
-            LadderFilterNode::<f32>::from(
-                LadderFilterConfig::new(ChannelLayout::STEREO, LadderType::LP24)
-                    .freq(Hz::new(1_000.0))
-                    .res(Resonance::new(0.7)),
-            )
-        },
-        None,
-    );
+    for (case, saturation) in [
+        ("lp24_res07_2", LadderSaturation::PerStage),
+        ("lp24_res07_2_input", LadderSaturation::Input),
+    ] {
+        run(
+            c,
+            "ladder",
+            case,
+            || {
+                LadderFilterNode::<f32>::from(
+                    LadderFilterConfig::new(ChannelLayout::STEREO, LadderType::LP24)
+                        .freq(Hz::new(1_000.0))
+                        .res(Resonance::new(0.7))
+                        .saturation(saturation),
+                )
+            },
+            None,
+        );
+    }
 }
 
 /// A ceiling that moves every frame, between -6 and -1 dB.

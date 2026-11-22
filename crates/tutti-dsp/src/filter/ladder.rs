@@ -7,5 +7,6 @@ mod model;
 mod solve;
 
 pub use bank::{LadderBank, LadderBlend};
-pub use kernel::{LadderCoefficients, LadderDesign, LadderType, ladder_step};
+pub use kernel::{LadderCoefficients, LadderDesign, LadderSaturation, LadderType, ladder_step};
 pub use model::{LadderControls, LadderModel};
+pub use solve::nonlinear_ladder_step;
