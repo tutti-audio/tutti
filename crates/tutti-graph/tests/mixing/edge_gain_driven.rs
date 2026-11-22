@@ -82,6 +82,8 @@ struct Rig {
     spec: GraphSpec,
     at: Where,
     sink: u64,
+    /// The range a pair starts a lane with.
+    range: Option<(EdgeId, ParamRange)>,
 }
 
 impl Rig {
@@ -111,6 +113,7 @@ impl Rig {
             spec: GraphSpec::new(t),
             at,
             sink,
+            range: None,
         }
     }
 
@@ -144,6 +147,9 @@ fn at_port(node: u64) -> InputPort {
 /// reference's.
 fn render(rig: &Rig, workers: usize, blocks: usize) -> Vec<f32> {
     let mut pair = Pair::with_workers(BLOCK, workers);
+    if let Some((id, range)) = rig.range {
+        pair.start_edge_gain_range(id, range);
+    }
     pair.switch(&rig.graph(), &rig.kinds);
     let mut got = Vec::new();
     for b in 0..blocks {
@@ -231,12 +237,54 @@ fn a_driven_lane_renders_the_analytic_weight() {
 fn a_driven_lane_is_clamped_to_its_range() {
     let mut rig = Rig::new(&[dc(1.0), driver(0)], &[1], Where::Output);
     let id = rig.drive(1, 2);
-    rig.spec.gains.get_mut(&id).expect("entry").range = ParamRange::new(0.0, 0.5);
+    rig.range = Some((id, ParamRange::new(0.0, 0.5)));
     let got = render_both(&rig, 4);
     for (n, &g) in got.iter().enumerate() {
         let w = stepped(n, 0).expect("step").clamp(0.0, 0.5);
         assert_eq!(g.to_bits(), (0.0 + w * 1.0).to_bits(), "frame {n}");
     }
+}
+
+/// Narrowing a driven lane's range clamps its value from the next block on and
+/// leaves its base where it was: while driven, frame `n` is the step clamped
+/// to `0.0..=0.5`; once the source goes and the declick is over, the lane reads
+/// the base `0.75`, which the range never clamped. Executor and reference
+/// agree at every block.
+#[test]
+fn narrowing_a_driven_lanes_range_clamps_the_value_and_leaves_the_base() {
+    let mut rig = Rig::new(&[dc(1.0), driver(0)], &[1], Where::Output);
+    let id = rig.drive(1, 2);
+    let mut pair = Pair::new(BLOCK);
+    pair.start_edge_gain(id, amp(0.75));
+    pair.switch(&rig.graph(), &rig.kinds);
+
+    let before = run(&mut pair, 2);
+    for (n, &g) in before.iter().enumerate() {
+        let w = stepped(n, 0).expect("step");
+        assert_eq!(g.to_bits(), (0.0 + w * 1.0).to_bits(), "frame {n}");
+    }
+    pair.set_edge_gain_range(id, ParamRange::new(0.0, 0.5));
+    let narrowed = run(&mut pair, 4);
+    for (i, &g) in narrowed.iter().enumerate() {
+        let w = stepped(2 * BLOCK + i, 0).expect("step").clamp(0.0, 0.5);
+        assert_eq!(g.to_bits(), (0.0 + w * 1.0).to_bits(), "frame {i}");
+    }
+    assert!(
+        narrowed.contains(&0.0) && narrowed.contains(&0.5),
+        "the range bites at both ends"
+    );
+    assert_eq!(pair.editor.edge_gain(id), Some(amp(0.75)), "the base stays");
+
+    // The source goes: past its declick the lane reads the unclamped base.
+    rig.spec.disconnect_edge_gain(id, lane_out(2));
+    pair.switch(&rig.graph(), &rig.kinds);
+    let after = run(&mut pair, 12);
+    assert!(
+        after[after.len() - BLOCK..]
+            .iter()
+            .all(|&g| g.to_bits() == (0.0 + 0.75 * 1.0f32).to_bits()),
+        "the base, outside the range"
+    );
 }
 
 /// Before its first event a driven lane reads its base, and a source that
@@ -257,10 +305,10 @@ fn a_source_that_goes_is_declicked_to_the_base() {
         },
     );
     let id = rig.drive(1, 2);
-    rig.spec.gains.get_mut(&id).expect("entry").base = amp(base);
     let held = driver_value(0, 1 << 20) as f32;
 
     let mut pair = Pair::new(BLOCK);
+    pair.start_edge_gain(id, amp(base));
     pair.switch(&rig.graph(), &rig.kinds);
     let got = run(&mut pair, 2);
     assert!(got.iter().all(|&x| x == held), "held at the step: {held}");

@@ -568,7 +568,7 @@ impl GraphSpec {
                     id,
                     EdgeGain {
                         fade,
-                        ..EdgeGain::new(weight)
+                        ..EdgeGain::default()
                     },
                 );
             }

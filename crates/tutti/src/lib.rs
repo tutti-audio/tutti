@@ -487,11 +487,11 @@ pub mod graph {
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,
         Due, Edge, Event, EventKind, EventOrderError, EventRejected, EventWriter, ForkBuild,
         ForkCause, ForkFaultKind, ForkHealth, ForkSource, Forked, GraphInvalid, Harmony,
-        HarmonyKind, InPlaceMask, NodeParts, Offset, ParamEvent, ParamInput, ParamKind, ParamMod,
-        ParamPorts, ParamPortsError, ParamRamp, ParamRange, ParamRangeCell, ParamRangeReader,
-        ParamSegment, Pass, PlayClock, PortSink, PortSource, RenderMode, Resolution, SilenceMask,
-        SortedEvents, SubBlocks, TransportChange, TransportChangeRejected, TransportChanges,
-        TransportHistory, TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
+        HarmonyKind, InPlaceMask, NodeParts, Offset, ParamEvent, ParamInput, ParamKind, ParamPorts,
+        ParamPortsError, ParamRamp, ParamRange, ParamRangeCell, ParamRangeReader, ParamSegment,
+        Pass, PlayClock, PortSink, PortSource, RenderMode, Resolution, SilenceMask, SortedEvents,
+        SubBlocks, TransportChange, TransportChangeRejected, TransportChanges, TransportHistory,
+        TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
     };
     pub use tutti_graph::{EdgeGain, FeedbackFrom, Invalid, NodeMix, RangeView};
 }
@@ -888,13 +888,13 @@ pub mod midi {
         Field, FirstGroup, Flex, FlexAddress, FlexTextKind, FlexTimeSignature, Form, Framed,
         FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, FunctionBlocks, GroupChannelIndex,
         GroupSpan, KeySignature, Letter, ManufacturerBytesError, MdsChunk, MdsChunkSize, MdsChunks,
-        MdsIdentity, Metronome, Midi1Bytes, Midi1Port, MixedDataHeader, MpeChannels, MpeOverlap,
-        MpeZoneSet, MpeZoneSpan, NotChunkSize, NotManufacturerId, NoteKey, NoteKeyEvent,
-        PerNoteManagement, Pitch, RegisteredData, RegisteredPerNoteController, Reserved,
-        ReservedAccents, ReservedAttribute, Rpn, SharpsFlats, Stream, SyllableError, Sysex7Packet,
-        Sysex7Packets, Sysex8Packet, Sysex8Packets, Sysex8Stream, Sysex8StreamIds, SysexError,
-        SysexMessage, SysexPart, SysexRef, SysexStatus, SysexStep, System, U4, UiHint, UmpVersion,
-        Unknown, Utility, Voice2,
+        MdsIdentity, MessageType, Metronome, Midi1Bytes, Midi1Port, MixedDataHeader, MpeChannels,
+        MpeOverlap, MpeZoneSet, MpeZoneSpan, NotChunkSize, NotManufacturerId, NoteKey,
+        NoteKeyEvent, PerNoteManagement, Pitch, RegisteredData, RegisteredPerNoteController,
+        Reserved, ReservedAccents, ReservedAttribute, Rpn, SharpsFlats, Stream, SyllableError,
+        Sysex7Packet, Sysex7Packets, Sysex8Packet, Sysex8Packets, Sysex8Stream, Sysex8StreamCount,
+        Sysex8StreamId, Sysex8StreamIds, SysexError, SysexMessage, SysexPart, SysexRef,
+        SysexStatus, SysexStep, System, U4, UiHint, UmpVersion, Unknown, Utility, Voice2,
     };
     pub use tutti_ump::{
         Address, CCNumber, DeviceIdentity, ExtremeValues, ManufacturerId, Message, Midi1Parser,
@@ -903,10 +903,10 @@ pub mod midi {
     };
     pub use tutti_ump::{
         CCNumberOutOfRange, ChordTypeOutOfRange, DeltaTicksOutOfRange, FirstGroupOutOfRange,
-        FunctionBlockCountOutOfRange, FunctionBlockIdOutOfRange, GroupSpanOutOfRange,
-        MidiChannelOutOfRange, MidiGroupOutOfRange, MpeChannelsOutOfRange, NotOnMidiScale,
-        NoteNumberOutOfRange, SharpsFlatsOutOfRange, TicksPerQuarterNoteOutOfRange, U4OutOfRange,
-        U7OutOfRange, U14OutOfRange,
+        FunctionBlockCountOutOfRange, FunctionBlockIdOutOfRange, GroupChannelIndexOutOfRange,
+        GroupSpanOutOfRange, MidiChannelOutOfRange, MidiGroupOutOfRange, MpeChannelsOutOfRange,
+        NotOnMidiScale, NoteNumberOutOfRange, SharpsFlatsOutOfRange, TicksPerQuarterNoteOutOfRange,
+        U4OutOfRange, U7OutOfRange, U14OutOfRange,
     };
     pub use tutti_ump::{
         FlexTextError, LyricKind, NotASoftwareRevision, PlainTextKind, SoftwareRevision,

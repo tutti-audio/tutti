@@ -665,12 +665,9 @@ impl<F: Float> Editor<F> {
         self.spec
             .required_resolution
             .retain(|(at, from), _| at.node != key && from.node != key);
-        self.spec.params.retain(|at, _| at.node != key);
-        for m in self.spec.params.values_mut() {
-            if m.source.is_some_and(|s| s.node == key) {
-                m.source = None;
-            }
-        }
+        self.spec
+            .params
+            .retain(|at, from| at.node != key && from.node != key);
         // A lane the node drove stops driving: its edge keeps its entry and
         // reads its base.
         for g in self.spec.gains.values_mut() {
@@ -688,6 +685,7 @@ impl<F: Float> Editor<F> {
             .collect();
         for id in stale {
             self.spec.gains.remove(&id);
+            self.values.forget_edge(id);
         }
         if leaving {
             return;

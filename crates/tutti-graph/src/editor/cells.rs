@@ -2,25 +2,25 @@
 //! param port's range, each weighted lane's gain, each unit's mode and mix.
 //!
 //! A control (`set_param_range`, `set_edge_gain`, `set_mode` ...) stores into
-//! a cell at once and the running unit reads it next block, with no commit; a
-//! commit writes every cell from the spec (a mode from the node values), keeps
-//! the cells of what the new plan keeps, and makes cells for what it places.
+//! its value and the cell at once and the running unit reads it next block,
+//! with no commit; a commit writes every cell from the values (a fade from the
+//! spec), keeps the cells of what the new plan keeps, and makes cells for what
+//! it places.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use tutti_curve::declick_frames;
 
-use super::{BusLanes, mix_range_of, range_of};
-use crate::gain::{EdgeGain, GainCell};
-use crate::mode::{ModeCell, ModeState, NodeMode};
-use crate::node_values::NodeValues;
+use super::BusLanes;
+use crate::gain::{EdgeFade, EdgeGain, GainCell};
+use crate::mode::{ModeCell, ModeState, NodeMix, NodeMode};
 use crate::param::{ParamIn, ParamPorts, ParamRange, ParamRangeCell, ParamRanges, ParamState};
 use crate::plan::Plan;
 use crate::spec::GraphSpec;
+use crate::values::Values;
 use crate::{EdgeId, NodeKey};
 use tutti_buffers::Float;
-use tutti_units::Amplitude;
 
 /// Every live cell, by kind. The kinds are separate fields so a commit can
 /// hand out cells of two kinds at once.
@@ -39,19 +39,13 @@ impl LiveCells {
         }
     }
 
-    /// Writes every cell from `spec` and `values`; a gain's base only where
-    /// `spec` moved it since `committed` (the cell is a knob, and its one
-    /// writer may be ahead of the spec's copy). A mix is never written here:
-    /// its cell is its one writer's.
-    pub(super) fn sync(
-        &self,
-        spec: &GraphSpec,
-        values: &NodeValues,
-        committed: Option<&GraphSpec>,
-    ) {
-        self.modes.sync(spec, values);
-        self.gains.sync(spec, committed);
-        self.ranges.sync(spec);
+    /// Writes every cell from `values` (a gain lane's fade from `spec`). A
+    /// base and a mix are never written here: each cell is its one writer's
+    /// (a knob a route moves too).
+    pub(super) fn sync(&self, spec: &GraphSpec, values: &Values) {
+        self.modes.sync(values);
+        self.gains.sync(spec, values);
+        self.ranges.sync(values);
     }
 
     /// Drops `key`'s mode cell: a node inserted at the key later starts from
@@ -67,10 +61,10 @@ impl LiveCells {
     }
 
     /// Drops the cells of every key `plan` does not place, and writes each
-    /// kept unit's mix range from `spec`.
-    pub(super) fn keep_placed(&mut self, plan: &Plan, spec: &GraphSpec) {
+    /// kept unit's mix range from `values`.
+    pub(super) fn keep_placed(&mut self, plan: &Plan, values: &Values) {
         for (&key, cell) in &self.modes.0 {
-            cell.store_range(mix_range_of(spec, key));
+            cell.store_range(values.range(mix_at(key)));
         }
         self.ranges.0.retain(|k, _| plan.unit(*k).is_some());
         self.modes.0.retain(|k, _| plan.unit(*k).is_some());
@@ -102,10 +96,10 @@ impl RangeCells {
         self.0.len()
     }
 
-    fn sync(&self, spec: &GraphSpec) {
+    fn sync(&self, values: &Values) {
         for (&node, cells) in &self.0 {
             for &param in cells.declared().as_slice() {
-                cells.store(param, range_of(spec, ParamIn { node, param }));
+                cells.store(param, values.range(ParamIn { node, param }));
             }
         }
     }
@@ -113,7 +107,7 @@ impl RangeCells {
     /// The param state of a unit placed at `key` with `ports` param ports
     /// declaring `declared`: the key's cells, kept for the same list (a
     /// crossfade keeps the running state, which reads them) and fresh for
-    /// another, written from `spec`.
+    /// another, written from `values`.
     pub(super) fn state<F: Float>(
         &mut self,
         key: NodeKey,
@@ -121,7 +115,7 @@ impl RangeCells {
         max: usize,
         declick: usize,
         declared: Option<ParamPorts>,
-        spec: &GraphSpec,
+        values: &Values,
     ) -> ParamState<F> {
         if ports == 0 {
             self.0.remove(&key);
@@ -138,7 +132,7 @@ impl RangeCells {
             })
             .or_insert_with(|| ParamRanges::new(list));
         for &param in list.as_slice() {
-            cells.store(param, range_of(spec, ParamIn { node: key, param }));
+            cells.store(param, values.range(ParamIn { node: key, param }));
         }
         ParamState::new(ports, max, declick, cells.readers())
     }
@@ -158,25 +152,24 @@ impl GainCells {
         self.0.values().map(GainCell::reclaim).sum()
     }
 
-    fn sync(&self, spec: &GraphSpec, committed: Option<&GraphSpec>) {
+    fn sync(&self, spec: &GraphSpec, values: &Values) {
         for (id, cell) in &self.0 {
             if let Some(g) = spec.gains.get(id) {
-                carry_base(committed, *id, cell, g.base);
-                cell.store_range(g.range);
+                cell.store_range(values.gain_range(*id));
                 cell.store_fade(g.fade);
             }
         }
     }
 
     /// One cell per weighted lane of `plan`, kept across commits for an edge
-    /// that stays and written from `spec`. A lane a bus edge made gets the
-    /// fold's static weight in a cell of its own that nothing writes and no
-    /// one is handed.
+    /// that stays (its base is its one writer's) and made from `values` for
+    /// one that is new. A lane a bus edge made gets the fold's static weight
+    /// in a cell of its own that nothing writes and no one is handed.
     pub(super) fn for_plan(
         &mut self,
         plan: &Plan,
         spec: &GraphSpec,
-        committed: Option<&GraphSpec>,
+        values: &Values,
         bus_weights: &BusLanes,
     ) -> BTreeMap<EdgeId, GainCell> {
         let lanes: BTreeSet<EdgeId> = plan.sum_lanes.iter().flatten().copied().collect();
@@ -189,14 +182,14 @@ impl GainCells {
                     cell.store_fade(fade);
                     return (id, cell);
                 }
-                let gain = spec.gains.get(&id).copied().unwrap_or_default();
+                let fade = spec.gains.get(&id).map_or(EdgeFade::None, |g| g.fade);
+                let range = values.gain_range(id);
                 let cell = self
                     .0
                     .entry(id)
-                    .or_insert_with(|| GainCell::new(gain.base, gain.range));
-                carry_base(committed, id, cell, gain.base);
-                cell.store_range(gain.range);
-                cell.store_fade(gain.fade);
+                    .or_insert_with(|| GainCell::new(values.base(id), range));
+                cell.store_range(range);
+                cell.store_fade(fade);
                 (id, cell.clone())
             })
             .collect()
@@ -217,10 +210,10 @@ impl ModeCells {
         self.0.values().map(ModeCell::reclaim).sum()
     }
 
-    fn sync(&self, spec: &GraphSpec, values: &NodeValues) {
+    fn sync(&self, values: &Values) {
         for (&node, cell) in &self.0 {
             cell.store(values.mode(node));
-            cell.store_range(mix_range_of(spec, node));
+            cell.store_range(values.range(mix_at(node)));
         }
     }
 
@@ -231,15 +224,14 @@ impl ModeCells {
         &mut self,
         key: NodeKey,
         plan: &Plan,
-        spec: &GraphSpec,
-        values: &NodeValues,
+        values: &Values,
     ) -> ModeState<F> {
         let cell = self
             .0
             .entry(key)
             .or_insert_with(|| ModeCell::new(NodeMode::Active, values.mix(key)));
         cell.store(values.mode(key));
-        cell.store_range(mix_range_of(spec, key));
+        cell.store_range(values.range(mix_at(key)));
         let shape = &plan.unit(key).expect("a placed unit is in its plan").shape;
         ModeState::new(
             cell.clone(),
@@ -250,15 +242,10 @@ impl ModeCells {
     }
 }
 
-/// Writes `base`, the spec's, into `cell` when the spec's base moved since
-/// `committed` (a spec edit that bypassed `set_edge_gain`). Otherwise the cell
-/// is left as it is: it is the lane's knob and its one writer's, and the
-/// spec's copy may be behind it.
-fn carry_base(committed: Option<&GraphSpec>, id: EdgeId, cell: &GainCell, base: Amplitude) {
-    let seen = committed
-        .and_then(|spec| spec.gains.get(&id))
-        .map(|g| g.base);
-    if seen.is_none_or(|s| s.get().to_bits() != base.get().to_bits()) {
-        cell.store(base);
+/// The port a node's mix is driven at, and whose range it clamps to.
+fn mix_at(node: NodeKey) -> ParamIn {
+    ParamIn {
+        node,
+        param: NodeMix::ADDR,
     }
 }

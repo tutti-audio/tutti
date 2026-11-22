@@ -518,7 +518,7 @@ pub fn compile(
 
     // Params: each is declared by its node, and each source is an output of
     // its own.
-    for (&at, m) in graph.params() {
+    for (&at, &from) in graph.params() {
         if at.param != NodeMix::ADDR
             && node_shapes[dense[&at.node]]
                 .params
@@ -527,9 +527,7 @@ pub fn compile(
         {
             return Err(CompileError::UnknownParam { at });
         }
-        if let Some(from) = m.source
-            && from.port >= node_shapes[dense[&from.node]].event_out
-        {
+        if from.port >= node_shapes[dense[&from.node]].event_out {
             return Err(CompileError::ParamSourceOutOfRange { at, from });
         }
     }
@@ -615,12 +613,10 @@ pub fn compile(
             }
         }
     }
-    for (&at, m) in graph.params() {
-        if let Some(from) = m.source {
-            let (src, d) = (dense[&from.node], dense[&at.node]);
-            preds[d].push(src);
-            labelled.push((src, d, CycleEdge::Param { at, from }));
-        }
+    for (&at, &from) in graph.params() {
+        let (src, d) = (dense[&from.node], dense[&at.node]);
+        preds[d].push(src);
+        labelled.push((src, d, CycleEdge::Param { at, from }));
     }
     // A lane that drives the gain of an edge into a node's port runs before
     // the sum at that port, so before the node. (One into an output channel
@@ -927,7 +923,7 @@ pub fn compile(
         let mut params: Vec<PPort> = Vec::new();
         for (k, &param) in shape.params.as_slice().iter().enumerate() {
             let at = ParamIn { node: key, param };
-            let Some(e) = graph.params().get(&at).and_then(|m| m.source) else {
+            let Some(e) = graph.params().get(&at).copied() else {
                 continue;
             };
             let value = align_event(
@@ -950,7 +946,7 @@ pub fn compile(
             node: key,
             param: NodeMix::ADDR,
         };
-        if let Some(e) = graph.params().get(&at).and_then(|m| m.source) {
+        if let Some(e) = graph.params().get(&at).copied() {
             let value = align_event(
                 &mut em,
                 event_out_val[&e],

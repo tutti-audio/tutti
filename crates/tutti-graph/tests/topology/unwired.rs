@@ -115,18 +115,14 @@ fn rig() -> (Editor, Executor) {
     spec.set_edge_gain(
         id(inp(X, 0), direct(A, 0)),
         EdgeGain {
-            base: Amplitude::new(0.25),
             fade: EdgeFade::In,
             ..EdgeGain::default()
         },
     );
-    spec.set_edge_gain(
-        id(inp(X, 2), direct(A, 2)),
-        EdgeGain {
-            base: Amplitude::new(0.5),
-            ..EdgeGain::default()
-        },
-    );
+    ed.set_edge_gain(id(inp(X, 0), direct(A, 0)), Amplitude::new(0.25))
+        .expect("the edge exists");
+    ed.set_edge_gain(id(inp(X, 2), direct(A, 2)), Amplitude::new(0.5))
+        .expect("the edge exists");
     ed.commit().expect("the wide rig commits");
     exec.apply_pending();
     ed.collect();
@@ -210,7 +206,10 @@ fn a_surviving_edge_keeps_its_gain_and_its_fade() {
     let (mut ed, _exec) = rig();
     ed.insert(X, "ported", Unforkable(narrow()));
     let kept = ed.spec().gains[&id(inp(X, 0), direct(A, 0))];
-    assert_eq!(kept.base, Amplitude::new(0.25));
+    assert_eq!(
+        ed.edge_gain(id(inp(X, 0), direct(A, 0))),
+        Some(Amplitude::new(0.25))
+    );
     assert_eq!(kept.fade, EdgeFade::In);
     assert!(
         !ed.spec().gains.contains_key(&id(inp(X, 2), direct(A, 2))),
@@ -278,7 +277,7 @@ fn a_driver_on_a_missing_event_output_is_released() {
     let placed = ed.insert(X, "ported", Unforkable(narrow()));
     assert_eq!(placed.unwired.gains, vec![(lane, eout(X, 2))]);
     assert_eq!(ed.spec().gains[&lane].source, None);
-    assert_eq!(ed.spec().gains[&lane].base, Amplitude::new(0.25));
+    assert_eq!(ed.edge_gain(lane), Some(Amplitude::new(0.25)));
 }
 
 fn stereo() -> BusTopology {
@@ -400,7 +399,7 @@ fn param_drivers_on_lost_ports_are_released_and_listed() {
     want.sort();
     assert_eq!(listed, want);
     assert!(!ed.spec().params.contains_key(&undeclared));
-    assert_eq!(ed.spec().params[&mix].source, None);
+    assert!(!ed.spec().params.contains_key(&mix));
     ed.commit().expect("nothing names a port X lacks");
 }
 

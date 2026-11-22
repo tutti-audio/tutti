@@ -50,7 +50,6 @@
 //! starts at its value). The state is sized when the plan is applied, so
 //! nothing allocates on the audio thread.
 
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use tutti_buffers::Float;
@@ -112,29 +111,22 @@ impl EdgeFade {
     }
 }
 
-/// What an edge carries beside the signal: a linear gain, `base`, the
-/// `range` a driven value is clamped to, and the `source` that drives it.
+/// What the spec holds of an edge's gain lane: the `source` that drives it and
+/// the `fade` it runs.
 ///
 /// Spec data beside the edge, keyed by [`EdgeId`](crate::EdgeId) in
 /// [`GraphSpec::gains`](crate::GraphSpec::gains), not inside
 /// [`Edge`](crate::Edge). An edge **with** an entry is a weighted lane of its
-/// sink's sum; one without is plain. A weight of `1.0` is the plain sum, and a
-/// negative one inverts polarity.
-///
-/// Compared and hashed by bits, as [`ParamRange`] is, so a spec holding one
-/// stays `Eq + Hash`.
+/// sink's sum; one without is plain. The lane's base (a linear multiplier, `1.0`
+/// the plain sum, a negative one inverting polarity) and the `range` a driven
+/// value is clamped to are values the editor holds
+/// ([`Editor::set_edge_gain`](crate::Editor::set_edge_gain),
+/// [`Editor::set_edge_gain_range`](crate::Editor::set_edge_gain_range)).
 ///
 /// The base is a control and is never clamped, as a param's base is not:
-/// `range` clamps only a value a `source` drives.
-#[derive(Clone, Copy, Debug)]
+/// the range clamps only a value a `source` drives.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct EdgeGain {
-    /// The linear multiplier. Finite ([`GraphInvalid::BadEdgeGain`]); a
-    /// negative value inverts polarity.
-    ///
-    /// [`GraphInvalid::BadEdgeGain`]: crate::GraphInvalid::BadEdgeGain
-    pub base: Amplitude,
-    /// What a driven value is clamped to. A NaN bound is refused.
-    pub range: ParamRange,
     /// The event output that drives the gain, replacing the base from its
     /// first event on ([`GraphSpec::connect_edge_gain`](crate::GraphSpec::connect_edge_gain)).
     /// Its node must be in the graph; `None` reads the base.
@@ -153,54 +145,9 @@ impl EdgeGain {
     /// `UnitLaneConfig::new(EdgeGain::ADDR, ..)`.
     pub const ADDR: UnitAddr = UnitAddr::first(UnitParam::Volume);
 
-    /// The range a new entry gets: finite, so `w * s` cannot meet infinity,
-    /// and polarity is allowed (about +18 dB either way).
+    /// The range an edge gain gets until one is set: finite, so `w * s` cannot
+    /// meet infinity, and polarity is allowed (about +18 dB either way).
     pub const DEFAULT_RANGE: ParamRange = ParamRange::new(-8.0, 8.0);
-
-    /// An entry with this `base` and the [`DEFAULT_RANGE`](Self::DEFAULT_RANGE).
-    #[must_use]
-    pub const fn new(base: Amplitude) -> Self {
-        Self {
-            base,
-            range: Self::DEFAULT_RANGE,
-            source: None,
-            fade: EdgeFade::None,
-        }
-    }
-
-    /// Whether the entry can reach the audio thread: a finite base and no NaN
-    /// bound.
-    #[must_use]
-    pub(crate) fn is_sound(&self) -> bool {
-        self.base.get().is_finite() && !self.range.min.is_nan() && !self.range.max.is_nan()
-    }
-}
-
-impl Default for EdgeGain {
-    /// Unity, with the default range.
-    fn default() -> Self {
-        Self::new(Amplitude::UNITY)
-    }
-}
-
-impl PartialEq for EdgeGain {
-    fn eq(&self, other: &Self) -> bool {
-        self.base.get().to_bits() == other.base.get().to_bits()
-            && self.range == other.range
-            && self.source == other.source
-            && self.fade == other.fade
-    }
-}
-
-impl Eq for EdgeGain {}
-
-impl Hash for EdgeGain {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.base.get().to_bits().hash(state);
-        self.range.hash(state);
-        self.source.hash(state);
-        self.fade.hash(state);
-    }
 }
 
 /// One lane's live controls: its base, which [`Editor::set_edge_gain`] stores

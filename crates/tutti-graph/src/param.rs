@@ -36,7 +36,6 @@
 //! a buffer nothing else can read. Its source is a read of the node op, so
 //! the colouring and the verifier cover it like any input.
 
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::NodeKey;
@@ -263,11 +262,10 @@ impl Quantity for CellValue {
 /// are ordered where they are applied, never a panic; a NaN bound never
 /// reaches the audio thread
 /// ([`GraphInvalid::BadParamRange`](crate::GraphInvalid::BadParamRange)).
-/// Compared and hashed by bits, so a spec holding one stays `Eq + Hash`.
 /// Sixteen bytes, so a port's live range is published whole through a
 /// [`ParamRangeCell`] and a reader sees one publish's `min` and `max`
 /// together.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ParamRange {
     /// The lowest value.
     pub min: f64,
@@ -449,31 +447,6 @@ impl Default for ParamRange {
     fn default() -> Self {
         Self::UNBOUNDED
     }
-}
-
-impl PartialEq for ParamRange {
-    fn eq(&self, other: &Self) -> bool {
-        self.min.to_bits() == other.min.to_bits() && self.max.to_bits() == other.max.to_bits()
-    }
-}
-
-impl Eq for ParamRange {}
-
-impl Hash for ParamRange {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.min.to_bits().hash(state);
-        self.max.to_bits().hash(state);
-    }
-}
-
-/// How one param port is driven: its range, and its event source. No
-/// source is the same as no entry: the port reads its base.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct ParamMod {
-    /// What the value is clamped to.
-    pub range: ParamRange,
-    /// The event output whose value replaces the base.
-    pub source: Option<EventOutputPort>,
 }
 
 /// What a node reads for one of its params this block
@@ -777,9 +750,9 @@ pub(crate) fn render_ramps<F: Float>(
 ///
 /// A range is a control, as a base is: written on the control side
 /// ([`Editor::set_param_range`](crate::Editor::set_param_range), and every
-/// commit from the spec), read by the audio thread at the start of the
-/// port's step, so a move lands on the next block and costs a publish, not a
-/// plan. The spec's range is its initial value; the plan carries no range.
+/// commit from the editor's table), read by the audio thread at the start of
+/// the port's step, so a move lands on the next block and costs a publish, not
+/// a plan. The table's range is its initial value; the plan carries no range.
 ///
 /// One [`Publisher`] per port: both bounds are published whole, so a reader
 /// never pairs one publish's `min` with another's `max` (two atomics could).
@@ -856,10 +829,10 @@ impl ParamRanges {
 /// [`reader`](Self::reader), the reader its node lends once per block. Handed
 /// out by [`Editor::param_range_cell`](crate::Editor::param_range_cell).
 ///
-/// Read-only on purpose: the spec is the range's one writer
+/// Read-only on purpose: the editor's table is the range's one writer
 /// ([`Editor::set_param_range`](crate::Editor::set_param_range) stores into
-/// the spec and this cell together, and every commit rewrites the cell from
-/// the spec), so a publish that went to the cell alone would be undone by the
+/// the table and this cell together, and every commit rewrites the cell from
+/// the table), so a publish that went to the cell alone would be undone by the
 /// next commit.
 #[derive(Clone, Debug)]
 pub struct ParamRangeCell(Arc<Publisher<ParamRange>>);

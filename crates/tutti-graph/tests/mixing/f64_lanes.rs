@@ -119,7 +119,7 @@ fn render(ramp: Ramp, range: Option<ParamRange>) -> Vec<f64> {
     ed.spec_mut()
         .connect_param(at, EventOutputPort::new(SRC, 0));
     if let Some(range) = range {
-        ed.spec_mut().set_param_range(at, range);
+        ed.set_param_range(at, range).expect("a range");
     }
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -325,7 +325,7 @@ fn block(exec: &mut Executor<f64>, ed: &mut Editor<f64>) -> Vec<f64> {
 /// `k` of the next block, to `f64` rounding.
 #[test]
 fn an_f64_edge_weight_ramps_in_f64() {
-    use tutti_graph::{Edge, EdgeGain, EdgeId, PortSink};
+    use tutti_graph::{Edge, EdgeId, PortSink};
     use tutti_units::Amplitude;
     let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
     ed.insert(LANE, "dc", ForkByClone(Dc(FINE)));
@@ -335,8 +335,7 @@ fn an_f64_edge_weight_ramps_in_f64() {
         sink: PortSink::Output(0),
         from: Edge::Direct(from),
     };
-    ed.spec_mut()
-        .set_edge_gain(id, EdgeGain::new(Amplitude::new(0.5)));
+    ed.set_edge_gain(id, Amplitude::new(0.5)).expect("an edge");
     ed.commit().expect("commits");
     exec.apply_pending();
     let first = block(&mut exec, &mut ed);

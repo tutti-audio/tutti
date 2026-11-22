@@ -17,7 +17,7 @@ use crate::{Edge, EdgeId, PortSink};
 
 impl<F: Float> Editor<F> {
     /// Sets param port `at`'s range — what its driven value is clamped
-    /// to — **without a commit**: the spec records it, and the running unit
+    /// to — **without a commit**: the editor records it, and the running unit
     /// clamps to it from its next block on, as it reads a base moved through
     /// its control. Nothing is compiled or sent, so a host may call this
     /// for every move of a range control.
@@ -34,12 +34,9 @@ impl<F: Float> Editor<F> {
     ///   value is read. A range that shrinks around a held base or a ramp in
     ///   flight pins the value to its bound, and one that widens again lets
     ///   it go back to where the base and the ramp have got to by then.
-    /// - **Before a commit.** The spec holds the range, so it is also the
+    /// - **Before a commit.** The editor holds the range, so it is also the
     ///   initial range of a unit the next commit places, and a unit not yet
-    ///   committed starts with it. A range edited through
-    ///   [`spec_mut`](Self::spec_mut) instead lands at the next
-    ///   [`commit`](Self::commit), which, for an edit that changes only
-    ///   ranges, sends nothing either.
+    ///   committed starts with it.
     /// - **No declick.** The value steps to the new bound on the block's
     ///   first frame, as it did when a range change was a commit. A host
     ///   that wants a range to ramp moves it in steps, or drives the param
@@ -48,8 +45,7 @@ impl<F: Float> Editor<F> {
     ///   publish allocates the new range; [`reclaim`](Self::reclaim) frees
     ///   the old one once no block holds it); nothing
     ///   on the audio thread but the per-block lend it always makes.
-    /// - A port its node does not declare is recorded in the spec and
-    ///   clamps nothing.
+    /// - A port its node does not declare is recorded and clamps nothing.
     ///
     /// # Errors
     ///
@@ -68,7 +64,7 @@ impl<F: Float> Editor<F> {
             });
         }
         self.touch();
-        self.spec.set_param_range(at, range);
+        self.values.set_range(at, range);
         if at.param == NodeMix::ADDR {
             // The node's mix: its range is the mode cell's.
             if let Some(cell) = self.cells.modes.get(at.node) {
@@ -77,15 +73,6 @@ impl<F: Float> Editor<F> {
         } else {
             self.cells.ranges.store(at, range);
         }
-        // The cells hold it now, so the spec last committed holds it too: a
-        // later commit with nothing else to send is the plain comparison,
-        // not a validate. (A committed spec without the node differs in its
-        // topology anyway, and gets a full commit.)
-        if let Some(c) = self.life.committed_mut()
-            && c.spec.topology.nodes.contains_key(&at.node)
-        {
-            c.spec.set_param_range(at, range);
-        }
         Ok(())
     }
 
@@ -93,8 +80,8 @@ impl<F: Float> Editor<F> {
     /// clamps to and [`set_param_range`](Self::set_param_range) publishes to:
     /// for a reader outside the graph (a control lane registers a reader on
     /// it and lends once per block). Control side. Writes go through
-    /// `set_param_range`, which keeps the spec and the cell together (a
-    /// commit rewrites every cell from the spec).
+    /// `set_param_range`, which keeps the table and the cell together (a
+    /// commit rewrites every cell from the table).
     ///
     /// `None` until a commit has placed a unit declaring `at.param` at
     /// `at.node`. The view stays the port's while the units placed at the
@@ -119,7 +106,7 @@ impl<F: Float> Editor<F> {
 
     /// Moves edge `id`'s weight to `base` from the next block on, without a
     /// new plan: the control of a mixer's fader. It
-    /// stores into the lane's cell and the spec and **marks nothing for
+    /// stores into the editor's value and the lane's cell and **marks nothing for
     /// commit**: the executor reads the cell once at the start of a block and
     /// ramps from the weight the last block was given to this one's across
     /// the block, so a move does not zipper. A move set while the audio
@@ -127,7 +114,7 @@ impl<F: Float> Editor<F> {
     ///
     /// An edge with no entry yet gets one (with the default range): that is
     /// structural, and the next [`commit`](Self::commit) compiles the weighted
-    /// sum. An entry's `range` is kept.
+    /// sum. A lane's range is kept.
     ///
     /// # Errors
     ///
@@ -135,35 +122,40 @@ impl<F: Float> Editor<F> {
     /// `id` is not an edge of the spec, and [`GraphInvalid::BadEdgeGain`]
     /// for a base that is not finite.
     pub fn set_edge_gain(&mut self, id: EdgeId, base: Amplitude) -> Result<(), GraphInvalid> {
-        // The entry keeps its range and its source: a move of the base is a
-        // control.
-        let gain = EdgeGain {
-            base,
-            ..self.spec.gains.get(&id).copied().unwrap_or_default()
-        };
-        if !gain.is_sound() {
-            return Err(GraphInvalid::BadEdgeGain { id, gain });
+        let range = self.edge_value_range(id);
+        if !base.get().is_finite() {
+            return Err(GraphInvalid::BadEdgeGain { id, base, range });
         }
         self.check_gain_edge(id)?;
         self.touch();
-        self.spec.set_edge_gain(id, gain);
+        self.declare_lane(id);
+        self.values.set_base(id, base);
         if let Some(cell) = self.cells.gains.get(id) {
             cell.store(base);
-        }
-        // As for a range: the cell holds it, so the spec last committed
-        // holds it too, and a later commit with nothing else to send is the
-        // plain comparison. (A committed spec without the entry differs in
-        // its keys anyway, and gets a full commit.)
-        if let Some(c) = self.life.committed_mut()
-            && let Some(g) = c.spec.gains.get_mut(&id)
-        {
-            g.base = base;
         }
         Ok(())
     }
 
+    /// Edge `id`'s range as held now (the default for an edge with no entry).
+    fn edge_value_range(&self, id: EdgeId) -> ParamRange {
+        if self.spec.gains.contains_key(&id) {
+            self.values.gain_range(id)
+        } else {
+            EdgeGain::DEFAULT_RANGE
+        }
+    }
+
+    /// Gives edge `id` a gain lane if it has none, starting at unity with the
+    /// default range: a value left from an earlier lane is dropped.
+    fn declare_lane(&mut self, id: EdgeId) {
+        if !self.spec.gains.contains_key(&id) {
+            self.values.forget_edge(id);
+            self.spec.set_edge_gain(id, EdgeGain::default());
+        }
+    }
+
     /// Sets edge `id`'s declick fade ([`EdgeFade`]). A control, like the base:
-    /// it stores into the lane's cell and the spec and marks nothing for
+    /// it stores into the lane's cell and the spec's entry and marks nothing for
     /// commit, and the executor reads it at the start of a block. An edge with
     /// no entry gets one (unity, the default range), which is structural.
     ///
@@ -181,11 +173,10 @@ impl<F: Float> Editor<F> {
     pub fn set_edge_fade(&mut self, id: EdgeId, fade: EdgeFade) -> Result<(), GraphInvalid> {
         self.check_gain_edge(id)?;
         self.touch();
-        let gain = EdgeGain {
-            fade,
-            ..self.spec.gains.get(&id).copied().unwrap_or_default()
-        };
-        self.spec.set_edge_gain(id, gain);
+        self.declare_lane(id);
+        if let Some(g) = self.spec.gains.get_mut(&id) {
+            g.fade = fade;
+        }
         if let Some(cell) = self.cells.gains.get(id) {
             cell.store_fade(fade);
         }
@@ -295,11 +286,12 @@ impl<F: Float> Editor<F> {
                     (PortSink::Output(_), Edge::Feedback(_)) => false,
                 },
                 EdgeFade::In => {
-                    let plain = g.base == Amplitude::UNITY
-                        && g.source.is_none()
-                        && g.range == EdgeGain::DEFAULT_RANGE;
+                    let plain = g.source.is_none()
+                        && self.values.base(id) == Amplitude::UNITY
+                        && self.values.gain_range(id) == EdgeGain::DEFAULT_RANGE;
                     if plain {
                         self.spec.clear_edge_gain(id);
+                        self.values.forget_edge(id);
                     } else {
                         self.spec.set_edge_gain(
                             id,
@@ -352,8 +344,8 @@ impl<F: Float> Editor<F> {
 
     /// Clamps edge `id`'s driven value to `range` from the next block on,
     /// without a new plan: [`set_param_range`](Self::set_param_range)'s
-    /// contract for an edge gain (the cell, the spec and the last committed
-    /// spec move together; the base is never clamped; no declick). Like
+    /// contract for an edge gain (the cell and the editor's value move
+    /// together; the base is never clamped; no declick). Like
     /// [`set_edge_gain`](Self::set_edge_gain) it gives an edge with no entry
     /// one (unity, the new range), which is a recompile at the next commit.
     ///
@@ -367,23 +359,20 @@ impl<F: Float> Editor<F> {
         id: EdgeId,
         range: ParamRange,
     ) -> Result<(), GraphInvalid> {
-        let gain = EdgeGain {
-            range,
-            ..self.spec.gains.get(&id).copied().unwrap_or_default()
-        };
-        if !gain.is_sound() {
-            return Err(GraphInvalid::BadEdgeGain { id, gain });
+        if range.min.is_nan() || range.max.is_nan() {
+            let base = if self.spec.gains.contains_key(&id) {
+                self.values.base(id)
+            } else {
+                Amplitude::UNITY
+            };
+            return Err(GraphInvalid::BadEdgeGain { id, base, range });
         }
         self.check_gain_edge(id)?;
         self.touch();
-        self.spec.set_edge_gain(id, gain);
+        self.declare_lane(id);
+        self.values.set_gain_range(id, range);
         if let Some(cell) = self.cells.gains.get(id) {
             cell.store_range(range);
-        }
-        if let Some(c) = self.life.committed_mut()
-            && let Some(g) = c.spec.gains.get_mut(&id)
-        {
-            g.range = range;
         }
         Ok(())
     }
@@ -403,8 +392,8 @@ impl<F: Float> Editor<F> {
     /// stores into, which a control lane reads as its knob (a native param's
     /// knob is the node's own cell; an edge's is its gain). `None` until a
     /// commit has sent a plan with the edge's entry. Writing it moves the
-    /// base without touching the spec: [`edge_gain`](Self::edge_gain) reads
-    /// the cell, never the spec's copy, once there is one.
+    /// base without touching the editor's value: [`edge_gain`](Self::edge_gain)
+    /// reads the cell, never the value, once there is one.
     pub fn edge_gain_cell(&self, id: EdgeId) -> Option<ParamCell> {
         self.cells.gains.get(id).map(GainCell::knob)
     }
@@ -440,14 +429,10 @@ impl<F: Float> Editor<F> {
         let heard = |key: NodeKey| {
             (self.values.mode(key) == NodeMode::Bypassed && !self.bypasses_itself(key))
                 || self.values.mix(key) != Mix::WET
-                || self
-                    .spec
-                    .params
-                    .get(&ParamIn {
-                        node: key,
-                        param: NodeMix::ADDR,
-                    })
-                    .is_some_and(|m| m.source.is_some())
+                || self.spec.params.contains_key(&ParamIn {
+                    node: key,
+                    param: NodeMix::ADDR,
+                })
         };
         for &key in self.spec.topology.nodes.keys() {
             if heard(key)
@@ -560,24 +545,37 @@ impl<F: Float> Editor<F> {
     /// which a control lane reads as its knob (a native param's knob is the
     /// node's own cell; a node's mix is this), so `set_mix` and a route are
     /// one writer. `None` until a commit has placed the unit. Writing it moves
-    /// the mix without touching the spec: [`mix`](Self::mix) reads the cell.
+    /// the mix without touching the editor's value: [`mix`](Self::mix) reads
+    /// the cell.
     pub fn mix_cell(&self, key: NodeKey) -> Option<ParamCell> {
         self.cells.modes.get(key).map(ModeCell::knob)
     }
 
     /// Edge `id`'s base, if the edge has an entry: the live cell's once a
     /// commit has sent one (the one writer's, whether it is
-    /// [`set_edge_gain`](Self::set_edge_gain) or a lane's knob), the spec's
-    /// before.
+    /// [`set_edge_gain`](Self::set_edge_gain) or a lane's knob), the editor's
+    /// value before.
     pub fn edge_gain(&self, id: EdgeId) -> Option<Amplitude> {
-        let gain = self.spec.gains.get(&id)?;
-        Some(self.cells.gains.get(id).map_or(gain.base, GainCell::load))
+        self.spec.gains.get(&id)?;
+        Some(
+            self.cells
+                .gains
+                .get(id)
+                .map_or_else(|| self.values.base(id), GainCell::load),
+        )
     }
 
-    /// Write every live cell from the spec and the node values: every range
-    /// and mode, and a base the spec moved since the last commit.
+    /// Edge `id`'s range, if the edge has an entry: what
+    /// [`set_edge_gain_range`](Self::set_edge_gain_range) set, the default
+    /// before.
+    pub fn edge_gain_range(&self, id: EdgeId) -> Option<ParamRange> {
+        self.spec.gains.get(&id)?;
+        Some(self.values.gain_range(id))
+    }
+
+    /// Write every live cell from the values and the spec's fades: every
+    /// range, mode and fade.
     pub(super) fn sync_ranges(&self) {
-        let committed = self.life.committed().map(|c| &c.spec);
-        self.cells.sync(&self.spec, &self.values, committed);
+        self.cells.sync(&self.spec, &self.values);
     }
 }

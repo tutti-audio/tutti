@@ -693,7 +693,6 @@ mod main_output;
 mod meter;
 mod mode;
 mod node;
-mod node_values;
 mod par;
 mod param;
 mod param_event;
@@ -714,6 +713,7 @@ mod tap;
 #[cfg(feature = "testing")]
 pub mod testing;
 mod time;
+mod values;
 mod wake;
 
 pub use builder::{GraphBuilder, Renderer, Standalone};
@@ -775,8 +775,8 @@ pub use node::{
 };
 pub use par::Pool;
 pub use param::{
-    MAX_PARAM_PORTS, ParamIn, ParamInput, ParamMod, ParamPorts, ParamPortsError, ParamRange,
-    ParamRangeCell, ParamRangeReader, RangeView,
+    MAX_PARAM_PORTS, ParamIn, ParamInput, ParamPorts, ParamPortsError, ParamRange, ParamRangeCell,
+    ParamRangeReader, RangeView,
 };
 pub use param_event::{ParamEvent, ParamKind, ParamRamp, ParamSegment};
 pub use pass::{Pass, PassError};

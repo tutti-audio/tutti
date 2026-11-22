@@ -552,7 +552,7 @@ pub enum Op {
     },
 }
 
-/// One driven param port of a node op: the fused `ParamMod` step the op
+/// One driven param port of a node op: the fused param step the op
 /// runs before its node (see
 /// [`GraphSpec::connect_param`](crate::GraphSpec::connect_param)).
 ///

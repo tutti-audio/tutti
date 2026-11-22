@@ -173,7 +173,12 @@ impl Rig {
     /// reference interpreter's.
     fn render(&self, workers: usize, blocks: usize) -> Vec<Vec<f32>> {
         let mut pair = Pair::with_workers(BLOCK, workers);
-        pair.switch(&self.valid(), &self.kinds);
+        // A lane's weight is the fold's: the pair starts it at that base.
+        let lowering = self.lowering().expect("lowers");
+        for (&id, &weight) in &lowering.lanes {
+            pair.start_edge_gain(id, weight);
+        }
+        pair.switch(&lowering.spec.validate().expect("valid"), &self.kinds);
         let mut got: Vec<Vec<f32>> = vec![Vec::new(); pair.outputs];
         for b in 0..blocks {
             let input = input_signal((b * BLOCK) as u64, BLOCK);
@@ -754,8 +759,8 @@ fn connecting_and_removing_a_bus_edge_round_trips_through_the_editor() {
     ed.spec_mut()
         .topology
         .connect(at(2, 0), Edge::Direct(out_port(3, 0)));
-    ed.spec_mut()
-        .set_edge_gain(own, EdgeGain::new(Amplitude::new(0.25)));
+    ed.set_edge_gain(own, Amplitude::new(0.25))
+        .expect("the author's edge");
 
     ed.connect_bus(from(1, 0), bus_ref(2, 0)).unwrap();
     ed.commit().expect("commits");

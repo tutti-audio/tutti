@@ -138,7 +138,7 @@ use tutti_units::{SampleRate, Samples, Seconds};
 pub const DEFAULT_BLOCK_CAPACITY: Samples = Samples::new(8192);
 
 /// Why [`Engine::new`] refused a graph.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum GraphEngineError {
     /// The executor is not the editor's: they were not built together.

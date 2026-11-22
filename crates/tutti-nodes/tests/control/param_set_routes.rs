@@ -217,7 +217,7 @@ fn render_chorus(
         node: n,
         param: UnitParam::Rate.into(),
     };
-    g.spec_mut().set_param_range(at, ParamRange::new(0.0, 10.0));
+    g.param_range(at, ParamRange::new(0.0, 10.0));
     let mut r = g
         .renderer(Prepare::new(
             SampleRate::SR_48K,
@@ -385,7 +385,7 @@ fn render_lfo(param: UnitParam, range: ParamRange, depth: f64) -> (Vec<f32>, f64
         node: n,
         param: param.into(),
     };
-    g.spec_mut().set_param_range(at, range);
+    g.param_range(at, range);
     let mut r = g
         .renderer(Prepare::new(
             SampleRate::SR_48K,
@@ -491,7 +491,7 @@ where
         node: n,
         param: param.into(),
     };
-    g.spec_mut().set_param_range(at, range);
+    g.param_range(at, range);
     let mut r = g
         .renderer(Prepare::new(
             SampleRate::SR_48K,
@@ -752,8 +752,7 @@ fn shelf_handed_back(block: usize) -> Vec<f32> {
         node: n,
         param: UnitParam::GainDb.into(),
     };
-    g.spec_mut()
-        .set_param_range(at, ParamRange::new(-24.0, 24.0));
+    g.param_range(at, ParamRange::new(-24.0, 24.0));
     let mut r = g
         .renderer(Prepare::new(
             SampleRate::SR_48K,

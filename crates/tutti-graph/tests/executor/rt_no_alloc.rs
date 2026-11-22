@@ -1594,7 +1594,7 @@ fn parallel_fan_in_is_allocation_free() {
 /// lane runs the param port's step, with its clamp and its values, per block.
 fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
     use common::Burst;
-    use tutti_graph::{EdgeGain, EdgeId, PortSink};
+    use tutti_graph::{EdgeId, PortSink};
     use tutti_units::Amplitude;
     for n in [64u64, 100] {
         for at_port in [false, true] {
@@ -1647,8 +1647,8 @@ fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
                 ];
             }
             for k in 1..=n {
-                ed.spec_mut()
-                    .set_edge_gain(edge_of(k), EdgeGain::new(Amplitude::new(0.5)));
+                ed.set_edge_gain(edge_of(k), Amplitude::new(0.5))
+                    .expect("the edge exists");
             }
             if driven {
                 for (i, latency) in [0usize, 0, 40, 150].into_iter().enumerate() {
@@ -2102,7 +2102,7 @@ fn parallel_driven_mixes_are_allocation_free() {
 /// the ring (a push of a plain value), then a block rendered after the editor
 /// settled them (outside the gate: settling edits the spec) and recommitted.
 fn fading_edges_are_allocation_free_on(workers: usize) {
-    use tutti_graph::{EdgeFade, EdgeGain, EdgeId, PortSink};
+    use tutti_graph::{EdgeFade, EdgeId, PortSink};
     let (mut ed, mut exec) = Editor::new(prepare(64));
     use_pool(&mut exec, workers);
     for k in 1..=8u64 {
@@ -2125,8 +2125,8 @@ fn fading_edges_are_allocation_free_on(workers: usize) {
             .collect(),
     ];
     for k in 1..=8u64 {
-        ed.spec_mut()
-            .set_edge_gain(edge(k), EdgeGain::new(tutti_units::Amplitude::new(0.5)));
+        ed.set_edge_gain(edge(k), tutti_units::Amplitude::new(0.5))
+            .expect("the edge exists");
     }
     ed.commit().expect("commits");
     apply(&mut exec);
@@ -2288,7 +2288,7 @@ fn parallel_swap_is_allocation_free() {
 /// on every block, across commits (which allocate, outside the gate).
 #[test]
 fn edge_fades_are_allocation_free() {
-    use tutti_graph::{EdgeFade, EdgeGain, EdgeId, PortSink};
+    use tutti_graph::{EdgeFade, EdgeId, PortSink};
     use tutti_units::Amplitude;
     const BLOCK: usize = 64;
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
@@ -2305,10 +2305,10 @@ fn edge_fades_are_allocation_free() {
         sink: PortSink::Output(0),
         from: Edge::Direct(src(n)),
     };
-    ed.spec_mut()
-        .set_edge_gain(id(1), EdgeGain::new(Amplitude::new(0.5)));
-    ed.spec_mut()
-        .set_edge_gain(id(2), EdgeGain::new(Amplitude::new(0.25)));
+    ed.set_edge_gain(id(1), Amplitude::new(0.5))
+        .expect("the edge exists");
+    ed.set_edge_gain(id(2), Amplitude::new(0.25))
+        .expect("the edge exists");
     ed.set_edge_fade(id(1), EdgeFade::In).expect("the edge");
     ed.commit().expect("commits");
     apply(&mut exec);
@@ -2500,8 +2500,8 @@ fn event_pdc(ed: &mut Editor, base: u64) {
 fn applying_a_commit_allocates_nothing_on(workers: usize) {
     use tutti_buffers::MaxBlock;
     use tutti_graph::{
-        EdgeGain, EdgeId, EventCapacity, EventTapId, MeterId, MeterSpec, PortKind, PortSink,
-        TapAlign, TapId, TapOptions,
+        EdgeId, EventCapacity, EventTapId, MeterId, MeterSpec, PortKind, PortSink, TapAlign, TapId,
+        TapOptions,
     };
     use tutti_units::{Amplitude, SampleRate};
 
@@ -2698,8 +2698,8 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         sink: PortSink::Output(0),
         from: from(node.0, 0),
     };
-    ed.spec_mut()
-        .set_edge_gain(edge(first), EdgeGain::new(Amplitude::new(0.5)));
+    ed.set_edge_gain(edge(first), Amplitude::new(0.5))
+        .expect("the edge exists");
     ed.commit().expect("commits");
     applied(&mut exec);
     blocks(&mut exec, 8, 64);

@@ -134,7 +134,7 @@ impl<N> Replacement<N> {
 }
 
 /// Why [`Graph::replace`] took nothing. The incoming node was dropped.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ReplaceRefused {
     /// The graph is poisoned (a re-prepare failed with its units out); the
@@ -555,7 +555,7 @@ impl<F: Float> std::fmt::Debug for Graph<F> {
 }
 
 /// What a commit came to.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Committed {
     /// Sent.
     Sent,
@@ -2547,9 +2547,14 @@ impl<F: Float> Graph<F> {
             return;
         }
         let _ = self.editor.set_edge_fade(id, EdgeFade::None);
-        let plain = self.editor.spec().gains.get(&id).is_some_and(|g| {
-            g.base == Amplitude::UNITY && g.source.is_none() && g.range == EdgeGain::DEFAULT_RANGE
-        });
+        let plain = self
+            .editor
+            .spec()
+            .gains
+            .get(&id)
+            .is_some_and(|g| g.source.is_none())
+            && self.editor.edge_gain(id) == Some(Amplitude::UNITY)
+            && self.editor.edge_gain_range(id) == Some(EdgeGain::DEFAULT_RANGE);
         if plain {
             self.editor.spec_mut().clear_edge_gain(id);
             self.sweep_gain_targets();
@@ -3119,6 +3124,8 @@ impl<F: Float> Graph<F> {
                 ..EdgeGain::default()
             };
             self.editor.spec_mut().set_edge_gain(id, fresh);
+            let _ = self.editor.set_edge_gain(id, Amplitude::UNITY);
+            let _ = self.editor.set_edge_gain_range(id, EdgeGain::DEFAULT_RANGE);
             true
         } else {
             self.editor.spec_mut().clear_edge_gain(id).is_some()

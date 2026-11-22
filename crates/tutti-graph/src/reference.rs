@@ -121,13 +121,13 @@ use crate::node::{
     ConstantMask, Cx, Env, InPlaceMask, Node, Prepare, SilenceMask, Status, TransportChanges,
     TransportPosition,
 };
-use crate::node_values::NodeValues;
 use crate::param::{CellValue, ParamIn, ParamInput, ParamRange};
 use crate::param_event::{ParamEvent, ParamKind};
 use crate::plan::DelayKey;
 use crate::play::PlayClock;
 use crate::spec::{EventEdge, EventInputPort, EventOutputPort, ValidGraph};
 use crate::time::Offset;
+use crate::values::Values;
 use tutti_ump::ControlValue;
 use tutti_ump::{
     Address, BendValue, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7,
@@ -281,22 +281,18 @@ pub struct Reference<F: Float = f32> {
     /// The param-port state of each node's mix lane, in `F` as the
     /// executor's mix lane is.
     mix_ports: BTreeMap<NodeKey, RefParam<F>>,
-    /// Ranges moved by [`set_param_range`](Self::set_param_range) since the
-    /// last graph: they override the graph's.
-    ranges: BTreeMap<ParamIn, ParamRange>,
+    /// The ranges and edge bases and ranges: the table the last graph was
+    /// given, as moved by [`set_param_range`](Self::set_param_range),
+    /// [`set_edge_gain`](Self::set_edge_gain) and
+    /// [`set_edge_gain_range`](Self::set_edge_gain_range) since.
+    values: Values,
     /// The weight each edge gain's lane was given by the last block it ran
     /// (`w_prev`), kept while the graph keeps the
     /// edge's entry. The reference's own bookkeeping: none of the executor's.
     lane_prev: BTreeMap<EdgeId, F>,
-    /// Edge gains moved by [`set_edge_gain`](Self::set_edge_gain) since the
-    /// last graph: they override the graph's.
-    gain_moves: BTreeMap<EdgeId, Amplitude>,
     /// The param-port state of each driven edge gain's lane, as
     /// `Reference::params` keeps a node's: one rule (`ref_port`).
     gain_ports: BTreeMap<EdgeId, RefParam<F>>,
-    /// Edge gain ranges moved by [`set_edge_gain_range`](Self::set_edge_gain_range)
-    /// since the last graph.
-    gain_ranges: BTreeMap<EdgeId, ParamRange>,
     /// The mode each node was last told to be in: the executor's cell.
     wanted: BTreeMap<NodeKey, NodeMode>,
     /// The mix each node is to have from the next block on (`set_mix`).
@@ -334,7 +330,7 @@ impl<F: Float> std::fmt::Debug for Reference<F> {
             .field("dropped", &self.dropped)
             .field("reset_time", &self.reset_time)
             .field("frame", &self.frame)
-            .field("ranges", &self.ranges)
+            .field("values", &self.values)
             .field("lane_prev", &self.lane_prev)
             .field("play", &self.play)
             .field("play_playing", &self.play_playing)
@@ -421,11 +417,9 @@ impl<F: Float> Reference<F> {
             cancelled: 0,
             params: BTreeMap::new(),
             mix_ports: BTreeMap::new(),
-            ranges: BTreeMap::new(),
+            values: Values::default(),
             lane_prev: BTreeMap::new(),
-            gain_moves: BTreeMap::new(),
             gain_ports: BTreeMap::new(),
-            gain_ranges: BTreeMap::new(),
             wanted: BTreeMap::new(),
             wanted_mix: BTreeMap::new(),
             modes: BTreeMap::new(),
@@ -603,18 +597,18 @@ impl<F: Float> Reference<F> {
 
     /// Moves param port `at`'s range, from the next block on, without a new
     /// graph: `Editor::set_param_range`'s contract. The next
-    /// [`set_graph`](Self::set_graph) replaces it with the graph's (the
-    /// editor's spec records the move, so the two agree).
+    /// [`set_graph`](Self::set_graph) replaces it with the values it is given
+    /// (the editor's table records the move, so the two agree).
     pub fn set_param_range(&mut self, at: ParamIn, range: ParamRange) {
-        self.ranges.insert(at, range);
+        self.values.set_range(at, range);
     }
 
     /// Moves edge `id`'s weight, from the next block on, without a new graph:
     /// `Editor::set_edge_gain`'s contract. The next
-    /// [`set_graph`](Self::set_graph) replaces it with the graph's (the
-    /// editor's spec records the move, so the two agree).
+    /// [`set_graph`](Self::set_graph) replaces it with the values it is given
+    /// (the editor's table records the move, so the two agree).
     pub fn set_edge_gain(&mut self, id: EdgeId, base: Amplitude) {
-        self.gain_moves.insert(id, base);
+        self.values.set_base(id, base);
     }
 
     /// Moves edge `id`'s range, from the next block on, without a new graph:
@@ -631,7 +625,7 @@ impl<F: Float> Reference<F> {
 
     /// `Editor::set_edge_gain_range`'s contract.
     pub fn set_edge_gain_range(&mut self, id: EdgeId, range: ParamRange) {
-        self.gain_ranges.insert(id, range);
+        self.values.set_gain_range(id, range);
     }
 
     /// Switch to `graph`. `fresh` supplies a unit for every node that is new or
@@ -642,7 +636,7 @@ impl<F: Float> Reference<F> {
     ///
     /// If `fresh` lacks a needed unit.
     pub fn set_graph(&mut self, graph: &ValidGraph, fresh: BTreeMap<NodeKey, Box<dyn Node<F>>>) {
-        self.set_graph_with(graph, fresh, &BTreeMap::new(), &NodeValues::default());
+        self.set_graph_with(graph, fresh, &BTreeMap::new(), &Values::default());
     }
 
     /// As [`set_graph`](Self::set_graph), with the regenerated keys in
@@ -661,7 +655,7 @@ impl<F: Float> Reference<F> {
         fresh: BTreeMap<NodeKey, Box<dyn Node<F>>>,
         fades: &BTreeMap<NodeKey, crate::Fade>,
     ) {
-        self.set_graph_with(graph, fresh, fades, &NodeValues::default());
+        self.set_graph_with(graph, fresh, fades, &Values::default());
     }
 
     /// [`set_graph_with_fades`](Self::set_graph_with_fades), with a unit placed
@@ -671,7 +665,7 @@ impl<F: Float> Reference<F> {
         graph: &ValidGraph,
         mut fresh: BTreeMap<NodeKey, Box<dyn Node<F>>>,
         fades: &BTreeMap<NodeKey, crate::Fade>,
-        values: &NodeValues,
+        values: &Values,
     ) {
         let t = graph.topology();
         // Keys whose unit is not the one running now: removed, or replaced.
@@ -854,10 +848,8 @@ impl<F: Float> Reference<F> {
                     }
                 }
             }
-            for (at, m) in g.params() {
-                if at.node == k
-                    && let Some(from) = m.source
-                {
+            for (at, &from) in g.params() {
+                if at.node == k {
                     let n = from.node;
                     best = best.max(arrive(n, g, lat, memo) + lat(n));
                 }
@@ -909,15 +901,13 @@ impl<F: Float> Reference<F> {
                 }
             }
         }
-        for (&at, m) in graph.params() {
-            if let Some(from) = m.source {
-                let d = arrival[&at.node]
-                    .samples()
-                    .checked_sub(departure(from.node).samples())
-                    .unwrap_or_default();
-                if !d.is_zero() {
-                    delays.insert(DelayKey::ParamEvent { at, from }, d);
-                }
+        for (&at, &from) in graph.params() {
+            let d = arrival[&at.node]
+                .samples()
+                .checked_sub(departure(from.node).samples())
+                .unwrap_or_default();
+            if !d.is_zero() {
+                delays.insert(DelayKey::ParamEvent { at, from }, d);
             }
         }
         // The output time is the latest departure over every source of every
@@ -1134,13 +1124,11 @@ impl<F: Float> Reference<F> {
         self.arrival = arrival;
         self.delays = delays;
         self.graph = Some(graph.clone());
-        self.ranges.clear();
+        self.values = values.clone();
         // A lane lives as long as its entry: a commit that keeps the edge's
         // entry keeps its weight, one that drops it forgets it.
         self.lane_prev
             .retain(|id, _| graph.gains().contains_key(id));
-        self.gain_moves.clear();
-        self.gain_ranges.clear();
         self.gain_ports
             .retain(|id, _| graph.gains().contains_key(id));
     }
@@ -1230,7 +1218,7 @@ impl<F: Float> Reference<F> {
         let targets: BTreeMap<EdgeId, Amplitude> = graph
             .gains()
             .iter()
-            .map(|(&id, gain)| (id, self.gain_moves.get(&id).copied().unwrap_or(gain.base)))
+            .map(|(&id, _)| (id, self.values.base(id)))
             .collect();
         with_no_denormals(|| {
             // Scheduled commands: which land this block, and where. Kept in
@@ -1305,9 +1293,9 @@ impl<F: Float> Reference<F> {
                         }));
                     }
                 }
-                for (at, m) in graph.params() {
+                for (at, from) in graph.params() {
                     if at.node == k {
-                        v.extend(m.source.map(|s| s.node));
+                        v.push(from.node);
                     }
                 }
                 for (id, gain) in graph.gains() {
@@ -1837,7 +1825,7 @@ impl<F: Float> Reference<F> {
         // A lane's first block starts at its value; one that has run is on
         // a running port, so a source connected to it later declicks.
         if gain.source.is_some() || self.gain_ports.contains_key(&id) {
-            let range = self.gain_ranges.get(&id).copied().unwrap_or(gain.range);
+            let range = self.values.gain_range(id);
             let st = self.gain_ports.entry(id).or_default();
             if let Some(vals) = ref_port(
                 st,
@@ -1881,17 +1869,11 @@ impl<F: Float> Reference<F> {
             node: key,
             param: NodeMix::ADDR,
         };
-        let entry = graph.params().get(&at);
-        let source = entry.and_then(|m| m.source);
+        let source = graph.params().get(&at).copied();
         if source.is_none() && !self.mix_ports.contains_key(&key) {
             return None;
         }
-        let range = self
-            .ranges
-            .get(&at)
-            .copied()
-            .or(entry.map(|m| m.range))
-            .unwrap_or(NodeMix::DEFAULT_RANGE);
+        let range = self.values.range(at);
         let evs: Vec<ParamEvent> = match source {
             Some(from) => {
                 let src = events[&from].params.clone();
@@ -1939,12 +1921,8 @@ impl<F: Float> Reference<F> {
                 out.push(None);
                 continue;
             };
-            let (range, source) = graph
-                .params()
-                .get(&at)
-                .map(|m| (m.range, m.source))
-                .unwrap_or_default();
-            let range = self.ranges.get(&at).copied().unwrap_or(range);
+            let source = graph.params().get(&at).copied();
+            let range = self.values.range(at);
             // The source's events this block, through its PDC delay.
             let evs: Vec<ParamEvent> = match source {
                 Some(from) => {

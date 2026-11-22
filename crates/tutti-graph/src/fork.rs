@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
-use tutti_units::SampleRate;
+use tutti_units::{Amplitude, SampleRate};
 
 use crate::NodeKey;
 use crate::{Edge, FeedbackFrom, InputPort, OutputPort, PortSink, PortSource, Topology};
@@ -18,10 +18,9 @@ use crate::CompileError;
 use crate::RenderMode;
 use crate::editor::{CommitError, Editor};
 use crate::exec::Executor;
-use crate::gain::EdgeGain;
 use crate::node::{IntoNode, Node, NodeParts, Prepare};
-use crate::node_values::NodeValues;
 use crate::spec::{EventInputPort, GraphSpec};
+use crate::values::Values;
 use crate::wake::Wake;
 use tutti_buffers::Float;
 
@@ -228,7 +227,7 @@ pub struct PendingFork<F: Float = f32> {
     /// figures, generations).
     spec: GraphSpec,
     /// The mode and mix each unit starts steady in.
-    values: NodeValues,
+    values: Values,
     units: Vec<(NodeKey, Unit<F>)>,
 }
 
@@ -1058,7 +1057,7 @@ impl<F: Float> Editor<F> {
                 .params
                 .iter()
                 .filter(|(at, _)| keys.contains(&at.node))
-                .map(|(at, m)| (*at, *m))
+                .map(|(at, from)| (*at, *from))
                 .collect(),
             gains: BTreeMap::new(),
             // The fork is of the lowered spec: a bus edge is already its
@@ -1070,27 +1069,36 @@ impl<F: Float> Editor<F> {
         };
         // The edge gains whose edge the fork kept (an output channel the
         // fork rewired to one node has none): the fork sums as the live graph
-        // does, each lane starting at its base.
+        // does, each lane starting at its base and range.
         let mut spec = spec;
         spec.gains = live
             .gains
             .iter()
             .filter(|(id, _)| spec.has_edge(**id))
-            .map(|(id, g)| {
-                // The live base is the cell's (a lane's knob writes it).
-                let base = self.edge_gain(*id).unwrap_or(g.base);
-                (*id, EdgeGain { base, ..*g })
-            })
+            .map(|(id, g)| (*id, *g))
             .collect();
         // Each unit starts steady in the mode the live graph holds, with no
         // fade: an export hears the state, not a toggle. The mix is the live
         // cell's (a driving lane's knob writes it, so the editor's value may
         // be behind): the fork starts at the base, a lane's value being the
         // fork's own route's to give.
-        let mut values = NodeValues::default();
+        let mut values = Values::default();
         for &key in &keys {
             values.set_mode(key, self.mode(key));
             values.set_mix(key, self.mix(key));
+        }
+        self.values()
+            .copy_ranges(&mut values, |node| keys.contains(&node));
+        for &id in spec.gains.keys() {
+            // A lane a bus edge made has the fold's weight and no range of
+            // its own; an author's lane has the live base (a lane's knob
+            // writes the cell).
+            let base = match lowered.as_ref().and_then(|l| l.lanes.get(&id)) {
+                Some(&weight) => weight,
+                None => self.edge_gain(id).unwrap_or(Amplitude::UNITY),
+            };
+            values.set_base(id, base);
+            values.set_gain_range(id, self.values().gain_range(id));
         }
 
         let mode = prepare.render_mode();
@@ -1223,7 +1231,7 @@ impl<F: Float> Editor<F> {
                 .params
                 .iter()
                 .filter(|(at, _)| at.node == node)
-                .filter_map(|(_, m)| m.source.map(|s| s.node));
+                .map(|(_, from)| from.node);
             // The lanes that drive the gain of an edge into the node.
             let gains = spec
                 .gains
