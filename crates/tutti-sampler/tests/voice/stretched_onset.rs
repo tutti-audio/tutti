@@ -243,7 +243,7 @@ fn a_voice_that_leaves_its_window_and_re_enters_sounds_from_the_re_entry_frame()
 #[test]
 fn a_disk_voice_whose_ring_has_not_caught_up_plays_on_time_and_counts_an_underrun() {
     use tutti_graph::Node;
-    use tutti_sampler::{Voice, VoiceNode, VoiceSource};
+    use tutti_sampler::VoiceNode;
     const AT: usize = 4_000;
     const RES: usize = 128;
     let dir = tempfile::tempdir().expect("a temp dir");
