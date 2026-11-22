@@ -9,12 +9,12 @@ use crate::ProcessGuard;
 use interprocess::local_socket::traits::Stream as _;
 use interprocess::local_socket::{GenericNamespaced, Stream, ToNsName as _};
 use std::os::windows::io::{AsHandle, OwnedHandle};
-use std::process::{Child, Command};
+use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tutti_platform::Instant;
-use tutti_plugin_ipc_ffi::{Connection, LaneWire};
+use tutti_plugin_ipc_ffi::{Connection, LaneWire, Reaped, Spawn};
 use tutti_plugin_types::{IpcError, IpcResult};
 
 /// How long to wait between connect attempts.
@@ -36,11 +36,13 @@ pub(crate) struct Rendezvous {
 /// # Errors
 ///
 /// The OS's random source cannot be read, or the spawn is refused.
-pub(crate) fn spawn(mut command: Command) -> IpcResult<(Child, Rendezvous)> {
+pub(crate) fn spawn(mut command: Command) -> IpcResult<(Reaped, Rendezvous)> {
     let name = tutti_plugin_ipc_ffi::unique_name("tutti-bridge")
         .map_err(|e| IpcError::Io(std::io::Error::other(e)))?;
-    let child = command.arg(&name).spawn()?;
-    Ok((child, Rendezvous { name }))
+    command.arg(&name);
+    let server =
+        tutti_plugin_ipc_ffi::spawn(command, Spawn::Leader).map_err(crate::error::spawn_failed)?;
+    Ok((server, Rendezvous { name }))
 }
 
 impl Rendezvous {
