@@ -5,6 +5,7 @@
 //! Every figure is analytic: constants of exactly representable values and
 //! weights, so the weighted fold `(0.0 + w * a) + b` is exact in `f32`.
 
+use crate::offline::offline;
 use std::sync::Arc;
 use tutti_graph::{Fade, ForkByClone};
 
@@ -21,10 +22,6 @@ use tutti_units::{Gain, Samples};
 const A: f32 = 0.25;
 const B: f32 = 0.5;
 const BLOCK: usize = 64;
-
-fn offline() -> Session {
-    Session::builder().build().expect("builds")
-}
 
 fn amp(x: f64) -> Gain {
     Gain::new(x)

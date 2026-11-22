@@ -85,7 +85,7 @@
 //! )
 //! .expect("equal lengths");
 //!
-//! let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K).with_tempo(tutti_units::Bpm::of(120.0)).with_playing(true);
+//! let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K).tempo(tutti_units::Bpm::of(120.0)).playing(true);
 //! let midi = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 16384))];
 //! processor.process(&mut buffer, &ClapProcessContext {
 //!     midi: &midi,

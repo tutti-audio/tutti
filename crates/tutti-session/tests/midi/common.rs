@@ -1,10 +1,13 @@
 //! What the MIDI tests share: an offline session, and a [`Tap`] that stands in for a
 //! synth, logging every MIDI event its event input receives with its absolute frame.
 
+use std::sync::Arc;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
+use tutti_graph::UmpAt;
 use tutti_graph::{Cx, EventKind, IntoNode, Io, Node, NodeKey, NodeParts, Prepare, Shape, Status};
-use tutti_midi_runtime::TimedMidiEvent;
+use tutti_midi_runtime::{MidiOut, Outgoing, Taken, TimedMidiEvent};
+use tutti_rt::Mutex;
 use tutti_session::{Session, SessionNode};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
 use tutti_units::{Beat, BeatDuration};
@@ -58,6 +61,31 @@ impl SessionNode for Tap {
 /// An offline session at 48 kHz, stereo: the builder's MIDI nodes in.
 pub fn offline() -> Session {
     Session::builder().build().expect("builds")
+}
+
+/// A [`MidiOut`] that keeps every batch it is handed, in order.
+#[derive(Clone, Default)]
+pub struct Wire(Arc<Mutex<Vec<Vec<UmpAt>>>>);
+
+impl MidiOut for Wire {
+    fn queue_timed(&self, batch: &[Outgoing]) -> Taken {
+        self.0
+            .lock()
+            .push(batch.iter().map(|e| (e.at, e.ump)).collect());
+        Taken::within(batch, batch.len())
+    }
+}
+
+impl Wire {
+    /// The batches handed since the last call.
+    pub fn batches(&self) -> Vec<Vec<UmpAt>> {
+        std::mem::take(&mut *self.0.lock())
+    }
+
+    /// Every event handed so far, in order: it keeps them.
+    pub fn events(&self) -> Vec<UmpAt> {
+        self.0.lock().iter().flatten().copied().collect()
+    }
 }
 
 /// A tap in `s`'s graph, and what it hears.

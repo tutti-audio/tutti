@@ -75,8 +75,11 @@ impl PluginBus {
 
     /// This bus with the placement `topology`.
     #[must_use]
-    pub fn placed(self, topology: Option<ChannelTopology>) -> Self {
-        Self { topology, ..self }
+    pub fn placed(self, topology: ChannelTopology) -> Self {
+        Self {
+            topology: Some(topology),
+            ..self
+        }
     }
 
     /// The bus's placement when it has one that agrees with its width: the
@@ -429,7 +432,7 @@ mod tests {
     /// A stereo main input with its placement, a mono aux with none.
     fn main_and_aux() -> PluginBuses {
         vec![
-            PluginBus::new(ChannelLayout::STEREO, BusRole::Main).placed(Some(stereo())),
+            PluginBus::new(ChannelLayout::STEREO, BusRole::Main).placed(stereo()),
             PluginBus::new(ChannelLayout::MONO, BusRole::Aux),
         ]
     }
@@ -492,7 +495,13 @@ mod tests {
     #[test]
     fn topology_is_complete_only_when_every_bus_agrees_with_its_count() {
         let mono = ChannelTopology::default_for(ChannelLayout::MONO);
-        let bus = |topology| PluginBus::new(ChannelLayout::STEREO, BusRole::Main).placed(topology);
+        let bus = |topology: Option<ChannelTopology>| {
+            let bus = PluginBus::new(ChannelLayout::STEREO, BusRole::Main);
+            match topology {
+                Some(topology) => bus.placed(topology),
+                None => bus,
+            }
+        };
         let of = |input, output| PluginWiring {
             inputs: vec![bus(input)],
             outputs: vec![bus(output)],

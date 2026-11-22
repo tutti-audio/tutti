@@ -142,10 +142,11 @@ impl ClapLoaded {
                 } else {
                     BusRole::Aux
                 };
-                Some(
-                    PluginBus::new(port.layout, role)
-                        .placed(self.surround_topology(main, is_input, i)),
-                )
+                let bus = PluginBus::new(port.layout, role);
+                Some(match self.surround_topology(main, is_input, i) {
+                    Some(topology) => bus.placed(topology),
+                    None => bus,
+                })
             })
             .collect();
         if !buses.is_empty() {
@@ -531,8 +532,8 @@ impl Control for ClapLoaded {
 
     /// The `[main-thread]` callbacks the plugin made from another thread,
     /// which the host refused (`HostCallbacks::refused_off_thread_call`).
-    fn refused_off_thread_calls(&self) -> u64 {
-        self.host_state.refused_off_thread.get()
+    fn refused_off_thread_calls(&self) -> tutti_units::Calls {
+        tutti_units::Calls::new(self.host_state.refused_off_thread.get())
     }
 
     /// What the plugin's `request_process` raises: CLAP's `SLEEP` status is

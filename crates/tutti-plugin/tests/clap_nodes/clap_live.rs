@@ -162,8 +162,8 @@ fn settled(controls: &tutti_plugin_host::PluginControls, refused: u64, skipped: 
         controls,
         "the chunk in flight to be answered, refused or skipped",
         || {
-            controls.chunk_outcomes().refused > refused
-                || controls.chunk_outcomes().skipped > skipped
+            controls.chunk_outcomes().refused.get() > refused
+                || controls.chunk_outcomes().skipped.get() > skipped
         },
     );
 }
@@ -217,28 +217,28 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
         // The bridge thread counts a skip when it gets to the chunk, between
         // callbacks: what it counted since the last callback began is the
         // last block's.
-        let now_skipped = controls.chunk_outcomes().skipped;
+        let now_skipped = controls.chunk_outcomes().skipped.get();
         if b > warm_up {
             skips.extend((skipped..now_skipped).map(|_| b - 1 - warm_up));
         }
         skipped = now_skipped;
         let (missed, late, refused) = (
-            controls.chunk_outcomes().missed,
-            controls.chunk_outcomes().late,
-            controls.chunk_outcomes().refused,
+            controls.chunk_outcomes().missed.get(),
+            controls.chunk_outcomes().late.get(),
+            controls.chunk_outcomes().refused.get(),
         );
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::MONO).unwrap());
         ed.collect();
         if b >= warm_up {
             let at = b - warm_up;
             let first = (b * quantum) as u64;
-            if controls.chunk_outcomes().missed > missed {
+            if controls.chunk_outcomes().missed.get() > missed {
                 misses.push(at);
             }
-            for _ in late..controls.chunk_outcomes().late {
+            for _ in late..controls.chunk_outcomes().late.get() {
                 lates.push(at);
             }
-            for _ in refused..controls.chunk_outcomes().refused {
+            for _ in refused..controls.chunk_outcomes().refused.get() {
                 refuses.push(at);
             }
             let judged = at < blocks;
@@ -262,8 +262,8 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
         // it none and read as silence.
         settled(&controls, refused, now_skipped);
     }
-    skips.extend((skipped..controls.chunk_outcomes().skipped).map(|_| blocks + TRAILING - 1));
-    let unanswered = controls.chunk_outcomes().unanswered;
+    skips.extend((skipped..controls.chunk_outcomes().skipped.get()).map(|_| blocks + TRAILING - 1));
+    let unanswered = controls.chunk_outcomes().unanswered.get();
     drop(probe.handle);
     Run {
         declared,
