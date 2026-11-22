@@ -1,22 +1,16 @@
-//! Asking a peer which optional features its MPE Profile supports, and reading
-//! the answer as [`MpeFeatures`] (M2-120 section 3.7, Table 6; M2-102 sections 2.5 and 3.3).
+//! Reading a peer's answer about which optional features its MPE Profile supports, as [`MpeFeatures`] (M2-120 section 3.7, Table 6; M2-102 sections 2.5 and 3.3).
 //!
 //! The question is a Profile Details Inquiry for the MPE Profile
-//! ([`ProfileId::MPE`]) with the Optional Features Inquiry Target
-//! ([`MpeFeatures::INQUIRY_TARGET`]); the Reply carries four Inquiry Target
-//! Data bytes. [`ask_mpe_features`] sends the inquiry through a
-//! [`ProfileInitiator`], and [`mpe_features`] reads the [`ProfileOutcome`] it
-//! settles with. The two live here because `MpeFeatures` is the protocol
-//! crate's and the Initiator the device crate's, and neither names the other.
+//! ([`ProfileId::MPE`](tutti_midi_ci::ProfileId::MPE)) with the Optional
+//! Features Inquiry Target ([`MpeFeatures::INQUIRY_TARGET`]), sent through a
+//! [`ProfileInitiator::details`](tutti_midi_ci::ProfileInitiator::details); the
+//! Reply carries four Inquiry Target Data bytes. [`mpe_features`] reads the
+//! [`ProfileOutcome`] the inquiry settles with. It lives here because
+//! `MpeFeatures` is the protocol crate's and the outcome the CI crate's, and
+//! neither names the other.
 
-use tutti_platform::Instant;
-
-use tutti_midi_ci::{
-    CiDeviceId, DetailsData, InquiryTarget, Nak, ProfileAction, ProfileId, ProfileInitiator,
-    ProfileOutcome, ProfileRequestError,
-};
+use tutti_midi_ci::{DetailsData, Nak, ProfileOutcome};
 use tutti_midi_protocol::MpeFeatures;
-use tutti_ump::{MidiChannel, U7};
 
 /// How an answer to the Optional Features inquiry is not a feature set.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -36,27 +30,7 @@ pub enum MpeFeaturesError {
     NotDetails,
 }
 
-/// Asks the peer for the optional features of its MPE Profile on `channel`:
-/// the Profile is enabled on Channels, so the inquiry names no Group or
-/// Function Block (M2-120 Table 6).
-///
-/// # Errors
-///
-/// [`ProfileRequestError::AlreadyAsking`] when the same inquiry is waiting.
-pub fn ask_mpe_features(
-    initiator: &mut ProfileInitiator,
-    channel: MidiChannel,
-    now: Instant,
-) -> Result<Vec<ProfileAction>, ProfileRequestError> {
-    initiator.details(
-        CiDeviceId::Channel(channel),
-        ProfileId::MPE,
-        features_target(),
-        now,
-    )
-}
-
-/// The features an [`ProfileOutcome`] of [`ask_mpe_features`] declares.
+/// The features a [`ProfileOutcome`] of the Optional Features inquiry declares.
 ///
 /// # Errors
 ///
@@ -71,10 +45,6 @@ pub fn mpe_features(outcome: &ProfileOutcome) -> Result<MpeFeatures, MpeFeatures
         ProfileOutcome::TimedOut => Err(MpeFeaturesError::TimedOut),
         _ => Err(MpeFeaturesError::NotDetails),
     }
-}
-
-fn features_target() -> InquiryTarget {
-    InquiryTarget::new(U7::masked(MpeFeatures::INQUIRY_TARGET))
 }
 
 #[cfg(test)]

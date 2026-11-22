@@ -7,6 +7,9 @@ use tutti_midi_ci::{
 };
 use tutti_midi_protocol::{ControllerSupport, PitchBendSupport};
 
+use tutti_midi_ci::{InquiryTarget, ProfileInitiator};
+use tutti_ump::U7;
+
 use super::*;
 
 const OURS: u32 = 0x0101_0101;
@@ -28,6 +31,25 @@ fn initiator() -> (ProfileInitiator, Instant) {
         now,
     );
     (initiator, now)
+}
+
+fn features_target() -> InquiryTarget {
+    InquiryTarget::new(U7::masked(MpeFeatures::INQUIRY_TARGET))
+}
+
+/// The Profile Details Inquiry for the MPE Profile's Optional Features.
+fn ask(
+    i: &mut ProfileInitiator,
+    channel: tutti_ump::MidiChannel,
+    now: Instant,
+) -> Vec<ProfileAction> {
+    i.details(
+        CiDeviceId::Channel(channel),
+        ProfileId::MPE,
+        features_target(),
+        now,
+    )
+    .unwrap()
 }
 
 fn reply(data: &[u8]) -> Decoded {
@@ -52,7 +74,7 @@ fn outcome(actions: Vec<ProfileAction>) -> ProfileOutcome {
 #[test]
 fn the_inquiry_asks_the_mpe_profile_for_target_one() {
     let (mut i, now) = initiator();
-    let actions = ask_mpe_features(&mut i, tutti_ump::MidiChannel::of(0), now).unwrap();
+    let actions = ask(&mut i, tutti_ump::MidiChannel::of(0), now);
     let [
         ProfileAction::Send(CiMessage::ProfileDetailsInquiry {
             profile, target, ..
@@ -72,7 +94,7 @@ fn the_inquiry_asks_the_mpe_profile_for_target_one() {
 fn the_reply_reads_as_the_four_declared_features() {
     let (mut i, now) = initiator();
     let address = CiDeviceId::Channel(tutti_ump::MidiChannel::of(0));
-    ask_mpe_features(&mut i, tutti_ump::MidiChannel::of(0), now).unwrap();
+    ask(&mut i, tutti_ump::MidiChannel::of(0), now);
     let mut answer = reply(&[0x01, 0x01, 0x01, 0x02]);
     if let Decoded::Message(CiMessage::ProfileDetailsReply { header, .. }) = &mut answer {
         header.device_id = address;
