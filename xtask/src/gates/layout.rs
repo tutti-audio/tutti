@@ -556,7 +556,13 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
     }
 
     // A crate's code names none of its banned words.
-    for (krate, words, why) in NAME_BANS.iter().filter(|(k, ..)| by_name.contains_key(k)) {
+    for (krate, words, why) in NAME_BANS {
+        if !by_name.contains_key(krate) {
+            bad.push(format!(
+                "NAME_BANS names {krate}, which is not a workspace member; move the row with the crate"
+            ));
+            continue;
+        }
         let mut read = 0;
         for path in tree.files(&format!("crates/{krate}/src"), &skipped) {
             if !path.ends_with(".rs") || is_test_file(&path) {
@@ -804,6 +810,23 @@ mod tests {
             r.findings
                 .iter()
                 .any(|l| l.contains("tutti-units: no source file under crates/tutti-units/src")),
+            "{:?}",
+            r.findings
+        );
+    }
+
+    #[test]
+    fn a_name_ban_on_a_crate_that_is_not_a_member_is_a_stale_row() {
+        let members: Vec<_> = base()
+            .into_iter()
+            .filter(|&(_, name, _)| name != "tutti-units")
+            .map(|(dir, name, _)| (dir, name, ""))
+            .collect();
+        let r = run(&members);
+        assert!(
+            r.findings
+                .iter()
+                .any(|l| l.contains("NAME_BANS names tutti-units, which is not a workspace member")),
             "{:?}",
             r.findings
         );

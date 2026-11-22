@@ -454,3 +454,21 @@ fn affected_takes_exactly_one_base() {
     assert!(step(&[]).unwrap_err().contains("takes a base"));
     assert!(step(&["a", "b"]).is_err());
 }
+
+/// Every step of `loom` and `check-loom` builds under `--cfg loom`, and every
+/// step of `check-wasm` for `wasm32-unknown-unknown`: without them the recipe
+/// checks the host build and passes.
+#[test]
+fn the_model_and_target_recipes_carry_their_cfg_and_target() {
+    for (recipe, needle) in [
+        ("loom", "--cfg loom"),
+        ("check-loom", "--cfg loom"),
+        ("check-wasm", "--target wasm32-unknown-unknown "),
+    ] {
+        let steps = dry(recipe, &[]);
+        assert!(!steps.is_empty(), "{recipe}");
+        for l in &steps {
+            assert!(l.contains(needle), "{recipe}: {l}");
+        }
+    }
+}
