@@ -7,6 +7,8 @@
 //! here allocates after construction except [`Clone`].
 
 use crate::ParameterPoint;
+#[cfg(test)]
+use crate::fake::at_frame;
 
 /// A fixed-capacity buffer of [`ParameterPoint`]s: its storage is sized when
 /// it is built, off the audio thread, and nothing on it can grow it.
@@ -222,7 +224,7 @@ pub struct PointPool {
     /// Each holder of a block, by index, with the buffer it gets back.
     lent: Vec<(usize, PointBuf)>,
     /// Whether each holder, by index, holds a block.
-    holds: Vec<bool>,
+    holds: Box<[bool]>,
     /// The points a block holds.
     block_room: usize,
 }
@@ -235,7 +237,7 @@ impl PointPool {
         Self {
             free: (0..blocks).map(|_| PointBuf::with_capacity(room)).collect(),
             lent: Vec::with_capacity(blocks),
-            holds: vec![false; holders],
+            holds: vec![false; holders].into_boxed_slice(),
             block_room: room,
         }
     }
@@ -324,14 +326,14 @@ mod tests {
 
     fn at(offset: i32, value: f64) -> ParameterPoint {
         ParameterPoint {
-            sample_offset: offset,
+            sample_offset: at_frame(offset),
             value: Normalized::clamped(value),
         }
     }
 
-    fn points(buf: &PointBuf) -> Vec<(i32, f64)> {
+    fn points(buf: &PointBuf) -> Vec<(u32, f64)> {
         buf.iter()
-            .map(|p| (p.sample_offset, p.value.get()))
+            .map(|p| (p.sample_offset.get(), p.value.get()))
             .collect()
     }
 
@@ -349,8 +351,8 @@ mod tests {
             let inserted = buf.push_front(at(0, 0.5));
             (refused, inserted)
         });
-        assert_eq!(refused.0.map_err(|p| p.sample_offset), Err(9));
-        assert_eq!(refused.1.map_err(|p| p.sample_offset), Err(0));
+        assert_eq!(refused.0.map_err(|p| p.sample_offset.get()), Err(9));
+        assert_eq!(refused.1.map_err(|p| p.sample_offset.get()), Err(0));
         assert_eq!(points(&buf), vec![(0, 0.25), (1, 0.25), (2, 0.25)]);
         assert_eq!(buf.capacity(), 3);
         assert_eq!(buf.as_ptr(), storage);
@@ -375,7 +377,7 @@ mod tests {
         assert_eq!(points(&buf), vec![(0, 0.0), (40, 1.0), (10, 0.25)]);
         // At the same frame as the latest: the later write wins.
         assert!(!buf.push_or_replace_last(at(40, 0.125)));
-        assert_eq!(buf.iter().map(|p| p.sample_offset).max(), Some(40));
+        assert_eq!(buf.iter().map(|p| p.sample_offset.get()).max(), Some(40));
         assert_eq!(buf[1].value.get(), 0.125);
         assert_eq!(buf.capacity(), 3);
         // An empty buffer of no room stores nothing.
@@ -412,7 +414,7 @@ mod tests {
             assert!(buf.push(at(k, v)).is_ok());
         }
         let removed = assert_no_alloc::assert_no_alloc(|| buf.remove(1));
-        assert_eq!(removed.map(|p| p.sample_offset), Some(10));
+        assert_eq!(removed.map(|p| p.sample_offset.get()), Some(10));
         assert_eq!(points(&buf), vec![(0, 0.0), (20, 0.5)]);
         assert!(buf.remove(2).is_none());
         assert_eq!(buf.capacity(), 4);
@@ -442,16 +444,16 @@ mod tests {
             assert!(buf.push(at(frame, (k as f64 + 1.0) / 1024.0)).is_ok());
         }
         let mut reference: Vec<ParameterPoint> = buf.iter().copied().collect();
-        reference.sort_by_key(|p| p.sample_offset);
+        reference.sort_by_key(|p| p.sample_offset.get());
         assert_no_alloc::assert_no_alloc(|| buf.sort_by_offset());
-        let want: Vec<(i32, f64)> = reference
+        let want: Vec<(u32, f64)> = reference
             .iter()
-            .map(|p| (p.sample_offset, p.value.get()))
+            .map(|p| (p.sample_offset.get(), p.value.get()))
             .collect();
         assert_eq!(points(&buf), want);
         assert!(
             buf.windows(2)
-                .all(|w| w[0].sample_offset <= w[1].sample_offset)
+                .all(|w| w[0].sample_offset.get() <= w[1].sample_offset.get())
         );
     }
 

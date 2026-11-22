@@ -71,10 +71,6 @@ pub enum ParamUnit {
     MidiNote,
     /// A MIDI controller number, `0..=127`.
     MidiController,
-    /// A choice: the value is an index into named options.
-    Choice,
-    /// An on/off switch.
-    Toggle,
 }
 
 impl ParamUnit {
@@ -111,8 +107,7 @@ impl ParamUnit {
 
     /// Whether `range` is one this unit may be declared over.
     ///
-    /// Every unit but [`Choice`](Self::Choice) and [`Toggle`](Self::Toggle)
-    /// needs a **plain** range with finite bounds in order, because a
+    /// Every unit needs a **plain** range with finite bounds in order, because a
     /// normalized-only parameter's number is not in the unit and a unit
     /// without a range cannot be converted. On top of that:
     ///
@@ -124,14 +119,8 @@ impl ParamUnit {
     /// | `Pan` | inside `-1..=1` |
     /// | `MidiNote`, `MidiController` | inside `0..=127` |
     /// | `Decibels`, `Cents`, `Semitones`, `Octaves`, `Degrees` | any finite range |
-    ///
-    /// `Choice` and `Toggle` name an index or a switch, so they fit any range,
-    /// a normalized one included (VST3 declares nothing else).
     #[must_use]
     pub fn fits(self, range: &PluginParamRange) -> bool {
-        if matches!(self, Self::Choice | Self::Toggle) {
-            return true;
-        }
         let PluginParamRange::Plain { min, max, .. } = *range else {
             return false;
         };
@@ -150,7 +139,6 @@ impl ParamUnit {
             Self::Pan => min >= -1.0 && max <= 1.0,
             Self::MidiNote | Self::MidiController => min >= 0.0 && max <= 127.0,
             Self::Decibels | Self::Cents | Self::Semitones | Self::Octaves | Self::Degrees => true,
-            Self::Choice | Self::Toggle => true,
         }
     }
 }
@@ -410,15 +398,12 @@ mod tests {
         }
     }
 
-    /// A unit needs a plain range; a normalized-only parameter fits only
-    /// `Choice` and `Toggle`.
+    /// A unit needs a plain range; a normalized-only parameter fits none.
     #[test]
-    fn a_normalized_range_fits_only_choice_and_toggle() {
+    fn a_normalized_range_fits_no_unit() {
         let normalized = PluginParamRange::Normalized { default: 0.0 };
         assert!(!ParamUnit::Hertz.fits(&normalized));
         assert!(!ParamUnit::Percent.fits(&normalized));
-        assert!(ParamUnit::Choice.fits(&normalized));
-        assert!(ParamUnit::Toggle.fits(&normalized));
     }
 
     /// `with_measures` keeps a unit the range fits and drops one it does not.
@@ -522,6 +507,5 @@ mod tests {
         assert_eq!(Hz::from_plain(U::Cents, 1.0), None);
         assert_eq!(Cents::from_plain(U::Hertz, 1.0), None);
         assert_eq!(Hz::from_plain(U::Octaves, 1.0), None);
-        assert_eq!(Hz::from_plain(U::Choice, 1.0), None);
     }
 }

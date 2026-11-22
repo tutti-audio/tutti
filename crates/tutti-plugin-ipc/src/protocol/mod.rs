@@ -201,7 +201,10 @@ pub(crate) mod wire;
 ///   and the server answers `ControlReply::LaneOpened`. `AudioReply::Ready` and
 ///   the other two connections' handshakes are gone, so `AudioReply`'s
 ///   `ParametersApplied` moves down one tag.
-pub const PROTOCOL_VERSION: u32 = 61;
+/// - **Version 62** carries a parameter point's frame offset as an unsigned
+///   `Offset` (a varint of a `u32`), where it was a signed `i32` (a zigzag
+///   varint).
+pub const PROTOCOL_VERSION: u32 = 62;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///

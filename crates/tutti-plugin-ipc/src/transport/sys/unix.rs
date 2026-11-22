@@ -10,10 +10,10 @@ use interprocess::local_socket::traits::Stream as _;
 use std::io::{Read, Write};
 use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::net::UnixStream;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
-use tutti_plugin_ipc_ffi::{Connection, LaneWire};
+use tutti_plugin_ipc_ffi::{Connection, LaneWire, Reaped, Spawn};
 use tutti_plugin_types::IpcResult;
 use tutti_rt::Mutex;
 
@@ -38,22 +38,22 @@ fn pair() -> std::io::Result<(UnixStream, UnixStream)> {
 
 /// Spawns `command` with the server's end of a fresh socket pair as its standard
 /// input (the only descriptor it inherits besides the other two standard ones),
-/// and returns the child and the host's end, under the send timeout.
+/// and returns the server and the host's end, under the send timeout.
 ///
 /// # Errors
 ///
 /// The OS refused the socket pair or the spawn.
-pub(crate) fn spawn(mut command: Command) -> IpcResult<(Child, Rendezvous)> {
+pub(crate) fn spawn(mut command: Command) -> IpcResult<(Reaped, Rendezvous)> {
     let _spawning = SPAWN.lock();
     let (host, server) = UnixStream::pair()?;
     command.stdin(Stdio::from(OwnedFd::from(server)));
-    let child = command.spawn()?;
-    // The command's copy of the server's end closes here: the child's is the last
-    // one, so its end of the process is the host's end of stream.
-    drop(command);
+    let server =
+        tutti_plugin_ipc_ffi::spawn(command, Spawn::Leader).map_err(crate::error::spawn_failed)?;
+    // The command's copy of the server's end closed in the spawn: the server's is
+    // the last one, so its end of the process is the host's end of stream.
     let host = Stream::UdSocket(OwnedFd::from(host).into());
     let _ = host.set_send_timeout(Some(super::control::SEND_TIMEOUT));
-    Ok((child, Rendezvous(host)))
+    Ok((server, Rendezvous(host)))
 }
 
 impl Rendezvous {

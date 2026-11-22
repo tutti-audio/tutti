@@ -12,28 +12,18 @@ use super::os_status::OsStatus;
 use std::task::Poll;
 use tutti_platform::Instant;
 
-/// Whether a creation retries.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Window {
-    /// The creation has its full retry window.
-    Full,
-    /// An earlier window ended in failure recently: one attempt, no retry.
-    Suppressed,
-}
-
-/// The rule for a creation whose first attempt starts at `start`, and its window.
+/// The rule for a creation whose first attempt starts at `start`.
 ///
 /// `gave_up` is the instant an earlier creation's window ended in failure. Within
 /// [`CLIENT_BOUND`] of it the server is still known to be gone, so this creation
 /// makes its one attempt and does not retry; after that it gets a full window
 /// again.
-pub(crate) fn rule(start: Instant, gave_up: Option<Instant>) -> (Backoff, Window) {
-    let suppressed = gave_up.is_some_and(|at| start < at + CLIENT_BOUND);
+pub(crate) fn rule(start: Instant, gave_up: Option<Instant>) -> Backoff {
     let backoff = Backoff::client(start);
-    if suppressed {
-        (backoff.single_attempt(), Window::Suppressed)
+    if gave_up.is_some_and(|at| start < at + CLIENT_BOUND) {
+        backoff.single_attempt()
     } else {
-        (backoff, Window::Full)
+        backoff
     }
 }
 
@@ -52,7 +42,6 @@ pub(crate) enum StartFailure {
 #[derive(Debug)]
 pub(crate) struct ClientStart {
     backoff: Backoff,
-    window: Window,
     gave_up_at: Option<Instant>,
     /// Set by the poll that ended the creation, with how it ended.
     ended: Option<StartFailure>,
@@ -62,10 +51,8 @@ impl ClientStart {
     /// A creation whose first attempt is due at `start`, after a window that
     /// ended in failure at `gave_up` (see [`rule`]).
     pub(crate) fn new(start: Instant, gave_up: Option<Instant>) -> Self {
-        let (backoff, window) = rule(start, gave_up);
         Self {
-            backoff,
-            window,
+            backoff: rule(start, gave_up),
             gave_up_at: None,
             ended: None,
         }
@@ -101,7 +88,7 @@ impl ClientStart {
             }
             Poll::Ready(Err(Failure::Failed(status))) => StartFailure::Failed(status),
             Poll::Ready(Err(Failure::TimedOut { last })) => {
-                if self.window == Window::Full {
+                if !self.backoff.is_single_attempt() {
                     self.gave_up_at = Some(now);
                 }
                 StartFailure::TimedOut { last }
@@ -152,8 +139,7 @@ mod tests {
     fn a_creation_within_the_bound_of_a_failed_window_makes_one_attempt() {
         let start = Instant::now();
         for later in [ms(0), ms(5_000), CLIENT_BOUND - ms(1)] {
-            let (mut backoff, window) = rule(start + later, Some(start));
-            assert_eq!(window, Window::Suppressed);
+            let mut backoff = rule(start + later, Some(start));
             assert_eq!(backoff.failed(SERVER_GONE, start + later), Verdict::Fatal);
         }
     }
@@ -161,8 +147,7 @@ mod tests {
     #[test]
     fn a_creation_after_the_bound_of_a_failed_window_gets_a_full_window() {
         let start = Instant::now();
-        let (mut backoff, window) = rule(start + CLIENT_BOUND, Some(start));
-        assert_eq!(window, Window::Full);
+        let mut backoff = rule(start + CLIENT_BOUND, Some(start));
         assert_eq!(
             backoff.failed(SERVER_GONE, start + CLIENT_BOUND),
             Verdict::Retry
