@@ -434,10 +434,12 @@ impl<F: FftFloat> PhaseVocoder<F> {
     /// synthesised, overlap-added or read out.
     ///
     /// After `discard`, the cursors, the phase history and the frames taken are bit for bit
-    /// what `process` over the same input and the same `output` leaves. What differs is the
-    /// overlap-add: the frames run here added nothing to it, so the output of the next
+    /// what `process` over the same input and the same `output` leaves, wherever in a stream
+    /// it is called. What differs is the overlap-add: the frames run here added nothing to
+    /// it, and the hops they would have finished are cleared (so nothing from earlier
+    /// frames wraps into a later hop), so the output of the next
     /// [`window`](StftGeometry::window) frames is short of the frames that would have
-    /// overlapped it. A caller that seats a stream on history ([`seat`](Self::seat)) discards
+    /// overlapped it, and from there on it is `process`'s. A caller that seats a stream on history ([`seat`](Self::seat)) discards
     /// the frames whose output lies wholly inside the ramp, and the stream's phases are as
     /// if they had been synthesised. The counts are `process`'s: `produced` is the output
     /// frames discarded. No allocation.
@@ -538,6 +540,8 @@ impl<F: FftFloat> PhaseVocoder<F> {
         self.steps[slot] = self.step;
         if synthesise {
             self.finish_hop();
+        } else {
+            self.clear_hop();
         }
         self.cursor.frame_done(start, hop, self.advance);
     }
@@ -556,6 +560,18 @@ impl<F: FftFloat> PhaseVocoder<F> {
                 } else {
                     F::ZERO
                 };
+            }
+        }
+        self.clear_hop();
+    }
+
+    /// Clears the overlap-add slots of the hop at the cursor, which the ring reuses for the
+    /// hop a window on: whatever earlier frames added there is dropped.
+    fn clear_hop(&mut self) {
+        let hop = self.geometry.hop().get();
+        let mask = self.energy.len() - 1;
+        for t in self.cursor.finished..self.cursor.finished + hop {
+            for sum in &mut self.sum {
                 sum[t & mask] = F::ZERO;
             }
             self.energy[t & mask] = F::ZERO;

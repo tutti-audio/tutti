@@ -412,11 +412,11 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
                     window,
                     gate,
                 };
-                let seated =
+                let in_reach =
                     ahead.prime(&mut stretch, spare.as_mut(), &mut feed, &mut input, prime);
                 if !sounds {
                     // Any other silence unseats.
-                    if !seated {
+                    if !in_reach {
                         stretch.unseat();
                     }
                     return Piece::Silent;
@@ -445,9 +445,9 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
                 // stands as a memory voice does, from the ring; a loop wrap is a seek
                 // to it (no spare primes: the ring holds what the stream's window
                 // follows, not the loop's start).
-                let seated = ahead.prime(&mut stretch, None, &mut feed, &mut input, prime);
+                let in_reach = ahead.prime(&mut stretch, None, &mut feed, &mut input, prime);
                 if !sounds {
-                    if !seated {
+                    if !in_reach {
                         stretch.unseat();
                         feed.reader.idle();
                     }
@@ -518,8 +518,8 @@ impl Ahead<'_> {
     /// Primes the voice ahead of its first sounding frame (see `stretched`): where the
     /// transport stands inside the window, or ahead of a window that opens soon, so the
     /// first frame lands on its frame; and the spare, for a loop wrap ahead of a window
-    /// that covers the loop's start. Whether the voice is seated for a window it has not
-    /// entered, which its silence must not unseat.
+    /// that covers the loop's start. Whether a window is ahead of the voice or the transport
+    /// stands in it (priming ran or not), which the voice's silence must not unseat.
     fn prime<F: SamplerFloat>(
         &self,
         stretch: &mut Stretch<'_, F>,

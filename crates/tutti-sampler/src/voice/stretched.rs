@@ -588,7 +588,7 @@ fn pump<F: SamplerFloat>(
                 input,
                 out,
                 ahead,
-                Pull::Output(at, 0),
+                Pull::Output { at, frames: 0 },
             );
             if counts.consumed.get() == 0 {
                 break;
@@ -604,7 +604,10 @@ fn pump<F: SamplerFloat>(
             input,
             out,
             count,
-            Pull::Output(at + done, hop),
+            Pull::Output {
+                at: at + done,
+                frames: hop,
+            },
         );
         done += hop;
     }
@@ -614,7 +617,7 @@ fn pump<F: SamplerFloat>(
 #[derive(Clone, Copy)]
 enum Pull {
     /// `frames` output frames from frame `at` of the lanes.
-    Output(usize, usize),
+    Output { at: usize, frames: usize },
     /// The first analysis frame, taken in without synthesis ([`PhaseVocoder::discard`]).
     Discard,
 }
@@ -643,7 +646,7 @@ fn take<F: SamplerFloat>(
         .slice(Samples::new(0)..Samples::new(count));
     let counts = match pull {
         Pull::Discard => vocoder.discard(planes, Samples::new(1)),
-        Pull::Output(at, frames) => {
+        Pull::Output { at, frames } => {
             let mut lanes = PlanesMut::from_vecs(&mut out.lanes_mut()[..input.n])
                 .expect("BUG: a stretching voice has at least one lane, all as long");
             vocoder.process(

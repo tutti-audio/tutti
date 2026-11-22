@@ -702,3 +702,61 @@ fn a_seated_stream_is_the_history_itself_after_its_ramp() {
         "the first frames are a ramp"
     );
 }
+
+/// A discard mid-stream drops the overlap-add of the hop it skips: after processing a steady
+/// sine, discarding one frame, and processing past the energy ring's length, the output from
+/// one window after the discard on is the full path's (a vocoder that did not discard, at the
+/// same input offset) to the unity test's `1e-12`. A skipped hop whose slots kept the earlier
+/// frames' sum and energy would add them into the hop the ring reuses a ring-length later.
+#[test]
+fn a_discard_mid_stream_leaves_the_output_the_full_path_gives_one_window_on() {
+    let input = sine::<f64>(1234.5, 0.5, 0.3, 40_000);
+    let run = |discard: bool| {
+        let mut v = vocoder::<f64>(ChannelLayout::MONO);
+        v.seat();
+        let mut out = Vec::new();
+        let mut at = 0;
+        let block = |v: &mut PhaseVocoder<f64>, out: &mut Vec<f64>, at: &mut usize, n: usize| {
+            let needed = v.input_needed(Samples::new(n)).get();
+            let mut y = vec![0.0; n];
+            let counts = v.process(
+                Planes::new(&[&input[*at..*at + needed]]).unwrap(),
+                PlanesMut::new(&mut [&mut y]).unwrap(),
+            );
+            *at += counts.consumed.get();
+            out.extend(y);
+        };
+        for _ in 0..16 {
+            block(&mut v, &mut out, &mut at, 512);
+        }
+        let needed = v.input_needed(Samples::new(HOP)).get();
+        let counts = if discard {
+            v.discard(
+                Planes::new(&[&input[at..at + needed]]).unwrap(),
+                Samples::new(HOP),
+            )
+        } else {
+            let mut y = vec![0.0; HOP];
+            v.process(
+                Planes::new(&[&input[at..at + needed]]).unwrap(),
+                PlanesMut::new(&mut [&mut y]).unwrap(),
+            )
+        };
+        assert_eq!(counts.produced.get(), HOP);
+        at += counts.consumed.get();
+        out.extend(vec![0.0; HOP]);
+        for _ in 0..20 {
+            block(&mut v, &mut out, &mut at, 512);
+        }
+        out
+    };
+    let (full, cheap) = (run(false), run(true));
+    let from = 16 * 512 + HOP + WINDOW;
+    assert!(
+        full.len() > from + 2 * WINDOW,
+        "past the energy ring's length"
+    );
+    for k in from..full.len() {
+        assert!((full[k] - cheap[k]).abs() < 1e-12, "frame {k}");
+    }
+}
