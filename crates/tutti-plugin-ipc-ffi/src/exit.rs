@@ -22,7 +22,7 @@ mod platform {
     pub(super) enum Imp {}
 
     impl Imp {
-        pub(super) fn of(_child: &std::process::Child) -> Option<Self> {
+        pub(super) fn of(_process: &crate::Process) -> Option<Self> {
             None
         }
 
@@ -87,7 +87,7 @@ impl ExitWait {
     #[must_use]
     pub fn of(process: &Process) -> Self {
         Self {
-            inner: platform::Imp::of(process.as_child()),
+            inner: platform::Imp::of(process),
             unasked: AtomicBool::new(true),
         }
     }
