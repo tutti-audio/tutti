@@ -31,14 +31,14 @@ use tutti_nodes::{
     AutoPanConfig, AutoPanNode, BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig,
     BusStripNode, ChannelTimes, CombFilterConfig, CombFilterNode, CombForm, CompressorConfig,
     CompressorControls, CompressorNode, ConvolverNode, DelayConfig, DelayControls, DelayLayout,
-    DelayNode, DistanceConfig, DistanceNode, DistortionConfig, DistortionNode, DynamicEqConfig,
-    DynamicEqNode, EqBandConfig, EqBandNode, FrequencyShifterConfig, FrequencyShifterNode,
-    GateConfig, GateControls, GateNode, InterpolationMode, KeySource, LadderFilterConfig,
-    LadderFilterNode, LadderType, LfoConfig, LfoNode, LfoShape, LimiterConfig, LimiterControls,
-    LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserControls, PhaserNode,
-    PitchShifterConfig, PitchShifterNode, RingModConfig, RingModNode, ShapeKind, ShimmerConfig,
-    ShimmerNode, Stages, SvfFilterConfig, SvfFilterNode, SvfType, TremoloConfig, TremoloNode,
-    WavetableConfig, WavetableNode,
+    DelayNode, DiodeClipperConfig, DiodeClipperNode, DistanceConfig, DistanceNode,
+    DistortionConfig, DistortionNode, DynamicEqConfig, DynamicEqNode, EqBandConfig, EqBandNode,
+    FrequencyShifterConfig, FrequencyShifterNode, GateConfig, GateControls, GateNode,
+    InterpolationMode, KeySource, LadderFilterConfig, LadderFilterNode, LadderType, LfoConfig,
+    LfoNode, LfoShape, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayConfig,
+    ModDelayNode, PhaserConfig, PhaserControls, PhaserNode, PitchShifterConfig, PitchShifterNode,
+    RingModConfig, RingModNode, ShapeKind, ShimmerConfig, ShimmerNode, Stages, SvfFilterConfig,
+    SvfFilterNode, SvfType, TremoloConfig, TremoloNode, WavetableConfig, WavetableNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -196,6 +196,20 @@ fn delay_line() {
     })
     .control("cross feedback", |d| {
         assert!(d.param_set().set(UnitParam::CrossFeedback, 0.0));
+    })
+    .check();
+}
+
+#[test]
+fn diode_clipper() {
+    IsolateRow::new("DiodeClipperNode (stereo)", || {
+        DiodeClipperNode::<f32>::from(DiodeClipperConfig::new(ChannelLayout::STEREO))
+    })
+    .control("cutoff", |d| {
+        assert!(d.param_set().set(UnitParam::Cutoff, 900.0))
+    })
+    .control("drive", |d| {
+        assert!(d.param_set().set(UnitParam::GainDb, 30.0))
     })
     .check();
 }

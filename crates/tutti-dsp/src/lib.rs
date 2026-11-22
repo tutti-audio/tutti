@@ -86,6 +86,9 @@
 //! - **Waveshaping** (`waveshape.rs`): [`ShapeKind`], seven memoryless curves, and
 //!   [`WaveshaperBank`], which runs one over a block at a ramping or per-frame drive, with
 //!   [`Antialiasing`] of the first or second order.
+//! - **Diode clipper** (`diode_clipper.rs`): [`DiodeClipper`], the RC-loaded antiparallel diode
+//!   pair of Yeh, Abel and Smith, by the trapezoidal rule with a capped Newton solve seeded from
+//!   the Wright omega closed form (`wright_omega.rs`, `newton.rs`).
 //! - **Spatial** (`spatial/`): VBAP ([`SpeakerLayout`], Pulkki's pairs and triplets and the
 //!   gain solve over them, [`SpeakerGeometryError`]; [`VbapKernel`] and [`VbapGains`], one
 //!   direction's gains and one channel rendered along a ramp between two) and the HRTF
@@ -188,6 +191,7 @@ mod dct;
 mod decorrelator;
 mod delay;
 mod design;
+mod diode_clipper;
 mod distance;
 mod dither;
 mod dynamics;
@@ -207,6 +211,7 @@ mod lfo;
 mod loudness;
 mod modal;
 mod modulation;
+mod newton;
 mod noise;
 mod novelty;
 mod onepole;
@@ -225,6 +230,7 @@ mod tremolo;
 mod waveguide;
 mod waveshape;
 mod wavetable;
+mod wright_omega;
 
 mod mel;
 mod mfcc;
@@ -269,6 +275,7 @@ pub use delay::{
     FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError, InterpolationMode,
     MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError, NoteTimes, NoteTimesError,
 };
+pub use diode_clipper::{ClipperDrive, ClipperDriveError, DiodeClipper, DiodeClipperControls};
 pub use distance::{
     DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec, ReferenceDistance,
     ReferenceDistanceError,

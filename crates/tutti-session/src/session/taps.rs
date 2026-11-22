@@ -164,7 +164,9 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             meter: self.transport.settings().project_meter().clone(),
             executor: self.background.executor().downgrade(),
             #[cfg(feature = "midi-hardware")]
-            io: self.midi.hardware.io.as_mut(),
+            io: self.midi.hardware.locked(),
+            #[cfg(feature = "midi-hardware")]
+            link: self.midi.hardware.link(),
         };
         (midi, &mut self.resource_ids)
     }

@@ -143,7 +143,7 @@
 //! ```rust,no_run
 //! use std::sync::Arc;
 //! use tutti_midi_runtime::InputInlets;
-//! use tutti_midi_hardware::{MidiHardwareConfig, MidiSession};
+//! use tutti_midi_hardware::{HardwareMidiInputs, MidiHardwareConfig, MidiSession};
 //! use tutti_graph::Offset;
 //! use tutti_fixtures::midi;
 //! use tutti_ump::{MidiChannel, NoteVelocity};
@@ -153,7 +153,7 @@
 //! // they arrive), then a session over this platform's backend.
 //! let inlets = InputInlets::new(tutti_graph::EventCapacity::of(1024), std::time::Duration::from_millis(10));
 //! let executor = tutti_platform::Executor::new();
-//! let mut session = MidiSession::open(&executor, Arc::clone(&inlets), MidiHardwareConfig::new())?;
+//! let mut session = MidiSession::open(&executor, HardwareMidiInputs::new(Arc::clone(&inlets)), MidiHardwareConfig::new())?;
 //! // Awaited before any port opens: the proof it resolves to is what opening takes.
 //! let started = session.start().await?;
 //!

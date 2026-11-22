@@ -109,6 +109,8 @@ mod midi_ci;
 mod midi_follow;
 #[cfg(feature = "midi-hardware")]
 mod midi_hardware;
+#[cfg(feature = "midi-hardware")]
+mod midi_link;
 #[cfg(feature = "midi")]
 mod midi_load;
 // Where UDP sockets exist and the feature is on; its twin is empty of them.

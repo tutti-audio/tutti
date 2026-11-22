@@ -47,7 +47,8 @@
 //!   its two `Sweep` presets, a `KernelNode` over `ModDelayKernel`; the General MIDI chorus a third,
 //!   with no feedback and a finite tail) and `PhaserNode` (a `KernelNode` over `PhaserKernel`, its `Stages`
 //!   and `SweepRange` checked; the rate is floored at 0.01 Hz, a control signal's value and a cell's alike), both any width.
-//! - **Distortion** — `DistortionNode` and its `ShapeKind` waveshapers.
+//! - **Distortion** — `DistortionNode` and its `ShapeKind` waveshapers; `DiodeClipperNode`, an
+//!   RC-loaded antiparallel diode pair solved by a capped Newton iteration, oversampled.
 //! - **Bit crusher** — `BitCrusherNode`, a sample-and-hold and a quantizer, with no tail,
 //!   from a `BitCrusherConfig`.
 //! - **DC blocker** — `DcBlockerNode`, a first-order high-pass with a finite tail, from a
@@ -343,8 +344,14 @@ pub use tutti_dsp::{
     InterpolationMode, MaxDelay, MaxDelayError, NoteTimes, NoteTimesError,
 };
 
+mod diode_clipper;
 mod distortion;
+mod oversampled;
+pub use diode_clipper::{
+    DiodeClipperConfig, DiodeClipperKernel, DiodeClipperNode, DiodeClipperSet,
+};
 pub use distortion::{DistortionConfig, DistortionKernel, DistortionNode, DistortionSet};
+pub use tutti_dsp::{ClipperDrive, ClipperDriveError, DiodeClipperControls};
 // `ShapeKind` and `OversamplingFactor` are in `DistortionNode`'s signatures; what is behind
 // them is `tutti-dsp`'s.
 pub use tutti_dsp::{Antialiasing, AntialiasingError, OversamplingFactor, ShapeKind};

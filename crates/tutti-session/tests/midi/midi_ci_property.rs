@@ -659,52 +659,58 @@ fn a_call_pending_across_a_replug_ends_and_the_returned_port_takes_new_ones() {
 }
 
 impl Wire {
-    /// Steps the wire until `request` resolves. The bound is a count of simulated
-    /// milliseconds: it guards a request that never resolves.
-    fn settle<F: Future + Unpin>(&mut self, request: &mut F) -> F::Output {
-        for _ in 0..2000 {
-            if let Some(out) = self.result(request) {
-                return out;
-            }
-            self.step(1);
-        }
-        panic!("the request never resolved");
+    /// Awaits `request` while a thread plays the device and nothing updates the
+    /// session: the answer reaches the future from the session's MIDI-CI task.
+    /// The bound only guards a hang.
+    fn awaited<F: Future>(&mut self, request: F) -> F::Output {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let (fake, now) = (self.fake.clone(), self.now());
+        let mut peer = std::mem::replace(&mut self.peer, PePeer::new(store(), 1));
+        let stop = Arc::new(AtomicBool::new(false));
+        let executor = tutti_platform::Executor::new();
+        let device = {
+            let stop = Arc::clone(&stop);
+            executor
+                .spawn_dedicated("device", None, async move {
+                    while !stop.load(Ordering::Relaxed) {
+                        peer.answer(&fake, now);
+                        std::thread::yield_now();
+                    }
+                    peer
+                })
+                .expect("a thread")
+        };
+        let out = tutti_fixtures::block_on_within(request, Duration::from_secs(120));
+        stop.store(true, Ordering::Relaxed);
+        self.peer = tutti_platform::join(device).expect("the device ended");
+        out.expect("the request resolved with no update")
     }
 }
 
-/// **A future resolves in the session's updates, not by itself**: a Get polled
-/// with no update stays pending, and the updates that send it and read the answer
-/// make it ready.
+/// **A future resolves when the device answers, with no update**: the session's
+/// MIDI-CI task reads the answer and wakes the Get.
 #[test]
-fn a_fetch_is_pending_until_the_session_updates() {
+fn a_fetch_resolves_when_the_device_answers_with_no_update() {
     let mut wire = Wire::new(store());
-    let mut fetch = wire.listed(&PeResource::LocalOn).fetch();
-    for _ in 0..3 {
-        assert_eq!(wire.result(&mut fetch), None, "no update has run");
-    }
-    assert_eq!(wire.settle(&mut fetch), Ok(on(false)));
+    let fetch = wire.listed(&PeResource::LocalOn).fetch();
+    assert_eq!(wire.awaited(fetch), Ok(on(false)));
 }
 
-/// As a Get, a Set is pending until the session updates.
+/// As a Get, a Set resolves with no update.
 #[test]
-fn a_write_is_pending_until_the_session_updates() {
+fn a_write_resolves_when_the_device_answers_with_no_update() {
     let mut wire = Wire::new(store());
-    let mut write = wire.listed(&PeResource::LocalOn).write(on(true));
-    for _ in 0..3 {
-        assert_eq!(wire.result(&mut write), None, "no update has run");
-    }
-    assert_eq!(wire.settle(&mut write).map(|status| status.code()), Ok(200));
+    let write = wire.listed(&PeResource::LocalOn).write(on(true));
+    assert_eq!(wire.awaited(write).map(|status| status.code()), Ok(200));
 }
 
-/// As a Get, a Subscription is pending until the session updates.
+/// As a Get, a Subscription resolves to its lease with no update.
 #[test]
-fn a_subscribe_is_pending_until_the_session_updates() {
+fn a_subscribe_resolves_when_the_device_answers_with_no_update() {
     let mut wire = Wire::new(subscribable());
-    let mut subscribe = wire.listed(&PeResource::LocalOn).subscribe();
-    for _ in 0..3 {
-        assert!(wire.result(&mut subscribe).is_none(), "no update has run");
-    }
-    let lease = wire.settle(&mut subscribe).expect("a lease");
+    let subscribe = wire.listed(&PeResource::LocalOn).subscribe();
+    let lease = wire.awaited(subscribe).expect("a lease");
     assert_eq!(lease.presence(), Presence::Live);
 }
 

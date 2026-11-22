@@ -12,6 +12,7 @@ mod rt_no_alloc_convolver;
 mod rt_no_alloc_crossover;
 mod rt_no_alloc_cut_filter;
 mod rt_no_alloc_dc_blocker;
+mod rt_no_alloc_diode_clipper;
 mod rt_no_alloc_distance;
 mod rt_no_alloc_dynamic_eq;
 mod rt_no_alloc_dynamics;

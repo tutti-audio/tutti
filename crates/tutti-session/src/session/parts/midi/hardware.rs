@@ -14,6 +14,7 @@ use tutti_midi_device::MidiIdentity;
 use tutti_midi_hardware::Presented;
 
 use tutti_midi_runtime::MidiInputPorts;
+use tutti_platform::Task;
 use tutti_rt::Reclaim;
 use tutti_units::{SampleRate, Samples};
 
@@ -21,24 +22,55 @@ use super::MidiNodes;
 use crate::builder::Parts;
 use crate::graph::Graph;
 use crate::midi::MidiState;
+use crate::midi_link::MidiLink;
 use crate::value::{Cell, SlotCell, SlotId, ValueTable};
 use crate::{MidiPolicy, SessionEvent};
 
 /// The OS MIDI layer and the identity the session presents on it.
 #[derive(Debug)]
 pub(crate) struct Hardware {
-    pub(crate) io: Option<tutti_midi_hardware::MidiSession>,
+    /// Ends the MIDI-CI task as it drops, before the link it drives.
+    _task: Option<Task<()>>,
+    /// The OS MIDI layer, shared with the MIDI-CI task.
+    pub(crate) io: Option<Arc<MidiLink>>,
     /// Who the session is on the wire, as set ([`Session::policy`](crate::Session::policy)).
     policy: Arc<Cell<MidiPolicy>>,
 }
 
 impl Hardware {
-    /// The layer the builder opened, and the state that receives its device events.
+    /// The layer the builder opened, the task on the session's executor that
+    /// drives it (woken by `bells`' bell), and the state that receives its
+    /// device events.
     pub(crate) fn new<F: Float>(parts: &mut Parts<F>) -> (Self, MidiState) {
-        let io = parts.midi_io.take();
+        let (task, io) = match parts.midi_io.take() {
+            Some((io, bell, listener)) => {
+                let (link, task) = MidiLink::start(io, &parts.executor, bell, listener);
+                (Some(task), Some(link))
+            }
+            None => (None, None),
+        };
         let policy = crate::midi_hardware::policy_cell(io.is_some());
         let state = MidiState::with_device_events(parts.device_events.take());
-        (Self { io, policy }, state)
+        (
+            Self {
+                _task: task,
+                io,
+                policy,
+            },
+            state,
+        )
+    }
+
+    /// The layer, locked for a call.
+    pub(crate) fn locked(
+        &self,
+    ) -> Option<std::sync::MutexGuard<'_, tutti_midi_hardware::MidiSession>> {
+        self.io.as_deref().map(MidiLink::lock)
+    }
+
+    /// The link to the layer and its task.
+    pub(crate) fn link(&self) -> Option<&MidiLink> {
+        self.io.as_deref()
     }
 
     /// Registers the policy cell in `table`.
@@ -51,9 +83,7 @@ impl Hardware {
 
     /// The hardware inlets' clock and port set, scanned.
     pub(crate) fn reclaim(&self) -> usize {
-        self.io
-            .as_ref()
-            .map_or(0, |io| io.ports().inlets().reclaim())
+        self.locked().map_or(0, |io| io.ports().inlets().reclaim())
     }
 
     /// Makes the OS MIDI layer present what the policy says, then steps the
@@ -68,7 +98,7 @@ impl Hardware {
         out: &mut Vec<SessionEvent>,
     ) -> bool {
         self.apply_policy(nodes);
-        state.midi_input_phase(self.io.as_mut(), graph, now, out)
+        state.midi_input_phase(self.link(), graph, now, out)
     }
 
     fn apply_policy(&mut self, nodes: Option<&MidiNodes>) {
@@ -80,7 +110,7 @@ impl Hardware {
             .current()
             .identity
             .map(|identity: MidiIdentity| Presented { identity, groups });
-        if let Some(io) = &mut self.io
+        if let Some(mut io) = self.locked()
             && io.presented() != wanted
         {
             io.present(wanted);
@@ -90,7 +120,7 @@ impl Hardware {
     /// The inlets place an arrival a block after it came, a block of the
     /// device's callback.
     pub(crate) fn set_block(&self, block: Samples, rate: SampleRate) {
-        if let Some(io) = &self.io {
+        if let Some(io) = self.locked() {
             io.ports()
                 .inlets()
                 .set_lead(crate::midi::input_lead(block, rate));
