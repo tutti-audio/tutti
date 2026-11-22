@@ -1639,9 +1639,9 @@ impl<'a> Plugin<'a> {
     /// this node's plugin: cumulative, and carried across a crash reload, a
     /// swap to another plugin and a rebuild of the node at the same key, so it
     /// only grows. In events, as the MIDI inlets count theirs
-    /// ([`Losses`](crate::Losses)):
+    /// ([`Losses`](tutti_units::Losses)):
     ///
-    /// - [`lost`](crate::Losses::lost): MIDI events on the node's event input
+    /// - [`lost`](tutti_units::Losses::lost): MIDI events on the node's event input
     ///   that never reached the plugin (in a
     ///   block the plugin did not run, or the rest of a SysEx message that
     ///   lost a packet; events past the node's declared event-input bound are
@@ -1651,23 +1651,23 @@ impl<'a> Plugin<'a> {
     ///   dropped; and parameter edits the plugin made that the host did not
     ///   hear (a lost edit costs a stale readout, not audio, and the session
     ///   re-reads the parameters after one).
-    /// - [`evicted`](crate::Losses::evicted): parameter points that replaced
+    /// - [`evicted`](tutti_units::Losses::evicted): parameter points that replaced
     ///   the last one of a full queue.
-    /// - [`refused`](crate::Losses::refused): parameter points for a
+    /// - [`refused`](tutti_units::Losses::refused): parameter points for a
     ///   parameter the node has no slot for, writes of a parameter the plugin
     ///   dropped after the session read its declaration (a rescan), and chords
     ///   and scales past the capacity of a block's sequencer context.
     ///
     /// The MIDI the plugin sent that the node had no room to put out is in
-    /// [`lost`](crate::Losses::lost) too.
+    /// [`lost`](tutti_units::Losses::lost) too.
     ///
-    /// [`late`](crate::Losses::late) stays zero. Audio the plugin's pipeline did
+    /// [`late`](tutti_units::Losses::late) stays zero. Audio the plugin's pipeline did
     /// not answer in time is not an event loss: it is counted in chunks, by
     /// [`Diagnostics::chunks`]; the blocks the node did not render and
     /// the entries the plugin refused are counted in blocks, by
     /// [`Diagnostics::block_losses`].
     #[must_use]
-    pub fn losses(&self) -> crate::Losses {
+    pub fn losses(&self) -> tutti_units::Losses {
         self.hosted.losses()
     }
 

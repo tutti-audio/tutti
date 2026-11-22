@@ -15,8 +15,9 @@ use tutti_fixtures::midi;
 use tutti_fixtures::midi::key_of;
 use tutti_graph::{Cx, EventTapOptions, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_graph::{EventCapacity, EventInletNode, EventTapReader, TapAlign, TapEvent};
-use tutti_session::{DetachedSession, Losses, MainOutput, OutputPort, Session, Stamp};
+use tutti_session::{DetachedSession, MainOutput, OutputPort, Session, Stamp};
 use tutti_ump::{MidiChannel, U7, Ump};
+use tutti_units::Losses;
 use tutti_units::{Frame, SampleRate};
 
 fn session() -> DetachedSession {

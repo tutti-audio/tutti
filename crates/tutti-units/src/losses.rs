@@ -11,15 +11,13 @@ use core::ops::{Add, AddAssign};
 /// its `losses()`, so a caller sums holders (`Add`, `Sum`) and never learns
 /// each one's own getters.
 ///
-/// - [`lost`](Self::lost): gone without a trace, unreadable on arrival, or
-///   refused at a full ring on the way in (the inlet's writer answers
-///   `PushError::Full`).
+/// - [`lost`](Self::lost): gone without a trace, or refused at a full ring on
+///   the way in (the inlet's writer answers `PushError::Full`).
 /// - [`evicted`](Self::evicted): held, then dropped to make room for another.
 ///   A full waiting list or a ring that overwrote its oldest.
 /// - [`refused`](Self::refused): a port or a node declined it: no room at the
 ///   destination, or no destination (a Group with no port). A MIDI-CI message
-///   that an output could not take whole counts as one, and so does a MIDI
-///   2.0-only message on a MIDI 1.0 port (a port declined it).
+///   that an output could not take whole counts as one.
 /// - [`late`](Self::late): found past its frame and delivered at the block's
 ///   first frame. Not a loss of the event, a loss of its time.
 ///

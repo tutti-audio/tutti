@@ -352,7 +352,6 @@ pub use tutti_graph::{
 };
 #[cfg(feature = "midi")]
 pub use tutti_ump::{MidiChannel, MidiGroup};
-pub use tutti_units::Losses;
 #[cfg(feature = "midi-hardware")]
 pub use value::MidiPolicyTarget;
 pub use value::OutputPolicyTarget;
