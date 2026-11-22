@@ -911,8 +911,8 @@ fn dropping_an_input_does_not_wait_on_a_stuck_pump() {
 }
 
 /// The next note message (type `0x2`) that reaches `device`'s port, polling
-/// for up to `patience`; the sequencer's own notices about the subscription
-/// (Stream messages) pass by.
+/// for up to `patience`, waiting on the client's descriptors between reads; the
+/// sequencer's own notices about the subscription (Stream messages) pass by.
 fn next_note(device: &Virtual, patience: Duration) -> Option<(u32, Instant)> {
     let deadline = Instant::now() + patience;
     while Instant::now() < deadline {
@@ -923,7 +923,10 @@ fn next_note(device: &Virtual, patience: Duration) -> Option<(u32, Instant)> {
                 return Some((ump.0[0], Instant::now()));
             }
             Ok(tutti_alsa_ffi::Read::Event(_)) => {}
-            _ => std::thread::sleep(Duration::from_micros(500)),
+            _ => {
+                let left = deadline.saturating_duration_since(Instant::now());
+                device.0.wait_input(left).expect("a wait");
+            }
         }
     }
     None
@@ -1252,23 +1255,31 @@ fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
 
     let name = unique("negotiated");
     let device = plug_ump(&name, Protocol::Midi1);
+    let device_id = device.0.id();
     let stop = std::sync::Arc::new(AtomicBool::new(false));
     let inlets =
         tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), Duration::ZERO);
+    let executor = tutti_platform::Executor::new();
+    let bells = tutti_rt::Bells::new(&executor).unwrap();
+    let (bell, mut listener) = bells.bell();
     let mut session = crate::MidiSession::open(
-        &tutti_platform::Executor::new(),
-        crate::HardwareMidiInputs::new(inlets),
+        &executor,
+        crate::HardwareMidiInputs::new(inlets).ringing(bell),
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();
     let want = format!("{name}: port");
+    // Subscribed before the first look, so a change between the look and the
+    // wait is queued.
+    let mut changes = session.devices().subscribe();
     let deadline = Instant::now() + PATIENCE;
     let id = loop {
         if let Some(d) = session.inputs().into_iter().find(|d| d.name == want) {
             break d.id;
         }
-        assert!(Instant::now() < deadline, "device never listed");
-        std::thread::sleep(Duration::from_millis(10));
+        let left = deadline.saturating_duration_since(Instant::now());
+        tutti_fixtures::block_on_within(futures_lite::StreamExt::next(&mut changes), left)
+            .expect("the device to be listed");
     };
     let thread = {
         let stop = std::sync::Arc::clone(&stop);
@@ -1294,7 +1305,12 @@ fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
                                 .unwrap();
                         }
                     }
-                    _ => std::thread::sleep(Duration::from_millis(1)),
+                    // Any other event is consumed; only an empty read waits, for
+                    // the next packet or the waker's after `stop`.
+                    Ok(Read::Event(_)) => {}
+                    _ => {
+                        device.0.wait_input(PATIENCE).expect("a wait");
+                    }
                 }
             }
         })
@@ -1308,10 +1324,26 @@ fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
         if let Some(found) = session.stream(&id) {
             break found;
         }
-        assert!(Instant::now() < deadline, "the negotiation never settled");
-        std::thread::sleep(Duration::from_millis(2));
+        // The session rings its bell when the device's reply reaches the stream
+        // ring, and the negotiation's own steps are due at its deadline.
+        let left = deadline.saturating_duration_since(Instant::now());
+        let step = session.deadline().map_or(left, |at| {
+            at.saturating_duration_since(Instant::now()).min(left)
+        });
+        assert!(!left.is_zero(), "the negotiation never settled");
+        let _ = tutti_fixtures::block_on_within(listener.rung(), step);
     };
     stop.store(true, Ordering::Release);
+    // A packet to the device wakes it from its wait to see `stop`.
+    let waker = plug(&unique("negotiated-waker"));
+    waker
+        .0
+        .connect_to(PortId::of(0), Address::new(device_id, PortId::of(0)))
+        .unwrap();
+    waker
+        .0
+        .send_to_subscribers(PortId::of(0), &tutti_ump::Ump([0x2090_3C64, 0, 0, 0]))
+        .unwrap();
     thread.join().unwrap();
     assert_eq!(stream.basis(), crate::Basis::Negotiated);
     assert_eq!(stream.config().protocol, Protocol::Midi2);

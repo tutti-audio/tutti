@@ -81,13 +81,8 @@ impl Poller {
 }
 
 impl Client {
-    /// This client's input descriptors, and `stop`, which the owner of the
-    /// other end closes to wake the waiter, as a [`Poller`] that owns both.
-    ///
-    /// # Errors
-    ///
-    /// The code of the descriptor query that failed.
-    pub fn into_poller(self, stop: OwnedFd) -> Result<Poller> {
+    /// The client's input descriptors, as `pollfd`s the client owns.
+    fn input_descriptors(&self) -> Result<Vec<libc::pollfd>> {
         let events = libc::POLLIN;
         // SAFETY: `self` is open.
         let rc = unsafe { sys::snd_seq_poll_descriptors_count(self.raw(), events) };
@@ -112,12 +107,38 @@ impl Client {
             )
         };
         check(rc, Operation::PollDescriptors)?;
+        Ok(polls)
+    }
+
+    /// This client's input descriptors, and `stop`, which the owner of the
+    /// other end closes to wake the waiter, as a [`Poller`] that owns both.
+    ///
+    /// # Errors
+    ///
+    /// The code of the descriptor query that failed.
+    pub fn into_poller(self, stop: OwnedFd) -> Result<Poller> {
+        let mut polls = self.input_descriptors()?;
         polls.reserve_exact(1);
         Ok(Poller {
             client: Arc::new(Mutex::new(self)),
             seq: polls,
             stop,
         })
+    }
+
+    /// Blocks until the sequencer has input for this client (`true`) or
+    /// `timeout` passes (`false`). The descriptors are level-triggered, so input
+    /// that arrived after the last read returns at once. A `timeout` too long for
+    /// an `Instant` waits for ever.
+    ///
+    /// # Errors
+    ///
+    /// The descriptor query's failure, or the OS error of `poll` but an
+    /// interrupted wait, which is retried.
+    pub fn wait_input(&self, timeout: Duration) -> io::Result<bool> {
+        let mut polls = self.input_descriptors().map_err(io::Error::other)?;
+        let deadline = Instant::now().checked_add(timeout);
+        poll_until(&mut polls, deadline)
     }
 }
 
