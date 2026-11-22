@@ -803,29 +803,37 @@ fn removing_an_edge_removes_its_entry() {
     rig.ed.commit().expect("commits without the stale entry");
 }
 
-/// An entry dropped and declared again is a new lane: its cell starts at unity
-/// with the default range, not from what the dropped entry's cell held.
+/// An entry dropped and declared again before the next commit is one lane
+/// with one cell: the audio reads the new base and the default range the
+/// editor holds, not what the dropped entry's cell held.
 #[test]
-fn a_redeclared_entry_gets_a_fresh_cell() {
+fn a_redeclared_entry_is_read_by_the_audio_at_its_new_base() {
     let mut rig = Rig::new(0.5);
     let id = output_edge(1);
     let held = tutti_graph::ParamRange::of(-2.0, 2.0);
     rig.ed.set_edge_gain_range(id, held).expect("an edge");
+    rig.ed.commit().expect("commits");
+    rig.exec.apply_pending();
+    rig.block();
     let old = rig.ed.edge_gain_range_cell(id).expect("a cell");
     assert_eq!(old.current(), held);
 
     rig.ed.spec_mut().clear_edge_gain(id);
-    assert_eq!(rig.ed.edge_gain(id), None, "dropped");
-    assert!(
-        rig.ed.edge_gain_range_cell(id).is_none(),
-        "a dropped entry has no cell to read"
-    );
+    assert!(rig.ed.edge_gain_range_cell(id).is_none(), "dropped");
     rig.ed.set_edge_gain(id, amp(0.25)).expect("an edge");
     let new = rig.ed.edge_gain_range_cell(id).expect("a cell");
-    assert!(!old.same_cell(&new), "a new cell, not the dropped entry's");
+    assert!(old.same_cell(&new), "one cell per edge");
     assert_eq!(new.current(), EdgeGain::DEFAULT_RANGE);
-    assert_eq!(rig.ed.edge_gain_range(id), Some(EdgeGain::DEFAULT_RANGE));
     assert_eq!(rig.ed.edge_gain(id), Some(amp(0.25)));
+
+    rig.ed.commit().expect("commits");
+    rig.exec.apply_pending();
+    rig.block();
+    let got = rig.block();
+    assert!(
+        got.iter().all(|&x| x == (0.0 + 0.25 * 1.0) + 2.0),
+        "the audio reads the new base"
+    );
 }
 
 // ---------------------------------------------------------------------------

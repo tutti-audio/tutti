@@ -176,9 +176,18 @@ impl GainCells {
         self.0.contains_key(&id)
     }
 
-    /// Makes edge `id`'s cell from `values`, in place of any it had: a lane
-    /// declared again starts from unity, the default range and no fade.
+    /// Declares edge `id` from `values`: a lane declared again starts from
+    /// unity, the default range and no fade. An edge keeps the one cell the
+    /// executor may already read (a lane dropped and declared again before
+    /// the next commit sends no new plan), so the values are written into
+    /// it; a new edge gets a new cell.
     pub(super) fn declare(&mut self, id: EdgeId, values: &GraphValues) {
+        if let Some(cell) = self.0.get(&id) {
+            cell.store(values.base(id));
+            cell.store_range(values.gain_range(id));
+            cell.store_fade(values.fade(id));
+            return;
+        }
         let cell = GainCell::new(values.base(id), values.gain_range(id));
         cell.store_fade(values.fade(id));
         self.0.insert(id, cell);
