@@ -564,7 +564,7 @@ impl<F: Float> Editor<F> {
     /// node does not declare on that side),
     /// [`BusError::Fold`] (the topologies cannot be folded: a channel with no
     /// place, a width that disagrees),
-    /// [`BusError::GlobalTooWide`], and [`BusError::Overlaps`] /
+    /// [`BusError::MainInputTooWide`], and [`BusError::Overlaps`] /
     /// [`BusError::GainOnLane`] when a lane would land on an edge or a gain
     /// the spec already has.
     pub fn connect_bus(&mut self, from: BusOutputPort, to: NodeBus) -> Result<(), BusError> {
@@ -591,7 +591,7 @@ impl<F: Float> Editor<F> {
     /// # Errors
     ///
     /// [`BusError::MainOutputUndeclared`], [`BusError::NoSuchNode`],
-    /// [`BusError::NoSuchBus`], [`BusError::GlobalTooWide`],
+    /// [`BusError::NoSuchBus`], [`BusError::MainInputTooWide`],
     /// [`BusError::MainOutputFold`], and [`BusError::Overlaps`] /
     /// [`BusError::GainOnLane`] when a lane lands on an output source or a
     /// gain the spec already has.

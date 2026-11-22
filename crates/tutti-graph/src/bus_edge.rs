@@ -86,10 +86,10 @@ impl NodeBus {
 pub enum BusOutputPort {
     /// An output bus of a node.
     Node(NodeBus),
-    /// The graph's own global input, as one
+    /// The graph's main input, as one
     /// [`Unassigned`](tutti_buffers::Speaker::Unassigned) bus of its width: it folds
     /// only to a bus of the same width and kind.
-    Global,
+    MainInput,
 }
 
 /// How a bus edge maps its source's channels onto its sink's.
@@ -145,11 +145,11 @@ pub enum BusError {
         /// source bus an output.
         side: BusSide,
     },
-    /// The global input is wider than a bus holds
+    /// The graph's main input is wider than a bus holds
     /// ([`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)).
-    #[error("the global input ({width} channels) is wider than a bus")]
-    GlobalTooWide {
-        /// The global input's width.
+    #[error("the graph's main input ({width} channels) is wider than a bus")]
+    MainInputTooWide {
+        /// The main input's width.
         width: usize,
     },
     /// The two topologies cannot be folded: a channel has no place, a width
@@ -431,11 +431,12 @@ impl GraphSpec {
                 let (topology, first) = bus.resolve(shape.buses_out()).ok_or(no_bus)?;
                 (topology, first, Some(bus.node))
             }
-            BusOutputPort::Global => {
+            BusOutputPort::MainInput => {
                 let width = self.topology.inputs;
-                let topology = BusTopology::unassigned(width).ok_or(BusError::GlobalTooWide {
-                    width: usize::from(width.count()),
-                })?;
+                let topology =
+                    BusTopology::unassigned(width).ok_or(BusError::MainInputTooWide {
+                        width: usize::from(width.count()),
+                    })?;
                 (topology, 0, None)
             }
         };

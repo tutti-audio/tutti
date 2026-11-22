@@ -506,7 +506,7 @@ fn an_unfoldable_bus_edge_is_refused_at_the_call_and_stores_nothing() {
 fn the_global_input_is_a_unassigned_bus() {
     let (mut ed, _exec) = editor(&[(1, sink(2, unassigned(2)))], 0);
     let refused = ed
-        .connect_bus(BusOutputPort::Global, bus_ref(1, 0))
+        .connect_bus(BusOutputPort::MainInput, bus_ref(1, 0))
         .unwrap_err();
     assert!(
         matches!(
@@ -520,16 +520,16 @@ fn the_global_input_is_a_unassigned_bus() {
     );
     // Unassigned(2) into unassigned(2): the same width folds.
     ed.spec_mut().topology.inputs = ch(2);
-    ed.connect_bus(BusOutputPort::Global, bus_ref(1, 0))
+    ed.connect_bus(BusOutputPort::MainInput, bus_ref(1, 0))
         .unwrap();
     // Wider than a bus holds.
     ed.spec_mut().topology.inputs = ch(17);
     ed.spec_mut()
-        .disconnect_bus(BusOutputPort::Global, bus_ref(1, 0));
+        .disconnect_bus(BusOutputPort::MainInput, bus_ref(1, 0));
     let refused = ed
-        .connect_bus(BusOutputPort::Global, bus_ref(1, 0))
+        .connect_bus(BusOutputPort::MainInput, bus_ref(1, 0))
         .unwrap_err();
-    assert_eq!(refused, BusError::GlobalTooWide { width: 17 });
+    assert_eq!(refused, BusError::MainInputTooWide { width: 17 });
 }
 
 /// A node or a bus that does not exist, and a bus asked for on the wrong side,
