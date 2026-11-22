@@ -17,7 +17,7 @@ use tutti_plugin_ipc::{
     AudioSlab, ControlReply, ControlRequest, News, SlabHandle, SlabLayout, StagedState, Working,
 };
 use tutti_plugin_ipc_ffi::Ready;
-#[cfg(test)]
+#[cfg(all(test, feature = "clap"))]
 use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{
     EditorError, IpcResult, MAX_STATE_BYTES, MainThreadMarker, MainWork, MainWorkHandle,
