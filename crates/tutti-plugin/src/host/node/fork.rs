@@ -455,7 +455,7 @@ mod tests {
     use super::super::mock_server::{PRESET, STATE, rig, tempo};
     use super::*;
     use std::time::Duration;
-    use tutti_plugin_ipc::{IpcConfig, ServerWatch, unique_socket_path};
+    use tutti_plugin_ipc::{IpcConfig, ServerWatch};
     use tutti_plugin_types::PluginTail;
     use tutti_plugin_types::{PluginFormat, PluginRef, PresetId};
     use tutti_units::{SampleRate, Samples};
@@ -496,7 +496,7 @@ mod tests {
     /// A source over a live mock-served plugin, which lists presets.
     fn source_over(rig: &super::super::mock_server::Rig) -> ServedFork {
         let origin = LaunchSpec {
-            config: IpcConfig::at(unique_socket_path().expect("a socket path")),
+            config: IpcConfig::new(),
             origin: PluginRef::file("test.vst3"),
             format: PluginFormat::Vst3,
             load_editor: None,

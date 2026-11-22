@@ -46,6 +46,27 @@ impl TryFrom<WireName> for LaneWire {
     }
 }
 
+/// `stem`, this process's id, a count shared by every name this process makes
+/// and sixty-four random bits, joined by `-`: a name in the pipe namespace, which
+/// every local process shares, that is unique and cannot be guessed (a name that
+/// can be is claimed first, and the pipe it names is then a wire another process
+/// speaks).
+///
+/// # Errors
+///
+/// The operating system's random source cannot be read.
+pub fn unique_name(stem: &str) -> Result<String, SlabError> {
+    static COUNT: AtomicU64 = AtomicU64::new(0);
+    let mut bytes = [0u8; 8];
+    getrandom::fill(&mut bytes).map_err(SlabError::Name)?;
+    Ok(format!(
+        "{stem}-{}-{}-{:016x}",
+        std::process::id(),
+        COUNT.fetch_add(1, Ordering::Relaxed),
+        u64::from_ne_bytes(bytes),
+    ))
+}
+
 impl LaneWire {
     /// A fresh name: the process id, a per-process count and sixty-four random
     /// bits, so no two lanes this process makes meet and a peer cannot guess it.
@@ -54,15 +75,7 @@ impl LaneWire {
     ///
     /// The operating system's random source cannot be read.
     pub fn fresh() -> Result<Self, SlabError> {
-        static COUNT: AtomicU64 = AtomicU64::new(0);
-        let mut bytes = [0u8; 8];
-        getrandom::fill(&mut bytes).map_err(SlabError::Name)?;
-        Ok(Self(format!(
-            "{NAME_PREFIX}{}-{}-{:016x}",
-            std::process::id(),
-            COUNT.fetch_add(1, Ordering::Relaxed),
-            u64::from_ne_bytes(bytes),
-        )))
+        Ok(Self(unique_name(NAME_PREFIX.trim_end_matches('-'))?))
     }
 
     /// The pipe's name.

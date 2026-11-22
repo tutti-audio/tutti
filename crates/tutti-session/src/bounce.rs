@@ -63,8 +63,8 @@ use std::future::{Future, IntoFuture};
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
 use tutti_platform::{Instant, WeakExecutor};
@@ -78,7 +78,7 @@ use tutti_export::{
     Resample, Target, Written,
 };
 use tutti_graph::{CommitError, Editor, MissingSource, NodeKey, OutputPort, TapId, TapOptions};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 use tutti_tempo::TempoMap;
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig, OfflineTransport, RenderClock};
 use tutti_units::{Beat, Frame, SampleRate, Samples, Seconds};
@@ -1421,7 +1421,7 @@ impl BounceHandle {
     /// pipeline's own weights.
     #[must_use]
     pub fn progress(&self) -> Option<Progress> {
-        *self.progress.lock_recover()
+        *self.progress.lock()
     }
 
     fn stop_requested(&self) -> bool {
@@ -1430,7 +1430,7 @@ impl BounceHandle {
 
     /// The render's callback: records the reading.
     fn record(&self, p: &Progress) {
-        *self.progress.lock_recover() = Some(*p);
+        *self.progress.lock() = Some(*p);
     }
 }
 
@@ -2497,16 +2497,16 @@ mod tests {
         let (into, handle) = (Arc::clone(&seen), Arc::clone(&job_handle));
         let job = session
             .bounce(short().edit(Box::new(move |_: PreparedGraph<'_>| {
-                let handle = handle.lock().unwrap().clone().expect("set before run");
-                into.lock().unwrap().extend(handle.progress());
+                let handle = handle.lock().clone().expect("set before run");
+                into.lock().extend(handle.progress());
             })))
             .expect("starts");
         let handle = job.handle();
         assert!(handle.progress().is_none(), "nothing before the job runs");
-        *job_handle.lock().unwrap() = Some(handle.clone());
+        *job_handle.lock() = Some(handle.clone());
         let rendered = block_on(job);
         drop(session.apply(rendered).unwrap());
-        let at_edit = seen.lock().unwrap()[0];
+        let at_edit = seen.lock()[0];
         assert_eq!(at_edit.stage(), Stage::Preparing);
         assert!((at_edit.fraction() - 0.025).abs() < 1e-6, "{at_edit:?}");
         assert_eq!(at_edit.frames(), None);
@@ -2615,12 +2615,12 @@ mod tests {
             &mut session,
             short().clock(ExportClock::frozen()).edit(Box::new(
                 move |prepared: PreparedGraph<'_>| {
-                    *into.lock().unwrap() = Some((prepared.ctx.is_rolling(), prepared.ctx.beat()));
+                    *into.lock() = Some((prepared.ctx.is_rolling(), prepared.ctx.beat()));
                 },
             )),
         )
         .expect("the bounce renders");
-        let (rolling, beat) = seen.lock().unwrap().expect("the edit ran");
+        let (rolling, beat) = seen.lock().expect("the edit ran");
         assert!(!rolling, "a frozen bounce's timeline must not roll");
         assert_eq!(beat, tutti_units::Beat::new(0.0));
     }
@@ -2647,7 +2647,7 @@ mod tests {
                 .main_output_buffers()
                 .range(Range::Beats(Beat::new(3.0), Beat::new(4.0)))
                 .edit(Box::new(move |prepared: PreparedGraph<'_>| {
-                    *into.lock().unwrap() = Some((
+                    *into.lock() = Some((
                         prepared.ctx.beat(),
                         prepared.ctx.tempo_map().tempo_at(prepared.ctx.beat()),
                     ));
@@ -2655,7 +2655,7 @@ mod tests {
         )
         .expect("renders");
         assert_eq!(
-            seen.lock().unwrap().expect("the edit ran"),
+            seen.lock().expect("the edit ran"),
             (Beat::new(3.0), Bpm::of(90.0))
         );
     }
@@ -2680,11 +2680,11 @@ mod tests {
                 .main_output_buffers()
                 .range(Range::Beats(Beat::new(0.0), Beat::new(1.0)))
                 .edit(Box::new(move |prepared: PreparedGraph<'_>| {
-                    *into.lock().unwrap() = Some(prepared.ctx.tempo_map().constant_tempo());
+                    *into.lock() = Some(prepared.ctx.tempo_map().constant_tempo());
                 })),
         )
         .expect("renders");
-        let seen = seen.lock().unwrap().expect("the edit ran");
+        let seen = seen.lock().expect("the edit ran");
         assert_eq!(seen, Some(Bpm::of(75.0)));
     }
 

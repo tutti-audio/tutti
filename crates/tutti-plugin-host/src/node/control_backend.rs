@@ -35,7 +35,7 @@ use tutti_platform::Instant;
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, StateUse};
 use tutti_rt::PendingSampleRate;
 
-use parking_lot::Mutex;
+use tutti_rt::Mutex;
 
 use super::instance::{Changes, Instance, Lost};
 use super::off_main_wait::{OffMainWait, await_answer};

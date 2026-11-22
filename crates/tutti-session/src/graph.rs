@@ -88,7 +88,6 @@ use crate::{
     ChannelEdge, ConnectError, Connection, DeclarationError, InletError, InputPort, Key, MainInput,
     MainOutput, NoSuchNode, OutputPort, RemoveError, SessionNode, SetRateError,
 };
-use tutti_rt::LockExt;
 
 /// The largest block a device's graph is prepared for.
 ///
@@ -3565,7 +3564,7 @@ impl<F: Float> Graph<F> {
                 placed,
                 main_output: self.main_output_in_force(),
             });
-        *self.values.output_facts().lock_recover() = facts;
+        *self.values.output_facts().lock() = facts;
     }
 
     /// The control side of the engine's output folds; `None` with no engine.

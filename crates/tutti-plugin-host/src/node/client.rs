@@ -32,10 +32,10 @@ use tutti_plugin_types::{
 use tutti_rt::Rt;
 
 use arrayvec::ArrayVec;
-use parking_lot::Mutex;
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::{Bus, Buses, Cx, Offset, Shape};
 use tutti_plugin_types::{Layout, PluginBus, PluginWiring};
+use tutti_rt::Mutex;
 use tutti_rt::PendingSampleRate;
 use tutti_tempo::TempoView;
 use tutti_timeline::TempoReader;
