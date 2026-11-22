@@ -90,7 +90,8 @@ impl AlsaEndpoints {
     /// A fresh snapshot in `direction`.
     ///
     /// An unopenable sequencer is the platform error, tried again at the next
-    /// call.
+    /// call. Enumeration holds a MIDI 2.0 client of its own, never a pump's, so
+    /// a listing does not wait behind an input.
     fn list(&self, direction: PortDirection) -> Result<Vec<OsEndpoint>> {
         let mut held = self.enumerator.lock();
         let seq = match held.take() {
