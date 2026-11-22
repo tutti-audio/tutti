@@ -387,7 +387,8 @@ impl ParameterInfo {
 
     /// Sets what the number measures, if the declared [`range`](Self::range)
     /// fits `unit` ([`ParamUnit::fits`]); a unit the range does not fit leaves
-    /// [`measures`](Self::measures) `None`. Call it after the range is set.
+    /// [`measures`](Self::measures) `None`, and so does a later range it does
+    /// not fit.
     #[must_use]
     pub fn with_measures(mut self, unit: Option<ParamUnit>) -> Self {
         self.measures = unit.filter(|u| u.fits(&self.range));
@@ -523,14 +524,14 @@ impl ParameterInfo {
     /// Sets the range exactly as a format host built it.
     #[must_use]
     pub fn with_range(mut self, range: PluginParamRange) -> Self {
-        self.range = range;
+        self.set_range(range);
         self
     }
 
     /// Sets a declared plain range, in the unit [`unit`](Self::unit) names.
     #[must_use]
     pub fn with_plain_range(mut self, min: f64, max: f64, default: f64) -> Self {
-        self.range = PluginParamRange::Plain { min, max, default };
+        self.set_range(PluginParamRange::Plain { min, max, default });
         self
     }
 
@@ -538,8 +539,15 @@ impl ParameterInfo {
     /// that declared no plain range.
     #[must_use]
     pub fn with_normalized_default(mut self, default: f64) -> Self {
-        self.range = PluginParamRange::Normalized { default };
+        self.set_range(PluginParamRange::Normalized { default });
         self
+    }
+
+    /// Replaces the range, dropping a [`measures`](Self::measures) unit the new
+    /// range does not fit: the invariant the deserializer checks.
+    fn set_range(&mut self, range: PluginParamRange) {
+        self.range = range;
+        self.measures = self.measures.filter(|u| u.fits(&self.range));
     }
 
     /// Sets the step information.
@@ -1011,5 +1019,19 @@ mod measures_serde_tests {
         };
         assert!(serde_json::from_str::<ParameterInfo>(&with("-1.0")).is_err());
         assert!(serde_json::from_str::<ParameterInfo>(&with("20.0")).is_ok());
+    }
+
+    /// No builder order makes a document the deserializer refuses: a range set
+    /// after the unit, which the unit does not fit, drops the unit.
+    #[test]
+    fn a_range_set_after_a_unit_it_does_not_fit_drops_the_unit() {
+        let p = ParameterInfo::new(ParamId::new(4), "Cutoff")
+            .with_plain_range(20.0, 20_000.0, 1_000.0)
+            .with_measures(Some(ParamUnit::Hertz))
+            .with_plain_range(-1.0, 1.0, 0.0);
+        assert_eq!(p.measures(), None);
+        let json = serde_json::to_string(&p).expect("serializes");
+        let back: ParameterInfo = serde_json::from_str(&json).expect("what was built reads back");
+        assert_eq!(back.measures(), None);
     }
 }
