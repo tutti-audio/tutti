@@ -140,7 +140,7 @@
 //! # use tutti_buffers::Planes;
 //! use tutti_buffers::{ChannelLayout, MaxBlock};
 //! use tutti_units::{Hz, Q, UnitParam};
-//! use tutti_graph::{Prepare, Standalone};
+//! use tutti_graph::{Prepare, Renderer};
 //! use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 //! use tutti_units::{SampleRate, Samples};
 //!
@@ -151,13 +151,13 @@
 //!     .freq(Hz::new(800.0))
 //!     .q(Q::new(0.707));
 //! let filter = SvfFilterNode::from(config);
-//! let mut standalone = Standalone::new(filter, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
-//! let out = standalone.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
+//! let (mut renderer, _, controls) = Renderer::alone(filter, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
+//! let out = renderer.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
 //!
 //! // Sweeping the cutoff on the *running* node: the set writes the `Param`
 //! // cell the node reads, at the start of its next block.
-//! assert!(standalone.controls().set(UnitParam::Cutoff, 2_000.0));
-//! let out = standalone.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
+//! assert!(controls.set(UnitParam::Cutoff, 2_000.0));
+//! let out = renderer.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
 //! ```
 //!
 //! ## Changing a running node
@@ -233,7 +233,7 @@
 //! checked for what a rate does not change (finite, above 0, in order), and a frequency
 //! past the prepared rate's Nyquist is held under it, not refused. The nodes that are not
 //! kernels ([`LfoNode`], [`ConvolverNode`]) take their rate from `prepare` too. To drive a node
-//! outside a graph, prepare it first (`tutti_graph::Standalone`, or
+//! outside a graph, prepare it first (`tutti_graph::Renderer::alone`, or
 //! `tutti_graph::contract::prepared` in tests).
 //!
 //! ## Items

@@ -821,6 +821,60 @@ impl<F: Float> Renderer<F> {
         }
     }
 
+    /// One node alone in a graph, prepared for `prepare`: its audio inputs read the main
+    /// inputs and its audio outputs feed the main outputs, channel for channel. Returns the
+    /// renderer, the node's key and its controls. For tests, benches and examples that drive a
+    /// single node the way a graph runs it, prepared, in blocks, through an executor, rather
+    /// than by calling [`Node::process`](crate::Node::process) by hand.
+    ///
+    /// Allocates, as the rest of the renderer does. Not for an audio callback.
+    ///
+    /// ```
+    /// # use tutti_buffers::Planes;
+    /// use tutti_buffers::MaxBlock;
+    /// use tutti_graph::{ForkByClone, Prepare, Renderer};
+    /// # use tutti_graph::{Cx, Io, Node, Shape, Status};
+    /// # use tutti_units::{SampleRate, Samples};
+    /// # use tutti_buffers::ChannelLayout;
+    /// # #[derive(Clone)]
+    /// # struct Half;
+    /// # impl Node for Half {
+    /// #     fn shape(&self) -> Shape { Shape::through_unassigned(ChannelLayout::MONO) }
+    /// #     fn prepare(&mut self, _: &Prepare) {}
+    /// #     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+    /// #         let (ins, mut outs) = io.split();
+    /// #         for (o, i) in outs.get(0).iter_mut().zip(ins.get(0)) { *o = i * 0.5; }
+    /// #         Status::Modified
+    /// #     }
+    /// #     fn reset(&mut self) {}
+    /// # }
+    /// let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64)));
+    /// let (mut renderer, _key, ()) = Renderer::alone(ForkByClone(Half), prepare);
+    /// assert_eq!(renderer.render_input(Planes::new(&[&[1.0; 3]]).unwrap()), vec![vec![0.5; 3]]);
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// If the one-node graph does not build (a node whose shape the compiler refuses).
+    pub fn alone<N: IntoNode<F>>(node: N, prepare: Prepare) -> (Self, NodeKey, N::Controls) {
+        let NodeParts {
+            node,
+            controls,
+            fork,
+        } = node.into_parts();
+        let shape = node.shape();
+        let mut g = GraphBuilder::<F>::with_format(shape.audio_in(), shape.audio_out());
+        let key = g.insert(N::kind(), NodeParts::new(node, (), fork));
+        for c in 0..usize::from(shape.audio_in().count()) {
+            g.connect_input(c, key, c);
+        }
+        for c in 0..usize::from(shape.audio_out().count()) {
+            g.connect_output(key, c, c);
+        }
+        let renderer = g.renderer(prepare).expect("a one-node graph builds");
+        (renderer, key, controls)
+    }
+
     /// Renders in blocks of `frames` (the last of a render may be shorter).
     ///
     /// # Panics
@@ -980,99 +1034,5 @@ impl<F: Float> Renderer<F> {
     /// The pair back.
     pub fn into_parts(self) -> (Editor<F>, Executor<F>) {
         (self.editor, self.executor)
-    }
-}
-
-/// One node alone in a graph: its audio inputs read the main inputs and
-/// its audio outputs feed the main outputs, channel for channel. For
-/// tests, benches and examples that drive a single node the way a graph
-/// runs it — prepared, in blocks, through an executor — rather than by
-/// calling [`Node::process`](crate::Node::process) by hand.
-///
-/// Allocates, as [`Renderer`] does. Not for an audio callback.
-///
-/// ```
-/// # use tutti_buffers::Planes;
-/// use tutti_buffers::MaxBlock;
-/// use tutti_graph::{ForkByClone, Prepare, Standalone};
-/// # use tutti_graph::{Cx, Io, Node, Shape, Status};
-/// # use tutti_units::{SampleRate, Samples};
-/// # use tutti_buffers::ChannelLayout;
-/// # #[derive(Clone)]
-/// # struct Half;
-/// # impl Node for Half {
-/// #     fn shape(&self) -> Shape { Shape::through_unassigned(ChannelLayout::MONO) }
-/// #     fn prepare(&mut self, _: &Prepare) {}
-/// #     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-/// #         let (ins, mut outs) = io.split();
-/// #         for (o, i) in outs.get(0).iter_mut().zip(ins.get(0)) { *o = i * 0.5; }
-/// #         Status::Modified
-/// #     }
-/// #     fn reset(&mut self) {}
-/// # }
-/// let mut standalone = Standalone::new(ForkByClone(Half), Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
-/// assert_eq!(standalone.render_input(Planes::new(&[&[1.0; 3]]).unwrap()), vec![vec![0.5; 3]]);
-/// ```
-#[derive(Debug)]
-pub struct Standalone<C, F: Float = f32> {
-    renderer: Renderer<F>,
-    key: NodeKey,
-    controls: C,
-}
-
-impl<C, F: Float> Standalone<C, F> {
-    /// `node`, alone, prepared for `prepare`.
-    ///
-    /// # Panics
-    ///
-    /// If the one-node graph does not build (a node whose shape the
-    /// compiler refuses).
-    pub fn new<N: IntoNode<F, Controls = C>>(node: N, prepare: Prepare) -> Self {
-        let NodeParts {
-            node,
-            controls,
-            fork,
-        } = node.into_parts();
-        let shape = node.shape();
-        let mut g = GraphBuilder::<F>::with_format(shape.audio_in(), shape.audio_out());
-        let key = g.insert(N::kind(), NodeParts::new(node, (), fork));
-        for c in 0..usize::from(shape.audio_in().count()) {
-            g.connect_input(c, key, c);
-        }
-        for c in 0..usize::from(shape.audio_out().count()) {
-            g.connect_output(key, c, c);
-        }
-        let renderer = g.renderer(prepare).expect("a one-node graph builds");
-        Self {
-            renderer,
-            key,
-            controls,
-        }
-    }
-
-    /// The node's controls.
-    pub fn controls(&self) -> &C {
-        &self.controls
-    }
-
-    /// The node's key in the graph.
-    pub fn key(&self) -> NodeKey {
-        self.key
-    }
-
-    /// Renders one frame per input sample (see [`Renderer::render_input`]).
-    pub fn render_input(&mut self, input: Planes<'_, F>) -> Vec<Vec<F>> {
-        self.renderer.render_input(input)
-    }
-
-    /// Renders `frames` with silent inputs (see [`Renderer::render`]).
-    pub fn render(&mut self, frames: usize) -> Vec<Vec<F>> {
-        self.renderer.render(frames)
-    }
-
-    /// The renderer, to set the block or the transport, or reach the
-    /// editor.
-    pub fn renderer_mut(&mut self) -> &mut Renderer<F> {
-        &mut self.renderer
     }
 }

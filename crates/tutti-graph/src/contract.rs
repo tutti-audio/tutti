@@ -1760,7 +1760,7 @@ macro_rules! contract_tests {
 /// then the block is as long as the first fed param.
 ///
 /// For a node's own unit tests, which inspect its state between blocks —
-/// what a [`Standalone`](crate::Standalone), whose node the executor owns, cannot show.
+/// what a [`Renderer::alone`](crate::Renderer::alone), whose node the executor owns, cannot show.
 /// `node` must already be [`prepare`](Node::prepare)d for a maximum block
 /// at least this long ([`prepared`]). [`drive_input`] is the same call under a
 /// transport, with events.
