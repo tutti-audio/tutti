@@ -407,25 +407,15 @@ mod stand_in_probe {
     }
 
     /// **A registration of a plugin that hangs its probe blacklists it** once
-    /// the deadline passes. The deadline is long enough that the probe is
-    /// running (its pid is read) before it fires.
+    /// the deadline passes. The deadline is already up, so the probe is killed at
+    /// its first look whatever the load, and no step waits on the child.
     #[test]
     fn registering_a_plugin_that_hangs_its_probe_blacklists_it() {
         let dir = tempfile::TempDir::new().expect("a scratch directory");
-        let (mut catalog, file, pid_file) =
-            catalog_probed_by(&dir, HANG, Some(Duration::from_secs(2)));
+        let (mut catalog, file, _) = catalog_probed_by(&dir, HANG, Some(Duration::ZERO));
 
         let task = catalog.register(&file, exec()).expect("a plugin file");
-        let runner = std::thread::spawn(move || {
-            use std::future::IntoFuture;
-            futures_lite::future::block_on(task.into_future())
-        });
-        running_pid(&pid_file);
-        let scanned = runner
-            .join()
-            .expect("the scan does not panic")
-            .expect("the executor lives");
-        let result = catalog.apply(scanned).expect("this catalog's scan");
+        let result = finish(&mut catalog, task);
 
         let failures = result.failures();
 
