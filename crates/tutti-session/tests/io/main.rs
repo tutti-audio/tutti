@@ -4,6 +4,10 @@
     reason = "a test starts the threads it races, outside any executor"
 )]
 
+/// An allocation inside an `RtScope` aborts the running test.
+#[global_allocator]
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
+
 // The device-free device tests (`ManualStreamDriver`): `device` is a feature,
 // so this suite runs under it (CI's dark-features job runs the crate with every
 // feature on; a workspace run does not turn it on).

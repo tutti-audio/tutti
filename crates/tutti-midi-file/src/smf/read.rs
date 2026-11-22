@@ -294,12 +294,12 @@ fn fixed_or_id_meta(kind: u8, data: &[u8]) -> Option<Meta> {
             let [Some(a), Some(b), Some(c)] = bytes.map(U7::new) else {
                 return None;
             };
-            ManufacturerId::from_sysex_bytes([a, b, c]).map(|manufacturer| {
-                Meta::SequencerSpecific {
+            ManufacturerId::try_from([a, b, c])
+                .ok()
+                .map(|manufacturer| Meta::SequencerSpecific {
                     manufacturer,
                     data: rest.into(),
-                }
-            })
+                })
         }
         _ => None,
     }

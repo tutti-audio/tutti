@@ -18,7 +18,6 @@
 //! listing produced.
 
 use std::path::PathBuf;
-use std::sync::MutexGuard;
 use tutti_fixtures::main_thread;
 use tutti_rt::Mutex;
 use tutti_vst2_host::Vst2Loaded;
@@ -31,10 +30,6 @@ const SAMPLE_RATE: f64 = 48_000.0;
 
 /// Serializes against the probe's process-global switches and environment.
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
-
-fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock()
-}
 
 /// Every `TUTTI_VST2_PROBE_*` key this file sets, cleared between loads so a
 /// leaked variable cannot reshape an unrelated test's plugin.
@@ -80,7 +75,7 @@ fn load_handle(env: &[(&str, &str)]) -> PluginHandle {
 /// `effProgramChange` reports nothing back.
 #[test]
 fn a_listed_preset_loads_the_program_it_names() {
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let handle = load_handle(&[("TUTTI_VST2_PROBE_PROGRAMS", "3")]);
 
     let presets = handle
@@ -111,7 +106,7 @@ fn a_listed_preset_loads_the_program_it_names() {
 /// and worse than a `false`.
 #[test]
 fn an_id_from_another_format_is_refused() {
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let handle = load_handle(&[("TUTTI_VST2_PROBE_PROGRAMS", "3")]);
 
     // `Refused`, not "not Ok": a lost route answers another error, which would
@@ -153,7 +148,7 @@ fn an_id_from_another_format_is_refused() {
 /// could not tell "this plugin has no presets" from "this host cannot check".
 #[test]
 fn a_plugin_with_no_programs_declines_rather_than_going_silent() {
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let handle = load_handle(&[("TUTTI_VST2_PROBE_PROGRAMS", "0")]);
 
     let loaded = handle.loaded();
@@ -186,7 +181,7 @@ fn a_plugin_with_no_programs_declines_rather_than_going_silent() {
 /// unconditionally would satisfy the test above.
 #[test]
 fn a_plugin_with_programs_answers_both_preset_bits() {
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let handle = load_handle(&[("TUTTI_VST2_PROBE_PROGRAMS", "2")]);
 
     let loaded = handle.loaded();

@@ -207,7 +207,7 @@ fn identity_of(info: &MIDI2DeviceInfo) -> Option<DeviceIdentity> {
     };
     let [a, b, c] = manufacturer;
     Some(DeviceIdentity {
-        manufacturer: ManufacturerId::from_sysex_bytes([U7::new(a)?, U7::new(b)?, U7::new(c)?])?,
+        manufacturer: ManufacturerId::try_from([U7::new(a)?, U7::new(b)?, U7::new(c)?]).ok()?,
         family: pair(family)?,
         model: pair(model)?,
         revision: SoftwareRevision::from(bytes(revision)?),

@@ -27,7 +27,6 @@
 )]
 
 use std::path::PathBuf;
-use std::sync::MutexGuard;
 use tutti_buffers::Planes;
 use tutti_fixtures::main_thread;
 use tutti_rt::Mutex;
@@ -44,10 +43,6 @@ const BLOCK: usize = 64;
 /// Serializes the whole load→drive→read sequence against the probe's one
 /// process-global capture, and against other tests loading the same image.
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
-
-fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock()
-}
 
 /// Re-open the image the host loaded and call one of the probe's exports.
 ///
@@ -197,7 +192,7 @@ fn process_block(unit: &mut PluginNode<Vst2Loaded>, frames: usize) {
 /// resumes once, and hard-coding that constant would make the test a statement
 /// about the loader instead of about `reset`.
 fn reset_dispatches_no_mains_changed_to_the_plugin() {
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let mut loaded = load();
 
     drive_block(&mut loaded.unit);
@@ -230,7 +225,7 @@ fn reset_dispatches_no_mains_changed_to_the_plugin() {
 /// the plugin was told, so a prepare has nothing to resize and never grows
 /// anything on the audio thread.
 fn blocks_past_64_frames_reach_the_plugin_after_a_prepare() {
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let mut loaded = load();
 
     drive_block(&mut loaded.unit);
@@ -271,7 +266,7 @@ fn prepare_off_main_thread(unit: &mut PluginNode<Vst2Loaded>, rate: SampleRate) 
 /// `effSetSampleRate` would leave the counters clean while reconfiguring a
 /// running plugin, which is the same class of bug one opcode narrower.
 fn set_sample_rate_parks_the_rate_instead_of_dispatching_it() {
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let mut loaded = load();
 
     drive_block(&mut loaded.unit);
@@ -314,7 +309,7 @@ fn set_sample_rate_parks_the_rate_instead_of_dispatching_it() {
 /// block hands it back (and renders silence), and the next drain runs the
 /// change.
 fn the_pending_rate_reaches_the_plugin_on_the_main_thread_drain() {
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let mut loaded = load();
 
     drive_block(&mut loaded.unit);
@@ -360,7 +355,7 @@ fn the_pending_rate_reaches_the_plugin_on_the_main_thread_drain() {
 /// realtime end hands the Processor back and takes the new one there, with no
 /// block of silence and no pump.
 fn a_prepare_on_the_main_thread_tells_the_plugin_at_once() {
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let mut loaded = load();
 
     drive_block(&mut loaded.unit);
@@ -395,7 +390,7 @@ fn a_prepare_on_the_main_thread_tells_the_plugin_at_once() {
 /// direction, so a drain that fired unconditionally would suspend and resume a
 /// running plugin on every editor frame.
 fn a_drain_with_nothing_pending_dispatches_nothing() {
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let loaded = load();
 
     loaded.handle.editor_idle(main_thread());
@@ -427,7 +422,7 @@ fn the_output_is_what_the_plugin_wrote() {
     use tutti_graph::{Env, Node, Prepare, TransportChanges, TransportPosition};
     use tutti_vst2_test_plugin::channel_tag;
 
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let mut loaded = load();
     let rate = SampleRate::of(SAMPLE_RATE);
     Node::prepare(
@@ -487,7 +482,7 @@ fn a_plugin_wider_than_a_block_is_refused_at_load() {
 
     const WIDE: usize = 18;
 
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let path = tutti_fixtures::vst2_probe().to_path_buf();
     reset_probe(&path);
     // SAFETY: `PROBE_LOCK` is held, so no other test thread touches the
@@ -530,7 +525,7 @@ fn a_plugin_wider_than_a_block_is_refused_at_load() {
 fn the_handle_counts_lost_parameter_reports() {
     const BURST: u32 = 600;
 
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let mut loaded = load();
     assert_eq!(loaded.handle.dropped_parameter_events(), 0);
 
@@ -564,7 +559,7 @@ fn the_handle_counts_lost_parameter_reports() {
 /// 8192-frame block is rendered as two calls of 4096, and the largest call
 /// the plugin saw is the announced maximum.
 fn a_block_past_the_announced_maximum_is_split_before_the_plugin() {
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let mut loaded = load();
 
     drive_blocks(&mut loaded.unit, 8_192, 8_192);
@@ -591,7 +586,7 @@ fn an_io_change_reaches_a_subscriber_and_the_shape() {
     use tutti_plugin_types::PluginInvalidation;
     use tutti_rt::Mutex;
 
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let loaded = load();
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&seen);
@@ -650,7 +645,7 @@ fn the_shape_declares_the_plugins_buses() {
     use tutti_buffers::Speaker;
     use tutti_graph::{BusRole, Node as _};
 
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let loaded = load();
     let shape = loaded.unit.shape();
     for (buses, ports) in [
@@ -677,7 +672,7 @@ fn the_shape_declares_the_plugins_buses() {
 /// restarts it), so every entry is refused, the block renders silence without failing, and
 /// the node's `entries_refused` count says so.
 fn a_refused_block_with_no_midi_is_counted() {
-    let _guard = lock_probe();
+    let _guard = PROBE_LOCK.lock();
     let mut loaded = load();
     drive_block(&mut loaded.unit);
     assert_eq!(
@@ -728,7 +723,7 @@ fn main() {
 /// the width asked and the widths the plugin has.
 #[test]
 fn a_width_refusal_widens_to_the_width_the_plugin_lacks() {
-    let _probe = lock_probe();
+    let _probe = PROBE_LOCK.lock();
     let path = tutti_fixtures::vst2_probe().to_path_buf();
     reset_probe(&path);
     let loaded = load_client::<Vst2Loaded, f64>(
@@ -755,7 +750,7 @@ fn a_width_refusal_widens_to_the_width_the_plugin_lacks() {
 /// `Widths::F32`, and `into_inner` is a client that hosts in a 32-bit graph.
 #[test]
 fn a_plugin_without_64_bit_audio_fails_a_64_bit_load_and_returns_at_32() {
-    let _probe = lock_probe();
+    let _probe = PROBE_LOCK.lock();
     let path = tutti_fixtures::vst2_probe().to_path_buf();
     reset_probe(&path);
     let loaded = load_client::<Vst2Loaded, f64>(

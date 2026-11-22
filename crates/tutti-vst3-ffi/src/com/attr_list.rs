@@ -6,7 +6,7 @@ use std::ffi::{CStr, c_void};
 use std::sync::Arc;
 use tutti_plugin_types::{ffi_guard, write_utf16_units};
 
-use parking_lot::Mutex;
+use tutti_rt::Mutex;
 use vst3::Steinberg::{
     Vst::{IAttributeList, IAttributeList_::AttrID, IAttributeListTrait, TChar},
     kInternalError, kInvalidArgument, kResultOk, tresult,

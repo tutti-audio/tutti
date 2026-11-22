@@ -143,11 +143,7 @@ impl IdentityWords {
         let [family_msb, family_lsb] = self.family.to_be_bytes();
         let [model_msb, model_lsb] = self.model.to_be_bytes();
         Some(DeviceIdentity {
-            manufacturer: ManufacturerId::from_sysex_bytes([
-                U7::new(a)?,
-                U7::new(b)?,
-                U7::new(c)?,
-            ])?,
+            manufacturer: ManufacturerId::try_from([U7::new(a)?, U7::new(b)?, U7::new(c)?]).ok()?,
             family: [U7::new(family_lsb)?, U7::new(family_msb)?],
             model: [U7::new(model_lsb)?, U7::new(model_msb)?],
             revision: SoftwareRevision::from([

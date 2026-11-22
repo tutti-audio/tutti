@@ -16,17 +16,17 @@ use crate::U7;
 /// `00` and `00 00 00` (unusable per the MIDI 1.0 Detailed Specification,
 /// Manufacturer SysEx ID Numbers; `0x0000` is Reserved in Table 20) are no id:
 /// [`new`](Self::new) refuses `0x0000` and `0x8000`, and
-/// [`from_sysex_bytes`](Self::from_sysex_bytes) refuses three zero bytes.
+/// the [`TryFrom`] of three bytes refuses three zero bytes.
 ///
 /// ```
 /// use tutti_ump::{ManufacturerId, U7};
 ///
 /// // A 21-bit id, 00 21 09 (Table 21's style of example).
-/// let id = ManufacturerId::from_sysex_bytes([0x00, 0x21, 0x09].map(U7::of)).unwrap();
+/// let id = ManufacturerId::try_from([0x00, 0x21, 0x09].map(U7::of)).unwrap();
 /// assert_eq!(id.get(), 0xA109);
 /// assert_eq!(id.sysex_bytes().map(U7::get), [0x00, 0x21, 0x09]);
 /// // A 7-bit id, 0x41, is 0x0041 and writes as `41 00 00` in a Device Identity.
-/// let id = ManufacturerId::from_sysex_bytes([0x41, 0, 0].map(U7::of)).unwrap();
+/// let id = ManufacturerId::try_from([0x41, 0, 0].map(U7::of)).unwrap();
 /// assert_eq!(id.get(), 0x0041);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -39,6 +39,21 @@ pub struct ManufacturerId(u16);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("{:#06x} is not a 16-bit manufacturer id", .0)]
 pub struct NotManufacturerId(pub u16);
+
+/// Three System Exclusive id bytes that are no [`ManufacturerId`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ManufacturerBytesError {
+    /// `00 00 00`, which is no id (M2-104 section 7.10).
+    #[error("00 00 00 is no manufacturer id")]
+    AllZero,
+    /// A one-byte id followed by a non-zero byte: the code would read it as the
+    /// one-byte id alone and so not give back what was read.
+    #[error("the one-byte manufacturer id {first:#04x} is followed by non-zero bytes")]
+    TrailingBytes {
+        /// The first byte, the one-byte id the others follow.
+        first: u8,
+    },
+}
 
 impl ManufacturerId {
     /// Non-Commercial / Research, No Public Release: `0x007D` (M1). A product
@@ -96,25 +111,6 @@ impl ManufacturerId {
         self.0
     }
 
-    /// The id of three System Exclusive id bytes as a Device Inquiry reply or a
-    /// Device Identity carries them: a first byte of `00` selects the 21-bit id of
-    /// the other two (`0x8000 | b2 << 8 | b3`), any other first byte is the one-byte
-    /// id and the other two are zero (M2-104 section 7.10, Example Conversion
-    /// Code, and section 7.1.3: the remaining two bytes are zero).
-    /// `None` for a one-byte id followed by a non-zero byte, which the code would
-    /// read as the one-byte id alone and so not give back, and for `00 00 00`.
-    #[inline]
-    #[must_use]
-    pub const fn from_sysex_bytes(bytes: [U7; 3]) -> Option<Self> {
-        if bytes[0].get() == 0 {
-            Self::new(0x8000 | (bytes[1].get() as u16) << 8 | bytes[2].get() as u16)
-        } else if bytes[1].get() == 0 && bytes[2].get() == 0 {
-            Some(Self(bytes[0].get() as u16))
-        } else {
-            None
-        }
-    }
-
     /// The three System Exclusive id bytes: `xx 00 00` for a one-byte id (what a
     /// Device Identity carries, M2-104 section 7.1.3) and `00 xx yy` for a 21-bit one.
     #[inline]
@@ -140,6 +136,35 @@ impl ManufacturerId {
     #[must_use]
     pub const fn is_extended(self) -> bool {
         self.0 & 0x8000 != 0
+    }
+}
+
+/// The id of three System Exclusive id bytes as a Device Inquiry reply or a
+/// Device Identity carries them: a first byte of `00` selects the 21-bit id of
+/// the other two (`0x8000 | b2 << 8 | b3`), any other first byte is the one-byte
+/// id and the other two are zero (M2-104 section 7.10, Example Conversion
+/// Code, and section 7.1.3: the remaining two bytes are zero).
+///
+/// [`ManufacturerBytesError::TrailingBytes`] for a one-byte id followed by a
+/// non-zero byte, which the code would read as the one-byte id alone and so not
+/// give back, and [`ManufacturerBytesError::AllZero`] for `00 00 00`.
+impl TryFrom<[U7; 3]> for ManufacturerId {
+    type Error = ManufacturerBytesError;
+
+    #[inline]
+    fn try_from(bytes: [U7; 3]) -> Result<Self, ManufacturerBytesError> {
+        let [first, second, third] = [bytes[0].get(), bytes[1].get(), bytes[2].get()];
+        if first == 0 {
+            if second == 0 && third == 0 {
+                Err(ManufacturerBytesError::AllZero)
+            } else {
+                Ok(Self(0x8000 | u16::from(second) << 8 | u16::from(third)))
+            }
+        } else if second == 0 && third == 0 {
+            Ok(Self(u16::from(first)))
+        } else {
+            Err(ManufacturerBytesError::TrailingBytes { first })
+        }
     }
 }
 
@@ -178,7 +203,7 @@ mod tests {
             (0x7E, 0x007E),
             (0x7F, 0x007F),
         ] {
-            let id = ManufacturerId::from_sysex_bytes(bytes([byte, 0, 0])).unwrap();
+            let id = ManufacturerId::try_from(bytes([byte, 0, 0])).unwrap();
             assert_eq!(id.get(), word);
             assert!(!id.is_extended());
             assert_eq!(id.sysex_bytes(), bytes([byte, 0, 0]));
@@ -194,11 +219,11 @@ mod tests {
     /// low bytes (`0x8000 | MFID_2 << 8 | MFID_3`).
     #[test]
     fn a_three_byte_id_sets_the_top_bit_and_keeps_its_last_two_bytes() {
-        let id = ManufacturerId::from_sysex_bytes(bytes([0x00, 0x21, 0x09])).unwrap();
+        let id = ManufacturerId::try_from(bytes([0x00, 0x21, 0x09])).unwrap();
         assert_eq!(id.get(), 0xA109);
         assert!(id.is_extended());
         assert_eq!(id.sysex_bytes(), bytes([0x00, 0x21, 0x09]));
-        let top = ManufacturerId::from_sysex_bytes(bytes([0x00, 0x7F, 0x7F])).unwrap();
+        let top = ManufacturerId::try_from(bytes([0x00, 0x7F, 0x7F])).unwrap();
         assert_eq!(top.get(), 0xFF7F);
     }
 
@@ -207,16 +232,16 @@ mod tests {
     #[test]
     fn a_nonzero_first_byte_with_anything_after_it_is_refused() {
         assert_eq!(
-            ManufacturerId::from_sysex_bytes(bytes([0x41, 0x12, 0x34])),
-            None
+            ManufacturerId::try_from(bytes([0x41, 0x12, 0x34])),
+            Err(ManufacturerBytesError::TrailingBytes { first: 0x41 })
         );
         assert_eq!(
-            ManufacturerId::from_sysex_bytes(bytes([0x41, 0x00, 0x01])),
-            None
+            ManufacturerId::try_from(bytes([0x41, 0x00, 0x01])),
+            Err(ManufacturerBytesError::TrailingBytes { first: 0x41 })
         );
         assert_eq!(
-            ManufacturerId::from_sysex_bytes(bytes([0x41, 0x01, 0x00])),
-            None
+            ManufacturerId::try_from(bytes([0x41, 0x01, 0x00])),
+            Err(ManufacturerBytesError::TrailingBytes { first: 0x41 })
         );
     }
 
@@ -227,8 +252,11 @@ mod tests {
         assert_eq!(ManufacturerId::new(0x0000), None);
         assert_eq!(ManufacturerId::new(0x8000), None);
         assert_eq!(ManufacturerId::try_from(0u16), Err(NotManufacturerId(0)));
-        assert_eq!(ManufacturerId::from_sysex_bytes(bytes([0, 0, 0])), None);
-        assert!(ManufacturerId::from_sysex_bytes(bytes([0, 0, 1])).is_some());
+        assert_eq!(
+            ManufacturerId::try_from(bytes([0, 0, 0])),
+            Err(ManufacturerBytesError::AllZero)
+        );
+        assert!(ManufacturerId::try_from(bytes([0, 0, 1])).is_ok());
     }
 
     /// A word is an id only if it is `0x00xx` with `xx` 7-bit, or has the top
@@ -251,7 +279,7 @@ mod tests {
             let Some(id) = ManufacturerId::new(raw) else {
                 continue;
             };
-            let back = ManufacturerId::from_sysex_bytes(id.sysex_bytes()).unwrap();
+            let back = ManufacturerId::try_from(id.sysex_bytes()).unwrap();
             assert_eq!(back, id, "{raw:#x}");
         }
     }

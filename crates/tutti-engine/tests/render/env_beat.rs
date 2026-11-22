@@ -20,9 +20,10 @@
 //! [`BeatPorts`] below emits the walk on two beat ports, so every assertion
 //! reads it through the same `f32` split.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{Planes, PlanesMut};
+use tutti_fixtures::Record;
 
 use crate::support;
 
@@ -45,7 +46,7 @@ use tutti_units::{At, Beat, Bpm, Frame, SampleRate, Samples, Tail};
 
 pub(crate) const SR: f64 = 48_000.0;
 
-type Log = Arc<Mutex<Vec<(f32, f32)>>>;
+type Log = Record<(f32, f32)>;
 
 /// Ragged device blocks, some past the graph's 512-frame maximum (split into
 /// graph blocks) and some not multiples of 64.
@@ -88,11 +89,11 @@ impl Node for BeatPorts {
 /// Two inputs (the beat ports), one silent output: logs, for every frame,
 /// the port pair and the beat the block's `Env` gives the frame
 /// (`transport_at`).
-struct GraphBeats(Log, Arc<Mutex<Vec<f64>>>);
+struct GraphBeats(Log, Record<f64>);
 
 impl GraphBeats {
     fn new(log: &Log) -> Self {
-        Self(Arc::clone(log), Arc::default())
+        Self(log.clone(), Record::new())
     }
 }
 
@@ -187,7 +188,7 @@ fn the_env_walk_is_the_env_beat() {
     let transport = Transport::new(SampleRate::of(SR));
     let log = Log::default();
     let sink = GraphBeats::new(&log);
-    let env_beats = Arc::clone(&sink.1);
+    let env_beats = sink.1.clone();
     let (graph, _ed) = graph_engine(&transport, Unforkable(sink), 1);
 
     let locate = |beat: f64| MotionCommand::Locate {
@@ -402,7 +403,7 @@ fn click_clicks_on_the_model_beats() {
 // ---- offline ---------------------------------------------------------------
 
 /// Logs every block's `Env`.
-pub(crate) struct EnvLog(pub(crate) Arc<Mutex<Vec<Env>>>);
+pub(crate) struct EnvLog(pub(crate) Record<Env>);
 
 impl Node for EnvLog {
     fn shape(&self) -> Shape {
@@ -418,12 +419,12 @@ impl Node for EnvLog {
 }
 
 /// An `EnvLog` at key 1, on the main output.
-pub(crate) fn env_graph(max_block: usize, log: &Arc<Mutex<Vec<Env>>>) -> (Editor, Executor) {
+pub(crate) fn env_graph(max_block: usize, log: &Record<Env>) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
         MaxBlock::of(Samples::new(max_block)),
     ));
-    ed.insert(NodeKey(1), "env", Unforkable(EnvLog(Arc::clone(log))));
+    ed.insert(NodeKey(1), "env", Unforkable(EnvLog(log.clone())));
     ed.spec_mut()
         .topology
         .set_outputs(vec![PortSource::Node(OutputPort {
@@ -455,7 +456,7 @@ fn an_offline_render_sees_the_live_engine_transport() {
 
     // Live.
     let live_t = Transport::new(SampleRate::of(SR));
-    let live_log = Arc::new(Mutex::new(Vec::new()));
+    let live_log = Record::new();
     let (mut ed, exec) = env_graph(512, &live_log);
     let live = Engine::new(&live_t, &mut ed, exec).expect("within the limits");
     live_t.settings().set_tempo(Bpm::of(100.0));
@@ -482,7 +483,7 @@ fn an_offline_render_sees_the_live_engine_transport() {
         sample_rate: SampleRate::of(SR),
         loop_range: LoopRange::new(Beat::new(6.0), Beat::new(7.0)),
     }));
-    let off_log = Arc::new(Mutex::new(Vec::new()));
+    let off_log = Record::new();
     let (_ed, mut exec) = env_graph(512, &off_log);
     let mut o1 = vec![0.0f32; 512];
     let live_log = live_log.lock().expect("log");

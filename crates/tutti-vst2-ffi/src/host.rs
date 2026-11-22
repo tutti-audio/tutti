@@ -2,7 +2,7 @@
 
 use num_traits::Float;
 use tracing::{error, warn};
-use tutti_rt::{LockExt, Tally, TallyWriter, tally};
+use tutti_rt::{Mutex, Tally, TallyWriter, tally};
 
 use libloading::Library;
 use std::cell::{Cell, UnsafeCell};
@@ -14,7 +14,7 @@ use std::mem::{ManuallyDrop, MaybeUninit};
 use std::os::raw::c_void;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, TryLockError};
+use std::sync::{Arc, MutexGuard};
 use std::thread::ThreadId;
 use std::{fmt, ptr, slice};
 
@@ -626,7 +626,7 @@ impl Core {
         // (the no-alloc gate of `a_callback_from_a_render_takes_no_lock_during_a_load` aborts
         // on it). Linux and Windows use a futex or SRW lock that never allocates. One
         // uncontended lock now means no later `lock`/`try_lock` on any thread allocates.
-        drop(core.gate.lock_recover());
+        drop(core.gate.lock());
         core
     }
 }
@@ -667,8 +667,8 @@ impl Closer {
         }
         // Waits for an off-main dispatcher call in flight (a parameter read), and then
         // for an audio entry in flight; after this none starts.
-        let _dispatching = self.core.dispatcher.lock_recover();
-        let mut closed = self.core.gate.lock_recover();
+        let _dispatching = self.core.dispatcher.lock();
+        let mut closed = self.core.gate.lock();
         // `effStopProcess`, which the SDK puts before the suspend, is the render handle's;
         // when no one stopped it, it is stopped here, once.
         if self.core.processing.swap(false, Ordering::AcqRel) {
@@ -1943,11 +1943,13 @@ impl Drop for RenderHandle {
 /// `refusals`) when the plugin is closed or dead, or the instance's close (or an exclusive
 /// call) holds the gate.
 ///
-/// **A panic under the gate kills the core.** The mutex is then poisoned: the plugin may be in
-/// any state (the panic came out of an entry mid-call), so the next entry marks the gate
-/// closed and refuses, and every later one finds it so: the handle renders silence from then
-/// on, and the plugin is closed by the instance's drop as ever. Free (not a method), so the
-/// caller can keep borrowing the handle's other fields (the name) across the call.
+/// **A panic that begins under the gate kills the core.** The guard's drop then marks the gate
+/// closed: the plugin may be in any state (the panic came out of an entry mid-call), so every
+/// later entry finds it closed and refuses: the handle renders silence from then on, and the
+/// plugin is closed by the instance's drop as ever. An entry made while an earlier panic is
+/// already unwinding (from a `Drop`) and that returns normally leaves the gate open. Free (not
+/// a method), so the caller can keep borrowing the handle's other fields (the name) across the
+/// call.
 fn gated<R>(
     core: &Core,
     entry: &RenderEntry,
@@ -1955,25 +1957,43 @@ fn gated<R>(
     refused: R,
     f: impl FnOnce(&RenderEntry, &Core) -> R,
 ) -> R {
-    let gate = match core.gate.try_lock() {
-        Ok(gate) => gate,
-        Err(TryLockError::Poisoned(poisoned)) => {
-            *poisoned.into_inner() = true;
-            refusals.gate.add(1);
-            return refused;
-        }
-        Err(TryLockError::WouldBlock) => {
-            refusals.gate.add(1);
-            return refused;
-        }
+    let Some(gate) = core.gate.try_lock() else {
+        refusals.gate.add(1);
+        return refused;
     };
-    if *gate {
+    let gate = KillOnUnwind::new(gate);
+    if *gate.gate {
         refusals.gate.add(1);
         return refused;
     }
     // The guard is held to the end of this function, so for the whole call; a panic out of `f`
-    // unwinds through it and poisons the mutex.
+    // that begins in it unwinds through the guard and closes the gate.
     f(entry, core)
+}
+
+/// The gate's guard, which closes the gate when a panic begins while it is held: the plugin may
+/// be in any state after one. A panic already unwinding when the guard was taken is not one.
+struct KillOnUnwind<'a> {
+    gate: MutexGuard<'a, bool>,
+    /// Whether this thread was already unwinding when the guard was taken.
+    panicking: bool,
+}
+
+impl<'a> KillOnUnwind<'a> {
+    fn new(gate: MutexGuard<'a, bool>) -> Self {
+        Self {
+            gate,
+            panicking: std::thread::panicking(),
+        }
+    }
+}
+
+impl Drop for KillOnUnwind<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() && !self.panicking {
+            *self.gate = true;
+        }
+    }
 }
 
 impl RenderHandle {
@@ -2154,8 +2174,8 @@ impl PluginInstance {
     /// meanwhile. That is the convention of the SDK's `suspend`/`resume` bracket; the header
     /// itself states no exclusion for any opcode (authority 3, `aeffect.h` is silent).
     fn exclusive<R>(&self, call: impl FnOnce() -> R) -> R {
-        let _dispatching = self.core.dispatcher.lock_recover();
-        let _gate = self.core.gate.lock_recover();
+        let _dispatching = self.core.dispatcher.lock();
+        let _gate = self.core.gate.lock();
         call()
     }
 
@@ -2169,7 +2189,7 @@ impl PluginInstance {
     /// text races its own `process` is the plugin's to make safe, as it is under every other
     /// host.
     fn concurrent<R>(&self, call: impl FnOnce() -> R) -> R {
-        let _dispatching = self.core.dispatcher.lock_recover();
+        let _dispatching = self.core.dispatcher.lock();
         call()
     }
 
@@ -2684,10 +2704,10 @@ impl Drop for Loading {
 #[cfg(test)]
 static REGISTRY_LOCKS: AtomicUsize = AtomicUsize::new(0);
 
-fn adopted() -> std::sync::MutexGuard<'static, BTreeSet<usize>> {
+fn adopted() -> MutexGuard<'static, BTreeSet<usize>> {
     #[cfg(test)]
     REGISTRY_LOCKS.fetch_add(1, Ordering::SeqCst);
-    ADOPTED.lock_recover()
+    ADOPTED.lock()
 }
 
 fn adopt(effect: *mut AEffect) {

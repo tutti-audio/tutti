@@ -1,4 +1,12 @@
 //! Weighted edges, mix, mode, param ports and audio fan-in.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
+
+/// An allocation inside an `RtScope` aborts the running test.
+#[global_allocator]
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
 mod azimuth_arc;
 mod declared_reads;
@@ -14,3 +22,4 @@ mod mix;
 mod mix_driven;
 mod mode;
 mod param_mod;
+mod rendezvous;
