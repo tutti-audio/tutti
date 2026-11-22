@@ -10,7 +10,9 @@ use tutti_dsp::{
 };
 use tutti_sf2::{SamplePool, Side};
 use tutti_ump::{MidiChannel, NoteNumber, RegisteredPerNoteController};
-use tutti_units::{Amplitude, Cents, Db, Hz, Pan, Q, SampleRate, Samples, Seconds, Semitones};
+use tutti_units::{
+    Amplitude, Cents, Db, Hz, Pan, Q, SampleRate, SampleSpan, Samples, Seconds, Semitones,
+};
 use tutti_voicing::{ChannelState, Glide, NoteControl};
 
 /// The longest an exclusive class's quick release takes, to fall
@@ -365,7 +367,7 @@ impl<F: Float + SimdLanes> Voice<F> {
             offset: Semitones::new(f64::from(i32::from(glide.from.get()) - self.played))
                 + glide.from_tune
                 - self.tune,
-            progress: FrameProgress::new(frames.get() as f64),
+            progress: FrameProgress::new(SampleSpan::from_samples(frames)),
         })
     }
 
@@ -375,7 +377,7 @@ impl<F: Float + SimdLanes> Voice<F> {
             return Semitones::new(0.0);
         };
         let offset = run.offset * (1.0 - run.progress.get().get());
-        run.progress.advance(frames);
+        run.progress.advance(Samples::new(frames));
         if run.progress.has_arrived() {
             self.glide = None;
         }

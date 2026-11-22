@@ -738,7 +738,9 @@ fn release_level(from: f64, elapsed: usize, length: usize) -> f64 {
 ///
 /// The bound is 4 steps of `F` at the starting level (`4 * 3e-8 = 1.2e-7` at `f32`, the
 /// level's own rounding, the slope's relative rounding and the final rounding of the
-/// compensated sum, with margin; `4 * 2^-54` at `f64`). Returns the starting level.
+/// compensated sum, with margin; `4 * 2^-54` at `f64`). A plain `level += slope` at
+/// `f32` stalls at the starting level, so the bound also fails a level that never moved.
+/// Returns the starting level.
 fn a_100_second_release_moves_at_its_authored_slope<F: SynthFloat>(epsilon: f64) -> f64 {
     const RELEASE: usize = 19_200_000;
     /// One second of it, a hundredth of the release.
@@ -778,20 +780,6 @@ fn a_100_second_release_at_192_khz_moves_at_its_authored_slope_at_both_widths() 
     assert_eq!(from, f64::from(0.27_f32), "the sustain level");
     let from = a_100_second_release_moves_at_its_authored_slope::<f64>(f64::EPSILON);
     assert_eq!(from, 0.27);
-}
-
-/// The plain sum of the slope, `level += slope`, which the envelope no longer does,
-/// stays where it began at `f32`.
-#[test]
-fn a_plain_f32_sum_of_a_100_second_releases_slope_stalls_at_the_starting_level() {
-    const RELEASE: usize = 19_200_000;
-    let from = 0.27_f32;
-    let slope = -from / RELEASE as f32;
-    let mut plain = from;
-    for _ in 0..RELEASE / 100 {
-        plain += slope;
-    }
-    assert_eq!(plain, from);
 }
 
 /// The distance between two phases on the unit circle.

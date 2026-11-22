@@ -10,7 +10,9 @@
 //! that interval the glide has travelled.
 
 use tutti_curve::{FrameProgress, Law};
-use tutti_units::{FrequencyRatio, Hz, Normalized, SampleRate, Seconds, Semitones};
+use tutti_units::{
+    FrequencyRatio, Hz, Normalized, SampleRate, SampleSpan, Samples, Seconds, Semitones,
+};
 
 /// When a new note glides from the previous pitch rather than jumping to its
 /// own.
@@ -235,7 +237,10 @@ impl Portamento {
                 from,
                 to: freq,
                 current: from,
-                progress: FrameProgress::new(glide_time * self.sample_rate.get()),
+                progress: FrameProgress::new(
+                    SampleSpan::from_seconds(Seconds::new(glide_time), self.sample_rate)
+                        .unwrap_or(SampleSpan::ZERO),
+                ),
             };
         } else {
             self.glide = Glide::Idle {
@@ -250,18 +255,19 @@ impl Portamento {
     /// Control, which `tutti-voicing` resolves to a source key and a time). A
     /// glide of no time, or between equal pitches, is a jump.
     pub(crate) fn begin(&mut self, from: Hz, to: Hz, time: Seconds) {
-        let glide_samples = time.get() * self.sample_rate.get();
-        self.glide = if from == to || glide_samples <= 0.0 {
-            Glide::Idle {
-                current: to,
-                target: to,
-            }
-        } else {
+        let glide = SampleSpan::from_seconds(time, self.sample_rate)
+            .filter(|span| *span > SampleSpan::ZERO);
+        self.glide = if let (false, Some(glide)) = (from == to, glide) {
             Glide::Gliding {
                 from,
                 to,
                 current: from,
-                progress: FrameProgress::new(glide_samples),
+                progress: FrameProgress::new(glide),
+            }
+        } else {
+            Glide::Idle {
+                current: to,
+                target: to,
             }
         };
     }
@@ -288,7 +294,7 @@ impl Portamento {
                 mut progress,
                 ..
             } => {
-                progress.advance(1);
+                progress.advance(Samples::new(1));
                 let current = glide_at(self.config.curve, from, to, progress.get());
                 self.glide = Self::after_step(from, to, current, progress);
                 current
@@ -314,12 +320,12 @@ impl Portamento {
             return self.target();
         };
         // `tick` returns the target once arrived, and every later tick too.
-        let taken = progress.advance(frames);
-        if taken > 0 {
+        let taken = progress.advance(Samples::new(frames));
+        if taken > Samples::new(0) {
             current = glide_at(self.config.curve, from, to, progress.get());
         }
         self.glide = Self::after_step(from, to, current, progress);
-        if taken < frames { to } else { current }
+        if taken.get() < frames { to } else { current }
     }
 
     /// The state after a step that left the glide at `progress`.
