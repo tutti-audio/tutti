@@ -6,7 +6,7 @@
 //! shares the Discovery *body* format, so [`DiscoveryData`] serves both.
 
 use bitflags::bitflags;
-use tutti_ump::{DeviceIdentity, FunctionBlockId, U7};
+use tutti_ump::{DeviceIdentity, FunctionBlockId, U7, U28};
 
 /// Sub-ID#2: Discovery message (M2-101 §5.5).
 pub const SUB_ID2_DISCOVERY: u8 = 0x70;
@@ -73,13 +73,8 @@ impl MaxSysexSize {
     /// is at most 28 bits, so each byte is the 7 bits its place holds.
     #[must_use]
     pub(crate) const fn to_le7(self) -> [u8; 4] {
-        let size = self.get();
-        [
-            (size & 0x7F) as u8,
-            ((size >> 7) & 0x7F) as u8,
-            ((size >> 14) & 0x7F) as u8,
-            ((size >> 21) & 0x7F) as u8,
-        ]
+        // The size is at most 28 bits, so it is a U28.
+        U28::masked(self.get()).to_le7()
     }
 }
 

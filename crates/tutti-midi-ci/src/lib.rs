@@ -84,7 +84,7 @@ pub use drawbar::{
 };
 pub use drum_map::{
     BitmapPosition, DrumControl, DrumFeatures, DrumInstrument, DrumNoteMapLevel, DrumSounds,
-    MutuallyExclusiveSet, NotAMutuallyExclusiveSet,
+    MutuallyExclusiveSet, NotABitmapPosition, NotAMutuallyExclusiveSet,
 };
 pub use endpoint::{EndpointInfo, EndpointStatus};
 pub use gm2::{Gm2ChannelCount, Gm2FunctionBlock, Gm2Role, Gm2SingleChannel, NotAGm2ChannelCount};
