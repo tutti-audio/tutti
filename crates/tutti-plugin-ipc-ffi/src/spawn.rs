@@ -12,21 +12,23 @@ mod platform;
 
 pub use platform::spawn;
 
-/// What a spawned helper is to the host.
+/// What a spawned helper is to the host, and the one entry for its standard
+/// streams on every platform.
 ///
-/// On Windows it also says what the helper's standard handles are, which std's
-/// opaque `Stdio` cannot say to a hand-written spawn: a leader's are the host's
-/// and a helper's are the `NUL` device, whatever the command sets. On unix the
-/// command's own `stdin`, `stdout` and `stderr` are used.
+/// A helper's `stdin`, `stdout` and `stderr` are `NUL` and a leader's `stdout`
+/// and `stderr` are the host's, whatever the command sets: the command's own
+/// `stdout` and `stderr` (and a helper's `stdin`) are read on no platform. A
+/// leader's `stdin` is the caller's: on unix the command's own (the transport's
+/// channel to the server), on Windows the host's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Spawn {
     /// A helper that ends by itself or by its owner's kill, with no standard
-    /// input or output of the host's (Windows).
+    /// input or output of the host's.
     Helper,
     /// A server, which leads the process group (unix) or sits in the host's
     /// kill-on-close job (Windows) that ends it, and the helpers a plugin
-    /// spawned, with the host; on Windows it is in the job before it runs, and
-    /// inherits the host's standard handles.
+    /// spawned, with the host; on Windows it is in the job before it runs. It
+    /// writes to the host's standard output and error.
     Leader,
 }
 
@@ -48,9 +50,11 @@ mod tests {
     use rustix::io::{FdFlags, fcntl_setfd};
     use rustix::process::{Pid, getpgid};
     use std::fs::File;
-    use std::io::{BufRead, BufReader, pipe};
+    use std::io::pipe;
     use std::os::fd::AsRawFd;
+    use std::path::Path;
     use std::process::Command;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// A descriptor open in this process without close-on-exec, which std's own
     /// opens never leave.
@@ -60,19 +64,34 @@ mod tests {
         file
     }
 
-    /// What a shell started as `how` (`None`: by std alone) finds of descriptor
-    /// `fd`, `open` or `closed`, and whether its process group is its own.
-    fn child_sees(fd: i32, how: Option<Spawn>) -> (String, bool) {
+    /// Runs `script` in a shell started as `how` (`None`: by std alone) with the
+    /// report file's path as `$1` and a fifo's as `$2`. The script ends by
+    /// reading the fifo, so the shell lives while `inspect` runs on its pid
+    /// and the report file's text. The shell's standard streams are the
+    /// command's own, which `how` may override: the report goes through a file.
+    fn run<T>(
+        script: &str,
+        how: Option<Spawn>,
+        mut command_with: impl FnMut(&mut Command),
+        inspect: impl FnOnce(u32, &str) -> T,
+    ) -> T {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "tutti-spawn-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&dir).expect("a directory");
+        let report = dir.join("report");
+        let fifo = dir.join("hold");
+        let made = Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
+        assert!(made.success(), "mkfifo {}", fifo.display());
         let mut command = Command::new("sh");
-        let (stdout, report_to) = pipe().expect("the report pipe");
-        let (hold, held) = pipe().expect("the stdin pipe");
         command
-            .args([
-                "-c",
-                &format!("(: <&{fd}) 2>/dev/null && echo open || echo closed; read line"),
-            ])
-            .stdin(hold)
-            .stdout(report_to);
+            .args(["-c", &format!("{script}\nread line <\"$2\""), "sh"])
+            .arg(&report)
+            .arg(&fifo);
+        command_with(&mut command);
         let (id, mut end): (u32, Box<dyn FnMut()>) = match how {
             Some(how) => {
                 let mut reaped = spawn(command, how).expect("the shell spawns");
@@ -93,16 +112,34 @@ mod tests {
                 )
             }
         };
-        let mut line = String::new();
-        BufReader::new(stdout)
-            .read_line(&mut line)
-            .expect("the shell answers");
-        // The shell is blocked on its input, so its group is read while it lives.
-        let pid = Pid::from_raw(i32::try_from(id).expect("a pid")).expect("a pid");
-        let leads = getpgid(Some(pid)).expect("the group reads") == pid;
+        // The shell opens the fifo for reading after it wrote the report, so the
+        // open returns once the report is complete and the shell is blocked.
+        let held = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&fifo)
+            .expect("the fifo opens");
+        let text = std::fs::read_to_string(&report).expect("the report");
+        let seen = inspect(id, &text);
         drop(held);
         end();
-        (line.trim().to_owned(), leads)
+        std::fs::remove_dir_all(&dir).expect("the directory goes");
+        seen
+    }
+
+    /// What a shell started as `how` finds of descriptor `fd`, `open` or
+    /// `closed`, and whether its process group is its own.
+    fn child_sees(fd: i32, how: Option<Spawn>) -> (String, bool) {
+        let script = format!("(: <&{fd}) 2>/dev/null && echo open >\"$1\" || echo closed >\"$1\"");
+        run(
+            &script,
+            how,
+            |_| {},
+            |id, text| {
+                let pid = Pid::from_raw(i32::try_from(id).expect("a pid")).expect("a pid");
+                let leads = getpgid(Some(pid)).expect("the group reads") == pid;
+                (text.trim().to_owned(), leads)
+            },
+        )
     }
 
     /// **A spawned helper inherits no descriptor above two, and a leader leads
@@ -123,5 +160,50 @@ mod tests {
             child_sees(fd, Some(Spawn::Leader)),
             ("closed".to_owned(), true)
         );
+    }
+
+    /// What the shell's descriptors 0, 1 and 2 are, as the kernel names them.
+    fn links(how: Spawn, command_with: impl FnMut(&mut Command)) -> Vec<String> {
+        let script = "a=$(readlink /proc/$$/fd/0); b=$(readlink /proc/$$/fd/1); \
+                      c=$(readlink /proc/$$/fd/2); printf '%s\\n%s\\n%s\\n' \"$a\" \"$b\" \"$c\" >\"$1\"";
+        run(script, Some(how), command_with, |_, text| {
+            text.lines().map(str::to_owned).collect()
+        })
+    }
+
+    fn host_link(fd: i32) -> String {
+        std::fs::read_link(Path::new("/proc/self/fd").join(fd.to_string()))
+            .expect("the host's descriptor")
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// **The spawn kind, not the command, decides a helper's standard streams**:
+    /// a helper's three are `/dev/null` though the command set pipes, and a
+    /// leader's `stdout` and `stderr` are the host's though the command set
+    /// pipes, while its `stdin` stays the command's own pipe.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_kind_decides_the_standard_streams() {
+        let pipes = |command: &mut Command| {
+            let (_, a) = pipe().expect("a pipe");
+            let (_, b) = pipe().expect("a pipe");
+            let (c, _) = pipe().expect("a pipe");
+            command.stdin(c).stdout(a).stderr(b);
+        };
+        let helper = links(Spawn::Helper, pipes);
+        assert_eq!(helper, ["/dev/null"; 3]);
+
+        let (held, _write) = pipe().expect("a pipe");
+        let own = host_link(held.as_raw_fd());
+        let leader = links(Spawn::Leader, |command| {
+            let (_, a) = pipe().expect("a pipe");
+            let (_, b) = pipe().expect("a pipe");
+            command
+                .stdin(held.try_clone().expect("a clone"))
+                .stdout(a)
+                .stderr(b);
+        });
+        assert_eq!(leader, [own, host_link(1), host_link(2)]);
     }
 }

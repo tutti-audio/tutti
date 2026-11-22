@@ -28,7 +28,9 @@ fn key(name: &OsStr) -> Vec<u16> {
 /// `name=value\0` sorted by upper-cased name, and an extra `\0` at the end.
 ///
 /// This process's own environment is read and never written. A command's
-/// `env_clear` is not readable through std, so a spawn never has one.
+/// `env_clear` is not readable through std, so a spawn never has one. The hidden
+/// per-drive current-directory variables (`=C:`) are not listed by `vars_os`, so
+/// the child does not get them.
 ///
 /// # Errors
 ///

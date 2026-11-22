@@ -97,7 +97,8 @@ impl Drop for HandleList<'_> {
 /// The command's program is never searched for, so it names a path, and its
 /// arguments, its variables set or removed and its current directory are
 /// read through std's getters. A command that cleared its environment is
-/// not honoured.
+/// not honoured, and the hidden `=C:` per-drive current-directory variables are
+/// not passed (`vars_os` skips them).
 ///
 /// # Errors
 ///

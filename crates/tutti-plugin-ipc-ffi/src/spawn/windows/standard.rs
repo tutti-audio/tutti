@@ -31,6 +31,11 @@ pub(super) enum Streams {
 /// Each is a handle of its own (a duplicate of the host's, or a fresh open of
 /// `NUL`), so the three are distinct values and a handle list of them holds no
 /// duplicate, and none is the host's own, which stays as it was.
+///
+/// While the duplicates exist a concurrent std `Command::spawn` elsewhere in the
+/// host (`bInheritHandles` TRUE, no handle list) can inherit them, and a held
+/// pipe duplicate can delay the end of file for a reader of the host's stdout.
+/// std's spawn lock is private, so it is not held here.
 #[derive(Debug)]
 pub(super) struct Standard {
     handles: [OwnedHandle; 3],
