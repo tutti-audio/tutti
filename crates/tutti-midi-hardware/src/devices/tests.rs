@@ -322,42 +322,15 @@ fn a_dropped_input_retires_its_port() {
     assert!(ports.list_input_ports().is_empty());
 }
 
-/// A backend that lists one input and refuses to open it.
-struct Refuses;
-
-impl MidiEndpoints for Refuses {
-    fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
-        sink.seed(os_devices(&self.inputs()?, &[]))?;
-        Ok(Box::new(crate::endpoints::NoWatch))
-    }
-    fn inputs(&self) -> Result<Vec<OsEndpoint>> {
-        Ok(vec![endpoint(1, "Keys")])
-    }
-    fn outputs(&self) -> Result<Vec<OsEndpoint>> {
-        Ok(Vec::new())
-    }
-    fn open_input(
-        &self,
-        _started: crate::Started,
-        _: EndpointId,
-        _: crate::InputProducerHandle,
-    ) -> Result<Box<dyn InputConnection>> {
-        Err(MidiHardwareError::Unsupported("refused"))
-    }
-    fn open_output(
-        &self,
-        _started: crate::Started,
-        _: EndpointId,
-    ) -> Result<Box<dyn crate::DeviceOut>> {
-        Err(MidiHardwareError::Unsupported("refused"))
-    }
-}
-
 /// An open the backend refuses leaves no port behind, however many times it
 /// is tried.
 #[test]
 fn a_backend_failure_leaves_no_port() {
-    let devices = Devices::open_over(&tutti_platform::Executor::new(), Box::new(Refuses)).unwrap();
+    let devices = Devices::open_over(
+        &tutti_platform::Executor::new(),
+        Box::new(crate::testing::Stub::inputs(vec![endpoint(1, "Keys")])),
+    )
+    .unwrap();
     let ports = ports();
     let keys = id_of(&devices, "Keys");
     for _ in 0..3 {
@@ -382,8 +355,11 @@ fn a_backend_failure_leaves_no_port() {
 fn a_change_during_subscribe_is_in_initial_or_in_the_stream_once() {
     const DEVICES: i32 = 2000;
     for _ in 0..10 {
-        let devices =
-            Devices::open_over(&tutti_platform::Executor::new(), Box::new(Refuses)).unwrap();
+        let devices = Devices::open_over(
+            &tutti_platform::Executor::new(),
+            Box::new(crate::testing::Stub::inputs(vec![endpoint(1, "Keys")])),
+        )
+        .unwrap();
         let sink = ChangeSink {
             shared: Arc::clone(&devices.inner.shared),
         };
@@ -629,49 +605,19 @@ fn the_blocks_left_out_of_a_device_are_readable() {
     assert_eq!(caps.function_blocks().count(), 1);
 }
 
-/// A backend whose OS cannot be asked: the listing fails, and the watch lists
-/// the device it was seeded with.
-struct Unlistable;
-
-impl MidiEndpoints for Unlistable {
-    fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
-        sink.seed(os_devices(&[endpoint(1, "Keys")], &[]))?;
-        Ok(Box::new(crate::endpoints::NoWatch))
-    }
-    fn inputs(&self) -> Result<Vec<OsEndpoint>> {
-        Err(MidiHardwareError::Unsupported(
-            "the sequencer will not open",
-        ))
-    }
-    fn outputs(&self) -> Result<Vec<OsEndpoint>> {
-        Err(MidiHardwareError::Unsupported(
-            "the sequencer will not open",
-        ))
-    }
-    fn open_input(
-        &self,
-        _started: crate::Started,
-        _: EndpointId,
-        _: crate::InputProducerHandle,
-    ) -> Result<Box<dyn InputConnection>> {
-        Err(MidiHardwareError::Unsupported("no inputs"))
-    }
-    fn open_output(
-        &self,
-        _started: crate::Started,
-        _: EndpointId,
-    ) -> Result<Box<dyn crate::DeviceOut>> {
-        Err(MidiHardwareError::Unsupported("no outputs"))
-    }
-}
-
 /// **A backend that cannot list its endpoints says so**: asking what a listed
 /// device is returns the backend's error, not "nothing", and opening the
 /// device's output fails with it too.
 #[test]
 fn a_backend_that_cannot_be_asked_fails_the_capability_query() {
-    let devices =
-        Devices::open_over(&tutti_platform::Executor::new(), Box::new(Unlistable)).unwrap();
+    let devices = Devices::open_over(
+        &tutti_platform::Executor::new(),
+        Box::new(
+            crate::testing::Stub::inputs(vec![endpoint(1, "Keys")])
+                .unlistable("the sequencer will not open"),
+        ),
+    )
+    .unwrap();
     let keys = id_of(&devices, "Keys");
     assert!(matches!(
         devices.capability(&keys),

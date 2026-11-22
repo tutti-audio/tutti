@@ -20,8 +20,8 @@ use tutti_midi_device::{
 use tutti_ump::ControlValue;
 use tutti_ump::MidiChannel;
 use tutti_ump::{
-    BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, JrTicks, Message, MessageType,
-    SoftwareRevision, Stream, Sysex8StreamCount, SysexAssembler, SysexStep,
+    BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, JrTicks, Message, MessageType, Stream,
+    Sysex8StreamCount, SysexAssembler, SysexStep,
 };
 use tutti_ump::{BlockName, EndpointName};
 
@@ -461,15 +461,7 @@ fn identity_reply(device: u8) -> Vec<Ump> {
     ])
 }
 
-fn identity() -> tutti_ump::DeviceIdentity {
-    use tutti_ump::{ManufacturerId, U7};
-    tutti_ump::DeviceIdentity {
-        manufacturer: ManufacturerId::new(0x41).unwrap(),
-        family: [U7::of(1), U7::of(2)],
-        model: [U7::of(3), U7::of(4)],
-        revision: SoftwareRevision::from([U7::of(5), U7::of(6), U7::of(7), U7::of(8)]),
-    }
-}
+use tutti_fixtures::midi::device_identity_one_byte_manufacturer as identity;
 
 fn reply_at(wire: &Wire, packets: Vec<Ump>, ms: u64) {
     for ump in packets {

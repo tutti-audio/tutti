@@ -14,7 +14,7 @@ use tutti_fixtures::sf2::generator;
 use tutti_midi_protocol::SysexDeviceId;
 use tutti_sf2::SoundFont;
 use tutti_soundfont::SoundFontConfig;
-use tutti_ump::{MidiChannel, MidiGroup, Rpn, SysexMessage, Ump, Voice2};
+use tutti_ump::{MidiChannel, Rpn, Voice2};
 
 /// `0:0` and `0:1` are the plain sine and an octave above it; the percussion
 /// bank's `128:0` is one or the other, as `drums_up` says.
@@ -44,13 +44,6 @@ fn font_with(drums_up: bool) -> Arc<SoundFont> {
     )
 }
 
-fn sysex(group: u8, bytes: &[u8]) -> Vec<Ump> {
-    SysexMessage::from_framed(bytes)
-        .expect("a framed message")
-        .packets(MidiGroup::of(group))
-        .collect()
-}
-
 /// A Universal Real Time Device Control message to `device`.
 fn device_control(device: u8, sub_id: u8, lsb: u8, msb: u8) -> Vec<u8> {
     vec![0xF0, 0x7F, device, 0x04, sub_id, lsb, msb, 0xF7]
@@ -60,7 +53,8 @@ const GM_ON: [u8; 6] = [0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7];
 const GM_OFF: [u8; 6] = [0xF0, 0x7E, 0x7F, 0x09, 0x02, 0xF7];
 
 fn send(rig: &mut Rig, bytes: &[u8]) {
-    rig.hand.queue_midi(&sysex(0, bytes));
+    rig.hand
+        .queue_midi(&tutti_fixtures::midi::sysex_packets(0, bytes));
 }
 
 /// The rising zero crossings in a second of key 69 on `channel`: the pitch in Hz.
@@ -211,8 +205,10 @@ fn general_midi_off_also_returns_to_the_initial_status() {
 #[test]
 fn another_groups_message_is_not_this_units() {
     let mut rig = Rig::dry(&font_with(false));
-    rig.hand
-        .queue_midi(&sysex(1, &device_control(0x7F, 0x04, 0x00, 0x4C)));
+    rig.hand.queue_midi(&tutti_fixtures::midi::sysex_packets(
+        1,
+        &device_control(0x7F, 0x04, 0x00, 0x4C),
+    ));
     near(pitch(&mut rig, 0), 441, "the first Group is untouched");
 }
 

@@ -158,37 +158,6 @@ fn a_failed_read_is_not_quiet() {
     assert_eq!(looks.get(), 2);
 }
 
-/// A backend that only hands out the sink its watch is given.
-struct Capture(Arc<Mutex<Option<ChangeSink>>>);
-
-impl crate::MidiEndpoints for Capture {
-    fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
-        *self.0.lock() = Some(sink);
-        Ok(Box::new(crate::endpoints::NoWatch))
-    }
-    fn inputs(&self) -> Result<Vec<crate::OsEndpoint>> {
-        Ok(Vec::new())
-    }
-    fn outputs(&self) -> Result<Vec<crate::OsEndpoint>> {
-        Ok(Vec::new())
-    }
-    fn open_input(
-        &self,
-        _started: crate::Started,
-        _: EndpointId,
-        _: crate::InputProducerHandle,
-    ) -> Result<Box<dyn crate::InputConnection>> {
-        Err(MidiHardwareError::Unsupported("none"))
-    }
-    fn open_output(
-        &self,
-        _started: crate::Started,
-        _: EndpointId,
-    ) -> Result<Box<dyn crate::DeviceOut>> {
-        Err(MidiHardwareError::Unsupported("none"))
-    }
-}
-
 /// The sequencer: one ordered announce port, and the clients.
 struct Model {
     stream: RefCell<Vec<Announced>>,
@@ -238,7 +207,7 @@ impl World {
         let slot = Arc::new(Mutex::new(None));
         let devices = crate::Devices::open_over(
             &tutti_platform::Executor::new(),
-            Box::new(Capture(Arc::clone(&slot))),
+            Box::new(crate::testing::Stub::capturing(&slot)),
         )
         .unwrap();
         let events = devices.subscribe();

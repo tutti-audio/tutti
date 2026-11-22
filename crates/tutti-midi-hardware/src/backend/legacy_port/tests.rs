@@ -21,7 +21,7 @@ use crate::error::{MidiHardwareError, Result};
 use tutti_midi_device::{
     DeviceEvent, EndpointId, OsDevice, OsEndpointIdentity, PortDirection, WinMmDevice,
 };
-use tutti_ump::{Message, MidiGroup, Sysex7Packet, SysexStatus, Ump};
+use tutti_ump::{SysexStatus, Ump};
 
 fn named(name: &str, product: u16) -> WinMmDevice {
     WinMmDevice::Named {
@@ -301,12 +301,7 @@ fn sent(out: &mut ByteOut, ump: Ump) -> Vec<Vec<u8>> {
     wire
 }
 
-fn sysex(status: SysexStatus, data: &[u8]) -> Ump {
-    Ump::from(Message::Sysex7(
-        MidiGroup::FIRST,
-        Sysex7Packet::new(status, data).unwrap(),
-    ))
-}
+use tutti_fixtures::midi::sysex7 as sysex;
 
 #[test]
 fn a_midi1_note_on_is_one_short_message() {
@@ -764,33 +759,6 @@ fn the_poll_seeds_then_reports_a_device_that_appears_and_one_that_goes() {
     );
 }
 
-/// A backend that hands the test its `ChangeSink` and watches nothing.
-struct Captured(Arc<Mutex<Option<ChangeSink>>>);
-
-impl MidiEndpoints for Captured {
-    fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
-        *self.0.lock() = Some(sink);
-        Ok(Box::new(crate::endpoints::NoWatch))
-    }
-    fn inputs(&self) -> Result<Vec<OsEndpoint>> {
-        Ok(Vec::new())
-    }
-    fn outputs(&self) -> Result<Vec<OsEndpoint>> {
-        Ok(Vec::new())
-    }
-    fn open_input(
-        &self,
-        _started: crate::Started,
-        _: EndpointId,
-        _: crate::InputProducerHandle,
-    ) -> Result<Box<dyn InputConnection>> {
-        Err(MidiHardwareError::Unsupported("test"))
-    }
-    fn open_output(&self, _started: crate::Started, _: EndpointId) -> Result<Box<dyn DeviceOut>> {
-        Err(MidiHardwareError::Unsupported("test"))
-    }
-}
-
 /// A poll whose executor has shut down ends without a look: a `Timer`'s sleep
 /// fails from then on, and a poll that looked again would spin. The future is polled once by hand on a thread, under a hang
 /// guard: one that loops never returns.
@@ -803,7 +771,8 @@ fn a_poll_ends_when_its_executor_has_shut_down() {
     }
     let slot = Arc::new(Mutex::new(None));
     let executor = tutti_platform::Executor::new();
-    let _devices = Devices::open_over(&executor, Box::new(Captured(Arc::clone(&slot)))).unwrap();
+    let _devices =
+        Devices::open_over(&executor, Box::new(crate::testing::Stub::capturing(&slot))).unwrap();
     let sink = slot.lock().take().unwrap();
     // The executor made here drops at once, so its timer is already shut down:
     // the poll's first sleep fails.

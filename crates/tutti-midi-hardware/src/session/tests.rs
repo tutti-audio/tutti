@@ -369,16 +369,9 @@ fn a_partial_accept_reports_what_landed() {
 
 /// A System Exclusive message of three packets, start, continue and end.
 fn sysex() -> [UmpAt; 3] {
-    use tutti_ump::{Message, MidiGroup, Sysex7Packet, SysexStatus};
-    [SysexStatus::Start, SysexStatus::Continue, SysexStatus::End].map(|status| {
-        (
-            Offset::ZERO,
-            tutti_ump::Ump::from(Message::Sysex7(
-                MidiGroup::FIRST,
-                Sysex7Packet::new(status, &[1, 2]).unwrap(),
-            )),
-        )
-    })
+    use tutti_ump::SysexStatus;
+    [SysexStatus::Start, SysexStatus::Continue, SysexStatus::End]
+        .map(|status| (Offset::ZERO, tutti_fixtures::midi::sysex7(status, &[1, 2])))
 }
 
 /// **A device that has room for two of a message's three packets takes none of

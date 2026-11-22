@@ -188,13 +188,10 @@ pub(crate) fn poll_attempt<T, E>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_fixtures::midi::ms;
 
     const SERVER_GONE: OsStatus = OsStatus::SERVER_GONE;
     const REFUSED: OsStatus = OsStatus::NOT_PERMITTED;
-
-    fn ms(n: u64) -> Duration {
-        Duration::from_millis(n)
-    }
 
     /// The waits a rule schedules for `count` failures of `status`, each at the
     /// instant the previous one made due.
