@@ -5,7 +5,32 @@
 //! arriving, and the MTC Full Message and the runtime's decoders read it rather
 //! than owning it.
 
-use tutti_units::{SampleRate, Seconds};
+use tutti_units::{Seconds, TimecodeFrames};
+
+tutti_units::ranged! {
+    /// The hours of a timecode: `0` to `23`, the hour of a day (M1 p.53 gives it
+    /// five bits, of which a clock reads 24 values).
+    #[derive(Eq, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    TimecodeHours(u8), NotTimecodeHours, "an hour of the day (0 to 23)", |raw| raw < 24
+}
+
+tutti_units::ranged! {
+    /// The minutes of a timecode: `0` to `59`.
+    #[derive(Eq, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    TimecodeMinutes(u8), NotTimecodeMinutes, "a minute of the hour (0 to 59)", |raw| raw < 60
+}
+
+tutti_units::ranged! {
+    /// The seconds of a timecode: `0` to `59`.
+    #[derive(Eq, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    TimecodeSeconds(u8), NotTimecodeSeconds, "a second of the minute (0 to 59)", |raw| raw < 60
+}
 
 /// SMPTE frame rate for MTC/LTC.
 ///
@@ -159,25 +184,22 @@ impl SmpteFrameRate {
     /// over the exact [`ratio`](Self::ratio), unrounded, so the fraction of a
     /// frame is kept. The one place a time becomes a frame count; each caller
     /// rounds it as its message needs: [`SmpteTimecode::from_seconds`] to the
-    /// nearest frame, `MmcPosition::from_seconds` down, with the fraction as
-    /// its subframes.
-    ///
-    /// The count is an `f64` and not a unit: no `tutti_units` unit counts
-    /// timecode frames (a `Frame` is a graph sample frame).
+    /// nearest frame ([`TimecodeFrames::round`]), `MmcPosition::from_seconds`
+    /// down ([`TimecodeFrames::floor`]) with the fraction as its subframes.
     ///
     /// [`SmpteTimecode::from_seconds`]: SmpteTimecode::from_seconds
     #[must_use]
-    pub fn frames_at(self, seconds: Seconds) -> f64 {
+    pub fn frames_at(self, seconds: Seconds) -> TimecodeFrames {
         let (num, den) = self.ratio();
-        seconds.get() * num as f64 / den as f64
+        TimecodeFrames::new(seconds.get() * num as f64 / den as f64)
     }
 
-    /// The samples in one frame at `sample_rate`: the exact ratio's
-    /// `rate * den / num`.
+    /// The time one frame lasts: `den / num` over the exact
+    /// [`ratio`](Self::ratio); [`frames_at`](Self::frames_at) is its inverse.
     #[must_use]
-    pub fn samples_per_frame(self, sample_rate: SampleRate) -> f64 {
+    pub fn frame_period(self) -> Seconds {
         let (num, den) = self.ratio();
-        sample_rate.get() * den as f64 / num as f64
+        Seconds::new(den as f64 / num as f64)
     }
 
     /// Frame labels per second: the count the `FF` field wraps at (24, 25, 30,
@@ -213,29 +235,29 @@ impl SmpteFrameRate {
     serde(try_from = "SmpteTimecodeRaw", into = "SmpteTimecodeRaw")
 )]
 pub struct SmpteTimecode {
-    hours: u8,
-    minutes: u8,
-    seconds: u8,
+    hours: TimecodeHours,
+    minutes: TimecodeMinutes,
+    seconds: TimecodeSeconds,
     frames: u8,
     frame_rate: SmpteFrameRate,
 }
 
-/// The persisted shape of a [`SmpteTimecode`]: its labels as written, checked
-/// by `TryFrom` on the way back in.
+/// The persisted shape of a [`SmpteTimecode`]: its labels as written, the frames
+/// checked against the rate by `TryFrom` on the way back in.
 #[cfg(feature = "serde")]
 #[derive(serde::Serialize, serde::Deserialize)]
 struct SmpteTimecodeRaw {
-    hours: u8,
-    minutes: u8,
-    seconds: u8,
+    hours: TimecodeHours,
+    minutes: TimecodeMinutes,
+    seconds: TimecodeSeconds,
     frames: u8,
     frame_rate: SmpteFrameRate,
 }
 
-/// A persisted position with a label out of range for its rate.
+/// A persisted position with a frame label out of range for its rate.
 #[cfg(feature = "serde")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
-#[error("a timecode label is out of range for its frame rate")]
+#[error("a timecode frame label is out of range for its frame rate")]
 pub struct InvalidSmpteTimecode;
 
 #[cfg(feature = "serde")]
@@ -272,35 +294,31 @@ impl SmpteTimecode {
     #[must_use]
     pub const fn origin(frame_rate: SmpteFrameRate) -> Self {
         Self {
-            hours: 0,
-            minutes: 0,
-            seconds: 0,
+            hours: TimecodeHours::of(0),
+            minutes: TimecodeMinutes::of(0),
+            seconds: TimecodeSeconds::of(0),
             frames: 0,
             frame_rate,
         }
     }
 
     /// The position `hours:minutes:seconds:frames` counted at `frame_rate`, or
-    /// `None` when a field is out of range: hours 0..=23, minutes and seconds
-    /// 0..=59, frames below the rate's label count (24, 25 or 30:
-    /// [`SmpteFrameRate::labels_per_second`]).
+    /// `None` when `frames` is not below the rate's label count (24, 25 or 30:
+    /// [`SmpteFrameRate::labels_per_second`]). The other fields are in range by
+    /// their types.
     ///
     /// The labels a drop-frame minute omits (`;00` and `;01`) are accepted:
     /// they are in range, and [`frame_count`](Self::frame_count) reads each as
     /// the next label that occurs.
     #[must_use]
     pub const fn new(
-        hours: u8,
-        minutes: u8,
-        seconds: u8,
+        hours: TimecodeHours,
+        minutes: TimecodeMinutes,
+        seconds: TimecodeSeconds,
         frames: u8,
         frame_rate: SmpteFrameRate,
     ) -> Option<Self> {
-        if hours < 24
-            && minutes < 60
-            && seconds < 60
-            && (frames as u64) < frame_rate.labels_per_second()
-        {
+        if (frames as u64) < frame_rate.labels_per_second() {
             Some(Self {
                 hours,
                 minutes,
@@ -313,39 +331,21 @@ impl SmpteTimecode {
         }
     }
 
-    /// The position counted at `frame_rate`, already checked by the caller to be
-    /// the labels [`new`](Self::new) accepts.
-    pub(crate) const fn counted(
-        hours: u8,
-        minutes: u8,
-        seconds: u8,
-        frames: u8,
-        frame_rate: SmpteFrameRate,
-    ) -> Self {
-        Self {
-            hours,
-            minutes,
-            seconds,
-            frames,
-            frame_rate,
-        }
-    }
-
     /// Hours, 0..=23. MTC carries this in 5 bits split across two nibbles.
     #[must_use]
-    pub const fn hours(self) -> u8 {
+    pub const fn hours(self) -> TimecodeHours {
         self.hours
     }
 
     /// Minutes, 0..=59.
     #[must_use]
-    pub const fn minutes(self) -> u8 {
+    pub const fn minutes(self) -> TimecodeMinutes {
         self.minutes
     }
 
     /// Seconds, 0..=59.
     #[must_use]
-    pub const fn seconds(self) -> u8 {
+    pub const fn seconds(self) -> TimecodeSeconds {
         self.seconds
     }
 
@@ -371,7 +371,10 @@ impl core::fmt::Display for SmpteTimecode {
         write!(
             f,
             "{:02}:{:02}:{:02}:{:02}",
-            self.hours, self.minutes, self.seconds, self.frames
+            self.hours.get(),
+            self.minutes.get(),
+            self.seconds.get(),
+            self.frames
         )
     }
 }
@@ -395,16 +398,16 @@ impl SmpteTimecode {
     /// that cannot occur in drop-frame are counted as the next label that does.
     pub fn frame_count(self) -> u64 {
         let per_sec = self.frame_rate.labels_per_second();
-        let minutes = u64::from(self.hours) * 60 + u64::from(self.minutes);
+        let minutes = u64::from(self.hours.get()) * 60 + u64::from(self.minutes.get());
         let mut frames = u64::from(self.frames);
         // `;00` and `;01` do not exist in a minute not divisible by ten: they
         // count as `;02`, the next label that does.
         let dropped_label =
-            self.frame_rate.is_drop_frame() && self.seconds == 0 && minutes % 10 != 0;
+            self.frame_rate.is_drop_frame() && self.seconds.get() == 0 && minutes % 10 != 0;
         if dropped_label {
             frames = frames.max(2);
         }
-        let labelled = (minutes * 60 + u64::from(self.seconds)) * per_sec + frames;
+        let labelled = (minutes * 60 + u64::from(self.seconds.get())) * per_sec + frames;
         if self.frame_rate.is_drop_frame() {
             labelled.saturating_sub(2 * (minutes - minutes / 10))
         } else {
@@ -466,9 +469,10 @@ impl SmpteTimecode {
         };
         let secs = labelled / per_sec;
         Self {
-            hours: ((secs / 3600) % 24) as u8,
-            minutes: ((secs / 60) % 60) as u8,
-            seconds: (secs % 60) as u8,
+            // Each is reduced below its bound, so the casts are exact.
+            hours: TimecodeHours::of(((secs / 3600) % 24) as u8),
+            minutes: TimecodeMinutes::of(((secs / 60) % 60) as u8),
+            seconds: TimecodeSeconds::of((secs % 60) as u8),
             frames: (labelled % per_sec) as u8,
             frame_rate,
         }
@@ -481,9 +485,8 @@ fn nearest_frame(seconds: Seconds, frame_rate: SmpteFrameRate) -> Option<u64> {
     if !seconds.get().is_finite() || seconds.get() < 0.0 {
         return None;
     }
-    let frames = libm::round(frame_rate.frames_at(seconds));
-    // A whole number in `0..2^53`, so the cast is exact.
-    (frames < 9_007_199_254_740_992.0).then_some(frames as u64)
+    let frames = frame_rate.frames_at(seconds).round();
+    (frames < 1 << 53).then_some(frames)
 }
 
 #[cfg(test)]

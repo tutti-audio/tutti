@@ -3,8 +3,8 @@
 
 use tutti_midi_protocol::{
     ChannelMask, KeyChange, KeyChanges, KeyTable, MtcRate, MtcTimeCode, OctaveOffsets,
-    PerNotePolicy, PerNoteTranslation, SmpteFrameRate, SmpteTimecode, Timing, TranslationMode,
-    TuningFrequency, TuningName,
+    PerNotePolicy, PerNoteTranslation, SmpteFrameRate, SmpteTimecode, TimecodeHours,
+    TimecodeMinutes, TimecodeSeconds, Timing, TranslationMode, TuningFrequency, TuningName,
 };
 use tutti_ump::{ExtremeValues, NoteNumber, PerNoteManagement, U7, U14};
 
@@ -20,7 +20,14 @@ where
 #[test]
 fn a_timecode_reads_back_only_when_its_labels_are_in_range_for_its_rate() {
     for rate in SmpteFrameRate::ALL {
-        let at = SmpteTimecode::new(23, 59, 58, 23, rate).unwrap();
+        let at = SmpteTimecode::new(
+            TimecodeHours::of(23),
+            TimecodeMinutes::of(59),
+            TimecodeSeconds::of(58),
+            23,
+            rate,
+        )
+        .unwrap();
         assert_eq!(round_trip(&at), at);
     }
     let mut json = serde_json::to_value(SmpteTimecode::origin(SmpteFrameRate::Fps24)).unwrap();
@@ -32,7 +39,14 @@ fn a_timecode_reads_back_only_when_its_labels_are_in_range_for_its_rate() {
     assert!(serde_json::from_value::<SmpteTimecode>(json).is_err());
 
     for rate in MtcRate::ALL {
-        let at = MtcTimeCode::new(rate, 1, 2, 3, rate.labels_per_second() - 1).unwrap();
+        let at = MtcTimeCode::new(
+            rate,
+            TimecodeHours::of(1),
+            TimecodeMinutes::of(2),
+            TimecodeSeconds::of(3),
+            rate.labels_per_second() - 1,
+        )
+        .unwrap();
         assert_eq!(round_trip(&at), at);
         let mut json = serde_json::to_value(at).unwrap();
         json["frames"] = rate.labels_per_second().into();

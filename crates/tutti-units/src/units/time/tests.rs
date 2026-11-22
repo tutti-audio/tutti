@@ -439,3 +439,47 @@ fn finite_or_keeps_a_finite_value_and_replaces_a_non_finite_one() {
     // A NaN fallback is returned as given, not repaired.
     assert!(Hz(f64::NAN).finite_or(Hz(f64::NAN)).get().is_nan());
 }
+
+/// What `TimecodeFrames` deliberately lacks, beside the definition in `units/time.rs`:
+///
+/// - `Mul<TimecodeFrames>`: frames squared is no quantity; scaling is `Mul<f64>`.
+/// - `Div<TimecodeFrames> -> f64`: a comparison is `<`; whole counts come from `floor`.
+/// - `Rem`: a label wraps by its own fields, and `SmpteTimecode::from_frame_count`
+///   owns the drop-frame wrap.
+/// - `From<f64>`, `From<TimecodeFrames> for f64`: `new` and `get`.
+///
+/// The body is empty and this test cannot fail; see the note in `units/tests.rs`.
+#[test]
+fn timecode_frames_omissions_are_documented() {}
+
+/// `round` is nearest (half away from zero), `floor` is down, and a count no whole
+/// number holds (NaN, negative) is 0, so a caller that needs a refusal checks first.
+#[test]
+fn timecode_frames_name_their_rounding() {
+    assert_eq!(TimecodeFrames::new(2.5).round(), 3);
+    assert_eq!(TimecodeFrames::new(2.5).floor(), 2);
+    assert_eq!(TimecodeFrames::new(2.499).round(), 2);
+    assert_eq!(TimecodeFrames::new(7.0).round(), 7);
+    assert_eq!(TimecodeFrames::new(7.0).floor(), 7);
+    for bad in [-1.5, f64::NAN, f64::NEG_INFINITY] {
+        assert_eq!(TimecodeFrames::new(bad).round(), 0, "{bad}");
+        assert_eq!(TimecodeFrames::new(bad).floor(), 0, "{bad}");
+    }
+    assert_eq!(TimecodeFrames::new(f64::INFINITY).floor(), u64::MAX);
+}
+
+/// A whole count converts exactly both ways, and the counts add, scale and order as
+/// frames do.
+#[test]
+fn timecode_frames_compose_as_a_count() {
+    let five = TimecodeFrames::from_count(5);
+    assert_eq!(five.floor(), 5);
+    assert_eq!(five + TimecodeFrames::new(0.5), TimecodeFrames::new(5.5));
+    assert_eq!(five * 2.0, TimecodeFrames::from_count(10));
+    assert_eq!((-five).abs(), five);
+    assert!(TimecodeFrames::new(1.5) < five);
+    assert_eq!(
+        five - TimecodeFrames::from_count(TimecodeFrames::new(5.25).floor()),
+        TimecodeFrames::ZERO
+    );
+}

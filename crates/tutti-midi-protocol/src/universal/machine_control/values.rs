@@ -4,7 +4,7 @@
 use tutti_ump::{U4, U7, first_non_seven_bit};
 
 use super::MmcBytes;
-use tutti_units::Seconds;
+use tutti_units::{Seconds, TimecodeFrames};
 
 use crate::smpte::{MtcRate, SmpteTimecode};
 use crate::universal::MtcTimeCode;
@@ -155,8 +155,8 @@ impl MmcTimeLabel {
         let p = self.time_code;
         [
             p.hours_byte(),
-            u8::from(self.color_frame) << 6 | p.timecode().minutes(),
-            u8::from(self.blank) << 6 | p.timecode().seconds(),
+            u8::from(self.color_frame) << 6 | p.timecode().minutes().get(),
+            u8::from(self.blank) << 6 | p.timecode().seconds().get(),
             self.sign.wire() << 6 | p.timecode().frames(),
         ]
     }
@@ -306,10 +306,11 @@ impl MmcPosition {
         }
         let frame_rate = rate.frame_rate();
         let frames = frame_rate.frames_at(seconds);
-        let whole = libm::floor(frames);
-        // `whole` is a finite whole number from 0 below one day of frames.
-        let label = SmpteTimecode::from_frame_count(whole as u64, frame_rate);
-        let hundredths = libm::floor((frames - whole) * 100.0).clamp(0.0, 99.0);
+        let whole = frames.floor();
+        // `whole` is a count from 0 below one day of frames.
+        let label = SmpteTimecode::from_frame_count(whole, frame_rate);
+        let fraction = frames - TimecodeFrames::from_count(whole);
+        let hundredths = libm::floor(fraction.get() * 100.0).clamp(0.0, 99.0);
         Some(Self {
             label: MmcTimeLabel::new(MtcTimeCode::new(
                 rate,
