@@ -172,7 +172,7 @@ pub(super) fn store() -> ResourceStore {
     store.put(Some(id("abcd")), program_edit()).unwrap();
     for (name, flow) in [("X-Blob", false), ("X-BigBlob", true)] {
         let blob = ResourceEntry::builder(custom(name))
-            .schema(json(r#"{"title":"Blob","type":"string"}"#))
+            .schema(json(r#"{"title":"Blob"}"#))
             .can_set(CanSet::Full)
             .fc_on_set(flow)
             .can_subscribe(true)

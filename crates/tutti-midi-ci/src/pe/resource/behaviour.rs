@@ -1085,3 +1085,75 @@ fn a_header_property_and_a_change_are_scalars_of_the_one_json_type() {
     assert!(PeHeader::try_from(br#"{"resource":"A","x-n":[1]}"#.as_slice()).is_err());
     assert!(PeJson::try_from(br#"{"resource": "A", "x-n": [1]}"#.as_slice()).is_ok());
 }
+
+fn terminate_message(transaction: PeTransaction, id: u8) -> Decoded {
+    signal_message(
+        transaction,
+        PeSignal::Terminate {
+            request_id: PeRequestId::of(id),
+            by: PeTerminator::Initiator,
+        },
+    )
+}
+
+/// The chunks of a Set of X-Blob, of three or more chunks, from the Initiator.
+fn blob_set_chunks() -> Vec<PeChunk> {
+    let mut request = super::super::header::PeRequest::new(ResourceName::new("X-Blob").unwrap());
+    request.mutual_encoding = Some(PeEncoding::Mcoded7);
+    request.media_type = Some(octets());
+    let body = super::super::mcoded7::encode_vec(&blob_bytes(400));
+    let chunks = split_message(
+        PeRequestId::of(5),
+        &PeHeader::Request(request),
+        &body,
+        MaxSysexSize::of(192),
+    )
+    .unwrap();
+    assert!(chunks.len() >= 3);
+    chunks
+}
+
+fn send_set_chunks(link: &mut Link, chunks: &[PeChunk]) -> Vec<ResponderAction> {
+    let mut out = Vec::new();
+    for chunk in chunks {
+        out.extend(link.resp.on_message(
+            &mut link.store,
+            &pe_message(PeCiMessage::Chunk {
+                kind: PeMessageKind::SET_INQUIRY,
+                chunk: chunk.clone(),
+            }),
+            link.now,
+        ));
+    }
+    out
+}
+
+// M2-103 §12.1.2: on a Terminate NAK of a Set, the side that expects the chunks, the
+// Responder, stops expecting the rest of the Request Id, and no reply follows: the
+// Set is never made.
+/// Spec: m2-103/12.1.2#3, m2-103/12.1.2#4
+#[test]
+fn a_terminate_nak_of_a_set_stops_the_responder_expecting_chunks() {
+    let target = super::exchange::target(custom("X-Blob"));
+    let chunks = blob_set_chunks();
+    let before = store().get(&target).cloned();
+    // All the chunks make the Set.
+    let mut whole = Link::new(store(), 192);
+    send_set_chunks(&mut whole, &chunks);
+    assert_ne!(whole.store.get(&target).cloned(), before);
+    // The NAK after the first one leaves the data as it was, and nothing is sent.
+    let mut link = Link::new(store(), 192);
+    send_set_chunks(&mut link, &chunks[..1]);
+    let answer = link.resp.on_message(
+        &mut link.store,
+        &terminate_message(PeTransaction::Set, 5),
+        link.now,
+    );
+    assert!(answer.is_empty(), "a reply to the NAK: {answer:?}");
+    let rest = send_set_chunks(&mut link, &chunks[1..]);
+    assert!(
+        chunks_of(&rest).is_empty(),
+        "a reply to a Set that was terminated"
+    );
+    assert_eq!(link.store.get(&target).cloned(), before);
+}

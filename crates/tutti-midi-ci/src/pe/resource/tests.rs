@@ -717,7 +717,7 @@ fn resource_list_reads_table_82() {
     let text = r#"[{"resource":"DeviceInfo"},{"resource":"ChannelList","canSubscribe":true},
         {"resource":"ProgramList"},
         {"resource":"X-Buffer","canSet":"full","mediaTypes":["application/octet-stream"],
-         "encodings":["MCoded7"],"schema":{"title":"Buffer","type":"string"}}]"#;
+         "encodings":["MCoded7"],"schema":{"title":"Buffer"}}]"#;
     let PeData::ResourceList(list) = ok(PeResource::ResourceList, text) else {
         panic!("not ResourceList");
     };
@@ -1270,4 +1270,23 @@ fn a_channel_fault_carries_the_function_block_channel_error() {
         error.fault,
         PeDataFault::NotValid(InvalidValue::FunctionBlockChannel(NotAPeChannel(257)))
     );
+}
+
+
+// M2-103 §14.6: a Resource that is not JSON leaves the schema `type` empty, and its
+// `mediaTypes` says what the data is; the schema still has its `title`.
+/// Spec: m2-103/14.6#1
+#[test]
+fn a_non_json_entry_leaves_the_schema_type_empty() {
+    let sample = |schema: &str| {
+        ResourceEntry::builder(custom("X-Sample"))
+            .can_set(CanSet::Full)
+            .media_types(vec![MediaType::new("audio/wav").unwrap()])
+            .encodings(vec![PeEncoding::Mcoded7])
+            .schema(json(schema))
+            .build()
+    };
+    assert!(sample(r#"{"title":"Sample Upload","description":"Upload the sample here"}"#).is_ok());
+    assert!(sample(r#"{"title":"Sample Upload","type":[]}"#).is_ok());
+    assert!(sample(r#"{"title":"Sample Upload","type":"string"}"#).is_err());
 }

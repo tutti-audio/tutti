@@ -641,7 +641,14 @@ impl ResourceResponder {
                     }
                 }
             }
-            PeTransaction::Set => {}
+            PeTransaction::Set => {
+                // The Responder is the side that expects a Set's chunks: a Terminate
+                // ends the reassembly, and the transaction is concluded with no reply.
+                if matches!(signal, PeSignal::Terminate { .. }) {
+                    self.reassembler
+                        .terminate(peer, PeMessageKind::SET_INQUIRY, id);
+                }
+            }
         }
     }
 

@@ -28,8 +28,9 @@ pub enum EntryError {
     #[error("{0} is not a List Resource")]
     NotAList(String),
     /// A manufacturer-specific JSON Resource gives a schema with at least a
-    /// `title` and a `type` (M2-103 §14.4).
-    #[error("the schema of {0} has no title or no type")]
+    /// `title` and a `type`, and the schema of a Resource that is not JSON a
+    /// `title` and no `type` (M2-103 §14.4, §14.6).
+    #[error("the schema of {0} has no title, or has no type where it needs one, or has one where it must not")]
     SchemaIncomplete(String),
     /// Flow Control on Get needs `canGet`, and on Set needs `canSet`.
     #[error("{0} sets Flow Control for a transaction it does not take")]
@@ -379,7 +380,8 @@ impl ResourceEntryBuilder {
     /// Resource a specification defines, and for a schema of one;
     /// [`EntryError::SchemaIncomplete`] unless a manufacturer-specific
     /// Resource gives a schema that is an object with a `title` string and a
-    /// `type` (a string or an array);
+    /// `type` (a string or an array), or, when its media types leave out
+    /// `application/json`, a `title` and no `type` (or an empty array);
     /// [`EntryError::NotAList`] for pagination or Columns of a Resource that is
     /// no List Resource; [`EntryError::FlowControlWithoutTransaction`] for Flow
     /// Control on a transaction the Resource does not take;
@@ -459,8 +461,19 @@ impl ResourceEntry {
             return Err(self.refuse_override("schema"));
         }
         let member = |name| schema.as_object().and_then(|o| o.get(name));
-        let complete = member("title").and_then(PeJson::as_str).is_some()
-            && member("type").is_some_and(|t| t.as_str().is_some() || t.as_array().is_some());
+        let titled = member("title").and_then(PeJson::as_str).is_some();
+        // A Resource whose media types leave out JSON is not JSON (§14.6): its schema
+        // has a title and no type, and `type` as an empty array counts as none.
+        let json = self
+            .media_types
+            .as_ref()
+            .is_none_or(|types| types.contains(&MediaType::JSON));
+        let complete = titled
+            && if json {
+                member("type").is_some_and(|t| t.as_str().is_some() || t.as_array().is_some())
+            } else {
+                member("type").is_none_or(|t| t.as_array().is_some_and(|a| a.is_empty()))
+            };
         if complete {
             Ok(())
         } else {
