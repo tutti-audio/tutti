@@ -34,12 +34,12 @@ use tutti_nodes::{
     DelayNode, DiodeClipperConfig, DiodeClipperNode, DistanceConfig, DistanceNode,
     DistortionConfig, DistortionNode, DynamicEqConfig, DynamicEqNode, EqBandConfig, EqBandNode,
     FrequencyShifterConfig, FrequencyShifterNode, GateConfig, GateControls, GateNode,
-    InterpolationMode, KeySource, LadderFilterConfig, LadderFilterNode, LadderType, LfoConfig,
-    LfoNode, LfoShape, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayConfig,
-    ModDelayNode, PhaserConfig, PhaserControls, PhaserNode, PitchShifterConfig, PitchShifterNode,
-    RingModConfig, RingModNode, ShapeKind, ShimmerConfig, ShimmerNode, Stages, SvfFilterConfig,
-    SvfFilterNode, SvfType, TremoloConfig, TremoloNode, TubeStageConfig, TubeStageNode,
-    WavetableConfig, WavetableNode,
+    HysteresisConfig, HysteresisNode, InterpolationMode, KeySource, LadderFilterConfig,
+    LadderFilterNode, LadderType, LfoConfig, LfoNode, LfoShape, LimiterConfig, LimiterControls,
+    LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserControls, PhaserNode,
+    PitchShifterConfig, PitchShifterNode, RingModConfig, RingModNode, ShapeKind, ShimmerConfig,
+    ShimmerNode, Stages, SvfFilterConfig, SvfFilterNode, SvfType, TremoloConfig, TremoloNode,
+    TubeStageConfig, TubeStageNode, WavetableConfig, WavetableNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -211,6 +211,17 @@ fn diode_clipper() {
     })
     .control("drive", |d| {
         assert!(d.param_set().set(UnitParam::GainDb, 30.0))
+    })
+    .check();
+}
+
+#[test]
+fn hysteresis() {
+    IsolateRow::new("HysteresisNode (stereo)", || {
+        HysteresisNode::<f32>::from(HysteresisConfig::new(ChannelLayout::STEREO))
+    })
+    .control("drive", |d| {
+        assert!(d.param_set().set(UnitParam::GainDb, 6.0))
     })
     .check();
 }

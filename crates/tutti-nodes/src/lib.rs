@@ -49,6 +49,7 @@
 //!   and `SweepRange` checked; the rate is floored at 0.01 Hz, a control signal's value and a cell's alike), both any width.
 //! - **Distortion** — `DistortionNode` and its `ShapeKind` waveshapers; `DiodeClipperNode`, an
 //!   RC-loaded antiparallel diode pair solved by a capped Newton iteration, oversampled;
+//!   `HysteresisNode`, Jiles-Atherton magnetic hysteresis solved the same way;
 //!   `TubeStageNode`, a 12AX7 common-cathode stage with a plate load, solved the same way.
 //! - **Bit crusher** — `BitCrusherNode`, a sample-and-hold and a quantizer, with no tail,
 //!   from a `BitCrusherConfig`.
@@ -347,14 +348,17 @@ pub use tutti_dsp::{
 
 mod diode_clipper;
 mod distortion;
+mod hysteresis;
 mod oversampled;
 mod tube_stage;
 pub use diode_clipper::{
     DiodeClipperConfig, DiodeClipperKernel, DiodeClipperNode, DiodeClipperSet,
 };
 pub use distortion::{DistortionConfig, DistortionKernel, DistortionNode, DistortionSet};
+pub use hysteresis::{HysteresisConfig, HysteresisKernel, HysteresisNode, HysteresisSet};
 pub use tube_stage::{TubeStageConfig, TubeStageKernel, TubeStageNode, TubeStageSet};
 pub use tutti_dsp::{ClipperDrive, ClipperDriveError, DiodeClipperControls};
+pub use tutti_dsp::{HysteresisControls, HysteresisDrive, HysteresisDriveError};
 pub use tutti_dsp::{TubeDrive, TubeDriveError, TubeStageControls};
 // `ShapeKind` and `OversamplingFactor` are in `DistortionNode`'s signatures; what is behind
 // them is `tutti-dsp`'s.

@@ -89,6 +89,9 @@
 //! - **Diode clipper** (`diode_clipper.rs`): [`DiodeClipper`], the RC-loaded antiparallel diode
 //!   pair of Yeh, Abel and Smith, by the trapezoidal rule with a capped Newton solve seeded from
 //!   the Wright omega closed form (`wright_omega.rs`, `newton.rs`).
+//! - **Hysteresis** (`hysteresis.rs`): [`Hysteresis`], the Jiles-Atherton model of magnetization
+//!   (Jiles and Atherton 1986), by the trapezoidal rule of Holters and Zoelzer (2016) with a
+//!   capped Newton solve (`newton.rs`).
 //! - **Tube stage** (`tube_stage.rs`): [`TubeStage`], a 12AX7 common-cathode stage after Koren's
 //!   model, its plate load solved per sample by a capped Newton iteration from a closed-form
 //!   seed, with [`TubeDrive`] its checked drive.
@@ -207,6 +210,7 @@ mod fm;
 mod follower;
 mod frequency_shifter;
 mod granular;
+mod hysteresis;
 mod interp;
 mod karplus_strong;
 mod level;
@@ -323,6 +327,7 @@ pub use frequency_shifter::{
 pub use granular::{
     GrainScheduler, GrainSettings, GrainStart, Granular, MaxGrains, MaxGrainsError,
 };
+pub use hysteresis::{Hysteresis, HysteresisControls, HysteresisDrive, HysteresisDriveError};
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
 pub use karplus_strong::{KarplusStrong, KarplusStrongBank, KarplusStrongControls};
 pub use level::rms;
