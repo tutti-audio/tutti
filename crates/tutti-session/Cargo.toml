@@ -77,7 +77,7 @@ tutti-plugin = { version = "0.0.1", path = "../tutti-plugin", optional = true }
 # The control handle, the node's controls and the host policy over a handle
 # (`Liveness`, `PluginParamValues`): what a hosted plugin is, whatever serves it.
 tutti-plugin-host = { version = "0.0.1", path = "../tutti-plugin-host", optional = true }
-# The catalog a plugin load resolves through (`Loadable`, `Hosting`, `BindError`).
+# The catalog a plugin load resolves through (`Loadable`, `Hosting`, `tutti_plugin_db::BindError`).
 tutti-plugin-db = { version = "0.0.1", path = "../tutti-plugin-db", optional = true }
 # The bridge settings a plugin opens with (`AudioConfig`).
 tutti-plugin-ipc = { version = "0.0.1", path = "../tutti-plugin-ipc", optional = true }

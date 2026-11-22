@@ -46,8 +46,8 @@ use tutti_nodes::{Feed, ReconcileError};
 use tutti_rt::Param;
 use tutti_units::{Depth, ParamAddr, ParamId, UnitAddr, UnitParam};
 
+use crate::ChannelEdge;
 use crate::DeclarationError;
-use crate::Edge;
 use crate::ModKeys;
 use crate::ParamUnit;
 use tutti_buffers::Float;
@@ -118,7 +118,7 @@ impl ParamRef {
     }
 
     /// The `ParamRef` a key of the session's own names; `None` for the key
-    /// of an edge ([`Edge`]) or a mix ([`MixRef`]).
+    /// of an edge ([`ChannelEdge`]) or a mix ([`MixRef`]).
     #[must_use]
     pub fn from_key(target: TargetKey) -> Option<Self> {
         match target {
@@ -160,7 +160,7 @@ impl MixRef {
 }
 
 /// What a modulation route, range or automation names: a param of a node
-/// ([`ParamRef`]), the gain of an edge ([`Edge`]) or the mix of a node
+/// ([`ParamRef`]), the gain of an edge ([`ChannelEdge`]) or the mix of a node
 /// ([`MixRef`]). Each converts: `mods.route(source, param_ref, depth)`,
 /// `mods.route(source, edge_ref, depth)` and `mods.route(source, mix_ref,
 /// depth)`.
@@ -169,7 +169,7 @@ pub enum ModTarget {
     /// A param of a node.
     Param(ParamRef),
     /// The gain of an edge.
-    Edge(Edge),
+    Edge(ChannelEdge),
     /// The mix of a node.
     Mix(MixRef),
 }
@@ -192,8 +192,8 @@ impl<U> From<crate::ParamTarget<U>> for ModTarget {
     }
 }
 
-impl From<Edge> for ModTarget {
-    fn from(e: Edge) -> Self {
+impl From<ChannelEdge> for ModTarget {
+    fn from(e: ChannelEdge) -> Self {
         Self::Edge(e)
     }
 }
@@ -218,7 +218,7 @@ impl std::fmt::Display for ModTarget {
 
 /// A modulation target whose value is in a unit tutti knows: what
 /// [`Mods::range`] takes a range of. A [`ParamTarget`](crate::ParamTarget) (the unit its node
-/// declares), an [`Edge`] ([`Amplitude`](tutti_units::Amplitude)) and a
+/// declares), a [`ChannelEdge`] ([`Amplitude`](tutti_units::Amplitude)) and a
 /// [`MixRef`] ([`Mix`](tutti_units::Mix)). Sealed.
 pub trait Ranged: Into<ModTarget> + ranged::Sealed {
     /// The unit of the target's value.
@@ -233,8 +233,8 @@ impl<U: crate::Scalar> ranged::Sealed for crate::ParamTarget<U> {}
 impl<U: crate::Scalar> Ranged for crate::ParamTarget<U> {
     type Unit = U;
 }
-impl ranged::Sealed for Edge {}
-impl Ranged for Edge {
+impl ranged::Sealed for ChannelEdge {}
+impl Ranged for ChannelEdge {
     type Unit = tutti_units::Amplitude;
 }
 impl ranged::Sealed for MixRef {}
@@ -931,9 +931,9 @@ pub(crate) struct OwnMods {
     /// The key the reconciler is given for each edge a target names (an
     /// edge has no node bits to be its key): minted on first use, kept for
     /// the edge's life as a target.
-    edge_keys: BTreeMap<Edge, u64>,
+    edge_keys: BTreeMap<ChannelEdge, u64>,
     /// The inverse, for [`OwnKeys`].
-    edge_refs: BTreeMap<u64, Edge>,
+    edge_refs: BTreeMap<u64, ChannelEdge>,
     /// The declarations as the reconciler takes them, built from the maps
     /// above on the first apply after they may have changed: cleared when
     /// [`Mods`] is handed out (whatever it then edits), when a take closes
@@ -1209,7 +1209,7 @@ impl ModKeys for OwnKeys<'_> {
         Some(NodeKey(target))
     }
 
-    fn edge(&self, target: u64) -> Option<Edge> {
+    fn edge(&self, target: u64) -> Option<ChannelEdge> {
         self.0.edge_refs.get(&target).copied()
     }
 
@@ -1704,7 +1704,7 @@ impl Mods<'_> {
     /// `false`.
     ///
     /// `target` is a [`Key`](crate::Key)'s param method (`lp.cutoff()`, in
-    /// [`Hz`](tutti_units::Hz)), an [`Edge`] (its gain, in
+    /// [`Hz`](tutti_units::Hz)), a [`ChannelEdge`] (its gain, in
     /// [`Amplitude`](tutti_units::Amplitude)) or a [`MixRef`] (in
     /// [`Mix`](tutti_units::Mix)), and the range is a range of that unit:
     /// `m.range(lp.cutoff(), Hz::new(100.0)..Hz::new(4000.0))?`. A plugin's param, which

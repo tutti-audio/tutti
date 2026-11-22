@@ -12,7 +12,7 @@ use tutti_measure::{
     Error as MeasureError, PeakBlocks, PeakConfig, VectorscopeConfig, WindowedLoudnessConfig,
 };
 use tutti_nodes::testing::{Const, Osc, Through};
-use tutti_session::{Analyzer, AnalyzerError, BindError, Session};
+use tutti_session::{Analyzer, AnalyzerError, MeterBindError, Session};
 use tutti_units::{Amplitude, Hz, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -155,7 +155,7 @@ fn a_view_the_tap_width_cannot_make_opens_no_tap() {
         .open_analyzer(&[src.out(0)], scope, tap(64))
         .unwrap_err();
     assert!(
-        matches!(refused, AnalyzerError::Bind(BindError::Width { .. })),
+        matches!(refused, AnalyzerError::Bind(MeterBindError::Width { .. })),
         "{refused:?}"
     );
     let next = s.graph().taps().open_root(Samples::new(64)).unwrap().id();

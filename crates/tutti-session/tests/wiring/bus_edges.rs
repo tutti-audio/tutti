@@ -11,7 +11,8 @@ use tutti_buffers::{FoldError, InterleavedMut};
 use tutti_graph::{BusError, BusRef, BusSource, Buses, NodeKey, Unforkable};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_session::{
-    Committed, ConnectError, Edge, GainTargetError, InPort, OutPort, Root, Session, SessionEvent,
+    ChannelEdge, Committed, ConnectError, GainTargetError, InPort, OutPort, Root, Session,
+    SessionEvent,
 };
 
 const BLOCK: usize = 64;
@@ -277,7 +278,7 @@ fn a_lane_has_no_gain_target_and_a_removed_node_takes_its_bus_edges() {
     g.connect(BusSource::Node(bus(r.stereo)), bus(r.sink))
         .unwrap()
         .unfaded();
-    let lane = Edge::new(OutPort::new(r.stereo, 0), InPort::new(r.sink, 0));
+    let lane = ChannelEdge::new(OutPort::new(r.stereo, 0), InPort::new(r.sink, 0));
     assert_eq!(
         g.gain_target(lane.source(), lane.sink()),
         Err(GainTargetError::BusLane(lane))

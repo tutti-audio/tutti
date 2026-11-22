@@ -738,7 +738,7 @@ pub use graph::{
 };
 pub use history::TransportHistory;
 pub use inlet::{InletNode, InletRing};
-pub use instrument::Instrument;
+pub use instrument::InstrumentNode;
 pub use io::{BusIn, BusOut, Channel, Inputs, Io, Outputs, PortKind};
 pub use latency::{
     ChannelFeed, Compensation, Delays, Feed, InputDelay, LatencyGraph, MAX_NODE_LATENCY,

@@ -47,7 +47,7 @@ use crate::graph::{OnShape, SwapRefused};
 use crate::loaded::{Stamp, caught};
 use crate::peer::sealed;
 use crate::{GiveUp, Key, LoadError, NoSuchNode, Peer, Presence};
-use crate::{OtherPeer, PeerState, ReplaceRefused, Resource, ResourceId, SavedPeer, Session};
+use crate::{OtherPeer, PeerResourceId, PeerState, ReplaceRefused, Resource, SavedPeer, Session};
 
 /// A plugin to open, built by [`Session::load_plugin`] and not yet run. Where it
 /// runs is decided when it is built, from the catalog's row and the format: a
@@ -413,7 +413,7 @@ impl LoadedPlugin {
 impl sealed::Sealed for LoadedPlugin {}
 
 impl Resource for LoadedPlugin {
-    fn id(&self) -> ResourceId {
+    fn id(&self) -> PeerResourceId {
         self.shared.id
     }
 }

@@ -28,7 +28,7 @@ use crate::PluginPresets;
 use crate::apply::SessionId;
 use crate::loaded::Stamp;
 use crate::peer::ResourceIds;
-use crate::{GiveUp, LoadError, ResourceId};
+use crate::{GiveUp, LoadError, PeerResourceId};
 
 /// What a plugin's load needs of the session that built it.
 #[derive(Clone, Debug)]
@@ -182,7 +182,7 @@ pub enum PluginCause {
 /// What a [`LoadedPlugin`](crate::LoadedPlugin) shares: the readings of one
 /// opened plugin.
 pub struct Shared {
-    pub(super) id: ResourceId,
+    pub(super) id: PeerResourceId,
     pub(super) stamp: Stamp,
     pub(super) info: Arc<PluginInfo>,
     pub(super) standing: Arc<Standing>,

@@ -8,7 +8,7 @@ use crate::common::{Seen, Tap, blocks, offline};
 use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::{
-    Cx, EventCapacity, ForkByClone, Instrument, IntoNode, Io, Node, NodeParts, Prepare, Shape,
+    Cx, EventCapacity, ForkByClone, InstrumentNode, IntoNode, Io, Node, NodeParts, Prepare, Shape,
     Status,
 };
 use tutti_midi_runtime::TimedMidiEvent;
@@ -39,7 +39,7 @@ impl IntoNode for Probe {
         self.0.into_parts()
     }
 }
-impl Instrument<f32> for Probe {}
+impl InstrumentNode<f32> for Probe {}
 impl SessionNode for Probe {
     fn reclaimer(_: &()) -> tutti_session::Reclaims {
         tutti_session::Reclaims::Nothing

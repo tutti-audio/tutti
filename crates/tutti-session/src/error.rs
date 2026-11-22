@@ -52,7 +52,7 @@ pub enum RemoveError {
 /// The session refused to set the project tempo. Nothing is published.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Error)]
 #[non_exhaustive]
-pub enum TempoError {
+pub enum SetTempoError {
     /// The session follows a live tempo (`Midi::follow_tempo`, feature
     /// `midi`), which owns the published map until `unfollow_tempo`: a map set now would be
     /// overwritten by the next live step, and unfollowing restores the map in
