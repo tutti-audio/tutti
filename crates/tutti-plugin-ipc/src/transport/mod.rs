@@ -8,8 +8,8 @@
 pub mod control;
 pub mod shm;
 
-// The control stream's platform difference (socket naming, waiting for bytes)
-// is `sys`'s: this `mod` line carries the transport's only platform `cfg`.
+// The control stream's platform difference (how the server is handed its end of the
+// connection, waiting for bytes) is `sys`'s: this `mod` line carries the transport's only platform `cfg`.
 #[cfg(unix)]
 #[path = "sys/unix.rs"]
 mod sys;
@@ -17,10 +17,9 @@ mod sys;
 #[path = "sys/windows.rs"]
 mod sys;
 
-pub(crate) use sys::PendingLane;
 #[cfg(any(test, feature = "testing"))]
 pub use sys::broker_pair;
 /// What a mock server receives a slab over.
 #[cfg(test)]
 pub(crate) use sys::connection;
-pub(crate) use sys::socket_path_in;
+pub(crate) use sys::{PendingLane, Rendezvous, spawn};

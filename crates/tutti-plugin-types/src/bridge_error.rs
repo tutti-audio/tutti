@@ -56,8 +56,9 @@ pub enum IpcError {
     #[error("the bridge cannot watch its control connection")]
     ConnectionUnwatched(#[source] std::io::Error),
 
-    /// The subprocess ended before it bound its control socket.
-    #[error("the plugin-server exited before binding its socket")]
+    /// The subprocess ended before the host could reach it: on Windows, before it
+    /// listened on the pipe it was given.
+    #[error("the plugin-server exited before the host connected to it")]
     ServerExited {
         /// How the server ended.
         #[source]

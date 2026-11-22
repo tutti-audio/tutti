@@ -13,6 +13,10 @@ categories = ["multimedia::audio"]
 [lints]
 workspace = true
 
+[features]
+# `inheritable_descriptors`, for the host's spawn tests.
+testing = []
+
 [dependencies]
 # The mapping.
 memmap2 = "0.9"
@@ -26,9 +30,10 @@ tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 futures-lite.workspace = true
 
 [target.'cfg(unix)'.dependencies]
-# `poll`, `kill(pid, 0)`, the slab's memfd and seals, and the descriptor's
-# `sendmsg`/`recvmsg`, without a hand-written call.
-rustix = { version = "1", default-features = false, features = ["std", "event", "process", "fs", "net"] }
+# `poll`, `kill(pid, 0)`, the slab's memfd and seals, the descriptor's
+# `sendmsg`/`recvmsg` and the server's adoption of the socket on its stdin, without
+# a hand-written call.
+rustix = { version = "1", default-features = false, features = ["std", "event", "process", "fs", "net", "stdio"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # The slab's POSIX shared memory object.
