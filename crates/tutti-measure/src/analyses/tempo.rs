@@ -34,8 +34,11 @@ use tutti_buffers::{Float, Mono, Sample};
 use tutti_units::{Bpm, Confidence, SampleRate, Samples, Seconds};
 
 use crate::analyses::xcorr::cross_correlate;
+use core::marker::PhantomData;
+
 use crate::convert::{Gathered, widen};
 use crate::framing::Framing;
+use crate::measure::measure_whole;
 use crate::meters::onset::{DetectionFunction, OnsetConfig, onset_lag, run};
 
 use tutti_dsp::FrameCount;
@@ -52,6 +55,10 @@ const HOP: usize = 512;
 /// them a period is not a musical beat, and the lag it maps to is absurd.
 const MIN_BPM: f64 = 1.0;
 const MAX_BPM: f64 = 1000.0;
+
+/// The most frames of novelty one call analyses, bounding the gathered audio
+/// and the curve.
+const MAX_FRAMES: FrameCount = FrameCount(1 << 22);
 
 /// The most runner-up tempi kept.
 const MAX_ALTERNATIVES: usize = 16;
@@ -223,12 +230,13 @@ impl TempoConfig {
 }
 
 impl TempoConfig {
-    /// Checks the framing against `rate`, as the analyses do before reading audio.
-    fn check(&self, rate: SampleRate) -> Result<(), MeterError> {
+    /// A gather for audio of this framing, once the framing is checked
+    /// against `rate`, as the analyses do before reading audio.
+    fn gather(&self, rate: SampleRate) -> Result<Gathered, MeterError> {
         OnsetConfig::new(DetectionFunction::SpectralFlux)
             .framing(self.framing)
             .plan(rate)?;
-        Ok(())
+        Ok(Gathered::new(self.framing, MAX_FRAMES))
     }
 }
 
@@ -241,14 +249,14 @@ impl<S: Sample> Measure<S> for TempoConfig {
     ///
     /// # Errors
     ///
-    /// [`FramingError::ZeroWindow`] or [`FramingError::ZeroHop`] for a zero
-    /// window or hop.
+    /// [`MeterError::Framing`] ([`FramingError::ZeroWindow`] or
+    /// [`FramingError::ZeroHop`]) for a zero window or hop.
     fn measure(&self, rate: SampleRate) -> Result<TempoMeter<S>, MeterError> {
-        self.check(rate)?;
         Ok(TempoMeter {
             cfg: *self,
             rate,
-            audio: Gathered::new(),
+            audio: self.gather(rate)?,
+            sample: PhantomData,
         })
     }
 }
@@ -262,7 +270,8 @@ impl<S: Sample> Measure<S> for TempoConfig {
 pub struct TempoMeter<S: Sample> {
     cfg: TempoConfig,
     rate: SampleRate,
-    audio: Gathered<S>,
+    audio: Gathered,
+    sample: PhantomData<fn(S)>,
 }
 
 impl<S: Sample> StreamMeter for TempoMeter<S> {
@@ -272,8 +281,7 @@ impl<S: Sample> StreamMeter for TempoMeter<S> {
 
     /// Gathers the next chunk of the audio; no tempo is read before the end.
     fn push(&mut self, chunk: Mono<'_, S>, _: &mut impl Extend<()>) -> Result<(), MeterError> {
-        self.audio.push(chunk);
-        Ok(())
+        self.audio.push(chunk)
     }
 
     /// The tempo of the audio gathered, or what [`estimate_tempo`] refuses it for.
@@ -304,14 +312,14 @@ impl<S: Sample> Measure<S> for BeatConfig {
     ///
     /// # Errors
     ///
-    /// [`FramingError::ZeroWindow`] or [`FramingError::ZeroHop`] for a zero
-    /// window or hop.
+    /// [`MeterError::Framing`] ([`FramingError::ZeroWindow`] or
+    /// [`FramingError::ZeroHop`]) for a zero window or hop.
     fn measure(&self, rate: SampleRate) -> Result<BeatMeter<S>, MeterError> {
-        self.0.check(rate)?;
         Ok(BeatMeter {
             cfg: self.0,
             rate,
-            audio: Gathered::new(),
+            audio: self.0.gather(rate)?,
+            sample: PhantomData,
         })
     }
 }
@@ -325,7 +333,8 @@ impl<S: Sample> Measure<S> for BeatConfig {
 pub struct BeatMeter<S: Sample> {
     cfg: TempoConfig,
     rate: SampleRate,
-    audio: Gathered<S>,
+    audio: Gathered,
+    sample: PhantomData<fn(S)>,
 }
 
 impl<S: Sample> StreamMeter for BeatMeter<S> {
@@ -335,8 +344,7 @@ impl<S: Sample> StreamMeter for BeatMeter<S> {
 
     /// Gathers the next chunk of the audio; no beat is placed before the end.
     fn push(&mut self, chunk: Mono<'_, S>, _: &mut impl Extend<()>) -> Result<(), MeterError> {
-        self.audio.push(chunk);
-        Ok(())
+        self.audio.push(chunk)
     }
 
     /// The beats of the audio gathered, or what [`track_beats`] refuses it for.
@@ -415,7 +423,7 @@ pub fn estimate_tempo<S: Sample>(
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
 ) -> Result<Tempo, TempoEstimateError> {
-    estimate_tempo_at(cfg, &widen(samples.samples()), rate.into())
+    measure_whole::<S, _, _, _>(cfg, rate.into(), samples)
 }
 
 /// [`estimate_tempo`] over `f64` samples.
@@ -469,7 +477,7 @@ pub fn track_beats<S: Sample>(
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
 ) -> Result<BeatGrid, TempoEstimateError> {
-    track_beats_at(cfg, &widen(samples.samples()), rate.into())
+    measure_whole::<S, _, _, _>(&BeatConfig::new(*cfg), rate.into(), samples)
 }
 
 /// [`track_beats`] over `f64` samples.
@@ -566,9 +574,6 @@ fn novelty(
         .framing(cfg.framing)
         .plan(rate)?;
     let geometry = onset.geometry();
-    if samples.iter().any(|s| !s.is_finite()) {
-        return Err(TempoEstimateError::NonFiniteInput);
-    }
     let window = geometry.window().get();
     if samples.len() < window {
         return Err(TempoEstimateError::InsufficientInput {

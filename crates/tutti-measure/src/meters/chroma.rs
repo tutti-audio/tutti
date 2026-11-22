@@ -354,6 +354,11 @@ pub(crate) struct ChromaPlan {
 }
 
 impl ChromaPlan {
+    /// The window and hop the frames are cut at.
+    pub(crate) fn framing(&self) -> Framing {
+        Framing::new(self.geometry.window(), self.geometry.hop())
+    }
+
     /// The bins a peak may sit on, `lo..=hi`, each with both neighbours inside
     /// the half spectrum; an error unless the band is valid and holds three.
     fn band_bins(&self) -> Result<(usize, usize), MeterError> {

@@ -21,14 +21,22 @@ use tutti_buffers::{
 use tutti_units::{Confidence, SampleRate, Samples, Seconds};
 
 use crate::analyses::xcorr::{CrossCorrelation, cross_correlate_shaped};
+use core::marker::PhantomData;
+
 use crate::convert::{Gathered, widen};
+use crate::framing::Framing;
 use crate::framing::check_nyquist;
+use crate::measure::measure_whole;
 use crate::meters::chroma::FrequencyBand;
 use crate::{AlignError, Measure, MeterError, StreamMeter};
 
-use tutti_dsp::Complex64;
 use tutti_dsp::FftScratch;
 use tutti_dsp::parabolic_peak;
+use tutti_dsp::{Complex64, FrameCount};
+
+/// The most samples of a take one call aligns, bounding the gathered audio and
+/// the padded spectra.
+const MAX_FRAMES: FrameCount = FrameCount(1 << 26);
 
 /// A bin whose cross-spectrum magnitude is below this fraction of the
 /// strongest in-band bin is damped rather than boosted to unit magnitude.
@@ -163,12 +171,9 @@ pub fn align<S: Sample>(
     take: Mono<'_, S>,
     rate: impl Into<SampleRate>,
 ) -> Result<Alignment, AlignError> {
-    align_at(
-        config,
-        &widen(reference.samples()),
-        &widen(take.samples()),
-        rate.into(),
-    )
+    let rate = rate.into();
+    let reference = Wave::from_mono(rate, Mono::new(&widen(reference.samples())));
+    measure_whole::<S, _, _, _>(&AlignTo::new(*config, reference), rate, take)
 }
 
 /// [`align`] over `f64` samples.
@@ -281,7 +286,8 @@ impl<S: Sample, R: Float> Measure<S> for AlignTo<R> {
             config: self.config,
             reference: self.mono_reference()?,
             rate,
-            take: Gathered::new(),
+            take: Gathered::new(Framing::new(Samples::new(1), Samples::new(1)), MAX_FRAMES),
+            sample: PhantomData,
         })
     }
 }
@@ -296,7 +302,8 @@ pub struct AlignMeter<S: Sample> {
     config: AlignConfig,
     reference: Vec<f64>,
     rate: SampleRate,
-    take: Gathered<S>,
+    take: Gathered,
+    sample: PhantomData<fn(S)>,
 }
 
 impl<S: Sample> StreamMeter for AlignMeter<S> {
@@ -305,9 +312,13 @@ impl<S: Sample> StreamMeter for AlignMeter<S> {
     type Output = Result<Alignment, AlignError>;
 
     /// Gathers the next chunk of the take; no lag is found before the end.
+    ///
+    /// # Errors
+    ///
+    /// [`MeterError::NonFiniteInput`] for a NaN or infinity;
+    /// [`MeterError::TooManyFrames`] for a take of more than 67108864 samples.
     fn push(&mut self, chunk: Mono<'_, S>, _: &mut impl Extend<()>) -> Result<(), MeterError> {
-        self.take.push(chunk);
-        Ok(())
+        self.take.push(chunk)
     }
 
     /// The alignment of the take gathered, or what [`align`] refuses it for.

@@ -458,26 +458,29 @@ fn delay_converts_and_bad_input_is_refused() {
     ));
 }
 
-/// The meter fed the take in uneven chunks finds the alignment `align` finds of
-/// the whole take, and a reference at another rate is refused.
+/// A meter of a take 25 samples late against its reference reads a lag of 25
+/// and a delay of 25 samples in seconds, in any chunking; a reference at
+/// another rate or one that cannot fold to mono is refused when the meter is
+/// made.
 #[test]
-fn the_align_meter_over_uneven_chunks_equals_align() {
+fn the_align_meter_reads_the_known_delay_and_refuses_a_reference_it_cannot_hold() {
     let reference = noise(4000, 3);
     let take = shifted(&reference, 25);
     let config = AlignConfig::new(Samples::new(100));
     let rate = SampleRate::SR_48K;
-    let whole = super::align(&config, Mono::new(&reference), Mono::new(&take), rate).unwrap();
-    assert_eq!(whole.lag(), 25);
-    let wave = Wave::from_mono(rate, Mono::new(&reference));
-    let measure = AlignTo::new(config, wave.clone());
-    let (items, found) = crate::fold_uneven(&measure, rate, take.len(), |meter, at, out| {
-        meter.push(Mono::new(&take[at]), out)
-    })
-    .unwrap();
-    assert!(items.is_empty());
-    assert_eq!(found, Ok(whole));
+    let measure = AlignTo::new(config, Wave::from_mono(rate, Mono::new(&reference)));
+    let found = crate::measure::chunk_independent(&measure, rate, &take).unwrap();
+    assert_eq!(found.lag(), 25);
+    assert!(found.offset().abs() < 0.05, "{}", found.offset());
+    assert!((found.delay(rate).get() - 25.0 / 48_000.0).abs() < 0.05 / 48_000.0);
+
     assert!(matches!(
         Measure::<f64>::measure(&measure, SampleRate::SR_44K1),
         Err(MeterError::ReferenceRate { .. })
+    ));
+    let three = AlignTo::new(config, Wave::<f64>::new(3, rate));
+    assert!(matches!(
+        Measure::<f64>::measure(&three, rate),
+        Err(MeterError::ReferenceFold(_))
     ));
 }

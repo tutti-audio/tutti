@@ -922,22 +922,40 @@ fn the_defaults_are_the_documented_ones() {
     assert_eq!(d.hop.get(), d.frame().get() / 8);
 }
 
-/// The meter fed uneven chunks reads the notes `transcribe` reads of the whole
-/// buffer.
+/// A meter of two tones reads A4 and C5 at the pitch of each, in any chunking;
+/// a pitch band above Nyquist and a hop wider than the YIN frame are refused
+/// when the meter is made, and a NaN when it is fed.
 #[test]
-fn the_note_meter_over_uneven_chunks_equals_transcribe() {
+fn the_note_meter_reads_the_pitches_and_refuses_what_it_cannot_hold() {
     let c = cfg();
     let x = render(
         RATE,
         &[tone(0.2, 0.45, 440.0, 0.5), tone(0.6, 0.85, 523.2511, 0.5)],
         1.0,
     );
-    let whole = transcribe(&c, &x).unwrap();
-    assert_eq!(whole.len(), 2);
-    let (items, notes) = crate::fold_uneven(&c.cfg, c.rate, x.len(), |meter, at, out| {
-        meter.push(Mono::new(&x[at]), out)
-    })
-    .unwrap();
-    assert!(items.is_empty());
-    assert_eq!(notes, Ok(whole));
+    let notes = crate::measure::chunk_independent(&c.cfg, c.rate, &x).unwrap();
+    let midi: Vec<_> = notes
+        .iter()
+        .map(|n| NoteNumber::try_from(n.note).map(u8::from))
+        .collect();
+    assert_eq!(midi, [Ok(69), Ok(72)]);
+    assert!(notes.iter().all(|n| n.cents.get().abs() < 1.0));
+
+    let high = c.cfg.pitch(YinConfig::new().band(band(80.0, 30_000.0)));
+    assert!(matches!(
+        Measure::<f64>::measure(&high, c.rate),
+        Err(MeterError::Note(NoteError::Pitch(PitchError::Nyquist(_))))
+    ));
+    let wide = c.cfg.hop(PitchHop::of(Samples::new(c.frame().get() + 1)));
+    assert!(matches!(
+        Measure::<f64>::measure(&wide, c.rate),
+        Err(MeterError::Note(NoteError::Framing(
+            FramingError::HopWiderThanWindow { .. }
+        )))
+    ));
+    let mut meter = Measure::<f64>::measure(&c.cfg, c.rate).unwrap();
+    assert_eq!(
+        meter.push(Mono::new(&[0.0, f64::NAN]), &mut Vec::new()),
+        Err(MeterError::NonFiniteInput)
+    );
 }

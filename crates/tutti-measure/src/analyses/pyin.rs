@@ -41,14 +41,17 @@
 //! candidate outside the grid is not a state: its weight goes to the unvoiced
 //! mass.
 
+use core::marker::PhantomData;
+
 use tutti_buffers::{Mono, Sample};
 use tutti_dsp::{BandedTransition, FrameCount, viterbi};
 use tutti_units::{Cents, Confidence, Hz, SampleRate, Samples, ranged};
 
 use crate::analyses::notes::PitchHop;
 use crate::analyses::yin::{PitchDetector, YinConfig, YinPlan};
-use crate::convert::{Gathered, widen};
-use crate::framing::{Framing, check_frame_count};
+use crate::convert::Gathered;
+use crate::framing::Framing;
+use crate::measure::measure_whole;
 use crate::meters::chroma::FrequencyBand;
 use crate::{Measure, MeterError, PitchError, StreamMeter};
 
@@ -170,6 +173,12 @@ impl PyinConfig {
         self
     }
 
+    /// The hop the track advances by over frames of `frame` samples.
+    fn hop_for(&self, frame: Samples) -> Samples {
+        self.hop
+            .map_or(Samples::new((frame.get() / 8).max(1)), PitchHop::get)
+    }
+
     /// The band's YIN analysis at `rate`.
     fn plan(&self, rate: SampleRate) -> Result<YinPlan, PitchError> {
         YinConfig::new().band(self.band).plan(rate)
@@ -273,8 +282,7 @@ pub fn pyin_track<S: Sample>(
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
 ) -> Result<Vec<PyinFrame>, PitchError> {
-    let plan = cfg.plan(rate.into())?;
-    pyin_at(cfg, plan, cfg.model()?, &widen(samples.samples()))
+    measure_whole::<S, _, _, _>(cfg, rate.into(), samples)
 }
 
 impl<S: Sample> Measure<S> for PyinConfig {
@@ -286,15 +294,20 @@ impl<S: Sample> Measure<S> for PyinConfig {
     ///
     /// # Errors
     ///
-    /// [`AboveNyquist`](crate::AboveNyquist) when the band's top exceeds half `rate`;
-    /// [`PitchError::PitchGridTooLarge`] (as [`MeterError::Pitch`]) for a band
-    /// of too many bins.
+    /// [`MeterError::Pitch`] for what [`PyinConfig`] refuses at `rate`: a band
+    /// whose top exceeds half `rate` ([`PitchError::Nyquist`]) or one of too
+    /// many bins ([`PitchError::PitchGridTooLarge`]).
     fn measure(&self, rate: SampleRate) -> Result<PyinMeter<S>, MeterError> {
+        let plan = self.plan(rate)?;
         Ok(PyinMeter {
             cfg: *self,
-            plan: self.plan(rate)?,
+            audio: Gathered::new(
+                Framing::new(plan.buffer_size(), self.hop_for(plan.buffer_size())),
+                MAX_FRAMES,
+            ),
+            plan,
             model: self.model()?,
-            audio: Gathered::new(),
+            sample: PhantomData,
         })
     }
 }
@@ -309,7 +322,8 @@ pub struct PyinMeter<S: Sample> {
     cfg: PyinConfig,
     plan: YinPlan,
     model: (usize, BandedTransition<f64>),
-    audio: Gathered<S>,
+    audio: Gathered,
+    sample: PhantomData<fn(S)>,
 }
 
 impl<S: Sample> StreamMeter for PyinMeter<S> {
@@ -318,9 +332,14 @@ impl<S: Sample> StreamMeter for PyinMeter<S> {
     type Output = Result<Vec<PyinFrame>, PitchError>;
 
     /// Gathers the next chunk of the audio; no frame is decoded before the end.
+    ///
+    /// # Errors
+    ///
+    /// [`MeterError::NonFiniteInput`] for a NaN or infinity;
+    /// [`MeterError::TooManyFrames`] when the audio would make more than 65536
+    /// frames.
     fn push(&mut self, chunk: Mono<'_, S>, _: &mut impl Extend<()>) -> Result<(), MeterError> {
-        self.audio.push(chunk);
-        Ok(())
+        self.audio.push(chunk)
     }
 
     /// The track of the audio gathered, or what [`pyin_track`] refuses it for.
@@ -337,9 +356,7 @@ fn pyin_at(
     samples: &[f64],
 ) -> Result<Vec<PyinFrame>, PitchError> {
     let frame = plan.buffer_size();
-    let hop = cfg
-        .hop
-        .map_or(Samples::new((frame.get() / 8).max(1)), PitchHop::get);
+    let hop = cfg.hop_for(frame);
     if samples.len() < frame.get() {
         return Err(PitchError::InsufficientInput {
             needed: frame,
@@ -347,7 +364,6 @@ fn pyin_at(
         });
     }
     let frames = Framing::new(frame, hop).frames_for(Samples::new(samples.len()));
-    check_frame_count(frames, MAX_FRAMES)?;
 
     let weights = threshold_weights(cfg.threshold_mean.get());
     let lowest = cfg.band.min().get();

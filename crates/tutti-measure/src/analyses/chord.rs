@@ -64,9 +64,11 @@ use tutti_units::ranged;
 use tutti_buffers::{Mono, Sample};
 use tutti_units::SampleRate;
 
+use core::marker::PhantomData;
+
 use crate::convert::Gathered;
 use crate::framing::{Framing, check_frame_count};
-use crate::meters::chroma::{CLASSES, Chroma, ChromaConfig, chroma};
+use crate::meters::chroma::{CLASSES, Chroma, ChromaConfig, MAX_FRAMES as CHROMA_FRAMES, chroma};
 use crate::{ChordError, Measure, MeterError, Region, StreamMeter};
 use tutti_dsp::{FrameCount, FrameIndex, Grid, median, sticky_viterbi};
 
@@ -207,11 +209,11 @@ impl<S: Sample> Measure<S> for ChordConfig {
     ///
     /// What [`ChromaConfig`] refuses at `rate`.
     fn measure(&self, rate: SampleRate) -> Result<ChordMeter<S>, MeterError> {
-        self.chroma.plan(rate)?;
         Ok(ChordMeter {
             cfg: *self,
             rate,
-            audio: Gathered::new(),
+            audio: Gathered::new(self.chroma.plan(rate)?.framing(), CHROMA_FRAMES),
+            sample: PhantomData,
         })
     }
 }
@@ -226,7 +228,8 @@ impl<S: Sample> Measure<S> for ChordConfig {
 pub struct ChordMeter<S: Sample> {
     cfg: ChordConfig,
     rate: SampleRate,
-    audio: Gathered<S>,
+    audio: Gathered,
+    sample: PhantomData<fn(S)>,
 }
 
 impl<S: Sample> StreamMeter for ChordMeter<S> {
@@ -234,10 +237,11 @@ impl<S: Sample> StreamMeter for ChordMeter<S> {
     type Item = ();
     type Output = Result<Vec<ChordSpan>, ChordError>;
 
-    /// Gathers the next chunk of the audio; no chord is read before the end.
+    /// Gathers the next chunk of the audio, refusing a NaN or infinity
+    /// ([`MeterError::NonFiniteInput`]) and more chroma frames than one call
+    /// analyses ([`MeterError::TooManyFrames`]); no chord is read before the end.
     fn push(&mut self, chunk: Mono<'_, S>, _: &mut impl Extend<()>) -> Result<(), MeterError> {
-        self.audio.push(chunk);
-        Ok(())
+        self.audio.push(chunk)
     }
 
     /// The chords of the audio gathered, or what its chroma or
@@ -250,6 +254,9 @@ impl<S: Sample> StreamMeter for ChordMeter<S> {
 
 /// The chords of a chromagram, as spans in order, placed at the samples of the
 /// chroma's own framing. Where none is detected there is a gap.
+///
+/// Reads the `chroma` it is given and ignores the config's own
+/// [`chroma`](ChordConfig::chroma), which only a [`ChordMeter`] reads.
 ///
 /// # Errors
 ///

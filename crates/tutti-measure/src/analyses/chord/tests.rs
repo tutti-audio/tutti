@@ -365,20 +365,37 @@ fn spans_follow_the_chromas_own_framing() {
     }
 }
 
-/// The meter fed uneven chunks reads the chords of the chroma of the whole
-/// buffer.
+/// A meter of a C major triad reads one C major span from the start to the end
+/// of the audio, in any chunking; a chroma band above Nyquist is refused when
+/// the meter is made, for a chord and a key alike.
 #[test]
-fn the_chord_meter_over_uneven_chunks_equals_detect_chords_of_the_chroma() {
+fn the_chord_meter_reads_the_triad_and_refuses_a_chroma_it_cannot_hold() {
     let rate = SampleRate::of(22_050.0);
-    let x = crate::test_rng::tones(22_050.0, &[261.63, 329.63, 392.0], 44_100);
-    let cfg = cfg();
-    let made = chroma(&cfg.chroma, Mono::new(&x), rate).unwrap();
-    let whole = detect_chords(&cfg, &made).unwrap();
-    assert!(!whole.is_empty());
-    let (items, chords) = crate::fold_uneven(&cfg, rate, x.len(), |meter, at, out| {
-        meter.push(Mono::new(&x[at]), out)
-    })
+    let x = crate::test_rng::tones(22_050.0, &[261.626, 329.628, 391.995], 44_100);
+    let spans = crate::measure::chunk_independent(&cfg(), rate, &x).unwrap();
+    assert_eq!(roots(&spans), [(PitchClass::C, ChordQuality::Major)]);
+    assert_eq!(spans[0].span.start(), Samples::new(0));
+    let last = (Framing::new(Samples::new(4096), Samples::new(1024)))
+        .frames_for(Samples::new(x.len()))
+        .get()
+        - 1;
+    assert_eq!(spans[0].span.end(), Samples::new(last * 1024 + 4096));
+
+    let above = crate::meters::chroma::FrequencyBand::new(
+        tutti_units::Hz::new(100.0),
+        tutti_units::Hz::new(20_000.0),
+    )
     .unwrap();
-    assert!(items.is_empty());
-    assert_eq!(chords, Ok(whole));
+    let chroma = crate::ChromaConfig::new().band(above);
+    assert!(matches!(
+        Measure::<f64>::measure(&cfg().chroma(chroma), rate),
+        Err(MeterError::Nyquist(_))
+    ));
+    assert!(matches!(
+        Measure::<f64>::measure(
+            &crate::KeyConfig::new(crate::KeyProfile::Krumhansl).chroma(chroma),
+            rate
+        ),
+        Err(MeterError::Nyquist(_))
+    ));
 }

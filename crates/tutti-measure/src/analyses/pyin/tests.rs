@@ -253,18 +253,42 @@ fn a_band_above_nyquist_a_short_buffer_and_a_huge_grid_are_refused() {
     ));
 }
 
-/// The meter fed uneven chunks decodes the track `pyin_track` decodes of the
-/// whole buffer.
+/// A meter of a 220 Hz tone tracks it within half a grid step in any chunking,
+/// and refuses a band above Nyquist, a NaN and more frames than a track decodes.
 #[test]
-fn the_pyin_meter_over_uneven_chunks_equals_pyin_track() {
+fn the_pyin_meter_tracks_the_tone_and_refuses_what_it_cannot_hold() {
     let cfg = PyinConfig::new().hop(hop());
-    let x = tone(220.0, 4000);
-    let whole = pyin_track(&cfg, Mono::new(&x), RATE).unwrap();
-    assert!(whole.iter().any(|f| f.frequency.is_some()));
-    let (items, track) = crate::fold_uneven(&cfg, RATE, x.len(), |meter, at, out| {
-        meter.push(Mono::new(&x[at]), out)
-    })
-    .unwrap();
-    assert!(items.is_empty());
-    assert_eq!(track, Ok(whole));
+    let x: Vec<f64> = tone(220.0, 4000).iter().map(|&s| f64::from(s)).collect();
+    let track = crate::measure::chunk_independent(&cfg, RATE, &x).unwrap();
+    let voiced: Vec<f64> = track
+        .iter()
+        .filter_map(|f| f.frequency)
+        .map(Hz::get)
+        .collect();
+    assert!(
+        voiced.len() * 2 > track.len(),
+        "{} of {}",
+        voiced.len(),
+        track.len()
+    );
+    assert!(voiced.iter().all(|&f| cents_between(f, 220.0).abs() < 5.5));
+
+    let wide = FrequencyBand::new(Hz::new(55.0), Hz::new(9000.0)).unwrap();
+    assert!(matches!(
+        Measure::<f64>::measure(&PyinConfig::new().band(wide), RATE),
+        Err(MeterError::Pitch(PitchError::Nyquist(_)))
+    ));
+
+    let mut meter = Measure::<f64>::measure(&cfg, RATE).unwrap();
+    assert_eq!(
+        meter.push(Mono::new(&[f64::INFINITY]), &mut Vec::new()),
+        Err(MeterError::NonFiniteInput)
+    );
+    let dense = PyinConfig::new().hop(PitchHop::of(Samples::new(1)));
+    let mut meter = Measure::<f64>::measure(&dense, RATE).unwrap();
+    let long = vec![0.0f64; FRAME + MAX_FRAMES.get()];
+    assert!(matches!(
+        meter.push(Mono::new(&long), &mut Vec::new()),
+        Err(MeterError::TooManyFrames(_))
+    ));
 }

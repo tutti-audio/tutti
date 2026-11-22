@@ -73,8 +73,11 @@ use tutti_music::Note;
 use tutti_units::{Amplitude, Cents, Db, FrequencyRatio, SampleRate, Samples, Seconds};
 
 use crate::analyses::yin::{PitchEstimate, YinConfig, YinPlan, yin_track_at};
+use core::marker::PhantomData;
+
 use crate::convert::{Gathered, widen};
 use crate::framing::{Framing, check_frame_count, check_hop_within, check_overlap};
+use crate::measure::measure_whole;
 use crate::meters::onset::{DetectionFunction, OnsetConfig, OnsetPlan, onset_lag, run};
 use crate::meters::silence::FiniteLevel;
 use crate::{
@@ -428,15 +431,12 @@ pub fn transcribe<S: Sample>(
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
 ) -> Result<Vec<NoteEvent>, NoteError> {
-    transcribe_at(&cfg.plan(rate.into())?, &widen(samples.samples()))
+    measure_whole::<S, _, _, _>(cfg, rate.into(), samples)
 }
 
-/// [`transcribe`] over a resolved config and `f64` samples.
+/// [`transcribe`] over a resolved config and the finite `f64` samples a meter
+/// gathered, at most [`MAX_FRAMES`] pitch frames of them.
 fn transcribe_at(cfg: &NotePlan, samples: &[f64]) -> Result<Vec<NoteEvent>, NoteError> {
-    cfg.check_hop()?;
-    if samples.iter().any(|s| !s.is_finite()) {
-        return Err(NoteError::NonFiniteInput);
-    }
     let frame = cfg.frame();
     if samples.len() < frame.get() {
         return Err(NoteError::InsufficientInput {
@@ -448,10 +448,6 @@ fn transcribe_at(cfg: &NotePlan, samples: &[f64]) -> Result<Vec<NoteEvent>, Note
     if peak < SILENCE_FLOOR.to_amplitude().get() {
         return Err(NoteError::NoSignal);
     }
-    check_frame_count(
-        cfg.framing().frames_for(Samples::new(samples.len())),
-        MAX_FRAMES,
-    )?;
 
     let track = yin_track_at(&cfg.yin, samples, cfg.hop)?;
     let levels = levels_at(cfg, samples)?;
@@ -472,12 +468,17 @@ impl<S: Sample> Measure<S> for NoteConfig {
     /// # Errors
     ///
     /// [`MeterError::Note`] for what [`NoteConfig`] refuses at `rate`: a pitch
-    /// band above Nyquist, a YIN frame that is too long, an onset function that
-    /// is not spectral flux, a zero onset window or hop.
+    /// band above Nyquist ([`NoteError::Pitch`]), a YIN frame that is too long,
+    /// an onset function that is not spectral flux, a zero onset window or hop
+    /// ([`NoteError::Framing`]), a pitch hop wider than the YIN frame or under
+    /// 1/64 of it ([`NoteError::Framing`]).
     fn measure(&self, rate: SampleRate) -> Result<NoteMeter<S>, MeterError> {
+        let plan = self.plan(rate)?;
+        plan.check_hop().map_err(NoteError::from)?;
         Ok(NoteMeter {
-            plan: self.plan(rate)?,
-            audio: Gathered::new(),
+            audio: Gathered::new(plan.framing(), MAX_FRAMES),
+            plan,
+            sample: PhantomData,
         })
     }
 }
@@ -490,7 +491,8 @@ impl<S: Sample> Measure<S> for NoteConfig {
 #[derive(Debug)]
 pub struct NoteMeter<S: Sample> {
     plan: NotePlan,
-    audio: Gathered<S>,
+    audio: Gathered,
+    sample: PhantomData<fn(S)>,
 }
 
 impl<S: Sample> StreamMeter for NoteMeter<S> {
@@ -499,9 +501,14 @@ impl<S: Sample> StreamMeter for NoteMeter<S> {
     type Output = Result<Vec<NoteEvent>, NoteError>;
 
     /// Gathers the next chunk of the audio; no note is complete before the end.
+    ///
+    /// # Errors
+    ///
+    /// [`MeterError::NonFiniteInput`] for a NaN or infinity;
+    /// [`MeterError::TooManyFrames`] when the audio would make more pitch
+    /// frames than one call analyses.
     fn push(&mut self, chunk: Mono<'_, S>, _: &mut impl Extend<()>) -> Result<(), MeterError> {
-        self.audio.push(chunk);
-        Ok(())
+        self.audio.push(chunk)
     }
 
     /// The notes of the audio gathered, or what [`transcribe`] refuses it for.

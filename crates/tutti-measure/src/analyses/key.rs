@@ -15,8 +15,12 @@ use tutti_buffers::{Mono, Sample};
 use tutti_music::PitchClass;
 use tutti_units::{Confidence, SampleRate};
 
+use core::marker::PhantomData;
+
 use crate::convert::Gathered;
-use crate::meters::chroma::{CLASSES, ChromaConfig, chroma, mean_of_rows};
+use crate::meters::chroma::{
+    CLASSES, ChromaConfig, MAX_FRAMES as CHROMA_FRAMES, chroma, mean_of_rows,
+};
 use crate::{KeyEstimateError, Measure, MeterError, StreamMeter};
 
 use tutti_dsp::Grid;
@@ -137,11 +141,11 @@ impl<S: Sample> Measure<S> for KeyConfig {
     ///
     /// What [`ChromaConfig`] refuses at `rate`.
     fn measure(&self, rate: SampleRate) -> Result<KeyMeter<S>, MeterError> {
-        self.chroma.plan(rate)?;
         Ok(KeyMeter {
             cfg: *self,
             rate,
-            audio: Gathered::new(),
+            audio: Gathered::new(self.chroma.plan(rate)?.framing(), CHROMA_FRAMES),
+            sample: PhantomData,
         })
     }
 }
@@ -156,7 +160,8 @@ impl<S: Sample> Measure<S> for KeyConfig {
 pub struct KeyMeter<S: Sample> {
     cfg: KeyConfig,
     rate: SampleRate,
-    audio: Gathered<S>,
+    audio: Gathered,
+    sample: PhantomData<fn(S)>,
 }
 
 impl<S: Sample> StreamMeter for KeyMeter<S> {
@@ -164,10 +169,11 @@ impl<S: Sample> StreamMeter for KeyMeter<S> {
     type Item = ();
     type Output = Result<KeyEstimate, KeyEstimateError>;
 
-    /// Gathers the next chunk of the audio; no key is read before the end.
+    /// Gathers the next chunk of the audio, refusing a NaN or infinity
+    /// ([`MeterError::NonFiniteInput`]) and more chroma frames than one call
+    /// analyses ([`MeterError::TooManyFrames`]); no key is read before the end.
     fn push(&mut self, chunk: Mono<'_, S>, _: &mut impl Extend<()>) -> Result<(), MeterError> {
-        self.audio.push(chunk);
-        Ok(())
+        self.audio.push(chunk)
     }
 
     /// The key of the audio gathered, or what its chroma or [`estimate_key`]

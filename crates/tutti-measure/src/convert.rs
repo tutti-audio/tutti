@@ -1,8 +1,11 @@
 //! Reading any sample format as `f64` without allocating.
 
-use core::marker::PhantomData;
-
 use tutti_buffers::{Mono, Sample};
+use tutti_dsp::FrameCount;
+use tutti_units::Samples;
+
+use crate::MeterError;
+use crate::framing::{Framing, check_frame_count};
 
 /// Samples converted per step of [`for_blocks`].
 pub(crate) const BLOCK: usize = 4096;
@@ -49,25 +52,42 @@ pub(crate) fn for_blocks<S: Sample>(data: &[S], channels: usize, mut f: impl FnM
 }
 
 /// The folded mono of a stream, gathered whole as `f64`: what a meter of a
-/// whole-buffer analysis holds until it finishes. Grows with the audio.
+/// whole-buffer analysis holds until it finishes. Grows with the audio, up to
+/// the most frames the analysis reads.
 #[derive(Debug)]
-pub(crate) struct Gathered<S: Sample> {
+pub(crate) struct Gathered {
     samples: Vec<f64>,
-    sample: PhantomData<fn(S)>,
+    framing: Framing,
+    max: FrameCount,
 }
 
-impl<S: Sample> Gathered<S> {
-    pub(crate) fn new() -> Self {
+impl Gathered {
+    /// A gather that refuses the sample that would make more than `max` whole
+    /// frames of `framing`.
+    pub(crate) fn new(framing: Framing, max: FrameCount) -> Self {
         Self {
             samples: Vec::new(),
-            sample: PhantomData,
+            framing,
+            max,
         }
     }
 
     /// Appends the next chunk, converted to `f64`.
-    pub(crate) fn push(&mut self, chunk: Mono<'_, S>) {
+    ///
+    /// # Errors
+    ///
+    /// [`MeterError::NonFiniteInput`] when the chunk holds a NaN or infinity;
+    /// [`MeterError::TooManyFrames`] when the stream would pass the most
+    /// frames. The gather is untouched on error.
+    pub(crate) fn push<S: Sample>(&mut self, chunk: Mono<'_, S>) -> Result<(), MeterError> {
+        if !all_finite(chunk.samples()) {
+            return Err(MeterError::NonFiniteInput);
+        }
+        let total = Samples::new(self.samples.len().saturating_add(chunk.samples().len()));
+        check_frame_count(self.framing.frames_for(total), self.max)?;
         self.samples
             .extend(chunk.samples().iter().map(|s| s.convert_to::<f64>()));
+        Ok(())
     }
 
     /// Everything gathered, in order.

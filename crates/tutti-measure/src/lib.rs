@@ -120,7 +120,10 @@
 //!
 //! The whole-buffer analyses are configs too, and their meters gather the
 //! folded mono and run the one-shot's algorithm at [`finish`](StreamMeter::finish), so a
-//! meter fed chunks reads exactly what the one-shot reads of the whole buffer.
+//! meter fed chunks reads exactly what the one-shot reads of the whole buffer:
+//! the one-shot is that meter fed the buffer as one chunk, its refusals joined to
+//! the analysis's own error. The meter holds the gathered audio up to the most
+//! frames the analysis reads, and refuses a NaN or infinity when it is fed.
 //! Their [`Output`](StreamMeter::Output) is a `Result` of the analysis's own
 //! error, since what they refuse (a silent buffer, one too short) is known only
 //! at the end:
