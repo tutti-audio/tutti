@@ -228,7 +228,7 @@ impl Default for Workers {
 pub(crate) struct Parts<F: Float> {
     /// The session's executor, the one the MIDI hardware opened on: `session()`
     /// clones it into the session's background work, sampler and plugins.
-    executor: tutti_platform::Executor,
+    pub(crate) executor: tutti_platform::Executor,
     /// The thread that drives `executor`; the session's background work takes it over in `session()`.
     background: crate::background::Running,
     graph: Graph<F>,
@@ -1051,7 +1051,7 @@ impl<C: Clock> SessionBuilder<C> {
                 crate::policy::output_cell(table.output_facts()),
             ),
             reports: Default::default(),
-            midi: crate::session::parts::MidiPart::new(&mut parts, &self.opts),
+            midi: crate::session::parts::MidiPart::new(&mut parts, &self.opts, &bells),
             graph: parts.graph,
             mods: crate::modulation::ModSession::new(
                 self.opts.unresolved_warning,

@@ -18,8 +18,14 @@
 //!
 //! # Threading
 //!
-//! One owner, on the control thread: the session is a plain value, every call
-//! that changes it takes `&mut self`, and it is `Send` but is not shared.
+//! One owner at a time, off the audio thread: the session is a plain value, every
+//! call that changes it takes `&mut self`, and it is `Send`. A host that steps it
+//! from a task as well as from its control tick shares it under a lock, and the
+//! two callers' clocks may differ: [`poll`](MidiSession::poll) keeps the later
+//! time. A port's reader can ring a [`Bell`] when it wrote what a poll reads
+//! ([`ringing`](MidiSession::ringing)), and [`deadline`](MidiSession::deadline)
+//! says when a wait runs out, so the task polls only when there is something to
+//! step.
 //! Inbound **events** never pass through this type — a backend pushes them straight into the
 //! [`InputProducerHandle`] of a [`HardwareMidiInputs`] port, which places each
 //! arrival on a frame and pushes it into the device's event inlet, whose node
@@ -540,9 +546,11 @@ impl MidiSession {
     ///
     /// `now` is the caller's time: nothing here reads a clock or waits, so a
     /// device that never answers costs a few packets over a few seconds of
-    /// polls and then reads as [`Unanswered`](crate::Basis::Unanswered). Call
-    /// it from the control tick (the session's `Phase::Poll`); it only reads
-    /// rings and sends.
+    /// polls and then reads as [`Unanswered`](crate::Basis::Unanswered). A call
+    /// given an earlier `now` than the last one steps at the last (time never
+    /// steps back). Poll again at [`deadline`](Self::deadline), when a reader
+    /// rang ([`ringing`](Self::ringing)), and while
+    /// [`needs_poll`](Self::needs_poll); a poll only reads rings and sends.
     pub fn poll(&mut self, now: Instant) -> std::vec::IntoIter<Polled> {
         // Two callers may poll, each with its own clock: the later time of the
         // two is the session's, so no wait is moved back.

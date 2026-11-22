@@ -480,7 +480,7 @@ impl Negotiation {
     pub(crate) fn needs_poll(&self) -> bool {
         matches!(self.run, Run::Idle)
             || matches!(self.inquire, Inquire::Idle)
-            || self.ci.needs_poll()
+            || (self.out.is_some() && self.ci.needs_poll())
     }
 
     /// When the negotiation, the inquiry or MIDI-CI next needs a poll for a

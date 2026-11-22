@@ -1180,7 +1180,7 @@ fn a_reader_rings_the_bell_after_writing_the_stream_ring() {
     let (mut producer, _inlet) = ports.open_input_port("dev");
     let port = producer.port();
     let at = Instant::now();
-    let mut rung = |listener: &mut tutti_rt::Listener| {
+    let rung = |listener: &mut tutti_rt::Listener| {
         let mut cx = Context::from_waker(Waker::noop());
         pin!(listener.rung()).poll(&mut cx) == Poll::Ready(())
     };

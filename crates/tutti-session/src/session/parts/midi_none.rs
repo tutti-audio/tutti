@@ -36,7 +36,7 @@ impl Followed {
 }
 
 impl MidiPart {
-    pub(crate) fn new<F: Float>(_: &mut Parts<F>, _: &Options) -> Self {
+    pub(crate) fn new<F: Float>(_: &mut Parts<F>, _: &Options, _: &tutti_rt::Bells) -> Self {
         Self
     }
 

@@ -927,12 +927,17 @@ impl MidiState {
     #[cfg(feature = "midi-hardware")]
     pub(crate) fn midi_input_phase<F: Float>(
         &mut self,
-        io: Option<&mut tutti_midi_hardware::MidiSession>,
+        io: Option<crate::midi_link::Locked<'_>>,
         graph: &mut Graph<F>,
         now: Instant,
         out: &mut Vec<crate::SessionEvent>,
     ) -> bool {
-        let Some(io) = io else { return false };
+        let Some(mut io) = io else { return false };
+        // The task steps the layer too: this step is the one a constructed
+        // `now` reaches, and it drains the requests queued since the task's.
+        let link = io.link();
+        link.step(&mut io, now);
+        let polled = link.take_queued();
         // Drained first: reopening a device takes the state mutably.
         let pending: Vec<_> = self
             .device_events
@@ -940,7 +945,7 @@ impl MidiState {
             .flat_map(tutti_midi_hardware::DeviceEvents::pending)
             .collect();
         let rate = graph.prepared().sample_rate();
-        let edits = self.ports.poll(io, graph, rate, pending, now, out);
+        let edits = self.ports.poll(&mut io, graph, rate, pending, polled, out);
         if !self.watch_failure_reported
             && let Some(why) = self
                 .device_events
@@ -1257,7 +1262,7 @@ pub struct Midi<'a, F: Float = f32> {
     pub(crate) executor: tutti_platform::WeakExecutor,
     /// The OS MIDI layer, when the builder opened it.
     #[cfg(feature = "midi-hardware")]
-    pub(crate) io: Option<&'a mut tutti_midi_hardware::MidiSession>,
+    pub(crate) io: Option<crate::midi_link::Locked<'a>>,
 }
 
 impl<F: Float> Midi<'_, F> {
