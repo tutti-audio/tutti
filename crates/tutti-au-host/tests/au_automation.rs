@@ -17,6 +17,7 @@ use tutti_au_host::component::{ComponentKey, find_component};
 use tutti_au_host::types::K_AUDIO_UNIT_TYPE_EFFECT;
 use tutti_au_host::{AuController, AuLoaded, AuProcessor};
 use tutti_buffers::InputOutput;
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{
     Loaded, MaxBlock, ParamEdit, ParameterChanges, PluginIo, Prepare, ProcessContext,
     ProcessOutput, Processor,
@@ -115,8 +116,8 @@ fn a_non_realtime_parameter_is_written_between_blocks_not_by_the_render() {
     let mix_before = plain(&controller, DRY_WET);
 
     let mut changes = ParameterChanges::reserved(2, 4);
-    assert!(changes.add_change(ParamId::new(DELAY_TIME), 0, 1.0));
-    assert!(changes.add_change(ParamId::new(DRY_WET), 0, 1.0));
+    assert!(changes.add_change(ParamId::new(DELAY_TIME), at_frame(0), unit_value(1.0)));
+    assert!(changes.add_change(ParamId::new(DRY_WET), at_frame(0), unit_value(1.0)));
     render_block(&mut processor, 0.0, &changes);
 
     assert_eq!(
@@ -167,7 +168,7 @@ fn the_blocks_last_value_reaches_other_listeners_at_the_tick_not_the_render() {
     }
 
     let mut changes = ParameterChanges::reserved(1, 4);
-    assert!(changes.add_change(ParamId::new(DRY_WET), 100, 0.75));
+    assert!(changes.add_change(ParamId::new(DRY_WET), at_frame(100), unit_value(0.75)));
     render_block(&mut processor, 0.0, &changes);
     assert_eq!(plain(&controller, DRY_WET), 75.0, "the automation landed");
 
@@ -203,7 +204,7 @@ fn the_tick_does_not_write_the_value_back_over_a_later_one() {
     let (mut processor, mut controller) = activate(delay_loaded());
 
     let mut changes = ParameterChanges::reserved(1, 4);
-    assert!(changes.add_change(ParamId::new(DRY_WET), 100, 0.75));
+    assert!(changes.add_change(ParamId::new(DRY_WET), at_frame(100), unit_value(0.75)));
     render_block(&mut processor, 0.0, &changes);
     assert_eq!(plain(&controller, DRY_WET), 75.0, "the automation landed");
 
@@ -245,12 +246,12 @@ fn many_blocks_between_ticks_tell_each_parameter_once() {
     for n in 0..BLOCKS {
         let mut changes = ParameterChanges::reserved(2, 4);
         let level = (n % 100) as f64 / 100.0;
-        assert!(changes.add_change(ParamId::new(DRY_WET), 100, level));
-        assert!(changes.add_change(ParamId::new(DELAY_TIME), 100, 0.5));
+        assert!(changes.add_change(ParamId::new(DRY_WET), at_frame(100), unit_value(level)));
+        assert!(changes.add_change(ParamId::new(DELAY_TIME), at_frame(100), unit_value(0.5)));
         render_block(&mut processor, 0.0, &changes);
     }
     let mut last = ParameterChanges::reserved(1, 4);
-    assert!(last.add_change(ParamId::new(DRY_WET), 100, 0.75));
+    assert!(last.add_change(ParamId::new(DRY_WET), at_frame(100), unit_value(0.75)));
     render_block(&mut processor, 0.0, &last);
 
     // The plugin's edit of another parameter, after the renders, is told to the
@@ -402,7 +403,7 @@ fn the_hosts_own_writes_are_not_reported_as_the_plugins_edits() {
     let (mut processor, mut controller) = activate(au);
 
     let mut changes = ParameterChanges::reserved(1, 4);
-    assert!(changes.add_change(ParamId::new(DRY_WET), 0, 0.5));
+    assert!(changes.add_change(ParamId::new(DRY_WET), at_frame(0), unit_value(0.5)));
     render_block(&mut processor, 0.0, &changes);
     assert_eq!(plain(&controller, DRY_WET), 50.0, "the automation landed");
 

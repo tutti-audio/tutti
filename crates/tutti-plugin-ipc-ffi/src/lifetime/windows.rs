@@ -3,7 +3,7 @@
 //! long as it runs, so the kernel closes it when the host dies, by any means.
 
 use std::os::windows::io::AsRawHandle;
-use std::process::{Child, Command};
+use std::process::Child;
 use std::sync::OnceLock;
 use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::System::JobObjects::{
@@ -15,9 +15,6 @@ use windows_sys::Win32::System::JobObjects::{
 /// The host's job, as the handle's integer (a raw handle is not `Send`), made
 /// once and never closed: its close is the host's end.
 static JOB: OnceLock<Result<usize, i32>> = OnceLock::new();
-
-/// A server needs no setup before its spawn on Windows: the job takes it after.
-pub fn own_group(_command: &mut Command) {}
 
 /// A server's helpers end with the job, not by a group's signal.
 pub fn kill_group(_leader: u32) {}
@@ -62,7 +59,7 @@ fn make_job() -> std::io::Result<HANDLE> {
 /// # Errors
 ///
 /// The job cannot be made or the child cannot be assigned (the OS error).
-pub fn bind_to_host(child: &Child) -> std::io::Result<()> {
+pub(crate) fn bind_to_host(child: &Child) -> std::io::Result<()> {
     let job = JOB.get_or_init(|| {
         make_job()
             .map(|job| job as usize)
@@ -83,6 +80,7 @@ pub fn bind_to_host(child: &Child) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
     use windows_sys::Win32::System::JobObjects::{IsProcessInJob, QueryInformationJobObject};
 
     /// **A bound child is in the host's job**: the kernel then ends it with the

@@ -334,7 +334,7 @@ fn copy_process_output(output: ProcessOutputRef<'_>, out: &mut tutti_plugin_type
     for queue in &output.param_changes.queues {
         for point in &queue.points {
             // Pooled queues: not `ParameterChanges::add_change`, which grows.
-            out.emit_param_point(queue.param_id, point.sample_offset, point.value.get());
+            out.emit_param_point(queue.param_id, point.sample_offset, point.value);
         }
     }
 

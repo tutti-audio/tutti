@@ -51,8 +51,8 @@ thiserror = "2"
 tracing.workspace = true
 
 [dev-dependencies]
-# `inheritable_descriptors`: the spawn test's snapshot of what the host holds open.
-tutti-plugin-ipc-ffi = { path = "../tutti-plugin-ipc-ffi", features = ["testing"] }
+# `at_frame` and `unit_value`: the parameter points the tests build.
+tutti-plugin-types = { path = "../tutti-plugin-types", features = ["testing"] }
 # The plugin handle the served-handle tests drive over the mock server. Not a
 # dependency: a format host knows no hosting, and the handle is `tutti-plugin-host`'s.
 tutti-plugin-host = { path = "../tutti-plugin-host" }
