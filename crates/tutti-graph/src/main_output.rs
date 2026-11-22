@@ -51,7 +51,7 @@ impl std::fmt::Display for MainOutputId {
 /// crossfades.
 ///
 /// A plan that carries one renders `base` channels of the new main output (the main output's
-/// width, [`Plan::global_outputs`](crate::Plan::global_outputs)) and, after
+/// width, [`Plan::main_outputs`](crate::Plan::main_outputs)) and, after
 /// them, the old main output's channels: the same nodes, wired as the previous main output
 /// wired them. The host folds each bank with its own main output's fold and sums them
 /// under the [`fade`](Self::fade)'s gains, the old main output's as the outgoing side,

@@ -54,7 +54,7 @@ use tutti_nodes::testing::{Const, bass_send, vbap_mix};
 /// The widened export path: a graph that starts at the **device (stereo)
 /// output** width — exactly what the live engine produces — is widened offline
 /// and wired to a surround main output before export. This mirrors what a host
-/// does to the graph it exports (on `tutti_graph`, the topology's global
+/// does to the graph it exports (on `tutti_graph`, the topology's main
 /// outputs grown), and proves widening a stereo graph does NOT lose the
 /// surround channels.
 #[test]

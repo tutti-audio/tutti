@@ -132,14 +132,14 @@ fn shapes() -> Vec<(&'static str, Topology)> {
     };
     t.nodes.insert(A, spec("fan", 2, 2));
     t.edges
-        .insert(at(A, 0), vec![Edge::Direct(PortSource::Global(0))]);
+        .insert(at(A, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
     t.edges
-        .insert(at(A, 1), vec![Edge::Direct(PortSource::Global(1))]);
+        .insert(at(A, 1), vec![Edge::Direct(PortSource::MainInput(1))]);
     t.set_outputs(vec![
         PortSource::Node(out(A, 0)),
         PortSource::Node(out(A, 1)),
     ]);
-    all.push(("global_input", t));
+    all.push(("main_input", t));
 
     let mut t = Topology::default();
     t.nodes.insert(A, spec("dc", 0, 1));
@@ -244,7 +244,7 @@ fn compiled(t: &Topology) -> tutti_graph::Plan {
 // ---------------------------------------------------------------------------
 
 /// One source stays an alias (no `Op::Sum`), none is silence, two or more at
-/// an input port or a global output channel are one sum op; 65 are a chain
+/// an input port or a main output channel are one sum op; 65 are a chain
 /// of two.
 #[test]
 fn one_source_is_an_alias_and_a_fan_in_is_a_sum_op() {
@@ -453,8 +453,8 @@ fn a_diamond_of_3_and_7_delays_the_short_branch_by_4() {
 #[test]
 fn the_ported_shapes_render_like_the_reference() {
     for (name, t) in shapes() {
-        // `global_input` reads two graph inputs and the harness feeds one;
-        // global inputs are covered by the differential suite instead.
+        // `main_input` reads two graph inputs and the harness feeds one;
+        // main inputs are covered by the differential suite instead.
         if t.inputs.count() > 1 {
             continue;
         }
@@ -858,11 +858,11 @@ fn the_delta_moves_only_what_changed() {
     assert_eq!(delta.store_len, 3);
 }
 
-/// A `PortSource::Global` input that merges with a latent path **is** delayed
+/// A `PortSource::MainInput` input that merges with a latent path **is** delayed
 /// to align, like any other merge-point source, and the compiler and
 /// `latency::delays` agree on it.
 #[test]
-fn a_global_input_merging_with_a_latent_path_is_delayed() {
+fn a_main_input_merging_with_a_latent_path_is_delayed() {
     let mut t = Topology {
         inputs: ChannelLayout::MONO,
         ..Topology::default()
@@ -874,13 +874,13 @@ fn a_global_input_merging_with_a_latent_path_is_delayed() {
     edge(&mut t, at(B, 0), out(A, 0));
     edge(&mut t, at(C, 0), out(B, 0));
     t.edges
-        .insert(at(C, 1), vec![Edge::Direct(PortSource::Global(0))]);
+        .insert(at(C, 1), vec![Edge::Direct(PortSource::MainInput(0))]);
     t.set_outputs(vec![PortSource::Node(out(C, 0))]);
 
     let plan = compiled(&t);
     let key = DelayKey::Audio {
         at: at(C, 1),
-        from: PortSource::Global(0),
+        from: PortSource::MainInput(0),
     };
     assert_eq!(plan.delay(key), Samples::new(48));
     // The pure pass agrees.
@@ -892,7 +892,7 @@ fn a_global_input_merging_with_a_latent_path_is_delayed() {
             feed: Feed::Outside,
             by: Samples::new(48)
         }],
-        "latency::delays aligns the global input as the plan does"
+        "latency::delays aligns the main input as the plan does"
     );
 
     let mut pair = Pair::new(128);

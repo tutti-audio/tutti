@@ -1,4 +1,4 @@
-//! The plan's non-node ops: global inputs, delays, sums, event merges,
+//! The plan's non-node ops: main inputs, delays, sums, event merges,
 //! outputs and captures.
 
 use super::node_op::{CONSTANT, SILENT, flag};
@@ -32,9 +32,9 @@ pub(crate) fn event_ring<F: Float>(r: &mut Option<Ring<F>>) -> &mut EventFifo {
     }
 }
 
-/// [`Op::GlobalIn`](crate::Op::GlobalIn).
+/// [`Op::MainInput`](crate::Op::MainInput).
 #[inline]
-pub(crate) fn global_in<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
+pub(crate) fn main_input<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
     arena: &mut A,
     flags: &mut Fl,
     inputs: &[&[F]],

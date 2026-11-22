@@ -585,7 +585,7 @@ impl<'a, F: Float> Io<'a, F> {
         WiredMask(shift(self.wired.inputs.0, self.main.inputs))
     }
 
-    /// Main output channels with at least one consumer: an edge, a global
+    /// Main output channels with at least one consumer: an edge, a main
     /// output, a tap or a meter. An unset channel is written for nobody. A
     /// hand-built `Io` reads every port wired.
     pub fn wired_outputs(&self) -> WiredMask {

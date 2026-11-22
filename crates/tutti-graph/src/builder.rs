@@ -179,8 +179,8 @@ impl<F: Float> std::fmt::Debug for GraphBuilder<F> {
 }
 
 impl GraphBuilder {
-    /// An empty `f32` graph with `inputs` global input channels and `outputs`
-    /// global output channels, every output silent until wired.
+    /// An empty `f32` graph with `inputs` main input channels and `outputs`
+    /// main output channels, every output silent until wired.
     /// [`with_format`](GraphBuilder::with_format) builds one for another
     /// sample format.
     #[must_use]
@@ -190,8 +190,8 @@ impl GraphBuilder {
 }
 
 impl<F: Float> GraphBuilder<F> {
-    /// An empty graph in sample format `F` with `inputs` global input
-    /// channels and `outputs` global output channels, every output silent
+    /// An empty graph in sample format `F` with `inputs` main input
+    /// channels and `outputs` main output channels, every output silent
     /// until wired.
     #[must_use]
     pub fn with_format(inputs: ChannelLayout, outputs: ChannelLayout) -> Self {
@@ -271,12 +271,12 @@ impl<F: Float> GraphBuilder<F> {
         self.shape(node).audio_out().count() as usize
     }
 
-    /// Global input channels.
+    /// Main input channels.
     pub fn inputs(&self) -> usize {
         self.spec.topology.inputs.count() as usize
     }
 
-    /// Global output channels.
+    /// Main output channels.
     pub fn outputs(&self) -> usize {
         self.spec.topology.outputs.len()
     }
@@ -328,11 +328,11 @@ impl<F: Float> GraphBuilder<F> {
     fn check_source(&self, source: PortSource) -> PortSource {
         match source {
             PortSource::Node(p) => PortSource::Node(self.check_out(p.node, p.port as usize)),
-            PortSource::Global(i) => {
+            PortSource::MainInput(i) => {
                 let n = self.inputs();
                 assert!(
                     (i as usize) < n,
-                    "the graph has {n} global inputs; input {i} is out of range"
+                    "the graph has {n} main inputs; input {i} is out of range"
                 );
                 source
             }
@@ -454,22 +454,22 @@ impl<F: Float> GraphBuilder<F> {
         self.set_source(node, port, PortSource::Zero)
     }
 
-    /// Adds global input `global` to the sources of `to`'s input `to_port`,
+    /// Adds main input `channel` to the sources of `to`'s input `to_port`,
     /// as [`connect`](Self::connect) does for a node's output.
-    pub fn connect_input(&mut self, global: usize, to: NodeKey, to_port: usize) -> &mut Self {
-        self.add_source(to, to_port, PortSource::Global(global as u16))
+    pub fn connect_input(&mut self, channel: usize, to: NodeKey, to_port: usize) -> &mut Self {
+        self.add_source(to, to_port, PortSource::MainInput(channel as u16))
     }
 
-    /// Adds `from`'s output `from_port` to the sources of global output
-    /// `global`, beside what it holds: the output is a sink, so several
+    /// Adds `from`'s output `from_port` to the sources of main output
+    /// `channel`, beside what it holds: the output is a sink, so several
     /// sources sum, as at an input port. [`set_output`](Self::set_output) is
     /// the one-source form.
-    pub fn connect_output(&mut self, from: NodeKey, from_port: usize, global: usize) -> &mut Self {
+    pub fn connect_output(&mut self, from: NodeKey, from_port: usize, channel: usize) -> &mut Self {
         let source = PortSource::Node(self.check_out(from, from_port));
-        self.add_output(global, source)
+        self.add_output(channel, source)
     }
 
-    /// Adds `source` to the sources of global output `channel`. `PortSource::Zero`
+    /// Adds `source` to the sources of main output `channel`. `PortSource::Zero`
     /// adds nothing.
     ///
     /// # Panics
@@ -486,11 +486,11 @@ impl<F: Float> GraphBuilder<F> {
         let n = self.outputs();
         assert!(
             channel < n,
-            "the graph has {n} global outputs; output {channel} is out of range"
+            "the graph has {n} main outputs; output {channel} is out of range"
         );
     }
 
-    /// Feeds global output `channel` from `source`.
+    /// Feeds main output `channel` from `source`.
     ///
     /// # Panics
     ///
@@ -525,15 +525,15 @@ impl<F: Float> GraphBuilder<F> {
         self
     }
 
-    /// Feeds every input of `node` from the global inputs, in order. The
-    /// rule: input `c` reads global input
-    /// `c % inputs`, and with no global inputs at all every input reads
+    /// Feeds every input of `node` from the main inputs, in order. The
+    /// rule: input `c` reads main input
+    /// `c % inputs`, and with no main inputs at all every input reads
     /// silence.
     pub fn pipe_input(&mut self, node: NodeKey) -> &mut Self {
-        let globals = self.inputs();
+        let main_inputs = self.inputs();
         for c in 0..self.input_count(node) {
-            let source = if globals > 0 {
-                PortSource::Global((c % globals) as u16)
+            let source = if main_inputs > 0 {
+                PortSource::MainInput((c % main_inputs) as u16)
             } else {
                 PortSource::Zero
             };
@@ -542,8 +542,8 @@ impl<F: Float> GraphBuilder<F> {
         self
     }
 
-    /// Feeds every global output from the outputs of `node`, in order. The
-    /// rule: global output `c` reads output
+    /// Feeds every main output from the outputs of `node`, in order. The
+    /// rule: main output `c` reads output
     /// `c % outputs`. So a mono node feeds every channel, a stereo node
     /// feeding six channels repeats L R L R L R (it wraps, it does not
     /// clamp to the last channel), a node wider than the graph has its
@@ -564,12 +564,12 @@ impl<F: Float> GraphBuilder<F> {
         self
     }
 
-    /// Adds `node` at the end of the chain the global outputs describe. The
+    /// Adds `node` at the end of the chain the main outputs describe. The
     /// first node added to an empty builder reads the
-    /// global inputs ([`pipe_input`](Self::pipe_input), when there are
-    /// any); a later one reads whatever fed the global outputs, input `c`
+    /// main inputs ([`pipe_input`](Self::pipe_input), when there are
+    /// any); a later one reads whatever fed the main outputs, input `c`
     /// taking output source `c % outputs`. Either way the node then feeds
-    /// every global output ([`pipe_output`](Self::pipe_output)).
+    /// every main output ([`pipe_output`](Self::pipe_output)).
     pub fn chain<N: IntoNode<F, Controls = ()>>(&mut self, node: N) -> NodeKey {
         let key = self.insert(N::kind(), node.into_parts());
         self.link(key);
@@ -834,27 +834,27 @@ impl<F: Float> Renderer<F> {
         self
     }
 
-    /// Renders `frames` with silent global inputs; one `Vec` per global
+    /// Renders `frames` with silent main inputs; one `Vec` per main
     /// output channel.
     pub fn render(&mut self, frames: usize) -> Vec<Vec<F>> {
-        let mut out = vec![vec![F::ZERO; frames]; self.global_outputs()];
+        let mut out = vec![vec![F::ZERO; frames]; self.main_outputs()];
         let mut refs: Vec<&mut [F]> = out.iter_mut().map(|c| &mut c[..]).collect();
         self.run(frames, None, &mut refs);
         out
     }
 
     /// Renders one frame per input sample, reading `input` (one slice per
-    /// global input channel, all the same length); one `Vec` per global
+    /// main input channel, all the same length); one `Vec` per main
     /// output channel.
     ///
     /// # Panics
     ///
     /// If `input` has the wrong channel count or ragged lengths, or the
-    /// graph has no global inputs (there is nothing to count frames by: use
+    /// graph has no main inputs (there is nothing to count frames by: use
     /// [`render`](Self::render)).
     pub fn render_input(&mut self, input: Planes<'_, F>) -> Vec<Vec<F>> {
         let frames = input.frames().get();
-        let mut out = vec![vec![F::ZERO; frames]; self.global_outputs()];
+        let mut out = vec![vec![F::ZERO; frames]; self.main_outputs()];
         let mut refs: Vec<&mut [F]> = out.iter_mut().map(|c| &mut c[..]).collect();
         let table: Vec<&[F]> = input.iter().map(|c| c.samples()).collect();
         self.run(frames, Some(&table), &mut refs);
@@ -872,8 +872,8 @@ impl<F: Float> Renderer<F> {
         out
     }
 
-    /// Renders into `output` (one slice per global output channel, all the
-    /// same length, which is the frame count) with silent global inputs.
+    /// Renders into `output` (one slice per main output channel, all the
+    /// same length, which is the frame count) with silent main inputs.
     ///
     /// # Panics
     ///
@@ -887,12 +887,12 @@ impl<F: Float> Renderer<F> {
 
     /// Render `frames` in blocks, reading `input` (silence when `None`).
     fn run(&mut self, frames: usize, input: Option<&[&[F]]>, output: &mut [&mut [F]]) {
-        let (ins, outs) = (self.global_inputs(), self.global_outputs());
+        let (ins, outs) = (self.main_inputs(), self.main_outputs());
         let silence = vec![F::ZERO; if input.is_none() { frames } else { 0 }];
         let silent = vec![&silence[..]; if input.is_none() { ins } else { 0 }];
         let input = input.unwrap_or(&silent);
-        assert_eq!(input.len(), ins, "one input slice per global input");
-        assert_eq!(output.len(), outs, "one output slice per global output");
+        assert_eq!(input.len(), ins, "one input slice per main input");
+        assert_eq!(output.len(), outs, "one output slice per main output");
         assert!(
             input.iter().all(|c| c.len() == frames) && output.iter().all(|c| c.len() == frames),
             "every channel must be {frames} frames long"
@@ -919,11 +919,11 @@ impl<F: Float> Renderer<F> {
         }
     }
 
-    fn global_inputs(&self) -> usize {
+    fn main_inputs(&self) -> usize {
         self.editor.spec().topology.inputs.count() as usize
     }
 
-    fn global_outputs(&self) -> usize {
+    fn main_outputs(&self) -> usize {
         self.editor.spec().topology.outputs.len()
     }
 
@@ -932,7 +932,7 @@ impl<F: Float> Renderer<F> {
     fn rendered_outputs(&self) -> usize {
         self.executor
             .plan()
-            .map_or_else(|| self.global_outputs(), |p| p.rendered_outputs())
+            .map_or_else(|| self.main_outputs(), |p| p.rendered_outputs())
     }
 
     /// The editor, to inspect the graph.
@@ -962,8 +962,8 @@ impl<F: Float> Renderer<F> {
     }
 }
 
-/// One node alone in a graph: its audio inputs read the global inputs and
-/// its audio outputs feed the global outputs, channel for channel. For
+/// One node alone in a graph: its audio inputs read the main inputs and
+/// its audio outputs feed the main outputs, channel for channel. For
 /// tests, benches and examples that drive a single node the way a graph
 /// runs it — prepared, in blocks, through an executor — rather than by
 /// calling [`Node::process`](crate::Node::process) by hand.

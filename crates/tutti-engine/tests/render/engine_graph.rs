@@ -54,7 +54,7 @@ fn prepare(max_block: usize) -> Prepare {
     Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples::new(max_block)))
 }
 
-/// Wire global outputs `0..width` to `node`'s outputs.
+/// Wire main outputs `0..width` to `node`'s outputs.
 fn outputs(ed: &mut Editor, node: NodeKey, width: u16) {
     ed.spec_mut()
         .topology
@@ -184,7 +184,7 @@ fn value(frame: u64, c: usize) -> f32 {
 }
 
 /// A graph engine over `transport` with one node at key 1, its outputs wired
-/// to the globals. The editor is returned, for scheduling.
+/// to the main outputs. The editor is returned, for scheduling.
 fn graph_engine(
     transport: &Transport,
     max_block: usize,
@@ -998,7 +998,7 @@ fn a_declick_stop_stops_the_transport_on_its_frame() {
 // ---- limits, capacity, re-prepare --------------------------------------------
 
 /// A graph engine refuses what its fold scratch cannot hold: a graph with
-/// more than `MAX_CHANNELS` global outputs at construction, and any
+/// more than `MAX_CHANNELS` main outputs at construction, and any
 /// later commit that would widen past it; and an executor that is not the
 /// editor's. Never silence.
 #[test]

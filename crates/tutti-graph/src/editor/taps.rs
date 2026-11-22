@@ -46,7 +46,7 @@ impl<F: Float> Editor<F> {
     ///
     /// Every source must exist now, in the spec as edited (uncommitted edits
     /// included): a node port past the node's width, a key no node has, or a
-    /// global input past the graph's width is refused with
+    /// main input past the graph's width is refused with
     /// [`MissingSource`] and nothing is opened. Only the open is checked. A
     /// lane whose port narrows or vanishes **later** (a node replaced by one
     /// with fewer outputs, a removed node) reads silence and the commit
@@ -85,7 +85,7 @@ impl<F: Float> Editor<F> {
         Ok(reader)
     }
 
-    /// Declares a tap on the graph's global outputs, `width` lanes, and
+    /// Declares a tap on the graph's main outputs, `width` lanes, and
     /// returns its reader: lane `c` is output channel `c` **post-sum and
     /// aligned** ([`TapSpec::Outputs`]), so a channel several sources feed is
     /// heard whole, at the output's time. The tap follows the outputs when
@@ -190,13 +190,13 @@ impl<F: Float> Editor<F> {
                         });
                     }
                 }
-                PortSource::Global(channel) if channel >= t.inputs.count() => {
-                    return Err(MissingSource::Global {
+                PortSource::MainInput(channel) if channel >= t.inputs.count() => {
+                    return Err(MissingSource::MainInput {
                         channel,
                         width: t.inputs.count() as usize,
                     });
                 }
-                PortSource::Global(_) | PortSource::Zero => {}
+                PortSource::MainInput(_) | PortSource::Zero => {}
             }
         }
         Ok(())
@@ -361,7 +361,7 @@ impl<F: Float> Editor<F> {
     /// [`commit`](Self::commit), which compiles the meter's op and hands the
     /// executor its cells; until then the reader sees nothing.
     ///
-    /// [`MeterSpec::Outputs`] meters the graph's global outputs, one channel
+    /// [`MeterSpec::Outputs`] meters the graph's main outputs, one channel
     /// each, following them as they change (up to [`MAX_CHANNELS`]),
     /// aligned: each lane is what its output channel carries, at the
     /// output's time. [`MeterSpec::Ports`] meters those sources, fixed at the

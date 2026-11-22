@@ -27,7 +27,7 @@ fn signal(n: usize) -> Vec<f32> {
 
 /// `ins` inputs, `outs` outputs; output `c` is `c + 1` plus the sum of the
 /// inputs. Any width, so the fan-out rules can be walked over a grid, and
-/// every output is a small integer while the global inputs are silent, so
+/// every output is a small integer while the main inputs are silent, so
 /// what a wiring renders is known exactly ([`net_rule::constants`]).
 #[derive(Clone)]
 struct Width {
@@ -83,7 +83,7 @@ fn source_of(g: &GraphBuilder, node: NodeKey, port: u16) -> PortSource {
     }
 }
 
-/// Every input of every node, and every global output, is fed from where
+/// Every input of every node, and every main output, is fed from where
 /// `want` (one entry per node, in the order added: its width and what feeds
 /// each input) and `outputs` say.
 fn assert_wired(
@@ -111,7 +111,7 @@ fn assert_wired(
                 vec![*s]
             })
             .collect::<Vec<_>>(),
-        "{case}: global outputs"
+        "{case}: main outputs"
     );
 }
 
@@ -168,7 +168,7 @@ mod net_rule {
             .collect()
     }
 
-    /// `pipe_output(n)`: global output `c` reads `n`'s port
+    /// `pipe_output(n)`: main output `c` reads `n`'s port
     /// `c % n_outs`; silence when `n` has no outputs.
     pub fn pipe_output(n: NodeKey, n_outs: usize, outputs: usize) -> Vec<PortSource> {
         (0..outputs)
@@ -182,13 +182,13 @@ mod net_rule {
             .collect()
     }
 
-    /// `pipe_input(n)`: input `c` reads global input `c % globals`;
+    /// `pipe_input(n)`: input `c` reads main input `c % main_inputs`;
     /// silence when there are none.
-    pub fn pipe_input(globals: usize, ins: usize) -> Vec<PortSource> {
+    pub fn pipe_input(main_inputs: usize, ins: usize) -> Vec<PortSource> {
         (0..ins)
             .map(|c| {
-                if globals > 0 {
-                    PortSource::Global((c % globals) as u16)
+                if main_inputs > 0 {
+                    PortSource::MainInput((c % main_inputs) as u16)
                 } else {
                     PortSource::Zero
                 }
@@ -197,11 +197,11 @@ mod net_rule {
     }
 
     /// `chain` over `widths`: the first node takes `pipe_input` (when
-    /// there are global inputs; otherwise its inputs stay silent), each later
-    /// one reads what fed global output `i % outputs` (silence with no
+    /// there are main inputs; otherwise its inputs stay silent), each later
+    /// one reads what fed main output `i % outputs` (silence with no
     /// outputs), and each takes over the outputs with `pipe_output`.
     pub fn chain(
-        globals: usize,
+        main_inputs: usize,
         outputs: usize,
         widths: &[(usize, usize)],
     ) -> (Vec<(NodeKey, Node)>, Vec<PortSource>) {
@@ -210,8 +210,8 @@ mod net_rule {
         for (k, &(ins, w)) in widths.iter().enumerate() {
             let key = NodeKey(k as u64);
             let sources = if k == 0 {
-                if globals > 0 {
-                    pipe_input(globals, ins)
+                if main_inputs > 0 {
+                    pipe_input(main_inputs, ins)
                 } else {
                     vec![PortSource::Zero; ins]
                 }
@@ -232,7 +232,7 @@ mod net_rule {
         (nodes, outs)
     }
 
-    /// What each global output carries with silent global inputs: a
+    /// What each main output carries with silent main inputs: a
     /// [`Width`] node's output `c` is `c + 1` plus the sum of its inputs,
     /// evaluated in the order the nodes were added (every source precedes
     /// the node it feeds in these graphs).
@@ -260,7 +260,7 @@ mod net_rule {
 /// The same graph written twice — through the builder, and by hand through
 /// `Editor::insert` and `spec_mut` — gives equal specs, equal plans and a
 /// bit-identical render. It covers every kind of wiring the builder writes:
-/// a global input, a node-to-node edge, a feedback edge, a global output
+/// a main input, a node-to-node edge, a feedback edge, a main output
 /// fed by `set_output` and one by `connect_output`, and an event edge.
 #[test]
 fn builder_builds_what_a_hand_written_spec_builds() {
@@ -325,7 +325,7 @@ fn builder_builds_what_a_hand_written_spec_builds() {
     };
     spec.topology
         .edges
-        .insert(at(0, 0), vec![Edge::Direct(PortSource::Global(0))]);
+        .insert(at(0, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
     spec.topology.edges.insert(
         at(0, 1),
         vec![Edge::Feedback(FeedbackFrom::new(from(1, 0), fb_delay))],
@@ -418,7 +418,7 @@ fn pipe_connects_ports_in_order_as_net_pipe_all() {
     }
 }
 
-/// `pipe_output` fans a node out over the global outputs: output `c` reads port `c % width`. Mono feeds
+/// `pipe_output` fans a node out over the main outputs: output `c` reads port `c % width`. Mono feeds
 /// every channel; stereo into six **wraps** (L R L R L R), it does not clamp
 /// to the last channel; a wider node's extra ports go unused; a node with no
 /// outputs feeds silence. Checked structurally and by the figure it renders.
@@ -467,21 +467,21 @@ fn pipe_output_fans_out_as_net_does() {
     );
 }
 
-/// `pipe_input` reads global input `c % inputs`, and silence with no global
+/// `pipe_input` reads main input `c % inputs`, and silence with no main
 /// inputs.
 #[test]
 fn pipe_input_wraps_as_net_does() {
-    for globals in 0..=3 {
+    for main_inputs in 0..=3 {
         for ins in 1..=3 {
-            let case = format!("{globals} globals → {ins} inputs");
-            let mut g = GraphBuilder::new(ch(globals), ChannelLayout::MONO);
+            let case = format!("{main_inputs} main_inputs → {ins} inputs");
+            let mut g = GraphBuilder::new(ch(main_inputs), ChannelLayout::MONO);
             let key = g.add(node(ins, 1));
             g.pipe_input(key).pipe_output(key);
             let want = [(
                 key,
                 net_rule::Node {
                     outs: 1,
-                    sources: net_rule::pipe_input(globals, ins),
+                    sources: net_rule::pipe_input(main_inputs, ins),
                 },
             )];
             assert_wired(&g, &want, &net_rule::pipe_output(key, 1, 1), &case);
@@ -490,19 +490,19 @@ fn pipe_input_wraps_as_net_does() {
 }
 
 /// `chain` extends a series: the first node reads the
-/// global inputs, each later one reads what fed the global outputs
+/// main inputs, each later one reads what fed the main outputs
 /// (wrapping), and every one takes over the outputs. Across width changes,
-/// with and without global inputs, and to the bit in render.
+/// with and without main inputs, and to the bit in render.
 #[test]
 fn chain_extends_the_series_as_net_does() {
-    for globals in [0, 1, 2] {
+    for main_inputs in [0, 1, 2] {
         let widths = [(1, 1), (1, 3), (2, 2), (3, 1), (1, 2)];
-        let case = format!("{globals} globals");
-        let mut g = GraphBuilder::new(ch(globals), ChannelLayout::STEREO);
+        let case = format!("{main_inputs} main_inputs");
+        let mut g = GraphBuilder::new(ch(main_inputs), ChannelLayout::STEREO);
         for (ins, outs) in widths {
             g.chain(node(ins, outs));
         }
-        let (want, outputs) = net_rule::chain(globals, 2, &widths);
+        let (want, outputs) = net_rule::chain(main_inputs, 2, &widths);
         assert_wired(&g, &want, &outputs, &case);
 
         let got = g.renderer(prepare(64)).expect("builds").render(70);
@@ -625,7 +625,7 @@ fn every_writer_normalises_silence_to_the_empty_set() {
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::STEREO);
     let a = g.add(node(1, 1));
     assert_eq!(g.spec().topology.outputs, vec![vec![], vec![]]);
-    g.set_source(a, 0, PortSource::Global(0));
+    g.set_source(a, 0, PortSource::MainInput(0));
     assert_eq!(g.spec().topology.edges.len(), 1);
     g.disconnect(a, 0);
     assert!(g.spec().topology.edges.is_empty(), "cleared port: no key");
@@ -644,8 +644,8 @@ fn every_writer_normalises_silence_to_the_empty_set() {
 
     // The two old ways agree: "no key" and "never wired" are one value.
     let mut wired_then_cleared = tutti_graph::Topology::default();
-    wired_then_cleared.connect(at, Edge::Direct(PortSource::Global(0)));
-    wired_then_cleared.disconnect(at, Edge::Direct(PortSource::Global(0)));
+    wired_then_cleared.connect(at, Edge::Direct(PortSource::MainInput(0)));
+    wired_then_cleared.disconnect(at, Edge::Direct(PortSource::MainInput(0)));
     assert_eq!(wired_then_cleared, tutti_graph::Topology::default());
     assert_eq!(
         hash(&wired_then_cleared),

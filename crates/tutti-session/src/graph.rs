@@ -266,7 +266,7 @@ struct Stash(Option<Held>);
 /// needs beside it.
 struct Local<F: Float> {
     exec: Executor<F>,
-    /// Planar scratch, one `Vec` per global output.
+    /// Planar scratch, one `Vec` per main output.
     #[cfg(feature = "testing")]
     scratch: Vec<Vec<F>>,
 }
@@ -606,7 +606,7 @@ fn clamp_latency(latency: Latency, rate: SampleRate) -> Latency {
 }
 
 impl<F: Float> Graph<F> {
-    /// An empty graph with `inputs` global inputs and `outputs` global
+    /// An empty graph with `inputs` main inputs and `outputs` main
     /// outputs, prepared for `rate`, `max_block` and the device's callback
     /// `quantum` (when known), its executor local.
     pub(crate) fn new(
@@ -2389,7 +2389,7 @@ impl<F: Float> Graph<F> {
                 node,
                 port: u16::try_from(index).ok()?,
             })),
-            OutEnd::Input(index) => Some(PortSource::Global(u16::try_from(index).ok()?)),
+            OutEnd::Input(index) => Some(PortSource::MainInput(u16::try_from(index).ok()?)),
         }
     }
 
@@ -2407,7 +2407,7 @@ impl<F: Float> Graph<F> {
                             .shape(node)
                             .map_or(0, |s| s.audio_out().count() as usize),
                     },
-                    OutEnd::Input(_) => MissingSource::Global {
+                    OutEnd::Input(_) => MissingSource::MainInput {
                         channel: u16::MAX,
                         width: self.inputs(),
                     },
@@ -2449,7 +2449,7 @@ impl<F: Float> Graph<F> {
                 .nodes
                 .contains_key(&p.node)
                 .then(|| OutputPort::new(p.node, usize::from(p.port))),
-            PortSource::Global(port) => Some(MainInput::channel(usize::from(port))),
+            PortSource::MainInput(port) => Some(MainInput::channel(usize::from(port))),
             PortSource::Zero => None,
         }
     }
@@ -2640,7 +2640,7 @@ impl<F: Float> Graph<F> {
     }
 
     /// What feeds `to`: every source of its set, in the order the graph sums
-    /// them (the compiler's: by node, then port, then a global input). Empty
+    /// them (the compiler's: by node, then port, then a main input). Empty
     /// for a port nothing feeds, which reads silence. `to` is an [`InputPort`]
     /// (its sources are [`OutputPort`]s) or an [`EventInputPort`] (its sources are
     /// [`EventOutputPort`]s, every edge the graph holds there, a modulation
@@ -3342,12 +3342,12 @@ impl<F: Float> Graph<F> {
 
     // --- Shape ---
 
-    /// The graph's global input count.
+    /// The graph's main input count.
     pub fn inputs(&self) -> usize {
         self.editor.spec().topology.inputs.count() as usize
     }
 
-    /// The graph's global output count.
+    /// The graph's main output count.
     pub fn outputs(&self) -> usize {
         self.editor.spec().topology.outputs.len()
     }
@@ -3417,7 +3417,7 @@ impl<F: Float> Graph<F> {
         self.shape_of(node.into()).map(|s| s.tail)
     }
 
-    /// Widen the global outputs to `channels`. New channels read silence.
+    /// Widen the main outputs to `channels`. New channels read silence.
     /// Never narrows.
     ///
     /// Two requests are refused, and the refusal is returned and kept
@@ -3975,8 +3975,8 @@ impl<F: Float> Graph<F> {
     }
 }
 
-/// Render one frame of `exec` into `output` (one sample per global output),
-/// with silence on every global input.
+/// Render one frame of `exec` into `output` (one sample per main output),
+/// with silence on every main input.
 ///
 /// `output` wider than the plan reads silence past it; narrower, the extra
 /// channels are dropped — the width a caller passes is its own business.
@@ -3994,9 +3994,9 @@ fn render<F: Float>(
         return;
     };
     let (ins, outs, main_output) = (
-        plan.global_inputs() as usize,
+        plan.main_inputs() as usize,
         plan.rendered_outputs(),
-        plan.global_outputs(),
+        plan.main_outputs(),
     );
     scratch.resize_with(outs, || vec![F::ZERO]);
     let silence = F::ZERO;
@@ -4339,7 +4339,7 @@ mod main_output_fade_tests {
             6 + 2,
             "and the old main output's after it"
         );
-        assert_eq!(plan.global_outputs(), 6);
+        assert_eq!(plan.main_outputs(), 6);
         assert_eq!(
             (bank.fade.duration, bank.fade.law),
             (Samples::new(240), FadeLaw::EqualAmplitude)

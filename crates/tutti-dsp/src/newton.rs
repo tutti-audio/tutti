@@ -7,6 +7,8 @@
 //! equation (a seed's distance from the root, and the Newton recurrence
 //! `e' <= (M / 2m) e^2` for `|f''| <= M` and `|f'| >= m`).
 
+use core::ops::{Div, Sub};
+
 use tutti_buffers::Float;
 
 /// The Newton steps every solve takes. Two squares an error twice: a seed within `e` of the
@@ -51,7 +53,10 @@ pub(crate) fn capped_newton_steps<F: Float, const CAP: usize>(
 /// the kernel's own convergence argument names.
 #[inline]
 #[must_use]
-pub(crate) fn newton_steps<F: Float, const CAP: usize>(f: impl Fn(F) -> (F, F), start: F) -> F {
+pub(crate) fn newton_steps<F: Copy + Sub<Output = F> + Div<Output = F>, const CAP: usize>(
+    f: impl Fn(F) -> (F, F),
+    start: F,
+) -> F {
     let at_start = f(start);
     steps_from::<F, CAP>(f, start, at_start)
 }
@@ -59,7 +64,7 @@ pub(crate) fn newton_steps<F: Float, const CAP: usize>(f: impl Fn(F) -> (F, F), 
 /// The step loop both forms share: `CAP` steps from `start`, whose value and slope are
 /// `at_start`, so the first step does not evaluate `f` again.
 #[inline(always)]
-fn steps_from<F: Float, const CAP: usize>(
+fn steps_from<F: Copy + Sub<Output = F> + Div<Output = F>, const CAP: usize>(
     f: impl Fn(F) -> (F, F),
     start: F,
     at_start: (F, F),
@@ -70,7 +75,7 @@ fn steps_from<F: Float, const CAP: usize>(
         if step > 0 {
             (value, slope) = f(u);
         }
-        u -= value / slope;
+        u = u - value / slope;
     }
     u
 }
