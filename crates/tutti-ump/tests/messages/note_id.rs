@@ -50,6 +50,15 @@ fn a_raw_above_the_max_names_no_pair() {
     for raw in [NoteId::MAX_CHANNEL_NOTE + 1, 0xDEAD_0000, u32::MAX] {
         assert_eq!(NoteId::from_raw(raw).channel_note(), None, "{raw}");
     }
+    assert_eq!(NoteId::FIRST_MINTED.raw(), NoteId::MAX_CHANNEL_NOTE + 1);
+    assert_eq!(
+        NoteId::FIRST_MINTED.next_minted().raw(),
+        NoteId::MAX_CHANNEL_NOTE + 2
+    );
+    assert_eq!(
+        NoteId::from_raw(u32::MAX).next_minted(),
+        NoteId::FIRST_MINTED
+    );
 }
 
 /// `Ord` makes an id a `BTreeMap` key, in raw order.

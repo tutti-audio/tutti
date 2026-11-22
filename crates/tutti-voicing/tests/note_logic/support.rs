@@ -6,7 +6,13 @@ use tutti_voicing::{Patch, VoiceAllocator, VoiceCommand, VoiceSpec};
 
 pub struct One;
 impl Patch for One {
-    fn voices(&self, _: MidiChannel, _: NoteNumber, _: u16, spec: &mut dyn FnMut(VoiceSpec)) {
+    fn voices(
+        &self,
+        _: MidiChannel,
+        _: NoteNumber,
+        _: tutti_ump::NoteVelocity,
+        spec: &mut dyn FnMut(VoiceSpec),
+    ) {
         spec(VoiceSpec {
             group: None,
             scope: 0,
