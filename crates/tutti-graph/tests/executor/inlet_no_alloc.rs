@@ -28,15 +28,9 @@ fn inlet_process_is_allocation_free() {
         node.block();
     }
 
-    assert_no_alloc::assert_no_alloc(|| {
-        // The loop far outlasts the 2 048 primed frames, so it goes silent.
-        for _ in 0..2_000 {
-            node.block();
-        }
-    });
-    assert_eq!(
-        node.output().plane(0).samples(),
-        [0.0; 64],
-        "ran dry inside the gate"
-    );
+    // The 256 blocks far outlast the 2 048 primed frames (32 blocks), so it goes silent.
+    for _ in 0..256 {
+        node.block();
+    }
+    assert_eq!(node.output().plane(0).samples(), [0.0; 64], "ran dry");
 }

@@ -1,6 +1,6 @@
 //! Events as ports, timestamped commands and the clocks a node reads.
 //!
-//! The binary installs `RtAllocCheck`, so an allocation inside an `assert_no_alloc`
+//! The binary installs `RtAllocCheck`, so an allocation inside an `RtScope` or an `assert_no_alloc`
 //! closure aborts.
 #![allow(
     clippy::disallowed_methods,
