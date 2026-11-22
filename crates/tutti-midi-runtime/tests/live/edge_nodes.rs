@@ -1852,10 +1852,13 @@ fn a_reset_transform_sends_the_zones_ranges_again() {
         SampleRate::SR_48K,
         256,
     );
+    let shape = tutti_graph::Node::<f32>::shape(&*d.node);
+    let input = shape.event_input(0).expect("an event input");
+    let output = shape.event_output(0).expect("an event output");
     let ranges = |d: &mut Direct<tutti_midi_runtime::MpeTransformNode>| {
-        d.events(0, &[pedal]);
+        d.events(input, &[pedal]);
         let _ = d.block();
-        d.event_output(0)
+        d.event_output(output)
             .iter()
             .filter(|e| {
                 matches!(e.kind, tutti_graph::EventKind::Midi(u)

@@ -876,8 +876,8 @@ impl Node for Probe {
             self.silent.lock().unwrap().push(io.silent().get(0));
         }
         let mut sent = false;
-        for p in 0..self.events_in as usize {
-            for e in io.events(p) {
+        for port in self.shape().event_inputs() {
+            for e in io.events(port) {
                 sent = true;
                 if let EventKind::Midi(Ump(w)) = e.kind {
                     self.events
@@ -1121,15 +1121,25 @@ struct Src {
     calls: Arc<AtomicUsize>,
 }
 
+impl Src {
+    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
+        Some(p) => p,
+        None => panic!("declared"),
+    };
+}
+
 impl Node for Src {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         self.calls.fetch_add(1, Ordering::Relaxed);
         for w in self.mail.lock().unwrap().drain(..) {
-            let _ = io.event_out(0).push(Event::midi(Offset::ZERO, Ump(w)));
+            let _ = io
+                .event_out(Self::OUT)
+                .push(Event::midi(Offset::ZERO, Ump(w)));
         }
         Status::Silent
     }

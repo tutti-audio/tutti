@@ -81,6 +81,7 @@
 
 use crate::NodeKey;
 use crate::OutputPort;
+use crate::{InEvents, OutEvents};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{BufferError, Float, Planes, PlanesMut};
@@ -936,7 +937,10 @@ impl Row {
         let audio = matches!(self.excite, Excite::Impulse { .. });
         let port = self.event_port();
         let (node, log) = if self.onset_release_silent.is_some() && !audio {
-            let (recorder, log) = Recorder::wrap(node, usize::from(port));
+            let port = shape
+                .event_input(port)
+                .expect("the node declares the event input the row excites");
+            let (recorder, log) = Recorder::wrap(node, port);
             (Box::new(recorder) as Box<dyn Node>, Some(log))
         } else {
             (node, None)
@@ -1313,6 +1317,7 @@ impl Node for ParamEcho {
 /// - `Block`: at its block's first frame.
 #[derive(Clone, Debug)]
 pub struct ImpulseSource {
+    port: InEvents,
     latency: Latency,
     resolution: Resolution,
     /// Absolute frames of impulses still to come; a fixed array, so the
@@ -1333,6 +1338,7 @@ impl ImpulseSource {
     #[must_use]
     pub fn new(latency: Latency) -> Self {
         Self {
+            port: Self::IN,
             latency,
             resolution: Resolution::Sample,
             pending: [0; PULSE_PENDING],
@@ -1347,22 +1353,31 @@ impl ImpulseSource {
         self.resolution = resolution;
         self
     }
+
+    const BASE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0);
+    const IN: InEvents = match Self::BASE.event_input(0) {
+        Some(port) => port,
+        None => panic!("declared"),
+    };
+
+    fn declared(latency: Latency, resolution: Resolution) -> Shape {
+        Self::BASE
+            .with_latency(latency)
+            .with_tail(tutti_units::Tail::Unknown)
+            .with_event_resolution(resolution)
+    }
 }
 
 impl Node for ImpulseSource {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO)
-            .with_events(1, 0)
-            .with_latency(self.latency)
-            .with_tail(tutti_units::Tail::Unknown)
-            .with_event_resolution(self.resolution)
+        Self::declared(self.latency, self.resolution)
     }
 
     fn prepare(&mut self, _: &Prepare) {}
 
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let block = cx.env.frame.get();
-        for (range, events) in io.sub_blocks(0) {
+        for (range, events) in io.sub_blocks(self.port) {
             let t = block + range.start as u64;
             let at = match self.resolution {
                 Resolution::Sample => t,
@@ -1496,12 +1511,12 @@ type EventLog = std::sync::Arc<std::sync::Mutex<Vec<(u64, EventKind)>>>;
 /// a path can assert what reached a node without a hook inside the node.
 struct Recorder {
     inner: Box<dyn Node>,
-    port: usize,
+    port: InEvents,
     log: EventLog,
 }
 
 impl Recorder {
-    fn wrap(inner: Box<dyn Node>, port: usize) -> (Self, EventLog) {
+    fn wrap(inner: Box<dyn Node>, port: InEvents) -> (Self, EventLog) {
         let log = EventLog::default();
         (
             Self {
@@ -1549,6 +1564,7 @@ impl Node for Recorder {
 /// Sends one event, `kind`, on its one event output at absolute frame `at`.
 #[derive(Clone, Copy, Debug)]
 pub struct Emitter {
+    port: OutEvents,
     at: Frame,
     kind: EventKind,
 }
@@ -1557,20 +1573,30 @@ impl Emitter {
     /// An emitter armed for `at`.
     #[must_use]
     pub fn new(at: Frame, kind: EventKind) -> Self {
-        Self { at, kind }
+        Self {
+            port: Self::OUT,
+            at,
+            kind,
+        }
     }
+
+    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const OUT: OutEvents = match Self::SHAPE.event_output(0) {
+        Some(port) => port,
+        None => panic!("declared"),
+    };
 }
 
 impl Node for Emitter {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1)
+        Self::SHAPE
     }
 
     fn prepare(&mut self, _: &Prepare) {}
 
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         if let Some(offset) = cx.env.offset_of(self.at) {
-            io.event_out(0)
+            io.event_out(self.port)
                 .push(Event {
                     offset,
                     kind: self.kind,
@@ -1590,6 +1616,7 @@ impl Node for Emitter {
 /// sends only the steps still ahead.
 #[derive(Clone, Copy, Debug)]
 pub struct ParamPulse {
+    port: OutEvents,
     at: Frame,
     param: UnitAddr,
     amplitude: f64,
@@ -1600,16 +1627,23 @@ impl ParamPulse {
     #[must_use]
     pub fn new(at: Frame, param: UnitAddr, amplitude: f64) -> Self {
         Self {
+            port: Self::OUT,
             at,
             param,
             amplitude,
         }
     }
+
+    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1).with_param_events();
+    const OUT: OutEvents = match Self::SHAPE.event_output(0) {
+        Some(port) => port,
+        None => panic!("declared"),
+    };
 }
 
 impl Node for ParamPulse {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_param_events()
+        Self::SHAPE
     }
 
     fn prepare(&mut self, _: &Prepare) {}
@@ -1618,7 +1652,7 @@ impl Node for ParamPulse {
         for (frame, value) in [(self.at, self.amplitude), (self.at + Samples::new(1), 0.0)] {
             if let Some(offset) = cx.env.offset_of(frame) {
                 let step = ParamSegment::unit(self.param, value, value, Samples::new(0));
-                io.event_out(0)
+                io.event_out(self.port)
                     .push_param(ParamEvent::segment(offset, step))
                     .expect("two events fit");
             }
@@ -2482,8 +2516,8 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
     /// block starts with every port empty). Up to [`HAND_EVENT_CAPACITY`]
     /// per port without allocating. Sorted and inside the next block, or
     /// that block panics.
-    pub fn events(&mut self, port: usize, events: &[Event]) {
-        let list = &mut self.events_in[port];
+    pub fn events(&mut self, port: InEvents, events: &[Event]) {
+        let list = &mut self.events_in[port.index()];
         list.clear();
         list.extend_from_slice(events);
     }
@@ -2492,21 +2526,21 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
     /// block only, beside its [`events`](Self::events). Up to
     /// [`HAND_EVENT_CAPACITY`] per port without allocating. Sorted and inside
     /// the next block, or that block panics.
-    pub fn param_events(&mut self, port: usize, events: &[ParamEvent]) {
-        let list = &mut self.params_in[port];
+    pub fn param_events(&mut self, port: InEvents, events: &[ParamEvent]) {
+        let list = &mut self.params_in[port.index()];
         list.clear();
         list.extend_from_slice(events);
     }
 
     /// What the node wrote to event output `port` in the last block.
-    pub fn event_output(&self, port: usize) -> &[Event] {
-        &self.events_out[port]
+    pub fn event_output(&self, port: OutEvents) -> &[Event] {
+        &self.events_out[port.index()]
     }
 
     /// The param events the node wrote to event output `port` in the last
     /// block.
-    pub fn param_events_out(&self, port: usize) -> &[ParamEvent] {
-        &self.params_out[port]
+    pub fn param_events_out(&self, port: OutEvents) -> &[ParamEvent] {
+        &self.params_out[port.index()]
     }
 
     /// The transport of every block from the next one on: its position is

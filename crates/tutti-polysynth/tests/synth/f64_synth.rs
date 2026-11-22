@@ -31,6 +31,9 @@ fn sine() -> PolySynth<f64> {
 fn play(note: u8, blocks: usize) -> Vec<f64> {
     let mut direct: Direct<PolySynth<f64>, f64> =
         Direct::with_format(sine(), SampleRate::SR_48K, BLOCK);
+    let input = tutti_graph::Node::shape(&*direct.node)
+        .event_input(0)
+        .expect("an event input");
     let on = midi::note_on(
         MidiChannel::FIRST,
         note,
@@ -43,7 +46,7 @@ fn play(note: u8, blocks: usize) -> Vec<f64> {
         } else {
             vec![]
         };
-        direct.events(0, &events);
+        direct.events(input, &events);
         direct.block();
         out.extend_from_slice(direct.output().plane(0).samples());
     }

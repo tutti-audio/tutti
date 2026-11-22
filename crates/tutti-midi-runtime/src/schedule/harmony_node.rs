@@ -29,8 +29,8 @@ use tutti_rt::LockExt;
 
 use tutti_graph::{
     Cx, Event, EventDensity, EventWriter, ForkCause, ForkMode, ForkSource, Forked, Harmony,
-    HarmonyKind, IntoNode, Io, MIN_EVENT_PORT_CAPACITY, Node, NodeParts, Offset, Prepare, Shape,
-    Status,
+    HarmonyKind, IntoNode, Io, MIN_EVENT_PORT_CAPACITY, Node, NodeParts, Offset, OutEvents,
+    Prepare, Shape, Status,
 };
 use tutti_rt::{Publisher, Reader};
 use tutti_units::Beat;
@@ -227,6 +227,18 @@ impl std::fmt::Debug for HarmonyNode {
 }
 
 impl HarmonyNode {
+    const fn declared(capacity: NonZeroU32) -> Shape {
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(capacity)
+            // Event-only: the clip node's walk over its changes, nothing per
+            // frame.
+            .with_cost(tutti_graph::Cost::Light)
+    }
+    const OUT: OutEvents = Self::declared(MIN_EVENT_PORT_CAPACITY)
+        .event_output(0)
+        .expect("declared");
+
     /// A node sending `changes`.
     #[must_use]
     pub fn new(changes: HarmonyChanges) -> Self {
@@ -394,12 +406,7 @@ impl<F: Float> Node<F> for HarmonyNode {
     /// No audio, one event output of [`HARMONY_EVENT_DENSITY`] per frame of
     /// the block it was prepared for.
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(self.capacity)
-            // Event-only: the clip node's walk over its changes, nothing per
-            // frame.
-            .with_cost(tutti_graph::Cost::Light)
+        Self::declared(self.capacity)
     }
 
     fn prepare(&mut self, p: &Prepare) {
@@ -414,7 +421,7 @@ impl<F: Float> Node<F> for HarmonyNode {
             self.sent = Sent::default();
         }
         let mut writer = HarmonyWriter {
-            out: io.event_out(0),
+            out: io.event_out(Self::OUT),
             sent: &mut self.sent,
             restated: None,
         };

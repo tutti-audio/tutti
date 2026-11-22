@@ -31,8 +31,8 @@
 use std::num::NonZeroU32;
 use tutti_buffers::Float;
 use tutti_graph::{
-    Cost, Cx, Event, EventKind, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Losses,
-    Node, NodeParts, Offset, Prepare, Shape, Status, UmpAt, note_off_room,
+    Cost, Cx, Event, EventKind, ForkCause, ForkMode, ForkSource, Forked, InEvents, IntoNode, Io,
+    Losses, Node, NodeParts, Offset, OutEvents, Prepare, Shape, Status, UmpAt, note_off_room,
 };
 use tutti_midi_protocol::{Midi2Translator, MpeMode};
 use tutti_rt::{Counter, CounterWriter, Publisher, Reader, counter};
@@ -112,6 +112,20 @@ fn tell(
 }
 
 impl MpeTransformNode {
+    const fn declared(capacity: NonZeroU32) -> Shape {
+        Shape::EMPTY
+            .with_events(1, 1)
+            .with_event_capacity(capacity)
+            // Event-only: a translation per event, nothing per frame.
+            .with_cost(Cost::Light)
+    }
+    const IN: InEvents = Self::declared(MIDI_INPUT_PORT_CAPACITY)
+        .event_input(0)
+        .expect("declared");
+    const OUT: OutEvents = Self::declared(MIDI_INPUT_PORT_CAPACITY)
+        .event_output(0)
+        .expect("declared");
+
     /// A transform that starts in the mode `mode` holds and follows it: a
     /// publish to `mode` is adopted at the next block. The reader is
     /// registered here, so build the node on the control side.
@@ -160,11 +174,7 @@ impl<F: Float> Node<F> for MpeTransformNode {
     /// [`CLIP_EVENT_DENSITY`] per frame, which is what a clip's port holds, so
     /// a clip's events pass whole (a fan-out may reach past it, and is counted).
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(1, 1)
-            .with_event_capacity(self.capacity)
-            // Event-only: a translation per event, nothing per frame.
-            .with_cost(Cost::Light)
+        Self::declared(self.capacity)
     }
 
     fn prepare(&mut self, p: &Prepare) {
@@ -190,7 +200,7 @@ impl<F: Float> Node<F> for MpeTransformNode {
                 }
             }
         }
-        for event in io.events(0) {
+        for event in io.events(Self::IN) {
             let EventKind::Midi(raw) = event.kind else {
                 continue;
             };
@@ -220,7 +230,7 @@ impl<F: Float> Node<F> for MpeTransformNode {
         }
         for ev in &self.out[..kept] {
             // Refused past the capacity: counted by the executor.
-            let _ = io.event_out(0).push(Event::midi(ev.0, ev.1));
+            let _ = io.event_out(Self::OUT).push(Event::midi(ev.0, ev.1));
         }
         Status::Modified
     }

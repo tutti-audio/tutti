@@ -38,13 +38,21 @@ type Inbox = tutti_fixtures::Record<(u32, u32, u64)>;
 /// Logs every event it receives, with its absolute delivery frame.
 struct Recorder(Inbox);
 
+impl Recorder {
+    const SHAPE: Shape = Shape::EMPTY.with_events(1, 0).with_tail(Tail::Unknown);
+    const IN: tutti_graph::InEvents = match Self::SHAPE.event_input(0) {
+        Some(p) => p,
+        None => panic!("declared"),
+    };
+}
+
 impl Node for Recorder {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0).with_tail(Tail::Unknown)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
-        for e in io.events(0) {
+        for e in io.events(Self::IN) {
             if let EventKind::Midi(Ump(w)) = e.kind {
                 self.0
                     .lock()

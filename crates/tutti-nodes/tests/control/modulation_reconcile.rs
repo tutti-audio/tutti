@@ -17,8 +17,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor,
-    ForkByClone, ForkMode, ForkTarget, Io, Node, Offset, ParamIn, ParamKind, ParamSegment, Prepare,
-    ScheduleError, Shape, Status, TransportChanges, TransportPosition,
+    ForkByClone, ForkMode, ForkTarget, InEvents, Io, Node, Offset, OutEvents, ParamIn, ParamKind,
+    ParamSegment, Prepare, ScheduleError, Shape, Status, TransportChanges, TransportPosition,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_modulation::{
@@ -167,14 +167,19 @@ struct Held {
     on: u64,
 }
 
+impl Held {
+    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Held {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         if let Some(o) = cx.env.offset_of(Frame::new(self.on)) {
-            io.event_out(0)
+            io.event_out(Self::OUT)
                 .push(Event::midi(
                     o,
                     Message::midi1(
@@ -208,14 +213,19 @@ impl Node for Capture2 {
 #[derive(Clone)]
 struct Capture(Arc<Mutex<Vec<(u64, ParamSegment)>>>);
 
+impl Capture {
+    const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+    const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for Capture {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
         let mut log = self.0.lock().expect("unpoisoned");
-        for e in io.events(0).params() {
+        for e in io.events(Self::IN).params() {
             if let ParamKind::Segment(s) = e.kind {
                 log.push((cx.env.frame_at(e.offset).get(), s));
             }

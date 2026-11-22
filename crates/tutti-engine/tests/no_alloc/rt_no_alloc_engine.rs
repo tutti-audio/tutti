@@ -38,11 +38,16 @@ use tutti_units::SampleRate;
 /// list, not only a render that ignores time.
 struct TransportTone;
 
+impl TransportTone {
+    const SHAPE: tutti_graph::Shape = tutti_graph::Shape::source_unassigned(ChannelLayout::STEREO)
+        .with_events(1, 0)
+        .with_tail(tutti_units::Tail::Unbounded);
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl tutti_graph::Node for TransportTone {
     fn shape(&self) -> tutti_graph::Shape {
-        tutti_graph::Shape::source_unassigned(ChannelLayout::STEREO)
-            .with_events(1, 0)
-            .with_tail(tutti_units::Tail::Unbounded)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &tutti_graph::Prepare) {}
     fn process(
@@ -51,7 +56,7 @@ impl tutti_graph::Node for TransportTone {
         mut io: tutti_graph::Io<'_>,
     ) -> tutti_graph::Status {
         let env = *cx.env;
-        let bumps = io.events(0).len() as f32;
+        let bumps = io.events(Self::IN).len() as f32;
         for k in env.offsets() {
             let t = env.transport_at(k);
             let v = if t.playing {

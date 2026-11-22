@@ -10,8 +10,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::WorkerPool;
 use tutti_graph::{
-    Cost, Cx, Editor, EventCapacity, EventInletNode, EventKind, Executor, ForkByClone, Io, Node,
-    Prepare, Schedule, Shape, Status, TransportPosition, Unforkable,
+    Cost, Cx, Editor, EventCapacity, EventInletNode, EventKind, Executor, ForkByClone, InEvents,
+    Io, Node, Prepare, Schedule, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_midi_runtime::{
@@ -55,14 +55,19 @@ type Seen = tutti_fixtures::Record<(u64, Ump)>;
 #[derive(Clone)]
 struct Recorder(Seen);
 
+impl Recorder {
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0);
+    const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for Recorder {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let mut seen = self.0.lock().unwrap();
-        for e in io.events(0) {
+        for e in io.events(Self::IN) {
             if let EventKind::Midi(Ump(data)) = e.kind {
                 seen.push((cx.env.frame.get() + u64::from(e.offset.get()), Ump(data)));
             }

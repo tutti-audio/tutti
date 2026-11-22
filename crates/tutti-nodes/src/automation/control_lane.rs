@@ -8,9 +8,9 @@ use atomic_float::AtomicF64;
 use tutti_buffers::Float;
 use tutti_curve::Piece;
 use tutti_graph::{
-    Cost, Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Law, Node, NodeParts, Offset,
-    ParamEvent, ParamKind, ParamRange, ParamRangeCell, ParamRangeReader, ParamSegment, PlayReading,
-    Prepare, Shape, Status, TransportPosition,
+    Cost, Cx, ForkCause, ForkMode, ForkSource, Forked, InEvents, IntoNode, Io, Law, Node,
+    NodeParts, Offset, OutEvents, ParamEvent, ParamKind, ParamRange, ParamRangeCell,
+    ParamRangeReader, ParamSegment, PlayReading, Prepare, Shape, Status, TransportPosition,
 };
 use tutti_modulation::{
     CONTROL_GRID, ControlProgram, CurveSegment, DepthSnapshot, LayerClock, MAX_LANE_INPUTS,
@@ -490,6 +490,22 @@ impl From<ForeignLaneConfig> for ControlLaneNode {
 }
 
 impl ControlLaneNode {
+    const SHAPE: Shape = Shape::EMPTY
+        .with_events(1, 1)
+        .with_param_events()
+        .with_event_capacity(SOURCE_EVENT_CAPACITY)
+        .with_cost(Cost::Moderate)
+        .with_tail(Tail::None)
+        .with_no_note_events();
+    const IN: InEvents = match Self::SHAPE.event_input(0) {
+        Some(port) => port,
+        None => panic!("declared one event input"),
+    };
+    const OUT: OutEvents = match Self::SHAPE.event_output(0) {
+        Some(port) => port,
+        None => panic!("declared one event output"),
+    };
+
     fn build(
         program: Arc<ControlProgram>,
         knob: Option<ParamCell>,
@@ -1082,13 +1098,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
     /// evaluation, sixteen grid points a block), about 7 ns a frame, where
     /// `Moderate`'s model is 200 + 8 a frame and `Light`'s 100 + 1.
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(1, 1)
-            .with_param_events()
-            .with_event_capacity(SOURCE_EVENT_CAPACITY)
-            .with_cost(Cost::Moderate)
-            .with_tail(Tail::None)
-            .with_no_note_events()
+        Self::SHAPE
     }
 
     fn prepare(&mut self, _: &Prepare) {
@@ -1155,7 +1165,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
             .is_none_or(|f| f.next.is_some_and(|n| n <= env.frame));
         let at_zero = (due || changed || moved || resync).then_some(changed && !moved && !resync);
 
-        let events = io.events(0).params();
+        let events = io.events(Self::IN).params();
         let mut block = Block {
             cx,
             program,
@@ -1198,7 +1208,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
             s.thinned.fetch_add(1, Ordering::Relaxed);
         }
         drop(loan);
-        let out = io.event_out(0);
+        let out = io.event_out(Self::OUT);
         for e in &self.scratch {
             // Within the declared capacity: never refused.
             let _ = out.push_param(*e);

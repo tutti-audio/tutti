@@ -685,16 +685,22 @@ impl Synth {
     }
 }
 
+impl Synth {
+    const BASE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0);
+    const IN: tutti_graph::InEvents = match Self::BASE.event_input(0) {
+        Some(p) => p,
+        None => panic!("declared"),
+    };
+}
+
 impl Node for Synth {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO)
-            .with_events(1, 0)
-            .with_tail(Tail::Finite(Samples::new(self.release)))
+        Self::BASE.with_tail(Tail::Finite(Samples::new(self.release)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         self.calls.fetch_add(1, Ordering::Relaxed);
-        let evs = io.events(0);
+        let evs = io.events(Self::IN);
         let n = io.frames();
         let mut next = 0;
         for i in 0..n {
@@ -740,15 +746,23 @@ struct OneShot {
     words: [u32; 4],
 }
 
+impl OneShot {
+    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
+        Some(p) => p,
+        None => panic!("declared"),
+    };
+}
+
 impl Node for OneShot {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         if let Some(at) = cx.env.offset_of(tutti_units::Frame::new(self.at)) {
             let _ = io
-                .event_out(0)
+                .event_out(Self::OUT)
                 .push(tutti_graph::Event::midi(at, Ump(self.words)));
         }
         Status::Silent
@@ -864,15 +878,23 @@ fn applying_refuses_a_plan_for_another_prepare() {
 #[test]
 fn a_merge_holds_all_its_inputs_so_no_note_off_is_lost() {
     struct Offs;
+    impl Offs {
+        const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+        const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
+            Some(p) => p,
+            None => panic!("declared"),
+        };
+    }
+
     impl Node for Offs {
         fn shape(&self) -> Shape {
-            Shape::EMPTY.with_events(0, 1)
+            Self::SHAPE
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
             if cx.env.frame == tutti_units::Frame::ZERO {
                 for n in 0..30 {
-                    io.event_out(0)
+                    io.event_out(Self::OUT)
                         .push(tutti_graph::Event::midi(
                             tutti_graph::Offset::ZERO,
                             Message::midi1(
@@ -888,13 +910,25 @@ fn a_merge_holds_all_its_inputs_so_no_note_off_is_lost() {
         fn reset(&mut self) {}
     }
     struct Count(Arc<AtomicUsize>);
+    impl Count {
+        const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+        const IN: tutti_graph::InEvents = match Self::SHAPE.event_input(0) {
+            Some(p) => p,
+            None => panic!("declared"),
+        };
+    }
+
     impl Node for Count {
         fn shape(&self) -> Shape {
-            Shape::EMPTY.with_events(1, 0)
+            Self::SHAPE
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
-            let offs = io.events(0).iter().filter(|e| e.is_note_off()).count();
+            let offs = io
+                .events(Self::IN)
+                .iter()
+                .filter(|e| e.is_note_off())
+                .count();
             self.0.fetch_add(offs, Ordering::Relaxed);
             Status::Idle
         }

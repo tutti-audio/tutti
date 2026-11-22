@@ -139,22 +139,22 @@ fn sent_at_arrival(reset: bool) -> usize {
     let (mut writer, generation) = DeviceGeneration::new();
     let node = MidiInputNode::new().following(&generation);
     let mut d = Direct::new(node, SampleRate::SR_48K, 64);
+    let shape = tutti_graph::Node::<f32>::shape(&*d.node);
+    let input = shape.event_input(0).expect("an event input");
     let on = midi::note_on(
         MidiChannel::of(0),
         60,
         NoteVelocity::from(U7::of(100)).get(),
     );
-    d.events(0, &[Event::midi(Offset::ZERO, on)]);
+    d.events(input, &[Event::midi(Offset::ZERO, on)]);
     d.block();
     if reset {
         tutti_graph::Node::<f32>::reset(&mut *d.node);
     }
-    d.events(0, &[]);
+    d.events(input, &[]);
     writer.arrive();
     d.block();
-    (0..MIDI_INPUT_PORTS)
-        .map(|p| d.event_output(usize::from(p)).len())
-        .sum()
+    shape.event_outputs().map(|p| d.event_output(p).len()).sum()
 }
 
 /// **`reset` returns the node to a freshly prepared one's state**: a device

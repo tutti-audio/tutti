@@ -66,6 +66,32 @@ pub struct InBus(pub(crate) PortSpan);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct OutBus(pub(crate) PortSpan);
 
+/// An event input of a node, from its [`Shape`](crate::Shape)
+/// ([`event_input`](crate::Shape::event_input)): read through
+/// [`Io::events`](crate::Io::events) or [`Io::sub_blocks`](crate::Io::sub_blocks).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct InEvents(pub(crate) u16);
+
+/// An event output of a node, from its [`Shape`](crate::Shape)
+/// ([`event_output`](crate::Shape::event_output)): written through
+/// [`Io::event_out`](crate::Io::event_out).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct OutEvents(pub(crate) u16);
+
+impl InEvents {
+    /// The port, as an index into the node's event inputs.
+    pub(crate) const fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl OutEvents {
+    /// The port, as an index into the node's event outputs.
+    pub(crate) const fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
 impl InBus {
     /// The bus's channels.
     #[must_use]

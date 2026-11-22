@@ -59,9 +59,14 @@ impl Node for Burst {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         for &(f, port, tag) in &self.plan {
+            let out = self
+                .shape()
+                .event_outputs()
+                .nth(port as usize)
+                .expect("a declared port");
             if let Some(at) = cx.env.offset_of(Frame::new(f))
                 && io
-                    .event_out(port as usize)
+                    .event_out(out)
                     .push(Event::midi(at, Ump([tag, 0, 0, 0])))
                     .is_err()
             {
@@ -77,18 +82,30 @@ impl Node for Burst {
 /// arpeggiator's shape, with no latency of its own.
 struct Relay;
 
+impl Relay {
+    const SHAPE: Shape = Shape::EMPTY.with_events(1, 1);
+    const IN: tutti_graph::InEvents = match Self::SHAPE.event_input(0) {
+        Some(p) => p,
+        None => panic!("declared"),
+    };
+    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
+        Some(p) => p,
+        None => panic!("declared"),
+    };
+}
+
 impl Node for Relay {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        for e in io.events(0) {
+        for e in io.events(Self::IN) {
             let EventKind::Midi(Ump(mut w)) = e.kind else {
                 continue;
             };
             w[0] += 1000;
-            io.event_out(0)
+            io.event_out(Self::OUT)
                 .push(Event::midi(e.offset, Ump(w)))
                 .expect("forwards what it was handed");
         }
@@ -130,8 +147,8 @@ impl Node for Sink {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
         let mut seen = self.seen.lock().unwrap();
-        for p in 0..io.event_input_count() {
-            for e in io.events(p) {
+        for (p, port) in self.shape().event_inputs().enumerate() {
+            for e in io.events(port) {
                 let EventKind::Midi(Ump(w)) = e.kind else {
                     panic!("only MIDI is sent")
                 };

@@ -15,7 +15,7 @@ pub mod font;
 pub mod rig;
 
 use tutti_graph::contract::{Direct, HAND_EVENT_CAPACITY};
-use tutti_graph::{Event, Offset, Status};
+use tutti_graph::{Event, InEvents, Offset, Status};
 use tutti_soundfont::SoundFontUnit;
 use tutti_ump::Ump;
 use tutti_units::{SampleRate, Samples};
@@ -27,6 +27,7 @@ pub const BLOCK: usize = 64;
 /// methods (`note_on`, `program_change`, …) are reachable.
 pub struct Hand {
     direct: Direct<SoundFontUnit<f32>>,
+    input: InEvents,
     queued: Vec<Event>,
     /// What the last block returned, and so what its outputs are: a node that
     /// returns `Silent` or `Idle` wrote nothing, and the executor zeroes.
@@ -44,8 +45,12 @@ impl Hand {
 
     /// `unit`, prepared at `rate` for [`BLOCK`]-frame blocks.
     pub fn at(unit: SoundFontUnit<f32>, rate: SampleRate) -> Self {
+        let direct = Direct::new(unit, rate, BLOCK);
         Self {
-            direct: Direct::new(unit, rate, BLOCK),
+            input: tutti_graph::Node::shape(&*direct.node)
+                .event_input(0)
+                .expect("an event input"),
+            direct,
             queued: Vec::with_capacity(HAND_EVENT_CAPACITY),
             status: Status::Modified,
             len: BLOCK,
@@ -116,7 +121,7 @@ impl Hand {
                 j -= 1;
             }
         }
-        self.direct.events(0, &self.queued);
+        self.direct.events(self.input, &self.queued);
         self.queued.clear();
         self.status = self.direct.block();
         self.len = frames;

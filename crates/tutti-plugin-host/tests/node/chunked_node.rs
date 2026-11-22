@@ -656,10 +656,15 @@ fn reset_reaches_the_processor_and_restarts_the_chunks() {
 fn the_loss_a_chunked_processor_reports_is_counted() {
     let rig = Rig::new(Some(64), Features::TRANSPORT);
     let (mut unit, controls) = node(&rig, 100, tempo(None));
+    let unit_in = unit
+        .node
+        .shape()
+        .event_input(0)
+        .expect("the node declares an event input");
     rig.lose.store(3, Ordering::Relaxed);
     rig.unsent.store(true, Ordering::Relaxed);
     unit.param_events(
-        0,
+        unit_in,
         &[ParamEvent::ramp(
             at(0, 100),
             ParamRamp::by_id(PARAM, 0.5, Samples::new(0)),
@@ -700,6 +705,11 @@ fn a_sysex_cut_by_a_reported_loss_stays_cut() {
     for open in [true, false] {
         let rig = Rig::new(Some(64), Features::TRANSPORT);
         let (mut unit, controls) = node(&rig, 64, tempo(None));
+        let unit_in = unit
+            .node
+            .shape()
+            .event_input(0)
+            .expect("the node declares an event input");
         // The first chunk reports three lost; the dump is open in it only when
         // its first packets were taken there.
         rig.lose.store(3, Ordering::Relaxed);
@@ -708,11 +718,11 @@ fn a_sysex_cut_by_a_reported_loss_stays_cut() {
         } else {
             vec![note_on(0, 64), note_on(1, 64), note_on(2, 64)]
         };
-        unit.events(0, &first);
+        unit.events(unit_in, &first);
         run_block(&mut unit, 0, 64);
         assert_eq!(controls.dropped_midi_in(), 3);
         rig.lose.store(0, Ordering::Relaxed);
-        unit.events(0, &[packet(3, 0), packet(4, 1), note_on(2, 64)]);
+        unit.events(unit_in, &[packet(3, 0), packet(4, 1), note_on(2, 64)]);
         run_block(&mut unit, 64, 64);
         let seen = rig.seen.lock().unwrap();
         let midi: Vec<_> = seen.iter().map(|s| s.midi.to_vec()).collect();
@@ -742,9 +752,14 @@ fn midi_and_harmony_arrive_on_the_frames_of_their_piece() {
         };
         let rig = Rig::new(Some(64), features);
         let (mut unit, _) = node(&rig, 100, tempo(None));
-        unit.events(0, &[note_on(70, 100), chord]);
+        let unit_in = unit
+            .node
+            .shape()
+            .event_input(0)
+            .expect("the node declares an event input");
+        unit.events(unit_in, &[note_on(70, 100), chord]);
         run_block(&mut unit, 0, 100);
-        unit.events(0, &[note_on(10, 100)]);
+        unit.events(unit_in, &[note_on(10, 100)]);
         run_block(&mut unit, 100, 100);
         let seen = rig.seen.lock().unwrap();
         let midi: Vec<_> = seen.iter().map(|s| s.midi.to_vec()).collect();
@@ -771,10 +786,15 @@ fn chunked_midi_out_past_the_blocks_room_is_counted() {
     let rig = Rig::new(Some(64), Features::TRANSPORT | Features::MIDI_OUT);
     rig.emit.store(200, Ordering::Relaxed);
     let (mut unit, controls) = node(&rig, 128, tempo(None));
+    let unit_out = unit
+        .node
+        .shape()
+        .event_output(0)
+        .expect("the node declares an event output");
     run_block(&mut unit, 0, 128);
     let room = tutti_plugin_types::MIDI_STACK_CAPACITY;
     assert_eq!(controls.midi_out_dropped(), (2 * 200 - room) as u64);
-    assert_eq!(unit.event_output(0).len(), room);
+    assert_eq!(unit.event_output(unit_out).len(), room);
 }
 
 /// **Chords past the capacity of a piece are counted**, in the whole-block path
@@ -789,7 +809,12 @@ fn chords_past_the_capacity_of_a_piece_are_counted() {
     for chunk in [None, Some(64)] {
         let rig = Rig::new(chunk, Features::TRANSPORT | Features::SEQUENCER_CONTEXT);
         let (mut unit, controls) = node(&rig, 64, tempo(None));
-        unit.events(0, &chords);
+        let unit_in = unit
+            .node
+            .shape()
+            .event_input(0)
+            .expect("the node declares an event input");
+        unit.events(unit_in, &chords);
         run_block(&mut unit, 0, 64);
         assert_eq!(controls.harmony_dropped(), over as u64, "chunk {chunk:?}");
         let seen = rig.seen.lock().unwrap();
@@ -807,7 +832,12 @@ fn chords_past_the_capacity_of_a_piece_are_counted() {
 fn a_failed_block_is_counted_in_the_nodes_controls() {
     let rig = Rig::new(None, Features::TRANSPORT);
     let (mut unit, controls) = node(&rig, 64, tempo(None));
-    unit.events(0, &[note_on(3, 64)]);
+    let unit_in = unit
+        .node
+        .shape()
+        .event_input(0)
+        .expect("the node declares an event input");
+    unit.events(unit_in, &[note_on(3, 64)]);
     rig.fail.store(true, Ordering::Relaxed);
     run_block(&mut unit, 0, 64);
     rig.fail.store(false, Ordering::Relaxed);
@@ -1026,6 +1056,11 @@ fn a_rebuilt_nodes_overflow_is_counted_once_in_the_shared_controls() {
     .expect("narrow");
     let rebinder = client.rebinder(tempo(None));
     let mut first = Direct::new(client.bind(tempo(None)), SR, 128);
+    let first_in = first
+        .node
+        .shape()
+        .event_input(0)
+        .expect("the node declares an event input");
 
     let over = 3;
     let chords: Vec<Event> = (0..tutti_plugin_types::HARMONY_CAPACITY + over)
@@ -1033,7 +1068,7 @@ fn a_rebuilt_nodes_overflow_is_counted_once_in_the_shared_controls() {
         .collect();
     let room = tutti_plugin_types::MIDI_STACK_CAPACITY;
     let midi_over = (2 * 200 - room) as u64;
-    first.events(0, &chords);
+    first.events(first_in, &chords);
     run_block(&mut first, 0, 128);
     assert_eq!(controls.harmony_dropped(), over as u64);
     assert_eq!(controls.midi_out_dropped(), midi_over);
@@ -1049,7 +1084,12 @@ fn a_rebuilt_nodes_overflow_is_counted_once_in_the_shared_controls() {
     }
     let (harmony, midi) = (controls.harmony_dropped(), controls.midi_out_dropped());
     let mut second = Direct::new(second, SR, 128);
-    second.events(0, &chords);
+    let second_in = second
+        .node
+        .shape()
+        .event_input(0)
+        .expect("the node declares an event input");
+    second.events(second_in, &chords);
     run_block(&mut second, frame, 128);
     assert_eq!(controls.harmony_dropped() - harmony, over as u64);
     assert_eq!(controls.midi_out_dropped() - midi, midi_over);
@@ -1063,11 +1103,16 @@ fn the_chunked_audio_path_does_not_allocate() {
     let mut rig = Rig::new(Some(64), Features::TRANSPORT);
     Arc::get_mut(&mut rig).expect("unshared").record = false;
     let (mut unit, _) = node(&rig, 100, tempo(Some(4.0 + 79.5 * BEATS_PER_FRAME)));
+    let unit_in = unit
+        .node
+        .shape()
+        .event_input(0)
+        .expect("the node declares an event input");
     let mut frame = 0;
     let mut one = |unit: &mut Direct<PluginNode<Rec>>| {
-        unit.events(0, &[note_on(5, 100)]);
+        unit.events(unit_in, &[note_on(5, 100)]);
         unit.param_events(
-            0,
+            unit_in,
             &[ParamEvent::ramp(
                 at(50, 100),
                 ParamRamp::by_id(PARAM, 0.25, Samples::new(10)),
@@ -1215,7 +1260,12 @@ fn a_tempo_ramp_across_a_block_boundary_gives_the_chunks_slope() {
 fn the_midi_in_flight_at_a_reset_is_lost_and_counted() {
     let rig = Rig::new(Some(64), Features::TRANSPORT);
     let (mut unit, controls) = node(&rig, 100, tempo(None));
-    unit.events(0, &[note_on(70, 100)]);
+    let unit_in = unit
+        .node
+        .shape()
+        .event_input(0)
+        .expect("the node declares an event input");
+    unit.events(unit_in, &[note_on(70, 100)]);
     run_block(&mut unit, 0, 100);
     assert_eq!(unit.lost(), 0);
     assert_eq!(controls.dropped_midi_in(), 0, "held, not lost");

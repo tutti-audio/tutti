@@ -55,7 +55,10 @@ fn render(cfg: SynthConfig, notes: &[u8]) -> (Vec<f32>, Vec<f32>) {
         .map(|&n| midi::note_on(MidiChannel::FIRST, n, NoteVelocity::from(U7::of(100)).get()))
         .map(|e: Ump| Event::midi(at, e))
         .collect();
-    synth.events(0, &events);
+    let input = tutti_graph::Node::shape(&*synth.node)
+        .event_input(0)
+        .expect("an event input");
+    synth.events(input, &events);
 
     let (mut l, mut r) = (Vec::new(), Vec::new());
     for _ in 0..BLOCKS {

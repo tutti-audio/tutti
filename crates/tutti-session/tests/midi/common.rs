@@ -18,14 +18,22 @@ pub type Seen = tutti_fixtures::Record<(u64, Ump)>;
 /// A stand-in synth: one MIDI event input, logged with each event's absolute frame.
 pub struct Tap(pub Seen);
 
+impl Tap {
+    const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+    const IN: tutti_graph::InEvents = match Self::SHAPE.event_input(0) {
+        Some(port) => port,
+        None => panic!("one event input is declared"),
+    };
+}
+
 impl Node for Tap {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
         let mut seen = self.0.lock().unwrap();
-        for e in io.events(0) {
+        for e in io.events(Self::IN) {
             if let EventKind::Midi(ump) = e.kind {
                 seen.push((cx.env.frame.get() + u64::from(e.offset.get()), ump));
             }

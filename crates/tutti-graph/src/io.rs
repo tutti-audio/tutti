@@ -17,7 +17,7 @@
 use tutti_buffers::{BufferError, Float, PlanesMut};
 use tutti_units::{Samples, Tail};
 
-use crate::bus::{InBus, OutBus, PortSpan};
+use crate::bus::{InBus, InEvents, OutBus, OutEvents, PortSpan};
 use crate::event::{EventWriter, SortedEvents, SubBlocks};
 use crate::node::{ConstantMask, InPlaceMask, MainPorts, SilenceMask, Wired, WiredMask};
 use crate::param::ParamInput;
@@ -632,13 +632,14 @@ impl<'a, F: Float> Io<'a, F> {
         self.events_in.len()
     }
 
-    /// Event input port `p`, sorted by offset, every offset inside the block.
+    /// Event input `port`, sorted by offset, every offset inside the block.
     ///
     /// # Panics
     ///
-    /// If `p` is not below [`event_input_count`](Self::event_input_count).
-    pub fn events(&self, p: usize) -> SortedEvents<'a> {
-        self.events_in[p]
+    /// If the handle reaches past this node's event inputs: one taken from
+    /// another shape.
+    pub fn events(&self, port: InEvents) -> SortedEvents<'a> {
+        self.events_in[port.index()]
     }
 
     /// Number of event output ports.
@@ -646,16 +647,16 @@ impl<'a, F: Float> Io<'a, F> {
         self.events_out.len()
     }
 
-    /// The writer for event output port `p`.
+    /// The writer for event output `port`.
     ///
     /// # Panics
     ///
-    /// If `p` is not below [`event_output_count`](Self::event_output_count).
-    pub fn event_out(&mut self, p: usize) -> &mut EventWriter<'a> {
-        &mut self.events_out[p]
+    /// If the handle reaches past this node's event outputs.
+    pub fn event_out(&mut self, port: OutEvents) -> &mut EventWriter<'a> {
+        &mut self.events_out[port.index()]
     }
 
-    /// The block split at event input port `p`'s offsets: `(range, events)`
+    /// The block split at event input `port`'s offsets: `(range, events)`
     /// chunks that tile the block, each carrying exactly the events at its
     /// first frame (see [`SubBlocks`]).
     ///
@@ -665,9 +666,9 @@ impl<'a, F: Float> Io<'a, F> {
     /// events, not the `Io`, so the loop body can write the outputs:
     ///
     /// ```
-    /// use tutti_graph::{Io, EventKind};
-    /// fn render(mut io: Io<'_>, level: &mut f32) {
-    ///     for (range, events) in io.sub_blocks(0) {
+    /// use tutti_graph::{Io, EventKind, InEvents};
+    /// fn render(mut io: Io<'_>, port: InEvents, level: &mut f32) {
+    ///     for (range, events) in io.sub_blocks(port) {
     ///         for e in events {
     ///             if let EventKind::Midi(_) = e.kind {
     ///                 *level = 1.0 - *level; // toggle on every event
@@ -677,8 +678,8 @@ impl<'a, F: Float> Io<'a, F> {
     ///     }
     /// }
     /// ```
-    pub fn sub_blocks(&self, p: usize) -> SubBlocks<'a> {
-        self.events_in[p].sub_blocks(Samples::new(self.frames))
+    pub fn sub_blocks(&self, port: InEvents) -> SubBlocks<'a> {
+        self.events_in[port.index()].sub_blocks(Samples::new(self.frames))
     }
 
     /// What declared param `k` ([`Shape::params`](crate::Shape::params))

@@ -16,8 +16,9 @@ use tutti_curve::{Breakpoint, Trajectory};
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, EventEdge, EventInputPort, EventOutputPort, Executor, ForkByClone, ForkMode,
-    ForkTarget, Io, Law, Node, Offset, ParamEvent, ParamIn, ParamKind, ParamRange, ParamSegment,
-    Prepare, Shape, Status, TransportChanges, TransportPosition, control_in, declick_frames,
+    ForkTarget, InEvents, Io, Law, Node, Offset, OutEvents, ParamEvent, ParamIn, ParamKind,
+    ParamRange, ParamSegment, Prepare, Shape, Status, TransportChanges, TransportPosition,
+    control_in, declick_frames,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_modulation::{
@@ -75,16 +76,21 @@ struct SegSink {
     last: Option<(ParamSegment, u64)>,
 }
 
+impl SegSink {
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::STEREO).with_events(1, 0);
+    const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for SegSink {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::STEREO).with_events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let n = io.frames();
         let base = cx.env.frame.get();
         let events: Vec<(usize, ParamSegment)> = io
-            .events(0)
+            .events(Self::IN)
             .params()
             .iter()
             .filter_map(|e| match e.kind {
@@ -120,15 +126,20 @@ struct Feed {
     plan: Vec<(u64, ParamSegment)>,
 }
 
+impl Feed {
+    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1).with_param_events();
+    const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Feed {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_param_events()
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         for &(at, seg) in &self.plan {
             if let Some(o) = cx.env.offset_of(Frame::new(at)) {
-                io.event_out(0)
+                io.event_out(Self::OUT)
                     .push_param(ParamEvent::segment(o, seg))
                     .expect("room");
             }

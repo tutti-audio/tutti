@@ -22,13 +22,22 @@ use tutti_ump::MidiChannel;
 #[derive(Clone)]
 struct Sink(Arc<AtomicUsize>);
 
+impl Sink {
+    const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+    const IN: tutti_graph::InEvents = match Self::SHAPE.event_input(0) {
+        Some(port) => port,
+        None => panic!("one event input is declared"),
+    };
+}
+
 impl Node for Sink {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
-        self.0.fetch_add(io.events(0).len(), Ordering::Relaxed);
+        self.0
+            .fetch_add(io.events(Self::IN).len(), Ordering::Relaxed);
         Status::Modified
     }
     fn reset(&mut self) {}

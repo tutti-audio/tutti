@@ -10,8 +10,8 @@ use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_fixtures::midi;
 use tutti_graph::{
     Buses, Chase, Cx, Editor, EventCapacity, EventEdge, EventInletNode, EventInletWriter,
-    EventInputPort, EventKind, EventOutputPort, Executor, Fade, FadeLaw, Io, Node, OutputPort,
-    PortSource, Prepare, Shape, Status, TransportPosition, Unforkable,
+    EventInputPort, EventKind, EventOutputPort, Executor, Fade, FadeLaw, InEvents, Io, Node,
+    OutputPort, PortSource, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{NodeKey, Stamp};
 
@@ -116,13 +116,19 @@ impl Rig {
 /// A successor that writes down what it is sent.
 struct Recorder(Arc<Mutex<Vec<Ump>>>);
 
+impl Recorder {
+    const SHAPE: Shape =
+        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::STEREO)).with_events(1, 0);
+    const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for Recorder {
     fn shape(&self) -> Shape {
-        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::STEREO)).with_events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        for e in io.events(0).iter() {
+        for e in io.events(Self::IN).iter() {
             if let EventKind::Midi(u) = e.kind {
                 self.0.lock().unwrap().push(u);
             }

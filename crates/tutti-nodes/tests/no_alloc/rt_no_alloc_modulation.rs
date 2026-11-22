@@ -967,9 +967,14 @@ struct Notes {
     period: u64,
 }
 
+impl Notes {
+    const SHAPE: tutti_graph::Shape = tutti_graph::Shape::EMPTY.with_events(0, 1);
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl tutti_graph::Node for Notes {
     fn shape(&self) -> tutti_graph::Shape {
-        tutti_graph::Shape::EMPTY.with_events(0, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &tutti_graph::Prepare) {}
     fn process(
@@ -989,7 +994,9 @@ impl tutti_graph::Node for Notes {
                 _ => continue,
             };
             let at = tutti_graph::Offset::of(tutti_units::Samples::new(i), n);
-            let _ = io.event_out(0).push(tutti_graph::Event::midi(at, ump));
+            let _ = io
+                .event_out(Self::OUT)
+                .push(tutti_graph::Event::midi(at, ump));
         }
         tutti_graph::Status::Modified
     }

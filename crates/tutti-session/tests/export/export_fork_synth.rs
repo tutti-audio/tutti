@@ -181,8 +181,13 @@ fn request(rate: f64) -> Bounce<NodeKey, BufferMainOutput> {
 /// the note sounds like from its first frame, at `rate`.
 fn reference<N: Node>(unit: N, rate: f64) -> Vec<f32> {
     let mut unit = Direct::new(unit, SampleRate::of(rate), 64);
+    let unit_in = unit
+        .node
+        .shape()
+        .event_input(0)
+        .expect("the node declares an event input");
     let at = Offset::of(Samples::new(0), Samples::new(64));
-    unit.events(0, &[Event::midi(at, clip_note_on())]);
+    unit.events(unit_in, &[Event::midi(at, clip_note_on())]);
     let mut out = Vec::with_capacity(NOTE);
     while out.len() < NOTE {
         unit.block();

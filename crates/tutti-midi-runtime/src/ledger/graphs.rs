@@ -22,8 +22,8 @@ use tutti_graph::NodeKey;
 use tutti_graph::contract::Direct;
 use tutti_graph::{
     Cx, Editor, Event, EventInputPort, EventKind, EventOutputPort, Executor, ForkCause, ForkMode,
-    ForkSource, ForkTarget, Forked, IntoNode, Io, Node, NodeParts, Offset, Prepare, Shape, Status,
-    TransportPosition, Unforkable,
+    ForkSource, ForkTarget, Forked, InEvents, IntoNode, Io, Node, NodeParts, Offset, OutEvents,
+    Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_music::LoopRange;
@@ -119,25 +119,34 @@ impl Sink {
     }
 }
 
-impl<F: Float> Node<F> for Sink {
-    fn shape(&self) -> Shape {
-        let layout = |on| {
+impl Sink {
+    const fn declared(audio_in: bool, audio_out: bool) -> Shape {
+        const fn layout(on: bool) -> ChannelLayout {
             if on {
                 ChannelLayout::MONO
             } else {
                 ChannelLayout::EMPTY
             }
-        };
+        }
         Shape::buses(
-            tutti_graph::Buses::unassigned(layout(self.audio_in)),
-            tutti_graph::Buses::unassigned(layout(self.audio_out)),
+            tutti_graph::Buses::unassigned(layout(audio_in)),
+            tutti_graph::Buses::unassigned(layout(audio_out)),
         )
         .with_events(1, 0)
+    }
+    const IN: InEvents = Self::declared(false, false)
+        .event_input(0)
+        .expect("declared");
+}
+
+impl<F: Float> Node<F> for Sink {
+    fn shape(&self) -> Shape {
+        Self::declared(self.audio_in, self.audio_out)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let mut t = self.tally.lock().unwrap();
-        for e in io.events(0) {
+        for e in io.events(Self::IN) {
             let EventKind::Midi(Ump(w)) = e.kind else {
                 continue;
             };
@@ -272,16 +281,21 @@ struct Script {
     k: usize,
 }
 
+impl Script {
+    const SHAPE: Shape = Shape::EMPTY
+        .with_events(0, 1)
+        .with_event_capacity(std::num::NonZeroU32::new(2048).expect("a capacity"));
+    const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl<F: Float> Node<F> for Script {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(std::num::NonZeroU32::new(2048).expect("a capacity"))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         if let Some(block) = self.blocks.get(self.k) {
-            let out = io.event_out(0);
+            let out = io.event_out(Self::OUT);
             for u in block {
                 let _ = out.push(Event::midi(Offset::ZERO, *u));
             }
@@ -298,19 +312,27 @@ struct Relay {
     capacity: u32,
 }
 
-impl<F: Float> Node<F> for Relay {
-    fn shape(&self) -> Shape {
+impl Relay {
+    const fn declared(capacity: u32) -> Shape {
         Shape::EMPTY
             .with_events(1, 1)
-            .with_event_capacity(std::num::NonZeroU32::new(self.capacity).expect("a capacity"))
+            .with_event_capacity(std::num::NonZeroU32::new(capacity).expect("a capacity"))
+    }
+    const IN: InEvents = Self::declared(1).event_input(0).expect("declared");
+    const OUT: OutEvents = Self::declared(1).event_output(0).expect("declared");
+}
+
+impl<F: Float> Node<F> for Relay {
+    fn shape(&self) -> Shape {
+        Self::declared(self.capacity)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
-        let events = io.events(0);
+        let events = io.events(Self::IN);
         let Some(first) = cx.env.offset(0) else {
             return Status::Modified;
         };
-        let out = io.event_out(0);
+        let out = io.event_out(Self::OUT);
         match &mut self.ledger {
             Some(ledger) => {
                 let mut sending = ledger.block(out, first);
@@ -782,15 +804,18 @@ fn a_reset_node_forgets_the_notes_it_held() {
     let stop_after = |reset: bool| {
         let clip = MidiClipNode::new([at(10, on(60)), at(5_000, off(60))]);
         let mut d = Direct::new(clip, SampleRate::SR_48K, 256);
+        let out = tutti_graph::Node::<f32>::shape(&*d.node)
+            .event_output(0)
+            .expect("an event output");
         d.set_transport(rolling(0));
         d.block();
-        assert_eq!(d.event_output(0).len(), 1, "the note started");
+        assert_eq!(d.event_output(out).len(), 1, "the note started");
         if reset {
             tutti_graph::Node::<f32>::reset(&mut *d.node);
         }
         d.set_transport(stopped(256));
         d.block();
-        d.event_output(0).len()
+        d.event_output(out).len()
     };
     assert_eq!(stop_after(false), 1, "the stop ends the held note");
     assert_eq!(stop_after(true), 0);
@@ -813,18 +838,23 @@ struct Probe {
     k: usize,
 }
 
+impl Probe {
+    const SHAPE: Shape = Shape::EMPTY
+        .with_events(0, 1)
+        .with_event_capacity(std::num::NonZeroU32::new(8).expect("a capacity"));
+    const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl<F: Float> Node<F> for Probe {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(std::num::NonZeroU32::new(8).expect("a capacity"))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let Some(first) = cx.env.offset(0) else {
             return Status::Modified;
         };
-        let mut sending = self.ledger.block(io.event_out(0), first);
+        let mut sending = self.ledger.block(io.event_out(Self::OUT), first);
         for act in self.blocks.get(self.k).into_iter().flatten() {
             match act {
                 Act::Send(ump, owner) => sending.send(first, *ump, *owner),
@@ -1166,16 +1196,21 @@ struct SendThenRelease {
     block: u32,
 }
 
+impl SendThenRelease {
+    const SHAPE: Shape = Shape::EMPTY
+        .with_events(0, 1)
+        .with_event_capacity(std::num::NonZeroU32::new(64).expect("a capacity"));
+    const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl<F: Float> Node<F> for SendThenRelease {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(std::num::NonZeroU32::new(64).expect("a capacity"))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let first = cx.env.offset(0).unwrap();
-        let mut sending = self.ledger.block(io.event_out(0), first);
+        let mut sending = self.ledger.block(io.event_out(Self::OUT), first);
         if self.block == 0 {
             for &u in &self.script {
                 sending.send(first, u, None);
@@ -1215,7 +1250,7 @@ fn a_midi_1_pedal_and_bend_are_returned_in_midi_1() {
     d.block();
     d.block();
     let released: Vec<Ump> = d
-        .event_output(0)
+        .event_output(SendThenRelease::OUT)
         .iter()
         .map(|e| match e.kind {
             EventKind::Midi(u) => u,

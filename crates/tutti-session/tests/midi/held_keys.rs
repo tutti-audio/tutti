@@ -13,14 +13,24 @@ use tutti_units::{Beat, BeatDuration};
 const MF: u16 = 0x8000;
 /// Stands in for the hardware input: sends what it is mailed on port 0.
 struct Src(tutti_fixtures::Shared<Vec<[u32; 4]>>);
+impl Src {
+    const SHAPE: Shape = Shape::EMPTY.with_events(0, MIDI_INPUT_PORTS);
+    const OUT: tutti_graph::OutEvents = match Self::SHAPE.event_output(0) {
+        Some(port) => port,
+        None => panic!("one event output is declared"),
+    };
+}
+
 impl Node for Src {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, MIDI_INPUT_PORTS)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         for w in self.0.lock().unwrap().drain(..) {
-            let _ = io.event_out(0).push(Event::midi(Offset::ZERO, Ump(w)));
+            let _ = io
+                .event_out(Self::OUT)
+                .push(Event::midi(Offset::ZERO, Ump(w)));
         }
         Status::Modified
     }
@@ -149,10 +159,23 @@ fn set_routes_with_a_held_key() {
 
 /// Stands in for a hardware input that hears Groups 1 and 2: sends each packet
 /// it is mailed out of the port its address names.
-struct GroupSrc(tutti_fixtures::Shared<Vec<[u32; 4]>>, MidiInputPorts);
+struct GroupSrc(
+    tutti_fixtures::Shared<Vec<[u32; 4]>>,
+    MidiInputPorts,
+    Vec<tutti_graph::OutEvents>,
+);
+impl GroupSrc {
+    fn new(mail: tutti_fixtures::Shared<Vec<[u32; 4]>>, ports: MidiInputPorts) -> Self {
+        let outs = Self::declared(ports).event_outputs().collect();
+        Self(mail, ports, outs)
+    }
+    fn declared(ports: MidiInputPorts) -> Shape {
+        Shape::EMPTY.with_events(0, ports.count())
+    }
+}
 impl Node for GroupSrc {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, self.1.count())
+        Self::declared(self.1)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -160,7 +183,7 @@ impl Node for GroupSrc {
             let ump = Ump(w);
             let port = self.1.port_of(&ump).expect("a Group the node hears");
             let _ = io
-                .event_out(usize::from(port))
+                .event_out(self.2[usize::from(port)])
                 .push(Event::midi(Offset::ZERO, ump));
         }
         Status::Modified
@@ -197,7 +220,7 @@ fn a_group_route_cut_with_keys_held_ends_them_at_the_next_block_then_nothing() {
         .expect("the builder's MIDI nodes")
         .input_ports;
     let mail = tutti_fixtures::Shared::default();
-    let src = s.graph().add(GroupSrc(mail.clone(), ports));
+    let src = s.graph().add(GroupSrc::new(mail.clone(), ports));
     let (a, a_seen) = tap(&mut s);
     let resolve = |k: u8| (k == 1).then_some(a);
     let by_group_2 = [MidiRouteRule::<u8>::new().in_group(MidiGroup::of(1)).to(1)];
