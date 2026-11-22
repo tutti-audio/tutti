@@ -13,7 +13,8 @@ use tutti_music::TimeSignature;
 use tutti_session::{
     DetachedSession, LoadError, LoadedMidi, NoCommonTimelineError, Session, TrackError,
 };
-use tutti_units::{Beat, SampleRate, Seconds};
+use tutti_tempo::TempoMap;
+use tutti_units::{Beat, Bpm, SampleRate, Seconds};
 
 fn session() -> DetachedSession {
     Session::builder()
@@ -237,23 +238,83 @@ fn a_time_signature_no_meter_holds_is_reported_at_its_beat() {
     assert_eq!(loaded.meter().unwrap().current().changes().len(), 1);
 }
 
-/// A file in SMPTE time has seconds and no beats: it lands, and each
-/// of its tracks and timeline answers `SmpteTiming`.
+/// An SMF in SMPTE time with the division word `division` and one track of
+/// `events`.
+fn smpte_smf(division: u16, events: &[&[u8]]) -> Vec<u8> {
+    let mut bytes = b"MThd\0\0\0\x06\0\0\0\x01".to_vec();
+    bytes.extend(division.to_be_bytes());
+    bytes.extend(track(events));
+    bytes
+}
+
+/// Where the bare `F7` escape of `file`'s track, the one event with no
+/// packet, lands, in beats.
+fn escape_beat(loaded: &LoadedMidi) -> Beat {
+    let dropped = &loaded.report().dropped;
+    assert_eq!(dropped.len(), 1);
+    dropped[0].beat
+}
+
+/// Delta 1000 (`87 68`), then the F7 escape of the one byte 0x55.
+const ESCAPE_AT_1000: [u8; 5] = [0x87, 0x68, 0xF7, 1, 0x55];
+
+/// **SMF 1.0 section 2.1: an SMPTE file's tick is a fixed fraction of a second.**
+/// At -25 frames a second and 40 ticks a frame (`E7 28`) a tick is a
+/// millisecond, so tick 1000 is 1.0 s and lands on beat 2.0 of the session's
+/// 120 BPM map. The file's own Set Tempo (60 BPM) moves nothing.
 #[test]
-fn a_file_in_smpte_time_lands_and_says_why_it_has_no_clip_or_timeline() {
-    let dir = tempfile::tempdir().unwrap();
-    // -25 frames a second, 40 ticks a frame (`E7 28`).
-    let bytes = b"MThd\0\0\0\x06\0\0\0\x01\xE7\x28MTrk\0\0\0\x04\0\xFF\x2F\0";
-    let loaded = load(&mut session(), write(dir.path(), "smpte.mid", bytes)).expect("loads");
-    assert_eq!(loaded.track(0).unwrap_err(), TrackError::SmpteTiming);
+fn an_smpte_file_places_its_seconds_on_the_sessions_tempo_map() {
+    let bytes = smpte_smf(0xE728, &[&TEMPO_60, &ESCAPE_AT_1000, &note(0, 60)]);
+    let mut s = session();
+    let loaded = tutti_fixtures::block_on(s.midi().load_midi(bytes)).expect("loads");
+    assert_eq!(escape_beat(&loaded), Beat::new(2.0));
+    assert_eq!(loaded.track(0).unwrap().events.len(), 2);
+    let tempo = loaded.tempo().expect("one timeline");
+    assert_eq!(tempo.seconds_at(Beat::new(2.0)), Seconds::new(1.0));
+    assert_eq!(loaded.track(0).unwrap().tempo, *tempo);
+}
+
+/// **SMF 1.0 section 2.1: "-29 corresponds to 30 drop frame"**, the
+/// 30000/1001 rate. At 40 ticks a frame a tick is 1001/1 200 000 s, so tick
+/// 1000 is 1.001/1.2 = 0.834166... s: 1001/1200 s, and beat 1001/600 at
+/// 120 BPM.
+#[test]
+fn a_29_97_drop_frame_file_counts_frames_at_30000_over_1001() {
+    // -29 is 0xE3.
+    let bytes = smpte_smf(0xE328, &[&ESCAPE_AT_1000]);
+    let loaded = tutti_fixtures::block_on(session().midi().load_midi(bytes)).expect("loads");
+    let beat = escape_beat(&loaded).get();
+    assert!((beat - 1001.0 / 600.0).abs() < 1e-12, "{beat}");
+}
+
+/// **A tempo change in the session's map moves the beats, not the seconds**:
+/// at 60 BPM the same 1.0 s is beat 1.0, and the map the clip plays on still
+/// puts that beat at 1.0 s.
+#[test]
+fn a_tempo_change_in_the_session_moves_an_smpte_files_beats_not_its_seconds() {
+    let bytes = smpte_smf(0xE728, &[&ESCAPE_AT_1000]);
+    let mut s = session();
+    let map = TempoMap::constant(Bpm::of(60.0)).expect("a tempo");
+    s.set(s.transport_handle().tempo().to(map)).expect("sets");
+    let _published = s.update();
+    let loaded = tutti_fixtures::block_on(s.midi().load_midi(bytes)).expect("loads");
+    assert_eq!(escape_beat(&loaded), Beat::new(1.0));
     assert_eq!(
-        loaded.tempo().unwrap_err(),
-        NoCommonTimelineError::SmpteTiming
+        loaded.tempo().unwrap().seconds_at(Beat::new(1.0)),
+        Seconds::new(1.0)
     );
-    assert_eq!(
-        loaded.meter().unwrap_err(),
-        NoCommonTimelineError::SmpteTiming
-    );
+}
+
+/// A format 2 file in SMPTE time lands each sequence over the session's map.
+#[test]
+fn an_smpte_format_2_file_lands_each_sequence_over_the_sessions_map() {
+    let mut bytes = b"MThd\0\0\0\x06\0\x02\0\x02\xE7\x28".to_vec();
+    bytes.extend(track(&[&ESCAPE_AT_1000]));
+    bytes.extend(track(&[&note(0, 60)]));
+    let loaded = tutti_fixtures::block_on(session().midi().load_midi(bytes)).expect("loads");
+    assert_eq!(loaded.tempo().unwrap_err(), NoCommonTimelineError::PerTrack);
+    assert_eq!(escape_beat(&loaded), Beat::new(2.0));
+    assert_eq!(loaded.track(1).unwrap().events.len(), 2);
 }
 
 #[test]

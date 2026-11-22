@@ -81,9 +81,10 @@
 //! - **SMPTE time is read.** A division with its top bit set
 //!   ([`SmfDivision::Smpte`]) counts ticks of `fps * ticks per frame` a second,
 //!   29.97 being 30000/1001: [`SmpteView::seconds_at`] and [`SmpteView::events`]
-//!   answer in seconds. It has no beat grid, so [`MidiFile::timebase`] gives it
-//!   a [`SmpteView`] with no tempo map, beats, timeline or clip: those are
-//!   the [`MetricalView`]'s.
+//!   answer in seconds. It has no beat grid and no tempo map of its own, so
+//!   [`MidiFile::timebase`] gives it a [`SmpteView`] whose
+//!   [`timeline`](SmpteView::timeline) takes the tempo map that places its seconds
+//!   on beats; the clip conversion is the [`MetricalView`]'s.
 //!
 //! - **To a Clip File.** [`MetricalView::to_clip`] converts a format 0 or 1 SMF: its meta
 //!   events become the Flex Data messages of M2-116 Appendix B, and what has no UMP
