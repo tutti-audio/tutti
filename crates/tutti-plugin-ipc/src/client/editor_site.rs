@@ -12,7 +12,6 @@ use super::ipc_editor::IpcEditor;
 use super::plugin_bridge::EditorLoader;
 use crossbeam_queue::ArrayQueue;
 use dpi::Size;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_plugin_types::AutomationMode;
 use tutti_plugin_types::{
@@ -20,7 +19,7 @@ use tutti_plugin_types::{
     EditorWindow, MainThreadMarker, ParamEdit, PluginError, PluginFormat, PluginRef, Request,
     StateError, WindowHandle,
 };
-use tutti_rt::{LockExt, PackedAtomic, Tally, TallyWriter, tally};
+use tutti_rt::{Mutex, PackedAtomic, Tally, TallyWriter, tally};
 use tutti_units::{Normalized, ParamId};
 
 /// Where a served plugin's editor lives: an editor-only instance in this
@@ -292,9 +291,11 @@ impl EditorSite {
     /// has the state either way.
     pub(crate) fn mirror_state(&self, main: MainThreadMarker, data: &[u8]) {
         if let Site::InProcess(site) = &self.site
-            && let Ok(mut guard) = site.gui.lock()
-            && let Some(gui) = guard.as_mut()
-            && gui.set_state(main, data).is_err()
+            && site
+                .gui
+                .lock()
+                .as_mut()
+                .is_some_and(|gui| gui.set_state(main, data).is_err())
         {
             site.mirror.refuse();
         }
@@ -324,8 +325,7 @@ impl Drop for EditorSite {
             self.close_editor(main);
         }
         if let Site::InProcess(site) = &self.site
-            && let Ok(mut guard) = site.gui.lock()
-            && let Some(gui) = guard.take()
+            && let Some(gui) = site.gui.lock().take()
         {
             std::mem::forget(gui);
         }
@@ -339,7 +339,7 @@ impl ServerEditor {
         &self,
         call: impl FnOnce(&mut IpcEditor) -> tutti_plugin_types::PluginResult<T>,
     ) -> std::result::Result<T, EditorError> {
-        let mut remote = self.remote.lock().map_err(|_| EditorError::Busy)?;
+        let mut remote = self.remote.lock();
         call(&mut remote).map_err(|e| match e {
             PluginError::Editor(typed) => typed,
             other => EditorError::PluginError(other.to_string()),
@@ -369,25 +369,18 @@ impl ServerEditor {
     }
 
     fn close_editor(&self, main: MainThreadMarker) -> bool {
-        let Ok(mut remote) = self.remote.lock() else {
-            return false;
-        };
+        let mut remote = self.remote.lock();
         let was_open = remote.is_open();
         remote.close_editor(main);
         was_open
     }
 
     fn editor_idle(&self, main: MainThreadMarker) {
-        if let Ok(mut remote) = self.remote.lock() {
-            remote.editor_idle(main);
-        }
+        self.remote.lock().editor_idle(main);
     }
 
     fn editor_capabilities(&self, main: MainThreadMarker) -> EditorCapabilities {
-        self.remote
-            .lock()
-            .map(|mut remote| remote.editor_capabilities(main))
-            .unwrap_or_default()
+        self.remote.lock().editor_capabilities(main)
     }
 
     fn set_editor_size(
@@ -407,7 +400,7 @@ impl ServerEditor {
     }
 
     fn poll_editor_resize_request(&self, main: MainThreadMarker) -> Option<Size> {
-        self.remote.lock().ok()?.poll_editor_resize_request(main)
+        self.remote.lock().poll_editor_resize_request(main)
     }
 }
 
@@ -448,7 +441,7 @@ impl InProcessEditor {
             "[bridge] open_editor: acquiring GUI lock for {}",
             self.origin.path().display()
         );
-        let mut guard = self.gui.lock().map_err(|_| EditorError::Busy)?;
+        let mut guard = self.gui.lock();
 
         // Lazy-load the in-process GUI instance on first open.
         let gui = self.instance(main, &mut guard)?;
@@ -514,7 +507,7 @@ impl InProcessEditor {
             return Err(EditorError::PluginCrashed);
         }
 
-        let mut guard = self.gui.lock().map_err(|_| EditorError::Busy)?;
+        let mut guard = self.gui.lock();
         let gui = self.instance(main, &mut guard)?;
 
         // Read before the open, as the embedded path does: audio is the source
@@ -585,9 +578,7 @@ impl InProcessEditor {
 
     fn close_editor(&self, main: MainThreadMarker) -> bool {
         self.mirror.closed();
-        let Ok(mut guard) = self.gui.lock() else {
-            return false;
-        };
+        let mut guard = self.gui.lock();
         if let Some(gui) = guard.as_mut() {
             // Flush pending GUI param changes before closing.
             self.forward_edits(gui.poll_edits(main));
@@ -596,7 +587,7 @@ impl InProcessEditor {
             // is still attached.
             self.pull_editor_state(main, gui.as_mut());
             gui.close_editor(main);
-            *self.baseline.lock_recover() = None;
+            *self.baseline.lock() = None;
             true
         } else {
             false
@@ -604,9 +595,7 @@ impl InProcessEditor {
     }
 
     fn wakeups(&self, main: MainThreadMarker, out: &mut tutti_plugin_types::Wakeups) {
-        if let Ok(mut guard) = self.gui.lock()
-            && let Some(gui) = guard.as_mut()
-        {
+        if let Some(gui) = self.gui.lock().as_mut() {
             gui.wakeups(main, out);
         }
     }
@@ -617,17 +606,13 @@ impl InProcessEditor {
         ready: &[tutti_plugin_ipc_ffi::Ready],
         now: tutti_platform::Instant,
     ) {
-        if let Ok(mut guard) = self.gui.lock()
-            && let Some(gui) = guard.as_mut()
-        {
+        if let Some(gui) = self.gui.lock().as_mut() {
             gui.wake(main, ready, now);
         }
     }
 
     fn editor_idle(&self, main: MainThreadMarker) {
-        if let Ok(mut guard) = self.gui.lock()
-            && let Some(gui) = guard.as_mut()
-        {
+        if let Some(gui) = self.gui.lock().as_mut() {
             gui.editor_idle(main);
             // Apply what the realtime setters queued for the editor's display.
             self.mirror
@@ -653,9 +638,7 @@ impl InProcessEditor {
     }
 
     fn editor_capabilities(&self, main: MainThreadMarker) -> EditorCapabilities {
-        let Ok(mut guard) = self.gui.lock() else {
-            return EditorCapabilities::default();
-        };
+        let mut guard = self.gui.lock();
         match guard.as_mut() {
             Some(gui) => gui.editor_capabilities(main),
             None => EditorCapabilities::default(),
@@ -667,7 +650,7 @@ impl InProcessEditor {
         main: MainThreadMarker,
         requested: Size,
     ) -> std::result::Result<Size, EditorError> {
-        let mut guard = self.gui.lock().map_err(|_| EditorError::Busy)?;
+        let mut guard = self.gui.lock();
         let gui = guard.as_mut().ok_or(EditorError::NotOpen)?;
         gui.set_editor_size(main, requested)
             .map_err(|e| EditorError::PluginError(e.to_string()))
@@ -678,7 +661,7 @@ impl InProcessEditor {
         main: MainThreadMarker,
         scale: ContentScale,
     ) -> std::result::Result<(), EditorError> {
-        let mut guard = self.gui.lock().map_err(|_| EditorError::Busy)?;
+        let mut guard = self.gui.lock();
         let gui = guard.as_mut().ok_or(EditorError::NotOpen)?;
         gui.set_editor_scale(main, scale).map_err(|e| match e {
             PluginError::Editor(typed) => typed,
@@ -687,7 +670,7 @@ impl InProcessEditor {
     }
 
     fn poll_editor_resize_request(&self, main: MainThreadMarker) -> Option<Size> {
-        let mut guard = self.gui.lock().ok()?;
+        let mut guard = self.gui.lock();
         guard.as_mut()?.poll_editor_resize_request(main)
     }
 
@@ -706,12 +689,12 @@ impl InProcessEditor {
                 None
             }
         };
-        *self.baseline.lock_recover() = baseline;
+        *self.baseline.lock() = baseline;
     }
 
     /// [`pull_editor_state`] against this bridge's audio instance.
     fn pull_editor_state(&self, main: MainThreadMarker, gui: &mut dyn Editor) {
-        let mut baseline = self.baseline.lock_recover();
+        let mut baseline = self.baseline.lock();
         let pulled = pull_editor_state(main, gui, &mut baseline, |state| {
             self.audio
                 .load_state(state, tutti_plugin_types::StateUse::Project)

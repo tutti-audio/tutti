@@ -40,6 +40,7 @@ use tutti_plugin_types::ChannelLayout;
 use tutti_plugin_types::{
     IpcError, PluginFailure, RateRefusal, RateRefusalCause, StateError, Timeouts,
 };
+use tutti_rt::Mutex;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::SampleRate;
@@ -237,7 +238,7 @@ pub(crate) enum Action {
 /// One connection of the mock server: answers each request as `respond` says.
 fn serve_lane<Req: Wire>(
     stream: interprocess::local_socket::Stream,
-    respond: &std::sync::Mutex<Box<dyn Fn(Req::Body) -> Action + Send>>,
+    respond: &Mutex<Box<dyn Fn(Req::Body) -> Action + Send>>,
 ) {
     loop {
         let msg = match recv_host_msg::<Req>(&stream) {
@@ -246,7 +247,7 @@ fn serve_lane<Req: Wire>(
         };
         let (id, body) = msg.split();
         Req::follow(&body, &stream);
-        match (respond.lock().unwrap())(body) {
+        match (respond.lock())(body) {
             Action::Reply(m) => {
                 if send_reply(&stream, id, &m).is_err() {
                     return;
@@ -344,7 +345,7 @@ fn serve_lane<Req: Wire>(
 }
 
 /// How a mock lane answers: a script over the messages of its connection.
-type Responder<Body> = Arc<std::sync::Mutex<Box<dyn Fn(Body) -> Action + Send>>>;
+type Responder<Body> = Arc<Mutex<Box<dyn Fn(Body) -> Action + Send>>>;
 
 pub(crate) struct MockServer {
     pub(crate) bridge: Arc<PluginBridge>,
@@ -420,7 +421,7 @@ impl MockServer {
         control: impl Fn(ControlRequest) -> Action + Send + 'static,
     ) -> Self {
         fn lane<Req>(respond: impl Fn(Req) -> Action + Send + 'static) -> Responder<Req> {
-            Arc::new(std::sync::Mutex::new(Box::new(respond)))
+            Arc::new(Mutex::new(Box::new(respond)))
         }
         Self::start_on(label, timeouts, lane(audio), lane(control))
     }
@@ -674,11 +675,9 @@ fn a_crash_latches_a_cause_that_outlives_the_call() {
 /// the window rarer.
 #[test]
 fn a_listener_hears_the_crash_with_its_cause() {
-    use parking_lot::Mutex as PlMutex;
-
     let mut mock = MockServer::start("crash-event", |_| Action::Die);
 
-    let heard: Arc<PlMutex<Vec<PluginFailure>>> = Arc::new(PlMutex::new(Vec::new()));
+    let heard: Arc<Mutex<Vec<PluginFailure>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&heard);
     mock.bridge.audio().set_listener(Some(Arc::new(move |ev| {
         if let crate::client::audio::IpcEvent::Crashed { cause } = ev {
@@ -724,8 +723,6 @@ fn a_listener_hears_the_crash_with_its_cause() {
 /// arrives.
 #[test]
 fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
-    use parking_lot::Mutex as PlMutex;
-
     let mock = MockServer::start("unprompted", |msg| match msg {
         ControlRequest::SetRenderMode { .. } => Action::Event(News::LatencyChanged {
             samples: tutti_plugin_types::Samples::new(77),
@@ -733,7 +730,7 @@ fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
         ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
     });
-    let heard: Arc<PlMutex<Vec<usize>>> = Arc::new(PlMutex::new(Vec::new()));
+    let heard: Arc<Mutex<Vec<usize>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&heard);
     mock.bridge.audio().set_listener(Some(Arc::new(move |ev| {
         if let crate::client::audio::IpcEvent::LatencyChanged { samples } = ev {
@@ -761,7 +758,6 @@ fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
 #[test]
 fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
     use crate::client::audio::IpcEvent;
-    use parking_lot::Mutex as PlMutex;
     use tutti_plugin_types::{Layout, PluginBus};
 
     let silly = Layout {
@@ -787,7 +783,7 @@ fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
         ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
     });
-    let layouts: Arc<PlMutex<Vec<Layout>>> = Arc::new(PlMutex::new(Vec::new()));
+    let layouts: Arc<Mutex<Vec<Layout>>> = Arc::new(Mutex::new(Vec::new()));
     let resyncs = Arc::new(AtomicU64::new(0));
     let (sink, count) = (Arc::clone(&layouts), Arc::clone(&resyncs));
     mock.bridge
@@ -817,7 +813,6 @@ fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
 #[test]
 fn a_plugin_that_refused_its_saved_state_is_heard_with_the_reason() {
     use crate::client::audio::IpcEvent;
-    use parking_lot::Mutex as PlMutex;
 
     let mock = MockServer::start("state-not-restored", |msg| match msg {
         ControlRequest::SetRenderMode { .. } => Action::Events(vec![
@@ -829,7 +824,7 @@ fn a_plugin_that_refused_its_saved_state_is_heard_with_the_reason() {
         ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
     });
-    let heard: Arc<PlMutex<Vec<String>>> = Arc::new(PlMutex::new(Vec::new()));
+    let heard: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&heard);
     mock.bridge
         .audio()
@@ -855,7 +850,6 @@ fn a_plugin_that_refused_its_saved_state_is_heard_with_the_reason() {
 #[test]
 fn a_refused_render_mode_and_a_restart_the_plugin_would_not_make_are_heard() {
     use crate::client::audio::IpcEvent;
-    use parking_lot::Mutex as PlMutex;
 
     let mock = MockServer::start("mode-not-applied", |msg| match msg {
         ControlRequest::SetRenderMode { .. } => Action::Events(vec![
@@ -869,7 +863,7 @@ fn a_refused_render_mode_and_a_restart_the_plugin_would_not_make_are_heard() {
         ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
     });
-    let heard: Arc<PlMutex<Vec<String>>> = Arc::new(PlMutex::new(Vec::new()));
+    let heard: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&heard);
     mock.bridge
         .audio()
@@ -894,7 +888,6 @@ fn a_refused_render_mode_and_a_restart_the_plugin_would_not_make_are_heard() {
 #[test]
 fn the_servers_loss_counts_are_heard() {
     use crate::client::audio::IpcEvent;
-    use parking_lot::Mutex as PlMutex;
 
     let mock = MockServer::start("server-losses", |msg| match msg {
         ControlRequest::SetRenderMode { .. } => Action::Events(vec![News::ServerLosses {
@@ -905,7 +898,7 @@ fn the_servers_loss_counts_are_heard() {
         ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
     });
-    let heard: Arc<PlMutex<Vec<(u64, u64, u64)>>> = Arc::new(PlMutex::new(Vec::new()));
+    let heard: Arc<Mutex<Vec<(u64, u64, u64)>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&heard);
     mock.bridge.audio().set_listener(Some(Arc::new(move |ev| {
         if let IpcEvent::ServerLosses(losses) = ev {
@@ -1658,11 +1651,11 @@ mod shell_server {
             .stdin(Stdio::piped())
             .spawn()
             .expect("the stand-in server spawns");
-        let stdin = Arc::new(std::sync::Mutex::new(child.stdin.take().expect("piped")));
+        let stdin = Arc::new(Mutex::new(child.stdin.take().expect("piped")));
         let tell = Arc::clone(&stdin);
         let mut mock = MockServer::start("guard_shutdown", move |msg| {
             if matches!(msg, ControlRequest::Shutdown) {
-                let _ = writeln!(tell.lock().unwrap());
+                let _ = writeln!(tell.lock());
             }
             Action::Silent
         });
@@ -2285,7 +2278,7 @@ fn a_live_peer_mid_frame_at_the_budget_is_not_a_crash() {
 /// call at once returns `None` for it, whatever the timing.
 #[test]
 fn a_second_control_call_while_a_reply_is_owed_waits_for_it() {
-    let log = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+    let log = Arc::new(Mutex::new(Vec::<&'static str>::new()));
     let (seen, seen_rx) = std::sync::mpsc::sync_channel(1);
     let timeouts = {
         let mut t = Timeouts::default();
@@ -2296,12 +2289,12 @@ fn a_second_control_call_while_a_reply_is_owed_waits_for_it() {
         let log = Arc::clone(&log);
         MockServer::start_with_timeouts("queued", timeouts, move |msg| match msg {
             ControlRequest::GetParameterList => {
-                log.lock().unwrap().push("list");
+                log.lock().push("list");
                 let _ = seen.try_send(());
                 Action::Silent
             }
             ControlRequest::GetParameter { .. } => {
-                log.lock().unwrap().push("value");
+                log.lock().push("value");
                 Action::Reply(Box::new(ControlReply::ParameterValue {
                     value: Some(Normalized::of(0.25)),
                 }))
@@ -2322,7 +2315,7 @@ fn a_second_control_call_while_a_reply_is_owed_waits_for_it() {
         "the second call failed instead of waiting for the slot"
     );
     assert!(first.join().expect("the first caller").is_none());
-    assert_eq!(*log.lock().unwrap(), ["list", "value"]);
+    assert_eq!(*log.lock(), ["list", "value"]);
 }
 
 // ── The two lanes ────────────────────────────────────────────────────────────
@@ -2404,19 +2397,19 @@ fn a_block_completes_while_a_control_request_is_outstanding() {
 /// server after it, whatever the two threads' timing.
 #[test]
 fn a_settle_reaches_the_server_after_the_rate_change_queued_before_it() {
-    let log = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+    let log = Arc::new(Mutex::new(Vec::<&'static str>::new()));
     let control = {
         let log = Arc::clone(&log);
         move |msg: ControlRequest| match msg {
             ControlRequest::SetSampleRate { rate } => {
-                log.lock().unwrap().push("rate");
+                log.lock().push("rate");
                 Action::Reply(Box::new(ControlReply::SampleRateSet {
                     rate,
                     refusal: None,
                 }))
             }
             ControlRequest::GetCurrentPreset => {
-                log.lock().unwrap().push("fence");
+                log.lock().push("fence");
                 Action::Reply(Box::new(applied_fence()))
             }
             _ => Action::Silent,
@@ -2426,7 +2419,7 @@ fn a_settle_reaches_the_server_after_the_rate_change_queued_before_it() {
     assert!(mock.bridge.audio().set_sample_rate(SampleRate::SR_96K));
     let bridge = Arc::clone(&mock.bridge);
     call_within(move || bridge.audio().settle()).expect("the settle returns");
-    assert_eq!(*log.lock().unwrap(), ["rate", "fence", "fence"]);
+    assert_eq!(*log.lock(), ["rate", "fence", "fence"]);
 }
 
 /// **A crash the control lane sees is answered on the reply ring by the audio
@@ -2616,22 +2609,22 @@ fn a_shutdown_ends_a_waiting_setting_through_its_reply() {
 /// lane's script (it ends at once if one does, and is only waited out by a host
 /// that holds the block back), then logs `name`.
 fn log_after_window(
-    log: &Arc<std::sync::Mutex<Vec<&'static str>>>,
+    log: &Arc<Mutex<Vec<&'static str>>>,
     block_rx: &std::sync::mpsc::Receiver<()>,
     name: &'static str,
 ) {
     let _ = block_rx.recv_timeout(Duration::from_millis(300));
-    log.lock().unwrap().push(name);
+    log.lock().push(name);
 }
 
 /// The audio lane's script for the ordering tests: logs the block, then answers.
 fn log_blocks(
-    log: Arc<std::sync::Mutex<Vec<&'static str>>>,
+    log: Arc<Mutex<Vec<&'static str>>>,
     block_seen: std::sync::mpsc::SyncSender<()>,
 ) -> impl Fn(AudioRequest) -> Action + Send + 'static {
     move |msg| {
         if matches!(msg, AudioRequest::ProcessAudio(_)) {
-            log.lock().unwrap().push("block");
+            log.lock().push("block");
             let _ = block_seen.try_send(());
         }
         answer_blocks(msg)
@@ -2644,7 +2637,7 @@ fn log_blocks(
 /// then the block. A bridge that stops holding the blocks logs the block first.
 #[test]
 fn a_render_mode_is_applied_before_the_next_block() {
-    let log = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+    let log = Arc::new(Mutex::new(Vec::<&'static str>::new()));
     let (block_seen, block_rx) = std::sync::mpsc::sync_channel(1);
     let control = {
         let log = Arc::clone(&log);
@@ -2654,7 +2647,7 @@ fn a_render_mode_is_applied_before_the_next_block() {
                 Action::Silent
             }
             ControlRequest::GetCurrentPreset => {
-                log.lock().unwrap().push("fence");
+                log.lock().push("fence");
                 Action::Reply(Box::new(applied_fence()))
             }
             _ => Action::Silent,
@@ -2675,14 +2668,14 @@ fn a_render_mode_is_applied_before_the_next_block() {
     tutti_fixtures::wait_until("the block to be answered", NOTICE_TIMEOUT, || {
         answered(&mut mock, 1)
     });
-    assert_eq!(*log.lock().unwrap(), ["mode", "fence", "block"]);
+    assert_eq!(*log.lock(), ["mode", "fence", "block"]);
 }
 
 /// **A rate change is applied before the next block is sent**, as a render mode
 /// is: the server sees the rate change, and only then the block.
 #[test]
 fn a_rate_change_is_applied_before_the_next_block() {
-    let log = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+    let log = Arc::new(Mutex::new(Vec::<&'static str>::new()));
     let (block_seen, block_rx) = std::sync::mpsc::sync_channel(1);
     let control = {
         let log = Arc::clone(&log);
@@ -2708,7 +2701,7 @@ fn a_rate_change_is_applied_before_the_next_block() {
     tutti_fixtures::wait_until("the block to be answered", NOTICE_TIMEOUT, || {
         answered(&mut mock, 1)
     });
-    assert_eq!(*log.lock().unwrap(), ["rate", "block"]);
+    assert_eq!(*log.lock(), ["rate", "block"]);
 }
 
 /// **A control command pushed after a block reaches the server after it.** With
@@ -2720,14 +2713,14 @@ fn a_rate_change_is_applied_before_the_next_block() {
 /// that does not make the command wait for the block logs it before the block.
 #[test]
 fn a_control_command_pushed_after_a_block_reaches_the_server_after_it() {
-    let log = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+    let log = Arc::new(Mutex::new(Vec::<&'static str>::new()));
     let (fence_seen, fence_rx) = std::sync::mpsc::sync_channel(1);
     let (release_tx, release) = std::sync::mpsc::sync_channel::<()>(1);
     let audio = {
         let log = Arc::clone(&log);
         move |msg: AudioRequest| {
             if matches!(msg, AudioRequest::ProcessAudio(_)) {
-                log.lock().unwrap().push("block");
+                log.lock().push("block");
             }
             answer_blocks(msg)
         }
@@ -2736,17 +2729,17 @@ fn a_control_command_pushed_after_a_block_reaches_the_server_after_it() {
         let log = Arc::clone(&log);
         move |msg: ControlRequest| match msg {
             ControlRequest::SetRenderMode { .. } => {
-                log.lock().unwrap().push("mode");
+                log.lock().push("mode");
                 Action::Silent
             }
             ControlRequest::GetCurrentPreset => {
-                log.lock().unwrap().push("fence");
+                log.lock().push("fence");
                 fence_seen.send(()).expect("the test listens");
                 release.recv().expect("the test releases the fence");
                 Action::Reply(Box::new(applied_fence()))
             }
             ControlRequest::SetAutomationState { .. } => {
-                log.lock().unwrap().push("command");
+                log.lock().push("command");
                 Action::Silent
             }
             _ => Action::Silent,
@@ -2774,7 +2767,7 @@ fn a_control_command_pushed_after_a_block_reaches_the_server_after_it() {
         answered(&mut mock, 1)
     });
     tutti_fixtures::wait_until("the command to reach the server", NOTICE_TIMEOUT, || {
-        log.lock().unwrap().contains(&"command")
+        log.lock().contains(&"command")
     });
-    assert_eq!(*log.lock().unwrap(), ["mode", "fence", "block", "command"]);
+    assert_eq!(*log.lock(), ["mode", "fence", "block", "command"]);
 }

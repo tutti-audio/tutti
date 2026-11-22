@@ -14,10 +14,10 @@
 
 #![cfg(feature = "vst2")]
 
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::main_thread;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 use tutti_vst2_host::Vst2Loaded;
 
 use tutti_buffers::ChannelLayout;
@@ -55,7 +55,7 @@ const CLOCK_VALID: i32 = 1 << 15;
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock_recover()
+    PROBE_LOCK.lock()
 }
 
 /// Call one of the probe's exports on the image the host loaded, leaking the
