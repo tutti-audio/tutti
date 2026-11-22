@@ -74,12 +74,8 @@ impl Followed {
 }
 
 impl MidiPart {
-    pub(crate) fn new<F: Float>(
-        parts: &mut Parts<F>,
-        options: &Options,
-        bells: &tutti_rt::Bells,
-    ) -> Self {
-        let (hardware, state) = Hardware::new(parts, bells);
+    pub(crate) fn new<F: Float>(parts: &mut Parts<F>, options: &Options) -> Self {
+        let (hardware, state) = Hardware::new(parts);
         Self {
             nodes: parts.midi.take(),
             state: state.with_mpe(options.mpe_mode),

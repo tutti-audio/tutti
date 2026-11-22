@@ -50,8 +50,12 @@ fn open() -> Loopback {
     let inlets = InputInlets::new(EventCapacity::of(256), Duration::from_millis(20));
     let mut graph = Listener::over(&inlets);
     let executor = tutti_platform::Executor::new();
-    let mut io = MidiSession::open(&executor, Arc::clone(&inlets), MidiHardwareConfig::new())
-        .expect("open MIDI");
+    let mut io = MidiSession::open(
+        &executor,
+        tutti_midi_hardware::HardwareMidiInputs::new(Arc::clone(&inlets)),
+        MidiHardwareConfig::new(),
+    )
+    .expect("open MIDI");
     let (inp, out) = (through(&io, true), through(&io, false));
     let tutti_midi_hardware::Connected::Opened(inlet) = io
         .connect_input(super::opening::started(&io), &inp.id)
@@ -183,8 +187,12 @@ fn midi_through_returns_a_note_on_a_note_off_and_a_burst_of_ten_note_ons() {
 fn an_input_reopened_at_once_hears_a_note() {
     let inlets = InputInlets::new(EventCapacity::of(256), Duration::from_millis(20));
     let executor = tutti_platform::Executor::new();
-    let mut io = MidiSession::open(&executor, Arc::clone(&inlets), MidiHardwareConfig::new())
-        .expect("open MIDI");
+    let mut io = MidiSession::open(
+        &executor,
+        tutti_midi_hardware::HardwareMidiInputs::new(Arc::clone(&inlets)),
+        MidiHardwareConfig::new(),
+    )
+    .expect("open MIDI");
     let (input_id, output_id) = (through(&io, true).id, through(&io, false).id);
     let mut sink = io
         .connect_output(super::opening::started(&io), &output_id)

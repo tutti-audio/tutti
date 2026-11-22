@@ -15,14 +15,14 @@ use tutti_midi_hardware::Presented;
 
 use tutti_midi_runtime::MidiInputPorts;
 use tutti_platform::Task;
-use tutti_rt::{Bells, Reclaim};
+use tutti_rt::Reclaim;
 use tutti_units::{SampleRate, Samples};
 
 use super::MidiNodes;
 use crate::builder::Parts;
 use crate::graph::Graph;
 use crate::midi::MidiState;
-use crate::midi_link::{Locked, MidiLink};
+use crate::midi_link::MidiLink;
 use crate::value::{Cell, SlotCell, SlotId, ValueTable};
 use crate::{MidiPolicy, SessionEvent};
 
@@ -41,11 +41,9 @@ impl Hardware {
     /// The layer the builder opened, the task on the session's executor that
     /// drives it (woken by `bells`' bell), and the state that receives its
     /// device events.
-    pub(crate) fn new<F: Float>(parts: &mut Parts<F>, bells: &Bells) -> (Self, MidiState) {
-        let (bell, listener) = bells.bell();
+    pub(crate) fn new<F: Float>(parts: &mut Parts<F>) -> (Self, MidiState) {
         let (task, io) = match parts.midi_io.take() {
-            Some(io) => {
-                let io = io.ringing(bell.clone());
+            Some((io, bell, listener)) => {
                 let (link, task) = MidiLink::start(io, &parts.executor, bell, listener);
                 (Some(task), Some(link))
             }
@@ -64,8 +62,15 @@ impl Hardware {
     }
 
     /// The layer, locked for a call.
-    pub(crate) fn locked(&self) -> Option<Locked<'_>> {
+    pub(crate) fn locked(
+        &self,
+    ) -> Option<std::sync::MutexGuard<'_, tutti_midi_hardware::MidiSession>> {
         self.io.as_deref().map(MidiLink::lock)
+    }
+
+    /// The link to the layer and its task.
+    pub(crate) fn link(&self) -> Option<&MidiLink> {
+        self.io.as_deref()
     }
 
     /// Registers the policy cell in `table`.
@@ -93,7 +98,7 @@ impl Hardware {
         out: &mut Vec<SessionEvent>,
     ) -> bool {
         self.apply_policy(nodes);
-        state.midi_input_phase(self.locked(), graph, now, out)
+        state.midi_input_phase(self.link(), graph, now, out)
     }
 
     fn apply_policy(&mut self, nodes: Option<&MidiNodes>) {

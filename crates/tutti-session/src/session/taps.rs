@@ -165,6 +165,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             executor: self.background.executor().downgrade(),
             #[cfg(feature = "midi-hardware")]
             io: self.midi.hardware.locked(),
+            #[cfg(feature = "midi-hardware")]
+            link: self.midi.hardware.link(),
         };
         (midi, &mut self.resource_ids)
     }

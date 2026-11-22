@@ -14,9 +14,9 @@
 //!
 //! The layer's lock comes first, then a port's `pending` table, then its inbox
 //! and record. The lock is never held across an `.await`: the task takes it for
-//! the steps of one pass and drops it before it waits. `update` holds it for
-//! its `Phase::Poll`, and a control call holds the [`Locked`] it made for that
-//! call only.
+//! one step and drops it before it waits. `update` holds it for its
+//! `Phase::Poll`, and a control call holds it for that call only. The layer
+//! rings the bell itself when a call leaves it work or moves its deadline.
 
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
@@ -27,11 +27,6 @@ use tutti_platform::{Executor, Instant, Task, Timer};
 use tutti_rt::{Bell, Listener, LockExt};
 
 use crate::midi_port::InputShared;
-
-/// How many polls in a row a pass makes while the last one left work for the
-/// next ([`MidiSession::needs_poll`]): a guard against a session that never
-/// settles, not a figure a settled one reaches.
-const MAX_CHAINED_POLLS: usize = 16;
 
 /// The OS MIDI layer, and what `update` and the MIDI-CI task share of it.
 pub(crate) struct MidiLink {
@@ -49,51 +44,6 @@ pub(crate) struct MidiLink {
 impl std::fmt::Debug for MidiLink {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MidiLink").finish_non_exhaustive()
-    }
-}
-
-/// The layer, locked for one call: it derefs to the [`MidiSession`]. As the
-/// call ends, the bell rings when the layer has work for the next poll or its
-/// next deadline moved, so the task polls what the call changed.
-pub(crate) struct Locked<'a> {
-    guard: MutexGuard<'a, MidiSession>,
-    link: &'a MidiLink,
-    /// The layer's deadline when it was locked.
-    deadline: Option<Instant>,
-}
-
-impl<'a> Locked<'a> {
-    /// The link the layer belongs to.
-    pub(crate) const fn link(&self) -> &'a MidiLink {
-        self.link
-    }
-}
-
-impl std::fmt::Debug for Locked<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Locked").finish_non_exhaustive()
-    }
-}
-
-impl std::ops::Deref for Locked<'_> {
-    type Target = MidiSession;
-
-    fn deref(&self) -> &MidiSession {
-        &self.guard
-    }
-}
-
-impl std::ops::DerefMut for Locked<'_> {
-    fn deref_mut(&mut self) -> &mut MidiSession {
-        &mut self.guard
-    }
-}
-
-impl Drop for Locked<'_> {
-    fn drop(&mut self) {
-        if self.guard.needs_poll() || self.guard.deadline() != self.deadline {
-            self.link.bell.ring();
-        }
     }
 }
 
@@ -117,13 +67,8 @@ impl MidiLink {
     }
 
     /// The layer, locked for a call of the control side.
-    pub(crate) fn lock(&self) -> Locked<'_> {
-        let guard = self.io.lock_recover();
-        Locked {
-            deadline: guard.deadline(),
-            guard,
-            link: self,
-        }
+    pub(crate) fn lock(&self) -> MutexGuard<'_, MidiSession> {
+        self.io.lock_recover()
     }
 
     /// The bell that wakes the task: a handle's request rings it.
@@ -167,28 +112,17 @@ impl MidiLink {
         }
         self.queued.lock_recover().extend(found);
     }
-
-    /// One pass of the task: steps at the real time while the layer has work
-    /// that no timer and no reply will bring. When the next wait runs out.
-    fn pass(&self) -> Option<Instant> {
-        let mut io = self.io.lock_recover();
-        for _ in 0..MAX_CHAINED_POLLS {
-            self.step(&mut io, Instant::now());
-            if !io.needs_poll() {
-                break;
-            }
-        }
-        io.deadline()
-    }
 }
 
-/// The task: a pass, then a wait for the bell or the next deadline, until the
+/// The task: a step at the real time, then a wait for the bell or the next deadline, until the
 /// link or the executor is gone.
 async fn drive(link: Weak<MidiLink>, mut listener: Listener, timer: Timer) {
     loop {
         let deadline = {
             let Some(link) = link.upgrade() else { return };
-            link.pass()
+            let mut io = link.lock();
+            link.step(&mut io, Instant::now());
+            io.deadline()
         };
         let mut rung = std::pin::pin!(listener.rung());
         let mut sleep = deadline.map(|at| timer.sleep_until(at));

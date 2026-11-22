@@ -23,7 +23,7 @@ use crate::value::ValueTable;
 pub(crate) struct Hardware;
 
 impl Hardware {
-    pub(crate) fn new<F: Float>(_: &mut Parts<F>, _: &tutti_rt::Bells) -> (Self, MidiState) {
+    pub(crate) fn new<F: Float>(_: &mut Parts<F>) -> (Self, MidiState) {
         (Self, MidiState::default())
     }
 

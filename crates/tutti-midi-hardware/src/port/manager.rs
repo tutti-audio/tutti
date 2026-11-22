@@ -115,6 +115,13 @@ impl HardwareMidiInputs {
         &self.inlets
     }
 
+    /// Rings the bell, if the list has one: whoever waits on it polls the session.
+    pub(crate) fn ring(&self) {
+        if let Some(bell) = &self.bell {
+            bell.ring();
+        }
+    }
+
     fn ports(&self) -> std::sync::MutexGuard<'_, Ports> {
         // A poisoned lock guards nothing inconsistent: every change is whole.
         self.ports.lock_recover()

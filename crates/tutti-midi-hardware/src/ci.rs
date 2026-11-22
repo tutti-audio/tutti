@@ -1387,7 +1387,7 @@ mod tests {
         let session = MidiSession::open_over(
             &tutti_platform::Executor::new(),
             backend,
-            inlets,
+            crate::HardwareMidiInputs::new(inlets),
             crate::MidiHardwareConfig::new(),
         )
         .unwrap();
@@ -1702,7 +1702,7 @@ mod tests {
         let session = MidiSession::open_over(
             &tutti_platform::Executor::new(),
             backend,
-            inlets,
+            crate::HardwareMidiInputs::new(inlets),
             crate::MidiHardwareConfig::new(),
         )
         .unwrap();

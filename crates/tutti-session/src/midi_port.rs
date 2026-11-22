@@ -1648,9 +1648,11 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
         started: Started,
     ) -> Result<MidiInput, MidiPortError> {
         self.close_dropped();
-        let io = self.io.as_mut().ok_or(MidiPortError::from(NoHardware))?;
-        let link = io.link();
-        let io = &mut **io;
+        let io = self
+            .io
+            .as_deref_mut()
+            .ok_or(MidiPortError::from(NoHardware))?;
+        let link = self.link.ok_or(MidiPortError::from(NoHardware))?;
         // A present device is bound when it is surely the saved one, or the one
         // of its name; one of several that could be is for the app to choose.
         let found = bind(io, &saved)?;
