@@ -75,7 +75,7 @@ impl IdentityInquiry {
     pub fn new(group: MidiGroup, now: Instant) -> (Self, InquiryAction) {
         let inquiry = Self {
             group,
-            step: Step::Asking(Retry::first(now)),
+            step: Step::Asking(Retry::first(now, INQUIRY_TIMEOUT)),
         };
         let request = inquiry.request();
         (inquiry, InquiryAction::Send(request))
@@ -95,7 +95,7 @@ impl IdentityInquiry {
     #[must_use]
     pub fn deadline(&self) -> Option<Instant> {
         match self.step {
-            Step::Asking(retry) => Some(retry.deadline(INQUIRY_TIMEOUT)),
+            Step::Asking(retry) => Some(retry.deadline()),
             Step::Done => None,
         }
     }
@@ -125,14 +125,14 @@ impl IdentityInquiry {
         let Step::Asking(mut retry) = self.step else {
             return InquiryAction::Wait;
         };
-        if !retry.due(now, INQUIRY_TIMEOUT) {
+        if !retry.due(now) {
             return InquiryAction::Wait;
         }
         if retry.spent(INQUIRY_ATTEMPTS) {
             self.step = Step::Done;
             return InquiryAction::GaveUp;
         }
-        retry.resend(now);
+        retry.resend(now, INQUIRY_TIMEOUT);
         self.step = Step::Asking(retry);
         InquiryAction::Send(self.request())
     }

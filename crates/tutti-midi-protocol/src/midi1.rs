@@ -25,8 +25,7 @@ pub fn midi1(packet: impl Into<Ump>) -> impl Iterator<Item = Midi1Bytes> {
 fn slots_of(message: Message) -> [Option<Midi1Bytes>; 3] {
     let none = None;
     match message {
-        Message::Midi1(address, voice) => [Some(voice.bytes(address.channel)), none, none],
-        Message::System(_, system) => [Some(system.bytes()), none, none],
+        Message::Midi1(..) | Message::System(..) => [message.midi1_bytes(), none, none],
         Message::Midi2(
             address,
             Voice2::ProgramChange {

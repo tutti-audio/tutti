@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
-use tutti_units::{Amplitude, SampleRate};
+use tutti_units::{Gain, SampleRate};
 
 use crate::NodeKey;
 use crate::{Edge, FeedbackFrom, InputPort, OutputPort, PortSink, PortSource, Topology};
@@ -334,15 +334,7 @@ impl<F: Float> PendingFork<F> {
                 editor.insert_prepared(key, kind, forked.node, wake)
             } else {
                 editor
-                    .insert(
-                        key,
-                        kind,
-                        NodeParts {
-                            node: forked.node,
-                            controls: (),
-                            fork: None,
-                        },
-                    )
+                    .insert(key, kind, NodeParts::new(forked.node, (), None))
                     .unwired
             };
             debug_assert!(unwired.is_empty());
@@ -357,7 +349,7 @@ impl<F: Float> PendingFork<F> {
         fork.events = spec.events;
         fork.required_resolution = spec.required_resolution;
         fork.params = spec.params;
-        fork.gains = spec.gains;
+        editor.enter_gains(spec.gains);
         if let Err(e) = editor.commit() {
             let remains = ForkRemains {
                 units: Vec::new(),
@@ -685,11 +677,7 @@ impl<F: Float, N: Node<F> + Clone + Send + 'static> IntoNode<F> for ForkByClone<
 
     fn into_parts(self) -> NodeParts<(), F> {
         let fork = CloneFork(self.0.clone());
-        NodeParts {
-            node: Box::new(self.0),
-            controls: (),
-            fork: Some(Box::new(fork)),
-        }
+        NodeParts::new(Box::new(self.0), (), Some(Box::new(fork)))
     }
 }
 
@@ -740,11 +728,7 @@ impl<F: Float, N: Node<F>> IntoNode<F> for Unforkable<N> {
     }
 
     fn into_parts(self) -> NodeParts<(), F> {
-        NodeParts {
-            node: Box::new(self.0),
-            controls: (),
-            fork: None,
-        }
+        NodeParts::new(Box::new(self.0), (), None)
     }
 }
 
@@ -756,11 +740,7 @@ impl IntoNode for Unforkable<Box<dyn Node>> {
     }
 
     fn into_parts(self) -> NodeParts<()> {
-        NodeParts {
-            node: self.0,
-            controls: (),
-            fork: None,
-        }
+        NodeParts::new(self.0, (), None)
     }
 }
 
@@ -1102,7 +1082,7 @@ impl<F: Float> Editor<F> {
             // writes the cell).
             let base = match lowered.as_ref().and_then(|l| l.lanes.get(&id)) {
                 Some(&weight) => weight,
-                None => self.edge_gain(id).unwrap_or(Amplitude::UNITY),
+                None => self.edge_gain(id).unwrap_or(Gain::UNITY),
             };
             values.set_base(id, base);
             values.set_gain_range(id, self.values().gain_range(id));

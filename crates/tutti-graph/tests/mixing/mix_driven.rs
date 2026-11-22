@@ -266,8 +266,8 @@ fn a_driven_block_whose_ends_agree_is_not_static() {
 /// inside it, and one wider than it (`NodeMix::lane_range`).
 #[test]
 fn a_driven_mix_is_clamped_to_its_range_and_to_the_blend() {
-    let wide = ParamRange::new(-5.0, 5.0);
-    let narrow = ParamRange::new(0.25, 0.75);
+    let wide = ParamRange::of(-5.0, 5.0);
+    let narrow = ParamRange::of(0.25, 0.75);
     for (range, lo, hi) in [
         (None, 0.0, 1.0),
         (Some(wide), 0.0, 1.0),
@@ -298,7 +298,7 @@ fn a_range_moved_between_blocks_clamps_from_the_next() {
     let mut pair = Pair::new(BLOCK);
     pair.switch(&rig.graph(), &rig.kinds);
     let (first, _) = run(&mut pair, 0, 2);
-    pair.set_mix_range(key(2), ParamRange::new(0.5, 0.5));
+    pair.set_mix_range(key(2), ParamRange::of(0.5, 0.5));
     let (second, x) = run(&mut pair, 2 * BLOCK, 2);
     let (_, x0) = (0, input_signal(0, 2 * BLOCK));
     for (n, &g) in first.iter().enumerate() {
@@ -710,14 +710,14 @@ fn the_mix_cell_is_the_one_writer() {
     let at = mix_of(1);
     let range = ed.param_range_cell(at).expect("the mix has a range cell");
     assert_eq!(range.current(), NodeMix::DEFAULT_RANGE);
-    ed.set_param_range(at, ParamRange::new(-3.0, 3.0))
+    ed.set_param_range(at, ParamRange::of(-3.0, 3.0))
         .expect("set");
     assert_eq!(
         range.current(),
-        ParamRange::new(0.0, 1.0),
+        ParamRange::of(0.0, 1.0),
         "narrowed to the blend"
     );
-    ed.set_param_range(at, ParamRange::new(0.25, 0.5))
+    ed.set_param_range(at, ParamRange::of(0.25, 0.5))
         .expect("set");
-    assert_eq!(range.current(), ParamRange::new(0.25, 0.5));
+    assert_eq!(range.current(), ParamRange::of(0.25, 0.5));
 }

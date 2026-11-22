@@ -17,6 +17,7 @@ use tutti_clap_host::{
 };
 use tutti_graph::Offset;
 use tutti_midi_protocol::{channel_voice, midi1};
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_ump::{
     BendValue, CCNumber, ControlValue, Message, MidiChannel, NoteKeyEvent, NoteNumber, Voice2,
 };
@@ -409,12 +410,12 @@ fn test_output_event_list_push_param_value() {
 fn test_param_changes_through_input_list() {
     let mut changes = ParameterChanges::new();
     let mut q1 = ParameterQueue::with_capacity(ParamId::new(1u32), 2);
-    q1.add_point(0, 0.0);
-    q1.add_point(128, 1.0);
+    q1.add_point(at_frame(0), unit_value(0.0));
+    q1.add_point(at_frame(128), unit_value(1.0));
     changes.add_queue(q1);
 
     let mut q2 = ParameterQueue::with_capacity(ParamId::new(2u32), 1);
-    q2.add_point(64, 0.5);
+    q2.add_point(at_frame(64), unit_value(0.5));
     changes.add_queue(q2);
 
     let mut list = InputEventList::new(InputRooms::new(0).param_points(3));

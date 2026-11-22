@@ -840,10 +840,9 @@ impl<F: Float> Pair<F> {
         // `set_edge_gain` checks the edge against it: with edge gains in
         // play, the editor's spec is the graph's (a harness that compiles
         // itself has otherwise left it empty).
-        if !graph.gains().is_empty() || !self.editor.spec_mut().gains.is_empty() {
-            let live = self.editor.spec_mut();
-            live.topology = graph.topology().clone();
-            live.gains = graph.gains().clone();
+        if !graph.gains().is_empty() || !self.editor.spec().gains.is_empty() {
+            self.editor.spec_mut().topology = graph.topology().clone();
+            self.editor.enter_gains(graph.gains().clone());
         }
         if !graph.params().is_empty() || !self.editor.spec_mut().params.is_empty() {
             self.editor.spec_mut().params = graph.params().clone();
@@ -884,7 +883,7 @@ impl<F: Float> Pair<F> {
 
     /// Move edge `id`'s weight to `base` in both, as a host moving a fader:
     /// the editor's `set_edge_gain` (a store, no commit) and the reference's.
-    pub fn set_edge_gain(&mut self, id: crate::EdgeId, base: tutti_units::Amplitude) {
+    pub fn set_edge_gain(&mut self, id: crate::EdgeId, base: tutti_units::Gain) {
         self.editor
             .set_edge_gain(id, base)
             .expect("the edge has a gain entry");
@@ -899,7 +898,7 @@ impl<F: Float> Pair<F> {
     }
 
     /// Sets the base a lane declared by the next switch starts at, in both.
-    pub fn start_edge_gain(&mut self, id: crate::EdgeId, base: tutti_units::Amplitude) {
+    pub fn start_edge_gain(&mut self, id: crate::EdgeId, base: tutti_units::Gain) {
         self.editor.values_mut().set_base(id, base);
     }
 

@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use tutti_graph::{NodeKey, NodeMode, PassError};
 use tutti_rt::Mutex;
-use tutti_units::{Amplitude, Mix};
+use tutti_units::{Gain, Mix};
 
 use super::error::SetRefusal;
 use super::slot::{Slot, SlotCell, SlotId, keyed_slot_target};
@@ -27,7 +27,7 @@ use crate::ChannelEdge;
 pub(crate) enum Write {
     Mode(NodeKey, NodeMode),
     Mix(NodeKey, Mix),
-    Gain(ChannelEdge, Amplitude),
+    Gain(ChannelEdge, Gain),
 }
 
 impl Write {
@@ -178,12 +178,12 @@ impl Slot<Mix> for MixSlot {
 /// One edge's gain lane: the [`Slot`] of its [`GainTarget`].
 pub(crate) struct GainSlot {
     edge: ChannelEdge,
-    value: Mutex<Amplitude>,
+    value: Mutex<Gain>,
     queue: Arc<Queue>,
 }
 
 impl GainSlot {
-    pub(crate) fn new(edge: ChannelEdge, seed: Amplitude, queue: Arc<Queue>) -> Arc<Self> {
+    pub(crate) fn new(edge: ChannelEdge, seed: Gain, queue: Arc<Queue>) -> Arc<Self> {
         Arc::new(Self {
             edge,
             value: Mutex::new(seed),
@@ -192,19 +192,19 @@ impl GainSlot {
     }
 }
 
-impl Slot<Amplitude> for GainSlot {
-    fn load(&self) -> Amplitude {
+impl Slot<Gain> for GainSlot {
+    fn load(&self) -> Gain {
         *self.value.lock()
     }
 
-    fn check(&self, value: &Amplitude) -> Result<(), SetRefusal> {
+    fn check(&self, value: &Gain) -> Result<(), SetRefusal> {
         if !value.get().is_finite() {
             return Err(SetRefusal::NotFinite);
         }
         Ok(())
     }
 
-    fn store(&self, value: &Amplitude) {
+    fn store(&self, value: &Gain) {
         *self.value.lock() = *value;
         self.queue.push(Write::Gain(self.edge, *value));
     }
@@ -303,14 +303,14 @@ keyed_slot_target!(
     /// The edge has the target while it has a gain lane; a call that names
     /// an edge whose lane is gone fails with `NoSuchTarget`.
     GainTarget,
-    Amplitude,
+    Gain,
     ChannelEdge,
     Gain
 );
 
 impl Modulatable for GainTarget {}
 impl ScalarTarget for GainTarget {
-    type Unit = Amplitude;
+    type Unit = Gain;
 }
 
 impl GainTarget {

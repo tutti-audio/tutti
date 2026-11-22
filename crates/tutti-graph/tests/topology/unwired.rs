@@ -16,7 +16,7 @@ use tutti_graph::{
     OutputPort, PortSink, PortSource, Prepare, Shape, Status, TapAlign, TapId, TapOptions, TapSpec,
     TransportPosition, Unforkable, Unwired,
 };
-use tutti_units::{Amplitude, Samples, UnitAddr, UnitParam};
+use tutti_units::{Gain, Samples, UnitAddr, UnitParam};
 
 /// A node of a given shape that writes silence: the editor's view of it is
 /// its ports.
@@ -114,9 +114,9 @@ fn rig() -> (Editor, Executor) {
     // Weighted lanes: one the shape keeps, one it loses.
     ed.set_edge_fade(id(inp(X, 0), direct(A, 0)), EdgeFade::In)
         .expect("the edge exists");
-    ed.set_edge_gain(id(inp(X, 0), direct(A, 0)), Amplitude::new(0.25))
+    ed.set_edge_gain(id(inp(X, 0), direct(A, 0)), Gain::new(0.25))
         .expect("the edge exists");
-    ed.set_edge_gain(id(inp(X, 2), direct(A, 2)), Amplitude::new(0.5))
+    ed.set_edge_gain(id(inp(X, 2), direct(A, 2)), Gain::new(0.5))
         .expect("the edge exists");
     ed.commit().expect("the wide rig commits");
     exec.apply_pending();
@@ -202,7 +202,7 @@ fn a_surviving_edge_keeps_its_gain_and_its_fade() {
     ed.insert(X, "ported", Unforkable(narrow()));
     assert_eq!(
         ed.edge_gain(id(inp(X, 0), direct(A, 0))),
-        Some(Amplitude::new(0.25))
+        Some(Gain::new(0.25))
     );
     assert_eq!(
         ed.edge_fade(id(inp(X, 0), direct(A, 0))),
@@ -269,7 +269,7 @@ fn a_driver_on_a_missing_event_output_is_released() {
     let placed = ed.insert(X, "ported", Unforkable(narrow()));
     assert_eq!(placed.unwired.gains, vec![(lane, eout(X, 2))]);
     assert_eq!(ed.spec().gains[&lane].source, None);
-    assert_eq!(ed.edge_gain(lane), Some(Amplitude::new(0.25)));
+    assert_eq!(ed.edge_gain(lane), Some(Gain::new(0.25)));
 }
 
 fn stereo() -> BusTopology {

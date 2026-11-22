@@ -16,10 +16,7 @@
 
 use std::sync::Arc;
 
-use tutti_midi_ci::Muid;
 use tutti_midi_ci::{ProcessFeatures, ReportRequest};
-use tutti_midi_device::MidiDeviceId;
-use tutti_ump::MidiGroup;
 
 use crate::peer::{PeerRef, PeerRequestError};
 
@@ -31,24 +28,6 @@ pub struct Reporter {
 }
 
 impl Reporter {
-    /// The input device the peer was found on.
-    #[must_use]
-    pub const fn device(&self) -> &MidiDeviceId {
-        self.at.device()
-    }
-
-    /// The Group of the connection the peer answered on.
-    #[must_use]
-    pub const fn group(&self) -> MidiGroup {
-        self.at.peer().group
-    }
-
-    /// The peer's MUID.
-    #[must_use]
-    pub const fn muid(&self) -> Muid {
-        self.at.peer().muid
-    }
-
     /// The peer, as every handle of MIDI-CI names one.
     #[must_use]
     pub const fn at(&self) -> &PeerRef {
@@ -76,16 +55,10 @@ pub struct ReportAsk {
 }
 
 impl ReportAsk {
-    /// The input device the request was made from.
-    #[must_use]
-    pub const fn device(&self) -> &MidiDeviceId {
-        self.peer.at.device()
-    }
-
     /// The peer the request is for.
     #[must_use]
-    pub const fn peer(&self) -> crate::ci::PeerId {
-        self.peer.at.peer()
+    pub const fn peer(&self) -> &Reporter {
+        &self.peer
     }
 
     /// Whether `peers`, the peers an input can ask for a report now, still hold

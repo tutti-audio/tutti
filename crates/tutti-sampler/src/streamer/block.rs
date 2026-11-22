@@ -243,6 +243,13 @@ impl<F: RingFloat> Block<'_, F> {
         self.claim.frame(pos)
     }
 
+    /// Channel `c` of positions `from..from + out.len()` into `out`
+    /// (`PosClaim::copy_channel`): the run keeps to the claimed ranges.
+    #[inline]
+    pub(crate) fn copy_channel(&self, from: u64, c: usize, out: &mut [F]) {
+        self.claim.copy_channel(from, c, out);
+    }
+
     /// The direction the stream plays in, as published.
     #[inline]
     pub fn direction(&self) -> PlayDirection {

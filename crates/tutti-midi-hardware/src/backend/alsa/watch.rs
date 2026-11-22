@@ -185,6 +185,18 @@ fn backoff(failures: u32) -> std::time::Duration {
     std::time::Duration::from_millis(ms.min(1000))
 }
 
+/// The handles of `kept` and of `listed` that `handles` still lists.
+fn carried(
+    kept: BTreeSet<EndpointId>,
+    listed: impl Iterator<Item = EndpointId>,
+    handles: &BTreeSet<EndpointId>,
+) -> BTreeSet<EndpointId> {
+    kept.into_iter()
+        .chain(listed)
+        .filter(|h| handles.contains(h))
+        .collect()
+}
+
 impl Tracker {
     fn new(reporter: Reporter) -> Self {
         Self {
@@ -321,10 +333,7 @@ impl Tracker {
                     && Self::told(h, events) != Some(Told::Renamed)
             })
             .copied();
-        kept.into_iter()
-            .chain(listed_first)
-            .filter(|h| handles.contains(h))
-            .collect()
+        carried(kept, listed_first, handles)
     }
 
     /// What the first announcement in `events` about `handle`'s occupant says,
@@ -358,10 +367,7 @@ impl Tracker {
                 last.contains(&h) && changed.contains(&h) && Self::told(h, events).is_none()
             })
             .copied();
-        kept.into_iter()
-            .chain(listed)
-            .filter(|h| handles.contains(h))
-            .collect()
+        carried(kept, listed, handles)
     }
 
     /// The handles whose own `PORT_START` may be unread after a look: those that
@@ -380,10 +386,7 @@ impl Tracker {
             .iter()
             .filter(|&&h| !last.contains(&h) && !started(h))
             .copied();
-        kept.into_iter()
-            .chain(listed_first)
-            .filter(|h| handles.contains(h))
-            .collect()
+        carried(kept, listed_first, handles)
     }
 
     /// What the starts in `events` say about the reported handles.
@@ -483,7 +486,7 @@ enum Woken {
 
 impl Announce {
     fn open(stop: UnixStream) -> Result<Self> {
-        let seq = super::client::open("tutti-watch", UmpVersion::Midi2)?;
+        let seq = Client::open("tutti-watch", UmpVersion::Midi2)?;
         // Write-only and not subscribable: nobody lists this port as a device.
         let port = seq.open_port("tutti-watch", PortCaps::WRITE, PortKind::APPLICATION)?;
         seq.connect_from_announce(port)?;

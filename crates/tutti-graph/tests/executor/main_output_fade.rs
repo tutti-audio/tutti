@@ -14,7 +14,7 @@ use tutti_graph::{
     Edge, EdgeId, Editor, Executor, Fade, FadeLaw, MainOutputFade, NodeKey, OutputPort, PortSink,
     PortSource, Renderer, TransportPosition, Unforkable,
 };
-use tutti_units::{Amplitude, Latency, Samples};
+use tutti_units::{Amplitude, Gain, Latency, Samples};
 
 const OLD: f32 = 0.5;
 const NEW: f32 = 0.25;
@@ -542,7 +542,7 @@ fn a_carried_commit_that_removes_an_old_source_drops_it_from_the_bank_and_keeps_
         from: Edge::Direct(source(2)),
     };
     r.editor_mut()
-        .set_edge_gain(weighted, Amplitude::new(0.5))
+        .set_edge_gain(weighted, Gain::new(0.5))
         .expect("the edge exists");
     r.editor_mut().commit().expect("commits");
     step(&mut r, BLOCK);

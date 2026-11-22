@@ -2,8 +2,7 @@
 //! processes when its last handle closes. The host holds that handle for as
 //! long as it runs, so the kernel closes it when the host dies, by any means.
 
-use std::os::windows::io::AsRawHandle;
-use std::process::{Child, Command};
+use crate::Process;
 use std::sync::OnceLock;
 use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::System::JobObjects::{
@@ -15,9 +14,6 @@ use windows_sys::Win32::System::JobObjects::{
 /// The host's job, as the handle's integer (a raw handle is not `Send`), made
 /// once and never closed: its close is the host's end.
 static JOB: OnceLock<Result<usize, i32>> = OnceLock::new();
-
-/// A server needs no setup before its spawn on Windows: the job takes it after.
-pub fn own_group(_command: &mut Command) {}
 
 /// A server's helpers end with the job, not by a group's signal.
 pub fn kill_group(_leader: u32) {}
@@ -55,14 +51,15 @@ fn make_job() -> std::io::Result<HANDLE> {
     Ok(job)
 }
 
-/// Assigns `child` to the host's kill-on-close Job Object, made on the first
-/// call: the kernel ends the child when the host ends. A child that spawned
-/// processes before this call leaves those outside the job.
+/// Assigns `process` to the host's kill-on-close Job Object, made on the first
+/// call: the kernel ends the process when the host ends. The spawn calls it
+/// while the process is still suspended, so no process of its own exists to
+/// stay outside the job.
 ///
 /// # Errors
 ///
-/// The job cannot be made or the child cannot be assigned (the OS error).
-pub fn bind_to_host(child: &Child) -> std::io::Result<()> {
+/// The job cannot be made or the process cannot be assigned (the OS error).
+pub(crate) fn bind_to_host(process: &Process) -> std::io::Result<()> {
     let job = JOB.get_or_init(|| {
         make_job()
             .map(|job| job as usize)
@@ -73,8 +70,8 @@ pub fn bind_to_host(child: &Child) -> std::io::Result<()> {
         Err(code) => return Err(std::io::Error::from_raw_os_error(*code)),
     };
     // SAFETY: `job` is the live job handle held for the process's life, and
-    // the child's handle is borrowed from `child` for the call.
-    if unsafe { AssignProcessToJobObject(job, child.as_raw_handle()) } == 0 {
+    // the process's handle is borrowed from `process` for the call.
+    if unsafe { AssignProcessToJobObject(job, process.as_raw_handle()) } == 0 {
         return Err(std::io::Error::last_os_error());
     }
     Ok(())
@@ -83,6 +80,7 @@ pub fn bind_to_host(child: &Child) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
     use windows_sys::Win32::System::JobObjects::{IsProcessInJob, QueryInformationJobObject};
 
     /// **A bound child is in the host's job**: the kernel then ends it with the
@@ -91,7 +89,7 @@ mod tests {
     fn a_bound_child_is_in_the_host_job_that_kills_on_close() {
         let mut command = Command::new("cmd");
         command.args(["/C", "ping -n 30 127.0.0.1 >NUL"]);
-        let mut child = command.spawn().expect("cmd spawns");
+        let mut child = Process::from(command.spawn().expect("cmd spawns"));
         bind_to_host(&child).expect("the child is assigned");
 
         let job = JOB

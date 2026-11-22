@@ -355,7 +355,7 @@ impl MpeZoneConfig {
     #[inline]
     #[must_use]
     pub fn handles_channel(&self, channel: MidiChannel) -> bool {
-        self.is_master_channel(channel) || self.is_member_channel(channel)
+        self.occupied().contains(channel)
     }
 
     /// The lowest member channel: the first of [`member_channels`](Self::member_channels).
@@ -393,20 +393,18 @@ impl MpeZoneConfig {
         }
     }
 
-    /// The lowest and highest channel the zone occupies, master included.
-    const fn span(&self) -> (u8, u8) {
-        let (first, last) = (*self.members().start(), *self.members().end());
-        let master = self.master_channel().get();
-        (
-            if master < first { master } else { first },
-            if master > last { master } else { last },
-        )
+    /// The channels the zone occupies, master included, as a span from its
+    /// lowest channel (the Manager of a Profile zone, the lower zone's master,
+    /// or the upper zone's lowest member).
+    fn occupied(&self) -> MpeZoneSpan {
+        let lowest = MidiChannel::masked(self.master_channel().get().min(*self.members().start()));
+        // `members` ends by channel 14 (upper) or 15, so the zone ends by 16.
+        MpeZoneSpan::new(lowest, self.channel_count()).expect("a zone ends by channel 16")
     }
 
     /// Whether this zone shares a channel with `other`.
     fn overlaps(&self, other: &Self) -> bool {
-        let ((a_first, a_last), (b_first, b_last)) = (self.span(), other.span());
-        a_first <= b_last && b_first <= a_last
+        self.occupied().overlaps(other.occupied())
     }
 
     /// Encodes this zone as an **MPE Configuration Message** (MCM): a MIDI 2.0

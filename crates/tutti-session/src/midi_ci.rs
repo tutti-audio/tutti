@@ -33,7 +33,7 @@ use std::collections::BTreeMap;
 use std::sync::Weak;
 
 use tutti_midi_ci::{
-    BodyLimit, CallError, CiDeviceId, Muid, Nak, PeData, PeOutcome, PeReply, PeResource, PeSignal,
+    BodyLimit, CallError, CiDeviceId, Nak, PeData, PeOutcome, PeReply, PeResource, PeSignal,
     PeStatus, PeTerminator, ProfileId, ProfileOutcome, ProfileRequest, ProfileState, ReportRequest,
     ResourceEntry, ResourceFailure, ResourceGet, ResourceSet, ResourceTarget,
 };
@@ -44,7 +44,7 @@ use tutti_midi_hardware::{
     Reporter as ListedReporter, WholeSwitcher as ListedWhole,
 };
 use tutti_rt::Mutex;
-use tutti_ump::{MidiChannel, MidiGroup};
+use tutti_ump::MidiChannel;
 
 use crate::PeerError;
 use crate::SessionEvent;
@@ -634,11 +634,6 @@ fn not_sent<T>(refused: tutti_midi_ci::RequestRefused) -> PeerReply<T, PeFailure
     ))))
 }
 
-/// The peer a Group and a MUID name.
-const fn peer_at(group: MidiGroup, muid: Muid) -> PeerId {
-    PeerId { group, muid }
-}
-
 /// A handle the hardware layer holds of one peer, named by its Group and MUID.
 pub(crate) trait AtPeer {
     fn peer_id(&self) -> PeerId;
@@ -646,19 +641,19 @@ pub(crate) trait AtPeer {
 
 impl AtPeer for PeerProfiles {
     fn peer_id(&self) -> PeerId {
-        peer_at(self.group(), self.muid())
+        self.at().peer()
     }
 }
 
 impl AtPeer for ListedReporter {
     fn peer_id(&self) -> PeerId {
-        peer_at(self.group(), self.muid())
+        self.at().peer()
     }
 }
 
 impl AtPeer for PropertyPeer {
     fn peer_id(&self) -> PeerId {
-        peer_at(self.group(), self.muid())
+        self.at().peer()
     }
 }
 
@@ -792,10 +787,7 @@ fn same_peer(a: &PropertyAsk, b: &PropertyAsk) -> bool {
 
 /// The peer `ask` is of.
 fn peer_of(ask: &PropertyAsk) -> PeerId {
-    PeerId {
-        group: ask.peer().group(),
-        muid: ask.peer().muid(),
-    }
+    ask.peer().at().peer()
 }
 
 impl Pending {
@@ -830,7 +822,7 @@ impl Pending {
         switch: ProfileSwitch,
         reply: ReplySender<ProfileState, Nak>,
     ) {
-        let key = (switch.peer(), switch_at(&switch.request()));
+        let key = (switch.at().peer(), switch_at(&switch.request()));
         let last = self
             .switches
             .iter_mut()
@@ -841,7 +833,7 @@ impl Pending {
             return;
         }
         self.switches.push(Slot {
-            peer: switch.peer(),
+            peer: switch.at().peer(),
             request: switch,
             sent: false,
             replies: vec![reply],
@@ -857,13 +849,17 @@ impl Pending {
         ask: ReportAsk,
         reply: ReplySender<(), Nak>,
     ) {
-        let last = self.reports.iter_mut().rev().find(|s| s.peer == ask.peer());
+        let last = self
+            .reports
+            .iter_mut()
+            .rev()
+            .find(|s| s.peer == ask.peer().at().peer());
         if let Some(slot) = last.filter(|s| s.request == ask) {
             slot.replies.push(reply);
             return;
         }
         self.reports.push(Slot {
-            peer: ask.peer(),
+            peer: ask.peer().at().peer(),
             request: ask,
             sent: false,
             replies: vec![reply],

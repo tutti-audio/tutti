@@ -68,7 +68,7 @@ fn automation_reaches_the_plugin_through_its_event_input() {
     let automation = ControlLaneNode::from(ForeignLaneConfig::new(
         GAIN,
         ControlProgram::from_curve(Arc::new(Constant(0.75))),
-        ParamRange::new(0.0, 1.0),
+        ParamRange::of(0.0, 1.0),
     ));
     let prepare = Prepare::new(
         SampleRate::of(SAMPLE_RATE),
@@ -353,7 +353,7 @@ fn a_lane_drives_a_plugin_parameter_along_its_curve() {
     let lane = ControlLaneNode::from(ForeignLaneConfig::new(
         GAIN,
         ControlProgram::from_curve(Arc::new(env.clone())),
-        ParamRange::new(0.0, 1.0),
+        ParamRange::of(0.0, 1.0),
     ));
     let (out, latency) = render_gain(Some(lane), &[], 10);
     let beat = |f: usize| Beat::new(f as f64 / 24_000.0);

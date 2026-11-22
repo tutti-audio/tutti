@@ -31,7 +31,7 @@ fn only_a_timeout_wait_ack_is_a_wait() {
 #[test]
 fn a_wait_is_added_to_the_time_left() {
     let now = Instant::now();
-    let mut wait = Pending::after(now, Duration::from_secs(3));
+    let mut wait = Deadline::after(now, Duration::from_secs(3));
     TimeoutWait::of(0x3C).extend(&mut wait);
     assert_eq!(wait.deadline(), now + Duration::from_secs(9));
     TimeoutWait::of(0x1E).extend(&mut wait);

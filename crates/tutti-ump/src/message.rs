@@ -608,129 +608,91 @@ pub enum Attribute {
     Reserved(ReservedAttribute),
 }
 
-/// A Registered Per-Note Controller number (M2-104 Appendix A, Table 22, and
-/// M2-123 §8.2's Playing Position). A number the table leaves reserved is read
-/// as [`Reserved`](Self::Reserved), which only the decoder builds, so its
-/// message re-encodes exactly and no sender names one. [`TryFrom<u8>`] names a
-/// number the table defines and refuses a reserved one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum RegisteredPerNoteController {
+macro_rules! registered_per_note_controllers {
+    ($( $(#[$meta:meta])* $name:ident = $number:literal, )*) => {
+        /// A Registered Per-Note Controller number (M2-104 Appendix A, Table 22, and
+        /// M2-123 §8.2's Playing Position). A number the table leaves reserved is read
+        /// as [`Reserved`](Self::Reserved), which only the decoder builds, so its
+        /// message re-encodes exactly and no sender names one. [`TryFrom<u8>`] names a
+        /// number the table defines and refuses a reserved one.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+        pub enum RegisteredPerNoteController {
+            $( $(#[$meta])* $name, )*
+            /// A number the table reserves.
+            Reserved(Reserved),
+        }
+
+        impl RegisteredPerNoteController {
+            /// The controller number on the wire.
+            #[must_use]
+            pub const fn number(self) -> u8 {
+                match self {
+                    $( Self::$name => $number, )*
+                    Self::Reserved(r) => r.get(),
+                }
+            }
+
+            /// The controller of a wire number: a number the table defines is named,
+            /// any other is [`Reserved`](Self::Reserved).
+            pub(crate) const fn wire(number: u8) -> Self {
+                match number {
+                    $( $number => Self::$name, )*
+                    n => Self::Reserved(Reserved::wire(n)),
+                }
+            }
+        }
+    };
+}
+
+registered_per_note_controllers! {
     /// 1: Modulation.
-    Modulation,
+    Modulation = 1,
     /// 2: Breath.
-    Breath,
+    Breath = 2,
     /// 3: Pitch 7.25 (§7.4.15.2); the value is a [`Pitch`] in Q7.25.
-    Pitch,
+    Pitch = 3,
     /// 7: Volume.
-    Volume,
+    Volume = 7,
     /// 8: Balance.
-    Balance,
+    Balance = 8,
     /// 10: Pan.
-    Pan,
+    Pan = 10,
     /// 11: Expression.
-    Expression,
+    Expression = 11,
     /// 12: Playing Position (M2-123 §8.2); the value is a
     /// [`PlayingPosition`](crate::PlayingPosition).
-    PlayingPosition,
+    PlayingPosition = 12,
     /// 70: Sound Controller 1, Sound Variation.
-    SoundVariation,
+    SoundVariation = 70,
     /// 71: Sound Controller 2, Timbre / Harmonic Intensity.
-    Timbre,
+    Timbre = 71,
     /// 72: Sound Controller 3, Release Time.
-    ReleaseTime,
+    ReleaseTime = 72,
     /// 73: Sound Controller 4, Attack Time.
-    AttackTime,
+    AttackTime = 73,
     /// 74: Sound Controller 5, Brightness.
-    Brightness,
+    Brightness = 74,
     /// 75: Sound Controller 6, Decay Time.
-    DecayTime,
+    DecayTime = 75,
     /// 76: Sound Controller 7, Vibrato Rate.
-    VibratoRate,
+    VibratoRate = 76,
     /// 77: Sound Controller 8, Vibrato Depth.
-    VibratoDepth,
+    VibratoDepth = 77,
     /// 78: Sound Controller 9, Vibrato Delay.
-    VibratoDelay,
+    VibratoDelay = 78,
     /// 79: Sound Controller 10, undefined.
-    SoundController10,
+    SoundController10 = 79,
     /// 91: Effects 1 Depth, Reverb Send Level.
-    ReverbSend,
+    ReverbSend = 91,
     /// 92: Effects 2 Depth (formerly Tremolo Depth).
-    Effects2Depth,
+    Effects2Depth = 92,
     /// 93: Effects 3 Depth, Chorus Send Level.
-    ChorusSend,
+    ChorusSend = 93,
     /// 94: Effects 4 Depth (formerly Celeste Depth).
-    Effects4Depth,
+    Effects4Depth = 94,
     /// 95: Effects 5 Depth (formerly Phaser Depth).
-    Effects5Depth,
-    /// A number the table reserves.
-    Reserved(Reserved),
-}
-
-impl RegisteredPerNoteController {
-    /// The controller number on the wire.
-    #[must_use]
-    pub const fn number(self) -> u8 {
-        match self {
-            Self::Modulation => 1,
-            Self::Breath => 2,
-            Self::Pitch => 3,
-            Self::Volume => 7,
-            Self::Balance => 8,
-            Self::Pan => 10,
-            Self::Expression => 11,
-            Self::PlayingPosition => 12,
-            Self::SoundVariation => 70,
-            Self::Timbre => 71,
-            Self::ReleaseTime => 72,
-            Self::AttackTime => 73,
-            Self::Brightness => 74,
-            Self::DecayTime => 75,
-            Self::VibratoRate => 76,
-            Self::VibratoDepth => 77,
-            Self::VibratoDelay => 78,
-            Self::SoundController10 => 79,
-            Self::ReverbSend => 91,
-            Self::Effects2Depth => 92,
-            Self::ChorusSend => 93,
-            Self::Effects4Depth => 94,
-            Self::Effects5Depth => 95,
-            Self::Reserved(r) => r.get(),
-        }
-    }
-}
-
-impl RegisteredPerNoteController {
-    /// The controller of a wire number: a number the table defines is named,
-    /// any other is [`Reserved`](Self::Reserved).
-    pub(crate) const fn wire(number: u8) -> Self {
-        match number {
-            1 => Self::Modulation,
-            2 => Self::Breath,
-            3 => Self::Pitch,
-            7 => Self::Volume,
-            8 => Self::Balance,
-            10 => Self::Pan,
-            11 => Self::Expression,
-            12 => Self::PlayingPosition,
-            70 => Self::SoundVariation,
-            71 => Self::Timbre,
-            72 => Self::ReleaseTime,
-            73 => Self::AttackTime,
-            74 => Self::Brightness,
-            75 => Self::DecayTime,
-            76 => Self::VibratoRate,
-            77 => Self::VibratoDepth,
-            78 => Self::VibratoDelay,
-            79 => Self::SoundController10,
-            91 => Self::ReverbSend,
-            92 => Self::Effects2Depth,
-            93 => Self::ChorusSend,
-            94 => Self::Effects4Depth,
-            95 => Self::Effects5Depth,
-            n => Self::Reserved(Reserved::wire(n)),
-        }
-    }
+    Effects5Depth = 95,
 }
 
 impl TryFrom<u8> for RegisteredPerNoteController {

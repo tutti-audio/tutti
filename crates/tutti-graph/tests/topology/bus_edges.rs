@@ -22,7 +22,7 @@ use tutti_graph::{
     Lowering, NodeBus, NodeKey, Op, OutputPort, Plan, PortSink, PortSource, TransportPosition,
     Unforkable, ValidGraph, compile,
 };
-use tutti_units::{Amplitude, SampleRate, Samples, Tail};
+use tutti_units::{Gain, SampleRate, Samples, Tail};
 
 const BLOCK: usize = 64;
 
@@ -649,21 +649,21 @@ fn a_replaced_node_whose_bus_no_longer_folds_fails_the_commit() {
 
 /// A bus edge's lanes carry the fold's weights and no gain of the author's:
 /// `set_edge_gain` refuses a lane by name, a hand-written entry at a lane's
-/// edge fails the commit, and the lane's cell is nobody's knob.
+/// edge fails the lowering, and the lane's cell is nobody's knob.
 #[test]
 fn a_bus_lane_takes_no_gain_of_the_authors() {
     let (mut ed, mut exec) = editor(&[(1, source(2, smpte(2))), (2, sink(1, smpte(1)))], 2);
     ed.connect_bus(from(1, 0), bus_ref(2, 0)).unwrap();
     let id = lane(2, 0, out_port(1, 0));
     assert_eq!(
-        ed.set_edge_gain(id, Amplitude::new(0.25)),
+        ed.set_edge_gain(id, Gain::new(0.25)),
         Err(EdgeGainError::BusLane { id })
     );
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
     assert_eq!(
-        ed.set_edge_gain(id, Amplitude::new(0.25)),
+        ed.set_edge_gain(id, Gain::new(0.25)),
         Err(EdgeGainError::BusLane { id })
     );
     assert!(ed.edge_gain_cell(id).is_none(), "no knob on a bus lane");
@@ -671,17 +671,16 @@ fn a_bus_lane_takes_no_gain_of_the_authors() {
     // An edge that is neither the spec's nor a lane is still a plain miss.
     let none = lane(2, 0, out_port(7, 0));
     assert_eq!(
-        ed.set_edge_gain(none, Amplitude::new(0.25)),
+        ed.set_edge_gain(none, Gain::new(0.25)),
         Err(EdgeGainError::NoSuchEdge { id: none })
     );
     // A hand-written entry at a lane's edge is the author's weight where the
     // fold's goes.
-    ed.spec_mut().set_edge_gain(id, EdgeGain::default());
+    let mut written = ed.spec().clone();
+    written.set_edge_gain(id, EdgeGain::default());
     assert_eq!(
-        ed.commit(),
-        Err(CommitError::Compile(CompileError::Bus(
-            BusError::GainOnLane { id }
-        )))
+        written.lowered(ed.shapes()).unwrap_err(),
+        BusError::GainOnLane { id }
     );
 }
 
@@ -759,7 +758,7 @@ fn connecting_and_removing_a_bus_edge_round_trips_through_the_editor() {
     ed.spec_mut()
         .topology
         .connect(at(2, 0), Edge::Direct(out_port(3, 0)));
-    ed.set_edge_gain(own, Amplitude::new(0.25))
+    ed.set_edge_gain(own, Gain::new(0.25))
         .expect("the author's edge");
 
     ed.connect_bus(from(1, 0), bus_ref(2, 0)).unwrap();

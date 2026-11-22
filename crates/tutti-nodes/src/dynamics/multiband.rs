@@ -31,7 +31,7 @@ use crate::filter::Splits;
 use crate::kernel::{
     Grid, first_non_finite, log_non_finite, silence_block, slice_in, slice_out, walk_grid,
 };
-use crate::ramp::LastGood;
+use crate::last_good::LastGood;
 
 /// The crossover frequencies a band count starts with.
 fn default_crossovers(bands: MultibandBands) -> &'static [Hz] {
@@ -676,14 +676,14 @@ impl<F: Float + SimdLanes + Lerp> IntoNode<F> for MultibandCompressorNode<F> {
             controls,
             fork,
         } = tutti_graph::param_parts(self);
-        NodeParts {
+        NodeParts::new(
             node,
-            controls: MultibandControls {
+            MultibandControls {
                 params: controls,
                 reductions,
             },
             fork,
-        }
+        )
     }
 }
 

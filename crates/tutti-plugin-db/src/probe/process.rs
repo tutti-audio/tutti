@@ -11,11 +11,11 @@ use futures_channel::oneshot;
 use futures_lite::future::{or, pending, yield_now};
 use std::ffi::OsStr;
 use std::path::Path;
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::{Command, ExitStatus};
 use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::{Instant, WeakExecutor, monotonic_ns, sleep_until_ns};
-use tutti_plugin_ipc_ffi::{ExitWait, HOST_PID_ENV, Reaped, inherit_only_stdio};
+use tutti_plugin_ipc_ffi::{ExitWait, HOST_PID_ENV, Reaped, Spawn, SpawnError};
 use tutti_plugin_types::{
     Deadline, Helper, Locator, PluginFormat, ProbeDeath, ProbeError, ProbeOutcome, ProbeRefusal,
     ResultError, read_result,
@@ -60,14 +60,11 @@ pub(super) async fn run(
         .args(flags)
         // The probe ends with this process: a plugin hung in its init does not
         // outlive its host.
-        .env(HOST_PID_ENV, std::process::id().to_string())
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .env(HOST_PID_ENV, std::process::id().to_string());
     // The probe loads plugin code: it gets the standard descriptors and nothing else of the host's.
-    inherit_only_stdio(&mut command);
-    let child = command.spawn().map_err(|e| ProbeError::Io(e.kind()))?;
-    let mut child = Reaped::new(child);
+    let mut child = tutti_plugin_ipc_ffi::spawn(command, Spawn::Helper).map_err(|e| match e {
+        SpawnError::Start(e) | SpawnError::NotBound(e) => ProbeError::Io(e.kind()),
+    })?;
     let deadline = Deadline::after(Instant::now(), timeout);
     let status = wait(&mut child, executor, deadline).await;
     settle(read_result(&result), status, timeout)

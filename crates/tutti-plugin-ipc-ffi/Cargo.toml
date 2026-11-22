@@ -13,10 +13,6 @@ categories = ["multimedia::audio"]
 [lints]
 workspace = true
 
-[features]
-# `inheritable_descriptors`, for the host's spawn tests.
-testing = []
-
 [dependencies]
 # The mapping.
 memmap2 = "0.9"
@@ -51,6 +47,7 @@ rustix = { version = "1", default-features = false, features = ["shm"] }
 windows-sys = { workspace = true, features = [
   "Win32_Storage_FileSystem",
   "Win32_Security",
+  "Win32_System_Console",
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_JobObjects",
   "Win32_System_Pipes",
@@ -63,3 +60,7 @@ windows-sys = { workspace = true, features = [
 #     cargo test -p tutti-plugin-ipc-ffi --release --lib loom_model   (with the loom cfg flag set)
 [target.'cfg(loom)'.dependencies]
 loom = "0.7"
+
+# `CommandLineToArgvW`, the parse the quoting tests round-trip through.
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { workspace = true, features = ["Win32_UI_Shell"] }

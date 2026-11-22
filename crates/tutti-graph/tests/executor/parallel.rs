@@ -48,11 +48,11 @@ impl IntoNode for Forkable {
         (Box::new(TestNode::new(self.0)), ())
     }
     fn into_parts(self) -> NodeParts<()> {
-        NodeParts {
-            node: Box::new(TestNode::new(self.0.clone())),
-            controls: (),
-            fork: Some(Box::new(KindFork(self.0))),
-        }
+        NodeParts::new(
+            Box::new(TestNode::new(self.0.clone())),
+            (),
+            Some(Box::new(KindFork(self.0))),
+        )
     }
 }
 
@@ -374,15 +374,15 @@ fn render_wide(
     extra: usize,
 ) -> Vec<Vec<f32>> {
     const CUT: [ParamRange; 4] = [
-        ParamRange::new(1.0, 2.0),
-        ParamRange::new(0.5, 1.2),
-        ParamRange::new(3.0, 1.5),
+        ParamRange::of(1.0, 2.0),
+        ParamRange::of(0.5, 1.2),
+        ParamRange::of(3.0, 1.5),
         ParamRange::UNBOUNDED,
     ];
     const Q: [ParamRange; 3] = [
-        ParamRange::new(1.8, 2.2),
+        ParamRange::of(1.8, 2.2),
         ParamRange::UNBOUNDED,
-        ParamRange::new(2.0, 2.05),
+        ParamRange::of(2.0, 2.05),
     ];
     let [cut, q] = sink_ports();
     let outputs = 5;

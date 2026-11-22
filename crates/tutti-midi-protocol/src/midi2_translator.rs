@@ -1,7 +1,6 @@
 //! The stateful MIDI 1.0 to MIDI 2.0 translation of M2-104 Appendix D.3: the
 //! [`Midi2Translator`] an input edge runs once.
 
-use crate::scale;
 use tutti_ump::{
     Address, Attribute, Bank, CCNumber, ControlValue, Message, MidiChannel, MidiGroup,
     NoteVelocity, U7, U14, Ump, Voice1, Voice2,
@@ -405,11 +404,7 @@ fn emit(channel: &mut Channel, lsb: Option<U7>, send: &mut impl FnMut(Voice2)) {
         Kind::None => return,
         Kind::Registered => {
             let Number { bank, index } = channel.rpn;
-            let value = if scale::zero_extended(index) {
-                ControlValue::new(u32::from(data.get()) << 18)
-            } else {
-                ControlValue::from(data)
-            };
+            let value = ControlValue::from_registered(index, data);
             Voice2::Registered { bank, index, value }
         }
         Kind::Assignable => {

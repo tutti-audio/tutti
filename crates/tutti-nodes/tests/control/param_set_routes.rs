@@ -131,7 +131,7 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
         node: probe,
         param: UnitParam::Cutoff.into(),
     };
-    ed.set_param_range(at, ParamRange::new(lo, hi))
+    ed.set_param_range(at, ParamRange::of(lo, hi))
         .expect("a probe");
     ed.commit().expect("commits");
     let layer = Layer {
@@ -217,7 +217,7 @@ fn render_chorus(
         node: n,
         param: UnitParam::Rate.into(),
     };
-    g.param_range(at, ParamRange::new(0.0, 10.0));
+    g.param_range(at, ParamRange::of(0.0, 10.0));
     let mut r = g
         .renderer(Prepare::new(
             SampleRate::SR_48K,
@@ -438,13 +438,13 @@ fn render_lfo(param: UnitParam, range: ParamRange, depth: f64) -> (Vec<f32>, f64
 /// miss a clock that drifts. Neither cell moves.
 #[test]
 fn a_lane_drives_an_lfo_nodes_depth_and_rate() {
-    let (out, knob) = render_lfo(UnitParam::Depth, ParamRange::new(0.0, 1.0), 0.5);
+    let (out, knob) = render_lfo(UnitParam::Depth, ParamRange::of(0.0, 1.0), 0.5);
     let peak = tutti_fixtures::signal::peak(&out);
     assert!((peak - 0.75).abs() < 1e-3, "peaks at 0.75, not {peak}");
     assert_eq!(knob, 0.25, "the lane never writes the depth cell");
     assert_crossings(&out, 48_000, 1);
 
-    let (out, knob) = render_lfo(UnitParam::Rate, ParamRange::new(0.0, 10.0), 0.2);
+    let (out, knob) = render_lfo(UnitParam::Rate, ParamRange::of(0.0, 10.0), 0.2);
     assert_crossings(&out, 16_000, 3);
     assert_eq!(knob, 1.0, "the lane never writes the rate cell");
 }
@@ -564,7 +564,7 @@ fn a_limiter_driven_below_its_release_floor_still_releases() {
             }),
         ),
         UnitParam::Release,
-        ParamRange::new(-1.0, 1.0),
+        ParamRange::of(-1.0, 1.0),
         -0.25,
         &input,
     );
@@ -615,7 +615,7 @@ fn a_phaser_driven_past_its_depth_range_stays_stable() {
             PhaserNode::<f32>::try_from(PhaserConfig::new(BusTopology::MONO, Stages::of(4)))
                 .unwrap(),
             UnitParam::Depth,
-            ParamRange::new(-8.0, 8.0),
+            ParamRange::of(-8.0, 8.0),
             depth,
             &noise,
         );
@@ -645,7 +645,7 @@ fn a_chorus_depth_lane_past_its_range_is_held_at_the_sweeps_bound() {
     let out = render_driven(
         n,
         UnitParam::Depth,
-        ParamRange::new(0.0, 1.0),
+        ParamRange::of(0.0, 1.0),
         0.495,
         &ramp(FRAMES),
     );
@@ -679,7 +679,7 @@ fn a_chorus_rate_lane_below_its_range_is_held_at_the_floor() {
     let out = render_driven(
         dry_chorus(BusTopology::MONO),
         UnitParam::Rate,
-        ParamRange::new(-10.0, 10.0),
+        ParamRange::of(-10.0, 10.0),
         -0.3,
         &ramp(FRAMES),
     );
@@ -752,7 +752,7 @@ fn shelf_handed_back(block: usize) -> Vec<f32> {
         node: n,
         param: UnitParam::GainDb.into(),
     };
-    g.param_range(at, ParamRange::new(-24.0, 24.0));
+    g.param_range(at, ParamRange::of(-24.0, 24.0));
     let mut r = g
         .renderer(Prepare::new(
             SampleRate::SR_48K,

@@ -1,6 +1,6 @@
 //! A child process that cannot outlive its owner.
 
-use crate::{ExitWait, has_ended, kill_group};
+use crate::{ExitWait, Process, has_ended, kill_group};
 use std::process::{Child, ExitStatus};
 
 /// A child process that is killed and reaped when it drops.
@@ -18,7 +18,7 @@ use std::process::{Child, ExitStatus};
 /// exited is dropped harmlessly.
 #[derive(Debug)]
 pub struct Reaped {
-    child: Child,
+    child: Process,
     /// The child leads a process group of its own, which its end takes with it.
     group: bool,
 }
@@ -27,19 +27,22 @@ impl Reaped {
     /// Own `child` from now on.
     #[must_use]
     pub fn new(child: Child) -> Self {
-        Self {
-            child,
-            group: false,
-        }
+        Self::of(child.into(), false)
     }
 
     /// Own `child`, which leads a process group of its own
-    /// ([`own_group`](crate::own_group)): its end, by the kill
+    /// ([`Spawn::Leader`](crate::Spawn::Leader)): its end, by the kill
     /// of a drop or by its reaping, ends the group's other processes too (the
     /// helpers a plugin spawned).
     #[must_use]
     pub fn leading_group(child: Child) -> Self {
-        Self { child, group: true }
+        Self::of(child.into(), true)
+    }
+
+    /// Own `child`, which leads a process group (or sits in the host's job)
+    /// when `group` is true.
+    pub(crate) fn of(child: Process, group: bool) -> Self {
+        Self { child, group }
     }
 
     /// The child's process id.

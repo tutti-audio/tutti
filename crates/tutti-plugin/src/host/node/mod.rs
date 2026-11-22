@@ -617,17 +617,20 @@ impl<S> PluginClient<S> {
     pub fn handle(&self) -> PluginHandle {
         let served = Arc::new(self.served.clone());
         let pid = served.server_pid();
-        PluginHandle::from_backend(
+        let handle = PluginHandle::from_backend(
             Arc::clone(&served),
             Some(served),
             self.descriptor().clone(),
             self.loaded().clone(),
             self.param_sink().clone(),
         )
-        .with_refresh_sink(self.refresh_sink().clone())
-        .with_invalidate_sink(self.invalidate_sink().clone())
-        .with_transport_sink(self.transport_sink().clone())
-        .with_server_pid(pid)
+        .refresh_sink(self.refresh_sink().clone())
+        .invalidate_sink(self.invalidate_sink().clone())
+        .transport_sink(self.transport_sink().clone());
+        match pid {
+            Some(pid) => handle.with_server_pid(pid),
+            None => handle,
+        }
     }
 
     pub(crate) fn param_sink(&self) -> &ParameterChangeSink {
@@ -712,11 +715,7 @@ impl IntoNode for PluginClient<Bound> {
     fn into_parts(self) -> NodeParts<PluginControls> {
         let fork = ServedFork::of(&self);
         let (node, controls) = self.into_node();
-        NodeParts {
-            node,
-            controls,
-            fork: Some(Box::new(fork)),
-        }
+        NodeParts::new(node, controls, Some(Box::new(fork)))
     }
 }
 

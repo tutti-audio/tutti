@@ -6,7 +6,7 @@ use tutti_platform::Instant;
 use super::super::header::{PeCacheTime, PePage};
 use super::data::PeData;
 use super::request::ResourceTarget;
-use crate::deadline::Pending;
+use crate::deadline::Deadline;
 
 /// What a reply gave: its Property Data and the `totalCount` of its header.
 #[derive(Debug)]
@@ -21,7 +21,7 @@ struct Held {
     target: ResourceTarget,
     page: Option<PePage>,
     cached: Cached,
-    life: Pending,
+    life: Deadline,
 }
 
 /// Whether the `cacheTime`s of a Resource's requests are kept apart or as one
@@ -102,7 +102,7 @@ impl GetCache {
     ) {
         let keeping = time.as_secs() > 0 && began_at == self.drops;
         let life = keeping.then(|| {
-            let own = Pending::after(now, time.into());
+            let own = Deadline::after(now, time.into());
             if self.scope == PeCacheScope::PerResource {
                 // The entry's time held, this request's own reply included, as the
                 // retain below has not yet dropped it: the reply may not outlive it.

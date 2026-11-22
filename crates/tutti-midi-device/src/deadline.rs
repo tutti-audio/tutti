@@ -3,32 +3,33 @@
 
 use std::time::Duration;
 
+use tutti_midi_ci::Deadline;
 use tutti_platform::Instant;
 
-/// A request sent `attempts` times, the last at `sent`.
+/// A request sent `attempts` times, the last of them ending its wait at `wait`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Retry {
-    sent: Instant,
+    wait: Deadline,
     attempts: u8,
 }
 
 impl Retry {
-    /// A request sent for the first time at `now`.
-    pub(crate) const fn first(now: Instant) -> Self {
+    /// A request sent for the first time at `now`, awaited for `timeout`.
+    pub(crate) fn first(now: Instant, timeout: Duration) -> Self {
         Self {
-            sent: now,
+            wait: Deadline::after(now, timeout),
             attempts: 1,
         }
     }
 
-    /// Whether `timeout` has gone by since the last send, at `now`.
-    pub(crate) fn due(self, now: Instant, timeout: Duration) -> bool {
-        now.saturating_duration_since(self.sent) >= timeout
+    /// Whether the last send's wait is over at `now`.
+    pub(crate) fn due(self, now: Instant) -> bool {
+        self.wait.expired(now)
     }
 
-    /// The instant the last send's `timeout` ends.
-    pub(crate) fn deadline(self, timeout: Duration) -> Instant {
-        self.sent + timeout
+    /// The instant the last send's wait ends.
+    pub(crate) fn deadline(self) -> Instant {
+        self.wait.deadline()
     }
 
     /// Whether `max` sends are made.
@@ -36,9 +37,9 @@ impl Retry {
         self.attempts >= max
     }
 
-    /// The request is sent again at `now`.
-    pub(crate) fn resend(&mut self, now: Instant) {
-        self.sent = now;
+    /// The request is sent again at `now`, awaited for `timeout`.
+    pub(crate) fn resend(&mut self, now: Instant, timeout: Duration) {
+        self.wait.restart(now, timeout);
         self.attempts = self.attempts.saturating_add(1);
     }
 }

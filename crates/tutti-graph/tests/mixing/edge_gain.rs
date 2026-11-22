@@ -18,12 +18,12 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use common::{Kind, Pair, TestNode, bits, input_signal, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    CommitError, Cx, Edge, EdgeGain, EdgeGainError, EdgeId, Editor, Executor, ForkByClone,
-    ForkTarget, GraphInvalid, GraphSpec, InputPort, Io, Node, NodeKey, Op, OutputPort, Plan,
-    PortSink, PortSource, Prepare, Renderer, Shape, Status, Topology, TransportPosition,
-    Unforkable, ValidGraph, compile,
+    Cx, Edge, EdgeGain, EdgeGainError, EdgeId, Editor, Executor, ForkByClone, ForkTarget,
+    GraphInvalid, GraphSpec, InputPort, Io, Node, NodeKey, Op, OutputPort, Plan, PortSink,
+    PortSource, Prepare, Renderer, Shape, Status, Topology, TransportPosition, Unforkable,
+    ValidGraph, compile,
 };
-use tutti_units::Amplitude;
+use tutti_units::Gain;
 
 const BLOCK: usize = 64;
 
@@ -47,8 +47,8 @@ fn dc(value: f32) -> Kind {
     Kind::Const { value, width: 1 }
 }
 
-fn amp(v: f32) -> Amplitude {
-    Amplitude::new(f64::from(v))
+fn amp(v: f32) -> Gain {
+    Gain::new(f64::from(v))
 }
 
 /// Edge `node → (sink, 0)` of a pass-through sink.
@@ -156,7 +156,7 @@ impl Fan {
 /// not the spec's.
 struct Weighed {
     graph: ValidGraph,
-    bases: Vec<(EdgeId, Amplitude)>,
+    bases: Vec<(EdgeId, Gain)>,
 }
 
 impl std::ops::Deref for Weighed {
@@ -645,7 +645,7 @@ fn set_edge_gain_leaves_the_plan_untouched_and_lands_next_block() {
         .set_edge_gain(output_edge(1), amp(0.25))
         .expect("an edge with an entry");
     rig.ed
-        .set_edge_gain_range(output_edge(1), tutti_graph::ParamRange::new(-2.0, 2.0))
+        .set_edge_gain_range(output_edge(1), tutti_graph::ParamRange::of(-2.0, 2.0))
         .expect("an edge with an entry");
     rig.ed.commit().expect("commits");
     assert!(Arc::ptr_eq(&plan, &rig.plan()), "base and range: no plan");
@@ -733,7 +733,7 @@ fn set_edge_gain_refuses_what_a_commit_would() {
 
 /// `validate` refuses an entry whose edge does not exist (a port and an output
 /// edge, a feedback edge's source gone); the editor refuses a base that is not
-/// finite and a range with a NaN bound, an infinite bound being fine.
+/// finite, and takes an infinite bound.
 #[test]
 fn validate_refuses_a_malformed_entry() {
     let fan = Fan::new(&[1.0, 2.0], true);
@@ -763,11 +763,6 @@ fn validate_refuses_a_malformed_entry() {
             Err(EdgeGainError::NotFinite { .. })
         ));
     }
-    assert!(matches!(
-        rig.ed
-            .set_edge_gain_range(output_edge(1), tutti_graph::ParamRange::new(f64::NAN, 1.0)),
-        Err(EdgeGainError::InvalidRange { .. })
-    ));
     rig.ed
         .set_edge_gain(output_edge(1), amp(-2.0))
         .expect("a negative weight");
@@ -800,12 +795,65 @@ fn removing_an_edge_removes_its_entry() {
 
     let mut rig = Rig::new(0.5);
     rig.ed
-        .spec_mut()
-        .set_edge_gain(output_edge(2), EdgeGain::default());
+        .set_edge_gain(output_edge(2), amp(1.0))
+        .expect("an edge");
     rig.ed.remove(key(1));
     assert!(rig.ed.spec_mut().gains.contains_key(&output_edge(2)));
     assert!(!rig.ed.spec_mut().gains.contains_key(&output_edge(1)));
     rig.ed.commit().expect("commits without the stale entry");
+}
+
+/// An entry dropped and declared again before the next commit is one lane
+/// with one cell: the audio reads the new base and the default range the
+/// editor holds, not what the dropped entry's cell held.
+#[test]
+fn a_redeclared_entry_is_read_by_the_audio_at_its_new_base() {
+    let mut rig = Rig::new(0.5);
+    let id = output_edge(1);
+    let held = tutti_graph::ParamRange::of(-2.0, 2.0);
+    rig.ed.set_edge_gain_range(id, held).expect("an edge");
+    rig.ed.commit().expect("commits");
+    rig.exec.apply_pending();
+    rig.block();
+    let old = rig.ed.edge_gain_range_cell(id).expect("a cell");
+    assert_eq!(old.current(), held);
+
+    rig.ed.spec_mut().clear_edge_gain(id);
+    assert!(rig.ed.edge_gain_range_cell(id).is_none(), "dropped");
+    rig.ed.set_edge_gain(id, amp(0.25)).expect("an edge");
+    let new = rig.ed.edge_gain_range_cell(id).expect("a cell");
+    assert!(old.same_cell(&new), "one cell per edge");
+    assert_eq!(new.current(), EdgeGain::DEFAULT_RANGE);
+    assert_eq!(rig.ed.edge_gain(id), Some(amp(0.25)));
+
+    rig.ed.commit().expect("commits");
+    rig.exec.apply_pending();
+    rig.block();
+    let got = rig.block();
+    assert!(
+        got.iter().all(|&x| x == (0.0 + 0.25 * 1.0) + 2.0),
+        "the audio reads the new base"
+    );
+}
+
+/// An entry written raw through `spec_mut` on a connected edge is a lane at
+/// the editor's values, unity and the default range: a commit makes its cell
+/// and renders the plain sum, never a panic.
+#[test]
+fn a_raw_entry_commits_as_a_unity_lane() {
+    let mut rig = Rig::new(0.5);
+    let id = output_edge(2);
+    rig.ed.spec_mut().set_edge_gain(id, EdgeGain::default());
+    rig.ed.commit().expect("commits");
+    rig.exec.apply_pending();
+    rig.block();
+    let got = rig.block();
+    assert!(
+        got.iter().all(|&x| x == (0.0 + 0.5 * 1.0) + 2.0 * 1.0),
+        "the raw lane weighs unity"
+    );
+    assert_eq!(rig.ed.edge_gain(id), Some(amp(1.0)));
+    assert_eq!(rig.ed.edge_gain_range(id), Some(EdgeGain::DEFAULT_RANGE));
 }
 
 // ---------------------------------------------------------------------------
@@ -1115,17 +1163,4 @@ fn a_fork_starts_at_the_base_the_knob_wrote() {
     let got = Renderer::new(fork_ed, fork_exec).render(2 * BLOCK);
     assert!(got[0].iter().all(|&x| x == 0.0 + 0.25 * 1.0));
     drop((ed, exec));
-}
-
-/// The commit refuses a stale entry rather than weighting nothing.
-#[test]
-fn a_commit_refuses_an_entry_without_its_edge() {
-    let mut rig = Rig::new(0.5);
-    rig.ed
-        .spec_mut()
-        .set_edge_gain(output_edge(7), EdgeGain::default());
-    assert!(matches!(
-        rig.ed.commit(),
-        Err(CommitError::Invalid(e)) if matches!(e[..], [GraphInvalid::GainWithoutEdge { .. }])
-    ));
 }

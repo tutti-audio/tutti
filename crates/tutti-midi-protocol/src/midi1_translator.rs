@@ -1,12 +1,10 @@
 //! The stateful MIDI 2.0 to MIDI 1.0 translation of M2-104 Appendix D.2: the
 //! [`Midi1Translator`] an output edge runs.
 
-use crate::scale;
 use crate::{PerNoteTranslation, TranslationMode, midi1};
 use members::Members;
 use tutti_ump::{
-    Address, BendValue, CCNumber, ControlValue, ExtremeValues, Message, Midi1Bytes, U7, U14, Ump,
-    Voice1, Voice2,
+    Address, CCNumber, ExtremeValues, Message, Midi1Bytes, U7, U14, Ump, Voice1, Voice2,
 };
 
 mod members;
@@ -24,7 +22,7 @@ mod members;
 ///   Registered Controller of index 0 to 31 (any bank) is a fixed-point number
 ///   or a pair of fields, upscaled by zero-extension (M2-115 section 4.1:
 ///   Zero-Extension Scaling for every Registered Controller whose index is
-///   0 to 31), and downscales **with rounding** (section 4.4, `rounded_u14`).
+///   0 to 31), and downscales **with rounding** (section 4.4, `ExtremeValues::registered`).
 ///   Every other controller was scaled
 ///   Min-Center-Max and downscales by the plain right shift of section 3.4
 ///   (`ControlValue::to_u7`), which returns the value it was upscaled from.
@@ -190,11 +188,7 @@ impl Midi1Translator {
         };
         match voice {
             Voice2::Registered { bank, index, value } => {
-                let data = if scale::zero_extended(index) {
-                    rounded_u14(value)
-                } else {
-                    data_u14(extremes, value)
-                };
+                let data = extremes.registered(index, value);
                 run(
                     (CCNumber::RPN_MSB, bank),
                     (CCNumber::RPN_LSB, index),
@@ -206,7 +200,7 @@ impl Midi1Translator {
                 run(
                     (CCNumber::NRPN_MSB, bank),
                     (CCNumber::NRPN_LSB, index),
-                    data_u14(extremes, value),
+                    extremes.assignable(value),
                     &mut cc,
                 );
             }
@@ -240,22 +234,4 @@ fn run(
     cc(lsb_select, lsb);
     cc(CCNumber::DATA_ENTRY, data.msb());
     cc(CCNumber::DATA_ENTRY_LSB, data.lsb());
-}
-
-/// The top 14 bits of a 32-bit controller word: the data of a Registered or
-/// Assignable Controller that M2-115 scales Min-Center-Max, downscaled by a right
-/// shift (as [`BendValue::to_u14`](tutti_ump::BendValue::to_u14) does a bend).
-fn data_u14(extremes: ExtremeValues, value: ControlValue) -> U14 {
-    extremes.fourteen(BendValue::new(value.get()).to_u14(), value.get())
-}
-
-/// A 32-bit value as 14 bits, rounded (M2-115 section 4.4.1,
-/// `scaleDownRounding(value, 32, 14)`): fixed-point values are rounded when
-/// downscaled, by adding half the scaled range, shifting, and clamping to the
-/// 14-bit maximum.
-fn rounded_u14(value: ControlValue) -> U14 {
-    const SCALE_BITS: u32 = 32 - 14;
-    let shifted = (u64::from(value.get()) + (1 << (SCALE_BITS - 1))) >> SCALE_BITS;
-    // `min` keeps 14 bits.
-    U14::masked(shifted.min(0x3FFF) as u16)
 }

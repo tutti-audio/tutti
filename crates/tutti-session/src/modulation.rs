@@ -214,7 +214,7 @@ impl std::fmt::Display for ModTarget {
 
 /// A modulation target whose value is in a unit tutti knows: what
 /// [`Mods::range`] takes a range of. A [`ParamTarget`](crate::ParamTarget) (the unit its node
-/// declares), a [`ChannelEdge`] ([`Amplitude`](tutti_units::Amplitude)) and a
+/// declares), a [`ChannelEdge`] ([`Gain`](tutti_units::Gain)) and a
 /// [`MixRef`] ([`Mix`](tutti_units::Mix)). Sealed.
 pub trait Ranged: Into<ModTarget> + ranged::Sealed {
     /// The unit of the target's value.
@@ -231,7 +231,7 @@ impl<U: crate::Scalar> Ranged for crate::ParamTarget<U> {
 }
 impl ranged::Sealed for ChannelEdge {}
 impl Ranged for ChannelEdge {
-    type Unit = tutti_units::Amplitude;
+    type Unit = tutti_units::Gain;
 }
 impl ranged::Sealed for MixRef {}
 impl Ranged for MixRef {
@@ -1386,6 +1386,12 @@ pub struct ModsView<'a> {
     own: &'a OwnMods,
 }
 
+impl<'a> ModsView<'a> {
+    pub(crate) const fn new(own: &'a OwnMods) -> Self {
+        Self { own }
+    }
+}
+
 impl ModsView<'_> {
     /// Every route, in the order they were declared.
     pub fn routes(&self) -> impl Iterator<Item = RouteInfo> + '_ {
@@ -1493,11 +1499,7 @@ impl Mods<'_> {
     /// The declarations, read.
     #[must_use]
     pub fn view(&self) -> ModsView<'_> {
-        ModsView { own: self.own }
-    }
-
-    pub(crate) fn view_of(own: &OwnMods) -> ModsView<'_> {
-        ModsView { own }
+        ModsView::new(self.own)
     }
 
     fn add_source(&mut self, source: Source, feed: Option<OwnFeed>) -> ModSourceId {
@@ -1673,7 +1675,7 @@ impl Mods<'_> {
     ///
     /// `target` is a [`Key`](crate::Key)'s param method (`lp.cutoff()`, in
     /// [`Hz`](tutti_units::Hz)), a [`ChannelEdge`] (its gain, in
-    /// [`Amplitude`](tutti_units::Amplitude)) or a [`MixRef`] (in
+    /// [`Gain`](tutti_units::Gain)) or a [`MixRef`] (in
     /// [`Mix`](tutti_units::Mix)), and the range is a range of that unit:
     /// `m.range(lp.cutoff(), Hz::new(100.0)..Hz::new(4000.0))?`. A plugin's param, which
     /// has no unit tutti knows, takes [`range_raw`](Self::range_raw).

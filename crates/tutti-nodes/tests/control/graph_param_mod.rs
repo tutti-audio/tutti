@@ -245,11 +245,7 @@ fn phaser_of_width(w: usize) -> PhaserNode<f32> {
 /// A node's parts, its controls dropped.
 fn parts_of<N: IntoNode>(node: N) -> NodeParts<()> {
     let NodeParts { node, fork, .. } = node.into_parts();
-    NodeParts {
-        node,
-        controls: (),
-        fork,
-    }
+    NodeParts::new(node, (), fork)
 }
 
 /// One modulatable param of one node type: how to build the node at a
@@ -1067,7 +1063,7 @@ fn an_authored_write_moves_the_base_under_modulation() {
         node: n,
         param: UnitParam::Drive.into(),
     };
-    g.param_range(at, ParamRange::new(0.0, 10.0));
+    g.param_range(at, ParamRange::of(0.0, 10.0));
     let mut r = g
         .renderer(Prepare::new(
             SampleRate::SR_48K,
@@ -1116,7 +1112,7 @@ fn a_crossed_range_is_survivable() {
         node: n,
         param: UnitParam::Drive.into(),
     };
-    g.param_range(at, ParamRange::new(4.0, 2.0));
+    g.param_range(at, ParamRange::of(4.0, 2.0));
     let mut r = g
         .renderer(Prepare::new(
             SampleRate::SR_48K,
