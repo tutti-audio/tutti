@@ -219,7 +219,7 @@ impl ProfileId {
         if a.get() == STANDARD_BYTE {
             return Some(Self::Standard(StandardProfile::new(b, c, d, e)));
         }
-        let manufacturer = ManufacturerId::from_sysex_bytes([a, b, c])?;
+        let manufacturer = ManufacturerId::try_from([a, b, c]).ok()?;
         Some(Self::Manufacturer(ManufacturerProfile::new(
             manufacturer,
             [d, e],

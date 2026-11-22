@@ -51,10 +51,9 @@ use std::mem::ManuallyDrop;
 use std::path::Path;
 use std::ptr::{self, NonNull};
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use tutti_buffers::MaxBlock;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 use tutti_units::{SampleRate, Samples};
 
 /// The smallest block a plugin is activated for: CLAP forbids an empty one.
@@ -496,7 +495,7 @@ impl Plugin {
         if !unsafe { activate(self.core.raw(), sample_rate.get(), MIN_FRAMES, max_frames) } {
             return Err(ActivateError::Refused);
         }
-        *self.core.layout.lock_recover() = Arc::new(layout);
+        *self.core.layout.lock() = Arc::new(layout);
         self.core.max_frames.store(max_frames, Ordering::Release);
         self.core.active.store(true, Ordering::Release);
         Ok(())
@@ -555,7 +554,7 @@ impl Plugin {
     /// The audio half of the current activation, `None` if inactive.
     #[must_use]
     pub fn audio_side(&self) -> Option<crate::AudioSide> {
-        let layout = Arc::clone(&self.core.layout.lock_recover());
+        let layout = Arc::clone(&self.core.layout.lock());
         self.is_active()
             .then(|| crate::AudioSide::new(Arc::clone(&self.core), layout))
     }

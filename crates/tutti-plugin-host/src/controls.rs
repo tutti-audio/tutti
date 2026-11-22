@@ -248,7 +248,7 @@ impl PluginReports {
             PluginInvalidation::Latency { samples } => {
                 self.latency.store(samples.get(), Ordering::Release);
             }
-            PluginInvalidation::Tail { tail } => *lock_tail(&self.tail) = tail,
+            PluginInvalidation::Tail { tail } => *self.tail.lock() = tail,
             _ => {}
         }
     }
@@ -379,7 +379,7 @@ impl PluginControls {
     /// What the plugin currently reports for its tail. Control side: takes a
     /// short lock.
     pub fn tail(&self) -> PluginTail {
-        *lock_tail(&self.tail)
+        *self.tail.lock()
     }
 
     /// The sample rate a source installed now would be stamped with.
@@ -405,12 +405,6 @@ impl PluginControls {
             meter: self.node.meter.installed(),
         }
     }
-}
-
-/// Lock a tail cell. A poisoned lock still holds a whole `PluginTail` (a
-/// `Copy` value written in one assignment), so it is read through.
-fn lock_tail(tail: &Mutex<PluginTail>) -> std::sync::MutexGuard<'_, PluginTail> {
-    tail.lock()
 }
 
 /// The live node's sources as a fork's gather read them
@@ -495,7 +489,7 @@ mod tests {
         let node = controls();
         let held = node.clone();
         node.latency.store(512, Ordering::Release);
-        *lock_tail(&node.tail) = PluginTail::Unbounded;
+        *node.tail.lock() = PluginTail::Unbounded;
         assert_eq!(held.latency(), Samples::new(512));
         assert_eq!(held.tail(), PluginTail::Unbounded);
     }

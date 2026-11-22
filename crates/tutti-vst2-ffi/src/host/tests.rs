@@ -405,7 +405,7 @@ fn a_chunk_reaches_the_plugin_with_its_index_and_size() {
         if opcode == plugin::EffectOpCode::SetData as i32 {
             // SAFETY: the host gives `value` readable bytes at `ptr`.
             let bytes = unsafe { std::slice::from_raw_parts(ptr as *const u8, value as usize) };
-            SEEN.lock().unwrap().push((index, value, bytes.to_vec()));
+            SEEN.lock().push((index, value, bytes.to_vec()));
         }
         0
     }
@@ -416,7 +416,7 @@ fn a_chunk_reaches_the_plugin_with_its_index_and_size() {
     effect.dispatcher = Some(dispatch as DispatcherProc);
     let (params, main) = instance_over(&mut effect as *mut AEffect);
     params.load_preset_data(main, b"program");
-    assert_eq!(*SEEN.lock().unwrap(), [(1, 7, b"program".to_vec())]);
+    assert_eq!(*SEEN.lock(), [(1, 7, b"program".to_vec())]);
 }
 
 /// A *failed* save and an *empty* save must not produce the same value.
@@ -1072,13 +1072,80 @@ fn a_panic_under_the_gate_kills_the_core() {
     );
 }
 
+/// **A render made while an earlier panic unwinds leaves the core alive** when it returns
+/// normally: only a panic that begins under the gate kills it.
+#[test]
+fn a_render_during_an_earlier_unwind_leaves_the_core_alive() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static RENDERS: AtomicUsize = AtomicUsize::new(0);
+
+    extern "C" fn dispatch(
+        _: *mut AEffect,
+        _: i32,
+        _: i32,
+        _: isize,
+        _: *mut c_void,
+        _: f32,
+    ) -> isize {
+        0
+    }
+    extern "C" fn render(_: *mut AEffect, _: *const *const f32, outputs: *mut *mut f32, n: i32) {
+        RENDERS.fetch_add(1, Ordering::SeqCst);
+        // SAFETY: the test's buffer has two output channels of `n` samples.
+        unsafe { std::slice::from_raw_parts_mut(*outputs, n as usize) }.fill(1.0);
+    }
+
+    /// Renders one good block from its `Drop`.
+    struct RenderOnDrop<'a>(&'a mut RenderHandle);
+    impl Drop for RenderOnDrop<'_> {
+        fn drop(&mut self) {
+            let none: Vec<Vec<f32>> = Vec::new();
+            let mut host: HostBuffer<f32> = HostBuffer::new(0, 2);
+            let mut two = vec![vec![0.0f32; 4]; 2];
+            self.0.process(&mut host.bind(&none, &mut two));
+        }
+    }
+
+    let effect = fake_effect(dispatch);
+    // SAFETY: the test's leaked `AEffect`; nothing else touches it yet.
+    unsafe {
+        (*effect).numOutputs = 2;
+        (*effect).processReplacing = Some(render);
+        (*effect).flags = PluginFlags::CAN_REPLACING.bits();
+    }
+    let (instance, main) = instance_over(effect);
+    let mut handle = instance.render_handle(main);
+
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _render = RenderOnDrop(&mut handle);
+        panic!("an unrelated panic, unwinding through the render");
+    }));
+    assert!(panicked.is_err());
+    assert_eq!(
+        RENDERS.load(Ordering::SeqCst),
+        1,
+        "the render during the unwind reached the plugin"
+    );
+
+    let none: Vec<Vec<f32>> = Vec::new();
+    let mut host: HostBuffer<f32> = HostBuffer::new(0, 2);
+    let mut two = vec![vec![9.0f32; 4]; 2];
+    handle.process(&mut host.bind(&none, &mut two));
+    assert_eq!(
+        RENDERS.load(Ordering::SeqCst),
+        2,
+        "a render that returned normally during an earlier unwind killed the core"
+    );
+    drop(instance);
+}
+
 /// **Dropping the instance on its own thread sends the close sequence in order**: the
 /// editor, `effStopProcess` if processing, `effMainsChanged(0)` if resumed, then
 /// `effClose`; a plugin that was not resumed or not processing sees neither.
 #[cfg(unix)]
 #[test]
 fn the_close_sequence_is_in_order_and_guarded() {
-    use std::sync::Mutex;
+    use tutti_rt::Mutex;
     static SEEN: Mutex<Vec<i32>> = Mutex::new(Vec::new());
 
     extern "C" fn dispatch(
@@ -1089,7 +1156,7 @@ fn the_close_sequence_is_in_order_and_guarded() {
         _: *mut c_void,
         _: f32,
     ) -> isize {
-        let mut seen = SEEN.lock().unwrap();
+        let mut seen = SEEN.lock();
         if opcode == plugin::EffectOpCode::StateChanged as i32 {
             seen.push(if value == 1 { 1000 } else { 1001 });
         } else {
@@ -1097,7 +1164,7 @@ fn the_close_sequence_is_in_order_and_guarded() {
         }
         1
     }
-    let take = || std::mem::take(&mut *SEEN.lock().unwrap());
+    let take = || std::mem::take(&mut *SEEN.lock());
     let wanted = |ops: &[plugin::EffectOpCode]| ops.iter().map(|o| *o as i32).collect::<Vec<_>>();
 
     // Resumed and processing, editor open: all four, in order.
@@ -1956,7 +2023,7 @@ fn a_speaker_arrangement_is_read_through_the_slots_the_plugin_points() {
 #[test]
 fn a_speaker_arrangement_is_proposed_only_while_suspended() {
     use crate::speaker::{Speaker, SpeakerArrangement};
-    use std::sync::Mutex;
+    use tutti_rt::Mutex;
     static SEEN: Mutex<Vec<(Vec<u32>, Vec<u32>)>> = Mutex::new(Vec::new());
 
     extern "C" fn dispatch(
@@ -1978,7 +2045,7 @@ fn a_speaker_arrangement_is_proposed_only_while_suspended() {
                 std::slice::from_raw_parts(ptr as *const u32, 2 + 56),
             )
         };
-        SEEN.lock().unwrap().push((input.to_vec(), output.to_vec()));
+        SEEN.lock().push((input.to_vec(), output.to_vec()));
         1
     }
     let mono = SpeakerArrangement::new(vec![Speaker::Mono]);
@@ -1986,7 +2053,7 @@ fn a_speaker_arrangement_is_proposed_only_while_suspended() {
     let (mut instance, main) = instance_over(fake_effect(dispatch));
 
     assert!(instance.set_speaker_arrangement(main, &mono, &stereo));
-    let seen = std::mem::take(&mut *SEEN.lock().unwrap());
+    let seen = std::mem::take(&mut *SEEN.lock());
     assert_eq!(seen, vec![(mono.encode(), stereo.encode())]);
     assert_eq!(
         (seen[0].0[0], seen[0].0[1]),
@@ -2001,8 +2068,5 @@ fn a_speaker_arrangement_is_proposed_only_while_suspended() {
 
     instance.resume(main);
     assert!(!instance.set_speaker_arrangement(main, &mono, &stereo));
-    assert!(
-        SEEN.lock().unwrap().is_empty(),
-        "a resumed plugin is sent nothing"
-    );
+    assert!(SEEN.lock().is_empty(), "a resumed plugin is sent nothing");
 }

@@ -23,8 +23,8 @@
 //! therefore driven from the library-scoped loop, via
 //! the host's editor loop iteration.
 
-use parking_lot::Mutex;
 use tutti_plugin_types::ffi_guard;
+use tutti_rt::Mutex;
 use vst3::Steinberg::{IPlugView, ViewRect, kInvalidArgument, kResultOk, tresult};
 use vst3::{Class, ComWrapper};
 
