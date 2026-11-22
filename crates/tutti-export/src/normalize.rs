@@ -470,8 +470,8 @@ impl Measurer {
             (
                 Normalize::Peak { target },
                 Err(
-                    tutti_measure::Error::AmbisonicLoudness
-                    | tutti_measure::Error::UnplacedLoudnessChannels { .. },
+                    tutti_measure::MeterError::AmbisonicLoudness
+                    | tutti_measure::MeterError::UnplacedLoudnessChannels { .. },
                 ),
             ) => Meter::Peak {
                 meter: PeakMeter::TruePeak(UnplacedMeter {
@@ -485,12 +485,12 @@ impl Measurer {
             (
                 Normalize::Lufs { .. },
                 Err(
-                    tutti_measure::Error::AmbisonicLoudness
-                    | tutti_measure::Error::UnplacedLoudnessChannels { .. },
+                    tutti_measure::MeterError::AmbisonicLoudness
+                    | tutti_measure::MeterError::UnplacedLoudnessChannels { .. },
                 ),
             ) => return Err(Unmeasured::Placement),
             // The meter cannot be built at this rate or width, and
-            // `tutti_measure::Error` is non-exhaustive.
+            // `tutti_measure::MeterError` is non-exhaustive.
             (_, Err(_)) => return Err(Unmeasured::Format),
         };
         Ok(Self {

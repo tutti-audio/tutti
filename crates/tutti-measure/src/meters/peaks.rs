@@ -34,7 +34,7 @@ use tutti_units::{Amplitude, Samples};
 use core::marker::PhantomData;
 
 use crate::convert::{Discard, for_blocks};
-use crate::{Error, Measure, Result, StreamMeter};
+use crate::{Measure, MeterError, StreamMeter};
 use tutti_dsp::rms;
 
 /// One block of a waveform summary, for one channel.
@@ -260,7 +260,7 @@ pub struct PeakConfig {
 impl PeakConfig {
     /// A config blocking `samples_per_block` of each channel: the horizontal
     /// resolution of a waveform display. A block of zero is refused by
-    /// [`measure`](Self::measure) and [`summarize`] ([`Error::ZeroBlock`]).
+    /// [`measure`](Self::measure) and [`summarize`] ([`MeterError::ZeroBlock`]).
     #[must_use]
     pub fn new(samples_per_block: impl Into<Samples>) -> Self {
         Self {
@@ -277,10 +277,10 @@ impl<S: Sample> Measure<S> for PeakConfig {
     ///
     /// # Errors
     ///
-    /// [`Error::ZeroBlock`] for a block of zero samples.
-    fn measure(&self, layout: ChannelLayout) -> Result<PeakMeter<S>> {
+    /// [`MeterError::ZeroBlock`] for a block of zero samples.
+    fn measure(&self, layout: ChannelLayout) -> Result<PeakMeter<S>, MeterError> {
         if self.samples_per_block.is_zero() {
-            return Err(Error::ZeroBlock);
+            return Err(MeterError::ZeroBlock);
         }
         let channels = layout.count() as usize;
         Ok(PeakMeter {
@@ -398,16 +398,16 @@ impl<S: Sample> StreamMeter for PeakMeter<S> {
     ///
     /// # Errors
     ///
-    /// [`Error::ChunkLayoutMismatch`] when `chunk` is not the meter's width:
+    /// [`MeterError::ChunkLayoutMismatch`] when `chunk` is not the meter's width:
     /// the carried tail is `layout`-wide, so a chunk of another width spliced
     /// onto it would realign at the wrong stride.
     fn push(
         &mut self,
         chunk: Interleaved<'_, S>,
         out: &mut impl Extend<ChannelBlock>,
-    ) -> Result<()> {
+    ) -> Result<(), MeterError> {
         if chunk.layout() != self.layout {
-            return Err(Error::ChunkLayoutMismatch {
+            return Err(MeterError::ChunkLayoutMismatch {
                 chunk: chunk.layout(),
                 config: self.layout,
             });
@@ -482,8 +482,11 @@ fn cut_blocks(pending: &mut Vec<f64>, block: usize, samples: &[f64], out: &mut V
 ///
 /// # Errors
 ///
-/// [`Error::ZeroBlock`] for a block of zero samples.
-pub fn summarize<S: Sample>(cfg: &PeakConfig, buffer: Interleaved<'_, S>) -> Result<PeakBlocks> {
+/// [`MeterError::ZeroBlock`] for a block of zero samples.
+pub fn summarize<S: Sample>(
+    cfg: &PeakConfig,
+    buffer: Interleaved<'_, S>,
+) -> Result<PeakBlocks, MeterError> {
     let mut meter = Measure::<S>::measure(cfg, buffer.layout())?;
     meter.push(buffer, &mut Discard)?;
     Ok(meter.finish())

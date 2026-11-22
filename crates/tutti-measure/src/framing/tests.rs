@@ -53,7 +53,7 @@ fn the_window_range_includes_both_ends() {
     for window in [63, 257] {
         assert_eq!(
             check_window(Samples::new(window), &accepted),
-            Err(Error::WindowOutOfRange {
+            Err(FramingError::WindowOutOfRange {
                 window: Samples::new(window),
                 min: Samples::new(64),
                 max: Samples::new(256)
@@ -68,7 +68,7 @@ fn a_hop_is_within_a_window_up_to_its_length() {
     assert!(check_hop_within(WINDOW, WINDOW).is_ok());
     assert_eq!(
         check_hop_within(WINDOW, Samples::new(1025)),
-        Err(Error::HopWiderThanWindow {
+        Err(FramingError::HopWiderThanWindow {
             hop: Samples::new(1025),
             window: WINDOW
         })
@@ -82,7 +82,7 @@ fn the_overlap_limit_is_exact() {
     assert!(check_overlap(Samples::new(4096), Samples::new(64)).is_ok());
     assert_eq!(
         check_overlap(Samples::new(4097), Samples::new(64)),
-        Err(Error::TooManyOverlaps {
+        Err(FramingError::TooManyOverlaps {
             window: Samples::new(4097),
             hop: Samples::new(64),
             max: MAX_OVERLAP
@@ -97,7 +97,7 @@ fn the_frame_limit_is_inclusive() {
     assert!(check_frame_count(FrameCount(10), max).is_ok());
     assert_eq!(
         check_frame_count(FrameCount(11), max),
-        Err(Error::TooManyFrames {
+        Err(TooManyFrames {
             frames: FrameCount(11),
             max
         })

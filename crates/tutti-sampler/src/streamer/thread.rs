@@ -29,7 +29,7 @@ use super::metrics::Metrics;
 #[cfg(any(test, feature = "testing"))]
 use super::step::StepOutcome;
 use super::step::StreamerCycle;
-use crate::Error;
+use crate::StreamerStartError;
 use std::sync::mpsc::Receiver;
 #[cfg(any(test, feature = "testing"))]
 use tutti_rt::Exclusive;
@@ -117,11 +117,11 @@ impl<F: RingFloat> Built<F> {
     ///
     /// # Errors
     ///
-    /// [`Error::Spawn`] when the OS refuses the streamer's thread. Every stream and every
+    /// [`StreamerStartError::Spawn`] when the OS refuses the streamer's thread. Every stream and every
     /// refill depends on it, so a
     /// failure here (the OS out of threads) would otherwise degrade into an engine
     /// that accepts commands and stays mute; it is the caller's to see instead.
-    pub(super) fn start(self, executor: &Executor) -> Result<Running, Error> {
+    pub(super) fn start(self, executor: &Executor) -> Result<Running, StreamerStartError> {
         let stop = Arc::new(AtomicBool::new(false));
         let bell = self.shared.bell.clone();
         let cycle = StreamerCycle::new(self.config);
@@ -144,7 +144,7 @@ impl<F: RingFloat> Built<F> {
         // it is queued like any future).
         executor
             .spawn_dedicated("tutti-streamer", Some(PriorityRequest::Raised), future)
-            .map_err(Error::Spawn)?
+            .map_err(StreamerStartError::Spawn)?
             .detach();
         Ok(Running { stop, bell })
     }

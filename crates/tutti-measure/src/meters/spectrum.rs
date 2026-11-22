@@ -37,7 +37,7 @@
 //! main bin and two half-amplitude neighbours.
 //!
 //! A band that holds no bin is refused when the state is built
-//! ([`Error::EmptyBand`]); the bands cannot be finer than the bins. A band of
+//! ([`MeterError::EmptyBand`]); the bands cannot be finer than the bins. A band of
 //! width `w` Hz is sure to hold a bin once the window is at least `rate / w`
 //! samples, so the narrowest band, the lowest, sets the window a banding
 //! needs: third-octave bands from 20 Hz (the first is 5.2 Hz wide) at 48 kHz
@@ -69,7 +69,7 @@ use tutti_units::{Ballistics, Db, Hz, SampleRate, Samples, Seconds};
 use crate::convert::{all_finite, for_blocks};
 use crate::framing::{Framing, check_hop_within, check_nyquist, check_overlap, check_window};
 use crate::meters::chroma::FrequencyBand;
-use crate::{Error, Measure, Result, StreamMeter};
+use crate::{EmptyFrequencyRange, Measure, MeterError, StreamMeter};
 use tutti_dsp::BinIndex;
 use tutti_dsp::Complex64;
 use tutti_dsp::FftScratch;
@@ -161,7 +161,7 @@ impl Smoothing {
 ///
 /// A banding's lowest band is its narrowest, and it must hold a bin: the
 /// window must be at least `rate / width` samples for a first band of `width`
-/// Hz, else [`SpectrumConfig::measure`] refuses with [`Error::EmptyBand`].
+/// Hz, else [`SpectrumConfig::measure`] refuses with [`MeterError::EmptyBand`].
 /// Bands do not merge or skip: a banding either has every band it names or is
 /// refused. The DC bin is in no band, and the Nyquist bin is in none when the
 /// band's top is Nyquist. A band reads the summed power of its bins, so a sine inside one
@@ -226,9 +226,9 @@ impl SpectrumConfig {
     /// The window and hop frames are taken at.
     ///
     /// [`measure`](Self::measure) refuses a window under 64 or over 65536
-    /// samples ([`Error::WindowOutOfRange`]), a hop wider than the window
-    /// ([`Error::HopWiderThanWindow`]) and a hop giving more than 64 frames
-    /// per window ([`Error::TooManyOverlaps`]).
+    /// samples ([`FramingError::WindowOutOfRange`](crate::FramingError::WindowOutOfRange)), a hop wider than the window
+    /// ([`FramingError::HopWiderThanWindow`](crate::FramingError::HopWiderThanWindow)) and a hop giving more than 64 frames
+    /// per window ([`FramingError::TooManyOverlaps`](crate::FramingError::TooManyOverlaps)).
     #[must_use]
     pub fn framing(mut self, framing: Framing) -> Self {
         self.framing = framing;
@@ -238,10 +238,10 @@ impl SpectrumConfig {
     /// Groups the bins into bands.
     ///
     /// [`measure`](Self::measure) refuses a banding the framing cannot hold:
-    /// more than 4096 bands ([`Error::TooManyBands`]), a band that holds no bin
-    /// ([`Error::EmptyBand`]), no whole band between the edges
-    /// ([`Error::EmptyFrequencyRange`]) or a top edge above half the sample
-    /// rate ([`Error::AboveNyquist`]).
+    /// more than 4096 bands ([`MeterError::TooManyBands`]), a band that holds no bin
+    /// ([`MeterError::EmptyBand`]), no whole band between the edges
+    /// ([`MeterError::EmptyFrequencyRange`]) or a top edge above half the sample
+    /// rate ([`AboveNyquist`](crate::AboveNyquist)).
     #[must_use]
     pub fn banding(mut self, banding: Banding) -> Self {
         self.banding = banding;
@@ -265,7 +265,7 @@ impl SpectrumConfig {
     /// Holds each peak for `hold` before it falls.
     ///
     /// [`measure`](Self::measure) refuses a `hold` of more than 4294967295
-    /// frames at the hop and rate in use ([`Error::PeakHoldTooLong`]).
+    /// frames at the hop and rate in use ([`MeterError::PeakHoldTooLong`]).
     #[must_use]
     pub fn peak_hold(mut self, hold: SpectrumTime) -> Self {
         self.peak_hold = hold;
@@ -282,20 +282,20 @@ impl SpectrumConfig {
     /// Keeps the newest `columns` frames of levels; 0 keeps none.
     ///
     /// [`measure`](Self::measure) refuses `columns` times the outputs of more
-    /// than 4194304 cells ([`Error::SpectrogramTooLarge`]).
+    /// than 4194304 cells ([`MeterError::SpectrogramTooLarge`]).
     #[must_use]
     pub fn spectrogram(mut self, columns: FrameCount) -> Self {
         self.columns = columns.get();
         self
     }
 
-    fn plan(&self, rate: SampleRate) -> Result<SpectrumPlan> {
+    fn plan(&self, rate: SampleRate) -> Result<SpectrumPlan, MeterError> {
         let geometry = self.framing.geometry(rate)?;
         check_window(geometry.window(), &WINDOWS)?;
         check_hop_within(geometry.window(), geometry.hop())?;
         check_overlap(geometry.window(), geometry.hop())?;
         if !(MIN_RATE..=MAX_RATE).contains(&rate) {
-            return Err(Error::SampleRateOutOfRange {
+            return Err(MeterError::SampleRateOutOfRange {
                 rate,
                 min: MIN_RATE,
                 max: MAX_RATE,
@@ -322,19 +322,19 @@ impl<S: Sample> Measure<S> for SpectrumConfig {
     ///
     /// # Errors
     ///
-    /// [`Error::ZeroWindow`] or [`Error::ZeroHop`] for a zero window or hop;
-    /// [`Error::WindowOutOfRange`] for a window under 64 or over 65536
-    /// samples; [`Error::HopWiderThanWindow`] for a hop wider than the window;
-    /// [`Error::TooManyOverlaps`] for a hop giving more than 64 frames per
-    /// window; [`Error::SampleRateOutOfRange`] for a rate outside
-    /// 1 Hz..=10 MHz; [`Error::TooManyBands`] for more than 4096 bands;
-    /// [`Error::EmptyBand`] for a band that holds no bin;
-    /// [`Error::EmptyFrequencyRange`] when no whole band fits between the
-    /// edges; [`Error::AboveNyquist`] when the top edge exceeds half the sample
-    /// rate; [`Error::SpectrogramTooLarge`] when the columns times the outputs
-    /// exceed 4194304 cells; [`Error::PeakHoldTooLong`] when the peak hold is
+    /// [`FramingError::ZeroWindow`](crate::FramingError::ZeroWindow) or [`FramingError::ZeroHop`](crate::FramingError::ZeroHop) for a zero window or hop;
+    /// [`FramingError::WindowOutOfRange`](crate::FramingError::WindowOutOfRange) for a window under 64 or over 65536
+    /// samples; [`FramingError::HopWiderThanWindow`](crate::FramingError::HopWiderThanWindow) for a hop wider than the window;
+    /// [`FramingError::TooManyOverlaps`](crate::FramingError::TooManyOverlaps) for a hop giving more than 64 frames per
+    /// window; [`MeterError::SampleRateOutOfRange`] for a rate outside
+    /// 1 Hz..=10 MHz; [`MeterError::TooManyBands`] for more than 4096 bands;
+    /// [`MeterError::EmptyBand`] for a band that holds no bin;
+    /// [`MeterError::EmptyFrequencyRange`] when no whole band fits between the
+    /// edges; [`AboveNyquist`](crate::AboveNyquist) when the top edge exceeds half the sample
+    /// rate; [`MeterError::SpectrogramTooLarge`] when the columns times the outputs
+    /// exceed 4194304 cells; [`MeterError::PeakHoldTooLong`] when the peak hold is
     /// more than 4294967295 frames at the hop and rate in use.
-    fn measure(&self, rate: SampleRate) -> Result<SpectrumMeter<S>> {
+    fn measure(&self, rate: SampleRate) -> Result<SpectrumMeter<S>, MeterError> {
         SpectrumMeter::build(&self.plan(rate)?)
     }
 }
@@ -360,12 +360,12 @@ struct SpectrumPlan {
 impl SpectrumPlan {
     /// The first bin of each band and one past the last, `None` for per-bin
     /// outputs, once every setting that depends on the geometry is checked.
-    fn layout(&self) -> Result<Option<Vec<usize>>> {
+    fn layout(&self) -> Result<Option<Vec<usize>>, MeterError> {
         let edges = self.band_edges()?;
         self.check_cells(edges.as_ref().map_or(self.bins(), |e| e.len() - 1))?;
         let frames = self.peak_hold_frames().get();
         if frames > u32::MAX as usize {
-            return Err(Error::PeakHoldTooLong {
+            return Err(MeterError::PeakHoldTooLong {
                 frames,
                 max: u32::MAX as usize,
             });
@@ -388,10 +388,10 @@ impl SpectrumPlan {
         self.geometry.window().get() / 2 + 1
     }
 
-    fn check_cells(&self, outputs: usize) -> Result<()> {
+    fn check_cells(&self, outputs: usize) -> Result<(), MeterError> {
         let cells = self.columns.saturating_mul(outputs);
         if cells > MAX_SPECTROGRAM_CELLS {
-            return Err(Error::SpectrogramTooLarge {
+            return Err(MeterError::SpectrogramTooLarge {
                 cells,
                 max: MAX_SPECTROGRAM_CELLS,
             });
@@ -400,7 +400,7 @@ impl SpectrumPlan {
     }
 
     /// The edge frequencies of the bands, `None` for per-bin outputs.
-    fn edge_frequencies(&self) -> Result<Option<Vec<Hz>>> {
+    fn edge_frequencies(&self) -> Result<Option<Vec<Hz>>, MeterError> {
         let (min, max, edges) = match self.banding {
             Banding::Bins => return Ok(None),
             Banding::Octave { per_octave, band } => (
@@ -416,19 +416,19 @@ impl SpectrumPlan {
         };
         check_nyquist(max, self.geometry.sample_rate())?;
         if edges.is_empty() {
-            return Err(Error::EmptyFrequencyRange { min, max });
+            return Err(EmptyFrequencyRange { min, max }.into());
         }
         Ok(Some(edges))
     }
 
     /// The first bin of each band and one past the last, `None` for per-bin
     /// outputs.
-    fn band_edges(&self) -> Result<Option<Vec<usize>>> {
+    fn band_edges(&self) -> Result<Option<Vec<usize>>, MeterError> {
         let Some(edges) = self.edge_frequencies()? else {
             return Ok(None);
         };
         if edges.len() - 1 > MAX_BANDS {
-            return Err(Error::TooManyBands {
+            return Err(MeterError::TooManyBands {
                 bands: edges.len() - 1,
                 max: MAX_BANDS,
             });
@@ -445,7 +445,7 @@ impl SpectrumPlan {
                 .map(|e| e[1].get() - e[0].get())
                 .fold(f64::MAX, f64::min);
             let needed = (self.geometry.sample_rate().get() / narrowest).ceil();
-            return Err(Error::EmptyBand {
+            return Err(MeterError::EmptyBand {
                 band,
                 lower: edges[band],
                 upper: edges[band + 1],
@@ -512,7 +512,7 @@ impl<S: Sample> core::fmt::Debug for SpectrumMeter<S> {
 
 impl<S: Sample> SpectrumMeter<S> {
     /// The meter of a plan whose layout holds.
-    fn build(cfg: &SpectrumPlan) -> Result<Self> {
+    fn build(cfg: &SpectrumPlan) -> Result<Self, MeterError> {
         let mut fft = FftScratch::new();
         let edges = cfg.layout()?;
         let outputs = edges.as_ref().map_or(cfg.bins(), |e| e.len() - 1);
@@ -753,11 +753,11 @@ impl<S: Sample> StreamMeter for SpectrumMeter<S> {
     ///
     /// # Errors
     ///
-    /// [`Error::NonFiniteInput`] for a NaN or infinite sample. The meter is
+    /// [`MeterError::NonFiniteInput`] for a NaN or infinite sample. The meter is
     /// untouched on error.
-    fn push(&mut self, block: Mono<'_, S>, out: &mut impl Extend<()>) -> Result<()> {
+    fn push(&mut self, block: Mono<'_, S>, out: &mut impl Extend<()>) -> Result<(), MeterError> {
         if !all_finite(block.samples()) {
-            return Err(Error::NonFiniteInput);
+            return Err(MeterError::NonFiniteInput);
         }
         for_blocks(block.samples(), 1, |converted| {
             self.step(converted, || out.extend([()]));
