@@ -260,7 +260,7 @@ impl TakeFile {
 ///
 /// A sink dithers itself: wrap a [`DitherSink`] yourself and give it to
 /// [`sink`](Self::sink). Such a take has no path, so no
-/// [`clip`](Recorded::clip).
+/// `Recorded::clip`.
 pub struct TakeTarget<F: Float = f32> {
     kind: TargetKind<F>,
 }
