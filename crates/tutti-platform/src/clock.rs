@@ -109,7 +109,7 @@ mod tests {
             assert_eq!(monotonic_ns_of(at), Some(ns));
         }
         assert_eq!(
-            monotonic_ns_of(origin + Duration::from_secs(u64::MAX / 2_000_000_000)),
+            monotonic_ns_of(origin + Duration::from_secs(u64::MAX / 1_000_000_000 + 1)),
             None,
             "centuries ahead is past an i64 of nanoseconds"
         );
