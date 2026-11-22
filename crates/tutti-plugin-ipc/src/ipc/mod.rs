@@ -421,6 +421,8 @@ impl Link {
         let was_armed = wait.armed();
         wait.arm(mode.is_offline());
         let audio = self.bridge.audio();
+        // A refused mode is a crashed bridge, which the fork's health reports;
+        // one the plugin does not apply in time is `unapplied_settings`.
         if mode.is_offline() {
             let _ = audio.set_render_mode(RenderMode::Offline);
         } else if was_armed && !keeps_offline {
