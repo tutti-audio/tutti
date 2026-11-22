@@ -37,6 +37,7 @@ use std::sync::Arc;
 use tutti_platform::{Executor, Instant};
 
 use tutti_midi_ci::ResourceStore;
+use tutti_rt::Bell;
 
 use crate::answer::Answer;
 use crate::backend;
@@ -106,6 +107,11 @@ pub struct MidiSession {
     /// What the MIDI-CI devices' Property Exchange Responders serve
     /// ([`MidiSession::serve_properties`]); empty by default.
     properties: ResourceStore,
+    /// The latest `now` a [`poll`](MidiSession::poll) was given: time never
+    /// steps back across two callers.
+    last_poll: Option<Instant>,
+    /// What the session presents changed since the last poll, which applies it.
+    presented_changed: bool,
 }
 
 /// An identity and the Groups its one Function Block spans: what
@@ -266,7 +272,28 @@ impl MidiSession {
             presented: None,
             generated_instance: None,
             properties: ResourceStore::default(),
+            last_poll: None,
+            presented_changed: false,
         })
+    }
+
+    /// This session with its input ports ringing `bell` whenever a port's
+    /// reader writes what [`poll`](Self::poll) reads: a UMP Stream message, or a
+    /// copy of a SysEx7 packet. The ring is [`Bell::ring`], so it is safe on the
+    /// OS's callback thread; whoever waits on the bell's listener polls then.
+    ///
+    /// Chain it onto the value that [`open`](Self::open) or
+    /// [`open_over`](Self::open_over) returned, before any input is connected:
+    /// it makes the session's ports anew.
+    #[must_use]
+    pub fn ringing(mut self, bell: Bell) -> Self {
+        debug_assert!(
+            self.inputs.is_empty(),
+            "a session's bell is set before an input is connected"
+        );
+        let inlets = Arc::clone(self.ports.inlets());
+        self.ports = Arc::new(HardwareMidiInputs::new(inlets).ringing(bell));
+        self
     }
 
     /// The wait for the backend to be ready: [`Devices::start`].
@@ -517,6 +544,11 @@ impl MidiSession {
     /// it from the control tick (the session's `Phase::Poll`); it only reads
     /// rings and sends.
     pub fn poll(&mut self, now: Instant) -> std::vec::IntoIter<Polled> {
+        // Two callers may poll, each with its own clock: the later time of the
+        // two is the session's, so no wait is moved back.
+        let now = self.last_poll.map_or(now, |last| last.max(now));
+        self.last_poll = Some(now);
+        self.presented_changed = false;
         let mut polled = Vec::new();
         let generated = self.generated_instance;
         let presented = self.presented.map(|mut who| {
@@ -593,6 +625,32 @@ impl MidiSession {
         polled.into_iter()
     }
 
+    /// When the next [`poll`](Self::poll) is due for a wait that runs out: the
+    /// earliest of every open input's Stream negotiation or Identity Inquiry
+    /// step, and the waits of its MIDI-CI devices, their Initiators and
+    /// Responders. `None` while nothing waits: only a device's reply, a request
+    /// or a change of the session brings the next poll.
+    ///
+    /// It reads no clock. Whether work waits that no timer and no reply will
+    /// bring is [`needs_poll`](Self::needs_poll).
+    #[must_use]
+    pub fn deadline(&self) -> Option<Instant> {
+        self.inputs
+            .values()
+            .filter_map(|held| held.stream.deadline())
+            .min()
+    }
+
+    /// Whether the next [`poll`](Self::poll) has work that no timer and no
+    /// reply will bring: an input that was connected, a change of
+    /// [`present`](Self::present), a step that decided what the next one does
+    /// (a settled negotiation starts MIDI-CI), or a request made since the last
+    /// poll. A caller polls again at once while it is `true`.
+    #[must_use]
+    pub fn needs_poll(&self) -> bool {
+        self.presented_changed || self.inputs.values().any(|held| held.stream.needs_poll())
+    }
+
     /// Presents the session as `who` on every open input with an output and on
     /// every one opened later, from the next [`poll`](Self::poll): MIDI-CI runs
     /// as its identity (a Discovery from each device), and a peer's UMP
@@ -627,6 +685,7 @@ impl MidiSession {
                     .map(|()| ProductInstanceId::from_random(bytes))
             };
         }
+        self.presented_changed |= self.presented != who;
         self.presented = who;
     }
 

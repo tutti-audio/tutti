@@ -357,6 +357,27 @@ struct Member {
 }
 
 impl Member {
+    /// When the device, its Initiators or its Responder next need a poll for a
+    /// wait that runs out.
+    fn deadline(&self) -> Option<Instant> {
+        [
+            self.device.deadline(),
+            self.server.deadline(),
+            self.initiators
+                .values()
+                .filter_map(Initiator::deadline)
+                .min(),
+            self.process.values().filter_map(Initiator::deadline).min(),
+            self.properties
+                .values()
+                .filter_map(Initiator::deadline)
+                .min(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+    }
+
     fn new(group: MidiGroup, device: CiDevice<Entropy>) -> Self {
         let server = property::responder(device.muid());
         Self {
@@ -434,6 +455,9 @@ pub(crate) struct Ci {
     /// Counts the CI messages the output has refused: a cell of the port that
     /// owns the conversation, which outlives the connection.
     refused: CounterWriter<Losses>,
+    /// The Groups were decided since the last poll, which brings the devices to
+    /// them.
+    decided: bool,
 }
 
 /// Group 0, the Group of a MIDI 1.0 port and of an Endpoint that says nothing
@@ -477,12 +501,29 @@ impl Ci {
             property_peers: Arc::default(),
             calls: Vec::new(),
             refused,
+            decided: false,
         }
     }
 
     /// MIDI-CI is to run on `groups` when the session has an identity.
     pub(crate) fn decide(&mut self, groups: Vec<MidiGroup>) {
         self.groups = groups;
+        self.decided = true;
+    }
+
+    /// Whether the next poll has work no input and no timer will bring: the
+    /// Groups were decided since the last poll, or a request waits to be
+    /// started.
+    pub(crate) fn needs_poll(&self) -> bool {
+        self.decided || !self.queue.is_empty() || !self.reports.is_empty() || !self.calls.is_empty()
+    }
+
+    /// When the running devices next need a poll for a wait that runs out, or
+    /// `None` while none waits.
+    pub(crate) fn deadline(&self) -> Option<Instant> {
+        self.running
+            .as_ref()
+            .and_then(|running| running.members.iter().filter_map(Member::deadline).min())
     }
 
     /// Whether the port should copy SysEx7 packets to the stream ring: the
@@ -505,6 +546,7 @@ impl Ci {
         out: &mut OpenOutput,
     ) -> CiChanges {
         let mut changes = CiChanges::default();
+        self.decided = false;
         // Who the session is changed, or it presents no one: the devices that
         // ran under the old identity end (Invalidate MUID, peers lost) and the
         // new identity, if any, starts them again below.

@@ -1090,3 +1090,126 @@ fn a_refused_stop_request_is_retried_until_it_goes_out() {
     assert!(state == StopJr::Asked);
     assert!(state.next(false, |_| panic!("nothing to ask")) == StopJr::Settled);
 }
+
+// --- Driving the session from a task ---------------------------------------
+
+/// `deadline` is the earliest wait that runs out, over constructed instants:
+/// the negotiation's step timeout while it asks, then MIDI-CI's Discovery
+/// window once a settle has started it, and nothing once both are over. A
+/// negotiation that has not started, and the settle that decides MIDI-CI's
+/// Groups, are `needs_poll`, not a deadline.
+#[test]
+fn the_deadline_is_the_earliest_wait_that_runs_out() {
+    let silent = Endpoint::new(Supports::of(Capabilities {
+        midi1: true,
+        ..Capabilities::default()
+    }));
+    let mut wire = session_over_ci(midi2(), PortDirection::Duplex, silent, Some(identity()));
+    wire.open();
+    let step = STEP_TIMEOUT.as_millis() as u64;
+
+    assert!(wire.session.needs_poll(), "an input that has not started");
+    assert_eq!(wire.session.deadline(), None);
+
+    wire.poll(0);
+    assert!(!wire.session.needs_poll());
+    assert_eq!(wire.session.deadline(), Some(wire.at(step)));
+
+    // A step that times out is sent again, a step later.
+    wire.poll(step);
+    assert_eq!(wire.session.deadline(), Some(wire.at(2 * step)));
+    wire.poll(2 * step);
+    assert_eq!(wire.session.deadline(), Some(wire.at(3 * step)));
+
+    // The last attempt gives up: the settle decides MIDI-CI's Groups, which
+    // the next poll starts, and its Discovery window is the one wait left.
+    wire.poll(3 * step);
+    assert_eq!(wire.session.deadline(), None);
+    assert!(
+        wire.session.needs_poll(),
+        "the settle decided MIDI-CI's Groups"
+    );
+    let started = 3 * step + 7;
+    wire.poll(started);
+    assert!(!wire.session.needs_poll());
+    assert_eq!(
+        wire.session.deadline(),
+        Some(wire.at(started) + tutti_midi_ci::DISCOVERY_WINDOW)
+    );
+
+    wire.poll(started + tutti_midi_ci::DISCOVERY_WINDOW.as_millis() as u64);
+    assert_eq!(wire.session.deadline(), None);
+}
+
+/// The session's time never steps back across two callers: a poll given an
+/// earlier instant than the last starts its waits from the later one.
+#[test]
+fn a_poll_with_an_earlier_instant_does_not_move_a_wait_back() {
+    let silent = Endpoint::new(Supports::of(Capabilities {
+        midi1: true,
+        ..Capabilities::default()
+    }));
+    let mut wire = session_over(midi2(), PortDirection::Duplex, silent);
+    wire.open();
+    let step = STEP_TIMEOUT.as_millis() as u64;
+    let late = 60 * step;
+
+    wire.poll(late);
+    // The input is opened again, and its first poll is given an earlier time.
+    wire.session.disconnect_input(&wire.id.clone()).unwrap();
+    wire.open();
+    wire.poll(step);
+    assert_eq!(wire.session.deadline(), Some(wire.at(late + step)));
+}
+
+/// A port's reader rings its bell after it writes the stream ring: for a UMP
+/// Stream message, and for a SysEx7 packet only while it is copied. A note
+/// and a port with no bell write nothing to ring for.
+#[test]
+fn a_reader_rings_the_bell_after_writing_the_stream_ring() {
+    use std::future::Future;
+    use std::pin::pin;
+    use std::task::{Context, Poll, Waker};
+    use tutti_rt::Bells;
+
+    let inlets =
+        tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), Duration::ZERO);
+    let bells = Bells::new(&tutti_platform::Executor::new()).unwrap();
+    let (bell, mut listener) = bells.bell();
+    let ports = HardwareMidiInputs::new(inlets).ringing(bell);
+    let (mut producer, _inlet) = ports.open_input_port("dev");
+    let port = producer.port();
+    let at = Instant::now();
+    let mut rung = |listener: &mut tutti_rt::Listener| {
+        let mut cx = Context::from_waker(Waker::noop());
+        pin!(listener.rung()).poll(&mut cx) == Poll::Ready(())
+    };
+    let stream = Ump::from(Message::Stream(Stream::EndpointDiscovery {
+        version: tutti_midi_device::UMP_VERSION,
+        filter: tutti_ump::DiscoveryFilter {
+            endpoint_info: true,
+            device_identity: false,
+            endpoint_name: false,
+            product_instance_id: false,
+            stream_configuration: false,
+        },
+    }));
+    let packets = identity_reply(0);
+
+    assert!(!rung(&mut listener));
+    producer
+        .push(midi::note_on(MidiChannel::FIRST, 60, 0x8000), at)
+        .unwrap();
+    assert!(!rung(&mut listener), "music is not the stream ring's");
+    producer.push(packets[0], at).unwrap();
+    assert!(
+        !rung(&mut listener),
+        "a SysEx7 packet is not copied unless asked"
+    );
+    producer.push(stream, at).unwrap();
+    assert!(rung(&mut listener), "a Stream message");
+    assert!(!rung(&mut listener), "one ring is one wake");
+    assert!(ports.hear_sysex(port, true));
+    producer.push(packets[0], at).unwrap();
+    assert!(rung(&mut listener), "a copied SysEx7 packet");
+}
