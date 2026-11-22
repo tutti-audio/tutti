@@ -14,8 +14,8 @@
 //! `Mix::new(-3.0)` both build. The range a type documents is what its
 //! named constructors and methods produce (`new_clamped`, `wrapped`,
 //! `wrap`), not what a value built with `new` holds.
-//! The exceptions are range-checked (`new` returns an `Option`): [`Bpm`],
-//! [`Bipolar`] and [`Bipolar`], which no hand-built value leaves.
+//! The exceptions are range-checked (`new` returns an `Option`): [`Bpm`]
+//! and [`Bipolar`], which no hand-built value leaves.
 //!
 //! # Non-finite input
 //!
