@@ -34,10 +34,9 @@
 
 mod support;
 
-use std::sync::Mutex;
 use tutti_au_ffi::property::ParametersForOverview;
 use tutti_au_ffi::{Property, Scope};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use crate::support::au::Au;
 use support::corpus::{
@@ -58,7 +57,7 @@ static AU_LOCK: Mutex<()> = Mutex::new(());
 /// convert one real failure into N spurious ones. The guard is only a
 /// serializer — there is no shared state to be left inconsistent — so recover.
 fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock_recover()
+    AU_LOCK.lock()
 }
 
 /// Every instantiable unit hands back the exact context name written.

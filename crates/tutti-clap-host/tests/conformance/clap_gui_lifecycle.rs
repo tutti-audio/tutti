@@ -18,8 +18,8 @@
 //! the host once at load, so it must be set before `load`.
 
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
-use tutti_rt::LockExt;
+use std::sync::MutexGuard;
+use tutti_rt::Mutex;
 
 use crate::support;
 use support::main_thread;
@@ -59,7 +59,7 @@ impl Probe {
     /// extension pointer once during load, and `Absent`/`NoCreate` are
     /// different vtables (or none), so they cannot be switched afterwards.
     fn acquire(mode: GuiMode) -> Self {
-        let lock = PROBE_LOCK.lock_recover();
+        let lock = PROBE_LOCK.lock();
         set_gui_mode(mode as u32);
         gui_reset();
         Probe { _lock: lock }

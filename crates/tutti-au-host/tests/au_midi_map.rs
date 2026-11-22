@@ -36,10 +36,9 @@
 
 #![cfg(target_os = "macos")]
 
-use std::sync::Mutex;
 use tutti_au_ffi::property::MidiControlMapping;
 use tutti_au_ffi::{Property, Scope};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 mod support;
 use support::corpus::{
@@ -60,7 +59,7 @@ use tutti_ump::{CCNumber, ControlValue, MidiChannel, U7};
 static AU_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock_recover()
+    AU_LOCK.lock()
 }
 
 const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;

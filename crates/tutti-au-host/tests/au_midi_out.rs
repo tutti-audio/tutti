@@ -47,9 +47,9 @@
 
 #![cfg(target_os = "macos")]
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 mod support;
 use support::corpus::{DELAY, DLS_SYNTH, LOWPASS, SAMPLER, every_component};
@@ -86,7 +86,7 @@ fn is_note_on(e: &tutti_plugin_types::WireMidi) -> bool {
 /// Recover from poisoning: the guard only serializes, it protects no shared state,
 /// so one panicking test must not convert into N spurious failures.
 fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock_recover()
+    AU_LOCK.lock()
 }
 
 const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;

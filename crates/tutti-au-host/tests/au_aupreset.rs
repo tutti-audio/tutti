@@ -60,9 +60,8 @@
 #![cfg(target_os = "macos")]
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use tutti_fixtures::main_thread;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 mod support;
 use support::corpus::{
@@ -82,7 +81,7 @@ static AU_LOCK: Mutex<()> = Mutex::new(());
 /// real failure into N spurious ones. The guard is only a serializer — there is no
 /// shared state to be left inconsistent — so recover.
 fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock_recover()
+    AU_LOCK.lock()
 }
 
 const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;

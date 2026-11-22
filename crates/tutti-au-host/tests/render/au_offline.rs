@@ -54,8 +54,7 @@
 //!
 //! A missing corpus unit **fails** rather than skipping — see `support/corpus.rs`.
 
-use std::sync::Mutex;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use crate::support::corpus::{
     DELAY, ENFORCES_RENDER_QUALITY_RANGE, IMPLEMENTS_PROCESS_MULTIPLE, PARAM_ERR, TOO_MANY_FRAMES,
@@ -83,7 +82,7 @@ static AU_LOCK: Mutex<()> = Mutex::new(());
 /// one actually broke. The guard only serializes — there is no shared state to be
 /// left inconsistent.
 fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock_recover()
+    AU_LOCK.lock()
 }
 
 /// The shared plugin's Audio Unit at [`RATE`] and [`RT_BLOCK`], initialized.

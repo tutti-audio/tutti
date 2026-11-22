@@ -112,13 +112,13 @@
 
 #![cfg(target_os = "macos")]
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tutti_au_ffi::Property;
 use tutti_au_ffi::property::{BypassEffect, Latency, PresentPreset};
 use tutti_au_host::types::{self, AudioComponentDescription, K_AUDIO_UNIT_TYPE_EFFECT};
 use tutti_platform::Instant;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 mod support;
 use support::corpus::{DELAY, DISTORTION, MULTI_CHANNEL_MIXER, N_BAND_EQ};
@@ -139,7 +139,7 @@ static AU_LOCK: Mutex<()> = Mutex::new(());
 /// Poison recovery. The guard is a serializer only — it protects no shared
 /// state — so one panicking test must not convert into N spurious failures.
 fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock_recover()
+    AU_LOCK.lock()
 }
 
 const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
@@ -171,19 +171,19 @@ struct EventLog(Arc<Mutex<Vec<AuEvent>>>);
 impl EventLog {
     fn sink(&self) -> impl Fn(AuEvent) + Send + Sync + 'static {
         let inner = Arc::clone(&self.0);
-        move |ev| inner.lock_recover().push(ev)
+        move |ev| inner.lock().push(ev)
     }
 
     fn snapshot(&self) -> Vec<AuEvent> {
-        self.0.lock_recover().clone()
+        self.0.lock().clone()
     }
 
     fn len(&self) -> usize {
-        self.0.lock_recover().len()
+        self.0.lock().len()
     }
 
     fn clear(&self) {
-        self.0.lock_recover().clear();
+        self.0.lock().clear();
     }
 
     /// Block until at least `n` events have arrived, or `SETTLE` elapses.

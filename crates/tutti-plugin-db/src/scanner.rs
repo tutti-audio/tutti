@@ -15,13 +15,13 @@ use crossbeam_queue::ArrayQueue;
 use std::future::{Future, IntoFuture};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tracing::{debug, info, warn};
 use tutti_platform::WeakExecutor;
 use tutti_plugin_types::{
     Described, MeasureFailure, PluginFormat, PluginId, ProbeError, ProbeRefusal, Unmeasured,
 };
-use tutti_rt::{LockExt, Tally, TallyWriter};
+use tutti_rt::{Mutex, Tally, TallyWriter};
 
 /// How many progress updates wait for the owner before the scan drops the
 /// next one.
@@ -283,7 +283,7 @@ struct Claim(PathBuf);
 impl Claim {
     fn take(pedal: &Pedal) -> Result<Self, ScanBusy> {
         let file = canonical_path(pedal.path());
-        let mut in_use = IN_USE.lock_recover();
+        let mut in_use = IN_USE.lock();
         if in_use.contains(&file) {
             return Err(ScanBusy);
         }
@@ -294,7 +294,7 @@ impl Claim {
 
 impl Drop for Claim {
     fn drop(&mut self) {
-        let mut in_use = IN_USE.lock_recover();
+        let mut in_use = IN_USE.lock();
         in_use.retain(|p| *p != self.0);
     }
 }
@@ -1822,7 +1822,7 @@ mod tests {
         let probes = AtomicUsize::new(0);
         let scanner = Scanner::new(dir.path().join(".scanning"), move |_, path, _| {
             let gate = (probes.fetch_add(1, Ordering::SeqCst) == 1)
-                .then(|| release_rx.lock().unwrap().take().expect("one gate"));
+                .then(|| release_rx.lock().take().expect("one gate"));
             let (parked, path) = (parked_tx.clone(), path.to_path_buf());
             async move {
                 if let Some(gate) = gate {
@@ -1917,7 +1917,7 @@ mod tests {
         let seen = Arc::clone(&calls);
         let scanner = Scanner::new(dir.join(".scanning"), move |_, path, _| {
             let gate = (seen.fetch_add(1, Ordering::SeqCst) == 0)
-                .then(|| release_rx.lock().unwrap().take().expect("one gate"));
+                .then(|| release_rx.lock().take().expect("one gate"));
             let (parked, path) = (parked_tx.clone(), path.to_path_buf());
             async move {
                 if let Some(gate) = gate {
@@ -2110,7 +2110,7 @@ mod tests {
         let probed = Arc::new(Mutex::new(Vec::new()));
         let seen = Arc::clone(&probed);
         let scanner = Scanner::new(dir.path().join(".scanning"), move |_, path, _| {
-            seen.lock().unwrap().push(path.to_path_buf());
+            seen.lock().push(path.to_path_buf());
             ready(named(path).map(Into::into))
         });
         let mut db = PluginDb::new();
@@ -2121,7 +2121,7 @@ mod tests {
         let _ = run(scan);
 
         let updates: Vec<_> = progress.read().collect();
-        let probed = probed.lock().unwrap().clone();
+        let probed = probed.lock().clone();
         assert_eq!(probed.len(), 2);
         let expected: Vec<_> = [
             ScanProgress::Discovering { directory: first },
@@ -2261,7 +2261,7 @@ mod tests {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let recorded = Arc::clone(&seen);
         let scanner = Scanner::new(dir.path().join(".scanning"), move |_, path, format| {
-            recorded.lock().unwrap().push(format);
+            recorded.lock().push(format);
             ready(Ok(vec![named_plugin(path)].into()))
         });
         let mut db = PluginDb::new();
@@ -2271,7 +2271,7 @@ mod tests {
             .unwrap();
         settle(task, &mut db);
 
-        assert_eq!(*seen.lock().unwrap(), [PluginFormat::Clap]);
+        assert_eq!(*seen.lock(), [PluginFormat::Clap]);
         assert_eq!(
             db.row(&file).expect("a row").format(),
             Some(PluginFormat::Clap)

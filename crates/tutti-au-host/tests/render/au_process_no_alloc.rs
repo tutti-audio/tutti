@@ -45,9 +45,8 @@
 //! guard) while calibrating this file — which is also what confirms the
 //! allocator hook is armed at all, the property every assertion here rests on.
 
-use std::sync::Mutex;
 use tutti_graph::UmpAt;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use crate::support::au::Au;
 use tutti_au_host::BusDirection;
@@ -66,7 +65,7 @@ use tutti_ump::{CCNumber, MidiChannel, MidiGroup};
 static PLUGIN_LOAD_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock() -> std::sync::MutexGuard<'static, ()> {
-    PLUGIN_LOAD_LOCK.lock_recover()
+    PLUGIN_LOAD_LOCK.lock()
 }
 
 /// Block size every test in this file renders at.
