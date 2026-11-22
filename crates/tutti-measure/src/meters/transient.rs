@@ -14,33 +14,19 @@
 use core::marker::PhantomData;
 
 use tutti_buffers::{Mono, Sample};
-use tutti_dsp::TransientDetector;
-use tutti_units::{Amplitude, SampleRate, Samples, Seconds, ranged};
+use tutti_dsp::{TransientDetector, TransientThreshold, TransientTimes};
+use tutti_units::{Amplitude, SampleRate, Samples, Seconds};
 
 use crate::convert::for_blocks;
 use crate::meters::onset::OnsetGap;
-use crate::{Error, Measure, Result, StreamMeter};
-
-ranged! {
-    /// How far the fast envelope must rise above the slow one for an attack: finite and above
-    /// zero, in the signal's own scale (a full-scale sample is `1.0`).
-    TransientThreshold(Amplitude), TransientThresholdError, "a transient threshold above zero",
-    |raw| raw.get() > 0.0 && raw.get().is_finite()
-}
-
-ranged! {
-    /// The time constant of one of the two envelopes: within `0.1 ms..=1 s`.
-    TransientTime(Seconds), TransientTimeError, "an envelope time within 0.1 ms..=1 s",
-    |raw| raw.get() >= 1e-4 && raw.get() <= 1.0
-}
+use crate::{Measure, Result, StreamMeter};
 
 /// Transient detection parameters. Immutable once built, and free of a sample rate:
 /// [`detect_transients`] and [`TransientConfig::measure`] take it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransientConfig {
     threshold: TransientThreshold,
-    fast: TransientTime,
-    slow: TransientTime,
+    times: TransientTimes,
     min_gap: OnsetGap,
 }
 
@@ -51,8 +37,7 @@ impl TransientConfig {
     pub fn new() -> Self {
         Self {
             threshold: TransientThreshold::of(Amplitude::new(0.05)),
-            fast: TransientTime::of(Seconds::new(0.001)),
-            slow: TransientTime::of(Seconds::new(0.03)),
+            times: TransientTimes::default(),
             min_gap: OnsetGap::of(Seconds::new(0.05)),
         }
     }
@@ -67,19 +52,12 @@ impl TransientConfig {
         self
     }
 
-    /// The fast envelope's time constant: the shorter it is, the shorter an attack it sees and
-    /// the more of a low tone's ripple it follows.
+    /// The two envelopes' time constants (see [`TransientTimes`]): the fast one is the shortest
+    /// attack seen, and the slow one sets the level an attack is measured against and the
+    /// slope of a fade tolerated.
     #[must_use]
-    pub fn fast(mut self, time: TransientTime) -> Self {
-        self.fast = time;
-        self
-    }
-
-    /// The slow envelope's time constant: the level an attack is measured against, and the
-    /// slope of a fade it tolerates.
-    #[must_use]
-    pub fn slow(mut self, time: TransientTime) -> Self {
-        self.slow = time;
+    pub fn times(mut self, times: TransientTimes) -> Self {
+        self.times = times;
         self
     }
 
@@ -102,23 +80,12 @@ impl<S: Sample> Measure<S> for TransientConfig {
     type Meter = TransientMeter<S>;
 
     /// A meter that detects transients in audio at `rate`, chunk by chunk.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::TransientTimes`] when the fast time is not below the slow one.
     fn measure(&self, rate: SampleRate) -> Result<TransientMeter<S>> {
-        let (fast, slow) = (self.fast.get(), self.slow.get());
-        if fast >= slow {
-            return Err(Error::TransientTimes { fast, slow });
-        }
         Ok(TransientMeter {
-            detector: TransientDetector::new(
-                rate,
-                fast,
-                slow,
-                self.threshold.get(),
-                self.min_gap.get().to_samples(rate),
-            ),
+            detector: TransientDetector::new(rate)
+                .threshold(self.threshold)
+                .times(self.times)
+                .min_gap(self.min_gap.get().to_samples(rate)),
             found: Vec::new(),
             sample: PhantomData,
         })
@@ -183,7 +150,7 @@ impl<S: Sample> StreamMeter for TransientMeter<S> {
 ///
 /// # Errors
 ///
-/// [`Error::TransientTimes`] when the config's fast time is not below its slow one.
+/// None today: the `Result` is [`Measure::measure`]'s.
 pub fn detect_transients<S: Sample>(
     cfg: &TransientConfig,
     samples: Mono<'_, S>,

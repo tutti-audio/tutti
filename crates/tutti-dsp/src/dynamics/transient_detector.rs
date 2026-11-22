@@ -49,12 +49,94 @@ const LOOKBACK_TIME_CONSTANTS: f64 = 5.0;
 /// The share of the threshold the difference must fall under before a new attack counts.
 const REARM: f64 = 0.5;
 
+tutti_units::ranged! {
+    /// How far the fast envelope must rise above the slow one for an attack: finite and above
+    /// zero, in the signal's own scale (a full-scale sample is `1.0`).
+    TransientThreshold(Amplitude), TransientThresholdError, "a transient threshold above zero",
+    |raw| raw.get() > 0.0 && raw.get().is_finite()
+}
+
+tutti_units::ranged! {
+    /// The time constant of one of the two envelopes: within `0.1 ms..=1 s`.
+    TransientTime(Seconds), TransientTimeError, "an envelope time within 0.1 ms..=1 s",
+    |raw| raw.get() >= 1e-4 && raw.get() <= 1.0
+}
+
+/// The fast and the slow envelope's time constants of a [`TransientDetector`], the fast one
+/// strictly the shorter: a pair that is not so cannot be built.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TransientTimes {
+    fast: TransientTime,
+    slow: TransientTime,
+}
+
+/// A [`TransientTimes`] whose fast time is not below its slow one, so the envelopes'
+/// difference would not mark a rise.
+#[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
+#[error("fast envelope time {fast} is not below slow envelope time {slow}")]
+pub struct TransientTimesError {
+    /// The fast envelope's time constant; not below `slow`.
+    pub fast: Seconds,
+    /// The slow envelope's time constant.
+    pub slow: Seconds,
+}
+
+impl TransientTimes {
+    /// The pair of `fast` and `slow`.
+    ///
+    /// # Errors
+    ///
+    /// [`TransientTimesError`] when `fast` is not below `slow`.
+    pub fn new(fast: TransientTime, slow: TransientTime) -> Result<Self, TransientTimesError> {
+        if fast.get() < slow.get() {
+            Ok(Self { fast, slow })
+        } else {
+            Err(TransientTimesError {
+                fast: fast.get(),
+                slow: slow.get(),
+            })
+        }
+    }
+
+    /// The fast envelope's time constant: the shorter it is, the shorter an attack it sees and
+    /// the more of a low tone's ripple it follows.
+    #[must_use]
+    pub fn fast(&self) -> TransientTime {
+        self.fast
+    }
+
+    /// The slow envelope's time constant: the level an attack is measured against, and the
+    /// slope of a fade it tolerates.
+    #[must_use]
+    pub fn slow(&self) -> TransientTime {
+        self.slow
+    }
+}
+
+/// 1 ms fast and 30 ms slow.
+impl Default for TransientTimes {
+    fn default() -> Self {
+        Self {
+            fast: TransientTime::of(Seconds::new(0.001)),
+            slow: TransientTime::of(Seconds::new(0.03)),
+        }
+    }
+}
+
+/// The threshold of a detector that is given none: 0.05.
+const DEFAULT_THRESHOLD: Amplitude = Amplitude::new(0.05);
+
+/// The minimum gap of a detector that is given none: 50 ms.
+const DEFAULT_MIN_GAP: Seconds = Seconds::new(0.05);
+
 /// An attack detector over one channel, fed a sample at a time.
 ///
-/// Built on the control side for one rate; a push allocates nothing. The state and the
+/// Built on the control side for one rate, with chained options; a push allocates nothing. The state and the
 /// samples are `F`, the graph's float.
 #[derive(Clone, Debug)]
 pub struct TransientDetector<F: Float> {
+    rate: SampleRate,
+    times: TransientTimes,
     fast: Follower<F>,
     slow: Follower<F>,
     envelopes: (Smoothed<F>, Smoothed<F>),
@@ -76,33 +158,59 @@ pub struct TransientDetector<F: Float> {
 }
 
 impl<F: Float> TransientDetector<F> {
-    /// A detector at `rate` whose fast envelope has the time constant `fast` and whose slow
-    /// one has `slow`, reporting attacks where `fast - slow` exceeds `threshold` at least
-    /// `min_gap` apart. The times are read as the shaper reads them (floored at 0).
+    /// A detector at `rate` with a 0.05 threshold, the default [`TransientTimes`] (1 ms and
+    /// 30 ms) and a 50 ms minimum gap.
     #[must_use]
-    pub fn new(
-        rate: SampleRate,
-        fast: Seconds,
-        slow: Seconds,
-        threshold: Amplitude,
-        min_gap: Samples,
-    ) -> Self {
-        let lookback =
-            (LOOKBACK_TIME_CONSTANTS * fast.get().max(0.0) * rate.get()).ceil() as usize + 1;
+    pub fn new(rate: SampleRate) -> Self {
+        let times = TransientTimes::default();
         Self {
-            fast: Follower::of(floored(fast, fast), rate),
-            slow: Follower::of(floored(slow, slow), rate),
+            rate,
+            times,
+            fast: Follower::NEUTRAL,
+            slow: Follower::NEUTRAL,
             envelopes: (Smoothed::ZERO, Smoothed::ZERO),
-            threshold: F::from_unit(threshold),
-            rearm: F::from_unit(Amplitude::new(threshold.get() * REARM)),
-            min_gap: min_gap.get(),
-            recent: vec![F::ZERO; lookback + 1],
+            threshold: F::ZERO,
+            rearm: F::ZERO,
+            min_gap: DEFAULT_MIN_GAP.to_samples(rate).get(),
+            recent: Vec::new(),
             head: 0,
             filled: 0,
             armed: true,
             last: None,
             frames: 0,
         }
+        .times(times)
+        .threshold(TransientThreshold::of(DEFAULT_THRESHOLD))
+    }
+
+    /// The envelopes' time constants. Builds the envelopes and the lookback ring (allocates:
+    /// the control side), and restarts the detector.
+    #[must_use]
+    pub fn times(mut self, times: TransientTimes) -> Self {
+        let (fast, slow) = (times.fast().get(), times.slow().get());
+        let lookback = (LOOKBACK_TIME_CONSTANTS * fast.get() * self.rate.get()).ceil() as usize + 1;
+        self.times = times;
+        self.fast = Follower::of(floored(fast, fast), self.rate);
+        self.slow = Follower::of(floored(slow, slow), self.rate);
+        self.recent = vec![F::ZERO; lookback + 1];
+        self.reset();
+        self
+    }
+
+    /// The threshold `fast - slow` and the fast envelope's rise must pass.
+    #[must_use]
+    pub fn threshold(mut self, threshold: TransientThreshold) -> Self {
+        let threshold = threshold.get();
+        self.threshold = F::from_unit(threshold);
+        self.rearm = F::from_unit(Amplitude::new(threshold.get() * REARM));
+        self
+    }
+
+    /// The least spacing between reported positions.
+    #[must_use]
+    pub fn min_gap(mut self, gap: Samples) -> Self {
+        self.min_gap = gap.get();
+        self
     }
 
     /// Back to silence: both envelopes at 0, armed, no position kept. No allocation.
@@ -181,3 +289,6 @@ impl<F: Float> TransientDetector<F> {
         best
     }
 }
+
+#[cfg(test)]
+mod tests;

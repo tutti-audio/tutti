@@ -6,7 +6,7 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_dsp::FrameCount;
-use tutti_units::{Bpm, Db, Hz, SampleRate, Samples, Seconds};
+use tutti_units::{Bpm, Db, Hz, SampleRate, Samples};
 
 /// Everything that can go wrong constructing or feeding an analysis.
 ///
@@ -64,15 +64,6 @@ pub enum Error {
         min: Bpm,
         /// The faster bound, in [`Bpm`].
         max: Bpm,
-    },
-    /// A transient detector whose fast envelope is not quicker than its slow one, so their
-    /// difference would not mark a rise.
-    #[error("fast envelope time {fast} is not below slow envelope time {slow}")]
-    TransientTimes {
-        /// The fast envelope's time constant, in [`Seconds`]; not below `slow`.
-        fast: Seconds,
-        /// The slow envelope's time constant, in [`Seconds`].
-        slow: Seconds,
     },
     /// A spectrum band that holds no bin: the window is too short for it.
     #[error(

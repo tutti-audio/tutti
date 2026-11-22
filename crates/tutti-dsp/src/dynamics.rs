@@ -38,4 +38,7 @@ pub use multiband::{
     MultibandSettings, MultibandSignals,
 };
 pub use transient::{TransientBank, TransientControls};
-pub use transient_detector::TransientDetector;
+pub use transient_detector::{
+    TransientDetector, TransientThreshold, TransientThresholdError, TransientTime,
+    TransientTimeError, TransientTimes, TransientTimesError,
+};

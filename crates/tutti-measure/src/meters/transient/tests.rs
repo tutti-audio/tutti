@@ -153,12 +153,38 @@ fn a_meter_fed_in_chunks_equals_the_one_shot() {
     }
 }
 
-/// A fast envelope not quicker than the slow one is refused with both times.
+/// An attack that does not stand above the slow envelope is not reported, though the fast
+/// envelope rises.
+///
+/// A 1 kHz sine at 0.8 for 0.3 s, then 0.1 for 20 ms, then 0.3. The fast envelope (mean
+/// rectified level `2/pi` of the amplitude) falls from 0.51 to 0.064 and then rises to 0.19, a
+/// rise of 0.127 within the 5 ms lookback, over the 0.05 threshold. The slow envelope (30 ms)
+/// has decayed from 0.51 only to `0.064 + 0.45 exp(-20/30) = 0.29` at the step, and stays over
+/// the fast one (under 0.19 plus ripple 0.01) until it falls to 0.19 much later, so
+/// `fast - slow` stays negative and the one start is the only attack. With the same step after
+/// the slow envelope has settled at 0.064 (0.3 s at 0.1) the difference reaches about
+/// `0.84 * 0.127 = 0.11` and the step is found.
 #[test]
-fn a_fast_envelope_slower_than_the_slow_one_is_refused() {
-    let cfg = TransientConfig::new()
-        .fast(TransientTime::of(Seconds::new(0.05)))
-        .slow(TransientTime::of(Seconds::new(0.01)));
-    let err = Measure::<f64>::measure(&cfg, rate()).unwrap_err();
-    assert!(matches!(err, Error::TransientTimes { .. }), "{err}");
+fn a_rise_under_the_slow_envelope_is_not_an_attack() {
+    let tone = |parts: &[(f64, usize)]| -> Vec<f64> {
+        let mut n = 0usize;
+        parts
+            .iter()
+            .flat_map(|&(amp, len)| {
+                let start = n;
+                n += len;
+                (start..start + len)
+                    .map(move |i| amp * (core::f64::consts::TAU * 1000.0 * i as f64 / RATE).sin())
+            })
+            .collect()
+    };
+    let cfg = TransientConfig::new();
+    let under = tone(&[(0.8, 14_400), (0.1, 960), (0.3, 9600)]);
+    let found = detect(&cfg, &under);
+    assert!(found.len() == 1 && found[0] < 32, "{found:?}");
+
+    let settled = tone(&[(0.1, 14_400), (0.3, 9600)]);
+    let found = detect(&cfg, &settled);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!((14_400..14_400 + 240).contains(&found[1]), "{}", found[1]);
 }

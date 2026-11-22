@@ -392,10 +392,7 @@ pub use meters::spectrum::{
     SpectrumTime, SpectrumTimeError,
 };
 pub use meters::stereo::{StereoLevels, StereoReading, StereoSmoother, correlate};
-pub use meters::transient::{
-    TransientConfig, TransientMeter, TransientThreshold, TransientThresholdError, TransientTime,
-    TransientTimeError, detect_transients,
-};
+pub use meters::transient::{TransientConfig, TransientMeter, detect_transients};
 pub use meters::vectorscope::{
     ScopePoint, VectorscopeConfig, VectorscopeMeter, vectorscope_points,
 };
