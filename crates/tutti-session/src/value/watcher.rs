@@ -135,13 +135,13 @@ where
 type Erased = Arc<dyn Any + Send + Sync>;
 
 /// One target's base moved: before and after, erased.
-pub struct Landing {
+pub(crate) struct StoredChange {
     id: TargetId,
     base: Erased,
     value: Erased,
 }
 
-impl Landing {
+impl StoredChange {
     pub(super) fn new<V: Send + Sync + 'static>(id: TargetId, base: V, value: V) -> Self {
         Self {
             id,
@@ -153,13 +153,13 @@ impl Landing {
 
 /// What a batch changed: how many writes it had, and the targets whose base
 /// moved.
-pub struct Landed {
+pub(crate) struct Stored {
     writes: usize,
-    landings: Vec<Landing>,
+    landings: Vec<StoredChange>,
 }
 
-impl Landed {
-    pub(super) fn new(writes: usize, landings: Vec<Landing>) -> Self {
+impl Stored {
+    pub(super) fn new(writes: usize, landings: Vec<StoredChange>) -> Self {
         Self { writes, landings }
     }
 }
@@ -188,7 +188,7 @@ macro_rules! opaque_debug {
         }
     )+};
 }
-opaque_debug!(Landing, Landed, Record);
+opaque_debug!(StoredChange, Stored, Record);
 
 /// A watcher's side of the feed: what it watches, and the changes the feed has
 /// recorded for it since it last read.
@@ -242,7 +242,7 @@ impl Feed {
 
     /// Tells every watcher what `landed`. A batch of two or more writes is one
     /// gesture, which ends with the call.
-    pub(super) fn land(&self, landed: Landed) {
+    pub(super) fn land(&self, landed: Stored) {
         if landed.landings.is_empty() {
             return;
         }

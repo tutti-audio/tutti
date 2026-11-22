@@ -13,7 +13,7 @@ use super::batch::{Batch, Failure, Stageable};
 use super::error::SetRefusal;
 use super::slot::SlotId;
 use super::state::Params;
-use super::watcher::Landing;
+use super::watcher::StoredChange;
 
 /// The crate-private half of [`Target`]: how a target finds its cell, checks
 /// a value and lands it. Nothing outside the crate can name it, so nothing
@@ -252,7 +252,7 @@ pub trait Staged {
     fn accepts(&self, value: &dyn Any) -> Result<(), SetRefusal>;
     /// Stores it, and answers the change when the value is not the base the
     /// slot was read at.
-    fn store(self: Box<Self>) -> Option<Landing>;
+    fn store(self: Box<Self>) -> Option<StoredChange>;
 }
 
 /// Writes the builders every target type has, from the target's generics.

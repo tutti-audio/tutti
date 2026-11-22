@@ -12,7 +12,7 @@ use std::any::Any;
 use super::error::{SetRefusal, ValueErrorKind};
 use super::state::Params;
 use super::target::{AnyAssign, Assign, Info, Modify, Staged, TargetId, sealed::Store};
-use super::watcher::{Landed, Landing};
+use super::watcher::{Stored, StoredChange};
 
 /// An item that failed: its position, and what failed there.
 #[derive(Debug)]
@@ -53,10 +53,10 @@ impl<T: Store> Staged for Slot<T> {
         T::check(&self.cell, value)
     }
 
-    fn store(self: Box<Self>) -> Option<Landing> {
+    fn store(self: Box<Self>) -> Option<StoredChange> {
         T::store(&self.cell, &self.value);
         // A value equal to the base is no change.
-        (self.value != self.base).then(|| Landing::new(self.id, self.base, self.value))
+        (self.value != self.base).then(|| StoredChange::new(self.id, self.base, self.value))
     }
 }
 
@@ -83,10 +83,10 @@ impl<'a> Batch<'a> {
 
     /// Stores every target's final value, in the order each was first named,
     /// and answers the targets whose value is not the base they had.
-    pub fn store(self) -> Landed {
+    pub(crate) fn store(self) -> Stored {
         let writes = self.writes;
         let landings = self.slots.into_iter().filter_map(Staged::store).collect();
-        Landed::new(writes, landings)
+        Stored::new(writes, landings)
     }
 
     fn fail(&self, target: TargetId, kind: ValueErrorKind) -> Failure {
