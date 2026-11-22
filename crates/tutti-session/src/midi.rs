@@ -2368,11 +2368,11 @@ mod tests {
     }
 
     /// Keeps every batch it is handed.
-    struct Recording(Arc<std::sync::Mutex<Vec<Vec<UmpAt>>>>);
+    struct Recording(Arc<tutti_rt::Mutex<Vec<Vec<UmpAt>>>>);
     impl tutti_midi_runtime::MidiOut for Recording {
         fn queue_timed(&self, batch: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
             let events: Vec<tutti_graph::UmpAt> = batch.iter().map(|e| (e.at, e.ump)).collect();
-            self.0.lock().unwrap().push(events.to_vec());
+            self.0.lock().push(events.to_vec());
             tutti_midi_runtime::Taken::within(batch, batch.len())
         }
     }
@@ -2383,10 +2383,10 @@ mod tests {
     /// stamping output advances its origin by that span: 1 000 frames.
     #[test]
     fn a_batch_of_frames_is_a_block_from_its_first_frame() {
-        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = Arc::new(tutti_rt::Mutex::new(Vec::new()));
         let mut out = UmpOut::new(Arc::new(Recording(log.clone())), SampleRate::SR_48K);
         out.send_frames(&[at(1_250), at(1_000), at(1_999)], None);
-        let sent = log.lock().unwrap().remove(0);
+        let sent = log.lock().remove(0);
         let span = Samples::new(1_000);
         let offsets: Vec<_> = sent.iter().map(|e| e.0).collect();
         assert_eq!(
@@ -2430,10 +2430,10 @@ mod tests {
     }
 
     /// Keeps every batch's events with the time each was sent at.
-    struct Timed(Arc<std::sync::Mutex<Vec<Outgoing>>>);
+    struct Timed(Arc<tutti_rt::Mutex<Vec<Outgoing>>>);
     impl tutti_midi_runtime::MidiOut for Timed {
         fn queue_timed(&self, events: &[Outgoing]) -> tutti_midi_runtime::Taken {
-            self.0.lock().unwrap().extend_from_slice(events);
+            self.0.lock().extend_from_slice(events);
             tutti_midi_runtime::Taken::within(events, events.len())
         }
     }
@@ -2449,12 +2449,12 @@ mod tests {
         }
     }
 
-    fn taken(log: &Arc<std::sync::Mutex<Vec<Outgoing>>>) -> Vec<Outgoing> {
-        log.lock().unwrap().clone()
+    fn taken(log: &Arc<tutti_rt::Mutex<Vec<Outgoing>>>) -> Vec<Outgoing> {
+        log.lock().clone()
     }
 
-    fn timed_out() -> (UmpOut, Arc<std::sync::Mutex<Vec<Outgoing>>>) {
-        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+    fn timed_out() -> (UmpOut, Arc<tutti_rt::Mutex<Vec<Outgoing>>>) {
+        let log = Arc::new(tutti_rt::Mutex::new(Vec::new()));
         let out = UmpOut::new(Arc::new(Timed(log.clone())), SampleRate::SR_48K);
         (out, log)
     }
@@ -2469,7 +2469,7 @@ mod tests {
         let timing = timing_at(t0, OutputTerms::default());
         let refused = out.send_frames(&[at(1_000), at(2_000), at(3_000)], Some(&timing));
         assert_eq!(refused, 0);
-        let sends: Vec<SendAt> = log.lock().unwrap().iter().map(|e| e.send).collect();
+        let sends: Vec<SendAt> = log.lock().iter().map(|e| e.send).collect();
         let SendAt::At(first) = sends[0] else {
             panic!("not scheduled: {sends:?}")
         };
@@ -2522,7 +2522,7 @@ mod tests {
         out.set_stamping(Stamping::Jr);
         let timing = timing_at(t0, OutputTerms::default());
         out.send_frames(&[at(1_000), at(2_000)], Some(&timing));
-        let sent = log.lock().unwrap().clone();
+        let sent = log.lock().clone();
         let events: Vec<&Outgoing> = sent
             .iter()
             .filter(|e| e.ump == note(0).1 || e.ump.message_type() == 0)
@@ -2550,7 +2550,7 @@ mod tests {
         let beyond = 48_000 * 3;
         let refused = out.send_frames(&[at(1_000), at(beyond)], Some(&timing));
         assert_eq!(refused, 1);
-        assert_eq!(log.lock().unwrap().len(), 1, "only the one within the cap");
+        assert_eq!(log.lock().len(), 1, "only the one within the cap");
     }
 
     /// With no timing, every event is sent at once, as before.
@@ -2558,6 +2558,6 @@ mod tests {
     fn without_timing_every_event_is_sent_now() {
         let (mut out, log) = timed_out();
         out.send_frames(&[at(1_000), at(2_000)], None);
-        assert!(log.lock().unwrap().iter().all(|e| e.send == SendAt::Now));
+        assert!(log.lock().iter().all(|e| e.send == SendAt::Now));
     }
 }

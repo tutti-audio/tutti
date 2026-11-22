@@ -3,14 +3,14 @@
 //! main thread.
 
 use std::future::Future;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 use tutti_platform::{Executor, Instant, WeakExecutor};
 
 use tutti_buffers::Float;
 use tutti_plugin_types::{MainThreadMarker, MainWork, MainWorkHandle, Timeouts};
-use tutti_rt::LockExt;
+use tutti_rt::{Condvar, Mutex};
 
 use crate::graph::Graph;
 use crate::plugin::{Inbox, RenderModeState, SNAPSHOT_INTERVAL};
@@ -114,7 +114,7 @@ impl TaskGuard {
     /// picked up from the pool's queue ends it here, unrun; otherwise the task counts as
     /// running, with its deadline counted from now.
     fn begin(&mut self) -> bool {
-        let mut state = self.tasks.0.state.lock_recover();
+        let mut state = self.tasks.0.state.lock();
         if state.closing {
             return false;
         }
@@ -128,7 +128,7 @@ impl TaskGuard {
 
 impl Tasks {
     fn enter(&self, bound: Duration) -> TaskGuard {
-        self.0.state.lock_recover().count += 1;
+        self.0.state.lock().count += 1;
         TaskGuard {
             tasks: self.clone(),
             bound,
@@ -138,12 +138,12 @@ impl Tasks {
 
     /// Marks a close begun: a task not yet running never runs.
     pub(crate) fn close(&self) {
-        self.0.state.lock_recover().closing = true;
+        self.0.state.lock().closing = true;
     }
 
     /// How many tasks are queued or running.
     pub(crate) fn in_flight(&self) -> usize {
-        self.0.state.lock_recover().count
+        self.0.state.lock().count
     }
 
     /// How many spawns the executor refused.
@@ -156,7 +156,7 @@ impl Tasks {
     /// [`close`](Self::close) was called. `pump` runs between waits when the caller is on the main thread, so
     /// an in-process plugin's task, which waits for the main thread, can end.
     pub(crate) fn wait_idle(&self, mut pump: Option<&mut dyn FnMut()>) -> bool {
-        let mut state = self.0.state.lock_recover();
+        let mut state = self.0.state.lock();
         loop {
             if state.running == 0 {
                 return true;
@@ -172,16 +172,11 @@ impl Tasks {
             } else {
                 left
             };
-            state = self
-                .0
-                .idle
-                .wait_timeout(state, slice)
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .0;
+            state = self.0.idle.wait_timeout(state, slice).0;
             if let Some(pump) = pump.as_mut() {
                 drop(state);
                 pump();
-                state = self.0.state.lock_recover();
+                state = self.0.state.lock();
             }
         }
     }
@@ -189,7 +184,7 @@ impl Tasks {
 
 impl Drop for TaskGuard {
     fn drop(&mut self) {
-        let mut state = self.tasks.0.state.lock_recover();
+        let mut state = self.tasks.0.state.lock();
         state.count -= 1;
         if self.running {
             state.running -= 1;
@@ -453,6 +448,6 @@ impl SharedWork {
 
     /// [`MainWork::run`].
     pub(crate) fn run(&self, main: MainThreadMarker) -> usize {
-        self.0.lock_recover().run(main)
+        self.0.lock().run(main)
     }
 }

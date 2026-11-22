@@ -264,7 +264,7 @@ fn a_non_mic_live_source_records_until_stopped() {
 
 /// A sink that is not a WAV: a test sink can be read back directly.
 #[derive(Clone)]
-struct Collect(Arc<std::sync::Mutex<Vec<f32>>>);
+struct Collect(Arc<tutti_rt::Mutex<Vec<f32>>>);
 
 impl Sink for Collect {
     type Sample = f32;
@@ -275,7 +275,7 @@ impl Sink for Collect {
     }
     fn write(&mut self, interleaved: Interleaved<'_>) -> Result<(), SinkFailed> {
         let interleaved = interleaved.samples();
-        self.0.lock().unwrap().extend_from_slice(interleaved);
+        self.0.lock().extend_from_slice(interleaved);
         Ok(())
     }
     fn finalize(self) -> Result<(), Self::Error> {
@@ -321,7 +321,7 @@ impl Source for Ramp {
 /// not just the count.
 #[test]
 fn a_named_capacity_bounds_each_pass_over_any_sink() {
-    let seen = Collect(Arc::new(std::sync::Mutex::new(Vec::new())));
+    let seen = Collect(Arc::new(tutti_rt::Mutex::new(Vec::new())));
     let mut pump_loop = PumpLoop::new(
         Ramp {
             frames: 1000,
@@ -345,7 +345,7 @@ fn a_named_capacity_bounds_each_pass_over_any_sink() {
         .finalize()
         .expect("a collecting sink finalizes cleanly");
 
-    let got = seen.0.lock().unwrap();
+    let got = seen.0.lock();
     assert_eq!(got.len(), 2000, "1000 stereo frames are 2000 samples");
     for (k, frame) in got.as_chunks::<2>().0.iter().enumerate() {
         assert_eq!(*frame, [k as f32, -(k as f32)], "frame {k}");
@@ -359,14 +359,14 @@ fn a_named_capacity_bounds_each_pass_over_any_sink() {
 /// parks forever. The clamp lives in `PumpLoop::new`.
 #[test]
 fn a_zero_capacity_moves_one_frame_per_pass() {
-    let seen = Collect(Arc::new(std::sync::Mutex::new(Vec::new())));
+    let seen = Collect(Arc::new(tutti_rt::Mutex::new(Vec::new())));
     let mut pump_loop = PumpLoop::new(Ramp { frames: 3, pos: 0 }, seen.clone(), Samples::ZERO)
         .expect("stereo into stereo");
 
     assert_eq!(pump_until_dry(&mut pump_loop, 16), Samples::new(3));
     assert_eq!(pump_loop.pump_once(), PumpPass::Ended);
     pump_loop.finalize().expect("finalize");
-    assert_eq!(*seen.0.lock().unwrap(), [0.0, 0.0, 1.0, -1.0, 2.0, -2.0]);
+    assert_eq!(*seen.0.lock(), [0.0, 0.0, 1.0, -1.0, 2.0, -2.0]);
 }
 
 /// A live source whose device can die: serves its queued frames, then reads

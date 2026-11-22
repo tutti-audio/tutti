@@ -23,10 +23,10 @@
 //! the new meter in its transport and in every plugin; a block that starts
 //! while it runs can read the old meter in some and the new in others.
 
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, MutexGuard, Weak};
 
 use tutti_music::MeterMap;
-use tutti_rt::{Loan, LockExt, Publisher, Reader};
+use tutti_rt::{Loan, Mutex, Publisher, Reader};
 
 /// What a following node reads: the project's meter, or none (the node then
 /// reads 4/4 from bar 0).
@@ -102,7 +102,7 @@ impl ProjectMeter {
     fn state(&self) -> MutexGuard<'_, ProjectState> {
         // A poisoned lock still holds a whole state: the list is changed in
         // one `retain` or push.
-        self.0.state.lock_recover()
+        self.0.state.lock()
     }
 
     /// Publishes `meter` to the transport and to every following slot, before
@@ -249,7 +249,7 @@ impl TimeSignatureSlot {
 
     fn follows(&self) -> MutexGuard<'_, Option<ProjectMeter>> {
         // A poisoned lock still holds a whole `Option`, set in one assignment.
-        self.0.follows.lock_recover()
+        self.0.follows.lock()
     }
 
     /// Follow `meter` from the node's next block: its meter now, and every

@@ -37,7 +37,6 @@ use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::bundle::{ModuleKind, native_module_path};
 use tutti_plugin_types::{IpcError, PluginPreset, PresetError};
 use tutti_plugin_types::{MainThreadMarker, PluginFailure, PluginFormat, PluginId, PluginRef};
-use tutti_rt::LockExt;
 
 use super::opened::{Context, Install, PluginCause, PluginInfo, PluginPorts, Shared, Standing};
 use super::opened::{plugin_failed, ports_of};
@@ -830,12 +829,12 @@ impl NodeLink {
 
     /// Recovery gave up on the plugin.
     pub(crate) fn gave_up(&self, why: GiveUp) {
-        *self.standing().gave_up.lock_recover() = Some(why);
+        *self.standing().gave_up.lock() = Some(why);
     }
 
     /// The session saw the plugin's bridge dead, for `failure`.
     pub(crate) fn died(&self, failure: PluginFailure) {
-        self.standing().dead.lock_recover().get_or_insert(failure);
+        self.standing().dead.lock().get_or_insert(failure);
     }
 }
 

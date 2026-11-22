@@ -81,12 +81,12 @@ pub(super) fn await_tasks<K: crate::AppKey, C: Clock<Float = f32>>(session: &Ses
 #[derive(Default)]
 pub(super) struct Inert {
     /// The thread the backend dropped on: the last owner of the handle lets go there.
-    pub(super) dropped_on: Arc<std::sync::Mutex<Option<std::thread::ThreadId>>>,
+    pub(super) dropped_on: Arc<tutti_rt::Mutex<Option<std::thread::ThreadId>>>,
 }
 
 impl Drop for Inert {
     fn drop(&mut self) {
-        *self.dropped_on.lock().unwrap() = Some(std::thread::current().id());
+        *self.dropped_on.lock() = Some(std::thread::current().id());
     }
 }
 
