@@ -1265,7 +1265,7 @@ fn a_controller_entry_fault_names_the_index_and_the_path_that_failed() {
             integers: 1
         }
         .to_string(),
-        "a `rpn` controller's ctrlIndex does not take 1 integers"
+        "a `rpn` controller takes no ctrlIndex of length 1"
     );
     assert_eq!(
         fault(r#""ctrlType":"cc""#),
