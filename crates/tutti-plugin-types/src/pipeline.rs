@@ -50,11 +50,13 @@ pub struct ServerLosses {
 /// (`PluginControls::chunk_outcomes` in `tutti-plugin-host`). Zero for a
 /// plugin that runs in this process, which has no pipeline to be late.
 ///
+/// In a reading taken while the pipeline is quiet,
 /// `late + refused + unanswered + skipped <= missed`, not equal: a chunk a
 /// reset dropped, and one whose channel the shared-memory slab lacks, is
 /// missed and none of the four; and a missed chunk's fate is learned a few
 /// chunks after it played, so a reading can hold missed chunks whose fate is
-/// not known yet.
+/// not known yet. A reading taken while the pipeline runs loads each count
+/// on its own, so it can catch one count ahead of another.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ChunkOutcomes {
     /// Chunks the server had not answered by the time the node played them,
