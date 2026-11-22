@@ -2013,11 +2013,7 @@ fn ref_port<F: Float>(
         }
     };
     let bound = |v: f64| F::from_unit(CellValue(v));
-    let (lo, hi) = if range.min <= range.max {
-        (bound(range.min), bound(range.max))
-    } else {
-        (bound(range.max), bound(range.min))
-    };
+    let (lo, hi) = (bound(range.ordered().0), bound(range.ordered().1));
     // The event source's value at every frame, the base before its
     // first event; it replaces the base, clamped.
     let mut vals = vec![F::ZERO; frames];

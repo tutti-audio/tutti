@@ -48,15 +48,15 @@ impl<F: Float> Editor<F> {
     ///
     /// # Errors
     ///
-    /// Refused, changing nothing: [`ParamRangeError::InvalidRange`] for a NaN
-    /// bound or crossed bounds on a circular param (`ParamRange::arc` writes
-    /// one), and [`ParamRangeError::NoSuchNode`] for a key with no node.
+    /// Refused, changing nothing: [`ParamRangeError::InvalidRange`] for crossed
+    /// bounds on a circular param (`ParamRange::arc` writes one), and
+    /// [`ParamRangeError::NoSuchNode`] for a key with no node.
     pub fn set_param_range(
         &mut self,
         at: ParamIn,
         range: ParamRange,
     ) -> Result<(), ParamRangeError> {
-        if range.min.is_nan() || range.max.is_nan() || !range.fits(at.param.param) {
+        if !range.fits(at.param.param) {
             return Err(ParamRangeError::InvalidRange { at });
         }
         if !self.spec.topology.nodes.contains_key(&at.node) {
@@ -354,17 +354,14 @@ impl<F: Float> Editor<F> {
     ///
     /// # Errors
     ///
-    /// Refused, changing nothing: [`EdgeGainError::InvalidRange`] for a NaN
-    /// bound, [`EdgeGainError::NoSuchEdge`] when `id` is not an edge of the
-    /// spec, and [`EdgeGainError::BusLane`] for a lane of a bus edge.
+    /// Refused, changing nothing: [`EdgeGainError::NoSuchEdge`] when `id` is
+    /// not an edge of the spec, and [`EdgeGainError::BusLane`] for a lane of a
+    /// bus edge.
     pub fn set_edge_gain_range(
         &mut self,
         id: EdgeId,
         range: ParamRange,
     ) -> Result<(), EdgeGainError> {
-        if range.min.is_nan() || range.max.is_nan() {
-            return Err(EdgeGainError::InvalidRange { id });
-        }
         self.check_gain_edge(id)?;
         self.touch();
         self.declare_lane(id);

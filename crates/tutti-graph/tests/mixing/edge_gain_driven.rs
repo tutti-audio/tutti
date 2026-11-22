@@ -15,9 +15,9 @@ use std::collections::BTreeMap;
 
 use common::{Kind, Pair, SpecBehaviour, bits, driver_value, input_signal, prepare};
 use tutti_graph::{
-    CompileError, Edge, EdgeGainError, EdgeId, Editor, EventOutputPort, ForkCause, ForkSource,
-    Forked, GraphInvalid, GraphSpec, InputPort, IntoNode, Node, NodeKey, NodeParts, OutputPort,
-    ParamRange, PortSink, PortSource, RenderMode, Topology, Unforkable, ValidGraph, compile,
+    CompileError, Edge, EdgeId, Editor, EventOutputPort, ForkCause, ForkSource, Forked,
+    GraphInvalid, GraphSpec, InputPort, IntoNode, Node, NodeKey, NodeParts, OutputPort, ParamRange,
+    PortSink, PortSource, RenderMode, Topology, Unforkable, ValidGraph, compile,
 };
 use tutti_units::{Amplitude, Samples, Tail};
 
@@ -237,7 +237,7 @@ fn a_driven_lane_renders_the_analytic_weight() {
 fn a_driven_lane_is_clamped_to_its_range() {
     let mut rig = Rig::new(&[dc(1.0), driver(0)], &[1], Where::Output);
     let id = rig.drive(1, 2);
-    rig.range = Some((id, ParamRange::new(0.0, 0.5)));
+    rig.range = Some((id, ParamRange::of(0.0, 0.5)));
     let got = render_both(&rig, 4);
     for (n, &g) in got.iter().enumerate() {
         let w = stepped(n, 0).expect("step").clamp(0.0, 0.5);
@@ -263,7 +263,7 @@ fn narrowing_a_driven_lanes_range_clamps_the_value_and_leaves_the_base() {
         let w = stepped(n, 0).expect("step");
         assert_eq!(g.to_bits(), (0.0 + w * 1.0).to_bits(), "frame {n}");
     }
-    pair.set_edge_gain_range(id, ParamRange::new(0.0, 0.5));
+    pair.set_edge_gain_range(id, ParamRange::of(0.0, 0.5));
     let narrowed = run(&mut pair, 4);
     for (i, &g) in narrowed.iter().enumerate() {
         let w = stepped(2 * BLOCK + i, 0).expect("step").clamp(0.0, 0.5);
@@ -579,18 +579,14 @@ fn a_source_is_structural_and_a_range_is_a_control() {
     assert_eq!(driven.gain_ports().len(), 1);
     assert!(reader.same_cell(&ed.edge_gain_range_cell(id).expect("cell")));
 
-    ed.set_edge_gain_range(id, ParamRange::new(-1.0, 1.0))
+    ed.set_edge_gain_range(id, ParamRange::of(-1.0, 1.0))
         .expect("an edge with an entry");
-    assert_eq!(reader.current(), ParamRange::new(-1.0, 1.0));
+    assert_eq!(reader.current(), ParamRange::of(-1.0, 1.0));
     ed.commit().expect("commits");
     assert!(
         std::sync::Arc::ptr_eq(&driven, ed.base().expect("a plan")),
         "a range sends no plan"
     );
-    assert!(matches!(
-        ed.set_edge_gain_range(id, ParamRange::new(f64::NAN, 1.0)),
-        Err(EdgeGainError::InvalidRange { .. })
-    ));
 
     assert!(
         !ed.spec_mut().disconnect_edge_gain(id, lane_out(1)),

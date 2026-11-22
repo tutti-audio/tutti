@@ -2492,7 +2492,7 @@ fn drive(desc: &mut Desc, rng: &mut Rng) {
         });
         let (min, max) = LANE_RANGES[rng.below(LANE_RANGES.len() as u64) as usize];
         desc.gain_ranges
-            .insert(id, tutti_graph::ParamRange::new(min, max));
+            .insert(id, tutti_graph::ParamRange::of(min, max));
     }
 }
 
@@ -2537,7 +2537,7 @@ proptest! {
                     && let Some(id) = lanes.pick(&ids)
                 {
                     let (min, max) = LANE_RANGES[lanes.below(LANE_RANGES.len() as u64) as usize];
-                    let range = tutti_graph::ParamRange::new(min, max);
+                    let range = tutti_graph::ParamRange::of(min, max);
                     pair.set_edge_gain_range(id, range);
                     desc.gain_ranges.insert(id, range);
                 }
@@ -2814,7 +2814,7 @@ fn drive_mixes(desc: &mut Desc, rng: &mut Rng) {
         if rng.chance(50) {
             let (min, max) = LANE_RANGES[rng.below(LANE_RANGES.len() as u64) as usize];
             desc.port_ranges
-                .insert(at, tutti_graph::ParamRange::new(min, max));
+                .insert(at, tutti_graph::ParamRange::of(min, max));
         }
     }
 }
@@ -2871,7 +2871,7 @@ proptest! {
                     && let Some(key) = draws.pick(&desc.order)
                 {
                     let (min, max) = LANE_RANGES[draws.below(LANE_RANGES.len() as u64) as usize];
-                    let range = tutti_graph::ParamRange::new(min, max);
+                    let range = tutti_graph::ParamRange::of(min, max);
                     pair.set_mix_range(key, range);
                     desc.port_ranges.insert(mix_port(key), range);
                 }

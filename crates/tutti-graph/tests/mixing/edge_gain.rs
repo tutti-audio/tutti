@@ -645,7 +645,7 @@ fn set_edge_gain_leaves_the_plan_untouched_and_lands_next_block() {
         .set_edge_gain(output_edge(1), amp(0.25))
         .expect("an edge with an entry");
     rig.ed
-        .set_edge_gain_range(output_edge(1), tutti_graph::ParamRange::new(-2.0, 2.0))
+        .set_edge_gain_range(output_edge(1), tutti_graph::ParamRange::of(-2.0, 2.0))
         .expect("an edge with an entry");
     rig.ed.commit().expect("commits");
     assert!(Arc::ptr_eq(&plan, &rig.plan()), "base and range: no plan");
@@ -733,7 +733,7 @@ fn set_edge_gain_refuses_what_a_commit_would() {
 
 /// `validate` refuses an entry whose edge does not exist (a port and an output
 /// edge, a feedback edge's source gone); the editor refuses a base that is not
-/// finite and a range with a NaN bound, an infinite bound being fine.
+/// finite, and takes an infinite bound.
 #[test]
 fn validate_refuses_a_malformed_entry() {
     let fan = Fan::new(&[1.0, 2.0], true);
@@ -763,11 +763,6 @@ fn validate_refuses_a_malformed_entry() {
             Err(EdgeGainError::NotFinite { .. })
         ));
     }
-    assert!(matches!(
-        rig.ed
-            .set_edge_gain_range(output_edge(1), tutti_graph::ParamRange::new(f64::NAN, 1.0)),
-        Err(EdgeGainError::InvalidRange { .. })
-    ));
     rig.ed
         .set_edge_gain(output_edge(1), amp(-2.0))
         .expect("a negative weight");

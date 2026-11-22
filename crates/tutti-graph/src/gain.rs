@@ -144,7 +144,7 @@ impl EdgeGain {
 
     /// The range an edge gain gets until one is set: finite, so `w * s` cannot
     /// meet infinity, and polarity is allowed (about +18 dB either way).
-    pub const DEFAULT_RANGE: ParamRange = ParamRange::new(-8.0, 8.0);
+    pub const DEFAULT_RANGE: ParamRange = ParamRange::of(-8.0, 8.0);
 }
 
 /// Why an edge-gain control ([`Editor::set_edge_gain`](crate::Editor::set_edge_gain),
@@ -171,13 +171,6 @@ pub enum EdgeGainError {
     /// NaN on the audio thread.
     #[error("the base of edge {id:?} is not finite")]
     NotFinite {
-        /// The edge.
-        id: crate::EdgeId,
-    },
-    /// The range has a NaN bound (`f32::clamp` panics on one, on the audio
-    /// thread). An infinite bound is fine.
-    #[error("the range of edge {id:?} has a NaN bound")]
-    InvalidRange {
         /// The edge.
         id: crate::EdgeId,
     },

@@ -329,15 +329,11 @@ impl<F: Float> GraphBuilder<F> {
     ///
     /// # Panics
     ///
-    /// If `at`'s node is not in the builder, or `range` has a NaN bound or
-    /// crossed bounds on a circular param (make one with
-    /// [`ParamRange::arc`]).
+    /// If `at`'s node is not in the builder, or `range` has crossed bounds on
+    /// a circular param (make one with [`ParamRange::arc`]).
     pub fn param_range(&mut self, at: ParamIn, range: ParamRange) -> &mut Self {
         self.check_node(at.node);
-        assert!(
-            !range.min.is_nan() && !range.max.is_nan() && range.fits(at.param.param),
-            "a range has no NaN bound and no crossed arc"
-        );
+        assert!(range.fits(at.param.param), "a range has no crossed arc");
         self.values.set_range(at, range);
         self
     }

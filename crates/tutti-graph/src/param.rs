@@ -258,19 +258,17 @@ impl Quantity for CellValue {
 ///
 /// Bare `f64` bounds, the unit's own width, not a unit type: a param port is
 /// erased over its unit (a cutoff is `Hz`, a threshold `Db`), as the
-/// `ParamRamp` wire is. Crossed bounds
-/// are ordered where they are applied, never a panic; a NaN bound never
-/// reaches the audio thread
-/// ([`ParamRangeError::InvalidRange`]).
+/// `ParamRamp` wire is. A bound is never NaN ([`new`](Self::new) refuses
+/// one and the fields are private), so a clamp by it cannot panic or yield
+/// NaN; an infinite bound is no clamp on that side. Crossed bounds are
+/// ordered where they are applied, never a panic.
 /// Sixteen bytes, so a port's live range is published whole through a
 /// [`ParamRangeCell`] and a reader sees one publish's `min` and `max`
 /// together.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ParamRange {
-    /// The lowest value.
-    pub min: f64,
-    /// The highest value.
-    pub max: f64,
+    min: f64,
+    max: f64,
 }
 
 impl ParamRange {
@@ -280,19 +278,58 @@ impl ParamRange {
         max: f64::INFINITY,
     };
 
-    /// `min..=max`. For a circular param ([`UnitParam::is_circular`]) the
-    /// bounds read as an arc, `min` to `max` counter-clockwise, and `min` must
-    /// not exceed `max` (a crossed range is refused,
-    /// [`ParamRangeError::InvalidRange`]);
-    /// [`arc`](Self::arc) writes one by its centre.
+    /// `min..=max`, or `None` when either bound is NaN. For a circular param
+    /// ([`UnitParam::is_circular`]) the bounds read as an arc, `min` to `max`
+    /// counter-clockwise, and `min` must not exceed `max` (a crossed range is
+    /// refused, [`ParamRangeError::InvalidRange`]); [`arc`](Self::arc) writes
+    /// one by its centre.
+    ///
+    /// ```
+    /// use tutti_graph::ParamRange;
+    ///
+    /// assert_eq!(ParamRange::new(0.0, 1.0), Some(ParamRange::of(0.0, 1.0)));
+    /// assert_eq!(ParamRange::new(f64::NAN, 1.0), None);
+    /// assert!(ParamRange::new(f64::NEG_INFINITY, 1.0).is_some());
+    /// ```
     #[must_use]
-    pub const fn new(min: f64, max: f64) -> Self {
-        Self { min, max }
+    pub const fn new(min: f64, max: f64) -> Option<Self> {
+        if min.is_nan() || max.is_nan() {
+            None
+        } else {
+            Some(Self { min, max })
+        }
+    }
+
+    /// [`new`](Self::new) for bounds known not to be NaN, such as literals.
+    ///
+    /// # Panics
+    ///
+    /// If either bound is NaN (a compile error in a `const`).
+    #[must_use]
+    pub const fn of(min: f64, max: f64) -> Self {
+        match Self::new(min, max) {
+            Some(range) => range,
+            None => panic!("a range bound is not NaN"),
+        }
+    }
+
+    /// The lowest bound, never NaN.
+    #[inline]
+    #[must_use]
+    pub const fn min(self) -> f64 {
+        self.min
+    }
+
+    /// The highest bound, never NaN.
+    #[inline]
+    #[must_use]
+    pub const fn max(self) -> f64 {
+        self.max
     }
 
     /// The arc of the circle `half_span` either side of `centre`: the range
     /// of a circular param ([`UnitParam::is_circular`], `Azimuth`). It is the
-    /// only way to write a bounded range of one: `new(170.0, -170.0)` would
+    /// only way to write a bounded range of one: `of(170.0, -170.0)` would
     /// be ordered into `-170..170`, the opposite arc, and a circular param's
     /// port refuses a crossed range
     /// ([`ParamRangeError::InvalidRange`]).
@@ -453,12 +490,10 @@ pub enum ParamRangeError {
         /// The key.
         node: crate::NodeKey,
     },
-    /// The range has a NaN bound, or crossed bounds on a circular param (an
-    /// arc is written [`ParamRange::arc`]; ordering `170..-170` would read the
-    /// opposite arc). A NaN bound clamps every value to NaN or to the other
-    /// bound, and `f32::clamp` panics on it, on the audio thread. An infinite
-    /// bound is fine (no clamp on that side).
-    #[error("the range of {at:?} has a NaN bound or a crossed arc")]
+    /// The range has crossed bounds on a circular param (an arc is written
+    /// [`ParamRange::arc`]; ordering `170..-170` would read the opposite arc).
+    /// A line orders its bounds, so any range fits it.
+    #[error("the range of {at:?} is a crossed arc")]
     InvalidRange {
         /// The param port.
         at: ParamIn,
@@ -1224,7 +1259,7 @@ mod tests {
             assert!(!behind.contains(v), "{v}");
         }
         // The same bounds as a line are the opposite, wide range: the trap.
-        let line = ParamRange::new(160.0, 200.0).view(EL);
+        let line = ParamRange::of(160.0, 200.0).view(EL);
         assert!(line.contains(180.0) && !line.contains(-180.0));
         assert_eq!(behind.span(), 40.0);
     }
@@ -1234,11 +1269,11 @@ mod tests {
     #[test]
     fn a_circular_ranges_span_is_its_arcs_length() {
         assert_eq!(ParamRange::UNBOUNDED.view(AZ).span(), 360.0);
-        assert_eq!(ParamRange::new(-180.0, 180.0).view(AZ).span(), 360.0);
+        assert_eq!(ParamRange::of(-180.0, 180.0).view(AZ).span(), 360.0);
         let arc = |half| ParamRange::arc(Azimuth::new(0.0), ArcDegrees::new(half)).view(AZ);
         assert_eq!(arc(90.0).span(), 180.0);
         assert_eq!(arc(400.0).span(), 360.0);
-        assert_eq!(ParamRange::new(-90.0, 90.0).view(EL).span(), 180.0);
+        assert_eq!(ParamRange::of(-90.0, 90.0).view(EL).span(), 180.0);
         assert!(ParamRange::UNBOUNDED.view(EL).span().is_infinite());
         assert!(ParamRange::UNBOUNDED.view(None).span().is_infinite());
     }
@@ -1247,7 +1282,7 @@ mod tests {
     /// line; an arc holds to its nearer end.
     #[test]
     fn constrain_wraps_a_circle_and_clamps_a_line() {
-        let r = ParamRange::new(-180.0, 180.0);
+        let r = ParamRange::of(-180.0, 180.0);
         assert_eq!(r.view(AZ).constrain(190.0), -170.0);
         assert_eq!(r.view(EL).constrain(190.0), 180.0);
         let arc = ParamRange::arc(Azimuth::new(90.0), ArcDegrees::new(30.0)).view(AZ);
@@ -1483,21 +1518,21 @@ mod tests {
             s.spawn(|| {
                 for k in 1..=LAST {
                     let k = f64::from(k);
-                    assert!(ranges.store(addr, ParamRange::new(-k, k)));
+                    assert!(ranges.store(addr, ParamRange::of(-k, k)));
                 }
                 done.store(true, Ordering::Release);
             });
             loop {
                 let finished = done.load(Ordering::Acquire);
                 let r = reader.load();
-                assert_eq!(r.min, -r.max, "one publish's bounds: {r:?}");
+                assert_eq!(r.min(), -r.max(), "one publish's bounds: {r:?}");
                 if finished {
                     break;
                 }
             }
         });
         let last = f64::from(LAST);
-        assert_eq!(reader.load(), ParamRange::new(-last, last));
+        assert_eq!(reader.load(), ParamRange::of(-last, last));
         assert_eq!(ranges.reclaim(), 0, "nothing is held once the reader idles");
     }
 }

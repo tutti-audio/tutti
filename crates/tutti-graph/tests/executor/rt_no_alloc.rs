@@ -953,8 +953,8 @@ fn modulated_params_are_allocation_free_on(workers: usize) {
     // range runs inside it. No commit, so nothing to apply.
     ed.collect();
     let ranges = [
-        tutti_graph::ParamRange::new(0.0, 0.5),
-        tutti_graph::ParamRange::new(2.0, -1.0),
+        tutti_graph::ParamRange::of(0.0, 0.5),
+        tutti_graph::ParamRange::of(2.0, -1.0),
         tutti_graph::ParamRange::UNBOUNDED,
     ];
     for i in 0..60 {
@@ -1276,7 +1276,7 @@ fn an_azimuth_param_port_is_allocation_free() {
     let mut out = vec![0.0f32; 256];
     let ranges = [
         ParamRange::arc(Azimuth::new(180.0), ArcDegrees::new(30.0)),
-        ParamRange::new(-180.0, 180.0),
+        ParamRange::of(-180.0, 180.0),
         ParamRange::UNBOUNDED,
     ];
     let sizes = [256usize, 1, 7, 64, 100, 255, 33];
@@ -2062,7 +2062,7 @@ fn driven_mixes_are_allocation_free_on(workers: usize) {
                 .expect("a node");
             if k >= 5 && block % 11 == k as usize {
                 let (min, max) = ranges[(block / 11 + k as usize) % ranges.len()];
-                ed.set_param_range(port(k), ParamRange::new(min, max))
+                ed.set_param_range(port(k), ParamRange::of(min, max))
                     .expect("a node");
             }
             if k % 3 == 0 {

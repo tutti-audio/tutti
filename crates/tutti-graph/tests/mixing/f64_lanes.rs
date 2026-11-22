@@ -177,7 +177,7 @@ fn an_f64_lane_ramps_in_f64() {
 #[test]
 fn a_range_clamps_an_f64_lane_in_f64() {
     let (at, len, target, hi) = (4, 3, 3.0, 2.0);
-    let out = render(Ramp { at, target, len }, Some(ParamRange::new(0.0, hi)));
+    let out = render(Ramp { at, target, len }, Some(ParamRange::of(0.0, hi)));
     for k in 1..=len {
         let (got, want) = (out[at + k - 1], analytic(target, len, k).min(hi));
         assert!(
@@ -205,7 +205,7 @@ fn a_range_bound_f32_cannot_hold_clamps_exactly() {
             target: 3.0,
             len,
         },
-        Some(ParamRange::new(0.0, hi)),
+        Some(ParamRange::of(0.0, hi)),
     );
     assert_eq!(up[at + len - 1], hi, "held at the exact upper bound");
     assert!(up[at + len - 1] > 2.0, "past the bound f32 would hold");
@@ -215,7 +215,7 @@ fn a_range_bound_f32_cannot_hold_clamps_exactly() {
             target: -3.0,
             len,
         },
-        Some(ParamRange::new(-hi, 1.0)),
+        Some(ParamRange::of(-hi, 1.0)),
     );
     assert_eq!(down[at + len - 1], -hi, "held at the exact lower bound");
 }
@@ -262,7 +262,7 @@ fn a_range_change_lands_on_the_next_block() {
     let last = |out: &[f64]| out[FRAMES - 1];
     assert_eq!(last(&block(&mut ed)), 3.0, "unbounded: the ramp's target");
     for (lo, hi) in [(0.0, 2.0), (-1.0, 1.5), (0.0, 2.5), (0.5, 4.0)] {
-        ed.set_param_range(at, ParamRange::new(lo, hi))
+        ed.set_param_range(at, ParamRange::of(lo, hi))
             .expect("a range");
         assert_eq!(
             last(&block(&mut ed)),
