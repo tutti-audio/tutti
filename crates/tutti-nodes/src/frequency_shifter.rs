@@ -126,9 +126,7 @@ impl<F: Float> Kernel for FrequencyShifterKernel<F> {
         block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
     ) -> Result<(), BlockMismatch> {
-        let (input, output) = block.split();
-        self.bank.process(input, output);
-        Ok(())
+        self.bank.process(block)
     }
 
     fn tail(&self) -> Tail {

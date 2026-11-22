@@ -116,14 +116,11 @@ fn recording_the_load_is_allocation_free() {
     ed.collect();
     let (load, blocks) = (engine.load(), engine.blocks());
     let before = blocks.get().blocks;
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..16 {
-            engine.process(&mut InterleavedMut::new(&mut out, ChannelLayout::MONO).unwrap());
-            engine
-                .process_segment(&mut InterleavedMut::new(&mut out, ChannelLayout::MONO).unwrap());
-            let _ = (load.get(), blocks.get());
-        }
-    });
+    for _ in 0..16 {
+        engine.process(&mut InterleavedMut::new(&mut out, ChannelLayout::MONO).unwrap());
+        engine.process_segment(&mut InterleavedMut::new(&mut out, ChannelLayout::MONO).unwrap());
+        let _ = (load.get(), blocks.get());
+    }
     assert_eq!(blocks.get().blocks - before, 32);
 }
 

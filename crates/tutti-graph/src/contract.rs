@@ -1826,6 +1826,25 @@ pub fn drive_input<F: Float>(
     drive_input_params(node, env, inputs, params, events, &[])
 }
 
+/// [`drive_input`] for a node prepared under `prepare`: a
+/// [`Realtime`](crate::RenderMode::Realtime) one runs its `process` inside
+/// [`RtScope`](tutti_rt::RtScope), an [`Offline`](crate::RenderMode::Offline)
+/// one outside it. [`drive_input`] drives as a realtime prepare does.
+///
+/// # Panics
+///
+/// As [`drive_input`].
+pub fn drive_input_in<F: Float>(
+    node: &mut dyn Node<F>,
+    prepare: &Prepare,
+    env: &Env,
+    inputs: Planes<'_, F>,
+    params: &[Option<&[F]>],
+    events: &[&[Event]],
+) -> Driven<F> {
+    drive_block(node, prepare, env, inputs, params, events, &[])
+}
+
 /// [`drive_input`] with `param_events[p]` the param events on event input `p`
 /// (a port past the end has none), beside its `events`.
 ///
@@ -1835,6 +1854,22 @@ pub fn drive_input<F: Float>(
 /// the block ([`SortedEvents::with_both`](crate::SortedEvents::with_both)).
 pub fn drive_input_params<F: Float>(
     node: &mut dyn Node<F>,
+    env: &Env,
+    inputs: Planes<'_, F>,
+    params: &[Option<&[F]>],
+    events: &[&[Event]],
+    param_events: &[&[ParamEvent]],
+) -> Driven<F> {
+    let prepare = Prepare::new(
+        env.sample_rate,
+        MaxBlock::of(Samples::new(env.block_len.get())),
+    );
+    drive_block(node, &prepare, env, inputs, params, events, param_events)
+}
+
+fn drive_block<F: Float>(
+    node: &mut dyn Node<F>,
+    prepare: &Prepare,
     env: &Env,
     inputs: Planes<'_, F>,
     params: &[Option<&[F]>],
@@ -1891,7 +1926,7 @@ pub fn drive_input_params<F: Float>(
         history: TransportHistory::none(),
         meter: None,
     };
-    let max = Prepare::new(env.sample_rate, MaxBlock::of(Samples::new(frames))).max_block();
+    let max = prepare.max_block();
     let reported = std::cell::Cell::new(None);
     let main = shape.main_ports();
     let io = Io::new(
@@ -1908,7 +1943,10 @@ pub fn drive_input_params<F: Float>(
     .with_main(main)
     .with_params(&params)
     .with_tail(&reported);
-    let status = node.process(&cx, io);
+    let status = {
+        let _rt = prepare.enter_rt_scope();
+        node.process(&cx, io)
+    };
     Driven {
         audio: out,
         events: out_events,
@@ -2226,8 +2264,7 @@ impl<F: Float> BlockRig<F> {
 pub struct Direct<N: ?Sized, F: Float = f32> {
     /// The node, prepared.
     pub node: Box<N>,
-    rate: SampleRate,
-    frames: usize,
+    prepare: Prepare,
     len: usize,
     frame: Frame,
     transport: TransportPosition,
@@ -2248,8 +2285,7 @@ pub struct Direct<N: ?Sized, F: Float = f32> {
 impl<N: ?Sized, F: Float> std::fmt::Debug for Direct<N, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Direct")
-            .field("rate", &self.rate)
-            .field("frames", &self.frames)
+            .field("prepare", &self.prepare)
             .field("len", &self.len)
             .field("frame", &self.frame)
             .field("transport", &self.transport)
@@ -2283,6 +2319,22 @@ impl<N: Node + ?Sized> Direct<N> {
     pub fn boxed(node: Box<N>, rate: SampleRate, frames: usize) -> Self {
         Self::boxed_with_format(node, rate, frames)
     }
+
+    /// [`new`](Self::new) prepared under `prepare`: its rate, its largest block
+    /// and its [`RenderMode`](crate::RenderMode). A
+    /// [`Realtime`](crate::RenderMode::Realtime) driver runs `process` inside
+    /// [`RtScope`](tutti_rt::RtScope), an [`Offline`](crate::RenderMode::Offline)
+    /// one outside it; [`new`](Self::new) prepares realtime.
+    ///
+    /// # Panics
+    ///
+    /// As [`new`](Self::new).
+    pub fn with_prepare(node: N, prepare: &Prepare) -> Self
+    where
+        N: Sized,
+    {
+        Self::boxed_with_prepare(Box::new(node), prepare)
+    }
 }
 
 impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
@@ -2303,8 +2355,25 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
     /// # Panics
     ///
     /// As [`new`](Direct::new).
-    pub fn boxed_with_format(mut node: Box<N>, rate: SampleRate, frames: usize) -> Self {
-        node.prepare(&Prepare::new(rate, MaxBlock::of(Samples::new(frames))));
+    pub fn boxed_with_format(node: Box<N>, rate: SampleRate, frames: usize) -> Self {
+        Self::boxed_with_prepare(
+            node,
+            &Prepare::new(rate, MaxBlock::of(Samples::new(frames))),
+        )
+    }
+
+    /// [`boxed_with_format`](Self::boxed_with_format) prepared under `prepare`
+    /// (its rate, its largest block and its [`RenderMode`](crate::RenderMode)):
+    /// a [`Realtime`](crate::RenderMode::Realtime) driver runs `process` inside
+    /// [`RtScope`](tutti_rt::RtScope), an [`Offline`](crate::RenderMode::Offline)
+    /// one outside it.
+    ///
+    /// # Panics
+    ///
+    /// As [`new`](Direct::new).
+    pub fn boxed_with_prepare(mut node: Box<N>, prepare: &Prepare) -> Self {
+        let frames = prepare.max_block().get();
+        node.prepare(prepare);
         let shape = node.shape();
         let (ins, outs) = (
             usize::from(shape.audio_in().count()),
@@ -2337,8 +2406,7 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
             params_in: param_events(shape.event_in, HAND_EVENT_CAPACITY),
             params_out: param_events(shape.event_out, param_room(&shape)),
             node,
-            rate,
-            frames,
+            prepare: *prepare,
             len: frames,
             frame: Frame::new(0),
             transport: TransportPosition::default(),
@@ -2399,7 +2467,11 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
     /// If `values` is not one block long.
     pub fn feed(&mut self, k: usize, values: Option<&[F]>) {
         if let Some(v) = values {
-            assert_eq!(v.len(), self.frames, "one value per frame");
+            assert_eq!(
+                v.len(),
+                self.prepare.max_block().get(),
+                "one value per frame"
+            );
         }
         self.params[k] = values.map(<[F]>::to_vec);
     }
@@ -2451,9 +2523,9 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
     /// If `len` is zero or past the prepared frames.
     pub fn set_block_len(&mut self, len: usize) {
         assert!(
-            len > 0 && len <= self.frames,
+            len > 0 && len <= self.prepare.max_block().get(),
             "a block of {len} frames against a prepared maximum of {}",
-            self.frames
+            self.prepare.max_block().get()
         );
         self.len = len;
     }
@@ -2480,7 +2552,7 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
     pub fn block(&mut self) -> Status {
         let env = Env {
             frame: self.frame,
-            sample_rate: self.rate,
+            sample_rate: self.prepare.sample_rate(),
             block_len: Samples::new(self.len),
             transport: self.transport,
             changes: TransportChanges::NONE,
@@ -2552,7 +2624,7 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
             history: TransportHistory::none(),
             meter: None,
         };
-        let max = Prepare::new(self.rate, MaxBlock::of(Samples::new(self.frames))).max_block();
+        let max = self.prepare.max_block();
         let io = Io::new(
             max,
             len,
@@ -2571,7 +2643,10 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
             Some(capture) => io.with_log(capture.begin_block()),
             None => io,
         };
-        let status = self.node.process(&cx, io);
+        let status = {
+            let _rt = self.prepare.enter_rt_scope();
+            self.node.process(&cx, io)
+        };
         if let Some(capture) = &mut self.capture {
             capture.end_block(NodeKey(0), env.frame, &mut self.logged);
         }

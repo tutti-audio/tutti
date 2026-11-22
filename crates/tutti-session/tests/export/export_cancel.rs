@@ -2,9 +2,11 @@
 //! offline session. No hardware and no sleeps: a node in the graph cancels
 //! the job from inside the render, at a block the test picks.
 
+use crate::bounced::bounced;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
+use tutti_fixtures::block_on;
 use tutti_session::Root;
 
 use tutti_buffers::ChannelLayout;
@@ -77,7 +79,7 @@ const FORMAT: Format = Format::Wav(Pcm::Int16);
 /// A bounce of `BLOCKS` graph blocks: stereo, nothing trimmed and no tail
 /// (the node reports an unbounded one), on a frozen clock.
 fn bounce() -> Bounce {
-    Bounce::project()
+    Bounce::new()
         .channels(ChannelLayout::STEREO)
         .range(Range::Frames(
             Frame::new(0),
@@ -109,7 +111,7 @@ fn a_cancel_stops_the_render_and_frees_the_session() {
     let path = dir.path().join("a.wav");
     let mut r = rig(3);
 
-    let job = r.session.bounce_start(file_request(&path, None)).unwrap();
+    let job = r.session.bounce(file_request(&path, None)).unwrap();
     let handle = job.handle();
     r.handle.set(handle.clone()).ok();
     assert!(
@@ -117,30 +119,32 @@ fn a_cancel_stops_the_render_and_frees_the_session() {
         "nothing before the first block"
     );
     assert!(matches!(
-        r.session.bounce_start(file_request(&path, None)),
+        r.session.bounce(file_request(&path, None)),
         Err(BounceError::InFlight)
     ));
 
-    let rendered = job.run();
+    let rendered = block_on(job);
     assert_eq!(
         r.blocks.load(Ordering::SeqCst),
         3,
         "stopped at the third block"
     );
     assert!(
-        r.session.bounce_in_flight(),
-        "the token lives until the main thread finishes the job"
+        matches!(
+            r.session.bounce(file_request(&path, None)),
+            Err(BounceError::InFlight)
+        ),
+        "the token lives until the main thread applies the render"
     );
-    let outcome = r.session.finish_bounce(rendered);
+    let outcome = r.session.apply(rendered);
     assert!(matches!(outcome, Err(BounceError::Cancelled)));
-    assert!(!r.session.bounce_in_flight(), "the token is released");
     assert!(!path.exists(), "no partial file");
     let seen = handle.progress().unwrap();
     assert_eq!(seen.stage(), Stage::Rendering);
     assert_eq!(seen.frames(), Some((Samples::new(0), TOTAL)));
 
     // The next export is not refused, and runs to its end.
-    r.session.bounce(file_request(&path, None)).unwrap();
+    bounced(&mut r.session, file_request(&path, None)).unwrap();
     assert!(path.exists());
     assert_eq!(r.blocks.load(Ordering::SeqCst), 3 + BLOCKS);
 }
@@ -151,22 +155,25 @@ fn a_job_cancelled_before_it_runs_renders_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("b.wav");
     let mut r = rig(usize::MAX);
-    let job = r.session.bounce_start(file_request(&path, None)).unwrap();
+    let job = r.session.bounce(file_request(&path, None)).unwrap();
     job.handle().cancel();
-    let outcome = r.session.finish_bounce(job.run());
+    let outcome = r.session.apply(block_on(job));
     assert!(matches!(outcome, Err(BounceError::Cancelled)));
     assert_eq!(r.blocks.load(Ordering::SeqCst), 0);
     assert!(!path.exists());
-    assert!(!r.session.bounce_in_flight());
+    assert!(
+        r.session.bounce(file_request(&path, None)).is_ok(),
+        "the token is released"
+    );
 }
 
 /// A rendering to memory stops the same way.
 #[test]
 fn a_buffer_export_cancels() {
     let mut r = rig(2);
-    let job = r.session.bounce_start(bounce().master_buffers()).unwrap();
+    let job = r.session.bounce(bounce().master_buffers()).unwrap();
     r.handle.set(job.handle()).ok();
-    let outcome = r.session.finish_bounce(job.run());
+    let outcome = r.session.apply(block_on(job));
     assert!(matches!(outcome, Err(BounceError::Cancelled)));
     assert_eq!(r.blocks.load(Ordering::SeqCst), 2);
 }
@@ -186,10 +193,10 @@ fn progress_ends_at_one_in_the_finalizing_stage() {
     ] {
         let job = r
             .session
-            .bounce_start(file_request(&dir.path().join(name), normalize))
+            .bounce(file_request(&dir.path().join(name), normalize))
             .unwrap();
         let handle = job.handle();
-        let outcome = r.session.finish_bounce(job.run()).unwrap();
+        let outcome = r.session.apply(block_on(job)).unwrap();
         drop(outcome);
         let last = handle.progress().unwrap();
         assert_eq!(
@@ -231,10 +238,10 @@ fn a_cancel_leaves_no_file_of_any_target() {
         let mut r = rig(3);
         let job = r
             .session
-            .bounce_start(with_stem(&r, dir.path(), normalize))
+            .bounce(with_stem(&r, dir.path(), normalize))
             .unwrap();
         r.handle.set(job.handle()).ok();
-        let outcome = r.session.finish_bounce(job.run());
+        let outcome = r.session.apply(block_on(job));
         assert!(
             matches!(outcome, Err(BounceError::Cancelled)),
             "normalize {normalize}"
@@ -245,23 +252,26 @@ fn a_cancel_leaves_no_file_of_any_target() {
             0,
             "normalize {normalize}: nothing is left beside the targets"
         );
-        assert!(!r.session.bounce_in_flight());
+        assert!(
+            r.session
+                .bounce(with_stem(&r, dir.path(), normalize))
+                .is_ok(),
+            "the token is released"
+        );
     }
 
     let dir = tempfile::tempdir().unwrap();
     let mut r = rig(usize::MAX);
-    let job = r
-        .session
-        .bounce_start(with_stem(&r, dir.path(), false))
-        .unwrap();
+    let job = r.session.bounce(with_stem(&r, dir.path(), false)).unwrap();
     job.handle().cancel();
-    let outcome = r.session.finish_bounce(job.run());
+    let outcome = r.session.apply(block_on(job));
     assert!(matches!(outcome, Err(BounceError::Cancelled)));
     assert_eq!(r.blocks.load(Ordering::SeqCst), 0, "nothing rendered");
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
 
     // And one nobody cancels lands both files.
-    r.session.bounce(with_stem(&r, dir.path(), false)).unwrap();
+    let request = with_stem(&r, dir.path(), false);
+    bounced(&mut r.session, request).unwrap();
     assert!(dir.path().join("master.wav").exists());
     assert!(dir.path().join("stem.wav").exists());
 }

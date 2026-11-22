@@ -8,11 +8,12 @@
 //! `Rec` is `InProcess` only to be loaded through `load_client`; the thread
 //! that loads it passes its `Rig` in a thread-local.
 
+use arrayvec::ArrayVec;
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 use tutti_buffers::MaxBlock;
 
 use tutti_buffers::{ByWidth, Float, InputOutput};
@@ -45,6 +46,10 @@ const PARAM: ParamId = ParamId::new(7);
 /// The reason the rig's plugin gives for a block it fails.
 const FAILURE: &str = "scripted failure";
 
+/// The most entries one call's record holds: inline, so recording a block
+/// allocates nothing; a call with more panics loudly.
+const SEEN_MAX: usize = 256;
+
 /// What one `process` call was handed.
 #[derive(Debug, Clone, PartialEq)]
 struct Seen {
@@ -52,14 +57,14 @@ struct Seen {
     quarters: f64,
     tempo: f64,
     /// `(frame, tempo)` of each transport change in the call.
-    changes: Vec<(u32, f64)>,
+    changes: ArrayVec<(u32, f64), SEEN_MAX>,
     /// `(frame, playing, quarters)` of the same changes.
-    moves: Vec<(u32, bool, f64)>,
+    moves: ArrayVec<(u32, bool, f64), SEEN_MAX>,
     /// The transport's `tempo_inc`.
     inc: f64,
-    midi: Vec<u32>,
+    midi: ArrayVec<u32, SEEN_MAX>,
     /// Chord offsets, `None` when no sequencer context was attached.
-    chords: Option<Vec<i32>>,
+    chords: Option<ArrayVec<i32, SEEN_MAX>>,
 }
 
 /// The plugin's script and its record, shared with the test.
@@ -67,7 +72,7 @@ struct Rig {
     chunk: Option<NonZeroUsize>,
     features: Features,
     record: bool,
-    seen: Mutex<Vec<Seen>>,
+    seen: tutti_fixtures::Shared<Vec<Seen>>,
     resets: AtomicUsize,
     /// MIDI events reported lost when a chunk completes.
     lose: AtomicUsize,
@@ -91,7 +96,7 @@ impl Rig {
             chunk: chunk.and_then(NonZeroUsize::new),
             features,
             record: true,
-            seen: Mutex::new(Vec::with_capacity(4096)),
+            seen: tutti_fixtures::Shared::new(Vec::with_capacity(4096)),
             resets: AtomicUsize::new(0),
             lose: AtomicUsize::new(0),
             unsent: AtomicBool::new(false),
@@ -592,7 +597,7 @@ fn a_transport_change_is_the_chunks_on_the_chunks_frame() {
     let seen = rig.seen.lock().unwrap();
     let pieces: Vec<_> = seen
         .iter()
-        .map(|s| (s.frames, s.changes.clone(), s.tempo))
+        .map(|s| (s.frames, s.changes.to_vec(), s.tempo))
         .collect();
     assert_eq!(
         pieces,
@@ -710,7 +715,7 @@ fn a_sysex_cut_by_a_reported_loss_stays_cut() {
         unit.events(0, &[packet(3, 0), packet(4, 1), note_on(2, 64)]);
         run_block(&mut unit, 64, 64);
         let seen = rig.seen.lock().unwrap();
-        let midi: Vec<_> = seen.iter().map(|s| s.midi.clone()).collect();
+        let midi: Vec<_> = seen.iter().map(|s| s.midi.to_vec()).collect();
         if open {
             assert_eq!(midi, [vec![0, 1, 2], vec![2]], "the tail is cut");
             assert_eq!(controls.dropped_midi_in(), 3 + 2);
@@ -742,9 +747,12 @@ fn midi_and_harmony_arrive_on_the_frames_of_their_piece() {
         unit.events(0, &[note_on(10, 100)]);
         run_block(&mut unit, 100, 100);
         let seen = rig.seen.lock().unwrap();
-        let midi: Vec<_> = seen.iter().map(|s| s.midi.clone()).collect();
+        let midi: Vec<_> = seen.iter().map(|s| s.midi.to_vec()).collect();
         assert_eq!(midi, [vec![], vec![6], vec![10], vec![], vec![]]);
-        let chords: Vec<_> = seen.iter().map(|s| s.chords.clone()).collect();
+        let chords: Vec<_> = seen
+            .iter()
+            .map(|s| s.chords.as_ref().map(|c| c.to_vec()))
+            .collect();
         let empty = declared.then(Vec::new);
         assert_eq!(
             chords,
@@ -786,7 +794,7 @@ fn chords_past_the_capacity_of_a_piece_are_counted() {
         assert_eq!(controls.harmony_dropped(), over as u64, "chunk {chunk:?}");
         let seen = rig.seen.lock().unwrap();
         assert_eq!(
-            seen[0].chords.as_ref().map(Vec::len),
+            seen[0].chords.as_ref().map(ArrayVec::len),
             Some(tutti_plugin_types::HARMONY_CAPACITY),
             "chunk {chunk:?}"
         );
@@ -1048,8 +1056,8 @@ fn a_rebuilt_nodes_overflow_is_counted_once_in_the_shared_controls() {
 }
 
 /// **The chunked audio path allocates nothing** once warm: blocks of 100 over
-/// a chunk of 64, with MIDI, a ramp and the transport walk, inside
-/// `assert_no_alloc`.
+/// a chunk of 64, with MIDI, a ramp and the transport walk, under
+/// `Direct`'s `RtScope`.
 #[test]
 fn the_chunked_audio_path_does_not_allocate() {
     let mut rig = Rig::new(Some(64), Features::TRANSPORT);
@@ -1071,11 +1079,9 @@ fn the_chunked_audio_path_does_not_allocate() {
     for _ in 0..32 {
         one(&mut unit);
     }
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..256 {
-            one(&mut unit);
-        }
-    });
+    for _ in 0..256 {
+        one(&mut unit);
+    }
 }
 
 /// **What a chunked Processor reports lost reaches the graph's event losses**,
@@ -1140,7 +1146,7 @@ fn a_stop_and_a_seek_on_a_block_boundary_are_changes_at_their_chunk_frame() {
             Beat::new(beat),
         );
         let seen = rig.seen.lock().unwrap();
-        let moves: Vec<_> = seen.iter().map(|s| s.moves.clone()).collect();
+        let moves: Vec<_> = seen.iter().map(|s| s.moves.to_vec()).collect();
         let held = (want.0, want.1, beat);
         assert_eq!(moves[0], []);
         assert_eq!(moves[1], []);

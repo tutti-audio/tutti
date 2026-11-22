@@ -10,6 +10,7 @@
 //! The streamer is hand-stepped (`DiskStreamer::manual`), so a refill is a
 //! step, not a race with a render that runs faster than real time.
 
+use crate::bounced::bounced;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -38,7 +39,7 @@ const RATE: f64 = 48_000.0;
 /// A bounce of the mix into memory for `seconds` at `rate`: stereo, trimming
 /// nothing and keeping no tail, on `clock`.
 fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, BufferMaster> {
-    Bounce::project()
+    Bounce::new()
         .master_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
@@ -49,8 +50,7 @@ fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, Buf
 }
 
 fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<Vec<f32>> {
-    session
-        .bounce(bounce)
+    bounced(session, bounce)
         .expect("the bounce renders")
         .into_master()
         .into_planes()
@@ -65,8 +65,7 @@ fn render_stem(
     node: NodeKey,
 ) -> Vec<Vec<f32>> {
     session.graph().connect(node, Root).unwrap();
-    let (_, mut stems) = session
-        .bounce(bounce.stem_with(Stem::buffers(node)))
+    let (_, mut stems) = bounced(session, bounce.stem_with(Stem::buffers(node)))
         .expect("the bounce renders")
         .into_parts();
     match stems.pop() {
@@ -524,7 +523,7 @@ fn a_disk_voice_whose_file_cannot_be_read_fails_the_export_by_name() {
         node
     };
     std::fs::remove_file(&path).expect("removes");
-    match session.bounce(on(0.2, &timeline(120.0))) {
+    match bounced(&mut session, on(0.2, &timeline(120.0))) {
         Err(BounceError::Export(tutti_export::RenderError::ForkFailed { key, kind, cause })) => {
             assert_eq!(key, clip.erase());
             assert_eq!(kind, tutti_graph::ForkFaultKind::Failed);

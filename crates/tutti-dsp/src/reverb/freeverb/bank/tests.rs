@@ -3,6 +3,7 @@ use tutti_units::{Db, Mix, Real, Samples};
 
 use super::*;
 use crate::TAIL_FLOOR;
+use tutti_buffers::{BlockSide, InputOutput};
 
 // The tests pin the `f32` instantiation, the session's audio
 // format, so their tolerances are `f32`'s.
@@ -37,9 +38,10 @@ fn run(
         let mut outs: [&mut [f32]; 2] = [l, r];
         bank.process(
             ramps,
-            Planes::new(&a).unwrap(),
-            PlanesMut::new(&mut outs).unwrap(),
-        );
+            &mut InputOutput::paired(Planes::new(&a).unwrap(), PlanesMut::new(&mut outs).unwrap())
+                .unwrap(),
+        )
+        .unwrap();
         at = end;
     }
     out
@@ -422,10 +424,10 @@ fn a_reset_bank_is_a_fresh_one_and_a_clone_shares_nothing() {
     );
 }
 
-/// An input of two channels is their average, so the same signal twice is itself; a view of
-/// one output plane has the left only.
+/// An input of two channels is their average, so the same signal twice is itself; a block of
+/// one output plane is refused, as the wet signal is a pair.
 #[test]
-fn two_input_channels_are_averaged_and_one_output_plane_is_the_left() {
+fn two_input_channels_are_averaged_and_one_output_plane_is_refused() {
     let x: Vec<f32> = (0..2_000)
         .map(|n| ((n * 7) % 19) as f32 / 9.0 - 1.0)
         .collect();
@@ -443,21 +445,36 @@ fn two_input_channels_are_averaged_and_one_output_plane_is_the_left() {
     let mut outs: [&mut [f32]; 2] = [&mut l2, &mut r2];
     bank.process(
         &mut ramps,
-        Planes::new(&twice).unwrap(),
-        PlanesMut::new(&mut outs).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::new(&twice).unwrap(),
+            PlanesMut::new(&mut outs).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     assert_eq!((l2, r2), want);
-    // One output plane is the left.
+    // One output plane is refused and left as it was.
     let (mut bank, mut ramps) = setup();
     let one_in = [x.as_slice()];
-    let mut left = vec![0.0f32; x.len()];
+    let mut left = vec![7.0f32; x.len()];
     let mut outs: [&mut [f32]; 1] = [&mut left];
-    bank.process(
+    let refused = bank.process(
         &mut ramps,
-        Planes::new(&one_in).unwrap(),
-        PlanesMut::new(&mut outs).unwrap(),
+        &mut InputOutput::paired(
+            Planes::new(&one_in).unwrap(),
+            PlanesMut::new(&mut outs).unwrap(),
+        )
+        .unwrap(),
     );
-    assert_eq!(left, want.0);
+    assert_eq!(
+        refused,
+        Err(BlockMismatch::Width {
+            side: BlockSide::Output,
+            expected: 2,
+            found: 1
+        })
+    );
+    assert!(left.iter().all(|&y| y == 7.0));
 }
 
 /// A tail that has run twice its declared length is under -100 dB of the impulse (the
@@ -557,9 +574,13 @@ fn run_wide(
     let (mut l, mut r) = (vec![0.0f64; x.len()], vec![0.0f64; x.len()]);
     bank.process(
         ramps,
-        Planes::new(&[x]).unwrap(),
-        PlanesMut::new(&mut [&mut l[..], &mut r[..]]).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::new(&[x]).unwrap(),
+            PlanesMut::new(&mut [&mut l[..], &mut r[..]]).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     [l, r]
 }
 

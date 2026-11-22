@@ -79,3 +79,8 @@ fn main() {
     cases.extend_from_slice(export_fork_plugin::CASES);
     tutti_fixtures::main_thread_cases(&cases);
 }
+
+// Starts a bounce, awaits its render and applies it.
+#[cfg(all(feature = "export", feature = "clap"))]
+#[path = "../support/bounced.rs"]
+mod bounced;

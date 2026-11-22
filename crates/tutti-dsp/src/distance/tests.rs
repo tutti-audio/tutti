@@ -1,6 +1,7 @@
 use super::*;
 use crate::TAIL_FLOOR;
 use core::f64::consts::TAU;
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 use tutti_fixtures::signal::{hann_image_leak, sine_frequency};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -48,9 +49,13 @@ fn run(
         let ins: Vec<Vec<f64>> = channels.iter().map(|c| c[at..end].to_vec()).collect();
         let mut outs = vec![vec![0.0; end - at]; channels.len()];
         d.process(
-            Planes::from_vecs(&ins).unwrap(),
-            PlanesMut::from_vecs(&mut outs).unwrap(),
-        );
+            &mut InputOutput::paired(
+                Planes::from_vecs(&ins).unwrap(),
+                PlanesMut::from_vecs(&mut outs).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         for (o, part) in out.iter_mut().zip(&outs) {
             o[at..end].copy_from_slice(part);
         }

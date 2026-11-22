@@ -77,7 +77,7 @@ fn session() -> Session {
         .expect("an offline session builds")
 }
 
-fn load(s: &Session, catalog: &Catalog) -> tutti_session::PluginNode {
+fn load(s: &Session, catalog: &Catalog) -> tutti_session::LoadedPlugin {
     s.load_in_process(&id(), catalog)
         .run(tutti_fixtures::main_thread())
         .expect("the reference plugin loads in process")
@@ -108,7 +108,7 @@ fn an_in_process_load_stamps_its_module() {
     let (catalog, _dir) = catalog_of(&module);
     let s = session();
     let opened = load(&s, &catalog);
-    let handle = opened.handle();
+    let handle = opened.instance();
     assert_eq!(handle.asset().name(), module.display().to_string());
     assert!(!handle.changed(), "as loaded");
     std::fs::OpenOptions::new()
@@ -140,11 +140,11 @@ fn an_in_process_load_is_a_plugin_hosted_in_this_process() {
     let (catalog, _dir) = catalog();
     let mut s = session();
     let opened = load(&s, &catalog);
-    let handle = opened.handle();
+    let handle = opened.instance();
     assert_eq!(handle.info().hosting(), ResolvedHosting::InProcess);
     assert_eq!(handle.info().id(), &id());
     assert!(matches!(handle.presence(), Presence::Live));
-    let node = s.add_plugin(opened).expect("the plugin enters");
+    let node = s.apply(opened).expect("the plugin enters");
     assert!(
         s.plugin_view(node)
             .unwrap()
@@ -165,7 +165,7 @@ fn an_unadded_node_dropped_off_the_main_thread_closes_on_the_main_thread() {
     let (catalog, _dir) = catalog();
     let mut s = session();
     let opened = load(&s, &catalog);
-    let handle = opened.handle();
+    let handle = opened.instance();
     thread::spawn(move || drop(opened)).join().unwrap();
     assert!(
         !deactivation().observed,
@@ -186,7 +186,7 @@ fn an_unadded_node_dropped_on_the_main_thread_closes_in_place() {
     let (catalog, _dir) = catalog();
     let s = session();
     let opened = load(&s, &catalog);
-    let handle = opened.handle();
+    let handle = opened.instance();
     let clone = handle.clone();
     drop(handle);
     drop(clone);
@@ -205,8 +205,8 @@ fn a_node_keeps_an_in_process_plugin_open_after_its_handle_drops() {
     let (catalog, _dir) = catalog();
     let mut s = session();
     let opened = load(&s, &catalog);
-    let watch = opened.handle();
-    let node = s.add_plugin(opened).unwrap();
+    let watch = opened.instance();
+    let node = s.apply(opened).unwrap();
     let _ = s.update();
     assert!(!deactivation().observed, "the node holds the plugin");
     assert!(matches!(watch.presence(), Presence::Live));
@@ -230,7 +230,7 @@ fn a_session_on_another_thread_adds_an_in_process_plugin() {
     let opened = load(&s, &catalog);
     let (s, node) = thread::spawn(move || {
         let mut s = s;
-        let node = s.add_plugin(opened).expect("added off the main thread");
+        let node = s.apply(opened).expect("added off the main thread");
         (s, node)
     })
     .join()
@@ -240,26 +240,26 @@ fn a_session_on_another_thread_adds_an_in_process_plugin() {
     s.close(tutti_fixtures::main_thread());
 }
 
-/// **A plugin loaded by one session is refused by another, handed back, and
-/// closes cleanly after the first session is gone.** The refusal names the
-/// session; the node returns in the error, and dropping it on the main thread
-/// closes the plugin there with nothing stranded.
-fn a_plugin_of_another_session_is_refused_and_closes_cleanly() {
+/// **A plugin loaded by one session is refused `Stale` by another and closes
+/// at the refusal.** The refusal hands nothing back: the load is dropped by
+/// the apply, on the main thread, which closes the plugin there with nothing
+/// stranded.
+fn a_plugin_of_another_session_is_refused_stale_and_closes_at_the_refusal() {
     probe().thread_reset();
     let (catalog, _dir) = catalog();
     let a = session();
     let mut b = session();
     let opened = load(&a, &catalog);
-    let Err(tutti_session::AddPluginError::OtherSession(returned)) = b.add_plugin(opened) else {
-        panic!("another session's plugin must be refused");
-    };
     let stranded = tutti_plugin_types::MainWork::stranded();
-    a.close(tutti_fixtures::main_thread());
-    assert!(!deactivation().observed, "the node still holds it");
-    drop(returned);
+    let refused = b.apply(opened);
+    assert!(
+        matches!(refused, Err(tutti_session::AddPluginError::Stale)),
+        "another session's plugin must be refused"
+    );
     let closed = deactivation();
     assert!(closed.observed && closed.is_main, "{closed:?}");
     assert_eq!(tutti_plugin_types::MainWork::stranded(), stranded);
+    a.close(tutti_fixtures::main_thread());
     b.close(tutti_fixtures::main_thread());
 }
 
@@ -271,5 +271,5 @@ an_unadded_node_dropped_off_the_main_thread_closes_on_the_main_thread,
 an_unadded_node_dropped_on_the_main_thread_closes_in_place,
 a_node_keeps_an_in_process_plugin_open_after_its_handle_drops,
 a_session_on_another_thread_adds_an_in_process_plugin,
-a_plugin_of_another_session_is_refused_and_closes_cleanly,
+a_plugin_of_another_session_is_refused_stale_and_closes_at_the_refusal,
 ];

@@ -14,6 +14,7 @@ workspace = true
 # The book's programs depend on the umbrella alone, as an application does.
 [dev-dependencies]
 tutti = { path = "../../crates/tutti", features = ["export", "encode-flac"] }
+futures-lite = { workspace = true }
 tutti-fixtures = { path = "../tutti-fixtures" }
 
 [[example]]

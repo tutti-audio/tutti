@@ -199,11 +199,10 @@ impl<F: FftFloat + Lerp> Kernel for FdnKernel<F> {
         block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
     ) -> Result<(), BlockMismatch> {
-        let (input, output) = block.split();
-        if let Some(r) = &mut self.running {
-            r.bank.process(&mut r.ramps, input, output);
+        match &mut self.running {
+            Some(r) => r.bank.process(&mut r.ramps, block),
+            None => Ok(()),
         }
-        Ok(())
     }
 
     /// The bank's ceiling, or [`Tail::Unbounded`] when that is past what a graph takes as a

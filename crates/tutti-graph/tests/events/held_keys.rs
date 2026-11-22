@@ -7,7 +7,7 @@
 
 use tutti_graph::testing as common;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use common::TestPool;
 use tutti_buffers::ChannelLayout;
@@ -26,7 +26,7 @@ use tutti_ump::{
 use tutti_units::Samples;
 
 type Words = [u32; 4];
-type Mail = Arc<Mutex<Vec<(u32, Words)>>>;
+type Mail = tutti_fixtures::Shared<Vec<(u32, Words)>>;
 /// `(sink, frame, words)`.
 type Log = tutti_fixtures::Record<(u64, u64, Words)>;
 
@@ -192,7 +192,7 @@ impl Rig {
 
     fn with_lag(mode: Mode, sinks: &[u64], lag: bool) -> Self {
         let prep = common::prepare(MAX);
-        let mail: Mail = Arc::default();
+        let mail: Mail = Mail::default();
         let log: Log = tutti_fixtures::Record::new();
         let (ed, exec, reference) = match mode {
             Mode::Reference => (None, None, Some(Reference::new(prep))),
@@ -881,7 +881,7 @@ fn a_new_delayed_edge_passes_the_orphan_off() {
 #[test]
 fn fan_in_closes_the_cut_sources_keys_only() {
     let mut r = Rig::new(Mode::Serial, &[2]);
-    let mail2: Mail = Arc::default();
+    let mail2: Mail = Mail::default();
     {
         let ed = r.ed.as_mut().unwrap();
         ed.insert(
@@ -921,7 +921,7 @@ fn fan_in_closes_the_cut_sources_keys_only() {
 #[test]
 fn a_crossfaded_source_closes_its_sinks() {
     let mut r = Rig::new(Mode::Serial, &[2]);
-    let mail2: Mail = Arc::default();
+    let mail2: Mail = Mail::default();
     r.wire(&[(1, 2)]);
     r.send(on60());
     r.block();
@@ -953,7 +953,7 @@ fn a_crossfaded_source_closes_its_sinks() {
 #[test]
 fn fan_in_on_one_key_is_closed_by_either_source() {
     let mut r = Rig::new(Mode::Serial, &[2]);
-    let mail2: Mail = Arc::default();
+    let mail2: Mail = Mail::default();
     r.ed.as_mut().unwrap().insert(
         NodeKey(5),
         "src2",
@@ -1367,7 +1367,7 @@ fn a_hard_replace_around_a_promotion_closes_once() {
             ed.replace(
                 NodeKey(1),
                 Unforkable(Src {
-                    mail: Arc::default(),
+                    mail: Mail::default(),
                 }),
                 Fade::new(Samples::new(0)),
             )
@@ -1558,7 +1558,7 @@ fn a_source_replaced_by_the_resume_commit_is_closed() {
     ed.replace(
         NodeKey(1),
         Unforkable(Src {
-            mail: Arc::default(),
+            mail: Mail::default(),
         }),
         Fade::new(Samples::new(0)),
     )
@@ -2099,10 +2099,7 @@ mod no_alloc {
         if workers > 1 {
             exec.set_pool(Some(TestPool::no_alloc(workers)));
         }
-        let mail: Mail = Arc::new(Mutex::new(Vec::with_capacity(64)));
-        // A std mutex can box its lock on first use (it does on macOS): take it
-        // once here, since the pool gates the warm-up blocks too.
-        drop(mail.lock().unwrap());
+        let mail = Mail::new(Vec::with_capacity(64));
         let n = Arc::new(AtomicU64::new(0));
         ed.insert(NodeKey(1), "src", Unforkable(Src { mail: mail.clone() }));
         for s in [2u64, 3] {
@@ -2119,29 +2116,27 @@ mod no_alloc {
         for _ in 0..8 {
             exec.process(MAX, &t, &[], &mut []);
         }
-        assert_no_alloc::assert_no_alloc(|| {
-            for i in 0..3000u32 {
-                {
-                    let mut m = mail.lock().unwrap();
-                    let key = i % 40;
-                    tog = !tog;
-                    let note = (key + 20) as u8;
-                    // An off that carries velocity 100 as well, as the on does.
-                    let vel = U7::of(100);
-                    let (ch, key) = (MidiChannel::FIRST, NoteNumber::of(note));
-                    m.push((
-                        0,
-                        if tog {
-                            Ump::from(Message::midi1(ch, Voice1::note_on(key, vel)))
-                        } else {
-                            Ump::from(Message::midi1(ch, Voice1::note_off(key, vel)))
-                        }
-                        .0,
-                    ));
-                }
-                exec.process(MAX, &t, &[], &mut []);
+        for i in 0..3000u32 {
+            {
+                let mut m = mail.lock().unwrap();
+                let key = i % 40;
+                tog = !tog;
+                let note = (key + 20) as u8;
+                // An off that carries velocity 100 as well, as the on does.
+                let vel = U7::of(100);
+                let (ch, key) = (MidiChannel::FIRST, NoteNumber::of(note));
+                m.push((
+                    0,
+                    if tog {
+                        Ump::from(Message::midi1(ch, Voice1::note_on(key, vel)))
+                    } else {
+                        Ump::from(Message::midi1(ch, Voice1::note_off(key, vel)))
+                    }
+                    .0,
+                ));
             }
-        });
+            exec.process(MAX, &t, &[], &mut []);
+        }
         assert!(n.load(Ordering::Relaxed) > 5000);
     }
 

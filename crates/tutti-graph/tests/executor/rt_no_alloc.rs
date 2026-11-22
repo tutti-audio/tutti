@@ -50,7 +50,7 @@ fn use_pool(exec: &mut tutti_graph::Executor, workers: usize) {
 
 /// Applies every queued commit under the gate: applying allocates nothing.
 fn apply(exec: &mut tutti_graph::Executor) {
-    assert_no_alloc::assert_no_alloc(|| exec.apply_pending());
+    exec.apply_pending();
 }
 
 fn at(node: u64, port: u16) -> InPort {
@@ -253,12 +253,10 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
         workers > 1,
         "the gate runs the mode it names"
     );
-    assert_no_alloc::assert_no_alloc(|| {
-        for i in 0..2_000 {
-            let n = sizes[i % sizes.len()];
-            exec.process(n, &transport, &[&input[..]], &mut [&mut l[..], &mut r[..]]);
-        }
-    });
+    for i in 0..2_000 {
+        let n = sizes[i % sizes.len()];
+        exec.process(n, &transport, &[&input[..]], &mut [&mut l[..], &mut r[..]]);
+    }
     assert_eq!(exec.dropped_event_count(), 0);
     assert!(l.iter().any(|&x| x != 0.0), "the gate rendered signal");
     assert_eq!(exec.late_command_count(), 1);
@@ -333,11 +331,9 @@ fn a_bounded_event_merge_is_allocation_free_on(workers: usize) {
     ed.commit().expect("commits");
     apply(&mut exec);
     ed.collect();
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..200 {
-            exec.process(256, &transport, &[], &mut [&mut out[..]]);
-        }
-    });
+    for _ in 0..200 {
+        exec.process(256, &transport, &[], &mut [&mut out[..]]);
+    }
     assert!(
         exec.dropped_event_count() >= before + 200 * (85 + 51 + 36 - 5),
         "every block lost what the bound cut"
@@ -447,11 +443,9 @@ fn crossfades_are_allocation_free_on(workers: usize) {
         workers > 1,
         "the gate runs the mode it names"
     );
-    assert_no_alloc::assert_no_alloc(|| {
-        for i in 0..200 {
-            block(&mut exec, sizes[i % sizes.len()]);
-        }
-    });
+    for i in 0..200 {
+        block(&mut exec, sizes[i % sizes.len()]);
+    }
     // Three outgoing units came back: both fades at key 1 and the one at 3.
     let mut back = ed.collect();
     back.sort();
@@ -565,11 +559,9 @@ fn a_held_chase_is_delivered_allocation_free_on(workers: usize) {
         workers > 1,
         "the gate runs the mode it names"
     );
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..16 {
-            block(&mut exec);
-        }
-    });
+    for _ in 0..16 {
+        block(&mut exec);
+    }
     for seen in &c {
         assert_eq!(
             seen.load(Ordering::Relaxed),
@@ -639,11 +631,9 @@ fn a_replace_queued_behind_a_running_fade_chases_without_allocating() {
     apply(&mut exec);
     block(&mut exec);
     assert_eq!(c.load(Ordering::Relaxed), 0, "C waits behind B's fade");
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..16 {
-            block(&mut exec);
-        }
-    });
+    for _ in 0..16 {
+        block(&mut exec);
+    }
     assert_eq!(
         c.load(Ordering::Relaxed),
         3,
@@ -782,11 +772,9 @@ fn declared_event_capacities_are_allocation_free_on(workers: usize) {
         workers > 1,
         "the gate runs the mode it names"
     );
-    assert_no_alloc::assert_no_alloc(|| {
-        for i in 0..2_000 {
-            exec.process(sizes[i % sizes.len()], &transport, &[], &mut []);
-        }
-    });
+    for i in 0..2_000 {
+        exec.process(sizes[i % sizes.len()], &transport, &[], &mut []);
+    }
     let refused = refused.load(Ordering::Relaxed);
     assert!(refused > before, "writers refused inside the gate");
     assert_eq!(
@@ -837,11 +825,9 @@ fn losses_past_the_log_and_the_ring_are_allocation_free_on(workers: usize) {
     let transport = TransportPosition::default();
     // No warm-up block: the first one is the first to fill the log, and a log
     // that grows would show there.
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..101 {
-            exec.process(256, &transport, &[], &mut []);
-        }
-    });
+    for _ in 0..101 {
+        exec.process(256, &transport, &[], &mut []);
+    }
     let total = exec.dropped_event_count();
     assert_eq!(total, 101 * 80 * 2);
     let named: u64 = ed.take_event_losses().map(|l| u64::from(l.count)).sum();
@@ -1005,7 +991,7 @@ fn modulated_params_are_allocation_free_on(workers: usize) {
         workers > 1,
         "the gate runs the mode it names"
     );
-    assert_no_alloc::assert_no_alloc(|| run(&mut exec));
+    run(&mut exec);
 
     // A connection made (Q, behind the lag's PDC: the ramps are the early
     // path) and one broken: both declick inside the gate.
@@ -1019,7 +1005,7 @@ fn modulated_params_are_allocation_free_on(workers: usize) {
         workers > 1,
         "the gate runs the mode it names"
     );
-    assert_no_alloc::assert_no_alloc(|| run(&mut exec));
+    run(&mut exec);
 
     // Ranges moved between blocks (`Editor::set_param_range`, on this
     // control thread, outside the gate): every block that reads a moved
@@ -1034,9 +1020,7 @@ fn modulated_params_are_allocation_free_on(workers: usize) {
         ed.set_param_range(cut, ranges[i % 3]).expect("a range");
         ed.set_param_range(q, ranges[(i + 1) % 3]).expect("a range");
         let n = sizes[i % sizes.len()];
-        assert_no_alloc::assert_no_alloc(|| {
-            exec.process(n, &transport, &[&input[..n]], &mut [&mut out[..n]]);
-        });
+        exec.process(n, &transport, &[&input[..n]], &mut [&mut out[..n]]);
     }
     assert_eq!(ed.in_flight(), 0, "a range move sends nothing");
     let plan = exec.plan().expect("a plan");
@@ -1145,12 +1129,10 @@ fn param_events_are_allocation_free_on(workers: usize) {
         workers > 1,
         "the gate runs the mode it names"
     );
-    assert_no_alloc::assert_no_alloc(|| {
-        for i in 0..400 {
-            let n = sizes[i % sizes.len()];
-            exec.process(n, &transport, &[&input[..n]], &mut [&mut audio[..n]]);
-        }
-    });
+    for i in 0..400 {
+        let n = sizes[i % sizes.len()];
+        exec.process(n, &transport, &[&input[..n]], &mut [&mut audio[..n]]);
+    }
     let plan = exec.plan().expect("a plan");
     let event_delays = plan
         .delays()
@@ -1244,12 +1226,10 @@ fn scheduled_params_are_allocation_free_on(workers: usize) {
         workers > 1,
         "the gate runs the mode it names"
     );
-    assert_no_alloc::assert_no_alloc(|| {
-        for i in 0..2_000 {
-            let n = sizes[i % sizes.len()];
-            exec.process(n, &transport, &[&input[..n]], &mut [&mut audio[..n]]);
-        }
-    });
+    for i in 0..2_000 {
+        let n = sizes[i % sizes.len()];
+        exec.process(n, &transport, &[&input[..n]], &mut [&mut audio[..n]]);
+    }
     let landed: u64 = counts.iter().map(|c| c.load(Ordering::Relaxed)).sum();
     assert_eq!(
         landed, 201,
@@ -1382,9 +1362,7 @@ fn an_azimuth_param_port_is_allocation_free() {
         ed.set_param_range(azimuth, ranges[i % ranges.len()])
             .expect("a bearing's range");
         for &n in &sizes {
-            assert_no_alloc::assert_no_alloc(|| {
-                exec.process(n, &transport, &[], &mut [&mut out[..n]]);
-            });
+            exec.process(n, &transport, &[], &mut [&mut out[..n]]);
         }
     }
     assert!(
@@ -1447,9 +1425,7 @@ fn a_range_published_while_blocks_render_is_allocation_free() {
             ed
         });
         for _ in 0..4_000 {
-            assert_no_alloc::assert_no_alloc(|| {
-                exec.process(64, &transport, &[], &mut [&mut out[..64]]);
-            });
+            exec.process(64, &transport, &[], &mut [&mut out[..64]]);
         }
         stop.store(true, Ordering::Release);
         control.join().expect("the control thread ran")
@@ -1495,18 +1471,14 @@ fn removing_a_node_with_a_moved_range_frees_nothing_on_the_audio_thread() {
             ParamRange::arc(Azimuth::new(180.0), ArcDegrees::new(half)),
         )
         .expect("a bearing's range");
-        assert_no_alloc::assert_no_alloc(|| {
-            exec.process(64, &transport, &[], &mut [&mut out[..64]]);
-        });
+        exec.process(64, &transport, &[], &mut [&mut out[..64]]);
     }
     ed.remove(NodeKey(1));
     ed.remove(NodeKey(4));
     ed.spec_mut().topology.set_outputs(Vec::new());
     ed.commit().expect("commits");
     for _ in 0..8 {
-        assert_no_alloc::assert_no_alloc(|| {
-            exec.process(64, &transport, &[], &mut [&mut out[..64]]);
-        });
+        exec.process(64, &transport, &[], &mut [&mut out[..64]]);
     }
     let mut gone = ed.collect();
     gone.sort_unstable_by_key(|k| k.0);
@@ -1588,17 +1560,15 @@ fn reporting_nodes_are_allocation_free_on(workers: usize) {
     assert_eq!(exec.is_parallel(), workers > 1);
     let [mut a, mut b, mut c, mut d] = std::array::from_fn(|_| vec![0.0f32; 64]);
     let mut heard = false;
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..200 {
-            exec.process(
-                64,
-                &TransportPosition::default(),
-                &[],
-                &mut [&mut a[..], &mut b[..], &mut c[..], &mut d[..]],
-            );
-            heard |= [&a, &b, &c, &d].iter().any(|o| o.iter().any(|&x| x != 0.0));
-        }
-    });
+    for _ in 0..200 {
+        exec.process(
+            64,
+            &TransportPosition::default(),
+            &[],
+            &mut [&mut a[..], &mut b[..], &mut c[..], &mut d[..]],
+        );
+        heard |= [&a, &b, &c, &d].iter().any(|o| o.iter().any(|&x| x != 0.0));
+    }
     assert!(heard, "the gate rendered signal");
 }
 
@@ -1685,12 +1655,10 @@ fn fan_in_is_allocation_free_on(workers: usize) {
                 assert_eq!(exec.is_parallel(), workers > 1);
                 let mut out = vec![0.0f32; 128];
                 let mut heard = false;
-                assert_no_alloc::assert_no_alloc(|| {
-                    for _ in 0..40 {
-                        exec.process(128, &TransportPosition::default(), &[], &mut [&mut out[..]]);
-                        heard |= out.iter().any(|&x| x != 0.0);
-                    }
-                });
+                for _ in 0..40 {
+                    exec.process(128, &TransportPosition::default(), &[], &mut [&mut out[..]]);
+                    heard |= out.iter().any(|&x| x != 0.0);
+                }
                 assert_eq!(
                     heard,
                     source != "silent",
@@ -1820,9 +1788,7 @@ fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
                     ed.set_edge_gain(edge_of(k), Amplitude::new(f64::from(w)))
                         .expect("an edge with an entry");
                 }
-                assert_no_alloc::assert_no_alloc(|| {
-                    exec.process(128, &TransportPosition::default(), &[], &mut [&mut out[..]]);
-                });
+                exec.process(128, &TransportPosition::default(), &[], &mut [&mut out[..]]);
                 heard |= out.iter().any(|&x| x != 0.0);
             }
             assert!(heard, "n = {n}, port {at_port}");
@@ -1998,7 +1964,7 @@ fn mode_graph(workers: usize) -> (Editor, tutti_graph::Executor) {
     (ed, exec)
 }
 
-/// Toggling modes and rendering inside `assert_no_alloc`, on `workers`
+/// Toggling modes and rendering under `RtScope`, on `workers`
 /// participants: every node of a
 /// graph with latent nodes (lines to feed and to run), event nodes (held-key
 /// tables to observe and to close), a node with no audio input, and sums, has
@@ -2022,14 +1988,12 @@ fn toggling_modes_are_allocation_free_on(workers: usize) {
             ed.set_mode(NodeKey(k), mode).expect("a node");
         }
         let n = lens[block % lens.len()];
-        assert_no_alloc::assert_no_alloc(|| {
-            exec.process(
-                n,
-                &TransportPosition::default(),
-                &[&input[..n]],
-                &mut [&mut out[..n]],
-            );
-        });
+        exec.process(
+            n,
+            &TransportPosition::default(),
+            &[&input[..n]],
+            &mut [&mut out[..n]],
+        );
         heard |= out[..n].iter().any(|&x| x != 0.0);
     }
     assert!(heard);
@@ -2046,7 +2010,7 @@ fn parallel_toggling_modes_are_allocation_free() {
 }
 
 /// A node that declares its own bypass is called in `Bypassed`, and toggling
-/// its mode and rendering inside `assert_no_alloc` allocates nothing: the
+/// its mode and rendering under `RtScope` allocates nothing: the
 /// executor neither blends nor parks it, so no fade, reset or park runs. Its
 /// calls are counted: one per block, bypassed or not.
 fn own_bypass_toggling_is_allocation_free_on(workers: usize) {
@@ -2081,14 +2045,12 @@ fn own_bypass_toggling_is_allocation_free_on(workers: usize) {
     for block in 0..60usize {
         let mode = [NodeMode::Active, NodeMode::Bypassed][(block / 3) % 2];
         ed.set_mode(NodeKey(1), mode).expect("a node");
-        assert_no_alloc::assert_no_alloc(|| {
-            exec.process(
-                64,
-                &TransportPosition::default(),
-                &[&input[..64]],
-                &mut [&mut out[..64]],
-            );
-        });
+        exec.process(
+            64,
+            &TransportPosition::default(),
+            &[&input[..64]],
+            &mut [&mut out[..64]],
+        );
         assert!(
             out[..64].iter().all(|&x| x == 1.0),
             "block {block} in {mode:?}: the node's own output, never blended"
@@ -2107,7 +2069,7 @@ fn parallel_own_bypass_toggling_is_allocation_free() {
     own_bypass_toggling_is_allocation_free_on(4);
 }
 
-/// Moving mixes and rendering inside `assert_no_alloc`, on `workers`
+/// Moving mixes and rendering under `RtScope`, on `workers`
 /// participants: the graph of
 /// the mode gate with every node's mix moved every few blocks (the ends and
 /// between, so a node runs steady WET, steady DRY, a steady blend and a ramp)
@@ -2137,14 +2099,12 @@ fn moving_mixes_are_allocation_free_on(workers: usize) {
             }
         }
         let n = lens[block % lens.len()];
-        assert_no_alloc::assert_no_alloc(|| {
-            exec.process(
-                n,
-                &TransportPosition::default(),
-                &[&input[..n]],
-                &mut [&mut out[..n]],
-            );
-        });
+        exec.process(
+            n,
+            &TransportPosition::default(),
+            &[&input[..n]],
+            &mut [&mut out[..n]],
+        );
         heard |= out[..n].iter().any(|&x| x != 0.0);
     }
     assert!(heard);
@@ -2160,7 +2120,7 @@ fn parallel_moving_mixes_are_allocation_free() {
     moving_mixes_are_allocation_free_on(4);
 }
 
-/// Driven mixes and rendering inside `assert_no_alloc`, on `workers`
+/// Driven mixes and rendering under `RtScope`, on `workers`
 /// participants: the graph
 /// of the mode gate, with a commit that then drives the mix of five of its
 /// kept nodes from lanes of four periods and latencies (two of them late
@@ -2231,14 +2191,12 @@ fn driven_mixes_are_allocation_free_on(workers: usize) {
             }
         }
         let n = lens[block % lens.len()];
-        assert_no_alloc::assert_no_alloc(|| {
-            exec.process(
-                n,
-                &TransportPosition::default(),
-                &[&input[..n]],
-                &mut [&mut out[..n]],
-            );
-        });
+        exec.process(
+            n,
+            &TransportPosition::default(),
+            &[&input[..n]],
+            &mut [&mut out[..n]],
+        );
         heard |= out[..n].iter().any(|&x| x != 0.0);
     }
     assert!(heard);
@@ -2254,7 +2212,7 @@ fn parallel_driven_mixes_are_allocation_free() {
     driven_mixes_are_allocation_free_on(4);
 }
 
-/// Edge fades inside `assert_no_alloc`, on `workers`
+/// Edge fades under `RtScope`, on `workers`
 /// participants: eight constants summed at the output, each edge fading in or
 /// out over several blocks of different lengths, the ended fades reported on
 /// the ring (a push of a plain value), then a block rendered after the editor
@@ -2315,9 +2273,7 @@ fn fading_edges_are_allocation_free_on(workers: usize) {
             }
         }
         let n = lens[block % lens.len()];
-        assert_no_alloc::assert_no_alloc(|| {
-            exec.process(n, &TransportPosition::default(), &[], &mut [&mut out[..n]]);
-        });
+        exec.process(n, &TransportPosition::default(), &[], &mut [&mut out[..n]]);
         heard |= out[..n].iter().any(|&x| x != 0.0);
     }
     assert!(heard);
@@ -2364,12 +2320,10 @@ impl Node for Chaser {
     }
     fn reset(&mut self) {}
     fn chase(&self, out: &mut tutti_graph::Chase<'_>) {
-        assert_no_alloc::assert_no_alloc(|| {
-            for i in 0..STATE {
-                let controller = tutti_ump::CCNumber::of(i);
-                assert!(out.push(midi::m1_cc(MidiChannel::FIRST, controller, U7::of(1))));
-            }
-        });
+        for i in 0..STATE {
+            let controller = tutti_ump::CCNumber::of(i);
+            assert!(out.push(midi::m1_cc(MidiChannel::FIRST, controller, U7::of(1))));
+        }
     }
 }
 
@@ -2428,11 +2382,9 @@ fn a_swap_is_allocation_free_on(workers: usize) {
         workers > 1,
         "the gate runs the mode it names"
     );
-    assert_no_alloc::assert_no_alloc(|| {
-        for n in [256usize, 1, 7, 64] {
-            block(&mut exec, n);
-        }
-    });
+    for n in [256usize, 1, 7, 64] {
+        block(&mut exec, n);
+    }
     for (first, second) in &seen {
         assert_eq!(second.load(Ordering::Relaxed), u64::from(STATE));
         assert_eq!(first.load(Ordering::Relaxed), 0);
@@ -2451,7 +2403,7 @@ fn parallel_swap_is_allocation_free() {
 }
 
 /// An edge fading in, out and back in, and a weight ramping beside it, render
-/// inside `assert_no_alloc`: the fade kernel (`Weight::Fade`) and the ramp run
+/// under `RtScope`: the fade kernel (`Weight::Fade`) and the ramp run
 /// on every block, across commits (which allocate, outside the gate).
 #[test]
 fn edge_fades_are_allocation_free() {
@@ -2496,14 +2448,12 @@ fn edge_fades_are_allocation_free() {
                 .expect("the edge"),
             _ => {}
         }
-        assert_no_alloc::assert_no_alloc(|| {
-            exec.process(
-                BLOCK,
-                &TransportPosition::default(),
-                &[],
-                &mut [&mut out[..]],
-            );
-        });
+        exec.process(
+            BLOCK,
+            &TransportPosition::default(),
+            &[],
+            &mut [&mut out[..]],
+        );
         heard |= out.iter().any(|&x| x != 0.0);
         ed.collect();
     }
@@ -2704,9 +2654,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
             let mut slices: Vec<&mut [f32]> = Vec::new();
             slices.extend(outs.iter_mut().take(wide).map(|o| &mut o[..]));
             // The slices of a block are made before the gate.
-            assert_no_alloc::assert_no_alloc(|| {
-                exec.process(frames, &transport, &[&input[..frames]], &mut slices);
-            });
+            exec.process(frames, &transport, &[&input[..frames]], &mut slices);
         }
     };
     let slots = |exec: &tutti_graph::Executor| exec.plan().expect("applied").slots(PortKind::Audio);
@@ -3181,9 +3129,7 @@ fn closing_pedals_and_bends_allocates_nothing_on(workers: usize) {
     let mut blocks = |exec: &mut tutti_graph::Executor, n: usize| {
         for _ in 0..n {
             let mut slices: Vec<&mut [f32]> = outs.iter_mut().map(|o| &mut o[..]).collect();
-            assert_no_alloc::assert_no_alloc(|| {
-                exec.process(64, &transport, &[&input[..]], &mut slices);
-            });
+            exec.process(64, &transport, &[&input[..]], &mut slices);
         }
     };
     let tallies = || [&offs, &pedals_up, &bends_centred].map(|n| n.load(Ordering::Relaxed));
@@ -3266,9 +3212,7 @@ fn retiring_and_re_preparing_a_key_holding_unit_allocates_nothing_on(workers: us
     let mut blocks = |exec: &mut tutti_graph::Executor, n: usize| {
         for _ in 0..n {
             let mut slices: Vec<&mut [f32]> = outs.iter_mut().map(|o| &mut o[..]).collect();
-            assert_no_alloc::assert_no_alloc(|| {
-                exec.process(64, &transport, &[&input[..]], &mut slices);
-            });
+            exec.process(64, &transport, &[&input[..]], &mut slices);
         }
     };
     let tallies = || [&offs, &pedals_up, &bends_centred].map(|n| n.load(Ordering::Relaxed));
@@ -3401,16 +3345,14 @@ fn an_output_tap_opened_again_at_another_width_swaps_without_allocating() {
     ed.collect();
     let (mut a, mut b, mut c) = (vec![0.0f32; 64], vec![0.0f32; 64], vec![0.0f32; 64]);
     let mut run = |exec: &mut tutti_graph::Executor, blocks: usize| {
-        assert_no_alloc::assert_no_alloc(|| {
-            for _ in 0..blocks {
-                exec.process(
-                    64,
-                    &TransportPosition::default(),
-                    &[],
-                    &mut [&mut a[..], &mut b[..], &mut c[..]],
-                );
-            }
-        });
+        for _ in 0..blocks {
+            exec.process(
+                64,
+                &TransportPosition::default(),
+                &[],
+                &mut [&mut a[..], &mut b[..], &mut c[..]],
+            );
+        }
     };
     run(&mut exec, 4);
 

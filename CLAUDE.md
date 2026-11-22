@@ -76,9 +76,11 @@ std only. A rule the compiler already enforces is not a gate.
   validation, never a test.
 - **One integration binary per area**: `tests/<area>/main.rs`, one `mod` per file. An area
   binary installs `tutti_fixtures::RtAllocCheck` once: any allocation or free inside a
-  `tutti_rt::RtScope` aborts the test with its name, so every render test is an
-  allocation test. A file is its own binary only for a different allocator (counting,
-  no-free), `harness = false`, or `cfg(loom)`.
+  `tutti_rt::RtScope` aborts the test with its name. A render prepared `Realtime` (the
+  executor, `Direct`, `drive_input`) runs inside one, so every realtime render test is an
+  allocation test; a render prepared `Offline` may block and allocate. A file is its own
+  binary only for a different allocator (counting, no-free), `harness = false`, or
+  `cfg(loom)`.
 - **A test must be able to fail.** It asserts a spec property, an analytic figure or an
   invariant, and its name says which. Delete a test that cannot fail: one that is always
   true, asserts only that nothing panicked, or compares a value with the function that
@@ -342,21 +344,22 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
 
 0. `tutti-platform`
 1. `tutti-units`, `tutti-plugin-ipc-ffi`
-2. `tutti-music`, `tutti-ump`, `tutti-buffers`
-3. `tutti-alsa-ffi`, `tutti-coremidi-ffi`, `tutti-winmm-ffi`, `tutti-midi-protocol`,
+2. `tutti-music`, `tutti-buffers`
+3. `tutti-ump`
+4. `tutti-alsa-ffi`, `tutti-coremidi-ffi`, `tutti-winmm-ffi`, `tutti-midi-protocol`,
    `tutti-midi-ci`, `tutti-curve`
-4. `tutti-rt`, `tutti-midi-device`
-5. `tutti-graph`, `tutti-dsp`, `tutti-modulation`, `tutti-codec`,
-   `tutti-tempo`, `tutti-voicing`, `tutti-sf2`, `tutti-midi-network`
-6. `tutti-timeline`, `tutti-plugin-types`, `tutti-measure`
-7. `tutti-engine`, `tutti-nodes`, `tutti-midi-runtime`, `tutti-midi-file`, `tutti-clap-ffi`,
+5. `tutti-rt`, `tutti-midi-device`
+6. `tutti-midi-network`, `tutti-graph`, `tutti-dsp`, `tutti-modulation`, `tutti-codec`,
+   `tutti-tempo`, `tutti-voicing`, `tutti-sf2`
+7. `tutti-timeline`, `tutti-plugin-types`, `tutti-measure`
+8. `tutti-engine`, `tutti-nodes`, `tutti-midi-runtime`, `tutti-midi-file`, `tutti-clap-ffi`,
    `tutti-vst3-ffi`, `tutti-au-ffi`, `tutti-vst2-ffi`, `tutti-plugin-db`, `tutti-plugin-ipc`
-8. `tutti-cpal`, `tutti-export`, `tutti-sampler`, `tutti-polysynth`, `tutti-soundfont`,
-   `tutti-midi-hardware`, `tutti-clap-host`, `tutti-vst3-host`, `tutti-au-host`,
+9. `tutti-cpal`, `tutti-au-host`, `tutti-export`, `tutti-sampler`, `tutti-polysynth`,
+   `tutti-soundfont`, `tutti-midi-hardware`, `tutti-clap-host`, `tutti-vst3-host`,
    `tutti-vst2-host`, `tutti-plugin-host`
-9. `tutti-plugin`, `tutti-plugin-probe`
-10. `tutti-plugin-server`, `tutti-session`
-11. `tutti`
+10. `tutti-plugin`, `tutti-plugin-probe`
+11. `tutti-plugin-server`, `tutti-session`
+12. `tutti`
 
 - Nothing under `crates/` has a normal or build dependency on `testing/`.
 - Only `tutti` depends on `tutti-session`, and nothing depends on `tutti` but a

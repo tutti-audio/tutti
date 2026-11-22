@@ -23,7 +23,9 @@
 //!
 //! The delay has **no latency**: the echo is the effect, not processing delay.
 
-use tutti_buffers::{Float, Mono, Planes, PlanesMut};
+use crate::BlockMismatch;
+use crate::block::expect_widths;
+use tutti_buffers::{Float, InputOutput, Mono};
 use tutti_units::{Bpm, Feedback, ReadPosition, SampleRate, Samples, Seconds};
 
 use super::layout::{DELAY_SLEW, DelayControls, DelayLayout, DelayTiming, MAX_DELAY_CHANNELS};
@@ -227,24 +229,24 @@ impl<F: Float + Lerp> DelayBank<F> {
     /// Runs `input` into `output`, frame `i` at the ramps' step `taken + 1 + i`, then
     /// takes the block's steps from them.
     ///
-    /// Channel `c` of `input` feeds channel `c` of `output`; a channel past the bank's width,
-    /// or past the narrower of the two views, is not touched. A time control signal frame is clamped
+    /// Channel `c` of `input` feeds channel `c` of `output`. A time control signal frame is clamped
     /// into the line, and one that is not finite is the ramped delay; a feedback control signal frame
     /// is clamped into the stable range, and one that is not finite is the ramped feedback.
     /// No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels.
     pub fn process(
         &mut self,
         ramps: &mut DelayRamps<F>,
         signals: DelaySignals<'_, F>,
-        input: Planes<'_, F>,
-        mut output: PlanesMut<'_, '_, F>,
-    ) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = self
-            .lines
-            .len()
-            .min(input.channels())
-            .min(output.channels());
+        block: &mut InputOutput<'_, F>,
+    ) -> Result<(), BlockMismatch> {
+        let width = self.lines.len();
+        expect_widths(block, width, width)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let xs: [&[F]; MAX_DELAY_CHANNELS] = core::array::from_fn(|c| {
             if c < width {
                 &input.plane(c).samples()[..frames]
@@ -332,6 +334,7 @@ impl<F: Float + Lerp> DelayBank<F> {
             );
         }
         ramps.advance(u32::try_from(frames).unwrap_or(u32::MAX));
+        Ok(())
     }
 
     /// The block, `gain(i)` the bounded `(fb, cf)` pair at frame `i` and `delay_at(c, i)`

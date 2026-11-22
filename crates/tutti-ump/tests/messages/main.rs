@@ -19,6 +19,7 @@ mod no_alloc;
 mod normalized;
 mod note_id;
 mod note_key_event;
+mod note_number_pitch;
 mod note_velocity;
 mod orchestral;
 mod properties;

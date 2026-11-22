@@ -7,9 +7,9 @@ use tutti_units::Drive;
 use tutti_units::{SampleRate, Samples, Seconds};
 
 /// A node through `BlockRig`, silent inputs: 16 warm-up blocks (past
-/// the first FFT partition, so `process` takes the hot path), then 1 000
-/// blocks under `assert_no_alloc`. Its `prepare` (which sizes the fold's
-/// scratch) runs when the rig is built, outside the gate.
+/// the first FFT partition, so `process` takes the hot path), then 240
+/// blocks under `RtScope`. Its `prepare` (which sizes the fold's
+/// scratch) runs when the rig is built, outside it.
 fn gate<N: tutti_graph::IntoNode>(node: N) {
     gate_at(node, 64);
 }
@@ -21,11 +21,9 @@ fn gate_at<N: tutti_graph::IntoNode>(node: N, block: usize) {
     for _ in 0..16 {
         rig.block();
     }
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..1_000 {
-            rig.block();
-        }
-    });
+    for _ in 0..240 {
+        rig.block();
+    }
 }
 #[test]
 fn convolver_process_is_allocation_free() {

@@ -657,8 +657,8 @@ fn a_panic_on_a_worker_reaches_the_caller() {
 /// cannot fail spuriously.)
 #[test]
 fn the_executor_waits_by_its_pools_budget() {
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-    use std::sync::{Arc, Mutex};
     use std::time::Duration;
     use tutti_graph::{BlockWaits, Pool};
     use tutti_platform::Instant;
@@ -668,8 +668,8 @@ fn the_executor_waits_by_its_pools_budget() {
     struct Times {
         started: AtomicBool,
         next: AtomicU64,
-        slow_done: Mutex<Option<u64>>,
-        helper_left: Mutex<Option<u64>>,
+        slow_done: tutti_fixtures::Shared<Option<u64>>,
+        helper_left: tutti_fixtures::Shared<Option<u64>>,
     }
     impl Times {
         fn tick(&self) -> u64 {

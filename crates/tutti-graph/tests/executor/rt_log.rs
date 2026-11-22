@@ -365,9 +365,7 @@ fn logging_lines_and_flushing_allocate_nothing_on_either_executor() {
         let mut bufs = vec![vec![0.0f32; 64]; 4];
         for _ in 0..3 {
             let mut refs: Vec<&mut [f32]> = bufs.iter_mut().map(Vec::as_mut_slice).collect();
-            assert_no_alloc::assert_no_alloc(|| {
-                exec.process(64, &TransportPosition::default(), &[], &mut refs);
-            });
+            exec.process(64, &TransportPosition::default(), &[], &mut refs);
             // The control side reads between blocks, off the gate.
             assert_eq!(take(&readers, ALL).0.len(), 12, "{workers} workers");
         }

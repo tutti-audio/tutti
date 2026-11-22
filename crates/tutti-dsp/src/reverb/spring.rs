@@ -27,8 +27,10 @@
 //! (a coefficient in `0..=0.6`, a gain in `Feedback`'s, a pole in `0..1`), so every
 //! intermediate point is a valid design and `|L| < 1` holds throughout the glide.
 
+use crate::BlockMismatch;
+use crate::block::expect_widths;
 use core::num::NonZeroUsize;
-use tutti_buffers::{ChannelLayout, Float, Planes, PlanesMut};
+use tutti_buffers::{ChannelLayout, Float, InputOutput};
 use tutti_units::{Feedback, Hz, Mix, SampleRate, Samples, Seconds, Tail};
 
 use crate::delay::trips;
@@ -373,15 +375,17 @@ impl<F: Float> SpringReverb<F> {
         Design::of(self.layout, self.rate, controls).tail()
     }
 
-    /// Runs `input` into `output`, the fewer of the two views' channels and frames. The glide
-    /// takes a step at each chunk's start, so a call that ends inside a chunk goes on in the
-    /// next. No allocation.
-    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = input
-            .channels()
-            .min(output.channels())
-            .min(self.springs.len());
+    /// Runs `input` into `output`, channel by channel. The glide takes a step at each chunk's
+    /// start, so a call that ends inside a chunk goes on in the next. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels.
+    pub fn process(&mut self, block: &mut InputOutput<'_, F>) -> Result<(), BlockMismatch> {
+        let width = self.springs.len();
+        expect_widths(block, width, width)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let half = F::lit(0.5);
         let back = loop_frames(self.layout, self.rate) - 1;
         let mut at = 0;
@@ -414,6 +418,7 @@ impl<F: Float> SpringReverb<F> {
             self.into = (self.into + run) % CHUNK;
             at += run;
         }
+        Ok(())
     }
 }
 

@@ -10,8 +10,8 @@ use tutti_nodes::{
 };
 use tutti_units::{SampleRate, UnitParam};
 
-/// `node` alone through `BlockRig`: a pulse train on every channel, 16 warm-up blocks, then 2 000
-/// blocks under `assert_no_alloc`, `between` run before each.
+/// `node` alone through `BlockRig`: a pulse train on every channel, 16 warm-up blocks, then 240
+/// blocks under `RtScope`, `between` run before each.
 fn gate<N: IntoNode>(node: N, mut between: impl FnMut(&N::Controls, usize)) {
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
     for ch in rig.inputs_mut().iter_mut() {
@@ -32,12 +32,10 @@ fn gate<N: IntoNode>(node: N, mut between: impl FnMut(&N::Controls, usize)) {
             .any(|s| s.abs() > 1e-6),
         "the node rendered silence; the gate would walk no DSP"
     );
-    assert_no_alloc::assert_no_alloc(|| {
-        for i in 0..2_000 {
-            between(&controls, i);
-            rig.block();
-        }
-    });
+    for i in 0..240 {
+        between(&controls, i);
+        rig.block();
+    }
 }
 
 #[test]

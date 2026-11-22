@@ -10,6 +10,7 @@
 #[path = "../support/loading.rs"]
 mod loading;
 
+use crate::bounced::bounced;
 use crate::loading::{LoadPlugin, Spec};
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, MaxBlock};
@@ -81,7 +82,7 @@ fn an_in_process_instrument_without_a_live_render_mode_bounces_its_clip() {
         sample_rate: RATE,
         loop_range: None,
     }));
-    let bounce = Bounce::project()
+    let bounce = Bounce::new()
         .master_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(1.5)))
@@ -90,7 +91,7 @@ fn an_in_process_instrument_without_a_live_render_mode_bounces_its_clip() {
         .latency(BounceLatency::Keep)
         .tail(BounceTail::None)
         .stem_with(Stem::buffers(node.erase()));
-    let planes = match session.bounce(bounce) {
+    let planes = match bounced(&mut session, bounce) {
         Ok(out) => match out.into_parts().1.pop() {
             Some(Produced::Buffers(rendered)) => rendered.into_planes(),
             other => panic!("expected one stem held in memory, got {other:?}"),
@@ -109,3 +110,8 @@ fn main() {
         an_in_process_instrument_without_a_live_render_mode_bounces_its_clip,
     ]);
 }
+
+// Starts a bounce, awaits its render and applies it.
+#[cfg(feature = "export")]
+#[path = "../support/bounced.rs"]
+mod bounced;
