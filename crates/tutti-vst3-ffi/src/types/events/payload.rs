@@ -165,22 +165,11 @@ impl Data {
         }
     }
 
-    /// `bytes` under `data_type`, or `None` past [`CAPACITY`](Self::CAPACITY).
-    #[must_use]
-    pub fn new(data_type: u32, bytes: &[u8]) -> Option<Self> {
-        let mut inline = [0; Self::CAPACITY];
-        inline.get_mut(..bytes.len())?.copy_from_slice(bytes);
-        Some(Self {
-            size: u32::try_from(bytes.len()).ok()?,
-            data_type,
-            bytes: inline,
-        })
-    }
-
     /// `bytes` under `data_type`, or `None` when they run past
-    /// [`CAPACITY`](Self::CAPACITY).
+    /// [`CAPACITY`](Self::CAPACITY). An iterator with no end is refused at
+    /// the first byte past it, never read to the end.
     #[must_use]
-    pub fn try_from_iter(data_type: u32, bytes: impl IntoIterator<Item = u8>) -> Option<Self> {
+    pub fn new(data_type: u32, bytes: impl IntoIterator<Item = u8>) -> Option<Self> {
         let mut inline = [0; Self::CAPACITY];
         let mut size = 0;
         for byte in bytes {
