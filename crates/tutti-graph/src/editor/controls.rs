@@ -86,7 +86,9 @@ impl<F: Float> Editor<F> {
     /// `at.param`. The view stays the port's while the units placed at the
     /// key declare the same params; staging one with another list gives the
     /// key fresh cells, and an old view then reads ranges nothing writes. Ask
-    /// again after such a replace (a rebind).
+    /// again after such a replace (a rebind). From that replace to its commit,
+    /// a range set reaches the new unit's cells only: the old unit, still
+    /// running, keeps the range it had.
     pub fn param_range_cell(&self, at: ParamIn) -> Option<ParamRangeCell> {
         if at.param == NodeMix::ADDR {
             return self.cells.modes.get(at.node).map(ModeCell::range_cell);

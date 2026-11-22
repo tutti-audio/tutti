@@ -1,4 +1,4 @@
-//! Modulation in the session (design 015 §4.4, §4.6, §5.1): the session's
+//! Modulation in the session: the session's
 //! own declarations ([`Session::mods`]) and a host's ([`ModInput`]), applied
 //! by `Phase::Modulation`, committed once and resynced by `Phase::Commit`.
 //!
