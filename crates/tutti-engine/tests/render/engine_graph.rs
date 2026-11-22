@@ -21,10 +21,10 @@
 //!
 //! The allocation gate is in `rt_no_alloc_engine.rs`.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tutti_buffers::MaxBlock;
-use tutti_fixtures::Record;
 use tutti_fixtures::signal::bits;
+use tutti_fixtures::{Record, Shared};
 
 use crate::support;
 
@@ -1173,7 +1173,7 @@ fn a_tempo_wiggle_under_the_clock_hysteresis_does_not_move_the_beat() {
 #[test]
 fn the_published_playhead_is_the_closed_form_over_ten_minutes() {
     // Logs only each block's first beat: 450 000 blocks.
-    struct FirstBeat(Arc<Mutex<f64>>);
+    struct FirstBeat(Shared<f64>);
     impl Node for FirstBeat {
         fn shape(&self) -> Shape {
             Shape::source_unassigned(ChannelLayout::MONO).with_tail(Tail::Unbounded)
@@ -1191,8 +1191,8 @@ fn the_published_playhead_is_the_closed_form_over_ten_minutes() {
     let (loop_start, loop_end) = (800.0, 816.0);
 
     let transport = Transport::new(SampleRate::of(SR));
-    let first = Arc::new(Mutex::new(0.0));
-    let (engine, _ed) = graph_engine(&transport, 64, Unforkable(FirstBeat(Arc::clone(&first))), 1);
+    let first = Shared::new(0.0);
+    let (engine, _ed) = graph_engine(&transport, 64, Unforkable(FirstBeat(first.clone())), 1);
     transport.settings().set_tempo(Bpm::of(123.0));
     transport.motion().send(MotionCommand::Play).expect("room");
     transport

@@ -1124,14 +1124,14 @@ impl Drop for TestPool {
 
 /// A shared [`TestPool`] per participant count, for a whole test binary.
 pub fn test_pool(participants: usize) -> Arc<dyn crate::Pool> {
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::OnceLock;
+    use tutti_rt::Mutex;
     static POOLS: OnceLock<Mutex<BTreeMap<usize, Arc<TestPool>>>> = OnceLock::new();
     let pools = POOLS.get_or_init(|| Mutex::new(BTreeMap::new()));
 
     (Arc::clone(
         pools
             .lock()
-            .expect("pool map")
             .entry(participants)
             .or_insert_with(|| TestPool::new(participants)),
     )) as _
