@@ -1036,41 +1036,27 @@ impl Word for f64 {
 /// for tests: helpers spin (yielding) for work and never sleep, so every
 /// job gets its helpers promptly and the parallel paths are exercised hard.
 /// `WorkerPool` is the production pool; this one never parks.
-///
-/// With `no_alloc`, every participant runs its share of the job inside
-/// `assert_no_alloc::assert_no_alloc` — the helpers included, which a gate
-/// around the caller alone would not see (`assert_no_alloc` is per thread).
 pub struct TestPool {
     gate: Arc<tutti_rt::JobGate>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     helpers: Vec<std::thread::JoinHandle<()>>,
-    no_alloc: bool,
 }
 
 impl TestPool {
     pub fn new(participants: usize) -> Arc<Self> {
-        Self::build(participants, false)
-    }
-
-    /// See the type docs.
-    pub fn no_alloc(participants: usize) -> Arc<Self> {
-        Self::build(participants, true)
+        Self::build_with(participants, crate::BlockWaits::DEFAULT)
     }
 
     /// A pool whose gate holds `waits`, which it reports to the executor.
     pub fn with_waits(participants: usize, waits: crate::BlockWaits) -> Arc<Self> {
-        Self::build_with(participants, false, waits)
-    }
-
-    fn build(participants: usize, no_alloc: bool) -> Arc<Self> {
-        Self::build_with(participants, no_alloc, crate::BlockWaits::DEFAULT)
+        Self::build_with(participants, waits)
     }
 
     #[expect(
         clippy::disallowed_methods,
         reason = "test support: the job gate's helpers race the test's own thread"
     )]
-    fn build_with(participants: usize, no_alloc: bool, waits: crate::BlockWaits) -> Arc<Self> {
+    fn build_with(participants: usize, waits: crate::BlockWaits) -> Arc<Self> {
         let gate = Arc::new(tutti_rt::JobGate::with_waits(participants, waits));
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let helpers = (1..participants)
@@ -1090,7 +1076,6 @@ impl TestPool {
             gate,
             stop,
             helpers,
-            no_alloc,
         })
     }
 }
@@ -1101,12 +1086,7 @@ impl crate::Pool for TestPool {
     }
 
     fn run(&self, _wake: usize, job: &(dyn Fn(usize) + Sync)) {
-        if self.no_alloc {
-            self.gate
-                .run(&|i| assert_no_alloc::assert_no_alloc(|| job(i)), || {});
-        } else {
-            self.gate.run(job, || {});
-        }
+        self.gate.run(job, || {});
     }
 
     fn waits(&self) -> crate::BlockWaits {

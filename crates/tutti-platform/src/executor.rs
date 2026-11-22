@@ -48,37 +48,60 @@ mod os;
 ///
 /// On a thread that drives an executor (a dedicated thread, a [`Threads`] driver): a wait
 /// there would stop the thread running the tasks it drives, its own task among them.
+/// Code that may run on a task (a `Drop`, say) calls [`join_within`], which hands the task
+/// back there.
 pub fn join<T>(task: Task<T>) -> Option<T> {
     os::join(task)
 }
 
-/// Whether the calling thread drives an executor (a dedicated thread, a [`Threads`]
-/// driver): a thread where [`join`] and [`join_within`] panic, since a wait there would
-/// stop the tasks it runs. A `Drop` that would join checks it first and detaches instead.
-/// Always `false` on the web, where no thread drives.
-#[must_use]
-pub fn is_driving() -> bool {
-    os::is_driving()
-}
-
 /// [`join`] with a bound: waits at most `bound` for `task` to end, and hands the task back
-/// when it has not.
+/// when it has not or when this thread cannot wait.
 ///
 /// The caller keeps the task while it waits, so nothing is cancelled by the wait. An owner
 /// that stops a future (a stop flag it reads) and must not wait for it without end calls
 /// this, then waits again, [`detach`](Task::detach)es or drops (cancels) what comes back.
+/// It is the form for code that may run on a task, a `Drop` among it: on a thread that
+/// drives an executor a wait would stop the tasks that thread runs, so it returns at once
+/// with [`Unjoined::Driving`], neither polling nor waiting.
 ///
 /// The web cannot block: there it looks once, whatever the bound.
 ///
 /// # Errors
 ///
-/// The task itself when it has not ended within `bound`.
-///
-/// # Panics
-///
-/// As [`join`]: on a thread that drives an executor.
-pub fn join_within<T>(task: Task<T>, bound: Duration) -> Result<Option<T>, Task<T>> {
+/// The task itself, as [`Unjoined::TimedOut`] when it has not ended within `bound`, and as
+/// [`Unjoined::Driving`] when the calling thread drives an executor.
+pub fn join_within<T>(task: Task<T>, bound: Duration) -> Result<Option<T>, Unjoined<T>> {
     os::join_within(task, bound)
+}
+
+/// A [`Task`] that [`join_within`] gives back instead of its output. The task keeps
+/// running: the caller [`detach`](Task::detach)es it, waits again or drops (cancels) it.
+#[derive(thiserror::Error)]
+pub enum Unjoined<T> {
+    /// The task did not end within the bound.
+    #[error("the task did not end within the bound")]
+    TimedOut(Task<T>),
+    /// The calling thread drives an executor, where a wait would stop the tasks it runs.
+    #[error("this thread drives an executor and cannot wait")]
+    Driving(Task<T>),
+}
+
+impl<T> Unjoined<T> {
+    /// The task, whichever way it was not joined.
+    pub fn into_task(self) -> Task<T> {
+        match self {
+            Self::TimedOut(task) | Self::Driving(task) => task,
+        }
+    }
+}
+
+impl<T> std::fmt::Debug for Unjoined<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TimedOut(task) => f.debug_tuple("TimedOut").field(task).finish(),
+            Self::Driving(task) => f.debug_tuple("Driving").field(task).finish(),
+        }
+    }
 }
 
 /// Threads that drive an [`Executor`]'s queue, started by `Executor::spawn_threads` on a

@@ -238,7 +238,7 @@ fn a_clip_fed_to_a_sinks_node_arrives_on_its_frames() {
         BeatDuration::new(1.0),
     )));
     s.graph()
-        .set_sources(EventInputPort::new(out.node(), 0), [clip.events_out()])
+        .set_sources(EventInputPort::new(out.node(), 0), [clip.event_output(0)])
         .expect("the sink's node takes events");
     let _ = s.update();
     render(&mut s, 50_000);
@@ -364,7 +364,7 @@ fn a_stamped_sink_stamps_at_the_new_rate_after_a_re_rate() {
         BeatDuration::new(1.0),
     )));
     s.graph()
-        .set_sources(EventInputPort::new(out.node(), 0), [clip.events_out()])
+        .set_sources(EventInputPort::new(out.node(), 0), [clip.event_output(0)])
         .expect("the sink's node takes events");
     let _ = s.update();
     s.play().expect("room");

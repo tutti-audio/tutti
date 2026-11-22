@@ -252,11 +252,8 @@ impl<U: Unit<Raw = f64>> AutomationRecorder<U> {
     }
 
     fn write_point(&mut self, beat: Beat, value: U) {
-        self.trajectory.add_breakpoint(Breakpoint::with_law(
-            beat,
-            value,
-            self.config.default_curve,
-        ));
+        self.trajectory
+            .add_breakpoint(Breakpoint::new(beat, value).law(self.config.default_curve));
     }
 }
 

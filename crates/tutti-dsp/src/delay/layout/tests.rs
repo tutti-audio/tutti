@@ -15,11 +15,11 @@ fn bus(width: u16) -> BusTopology {
 
 /// A stereo delay: the default swap routing, the channels linked in time.
 fn stereo_builder() -> DelayLayoutBuilder {
-    DelayLayout::builder(BusTopology::STEREO, MAX, InterpolationMode::Linear)
+    DelayLayout::builder(BusTopology::STEREO, MAX)
 }
 
 fn stereo() -> DelayLayout {
-    DelayLayout::new(BusTopology::STEREO, MAX, InterpolationMode::Linear)
+    DelayLayout::new(BusTopology::STEREO, MAX)
 }
 
 /// `MaxDelay` keeps the range-checked shape: `new` refuses what is not a longest delay (not
@@ -215,7 +215,7 @@ fn a_layout_takes_a_routing_for_its_own_bus_and_defaults_by_its_width() {
     );
     assert_eq!(stereo().routing(), &FeedbackRouting::swap());
     for w in [1u16, 3, 6] {
-        let f = DelayLayout::new(bus(w), MAX, InterpolationMode::Linear);
+        let f = DelayLayout::new(bus(w), MAX);
         assert!(f.routing().is_none(), "width {w}");
         assert_eq!(
             f.timing(),
@@ -224,11 +224,8 @@ fn a_layout_takes_a_routing_for_its_own_bus_and_defaults_by_its_width() {
         );
     }
     // The stereo default is the swap whatever the interpolation or maximum.
-    let f = DelayLayout::new(
-        BusTopology::STEREO,
-        MaxDelay::DEFAULT,
-        InterpolationMode::None,
-    );
+    let f = DelayLayout::new(BusTopology::STEREO, MaxDelay::DEFAULT)
+        .interpolation(InterpolationMode::None);
     assert_eq!(f.routing(), &FeedbackRouting::swap());
 }
 
@@ -319,7 +316,7 @@ fn note_times_fit_the_width_they_are_built_for() {
             .is_ok()
     );
     assert_eq!(
-        DelayLayout::builder(bus(3), MAX, InterpolationMode::Linear)
+        DelayLayout::builder(bus(3), MAX)
             .synced(two)
             .build()
             .unwrap_err(),

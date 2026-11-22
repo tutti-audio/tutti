@@ -11,7 +11,7 @@ use tutti_buffers::Speaker;
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_buffers::{InterleavedMut, Pull, Source};
 use tutti_graph::Unforkable;
-use tutti_graph::{BusRef, BusSource, Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
+use tutti_graph::{BusOutputPort, Cx, ForkByClone, Io, Node, NodeBus, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
 use tutti_session::{MainOutput, MainOutputReader, OutputPort, Reopened, Session, SessionEvent};
 use tutti_units::{SampleRate, Samples};
@@ -397,7 +397,10 @@ fn a_bus_fed_main_output_redeclared_mid_fade_keeps_its_fold_until_the_fade_ends(
         out: BusTopology::unassigned(ChannelLayout::STEREO).unwrap(),
     }));
     s.graph()
-        .connect(BusSource::Node(BusRef::new(src.erase(), 0)), MainOutput)
+        .connect(
+            BusOutputPort::Node(NodeBus::new(src.erase(), 0)),
+            MainOutput,
+        )
         .expect("folds by index")
         .unfaded();
     let _ = block(&mut s);

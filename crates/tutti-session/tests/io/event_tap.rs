@@ -45,7 +45,7 @@ fn session() -> (DetachedSession, EventOutputPort) {
         .build_detached(SampleRate::SR_48K)
         .expect("builds");
     let key = s.graph().add(Unforkable(Every4));
-    (s, key.events_out())
+    (s, key.event_output(0))
 }
 
 fn frames(n: usize, s: &mut DetachedSession) {
@@ -226,7 +226,7 @@ impl Node for Hears {
     fn reset(&mut self) {}
 }
 
-/// A tap opened on an event input (`key.events_in()`) copies what the node
+/// A tap opened on an event input (`key.event_input(0)`) copies what the node
 /// hears there: the events its source wrote, on their frames, and the tap
 /// survives a re-rate through `reopen_event`. A port past the node's inputs
 /// is refused as an input.
@@ -235,7 +235,7 @@ fn a_tap_of_an_event_input_hears_what_the_node_hears() {
     let (mut s, source) = session();
     let hears = s.graph().add(Unforkable(Hears));
     s.graph()
-        .connect(source, hears.events_in())
+        .connect(source, hears.event_input(0))
         .expect("both ports exist");
     assert_eq!(
         s.graph()
@@ -255,7 +255,7 @@ fn a_tap_of_an_event_input_hears_what_the_node_hears() {
         .graph()
         .taps()
         .open_event(
-            hears.events_in(),
+            hears.event_input(0),
             EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .expect("the input exists");

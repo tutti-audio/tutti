@@ -23,9 +23,9 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::Node;
 use tutti_graph::contract::Direct;
 use tutti_nodes::{
-    DelayConfig, DelayControls, DelayLayout, DelayNode, InterpolationMode, LadderFilterConfig,
-    LadderFilterNode, LadderType, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode,
-    Stages, SvfFilterConfig, SvfFilterNode, SvfType,
+    DelayConfig, DelayControls, DelayLayout, DelayNode, LadderFilterConfig, LadderFilterNode,
+    LadderType, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, Stages,
+    SvfFilterConfig, SvfFilterNode, SvfType,
 };
 use tutti_units::{Feedback, Hz, Q, Resonance, SampleRate, Seconds};
 
@@ -121,7 +121,6 @@ fn delay(c: &mut Criterion) {
                 )
                 .expect("at most one bus wide"),
                 MaxDelay::of(Seconds::new(1.0)),
-                InterpolationMode::Linear,
             ))
             .controls(DelayControls {
                 time: Seconds::new(0.25),

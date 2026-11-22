@@ -6,7 +6,8 @@
 //! process (a server's pid) is `None`, a count that cannot happen in process
 //! (a pipeline's missed chunks) is zero, and everything else reads the same.
 
-use tutti_graph::{BusRef, BusSource, MAX_BUSES};
+use crate::BusInputPort;
+use tutti_graph::{BusOutputPort, MAX_BUSES, NodeBus};
 use tutti_plugin_host::PluginControls;
 use tutti_plugin_types::{
     BridgeLosses, BusRole, ChunkOutcomes, PipelineCounts, PluginBus, ServerLosses,
@@ -194,12 +195,12 @@ impl<'a> Diagnostics<'a> {
 
 /// A plugin's buses as the graph's bus handles, lent by
 /// [`Plugin::buses`](crate::Plugin::buses): what to wire with
-/// `Graph::connect` ([`BusSource`] into [`BusRef`]).
+/// `Graph::connect` ([`BusOutputPort`] into [`BusInputPort`]).
 ///
-/// `connect(kick.bus_out(0), comp.buses().input(1).unwrap())` feeds a plugin's
+/// `connect(kick.bus_output(0), comp.buses().input(1).unwrap())` feeds a plugin's
 /// second input bus: no loader marks a sidechain (CLAP and AU have no marker and
 /// VST3 says aux), so an app wires a key input by index. A bus index here is the graph's bus index, the plugin's own bus
-/// order, so each handle is the one `key.bus_in(i)` and `key.bus_out(i)` name.
+/// order, so each handle is the one `key.bus_input(i)` and `key.bus_output(i)` name.
 /// The graph tracks [`MAX_BUSES`] of a side: a plugin with more has its later
 /// buses reached by port.
 #[derive(Debug, Clone, Copy)]
@@ -227,12 +228,12 @@ impl<'a> PluginBuses<'a> {
     }
 
     /// Bus `index` of this node (below [`MAX_BUSES`], so it fits the `u8`).
-    fn bus(&self, index: usize) -> BusRef {
-        BusRef::new(self.node, index as u8)
+    fn bus(&self, index: usize) -> NodeBus {
+        NodeBus::new(self.node, index as u8)
     }
 
     /// The main input bus, if the plugin has an input.
-    pub fn main_input(&self) -> Option<BusRef> {
+    pub fn main_input(&self) -> Option<BusInputPort> {
         let index = self
             .inputs
             .iter()
@@ -241,14 +242,14 @@ impl<'a> PluginBuses<'a> {
     }
 
     /// Input bus `index`, in the plugin's bus order.
-    pub fn input(&self, index: usize) -> Option<BusRef> {
-        (index < self.inputs.len().min(MAX_BUSES)).then(|| self.bus(index))
+    pub fn input(&self, index: usize) -> Option<BusInputPort> {
+        (index < self.inputs.len().min(MAX_BUSES)).then(|| BusInputPort::node(self.bus(index)))
     }
 
     /// Output bus `index`, in the plugin's bus order: the main bus is the one
     /// the plugin marks main, and the rest are its extra outputs.
-    pub fn output(&self, index: usize) -> Option<BusSource> {
-        (index < self.outputs.len().min(MAX_BUSES)).then(|| BusSource::Node(self.bus(index)))
+    pub fn output(&self, index: usize) -> Option<BusOutputPort> {
+        (index < self.outputs.len().min(MAX_BUSES)).then(|| BusOutputPort::Node(self.bus(index)))
     }
 
     /// How many input buses the graph tracks.

@@ -102,15 +102,15 @@ fn a_port_that_is_not_there_is_refused() {
     let _ = s.update();
     let g = s.graph();
     assert_eq!(
-        g.connect(src.out(1), through.input(0)).err(),
-        Some(ConnectError::NoSuchOutPort(src.out(1)))
+        g.connect(src.output(1), through.input(0)).err(),
+        Some(ConnectError::NoSuchOutPort(src.output(1)))
     );
     assert_eq!(
-        g.connect(src.out(0), through.input(1)).err(),
+        g.connect(src.output(0), through.input(1)).err(),
         Some(ConnectError::NoSuchInPort(through.input(1)))
     );
     assert_eq!(
-        g.connect(src.out(0), MainOutput::channel(9)).err(),
+        g.connect(src.output(0), MainOutput::channel(9)).err(),
         Some(ConnectError::NoSuchInPort(MainOutput::channel(9)))
     );
     assert_eq!(
@@ -128,13 +128,13 @@ fn a_connections_gain_weights_the_edge_it_added() {
     let mut s = offline();
     let src = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph()
-        .connect(src.out(0), MainOutput::channel(0))
+        .connect(src.output(0), MainOutput::channel(0))
         .unwrap()
         .unfaded()
         .gain(Amplitude::new(0.5))
         .unwrap();
     assert_eq!(first_frame(&mut s), [0.25, 0.0]);
-    let edge = ChannelEdge::new(src.out(0), MainOutput::channel(0));
+    let edge = ChannelEdge::new(src.output(0), MainOutput::channel(0));
     let gain = s
         .graph_ref()
         .gain_target(edge.source(), edge.sink())
@@ -150,7 +150,7 @@ fn a_connections_gain_weights_the_edge_it_added() {
     let other = s.graph().add(ForkByClone(Const::mono(0.125)));
     assert_eq!(
         s.graph()
-            .connect(other.out(0), MainOutput::channel(1))
+            .connect(other.output(0), MainOutput::channel(1))
             .unwrap()
             .unfaded()
             .gain(Amplitude::new(f64::NAN))
@@ -174,26 +174,26 @@ fn disconnect_removes_one_edge_and_an_empty_set_sources_the_rest() {
     let a = s.graph().add(ForkByClone(Const::mono(0.5)));
     let b = s.graph().add(ForkByClone(Const::mono(0.25)));
     let sink = MainOutput::channel(0);
-    s.graph().connect(a.out(0), sink).unwrap().unfaded();
-    s.graph().connect(b.out(0), sink).unwrap().unfaded();
+    s.graph().connect(a.output(0), sink).unwrap().unfaded();
+    s.graph().connect(b.output(0), sink).unwrap().unfaded();
     assert_eq!(first_frame(&mut s), [0.75, 0.0]);
 
     assert!(
         s.graph()
-            .disconnect(a.out(0), sink)
+            .disconnect(a.output(0), sink)
             .unwrap()
             .unfaded()
             .was_connected()
     );
     assert!(
         !s.graph()
-            .disconnect(a.out(0), sink)
+            .disconnect(a.output(0), sink)
             .unwrap()
             .unfaded()
             .was_connected(),
         "already gone"
     );
-    assert_eq!(s.graph_ref().sources(sink).unwrap(), [b.out(0)]);
+    assert_eq!(s.graph_ref().sources(sink).unwrap(), [b.output(0)]);
     assert_eq!(first_frame(&mut s), [0.25, 0.0]);
 
     s.graph().set_sources(sink, []).unwrap();
@@ -218,7 +218,7 @@ fn a_main_bus_disconnects_what_it_connected() {
     s.graph().connect(src, through).unwrap().unfaded();
     assert_eq!(
         s.graph_ref().sources(through.input(1)).unwrap(),
-        [src.out(1)],
+        [src.output(1)],
         "channel by channel"
     );
     assert!(
@@ -262,6 +262,6 @@ fn a_key_and_its_erasure_are_one_node() {
     );
     assert_eq!(
         s.graph_ref().sources(MainOutput::channel(0)).unwrap(),
-        [src.out(0)]
+        [src.output(0)]
     );
 }

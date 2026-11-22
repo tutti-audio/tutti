@@ -16,7 +16,7 @@ fn rig() -> (Direct<EventInletNode>, MidiKeys) {
 }
 
 fn sent(d: &Direct<EventInletNode>) -> Vec<Ump> {
-    d.events_out(0)
+    d.event_output(0)
         .iter()
         .map(|e| match e.kind {
             EventKind::Midi(ump) => ump,

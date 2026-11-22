@@ -19,7 +19,9 @@ use common::{Kind, Pair, Word, bits, input_signal};
 use proptest::prelude::*;
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology};
 use tutti_graph::Topology;
-use tutti_graph::{Bus, BusRef, BusRole, BusSource, Buses, NodeKey, TapId, TapOptions, TapSpec};
+use tutti_graph::{
+    Bus, BusOutputPort, BusRole, Buses, NodeBus, NodeKey, TapId, TapOptions, TapSpec,
+};
 use tutti_graph::{
     Edge, EdgeGain, EdgeId, FeedbackFrom, InputPort, NodeSpec, OutputPort, PortSink, PortSource,
 };
@@ -3093,7 +3095,10 @@ fn bus_graph(seed: u64) -> BusGraph {
                     continue;
                 };
                 let mut trial = spec.clone();
-                trial.connect_bus(BusSource::Node(BusRef::new(from, 0)), BusRef::new(node, 0));
+                trial.connect_bus(
+                    BusOutputPort::Node(NodeBus::new(from, 0)),
+                    NodeBus::new(node, 0),
+                );
                 if trial.lowered(&common::shapes_of(&kinds)).is_ok() {
                     spec = trial;
                 }
@@ -3209,7 +3214,7 @@ fn main_output_bus_graph(seed: u64) -> BusGraph {
             continue;
         };
         let mut trial = graph.spec.clone();
-        trial.connect_bus_to_main_output(BusSource::Node(BusRef::new(node, 0)));
+        trial.connect_bus_to_main_output(BusOutputPort::Node(NodeBus::new(node, 0)));
         if trial.lowered(&common::shapes_of(&graph.kinds)).is_ok() {
             graph.spec = trial;
         }

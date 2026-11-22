@@ -58,7 +58,7 @@ use tutti_units::{At, SampleRate};
 
 use crate::EdgeId;
 use crate::Fade;
-use crate::bus_edge::{BusError, BusFold, BusRef, BusSource, Lowering};
+use crate::bus_edge::{BusError, BusFold, BusOutputPort, Lowering, NodeBus};
 use crate::command::{CommandId, ScheduleError, Scheduled, command_channel};
 use crate::compile::{CompileError, Shapes};
 use crate::event_tap::EventTapWriter;
@@ -564,10 +564,10 @@ impl<F: Float> Editor<F> {
     /// node does not declare on that side),
     /// [`BusError::Fold`] (the topologies cannot be folded: a channel with no
     /// place, a width that disagrees),
-    /// [`BusError::GlobalTooWide`], and [`BusError::Overlaps`] /
+    /// [`BusError::MainInputTooWide`], and [`BusError::Overlaps`] /
     /// [`BusError::GainOnLane`] when a lane would land on an edge or a gain
     /// the spec already has.
-    pub fn connect_bus(&mut self, from: BusSource, to: BusRef) -> Result<(), BusError> {
+    pub fn connect_bus(&mut self, from: BusOutputPort, to: NodeBus) -> Result<(), BusError> {
         self.spec
             .check_bus_edge(&self.shapes, from, to, BusFold::Speakers)?;
         self.touch();
@@ -578,7 +578,7 @@ impl<F: Float> Editor<F> {
     /// Removes the bus edge `from -> to`: its lanes and their weights go with
     /// it at the next commit, and the author's own edges and gains stay.
     /// Returns whether it was declared.
-    pub fn disconnect_bus(&mut self, from: BusSource, to: BusRef) -> bool {
+    pub fn disconnect_bus(&mut self, from: BusOutputPort, to: NodeBus) -> bool {
         self.touch();
         self.spec.disconnect_bus(from, to)
     }
@@ -591,11 +591,11 @@ impl<F: Float> Editor<F> {
     /// # Errors
     ///
     /// [`BusError::MainOutputUndeclared`], [`BusError::NoSuchNode`],
-    /// [`BusError::NoSuchBus`], [`BusError::GlobalTooWide`],
+    /// [`BusError::NoSuchBus`], [`BusError::MainInputTooWide`],
     /// [`BusError::MainOutputFold`], and [`BusError::Overlaps`] /
     /// [`BusError::GainOnLane`] when a lane lands on an output source or a
     /// gain the spec already has.
-    pub fn connect_bus_to_main_output(&mut self, from: BusSource) -> Result<(), BusError> {
+    pub fn connect_bus_to_main_output(&mut self, from: BusOutputPort) -> Result<(), BusError> {
         self.spec
             .check_main_output_bus_edge(&self.shapes, from, BusFold::Speakers)?;
         self.touch();
@@ -605,7 +605,7 @@ impl<F: Float> Editor<F> {
 
     /// Removes the bus edge `from -> main_output`, its lanes with it. Returns
     /// whether it was declared.
-    pub fn disconnect_bus_from_main_output(&mut self, from: BusSource) -> bool {
+    pub fn disconnect_bus_from_main_output(&mut self, from: BusOutputPort) -> bool {
         self.touch();
         self.spec.disconnect_bus_from_main_output(from)
     }

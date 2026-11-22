@@ -66,8 +66,8 @@ fn the_setup_adds_a_chorus_a_reverb_and_a_fader_of_the_right_widths() {
     );
     assert_eq!(
         (
-            graph.node_inputs(gm.out()).unwrap(),
-            graph.node_outputs(gm.out()).unwrap()
+            graph.node_inputs(gm.output()).unwrap(),
+            graph.node_outputs(gm.output()).unwrap()
         ),
         (2, 2),
         "the fader"
@@ -84,7 +84,7 @@ fn the_sends_feed_the_effects_and_the_effects_feed_the_fader() {
     let mut session = offline_session();
     let gm = session.add_general_midi(unit()).expect("a SoundFont unit");
     let unit = gm.instrument().node().erase();
-    let strip = gm.instrument().out();
+    let strip = gm.instrument().output();
     assert_eq!(
         source(&session, gm.chorus().erase(), 0),
         OutputPort::new(unit, 2)
@@ -100,7 +100,7 @@ fn the_sends_feed_the_effects_and_the_effects_feed_the_fader() {
     for (port, channel) in [(0, 0), (1, 1)] {
         let mut held = session
             .graph_ref()
-            .sources(InputPort::new(gm.out(), port))
+            .sources(InputPort::new(gm.output(), port))
             .unwrap();
         let mut want = vec![
             OutputPort::new(strip, channel),
@@ -155,7 +155,7 @@ fn every_stage_declares_its_own_tail() {
     );
     assert_eq!(frames(gm.chorus().erase()), 240);
     assert!((1.0..2.0).contains(&seconds(gm.reverb().erase())));
-    assert_eq!(graph.node_tail(gm.out()).unwrap(), Tail::None);
+    assert_eq!(graph.node_tail(gm.output()).unwrap(), Tail::None);
 }
 
 /// The ring-out of 3a holds against the per-node tails: a note let go through
@@ -199,11 +199,11 @@ fn a_note_through_the_setup_rings_out_within_the_summed_tails() {
     let mut gm = session.add_general_midi(unit).expect("a SoundFont unit");
     session
         .graph()
-        .set_sources(MainOutput::channel(0), [OutputPort::new(gm.out(), 0)])
+        .set_sources(MainOutput::channel(0), [OutputPort::new(gm.output(), 0)])
         .unwrap();
     session
         .graph()
-        .set_sources(MainOutput::channel(1), [OutputPort::new(gm.out(), 1)])
+        .set_sources(MainOutput::channel(1), [OutputPort::new(gm.output(), 1)])
         .unwrap();
     let _ = session.update();
     let tail = |node| match session.graph_ref().node_tail(node).unwrap() {
@@ -298,7 +298,7 @@ fn short_release_setup() -> (Session, GeneralMidi<f32>) {
     for c in 0..2 {
         session
             .graph()
-            .set_sources(MainOutput::channel(c), [OutputPort::new(gm.out(), c)])
+            .set_sources(MainOutput::channel(c), [OutputPort::new(gm.output(), c)])
             .unwrap();
     }
     let _ = session.update();
@@ -382,7 +382,7 @@ fn muting_the_setup_silences_the_wet_path_too() {
     );
 
     session
-        .set(gm.out().mode().to(NodeMode::Muted))
+        .set(gm.output().mode().to(NodeMode::Muted))
         .expect("the fader is in the graph");
     // The mode reaches the node with the update after the first block, and
     // its fade is two blocks.
@@ -405,10 +405,10 @@ fn removing_the_setup_leaves_nothing() {
     let nodes = [
         gm.instrument().node().erase(),
         gm.instrument().queue().erase(),
-        gm.instrument().out().erase(),
+        gm.instrument().output().erase(),
         gm.chorus().erase(),
         gm.reverb().erase(),
-        gm.out().erase(),
+        gm.output().erase(),
     ];
     assert!(session.graph_ref().node_count() > before);
     for node in nodes {

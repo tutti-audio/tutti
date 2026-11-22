@@ -8,8 +8,9 @@
 use tutti_buffers::Float;
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology};
 use tutti_buffers::{FoldError, InterleavedMut};
-use tutti_graph::{BusError, BusRef, BusSource, Buses, NodeKey, Unforkable};
+use tutti_graph::{BusError, BusOutputPort, Buses, NodeBus, NodeKey, Unforkable};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
+use tutti_session::BusInputPort;
 use tutti_session::{
     ChannelEdge, Committed, ConnectError, GainTargetError, InputPort, MainOutput, OutputPort,
     Session, SessionEvent,
@@ -84,8 +85,12 @@ fn all_are(block: &[f32], want: f32) -> bool {
     block.iter().all(|x| x.to_bits() == want.to_bits())
 }
 
-fn bus(node: NodeKey) -> BusRef {
-    BusRef::new(node, 0)
+fn bus(node: NodeKey) -> BusInputPort {
+    BusInputPort::new(node, 0)
+}
+
+fn node_bus(node: NodeKey) -> NodeBus {
+    NodeBus::new(node, 0)
 }
 
 struct Rig {
@@ -144,19 +149,22 @@ fn connecting_and_disconnecting_a_bus_edge_round_trips() {
     assert!(all_are(&out0(&mut r.s), 0.125));
 
     let g = r.s.graph();
-    g.connect(BusSource::Node(bus(r.stereo)), bus(r.sink))
+    g.connect(BusOutputPort::Node(node_bus(r.stereo)), bus(r.sink))
         .unwrap()
         .unfaded();
     assert!(g.has_uncommitted_edits());
     assert_eq!(
-        g.bus_sources(BusRef::new(r.sink, 0)).unwrap(),
-        [BusSource::Node(bus(r.stereo))]
+        g.bus_sources(BusInputPort::new(r.sink, 0)).unwrap(),
+        [BusOutputPort::Node(node_bus(r.stereo))]
     );
     // A second connect of the same edge is the same edge.
-    g.connect(BusSource::Node(bus(r.stereo)), bus(r.sink))
+    g.connect(BusOutputPort::Node(node_bus(r.stereo)), bus(r.sink))
         .unwrap()
         .unfaded();
-    assert_eq!(g.bus_sources(BusRef::new(r.sink, 0)).unwrap().len(), 1);
+    assert_eq!(
+        g.bus_sources(BusInputPort::new(r.sink, 0)).unwrap().len(),
+        1
+    );
     // The fold (0.5 * 0.25 + 0.5 * 0.75) summed with the ordinary source
     // (bus edge's node sorts first): (0.125 + 0.375) + 0.125.
     let want = (0.5f32 * 0.25 + 0.5 * 0.75) + 0.125;
@@ -165,19 +173,23 @@ fn connecting_and_disconnecting_a_bus_edge_round_trips() {
 
     let g = r.s.graph();
     assert!(
-        g.disconnect(BusSource::Node(bus(r.stereo)), bus(r.sink))
+        g.disconnect(BusOutputPort::Node(node_bus(r.stereo)), bus(r.sink))
             .unwrap()
             .unfaded()
             .was_connected()
     );
     assert!(
-        !g.disconnect(BusSource::Node(bus(r.stereo)), bus(r.sink))
+        !g.disconnect(BusOutputPort::Node(node_bus(r.stereo)), bus(r.sink))
             .unwrap()
             .unfaded()
             .was_connected()
     );
     assert!(g.has_uncommitted_edits());
-    assert!(g.bus_sources(BusRef::new(r.sink, 0)).unwrap().is_empty());
+    assert!(
+        g.bus_sources(BusInputPort::new(r.sink, 0))
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(
         g.sources(InputPort::new(r.sink, 0)).unwrap(),
         [OutputPort::new(r.own, 0)],
@@ -194,7 +206,7 @@ fn connecting_and_disconnecting_a_bus_edge_round_trips() {
 fn a_bus_edge_fades_in_and_out_lane_by_lane() {
     let mut r = rig();
     let g = r.s.graph();
-    g.connect(BusSource::Node(bus(r.stereo)), bus(r.sink))
+    g.connect(BusOutputPort::Node(node_bus(r.stereo)), bus(r.sink))
         .unwrap();
     let first = out0(&mut r.s);
     for (j, &x) in first.iter().enumerate() {
@@ -213,11 +225,15 @@ fn a_bus_edge_fades_in_and_out_lane_by_lane() {
 
     let g = r.s.graph();
     assert!(
-        g.disconnect(BusSource::Node(bus(r.stereo)), bus(r.sink))
+        g.disconnect(BusOutputPort::Node(node_bus(r.stereo)), bus(r.sink))
             .unwrap()
             .was_connected()
     );
-    assert!(g.bus_sources(BusRef::new(r.sink, 0)).unwrap().is_empty());
+    assert!(
+        g.bus_sources(BusInputPort::new(r.sink, 0))
+            .unwrap()
+            .is_empty()
+    );
     let down = out0(&mut r.s);
     assert!(
         (down[0] - 0.5).abs() < 1e-3,
@@ -243,13 +259,13 @@ fn a_refused_bus_edge_changes_nothing() {
     let _ = r.s.update();
     let g = r.s.graph();
     let refused = g
-        .connect(BusSource::Node(bus(three.erase())), bus(r.sink))
+        .connect(BusOutputPort::Node(node_bus(three.erase())), bus(r.sink))
         .unwrap_err();
     assert_eq!(
         refused,
         ConnectError::Bus(BusError::Fold {
-            from: BusSource::Node(bus(three.erase())),
-            to: bus(r.sink),
+            from: BusOutputPort::Node(node_bus(three.erase())),
+            to: node_bus(r.sink),
             error: FoldError::Unassigned {
                 src: layout(3),
                 dst: layout(1)
@@ -257,15 +273,22 @@ fn a_refused_bus_edge_changes_nothing() {
         })
     );
     assert!(matches!(
-        g.connect(BusSource::Node(BusRef::new(r.stereo, 4)), bus(r.sink)),
+        g.connect(BusOutputPort::Node(NodeBus::new(r.stereo, 4)), bus(r.sink)),
         Err(ConnectError::Bus(BusError::NoSuchBus { .. }))
     ));
     assert!(matches!(
-        g.connect(BusSource::Node(bus(NodeKey(u64::MAX))), bus(r.sink)),
+        g.connect(
+            BusOutputPort::Node(node_bus(NodeKey(u64::MAX))),
+            bus(r.sink)
+        ),
         Err(ConnectError::Bus(BusError::NoSuchNode { .. }))
     ));
     assert!(!g.has_uncommitted_edits());
-    assert!(g.bus_sources(BusRef::new(r.sink, 0)).unwrap().is_empty());
+    assert!(
+        g.bus_sources(BusInputPort::new(r.sink, 0))
+            .unwrap()
+            .is_empty()
+    );
 }
 
 /// The weights of a bus edge's lanes are the fold's: a gain target of a lane is
@@ -275,7 +298,7 @@ fn a_refused_bus_edge_changes_nothing() {
 fn a_lane_has_no_gain_target_and_a_removed_node_takes_its_bus_edges() {
     let mut r = rig();
     let g = r.s.graph();
-    g.connect(BusSource::Node(bus(r.stereo)), bus(r.sink))
+    g.connect(BusOutputPort::Node(node_bus(r.stereo)), bus(r.sink))
         .unwrap()
         .unfaded();
     let lane = ChannelEdge::new(OutputPort::new(r.stereo, 0), InputPort::new(r.sink, 0));
@@ -287,7 +310,11 @@ fn a_lane_has_no_gain_target_and_a_removed_node_takes_its_bus_edges() {
 
     r.s.remove(r.stereo).unwrap();
     let g = r.s.graph();
-    assert!(g.bus_sources(BusRef::new(r.sink, 0)).unwrap().is_empty());
+    assert!(
+        g.bus_sources(BusInputPort::new(r.sink, 0))
+            .unwrap()
+            .is_empty()
+    );
     // The removed node's lanes fade out over 256 frames before they go.
     let silent = (0..64).any(|_| all_are(&out0(&mut r.s), 0.0));
     assert!(silent, "the lanes faded out");
@@ -331,13 +358,13 @@ fn main_output_rig() -> (Session, NodeKey) {
 fn a_bus_into_the_declared_main_output_renders_the_itu_rows() {
     let (mut s, src) = main_output_rig();
     let g = s.graph();
-    g.connect(BusSource::Node(bus(src)), MainOutput)
+    g.connect(BusOutputPort::Node(node_bus(src)), MainOutput)
         .expect("5.1 folds to stereo")
         .unfaded();
     assert!(g.has_uncommitted_edits());
     assert_eq!(
         g.bus_sources(MainOutput).unwrap(),
-        [BusSource::Node(bus(src))]
+        [BusOutputPort::Node(node_bus(src))]
     );
     let [l, r] = stereo_block(&mut s);
     // The unity lane is a plain addend, the others weighted, in source order.
@@ -348,13 +375,13 @@ fn a_bus_into_the_declared_main_output_renders_the_itu_rows() {
 
     let g = s.graph();
     assert!(
-        g.disconnect(BusSource::Node(bus(src)), MainOutput)
+        g.disconnect(BusOutputPort::Node(node_bus(src)), MainOutput)
             .unwrap()
             .unfaded()
             .was_connected()
     );
     assert!(
-        !g.disconnect(BusSource::Node(bus(src)), MainOutput)
+        !g.disconnect(BusOutputPort::Node(node_bus(src)), MainOutput)
             .unwrap()
             .unfaded()
             .was_connected()
@@ -372,7 +399,8 @@ fn an_undeclared_main_output_refuses_a_bus_edge() {
     let mut r = rig();
     let g = r.s.graph();
     assert_eq!(
-        g.connect(BusSource::Node(bus(r.stereo)), MainOutput).err(),
+        g.connect(BusOutputPort::Node(node_bus(r.stereo)), MainOutput)
+            .err(),
         Some(ConnectError::Bus(BusError::MainOutputUndeclared))
     );
     assert!(!g.has_uncommitted_edits());
@@ -392,7 +420,7 @@ fn a_refused_commit_is_an_event_of_its_update() {
         out: named(2),
     }));
     s.graph()
-        .connect(BusSource::Node(bus(src.erase())), MainOutput)
+        .connect(BusOutputPort::Node(node_bus(src.erase())), MainOutput)
         .unwrap()
         .unfaded();
     let refused = |events: Vec<SessionEvent>| {
@@ -447,7 +475,7 @@ fn a_redeclared_main_output_relowers_its_edges_and_a_misfit_refuses_the_commit()
         out: named(2),
     }));
     s.graph()
-        .connect(BusSource::Node(bus(src.erase())), MainOutput)
+        .connect(BusOutputPort::Node(node_bus(src.erase())), MainOutput)
         .unwrap()
         .unfaded();
     let [l, r] = stereo_block(&mut s);

@@ -246,7 +246,7 @@ fn a_linear_piece_is_the_line_through_its_endpoints_in_f64() {
             assert_eq!(Law::Linear.eval(t), t);
             let (from, to) = (0.3f64, -7.9f64);
             assert_eq!(
-                Piece::new(from, to, Law::Linear).value(None, t).to_bits(),
+                Piece::new(from, to).value(None, t).to_bits(),
                 (from + (to - from) * t.get()).to_bits()
             );
         }

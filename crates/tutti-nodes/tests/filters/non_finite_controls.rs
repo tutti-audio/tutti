@@ -22,9 +22,9 @@ use tutti_graph::contract::drive;
 use tutti_graph::{Node, ParamNode, Prepare};
 use tutti_nodes::{
     ChannelTimes, CompressorConfig, CompressorControls, CompressorNode, DelayConfig, DelayControls,
-    DelayLayout, DelayNode, GateConfig, GateControls, GateNode, InterpolationMode, KeySource,
-    LadderFilterConfig, LadderFilterNode, LadderType, MaxDelay, ModDelayConfig, ModDelayNode,
-    PhaserConfig, PhaserNode, Stages, SvfFilterConfig, SvfFilterNode, SvfType,
+    DelayLayout, DelayNode, GateConfig, GateControls, GateNode, KeySource, LadderFilterConfig,
+    LadderFilterNode, LadderType, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode,
+    Stages, SvfFilterConfig, SvfFilterNode, SvfType,
 };
 use tutti_rt::ParamCell;
 use tutti_units::{
@@ -159,14 +159,10 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     survives_node(
         "delay",
         || {
-            let layout = DelayLayout::builder(
-                BusTopology::STEREO,
-                MaxDelay::of(Seconds::new(0.1)),
-                InterpolationMode::Linear,
-            )
-            .times(ChannelTimes::try_from(&[Seconds::new(0.013)][..]).unwrap())
-            .build()
-            .unwrap();
+            let layout = DelayLayout::builder(BusTopology::STEREO, MaxDelay::of(Seconds::new(0.1)))
+                .times(ChannelTimes::try_from(&[Seconds::new(0.013)][..]).unwrap())
+                .build()
+                .unwrap();
             DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
                 time: Seconds::new(0.01),
                 feedback: Feedback::new(0.5),

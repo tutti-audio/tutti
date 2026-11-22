@@ -93,11 +93,11 @@ pub struct DelayLayout {
 }
 
 impl DelayLayout {
-    /// A delay on the bus `input`, holding up to `max_delay`, reading with
-    /// `interpolation`, its channels linked in seconds and routed by the default for its
-    /// width.
+    /// A delay on the bus `input`, holding up to `max_delay`, reading with the default
+    /// [`InterpolationMode`], its channels linked in seconds and routed by the default for
+    /// its width.
     #[must_use]
-    pub fn new(input: BusTopology, max_delay: MaxDelay, interpolation: InterpolationMode) -> Self {
+    pub fn new(input: BusTopology, max_delay: MaxDelay) -> Self {
         let routing = if input == BusTopology::STEREO {
             FeedbackRouting::swap()
         } else {
@@ -106,24 +106,27 @@ impl DelayLayout {
         Self {
             input,
             max_delay,
-            interpolation,
+            interpolation: InterpolationMode::default(),
             routing,
             timing: DelayTiming::Free(ChannelTimes::linked()),
         }
     }
 
+    /// The delay reading with `interpolation`.
+    #[must_use]
+    pub const fn interpolation(mut self, interpolation: InterpolationMode) -> Self {
+        self.interpolation = interpolation;
+        self
+    }
+
     /// A [`DelayLayoutBuilder`] for the same delay, to give it a routing, channel times of
     /// its own or times in notes.
     #[must_use]
-    pub const fn builder(
-        input: BusTopology,
-        max_delay: MaxDelay,
-        interpolation: InterpolationMode,
-    ) -> DelayLayoutBuilder {
+    pub const fn builder(input: BusTopology, max_delay: MaxDelay) -> DelayLayoutBuilder {
         DelayLayoutBuilder {
             input,
             max_delay,
-            interpolation,
+            interpolation: InterpolationMode::Linear,
             routing: None,
             timing: DelayTiming::Free(ChannelTimes::linked()),
         }
@@ -149,7 +152,7 @@ impl DelayLayout {
 
     /// How a delayed position is read.
     #[must_use]
-    pub const fn interpolation(&self) -> InterpolationMode {
+    pub const fn interpolation_mode(&self) -> InterpolationMode {
         self.interpolation
     }
 
@@ -194,6 +197,13 @@ pub enum DelayLayoutError {
 }
 
 impl DelayLayoutBuilder {
+    /// Reads a delayed position with `interpolation`.
+    #[must_use]
+    pub const fn interpolation(mut self, interpolation: InterpolationMode) -> Self {
+        self.interpolation = interpolation;
+        self
+    }
+
     /// Routes the cross-feedback by `routing`.
     #[must_use]
     pub const fn routing(mut self, routing: FeedbackRouting) -> Self {
@@ -228,7 +238,8 @@ impl DelayLayoutBuilder {
     /// [for all](NoteTimes::all) or one for each channel. A note longer than the delay holds
     /// at the tempo is read as the longest delay.
     pub fn build(self) -> Result<DelayLayout, DelayLayoutError> {
-        let mut layout = DelayLayout::new(self.input, self.max_delay, self.interpolation);
+        let mut layout =
+            DelayLayout::new(self.input, self.max_delay).interpolation(self.interpolation);
         if let Some(routing) = self.routing {
             if routing.input() != self.input {
                 return Err(FeedbackRoutingError::Width {

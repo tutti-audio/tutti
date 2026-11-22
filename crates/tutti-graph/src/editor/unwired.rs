@@ -2,7 +2,7 @@
 //! key that names a port the new unit's shape does not have.
 
 use super::Editor;
-use crate::bus_edge::{BusFeed, BusRef, BusSource};
+use crate::bus_edge::{BusFeed, BusOutputPort, NodeBus};
 use crate::gain::EdgeFade;
 use crate::mode::NodeMix;
 use crate::node::Shape;
@@ -43,7 +43,7 @@ pub struct Unwired {
     /// event output the shape lacks, by the sink port they fed.
     pub event_edges: Vec<(EventInputPort, EventEdge)>,
     /// Bus edges into a bus the shape lacks or out of one, by the sink bus.
-    pub bus_edges: Vec<(BusRef, BusFeed)>,
+    pub bus_edges: Vec<(NodeBus, BusFeed)>,
     /// Bus edges into the main output out of an output bus the shape lacks.
     pub main_output_buses: Vec<BusFeed>,
     /// Param ports a source drove that no longer exists or whose source
@@ -140,9 +140,9 @@ impl<F: Float> Editor<F> {
         }
 
         // Bus edges.
-        let bus_in_gone = |b: &BusRef| b.node == key && b.resolve(shape.buses_in()).is_none();
+        let bus_in_gone = |b: &NodeBus| b.node == key && b.resolve(shape.buses_in()).is_none();
         let feed_gone = |f: &BusFeed| {
-            matches!(f.source, BusSource::Node(b)
+            matches!(f.source, BusOutputPort::Node(b)
                 if b.node == key && b.resolve(shape.buses_out()).is_none())
         };
         spec.bus_edges.retain(|to, feeds| {

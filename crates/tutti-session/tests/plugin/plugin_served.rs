@@ -981,7 +981,7 @@ fn dropped_events_at_the_node_accumulate_across_a_reload_of_its_plugin() {
     s.graph().connect(node, MainOutput).unwrap();
     let (inlet, mut writer) = s.graph().open_event_inlet(EventCapacity::of(512));
     s.graph()
-        .connect(inlet.events_out(), node.events_in())
+        .connect(inlet.event_output(0), node.event_input(0))
         .unwrap();
     let notes = || (0..300).map(|i| midi::note_on(MidiChannel::FIRST, (i % 128) as u8, 0xFFFF));
     let losses = |s: &Session| s.plugin_view(node).unwrap().losses();

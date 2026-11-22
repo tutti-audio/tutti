@@ -8,7 +8,7 @@
 //! [`ModDelayConfig::general_midi_chorus`] (wet only), the reverb a
 //! [`FreeverbNode`], the graph sums the dry pair and both effects' pairs into
 //! one stereo mix (each of the fader's two inputs has three sources), and a
-//! [`BusStripNode`] after the sum is the setup's fader, whose output is [`out`](GeneralMidi::out). The sends are
+//! [`BusStripNode`] after the sum is the setup's fader, whose output is [`output`](GeneralMidi::output). The sends are
 //! post-fader, as a mixer channel's are: the strip's gain and its
 //! [`NodeMode`](tutti_graph::NodeMode) act on the whole mix, effects included.
 //! Nothing else is needed to hear it; nothing here is required either: a host
@@ -37,7 +37,7 @@ use crate::{InstrumentHandle, Key, OutputPort, ParamTarget, RemoveError, Session
 /// level** (a strip on the dry pair only, before the sum). The setup's own
 /// fader, [`gain`](Self::gain), is after the sum and so takes the
 /// effects with it; so does muting it, which is the graph's, not a method
-/// here: `session.set(gm.out().mode().to(NodeMode::Muted))`. A send's level is the font's
+/// here: `session.set(gm.output().mode().to(NodeMode::Muted))`. A send's level is the font's
 /// and the channel's (CC 91 and CC 93), not a gain's.
 #[derive(Debug)]
 pub struct GeneralMidi<F: Float + SimdLanes + Lerp> {
@@ -74,7 +74,7 @@ impl<F: Float + SimdLanes + Lerp> GeneralMidi<F> {
     /// The mix after the fader: dry pair, chorus and reverb summed, on ports 0
     /// (left) and 1 (right).
     #[must_use]
-    pub fn out(&self) -> Key<BusStripNode> {
+    pub fn output(&self) -> Key<BusStripNode> {
         self.strip
     }
 
@@ -155,7 +155,7 @@ where
         graph.connect(OutputPort::new(unit, 4), reverb.input(0))?;
         // The fader's inputs sum the dry pair, the chorus and the reverb,
         // each stereo, left on port 0 and right on port 1.
-        let dry = instrument.out().erase();
+        let dry = instrument.output().erase();
         for (channel, port) in [(0, 0), (1, 1)] {
             for node in [dry, chorus.erase(), reverb.erase()] {
                 graph.connect(OutputPort::new(node, channel), strip.input(port))?;

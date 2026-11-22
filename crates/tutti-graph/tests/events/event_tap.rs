@@ -160,7 +160,7 @@ fn rig(workers: usize, no_alloc: bool, m: usize) -> Rig {
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
     if workers > 1 {
         exec.set_pool(Some(if no_alloc {
-            common::TestPool::no_alloc(workers)
+            common::TestPool::new(workers)
         } else {
             common::test_pool(workers)
         }));
@@ -1005,7 +1005,7 @@ fn run_busy(r: &mut Rig) -> Vec<Vec<TapEvent>> {
 }
 
 /// The pooled render's taps equal the serial one's, event for event, at
-/// several worker counts with every participant inside `assert_no_alloc`; the
+/// several worker counts with every participant inside `RtScope`; the
 /// serial run itself is checked against the script and the compensation.
 #[test]
 fn the_parallel_event_taps_are_bit_identical_and_allocation_free() {

@@ -26,15 +26,23 @@ pub struct AllPassFilter<F: Float> {
 }
 
 impl<F: Float> AllPassFilter<F> {
-    /// A silent all-pass of `form`, its delay `delay` frames and `gain` the
-    /// coefficient `g`, below 1 ([`Feedback`]'s own contract).
+    /// A silent [`Lattice`](AllPassForm::Lattice) all-pass, its delay `delay`
+    /// frames and `gain` the coefficient `g`, below 1 ([`Feedback`]'s own
+    /// contract).
     #[must_use]
-    pub fn new(form: AllPassForm, delay: NonZeroUsize, gain: Feedback) -> Self {
+    pub fn new(delay: NonZeroUsize, gain: Feedback) -> Self {
         Self {
-            form,
+            form: AllPassForm::Lattice,
             ring: DelayRing::new(delay.get()),
             gain: F::from_unit(gain),
         }
+    }
+
+    /// The all-pass of `form`.
+    #[must_use]
+    pub fn form(mut self, form: AllPassForm) -> Self {
+        self.form = form;
+        self
     }
 
     /// The delay in frames.

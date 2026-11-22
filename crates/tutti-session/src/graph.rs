@@ -51,7 +51,7 @@ use tutti_graph::Compensation;
 use tutti_graph::NodeParts;
 #[cfg(feature = "testing")]
 use tutti_graph::fade_gains;
-use tutti_graph::{BusRef, BusSource, Buses, EdgeFade, EdgeGain};
+use tutti_graph::{BusOutputPort, Buses, EdgeFade, EdgeGain, NodeBus};
 use tutti_graph::{
     CommitError, Editor, EventEdge, EventInputPort, EventOutputPort, Executor, Fade, GraphInvalid,
     InletNode, InletRing, IntoNode, MeterReader, Prepare, RenderMode,
@@ -80,8 +80,8 @@ pub use observe::{MainOutputReader, Meters, NotReopened, Reopened, Taps};
 pub use testing::{AudioSide, Testing};
 
 use crate::key::{
-    BusSink, BusWire, Disconnection, Fanin, InEnd, Inlet, MainSink, OutEnd, Outlet, Removal,
-    SetSources, Wire,
+    BusEnd, BusInputPort, BusWire, Disconnection, Fanin, InEnd, Inlet, MainSink, OutEnd, Outlet,
+    Removal, SetSources, Wire,
 };
 use crate::value::{GainTarget, GainTargetError, ValueTable, Write};
 use crate::{
@@ -513,7 +513,7 @@ pub(crate) struct Unwiring {
     pub(crate) node: NodeKey,
     pub(crate) edges: Vec<ChannelEdge>,
     pub(crate) event_edges: Vec<crate::EventEdge>,
-    pub(crate) bus_edges: Vec<(BusSource, BusSink)>,
+    pub(crate) bus_edges: Vec<(BusOutputPort, BusInputPort)>,
 }
 
 /// A hook each live render helper runs once on its own thread, with its
@@ -1728,16 +1728,16 @@ impl<F: Float> Graph<F> {
                 event_edges.push(edge);
             }
         }
-        let mut bus_edges: Vec<(BusSource, BusSink)> = Vec::new();
+        let mut bus_edges: Vec<(BusOutputPort, BusInputPort)> = Vec::new();
         let named = unwired
             .bus_edges
             .iter()
-            .map(|(to, feed)| (feed.source, BusSink::Node(*to)))
+            .map(|(to, feed)| (feed.source, BusInputPort(BusEnd::Node(*to))))
             .chain(
                 unwired
                     .main_output_buses
                     .iter()
-                    .map(|feed| (feed.source, BusSink::MainOutput)),
+                    .map(|feed| (feed.source, BusInputPort(BusEnd::MainOutput))),
             );
         for wire in named {
             if !bus_edges.contains(&wire) {
@@ -2740,7 +2740,7 @@ impl<F: Float> Graph<F> {
     }
 
     /// Connects `from` to `to` and returns the connection, which a gain can
-    /// follow: `g.connect(osc.out(0), lp.input(0))?.gain(Amplitude::new(0.5))?`.
+    /// follow: `g.connect(osc.output(0), lp.input(0))?.gain(Amplitude::new(0.5))?`.
     ///
     /// What the two ends are says what is connected:
     ///
@@ -2756,16 +2756,16 @@ impl<F: Float> Graph<F> {
     ///   feeds both channels of a stereo main output at gain 1.0. A placement that
     ///   would weight a channel (a centre into a main output with none) is refused:
     ///   a weighted fold is a bus edge. A connection never truncates;
-    /// - a [`BusSource`] into a [`BusRef`] (`key.bus_out(i)`,
-    ///   `key.bus_in(i)`) or into [`MainOutput`]: **a bus edge**, a fold between two
+    /// - a [`BusOutputPort`] into a [`BusInputPort`] (`key.bus_output(i)`,
+    ///   `key.bus_input(i)`) or into [`MainOutput`]: **a bus edge**, a fold between two
     ///   declared topologies, lowered at the commit to one weighted lane per
     ///   contribution (`Fold::contributions`) and summed with any other source
     ///   of the sink's ports. Into the main output it folds to the topology the main output
     ///   was declared with
     ///   ([`Session::declare_main_output_topology`](crate::Session::declare_main_output_topology)).
     ///   Its lanes carry the fold's weights and no gain of their own;
-    /// - an [`EventOutputPort`] into an [`EventInputPort`] (`key.events_out()`,
-    ///   `key.events_in()`): **an event edge**. Events merge by offset at the
+    /// - an [`EventOutputPort`] into an [`EventInputPort`] (`key.event_output(0)`,
+    ///   `key.event_input(0)`): **an event edge**. Events merge by offset at the
     ///   sink, and an event edge is never faded (a note-off is a message, not
     ///   a level), so `.unfaded()` on a [`Connection`] or a
     ///   [`Disconnection`] changes nothing for it.
@@ -2826,14 +2826,14 @@ impl<F: Float> Graph<F> {
 
     pub(crate) fn add_bus_edge(
         &mut self,
-        from: BusSource,
-        to: BusSink,
+        from: BusOutputPort,
+        to: BusInputPort,
     ) -> Result<(), ConnectError> {
         let at = Self::bus_sink(to);
         let was = self.editor.spec().bus_fade(from, at);
-        match to {
-            BusSink::Node(to) => self.editor.connect_bus(from, to),
-            BusSink::MainOutput => self.editor.connect_bus_to_main_output(from),
+        match to.0 {
+            BusEnd::Node(to) => self.editor.connect_bus(from, to),
+            BusEnd::MainOutput => self.editor.connect_bus_to_main_output(from),
         }?;
         // A new bus edge, or one on its way out, fades in: each lane of its
         // fold does.
@@ -2844,14 +2844,19 @@ impl<F: Float> Graph<F> {
         Ok(())
     }
 
-    fn bus_sink(to: BusSink) -> Option<BusRef> {
-        match to {
-            BusSink::Node(bus) => Some(bus),
-            BusSink::MainOutput => None,
+    fn bus_sink(to: BusInputPort) -> Option<NodeBus> {
+        match to.0 {
+            BusEnd::Node(bus) => Some(bus),
+            BusEnd::MainOutput => None,
         }
     }
 
-    pub(crate) fn remove_bus_edge(&mut self, from: BusSource, to: BusSink, hard: bool) -> bool {
+    pub(crate) fn remove_bus_edge(
+        &mut self,
+        from: BusOutputPort,
+        to: BusInputPort,
+        hard: bool,
+    ) -> bool {
         let at = Self::bus_sink(to);
         let Some(fade) = self.editor.spec().bus_fade(from, at) else {
             return false;
@@ -2864,16 +2869,16 @@ impl<F: Float> Graph<F> {
             self.edited = true;
             return true;
         }
-        let removed = match to {
-            BusSink::Node(to) => self.editor.disconnect_bus(from, to),
-            BusSink::MainOutput => self.editor.disconnect_bus_from_main_output(from),
+        let removed = match to.0 {
+            BusEnd::Node(to) => self.editor.disconnect_bus(from, to),
+            BusEnd::MainOutput => self.editor.disconnect_bus_from_main_output(from),
         };
         self.edited |= removed;
         removed
     }
 
     /// Makes the bus edge `from -> to` a plain, unfaded one.
-    pub(crate) fn harden_bus_edge(&mut self, from: BusSource, to: BusSink) {
+    pub(crate) fn harden_bus_edge(&mut self, from: BusOutputPort, to: BusInputPort) {
         if self
             .editor
             .set_bus_fade(from, Self::bus_sink(to), EdgeFade::None)
@@ -2888,17 +2893,17 @@ impl<F: Float> Graph<F> {
     /// # Errors
     ///
     /// [`ConnectError::NoSuchNode`] when the bus's node is not in the graph.
-    pub fn bus_sources(&self, to: impl Inlet<BusWire>) -> Result<Vec<BusSource>, ConnectError> {
+    pub fn bus_sources(&self, to: impl Inlet<BusWire>) -> Result<Vec<BusOutputPort>, ConnectError> {
         let to = to.sink();
-        if let BusSink::Node(bus) = to
+        if let BusEnd::Node(bus) = to.0
             && !self.contains(bus.node)
         {
             return Err(ConnectError::NoSuchNode(bus.node));
         }
         let spec = self.editor.spec();
-        let feeds = match to {
-            BusSink::Node(bus) => spec.bus_edges.get(&bus),
-            BusSink::MainOutput => Some(&spec.main_output_sources),
+        let feeds = match to.0 {
+            BusEnd::Node(bus) => spec.bus_edges.get(&bus),
+            BusEnd::MainOutput => Some(&spec.main_output_sources),
         };
         Ok(feeds.map_or_else(Vec::new, |feeds| {
             feeds
@@ -2910,13 +2915,17 @@ impl<F: Float> Graph<F> {
     }
 
     /// Whether the nodes a bus edge names are in the graph.
-    pub(crate) fn check_bus_nodes(&self, from: BusSource, to: BusSink) -> Result<(), ConnectError> {
-        if let BusSource::Node(bus) = from
+    pub(crate) fn check_bus_nodes(
+        &self,
+        from: BusOutputPort,
+        to: BusInputPort,
+    ) -> Result<(), ConnectError> {
+        if let BusOutputPort::Node(bus) = from
             && !self.contains(bus.node)
         {
             return Err(ConnectError::NoSuchNode(bus.node));
         }
-        if let BusSink::Node(bus) = to
+        if let BusEnd::Node(bus) = to.0
             && !self.contains(bus.node)
         {
             return Err(ConnectError::NoSuchNode(bus.node));

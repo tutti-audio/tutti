@@ -13,11 +13,9 @@ fn point(beat: f64, value: f64) -> Breakpoint<Db> {
 
 fn ramp() -> Trajectory<Db> {
     let mut e = Trajectory::new();
-    e.add_breakpoint(Breakpoint::with_law(
-        Beat::new(1.0),
-        Db::new(0.0),
-        Law::PowerIn(Exponent::of(2.0)),
-    ));
+    e.add_breakpoint(
+        Breakpoint::new(Beat::new(1.0), Db::new(0.0)).law(Law::PowerIn(Exponent::of(2.0))),
+    );
     e.add_breakpoint(point(3.0, 1.0));
     e
 }
@@ -63,16 +61,8 @@ fn a_linear_piece_is_the_straight_line() {
 #[test]
 fn a_breakpoint_reads_its_own_value() {
     let mut e = Trajectory::new();
-    e.add_breakpoint(Breakpoint::with_law(
-        Beat::new(0.0),
-        Db::new(0.0),
-        Law::Hold,
-    ));
-    e.add_breakpoint(Breakpoint::with_law(
-        Beat::new(2.0),
-        Db::new(5.0),
-        Law::Hold,
-    ));
+    e.add_breakpoint(Breakpoint::new(Beat::new(0.0), Db::new(0.0)).law(Law::Hold));
+    e.add_breakpoint(Breakpoint::new(Beat::new(2.0), Db::new(5.0)).law(Law::Hold));
     e.add_breakpoint(point(4.0, 9.0));
     assert_eq!(e.value_at(Beat::new(1.999)), Some(Db::new(0.0)));
     assert_eq!(e.value_at(Beat::new(2.0)), Some(Db::new(5.0)));
@@ -146,7 +136,7 @@ fn simplify_drops_the_redundant_and_keeps_the_corner() {
 fn simplify_reads_the_previous_breakpoints_law() {
     let build = |law| {
         let mut e = Trajectory::new();
-        e.add_breakpoint(Breakpoint::with_law(Beat::new(0.0), Db::new(0.0), law));
+        e.add_breakpoint(Breakpoint::new(Beat::new(0.0), Db::new(0.0)).law(law));
         e.add_breakpoint(point(1.0, 0.25));
         e.add_breakpoint(point(2.0, 1.0));
         e.simplify(0.01);

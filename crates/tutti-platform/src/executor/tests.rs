@@ -872,9 +872,36 @@ fn join_within_hands_back_a_running_task_past_the_bound() {
     let task = executor
         .spawn_dedicated("bounded", None, async move { wait.recv().unwrap() })
         .unwrap();
-    let task = join_within(task, Duration::ZERO).expect_err("the task has not ended");
+    let Err(Unjoined::TimedOut(task)) = join_within(task, Duration::ZERO) else {
+        panic!("a pending task is handed back as timed out");
+    };
     go.send(3).unwrap();
     assert_eq!(joined_off_thread(task), Some(3));
+}
+
+/// **`join_within` on a thread that drives an executor hands the task back at once and
+/// the task still runs**: inside a dedicated task it returns `Driving` without waiting or
+/// panicking, and the task it was given ends with its output once released.
+#[test]
+fn join_within_on_a_driving_thread_hands_the_task_back_and_it_still_runs() {
+    let executor = Executor::new();
+    let (go, wait) = mpsc::channel::<u32>();
+    let pending = executor
+        .spawn_dedicated("pending", None, async move { wait.recv().unwrap() })
+        .unwrap();
+    let joiner = executor
+        .spawn_dedicated("joiner", None, async move {
+            match join_within(pending, HANG_GUARD) {
+                Err(Unjoined::Driving(task)) => Some(task),
+                _ => None,
+            }
+        })
+        .unwrap();
+    let task = joined_off_thread(joiner)
+        .expect("the joiner ended without panicking")
+        .expect("the wait on a driving thread is refused with `Driving`");
+    go.send(6).unwrap();
+    assert_eq!(joined_off_thread(task), Some(6));
 }
 
 /// **`join_within` returns a task's outcome once it ends within the bound**: its output,
@@ -1004,26 +1031,6 @@ fn shutdown_ends_a_local_dedicated_future() {
         .unwrap();
     drop(executor);
     assert_eq!(joined_off_thread(task), None);
-}
-
-/// **`is_driving` is true on a thread that drives an executor and false elsewhere**: a
-/// dedicated future and a task on a `Threads` driver read `true`, the test's own thread
-/// `false`.
-#[test]
-fn is_driving_is_true_only_on_a_driving_thread() {
-    assert!(!is_driving(), "the test's thread drives nothing");
-    let executor = Executor::new();
-    let task = executor
-        .spawn_dedicated("drives", None, async { is_driving() })
-        .unwrap();
-    assert_eq!(joined_off_thread(task), Some(true));
-    let _threads = executor.spawn_threads(NonZeroUsize::MIN).unwrap();
-    let on_driver = executor.spawn(async { is_driving() });
-    assert_eq!(
-        joined_off_thread(on_driver),
-        Some(true),
-        "a `Threads` driver drives"
-    );
 }
 
 #[cfg(target_os = "linux")]

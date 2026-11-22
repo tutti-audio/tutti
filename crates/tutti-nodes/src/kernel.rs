@@ -853,7 +853,7 @@ mod latency_tail;
 #[cfg(test)]
 mod tests {
     use tutti_buffers::BusTopology;
-    use tutti_dsp::{DelayControls, DelayLayout, InterpolationMode, MaxDelay};
+    use tutti_dsp::{DelayControls, DelayLayout, MaxDelay};
     use tutti_graph::contract::{drive_input, prepared};
     use tutti_graph::{Env, PlayClock, Status, TransportChanges, TransportPosition};
     use tutti_units::{Frame, Seconds};
@@ -896,7 +896,6 @@ mod tests {
                 DelayConfig::new(DelayLayout::new(
                     BusTopology::MONO,
                     MaxDelay::of(Seconds::new(0.01)),
-                    InterpolationMode::Linear,
                 ))
                 .controls(DelayControls {
                     feedback: tutti_units::Feedback::new(0.5),

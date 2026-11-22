@@ -62,7 +62,7 @@ fn a_mono_source_reaches_both_sides_of_a_stereo_strip() {
         out: BusTopology::MONO,
     }));
     let strip = g.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
-    g.connect(src.bus_out(0), strip.bus_in(0))
+    g.connect(src.bus_output(0), strip.bus_input(0))
         .expect("a mono bus folds onto a stereo one")
         .unfaded();
     for c in 0..2 {
@@ -86,7 +86,7 @@ fn a_stereo_strip_feeds_a_declared_surround_main_output() {
     }));
     let strip = g.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
     g.connect(src, strip).expect("same width").unfaded();
-    g.connect(strip.bus_out(0), MainOutput)
+    g.connect(strip.bus_output(0), MainOutput)
         .expect("a placed stereo bus folds onto 5.1")
         .unfaded();
     assert_eq!(heard(&mut s, 6), [0.25, 0.75, 0.0, 0.0, 0.0, 0.0]);

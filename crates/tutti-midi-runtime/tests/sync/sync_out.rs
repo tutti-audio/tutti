@@ -520,7 +520,7 @@ fn set_metronome_is_a_complete_group_packet_and_off_by_default() {
 fn drive(d: &mut Direct<SyncOut>, transport: TransportPosition) -> Vec<Ump> {
     d.set_transport(transport);
     d.block();
-    d.events_out(0)
+    d.event_output(0)
         .iter()
         .filter_map(|e| match e.kind {
             EventKind::Midi(ump) => Some(ump),

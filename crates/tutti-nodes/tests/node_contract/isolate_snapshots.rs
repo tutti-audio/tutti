@@ -35,12 +35,12 @@ use tutti_nodes::{
     DelayNode, DiodeClipperConfig, DiodeClipperNode, DistanceConfig, DistanceNode,
     DistortionConfig, DistortionNode, DynamicEqConfig, DynamicEqNode, EqBandConfig, EqBandNode,
     FrequencyShifterConfig, FrequencyShifterNode, GateConfig, GateControls, GateNode,
-    HysteresisConfig, HysteresisNode, InterpolationMode, KeySource, LadderFilterConfig,
-    LadderFilterNode, LadderType, LfoConfig, LfoNode, LfoShape, LimiterConfig, LimiterControls,
-    LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserControls, PhaserNode,
-    PitchShifterConfig, PitchShifterNode, RingModConfig, RingModNode, ShapeKind, ShimmerConfig,
-    ShimmerNode, Stages, SvfFilterConfig, SvfFilterNode, SvfType, TremoloConfig, TremoloNode,
-    TubeStageConfig, TubeStageNode, WavetableConfig, WavetableNode,
+    HysteresisConfig, HysteresisNode, KeySource, LadderFilterConfig, LadderFilterNode, LadderType,
+    LfoConfig, LfoNode, LfoShape, LimiterConfig, LimiterControls, LimiterNode, MaxDelay,
+    ModDelayConfig, ModDelayNode, PhaserConfig, PhaserControls, PhaserNode, PitchShifterConfig,
+    PitchShifterNode, RingModConfig, RingModNode, ShapeKind, ShimmerConfig, ShimmerNode, Stages,
+    SvfFilterConfig, SvfFilterNode, SvfType, TremoloConfig, TremoloNode, TubeStageConfig,
+    TubeStageNode, WavetableConfig, WavetableNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -176,14 +176,10 @@ fn brickwall_limiter() {
 #[test]
 fn delay_line() {
     IsolateRow::new("DelayNode (stereo, ping-pong)", || {
-        let layout = DelayLayout::builder(
-            BusTopology::STEREO,
-            MaxDelay::of(Seconds::new(1.0)),
-            InterpolationMode::Linear,
-        )
-        .times(ChannelTimes::try_from(&[Seconds::new(0.07)][..]).unwrap())
-        .build()
-        .unwrap();
+        let layout = DelayLayout::builder(BusTopology::STEREO, MaxDelay::of(Seconds::new(1.0)))
+            .times(ChannelTimes::try_from(&[Seconds::new(0.07)][..]).unwrap())
+            .build()
+            .unwrap();
         DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
             time: Seconds::new(0.05),
             feedback: Feedback::new(0.5_f64),

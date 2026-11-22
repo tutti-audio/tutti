@@ -24,7 +24,7 @@ use tutti_units::{Db, Feedback, Hz, SampleRate, SampleSpan, Samples, Seconds, Ta
 
 use crate::delay::{DelayRing, ring_seconds, trips};
 use crate::string_tuning::{LowestPitch, Tuned, per_trip_decay, period, tune};
-use crate::{AllPassFilter, AllPassForm, TAIL_FLOOR};
+use crate::{AllPassFilter, TAIL_FLOOR};
 
 /// The controls of a [`KarplusStrong`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -78,7 +78,7 @@ impl<F: Float> KarplusStrong<F> {
             rate,
             lowest,
             ring: DelayRing::new(frames),
-            all_pass: AllPassFilter::new(AllPassForm::Lattice, NonZeroUsize::MIN, Feedback::NONE),
+            all_pass: AllPassFilter::new(NonZeroUsize::MIN, Feedback::NONE),
             tuned: Tuned {
                 whole: Samples::new(1),
                 delay: SampleSpan::of(1.0),

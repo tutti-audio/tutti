@@ -74,7 +74,7 @@ const PASSES: usize = QUANTUM / BLOCK;
 /// play clock's 32-frame grid across it.
 ///
 /// Transport changes inside every chunk (a map point and a seek in each
-/// pass, doc 020 stage 5b) are walked inside the guard too.
+/// pass, doc 020 stage 5b) are walked in the render too.
 ///
 /// The LFO is a lane's LFO layer around its knob.
 #[test]
@@ -118,11 +118,10 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
     let mut env = Trajectory::new();
     for k in 0..200 {
         let v = if k % 2 == 0 { 0.2 } else { 0.9 };
-        env.add_breakpoint(Breakpoint::with_law(
-            Beat::new(f64::from(k) * 2.0),
-            Hz::new(v),
-            Law::PowerIn(Exponent::of(2.0)),
-        ));
+        env.add_breakpoint(
+            Breakpoint::new(Beat::new(f64::from(k) * 2.0), Hz::new(v))
+                .law(Law::PowerIn(Exponent::of(2.0))),
+        );
     }
     let lane = ControlLaneNode::from(ForeignLaneConfig::new(
         ParamId::new(78),
@@ -186,28 +185,24 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
         }
     };
 
-    // Warm up: the first blocks fault in the slab and fill the pipeline.
-    for b in 0..4 * PASSES {
+    // The first blocks fault in the slab and fill the pipeline; every block is
+    // inside `RtScope`, so none may allocate.
+    for b in 0..=20 * PASSES {
         block(b, &mut outs);
     }
-    assert_no_alloc::assert_no_alloc(|| {
-        for b in 4 * PASSES..=20 * PASSES {
-            block(b, &mut outs);
-        }
-    });
     drop(outs);
-    // The chunks' transport changes ran inside the guard: a map point and a
+    // The chunks' transport changes ran in the render: a map point and a
     // seek in every pass overflow the eight a chunk holds, counted.
     assert!(
         rig.controls.dropped_transport_changes() > 0,
-        "no chunk filled its transport changes, so the cap path was not guarded"
+        "no chunk filled its transport changes, so the cap path was not walked"
     );
     // The plugin rendered through it all (its transport echo opens every
     // chunk, and the last pass opened one), so the collect path ran inside
-    // the guard, not only the submit.
+    // the render, not only the submit.
     assert!(
         out[0].iter().any(|&s| s != 0.0),
-        "the steady state rendered nothing; the guarded blocks never collected"
+        "the steady state rendered nothing; the steady-state blocks never collected"
     );
     drop(probe.handle);
 }

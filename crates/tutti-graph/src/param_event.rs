@@ -364,7 +364,7 @@ impl ParamSegment {
     /// [`Piece`]. A segment is this plus an address and a position
     /// ([`position`](Self::position), [`length`](Self::length)).
     pub fn piece(&self) -> Piece {
-        Piece::new(self.from, self.to, self.shape)
+        Piece::new(self.from, self.to).law(self.shape)
     }
 
     /// The built-in param this moves, `None` for an id-addressed one: what decides
@@ -534,10 +534,10 @@ mod tests {
         // `Smootherstep`, among them).
         let smooth = ParamSegment::new(key, Hz::new(1.0), Hz::new(2.0), Samples::new(8))
             .law(Law::Smootherstep);
-        assert_eq!(smooth.piece(), Piece::new(1.0, 2.0, Law::Smootherstep));
+        assert_eq!(smooth.piece(), Piece::new(1.0, 2.0).law(Law::Smootherstep));
         assert_eq!(
             s.piece(),
-            Piece::new(1.0, 2.0, Law::PowerOut(Exponent::of(3.0)))
+            Piece::new(1.0, 2.0).law(Law::PowerOut(Exponent::of(3.0)))
         );
     }
 

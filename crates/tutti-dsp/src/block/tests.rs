@@ -8,8 +8,8 @@ use crate::{
 };
 use crate::{
     DelayBank, DelayLayout, DelayRamps, DelaySignals, EarlyReflections, FreeverbBank,
-    FrequencyShifterBank, GAIN_RAMP, InterpolationMode, KarplusStrongBank, LowestPitch, MaxDelay,
-    PhaserChain, SpringLayout, SpringReverb, Stages, TapSet,
+    FrequencyShifterBank, GAIN_RAMP, KarplusStrongBank, LowestPitch, MaxDelay, PhaserChain,
+    SpringLayout, SpringReverb, Stages, TapSet,
 };
 use core::num::NonZeroUsize;
 use tutti_buffers::{
@@ -232,11 +232,7 @@ fn utility_banks_refuse_a_block_of_another_width() {
 fn delay_banks_refuse_a_block_of_another_width() {
     frames_cannot_differ();
     refuses_another_width(2, |block| {
-        let layout = DelayLayout::new(
-            BusTopology::STEREO,
-            MaxDelay::of(Seconds::new(1.0)),
-            InterpolationMode::Linear,
-        );
+        let layout = DelayLayout::new(BusTopology::STEREO, MaxDelay::of(Seconds::new(1.0)));
         let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(RATE).get()).unwrap();
         DelayBank::<f32>::new(&layout, RATE).process(
             &mut DelayRamps::new(steps),

@@ -1,6 +1,6 @@
 //! The executor, the worker pool, the sample-accuracy contract and the reader ends of taps and inlets.
 //!
-//! The binary installs `RtAllocCheck`, so an allocation inside an `assert_no_alloc`
+//! The binary installs `RtAllocCheck`, so an allocation inside an `RtScope` or an `assert_no_alloc`
 //! closure aborts.
 #![allow(
     clippy::disallowed_methods,
