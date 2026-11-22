@@ -2,24 +2,20 @@
 //! [`Session::load_preset_file`] hand back a [`LoadPreset`], a value by where
 //! the plugin runs as [`Session::restore_state`]'s is: `!Send` and run on the
 //! main thread with its proof (`run(main)`) for a plugin in this process, `Send`
-//! and awaited on any thread for a plugin in a `plugin-server` process.
+//! and awaited on any thread for a plugin in a `plugin-server` process (an
+//! [`Op`] over a [`PluginOp`]).
 //!
 //! A plugin that declines ends the work as [`PresetError::Refused`] and one that
 //! is gone as [`PresetError::Lost`]. A preset the plugin took is a
 //! [`LoadedPreset`], which [`Session::apply`] takes back.
 
-use core::marker::PhantomData;
-use std::fmt;
-use std::future::{Future, IntoFuture};
 use std::path::PathBuf;
-use std::pin::Pin;
-use std::task::{Context as TaskContext, Poll};
 
-use tutti_plugin::PluginAnswers;
+use tutti_plugin::{Answer, PluginAnswers};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, PresetError, PresetId, PresetSupport};
 
-use super::awaiting::Stage;
+use super::op::{InProcessOp, Op, OutOfProcessOp, PluginOp, Sealed as OpSealed};
 use super::state::{Landed, PluginApplyError};
 use super::{AnyPlugin, HostedPlugin};
 use crate::SessionFloat;
@@ -52,122 +48,31 @@ pub enum PresetStartError {
 /// ```
 /// fn send<T: Send>() {}
 /// send::<tutti_session::LoadPresetOutOfProcess>();
-/// send::<tutti_session::LoadingPresetOutOfProcess>();
+/// send::<tutti_session::AwaitingOp<tutti_session::LoadPresetOp>>();
 /// send::<tutti_session::LoadedPreset>();
 /// ```
-#[must_use = "work does nothing until it runs"]
-#[derive(Debug)]
-pub enum LoadPreset {
-    /// The plugin runs in this process.
-    InProcess(LoadPresetInProcess),
-    /// The plugin runs in a `plugin-server` process.
-    OutOfProcess(LoadPresetOutOfProcess),
-}
+pub type LoadPreset = Op<LoadPresetOp>;
 
-/// A preset to load into a plugin that runs in this process.
-///
-/// `!Send`: the plugin loads it on the main thread.
-#[must_use = "work does nothing until it runs"]
-pub struct LoadPresetInProcess {
-    landed: Landed,
-    handle: PluginHandle,
-    id: PresetId,
-    needs: Option<PresetSupport>,
-    main_thread: PhantomData<*const ()>,
-}
+/// The value [`Session::load_preset`] and [`Session::load_preset_file`] return for
+/// a plugin in this process: `!Send`, run on the main thread. Its [`run`](InProcessOp::run) asks the plugin to load the preset
+/// and yields the [`LoadedPreset`], which [`Session::apply`] takes back and which
+/// has the session read the plugin's parameters again. It ends in
+/// [`PresetError::Lost`] when the node was removed or the plugin replaced since
+/// the value was made, or the plugin is gone; [`PresetError::Unsupported`] when
+/// the plugin has no such operation (a file for a plugin that lists);
+/// [`PresetError::Refused`] when it declined.
+pub type LoadPresetInProcess = InProcessOp<LoadPresetOp>;
 
-impl fmt::Debug for LoadPresetInProcess {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("LoadPresetInProcess")
-            .field("id", &self.id)
-            .finish_non_exhaustive()
-    }
-}
-
-impl LoadPresetInProcess {
-    /// Asks the plugin to load the preset, on the main thread. The output goes
-    /// to [`Session::apply`], which has the session read the plugin's
-    /// parameters again.
-    ///
-    /// # Errors
-    ///
-    /// [`PresetError::Lost`] when the node was removed or the plugin replaced
-    /// since the value was made, or the plugin is gone;
-    /// [`PresetError::Unsupported`] when the plugin has no such operation (a
-    /// file for a plugin that lists); [`PresetError::Refused`] when it
-    /// declined.
-    pub fn run(self, main: MainThreadMarker) -> Result<LoadedPreset, PresetError> {
-        if self.landed.gate.is_ended() {
-            return Err(PresetError::Lost);
-        }
-        if self
-            .needs
-            .is_some_and(|needs| needs != self.handle.preset_support())
-        {
-            return Err(PresetError::Unsupported);
-        }
-        self.handle.load_preset(main, &self.id)?;
-        Ok(LoadedPreset(self.landed))
-    }
-}
-
-/// A preset to load into a plugin that runs in a `plugin-server` process. It is
-/// `Send`, and it is a [`Future`] through [`IntoFuture`]: awaiting it queues the
-/// load with the plugin's bridge and yields the [`LoadedPreset`], which
-/// [`Session::apply`] takes back on the main thread. There is no blocking form.
-///
-/// Dropping it unawaited sends nothing.
-#[must_use = "work does nothing until it is awaited"]
-pub struct LoadPresetOutOfProcess {
-    landed: Landed,
-    answers: PluginAnswers,
-    handle: PluginHandle,
-    id: PresetId,
-    needs: Option<PresetSupport>,
-}
-
-impl fmt::Debug for LoadPresetOutOfProcess {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("LoadPresetOutOfProcess")
-            .field("id", &self.id)
-            .finish_non_exhaustive()
-    }
-}
-
-impl IntoFuture for LoadPresetOutOfProcess {
-    type Output = Result<LoadedPreset, PresetError>;
-    type IntoFuture = LoadingPresetOutOfProcess;
-
-    fn into_future(self) -> LoadingPresetOutOfProcess {
-        let Self {
-            landed,
-            answers,
-            handle,
-            id,
-            needs,
-        } = self;
-        LoadingPresetOutOfProcess {
-            stage: Stage::Unstarted((answers, handle, id, needs)),
-            landed: Some(landed),
-        }
-    }
-}
-
-/// An out-of-process preset load being awaited ([`LoadPresetOutOfProcess`]):
-/// resolves to the [`LoadedPreset`] once the server has taken the preset.
-///
-/// **The bridge's IPC reader thread fills the sender** with the server's reply,
-/// which wakes the future: a poll never blocks and `Session::update` is not
-/// needed. **The bridge's control lane thread fires the deadline**: a server
-/// that never answers is cut off there, at the bridge's parameter timeout, and
-/// the lane sends [`PresetError::Stalled`] into the sender with no one polling.
+/// The value [`Session::load_preset`] and [`Session::load_preset_file`] return for
+/// a plugin in a `plugin-server` process: `Send`, and a `Future` through
+/// `IntoFuture` that yields the [`LoadedPreset`], which [`Session::apply`] takes
+/// back on the main thread. Dropping it unawaited sends nothing.
 ///
 /// Dropped after the first poll and before it resolves, the future drops the
 /// receiver, but the request is already queued: **the server may still load the
-/// preset**. No [`LoadedPreset`] exists for it, because one is made only by this
-/// future resolving, so [`Session::apply`] is never run for that load and the
-/// session's view of the plugin's parameters is stale until they are read
-/// again.
+/// preset**. No [`LoadedPreset`] exists for it, so [`Session::apply`] is never
+/// run for that load and the session's view of the plugin's parameters is stale
+/// until they are read again.
 ///
 /// # Errors
 ///
@@ -176,46 +81,60 @@ impl IntoFuture for LoadPresetOutOfProcess {
 /// before it answered; [`PresetError::Unsupported`] when the plugin has no such
 /// operation; [`PresetError::Refused`] when it declined;
 /// [`PresetError::Busy`] when the bridge's queue was full (nothing was sent);
-/// [`PresetError::Stalled`] when the server did not answer in time (the
-/// preset may have loaded).
+/// [`PresetError::Stalled`] when the server did not answer in time (the preset
+/// may have loaded).
 ///
 /// # Panics
 ///
 /// When polled after it resolved.
-#[must_use = "a load does nothing unless it is awaited"]
-pub struct LoadingPresetOutOfProcess {
-    stage: Stage<(PluginAnswers, PluginHandle, PresetId, Option<PresetSupport>), (), PresetError>,
-    landed: Option<Landed>,
+pub type LoadPresetOutOfProcess = OutOfProcessOp<LoadPresetOp>;
+
+/// The load of a preset into a plugin ([`Session::load_preset`],
+/// [`Session::load_preset_file`]); with `needs`, a plugin whose preset support
+/// is another answers `Unsupported`.
+#[derive(Debug)]
+pub struct LoadPresetOp {
+    landed: Landed,
+    id: PresetId,
+    needs: Option<PresetSupport>,
 }
 
-impl fmt::Debug for LoadingPresetOutOfProcess {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("LoadingPresetOutOfProcess")
-            .finish_non_exhaustive()
+impl OpSealed for LoadPresetOp {}
+
+impl PluginOp for LoadPresetOp {
+    type Reply = ();
+    type Output = LoadedPreset;
+    type Error = PresetError;
+
+    fn ended(&self) -> bool {
+        self.landed.gate.is_ended()
     }
-}
 
-impl Future for LoadingPresetOutOfProcess {
-    type Output = Result<LoadedPreset, PresetError>;
+    fn lost() -> PresetError {
+        PresetError::Lost
+    }
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Output> {
-        let this = &mut *self;
-        let landed = &this.landed;
-        this.stage
-            .poll(
-                cx,
-                |(answers, handle, id, needs)| {
-                    if landed.as_ref().is_some_and(|l| l.gate.is_ended()) {
-                        return Err(PresetError::Lost);
-                    }
-                    if needs.is_some_and(|needs| needs != handle.preset_support()) {
-                        return Err(PresetError::Unsupported);
-                    }
-                    Ok(answers.load_preset(&id))
-                },
-                PresetError::Lost,
-            )
-            .map_ok(|()| LoadedPreset(this.landed.take().expect("a load resolves once")))
+    fn crashed() -> PresetError {
+        PresetError::Lost
+    }
+
+    fn admit(&self, support: PresetSupport) -> Result<(), PresetError> {
+        match self.needs {
+            Some(needs) if needs != support => Err(PresetError::Unsupported),
+            _ => Ok(()),
+        }
+    }
+
+    fn run(&self, handle: &PluginHandle, main: MainThreadMarker) -> Result<(), PresetError> {
+        handle.load_preset(main, &self.id)
+    }
+
+    fn send(&self, answers: &PluginAnswers) -> Answer<Result<(), PresetError>> {
+        answers.load_preset(&self.id)
+    }
+
+    fn finish(self, (): (), _answers: Option<&PluginAnswers>) -> LoadedPreset {
+        LoadedPreset(self.landed)
     }
 }
 
@@ -321,22 +240,6 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
         needs: Option<PresetSupport>,
     ) -> LoadPreset {
         let landed = Landed::of(self, *node, hosted.gate.clone());
-        let handle = hosted.handle.clone();
-        match &hosted.answers {
-            None => LoadPreset::InProcess(LoadPresetInProcess {
-                landed,
-                handle,
-                id,
-                needs,
-                main_thread: PhantomData,
-            }),
-            Some(answers) => LoadPreset::OutOfProcess(LoadPresetOutOfProcess {
-                landed,
-                answers: answers.clone(),
-                handle,
-                id,
-                needs,
-            }),
-        }
+        Op::at(hosted, LoadPresetOp { landed, id, needs })
     }
 }

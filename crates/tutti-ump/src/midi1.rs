@@ -139,6 +139,21 @@ impl Bank {
     }
 }
 
+impl Message {
+    /// The MIDI 1.0 bytes of a MIDI 1.0 channel voice or a system common or
+    /// real time message, as [`Voice1::bytes`] and [`System::bytes`] write them.
+    /// `None` for any other message: a MIDI 2.0 message has no byte-stream form
+    /// of its own.
+    #[must_use]
+    pub fn midi1_bytes(self) -> Option<Midi1Bytes> {
+        match self {
+            Self::Midi1(address, voice) => Some(voice.bytes(address.channel)),
+            Self::System(_, system) => Some(system.bytes()),
+            _ => None,
+        }
+    }
+}
+
 impl Ump {
     /// The MIDI 1.0 bytes of a MIDI 1.0 channel voice (type 2) or system common
     /// or real time (type 1) message, as [`Voice1::bytes`] and [`System::bytes`]
@@ -156,11 +171,7 @@ impl Ump {
     /// ```
     #[must_use]
     pub fn midi1_bytes(&self) -> Option<Midi1Bytes> {
-        let bytes = match self.decode().ok()? {
-            Message::Midi1(address, voice) => voice.bytes(address.channel),
-            Message::System(_, system) => system.bytes(),
-            _ => return None,
-        };
+        let bytes = self.decode().ok()?.midi1_bytes()?;
         // The decoder reads a data byte's low 7 bits: bit 7 of a byte the
         // message uses is a byte that is not a MIDI 1.0 data byte.
         let [_, _, d1, d2] = self.0[0].to_be_bytes();

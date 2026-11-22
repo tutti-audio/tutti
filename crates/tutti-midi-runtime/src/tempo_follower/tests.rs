@@ -21,7 +21,7 @@ fn meter_in(group: u8, numerator: u8, denominator: u8) -> Ump {
 }
 
 fn follower(group: u8, meter: bool) -> TempoFollower {
-    TempoFollower::new(TempoSource::Flex(MidiGroup::of(group)), meter)
+    TempoFollower::new(MidiGroup::of(group), meter)
 }
 
 /// **A Set Tempo of the followed Group is its tempo**: the field is 10 ns per

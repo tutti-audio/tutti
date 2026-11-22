@@ -6,8 +6,7 @@
 //! tempo map and no OS handle, and allocates nothing: whoever owns the
 //! transport places the change (the session, in `tutti-session`).
 //!
-//! The source is an enum, [`TempoSource`], with [`Flex`](TempoSource::Flex)
-//! first. MIDI Beat Clock and MTC are followed by [`ClockFollower`](crate::ClockFollower).
+//! MIDI Beat Clock and MTC are followed by [`ClockFollower`](crate::ClockFollower).
 //!
 //! **Flex addressing** (M2-104 §7.5, Table 10). Set Tempo (§7.5.3) and Set Time
 //! Signature (§7.5.4) are Group messages: Format Complete, Address 1, and a Group
@@ -20,15 +19,6 @@ use tutti_music::TimeSignature;
 use tutti_ump::{Flex, Message, MidiGroup, Ump};
 use tutti_units::Bpm;
 
-/// Where a followed tempo comes from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum TempoSource {
-    /// The Flex Data Set Tempo and Set Time Signature messages of one Group
-    /// (M2-104 §7.5.3, §7.5.4).
-    Flex(MidiGroup),
-}
-
 /// What a message asks the transport to take.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
@@ -40,36 +30,37 @@ pub enum Followed {
     Meter(TimeSignature),
 }
 
-/// Reads a source's messages for the tempo and meter they declare.
+/// Reads the Flex Data Set Tempo and Set Time Signature messages of one Group
+/// (M2-104 §7.5.3, §7.5.4) for the tempo and meter they declare.
 ///
 /// ```
-/// use tutti_midi_runtime::{Followed, TempoFollower, TempoSource};
+/// use tutti_midi_runtime::{Followed, TempoFollower};
 /// use tutti_units::Bpm;
 /// use tutti_ump::{Flex, FlexTempo, Message, MidiGroup, Ump};
 ///
-/// let follower = TempoFollower::new(TempoSource::Flex(MidiGroup::FIRST), false);
+/// let follower = TempoFollower::new(MidiGroup::FIRST, false);
 /// // 0.5 s per quarter note is 120 bpm.
 /// let set_tempo = Ump::from(Message::Flex(MidiGroup::FIRST, Flex::SetTempo(FlexTempo::new(50_000_000))));
 /// assert_eq!(follower.step(set_tempo), Some(Followed::Tempo(Bpm::of(120.0))));
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TempoFollower {
-    source: TempoSource,
+    group: MidiGroup,
     meter: bool,
 }
 
 impl TempoFollower {
-    /// A follower of `source`; `meter` says whether it also reads the time
+    /// A follower of `group`; `meter` says whether it also reads the time
     /// signature (a Set Time Signature is ignored otherwise).
     #[must_use]
-    pub const fn new(source: TempoSource, meter: bool) -> Self {
-        Self { source, meter }
+    pub const fn new(group: MidiGroup, meter: bool) -> Self {
+        Self { group, meter }
     }
 
-    /// Where it reads from.
+    /// The Group it reads.
     #[must_use]
-    pub const fn source(&self) -> TempoSource {
-        self.source
+    pub const fn group(&self) -> MidiGroup {
+        self.group
     }
 
     /// What `ump` asks the transport to take, if anything: a Set Tempo or (when
@@ -80,11 +71,10 @@ impl TempoFollower {
     /// non-standard or too short denominator).
     #[must_use]
     pub fn step(&self, ump: impl Into<Ump>) -> Option<Followed> {
-        let TempoSource::Flex(group) = self.source;
         let Ok(Message::Flex(from, flex)) = ump.into().decode() else {
             return None;
         };
-        if from != group {
+        if from != self.group {
             return None;
         }
         match flex {

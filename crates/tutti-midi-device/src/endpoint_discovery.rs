@@ -151,7 +151,7 @@ impl EndpointDiscovery {
         let connection = Self {
             wanted,
             step: Step::Discover(Heard::empty()),
-            retry: Retry::first(now),
+            retry: Retry::first(now, STEP_TIMEOUT),
             endpoint: Endpoint::blank(),
             endpoint_name: StreamTextAssembler::new(),
             instance_id: StreamTextAssembler::new(),
@@ -186,7 +186,7 @@ impl EndpointDiscovery {
             Step::Blocks {
                 infos: Some(at), ..
             } => Some(at + NAME_GRACE),
-            _ => Some(self.retry.deadline(STEP_TIMEOUT)),
+            _ => Some(self.retry.deadline()),
         }
     }
 
@@ -243,11 +243,11 @@ impl EndpointDiscovery {
                 DiscoveryAction::Wait
             };
         }
-        if matches!(self.step, Step::Done(_)) || !self.retry.due(now, STEP_TIMEOUT) {
+        if matches!(self.step, Step::Done(_)) || !self.retry.due(now) {
             return DiscoveryAction::Wait;
         }
         if !self.retry.spent(MAX_ATTEMPTS) {
-            self.retry.resend(now);
+            self.retry.resend(now, STEP_TIMEOUT);
             return DiscoveryAction::Send(self.packet_for_step());
         }
         match self.step {
@@ -420,7 +420,7 @@ impl EndpointDiscovery {
     }
 
     fn send_step(&mut self, now: Instant) -> DiscoveryAction {
-        self.retry = Retry::first(now);
+        self.retry = Retry::first(now, STEP_TIMEOUT);
         DiscoveryAction::Send(self.packet_for_step())
     }
 

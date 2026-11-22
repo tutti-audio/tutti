@@ -599,11 +599,11 @@ impl PluginHandle {
     /// forbid, which the host refused, over the plugin's life; the plugin's
     /// [`Control::refused_off_thread_calls`]. A served plugin's is the
     /// server's, as it last told. Not for the audio thread.
-    pub fn refused_off_thread_calls(&self) -> u64 {
+    pub fn refused_off_thread_calls(&self) -> tutti_units::Calls {
         self.control
             .as_deref()
             .and_then(|control| lent(control, |c| c.refused_off_thread_calls()))
-            .unwrap_or(0)
+            .unwrap_or(tutti_units::Calls::ZERO)
     }
 
     // ---- State and presets (main thread) ----------------------------------
@@ -1104,8 +1104,8 @@ mod tests {
         fn dropped_reported_edits(&self) -> u64 {
             0
         }
-        fn refused_off_thread_calls(&self) -> u64 {
-            0
+        fn refused_off_thread_calls(&self) -> tutti_units::Calls {
+            tutti_units::Calls::ZERO
         }
     }
 

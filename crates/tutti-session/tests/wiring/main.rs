@@ -9,6 +9,7 @@
 #[global_allocator]
 static A: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
+// The offline sessions the files share.
 mod block_dates;
 mod build_frame;
 mod bus_edges;
@@ -28,6 +29,8 @@ mod main_output_crossfade;
 mod main_output_defer;
 mod main_output_reopen;
 mod main_output_topology;
+#[path = "../support/offline.rs"]
+mod offline;
 mod output_policy;
 mod rewired;
 mod scene_render;
@@ -42,6 +45,7 @@ mod typed_params;
 mod unwired;
 mod values;
 mod vocabulary;
+mod watch;
 
 // Starts a bounce, awaits its render and applies it.
 #[cfg(feature = "export")]

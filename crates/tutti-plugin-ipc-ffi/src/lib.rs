@@ -36,7 +36,7 @@
 //!   [`protect_host_memory`], the host's dumpable flag cleared (Linux), so a
 //!   same-user plugin cannot `ptrace` the host or write its memory.
 //! - **What a spawned helper inherits** ([`spawn()`]): descriptors 0, 1 and 2
-//!   only, so plugin code in the helper cannot reach the host's files and sockets (unix only: on Windows the spawn does not yet limit it).
+//!   only on unix; on Windows the three standard handles only, by a handle list, and a leader starts suspended and is in the job before it runs, so plugin code in the helper cannot reach the host's files and sockets.
 //! - **The guard on a child process** ([`Reaped`], over a [`Process`], started by [`spawn()`]): a spawned child, killed with its
 //!   process group and reaped when the guard drops, so no path out of the code that holds
 //!   it leaves a running process or a zombie. It holds no `unsafe` of its own.

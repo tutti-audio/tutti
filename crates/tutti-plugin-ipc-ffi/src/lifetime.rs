@@ -2,7 +2,8 @@
 //! server leads (unix), the Job Object the kernel ends it with (Windows).
 //!
 //! One platform module is chosen here and nowhere else. Windows' assignment to
-//! the job (`bind_to_host` there) is the spawn's alone.
+//! the job (`bind_to_host` there) is the spawn's alone, made while the process
+//! is still suspended.
 
 #[cfg(unix)]
 #[path = "lifetime/unix.rs"]

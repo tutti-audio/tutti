@@ -2017,9 +2017,9 @@ fn test_clap_process_with_transport() {
     .expect("Failed to load");
 
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
-        .with_playing(true)
-        .with_tempo(tutti_units::Bpm::of(120.0))
-        .with_time_signature(tutti_plugin_types::TimeSignature::default());
+        .playing(true)
+        .tempo(tutti_units::Bpm::of(120.0))
+        .time_signature(tutti_plugin_types::TimeSignature::default());
 
     let num_samples = 512;
     let input_data = vec![vec![0.0f32; num_samples]; 2];
@@ -2644,6 +2644,9 @@ fn the_refused_off_thread_calls_are_told_to_the_host_when_they_change() {
         .host_state()
         .refused_off_thread
         .add(3);
-    assert_eq!(told(&instance.poll(main_thread())), [3]);
+    assert_eq!(
+        told(&instance.poll(main_thread())),
+        [tutti_units::Calls::new(3)]
+    );
     assert!(told(&instance.poll(main_thread())).is_empty(), "told once");
 }
