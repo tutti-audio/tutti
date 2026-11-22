@@ -898,8 +898,8 @@ pub mod midi {
     };
     pub use tutti_ump::{
         Address, CCNumber, DeviceIdentity, ExtremeValues, ManufacturerId, Message, Midi1Parser,
-        MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Protocol, StreamConfig, SysexAssembler,
-        TicksPerQuarterNote, U7, U14, Ump, Voice1,
+        MidiChannel, MidiChannelSet, MidiGroup, MidiGroupSet, NoteNumber, NoteVelocity, Protocol,
+        StreamConfig, SysexAssembler, TicksPerQuarterNote, U7, U14, Ump, Voice1,
     };
     pub use tutti_ump::{
         CCNumberOutOfRange, ChordTypeOutOfRange, DeltaTicksOutOfRange, FirstGroupOutOfRange,

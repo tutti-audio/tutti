@@ -73,15 +73,22 @@
 //!    its own editor is never re-sent live; seeded, the fork does not send
 //!    it either, and the export renders what playback plays.
 //! 5. **Bind it**, tell it [`RenderMode::Offline`](tutti_plugin_types::RenderMode) when
-//!    it renders offline (an offline fork, or a live fork of a plugin that
-//!    ran offline), and **for an offline fork only:** make its pipeline wait for
-//!    each chunk (`Ipc::watch`, before the plugin is activated; the live
-//!    pipeline never waits, which on a render worker would turn every chunk the
-//!    subprocess had not finished yet into silence) — and drop its host clock,
-//!    so the plugin is told no `systemTime`: no clock relates to a render that
-//!    runs at its own speed. A fork, offline or live, is **watched**: its
-//!    `prepare` (`IpcProcessor::retune`) settles the server's queued rate and
-//!    mode changes and records the latency its graph is compiled against.
+//!    it renders offline (a fork the graph names offline, or a live fork of a
+//!    plugin that ran offline) and drop its host clock then, so the plugin is
+//!    told no `systemTime`: no clock relates to a render that runs at its own
+//!    speed. A fork, offline or live, is **watched** (`Ipc::watch`, before the
+//!    plugin is activated): its `prepare` (`IpcProcessor::retune`) settles the
+//!    server's queued rate and mode changes and records the latency its graph
+//!    is compiled against. **The wait for each chunk is the node's, not the
+//!    plugin's:** the fork's node is handed the switch of its pipeline's wait
+//!    (`WaitSwitch`), and its `Node::prepare` sets it from the graph's
+//!    `RenderMode` on every prepare, with or without the Processor in hand,
+//!    armed for an offline graph and disarmed for any other. It is the only
+//!    source of the wait, so a render mode told to the plugin (by the build
+//!    or through the handle) never makes the audio thread of a realtime graph
+//!    wait, and a re-prepare in the other mode switches it at once. The live
+//!    pipeline never waits, which on a render worker would turn every chunk
+//!    the subprocess had not finished yet into silence.
 //!
 //! Any failure is a [`PluginForkError`] naming the step, and the fresh
 //! instance (if one started) is dropped with it, which kills and reaps its
@@ -298,6 +305,8 @@ struct Capture {
     /// A reader of the project's tempo map of the fork's own, registered at
     /// the gather.
     tempo: tutti_timeline::TempoReader,
+    /// The render mode the fork's graph is built for (`ForkSource::fork`'s):
+    /// an offline graph's fork is told offline at build.
     mode: RenderMode,
 }
 
@@ -334,9 +343,10 @@ impl Capture {
                 .map_err(PluginForkError::LoadState)?;
         }
 
-        // Watched before it is activated: offline, the pipeline waits for each
-        // chunk; either way a `prepare` settles and records the plan.
-        let wait = ipc.watch(matches!(self.mode, RenderMode::Offline));
+        // Watched before it is activated: a `prepare` settles and records the
+        // plan. The wait for each chunk is the node's: its switch goes to the
+        // node below, and the node's `prepare` is its only writer.
+        let (wait, switch) = ipc.watch();
         let mut fork = PluginClient::over(ipc).map_err(|source| PluginForkError::Load {
             path: path.clone(),
             source,
@@ -347,6 +357,7 @@ impl Capture {
             wait,
         }));
         fork.state.client.seed_delivery(&self.delivered);
+        fork.state.client.adopt_wait_switch(switch);
         if self.snapshot.offline(self.mode) {
             // Advisory: a plugin without the concept keeps rendering as it
             // would live, which is not an error (`Features::RENDER_MODE`).
@@ -399,10 +410,9 @@ impl PluginClient<Unbound> {
     /// As [`PluginClient::fork_instance`].
     pub fn fork_instance(
         &self,
-        mode: RenderMode,
         tempo: tutti_timeline::TempoReader,
     ) -> Result<PluginClient<Bound>, PluginForkError> {
-        ServedFork::reading(self, tempo).instance(mode)
+        ServedFork::reading(self, tempo).instance(RenderMode::Realtime)
     }
 }
 
@@ -414,10 +424,13 @@ impl PluginClient<Bound> {
     /// on a subprocess launch and two state transfers (half a second or
     /// more).
     ///
-    /// `mode` is the graph's: [`RenderMode::Offline`] tells the plugin it is
-    /// rendering offline and makes it wait for each chunk; [`RenderMode::Realtime`]
-    /// does neither. Either way the fork reads the transport from the `Env`
-    /// of the graph it is rendered in. A fork does not carry live MIDI or running
+    /// The fork's per-chunk wait is its graph's: its node's `prepare` arms it
+    /// for a graph prepared [`RenderMode::Offline`] and disarms it for any
+    /// other, so a fork never blocks the audio thread of a realtime graph, and
+    /// nothing told to the plugin changes that. The plugin's own render mode is
+    /// the live plugin's (a plugin that ran offline is told offline), and the
+    /// fork's `prepare` tells it the graph's like any node's. The fork reads
+    /// the transport from the `Env` of the graph it is rendered in. A fork does not carry live MIDI or running
     /// DSP state (voices, delay lines, a reverb's tail): the state is what the
     /// plugin saves for a project, so a fork starts silent.
     ///
@@ -434,8 +447,8 @@ impl PluginClient<Bound> {
     /// instance is gone or would not save its state, the new instance failed
     /// to load, it turned out to be a different plugin, or it refused the
     /// state. A partly started fork is shut down before this returns.
-    pub fn fork_instance(&self, mode: RenderMode) -> Result<PluginClient<Bound>, PluginForkError> {
-        ServedFork::of(self).instance(mode)
+    pub fn fork_instance(&self) -> Result<PluginClient<Bound>, PluginForkError> {
+        ServedFork::of(self).instance(RenderMode::Realtime)
     }
 
     /// On a fork ([`fork_instance`](Self::fork_instance)): the probe that
@@ -467,12 +480,11 @@ mod tests {
     fn a_latency_moved_after_the_plan_is_a_fault() {
         let (controls, reports) =
             PluginControls::new(Samples::new(137), PluginTail::default(), SampleRate::SR_48K);
+        let (wait, _switch) =
+            OfflineWait::new(Duration::from_secs(1), Arc::new(ServerWatch::new()));
         let watch = ForkWatch {
             controls: controls.clone(),
-            wait: Arc::new(OfflineWait::new(
-                Duration::from_secs(1),
-                Arc::new(ServerWatch::new()),
-            )),
+            wait: Arc::new(wait),
         };
         assert!(watch.fault().is_none(), "not planned yet");
         controls.set_pipeline(Samples::new(64));

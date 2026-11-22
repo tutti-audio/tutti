@@ -108,6 +108,7 @@ mod messages;
 mod midi1;
 mod midi_channel;
 mod midi_group;
+mod midi_set;
 mod midi_translation;
 mod mixed_data;
 mod mpe_zone;
@@ -168,6 +169,7 @@ pub use message::{
 pub use messages::{Join, PacketSpan, Spans, spans, spans_joined};
 pub use midi_channel::{MidiChannel, MidiChannelOutOfRange};
 pub use midi_group::{MidiGroup, MidiGroupOutOfRange};
+pub use midi_set::{MidiChannelSet, MidiGroupSet};
 pub use midi_translation::{ExtremeValues, NoMidi1Form};
 pub use midi1::{Framed, Midi1Bytes, Midi1Parser, frame, parse_exact};
 pub use mixed_data::{

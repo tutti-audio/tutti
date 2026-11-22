@@ -64,6 +64,17 @@ impl Rig {
         )
     }
 
+    /// An offline fork `client` in a graph prepared [`tutti_graph::RenderMode::Offline`]
+    /// for `rate` and blocks of `block` frames: the mode that makes a fork wait
+    /// for each chunk.
+    pub fn offline(client: PluginClient<Bound>, rate: f64, block: usize) -> Self {
+        Self::prepared(
+            client,
+            Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples::new(block)))
+                .with_render_mode(tutti_graph::RenderMode::Offline),
+        )
+    }
+
     /// `client` in a graph prepared with `prepare` (a device quantum, say).
     pub fn prepared(client: PluginClient<Bound>, prepare: Prepare) -> Self {
         Self::prepared_with(client, prepare, Vec::new())

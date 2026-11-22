@@ -7,7 +7,7 @@ use tutti_ump::{
     BlockDirection, CiVersion, DeviceIdentity, FirstGroup, FunctionBlockId, GroupSpan,
     ManufacturerId, Midi1Port, SoftwareRevision, Sysex8StreamCount, U7, UiHint,
 };
-use tutti_ump::{BlockName, EndpointName, ProductInstanceId};
+use tutti_ump::{BlockName, EndpointName, FunctionBlockCount, ProductInstanceId};
 
 fn block(id: u8, direction: BlockDirection) -> FunctionBlock {
     FunctionBlock::builder(
@@ -52,7 +52,7 @@ fn an_endpoint_reads_back_as_the_endpoint_it_was() {
     let endpoint = endpoint();
     let back: Endpoint = serde_json::from_str(&serde_json::to_string(&endpoint).unwrap()).unwrap();
     assert_eq!(back, endpoint);
-    assert_eq!(back.declared_function_blocks(), 3);
+    assert_eq!(back.declared_function_blocks(), FunctionBlockCount::of(3));
     assert_eq!(
         back.function_block(FunctionBlockId::of(2)).unwrap().name(),
         Some(&"Keys".parse::<BlockName>().unwrap())

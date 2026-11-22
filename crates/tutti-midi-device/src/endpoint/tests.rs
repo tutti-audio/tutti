@@ -473,7 +473,7 @@ fn a_midi1_device_has_one_inferred_block() {
     assert!(b.active());
     assert_eq!(b.direction(), BlockDirection::Bidirectional);
     assert_eq!(b.midi1(), Midi1Port::Unrestricted);
-    assert_eq!(e.declared_function_blocks(), 1);
+    assert_eq!(e.declared_function_blocks(), FunctionBlockCount::of(1));
     assert!(e.static_function_blocks());
     assert_eq!(e.active().protocol, Protocol::Midi1);
     assert_eq!(e.name().unwrap().as_str(), "Keystep");
@@ -536,7 +536,7 @@ fn a_block_is_replaced_by_number_and_the_count_follows_the_highest() {
     let e = Endpoint::new(Supports::of(FULL))
         .block(block(5, 0, 1).build().unwrap())
         .block(block(5, 2, 3).build().unwrap());
-    assert_eq!(e.declared_function_blocks(), 6);
+    assert_eq!(e.declared_function_blocks(), FunctionBlockCount::of(6));
     assert_eq!(e.function_blocks().count(), 1);
     assert_eq!(e.function_block(id(5)).unwrap().first_group().get(), 2);
     assert!(e.function_block(id(0)).is_none());
@@ -709,7 +709,7 @@ fn answering_discoveries_changes_no_block_of_a_static_endpoint() {
     ask(&mut e, block_discovery(BlockSelect::One(id(0)), true, true));
     ask(&mut e, block_discovery(BlockSelect::One(id(7)), true, true));
     assert_eq!(e, before);
-    assert_eq!(e.declared_function_blocks(), 1);
+    assert_eq!(e.declared_function_blocks(), FunctionBlockCount::of(1));
 }
 
 /// §7.1.5: an instance id of 30 bytes is a Start, a Continue and an End of 14

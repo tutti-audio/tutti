@@ -535,7 +535,10 @@ fn missing_function_blocks_end_the_connection_with_what_came() {
     );
     assert_eq!(c.endpoint().active().protocol, Protocol::Midi1);
     assert_eq!(c.endpoint().function_blocks().count(), 1);
-    assert_eq!(c.endpoint().declared_function_blocks(), 2);
+    assert_eq!(
+        c.endpoint().declared_function_blocks(),
+        FunctionBlockCount::of(2)
+    );
 }
 
 // A Name that follows its block's Info within the grace is kept, and when every
@@ -712,7 +715,10 @@ fn a_block_outside_the_declared_count_is_not_read() {
     let t0 = Instant::now();
     let mut c = in_blocks_declaring(t0, 2, false);
     c.on_message(info_of(5), t0);
-    assert_eq!(c.endpoint().declared_function_blocks(), 2);
+    assert_eq!(
+        c.endpoint().declared_function_blocks(),
+        FunctionBlockCount::of(2)
+    );
     assert_eq!(c.endpoint().function_blocks().count(), 0);
     c.on_message(info_of(0), t0);
     c.on_message(info_of(1), t0);
@@ -744,7 +750,10 @@ fn a_declared_count_above_32_is_refused() {
         c.on_message(notification(Protocol::Midi2, false, false), t0),
         DiscoveryAction::Wait
     );
-    assert_eq!(c.endpoint().declared_function_blocks(), 0);
+    assert_eq!(
+        c.endpoint().declared_function_blocks(),
+        FunctionBlockCount::of(0)
+    );
     c.on_timeout(at(t0, 1000));
     c.on_timeout(at(t0, 2000));
     assert_eq!(
@@ -754,7 +763,10 @@ fn a_declared_count_above_32_is_refused() {
     // 32 is the most there are, and is heard.
     let (mut c, _) = EndpointDiscovery::new(t0);
     c.on_message(info(32), t0);
-    assert_eq!(c.endpoint().declared_function_blocks(), 32);
+    assert_eq!(
+        c.endpoint().declared_function_blocks(),
+        FunctionBlockCount::of(32)
+    );
 }
 
 // §7.1.8: a static Endpoint has no inactive Function Blocks, each having

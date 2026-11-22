@@ -705,10 +705,10 @@ impl ClockMaster {
                 break;
             };
             let sample_offset = pass.start.get() + qf_sample;
-            let piece = (next & 0x07) as u8;
+            let piece = QuarterFramePiece::masked(next as u8);
             // A cycle's timecode is that of the sample piece 0 goes out on;
             // the receiver adds the two frames the cycle takes.
-            if piece == 0 {
+            if piece == QuarterFramePiece::of(0) {
                 let position = mtc_cycle(
                     Seconds::new((block_pos + qf_sample as f64) / rate.get()),
                     fps,
@@ -724,9 +724,7 @@ impl ClockMaster {
             if !skipped {
                 emit((
                     frame_offset(sample_offset, block_size),
-                    self.system(System::TimeCode(
-                        cycle.frame(QuarterFramePiece::masked(piece)).data(),
-                    )),
+                    self.system(System::TimeCode(cycle.frame(piece).data())),
                 ));
             }
             next += 1;
