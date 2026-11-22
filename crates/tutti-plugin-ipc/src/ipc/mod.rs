@@ -45,10 +45,10 @@ mod tests;
 pub use processor::IpcProcessor;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tutti_rt::Exclusive;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_buffers::FloatWidth;
 use tutti_platform::{Executor, WeakExecutor};
@@ -209,14 +209,14 @@ struct DeclaredState {
 impl DeclaredCache {
     /// The kept list, or the generation a refill must pass to [`store`](Self::store).
     fn get(&self) -> Result<Arc<[(ParamId, ParamAccess)]>, u64> {
-        let state = self.state.lock_recover();
+        let state = self.state.lock();
         state.list.clone().ok_or(state.generation)
     }
 
     /// Keeps `list`, read when the generation was `started`, unless a forgetting
     /// has made it older than the plugin's word.
     fn store(&self, started: u64, list: &Arc<[(ParamId, ParamAccess)]>) {
-        let mut state = self.state.lock_recover();
+        let mut state = self.state.lock();
         if state.generation == started {
             state.list = Some(Arc::clone(list));
         }
@@ -224,7 +224,7 @@ impl DeclaredCache {
 
     /// Forgets the list, and makes a refill that is under way not store.
     fn forget(&self) {
-        let mut state = self.state.lock_recover();
+        let mut state = self.state.lock();
         state.list = None;
         state.generation += 1;
     }
@@ -238,11 +238,11 @@ impl Events {
                 self.ask(Request::LatencyChanged);
             }
             IpcEvent::TailChanged { tail } => {
-                *self.tail.lock_recover() = *tail;
+                *self.tail.lock() = *tail;
                 self.ask(Request::TailChanged);
             }
             IpcEvent::IoLayout(layout) => {
-                *self.layout.lock_recover() = Some(layout.clone());
+                *self.layout.lock() = Some(layout.clone());
             }
             // The restart the core plans for it ([`RESTARTS`](Loaded::RESTARTS))
             // lays out the slab, the pipeline and the node for the buses the
@@ -273,14 +273,14 @@ impl Events {
             // listener, in order; nothing is queued for it here.
             _ => {}
         }
-        let forward = self.forward.lock_recover().clone();
+        let forward = self.forward.lock().clone();
         if let Some(forward) = forward {
             forward(event);
         }
     }
 
     fn ask(&self, request: Request) {
-        self.requests.lock_recover().push(request);
+        self.requests.lock().push(request);
     }
 }
 
@@ -322,7 +322,7 @@ impl Link {
 
     /// The buses the plugin last announced, if it announced any.
     pub(crate) fn layout(&self) -> Option<tutti_plugin_types::Layout> {
-        self.events.layout.lock_recover().clone()
+        self.events.layout.lock().clone()
     }
 
     /// The latency the plugin reports now.
@@ -389,7 +389,7 @@ impl Link {
     }
 
     pub(crate) fn tail(&self) -> PluginTail {
-        *self.events.tail.lock_recover()
+        *self.events.tail.lock()
     }
 
     pub(crate) fn rate(&self) -> SampleRate {
@@ -401,7 +401,7 @@ impl Link {
     }
 
     pub(crate) fn watch(&self) -> Option<Watch> {
-        self.wait.lock_recover().clone()
+        self.wait.lock().clone()
     }
 
     /// The queues and points of the bridge's parameter buffers for chunks of
@@ -512,7 +512,7 @@ impl Ipc {
         let answering = Arc::new(Mutex::new(Arc::clone(slab.slab())));
         {
             let answering = Arc::clone(&answering);
-            counters.attach(move |seq| answering.lock_recover().has_output(seq));
+            counters.attach(move |seq| answering.lock().has_output(seq));
             counters.attach_skipped(bridge.audio().skipped_cell());
             counters.attach_commands_refused(bridge.audio().commands_refused_cell());
             counters.attach_responses_lost(bridge.audio().responses_lost_cell());
@@ -702,7 +702,7 @@ impl Ipc {
             .bridge
             .audio()
             .offer_refusals_to(Arc::clone(&wait));
-        *self.link.wait.lock_recover() = Some(Watch {
+        *self.link.wait.lock() = Some(Watch {
             wait: Arc::clone(&wait),
             offline,
         });
@@ -714,7 +714,7 @@ impl Ipc {
     /// `listener` as well. Invoked on the bridge thread: cheap, and never
     /// blocking. `None` stops forwarding.
     pub fn forward_events(&self, listener: Option<IpcListener>) {
-        *self.link.events.forward.lock_recover() = listener;
+        *self.link.events.forward.lock() = listener;
     }
 
     /// The bridge: the control socket and audio slab, for a caller that has
@@ -891,7 +891,7 @@ impl Ipc {
         ) {
             Ok(None) => slab,
             Ok(Some(new)) => {
-                *link.answering.lock_recover() = Arc::clone(new.slab());
+                *link.answering.lock() = Arc::clone(new.slab());
                 // The slab the server renders through now; the old one goes
                 // with the writer, after the server's ack.
                 drop(slab);

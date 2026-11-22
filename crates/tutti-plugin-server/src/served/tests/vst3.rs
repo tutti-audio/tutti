@@ -40,7 +40,7 @@ use tutti_fixtures::midi;
 use tutti_ump::{MidiChannel, NoteVelocity, U7};
 
 /// Sets `TUTTI_PROBE_MISBEHAVIOUR` until the guard drops (a panic
-/// included). Take it while holding `plugin_load_lock()`, which every test
+/// included). Take it while holding `PLUGIN_LOAD_LOCK`, which every test
 /// here that loads the probe (the only reader of the variable) also takes,
 /// and drop it before the lock (declare it after).
 fn probe_misbehaviour(code: &str) -> tutti_fixtures::ScopedEnv {
@@ -135,7 +135,7 @@ fn the_request_reads_do_not_allocate_with_edits_pending() {
     // assertion on the request below pins that this is the bit.
     const K_PARAM_VALUES_CHANGED: i32 = 1 << 2;
 
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let mut instance = Vst3Instance::load_first(
         main_thread(),
         Path::new(vst3_plugin()),
@@ -202,7 +202,7 @@ fn the_request_reads_do_not_allocate_with_edits_pending() {
 /// kept the old rate's.
 #[test]
 fn a_latency_that_follows_the_rate_is_reread_after_a_rate_change() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     // `kMisbehaveLatencyFollowsRate`: the latency is the rate in kHz.
     let _misbehaviour = probe_misbehaviour("12");
     let mut instance = Vst3Instance::load_first(
@@ -239,7 +239,7 @@ fn a_latency_that_follows_the_rate_is_reread_after_a_rate_change() {
 fn a_prefetchable_support_change_restarts_the_plugin() {
     // `RestartFlags_::kPrefetchableSupportChanged`.
     const K_PREFETCHABLE_SUPPORT_CHANGED: i32 = 1 << 8;
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let mut instance = Vst3Instance::load_first(
         main_thread(),
         Path::new(vst3_plugin()),
@@ -279,7 +279,7 @@ fn a_prefetchable_support_change_restarts_the_plugin() {
 fn a_param_id_remap_is_reported_as_a_changed_list() {
     // `RestartFlags_::kParamIDMappingChanged`.
     const K_PARAM_ID_MAPPING_CHANGED: i32 = 1 << 11;
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let mut instance = Vst3Instance::load_first(
         main_thread(),
         Path::new(vst3_plugin()),
@@ -305,7 +305,7 @@ fn a_param_id_remap_is_reported_as_a_changed_list() {
 /// it takes is taken.
 #[test]
 fn a_refused_rate_is_rolled_back_to_the_previous_one() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     // `kMisbehaveRefusesHighRates`: `setActive(true)` fails above 50 kHz.
     let _misbehaviour = probe_misbehaviour("14");
     let mut instance = Vst3Instance::load_first(
@@ -350,7 +350,7 @@ fn a_refused_rate_is_rolled_back_to_the_previous_one() {
 /// `SampleRate` is finite and above zero.)
 #[test]
 fn a_load_with_no_block_is_refused() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     match Vst3Instance::load_first(
         main_thread(),
         Path::new(vst3_plugin()),
@@ -378,7 +378,7 @@ fn a_load_with_no_block_is_refused() {
 
 #[test]
 fn a_render_mode_change_activates_the_plugin_again_in_the_new_mode() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     // `kMisbehaveRefusesOffline`: `setActive(true)` fails under `kOffline`.
     let _misbehaviour = probe_misbehaviour("15");
     let mut instance = Vst3Instance::load_first(
@@ -434,7 +434,7 @@ fn a_render_mode_change_activates_the_plugin_again_in_the_new_mode() {
 /// `PluginWouldNotStop`, with the plugin's reason.
 #[test]
 fn a_plugin_that_would_not_stop_is_told_to_the_host() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let mut instance = Vst3Instance::load_first(
         main_thread(),
         Path::new(vst3_plugin()),
@@ -474,7 +474,7 @@ fn a_plugin_that_would_not_stop_is_told_to_the_host() {
 /// report `None`.
 #[test]
 fn a_vst3_program_keeps_its_list_id_and_bank() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let mut instance = Vst3Instance::load_first(
         main_thread(),
         Path::new(multi_program_sample()),
@@ -550,7 +550,7 @@ fn a_vst3_program_keeps_its_list_id_and_bank() {
 /// `i / N` — which lands on a neighbour rather than failing.
 #[test]
 fn a_vst3_program_loads_and_reads_back() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let mut instance = Vst3Instance::load_first(
         main_thread(),
         Path::new(multi_program_sample()),
@@ -608,7 +608,7 @@ fn a_vst3_program_loads_and_reads_back() {
 /// happened to be found first.
 #[test]
 fn a_vst3_load_refuses_an_id_from_another_format() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let mut instance = Vst3Instance::load_first(
         main_thread(),
         Path::new(multi_program_sample()),
@@ -636,7 +636,7 @@ fn a_vst3_load_refuses_an_id_from_another_format() {
 
 #[test]
 fn test_vst3_load() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let path = Path::new(vst3_plugin());
     let instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32);
     assert!(
@@ -656,7 +656,7 @@ fn test_vst3_load() {
 
 #[test]
 fn test_vst3_metadata() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let path = Path::new(vst3_plugin());
     let instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
         .expect("Failed to load VST3 plugin");
@@ -667,7 +667,7 @@ fn test_vst3_metadata() {
 
 #[test]
 fn test_vst3_parameter_count() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let path = Path::new(vst3_plugin());
     let instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
         .expect("Failed to load VST3 plugin");
@@ -682,7 +682,7 @@ fn test_vst3_parameter_count() {
 
 #[test]
 fn test_vst3_parameter_list() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let path = Path::new(vst3_plugin());
     let instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
         .expect("Failed to load VST3 plugin");
@@ -704,7 +704,7 @@ fn test_vst3_parameter_list() {
 
 #[test]
 fn test_vst3_get_parameter() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let path = Path::new(vst3_plugin());
     let instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
         .expect("Failed to load VST3 plugin");
@@ -723,7 +723,7 @@ fn test_vst3_get_parameter() {
 
 #[test]
 fn test_vst3_process_f32_silence() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let path = Path::new(vst3_plugin());
     let mut instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
         .expect("Failed to load VST3 plugin");
@@ -755,7 +755,7 @@ fn test_vst3_process_f32_silence() {
 
 #[test]
 fn test_vst3_process_f32_with_note() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let path = Path::new(vst3_plugin());
     let mut instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
         .expect("Failed to load VST3 plugin");
@@ -850,7 +850,7 @@ fn test_vst3_process_f32_with_note() {
 /// their cumulative totals at the next poll, and a poll after tells nothing.
 #[test]
 fn the_servers_losses_are_told_to_the_host_when_they_change() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let mut instance = Vst3Instance::load_first(
         main_thread(),
         Path::new(vst3_plugin()),

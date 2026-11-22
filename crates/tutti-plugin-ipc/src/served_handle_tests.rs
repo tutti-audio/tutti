@@ -25,6 +25,7 @@ use tutti_plugin_types::{
     Samples,
 };
 use tutti_plugin_types::{EditorPresence, PluginClass};
+use tutti_rt::Mutex;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::SampleRate;
@@ -184,7 +185,7 @@ fn handle_with_mock_server(
     )
     .unwrap();
 
-    let respond = std::sync::Mutex::new(respond);
+    let respond = Mutex::new(respond);
     let server_thread = serve_lanes(audio, control, move |stream| {
         loop {
             let msg = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -193,7 +194,7 @@ fn handle_with_mock_server(
                 Ok(msg) => msg,
                 Err(_) => break,
             };
-            let response = (respond.lock().unwrap())(msg.body);
+            let response = (respond.lock())(msg.body);
             if let Some(reply) = response
                 && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     send_bridge_msg(stream, &ControlFrame::Reply { id: msg.id, reply })
@@ -266,7 +267,7 @@ fn handle_with_multi_reply_server(
     )
     .unwrap();
 
-    let respond = std::sync::Mutex::new(respond);
+    let respond = Mutex::new(respond);
     let server_thread = serve_lanes(audio, control, move |stream| {
         loop {
             let msg = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -275,7 +276,7 @@ fn handle_with_multi_reply_server(
                 Ok(msg) => msg,
                 Err(_) => break,
             };
-            let replies = (respond.lock().unwrap())(msg.body);
+            let replies = (respond.lock())(msg.body);
             for said in replies {
                 let (frame, object) = match said {
                     Say::Reply(reply) => (ControlFrame::Reply { id: msg.id, reply }, None),
@@ -369,7 +370,7 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
         });
 
     let latency_seen = Arc::new(AtomicUsize::new(0));
-    let param_seen = Arc::new(parking_lot::Mutex::new(None::<(u32, Normalized)>));
+    let param_seen = Arc::new(Mutex::new(None::<(u32, Normalized)>));
 
     {
         let latency_seen = Arc::clone(&latency_seen);
@@ -452,7 +453,7 @@ fn a_tail_change_reaches_the_listener() {
             _ => vec![],
         });
 
-    let tail_seen = Arc::new(parking_lot::Mutex::new(None::<PluginTail>));
+    let tail_seen = Arc::new(Mutex::new(None::<PluginTail>));
     {
         let tail_seen = Arc::clone(&tail_seen);
         bridge.audio().set_listener(Some(Arc::new(move |ev| {

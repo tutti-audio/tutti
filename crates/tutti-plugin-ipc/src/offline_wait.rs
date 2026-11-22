@@ -2,11 +2,11 @@
 //! latches when the wait fails.
 
 use crate::ServerWatch;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tutti_plugin_types::{PluginFailure, RateRefusal};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 use tutti_units::Samples;
 
 /// An offline fork's wait for the server: the per-block budget, and the
@@ -116,7 +116,7 @@ impl OfflineWait {
         if !self.refused.load(Ordering::Acquire) {
             return None;
         }
-        self.refusal.lock_recover().clone()
+        self.refusal.lock().clone()
     }
 
     /// The bridge thread's record of a plugin refusal, called before the
@@ -127,7 +127,7 @@ impl OfflineWait {
     /// refusals of this fork), also after the latch; the replaced value drops
     /// here, on the bridge thread.
     pub(crate) fn offer_refusal(&self, refusal: RateRefusal) {
-        let old = self.refusal.lock_recover().replace(refusal);
+        let old = self.refusal.lock().replace(refusal);
         drop(old);
     }
 

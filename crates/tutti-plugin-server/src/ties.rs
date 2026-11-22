@@ -19,12 +19,12 @@
 //! A wait that must end is bounded by a [`Patience`], a deadline that is a
 //! function of the `now` it is asked at.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tutti_platform::Instant;
 
-use tutti_rt::{LockExt, Parker, Tally, Unparker, parker, tally};
+use tutti_rt::{Mutex, Parker, Tally, Unparker, parker, tally};
 
 use crate::main_loop::Bell;
 
@@ -90,7 +90,7 @@ impl Settle {
             return;
         };
         self.parker
-            .lock_recover()
+            .lock()
             .park_timeout(|| self.progress.load(Ordering::Acquire) != seen, left);
     }
 }

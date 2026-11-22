@@ -122,7 +122,7 @@ fn au_fixture() -> PluginRef {
 /// probe that can post one.
 #[test]
 fn an_au_property_change_reaches_the_event_list() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let fixture = au_fixture();
     let mut plugin = AuInstance::load_with(main_thread(), &fixture, 44100.0, 512)
         .expect("the AU fixture resolved but would not load");
@@ -177,7 +177,7 @@ fn an_au_property_change_reaches_the_event_list() {
 /// forever.
 #[test]
 fn an_au_latency_poll_refreshes_the_cached_wiring() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let fixture = au_fixture();
     let mut au = AuInstance::load_with(main_thread(), &fixture, 44100.0, 512)
         .expect("the AU fixture resolved but would not load");
