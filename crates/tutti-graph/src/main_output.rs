@@ -82,7 +82,7 @@ pub struct MainOutputBank {
 pub enum MainOutputError {
     /// A graph's main output's channels were declared at one width and the main output is, or
     /// was asked to be, another: the declaration owns the main output's width.
-    #[error("the main output is declared {declared:?} wide and cannot be {requested:?}")]
+    #[error("the graph's main output is declared {declared:?} wide and cannot be {requested:?}")]
     Width {
         /// The width the main output was declared with.
         declared: ChannelLayout,
