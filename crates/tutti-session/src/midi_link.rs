@@ -2,14 +2,15 @@
 //! between [`update`](crate::Session::update) and one task on a thread of its own.
 //!
 //! The task runs on a dedicated thread of the session's executor
-//! ([`Executor::spawn_dedicated`]), not on the executor's shared queue: an
-//! app-driven executor the app does not step must not stall the peers' answers,
-//! Discovery and replies. It steps [`MidiSession::poll`] whenever a port's reader wrote what it
-//! reads, a handle queued a request, a control call changed the session, or a
-//! wait of the devices ran out. It sends what the devices answer or ask again
-//! and resolves a peer's answer at once, which wakes the future that asked. The
-//! rest of what a poll found (Stream settles, peers and Profiles that changed)
-//! is the session's own view of the devices: it is queued, and `update`'s
+//! ([`Executor::spawn_dedicated`]), not on the executor's shared queue: that
+//! queue can sit behind the session's other tasks (a long load or an analysis),
+//! and a peer's reply or Discovery must not wait for them. It steps
+//! [`MidiSession::poll`] whenever a port's reader wrote what it reads, a handle
+//! queued a request, a control call changed the session, or a wait of the
+//! devices ran out. It sends what the devices answer or ask again and resolves
+//! a peer's answer at once, which wakes the future that asked. The rest of what
+//! a poll found (Stream settles, peers and Profiles that changed) is the
+//! session's own view of the devices: it is queued, and `update`'s
 //! `Phase::Poll` applies it to the graph, the ports' info and the events.
 //!
 //! # Locks
