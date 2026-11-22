@@ -529,7 +529,7 @@ device.stop(); device.start()?;
 **Add and wire nodes.**
 
 ```rust
-let pad = s.graph().add(PolySynth::new(SynthConfig::default())?);
+let pad = s.graph().add(PolySynth::new(SynthConfig::new())?);
 let filter = s.graph().add(SvfFilterNode::<f64>::new(SvfType::LowPass, Hz::new(1_000.0), Q::new(0.7)));
 s.graph().connect(pad.out(0), filter.input(0))?;
 s.graph().connect(filter, Root)?;
@@ -885,7 +885,7 @@ use tutti::prelude::*;
 
 let (mut s, _device) = Session::builder().build_device(DeviceSelector::Default)?;
 let filter = s.graph().add(SvfFilterNode::<f64>::new(SvfType::LowPass, Hz::new(1_000.0), Q::new(0.7)));
-let pad = s.graph().add(PolySynth::new(SynthConfig::default())?);
+let pad = s.graph().add(PolySynth::new(SynthConfig::new())?);
 let kick_bus = s.graph().add(BusStripNode::stereo());
 s.graph().connect(pad.out(0), filter.input(0))?;
 s.graph().connect(filter, Root)?;

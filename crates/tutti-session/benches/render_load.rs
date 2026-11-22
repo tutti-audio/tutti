@@ -241,21 +241,21 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
     let mut strips = Vec::new();
     let mut sends = Vec::new();
     for i in 0..SYNTHS {
-        let synth = PolySynth::new(SynthConfig {
-            polyphony: std::num::NonZeroUsize::new(NOTES).expect("at least one voice"),
-            oscillator: OscillatorType::Saw,
-            filter: FilterType::Moog {
-                cutoff: Hz::new(1_200.0),
-                resonance: Resonance::new(0.3),
-            },
-            envelope: Adsr::new(
-                Seconds::new(0.005),
-                Seconds::new(0.2),
-                Amplitude::new(0.7),
-                Seconds::new(0.3),
-            ),
-            ..Default::default()
-        });
+        let synth = PolySynth::new(
+            SynthConfig::new()
+                .polyphony(std::num::NonZeroUsize::new(NOTES).expect("at least one voice"))
+                .oscillator(OscillatorType::Saw)
+                .filter(FilterType::Moog {
+                    cutoff: Hz::new(1_200.0),
+                    resonance: Resonance::new(0.3),
+                })
+                .envelope(Adsr::new(
+                    Seconds::new(0.005),
+                    Seconds::new(0.2),
+                    Amplitude::new(0.7),
+                    Seconds::new(0.3),
+                )),
+        );
         let synth = s.graph().add(synth);
         let hold = s.graph().add(Unforkable(Hold {
             base: 36 + i as u8,

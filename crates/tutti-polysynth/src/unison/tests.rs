@@ -4,21 +4,18 @@ use crate::UnisonVoices;
 /// **A driven detune below zero is floored at 0 cents.**
 #[test]
 fn a_driven_detune_is_floored_at_zero() {
-    let mut engine = UnisonEngine::new(UnisonConfig {
-        voice_count: UnisonVoices::of(3),
-        detune_cents: CentsSpan::of(12.0),
-        ..UnisonConfig::default()
-    });
+    let mut engine = UnisonEngine::new(
+        UnisonConfig::new()
+            .voice_count(UnisonVoices::of(3))
+            .detune_cents(CentsSpan::of(12.0)),
+    );
     engine.sync_from_atomics([Some(-10.0), None]);
     assert_eq!(engine.config().detune_cents, CentsSpan::ZERO);
 }
 
 #[test]
 fn test_single_voice() {
-    let config = UnisonConfig {
-        voice_count: UnisonVoices::of(1),
-        ..Default::default()
-    };
+    let config = UnisonConfig::new().voice_count(UnisonVoices::of(1));
     let unison = UnisonEngine::new(config);
 
     assert_eq!(unison.voice_count(), UnisonVoices::of(1));
@@ -31,12 +28,12 @@ fn test_single_voice() {
 
 #[test]
 fn test_detune_spread() {
-    let config = UnisonConfig {
-        voice_count: UnisonVoices::of(3),
-        detune_cents: CentsSpan::of(12.0), // ~1/8 semitone spread
-        stereo_spread: Spread::POINT,
-        phase_randomize: false,
-    };
+    let config = UnisonConfig::new()
+        .voice_count(UnisonVoices::of(3))
+        // ~1/8 semitone spread
+        .detune_cents(CentsSpan::of(12.0))
+        .stereo_spread(Spread::POINT)
+        .phase_randomize(false);
     let unison = UnisonEngine::new(config);
 
     assert_eq!(unison.voice_count(), UnisonVoices::of(3));
@@ -62,12 +59,11 @@ fn test_detune_spread() {
 
 #[test]
 fn test_stereo_spread() {
-    let config = UnisonConfig {
-        voice_count: UnisonVoices::of(3),
-        detune_cents: CentsSpan::ZERO,
-        stereo_spread: Spread::new(1.0),
-        phase_randomize: false,
-    };
+    let config = UnisonConfig::new()
+        .voice_count(UnisonVoices::of(3))
+        .detune_cents(CentsSpan::ZERO)
+        .stereo_spread(Spread::new(1.0))
+        .phase_randomize(false);
     let unison = UnisonEngine::new(config);
 
     let left = unison.voice_params(0);
@@ -82,10 +78,8 @@ fn test_stereo_spread() {
 #[test]
 fn test_equal_power_amplitude() {
     for count in 1..=8 {
-        let config = UnisonConfig {
-            voice_count: UnisonVoices::new(count).expect("a unison count"),
-            ..Default::default()
-        };
+        let config =
+            UnisonConfig::new().voice_count(UnisonVoices::new(count).expect("a unison count"));
         let unison = UnisonEngine::new(config);
 
         // Sum of squared amplitudes should equal 1.0 (equal power)
@@ -106,11 +100,9 @@ fn test_equal_power_amplitude() {
 
 #[test]
 fn test_phase_randomization() {
-    let config = UnisonConfig {
-        voice_count: UnisonVoices::of(4),
-        phase_randomize: true,
-        ..Default::default()
-    };
+    let config = UnisonConfig::new()
+        .voice_count(UnisonVoices::of(4))
+        .phase_randomize(true);
     let mut unison = UnisonEngine::new(config);
 
     unison.randomize_phases();
@@ -137,11 +129,11 @@ fn test_phase_randomization() {
 #[test]
 fn drawn_phases_are_the_same_for_a_seed_and_distinct_per_voice() {
     let draw = || -> Vec<f64> {
-        UnisonEngine::new(UnisonConfig {
-            voice_count: UnisonVoices::of(8),
-            phase_randomize: true,
-            ..Default::default()
-        })
+        UnisonEngine::new(
+            UnisonConfig::new()
+                .voice_count(UnisonVoices::of(8))
+                .phase_randomize(true),
+        )
         .randomize_phases()
         .iter()
         .map(|p| p.phase_offset.get())
@@ -158,10 +150,7 @@ fn drawn_phases_are_the_same_for_a_seed_and_distinct_per_voice() {
 
 #[test]
 fn test_config_update() {
-    let mut unison = UnisonEngine::new(UnisonConfig {
-        voice_count: UnisonVoices::of(5),
-        ..Default::default()
-    });
+    let mut unison = UnisonEngine::new(UnisonConfig::new().voice_count(UnisonVoices::of(5)));
     assert_eq!(unison.voice_count(), UnisonVoices::of(5));
 
     unison.sync_from_atomics([Some(20.0), Some(0.5)]);
@@ -222,11 +211,11 @@ fn unison_voices_keep_the_range_checked_shape() {
 /// that reset the phases wiped the note-on's draw before anything used it.
 #[test]
 fn recompute_keeps_the_drawn_phases() {
-    let mut unison = UnisonEngine::new(UnisonConfig {
-        voice_count: UnisonVoices::of(4),
-        phase_randomize: true,
-        ..Default::default()
-    });
+    let mut unison = UnisonEngine::new(
+        UnisonConfig::new()
+            .voice_count(UnisonVoices::of(4))
+            .phase_randomize(true),
+    );
     let drawn: Vec<f64> = unison
         .randomize_phases()
         .iter()
