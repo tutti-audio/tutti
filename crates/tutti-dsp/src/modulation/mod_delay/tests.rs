@@ -474,3 +474,42 @@ fn a_modulation_rate_takes_exactly_the_finite_rates_from_the_minimum() {
         ],
     });
 }
+
+/// A bank given fewer delay ramps than it has channels refuses with the counts and takes no
+/// step; exactly its width in ramps is accepted.
+#[test]
+fn fewer_delay_ramps_than_channels_are_refused_and_exactly_the_width_is_accepted() {
+    let sweep = Sweep::of(
+        Seconds::new(0.001),
+        MaxDelay::of(Seconds::new(0.02)),
+        Seconds::ZERO,
+        Seconds::new(0.01),
+        Feedback::MAX_STABLE,
+    );
+    let layout = ModDelayLayout::builder(bus(2), sweep).build().unwrap();
+    let mut bank = ModDelayBank::<f32>::new(&layout, RATE);
+    let x = [vec![1.0f32; 8], vec![1.0f32; 8]];
+    let mut y = [vec![0.0f32; 8], vec![0.0f32; 8]];
+    let mut feedback = Ramp::new(0.0f32);
+    let mut block = |bank: &mut ModDelayBank<f32>, delays: &mut [Ramp<f32>]| {
+        let a: Vec<&[f32]> = x.iter().map(Vec::as_slice).collect();
+        let mut outs: Vec<&mut [f32]> = y.iter_mut().map(Vec::as_mut_slice).collect();
+        bank.process(
+            delays,
+            &mut feedback,
+            &mut InputOutput::paired(Planes::new(&a).unwrap(), PlanesMut::new(&mut outs).unwrap())
+                .unwrap(),
+        )
+    };
+    let mut one = [Ramp::new(0.0f32)];
+    assert_eq!(
+        block(&mut bank, &mut one),
+        Err(BlockMismatch::Ramps {
+            expected: 2,
+            found: 1
+        })
+    );
+    assert_eq!(one[0].steps_taken(), 0, "a refused block takes no step");
+    let mut two = [Ramp::new(0.0f32), Ramp::new(0.0f32)];
+    assert_eq!(block(&mut bank, &mut two), Ok(()));
+}

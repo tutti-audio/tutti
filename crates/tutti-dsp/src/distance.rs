@@ -268,7 +268,7 @@ impl<F: Float> Distance<F> {
             for (i, (y, &x)) in y.iter_mut().zip(x).enumerate() {
                 line.push_sample(x);
                 let delay = delay_at(i);
-                let mut heard = line.read_sample(delay, InterpolationMode::Linear);
+                let mut heard = line.read_sample(line.held(delay), InterpolationMode::Linear);
                 if let Some(k) = coefficient {
                     *state += k * (heard - *state);
                     heard = *state;

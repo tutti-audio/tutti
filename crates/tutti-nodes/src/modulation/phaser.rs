@@ -232,7 +232,7 @@ impl<F: Float + Lerp> PhaserKernel<F> {
         let d = PhaserControls::DEFAULT;
         Ok(Self {
             input,
-            chain: PhaserChain::new(stages, input.layout()),
+            chain: PhaserChain::new(stages, input),
             range,
             min: range.min(),
             max: range.max(),

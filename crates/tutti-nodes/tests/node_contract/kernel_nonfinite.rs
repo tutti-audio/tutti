@@ -4,6 +4,7 @@
 
 use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes};
+use tutti_dsp::CombDelay;
 use tutti_dsp::{FdnLayout, FreeverbControls, FreezeMode, LadderType, ShapeKind, Stages, SvfType};
 use tutti_dsp::{Inline, Tap, TapSet};
 use tutti_graph::contract::drive_input;
@@ -354,7 +355,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             Box::new(CombFilterNode::<f32>::from(CombFilterConfig::new(
                 ChannelLayout::STEREO,
                 CombForm::Feedback,
-                Seconds::new(0.002),
+                CombDelay::of(Seconds::new(0.002)),
             ))),
         ),
         (
