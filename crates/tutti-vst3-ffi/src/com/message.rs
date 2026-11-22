@@ -5,7 +5,7 @@ use std::ffi::CStr;
 use std::sync::Arc;
 use tutti_plugin_types::ffi_guard;
 
-use parking_lot::Mutex;
+use tutti_rt::Mutex;
 use vst3::Steinberg::{
     FIDString,
     Vst::{IAttributeList, IMessage, IMessageTrait},
