@@ -11,9 +11,9 @@ use std::process::Command;
 pub fn inherit_only_stdio(command: &mut Command) {
     let bound = descriptor_bound();
     // SAFETY: the hook runs between `fork` and `exec` and calls only
-    // `mark_close_on_exec`, which makes `fcntl` system calls through `rustix`
-    // on a number it was handed before the fork: no allocation, no lock, no
-    // `std` I/O, so it is async-signal-safe.
+    // `mark_close_on_exec`, which calls `libc::fcntl`, which POSIX lists as
+    // async-signal-safe, up to a bound it was handed before the fork: no
+    // allocation, no lock, no `std` I/O, so it is async-signal-safe.
     unsafe {
         command.pre_exec(move || {
             mark_close_on_exec(bound);
