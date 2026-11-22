@@ -1441,6 +1441,8 @@ mod tests {
         until: Option<(usize, Arc<AtomicBool>)>,
         /// Dropped with the transport, which the lane drops when it ends.
         gone: Option<std::sync::mpsc::Sender<()>>,
+        /// The first read waits for a send on it, or for its sender to drop.
+        hold: Option<std::sync::mpsc::Receiver<()>>,
     }
 
     impl Endless {
@@ -1451,6 +1453,7 @@ mod tests {
                     entered: Some(entered),
                     until: None,
                     gone: None,
+                    hold: None,
                 },
                 reads,
             )
@@ -1461,6 +1464,9 @@ mod tests {
         fn recv(&mut self) -> IpcResult<AudioRequest> {
             if let Some(entered) = self.entered.take() {
                 let _ = entered.send(());
+            }
+            if let Some(hold) = self.hold.take() {
+                let _ = hold.recv();
             }
             if let Some((left, stop)) = self.until.as_mut() {
                 *left = left.saturating_sub(1);
@@ -1482,14 +1488,16 @@ mod tests {
 
     /// **A render thread stopped on a thread that drives an executor reports `Driving`
     /// and its lane still ends**: the stop flag is set and the lane detached, so the
-    /// outcome is `Driving` (never `Stuck`, which ends the process) and the lane drops
-    /// its transport.
+    /// outcome is `Driving` (never `Stuck`, which ends the process) and, once released
+    /// from its read, the lane drops its transport.
     #[test]
     fn a_render_thread_stopped_on_a_driving_thread_reports_driving_and_its_lane_ends() {
         let (_link, side) = link().expect("bells");
         let (mut busy, reads) = Endless::new();
         let (gone, ended) = std::sync::mpsc::channel::<()>();
         busy.gone = Some(gone);
+        let (release, hold) = std::sync::mpsc::channel::<()>();
+        busy.hold = Some(hold);
         let executor = Executor::new();
         let thread = RenderThread::spawn(&executor, side, Some(Box::new(busy))).expect("lane");
         reads.recv_timeout(HANG_GUARD).expect("the lane is serving");
@@ -1500,6 +1508,8 @@ mod tests {
             .expect("a dedicated thread");
         let outcome = tutti_platform::join(stopper).expect("the stop ended without panicking");
         assert!(matches!(outcome, Some(NotHome::Driving)), "{outcome:?}");
+        // The lane sat in its read until now, so it could not end before the stop looked.
+        release.send(()).expect("the lane holds the receiver");
         assert_eq!(
             ended.recv_timeout(HANG_GUARD),
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected),
