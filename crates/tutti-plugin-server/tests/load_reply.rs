@@ -404,10 +404,11 @@ fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
     let dir = tempfile::tempdir().expect("a scratch directory");
     let log = dir.path().join("server.log");
     // The shell is the host until this test ends it: it states its own pid, prints
-    // the server's, and waits. Its standard input is the server's connection (`<&0`
-    // keeps it on a background command), so it waits on `sleep` and not on a read.
+    // the server's, and waits. Its standard input is the server's connection, moved to
+    // descriptor 3 and handed over with `<&3` (dash points a background command's
+    // standard input at `/dev/null` first, so `<&0` would hand over `/dev/null`), so it waits on `sleep` and not on a read.
     let script = format!(
-        "RUST_LOG=info {env}=$$ {exe:?} <&0 >{log:?} 2>&1 & echo $!; exec sleep 600",
+        "exec 3<&0; RUST_LOG=info {env}=$$ {exe:?} <&3 3<&- >{log:?} 2>&1 & echo $!; exec sleep 600",
         env = tutti_plugin_ipc_ffi::HOST_PID_ENV,
         exe = env!("CARGO_BIN_EXE_plugin-server"),
     );

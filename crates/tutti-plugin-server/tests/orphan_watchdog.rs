@@ -109,8 +109,9 @@ fn connection() -> (UnixStream, Stdio) {
 ///
 /// The host's end of the connection is returned, and the caller holds it: the
 /// server then sees no end of stream and no request, so only the watch on the
-/// host process can end it. (A shell runs a background command with its standard
-/// input at `/dev/null`: `<&0` keeps the connection on it.)
+/// host process can end it. (A shell may point a background command's standard
+/// input at `/dev/null` before its own redirections, as dash does: the connection
+/// moves to descriptor 3 first and `<&3` hands it to the server.)
 fn spawn_orphaned_server() -> (Reaper, UnixStream) {
     let exe = env!("CARGO_BIN_EXE_plugin-server");
     let (host, server) = connection();
@@ -120,7 +121,7 @@ fn spawn_orphaned_server() -> (Reaper, UnixStream) {
         // orphaning. `$$` is the shell's own PID — the host, as far as the
         // server is concerned. `echo $!` hands the server's PID back; the
         // shell then exits at once.
-        "{env}=$$ {exe:?} <&0 >/dev/null 2>&1 & echo $!",
+        "exec 3<&0; {env}=$$ {exe:?} <&3 3<&- >/dev/null 2>&1 & echo $!",
         env = tutti_plugin_ipc_ffi::HOST_PID_ENV
     );
     let out = Command::new("/bin/sh")
@@ -264,7 +265,7 @@ fn a_host_that_ends_after_connecting_ends_the_server() {
     // and waits. Its standard input is the server's connection, so it waits on
     // `sleep` and not on a read.
     let script = format!(
-        "{env}=$$ {exe:?} <&0 >/dev/null 2>&1 & echo $!; exec sleep 600",
+        "exec 3<&0; {env}=$$ {exe:?} <&3 3<&- >/dev/null 2>&1 & echo $!; exec sleep 600",
         env = tutti_plugin_ipc_ffi::HOST_PID_ENV
     );
     let mut host = Command::new("/bin/sh")
