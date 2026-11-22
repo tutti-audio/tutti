@@ -8,7 +8,8 @@ use tutti_buffers::MaxBlock;
 
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Editor, EventEdge, EventIn, EventOut, ParamIn, ParamRange, Prepare, Renderer, TransportPosition,
+    Editor, EventEdge, EventInputPort, EventOutputPort, ParamIn, ParamRange, Prepare, Renderer,
+    TransportPosition,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
@@ -111,11 +112,11 @@ fn render_with_knob(synth: PolySynth<f32>, drive: Option<Drive>) -> ([Vec<f32>; 
     ed.insert(NodeKey(1), "clip", MidiClipNode::new([note]));
     let params = ed.insert(SYNTH, "synth", synth).controls;
     ed.spec_mut().connect_events(
-        EventIn {
+        EventInputPort {
             node: SYNTH,
             port: 0,
         },
-        EventEdge::Direct(EventOut {
+        EventEdge::Direct(EventOutputPort {
             node: NodeKey(1),
             port: 0,
         }),
@@ -143,7 +144,7 @@ fn render_with_knob(synth: PolySynth<f32>, drive: Option<Drive>) -> ([Vec<f32>; 
         ed.insert(LANE, "lane", lane);
         ed.spec_mut().connect_param(
             at,
-            EventOut {
+            EventOutputPort {
                 node: LANE,
                 port: 0,
             },

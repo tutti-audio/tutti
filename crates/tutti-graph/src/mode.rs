@@ -119,7 +119,7 @@ use crate::node::Shape;
 use crate::param::{ParamPorts, ParamRange, ParamRangeCell, ParamRanges, ParamState};
 use crate::param_event::ParamEvent;
 use crate::pass::Pass;
-use crate::spec::EventOut;
+use crate::spec::EventOutputPort;
 use tutti_buffers::Float;
 
 /// What the graph does with a node: a state the graph holds for any node, a
@@ -759,7 +759,11 @@ impl<F: Float> ModeState<F> {
     /// the next block ramps from the last of them; otherwise the base, the
     /// cell's snapshot, ramps as it does undriven.
     #[inline]
-    pub(crate) fn drive_step(&mut self, frames: usize, source: Option<(EventOut, &[ParamEvent])>) {
+    pub(crate) fn drive_step(
+        &mut self,
+        frames: usize,
+        source: Option<(EventOutputPort, &[ParamEvent])>,
+    ) {
         let Some(drive) = &mut self.drive else {
             return;
         };
@@ -1118,7 +1122,7 @@ mod tests {
     /// behind costs nothing).
     #[test]
     fn a_node_whose_mix_is_not_driven_keeps_the_plain_op() {
-        let from = EventOut {
+        let from = EventOutputPort {
             node: NodeKey(1),
             port: 0,
         };

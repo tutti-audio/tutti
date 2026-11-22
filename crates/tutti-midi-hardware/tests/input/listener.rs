@@ -11,7 +11,7 @@ use std::time::Duration;
 use tutti_platform::Instant;
 
 use tutti_fixtures::{BlockClock, EventRig};
-use tutti_graph::{EventEdge, EventIn, EventInletNode, EventOut, NodeKey};
+use tutti_graph::{EventEdge, EventInletNode, EventInputPort, EventOutputPort, NodeKey};
 use tutti_midi_runtime::{InputInlets, MidiInputNode};
 use tutti_ump::Ump;
 use tutti_units::{Frame, SampleRate};
@@ -75,11 +75,11 @@ impl Listener {
         let key = NodeKey(100);
         self.rig.editor.insert(key, "inlet", inlet);
         self.rig.editor.spec_mut().connect_events(
-            EventIn {
+            EventInputPort {
                 node: self.entry,
                 port: 0,
             },
-            EventEdge::Direct(EventOut { node: key, port: 0 }),
+            EventEdge::Direct(EventOutputPort { node: key, port: 0 }),
         );
         self.rig.commit();
     }

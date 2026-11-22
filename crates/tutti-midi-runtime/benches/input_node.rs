@@ -22,7 +22,7 @@ use tutti_platform::Instant;
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::midi;
 use tutti_graph::{
-    Editor, EventCapacity, EventEdge, EventIn, EventOut, Executor, NodeKey, Prepare,
+    Editor, EventCapacity, EventEdge, EventInputPort, EventOutputPort, Executor, NodeKey, Prepare,
     TransportPosition,
 };
 use tutti_midi_runtime::{DeviceGeneration, DeviceInput, InputInlets, MidiInputNode};
@@ -64,11 +64,11 @@ fn rig() -> (Executor, DeviceInput) {
     );
     editor.insert(NodeKey(2), "inlet", inlet);
     editor.spec_mut().connect_events(
-        EventIn {
+        EventInputPort {
             node: NodeKey(1),
             port: 0,
         },
-        EventEdge::Direct(EventOut {
+        EventEdge::Direct(EventOutputPort {
             node: NodeKey(2),
             port: 0,
         }),

@@ -12,8 +12,8 @@ use common::{WORKERS, bits, prepare, test_pool};
 use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::{
-    Buses, Chase, Cx, Editor, Event, EventEdge, EventIn, EventKind, EventOut, Executor, Fade,
-    FadeLaw, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable,
+    Buses, Chase, Cx, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort,
+    Executor, Fade, FadeLaw, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{NodeKey, OutputPort, PortSource};
 use tutti_ump::{CCNumber, MidiChannel, U7, Ump};
@@ -260,11 +260,11 @@ fn the_chase_comes_ahead_of_edge_events_at_offset_zero() {
     );
     ed.insert(NodeKey(2), "edge", Unforkable(Edge0(edge, Arc::clone(&on))));
     ed.spec_mut().connect_events(
-        EventIn {
+        EventInputPort {
             node: NodeKey(1),
             port: 0,
         },
-        EventEdge::Direct(EventOut {
+        EventEdge::Direct(EventOutputPort {
             node: NodeKey(2),
             port: 0,
         }),

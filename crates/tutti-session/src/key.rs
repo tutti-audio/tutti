@@ -6,7 +6,7 @@
 //! - [`OutputPort`] and [`InputPort`] name one channel: a node's output or input
 //!   port (`key.out(0)`, `key.input(1)`), a main input channel
 //!   ([`MainInput::channel`]) or a main output channel ([`MainOutput::channel`]).
-//! - [`EventOutPort`] and [`EventInPort`] name one event port
+//! - [`EventOutputPort`] and [`EventInputPort`] name one event port
 //!   (`key.events_out()`, `key.events_in_at(1)`); **event input 0 is the
 //!   node's main event input**, where the chase (`Node::chase`) delivers.
 //! - [`Graph::connect`] takes an [`Outlet`] and an [`Inlet`] of the same kind
@@ -18,7 +18,7 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 
 use tutti_buffers::Float;
-use tutti_graph::{BusRef, BusSource, EdgeId, NodeKey};
+use tutti_graph::{BusRef, BusSource, EdgeId, EventInputPort, EventOutputPort, NodeKey};
 use tutti_units::Amplitude;
 
 use crate::{ConnectError, DeclarationError, Graph};
@@ -67,16 +67,16 @@ impl<N: ?Sized> Key<N> {
 
     /// The node's main event output (port 0), as a source of an event edge.
     #[must_use]
-    pub const fn events_out(self) -> EventOutPort {
+    pub const fn events_out(self) -> EventOutputPort {
         self.events_out_at(0)
     }
 
     /// Event output `index` of the node.
     #[must_use]
-    pub const fn events_out_at(self, index: usize) -> EventOutPort {
-        EventOutPort {
+    pub const fn events_out_at(self, index: u16) -> EventOutputPort {
+        EventOutputPort {
             node: self.node,
-            index,
+            port: index,
         }
     }
 
@@ -86,17 +86,17 @@ impl<N: ?Sized> Key<N> {
     /// the state a node is given when it takes over from another, is
     /// delivered there.
     #[must_use]
-    pub const fn events_in(self) -> EventInPort {
+    pub const fn events_in(self) -> EventInputPort {
         self.events_in_at(0)
     }
 
     /// Event input `index` of the node (a port per MIDI Group, a plugin's
     /// note port `N`).
     #[must_use]
-    pub const fn events_in_at(self, index: usize) -> EventInPort {
-        EventInPort {
+    pub const fn events_in_at(self, index: u16) -> EventInputPort {
+        EventInputPort {
             node: self.node,
-            index,
+            port: index,
         }
     }
 
@@ -289,163 +289,33 @@ impl MainInput {
     }
 }
 
-/// One event port a stream of events leaves from: an event output of a node.
-/// Made by [`Key::events_out`], [`Key::events_out_at`] and
-/// [`EventOutPort::new`]. What [`Graph::connect`] wires into an
-/// [`EventInPort`] and [`Taps::open_event`](crate::Taps::open_event) copies.
-///
-/// The index is a port number of the node's declared event ports, a count
-/// and not a unit.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct EventOutPort {
-    node: NodeKey,
-    index: usize,
-}
-
-impl EventOutPort {
-    /// Event output `index` of `node`.
-    #[must_use]
-    pub fn new(node: impl Into<NodeKey>, index: usize) -> Self {
-        Self {
-            node: node.into(),
-            index,
-        }
-    }
-
-    /// The node it leaves.
-    #[must_use]
-    pub const fn node(self) -> NodeKey {
-        self.node
-    }
-
-    /// The port's index on its node.
-    #[must_use]
-    pub const fn index(self) -> usize {
-        self.index
-    }
-
-    /// The graph's own name for it, `None` for an index no port has.
-    pub(crate) fn raw(self) -> Option<tutti_graph::EventOut> {
-        Some(tutti_graph::EventOut {
-            node: self.node,
-            port: u16::try_from(self.index).ok()?,
-        })
-    }
-
-    pub(crate) fn of_raw(from: tutti_graph::EventOut) -> Self {
-        Self::new(from.node, usize::from(from.port))
-    }
-}
-
-/// One event port a stream of events arrives at: an event input of a node.
-/// Made by [`Key::events_in`], [`Key::events_in_at`] and
-/// [`EventInPort::new`].
-///
-/// Input 0 is the node's main event input. The index is a port number of the
-/// node's declared event ports, a count and not a unit.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct EventInPort {
-    node: NodeKey,
-    index: usize,
-}
-
-impl EventInPort {
-    /// Event input `index` of `node`.
-    #[must_use]
-    pub fn new(node: impl Into<NodeKey>, index: usize) -> Self {
-        Self {
-            node: node.into(),
-            index,
-        }
-    }
-
-    /// The node it arrives at.
-    #[must_use]
-    pub const fn node(self) -> NodeKey {
-        self.node
-    }
-
-    /// The port's index on its node.
-    #[must_use]
-    pub const fn index(self) -> usize {
-        self.index
-    }
-
-    /// The graph's own name for it, `None` for an index no port has.
-    pub(crate) fn raw(self) -> Option<tutti_graph::EventIn> {
-        Some(tutti_graph::EventIn {
-            node: self.node,
-            port: u16::try_from(self.index).ok()?,
-        })
-    }
-
-    pub(crate) fn of_raw(at: tutti_graph::EventIn) -> Self {
-        Self::new(at.node, usize::from(at.port))
-    }
-}
-
 /// One event edge, named: what feeds which event input. What
-/// [`Graph::connect`] adds between an [`EventOutPort`] and an
-/// [`EventInPort`], and what [`SessionEvent::Unwired`](crate::SessionEvent::Unwired)
+/// [`Graph::connect`] adds between an [`EventOutputPort`] and an
+/// [`EventInputPort`], and what [`SessionEvent::Unwired`](crate::SessionEvent::Unwired)
 /// lists for a node that lost an event port.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EventEdge {
-    from: EventOutPort,
-    to: EventInPort,
+    from: EventOutputPort,
+    to: EventInputPort,
 }
 
 impl EventEdge {
     /// The edge from `from` into `to`.
     #[must_use]
-    pub const fn new(from: EventOutPort, to: EventInPort) -> Self {
+    pub const fn new(from: EventOutputPort, to: EventInputPort) -> Self {
         Self { from, to }
     }
 
     /// What feeds it.
     #[must_use]
-    pub const fn source(self) -> EventOutPort {
+    pub const fn source(self) -> EventOutputPort {
         self.from
     }
 
     /// Where it goes.
     #[must_use]
-    pub const fn sink(self) -> EventInPort {
+    pub const fn sink(self) -> EventInputPort {
         self.to
-    }
-}
-
-/// One event port an event tap copies: an output (what the port wrote) or an
-/// input (what its node hears there, every source merged). An
-/// [`EventOutPort`] and an [`EventInPort`] both convert into it, so
-/// [`Taps::open_event`](crate::Taps::open_event) takes either.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum EventTapPort {
-    /// An event output.
-    Out(EventOutPort),
-    /// An event input.
-    In(EventInPort),
-}
-
-impl EventTapPort {
-    /// The node whose port this is.
-    #[must_use]
-    pub const fn node(self) -> NodeKey {
-        match self {
-            Self::Out(p) => p.node(),
-            Self::In(p) => p.node(),
-        }
-    }
-}
-
-impl From<EventOutPort> for EventTapPort {
-    fn from(port: EventOutPort) -> Self {
-        Self::Out(port)
-    }
-}
-
-impl From<EventInPort> for EventTapPort {
-    fn from(port: EventInPort) -> Self {
-        Self::In(port)
     }
 }
 
@@ -540,7 +410,7 @@ pub struct MainBusWire;
 #[derive(Clone, Copy, Debug)]
 pub struct BusWire;
 
-/// An event edge: an [`EventOutPort`] into an [`EventInPort`]. Events merge by
+/// An event edge: an [`EventOutputPort`] into an [`EventInputPort`]. Events merge by
 /// offset at the sink, the graph ordering ties by source, and an event edge is
 /// **never faded**: a note-off is a message, not a level (doc 030, section 4),
 /// so [`Connection::unfaded`] and [`Disconnection::unfaded`] change nothing here.
@@ -598,8 +468,8 @@ impl Sealed for ChannelWire {}
 impl Sealed for MainBusWire {}
 impl Sealed for BusWire {}
 impl Sealed for EventWire {}
-impl Sealed for EventOutPort {}
-impl Sealed for EventInPort {}
+impl Sealed for EventOutputPort {}
+impl Sealed for EventInputPort {}
 
 impl Wire for ChannelWire {
     type Out = OutputPort;
@@ -711,20 +581,20 @@ impl Wire for BusWire {
 }
 
 impl Wire for EventWire {
-    type Out = EventOutPort;
-    type In = EventInPort;
+    type Out = EventOutputPort;
+    type In = EventInputPort;
     fn connect<F: Float>(
         graph: &mut Graph<F>,
-        from: EventOutPort,
-        to: EventInPort,
+        from: EventOutputPort,
+        to: EventInputPort,
     ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError> {
         graph.add_event_edge(from, to)?;
         Ok(Vec::new())
     }
     fn disconnect<F: Float>(
         graph: &mut Graph<F>,
-        from: EventOutPort,
-        to: EventInPort,
+        from: EventOutputPort,
+        to: EventInputPort,
         _hard: bool,
     ) -> Result<bool, ConnectError> {
         graph.check_event_wire(from, to)?;
@@ -732,22 +602,22 @@ impl Wire for EventWire {
     }
     fn harden<F: Float>(
         _: &mut Graph<F>,
-        _: EventOutPort,
-        _: EventInPort,
+        _: EventOutputPort,
+        _: EventInputPort,
         _: &[(ChannelEdge, bool)],
     ) {
     }
 }
 
-impl Outlet for EventOutPort {
+impl Outlet for EventOutputPort {
     type Wire = EventWire;
-    fn out(self) -> EventOutPort {
+    fn out(self) -> EventOutputPort {
         self
     }
 }
 
-impl Inlet<EventWire> for EventInPort {
-    fn sink(self) -> EventInPort {
+impl Inlet<EventWire> for EventInputPort {
+    fn sink(self) -> EventInputPort {
         self
     }
 }
@@ -755,7 +625,7 @@ impl Inlet<EventWire> for EventInPort {
 /// A port with a set of sources: what [`Graph::sources`],
 /// [`Graph::set_sources`] takes, so one
 /// vocabulary covers an audio [`InputPort`] (its sources sum) and an
-/// [`EventInPort`] (its sources merge). Sealed.
+/// [`EventInputPort`] (its sources merge). Sealed.
 pub trait Fanin: Sealed + Copy {
     /// What feeds it.
     type Source: Copy;
@@ -786,16 +656,16 @@ impl Fanin for InputPort {
     }
 }
 
-impl Fanin for EventInPort {
-    type Source = EventOutPort;
-    fn sources<F: Float>(self, graph: &Graph<F>) -> Result<Vec<EventOutPort>, ConnectError> {
+impl Fanin for EventInputPort {
+    type Source = EventOutputPort;
+    fn sources<F: Float>(self, graph: &Graph<F>) -> Result<Vec<EventOutputPort>, ConnectError> {
         graph.check_event_in(self)?;
         Ok(graph.event_sources_of(self))
     }
     fn set_sources<F: Float>(
         self,
         graph: &mut Graph<F>,
-        from: Vec<EventOutPort>,
+        from: Vec<EventOutputPort>,
         _hard: bool,
     ) -> Result<Vec<EdgeId>, ConnectError> {
         graph.set_event_sources_of(self, &from)?;

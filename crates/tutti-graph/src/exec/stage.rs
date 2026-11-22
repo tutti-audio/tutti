@@ -33,7 +33,7 @@ use super::commit::Commit;
 use super::node_op::{CONSTANT, SILENT};
 use super::par_for;
 use super::state::{Gone, Inject, Ring, State, Unit};
-use crate::EventTapSource;
+use crate::EventTapPort;
 use crate::NodeKey;
 use crate::arena::Arena;
 use crate::command::{Overlay, overlay_capacity};
@@ -47,7 +47,7 @@ use crate::par::Par;
 use crate::param::ParamState;
 use crate::plan::{DelayKey, FeedbackKey, Op, ParamPortOp, Plan};
 use crate::slots::EventSlot;
-use crate::spec::{EventIn, EventOut};
+use crate::spec::{EventInputPort, EventOutputPort};
 use crate::tap::TapWriter;
 
 /// How a ring or FIFO of the new plan gets its state from the executor's old
@@ -71,8 +71,8 @@ pub(super) enum RingFrom {
 
 /// An old event edge whose source's held keys are closed at its sink.
 pub(super) struct Closer {
-    pub(super) from: EventOut,
-    pub(super) at: EventIn,
+    pub(super) from: EventOutputPort,
+    pub(super) at: EventInputPort,
     pub(super) route: Route,
 }
 
@@ -96,7 +96,7 @@ pub(super) enum Route {
 /// A delay or feedback FIFO that goes away: its queue flushes into `at`.
 pub(super) struct Vanished {
     pub(super) from: u32,
-    pub(super) at: EventIn,
+    pub(super) at: EventInputPort,
 }
 
 /// Everything a commit's apply installs, built on the control side.
@@ -208,7 +208,7 @@ struct Cx<'a> {
 
 impl Cx<'_> {
     /// The plan unit index of the input `at`, when the plan has it.
-    fn sink_of(&self, at: EventIn) -> Option<u32> {
+    fn sink_of(&self, at: EventInputPort) -> Option<u32> {
         let u = self
             .plan
             .units
@@ -635,7 +635,7 @@ impl Stager {
                 let FeedbackKey::Event { from: src, .. } = f.key else {
                     unreachable!("event feedback keys are events")
                 };
-                let rate = plan.event_tap_rate(EventTapSource::Out(src), cx.cap);
+                let rate = plan.event_tap_rate(EventTapPort::Out(src), cx.cap);
                 let want = EventFifo::bound(f.key.delay().get(), rate, cx.max_block);
                 let carried = old_efb.get(&f.key).filter(|_| cx.carry).map(|&j| {
                     let have = self.feedback.get(&f.key).copied();
@@ -645,7 +645,7 @@ impl Stager {
                 let (mut how, mut cap, over) = fit_fifo(carried, want, rate);
                 // As a delay's FIFO: one kept from before its source wrote
                 // param events is built afresh.
-                let params = plan.event_tap_params(EventTapSource::Out(src));
+                let params = plan.event_tap_params(EventTapPort::Out(src));
                 let had_params = carried.is_some() && self.param_feedback.contains(&f.key);
                 if let (RingFrom::Keep { from: j, .. }, true, false) = (how, params, had_params) {
                     how = RingFrom::Move { from: j };
@@ -685,7 +685,7 @@ impl Stager {
                 .old
                 .and_then(|o| o.unit(old_p.key))
                 .and_then(|u| u.shape.chase);
-            let sink = cx.sink_of(EventIn {
+            let sink = cx.sink_of(EventInputPort {
                 node: new_p.key,
                 port: 0,
             });
@@ -696,7 +696,7 @@ impl Stager {
         // Injections not yet delivered: each buffer counts once, with what
         // flushed into it before, and its room for a fade's end.
         for s in &self.shells {
-            let at = EventIn {
+            let at = EventInputPort {
                 node: s.key,
                 port: s.port,
             };

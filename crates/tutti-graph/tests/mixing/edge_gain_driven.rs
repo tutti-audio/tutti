@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 
 use common::{Kind, Pair, SpecBehaviour, bits, driver_value, input_signal, prepare};
 use tutti_graph::{
-    CompileError, Edge, EdgeId, Editor, EventOut, ForkCause, ForkMode, ForkSource, Forked,
+    CompileError, Edge, EdgeId, Editor, EventOutputPort, ForkCause, ForkMode, ForkSource, Forked,
     GraphInvalid, GraphSpec, InputPort, IntoNode, Node, NodeKey, NodeParts, OutputPort, ParamRange,
     PortSink, PortSource, Topology, Unforkable, ValidGraph, compile,
 };
@@ -42,8 +42,8 @@ fn out(node: u64) -> PortSource {
     })
 }
 
-fn lane_out(node: u64) -> EventOut {
-    EventOut {
+fn lane_out(node: u64) -> EventOutputPort {
+    EventOutputPort {
         node: key(node),
         port: 0,
     }
@@ -457,7 +457,7 @@ fn connect_edge_gain_refusals() {
     let id = rig.edge(1);
     rig.spec.connect_edge_gain(
         id,
-        EventOut {
+        EventOutputPort {
             node: key(2),
             port: 5,
         },

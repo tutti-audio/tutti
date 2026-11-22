@@ -29,9 +29,9 @@ use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Buses, Cx, Editor, EventEdge, EventIn, EventKind, EventOut, Fade, FadeLaw, Io, Law, Node,
-    ParamKind, ParamRamp, ParamSegment, Prepare, Scheduled, Shape, Status, TransportPosition,
-    Unforkable,
+    Buses, Cx, Editor, EventEdge, EventInputPort, EventKind, EventOutputPort, Fade, FadeLaw, Io,
+    Law, Node, ParamKind, ParamRamp, ParamSegment, Prepare, Scheduled, Shape, Status,
+    TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, FeedbackFrom, InputPort, OutputPort, PortSource};
 use tutti_ump::{CCNumber, Message, MidiChannel, NoteNumber, U7, U14, Ump, Voice1};
@@ -127,12 +127,12 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
     );
 
     let spec = ed.spec_mut();
-    let ev = |node, port| EventOut {
+    let ev = |node, port| EventOutputPort {
         node: NodeKey(node),
         port,
     };
     spec.connect_events(
-        EventIn {
+        EventInputPort {
             node: NodeKey(3),
             port: 0,
         },
@@ -140,21 +140,21 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
     );
     // Fan-in, a PDC-delayed source (3 is 11 frames late), and feedback.
     spec.connect_events(
-        EventIn {
+        EventInputPort {
             node: NodeKey(4),
             port: 0,
         },
         EventEdge::Direct(ev(3, 0)),
     );
     spec.connect_events(
-        EventIn {
+        EventInputPort {
             node: NodeKey(4),
             port: 0,
         },
         EventEdge::Direct(ev(2, 0)),
     );
     spec.connect_events(
-        EventIn {
+        EventInputPort {
             node: NodeKey(4),
             port: 1,
         },
@@ -201,7 +201,7 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
     // consumer's fan-in port (merged after its two sources) and its feedback
     // port, on time; one already late; one waiting on a beat the stopped
     // transport never reaches.
-    let consumer = |port| EventIn {
+    let consumer = |port| EventInputPort {
         node: NodeKey(4),
         port,
     };
@@ -300,11 +300,11 @@ fn a_bounded_event_merge_is_allocation_free_on(workers: usize) {
     );
     let wire = |ed: &mut Editor, from: u64| {
         ed.spec_mut().connect_events(
-            EventIn {
+            EventInputPort {
                 node: NodeKey(4),
                 port: 0,
             },
-            EventEdge::Direct(EventOut {
+            EventEdge::Direct(EventOutputPort {
                 node: NodeKey(from),
                 port: 0,
             }),
@@ -374,13 +374,13 @@ fn crossfades_are_allocation_free_on(workers: usize) {
         "consume",
         Unforkable(TestNode::new(Kind::Consumer { inputs: 1 })),
     );
-    let consumer = EventIn {
+    let consumer = EventInputPort {
         node: NodeKey(3),
         port: 0,
     };
     ed.spec_mut().connect_events(
         consumer,
-        EventEdge::Direct(EventOut {
+        EventEdge::Direct(EventOutputPort {
             node: NodeKey(2),
             port: 0,
         }),
@@ -739,11 +739,11 @@ fn declared_event_capacities_are_allocation_free_on(workers: usize) {
     }
     ed.insert(NodeKey(3), "late", Unforkable(LateEvents));
     ed.insert(NodeKey(4), "tally", Unforkable(Tally(seen.clone())));
-    let ev = |node| EventOut {
+    let ev = |node| EventOutputPort {
         node: NodeKey(node),
         port: 0,
     };
-    let tally = |port| EventIn {
+    let tally = |port| EventInputPort {
         node: NodeKey(4),
         port,
     };
@@ -968,7 +968,7 @@ fn modulated_params_are_allocation_free_on(workers: usize) {
     };
     // The ramps are the early path: the sink sits behind the lag's PDC, so
     // the plan delays its event source.
-    let ramps = EventOut {
+    let ramps = EventOutputPort {
         node: NodeKey(4),
         port: 0,
     };
@@ -1098,11 +1098,11 @@ fn param_events_are_allocation_free_on(workers: usize) {
             port: 0,
         })]);
     }
-    let port = |p| EventIn {
+    let port = |p| EventInputPort {
         node: NodeKey(1),
         port: p,
     };
-    let out = |k| EventOut {
+    let out = |k| EventOutputPort {
         node: NodeKey(k),
         port: 0,
     };
@@ -1183,7 +1183,7 @@ fn scheduled_params_are_allocation_free_on(workers: usize) {
     }
     ed.commit().expect("commits");
     apply(&mut exec);
-    let consumer = |port| EventIn {
+    let consumer = |port| EventInputPort {
         node: NodeKey(1),
         port,
     };
@@ -1343,7 +1343,7 @@ fn an_azimuth_param_port_is_allocation_free() {
     };
     ed.spec_mut().connect_param(
         azimuth,
-        EventOut {
+        EventOutputPort {
             node: NodeKey(4),
             port: 0,
         },
@@ -1396,7 +1396,7 @@ fn a_range_published_while_blocks_render_is_allocation_free() {
     };
     ed.spec_mut().connect_param(
         azimuth,
-        EventOut {
+        EventOutputPort {
             node: NodeKey(4),
             port: 0,
         },
@@ -1456,7 +1456,7 @@ fn removing_a_node_with_a_moved_range_frees_nothing_on_the_audio_thread() {
     };
     ed.spec_mut().connect_param(
         azimuth,
-        EventOut {
+        EventOutputPort {
             node: NodeKey(4),
             port: 0,
         },
@@ -1769,7 +1769,7 @@ fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
                 for k in 1..=n {
                     ed.spec_mut().connect_edge_gain(
                         edge_of(k),
-                        EventOut {
+                        EventOutputPort {
                             node: NodeKey(5000 + k % 4),
                             port: 0,
                         },
@@ -1927,20 +1927,20 @@ fn mode_graph(workers: usize) -> (Editor, tutti_graph::Executor) {
     node(&mut ed, 7, Wire::new(1, 1, 150));
     node(&mut ed, 8, Wire::new(2, 1, 0));
     node(&mut ed, 9, Wire::new(1, 1, 0));
-    let ev = |node, port| EventOut {
+    let ev = |node, port| EventOutputPort {
         node: NodeKey(node),
         port,
     };
     let spec = ed.spec_mut();
     spec.events.insert(
-        EventIn {
+        EventInputPort {
             node: NodeKey(3),
             port: 0,
         },
         vec![EventEdge::Direct(ev(1, 0)), EventEdge::Direct(ev(2, 0))],
     );
     spec.events.insert(
-        EventIn {
+        EventInputPort {
             node: NodeKey(4),
             port: 0,
         },
@@ -2146,7 +2146,7 @@ fn driven_mixes_are_allocation_free_on(workers: usize) {
         node: NodeKey(k),
         param: NodeMix::ADDR,
     };
-    let lane = |k: u64| EventOut {
+    let lane = |k: u64| EventOutputPort {
         node: NodeKey(5000 + k % 4),
         port: 0,
     };
@@ -2554,15 +2554,15 @@ impl Node for Holder {
     fn reset(&mut self) {}
 }
 
-fn ev(node: u64, port: u16) -> EventOut {
-    EventOut {
+fn ev(node: u64, port: u16) -> EventOutputPort {
+    EventOutputPort {
         node: NodeKey(node),
         port,
     }
 }
 
-fn sink(node: u64, port: u16) -> EventIn {
-    EventIn {
+fn sink(node: u64, port: u16) -> EventInputPort {
+    EventInputPort {
         node: NodeKey(node),
         port,
     }

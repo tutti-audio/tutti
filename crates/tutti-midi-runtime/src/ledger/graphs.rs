@@ -21,8 +21,8 @@ use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::contract::Direct;
 use tutti_graph::{
-    Cx, Editor, Event, EventIn, EventKind, EventOut, Executor, ForkCause, ForkMode, ForkSource,
-    ForkTarget, Forked, IntoNode, Io, Node, NodeParts, Offset, Prepare, Shape, Status,
+    Cx, Editor, Event, EventInputPort, EventKind, EventOutputPort, Executor, ForkCause, ForkMode,
+    ForkSource, ForkTarget, Forked, IntoNode, Io, Node, NodeParts, Offset, Prepare, Shape, Status,
     TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
@@ -34,7 +34,9 @@ use tutti_units::{Beat, Bpm, Latency, SampleRate, Samples};
 /// The clip clock at 120 BPM and 48 kHz and the helpers that build on it.
 mod common {
     use tutti_fixtures::midi;
-    use tutti_graph::{Editor, EventEdge, EventIn, EventOut, NodeKey, TransportPosition};
+    use tutti_graph::{
+        Editor, EventEdge, EventInputPort, EventOutputPort, NodeKey, TransportPosition,
+    };
     use tutti_ump::{MidiChannel, Ump};
     use tutti_units::{Beat, Bpm};
 
@@ -70,11 +72,11 @@ mod common {
     /// Wires event output 0 of node `from` to event input 0 of node `to`.
     pub(super) fn connect(ed: &mut Editor, from: u64, to: u64) {
         ed.spec_mut().connect_events(
-            EventIn {
+            EventInputPort {
                 node: NodeKey(to),
                 port: 0,
             },
-            EventEdge::Direct(EventOut {
+            EventEdge::Direct(EventOutputPort {
                 node: NodeKey(from),
                 port: 0,
             }),
@@ -213,11 +215,11 @@ impl<F: Float> Node<F> for Latent {
 
 fn disconnect(ed: &mut Editor, from: u64, to: u64) {
     assert!(ed.spec_mut().disconnect_events(
-        EventIn {
+        EventInputPort {
             node: NodeKey(to),
             port: 0
         },
-        EventOut {
+        EventOutputPort {
             node: NodeKey(from),
             port: 0
         }

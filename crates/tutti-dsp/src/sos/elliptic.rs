@@ -5,7 +5,7 @@
 
 use core::f64::consts::PI;
 
-use tutti_units::{Hz, SampleRate};
+use tutti_units::{Hz, Normalized, SampleRate};
 
 use super::analog::{PassbandRipple, Poles, Stage, StopbandAttenuation, push_stage};
 use super::butterworth::check_cutoff;
@@ -82,8 +82,9 @@ impl Elliptic {
     /// the steeper the transition. The solution of the degree equation `N = K(k) K'(k1) /
     /// (K'(k) K(k1))` with the discrimination `k1 = e_ripple / e_attenuation`.
     #[must_use]
-    pub fn selectivity(&self) -> f64 {
-        self.moduli().0.k()
+    pub fn selectivity(&self) -> Normalized {
+        // `k` is the modulus of a nome in `0..1`, so `0..=1` up to the rounding at its ends.
+        Normalized::clamped(self.moduli().0.k())
     }
 
     /// The stopband edge of the design at the passband edge `cutoff`: the frequency from
@@ -95,7 +96,7 @@ impl Elliptic {
     /// As [`design`](Self::design).
     pub fn stopband_edge(&self, cutoff: Hz, rate: SampleRate) -> Result<Hz, SosError> {
         let g = prewarp(check_cutoff(cutoff, rate)?, rate);
-        let k = self.selectivity();
+        let k = self.selectivity().get();
         let edge = match self.response {
             CutResponse::LowPass => g / k,
             CutResponse::HighPass => g * k,

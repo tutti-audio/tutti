@@ -1,8 +1,19 @@
 use super::*;
+use crate::SvfControls;
+
+/// The design of the controls `(ty, freq, q, gain)` at `rate`, which must be in range.
+fn designed(ty: SvfType, freq: Hz, q: Q, gain: Db, rate: SampleRate) -> SvfDesign {
+    SvfControls { ty, freq, q, gain }.design(rate).unwrap()
+}
+
+/// The held design of the controls `(ty, freq, q, gain)` at `rate`.
+fn clamped(ty: SvfType, freq: Hz, q: Q, gain: Db, rate: SampleRate) -> SvfDesign {
+    SvfControls { ty, freq, q, gain }.design_clamped(rate)
+}
 
 #[test]
 fn test_svf_coeffs_lowpass_m_values() {
-    let c = SvfDesign::new(
+    let c = designed(
         SvfType::LowPass,
         Hz::new(1000.0),
         Q::new(0.707),
@@ -17,7 +28,7 @@ fn test_svf_coeffs_lowpass_m_values() {
 
 #[test]
 fn test_svf_coeffs_highpass_m_values() {
-    let c = SvfDesign::new(
+    let c = designed(
         SvfType::HighPass,
         Hz::new(1000.0),
         Q::new(0.707),
@@ -78,7 +89,7 @@ fn rbj_db(ty: SvfType, fc: f64, q: f64, gain_db: f64, rate: f64, f: f64) -> f64 
 /// Steady-state gain (dB) of a unit sine at `f` through the filter's own
 /// recurrence, projected on the last whole second.
 fn measured_db(ty: SvfType, fc: f64, q: f64, gain_db: f64, rate: f64, f: f64) -> f64 {
-    let c = SvfCoefficients::<f64>::from(&SvfDesign::new(
+    let c = SvfCoefficients::<f64>::from(&designed(
         ty,
         Hz::new(fc),
         Q::new(q),
@@ -127,12 +138,12 @@ fn bell_and_shelves_match_the_rbj_cookbook() {
 
 /// A gain far outside any audible range, or not a number, still solves to
 /// a finite set (it was NaN at -1e30 dB: `10^(dB / 40)` underflows to 0
-/// and `k = 1 / (Q * A)` is infinite), and a gain past the cap is the cap's.
+/// and `k = 1 / (Q * A)` is infinite), and a gain past the cap is the cap's. `design_clamped` is the call that holds it.
 #[test]
 fn an_absurd_gain_solves_finite_and_saturates() {
     for ty in [SvfType::Bell, SvfType::LowShelf, SvfType::HighShelf] {
         for db in [f64::NAN, -1e30, 1e30, f64::NEG_INFINITY, f64::INFINITY] {
-            let c = SvfDesign::new(
+            let c = clamped(
                 ty,
                 Hz::new(1000.0),
                 Q::new(1.0),
@@ -143,14 +154,14 @@ fn an_absurd_gain_solves_finite_and_saturates() {
                 assert!(v.is_finite(), "{ty:?} at {db} dB: {c:?}");
             }
         }
-        let cap = SvfDesign::new(
+        let cap = clamped(
             ty,
             Hz::new(1000.0),
             Q::new(1.0),
             SvfDesign::MAX_GAIN,
             SampleRate::SR_48K,
         );
-        let past = SvfDesign::new(
+        let past = clamped(
             ty,
             Hz::new(1000.0),
             Q::new(1.0),
@@ -159,14 +170,14 @@ fn an_absurd_gain_solves_finite_and_saturates() {
         );
         assert_eq!((cap.m0, cap.m1, cap.m2), (past.m0, past.m1, past.m2));
     }
-    let nan = SvfDesign::new(
+    let nan = clamped(
         SvfType::Bell,
         Hz::new(1000.0),
         Q::new(1.0),
         Db::new(f64::NAN),
         SampleRate::SR_48K,
     );
-    let flat = SvfDesign::new(
+    let flat = clamped(
         SvfType::Bell,
         Hz::new(1000.0),
         Q::new(1.0),
@@ -176,9 +187,41 @@ fn an_absurd_gain_solves_finite_and_saturates() {
     assert_eq!(nan.m1, flat.m1);
 }
 
+/// `design` refuses what `design_clamped` holds: a `Q` below `MIN_Q` or not finite, a gain past
+/// `MAX_GAIN` or not finite; the bounds themselves are solved.
+#[test]
+fn new_refuses_a_q_or_gain_out_of_range() {
+    let new = |q: f64, db: f64| {
+        SvfControls {
+            ty: SvfType::Bell,
+            freq: Hz::new(1000.0),
+            q: Q::new(q),
+            gain: Db::new(db),
+        }
+        .design(SampleRate::SR_48K)
+    };
+    for q in [0.0, -1.0, 0.0099, f64::NAN, f64::INFINITY] {
+        assert!(matches!(new(q, 0.0), Err(SvfDesignError::Q(_))), "Q {q}");
+    }
+    for db in [
+        200.0001,
+        -200.0001,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+    ] {
+        assert!(
+            matches!(new(1.0, db), Err(SvfDesignError::Gain(_))),
+            "{db} dB"
+        );
+    }
+    assert!(new(crate::SvfControls::MIN_Q, 200.0).is_ok());
+    assert!(new(1.0, -200.0).is_ok());
+}
+
 #[test]
 fn test_svf_coeffs_bell_zero_gain_is_unity() {
-    let c = SvfDesign::new(
+    let c = designed(
         SvfType::Bell,
         Hz::new(1000.0),
         Q::new(1.0),
@@ -200,7 +243,7 @@ fn test_svf_coeffs_bell_zero_gain_is_unity() {
 /// make, so the two are never quietly given one type again.
 #[test]
 fn cutoff_and_q_are_not_interchangeable() {
-    let right = SvfDesign::new(
+    let right = designed(
         SvfType::LowPass,
         Hz::new(1000.0),
         Q::new(0.707),
@@ -208,7 +251,7 @@ fn cutoff_and_q_are_not_interchangeable() {
         SampleRate::SR_44K1,
     );
     // What the transposed call computes: a 0.707 Hz cutoff at Q 1000.
-    let swapped = SvfDesign::new(
+    let swapped = designed(
         SvfType::LowPass,
         Hz::new(0.707),
         Q::new(1000.0),
@@ -223,14 +266,14 @@ fn cutoff_and_q_are_not_interchangeable() {
 
 #[test]
 fn test_svf_coeffs_deterministic() {
-    let c1 = SvfDesign::new(
+    let c1 = designed(
         SvfType::LowPass,
         Hz::new(500.0),
         Q::new(0.707),
         Db::new(0.0),
         SampleRate::SR_44K1,
     );
-    let c2 = SvfDesign::new(
+    let c2 = designed(
         SvfType::LowPass,
         Hz::new(500.0),
         Q::new(0.707),

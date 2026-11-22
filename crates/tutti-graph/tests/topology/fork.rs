@@ -11,10 +11,10 @@ use common::{Kind, TestNode, bits, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventEdge, EventIn, EventOut, Fade, FadeLaw, ForkBuild, ForkByClone, ForkCause,
-    ForkError, ForkFault, ForkFaultKind, ForkHealth, ForkMode, ForkRemains, ForkSource, ForkTarget,
-    Forked, GraphBuilder, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, PendingFork, Prepare,
-    Renderer, Shape, Status, Unforkable, param_parts,
+    Cx, Editor, EventEdge, EventInputPort, EventOutputPort, Fade, FadeLaw, ForkBuild, ForkByClone,
+    ForkCause, ForkError, ForkFault, ForkFaultKind, ForkHealth, ForkMode, ForkRemains, ForkSource,
+    ForkTarget, Forked, GraphBuilder, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet,
+    PendingFork, Prepare, Renderer, Shape, Status, Unforkable, param_parts,
 };
 use tutti_graph::{Edge, FeedbackFrom, InputPort, OutputPort, PortSource};
 use tutti_rt::Param;
@@ -694,11 +694,11 @@ fn a_node_fork_holds_exactly_what_feeds_the_node() {
     );
     t.set_outputs(vec![out(after, 0), out(side, 0)]);
     spec.connect_events(
-        EventIn {
+        EventInputPort {
             node: target,
             port: 0,
         },
-        EventEdge::Direct(EventOut {
+        EventEdge::Direct(EventOutputPort {
             node: emit,
             port: 0,
         }),
@@ -863,8 +863,8 @@ fn a_fork_carries_event_capacity_and_its_own_marks() {
     let spec = ed.spec_mut();
     spec.topology.set_outputs(vec![out(fold, 0), out(fold2, 0)]);
     for (e, f) in [(emit, fold), (emit2, fold2)] {
-        let at = EventIn { node: f, port: 0 };
-        let from = EventOut { node: e, port: 0 };
+        let at = EventInputPort { node: f, port: 0 };
+        let from = EventOutputPort { node: e, port: 0 };
         spec.connect_events(at, EventEdge::Direct(from));
         spec.require_resolution(at, from, Resolution::Sample);
     }
@@ -873,11 +873,11 @@ fn a_fork_carries_event_capacity_and_its_own_marks() {
         .fork(ForkTarget::Node(fold), ForkMode::Live, pre)
         .expect("forks");
     let mark = (
-        EventIn {
+        EventInputPort {
             node: fold,
             port: 0,
         },
-        EventOut {
+        EventOutputPort {
             node: emit,
             port: 0,
         },

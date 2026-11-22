@@ -23,7 +23,7 @@ use tutti_graph::{Bus, BusRef, BusRole, BusSource, Buses, NodeKey, TapId, TapOpt
 use tutti_graph::{
     Edge, EdgeGain, EdgeId, FeedbackFrom, InputPort, NodeSpec, OutputPort, PortSink, PortSource,
 };
-use tutti_graph::{EventEdge, EventIn, EventOut, GraphSpec, Unforkable};
+use tutti_graph::{EventEdge, EventInputPort, EventOutputPort, GraphSpec, Unforkable};
 use tutti_units::{Amplitude, Samples};
 
 use tutti_graph::Node;
@@ -150,11 +150,11 @@ fn audio_outs(desc: &Desc, among: &[NodeKey]) -> Vec<OutputPort> {
         .collect()
 }
 
-fn event_outs(desc: &Desc, among: &[NodeKey]) -> Vec<EventOut> {
+fn event_outs(desc: &Desc, among: &[NodeKey]) -> Vec<EventOutputPort> {
     among
         .iter()
         .flat_map(|&k| {
-            (0..shape(&desc.kinds[&k]).event_out).map(move |port| EventOut { node: k, port })
+            (0..shape(&desc.kinds[&k]).event_out).map(move |port| EventOutputPort { node: k, port })
         })
         .collect()
 }
@@ -231,7 +231,7 @@ fn wire_node(desc: &mut Desc, j: usize, rng: &mut Rng) {
     let direct_ev = event_outs(desc, &earlier);
     let any_ev = event_outs(desc, &all);
     for port in 0..s.event_in {
-        let at = EventIn { node: key, port };
+        let at = EventInputPort { node: key, port };
         let mut seen = BTreeSet::new();
         let mut sources = Vec::new();
         // Up to six sources, so fan-in wider than the common two or three is
@@ -656,10 +656,10 @@ proptest! {
             let valid = desc.spec.validate().expect("generated graphs are valid");
             let mut pair = Pair::with_workers(MAX_BLOCK, workers);
             pair.switch(&valid, &desc.kinds);
-            let ports: Vec<EventIn> = desc
+            let ports: Vec<EventInputPort> = desc
                 .kinds
                 .keys()
-                .flat_map(|&k| (0..shape(&desc.kinds[&k]).event_in).map(move |port| EventIn { node: k, port }))
+                .flat_map(|&k| (0..shape(&desc.kinds[&k]).event_in).map(move |port| EventInputPort { node: k, port }))
                 .collect();
             let mut rng = Rng::new(seed ^ 0xC0DE);
             let mut script = Script {
@@ -746,11 +746,12 @@ fn transport_case(seed: u64, which: usize) -> Result<(), TestCaseError> {
         let valid = desc.spec.validate().expect("generated graphs are valid");
         let mut pair = Pair::with_workers(MAX_BLOCK, workers);
         pair.switch(&valid, &desc.kinds);
-        let ports: Vec<EventIn> = desc
+        let ports: Vec<EventInputPort> = desc
             .kinds
             .keys()
             .flat_map(|&k| {
-                (0..shape(&desc.kinds[&k]).event_in).map(move |port| EventIn { node: k, port })
+                (0..shape(&desc.kinds[&k]).event_in)
+                    .map(move |port| EventInputPort { node: k, port })
             })
             .collect();
         let mut rng = Rng::new(seed ^ 0x7A45);
@@ -1169,25 +1170,25 @@ fn close_a_cycle(desc: &mut Desc, rng: &mut Rng) -> bool {
             );
             return true;
         }
-        let from = EventOut {
+        let from = EventOutputPort {
             node: late,
             port: 0,
         };
         let listed = desc
             .spec
             .events
-            .get(&EventIn {
+            .get(&EventInputPort {
                 node: early,
                 port: 0,
             })
             .is_some_and(|v| v.iter().any(|e| e.from() == from));
         if se.event_in > 0 && sl.event_out > 0 && !listed {
             desc.spec.connect_events(
-                EventIn {
+                EventInputPort {
                     node: early,
                     port: 0,
                 },
-                EventEdge::Direct(EventOut {
+                EventEdge::Direct(EventOutputPort {
                     node: late,
                     port: 0,
                 }),
@@ -1656,9 +1657,9 @@ fn every_borrow_form_matches_the_reference() {
         out(w3, 2),
     ]);
     let mut g = GraphSpec::new(t);
-    let ev = |node, port| EventOut { node, port };
+    let ev = |node, port| EventOutputPort { node, port };
     let mut connect = |node, port, from| {
-        g.connect_events(EventIn { node, port }, EventEdge::Direct(from));
+        g.connect_events(EventInputPort { node, port }, EventEdge::Direct(from));
     };
     connect(consume, 0, ev(emit, 0));
     connect(mix6, 0, ev(emit, 0));
@@ -1829,7 +1830,7 @@ impl EditorPair {
     }
 
     /// Schedule `kind` into `to` at `at` on both.
-    fn schedule(&mut self, at: tutti_units::At, to: EventIn, kind: tutti_graph::EventKind) {
+    fn schedule(&mut self, at: tutti_units::At, to: EventInputPort, kind: tutti_graph::EventKind) {
         self.editor.schedule(at, to, kind).expect("room");
         self.reference.schedule(at, to, kind);
     }
@@ -1904,10 +1905,10 @@ proptest! {
                 (48_000.0, MAX_BLOCK),
             ][to];
             let p = tutti_graph::Prepare::new(tutti_units::SampleRate::of(rate), MaxBlock::of(Samples::new(max)));
-            let ports: Vec<EventIn> = desc
+            let ports: Vec<EventInputPort> = desc
                 .kinds
                 .keys()
-                .flat_map(|&k| (0..shape(&desc.kinds[&k]).event_in).map(move |port| EventIn { node: k, port }))
+                .flat_map(|&k| (0..shape(&desc.kinds[&k]).event_in).map(move |port| EventInputPort { node: k, port }))
                 .collect();
             let mut rng = Rng::new(seed ^ 0xFA11);
             for _ in 0..rng.below(12) {
@@ -2471,7 +2472,7 @@ fn drive(desc: &mut Desc, rng: &mut Rng) {
             continue;
         }
         let g = desc.spec.gains.get_mut(&id).expect("listed");
-        g.source = rng.chance(80).then(|| EventOut {
+        g.source = rng.chance(80).then(|| EventOutputPort {
             node: NodeKey(LANE_KEYS + rng.below(LANE_LATENCIES.len() as u64)),
             port: 0,
         });
@@ -2805,7 +2806,7 @@ fn drive_mixes(desc: &mut Desc, rng: &mut Rng) {
         }
         let at = mix_port(key);
         if rng.chance(80) {
-            let from = EventOut {
+            let from = EventOutputPort {
                 node: NodeKey(MIX_LANE_KEYS + rng.below(LANE_LATENCIES.len() as u64)),
                 port: 0,
             };

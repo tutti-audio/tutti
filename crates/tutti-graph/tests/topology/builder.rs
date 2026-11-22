@@ -13,8 +13,8 @@ use common::{Kind, TestNode, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventEdge, EventIn, EventOut, ForkByClone, GraphBuilder, Io, Node, Prepare,
-    Renderer, Shape, Status, TransportPosition, Unforkable,
+    Cx, Editor, EventEdge, EventInputPort, EventOutputPort, ForkByClone, GraphBuilder, Io, Node,
+    Prepare, Renderer, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, FeedbackFrom, InputPort, OutputPort, PortSource};
 use tutti_units::{Beat, Frame, Samples};
@@ -338,11 +338,11 @@ fn builder_builds_what_a_hand_written_spec_builds() {
         PortSource::Node(from(3, 0)),
     ]);
     spec.connect_events(
-        EventIn {
+        EventInputPort {
             node: NodeKey(3),
             port: 0,
         },
-        EventEdge::Direct(EventOut {
+        EventEdge::Direct(EventOutputPort {
             node: NodeKey(2),
             port: 0,
         }),

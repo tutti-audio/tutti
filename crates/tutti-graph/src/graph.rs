@@ -41,7 +41,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::latency::{ChannelFeed, Feed, LatencyGraph, PortFeed};
-use crate::spec::{EventIn, EventOut};
+use crate::spec::{EventInputPort, EventOutputPort};
 use crate::tail::TailGraph;
 use tutti_buffers::ChannelLayout;
 use tutti_units::{Samples, Tail};
@@ -390,18 +390,18 @@ tutti_rt::id! {
 
 /// The event port an event tap copies: an output, or an input.
 ///
-/// An [`EventOut`] and an [`EventIn`] both convert into it, so one open call
+/// An [`EventOutputPort`] and an [`EventInputPort`] both convert into it, so one open call
 /// takes either.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum EventTapSource {
+pub enum EventTapPort {
     /// An event output: what the port wrote.
-    Out(EventOut),
+    Out(EventOutputPort),
     /// An event input: what the node reads there, every source merged in the
     /// order the node is handed them.
-    In(EventIn),
+    In(EventInputPort),
 }
 
-impl EventTapSource {
+impl EventTapPort {
     /// The node whose port this is.
     #[must_use]
     pub const fn node(self) -> NodeKey {
@@ -412,14 +412,14 @@ impl EventTapSource {
     }
 }
 
-impl From<EventOut> for EventTapSource {
-    fn from(port: EventOut) -> Self {
+impl From<EventOutputPort> for EventTapPort {
+    fn from(port: EventOutputPort) -> Self {
         Self::Out(port)
     }
 }
 
-impl From<EventIn> for EventTapSource {
-    fn from(port: EventIn) -> Self {
+impl From<EventInputPort> for EventTapPort {
+    fn from(port: EventInputPort) -> Self {
         Self::In(port)
     }
 }
@@ -434,7 +434,7 @@ pub struct EventTapSpec {
     /// reads nothing. A port that does not exist (a node replaced by one with
     /// fewer event ports) reads nothing too; it does not fail a commit.
     /// Opening an event tap refuses a port that does not exist at that moment.
-    pub source: Option<EventTapSource>,
+    pub source: Option<EventTapPort>,
     /// Where the copy sits in time.
     pub align: TapAlign,
 }

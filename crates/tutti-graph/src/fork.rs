@@ -19,7 +19,7 @@ use crate::editor::{CommitError, Editor};
 use crate::exec::Executor;
 use crate::gain::EdgeGain;
 use crate::node::{IntoNode, Node, NodeParts, Prepare};
-use crate::spec::{EventIn, GraphSpec};
+use crate::spec::{EventInputPort, GraphSpec};
 use crate::wake::Wake;
 use tutti_buffers::Float;
 
@@ -1232,7 +1232,7 @@ impl<F: Float> Editor<F> {
             let events = spec
                 .events
                 .range(
-                    EventIn { node, port: 0 }..=EventIn {
+                    EventInputPort { node, port: 0 }..=EventInputPort {
                         node,
                         port: u16::MAX,
                     },

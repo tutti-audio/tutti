@@ -16,9 +16,9 @@ use atomic_float::AtomicF64;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, Event, EventEdge, EventIn, EventKind, EventOut, Executor, ForkByClone, ForkMode,
-    ForkTarget, Io, Node, Offset, ParamIn, ParamKind, ParamSegment, Prepare, ScheduleError, Shape,
-    Status, TransportChanges, TransportPosition,
+    Cx, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor,
+    ForkByClone, ForkMode, ForkTarget, Io, Node, Offset, ParamIn, ParamKind, ParamSegment, Prepare,
+    ScheduleError, Shape, Status, TransportChanges, TransportPosition,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_modulation::{
@@ -764,7 +764,7 @@ fn resync_rig() -> (Rig, SourceKey) {
     let env = decl.source(1, envelope());
     host.feeds.insert(
         env,
-        Feed::Events(EventOut {
+        Feed::Events(EventOutputPort {
             node: key(10),
             port: 0,
         }),
@@ -875,7 +875,7 @@ fn a_follower_takes_no_resync() {
     let mut r = rig(128);
     assert_eq!(r.m.resyncs_owed(), 0, "the rig's follower owes none");
     let node = r.m.source(SourceKey(2)).expect("a follower");
-    let to = EventIn { node, port: 0 };
+    let to = EventInputPort { node, port: 0 };
     assert_eq!(
         r.ed.schedule(At::NextBlock, to, EventKind::Resync),
         Err(ScheduleError::NoSuchPort { to })
@@ -1076,7 +1076,7 @@ fn a_port_with_another_event_source_is_refused() {
             node: key(3),
             param: UnitParam::Cutoff.into(),
         },
-        EventOut {
+        EventOutputPort {
             node: key(30),
             port: 0,
         },
@@ -1280,12 +1280,12 @@ fn a_taken_lanes_unwiring_keeps_the_hosts_edges() {
 
     let lane = m.lane(param).expect("a lane").0;
     ed.insert(lane, "clip", ForkByClone(Held { on: 10 }));
-    let to = EventIn {
+    let to = EventInputPort {
         node: key(50),
         port: 0,
     };
     let feedback = EventEdge::Feedback {
-        from: EventOut {
+        from: EventOutputPort {
             node: lane,
             port: 0,
         },
@@ -1299,7 +1299,7 @@ fn a_taken_lanes_unwiring_keeps_the_hosts_edges() {
         "the host's edge stays: {edges:?}"
     );
     assert!(
-        !edges.contains(&EventEdge::Direct(EventOut {
+        !edges.contains(&EventEdge::Direct(EventOutputPort {
             node: lane,
             port: 0
         })),
@@ -1747,9 +1747,9 @@ fn foreign_rig() -> (Editor, Host, Decl, Modulation, TargetKey) {
 }
 
 /// Whether `lane` drives `to`.
-fn drives(ed: &Editor, lane: NodeKey, to: EventIn) -> bool {
+fn drives(ed: &Editor, lane: NodeKey, to: EventInputPort) -> bool {
     ed.spec().events.get(&to).is_some_and(|edges| {
-        edges.contains(&EventEdge::Direct(EventOut {
+        edges.contains(&EventEdge::Direct(EventOutputPort {
             node: lane,
             port: 0,
         }))
@@ -1768,7 +1768,7 @@ fn a_foreign_target_on_another_node_after_a_steady_state_moves_the_lane() {
     assert!(drives(
         &ed,
         lane,
-        EventIn {
+        EventInputPort {
             node: key(51),
             port: 0
         }
@@ -1776,7 +1776,7 @@ fn a_foreign_target_on_another_node_after_a_steady_state_moves_the_lane() {
     assert!(!drives(
         &ed,
         lane,
-        EventIn {
+        EventInputPort {
             node: key(50),
             port: 0
         }
@@ -1805,7 +1805,7 @@ fn a_foreign_target_on_another_port_after_a_steady_state_moves_the_lane() {
     assert!(drives(
         &ed,
         lane,
-        EventIn {
+        EventInputPort {
             node: key(51),
             port: 1
         }
@@ -1813,7 +1813,7 @@ fn a_foreign_target_on_another_port_after_a_steady_state_moves_the_lane() {
     assert!(!drives(
         &ed,
         lane,
-        EventIn {
+        EventInputPort {
             node: key(51),
             port: 0
         }

@@ -49,12 +49,12 @@ use tutti_dsp::{ChannelWeight, channel_weights};
 use tutti_units::{Amplitude, Db, SampleRate, Samples};
 
 use crate::convert::{BLOCK, Discard, all_finite, for_blocks, run_len};
-use crate::{Error, Measure, Result, StreamMeter};
+use crate::{Measure, MeterError, StreamMeter};
 
 /// What a loudness meter measures: the channel topology of the frames fed to
 /// it. Unlike a width, a topology is part of the analysis: it is the channel
 /// model each speaker's weight is read from. [`measure_loudness`] checks the
-/// buffer's width against it ([`Error::ChunkLayoutMismatch`]).
+/// buffer's width against it ([`MeterError::ChunkLayoutMismatch`]).
 ///
 /// The rate is **not** part of the config and **not** defaulted: the call that
 /// takes the frames binds it ([`measure`](Self::measure),
@@ -78,7 +78,7 @@ impl LoudnessConfig {
     }
 
     /// The topology of the fed frames. Fixed at meter construction: a chunk of
-    /// a different width is refused ([`Error::ChunkLayoutMismatch`]).
+    /// a different width is refused ([`MeterError::ChunkLayoutMismatch`]).
     #[inline]
     #[must_use]
     pub fn topology(&self) -> &ChannelTopology {
@@ -94,11 +94,11 @@ impl<S: Sample> Measure<S> for LoudnessConfig {
     ///
     /// # Errors
     ///
-    /// [`Error::AmbisonicLoudness`] for an ambisonic topology;
-    /// [`Error::UnplacedLoudnessChannels`] for speakers that are not a
+    /// [`MeterError::AmbisonicLoudness`] for an ambisonic topology;
+    /// [`MeterError::UnplacedLoudnessChannels`] for speakers that are not a
     /// [`Bed`](tutti_buffers::Bed)'s, whose angles are unknown;
-    /// [`Error::MeterUnavailable`] when `ebur128` cannot meter the rate.
-    fn measure(&self, rate: SampleRate) -> Result<LoudnessMeter<S>> {
+    /// [`MeterError::MeterUnavailable`] when `ebur128` cannot meter the rate.
+    fn measure(&self, rate: SampleRate) -> Result<LoudnessMeter<S>, MeterError> {
         let labels = channel_labels(&self.topology)?;
         let layout = self.topology.width();
         let mut meter = EbuR128::new(
@@ -106,10 +106,10 @@ impl<S: Sample> Measure<S> for LoudnessConfig {
             rate.get().round() as u32,
             Mode::I | Mode::LRA | Mode::TRUE_PEAK,
         )
-        .map_err(|_| Error::MeterUnavailable)?;
+        .map_err(|_| MeterError::MeterUnavailable)?;
         meter
             .set_channel_map(&labels)
-            .map_err(|_| Error::MeterUnavailable)?;
+            .map_err(|_| MeterError::MeterUnavailable)?;
         Ok(LoudnessMeter {
             layout,
             meter,
@@ -120,7 +120,7 @@ impl<S: Sample> Measure<S> for LoudnessConfig {
 
 /// The label of every channel of `topology`, in channel order: the one `ebur128` weighs as
 /// [`channel_weights`] does (the surround labels carry 1.41, the rest 1.0, the LFE is unused).
-fn channel_labels(topology: &ChannelTopology) -> Result<Box<[Channel]>> {
+fn channel_labels(topology: &ChannelTopology) -> Result<Box<[Channel]>, MeterError> {
     let weights = channel_weights(topology)?;
     Ok(weights
         .as_slice()
@@ -211,12 +211,16 @@ impl<S: Sample> StreamMeter for LoudnessMeter<S> {
     ///
     /// # Errors
     ///
-    /// [`Error::ChunkLayoutMismatch`] when `chunk` is not the topology's width:
+    /// [`MeterError::ChunkLayoutMismatch`] when `chunk` is not the topology's width:
     /// the meter's channel count is fixed, so a chunk of another width would be
     /// split into the wrong number of frames and read as a different signal.
-    fn push(&mut self, chunk: Interleaved<'_, S>, _: &mut impl Extend<()>) -> Result<()> {
+    fn push(
+        &mut self,
+        chunk: Interleaved<'_, S>,
+        _: &mut impl Extend<()>,
+    ) -> Result<(), MeterError> {
         if chunk.layout() != self.layout {
-            return Err(Error::ChunkLayoutMismatch {
+            return Err(MeterError::ChunkLayoutMismatch {
                 chunk: chunk.layout(),
                 config: self.layout,
             });
@@ -279,15 +283,18 @@ impl<S: Sample> Measure<S> for TruePeakConfig {
     ///
     /// # Errors
     ///
-    /// [`Error::MeterUnavailable`] when `ebur128` cannot meter the width or the
+    /// [`MeterError::MeterUnavailable`] when `ebur128` cannot meter the width or the
     /// rate.
-    fn measure(&self, (rate, layout): (SampleRate, ChannelLayout)) -> Result<TruePeakMeter<S>> {
+    fn measure(
+        &self,
+        (rate, layout): (SampleRate, ChannelLayout),
+    ) -> Result<TruePeakMeter<S>, MeterError> {
         EbuR128::new(
             u32::from(layout.count()),
             rate.get().round() as u32,
             Mode::TRUE_PEAK,
         )
-        .map_err(|_| Error::MeterUnavailable)
+        .map_err(|_| MeterError::MeterUnavailable)
         .map(|meter| TruePeakMeter {
             layout,
             meter,
@@ -337,10 +344,14 @@ impl<S: Sample> StreamMeter for TruePeakMeter<S> {
     ///
     /// # Errors
     ///
-    /// [`Error::ChunkLayoutMismatch`] when `chunk` is not the meter's width.
-    fn push(&mut self, chunk: Interleaved<'_, S>, _: &mut impl Extend<()>) -> Result<()> {
+    /// [`MeterError::ChunkLayoutMismatch`] when `chunk` is not the meter's width.
+    fn push(
+        &mut self,
+        chunk: Interleaved<'_, S>,
+        _: &mut impl Extend<()>,
+    ) -> Result<(), MeterError> {
         if chunk.layout() != self.layout {
-            return Err(Error::ChunkLayoutMismatch {
+            return Err(MeterError::ChunkLayoutMismatch {
                 chunk: chunk.layout(),
                 config: self.layout,
             });
@@ -371,12 +382,12 @@ impl<S: Sample> StreamMeter for TruePeakMeter<S> {
 ///
 /// # Errors
 ///
-/// [`Error::MeterUnavailable`] when `ebur128` cannot meter the width or the
+/// [`MeterError::MeterUnavailable`] when `ebur128` cannot meter the width or the
 /// rate.
 pub fn measure_true_peak<S: Sample>(
     buffer: Interleaved<'_, S>,
     rate: impl Into<SampleRate>,
-) -> Result<Db> {
+) -> Result<Db, MeterError> {
     let mut meter = TruePeakConfig.measure((rate.into(), buffer.layout()))?;
     meter.push(buffer, &mut Discard)?;
     Ok(meter.finish())
@@ -437,13 +448,13 @@ impl<S: Sample> Measure<S> for WindowedLoudnessConfig {
     ///
     /// # Errors
     ///
-    /// [`Error::SampleRateOutOfRange`] for a rate outside 8 kHz..=192 kHz;
-    /// [`Error::AmbisonicLoudness`] or [`Error::UnplacedLoudnessChannels`] for
-    /// a topology with no placement to weigh; [`Error::MeterUnavailable`] if the
+    /// [`MeterError::SampleRateOutOfRange`] for a rate outside 8 kHz..=192 kHz;
+    /// [`MeterError::AmbisonicLoudness`] or [`MeterError::UnplacedLoudnessChannels`] for
+    /// a topology with no placement to weigh; [`MeterError::MeterUnavailable`] if the
     /// meter cannot be built.
-    fn measure(&self, rate: SampleRate) -> Result<WindowedMeter<S>> {
+    fn measure(&self, rate: SampleRate) -> Result<WindowedMeter<S>, MeterError> {
         if !(WINDOWED_MIN_RATE..=WINDOWED_MAX_RATE).contains(&rate) {
-            return Err(Error::SampleRateOutOfRange {
+            return Err(MeterError::SampleRateOutOfRange {
                 rate,
                 min: WINDOWED_MIN_RATE,
                 max: WINDOWED_MAX_RATE,
@@ -456,10 +467,10 @@ impl<S: Sample> Measure<S> for WindowedLoudnessConfig {
             rate.get().round() as u32,
             Mode::M | Mode::S | Mode::TRUE_PEAK,
         )
-        .map_err(|_| Error::MeterUnavailable)?;
+        .map_err(|_| MeterError::MeterUnavailable)?;
         meter
             .set_channel_map(&labels)
-            .map_err(|_| Error::MeterUnavailable)?;
+            .map_err(|_| MeterError::MeterUnavailable)?;
         Ok(WindowedMeter {
             layout,
             rate,
@@ -590,23 +601,23 @@ impl<S: Sample> StreamMeter for WindowedMeter<S> {
     ///
     /// # Errors
     ///
-    /// [`Error::ChunkLayoutMismatch`] when `chunk` is not the topology's width;
-    /// [`Error::NonFiniteInput`] for a NaN or infinite sample;
-    /// [`Error::MeterRejectedFrames`] if the meter refuses the frames. The
+    /// [`MeterError::ChunkLayoutMismatch`] when `chunk` is not the topology's width;
+    /// [`MeterError::NonFiniteInput`] for a NaN or infinite sample;
+    /// [`MeterError::MeterRejectedFrames`] if the meter refuses the frames. The
     /// meter is untouched on the first two.
     fn push(
         &mut self,
         chunk: Interleaved<'_, S>,
         out: &mut impl Extend<WindowedReading>,
-    ) -> Result<()> {
+    ) -> Result<(), MeterError> {
         if chunk.layout() != self.layout {
-            return Err(Error::ChunkLayoutMismatch {
+            return Err(MeterError::ChunkLayoutMismatch {
                 chunk: chunk.layout(),
                 config: self.layout,
             });
         }
         if !all_finite(chunk.samples()) {
-            return Err(Error::NonFiniteInput);
+            return Err(MeterError::NonFiniteInput);
         }
         let channels = chunk.channels();
         let mut rejected = false;
@@ -618,7 +629,7 @@ impl<S: Sample> StreamMeter for WindowedMeter<S> {
             }
         });
         if rejected {
-            return Err(Error::MeterRejectedFrames);
+            return Err(MeterError::MeterRejectedFrames);
         }
         out.extend([self.reading()]);
         Ok(())
@@ -649,13 +660,13 @@ fn windowed_db(frames: u64, needed: u64, lufs: Option<f64>) -> Db {
 ///
 /// # Errors
 ///
-/// As [`LoudnessConfig::measure`], and [`Error::ChunkLayoutMismatch`] when
+/// As [`LoudnessConfig::measure`], and [`MeterError::ChunkLayoutMismatch`] when
 /// `buffer` is not the topology's width.
 pub fn measure_loudness<S: Sample>(
     cfg: &LoudnessConfig,
     buffer: Interleaved<'_, S>,
     rate: impl Into<SampleRate>,
-) -> Result<Loudness> {
+) -> Result<Loudness, MeterError> {
     let mut meter = cfg.measure(rate.into())?;
     meter.push(buffer, &mut Discard)?;
     Ok(meter.finish())

@@ -7,7 +7,7 @@
 //! the next commit compiles them.
 
 use tutti_graph::{
-    CloseError, EventTapId, EventTapOptions, EventTapReader, EventTapSource, MeterId, MeterReader,
+    CloseError, EventTapId, EventTapOptions, EventTapPort, EventTapReader, MeterId, MeterReader,
     MeterSpec, MissingSource, TapAlign, TapId, TapOptions, TapReader,
 };
 use tutti_units::Samples;
@@ -15,9 +15,9 @@ use tutti_units::Samples;
 use tutti_buffers::Float;
 
 use super::Graph;
+use crate::OutputPort;
 #[cfg(feature = "analyze")]
 use crate::{Analyzer, AnalyzerError, AudioContext, AudioInput};
-use crate::{EventTapPort, OutputPort};
 
 /// What a reader of the main output is named by: the id of the tap or of the meter.
 /// The reader a reopen opens takes the id of the one it supersedes.
@@ -267,7 +267,7 @@ impl<F: Float> Taps<'_, F> {
     ///
     /// The port must exist now, edits not yet committed included
     /// ([`MissingSource::Node`], [`MissingSource::EventPort`] or
-    /// [`MissingSource::EventInPort`] otherwise, and nothing is opened). One that vanishes later reads no events, counts no
+    /// [`MissingSource::EventInputPort`] otherwise, and nothing is opened). One that vanishes later reads no events, counts no
     /// loss and fails no commit. Dropping the reader leaves the tap open until
     /// [`close_event`](Self::close_event) or the session's next
     /// [`Reclaim`](crate::Phase::Reclaim) phase, which closes it.
@@ -287,28 +287,8 @@ impl<F: Float> Taps<'_, F> {
     ) -> Result<EventTapReader, MissingSource> {
         let id = EventTapId::mint(&self.graph.ids);
         let source = source.into();
-        let node = source.node();
-        let raw = match source {
-            EventTapPort::Out(p) => p.raw().map(EventTapSource::Out),
-            EventTapPort::In(p) => p.raw().map(EventTapSource::In),
-        }
-        .ok_or_else(|| {
-            let shape = self.graph.shape(node);
-            match source {
-                EventTapPort::Out(_) => MissingSource::EventPort {
-                    node,
-                    port: u16::MAX,
-                    width: shape.map_or(0, |s| usize::from(s.event_out)),
-                },
-                EventTapPort::In(_) => MissingSource::EventInPort {
-                    node,
-                    port: u16::MAX,
-                    width: shape.map_or(0, |s| usize::from(s.event_in)),
-                },
-            }
-        })?;
-        let reader = self.graph.editor.open_event_tap(id, raw, options)?;
-        self.graph.event_taps.insert(id, (raw, options));
+        let reader = self.graph.editor.open_event_tap(id, source, options)?;
+        self.graph.event_taps.insert(id, (source, options));
         self.graph.edited = true;
         Ok(reader)
     }

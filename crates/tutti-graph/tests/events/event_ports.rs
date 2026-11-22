@@ -27,9 +27,9 @@ use tutti_buffers::MaxBlock;
 
 use tutti_graph::NodeSpec;
 use tutti_graph::{
-    Cx, Editor, Event, EventEdge, EventIn, EventKind, EventOut, EventSlotCapacity, GraphSpec, Io,
-    Node, Op, Prepare, Reference, Shape, Shapes, Status, TransportPosition, Unforkable, ValidGraph,
-    compile,
+    Cx, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort, EventSlotCapacity,
+    GraphSpec, Io, Node, Op, Prepare, Reference, Shape, Shapes, Status, TransportPosition,
+    Unforkable, ValidGraph, compile,
 };
 use tutti_graph::{NodeKey, Topology};
 use tutti_ump::Ump;
@@ -150,7 +150,7 @@ type Make = Box<dyn Fn() -> Box<dyn Node>>;
 /// test can list sources out of order).
 struct Rig {
     nodes: Vec<(NodeKey, Make)>,
-    events: BTreeMap<EventIn, Vec<EventEdge>>,
+    events: BTreeMap<EventInputPort, Vec<EventEdge>>,
 }
 
 impl Rig {
@@ -213,15 +213,15 @@ impl Rig {
     }
 }
 
-fn at(node: u64, port: u16) -> EventIn {
-    EventIn {
+fn at(node: u64, port: u16) -> EventInputPort {
+    EventInputPort {
         node: NodeKey(node),
         port,
     }
 }
 
-fn out(node: u64, port: u16) -> EventOut {
-    EventOut {
+fn out(node: u64, port: u16) -> EventOutputPort {
+    EventOutputPort {
         node: NodeKey(node),
         port,
     }

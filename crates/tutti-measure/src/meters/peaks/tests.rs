@@ -105,7 +105,7 @@ fn a_chunk_of_the_wrong_width_is_refused() {
             Interleaved::new(&[1.0f64, 2.0, 3.0, 4.0], ChannelLayout::QUAD).unwrap(),
             &mut Vec::new()
         ),
-        Err(Error::ChunkLayoutMismatch {
+        Err(MeterError::ChunkLayoutMismatch {
             chunk: ChannelLayout::QUAD,
             config: ChannelLayout::STEREO,
         })
@@ -269,7 +269,7 @@ fn degenerate_inputs_are_safe() {
             &mono(0),
             Interleaved::new(&[1.0f64, 2.0], ChannelLayout::MONO).unwrap()
         ),
-        Err(Error::ZeroBlock)
+        Err(MeterError::ZeroBlock)
     );
     assert_eq!(
         summarize_block(Mono::new(&[] as &[f64])),

@@ -18,7 +18,7 @@ use tutti_fixtures::signal::peak;
 use tutti_curve::Law;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventOut, GraphBuilder, Io, Node, ParamIn, ParamNode, ParamRange, ParamSet,
+    Cx, Editor, EventOutputPort, GraphBuilder, Io, Node, ParamIn, ParamNode, ParamRange, ParamSet,
     Prepare, Renderer, Shape, Status, Unforkable,
 };
 use tutti_graph::{OutputPort, PortSource};
@@ -173,7 +173,7 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
     ed.insert(NodeKey(2), "lane", lane);
     ed.spec_mut().connect_param(
         at,
-        EventOut {
+        EventOutputPort {
             node: NodeKey(2),
             port: 0,
         },
@@ -262,7 +262,7 @@ fn render_chorus(
         ed.insert(NodeKey(9_000), "lane", lane);
         ed.spec_mut().connect_param(
             at,
-            EventOut {
+            EventOutputPort {
                 node: NodeKey(9_000),
                 port: 0,
             },
@@ -436,7 +436,7 @@ fn render_lfo(param: UnitParam, range: ParamRange, depth: f64) -> (Vec<f32>, f64
     ed.insert(NodeKey(9_000), "lane", lane);
     ed.spec_mut().connect_param(
         at,
-        EventOut {
+        EventOutputPort {
             node: NodeKey(9_000),
             port: 0,
         },
@@ -543,7 +543,7 @@ where
     ed.insert(NodeKey(9_000), "lane", lane);
     ed.spec_mut().connect_param(
         at,
-        EventOut {
+        EventOutputPort {
             node: NodeKey(9_000),
             port: 0,
         },
@@ -745,7 +745,7 @@ fn an_lfo_reads_a_driven_depth_per_frame() {
             node: n,
             param: UnitParam::Depth.into(),
         },
-        EventOut {
+        EventOutputPort {
             node: pulse,
             port: 0,
         },
@@ -814,7 +814,7 @@ fn shelf_handed_back(block: usize) -> Vec<f32> {
             .knob(knob)
             .range(range),
     );
-    let lane_out = EventOut {
+    let lane_out = EventOutputPort {
         node: NodeKey(9_000),
         port: 0,
     };

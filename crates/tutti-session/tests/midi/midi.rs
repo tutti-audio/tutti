@@ -35,7 +35,7 @@ use tutti_ump::{MpeChannels, MpeZoneSpan};
 use tutti_units::{Beat, BeatDuration, Frame, SampleRate};
 
 use tutti_fixtures::midi;
-use tutti_session::{EventInPort, EventOutPort, Feeder, MidiError, Session, SessionEvent};
+use tutti_session::{EventInputPort, EventOutputPort, Feeder, MidiError, Session, SessionEvent};
 #[cfg(feature = "midi-hardware")]
 use tutti_session::{MidiEvent, PHASES, PeerEvent, PhaseCx};
 #[cfg(feature = "midi-hardware")]
@@ -287,7 +287,7 @@ fn a_clip_and_a_live_input_survive_a_re_bind() {
         .unwrap();
     let clip = s.midi().clip(old).expect("the target's clip");
     let mut live = s.midi().input(old).unwrap();
-    let inlet = s.graph_ref().feed(old, Feeder::LiveInput).unwrap()[0].node();
+    let inlet = s.graph_ref().feed(old, Feeder::LiveInput).unwrap()[0].node;
     let _ = s.update();
 
     s.remove(old).unwrap();
@@ -299,7 +299,7 @@ fn a_clip_and_a_live_input_survive_a_re_bind() {
     let _ = s.update();
     assert_eq!(s.midi().clip(new), Some(clip), "the same clip");
     assert_eq!(
-        s.graph_ref().feed(new, Feeder::LiveInput).unwrap()[0].node(),
+        s.graph_ref().feed(new, Feeder::LiveInput).unwrap()[0].node,
         inlet,
         "the same inlet"
     );
@@ -307,12 +307,12 @@ fn a_clip_and_a_live_input_survive_a_re_bind() {
         matches!(s.midi().input(new), Err(MidiError::InputTaken(n)) if n == new),
         "its keys were handed out once"
     );
-    let mut fed = s.graph_ref().sources(EventInPort::new(new, 0)).unwrap();
-    fed.sort_by_key(|e| e.node());
+    let mut fed = s.graph_ref().sources(EventInputPort::new(new, 0)).unwrap();
+    fed.sort_by_key(|e| e.node);
     // The clip feeds the target through its MPE transform.
     let transform = s.graph_ref().feed(new, Feeder::Sequencer).unwrap()[0];
-    let mut want = vec![transform, EventOutPort::new(inlet, 0)];
-    want.sort_by_key(|e| e.node());
+    let mut want = vec![transform, EventOutputPort::new(inlet, 0)];
+    want.sort_by_key(|e| e.node);
     assert_eq!(fed, want);
 
     live.push(Stamp::NextBlock, midi::note_on(MidiChannel::FIRST, 72, MF))
@@ -392,8 +392,8 @@ fn route_rules_wire_the_hardware_input() {
             .unwrap()
             .iter()
             .map(|e| {
-                assert_eq!(e.node(), input);
-                u16::try_from(e.index()).unwrap()
+                assert_eq!(e.node, input);
+                e.port
             })
             .collect();
         p.sort();
@@ -447,8 +447,8 @@ fn a_route_rule_names_a_group() {
             .unwrap()
             .iter()
             .map(|e| {
-                assert_eq!(e.node(), input);
-                u16::try_from(e.index()).unwrap()
+                assert_eq!(e.node, input);
+                e.port
             })
             .collect();
         p.sort();
@@ -941,11 +941,11 @@ fn a_remembered_device_resolves_through_the_session() {
 fn a_hand_wired_event_edge_survives_the_sequencers_feed() {
     use tutti_midi_runtime::MidiClipNode;
 
-    let sorted = |mut v: Vec<EventOutPort>| {
+    let sorted = |mut v: Vec<EventOutputPort>| {
         v.sort();
         v
     };
-    let input = |synth| EventInPort::new(synth, 0);
+    let input = |synth| EventInputPort::new(synth, 0);
     let mut s = offline();
     let (synth, seen) = tap(&mut s);
     let (other, _) = tap(&mut s);

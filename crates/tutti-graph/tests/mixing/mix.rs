@@ -24,7 +24,7 @@ use std::sync::{Arc, Mutex};
 use common::{Kind, Pair, SpecBehaviour, TestNode, bits, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    CommitError, Cx, Edge, Editor, EventOut, FadeLaw, ForkMode, ForkTarget, GraphInvalid,
+    CommitError, Cx, Edge, Editor, EventOutputPort, FadeLaw, ForkMode, ForkTarget, GraphInvalid,
     GraphSpec, InputPort, Io, MixError, Node, NodeKey, NodeMix, NodeMode, OutputPort, ParamIn,
     PassError, PortSource, Prepare, Shape, Status, Topology, TransportPosition, Unforkable,
 };
@@ -846,7 +846,7 @@ fn a_mix_of_a_node_with_no_pass_is_refused() {
         node: key(1),
         param: NodeMix::ADDR,
     };
-    let lane = EventOut {
+    let lane = EventOutputPort {
         node: key(2),
         port: 0,
     };

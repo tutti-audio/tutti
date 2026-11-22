@@ -1,6 +1,7 @@
 use super::*;
 use crate::cross_correlate;
 use crate::test_rng::uniform;
+use crate::{AboveNyquist, EmptyFrequencyRange};
 use tutti_rt::SplitMix64;
 use tutti_units::Hz;
 
@@ -36,7 +37,7 @@ fn plain_lag(reference: &[f64], take: &[f64], max_lag: usize) -> isize {
 }
 
 /// `align` at 48 kHz, the rate the tests that do not name one read at.
-fn align(reference: &[f64], take: &[f64], config: &AlignConfig) -> Result<Alignment> {
+fn align(reference: &[f64], take: &[f64], config: &AlignConfig) -> Result<Alignment, AlignError> {
     align_at(SampleRate::SR_48K, reference, take, config)
 }
 
@@ -45,7 +46,7 @@ fn align_at(
     reference: &[f64],
     take: &[f64],
     config: &AlignConfig,
-) -> Result<Alignment> {
+) -> Result<Alignment, AlignError> {
     super::align(config, Mono::new(reference), Mono::new(take), rate)
 }
 
@@ -415,36 +416,36 @@ fn delay_converts_and_bad_input_is_refused() {
     let one = [1.0f64];
     assert!(matches!(
         align(&[], &one, &cfg),
-        Err(Error::InsufficientInput { .. })
+        Err(AlignError::InsufficientInput { .. })
     ));
     assert!(matches!(
         align(&one, &[], &cfg),
-        Err(Error::InsufficientInput { .. })
+        Err(AlignError::InsufficientInput { .. })
     ));
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let x = [1.0, bad, 2.0];
-        assert_eq!(align(&x, &one, &cfg), Err(Error::NonFiniteInput));
-        assert_eq!(align(&one, &x, &cfg), Err(Error::NonFiniteInput));
+        assert_eq!(align(&x, &one, &cfg), Err(AlignError::NonFiniteInput));
+        assert_eq!(align(&one, &x, &cfg), Err(AlignError::NonFiniteInput));
     }
     // Silence, and a band between two bins: nothing to correlate.
     let quiet = [0.0f64; 64];
     let x = noise(64, 3);
-    assert_eq!(align(&x, &quiet, &cfg), Err(Error::NoSignal));
-    assert_eq!(align(&quiet, &x, &cfg), Err(Error::NoSignal));
+    assert_eq!(align(&x, &quiet, &cfg), Err(AlignError::NoSignal));
+    assert_eq!(align(&quiet, &x, &cfg), Err(AlignError::NoSignal));
     let gap = cfg.band(band(100.0, 200.0));
-    assert_eq!(align(&x, &x, &gap), Err(Error::NoSignal));
+    assert_eq!(align(&x, &x, &gap), Err(AlignError::NoSignal));
 
     // A band above Nyquist is refused where the rate binds.
     let high = cfg.band(band(100.0, 30_000.0));
     assert_eq!(
         align(&x, &x, &high),
-        Err(Error::AboveNyquist {
+        Err(AlignError::Nyquist(AboveNyquist {
             freq: Hz::new(30_000.0),
             nyquist: Hz::new(24_000.0)
-        })
+        }))
     );
     assert!(matches!(
         FrequencyBand::try_from(Hz::new(500.0)..=Hz::new(100.0)),
-        Err(Error::EmptyFrequencyRange { .. })
+        Err(EmptyFrequencyRange { .. })
     ));
 }

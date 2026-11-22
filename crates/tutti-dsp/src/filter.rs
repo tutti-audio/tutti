@@ -14,7 +14,7 @@ mod simd_lanes;
 mod svf;
 
 pub use biquad::Biquad;
-pub(crate) use biquad::section_l1;
+pub(crate) use biquad::{decay_time, section_l1};
 pub use crossover::{
     CrossoverBands, CrossoverBandsError, CrossoverBank, CrossoverBlend, CrossoverControls,
     CrossoverError, CrossoverModel, MAX_SPLITS, SOLVE_CEILING, fit_to_rate,
@@ -25,5 +25,7 @@ pub use ladder::{
     LadderType, ladder_step,
 };
 pub use simd_lanes::SimdLanes;
-pub use svf::{SvfBank, SvfCoefficients, SvfControls, SvfDesign, SvfModel, SvfType, svf_step};
+pub use svf::{
+    SvfBank, SvfCoefficients, SvfControls, SvfDesign, SvfDesignError, SvfModel, SvfType, svf_step,
+};
 pub(crate) use svf::{integrator_gains, svf_taps};

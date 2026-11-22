@@ -65,7 +65,7 @@
 //! seconds and a [`Framing`] in samples, never a sample rate or a channel width
 //! the audio carries. The call that takes the audio binds the rate, derives the
 //! geometry and checks what depends on two settings together (a band against
-//! Nyquist, a window against its hop), answering with a named [`Error`].
+//! Nyquist, a window against its hop), answering with a named error ([`FramingError`], [`AboveNyquist`], and each analysis's own).
 //!
 //! Each analysis has the same two terminals:
 //!
@@ -116,7 +116,7 @@
 //! view (`Mono`, `Interleaved`, `StereoPlanes`); [`LoudnessConfig`] and
 //! [`WindowedLoudnessConfig`] hold a topology because the weight of each speaker
 //! is part of the analysis, and check the view's width against it
-//! ([`Error::ChunkLayoutMismatch`]).
+//! ([`MeterError::ChunkLayoutMismatch`]).
 //!
 //! The rest are stateless: `yin`, `correlate`, `cross_correlate`, `align`,
 //! `estimate_tempo`, `transcribe` and `spectral_features` are pure functions of
@@ -160,7 +160,7 @@
 //! // refused here rather than silently truncated inside the measurement.
 //! let planes = StereoPlanes::new(&samples, &samples).expect("equal lengths");
 //! let reading = correlate(planes);
-//! # Ok::<(), tutti_measure::Error>(())
+//! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
 //! ## Reading from a running graph
@@ -234,7 +234,7 @@
 //! `TempoRange`: a low below a high). What depends on the rate, the framing or
 //! the input is checked by the call that takes the config: a band against
 //! Nyquist, a banding against the window, a tempo against the curve's length.
-//! That call answers with a named [`Error`], where a detector that *accepted*
+//! That call answers with a named error, where a detector that *accepted*
 //! an inverted range would report "unvoiced" forever instead, which is a
 //! silent wrong answer rather than an error.
 //!
@@ -367,7 +367,11 @@ pub use analyses::yin::{
     Pitch, PitchEstimate, YinConfig, YinThreshold, YinThresholdError, median_filter,
     penalize_jumps, yin, yin_track,
 };
-pub use error::{Error, Result};
+pub use error::{
+    AboveNyquist, AlignError, ChordError, EmptyFrequencyRange, EmptyTempoRange, EmptyVelocityRange,
+    FramingError, KeyEstimateError, MeterError, MfccError, NoteError, PitchError,
+    TempoEstimateError, TooManyFrames, TransformError,
+};
 pub use framing::Framing;
 #[cfg(test)]
 pub(crate) use measure::fold_uneven;

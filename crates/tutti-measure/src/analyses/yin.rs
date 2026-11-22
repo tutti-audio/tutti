@@ -30,11 +30,12 @@ use tutti_buffers::{Mono, MonoMut, Sample};
 use tutti_music::Note;
 use tutti_units::{Cents, Confidence, Hz, SampleRate, Samples};
 
+use crate::PitchError;
 use crate::analyses::notes::PitchHop;
 use crate::convert::widen;
 use crate::framing::{Framing, check_nyquist};
 use crate::meters::chroma::FrequencyBand;
-use crate::{Error, Result};
+
 use tutti_dsp::{Correlator, FftScratch, FrameCount, median_of_sorted, parabolic_peak};
 use tutti_units::ranged;
 
@@ -70,7 +71,7 @@ impl YinConfig {
     /// inverted range (which would invert the period bounds and report
     /// "unvoiced" forever) cannot be written. A band whose top exceeds half
     /// the buffer's sample rate is refused by the call that takes the buffer
-    /// ([`Error::AboveNyquist`]).
+    /// ([`AboveNyquist`](crate::AboveNyquist)).
     #[must_use]
     pub fn band(mut self, band: FrequencyBand) -> Self {
         self.band = band;
@@ -89,8 +90,8 @@ impl YinConfig {
     ///
     /// # Errors
     ///
-    /// [`Error::AboveNyquist`] when the band's top exceeds half `rate`.
-    pub(crate) fn plan(&self, rate: SampleRate) -> Result<YinPlan> {
+    /// [`AboveNyquist`](crate::AboveNyquist) when the band's top exceeds half `rate`.
+    pub(crate) fn plan(&self, rate: SampleRate) -> Result<YinPlan, PitchError> {
         let (min_freq, max_freq) = (self.band.min(), self.band.max());
         check_nyquist(max_freq, rate)?;
         Ok(YinPlan {
@@ -102,12 +103,12 @@ impl YinConfig {
     }
 
     /// The shortest buffer [`yin`] reads at `rate`; below this it returns
-    /// [`Error::InsufficientInput`] rather than a silent "unvoiced".
+    /// [`PitchError::InsufficientInput`] rather than a silent "unvoiced".
     ///
     /// # Errors
     ///
-    /// [`Error::AboveNyquist`] when the band's top exceeds half `rate`.
-    pub fn buffer_size(&self, rate: impl Into<SampleRate>) -> Result<Samples> {
+    /// [`AboveNyquist`](crate::AboveNyquist) when the band's top exceeds half `rate`.
+    pub fn buffer_size(&self, rate: impl Into<SampleRate>) -> Result<Samples, PitchError> {
         Ok(self.plan(rate.into())?.buffer_size())
     }
 }
@@ -491,19 +492,19 @@ impl Pitch {
 ///
 /// # Errors
 ///
-/// [`Error::AboveNyquist`] when the band's top exceeds half `rate`;
-/// [`Error::InsufficientInput`] if `samples` is shorter than
+/// [`AboveNyquist`](crate::AboveNyquist) when the band's top exceeds half `rate`;
+/// [`PitchError::InsufficientInput`] if `samples` is shorter than
 /// [`YinConfig::buffer_size`], an explicit refusal rather than a silent
 /// "unvoiced".
 pub fn yin<S: Sample>(
     cfg: &YinConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-) -> Result<PitchEstimate> {
+) -> Result<PitchEstimate, PitchError> {
     let plan = cfg.plan(rate.into())?;
     let needed = plan.buffer_size();
     if samples.frames() < needed {
-        return Err(Error::InsufficientInput {
+        return Err(PitchError::InsufficientInput {
             needed,
             got: samples.frames(),
         });
@@ -515,15 +516,15 @@ pub fn yin<S: Sample>(
 ///
 /// # Errors
 ///
-/// [`Error::AboveNyquist`] when the band's top exceeds half `rate`, and
-/// [`Error::InsufficientInput`] if `samples` is shorter than
+/// [`AboveNyquist`](crate::AboveNyquist) when the band's top exceeds half `rate`, and
+/// [`PitchError::InsufficientInput`] if `samples` is shorter than
 /// [`YinConfig::buffer_size`].
 pub fn yin_track<S: Sample>(
     cfg: &YinConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
     hop: PitchHop,
-) -> Result<Vec<PitchEstimate>> {
+) -> Result<Vec<PitchEstimate>, PitchError> {
     let plan = cfg.plan(rate.into())?;
     yin_track_at(&plan, &widen(samples.samples()), hop.get())
 }
@@ -533,10 +534,10 @@ pub(crate) fn yin_track_at(
     plan: &YinPlan,
     samples: &[f64],
     hop: Samples,
-) -> Result<Vec<PitchEstimate>> {
+) -> Result<Vec<PitchEstimate>, PitchError> {
     let frame = plan.buffer_size();
     if samples.len() < frame.get() {
-        return Err(Error::InsufficientInput {
+        return Err(PitchError::InsufficientInput {
             needed: frame,
             got: Samples::new(samples.len()),
         });

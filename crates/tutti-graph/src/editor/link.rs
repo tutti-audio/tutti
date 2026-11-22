@@ -9,7 +9,7 @@ use super::CommitError;
 use crate::command::{CommandId, CommandTx, ScheduleError, Scheduled};
 use crate::exec::{Channels, Commit, Crossfade, FADE_CAPACITY, QUEUE_CAPACITY};
 use crate::gain::EdgeFade;
-use crate::spec::EventIn;
+use crate::spec::EventInputPort;
 use crate::{EdgeId, Executor};
 use tutti_buffers::Float;
 use tutti_rt::PushError;
@@ -210,7 +210,7 @@ impl<F: Float> Link<F> {
     pub(super) fn schedule(
         &mut self,
         at: At,
-        to: EventIn,
+        to: EventInputPort,
         payload: Scheduled,
     ) -> Result<CommandId, ScheduleError> {
         self.commands.send(self.sent, at, to, payload)

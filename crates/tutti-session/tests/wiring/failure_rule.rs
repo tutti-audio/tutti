@@ -6,7 +6,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, SampleRates, Shape, Status};
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    ConnectError, DetachedSession, EventInPort, EventOutPort, Feeder, InputPort, MainOutput,
+    ConnectError, DetachedSession, EventInputPort, EventOutputPort, Feeder, InputPort, MainOutput,
     OutputPort, ReplaceRefused, Replacement, Session, SetRateError,
 };
 use tutti_units::SampleRate;
@@ -77,18 +77,21 @@ fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
     );
     assert_eq!(g.sources(ghost_in), Err(ConnectError::NoSuchNode(GHOST)));
     assert_eq!(
-        g.disconnect(a.events_out(), EventInPort::new(GHOST, 0))
+        g.disconnect(a.events_out(), EventInputPort::new(GHOST, 0))
             .err(),
         Some(ConnectError::NoSuchEventOut(a.events_out())),
         "the source side is checked first: a constant has no event output"
     );
     assert_eq!(
-        g.sources(EventInPort::new(GHOST, 0)),
+        g.sources(EventInputPort::new(GHOST, 0)),
         Err(ConnectError::NoSuchNode(GHOST))
     );
     assert_eq!(
-        g.disconnect(EventOutPort::new(GHOST, 0), EventInPort::new(a.erase(), 0))
-            .err(),
+        g.disconnect(
+            EventOutputPort::new(GHOST, 0),
+            EventInputPort::new(a.erase(), 0)
+        )
+        .err(),
         Some(ConnectError::NoSuchNode(GHOST))
     );
     assert_eq!(
@@ -229,7 +232,7 @@ fn set_feed_refuses_a_sink_that_is_not_there_and_changes_nothing() {
     g.set_feed(gone, Feeder::Routes, fed.clone()).unwrap();
     s.remove(gone).unwrap();
     let g = s.graph();
-    let edges = g.sources(EventInPort::new(sink, 0)).unwrap();
+    let edges = g.sources(EventInputPort::new(sink, 0)).unwrap();
 
     for missing in [GHOST, gone.erase()] {
         let refused = g.set_feed(missing, Feeder::Routes, fed.clone());
@@ -242,7 +245,7 @@ fn set_feed_refuses_a_sink_that_is_not_there_and_changes_nothing() {
         fed,
         "the feed stands"
     );
-    assert_eq!(g.sources(EventInPort::new(sink, 0)).unwrap(), edges);
+    assert_eq!(g.sources(EventInputPort::new(sink, 0)).unwrap(), edges);
 }
 
 /// **A read of the feeds of a node that is not there names it.** An empty

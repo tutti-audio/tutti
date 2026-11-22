@@ -14,8 +14,8 @@ use std::sync::Arc;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Editor, EventCapacity, EventEdge, EventIn, EventInletNode, EventOut, Executor, ForkMode,
-    ForkTarget, Offset, Prepare, TransportChanges, TransportPosition,
+    Editor, EventCapacity, EventEdge, EventInletNode, EventInputPort, EventOutputPort, Executor,
+    ForkMode, ForkTarget, Offset, Prepare, TransportChanges, TransportPosition,
 };
 use tutti_midi_protocol::{
     MpeMode, MpeZoneConfig, MpeZones, MtcRate, PitchBendSensitivity, Recipient, channel_voice,
@@ -92,11 +92,11 @@ fn input(
         let key = NodeKey(3);
         ed.insert(key, "inlet", inlet);
         ed.spec_mut().connect_events(
-            EventIn {
+            EventInputPort {
                 node: NodeKey(1),
                 port: 0,
             },
-            EventEdge::Direct(EventOut { node: key, port: 0 }),
+            EventEdge::Direct(EventOutputPort { node: key, port: 0 }),
         );
     })
 }
@@ -395,11 +395,11 @@ fn the_midi_out_node_counts_the_events_it_cannot_pass() {
                 let key = NodeKey(3 + source);
                 ed.insert(key, "source", inlet);
                 ed.spec_mut().connect_events(
-                    EventIn {
+                    EventInputPort {
                         node: NodeKey(1),
                         port: 0,
                     },
-                    EventEdge::Direct(EventOut { node: key, port: 0 }),
+                    EventEdge::Direct(EventOutputPort { node: key, port: 0 }),
                 );
             }
         });
@@ -505,11 +505,11 @@ fn retiring_lanes(
             tutti_graph::Unforkable(Heavy(MidiOutNode::new().following(&generation))),
         );
         rig.editor.spec_mut().connect_events(
-            EventIn {
+            EventInputPort {
                 node: NodeKey(100 + lane),
                 port: 0,
             },
-            EventEdge::Direct(EventOut {
+            EventEdge::Direct(EventOutputPort {
                 node: NodeKey(10 + lane),
                 port: 0,
             }),
@@ -1736,11 +1736,11 @@ fn transform_over<N: tutti_graph::IntoNode>(
     rig_with(node, 1, 512, |ed| {
         ed.insert(NodeKey(3), "inlet", inlet);
         ed.spec_mut().connect_events(
-            EventIn {
+            EventInputPort {
                 node: NodeKey(1),
                 port: 0,
             },
-            EventEdge::Direct(EventOut {
+            EventEdge::Direct(EventOutputPort {
                 node: NodeKey(3),
                 port: 0,
             }),

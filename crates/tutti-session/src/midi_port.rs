@@ -59,8 +59,8 @@ use crate::midi_ci::{
     Subscription, at_peer, resolve,
 };
 use crate::{
-    EventInPort, EventOutPort, MidiEvent, Peer, PeerError, PeerEvent, PeerResourceId, Presence,
-    Resource, ResourceFact, Session, SessionEvent,
+    EventInputPort, EventOutputPort, MidiEvent, Peer, PeerError, PeerEvent, PeerResourceId,
+    Presence, Resource, ResourceFact, Session, SessionEvent,
 };
 
 /// Why a port whose input could not be reopened is lost: the fault the reader
@@ -1227,8 +1227,10 @@ impl Ports {
                 let key = graph.add(inlet).erase();
                 // The input node has the one event input, and the inlet was just
                 // added. A host that removed the input node itself leaves it nothing to feed.
-                let _ =
-                    graph.set_sources(EventInPort::new(port.node, 0), [EventOutPort::new(key, 0)]);
+                let _ = graph.set_sources(
+                    EventInputPort::new(port.node, 0),
+                    [EventOutputPort::new(key, 0)],
+                );
                 port.inlet = Some(key);
                 port.writer.arrive();
                 port.open = Some(info.id.clone());

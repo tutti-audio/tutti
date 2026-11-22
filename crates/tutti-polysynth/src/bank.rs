@@ -40,7 +40,7 @@ use crate::lane::{Lane, SynthFloat};
 use crate::{Adsr, FilterType, OscillatorType, SvfMode, UnisonVoices};
 use tutti_dsp::{
     EnvelopeDesign, EnvelopeLeg, EnvelopePace, EnvelopeStage, EnvelopeStages, EnvelopeStep,
-    LadderCoefficients, LadderDesign, LadderType, SimdLanes, SvfCoefficients, SvfDesign, SvfType,
+    LadderCoefficients, LadderDesign, LadderType, SimdLanes, SvfCoefficients, SvfControls, SvfType,
     ladder_step, svf_step,
 };
 use tutti_rt::SplitMix64;
@@ -65,6 +65,17 @@ pub(crate) const CONTROL_BLOCK: usize = 16;
 /// coefficients — the same guard `SvfFilterNode`/`LadderFilterNode` use.
 const FREQ_EPS: f64 = 0.01;
 const RES_EPS: f64 = 0.0001;
+
+/// The controls of a voice's filter tap: no gain, which only a bell or a shelf reads. Its
+/// design is the held one, as the cutoff is read every coefficient interval.
+fn svf_controls(ty: SvfType, freq: Hz, q: impl Into<Q>) -> SvfControls {
+    SvfControls {
+        ty,
+        freq,
+        q: q.into(),
+        gain: Db::UNITY,
+    }
+}
 
 /// The envelope design of an [`Adsr`] at `rate`: its stages are straight lines, a decay and a
 /// release take their stated times from wherever they start, and an attack takes the share of
@@ -267,7 +278,7 @@ impl<F: SynthFloat> VoiceBank<F> {
                 };
                 // The output mix depends on the tap and `Q` alone, so any
                 // cutoff gives the same `m`.
-                let c = SvfDesign::new(ty, Hz::new(1000.0), q, Db::new(0.0), sample_rate);
+                let c = svf_controls(ty, Hz::new(1000.0), q).design_clamped(sample_rate);
                 Filter::Svf {
                     ty,
                     q: q.into(),
@@ -446,7 +457,7 @@ impl<F: SynthFloat> VoiceBank<F> {
         let coef = match self.filter {
             Filter::None => return,
             Filter::Svf { ty, q, .. } => {
-                let s = SvfDesign::new(ty, cutoff, q, Db::new(0.0), self.sample_rate);
+                let s = svf_controls(ty, cutoff, q).design_clamped(self.sample_rate);
                 [s.d, s.a2, s.a3].map(F::from_design)
             }
             Filter::Ladder => {

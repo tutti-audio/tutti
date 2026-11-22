@@ -76,7 +76,7 @@ impl tutti_graph::Node for TransportTone {
 #[test]
 fn graph_engine_with_timed_transport_is_allocation_free() {
     use tutti_graph::NodeKey;
-    use tutti_graph::{Editor, EventIn, EventKind, Prepare, Unforkable};
+    use tutti_graph::{Editor, EventInputPort, EventKind, Prepare, Unforkable};
     use tutti_graph::{OutputPort, PortSource};
     use tutti_timeline::{MotionCommand, TransportCommand};
     use tutti_ump::{MidiChannel, U7};
@@ -103,7 +103,7 @@ fn graph_engine_with_timed_transport_is_allocation_free() {
     // happens before the gate.
     engine.process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
     ed.collect();
-    let to = EventIn {
+    let to = EventInputPort {
         node: NodeKey(1),
         port: 0,
     };
