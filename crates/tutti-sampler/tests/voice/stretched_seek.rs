@@ -2,10 +2,9 @@
 //! after a seek.
 //!
 //! A seek unseats the vocoder, so pre-jump audio does not smear over the new
-//! region, and the seat is primed: the vocoder runs a latency and a window of output
-//! frames from source read before the seek's target, and discards them, over a few
-//! blocks (silent meanwhile). Unprimed, a voice would be silent until the vocoder's
-//! latency had passed and then ramp in. `verify-audio`'s `seek_while_stretched` case
+//! region, and the seat is primed: the vocoder runs a window of output frames from
+//! source read before the seek's target, and discards them, over a few blocks (silent
+//! meanwhile). Unprimed, a voice would ramp in over a window. `verify-audio`'s `seek_while_stretched` case
 //! heard that; this pins the primed voice in the suite.
 
 use tutti_buffers::Interleaved;
@@ -72,19 +71,18 @@ fn render(frames: usize, seek_at: usize) -> Vec<f32> {
 /// After a seek the voice is silent for exactly the priming the closed form gives, then
 /// plays the sine at its own level.
 ///
-/// The seat owes `prime` = latency + window = 2049 + 2048 output frames, each frame
-/// that goes by adds one and the priming runs 2 a frame, so the voice sounds `prime`
-/// frames after the seek: the frames before are exactly zero. From there the
-/// vocoder is full (the priming ran a window ahead), so the next 2 048 frames have the
+/// The seat owes a window of output frames (2 048), each frame that goes by adds one and
+/// the priming runs `PRIME_SPEED` a frame, so the voice sounds `priming()` frames after
+/// the seek: the frames before are exactly zero. From there the vocoder is full (the
+/// priming ran a window ahead), so the next 2 048 frames have the
 /// sine's RMS, `amplitude / sqrt(2)`, to within 1 dB (two overlapped frames' phase
 /// mismatch of `acos(10^(-1/20)) = 0.48` rad) with no ramp: a voice left to fill from
 /// silence would be 3 dB down over them.
 #[test]
 fn a_stretched_voice_sounds_the_sine_after_exactly_its_priming() {
-    const PRIME: usize = 2049 + 2048;
     let seek_at = 375 * BLOCK; // 24 000
     let out = render(32_000, seek_at);
-    let silent = PRIME;
+    let silent = crate::vocoder_voice::priming();
     assert!(
         out[seek_at..seek_at + silent].iter().all(|&x| x == 0.0),
         "silent for the {silent} frames of priming"

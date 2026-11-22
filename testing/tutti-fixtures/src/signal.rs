@@ -4,6 +4,8 @@
 //! [`decay_ir`] and [`room_ir`], and a float WAV on disk ([`write_wav_f32`],
 //! [`read_wav_f32`]), and the narrowing check [`wide_signal`] with [`assert_close_f64`].
 //!
+//! A stretched step edge's smear is [`stretched_edge_spread`].
+//!
 //! Noise is [`noise`](crate::noise) and a bit hash is [`Fnv`](crate::Fnv), both in
 //! this crate's root. The figures are plain `f32` samples, except the `f64` narrowing
 //! check's; only the arguments that name a quantity are units.
@@ -13,7 +15,7 @@
 //! another render.
 
 use std::path::Path;
-use tutti_units::{Amplitude, Hz, SampleRate, Samples, Seconds};
+use tutti_units::{Amplitude, Hz, SampleRate, Samples, Seconds, StretchFactor};
 
 /// `len` samples of a sine: `amplitude * sin(2 pi * hz * i / rate)` for sample
 /// `i`, with phase 0 at sample 0 (the first sample is exactly `0.0`).
@@ -269,6 +271,37 @@ pub fn assert_close_f64(got: &[f64], want: &[f64], tolerance: f64) {
             (got[i] - want[i]).abs()
         );
     }
+}
+
+/// How far from `edge x stretch` the half-level frame of a step edge through a phase
+/// vocoder can sit: the spread of the edge's smear about its centroid, for a vocoder on a Hann
+/// window of `window` frames stretching by `stretch` with a read aligned to the stretch (see
+/// the sampler's seat). Add the resolution of the level reading.
+///
+/// With `c = 1 / stretch`, analysis frame `f` starts at input `f hop c` and its content at
+/// output `t` is the input at `f hop c + t - f hop`, so the frame holds an edge at input `e`
+/// from output `T_f = e + f hop (1 - c)` on, and the frames covering `t` are weighted by the
+/// window energy `w(t - f hop)^2` the overlap-add divides by. At offset `i = t - f hop` in the
+/// frame, `T_f = e + (t - i)(1 - c)`: the edge's smear is the window's energy distribution
+/// over `i`, scaled by `|1 - c|`. The aligned read puts its centroid at `edge x stretch`
+/// (the offsets average to the window's middle), the level at `t` is the energy held by the
+/// frames whose `T_f <= t`, so its half-level frame is the smear's median, and a median is
+/// within one standard deviation of the mean. The bound is that deviation,
+/// `|1 - c| sigma`, `sigma` the standard deviation of `i` under `w(i)^2` (about
+/// `0.146 window`), 100 frames at a stretch of 1.5 on a 2048 window, and zero at unity.
+#[must_use]
+pub fn stretched_edge_spread(stretch: StretchFactor, window: Samples) -> Samples {
+    let w = window.get();
+    let energy =
+        |i: usize| (0.5 - 0.5 * (core::f64::consts::TAU * i as f64 / w as f64).cos()).powi(2);
+    let total: f64 = (0..w).map(energy).sum();
+    let mean: f64 = (0..w).map(|i| energy(i) * i as f64).sum::<f64>() / total;
+    let variance: f64 = (0..w)
+        .map(|i| energy(i) * (i as f64 - mean).powi(2))
+        .sum::<f64>()
+        / total;
+    let c = 1.0 / stretch.get();
+    Samples::new((variance.sqrt() * (1.0 - c).abs()).ceil() as usize)
 }
 
 #[cfg(test)]
