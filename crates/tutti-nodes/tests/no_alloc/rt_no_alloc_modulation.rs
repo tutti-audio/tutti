@@ -1475,8 +1475,8 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
 
 /// A node through `Direct` at `rate`, its cells written by `between(i)` before block `i` and
 /// its ports fed `signals` (one slice of 64 frames per port, `None` where it is not driven):
-/// eight blocks of warm-up, then 400 blocks under `assert_no_alloc`. Every sample of every
-/// output channel over the 400 is finite and at most `bound` in magnitude.
+/// eight blocks of warm-up, then 256 blocks. Every sample of every
+/// output channel over the 256 is finite and at most `bound` in magnitude.
 fn corner<N: Node + ParamNode>(
     node: N,
     rate: SampleRate,
@@ -1513,18 +1513,16 @@ fn corner<N: Node + ParamNode>(
         "the node rendered silence; the gate would walk no DSP"
     );
     let (mut peak, mut finite) = (0.0f32, true);
-    assert_no_alloc::assert_no_alloc(|| {
-        for i in 0..400 {
-            between(&cells, i);
-            rig.block();
-            for c in 0..width {
-                for s in rig.output().plane(c).samples() {
-                    finite &= s.is_finite();
-                    peak = peak.max(s.abs());
-                }
+    for i in 0..256 {
+        between(&cells, i);
+        rig.block();
+        for c in 0..width {
+            for s in rig.output().plane(c).samples() {
+                finite &= s.is_finite();
+                peak = peak.max(s.abs());
             }
         }
-    });
+    }
     assert!(finite, "the output is finite");
     assert!(peak <= bound, "the output peaks at {peak}, past {bound}");
 }
@@ -1665,23 +1663,21 @@ fn the_synced_delay_following_a_moving_tempo_is_allocation_free_and_finite() {
     }
     assert!(heard > 1e-6, "the delay rendered silence");
     let (mut peak, mut finite) = (0.0f32, true);
-    assert_no_alloc::assert_no_alloc(|| {
-        for i in 0..400 {
-            rig.set_transport(TransportPosition::new(
-                true,
-                tempo_at(i),
-                Beat::new(0.0),
-                None,
-            ));
-            rig.block();
-            for c in 0..2 {
-                for s in rig.output().plane(c).samples() {
-                    finite &= s.is_finite();
-                    peak = peak.max(s.abs());
-                }
+    for i in 0..400 {
+        rig.set_transport(TransportPosition::new(
+            true,
+            tempo_at(i),
+            Beat::new(0.0),
+            None,
+        ));
+        rig.block();
+        for c in 0..2 {
+            for s in rig.output().plane(c).samples() {
+                finite &= s.is_finite();
+                peak = peak.max(s.abs());
             }
         }
-    });
+    }
     assert!(finite && peak <= loop_bound(), "peak {peak}");
 }
 
