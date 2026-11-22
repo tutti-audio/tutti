@@ -20,8 +20,8 @@ use tutti_midi_device::{
 use tutti_ump::ControlValue;
 use tutti_ump::MidiChannel;
 use tutti_ump::{
-    BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, Message, MessageType, SoftwareRevision,
-    Stream, Sysex8StreamCount, SysexAssembler, SysexStep,
+    BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, JrTicks, Message, MessageType,
+    SoftwareRevision, Stream, Sysex8StreamCount, SysexAssembler, SysexStep,
 };
 use tutti_ump::{BlockName, EndpointName};
 
@@ -919,7 +919,9 @@ fn jr_reaches_a_device_only_after_its_notification_enables_it() {
     let stream = settle(&mut wire);
     assert!(!stream.config().rx_jr);
     wire.connect_output();
-    let clock = Ump::from(Message::Utility(tutti_ump::Utility::JrClock(7)));
+    let clock = Ump::from(Message::Utility(tutti_ump::Utility::JrClock(JrTicks::new(
+        7,
+    ))));
     let note = midi::note_on(tutti_ump::MidiChannel::FIRST, 60, 0xFFFF);
     let events = [(Offset::ZERO, clock), (Offset::ZERO, note)];
     received(&wire);
@@ -941,7 +943,7 @@ fn moved_block(first_group: u8) -> Stream {
         midi1: tutti_ump::Midi1Port::No,
         first_group: FirstGroup::new(first_group).unwrap().into(),
         groups_spanned: GroupSpan::new(2).unwrap().into(),
-        midi_ci_version: 0,
+        midi_ci_version: None,
         max_sysex8_streams: Sysex8StreamCount::new(0),
     })
 }
@@ -997,7 +999,10 @@ fn a_jr_message_a_device_sends_never_reaches_the_graph() {
     rig.attach(inlet);
     let note = midi::note_on(MidiChannel::FIRST, 60, 0x8000);
     let arrival = rig.origin + Duration::from_millis(1);
-    for jr in [Utility::JrClock(10), Utility::JrTimestamp(20)] {
+    for jr in [
+        Utility::JrClock(JrTicks::new(10)),
+        Utility::JrTimestamp(JrTicks::new(20)),
+    ] {
         assert_eq!(
             producer.push(Ump::from(Message::Utility(jr)), arrival),
             Ok(Delivered::Diverted)

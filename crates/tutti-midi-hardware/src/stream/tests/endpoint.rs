@@ -9,7 +9,9 @@ use tutti_midi_ci::CiCategories;
 use tutti_midi_ci::CiMessage;
 use tutti_midi_device::MidiIdentity;
 use tutti_ump::ProductInstanceId;
-use tutti_ump::{BlockFilter, BlockSelect, DiscoveryFilter, Form, MessageType, UmpVersion};
+use tutti_ump::{
+    BlockFilter, BlockSelect, DiscoveryFilter, Form, JrTicks, MessageType, UmpVersion,
+};
 
 const ASKING: UmpVersion = UmpVersion { major: 1, minor: 1 };
 
@@ -261,7 +263,7 @@ fn a_function_block_discovery_is_answered_with_the_one_block_over_the_sessions_g
     assert_eq!(block.direction, BlockDirection::Bidirectional);
     assert_eq!(block.first_group.value(), FirstGroup::new(0));
     assert_eq!(block.groups_spanned.value(), GroupSpan::new(4));
-    assert_eq!(block.midi_ci_version, 0);
+    assert_eq!(block.midi_ci_version, None);
 }
 
 /// A session that presents nothing is not an Endpoint to its peers: a
@@ -600,7 +602,9 @@ fn under_arrival_timing_a_request_to_receive_jr_is_granted_with_it_off() {
 fn a_request_for_the_session_to_send_jr_is_granted_and_the_output_stamps() {
     let mut wire = presenting(Some(presented(identity())));
     wire.connect_output();
-    let clock = Ump::from(Message::Utility(tutti_ump::Utility::JrClock(7)));
+    let clock = Ump::from(Message::Utility(tutti_ump::Utility::JrClock(JrTicks::new(
+        7,
+    ))));
     let note = midi::note_on(MidiChannel::FIRST, 60, 0xFFFF);
     let events = [(Offset::ZERO, clock), (Offset::ZERO, note)];
     wire.send(&events);

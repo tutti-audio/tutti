@@ -226,7 +226,9 @@ touched.
   thread rings it, and the future awaits its `Listener::rung()`. An app never names either:
   a session's tap carries one, and the app awaits `TapReader::notified()`.
 - A value the audio thread must never drop holds a `tutti_rt::ControlDrop`.
-- A `Mutex` is taken with `tutti_rt::LockExt::lock_recover`.
+- A lock is `tutti_rt::{Mutex, RwLock, Condvar}`: it recovers a poisoned lock and, in a debug
+  build, panics on a wait inside an `RtScope`. `clippy.toml`'s `disallowed-types` refuses
+  std's; a crate below `tutti-rt` or a test plugin allows it at its root with the reason.
 - A collection the audio thread fills is a `tutti_rt::RtVec` or `CappedVec`: capped at
   construction, refusing past it, never growing. A value of more than one field read as
   one word is a `PackedAtomic`; an atomic float is `atomic_float::AtomicF32`/`AtomicF64`.

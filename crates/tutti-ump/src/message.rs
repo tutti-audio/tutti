@@ -9,9 +9,10 @@ use crate::field::{
     Pitch, SharpsFlats, TicksPerQuarterNote, U4, U7, U14,
 };
 use crate::{
-    ArticulationAttribute, BendValue, CCNumber, ControlValue, Field, ManufacturerId, MdsChunk,
-    MdsChunkSize, MdsChunks, MdsIdentity, MidiChannel, MidiGroup, NoteVelocity, Reserved,
-    ReservedAccents, ReservedAttribute, Rpn, Sysex8StreamCount, Sysex8StreamId, Ump,
+    ArticulationAttribute, BendValue, CCNumber, CiVersion, ControlValue, Field, FlexTempo, JrTicks,
+    ManufacturerId, MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, MidiChannel, MidiGroup,
+    NoteVelocity, Reserved, ReservedAccents, ReservedAttribute, Rpn, Sysex8StreamCount,
+    Sysex8StreamId, Ump,
 };
 
 /// One UMP, decoded.
@@ -72,10 +73,10 @@ pub struct Address {
 pub enum Utility {
     /// No operation.
     Noop,
-    /// The sender's clock, in ticks of 1/31250 s (wraps).
-    JrClock(u16),
-    /// The time of the following messages, in ticks of 1/31250 s.
-    JrTimestamp(u16),
+    /// The sender's clock (wraps).
+    JrClock(JrTicks),
+    /// The time of the following messages.
+    JrTimestamp(JrTicks),
     /// Delta Clockstamp ticks per quarter note.
     TicksPerQuarterNote(TicksPerQuarterNote),
     /// A Ticks Per Quarter Note of the reserved `0`, as read from the wire.
@@ -1107,8 +1108,8 @@ pub enum Letter {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Flex {
-    /// Set Tempo: units of 10 ns per quarter note.
-    SetTempo(u32),
+    /// Set Tempo.
+    SetTempo(FlexTempo),
     /// Set Time Signature.
     SetTimeSignature(FlexTimeSignature),
     /// Set Metronome.
@@ -1725,8 +1726,10 @@ pub struct FunctionBlockInfo {
     pub first_group: Field<FirstGroup>,
     /// How many Groups it spans.
     pub groups_spanned: Field<GroupSpan>,
-    /// The MIDI-CI message version, `0` for none.
-    pub midi_ci_version: u8,
+    /// The MIDI-CI message version: `None` is `0`, no MIDI-CI; a value above
+    /// `0x1F` is reserved, as read. A reserved `0` writes as `0` and so reads
+    /// back as `None`.
+    pub midi_ci_version: Option<Field<CiVersion>>,
     /// Simultaneous SysEx 8 streams supported.
     pub max_sysex8_streams: Sysex8StreamCount,
 }

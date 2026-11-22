@@ -57,8 +57,8 @@ fn word(b: [u8; 4]) -> u32 {
 fn utility(u: Utility) -> u32 {
     match u {
         Utility::Noop => 0,
-        Utility::JrClock(t) => (0x1 << 20) | u32::from(t),
-        Utility::JrTimestamp(t) => (0x2 << 20) | u32::from(t),
+        Utility::JrClock(t) => (0x1 << 20) | u32::from(t.get()),
+        Utility::JrTimestamp(t) => (0x2 << 20) | u32::from(t.get()),
         Utility::TicksPerQuarterNote(n) => (0x3 << 20) | u32::from(n.get()),
         Utility::ReservedTicksPerQuarterNote(r) => (0x3 << 20) | u32::from(r.get()),
         Utility::DeltaClockstamp(t) => (0x4 << 20) | t.get(),
@@ -369,7 +369,7 @@ fn flex_text_kind(k: FlexTextKind) -> (u32, u32) {
 fn flex(g: MidiGroup, f: Flex) -> [u32; 4] {
     let complete = |address, bank, status| flex_head(g, Form::Complete, address, bank, status);
     match f {
-        Flex::SetTempo(t) => [complete(FlexAddress::Group, 0, 0x00), t, 0, 0],
+        Flex::SetTempo(t) => [complete(FlexAddress::Group, 0, 0x00), t.get(), 0, 0],
         Flex::SetTimeSignature(t) => [
             complete(FlexAddress::Group, 0, 0x01),
             word([t.numerator, t.denominator, t.thirty_seconds, 0]),
@@ -528,7 +528,7 @@ fn stream(s: Stream) -> [u32; 4] {
                     | direction,
                 (u32::from(i.first_group.raw(FirstGroup::get)) << 24)
                     | (u32::from(i.groups_spanned.raw(GroupSpan::get)) << 16)
-                    | (u32::from(i.midi_ci_version) << 8)
+                    | (u32::from(crate::ci_version::raw(i.midi_ci_version)) << 8)
                     | u32::from(i.max_sysex8_streams.get()),
                 0,
                 0,

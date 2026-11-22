@@ -2,13 +2,13 @@ use super::*;
 use crate::test_support::at;
 
 use tutti_fixtures::midi;
-use tutti_ump::{Message, MidiChannel, NoteKeyEvent, Utility};
+use tutti_ump::{JrTicks, Message, MidiChannel, NoteKeyEvent, Utility};
 use tutti_units::{Frame, Samples};
 
 /// The sender-clock value if `ump` is a JR Clock (M2-104 section 7.2.2.1).
 fn jr_clock_value(ump: &Ump) -> Option<u16> {
     match (*ump).decode() {
-        Ok(Message::Utility(Utility::JrClock(t))) => Some(t),
+        Ok(Message::Utility(Utility::JrClock(t))) => Some(t.get()),
         _ => None,
     }
 }
@@ -16,7 +16,7 @@ fn jr_clock_value(ump: &Ump) -> Option<u16> {
 /// The timestamp value if `ump` is a JR Timestamp (section 7.2.2.2).
 fn jr_timestamp_value(ump: &Ump) -> Option<u16> {
     match (*ump).decode() {
-        Ok(Message::Utility(Utility::JrTimestamp(t))) => Some(t),
+        Ok(Message::Utility(Utility::JrTimestamp(t))) => Some(t.get()),
         _ => None,
     }
 }
@@ -25,24 +25,24 @@ fn jr_timestamp_value(ump: &Ump) -> Option<u16> {
 fn clock_maps_samples_to_ticks_monotonically() {
     let clock = JrClock::new(SampleRate::SR_48K);
     // 48000 samples = 1 s = 31250 ticks, which wraps: 31250 & 0xFFFF = 31250.
-    assert_eq!(clock.ticks_at(Frame::new(0)), 0);
-    assert_eq!(clock.ticks_at(Frame::new(48_000)), 31_250);
+    assert_eq!(clock.ticks_at(Frame::new(0)).get(), 0);
+    assert_eq!(clock.ticks_at(Frame::new(48_000)).get(), 31_250);
     // Half a second → half the ticks.
-    assert_eq!(clock.ticks_at(Frame::new(24_000)), 15_625);
+    assert_eq!(clock.ticks_at(Frame::new(24_000)).get(), 15_625);
 }
 
 #[test]
 fn clock_wraps_at_16_bits() {
     // At exactly the JR reference rate, one sample is one tick, so the wrap
     // boundary is integer-exact (no float rounding at the edge).
-    let clock = JrClock::new(TICK_RATE);
-    assert_eq!(clock.ticks_at(Frame::new(0xFFFF)), 0xFFFF);
+    let clock = JrClock::new(JrTicks::RATE);
+    assert_eq!(clock.ticks_at(Frame::new(0xFFFF)).get(), 0xFFFF);
     assert_eq!(
-        clock.ticks_at(Frame::new(0x1_0000)),
+        clock.ticks_at(Frame::new(0x1_0000)).get(),
         0,
         "wraps back to zero"
     );
-    assert_eq!(clock.ticks_at(Frame::new(0x1_0001)), 1);
+    assert_eq!(clock.ticks_at(Frame::new(0x1_0001)).get(), 1);
 }
 
 #[test]

@@ -56,11 +56,10 @@
 //! reads that way would be a second spelling of the same control.
 
 use std::path::PathBuf;
-use tutti_rt::LockExt;
 
 use clap_sys::host::clap_host;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::{Mutex, PoisonError};
 
 /// Abort the process on this `process()` call (1-based). `0` = never.
 static CRASH_ON_BLOCK: AtomicU32 = AtomicU32::new(0);
@@ -222,7 +221,7 @@ pub(crate) fn configure() {
         CRASH_ON_BLOCK.store(n, Ordering::SeqCst);
     }
     if let Ok(path) = std::env::var("TUTTI_CLAP_PROBE_RELEASE_FILE") {
-        let mut slot = RELEASE_FILE.lock_recover();
+        let mut slot = RELEASE_FILE.lock().unwrap_or_else(PoisonError::into_inner);
         *slot = Some(std::path::PathBuf::from(path));
     }
     if let Some(n) = u32_var("TUTTI_CLAP_PROBE_BLOCK_FROM").filter(|_| !replacement) {
@@ -431,7 +430,10 @@ pub(crate) fn on_process_entry() {
         // flip a flag nothing here reads. So a release **file** is polled too:
         // the host creates it, and `exists()` neither blocks nor allocates,
         // which is what lets this stay on the audio thread.
-        let release_file = RELEASE_FILE.lock_recover().clone();
+        let release_file = RELEASE_FILE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
         while BLOCKED.load(Ordering::SeqCst) {
             if let Some(path) = release_file.as_deref()
                 && path.exists()

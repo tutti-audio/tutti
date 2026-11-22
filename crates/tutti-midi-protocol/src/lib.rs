@@ -108,10 +108,9 @@
 //! [`Message`](tutti_ump::Message) keeps the protocol it arrived in.
 //!
 //! The crate also holds the values the translation and the instruments share:
-//! [`flex_tempo`] and [`flex_time_signature`] read a Flex Set Tempo and Set Time
-//! Signature as a `Bpm` and a project meter (`None` for a field the type cannot
-//! hold, never clamped), and [`flex_tempo_field`] and [`flex_time_signature_wire`]
-//! write them back;
+//! [`flex_time_signature`] reads a Flex Set Time Signature as a project meter
+//! (`None` for a field the type cannot hold, never clamped), and
+//! [`flex_time_signature_wire`] writes it back;
 //! [`song_position`](fn@song_position) converts a beat to a Song Position
 //! Pointer and [`SmpteTimecode::from_seconds`] a time to a timecode (each
 //! `None` outside its field, never clamped); [`MtcTimeCode::nibbles`] gives
@@ -158,9 +157,7 @@ mod tuning;
 mod universal;
 mod voice;
 
-pub use flex::{
-    flex_metronome, flex_tempo, flex_tempo_field, flex_time_signature, flex_time_signature_wire,
-};
+pub use flex::{flex_metronome, flex_time_signature, flex_time_signature_wire};
 pub use midi1::midi1;
 pub use midi1_translator::Midi1Translator;
 pub use midi2_translator::Midi2Translator;

@@ -9,7 +9,7 @@ use tutti_midi_protocol::{QuarterFramePiece, SmpteFrameRate};
 use tutti_music::LoopRange;
 use tutti_music::MeterChange;
 use tutti_timeline::ProjectMeter;
-use tutti_ump::{BarAccents, Flex, Message, Metronome, MidiGroup, System};
+use tutti_ump::{BarAccents, Flex, FlexTempo, Message, Metronome, MidiGroup, System};
 use tutti_units::{Bpm, Seconds};
 
 /// The System message a packet carries.
@@ -1359,14 +1359,17 @@ fn set_tempo_with_clock_goes_out_on_a_tick() {
     let (mut cm, _meter, out) = flex_master(true);
     play(&mut cm, &out, 120.0, 0.0, 2_500);
     let first = drain_all(&out);
-    assert_eq!(flexes(&first)[0], (0, Flex::SetTempo(50_000_000)));
+    assert_eq!(
+        flexes(&first)[0],
+        (0, Flex::SetTempo(FlexTempo::new(50_000_000)))
+    );
     play(&mut cm, &out, 150.0, 2_500.0 / 24_000.0, 2_000);
     let second = drain_all(&out);
     let tempo: Vec<_> = flexes(&second)
         .into_iter()
         .filter(|(_, f)| matches!(f, Flex::SetTempo(_)))
         .collect();
-    assert_eq!(tempo, [(400, Flex::SetTempo(40_000_000))]);
+    assert_eq!(tempo, [(400, Flex::SetTempo(FlexTempo::new(40_000_000)))]);
     let ticks: Vec<u32> = second
         .iter()
         .filter(|e| is_status(e, 0xF8))
@@ -1383,7 +1386,10 @@ fn set_tempo_without_clock_goes_out_on_the_tick_grid() {
     let (mut cm, _meter, out) = flex_master(false);
     play(&mut cm, &out, 120.0, 0.0, 2_500);
     let first = drain_all(&out);
-    assert_eq!(flexes(&first)[0], (0, Flex::SetTempo(50_000_000)));
+    assert_eq!(
+        flexes(&first)[0],
+        (0, Flex::SetTempo(FlexTempo::new(50_000_000)))
+    );
     play(&mut cm, &out, 150.0, 2_500.0 / 24_000.0, 2_000);
     let second = drain_all(&out);
     assert!(
@@ -1394,7 +1400,7 @@ fn set_tempo_without_clock_goes_out_on_the_tick_grid() {
         .into_iter()
         .filter(|(_, f)| matches!(f, Flex::SetTempo(_)))
         .collect();
-    assert_eq!(tempo, [(400, Flex::SetTempo(40_000_000))]);
+    assert_eq!(tempo, [(400, Flex::SetTempo(FlexTempo::new(40_000_000)))]);
 }
 
 /// A tempo that stays is stated once, not on every tick or block.
@@ -1474,7 +1480,7 @@ fn a_start_mid_bar_states_the_meter_at_the_next_bar() {
     assert_eq!(
         sent,
         [
-            (0, Flex::SetTempo(50_000_000)),
+            (0, Flex::SetTempo(FlexTempo::new(50_000_000))),
             (72_000, time_signature(4, 2)),
         ]
     );
@@ -1553,7 +1559,7 @@ fn set_metronome_follows_the_set_time_signature_on_its_frame() {
     assert_eq!(
         flexes(&drain_all(&out)),
         [
-            (0, Flex::SetTempo(50_000_000)),
+            (0, Flex::SetTempo(FlexTempo::new(50_000_000))),
             (0, time_signature(4, 2)),
             (0, metronome(24, 4)),
         ]
@@ -1681,11 +1687,17 @@ fn a_tick_and_a_bar_line_on_a_block_edge_are_sent_once() {
     let (mut cm, _meter, out) = flex_master(true);
     play(&mut cm, &out, 120.0, 0.0, 1_000);
     let block = drain_all(&out);
-    assert_eq!(tempos(&block), [(0, Flex::SetTempo(50_000_000))]);
+    assert_eq!(
+        tempos(&block),
+        [(0, Flex::SetTempo(FlexTempo::new(50_000_000)))]
+    );
     assert_eq!(offsets(&block, 0xF8), [0]);
     play(&mut cm, &out, 150.0, 1_000.0 / 24_000.0, 1_000);
     let block = drain_all(&out);
-    assert_eq!(tempos(&block), [(0, Flex::SetTempo(40_000_000))]);
+    assert_eq!(
+        tempos(&block),
+        [(0, Flex::SetTempo(FlexTempo::new(40_000_000)))]
+    );
     // 800 frames a tick at 150 bpm.
     assert_eq!(offsets(&block, 0xF8), [0, 800]);
     play(
@@ -1733,7 +1745,10 @@ fn the_passes_of_a_looped_block_restate_nothing() {
     assert_eq!(offsets(&events, 0xF2), [24_000, 48_000], "two wraps");
     assert_eq!(
         flexes(&events),
-        [(0, Flex::SetTempo(50_000_000)), (0, time_signature(4, 2)),]
+        [
+            (0, Flex::SetTempo(FlexTempo::new(50_000_000))),
+            (0, time_signature(4, 2)),
+        ]
     );
 }
 
@@ -1749,7 +1764,7 @@ fn a_meter_change_inside_the_block_is_stated_on_its_bar_line() {
     assert_eq!(
         flexes(&drain_all(&out)),
         [
-            (0, Flex::SetTempo(50_000_000)),
+            (0, Flex::SetTempo(FlexTempo::new(50_000_000))),
             (0, time_signature(4, 2)),
             (192_000, time_signature(3, 2)),
         ]

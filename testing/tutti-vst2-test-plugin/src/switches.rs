@@ -9,8 +9,8 @@
 //! process-global *and* sticky for the life of the image, so one a test
 //! forgets to unset silently poisons every later test in the binary.
 
+use std::sync::PoisonError;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicIsize, AtomicU32, Ordering};
-use tutti_rt::LockExt;
 
 /// What the probe answers to `effCanDo`.
 ///
@@ -464,20 +464,27 @@ static LIFECYCLE: std::sync::Mutex<Vec<i64>> = std::sync::Mutex::new(Vec::new())
 
 pub(crate) fn record_lifecycle(opcode: i32, value: isize) {
     let packed = (i64::from(opcode) << 32) | i64::from(value as u32);
-    LIFECYCLE.lock_recover().push(packed);
+    LIFECYCLE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push(packed);
 }
 
 /// How many entries the lifecycle trace holds.
 #[unsafe(no_mangle)]
 pub extern "C" fn tutti_vst2_probe_trace_len() -> u32 {
-    LIFECYCLE.lock_recover().len() as u32
+    LIFECYCLE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .len() as u32
 }
 
 /// Entry `index` of the lifecycle trace (`opcode << 32 | value`), or `-1`.
 #[unsafe(no_mangle)]
 pub extern "C" fn tutti_vst2_probe_trace_at(index: u32) -> i64 {
     LIFECYCLE
-        .lock_recover()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
         .get(index as usize)
         .copied()
         .unwrap_or(-1)
@@ -486,7 +493,10 @@ pub extern "C" fn tutti_vst2_probe_trace_at(index: u32) -> i64 {
 /// Clear the lifecycle trace.
 #[unsafe(no_mangle)]
 pub extern "C" fn tutti_vst2_probe_reset_trace() {
-    LIFECYCLE.lock_recover().clear();
+    LIFECYCLE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clear();
 }
 
 // ---------------------------------------------------------------------------

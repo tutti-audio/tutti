@@ -84,6 +84,6 @@ pub use id::{
     DeviceInfo, EndpointId, MidiDeviceId, OsEndpointIdentity, PortDirection, WinMmDevice,
 };
 pub use inquiry::{INQUIRY_ATTEMPTS, INQUIRY_TIMEOUT, IdentityInquiry, InquiryAction};
-pub use jr::{ClockHeard, JrLock, JrReceiver, JrTime, TICK_RATE, Unmapped, tick_time};
+pub use jr::{ClockHeard, JrLock, JrReceiver, JrTime, Unmapped};
 pub use learned::{Learned, Match, SavedDevice};
 pub use table::{BindPolicy, DeviceEvent, DeviceTable, OsChange, OsDevice, Resolved};

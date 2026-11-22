@@ -15,7 +15,7 @@
 //! followed Group only. A Set Tempo addressed to a Channel is no Set Tempo (the
 //! decoder in `tutti-ump` refuses it) and is ignored here too.
 
-use tutti_midi_protocol::{flex_tempo, flex_time_signature};
+use tutti_midi_protocol::flex_time_signature;
 use tutti_music::TimeSignature;
 use tutti_ump::{Flex, Message, MidiGroup, Ump};
 use tutti_units::Bpm;
@@ -33,7 +33,7 @@ pub enum TempoSource {
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum Followed {
-    /// A tempo: Set Tempo, a beat of `field` 10-ns units ([`flex_tempo`]).
+    /// A tempo: Set Tempo, a beat of the field's 10-ns units ([`tutti_ump::FlexTempo::bpm`]).
     Tempo(Bpm),
     /// A meter: Set Time Signature ([`flex_time_signature`]). Only where the
     /// follower was built to follow the meter.
@@ -45,11 +45,11 @@ pub enum Followed {
 /// ```
 /// use tutti_midi_runtime::{Followed, TempoFollower, TempoSource};
 /// use tutti_units::Bpm;
-/// use tutti_ump::{Flex, Message, MidiGroup, Ump};
+/// use tutti_ump::{Flex, FlexTempo, Message, MidiGroup, Ump};
 ///
 /// let follower = TempoFollower::new(TempoSource::Flex(MidiGroup::FIRST), false);
 /// // 0.5 s per quarter note is 120 bpm.
-/// let set_tempo = Ump::from(Message::Flex(MidiGroup::FIRST, Flex::SetTempo(50_000_000)));
+/// let set_tempo = Ump::from(Message::Flex(MidiGroup::FIRST, Flex::SetTempo(FlexTempo::new(50_000_000))));
 /// assert_eq!(follower.step(set_tempo), Some(Followed::Tempo(Bpm::of(120.0))));
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,7 +75,7 @@ impl TempoFollower {
     /// What `ump` asks the transport to take, if anything: a Set Tempo or (when
     /// the meter is followed) a Set Time Signature of the followed Group, whose
     /// value the project's units can hold. `None` for any other message, for one
-    /// of another Group, and for what [`flex_tempo`] and [`flex_time_signature`]
+    /// of another Group, and for what [`tutti_ump::FlexTempo::bpm`] and [`flex_time_signature`]
     /// refuse (a tempo field of `0`, a numerator of `0` or above 64, a
     /// non-standard or too short denominator).
     #[must_use]
@@ -88,7 +88,7 @@ impl TempoFollower {
             return None;
         }
         match flex {
-            Flex::SetTempo(field) => flex_tempo(field).map(Followed::Tempo),
+            Flex::SetTempo(field) => field.bpm().map(Followed::Tempo),
             Flex::SetTimeSignature(wire) if self.meter => {
                 flex_time_signature(wire).map(Followed::Meter)
             }
