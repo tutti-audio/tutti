@@ -7,7 +7,7 @@
 //! (a pipeline's missed chunks) is zero, and everything else reads the same.
 
 use tutti_graph::{BusRef, BusSource, MAX_BUSES};
-use tutti_plugin_types::{BlockCounts, BusRole, PluginBus, TerminationReason};
+use tutti_plugin_types::{BusRole, PipelineCounts, PluginBus, TerminationReason};
 use tutti_units::{Samples, Tail};
 
 use crate::plugin::HostedPlugin;
@@ -46,7 +46,7 @@ impl<'a> Diagnostics<'a> {
     /// over the plugin's life. What the node itself did not render is
     /// [`block_losses`](Self::block_losses). A plugin that runs in this process has no
     /// replies to wait for: both are zero.
-    pub fn block_counts(&self) -> BlockCounts {
+    pub fn block_counts(&self) -> PipelineCounts {
         self.hosted.handle.block_counts()
     }
 

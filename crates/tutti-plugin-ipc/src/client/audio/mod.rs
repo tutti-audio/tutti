@@ -39,8 +39,8 @@ use tutti_plugin_types::{
 };
 use tutti_plugin_types::{
     ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
-    NoteExpressionTextChanges, ParameterChanges, ParameterInfo, Preset, PresetId, ScaleChanges,
-    TransportChanges, TransportInfo,
+    NoteExpressionTextChanges, ParameterChanges, ParameterInfo, PluginPreset, PresetId,
+    ScaleChanges, TransportChanges, TransportInfo,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -383,7 +383,7 @@ impl AudioBridge {
     /// and replies it took (on time, or owed and taken back off the socket),
     /// ever. The bridge thread writes them and any thread reads them: relaxed
     /// atomics, no lock, no allocation.
-    pub fn block_counts(&self) -> tutti_plugin_types::BlockCounts {
+    pub fn block_counts(&self) -> tutti_plugin_types::PipelineCounts {
         self.channels.block_counts()
     }
 
@@ -1005,7 +1005,7 @@ impl AudioBridge {
     ///
     /// `None` and `Some(vec![])` are different answers: the first means the
     /// question could not be asked, the second that the plugin listed nothing.
-    pub fn presets(&self) -> Option<Vec<Preset>> {
+    pub fn presets(&self) -> Option<Vec<PluginPreset>> {
         if self.lifecycle.is_crashed() {
             return None;
         }

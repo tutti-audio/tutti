@@ -13,7 +13,7 @@
 //! `tutti-units` beside the compile-time units: a second name for
 //! `Hz` or `Db` there would be two names for one behaviour.
 
-use crate::ParamRange;
+use crate::PluginParamRange;
 use tutti_units::{
     Amplitude, ArcDegrees, BeatDuration, Bpm, Cents, Db, Hz, Mix, Pan, PlaybackRate, Seconds,
     Semitones,
@@ -128,11 +128,11 @@ impl ParamUnit {
     /// `Choice` and `Toggle` name an index or a switch, so they fit any range,
     /// a normalized one included (VST3 declares nothing else).
     #[must_use]
-    pub fn fits(self, range: &ParamRange) -> bool {
+    pub fn fits(self, range: &PluginParamRange) -> bool {
         if matches!(self, Self::Choice | Self::Toggle) {
             return true;
         }
-        let ParamRange::Plain { min, max, .. } = *range else {
+        let PluginParamRange::Plain { min, max, .. } = *range else {
             return false;
         };
         if !(min.is_finite() && max.is_finite() && min <= max) {
@@ -299,8 +299,8 @@ mod tests {
     use crate::ParameterInfo;
     use tutti_units::ParamId;
 
-    fn plain(min: f64, max: f64) -> ParamRange {
-        ParamRange::Plain {
+    fn plain(min: f64, max: f64) -> PluginParamRange {
+        PluginParamRange::Plain {
             min,
             max,
             default: min,
@@ -414,7 +414,7 @@ mod tests {
     /// `Choice` and `Toggle`.
     #[test]
     fn a_normalized_range_fits_only_choice_and_toggle() {
-        let normalized = ParamRange::Normalized { default: 0.0 };
+        let normalized = PluginParamRange::Normalized { default: 0.0 };
         assert!(!ParamUnit::Hertz.fits(&normalized));
         assert!(!ParamUnit::Percent.fits(&normalized));
         assert!(ParamUnit::Choice.fits(&normalized));

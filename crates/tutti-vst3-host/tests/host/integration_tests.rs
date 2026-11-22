@@ -288,7 +288,7 @@ fn plain_range_probe_recovers_real_ranges() {
                 continue;
             };
             // `None` is legitimate: no controller, or an incoherent map. That
-            // is the case the caller turns into `ParamRange::Normalized`.
+            // is the case the caller turns into `PluginParamRange::Normalized`.
             let Some(tutti_vst3_host::PlainRange { min, max }) =
                 loaded.parameter_plain_range(main_thread(), id)
             else {

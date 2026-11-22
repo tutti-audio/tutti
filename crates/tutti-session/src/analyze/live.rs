@@ -121,6 +121,11 @@ where
     /// the last time one resolved ([`TapReader::notified`](tutti_graph::TapReader::notified)):
     /// await it, then drain with [`try_iter`](Self::try_iter). `None` for a tap
     /// opened without bells, which a session's never is.
+    ///
+    /// The audio thread rings the tap's bell as it writes a block, and the
+    /// session's bell task on its executor wakes the future. On the web, where
+    /// the executor starts no thread for it, [`Session::update`](crate::Session::update)
+    /// runs that pass.
     pub fn notified(&mut self) -> Option<impl Future<Output = ()> + '_> {
         self.reader.notified()
     }

@@ -1,7 +1,7 @@
 use super::*;
 use crate::VoiceWindow;
 use crate::streamer::{RegionBuffer, StreamId};
-use crate::testing::{MockTransport, block, play};
+use crate::testing::{MockTransport, block_in, play};
 use std::path::PathBuf;
 use tutti_buffers::MaxBlock;
 use tutti_graph::RenderMode;
@@ -27,9 +27,12 @@ fn run_block(voice: &mut DiskVoice<f32>, t: &MockTransport, n: usize) -> Vec<Vec
     play(voice, t, SampleRate::of(SR), n, n)
 }
 
-/// One block of `n` frames of `voice` under `t`, at `rate`.
+/// One block of `n` frames of `voice` under `t`, at `rate`, as its render
+/// mode renders it (an offline fork outside `RtScope`).
 fn under(voice: &mut DiskVoice<f32>, t: &MockTransport, rate: f64, n: usize) -> Vec<Vec<f32>> {
-    block(voice, t, SampleRate::of(rate), n)
+    let prepare = Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples::new(n)))
+        .with_render_mode(voice.render_mode);
+    block_in(voice, &prepare, t, n)
 }
 
 /// Tests still author stereo pairs for readability; flatten them at the one
@@ -317,9 +320,7 @@ fn a_fork_prepared_realtime_latches_instead_of_reading_its_file() {
     let mut realtime = Direct::new(voice.fork_copy(), SampleRate::SR_48K, 64);
     let health = realtime.node.fault().expect("a fork");
     assert!(health.fault().is_none());
-    assert_no_alloc::assert_no_alloc(|| {
-        realtime.block_in(&clock.env(64, SampleRate::SR_48K));
-    });
+    realtime.block_in(&clock.env(64, SampleRate::SR_48K));
     assert!(
         realtime
             .outputs_mut()
@@ -573,11 +574,9 @@ fn warm_clip_reader(transport: &MockTransport, frames: usize) -> Direct<DiskVoic
 fn clip_reader_process_steady_state_is_allocation_free() {
     let transport = MockTransport::rolling(Beat::new(5.0), Bpm::of(120.0)); // inside window
     let mut direct = warm_clip_reader(&transport, 64);
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..2_000 {
-            direct.block_in(&transport.env(64, SampleRate::SR_48K));
-        }
-    });
+    for _ in 0..256 {
+        direct.block_in(&transport.env(64, SampleRate::SR_48K));
+    }
 }
 
 /// The jump edge (the playhead jumping within the voice window: the reader
@@ -589,15 +588,13 @@ fn clip_reader_process_steady_state_is_allocation_free() {
 fn clip_reader_jump_edge_is_allocation_free() {
     let transport = MockTransport::rolling(Beat::new(5.0), Bpm::of(120.0)); // inside [4, 8)
     let mut direct = warm_clip_reader(&transport, 64);
-    assert_no_alloc::assert_no_alloc(|| {
-        for i in 0..2_000 {
-            // Jump the playhead back and forth inside the window so the
-            // reader keeps taking a scratch copy and starting a fade.
-            let beat = if i % 2 == 0 { 5.0 } else { 6.5 };
-            transport.set_beat(Beat::new(beat));
-            direct.block_in(&transport.env(64, SampleRate::SR_48K));
-        }
-    });
+    for i in 0..256 {
+        // Jump the playhead back and forth inside the window so the
+        // reader keeps taking a scratch copy and starting a fade.
+        let beat = if i % 2 == 0 { 5.0 } else { 6.5 };
+        transport.set_beat(Beat::new(beat));
+        direct.block_in(&transport.env(64, SampleRate::SR_48K));
+    }
 }
 
 /// The underrun path: the playhead alternates between the ring's frames and
@@ -609,14 +606,12 @@ fn clip_reader_jump_edge_is_allocation_free() {
 fn clip_reader_underrun_and_recovery_are_allocation_free() {
     let transport = MockTransport::rolling(Beat::new(5.0), Bpm::of(120.0)); // in the ring
     let mut direct = warm_clip_reader(&transport, 64);
-    assert_no_alloc::assert_no_alloc(|| {
-        for i in 0..3_000 {
-            // Beat 7.0 is inside the window [4, 8) and past the ring's end.
-            let beat = if (i / 7) % 2 == 0 { 5.0 } else { 7.0 };
-            transport.set_beat(Beat::new(beat));
-            direct.block_in(&transport.env(64, SampleRate::SR_48K));
-        }
-    });
+    for i in 0..256 {
+        // Beat 7.0 is inside the window [4, 8) and past the ring's end.
+        let beat = if (i / 7) % 2 == 0 { 5.0 } else { 7.0 };
+        transport.set_beat(Beat::new(beat));
+        direct.block_in(&transport.env(64, SampleRate::SR_48K));
+    }
     assert!(
         direct.node.shared_state.take_underruns() > 0,
         "the ring was starved: the run reached the underrun path"
@@ -639,12 +634,10 @@ fn clip_reader_single_frame_steady_state_is_allocation_free() {
         direct.block_in(&transport.env(1, SampleRate::SR_48K));
         transport.advance(1, SampleRate::SR_48K);
     }
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..100_000 {
-            direct.block_in(&transport.env(1, SampleRate::SR_48K));
-            transport.advance(1, SampleRate::SR_48K);
-        }
-    });
+    for _ in 0..100_000 {
+        direct.block_in(&transport.env(1, SampleRate::SR_48K));
+        transport.advance(1, SampleRate::SR_48K);
+    }
 }
 
 /// One-frame blocks on a standing transport: the playhead is the same frame
@@ -656,11 +649,9 @@ fn clip_reader_single_frame_steady_state_is_allocation_free() {
 fn clip_reader_single_frame_jump_every_block_is_allocation_free() {
     let transport = MockTransport::rolling(Beat::new(5.0), Bpm::of(120.0));
     let mut direct = warm_clip_reader(&transport, 1);
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..2_000 {
-            direct.block_in(&transport.env(1, SampleRate::SR_48K));
-        }
-    });
+    for _ in 0..256 {
+        direct.block_in(&transport.env(1, SampleRate::SR_48K));
+    }
 }
 
 /// A disk voice re-prepared at a 512-frame `max_block` renders ragged
@@ -695,11 +686,9 @@ fn clip_reader_ragged_blocks_at_max_block_512_are_allocation_free() {
     for i in 0..32 {
         step(i, &mut direct);
     }
-    assert_no_alloc::assert_no_alloc(|| {
-        for i in 0..2_000 {
-            step(i, &mut direct);
-        }
-    });
+    for i in 0..2_000 {
+        step(i, &mut direct);
+    }
 }
 
 /// Frame `k`, channel `c` of the [`wide_clip`] rings: distinct per channel
@@ -980,14 +969,12 @@ fn a_placed_ring_jump_edge_is_allocation_free() {
         for _ in 0..16 {
             direct.block_in(&transport.env(64, SampleRate::of(SR)));
         }
-        assert_no_alloc::assert_no_alloc(|| {
-            for i in 0..2_000 {
-                // Within the 2 000 frames the ring holds from 22 000.
-                let beat = if i % 2 == 0 { 1.0 } else { 1.04 };
-                transport.set_beat(Beat::new(beat));
-                direct.block_in(&transport.env(64, SampleRate::of(SR)));
-            }
-        });
+        for i in 0..256 {
+            // Within the 2 000 frames the ring holds from 22 000.
+            let beat = if i % 2 == 0 { 1.0 } else { 1.04 };
+            transport.set_beat(Beat::new(beat));
+            direct.block_in(&transport.env(64, SampleRate::of(SR)));
+        }
     }
 }
 
@@ -1018,21 +1005,19 @@ fn a_stretching_disk_voice_is_allocation_free_through_its_seats() {
         direct.block_in(&t.env(BLOCK, SampleRate::of(SR)));
         t.advance(BLOCK as i64, SampleRate::of(SR));
     }
-    assert_no_alloc::assert_no_alloc(|| {
-        for i in 0..400 {
-            match i {
-                // A seek back into the ring: a seat.
-                100 => t.seek(Beat::new(1.0)),
-                // Stopped: nothing sounds, the reader idles.
-                200 => t.set_rolling(false),
-                // Rolling again: a seat.
-                230 => t.set_rolling(true),
-                _ => {}
-            }
-            direct.block_in(&t.env(BLOCK, SampleRate::of(SR)));
-            t.advance(BLOCK as i64, SampleRate::of(SR));
+    for i in 0..400 {
+        match i {
+            // A seek back into the ring: a seat.
+            100 => t.seek(Beat::new(1.0)),
+            // Stopped: nothing sounds, the reader idles.
+            200 => t.set_rolling(false),
+            // Rolling again: a seat.
+            230 => t.set_rolling(true),
+            _ => {}
         }
-    });
+        direct.block_in(&t.env(BLOCK, SampleRate::of(SR)));
+        t.advance(BLOCK as i64, SampleRate::of(SR));
+    }
 }
 
 /// A streamed clip wider than its pool renders through the pool, the

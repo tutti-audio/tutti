@@ -8,7 +8,7 @@ use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
     KeyUse, LoadedPlugin, ModifierConvention, ParamAccess, ParamEdit, ParamWriteError,
     ParameterInfo, PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError,
-    PluginResult, Preset, PresetId, RenderMode, RenderModeSupport, Request, StateUse, Widths,
+    PluginPreset, PluginResult, PresetId, RenderMode, RenderModeSupport, Request, StateUse, Widths,
     WindowHandle,
 };
 use tutti_units::Normalized;
@@ -262,10 +262,10 @@ impl Control for Vst2Loaded {
     /// a position in `[0, numPrograms)` — so unlike AU's sparse selectors these
     /// are genuinely dense. Unnamed slots are kept: dropping one would renumber
     /// every program after it.
-    fn presets(&mut self, main: MainThreadMarker) -> Vec<Preset> {
+    fn presets(&mut self, main: MainThreadMarker) -> Vec<PluginPreset> {
         self.programs(main)
             .into_iter()
-            .map(|(index, name)| Preset::new(PresetId::Number(index), name))
+            .map(|(index, name)| PluginPreset::new(PresetId::Number(index), name))
             .collect()
     }
 

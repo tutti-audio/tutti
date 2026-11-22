@@ -345,7 +345,7 @@
 //!
 //! - [`tutti-plugin-types`](https://docs.rs/tutti-plugin-types) — the shared value
 //!   vocabulary ([`ParameterInfo`](tutti_plugin_types::ParameterInfo),
-//!   [`TransportInfo`](tutti_plugin_types::TransportInfo), [`Features`], [`Preset`], …). The
+//!   [`TransportInfo`](tutti_plugin_types::TransportInfo), [`Features`], [`PluginPreset`], …). The
 //!   types a caller cannot avoid naming are re-exported at this crate's root.
 //! - [`tutti-plugin-server`](https://docs.rs/tutti-plugin-server) — the
 //!   subprocess side of the bridge.
@@ -357,7 +357,7 @@
 //!
 //! [`Features`]: tutti_plugin_types::Features
 //! [`PresetId`]: tutti_plugin_types::PresetId
-//! [`Preset`]: tutti_plugin_types::Preset
+//! [`PluginPreset`]: tutti_plugin_types::PluginPreset
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
 #![cfg_attr(

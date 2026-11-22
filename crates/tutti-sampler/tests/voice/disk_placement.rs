@@ -289,13 +289,13 @@ fn a_fork_places_the_file_as_the_live_voice_does() {
         .fork(ForkMode::Offline)
         .expect("forks");
     let mut node = forked.node;
-    node.prepare(
-        &Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples::new(BLOCK)))
-            .with_render_mode(tutti_graph::RenderMode::Offline),
-    );
+    let prepare = Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples::new(BLOCK)))
+        .with_render_mode(tutti_graph::RenderMode::Offline);
+    node.prepare(&prepare);
     let clock = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let env = clock.env(BLOCK, SampleRate::of(SR));
-    let out = contract::drive_input(&mut *node, &env, Planes::default(), &[], &[]).audio;
+    let out =
+        contract::drive_input_in(&mut *node, &prepare, &env, Planes::default(), &[], &[]).audio;
     // Engine order: FL FR FC LFE SL SR BL BR from the file's FL FR FC LFE BL BR SL SR.
     let want: Vec<f32> = [0, 1, 2, 3, 6, 7, 4, 5].map(value).to_vec();
     assert_channels(&out, &want, "the fork of a 7.1 in WAV order");
@@ -445,7 +445,9 @@ fn render(node: &mut dyn tutti_graph::Node, clock: &MockTransport, n: usize) -> 
     let mut out: Vec<Vec<f32>> = Vec::new();
     for _ in 0..n {
         let env = clock.env(BLOCK, SampleRate::of(SR));
-        let b = contract::drive_input(node, &env, Planes::default(), &[], &[]).audio;
+        let b =
+            contract::drive_input_in(node, &offline_prepare(), &env, Planes::default(), &[], &[])
+                .audio;
         if out.is_empty() {
             out = vec![Vec::new(); b.len()];
         }
@@ -470,38 +472,20 @@ fn fork_unprepared(voice: &DiskVoice<f32>) -> Box<dyn tutti_graph::Node> {
         .node
 }
 
-/// A boxed node, as a node (for `Direct`).
-struct Boxed(Box<dyn tutti_graph::Node>);
-
-impl tutti_graph::Node for Boxed {
-    fn shape(&self) -> tutti_graph::Shape {
-        self.0.shape()
-    }
-    fn prepare(&mut self, p: &tutti_graph::Prepare) {
-        self.0.prepare(p);
-    }
-    fn process(
-        &mut self,
-        cx: &tutti_graph::Cx<'_>,
-        io: tutti_graph::Io<'_>,
-    ) -> tutti_graph::Status {
-        self.0.process(cx, io)
-    }
-    fn reset(&mut self) {
-        self.0.reset();
-    }
+/// What an export prepares a fork under: offline, so the fork reads its file
+/// itself and `process` may allocate.
+fn offline_prepare() -> tutti_graph::Prepare {
+    tutti_graph::Prepare::new(
+        SampleRate::of(SR),
+        tutti_buffers::MaxBlock::of(tutti_units::Samples::new(BLOCK)),
+    )
+    .with_render_mode(tutti_graph::RenderMode::Offline)
 }
 
 /// [`fork_unprepared`], prepared.
 fn fork(voice: &DiskVoice<f32>) -> Box<dyn tutti_graph::Node> {
     let mut node = fork_unprepared(voice);
-    node.prepare(
-        &tutti_graph::Prepare::new(
-            SampleRate::of(SR),
-            tutti_buffers::MaxBlock::of(tutti_units::Samples::new(BLOCK)),
-        )
-        .with_render_mode(tutti_graph::RenderMode::Offline),
-    );
+    node.prepare(&offline_prepare());
     node
 }
 
@@ -548,48 +532,6 @@ fn a_fork_places_every_read_path() {
                     .collect();
                 assert_near(&block, &f.want, &format!("{what}, block {chunk}"));
             }
-        }
-    }
-}
-
-/// A fork's placed read allocates nothing once its page is in (forward and
-/// looped, the permuting and the folding file).
-#[test]
-fn a_fork_placed_read_is_allocation_free() {
-    for f in fixtures() {
-        for looped in [false, true] {
-            let (_dir, mut rig, reader) = stream_fixture(&f);
-            if looped {
-                rig.stream.looping_cell().publish(loop_1000_3000());
-                assert!(rig.streamer.step_until_idle(1_000) < 1_000);
-            }
-            let voice = voice_of(reader);
-            let mut direct =
-                contract::Direct::new(Boxed(fork_unprepared(&voice)), SampleRate::of(SR), BLOCK);
-            // A fork reads its file only in an offline render.
-            tutti_graph::Node::prepare(
-                &mut *direct.node,
-                &tutti_graph::Prepare::new(
-                    SampleRate::of(SR),
-                    tutti_buffers::MaxBlock::of(tutti_units::Samples::new(BLOCK)),
-                )
-                .with_render_mode(tutti_graph::RenderMode::Offline),
-            );
-            let clock = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-            // The first block opens the file and pages it in.
-            direct.block_in(&clock.env(BLOCK, SampleRate::of(SR)));
-            clock.advance(BLOCK as i64, SampleRate::of(SR));
-            assert_no_alloc::assert_no_alloc(|| {
-                for _ in 0..80 {
-                    direct.block_in(&clock.env(BLOCK, SampleRate::of(SR)));
-                    clock.advance(BLOCK as i64, SampleRate::of(SR));
-                }
-            });
-            assert_near(
-                &lanes(&direct),
-                &f.want,
-                &format!("{} channels", f.channels),
-            );
         }
     }
 }

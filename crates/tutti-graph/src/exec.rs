@@ -39,9 +39,10 @@
 //! editor is dropped, the executor keeps running its current plan; boxes it
 //! returns afterwards wait in the return ring until the executor is dropped.
 //!
-//! Applying runs under the [`RtScope::enter`](tutti_rt::RtScope::enter) marker, so a unit or a
+//! Applying a realtime-prepared executor runs under the
+//! [`RtScope::enter`](tutti_rt::RtScope::enter) marker, so a unit or a
 //! commit dropped there panics in a debug build, and it neither allocates
-//! nor frees. Everything a plan needs that is a function of the plan — the
+//! nor frees (an offline-prepared one is not marked). Everything a plan needs that is a function of the plan — the
 //! zeroed arena, the event slots, every ring and FIFO, the lanes, the
 //! injection buffers, the parallel state, a store with room — is built by the
 //! editor when it packages the plan (`stage.rs`) and travels in the commit.
