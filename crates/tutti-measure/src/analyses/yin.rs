@@ -152,7 +152,7 @@ impl YinPlan {
         Samples::new(self.max_period().get() * 2)
     }
 
-    fn detector(&self) -> PitchDetector {
+    pub(crate) fn detector(&self) -> PitchDetector {
         PitchDetector::new(*self)
     }
 }
@@ -220,14 +220,9 @@ impl PitchDetector {
 
     /// Needs at least `buffer_size()` samples.
     pub(crate) fn detect(&mut self, samples: &[f64]) -> PitchResult {
-        let (min_period, max_period) = self.periods(samples.len());
-
-        if samples.len() < max_period * 2 || max_period <= min_period {
+        let Some((min_period, max_period)) = self.normalized_difference(samples) else {
             return PitchResult::default();
-        }
-
-        self.compute_difference(samples, max_period);
-        self.compute_cumulative_mean(max_period);
+        };
         let (period, aperiodicity) = self.find_best_period_full(min_period, max_period);
 
         if period == 0 {
@@ -244,6 +239,36 @@ impl PitchDetector {
             frequency,
             confidence,
         }
+    }
+
+    /// YIN steps 1-3 over `samples`: fills the cumulative mean normalized
+    /// difference d'(τ), read by [`cumulative_mean`](Self::cumulative_mean),
+    /// and returns the lag range `(min, max)` it holds, or `None` when
+    /// `samples` is too short or the band leaves no lag.
+    pub(crate) fn normalized_difference(&mut self, samples: &[f64]) -> Option<(usize, usize)> {
+        let (min_period, max_period) = self.periods(samples.len());
+        if samples.len() < max_period * 2 || max_period <= min_period {
+            return None;
+        }
+        self.compute_difference(samples, max_period);
+        self.compute_cumulative_mean(max_period);
+        Some((min_period, max_period))
+    }
+
+    /// d'(τ) for `τ` in `0..=max` of the last [`normalized_difference`](Self::normalized_difference).
+    pub(crate) fn cumulative_mean(&self) -> &[f64] {
+        &self.cumulative_mean
+    }
+
+    /// The period of the minimum at lag `tau`, refined by the parabola through
+    /// its neighbours (YIN step 5).
+    pub(crate) fn refined_period(&self, tau: usize, max_period: usize) -> f64 {
+        self.parabolic_interpolation(tau, max_period)
+    }
+
+    /// The rate the detector's lags are denominated at.
+    pub(crate) fn sample_rate(&self) -> SampleRate {
+        self.cfg.sample_rate()
     }
 
     /// The lag range one call searches: the config's, the longest capped by
