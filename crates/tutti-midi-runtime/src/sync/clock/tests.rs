@@ -188,6 +188,7 @@ fn test_continue_resumes() {
 #[test]
 fn test_reset() {
     let mut clock = MidiClockDecoder::new();
+    assert!(clock.tempo_bpm().is_none());
     clock.start_msg();
 
     let interval = us_per_tick(120.0);

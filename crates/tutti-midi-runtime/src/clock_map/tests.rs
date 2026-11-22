@@ -52,7 +52,7 @@ fn a_time_before_the_anchor_is_extrapolated_back_until_frame_zero() {
 #[test]
 fn a_time_lands_on_the_nearest_frame() {
     let t0 = base();
-    for (anchor, sign, near, far) in [(0, 1, 0, 1), (4, -1, 4, 3)] {
+    for (case, anchor, sign, near, far) in [("after", 0, 1, 0, 1), ("before", 4, -1, 4, 3)] {
         let map = map_at(t0, anchor);
         let at = |ns| {
             if sign > 0 {
@@ -61,8 +61,8 @@ fn a_time_lands_on_the_nearest_frame() {
                 t0 - Duration::from_nanos(ns)
             }
         };
-        assert_eq!(map.frame_at(at(10_417)), Some(Frame::new(far)), "{sign}");
-        assert_eq!(map.frame_at(at(10_416)), Some(Frame::new(near)), "{sign}");
+        assert_eq!(map.frame_at(at(10_417)), Some(Frame::new(far)), "{case}");
+        assert_eq!(map.frame_at(at(10_416)), Some(Frame::new(near)), "{case}");
     }
 }
 
