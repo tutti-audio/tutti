@@ -10,8 +10,8 @@ use tutti_plugin_types::{
 };
 use tutti_plugin_types::{
     ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
-    NoteExpressionTextChanges, ParamEdit, ParameterChanges, ParameterInfo, PluginTail, Preset,
-    PresetId, Samples, ScaleChanges, TransportChanges, TransportInfo,
+    NoteExpressionTextChanges, ParamEdit, ParameterChanges, ParameterInfo, PluginPreset,
+    PluginTail, PresetId, Samples, ScaleChanges, TransportChanges, TransportInfo,
 };
 use tutti_plugin_types::{RateRefusal, RateRefusalCause};
 use tutti_units::Normalized;
@@ -144,7 +144,7 @@ pub(super) enum ControlCommand {
         reply: Reply<Option<Normalized>>,
     },
     GetPresetList {
-        reply: Reply<Option<Vec<Preset>>>,
+        reply: Reply<Option<Vec<PluginPreset>>>,
     },
     LoadPreset {
         id: PresetId,

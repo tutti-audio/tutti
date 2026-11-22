@@ -317,7 +317,7 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     let (_fork_ed, mut fork_exec) = live
         .renderer()
         .editor()
-        .fork(ForkTarget::Master, ForkMode::Offline, prepare)
+        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare)
         .expect("the lane and the plugin fork");
     let silence = vec![0.0f32; FORK_BLOCK];
     let inputs: Vec<&[f32]> = (0..live.inputs()).map(|_| &silence[..]).collect();

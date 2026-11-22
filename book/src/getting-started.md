@@ -37,7 +37,7 @@ device:
 
 ```rust,ignore
 // No sound card: the session renders when we ask it to.
-let mut session = Session::new(SampleRate::SR_48K)?;
+let mut session = Session::builder().sample_rate(SampleRate::SR_48K).build()?;
 ```
 
 The sample rate (also known as *sampling frequency*) tells
@@ -94,13 +94,16 @@ connect it to the left channel and to the right one:
 
 ```rust,ignore
 // One mono output, heard in the left and the right channel.
-session.graph().connect(sine.out(0), Root::output(0))?;
-session.graph().connect(sine.out(0), Root::output(1))?;
+session
+    .graph()
+    .connect(sine.out(0), MainOutput::channel(0))?;
+session
+    .graph()
+    .connect(sine.out(0), MainOutput::channel(1))?;
 ```
 
-[`Root`](../api/tutti/struct.Root.html) stands for the session's own output,
-the end of every signal path (also known as the *master bus*, or *main
-out*). Wiring is how everything in
+[`MainOutput`](../api/tutti/struct.MainOutput.html) is the session's main output,
+the end of every signal path (the *master bus* of other tools). Wiring is how everything in
 tutti fits together, and later chapters build much richer paths than this
 one.
 
@@ -118,13 +121,13 @@ Bounce::new()
 ```
 
 Then we tell the [`Bounce`](../api/tutti/struct.Bounce.html) where the file
-goes: the *master*, the file of the whole mix (also known as the *main mix*,
-or *stereo mix*). Then we hand it to the session:
+goes: the *main output*, the file of the whole mix (also known as the *master*,
+*main mix*, or *stereo mix*). Then we hand it to the session:
 
 ```rust,ignore
 // The file's name picks its format: `.flac` is FLAC.
 let mut session = tone()?;
-let rendering = session.bounce(two_seconds().master(&path, Format::from_path(&path)?))?;
+let rendering = session.bounce(two_seconds().main_output(&path, Format::from_path(&path)?))?;
 // The session renders on a thread of its own; we wait for it, then hand
 // what it made back to the session.
 let rendered = block_on(rendering.into_future());
@@ -167,7 +170,7 @@ listen:
 - Change `OscillatorWave::Sine` to `OscillatorWave::Saw`. The pitch stays the
   same, but the sound turns bright and buzzy, because a saw wave carries
   every harmonic of the note.
-- Remove the line that wires `Root::output(1)`, and the tone moves to your
+- Remove the line that wires `MainOutput::channel(1)`, and the tone moves to your
   left ear.
 
 A single tone is not music yet. In the guide, we start shaping it into some.

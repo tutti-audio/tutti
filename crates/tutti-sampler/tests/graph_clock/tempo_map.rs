@@ -158,10 +158,7 @@ fn render(
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     transport.settings().set_tempo_map(Arc::clone(map));
-    transport
-        .motion()
-        .try_send(MotionCommand::Play)
-        .expect("room");
+    transport.motion().send(MotionCommand::Play).expect("room");
     let mut left = Vec::with_capacity(frames + block);
     let mut buf = vec![0.0f32; block * 2];
     while left.len() < frames {
@@ -355,10 +352,7 @@ fn a_clip_placed_ahead_of_a_tempo_change_lands_its_first_frame_on_its_start() {
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     transport.settings().set_tempo_map(Arc::clone(&m));
-    transport
-        .motion()
-        .try_send(MotionCommand::Play)
-        .expect("room");
+    transport.motion().send(MotionCommand::Play).expect("room");
     let frames = 3 * 48_000 + 12_000;
     let mut left = Vec::with_capacity(frames + 64);
     let mut buf = vec![0.0f32; 64 * 2];

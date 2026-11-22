@@ -15,7 +15,8 @@ use tutti_graph::{
 };
 use tutti_nodes::testing::Const;
 use tutti_session::{
-    BusSink, Edge, EventEdge, Feeder, InPort, OutPort, Replacement, Root, Session, SessionEvent,
+    BusSink, ChannelEdge, EventEdge, Feeder, InPort, MainOutput, OutPort, Replacement, Session,
+    SessionEvent,
 };
 use tutti_units::{Amplitude, Samples};
 
@@ -70,7 +71,7 @@ fn channel(s: &mut Session, ch: usize) -> Vec<f32> {
     block.iter().skip(ch).step_by(2).copied().collect()
 }
 
-fn unwired(events: &[SessionEvent]) -> Vec<(NodeKey, Vec<Edge>, Vec<EventEdge>)> {
+fn unwired(events: &[SessionEvent]) -> Vec<(NodeKey, Vec<ChannelEdge>, Vec<EventEdge>)> {
     events
         .iter()
         .filter_map(|e| match e {
@@ -110,8 +111,8 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
     for (from, to) in [
         (OutPort::new(a, 0), x.input(0)),
         (OutPort::new(b, 0), x.input(1)),
-        (x.out(0), Root::output(0)),
-        (x.out(1), Root::output(1)),
+        (x.out(0), MainOutput::channel(0)),
+        (x.out(1), MainOutput::channel(1)),
     ] {
         g.connect(from, to).unwrap().unfaded();
     }
@@ -123,7 +124,7 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
     ] {
         g.connect(from, to).unwrap();
     }
-    let kept = Edge::new(OutPort::new(a, 0), x.input(0));
+    let kept = ChannelEdge::new(OutPort::new(a, 0), x.input(0));
     // The gain lane is the wire's declaration: the connection is made again
     // with it (the edge is held already, so only its gain is set).
     g.connect(kept.source(), kept.sink())
@@ -153,8 +154,8 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
     edges.sort();
     event_edges.sort();
     let mut want_edges = vec![
-        Edge::new(OutPort::new(b, 0), x.input(1)),
-        Edge::new(x.out(1), Root::output(1)),
+        ChannelEdge::new(OutPort::new(b, 0), x.input(1)),
+        ChannelEdge::new(x.out(1), MainOutput::channel(1)),
     ];
     want_edges.sort();
     let mut want_events = vec![
@@ -205,7 +206,9 @@ fn a_wider_reinsert_reports_nothing() {
     let a = g.add(ForkByClone(Const::mono(A)));
     let x = g.add(ForkByClone(Pass::<1, 1>));
     g.connect(OutPort::new(a, 0), x.input(0)).unwrap().unfaded();
-    g.connect(x.out(0), Root::output(0)).unwrap().unfaded();
+    g.connect(x.out(0), MainOutput::channel(0))
+        .unwrap()
+        .unfaded();
     let events = s.update();
     assert!(!refused(&events));
     s.graph()
@@ -347,17 +350,17 @@ fn a_narrower_reinsert_reports_the_bus_edges_it_dropped() {
     }
 }
 
-/// **A root feed from a lost bus is reported as `(source, Root)`.**
+/// **A main output feed from a lost bus is reported as `(source, MainOutput)`.**
 #[test]
-fn a_narrower_reinsert_reports_the_root_feed_it_dropped() {
+fn a_narrower_reinsert_reports_the_main_output_feed_it_dropped() {
     let mut s = Session::builder().build().expect("builds");
     let g = s.graph();
     let y = g.add(ForkByClone(Bused { aux: true }));
-    s.declare_root_topology(Some(ChannelTopology::default_for(ChannelLayout::STEREO)))
+    s.declare_main_output_topology(Some(ChannelTopology::default_for(ChannelLayout::STEREO)))
         .expect("stereo");
     let g = s.graph();
-    g.connect(y.bus_out(0), Root).unwrap().unfaded();
-    g.connect(y.bus_out(1), Root).unwrap().unfaded();
+    g.connect(y.bus_out(0), MainOutput).unwrap().unfaded();
+    g.connect(y.bus_out(1), MainOutput).unwrap().unfaded();
     let events = s.update();
     assert!(!refused(&events), "{events:?}");
 
@@ -376,7 +379,7 @@ fn a_narrower_reinsert_reports_the_root_feed_it_dropped() {
             _ => None,
         })
         .collect();
-    assert_eq!(reported, [vec![(y.bus_out(1), BusSink::Root)]]);
+    assert_eq!(reported, [vec![(y.bus_out(1), BusSink::MainOutput)]]);
 }
 
 /// **A commit that is refused reports nothing, and the record waits for the
@@ -418,6 +421,6 @@ fn unwired_waits_for_the_commit_that_lands() {
     assert!(!refused(&events), "{events:?}");
     let [(node, edges, _)] = <[_; 1]>::try_from(unwired(&events)).expect("reported once");
     assert_eq!(node, x.erase());
-    assert_eq!(edges, [Edge::new(OutPort::new(a, 0), x.input(1))]);
+    assert_eq!(edges, [ChannelEdge::new(OutPort::new(a, 0), x.input(1))]);
     assert!(unwired(&s.update()).is_empty());
 }

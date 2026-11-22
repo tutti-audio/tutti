@@ -474,6 +474,33 @@ impl Negotiation {
             || self.ci.hears_sysex(has_identity)
     }
 
+    /// Whether the next poll has work no input and no timer will bring: a
+    /// negotiation or an inquiry that has not started, or what MIDI-CI has
+    /// decided or been asked since the last poll.
+    pub(crate) fn needs_poll(&self) -> bool {
+        matches!(self.run, Run::Idle)
+            || matches!(self.inquire, Inquire::Idle)
+            || (self.out.is_some() && self.ci.needs_poll())
+    }
+
+    /// When the negotiation, the inquiry or MIDI-CI next needs a poll for a
+    /// wait that runs out, or `None` while none waits.
+    pub(crate) fn deadline(&self) -> Option<Instant> {
+        let stream = match &self.run {
+            Run::Idle => None,
+            Run::Asking(connection) => connection.deadline(),
+            Run::Done { listening, .. } => listening.as_ref().and_then(|c| c.deadline()),
+        };
+        let inquiry = match &self.inquire {
+            Inquire::Asking(asking) => asking.inquiry.deadline(),
+            Inquire::No | Inquire::Idle => None,
+        };
+        [stream, inquiry, self.ci.deadline()]
+            .into_iter()
+            .flatten()
+            .min()
+    }
+
     /// The input is closing: MIDI-CI ends on the device's output (see
     /// [`Ci::close`]).
     pub(crate) fn close(&mut self) {

@@ -20,7 +20,7 @@ use tutti_plugin_types::Samples;
 use tutti_plugin_types::{BlockStatus, ContentScale, PluginId, StateUse};
 use tutti_plugin_types::{EditorError, MidiEventVec, RateRefusalCause, ServerError, StateError};
 use tutti_plugin_types::{
-    LoadedPlugin, ParameterInfo, PluginDescriptor, PluginFormat, PluginTail, Preset, PresetId,
+    ParameterInfo, PluginDescriptor, PluginFormat, PluginPreset, PluginTail, PluginWiring, PresetId,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -426,7 +426,7 @@ pub enum ControlReply {
         descriptor: Box<PluginDescriptor>,
         /// Engine-wiring data from instantiation (bus widths, latency, f64).
         #[serde(default)]
-        loaded: LoadedPlugin,
+        loaded: PluginWiring,
         /// The sample format actually agreed on, which may differ from the
         /// host's preference.
         negotiated_format: FloatWidth,
@@ -472,7 +472,7 @@ pub enum ControlReply {
     /// `Some(false)` for a format that was asked and declined.
     PresetList {
         /// The plugin's presets, in its own order.
-        presets: Vec<Preset>,
+        presets: Vec<PluginPreset>,
     },
     /// Whether the plugin accepted a [`LoadPreset`](ControlRequest::LoadPreset).
     ///

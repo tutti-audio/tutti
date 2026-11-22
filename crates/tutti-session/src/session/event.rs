@@ -5,9 +5,7 @@ use tutti_engine::StreamFault;
 use tutti_graph::{BusSource, CommitError, NodeKey, Wired};
 use tutti_units::SampleRate;
 
-use crate::{
-    BusSink, Edge, EventEdge, Problem, ReplaceRefused, ResourceFact, ResourceId, RootReader,
-};
+use crate::{BusSink, ChannelEdge, EventEdge, MainOutputReader, Problem, ReplaceRefused};
 
 /// Something an [`update`](crate::Session::update) found for the host.
 #[derive(Debug)]
@@ -43,14 +41,14 @@ pub enum SessionEvent {
     /// A node re-inserted with a narrower shape (a plugin whose ports changed,
     /// a node re-declared at a new width) lost wiring to the ports it no
     /// longer has. Reported once, by the update that commits the re-insert,
-    /// per node: the audio edges, the event edges and the bus edges (root feeds
+    /// per node: the audio edges, the event edges and the bus edges (main output feeds
     /// included) that were dropped, by the ports the app named them with.
     /// Edges to the ports the node still has are kept, gains included. A
     /// refused commit reports nothing: the record waits for the update whose
     /// commit lands.
     ///
     /// A feedback edge is listed as the pair of ports it joined (its delay
-    /// is not part of an [`Edge`]). A modulation route onto a
+    /// is not part of a [`ChannelEdge`]). A modulation route onto a
     /// dropped edge, or a param or edge-gain lane the node's lost event
     /// outputs drove, is not listed: the route stays declared and reads
     /// unresolved (`Problem::Unresolved`) until its target
@@ -60,12 +58,12 @@ pub enum SessionEvent {
         node: NodeKey,
         /// The audio edges dropped, into or out of the node (a feedback edge
         /// as the pair of ports it joined).
-        edges: Vec<Edge>,
+        edges: Vec<ChannelEdge>,
         /// The event edges dropped, into or out of the node.
         event_edges: Vec<EventEdge>,
         /// The bus edges dropped, into or out of the node, as the app wired
         /// them: the source bus and the sink, a node's input bus or the
-        /// root.
+        /// main output.
         bus_edges: Vec<(BusSource, BusSink)>,
     },
     /// A node with a bus besides its main one (an aux or sidechain bus, a
@@ -129,16 +127,16 @@ pub enum SessionEvent {
     /// the callback came (an edit applying while the device asked for
     /// audio), when the output buffer's width is one the engine has no fold
     /// for ([`Engine::support_output`](tutti_engine::Engine::support_output)),
-    /// when the graph has no output channels, or when the graph's root width
+    /// when the graph has no output channels, or when the graph's main output width
     /// cannot be placed on the device's. Blocks that merely ran past their
     /// budget are not silenced and have no event: that is the polled
     /// [`BlockCounts::over_budget`](tutti_engine::BlockCounts::over_budget).
     BlocksSilenced(u64),
     /// A staged [`OutputPolicy`](crate::OutputPolicy)'s routing was checked
     /// when it was set, and the engine refused it when it came to apply: it has
-    /// no place for a root on the device the stream renders into. The routing
+    /// no place for a main output on the device the stream renders into. The routing
     /// in force is unchanged and the policy's levels are applied; set a routing
-    /// that places the root.
+    /// that places the main output.
     OutputRoutingRefused(tutti_engine::RoutingError),
     /// The session's rate changed with its clock: a switch onto a sound card
     /// that runs at another rate, or the card's rate carried to the timer. A
@@ -174,45 +172,39 @@ pub enum SessionEvent {
     /// A MIDI event of the session's, by area (design 030, convention 1):
     /// a device came or went, a held input or the output was lost, a
     /// negotiation settled, the device watch ended, or events were dropped.
-    /// See [`MidiReport`](crate::MidiReport).
+    /// See [`MidiEvent`](crate::MidiEvent).
     #[cfg(feature = "midi")]
-    Midi(crate::MidiReport),
+    Midi(crate::MidiEvent),
     /// A hosted plugin's event, by area: what the plugin reported (its own edit of a parameter, a
     /// new tail) and every transition of its life (died, reloading, recovered,
     /// gave up). See [`PluginEvent`](crate::PluginEvent).
     #[cfg(feature = "plugin")]
     Plugin(crate::PluginEvent),
-    /// A reading of one peer changed: read `fact` again on the token whose
-    /// [`Resource::id`](crate::Resource::id) is `id`. The notice carries no
-    /// value.
-    ResourceChanged {
-        /// The peer's token.
-        id: ResourceId,
-        /// Which of its readings changed.
-        fact: ResourceFact,
-    },
-    /// A reader of the root was opened again, because the root's width is no
+    /// A reading of one of the session's peers changed. See
+    /// [`PeerEvent`](crate::PeerEvent).
+    Peer(crate::PeerEvent),
+    /// A reader of the main output was opened again, because the main output's width is no
     /// longer the one the reader has: a tap from
-    /// [`Taps::open_root`](crate::Taps::open_root), or the master meter
-    /// once a host took it ([`crate::Session::take_master_meter`]). `id` names the new
+    /// [`Taps::open_main_output`](crate::Taps::open_main_output), or the main output meter
+    /// once a host took it ([`crate::Session::take_main_output_meter`]). `id` names the new
     /// reader, which the session holds until
     /// [`crate::Session::take_reopened`] claims it (an event left unread loses
-    /// nothing); `topology` is the root's now. The old reader reads closed, so
+    /// nothing); `topology` is the main output's now. The old reader reads closed, so
     /// no reader takes twelve channels for two: a tap's reads what its rings
-    /// held when the commit that changed the root was applied and then ends
+    /// held when the commit that changed the main output was applied and then ends
     /// ([`Pull::Ended`](tutti_buffers::Pull::Ended)), a meter's reads
     /// [`is_closed`](tutti_graph::MeterReader::is_closed). A second reopen
     /// before the claim replaces the held reader, and the earlier one ends.
     ///
     /// The new tap is fed from the first block of the plan that carries the
-    /// change, and what the old one holds ends on the block before it: a root
+    /// change, and what the old one holds ends on the block before it: a main output
     /// crossfade fades the engine's output, never what a tap reads, so the
-    /// tap switches to the new root at the commit and never reads the old
-    /// root's channels. The event comes in the update that sends the commit.
-    RootReaderReopened {
+    /// tap switches to the new main output at the commit and never reads the old
+    /// main output's channels. The event comes in the update that sends the commit.
+    MainOutputReaderReopened {
         /// The reader to claim.
-        id: RootReader,
-        /// The root's topology the reader was opened for.
+        id: MainOutputReader,
+        /// The main output's topology the reader was opened for.
         topology: ChannelTopology,
     },
 }

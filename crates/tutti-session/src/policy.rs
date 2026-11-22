@@ -25,14 +25,14 @@ pub trait Policy: Clone + PartialEq + Send + Sync + 'static {
     fn target() -> Self::Target;
 }
 
-/// Where the mix lands: the format the root is heard in, the root's channels to
+/// Where the mix lands: the format the main output is heard in, the main output's channels to
 /// the device's, and each device output's gain.
 ///
-/// The root, a bounce and a tap are never changed by it: they read the root.
+/// The main output, a bounce and a tap are never changed by it: they read the main output.
 /// What is heard is the device, and the heard tap
 /// ([`Session::open_heard_tap`]).
 ///
-/// The default routes the root to the device by speaker, as a session with no
+/// The default routes the main output to the device by speaker, as a session with no
 /// policy does.
 ///
 /// ```
@@ -57,11 +57,11 @@ pub struct OutputPolicy {
     /// The device channel each heard channel goes to; the identity (by
     /// speaker) by default.
     pub map: OutputMap,
-    /// The format the root is heard in (a 7.1.4 mix checked as 5.1, stereo or
-    /// mono); `None` is the root's own.
+    /// The format the main output is heard in (a 7.1.4 mix checked as 5.1, stereo or
+    /// mono); `None` is the main output's own.
     pub monitor: Option<ChannelTopology>,
     /// The downmix levels of the fold into [`monitor`](Self::monitor), and of
-    /// that fold alone: with no monitor the root reaches the device by speaker
+    /// that fold alone: with no monitor the main output reaches the device by speaker
     /// at the default levels (BS.775), whatever these say.
     pub levels: FoldLevels,
     /// A gain, mute and solo per device output, and the dim over all.
@@ -96,7 +96,7 @@ pub enum OutputPolicyError {
         /// The device's width.
         device: ChannelLayout,
     },
-    /// The routing has no place on the root and the device: the monitor fold,
+    /// The routing has no place on the main output and the device: the monitor fold,
     /// the map's width or outputs.
     #[error(transparent)]
     Routing(#[from] RoutingError),
@@ -110,7 +110,7 @@ impl Policy for OutputPolicy {
     }
 }
 
-/// What the device and the root are, as the graph last placed them: what an
+/// What the device and the main output are, as the graph last placed them: what an
 /// [`OutputPolicy`] is checked against. The graph publishes it at each
 /// change; it is `None` with no engine.
 #[derive(Clone, Debug)]
@@ -119,8 +119,8 @@ pub(crate) struct OutputFacts {
     pub device: ChannelLayout,
     /// What the device is, for a fold.
     pub placed: ChannelTopology,
-    /// The root the next commit renders.
-    pub root: ChannelTopology,
+    /// The main output the next commit renders.
+    pub main_output: ChannelTopology,
 }
 
 /// [`OutputFacts`] behind a lock the value lock does not cover: the graph
@@ -145,11 +145,11 @@ pub(crate) fn output_cell(facts: FactsCell) -> Arc<Cell<OutputPolicy>> {
             .check()
             .map_err(RoutingError::Fold)
             .map_err(OutputPolicyError::from)?;
-        // A check over the routing's shape against the root and the device, not a
+        // A check over the routing's shape against the main output and the device, not a
         // render: whether it has a place does not depend on the sample format.
         policy
             .routing()
-            .fold::<f32>(&facts.root, &facts.placed)
+            .fold::<f32>(&facts.main_output, &facts.placed)
             .map_err(OutputPolicyError::from)?;
         Ok::<(), SetRefusal>(())
     })

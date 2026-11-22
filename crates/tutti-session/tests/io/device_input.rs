@@ -13,8 +13,8 @@ use tutti_cpal::MicConfig;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec, StreamLatency};
 use tutti_graph::{InletRing, TapWriter};
 use tutti_session::{
-    DeviceEvent, Error, InputConfig, InputOpener, LiveSession, OpenedInput, Phase, PhaseCx, Root,
-    Session, SessionEvent,
+    DeviceEvent, Error, InputConfig, InputOpener, LiveSession, MainOutput, OpenedInput, Phase,
+    PhaseCx, Session, SessionEvent,
 };
 use tutti_units::{SampleRate, Samples};
 
@@ -120,7 +120,7 @@ fn first_frame(session: &mut LiveSession, stream: &ManualStream) -> [f32; 2] {
 }
 
 /// **A restart onto another rate reopens an added input at that rate into the
-/// same node.** The input is monitored (wired to the root); after a restart from
+/// same node.** The input is monitored (wired to the main output); after a restart from
 /// 48 kHz to 44.1 kHz the capture was closed first, opened again at 44.1 kHz,
 /// and what its new callback pushes is heard through the node the host holds,
 /// which was never rewired. The old ring is no longer read.
@@ -135,11 +135,11 @@ fn a_restart_reopens_an_added_input_into_the_same_node() {
         .expect("opens");
     session
         .graph()
-        .connect(input.node(), Root)
+        .connect(input.node(), MainOutput)
         .unwrap()
         .unfaded();
     // The wire as the host declared it; the render below needs it in force.
-    let wired = session.graph_ref().sources(Root::output(0)).unwrap();
+    let wired = session.graph_ref().sources(MainOutput::channel(0)).unwrap();
     assert_eq!(wired.len(), 1, "monitored");
 
     let block = [0.25, -0.25].repeat(16);
@@ -165,7 +165,10 @@ fn a_restart_reopens_an_added_input_into_the_same_node() {
     );
 
     // The same node, the same wire: nothing was done to the graph but the swap.
-    assert_eq!(session.graph_ref().sources(Root::output(0)).unwrap(), wired);
+    assert_eq!(
+        session.graph_ref().sources(MainOutput::channel(0)).unwrap(),
+        wired
+    );
     {
         let mut rec = record.lock().unwrap();
         rec.writers[0].push_interleaved(

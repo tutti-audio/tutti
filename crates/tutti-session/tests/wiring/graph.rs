@@ -17,8 +17,8 @@ use tutti_graph::{
 use tutti_nodes::testing::{Const, Osc, Through};
 use tutti_rt::Param;
 use tutti_session::{
-    DetachedSession, EventInPort, Feeder, InPort, OutPort, RemoveError, ReplaceRefused,
-    Replacement, Root, Session, SessionEvent, SessionNode, root_width,
+    DetachedSession, EventInPort, Feeder, InPort, MainInput, MainOutput, OutPort, RemoveError,
+    ReplaceRefused, Replacement, Session, SessionEvent, SessionNode, main_output_width,
 };
 use tutti_units::{Drive, Hz, Real, SampleRate, Samples};
 use tutti_units::{Latency, UnitParam};
@@ -266,7 +266,7 @@ fn every_source_reads_back_as_written() {
     for source in [
         OutPort::new(stereo, 1),
         OutPort::new(stereo, 0),
-        Root::input(0),
+        MainInput::channel(0),
     ] {
         graph
             .set_sources(InPort::new(sink, 0), [source])
@@ -279,11 +279,11 @@ fn every_source_reads_back_as_written() {
             "node port"
         );
         graph
-            .set_sources(Root::output(1), [source])
+            .set_sources(MainOutput::channel(1), [source])
             .unwrap()
             .unfaded();
         assert_eq!(
-            graph.sources(Root::output(1)).unwrap(),
+            graph.sources(MainOutput::channel(1)).unwrap(),
             held,
             "global output"
         );
@@ -292,7 +292,7 @@ fn every_source_reads_back_as_written() {
 
 /// Silence is stored as the empty set, never as a `PortSource::Zero` (which the
 /// compiler's validation refuses), whichever call wrote it: a port or output
-/// set to no sources, a cleared sink, and a fresh or widened root. `planned_compensation` is `None` when the spec does not validate.
+/// set to no sources, a cleared sink, and a fresh or widened main output. `planned_compensation` is `None` when the spec does not validate.
 #[test]
 fn every_setter_stores_silence_as_the_empty_set() {
     let mut s = detached(2);
@@ -301,7 +301,7 @@ fn every_setter_stores_silence_as_the_empty_set() {
     let src = graph.add(ForkByClone(Const::frame(&[1.0, 2.0])));
     assert!(
         graph.testing().planned_compensation().is_some(),
-        "fresh root"
+        "fresh main output"
     );
 
     graph
@@ -318,17 +318,20 @@ fn every_setter_stores_silence_as_the_empty_set() {
     );
 
     graph
-        .set_sources(Root::output(0), [OutPort::new(src, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(src, 0)])
         .unwrap()
         .unfaded();
-    graph.set_sources(Root::output(0), []).unwrap().unfaded();
+    graph
+        .set_sources(MainOutput::channel(0), [])
+        .unwrap()
+        .unfaded();
     assert!(
         graph.testing().planned_compensation().is_some(),
         "set_sources of none after one"
     );
 
-    graph.connect(src, Root).unwrap().unfaded();
-    graph.disconnect(src, Root).unwrap();
+    graph.connect(src, MainOutput).unwrap().unfaded();
+    graph.disconnect(src, MainOutput).unwrap();
     assert!(
         graph.testing().planned_compensation().is_some(),
         "disconnected main bus"
@@ -337,9 +340,9 @@ fn every_setter_stores_silence_as_the_empty_set() {
     graph.widen_outputs(4).expect("widens");
     assert!(
         graph.testing().planned_compensation().is_some(),
-        "widened root"
+        "widened main output"
     );
-    assert_eq!(graph.sources(Root::output(3)).unwrap(), []);
+    assert_eq!(graph.sources(MainOutput::channel(3)).unwrap(), []);
 }
 
 /// `remove` says whether the node was there, so removing a node twice is a
@@ -372,16 +375,16 @@ fn removing_a_stranger_changes_nothing() {
     assert!(!s.graph_ref().has_uncommitted_edits(), "nothing was edited");
 }
 
-/// `root_width` is `max(project, device)` clamped to
+/// `main_output_width` is `max(project, device)` clamped to
 /// `1..=MAX_CHANNELS`; each row is one way the rule is load-bearing.
 #[test]
-fn root_width_takes_the_wider_side_within_the_scratch_bounds() {
+fn main_output_width_takes_the_wider_side_within_the_scratch_bounds() {
     let cases: &[(ChannelLayout, ChannelLayout, usize, &str)] = &[
         (
             ChannelLayout::STEREO,
             ChannelLayout::from(6u16),
             6,
-            "a wider device widens the root: a stereo project on a 5.1 device \
+            "a wider device widens the main output: a stereo project on a 5.1 device \
              must render all six, or the top four are permanently silent",
         ),
         (
@@ -412,15 +415,15 @@ fn root_width_takes_the_wider_side_within_the_scratch_bounds() {
             ChannelLayout::EMPTY,
             ChannelLayout::EMPTY,
             1,
-            "the root is never zero wide: a zero-output root would render \
+            "the main output is never zero wide: a zero-output main output would render \
              nothing at all",
         ),
     ];
     for &(project, device, expected, why) in cases {
         assert_eq!(
-            root_width(project, device),
+            main_output_width(project, device),
             expected,
-            "root_width({} channels, {} channels): {why}",
+            "main_output_width({} channels, {} channels): {why}",
             project.count(),
             device.count()
         );
@@ -436,7 +439,7 @@ fn an_edit_between_updates_is_committed_by_the_next() {
     let mut s = detached(1);
     let a = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(a, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(a, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -449,7 +452,7 @@ fn an_edit_between_updates_is_committed_by_the_next() {
 
     let b = s.graph().add(ForkByClone(Const::mono(2.0)));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(b, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(b, 0)])
         .unwrap()
         .unfaded();
     assert!(s.graph_ref().has_uncommitted_edits());
@@ -477,7 +480,7 @@ fn an_update_with_no_edit_sends_no_plan() {
     let mut s = detached(1);
     let a = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(a, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(a, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -525,7 +528,7 @@ fn a_replace_during_a_re_prepare_lands_on_a_later_update() {
     let mut side = s.graph().take_audio_side();
     let knob = s.graph().add(Params(Knob::new()));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(knob, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(knob, 0)])
         .unwrap()
         .unfaded();
     assert!(s.update().is_empty());
@@ -615,7 +618,7 @@ fn removing_a_node_purges_the_replacements_parked_on_it() {
     }
 }
 
-/// A detached session with a knob playing at the root, its first plan sent,
+/// A detached session with a knob playing at the main output, its first plan sent,
 /// and the audio side taken: the running node a swap fades from.
 fn playing_knob() -> (
     DetachedSession,
@@ -626,7 +629,7 @@ fn playing_knob() -> (
     let mut side = s.graph().take_audio_side();
     let knob = s.graph().add(Params(Knob::new()));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(knob, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(knob, 0)])
         .unwrap()
         .unfaded();
     assert!(s.update().is_empty());
@@ -853,7 +856,7 @@ fn removing_a_node_reports_the_parked_swap_it_drops() {
 }
 
 /// **`remove` fades the node out, and `.unfaded()` cuts it**: a removed node
-/// that feeds the root plays on through the declick after the commit that
+/// that feeds the main output plays on through the declick after the commit that
 /// carries the removal, and is gone at that commit with `.unfaded()`.
 #[test]
 fn an_unfaded_removal_cuts_where_the_default_fades_out() {
@@ -914,11 +917,11 @@ fn every_param_write_path_reaches_a_fork() {
     let k0 = s.graph().add(Params(Knob::new()));
     let k1 = s.graph().add(Params(Knob::new()));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(k0, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(k0, 0)])
         .unwrap()
         .unfaded();
     s.graph()
-        .set_sources(Root::output(1), [OutPort::new(k1, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(k1, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -1002,7 +1005,7 @@ fn period(x: &[f32]) -> f64 {
 }
 
 /// `frames` frames of `s`, `layout` wide, in `block`-frame blocks.
-fn pull(s: &Session, layout: ChannelLayout, frames: usize, block: usize) -> Vec<f32> {
+fn pull(s: &mut Session, layout: ChannelLayout, frames: usize, block: usize) -> Vec<f32> {
     let width = usize::from(layout.count());
     let mut out = Vec::with_capacity(frames * width);
     let mut buf = vec![0.0f32; block * width];
@@ -1029,12 +1032,12 @@ fn an_offline_session_renders_a_sines_analytic_rms() {
     let osc = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
     for c in 0..s.graph_ref().outputs() {
         s.graph()
-            .connect(osc.out(0), Root::output(c))
+            .connect(osc.out(0), MainOutput::channel(c))
             .unwrap()
             .unfaded();
     }
     let _ = s.update();
-    let out = pull(&s, ChannelLayout::MONO, 48_000, 512);
+    let out = pull(&mut s, ChannelLayout::MONO, 48_000, 512);
     let rms = tutti_fixtures::signal::rms_f64(&out);
     assert!(
         (rms - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-4,
@@ -1070,11 +1073,11 @@ fn a_latent_branch_is_compensated_on_the_other_to_the_sample() {
         .unwrap()
         .unfaded();
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(osc, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(osc, 0)])
         .unwrap()
         .unfaded();
     s.graph()
-        .set_sources(Root::output(1), [OutPort::new(late, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(late, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -1085,7 +1088,7 @@ fn a_latent_branch_is_compensated_on_the_other_to_the_sample() {
         "the dry channel pre-rolls by the latent one's latency"
     );
 
-    let out = pull(&s, ChannelLayout::STEREO, 4_096, 256);
+    let out = pull(&mut s, ChannelLayout::STEREO, 4_096, 256);
     let (dry, wet): (Vec<f32>, Vec<f32>) =
         out.as_chunks::<2>().0.iter().map(|f| (f[0], f[1])).unzip();
     let first = |x: &[f32]| x.iter().position(|&v| v != 0.0);
@@ -1230,7 +1233,7 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
     let (published, first) = Published::new();
     let node = s.graph().add(published);
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -1327,11 +1330,11 @@ fn a_removed_nodes_controls_live_until_its_fade_out_ends() {
     let (published, controls) = Published::new();
     let node = s.graph().add(published);
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
-    let _ = pull(&s, ChannelLayout::STEREO, 64, 64);
+    let _ = pull(&mut s, ChannelLayout::STEREO, 64, 64);
     s.remove(node).unwrap();
     let _ = s.update();
     assert_eq!(
@@ -1341,10 +1344,10 @@ fn a_removed_nodes_controls_live_until_its_fade_out_ends() {
     );
     // The declick spans 256 frames; render past it, then let the updates
     // drop the node and collect its unit.
-    let _ = pull(&s, ChannelLayout::STEREO, 1_024, 64);
+    let _ = pull(&mut s, ChannelLayout::STEREO, 1_024, 64);
     for _ in 0..3 {
         let _ = s.update();
-        let _ = pull(&s, ChannelLayout::STEREO, 64, 64);
+        let _ = pull(&mut s, ChannelLayout::STEREO, 64, 64);
     }
     assert_eq!(
         Arc::strong_count(&controls.token),
@@ -1366,7 +1369,7 @@ fn a_refused_parked_replace_leaves_the_next_ones_controls_under_the_key() {
     let (published, outgoing) = Published::new();
     let node = s.graph().add(published);
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
         .unwrap()
         .unfaded();
     assert!(s.update().is_empty());
@@ -1457,7 +1460,7 @@ fn the_update_frees_the_slots_a_graph_pool_retired() {
     let bare = s.graph().add(tutti_graph::Unforkable(bare));
     s.graph()
         .set_sources(
-            Root::output(0),
+            MainOutput::channel(0),
             [OutPort::new(pool, 0), OutPort::new(bare, 0)],
         )
         .unwrap()
@@ -1500,7 +1503,7 @@ fn a_handle_is_none_once_its_node_is_removed() {
 /// pool's handle, and the graph's handle still commands it**: the pool's handle
 /// holds each streaming voice's `Stream`, and the last handle dropped closes
 /// it. The graph owns one for the node's life, so the file (a constant
-/// 0.25) still renders at unity gain on the root's left channel (the file is
+/// 0.25) still renders at unity gain on the main output's left channel (the file is
 /// mono) after the streamer has stepped past the drop, and a removal queued
 /// through `Graph::handle` silences it.
 #[cfg(feature = "sampler")]
@@ -1525,7 +1528,7 @@ fn a_streamed_voice_keeps_sounding_after_the_host_drops_its_handle() {
         .handle(&pool)
         .expect("the pool is in the graph")
         .clone();
-    s.graph().connect(pool, Root).unwrap().unfaded();
+    s.graph().connect(pool, MainOutput).unwrap().unfaded();
     host.add_streaming(
         SlotId(1),
         DiskVoice::from_reader(reader, VoiceWindow::from(tutti_units::Beat::new(0.0))),

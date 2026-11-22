@@ -626,7 +626,7 @@ s.finish_export(done)?;               // main thread: drop the leftovers, releas
 
 - The Bevy `ExportRequest` component stays in `bevy-tutti`. Its observer
   runs the `PrepareGraph` hook's `Fn(&World)` half on the main thread,
-  resolves `ExportSource<Entity>` to `ExportSource<NodeKey>` (`try_map`),
+  resolves `ExportSource<Entity>` to `ExportSource<NodeKey>` (`map`),
   and builds the session's request with the returned edit. `NodeNames` stays too: it maps
   the `NodeKey` an `ExportError` names back to an entity and its `Name`.
 - **One export at a time.** `s.export` returns `Error::ExportInFlight`

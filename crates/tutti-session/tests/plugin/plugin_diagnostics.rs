@@ -11,7 +11,7 @@ use crate::loading::{LoadPlugin, Spec};
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_plugin_types::PluginRef;
-use tutti_session::{Root, Session};
+use tutti_session::{MainOutput, Session};
 use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -25,7 +25,7 @@ fn offline() -> Session {
         .expect("an offline session builds")
 }
 
-fn render_block(s: &Session) {
+fn render_block(s: &mut Session) {
     let mut out = vec![0.0f32; BLOCK * 2];
     s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
 }
@@ -118,7 +118,7 @@ mod clap {
         use tutti_session::PluginHealth;
 
         let (mut s, node) = loaded(None);
-        s.graph().connect(node, Root).unwrap();
+        s.graph().connect(node, MainOutput).unwrap();
         let _ = s.update();
         let pid = s
             .plugin_view(node)
@@ -148,7 +148,7 @@ mod clap {
                 tutti_platform::Instant::now() < deadline,
                 "it never read Died"
             );
-            render_block(&s);
+            render_block(&mut s);
             std::thread::sleep(std::time::Duration::from_millis(5));
         };
         assert!(
@@ -169,7 +169,7 @@ mod clap {
     #[test]
     fn the_diagnostics_latency_is_the_report_plus_the_pipeline() {
         let (mut s, node) = loaded(None);
-        s.graph().connect(node, Root).unwrap();
+        s.graph().connect(node, MainOutput).unwrap();
         let _ = s.update();
         let diag = s.plugin_view(node).unwrap().diagnostics();
         let own = tutti_clap_test_plugin::REPORTED_LATENCY_SAMPLES as usize;
@@ -209,7 +209,7 @@ mod vst2 {
                 Spec::new(PluginRef::file(tutti_fixtures::vst2_probe().to_path_buf())),
             )
             .expect("the in-process VST2 loads");
-        s.graph().connect(node, Root).unwrap();
+        s.graph().connect(node, MainOutput).unwrap();
         let (inlet, mut writer) = s.graph().open_event_inlet(EventCapacity::of(512));
         s.graph()
             .connect(inlet.events_out(), node.events_in())
@@ -220,7 +220,7 @@ mod vst2 {
         let losses = || s.plugin_view(node).unwrap().losses();
         assert_eq!(losses(), Losses::NONE, "nothing sent yet");
         assert_eq!(diag().server_pid(), None, "no server in process");
-        assert_eq!(diag().missed_chunks(), 0, "no pipeline in process");
+        assert_eq!(diag().chunks().missed, 0, "no pipeline in process");
         assert!(diag().follows_project_meter());
         assert_eq!(
             diag().tail(),
@@ -246,7 +246,7 @@ mod vst2 {
                 .sum::<u64>()
         };
         writer.push_all(notes(300).map(|n| (tutti_session::Stamp::NextBlock, n)));
-        render_block(&s);
+        render_block(&mut s);
         assert_eq!(dropped(s.update()), cut, "the graph's cut, reported once");
         assert_eq!(
             s.plugin_view(node).unwrap().losses(),
@@ -254,7 +254,7 @@ mod vst2 {
             "not the plugin's loss"
         );
         writer.push_all(notes(10).map(|n| (tutti_session::Stamp::NextBlock, n)));
-        render_block(&s);
+        render_block(&mut s);
         assert_eq!(
             dropped(s.update()),
             0,

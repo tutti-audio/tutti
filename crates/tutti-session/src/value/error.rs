@@ -75,7 +75,7 @@ pub enum SetRefusal {
     #[cfg(feature = "plugin")]
     #[error(transparent)]
     Plugin(#[from] PluginParamRefusal),
-    /// The output policy has no place on the root and the device.
+    /// The output policy has no place on the main output and the device.
     #[error(transparent)]
     OutputPolicy(#[from] crate::OutputPolicyError),
     /// The MIDI policy has no place on the session's MIDI layer.

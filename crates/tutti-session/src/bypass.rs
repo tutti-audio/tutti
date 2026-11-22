@@ -226,8 +226,8 @@ pub(crate) mod tests {
 
     use tutti_plugin_host::{ParameterChangeSink, PluginHandle, PluginParamValues};
     use tutti_plugin_types::{
-        AnyThread, AutomationMode, AutomationModeError, BlockCounts, BypassWrite, Health,
-        LoadedPlugin, OwnBypass, ParamFlags, ParameterInfo, PluginFailure, RenderMode, StateError,
+        AnyThread, AutomationMode, AutomationModeError, BypassWrite, Health, OwnBypass, ParamFlags,
+        ParameterInfo, PipelineCounts, PluginFailure, PluginWiring, RenderMode, StateError,
         StateUse, TerminationReason, bypass_value, is_bypassed,
     };
     use tutti_units::Normalized;
@@ -340,8 +340,8 @@ pub(crate) mod tests {
         fn rate_refusal(&self) -> Option<tutti_plugin_types::RateRefusal> {
             None
         }
-        fn block_counts(&self) -> BlockCounts {
-            BlockCounts::default()
+        fn block_counts(&self) -> PipelineCounts {
+            PipelineCounts::default()
         }
         fn terminate(&self, _reason: TerminationReason) {}
     }
@@ -358,9 +358,9 @@ pub(crate) mod tests {
             attempts: 0.into(),
             writes: 0.into(),
         });
-        let loaded = LoadedPlugin {
+        let loaded = PluginWiring {
             own_bypass: Some(OwnBypass::Parameter(ID)),
-            ..LoadedPlugin::default()
+            ..PluginWiring::default()
         };
         let handle = PluginHandle::from_backend(
             Arc::clone(&plugin),

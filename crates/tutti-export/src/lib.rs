@@ -21,7 +21,7 @@
 //!   up to 512 MiB across the render, then in a temporary file beside its
 //!   target), measures it at the file's rate, and writes it again with the gain.
 //!   The graph is never rendered twice. An output can take another's gain
-//!   (`NormalizeSpec::from_output`), so a set of stems keeps the master's balance.
+//!   (`NormalizeSpec::from_output`), so a set of stems keeps the main output's balance.
 //! - Every file is written to a temporary beside its path and put in place at the
 //!   end, after every output has been finalized and the fork and the event loss
 //!   have been checked. A render that fails or is cancelled leaves every path as it
@@ -114,7 +114,7 @@
 //!     &mut tone(),
 //!     &job,
 //!     &FrozenClock,
-//!     Output::master(BufferTarget::new(ChannelLayout::STEREO)),
+//!     Output::main_output(BufferTarget::new(ChannelLayout::STEREO)),
 //!     &mut Control::none(),
 //! )
 //! .expect("a 0.5 s stereo render")
@@ -132,13 +132,13 @@
 //!     &job,
 //!     &FrozenClock,
 //!     vec![
-//!         Output::master(FileTarget::new(
-//!             dir.path().join("master.flac"),
+//!         Output::main_output(FileTarget::new(
+//!             dir.path().join("main_output.flac"),
 //!             Format::Flac { depth: IntDepth::Int24, level: FlacLevel::Standard },
 //!             ChannelLayout::STEREO,
 //!         )),
-//!         Output::master(FileTarget::new(
-//!             dir.path().join("master.wav"),
+//!         Output::main_output(FileTarget::new(
+//!             dir.path().join("main_output.wav"),
 //!             Format::Wav(Pcm::Int16),
 //!             ChannelLayout::STEREO,
 //!         )),
@@ -296,7 +296,7 @@ pub struct Written {
 /// The one place a [`ChannelLayout`] becomes the `usize` stride the render and
 /// the encoders use, and zero is the only rejected width. That the check is
 /// a bound rather than a list of enumerated widths is what lets a 3- or 5-wide
-/// master export at all: nothing here is generic over the count.
+/// main output export at all: nothing here is generic over the count.
 fn frame_width(layout: ChannelLayout) -> Result<usize> {
     match layout.count() {
         0 => Err(RenderError::UnsupportedChannels),
@@ -316,7 +316,7 @@ fn frame_width(layout: ChannelLayout) -> Result<usize> {
 /// target, removed afterwards), is measured at its file's rate and written
 /// again with the gain, and the graph is never rendered twice. An output that
 /// takes another's gain ([`GainSource::FromOutput`]) is written with it, so a
-/// set of stems keeps the master's balance.
+/// set of stems keeps the main output's balance.
 ///
 /// The render is the `job`'s: its rate (the graph must be prepared at it:
 /// [`RenderGraph::prepare`]), the audible span, the

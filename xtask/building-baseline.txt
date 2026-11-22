@@ -109,8 +109,8 @@ tutti-graph  setter  crates/tutti-graph/src/builder.rs::Renderer::set_transport
 tutti-graph  setter  crates/tutti-graph/src/builder.rs::Renderer::set_transport_fn
 tutti-graph  setter  crates/tutti-graph/src/bus_edge.rs::GraphSpec::set_bus_fade
 tutti-graph  setter  crates/tutti-graph/src/editor.rs::Editor::set_limits
-tutti-graph  setter  crates/tutti-graph/src/editor.rs::Editor::set_root_gate
-tutti-graph  setter  crates/tutti-graph/src/editor/commit.rs::Editor::set_root_fade
+tutti-graph  setter  crates/tutti-graph/src/editor.rs::Editor::set_main_output_gate
+tutti-graph  setter  crates/tutti-graph/src/editor/commit.rs::Editor::set_main_output_fade
 tutti-graph  setter  crates/tutti-graph/src/editor/controls.rs::Editor::set_bus_fade
 tutti-graph  setter  crates/tutti-graph/src/editor/controls.rs::Editor::set_edge_fade
 tutti-graph  setter  crates/tutti-graph/src/editor/controls.rs::Editor::set_edge_gain
@@ -268,8 +268,8 @@ tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/pool.rs::VoicePool::w
 
 # tutti-session
 tutti-session  with-prefix  crates/tutti-session/src/session/phases.rs::PhaseCx::with_mods
-tutti-session  chain-result  crates/tutti-session/src/bounce.rs::Bounce::try_map
-tutti-session  chain-result  crates/tutti-session/src/bounce.rs::Stem::try_map
+tutti-session  chain-result  crates/tutti-session/src/bounce.rs::Bounce::map
+tutti-session  chain-result  crates/tutti-session/src/bounce.rs::Stem::map
 tutti-session  chain-result  crates/tutti-session/src/key.rs::Connection::gain
 tutti-session  chain-result  crates/tutti-session/src/take.rs::Punch::until
 tutti-session  chain-result  crates/tutti-session/src/take.rs::Take::rolling
@@ -280,7 +280,6 @@ tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallbac
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_routes
 tutti-session  setter  crates/tutti-session/src/modulation.rs::Mods::set_source
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::PumpLoop::new
-tutti-session  ctor-result  crates/tutti-session/src/session/mod.rs::Session::new
 
 # tutti-sf2
 

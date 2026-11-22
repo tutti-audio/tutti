@@ -196,7 +196,7 @@ fn the_env_walk_is_the_env_beat() {
         then: AfterLocate::Keep,
     };
     let m = &transport.motion();
-    m.try_send(MotionCommand::Play).expect("room");
+    m.send(MotionCommand::Play).expect("room");
     let at = |f: u64| At::Frame(Frame::new(f));
     // Armed with the playhead inside it (~0.03): wraps from ~1 600.
     m.schedule(
@@ -350,7 +350,7 @@ fn click_clicks_on_the_model_beats() {
     ed.commit().expect("commits");
     let graph = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     let m = &transport.motion();
-    m.try_send(MotionCommand::Play).expect("room");
+    m.send(MotionCommand::Play).expect("room");
     // 151 BPM from the beat frame 20 111 reaches at 120: a step inside a block.
     transport.settings().set_tempo_map(step_map(&[
         (0.0, 120.0),
@@ -468,7 +468,7 @@ fn an_offline_render_sees_the_live_engine_transport() {
         .expect("room");
     live_t
         .motion()
-        .try_send(MotionCommand::play_from(Beat::new(BAR_2)))
+        .send(MotionCommand::play_from(Beat::new(BAR_2)))
         .expect("room");
     for &n in &blocks {
         render(&live, ChannelLayout::MONO, n);

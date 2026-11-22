@@ -110,10 +110,7 @@ fn play(
     blocks: usize,
     mut between: impl FnMut(usize),
 ) -> Vec<f32> {
-    transport
-        .motion()
-        .try_send(MotionCommand::Play)
-        .expect("room");
+    transport.motion().send(MotionCommand::Play).expect("room");
     let mut all = Vec::with_capacity(n * blocks * 2);
     let mut buf = vec![0.0f32; n * 2];
     for i in 0..blocks {

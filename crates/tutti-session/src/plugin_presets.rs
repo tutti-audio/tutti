@@ -13,7 +13,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use tutti_plugin_types::{Preset, PresetError, PresetId, PresetSupport};
+use tutti_plugin_types::{PluginPreset, PresetError, PresetId, PresetSupport};
 
 use tutti_plugin_host::InstanceId;
 
@@ -25,7 +25,7 @@ use tutti_plugin_host::InstanceId;
 pub struct PluginPresets {
     support: PresetSupport,
     plugin: InstanceId,
-    list: Arc<OnceLock<Vec<Preset>>>,
+    list: Arc<OnceLock<Vec<PluginPreset>>>,
 }
 
 impl PluginPresets {
@@ -48,7 +48,7 @@ impl PluginPresets {
     /// Sets the list from the plugin's answer, if it was not set. An answer
     /// that is an error (the plugin is gone, or has no route) sets nothing, so
     /// the list reads as not read rather than as empty.
-    pub(crate) fn fill(&self, answer: Result<Vec<Preset>, PresetError>) {
+    pub(crate) fn fill(&self, answer: Result<Vec<PluginPreset>, PresetError>) {
         if let Ok(presets) = answer {
             let _ = self.list.set(presets);
         }
@@ -109,7 +109,7 @@ impl PluginPresets {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListedPreset {
     pub(crate) plugin: InstanceId,
-    preset: Preset,
+    preset: PluginPreset,
 }
 
 impl ListedPreset {

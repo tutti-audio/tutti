@@ -15,7 +15,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
-use tutti_session::{CloseError, DetachedSession, OutPort, Root, Session};
+use tutti_session::{CloseError, DetachedSession, MainOutput, OutPort, Session};
 use tutti_units::{SampleRate, Samples};
 
 /// A detached one-output session playing a constant 0.25.
@@ -26,7 +26,7 @@ fn session() -> DetachedSession {
         .expect("builds");
     let dc = s.graph().add(ForkByClone(Const::mono(0.25)));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(dc, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(dc, 0)])
         .unwrap()
         .unfaded();
     s
@@ -42,7 +42,7 @@ fn opening_a_tap_yields_a_reader_that_sees_the_rendered_frames() {
     let mut reader = s
         .graph()
         .taps()
-        .open_root(Samples::new(64))
+        .open_main_output(Samples::new(64))
         .expect("the sources exist");
     for _ in 0..3 {
         s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
@@ -67,7 +67,7 @@ fn closing_the_tap_stops_the_copy() {
     let mut reader = s
         .graph()
         .taps()
-        .open_root(Samples::new(64))
+        .open_main_output(Samples::new(64))
         .expect("the sources exist");
     let mut out = [0.0f32];
     s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
@@ -102,7 +102,7 @@ fn a_session_without_a_tap_renders_untouched() {
     let reader = s
         .graph()
         .taps()
-        .open_root(Samples::new(64))
+        .open_main_output(Samples::new(64))
         .expect("the sources exist");
     assert_eq!(
         reader.available(),
@@ -120,7 +120,7 @@ fn a_session_taps_notified_resolves_once_a_block_renders() {
     let mut reader = s
         .graph()
         .taps()
-        .open_root(Samples::new(64))
+        .open_main_output(Samples::new(64))
         .expect("the sources exist");
     let mut cx = Context::from_waker(Waker::noop());
     let mut poll = |reader: &mut tutti_graph::TapReader| {

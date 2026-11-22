@@ -12,10 +12,9 @@
 use crate::bounced::bounced;
 use crate::loading::Perform as _;
 use crate::loading::{LoadPlugin, Spec};
-use crate::param_reads::ParamReads as _;
 use crate::support;
 use tutti_buffers::{InterleavedMut, PlanesMut};
-use tutti_session::Root;
+use tutti_session::MainOutput;
 use tutti_session::{PluginChange, PluginEvent, Replacement};
 
 use std::time::Duration;
@@ -69,7 +68,7 @@ fn add_probe(s: &mut DetachedSession) -> tutti_session::Key<tutti_session::AnyPl
             Spec::new(PluginRef::file(clap_probe())),
         )
         .expect("the reference CLAP plugin loads");
-    s.graph().connect(node, Root).unwrap();
+    s.graph().connect(node, MainOutput).unwrap();
     node
 }
 
@@ -163,11 +162,18 @@ fn lane_of(drive: &mut Drive, s: &mut DetachedSession, target: ParamRef) -> Node
     }
 }
 
-fn gain_value(s: &DetachedSession, node: impl Into<NodeKey> + Copy) -> Option<Normalized> {
-    s.plugin_view(node)
-        .expect("hosted")
-        .handle()
-        .parameter_value(ParamId::new(GAIN))
+/// The plugin's own gain, normalized over its declared range: read from the state the
+/// plugin saves, not from the host's mirror.
+fn gain_value(
+    s: &DetachedSession,
+    node: tutti_session::Key<tutti_session::AnyPlugin>,
+) -> Option<Normalized> {
+    let state = s
+        .save_state(&node, tutti_plugin_types::StateUse::Project)
+        .ok()?
+        .perform(tutti_fixtures::main_thread())
+        .ok()?;
+    tutti_clap_test_plugin::saved_normalized(state.bytes(), GAIN).and_then(Normalized::new)
 }
 
 /// **A modulation lane on the plugin survives the replacement.** The lane
@@ -551,7 +557,7 @@ fn a_read_landing_under_a_lane_keeps_the_knob_in_the_mirror() {
 /// `-60..=12`). Live renders rolling 1024-frame blocks from the play start,
 /// each once the server answered the chunk before it
 /// (`PluginControls::chunk_in_flight_answered`), and fails by name if one was
-/// played unanswered (`missed_chunks`); the export forks the graph (the
+/// played unanswered (`ChunkOutcomes::missed`); the export forks the graph (the
 /// plugin by state transfer, the lane by clone) and renders the same span at
 /// its 1024-frame chunk. Equal bit for bit.
 #[test]
@@ -605,7 +611,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
         loop_range: None,
     }));
     let config = Bounce::new()
-        .master_buffers()
+        .main_output_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(
             Seconds::new(0.0),
@@ -623,7 +629,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
     // loaded machine), and after it, require that none was played
     // unanswered: a late block is waited for, a missed one fails here, by
     // name.
-    let missed_before = diagnostics_of(&s, node.into()).missed_chunks();
+    let missed_before = diagnostics_of(&s, node.into()).chunks().missed;
     let mut side = s.graph().take_audio_side();
     let mut live = [Vec::new(), Vec::new()];
     let mut out = vec![vec![0.0; BLOCK]; 2];
@@ -645,7 +651,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
         }
         side.render(BLOCK, PlanesMut::from_vecs(&mut out).unwrap());
         assert_eq!(
-            diagnostics_of(&s, node.into()).missed_chunks(),
+            diagnostics_of(&s, node.into()).chunks().missed,
             missed_before,
             "live block {b} late or missed: the plugin's chunk was played unanswered"
         );
@@ -658,7 +664,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
     let request = config.clock(ExportClock::timeline(timeline));
     let export = bounced(&mut s, request)
         .expect("the export renders")
-        .into_master();
+        .into_main_output();
     for (c, (l, e)) in live.iter().zip(export.planes()).enumerate() {
         assert!(e.len() >= total, "channel {c}: {} frames", e.len());
         let moving = l.iter().filter(|&&v| v != 0.0).collect::<Vec<_>>();

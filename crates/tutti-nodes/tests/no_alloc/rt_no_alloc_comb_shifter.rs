@@ -2,6 +2,7 @@
 //! held and with their controls moved between blocks.
 
 use tutti_buffers::ChannelLayout;
+use tutti_dsp::CombDelay;
 use tutti_graph::IntoNode;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{
@@ -44,7 +45,7 @@ fn comb_filter_process_is_allocation_free_with_the_coefficient_moving() {
             CombFilterNode::from(CombFilterConfig::new(
                 ChannelLayout::STEREO,
                 form,
-                Seconds::new(0.003),
+                CombDelay::of(Seconds::new(0.003)),
             )),
             |controls, i| {
                 controls.set(

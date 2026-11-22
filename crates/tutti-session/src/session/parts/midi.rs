@@ -128,8 +128,17 @@ impl MidiPart {
         now: Instant,
         out: &mut Vec<SessionEvent>,
     ) -> bool {
-        self.hardware
-            .poll(&mut self.state, self.nodes.as_ref(), graph, now, out)
+        let networks = self
+            .state
+            .midi_network_phase(self.nodes.as_ref(), graph, out);
+        let devices = self
+            .hardware
+            .poll(&mut self.state, self.nodes.as_ref(), graph, now, out);
+        // The input nodes may have changed in either: the routes are compiled once.
+        if networks || devices {
+            self.state.compile_feeds_for(self.nodes.as_ref(), graph);
+        }
+        networks || devices
     }
 
     /// The tempo, the MIDI clock and Machine Control the session follows, read
@@ -158,7 +167,7 @@ impl MidiPart {
     /// Sends what a followed MIDI clock asked of the transport, each command at
     /// the frame it was placed on (`At::NextBlock` for Machine Control). A command
     /// the transport's list has no room for is dropped and logged, and counted
-    /// ([`MidiReport::ClockCommandsRefused`](crate::MidiReport::ClockCommandsRefused)):
+    /// ([`MidiEvent::ClockCommandsRefused`](crate::MidiEvent::ClockCommandsRefused)):
     /// the source says its position again with the next message.
     pub(crate) fn send_follow(
         followed: Followed,
@@ -171,7 +180,7 @@ impl MidiPart {
             .map(|placed| u64::from(!Self::send_action(placed, handle)))
             .sum();
         if refused > 0 {
-            out.push(crate::MidiReport::ClockCommandsRefused(refused).into());
+            out.push(crate::MidiEvent::ClockCommandsRefused(refused).into());
         }
     }
 

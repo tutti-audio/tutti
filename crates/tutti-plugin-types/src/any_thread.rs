@@ -7,8 +7,8 @@
 //! [`MainThreadMarker`](crate::MainThreadMarker).
 
 use crate::{
-    Answer, AutomationMode, AutomationModeError, BlockCounts, BypassWrite, OwnBypass,
-    ParameterInfo, PluginFailure, RenderMode, StateError, StateUse, TerminationReason,
+    Answer, AutomationMode, AutomationModeError, BypassWrite, OwnBypass, ParameterInfo,
+    PipelineCounts, PluginFailure, RenderMode, StateError, StateUse, TerminationReason,
     UnknownParam, bypass_value,
 };
 use tutti_units::Normalized;
@@ -130,7 +130,7 @@ pub trait AnyThread: Send + Sync {
 
     /// Writes the plugin's own bypass, `true` bypassed and `false` processing,
     /// where `site` says the plugin keeps it
-    /// ([`LoadedPlugin::own_bypass`](crate::LoadedPlugin::own_bypass)).
+    /// ([`PluginWiring::own_bypass`](crate::PluginWiring::own_bypass)).
     /// Fire-and-forget like [`set_parameter_value`](Self::set_parameter_value):
     /// [`Sent`](BypassWrite::Sent) is not applied, and
     /// [`bypassed`](Self::bypassed) reads the result back.
@@ -194,7 +194,7 @@ pub trait Health: Send + Sync {
     /// or late), over the plugin's life: a plugin that stays alive but never
     /// returns from `process()` shows as the first growing while the second
     /// does not. An in-process plugin has no budget to miss.
-    fn block_counts(&self) -> BlockCounts;
+    fn block_counts(&self) -> PipelineCounts;
 
     /// Ends the plugin's server process, latching
     /// [`PluginFailure::Terminated`] with `reason` as why it is dead

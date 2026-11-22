@@ -10,7 +10,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::{Const, Through};
-use tutti_session::{InPort, OutPort, Root, Session};
+use tutti_session::{InPort, MainOutput, OutPort, Session};
 use tutti_units::Samples;
 
 const A: f32 = 0.25;
@@ -46,7 +46,7 @@ fn rig() -> Rig {
     let b = g.add(ForkByClone(Const::mono(B)));
     let c = g.add(ForkByClone(Const::mono(C)));
     let sink = g.add(ForkByClone(Through::mono()));
-    g.set_sources(Root::output(0), [OutPort::new(sink, 0)])
+    g.set_sources(MainOutput::channel(0), [OutPort::new(sink, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -290,40 +290,40 @@ fn a_node_cannot_be_its_own_source() {
 fn an_output_channel_sums_its_sources() {
     let mut r = rig();
     r.s.graph()
-        .set_sources(Root::output(0), [node(r.b)])
+        .set_sources(MainOutput::channel(0), [node(r.b)])
         .unwrap()
         .unfaded();
     r.s.graph()
-        .connect(node(r.a), Root::output(0))
+        .connect(node(r.a), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     assert_eq!(
-        r.s.graph_ref().sources(Root::output(0)).unwrap(),
+        r.s.graph_ref().sources(MainOutput::channel(0)).unwrap(),
         [node(r.a), node(r.b)]
     );
     assert!(left(&mut r.s).iter().all(|&x| x == A + B));
 
     r.s.graph()
-        .disconnect(node(r.b), Root::output(0))
+        .disconnect(node(r.b), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     assert_eq!(
-        r.s.graph_ref().sources(Root::output(0)).unwrap(),
+        r.s.graph_ref().sources(MainOutput::channel(0)).unwrap(),
         [node(r.a)]
     );
     assert!(left(&mut r.s).iter().all(|&x| x == A));
 
     r.s.graph()
-        .set_sources(Root::output(0), [node(r.c), node(r.a)])
+        .set_sources(MainOutput::channel(0), [node(r.c), node(r.a)])
         .unwrap()
         .unfaded();
     assert!(left(&mut r.s).iter().all(|&x| x == A + C));
     r.s.graph()
-        .set_sources(Root::output(0), [node(r.c)])
+        .set_sources(MainOutput::channel(0), [node(r.c)])
         .unwrap()
         .unfaded();
     assert_eq!(
-        r.s.graph_ref().sources(Root::output(0)).unwrap(),
+        r.s.graph_ref().sources(MainOutput::channel(0)).unwrap(),
         [node(r.c)]
     );
     assert!(left(&mut r.s).iter().all(|&x| x == C));
@@ -334,17 +334,17 @@ fn an_output_channel_sums_its_sources() {
 fn an_unchanged_output_set_marks_nothing_edited() {
     let mut r = rig();
     r.s.graph()
-        .set_sources(Root::output(0), [node(r.sink)])
+        .set_sources(MainOutput::channel(0), [node(r.sink)])
         .unwrap()
         .unfaded();
     assert!(!r.s.graph_ref().has_uncommitted_edits());
     r.s.graph()
-        .connect(node(r.sink), Root::output(0))
+        .connect(node(r.sink), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     assert!(!r.s.graph_ref().has_uncommitted_edits());
     r.s.graph()
-        .disconnect(node(r.a), Root::output(0))
+        .disconnect(node(r.a), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     assert!(!r.s.graph_ref().has_uncommitted_edits());
@@ -356,17 +356,17 @@ fn an_unchanged_output_set_marks_nothing_edited() {
 fn the_output_tap_hears_the_sum() {
     let mut r = rig();
     r.s.graph()
-        .set_sources(Root::output(0), [node(r.a), node(r.b)])
+        .set_sources(MainOutput::channel(0), [node(r.a), node(r.b)])
         .unwrap()
         .unfaded();
     let mut tap =
         r.s.graph()
             .taps()
-            .open_root(Samples::new(1_024))
+            .open_main_output(Samples::new(1_024))
             .expect("the sources exist");
     assert!(left(&mut r.s).iter().all(|&x| x == A + B));
     r.s.graph()
-        .connect(node(r.c), Root::output(0))
+        .connect(node(r.c), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     assert!(left(&mut r.s).iter().all(|&x| x == A + B + C));

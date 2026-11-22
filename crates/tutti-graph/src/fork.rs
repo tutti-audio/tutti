@@ -530,7 +530,7 @@ pub enum ForkTarget {
     /// node an output reaches, walking back along audio, feedback and event
     /// edges. A node no output reaches is not forked, and need not be
     /// forkable.
-    Master,
+    MainOutput,
     /// The sub-graph feeding this node, with every global output reading it
     /// (see "Forking one node" on [`Editor::fork`]).
     Node(NodeKey),
@@ -733,7 +733,7 @@ impl<F: Float, N: Node<F> + Clone + Send + 'static> IntoNode<F> for ForkByClone<
 ///     tutti_graph::OutPort { node: NodeKey(1), port: 0 },
 /// )]);
 /// assert_eq!(
-///     editor.fork(ForkTarget::Master, ForkMode::Live, prepare).err(),
+///     editor.fork(ForkTarget::MainOutput, ForkMode::Live, prepare).err(),
 ///     Some(ForkError::NotForkable { key: NodeKey(1) }),
 /// );
 /// ```
@@ -959,7 +959,7 @@ impl<F: Float> Editor<F> {
             // copied nor asked to be forkable (an unrouted mic monitor does
             // not refuse the export; an unrouted plugin launches no server).
             // The same reachability `graph_tail` folds over.
-            ForkTarget::Master => (Self::heard(live), live.topology.outputs.clone()),
+            ForkTarget::MainOutput => (Self::heard(live), live.topology.outputs.clone()),
             ForkTarget::Node(key) => {
                 let Some(shape) = self.shapes().get(&key) else {
                     return Err(ForkError::NoSuchNode { key });
@@ -1071,9 +1071,9 @@ impl<F: Float> Editor<F> {
             // The fork is of the lowered spec: a bus edge is already its
             // lanes.
             bus_edges: BTreeMap::new(),
-            root: None,
-            root_id: crate::RootId::GENESIS,
-            root_sources: Vec::new(),
+            main_output: None,
+            main_output_id: crate::MainOutputId::GENESIS,
+            main_output_sources: Vec::new(),
         };
         // The edge gains whose edge the fork kept (an output channel the
         // fork rewired to one node has none): the fork sums as the live graph
@@ -1162,7 +1162,7 @@ impl<F: Float> Editor<F> {
 
     /// What the global outputs hear, and nothing else: every node an output
     /// (or the lane that drives the gain of an output edge) reads, and
-    /// everything upstream of those. The set a master fork copies.
+    /// everything upstream of those. The set a main output fork copies.
     fn heard(live: &GraphSpec) -> BTreeSet<NodeKey> {
         Self::upstream(
             live,
@@ -1185,10 +1185,10 @@ impl<F: Float> Editor<F> {
         )
     }
 
-    /// Whether `node` is in what a [`ForkTarget::Master`] fork copies: it is
+    /// Whether `node` is in what a [`ForkTarget::MainOutput`] fork copies: it is
     /// read by a global output, or feeds (by audio, feedback, event, param or
     /// edge gain) a node that is. A node no output reaches renders nothing
-    /// into a master fork, so it is not in one.
+    /// into a main output fork, so it is not in one.
     ///
     /// # Errors
     ///

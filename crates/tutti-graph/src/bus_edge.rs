@@ -102,7 +102,7 @@ pub enum BusFold {
 }
 
 /// One source of a sink bus and how it folds: an entry of
-/// [`GraphSpec::bus_edges`] or [`GraphSpec::root_sources`], kept in `source`
+/// [`GraphSpec::bus_edges`] or [`GraphSpec::main_output_sources`], kept in `source`
 /// order, once per source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BusFeed {
@@ -163,14 +163,14 @@ pub enum BusError {
         /// Why.
         error: FoldError,
     },
-    /// A bus edge into the root, and the root's topology is not declared
-    /// ([`GraphSpec::root`] is `None`).
-    #[error("the root's topology is not declared")]
-    RootUndeclared,
-    /// A bus edge into the root, and the source cannot be folded to the
-    /// root's declared topology.
-    #[error("bus edge {from:?} -> root cannot be folded: {error}")]
-    RootFold {
+    /// A bus edge into the main output, and the main output's topology is not declared
+    /// ([`GraphSpec::main_output`] is `None`).
+    #[error("the topology of the graph's main output is not declared")]
+    MainOutputUndeclared,
+    /// A bus edge into the main output, and the source cannot be folded to the
+    /// main output's declared topology.
+    #[error("bus edge {from:?} -> the graph's main output cannot be folded: {error}")]
+    MainOutputFold {
         /// The source bus.
         from: BusSource,
         /// Why.
@@ -266,27 +266,31 @@ impl GraphSpec {
         true
     }
 
-    /// Adds `from` to the bus edges into the root, folded by speaker, in
+    /// Adds `from` to the bus edges into the main output, folded by speaker, in
     /// source order. Returns whether it was new. As
     /// [`connect_bus`](Self::connect_bus), nothing is checked until the
     /// lowering.
-    pub fn connect_bus_to_root(&mut self, from: BusSource) -> bool {
-        insert_feed(&mut self.root_sources, from, BusFold::Speakers)
+    pub fn connect_bus_to_main_output(&mut self, from: BusSource) -> bool {
+        insert_feed(&mut self.main_output_sources, from, BusFold::Speakers)
     }
 
-    /// Removes `from` from the bus edges into the root. Returns whether it
+    /// Removes `from` from the bus edges into the main output. Returns whether it
     /// was there.
-    pub fn disconnect_bus_from_root(&mut self, from: BusSource) -> bool {
-        match self.root_sources.iter().position(|f| f.source == from) {
+    pub fn disconnect_bus_from_main_output(&mut self, from: BusSource) -> bool {
+        match self
+            .main_output_sources
+            .iter()
+            .position(|f| f.source == from)
+        {
             Some(i) => {
-                self.root_sources.remove(i);
+                self.main_output_sources.remove(i);
                 true
             }
             None => false,
         }
     }
 
-    /// The fade of the bus edge `from -> to` (`None` for the root), or `None`
+    /// The fade of the bus edge `from -> to` (`None` for the main output), or `None`
     /// when it is not in the spec.
     #[must_use]
     pub fn bus_fade(&self, from: BusSource, to: Option<BusRef>) -> Option<EdgeFade> {
@@ -295,12 +299,12 @@ impl GraphSpec {
             .map(|f| f.fade)
     }
 
-    /// Sets the fade of the bus edge `from -> to` (`None` for the root).
+    /// Sets the fade of the bus edge `from -> to` (`None` for the main output).
     /// Returns whether it was there and changed.
     pub fn set_bus_fade(&mut self, from: BusSource, to: Option<BusRef>, fade: EdgeFade) -> bool {
         let feeds = match to {
             Some(to) => self.bus_edges.get_mut(&to),
-            None => Some(&mut self.root_sources),
+            None => Some(&mut self.main_output_sources),
         };
         match feeds.and_then(|f| f.iter_mut().find(|f| f.source == from)) {
             Some(feed) if feed.fade != fade => {
@@ -314,12 +318,12 @@ impl GraphSpec {
     fn feeds(&self, to: Option<BusRef>) -> Option<&Vec<BusFeed>> {
         match to {
             Some(to) => self.bus_edges.get(&to),
-            None => Some(&self.root_sources),
+            None => Some(&self.main_output_sources),
         }
     }
 
     /// The bus edge one of whose lanes is `id`, and the fade it runs: its
-    /// source, its sink (`None` for the root) and the fade. A pure function of
+    /// source, its sink (`None` for the main output) and the fade. A pure function of
     /// the spec and `shapes`.
     pub(crate) fn feed_of_lane(
         &self,
@@ -336,18 +340,18 @@ impl GraphSpec {
                 }
             }
         }
-        for f in &self.root_sources {
-            if has(self.root_lanes(shapes, f.source, f.fold)) {
+        for f in &self.main_output_sources {
+            if has(self.main_output_lanes(shapes, f.source, f.fold)) {
                 return Some((f.source, None, f.fade));
             }
         }
         None
     }
 
-    /// Whether the spec holds any bus edge, to a node or to the root.
+    /// Whether the spec holds any bus edge, to a node or to the main output.
     #[must_use]
     pub fn has_bus_edges(&self) -> bool {
-        !self.bus_edges.is_empty() || !self.root_sources.is_empty()
+        !self.bus_edges.is_empty() || !self.main_output_sources.is_empty()
     }
 
     /// The lanes of the bus edge `from -> to` against `shapes`: `(edge,
@@ -380,22 +384,24 @@ impl GraphSpec {
         })
     }
 
-    /// The lanes of the bus edge `from -> root`: the same fold, onto the
+    /// The lanes of the bus edge `from -> main_output`: the same fold, onto the
     /// output channels.
-    fn root_lanes(
+    fn main_output_lanes(
         &self,
         shapes: &Shapes,
         from: BusSource,
         fold: BusFold,
     ) -> Result<Vec<(EdgeId, Amplitude)>, BusError> {
-        // The engine's roots are at most `MAX_CHANNELS` wide, a bus's width, so
-        // a root with no `BusTopology` is one never declared.
-        let root = self.root.ok_or(BusError::RootUndeclared)?;
-        self.fold_lanes(shapes, from, root, fold, |c| PortSink::Output(c as u16))
-            .map_err(|error| match error {
-                LaneError::Bus(e) => e,
-                LaneError::Fold(error) => BusError::RootFold { from, error },
-            })
+        // The engine's main outputs are at most `MAX_CHANNELS` wide, a bus's width, so
+        // a main output with no `BusTopology` is one never declared.
+        let main_output = self.main_output.ok_or(BusError::MainOutputUndeclared)?;
+        self.fold_lanes(shapes, from, main_output, fold, |c| {
+            PortSink::Output(c as u16)
+        })
+        .map_err(|error| match error {
+            LaneError::Bus(e) => e,
+            LaneError::Fold(error) => BusError::MainOutputFold { from, error },
+        })
     }
 
     /// The lanes of `from` folded to `sink`'s topology, each channel `c` at
@@ -475,14 +481,14 @@ impl GraphSpec {
         Ok(())
     }
 
-    /// As [`check_bus_edge`](Self::check_bus_edge), for the root.
-    pub(crate) fn check_root_bus_edge(
+    /// As [`check_bus_edge`](Self::check_bus_edge), for the main output.
+    pub(crate) fn check_main_output_bus_edge(
         &self,
         shapes: &Shapes,
         from: BusSource,
         fold: BusFold,
     ) -> Result<(), BusError> {
-        for (id, _) in self.root_lanes(shapes, from, fold)? {
+        for (id, _) in self.main_output_lanes(shapes, from, fold)? {
             self.check_lane(id)?;
         }
         Ok(())
@@ -512,7 +518,7 @@ impl GraphSpec {
     pub fn lowered(&self, shapes: &Shapes) -> Result<Lowering, BusError> {
         let mut spec = self.clone();
         spec.bus_edges.clear();
-        spec.root_sources.clear();
+        spec.main_output_sources.clear();
         let mut lanes = BTreeMap::new();
         let mut fades = BTreeMap::new();
         let mut place = |spec: &mut GraphSpec,
@@ -528,7 +534,7 @@ impl GraphSpec {
                     spec.topology.connect(at, from);
                 }
                 (PortSink::Output(c), Edge::Direct(source)) => {
-                    // The root is as wide as its declaration; a shorter
+                    // The main output is as wide as its declaration; a shorter
                     // output list is widened in the lowered value only.
                     let c = usize::from(c);
                     if spec.topology.outputs.len() <= c {
@@ -571,9 +577,9 @@ impl GraphSpec {
             source: from,
             fold,
             fade,
-        } in &self.root_sources
+        } in &self.main_output_sources
         {
-            for (id, weight) in self.root_lanes(shapes, from, fold)? {
+            for (id, weight) in self.main_output_lanes(shapes, from, fold)? {
                 place(&mut spec, id, weight, fade)?;
             }
         }

@@ -20,7 +20,7 @@ fn offline() -> Session {
 /// render call's first frame, so it stands one block behind the frames rendered.
 const BLOCK_BEATS: f64 = 1_000.0 / 48_000.0;
 
-fn render(s: &Session, frames: usize) {
+fn render(s: &mut Session, frames: usize) {
     let mut block = vec![0.0f32; 1_000 * 2];
     for _ in 0..frames / 1_000 {
         s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
@@ -36,14 +36,14 @@ fn locate_play_and_stop_move_the_playhead_on_the_set_tempo() {
     crate::tempo::set_tempo(&mut s, Bpm::of(60.0)).expect("not following");
     s.locate(Beat::new(2.0)).unwrap();
     s.play().unwrap();
-    render(&s, 48_000);
+    render(&mut s, 48_000);
     let beat = s.playhead().beat().get();
     assert!((beat - (3.0 - BLOCK_BEATS)).abs() < 1e-3, "{beat}");
 
     s.stop(FadeOut::Immediate).unwrap();
-    render(&s, 2_000);
+    render(&mut s, 2_000);
     let held = s.playhead().beat().get();
-    render(&s, 10_000);
+    render(&mut s, 10_000);
     assert_eq!(s.playhead().beat().get(), held, "stopped");
 }
 
@@ -55,7 +55,7 @@ fn a_scheduled_play_starts_on_its_frame() {
     let mut s = offline();
     crate::tempo::set_tempo(&mut s, Bpm::of(60.0)).expect("not following");
     s.schedule(Frame::new(24_000), MotionCommand::Play).unwrap();
-    render(&s, 48_000);
+    render(&mut s, 48_000);
     let beat = s.playhead().beat().get();
     assert!((beat - (0.5 - BLOCK_BEATS)).abs() < 1e-3, "{beat}");
 }
@@ -69,9 +69,9 @@ fn a_stop_scheduled_at_a_beat_halts_there() {
     s.schedule(Beat::new(1.0), MotionCommand::stop_unfaded())
         .unwrap();
     s.play().unwrap();
-    render(&s, 3_000);
-    render(&s, 45_000);
-    render(&s, 5_000);
+    render(&mut s, 3_000);
+    render(&mut s, 45_000);
+    render(&mut s, 5_000);
     let beat = s.playhead().beat().get();
     assert!((beat - 1.0).abs() < 1e-3, "{beat}");
     assert!(!s.playhead().playing(), "the stop landed");
@@ -88,7 +88,7 @@ fn the_playhead_is_one_read_of_the_last_block() {
     crate::tempo::set_tempo(&mut s, Bpm::of(60.0)).expect("not following");
     s.locate(Beat::new(2.0)).unwrap();
     s.play().unwrap();
-    render(&s, 2_000);
+    render(&mut s, 2_000);
     let p = s.playhead();
     assert!(p.playing());
     assert_eq!(p.frame(), Frame::new(1_000));
@@ -97,7 +97,7 @@ fn the_playhead_is_one_read_of_the_last_block() {
     assert!(p.at().is_some());
 
     s.stop(FadeOut::Immediate).unwrap();
-    render(&s, 1_000);
+    render(&mut s, 1_000);
     let p = s.playhead();
     assert!(
         !p.playing(),
@@ -148,14 +148,14 @@ fn a_set_loop_target_wraps_a_rolling_render_at_the_loops_end() {
         .unwrap();
     let _published = looped.update();
     looped.play().unwrap();
-    render(&looped, 72_000);
+    render(&mut looped, 72_000);
     let beat = looped.playhead().beat().get();
     assert!((beat - (0.5 - BLOCK_BEATS)).abs() < 1e-3, "looped: {beat}");
 
     let mut free = offline();
     crate::tempo::set_tempo(&mut free, Bpm::of(60.0)).expect("not following");
     free.play().unwrap();
-    render(&free, 72_000);
+    render(&mut free, 72_000);
     let beat = free.playhead().beat().get();
     assert!(
         (beat - (1.5 - BLOCK_BEATS)).abs() < 1e-3,
@@ -175,10 +175,10 @@ fn disarming_the_loop_target_stops_wrapping_and_keeps_the_bounds() {
     s.set(looping.to(LoopRegion::new(range, true))).unwrap();
     let _published = s.update();
     s.play().unwrap();
-    render(&s, 24_000);
+    render(&mut s, 24_000);
     s.set(looping.to(LoopRegion::new(range, false))).unwrap();
     let _published = s.update();
-    render(&s, 48_000);
+    render(&mut s, 48_000);
     let beat = s.playhead().beat().get();
     assert!((beat - (1.5 - BLOCK_BEATS)).abs() < 1e-3, "{beat}");
     let region = s.transport_handle().loop_region();
@@ -231,12 +231,12 @@ fn a_play_at_a_beat_right_after_play_is_taken_and_fires() {
     s.schedule(Beat::new(1.0), MotionCommand::Play).unwrap();
     // The play and the timed play, neither applied yet.
     assert_eq!(s.transport_handle().scheduled_outstanding(), 2);
-    render(&s, 24_000);
+    render(&mut s, 24_000);
     assert_eq!(s.transport_handle().scheduled_outstanding(), 1, "not yet");
-    render(&s, 36_000);
+    render(&mut s, 36_000);
     assert_eq!(s.transport_handle().scheduled_outstanding(), 0, "fired");
 
     s.stop(FadeOut::Immediate).unwrap();
-    render(&s, 2_000);
+    render(&mut s, 2_000);
     assert!(s.schedule(Beat::new(9.0), MotionCommand::Play).is_err());
 }

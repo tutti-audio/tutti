@@ -7,7 +7,7 @@
 //! and targets: it proves `tutti-export` is usable standalone, which is the
 //! layering claim this crate must not obscure. This one has a `Session`, which
 //! knows the project: the rate, the clock, the graph's latency and tail and the
-//! root's width are derived from it, and a request names
+//! main output's width are derived from it, and a request names
 //! only what it wants.
 //!
 //! The imports group by *subsystem* rather than by crate boundary, which is
@@ -21,8 +21,8 @@ use futures_lite::future::block_on;
 use std::future::IntoFuture as _;
 use tutti::graph::{ForkByClone, Node};
 use tutti::{
-    Amplitude, Bounce, ChannelLayout, ChannelTopology, Format, Hz, Interleaved, Pcm, Range, Root,
-    SampleRate, Seconds, Session,
+    Amplitude, Bounce, ChannelLayout, ChannelTopology, Format, Hz, Interleaved, MainOutput, Pcm,
+    Range, SampleRate, Seconds, Session,
 };
 use tutti_measure::{LoudnessConfig, measure_loudness};
 use tutti_nodes::testing::{Const, Osc};
@@ -32,9 +32,12 @@ const RATE: SampleRate = SampleRate::SR_48K;
 
 /// A session whose outputs hear `node`, one second of a project.
 fn session_with(node: impl Node + Clone + 'static) -> Session {
-    let mut session = Session::new(RATE).expect("a session builds");
+    let mut session = Session::builder()
+        .sample_rate(RATE)
+        .build()
+        .expect("a session builds");
     let node = session.graph().add(ForkByClone(node));
-    session.graph().connect(node, Root).unwrap();
+    session.graph().connect(node, MainOutput).unwrap();
     session
 }
 
@@ -72,16 +75,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut session = tone();
     let rendered = block_on(
         session
-            .bounce(first(1.0).master(&path, FORMAT))?
+            .bounce(first(1.0).main_output(&path, FORMAT))?
             .into_future(),
     );
-    let written = session.apply(rendered)?.into_master();
+    let written = session.apply(rendered)?.into_main_output();
     println!("wrote {} ({written:?})", path.display());
 
     // 2. The same project into memory, and a measurement of it.
     let mut session = tone();
-    let rendered = block_on(session.bounce(first(1.0).master_buffers())?.into_future());
-    let rendered = session.apply(rendered)?.into_master();
+    let rendered = block_on(
+        session
+            .bounce(first(1.0).main_output_buffers())?
+            .into_future(),
+    );
+    let rendered = session.apply(rendered)?.into_main_output();
     let flat = rendered.interleaved();
     // `tutti` exports no path to `Bed`, so the placement is the default layout for
     // two channels, which is a stereo bed.
@@ -107,7 +114,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .bounce(
                 first(0.5)
                     .channels(ChannelLayout::STEREO)
-                    .master(&mono_path, FORMAT),
+                    .main_output(&mono_path, FORMAT),
             )?
             .into_future(),
     );

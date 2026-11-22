@@ -14,7 +14,7 @@ use tutti_graph::ForkByClone;
 use tutti_nodes::testing::{Const, Through};
 use tutti_rt::LockExt;
 use tutti_session::{
-    Error, InPort, LiveSession, OutPort, Root, Session, SessionEvent, SystemSession,
+    Error, InPort, LiveSession, MainOutput, OutPort, Session, SessionEvent, SystemSession,
 };
 use tutti_units::{SampleRate, Samples};
 
@@ -47,7 +47,7 @@ fn wire_constant<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>
     let node = s.graph().add(ForkByClone(Const::mono(level)));
     for port in 0..2 {
         s.graph()
-            .set_sources(Root::output(port), [OutPort::new(node, 0)])
+            .set_sources(MainOutput::channel(port), [OutPort::new(node, 0)])
             .unwrap()
             .unfaded();
     }
@@ -137,18 +137,7 @@ fn a_device_session_switches_to_the_timer_and_its_graph_keeps_rendering() {
         "the card's stream stopped"
     );
     play(&s);
-    let limit = Instant::now() + Duration::from_secs(10);
-    let mut tap = loop {
-        let _ = s.update();
-        if let Some(tap) = s.open_heard_tap(Samples::new(4 * BLOCK)).unwrap().reader() {
-            break tap;
-        }
-        assert!(
-            Instant::now() < limit,
-            "the audio side never took the graph"
-        );
-        std::thread::sleep(Duration::from_millis(2));
-    };
+    let mut tap = s.open_heard_tap(Samples::new(4 * BLOCK)).unwrap();
     let mut heard = vec![0.0f32; 2 * BLOCK];
     wait_until("the constant never reached the tap", || {
         let _ = s.update();
@@ -181,14 +170,14 @@ fn a_device_that_will_not_open_returns_the_session_running_on_its_old_clock() {
     wait_past(&mut s, before);
 }
 
-/// **A root the new device cannot place is refused before the timer stops**:
+/// **A main output the new device cannot place is refused before the timer stops**:
 /// six unassigned buses on a stereo card. The error is named, the card's stream
 /// never opened, and the timer renders on.
 #[test]
-fn a_root_the_device_cannot_place_is_refused_before_the_timer_stops() {
+fn a_main_output_the_device_cannot_place_is_refused_before_the_timer_stops() {
     let mut s = system_builder()
         .outputs(ChannelLayout::from(6u16))
-        .root_topology(ChannelTopology::unassigned(ChannelLayout::from(6u16)))
+        .main_output_topology(ChannelTopology::unassigned(ChannelLayout::from(6u16)))
         .build()
         .expect("builds");
     play(&s);
@@ -196,7 +185,7 @@ fn a_root_the_device_cannot_place_is_refused_before_the_timer_stops() {
     let (driver, stream) = ManualStreamDriver::new();
     let err = s
         .into_device_on(stereo(SampleRate::SR_48K), driver)
-        .expect_err("a six-wide unassigned root has no place on two channels");
+        .expect_err("a six-wide unassigned main output has no place on two channels");
     assert!(
         matches!(err.error().error(), Error::Unplaceable { .. }),
         "{}",
@@ -221,7 +210,7 @@ fn a_graph_that_no_longer_compiles_fails_the_switch_and_the_timer_runs_again() {
         .set_sources(InPort::new(lim, 0), [OutPort::new(osc, 0)])
         .unwrap();
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(lim, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(lim, 0)])
         .unwrap();
     let _ = s.update();
     let before = wait_past(&mut s, 0);
@@ -730,7 +719,7 @@ fn the_old_driver_renders_its_last_block_before_the_new_one_its_first() {
         inside: Default::default(),
     }));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();

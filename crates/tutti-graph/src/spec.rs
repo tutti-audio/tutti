@@ -177,20 +177,20 @@ pub struct GraphSpec {
     /// [`Editor::commit`](crate::Editor::commit) lowers for you. An empty
     /// `Vec` is the same as an absent key.
     pub bus_edges: BTreeMap<BusRef, Vec<BusFeed>>,
-    /// The declared topology of the root, the graph's outputs, as a bus: what a
-    /// bus edge into the root folds to. `None` is undeclared. Every root the
+    /// The declared topology of the main output, the graph's outputs, as a bus: what a
+    /// bus edge into the main output folds to. `None` is undeclared. Every main output the
     /// engine renders is at most [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)
-    /// wide, which is a bus's width. The session keeps it in step with its root
+    /// wide, which is a bus's width. The session keeps it in step with its main output
     /// declaration.
-    pub root: Option<BusTopology>,
-    /// The root's generation: a commit that changes the root's declaration
-    /// carries the next one ([`RootId`](crate::RootId)), and the plan it compiles to reports
-    /// it ([`Plan::root_id`](crate::Plan::root_id)).
-    pub root_id: crate::RootId,
-    /// Bus edges into the root, in source order
-    /// ([`connect_bus_to_root`](Self::connect_bus_to_root)): lowered, as
+    pub main_output: Option<BusTopology>,
+    /// The main output's generation: a commit that changes the main output's declaration
+    /// carries the next one ([`MainOutputId`](crate::MainOutputId)), and the plan it compiles to reports
+    /// it ([`Plan::main_output_id`](crate::Plan::main_output_id)).
+    pub main_output_id: crate::MainOutputId,
+    /// Bus edges into the main output, in source order
+    /// ([`connect_bus_to_main_output`](Self::connect_bus_to_main_output)): lowered, as
     /// `bus_edges` are, to lanes on the output channels.
-    pub root_sources: Vec<BusFeed>,
+    pub main_output_sources: Vec<BusFeed>,
 }
 
 impl GraphSpec {
@@ -560,9 +560,9 @@ impl GraphSpec {
             params,
             gains,
             bus_edges,
-            root,
-            root_id,
-            root_sources,
+            main_output,
+            main_output_id,
+            main_output_sources,
             // A control: the plan does not read it.
             modes: _,
             mixes: _,
@@ -573,9 +573,9 @@ impl GraphSpec {
         *topology == other.topology
             && *events == other.events
             && *bus_edges == other.bus_edges
-            && *root == other.root
-            && *root_id == other.root_id
-            && *root_sources == other.root_sources
+            && *main_output == other.main_output
+            && *main_output_id == other.main_output_id
+            && *main_output_sources == other.main_output_sources
             && *generations == other.generations
             && *required_resolution == other.required_resolution
             && wired(params).eq(wired(&other.params))
@@ -706,7 +706,7 @@ impl GraphSpec {
                 gains: self.gains.clone(),
                 modes: self.modes.clone(),
                 mixes: self.mixes.clone(),
-                root_bank: None,
+                main_output_bank: None,
             }),
             _ => Err(errs),
         }
@@ -835,25 +835,25 @@ pub struct ValidGraph {
     gains: BTreeMap<EdgeId, EdgeGain>,
     modes: BTreeMap<NodeKey, NodeMode>,
     mixes: BTreeMap<NodeKey, NodeMix>,
-    root_bank: Option<crate::RootBank>,
+    main_output_bank: Option<crate::MainOutputBank>,
 }
 
 impl ValidGraph {
-    /// This graph with the outputs from `bank.base` on being the old root's:
-    /// the channels a plan renders beside the root's own while a root change
-    /// crossfades ([`RootBank`](crate::RootBank)). The editor's commit makes
+    /// This graph with the outputs from `bank.base` on being the old main output's:
+    /// the channels a plan renders beside the main output's own while a main output change
+    /// crossfades ([`MainOutputBank`](crate::MainOutputBank)). The editor's commit makes
     /// them; the compiler gives them no meter, tap or compensation.
     #[must_use]
-    pub(crate) fn with_root_bank(mut self, bank: crate::RootBank) -> Self {
+    pub(crate) fn with_main_output_bank(mut self, bank: crate::MainOutputBank) -> Self {
         debug_assert!(bank.base <= self.valid.get().outputs.len());
-        self.root_bank = Some(bank);
+        self.main_output_bank = Some(bank);
         self
     }
 
-    /// The old root's outputs the topology's channels end with, if a root
+    /// The old main output's outputs the topology's channels end with, if a main output
     /// change is crossfading.
-    pub fn root_bank(&self) -> Option<crate::RootBank> {
-        self.root_bank
+    pub fn main_output_bank(&self) -> Option<crate::MainOutputBank> {
+        self.main_output_bank
     }
 
     /// The checked topology.
@@ -957,11 +957,11 @@ impl LatencyGraph for ValidGraph {
         output_gain_sources(&self.gains)
     }
 
-    /// The root's channels: an old root's channels beside them take their
+    /// The main output's channels: an old main output's channels beside them take their
     /// delays from the plan they were heard in, not from this solve.
     fn outputs(&self) -> impl Iterator<Item = ChannelFeed<NodeKey>> {
-        let root = self.root_bank.map_or(usize::MAX, |bank| bank.base);
-        LatencyGraph::outputs(self.topology()).filter(move |feed| feed.channel < root)
+        let main_output = self.main_output_bank.map_or(usize::MAX, |bank| bank.base);
+        LatencyGraph::outputs(self.topology()).filter(move |feed| feed.channel < main_output)
     }
 }
 

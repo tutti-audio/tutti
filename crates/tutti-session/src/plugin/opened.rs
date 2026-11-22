@@ -1,10 +1,10 @@
-//! What a [`LoadedPlugin`](crate::LoadedPlugin) observes of a plugin, and the
+//! What a [`PluginInstance`](crate::PluginInstance) observes of a plugin, and the
 //! plugin itself.
 //!
 //! [`Shared`] is the observer's half: what the load says of the plugin
 //! ([`PluginInfo`]), its ports, and its [`Standing`]: whether its live part is
 //! gone, or it has no plugin behind it. [`Install`] is the plugin and its
-//! parameter mirror, owned by one [`PluginNode`](crate::PluginNode). The parts
+//! parameter mirror, owned by one [`LoadedPlugin`](crate::LoadedPlugin). The parts
 //! that only the main thread may drop (an in-process plugin) go to the main
 //! thread when they are dropped on another: the format's own handle defers its
 //! close to the session's main-work collector.
@@ -18,17 +18,19 @@ use tutti_plugin::catalog::ResolvedHosting;
 use tutti_plugin_db::Loadable;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_ipc::AudioConfig;
-use tutti_plugin_types::{Features, IpcError, MainWorkHandle, PluginFailure, Preset, PresetError};
+use tutti_plugin_types::{
+    Features, IpcError, MainWorkHandle, PluginFailure, PluginPreset, PresetError,
+};
 use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRef};
 use tutti_rt::LockExt;
 use tutti_units::SampleRate;
 
 use super::{HostPlugin, Mirror, Open, Origin};
 use crate::PluginPresets;
-use crate::apply::SessionId;
+use crate::apply::Cut;
 use crate::loaded::Stamp;
 use crate::peer::ResourceIds;
-use crate::{GiveUp, LoadError, ResourceId};
+use crate::{GiveUp, LoadError, PeerResourceId};
 
 /// What a plugin's load needs of the session that built it.
 #[derive(Clone, Debug)]
@@ -39,7 +41,7 @@ pub(super) struct Context {
     pub(super) executor: tutti_platform::WeakExecutor,
     pub(super) ids: ResourceIds,
     /// The session that built the load: the one the plugin may be added to.
-    pub(super) session: SessionId,
+    pub(super) cut: Cut,
     /// Whether the session recovers a plugin that dies at its node.
     pub(super) recovery: bool,
 }
@@ -179,10 +181,10 @@ pub enum PluginCause {
     GaveUp(GiveUp),
 }
 
-/// What a [`LoadedPlugin`](crate::LoadedPlugin) shares: the readings of one
+/// What a [`PluginInstance`](crate::PluginInstance) shares: the readings of one
 /// opened plugin.
 pub struct Shared {
-    pub(super) id: ResourceId,
+    pub(super) id: PeerResourceId,
     pub(super) stamp: Stamp,
     pub(super) info: Arc<PluginInfo>,
     pub(super) standing: Arc<Standing>,
@@ -209,7 +211,7 @@ impl Shared {
         open: Open,
         loadable: Loadable,
         config: AudioConfig,
-        read: impl FnOnce(&HostPlugin) -> Result<Vec<Preset>, PresetError>,
+        read: impl FnOnce(&HostPlugin) -> Result<Vec<PluginPreset>, PresetError>,
     ) -> Result<(Self, Install), LoadError> {
         let Open {
             plugin,

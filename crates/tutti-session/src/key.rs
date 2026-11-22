@@ -1,11 +1,11 @@
 //! Typed keys, ports and the one wiring vocabulary of the session's
-//! [`Graph`] (doc 013, "The session graph's surface").
+//! [`Graph`].
 //!
 //! - [`Key<N>`] is a node's identity with its type: [`Graph::add`] returns one, and every call that takes a node takes
 //!   `impl Into<NodeKey>`, so a [`Key`] and an erased [`NodeKey`] both work.
 //! - [`OutPort`] and [`InPort`] name one channel: a node's output or input
-//!   port (`key.out(0)`, `key.input(1)`), a global input channel
-//!   ([`Root::input`]) or a global output channel ([`Root::output`]).
+//!   port (`key.out(0)`, `key.input(1)`), a main input channel
+//!   ([`MainInput::channel`]) or a main output channel ([`MainOutput::channel`]).
 //! - [`EventOutPort`] and [`EventInPort`] name one event port
 //!   (`key.events_out()`, `key.events_in_at(1)`); **event input 0 is the
 //!   node's main event input**, where the chase (`Node::chase`) delivers.
@@ -152,8 +152,8 @@ impl<N: ?Sized> From<Key<N>> for NodeKey {
 }
 
 /// One channel a signal leaves from: an output port of a node, or a channel
-/// of the graph's own global input. Made by [`Key::out`], [`OutPort::new`]
-/// and [`Root::input`].
+/// of the graph's main input. Made by [`Key::out`], [`OutPort::new`]
+/// and [`MainInput::channel`].
 ///
 /// The index is a port number of the node's declared ports, a count and not
 /// a unit.
@@ -198,15 +198,15 @@ impl OutPort {
     pub(crate) fn of_source(source: tutti_graph::PortSource) -> Option<Self> {
         match source {
             tutti_graph::PortSource::Node(p) => Some(Self::new(p.node, usize::from(p.port))),
-            tutti_graph::PortSource::Global(c) => Some(Root::input(usize::from(c))),
+            tutti_graph::PortSource::Global(c) => Some(MainInput::channel(usize::from(c))),
             tutti_graph::PortSource::Zero => None,
         }
     }
 }
 
 /// One channel a signal arrives at: an input port of a node, or a channel of
-/// the graph's global output (the root's). Made by [`Key::input`],
-/// [`InPort::new`] and [`Root::output`].
+/// the graph's main output. Made by [`Key::input`],
+/// [`InPort::new`] and [`MainOutput::channel`].
 ///
 /// The index is a port number of the node's declared ports, a count and not
 /// a unit.
@@ -251,31 +251,40 @@ impl InPort {
     pub(crate) fn of_sink(sink: tutti_graph::PortSink) -> Self {
         match sink {
             tutti_graph::PortSink::Port(p) => Self::new(p.node, usize::from(p.port)),
-            tutti_graph::PortSink::Output(c) => Root::output(usize::from(c)),
+            tutti_graph::PortSink::Output(c) => MainOutput::channel(usize::from(c)),
         }
     }
 }
 
-/// The graph's root: its global inputs and its global outputs.
+/// The graph's main output: the channels the device or the render reads.
 ///
-/// A value of its own rather than a method of [`Graph`], so naming a root
-/// channel borrows nothing: `s.graph().connect(osc.out(0), Root::output(0))`
+/// A value of its own rather than a method of [`Graph`], so naming a channel
+/// borrows nothing: `s.graph().connect(osc.out(0), MainOutput::channel(0))`
 /// is one borrow of the session. As an [`Inlet`] it is the sink of a node's
 /// main bus ([`Graph::connect`] channel by channel onto the outputs) and of a
-/// bus edge (folded to the topology the root was declared with).
+/// bus edge (folded to the topology the main output was declared with).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Root;
+pub struct MainOutput;
 
-impl Root {
-    /// Global output channel `index`, as a sink.
+impl MainOutput {
+    /// Main output channel `index`, as a sink.
     #[must_use]
-    pub const fn output(index: usize) -> InPort {
+    pub const fn channel(index: usize) -> InPort {
         InPort(InEnd::Output(index))
     }
+}
 
-    /// Global input channel `index` (a hardware or host input), as a source.
+/// The graph's main input: the hardware or host input channels.
+///
+/// A value of its own, like [`MainOutput`], so naming a channel borrows
+/// nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MainInput;
+
+impl MainInput {
+    /// Main input channel `index` (a hardware or host input), as a source.
     #[must_use]
-    pub const fn input(index: usize) -> OutPort {
+    pub const fn channel(index: usize) -> OutPort {
         OutPort(OutEnd::Input(index))
     }
 }
@@ -443,16 +452,16 @@ impl From<EventInPort> for EventTapPort {
 /// One audio edge, named: what feeds which channel. What
 /// [`Graph::connect`] adds and a modulation route onto its gain
 /// (`ModTarget`) drives: the
-/// **gain** of an edge is a weight of the sum its sink holds (doc 013, "Edge
-/// gain"). The edge must exist; a target whose edge is not in the graph yet
+/// **gain** of an edge is a weight of the sum its sink holds. The edge must
+/// exist; a target whose edge is not in the graph yet
 /// is unresolved until it is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Edge {
+pub struct ChannelEdge {
     from: OutPort,
     to: InPort,
 }
 
-impl Edge {
+impl ChannelEdge {
     /// The edge from `from` into `to`.
     #[must_use]
     pub const fn new(from: OutPort, to: InPort) -> Self {
@@ -498,7 +507,7 @@ pub trait Wire: Sealed {
         graph: &mut Graph<F>,
         from: Self::Out,
         to: Self::In,
-    ) -> Result<Vec<(Edge, bool)>, ConnectError>;
+    ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError>;
     #[doc(hidden)]
     fn disconnect<F: Float>(
         graph: &mut Graph<F>,
@@ -511,37 +520,37 @@ pub trait Wire: Sealed {
         graph: &mut Graph<F>,
         from: Self::Out,
         to: Self::In,
-        edges: &[(Edge, bool)],
+        edges: &[(ChannelEdge, bool)],
     );
 }
 
 /// One channel to one channel: an [`OutPort`] into an [`InPort`], and an edge
 /// with a gain.
 #[derive(Clone, Copy, Debug)]
-pub struct Channel;
+pub struct ChannelWire;
 
 /// A node's whole main output bus into another node's main input bus, or the
-/// root's outputs, channel by channel: one edge per channel, each with a
+/// main output's channels, channel by channel: one edge per channel, each with a
 /// gain.
 #[derive(Clone, Copy, Debug)]
-pub struct MainBus;
+pub struct MainBusWire;
 
 /// A bus edge: a fold between two declared bus topologies. Its lanes carry
 /// the fold's weights and no gain of their own.
 #[derive(Clone, Copy, Debug)]
-pub struct Bus;
+pub struct BusWire;
 
 /// An event edge: an [`EventOutPort`] into an [`EventInPort`]. Events merge by
 /// offset at the sink, the graph ordering ties by source, and an event edge is
 /// **never faded**: a note-off is a message, not a level (doc 030, section 4),
 /// so [`Connection::unfaded`] and [`Disconnection::unfaded`] change nothing here.
 #[derive(Clone, Copy, Debug)]
-pub struct Event;
+pub struct EventWire;
 
 /// The wires whose edges carry a gain of their own.
 pub trait Weighted: Wire {}
-impl Weighted for Channel {}
-impl Weighted for MainBus {}
+impl Weighted for ChannelWire {}
+impl Weighted for MainBusWire {}
 
 /// Something a signal leaves from: [`OutPort`] (one channel), a [`Key`] or
 /// [`NodeKey`] (the node's whole main bus) or a [`BusSource`]. Sealed.
@@ -554,28 +563,28 @@ pub trait Outlet: Sealed {
 
 /// Something a signal arrives at, for a wire of kind `W`: [`InPort`] (one
 /// channel), a [`Key`] or [`NodeKey`] (the node's whole main bus), a
-/// [`BusRef`], or the [`Root`]. Sealed.
+/// [`BusRef`], or the [`MainOutput`]. Sealed.
 pub trait Inlet<W: Wire>: Sealed {
     #[doc(hidden)]
     fn sink(self) -> W::In;
 }
 
-/// A main-bus sink: a node, or the root.
+/// A main-bus sink: a node, or the main output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MainSink {
     #[doc(hidden)]
     Node(NodeKey),
     #[doc(hidden)]
-    Root,
+    MainOutput,
 }
 
-/// A bus-edge sink: a node's input bus, or the root.
+/// A bus-edge sink: a node's input bus, or the main output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BusSink {
     #[doc(hidden)]
     Node(BusRef),
     #[doc(hidden)]
-    Root,
+    MainOutput,
 }
 
 impl Sealed for OutPort {}
@@ -584,24 +593,24 @@ impl Sealed for NodeKey {}
 impl<N: ?Sized> Sealed for Key<N> {}
 impl Sealed for BusSource {}
 impl Sealed for BusRef {}
-impl Sealed for Root {}
-impl Sealed for Channel {}
-impl Sealed for MainBus {}
-impl Sealed for Bus {}
-impl Sealed for Event {}
+impl Sealed for MainOutput {}
+impl Sealed for ChannelWire {}
+impl Sealed for MainBusWire {}
+impl Sealed for BusWire {}
+impl Sealed for EventWire {}
 impl Sealed for EventOutPort {}
 impl Sealed for EventInPort {}
 
-impl Wire for Channel {
+impl Wire for ChannelWire {
     type Out = OutPort;
     type In = InPort;
     fn connect<F: Float>(
         graph: &mut Graph<F>,
         from: OutPort,
         to: InPort,
-    ) -> Result<Vec<(Edge, bool)>, ConnectError> {
+    ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError> {
         let added = graph.add_edge(from, to)?;
-        Ok(vec![(Edge::new(from, to), added)])
+        Ok(vec![(ChannelEdge::new(from, to), added)])
     }
     fn disconnect<F: Float>(
         graph: &mut Graph<F>,
@@ -612,26 +621,31 @@ impl Wire for Channel {
         graph.check_wire(from, to)?;
         Ok(graph.remove_edge(from, to, hard))
     }
-    fn harden<F: Float>(graph: &mut Graph<F>, _: OutPort, _: InPort, edges: &[(Edge, bool)]) {
+    fn harden<F: Float>(
+        graph: &mut Graph<F>,
+        _: OutPort,
+        _: InPort,
+        edges: &[(ChannelEdge, bool)],
+    ) {
         for (edge, _) in edges {
             graph.harden_edge(*edge);
         }
     }
 }
 
-impl Wire for MainBus {
+impl Wire for MainBusWire {
     type Out = NodeKey;
     type In = MainSink;
     fn connect<F: Float>(
         graph: &mut Graph<F>,
         from: NodeKey,
         to: MainSink,
-    ) -> Result<Vec<(Edge, bool)>, ConnectError> {
+    ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError> {
         let wires = graph.main_wires(from, to)?;
         let mut edges = Vec::with_capacity(wires.len());
         for (out, input) in wires {
             let added = graph.add_edge(out, input)?;
-            edges.push((Edge::new(out, input), added));
+            edges.push((ChannelEdge::new(out, input), added));
         }
         Ok(edges)
     }
@@ -654,21 +668,26 @@ impl Wire for MainBus {
         }
         Ok(removed)
     }
-    fn harden<F: Float>(graph: &mut Graph<F>, _: NodeKey, _: MainSink, edges: &[(Edge, bool)]) {
+    fn harden<F: Float>(
+        graph: &mut Graph<F>,
+        _: NodeKey,
+        _: MainSink,
+        edges: &[(ChannelEdge, bool)],
+    ) {
         for (edge, _) in edges {
             graph.harden_edge(*edge);
         }
     }
 }
 
-impl Wire for Bus {
+impl Wire for BusWire {
     type Out = BusSource;
     type In = BusSink;
     fn connect<F: Float>(
         graph: &mut Graph<F>,
         from: BusSource,
         to: BusSink,
-    ) -> Result<Vec<(Edge, bool)>, ConnectError> {
+    ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError> {
         graph.add_bus_edge(from, to)?;
         Ok(Vec::new())
     }
@@ -681,19 +700,24 @@ impl Wire for Bus {
         graph.check_bus_nodes(from, to)?;
         Ok(graph.remove_bus_edge(from, to, hard))
     }
-    fn harden<F: Float>(graph: &mut Graph<F>, from: BusSource, to: BusSink, _: &[(Edge, bool)]) {
+    fn harden<F: Float>(
+        graph: &mut Graph<F>,
+        from: BusSource,
+        to: BusSink,
+        _: &[(ChannelEdge, bool)],
+    ) {
         graph.harden_bus_edge(from, to);
     }
 }
 
-impl Wire for Event {
+impl Wire for EventWire {
     type Out = EventOutPort;
     type In = EventInPort;
     fn connect<F: Float>(
         graph: &mut Graph<F>,
         from: EventOutPort,
         to: EventInPort,
-    ) -> Result<Vec<(Edge, bool)>, ConnectError> {
+    ) -> Result<Vec<(ChannelEdge, bool)>, ConnectError> {
         graph.add_event_edge(from, to)?;
         Ok(Vec::new())
     }
@@ -706,17 +730,23 @@ impl Wire for Event {
         graph.check_event_wire(from, to)?;
         Ok(graph.remove_event_edge(from, to))
     }
-    fn harden<F: Float>(_: &mut Graph<F>, _: EventOutPort, _: EventInPort, _: &[(Edge, bool)]) {}
+    fn harden<F: Float>(
+        _: &mut Graph<F>,
+        _: EventOutPort,
+        _: EventInPort,
+        _: &[(ChannelEdge, bool)],
+    ) {
+    }
 }
 
 impl Outlet for EventOutPort {
-    type Wire = Event;
+    type Wire = EventWire;
     fn out(self) -> EventOutPort {
         self
     }
 }
 
-impl Inlet<Event> for EventInPort {
+impl Inlet<EventWire> for EventInPort {
     fn sink(self) -> EventInPort {
         self
     }
@@ -774,81 +804,81 @@ impl Fanin for EventInPort {
 }
 
 impl Outlet for OutPort {
-    type Wire = Channel;
+    type Wire = ChannelWire;
     fn out(self) -> OutPort {
         self
     }
 }
 impl Outlet for NodeKey {
-    type Wire = MainBus;
+    type Wire = MainBusWire;
     fn out(self) -> NodeKey {
         self
     }
 }
 impl<N: ?Sized> Outlet for Key<N> {
-    type Wire = MainBus;
+    type Wire = MainBusWire;
     fn out(self) -> NodeKey {
         self.node
     }
 }
 impl Outlet for BusSource {
-    type Wire = Bus;
+    type Wire = BusWire;
     fn out(self) -> BusSource {
         self
     }
 }
 
-impl Inlet<Channel> for InPort {
+impl Inlet<ChannelWire> for InPort {
     fn sink(self) -> InPort {
         self
     }
 }
-impl Inlet<MainBus> for NodeKey {
+impl Inlet<MainBusWire> for NodeKey {
     fn sink(self) -> MainSink {
         MainSink::Node(self)
     }
 }
-impl<N: ?Sized> Inlet<MainBus> for Key<N> {
+impl<N: ?Sized> Inlet<MainBusWire> for Key<N> {
     fn sink(self) -> MainSink {
         MainSink::Node(self.node)
     }
 }
-impl Inlet<MainBus> for Root {
+impl Inlet<MainBusWire> for MainOutput {
     fn sink(self) -> MainSink {
-        MainSink::Root
+        MainSink::MainOutput
     }
 }
-impl Inlet<Bus> for BusRef {
+impl Inlet<BusWire> for BusRef {
     fn sink(self) -> BusSink {
         BusSink::Node(self)
     }
 }
-impl Inlet<Bus> for Root {
+impl Inlet<BusWire> for MainOutput {
     fn sink(self) -> BusSink {
-        BusSink::Root
+        BusSink::MainOutput
     }
 }
 
-/// A root declaration just made ([`Session::declare_root_topology`](crate::Session::declare_root_topology)),
+/// A main output declaration just made ([`Session::declare_main_output_topology`](crate::Session::declare_main_output_topology)),
 /// borrowing the graph so it can be made a cut:
-/// `session.declare_root_topology(root)?.unfaded()`.
+/// `session.declare_main_output_topology(main_output)?.unfaded()`.
 ///
-/// Dropping it keeps the declaration as made, which crossfades the old root
+/// Dropping it keeps the declaration as made, which crossfades the old main output
 /// into the new over [`DECLICK`](tutti_graph::DECLICK).
 #[derive(Debug)]
-pub struct RootDeclaration<'g, F: Float = f32> {
+pub struct MainOutputDeclaration<'g, F: Float = f32> {
     pub(crate) graph: &'g mut Graph<F>,
 }
 
-impl<F: Float> RootDeclaration<'_, F> {
-    /// Takes the new root at one block, a cut: no old root is rendered beside
+impl<F: Float> MainOutputDeclaration<'_, F> {
+    /// Takes the new main output at one block, a cut: no old main output is rendered beside
     /// it. The default is a crossfade over [`DECLICK`](tutti_graph::DECLICK)
     /// (5 ms), so a change of layout never steps the sound; `unfaded` is for a
-    /// test, an analysis graph or a root changed before anything is listening.
+    /// test, an analysis graph or a main output changed before anything is listening.
     /// A declaration that waits for a running crossfade applies at once, and
     /// the cut is its.
     pub fn unfaded(self) -> Self {
-        self.graph.harden_root();
+        self.graph.harden_main_output();
         self
     }
 }
@@ -972,20 +1002,20 @@ impl<'g, P: Fanin, F: Float> SetSources<'g, P, F> {
 /// The edges a [`Graph::connect`] just made, borrowing the graph so a gain
 /// can be set on them: `g.connect(a.out(0), b.input(0))?.gain(half)?`.
 ///
-/// Dropping it keeps the edges as they are. Get the [`Edge`]s with
+/// Dropping it keeps the edges as they are. Get the [`ChannelEdge`]s with
 /// [`edges`](Self::edges) to keep a handle (a modulation target, a later
 /// gain).
 #[derive(Debug)]
 pub struct Connection<'g, W: Wire, F: Float = f32> {
     graph: &'g mut Graph<F>,
-    edges: Vec<(Edge, bool)>,
+    edges: Vec<(ChannelEdge, bool)>,
     ends: (W::Out, W::In),
 }
 
 impl<'g, W: Wire, F: Float> Connection<'g, W, F> {
     pub(crate) fn new(
         graph: &'g mut Graph<F>,
-        edges: Vec<(Edge, bool)>,
+        edges: Vec<(ChannelEdge, bool)>,
         from: W::Out,
         to: W::In,
     ) -> Self {
@@ -1006,11 +1036,11 @@ impl<'g, W: Wire, F: Float> Connection<'g, W, F> {
         self
     }
 
-    /// The edges the call connected: one for a [`Channel`], one per channel
-    /// for a [`MainBus`], none for a [`Bus`] (its lanes are the fold's). An
+    /// The edges the call connected: one for a [`ChannelWire`], one per channel
+    /// for a [`MainBusWire`], none for a [`BusWire`] (its lanes are the fold's). An
     /// edge the graph already held is listed too.
     #[must_use]
-    pub fn edges(&self) -> Vec<Edge> {
+    pub fn edges(&self) -> Vec<ChannelEdge> {
         self.edges.iter().map(|(edge, _)| *edge).collect()
     }
 }

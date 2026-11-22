@@ -22,16 +22,16 @@
 //! ```rust
 //! use tutti::modulation::LfoShape;
 //! use tutti::nodes::{LfoConfig, LfoNode};
-//! use tutti::{ChannelLayout, Hz, InterleavedMut, Root, SampleRate, Session};
+//! use tutti::{ChannelLayout, Hz, InterleavedMut, MainOutput, SampleRate, Session};
 //!
-//! let mut session = Session::new(SampleRate::SR_48K).expect("a session builds");
+//! let mut session = Session::builder().sample_rate(SampleRate::SR_48K).build().expect("a session builds");
 //!
 //! // A 440 Hz sine into the session's output. The node's own controls come back
 //! // with its key; they set its parameters live.
 //! let tone = session
 //!     .graph()
 //!     .add(LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Hz::new(440.0))));
-//! session.graph().connect(tone, Root).expect("both ends exist");
+//! session.graph().connect(tone, MainOutput).expect("both ends exist");
 //!
 //! // An update commits the edit; it lands at the start of the next block, and
 //! // reports a fault or a dropout as an event.
@@ -49,7 +49,7 @@
 //! the sound card's clock (dropping it stops the stream).
 //! `examples/headless_engine.rs` plays a tone in under twenty lines. To write a
 //! file instead, turn on `export` and bounce the session: a `Bounce` names a
-//! range and a master, and optionally stems, and `Session::bounce` renders it
+//! range and a main output, and optionally stems, and `Session::bounce` renders it
 //! (`examples/headless_export.rs`). `examples/song_bounce.rs` is the whole common
 //! path from one `use tutti::{..}`: a sampler `Clip` into a filter into a
 //! reverb, an LFO on the cutoff, `Session::play`, and eight beats bounced to a
@@ -58,7 +58,7 @@
 //! ## Where a name lives
 //!
 //! Every item is reachable at one path. What an application names is at the
-//! crate's root, so one `use tutti::{Session, SessionEvent, Root, Samples};`
+//! crate's root, so one `use tutti::{Session, SessionEvent, MainOutput, Samples};`
 //! covers a program. The rest is in a module that groups it by what it is, each
 //! item listed by name:
 //!
@@ -106,6 +106,7 @@
 //! - `export` — `Bounce` and its results (implies `encode-wav`).
 //! - `midi` — `tutti::midi`. `crates/tutti/examples/midi_all.rs` uses every piece together, offline.
 //! - `midi-hardware` — OS MIDI I/O in `tutti::midi` (implies `midi`).
+//! - `midi-network` — Network MIDI 2.0 in `tutti::midi::network` (implies `midi`; not on the web).
 //! - `synth`, `soundfont`, `sampler` — the matching module.
 //!   `synth` and `soundfont` imply `midi`; `sampler` implies no decoder.
 //! - `analyze` — `Session::analyze` and `tutti::measure` (implies `session`).
@@ -126,7 +127,7 @@
 // --- the application's names, at the root -----------------------------------
 //
 // What an application names, listed here by name, so a program imports from one
-// place: `use tutti::{Session, SessionEvent, Root, Samples};`. There is no
+// place: `use tutti::{Session, SessionEvent, MainOutput, Samples};`. There is no
 // prelude and no glob: this file is the surface. Each group is behind the
 // feature that gates it. A name here is in no module below. `Result`, `Sample`
 // and `Unit` are not here: each would shadow a name a program already has.
@@ -197,16 +198,17 @@ pub use tutti_session::windows_from_signal;
 pub use tutti_session::{
     AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadInProcess, LoadOutOfProcess,
     LoadPlugin, LoadPreset, LoadPresetInProcess, LoadPresetOutOfProcess, LoadedPlugin,
-    LoadedPreset, LoadingOutOfProcess, LoadingPresetOutOfProcess, Opened, Plugin, PluginApplyError,
-    PluginBuses, PluginChange, PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginPresets,
-    PortCounts, PresetStartError, RestoreState, RestoreStateInProcess, RestoreStateOutOfProcess,
-    RestoredState, RestoringStateOutOfProcess, SaveState, SaveStateInProcess,
-    SaveStateOutOfProcess, SavingStateOutOfProcess, StateStartError, SwapPluginError,
+    LoadedPreset, LoadingPlugin, LoadingPresetOutOfProcess, Opened, Plugin, PluginApplyError,
+    PluginBuses, PluginChange, PluginEvent, PluginHealth, PluginInfo, PluginInstance,
+    PluginPresets, PortCounts, PresetStartError, RestoreState, RestoreStateInProcess,
+    RestoreStateOutOfProcess, RestoredState, RestoringStateOutOfProcess, SaveState,
+    SaveStateInProcess, SaveStateOutOfProcess, SavingStateOutOfProcess, StateStartError,
+    SwapPluginError,
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{
     Analyze, AnalyzeError, Analyzer, AnalyzerError, Analyzing, Audio, AudioContext, AudioInput,
-    BindError,
+    MeterBindError,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
@@ -218,10 +220,10 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    AppKey, BlockDates, Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Key,
-    NoSuchNode, Offline, OfflineSession, OutPort, Playhead, RealTime, Root, Session,
-    SessionBuilder, SessionEvent, SessionFloat, SystemClock, SystemSession, TransportHandle,
-    Workers,
+    AppKey, BlockDates, ChannelEdge, Clock, ConnectError, EventInPort, EventOutPort, InPort, Key,
+    MainInput, MainOutput, NoSuchNode, Offline, OfflineSession, OutPort, Playhead, RealTime,
+    Session, SessionBuilder, SessionEvent, SessionFloat, SystemClock, SystemSession,
+    TransportHandle, Workers,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
@@ -235,7 +237,7 @@ pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
 pub use tutti_session::{DirectionTarget, LoopingTarget, SpeedTarget, WindowTarget};
 #[cfg(all(feature = "session", feature = "capture"))]
 pub use tutti_session::{
-    Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeFile, TakeTarget,
+    Input, InputConfig, Punch, Record, Recorded, Take, TakeError, TakeEvent, TakeFile, TakeTarget,
 };
 #[cfg(all(feature = "session", feature = "midi", feature = "analyze"))]
 pub use tutti_session::{
@@ -296,30 +298,32 @@ pub mod nodes {
         ConvolverNode, CrossoverConfig, CrossoverError, CrossoverNode, CutAlignment,
         CutFilterConfig, CutFilterNode, DcBlockerConfig, DcBlockerNode, Decoding,
         DecorrelatorConfig, DecorrelatorNode, DelayConfig, DelayLayout, DelayLayoutBuilder,
-        DelayLayoutError, DelayNode, DelayTiming, DistanceConfig, DistanceNode, DistortionConfig,
-        DistortionNode, DynamicEqConfig, DynamicEqNode, DynamicMode, EarlyReflectionsConfig,
-        EarlyReflectionsNode, EnvelopeFilterConfig, EnvelopeFilterNode, EnvelopeFollowerConfig,
-        EnvelopeFollowerNode, EqBandConfig, EqBandNode, FdnConfig, FdnLayout, FdnNode,
-        FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError, FirConvolverConfig,
-        FmConfig, FmNode, FreeverbConfig, FreeverbNode, FreezeMode, FrequencyShifterConfig,
-        FrequencyShifterNode, GateConfig, GateNode, GranularConfig, GranularError, GranularNode,
-        GraphicBands, GraphicEqConfig, GraphicEqNode, HrtfBinauralConfig, HrtfBinauralNode,
-        InterpolationMode, IrLayout, KarplusStrongConfig, KarplusStrongNode, KeyFilter, KeySource,
-        LadderFilterConfig, LadderFilterNode, LadderType, LevellerConfig, LevellerNode, LfoClock,
-        LfoConfig, LfoNode, LimiterConfig, LimiterNode, MetronomeMode, MidSideConfig, MidSideNode,
-        ModDelayConfig, ModDelayLayout, ModDelayLayoutBuilder, ModDelayNode, ModalBankConfig,
-        ModalBankNode, MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
-        NoiseColour, NoiseConfig, NoiseNode, NoteEnvelopeConfig, NoteEnvelopeNode, NoteTimes,
-        NoteTimesError, OscillatorConfig, OscillatorNode, OscillatorWave, PanLaw, PhaserConfig,
-        PhaserNode, PitchShifterConfig, PitchShifterNode, PlateReverbConfig, PlateReverbNode,
-        PolarityConfig, PolarityError, PolarityNode, RingModConfig, RingModNode,
-        SOURCE_EVENT_CAPACITY, ShapeKind, ShimmerConfig, ShimmerNode, SourceNode, SourcePorts,
-        SpringLayout, SpringReverbConfig, SpringReverbNode, SpringStages, SpringStagesError,
-        Stages, StagesError, Stagger, StaggerError, StereoWidthConfig, StereoWidthNode,
-        SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError, SweepRange,
-        SweepRangeError, TiltFilterConfig, TiltFilterNode, TransientShaperConfig,
-        TransientShaperNode, TremoloConfig, TremoloNode, VbapError, VbapPannerConfig,
-        VbapPannerNode, WaveguideStringConfig, WaveguideStringNode, WavetableConfig, WavetableNode,
+        DelayLayoutError, DelayNode, DelayTiming, DiodeClipperConfig, DiodeClipperNode,
+        DistanceConfig, DistanceNode, DistortionConfig, DistortionNode, DynamicEqConfig,
+        DynamicEqNode, DynamicMode, EarlyReflectionsConfig, EarlyReflectionsNode,
+        EnvelopeFilterConfig, EnvelopeFilterNode, EnvelopeFollowerConfig, EnvelopeFollowerNode,
+        EqBandConfig, EqBandNode, FdnConfig, FdnLayout, FdnNode, FeedbackRouting,
+        FeedbackRoutingBuilder, FeedbackRoutingError, FirConvolverConfig, FmConfig, FmNode,
+        FreeverbConfig, FreeverbNode, FreezeMode, FrequencyShifterConfig, FrequencyShifterNode,
+        GateConfig, GateNode, GranularConfig, GranularError, GranularNode, GraphicBands,
+        GraphicEqConfig, GraphicEqNode, HrtfBinauralConfig, HrtfBinauralNode, HysteresisConfig,
+        HysteresisNode, InterpolationMode, IrLayout, KarplusStrongConfig, KarplusStrongNode,
+        KeyFilter, KeySource, LadderFilterConfig, LadderFilterNode, LadderType, LevellerConfig,
+        LevellerNode, LfoClock, LfoConfig, LfoNode, LimiterConfig, LimiterNode, MetronomeMode,
+        MidSideConfig, MidSideNode, ModDelayConfig, ModDelayLayout, ModDelayLayoutBuilder,
+        ModDelayNode, ModalBankConfig, ModalBankNode, MultibandBands, MultibandCompressorConfig,
+        MultibandCompressorNode, NoiseColour, NoiseConfig, NoiseNode, NoteEnvelopeConfig,
+        NoteEnvelopeNode, NoteTimes, NoteTimesError, OscillatorConfig, OscillatorNode,
+        OscillatorWave, PanLaw, PhaserConfig, PhaserNode, PitchShifterConfig, PitchShifterNode,
+        PlateReverbConfig, PlateReverbNode, PolarityConfig, PolarityError, PolarityNode,
+        RingModConfig, RingModNode, SOURCE_EVENT_CAPACITY, ShapeKind, ShimmerConfig, ShimmerNode,
+        SourceNode, SourcePorts, SpringLayout, SpringReverbConfig, SpringReverbNode, SpringStages,
+        SpringStagesError, Stages, StagesError, Stagger, StaggerError, StereoWidthConfig,
+        StereoWidthNode, SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError,
+        SweepRange, SweepRangeError, TiltFilterConfig, TiltFilterNode, TransientShaperConfig,
+        TransientShaperNode, TremoloConfig, TremoloNode, TubeStageConfig, TubeStageNode, VbapError,
+        VbapPannerConfig, VbapPannerNode, WaveguideStringConfig, WaveguideStringNode,
+        WavetableConfig, WavetableNode,
     };
 
     /// Writing a node over the kernels (`tutti-nodes`): the `Kernel` and `KernelNode`
@@ -337,23 +341,26 @@ pub mod nodes {
             ControlRead, ControlSet, ControlSignals, ControlValid, CrossoverControls,
             CrossoverKernel, CrossoverSet, CutFilterControls, CutFilterKernel, CutFilterSet,
             DcBlockerControls, DcBlockerKernel, DcBlockerSet, DecorrelatorKernel, DelayControls,
-            DelayKernel, DelaySet, DirectionSet, DistanceKernel, DistanceSet, DistortionKernel,
-            DistortionSet, DynamicEqControls, DynamicEqKernel, DynamicEqSet,
-            EarlyReflectionsKernel, EnvelopeFilterControls, EnvelopeFilterKernel,
-            EnvelopeFilterSet, EqControls, EqKernel, FdnControls, FdnKernel, FdnSet, Feed,
-            FmKernel, FmSet, FreeverbControls, FreeverbKernel, FreeverbSet, FrequencyShifterKernel,
-            FrequencyShifterSet, GateControls, GateKernel, GateSet, GraphicEqControls,
-            GraphicEqKernel, GraphicEqSet, HasControl, KarplusStrongKernel, KarplusStrongSet,
-            Kernel, KernelConfig, KernelNode, LadderControls, LadderKernel, LadderSet,
-            LevellerControls, LevellerKernel, LevellerSet, LimiterControls, LimiterKernel,
-            LimiterSet, ModDelayControls, ModDelayKernel, ModDelaySet, ModalBankKernel,
-            ModalBankSet, MultibandControls, NoControls, PhaserControls, PhaserKernel, PhaserSet,
-            PitchShifterKernel, PitchShifterSet, PlateControls, PlateKernel, PlateSet,
-            ReconcileError, RingModControls, RingModKernel, RingModSet, ShimmerKernel, ShimmerSet,
-            SpringControls, SpringReverbKernel, SpringReverbSet, StereoWidthKernel, StereoWidthSet,
-            SvfControls, SvfKernel, SvfSet, TiltFilterControls, TiltFilterKernel, TiltFilterSet,
-            TransientControls, TransientShaperKernel, TransientShaperSet, TremoloControls,
-            TremoloKernel, TremoloSet, WaveguideStringKernel, WaveguideStringSet, WidthControls,
+            DelayKernel, DelaySet, DiodeClipperControls, DiodeClipperKernel, DiodeClipperSet,
+            DirectionSet, DistanceKernel, DistanceSet, DistortionKernel, DistortionSet,
+            DynamicEqControls, DynamicEqKernel, DynamicEqSet, EarlyReflectionsKernel,
+            EnvelopeFilterControls, EnvelopeFilterKernel, EnvelopeFilterSet, EqControls, EqKernel,
+            FdnControls, FdnKernel, FdnSet, Feed, FmKernel, FmSet, FreeverbControls,
+            FreeverbKernel, FreeverbSet, FrequencyShifterKernel, FrequencyShifterSet, GateControls,
+            GateKernel, GateSet, GraphicEqControls, GraphicEqKernel, GraphicEqSet, HasControl,
+            HysteresisControls, HysteresisKernel, HysteresisSet, KarplusStrongKernel,
+            KarplusStrongSet, Kernel, KernelConfig, KernelNode, LadderControls, LadderKernel,
+            LadderSet, LevellerControls, LevellerKernel, LevellerSet, LimiterControls,
+            LimiterKernel, LimiterSet, ModDelayControls, ModDelayKernel, ModDelaySet,
+            ModalBankKernel, ModalBankSet, MultibandControls, NoControls, PhaserControls,
+            PhaserKernel, PhaserSet, PitchShifterKernel, PitchShifterSet, PlateControls,
+            PlateKernel, PlateSet, ReconcileError, RingModControls, RingModKernel, RingModSet,
+            ShimmerKernel, ShimmerSet, SpringControls, SpringReverbKernel, SpringReverbSet,
+            StereoWidthKernel, StereoWidthSet, SvfControls, SvfKernel, SvfSet, TiltFilterControls,
+            TiltFilterKernel, TiltFilterSet, TransientControls, TransientShaperKernel,
+            TransientShaperSet, TremoloControls, TremoloKernel, TremoloSet, TubeStageControls,
+            TubeStageKernel, TubeStageSet, WaveguideStringKernel, WaveguideStringSet,
+            WidthControls,
         };
     }
 }
@@ -367,34 +374,38 @@ pub mod dsp {
         Absorption, AdditiveBank, AdditiveControls, Algorithm, AlgorithmError, AllPass,
         AllPassFilter, AllPassForm, AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, Band,
         Biquad, BlockMismatch, BlockTooLong, BrickwallControls, Butterworth, ButterworthOrder,
-        ButterworthOrderError, ChebyshevI, ChebyshevII, ChunkSize, CombBank, CombControls,
-        CombFilter, CombForm, Cookbook, CutResponse, DISTANCE_GLIDE, DecayTime, Decorrelator,
-        Distance, DistanceControls, DistanceSpec, EarlyReflections, EarlyReflectionsError,
-        Elliptic, EllipticTolerances, Envelope, EnvelopeCurve, EnvelopeDesign, EnvelopeLeg,
-        EnvelopePace, EnvelopeStage, EnvelopeStages, EnvelopeStep, Fdn, FillController, Fir,
-        FirError, FirSummary, FmControls, FmPatch, FmVoice, FrequencyShifterBank,
-        FrequencyShifterControls, Full, Gains, GainsLengthMismatch, GrainScheduler, GrainSettings,
-        GrainStart, Granular, HarmonicNormalization, Harmonics, HrirMeasurement, HrirSphere,
-        HrtfBinauralError, Inline, KarplusStrong, KarplusStrongBank, KarplusStrongControls, Lerp,
-        Line, LineModulation, LinearPhaseDesign, LinkwitzRiley, Lookahead, LookaheadError,
-        LoopBandwidth, LoopBandwidthError, LowestPitch, LowestPitchError, Lti, MAX_GRID, MAX_MODES,
-        MAX_OPERATORS, MAX_PARTIALS, MAX_TAP_DELAY, MatchedBell, Matrix, MatrixConvolver,
-        MatrixConvolverConfig, MatrixConvolverError, MaxDecay, MaxDecayError, MaxDelay,
-        MaxDelayError, MaxGrains, MaxGrainsError, ModalBank, ModalControls, Mode, ModeCount,
-        ModeCountError, Modes, ModulationRate, ModulationRateError, Network, NetworkOutputMap,
-        NetworkStage, Operator, OperatorCount, OperatorCountError, OperatorError,
-        OperatorFrequency, OperatorSpec, Oversampler, Oversampling, OversamplingFactor,
-        OversamplingPlan, Partial, PartialCount, PartialCountError, Partials, Passband,
-        PassbandError, PassbandRipple, PassbandRippleError, PeakDetection, PhaseVocoder,
+        ButterworthOrderError, ChebyshevI, ChebyshevII, ChunkSize, ClipperDrive, ClipperDriveError,
+        CombBank, CombControls, CombDelay, CombDelayError, CombFilter, CombForm, Cookbook,
+        CutResponse, DISTANCE_GLIDE, DecayTime, Decorrelator, Distance, DistanceControls,
+        DistanceSpec, EarlyReflections, EarlyReflectionsError, Elliptic, EllipticTolerances,
+        Envelope, EnvelopeCurve, EnvelopeDesign, EnvelopeLeg, EnvelopePace, EnvelopeStage,
+        EnvelopeStages, EnvelopeStep, Fdn, FillController, Fir, FirError, FirSummary, FmControls,
+        FmPatch, FmVoice, FrequencyShifterBank, FrequencyShifterControls, Full, Gains,
+        GainsLengthMismatch, GrainScheduler, GrainSettings, GrainStart, Granular,
+        HarmonicNormalization, Harmonics, HrirMeasurement, HrirSphere, HrtfBinauralError,
+        HysteresisDrive, HysteresisDriveError, Inline, KarplusStrong, KarplusStrongBank,
+        KarplusStrongControls, Lerp, Line, LineModulation, LinearPhaseDesign, LinkwitzRiley,
+        Lookahead, LookaheadError, LoopBandwidth, LoopBandwidthError, LowestPitch,
+        LowestPitchError, Lti, MAX_GRID, MAX_MODES, MAX_OPERATORS, MAX_PARTIALS, MAX_TAP_DELAY,
+        MatchedBell, Matrix, MatrixConvolver, MatrixConvolverConfig, MatrixConvolverError,
+        MaxDecay, MaxDecayError, MaxDelay, MaxDelayError, MaxGrains, MaxGrainsError, ModalBank,
+        ModalControls, Mode, ModeCount, ModeCountError, Modes, ModulationRate, ModulationRateError,
+        Network, NetworkOutputMap, NetworkStage, Operator, OperatorCount, OperatorCountError,
+        OperatorError, OperatorFrequency, OperatorSpec, Oversampler, Oversampling,
+        OversamplingFactor, OversamplingPlan, Partial, PartialCount, PartialCountError, Partials,
+        Passband, PassbandError, PassbandRipple, PassbandRippleError, PeakDetection, PhaseVocoder,
         PhaseVocoderControls, QUADRATURE_ERROR, ReferenceDistance, ReferenceDistanceError,
         ReflectionOrder, ResampleError, Rotation, Route, ShoeboxConfig, ShoeboxError, ShoeboxRoom,
         SimdLanes, Sos, SosError, SpeakerGeometryError, SpeakerLayout, SpringLength,
         SpringLengthError, StopbandAttenuation, StopbandAttenuationError, StreamCounts, System,
-        TableSize, TableSizeError, Tap, TapSet, Tilt, VariableRate, VariableRateError,
+        TableSize, TableSizeError, Tap, TapSet, Tilt, TransientDetector, TransientThreshold,
+        TransientThresholdError, TransientTime, TransientTimeError, TransientTimes,
+        TransientTimesError, TubeDrive, TubeDriveError, VariableRate, VariableRateError,
         VariableResampler, VelvetDensity, VelvetDensityError, VelvetLength, VelvetLengthError,
         VelvetNoise, VelvetNoiseError, VelvetPulse, Wall, WaveguideBank, WaveguideControls,
         WaveguidePositions, WaveguideString, WaveshaperControls, Wavetable, WavetableError,
-        WavetableOscillator, WavetableStep, quadrature_band,
+        WavetableOscillator, WavetableStep, quadrature_band, spectral_bandwidth, spectral_crest,
+        spectral_slope,
     };
 }
 
@@ -468,7 +479,7 @@ pub mod graph {
     pub use tutti_graph::{
         Bus, BusRole, Buses, Cost, Cx, Env, ForkByClone, HasParam, HasParams, InBus, Inputs,
         IntoNode, Io, Node, OutBus, Outputs, ParamFork, ParamNode, ParamSet, ParamSetBuilder,
-        ParamUnit, Params, Prepare, RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar,
+        ParamValue, Params, Prepare, RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar,
         Shape, Status, Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
@@ -515,7 +526,8 @@ pub mod session {
     };
     pub use tutti_graph::{
         BusFeed, BusFold, BusSide, EdgeFade, EdgeId, EventCapacityError, EventIn, EventOut,
-        ForkError, InletCounts, Instrument, MeterId, ParamIn, PrerollTable, RootError, RootId,
+        ForkError, InletCounts, InstrumentNode, MainOutputError, MainOutputId, MeterId, ParamIn,
+        PrerollTable,
     };
     pub use tutti_modulation::PeriodPoint;
     pub use tutti_session::Apply;
@@ -529,14 +541,15 @@ pub mod session {
     ))]
     pub use tutti_session::LoadError;
     pub use tutti_session::{
-        BackgroundWork, BlockConfig, Bus, BusSink, Channel, Committed, Connection,
-        DeclarationError, Disconnection, Event, EventEdge, EventTapPort, Fanin, Feeder, Graph,
-        HeardTapOpen, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots,
-        NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer,
-        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims, Removal,
-        RemoveError, Reopened, ReplaceRefused, Replacement, Resource, ResourceFact, ResourceId,
-        RootDeclaration, RootReader, RootTopologyStatus, SessionHeardTapError, SessionNode,
-        SetRateError, SetSources, Taps, TempoError, Weighted, Wire, root_width,
+        BackgroundWork, BlockConfig, BusSink, BusWire, ChannelWire, Committed, Connection,
+        DeclarationError, Disconnection, EventEdge, EventTapPort, EventWire, Fanin, Feeder, Graph,
+        Inlet, InletError, LIVE_MAX_BLOCK, MainBusWire, MainOutputDeclaration, MainOutputReader,
+        MainOutputTopologyStatus, MainSink, Meters, NodeSlots, NotReopened, Outlet,
+        OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError, PeerEvent,
+        PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
+        Removal, RemoveError, Reopened, ReplaceRefused, Replacement, Resource, ResourceFact,
+        SessionHeardTapError, SessionNode, SetRateError, SetSources, SetTempoError, Taps, Weighted,
+        Wire, main_output_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
@@ -552,9 +565,9 @@ pub mod session {
     #[cfg(feature = "export")]
     pub use tutti_session::{
         AnyStem, BounceConfigError, BounceHandle, BounceJob, BounceRendered, Bouncing,
-        BufferMaster, BufferStem, EventLossPolicy, ExportClock, FileMaster, FileStem, Master,
-        NoMaster, Normalize, Outcome, PrepareEdit, PreparedGraph, Produced, Progress, Resample,
-        Stage,
+        BufferMainOutput, BufferStem, EventLossPolicy, ExportClock, FileMainOutput, FileStem,
+        MainOutputKind, NoMainOutput, Normalize, Outcome, PrepareEdit, PreparedGraph, Produced,
+        Progress, Resample, Stage,
     };
     #[cfg(feature = "capture")]
     pub use tutti_session::{
@@ -660,7 +673,8 @@ pub mod measure {
     pub use tutti_measure::{
         DetectionFunction, FiniteLevel, FiniteLevelError, Framing, Novelty, Onset, OnsetConfig,
         OnsetGap, OnsetGapError, OnsetMeter, OnsetSensitivity, OnsetSensitivityError,
-        OnsetThreshold, OnsetThresholdError, Region, SilenceConfig, SilenceMeter,
+        OnsetThreshold, OnsetThresholdError, Region, SilenceConfig, SilenceMeter, TransientConfig,
+        TransientMeter, detect_transients,
     };
     // Spectrum and chroma.
     pub use tutti_measure::{
@@ -740,9 +754,10 @@ pub mod soundfont {
 #[cfg(feature = "plugin")]
 pub mod plugin {
     pub use tutti_plugin_db::{
-        BeforeEpoch, BlacklistedFile, FileFacts, FileFailure, FileFailureCause, FileRow, FileState,
-        FilesError, Mtime, PedalError, PluginEntry, ProbeFailure, Recovered, RecoveryFailure,
-        RowChange, ScanBusy, ScanOutcome, ScanProgress, ScannedFile, UnmeasuredPlugin,
+        BeforeEpoch, BlacklistedFile, CrashRecoveryFailure, FileFacts, FileFailure,
+        FileFailureCause, FileRow, FileState, FilesError, Mtime, PedalError, PluginEntry,
+        ProbeFailure, Recovered, RowChange, ScanBusy, ScanOutcome, ScanProgress, ScannedFile,
+        UnmeasuredPlugin,
     };
     pub use tutti_plugin_db::{BindError, BlacklistView, Loadable, PersistError, Resolved};
     pub use tutti_plugin_host::{BlockLosses, RebindError};
@@ -752,16 +767,16 @@ pub mod plugin {
     pub use tutti_plugin_types::bundle::ModuleKind;
     pub use tutti_plugin_types::features::{FeatureReport, Features};
     pub use tutti_plugin_types::{
-        AuComponentType, AutomationModeError, Axis, BlockCounts, ClapFeature, ContentScale,
-        ControlRole, EditorPresence, EmptyVersionText, Helper, InvalidContentScale, IpcError,
-        IpcResult, KeyEvent, KeyUse, LatencyVerdict, LinearRange, Locator, Measured, NotChecked,
-        ParamFlags, ParamRange, ParamSteps, ParamUnit, ParameterInfo, PlainMap, PlainUnit,
-        PluginClass, PluginError, PluginFormat, PluginTooWide, PluginVersion, ProbeConfig,
-        StateError, StateHash, TailVerdict, UnknownExtension, Verdict, VersionText, Vst2Category,
-        Vst3PlugType, Vst3SubCategories,
+        AuComponentType, AutomationModeError, Axis, BridgeLosses, ChunkOutcomes, ClapFeature,
+        ContentScale, ControlRole, EditorPresence, EmptyVersionText, Helper, InvalidContentScale,
+        IpcError, IpcResult, KeyEvent, KeyUse, LatencyVerdict, LinearRange, Locator, Measured,
+        NotChecked, ParamFlags, ParamSteps, ParamUnit, ParameterInfo, PipelineCounts, PlainMap,
+        PlainUnit, PluginClass, PluginError, PluginFormat, PluginParamRange, PluginTooWide,
+        PluginVersion, ProbeConfig, ServerLosses, StateError, StateHash, TailVerdict,
+        UnknownExtension, Verdict, VersionText, Vst2Category, Vst3PlugType, Vst3SubCategories,
     };
     pub use tutti_plugin_types::{
-        AutomationMode, MainThreadMarker, MainWork, MainWorkHandle, Preset,
+        AutomationMode, MainThreadMarker, MainWork, MainWorkHandle, PluginPreset,
     };
     pub use tutti_plugin_types::{
         EditorError, EditorMirrorError, EditorOpened, LoadStage, NoEditorHost, RateRefusal,
@@ -793,7 +808,7 @@ pub mod plugin {
 /// `MidiChannel`, `MidiGroup`, `NoteNumber`, `NoteVelocity`, `Voice1`, `SysexAssembler`, `Midi1Parser`), a timed event, the keys
 /// that play an instrument or a live input (`MidiKeys`),
 /// the session's MIDI (`Midi`, `InstrumentHandle`), its route rule, events and
-/// errors (`MidiRouteRule`, `MidiRouteId`, `MidiReport`, `MidiError`), its
+/// errors (`MidiRouteRule`, `MidiRouteId`, `MidiEvent`, `MidiError`), its
 /// followers (`FollowTempo`, `FollowClock`, `FollowMachineControl`), the
 /// sync node that sends the transport (`SyncOut`, `SyncMessages`), a host's own output (`MidiSink`, `OpenMidiSink`, `Stamping`), and under `midi-hardware` a device (`MidiDeviceId`,
 /// `DeviceInfo`), the ports a session opens for them
@@ -902,7 +917,7 @@ pub mod midi {
     #[cfg(feature = "session")]
     pub use tutti_session::{
         AnyNode, DroppedEvent, FollowClock, FollowMachineControl, FollowTempo, InstrumentHandle,
-        LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi, Midi, MidiReport, MidiRouteId,
+        LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi, Midi, MidiEvent, MidiRouteId,
         MidiRouteRule, MidiSink, NoCommonTimelineError, NotInstrument, OpenMidiSink, Stamping,
         TrackError,
     };
@@ -930,8 +945,35 @@ pub mod midi {
         MidiPolicyError, MidiPortError, NoHardware, PortCause, ProfilePeer, ReportPeer,
         RequestReport, RestorePeerState, SavePeerState, SwitchProfile, WholeProfile,
     };
-    #[cfg(feature = "midi-hardware")]
+    #[cfg(any(feature = "midi-hardware", feature = "midi-network"))]
     pub use tutti_ump::{EndpointName, InstanceIdError, Name, NameError, ProductInstanceId};
+    /// Network MIDI 2.0 (M2-124) as the session's MIDI: a Client or a Host bound by
+    /// `Midi::open_network_client` and `open_network_host`, its peers' input nodes and its output node, and the
+    /// Hosts found by mDNS. Not on the web, which has no UDP sockets. Feature
+    /// `midi-network`.
+    ///
+    /// ```
+    /// use tutti::midi::network::EndpointIdentity;
+    /// use tutti::midi::{EndpointName, ProductInstanceId};
+    ///
+    /// let identity = EndpointIdentity::new(
+    ///     EndpointName::new("Studio").unwrap(),
+    ///     ProductInstanceId::new("HOST-1").unwrap(),
+    /// );
+    /// assert!(identity.is_some());
+    /// ```
+    #[cfg(all(feature = "midi-network", not(target_arch = "wasm32")))]
+    pub mod network {
+        pub use tutti_midi_network::{
+            Admission, Advertisement, AuthFailure, AuthMethods, Browser, ByeReason, Client,
+            Credentials, DiscoveryError, EndedBy, EndpointIdentity, Fec, FoundHost, Host,
+            HostEvent, IdleInterval, IdleIntervalOutOfRange, InstanceName, InstanceNameError,
+            PendingHosts, Requests, Retransmit, SessionConfig, Timer, TimerOutOfRange, Username,
+        };
+        #[cfg(feature = "session")]
+        pub use tutti_session::{MidiNetwork, NetworkError, NetworkEvent, OpenClient, OpenHost};
+    }
+
     /// MIDI-CI Property Exchange (M2-103 and its resource specifications): a
     /// peer's resources, read, written and subscribed to through the session.
     /// Under `plugin` alone it holds only the `MediaType` a `PeerState` carries.

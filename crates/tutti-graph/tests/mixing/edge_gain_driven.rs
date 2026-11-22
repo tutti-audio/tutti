@@ -571,8 +571,8 @@ fn a_source_is_structural_and_a_range_is_a_control() {
     ed.commit().expect("commits");
 }
 
-/// A fork of the master carries a driven lane and its driver (the lane's
-/// node is a root of the fork), and its first block starts at the driven
+/// A fork of the main output carries a driven lane and its driver (the lane's
+/// node is a main output of the fork), and its first block starts at the driven
 /// value.
 #[test]
 fn a_fork_carries_the_driven_lane() {
@@ -591,7 +591,7 @@ fn a_fork_carries_the_driven_lane() {
     exec.apply_pending();
     ed.collect();
     let (mut fed, mut fexec) = ed
-        .fork(ForkTarget::Master, ForkMode::Offline, prepare(BLOCK))
+        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare(BLOCK))
         .expect("forks");
     let mut o = vec![0.0f32; BLOCK];
     fexec.process(

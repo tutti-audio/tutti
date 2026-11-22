@@ -6,10 +6,9 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
-    KeyUse, LoadedPlugin, ModifierConvention, ParamAccess, ParamEdit, ParamWriteError,
-    ParameterInfo, PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError,
-    PluginResult, Preset, PresetId, RenderMode, RenderModeSupport, Request, StateUse, Widths,
-    WindowHandle,
+    KeyUse, ModifierConvention, ParamAccess, ParamEdit, ParamWriteError, ParameterInfo, PluginBus,
+    PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginPreset, PluginResult,
+    PluginWiring, PresetId, RenderMode, RenderModeSupport, Request, StateUse, Widths, WindowHandle,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -112,12 +111,12 @@ impl Control for Vst2Loaded {
 
     /// The wiring read from the plugin now: its pin counts, latency and tail are
     /// asked of the `AEffect` and the dispatcher, not remembered from load.
-    fn wiring(&self, main: MainThreadMarker) -> LoadedPlugin {
+    fn wiring(&self, main: MainThreadMarker) -> PluginWiring {
         let (inputs, outputs) = self.pins();
         // The arrangements the plugin kept after `negotiate_arrangement`; a bus reads one
         // through `placement`, which is `None` where its width is not the pin count.
         let kept = self.kept.as_ref();
-        LoadedPlugin {
+        PluginWiring {
             // VST2 is single-bus: one main input bus, one main output bus. Before a
             // negotiation a bus has no placement: `effGetSpeakerArrangement` is asked only
             // of a plugin the host has proposed an arrangement to.
@@ -262,10 +261,10 @@ impl Control for Vst2Loaded {
     /// a position in `[0, numPrograms)` — so unlike AU's sparse selectors these
     /// are genuinely dense. Unnamed slots are kept: dropping one would renumber
     /// every program after it.
-    fn presets(&mut self, main: MainThreadMarker) -> Vec<Preset> {
+    fn presets(&mut self, main: MainThreadMarker) -> Vec<PluginPreset> {
         self.programs(main)
             .into_iter()
-            .map(|(index, name)| Preset::new(PresetId::Number(index), name))
+            .map(|(index, name)| PluginPreset::new(PresetId::Number(index), name))
             .collect()
     }
 

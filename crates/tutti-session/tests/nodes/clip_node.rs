@@ -5,7 +5,7 @@ use tutti_buffers::Interleaved;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::NodeKey;
 use tutti_sampler::Clip;
-use tutti_session::{OutPort, Root, Session};
+use tutti_session::{MainOutput, OutPort, Session};
 use tutti_units::{Amplitude, Beat, SampleRate};
 
 const RATE: f64 = 48_000.0;
@@ -28,7 +28,7 @@ fn level(value: f32) -> tutti_buffers::Wave {
 }
 
 /// `frames` stereo frames of the session, the transport rolling.
-fn run(s: &Session, frames: usize) -> Vec<f32> {
+fn run(s: &mut Session, frames: usize) -> Vec<f32> {
     s.play().expect("room");
     let mut out = Vec::new();
     let mut buf = vec![0.0f32; 512 * 2];
@@ -43,7 +43,7 @@ fn run(s: &Session, frames: usize) -> Vec<f32> {
 fn wire(s: &mut Session, clip: NodeKey) {
     for port in 0..2 {
         s.graph()
-            .set_sources(Root::output(port), [OutPort::new(clip, port)])
+            .set_sources(MainOutput::channel(port), [OutPort::new(clip, port)])
             .unwrap();
     }
 }
@@ -64,7 +64,7 @@ fn a_clip_starts_on_its_beat_at_its_gain() {
     );
     wire(&mut s, clip.erase());
     let _ = s.update();
-    let out = run(&s, 40_000);
+    let out = run(&mut s, 40_000);
     assert!(out[..2 * 24_000].iter().all(|&x| x == 0.0), "silent before");
     let after = out[2 * 24_000 + 2];
     assert!(after > 0.0, "audible from the beat");
@@ -80,7 +80,7 @@ fn a_clip_starts_on_its_beat_at_its_gain() {
     );
     wire(&mut full, whole.erase());
     let _ = full.update();
-    let unscaled = run(&full, 40_000)[2 * 24_000 + 2];
+    let unscaled = run(&mut full, 40_000)[2 * 24_000 + 2];
     assert!(
         (after - unscaled * 0.5).abs() < 1e-6,
         "{after} vs {unscaled}"

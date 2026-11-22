@@ -941,7 +941,7 @@ fn a_fork_of_a_bus_edge_renders_the_fold() {
     ed.spec_mut().topology.set_outputs(vec![out_port(2, 0)]);
     ed.commit().expect("commits");
     let (fork_ed, fork_exec) = ed
-        .fork(ForkTarget::Master, ForkMode::Live, prepare(BLOCK))
+        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(BLOCK))
         .expect("forkable");
     let got = Renderer::new(fork_ed, fork_exec).render(2 * BLOCK);
     assert_eq!(got.len(), 1);
@@ -951,10 +951,10 @@ fn a_fork_of_a_bus_edge_renders_the_fold() {
 }
 
 // ---------------------------------------------------------------------------
-// The root as a bus sink.
+// The main output as a bus sink.
 // ---------------------------------------------------------------------------
 
-fn root_lane(channel: u16, from: PortSource) -> EdgeId {
+fn main_output_lane(channel: u16, from: PortSource) -> EdgeId {
     EdgeId {
         sink: PortSink::Output(channel),
         from: Edge::Direct(from),
@@ -962,25 +962,25 @@ fn root_lane(channel: u16, from: PortSource) -> EdgeId {
 }
 
 /// `src` channels of SMPTE global input through a source node (key 1) into a
-/// declared root of `dst` SMPTE channels by one bus edge, and nothing else:
-/// the outputs are the root's width and no ordinary source feeds them.
-fn root_rig(src: usize, dst: usize) -> Rig {
+/// declared main output of `dst` SMPTE channels by one bus edge, and nothing else:
+/// the outputs are the main output's width and no ordinary source feeds them.
+fn main_output_rig(src: usize, dst: usize) -> Rig {
     let mut rig = Rig::new(src);
     rig.add(1, source(src, smpte(src)));
     rig.feed_globals(1, src);
-    rig.spec.root = Some(smpte(dst).topology);
+    rig.spec.main_output = Some(smpte(dst).topology);
     rig.spec.topology.outputs = vec![Vec::new(); dst];
-    assert!(rig.spec.connect_bus_to_root(from(1, 0)));
+    assert!(rig.spec.connect_bus_to_main_output(from(1, 0)));
     rig
 }
 
-/// 5.1 into a declared stereo root is the fold's ITU table on the output
+/// 5.1 into a declared stereo main output is the fold's ITU table on the output
 /// channels: each side takes its front, the centre at -3 dB and its
 /// surround at -3 dB, the LFE dropped, as lanes of the outputs' sums in
 /// source-port order; serial, parallel and the reference agree.
 #[test]
-fn five_one_into_a_stereo_root_follows_the_itu_rows() {
-    let rig = root_rig(6, 2);
+fn five_one_into_a_stereo_main_output_follows_the_itu_rows() {
+    let rig = main_output_rig(6, 2);
     let lowering = rig.lowering().unwrap();
     let weights: Vec<(EdgeId, f64)> = lowering
         .lanes
@@ -988,15 +988,15 @@ fn five_one_into_a_stereo_root_follows_the_itu_rows() {
         .map(|(&id, w)| (id, w.get()))
         .collect();
     let expect = [
-        (root_lane(0, out_port(1, 0)), 1.0),
-        (root_lane(0, out_port(1, 2)), f64::MINUS_3_DB),
-        (root_lane(0, out_port(1, 4)), f64::MINUS_3_DB),
-        (root_lane(1, out_port(1, 1)), 1.0),
-        (root_lane(1, out_port(1, 2)), f64::MINUS_3_DB),
-        (root_lane(1, out_port(1, 5)), f64::MINUS_3_DB),
+        (main_output_lane(0, out_port(1, 0)), 1.0),
+        (main_output_lane(0, out_port(1, 2)), f64::MINUS_3_DB),
+        (main_output_lane(0, out_port(1, 4)), f64::MINUS_3_DB),
+        (main_output_lane(1, out_port(1, 1)), 1.0),
+        (main_output_lane(1, out_port(1, 2)), f64::MINUS_3_DB),
+        (main_output_lane(1, out_port(1, 5)), f64::MINUS_3_DB),
     ];
     assert_eq!(weights, expect);
-    assert!(lowering.spec.root_sources.is_empty() && lowering.spec.bus_edges.is_empty());
+    assert!(lowering.spec.main_output_sources.is_empty() && lowering.spec.bus_edges.is_empty());
 
     let blocks = 6;
     let got = rig.render_both(blocks);
@@ -1019,13 +1019,13 @@ fn five_one_into_a_stereo_root_follows_the_itu_rows() {
     assert_eq!(bits(&got), [side(0, 4), side(1, 5)]);
 }
 
-/// A root edge between equal topologies lowers to plain output sources, and
+/// A main output edge between equal topologies lowers to plain output sources, and
 /// the plan is the hand-wired graph's (the plans are compared, not renders).
 #[test]
-fn a_same_topology_root_edge_is_the_hand_wired_plan() {
-    let bus = root_rig(2, 2);
+fn a_same_topology_main_output_edge_is_the_hand_wired_plan() {
+    let bus = main_output_rig(2, 2);
     let mut wired = bus.clone();
-    wired.spec.root_sources.clear();
+    wired.spec.main_output_sources.clear();
     wired.output_all(1, 2);
 
     let lowering = bus.lowering().unwrap();
@@ -1035,55 +1035,55 @@ fn a_same_topology_root_edge_is_the_hand_wired_plan() {
     assert_eq!(weighted_ops(&bus.plan()), 0);
 }
 
-/// A root edge with no declared root is refused at the call with
-/// [`BusError::RootUndeclared`], storing nothing and moving no revision; and
-/// a bus edge that cannot fold to the declared root is `RootFold`.
+/// A main output edge with no declared main output is refused at the call with
+/// [`BusError::MainOutputUndeclared`], storing nothing and moving no revision; and
+/// a bus edge that cannot fold to the declared main output is `MainOutputFold`.
 #[test]
-fn an_undeclared_root_refuses_a_bus_edge_and_stores_nothing() {
+fn an_undeclared_main_output_refuses_a_bus_edge_and_stores_nothing() {
     let (mut ed, _exec) = editor(&[(1, source(2, smpte(2)))], 2);
     ed.spec_mut().topology.outputs = vec![Vec::new(); 2];
     let before = ed.revision();
     assert_eq!(
-        ed.connect_bus_to_root(from(1, 0)),
-        Err(BusError::RootUndeclared)
+        ed.connect_bus_to_main_output(from(1, 0)),
+        Err(BusError::MainOutputUndeclared)
     );
-    assert!(ed.spec().root_sources.is_empty());
+    assert!(ed.spec().main_output_sources.is_empty());
     assert_eq!(ed.revision(), before, "nothing marked edited");
 
     // Declared, but three unassigned channels have no place in a named stereo.
     let (mut ed, _exec) = editor(&[(1, source(3, unassigned(3)))], 3);
-    ed.spec_mut().root = Some(smpte(2).topology);
+    ed.spec_mut().main_output = Some(smpte(2).topology);
     ed.spec_mut().topology.outputs = vec![Vec::new(); 2];
     let before = ed.revision();
     assert!(matches!(
-        ed.connect_bus_to_root(from(1, 0)),
-        Err(BusError::RootFold {
+        ed.connect_bus_to_main_output(from(1, 0)),
+        Err(BusError::MainOutputFold {
             error: FoldError::Unplaced { .. } | FoldError::Unassigned { .. },
             ..
         })
     ));
-    assert!(ed.spec().root_sources.is_empty());
+    assert!(ed.spec().main_output_sources.is_empty());
     assert_eq!(ed.revision(), before);
 }
 
-/// A root lane on an output channel an ordinary source already feeds is
+/// A main output lane on an output channel an ordinary source already feeds is
 /// refused, whichever came first: at the call when the ordinary source is
 /// there, at the commit when it came after.
 #[test]
-fn a_root_lane_on_an_ordinary_output_source_is_refused() {
+fn a_main_output_lane_on_an_ordinary_output_source_is_refused() {
     let (mut ed, _exec) = editor(&[(1, source(2, smpte(2)))], 2);
-    ed.spec_mut().root = Some(smpte(2).topology);
+    ed.spec_mut().main_output = Some(smpte(2).topology);
     ed.spec_mut().topology.outputs = vec![vec![out_port(1, 0)], Vec::new()];
-    let lane = root_lane(0, out_port(1, 0));
+    let lane = main_output_lane(0, out_port(1, 0));
     assert_eq!(
-        ed.connect_bus_to_root(from(1, 0)),
+        ed.connect_bus_to_main_output(from(1, 0)),
         Err(BusError::Overlaps { id: lane })
     );
-    assert!(ed.spec().root_sources.is_empty());
+    assert!(ed.spec().main_output_sources.is_empty());
 
-    // The other order: the ordinary source arrives after the root edge.
+    // The other order: the ordinary source arrives after the main output edge.
     ed.spec_mut().topology.outputs = vec![Vec::new(), Vec::new()];
-    ed.connect_bus_to_root(from(1, 0)).unwrap();
+    ed.connect_bus_to_main_output(from(1, 0)).unwrap();
     ed.spec_mut().topology.outputs[0] = vec![out_port(1, 0)];
     let refused = ed.commit().unwrap_err();
     assert!(
@@ -1095,46 +1095,46 @@ fn a_root_lane_on_an_ordinary_output_source_is_refused() {
     );
 }
 
-/// A root re-declared to a topology the edge no longer folds to fails the
+/// A main output re-declared to a topology the edge no longer folds to fails the
 /// commit with the bus error, never a silent drop; declared back, it
 /// commits. The plan sent last stays in between.
 #[test]
-fn a_redeclared_root_that_no_longer_folds_fails_the_commit() {
+fn a_redeclared_main_output_that_no_longer_folds_fails_the_commit() {
     let (mut ed, mut exec) = editor(&[(1, source(2, smpte(2)))], 2);
     for c in 0..2u16 {
         ed.spec_mut()
             .topology
             .connect(at(1, c), Edge::Direct(PortSource::Global(c)));
     }
-    ed.spec_mut().root = Some(smpte(2).topology);
+    ed.spec_mut().main_output = Some(smpte(2).topology);
     ed.spec_mut().topology.outputs = vec![Vec::new(); 2];
-    ed.connect_bus_to_root(from(1, 0)).unwrap();
+    ed.connect_bus_to_main_output(from(1, 0)).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
 
     // Named stereo has no place in one unassigned channel.
-    ed.spec_mut().root = Some(unassigned(1).topology);
+    ed.spec_mut().main_output = Some(unassigned(1).topology);
     let refused = ed.commit().unwrap_err();
     assert!(
         matches!(
             refused,
-            CommitError::Compile(CompileError::Bus(BusError::RootFold { .. }))
+            CommitError::Compile(CompileError::Bus(BusError::MainOutputFold { .. }))
         ),
         "{refused:?}"
     );
     // Undeclared fails the same commit, by its own name.
-    ed.spec_mut().root = None;
+    ed.spec_mut().main_output = None;
     let refused = ed.commit().unwrap_err();
     assert!(
         matches!(
             refused,
-            CommitError::Compile(CompileError::Bus(BusError::RootUndeclared))
+            CommitError::Compile(CompileError::Bus(BusError::MainOutputUndeclared))
         ),
         "{refused:?}"
     );
     // A re-declaration it folds to re-lowers: stereo to mono is 0.5 L + 0.5 R.
-    ed.spec_mut().root = Some(smpte(1).topology);
+    ed.spec_mut().main_output = Some(smpte(1).topology);
     ed.spec_mut().topology.outputs = vec![Vec::new()];
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -1148,43 +1148,43 @@ fn a_redeclared_root_that_no_longer_folds_fails_the_commit() {
     assert_eq!(bits(&got), [expected]);
 }
 
-/// Connecting and removing a root edge round trips through the editor (the
+/// Connecting and removing a main output edge round trips through the editor (the
 /// disconnect reports whether it was there), and removing a node drops its
-/// root bus edges, as it drops its other bus edges; a stale one would fail
+/// main output bus edges, as it drops its other bus edges; a stale one would fail
 /// every later commit.
 #[test]
-fn root_edges_connect_disconnect_and_go_with_their_node() {
+fn main_output_edges_connect_disconnect_and_go_with_their_node() {
     let (mut ed, mut exec) = editor(&[(1, source(2, smpte(2))), (3, source(2, smpte(2)))], 0);
-    ed.spec_mut().root = Some(smpte(2).topology);
+    ed.spec_mut().main_output = Some(smpte(2).topology);
     ed.spec_mut().topology.outputs = vec![Vec::new(); 2];
-    ed.connect_bus_to_root(from(3, 0)).unwrap();
-    ed.connect_bus_to_root(from(1, 0)).unwrap();
-    ed.connect_bus_to_root(from(1, 0)).unwrap();
+    ed.connect_bus_to_main_output(from(3, 0)).unwrap();
+    ed.connect_bus_to_main_output(from(1, 0)).unwrap();
+    ed.connect_bus_to_main_output(from(1, 0)).unwrap();
     assert_eq!(
-        ed.spec().root_sources,
+        ed.spec().main_output_sources,
         [
             feed(from(1, 0), BusFold::Speakers),
             feed(from(3, 0), BusFold::Speakers)
         ],
         "source order, once"
     );
-    assert!(ed.disconnect_bus_from_root(from(3, 0)));
-    assert!(!ed.disconnect_bus_from_root(from(3, 0)));
-    ed.connect_bus_to_root(from(3, 0)).unwrap();
+    assert!(ed.disconnect_bus_from_main_output(from(3, 0)));
+    assert!(!ed.disconnect_bus_from_main_output(from(3, 0)));
+    ed.connect_bus_to_main_output(from(3, 0)).unwrap();
     ed.remove(key(1));
     assert_eq!(
-        ed.spec().root_sources,
+        ed.spec().main_output_sources,
         [feed(from(3, 0), BusFold::Speakers)]
     );
     ed.commit().expect("commits");
     exec.apply_pending();
 }
 
-/// A fork of a graph with a bus edge into the root is the lowered graph: the
-/// source is forked (reachability over the root lanes) and the fork renders
-/// the fold on the outputs, which is what an export of the master hears.
+/// A fork of a graph with a bus edge into the main output is the lowered graph: the
+/// source is forked (reachability over the main output lanes) and the fork renders
+/// the fold on the outputs, which is what an export of the main output hears.
 #[test]
-fn a_fork_of_a_root_edge_renders_the_fold() {
+fn a_fork_of_a_main_output_edge_renders_the_fold() {
     use tutti_graph::{Cx, ForkByClone, ForkMode, ForkTarget, Io, Renderer, Shape, Status};
 
     #[derive(Clone)]
@@ -1204,12 +1204,12 @@ fn a_fork_of_a_root_edge_renders_the_fold() {
 
     let (mut ed, exec) = Editor::new(prepare(BLOCK));
     ed.insert(key(1), "stereo", ForkByClone(Stereo));
-    ed.spec_mut().root = Some(smpte(1).topology);
+    ed.spec_mut().main_output = Some(smpte(1).topology);
     ed.spec_mut().topology.outputs = vec![Vec::new()];
-    ed.connect_bus_to_root(from(1, 0)).unwrap();
+    ed.connect_bus_to_main_output(from(1, 0)).unwrap();
     ed.commit().expect("commits");
     let (fork_ed, fork_exec) = ed
-        .fork(ForkTarget::Master, ForkMode::Live, prepare(BLOCK))
+        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(BLOCK))
         .expect("forkable");
     let got = Renderer::new(fork_ed, fork_exec).render(2 * BLOCK);
     assert_eq!(got.len(), 1);

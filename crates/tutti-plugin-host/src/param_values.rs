@@ -38,7 +38,7 @@ use std::task::{Context, Poll};
 use tutti_rt::LockExt;
 
 use crate::{PluginHandle, PluginSignal, Subscription};
-use tutti_plugin_types::{Answer, ParamRange, ParameterInfo};
+use tutti_plugin_types::{Answer, ParameterInfo, PluginParamRange};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
@@ -221,8 +221,8 @@ impl Future for ReadingParams {
             let value = match (&*question, answered) {
                 (_, Some(value)) => value,
                 (Question::Value(_), None) => match info.range() {
-                    ParamRange::Normalized { default } => Normalized::clamped(default),
-                    ParamRange::Plain { default, .. } => {
+                    PluginParamRange::Normalized { default } => Normalized::clamped(default),
+                    PluginParamRange::Plain { default, .. } => {
                         let id = info.id();
                         *question = Question::Default(params.parameter_normalized(id, default));
                         continue;
@@ -572,8 +572,8 @@ mod tests {
         fn rate_refusal(&self) -> Option<tutti_plugin_types::RateRefusal> {
             None
         }
-        fn block_counts(&self) -> tutti_plugin_types::BlockCounts {
-            tutti_plugin_types::BlockCounts::default()
+        fn block_counts(&self) -> tutti_plugin_types::PipelineCounts {
+            tutti_plugin_types::PipelineCounts::default()
         }
         fn terminate(&self, _reason: TerminationReason) {}
     }

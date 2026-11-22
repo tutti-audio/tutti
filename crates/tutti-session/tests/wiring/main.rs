@@ -1,4 +1,4 @@
-//! The session's graph: wiring, buses, edge gain, latency, the root and the scene render.
+//! The session's graph: wiring, buses, edge gain, latency, the main output and the scene render.
 #![allow(
     clippy::disallowed_methods,
     reason = "a test starts the threads it races, outside any executor"
@@ -24,12 +24,12 @@ mod fan_in;
 mod graph;
 mod latency_removal;
 mod loop_region;
+mod main_output_crossfade;
+mod main_output_defer;
+mod main_output_reopen;
+mod main_output_topology;
 mod output_policy;
 mod rewired;
-mod root_crossfade;
-mod root_defer;
-mod root_reopen;
-mod root_topology;
 mod scene_render;
 mod session_targets;
 mod staged_values;

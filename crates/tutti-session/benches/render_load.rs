@@ -132,7 +132,7 @@ use tutti_platform::Instant;
 use tutti_polysynth::{Adsr, FilterType, OscillatorType, PolySynth, SynthConfig};
 use tutti_rt::SplitMix64;
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
-use tutti_session::{InPort, OutPort, Root, Session, Workers};
+use tutti_session::{InPort, MainOutput, OutPort, Session, Workers};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
 use tutti_units::{
     Amplitude, Beat, Cents, Db, Hz, PlaybackRate, Resonance, SampleRate, Samples, Seconds,
@@ -365,7 +365,7 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
     connect_stereo(&mut s, limiter, 0, master);
     for c in 0..2 {
         s.graph()
-            .set_sources(Root::output(c), [OutPort::new(limiter, c)])
+            .set_sources(MainOutput::channel(c), [OutPort::new(limiter, c)])
             .unwrap();
     }
     let _ = s.update();
@@ -390,7 +390,7 @@ struct Figures {
 }
 
 fn measure(block: usize, workers: Workers, variant: Variant) -> Figures {
-    let s = scene(block, workers, variant);
+    let mut s = scene(block, workers, variant);
     let counter = s.blocks().expect("an offline engine");
     let mut out = vec![0.0f32; block * 2];
     let blocks = |span: Seconds| span.to_samples(SampleRate::of(RATE)).get().div_ceil(block);

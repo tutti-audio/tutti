@@ -952,7 +952,7 @@ fn an_export_is_the_live_render_for_signal_sources() {
     );
     let (mut fed, mut fexec) = ed
         .fork(
-            ForkTarget::Master,
+            ForkTarget::MainOutput,
             ForkMode::Offline,
             Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(1024))),
         )

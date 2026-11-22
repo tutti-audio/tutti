@@ -3,7 +3,7 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{Cx, ForkByClone, ForkError, Io, Node, Prepare, SampleRates, Shape, Status};
-use tutti_session::{Bounce, BounceError, DetachedSession, Range, Root, Session};
+use tutti_session::{Bounce, BounceError, DetachedSession, MainOutput, Range, Session};
 use tutti_units::{SampleRate, Seconds};
 
 use crate::bounced::bounced;
@@ -27,10 +27,10 @@ impl Node for Rated {
 
 fn bounce_at(session: &mut DetachedSession, rate: SampleRate) -> Result<usize, BounceError> {
     let bounce = Bounce::new()
-        .master_buffers()
+        .main_output_buffers()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.25)))
         .sample_rate(rate);
-    Ok(bounced(session, bounce)?.into_master().into_planes()[0].len())
+    Ok(bounced(session, bounce)?.into_main_output().into_planes()[0].len())
 }
 
 /// **A fork refuses a rate outside a node's declared rates and renders at one
@@ -45,7 +45,7 @@ fn a_bounce_at_a_rate_a_node_does_not_run_at_is_refused() {
         .expect("a detached session builds");
     let rates = SampleRates::of(SampleRate::SR_44K1, SampleRate::SR_48K);
     let node = session.graph().add(ForkByClone(Rated(rates)));
-    session.graph().connect(node, Root).unwrap().unfaded();
+    session.graph().connect(node, MainOutput).unwrap().unfaded();
 
     let refused = bounce_at(&mut session, SampleRate::SR_96K).unwrap_err();
     assert!(

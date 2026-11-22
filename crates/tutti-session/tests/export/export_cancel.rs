@@ -7,15 +7,15 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use tutti_fixtures::block_on;
-use tutti_session::Root;
+use tutti_session::MainOutput;
 
 use tutti_buffers::ChannelLayout;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{GRAPH_MAX_BLOCK, Normalize, Stage};
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_session::{
-    Bounce, BounceError, BounceHandle, BounceTail, DetachedSession, ExportClock, FileMaster, Range,
-    Session,
+    Bounce, BounceError, BounceHandle, BounceTail, DetachedSession, ExportClock, FileMainOutput,
+    Range, Session,
 };
 use tutti_units::{Db, Frame, SampleRate, Samples};
 
@@ -64,7 +64,7 @@ fn rig(at: usize) -> Rig {
         handle: Arc::clone(&handle),
     };
     let node = session.graph().add(ForkByClone(node));
-    session.graph().connect(node, Root).unwrap();
+    session.graph().connect(node, MainOutput).unwrap();
     Rig {
         session,
         node: node.erase(),
@@ -90,8 +90,8 @@ fn bounce() -> Bounce {
         .tail(BounceTail::None)
 }
 
-fn file_request(path: &Path, normalize: Option<Normalize>) -> Bounce<NodeKey, FileMaster> {
-    let bounce = bounce().master(path, FORMAT);
+fn file_request(path: &Path, normalize: Option<Normalize>) -> Bounce<NodeKey, FileMainOutput> {
+    let bounce = bounce().main_output(path, FORMAT);
     match normalize {
         Some(n) => bounce.normalize(n),
         None => bounce,
@@ -171,7 +171,7 @@ fn a_job_cancelled_before_it_runs_renders_nothing() {
 #[test]
 fn a_buffer_export_cancels() {
     let mut r = rig(2);
-    let job = r.session.bounce(bounce().master_buffers()).unwrap();
+    let job = r.session.bounce(bounce().main_output_buffers()).unwrap();
     r.handle.set(job.handle()).ok();
     let outcome = r.session.apply(block_on(job));
     assert!(matches!(outcome, Err(BounceError::Cancelled)));
@@ -207,18 +207,22 @@ fn progress_ends_at_one_in_the_finalizing_stage() {
     }
 }
 
-/// A bounce of the master and a stem of the node into `dir`, normalized when
-/// `normalize` is set (the stem then takes the master's gain, so the pass
+/// A bounce of the main output and a stem of the node into `dir`, normalized when
+/// `normalize` is set (the stem then takes the main output's gain, so the pass
 /// keeps both for its measurement).
-fn with_stem(r: &Rig, dir: &Path, normalize: bool) -> Bounce<NodeKey, FileMaster> {
+fn with_stem(r: &Rig, dir: &Path, normalize: bool) -> Bounce<NodeKey, FileMainOutput> {
     let gain = if normalize {
         tutti_session::StemGain::Shared
     } else {
         tutti_session::StemGain::None
     };
     let bounce = bounce()
-        .master(dir.join("master.wav"), FORMAT)
-        .stem_with(tutti_session::Stem::new(r.node, dir.join("stem.wav"), FORMAT).gain(gain));
+        .main_output(dir.join("main_output.wav"), FORMAT)
+        .stem_with(
+            tutti_session::Stem::new(r.node)
+                .file(dir.join("stem.wav"), FORMAT)
+                .gain(gain),
+        );
     if normalize {
         bounce.normalize(Normalize::peak(Db::new(-6.0)))
     } else {
@@ -227,7 +231,7 @@ fn with_stem(r: &Rig, dir: &Path, normalize: bool) -> Bounce<NodeKey, FileMaster
 }
 
 /// **A cancel stops a bounce with stems like one without, and leaves no file
-/// of any target**: neither the master nor the stem, and no temporary or
+/// of any target**: neither the main output nor the stem, and no temporary or
 /// spill beside them, for a cancel inside the render (streamed and
 /// normalized: the pass keeps the audio in the second) and for one before the
 /// job runs. The token is released, and a bounce after it is not refused.
@@ -272,6 +276,6 @@ fn a_cancel_leaves_no_file_of_any_target() {
     // And one nobody cancels lands both files.
     let request = with_stem(&r, dir.path(), false);
     bounced(&mut r.session, request).unwrap();
-    assert!(dir.path().join("master.wav").exists());
+    assert!(dir.path().join("main_output.wav").exists());
     assert!(dir.path().join("stem.wav").exists());
 }

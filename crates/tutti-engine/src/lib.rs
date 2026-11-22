@@ -21,12 +21,12 @@
 //!   applies what the transport schedules.
 //! - **Level metering.** A meter is an op in the compiled plan, on the outputs or
 //!   any node's port (`tutti-graph`'s `Editor::open_meter`, `MeterReader`), per
-//!   channel and before the engine's fold and declick. The engine holds no master
+//!   channel and before the engine's fold and declick. The engine holds no main output
 //!   meter and no stereo fold. The engine times each block and writes
 //!   its [`Load`] and [`BlockCounts`], because they are not audio.
 //! - **Taps.** Copying audio out of the graph is `tutti-graph`'s (`Editor::open_tap`,
 //!   `TapReader`), an op in the compiled plan, before the declick fader. The engine
-//!   writes the other kind itself: `Engine::heard_taps()` opens a tap on its
+//!   writes the other kind itself: `Engine::take_heard_taps()` opens a tap on its
 //!   device-width output after the fader (what is heard), read through the same
 //!   `TapReader`.
 //! - **MIDI.** `Engine` is MIDI-free; MIDI travels on the graph's event ports
@@ -39,7 +39,7 @@
 //!   `delays`) is `tutti-graph`'s pure pass, applied by the graph compiler.
 //! - **The worker pool and the pre-roll table.** `tutti-graph`'s.
 //! - **The metronome.** `ClickNode` is `tutti-nodes`'.
-//! - **The root width ceiling.** `tutti_buffers::MAX_CHANNELS` bounds the engine's
+//! - **The main output width ceiling.** `tutti_buffers::MAX_CHANNELS` bounds the engine's
 //!   editor, as it bounds a bus.
 //!
 //! ## Example — a graph, an engine, and a transport
@@ -104,7 +104,7 @@
 //! transport.settings().set_tempo(Bpm::of(90.0));
 //! transport
 //!     .motion()
-//!     .try_send(MotionCommand::play_from(Beat::new(8.0)))
+//!     .send(MotionCommand::play_from(Beat::new(8.0)))
 //!     .expect("the motion queue has room at startup");
 //!
 //! let mut block = vec![0.0f32; 256 * 2];
@@ -150,11 +150,11 @@ pub use faults::{
     BackendErrorKind, Lagging, RT_TEXT_BYTES, STALL_GRACE, StreamFault, StreamFaultKind,
     StreamFaults,
 };
-pub use hearing::{HeardTapError, HeardTapOpen, HeardTaps};
+pub use hearing::HeardTaps;
 pub use latency::StreamLatency;
 pub use load::{BlockCounts, LOAD_MEAN_TIME_CONSTANT, Load};
 pub use manual::{ManualRunning, ManualStream, ManualStreamDriver};
-pub use output::{MAX_PENDING_ROOTS, OutputControl, OutputPlacement};
+pub use output::{MAX_PENDING_MAIN_OUTPUTS, OutputControl, OutputPlacement};
 pub use restart::{Stopped, StreamHost};
 pub use routing::{
     OutputLevelError, OutputLevels, OutputMap, OutputMapError, OutputStrip, Routing, RoutingError,

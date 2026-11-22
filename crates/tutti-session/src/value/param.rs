@@ -5,7 +5,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::sync::atomic::Ordering;
 
-use tutti_graph::{NodeKey, ParamUnit};
+use tutti_graph::{NodeKey, ParamValue};
 use tutti_rt::ParamCell;
 use tutti_units::{ParamAddr, UnitAddr};
 
@@ -106,20 +106,20 @@ impl<U> From<ParamTarget<U>> for crate::ParamRef {
     }
 }
 
-impl<U: ParamUnit> sealed::Sealed for ParamTarget<U> {
+impl<U: ParamValue> sealed::Sealed for ParamTarget<U> {
     fn id(self) -> TargetId {
         TargetId::Param(self.node, self.addr, self.owner)
     }
 }
-impl<U: ParamUnit> Target for ParamTarget<U> {
+impl<U: ParamValue> Target for ParamTarget<U> {
     type Value = U;
 }
-impl<U: ParamUnit> Modulatable for ParamTarget<U> {}
+impl<U: ParamValue> Modulatable for ParamTarget<U> {}
 impl<U: crate::Scalar> ScalarTarget for ParamTarget<U> {
     type Unit = U;
 }
 
-impl<U: ParamUnit> sealed::Store for ParamTarget<U> {
+impl<U: ParamValue> sealed::Store for ParamTarget<U> {
     type Cell = ParamCell;
 
     fn resolve(self, params: &Params) -> Option<(ParamCell, U)> {
@@ -140,7 +140,7 @@ impl<U: ParamUnit> sealed::Store for ParamTarget<U> {
     }
 }
 
-target_builders!(moved [U: ParamUnit] ParamTarget<U>);
+target_builders!(moved [U: ParamValue] ParamTarget<U>);
 
 /// What a control shows of a native param ([`ParamTarget::info`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -152,7 +152,7 @@ pub struct TargetInfo<V> {
     pub default: V,
 }
 
-impl<U: ParamUnit> Describe for Info<ParamTarget<U>> {
+impl<U: ParamValue> Describe for Info<ParamTarget<U>> {
     type Output = TargetInfo<U>;
 
     fn describe(self, params: &Params) -> Result<TargetInfo<U>, (TargetId, ValueErrorKind)> {

@@ -64,7 +64,7 @@ fn rig(wire: &Wire) -> (Session, MidiSink) {
     (s, sink)
 }
 
-fn render(s: &Session, frames: usize) {
+fn render(s: &mut Session, frames: usize) {
     let mut buf = vec![0.0f32; 512 * 2];
     for _ in 0..frames.div_ceil(512) {
         s.render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
@@ -89,7 +89,7 @@ fn ticks(batch: &[UmpAt]) -> Vec<u32> {
 fn the_clock_reaches_the_output_in_order_on_its_frames() {
     let wire = Wire::default();
     let (mut s, _sink) = rig(&wire);
-    render(&s, 24_000);
+    render(&mut s, 24_000);
     let _ = s.update();
     let batches = wire.batches();
     assert_eq!(batches.len(), 1, "one drain, one batch");
@@ -126,7 +126,7 @@ fn a_full_tap_counts_what_it_drops() {
         )
         .expect("the clock is in the graph");
     let _ = s.update(); // commits the second tap
-    render(&s, 1_100_000);
+    render(&mut s, 1_100_000);
     let mut total = 0;
     let mut chunk = [tutti_graph::TapEvent {
         frame: tutti_units::Frame::ZERO,
@@ -206,9 +206,9 @@ fn reopening_one_tap_leaves_the_others_fed() {
     first = reopened;
     // The re-prepare's second half lands on a render, then the commit.
     let _ = s.update();
-    render(&s, 4_096);
+    render(&mut s, 4_096);
     let _ = s.update();
-    render(&s, 4_096);
+    render(&mut s, 4_096);
     let mut chunk = [tutti_graph::TapEvent {
         frame: tutti_units::Frame::ZERO,
         ump: Ump([0; 4]),
@@ -241,7 +241,7 @@ fn a_clip_fed_to_a_sinks_node_arrives_on_its_frames() {
         .set_sources(EventInPort::new(out.node(), 0), [clip.events_out()])
         .expect("the sink's node takes events");
     let _ = s.update();
-    render(&s, 50_000);
+    render(&mut s, 50_000);
     let _ = s.update();
     let sent: Vec<UmpAt> = wire.batches().concat();
     let kinds: Vec<(u32, bool)> = sent
@@ -286,7 +286,7 @@ fn a_sink_is_open_while_a_handle_is_held() {
 fn dropping_the_last_handle_ends_the_sink() {
     let wire = Wire::default();
     let (mut s, sink) = rig(&wire);
-    render(&s, 4_096);
+    render(&mut s, 4_096);
     let _ = s.update();
     assert!(!wire.batches().is_empty(), "the clock reached the sink");
 
@@ -297,11 +297,11 @@ fn dropping_the_last_handle_ends_the_sink() {
         s.graph_ref().contains(node),
         "its node stays until the graph has rendered past the drop"
     );
-    render(&s, 3 * 512);
+    render(&mut s, 3 * 512);
     let _ = s.update();
     assert!(!s.graph_ref().contains(node), "its node left");
     let _ = wire.batches();
-    render(&s, 4_096);
+    render(&mut s, 4_096);
     let _ = s.update();
     assert!(wire.batches().is_empty(), "nothing more reaches it");
 }
@@ -323,7 +323,7 @@ fn a_note_off_sent_just_before_the_last_handle_drops_reaches_the_sink() {
     drop(sink);
     let _ = s.update();
     assert!(s.graph_ref().contains(node), "no block has rendered it yet");
-    render(&s, 3 * 512);
+    render(&mut s, 3 * 512);
     let _ = s.update();
     assert!(!s.graph_ref().contains(node), "the sink retired");
     let off = wire.batches().iter().flatten().any(|(_, ump)| {
@@ -351,9 +351,9 @@ fn a_stamped_sink_stamps_at_the_new_rate_after_a_re_rate() {
     s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     let _ = s.update();
     // The re-prepare's second half lands on a render, then the commit.
-    render(&s, 4_096);
+    render(&mut s, 4_096);
     let _ = s.update();
-    render(&s, 512);
+    render(&mut s, 512);
     let _ = s.update();
     let _ = wire.batches();
 
@@ -368,7 +368,7 @@ fn a_stamped_sink_stamps_at_the_new_rate_after_a_re_rate() {
         .expect("the sink's node takes events");
     let _ = s.update();
     s.play().expect("room");
-    render(&s, 50_000);
+    render(&mut s, 50_000);
     let _ = s.update();
 
     let mut stamp = None;

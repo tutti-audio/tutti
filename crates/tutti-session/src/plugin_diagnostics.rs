@@ -7,7 +7,11 @@
 //! (a pipeline's missed chunks) is zero, and everything else reads the same.
 
 use tutti_graph::{BusRef, BusSource, MAX_BUSES};
-use tutti_plugin_types::{BlockCounts, BusRole, PluginBus, TerminationReason};
+use tutti_plugin_host::PluginControls;
+use tutti_plugin_types::{
+    BridgeLosses, BusRole, ChunkOutcomes, PipelineCounts, PluginBus, ServerLosses,
+    TerminationReason,
+};
 use tutti_units::{Samples, Tail};
 
 use crate::plugin::HostedPlugin;
@@ -46,7 +50,7 @@ impl<'a> Diagnostics<'a> {
     /// over the plugin's life. What the node itself did not render is
     /// [`block_losses`](Self::block_losses). A plugin that runs in this process has no
     /// replies to wait for: both are zero.
-    pub fn block_counts(&self) -> BlockCounts {
+    pub fn block_counts(&self) -> PipelineCounts {
         self.hosted.handle.block_counts()
     }
 
@@ -66,132 +70,44 @@ impl<'a> Diagnostics<'a> {
         self.hosted.block_losses()
     }
 
-    /// The chunks the plugin's pipeline had not answered by the time the node
-    /// played them (each played as silence: a dropout), since the plugin was
-    /// bound. Zero for a plugin that runs in this process, which has no
-    /// pipeline to be late.
-    pub fn missed_chunks(&self) -> u64 {
+    /// What became of the chunks the plugin's pipeline had not answered by
+    /// the time the node played them (each played as silence: a dropout),
+    /// since the plugin was bound: late, refused, skipped or unanswered. A
+    /// late chunk means an overloaded plugin or machine (raise the buffer
+    /// size); an unanswered one is a loss no count explains. See
+    /// [`ChunkOutcomes`] for how the counts add up. All zero for a plugin
+    /// that runs in this process, which has no pipeline to be late.
+    pub fn chunks(&self) -> ChunkOutcomes {
         self.hosted
             .controls
             .as_ref()
-            .map_or(0, tutti_plugin_host::PluginControls::missed_chunks)
+            .map_or_else(ChunkOutcomes::default, PluginControls::chunk_outcomes)
     }
 
-    /// Of the [`missed_chunks`](Self::missed_chunks), those the plugin's
-    /// pipeline answered after the node had played the silence: a late answer
-    /// (an overloaded plugin or machine: raise the buffer size), not a lost
-    /// one. Every missed chunk ends as exactly one of late,
-    /// [refused](Self::refused_chunks), [skipped](Self::skipped_chunks) or
-    /// [unanswered](Self::unanswered_chunks). Zero for a plugin that runs in
-    /// this process.
-    pub fn late_chunks(&self) -> u64 {
+    /// What the host side of the plugin's server lost of its own work:
+    /// commands it could not hand the bridge (a refused block plays as
+    /// silence), responses it could not queue, buffers it leaked, editor
+    /// transfers refused, editor requests dropped and tasks left running.
+    /// All zero for a plugin that runs in this process.
+    pub fn bridge_losses(&self) -> BridgeLosses {
         self.hosted
             .controls
             .as_ref()
-            .map_or(0, tutti_plugin_host::PluginControls::late_chunks)
+            .map_or_else(BridgeLosses::default, PluginControls::bridge_losses)
     }
 
-    /// Of the [`missed_chunks`](Self::missed_chunks), those the plugin's
-    /// server refused: it did not publish the audio (the chunk's ring slot
-    /// recycled before it ran, a block that did not fit, an output channel not
-    /// written, or a refused rate). Zero for a plugin that runs in this
-    /// process.
-    pub fn refused_chunks(&self) -> u64 {
+    /// What the plugin's server lost of its own work (commands its render
+    /// thread never got, one-way edits the plugin refused, callbacks from a
+    /// thread its format forbids), as the server last told them. Not
+    /// [`bridge_losses`](Self::bridge_losses), which are the host side's. All
+    /// zero for a plugin that runs in this process; its refused off-thread
+    /// calls are in [`refused_off_thread_calls`](Self::refused_off_thread_calls),
+    /// which counts them for every hosting.
+    pub fn server_losses(&self) -> ServerLosses {
         self.hosted
             .controls
             .as_ref()
-            .map_or(0, tutti_plugin_host::PluginControls::refused_chunks)
-    }
-
-    /// Of the [`missed_chunks`](Self::missed_chunks), those that are neither
-    /// late, refused nor skipped: the server never said what became of them. A
-    /// loss no counter explains. Zero for a plugin that runs in this process.
-    pub fn unanswered_chunks(&self) -> u64 {
-        self.hosted
-            .controls
-            .as_ref()
-            .map_or(0, tutti_plugin_host::PluginControls::unanswered_chunks)
-    }
-
-    /// Chunks dropped because the plugin fell more than one chunk behind: the
-    /// pipeline never sent them, so they played as silence. Raise the buffer
-    /// size if it grows. Zero for a plugin that runs in this process.
-    pub fn skipped_chunks(&self) -> u64 {
-        self.hosted
-            .controls
-            .as_ref()
-            .map_or(0, tutti_plugin_host::PluginControls::skipped_chunks)
-    }
-
-    /// Commands the audio side could not hand to the plugin's bridge (a full
-    /// command queue, or no payload for a block): lost, and a refused block
-    /// plays as silence. Zero for a plugin that runs in this process.
-    pub fn refused_commands(&self) -> u64 {
-        self.hosted
-            .controls
-            .as_ref()
-            .map_or(0, tutti_plugin_host::PluginControls::refused_commands)
-    }
-
-    /// Commands the plugin's server could not give its own render thread, as
-    /// the server last told them. Not [`refused_commands`](Self::refused_commands),
-    /// which are the host side's. Zero for a plugin that runs in this process.
-    pub fn server_refused_commands(&self) -> u64 {
-        self.hosted.controls.as_ref().map_or(
-            0,
-            tutti_plugin_host::PluginControls::server_refused_commands,
-        )
-    }
-
-    /// One-way edits the plugin refused in its server (an automation state, a
-    /// track's info, a parameter write), as the server last told them. Zero for
-    /// a plugin that runs in this process.
-    pub fn server_refused_edits(&self) -> u64 {
-        self.hosted
-            .controls
-            .as_ref()
-            .map_or(0, tutti_plugin_host::PluginControls::server_refused_edits)
-    }
-
-    /// Audio responses the plugin's bridge could not queue for the audio thread: lost. Zero for a plugin that runs in this process.
-    pub fn lost_responses(&self) -> u64 {
-        self.hosted
-            .controls
-            .as_ref()
-            .map_or(0, tutti_plugin_host::PluginControls::lost_responses)
-    }
-
-    /// Parameter-change buffers the audio thread leaked rather than free (a broken sizing bound). Zero for a plugin that runs in this process.
-    pub fn leaked_buffers(&self) -> u64 {
-        self.hosted
-            .controls
-            .as_ref()
-            .map_or(0, tutti_plugin_host::PluginControls::leaked_buffers)
-    }
-
-    /// Transfers between the plugin and its editor instance that were refused: a parameter write the mirror dropped (the plugin still got it; the open editor's display missed it), an edit or a state one side did not take (an editor opened at the plugin's defaults among them). Zero for a plugin that runs in this process.
-    pub fn mirror_transfers_refused(&self) -> u64 {
-        self.hosted.controls.as_ref().map_or(
-            0,
-            tutti_plugin_host::PluginControls::mirror_transfers_refused,
-        )
-    }
-
-    /// Requests the plugin's editor instance made that were dropped: every request but a transport request (a restart, an I/O change, a parameter rescan, a latency or tail change, a reload, a callback, a MIDI-CC or note-expression change, a timer or a file descriptor), which the plugin's audio instance cannot be told. Zero for a plugin that runs in this process.
-    pub fn editor_requests_dropped(&self) -> u64 {
-        self.hosted.controls.as_ref().map_or(
-            0,
-            tutti_plugin_host::PluginControls::editor_requests_dropped,
-        )
-    }
-
-    /// Host-side tasks of the plugin's server that did not stop in time and were
-    /// left running. Zero for a plugin that runs in this process.
-    pub fn detached_tasks(&self) -> u64 {
-        self.hosted
-            .controls
-            .as_ref()
-            .map_or(0, tutti_plugin_host::PluginControls::detached_tasks)
+            .map_or_else(ServerLosses::default, PluginControls::server_losses)
     }
 
     /// Round trips of the session's tasks for this plugin (a parameter read, a
@@ -243,7 +159,7 @@ impl<'a> Diagnostics<'a> {
     ///
     /// For a host driving the graph by hand, block by block, with no device
     /// clock: it waits on this before the next block, so that block plays the
-    /// answer and not a dropout ([`missed_chunks`](Self::missed_chunks)). A
+    /// answer and not a dropout ([`chunks`](Self::chunks)). A
     /// live host does not wait: the device's callback period is the deadline.
     pub fn chunk_in_flight_answered(&self) -> bool {
         self.hosted

@@ -30,7 +30,7 @@ fn a_reload_that_fails_to_load_carries_the_bridge_error_as_its_source() {
             Spec::new(PluginRef::file(&copy)),
         )
         .expect("the copy loads");
-    s.graph().connect(node, Root).unwrap();
+    s.graph().connect(node, MainOutput).unwrap();
     let _ = s.update();
     std::fs::remove_file(&copy).expect("the copy is removed once it runs");
 

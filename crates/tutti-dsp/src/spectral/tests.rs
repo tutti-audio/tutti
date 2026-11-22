@@ -2,6 +2,7 @@ use super::*;
 use crate::FftScratch;
 use crate::testing::uniform;
 use tutti_rt::SplitMix64;
+use tutti_units::Normalized;
 
 const RATE: f64 = 48_000.0;
 
@@ -35,10 +36,22 @@ fn rolloff_sits_at_the_energy_share_and_the_band_edge() {
     let mut row = vec![0.0f64; 513];
     row[..100].fill(1.0);
     let width = Hz::new(10.0);
-    assert_eq!(spectral_rolloff(&row, width, 0.5), Hz::new(490.0));
-    assert_eq!(spectral_rolloff(&row, width, 0.855), Hz::new(850.0));
-    assert_eq!(spectral_rolloff(&row, width, 1.0), Hz::new(990.0));
-    assert_eq!(spectral_rolloff(&row, width, 0.0), Hz::new(0.0));
+    assert_eq!(
+        spectral_rolloff(&row, width, Normalized::of(0.5)),
+        Hz::new(490.0)
+    );
+    assert_eq!(
+        spectral_rolloff(&row, width, Normalized::of(0.855)),
+        Hz::new(850.0)
+    );
+    assert_eq!(
+        spectral_rolloff(&row, width, Normalized::of(1.0)),
+        Hz::new(990.0)
+    );
+    assert_eq!(
+        spectral_rolloff(&row, width, Normalized::of(0.0)),
+        Hz::new(0.0)
+    );
 }
 
 /// Band-limited noise (unit magnitude below an edge, random phase) rolls
@@ -61,7 +74,7 @@ fn band_limited_noise_rolls_off_at_the_edge() {
         fft.forward_unwindowed(tutti_buffers::Mono::new(&x), &mut out);
         out.iter().map(|b| b.norm()).collect::<Vec<_>>()
     };
-    let r = spectral_rolloff(&row, Hz::new(width), 0.99);
+    let r = spectral_rolloff(&row, Hz::new(width), Normalized::of(0.99));
     let edge = edge_bin as f64 * width;
     assert!(r.get() <= edge && r.get() > 0.98 * edge, "{r} vs {edge}");
 }
@@ -84,36 +97,41 @@ fn flatness_is_level_independent_and_a_zero_bin_tonal_frame_is_near_zero() {
     }
 }
 
-/// A NaN or infinite magnitude gives no result rather than a NaN, and a
-/// rolloff share outside `0..=1` acts as its nearer end.
+/// A NaN or infinite magnitude gives no result rather than a NaN, in every feature.
 #[test]
-fn non_finite_magnitudes_give_no_result_and_an_out_of_range_share_acts_as_its_nearer_end() {
+fn non_finite_magnitudes_give_no_result() {
     for bad in [f64::NAN, f64::INFINITY] {
         let mut row = vec![1.0f64; 32];
         row[5] = bad;
-        assert_eq!(spectral_centroid(&row, Hz::new(10.0)), Hz::new(0.0));
+        let width = Hz::new(10.0);
+        assert_eq!(spectral_centroid(&row, width), Hz::new(0.0));
+        assert_eq!(spectral_bandwidth(&row, width), Hz::new(0.0));
         assert_eq!(spectral_flatness(&row), 0.0);
-        assert_eq!(spectral_rolloff(&row, Hz::new(10.0), 0.85), Hz::new(0.0));
+        assert_eq!(spectral_crest(&row), 0.0);
+        assert_eq!(spectral_slope(&row, width), 0.0);
+        assert_eq!(
+            spectral_rolloff(&row, width, Normalized::of(0.85)),
+            Hz::new(0.0)
+        );
     }
-    let mut row = vec![0.0f64; 40];
-    row[..20].fill(1.0);
-    assert_eq!(spectral_rolloff(&row, Hz::new(10.0), 7.0), Hz::new(190.0));
-    assert_eq!(spectral_rolloff(&row, Hz::new(10.0), -3.0), Hz::new(0.0));
-    assert_eq!(
-        spectral_rolloff(&row, Hz::new(10.0), f64::NAN),
-        Hz::new(0.0)
-    );
 }
 
-/// A silent spectrum reads zero on all three, and an empty one does not
-/// panic.
+/// A silent spectrum reads zero on every feature, and an empty one does not panic.
 #[test]
 fn silence_has_no_shape() {
     let zeros = [0.0f64; 33];
     assert_eq!(spectral_centroid(&zeros, Hz::new(5.0)), Hz::new(0.0));
     assert_eq!(spectral_flatness(&zeros), 0.0);
-    assert_eq!(spectral_rolloff(&zeros, Hz::new(5.0), 0.85), Hz::new(0.0));
+    assert_eq!(
+        spectral_rolloff(&zeros, Hz::new(5.0), Normalized::of(0.85)),
+        Hz::new(0.0)
+    );
+    assert_eq!(spectral_bandwidth(&zeros, Hz::new(5.0)), Hz::new(0.0));
+    assert_eq!(spectral_crest(&zeros), 0.0);
+    assert_eq!(spectral_slope(&zeros, Hz::new(5.0)), 0.0);
     assert_eq!(spectral_flatness::<f64>(&[]), 0.0);
+    assert_eq!(spectral_crest::<f64>(&[]), 0.0);
+    assert_eq!(spectral_slope::<f64>(&[], Hz::new(5.0)), 0.0);
     assert_eq!(spectral_centroid::<f64>(&[], Hz::new(5.0)), Hz::new(0.0));
 }
 
@@ -126,6 +144,63 @@ fn the_kernels_read_an_f32_spectrum_at_the_same_figures() {
     row[10] = 2.0;
     let width = Hz::new(100.0);
     assert_eq!(spectral_centroid(&row, width), Hz::new(1000.0));
-    assert_eq!(spectral_rolloff(&row, width, 1.0), Hz::new(1000.0));
+    assert_eq!(
+        spectral_rolloff(&row, width, Normalized::of(1.0)),
+        Hz::new(1000.0)
+    );
     assert!(spectral_flatness(&row) < 1e-9);
+}
+
+/// Two equal bins at 10 and 30 are `d = 20` bins apart, each `d / 2` from the centroid, so the
+/// bandwidth is `d / 2 = 10` bins exactly: 100 Hz at 10 Hz per bin.
+#[test]
+fn the_bandwidth_of_two_equal_bins_is_half_their_distance() {
+    let mut row = vec![0.0f64; 65];
+    row[10] = 2.0;
+    row[30] = 2.0;
+    assert!((spectral_bandwidth(&row, Hz::new(10.0)).get() - 100.0).abs() < 1e-9);
+}
+
+/// `n` equal bins are uniform over `0..n`, whose standard deviation is `sqrt((n^2 - 1) / 12)`
+/// bins (`n = 100`: 28.866...), while a single bin has bandwidth 0 and a crest of `n`. The
+/// bandwidth and the crest do not move with the level, to the rounding of a few sums.
+#[test]
+fn a_flat_row_and_a_single_bin_have_the_closed_forms_of_the_shape_features() {
+    let width = Hz::new(10.0);
+    let n = 100usize;
+    let flat = vec![3.0f64; n];
+    let std = ((n * n - 1) as f64 / 12.0).sqrt() * width.get();
+    assert!((spectral_bandwidth(&flat, width).get() - std).abs() < 1e-9 * std);
+    assert!((spectral_crest(&flat) - 1.0).abs() < 1e-12);
+    assert!(spectral_slope(&flat, width).abs() < 1e-12);
+    let loud: Vec<f64> = flat.iter().map(|m| m * 1e6).collect();
+    assert!((spectral_bandwidth(&loud, width).get() - std).abs() < 1e-9 * std);
+
+    let mut single = vec![0.0f64; n];
+    single[37] = 0.25;
+    assert_eq!(spectral_bandwidth(&single, width), Hz::new(0.0));
+    assert!((spectral_crest(&single) - n as f64).abs() < 1e-12);
+}
+
+/// Magnitudes `a + g f` over bins at `w` Hz have the least-squares slope `g` exactly (a line is
+/// its own fit), up to the rounding of the sums; scaling the magnitudes scales the slope.
+#[test]
+fn the_slope_of_a_linear_ramp_is_its_gradient() {
+    let w = 25.0;
+    let g = -0.004;
+    let ramp: Vec<f64> = (0..200).map(|k| 30.0 + g * k as f64 * w).collect();
+    let slope = spectral_slope(&ramp, Hz::new(w));
+    assert!((slope - g).abs() < 1e-12, "{slope}");
+    let doubled: Vec<f64> = ramp.iter().map(|m| 2.0 * m).collect();
+    assert!((spectral_slope(&doubled, Hz::new(w)) - 2.0 * g).abs() < 1e-12);
+}
+
+/// The features read an `f32` spectrum at the `f64` figures to the narrowing of the input: a
+/// flat `f32` row of 3.0 is exact, so the figures are the closed forms.
+#[test]
+fn the_shape_features_read_an_f32_spectrum() {
+    let flat = [3.0f32; 64];
+    let std = ((64.0f64 * 64.0 - 1.0) / 12.0).sqrt() * 10.0;
+    assert!((spectral_bandwidth(&flat, Hz::new(10.0)).get() - std).abs() < 1e-9 * std);
+    assert_eq!(spectral_crest(&flat), 1.0);
 }

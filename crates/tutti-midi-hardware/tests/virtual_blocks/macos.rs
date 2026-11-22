@@ -112,7 +112,12 @@ pub fn an_endpoint_with_function_blocks_is_listed_with_those_blocks() {
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
     let executor = Executor::new();
     let session = started(
-        MidiSession::open(&executor, inlets, MidiHardwareConfig::new()).expect("a session"),
+        MidiSession::open(
+            &executor,
+            tutti_midi_hardware::HardwareMidiInputs::new(inlets),
+            MidiHardwareConfig::new(),
+        )
+        .expect("a session"),
     );
     let (opened, _inlet) = open(&executor, &two_blocks(name), &session);
     if !has_ump_endpoints() {
@@ -187,7 +192,12 @@ pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
     let executor = Executor::new();
     let session = started(
-        MidiSession::open(&executor, inlets, MidiHardwareConfig::new()).expect("a session"),
+        MidiSession::open(
+            &executor,
+            tutti_midi_hardware::HardwareMidiInputs::new(inlets),
+            MidiHardwareConfig::new(),
+        )
+        .expect("a session"),
     );
     let (producer, _inlet) = std::sync::Arc::clone(session.ports()).open_input_port("virtual");
     assert!(matches!(
@@ -213,7 +223,12 @@ pub fn what_is_written_to_an_endpoints_destination_reaches_its_producer() {
     let mut graph = Listener::over(&inlets);
     let executor = Executor::new();
     let session = started(
-        MidiSession::open(&executor, inlets, MidiHardwareConfig::new()).expect("a session"),
+        MidiSession::open(
+            &executor,
+            tutti_midi_hardware::HardwareMidiInputs::new(inlets),
+            MidiHardwareConfig::new(),
+        )
+        .expect("a session"),
     );
     let (opened, inlet) = open(&executor, &two_blocks(name), &session);
     if !has_ump_endpoints() {
@@ -254,7 +269,12 @@ pub fn a_sender_outlives_its_endpoint_and_refuses_by_name() {
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
     let executor = Executor::new();
     let session = started(
-        MidiSession::open(&executor, inlets, MidiHardwareConfig::new()).expect("a session"),
+        MidiSession::open(
+            &executor,
+            tutti_midi_hardware::HardwareMidiInputs::new(inlets),
+            MidiHardwareConfig::new(),
+        )
+        .expect("a session"),
     );
     let (opened, _inlet) = open(
         &executor,

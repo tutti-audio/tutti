@@ -4,6 +4,7 @@
 
 use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes};
+use tutti_dsp::CombDelay;
 use tutti_dsp::{FdnLayout, FreeverbControls, FreezeMode, LadderType, ShapeKind, Stages, SvfType};
 use tutti_dsp::{Inline, Tap, TapSet};
 use tutti_graph::contract::drive_input;
@@ -13,14 +14,15 @@ use tutti_nodes::{
     AmbisonicRotatorConfig, AmbisonicRotatorNode, Antialiasing, AutoPanConfig, AutoPanNode,
     BrickwallLimiterConfig, BrickwallLimiterNode, CompressorConfig, CompressorControls,
     CompressorNode, CrossoverConfig, CrossoverControls, CrossoverNode, DelayConfig, DelayControls,
-    DelayLayout, DelayNode, DistanceConfig, DistanceNode, DistortionConfig, DistortionNode,
-    DynamicEqConfig, DynamicEqNode, FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig,
-    GateControls, GateNode, InterpolationMode, LadderFilterConfig, LadderFilterNode, LimiterConfig,
+    DelayLayout, DelayNode, DiodeClipperConfig, DiodeClipperNode, DistanceConfig, DistanceNode,
+    DistortionConfig, DistortionNode, DynamicEqConfig, DynamicEqNode, FdnConfig, FdnNode,
+    FreeverbConfig, FreeverbNode, GateConfig, GateControls, GateNode, HysteresisConfig,
+    HysteresisNode, InterpolationMode, LadderFilterConfig, LadderFilterNode, LimiterConfig,
     LimiterControls, LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, MultibandBands,
     MultibandCompressorConfig, MultibandCompressorNode, PeakDetection, PhaserConfig, PhaserNode,
     PitchShifterConfig, PitchShifterNode, PlateReverbConfig, PlateReverbNode, RingModConfig,
     RingModNode, ShimmerConfig, ShimmerNode, SpringReverbConfig, SpringReverbNode, SvfFilterConfig,
-    SvfFilterNode, TremoloConfig, TremoloNode,
+    SvfFilterNode, TremoloConfig, TremoloNode, TubeStageConfig, TubeStageNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -99,6 +101,24 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
                     ..DelayControls::DEFAULT
                 }),
             )),
+        ),
+        (
+            "diode clipper",
+            Box::new(DiodeClipperNode::<f32>::from(DiodeClipperConfig::new(
+                ChannelLayout::STEREO,
+            ))),
+        ),
+        (
+            "hysteresis",
+            Box::new(HysteresisNode::<f32>::from(HysteresisConfig::new(
+                ChannelLayout::STEREO,
+            ))),
+        ),
+        (
+            "tube stage",
+            Box::new(TubeStageNode::<f32>::from(TubeStageConfig::new(
+                ChannelLayout::STEREO,
+            ))),
         ),
         (
             "distortion",
@@ -335,7 +355,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             Box::new(CombFilterNode::<f32>::from(CombFilterConfig::new(
                 ChannelLayout::STEREO,
                 CombForm::Feedback,
-                Seconds::new(0.002),
+                CombDelay::of(Seconds::new(0.002)),
             ))),
         ),
         (

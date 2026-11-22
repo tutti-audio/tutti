@@ -497,7 +497,7 @@ impl<F: Float> Editor<F> {
                 }
             }
         }
-        for f in &self.spec.root_sources {
+        for f in &self.spec.main_output_sources {
             if matches!(f.source, BusSource::Node(b) if b.node == key)
                 && self.bus_edge_is_live(f.source, None)
             {
@@ -537,7 +537,7 @@ impl<F: Float> Editor<F> {
                 .bus_edges
                 .values()
                 .flatten()
-                .chain(&spec.root_sources)
+                .chain(&spec.main_output_sources)
                 .any(|f| matches!(f.source, BusSource::Node(b) if b.node == key))
     }
 
@@ -563,7 +563,7 @@ impl<F: Float> Editor<F> {
         let no_edges = BTreeSet::new();
         let (kept_edges, kept_feeds) = keep.unwrap_or((&no_edges, &[]));
         // A bus edge that touches the node goes with it, as its edges do.
-        self.spec.root_sources.retain(|f| {
+        self.spec.main_output_sources.retain(|f| {
             !matches!(f.source, BusSource::Node(b) if b.node == key)
                 || kept_feeds.contains(&(f.source, None))
         });

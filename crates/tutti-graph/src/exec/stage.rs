@@ -63,8 +63,8 @@ pub(super) enum RingFrom {
     /// length, and goes back in the commit.
     Move { from: u32 },
     /// The old ring at this index is copied into the one built for it and
-    /// stays where it is, for the ring that takes it over: an old root's
-    /// channel, kept sounding while the new root's channel of the same source
+    /// stays where it is, for the ring that takes it over: an old main output's
+    /// channel, kept sounding while the new main output's channel of the same source
     /// goes on with the same history.
     Copy { from: u32 },
 }
@@ -553,8 +553,8 @@ impl Stager {
                     caps.insert(d.key, cap);
                 }
                 None => match carried {
-                    // An old root's channel in a root crossfade's bank starts
-                    // with the history the root's own channel had.
+                    // An old main output's channel in a main output crossfade's bank starts
+                    // with the history the main output's own channel had.
                     None if copy_origin(plan, &d.key, &old_delays, &old_by_source)
                         .filter(|_| cx.carry)
                         .is_some() =>
@@ -1256,8 +1256,8 @@ fn ring_by_source(delays: &[crate::DelaySpec]) -> BTreeMap<crate::PortSource, us
 }
 
 /// The old ring an output channel's ring of this plan starts from when no old
-/// ring has its own key: the old root's channel `c` for the bank's channel
-/// `base + c`, and, in a root change, for a root channel of a source the old
+/// ring has its own key: the old main output's channel `c` for the bank's channel
+/// `base + c`, and, in a main output change, for a main output channel of a source the old
 /// plan aligned on another channel, that channel's ring (a source's delayed
 /// signal does not depend on the channel it feeds).
 fn copy_origin(
@@ -1269,12 +1269,12 @@ fn copy_origin(
     let DelayKey::Output { channel, from } = *key else {
         return None;
     };
-    match plan.root_bank() {
+    match plan.main_output_bank() {
         Some(bank) if usize::from(channel) >= bank.base => {
             let was = channel - u16::try_from(bank.base).ok()?;
             old.get(&DelayKey::Output { channel: was, from }).copied()
         }
-        // Only in a root change: any other recompile keeps a ring by its key.
+        // Only in a main output change: any other recompile keeps a ring by its key.
         Some(_) if !old.contains_key(key) => by_source.get(&from).copied(),
         _ => None,
     }

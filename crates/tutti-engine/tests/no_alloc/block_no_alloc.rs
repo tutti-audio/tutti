@@ -46,7 +46,7 @@ fn rolling_state() -> (Transport, AudioCallbackState) {
 }
 
 /// [`rolling_state`], with a graph tap on both outputs when `tap` (the reader
-/// is returned, and must be held), and the master meter declared on the
+/// is returned, and must be held), and the main output meter declared on the
 /// outputs (off until enabled).
 fn rolling_state_with(
     tap: bool,
@@ -117,7 +117,7 @@ fn rolling_state_with(
     let state = AudioCallbackState::new(engine);
 
     transport.settings().set_tempo(Bpm::of(120.0));
-    let _ = transport.motion().try_send(MotionCommand::Play);
+    let _ = transport.motion().send(MotionCommand::Play);
 
     (transport, state, meter, reader)
 }

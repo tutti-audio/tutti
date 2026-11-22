@@ -4,26 +4,26 @@
 //! methods by job.
 
 mod event;
+mod main_output;
 pub(crate) mod parts;
 mod phases;
-mod root;
 mod taps;
 #[cfg(test)]
 mod tests;
 mod transport;
 
 pub use event::SessionEvent;
+pub use main_output::MainOutputTopologyStatus;
 #[cfg(feature = "midi")]
 pub use parts::MidiNodes;
 pub use phases::{ModInput, PHASES, Phase, PhaseCx};
-pub use root::RootTopologyStatus;
 
 use std::fmt::Debug;
 use std::sync::Arc;
 
 use tutti_engine::{OutputSpec, StreamFaults};
 use tutti_graph::NodeKey;
-use tutti_units::{Amplitude, SampleRate};
+use tutti_units::Amplitude;
 
 use crate::background::Background;
 use crate::clock::sealed::Streaming;
@@ -73,7 +73,7 @@ impl<T: Ord + Clone + Debug + Send + Sync + 'static> AppKey for T {}
 /// use tutti_buffers::ChannelLayout;
 /// use tutti_buffers::InterleavedMut;
 /// use tutti_graph::ForkByClone;
-/// use tutti_session::{OutPort, Root, Session};
+/// use tutti_session::{OutPort, MainOutput, Session};
 /// use tutti_nodes::testing::Const;
 ///
 /// // One global output: the mono device takes it as it is, unfolded.
@@ -82,7 +82,7 @@ impl<T: Ord + Clone + Debug + Send + Sync + 'static> AppKey for T {}
 ///     .outputs(ChannelLayout::MONO).max_block(MaxBlock::of(Samples::new(64))).build()
 ///     .unwrap();
 /// let dc = session.graph().add(ForkByClone(Const::mono(0.5)));
-/// session.graph().set_sources(Root::output(0), [OutPort::new(dc, 0)]).unwrap().unfaded();
+/// session.graph().set_sources(MainOutput::channel(0), [OutPort::new(dc, 0)]).unwrap().unfaded();
 /// session.update();
 ///
 /// let mut block = [0.0f32; 64];
@@ -117,7 +117,7 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     pub(crate) resource_ids: crate::peer::ResourceIds,
     /// The transport and the figures of the plan sent last.
     pub(crate) transport: TransportPart,
-    /// Where the mix lands: the root, the policy, the engine's output readings.
+    /// Where the mix lands: the main output, the policy, the engine's output readings.
     pub(crate) output: OutputPart<C::Float>,
     /// What the last update read, for the next one's reports.
     pub(crate) reports: Reports,
@@ -150,25 +150,17 @@ impl Session<&'static str, Offline> {
     /// ([`SessionBuilder`](crate::SessionBuilder) has the options, and the
     /// other clocks).
     pub fn builder() -> crate::SessionBuilder<crate::Offline> {
-        crate::SessionBuilder::default()
-    }
-
-    /// An offline session at `rate` with every other option at its default:
-    /// shorthand for `Session::builder().sample_rate(rate).build()`.
-    ///
-    /// # Errors
-    ///
-    /// As [`SessionBuilder::build`](crate::SessionBuilder::build).
-    pub fn new(rate: SampleRate) -> crate::Result<Self> {
-        Self::builder().sample_rate(rate).build()
+        crate::SessionBuilder::new()
     }
 }
 
 impl<K: AppKey, F: SessionFloat> Session<K, Offline<F>> {
     /// Renders one block into `output`, as a device callback would: what an
     /// offline session's host pulls. Every update's commit lands at the
-    /// start of the next block.
-    pub fn render(&self, output: &mut tutti_buffers::InterleavedMut<'_, F>) {
+    /// start of the next block, and a heard tap opened or closed since the last
+    /// render is pushed first, so this render already writes it.
+    pub fn render(&mut self, output: &mut tutti_buffers::InterleavedMut<'_, F>) {
+        self.output.reclaim();
         self.running.engine.process(output);
     }
 }

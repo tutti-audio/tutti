@@ -5,30 +5,33 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
-use tutti_session::{Bounce, BounceLatency, BounceTail, Range, Root, Session};
+use tutti_session::{Bounce, BounceLatency, BounceTail, MainOutput, Range, Session};
 use tutti_units::{SampleRate, Seconds};
 
 /// **A session from `Session::new` is a full session.** A constant wired to
-/// the root bounces to buffers holding that constant on every frame, and
+/// the main output bounces to buffers holding that constant on every frame, and
 /// `render`, which only a session with an engine has, answers instead of
 /// panicking.
 #[test]
 fn a_session_from_new_bounces_a_node_and_renders() {
-    let mut session = Session::new(SampleRate::SR_48K).expect("builds");
+    let mut session = Session::builder()
+        .sample_rate(SampleRate::SR_48K)
+        .build()
+        .expect("builds");
     let node = session
         .graph()
         .add(ForkByClone(Const::new(0.25, ChannelLayout::STEREO)));
-    session.graph().connect(node, Root).unwrap().unfaded();
+    session.graph().connect(node, MainOutput).unwrap().unfaded();
     let planes = bounced(
         &mut session,
         Bounce::new()
-            .master_buffers()
+            .main_output_buffers()
             .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.05)))
             .latency(BounceLatency::Keep)
             .tail(BounceTail::None),
     )
     .expect("the bounce renders")
-    .into_master()
+    .into_main_output()
     .into_planes();
     assert_eq!(planes.len(), 2);
     assert!(planes.iter().all(|p| !p.is_empty()));

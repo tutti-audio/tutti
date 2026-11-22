@@ -7,7 +7,7 @@ use tutti_buffers::SampleFormat;
 use tutti_engine::{ManualStreamDriver, OutputSpec};
 use tutti_graph::{ForkByClone, Params};
 use tutti_rt::Param;
-use tutti_session::{Root, Session};
+use tutti_session::{MainOutput, Session};
 use tutti_units::{Amplitude, SampleRate, Samples};
 
 #[path = "../support/f64_nodes.rs"]
@@ -36,7 +36,7 @@ fn an_f64_device_session_renders_a_figure_f32_rounds_away_to_its_stream() {
         .unwrap()
         .unfaded();
     s.graph()
-        .connect(gain.out(0), Root::output(0))
+        .connect(gain.out(0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -68,7 +68,7 @@ fn an_f64_device_session_switches_to_the_timer_and_keeps_rendering_fine() {
         .expect("an f64 device session builds with no device");
     let dc = live.graph().add(ForkByClone(Dc(FINE)));
     live.graph()
-        .connect(dc.out(0), Root::output(0))
+        .connect(dc.out(0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     let _ = live.update();
@@ -82,13 +82,7 @@ fn an_f64_device_session_switches_to_the_timer_and_keeps_rendering_fine() {
     );
     system.play().expect("queued");
     let guard = Duration::from_secs(10);
-    let mut tap = None;
-    tutti_fixtures::wait_until("the audio side never took the graph", guard, || {
-        let _ = system.update();
-        tap = system.open_heard_tap(Samples::new(2_048)).unwrap().reader();
-        tap.is_some()
-    });
-    let mut tap = tap.expect("opened");
+    let mut tap = system.open_heard_tap(Samples::new(2_048)).unwrap();
     let mut heard = vec![0.0f64; 512];
     tutti_fixtures::wait_until("FINE never reached the tap", guard, || {
         let _ = system.update();

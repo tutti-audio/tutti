@@ -1,8 +1,8 @@
 //! The plugin as a value: [`Session::load_plugin`] returns a [`LoadPlugin`], a
 //! [`LoadInProcess`] the app runs on the main thread or a [`LoadOutOfProcess`] it
-//! awaits on any thread, which opens the plugin and returns the [`PluginNode`]
-//! that owns it; [`Session::add_plugin`] puts the node in the
-//! graph, and [`Session::swap_plugin`] replaces the plugin at a node with one.
+//! awaits on any thread, which opens the plugin and returns the [`LoadedPlugin`]
+//! that owns it; [`Session::apply`] puts the loaded plugin in the graph, and
+//! [`Session::swap_plugin`] replaces the plugin at a node with one.
 //!
 //! The id is resolved and bound against the catalog, and the hosting resolved
 //! for the format, when the load is built; the load then opens the plugin, the
@@ -10,13 +10,13 @@
 //! and rate, its collector of main-thread work and a weak handle to its
 //! executor, which it upgrades only for the launch of an out-of-process plugin.
 //!
-//! One opened plugin is one [`PluginNode`], which a session takes once. Its
-//! [`LoadedPlugin`] is the cloneable observer: what the load read of the plugin
+//! One opened plugin is one [`LoadedPlugin`], which a session takes once. Its
+//! [`PluginInstance`] is the cloneable observer: what the load read of the plugin
 //! and whether it is live, or [`Closed`](Presence::Closed) once no plugin is
-//! behind it. An unadded plugin closes when its node is dropped, and an added
-//! one with its node in the graph (an in-process plugin on the main thread,
-//! whichever thread drops it; an out-of-process one reaps its server). The session keeps
-//! no cache: two loads of one id are two plugins.
+//! behind it. A plugin not yet applied closes when its [`LoadedPlugin`] is
+//! dropped, and an applied one with its node in the graph (an in-process plugin
+//! on the main thread, whichever thread drops it; an out-of-process one reaps
+//! its server). The session keeps no cache: two loads of one id are two plugins.
 
 use std::fmt;
 use std::future::{Future, IntoFuture};
@@ -35,19 +35,19 @@ use tutti_plugin::catalog::ResolvedHosting;
 use tutti_plugin_db::{Catalog, Hosting, Loadable};
 use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::bundle::{ModuleKind, native_module_path};
-use tutti_plugin_types::{IpcError, Preset, PresetError};
+use tutti_plugin_types::{IpcError, PluginPreset, PresetError};
 use tutti_plugin_types::{MainThreadMarker, PluginFailure, PluginFormat, PluginId, PluginRef};
 use tutti_rt::LockExt;
 
 use super::opened::{Context, Install, PluginCause, PluginInfo, PluginPorts, Shared, Standing};
 use super::opened::{plugin_failed, ports_of};
 use super::{AnyPlugin, HostPlugin, Open, Origin, PluginLoad};
-use crate::apply::SessionId;
+use crate::apply::{Cut, Sealed as ApplySealed};
 use crate::graph::{OnShape, SwapRefused};
 use crate::loaded::{Stamp, caught};
 use crate::peer::sealed;
-use crate::{GiveUp, Key, LoadError, NoSuchNode, Peer, Presence};
-use crate::{OtherPeer, PeerState, ReplaceRefused, Resource, ResourceId, SavedPeer, Session};
+use crate::{AppKey, Clock, GiveUp, Key, LoadError, NoSuchNode, Peer, Presence};
+use crate::{OtherPeer, PeerResourceId, PeerState, ReplaceRefused, Resource, SavedPeer, Session};
 
 /// A plugin to open, built by [`Session::load_plugin`] and not yet run. Where it
 /// runs is decided when it is built, from the catalog's row and the format: a
@@ -96,8 +96,8 @@ impl Request {
     fn open(
         self,
         open: impl FnOnce(PluginLoad) -> Open,
-        presets: impl FnOnce(&HostPlugin) -> Result<Vec<Preset>, PresetError>,
-    ) -> Result<PluginNode, LoadError> {
+        presets: impl FnOnce(&HostPlugin) -> Result<Vec<PluginPreset>, PresetError>,
+    ) -> Result<LoadedPlugin, LoadError> {
         let stamp = Stamp::take(Asset::from(module_of(self.loadable.plugin())?));
         let cx = self.cx;
         let request = PluginLoad {
@@ -112,12 +112,12 @@ impl Request {
         let opened = open(request);
         let (shared, install) =
             Shared::new(&cx, stamp, self.id, opened, self.loadable, config, presets)?;
-        Ok(PluginNode {
-            handle: LoadedPlugin {
+        Ok(LoadedPlugin {
+            instance: PluginInstance {
                 shared: Arc::new(shared),
             },
             install: Some(Box::new(install)),
-            session: cx.session,
+            cut: cx.cut,
         })
     }
 }
@@ -149,7 +149,7 @@ impl LoadInProcess {
     ///
     /// The plugin module's [`Identity`](tutti_platform::Identity) is taken
     /// before the open, so a rewrite during it shows in
-    /// [`LoadedPlugin::changed`].
+    /// [`PluginInstance::changed`].
     ///
     /// # Errors
     ///
@@ -157,7 +157,7 @@ impl LoadInProcess {
     /// [`LoadError::Plugin`] when the catalog blacklisted the plugin since the
     /// load was built or the plugin does not open; [`LoadError::Panicked`] when
     /// a plugin or the host panicked in the open.
-    pub fn run(self, main: MainThreadMarker) -> Result<PluginNode, LoadError> {
+    pub fn run(self, main: MainThreadMarker) -> Result<LoadedPlugin, LoadError> {
         caught(|| {
             self.request.open(
                 |load| load.run_in_process(main),
@@ -170,8 +170,8 @@ impl LoadInProcess {
 /// A plugin that runs in a `plugin-server` process, not yet started. It is
 /// `Send`, and it is a [`Future`] through [`IntoFuture`]: awaiting it launches
 /// the server and loads the plugin as a task on the session's executor, and
-/// yields the [`PluginNode`]. Nothing of it needs the main thread, so any
-/// thread awaits it and the session adds the node on its own. There is no
+/// yields the [`LoadedPlugin`]. Nothing of it needs the main thread, so any
+/// thread awaits it and the session applies the result on its own. There is no
 /// blocking form: the task wakes the awaiting future when the reply lands.
 ///
 /// It holds no strong handle to the session's executor. Dropping it unawaited
@@ -196,18 +196,18 @@ impl LoadOutOfProcess {
 }
 
 impl IntoFuture for LoadOutOfProcess {
-    type Output = Result<PluginNode, LoadError>;
-    type IntoFuture = LoadingOutOfProcess;
+    type Output = Result<LoadedPlugin, LoadError>;
+    type IntoFuture = LoadingPlugin;
 
-    fn into_future(self) -> LoadingOutOfProcess {
-        LoadingOutOfProcess {
+    fn into_future(self) -> LoadingPlugin {
+        LoadingPlugin {
             stage: Stage::Unstarted(self.request),
         }
     }
 }
 
 /// An out-of-process load being awaited ([`LoadOutOfProcess`]): resolves to
-/// the [`PluginNode`] once the plugin's server has launched and loaded it.
+/// the [`LoadedPlugin`] once the plugin's server has launched and loaded it.
 ///
 /// The first poll starts the launch as a task on the session's executor (the
 /// session's weak handle, upgraded for the spawn only) and awaits the receiver
@@ -244,29 +244,28 @@ impl IntoFuture for LoadOutOfProcess {
 /// [`IpcError::ShutDown`]: tutti_plugin_types::IpcError::ShutDown
 /// [`IpcError::Io`]: tutti_plugin_types::IpcError::Io
 #[must_use = "a load does nothing unless it is awaited"]
-pub struct LoadingOutOfProcess {
+pub struct LoadingPlugin {
     stage: Stage,
 }
 
-type Reply = oneshot::Receiver<Result<PluginNode, LoadError>>;
+type Reply = oneshot::Receiver<Result<LoadedPlugin, LoadError>>;
 
 enum Stage {
     Unstarted(Request),
     Running(Reply),
     /// The plugin is open and its node made; its parameters are being read, which the
     /// plugin's replies fill.
-    Reading(Option<PluginNode>, Box<tutti_plugin_host::ReadingParams>),
+    Reading(Option<LoadedPlugin>, Box<tutti_plugin_host::ReadingParams>),
     Finished,
 }
 
-impl fmt::Debug for LoadingOutOfProcess {
+impl fmt::Debug for LoadingPlugin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("LoadingOutOfProcess")
-            .finish_non_exhaustive()
+        f.debug_struct("LoadingPlugin").finish_non_exhaustive()
     }
 }
 
-impl LoadingOutOfProcess {
+impl LoadingPlugin {
     /// Starts the launch of `request` on the session's executor: the task owns
     /// the sender of the reply this returns the receiver of.
     fn launch(request: Request) -> Result<Reply, LoadError> {
@@ -300,8 +299,8 @@ impl LoadingOutOfProcess {
     }
 }
 
-impl Future for LoadingOutOfProcess {
-    type Output = Result<PluginNode, LoadError>;
+impl Future for LoadingPlugin {
+    type Output = Result<LoadedPlugin, LoadError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Output> {
         let this = &mut *self;
@@ -368,23 +367,23 @@ fn module_of(plugin: &PluginRef) -> Result<PathBuf, LoadError> {
     native_module_path(plugin.path(), kind).map_err(|error| LoadError::Module(Arc::new(error)))
 }
 
-/// What an app observes of an opened plugin: [`PluginNode::handle`]. A clone
-/// shares the readings, and holds no plugin: the node owns it.
+/// What an app observes of a loaded plugin: [`LoadedPlugin::instance`]. A clone
+/// shares the readings, and holds no plugin: the [`LoadedPlugin`] or its node owns it.
 ///
 /// It carries what the load read of the plugin ([`info`](Peer::info)) and
 /// whether the plugin is live ([`presence`](Peer::presence)): [`Closed`](Presence::Closed)
-/// once the node was dropped unadded, removed from the graph, or swapped out.
+/// once the [`LoadedPlugin`] was dropped unapplied, removed from the graph, or swapped out.
 ///
 /// ```
 /// fn send_sync<T: Send + Sync>() {}
-/// send_sync::<tutti_session::LoadedPlugin>();
+/// send_sync::<tutti_session::PluginInstance>();
 /// ```
 #[derive(Clone, Debug)]
-pub struct LoadedPlugin {
+pub struct PluginInstance {
     shared: Arc<Shared>,
 }
 
-impl LoadedPlugin {
+impl PluginInstance {
     /// The plugin module the load opened: the file in a bundle, else the path.
     #[must_use]
     pub fn asset(&self) -> &Asset {
@@ -410,15 +409,15 @@ impl LoadedPlugin {
     }
 }
 
-impl sealed::Sealed for LoadedPlugin {}
+impl sealed::Sealed for PluginInstance {}
 
-impl Resource for LoadedPlugin {
-    fn id(&self) -> ResourceId {
+impl Resource for PluginInstance {
+    fn id(&self) -> PeerResourceId {
         self.shared.id
     }
 }
 
-impl Peer for LoadedPlugin {
+impl Peer for PluginInstance {
     type Info = PluginInfo;
     type Cause = PluginCause;
 
@@ -438,37 +437,38 @@ impl Peer for LoadedPlugin {
     }
 }
 
-/// An opened plugin, owned: a load's `run` output, which
-/// [`Session::add_plugin`] and [`Session::swap_plugin`] consume. A plugin is in
-/// one node, so the node is not `Clone`.
+/// A plugin loaded and not yet in the graph: a load's output, which
+/// [`Session::apply`] and [`Session::swap_plugin`] take. A plugin is in one
+/// node, so a `LoadedPlugin` is not `Clone`; applying it gives the node's
+/// [`Key`], and a refused apply hands nothing back.
 ///
 /// It is `Send`: a session on any thread takes it, whichever thread opened it.
-/// Dropped before it is added, it closes its plugin (an in-process plugin on the
-/// main thread, whichever thread drops it).
+/// Dropped before it is applied, it closes its plugin (an in-process plugin on
+/// the main thread, whichever thread drops it).
 ///
 /// ```
 /// fn send<T: Send>() {}
-/// send::<tutti_session::PluginNode>();
+/// send::<tutti_session::LoadedPlugin>();
 /// ```
-#[must_use = "a node does nothing until it is added"]
-pub struct PluginNode {
-    handle: LoadedPlugin,
+#[must_use = "a loaded plugin does nothing until it is applied"]
+pub struct LoadedPlugin {
+    instance: PluginInstance,
     /// The plugin, until a session takes it. Boxed: an opened plugin is far
     /// larger than the errors that hand a node back.
     install: Option<Box<Install>>,
-    /// The session that loaded it, the only one it may be added to.
-    session: SessionId,
+    /// The session that loaded it, the only one it may be applied to.
+    cut: Cut,
 }
 
-impl fmt::Debug for PluginNode {
+impl fmt::Debug for LoadedPlugin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PluginNode")
-            .field("handle", &self.handle)
+        f.debug_struct("LoadedPlugin")
+            .field("instance", &self.instance)
             .finish_non_exhaustive()
     }
 }
 
-impl PluginNode {
+impl LoadedPlugin {
     /// The parameter read the open left for its caller to await, when it has one.
     fn take_param_read(&mut self) -> Option<tutti_plugin_host::ParamRead> {
         self.install.as_mut()?.mirror.as_mut()?.unread.take()
@@ -486,45 +486,46 @@ impl PluginNode {
         }
     }
 
-    /// The observer of this plugin: a clone of it outlives the node.
-    pub fn handle(&self) -> LoadedPlugin {
-        self.handle.clone()
+    /// The observer of this plugin: a clone of it outlives the load.
+    pub fn instance(&self) -> PluginInstance {
+        self.instance.clone()
     }
 
-    /// The plugin and its handle, the node spent: the caller owns the plugin's
+    /// The plugin and its instance, the load spent: the caller owns the plugin's
     /// retirement from here.
-    fn into_parts(mut self) -> (Install, LoadedPlugin) {
+    fn into_parts(mut self) -> (Install, PluginInstance) {
         let install = self
             .install
             .take()
             .expect("a node holds its plugin until taken");
-        (*install, self.handle.clone())
+        (*install, self.instance.clone())
     }
 }
 
-impl Drop for PluginNode {
+impl Drop for LoadedPlugin {
     /// Dropped with its plugin still in it: the plugin closes, and its handle
     /// keeps no server alive.
     fn drop(&mut self) {
         if self.install.is_some() {
-            let standing = &self.handle.shared.standing;
+            let standing = &self.instance.shared.standing;
             standing.retired.store(true, Ordering::Release);
             standing.release_handle();
         }
     }
 }
 
-/// Why [`Session::add_plugin`] added no node.
+/// Why [`Session::apply`] of a [`LoadedPlugin`] added no node. The plugin is
+/// dropped in each case, which closes it.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum AddPluginError {
-    /// The plugin is lost: its server died before it had a node. It is dropped.
+    /// The plugin is lost: its server died before it had a node.
     #[error("the plugin is lost")]
     Lost,
     /// Another session loaded the plugin, at its own rate and with its own
-    /// collector of main-thread work. The node is handed back.
+    /// collector of main-thread work.
     #[error("the plugin was loaded by another session")]
-    OtherSession(PluginNode),
+    Stale,
 }
 
 /// Why [`Session::swap_plugin`] swapped nothing. The node keeps the plugin it
@@ -535,13 +536,13 @@ pub enum AddPluginError {
 pub enum SwapPluginError {
     /// No plugin is hosted at the node.
     #[error("{0}")]
-    NoSuchNode(NoSuchNode, PluginNode),
+    NoSuchNode(NoSuchNode, LoadedPlugin),
     /// The incoming plugin is lost.
     #[error("the plugin is lost")]
-    Lost(PluginNode),
+    Lost(LoadedPlugin),
     /// Another session loaded the incoming plugin.
     #[error("the plugin was loaded by another session")]
-    OtherSession(PluginNode),
+    Stale(LoadedPlugin),
     /// The incoming plugin has other ports than the node's, which would leave
     /// the node's edges on ports that are gone.
     #[error("the plugin has {got} where its node has {was}")]
@@ -551,11 +552,11 @@ pub enum SwapPluginError {
         /// The node's.
         was: Box<PluginPorts>,
         /// The incoming node.
-        node: PluginNode,
+        node: LoadedPlugin,
     },
     /// The graph is re-preparing: swap again after an update.
     #[error("the graph is re-preparing; swap again after an update")]
-    Busy(PluginNode),
+    Busy(LoadedPlugin),
     /// The graph refused the swap; the incoming plugin is closed.
     #[error("the node could not swap to the plugin: {0}")]
     Graph(Arc<ReplaceRefused>),
@@ -573,7 +574,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// keeps its catalog. Two loads of one id are two plugins.
     ///
     /// The opened plugin has no node in the graph yet:
-    /// [`add_plugin`](Self::add_plugin) puts it there, in this session only.
+    /// [`apply`](Self::apply) puts it there, in this session only.
     ///
     /// # Errors
     ///
@@ -640,7 +641,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 work: self.plugins.work.clone(),
                 executor: self.plugins.executor.clone(),
                 ids: self.resource_ids.clone(),
-                session: self.id,
+                cut: Cut::of(self),
                 recovery: self.plugins.recovery.is_some(),
             },
         };
@@ -651,36 +652,6 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             }),
             ResolvedHosting::OutOfProcess => LoadPlugin::OutOfProcess(LoadOutOfProcess { request }),
         })
-    }
-
-    /// Puts the plugin of `node` in the graph, unwired. The node's record holds
-    /// a clone of the plugin's handle until the record retires, and then the
-    /// handle reads [`Closed`](Presence::Closed).
-    ///
-    /// The one way a loaded plugin enters the graph. It takes no main thread:
-    /// the plugin was opened on it, and binding it to a graph node is not
-    /// main-thread work, so a session on another thread adds it too.
-    ///
-    /// # Errors
-    ///
-    /// [`AddPluginError::Lost`] when the plugin is lost;
-    /// [`AddPluginError::OtherSession`] when another session loaded it.
-    pub fn add_plugin(&mut self, node: PluginNode) -> Result<Key<AnyPlugin>, AddPluginError> {
-        if node.session != self.id {
-            return Err(AddPluginError::OtherSession(node));
-        }
-        if node.handle.shared.standing.lost() {
-            return Err(AddPluginError::Lost);
-        }
-        let (install, handle) = node.into_parts();
-        let Install {
-            plugin,
-            mirror,
-            origin,
-        } = install;
-        let (key, rebinder) = self.install_plugin(plugin, mirror, origin);
-        self.link_node(key, NodeLink::of(handle), rebinder);
-        Ok(key)
     }
 
     /// Replaces the plugin at `node` with `with`'s: a crossfade when the shapes
@@ -703,22 +674,22 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// A reload is the app's own composition: the load of the plugin's id as it
     /// was hosted, started from the state worth keeping, swapped in at its key.
     /// The inputs are read: [`PluginInfo::id`] and [`PluginInfo::hosting`] from
-    /// the node's handle, and [`StateView::withheld`](crate::StateView::withheld)
+    /// the node's instance, and [`StateView::withheld`](crate::StateView::withheld)
     /// or [`last_good`](crate::StateView::last_good) from the session's view of
     /// it. A node that gave up is revived the same way.
     ///
     /// ```no_run
     /// # use tutti_plugin_db::Catalog;
     /// # use tutti_plugin_types::MainThreadMarker;
-    /// # use tutti_session::{AnyPlugin, Key, LoadPlugin, LoadedPlugin, Peer, Session};
+    /// # use tutti_session::{AnyPlugin, Key, LoadPlugin, PluginInstance, Peer, Session};
     /// # async fn go(
     /// #     session: &mut Session,
     /// #     catalog: &Catalog,
     /// #     node: Key<AnyPlugin>,
-    /// #     handle: &LoadedPlugin,
+    /// #     instance: &PluginInstance,
     /// #     main: MainThreadMarker,
     /// # ) -> Result<(), Box<dyn std::error::Error>> {
-    /// let info = handle.info();
+    /// let info = instance.info();
     /// let state = {
     ///     let view = session.plugin_view(node)?;
     ///     view.state().withheld().or(view.state().last_good()).cloned()
@@ -746,7 +717,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     ///
     /// The incoming node comes back in the error, and `node` keeps its plugin:
     /// [`SwapPluginError::NoSuchNode`] when no plugin is hosted at `node`;
-    /// [`SwapPluginError::Lost`] and [`SwapPluginError::OtherSession`] for an
+    /// [`SwapPluginError::Lost`] and [`SwapPluginError::Stale`] for an
     /// incoming plugin that is lost or loaded by another session;
     /// [`SwapPluginError::Ports`] for other audio buses or MIDI output than the
     /// node's; [`SwapPluginError::Busy`] while the graph re-prepares: swap again
@@ -755,11 +726,11 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     pub fn swap_plugin(
         &mut self,
         node: Key<AnyPlugin>,
-        with: PluginNode,
+        with: LoadedPlugin,
         _main: MainThreadMarker,
     ) -> Result<(), SwapPluginError> {
-        if with.session != self.id {
-            return Err(SwapPluginError::OtherSession(with));
+        if with.cut != Cut::of(self) {
+            return Err(SwapPluginError::Stale(with));
         }
         let was = match self.graph.plugins.get(&node.erase()) {
             Some(hosted) => ports_of(&hosted.handle),
@@ -770,13 +741,13 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 ));
             }
         };
-        if with.handle.shared.standing.lost() {
+        if with.instance.shared.standing.lost() {
             return Err(SwapPluginError::Lost(with));
         }
         // A replacement with other ports would leave the node's edges on ports
         // that are gone and refuse every later commit.
-        if with.handle.shared.ports != was {
-            let got = Box::new(with.handle.shared.ports.clone());
+        if with.instance.shared.ports != was {
+            let got = Box::new(with.instance.shared.ports.clone());
             return Err(SwapPluginError::Ports {
                 got,
                 was: Box::new(was),
@@ -803,15 +774,53 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     }
 }
 
-/// What a node's record keeps of the plugin it is over: the handle the plugin
+impl ApplySealed<f32> for LoadedPlugin {
+    type Applied = Key<AnyPlugin>;
+    type Error = AddPluginError;
+
+    fn cut(&self) -> &Cut {
+        &self.cut
+    }
+
+    fn stale() -> AddPluginError {
+        AddPluginError::Stale
+    }
+
+    /// Puts the plugin in the graph, unwired. The node's record holds a clone
+    /// of the plugin's instance until the record retires, and then the
+    /// instance reads [`Closed`](Presence::Closed). It takes no main thread:
+    /// the plugin was opened on it, and binding it to a graph node is not
+    /// main-thread work, so a session on another thread applies it too.
+    ///
+    /// A refusal hands nothing back: the load drops, which closes its plugin.
+    fn apply_to<K: AppKey, C: Clock<Float = f32>>(
+        self,
+        session: &mut Session<K, C>,
+    ) -> Result<Key<AnyPlugin>, AddPluginError> {
+        if self.instance.shared.standing.lost() {
+            return Err(AddPluginError::Lost);
+        }
+        let (install, instance) = self.into_parts();
+        let Install {
+            plugin,
+            mirror,
+            origin,
+        } = install;
+        let (key, rebinder) = session.install_plugin(plugin, mirror, origin);
+        session.link_node(key, NodeLink::of(instance), rebinder);
+        Ok(key)
+    }
+}
+
+/// What a node's record keeps of the plugin it is over: the instance the plugin
 /// was loaded as, and with it the plugin's standing. Dropped with the node's
 /// record, which retires the handle.
 pub(crate) struct NodeLink {
-    plugin: LoadedPlugin,
+    plugin: PluginInstance,
 }
 
 impl NodeLink {
-    fn of(plugin: LoadedPlugin) -> Self {
+    fn of(plugin: PluginInstance) -> Self {
         Self { plugin }
     }
 
@@ -918,7 +927,7 @@ mod tests {
     fn a_dropped_sender_resolves_as_a_shut_down_host() {
         let (reply, receiver) = oneshot::channel();
         drop(reply);
-        let load = LoadingOutOfProcess {
+        let load = LoadingPlugin {
             stage: Stage::Running(receiver),
         };
         let error = tutti_fixtures::block_on(load).expect_err("nobody answered");

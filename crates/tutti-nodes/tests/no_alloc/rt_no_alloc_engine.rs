@@ -96,7 +96,7 @@ fn build_engine_with_chain() -> Engine {
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     // Every commit is sent; the editor only had to outlive the setup.
     drop(ed);
-    let _ = transport.motion().try_send(MotionCommand::Play);
+    let _ = transport.motion().send(MotionCommand::Play);
     engine
 }
 

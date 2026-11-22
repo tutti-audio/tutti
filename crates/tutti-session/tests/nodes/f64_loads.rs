@@ -10,7 +10,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_fixtures::wait_until;
 use tutti_graph::ForkByClone;
 use tutti_sampler::StreamStart;
-use tutti_session::{AudioData, OutPort, Root, Session, Tier};
+use tutti_session::{AudioData, MainOutput, OutPort, Session, Tier};
 use tutti_units::{Beat, SampleRate};
 
 #[path = "../support/f64_nodes.rs"]
@@ -85,8 +85,8 @@ fn a_loaded_resident_wave_holds_f64_frames_and_its_clip_plays_them() {
     let clip = tutti_sampler::Clip::<f64>::new(wave).expect("a placeable wave");
     let key = s.graph().add(clip.at(Beat::new(0.0)));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(key, 0)])
-        .expect("the clip into the root");
+        .set_sources(MainOutput::channel(0), [OutPort::new(key, 0)])
+        .expect("the clip into the main output");
     let _ = s.update();
     s.play().expect("room");
     let mut heard = Vec::new();
@@ -119,8 +119,11 @@ fn an_f64_session_streams_a_file_into_f64_frames() {
         .graph()
         .add(tutti_sampler::Clip::<f64>::streaming(reader, stream).at(Beat::new(0.0)));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(dc, 0), OutPort::new(key, 0)])
-        .expect("both into the root");
+        .set_sources(
+            MainOutput::channel(0),
+            [OutPort::new(dc, 0), OutPort::new(key, 0)],
+        )
+        .expect("both into the main output");
     let _ = s.update();
     wait_until("the stream to prime", Duration::from_secs(10), || {
         s.graph_ref()

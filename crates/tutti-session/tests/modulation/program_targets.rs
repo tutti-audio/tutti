@@ -13,7 +13,7 @@ use tutti_session::{DepthTarget, ModRouteId, ModSourceId, ParamRef, RouteSpec, V
 use tutti_units::{Beat, BeatsPerCycle, Bipolar, Depth, Hz, SamplePosition, SampleRate, UnitParam};
 
 use crate::common::probe::ProbeUnit;
-use crate::mod_lanes::{frame, master, render, rig, settle};
+use crate::mod_lanes::{frame, main_output, render, rig, settle};
 
 const RATE: f64 = 48_000.0;
 
@@ -27,7 +27,7 @@ fn scene(
     depth: f64,
 ) -> (ParamRef, ModSourceId, ModRouteId) {
     let probe = s.graph().add(ProbeUnit::new(500.0));
-    master(s, &[probe.erase()]);
+    main_output(s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
@@ -370,7 +370,7 @@ fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
     let probe = s.graph().add(ProbeUnit::new(500.0));
     s.graph()
         .set_sources(
-            tutti_session::Root::output(0),
+            tutti_session::MainOutput::channel(0),
             [tutti_session::OutPort::new(probe, 0)],
         )
         .unwrap();
@@ -386,13 +386,13 @@ fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
         let _ = s.update();
     }
     let mut block = vec![0.0f32; 2 * 128];
-    let render = |s: &tutti_session::Session, block: &mut Vec<f32>| {
+    let render = |s: &mut tutti_session::Session, block: &mut Vec<f32>| {
         s.render(
             &mut tutti_buffers::InterleavedMut::new(block, tutti_buffers::ChannelLayout::STEREO)
                 .unwrap(),
         );
     };
-    render(&s, &mut block);
+    render(&mut s, &mut block);
     let before = block.clone();
 
     s.set((
@@ -405,7 +405,7 @@ fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
         .unwrap();
     let _ = s.update();
     for _ in 0..8 {
-        render(&s, &mut block);
+        render(&mut s, &mut block);
     }
     // The probe is on output 0 of a stereo mix: the last frame's left sample.
     // The transport is stopped at beat 0. The route is `Hold`, which offsets
@@ -433,7 +433,7 @@ fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
 fn an_automation_curve_set_lands_at_the_update_and_the_param_follows_it() {
     let (mut s, _) = rig(1);
     let probe = s.graph().add(ProbeUnit::new(300.0));
-    master(&mut s, &[probe.erase()]);
+    main_output(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let target = probe.cutoff().automation();
     assert_eq!(

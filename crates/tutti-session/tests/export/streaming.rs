@@ -8,7 +8,7 @@ use std::time::Duration;
 use tutti_buffers::ChannelLayout;
 use tutti_platform::Instant;
 use tutti_sampler::{Clip, StreamFailure, StreamPhase, StreamStart};
-use tutti_session::{Bounce, BounceLatency, BounceTail, Range, Root, Session};
+use tutti_session::{Bounce, BounceLatency, BounceTail, MainOutput, Range, Session};
 use tutti_units::{Beat, SampleRate, Seconds};
 
 const RATE: f64 = 48_000.0;
@@ -91,14 +91,14 @@ fn a_bounce_of_a_streamed_ramp_at_unity_reproduces_the_files_frames() {
         .graph()
         .add(Clip::streaming(reader, stream).at(Beat::new(0.0)));
     s.graph()
-        .connect(node, Root)
-        .expect("the clip reaches the root");
+        .connect(node, MainOutput)
+        .expect("the clip reaches the main output");
     let _ = s.update();
 
     let rendered = bounced(
         &mut s,
         Bounce::new()
-            .master_buffers()
+            .main_output_buffers()
             .channels(ChannelLayout::STEREO)
             .range(Range::Seconds(Seconds::new(0.0), Seconds::new(1.0)))
             .sample_rate(SampleRate::of(RATE))
@@ -106,7 +106,7 @@ fn a_bounce_of_a_streamed_ramp_at_unity_reproduces_the_files_frames() {
             .tail(BounceTail::None),
     )
     .expect("the bounce renders")
-    .into_master()
+    .into_main_output()
     .into_planes();
     for k in 0..LEN {
         assert_eq!(rendered[0][k], value(k), "left, file frame {k}");

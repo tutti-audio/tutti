@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, InterleavedMut, MaxBlock};
 use tutti_music::Adsr;
 use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};
-use tutti_session::{InstrumentHandle, OfflineSession, OutPort, Root, Session, Stamp};
+use tutti_session::{InstrumentHandle, MainOutput, OfflineSession, OutPort, Session, Stamp};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity};
@@ -143,7 +143,10 @@ fn an_f64_general_midi_rig_is_silent_then_renders_a_finite_note() {
     for channel in 0..2 {
         session
             .graph()
-            .set_sources(Root::output(channel), [OutPort::new(gm.out(), channel)])
+            .set_sources(
+                MainOutput::channel(channel),
+                [OutPort::new(gm.out(), channel)],
+            )
             .unwrap();
     }
     let _ = session.update();

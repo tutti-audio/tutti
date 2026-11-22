@@ -26,7 +26,7 @@ pub enum GainSource {
     Own,
     /// The output at this index (in the list given to [`render`](crate::render()))
     /// is measured and this one takes its gain, so the two keep their
-    /// balance (stems that still sum to the master). The index must name
+    /// balance (stems that still sum to the main output). The index must name
     /// another output that normalizes by [`Own`](Self::Own).
     FromOutput(usize),
 }
@@ -340,9 +340,9 @@ impl Placement {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Feed<F: Float = f32> {
-    /// The graph's outputs (the declared root, or the engine's order for the
+    /// The graph's outputs (the declared main output, or the engine's order for the
     /// width), folded onto the target's layout.
-    Master,
+    MainOutput,
     /// A plan tap ([`Editor::open_tap`](tutti_graph::Editor::open_tap)), read
     /// after every block: its lanes are `lanes`, folded onto the target's
     /// layout.
@@ -372,9 +372,9 @@ pub struct Output<F: Float = f32> {
 impl<F: Float> Output<F> {
     /// The graph's outputs, into `target`.
     #[must_use]
-    pub fn master(target: impl Into<Target>) -> Self {
+    pub fn main_output(target: impl Into<Target>) -> Self {
         Self {
-            feed: Feed::Master,
+            feed: Feed::MainOutput,
             target: target.into(),
         }
     }

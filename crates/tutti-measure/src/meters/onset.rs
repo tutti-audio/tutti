@@ -11,7 +11,7 @@
 //! binds where the audio does: [`detect_onsets`] takes a buffer and its rate,
 //! and [`OnsetConfig::measure`] makes an [`OnsetMeter`] that takes the buffer
 //! in chunks of any length and cuts its own frames. Spectral flux and
-//! complex-domain deviation both need the previous frame, which a meter
+//! spectral distance both need the previous frame, which a meter
 //! carries, so a run cannot diff its first frame against another run's last.
 
 use core::marker::PhantomData;
@@ -26,7 +26,7 @@ use tutti_dsp::Complex64;
 use tutti_dsp::FftScratch;
 use tutti_dsp::StftGeometry;
 use tutti_dsp::{
-    bin_magnitude, complex_domain_deviation, high_frequency_content, spectral_energy, spectral_flux,
+    bin_magnitude, high_frequency_content, spectral_distance, spectral_energy, spectral_flux,
 };
 use tutti_units::ranged;
 
@@ -64,11 +64,11 @@ pub enum DetectionFunction {
     /// short decaying spikes that the spectral functions catch.
     Energy,
     /// Euclidean distance between successive magnitude spectra
-    /// ([`complex_domain_deviation`]): decreases count as well as increases,
-    /// so it catches energy moving between bins. Despite the name it reads
-    /// magnitudes only; the phase prediction of the textbook complex-domain
-    /// function is not computed.
-    ComplexDomain,
+    /// ([`spectral_distance`]): decreases count as well as increases,
+    /// so it catches energy moving between bins. It reads magnitudes only (no
+    /// phase), so it is not the phase-predicted complex-domain function of
+    /// Bello et al. (2004).
+    SpectralDistance,
 }
 
 /// Onset detection parameters. Immutable once built, and free of a sample
@@ -237,7 +237,7 @@ pub(crate) fn onset_lag(geometry: StftGeometry) -> Samples {
 /// as an item (its position and the value) and reads the onsets at
 /// [`finish`](StreamMeter::finish).
 ///
-/// Spectral flux and complex-domain deviation both need the previous frame,
+/// Spectral flux and spectral distance both need the previous frame,
 /// which the meter carries, so a run cannot diff its first frame against
 /// another run's last.
 ///
@@ -316,9 +316,9 @@ impl<S: Sample> OnsetMeter<S> {
                     store_magnitudes(previous, spectrum);
                     v
                 }
-                DetectionFunction::ComplexDomain => {
+                DetectionFunction::SpectralDistance => {
                     fft.forward(Mono::new(samples), window, spectrum);
-                    let v = complex_domain_deviation(previous, spectrum);
+                    let v = spectral_distance(previous, spectrum);
                     store_magnitudes(previous, spectrum);
                     v
                 }

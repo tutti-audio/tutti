@@ -1,5 +1,5 @@
 //! A modulation route onto the **gain of an edge** (doc 013, "Edge gain",
-//! G2): `Mods::route(source, Edge, depth)` gives the edge's sink sum a
+//! G2): `Mods::route(source, ChannelEdge, depth)` gives the edge's sink sum a
 //! driven lane, as a route onto a param gives a port one.
 //!
 //! The figures are analytic. Two constant sources sum at global output 0;
@@ -15,7 +15,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_session::{
-    Edge, GainTarget, ModTarget, OutPort, ParamRef, RangeTarget, Root, RouteSpec, Session,
+    ChannelEdge, GainTarget, MainOutput, ModTarget, OutPort, ParamRef, RangeTarget, RouteSpec,
+    Session,
 };
 use tutti_units::{Amplitude, Depth, SampleRate, UnitParam};
 
@@ -46,13 +47,13 @@ fn settle(s: &mut Session) {
 }
 
 /// The gain target of `edge`, which has a lane.
-fn gain(s: &Session, edge: Edge) -> GainTarget {
+fn gain(s: &Session, edge: ChannelEdge) -> GainTarget {
     s.graph_ref()
         .gain_target(edge.source(), edge.sink())
         .expect("a lane")
 }
 
-/// Output channel 0 (the left of the stereo root) for `blocks` blocks.
+/// Output channel 0 (the left of the stereo main output) for `blocks` blocks.
 fn render(s: &mut Session, blocks: usize) -> Vec<f32> {
     let mut all = Vec::new();
     let mut buf = vec![0.0f32; BLOCK * 2];
@@ -65,7 +66,7 @@ fn render(s: &mut Session, blocks: usize) -> Vec<f32> {
 
 /// Two always-on sources summed at output 0; the edge of the first, which has
 /// a gain lane at unity (declared with the wire).
-fn mixer(s: &mut Session) -> Edge {
+fn mixer(s: &mut Session) -> ChannelEdge {
     let level = |level| {
         ForkByClone(Pulse {
             from: 0,
@@ -76,16 +77,16 @@ fn mixer(s: &mut Session) -> Edge {
     let a = s.graph().add(level(A));
     let b = s.graph().add(level(B));
     s.graph()
-        .connect(OutPort::new(a, 0), Root::output(0))
+        .connect(OutPort::new(a, 0), MainOutput::channel(0))
         .unwrap()
         .unfaded()
         .gain(Amplitude::UNITY)
         .unwrap();
     s.graph()
-        .connect(OutPort::new(b, 0), Root::output(0))
+        .connect(OutPort::new(b, 0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
-    Edge::new(OutPort::new(a, 0), Root::output(0))
+    ChannelEdge::new(OutPort::new(a, 0), MainOutput::channel(0))
 }
 
 /// A route onto an edge's gain modulates the sum by the analytic amount. The

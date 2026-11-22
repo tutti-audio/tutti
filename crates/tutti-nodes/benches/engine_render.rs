@@ -114,7 +114,7 @@ fn chain_engine(outputs: usize) -> Engine {
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
 
     transport.settings().set_tempo(Bpm::of(120.0));
-    let _ = transport.motion().try_send(MotionCommand::Play);
+    let _ = transport.motion().send(MotionCommand::Play);
     engine
 }
 
@@ -165,7 +165,7 @@ fn bench_depth(c: &mut Criterion) {
     group.finish();
 }
 
-/// Device width. Prices the fold at the root (`Fold::fold_planar_to_interleaved`):
+/// Device width. Prices the fold at the main output (`Fold::fold_planar_to_interleaved`):
 /// the graph work is identical, only the fold width changes.
 fn bench_width(c: &mut Criterion) {
     let mut group = c.benchmark_group("width");
@@ -183,8 +183,8 @@ fn bench_width(c: &mut Criterion) {
     group.finish();
 }
 
-/// A surround root on a stereo device: the fold that narrows. The graph work is
-/// identical across the rows, only the root width (and so the fold) changes.
+/// A surround main output on a stereo device: the fold that narrows. The graph work is
+/// identical across the rows, only the main output width (and so the fold) changes.
 fn bench_to_stereo(c: &mut Criterion) {
     let mut group = c.benchmark_group("to_stereo");
     const FRAMES: usize = 256;

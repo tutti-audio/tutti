@@ -21,7 +21,7 @@ use super::state::Params;
 use super::target::{Target, TargetId, sealed, target_builders};
 use tutti_modulation::TargetKey;
 
-use crate::{Edge, ModRouteId, ModSourceId, ModTarget};
+use crate::{ChannelEdge, ModRouteId, ModSourceId, ModTarget};
 
 /// Which of the session's own values a slot target names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -80,7 +80,7 @@ pub enum SlotId {
     /// A node's mix.
     Mix(NodeKey),
     /// The gain of an edge.
-    Gain(Edge),
+    Gain(ChannelEdge),
     /// The range declared on a modulation target.
     Range(ModTarget),
     /// The automation mode the host tells a plugin.
@@ -325,7 +325,7 @@ slot_target!(
 slot_target!(
     /// Where the mix lands ([`OutputPolicy`](crate::OutputPolicy)), as
     /// `session.policy::<OutputPolicy>()` names it. A write is checked
-    /// against the device and the root now, staged, and applied by the next
+    /// against the device and the main output now, staged, and applied by the next
     /// [`Session::update`](crate::Session::update), live. It is refused with
     /// [`SetRefusal::OutputPolicy`] when it has no place.
     OutputPolicyTarget,
@@ -608,7 +608,7 @@ slot_target!(
     /// A device that enables the MIDI-CI MPE Profile (M2-120) is not under this
     /// mode: its input follows the Profile's zones and rules, in the Groups it
     /// enabled them on, until it disables the Profile or goes. The session
-    /// does that from the peer's Profile reports (`MidiReport::CiProfiles`).
+    /// does that from the peer's Profile reports (`MidiEvent::CiProfiles`).
     MpeModeTarget,
     tutti_midi_protocol::MpeMode,
     SlotId::MpeMode

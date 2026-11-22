@@ -18,7 +18,7 @@ use tutti_units::{Beat, SampleRate};
 /// # use tutti_units::{At, Bpm};
 /// # use tutti_timeline::{LoopEdit, MotionCommand, Transport};
 /// # let transport = Transport::new(tutti_units::SampleRate::SR_48K);
-/// transport.motion().try_send(MotionCommand::Play)?; // a request; may be refused
+/// transport.motion().send(MotionCommand::Play)?; // a request; may be refused
 /// transport.settings().set_tempo(Bpm::of(140.0));      // a value; cannot fail
 /// // Loop beats 0 to 4 from the next block; the engine owns the region.
 /// let range = tutti_music::LoopRange::new(tutti_units::Beat::new(0.0), tutti_units::Beat::new(4.0)).expect("ordered");
@@ -166,7 +166,7 @@ mod tests {
             Some(Bpm::of(140.0))
         );
 
-        let _ = a.motion.try_send(MotionCommand::Play);
+        let _ = a.motion.send(MotionCommand::Play);
         Audio::of(&b.motion).drain();
         assert!(a.motion.is_playing(), "the FSM is shared, not copied");
     }
@@ -193,7 +193,7 @@ mod tests {
         let t = Transport::new(SampleRate::SR_48K);
         t.settings.set_beat(Beat::new(8.0));
         t.settings.set_tempo(Bpm::of(90.0));
-        let _ = t.motion.try_send(MotionCommand::Play);
+        let _ = t.motion.send(MotionCommand::Play);
         Audio::of(&t.motion).drain();
 
         // beat/tempo come from settings, is_playing from the FSM — the reason
@@ -208,7 +208,7 @@ mod tests {
         let t = Transport::new(SampleRate::SR_48K);
         let inputs = t.links();
 
-        let _ = t.motion.try_send(MotionCommand::locate(Beat::new(4.0)));
+        let _ = t.motion.send(MotionCommand::locate(Beat::new(4.0)));
         Audio::of(&t.motion).drain();
         assert_eq!(inputs.seek.take(), Some(Beat::new(4.0)));
     }

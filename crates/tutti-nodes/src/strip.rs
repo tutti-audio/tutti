@@ -93,7 +93,7 @@ pub struct BusStripNode {
     ///
     /// A placed bus is what lets a bus edge fold into or out of the strip: a mono
     /// source reaches both sides of a stereo strip, and a stereo strip lands on the
-    /// front pair of a declared 5.1 root.
+    /// front pair of a declared 5.1 main output.
     topology: BusTopology,
     /// Each channel's side of the balance, from `topology`'s placement: built
     /// once at construction, read once per block.

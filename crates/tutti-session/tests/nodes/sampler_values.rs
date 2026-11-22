@@ -6,7 +6,7 @@
 use tutti_buffers::{ChannelLayout, Interleaved, InterleavedMut, Wave};
 use tutti_graph::NodeKey;
 use tutti_sampler::{Clip, PlayError, VoiceWindow};
-use tutti_session::{OutPort, Root, Session, ValueErrorKind};
+use tutti_session::{MainOutput, OutPort, Session, ValueErrorKind};
 use tutti_units::{Amplitude, Beat, SampleRate};
 
 const RATE: f64 = 48_000.0;
@@ -33,7 +33,7 @@ fn level(value: f32) -> Wave {
 
 /// `frames` stereo frames of the session, in 512-frame blocks, the transport
 /// as it stands.
-fn render(s: &Session, frames: usize) -> Vec<f32> {
+fn render(s: &mut Session, frames: usize) -> Vec<f32> {
     let mut out = Vec::new();
     let mut buf = vec![0.0f32; 512 * 2];
     while out.len() < frames * 2 {
@@ -52,7 +52,7 @@ fn first_sound(out: &[f32]) -> Option<usize> {
 fn wire(s: &mut Session, node: NodeKey) {
     for port in 0..2 {
         s.graph()
-            .set_sources(Root::output(port), [OutPort::new(node, port)])
+            .set_sources(MainOutput::channel(port), [OutPort::new(node, port)])
             .unwrap()
             .unfaded();
     }
@@ -116,7 +116,7 @@ fn a_window_set_is_pending_until_the_update_then_places_the_voice() {
     );
     s.play().expect("room");
     assert_eq!(
-        first_sound(&render(&s, 40_000)),
+        first_sound(&render(&mut s, 40_000)),
         None,
         "nothing before the update"
     );
@@ -127,7 +127,7 @@ fn a_window_set_is_pending_until_the_update_then_places_the_voice() {
     let _ = s.update();
     assert_eq!(*handle.window_cell().current(), beat_one);
     s.play().expect("room");
-    assert_eq!(first_sound(&render(&s, 40_000)), Some(BEAT));
+    assert_eq!(first_sound(&render(&mut s, 40_000)), Some(BEAT));
 }
 
 /// File frames of the ramp the free-running test plays. Frame `i` holds
@@ -162,7 +162,7 @@ fn placed_ramp(
 }
 
 /// The first output channel of `frames` frames.
-fn left(s: &Session, frames: usize) -> Vec<f32> {
+fn left(s: &mut Session, frames: usize) -> Vec<f32> {
     render(s, frames).chunks(2).map(|f| f[0]).collect()
 }
 
@@ -178,7 +178,7 @@ fn play_on_a_placed_voice_is_refused_and_a_free_running_one_plays_its_own_cursor
     let mut s = offline();
     let (clip, handle) = placed_ramp(&mut s);
     s.play().expect("room");
-    let placed: Vec<f32> = left(&s, 1_024);
+    let placed: Vec<f32> = left(&mut s, 1_024);
     assert!(placed.iter().enumerate().all(|(f, &x)| x == ramp_value(f)));
     assert_eq!(handle.play(), Err(PlayError::Placed));
     assert_eq!(handle.stop(), Err(PlayError::Placed));
@@ -187,11 +187,11 @@ fn play_on_a_placed_voice_is_refused_and_a_free_running_one_plays_its_own_cursor
     assert_eq!(handle.play(), Err(PlayError::Placed), "until the update");
     let _ = s.update();
     assert_eq!(handle.play(), Ok(()));
-    let mut got = left(&s, 512);
+    let mut got = left(&mut s, 512);
     assert_eq!(handle.stop(), Ok(()));
-    got.extend(left(&s, 512));
+    got.extend(left(&mut s, 512));
     assert_eq!(handle.play(), Ok(()));
-    got.extend(left(&s, RAMP_LEN));
+    got.extend(left(&mut s, RAMP_LEN));
 
     for (f, &x) in got.iter().enumerate() {
         let want = match f {
@@ -250,7 +250,7 @@ fn a_block_adopting_a_written_window_does_not_allocate() {
     let mut s = offline();
     let (clip, _) = placed(&mut s, Beat::new(2.0));
     s.play().expect("room");
-    let _ = render(&s, 1_024);
+    let _ = render(&mut s, 1_024);
     s.set(clip.window().to(Some(VoiceWindow::from(Beat::new(0.0)))))
         .unwrap();
     let _ = s.update();
@@ -311,7 +311,7 @@ impl Rig {
         let handle = handle_of(&s, &clip);
         for port in 0..2 {
             s.graph()
-                .set_sources(Root::output(port), [OutPort::new(clip.erase(), 0)])
+                .set_sources(MainOutput::channel(port), [OutPort::new(clip.erase(), 0)])
                 .unwrap()
                 .unfaded();
         }
@@ -880,10 +880,10 @@ fn a_speed_set_mid_play_continues_a_free_running_voice_from_its_cursor() {
     let _ = s.update();
     s.play().expect("room");
     assert_eq!(handle.play(), Ok(()));
-    let mut got = left(&s, 512);
+    let mut got = left(&mut s, 512);
     s.set(clip.speed().to(rate(2.0))).unwrap();
     let _ = s.update();
-    got.extend(left(&s, 1_024));
+    got.extend(left(&mut s, 1_024));
     for (f, &x) in got.iter().enumerate() {
         let source = if f < 512 { f } else { 512 + 2 * (f - 512) };
         assert_eq!(x.to_bits(), ramp_value(source).to_bits(), "frame {f}");

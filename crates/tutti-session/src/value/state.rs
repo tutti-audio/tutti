@@ -132,7 +132,7 @@ impl ValueTable {
         Some(Held { guard, token })
     }
 
-    /// The cell the graph publishes the output device and root to.
+    /// The cell the graph publishes the output device and main output to.
     pub(crate) fn output_facts(&self) -> crate::policy::FactsCell {
         Arc::clone(&self.output)
     }
@@ -290,7 +290,7 @@ impl ValueTable {
 
     /// Gives `edge` a gain target holding `seed`, unless it has one. Control
     /// thread.
-    pub(crate) fn provide_gain(&self, edge: crate::Edge, seed: tutti_units::Amplitude) {
+    pub(crate) fn provide_gain(&self, edge: crate::ChannelEdge, seed: tutti_units::Amplitude) {
         let mut params = self.params.lock_recover();
         params.slots.entry(SlotId::Gain(edge)).or_insert_with(|| {
             slot::erase(GainSlot::new(edge, seed, Arc::clone(&self.queue)) as SlotCell<_>)
@@ -298,7 +298,7 @@ impl ValueTable {
     }
 
     /// The edges that have a gain target.
-    pub(crate) fn gain_edges(&self) -> Vec<crate::Edge> {
+    pub(crate) fn gain_edges(&self) -> Vec<crate::ChannelEdge> {
         self.params
             .lock_recover()
             .slots
@@ -312,7 +312,7 @@ impl ValueTable {
 
     /// Forgets the gain target of `edge`, and what was written to it and not
     /// yet handed to the editor. Control thread.
-    pub(crate) fn retire_gain(&self, edge: crate::Edge) {
+    pub(crate) fn retire_gain(&self, edge: crate::ChannelEdge) {
         let gone = self.params.lock_recover().slots.remove(&SlotId::Gain(edge));
         self.queue.forget_edge(edge);
         drop(gone);

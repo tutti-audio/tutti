@@ -74,18 +74,19 @@ mod phases;
 #[cfg(feature = "testing")]
 mod testing;
 
-pub use observe::{Meters, NotReopened, Reopened, RootReader, Taps};
+pub use observe::{MainOutputReader, Meters, NotReopened, Reopened, Taps};
 #[cfg(feature = "testing")]
 pub use testing::{AudioSide, Testing};
 
 use crate::key::{
-    Bus, BusSink, Disconnection, Fanin, InEnd, Inlet, MainSink, OutEnd, Outlet, Removal,
+    BusSink, BusWire, Disconnection, Fanin, InEnd, Inlet, MainSink, OutEnd, Outlet, Removal,
     SetSources, Wire,
 };
 use crate::value::{GainTarget, GainTargetError, ValueTable, Write};
 use crate::{
-    ConnectError, Connection, DeclarationError, Edge, EventInPort, EventOutPort, InPort,
-    InletError, Key, NoSuchNode, OutPort, RemoveError, Root, SessionNode, SetRateError,
+    ChannelEdge, ConnectError, Connection, DeclarationError, EventInPort, EventOutPort, InPort,
+    InletError, Key, MainInput, MainOutput, NoSuchNode, OutPort, RemoveError, SessionNode,
+    SetRateError,
 };
 use tutti_rt::LockExt;
 
@@ -425,16 +426,16 @@ pub struct Graph<F: Float = f32> {
     /// capacity), so [`Taps::reopen_event`] can open it
     /// again.
     event_taps: BTreeMap<EventTapId, (tutti_graph::EventTapSource, tutti_graph::EventTapOptions)>,
-    /// The master meter's reader until a host takes it.
-    master_meter: Option<MeterReader>,
-    /// The master meter's id: the one meter that reads the root.
-    master_meter_id: MeterId,
-    /// Each open tap on the root ([`Taps::open_root`]) with its capacity and
-    /// the width its reader has, so a root of another width opens it again.
+    /// The main output meter's reader until a host takes it.
+    main_output_meter: Option<MeterReader>,
+    /// The main output meter's id: the one meter that reads the main output.
+    main_output_meter_id: MeterId,
+    /// Each open tap on the main output ([`Taps::open_main_output`]) with its capacity and
+    /// the width its reader has, so a main output of another width opens it again.
     output_taps: BTreeMap<TapId, (Samples, usize)>,
-    /// The readers the root's width opened again, each held under its id until
+    /// The readers the main output's width opened again, each held under its id until
     /// claimed ([`Graph::take_reopened`]).
-    reopened: BTreeMap<RootReader, observe::Held<F>>,
+    reopened: BTreeMap<MainOutputReader, observe::Held<F>>,
     /// Crossfades refused `Busy`, in request order.
     parked: VecDeque<Parked<F>>,
     /// The nodes whose waiting replacements a removal dropped, until the
@@ -451,30 +452,30 @@ pub struct Graph<F: Float = f32> {
     /// The nodes the graph's removal took out since the session last
     /// forgot what it declared on them ([`Graph::take_removed`]).
     removed: Vec<NodeKey>,
-    /// What the root's channels are, when a host declared it
-    /// ([`Session::declare_root_topology`](crate::Session::declare_root_topology));
-    /// `None` is the engine's order for the root's width.
-    root: Option<tutti_buffers::ChannelTopology>,
+    /// What the main output's channels are, when a host declared it
+    /// ([`Session::declare_main_output_topology`](crate::Session::declare_main_output_topology));
+    /// `None` is the engine's order for the main output's width.
+    main_output: Option<tutti_buffers::ChannelTopology>,
     /// The engine's output folds and the device it renders into, once an
     /// engine was built over this graph: a declaration is published through
     /// it, and a commit must fold into the device. One value, so a graph has
     /// folds to publish exactly when it has a device to place them on; a
-    /// graph with no engine has neither, and nothing folds its root.
+    /// graph with no engine has neither, and nothing folds its main output.
     output: Option<Placed<F>>,
     /// What the nodes logged on the audio thread, once an engine renders the
     /// graph: drained by the session's reclaim sweep ([`Graph::drain_rt_log`]).
     rt_log: Option<tutti_graph::RtLogReaders>,
     /// The last widening [`widen_outputs`](Self::widen_outputs) refused.
-    widen_refusal: Option<tutti_graph::RootError>,
-    /// Why the declaration that waited for a root crossfade, or a hard one
-    /// made through [`harden_root`](Self::harden_root), could not be applied;
+    widen_refusal: Option<tutti_graph::MainOutputError>,
+    /// Why the declaration that waited for a main output crossfade, or a hard one
+    /// made through [`harden_main_output`](Self::harden_main_output), could not be applied;
     /// the session takes it as its declaration refusal
     /// ([`take_apply_refusal`](Self::take_apply_refusal)). A slot of its own,
     /// so a widening neither hides nor erases it.
-    apply_refusal: Option<tutti_graph::RootError>,
-    /// A root declared while a root crossfade ran, applied when it ends:
+    apply_refusal: Option<tutti_graph::MainOutputError>,
+    /// A main output declared while a main output crossfade ran, applied when it ends:
     /// the newest declaration (`Some(None)` takes the declaration back).
-    pending_root: Option<Option<tutti_buffers::ChannelTopology>>,
+    pending_main_output: Option<Option<tutti_buffers::ChannelTopology>>,
     /// The hosted plugins' records, by node (`plugin.rs`): kept here so a
     /// crossfade to another plugin and a removal update them where they
     /// happen.
@@ -510,7 +511,7 @@ pub struct Graph<F: Float = f32> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Unwiring {
     pub(crate) node: NodeKey,
-    pub(crate) edges: Vec<Edge>,
+    pub(crate) edges: Vec<ChannelEdge>,
     pub(crate) event_edges: Vec<crate::EventEdge>,
     pub(crate) bus_edges: Vec<(BusSource, BusSink)>,
 }
@@ -620,15 +621,15 @@ impl<F: Float> Graph<F> {
         let topology = &mut editor.spec_mut().topology;
         topology.inputs = inputs;
         topology.set_outputs(vec![PortSource::Zero; outputs]);
-        // Declared and on from the start: a host reads the master level
+        // Declared and on from the start: a host reads the main output level
         // without asking for it.
         // `Outputs` names no source, so the open cannot be refused.
         let ids = Mint::new();
-        let master_meter_id = MeterId::mint(&ids);
-        let master_meter = editor
-            .open_meter(master_meter_id, MeterSpec::Outputs)
-            .expect("a master meter names no source");
-        master_meter.enable();
+        let main_output_meter_id = MeterId::mint(&ids);
+        let main_output_meter = editor
+            .open_meter(main_output_meter_id, MeterSpec::Outputs)
+            .expect("a main output meter names no source");
+        main_output_meter.enable();
         Self {
             editor,
             local: Some(Box::new(Local {
@@ -647,8 +648,8 @@ impl<F: Float> Graph<F> {
             fed_edges: BTreeMap::new(),
             ids,
             event_taps: BTreeMap::new(),
-            master_meter: Some(master_meter),
-            master_meter_id,
+            main_output_meter: Some(main_output_meter),
+            main_output_meter_id,
             output_taps: BTreeMap::new(),
             reopened: BTreeMap::new(),
             parked: VecDeque::new(),
@@ -656,12 +657,12 @@ impl<F: Float> Graph<F> {
             unwired: Vec::new(),
             rewired: Vec::new(),
             removed: Vec::new(),
-            root: None,
+            main_output: None,
             output: None,
             rt_log: None,
             widen_refusal: None,
             apply_refusal: None,
-            pending_root: None,
+            pending_main_output: None,
             #[cfg(feature = "plugin")]
             plugins: BTreeMap::new(),
             #[cfg(feature = "plugin")]
@@ -1352,14 +1353,14 @@ impl Graph {
 }
 
 impl<F: Float> Graph<F> {
-    /// The control-thread half of a copy of the master for an offline render
+    /// The control-thread half of a copy of the main output for an offline render
     /// at `rate`, sharing no state with this graph: `Editor::fork_gather`
     /// with `ForkMode::Offline`, prepared as a bounce is
     /// (`RenderGraph::prepare`). [`PendingExport::build`] makes the rest on a
     /// worker.
     ///
     /// The fork renders on the session's render pool unless `serial`, and
-    /// places the master's channels by `root`: the session's declared root, the
+    /// places the main output's channels by `main_output`: the session's declared main output, the
     /// engine's order for the width, or the bounce's own topology.
     ///
     /// # Errors
@@ -1371,12 +1372,12 @@ impl<F: Float> Graph<F> {
         &self,
         rate: SampleRate,
         serial: bool,
-        root: crate::bounce::RootChoice,
+        main_output: crate::bounce::MainOutputChoice,
     ) -> tutti_export::Result<PendingExport<F>> {
-        let root = match root {
-            crate::bounce::RootChoice::Session => self.root.clone(),
-            crate::bounce::RootChoice::Engine => None,
-            crate::bounce::RootChoice::Placed(topology) => Some(topology),
+        let main_output = match main_output {
+            crate::bounce::MainOutputChoice::Session => self.main_output.clone(),
+            crate::bounce::MainOutputChoice::Engine => None,
+            crate::bounce::MainOutputChoice::Placed(topology) => Some(topology),
         };
         // Its own pool, not the live engine's: the live callback would find a
         // shared one busy with the bounce's job and render alone. No start
@@ -1389,10 +1390,10 @@ impl<F: Float> Graph<F> {
         };
         PendingExport::gather(
             &self.editor,
-            tutti_graph::ForkTarget::Master,
+            tutti_graph::ForkTarget::MainOutput,
             rate,
             pool,
-            root,
+            main_output,
         )
     }
 }
@@ -1698,7 +1699,7 @@ impl<F: Float> Graph<F> {
         if unwired.is_empty() {
             return;
         }
-        let mut edges: Vec<Edge> = Vec::new();
+        let mut edges: Vec<ChannelEdge> = Vec::new();
         for id in &unwired.edges {
             // A feedback edge is reported as the pair of ports it joins.
             let source = match id.from {
@@ -1709,7 +1710,7 @@ impl<F: Float> Graph<F> {
             let Some(from) = OutPort::of_source(source) else {
                 continue;
             };
-            let edge = Edge::new(from, InPort::of_sink(id.sink));
+            let edge = ChannelEdge::new(from, InPort::of_sink(id.sink));
             if !edges.contains(&edge) {
                 edges.push(edge);
             }
@@ -1734,9 +1735,9 @@ impl<F: Float> Graph<F> {
             .map(|(to, feed)| (feed.source, BusSink::Node(*to)))
             .chain(
                 unwired
-                    .root_buses
+                    .main_output_buses
                     .iter()
-                    .map(|feed| (feed.source, BusSink::Root)),
+                    .map(|feed| (feed.source, BusSink::MainOutput)),
             );
         for wire in named {
             if !bus_edges.contains(&wire) {
@@ -2324,7 +2325,7 @@ impl<F: Float> Graph<F> {
         self.editor.spec().topology.nodes.contains_key(&node) && !self.editor.is_leaving(node)
     }
 
-    /// Whether `node` is in what a bounce of the master forks: an output
+    /// Whether `node` is in what a bounce of the main output forks: an output
     /// reads it, or it feeds one that is read. A bounce's stem names such a
     /// node. A graph whose bus edges do not lower reaches none.
     #[cfg(feature = "export")]
@@ -2424,7 +2425,7 @@ impl<F: Float> Graph<F> {
             .collect()
     }
 
-    /// The graph's raw input port of a node's [`InPort`], `None` for a root
+    /// The graph's raw input port of a node's [`InPort`], `None` for a main output
     /// channel or an index no port has.
     fn raw_in(port: InPort) -> Option<RawIn> {
         match port.end() {
@@ -2438,7 +2439,7 @@ impl<F: Float> Graph<F> {
 
     /// The graph's name for `edge`: a direct one, `None` for an index no
     /// port has.
-    pub(crate) fn edge_id(edge: Edge) -> Option<EdgeId> {
+    pub(crate) fn edge_id(edge: ChannelEdge) -> Option<EdgeId> {
         let sink = match edge.sink().end() {
             InEnd::Node(..) => PortSink::Port(Self::raw_in(edge.sink())?),
             InEnd::Output(channel) => PortSink::Output(u16::try_from(channel).ok()?),
@@ -2457,7 +2458,7 @@ impl<F: Float> Graph<F> {
                 .nodes
                 .contains_key(&p.node)
                 .then(|| OutPort::new(p.node, usize::from(p.port))),
-            PortSource::Global(port) => Some(Root::input(usize::from(port))),
+            PortSource::Global(port) => Some(MainInput::channel(usize::from(port))),
             PortSource::Zero => None,
         }
     }
@@ -2507,7 +2508,7 @@ impl<F: Float> Graph<F> {
     pub(crate) fn add_edge(&mut self, from: OutPort, to: InPort) -> Result<bool, ConnectError> {
         self.check_wire(from, to)?;
         let source = Self::raw_source(from).expect("checked: the port fits");
-        let id = Self::edge_id(Edge::new(from, to)).expect("checked: the ports fit");
+        let id = Self::edge_id(ChannelEdge::new(from, to)).expect("checked: the ports fit");
         let leaving = self.fading_out(id);
         let topology = &mut self.editor.spec_mut().topology;
         let added = match to.end() {
@@ -2537,7 +2538,7 @@ impl<F: Float> Graph<F> {
     /// Makes the edge `edge` a plain, unfaded connection: no fade in or out
     /// (and no entry, when the fade was all it carried). The step
     /// [`Connection::unfaded`](crate::Connection::unfaded) takes.
-    pub(crate) fn harden_edge(&mut self, edge: Edge) {
+    pub(crate) fn harden_edge(&mut self, edge: ChannelEdge) {
         let Some(id) = Self::edge_id(edge) else {
             return;
         };
@@ -2566,7 +2567,7 @@ impl<F: Float> Graph<F> {
     /// leaves the spec when the fade ends (`Editor::finish_fades`), and one
     /// already fading out is not there.
     pub(crate) fn remove_edge(&mut self, from: OutPort, to: InPort, hard: bool) -> bool {
-        match Self::edge_id(Edge::new(from, to)) {
+        match Self::edge_id(ChannelEdge::new(from, to)) {
             Some(id) => self.drop_edge(id, hard),
             None => false,
         }
@@ -2729,7 +2730,7 @@ impl<F: Float> Graph<F> {
         for (_, port) in want {
             self.add_edge(port, to)?;
             if hard {
-                self.harden_edge(Edge::new(port, to));
+                self.harden_edge(ChannelEdge::new(port, to));
             }
         }
         Ok(cut)
@@ -2749,24 +2750,24 @@ impl<F: Float> Graph<F> {
     /// What the two ends are says what is connected:
     ///
     /// - an [`OutPort`] into an [`InPort`]: **one channel**
-    ///   ([`Root::output`] is the root's channel, [`Root::input`] a global
+    ///   ([`MainOutput::channel`] is the main output's channel, [`MainInput::channel`] a main
     ///   input);
-    /// - a [`Key`] (or [`NodeKey`]) into a key, or into [`Root`]: **a main
+    /// - a [`Key`] (or [`NodeKey`]) into a key, or into [`MainOutput`]: **a main
     ///   bus**, channel `c` of the source into channel `c` of the sink. The two
-    ///   must be the same width. A bus into the root may be narrower than it:
-    ///   it is placed by speaker, on the topology the root was declared with,
-    ///   else on the engine's order for the root's width
+    ///   must be the same width. A bus into the main output may be narrower than it:
+    ///   it is placed by speaker, on the topology the main output was declared with,
+    ///   else on the engine's order for the main output's width
     ///   ([`fold_to_width`](tutti_graph::fold_to_width)), so a mono source
-    ///   feeds both channels of a stereo root at gain 1.0. A placement that
-    ///   would weight a channel (a centre into a root with none) is refused:
+    ///   feeds both channels of a stereo main output at gain 1.0. A placement that
+    ///   would weight a channel (a centre into a main output with none) is refused:
     ///   a weighted fold is a bus edge. A connection never truncates;
     /// - a [`BusSource`] into a [`BusRef`] (`key.bus_out(i)`,
-    ///   `key.bus_in(i)`) or into [`Root`]: **a bus edge**, a fold between two
+    ///   `key.bus_in(i)`) or into [`MainOutput`]: **a bus edge**, a fold between two
     ///   declared topologies, lowered at the commit to one weighted lane per
     ///   contribution (`Fold::contributions`) and summed with any other source
-    ///   of the sink's ports. Into the root it folds to the topology the root
+    ///   of the sink's ports. Into the main output it folds to the topology the main output
     ///   was declared with
-    ///   ([`Session::declare_root_topology`](crate::Session::declare_root_topology)).
+    ///   ([`Session::declare_main_output_topology`](crate::Session::declare_main_output_topology)).
     ///   Its lanes carry the fold's weights and no gain of their own;
     /// - an [`EventOutPort`] into an [`EventInPort`] (`key.events_out()`,
     ///   `key.events_in()`): **an event edge**. Events merge by offset at the
@@ -2837,7 +2838,7 @@ impl<F: Float> Graph<F> {
         let was = self.editor.spec().bus_fade(from, at);
         match to {
             BusSink::Node(to) => self.editor.connect_bus(from, to),
-            BusSink::Root => self.editor.connect_bus_to_root(from),
+            BusSink::MainOutput => self.editor.connect_bus_to_main_output(from),
         }?;
         // A new bus edge, or one on its way out, fades in: each lane of its
         // fold does.
@@ -2851,7 +2852,7 @@ impl<F: Float> Graph<F> {
     fn bus_sink(to: BusSink) -> Option<BusRef> {
         match to {
             BusSink::Node(bus) => Some(bus),
-            BusSink::Root => None,
+            BusSink::MainOutput => None,
         }
     }
 
@@ -2870,7 +2871,7 @@ impl<F: Float> Graph<F> {
         }
         let removed = match to {
             BusSink::Node(to) => self.editor.disconnect_bus(from, to),
-            BusSink::Root => self.editor.disconnect_bus_from_root(from),
+            BusSink::MainOutput => self.editor.disconnect_bus_from_main_output(from),
         };
         self.edited |= removed;
         removed
@@ -2886,13 +2887,13 @@ impl<F: Float> Graph<F> {
         }
     }
 
-    /// What feeds a bus edge's sink (an input bus of a node, or the root), in
+    /// What feeds a bus edge's sink (an input bus of a node, or the main output), in
     /// source order. An edge fading out is no longer a source.
     ///
     /// # Errors
     ///
     /// [`ConnectError::NoSuchNode`] when the bus's node is not in the graph.
-    pub fn bus_sources(&self, to: impl Inlet<Bus>) -> Result<Vec<BusSource>, ConnectError> {
+    pub fn bus_sources(&self, to: impl Inlet<BusWire>) -> Result<Vec<BusSource>, ConnectError> {
         let to = to.sink();
         if let BusSink::Node(bus) = to
             && !self.contains(bus.node)
@@ -2902,7 +2903,7 @@ impl<F: Float> Graph<F> {
         let spec = self.editor.spec();
         let feeds = match to {
             BusSink::Node(bus) => spec.bus_edges.get(&bus),
-            BusSink::Root => Some(&spec.root_sources),
+            BusSink::MainOutput => Some(&spec.main_output_sources),
         };
         Ok(feeds.map_or_else(Vec::new, |feeds| {
             feeds
@@ -2929,7 +2930,7 @@ impl<F: Float> Graph<F> {
     }
 
     /// The `(output port, input port)` pairs that connect `from`'s main
-    /// output to `to`'s main input (or the root's outputs), checked.
+    /// output to `to`'s main input (or the main output's outputs), checked.
     pub(crate) fn main_wires(
         &self,
         from: NodeKey,
@@ -2972,21 +2973,21 @@ impl<F: Float> Graph<F> {
                     })
                     .collect())
             }
-            MainSink::Root => {
-                let root_width = self.outputs();
-                if out_width > root_width {
-                    return Err(ConnectError::RootNarrow {
+            MainSink::MainOutput => {
+                let main_output_width = self.outputs();
+                if out_width > main_output_width {
+                    return Err(ConnectError::MainOutputNarrow {
                         from,
                         from_width: out_width,
-                        root_width,
+                        main_output_width,
                     });
                 }
-                if out_width == root_width {
+                if out_width == main_output_width {
                     return Ok((0..out_width)
-                        .map(|c| (OutPort::new(from, out_first + c), Root::output(c)))
+                        .map(|c| (OutPort::new(from, out_first + c), MainOutput::channel(c)))
                         .collect());
                 }
-                // A narrower bus is placed on the root by speaker: the root's
+                // A narrower bus is placed on the main output by speaker: the main output's
                 // declared topology, else the engine's order for its width. A
                 // bus that names no speaker is read in the engine's order for
                 // its width.
@@ -2996,23 +2997,24 @@ impl<F: Float> Graph<F> {
                 } else {
                     source
                 };
-                let fold = match self.root_topology() {
-                    Some(root) => tutti_buffers::Fold::<f32>::between(&placed, root),
+                let fold = match self.main_output_topology() {
+                    Some(main_output) => tutti_buffers::Fold::<f32>::between(&placed, main_output),
                     None => tutti_graph::fold_to_width(
                         &placed,
-                        // The root's width is a `ChannelLayout`'s: every call
+                        // The main output's width is a `ChannelLayout`'s: every call
                         // that sizes it takes one.
-                        ChannelLayout::try_from(root_width).expect("a root width fits a layout"),
+                        ChannelLayout::try_from(main_output_width)
+                            .expect("a main output width fits a layout"),
                     ),
                 }
-                .map_err(|cause| ConnectError::RootFold { from, cause })?;
+                .map_err(|cause| ConnectError::MainOutputFold { from, cause })?;
                 let mut wires = Vec::new();
-                for c in 0..root_width {
+                for c in 0..main_output_width {
                     for (k, weight) in fold.contributions(c) {
                         if weight != 1.0 {
-                            return Err(ConnectError::RootWeighted { from });
+                            return Err(ConnectError::MainOutputWeighted { from });
                         }
-                        wires.push((OutPort::new(from, out_first + k), Root::output(c)));
+                        wires.push((OutPort::new(from, out_first + k), MainOutput::channel(c)));
                     }
                 }
                 Ok(wires)
@@ -3027,7 +3029,7 @@ impl<F: Float> Graph<F> {
     /// [`GainTarget`]'s.
     pub(crate) fn declare_edge_gain(
         &mut self,
-        edge: Edge,
+        edge: ChannelEdge,
         gain: Amplitude,
     ) -> Result<(), DeclarationError> {
         if !gain.get().is_finite() {
@@ -3051,7 +3053,7 @@ impl<F: Float> Graph<F> {
 
     /// Whether `edge` still has the gain lane its target was made for: it is
     /// in the graph, not fading out, and holds an entry.
-    fn has_gain_lane(&self, edge: Edge) -> bool {
+    fn has_gain_lane(&self, edge: ChannelEdge) -> bool {
         let ends = [edge.source().node(), edge.sink().node()];
         ends.into_iter()
             .flatten()
@@ -3079,7 +3081,7 @@ impl<F: Float> Graph<F> {
     /// [`GainTargetError::NoLane`] when the edge is not in the graph or has
     /// no gain lane, [`GainTargetError::BusLane`] for a lane of a bus edge.
     pub fn gain_target(&self, from: OutPort, to: InPort) -> Result<GainTarget, GainTargetError> {
-        let edge = Edge::new(from, to);
+        let edge = ChannelEdge::new(from, to);
         let id = Self::edge_id(edge).ok_or(GainTargetError::NoLane(edge))?;
         match self.editor.check_gain_edge(id) {
             Ok(()) => {}
@@ -3094,7 +3096,7 @@ impl<F: Float> Graph<F> {
         Ok(GainTarget::new(edge))
     }
 
-    pub(crate) fn clear_edge_gain_of(&mut self, edge: Edge) -> bool {
+    pub(crate) fn clear_edge_gain_of(&mut self, edge: ChannelEdge) -> bool {
         let Some(id) = Self::edge_id(edge) else {
             return false;
         };
@@ -3289,8 +3291,8 @@ impl<F: Float> Graph<F> {
             // A held reader keeps its tap alive, and a claimed one has left the map.
             debug_assert!(
                 self.reopened.keys().all(|id| match id {
-                    RootReader::Tap(tap) => open.contains_key(tap),
-                    RootReader::Meter(_) => true,
+                    MainOutputReader::Tap(tap) => open.contains_key(tap),
+                    MainOutputReader::Meter(_) => true,
                 }),
                 "no held reader names a pruned tap"
             );
@@ -3320,8 +3322,8 @@ impl<F: Float> Graph<F> {
             // A held reader keeps its meter alive, and a claimed one has left the map.
             debug_assert!(
                 self.reopened.keys().all(|id| match id {
-                    RootReader::Meter(meter) => open.contains_key(meter),
-                    RootReader::Tap(_) => true,
+                    MainOutputReader::Meter(meter) => open.contains_key(meter),
+                    MainOutputReader::Tap(_) => true,
                 }),
                 "no held reader names a pruned meter"
             );
@@ -3411,39 +3413,39 @@ impl<F: Float> Graph<F> {
     /// Never narrows.
     ///
     /// Two requests are refused, and the refusal is returned and kept
-    /// ([`Session::root_topology_status`](crate::Session::root_topology_status)):
+    /// ([`Session::main_output_topology_status`](crate::Session::main_output_topology_status)):
     ///
-    /// - on a root whose topology was declared
-    ///   ([`Session::declare_root_topology`](crate::Session::declare_root_topology)),
-    ///   anything wider than the declaration: the root is not widened under
-    ///   it ([`RootError::Width`](tutti_graph::RootError::Width));
-    /// - past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS): the root keeps
+    /// - on a main output whose topology was declared
+    ///   ([`Session::declare_main_output_topology`](crate::Session::declare_main_output_topology)),
+    ///   anything wider than the declaration: the main output is not widened under
+    ///   it ([`MainOutputError::Width`](tutti_graph::MainOutputError::Width));
+    /// - past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS): the main output keeps
     ///   its width
     ///   ([`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced), the first
     ///   channel with no place).
     ///
     /// A refused request changes nothing.
     ///
-    /// A request for as many or fewer channels than the root has is a no-op.
+    /// A request for as many or fewer channels than the main output has is a no-op.
     ///
     /// # Errors
     ///
     /// As above.
-    pub fn widen_outputs(&mut self, channels: usize) -> Result<(), tutti_graph::RootError> {
-        let refused = if let Some(root) = self
-            .root
+    pub fn widen_outputs(&mut self, channels: usize) -> Result<(), tutti_graph::MainOutputError> {
+        let refused = if let Some(main_output) = self
+            .main_output
             .as_ref()
             .filter(|r| channels > usize::from(r.width().count()))
         {
-            Some(tutti_graph::RootError::Width {
-                declared: root.width(),
+            Some(tutti_graph::MainOutputError::Width {
+                declared: main_output.width(),
                 // Only the report names the request; one past `u16::MAX` is
                 // refused either way (it is past `MAX_CHANNELS`), so the
                 // saturated figure loses nothing.
                 requested: ChannelLayout::clamped(channels),
             })
         } else if channels > tutti_buffers::MAX_CHANNELS {
-            Some(tutti_graph::RootError::Fold(
+            Some(tutti_graph::MainOutputError::Fold(
                 tutti_buffers::FoldError::Unplaced {
                     channel: tutti_buffers::MAX_CHANNELS,
                     speaker: tutti_buffers::Speaker::Unassigned,
@@ -3466,27 +3468,27 @@ impl<F: Float> Graph<F> {
 
     /// The last widening [`widen_outputs`](Self::widen_outputs) refused, until
     /// a request is not or a declaration is made.
-    pub(crate) fn widen_refusal(&self) -> Option<tutti_graph::RootError> {
+    pub(crate) fn widen_refusal(&self) -> Option<tutti_graph::MainOutputError> {
         self.widen_refusal
     }
 
-    /// The generation of the root the next commit carries
-    /// ([`RootId`](tutti_graph::RootId)); a restart names it.
+    /// The generation of the main output the next commit carries
+    /// ([`MainOutputId`](tutti_graph::MainOutputId)); a restart names it.
     #[cfg(feature = "device")]
-    pub(crate) fn root_id(&self) -> tutti_graph::RootId {
-        self.editor.spec().root_id
+    pub(crate) fn main_output_id(&self) -> tutti_graph::MainOutputId {
+        self.editor.spec().main_output_id
     }
 
-    /// The topology the root was declared with, if one was.
-    pub fn root_topology(&self) -> Option<&tutti_buffers::ChannelTopology> {
-        self.root.as_ref()
+    /// The topology the main output was declared with, if one was.
+    pub fn main_output_topology(&self) -> Option<&tutti_buffers::ChannelTopology> {
+        self.main_output.as_ref()
     }
 
-    /// Declares what the root's channels are, and sizes the root to it: the
-    /// root becomes exactly as wide as `root` (widened, or narrowed, its
+    /// Declares what the main output's channels are, and sizes the main output to it: the
+    /// main output becomes exactly as wide as `main_output` (widened, or narrowed, its
     /// channels past the new width dropped), since a declaration states the
-    /// root and the device is no floor under it. `None` takes it back and leaves
-    /// the root at its width.
+    /// main output and the device is no floor under it. `None` takes it back and leaves
+    /// the main output at its width.
     ///
     /// `device` is the width the engine renders into, when there is one: a
     /// declaration it cannot place is refused before anything changes. The
@@ -3499,22 +3501,22 @@ impl<F: Float> Graph<F> {
     /// renders ([`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS),
     /// [`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced)), or cannot be placed on `device`. Nothing is
     /// changed.
-    /// Whether `root` can be a root, and be placed on `device` when there is
+    /// Whether `main_output` can be a main output, and be placed on `device` when there is
     /// one: not empty, no wider than the engine renders, and every channel
     /// has a place on the device ([`fold_to_width`](tutti_graph::fold_to_width)).
-    pub(crate) fn check_root(
-        root: &tutti_buffers::ChannelTopology,
+    pub(crate) fn check_main_output(
+        main_output: &tutti_buffers::ChannelTopology,
         device: Option<&tutti_buffers::ChannelTopology>,
     ) -> Result<(), tutti_buffers::FoldError> {
         use tutti_buffers::{BufferError, FoldError};
-        let width = usize::from(root.width().count());
+        let width = usize::from(main_output.width().count());
         if width == 0 {
             return Err(BufferError::ZeroWidth.into());
         }
         if width > tutti_buffers::MAX_CHANNELS {
             return Err(FoldError::Unplaced {
                 channel: tutti_buffers::MAX_CHANNELS,
-                speaker: root
+                speaker: main_output
                     .positions()
                     .and_then(|list| list.get(tutti_buffers::MAX_CHANNELS))
                     .copied()
@@ -3522,7 +3524,7 @@ impl<F: Float> Graph<F> {
             });
         }
         if let Some(device) = device {
-            tutti_graph::fold_to_topology::<f32>(root, device)?;
+            tutti_graph::fold_to_topology::<f32>(main_output, device)?;
         }
         Ok(())
     }
@@ -3544,16 +3546,16 @@ impl<F: Float> Graph<F> {
         Some((placed.device, self.placed_topology()?))
     }
 
-    /// Publishes the device and the root the output policy is checked
+    /// Publishes the device and the main output the output policy is checked
     /// against ([`placed_device`](Self::placed_device),
-    /// [`root_in_force`](Self::root_in_force)), after any of them changed.
+    /// [`main_output_in_force`](Self::main_output_in_force)), after any of them changed.
     fn publish_output_facts(&self) {
         let facts = self
             .placed_device()
             .map(|(device, placed)| crate::policy::OutputFacts {
                 device,
                 placed,
-                root: self.root_in_force(),
+                main_output: self.main_output_in_force(),
             });
         *self.values.output_facts().lock_recover() = facts;
     }
@@ -3563,10 +3565,10 @@ impl<F: Float> Graph<F> {
         self.output.as_ref().map(|placed| &placed.control)
     }
 
-    /// The root the next commit renders: what was declared, else the engine's
+    /// The main output the next commit renders: what was declared, else the engine's
     /// order for the width the graph has.
-    pub(crate) fn root_in_force(&self) -> tutti_buffers::ChannelTopology {
-        self.root.clone().unwrap_or_else(|| {
+    pub(crate) fn main_output_in_force(&self) -> tutti_buffers::ChannelTopology {
+        self.main_output.clone().unwrap_or_else(|| {
             tutti_buffers::ChannelTopology::default_for(ChannelLayout::clamped(self.outputs()))
         })
     }
@@ -3582,7 +3584,7 @@ impl<F: Float> Graph<F> {
     }
 
     /// Moves the engine to a new output device of `device` channels, stated
-    /// as `topology` or the engine's order for the width, folding every root
+    /// as `topology` or the engine's order for the width, folding every main output
     /// published into it. A restart's step; a graph with no engine has no
     /// device to move.
     ///
@@ -3605,94 +3607,94 @@ impl<F: Float> Graph<F> {
         Ok(())
     }
 
-    /// Makes the root declaration last made a cut: the commit that carries
-    /// it renders no old root. A declaration that waits for a running
+    /// Makes the main output declaration last made a cut: the commit that carries
+    /// it renders no old main output. A declaration that waits for a running
     /// crossfade is applied now instead, and is the cut.
-    pub(crate) fn harden_root(&mut self) {
-        match self.pending_root.take() {
-            Some(root) => self.apply_declared(root, true),
-            None => self.editor.set_root_fade(None),
+    pub(crate) fn harden_main_output(&mut self) {
+        match self.pending_main_output.take() {
+            Some(main_output) => self.apply_declared(main_output, true),
+            None => self.editor.set_main_output_fade(None),
         }
     }
 
-    /// Whether a root declaration waits for the running crossfade to end.
-    pub(crate) fn root_pending(&self) -> bool {
-        self.pending_root.is_some()
+    /// Whether a main output declaration waits for the running crossfade to end.
+    pub(crate) fn main_output_pending(&self) -> bool {
+        self.pending_main_output.is_some()
     }
 
     /// The refusal of a declaration when it was applied, taken: the session
     /// holds it as its own. See [`apply_refusal`](Self).
-    pub(crate) fn take_apply_refusal(&mut self) -> Option<tutti_graph::RootError> {
+    pub(crate) fn take_apply_refusal(&mut self) -> Option<tutti_graph::MainOutputError> {
         self.apply_refusal.take()
     }
 
     /// The refusal of a declaration when it was applied, not yet taken.
-    pub(crate) fn apply_refusal(&self) -> Option<tutti_graph::RootError> {
+    pub(crate) fn apply_refusal(&self) -> Option<tutti_graph::MainOutputError> {
         self.apply_refusal
     }
 
     /// Applies the declaration that waited, once the crossfade it waited for
     /// is over: the spec, the readers and the announcement change together.
-    /// A refusal now (the device no longer places it, the roots in flight are
+    /// A refusal now (the device no longer places it, the main outputs in flight are
     /// at their limit) is [`take_apply_refusal`](Self::take_apply_refusal)'s.
-    fn apply_pending_root(&mut self) {
-        if self.editor.root_fade_running() {
+    fn apply_pending_main_output(&mut self) {
+        if self.editor.main_output_fade_running() {
             return;
         }
-        if let Some(root) = self.pending_root.take() {
-            self.apply_declared(root, false);
+        if let Some(main_output) = self.pending_main_output.take() {
+            self.apply_declared(main_output, false);
         }
     }
 
-    fn apply_declared(&mut self, root: Option<tutti_buffers::ChannelTopology>, hard: bool) {
+    fn apply_declared(&mut self, main_output: Option<tutti_buffers::ChannelTopology>, hard: bool) {
         let applied = self
-            .check_declaration(&root)
-            .and_then(|width| self.apply_root(root, hard, width));
+            .check_declaration(&main_output)
+            .and_then(|width| self.apply_main_output(main_output, hard, width));
         if let Err(e) = applied {
             self.apply_refusal = Some(e);
         }
     }
 
-    /// Declares the root's topology. A declaration that changes it is the next
-    /// root, and the commit that carries it crossfades the old root's outputs
-    /// into the new root's over the declick length (`Editor::set_root_fade`),
-    /// unless `hard`: the new root takes over at the commit's block.
+    /// Declares the main output's topology. A declaration that changes it is the next
+    /// main output, and the commit that carries it crossfades the old main output's outputs
+    /// into the new main output's over the declick length (`Editor::set_main_output_fade`),
+    /// unless `hard`: the new main output takes over at the commit's block.
     ///
-    /// While a root crossfade runs, a declaration that is not `hard` is held
+    /// While a main output crossfade runs, a declaration that is not `hard` is held
     /// (checked now, applied by [`collect`](Self::collect) once the fade is
     /// over, the newest replacing an older one): the spec, the readers and the
-    /// root in force do not change until then. A declaration refused at the
+    /// main output in force do not change until then. A declaration refused at the
     /// call drops nothing: the one waiting still applies. The fade is over
     /// when the executor has rendered it, so a held declaration also waits
     /// while no blocks render, and travels with the graph through a restart,
     /// to be checked against the device it finds when it is applied.
-    pub(crate) fn declare_root(
+    pub(crate) fn declare_main_output(
         &mut self,
-        root: Option<tutti_buffers::ChannelTopology>,
+        main_output: Option<tutti_buffers::ChannelTopology>,
         hard: bool,
-    ) -> Result<(), tutti_graph::RootError> {
-        let width = self.check_declaration(&root)?;
-        if !hard && self.editor.root_fade_running() {
-            self.pending_root = Some(root);
+    ) -> Result<(), tutti_graph::MainOutputError> {
+        let width = self.check_declaration(&main_output)?;
+        if !hard && self.editor.main_output_fade_running() {
+            self.pending_main_output = Some(main_output);
             self.apply_refusal = None;
             return Ok(());
         }
-        self.pending_root = None;
+        self.pending_main_output = None;
         self.apply_refusal = None;
-        self.apply_root(root, hard, width)
+        self.apply_main_output(main_output, hard, width)
     }
 
-    /// The width of the root `root` declares, if it can be placed on the
-    /// device: [`declare_root`](Self::declare_root)'s checks.
+    /// The width of the main output `main_output` declares, if it can be placed on the
+    /// device: [`declare_main_output`](Self::declare_main_output)'s checks.
     fn check_declaration(
         &self,
-        root: &Option<tutti_buffers::ChannelTopology>,
-    ) -> Result<usize, tutti_graph::RootError> {
+        main_output: &Option<tutti_buffers::ChannelTopology>,
+    ) -> Result<usize, tutti_graph::MainOutputError> {
         let placed = self.placed_topology();
-        Ok(match root {
-            Some(root) => {
-                Self::check_root(root, placed.as_ref())?;
-                usize::from(root.width().count())
+        Ok(match main_output {
+            Some(main_output) => {
+                Self::check_main_output(main_output, placed.as_ref())?;
+                usize::from(main_output.width().count())
             }
             None => {
                 if let Some(placed) = &placed {
@@ -3710,48 +3712,48 @@ impl<F: Float> Graph<F> {
         })
     }
 
-    fn apply_root(
+    fn apply_main_output(
         &mut self,
-        root: Option<tutti_buffers::ChannelTopology>,
+        main_output: Option<tutti_buffers::ChannelTopology>,
         hard: bool,
         width: usize,
-    ) -> Result<(), tutti_graph::RootError> {
-        // A changed declaration is the next root: its folds are published
+    ) -> Result<(), tutti_graph::MainOutputError> {
+        // A changed declaration is the next main output: its folds are published
         // first, so the commit that carries its id finds them. The engine
         // checks the device again, and a refusal there leaves the graph as it
         // was.
-        let next = if root == self.root {
+        let next = if main_output == self.main_output {
             None
         } else {
-            let id = self.editor.spec().root_id.next();
+            let id = self.editor.spec().main_output_id.next();
             if let Some(placed) = &self.output {
                 placed
                     .control
-                    .publish_root(id, root.clone(), placed.device)?;
+                    .publish_main_output(id, main_output.clone(), placed.device)?;
             }
             Some(id)
         };
-        // The bus form of the declaration; `check_root` held it to
+        // The bus form of the declaration; `check_main_output` held it to
         // `MAX_CHANNELS`, which is a bus's width.
-        let bus = root
-            .as_ref()
-            .map(|r| tutti_buffers::BusTopology::try_from(r).expect("a checked root fits a bus"));
-        // Both roots render the same nodes, in phase.
-        self.editor.set_root_fade((!hard).then(|| {
+        let bus = main_output.as_ref().map(|r| {
+            tutti_buffers::BusTopology::try_from(r).expect("a checked main output fits a bus")
+        });
+        // Both main outputs render the same nodes, in phase.
+        self.editor.set_main_output_fade((!hard).then(|| {
             tutti_graph::Fade::seconds(tutti_graph::DECLICK, self.editor.prepare().sample_rate())
         }));
         let spec = self.editor.spec_mut();
-        if spec.root != bus {
-            spec.root = bus;
-            // The root's bus edges fold to the new topology at the next
+        if spec.main_output != bus {
+            spec.main_output = bus;
+            // The main output's bus edges fold to the new topology at the next
             // commit.
-            self.edited |= !spec.root_sources.is_empty();
+            self.edited |= !spec.main_output_sources.is_empty();
         }
         if let Some(id) = next {
-            spec.root_id = id;
+            spec.main_output_id = id;
             self.edited = true;
         }
-        self.root = root;
+        self.main_output = main_output;
         self.widen_refusal = None;
         let mut resized = false;
         let outputs = &mut self.editor.spec_mut().topology.outputs;
@@ -3761,7 +3763,7 @@ impl<F: Float> Graph<F> {
             self.edited = true;
             resized = true;
         }
-        self.reopen_root_readers(resized);
+        self.reopen_main_output_readers(resized);
         self.publish_output_facts();
         Ok(())
     }
@@ -3885,7 +3887,7 @@ impl<F: Float> Graph<F> {
         if self.editor.finish_fades() {
             self.edited = true;
         }
-        self.apply_pending_root();
+        self.apply_pending_main_output();
     }
 
     /// The output ports that lost events since the last call
@@ -3922,7 +3924,7 @@ impl<F: Float> Graph<F> {
         }
     }
 
-    /// The refusal for a spec whose root has no fold into the device: the
+    /// The refusal for a spec whose main output has no fold into the device: the
     /// engine would render that plan as a silent, counted block. A commit
     /// names the pair, and nothing is sent.
     fn unplaceable(&self) -> Option<CommitError> {
@@ -3931,9 +3933,9 @@ impl<F: Float> Graph<F> {
         let device = *device;
         let spec = self.editor.spec();
         let width = spec.topology.outputs.len();
-        (width > 0 && !control.has_fold(spec.root_id, width, device)).then_some(
+        (width > 0 && !control.has_fold(spec.main_output_id, width, device)).then_some(
             CommitError::Unplaceable {
-                root: spec.root_id,
+                main_output: spec.main_output_id,
                 width,
                 device,
             },
@@ -3983,7 +3985,7 @@ fn render<F: Float>(
         output.fill(F::ZERO);
         return;
     };
-    let (ins, outs, root) = (
+    let (ins, outs, main_output) = (
         plan.global_inputs() as usize,
         plan.rendered_outputs(),
         plan.global_outputs(),
@@ -3991,22 +3993,22 @@ fn render<F: Float>(
     scratch.resize_with(outs, || vec![F::ZERO]);
     let silence = F::ZERO;
     let inputs: Vec<&[F]> = (0..ins).map(|_| std::slice::from_ref(&silence)).collect();
-    let fade = exec.root_fade();
+    let fade = exec.main_output_fade();
     let mut outputs: Vec<&mut [F]> = scratch.iter_mut().map(|c| &mut c[..1]).collect();
     exec.process(1, transport, &inputs, &mut outputs);
-    // With no device there is no fold: the root's channels are the output's
-    // by index, and a root change crossfades channel by channel, the old
-    // root's channels after the new root's.
+    // With no device there is no fold: the main output's channels are the output's
+    // by index, and a main output change crossfades channel by channel, the old
+    // main output's channels after the new main output's.
     let gains = fade.map(|f| fade_gains::<F>(f.fade.law, f.done, f.fade.duration));
     for (c, o) in output.iter_mut().enumerate() {
         let new = scratch
             .get(c)
-            .filter(|_| c < root)
+            .filter(|_| c < main_output)
             .map_or(F::ZERO, |s| s[0]);
         *o = match (fade, gains) {
             (Some(f), Some((go, gn))) => {
                 let old = if c < f.width {
-                    scratch[root + c][0]
+                    scratch[main_output + c][0]
                 } else {
                     F::ZERO
                 };
@@ -4029,7 +4031,7 @@ pub trait ModKeys {
     /// The edge a target's key names (`TargetKey::Edge`), whose gain the
     /// target modulates. A host with no edge targets leaves the default,
     /// which names none.
-    fn edge(&self, target: u64) -> Option<crate::Edge> {
+    fn edge(&self, target: u64) -> Option<crate::ChannelEdge> {
         let _ = target;
         None
     }
@@ -4278,11 +4280,11 @@ mod tail_tests {
 }
 
 #[cfg(test)]
-mod root_fade_tests {
+mod main_output_fade_tests {
     use super::*;
     use std::sync::Arc;
     use tutti_buffers::Bed;
-    use tutti_graph::{FadeLaw, ForkByClone, OutPort, PortSource, RootId};
+    use tutti_graph::{FadeLaw, ForkByClone, MainOutputId, OutPort, PortSource};
     use tutti_nodes::testing::Const;
     use tutti_tempo::TempoMap;
     use tutti_units::Bpm;
@@ -4307,25 +4309,27 @@ mod root_fade_tests {
         (g, node)
     }
 
-    /// **A root declaration crossfades by the declick unless it is hard**: the
-    /// plan of the commit that carries the next root also renders the old
-    /// root's outputs, the old root's id and the root's width naming where
+    /// **A main output declaration crossfades by the declick unless it is hard**: the
+    /// plan of the commit that carries the next main output also renders the old
+    /// main output's outputs, the old main output's id and the main output's width naming where
     /// they begin, over the declick length (5 ms, 240 frames at 48 kHz) along
     /// the equal-amplitude law; a hard declaration carries none.
     #[test]
-    fn a_root_declaration_crossfades_for_the_declick_unless_hard() {
+    fn a_main_output_declaration_crossfades_for_the_declick_unless_hard() {
         let (mut g, _) = graph();
-        g.declare_root(Some(Bed::Surround51.topology()), false)
+        g.declare_main_output(Some(Bed::Surround51.topology()), false)
             .expect("declares");
         assert!(matches!(g.commit(), Committed::Sent));
         let plan = g.editor.base().expect("a plan");
-        let bank = plan.root_bank().expect("the old root is carried");
-        assert_eq!(bank.old, RootId::GENESIS);
-        assert_eq!(bank.base, 6, "the new root's width");
+        let bank = plan
+            .main_output_bank()
+            .expect("the old main output is carried");
+        assert_eq!(bank.old, MainOutputId::GENESIS);
+        assert_eq!(bank.base, 6, "the new main output's width");
         assert_eq!(
             plan.rendered_outputs(),
             6 + 2,
-            "and the old root's after it"
+            "and the old main output's after it"
         );
         assert_eq!(plan.global_outputs(), 6);
         assert_eq!(
@@ -4333,11 +4337,11 @@ mod root_fade_tests {
             (Samples::new(240), FadeLaw::EqualAmplitude)
         );
 
-        g.declare_root(Some(Bed::Stereo.topology()), true)
+        g.declare_main_output(Some(Bed::Stereo.topology()), true)
             .expect("declares");
         assert!(matches!(g.commit(), Committed::Sent));
         let plan = g.editor.base().expect("a plan");
-        assert_eq!(plan.root_bank(), None, "a hard declaration cuts");
+        assert_eq!(plan.main_output_bank(), None, "a hard declaration cuts");
         assert_eq!(plan.rendered_outputs(), 2);
     }
 

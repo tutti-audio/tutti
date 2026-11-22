@@ -2,7 +2,7 @@
 //!
 //! Pure: no I/O, no audio, no units — only the value, the shapes
 //! the units declared, and the previous plan (for placements, and for the
-//! output time an old root's channels were heard at). The passes, in order:
+//! output time an old main output's channels were heard at). The passes, in order:
 //!
 //! 1. **Check** every node's shape against its spec — widths, latency and
 //!    tail must all agree — and every event edge's ports against the shapes.
@@ -435,8 +435,8 @@ impl Emitted {
 /// `prev` is the plan currently running, if any. It is read for two things:
 /// which store index each surviving key already occupies, so that the
 /// [`Delta`] moves only what changed, and, when the graph carries an old
-/// root's channels ([`ValidGraph::root_bank`]), its total latency, the output
-/// time those channels align to. With no `prev`, that time is the new root's
+/// main output's channels ([`ValidGraph::main_output_bank`]), its total latency, the output
+/// time those channels align to. With no `prev`, that time is the new main output's
 /// own total. Delay-ring and feedback state carry over by *key* at the
 /// runtime and need nothing else from `prev`.
 ///
@@ -671,24 +671,28 @@ pub fn compile(
         .collect();
     let departure = |n: usize| departures[n];
     let total = Latency::new(solved.compensation().total());
-    // The root's channels: a root change's old channels, after them, are
+    // The main output's channels: a main output change's old channels, after them, are
     // aligned like any output and report nothing outward.
     let rendered_outputs = topology.outputs.len();
-    // An old root's channels are aligned to the output time they were heard
+    // An old main output's channels are aligned to the output time they were heard
     // at: the previous plan's total, or, for a plan that continues the
-    // previous plan's crossfade, the alignment that plan kept. The new root's
+    // previous plan's crossfade, the alignment that plan kept. The new main output's
     // alignment does not move for the length of the fade and back after it.
-    let bank_total = match (graph.root_bank(), prev) {
-        (Some(bank), Some(p)) if p.root_bank.is_some_and(|b| b.old == bank.old) => p.bank_total,
+    let bank_total = match (graph.main_output_bank(), prev) {
+        (Some(bank), Some(p)) if p.main_output_bank.is_some_and(|b| b.old == bank.old) => {
+            p.bank_total
+        }
         (_, Some(p)) => p.total_latency,
         (_, None) => total,
     };
-    let output_time = |channel: u16| match graph.root_bank() {
+    let output_time = |channel: u16| match graph.main_output_bank() {
         Some(bank) if usize::from(channel) >= bank.base => bank_total,
         _ => total,
     };
-    let root_width = graph.root_bank().map_or(rendered_outputs, |b| b.base);
-    let compensation: Vec<Samples> = (0..root_width)
+    let main_output_width = graph
+        .main_output_bank()
+        .map_or(rendered_outputs, |b| b.base);
+    let compensation: Vec<Samples> = (0..main_output_width)
         .map(|ch| solved.compensation().for_channel(ch))
         .collect();
 
@@ -1001,11 +1005,11 @@ pub fn compile(
         }
     }
 
-    // A master meter or an outputs tap reads each output channel as it leaves
+    // A main output meter or an outputs tap reads each output channel as it leaves
     // the alignment delay, so with one declared the delay is its own op
     // writing a slot that the `Output` op and the reader both read (one ring,
     // the same key).
-    let master_meter = topology
+    let main_output_meter = topology
         .meters
         .values()
         .any(|spec| matches!(spec, crate::MeterSpec::Outputs))
@@ -1082,7 +1086,7 @@ pub fn compile(
             PortSource::Global(ch) => ARef::Val(global_val[&ch]),
             PortSource::Zero => ARef::Zero,
         };
-        let d = match (graph.root_bank(), source) {
+        let d = match (graph.main_output_bank(), source) {
             (Some(bank), _) if usize::from(channel) >= bank.base => match source {
                 PortSource::Node(p) => departure(dense[&p.node]).gap_to(bank_total),
                 PortSource::Global(_) => Latency::ZERO.gap_to(bank_total),
@@ -1102,7 +1106,7 @@ pub fn compile(
             });
             (em.delays.len() - 1) as u32
         });
-        if let (true, Some(ring), ARef::Val(v)) = (master_meter, delay, src) {
+        if let (true, Some(ring), ARef::Val(v)) = (main_output_meter, delay, src) {
             let op = em.push(Pre::Delay {
                 delay: ring,
                 src: v,
@@ -1143,7 +1147,7 @@ pub fn compile(
                     .map(|c| {
                         output_refs
                             .get(c)
-                            .filter(|_| c < root_width)
+                            .filter(|_| c < main_output_width)
                             .copied()
                             .unwrap_or(ARef::Zero)
                     })
@@ -1286,7 +1290,7 @@ pub fn compile(
     let mut meter_ids: Vec<(crate::MeterId, usize)> = Vec::new();
     for (&meter, spec) in &topology.meters {
         let srcs: Vec<ARef> = match spec {
-            crate::MeterSpec::Outputs => output_refs[..root_width].to_vec(),
+            crate::MeterSpec::Outputs => output_refs[..main_output_width].to_vec(),
             crate::MeterSpec::Ports { sources, align } => {
                 let mut srcs = Vec::with_capacity(sources.len());
                 for (lane, source) in sources.iter().enumerate() {
@@ -1792,8 +1796,8 @@ pub fn compile(
         order: order.iter().map(|&n| keys[n]).collect(),
         global_inputs: topology.inputs.count(),
         compensation,
-        root_id: crate::RootId::GENESIS,
-        root_bank: graph.root_bank(),
+        main_output_id: crate::MainOutputId::GENESIS,
+        main_output_bank: graph.main_output_bank(),
         rendered_outputs,
         total_latency: total,
         bank_total,

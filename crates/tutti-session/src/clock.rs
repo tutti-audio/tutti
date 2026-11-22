@@ -1,6 +1,6 @@
 //! [`Clock`]: what runs a session's blocks, and so the session's type.
 //!
-//! Every session differs at its root by one thing: the app steps an
+//! Every session differs at its main output by one thing: the app steps an
 //! [`Offline`] session (`Session::render`), a sound card's callback steps a
 //! `DeviceClock` session, an OS timer thread steps a [`SystemClock`] one. The
 //! rest follows from it: a sound card's audio can be played and captured only

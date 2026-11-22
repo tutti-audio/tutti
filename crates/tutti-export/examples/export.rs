@@ -90,7 +90,7 @@ fn main() -> tutti_export::Result<()> {
         &mut tone(),
         &job,
         &FrozenClock,
-        Output::master(target),
+        Output::main_output(target),
         &mut Control::none(),
     )?
     .into_finished()
@@ -109,7 +109,7 @@ fn main() -> tutti_export::Result<()> {
     ]
     .into_iter()
     .map(|(format, ext)| {
-        Output::master(FileTarget::new(
+        Output::main_output(FileTarget::new(
             dir.join(format!("tone.{ext}")),
             format,
             ChannelLayout::STEREO,
@@ -140,7 +140,7 @@ fn main() -> tutti_export::Result<()> {
         &mut mono_tone(),
         &job,
         &FrozenClock,
-        Output::master(BufferTarget::new(ChannelLayout::QUAD)),
+        Output::main_output(BufferTarget::new(ChannelLayout::QUAD)),
         &mut Control::none(),
     )?
     .into_finished()
@@ -174,7 +174,7 @@ fn main() -> tutti_export::Result<()> {
         &mut tone(),
         &job,
         &FrozenClock,
-        Output::master(normalized),
+        Output::main_output(normalized),
         &mut Control::none(),
     )?
     .into_finished()
@@ -195,7 +195,7 @@ fn main() -> tutti_export::Result<()> {
         &mut tone(),
         &job,
         &FrozenClock,
-        Output::master(BufferTarget::new(ChannelLayout::STEREO)),
+        Output::main_output(BufferTarget::new(ChannelLayout::STEREO)),
         &mut Control::none(),
     )?
     .into_finished()

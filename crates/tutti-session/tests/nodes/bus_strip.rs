@@ -7,7 +7,7 @@
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, InterleavedMut, MaxBlock};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::{BusStripConfig, BusStripNode};
-use tutti_session::{OutPort, Root, Session, SessionBuilder, ValueErrorKind};
+use tutti_session::{MainOutput, OutPort, Session, SessionBuilder, ValueErrorKind};
 use tutti_units::{Balance, Samples};
 
 /// Constant `values` on its output channels, declaring `out` as its bus.
@@ -66,19 +66,19 @@ fn a_mono_source_reaches_both_sides_of_a_stereo_strip() {
         .expect("a mono bus folds onto a stereo one")
         .unfaded();
     for c in 0..2 {
-        g.set_sources(Root::output(c), [OutPort::new(strip, c)])
+        g.set_sources(MainOutput::channel(c), [OutPort::new(strip, c)])
             .unwrap()
             .unfaded();
     }
     assert_eq!(heard(&mut s, 2), [0.5, 0.5]);
 }
 
-/// A stereo strip's bus folds onto a declared 5.1 root: its pair lands on the
+/// A stereo strip's bus folds onto a declared 5.1 main output: its pair lands on the
 /// front left and right, and the other four speakers are silent.
 #[test]
-fn a_stereo_strip_feeds_a_declared_surround_root() {
+fn a_stereo_strip_feeds_a_declared_surround_main_output() {
     let five_one = ChannelTopology::default_for(ChannelLayout::from(6u16));
-    let mut s = offline(Session::builder().root_topology(five_one), 6);
+    let mut s = offline(Session::builder().main_output_topology(five_one), 6);
     let g = s.graph();
     let src = g.add(Unforkable(Src {
         values: vec![0.25, 0.75],
@@ -86,7 +86,7 @@ fn a_stereo_strip_feeds_a_declared_surround_root() {
     }));
     let strip = g.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
     g.connect(src, strip).expect("same width").unfaded();
-    g.connect(strip.bus_out(0), Root)
+    g.connect(strip.bus_out(0), MainOutput)
         .expect("a placed stereo bus folds onto 5.1")
         .unfaded();
     assert_eq!(heard(&mut s, 6), [0.25, 0.75, 0.0, 0.0, 0.0, 0.0]);

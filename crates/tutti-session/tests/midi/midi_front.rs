@@ -8,7 +8,7 @@ use crate::common::{Seen, Tap, blocks, offline};
 use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::{
-    Cx, EventCapacity, ForkByClone, Instrument, IntoNode, Io, Node, NodeParts, Prepare, Shape,
+    Cx, EventCapacity, ForkByClone, InstrumentNode, IntoNode, Io, Node, NodeParts, Prepare, Shape,
     Status,
 };
 use tutti_midi_runtime::TimedMidiEvent;
@@ -39,7 +39,7 @@ impl IntoNode for Probe {
         self.0.into_parts()
     }
 }
-impl Instrument<f32> for Probe {}
+impl InstrumentNode<f32> for Probe {}
 impl SessionNode for Probe {
     fn reclaimer(_: &()) -> tutti_session::Reclaims {
         tutti_session::Reclaims::Nothing
@@ -76,7 +76,9 @@ fn a_take_records_the_live_input_on_its_frames_and_the_target_still_hears_it() {
     let seen = tutti_fixtures::Record::new();
     let target = s.graph().add(Tap(seen.clone()));
     let latent = s.graph().add(ForkByClone(Latent));
-    s.graph().connect(latent, tutti_session::Root).unwrap();
+    s.graph()
+        .connect(latent, tutti_session::MainOutput)
+        .unwrap();
     let mut live = s.midi().input(target).expect("a live input");
     let mut take = s
         .midi()
@@ -87,7 +89,7 @@ fn a_take_records_the_live_input_on_its_frames_and_the_target_still_hears_it() {
     live.note_on(Frame::new(600), c, k, NoteVelocity::CENTER)
         .unwrap();
     live.note_off(Frame::new(900), c, k).unwrap();
-    blocks(&s, 3);
+    blocks(&mut s, 3);
 
     let got: Vec<_> = take.drain().map(|e| (e.frame, e.ump)).collect();
     assert_eq!(
@@ -123,7 +125,7 @@ fn a_take_of_an_instrument_records_what_its_handle_plays() {
         .note_on(Frame::new(600), c, k, NoteVelocity::CENTER)
         .unwrap();
     synth.keys_mut().note_off(Frame::new(900), c, k).unwrap();
-    blocks(&s, 3);
+    blocks(&mut s, 3);
     let got: Vec<_> = take.drain().map(|e| (e.frame, e.ump)).collect();
     assert_eq!(
         got,

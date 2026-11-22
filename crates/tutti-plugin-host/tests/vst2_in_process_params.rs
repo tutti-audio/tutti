@@ -275,7 +275,7 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     }));
     let (_fork_ed, mut fork_exec) = live
         .editor()
-        .fork(ForkTarget::Master, ForkMode::Offline, prepare)
+        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare)
         .expect("the lane and the plugin fork");
     let mut out = vec![vec![0.0f32; BLOCK]; 2];
     for _ in 0..8 {

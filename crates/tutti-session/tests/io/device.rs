@@ -14,8 +14,8 @@ use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
 use tutti_session::{
-    Backoff, DeviceEvent, DevicePolicy, DeviceRestart, DeviceWatch, InPort, LiveSession, OutPort,
-    Phase, PhaseCx, RestartOutcome, Root, Session, SessionEvent, Workers,
+    Backoff, DeviceEvent, DevicePolicy, DeviceRestart, DeviceWatch, InPort, LiveSession,
+    MainOutput, OutPort, Phase, PhaseCx, RestartOutcome, Session, SessionEvent, Workers,
 };
 use tutti_units::{Db, Hz, SampleRate, Samples};
 
@@ -30,7 +30,7 @@ fn spec_at(rate: f64) -> OutputSpec {
 /// **The session publishes the meter and the taps its callback feeds**, not
 /// disconnected ones: a host opens a tap with `Graph::open_heard_tap` and
 /// sees the frames the callback renders, and reads the level they carry from
-/// `Session::take_master_meter`.
+/// `Session::take_main_output_meter`.
 #[test]
 fn the_session_publishes_the_meter_and_taps_its_callback_feeds() {
     let (driver, stream) = ManualStreamDriver::new();
@@ -43,16 +43,18 @@ fn the_session_publishes_the_meter_and_taps_its_callback_feeds() {
         .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
     session
         .graph()
-        .set_sources(Root::output(0), [OutPort::new(dc, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(dc, 0)])
         .unwrap()
         .unfaded();
     let mut tap = session
         .graph()
         .taps()
-        .open_root(Samples::new(1_024))
+        .open_main_output(Samples::new(1_024))
         .expect("the sources exist");
     let _ = session.update();
-    let mut meter = session.take_master_meter().expect("declared at the build");
+    let mut meter = session
+        .take_main_output_meter()
+        .expect("declared at the build");
     stream
         .render_block(Samples::new(64))
         .expect("the stream is open");
@@ -120,11 +122,11 @@ fn a_rerate_keeps_the_published_compensation_in_step_with_the_plan() {
         .unwrap()
         .unfaded();
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(osc, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(osc, 0)])
         .unwrap()
         .unfaded();
     s.graph()
-        .set_sources(Root::output(1), [OutPort::new(lim, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(lim, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -572,7 +574,7 @@ fn a_stale_wanted_restart_does_not_replace_a_later_choice() {
     };
     // The host chooses X first (this device-free engine cannot open it, but
     // the choice is made).
-    let _ = live.restart(DeviceRestart::to(DeviceSelector::named("X")));
+    let _ = live.restart(DeviceRestart::new(DeviceSelector::named("X")));
     // The policy's own request, as the event carried it, is stale now.
     let [stale] = wanted
         .into_iter()
@@ -770,11 +772,7 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
         .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
-    let across = s
-        .open_heard_tap(Samples::new(1_024))
-        .expect("opens")
-        .reader()
-        .expect("the audio thread is not behind");
+    let across = s.open_heard_tap(Samples::new(1_024)).expect("opens");
     assert_eq!(across.width(), 2);
 
     let six = OutputSpec::new(
@@ -797,11 +795,7 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
     );
 
     drop(across);
-    let after = s
-        .open_heard_tap(Samples::new(1_024))
-        .expect("reopens")
-        .reader()
-        .expect("the audio thread is not behind");
+    let after = s.open_heard_tap(Samples::new(1_024)).expect("reopens");
     assert_eq!(after.width(), 6, "the device's width now");
     new.render_block(Samples::new(64)).expect("open");
     assert_eq!(after.available(), Samples::new(64));
@@ -860,12 +854,12 @@ fn the_session_lists_the_outputs_once() {
     );
 }
 
-/// A declared root is placed on the device it is declared for, and a restart to
+/// A declared main output is placed on the device it is declared for, and a restart to
 /// a device that cannot place it is refused rather than rendering silence: four
 /// buses on a six-wide device restart onto another six-wide one, and not onto
 /// a stereo one.
 #[test]
-fn a_restart_onto_a_device_that_cannot_place_the_declared_root_is_refused() {
+fn a_restart_onto_a_device_that_cannot_place_the_declared_main_output_is_refused() {
     let wide = |rate| {
         OutputSpec::new(
             SampleRate::of(rate),
@@ -875,7 +869,7 @@ fn a_restart_onto_a_device_that_cannot_place_the_declared_root_is_refused() {
     };
     let (driver, _stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .root_topology(tutti_buffers::ChannelTopology::unassigned(
+        .main_output_topology(tutti_buffers::ChannelTopology::unassigned(
             ChannelLayout::QUAD,
         ))
         .device(tutti_cpal::DeviceSelector::Default)
@@ -974,17 +968,21 @@ fn a_restart_states_or_defaults_the_new_devices_placement() {
 /// `Refused` status on stereo and `Applied` after a restart onto six channels.
 #[test]
 fn a_refused_declaration_is_retried_on_a_restart() {
-    use tutti_session::RootTopologyStatus;
+    use tutti_session::MainOutputTopologyStatus;
     let buses = tutti_buffers::ChannelTopology::unassigned(ChannelLayout::QUAD);
     let (driver, _stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
         .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
-    assert!(session.declare_root_topology(Some(buses.clone())).is_err());
+    assert!(
+        session
+            .declare_main_output_topology(Some(buses.clone()))
+            .is_err()
+    );
     assert!(matches!(
-        session.root_topology_status(),
-        RootTopologyStatus::Refused(_)
+        session.main_output_topology_status(),
+        MainOutputTopologyStatus::Refused(_)
     ));
     assert_eq!(session.graph_ref().outputs(), 2);
 
@@ -995,17 +993,20 @@ fn a_refused_declaration_is_retried_on_a_restart() {
     );
     let (driver, _new) = ManualStreamDriver::new();
     session.restart_on(wide, driver, None, None).unwrap();
-    assert_eq!(session.root_topology_status(), RootTopologyStatus::Applied);
-    assert_eq!(session.root_topology(), Some(&buses));
+    assert_eq!(
+        session.main_output_topology_status(),
+        MainOutputTopologyStatus::Applied
+    );
+    assert_eq!(session.main_output_topology(), Some(&buses));
     assert_eq!(session.graph_ref().outputs(), 4);
 }
 
-/// A declaration that waited for a root crossfade and is refused when it
+/// A declaration that waited for a main output crossfade and is refused when it
 /// applies, because the device it finds no longer places it, is a `Refused`
 /// status that a later widening does not erase, and a restart asks again.
 #[test]
 fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a_restart() {
-    use tutti_session::RootTopologyStatus;
+    use tutti_session::MainOutputTopologyStatus;
     let wide = OutputSpec::new(
         SampleRate::SR_48K,
         ChannelLayout::from(6u16),
@@ -1018,60 +1019,70 @@ fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a
         .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(wide.clone(), driver)
         .unwrap();
-    // Something is heard, so the old root has outputs to fade; the root in
+    // Something is heard, so the old main output has outputs to fade; the main output in
     // force fits both devices, and the change to it starts a fade.
     let dc = session
         .graph()
         .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
     session
         .graph()
-        .set_sources(Root::output(0), [OutPort::new(dc, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(dc, 0)])
         .unwrap()
         .unfaded();
     let _ = session.update();
-    session.declare_root_topology(Some(stereo.clone())).unwrap();
+    session
+        .declare_main_output_topology(Some(stereo.clone()))
+        .unwrap();
     let _ = session.update();
     stream.render_block(Samples::new(64)).expect("open");
     // Four buses place on six channels, so the declaration is taken, and waits.
-    session.declare_root_topology(Some(buses.clone())).unwrap();
-    assert_eq!(session.root_topology_status(), RootTopologyStatus::Pending);
-    assert_eq!(session.requested_root_topology(), Some(&buses));
+    session
+        .declare_main_output_topology(Some(buses.clone()))
+        .unwrap();
+    assert_eq!(
+        session.main_output_topology_status(),
+        MainOutputTopologyStatus::Pending
+    );
+    assert_eq!(session.requested_main_output_topology(), Some(&buses));
 
     // The device changes under it to one that cannot place four buses.
     let (driver, narrow) = ManualStreamDriver::new();
     session
         .restart_on(spec_at(48_000.0), driver, None, None)
-        .expect("the root in force places on stereo");
+        .expect("the main output in force places on stereo");
     for _ in 0..5 {
         narrow.render_block(Samples::new(64)).expect("open");
         let _ = session.update();
     }
     assert!(
         matches!(
-            session.root_topology_status(),
-            RootTopologyStatus::Refused(tutti_graph::RootError::Fold(_))
+            session.main_output_topology_status(),
+            MainOutputTopologyStatus::Refused(tutti_graph::MainOutputError::Fold(_))
         ),
         "{:?}",
-        session.root_topology_status()
+        session.main_output_topology_status()
     );
     assert_eq!(
-        session.root_topology(),
+        session.main_output_topology(),
         Some(&stereo),
-        "the root in force stays"
+        "the main output in force stays"
     );
-    let refusal = session.root_topology_status();
+    let refusal = session.main_output_topology_status();
     let _ = session.graph().widen_outputs(8);
     assert_eq!(
-        session.root_topology_status(),
+        session.main_output_topology_status(),
         refusal,
         "a widening does not replace the declaration's refusal"
     );
 
     let (driver, _wide) = ManualStreamDriver::new();
     session.restart_on(wide, driver, None, None).unwrap();
-    assert_eq!(session.root_topology_status(), RootTopologyStatus::Applied);
     assert_eq!(
-        session.root_topology(),
+        session.main_output_topology_status(),
+        MainOutputTopologyStatus::Applied
+    );
+    assert_eq!(
+        session.main_output_topology(),
         Some(&buses),
         "the restart asked again"
     );
@@ -1109,7 +1120,7 @@ fn a_panic_in_the_render_is_a_device_fault_event() {
     let node = session.graph().add(ForkByClone(AlwaysPanics));
     session
         .graph()
-        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
         .unwrap()
         .unfaded();
     let _ = session.update();

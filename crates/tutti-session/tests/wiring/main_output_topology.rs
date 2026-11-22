@@ -1,4 +1,4 @@
-//! The graph root's declared topology: what the session's output is, as the
+//! The graph's main output's declared topology: what the session's output is, as the
 //! engine places it on the device and an export places it in a file.
 //!
 //! Every figure is analytic: a `Const` writes a known value per channel, and
@@ -9,9 +9,11 @@ use tutti_buffers::Float;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{ChannelLayout, ChannelTopology, Placement, Speaker};
 use tutti_buffers::{FoldError, InterleavedMut};
-use tutti_graph::{ForkByClone, RootError};
+use tutti_graph::{ForkByClone, MainOutputError};
 use tutti_nodes::testing::Const;
-use tutti_session::{Committed, Error, OutPort, Root, RootTopologyStatus, Session, SessionBuilder};
+use tutti_session::{
+    Committed, Error, MainOutput, MainOutputTopologyStatus, OutPort, Session, SessionBuilder,
+};
 use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -25,7 +27,7 @@ fn feed<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     for c in 0..values.len() {
         session
             .graph()
-            .set_sources(Root::output(c), [OutPort::new(node, c)])
+            .set_sources(MainOutput::channel(c), [OutPort::new(node, c)])
             .unwrap()
             .unfaded();
     }
@@ -55,25 +57,25 @@ fn buses(n: u16) -> ChannelTopology {
     ChannelTopology::unassigned(ChannelLayout::from(n))
 }
 
-/// Four declared buses on a six-wide device stay at 0..4. The root is the
+/// Four declared buses on a six-wide device stay at 0..4. The main output is the
 /// declaration's width, not the device's.
 #[test]
-fn a_declared_unassigned_root_keeps_its_buses_by_index() {
-    let mut s = offline(Session::builder().root_topology(buses(4)), 6).unwrap();
+fn a_declared_unassigned_main_output_keeps_its_buses_by_index() {
+    let mut s = offline(Session::builder().main_output_topology(buses(4)), 6).unwrap();
     assert_eq!(s.graph_ref().outputs(), 4);
-    assert_eq!(s.root_topology(), Some(&buses(4)));
+    assert_eq!(s.main_output_topology(), Some(&buses(4)));
     feed(&mut s, &[0.1, 0.2, 0.3, 0.4]);
     assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.3, 0.4, 0.0, 0.0]);
 }
 
-/// A declared 5.1 root folds into stereo by the 5.1 rules, from the speakers it
+/// A declared 5.1 main output folds into stereo by the 5.1 rules, from the speakers it
 /// declared: the same six channels with the front pair declared the other way
 /// round fold with left and right exchanged. (The plain 5.1 is the figure a bare
 /// six gives, so only the swapped declaration shows the engine read it.)
 #[test]
-fn a_declared_surround_root_folds_by_the_surround_rules() {
+fn a_declared_surround_main_output_folds_by_the_surround_rules() {
     let five_one = ChannelTopology::default_for(ChannelLayout::from(6u16));
-    let mut s = offline(Session::builder().root_topology(five_one), 2).unwrap();
+    let mut s = offline(Session::builder().main_output_topology(five_one), 2).unwrap();
     assert_eq!(s.graph_ref().outputs(), 6);
     feed(&mut s, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
     assert_eq!(
@@ -92,7 +94,9 @@ fn a_declared_surround_root_folds_by_the_surround_rules() {
         Speaker::SideRight,
     ])
     .unwrap();
-    s.declare_root_topology(Some(swapped)).unwrap().unfaded();
+    s.declare_main_output_topology(Some(swapped))
+        .unwrap()
+        .unfaded();
     assert_eq!(
         heard(&mut s, 2),
         [
@@ -102,13 +106,17 @@ fn a_declared_surround_root_folds_by_the_surround_rules() {
     );
 }
 
-/// With nothing declared, the root is the device's floor and a bare four is
+/// With nothing declared, the main output is the device's floor and a bare four is
 /// quad: as before this existed.
 #[test]
-fn an_undeclared_root_is_as_it_was() {
+fn an_undeclared_main_output_is_as_it_was() {
     let mut s = offline(Session::builder().outputs_floor(ChannelLayout::QUAD), 6).unwrap();
-    assert_eq!(s.root_topology(), None);
-    assert_eq!(s.graph_ref().outputs(), 6, "the device floors the root");
+    assert_eq!(s.main_output_topology(), None);
+    assert_eq!(
+        s.graph_ref().outputs(),
+        6,
+        "the device floors the main output"
+    );
     feed(&mut s, &[0.1, 0.2, 0.3, 0.4]);
     assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.3, 0.4, 0.0, 0.0]);
 
@@ -131,7 +139,10 @@ fn an_unplaceable_declaration_is_refused() {
         other => panic!("expected Output, got {:?}", other.map(|_| ())),
     };
     assert_eq!(
-        refused(offline(Session::builder().root_topology(buses(4)), 2)),
+        refused(offline(
+            Session::builder().main_output_topology(buses(4)),
+            2
+        )),
         FoldError::Unplaced {
             channel: 2,
             speaker: Speaker::Unassigned
@@ -139,18 +150,18 @@ fn an_unplaceable_declaration_is_refused() {
     );
     let unnamed = ChannelTopology::new([Speaker::FrontLeft, Speaker::Unknown(9)]).unwrap();
     assert!(matches!(
-        refused(offline(Session::builder().root_topology(unnamed), 2)),
+        refused(offline(Session::builder().main_output_topology(unnamed), 2)),
         FoldError::Unnamed { .. }
     ));
     // Wider than the engine renders.
     let wide = buses(tutti_buffers::MAX_CHANNELS as u16 + 1);
     assert!(matches!(
-        refused(offline(Session::builder().root_topology(wide), 32)),
+        refused(offline(Session::builder().main_output_topology(wide), 32)),
         FoldError::Unplaced { .. }
     ));
     assert!(matches!(
         Session::builder()
-            .root_topology(buses(40))
+            .main_output_topology(buses(40))
             .build_detached(RATE),
         Err(Error::Output(_))
     ));
@@ -158,21 +169,21 @@ fn an_unplaceable_declaration_is_refused() {
     // After the build.
     let mut s = offline(Session::builder(), 2).unwrap();
     assert!(matches!(
-        s.declare_root_topology(Some(buses(4))),
+        s.declare_main_output_topology(Some(buses(4))),
         Err(Error::Output(FoldError::Unplaced { channel: 2, .. }))
     ));
     assert_eq!(s.graph_ref().outputs(), 2);
-    assert_eq!(s.root_topology(), None);
+    assert_eq!(s.main_output_topology(), None);
 }
 
-/// Declared after the build, on a device-wide root: the declaration sets the
-/// root's width (narrowing six to four), the root cannot then be widened under
-/// it, and taking it back leaves the root at four, quad again.
+/// Declared after the build, on a device-wide main output: the declaration sets the
+/// main output's width (narrowing six to four), the main output cannot then be widened under
+/// it, and taking it back leaves the main output at four, quad again.
 #[test]
-fn a_declaration_sets_the_roots_width_and_the_width_cannot_leave_it() {
+fn a_declaration_sets_the_main_outputs_width_and_the_width_cannot_leave_it() {
     let mut s = offline(Session::builder(), 6).unwrap();
     assert_eq!(s.graph_ref().outputs(), 6);
-    s.declare_root_topology(Some(buses(4))).unwrap();
+    s.declare_main_output_topology(Some(buses(4))).unwrap();
     assert_eq!(s.graph_ref().outputs(), 4);
     feed(&mut s, &[0.1, 0.2, 0.3, 0.4]);
     assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.3, 0.4, 0.0, 0.0]);
@@ -182,76 +193,97 @@ fn a_declaration_sets_the_roots_width_and_the_width_cannot_leave_it() {
     let err = s.graph().widen_outputs(5).unwrap_err();
     assert_eq!(
         err,
-        RootError::Width {
+        MainOutputError::Width {
             declared: ChannelLayout::QUAD,
             requested: ChannelLayout::from(5u16)
         }
     );
-    assert_eq!(s.root_topology_status(), RootTopologyStatus::Refused(err));
+    assert_eq!(
+        s.main_output_topology_status(),
+        MainOutputTopologyStatus::Refused(err)
+    );
     assert_eq!(s.graph_ref().outputs(), 4);
 
-    s.declare_root_topology(None).unwrap().unfaded();
-    assert_eq!(s.root_topology(), None);
+    s.declare_main_output_topology(None).unwrap().unfaded();
+    assert_eq!(s.main_output_topology(), None);
     assert_eq!(s.graph_ref().outputs(), 4);
     assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.0, 0.0, 0.3, 0.4]);
-    assert_eq!(s.root_topology_status(), RootTopologyStatus::Applied);
+    assert_eq!(
+        s.main_output_topology_status(),
+        MainOutputTopologyStatus::Applied
+    );
     s.graph().widen_outputs(5).unwrap();
     assert_eq!(s.graph_ref().outputs(), 5);
 }
 
 /// A refusal is a value: the declaration's, kept with the request; a widening
-/// the declared root cannot take; channels past the engine's width. The
+/// the declared main output cannot take; channels past the engine's width. The
 /// request is the same again once it is in force.
 #[test]
 fn a_refusal_is_a_status_not_a_log_line() {
     let mut s = offline(Session::builder(), 2).unwrap();
-    assert_eq!(s.root_topology_status(), RootTopologyStatus::Applied);
-    let e = s.declare_root_topology(Some(buses(4))).unwrap_err();
+    assert_eq!(
+        s.main_output_topology_status(),
+        MainOutputTopologyStatus::Applied
+    );
+    let e = s.declare_main_output_topology(Some(buses(4))).unwrap_err();
     let Error::Output(refusal) = e else { panic!() };
     assert_eq!(
-        s.root_topology_status(),
-        RootTopologyStatus::Refused(refusal.into())
+        s.main_output_topology_status(),
+        MainOutputTopologyStatus::Refused(refusal.into())
     );
-    assert_eq!(s.requested_root_topology(), Some(&buses(4)), "kept");
-    assert_eq!(s.root_topology(), None, "the previous stands");
+    assert_eq!(s.requested_main_output_topology(), Some(&buses(4)), "kept");
+    assert_eq!(s.main_output_topology(), None, "the previous stands");
     // Asking for what is in force is Applied again.
-    s.declare_root_topology(None).unwrap();
-    assert_eq!(s.root_topology_status(), RootTopologyStatus::Applied);
+    s.declare_main_output_topology(None).unwrap();
+    assert_eq!(
+        s.main_output_topology_status(),
+        MainOutputTopologyStatus::Applied
+    );
 
-    // A root wider than the engine renders is refused whole: its width stays.
+    // A main output wider than the engine renders is refused whole: its width stays.
     let max = tutti_buffers::MAX_CHANNELS;
     let before = s.graph_ref().outputs();
     let err = s.graph().widen_outputs(max + 8).unwrap_err();
     assert_eq!(s.graph_ref().outputs(), before);
     assert!(matches!(
         err,
-        RootError::Fold(FoldError::Unplaced { channel, .. }) if channel == max
+        MainOutputError::Fold(FoldError::Unplaced { channel, .. }) if channel == max
     ));
-    assert_eq!(s.root_topology_status(), RootTopologyStatus::Refused(err));
+    assert_eq!(
+        s.main_output_topology_status(),
+        MainOutputTopologyStatus::Refused(err)
+    );
     s.graph().widen_outputs(max).unwrap();
-    assert_eq!(s.root_topology_status(), RootTopologyStatus::Applied);
+    assert_eq!(
+        s.main_output_topology_status(),
+        MainOutputTopologyStatus::Applied
+    );
 }
 
 /// A builder's declaration is in force after updates, and declaring the same
 /// topology again changes nothing (no edit, so no commit).
 ///
-/// The equal-request early return in `declare_root_topology` is
+/// The equal-request early return in `declare_main_output_topology` is
 /// not observable here (the graph and engine ignore an equal declaration
 /// themselves).
 #[test]
 fn declaring_the_same_topology_again_changes_nothing() {
-    let mut s = offline(Session::builder().root_topology(buses(4)), 6).unwrap();
+    let mut s = offline(Session::builder().main_output_topology(buses(4)), 6).unwrap();
     let _ = s.update();
     let sent = s.graph_ref().testing().commits_sent();
-    s.declare_root_topology(Some(buses(4))).unwrap();
+    s.declare_main_output_topology(Some(buses(4))).unwrap();
     let _ = s.update();
     let _ = s.update();
-    assert_eq!(s.root_topology(), Some(&buses(4)));
+    assert_eq!(s.main_output_topology(), Some(&buses(4)));
     assert_eq!(s.graph_ref().testing().commits_sent(), sent);
-    assert_eq!(s.root_topology_status(), RootTopologyStatus::Applied);
+    assert_eq!(
+        s.main_output_topology_status(),
+        MainOutputTopologyStatus::Applied
+    );
 }
 
-/// An export of the master places the file from the declaration, as the device
+/// An export of the main output places the file from the declaration, as the device
 /// is: four buses into a six-channel file stay at 0..4.
 #[cfg(feature = "export")]
 #[test]
@@ -260,7 +292,7 @@ fn an_export_is_placed_from_the_declaration() {
     use tutti_session::{Bounce, BounceLatency, BounceTail, ExportClock, Range};
     let planes = |s: &mut tutti_session::DetachedSession| {
         let request = Bounce::new()
-            .master_buffers()
+            .main_output_buffers()
             .channels(ChannelLayout::from(6u16))
             .range(Range::Seconds(
                 tutti_units::Seconds::new(0.0),
@@ -270,16 +302,16 @@ fn an_export_is_placed_from_the_declaration() {
             .clock(ExportClock::frozen())
             .latency(BounceLatency::Keep)
             .tail(BounceTail::None);
-        let rendered = bounced(s, request).unwrap().into_master();
+        let rendered = bounced(s, request).unwrap().into_main_output();
         rendered.planes().iter().map(|p| p[0]).collect::<Vec<_>>()
     };
     let mut declared = Session::builder()
-        .root_topology(buses(4))
+        .main_output_topology(buses(4))
         .build_detached(RATE)
         .unwrap();
     feed(&mut declared, &[0.1, 0.2, 0.3, 0.4]);
     assert_eq!(planes(&mut declared), [0.1, 0.2, 0.3, 0.4, 0.0, 0.0]);
-    declared.declare_root_topology(None).unwrap();
+    declared.declare_main_output_topology(None).unwrap();
     assert_eq!(planes(&mut declared), [0.1, 0.2, 0.0, 0.0, 0.3, 0.4]);
 }
 
@@ -321,7 +353,7 @@ fn the_output_device_reads_stated_or_default() {
 /// stated right then left lands its left on the device's second channel, where
 /// the default stereo device is the identity.
 #[test]
-fn a_stated_device_receives_the_root_by_speaker() {
+fn a_stated_device_receives_the_main_output_by_speaker() {
     let swapped = ChannelTopology::new([Speaker::FrontRight, Speaker::FrontLeft]).unwrap();
     let mut s = offline(Session::builder().device_topology(swapped), 2).unwrap();
     feed(&mut s, &[0.25, 0.75]);
@@ -347,7 +379,7 @@ fn a_statement_of_another_width_than_the_device_is_refused() {
     }
 }
 
-/// A root a device has no fold for is refused at the commit that makes the
+/// A main output a device has no fold for is refused at the commit that makes the
 /// pair, naming it, and the plan sent last keeps sounding: five undeclared
 /// channels on a three-channel device would drop two.
 #[test]
@@ -371,17 +403,19 @@ fn a_commit_with_no_fold_into_the_device_is_refused_by_name() {
     assert_eq!(heard(&mut s, 3), [0.1, 0.2, 0.3]);
 }
 
-/// A root changed after the build folds with the plan that carries it: the
-/// session publishes the root's folds, then sends the commit, and the block
-/// that renders the new plan has the new root's fold, not the old one's.
+/// A main output changed after the build folds with the plan that carries it: the
+/// session publishes the main output's folds, then sends the commit, and the block
+/// that renders the new plan has the new main output's fold, not the old one's.
 #[test]
-fn a_root_declared_after_the_build_folds_from_the_plan_that_carries_it() {
+fn a_main_output_declared_after_the_build_folds_from_the_plan_that_carries_it() {
     let mut s = offline(Session::builder(), 6).unwrap();
     feed(&mut s, &[0.1, 0.2, 0.3, 0.4, 0.0, 0.0]);
-    s.declare_root_topology(Some(buses(4))).unwrap().unfaded();
+    s.declare_main_output_topology(Some(buses(4)))
+        .unwrap()
+        .unfaded();
     assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.3, 0.4, 0.0, 0.0]);
-    // Back to the bare root (the root is four wide now): quad, rears on 4, 5.
-    s.declare_root_topology(None).unwrap().unfaded();
+    // Back to the bare main output (the main output is four wide now): quad, rears on 4, 5.
+    s.declare_main_output_topology(None).unwrap().unfaded();
     assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.0, 0.0, 0.3, 0.4]);
 }
 
@@ -395,18 +429,18 @@ fn a_session_with_no_engine_commits_every_width() {
     assert_eq!(s.graph_ref().outputs(), 5);
 }
 
-/// A root declared under a stream that is not rendering is bounded: the
-/// engine holds a few roots ahead of the plan in force, and past them a
-/// declaration is refused by name (`Error::Root`) with the root unchanged;
+/// A main output declared under a stream that is not rendering is bounded: the
+/// engine holds a few main outputs ahead of the plan in force, and past them a
+/// declaration is refused by name (`Error::MainOutput`) with the main output unchanged;
 /// one block frees the room.
 #[test]
-fn a_declaration_past_the_pending_roots_is_refused_by_name() {
+fn a_declaration_past_the_pending_main_outputs_is_refused_by_name() {
     let mut s = offline(Session::builder(), 6).unwrap();
     let mut refused = None;
-    for i in 0..(tutti_engine::MAX_PENDING_ROOTS + 2) {
-        // Alternate, so each declaration is a new root.
-        let root = (i % 2 == 0).then(|| buses(4));
-        match s.declare_root_topology(root) {
+    for i in 0..(tutti_engine::MAX_PENDING_MAIN_OUTPUTS + 2) {
+        // Alternate, so each declaration is a new main output.
+        let main_output = (i % 2 == 0).then(|| buses(4));
+        match s.declare_main_output_topology(main_output) {
             Ok(_) => {}
             Err(e) => {
                 refused = Some(e);
@@ -417,18 +451,18 @@ fn a_declaration_past_the_pending_roots_is_refused_by_name() {
     assert!(
         matches!(
             refused,
-            Some(Error::Root(RootError::TooManyPending { limit }))
-                if limit == tutti_engine::MAX_PENDING_ROOTS
+            Some(Error::MainOutput(MainOutputError::TooManyPending { limit }))
+                if limit == tutti_engine::MAX_PENDING_MAIN_OUTPUTS
         ),
         "{refused:?}"
     );
     // A block renders the newest committed plan and the room is back.
     let _ = heard(&mut s, 6);
     let _ = s.update();
-    s.declare_root_topology(Some(buses(4))).unwrap();
+    s.declare_main_output_topology(Some(buses(4))).unwrap();
 }
 
-/// **A widening past the engine's width is refused whole.** The root keeps the
+/// **A widening past the engine's width is refused whole.** The main output keeps the
 /// width it had, and the refusal is the first channel with no place; a
 /// request the engine can render widens afterwards.
 #[test]
@@ -440,7 +474,7 @@ fn widen_outputs_past_the_maximum_changes_nothing() {
         let err = s.graph().widen_outputs(request).unwrap_err();
         assert!(matches!(
             err,
-            RootError::Fold(FoldError::Unplaced { channel, .. }) if channel == max
+            MainOutputError::Fold(FoldError::Unplaced { channel, .. }) if channel == max
         ));
         assert_eq!(
             s.graph_ref().outputs(),

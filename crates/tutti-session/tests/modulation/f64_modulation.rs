@@ -6,7 +6,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{ForkByClone, Params};
 use tutti_rt::Param;
-use tutti_session::{OutPort, ParamRef, Root, RouteSpec, Session};
+use tutti_session::{MainOutput, OutPort, ParamRef, RouteSpec, Session};
 use tutti_units::{Amplitude, Depth, SampleRate, UnitParam};
 
 #[path = "../support/f64_nodes.rs"]
@@ -34,7 +34,7 @@ fn a_route_onto_a_param_scales_an_f64_render_by_the_analytic_gain() {
         .unwrap()
         .unfaded();
     s.graph()
-        .connect(OutPort::new(gain, 0), Root::output(0))
+        .connect(OutPort::new(gain, 0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
 

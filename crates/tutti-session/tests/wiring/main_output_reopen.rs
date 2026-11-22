@@ -1,22 +1,24 @@
-//! A root of another width opens again what reads the root: a tap on it and
-//! the master meter are announced by `SessionEvent::RootReaderReopened` with
+//! A main output of another width opens again what reads the main output: a tap on it and
+//! the main output meter are announced by `SessionEvent::MainOutputReaderReopened` with
 //! the new topology and claimed with `Session::take_reopened`, the old reader
-//! reads closed, and a reader that has the root's width is left alone.
+//! reads closed, and a reader that has the main output's width is left alone.
 //!
 //! Every figure is analytic: the source is the constant frame (0.25, 0.75), so
-//! the stereo root carries 0.25 and 0.75 and a mono root keeps channel 0.
+//! the stereo main output carries 0.25 and 0.75 and a mono main output keeps channel 0.
 
 use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_buffers::{InterleavedMut, Pull, Source};
 use tutti_graph::ForkByClone;
 use tutti_graph::TapId;
 use tutti_nodes::testing::Const;
-use tutti_session::{NotReopened, OutPort, Reopened, Root, RootReader, Session, SessionEvent};
+use tutti_session::{
+    MainOutput, MainOutputReader, NotReopened, OutPort, Reopened, Session, SessionEvent,
+};
 use tutti_units::{SampleRate, Samples};
 
 const BLOCK: usize = 64;
 
-/// A stereo session whose root is fed (0.25, 0.75), the plan installed.
+/// A stereo session whose main output is fed (0.25, 0.75), the plan installed.
 fn session() -> Session {
     let mut s = Session::builder()
         .sample_rate(SampleRate::SR_48K)
@@ -26,7 +28,7 @@ fn session() -> Session {
     let node = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.75])));
     for c in 0..2 {
         s.graph()
-            .set_sources(Root::output(c), [OutPort::new(node, c)])
+            .set_sources(MainOutput::channel(c), [OutPort::new(node, c)])
             .unwrap()
             .unfaded();
     }
@@ -47,18 +49,18 @@ fn mono() -> ChannelTopology {
 }
 
 /// The readers `events` announce.
-fn reopened(events: Vec<SessionEvent>) -> Vec<(RootReader, ChannelTopology)> {
+fn reopened(events: Vec<SessionEvent>) -> Vec<(MainOutputReader, ChannelTopology)> {
     events
         .into_iter()
         .filter_map(|e| match e {
-            SessionEvent::RootReaderReopened { id, topology } => Some((id, topology)),
+            SessionEvent::MainOutputReaderReopened { id, topology } => Some((id, topology)),
             _ => None,
         })
         .collect()
 }
 
 /// The tap `s` holds under `id`.
-fn claim_tap(s: &mut Session, id: RootReader) -> tutti_graph::TapReader {
+fn claim_tap(s: &mut Session, id: MainOutputReader) -> tutti_graph::TapReader {
     match s.take_reopened(id).expect("held") {
         Reopened::Tap(tap) => tap,
         other => panic!("a tap, not {other:?}"),
@@ -81,32 +83,32 @@ fn drain(tap: &mut tutti_graph::TapReader) -> (Vec<f32>, bool) {
     }
 }
 
-/// **A root change mid-stream reopens its tap once, with the new topology;
+/// **A main output change mid-stream reopens its tap once, with the new topology;
 /// the old reader drains and reads closed; the new one reads the new width.**
 /// The old reader holds the three blocks written before the commit, none lost;
 /// the new reader holds the blocks from the commit's block on, one channel of
-/// 0.25 (the mono root keeps channel 0).
+/// 0.25 (the mono main output keeps channel 0).
 #[test]
-fn a_root_width_change_reopens_the_root_tap_and_closes_the_old_reader() {
+fn a_main_output_width_change_reopens_the_main_output_tap_and_closes_the_old_reader() {
     let mut s = session();
     let mut old = s
         .graph()
         .taps()
-        .open_root(Samples::new(4096))
+        .open_main_output(Samples::new(4096))
         .expect("the outputs exist");
     assert_eq!(old.width(), 2);
     for _ in 0..3 {
         assert!(reopened(block(&mut s)).is_empty());
     }
 
-    s.declare_root_topology(Some(mono()))
-        .expect("a mono root")
+    s.declare_main_output_topology(Some(mono()))
+        .expect("a mono main output")
         .unfaded();
     let mut events = reopened(s.update());
     assert_eq!(events.len(), 1, "one reopen for the one tap");
     let (id, topology) = events.remove(0);
     assert_eq!(topology, mono(), "carries the new topology");
-    assert_eq!(Some(id), old.id().map(RootReader::Tap));
+    assert_eq!(Some(id), old.id().map(MainOutputReader::Tap));
     let mut new = claim_tap(&mut s, id);
     assert_eq!(new.width(), 1);
     assert_eq!(new.id(), old.id(), "the new reader takes the old one's id");
@@ -130,7 +132,7 @@ fn a_root_width_change_reopens_the_root_tap_and_closes_the_old_reader() {
             .0
             .iter()
             .all(|f| f[0] == 0.25 && f[1] == 0.75),
-        "the old reader holds the stereo root"
+        "the old reader holds the stereo main output"
     );
     assert_eq!(
         old.take_lost(),
@@ -147,13 +149,13 @@ fn a_root_width_change_reopens_the_root_tap_and_closes_the_old_reader() {
     );
     assert!(
         new_frames.iter().all(|&x| x == 0.25),
-        "the mono root keeps channel 0"
+        "the mono main output keeps channel 0"
     );
     assert_eq!(new.take_lost(), Samples::new(0));
 }
 
 /// **A tap on a port whose width did not change is not reopened**: a
-/// declaration of the stereo the root already is changes the declaration and
+/// declaration of the stereo the main output already is changes the declaration and
 /// not the width, so no event arrives and the reader keeps reading.
 #[test]
 fn a_declaration_that_keeps_the_width_leaves_the_tap_alone() {
@@ -161,11 +163,11 @@ fn a_declaration_that_keeps_the_width_leaves_the_tap_alone() {
     let mut tap = s
         .graph()
         .taps()
-        .open_root(Samples::new(4096))
+        .open_main_output(Samples::new(4096))
         .expect("the outputs exist");
     let _ = block(&mut s);
-    s.declare_root_topology(Some(ChannelTopology::default_for(ChannelLayout::STEREO)))
-        .expect("a stereo root")
+    s.declare_main_output_topology(Some(ChannelTopology::default_for(ChannelLayout::STEREO)))
+        .expect("a stereo main output")
         .unfaded();
     for _ in 0..3 {
         assert!(reopened(block(&mut s)).is_empty());
@@ -175,24 +177,24 @@ fn a_declaration_that_keeps_the_width_leaves_the_tap_alone() {
     assert_eq!(frames.len(), 4 * BLOCK * 2);
 }
 
-/// **A meter reopens with the new width**: the master meter a host took
+/// **A meter reopens with the new width**: the main output meter a host took
 /// arrives with the new topology, measuring one channel at 0.25 (the peak and,
 /// the source being constant, the rms); the old handle reads closed.
 #[test]
-fn the_taken_master_meter_reopens_with_the_new_width() {
+fn the_taken_main_output_meter_reopens_with_the_new_width() {
     let mut s = session();
-    let old = s.take_master_meter().expect("held");
+    let old = s.take_main_output_meter().expect("held");
     assert_eq!(old.channels(), 2);
     let _ = block(&mut s);
     assert!(!old.is_closed());
 
-    s.declare_root_topology(Some(mono()))
-        .expect("a mono root")
+    s.declare_main_output_topology(Some(mono()))
+        .expect("a mono main output")
         .unfaded();
     let mut events = reopened(block(&mut s));
     assert_eq!(events.len(), 1, "the meter, and no tap, was opened");
     let (id, topology) = events.remove(0);
-    assert!(matches!(id, RootReader::Meter(_)));
+    assert!(matches!(id, MainOutputReader::Meter(_)));
     assert_eq!(topology, mono());
     let Reopened::Meter(mut new) = s.take_reopened(id).expect("held") else {
         panic!("a meter")
@@ -213,12 +215,12 @@ fn the_taken_master_meter_reopens_with_the_new_width() {
 #[test]
 fn a_meter_nobody_took_is_replaced_without_an_event() {
     let mut s = session();
-    s.declare_root_topology(Some(mono()))
-        .expect("a mono root")
+    s.declare_main_output_topology(Some(mono()))
+        .expect("a mono main output")
         .unfaded();
     assert!(reopened(block(&mut s)).is_empty());
     let _ = block(&mut s);
-    let meter = s.master_meter().expect("held");
+    let mut meter = s.take_main_output_meter().expect("held");
     assert_eq!(meter.channels(), 1);
     assert_eq!(meter.read()[0].peak.get(), 0.25);
 }
@@ -231,13 +233,13 @@ fn only_the_last_of_two_changes_before_an_update_is_reported() {
     let mut old = s
         .graph()
         .taps()
-        .open_root(Samples::new(4096))
+        .open_main_output(Samples::new(4096))
         .expect("opens");
     let _ = block(&mut s);
-    s.declare_root_topology(Some(mono()))
+    s.declare_main_output_topology(Some(mono()))
         .expect("mono")
         .unfaded();
-    s.declare_root_topology(Some(ChannelTopology::default_for(
+    s.declare_main_output_topology(Some(ChannelTopology::default_for(
         ChannelLayout::from_count(4),
     )))
     .expect("quad")
@@ -260,14 +262,14 @@ fn a_second_reopen_before_the_claim_replaces_the_held_reader() {
     let _old = s
         .graph()
         .taps()
-        .open_root(Samples::new(4096))
+        .open_main_output(Samples::new(4096))
         .expect("opens");
-    s.declare_root_topology(Some(mono()))
+    s.declare_main_output_topology(Some(mono()))
         .expect("mono")
         .unfaded();
     let first = reopened(block(&mut s));
     assert_eq!(first.len(), 1);
-    s.declare_root_topology(Some(ChannelTopology::default_for(
+    s.declare_main_output_topology(Some(ChannelTopology::default_for(
         ChannelLayout::from_count(4),
     )))
     .expect("quad")
@@ -291,9 +293,9 @@ fn an_unclaimed_reader_survives_ignored_updates_and_is_claimed_later() {
     let _old = s
         .graph()
         .taps()
-        .open_root(Samples::new(4096))
+        .open_main_output(Samples::new(4096))
         .expect("opens");
-    s.declare_root_topology(Some(mono()))
+    s.declare_main_output_topology(Some(mono()))
         .expect("mono")
         .unfaded();
     let events = reopened(block(&mut s));
@@ -312,31 +314,31 @@ fn an_unclaimed_reader_survives_ignored_updates_and_is_claimed_later() {
 #[test]
 fn a_claim_of_an_unknown_id_is_refused() {
     let mut s = session();
-    let id = RootReader::Tap(TapId::of(99));
+    let id = MainOutputReader::Tap(TapId::of(99));
     assert_eq!(s.take_reopened(id).unwrap_err(), NotReopened(id));
 }
 
-/// **A reader keeps no width the root lacks, and is left alone when it has it**:
-/// a 2-wide tap, the root widened to 4 (the tap stays 2-wide), then declared 2
-/// wide: the tap has the root's width and is not reopened.
+/// **A reader keeps no width the main output lacks, and is left alone when it has it**:
+/// a 2-wide tap, the main output widened to 4 (the tap stays 2-wide), then declared 2
+/// wide: the tap has the main output's width and is not reopened.
 #[test]
-fn a_tap_that_has_the_roots_width_after_a_widen_and_a_declaration_is_not_reopened() {
+fn a_tap_that_has_the_main_outputs_width_after_a_widen_and_a_declaration_is_not_reopened() {
     let mut s = session();
     let mut tap = s
         .graph()
         .taps()
-        .open_root(Samples::new(4096))
+        .open_main_output(Samples::new(4096))
         .expect("opens");
     s.graph().widen_outputs(4).expect("widens");
     let _ = block(&mut s);
-    s.declare_root_topology(Some(ChannelTopology::default_for(ChannelLayout::STEREO)))
+    s.declare_main_output_topology(Some(ChannelTopology::default_for(ChannelLayout::STEREO)))
         .expect("stereo")
         .unfaded();
     let events = reopened(block(&mut s));
     assert!(
         events
             .iter()
-            .all(|(id, _)| matches!(id, RootReader::Meter(_))),
+            .all(|(id, _)| matches!(id, MainOutputReader::Meter(_))),
         "no tap is reopened"
     );
     let (frames, ended) = drain(&mut tap);
@@ -344,28 +346,28 @@ fn a_tap_that_has_the_roots_width_after_a_widen_and_a_declaration_is_not_reopene
     assert_eq!(frames.len(), 2 * BLOCK * 2);
 }
 
-/// **The converse**: the root widened to 4 and declared 4 wide leaves a 2-wide
+/// **The converse**: the main output widened to 4 and declared 4 wide leaves a 2-wide
 /// tap with the wrong width, so it is reopened at 4 although the declaration
-/// did not move the root's width.
+/// did not move the main output's width.
 #[test]
-fn a_tap_narrower_than_the_declared_root_is_reopened_at_its_width() {
+fn a_tap_narrower_than_the_declared_main_output_is_reopened_at_its_width() {
     let mut s = session();
     let old = s
         .graph()
         .taps()
-        .open_root(Samples::new(4096))
+        .open_main_output(Samples::new(4096))
         .expect("opens");
     s.graph().widen_outputs(4).expect("widens");
     let _ = block(&mut s);
     let four = ChannelTopology::default_for(ChannelLayout::from_count(4));
-    s.declare_root_topology(Some(four.clone()))
+    s.declare_main_output_topology(Some(four.clone()))
         .expect("quad")
         .unfaded();
     let mut events = reopened(block(&mut s));
-    events.retain(|(id, _)| matches!(id, RootReader::Tap(_)));
+    events.retain(|(id, _)| matches!(id, MainOutputReader::Tap(_)));
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].1, four);
-    assert_eq!(Some(events[0].0), old.id().map(RootReader::Tap));
+    assert_eq!(Some(events[0].0), old.id().map(MainOutputReader::Tap));
     assert_eq!(claim_tap(&mut s, events[0].0).width(), 4);
 }
 
@@ -377,11 +379,11 @@ fn closing_a_tap_drops_the_reader_held_for_it() {
     let mut old = s
         .graph()
         .taps()
-        .open_root(Samples::new(4096))
+        .open_main_output(Samples::new(4096))
         .expect("opens");
     let id = old.id().expect("named");
     let _ = block(&mut s);
-    s.declare_root_topology(Some(mono()))
+    s.declare_main_output_topology(Some(mono()))
         .expect("mono")
         .unfaded();
     assert_eq!(reopened(block(&mut s)).len(), 1);
@@ -389,21 +391,21 @@ fn closing_a_tap_drops_the_reader_held_for_it() {
     let _ = block(&mut s);
     let _ = s.update();
     assert_eq!(
-        s.take_reopened(RootReader::Tap(id)).unwrap_err(),
-        NotReopened(RootReader::Tap(id))
+        s.take_reopened(MainOutputReader::Tap(id)).unwrap_err(),
+        NotReopened(MainOutputReader::Tap(id))
     );
     assert!(drain(&mut old).1, "the superseded reader ends");
 }
 
-/// **Closing the master meter drops the reader held for it**: the claim is
+/// **Closing the main output meter drops the reader held for it**: the claim is
 /// refused, and the superseded handle reads closed.
 #[test]
-fn closing_the_master_meter_drops_the_reader_held_for_it() {
+fn closing_the_main_output_meter_drops_the_reader_held_for_it() {
     let mut s = session();
-    let old = s.take_master_meter().expect("held");
+    let old = s.take_main_output_meter().expect("held");
     let id = old.id();
     let _ = block(&mut s);
-    s.declare_root_topology(Some(mono()))
+    s.declare_main_output_topology(Some(mono()))
         .expect("mono")
         .unfaded();
     assert_eq!(reopened(block(&mut s)).len(), 1);
@@ -412,8 +414,8 @@ fn closing_the_master_meter_drops_the_reader_held_for_it() {
         let _ = block(&mut s);
     }
     assert_eq!(
-        s.take_reopened(RootReader::Meter(id)).unwrap_err(),
-        NotReopened(RootReader::Meter(id))
+        s.take_reopened(MainOutputReader::Meter(id)).unwrap_err(),
+        NotReopened(MainOutputReader::Meter(id))
     );
     assert!(old.is_closed());
 }

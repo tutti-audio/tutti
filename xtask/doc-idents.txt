@@ -89,7 +89,7 @@
 1 crates/tutti-sampler/tests/voice/reverse_and_loop.rs
 1 crates/tutti-session/src/fork.rs
 1 crates/tutti-session/src/plugin.rs
-1 crates/tutti-session/src/session/root.rs
+1 crates/tutti-session/src/session/main_output.rs
 1 crates/tutti-session/tests/midi/midi.rs
 1 crates/tutti-sf2/src/sample_header.rs
 1 crates/tutti-music/src/note.rs

@@ -17,7 +17,7 @@ use std::sync::{Arc, OnceLock};
 use tutti_buffers::ChannelTopology;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
-    ParamAccess, ParamFlags, ParamRange, ParamSteps, ParameterInfo, PluginDescriptor,
+    ParamAccess, ParamFlags, ParamSteps, ParameterInfo, PluginDescriptor, PluginParamRange,
 };
 use tutti_rt::Publisher;
 use tutti_units::Normalized;

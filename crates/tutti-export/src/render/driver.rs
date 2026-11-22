@@ -12,7 +12,7 @@
 //! The frame width is a runtime value carried by
 //! `Interleaved`, never a `const CH`. A width in the type can only carry one that is a property of the
 //! *code*; the destination width here is a property of the caller's target, so
-//! any positive count renders — 3- and 5-wide masters included.
+//! any positive count renders — 3- and 5-wide main outputs included.
 //!
 //! A fold from the graph's real output width onto a target's
 //! ([`tutti_buffers::Fold`], built once, before the first block) downmixes a
@@ -39,7 +39,7 @@ pub(crate) struct FileChannels<'a> {
 
 impl FileChannels<'_> {
     /// The fold from a source of `outputs` channels. The source is what it
-    /// declared (`root`: the graph's root, or a tap's placement), or else the engine's order for its width (a bare 4 is
+    /// declared (`main_output`: the graph's main output, or a tap's placement), or else the engine's order for its width (a bare 4 is
     /// quad); the file the topology it states or else the default layout for
     /// its width; where either has no order, or the file states unassigned
     /// channels, the channels go by index ([`fold_to_width`],
@@ -48,34 +48,36 @@ impl FileChannels<'_> {
     /// # Errors
     ///
     /// [`ConfigError::Placement`] when the file's topology cannot take the
-    /// graph's channels, or the declared root is
+    /// graph's channels, or the declared main output is
     /// not as wide as the graph, or the graph has more channels than a layout
     /// holds ([`BufferError::Layout`](tutti_buffers::BufferError::Layout)).
     pub(crate) fn fold_from<F: Float>(
         &self,
         outputs: usize,
-        root: Option<&ChannelTopology>,
+        main_output: Option<&ChannelTopology>,
     ) -> crate::Result<Fold<F>> {
         let graph = ChannelLayout::try_from(outputs)
             .map_err(|e| ConfigError::Placement(tutti_buffers::BufferError::from(e).into()))?;
-        if let Some(root) = root
-            && root.width() != graph
+        if let Some(main_output) = main_output
+            && main_output.width() != graph
         {
-            return Err(ConfigError::Root(tutti_graph::RootError::Width {
-                declared: root.width(),
-                requested: graph,
-            })
-            .into());
+            return Err(
+                ConfigError::MainOutput(tutti_graph::MainOutputError::Width {
+                    declared: main_output.width(),
+                    requested: graph,
+                })
+                .into(),
+            );
         }
         let Some(topology) = self.topology else {
-            let fold = match root {
-                Some(root) => fold_to_width(root, self.layout),
+            let fold = match main_output {
+                Some(main_output) => fold_to_width(main_output, self.layout),
                 None => fold_to_width(&ChannelTopology::default_for(graph), self.layout),
             };
             return fold.map_err(|e| ConfigError::Placement(e).into());
         };
-        let from = match root {
-            Some(root) => root.clone(),
+        let from = match main_output {
+            Some(main_output) => main_output.clone(),
             None => ChannelTopology::default_for(graph),
         };
         // A file that names no speaker takes the graph's channels by index,
@@ -107,10 +109,10 @@ pub(crate) struct GraphSource<'a, F: Float> {
     global_inputs: usize,
     /// One plane per global output, `max_block` long.
     planes: Vec<Vec<F>>,
-    /// The root's channels: the first of `planes`.
+    /// The main output's channels: the first of `planes`.
     outputs: usize,
     /// What the graph's output channels are, when it declared it.
-    root: Option<ChannelTopology>,
+    main_output: Option<ChannelTopology>,
     max_block: usize,
     produced: Samples,
     /// The executor's dropped and recovered counts the render counts from
@@ -145,7 +147,7 @@ impl<'a, F: Float> GraphSource<'a, F> {
         executor: &'a mut tutti_graph::Executor<F>,
         sample_rate: tutti_units::SampleRate,
         clock: &'a dyn RenderClock,
-        root: Option<ChannelTopology>,
+        main_output: Option<ChannelTopology>,
         before: (u64, u64),
         rt_log: Option<(RtLogReaders, Arc<dyn RtLogSink>)>,
     ) -> crate::Result<Self> {
@@ -168,8 +170,8 @@ impl<'a, F: Float> GraphSource<'a, F> {
         // this call, and not from here.
         executor.apply_pending();
         // The executor takes a slice for every channel the plan renders, and
-        // the root's are the first `outputs`: a plan that carries an old
-        // root's channels (a root change crossfading) renders them into planes
+        // the main output's are the first `outputs`: a plan that carries an old
+        // main output's channels (a main output change crossfading) renders them into planes
         // the export never reads.
         let (global_inputs, outputs, rendered) = executor.plan().map_or_else(
             || {
@@ -196,7 +198,7 @@ impl<'a, F: Float> GraphSource<'a, F> {
             global_inputs,
             planes,
             outputs,
-            root,
+            main_output,
             max_block,
             produced: Samples::new(0),
             before,
@@ -220,8 +222,8 @@ impl<F: Float> GraphSource<'_, F> {
     }
 
     /// What the graph's outputs are, when it declared it.
-    pub(crate) fn root(&self) -> Option<&ChannelTopology> {
-        self.root.as_ref()
+    pub(crate) fn main_output(&self) -> Option<&ChannelTopology> {
+        self.main_output.as_ref()
     }
 
     /// The planes of the block last rendered: one per global output, the first
@@ -334,11 +336,19 @@ pub(crate) fn with_source<F: Float, T>(
     clock: &dyn RenderClock,
     f: impl FnOnce(&mut GraphSource<'_, F>) -> crate::Result<Outcome<T>>,
 ) -> crate::Result<(Outcome<T>, u64)> {
-    let root = graph.root_topology().cloned();
+    let main_output = graph.main_output_topology().cloned();
     let settled = graph.settled();
     let rt_log = graph.rt_log();
     let (editor, executor) = graph.parts_mut();
-    let mut src = GraphSource::new(editor, executor, sample_rate, clock, root, settled, rt_log)?;
+    let mut src = GraphSource::new(
+        editor,
+        executor,
+        sample_rate,
+        clock,
+        main_output,
+        settled,
+        rt_log,
+    )?;
     let rendered = f(&mut src);
     // The next render counts from here, whether this one finished or not.
     let counts = src.counts();

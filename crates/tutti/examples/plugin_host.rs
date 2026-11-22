@@ -43,8 +43,9 @@ use tutti::plugin::PresetSupport;
 use tutti::plugin::catalog::{CatalogConfig, PluginDb};
 use tutti::session::Peer as _;
 use tutti::{
-    Beat, Bounce, Catalog, Format, LoadPlugin, LoadPreset, MaxBlock, ParamId, Pcm, PluginEvent,
-    Range, RestoreState, Root, SampleRate, Samples, SaveState, Session, SessionEvent, StateUse,
+    Beat, Bounce, Catalog, Format, LoadPlugin, LoadPreset, MainOutput, MaxBlock, ParamId, Pcm,
+    PluginEvent, Range, RestoreState, SampleRate, Samples, SaveState, Session, SessionEvent,
+    StateUse,
 };
 use tutti_units::Normalized;
 
@@ -111,14 +112,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         LoadPlugin::InProcess(load) => load.run(main)?,
         LoadPlugin::OutOfProcess(load) => block_on(load.into_future())?,
     };
-    let loaded = opened.handle();
-    let node = session.add_plugin(opened)?;
+    let loaded = opened.instance();
+    let node = session.apply(opened)?;
 
-    // 4. Wire it: the plugin's outputs feed the root's channels. `node` is a
+    // 4. Wire it: the plugin's outputs feed the main output's channels. `node` is a
     //    `Key<AnyPlugin>`: ports come from it as from any node's key
     //    (`node.out(0)`, `node.events_in()`), and
     //    `node.param(id)` is the reference a route targets.
-    session.graph().connect(node, Root)?;
+    session.graph().connect(node, MainOutput)?;
 
     // 5. Play. An instrument takes a note on its event input: middle C for the
     //    first two beats, as a clip on the project's timeline.
@@ -242,10 +243,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rendering = session.bounce(
         Bounce::new()
             .range(Range::Beats(Beat::new(0.0), Beat::new(4.0)))
-            .master(out.as_path(), Format::Wav(Pcm::Int24)),
+            .main_output(out.as_path(), Format::Wav(Pcm::Int24)),
     )?;
     let rendered = block_on(rendering.into_future());
-    let written = session.apply(rendered)?.into_master();
+    let written = session.apply(rendered)?.into_main_output();
     println!("wrote {} ({} bytes)", written.path.display(), written.bytes);
     Ok(())
 }

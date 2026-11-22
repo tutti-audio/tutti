@@ -1,6 +1,6 @@
 //! An instrument in the session, played live.
 //!
-//! An instrument is a [`tutti_graph::Instrument`]: a node that turns MIDI on its
+//! An instrument is a [`tutti_graph::InstrumentNode`]: a node that turns MIDI on its
 //! event input into audio and names its main output pair. The session adds one
 //! ([`Session::add_instrument`]), makes one of a node already in the graph
 //! ([`Session::instrument`]), or of a hosted plugin whose format says it is one
@@ -36,13 +36,15 @@
 
 use tutti_buffers::BusTopology;
 use tutti_graph::NodeKey;
-use tutti_graph::{EventInletNode, Instrument};
+use tutti_graph::{EventInletNode, InstrumentNode};
 use tutti_midi_runtime::{LIVE_INLET_CAPACITY, MidiKeys};
 use tutti_nodes::{BusStripConfig, BusStripNode};
 use tutti_ump::MidiGroup;
 use tutti_units::Amplitude;
 
-use crate::{Feeder, Graph, Key, OutPort, ParamTarget, RemoveError, Root, Session, SessionNode};
+use crate::{
+    Feeder, Graph, Key, MainOutput, OutPort, ParamTarget, RemoveError, Session, SessionNode,
+};
 
 /// The type of an instrument's key when the session was given a node by its
 /// [`NodeKey`] ([`Session::instrument`]), so its type is not known. A [`Key`]
@@ -140,8 +142,8 @@ impl<N: ?Sized> InstrumentHandle<N> {
     }
 
     /// The instrument's main pair, the output ports a host plays (the
-    /// instrument's `main_outputs`). Feed a wide root from it with
-    /// [`Graph::connect`](crate::Graph::connect), one port to one root channel.
+    /// instrument's `main_outputs`). Feed a wide main output from it with
+    /// [`Graph::connect`](crate::Graph::connect), one port to one main output channel.
     #[must_use]
     pub fn main_outputs(&self) -> [usize; 2] {
         self.main.map(usize::from)
@@ -192,11 +194,11 @@ impl<N: ?Sized> InstrumentHandle<N> {
 
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Adds `instrument` to the graph, makes it playable and wires its strip
-    /// to the master, so a note sent through its keys is heard. It holds no MPE
+    /// to the main output, so a note sent through its keys is heard. It holds no MPE
     /// zones: classic MPE reaches it already rewritten as per-note messages, by the
     /// session's transforms (`session.mpe()`).
     ///
-    /// A strip is a stereo pair, so a master of another width refuses the wire
+    /// A strip is a stereo pair, so a main output of another width refuses the wire
     /// ([`ConnectError::Width`](crate::ConnectError::Width)): add the instrument
     /// with [`add_instrument_unwired`](Self::add_instrument_unwired) and wire
     /// [`InstrumentHandle::out`] as the mix wants.
@@ -207,12 +209,12 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// no event input or lacks the output its main pair names, or the wire's
     /// [`ConnectError`](crate::ConnectError) (the instrument is removed again in
     /// both cases).
-    pub fn add_instrument<I: Instrument<C::Float> + SessionNode<C::Float>>(
+    pub fn add_instrument<I: InstrumentNode<C::Float> + SessionNode<C::Float>>(
         &mut self,
         instrument: I,
     ) -> Result<InstrumentHandle<I>, crate::Error> {
         let added = self.add_instrument_unwired(instrument)?;
-        if let Err(e) = self.graph().connect(added.out(), Root) {
+        if let Err(e) = self.graph().connect(added.out(), MainOutput) {
             let node = added.node().erase();
             let handle = self.remove_instrument(added);
             let removed = self.remove(node);
@@ -225,7 +227,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
 
     /// [`add_instrument`](Self::add_instrument) with nothing wired after the
     /// strip: for a mix that routes [`InstrumentHandle::out`] itself (a bus, a
-    /// send, a wide root), as [`instrument`](Self::instrument) leaves a node
+    /// send, a wide main output), as [`instrument`](Self::instrument) leaves a node
     /// it is given. Its keys are live only, as `add_instrument`'s are: a bounce
     /// does not contain what they play.
     ///
@@ -234,7 +236,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// [`Error::NotInstrument`](crate::Error::NotInstrument) when its shape has
     /// no event input or lacks the output its main pair names (the node is
     /// removed again).
-    pub fn add_instrument_unwired<I: Instrument<C::Float> + SessionNode<C::Float>>(
+    pub fn add_instrument_unwired<I: InstrumentNode<C::Float> + SessionNode<C::Float>>(
         &mut self,
         instrument: I,
     ) -> Result<InstrumentHandle<I>, crate::Error> {

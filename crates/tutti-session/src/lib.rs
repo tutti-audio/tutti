@@ -18,14 +18,14 @@
 //! use tutti_buffers::InterleavedMut;
 //! use tutti_graph::ForkByClone;
 //! use tutti_nodes::testing::Osc;
-//! use tutti_session::{Root, Session};
+//! use tutti_session::{MainOutput, Session};
 //!
 //! let mut s = Session::builder()
 //!     .outputs_floor(ChannelLayout::MONO)
 //!     .outputs(ChannelLayout::MONO).max_block(MaxBlock::of(Samples::new(512))).build()
 //!     .unwrap();
 //! let osc = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
-//! s.graph().connect(osc, Root).unwrap();
+//! s.graph().connect(osc, MainOutput).unwrap();
 //! s.update(); // commits: the graph was edited
 //!
 //! let mut block = vec![0.0f32; 512];
@@ -106,18 +106,31 @@ mod midi;
 #[cfg(feature = "midi-hardware")]
 mod midi_ci;
 #[cfg(feature = "midi")]
+mod midi_event;
+#[cfg(feature = "midi")]
 mod midi_follow;
 #[cfg(feature = "midi-hardware")]
 mod midi_hardware;
+#[cfg(feature = "midi-hardware")]
+mod midi_link;
 #[cfg(feature = "midi")]
 mod midi_load;
+// Where UDP sockets exist and the feature is on; its twin is empty of them.
+#[cfg(feature = "midi")]
+#[cfg_attr(
+    all(feature = "midi-network", not(target_arch = "wasm32")),
+    path = "midi_network.rs"
+)]
+#[cfg_attr(
+    not(all(feature = "midi-network", not(target_arch = "wasm32"))),
+    path = "midi_network_none.rs"
+)]
+mod midi_network;
 #[cfg(feature = "midi-hardware")]
 mod midi_port;
 #[cfg(all(feature = "midi", not(feature = "midi-hardware")))]
 #[path = "midi_port_none.rs"]
 mod midi_port;
-#[cfg(feature = "midi")]
-mod midi_report;
 #[cfg(feature = "midi")]
 mod midi_sink;
 mod modulation;
@@ -163,16 +176,17 @@ mod watch;
 #[cfg(feature = "analyze")]
 pub use analyze::{
     Analyze, AnalyzeError, Analyzer, AnalyzerError, Analyzing, Audio, AudioContext, AudioInput,
-    BindError,
+    MeterBindError,
 };
 pub use apply::Apply;
 #[cfg(feature = "export")]
 pub use bounce::{
     AnyStem, Bounce, BounceConfigError, BounceError, BounceHandle, BounceJob, BounceLatency,
-    BounceRendered, BounceTail, Bounced, Bouncing, BufferMaster, BufferStem, ExportClock,
-    FileMaster, FileStem, Master, NoMaster, PrepareEdit, PreparedGraph, Range, Stem, StemGain,
+    BounceRendered, BounceTail, Bounced, Bouncing, BufferMainOutput, BufferStem, ExportClock,
+    FileMainOutput, FileStem, MainOutputKind, NoMainOutput, PrepareEdit, PreparedGraph, Range,
+    Stem, StemGain,
 };
-pub use builder::{BlockConfig, SessionBuilder, Workers, root_width};
+pub use builder::{BlockConfig, SessionBuilder, Workers, main_output_width};
 #[cfg(feature = "device")]
 pub use clock::DeviceClock;
 pub use clock::{
@@ -189,7 +203,7 @@ pub use device::{
 pub use editor::{Editor, EditorCallError, Opened};
 pub use error::{
     BackgroundWork, ConnectError, DeclarationError, Error, InletError, NoSuchNode, RemoveError,
-    Result, SessionHeardTapError, SetRateError, TempoError,
+    Result, SessionHeardTapError, SetRateError, SetTempoError,
 };
 #[cfg(feature = "midi")]
 pub use error::{MidiError, RouteDeclarer};
@@ -199,17 +213,18 @@ pub use graph::ModKeys;
 #[cfg(feature = "testing")]
 pub use graph::{AudioSide, Testing};
 pub use graph::{
-    Committed, Feeder, Graph, LIVE_MAX_BLOCK, Meters, NotReopened, Reopened, ReplaceRefused,
-    Replacement, RootReader, Taps,
+    Committed, Feeder, Graph, LIVE_MAX_BLOCK, MainOutputReader, Meters, NotReopened, Reopened,
+    ReplaceRefused, Replacement, Taps,
 };
 #[cfg(feature = "capture")]
 pub use input::{Input, InputConfig, InputOpener, OpenedInput};
 #[cfg(feature = "midi")]
 pub use instrument::{AnyNode, InstrumentHandle, NotInstrument};
 pub use key::{
-    Bus, BusSink, Channel, Connection, Disconnection, Edge, Event, EventEdge, EventInPort,
-    EventOutPort, EventTapPort, Fanin, InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet,
-    Removal, Root, RootDeclaration, SetSources, Weighted, Wire,
+    BusSink, BusWire, ChannelEdge, ChannelWire, Connection, Disconnection, EventEdge, EventInPort,
+    EventOutPort, EventTapPort, EventWire, Fanin, InPort, Inlet, Key, MainBusWire, MainInput,
+    MainOutput, MainOutputDeclaration, MainSink, OutPort, Outlet, Removal, SetSources, Weighted,
+    Wire,
 };
 #[cfg(any(feature = "capture", feature = "midi"))]
 pub use latency::{Start, TakeLatency, Trim};
@@ -244,8 +259,12 @@ pub use midi_port::{
     MidiInput, MidiInputInfo, MidiOpenError, MidiOutput, MidiOutputInfo, MidiPortError, NoHardware,
     OpenedMidiInput, OpenedMidiOutput, OpeningMidiInput, OpeningMidiOutput, PortCause,
 };
+// Everything public in the module: it has no items on a target with no sockets
+// but `NetworkEvent`, which `MidiEvent` names.
 #[cfg(feature = "midi")]
-pub use midi_report::MidiReport;
+pub use midi_event::MidiEvent;
+#[cfg(feature = "midi-network")]
+pub use midi_network::*;
 #[cfg(feature = "midi")]
 pub use midi_sink::{MidiSink, OpenMidiSink};
 pub use modulation::{
@@ -256,15 +275,15 @@ pub use modulation::{
 #[cfg(feature = "sampler")]
 pub use node::Handled;
 pub use node::{Reclaimer, Reclaims, SessionNode};
-pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
+pub use peer::{Peer, PeerError, PeerEvent, PeerResourceId, Presence, Resource, ResourceFact};
 #[cfg(any(feature = "plugin", feature = "midi-hardware"))]
 pub use peer_state::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "plugin")]
 pub use plugin::{
     AddPluginError, AnyPlugin, LoadInProcess, LoadOutOfProcess, LoadPlugin, LoadPreset,
-    LoadPresetInProcess, LoadPresetOutOfProcess, LoadedPlugin, LoadedPreset, LoadingOutOfProcess,
+    LoadPresetInProcess, LoadPresetOutOfProcess, LoadedPlugin, LoadedPreset, LoadingPlugin,
     LoadingPresetOutOfProcess, Plugin, PluginApplyError, PluginCause, PluginChange, PluginEvent,
-    PluginHealth, PluginInfo, PluginNode, PluginPorts, PortsRefusal, PresetStartError,
+    PluginHealth, PluginInfo, PluginInstance, PluginPorts, PortsRefusal, PresetStartError,
     RestoreState, RestoreStateInProcess, RestoreStateOutOfProcess, RestoredState,
     RestoringStateOutOfProcess, SaveState, SaveStateInProcess, SaveStateOutOfProcess,
     SavingStateOutOfProcess, StateRestore, StateStartError, StateView, SwapPluginError,
@@ -295,15 +314,17 @@ pub use sampler::{OpenStream, OpenStreamError, OpenedStream, OpeningStream, Samp
 #[cfg(feature = "midi")]
 pub use session::MidiNodes;
 pub use session::ModInput;
-pub use session::{AppKey, PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent};
+pub use session::{
+    AppKey, MainOutputTopologyStatus, PHASES, Phase, PhaseCx, Session, SessionEvent,
+};
 #[cfg(all(feature = "analyze", feature = "sampler"))]
 pub use signal_windows::windows_from_signal;
 #[cfg(feature = "device")]
 pub use switch::ClockError;
 #[cfg(feature = "capture")]
 pub use take::{
-    Armed, InFlight, Punch, PunchError, Recorded, Rolling, Take, TakeEnd, TakeError, TakeEvent,
-    TakeFile, TakeId, TakePlacement, TakeTarget, Window,
+    Armed, InFlight, Punch, PunchError, Record, Recorded, Rolling, Take, TakeEnd, TakeError,
+    TakeEvent, TakeFile, TakeId, TakePlacement, TakeTarget, Window,
 };
 #[cfg(all(feature = "midi", feature = "analyze"))]
 pub use transcribe::{LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords};
@@ -312,13 +333,13 @@ pub use transport_handle::TransportHandle;
 pub use tutti_dsp::DitherShape;
 #[cfg(feature = "record")]
 pub use tutti_dsp::{DitherSink, NoiseShaping};
-pub use tutti_engine::{BlockDates, HeardTapOpen, OutputPlacement, Playhead};
+pub use tutti_engine::{BlockDates, OutputPlacement, Playhead};
 #[cfg(feature = "export")]
 pub use tutti_export::{
     EventLossPolicy, Normalize, Outcome, Produced, Progress, Rendered, Resample, Stage, Written,
 };
 pub use tutti_graph::{
-    BusError, BusRef, BusSource, Buses, HasParam, HasParams, MissingSource, ParamUnit, Scalar,
+    BusError, BusRef, BusSource, Buses, HasParam, HasParams, MissingSource, ParamValue, Scalar,
 };
 pub use tutti_graph::{
     CloseError, CommitError, EventCapacity, Losses, NodeMode, PassError, Stamp, Wired, WiredMask,

@@ -561,7 +561,7 @@ fn an_offline_fork_renders_the_same_on_a_pool() {
     let pre = prepare(256);
     let fork = |workers: usize| {
         let (ed, mut exec) = live_ed
-            .fork(ForkTarget::Master, ForkMode::Offline, pre)
+            .fork(ForkTarget::MainOutput, ForkMode::Offline, pre)
             .expect("every node forks");
         if workers > 1 {
             exec.set_pool(Some(test_pool(workers)));

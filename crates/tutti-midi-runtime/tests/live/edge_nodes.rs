@@ -233,7 +233,7 @@ fn a_groups_channels_leave_on_their_own_ports() {
     assert_eq!(got, vec![(1, 60), (MIDI_INPUT_PORTS + 1, 61)]);
     let prepare = *live.prepare();
     assert!(
-        live.fork(ForkTarget::Master, ForkMode::Live, prepare)
+        live.fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
             .is_ok()
     );
 }
@@ -1323,7 +1323,7 @@ fn an_input_nodes_fork_is_silent() {
     let (live, _exec, _c, seen) = input(Input::new(wire), MIDI_INPUT_PORTS as u16, 512);
     let prepare = *live.prepare();
     let (_fork, mut fork_exec) = live
-        .fork(ForkTarget::Master, ForkMode::Live, prepare)
+        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
         .expect("forks");
     block(&mut fork_exec, 512);
     assert!(seen.lock().unwrap().is_empty());
@@ -1522,7 +1522,7 @@ fn a_sync_nodes_fork_runs() {
     );
     let prepare = *live.prepare();
     let (_fork, mut fork_exec) = live
-        .fork(ForkTarget::Master, ForkMode::Live, prepare)
+        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
         .expect("forks");
     let mut out = vec![0.0f32; 512];
     for playing in [false, true] {

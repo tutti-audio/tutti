@@ -14,7 +14,7 @@ fn offline() -> Session {
         .expect("builds")
 }
 
-fn render(s: &Session, blocks: usize) {
+fn render(s: &mut Session, blocks: usize) {
     let mut block = vec![0.0f32; 1_000 * 2];
     for _ in 0..blocks {
         s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
@@ -34,7 +34,7 @@ fn a_handle_on_another_thread_rolls_the_session_transport() {
     std::thread::spawn(move || handle.play().unwrap())
         .join()
         .unwrap();
-    render(&s, 2);
+    render(&mut s, 2);
     let head = s.playhead();
     assert!(head.playing());
     assert!(head.beat().get() > 0.0, "{}", head.beat().get());
@@ -44,16 +44,16 @@ fn a_handle_on_another_thread_rolls_the_session_transport() {
 /// a stop from a thread, the playhead holds.
 #[test]
 fn a_handle_stop_halts_a_session_play() {
-    let s = offline();
+    let mut s = offline();
     s.play().unwrap();
-    render(&s, 2);
+    render(&mut s, 2);
     let handle = s.transport_handle();
     std::thread::spawn(move || handle.stop(FadeOut::Immediate).unwrap())
         .join()
         .unwrap();
-    render(&s, 2);
+    render(&mut s, 2);
     let held = s.playhead().beat();
-    render(&s, 5);
+    render(&mut s, 5);
     assert!(!s.playhead().playing());
     assert_eq!(s.playhead().beat(), held);
 }
@@ -119,9 +119,9 @@ fn a_next_block_schedule_updates_the_rolling_record() {
 /// transport.
 #[test]
 fn a_stop_sent_after_a_rendered_play_refuses_a_beat_play() {
-    let s = offline();
+    let mut s = offline();
     s.play().unwrap();
-    render(&s, 2);
+    render(&mut s, 2);
     assert!(s.playhead().playing());
     let handle = s.transport_handle();
     handle.stop(FadeOut::Immediate).unwrap();
@@ -135,7 +135,7 @@ fn a_stop_sent_after_a_rendered_play_refuses_a_beat_play() {
 /// fires:** after the render that fires it, a beat play is accepted.
 #[test]
 fn a_play_timed_at_a_frame_counts_as_rolling_once_rendered() {
-    let s = offline();
+    let mut s = offline();
     let handle = s.transport_handle();
     handle
         .schedule(Frame::new(1_000), MotionCommand::Play)
@@ -144,7 +144,7 @@ fn a_play_timed_at_a_frame_counts_as_rolling_once_rendered() {
         handle.schedule(Beat::new(8.0), MotionCommand::Play),
         Err(TimedError::BeatWhileStopped(MotionCommand::Play))
     ));
-    render(&s, 3);
+    render(&mut s, 3);
     assert!(s.playhead().playing());
     assert!(handle.schedule(Beat::new(8.0), MotionCommand::Play).is_ok());
 }
@@ -152,14 +152,14 @@ fn a_play_timed_at_a_frame_counts_as_rolling_once_rendered() {
 /// **A handle reads and cancels the timed commands in flight.**
 #[test]
 fn a_handle_counts_and_cancels_scheduled_commands() {
-    let s = offline();
+    let mut s = offline();
     let handle = s.transport_handle();
     handle
         .schedule(Frame::new(48_000), MotionCommand::Play)
         .unwrap();
     assert_eq!(handle.scheduled_outstanding(), 1);
     handle.cancel_scheduled();
-    render(&s, 1);
+    render(&mut s, 1);
     assert_eq!(handle.scheduled_outstanding(), 0);
     assert!(!s.playhead().playing(), "the cancelled play never fires");
 }
@@ -173,13 +173,13 @@ fn a_handle_reads_the_loop_region() {
     let looping = handle.looping();
     s.set(looping.to(LoopRegion::new(range, true))).unwrap();
     let _published = s.update();
-    render(&s, 1);
+    render(&mut s, 1);
     let region = handle.loop_region();
     assert_eq!(region.bounds(), range);
     assert!(region.is_armed());
     s.set(looping.to(LoopRegion::new(range, false))).unwrap();
     let _published = s.update();
-    render(&s, 1);
+    render(&mut s, 1);
     let region = handle.loop_region();
     assert_eq!(region.bounds(), range, "the bounds are kept");
     assert!(!region.is_armed());

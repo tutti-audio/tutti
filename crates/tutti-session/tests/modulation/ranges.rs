@@ -14,7 +14,7 @@ use tutti_session::{
 use tutti_units::{Depth, Hz, Mix, Q, Samples, UnitParam};
 
 use crate::common::probe::ProbeUnit;
-use crate::mod_lanes::{master, render, rig, settle};
+use crate::mod_lanes::{main_output, render, rig, settle};
 use tutti_buffers::ChannelLayout;
 
 fn session() -> Session {
@@ -210,7 +210,7 @@ fn a_range_write_is_refused_at_the_call() {
 fn a_narrowed_range_bounds_the_effective_value_and_not_the_base() {
     let (mut s, mut side) = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));
-    master(&mut s, &[probe.erase()]);
+    main_output(&mut s, &[probe.erase()]);
     let mut m = s.mods_mut();
     m.range(probe.cutoff(), Hz::new(0.0)..Hz::new(1_000.0))
         .unwrap();
@@ -251,7 +251,7 @@ fn a_narrowed_range_bounds_the_effective_value_and_not_the_base() {
 fn a_range_write_republishes_no_program() {
     let (mut s, mut side) = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));
-    master(&mut s, &[probe.erase()]);
+    main_output(&mut s, &[probe.erase()]);
     let mut m = s.mods_mut();
     m.range(probe.cutoff(), Hz::new(0.0)..Hz::new(1_000.0))
         .unwrap();

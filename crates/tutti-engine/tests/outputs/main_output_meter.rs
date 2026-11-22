@@ -1,4 +1,4 @@
-//! The master meter is an op in the plan, so whatever renders the graph feeds
+//! The main output meter is an op in the plan, so whatever renders the graph feeds
 //! it: the level of each graph output channel, before the engine's fold to the
 //! device and its declick. These moved here from `tutti-cpal`'s output-block
 //! tests, where the callback fed a stereo-folded meter; the fold tests became
@@ -36,7 +36,7 @@ impl tutti_graph::Node for Dc {
 }
 
 /// An engine over a constant `level` on output `channel` of `outputs` (silence
-/// on the rest), or on every output when `channel` is `None`, and the master
+/// on the rest), or on every output when `channel` is `None`, and the main output
 /// meter declared on its outputs (off until enabled).
 fn engine(
     level: f32,
@@ -175,7 +175,7 @@ fn the_pure_render_feeds_the_meter() {
     assert_eq!(meter.read()[0].peak.get(), 0.25);
 }
 
-/// **The master reads before the declick.** A stop that fades the output
+/// **The main output reads before the declick.** A stop that fades the output
 /// does not lower the reading of the block in which it fades: the meter sees
 /// the graph's signal at its full level while the device buffer ramps to
 /// silence.
@@ -183,7 +183,7 @@ fn the_pure_render_feeds_the_meter() {
 /// The RMS tells them apart (the peak does not: the fade rises back to the
 /// source's level within the block).
 #[test]
-fn the_master_reads_before_the_declick() {
+fn the_main_output_reads_before_the_declick() {
     use tutti_timeline::MotionCommand;
     let transport = Transport::new(SampleRate::of(RATE));
     let (mut ed, exec) = Editor::new(Prepare::new(
@@ -204,13 +204,13 @@ fn the_master_reads_before_the_declick() {
     ed.commit().expect("commits");
     let engine =
         Engine::with_capacity(&transport, &mut ed, exec, Samples::new(512)).expect("limits");
-    let _ = transport.motion().try_send(MotionCommand::Play);
+    let _ = transport.motion().send(MotionCommand::Play);
     render(&engine, 512, 1);
     assert_eq!(meter.read()[0].peak.get(), 0.5);
 
     // A declicked stop with no lead time: the output falls to zero over the
     // fade, the graph's own signal does not.
-    let _ = transport.motion().try_send(MotionCommand::stop());
+    let _ = transport.motion().send(MotionCommand::stop());
     let out = render(&engine, 512, 1);
     assert_eq!(out[0], 0.0, "the device buffer starts the stop at zero");
     let faded = (out.iter().map(|s| s * s).sum::<f32>() / out.len() as f32).sqrt();
@@ -220,7 +220,7 @@ fn the_master_reads_before_the_declick() {
     assert_eq!(
         l.rms.get(),
         0.5,
-        "the master reads the graph, not the faded buffer (rms {faded})"
+        "the main output reads the graph, not the faded buffer (rms {faded})"
     );
     Box::leak(Box::new((ed, transport)));
 }
@@ -296,15 +296,15 @@ fn a_block_longer_than_the_capacity_is_measured_whole() {
     }
 }
 
-/// **A stereo root reaches a stereo device unchanged.**
+/// **A stereo main output reaches a stereo device unchanged.**
 ///
 /// The engine folds the graph's outputs to the device's width with
-/// `fold_to_width` over the engine's order for the root's width; a stereo root to a stereo device is the identity, which
+/// `fold_to_width` over the engine's order for the main output's width; a stereo main output to a stereo device is the identity, which
 /// must stay a passthrough. (This pinned the premise of the meter's
 /// stereo shortcut, which went with the fold; the passthrough is still the
 /// engine's own.)
 #[test]
-fn a_stereo_root_folds_to_a_stereo_device_unchanged() {
+fn a_stereo_main_output_folds_to_a_stereo_device_unchanged() {
     let mut folded = [0.0f32; 2];
     let stereo = tutti_buffers::ChannelLayout::STEREO;
     let fold =
@@ -315,6 +315,6 @@ fn a_stereo_root_folds_to_a_stereo_device_unchanged() {
     assert_eq!(
         folded,
         [0.25, -0.75],
-        "a stereo root plays unchanged on a stereo device"
+        "a stereo main output plays unchanged on a stereo device"
     );
 }

@@ -4736,7 +4736,7 @@ mod tests {
         let last = over.queues.last_mut().expect("a queue");
         let mut grown = ParameterQueue::with_capacity(last.param_id, last.len() + extra + 1);
         for p in &last.points {
-            assert!(grown.points.try_push(*p).is_ok());
+            assert!(grown.points.push(*p).is_ok());
         }
         for k in 0..extra {
             assert!(grown.add_point(70 + k as i32 % 300, 0.5));

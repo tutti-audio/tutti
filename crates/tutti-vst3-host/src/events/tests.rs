@@ -478,7 +478,7 @@ fn a_note_expression_of_a_plugins_own_note_id_is_not_a_midi_event() {
 
 #[test]
 fn data_event_with_truncated_size_fails_gracefully() {
-    let data = Data::new(0, &[0xB0]).expect("fits inline");
+    let data = Data::new(0, [0xB0]).expect("fits inline");
     assert!(
         Event::at(0, Payload::Data(data))
             .to_midi(&mut OutputStream::new())
@@ -1471,7 +1471,12 @@ mod message {
             &[0xB0, 7],
         ]
         .into_iter()
-        .map(|bytes| Event::at(0, Payload::Data(Data::new(0, bytes).unwrap())))
+        .map(|bytes| {
+            Event::at(
+                0,
+                Payload::Data(Data::new(0, bytes.iter().copied()).unwrap()),
+            )
+        })
         .collect();
         let good = Event::at(3, Payload::Data(Data::inline(0, [0xB0, 7, 99])));
         assert_no_alloc::assert_no_alloc(|| {
@@ -1491,7 +1496,12 @@ mod message {
     /// more than one packet's worth is dropped (never cut or masked).
     #[test]
     fn a_plugins_sysex_data_event_is_forwarded_only_when_whole() {
-        let data = |bytes: &[u8]| Event::at(2, Payload::Data(Data::new(0, bytes).unwrap()));
+        let data = |bytes: &[u8]| {
+            Event::at(
+                2,
+                Payload::Data(Data::new(0, bytes.iter().copied()).unwrap()),
+            )
+        };
         let whole = data(&[0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7])
             .to_midi(&mut OutputStream::new())
             .unwrap();
@@ -1715,7 +1725,12 @@ fn a_plugins_note_expression_is_the_per_note_message_of_its_dimension() {
 #[test]
 fn events_with_no_ump_form_are_counted_lost() {
     let mut stream = OutputStream::new();
-    let data = |bytes: &[u8]| Event::at(0, Payload::Data(Data::new(0, bytes).unwrap()));
+    let data = |bytes: &[u8]| {
+        Event::at(
+            0,
+            Payload::Data(Data::new(0, bytes.iter().copied()).unwrap()),
+        )
+    };
     // A lone data byte, then bytes whose status is not a message.
     for bytes in [&[0x90][..], &[0x90, 60][..], &[0x00, 1, 2][..]] {
         assert!(data(bytes).to_midi(&mut stream).is_none(), "{bytes:?}");

@@ -485,7 +485,7 @@ fn topo_order_is_deterministic() {
     let t = unequal_latency_diamond();
     let order = t.topo_order().expect("acyclic");
     // Depth-first from the lowest zero-in-degree key: A, then A's newly-ready
-    // dependent B, then the other root D, then the merge C. Asserting the exact
+    // dependent B, then the other main output D, then the merge C. Asserting the exact
     // vector — not merely `is_sorted_topologically` — is the point: any valid
     // order would pass a weaker check, and then a nondeterministic seed would
     // too.

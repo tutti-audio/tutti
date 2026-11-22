@@ -38,9 +38,9 @@ fn fork_error(e: ForkError) -> RenderError {
 pub(crate) struct PendingExport<F: Float> {
     fork: PendingFork<F>,
     pool: Option<Arc<dyn Pool>>,
-    /// The live root's declared topology, for an export of the master: the
+    /// The live main output's declared topology, for an export of the main output: the
     /// file is placed from it, as the device is.
-    root: Option<ChannelTopology>,
+    main_output: Option<ChannelTopology>,
     /// Where the fork's audio-thread log goes, named as the live graph names
     /// its nodes.
     rt_log: Arc<dyn RtLogSink>,
@@ -64,7 +64,7 @@ impl<F: Float> PendingExport<F> {
         target: ForkTarget,
         rate: SampleRate,
         pool: Option<Arc<dyn Pool>>,
-        root: Option<ChannelTopology>,
+        main_output: Option<ChannelTopology>,
     ) -> Result<Self, RenderError> {
         let fork = live
             .fork_gather(target, ForkMode::Offline, RenderGraph::prepare(rate))
@@ -73,7 +73,7 @@ impl<F: Float> PendingExport<F> {
         Ok(Self {
             fork,
             pool,
-            root,
+            main_output,
             rt_log,
         })
     }
@@ -93,8 +93,8 @@ impl<F: Float> PendingExport<F> {
         if let Some(pool) = self.pool {
             setup = setup.pool(pool);
         }
-        if let Some(root) = self.root {
-            setup = setup.root(root);
+        if let Some(main_output) = self.main_output {
+            setup = setup.main_output(main_output);
         }
         Ok(ForkedPair {
             editor,

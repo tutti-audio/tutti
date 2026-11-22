@@ -10,14 +10,16 @@ use std::path::Path;
 use futures_lite::future::block_on;
 use std::future::IntoFuture as _;
 use tutti::nodes::{OscillatorConfig, OscillatorNode, OscillatorWave};
-use tutti::{Amplitude, Bounce, ChannelLayout, Format, Hz, Root, SampleRate, Seconds, Session};
+use tutti::{
+    Amplitude, Bounce, ChannelLayout, Format, Hz, MainOutput, SampleRate, Seconds, Session,
+};
 // ANCHOR_END: imports
 
 // ANCHOR: session
 /// A session whose output plays a 440 Hz sine at a quarter of full scale.
 fn tone() -> Result<Session, tutti::Error> {
     // No sound card: the session renders when we ask it to.
-    let mut session = Session::new(SampleRate::SR_48K)?;
+    let mut session = Session::builder().sample_rate(SampleRate::SR_48K).build()?;
 
     // An A at 440 Hz, a quarter of full scale.
     let sine = session.graph().add(OscillatorNode::from(
@@ -25,8 +27,12 @@ fn tone() -> Result<Session, tutti::Error> {
     ));
 
     // One mono output, heard in the left and the right channel.
-    session.graph().connect(sine.out(0), Root::output(0))?;
-    session.graph().connect(sine.out(0), Root::output(1))?;
+    session
+        .graph()
+        .connect(sine.out(0), MainOutput::channel(0))?;
+    session
+        .graph()
+        .connect(sine.out(0), MainOutput::channel(1))?;
     Ok(session)
 }
 // ANCHOR_END: session
@@ -48,7 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // The file's name picks its format: `.flac` is FLAC.
     let mut session = tone()?;
-    let rendering = session.bounce(two_seconds().master(&path, Format::from_path(&path)?))?;
+    let rendering = session.bounce(two_seconds().main_output(&path, Format::from_path(&path)?))?;
     // The session renders on a thread of its own; we wait for it, then hand
     // what it made back to the session.
     let rendered = block_on(rendering.into_future());
@@ -68,11 +74,11 @@ mod tests {
     #[test]
     fn the_bounce_is_a_sine_at_its_level_on_both_channels() {
         let mut session = tone().unwrap();
-        let rendering = session.bounce(two_seconds().master_buffers()).unwrap();
+        let rendering = session.bounce(two_seconds().main_output_buffers()).unwrap();
         let rendered = session
             .apply(block_on(rendering.into_future()))
             .unwrap()
-            .into_master();
+            .into_main_output();
         let frames = rendered.interleaved();
         let settled = &frames[frames.len() / 2..];
         for channel in 0..2 {

@@ -7,7 +7,7 @@
 // `Session::new` is a full session: it bounces.
 #[cfg(feature = "export")]
 mod new_session;
-// Stems: a node's own output beside the master, aligned to it, in one pass.
+// Stems: a node's own output beside the main output, aligned to it, in one pass.
 #[cfg(feature = "export")]
 mod bounce_stems;
 // A bounce's `create_new`: a path that exists is refused at the commit and the file kept.

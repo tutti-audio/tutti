@@ -24,11 +24,11 @@ pub(super) fn scc(succ: &[Vec<usize>]) -> Vec<usize> {
     // (vertex, next successor position)
     let mut call: Vec<(usize, usize)> = Vec::new();
 
-    for root in 0..n {
-        if index[root] != UNSEEN {
+    for main_output in 0..n {
+        if index[main_output] != UNSEEN {
             continue;
         }
-        call.push((root, 0));
+        call.push((main_output, 0));
         while let Some(&mut (v, ref mut pos)) = call.last_mut() {
             if *pos == 0 && index[v] == UNSEEN {
                 index[v] = next_index;

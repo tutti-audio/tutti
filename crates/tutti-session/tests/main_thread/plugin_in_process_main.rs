@@ -226,7 +226,7 @@ fn restore_round_trip(hosting: Hosting) {
         .unwrap();
     // Wired to the output, so blocks run the plugin: an in-process plugin takes
     // a host write at the head of its next block.
-    s.graph().connect(node, tutti_session::Root).unwrap();
+    s.graph().connect(node, tutti_session::MainOutput).unwrap();
     let blocks = |s: &mut Session| {
         for _ in 0..4 {
             let _ = s.update();
@@ -316,7 +316,7 @@ fn a_restore_applies_the_saved_state_to_a_served_plugin() {
 /// An in-process plugin in a node, in `layout`'s ports, rendering its
 /// closed-form tags (`TagOnly`: output channel `c` of port `p` holds
 /// `probe_tag(p, c)`), its stereo input fed by two constants and its first two
-/// outputs on the root.
+/// outputs on the main output.
 struct Rebound {
     s: Session,
     node: tutti_session::Key<tutti_session::AnyPlugin>,
@@ -327,7 +327,7 @@ struct Rebound {
 fn rebound(layout: u32) -> Rebound {
     use tutti_graph::ForkByClone;
     use tutti_nodes::testing::Const;
-    use tutti_session::Root;
+    use tutti_session::MainOutput;
     probe().set(ClapSwitch::PortLayout, layout);
     probe().set(ClapSwitch::RenderMode, 2);
     let (catalog, _dir) = catalog();
@@ -347,8 +347,8 @@ fn rebound(layout: u32) -> Rebound {
     for (from, to) in [
         (tutti_session::OutPort::new(a, 0), node.input(0)),
         (tutti_session::OutPort::new(b, 0), node.input(1)),
-        (node.out(0), Root::output(0)),
-        (node.out(1), Root::output(1)),
+        (node.out(0), MainOutput::channel(0)),
+        (node.out(1), MainOutput::channel(1)),
     ] {
         g.connect(from, to).unwrap().unfaded();
     }
@@ -384,7 +384,7 @@ impl Rebound {
         }
     }
 
-    /// The root's channel `ch` of one rendered block.
+    /// The main output's channel `ch` of one rendered block.
     fn channel(&mut self, ch: usize) -> Vec<f32> {
         let mut block = vec![f32::NAN; 512 * 2];
         self.s.render(
@@ -411,7 +411,9 @@ impl Rebound {
     }
 }
 
-fn unwired_of(events: &[SessionEvent]) -> Vec<(tutti_graph::NodeKey, Vec<tutti_session::Edge>)> {
+fn unwired_of(
+    events: &[SessionEvent],
+) -> Vec<(tutti_graph::NodeKey, Vec<tutti_session::ChannelEdge>)> {
     events
         .iter()
         .filter_map(|event| match event {
@@ -425,7 +427,7 @@ fn unwired_of(events: &[SessionEvent]) -> Vec<(tutti_graph::NodeKey, Vec<tutti_s
 /// and renders through it.** The stereo plugin announces `[2, 1]` buses: the
 /// node at its key declares three outputs, nothing is unwired, the plugin runs
 /// on (it was told to restart once, by its own change, and not again for the
-/// move), and its tags reach the root through the new node.
+/// move), and its tags reach the main output through the new node.
 fn a_plugin_that_widens_its_ports_is_re_inserted_wider() {
     let mut r = rebound(0);
     let node = r.node;
@@ -462,9 +464,9 @@ fn a_plugin_that_widens_its_ports_is_re_inserted_wider() {
 /// **A plugin that narrows its ports gets a node with them, and what it
 /// dropped is reported exactly.** The stereo effect announces an instrument
 /// layout (no inputs): the two edges into its inputs are `Unwired`, once, and
-/// its outputs, still wired to the root, carry the plugin's tags.
+/// its outputs, still wired to the main output, carry the plugin's tags.
 fn a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost() {
-    use tutti_session::{Edge, OutPort};
+    use tutti_session::{ChannelEdge, OutPort};
     let mut r = rebound(0);
     let node = r.node;
     let (a, b) = (r.a, r.b);
@@ -479,8 +481,8 @@ fn a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost() {
     assert_eq!(unwired_node, node.erase());
     edges.sort();
     let mut want = vec![
-        Edge::new(OutPort::new(a, 0), node.input(0)),
-        Edge::new(OutPort::new(b, 0), node.input(1)),
+        ChannelEdge::new(OutPort::new(a, 0), node.input(0)),
+        ChannelEdge::new(OutPort::new(b, 0), node.input(1)),
     ];
     want.sort();
     assert_eq!(edges, want, "exactly the edges into the inputs it lost");
@@ -758,8 +760,8 @@ fn a_served_plugin_that_grows_its_ports_gets_a_wider_node() {
         )
         .unwrap();
     for (from, to) in [
-        (node.out(0), tutti_session::Root::output(0)),
-        (node.out(1), tutti_session::Root::output(1)),
+        (node.out(0), tutti_session::MainOutput::channel(0)),
+        (node.out(1), tutti_session::MainOutput::channel(1)),
     ] {
         s.graph().connect(from, to).unwrap().unfaded();
     }
@@ -810,8 +812,8 @@ fn an_inserted_served_plugin_that_grows_its_ports_gets_a_wider_node() {
     .expect("the reference plugin loads");
     let node = s.graph().add_plugin(Box::new(client));
     for (from, to) in [
-        (node.out(0), tutti_session::Root::output(0)),
-        (node.out(1), tutti_session::Root::output(1)),
+        (node.out(0), tutti_session::MainOutput::channel(0)),
+        (node.out(1), tutti_session::MainOutput::channel(1)),
     ] {
         s.graph().connect(from, to).unwrap().unfaded();
     }

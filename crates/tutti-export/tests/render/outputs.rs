@@ -7,7 +7,7 @@
 //! files are checked against (through each format's own quantizer), a tap on a
 //! node is checked against the figure its gain makes of the node's constant,
 //! and files that share a gain are checked against the relation that gain
-//! implies (the stems sum to the master).
+//! implies (the stems sum to the main output).
 
 use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::formats::probe::Hint;
@@ -233,9 +233,9 @@ fn two_outputs_of_different_formats_are_each_their_own_quantization_of_one_pass(
         &job(frames),
         &timeline,
         vec![
-            Output::master(wav(&a, Pcm::Int24)),
-            Output::master(flac(&b, IntDepth::Int16)),
-            Output::master(BufferTarget::new(ChannelLayout::STEREO)),
+            Output::main_output(wav(&a, Pcm::Int24)),
+            Output::main_output(flac(&b, IntDepth::Int16)),
+            Output::main_output(BufferTarget::new(ChannelLayout::STEREO)),
         ],
         &mut Control::none(),
     )
@@ -276,7 +276,7 @@ fn two_outputs_of_different_formats_are_each_their_own_quantization_of_one_pass(
     assert_eq!(names(dir.path()), ["a.wav", "b.flac"], "no temporary left");
 }
 
-/// Stereo `0.5` through a `0.5` gain, on the master, with a tap on each of the
+/// Stereo `0.5` through a `0.5` gain, on the main output, with a tap on each of the
 /// source (before the gain) and the gain (after it).
 fn gain_graph() -> (Rig, NodeKey, NodeKey) {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
@@ -287,9 +287,9 @@ fn gain_graph() -> (Rig, NodeKey, NodeKey) {
     (rig(g), source, gain)
 }
 
-/// A tap on a node's port renders that node's own signal, not the master's:
+/// A tap on a node's port renders that node's own signal, not the main output's:
 /// a constant `0.5` read before a `0.5` gain is `0.5`, read after it `0.25`,
-/// and the master (after the gain) is `0.25`. The three outputs come from one
+/// and the main output (after the gain) is `0.25`. The three outputs come from one
 /// pass.
 #[test]
 fn a_tap_renders_the_signal_of_the_node_it_is_on() {
@@ -302,7 +302,7 @@ fn a_tap_renders_the_signal_of_the_node_it_is_on() {
         &job(3_000),
         &FrozenClock,
         vec![
-            Output::master(BufferTarget::new(ChannelLayout::STEREO)),
+            Output::main_output(BufferTarget::new(ChannelLayout::STEREO)),
             Output::tap(
                 before,
                 stereo_placement(),
@@ -319,14 +319,14 @@ fn a_tap_renders_the_signal_of_the_node_it_is_on() {
     .expect("renders")
     .into_finished()
     .expect("not cancelled");
-    let [master, before, after]: [Vec<Vec<f32>>; 3] = produced
+    let [main_output, before, after]: [Vec<Vec<f32>>; 3] = produced
         .into_iter()
         .map(planes)
         .collect::<Vec<_>>()
         .try_into()
         .expect("three outputs");
     for (name, got, want) in [
-        ("master", master, 0.25),
+        ("main_output", main_output, 0.25),
         ("before the gain", before, 0.5),
         ("after the gain", after, 0.25),
     ] {
@@ -338,14 +338,14 @@ fn a_tap_renders_the_signal_of_the_node_it_is_on() {
     }
 }
 
-/// A tap shares the master's gate: with a latency trim of more than a block
+/// A tap shares the main output's gate: with a latency trim of more than a block
 /// the first block is dropped whole, its tap frames are still drained, and the
-/// file starts where the master would: at frame 1500 of a sine.
+/// file starts where the main output would: at frame 1500 of a sine.
 ///
 /// The sine is `0.4 sin(2 pi 440 n / 48000)` through a `0.5` gain, so the tap
 /// on the gain reads `0.2 sin(...)`; its first kept frame is frame 1500 of it.
 #[test]
-fn a_tap_is_drained_and_gated_like_the_master() {
+fn a_tap_is_drained_and_gated_like_the_main_output() {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     let osc = g.add(
         Osc::sine(Hz::new(440.0))
@@ -427,13 +427,13 @@ fn a_tap_that_cannot_be_placed_is_a_named_error() {
     );
 
     // The same check at the second output: it is made for every output before
-    // the first file is begun, so the master's is never created.
+    // the first file is begun, so the main output's is never created.
     let err = render(
         &mut graph,
         &job(1_000),
         &FrozenClock,
         vec![
-            Output::master(wav(&dir.path().join("m.wav"), Pcm::Int16)),
+            Output::main_output(wav(&dir.path().join("m.wav"), Pcm::Int16)),
             Output::tap(
                 narrow,
                 Placement::new(ChannelTopology::unassigned(ChannelLayout::from(3u16))),
@@ -467,7 +467,7 @@ fn a_placement_the_target_cannot_take_is_a_target_error_and_leaves_nothing() {
         &job(1_000),
         &FrozenClock,
         vec![
-            Output::master(wav(&dir.path().join("m.wav"), Pcm::Int16)),
+            Output::main_output(wav(&dir.path().join("m.wav"), Pcm::Int16)),
             Output::tap(
                 reader,
                 // Two unassigned feeds onto a mono file: unassigned channels are
@@ -496,13 +496,13 @@ fn a_placement_the_target_cannot_take_is_a_target_error_and_leaves_nothing() {
     assert!(names(dir.path()).is_empty(), "the first file was removed");
 }
 
-/// Three files from one pass: a master and two stems that sum to it, the
-/// master normalized and the stems taking its gain. All three report the same
+/// Three files from one pass: a main output and two stems that sum to it, the
+/// main output normalized and the stems taking its gain. All three report the same
 /// gain, the stems' files are the stems scaled by it, and they still add up to
-/// the master's: the balance the shared gain exists to keep.
+/// the main output's: the balance the shared gain exists to keep.
 ///
-/// The gain is the master's: `Written::gain` is the peak target less the
-/// master's measured true peak, and a stem has no reading of its own.
+/// The gain is the main output's: `Written::gain` is the peak target less the
+/// main output's measured true peak, and a stem has no reading of its own.
 #[test]
 fn stems_that_take_the_masters_gain_still_sum_to_it() {
     let dir = tempfile::tempdir().unwrap();
@@ -516,7 +516,7 @@ fn stems_that_take_the_masters_gain_still_sum_to_it() {
     let mut graph = rig.assemble();
 
     let mode = Normalize::peak(Db::new(-6.0));
-    let files: Vec<std::path::PathBuf> = ["master.wav", "a.wav", "b.wav"]
+    let files: Vec<std::path::PathBuf> = ["main_output.wav", "a.wav", "b.wav"]
         .iter()
         .map(|n| dir.path().join(n))
         .collect();
@@ -528,7 +528,7 @@ fn stems_that_take_the_masters_gain_still_sum_to_it() {
         &job(24_000),
         &FrozenClock,
         vec![
-            Output::master(float(&files[0], NormalizeSpec::own(mode))),
+            Output::main_output(float(&files[0], NormalizeSpec::own(mode))),
             Output::tap(
                 ta,
                 stereo_placement(),
@@ -547,14 +547,14 @@ fn stems_that_take_the_masters_gain_still_sum_to_it() {
     .expect("not cancelled")
     .into_iter()
     .map(|p| p.into_file().expect("files"));
-    let (master, sa, sb) = (
+    let (main_output, sa, sb) = (
         produced.next().unwrap(),
         produced.next().unwrap(),
         produced.next().unwrap(),
     );
 
-    let gain = master.gain.expect("the master normalized");
-    let reading = master.measured.expect("and measured itself");
+    let gain = main_output.gain.expect("the main output normalized");
+    let reading = main_output.measured.expect("and measured itself");
     assert!(
         (gain.get() - (-6.0 - reading.true_peak.get())).abs() < 1e-5,
         "the gain is the target less the true peak: {gain:?} for {reading:?}"
@@ -583,7 +583,7 @@ fn stems_that_take_the_masters_gain_still_sum_to_it() {
             );
             assert!(
                 (da[c][i] + db[c][i] - m[c][i]).abs() < 1e-6,
-                "the stems sum to the master: channel {c}, frame {i}"
+                "the stems sum to the main output: channel {c}, frame {i}"
             );
         }
     }
@@ -609,8 +609,8 @@ fn a_rename_that_fails_after_another_landed_is_not_committed() {
         &job(2_000),
         &FrozenClock,
         vec![
-            Output::master(wav(&first, Pcm::Int16)),
-            Output::master(wav(&second, Pcm::Int16)),
+            Output::main_output(wav(&first, Pcm::Int16)),
+            Output::main_output(wav(&second, Pcm::Int16)),
         ],
         &mut Control::none(),
     )
@@ -653,8 +653,8 @@ fn a_rename_that_fails_after_another_landed_is_not_committed() {
         &job(2_000),
         &FrozenClock,
         vec![
-            Output::master(wav(&first, Pcm::Int16)),
-            Output::master(wav(&dir.path().join("third.wav"), Pcm::Int16)),
+            Output::main_output(wav(&first, Pcm::Int16)),
+            Output::main_output(wav(&dir.path().join("third.wav"), Pcm::Int16)),
         ],
         &mut Control::none(),
     )
@@ -681,7 +681,7 @@ fn outputs_that_contradict_each_other_are_named_errors() {
     let mode = Normalize::peak(Db::new(-6.0));
     let file = |n: &str, spec: Option<NormalizeSpec>| {
         let target = wav(&dir.path().join(n), Pcm::Int16);
-        Output::master(match spec {
+        Output::main_output(match spec {
             Some(spec) => target.normalize(spec),
             None => target,
         })
@@ -741,7 +741,7 @@ fn outputs_that_contradict_each_other_are_named_errors() {
 }
 
 /// An output whose audio cannot be normalized names itself: with an audible
-/// master first and a silent stem second, `Unmeasurable` is the second's.
+/// main output first and a silent stem second, `Unmeasurable` is the second's.
 #[test]
 fn an_unmeasurable_output_names_its_index() {
     let dir = tempfile::tempdir().unwrap();
@@ -759,7 +759,7 @@ fn an_unmeasurable_output_names_its_index() {
         &job(2_000),
         &FrozenClock,
         vec![
-            Output::master(
+            Output::main_output(
                 FileTarget::new(
                     dir.path().join("m.wav"),
                     Format::Wav(Pcm::Float32),
@@ -820,7 +820,7 @@ fn a_file_reports_whether_its_placement_is_the_default_or_stated() {
             &mut graph,
             &job(2_000),
             &FrozenClock,
-            vec![Output::master(target)],
+            vec![Output::main_output(target)],
             &mut Control::none(),
         )
         .expect("renders");
@@ -856,7 +856,7 @@ fn a_lufs_output_with_no_placement_is_refused_before_the_render() {
         &mut graph,
         &job(2_000),
         &FrozenClock,
-        vec![Output::master(lufs)],
+        vec![Output::main_output(lufs)],
         &mut Control::none(),
     )
     .expect_err("three channels name no speakers");
@@ -901,7 +901,7 @@ fn a_peak_output_with_no_placement_reaches_its_target_and_reports_no_loudness() 
         &mut tone(3),
         &job(48_000),
         &FrozenClock,
-        vec![Output::master(target)],
+        vec![Output::main_output(target)],
         &mut Control::none(),
     )
     .expect("a peak needs no placement")
@@ -938,7 +938,7 @@ fn a_peak_output_with_a_default_layout_reports_its_weighted_loudness() {
         &mut tone(6),
         &job(48_000),
         &FrozenClock,
-        vec![Output::master(target)],
+        vec![Output::main_output(target)],
         &mut Control::none(),
     )
     .expect("renders")

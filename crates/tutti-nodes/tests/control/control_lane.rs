@@ -583,7 +583,7 @@ fn an_export_is_the_live_render_bit_for_bit() {
     }
     let (mut fed, mut fexec) = ed
         .fork(
-            ForkTarget::Master,
+            ForkTarget::MainOutput,
             ForkMode::Offline,
             Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(1024))),
         )
@@ -1367,7 +1367,7 @@ fn a_lane_fed_fork_reads_its_value_at_frame_0() {
 
     let (mut fed, mut fexec) = ed
         .fork(
-            ForkTarget::Master,
+            ForkTarget::MainOutput,
             ForkMode::Offline,
             Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(64))),
         )

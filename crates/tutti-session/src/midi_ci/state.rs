@@ -1,9 +1,9 @@
 //! A device's state as futures: the `fullState` of its State resource (M2-111),
 //! got and set through the Property Exchange calls of its listed Resources.
 //!
-//! A call is queued when it is made, sent in the session's next
-//! [`update`](crate::Session::update), and resolved in the update that reads the
-//! device's answer: keep updating while you await it.
+//! A call is queued when it is made, sent by the session's MIDI-CI task, and
+//! resolved by that task when the device answers, with no
+//! [`update`](crate::Session::update).
 
 use std::future::Future;
 use std::pin::Pin;
@@ -20,11 +20,13 @@ use tutti_midi_hardware::PropertyCall;
 use super::{InputRequest, ListedPeer, ListedResource, PeFailure, PeerReply, listing};
 use crate::{OtherPeer, PeerError, PeerState, SavedPeer};
 
-/// A save of a device's state in flight: it resolves to the state the device
-/// sent, or to why it did not.
+/// Resolves when the device answers, on the session's MIDI-CI task, with no
+/// [`update`](crate::Session::update); the session's view of the peer changes at
+/// the next `update`, so the future may resolve before it.
 ///
-/// It resolves in a later [`Session::update`](crate::Session::update): keep
-/// updating while you await it. Dropping it drops the answer; a device or session
+/// A save of a device's state in flight: it resolves to the state the device
+/// sent, or to why it did not. The task sends the call and reads the device's
+/// answer, which resolves it. Dropping it drops the answer; a device or session
 /// that goes away resolves it to [`PeerError::Disconnected`].
 #[derive(Debug)]
 #[must_use = "a save is answered only when it is awaited"]
@@ -64,11 +66,13 @@ impl Future for SavePeerState {
     }
 }
 
-/// A restore of a device's state in flight: it resolves once the device has
-/// answered its Set, or to why it did not.
+/// Resolves when the device answers, on the session's MIDI-CI task, with no
+/// [`update`](crate::Session::update); the session's view of the peer changes at
+/// the next `update`, so the future may resolve before it.
 ///
-/// It resolves in a later [`Session::update`](crate::Session::update), as
-/// [`SavePeerState`] does.
+/// A restore of a device's state in flight: it resolves once the device has
+/// answered its Set, or to why it did not. The task sends the call and reads
+/// the answer, as for [`SavePeerState`].
 #[derive(Debug)]
 #[must_use = "a restore is answered only when it is awaited"]
 pub struct RestorePeerState {
@@ -99,9 +103,9 @@ impl ListedPeer {
     /// (M2-111 §3.2), resolving to the body as it came with the media type the
     /// device declared.
     ///
-    /// The Get is queued as any peer call is, sent in the session's next
-    /// [`update`](crate::Session::update) and resolved in the update that reads
-    /// the device's answer: keep updating while you await it. A peer whose
+    /// The Get is queued as any peer call is, sent by the session's MIDI-CI task
+    /// and resolved by it when the device answers, with no
+    /// [`update`](crate::Session::update). A peer whose
     /// ResourceList has no State resource resolves to [`PeFailure::NotSent`], and
     /// one that is no longer listed to [`PeerError::Disconnected`].
     #[must_use = "a save is answered only when it is awaited"]
@@ -127,7 +131,7 @@ impl ListedPeer {
 
     /// Restores `state` to the device: a Set of its State resource's
     /// `fullState` with the body and media type `state` holds, resolving once the
-    /// device answers it. It is sent and resolved in the session's updates, as
+    /// device answers it. It is sent and resolved by the session's MIDI-CI task, as
     /// [`save_state`](Self::save_state) is.
     ///
     /// # Errors

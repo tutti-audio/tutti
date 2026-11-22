@@ -135,7 +135,7 @@ fn run_many(
                     NormalizeSpec::from_output(n, 0)
                 }
             });
-            Output::master(match spec {
+            Output::main_output(match spec {
                 Some(spec) => target.normalize(spec),
                 None => target,
             })

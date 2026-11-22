@@ -10,7 +10,7 @@ use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_engine::StreamFaultKind;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
-use tutti_session::{OutPort, Root, Session, SessionEvent, SystemSession};
+use tutti_session::{MainOutput, OutPort, Session, SessionEvent, SystemSession};
 use tutti_units::{SampleRate, Samples};
 
 const BLOCK: usize = 480;
@@ -35,22 +35,12 @@ fn a_system_session_renders_its_graph_with_no_device() {
     let level = s.graph().add(ForkByClone(Const::mono(0.25)));
     for port in 0..2 {
         s.graph()
-            .set_sources(Root::output(port), [OutPort::new(level, 0)])
+            .set_sources(MainOutput::channel(port), [OutPort::new(level, 0)])
             .unwrap()
             .unfaded();
     }
     let limit = Instant::now() + Duration::from_secs(10);
-    let mut tap = loop {
-        let _ = s.update();
-        if let Some(tap) = s.open_heard_tap(Samples::new(4 * BLOCK)).unwrap().reader() {
-            break tap;
-        }
-        assert!(
-            Instant::now() < limit,
-            "the audio side never took the graph"
-        );
-        std::thread::sleep(Duration::from_millis(2));
-    };
+    let mut tap = s.open_heard_tap(Samples::new(4 * BLOCK)).unwrap();
     assert_eq!(tap.width(), 2);
 
     s.play().expect("room");
@@ -109,7 +99,7 @@ fn a_panic_on_the_timer_thread_is_reported_once_as_a_fault_event() {
     let node = system.graph().add(ForkByClone(AlwaysPanics));
     system
         .graph()
-        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
         .unwrap()
         .unfaded();
     let panics = |events: &[SessionEvent]| {

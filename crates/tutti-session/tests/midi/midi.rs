@@ -37,7 +37,7 @@ use tutti_units::{Beat, BeatDuration, Frame, SampleRate};
 use tutti_fixtures::midi;
 use tutti_session::{EventInPort, EventOutPort, Feeder, MidiError, Session, SessionEvent};
 #[cfg(feature = "midi-hardware")]
-use tutti_session::{MidiReport, PHASES, PhaseCx};
+use tutti_session::{MidiEvent, PHASES, PeerEvent, PhaseCx};
 #[cfg(feature = "midi-hardware")]
 use tutti_session::{MidiRouteRule, RouteDeclarer};
 #[cfg(feature = "midi-hardware")]
@@ -86,7 +86,7 @@ const RATE: f64 = 48_000.0;
 
 /// Plays the transport from beat 0 and renders `frames` frames in 512-frame
 /// blocks.
-fn roll(s: &Session, frames: usize) {
+fn roll(s: &mut Session, frames: usize) {
     play(s);
     blocks(s, frames.div_ceil(512));
 }
@@ -126,7 +126,7 @@ fn a_clip_plays_its_note_on_its_frame() {
         )
         .expect("the tap takes MIDI");
     let _ = s.update();
-    roll(&s, 9_000);
+    roll(&mut s, 9_000);
     assert_eq!(note_ons(&seen), vec![(8_000, 60)]);
 }
 
@@ -158,7 +158,7 @@ fn a_clip_edit_updates_in_place() {
     let _ = s.update();
     assert_eq!(s.midi().clip(synth), Some(clip), "the same clip");
     assert_eq!(plan_nodes(&s), nodes, "and no node more");
-    roll(&s, 9_000);
+    roll(&mut s, 9_000);
     assert_eq!(note_ons(&seen), vec![(8_000, 64)], "playing the new events");
 
     s.midi().stop_clip(synth).expect("the target has a clip");
@@ -182,7 +182,7 @@ fn a_clip_starts_at_the_beat_it_is_given() {
         )
         .expect("the tap takes MIDI");
     let _ = s.update();
-    roll(&s, 33_000);
+    roll(&mut s, 33_000);
     assert_eq!(note_ons(&seen), vec![(32_000, 60)]);
 }
 
@@ -245,7 +245,7 @@ fn a_loaded_track_plays_its_events_at_their_beats() {
         .play_track(synth, loaded.track(0).unwrap())
         .unwrap();
     let _ = s.update();
-    roll(&s, 49_000);
+    roll(&mut s, 49_000);
     assert_eq!(note_ons(&seen), vec![(48_000, 62)]);
 }
 
@@ -317,7 +317,7 @@ fn a_clip_and_a_live_input_survive_a_re_bind() {
 
     live.push(Stamp::NextBlock, midi::note_on(MidiChannel::FIRST, 72, MF))
         .unwrap();
-    roll(&s, 9_000);
+    roll(&mut s, 9_000);
     let heard = note_ons(&new_seen);
     assert!(heard.contains(&(8_000, 60)), "the clip plays it: {heard:?}");
     assert!(
@@ -356,7 +356,7 @@ fn a_live_inputs_keys_send_in_order_and_are_handed_out_once() {
     on(&mut keys, Stamp::NextBlock, 60).unwrap();
     on(&mut keys, Stamp::NextBlock, 62).unwrap();
     on(&mut keys, Frame::new(3_000).into(), 64).unwrap();
-    roll(&s, 4_000);
+    roll(&mut s, 4_000);
     let heard = note_ons(&seen);
     assert_eq!(
         heard.iter().map(|&(_, n)| n).collect::<Vec<_>>(),
@@ -559,7 +559,7 @@ fn clocked(sink: Arc<dyn tutti_midi_runtime::MidiOut>) -> (Session, tutti_sessio
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });
-    roll(&s, 24_000);
+    roll(&mut s, 24_000);
     (s, out)
 }
 
@@ -590,7 +590,7 @@ fn a_refusing_sink_counts_what_it_refused() {
     );
     assert_eq!(losses.lost, 0, "the tap had room for them");
     let before = losses.refused;
-    roll(&s, 24_000);
+    roll(&mut s, 24_000);
     let _ = s.update();
     assert!(sink.losses().refused > before, "and the count only rises");
 }
@@ -669,13 +669,9 @@ fn device_events(events: &[SessionEvent]) -> Vec<(&'static str, String)> {
     events
         .iter()
         .filter_map(|e| match e {
-            SessionEvent::Midi(MidiReport::Added { info }) => Some(("added", info.name.clone())),
-            SessionEvent::Midi(MidiReport::Removed { info }) => {
-                Some(("removed", info.name.clone()))
-            }
-            SessionEvent::Midi(MidiReport::Changed { info }) => {
-                Some(("changed", info.name.clone()))
-            }
+            SessionEvent::Midi(MidiEvent::Added { info }) => Some(("added", info.name.clone())),
+            SessionEvent::Midi(MidiEvent::Removed { info }) => Some(("removed", info.name.clone())),
+            SessionEvent::Midi(MidiEvent::Changed { info }) => Some(("changed", info.name.clone())),
             _ => None,
         })
         .collect()
@@ -777,9 +773,9 @@ fn key(channel: u8, n: u8) -> Ump {
 fn a_connected_devices_note_reaches_the_synth_through_its_inlet() {
     let (mut s, fake, seen) = keyboards();
     let _ports = connect(&mut s, &["keys"]);
-    roll(&s, 1_024);
+    roll(&mut s, 1_024);
     assert!(fake.send_input(EndpointId::from_raw(1), key(2, 60), Instant::now()));
-    roll(&s, 8_192);
+    roll(&mut s, 8_192);
     let heard = note_ons(&seen);
     assert_eq!(heard.len(), 1, "once: {heard:?}");
     assert_eq!(heard[0].1, 60);
@@ -800,13 +796,13 @@ fn two_devices_are_two_ports_and_one_leaving_takes_only_its_own() {
         before + 4,
         "an input node and an inlet each"
     );
-    roll(&s, 1_024);
+    roll(&mut s, 1_024);
     // Both arrive at one instant, the second device's first: the merged order
     // is the graph's `(offset, source)` and not the order of arrival.
     let at = Instant::now();
     assert!(fake.send_input(EndpointId::from_raw(2), key(0, 64), at));
     assert!(fake.send_input(EndpointId::from_raw(1), key(0, 60), at));
-    roll(&s, 8_192);
+    roll(&mut s, 8_192);
     let heard = note_ons(&seen);
     assert_eq!(
         heard.iter().map(|n| n.1).collect::<Vec<_>>(),
@@ -817,7 +813,7 @@ fn two_devices_are_two_ports_and_one_leaving_takes_only_its_own() {
 
     drop(keys);
     let _ = s.update();
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     let _ = s.update();
     assert_eq!(
         plan_nodes(&s),
@@ -840,13 +836,13 @@ fn two_devices_are_two_ports_and_one_leaving_takes_only_its_own() {
 fn a_dropped_port_ends_its_held_key_once() {
     let (mut s, fake, seen) = keyboards();
     let ports = connect(&mut s, &["keys"]);
-    roll(&s, 1_024);
+    roll(&mut s, 1_024);
     assert!(fake.send_input(EndpointId::from_raw(1), key(0, 60), Instant::now()));
-    roll(&s, 8_192);
+    roll(&mut s, 8_192);
     assert_eq!(note_ons(&seen).len(), 1);
     drop(ports);
     let _ = s.update();
-    roll(&s, 8_192);
+    roll(&mut s, 8_192);
     let offs: Vec<u8> = seen
         .lock()
         .unwrap()
@@ -868,12 +864,12 @@ fn a_dropped_port_ends_its_held_key_once() {
 fn a_devices_arrival_is_placed_on_the_engines_clock() {
     let (mut s, fake, seen) = keyboards();
     let _ports = connect(&mut s, &["keys"]);
-    roll(&s, 1_024);
+    roll(&mut s, 1_024);
     let ahead = Instant::now() + Duration::from_secs(1);
     assert!(fake.send_input(EndpointId::from_raw(1), key(0, 60), ahead));
-    roll(&s, 4_096);
+    roll(&mut s, 4_096);
     assert!(note_ons(&seen).is_empty(), "not yet: it is a second away");
-    roll(&s, 60_000);
+    roll(&mut s, 60_000);
     let heard = note_ons(&seen);
     assert_eq!(heard.len(), 1);
     assert!(
@@ -893,7 +889,7 @@ fn a_dead_device_watch_is_reported_once() {
         events
             .iter()
             .filter_map(|e| match e {
-                SessionEvent::Midi(MidiReport::WatchFailed(why)) => Some(why.clone()),
+                SessionEvent::Midi(MidiEvent::WatchFailed(why)) => Some(why.clone()),
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -978,7 +974,7 @@ fn a_hand_wired_event_edge_survives_the_sequencers_feed() {
         sorted(vec![hand.events_out(), transform]),
         "the sequencer's clip joins the hand-wired one"
     );
-    roll(&s, 9_000);
+    roll(&mut s, 9_000);
     let mut ons = note_ons(&seen);
     ons.sort_unstable();
     assert_eq!(ons, vec![(8_000, 60), (8_000, 62)], "both play");
@@ -1024,7 +1020,7 @@ fn a_port_that_loses_events_is_reported() {
         .play_clip(synth, Beat::new(0.0), chord)
         .expect("takes MIDI");
     let _ = s.update();
-    roll(&s, 512);
+    roll(&mut s, 512);
     let lost: Vec<_> = s
         .update()
         .into_iter()
@@ -1107,7 +1103,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
     for ms in 0..40 {
         let now = start + Duration::from_millis(ms);
         for event in update_at(&mut s, now) {
-            if let SessionEvent::ResourceChanged { id, fact } = event
+            if let SessionEvent::Peer(PeerEvent::ResourceChanged { id, fact }) = event
                 && id == port.id()
                 && fact == tutti_session::ResourceFact::Info
                 && !port.info().peers().is_empty()
@@ -1189,7 +1185,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
 /// **A MIDI-CI peer's Profiles are the session's, and it switches them as the
 /// Initiator** (M2-101 section 7): a peer whose Discovery Reply declares Profile
 /// Configuration is sent a Profile Inquiry by the session's tick; its Replies
-/// make the Profiles the port's info lists (`MidiReport::CiProfiles`, `Known`
+/// make the Profiles the port's info lists (`MidiEvent::CiProfiles`, `Known`
 /// at the final Reply on the Function Block); `enable` of a listed handle is
 /// sent as a Set Profile On (Sub-ID#2 `0x22`) with the Channel count asked, and
 /// the peer's Profile Enabled Report resolves the request with `Enabled` and updates
@@ -1262,7 +1258,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     for ms in 0..80 {
         let now = start + Duration::from_millis(ms);
         for event in update_at(&mut s, now) {
-            if let SessionEvent::Midi(MidiReport::CiProfiles { change, .. }) = event {
+            if let SessionEvent::Midi(MidiEvent::CiProfiles { change, .. }) = event {
                 seen.push(change);
             }
         }
@@ -1774,7 +1770,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
             clock.set(clock.get() + 1);
             let now = start + Duration::from_millis(clock.get());
             for event in update_at(s, now) {
-                if let SessionEvent::Midi(MidiReport::CiProfiles { device, change, .. }) = event {
+                if let SessionEvent::Midi(MidiEvent::CiProfiles { device, change, .. }) = event {
                     changes.push((device, change));
                 }
             }
@@ -1898,7 +1894,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
 /// (M2-101 section 9): a peer whose Discovery Reply declares Process Inquiry is
 /// sent an Inquiry: Process Inquiry Capabilities by the session's tick; its reply
 /// with MIDI Message Report makes it a `MidiInputInfo::report_peers` handle
-/// (`MidiReport::CiProcess`); `ReportPeer::request` sends an Inquiry: MIDI
+/// (`MidiEvent::CiProcess`); `ReportPeer::request` sends an Inquiry: MIDI
 /// Message Report (Sub-ID#2 `0x42`) with the bitmaps asked, and the peer's End
 /// resolves the request.
 #[cfg(feature = "midi-hardware")]
@@ -1966,7 +1962,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
     for ms in 0..80 {
         let now = start + Duration::from_millis(ms);
         for event in update_at(&mut s, now) {
-            if let SessionEvent::Midi(MidiReport::CiProcess { change, .. }) = event {
+            if let SessionEvent::Midi(MidiEvent::CiProcess { change, .. }) = event {
                 seen.push(change);
             }
         }
@@ -2239,7 +2235,7 @@ fn a_device_that_receives_jr_has_every_message_prefixed_by_a_timestamp() {
     assert!(fake.send_input(raw, on, start));
     update_at(&mut s, start + Duration::from_millis(20));
     fake.take_sent(raw);
-    roll(&s, 4_096);
+    roll(&mut s, 4_096);
     update_at(&mut s, start + Duration::from_millis(21));
     let sent = fake.take_sent(raw);
     let stamp = |u: &Ump| match u.decode() {

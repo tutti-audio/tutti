@@ -1,10 +1,10 @@
-//! The graph root's channel count must not panic the audio callback, AND a
-//! surround root must reach the output correctly — either straight through to a
+//! The graph's main output's channel count must not panic the audio callback, AND a
+//! surround main output must reach the output correctly — either straight through to a
 //! matching-width device, or folded to a narrower one via the ITU/Dolby matrix.
 //!
 //! `TuttiPlugin.outputs` is a public field, so a host can build a mono or wider
-//! root. A root wider than the engine's fold scratch would index past its end
-//! inside the CPAL callback, so the engine refuses such a root on the control
+//! main output. A main output wider than the engine's fold scratch would index past its end
+//! inside the CPAL callback, so the engine refuses such a main output on the control
 //! thread instead; these run in both profiles on purpose.
 
 use crate::support;
@@ -21,9 +21,9 @@ use tutti_graph::{OutPort, PortSource};
 use tutti_timeline::Transport;
 use tutti_units::{Hz, SampleRate, Samples};
 
-/// A graph whose root has `outputs` channels, with a sine at key 1 feeding
+/// A graph whose main output has `outputs` channels, with a sine at key 1 feeding
 /// the channels `wire` picks (the rest explicitly silent).
-fn root(outputs: usize, wire: &[usize]) -> (Editor, tutti_graph::Executor) {
+fn main_output(outputs: usize, wire: &[usize]) -> (Editor, tutti_graph::Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
         MaxBlock::of(Samples::new(256)),
@@ -43,10 +43,10 @@ fn root(outputs: usize, wire: &[usize]) -> (Editor, tutti_graph::Executor) {
     (ed, exec)
 }
 
-/// Render one block of a root with `outputs` channels into a `target`-wide
-/// interleaved buffer. `wire` feeds the source to the root outputs it picks.
-fn render_root_to(outputs: usize, target: usize, wire: &[usize]) -> Vec<f32> {
-    let (mut ed, exec) = root(outputs, wire);
+/// Render one block of a main output with `outputs` channels into a `target`-wide
+/// interleaved buffer. `wire` feeds the source to the main output outputs it picks.
+fn render_main_output_to(outputs: usize, target: usize, wire: &[usize]) -> Vec<f32> {
+    let (mut ed, exec) = main_output(outputs, wire);
     let engine =
         Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).expect("within the limits");
     let frames = 256;
@@ -71,26 +71,29 @@ fn channel_energy(buf: &[f32], c: usize, width: usize) -> f32 {
 }
 
 #[test]
-fn mono_root_duplicates_into_stereo() {
-    // Mono root → stereo device: channel 0 duplicated into both sides.
-    let out = render_root_to(1, 2, &[0]);
+fn mono_main_output_duplicates_into_stereo() {
+    // Mono main output → stereo device: channel 0 duplicated into both sides.
+    let out = render_main_output_to(1, 2, &[0]);
     for frame in out.as_chunks::<2>().0 {
-        assert_eq!(frame[0], frame[1], "mono root must duplicate into L/R");
+        assert_eq!(
+            frame[0], frame[1],
+            "mono main output must duplicate into L/R"
+        );
     }
     assert!(out.iter().any(|s| *s != 0.0), "sine should produce signal");
 }
 
 #[test]
-fn stereo_root_passes_through_to_stereo() {
-    let out = render_root_to(2, 2, &[0, 1]);
+fn stereo_main_output_passes_through_to_stereo() {
+    let out = render_main_output_to(2, 2, &[0, 1]);
     assert!(out.iter().any(|s| *s != 0.0));
 }
 
 #[test]
-fn surround_root_reaches_matching_width_device() {
-    // 5.1 root, source wired ONLY to the SL channel (idx 4). At a 6-wide target
+fn surround_main_output_reaches_matching_width_device() {
+    // 5.1 main output, source wired ONLY to the SL channel (idx 4). At a 6-wide target
     // the energy stays in channel 4 — straight through, no fold.
-    let out = render_root_to(6, 6, &[4]);
+    let out = render_main_output_to(6, 6, &[4]);
     let e: Vec<f32> = (0..6).map(|c| channel_energy(&out, c, 6)).collect();
     assert!(e[4] > 0.0, "SL source must reach output channel 4 ({e:?})");
     for (c, &en) in e.iter().enumerate() {
@@ -101,11 +104,11 @@ fn surround_root_reaches_matching_width_device() {
 }
 
 #[test]
-fn surround_root_folds_to_stereo_device() {
-    // Same 5.1 root with the source in SL (idx 4). At a 2-wide target the ITU
+fn surround_main_output_folds_to_stereo_device() {
+    // Same 5.1 main output with the source in SL (idx 4). At a 2-wide target the ITU
     // matrix folds SL into Lo at −3 dB (Lo = FL + .707·C + .707·SL) — so the
     // LEFT channel carries it and the right is (near) silent.
-    let out = render_root_to(6, 2, &[4]);
+    let out = render_main_output_to(6, 2, &[4]);
     let el = channel_energy(&out, 0, 2);
     let er = channel_energy(&out, 1, 2);
     assert!(el > 0.0, "SL must fold into the left downmix channel");
@@ -116,9 +119,9 @@ fn surround_root_folds_to_stereo_device() {
 }
 
 #[test]
-fn center_root_folds_symmetrically_to_stereo() {
+fn center_main_output_folds_symmetrically_to_stereo() {
     // Source in the CENTER channel (idx 2 in 5.1) → both stereo channels at −3dB.
-    let out = render_root_to(6, 2, &[2]);
+    let out = render_main_output_to(6, 2, &[2]);
     let el = channel_energy(&out, 0, 2);
     let er = channel_energy(&out, 1, 2);
     assert!(el > 0.0 && er > 0.0, "center must reach both channels");
@@ -129,12 +132,12 @@ fn center_root_folds_symmetrically_to_stereo() {
     );
 }
 
-/// A 7.1.4 root (twelve channels) renders: a source on its last channel, the
+/// A 7.1.4 main output (twelve channels) renders: a source on its last channel, the
 /// top back right at index 11, reaches the same channel of a twelve-wide
 /// device and no other.
 #[test]
-fn a_714_root_reaches_a_matching_width_device() {
-    let out = render_root_to(12, 12, &[11]);
+fn a_714_main_output_reaches_a_matching_width_device() {
+    let out = render_main_output_to(12, 12, &[11]);
     let e: Vec<f32> = (0..12).map(|c| channel_energy(&out, c, 12)).collect();
     assert!(e[11] > 0.0, "the source must reach channel 11 ({e:?})");
     for &en in e.iter().take(11) {
@@ -142,17 +145,17 @@ fn a_714_root_reaches_a_matching_width_device() {
     }
 }
 
-/// The same 7.1.4 root folds to a stereo device by speaker: the top back right
+/// The same 7.1.4 main output folds to a stereo device by speaker: the top back right
 /// (index 11) goes to the right channel alone.
 #[test]
-fn a_714_root_folds_to_a_stereo_device_by_speaker() {
-    let out = render_root_to(12, 2, &[11]);
+fn a_714_main_output_folds_to_a_stereo_device_by_speaker() {
+    let out = render_main_output_to(12, 2, &[11]);
     let (el, er) = (channel_energy(&out, 0, 2), channel_energy(&out, 1, 2));
     assert!(er > 0.0, "the right channel carries the source");
     assert_eq!(el, 0.0, "the left channel carries none (el={el}, er={er})");
 }
 
-/// A root wider than `MAX_CHANNELS` never reaches the callback:
+/// A main output wider than `MAX_CHANNELS` never reaches the callback:
 /// the engine refuses it at construction, naming the widths.
 ///
 /// A graph cannot be handed to the engine that wide, so the property is the
@@ -160,9 +163,9 @@ fn a_714_root_folds_to_a_stereo_device_by_speaker() {
 /// a later widening commit is `engine_graph`'s
 /// `a_graph_engine_refuses_more_outputs_than_it_folds`).
 #[test]
-fn over_wide_root_is_refused_before_it_can_render() {
+fn over_wide_main_output_is_refused_before_it_can_render() {
     let wide = MAX_CHANNELS + 1;
-    let (mut ed, exec) = root(wide, &(0..wide).collect::<Vec<_>>());
+    let (mut ed, exec) = main_output(wide, &(0..wide).collect::<Vec<_>>());
     let refused = Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).err();
     assert_eq!(
         refused,

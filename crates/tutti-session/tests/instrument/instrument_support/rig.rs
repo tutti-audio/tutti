@@ -4,7 +4,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;
-use tutti_session::Root;
+use tutti_session::MainOutput;
 use tutti_session::{InstrumentHandle, Session};
 use tutti_ump::Ump;
 use tutti_units::Moment;
@@ -17,6 +17,8 @@ pub const BLOCK: usize = 128;
 pub struct Rig {
     pub session: Session,
     pub node: NodeKey,
+    /// The key of the hosted plugin the instrument is, when it is one.
+    pub plugin: Option<tutti_session::Key<tutti_session::AnyPlugin>>,
     pub handle: InstrumentHandle,
     /// Left channel of everything rendered, from frame 0.
     pub left: Vec<f32>,
@@ -48,7 +50,7 @@ impl Rig {
     /// A rig over a handle the session already made, its strip wired to the
     /// outputs here.
     pub fn wired<N: ?Sized>(mut session: Session, handle: InstrumentHandle<N>) -> Self {
-        session.graph().connect(handle.out(), Root).unwrap();
+        session.graph().connect(handle.out(), MainOutput).unwrap();
         Self::played(session, handle)
     }
 
@@ -60,6 +62,7 @@ impl Rig {
         Self {
             session,
             node: handle.node().erase(),
+            plugin: None,
             handle,
             left: Vec::new(),
             right: Vec::new(),

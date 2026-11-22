@@ -7,7 +7,7 @@ use tutti_buffers::Interleaved;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
-use tutti_session::{OutPort, Root, Session};
+use tutti_session::{MainOutput, OutPort, Session};
 use tutti_units::SampleRate;
 
 const RATE: f64 = 48_000.0;
@@ -22,7 +22,7 @@ fn offline() -> Session {
 
 /// `frames` stereo frames of `s` in `block`-frame device blocks, the
 /// transport rolling from the first block.
-fn run(s: &Session, frames: usize, block: usize) -> Vec<f32> {
+fn run(s: &mut Session, frames: usize, block: usize) -> Vec<f32> {
     s.play().expect("room");
     let mut out = Vec::with_capacity(frames * 2);
     let mut buf = vec![0.0f32; block * 2];
@@ -76,12 +76,12 @@ fn a_sampler_node_added_to_the_graph_follows_the_sessions_tempo_map() {
     let voice = s.graph().add(pool);
     for port in 0..2 {
         s.graph()
-            .set_sources(Root::output(port), [OutPort::new(voice, port)])
+            .set_sources(MainOutput::channel(port), [OutPort::new(voice, port)])
             .unwrap()
             .unfaded();
     }
     let _ = s.update();
-    let out = run(&s, 60_000, 512);
+    let out = run(&mut s, 60_000, 512);
     for f in 0..60_000 {
         let want = f as f32 / 131_072.0;
         assert_eq!(out[2 * f].to_bits(), want.to_bits(), "frame {f}");

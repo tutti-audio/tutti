@@ -52,8 +52,8 @@ fn run(budget: usize, dir: &std::path::Path) -> (crate::Written, Vec<Vec<f32>>, 
         &job,
         &FrozenClock,
         vec![
-            Output::master(target),
-            Output::master(BufferTarget::new(ChannelLayout::STEREO)),
+            Output::main_output(target),
+            Output::main_output(BufferTarget::new(ChannelLayout::STEREO)),
         ],
         &mut control,
         budget,
@@ -127,7 +127,7 @@ fn a_cancelled_or_failed_render_removes_its_spill() {
     let path = dir.path().join("n.wav");
     let job = Job::new(RATE, Samples::new(FRAMES), Samples::new(0), Samples::new(0)).unwrap();
     let target = || {
-        Output::master(
+        Output::main_output(
             crate::FileTarget::new(
                 &path,
                 tutti_codec::Format::Wav(Pcm::Float32),

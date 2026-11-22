@@ -20,14 +20,17 @@ use tutti_timeline::Transport;
 #[test]
 fn one_import_renders_a_block() {
     use tutti::graph::ForkByClone;
-    use tutti::{Hz, InterleavedMut, Root, Session};
+    use tutti::{Hz, InterleavedMut, MainOutput, Session};
     use tutti_nodes::testing::Osc;
 
-    let mut session = Session::new(SampleRate::SR_48K).expect("builds");
+    let mut session = Session::builder()
+        .sample_rate(SampleRate::SR_48K)
+        .build()
+        .expect("builds");
     let tone = session.graph().add(ForkByClone(Osc::sine(Hz::new(440.0))));
     session
         .graph()
-        .connect(tone, Root)
+        .connect(tone, MainOutput)
         .expect("both ends exist")
         .unfaded();
     assert!(session.update().is_empty(), "the commit raised no event");
@@ -74,20 +77,23 @@ fn the_dsp_library_and_the_node_contract_are_reachable() {
 #[test]
 fn a_session_bounces_to_buffers_through_the_umbrella() {
     use tutti::graph::ForkByClone;
-    use tutti::{Bounce, Range, Root, Session};
+    use tutti::{Bounce, MainOutput, Range, Session};
 
-    let mut session = Session::new(SampleRate::SR_48K).expect("builds");
+    let mut session = Session::builder()
+        .sample_rate(SampleRate::SR_48K)
+        .build()
+        .expect("builds");
     let node = session.graph().add(ForkByClone(Const::frame(&[0.5, 0.5])));
     session
         .graph()
-        .connect(node, Root)
+        .connect(node, MainOutput)
         .expect("both ends exist")
         .unfaded();
     let rendered = tutti_fixtures::block_on(
         session
             .bounce(
                 Bounce::new()
-                    .master_buffers()
+                    .main_output_buffers()
                     .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01))),
             )
             .expect("a DC graph starts"),
@@ -95,7 +101,7 @@ fn a_session_bounces_to_buffers_through_the_umbrella() {
     let planes = session
         .apply(rendered)
         .expect("a DC graph renders")
-        .into_master()
+        .into_main_output()
         .into_planes();
     assert_eq!(planes.len(), 2);
     assert!(planes[0].iter().all(|&s| (s - 0.5).abs() < 1e-6));

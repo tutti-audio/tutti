@@ -189,7 +189,7 @@ fn a_fork_starts_from_the_gain_last_set_and_shares_nothing() {
         .renderer_mut()
         .editor()
         .fork(
-            ForkTarget::Master,
+            ForkTarget::MainOutput,
             ForkMode::Live,
             Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))),
         )

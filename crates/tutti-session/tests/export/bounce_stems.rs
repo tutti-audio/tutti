@@ -1,11 +1,11 @@
-//! Stems: a node's own output written beside the master
-//! in the same pass, through a plan tap on the master's fork.
+//! Stems: a node's own output written beside the main output
+//! in the same pass, through a plan tap on the main output's fork.
 //!
 //! What is pinned here is what only a stem has: it is the node's output and
 //! not what is downstream of it, at the node's own width and in the tapped
-//! order; it leaves the plan at the master's time (so the stems sum to the
-//! master sample for sample, with the latency trimmed or not); every target
-//! has the same length; the stems take the master's gain or their own; and a
+//! order; it leaves the plan at the main output's time (so the stems sum to the
+//! main output sample for sample, with the latency trimmed or not); every target
+//! has the same length; the stems take the main output's gain or their own; and a
 //! stem that cannot be rendered, or two files at one path, are refused by name
 //! before anything is written.
 
@@ -20,9 +20,9 @@ use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
 use tutti_session::{
     Bounce, BounceConfigError, BounceError, BounceLatency, BounceTail, DetachedSession,
-    ExportClock, InPort, OutPort, PreparedGraph, Range, Root, Session, Stem, StemGain,
+    ExportClock, InPort, MainOutput, OutPort, PreparedGraph, Range, Session, Stem, StemGain,
 };
-use tutti_session::{Bounced, BufferMaster, Master};
+use tutti_session::{Bounced, BufferMainOutput, MainOutputKind};
 use tutti_units::{Db, SampleRate, Samples, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -47,14 +47,14 @@ fn base(seconds: f64) -> Bounce {
 }
 
 /// [`base`] into memory.
-fn bounce(seconds: f64) -> Bounce<NodeKey, BufferMaster> {
-    base(seconds).master_buffers()
+fn bounce(seconds: f64) -> Bounce<NodeKey, BufferMainOutput> {
+    base(seconds).main_output_buffers()
 }
 
-/// The planes of every target a finished bounce produced, master first.
-fn planes(out: Result<Bounced<BufferMaster>, BounceError>) -> Vec<Vec<Vec<f32>>> {
-    let (master, stems) = out.expect("the bounce renders").into_parts();
-    std::iter::once(master.into_planes())
+/// The planes of every target a finished bounce produced, main output first.
+fn planes(out: Result<Bounced<BufferMainOutput>, BounceError>) -> Vec<Vec<Vec<f32>>> {
+    let (main_output, stems) = out.expect("the bounce renders").into_parts();
+    std::iter::once(main_output.into_planes())
         .chain(stems.into_iter().map(|p| match p {
             Produced::Buffers(rendered) => rendered.into_planes(),
             other => panic!("expected planes, got {other:?}"),
@@ -63,7 +63,10 @@ fn planes(out: Result<Bounced<BufferMaster>, BounceError>) -> Vec<Vec<Vec<f32>>>
 }
 
 /// What a bounce is refused with, started and run on this thread.
-fn refused<M: Master>(session: &mut DetachedSession, bounce: Bounce<NodeKey, M>) -> BounceError {
+fn refused<M: MainOutputKind>(
+    session: &mut DetachedSession,
+    bounce: Bounce<NodeKey, M>,
+) -> BounceError {
     match bounced(session, bounce) {
         Err(e) => e,
         Ok(out) => panic!("expected a refusal, got {:?}", out.stems().len()),
@@ -130,47 +133,47 @@ impl Node for Half {
     fn reset(&mut self) {}
 }
 
-/// **Stems leave the plan at the master's time, so they sum to it.** A
+/// **Stems leave the plan at the main output's time, so they sum to it.** A
 /// constant 0.5 (no latency) and the `Late` step (latency [`LATE`]) both feed
 /// the two outputs. The plan delays the constant by [`LATE`] frames to meet the
 /// step, so with the latency kept: the constant's stem is 0 for [`LATE`] frames
 /// and then 0.5 (not 0.5 from frame 0, which is the node as it leaves the node),
-/// the step's is 0 then 1, and the master is their sum, 0 then 1.5, sample for
+/// the step's is 0 then 1, and the main output is their sum, 0 then 1.5, sample for
 /// sample; with the latency trimmed every one starts on its programme, and all
 /// of them have the same length.
 #[test]
-fn stems_are_aligned_with_the_master_and_sum_to_it() {
+fn stems_are_aligned_with_the_main_output_and_sum_to_it() {
     let mut session = session();
     let steady = session.graph().add(ForkByClone(Const::mono(0.5)));
     let late = session.graph().add(ForkByClone(Late { pos: 0 }));
     for channel in 0..2 {
         session
             .graph()
-            .connect(OutPort::new(steady, 0), Root::output(channel))
+            .connect(OutPort::new(steady, 0), MainOutput::channel(channel))
             .unwrap();
         session
             .graph()
-            .connect(OutPort::new(late, 0), Root::output(channel))
+            .connect(OutPort::new(late, 0), MainOutput::channel(channel))
             .unwrap();
     }
     let frames = 2_000;
     let seconds = Samples::new(frames).to_seconds(RATE).get();
-    let stems = |bounce: Bounce<NodeKey, BufferMaster>| {
+    let stems = |bounce: Bounce<NodeKey, BufferMainOutput>| {
         bounce
-            .stem_with(Stem::buffers(steady.erase()))
-            .stem_with(Stem::buffers(late.erase()))
+            .stem_with(Stem::new(steady.erase()))
+            .stem_with(Stem::new(late.erase()))
     };
 
     // BounceLatency kept: the programme starts `LATE` frames in.
     let kept = planes(bounced(&mut session, stems(bounce(seconds))));
-    let [master, constant, step] = kept.as_slice() else {
-        panic!("the master and two stems")
+    let [main_output, constant, step] = kept.as_slice() else {
+        panic!("the main output and two stems")
     };
     assert_eq!(constant.len(), 1, "a mono node's stem is mono");
     for (what, plane, before, after) in [
         ("constant", &constant[0], 0.0, 0.5),
         ("step", &step[0], 0.0, 1.0),
-        ("master", &master[0], 0.0, 1.5),
+        ("main_output", &main_output[0], 0.0, 1.5),
     ] {
         assert_eq!(
             plane.len(),
@@ -186,10 +189,18 @@ fn stems_are_aligned_with_the_master_and_sum_to_it() {
             "{what}: the programme from frame {LATE}"
         );
     }
-    for (i, ((m, a), b)) in master[0].iter().zip(&constant[0]).zip(&step[0]).enumerate() {
+    for (i, ((m, a), b)) in main_output[0]
+        .iter()
+        .zip(&constant[0])
+        .zip(&step[0])
+        .enumerate()
+    {
         assert_eq!(m.to_bits(), (a + b).to_bits(), "the stems sum at {i}");
     }
-    assert_eq!(master[0], master[1], "both master channels hear both");
+    assert_eq!(
+        main_output[0], main_output[1],
+        "both main output channels hear both"
+    );
 
     // BounceLatency trimmed: the programme from frame 0, and the same length.
     let trimmed = planes(bounced(
@@ -197,7 +208,7 @@ fn stems_are_aligned_with_the_master_and_sum_to_it() {
         stems(bounce(seconds).latency(BounceLatency::Graph)),
     ));
     for (what, plane, level) in [
-        ("master", &trimmed[0][0], 1.5),
+        ("main_output", &trimmed[0][0], 1.5),
         ("constant", &trimmed[1][0], 0.5),
         ("step", &trimmed[2][0], 1.0),
     ] {
@@ -208,7 +219,7 @@ fn stems_are_aligned_with_the_master_and_sum_to_it() {
 
 /// **A stem is the node's own output, at the node's own width and in the order
 /// tapped; what is downstream of it is not in it.** A constant 0.5 feeds a
-/// node that halves it, which feeds the outputs: the master and the halver's
+/// node that halves it, which feeds the outputs: the main output and the halver's
 /// stem read 0.25, and the constant's stem 0.5. A three-channel node heard on
 /// two output channels is a three-channel stem, and `channels` taps some of
 /// them in the order given.
@@ -221,36 +232,47 @@ fn a_stem_is_the_nodes_own_output_and_not_what_is_downstream() {
         .graph()
         .set_sources(InPort::new(half, 0), [OutPort::new(source, 0)])
         .unwrap();
-    session.graph().connect(half, Root).unwrap();
+    session.graph().connect(half, MainOutput).unwrap();
     let wide = session
         .graph()
         .add(ForkByClone(Const::frame(&[0.25, -0.5, 0.75])));
     for channel in 0..2 {
         session
             .graph()
-            .connect(OutPort::new(wide, channel), Root::output(channel))
+            .connect(OutPort::new(wide, channel), MainOutput::channel(channel))
             .unwrap();
     }
 
     let out = planes(bounced(
         &mut session,
         bounce(0.01)
-            .stem_with(Stem::buffers(source.erase()))
-            .stem_with(Stem::buffers(half.erase()))
-            .stem_with(Stem::buffers(wide.erase()))
-            .stem_with(Stem::buffers(wide.erase()).channels([2, 0])),
+            .stem_with(Stem::new(source.erase()))
+            .stem_with(Stem::new(half.erase()))
+            .stem_with(Stem::new(wide.erase()))
+            .stem_with(Stem::new(wide.erase()).channels([2, 0])),
     ));
-    let [master, source_stem, half_stem, wide_stem, picked] = out.as_slice() else {
-        panic!("the master and four stems")
+    let [main_output, source_stem, half_stem, wide_stem, picked] = out.as_slice() else {
+        panic!("the main output and four stems")
     };
-    assert_eq!(master.len(), 2, "the master is the root's width");
-    assert!(master[0].iter().all(|&s| s == 0.25 + 0.25), "0.25 and 0.25");
+    assert_eq!(
+        main_output.len(),
+        2,
+        "the main output is the main output's width"
+    );
+    assert!(
+        main_output[0].iter().all(|&s| s == 0.25 + 0.25),
+        "0.25 and 0.25"
+    );
     assert!(
         source_stem[0].iter().all(|&s| s == 0.5),
         "before the halver"
     );
     assert!(half_stem[0].iter().all(|&s| s == 0.25), "the halver's own");
-    assert_eq!(wide_stem.len(), 3, "the node's width, not the root's");
+    assert_eq!(
+        wide_stem.len(),
+        3,
+        "the node's width, not the main output's"
+    );
     for (plane, level) in wide_stem.iter().zip([0.25, -0.5, 0.75]) {
         assert!(plane.iter().all(|&s| s == level), "channel at {level}");
     }
@@ -273,14 +295,17 @@ fn a_stem_that_cannot_be_placed_is_refused_not_truncated() {
     for channel in 0..2 {
         session
             .graph()
-            .connect(OutPort::new(wide, channel), Root::output(channel))
+            .connect(OutPort::new(wide, channel), MainOutput::channel(channel))
             .unwrap();
     }
-    let to_mono = Stem::new(wide.erase(), dir.path().join("mono.wav"), float_wav())
+    let to_mono = Stem::new(wide.erase())
+        .file(dir.path().join("mono.wav"), float_wav())
         .layout(ChannelLayout::MONO);
-    let wrong_width = Stem::new(wide.erase(), dir.path().join("two.wav"), float_wav()).topology(
-        tutti_buffers::ChannelTopology::default_for(ChannelLayout::STEREO),
-    );
+    let wrong_width = Stem::new(wide.erase())
+        .file(dir.path().join("two.wav"), float_wav())
+        .topology(tutti_buffers::ChannelTopology::default_for(
+            ChannelLayout::STEREO,
+        ));
     for stem in [to_mono, wrong_width] {
         let b = bounce(0.01).stem_with(stem);
         match refused(&mut session, b) {
@@ -301,7 +326,7 @@ fn a_stem_that_cannot_be_placed_is_refused_not_truncated() {
 }
 
 /// **Every target is the same length after the same resample**, and a stem
-/// takes its own format: the master as a 16-bit file, a stem as 32-bit float,
+/// takes its own format: the main output as a 16-bit file, a stem as 32-bit float,
 /// both converted to 44.1 kHz from 48 kHz, are the same number of frames, and
 /// the float stem holds the node's level exactly.
 #[test]
@@ -309,27 +334,30 @@ fn every_target_has_the_same_length_and_a_stem_its_own_format() {
     let dir = tempfile::tempdir().unwrap();
     let mut session = session();
     let node = session.graph().add(ForkByClone(Const::mono(0.5)));
-    session.graph().connect(node, Root).unwrap();
-    let master = dir.path().join("master.wav");
+    session.graph().connect(node, MainOutput).unwrap();
+    let main_output = dir.path().join("main_output.wav");
     let stem = dir.path().join("stem.wav");
     let done = bounced(
         &mut session,
         base(0.25)
-            .master(&master, Format::Wav(Pcm::Int16))
+            .main_output(&main_output, Format::Wav(Pcm::Int16))
             .resample(Resample::to(tutti_units::SampleRate::SR_44K1))
-            .stem_with(Stem::new(node.erase(), &stem, float_wav())),
+            .stem_with(Stem::new(node.erase()).file(&stem, float_wav())),
     )
     .expect("renders");
     assert_eq!(done.stems().len(), 1);
 
-    let master_spec = hound::WavReader::open(&master).unwrap().spec();
+    let main_output_spec = hound::WavReader::open(&main_output).unwrap().spec();
     assert_eq!(
-        (master_spec.bits_per_sample, master_spec.sample_rate),
+        (
+            main_output_spec.bits_per_sample,
+            main_output_spec.sample_rate
+        ),
         (16, 44_100)
     );
     let (planes, frames) = read_wav(&stem);
-    let master_frames = hound::WavReader::open(&master).unwrap().duration() as usize;
-    assert_eq!(frames, master_frames, "one length for every target");
+    let main_output_frames = hound::WavReader::open(&main_output).unwrap().duration() as usize;
+    assert_eq!(frames, main_output_frames, "one length for every target");
     assert_eq!(planes.len(), 1, "the node's width");
     // The resampler's edges ring; its middle is the node's constant.
     let middle = &planes[0][frames / 4..3 * frames / 4];
@@ -337,9 +365,9 @@ fn every_target_has_the_same_length_and_a_stem_its_own_format() {
 }
 
 /// **Shared gain keeps the balance; each measures its own.** Two constants
-/// 0.5 and 0.25 feed the outputs (a master of 0.75). With `Shared` the stems
-/// are written with the master's gain: the files are 0.5 and 0.25 times it,
-/// still summing to the master's samples, and all three report one gain. With
+/// 0.5 and 0.25 feed the outputs (a main output of 0.75). With `Shared` the stems
+/// are written with the main output's gain: the files are 0.5 and 0.25 times it,
+/// still summing to the main output's samples, and all three report one gain. With
 /// `Each` each stem is measured alone: the quieter one is given twice the
 /// loud one's gain (the same shape at half the level), and both land on the
 /// same peak. `None` writes them as rendered.
@@ -351,29 +379,38 @@ fn shared_gain_keeps_the_balance_and_each_measures_its_own() {
     for channel in 0..2 {
         session
             .graph()
-            .connect(OutPort::new(loud, 0), Root::output(channel))
+            .connect(OutPort::new(loud, 0), MainOutput::channel(channel))
             .unwrap();
         session
             .graph()
-            .connect(OutPort::new(quiet, 0), Root::output(channel))
+            .connect(OutPort::new(quiet, 0), MainOutput::channel(channel))
             .unwrap();
     }
     let target = Normalize::peak(Db::new(-6.0));
     let dir = tempfile::tempdir().unwrap();
     // The three files' samples, and the gain each reports.
     let run = |session: &mut DetachedSession, tag: &str, gain: StemGain| {
-        let paths = ["master", "loud", "quiet"].map(|n| dir.path().join(format!("{tag}-{n}.wav")));
+        let paths =
+            ["main_output", "loud", "quiet"].map(|n| dir.path().join(format!("{tag}-{n}.wav")));
         let done = bounced(
             session,
             base(0.1)
-                .master(&paths[0], float_wav())
+                .main_output(&paths[0], float_wav())
                 .normalize(target)
-                .stem_with(Stem::new(loud.erase(), &paths[1], float_wav()).gain(gain))
-                .stem_with(Stem::new(quiet.erase(), &paths[2], float_wav()).gain(gain)),
+                .stem_with(
+                    Stem::new(loud.erase())
+                        .file(&paths[1], float_wav())
+                        .gain(gain),
+                )
+                .stem_with(
+                    Stem::new(quiet.erase())
+                        .file(&paths[2], float_wav())
+                        .gain(gain),
+                ),
         )
         .expect("renders");
-        let (master, stems) = done.into_parts();
-        let gains: Vec<Option<Db>> = std::iter::once(master.gain)
+        let (main_output, stems) = done.into_parts();
+        let gains: Vec<Option<Db>> = std::iter::once(main_output.gain)
             .chain(stems.into_iter().map(|p| match p {
                 Produced::File(written) => written.gain,
                 other => panic!("expected a file, got {other:?}"),
@@ -388,15 +425,18 @@ fn shared_gain_keeps_the_balance_and_each_measures_its_own() {
     // The stems are `f32`: the gain narrows once.
     let amp = |db: Db| db.to_amplitude().get() as f32;
 
-    let (paths, gains, [master, loud_level, quiet_level]) =
+    let (paths, gains, [main_output, loud_level, quiet_level]) =
         run(&mut session, "shared", StemGain::Shared);
-    let g = gains[0].expect("the master was normalized");
+    let g = gains[0].expect("the main output was normalized");
     assert_eq!(
         gains,
         [Some(g); 3],
-        "one gain for the master and both stems"
+        "one gain for the main output and both stems"
     );
-    assert!((master - 0.75 * amp(g)).abs() < 1e-5, "the master's gain");
+    assert!(
+        (main_output - 0.75 * amp(g)).abs() < 1e-5,
+        "the main output's gain"
+    );
     assert!((loud_level - 0.5 * amp(g)).abs() < 1e-5, "the loud stem's");
     assert!(
         (quiet_level - 0.25 * amp(g)).abs() < 1e-5,
@@ -404,7 +444,10 @@ fn shared_gain_keeps_the_balance_and_each_measures_its_own() {
     );
     let [m, a, b] = paths.map(|p| read_wav(&p).0.swap_remove(0));
     for ((m, a), b) in m.iter().zip(&a).zip(&b) {
-        assert!((m - (a + b)).abs() < 1e-6, "the stems sum to the master");
+        assert!(
+            (m - (a + b)).abs() < 1e-6,
+            "the stems sum to the main output"
+        );
     }
 
     let (_, gains, [_, loud_level, quiet_level]) =
@@ -425,17 +468,20 @@ fn shared_gain_keeps_the_balance_and_each_measures_its_own() {
 }
 
 /// **A request that cannot work is refused by name before any fork**: a
-/// shared gain with no normalized master, a normalize of a stem held in
+/// shared gain with no normalized main output, a normalize of a stem held in
 /// memory, a stem file with no format anywhere, and two targets at one path
-/// (the master and a stem, or two stems).
+/// (the main output and a stem, or two stems).
 #[test]
 fn a_request_that_cannot_work_is_refused_by_name() {
     let dir = tempfile::tempdir().unwrap();
     let path = |n: &str| dir.path().join(n);
     let mut session = session();
     let node = session.graph().add(ForkByClone(Const::mono(0.5)));
-    session.graph().connect(node, Root).unwrap();
-    fn why<M: Master>(session: &mut DetachedSession, b: Bounce<NodeKey, M>) -> BounceConfigError {
+    session.graph().connect(node, MainOutput).unwrap();
+    fn why<M: MainOutputKind>(
+        session: &mut DetachedSession,
+        b: Bounce<NodeKey, M>,
+    ) -> BounceConfigError {
         match refused(session, b) {
             BounceError::Config(why) => why,
             other => panic!("expected a refusal by name, got {other:?}"),
@@ -445,17 +491,21 @@ fn a_request_that_cannot_work_is_refused_by_name() {
     assert_eq!(
         why(
             &mut session,
-            base(0.01).master(path("m.wav"), float_wav()).stem_with(
-                Stem::new(node.erase(), path("s.wav"), float_wav()).gain(StemGain::Shared),
-            ),
+            base(0.01)
+                .main_output(path("m.wav"), float_wav())
+                .stem_with(
+                    Stem::new(node.erase())
+                        .file(path("s.wav"), float_wav())
+                        .gain(StemGain::Shared),
+                ),
         ),
-        BounceConfigError::SharedGainWithoutMaster
+        BounceConfigError::SharedGainWithoutMainOutput
     );
     assert_eq!(
         why(
             &mut session,
             base(0.01)
-                .master(path("one.wav"), float_wav())
+                .main_output(path("one.wav"), float_wav())
                 .stem(node.erase(), path("one.wav")),
         ),
         BounceConfigError::DuplicatePath(path("one.wav"))
@@ -464,7 +514,7 @@ fn a_request_that_cannot_work_is_refused_by_name() {
         why(
             &mut session,
             base(0.01)
-                .master(path("m.wav"), float_wav())
+                .main_output(path("m.wav"), float_wav())
                 .stem(node.erase(), path("two.wav"))
                 .stem(node.erase(), path("two.wav")),
         ),
@@ -477,27 +527,27 @@ fn a_request_that_cannot_work_is_refused_by_name() {
     );
 }
 
-/// **A host names nodes its own way and resolves them once**: `try_map`
+/// **A host names nodes its own way and resolves them once**: `map`
 /// turns a bounce over names into one over keys, and the first node it cannot
 /// resolve is its error, with nothing started.
 #[test]
 fn a_host_resolves_its_own_names_once() {
     let mut session = session();
     let kick = session.graph().add(ForkByClone(Const::mono(0.5)));
-    session.graph().connect(kick, Root).unwrap();
+    session.graph().connect(kick, MainOutput).unwrap();
     let keys: HashMap<&str, _> = HashMap::from([("kick", kick.erase())]);
 
-    let named = |name| Bounce::<&str>::new().stem_with(Stem::buffers(name));
+    let named = |name| Bounce::<&str>::new().stem_with(Stem::new(name));
     let resolved = named("kick")
-        .master_buffers()
+        .main_output_buffers()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01)))
         .clock(ExportClock::frozen())
-        .try_map(|name| keys.get(name).copied().ok_or(name))
+        .map(|name| keys.get(name).copied().ok_or(name))
         .expect("kick is a node");
     let out = planes(bounced(&mut session, resolved));
     assert!(out[1][0].iter().all(|&s| s == 0.5), "the kick's stem");
 
-    let unresolved = named("snare").try_map(|name| keys.get(name).copied().ok_or(name));
+    let unresolved = named("snare").map(|name| keys.get(name).copied().ok_or(name));
     assert_eq!(unresolved.err(), Some("snare"));
 }
 
@@ -507,9 +557,9 @@ fn a_host_resolves_its_own_names_once() {
 fn a_node_the_edit_removed_is_refused_where_the_taps_open() {
     let mut session = session();
     let node = session.graph().add(ForkByClone(Const::mono(0.5)));
-    session.graph().connect(node, Root).unwrap();
+    session.graph().connect(node, MainOutput).unwrap();
     let b = bounce(0.01)
-        .stem_with(Stem::buffers(node.erase()))
+        .stem_with(Stem::new(node.erase()))
         .edit(Box::new(move |prepared: PreparedGraph<'_>| {
             prepared
                 .editor

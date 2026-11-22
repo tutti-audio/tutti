@@ -63,7 +63,7 @@ pub use facts::FileFacts;
 pub use fs::canonical_path;
 pub use loadable::{BindError, Hosting, Loadable, Resolved};
 pub use mtime::{BeforeEpoch, Mtime};
-pub use pedal::{PedalError, Recovered, RecoveryFailure};
+pub use pedal::{CrashRecoveryFailure, PedalError, Recovered};
 pub use probe::DEFAULT_PROBE_TIMEOUT;
 pub use probing::DEFAULT_MEASURE_TIMEOUT;
 pub use scanner::{

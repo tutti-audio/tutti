@@ -11,7 +11,7 @@ use tutti_engine::{OutputMap, OutputStrip, RoutingError};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_session::{
-    OutPort, OutputPolicy, OutputPolicyError, Root, Session, SessionBuilder, SetRefusal,
+    MainOutput, OutPort, OutputPolicy, OutputPolicyError, Session, SessionBuilder, SetRefusal,
     ValueError, ValueErrorKind,
 };
 use tutti_units::{Amplitude, SampleRate, Samples};
@@ -31,7 +31,7 @@ fn feed(session: &mut Session, values: &[f32]) {
     for c in 0..values.len() {
         session
             .graph()
-            .set_sources(Root::output(c), [OutPort::new(node, c)])
+            .set_sources(MainOutput::channel(c), [OutPort::new(node, c)])
             .unwrap()
             .unfaded();
     }
@@ -56,15 +56,15 @@ fn last_frame(session: &mut Session, device: u16, frames: usize) -> Vec<f32> {
 }
 
 /// A monitor format and a map are heard on the device and change nothing the
-/// root is: a tap on the root reads the six channels as fed.
+/// main output is: a tap on the main output reads the six channels as fed.
 #[test]
-fn monitoring_changes_what_is_heard_and_never_the_root() {
+fn monitoring_changes_what_is_heard_and_never_the_main_output() {
     let mut s = offline(Session::builder(), 6);
     feed(&mut s, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
     let mut tap = s
         .graph()
         .taps()
-        .open_root(Samples::new(4_096))
+        .open_main_output(Samples::new(4_096))
         .expect("the sources exist");
     assert_eq!(last_frame(&mut s, 6, 128), [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
 
@@ -80,7 +80,7 @@ fn monitoring_changes_what_is_heard_and_never_the_root() {
     // stereo fold on outputs 3 and 4, silence elsewhere.
     assert_eq!(last_frame(&mut s, 6, 512), [0.0, 0.0, l, r, 0.0, 0.0]);
 
-    // The root is as fed, every frame the tap holds.
+    // The main output is as fed, every frame the tap holds.
     let mut frame = [0.0f32; 6];
     let mut seen = 0;
     while tap
@@ -92,7 +92,7 @@ fn monitoring_changes_what_is_heard_and_never_the_root() {
         assert_eq!(frame, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0], "frame {seen}");
         seen += 1;
     }
-    assert!(seen > 0, "the tap read the root");
+    assert!(seen > 0, "the tap read the main output");
 }
 
 /// The policy is checked against the device when it is set: a map that names an

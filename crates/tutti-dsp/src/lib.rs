@@ -50,7 +50,8 @@
 //!   itself) through a [`KeyFilter`] if built with one; the lookahead limiter ([`LimiterBank`],
 //!   its threshold and ceiling [`LimiterSignals`], its lookahead its latency); the brickwall
 //!   clipper ([`BrickwallBank`], its ceiling a per-frame control signal); the transient shaper
-//!   ([`TransientBank`]: one gain from a fast and a slow one-pole envelope); the loudness
+//!   ([`TransientBank`]: one gain from a fast and a slow one-pole envelope; [`TransientDetector`]:
+//!   the sample positions of attacks from the same two envelopes); the loudness
 //!   leveller ([`LevellerBank`]: one gain moving the BS.1770 short-term loudness, over the
 //!   [`ChannelWeight`] of each channel, to a target); the dynamic EQ
 //!   band ([`DynamicEqBank`]: an SVF bell whose gain follows the level of a band-passed key
@@ -86,6 +87,15 @@
 //! - **Waveshaping** (`waveshape.rs`): [`ShapeKind`], seven memoryless curves, and
 //!   [`WaveshaperBank`], which runs one over a block at a ramping or per-frame drive, with
 //!   [`Antialiasing`] of the first or second order.
+//! - **Diode clipper** (`diode_clipper.rs`): [`DiodeClipper`], the RC-loaded antiparallel diode
+//!   pair of Yeh, Abel and Smith, by the trapezoidal rule with a capped Newton solve seeded from
+//!   the Wright omega closed form (`wright_omega.rs`, `newton.rs`).
+//! - **Hysteresis** (`hysteresis.rs`): [`Hysteresis`], the Jiles-Atherton model of magnetization
+//!   (Jiles and Atherton 1986), by the trapezoidal rule of Holters and Zoelzer (2016) with a
+//!   capped Newton solve (`newton.rs`).
+//! - **Tube stage** (`tube_stage.rs`): [`TubeStage`], a 12AX7 common-cathode stage after Koren's
+//!   model, its plate load solved per sample by a capped Newton iteration from a closed-form
+//!   seed, with [`TubeDrive`] its checked drive.
 //! - **Spatial** (`spatial/`): VBAP ([`SpeakerLayout`], Pulkki's pairs and triplets and the
 //!   gain solve over them, [`SpeakerGeometryError`]; [`VbapKernel`] and [`VbapGains`], one
 //!   direction's gains and one channel rendered along a ramp between two) and the HRTF
@@ -141,15 +151,16 @@
 //! - **Bit crusher and DC blocker** (`bit_crush.rs`, `dc_block.rs`): [`BitCrusher`], a
 //!   sample-and-hold every [`hold_frames`] frames, then [`quantize`] to a bit depth;
 //!   [`DcBlocker`], a first-order high-pass with its pole `exp(-2 pi fc / fs)`.
-//! - **Spectral features and onset novelty** (`spectral.rs`, `novelty.rs`): the shape of one
-//!   magnitude spectrum ([`spectral_centroid`], [`spectral_flatness`], [`spectral_rolloff`]) and
+//! - **Spectral features, onset novelty and transients** (`spectral.rs`, `novelty.rs`): the shape of one
+//!   magnitude spectrum ([`spectral_centroid`], [`spectral_bandwidth`], [`spectral_flatness`], [`spectral_crest`],
+//!   [`spectral_slope`], [`spectral_rolloff`]) and
 //!   how much a frame differs from the one before ([`spectral_flux`],
-//!   [`high_frequency_content`], [`complex_domain_deviation`], [`spectral_energy`]), and
+//!   [`high_frequency_content`], [`spectral_distance`], [`spectral_energy`]), and
 //!   [`bin_magnitude`], the modulus they take of a bin.
 //! - **Mel bank, DCT-II and MFCC** (`mel.rs`, `dct.rs`, `mfcc.rs`): [`MelFilterbank`]
 //!   (from a [`MelConfig`], in a [`MelScale`] and [`MelNorm`]), the orthonormal [`Dct2`], and
 //!   [`Mfcc`], the cepstral coefficients of one magnitude spectrum.
-//! - **Sequence decoding** (`viterbi.rs`, `beat.rs`, `sequence.rs`): [`sticky_viterbi`], the best
+//! - **Sequence decoding** (`viterbi.rs`, `beat.rs`, `sequence.rs`): [`viterbi()`] over a [`Transition`] ([`StickyTransition`], [`BandedTransition`]), and [`sticky_viterbi`], the best
 //!   state path when every switch costs the same; [`track_beat_frames`], beat placement by
 //!   dynamic programming over a novelty curve (Ellis, 2007); the [`median`] of a set and the
 //!   [`local_maxima`] of a curve.
@@ -188,6 +199,7 @@ mod dct;
 mod decorrelator;
 mod delay;
 mod design;
+mod diode_clipper;
 mod distance;
 mod dither;
 mod dynamics;
@@ -200,6 +212,7 @@ mod fm;
 mod follower;
 mod frequency_shifter;
 mod granular;
+mod hysteresis;
 mod interp;
 mod karplus_strong;
 mod level;
@@ -207,6 +220,7 @@ mod lfo;
 mod loudness;
 mod modal;
 mod modulation;
+mod newton;
 mod noise;
 mod novelty;
 mod onepole;
@@ -222,9 +236,11 @@ mod shoebox;
 mod stereo;
 mod string_tuning;
 mod tremolo;
+mod tube_stage;
 mod waveguide;
 mod waveshape;
 mod wavetable;
+mod wright_omega;
 
 mod mel;
 mod mfcc;
@@ -251,7 +267,7 @@ pub use beat::track_beat_frames;
 pub use bit_crush::{BitCrusher, BitCrusherControls, hold_frames, quantize};
 pub use block::BlockMismatch;
 pub use channel_group::CHANNEL_GROUP;
-pub use comb::{CombBank, CombControls, CombFilter, CombForm};
+pub use comb::{CombBank, CombControls, CombDelay, CombDelayError, CombFilter, CombForm};
 pub use control_rate::COEFF_INTERVAL;
 pub use convolver::{
     Convolver, IrSpectra, MatrixConvolver, MatrixConvolverConfig, MatrixConvolverError,
@@ -264,11 +280,12 @@ pub use decorrelator::{
 };
 pub(crate) use delay::delay_step;
 pub use delay::{
-    ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayLayout,
+    ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayError, DelayLayout,
     DelayLayoutBuilder, DelayLayoutError, DelayLine, DelayRamps, DelaySignals, DelayTiming,
-    FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError, InterpolationMode,
+    FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError, InterpolationMode, LinePosition,
     MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError, NoteTimes, NoteTimesError,
 };
+pub use diode_clipper::{ClipperDrive, ClipperDriveError, DiodeClipper, DiodeClipperControls};
 pub use distance::{
     DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec, ReferenceDistance,
     ReferenceDistanceError,
@@ -283,7 +300,9 @@ pub use dynamics::{
     LevellerBank, LevellerControls, LimiterBank, LimiterControls, LimiterCurve, LimiterSignals,
     Lookahead, LookaheadError, MultibandBands, MultibandBandsError, MultibandBank,
     MultibandSettings, MultibandSignals, PeakDetection, TransientBank, TransientControls,
-    amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
+    TransientDetector, TransientThreshold, TransientThresholdError, TransientTime,
+    TransientTimeError, TransientTimes, TransientTimesError, amplitude_to_db,
+    compute_compressor_gain_reduction, compute_limiter_gain,
 };
 pub use early_reflections::{EarlyReflections, EarlyReflectionsError, MAX_TAP_DELAY};
 pub use envelope::{
@@ -312,6 +331,7 @@ pub use frequency_shifter::{
 pub use granular::{
     GrainScheduler, GrainSettings, GrainStart, Granular, MaxGrains, MaxGrainsError,
 };
+pub use hysteresis::{Hysteresis, HysteresisControls, HysteresisDrive, HysteresisDriveError};
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
 pub use karplus_strong::{KarplusStrong, KarplusStrongBank, KarplusStrongControls};
 pub use level::rms;
@@ -335,7 +355,7 @@ pub use modulation::phaser::{
 pub use modulation::sweep::{Stagger, StaggerError, Sweep, SweepBuilder, SweepError};
 pub use noise::{Noise, NoiseColour};
 pub use novelty::{
-    bin_magnitude, complex_domain_deviation, high_frequency_content, spectral_energy, spectral_flux,
+    bin_magnitude, high_frequency_content, spectral_distance, spectral_energy, spectral_flux,
 };
 pub use oscillator::{Oscillator, OscillatorStep, OscillatorWave};
 pub use oversample::{
@@ -382,7 +402,10 @@ pub use spatial::{
     HrtfBinauralError, MAX_PREPARED_RATE, MAX_SPHERE_RATE, MIN_SPHERE_RATE, Rotation,
     SpeakerGeometryError, SpeakerLayout, VbapGains, VbapKernel,
 };
-pub use spectral::{spectral_centroid, spectral_flatness, spectral_rolloff};
+pub use spectral::{
+    spectral_bandwidth, spectral_centroid, spectral_crest, spectral_flatness, spectral_rolloff,
+    spectral_slope,
+};
 pub use stereo::{MidSide, WidthBank, WidthControls};
 pub use stft::error::StftError;
 pub use stft::geometry::{
@@ -393,7 +416,8 @@ pub use stft::vocoder::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
 pub use stft::window::{CosineWindow, Window};
 pub use string_tuning::{LowestPitch, LowestPitchError};
 pub use tremolo::{AutoPan, AutoPanControls, Tremolo, TremoloControls};
-pub use viterbi::sticky_viterbi;
+pub use tube_stage::{TubeDrive, TubeDriveError, TubeStage, TubeStageControls};
+pub use viterbi::{BandedTransition, StickyTransition, Transition, sticky_viterbi, viterbi};
 pub use waveguide::{WaveguideBank, WaveguideControls, WaveguidePositions, WaveguideString};
 pub use waveshape::{
     Antialiasing, AntialiasingError, ShapeKind, WaveshaperBank, WaveshaperControls,

@@ -16,8 +16,8 @@ use std::future::IntoFuture as _;
 use tutti::modulation::Lfo;
 use tutti::nodes::{FreeverbConfig, FreeverbNode, SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti::{
-    Amplitude, Beat, Bounce, Bpm, ChannelLayout, Clip, Depth, Error, Format, Hz, MaxBlock, Pcm, Q,
-    Root, RouteSpec, SampleRate, Samples, Session, SessionEvent, Wave, Written,
+    Amplitude, Beat, Bounce, Bpm, ChannelLayout, Clip, Depth, Error, Format, Hz, MainOutput,
+    MaxBlock, Pcm, Q, RouteSpec, SampleRate, Samples, Session, SessionEvent, Wave, Written,
 };
 use tutti_buffers::Interleaved;
 
@@ -97,8 +97,8 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
     s.graph().connect(second, filter)?; // adds: both clips sum into the filter
     s.graph().connect(filter.bus_out(0), reverb.bus_in(0))?;
     for c in 0..2 {
-        s.graph().connect(filter.out(c), Root::output(c))?;
-        s.graph().connect(reverb.out(c), Root::output(c))?;
+        s.graph().connect(filter.out(c), MainOutput::channel(c))?;
+        s.graph().connect(reverb.out(c), MainOutput::channel(c))?;
     }
 
     // An LFO on the cutoff: 1 Hz across 200 Hz to 3 kHz.
@@ -118,12 +118,12 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
     let rendering = s.bounce(
         Bounce::new()
             .range(Beat::new(0.0)..Beat::new(8.0))
-            .master(&path, Format::Wav(Pcm::Int24)),
+            .main_output(&path, Format::Wav(Pcm::Int24)),
     )?;
     // The render runs on a thread the session starts; an app awaits it on its own
     // executor, here the simplest one.
     let rendered = block_on(rendering.into_future());
-    Ok(s.apply(rendered)?.into_master())
+    Ok(s.apply(rendered)?.into_main_output())
 }
 
 #[cfg(test)]

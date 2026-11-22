@@ -101,7 +101,7 @@ pub(crate) fn render_outputs<F: FftFloat>(
             job,
             &plan,
             src.outputs(),
-            src.root(),
+            src.main_output(),
             src.max_block(),
         )?;
         let mut budget = SpillBudget::new(spill_budget);
@@ -231,7 +231,7 @@ fn open_lanes<F: FftFloat>(
     job: &Job,
     plan: &RenderPlan,
     graph_outputs: usize,
-    root: Option<&ChannelTopology>,
+    main_output: Option<&ChannelTopology>,
     max_block: usize,
 ) -> Result<Vec<Lane<F>>> {
     let mut lanes = Vec::with_capacity(outputs.len());
@@ -248,7 +248,7 @@ fn open_lanes<F: FftFloat>(
         };
         let channels = FileChannels { layout, topology };
         let (fold, tap) = match feed {
-            crate::Feed::Master => (channels.fold_from(graph_outputs, root)?, None),
+            crate::Feed::MainOutput => (channels.fold_from(graph_outputs, main_output)?, None),
             crate::Feed::Tap { reader, lanes } => {
                 let width = lanes.topology().width();
                 let fold = channels

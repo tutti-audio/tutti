@@ -10,7 +10,7 @@
 //! every test here fails, naming that command. They must fail rather than
 //! skip.
 
-use crate::loading::{LoadPlugin, Spec};
+use crate::loading::{LoadPlugin, Perform, Spec};
 use crate::support;
 
 use tutti_buffers::MaxBlock;
@@ -24,8 +24,8 @@ use tutti_plugin::PluginClient;
 use tutti_plugin_db::Loadable;
 use tutti_plugin_types::PluginRef;
 use tutti_session::{
-    Bounce, BounceLatency, BounceTail, BufferMaster, ExportClock, OutPort, PHASES, Phase, PhaseCx,
-    Range, Replacement, Root, Session, SessionEvent,
+    Bounce, BounceLatency, BounceTail, BufferMainOutput, ExportClock, MainOutput, OutPort, PHASES,
+    Phase, PhaseCx, Range, Replacement, Session, SessionEvent,
 };
 use tutti_session::{PluginChange, PluginEvent};
 use tutti_units::{SampleRate, Samples};
@@ -51,7 +51,7 @@ fn offline() -> Session {
         .expect("an offline session builds")
 }
 
-fn add_probe_on_outputs(s: &mut Session) -> tutti_graph::NodeKey {
+fn add_probe_on_outputs(s: &mut Session) -> tutti_session::Key<tutti_session::AnyPlugin> {
     let node = s
         .load_plugin_blocking(
             tutti_fixtures::main_thread(),
@@ -59,10 +59,10 @@ fn add_probe_on_outputs(s: &mut Session) -> tutti_graph::NodeKey {
         )
         .expect("the reference CLAP plugin loads");
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
         .unwrap();
     let _ = s.update();
-    node.erase()
+    node
 }
 
 /// **The graph plans PDC against a plugin's declared latency, and a change
@@ -144,9 +144,9 @@ fn a_plugins_tail_ceiling_is_the_plugins_claim() {
 
 /// A short offline bounce into memory: the render mode a plugin is told
 /// Offline for as long as it is in flight.
-fn request() -> Bounce<tutti_graph::NodeKey, BufferMaster> {
+fn request() -> Bounce<tutti_graph::NodeKey, BufferMainOutput> {
     Bounce::new()
-        .master_buffers()
+        .main_output_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(
             tutti_units::Seconds::new(0.0),
@@ -209,7 +209,7 @@ fn a_latency_the_plugin_reports_reaches_the_graph() {
         events.iter().any(|e| matches!(
             e,
             SessionEvent::Plugin(PluginEvent { node: n, change: PluginChange::LatencyChanged { latency }, .. })
-                if *n == node && *latency == Samples::new(own + 300 + BLOCK)
+                if *n == node.erase() && *latency == Samples::new(own + 300 + BLOCK)
         )),
         "{events:?}"
     );
@@ -258,12 +258,27 @@ fn a_swapped_in_plugins_latency_is_the_incoming_ones() {
             .expect("the plugin announced its latency");
     }
     let mut s = offline();
-    let node = add_probe_on_outputs(&mut s);
-    let outgoing_handle = s.plugin_view(node).expect("hosted").handle().clone();
+    let outgoing = PluginClient::new(
+        tutti_plugin_ipc::IpcConfig::at(
+            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
+        ),
+        tutti_fixtures::executor(),
+        &tutti_fixtures::detached_work(),
+        &Loadable::uncatalogued(PluginRef::file(clap_probe())),
+        RATE,
+    )
+    .expect("load the reference plugin");
+    // The plugin's controls are captured before the graph takes it.
+    let outgoing_handle = outgoing.handle();
+    let node = s.graph().add_plugin(Box::new(outgoing));
+    s.graph()
+        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
+        .unwrap();
+    let _ = s.update();
     told(&outgoing_handle, tutti_plugin_types::RenderMode::Offline);
     let _ = s.update();
-    let outgoing = s.graph_ref().node_latency(node).unwrap();
-    assert_eq!(outgoing, Samples::new(OWN + OFFLINE_EXTRA + BLOCK));
+    let outgoing_latency = s.graph_ref().node_latency(node).unwrap();
+    assert_eq!(outgoing_latency, Samples::new(OWN + OFFLINE_EXTRA + BLOCK));
 
     let incoming = PluginClient::new(
         tutti_plugin_ipc::IpcConfig::at(
@@ -284,7 +299,7 @@ fn a_swapped_in_plugins_latency_is_the_incoming_ones() {
             Replacement::new(Box::new(incoming)).fade(Fade::new(Samples::ZERO)),
         )
         .expect("the replace is accepted");
-    assert_eq!(landed.erase(), node);
+    assert_eq!(landed.erase(), node.erase());
     assert_eq!(
         s.graph_ref().testing().waiting_replacements(),
         0,
@@ -344,7 +359,7 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
     .expect("the reference plugin loads");
     let node = s.graph().add_plugin(Box::new(client)).erase();
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
         .unwrap();
     let _ = s.update();
     let _ = stream
@@ -397,9 +412,9 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
         RATE,
     )
     .expect("the reference plugin loads");
-    let node = s.graph().add_plugin(Box::new(client)).erase();
+    let node = s.graph().add_plugin(Box::new(client));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
         .unwrap();
     let _ = s.update();
     std::thread::sleep(std::time::Duration::from_millis(100));
@@ -433,10 +448,9 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
     );
     assert_eq!(live.latency(), Samples::new(137 + 256));
     assert!(
-        live.plugin_view(node)
+        live.save_state(&node, tutti_plugin_types::StateUse::Project)
             .expect("hosted")
-            .handle()
-            .save_state(tutti_plugin_types::StateUse::Project)
+            .perform(tutti_fixtures::main_thread())
             .is_ok(),
         "the handle still answers"
     );
@@ -447,10 +461,9 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
     let _ = system.update();
     assert!(
         system
-            .plugin_view(node)
+            .save_state(&node, tutti_plugin_types::StateUse::Project)
             .expect("hosted")
-            .handle()
-            .save_state(tutti_plugin_types::StateUse::Project)
+            .perform(tutti_fixtures::main_thread())
             .is_ok(),
         "and on the timer"
     );
@@ -461,17 +474,19 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
     );
 }
 
-fn diagnostics_of(s: &Session, node: tutti_graph::NodeKey) -> tutti_session::Diagnostics<'_> {
+fn diagnostics_of(
+    s: &Session,
+    node: impl Into<tutti_graph::NodeKey>,
+) -> tutti_session::Diagnostics<'_> {
     s.plugin_view(node).expect("hosted").diagnostics()
 }
 
 /// One control round trip to the probe's server: the server sends the
 /// `latency.changed` of a render mode after that call's reply, and the bridge
 /// thread reads it off the socket only while it waits for the next reply.
-fn round_trip(s: &Session, node: tutti_graph::NodeKey) {
+fn round_trip(s: &Session, node: tutti_session::Key<tutti_session::AnyPlugin>) {
     let _ = s
-        .plugin_view(node)
+        .save_state(&node, tutti_plugin_types::StateUse::Project)
         .expect("hosted")
-        .handle()
-        .save_state(tutti_plugin_types::StateUse::Project);
+        .perform(tutti_fixtures::main_thread());
 }

@@ -20,7 +20,7 @@ use tutti_plugin_host::{
 use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::IpcResult;
 use tutti_plugin_types::PluginFormat;
-use tutti_plugin_types::{LoadedPlugin, PluginDescriptor, StateError};
+use tutti_plugin_types::{PluginDescriptor, PluginWiring, StateError};
 use tutti_units::SampleRate;
 
 /// The audio node, wherever it runs.
@@ -422,7 +422,7 @@ impl Plugin {
     }
 
     /// Returns the load-time wiring: bus widths, latency, tail, capabilities.
-    pub fn loaded(&self) -> &LoadedPlugin {
+    pub fn loaded(&self) -> &PluginWiring {
         self.handle.loaded()
     }
 
@@ -445,7 +445,7 @@ impl Plugin {
     /// plugin the tempo from (and CLAP its slope), wherever it
     /// runs: [`PluginClient::bind`] for a subprocess plugin,
     /// `InProcessClient::bind` for an in-process one. The result is the graph
-    /// node ([`BoundPlugin`]); `Session::add_plugin` binds every plugin with
+    /// node ([`BoundPlugin`]); `Session::apply` binds every plugin with
     /// the session's reader, and a host with no session passes a
     /// [`TempoReader::fixed`](tutti_timeline::TempoReader::fixed) one.
     #[must_use]

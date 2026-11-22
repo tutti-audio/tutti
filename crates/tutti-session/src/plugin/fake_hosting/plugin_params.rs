@@ -199,8 +199,8 @@ impl Health for Fake {
     fn rate_refusal(&self) -> Option<tutti_plugin_types::RateRefusal> {
         None
     }
-    fn block_counts(&self) -> tutti_plugin_types::BlockCounts {
-        tutti_plugin_types::BlockCounts::default()
+    fn block_counts(&self) -> tutti_plugin_types::PipelineCounts {
+        tutti_plugin_types::PipelineCounts::default()
     }
     fn terminate(&self, _reason: tutti_plugin_types::TerminationReason) {}
 }
@@ -642,16 +642,16 @@ fn a_plugin_key_names_a_parameter_a_route_targets() {
 }
 
 /// **A hosted plugin's key wires like a native node's**: `connect` takes the
-/// key of a hosted plugin (and its ports) and the root, and the edge is in the
+/// key of a hosted plugin (and its ports) and the main output, and the edge is in the
 /// graph.
 #[test]
 fn a_hosted_plugin_key_wires_like_a_native_key() {
     let (mut s, key, _, _) = session_keyed();
     let _ = update(&mut s);
     s.graph()
-        .connect(key.out(0), crate::Root::output(0))
+        .connect(key.out(0), crate::MainOutput::channel(0))
         .unwrap();
-    let sources = s.graph().sources(crate::Root::output(0)).unwrap();
+    let sources = s.graph().sources(crate::MainOutput::channel(0)).unwrap();
     assert_eq!(sources, [key.out(0)]);
 }
 
