@@ -435,7 +435,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
     }
 
     /// Also writes the [`Stem`] it describes: a file stem
-    /// ([`Stem::new`]) or one held in memory ([`Stem::buffers`]).
+    /// ([`Stem::file`]) or one held in memory ([`Stem::new`]).
     pub fn stem_with(mut self, stem: impl Into<AnyStem<N>>) -> Self {
         self.stems.push(stem.into());
         self
@@ -614,7 +614,7 @@ impl<N, F: Float> Bounce<N, FileMaster, F> {
     /// the node's own width.
     pub fn stem(self, node: N, path: impl Into<PathBuf>) -> Self {
         let format = self.master.format;
-        self.stem_with(Stem::new(node, path, format))
+        self.stem_with(Stem::new(node).file(path, format))
     }
 
     /// Writes the files at another rate than the render's.
@@ -679,7 +679,7 @@ impl<N: std::fmt::Debug, M: std::fmt::Debug, F: Float> std::fmt::Debug for Bounc
     }
 }
 
-/// A stem written to a file ([`Stem::new`]): where, as what, and how its gain is
+/// A stem written to a file ([`Stem::file`]): where, as what, and how its gain is
 /// chosen.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FileStem {
@@ -688,13 +688,14 @@ pub struct FileStem {
     gain: StemGain,
 }
 
-/// A stem held in memory ([`Stem::buffers`]): planes, which are not measured, so
+/// A stem held in memory ([`Stem::new`]): planes, which are not measured, so
 /// it has no gain to choose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BufferStem;
 
-/// One node's own output, written beside the master in the same pass: `N` names the node ([`NodeKey`] by default), and `K` is where it
-/// goes ([`FileStem`] by default, or [`BufferStem`]).
+/// One node's own output, written beside the master in the same pass: `N` names
+/// the node ([`NodeKey`] by default), and `K` is where it goes ([`BufferStem`]
+/// by default, or [`FileStem`] after [`file`](Stem::file)).
 ///
 /// A stem is what the node produces, read where it leaves the node and
 /// delayed to the time the master leaves the plan (so every stem and the
@@ -719,14 +720,14 @@ pub struct BufferStem;
 /// # use tutti_session::{Stem, StemGain};
 /// # use tutti_graph::NodeKey;
 /// # fn go(node: NodeKey) {
-/// let _ = Stem::buffers(node).gain(StemGain::Shared);
+/// let _ = Stem::new(node).gain(StemGain::Shared);
 /// # }
 /// ```
 ///
 /// The master's root declaration is never applied to a stem: it describes the
 /// graph's output bus, not a node's output.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Stem<N = NodeKey, K = FileStem> {
+pub struct Stem<N = NodeKey, K = BufferStem> {
     node: N,
     channels: Option<Vec<u16>>,
     layout: Option<ChannelLayout>,
@@ -758,37 +759,36 @@ impl<N> From<Stem<N, BufferStem>> for AnyStem<N> {
     }
 }
 
-impl<N> Stem<N, FileStem> {
-    /// `node`'s output into a file at `path` as `format`: written beside it
-    /// and renamed over it when the bounce finishes, as the master is. A file
-    /// stem always has its format; [`Bounce::stem`] of a file master gives it
-    /// the master's. Its gain is [`StemGain::None`] until [`gain`](Self::gain).
-    pub fn new(node: N, path: impl Into<PathBuf>, format: Format) -> Self {
-        Self::of(
-            node,
-            FileStem {
-                path: path.into(),
-                format,
-                gain: StemGain::None,
-            },
-        )
+impl<N> Stem<N, BufferStem> {
+    /// `node`'s output into memory ([`Bounced::stems`] is
+    /// [`Produced::Buffers`]), one plane per channel, at the render's rate:
+    /// nothing is encoded, resampled, dithered or normalized, as for
+    /// [`Bounce::master_buffers`]. [`file`](Self::file) writes it to a file
+    /// instead.
+    pub fn new(node: N) -> Self {
+        Self::of(node, BufferStem)
     }
 
+    /// This stem into a file at `path` as `format`: written beside it and
+    /// renamed over it when the bounce finishes, as the master is. A file
+    /// stem always has its format; [`Bounce::stem`] of a file master gives it
+    /// the master's. Its gain is [`StemGain::None`] until [`gain`](Stem::gain).
+    #[must_use]
+    pub fn file(self, path: impl Into<PathBuf>, format: Format) -> Stem<N, FileStem> {
+        self.with_kind(|BufferStem| FileStem {
+            path: path.into(),
+            format,
+            gain: StemGain::None,
+        })
+    }
+}
+
+impl<N> Stem<N, FileStem> {
     /// How this stem is normalized: as rendered without it.
     #[must_use]
     pub fn gain(mut self, gain: StemGain) -> Self {
         self.kind.gain = gain;
         self
-    }
-}
-
-impl<N> Stem<N, BufferStem> {
-    /// `node`'s output into memory ([`Bounced::stems`] is
-    /// [`Produced::Buffers`]), one plane per channel, at the render's rate:
-    /// nothing is encoded, resampled, dithered or normalized, as for
-    /// [`Bounce::master_buffers`].
-    pub fn buffers(node: N) -> Self {
-        Self::of(node, BufferStem)
     }
 }
 
@@ -918,7 +918,7 @@ impl<M: Master, F: Float> Bounced<M, F> {
     ///         Bounce::new()
     ///             .range(tutti_session::Range::Until(tutti_units::Beat::new(4.0)))
     ///             .master_buffers()
-    ///             .stem_with(Stem::buffers(drums)),
+    ///             .stem_with(Stem::new(drums)),
     ///     )?
     ///     .await;
     /// let done = session.apply(rendered)?;

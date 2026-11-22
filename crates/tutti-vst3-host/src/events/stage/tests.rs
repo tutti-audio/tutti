@@ -629,7 +629,7 @@ fn draining_a_plugins_sysex_allocates_nothing() {
     let list = EventList::input();
     let mut staging = list.begin();
     for bytes in [&[0xF0, 1, 2, 3, 0xF7][..], &[0xF0, 0xF7]] {
-        let data = Data::new(0, bytes).unwrap();
+        let data = Data::new(0, bytes.iter().copied()).unwrap();
         assert!(staging.push(Event::at(7, Payload::Data(data))));
     }
     staging.finish();
@@ -651,7 +651,7 @@ fn draining_a_plugins_sysex_allocates_nothing() {
     // A byte with its top bit set: the message is dropped whole.
     let list = EventList::input();
     let mut staging = list.begin();
-    let data = Data::new(0, &[0xF0, 0x81, 0xFF, 2, 0xF7]).unwrap();
+    let data = Data::new(0, [0xF0, 0x81, 0xFF, 2, 0xF7]).unwrap();
     assert!(staging.push(Event::at(7, Payload::Data(data))));
     staging.finish();
     let mut out = RtMidiEvents::new();

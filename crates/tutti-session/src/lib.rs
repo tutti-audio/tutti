@@ -109,6 +109,8 @@ mod midi_ci;
 mod midi_follow;
 #[cfg(feature = "midi-hardware")]
 mod midi_hardware;
+#[cfg(feature = "midi-hardware")]
+mod midi_link;
 #[cfg(feature = "midi")]
 mod midi_load;
 // Where UDP sockets exist and the feature is on; its twin is empty of them.
@@ -317,8 +319,8 @@ pub use signal_windows::windows_from_signal;
 pub use switch::ClockError;
 #[cfg(feature = "capture")]
 pub use take::{
-    Armed, InFlight, Punch, PunchError, Recorded, Rolling, Take, TakeEnd, TakeError, TakeEvent,
-    TakeFile, TakeId, TakePlacement, TakeTarget, Window,
+    Armed, InFlight, Punch, PunchError, Record, Recorded, Rolling, Take, TakeEnd, TakeError,
+    TakeEvent, TakeFile, TakeId, TakePlacement, TakeTarget, Window,
 };
 #[cfg(all(feature = "midi", feature = "analyze"))]
 pub use transcribe::{LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords};
@@ -327,7 +329,7 @@ pub use transport_handle::TransportHandle;
 pub use tutti_dsp::DitherShape;
 #[cfg(feature = "record")]
 pub use tutti_dsp::{DitherSink, NoiseShaping};
-pub use tutti_engine::{BlockDates, HeardTapOpen, OutputPlacement, Playhead};
+pub use tutti_engine::{BlockDates, OutputPlacement, Playhead};
 #[cfg(feature = "export")]
 pub use tutti_export::{
     EventLossPolicy, Normalize, Outcome, Produced, Progress, Rendered, Resample, Stage, Written,

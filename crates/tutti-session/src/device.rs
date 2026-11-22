@@ -651,7 +651,7 @@ impl DeviceRestarted {
 /// use tutti_cpal::DeviceSelector;
 /// use tutti_session::DeviceRestart;
 ///
-/// let request = DeviceRestart::to(DeviceSelector::named("Interface"));
+/// let request = DeviceRestart::new(DeviceSelector::named("Interface"));
 /// assert_eq!(request.max_block, None);
 /// assert_eq!(DeviceRestart::default().device, DeviceSelector::Default);
 /// ```
@@ -683,14 +683,14 @@ pub struct DeviceRestart {
 impl Default for DeviceRestart {
     /// A restart onto the host's default device, keeping the block size.
     fn default() -> Self {
-        Self::to(DeviceSelector::Default)
+        Self::new(DeviceSelector::Default)
     }
 }
 
 impl DeviceRestart {
     /// A restart onto `device`, keeping the block size.
     #[must_use]
-    pub fn to(device: impl Into<DeviceSelector>) -> Self {
+    pub fn new(device: impl Into<DeviceSelector>) -> Self {
         Self {
             device: device.into(),
             max_block: None,

@@ -422,12 +422,6 @@ impl<F: Float> Meters<'_, F> {
 }
 
 impl<'g, F: Float> Meters<'g, F> {
-    /// The master meter's reader, while the graph holds it
-    /// ([`Session::master_meter`](crate::Session::master_meter)).
-    pub(crate) fn master(self) -> Option<&'g mut MeterReader> {
-        self.graph.master_meter.as_mut()
-    }
-
     /// Hands the master meter's reader over
     /// ([`Session::take_master_meter`](crate::Session::take_master_meter)).
     pub(crate) fn take_master(&mut self) -> Option<MeterReader> {

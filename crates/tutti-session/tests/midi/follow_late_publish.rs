@@ -25,7 +25,7 @@ fn a_step_published_behind_the_playhead_moves_no_beat() {
         .build()
         .expect("builds");
     let mut buf = vec![0.0f32; BLOCK * 2];
-    let mut block = |s: &Session| {
+    let mut block = |s: &mut Session| {
         s.render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
         s.playhead().beat().get()
     };
@@ -33,9 +33,9 @@ fn a_step_published_behind_the_playhead_moves_no_beat() {
     s.play().expect("room");
     // 120 bpm: a block is 512 / 48000 * 2 beats.
     let old_block = BLOCK as f64 / RATE * 2.0;
-    let mut beats = vec![block(&s)];
+    let mut beats = vec![block(&mut s)];
     while *beats.last().unwrap() < 8.0 {
-        beats.push(block(&s));
+        beats.push(block(&mut s));
     }
     let published_at = beats.len();
     let behind = TempoMap::new([
@@ -47,7 +47,7 @@ fn a_step_published_behind_the_playhead_moves_no_beat() {
         .expect("not following");
     let _ = s.update();
     for _ in 0..8 {
-        beats.push(block(&s));
+        beats.push(block(&mut s));
     }
 
     // The beat at the start of each block, and what each block advanced it by.

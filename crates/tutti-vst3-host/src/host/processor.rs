@@ -139,7 +139,7 @@ impl OutputStaging {
         // A refusal is counted in `lists_busy` and leaves the pool empty.
         if !self
             .param_changes
-            .try_fill_changes(&mut self.emitted_param_changes)
+            .fill_changes(&mut self.emitted_param_changes)
         {
             self.emitted_param_changes.clear();
         }

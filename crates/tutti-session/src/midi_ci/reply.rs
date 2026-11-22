@@ -1,5 +1,5 @@
-//! Where a peer's answer goes: a [`PeerReply`] future that the session's update
-//! resolves.
+//! Where a peer's answer goes: a [`PeerReply`] future that the session's MIDI-CI
+//! task resolves.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -28,8 +28,10 @@ macro_rules! peer_future {
         $(#[$meta:meta])*
         $name:ident => $output:ty, $error:ty, $must:literal
     ) => {
-        /// Fed by [`Session::update`](crate::Session::update): keep updating while
-        /// you await it.
+        /// Resolves when the device answers, on the session's MIDI-CI task, with no
+        /// [`update`](crate::Session::update); the session's view of the peer (the
+        /// port's info, [`MidiReport`](crate::MidiReport)) changes at the next
+        /// `update`, so the future may resolve before it.
         ///
         $(#[$meta])*
         ///
@@ -63,12 +65,13 @@ macro_rules! peer_future {
 }
 pub(crate) use peer_future;
 
-/// Fed by [`Session::update`](crate::Session::update): keep updating while you
-/// await it.
+/// Resolves when the device answers, on the session's MIDI-CI task, with no
+/// [`update`](crate::Session::update); the session's view of the peer changes at
+/// the next `update`, so the future may resolve before it.
 ///
 /// A peer's reply to a request, as a future: it resolves with what the peer
-/// answered, or with the [`PeerError`] that says why it could not. The session
-/// sends the request and reads the reply in its update. Dropping it is harmless: the reply, when it
+/// answered, or with the [`PeerError`] that says why it could not. The session's
+/// MIDI-CI task sends the request and reads the reply. Dropping it is harmless: the reply, when it
 /// comes, is discarded. A request whose session or device goes away unanswered
 /// resolves to [`PeerError::Disconnected`]; it never waits for ever.
 #[must_use = "a reply is read only when the future is awaited"]

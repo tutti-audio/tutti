@@ -40,17 +40,7 @@ fn a_system_session_renders_its_graph_with_no_device() {
             .unfaded();
     }
     let limit = Instant::now() + Duration::from_secs(10);
-    let mut tap = loop {
-        let _ = s.update();
-        if let Some(tap) = s.open_heard_tap(Samples::new(4 * BLOCK)).unwrap().reader() {
-            break tap;
-        }
-        assert!(
-            Instant::now() < limit,
-            "the audio side never took the graph"
-        );
-        std::thread::sleep(Duration::from_millis(2));
-    };
+    let mut tap = s.open_heard_tap(Samples::new(4 * BLOCK)).unwrap();
     assert_eq!(tap.width(), 2);
 
     s.play().expect("room");

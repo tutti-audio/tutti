@@ -64,6 +64,15 @@ pub struct SessionBuilder<C: Clock = Offline> {
     dates: C::Dates,
 }
 
+/// The heard tap's control end of an engine just built: the session is its one owner.
+fn fresh_heard_taps<F: SessionFloat>(
+    engine: &mut tutti_engine::Engine<F>,
+) -> tutti_engine::HeardTaps<F> {
+    engine
+        .take_heard_taps()
+        .expect("a fresh engine holds its heard tap")
+}
+
 impl<C: Clock> std::fmt::Debug for SessionBuilder<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SessionBuilder")
@@ -228,7 +237,10 @@ impl Default for Workers {
 pub(crate) struct Parts<F: Float> {
     /// The session's executor, the one the MIDI hardware opened on: `session()`
     /// clones it into the session's background work, sampler and plugins.
-    executor: tutti_platform::Executor,
+    pub(crate) executor: tutti_platform::Executor,
+    /// The session's bells, made with the executor so a MIDI port's bell exists
+    /// when the layer opens.
+    pub(crate) bells: tutti_rt::Bells,
     /// The thread that drives `executor`; the session's background work takes it over in `session()`.
     background: crate::background::Running,
     graph: Graph<F>,
@@ -238,13 +250,20 @@ pub(crate) struct Parts<F: Float> {
     #[cfg(feature = "midi")]
     pub(crate) midi: Option<crate::MidiNodes>,
     #[cfg(feature = "midi-hardware")]
-    pub(crate) midi_io: Option<tutti_midi_hardware::MidiSession>,
+    /// The OS MIDI layer, with the bell its ports ring and the listener the
+    /// session's MIDI-CI task waits on.
+    pub(crate) midi_io: Option<(
+        tutti_midi_hardware::MidiSession,
+        tutti_rt::Bell,
+        tutti_rt::Listener,
+    )>,
     #[cfg(feature = "midi-hardware")]
     pub(crate) device_events: Option<tutti_midi_hardware::DeviceEvents>,
 }
 
-impl<F: SessionFloat> Default for SessionBuilder<Offline<F>> {
-    fn default() -> Self {
+impl<F: SessionFloat> SessionBuilder<Offline<F>> {
+    /// The defaults: [`Session::builder`] is the way in.
+    pub(crate) fn new() -> Self {
         Self {
             opts: Options::default(),
             config: BlockConfig::default(),
@@ -384,7 +403,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
         let runtime = Self::session_executor()?;
         let mut parts = self.parts(runtime, rate, max_block, None, root)?;
         // The width of every block the host pulls.
-        let engine = parts.graph.engine(
+        let mut engine = parts.graph.engine(
             &parts.transport,
             layout,
             self.opts.device_topology.clone(),
@@ -392,7 +411,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
         )?;
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
-        let taps = engine.heard_taps();
+        let mut taps = fresh_heard_taps(&mut engine);
         let readings = (engine.load(), engine.blocks());
         let clock = engine.block_clock();
         let mut session = self.session(parts, crate::clock::OfflineEngine { engine }, true)?;
@@ -437,9 +456,11 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
         graph.set_render_workers(self.opts.render_workers);
         graph.declare_root(self.opts.root.clone(), true)?;
         let (executor, background) = Self::session_executor()?;
+        let bells = tutti_rt::Bells::new(&executor).map_err(crate::Error::Bells)?;
         self.session(
             Parts {
                 executor,
+                bells,
                 background,
                 graph,
                 transport,
@@ -489,7 +510,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
         let runtime = Self::session_executor()?;
         let timer = tutti_engine::TimerDriver::new(&runtime.0);
         let mut parts = self.parts(runtime, rate, max_block, Some(max_block), root)?;
-        let engine = parts.graph.engine(
+        let mut engine = parts.graph.engine(
             &parts.transport,
             layout,
             self.opts.device_topology.clone(),
@@ -498,7 +519,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
         let readings = (engine.load(), engine.blocks());
-        let taps = engine.heard_taps();
+        let mut taps = fresh_heard_taps(&mut engine);
         let clock = engine.block_clock();
         let spec = tutti_engine::OutputSpec::new(rate, layout, F::FORMAT)
             .with_quantum(tutti_engine::OutputQuantum::try_from(max_block)?);
@@ -628,7 +649,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
             spec.quantum.map(tutti_engine::OutputQuantum::max_block),
             root,
         )?;
-        let engine = parts.graph.engine(
+        let mut engine = parts.graph.engine(
             &parts.transport,
             spec.channels,
             self.opts.device_topology.clone(),
@@ -642,7 +663,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
             true,
         )?;
         session.output.readings = Some((engine.load(), engine.blocks()));
-        let taps = engine.heard_taps();
+        let mut taps = fresh_heard_taps(&mut engine);
         taps.notify_with(session.background.bells().handle());
         session.output.taps = Some((taps, spec.channels));
         let clock = engine.block_clock();
@@ -921,6 +942,7 @@ impl<C: Clock> SessionBuilder<C> {
         if self.opts.midi_hardware.is_some() {
             crate::background::require(crate::BackgroundWork::MidiHardware)?;
         }
+        let bells = tutti_rt::Bells::new(&executor).map_err(crate::Error::Bells)?;
         // Built first so its port list can feed the graph's MIDI input.
         #[cfg(feature = "midi-hardware")]
         let backend = self.opts.midi_backend.take();
@@ -933,18 +955,21 @@ impl<C: Clock> SessionBuilder<C> {
                 crate::midi::MIDI_INPUT_INLET_CAPACITY,
                 crate::midi::input_lead(quantum.unwrap_or(max_block).samples(), rate),
             );
+            // Each port's reader rings the bell the MIDI-CI task waits on.
+            let (bell, listener) = bells.bell();
+            let ports = tutti_midi_hardware::HardwareMidiInputs::new(inlets).ringing(bell.clone());
             let io = match backend {
                 Some(MidiBackend(backend)) => {
-                    tutti_midi_hardware::MidiSession::open_over(&executor, backend, inlets, options)
+                    tutti_midi_hardware::MidiSession::open_over(&executor, backend, ports, options)
                         .map_err(crate::Error::MidiHardware)?
                 }
-                None => tutti_midi_hardware::MidiSession::open(&executor, inlets, options)
+                None => tutti_midi_hardware::MidiSession::open(&executor, ports, options)
                     .map_err(crate::Error::MidiHardware)?,
             };
             // Subscribed before anything can plug in unseen: `Phase::Poll`
             // is this subscription's only reader.
             let events = io.devices().subscribe();
-            Ok((io, events))
+            Ok(((io, bell, listener), events))
         });
         #[cfg(feature = "midi-hardware")]
         let (midi_io, device_events) = midi_io.transpose()?.unzip();
@@ -994,6 +1019,7 @@ impl<C: Clock> SessionBuilder<C> {
 
         Ok(Parts {
             executor,
+            bells,
             background,
             graph,
             transport,
@@ -1024,7 +1050,8 @@ impl<C: Clock> SessionBuilder<C> {
         streamer: bool,
     ) -> Result<Session<&'static str, N>> {
         let executor = parts.executor.clone();
-        let bells = tutti_rt::Bells::new(&executor).map_err(crate::Error::Bells)?;
+        let midi = crate::session::parts::MidiPart::new(&mut parts, &self.opts);
+        let bells = parts.bells;
         parts.graph.notify_with(bells.handle());
         let sampler = crate::session::parts::SamplerPart::new(
             streamer,
@@ -1051,7 +1078,7 @@ impl<C: Clock> SessionBuilder<C> {
                 crate::policy::output_cell(table.output_facts()),
             ),
             reports: Default::default(),
-            midi: crate::session::parts::MidiPart::new(&mut parts, &self.opts),
+            midi,
             graph: parts.graph,
             mods: crate::modulation::ModSession::new(
                 self.opts.unresolved_warning,
@@ -1074,7 +1101,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// each places its arrivals on frames.
     fn clock_midi(parts: &Parts<C::Float>, engine: &tutti_engine::Engine<C::Float>) {
         #[cfg(feature = "midi-hardware")]
-        if let Some(io) = &parts.midi_io {
+        if let Some((io, ..)) = &parts.midi_io {
             io.ports()
                 .inlets()
                 .set_clock(Some(crate::midi::arrival_clock(engine.block_clock())));

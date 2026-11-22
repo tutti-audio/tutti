@@ -82,11 +82,11 @@ tutti_rt::id! {
 /// use tutti_units::{At, Beat};
 ///
 /// // Beat 16 to beat 48.
-/// let punch = Punch::at(Beat::new(16.0)).until(Beat::new(48.0)).unwrap();
+/// let punch = Punch::new(Beat::new(16.0)).until(Beat::new(48.0)).unwrap();
 /// // Open-ended, from the next block.
-/// let _ = Punch::now();
+/// let _ = Punch::new(At::NextBlock);
 /// // Backwards is refused where it is made.
-/// assert!(Punch::at(Beat::new(16.0)).until(Beat::new(8.0)).is_err());
+/// assert!(Punch::new(Beat::new(16.0)).until(Beat::new(8.0)).is_err());
 /// # let _ = (punch, At::NextBlock);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -96,25 +96,19 @@ pub struct Punch {
 }
 
 impl Default for Punch {
-    /// [`Punch::now`].
+    /// [`Punch::new`] at [`At::NextBlock`]: a take that starts at once.
     fn default() -> Self {
-        Self::now()
+        Self::new(At::NextBlock)
     }
 }
 
 impl Punch {
     /// A take that starts at `at` and runs until it is finished.
-    pub fn at(at: impl Into<At>) -> Self {
+    pub fn new(at: impl Into<At>) -> Self {
         Self {
             at: at.into(),
             until: None,
         }
-    }
-
-    /// A take that starts at once, from the next block.
-    #[must_use]
-    pub fn now() -> Self {
-        Self::at(At::NextBlock)
     }
 
     /// This punch ending at `until`.
@@ -883,13 +877,50 @@ impl<S: InFlight> Take<S> {
     }
 }
 
+/// A request to arm a take: record `input` into `target`, from a [`Punch`].
+///
+/// [`Session::record`] takes it. The punch is [`Punch::new`] at
+/// [`At::NextBlock`] (a take that starts at once) until [`punch`](Self::punch).
+/// `target` is a [`TakeFile`] (an integer format triangular-dithered unless it
+/// says otherwise) or a sink ([`TakeTarget::sink`]).
+///
+/// ```no_run
+/// # use tutti_session::{Input, Punch, Record, TakeFile};
+/// # use tutti_units::Beat;
+/// # fn go(input: &Input, file: TakeFile) {
+/// let _ = Record::new(&input, file).punch(Punch::new(Beat::new(16.0)));
+/// # }
+/// ```
+#[derive(Debug)]
+pub struct Record<F: Float = f32> {
+    input: Input<F>,
+    target: TakeTarget<F>,
+    punch: Punch,
+}
+
+impl<F: Float> Record<F> {
+    /// A take of `input` into `target`, starting at once.
+    pub fn new(input: &Input<F>, target: impl Into<TakeTarget<F>>) -> Self {
+        Self {
+            input: *input,
+            target: target.into(),
+            punch: Punch::new(At::NextBlock),
+        }
+    }
+
+    /// Where the take starts and, if it has one, where it stops.
+    #[must_use]
+    pub fn punch(mut self, punch: Punch) -> Self {
+        self.punch = punch;
+        self
+    }
+}
+
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
-    /// Arms a take on `input`: opens a plan tap on its inlet node and runs the
-    /// pump into `target` on the session's executor. The take records what the
+    /// Arms the take `request` describes: opens a plan tap on its input's inlet
+    /// node and runs the pump into its target on the session's executor. The take records what the
     /// graph is given by the input, so it is on the graph's clock whatever the
-    /// device does; the module docs say where it is placed. `target` is a
-    /// [`TakeFile`] (an integer format triangular-dithered unless it says
-    /// otherwise) or a sink ([`TakeTarget::sink`]).
+    /// device does; the module docs say where it is placed.
     ///
     /// The pump is a future that awaits the tap's bell: the audio thread rings it as it
     /// writes each block, so the pump runs only when there are frames. It runs on a
@@ -909,12 +940,12 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// [`TakeError::NotStarted`] when the executor refuses the pump, before any file
     /// or tap exists; [`TakeError::Open`] and [`TakeError::Width`] for the target.
     /// Nothing is left open on an error.
-    pub fn record(
-        &mut self,
-        input: &Input<C::Float>,
-        punch: Punch,
-        target: impl Into<TakeTarget<C::Float>>,
-    ) -> Result<Take<Armed>, TakeError> {
+    pub fn record(&mut self, request: Record<C::Float>) -> Result<Take<Armed>, TakeError> {
+        let Record {
+            input,
+            target,
+            punch,
+        } = request;
         let node = input.node();
         let held = self
             .inputs
@@ -974,7 +1005,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
             .map_err(|error| TakeError::NotStarted(error.kind()))?;
         let stop = StopOnDrop { stop, bell };
 
-        let (sink, path) = open_target(target.into(), layout, rate)?;
+        let (sink, path) = open_target(target, layout, rate)?;
 
         let ports: Vec<_> = (0..width).map(|channel| node.out(channel)).collect();
         // A second of frames: the pump moves what the tap holds each time it wakes.

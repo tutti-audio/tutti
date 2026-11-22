@@ -17,7 +17,7 @@ use tutti::{Amplitude, Bounce, ChannelLayout, Format, Hz, Root, SampleRate, Seco
 /// A session whose output plays a 440 Hz sine at a quarter of full scale.
 fn tone() -> Result<Session, tutti::Error> {
     // No sound card: the session renders when we ask it to.
-    let mut session = Session::new(SampleRate::SR_48K)?;
+    let mut session = Session::builder().sample_rate(SampleRate::SR_48K).build()?;
 
     // An A at 440 Hz, a quarter of full scale.
     let sine = session.graph().add(OscillatorNode::from(

@@ -37,7 +37,7 @@ device:
 
 ```rust,ignore
 // No sound card: the session renders when we ask it to.
-let mut session = Session::new(SampleRate::SR_48K)?;
+let mut session = Session::builder().sample_rate(SampleRate::SR_48K).build()?;
 ```
 
 The sample rate (also known as *sampling frequency*) tells

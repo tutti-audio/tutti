@@ -349,7 +349,7 @@ fn a_clock_command_the_transport_refuses_is_counted() {
     send(&fake, system(System::Start), Instant::now());
     let mut refused = 0;
     for _ in 0..50 {
-        blocks(&s, 1);
+        blocks(&mut s, 1);
         // The list is full again before the update that places what the tap held.
         while s.schedule(At::NextBlock, MotionCommand::stop()).is_ok() {}
         for event in s.update() {

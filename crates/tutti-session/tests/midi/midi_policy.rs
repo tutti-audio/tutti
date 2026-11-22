@@ -473,7 +473,7 @@ fn a_granted_request_moves_the_sessions_output_to_the_protocol_asked() {
         .expect("the port's node takes events");
     let _ = s.update();
     play(&s);
-    blocks(&s, 2);
+    blocks(&mut s, 2);
     let _ = s.update();
     let sent = fake.take_sent(EndpointId::from_raw(RAW));
     let notes: Vec<_> = sent

@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use tutti_engine::{OutputSpec, StreamFaults};
 use tutti_graph::NodeKey;
-use tutti_units::{Amplitude, SampleRate};
+use tutti_units::Amplitude;
 
 use crate::background::Background;
 use crate::clock::sealed::Streaming;
@@ -150,25 +150,17 @@ impl Session<&'static str, Offline> {
     /// ([`SessionBuilder`](crate::SessionBuilder) has the options, and the
     /// other clocks).
     pub fn builder() -> crate::SessionBuilder<crate::Offline> {
-        crate::SessionBuilder::default()
-    }
-
-    /// An offline session at `rate` with every other option at its default:
-    /// shorthand for `Session::builder().sample_rate(rate).build()`.
-    ///
-    /// # Errors
-    ///
-    /// As [`SessionBuilder::build`](crate::SessionBuilder::build).
-    pub fn new(rate: SampleRate) -> crate::Result<Self> {
-        Self::builder().sample_rate(rate).build()
+        crate::SessionBuilder::new()
     }
 }
 
 impl<K: AppKey, F: SessionFloat> Session<K, Offline<F>> {
     /// Renders one block into `output`, as a device callback would: what an
     /// offline session's host pulls. Every update's commit lands at the
-    /// start of the next block.
-    pub fn render(&self, output: &mut tutti_buffers::InterleavedMut<'_, F>) {
+    /// start of the next block, and a heard tap opened or closed since the last
+    /// render is pushed first, so this render already writes it.
+    pub fn render(&mut self, output: &mut tutti_buffers::InterleavedMut<'_, F>) {
+        self.output.reclaim();
         self.running.engine.process(output);
     }
 }

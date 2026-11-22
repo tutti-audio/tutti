@@ -18,8 +18,8 @@ use tutti_midi_device::EndpointId;
 /// names only the counter it uses — `(s, _, opens)` says at a glance that
 /// this one is about opens.
 /// Inlets of 64 events, with no lead.
-fn inlets() -> Arc<InputInlets> {
-    InputInlets::new(
+fn inlets() -> Arc<tutti_midi_runtime::InputInlets> {
+    tutti_midi_runtime::InputInlets::new(
         tutti_graph::EventCapacity::of(64),
         std::time::Duration::ZERO,
     )
@@ -32,7 +32,7 @@ fn session() -> (MidiSession, Arc<AtomicUsize>, Arc<AtomicUsize>) {
         MidiSession::open_over(
             &tutti_platform::Executor::new(),
             backend,
-            inlets,
+            crate::HardwareMidiInputs::new(inlets),
             crate::MidiHardwareConfig::new(),
         )
         .unwrap(),
@@ -96,7 +96,7 @@ fn connecting_an_absent_device_is_an_error_not_a_silent_noop() {
     let mut s = MidiSession::open_over(
         &tutti_platform::Executor::new(),
         backend,
-        inlets(),
+        crate::HardwareMidiInputs::new(inlets()),
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();
@@ -168,7 +168,7 @@ fn an_output_that_will_not_open_fails_the_input_connect() {
     let mut s = MidiSession::open_over(
         &tutti_platform::Executor::new(),
         backend,
-        inlets(),
+        crate::HardwareMidiInputs::new(inlets()),
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();
@@ -209,7 +209,7 @@ fn a_dead_inputs_fault_is_read_through_the_session() {
     let mut s = MidiSession::open_over(
         &tutti_platform::Executor::new(),
         backend,
-        inlets(),
+        crate::HardwareMidiInputs::new(inlets()),
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();
@@ -274,7 +274,7 @@ fn a_send_time_reaches_the_sink_with_its_packet() {
     let s = MidiSession::open_over(
         &tutti_platform::Executor::new(),
         backend,
-        inlets(),
+        crate::HardwareMidiInputs::new(inlets()),
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();
@@ -317,7 +317,7 @@ fn a_refusing_output_reports_zero_accepted() {
     let s = MidiSession::open_over(
         &tutti_platform::Executor::new(),
         backend,
-        inlets(),
+        crate::HardwareMidiInputs::new(inlets()),
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();
@@ -350,7 +350,7 @@ fn a_partial_accept_reports_what_landed() {
     let s = MidiSession::open_over(
         &tutti_platform::Executor::new(),
         backend,
-        inlets(),
+        crate::HardwareMidiInputs::new(inlets()),
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();
@@ -391,7 +391,7 @@ fn a_message_the_device_cannot_take_whole_is_refused_whole_and_counted() {
     let s = MidiSession::open_over(
         &tutti_platform::Executor::new(),
         backend,
-        inlets(),
+        crate::HardwareMidiInputs::new(inlets()),
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();
@@ -428,7 +428,7 @@ fn each_connected_output_is_its_own_value_on_its_own_device() {
     let s = MidiSession::open_over(
         &tutti_platform::Executor::new(),
         backend,
-        inlets(),
+        crate::HardwareMidiInputs::new(inlets()),
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();
@@ -548,7 +548,7 @@ fn logging_session(refuse: bool) -> (MidiSession, Arc<Mutex<Vec<&'static str>>>)
         MidiSession::open_over(
             &tutti_platform::Executor::new(),
             Box::new(backend),
-            inlets,
+            crate::HardwareMidiInputs::new(inlets),
             crate::MidiHardwareConfig::new(),
         )
         .unwrap(),
@@ -606,7 +606,7 @@ fn a_session_is_send() {
     let session = MidiSession::open_over(
         &tutti_platform::Executor::new(),
         backend,
-        inlets,
+        crate::HardwareMidiInputs::new(inlets),
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();

@@ -62,7 +62,7 @@ fn rig() -> (Session, NodeKey) {
 }
 
 /// `frames` frames from the session, in 128-frame blocks.
-fn render(s: &Session, frames: usize) -> Vec<f32> {
+fn render(s: &mut Session, frames: usize) -> Vec<f32> {
     let mut out = Vec::with_capacity(frames * 2);
     let mut buf = vec![0.0f32; 128 * 2];
     for _ in 0..frames.div_ceil(128) {
@@ -90,7 +90,7 @@ fn a_declared_note_produces_audio() {
     play(&s);
 
     // Half a second at 120 BPM covers the note-on comfortably.
-    let level = rms(&render(&s, 24_000));
+    let level = rms(&render(&mut s, 24_000));
     assert!(
         level > 1e-4,
         "a declared note must reach the speakers, got RMS {level}"
@@ -117,10 +117,10 @@ fn the_note_waits_for_its_beat() {
     play(&s);
 
     // Still well before beat 4.
-    let before = rms(&render(&s, 4_000));
+    let before = rms(&render(&mut s, 4_000));
     // Roll up to the note, and render across it.
-    render(&s, 96_000 - 4_000);
-    let after = rms(&render(&s, 12_000));
+    render(&mut s, 96_000 - 4_000);
+    let after = rms(&render(&mut s, 12_000));
 
     assert!(
         before < 1e-5,
@@ -153,7 +153,7 @@ fn preview_still_sounds_under_an_installed_clip() {
     let _ = s.update();
     play(&s);
 
-    let quiet = rms(&render(&s, 6_000));
+    let quiet = rms(&render(&mut s, 6_000));
     assert!(
         quiet < 1e-5,
         "the clip's note is far away; expected silence"
@@ -168,7 +168,7 @@ fn preview_still_sounds_under_an_installed_clip() {
     )
     .unwrap();
 
-    let previewed = rms(&render(&s, 12_000));
+    let previewed = rms(&render(&mut s, 12_000));
     assert!(
         previewed > 1e-4,
         "live preview must still sound while a clip is installed, got RMS {previewed}"
@@ -199,7 +199,7 @@ fn routed_level(channel: MidiChannel) -> f32 {
             midi::note_on(MidiChannel::of(1), 60, u16::MAX),
         )
         .expect("room");
-    rms(&render(&s, 12_000))
+    rms(&render(&mut s, 12_000))
 }
 
 /// **A note from the hardware MIDI input, routed by a rule, sounds**, and one

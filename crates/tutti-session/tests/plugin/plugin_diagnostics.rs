@@ -25,7 +25,7 @@ fn offline() -> Session {
         .expect("an offline session builds")
 }
 
-fn render_block(s: &Session) {
+fn render_block(s: &mut Session) {
     let mut out = vec![0.0f32; BLOCK * 2];
     s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
 }
@@ -148,7 +148,7 @@ mod clap {
                 tutti_platform::Instant::now() < deadline,
                 "it never read Died"
             );
-            render_block(&s);
+            render_block(&mut s);
             std::thread::sleep(std::time::Duration::from_millis(5));
         };
         assert!(
@@ -246,7 +246,7 @@ mod vst2 {
                 .sum::<u64>()
         };
         writer.push_all(notes(300).map(|n| (tutti_session::Stamp::NextBlock, n)));
-        render_block(&s);
+        render_block(&mut s);
         assert_eq!(dropped(s.update()), cut, "the graph's cut, reported once");
         assert_eq!(
             s.plugin_view(node).unwrap().losses(),
@@ -254,7 +254,7 @@ mod vst2 {
             "not the plugin's loss"
         );
         writer.push_all(notes(10).map(|n| (tutti_session::Stamp::NextBlock, n)));
-        render_block(&s);
+        render_block(&mut s);
         assert_eq!(
             dropped(s.update()),
             0,

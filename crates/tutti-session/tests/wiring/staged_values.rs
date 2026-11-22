@@ -18,7 +18,7 @@ fn offline() -> Session {
         .expect("builds")
 }
 
-fn render(s: &Session, blocks: usize) {
+fn render(s: &mut Session, blocks: usize) {
     let mut block = vec![0.0f32; 512 * 2];
     for _ in 0..blocks {
         s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
@@ -40,7 +40,7 @@ fn a_loop_set_and_updated_is_the_transports_region() {
     let looping = s.transport_handle().looping();
     s.set(looping.to(region(2.0, 6.0, true))).unwrap();
     let _ = s.update();
-    render(&s, 1);
+    render(&mut s, 1);
     assert_eq!(s.transport_handle().loop_region(), region(2.0, 6.0, true));
 }
 
@@ -56,10 +56,10 @@ fn a_loop_read_before_the_update_is_the_pending_region() {
 
     s.set(looping.to(region(2.0, 6.0, true))).unwrap();
     assert_eq!(s.get(looping).unwrap(), region(2.0, 6.0, true));
-    render(&s, 1);
+    render(&mut s, 1);
     assert_eq!(s.transport_handle().loop_region(), default);
     let _ = s.update();
-    render(&s, 1);
+    render(&mut s, 1);
     assert_eq!(s.get(looping).unwrap(), region(2.0, 6.0, true));
 }
 
@@ -76,7 +76,7 @@ fn a_loop_read_after_the_update_and_before_a_block_is_the_region_sent() {
         !s.transport_handle().loop_region().is_armed(),
         "no block yet"
     );
-    render(&s, 1);
+    render(&mut s, 1);
     assert_eq!(s.get(looping).unwrap(), region(2.0, 6.0, true));
     assert_eq!(s.transport_handle().loop_region(), region(2.0, 6.0, true));
 }
@@ -89,11 +89,11 @@ fn a_loop_written_disarmed_disarms_and_keeps_the_bounds() {
     let looping = s.transport_handle().looping();
     s.set(looping.to(region(2.0, 6.0, true))).unwrap();
     let _ = s.update();
-    render(&s, 1);
+    render(&mut s, 1);
     s.set(looping.modify(|r| LoopRegion::new(r.bounds(), false)))
         .unwrap();
     let _ = s.update();
-    render(&s, 1);
+    render(&mut s, 1);
     let now = s.transport_handle().loop_region();
     assert!(!now.is_armed());
     assert_eq!(now.bounds(), region(2.0, 6.0, true).bounds());

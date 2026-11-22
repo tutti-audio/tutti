@@ -13,7 +13,7 @@ fn ready<T, E: std::fmt::Debug>(wait: impl Future<Output = Result<T, E>>) -> T {
     }
 }
 
-fn render(s: &Session, blocks: usize) {
+fn render(s: &mut Session, blocks: usize) {
     let mut buf = vec![0.0f32; 512 * 2];
     for _ in 0..blocks {
         s.render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
@@ -70,7 +70,7 @@ fn the_stamp_stream_is_carried_across_a_closed_output() {
             ..tutti_midi_runtime::SyncMessages::OFF
         });
     s.play().expect("room");
-    render(&s, 8);
+    render(&mut s, 8);
     let _ = s.update();
     let before = s.midi.state.ports.stream_origin();
     assert!(before > Frame::ZERO, "the clock moved the stream on");

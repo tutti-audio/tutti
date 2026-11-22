@@ -1002,7 +1002,7 @@ fn period(x: &[f32]) -> f64 {
 }
 
 /// `frames` frames of `s`, `layout` wide, in `block`-frame blocks.
-fn pull(s: &Session, layout: ChannelLayout, frames: usize, block: usize) -> Vec<f32> {
+fn pull(s: &mut Session, layout: ChannelLayout, frames: usize, block: usize) -> Vec<f32> {
     let width = usize::from(layout.count());
     let mut out = Vec::with_capacity(frames * width);
     let mut buf = vec![0.0f32; block * width];
@@ -1034,7 +1034,7 @@ fn an_offline_session_renders_a_sines_analytic_rms() {
             .unfaded();
     }
     let _ = s.update();
-    let out = pull(&s, ChannelLayout::MONO, 48_000, 512);
+    let out = pull(&mut s, ChannelLayout::MONO, 48_000, 512);
     let rms = tutti_fixtures::signal::rms_f64(&out);
     assert!(
         (rms - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-4,
@@ -1085,7 +1085,7 @@ fn a_latent_branch_is_compensated_on_the_other_to_the_sample() {
         "the dry channel pre-rolls by the latent one's latency"
     );
 
-    let out = pull(&s, ChannelLayout::STEREO, 4_096, 256);
+    let out = pull(&mut s, ChannelLayout::STEREO, 4_096, 256);
     let (dry, wet): (Vec<f32>, Vec<f32>) =
         out.as_chunks::<2>().0.iter().map(|f| (f[0], f[1])).unzip();
     let first = |x: &[f32]| x.iter().position(|&v| v != 0.0);
@@ -1331,7 +1331,7 @@ fn a_removed_nodes_controls_live_until_its_fade_out_ends() {
         .unwrap()
         .unfaded();
     let _ = s.update();
-    let _ = pull(&s, ChannelLayout::STEREO, 64, 64);
+    let _ = pull(&mut s, ChannelLayout::STEREO, 64, 64);
     s.remove(node).unwrap();
     let _ = s.update();
     assert_eq!(
@@ -1341,10 +1341,10 @@ fn a_removed_nodes_controls_live_until_its_fade_out_ends() {
     );
     // The declick spans 256 frames; render past it, then let the updates
     // drop the node and collect its unit.
-    let _ = pull(&s, ChannelLayout::STEREO, 1_024, 64);
+    let _ = pull(&mut s, ChannelLayout::STEREO, 1_024, 64);
     for _ in 0..3 {
         let _ = s.update();
-        let _ = pull(&s, ChannelLayout::STEREO, 64, 64);
+        let _ = pull(&mut s, ChannelLayout::STEREO, 64, 64);
     }
     assert_eq!(
         Arc::strong_count(&controls.token),

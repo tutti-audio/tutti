@@ -63,7 +63,7 @@ fn instant_at(ns: i64) -> Instant {
 
 /// A block, then an event from the device stamped at that block's date: the
 /// device's thread reads the new block reading when it places the event.
-fn block_and_event(s: &Session, fake: &FakeCounters) {
+fn block_and_event(s: &mut Session, fake: &FakeCounters) {
     blocks(s, 1);
     let date = s.playhead().at().expect("the block is dated");
     let ump = Ump::from(Message::midi2(
@@ -75,7 +75,7 @@ fn block_and_event(s: &Session, fake: &FakeCounters) {
 
 /// Two blocks, each followed by an event on its date: the first builds the map,
 /// the second is observed against its prediction.
-fn two_readings(s: &Session, fake: &FakeCounters) {
+fn two_readings(s: &mut Session, fake: &FakeCounters) {
     block_and_event(s, fake);
     block_and_event(s, fake);
 }
@@ -105,7 +105,7 @@ fn the_readings_held_from_before_the_first_connect_live_across_a_replug() {
     plug(&fake);
     let _ = s.update();
     assert!(!timing.is_closed() && !resyncs.is_closed(), "connected");
-    two_readings(&s, &fake);
+    two_readings(&mut s, &fake);
     assert_eq!(
         resyncs.get(),
         Resyncs::ZERO,
@@ -124,7 +124,7 @@ fn the_readings_held_from_before_the_first_connect_live_across_a_replug() {
     let _ = s.update();
     assert!(!timing.is_closed() && !resyncs.is_closed(), "reconnected");
     assert_eq!(resyncs.get(), Resyncs::ZERO, "a connect counts nothing");
-    two_readings(&s, &fake);
+    two_readings(&mut s, &fake);
     assert_eq!(resyncs.get(), Resyncs::ZERO, "still none across the replug");
     // A clone reads the same cells.
     assert_eq!(port.resyncs().get(), Resyncs::ZERO);

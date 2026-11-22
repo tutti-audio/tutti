@@ -107,7 +107,7 @@ fn render_stems(
 
 /// The one stem `node` of a bounce of `seconds`: its planes.
 fn stem_of(session: &mut DetachedSession, node: NodeKey, seconds: f64) -> Vec<Vec<f32>> {
-    render_stems(session, buffers(seconds).stem_with(Stem::buffers(node)))
+    render_stems(session, buffers(seconds).stem_with(Stem::new(node)))
         .pop()
         .expect("one stem")
 }
@@ -386,7 +386,7 @@ fn a_graph_with_no_outputs_says_so() {
     let node = session.graph().add(ForkByClone(Osc::sine(Hz::new(220.0))));
     for with_stem in [false, true] {
         let bounce = if with_stem {
-            buffers(0.01).stem_with(Stem::buffers(node.erase()))
+            buffers(0.01).stem_with(Stem::new(node.erase()))
         } else {
             buffers(0.01)
         };
@@ -421,24 +421,24 @@ fn an_unrenderable_stem_is_refused_by_name() {
         }
     };
     assert_eq!(
-        refusal(&mut session, Stem::buffers(gone)),
+        refusal(&mut session, Stem::new(gone)),
         BounceConfigError::StemNotInGraph { node: gone }
     );
     for node in [orphan.erase(), loose.erase()] {
         assert_eq!(
-            refusal(&mut session, Stem::buffers(node)),
+            refusal(&mut session, Stem::new(node)),
             BounceConfigError::StemNotAudible { node }
         );
     }
     assert_eq!(
-        refusal(&mut session, Stem::buffers(wired.erase()).channels([0, 1])),
+        refusal(&mut session, Stem::new(wired.erase()).channels([0, 1])),
         BounceConfigError::StemChannelMissing {
             node: wired.erase(),
             channel: 1
         }
     );
     assert_eq!(
-        refusal(&mut session, Stem::buffers(wired.erase()).channels([])),
+        refusal(&mut session, Stem::new(wired.erase()).channels([])),
         BounceConfigError::StemChannelMissing {
             node: wired.erase(),
             channel: 0
@@ -523,7 +523,7 @@ fn the_prepare_hook_sees_the_callers_timeline() {
     let seen: Arc<Mutex<Option<(usize, usize)>>> = Arc::default();
     let into = Arc::clone(&seen);
     let request = bounce_at(0.05, 44_100.0)
-        .stem_with(Stem::buffers(node))
+        .stem_with(Stem::new(node))
         .clock(ExportClock::timeline(timeline))
         .edit(Box::new(move |prepared: PreparedGraph<'_>| {
             let transport = prepared.ctx;
@@ -751,7 +751,7 @@ fn an_unforkable_node_refuses_the_export_by_key() {
     }
     match refused(
         &mut session,
-        buffers(0.05).stem_with(Stem::buffers(osc.erase())),
+        buffers(0.05).stem_with(Stem::new(osc.erase())),
     ) {
         BounceError::NotForkable { node: key } => assert_eq!(key, mic.erase()),
         other => panic!("expected the same named refusal, got {other:?}"),
