@@ -25,9 +25,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use common::{Kind, Pair, SpecBehaviour, TestNode, bits, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    CommitError, Cx, Edge, Editor, EventOutputPort, FadeLaw, ForkTarget, GraphInvalid, GraphSpec,
-    InputPort, Io, MixError, Node, NodeKey, NodeMix, NodeMode, OutputPort, ParamIn, PassError,
-    PortSource, Prepare, RenderMode, Shape, Status, Topology, TransportPosition, Unforkable,
+    CommitError, Cx, Edge, Editor, EventOutputPort, FadeLaw, ForkTarget, GraphSpec, InputPort, Io,
+    MixError, Node, NodeKey, NodeMix, NodeMode, OutputPort, ParamIn, PassError, PortSource,
+    Prepare, RenderMode, Shape, Status, Topology, TransportPosition, Unforkable,
 };
 use tutti_units::{Mix, Samples, Tail};
 
@@ -91,7 +91,7 @@ fn ramp(from: f64, to: f64, i: usize, frames: usize) -> f32 {
 }
 
 /// A `Pair` over one node (key 1) fed by main input 0, with its mix (and
-/// mode) set before the first block: a unit starts steady in the spec's.
+/// mode) set before the first block: a unit starts steady in them.
 struct Rig {
     pair: Pair,
     frame: u64,
@@ -104,14 +104,14 @@ impl Rig {
         t.inputs = ChannelLayout::MONO;
         t.connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
         t.set_outputs(vec![out(1, 0)]);
-        let mut spec = GraphSpec::new(t);
+        let spec = GraphSpec::new(t);
+        let mut pair = Pair::with_workers(MAX_BLOCK, workers);
         if let Some(m) = mix {
-            spec.set_mix(key(1), m);
+            pair.start_mix(key(1), m);
         }
         if let Some(m) = mode {
-            spec.set_mode(key(1), m);
+            pair.start_mode(key(1), m);
         }
-        let mut pair = Pair::with_workers(MAX_BLOCK, workers);
         pair.switch(
             &spec.validate().expect("valid"),
             &BTreeMap::from([(key(1), kind.clone())]),
@@ -608,8 +608,7 @@ fn solo(mix: Option<Mix>) -> (Editor, tutti_graph::Executor) {
 
 /// **`set_mix` does not change the plan**: the `Arc` the editor and the
 /// executor hold is the same one after it, and a commit that has nothing else
-/// to send sends nothing; a mix edited in the spec directly lands at the next
-/// commit, still not a new plan.
+/// to send sends nothing, whatever the mix was set to in between.
 #[test]
 fn set_mix_does_not_change_the_plan() {
     let (mut ed, mut exec) = solo(None);
@@ -625,10 +624,10 @@ fn set_mix_does_not_change_the_plan() {
     assert!(Arc::ptr_eq(&exec_plan, exec.plan().expect("running")));
     assert_eq!(ed.mix(key(1)), Mix::new(0.25));
     assert_eq!(ed.mix(key(9)), Mix::WET, "absent is WET");
-    // Back to WET: the spec holds no entry for it.
+    // Back to WET, and on to DRY: a commit between them still has nothing to send.
     ed.set_mix(key(1), Mix::WET).expect("a node");
-    assert!(ed.spec().mixes.is_empty());
-    ed.spec_mut().set_mix(key(1), Mix::DRY);
+    assert_eq!(ed.mix(key(1)), Mix::WET);
+    ed.set_mix(key(1), Mix::DRY).expect("a node");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -651,8 +650,8 @@ fn set_mix_does_not_change_the_plan() {
 }
 
 /// `set_mix` refuses a key with no node and a mix off `0..=1` (NaN, negative,
-/// above one), a spec with a mix for a missing node or a bad mix is invalid,
-/// and removing the node takes its mix with it. A refusal changes nothing.
+/// above one), and removing the node takes its mix with it, so a node inserted
+/// at the key again is WET. A refusal changes nothing.
 #[test]
 fn mixes_name_nodes_and_stay_in_range() {
     let (mut ed, _exec) = solo(Some(Mix::new(0.5)));
@@ -665,25 +664,82 @@ fn mixes_name_nodes_and_stay_in_range() {
     }
     assert_eq!(ed.mix(key(1)), Mix::new(0.5), "a refusal changes nothing");
 
-    let mut spec: GraphSpec = ed.spec().clone();
-    spec.set_mix(key(7), Mix::DRY);
-    assert_eq!(
-        spec.validate().map(|_| ()),
-        Err(vec![GraphInvalid::MixWithoutNode { node: key(7) }])
-    );
-    spec.mixes.remove(&key(7));
-    spec.set_mix(key(1), Mix::new(2.0));
-    let errs = spec.validate().map(|_| ()).expect_err("a bad mix");
-    assert!(matches!(
-        errs.as_slice(),
-        [GraphInvalid::BadMix { node, .. }] if *node == key(1)
-    ));
-    spec.set_mix(key(1), Mix::new(0.5));
-    let v = spec.validate().expect("valid");
-    assert_eq!(v.mixes().get(&key(1)).map(|m| m.mix), Some(Mix::new(0.5)));
-
     ed.remove(key(1));
-    assert!(ed.spec().mixes.is_empty());
+    assert_eq!(ed.mix(key(1)), Mix::WET);
+}
+
+/// **The node values go with the node**: a node given a mix and a mode, removed
+/// and committed, and inserted again at its key starts Active and WET, from its
+/// first block: its output is the node's own, `3 * x`, bit for bit.
+#[test]
+fn a_node_inserted_at_a_removed_nodes_key_starts_active_and_wet() {
+    let (mut ed, mut exec) = solo(Some(Mix::new(0.5)));
+    ed.set_mode(key(1), NodeMode::Muted).expect("a node");
+    ed.remove(key(1));
+    ed.commit().expect("commits");
+    exec.apply_pending();
+    ed.collect();
+
+    ed.insert(key(1), "gain", tutti_graph::ForkByClone(Triple));
+    ed.spec_mut()
+        .topology
+        .connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
+    ed.spec_mut().topology.set_outputs(vec![out(1, 0)]);
+    assert_eq!(ed.mix(key(1)), Mix::WET);
+    assert_eq!(ed.mode(key(1)), NodeMode::Active);
+    ed.commit().expect("commits");
+    exec.apply_pending();
+    ed.collect();
+    assert_eq!(ed.mix(key(1)), Mix::WET, "the placed unit's cell");
+
+    let input: Vec<f32> = (0..BLOCK as u64).map(wave).collect();
+    let mut o = vec![0.0f32; BLOCK];
+    exec.process(
+        BLOCK,
+        &TransportPosition::default(),
+        &[&input],
+        &mut [&mut o[..]],
+    );
+    let expected: Vec<f32> = input.iter().map(|x| 3.0 * x).collect();
+    assert_eq!(bits(&[o]), bits(&[expected]));
+}
+
+/// **A mix set while a commit is in flight is the editor's and the unit's**: the
+/// commit is sent and not yet applied when the mix is set, `Editor::mix` reads
+/// it back, and the unit placed by that commit blends at it from its first
+/// block (a ramp from WET across the block it lands on).
+#[test]
+fn a_mix_set_while_a_commit_is_in_flight_is_read_back_and_lands_on_the_unit() {
+    let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
+    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.insert(key(1), "gain", tutti_graph::ForkByClone(Triple));
+    ed.spec_mut()
+        .topology
+        .connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
+    ed.spec_mut().topology.set_outputs(vec![out(1, 0)]);
+    ed.commit().expect("commits");
+    ed.set_mix(key(1), Mix::new(0.5)).expect("a node");
+    assert_eq!(ed.mix(key(1)), Mix::new(0.5));
+    exec.apply_pending();
+    ed.collect();
+    assert_eq!(ed.mix(key(1)), Mix::new(0.5));
+
+    let input: Vec<f32> = (0..BLOCK as u64).map(wave).collect();
+    let mut o = vec![0.0f32; BLOCK];
+    exec.process(
+        BLOCK,
+        &TransportPosition::default(),
+        &[&input],
+        &mut [&mut o[..]],
+    );
+    for i in 0..BLOCK {
+        let m = ramp(1.0, 0.5, i, BLOCK);
+        assert_eq!(
+            o[i].to_bits(),
+            blend(3.0 * input[i], input[i], m).to_bits(),
+            "frame {i}"
+        );
+    }
 }
 
 /// **A fork copies the mixes and starts every unit at them**: the live graph,
@@ -745,7 +801,7 @@ fn a_fork_copies_the_mix() {
 /// **Nothing hears a pass a node does not have.** A mono node with a stereo
 /// output, built from widths, names no placement: by index its input would be
 /// heard on the left alone. It commits and runs while nothing reads its dry
-/// path; `set_mix` short of WET is refused, and so is a commit of a spec that
+/// path; `set_mix` short of WET is refused, and so is a commit that
 /// mixes it, bypasses it or drives its mix from a lane, each with the reason.
 /// `Mix::WET` and a node at one width are accepted.
 #[test]
@@ -797,13 +853,35 @@ fn a_mix_of_a_node_with_no_pass_is_refused() {
         node: key(1),
         error: no_pass,
     });
-    ed.spec_mut().set_mix(key(1), Mix::new(0.5));
-    assert_eq!(ed.commit(), refused, "a mix in the spec");
-    ed.spec_mut().set_mix(key(1), Mix::WET);
+    // A node with a pass, mixed or bypassed, and then replaced by one with
+    // none: the commit hears a pass that is not there.
+    let split = || {
+        Unforkable(TestNode::new(Kind::Spec {
+            behaviour: SpecBehaviour::Fan,
+            ins: 1,
+            outs: 2,
+            latency: 0,
+            tail: Tail::None,
+        }))
+    };
+    ed.insert(key(1), "gain", Unforkable(TestNode::new(plain())));
+    ed.set_mix(key(1), Mix::new(0.5))
+        .expect("a node with a pass");
+    ed.insert(key(1), "split", split());
+    assert_eq!(ed.commit(), refused, "a mix held for a node with no pass");
+    ed.set_mix(key(1), Mix::WET).expect("WET needs no pass");
 
-    ed.spec_mut().set_mode(key(1), NodeMode::Bypassed);
-    assert_eq!(ed.commit(), refused, "a bypass in the spec");
-    ed.spec_mut().set_mode(key(1), NodeMode::Active);
+    ed.insert(key(1), "gain", Unforkable(TestNode::new(plain())));
+    ed.set_mode(key(1), NodeMode::Bypassed)
+        .expect("a node with a pass");
+    ed.insert(key(1), "split", split());
+    assert_eq!(
+        ed.commit(),
+        refused,
+        "a bypass held for a node with no pass"
+    );
+    ed.set_mode(key(1), NodeMode::Active)
+        .expect("Active needs no pass");
 
     let mix = ParamIn {
         node: key(1),

@@ -136,8 +136,8 @@ use tutti_buffers::Float;
 ///   width, and every output of a node with no audio input, is silence), its
 ///   event outputs are empty, and its `process` is not called.
 ///
-/// Set with [`Editor::set_mode`](crate::Editor::set_mode); absent from
-/// [`GraphSpec::modes`](crate::GraphSpec::modes) is `Active`.
+/// Set with [`Editor::set_mode`](crate::Editor::set_mode); a node never given
+/// one is `Active`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum NodeMode {
     /// The node runs.
@@ -201,18 +201,11 @@ pub enum ModeError {
     },
 }
 
-/// A node's [`Mix`] as the spec holds it: the blend of the node's output with its aligned input,
-/// `out = y * m + x̂ * (1 - m)`. [`Mix::WET`] (all of the node's output) is
-/// the canonical absent entry of [`GraphSpec::mixes`](crate::GraphSpec::mixes).
-///
-/// Compared and hashed by bits, as [`ParamRange`] is, so a
-/// spec holding one stays `Eq + Hash`.
+/// What the graph reserves for a node's [`Mix`]: the address a lane drives it
+/// at, its default range, and what a mix may be. The value itself is the
+/// editor's ([`Editor::set_mix`](crate::Editor::set_mix)).
 #[derive(Clone, Copy, Debug)]
-pub struct NodeMix {
-    /// The blend position: finite and in `0..=1`
-    /// ([`GraphInvalid::BadMix`](crate::GraphInvalid::BadMix)).
-    pub mix: Mix,
-}
+pub struct NodeMix;
 
 impl NodeMix {
     /// The address a driving lane's ramps and segments carry, and the
@@ -243,20 +236,6 @@ impl NodeMix {
     #[must_use]
     pub(crate) fn is_sound(mix: Mix) -> bool {
         (0.0..=1.0).contains(&mix.get())
-    }
-}
-
-impl PartialEq for NodeMix {
-    fn eq(&self, other: &Self) -> bool {
-        self.mix.get().to_bits() == other.mix.get().to_bits()
-    }
-}
-
-impl Eq for NodeMix {}
-
-impl std::hash::Hash for NodeMix {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.mix.get().to_bits().hash(state);
     }
 }
 

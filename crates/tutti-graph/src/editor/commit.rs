@@ -513,7 +513,8 @@ impl<F: Float> Editor<F> {
             .cells
             .gains
             .for_plan(&plan, spec, committed, bus_weights);
-        let modes = |key: NodeKey| modes_cells.state(key, &plan, spec, committed);
+        let values = &self.values;
+        let modes = |key: NodeKey| modes_cells.state(key, &plan, spec, values);
         let placements = &self.placements;
         // A unit handed in whole (`send`'s callers) was never bound: its flag
         // is a fresh one nothing holds.

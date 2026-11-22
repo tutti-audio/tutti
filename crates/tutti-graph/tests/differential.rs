@@ -2355,7 +2355,6 @@ proptest! {
                     && let Some((key, mix)) = pick_mix(&desc, &mut draws)
                 {
                     pair.set_mix(key, mix);
-                    desc.spec.set_mix(key, mix);
                 }
                 let input = input_signal::<f64>(frame, n);
                 let (a, b) = pair.block(n, &input);
@@ -2580,18 +2579,6 @@ fn pick_mode(desc: &Desc, rng: &mut Rng) -> Option<(NodeKey, tutti_graph::NodeMo
     Some((key, mode))
 }
 
-/// Moves `desc`'s spec to `mode` for `key`, as `Pair::set_mode` moves both
-/// interpreters.
-fn note_mode(desc: &mut Desc, key: NodeKey, mode: tutti_graph::NodeMode) {
-    desc.spec.set_mode(key, mode);
-}
-
-/// Drops the modes of nodes `mutate` removed.
-fn prune_modes(desc: &mut Desc) {
-    let nodes = &desc.spec.topology.nodes;
-    desc.spec.modes.retain(|k, _| nodes.contains_key(k));
-}
-
 proptest! {
     #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(128), ..ProptestConfig::default() })]
 
@@ -2617,8 +2604,7 @@ proptest! {
             let mut frame = 0u64;
             for (i, &n) in blocks.iter().enumerate() {
                 if i == half {
-                    let mut edited = mutate(&desc, &mut rng);
-                    prune_modes(&mut edited);
+                    let edited = mutate(&desc, &mut rng);
                     pair.switch(&edited.spec.validate().expect("valid"), &edited.kinds);
                     desc = edited;
                 }
@@ -2626,7 +2612,6 @@ proptest! {
                     && let Some((key, mode)) = pick_mode(&desc, &mut modes)
                 {
                     pair.set_mode(key, mode);
-                    note_mode(&mut desc, key, mode);
                 }
                 let input = input_signal(frame, n);
                 let (a, b) = pair.block(n, &input);
@@ -2661,7 +2646,6 @@ proptest! {
                     && let Some((key, mode)) = pick_mode(&desc, &mut modes)
                 {
                     pair.set_mode(key, mode);
-                    note_mode(&mut desc, key, mode);
                 }
                 let input = input_signal(frame, n);
                 let (a, b) = pair.block(n, &input);
@@ -2694,12 +2678,6 @@ fn pick_mix(desc: &Desc, rng: &mut Rng) -> Option<(NodeKey, tutti_units::Mix)> {
     Some((key, tutti_units::Mix::new(mix)))
 }
 
-/// Drops the mixes of nodes `mutate` removed.
-fn prune_mixes(desc: &mut Desc) {
-    let nodes = &desc.spec.topology.nodes;
-    desc.spec.mixes.retain(|k, _| nodes.contains_key(k));
-}
-
 proptest! {
     #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(128), ..ProptestConfig::default() })]
 
@@ -2724,9 +2702,7 @@ proptest! {
             let mut frame = 0u64;
             for (i, &n) in blocks.iter().enumerate() {
                 if i == half {
-                    let mut edited = mutate(&desc, &mut rng);
-                    prune_modes(&mut edited);
-                    prune_mixes(&mut edited);
+                    let edited = mutate(&desc, &mut rng);
                     pair.switch(&edited.spec.validate().expect("valid"), &edited.kinds);
                     desc = edited;
                 }
@@ -2734,12 +2710,10 @@ proptest! {
                     && let Some((key, mix)) = pick_mix(&desc, &mut draws)
                 {
                     pair.set_mix(key, mix);
-                    desc.spec.set_mix(key, mix);
                     if draws.chance(8)
                         && let Some((key, mode)) = pick_mode(&desc, &mut draws)
                     {
                         pair.set_mode(key, mode);
-                        note_mode(&mut desc, key, mode);
                     }
                 }
                 let input = input_signal(frame, n);
@@ -2841,8 +2815,6 @@ proptest! {
             for (i, &n) in blocks.iter().enumerate() {
                 if i == half {
                     let mut edited = mutate(&desc, &mut rng);
-                    prune_modes(&mut edited);
-                    prune_mixes(&mut edited);
                     prune_mix_lanes(&mut edited);
                     drive_mixes(&mut edited, &mut lanes);
                     pair.switch(&edited.spec.validate().expect("valid"), &edited.kinds);
@@ -2852,7 +2824,6 @@ proptest! {
                     && let Some((key, mix)) = pick_mix(&desc, &mut draws)
                 {
                     pair.set_mix(key, mix);
-                    desc.spec.set_mix(key, mix);
                 }
                 if draws.chance(15)
                     && let Some(key) = draws.pick(&desc.order)
@@ -2866,7 +2837,6 @@ proptest! {
                     && let Some((key, mode)) = pick_mode(&desc, &mut draws)
                 {
                     pair.set_mode(key, mode);
-                    note_mode(&mut desc, key, mode);
                 }
                 let input = input_signal(frame, n);
                 let (a, b) = pair.block(n, &input);

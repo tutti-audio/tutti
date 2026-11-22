@@ -68,6 +68,7 @@ use crate::gain::EdgeFade;
 use crate::meter::MeterWriter;
 use crate::mode::NodeMix;
 use crate::node::Prepare;
+use crate::node_values::NodeValues;
 use crate::param::{ParamIn, ParamRange};
 use crate::plan::{Delta, Plan};
 use crate::spec::{EventInputPort, GraphSpec, ValidGraph};
@@ -255,6 +256,10 @@ pub struct Editor<F: Float = f32> {
     /// [`set_edge_gain`](Self::set_edge_gain), [`set_mode`](Self::set_mode)
     /// ...) at once.
     cells: LiveCells,
+    /// Each node's mode and mix: what a unit placed by a commit starts in, and
+    /// what a fork starts every unit in. Never in the spec, whose commits they
+    /// do not move.
+    values: NodeValues,
     /// [`revision`](Self::revision): moved by every call that can change
     /// what a reader of the editor sees.
     revision: u64,
@@ -384,6 +389,7 @@ impl<F: Float> Editor<F> {
             event_capacity: cap,
             fork_health: Vec::new(),
             cells: LiveCells::new(),
+            values: NodeValues::default(),
             revision: 0,
             stager,
             main_output_fade: None,
@@ -512,6 +518,20 @@ impl<F: Float> Editor<F> {
     pub fn spec_mut(&mut self) -> &mut GraphSpec {
         self.touch();
         &mut self.spec
+    }
+
+    /// The node values: each node's mode and mix.
+    #[cfg(feature = "testing")]
+    pub(crate) fn values(&self) -> &NodeValues {
+        &self.values
+    }
+
+    /// The node values, for a caller that builds the editor whole (a fork) or
+    /// follows another graph's nodes (the test harness). Moves the
+    /// [`revision`](Self::revision).
+    pub(crate) fn values_mut(&mut self) -> &mut NodeValues {
+        self.touch();
+        &mut self.values
     }
 
     /// A count that moves whenever anything the editor shows a reader may

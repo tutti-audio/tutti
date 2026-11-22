@@ -3,8 +3,8 @@
 //!
 //! A control (`set_param_range`, `set_edge_gain`, `set_mode` ...) stores into
 //! a cell at once and the running unit reads it next block, with no commit; a
-//! commit writes every cell from the spec, keeps the cells of what the new
-//! plan keeps, and makes cells for what it places.
+//! commit writes every cell from the spec (a mode from the node values), keeps
+//! the cells of what the new plan keeps, and makes cells for what it places.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -14,12 +14,13 @@ use tutti_curve::declick_frames;
 use super::{BusLanes, mix_range_of, range_of};
 use crate::gain::{EdgeGain, GainCell};
 use crate::mode::{ModeCell, ModeState, NodeMode};
+use crate::node_values::NodeValues;
 use crate::param::{ParamIn, ParamPorts, ParamRange, ParamRangeCell, ParamRanges, ParamState};
 use crate::plan::Plan;
 use crate::spec::GraphSpec;
 use crate::{EdgeId, NodeKey};
 use tutti_buffers::Float;
-use tutti_units::{Amplitude, Mix};
+use tutti_units::Amplitude;
 
 /// Every live cell, by kind. The kinds are separate fields so a commit can
 /// hand out cells of two kinds at once.
@@ -38,13 +39,25 @@ impl LiveCells {
         }
     }
 
-    /// Writes every cell from `spec`; a gain's base and a mix only where
-    /// `spec` moved them since `committed` (the cell is a knob, and its one
-    /// writer may be ahead of the spec's copy).
-    pub(super) fn sync(&self, spec: &GraphSpec, committed: Option<&GraphSpec>) {
-        self.modes.sync(spec, committed);
+    /// Writes every cell from `spec` and `values`; a gain's base only where
+    /// `spec` moved it since `committed` (the cell is a knob, and its one
+    /// writer may be ahead of the spec's copy). A mix is never written here:
+    /// its cell is its one writer's.
+    pub(super) fn sync(
+        &self,
+        spec: &GraphSpec,
+        values: &NodeValues,
+        committed: Option<&GraphSpec>,
+    ) {
+        self.modes.sync(spec, values);
         self.gains.sync(spec, committed);
         self.ranges.sync(spec);
+    }
+
+    /// Drops `key`'s mode cell: a node inserted at the key later starts from
+    /// its own values.
+    pub(super) fn forget(&mut self, key: NodeKey) {
+        self.modes.0.remove(&key);
     }
 
     /// Frees the ranges the audio thread has let go of, in every cell kind;
@@ -204,30 +217,28 @@ impl ModeCells {
         self.0.values().map(ModeCell::reclaim).sum()
     }
 
-    fn sync(&self, spec: &GraphSpec, committed: Option<&GraphSpec>) {
+    fn sync(&self, spec: &GraphSpec, values: &NodeValues) {
         for (&node, cell) in &self.0 {
-            cell.store(spec.mode(node));
-            carry_mix(committed, node, cell, spec.mix(node));
+            cell.store(values.mode(node));
             cell.store_range(mix_range_of(spec, node));
         }
     }
 
     /// The mode state of the unit `plan` places at `key`: the key's cell,
-    /// kept for a key that stays, written from `spec`; a unit placed now
-    /// starts steady in the spec's mode.
+    /// kept for a key that stays; a unit placed now starts steady in the
+    /// node values' mode and mix.
     pub(super) fn state<F: Float>(
         &mut self,
         key: NodeKey,
         plan: &Plan,
         spec: &GraphSpec,
-        committed: Option<&GraphSpec>,
+        values: &NodeValues,
     ) -> ModeState<F> {
         let cell = self
             .0
             .entry(key)
-            .or_insert_with(|| ModeCell::new(NodeMode::Active, spec.mix(key)));
-        cell.store(spec.mode(key));
-        carry_mix(committed, key, cell, spec.mix(key));
+            .or_insert_with(|| ModeCell::new(NodeMode::Active, values.mix(key)));
+        cell.store(values.mode(key));
         cell.store_range(mix_range_of(spec, key));
         let shape = &plan.unit(key).expect("a placed unit is in its plan").shape;
         ModeState::new(
@@ -249,16 +260,5 @@ fn carry_base(committed: Option<&GraphSpec>, id: EdgeId, cell: &GainCell, base: 
         .map(|g| g.base);
     if seen.is_none_or(|s| s.get().to_bits() != base.get().to_bits()) {
         cell.store(base);
-    }
-}
-
-/// Writes `mix`, the spec's, into `cell` when the spec's mix moved since
-/// `committed` (a spec edit that bypassed `set_mix`). Otherwise the cell is
-/// left as it is: it is a driving lane's knob and its one writer's, and the
-/// spec's copy may be behind it.
-fn carry_mix(committed: Option<&GraphSpec>, node: NodeKey, cell: &ModeCell, mix: Mix) {
-    let seen = committed.map(|spec| spec.mix(node));
-    if seen.is_none_or(|s| s.get().to_bits() != mix.get().to_bits()) {
-        cell.store_mix(mix);
     }
 }

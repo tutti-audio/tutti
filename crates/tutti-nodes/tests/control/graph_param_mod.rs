@@ -207,7 +207,7 @@ fn render_mix(node: NodeParts<()>, mix: MixIs) -> Vec<Vec<f32>> {
         g.connect_output(n, c, c);
     }
     if let MixIs::Set(v) = mix {
-        g.spec_mut().set_mix(n, Mix::new(v));
+        g.mix(n, Mix::new(v));
     }
     let mut r = g
         .renderer(Prepare::new(

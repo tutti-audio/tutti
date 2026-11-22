@@ -46,7 +46,7 @@ pub enum CommitError {
         /// What went wrong.
         cause: String,
     },
-    /// The spec bypasses, mixes or drives the mix of a node with no pass
+    /// The graph bypasses, mixes or drives the mix of a node with no pass
     /// ([`Editor::check_pass`](crate::Editor::check_pass)): its input would go where a guess put it.
     /// Nothing was compiled or sent, and the last plan goes on sounding.
     ///
