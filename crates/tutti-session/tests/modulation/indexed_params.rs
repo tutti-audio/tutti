@@ -5,13 +5,13 @@
 //! The render stands on `tests/modulation/modulation.rs`'s analytic sine figure.
 
 use crate::common;
+use crate::offline::offline_48k;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::Params;
 use tutti_modulation::Lfo;
 use tutti_session::{MainOutput, OutputPort, ParamRef, RouteSpec, Session, ValueErrorKind};
-use tutti_units::SampleRate;
 use tutti_units::{BeatsPerCycle, Db, Depth, ParamAddr, UnitParam};
 
 use common::bands::{BAND1, Bands};
@@ -21,13 +21,6 @@ const RATE: f64 = 48_000.0;
 const STEP: usize = 32;
 /// A port's connect crossfade: `DECLICK` at 48 kHz.
 const DECLICK: usize = 240;
-
-fn offline() -> Session {
-    Session::builder()
-        .sample_rate(SampleRate::of(RATE))
-        .build()
-        .expect("builds")
-}
 
 /// Renders `frames` frames from a rolling transport, in blocks of 128;
 /// returns the two output channels.
@@ -49,7 +42,7 @@ fn render(s: &mut Session, frames: usize) -> [Vec<f32>; 2] {
 /// and the node reads it: the render shows each band's own value.
 #[test]
 fn a_write_reaches_the_index_it_names() {
-    let mut s = offline();
+    let mut s = offline_48k();
     let node = s.graph().add(Params(Bands::new(100.0, 500.0)));
     s.graph()
         .set_sources(MainOutput::channel(0), [OutputPort::new(node, 0)])
@@ -94,7 +87,7 @@ fn a_write_reaches_the_index_it_names() {
 /// reconciler to the lane's knob and port.
 #[test]
 fn a_route_to_index_1_does_not_touch_index_0() {
-    let mut s = offline();
+    let mut s = offline_48k();
     let node = s.graph().add(Params(Bands::new(100.0, 500.0)));
     s.graph()
         .set_sources(MainOutput::channel(0), [OutputPort::new(node, 0)])

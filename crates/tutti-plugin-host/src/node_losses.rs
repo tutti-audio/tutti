@@ -3,6 +3,7 @@
 //! refused, the MIDI out and harmony it had no room for.
 
 use tutti_rt::{Tally, TallyWriter, tally};
+use tutti_units::Blocks;
 
 /// One count the audio thread adds to and any thread reads.
 #[derive(Debug)]
@@ -51,10 +52,10 @@ pub(crate) struct LossCounts {
 impl LossCounts {
     pub(crate) fn blocks(&self) -> BlockLosses {
         BlockLosses {
-            unlent: self.unlent.get(),
-            failed: self.failed.get(),
-            nonfinite: self.nonfinite.get(),
-            entries_refused: self.entries_refused.get(),
+            unlent: Blocks::new(self.unlent.get()),
+            failed: Blocks::new(self.failed.get()),
+            nonfinite: Blocks::new(self.nonfinite.get()),
+            entries_refused: Blocks::new(self.entries_refused.get()),
             inputs_refused: self.inputs_refused.get(),
         }
     }
@@ -72,16 +73,16 @@ impl LossCounts {
 pub struct BlockLosses {
     /// Blocks rendered silent because the realtime end held no Processor
     /// (recalled for a rate change, or the plugin refused its rate).
-    pub unlent: u64,
+    pub unlent: Blocks,
     /// Blocks rendered silent because the Processor failed them.
-    pub failed: u64,
+    pub failed: Blocks,
     /// Blocks the plugin wrote a NaN or an infinity in, passed on with those
     /// samples zeroed.
-    pub nonfinite: u64,
+    pub nonfinite: Blocks,
     /// Audio entries the plugin refused in blocks that otherwise ran (a closed
     /// or dead plugin, a missing entry, pins grown past the buffer): each a
     /// block or a piece of one that rendered silence, not a failed block.
-    pub entries_refused: u64,
+    pub entries_refused: Blocks,
     /// Input messages the plugin's host refused, in the host's unit: a MIDI 1.0
     /// message or a whole SysEx message, not the node's events.
     pub inputs_refused: u64,
@@ -92,10 +93,10 @@ impl std::ops::Add for BlockLosses {
 
     fn add(self, rhs: Self) -> Self {
         Self {
-            unlent: self.unlent.saturating_add(rhs.unlent),
-            failed: self.failed.saturating_add(rhs.failed),
-            nonfinite: self.nonfinite.saturating_add(rhs.nonfinite),
-            entries_refused: self.entries_refused.saturating_add(rhs.entries_refused),
+            unlent: self.unlent + rhs.unlent,
+            failed: self.failed + rhs.failed,
+            nonfinite: self.nonfinite + rhs.nonfinite,
+            entries_refused: self.entries_refused + rhs.entries_refused,
             inputs_refused: self.inputs_refused.saturating_add(rhs.inputs_refused),
         }
     }

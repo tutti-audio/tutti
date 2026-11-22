@@ -7,21 +7,21 @@
 //! and the time code a locate states.
 
 use crate::common::OpenPorts as _;
+use crate::common::Wire;
 use crate::common::{Keyed, blocks};
 use std::sync::Arc;
 use tutti_platform::Instant;
-use tutti_rt::Mutex;
 
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_midi_protocol::{MtcRate, Recipient, SysexDeviceId};
-use tutti_midi_runtime::{ClockKind, MidiOut, SyncMessages};
+use tutti_midi_runtime::{ClockKind, SyncMessages};
 use tutti_session::{
     FollowClock, FollowMachineControl, MidiError, MidiEvent, Session, SessionEvent, SetRefusal,
     ValueErrorKind,
 };
 use tutti_timeline::FadeOut;
-use tutti_ump::{Message, MidiGroup, Sysex7Packets, Ump};
+use tutti_ump::{Message, MidiGroup, Sysex7Packets};
 use tutti_units::{Beat, SampleRate};
 
 const RATE: f64 = 48_000.0;
@@ -331,37 +331,23 @@ fn a_group_the_input_does_not_hear_is_refused() {
 
 // --- Sending ---
 
-/// Every batch the output was handed, in order.
-#[derive(Clone, Default)]
-struct Wire(Arc<Mutex<Vec<Ump>>>);
-
-impl MidiOut for Wire {
-    fn queue_timed(&self, batch: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
-        let events: Vec<tutti_graph::UmpAt> = batch.iter().map(|e| (e.at, e.ump)).collect();
-        self.0.lock().extend(events.iter().map(|(_, ump)| *ump));
-        tutti_midi_runtime::Taken::within(batch, batch.len())
-    }
-}
-
-impl Wire {
-    /// The SysEx payloads sent since the last call, one per message.
-    fn messages(&self) -> Vec<Vec<u8>> {
-        let mut messages = Vec::new();
-        let mut current = Vec::new();
-        for ump in std::mem::take(&mut *self.0.lock()) {
-            let Ok(Message::Sysex7(_, packet)) = ump.decode() else {
-                continue;
-            };
-            current.extend(packet.bytes().iter().map(|b| b.get()));
-            if matches!(
-                packet.status(),
-                tutti_ump::SysexStatus::Complete | tutti_ump::SysexStatus::End
-            ) {
-                messages.push(std::mem::take(&mut current));
-            }
+/// The SysEx payloads sent since the last call, one per message.
+fn messages(wire: &Wire) -> Vec<Vec<u8>> {
+    let mut messages = Vec::new();
+    let mut current = Vec::new();
+    for (_, ump) in wire.batches().into_iter().flatten() {
+        let Ok(Message::Sysex7(_, packet)) = ump.decode() else {
+            continue;
+        };
+        current.extend(packet.bytes().iter().map(|b| b.get()));
+        if matches!(
+            packet.status(),
+            tutti_ump::SysexStatus::Complete | tutti_ump::SysexStatus::End
+        ) {
+            messages.push(std::mem::take(&mut current));
         }
-        messages
     }
+    messages
 }
 
 fn sender(wire: &Wire, to: Recipient) -> (Session, tutti_session::MidiSink) {
@@ -394,18 +380,18 @@ fn sender(wire: &Wire, to: Recipient) -> (Session, tutti_session::MidiSink) {
 fn the_transport_is_sent_as_play_locate_and_stop() {
     let wire = Wire::default();
     let (mut s, _sink) = sender(&wire, Recipient::Device(SysexDeviceId::of(3)));
-    assert!(wire.messages().is_empty(), "nothing before anything moves");
+    assert!(messages(&wire).is_empty(), "nothing before anything moves");
 
     s.play().unwrap();
     blocks(&mut s, 1);
     let _ = s.update();
-    assert_eq!(wire.messages(), [vec![0x7F, 0x03, 0x06, 0x02]]);
+    assert_eq!(messages(&wire), [vec![0x7F, 0x03, 0x06, 0x02]]);
 
     s.locate(Beat::new(4.0)).unwrap();
     blocks(&mut s, 1);
     let _ = s.update();
     assert_eq!(
-        wire.messages(),
+        messages(&wire),
         [vec![
             0x7F, 0x03, 0x06, 0x44, 0x06, 0x01, 0x60, 0x00, 0x02, 0x00, 0x00, 0x03
         ]]
@@ -414,12 +400,12 @@ fn the_transport_is_sent_as_play_locate_and_stop() {
     // Rolling on in order sends nothing.
     blocks(&mut s, 3);
     let _ = s.update();
-    assert!(wire.messages().is_empty(), "no change, no message");
+    assert!(messages(&wire).is_empty(), "no change, no message");
 
     s.stop(FadeOut::Immediate).unwrap();
     blocks(&mut s, 1);
     let _ = s.update();
-    assert_eq!(wire.messages(), [vec![0x7F, 0x03, 0x06, 0x01]]);
+    assert_eq!(messages(&wire), [vec![0x7F, 0x03, 0x06, 0x01]]);
 }
 
 /// **A locate of a stopped transport is LOCATE alone**, to the all-call.
@@ -431,7 +417,7 @@ fn a_locate_while_stopped_sends_a_locate_and_no_play() {
     blocks(&mut s, 1);
     let _ = s.update();
     assert_eq!(
-        wire.messages(),
+        messages(&wire),
         [vec![
             0x7F, 0x7F, 0x06, 0x44, 0x06, 0x01, 0x60, 0x00, 0x02, 0x00, 0x00
         ]]
@@ -451,7 +437,7 @@ fn a_locate_no_time_code_names_is_counted_and_sends_nothing() {
     s.locate(Beat::new(4_000_000.0)).unwrap();
     blocks(&mut s, 1);
     let _ = s.update();
-    assert!(wire.messages().is_empty());
+    assert!(messages(&wire).is_empty());
     assert_eq!(refused(&s), before + 1);
     blocks(&mut s, 1);
     let _ = s.update();
@@ -472,5 +458,5 @@ fn nothing_is_sent_unless_asked_and_it_can_be_stopped() {
     s.play().unwrap();
     blocks(&mut s, 2);
     let _ = s.update();
-    assert!(wire.messages().is_empty());
+    assert!(messages(&wire).is_empty());
 }

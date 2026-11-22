@@ -3,27 +3,13 @@
 //! terms are complete from the first block (the audio output's latency is zero,
 //! not unknown).
 
+use crate::common::Wire;
 use std::sync::Arc;
-use std::time::Duration;
-use tutti_platform::Instant;
-use tutti_rt::Mutex;
 
 use tutti_buffers::MaxBlock;
-use tutti_graph::UmpAt;
-use tutti_midi_runtime::{MidiOut, Outgoing, Taken};
 use tutti_session::Session;
 use tutti_ump::{Message, MidiGroup, System, Ump};
 use tutti_units::{SampleRate, Samples};
-
-#[derive(Clone, Default)]
-struct Wire(Arc<Mutex<Vec<UmpAt>>>);
-
-impl MidiOut for Wire {
-    fn queue_timed(&self, events: &[Outgoing]) -> Taken {
-        self.0.lock().extend(events.iter().map(|e| (e.at, e.ump)));
-        Taken::within(events, events.len())
-    }
-}
 
 /// **A system session sends its MIDI clock to a sink with no device.**
 /// The clock node is enabled, the transport rolls, and the timer's blocks
@@ -53,16 +39,14 @@ fn the_midi_clock_reaches_the_output_on_the_timers_blocks() {
     s.play().expect("room");
 
     let tick = Ump::from(Message::System(MidiGroup::FIRST, System::TimingClock));
-    let limit = Instant::now() + Duration::from_secs(10);
-    loop {
-        let _ = s.update();
-        let ticks = wire.0.lock().iter().filter(|(_, ump)| *ump == tick).count();
-        if ticks >= 3 {
-            break;
-        }
-        assert!(Instant::now() < limit, "the clock's ticks never arrived");
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    tutti_fixtures::wait_until(
+        "the clock's ticks to arrive",
+        tutti_fixtures::HANG_GUARD,
+        || {
+            let _ = s.update();
+            wire.events().iter().filter(|(_, ump)| *ump == tick).count() >= 3
+        },
+    );
     let terms = s
         .midi()
         .output_terms()

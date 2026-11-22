@@ -576,7 +576,7 @@ mod tests {
             news(News::ServerLosses {
                 commands_refused: 0,
                 edits_refused: 0,
-                refused_off_thread_calls: 0
+                refused_off_thread_calls: tutti_units::Calls::ZERO
             }),
             14
         );

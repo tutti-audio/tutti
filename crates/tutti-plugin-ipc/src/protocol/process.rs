@@ -165,12 +165,12 @@ mod tests {
             scales,
             expr_texts,
             expr_ints,
-            transport: info().with_system_time_ns(0x0102_0304_0506_0708),
+            transport: info().system_time_ns(0x0102_0304_0506_0708),
             transport_changes: [TransportChange {
                 offset: 17,
                 transport: info()
-                    .with_system_time_ns(0x0102_0304_0506_0708)
-                    .with_tempo(Bpm::of(90.0)),
+                    .system_time_ns(0x0102_0304_0506_0708)
+                    .tempo(Bpm::of(90.0)),
             }]
             .into_iter()
             .collect(),
@@ -215,8 +215,8 @@ mod tests {
     fn the_transport_clocks_cross_the_wire() {
         let block = ProcessAudioData {
             transport: info()
-                .with_position_samples(96_007)
-                .with_system_time_ns(5_001_000_000),
+                .position_samples(96_007)
+                .system_time_ns(5_001_000_000),
             ..ProcessAudioData::empty(SampleRate::SR_48K)
         };
         let back: ProcessAudioData =
@@ -242,7 +242,7 @@ mod tests {
             )
         };
         let block = ProcessAudioData {
-            transport: info().with_loop(region),
+            transport: info().loop_region(region),
             ..ProcessAudioData::empty(SampleRate::SR_48K)
         };
         let back: ProcessAudioData =
@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn the_tempo_slope_crosses_the_wire() {
         let block = ProcessAudioData {
-            transport: info().with_tempo(Bpm::of(93.5)).with_tempo_inc(-0.000_125),
+            transport: info().tempo(Bpm::of(93.5)).tempo_inc(-0.000_125),
             ..ProcessAudioData::empty(SampleRate::SR_48K)
         };
         let back: ProcessAudioData =
@@ -290,10 +290,7 @@ mod change_tests {
         for (offset, tempo, inc) in [(10, Bpm::of(100.0), 0.001), (50, Bpm::of(90.0), -0.002)] {
             block.transport_changes.push(TransportChange {
                 offset,
-                transport: info()
-                    .with_tempo(tempo)
-                    .with_tempo_inc(inc)
-                    .with_playing(true),
+                transport: info().tempo(tempo).tempo_inc(inc).playing(true),
             });
         }
         let back: ProcessAudioData =

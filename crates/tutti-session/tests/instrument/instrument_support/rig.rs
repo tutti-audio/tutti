@@ -24,9 +24,6 @@ pub struct Rig {
     pub left: Vec<f32>,
     /// Right channel.
     pub right: Vec<f32>,
-    /// Real time to wait after each block: a hosted plugin in a live session
-    /// answers a chunk in real time, and an unpaced render reads back silence.
-    pub pace: std::time::Duration,
     /// The first frame a case looks at: what came before is warm-up.
     pub origin: usize,
 }
@@ -69,7 +66,6 @@ impl Rig {
             handle,
             left: Vec::new(),
             right: Vec::new(),
-            pace: std::time::Duration::ZERO,
             origin: 0,
         }
     }
@@ -87,7 +83,21 @@ impl Rig {
         self.session
             .render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
         let _ = self.session.update();
-        std::thread::sleep(self.pace);
+        // A hosted plugin answers a chunk in real time, and a block rendered before
+        // the answer reads back silence: wait for the chunk in flight.
+        if let Some(plugin) = self.plugin {
+            tutti_fixtures::wait_until(
+                "the plugin's server to answer the chunk in flight",
+                tutti_fixtures::HANG_GUARD,
+                || {
+                    self.session
+                        .plugin_view(plugin)
+                        .expect("the plugin is hosted")
+                        .diagnostics()
+                        .chunk_in_flight_answered()
+                },
+            );
+        }
         for f in buf.as_chunks::<2>().0 {
             self.left.push(f[0]);
             self.right.push(f[1]);
