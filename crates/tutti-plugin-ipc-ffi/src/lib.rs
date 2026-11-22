@@ -1,5 +1,9 @@
 #![doc = include_str!("../README.md")]
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
+#![allow(
+    clippy::disallowed_types,
+    reason = "layer 0, below tutti-rt: the process edge's watchers lock with std"
+)]
 //! The `unsafe` of Tutti's plugin process edge, each piece behind a safe call,
 //! so `tutti-plugin-ipc` and `tutti-plugin-server` forbid `unsafe`: it lives in
 //! one self-contained place behind a safe wrapper, as in the per-format `-ffi`

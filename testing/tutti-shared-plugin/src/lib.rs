@@ -4,6 +4,11 @@
 //! plugin SDK. Each format's shell decodes its host's calls onto it and holds
 //! only what that SDK forces.
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "a test plugin stands in for a third party's plugin, whose locks are its own"
+)]
+
 pub mod core;
 pub mod transcript;
 

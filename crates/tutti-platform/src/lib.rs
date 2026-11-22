@@ -77,6 +77,10 @@
 #![deny(missing_docs)]
 #![deny(unsafe_op_in_unsafe_fn)]
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
+#![allow(
+    clippy::disallowed_types,
+    reason = "layer 0, below tutti-rt: the executor and thread edges wrap std's locks themselves"
+)]
 #![cfg_attr(
     test,
     allow(

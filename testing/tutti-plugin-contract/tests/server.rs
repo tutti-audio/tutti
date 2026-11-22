@@ -128,10 +128,7 @@ fn no_editor(
 /// listener (`Ipc::forward_events`), as the plugin node hears them.
 fn served<F: Format>(
     path: PathBuf,
-) -> (
-    Active<Ipc>,
-    std::sync::Arc<std::sync::Mutex<Vec<ParamEdit>>>,
-) {
+) -> (Active<Ipc>, std::sync::Arc<tutti_rt::Mutex<Vec<ParamEdit>>>) {
     // SAFETY: set before any thread of this test reads it.
     unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
     let Launched { ipc, .. } = Ipc::launch(
@@ -149,11 +146,11 @@ fn served<F: Format>(
         tutti_fixtures::executor(),
     )
     .unwrap_or_else(|e| panic!("{}: the server loads the plugin: {e:?}", F::NAME));
-    let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let heard = std::sync::Arc::new(tutti_rt::Mutex::new(Vec::new()));
     let sink = std::sync::Arc::clone(&heard);
     ipc.forward_events(Some(std::sync::Arc::new(move |event| {
         if let IpcEvent::ParameterChanged { edit } = event {
-            sink.lock().unwrap().push(edit);
+            sink.lock().push(edit);
         }
     })));
     let active = Active::activate(ipc, prepare(RATE, BLOCK, FloatWidth::F32))
@@ -198,7 +195,7 @@ fn a_served_gesture_arrives_in_order<F: Format>(path: PathBuf) {
     );
     // CLAP's plugin says it from `process`, so blocks run while the host waits.
     let guard = HangGuard::new();
-    while heard.lock().unwrap().len() < gesture_edits().len() {
+    while heard.lock().len() < gesture_edits().len() {
         guard.check("the gesture never arrived");
         a.silent(BLOCK);
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -213,7 +210,7 @@ fn a_served_gesture_arrives_in_order<F: Format>(path: PathBuf) {
         )
         .expect("saves");
     assert_eq!(
-        *heard.lock().unwrap(),
+        *heard.lock(),
         gesture_edits(),
         "{}: the gesture across the wire",
         F::NAME
@@ -237,9 +234,9 @@ fn clap_gesture_from_a_flush_crosses_the_process_boundary_in_order() {
     tutti_fixtures::wait_until(
         "the gesture the flush raised to arrive",
         HangGuard::LIMIT,
-        || heard.lock().unwrap().len() >= gesture_edits().len(),
+        || heard.lock().len() >= gesture_edits().len(),
     );
-    assert_eq!(*heard.lock().unwrap(), gesture_edits());
+    assert_eq!(*heard.lock(), gesture_edits());
 }
 
 /// A parameter value keeps its width across the wire: 0.3, which an `f32`

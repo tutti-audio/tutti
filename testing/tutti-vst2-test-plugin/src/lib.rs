@@ -22,6 +22,11 @@
 //! (`config.rs`), runtime behaviour from `extern "C"` switches
 //! (`switches.rs`); each file documents why its half falls on that side.
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "a test plugin stands in for a third party's plugin, whose locks are its own"
+)]
+
 extern crate tutti_vst2_author as vst;
 
 #[cfg(feature = "probe")]
