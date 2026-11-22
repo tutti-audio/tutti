@@ -19,7 +19,7 @@ use tutti_modulation::{
 use tutti_rt::ParamCell;
 use tutti_rt::{Publisher, Reader};
 use tutti_units::{
-    Beat, Frame, Normalized, ParamAddr, ParamId, SamplePosition, Samples, Tail, UnitAddr, UnitParam,
+    Frame, Normalized, ParamAddr, ParamId, SamplePosition, Samples, Tail, UnitAddr, UnitParam,
 };
 
 use crate::SOURCE_EVENT_CAPACITY;
@@ -568,7 +568,7 @@ impl ControlLaneNode {
 /// The transport one frame on from `t`, as the executor's own history rolls
 /// it (`FrameClock` advanced, loop wrapped).
 fn roll_one(t: TransportPosition, rate: tutti_units::SampleRate) -> TransportPosition {
-    if !t.playing || tutti_music::frames_per_beat(t.tempo, rate).is_none() {
+    if !t.playing || t.tempo.frames_per_beat(rate).is_none() {
         return t;
     }
     let mut clock = t.clock(rate);
@@ -739,7 +739,7 @@ impl Block<'_> {
         let t = self.cx.transport_at(off);
         let play = self.cx.play_at(off);
         let rate = env.sample_rate;
-        let fpb = tutti_music::frames_per_beat(t.tempo, rate).filter(|_| t.playing);
+        let fpb = t.tempo.frames_per_beat(rate).filter(|_| t.playing);
         let abs = self.base() + Samples::new(p);
         let beat = t.beat().get();
         let time = ProgramTime {
@@ -750,7 +750,7 @@ impl Block<'_> {
         };
         // The loop's wrap, a point of its own, in frames from here.
         let wrap = match (fpb, t.looping) {
-            (Some(f), Some(l)) if l.end().get() > beat => Some((l.end().get() - beat) * f),
+            (Some(f), Some(l)) if l.end().get() > beat => Some(f.frames_in(l.end() - t.beat())),
             _ => None,
         };
         let pf = p as f64;
@@ -793,21 +793,24 @@ impl Block<'_> {
                         to,
                         shape,
                     }) if from.is_finite() && to.is_finite() && end.get() > beat => {
-                        let (s, e) = (start.get(), end.get());
                         // The piece on whole frames: its start and end round to
                         // the nearest frame, so a piece sent in any block is
                         // the same piece. One past what a segment can count is
                         // not exact: the grid takes it.
-                        exact_span((beat - s) * f, (e - beat) * f).map(|(since, span)| {
-                            let seg = make(from, to, shape).resumed_exactly(since, span);
-                            (seg, from, to, Some((e - beat) * f))
-                        })
+                        exact_span(f.frames_in(t.beat() - start), f.frames_in(end - t.beat())).map(
+                            |(since, span)| {
+                                let seg = make(from, to, shape).resumed_exactly(since, span);
+                                (seg, from, to, Some(f.frames_in(end - t.beat())))
+                            },
+                        )
                     }
                     Some(CurveSegment::Hold { value, until }) if value.is_finite() => Some((
                         make(value, value, Law::Linear),
                         value,
                         value,
-                        until.map(|u| (u.get() - beat) * f).filter(|d| *d > 0.0),
+                        until
+                            .map(|u| f.frames_in(u - t.beat()))
+                            .filter(|d| *d > 0.0),
                     )),
                     None if curve.value_at(t.beat()).is_none() => {
                         // No value anywhere: the knob, held.
@@ -878,7 +881,7 @@ impl Block<'_> {
             }
         };
         if let Some(f) = fpb {
-            consider(corners.beat.map(|b| (b.get() - beat) * f));
+            consider(corners.beat.map(|b| f.frames_in(b - t.beat())));
             consider(wrap);
         }
         consider(corners.play.map(|c| c.get() - time.play.get()));
@@ -894,7 +897,7 @@ impl Block<'_> {
             d = nearest;
         }
         let end = ProgramTime {
-            beat: Beat::new(fpb.map_or(beat, |f| beat + d / f)),
+            beat: fpb.map_or(t.beat(), |f| t.beat() + f.beats_over(d)),
             play: SamplePosition::new(time.play.get() + d),
             ..time
         };

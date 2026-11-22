@@ -1,5 +1,5 @@
 //! The values the graph holds beside its structure: a node's [`NodeMode`] and
-//! [`Mix`], a param port's range, and an edge gain's base and range.
+//! [`Mix`], a param port's range, and an edge gain's base, range and fade.
 //!
 //! A value is not wiring: a change of one sends no plan. The editor owns the
 //! one table. A unit's cells start from it when a commit places the unit, a
@@ -12,14 +12,14 @@ use std::collections::BTreeMap;
 
 use crate::mode::{NodeMix, NodeMode};
 use crate::param::{ParamIn, ParamRange};
-use crate::{EdgeGain, EdgeId, NodeKey};
+use crate::{EdgeFade, EdgeGain, EdgeId, NodeKey};
 use tutti_units::{Amplitude, Mix};
 
 /// The table. A value at its default has no entry, so two tables with the same
 /// values are equal: a node's mode ([`NodeMode::Active`]) and mix
 /// ([`Mix::WET`]), a port's range ([`ParamRange::UNBOUNDED`], the whole blend
 /// for a mix), an edge's base ([`Amplitude::UNITY`]) and range
-/// ([`EdgeGain::DEFAULT_RANGE`]).
+/// ([`EdgeGain::DEFAULT_RANGE`]) and fade ([`EdgeFade::None`]).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct GraphValues {
     modes: BTreeMap<NodeKey, NodeMode>,
@@ -27,6 +27,7 @@ pub(crate) struct GraphValues {
     ranges: BTreeMap<ParamIn, ParamRange>,
     bases: BTreeMap<EdgeId, Amplitude>,
     gain_ranges: BTreeMap<EdgeId, ParamRange>,
+    fades: BTreeMap<EdgeId, EdgeFade>,
 }
 
 /// Sets `value` at `key`, or removes the entry when `value` is `default`.
@@ -109,17 +110,29 @@ impl GraphValues {
         set(&mut self.gain_ranges, id, range, EdgeGain::DEFAULT_RANGE);
     }
 
-    /// Drops edge `id`'s base and range: a lane declared again starts at
-    /// unity with the default range.
+    /// Edge `id`'s fade: [`EdgeFade::None`] unless one was set.
+    pub(crate) fn fade(&self, id: EdgeId) -> EdgeFade {
+        self.fades.get(&id).copied().unwrap_or_default()
+    }
+
+    /// Sets edge `id`'s fade.
+    pub(crate) fn set_fade(&mut self, id: EdgeId, fade: EdgeFade) {
+        set(&mut self.fades, id, fade, EdgeFade::None);
+    }
+
+    /// Drops edge `id`'s base, range and fade: a lane declared again starts at
+    /// unity with the default range and no fade.
     pub(crate) fn forget_edge(&mut self, id: EdgeId) {
         self.bases.remove(&id);
         self.gain_ranges.remove(&id);
+        self.fades.remove(&id);
     }
 
-    /// Keeps the base and range of the edges `keep` accepts.
+    /// Keeps the base, range and fade of the edges `keep` accepts.
     pub(crate) fn retain_edges(&mut self, mut keep: impl FnMut(EdgeId) -> bool) {
         self.bases.retain(|&id, _| keep(id));
         self.gain_ranges.retain(|&id, _| keep(id));
+        self.fades.retain(|&id, _| keep(id));
     }
 
     /// Copies into `to` the range of every port of the nodes `keep` accepts.

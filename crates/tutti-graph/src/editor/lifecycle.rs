@@ -81,20 +81,6 @@ impl<F: Float> Lifecycle<F> {
         }
     }
 
-    /// As [`committed`](Self::committed), to write a control into.
-    pub(super) fn committed_mut(&mut self) -> Option<&mut Committed> {
-        match self {
-            Self::Running(sent)
-            | Self::Repreparing {
-                sent: Some(sent), ..
-            }
-            | Self::Poisoned {
-                sent: Some(sent), ..
-            } => sent.committed.as_deref_mut(),
-            _ => None,
-        }
-    }
-
     /// Records the spec and shapes the running plan was compiled from.
     pub(super) fn set_committed(&mut self, spec: GraphSpec, shapes: Shapes) {
         if let Self::Running(sent) = self {
