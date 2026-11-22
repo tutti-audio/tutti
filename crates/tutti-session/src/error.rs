@@ -49,7 +49,7 @@ pub enum RemoveError {
 /// The session refused to set the project tempo. Nothing is published.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Error)]
 #[non_exhaustive]
-pub enum TempoError {
+pub enum SetTempoError {
     /// The session follows a live tempo (`Midi::follow_tempo`, feature
     /// `midi`), which owns the published map until `unfollow_tempo`: a map set now would be
     /// overwritten by the next live step, and unfollowing restores the map in
@@ -303,6 +303,18 @@ pub enum MidiError {
     /// the other is followed.
     #[error("another follower already publishes the tempo; unfollow it first")]
     TempoSourceTaken,
+
+    /// `Midi::open_network_client` or `open_network_host`: the session's executor is gone, so
+    /// the link has nothing to run on.
+    #[cfg(feature = "midi-network")]
+    #[error("the session's executor is shut down")]
+    NetworkShutDown,
+
+    /// `Midi::open_network_client` or `open_network_host`: the socket could not be bound, or the OS refused the
+    /// link's thread.
+    #[cfg(feature = "midi-network")]
+    #[error("the network socket")]
+    NetworkSocket(#[from] std::io::Error),
 
     /// The hardware input's routes have one declarer: the session's own
     /// (`Midi::route`, `Midi::set_route_fallback`) or a host's

@@ -24,7 +24,7 @@ use tutti_buffers::FloatWidth;
 use tutti_fixtures::main_thread;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{
-    ChannelLayout, Features, LoadedPlugin, ParameterInfo, PluginBus, PluginDescriptor, PluginTail,
+    ChannelLayout, Features, ParameterInfo, PluginBus, PluginDescriptor, PluginTail, PluginWiring,
     Samples,
 };
 use tutti_plugin_types::{EditorPresence, PluginClass};
@@ -53,7 +53,7 @@ fn handle_over(
     slab: crate::SlabWriter,
     replies: crate::Replies,
     descriptor: PluginDescriptor,
-    loaded: LoadedPlugin,
+    loaded: PluginWiring,
 ) -> PluginHandle {
     let guard = Arc::new(crate::ProcessGuard::for_test(
         crate::unique_socket_path().expect("the OS has a random source"),
@@ -247,14 +247,14 @@ fn handle_with_mock_server(
         measured: None,
         widths: None,
     };
-    let loaded = LoadedPlugin {
+    let loaded = PluginWiring {
         inputs: vec![PluginBus::main(ChannelLayout::STEREO)],
         outputs: vec![PluginBus::main(ChannelLayout::STEREO)],
         latency_samples: Samples::ZERO,
         tail: PluginTail::Unknown,
         features: Features::EDITOR,
         probed: Features::EDITOR,
-        ..LoadedPlugin::default()
+        ..PluginWiring::default()
     };
     let plugin_handle = handle_over(bridge, slab, replies, descriptor, loaded);
 
@@ -349,14 +349,14 @@ fn handle_with_multi_reply_server(
         measured: None,
         widths: None,
     };
-    let loaded = LoadedPlugin {
+    let loaded = PluginWiring {
         inputs: vec![PluginBus::main(ChannelLayout::STEREO)],
         outputs: vec![PluginBus::main(ChannelLayout::STEREO)],
         latency_samples: Samples::ZERO,
         tail: PluginTail::Unknown,
         features: Features::EDITOR,
         probed: Features::EDITOR,
-        ..LoadedPlugin::default()
+        ..PluginWiring::default()
     };
     let plugin_handle = handle_over(Arc::clone(&bridge), slab, replies, descriptor, loaded);
 

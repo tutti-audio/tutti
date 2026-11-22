@@ -267,7 +267,7 @@ fn open_routes_a_vst2_to_the_in_process_backend() {
 /// has no call that reaches it.
 ///
 /// Worth an integration test rather than only a unit one: the unit tests build
-/// a `LoadedPlugin` by hand, so they would still pass if the VST2 loader
+/// a `PluginWiring` by hand, so they would still pass if the VST2 loader
 /// silently populated the field with something. This asserts the loader's own
 /// answer.
 #[test]

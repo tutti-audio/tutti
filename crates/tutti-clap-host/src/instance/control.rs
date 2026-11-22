@@ -10,9 +10,9 @@ use tutti_plugin_ipc_ffi::FdId;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, BusRole, ChannelLayout, ClapFeature, ContentScale, Control, Delivered,
-    EditorOpened, EditorPresence, EditorWindow, Features, Layout, Loaded, LoadedPlugin, OwnBypass,
-    ParamAccess, ParamEdit, ParamFlags, ParamMapping, ParamWriteError, ParameterInfo, PluginBus,
-    PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, PresetId,
+    EditorOpened, EditorPresence, EditorWindow, Features, Layout, Loaded, OwnBypass, ParamAccess,
+    ParamEdit, ParamFlags, ParamMapping, ParamWriteError, ParameterInfo, PluginBus, PluginBuses,
+    PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, PluginWiring, PresetId,
     ProcessWake, RenderMode, RenderModeSupport, Request, RescanScope, Samples, StateUse, TimerId,
     TrackInfo, WindowHandle, Wraps, bypass_parameter,
 };
@@ -286,7 +286,7 @@ impl Control for ClapLoaded {
     /// The wiring read from the plugin now. Latency is read only while the
     /// plugin is active, which is when CLAP lets it change; a loaded plugin
     /// reports none.
-    fn wiring(&self, main: MainThreadMarker) -> LoadedPlugin {
+    fn wiring(&self, main: MainThreadMarker) -> PluginWiring {
         self.measured(main);
         let layout = self.layout(main);
         let latency_samples = if self.flags.active {
@@ -294,7 +294,7 @@ impl Control for ClapLoaded {
         } else {
             Samples::new(0)
         };
-        LoadedPlugin {
+        PluginWiring {
             inputs: layout.inputs,
             outputs: layout.outputs,
             latency_samples,

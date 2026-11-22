@@ -106,6 +106,7 @@
 //! - `export` — `Bounce` and its results (implies `encode-wav`).
 //! - `midi` — `tutti::midi`. `crates/tutti/examples/midi_all.rs` uses every piece together, offline.
 //! - `midi-hardware` — OS MIDI I/O in `tutti::midi` (implies `midi`).
+//! - `midi-network` — Network MIDI 2.0 in `tutti::midi::network` (implies `midi`; not on the web).
 //! - `synth`, `soundfont`, `sampler` — the matching module.
 //!   `synth` and `soundfont` imply `midi`; `sampler` implies no decoder.
 //! - `analyze` — `Session::analyze` and `tutti::measure` (implies `session`).
@@ -207,7 +208,7 @@ pub use tutti_session::{
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{
     Analyze, AnalyzeError, Analyzer, AnalyzerError, Analyzing, Audio, AudioContext, AudioInput,
-    BindError,
+    MeterBindError,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
@@ -219,7 +220,7 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    AppKey, BlockDates, Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Key,
+    AppKey, BlockDates, ChannelEdge, Clock, ConnectError, EventInPort, EventOutPort, InPort, Key,
     NoSuchNode, Offline, OfflineSession, OutPort, Playhead, RealTime, Root, Session,
     SessionBuilder, SessionEvent, SessionFloat, SystemClock, SystemSession, TransportHandle,
     Workers,
@@ -469,7 +470,7 @@ pub mod graph {
     pub use tutti_graph::{
         Bus, BusRole, Buses, Cost, Cx, Env, ForkByClone, HasParam, HasParams, InBus, Inputs,
         IntoNode, Io, Node, OutBus, Outputs, ParamFork, ParamNode, ParamSet, ParamSetBuilder,
-        ParamUnit, Params, Prepare, RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar,
+        ParamValue, Params, Prepare, RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar,
         Shape, Status, Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
@@ -516,7 +517,7 @@ pub mod session {
     };
     pub use tutti_graph::{
         BusFeed, BusFold, BusSide, EdgeFade, EdgeId, EventCapacityError, EventIn, EventOut,
-        ForkError, InletCounts, Instrument, MeterId, ParamIn, PrerollTable, RootError, RootId,
+        ForkError, InletCounts, InstrumentNode, MeterId, ParamIn, PrerollTable, RootError, RootId,
     };
     pub use tutti_modulation::PeriodPoint;
     pub use tutti_session::Apply;
@@ -530,14 +531,14 @@ pub mod session {
     ))]
     pub use tutti_session::LoadError;
     pub use tutti_session::{
-        BackgroundWork, BlockConfig, Bus, BusSink, Channel, Committed, Connection,
-        DeclarationError, Disconnection, Event, EventEdge, EventTapPort, Fanin, Feeder, Graph,
-        Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots, NotReopened,
+        BackgroundWork, BlockConfig, BusSink, BusWire, ChannelWire, Committed, Connection,
+        DeclarationError, Disconnection, EventEdge, EventTapPort, EventWire, Fanin, Feeder, Graph,
+        Inlet, InletError, LIVE_MAX_BLOCK, MainBusWire, MainSink, Meters, NodeSlots, NotReopened,
         Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError,
-        Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims, Removal, RemoveError,
-        Reopened, ReplaceRefused, Replacement, Resource, ResourceFact, ResourceId, RootDeclaration,
-        RootReader, RootTopologyStatus, SessionHeardTapError, SessionNode, SetRateError,
-        SetSources, Taps, TempoError, Weighted, Wire, root_width,
+        PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
+        Removal, RemoveError, Reopened, ReplaceRefused, Replacement, Resource, ResourceFact,
+        RootDeclaration, RootReader, RootTopologyStatus, SessionHeardTapError, SessionNode,
+        SetRateError, SetSources, SetTempoError, Taps, Weighted, Wire, root_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
@@ -932,8 +933,35 @@ pub mod midi {
         MidiPolicyError, MidiPortError, NoHardware, PortCause, ProfilePeer, ReportPeer,
         RequestReport, RestorePeerState, SavePeerState, SwitchProfile, WholeProfile,
     };
-    #[cfg(feature = "midi-hardware")]
+    #[cfg(any(feature = "midi-hardware", feature = "midi-network"))]
     pub use tutti_ump::{EndpointName, InstanceIdError, Name, NameError, ProductInstanceId};
+    /// Network MIDI 2.0 (M2-124) as the session's MIDI: a Client or a Host bound by
+    /// `Midi::open_network_client` and `open_network_host`, its peers' input nodes and its output node, and the
+    /// Hosts found by mDNS. Not on the web, which has no UDP sockets. Feature
+    /// `midi-network`.
+    ///
+    /// ```
+    /// use tutti::midi::network::EndpointIdentity;
+    /// use tutti::midi::{EndpointName, ProductInstanceId};
+    ///
+    /// let identity = EndpointIdentity::new(
+    ///     EndpointName::new("Studio").unwrap(),
+    ///     ProductInstanceId::new("HOST-1").unwrap(),
+    /// );
+    /// assert!(identity.is_some());
+    /// ```
+    #[cfg(all(feature = "midi-network", not(target_arch = "wasm32")))]
+    pub mod network {
+        pub use tutti_midi_network::{
+            Admission, Advertisement, AuthFailure, AuthMethods, Browser, ByeReason, Client,
+            Credentials, DiscoveryError, EndedBy, EndpointIdentity, Fec, FoundHost, Host,
+            HostEvent, IdleInterval, IdleIntervalOutOfRange, InstanceName, InstanceNameError,
+            PendingHosts, Requests, Retransmit, SessionConfig, Timer, TimerOutOfRange, Username,
+        };
+        #[cfg(feature = "session")]
+        pub use tutti_session::{MidiNetwork, NetworkError, NetworkReport, OpenClient, OpenHost};
+    }
+
     /// MIDI-CI Property Exchange (M2-103 and its resource specifications): a
     /// peer's resources, read, written and subscribed to through the session.
     /// Under `plugin` alone it holds only the `MediaType` a `PeerState` carries.

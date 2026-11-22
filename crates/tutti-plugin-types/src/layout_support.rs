@@ -1,10 +1,10 @@
 //! [`LayoutSupport`]: what is known about a plugin's channel placement.
 
-use crate::LoadedPlugin;
+use crate::PluginWiring;
 
 /// What is known about a plugin's channel placement.
 ///
-/// Derived from [`LoadedPlugin`] rather than from a `Features` bit, because
+/// Derived from [`PluginWiring`] rather than from a `Features` bit, because
 /// there is no bit to read: topology is per-bus data, and "some buses answered"
 /// is a real state that one flag cannot express.
 ///
@@ -43,11 +43,11 @@ impl LayoutSupport {
     /// it into `Full` would have a caller ask for a speaker on a bus that never
     /// named one.
     ///
-    /// Completeness is `LoadedPlugin::topology_is_complete`, which requires
+    /// Completeness is `PluginWiring::topology_is_complete`, which requires
     /// more than presence: each topology's width must match the count beside
     /// it, since the count sizes the buffers and two descriptions of one bus
     /// cannot be adjudicated.
-    pub fn of(loaded: &LoadedPlugin) -> Self {
+    pub fn of(loaded: &PluginWiring) -> Self {
         if loaded.topology_is_complete() {
             return Self::Full;
         }
@@ -80,9 +80,9 @@ mod tests {
     fn one_bus_each(
         input: Option<ChannelTopology>,
         output: Option<ChannelTopology>,
-    ) -> LoadedPlugin {
+    ) -> PluginWiring {
         let bus = |topology| PluginBus::new(ChannelLayout::STEREO, BusRole::Main).placed(topology);
-        LoadedPlugin {
+        PluginWiring {
             inputs: vec![bus(input)],
             outputs: vec![bus(output)],
             ..Default::default()
@@ -147,7 +147,7 @@ mod tests {
     #[test]
     fn a_plugin_with_no_buses_is_vacuously_full() {
         assert_eq!(
-            LayoutSupport::of(&LoadedPlugin::default()),
+            LayoutSupport::of(&PluginWiring::default()),
             LayoutSupport::Full
         );
     }

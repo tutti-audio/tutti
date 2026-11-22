@@ -43,7 +43,7 @@ pub struct RangeTarget<U> {
 }
 
 impl<U: Scalar> RangeTarget<U> {
-    /// The range of `target`, a [`ParamTarget`], an [`Edge`](crate::Edge) (its
+    /// The range of `target`, a [`ParamTarget`], a [`ChannelEdge`](crate::ChannelEdge) (its
     /// gain) or a [`MixRef`](crate::MixRef).
     #[must_use]
     pub fn of<T: Ranged<Unit = U>>(target: T) -> Self {

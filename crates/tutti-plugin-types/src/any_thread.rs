@@ -130,7 +130,7 @@ pub trait AnyThread: Send + Sync {
 
     /// Writes the plugin's own bypass, `true` bypassed and `false` processing,
     /// where `site` says the plugin keeps it
-    /// ([`LoadedPlugin::own_bypass`](crate::LoadedPlugin::own_bypass)).
+    /// ([`PluginWiring::own_bypass`](crate::PluginWiring::own_bypass)).
     /// Fire-and-forget like [`set_parameter_value`](Self::set_parameter_value):
     /// [`Sent`](BypassWrite::Sent) is not applied, and
     /// [`bypassed`](Self::bypassed) reads the result back.

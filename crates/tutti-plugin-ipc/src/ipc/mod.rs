@@ -4,7 +4,7 @@
 //! It wraps what a served plugin is today: the [`PluginBridge`] (control
 //! socket and audio slab), the [`ProcessGuard`] that owns the server, the
 //! [`EditorLoader`] the host passed (or none: the editor then lives in the server), and the
-//! [`LoadedPlugin`] descriptor the
+//! [`PluginWiring`] descriptor the
 //! server reported. [`activate`](Loaded::activate) splits it into an
 //! [`IpcProcessor`] (the [`Batcher`] behind
 //! [`Processor::process`](tutti_plugin_types::Processor::process)) and an [`IpcController`] (the bridge's control
@@ -53,9 +53,9 @@ use tutti_rt::LockExt;
 use tutti_buffers::FloatWidth;
 use tutti_platform::{Executor, WeakExecutor};
 use tutti_plugin_types::{
-    ChunkCounters, Controller, IpcError, IpcResult, Loaded, LoadedPlugin, MainThreadMarker,
-    ParamAccess, ParamWriteError, ParameterChanges, ParameterQueue, PluginDescriptor, PluginError,
-    PluginFormat, PluginRef, PluginResult, PluginTail, Prepare, PresetId, ProcessWake, Refused,
+    ChunkCounters, Controller, IpcError, IpcResult, Loaded, MainThreadMarker, ParamAccess,
+    ParamWriteError, ParameterChanges, ParameterQueue, PluginDescriptor, PluginError, PluginFormat,
+    PluginRef, PluginResult, PluginTail, PluginWiring, Prepare, PresetId, ProcessWake, Refused,
     Reopen, Request, RestartRules, ResyncKind, SampleRate, Samples, StateError, StateUse, Stuck,
     Widths,
 };
@@ -139,7 +139,7 @@ pub struct IpcParts {
     /// The plugin's catalog identity.
     pub descriptor: PluginDescriptor,
     /// What the server reported at load.
-    pub loaded: LoadedPlugin,
+    pub loaded: PluginWiring,
     /// The format the blocks travel in.
     pub format: FloatWidth,
     /// The slab's per-chunk size: the most a chunk can be.
@@ -294,7 +294,7 @@ pub(crate) struct Link {
     pub(crate) bridge: Arc<PluginBridge>,
     pub(crate) guard: Arc<ProcessGuard>,
     pub(crate) descriptor: PluginDescriptor,
-    pub(crate) loaded: LoadedPlugin,
+    pub(crate) loaded: PluginWiring,
     pub(crate) format: FloatWidth,
     pub(crate) ceiling: usize,
     pub(crate) parameters: usize,
@@ -316,7 +316,7 @@ impl Link {
     /// The plugin as the host knows it now: what it reported at load, with the
     /// buses it announced since. An activation reads it once and lays out the
     /// slab, the pipeline and the node's ports from that one value.
-    pub(crate) fn current(&self) -> LoadedPlugin {
+    pub(crate) fn current(&self) -> PluginWiring {
         let mut loaded = self.loaded.clone();
         if let Some(layout) = self.layout() {
             loaded.inputs = layout.inputs;
@@ -733,7 +733,7 @@ impl Ipc {
     }
 
     /// What the server reported at load.
-    pub fn loaded(&self) -> &LoadedPlugin {
+    pub fn loaded(&self) -> &PluginWiring {
         &self.link.loaded
     }
 
@@ -790,7 +790,7 @@ pub struct IpcController {
     /// what its [`wiring`](tutti_plugin_types::Control::wiring) answers, whatever the plugin has announced
     /// since. `None` for a view that belongs to no activation, which answers
     /// the buses announced last.
-    activated: Option<Arc<LoadedPlugin>>,
+    activated: Option<Arc<PluginWiring>>,
 }
 
 impl std::fmt::Debug for IpcController {
@@ -803,7 +803,7 @@ impl std::fmt::Debug for IpcController {
 
 impl Ipc {
     /// What `Control::wiring` answers: the buses announced last.
-    pub(crate) fn wiring_now(&self) -> LoadedPlugin {
+    pub(crate) fn wiring_now(&self) -> PluginWiring {
         self.link.current()
     }
 }
@@ -811,7 +811,7 @@ impl Ipc {
 impl IpcController {
     /// What `Control::wiring` answers: the buses of the activation this
     /// controller belongs to, or the ones announced last for a view of none.
-    pub(crate) fn wiring_now(&self) -> LoadedPlugin {
+    pub(crate) fn wiring_now(&self) -> PluginWiring {
         self.activated
             .as_deref()
             .cloned()

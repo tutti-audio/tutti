@@ -10,8 +10,8 @@ use dpi::Size;
 use tutti_plugin_types::{
     Answer, AnyThread, AutomationMode, AutomationModeError, BypassWrite, ContentScale, Control,
     Delivered, EditorCapabilities, EditorOpened, EditorPresence, EditorWindow, Features, Health,
-    LoadedPlugin, MainThreadMarker, OwnBypass, ParameterInfo, PipelineCounts, PluginDescriptor,
-    PluginError, PluginFailure, PluginPreset, PluginResult, PresetId, ProcessWake, RateRefusal,
+    MainThreadMarker, OwnBypass, ParameterInfo, PipelineCounts, PluginDescriptor, PluginError,
+    PluginFailure, PluginPreset, PluginResult, PluginWiring, PresetId, ProcessWake, RateRefusal,
     RenderMode, RenderModeSupport, Request, StateError, StateUse, TerminationReason, TrackInfo,
     UnknownParam, WindowHandle, bypass_value,
 };
@@ -210,7 +210,7 @@ macro_rules! served_control {
                 &self.link.descriptor
             }
 
-            fn wiring(&self, _main: MainThreadMarker) -> LoadedPlugin {
+            fn wiring(&self, _main: MainThreadMarker) -> PluginWiring {
                 self.wiring_now()
             }
 

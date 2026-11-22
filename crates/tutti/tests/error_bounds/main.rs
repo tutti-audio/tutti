@@ -65,7 +65,7 @@ fn session_graph_errors_are_boxable() {
 #[cfg(feature = "session")]
 fn session_errors_are_boxable() {
     err::<tutti::Error>();
-    err::<tutti::session::TempoError>();
+    err::<tutti::session::SetTempoError>();
 }
 
 #[cfg(all(feature = "session", feature = "device"))]

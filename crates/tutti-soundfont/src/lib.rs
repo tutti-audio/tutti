@@ -231,7 +231,7 @@ pub const SYNTH_BLOCK_FRAMES: usize = Render::BLOCK;
 ///
 /// No audio inputs, five outputs and one MIDI event input: the unit is a
 /// source. The outputs are, in order, the dry left and right pair (the sound a
-/// host plays: this is the unit's [`tutti_graph::Instrument::main_outputs`]), the chorus
+/// host plays: this is the unit's [`tutti_graph::InstrumentNode::main_outputs`]), the chorus
 /// send left and right, and the reverb send (mono). The unit has no effect
 /// inside it: the sends are what each voice would send to one, at the level the
 /// preset and the channel ask (SF2 2.04 section 8.1.2, generators 15 and 16, and

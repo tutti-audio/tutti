@@ -10,8 +10,8 @@ use tutti_platform::Instant;
 use tutti_buffers::FloatWidth;
 use tutti_fixtures::{machine_lock, main_thread};
 use tutti_plugin_types::{
-    ChannelLayout, Control, Controller, EditorError, Loaded, LoadedPlugin, MaxBlock, ParamAccess,
-    ParameterInfo, PluginBus, PluginClass, PluginDescriptor, Prepare, Processor, Reopen, Request,
+    ChannelLayout, Control, Controller, EditorError, Loaded, MaxBlock, ParamAccess, ParameterInfo,
+    PluginBus, PluginClass, PluginDescriptor, PluginWiring, Prepare, Processor, Reopen, Request,
     SampleRate, Samples,
 };
 use tutti_units::ParamId;
@@ -438,11 +438,11 @@ fn mock_with(
             crate::unique_socket_path().expect("the OS has a random source"),
         )),
         descriptor: PluginDescriptor::new("", PluginClass::Unknown),
-        loaded: LoadedPlugin {
+        loaded: PluginWiring {
             inputs: vec![PluginBus::main(ChannelLayout::STEREO)],
             outputs: vec![PluginBus::main(ChannelLayout::STEREO)],
             latency_samples: Samples::new(5),
-            ..LoadedPlugin::default()
+            ..PluginWiring::default()
         },
         format: FloatWidth::F32,
         ceiling: CEILING,

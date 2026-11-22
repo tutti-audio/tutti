@@ -325,6 +325,29 @@ impl<E: NetworkEndpoint + Send + 'static> NetworkLink<E> {
         self.shared.state().sends_failed
     }
 
+    /// Ends the link: a Bye ([`NetworkEndpoint::close_all`]) to every Session, then
+    /// the socket task is told to stop, which it does within 100 ms (at once when
+    /// the poke it is sent lands). Nothing waits for it. The stream ends once the
+    /// task has, and a send after this finds no Session established.
+    ///
+    /// Dropping the link does the same, and a link that was closed is not closed
+    /// again.
+    pub fn close(&self) {
+        let wakers = {
+            let mut state = self.shared.state();
+            if state.stop {
+                return;
+            }
+            state.endpoint.close_all(Instant::now());
+            // Nobody is left to tell of a Bye that cannot be sent.
+            let _ = state.flush(&self.socket);
+            state.stop = true;
+            state.take_wakers()
+        };
+        wakers.into_iter().for_each(Waker::wake);
+        self.poke();
+    }
+
     /// Wakes the socket task from its read with a zero-length datagram from
     /// the socket to itself. A poke that cannot be sent is not an error: the
     /// task looks at the clock within 100 ms anyway.
@@ -337,16 +360,7 @@ impl<E: NetworkEndpoint + Send + 'static> NetworkLink<E> {
 
 impl<E: NetworkEndpoint + Send + 'static> Drop for NetworkLink<E> {
     fn drop(&mut self) {
-        let wakers = {
-            let mut state = self.shared.state();
-            state.endpoint.close_all(Instant::now());
-            // Nobody is left to tell of a Bye that cannot be sent.
-            let _ = state.flush(&self.socket);
-            state.stop = true;
-            state.take_wakers()
-        };
-        wakers.into_iter().for_each(Waker::wake);
-        self.poke();
+        self.close();
     }
 }
 

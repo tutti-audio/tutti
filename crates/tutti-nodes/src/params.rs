@@ -188,7 +188,7 @@ impl Control {
 /// ([`HasParam`](tutti_graph::HasParam)).
 pub trait HasControl<const P: u16> {
     /// The unit the control's value is in.
-    type Unit: tutti_graph::ParamUnit;
+    type Unit: tutti_graph::ParamValue;
 }
 
 /// That a [`ControlSet`] has several controls of the kind `P`, numbered from 0.
@@ -256,7 +256,7 @@ macro_rules! control_set {
 
             fn flatten(&self, c: &$controls, out: &mut [f64]) {
                 let all = [$(
-                    <$unit as tutti_graph::ParamUnit>::to_cell(c.$f $([$pi])?)
+                    <$unit as tutti_graph::ParamValue>::to_cell(c.$f $([$pi])?)
                 ),+];
                 out.copy_from_slice(&all[..out.len()]);
             }
@@ -268,7 +268,7 @@ macro_rules! control_set {
                 let mut cells = v.iter().copied();
                 $(
                     if let Some(x) = cells.next() {
-                        c.$f $([$pi])? = <$unit as tutti_graph::ParamUnit>::from_cell(x);
+                        c.$f $([$pi])? = <$unit as tutti_graph::ParamValue>::from_cell(x);
                     }
                 )+
                 c

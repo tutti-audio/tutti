@@ -35,7 +35,7 @@ use arrayvec::ArrayVec;
 use parking_lot::Mutex;
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::{Bus, Buses, Cx, Offset, Shape};
-use tutti_plugin_types::{Layout, LoadedPlugin, PluginBus};
+use tutti_plugin_types::{Layout, PluginBus, PluginWiring};
 use tutti_rt::PendingSampleRate;
 use tutti_tempo::TempoView;
 use tutti_timeline::TempoReader;
@@ -265,7 +265,7 @@ impl Declared {
     ///
     /// [`PluginTooWide`] when the plugin has more channels in a direction than
     /// a block serves.
-    pub(super) fn of(loaded: &LoadedPlugin) -> Result<Self, PluginTooWide> {
+    pub(super) fn of(loaded: &PluginWiring) -> Result<Self, PluginTooWide> {
         let mut declared = Self::from_layout(&Layout::from(loaded))?;
         // A plugin with a bypass of its own keeps running in
         // `NodeMode::Bypassed`: the host writes that bypass
@@ -1409,7 +1409,7 @@ mod declared_buses {
     /// `Unassigned`, and the shape's ports are every channel.
     #[test]
     fn a_plugins_buses_are_the_nodes_in_order_placed_and_with_their_roles() {
-        let loaded = LoadedPlugin {
+        let loaded = PluginWiring {
             inputs: vec![
                 PluginBus::new(width(2), BusRole::Main).placed(Some(stereo())),
                 PluginBus::new(width(1), BusRole::Sidechain),
@@ -1417,7 +1417,7 @@ mod declared_buses {
                 PluginBus::new(width(3), BusRole::Aux).placed(Some(stereo())),
             ],
             outputs: vec![PluginBus::main(width(2)).placed(Some(stereo()))],
-            ..LoadedPlugin::default()
+            ..PluginWiring::default()
         };
         let shape = Declared::of(&loaded).unwrap().ports;
         assert_eq!(shape.audio_in(), width(6));
@@ -1451,13 +1451,13 @@ mod declared_buses {
     /// holds keeps the first ones and every channel as a port.
     #[test]
     fn what_does_not_fit_stays_a_port() {
-        let none = Declared::of(&LoadedPlugin::default()).unwrap().ports;
+        let none = Declared::of(&PluginWiring::default()).unwrap().ports;
         assert!(none.buses_in().is_empty() && none.buses_out().is_empty());
 
-        let many = LoadedPlugin {
+        let many = PluginWiring {
             inputs: vec![PluginBus::main(width(1)); 5],
             outputs: vec![PluginBus::main(width(2)); 5],
-            ..LoadedPlugin::default()
+            ..PluginWiring::default()
         };
         let shape = Declared::of(&many).unwrap().ports;
         assert_eq!(shape.audio_in(), width(5));
@@ -1472,7 +1472,7 @@ mod declared_buses {
     #[test]
     fn a_plugin_wider_than_a_block_is_refused_by_name() {
         let max = MAX_BLOCK_CHANNELS;
-        let wiring = |inputs: &[usize], outputs: &[usize]| LoadedPlugin {
+        let wiring = |inputs: &[usize], outputs: &[usize]| PluginWiring {
             inputs: inputs
                 .iter()
                 .map(|&n| PluginBus::main(width(n as u16)))
@@ -1481,7 +1481,7 @@ mod declared_buses {
                 .iter()
                 .map(|&n| PluginBus::main(width(n as u16)))
                 .collect(),
-            ..LoadedPlugin::default()
+            ..PluginWiring::default()
         };
         assert!(Declared::of(&wiring(&[max], &[max])).is_ok());
         assert_eq!(
@@ -1505,9 +1505,9 @@ mod declared_buses {
     /// without one keeps the executor's bypass.
     #[test]
     fn only_a_plugin_with_its_own_bypass_declares_one() {
-        let with = LoadedPlugin {
+        let with = PluginWiring {
             own_bypass: Some(tutti_plugin_types::OwnBypass::Property),
-            ..LoadedPlugin::default()
+            ..PluginWiring::default()
         };
         assert!(
             Declared::of(&with)
@@ -1516,7 +1516,7 @@ mod declared_buses {
                 .own_bypass
         );
         assert!(
-            !Declared::of(&LoadedPlugin::default())
+            !Declared::of(&PluginWiring::default())
                 .expect("an empty plugin")
                 .ports
                 .own_bypass

@@ -704,7 +704,7 @@ pub use command::{CANCEL_CAPACITY, COMMAND_CAPACITY, CommandId, ScheduleError, S
 pub use compile::{CompileError, CycleEdge, Shapes, VerifyError, compile};
 pub use controls::{ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, param_parts};
 pub use cost::{Cost, Schedule, Work};
-pub use declare::{HasParam, HasParams, ParamUnit, Scalar};
+pub use declare::{HasParam, HasParams, ParamValue, Scalar};
 pub use editor::{
     CloseError, CommitError, Editor, Inserted, Limits, MissingSource, Rewired, RootGate, Unwired,
 };
@@ -738,7 +738,7 @@ pub use graph::{
 };
 pub use history::TransportHistory;
 pub use inlet::{InletNode, InletRing};
-pub use instrument::Instrument;
+pub use instrument::InstrumentNode;
 pub use io::{BusIn, BusOut, Channel, Inputs, Io, Outputs, PortKind};
 pub use latency::{
     ChannelFeed, Compensation, Delays, Feed, InputDelay, LatencyGraph, MAX_NODE_LATENCY,

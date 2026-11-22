@@ -69,7 +69,7 @@ fn output(s: &mut Session, info: &DeviceInfo) -> MidiOutput {
 }
 
 /// What an update said of the resource `id`.
-fn changed(events: &[SessionEvent], id: tutti_session::ResourceId) -> Vec<ResourceFact> {
+fn changed(events: &[SessionEvent], id: tutti_session::PeerResourceId) -> Vec<ResourceFact> {
     events
         .iter()
         .filter_map(|e| match e {

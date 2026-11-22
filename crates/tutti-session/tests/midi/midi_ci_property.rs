@@ -20,8 +20,8 @@ use tutti_midi_device::{EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::FakeCounters;
 use tutti_session::Peer as _;
 use tutti_session::{
-    ListedResource, MidiInput, PeFailure, PeerError, Presence, Resource as _, ResourceFact,
-    ResourceId, Session, SessionEvent, Subscription, SubscriptionCause,
+    ListedResource, MidiInput, PeFailure, PeerError, PeerResourceId, Presence, Resource as _,
+    ResourceFact, Session, SessionEvent, Subscription, SubscriptionCause,
 };
 use tutti_ump::{DeviceIdentity, ManufacturerId, MidiGroup, U7, Ump};
 
@@ -224,7 +224,7 @@ struct Wire {
     start: Instant,
     ms: u64,
     /// What the updates noticed of resources, in order.
-    changed: Vec<(ResourceId, ResourceFact)>,
+    changed: Vec<(PeerResourceId, ResourceFact)>,
 }
 
 impl Wire {

@@ -51,11 +51,28 @@
 use super::use_tree::{is_word, uses};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+/// Why the sans-IO surface of a network `Client` and `Host` is internal.
+const SANS_IO: &str = "the sans-IO surface of `Client` and `Host`, named by the umbrella only as a handle's parameter";
+
 /// `(crate, type, why)` rows: internals of their crate (the engine, the executor,
 /// the compiler) that the umbrella does not name. An exported item whose signature
 /// names one is a finding for its owner, listed in [`Analysis::leaks`]. A type of
 /// `*` is every type of the crate.
 const INTERNAL: &[(&str, &str, &str)] = &[
+    ("tutti_midi_network", "Event", SANS_IO),
+    ("tutti_midi_network", "Header", SANS_IO),
+    ("tutti_midi_network", "HostConfig", SANS_IO),
+    ("tutti_midi_network", "NakReason", SANS_IO),
+    ("tutti_midi_network", "Nonce", SANS_IO),
+    ("tutti_midi_network", "SendError", SANS_IO),
+    ("tutti_midi_network", "SequenceNumber", SANS_IO),
+    ("tutti_midi_network", "SessionState", SANS_IO),
+    ("tutti_midi_network", "Transmit", SANS_IO),
+    (
+        "tutti_units",
+        "Text",
+        "the bounded text behind a name alias the umbrella exports (`Username`); the alias is the name",
+    ),
     (
         "tutti_timeline",
         "Transport",

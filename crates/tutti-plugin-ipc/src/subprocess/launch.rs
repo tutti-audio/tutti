@@ -20,7 +20,7 @@ use tutti_plugin_types::StateUse;
 use tutti_plugin_types::Timeouts;
 use tutti_plugin_types::{Helper, Locator, PluginFormat, PluginId, PluginRef};
 use tutti_plugin_types::{IpcError, IpcResult, ServerError, StateError};
-use tutti_plugin_types::{LoadedPlugin, PluginDescriptor};
+use tutti_plugin_types::{PluginDescriptor, PluginWiring};
 use tutti_units::SampleRate;
 
 /// How long to wait between connect attempts.
@@ -42,7 +42,7 @@ pub struct LaunchedServer {
     /// Catalog identity (name, vendor, class, editor).
     pub descriptor: PluginDescriptor,
     /// Engine-wiring data from instantiation (bus widths, latency, f64).
-    pub loaded: LoadedPlugin,
+    pub loaded: PluginWiring,
     /// The sample format the blocks travel in.
     pub format: FloatWidth,
     /// The shared-memory slab the server mapped, as the writer of its inputs:
@@ -498,7 +498,7 @@ fn load_plugin(
 ) -> IpcResult<(
     PluginId,
     Box<PluginDescriptor>,
-    LoadedPlugin,
+    PluginWiring,
     FloatWidth,
     Option<StateError>,
 )> {
@@ -590,7 +590,7 @@ fn stage_state(
 /// matters more than it looks: with the decision fused to the I/O, the aliasing
 /// choice below can only be checked by launching a real plugin.
 fn slab_layout_for(
-    loaded: &LoadedPlugin,
+    loaded: &PluginWiring,
     format: FloatWidth,
     max_buffer_size: usize,
 ) -> SlabLayout {
@@ -615,7 +615,7 @@ fn slab_layout_for(
 fn setup_shm(
     launch: &mut Launch<'_>,
     config: &IpcConfig,
-    loaded: &LoadedPlugin,
+    loaded: &PluginWiring,
     format: FloatWidth,
 ) -> IpcResult<SlabWriter> {
     let layout = slab_layout_for(loaded, format, config.max_buffer_size);
@@ -649,7 +649,7 @@ fn setup_shm(
 /// lost; `held` stays valid and the next activation asks again.
 pub(crate) fn swap_slab(
     bridge: &crate::PluginBridge,
-    loaded: &LoadedPlugin,
+    loaded: &PluginWiring,
     format: FloatWidth,
     ceiling: usize,
     held: &SlabLayout,
@@ -1216,14 +1216,14 @@ mod tests {
             .unwrap_or(false)
     }
 
-    fn loaded(inputs: &[ChannelLayout], outputs: &[ChannelLayout]) -> LoadedPlugin {
+    fn loaded(inputs: &[ChannelLayout], outputs: &[ChannelLayout]) -> PluginWiring {
         let buses = |widths: &[ChannelLayout]| {
             widths
                 .iter()
                 .map(|&w| tutti_plugin_types::PluginBus::main(w))
                 .collect()
         };
-        LoadedPlugin {
+        PluginWiring {
             inputs: buses(inputs),
             outputs: buses(outputs),
             ..Default::default()

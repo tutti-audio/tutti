@@ -4,7 +4,7 @@
 use crate::instrument_support::Rig;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Cx, ForkByClone, Instrument, IntoNode, Io, Node, NodeParts, Prepare, Shape, Status,
+    Cx, ForkByClone, InstrumentNode, IntoNode, Io, Node, NodeParts, Prepare, Shape, Status,
 };
 use tutti_session::SessionNode;
 use tutti_session::{Losses, Root};
@@ -35,7 +35,7 @@ impl IntoNode for Dressed {
         self.0.into_parts()
     }
 }
-impl Instrument<f32> for Dressed {
+impl InstrumentNode<f32> for Dressed {
     fn main_outputs(&self) -> [u16; 2] {
         [2, 3]
     }
@@ -87,7 +87,7 @@ fn a_pair_past_the_outputs_is_refused() {
             ForkByClone(Five).into_parts()
         }
     }
-    impl Instrument<f32> for Short {
+    impl InstrumentNode<f32> for Short {
         fn main_outputs(&self) -> [u16; 2] {
             [4, 5]
         }
