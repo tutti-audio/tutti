@@ -1,11 +1,13 @@
 //! The control halves of the cells the editor shares with running units: each
 //! param port's range, each weighted lane's gain, each unit's mode and mix.
 //!
-//! A control (`set_param_range`, `set_edge_gain`, `set_mode` ...) stores into
-//! its value and the cell at once and the running unit reads it next block,
-//! with no commit; a commit writes every cell from the values (a fade from the
-//! spec), keeps the cells of what the new plan keeps, and makes cells for what
-//! it places.
+//! A node's cells are made when the node is staged (`insert`, `replace`) and an
+//! edge's when its gain entry is declared, so a lane can bind to them before
+//! any commit. A control (`set_param_range`, `set_edge_gain`, `set_mode` ...)
+//! stores into its value and the cell at once and the running unit reads it
+//! next block, with no commit; a commit writes every cell from the values (a
+//! fade from the spec), hands the staged cells to the units it places, and
+//! drops the cells of what the new plan no longer has.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -48,10 +50,19 @@ impl LiveCells {
         self.ranges.sync(values);
     }
 
-    /// Drops `key`'s mode cell: a node inserted at the key later starts from
-    /// its own values.
+    /// Makes the cells of the unit staged at `key`, which declares `declared`
+    /// param ports, from `values`: the mode cell is kept for a key that
+    /// stays, the range cells for the same list and fresh for another.
+    pub(super) fn stage(&mut self, key: NodeKey, declared: ParamPorts, values: &GraphValues) {
+        self.modes.declare(key, values);
+        self.ranges.declare(key, declared, values);
+    }
+
+    /// Drops `key`'s cells: a node inserted at the key later starts from its
+    /// own values.
     pub(super) fn forget(&mut self, key: NodeKey) {
         self.modes.0.remove(&key);
+        self.ranges.0.remove(&key);
     }
 
     /// Frees the ranges the audio thread has let go of, in every cell kind;
@@ -104,10 +115,31 @@ impl RangeCells {
         }
     }
 
+    /// The cells of a unit at `key` declaring `declared`: the key's, kept for
+    /// the same list (a crossfade keeps the running state, which reads them)
+    /// and fresh for another, written from `values`. A list of no params has
+    /// none.
+    fn declare(&mut self, key: NodeKey, declared: ParamPorts, values: &GraphValues) {
+        if declared.is_empty() {
+            self.0.remove(&key);
+            return;
+        }
+        let cells = self
+            .0
+            .entry(key)
+            .and_modify(|c| {
+                if c.declared() != declared {
+                    *c = ParamRanges::new(declared);
+                }
+            })
+            .or_insert_with(|| ParamRanges::new(declared));
+        for &param in declared.as_slice() {
+            cells.store(param, values.range(ParamIn { node: key, param }));
+        }
+    }
+
     /// The param state of a unit placed at `key` with `ports` param ports
-    /// declaring `declared`: the key's cells, kept for the same list (a
-    /// crossfade keeps the running state, which reads them) and fresh for
-    /// another, written from `values`.
+    /// declaring `declared`, over the key's cells written from `values`.
     pub(super) fn state<F: Float>(
         &mut self,
         key: NodeKey,
@@ -117,24 +149,11 @@ impl RangeCells {
         declared: Option<ParamPorts>,
         values: &GraphValues,
     ) -> ParamState<F> {
-        if ports == 0 {
-            self.0.remove(&key);
-            return ParamState::default();
+        self.declare(key, declared.unwrap_or(ParamPorts::NONE), values);
+        match self.0.get(&key) {
+            Some(cells) if ports > 0 => ParamState::new(ports, max, declick, cells.readers()),
+            _ => ParamState::default(),
         }
-        let list = declared.unwrap_or(ParamPorts::NONE);
-        let cells = self
-            .0
-            .entry(key)
-            .and_modify(|c| {
-                if c.declared() != list {
-                    *c = ParamRanges::new(list);
-                }
-            })
-            .or_insert_with(|| ParamRanges::new(list));
-        for &param in list.as_slice() {
-            cells.store(param, values.range(ParamIn { node: key, param }));
-        }
-        ParamState::new(ports, max, declick, cells.readers())
     }
 }
 
@@ -143,13 +162,21 @@ impl RangeCells {
 pub(super) struct GainCells(BTreeMap<EdgeId, GainCell>);
 
 impl GainCells {
-    /// Lane `id`'s cell, once a plan with its entry was sent.
+    /// Lane `id`'s cell, once its entry is declared.
     pub(super) fn get(&self, id: EdgeId) -> Option<&GainCell> {
         self.0.get(&id)
     }
 
     fn reclaim(&self) -> usize {
         self.0.values().map(GainCell::reclaim).sum()
+    }
+
+    /// Makes edge `id`'s cell from `values`, in place of any it had: a lane
+    /// declared again starts from unity, the default range and no fade.
+    pub(super) fn declare(&mut self, id: EdgeId, values: &GraphValues) {
+        let cell = GainCell::new(values.base(id), values.gain_range(id));
+        cell.store_fade(values.fade(id));
+        self.0.insert(id, cell);
     }
 
     fn sync(&self, spec: &GraphSpec, values: &GraphValues) {
@@ -205,13 +232,24 @@ impl GainCells {
 pub(super) struct ModeCells(BTreeMap<NodeKey, ModeCell>);
 
 impl ModeCells {
-    /// `key`'s cell, once a plan placing it was sent.
+    /// `key`'s cell, once the node is staged.
     pub(super) fn get(&self, key: NodeKey) -> Option<&ModeCell> {
         self.0.get(&key)
     }
 
     fn reclaim(&self) -> usize {
         self.0.values().map(ModeCell::reclaim).sum()
+    }
+
+    /// `key`'s cell, made from `values` when the key has none; a key that
+    /// stays keeps its cell.
+    fn declare(&mut self, key: NodeKey, values: &GraphValues) {
+        let cell = self
+            .0
+            .entry(key)
+            .or_insert_with(|| ModeCell::new(NodeMode::Active, values.mix(key)));
+        cell.store(values.mode(key));
+        cell.store_range(values.range(mix_at(key)));
     }
 
     fn sync(&self, values: &GraphValues) {

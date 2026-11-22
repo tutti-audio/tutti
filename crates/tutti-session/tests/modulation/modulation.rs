@@ -1,6 +1,6 @@
 //! Modulation in the session (design 015 §4.4, §4.6, §5.1): the session's
 //! own declarations ([`Session::mods`]) and a host's ([`ModInput`]), applied
-//! by `Phase::Modulation`, re-applied and resynced by `Phase::AfterCommit`.
+//! by `Phase::Modulation`, committed once and resynced by `Phase::Commit`.
 //!
 //! The render tests stand on analytic figures (doc 014 §5.3's bound for a
 //! sine on the control grid, a follower's closed form), never on a
@@ -253,14 +253,15 @@ impl HostDecl {
     }
 }
 
-/// **A route to a target placed one update later resolves on that
-/// update** (the re-apply loop, doc 014 §8.2). On the first update the
-/// host's target key names no node. On the second it names a node inserted
-/// in that update: the apply finds it uncommitted, the commit places it,
-/// and `AfterCommit` re-applies and commits the lane, so after that one
-/// update nothing is unresolved and the lane exists.
+/// **A target that names no node stays unresolved, and resolves in the one
+/// commit of the update its node is added in.** On the first update the
+/// host's target key names no node: `ModState::problems()` names it. On the
+/// second it names a node added in that update: the apply binds the lane to
+/// the node's staged cells, so after that one update, which sent exactly one
+/// plan, nothing is unresolved, the lane exists and nothing waits to be
+/// committed.
 #[test]
-fn a_target_placed_one_update_later_resolves_on_that_update() {
+fn a_target_added_later_resolves_in_that_updates_one_plan() {
     let mut s = offline();
     let keys = HostKeys {
         node: Cell::new(None),
@@ -275,6 +276,7 @@ fn a_target_placed_one_update_later_resolves_on_that_update() {
     );
     assert!(s.mod_state().lane(HOST_TARGET).is_none());
 
+    let plans = s.graph_ref().testing().commits_sent();
     let probe = s.graph().add(ProbeUnit::new(500.0));
     keys.node.set(Some(probe.erase()));
     update_at(&mut s, now, Some(decl.input(&keys)));
@@ -282,6 +284,11 @@ fn a_target_placed_one_update_later_resolves_on_that_update() {
         s.mod_state().problems().next(),
         None,
         "resolved on the update its node was placed"
+    );
+    assert_eq!(
+        s.graph_ref().testing().commits_sent(),
+        plans + 1,
+        "one plan for the node and its lane"
     );
     assert!(s.mod_state().lane(HOST_TARGET).is_some(), "with its lane");
     assert!(
@@ -542,18 +549,16 @@ impl tutti_graph::Node for Late {
     fn reset(&mut self) {}
 }
 
-/// **A re-apply whose commit moves the latency publishes it on that
-/// update.** A follower of a latent node (`LATE` frames) is routed to a
-/// probe inserted in the same update, the probe alone on output 0. The
-/// apply finds the probe uncommitted, so the update's commit sends the
-/// probe and the follower with no lane: nothing latent reaches an output,
-/// and the latency is 0. `AfterCommit`'s re-apply then builds the lane,
-/// which puts the follower's path (and its `LATE` frames) in front of the
-/// probe's param port: that commit's plan has `LATE` frames on output 0,
-/// and the session publishes them, the total and the per-channel figures,
-/// before the update returns.
+/// **A lane to a node added in the same update goes out in that update's one
+/// plan, and its latency is published with it.** A follower of a latent node
+/// (`LATE` frames) is routed to a probe inserted in the same update, the probe
+/// alone on output 0. The apply binds the lane to the probe's staged cells, so
+/// the one commit sends the probe, the follower and the lane: that plan has
+/// `LATE` frames on output 0 (the follower's path in front of the probe's
+/// param port), and the session publishes them, the total and the per-channel
+/// figures, before the update returns. Exactly one plan is sent.
 #[test]
-fn a_re_apply_that_moves_the_latency_publishes_it() {
+fn a_lane_to_a_node_added_in_the_update_sends_one_plan_with_its_latency() {
     let mut s = offline();
     let late = s.graph().add(ForkByClone(Late));
     let _ = s.update();
@@ -562,6 +567,7 @@ fn a_re_apply_that_moves_the_latency_publishes_it() {
         Samples::new(0),
         "precondition: nothing latent out"
     );
+    let plans = s.graph_ref().testing().commits_sent();
 
     let probe = s.graph().add(ProbeUnit::new(500.0));
     s.graph()
@@ -575,25 +581,14 @@ fn a_re_apply_that_moves_the_latency_publishes_it() {
     m.route(RouteSpec::new(follower, cutoff, Depth::of(0.5)))
         .unwrap();
 
-    let now = Instant::now();
-    let mut out = Vec::new();
-    for &phase in PHASES {
-        s.run_phase(phase, PhaseCx::at(now), &mut out);
-        if phase == tutti_session::Phase::Commit {
-            assert_eq!(
-                s.mod_state().problems().cloned().collect::<Vec<_>>(),
-                [unresolved(TargetName::Own(cutoff.into()))],
-                "precondition: the lane waits for the re-apply"
-            );
-            assert_eq!(s.latency(), Samples::new(0), "precondition: no lane yet");
-        }
-    }
+    let _ = s.update();
     assert_eq!(s.mod_state().problems().next(), None, "the lane is built");
     assert_eq!(
-        s.latency(),
-        Samples::new(LATE),
-        "the re-apply's plan, published"
+        s.graph_ref().testing().commits_sent(),
+        plans + 1,
+        "one plan for the node and its lane"
     );
+    assert_eq!(s.latency(), Samples::new(LATE), "the plan's latency");
     assert_eq!(
         s.compensation().to_vec().as_slice(),
         s.graph_ref()

@@ -1,21 +1,19 @@
-//! Modulation in the session (design 015 §4.4, §4.6):
-//! the reconcile loop of doc 014 §8.2, run by [`Phase::Modulation`] and
-//! [`Phase::AfterCommit`](crate::Phase::AfterCommit), over either the
-//! session's own declarations ([`Session::mods_mut`](crate::Session::mods_mut)) or a
-//! host's ([`ModInput`](crate::ModInput)).
+//! Modulation in the session: the reconcile loop of `tutti-nodes`'
+//! [`Modulation`](tutti_nodes::Modulation), run by [`Phase::Modulation`] over
+//! either the session's own declarations
+//! ([`Session::mods_mut`](crate::Session::mods_mut)) or a host's
+//! ([`ModInput`](crate::ModInput)).
 //!
-//! The loop, per update:
+//! Per update:
 //!
 //! 1. **Apply** (`Modulation`): the declarations onto the editor. A program
 //!    edit republishes its lanes and stages nothing; a new lane, a signal
-//!    node or a moved edge is staged for the commit.
-//! 2. **Commit** (`Commit`).
-//! 3. **Re-apply** (`AfterCommit`): a native target resolves only once its
-//!    node is in a committed plan, so while a target is unresolved and the
-//!    graph is otherwise clean, the declarations apply again and what that
-//!    built is committed, so the lane plays from the update its node does.
-//! 4. **Resync** (`AfterCommit`): the note-envelope resyncs the apply owes,
-//!    once the commit that placed their nodes is out.
+//!    node or a moved edge is staged for the commit. A target is bound to the
+//!    cells its node declared when it was staged, so a lane resolves in the
+//!    update its node is added in.
+//! 2. **Commit** (`Commit`): one plan carries the lane and its target. A note
+//!    envelope's resync follows the plan it was owed for: a scheduled
+//!    command waits for the plan sent before it.
 //!
 //! **Why is nothing modulating** has one answer, [`ModState::problems`]: a
 //! [`Problem`] each for a refusal (which changes nothing in the graph), a
@@ -59,10 +57,9 @@ use crate::value::{
 };
 
 /// How long a modulation target may stay unresolved before it is logged:
-/// today's 240 frames at 60 Hz (design 015 §4.4). A target waits an update
-/// or two for its node's commit, and a plugin's for its values' read; one
-/// still waiting after this long is likely never to resolve (a key no node
-/// is ever bound to).
+/// 240 frames at 60 Hz. A target waits for its node to be added, and a
+/// plugin's for its values' read; one still waiting after this long is likely
+/// never to resolve (a key no node is ever bound to).
 pub(crate) const UNRESOLVED_WARNING: Duration = Duration::from_secs(4);
 
 /// One modulatable parameter of a node in the session's graph.
@@ -779,7 +776,7 @@ impl ModState {
         self.modulation.source(SourceKey(source.get()))
     }
 
-    /// Note-envelope resyncs owed to the next `AfterCommit`.
+    /// Note-envelope resyncs owed to the next commit.
     pub fn pending_resyncs(&self) -> usize {
         self.modulation.resyncs_owed()
     }
@@ -789,21 +786,14 @@ impl ModState {
         self.modulation.resyncs_dropped()
     }
 
-    /// Whether a target is unresolved: what the update's re-apply waits on.
-    fn has_unresolved_target(&self) -> bool {
-        self.unresolved
-            .iter()
-            .any(|p| matches!(p, Problem::Unresolved { .. }))
-    }
-
-    /// Records an apply's outcome; returns whether it asks for a commit.
+    /// Records an apply's outcome.
     fn applied(
         &mut self,
         applied: Result<(tutti_nodes::Applied, crate::graph::PluginTargets), ReconcileError>,
         names: Names<'_>,
         now: Instant,
         out: &mut Vec<crate::SessionEvent>,
-    ) -> bool {
+    ) {
         self.applied = true;
         match applied {
             Ok((applied, plugin_targets)) => {
@@ -837,11 +827,9 @@ impl ModState {
                     }
                 }));
                 self.unresolved = unresolved;
-                applied.commit
             }
             Err(error) => {
                 self.refuse(names.refused(ModRefusal::Apply(error)), out);
-                false
             }
         }
     }
@@ -1240,14 +1228,14 @@ impl ModSession {
     }
 
     /// Applies the declarations: the host's, or with `None` the session's
-    /// own. Returns whether the apply asks for a commit.
+    /// own. What the apply stages is the update's commit's.
     fn apply<F: Float>(
         &mut self,
         graph: &mut Graph<F>,
         host: Option<crate::ModInput<'_>>,
         now: Instant,
         out: &mut Vec<crate::SessionEvent>,
-    ) -> bool {
+    ) {
         let applied = match host {
             Some(input) => {
                 graph.modulate(&mut self.state.modulation, &input.declarations, input.keys)
@@ -1267,12 +1255,11 @@ impl ModSession {
         } else {
             Names::Own(&self.own)
         };
-        let asked = self.state.applied(applied, names, now, out);
+        self.state.applied(applied, names, now, out);
         // Every lane this apply built or dropped is in `state` now: the
         // plugins' driven parameters follow it in the same update.
         #[cfg(feature = "plugin")]
         graph.refresh_driven(&self.state);
-        asked
     }
 
     /// Whether this phase has a declarer: `false` when a host passed its
@@ -1313,26 +1300,8 @@ impl ModSession {
         }
     }
 
-    /// `Phase::AfterCommit`'s re-apply: while a target is unresolved and
-    /// the graph is otherwise clean (the update's own commit went out),
-    /// applies again. Returns whether that asks for a commit.
-    pub(crate) fn reapply<F: Float>(
-        &mut self,
-        graph: &mut Graph<F>,
-        host: Option<crate::ModInput<'_>>,
-        now: Instant,
-        out: &mut Vec<crate::SessionEvent>,
-    ) -> bool {
-        // Nothing to resolve while the update's own commit waits (refused
-        // for now): its nodes are not in a plan yet.
-        if !self.state.has_unresolved_target() || graph.has_uncommitted_edits() {
-            return false;
-        }
-        self.declarer(host, out) && self.apply(graph, host, now, out)
-    }
-
-    /// `Phase::AfterCommit`'s resyncs: sent on an update that owes them and
-    /// has nothing left to commit.
+    /// `Phase::Commit`'s resyncs: sent on an update that owes them and has
+    /// nothing left to commit.
     pub(crate) fn resync<F: Float>(&mut self, graph: &mut Graph<F>) {
         if self.state.modulation.resyncs_owed() > 0 && !graph.has_uncommitted_edits() {
             graph.send_mod_resyncs(&mut self.state.modulation);

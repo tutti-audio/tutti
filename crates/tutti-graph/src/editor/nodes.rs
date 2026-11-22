@@ -300,6 +300,7 @@ impl<F: Float> Editor<F> {
         self.spec.topology.nodes.insert(key, spec);
         self.spec.generations.insert(key, generation);
         self.shapes.insert(key, shape);
+        self.cells.stage(key, shape.params, &self.values);
         self.unwire(key, &shape)
     }
 
