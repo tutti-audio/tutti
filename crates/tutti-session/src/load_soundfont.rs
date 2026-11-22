@@ -6,11 +6,8 @@
 //! nothing of what it loads: two loads of one file are two parses, and the font
 //! lives while a clone of the handle does.
 
-use std::fmt;
-use std::future::{Future, IntoFuture};
-use std::pin::Pin;
+use std::future::IntoFuture;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
 use tutti_platform::{Asset, WeakExecutor};
 
@@ -53,25 +50,15 @@ impl IntoFuture for LoadSoundFont {
     type IntoFuture = LoadingSoundFont;
 
     fn into_future(self) -> LoadingSoundFont {
-        LoadingSoundFont {
-            load: Unblocked::new(self.executor.clone(), self, Self::run),
-        }
+        Unblocked::new(self.executor.clone(), self, Self::run)
     }
 }
 
 /// A SoundFont load being awaited ([`LoadSoundFont`]): resolves to the
 /// [`LoadedSoundFont`] once the file is parsed.
 ///
-/// The first poll starts the parse as a task on the session's executor (the
-/// session's weak handle, upgraded for the spawn only) and awaits the receiver
-/// of a oneshot. **The task fills the sender**: it takes the asset's
-/// [`Identity`](tutti_platform::Identity), parses the file, and sends the handle
-/// or the error, which wakes the future. A poll never blocks, and
+/// A [`Unblocked`]: its first poll starts the work as a task on the session's executor, and
 /// `Session::update` is not needed.
-///
-/// Dropped before it resolves, the future drops the receiver: a parse that has
-/// not begun reads nothing, and one in flight finishes and its handle is dropped.
-/// Dropped before its first poll it starts nothing.
 ///
 /// # Errors
 ///
@@ -82,24 +69,7 @@ impl IntoFuture for LoadSoundFont {
 /// # Panics
 ///
 /// When polled after it resolved.
-#[must_use = "a load does nothing unless it is awaited"]
-pub struct LoadingSoundFont {
-    load: Unblocked<LoadSoundFont, LoadedSoundFont, LoadError>,
-}
-
-impl Future for LoadingSoundFont {
-    type Output = Result<LoadedSoundFont, LoadError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.load).poll(cx)
-    }
-}
-
-impl fmt::Debug for LoadingSoundFont {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("LoadingSoundFont").finish_non_exhaustive()
-    }
-}
+pub type LoadingSoundFont = Unblocked<LoadSoundFont, LoadedSoundFont, LoadError>;
 
 /// A parsed SoundFont. A clone shares the font; releasing is dropping every
 /// clone.

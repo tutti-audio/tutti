@@ -7,12 +7,9 @@
 //! wants one copy keeps the handle and clones it. The session keeps no cache:
 //! the wave lives while a clone of the handle does.
 
-use std::fmt;
-use std::future::{Future, IntoFuture};
+use std::future::IntoFuture;
 use std::marker::PhantomData;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
 use tutti_buffers::{Float, Wave};
 use tutti_platform::{Asset, WeakExecutor};
@@ -161,25 +158,15 @@ impl<F: Float> IntoFuture for LoadAudio<F> {
     type IntoFuture = LoadingAudio<F>;
 
     fn into_future(self) -> LoadingAudio<F> {
-        LoadingAudio {
-            load: Unblocked::new(self.executor.clone(), self, Self::run),
-        }
+        Unblocked::new(self.executor.clone(), self, Self::run)
     }
 }
 
 /// A wave file load being awaited ([`LoadAudio`]): resolves to the
 /// [`LoadedAudio`] once the file is read.
 ///
-/// The first poll starts the read as a task on the session's executor (the
-/// session's weak handle, upgraded for the spawn only) and awaits the receiver
-/// of a oneshot. **The task fills the sender**: it takes the asset's
-/// [`Identity`](tutti_platform::Identity), reads the file, and sends the handle
-/// or the error, which wakes the future. A poll never blocks, and
+/// A [`Unblocked`]: its first poll starts the work as a task on the session's executor, and
 /// `Session::update` is not needed.
-///
-/// Dropped before it resolves, the future drops the receiver: a read that has
-/// not begun reads nothing, and one in flight finishes and its handle is dropped.
-/// Dropped before its first poll it starts nothing.
 ///
 /// # Errors
 ///
@@ -190,24 +177,7 @@ impl<F: Float> IntoFuture for LoadAudio<F> {
 /// # Panics
 ///
 /// When polled after it resolved.
-#[must_use = "a load does nothing unless it is awaited"]
-pub struct LoadingAudio<F: Float = f32> {
-    load: Unblocked<LoadAudio<F>, LoadedAudio<F>, LoadError>,
-}
-
-impl<F: Float> Future for LoadingAudio<F> {
-    type Output = Result<LoadedAudio<F>, LoadError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.load).poll(cx)
-    }
-}
-
-impl<F: Float> fmt::Debug for LoadingAudio<F> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("LoadingAudio").finish_non_exhaustive()
-    }
-}
+pub type LoadingAudio<F> = Unblocked<LoadAudio<F>, LoadedAudio<F>, LoadError>;
 
 /// What a [`LoadedAudio`] holds: the decoded wave, or the file's header.
 #[derive(Clone, Debug)]

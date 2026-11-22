@@ -16,11 +16,8 @@
 //! `tutti-codec` decoder on): a [`LoadedAudio`](crate::LoadedAudio) holds the
 //! wave or names the file [`open_stream`](Session::open_stream) opens.
 
-use std::fmt;
-use std::future::{Future, IntoFuture};
-use std::pin::Pin;
+use std::future::IntoFuture;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use tutti_platform::{Asset, WeakExecutor};
 use tutti_sampler::{AdoptError, StreamHandle, StreamReader, StreamStart};
 
@@ -117,24 +114,15 @@ impl<F: SessionFloat> IntoFuture for OpenStream<F> {
     type IntoFuture = OpeningStream<F>;
 
     fn into_future(self) -> OpeningStream<F> {
-        OpeningStream {
-            open: Unblocked::new(self.executor.clone(), self, Self::run),
-        }
+        Unblocked::new(self.executor.clone(), self, Self::run)
     }
 }
 
 /// A stream's file being read ([`OpenStream`]): resolves to the
 /// [`OpenedStream`] once the file is opened.
 ///
-/// The first poll starts the read as a task on the session's executor (the
-/// session's weak handle, upgraded for the spawn only) and awaits the receiver
-/// of a oneshot. **The task fills the sender**: it opens the file and sends the
-/// value or the error, which wakes the future. A poll never blocks, and
+/// A [`Unblocked`]: its first poll starts the work as a task on the session's executor, and
 /// `Session::update` is not needed.
-///
-/// Dropped before it resolves, the future drops the receiver: a read that has
-/// not begun reads nothing, and one in flight finishes and its value is dropped.
-/// Dropped before its first poll it starts nothing.
 ///
 /// # Errors
 ///
@@ -146,24 +134,7 @@ impl<F: SessionFloat> IntoFuture for OpenStream<F> {
 /// # Panics
 ///
 /// When polled after it resolved.
-#[must_use = "an open does nothing unless it is awaited"]
-pub struct OpeningStream<F: SessionFloat> {
-    open: Unblocked<OpenStream<F>, OpenedStream<F>, LoadError>,
-}
-
-impl<F: SessionFloat> Future for OpeningStream<F> {
-    type Output = Result<OpenedStream<F>, LoadError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.open).poll(cx)
-    }
-}
-
-impl<F: SessionFloat> fmt::Debug for OpeningStream<F> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("OpeningStream").finish_non_exhaustive()
-    }
-}
+pub type OpeningStream<F> = Unblocked<OpenStream<F>, OpenedStream<F>, LoadError>;
 
 /// A file read for a disk stream (an awaited [`OpenStream`]), which the session takes
 /// back with [`Session::apply`](crate::Session::apply): the stream's control

@@ -1386,6 +1386,12 @@ pub struct ModsView<'a> {
     own: &'a OwnMods,
 }
 
+impl<'a> ModsView<'a> {
+    pub(crate) const fn new(own: &'a OwnMods) -> Self {
+        Self { own }
+    }
+}
+
 impl ModsView<'_> {
     /// Every route, in the order they were declared.
     pub fn routes(&self) -> impl Iterator<Item = RouteInfo> + '_ {
@@ -1493,11 +1499,7 @@ impl Mods<'_> {
     /// The declarations, read.
     #[must_use]
     pub fn view(&self) -> ModsView<'_> {
-        ModsView { own: self.own }
-    }
-
-    pub(crate) fn view_of(own: &OwnMods) -> ModsView<'_> {
-        ModsView { own }
+        ModsView::new(self.own)
     }
 
     fn add_source(&mut self, source: Source, feed: Option<OwnFeed>) -> ModSourceId {

@@ -13,9 +13,9 @@ use tutti_platform::WeakExecutor;
 use crate::loaded::caught_by;
 
 /// An error type that can say why work ended without its output: the session's
-/// executor was gone, or the work panicked. A family's error implements it
-/// with its own variants.
-pub(crate) trait Unanswered {
+/// executor was gone, or the work panicked. A [`Unblocked`]'s error implements it with
+/// its own variants.
+pub trait Unanswered {
     /// The session's executor is gone, refused the `unblock` (the OS would not
     /// start a thread), or dropped the task before it ran: the host is shutting
     /// down and the work did not fail.
@@ -27,8 +27,9 @@ pub(crate) trait Unanswered {
 
 /// `work` over `input`, run as a task on the session's executor and awaited.
 ///
-/// This is the feeder of every future built on it (`Analyzing`, `Bouncing`,
-/// `LoadingAudio`, `LoadingSoundFont`, `LoadingMidi`, `OpeningStream`): the
+/// This is the future of every awaited file load and analysis (`Analyzing`,
+/// `LoadingAudio`, `LoadingSoundFont`, `LoadingMidi`, `OpeningStream`) and
+/// the feeder of `Bouncing`: the
 /// work runs as a blocking task of the executor (`Executor::unblock`, a pool
 /// thread on a native target, the page's queue on the web), and its reply
 /// wakes the awaiting task. Those futures need no `Session::update`.
@@ -51,7 +52,7 @@ pub(crate) trait Unanswered {
 ///
 /// When polled after it resolved.
 #[must_use = "work does nothing unless it is awaited"]
-pub(crate) struct Unblocked<W, T, E> {
+pub struct Unblocked<W, T, E> {
     executor: WeakExecutor,
     work: fn(W) -> Result<T, E>,
     stage: Stage<W, T, E>,

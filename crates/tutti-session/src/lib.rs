@@ -264,6 +264,14 @@ pub use midi_port::{
     OpenedMidiInput, OpenedMidiOutput, OpeningMidiInput, OpeningMidiOutput, PortCause,
 };
 pub use tutti_graph::{EventInputPort, EventOutputPort, EventTapPort};
+#[cfg(any(
+    feature = "sampler",
+    feature = "analyze",
+    feature = "midi",
+    feature = "soundfont",
+    feature = "export"
+))]
+pub use unblocked::{Unanswered, Unblocked};
 // Everything public in the module: it has no items on a target with no sockets
 // but `NetworkEvent`, which `MidiEvent` names.
 #[cfg(feature = "midi")]
@@ -285,12 +293,13 @@ pub use peer::{Peer, PeerError, PeerEvent, PeerResourceId, Presence, Resource, R
 pub use peer_state::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "plugin")]
 pub use plugin::{
-    AddPluginError, AnyPlugin, LoadInProcess, LoadOutOfProcess, LoadPlugin, LoadPreset,
-    LoadPresetInProcess, LoadPresetOutOfProcess, LoadedPlugin, LoadedPreset, LoadingPlugin,
-    LoadingPresetOutOfProcess, Plugin, PluginApplyError, PluginCause, PluginChange, PluginEvent,
-    PluginHealth, PluginInfo, PluginInstance, PluginPorts, PortsRefusal, PresetStartError,
-    RestoreState, RestoreStateInProcess, RestoreStateOutOfProcess, RestoredState,
-    RestoringStateOutOfProcess, SaveState, SaveStateInProcess, SaveStateOutOfProcess,
+    AddPluginError, AnyPlugin, AwaitingOp, InProcessOp, LoadInProcess, LoadOutOfProcess,
+    LoadPlugin, LoadPreset, LoadPresetInProcess, LoadPresetOp, LoadPresetOutOfProcess,
+    LoadedPlugin, LoadedPreset, LoadingPlugin, LoadingPresetOutOfProcess, Op, OutOfProcessOp,
+    Plugin, PluginApplyError, PluginCause, PluginChange, PluginEvent, PluginHealth, PluginInfo,
+    PluginInstance, PluginOp, PluginPorts, PortsRefusal, PresetStartError, RestoreState,
+    RestoreStateInProcess, RestoreStateOp, RestoreStateOutOfProcess, RestoredState,
+    RestoringStateOutOfProcess, SaveState, SaveStateInProcess, SaveStateOp, SaveStateOutOfProcess,
     SavingStateOutOfProcess, StateRestore, StateStartError, StateView, SwapPluginError,
 };
 pub use timeline_view::TimelineView;
