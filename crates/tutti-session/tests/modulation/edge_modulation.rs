@@ -197,6 +197,39 @@ fn the_base_is_the_lanes_knob_and_a_route_returns_to_it() {
     figure(&mut s, 0.25, "the route gone: the base, not unity");
 }
 
+/// **A route onto the gain of an edge declared in the same update goes out in
+/// that update's one plan, and modulates from its first frame.** The two
+/// sources, the wire with its gain at unity and a route of macro `0.5` at
+/// depth `0.25` over `-2..=2` are declared before one update: the lane binds
+/// to the cells the gain entry made when it was declared, so exactly one plan
+/// is sent and its first frame is the weighted fold at `1.0 + 0.5 = 1.5`.
+#[test]
+fn a_route_onto_an_edge_declared_in_the_update_sends_one_plan() {
+    let mut s = offline();
+    settle(&mut s);
+    let plans = s.graph_ref().testing().commits_sent();
+
+    let edge = mixer(&mut s);
+    let mut m = s.mods_mut();
+    m.range(edge, Amplitude::new(-2.0)..Amplitude::new(2.0))
+        .unwrap();
+    let source = m.macro_(0.5);
+    m.route(RouteSpec::new(source, edge, Depth::of(0.25)))
+        .unwrap();
+
+    let _ = s.update();
+    assert_eq!(s.mod_state().problems().next(), None, "the route resolved");
+    assert_eq!(
+        s.graph_ref().testing().commits_sent(),
+        plans + 1,
+        "one plan for the wire and its lane"
+    );
+    let got = render(&mut s, 1);
+    let want = (0.0 + 1.5 * A) + B;
+    assert_eq!(got[0].to_bits(), want.to_bits(), "the first frame");
+    assert_eq!(got[BLOCK - 1].to_bits(), want.to_bits());
+}
+
 /// An edge target keys once per edge, apart from a param's, and is no param.
 #[test]
 fn an_edge_target_keys_apart_and_goes_with_its_node() {

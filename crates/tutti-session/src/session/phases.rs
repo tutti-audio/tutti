@@ -54,14 +54,10 @@ pub enum Phase {
     /// The output policy staged since the last update, applied
     /// ([`Session::policy`]); then the commit, iff the graph was edited since
     /// the last one, and the compensation of the plan it sent (or of a
-    /// re-prepare's resumed plan) published.
+    /// re-prepare's resumed plan) published, then the note-envelope resyncs
+    /// the modulation apply owes. The update's one plan carries what the
+    /// apply staged, a lane with its target.
     Commit,
-    /// Modulation's re-apply and resyncs: while a
-    /// target is unresolved (its node was new before the commit), the
-    /// declarations apply again and what that built is committed, so the
-    /// lane plays from the update its node does; then the note-envelope
-    /// resyncs the apply owes are sent.
-    AfterCommit,
     /// Every output's event tap drained to its device or sink (feature `midi`:
     /// the sinks, and with `midi-hardware` the output ports).
     MidiOut,
@@ -92,7 +88,6 @@ pub const PHASES: &[Phase] = &[
     Phase::RenderMode,
     Phase::Modulation,
     Phase::Commit,
-    Phase::AfterCommit,
     Phase::MidiOut,
     Phase::Poll,
     Phase::Reclaim,
@@ -108,8 +103,7 @@ pub struct PhaseCx<'a> {
     pub now: Instant,
     /// The host's modulation declarations and the resolver for its keys;
     /// `None`: the session's own ([`Session::mods_mut`]). Read by the
-    /// [`Modulation`](Phase::Modulation) and
-    /// [`AfterCommit`](Phase::AfterCommit) phases.
+    /// [`Modulation`](Phase::Modulation) phase.
     pub mods: Option<ModInput<'a>>,
     /// The proof the calling thread is the main thread, when it is: the work
     /// only that thread may do (the retired plugins' drops, the editors'
@@ -230,6 +224,9 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 if self.graph.take_resumed() && !sent {
                     self.graph.publish_sent();
                 }
+                // A scheduled command waits for the plan sent before it, so
+                // the resyncs follow it here.
+                self.mods.resync(&mut self.graph);
             }
             Phase::Modulation => {
                 // First: the apply reads the program values this update
@@ -239,15 +236,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 self.graph.apply_controls();
                 self.mods
                     .modulation_phase(&mut self.graph, cx.mods, cx.now, out);
-            }
-            Phase::AfterCommit => {
-                // The re-apply's commit, as the update's own: published
-                // on `Sent`.
-                if self.mods.reapply(&mut self.graph, cx.mods, cx.now, out) {
-                    self.commit_reporting(out);
-                }
-                self.mods.resync(&mut self.graph);
-                self.graph.report_rewired(out);
             }
             Phase::MidiOut => {
                 if self.midi.out_phase(&mut self.graph, cx.now) {

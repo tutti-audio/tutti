@@ -683,6 +683,9 @@ impl<F: Float> GraphBuilder<F> {
     /// so on.
     pub fn build(self, prepare: Prepare) -> Result<(Editor<F>, Executor<F>), CommitError> {
         let (mut editor, mut executor) = Editor::<F>::with_format(prepare);
+        // Before the nodes are placed: a placed node's cells start from the
+        // values.
+        *editor.values_mut() = self.values;
         for Pending { key, kind, unit } in self.units {
             // No wiring is recorded yet (it moves across below), so nothing is unwired.
             editor.insert(key, &kind, unit);
@@ -714,7 +717,6 @@ impl<F: Float> GraphBuilder<F> {
         live.main_output = main_output;
         live.main_output_id = main_output_id;
         live.main_output_sources = main_output_sources;
-        *editor.values_mut() = self.values;
         editor.commit()?;
         executor.apply_pending();
         editor.collect();
