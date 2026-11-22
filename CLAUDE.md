@@ -128,6 +128,7 @@ std only. A rule the compiler already enforces is not a gate.
 - A node that changes width declares its buses; the graph never guesses a dry path. A node
   reads a non-main bus through the handle its shape issued.
 - Summing is the graph's: several sources into one port sum. Never add a node to sum.
+- `GraphSpec` holds structure only. A node's mode and mix, and an edge's gain base, range and fade, and a param's range, are values the editor holds (`Editor::set_*`); a field added to the spec is structure, or it goes to the editor's table.
 - A transport command meant for playback takes an `At`. A node reads the transport at a
   frame through `Env::transport_at`; a block is never split for it.
 

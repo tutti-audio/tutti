@@ -11,7 +11,7 @@ use tutti_graph::testing as common;
 use common::{Kind, TestNode, prepare};
 use tutti_buffers::{BusTopology, ChannelLayout, Speaker};
 use tutti_graph::{
-    Bus, BusOutputPort, BusRole, Buses, Cx, Edge, EdgeFade, EdgeGain, EdgeId, Editor, EventEdge,
+    Bus, BusOutputPort, BusRole, Buses, Cx, Edge, EdgeFade, EdgeId, Editor, EventEdge,
     EventInputPort, EventOutputPort, Executor, FeedbackFrom, InputPort, Io, Node, NodeBus, NodeKey,
     OutputPort, PortSink, PortSource, Prepare, Shape, Status, TapAlign, TapId, TapOptions, TapSpec,
     TransportPosition, Unforkable, Unwired,
@@ -112,13 +112,8 @@ fn rig() -> (Editor, Executor) {
     spec.connect_events(ein(B, 2), EventEdge::Direct(eout(X, 2)));
     spec.connect_events(ein(A, 1), EventEdge::feedback(eout(X, 2), DELAY));
     // Weighted lanes: one the shape keeps, one it loses.
-    spec.set_edge_gain(
-        id(inp(X, 0), direct(A, 0)),
-        EdgeGain {
-            fade: EdgeFade::In,
-            ..EdgeGain::default()
-        },
-    );
+    ed.set_edge_fade(id(inp(X, 0), direct(A, 0)), EdgeFade::In)
+        .expect("the edge exists");
     ed.set_edge_gain(id(inp(X, 0), direct(A, 0)), Amplitude::new(0.25))
         .expect("the edge exists");
     ed.set_edge_gain(id(inp(X, 2), direct(A, 2)), Amplitude::new(0.5))
@@ -205,12 +200,14 @@ fn a_narrower_shape_drops_exactly_the_event_edges_to_missing_ports() {
 fn a_surviving_edge_keeps_its_gain_and_its_fade() {
     let (mut ed, _exec) = rig();
     ed.insert(X, "ported", Unforkable(narrow()));
-    let kept = ed.spec().gains[&id(inp(X, 0), direct(A, 0))];
     assert_eq!(
         ed.edge_gain(id(inp(X, 0), direct(A, 0))),
         Some(Amplitude::new(0.25))
     );
-    assert_eq!(kept.fade, EdgeFade::In);
+    assert_eq!(
+        ed.edge_fade(id(inp(X, 0), direct(A, 0))),
+        Some(EdgeFade::In)
+    );
     assert!(
         !ed.spec().gains.contains_key(&id(inp(X, 2), direct(A, 2))),
         "the lane of a dropped edge goes with it"
@@ -254,13 +251,8 @@ fn a_wider_shape_drops_nothing() {
 fn an_edge_already_fading_out_is_not_reported() {
     let (mut ed, _exec) = rig();
     let fading = id(inp(X, 2), direct(A, 2));
-    ed.spec_mut().set_edge_gain(
-        fading,
-        EdgeGain {
-            fade: EdgeFade::Out,
-            ..EdgeGain::default()
-        },
-    );
+    ed.set_edge_fade(fading, EdgeFade::Out)
+        .expect("the edge exists");
     let placed = ed.insert(X, "ported", Unforkable(narrow()));
     assert!(!placed.unwired.edges.contains(&fading));
     assert!(!ed.spec().has_edge(fading));

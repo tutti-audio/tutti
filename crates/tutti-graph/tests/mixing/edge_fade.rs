@@ -116,6 +116,28 @@ fn a_fade_in_rises_along_the_smootherstep_and_reaches_its_weight_at_declick() {
     }
 }
 
+/// **A fade is a value, not structure**: setting one on a lane that already has
+/// its entry sends no plan, so the executor's plan is the one it had.
+#[test]
+fn a_commit_that_differs_only_in_an_edge_fade_sends_no_plan() {
+    let mut rig = Rig::new(&[1.0]);
+    rig.ed
+        .set_edge_gain(output_edge(1), Amplitude::new(0.5))
+        .expect("the edge exists");
+    rig.commit();
+    let before = rig.exec.plan().expect("applied").clone();
+    for fade in [EdgeFade::In, EdgeFade::Out, EdgeFade::None] {
+        rig.ed
+            .set_edge_fade(output_edge(1), fade)
+            .expect("the edge exists");
+        rig.commit();
+        assert!(
+            std::sync::Arc::ptr_eq(&before, rig.exec.plan().expect("applied")),
+            "{fade:?} sent a plan"
+        );
+    }
+}
+
 /// **A fade out leaves from the weight it has and its last nonzero frame is
 /// inside the span**; it then reads 0, and the editor is told once and drops
 /// the edge, after which a commit leaves the sink silent.

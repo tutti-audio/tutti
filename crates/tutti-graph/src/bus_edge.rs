@@ -564,13 +564,7 @@ impl GraphSpec {
                 }
             }
             if weight != Amplitude::UNITY || fade != EdgeFade::None {
-                spec.gains.insert(
-                    id,
-                    EdgeGain {
-                        fade,
-                        ..EdgeGain::default()
-                    },
-                );
+                spec.gains.insert(id, EdgeGain::default());
             }
             if fade != EdgeFade::None {
                 fades.insert(id, fade);
