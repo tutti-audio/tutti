@@ -624,11 +624,7 @@ impl<F: tutti_buffers::Float> IntoNode<F> for EventInletNode {
 
     fn into_parts(self) -> NodeParts<(), F> {
         let capacity = self.capacity;
-        NodeParts {
-            node: Box::new(self),
-            controls: (),
-            fork: Some(Box::new(SilentInlet { capacity })),
-        }
+        NodeParts::new(Box::new(self), (), Some(Box::new(SilentInlet { capacity })))
     }
 }
 

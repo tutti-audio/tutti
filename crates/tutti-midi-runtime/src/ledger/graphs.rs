@@ -195,11 +195,11 @@ impl ForkSource for SinkFork {
 impl IntoNode for ForkableSink {
     type Controls = ();
     fn into_parts(self) -> NodeParts<()> {
-        NodeParts {
-            node: Box::new(self.sink),
-            controls: (),
-            fork: Some(Box::new(SinkFork(self.forks))),
-        }
+        NodeParts::new(
+            Box::new(self.sink),
+            (),
+            Some(Box::new(SinkFork(self.forks))),
+        )
     }
 }
 
