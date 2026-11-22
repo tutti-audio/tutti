@@ -702,16 +702,20 @@ fn wide_value(k: u64, c: usize) -> f32 {
 /// (120 BPM) it reads whole frames `22_050 + i`, where the cubic at
 /// `t` = 0 returns the frame itself.
 fn wide_clip(width: usize) -> DiskVoice<f32> {
-    const AT: u64 = 22_000;
+    wide_clip_at(width, 22_000)
+}
+
+/// [`wide_clip`] over frames `at..at + 2_000`.
+fn wide_clip_at(width: usize, at: u64) -> DiskVoice<f32> {
     let (mut writer, reader, pos) = RegionBuffer::with_capacity(
         StreamId::of(1),
         PathBuf::new(),
         4096,
         ChannelLayout::try_from(width).expect("a test width is small"),
     );
-    writer.reset(AT);
-    writer.set_play(AT);
-    let flat: Vec<f32> = (AT..AT + 2_000)
+    writer.reset(at);
+    writer.set_play(at);
+    let flat: Vec<f32> = (at..at + 2_000)
         .flat_map(|k| (0..width).map(move |c| wide_value(k, c)))
         .collect();
     writer.push_interleaved(&flat).expect("the ring\'s width");
@@ -789,6 +793,46 @@ fn a_steady_lane_read_writes_the_callers_lanes_as_put_does() {
             }
         }
     }
+}
+
+/// A block read at a rate that takes several runs a block (`steady_lanes`
+/// splits where the taps' span passes its scratch) reproduces a linear
+/// ramp: the cubic is exact on a line, so each frame is the ramp at the
+/// playback position, 1.5 file frames a frame from file frame 33 075.
+#[test]
+fn a_steady_lane_read_at_one_and_a_half_reproduces_a_ramp_across_runs() {
+    const BLOCK: usize = 64;
+    let mut voice = wide_clip_at(2, 33_000);
+    voice.set_speed(PlaybackRate::of(1.5));
+    let mut scratch = crate::lanes::BlockScratch::new(BLOCK, 2);
+    let mut clock = crate::voice::clock::Clock::new();
+    let t = MockTransport::rolling(Beat::new(1.0), Bpm::of(120.0));
+    for b in 0..8 {
+        let env = t.env(BLOCK, SampleRate::of(SR));
+        let clock = clock.observe(&env);
+        let crate::lanes::BlockScratch {
+            out,
+            positions,
+            gather,
+            ..
+        } = &mut scratch;
+        voice.render_lanes(&clock, 0..BLOCK, out, 2, positions, gather);
+        t.advance(BLOCK as i64, SampleRate::of(SR));
+        if b == 0 {
+            continue;
+        }
+        for c in 0..2 {
+            for (i, &got) in scratch.out.lanes()[c][..BLOCK].iter().enumerate() {
+                let pos = 33_075.0 + 1.5 * (b * BLOCK + i) as f64;
+                let want = (c + 1) as f64 + pos / 1024.0;
+                assert!(
+                    (f64::from(got) - want).abs() < 1e-4,
+                    "block {b}, lane {c}, frame {i}: {got} for {want}"
+                );
+            }
+        }
+    }
+    assert_eq!(voice.inner.read.steady_runs(), 8, "every block is steady");
 }
 
 /// [`wide_clip`] over a ring that states `topology` (its width is the
