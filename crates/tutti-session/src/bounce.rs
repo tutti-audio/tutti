@@ -310,7 +310,7 @@ pub struct Bounce<N = NodeKey, M = NoMaster, F: Float = f32> {
     resample: Option<Resample>,
     latency: BounceLatency,
     tail: BounceTail,
-    root_topology: RootChoice,
+    main_output_topology: RootChoice,
     channels: Option<ChannelLayout>,
     file_topology: Option<ChannelTopology>,
     serial: bool,
@@ -344,7 +344,7 @@ impl<N, F: Float> Bounce<N, NoMaster, F> {
             resample: None,
             latency: BounceLatency::default(),
             tail: BounceTail::default(),
-            root_topology: RootChoice::Session,
+            main_output_topology: RootChoice::Session,
             channels: None,
             file_topology: None,
             serial: false,
@@ -401,7 +401,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             resample,
             latency,
             tail,
-            root_topology,
+            main_output_topology,
             channels,
             file_topology,
             serial,
@@ -421,7 +421,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             resample,
             latency,
             tail,
-            root_topology,
+            main_output_topology,
             channels,
             file_topology,
             serial,
@@ -459,7 +459,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             resample,
             latency,
             tail,
-            root_topology,
+            main_output_topology,
             channels,
             file_topology,
             serial,
@@ -483,7 +483,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             resample,
             latency,
             tail,
-            root_topology,
+            main_output_topology,
             channels,
             file_topology,
             serial,
@@ -534,15 +534,15 @@ impl<N, M, F: Float> Bounce<N, M, F> {
 
     /// What the graph's output channels are, in place of the session's declared
     /// root topology.
-    pub fn root_topology(mut self, root: ChannelTopology) -> Self {
-        self.root_topology = RootChoice::Placed(root);
+    pub fn main_output_topology(mut self, root: ChannelTopology) -> Self {
+        self.main_output_topology = RootChoice::Placed(root);
         self
     }
 
     /// The graph's output channels are the engine's order for the width,
     /// whatever root topology the session declares.
     pub fn undeclared_root(mut self) -> Self {
-        self.root_topology = RootChoice::Engine;
+        self.main_output_topology = RootChoice::Engine;
         self
     }
 
@@ -665,7 +665,7 @@ impl<N: std::fmt::Debug, M: std::fmt::Debug, F: Float> std::fmt::Debug for Bounc
             .field("resample", &self.resample)
             .field("latency", &self.latency)
             .field("tail", &self.tail)
-            .field("root_topology", &self.root_topology)
+            .field("main_output_topology", &self.main_output_topology)
             .field("channels", &self.channels)
             .field("file_topology", &self.file_topology)
             .field("serial", &self.serial)
@@ -2029,7 +2029,7 @@ where
             resample,
             latency,
             tail,
-            root_topology,
+            main_output_topology,
             channels,
             file_topology,
             serial,
@@ -2202,7 +2202,10 @@ where
         // The edit hook's timeline: the same object the renderer advances, or
         // one stopped at beat 0 for a frozen clock.
         let ctx = clock.offline();
-        let pending = match self.graph.gather_for_bounce(rate, serial, root_topology) {
+        let pending = match self
+            .graph
+            .gather_for_bounce(rate, serial, main_output_topology)
+        {
             Ok(pending) => pending,
             Err(tutti_export::RenderError::Fork(
                 tutti_graph::ForkError::NoOutputs { .. }

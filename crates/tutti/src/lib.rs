@@ -517,7 +517,8 @@ pub mod session {
     };
     pub use tutti_graph::{
         BusFeed, BusFold, BusSide, EdgeFade, EdgeId, EventCapacityError, EventIn, EventOut,
-        ForkError, InletCounts, InstrumentNode, MeterId, ParamIn, PrerollTable, RootError, RootId,
+        ForkError, InletCounts, InstrumentNode, MainOutputError, MainOutputId, MeterId, ParamIn,
+        PrerollTable,
     };
     pub use tutti_modulation::PeriodPoint;
     pub use tutti_session::Apply;
@@ -538,7 +539,7 @@ pub mod session {
         PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
         Removal, RemoveError, Reopened, ReplaceRefused, Replacement, Resource, ResourceFact,
         RootDeclaration, RootReader, RootTopologyStatus, SessionHeardTapError, SessionNode,
-        SetRateError, SetSources, SetTempoError, Taps, Weighted, Wire, root_width,
+        SetRateError, SetSources, SetTempoError, Taps, Weighted, Wire, main_output_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,

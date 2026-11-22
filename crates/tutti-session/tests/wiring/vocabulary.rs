@@ -67,7 +67,7 @@ fn a_bus_with_no_place_on_the_root_is_refused() {
     let _ = s.update();
     assert!(matches!(
         s.graph().connect(mono, MainOutput).err(),
-        Some(ConnectError::RootFold { from, cause: FoldError::Unassigned { .. } })
+        Some(ConnectError::MainOutputFold { from, cause: FoldError::Unassigned { .. } })
             if from == mono.erase()
     ));
     assert!(!s.graph_ref().has_uncommitted_edits(), "nothing was stored");
@@ -80,13 +80,13 @@ fn a_bus_wider_than_the_root_is_refused() {
     let mut s = offline();
     let wide = s.graph().add(ForkByClone(Const::frame(&[1.0, 2.0, 3.0])));
     let _ = s.update();
-    let root_width = s.graph_ref().outputs();
+    let main_output_width = s.graph_ref().outputs();
     assert_eq!(
         s.graph().connect(wide, MainOutput).err(),
         Some(ConnectError::RootNarrow {
             from: wide.erase(),
             from_width: 3,
-            root_width,
+            main_output_width,
         })
     );
     assert!(!s.graph_ref().has_uncommitted_edits(), "nothing was stored");

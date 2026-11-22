@@ -34,7 +34,7 @@ pub const GRAPH_MAX_BLOCK: MaxBlock = MaxBlock::of(Samples::new(1024));
 #[derive(Debug, Clone, Default)]
 pub struct Setup {
     pool: Option<Arc<dyn Pool>>,
-    root: Option<ChannelTopology>,
+    main_output: Option<ChannelTopology>,
     rt_log: Option<Arc<dyn RtLogSink>>,
 }
 
@@ -86,10 +86,10 @@ impl Setup {
     /// The render refuses a declaration that is not as wide as the graph's
     /// outputs, or that the file cannot take
     /// ([`ConfigError::Placement`]). Give it for a fork of a live graph that
-    /// declared its root, so the file is placed as the device was.
+    /// declared its main output, so the file is placed as the device was.
     #[must_use]
-    pub fn root(mut self, root: ChannelTopology) -> Self {
-        self.root = Some(root);
+    pub fn main_output(mut self, main_output: ChannelTopology) -> Self {
+        self.main_output = Some(main_output);
         self
     }
 
@@ -182,8 +182,8 @@ pub struct RenderGraph<F: Float = f32> {
     /// only thing that runs it.
     executor: Executor<F>,
     /// What the graph's output channels are, when the live graph declared it
-    /// ([`Setup::root`]); `None` is the engine's order for the width.
-    root: Option<ChannelTopology>,
+    /// ([`Setup::main_output`]); `None` is the engine's order for the width.
+    main_output: Option<ChannelTopology>,
     /// The executor's `(dropped, recovered)` event counts where the last
     /// render ended, or where the pair was wrapped: the next render counts its
     /// losses from here, so a drop between the two (installing a commit) is
@@ -240,7 +240,7 @@ impl<F: Float> RenderGraph<F> {
         Ok(Self {
             editor,
             executor,
-            root: setup.root,
+            main_output: setup.main_output,
             settled,
             rt_log,
         })
@@ -261,9 +261,9 @@ impl<F: Float> RenderGraph<F> {
         self.rt_log.clone()
     }
 
-    /// The declared output topology ([`Setup::root`]).
-    pub(crate) fn root_topology(&self) -> Option<&ChannelTopology> {
-        self.root.as_ref()
+    /// The declared output topology ([`Setup::main_output`]).
+    pub(crate) fn main_output_topology(&self) -> Option<&ChannelTopology> {
+        self.main_output.as_ref()
     }
 
     /// Both halves, for the render. Crate-private: outside the crate the

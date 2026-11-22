@@ -246,8 +246,8 @@ impl<F: Float> Executor<F> {
                 pool,
                 pool_participants: _,
                 rendered,
-                root_fade,
-                root_fade_ended,
+                main_output_fade,
+                main_output_fade_ended,
                 stash: _,
                 logs,
             } = self;
@@ -570,11 +570,11 @@ impl<F: Float> Executor<F> {
             for f in event_fb.iter_mut().flatten() {
                 f.advance(frames);
             }
-            if let (Some(run), Some(bank)) = (root_fade.as_mut(), plan.root_bank()) {
+            if let (Some(run), Some(bank)) = (main_output_fade.as_mut(), plan.main_output_bank()) {
                 let before = run.done;
                 run.done += frames;
                 if before < bank.fade.duration.get() && run.done >= bank.fade.duration.get() {
-                    root_fade_ended.store(run.seq, Ordering::Release);
+                    main_output_fade_ended.store(run.seq, Ordering::Release);
                 }
             }
             *frame += Samples::new(frames);

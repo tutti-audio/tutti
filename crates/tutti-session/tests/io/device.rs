@@ -867,7 +867,7 @@ fn a_restart_onto_a_device_that_cannot_place_the_declared_root_is_refused() {
     };
     let (driver, _stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .root_topology(tutti_buffers::ChannelTopology::unassigned(
+        .main_output_topology(tutti_buffers::ChannelTopology::unassigned(
             ChannelLayout::QUAD,
         ))
         .device(tutti_cpal::DeviceSelector::Default)
@@ -988,7 +988,7 @@ fn a_refused_declaration_is_retried_on_a_restart() {
     let (driver, _new) = ManualStreamDriver::new();
     session.restart_on(wide, driver, None, None).unwrap();
     assert_eq!(session.root_topology_status(), RootTopologyStatus::Applied);
-    assert_eq!(session.root_topology(), Some(&buses));
+    assert_eq!(session.main_output_topology(), Some(&buses));
     assert_eq!(session.graph_ref().outputs(), 4);
 }
 
@@ -1041,13 +1041,13 @@ fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a
     assert!(
         matches!(
             session.root_topology_status(),
-            RootTopologyStatus::Refused(tutti_graph::RootError::Fold(_))
+            RootTopologyStatus::Refused(tutti_graph::MainOutputError::Fold(_))
         ),
         "{:?}",
         session.root_topology_status()
     );
     assert_eq!(
-        session.root_topology(),
+        session.main_output_topology(),
         Some(&stereo),
         "the root in force stays"
     );
@@ -1063,7 +1063,7 @@ fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a
     session.restart_on(wide, driver, None, None).unwrap();
     assert_eq!(session.root_topology_status(), RootTopologyStatus::Applied);
     assert_eq!(
-        session.root_topology(),
+        session.main_output_topology(),
         Some(&buses),
         "the restart asked again"
     );

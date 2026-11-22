@@ -64,7 +64,7 @@ pub struct BlockCounts {
     pub over_budget: u64,
     /// Blocks rendered silent (an audible dropout, not timed): the graph was
     /// held on the control side when the callback came, the buffer's width has
-    /// no fold, or the graph's root cannot be placed on it. The session
+    /// no fold, or the graph's main output cannot be placed on it. The session
     /// reports the rise as `SessionEvent::BlocksSilenced`.
     pub silenced: u64,
     /// Events the graph dropped: an event output port past its capacity

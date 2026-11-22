@@ -9,7 +9,7 @@ use tutti_buffers::Float;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{ChannelLayout, ChannelTopology, Placement, Speaker};
 use tutti_buffers::{FoldError, InterleavedMut};
-use tutti_graph::{ForkByClone, RootError};
+use tutti_graph::{ForkByClone, MainOutputError};
 use tutti_nodes::testing::Const;
 use tutti_session::{
     Committed, Error, MainOutput, OutPort, RootTopologyStatus, Session, SessionBuilder,
@@ -61,9 +61,9 @@ fn buses(n: u16) -> ChannelTopology {
 /// declaration's width, not the device's.
 #[test]
 fn a_declared_unassigned_root_keeps_its_buses_by_index() {
-    let mut s = offline(Session::builder().root_topology(buses(4)), 6).unwrap();
+    let mut s = offline(Session::builder().main_output_topology(buses(4)), 6).unwrap();
     assert_eq!(s.graph_ref().outputs(), 4);
-    assert_eq!(s.root_topology(), Some(&buses(4)));
+    assert_eq!(s.main_output_topology(), Some(&buses(4)));
     feed(&mut s, &[0.1, 0.2, 0.3, 0.4]);
     assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.3, 0.4, 0.0, 0.0]);
 }
@@ -75,7 +75,7 @@ fn a_declared_unassigned_root_keeps_its_buses_by_index() {
 #[test]
 fn a_declared_surround_root_folds_by_the_surround_rules() {
     let five_one = ChannelTopology::default_for(ChannelLayout::from(6u16));
-    let mut s = offline(Session::builder().root_topology(five_one), 2).unwrap();
+    let mut s = offline(Session::builder().main_output_topology(five_one), 2).unwrap();
     assert_eq!(s.graph_ref().outputs(), 6);
     feed(&mut s, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
     assert_eq!(
@@ -109,7 +109,7 @@ fn a_declared_surround_root_folds_by_the_surround_rules() {
 #[test]
 fn an_undeclared_root_is_as_it_was() {
     let mut s = offline(Session::builder().outputs_floor(ChannelLayout::QUAD), 6).unwrap();
-    assert_eq!(s.root_topology(), None);
+    assert_eq!(s.main_output_topology(), None);
     assert_eq!(s.graph_ref().outputs(), 6, "the device floors the root");
     feed(&mut s, &[0.1, 0.2, 0.3, 0.4]);
     assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.3, 0.4, 0.0, 0.0]);
@@ -133,7 +133,10 @@ fn an_unplaceable_declaration_is_refused() {
         other => panic!("expected Output, got {:?}", other.map(|_| ())),
     };
     assert_eq!(
-        refused(offline(Session::builder().root_topology(buses(4)), 2)),
+        refused(offline(
+            Session::builder().main_output_topology(buses(4)),
+            2
+        )),
         FoldError::Unplaced {
             channel: 2,
             speaker: Speaker::Unassigned
@@ -141,18 +144,18 @@ fn an_unplaceable_declaration_is_refused() {
     );
     let unnamed = ChannelTopology::new([Speaker::FrontLeft, Speaker::Unknown(9)]).unwrap();
     assert!(matches!(
-        refused(offline(Session::builder().root_topology(unnamed), 2)),
+        refused(offline(Session::builder().main_output_topology(unnamed), 2)),
         FoldError::Unnamed { .. }
     ));
     // Wider than the engine renders.
     let wide = buses(tutti_buffers::MAX_CHANNELS as u16 + 1);
     assert!(matches!(
-        refused(offline(Session::builder().root_topology(wide), 32)),
+        refused(offline(Session::builder().main_output_topology(wide), 32)),
         FoldError::Unplaced { .. }
     ));
     assert!(matches!(
         Session::builder()
-            .root_topology(buses(40))
+            .main_output_topology(buses(40))
             .build_detached(RATE),
         Err(Error::Output(_))
     ));
@@ -164,7 +167,7 @@ fn an_unplaceable_declaration_is_refused() {
         Err(Error::Output(FoldError::Unplaced { channel: 2, .. }))
     ));
     assert_eq!(s.graph_ref().outputs(), 2);
-    assert_eq!(s.root_topology(), None);
+    assert_eq!(s.main_output_topology(), None);
 }
 
 /// Declared after the build, on a device-wide root: the declaration sets the
@@ -184,7 +187,7 @@ fn a_declaration_sets_the_roots_width_and_the_width_cannot_leave_it() {
     let err = s.graph().widen_outputs(5).unwrap_err();
     assert_eq!(
         err,
-        RootError::Width {
+        MainOutputError::Width {
             declared: ChannelLayout::QUAD,
             requested: ChannelLayout::from(5u16)
         }
@@ -193,7 +196,7 @@ fn a_declaration_sets_the_roots_width_and_the_width_cannot_leave_it() {
     assert_eq!(s.graph_ref().outputs(), 4);
 
     s.declare_root_topology(None).unwrap().unfaded();
-    assert_eq!(s.root_topology(), None);
+    assert_eq!(s.main_output_topology(), None);
     assert_eq!(s.graph_ref().outputs(), 4);
     assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.0, 0.0, 0.3, 0.4]);
     assert_eq!(s.root_topology_status(), RootTopologyStatus::Applied);
@@ -215,7 +218,7 @@ fn a_refusal_is_a_status_not_a_log_line() {
         RootTopologyStatus::Refused(refusal.into())
     );
     assert_eq!(s.requested_root_topology(), Some(&buses(4)), "kept");
-    assert_eq!(s.root_topology(), None, "the previous stands");
+    assert_eq!(s.main_output_topology(), None, "the previous stands");
     // Asking for what is in force is Applied again.
     s.declare_root_topology(None).unwrap();
     assert_eq!(s.root_topology_status(), RootTopologyStatus::Applied);
@@ -227,7 +230,7 @@ fn a_refusal_is_a_status_not_a_log_line() {
     assert_eq!(s.graph_ref().outputs(), before);
     assert!(matches!(
         err,
-        RootError::Fold(FoldError::Unplaced { channel, .. }) if channel == max
+        MainOutputError::Fold(FoldError::Unplaced { channel, .. }) if channel == max
     ));
     assert_eq!(s.root_topology_status(), RootTopologyStatus::Refused(err));
     s.graph().widen_outputs(max).unwrap();
@@ -242,13 +245,13 @@ fn a_refusal_is_a_status_not_a_log_line() {
 /// themselves).
 #[test]
 fn declaring_the_same_topology_again_changes_nothing() {
-    let mut s = offline(Session::builder().root_topology(buses(4)), 6).unwrap();
+    let mut s = offline(Session::builder().main_output_topology(buses(4)), 6).unwrap();
     let _ = s.update();
     let sent = s.graph_ref().testing().commits_sent();
     s.declare_root_topology(Some(buses(4))).unwrap();
     let _ = s.update();
     let _ = s.update();
-    assert_eq!(s.root_topology(), Some(&buses(4)));
+    assert_eq!(s.main_output_topology(), Some(&buses(4)));
     assert_eq!(s.graph_ref().testing().commits_sent(), sent);
     assert_eq!(s.root_topology_status(), RootTopologyStatus::Applied);
 }
@@ -276,7 +279,7 @@ fn an_export_is_placed_from_the_declaration() {
         rendered.planes().iter().map(|p| p[0]).collect::<Vec<_>>()
     };
     let mut declared = Session::builder()
-        .root_topology(buses(4))
+        .main_output_topology(buses(4))
         .build_detached(RATE)
         .unwrap();
     feed(&mut declared, &[0.1, 0.2, 0.3, 0.4]);
@@ -399,13 +402,13 @@ fn a_session_with_no_engine_commits_every_width() {
 
 /// A root declared under a stream that is not rendering is bounded: the
 /// engine holds a few roots ahead of the plan in force, and past them a
-/// declaration is refused by name (`Error::Root`) with the root unchanged;
+/// declaration is refused by name (`Error::MainOutput`) with the root unchanged;
 /// one block frees the room.
 #[test]
 fn a_declaration_past_the_pending_roots_is_refused_by_name() {
     let mut s = offline(Session::builder(), 6).unwrap();
     let mut refused = None;
-    for i in 0..(tutti_engine::MAX_PENDING_ROOTS + 2) {
+    for i in 0..(tutti_engine::MAX_PENDING_MAIN_OUTPUTS + 2) {
         // Alternate, so each declaration is a new root.
         let root = (i % 2 == 0).then(|| buses(4));
         match s.declare_root_topology(root) {
@@ -419,8 +422,8 @@ fn a_declaration_past_the_pending_roots_is_refused_by_name() {
     assert!(
         matches!(
             refused,
-            Some(Error::Root(RootError::TooManyPending { limit }))
-                if limit == tutti_engine::MAX_PENDING_ROOTS
+            Some(Error::MainOutput(MainOutputError::TooManyPending { limit }))
+                if limit == tutti_engine::MAX_PENDING_MAIN_OUTPUTS
         ),
         "{refused:?}"
     );
@@ -442,7 +445,7 @@ fn widen_outputs_past_the_maximum_changes_nothing() {
         let err = s.graph().widen_outputs(request).unwrap_err();
         assert!(matches!(
             err,
-            RootError::Fold(FoldError::Unplaced { channel, .. }) if channel == max
+            MainOutputError::Fold(FoldError::Unplaced { channel, .. }) if channel == max
         ));
         assert_eq!(
             s.graph_ref().outputs(),

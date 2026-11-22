@@ -186,7 +186,7 @@ pub enum ConnectError {
     /// A main bus is wider than the root it connects to: a connection never
     /// truncates.
     #[error(
-        "{from:?}'s main output is {from_width} wide and the root {root_width}; \
+        "{from:?}'s main output is {from_width} wide and the root {main_output_width}; \
          a width change is a bus edge"
     )]
     RootNarrow {
@@ -195,12 +195,12 @@ pub enum ConnectError {
         /// Its main output's width.
         from_width: usize,
         /// The root's width.
-        root_width: usize,
+        main_output_width: usize,
     },
     /// A main bus narrower than the root has no placement on the root's
     /// channels.
     #[error("{from:?}'s main output has no place on the root: {cause}")]
-    RootFold {
+    MainOutputFold {
         /// The source node.
         from: tutti_graph::NodeKey,
         /// Why its topology does not fold onto the root's.
@@ -391,9 +391,9 @@ pub enum Error {
     /// The root's declaration was refused by the engine's fold table, other
     /// than for a fold: its id is not past the published roots, or too many
     /// published roots are waiting for a plan to carry them (the stream is not
-    /// rendering). Wraps `tutti_graph::RootError`.
+    /// rendering). Wraps `tutti_graph::MainOutputError`.
     #[error(transparent)]
-    Root(tutti_graph::RootError),
+    MainOutput(tutti_graph::MainOutputError),
 
     /// The graph root cannot be placed on the output: the device has no
     /// channels, or the root is wider than a device at least one of whose
@@ -411,7 +411,7 @@ pub enum Error {
     #[error("root {root} ({width:?} wide) has no place on a {device:?} device: {source}")]
     Unplaceable {
         /// The root generation in force.
-        root: tutti_graph::RootId,
+        root: tutti_graph::MainOutputId,
         /// The root's channels.
         width: tutti_buffers::ChannelLayout,
         /// The device's channels.
@@ -583,12 +583,12 @@ pub enum Error {
 /// `Result<T, `[`enum@Error`]`>`.
 pub type Result<T> = core::result::Result<T, Error>;
 
-impl From<tutti_graph::RootError> for Error {
-    /// A fold refusal is [`Error::Output`]; the rest are [`Error::Root`].
-    fn from(e: tutti_graph::RootError) -> Self {
+impl From<tutti_graph::MainOutputError> for Error {
+    /// A fold refusal is [`Error::Output`]; the rest are [`Error::MainOutput`].
+    fn from(e: tutti_graph::MainOutputError) -> Self {
         match e {
-            tutti_graph::RootError::Fold(fold) => Self::Output(fold),
-            other => Self::Root(other),
+            tutti_graph::MainOutputError::Fold(fold) => Self::Output(fold),
+            other => Self::MainOutput(other),
         }
     }
 }

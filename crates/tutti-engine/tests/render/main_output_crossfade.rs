@@ -1,6 +1,6 @@
-//! A root crossfade on the parallel executor renders the serial executor's
-//! samples bit for bit: the old root's channels are outputs of the plan like
-//! the root's own, claimed and written by the same tasks.
+//! A main output crossfade on the parallel executor renders the serial executor's
+//! samples bit for bit: the old main output's channels are outputs of the plan like
+//! the main output's own, claimed and written by the same tasks.
 
 use crate::support;
 
@@ -30,7 +30,7 @@ impl Pool for Counting {
     }
 }
 
-/// Six sines, each through its own gain (keys 11 to 16), the root's two
+/// Six sines, each through its own gain (keys 11 to 16), the main output's two
 /// channels taking `pair`.
 fn wire(ed: &mut Editor, pair: [u64; 2]) {
     ed.spec_mut().topology.set_outputs(
@@ -44,7 +44,7 @@ fn wire(ed: &mut Editor, pair: [u64; 2]) {
     );
 }
 
-/// 64-frame stereo blocks of a graph whose root moves from channels (11, 12)
+/// 64-frame stereo blocks of a graph whose main output moves from channels (11, 12)
 /// to (15, 16) after two blocks, with the crossfade over the declick length
 /// (four blocks), on a pool of four if `pooled`. Returns the samples and how
 /// many jobs the pool ran.
@@ -84,22 +84,22 @@ fn render(pooled: bool) -> (Vec<f32>, usize) {
     wire(&mut ed, [11, 12]);
     ed.commit().expect("commits");
     let engine = Engine::new(&Transport::new(rate), &mut ed, exec).expect("within limits");
-    ed.set_root_fade(Some(Fade::seconds(Seconds::new(0.005), rate)));
+    ed.set_main_output_fade(Some(Fade::seconds(Seconds::new(0.005), rate)));
     let control = engine.output_control();
     let mut heard = Vec::new();
     let mut block = vec![0.0f32; 64 * 2];
     for n in 0..9 {
         if n == 2 {
-            let id = ed.spec().root_id.next();
+            let id = ed.spec().main_output_id.next();
             control
-                .publish_root(id, None, ChannelLayout::STEREO)
+                .publish_main_output(id, None, ChannelLayout::STEREO)
                 .expect("places");
-            ed.spec_mut().root_id = id;
+            ed.spec_mut().main_output_id = id;
             wire(&mut ed, [15, 16]);
             ed.commit().expect("commits");
             assert!(
-                ed.base().is_some_and(|p| p.root_bank().is_some()),
-                "the plan carries the old root's channels"
+                ed.base().is_some_and(|p| p.main_output_bank().is_some()),
+                "the plan carries the old main output's channels"
             );
         }
         engine.process(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
@@ -109,10 +109,10 @@ fn render(pooled: bool) -> (Vec<f32>, usize) {
     (heard, jobs.load(Ordering::Relaxed))
 }
 
-/// The root crossfade's samples are the serial render's, bit for bit, and
+/// The main output crossfade's samples are the serial render's, bit for bit, and
 /// the blocks did spread over the pool.
 #[test]
-fn a_root_crossfade_is_bit_identical_on_the_parallel_executor() {
+fn a_main_output_crossfade_is_bit_identical_on_the_parallel_executor() {
     let (serial, _) = render(false);
     let (parallel, jobs) = render(true);
     assert!(jobs > 0, "the pool ran jobs: the plan spread");

@@ -4,7 +4,7 @@
 //! be, so these tests do not depend on a node library's behaviour.
 //!
 //! Neither is a DSP node anyone should reach for: the tests that use them are
-//! about the `Engine` and the editor (root folding, allocation budgets), and
+//! about the `Engine` and the editor (main output folding, allocation budgets), and
 //! the node inside is only there so the graph renders something non-zero.
 //!
 //! Below them, the beat model the engine tests hold the transport to.

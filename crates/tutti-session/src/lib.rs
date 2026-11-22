@@ -183,7 +183,7 @@ pub use bounce::{
     BounceRendered, BounceTail, Bounced, Bouncing, BufferMaster, BufferStem, ExportClock,
     FileMaster, FileStem, Master, NoMaster, PrepareEdit, PreparedGraph, Range, Stem, StemGain,
 };
-pub use builder::{BlockConfig, SessionBuilder, Workers, root_width};
+pub use builder::{BlockConfig, SessionBuilder, Workers, main_output_width};
 #[cfg(feature = "device")]
 pub use clock::DeviceClock;
 pub use clock::{

@@ -42,7 +42,7 @@ fn render(
             layout,
             topology: None,
         };
-        let fold = file.fold_from(src.outputs(), src.root())?;
+        let fold = file.fold_from(src.outputs(), src.main_output())?;
         let mut scratch = vec![0.0f32; src.max_block() * ch];
         drive(
             src,

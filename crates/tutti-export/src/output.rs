@@ -340,7 +340,7 @@ impl Placement {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Feed<F: Float = f32> {
-    /// The graph's outputs (the declared root, or the engine's order for the
+    /// The graph's outputs (the declared main output, or the engine's order for the
     /// width), folded onto the target's layout.
     Master,
     /// A plan tap ([`Editor::open_tap`](tutti_graph::Editor::open_tap)), read

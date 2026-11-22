@@ -273,7 +273,7 @@ impl<C: Clock<Config = BlockConfig>> SessionBuilder<C> {
 
     /// The width of every block the host pulls with [`Session::render`] (or
     /// the system clock renders). The graph root is
-    /// [`root_width`]`(outputs_floor, outputs)` wide. Default stereo.
+    /// [`main_output_width`]`(outputs_floor, outputs)` wide. Default stereo.
     #[must_use]
     pub fn outputs(mut self, outputs: ChannelLayout) -> Self {
         self.config.outputs = outputs;
@@ -376,7 +376,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
     /// [`max_block`](Self::max_block) frames per graph block (a longer one
     /// renders as consecutive graph blocks),
     /// [`outputs`](Self::outputs) wide; the graph root is
-    /// [`root_width`]`(outputs_floor, outputs)`.
+    /// [`main_output_width`]`(outputs_floor, outputs)`.
     ///
     /// # Errors
     ///
@@ -389,7 +389,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
             outputs: layout,
             max_block,
         } = self.config;
-        let root = self.root_width(layout);
+        let root = self.main_output_width(layout);
         self.check_placement(root, layout)?;
         let runtime = Self::session_executor()?;
         let mut parts = self.parts(runtime, rate, max_block, None, root)?;
@@ -418,7 +418,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
     /// (or `Graph::take_audio_side` hands it to a test). No metronome and
     /// no MIDI nodes are inserted, and no disk streamer is started: the
     /// graph is exactly `outputs_floor` wide (a declared
-    /// [`root_topology`](Self::root_topology)'s width, if there is one), empty,
+    /// [`main_output_topology`](Self::main_output_topology)'s width, if there is one), empty,
     /// at `rate`, in blocks of [`LIVE_MAX_BLOCK`]. Behind `testing`: what a
     /// host wants is [`build`](Self::build).
     ///
@@ -494,7 +494,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
             outputs: layout,
             max_block,
         } = self.config;
-        let root = self.root_width(layout);
+        let root = self.main_output_width(layout);
         self.check_placement(root, layout)?;
         let runtime = Self::session_executor()?;
         let timer = tutti_engine::TimerDriver::new(&runtime.0);
@@ -629,7 +629,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
     ) -> Result<crate::LiveSession<&'static str, F>> {
         crate::background::require(crate::BackgroundWork::Device)?;
         let spec = audio_engine.spec().clone();
-        let root = self.root_width(spec.channels);
+        let root = self.main_output_width(spec.channels);
         self.check_placement(root, spec.channels)?;
         let mut parts = self.parts(
             runtime,
@@ -710,7 +710,7 @@ impl<C: Clock> SessionBuilder<C> {
     }
 
     /// The project's output width: the graph root is at least this wide, and
-    /// at least the device's ([`root_width`]). Default stereo.
+    /// at least the device's ([`main_output_width`]). Default stereo.
     #[must_use]
     pub fn outputs_floor(mut self, outputs: ChannelLayout) -> Self {
         self.opts.outputs_floor = outputs;
@@ -724,7 +724,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// ([`Error::Output`](crate::Error::Output)). Default none: the root is the engine's order for
     /// its width.
     #[must_use]
-    pub fn root_topology(mut self, root: ChannelTopology) -> Self {
+    pub fn main_output_topology(mut self, root: ChannelTopology) -> Self {
         self.opts.root = Some(root);
         self
     }
@@ -1094,10 +1094,10 @@ impl<C: Clock> SessionBuilder<C> {
     }
 
     /// The root's width for `device`: the declared topology's, or else
-    /// [`root_width`] of the floor.
-    fn root_width(&self, device: ChannelLayout) -> usize {
+    /// [`main_output_width`] of the floor.
+    fn main_output_width(&self, device: ChannelLayout) -> usize {
         self.opts.root.as_ref().map_or_else(
-            || root_width(self.opts.outputs_floor, device),
+            || main_output_width(self.opts.outputs_floor, device),
             |root| usize::from(root.width().count()),
         )
     }
@@ -1174,7 +1174,7 @@ impl<C: Clock> SessionBuilder<C> {
 /// `Engine::new` bounds the editor to that many global outputs, so a wider
 /// root would be refused at its first commit and never play. An export's
 /// fork is prepared on its own, with no such cap.
-pub fn root_width(project: ChannelLayout, device: ChannelLayout) -> usize {
+pub fn main_output_width(project: ChannelLayout, device: ChannelLayout) -> usize {
     usize::from(project.count())
         .max(usize::from(device.count()))
         .clamp(1, MAX_CHANNELS)

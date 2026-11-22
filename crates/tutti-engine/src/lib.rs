@@ -39,7 +39,7 @@
 //!   `delays`) is `tutti-graph`'s pure pass, applied by the graph compiler.
 //! - **The worker pool and the pre-roll table.** `tutti-graph`'s.
 //! - **The metronome.** `ClickNode` is `tutti-nodes`'.
-//! - **The root width ceiling.** `tutti_buffers::MAX_CHANNELS` bounds the engine's
+//! - **The main output width ceiling.** `tutti_buffers::MAX_CHANNELS` bounds the engine's
 //!   editor, as it bounds a bus.
 //!
 //! ## Example — a graph, an engine, and a transport
@@ -154,7 +154,7 @@ pub use hearing::HeardTaps;
 pub use latency::StreamLatency;
 pub use load::{BlockCounts, LOAD_MEAN_TIME_CONSTANT, Load};
 pub use manual::{ManualRunning, ManualStream, ManualStreamDriver};
-pub use output::{MAX_PENDING_ROOTS, OutputControl, OutputPlacement};
+pub use output::{MAX_PENDING_MAIN_OUTPUTS, OutputControl, OutputPlacement};
 pub use restart::{Stopped, StreamHost};
 pub use routing::{
     OutputLevelError, OutputLevels, OutputMap, OutputMapError, OutputStrip, Routing, RoutingError,
