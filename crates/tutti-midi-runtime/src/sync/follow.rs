@@ -119,7 +119,7 @@ use tutti_midi_protocol::{
     Addressed, SmpteFrameRate, SmpteTimecode, Universal, UniversalRead, read,
 };
 use tutti_ump::{Message, SysexAssembler, SysexStep, System, Ump};
-use tutti_units::{Beat, Bpm, Seconds};
+use tutti_units::{Beat, Bpm, Seconds, TimecodeFrames};
 
 use super::{ClockTransportState, MidiClockDecoder, MtcDecoder, MtcDirection};
 
@@ -693,7 +693,7 @@ impl MtcFollower {
         }
         self.error = Some(Seconds::new(error));
         let frames = origin.rate.frames_at(Seconds::new(error)).abs();
-        if frames > ClockFollower::MTC_SLIP_FRAMES as f64 {
+        if frames > TimecodeFrames::from_count(ClockFollower::MTC_SLIP_FRAMES) {
             out(ClockEvent::Slipped {
                 error: ClockOffset::Time(Seconds::new(error)),
             });
@@ -780,7 +780,8 @@ impl MtcFollower {
                 && step.is_some_and(|step| {
                     step >= CYCLE_FRAMES
                         && step % CYCLE_FRAMES == 0
-                        && frame.frame_rate().frames_at(ClockFollower::MTC_DROPOUT) >= step as f64
+                        && frame.frame_rate().frames_at(ClockFollower::MTC_DROPOUT)
+                            >= TimecodeFrames::from_count(step)
                 })
         });
         let first = self.last_cycle.is_none();

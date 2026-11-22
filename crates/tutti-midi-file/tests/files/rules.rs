@@ -15,7 +15,9 @@ use tutti_midi_file::{
     FileEvent, Layout, Lead, LeadRepair, LeadTrack, Meta, MidiFile, Pattern, ReadRepair,
     SmfDivision, SmpteFractionalFrames, SmpteOffset, SysEx, TextKind, Tick, Track, TracksError,
 };
-use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode};
+use tutti_midi_protocol::{
+    SmpteFrameRate, SmpteTimecode, TimecodeHours, TimecodeMinutes, TimecodeSeconds,
+};
 use tutti_ump::{ManufacturerId, MidiChannel, NoteNumber, U7};
 use tutti_units::{Beat, Bpm};
 
@@ -115,7 +117,14 @@ fn body(file: &MidiFile) -> Vec<u8> {
 
 fn offset(h: u8, m: u8, s: u8, f: u8, rate: SmpteFrameRate, ff: u8) -> SmpteOffset {
     SmpteOffset::new(
-        SmpteTimecode::new(h, m, s, f, rate).unwrap(),
+        SmpteTimecode::new(
+            TimecodeHours::of(h),
+            TimecodeMinutes::of(m),
+            TimecodeSeconds::of(s),
+            f,
+            rate,
+        )
+        .unwrap(),
         SmpteFractionalFrames::of(ff),
     )
     .unwrap()

@@ -1,8 +1,11 @@
 //! Song Position Pointer and timecode as values of time (M1 pp.30 and 53).
 
-use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode, song_position};
+use tutti_fixtures::{RangeContract, check_range_contract};
+use tutti_midi_protocol::{
+    SmpteFrameRate, SmpteTimecode, TimecodeHours, TimecodeMinutes, TimecodeSeconds, song_position,
+};
 use tutti_ump::U14;
-use tutti_units::{Beat, Seconds};
+use tutti_units::{Beat, Seconds, TimecodeFrames};
 
 /// M1 p.30: a Song Position Pointer counts MIDI beats, each a sixteenth note,
 /// so a quarter note is 4 and beat 2.0 is 8; it rounds to the nearest.
@@ -135,5 +138,60 @@ fn a_time_at_drop_frame_is_labelled_by_the_dropped_count() {
     )
     .expect("a time of day");
     assert_eq!(tc.to_string(), "00:01:00:02");
-    assert_eq!(SmpteFrameRate::Fps25.frames_at(Seconds::new(2.0)), 50.0);
+    assert_eq!(
+        SmpteFrameRate::Fps25.frames_at(Seconds::new(2.0)),
+        TimecodeFrames::new(50.0)
+    );
+}
+
+/// A frame lasts `den / num` seconds over the exact ratio, and `frames_at` counts
+/// those periods: 1001/30000 s for both 29.97 rates, 1/24 s at film rate.
+#[test]
+fn a_frame_period_is_the_exact_ratio_inverted() {
+    for rate in SmpteFrameRate::ALL {
+        let (num, den) = rate.ratio();
+        assert_eq!(rate.frame_period(), Seconds::new(den as f64 / num as f64));
+        assert_eq!(rate.frames_at(rate.frame_period()).round(), 1, "{rate:?}");
+    }
+    assert_eq!(
+        SmpteFrameRate::Fps2997Df.frame_period(),
+        Seconds::new(1001.0 / 30_000.0)
+    );
+    assert_eq!(SmpteFrameRate::Fps24.frame_period().get(), 1.0 / 24.0);
+}
+
+/// The hours of a timecode are `0..=23`, so a clock's 24th hour is unwritable.
+#[test]
+fn timecode_hours_keep_the_range_contract() {
+    check_range_contract(&RangeContract {
+        new: TimecodeHours::new,
+        get: TimecodeHours::get,
+        of: Some(TimecodeHours::of),
+        valid: &[0, 1, 22, 23],
+        invalid: &[24, 31, 255],
+    });
+}
+
+/// The minutes of a timecode are `0..=59`.
+#[test]
+fn timecode_minutes_keep_the_range_contract() {
+    check_range_contract(&RangeContract {
+        new: TimecodeMinutes::new,
+        get: TimecodeMinutes::get,
+        of: Some(TimecodeMinutes::of),
+        valid: &[0, 1, 58, 59],
+        invalid: &[60, 63, 255],
+    });
+}
+
+/// The seconds of a timecode are `0..=59`.
+#[test]
+fn timecode_seconds_keep_the_range_contract() {
+    check_range_contract(&RangeContract {
+        new: TimecodeSeconds::new,
+        get: TimecodeSeconds::get,
+        of: Some(TimecodeSeconds::of),
+        valid: &[0, 1, 58, 59],
+        invalid: &[60, 63, 255],
+    });
 }
