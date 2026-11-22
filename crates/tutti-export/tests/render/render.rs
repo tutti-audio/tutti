@@ -33,7 +33,7 @@ fn built(g: GraphBuilder, rate: SampleRate) -> RenderGraph {
     built_with(g, rate, Setup::new())
 }
 
-/// [`built`] with the root declared (or not) as `setup` says.
+/// [`built`] with the main output declared (or not) as `setup` says.
 fn built_with(g: GraphBuilder, rate: SampleRate, setup: Setup) -> RenderGraph {
     let (editor, executor) = g.build(RenderGraph::prepare(rate)).expect("builds");
     RenderGraph::assemble(editor, executor, setup).expect("built together")
@@ -1252,12 +1252,12 @@ fn a_graph_with_no_place_in_the_file_is_refused() {
 }
 
 /// A four-wide graph whose channels are 0.1, 0.2, 0.3, 0.4.
-fn four_buses(root: Option<ChannelTopology>) -> RenderGraph {
+fn four_buses(main_output: Option<ChannelTopology>) -> RenderGraph {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::QUAD);
     let id = g.add(Const::frame(&[0.1, 0.2, 0.3, 0.4]));
     g.pipe_output(id);
-    let setup = match root {
-        Some(root) => Setup::new().root(root),
+    let setup = match main_output {
+        Some(main_output) => Setup::new().main_output(main_output),
         None => Setup::new(),
     };
     built_with(g, RATE, setup)
@@ -1270,14 +1270,14 @@ fn first_frame(graph: &mut RenderGraph, width: u16) -> Result<Vec<f32>, tutti_ex
     Ok(out.planes().iter().map(|p| p[0]).collect())
 }
 
-/// A declared root is what the file is placed from: four `Unassigned` buses into
+/// A declared main output is what the file is placed from: four `Unassigned` buses into
 /// a six-channel file keep channels 2 and 3 at 2 and 3 (undeclared, a four is
 /// quad and its rears land on the side pair at 4 and 5), a declared 5.1 folds
 /// into stereo by the 5.1 rules, and a declaration the file cannot take is
 /// `ConfigError::Placement`, and one that is not as wide as the graph
-/// `ConfigError::Root`.
+/// `ConfigError::MainOutput`.
 #[test]
-fn a_declared_root_is_what_the_file_is_placed_from() {
+fn a_declared_main_output_is_what_the_file_is_placed_from() {
     use tutti_buffers::FoldError;
     use tutti_buffers::{ChannelTopology, Speaker};
     use tutti_export::ConfigError;
@@ -1302,16 +1302,16 @@ fn a_declared_root_is_what_the_file_is_placed_from() {
     let mut graph = four_buses(Some(ChannelTopology::unassigned(ChannelLayout::from(6u16))));
     assert!(matches!(
         first_frame(&mut graph, 6),
-        Err(tutti_export::RenderError::InvalidConfig(ConfigError::Root(
-            tutti_graph::RootError::Width { .. }
-        )))
+        Err(tutti_export::RenderError::InvalidConfig(
+            ConfigError::MainOutput(tutti_graph::MainOutputError::Width { .. })
+        ))
     ));
     // Declared as a 5.1 (six wide), a six-channel graph folds to stereo by it.
-    let six_channels = |root: ChannelTopology| {
+    let six_channels = |main_output: ChannelTopology| {
         let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::from(6u16));
         let id = g.add(Const::frame(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
         g.pipe_output(id);
-        built_with(g, RATE, Setup::new().root(root))
+        built_with(g, RATE, Setup::new().main_output(main_output))
     };
     let swapped = ChannelTopology::default_for(ChannelLayout::from(6u16));
     assert!(swapped.index_of(Speaker::FrontLeft).is_some());

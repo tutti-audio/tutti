@@ -1,4 +1,4 @@
-//! `Engine` over the graph: blocks, clocks, loop region, tempo and root channel layouts.
+//! `Engine` over the graph: blocks, clocks, loop region, tempo and main output channel layouts.
 #![allow(
     clippy::disallowed_methods,
     reason = "a test starts the threads it races, outside any executor"
@@ -13,8 +13,8 @@ mod engine_graph;
 mod env_beat;
 mod graph_contract;
 mod loop_region;
-mod root_channel_layouts;
-mod root_crossfade;
+mod main_output_channel_layouts;
+mod main_output_crossfade;
 mod rt_log;
 mod tempo_ramps;
 mod tempo_steps;

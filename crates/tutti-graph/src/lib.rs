@@ -673,6 +673,7 @@ mod kernels;
 mod lane;
 mod latency;
 mod loss;
+mod main_output;
 mod meter;
 mod mode;
 mod node;
@@ -688,7 +689,6 @@ mod rates;
 #[cfg(feature = "testing")]
 mod reference;
 mod render_mode;
-mod root;
 mod rtlog;
 mod slots;
 mod spec;
@@ -706,7 +706,8 @@ pub use controls::{ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, para
 pub use cost::{Cost, Schedule, Work};
 pub use declare::{HasParam, HasParams, ParamValue, Scalar};
 pub use editor::{
-    CloseError, CommitError, Editor, Inserted, Limits, MissingSource, Rewired, RootGate, Unwired,
+    CloseError, CommitError, Editor, Inserted, Limits, MainOutputGate, MissingSource, Rewired,
+    Unwired,
 };
 pub use event::{
     Event, EventDensity, EventKind, EventOrderError, EventRejected, EventWriter, Harmony,
@@ -718,7 +719,7 @@ pub use event_inlet::{
 };
 pub use event_losses::Losses;
 pub use event_tap::{EventTapOptions, EventTapReader, EventTapWriter, TapEvent};
-pub use exec::{DEFAULT_EVENT_CAPACITY, Executor, FADE_CAPACITY, QUEUE_CAPACITY, RootFade};
+pub use exec::{DEFAULT_EVENT_CAPACITY, Executor, FADE_CAPACITY, MainOutputFade, QUEUE_CAPACITY};
 pub use fade::Fade;
 pub use fork::{
     ForkBuild, ForkByClone, ForkCause, ForkError, ForkFault, ForkFaultKind, ForkHealth, ForkMode,
@@ -745,6 +746,10 @@ pub use latency::{
     OutputDelay, PortFeed, delays, plan as latency_plan,
 };
 pub use loss::EventLoss;
+pub use main_output::{
+    MainOutputBank, MainOutputError, MainOutputId, fold_to_topology, fold_to_topology_with,
+    fold_to_width,
+};
 pub use meter::{Level, MeterReader, MeterWriter};
 pub use mode::{MixError, ModeError, NodeMix, NodeMode};
 pub use node::{
@@ -771,9 +776,6 @@ pub use rates::SampleRates;
 #[cfg(feature = "testing")]
 pub use reference::Reference;
 pub use render_mode::RenderMode;
-pub use root::{
-    RootBank, RootError, RootId, fold_to_topology, fold_to_topology_with, fold_to_width,
-};
 pub use rtlog::{
     LogFilter, MAX_FIELDS, RtLevel, RtLogReaders, RtRecord, RtTarget, RtValue, TEXT_CAPACITY,
 };

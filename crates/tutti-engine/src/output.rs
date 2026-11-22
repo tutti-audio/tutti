@@ -1,34 +1,34 @@
-//! The folds from the graph root to the device: built once on the control side,
+//! The folds from the graph main output to the device: built once on the control side,
 //! lent to the audio thread.
 //!
-//! The root renders at the width of its plan (at most
+//! The main output renders at the width of its plan (at most
 //! [`MAX_CHANNELS`]) and the device
 //! callback hands over a buffer of its own width. [`Fold`]
 //! allocates when built, and a plan arrives on the audio thread (a commit
 //! installed at a block's start), so the folds are built ahead of time for
-//! every root the control side has published and every device width up to
-//! [`DEFAULT_DEVICE_WIDTHS`]; a block picks the one for the root its plan
-//! carries ([`Plan::root_id`](tutti_graph::Plan::root_id)) and the buffer it is
+//! every main output the control side has published and every device width up to
+//! [`DEFAULT_DEVICE_WIDTHS`]; a block picks the one for the main output its plan
+//! carries ([`Plan::main_output_id`](tutti_graph::Plan::main_output_id)) and the buffer it is
 //! given. A plan and its folds therefore swap together, and no topology crosses
 //! to the audio thread. A wider device is added on the control side
 //! ([`Engine::support_output`](crate::Engine::support_output)).
 //!
-//! # Roots
+//! # Main outputs
 //!
-//! Each root generation ([`RootId`]) is published with the topology it was
+//! Each main output generation ([`MainOutputId`]) is published with the topology it was
 //! declared with, before the commit that carries its id is sent
-//! ([`OutputControl::publish_root`]). A root with no declaration is the
+//! ([`OutputControl::publish_main_output`]). A main output with no declaration is the
 //! engine's order for the plan's width
 //! ([`ChannelTopology::default_for`](tutti_buffers::ChannelTopology::default_for)), at
-//! every width. A root's folds stay published until a plan of a later root has
-//! rendered a block ([`OutputControl::reclaim`]). A root change that cuts ends
-//! the older root at the commit's block. One that crossfades
-//! ([`Editor::set_root_fade`](tutti_graph::Editor::set_root_fade)) keeps the
-//! older root's folds until the block that ends the fade, since that block
-//! still folds the old root's outputs. At most
-//! [`MAX_PENDING_ROOTS`] are published ahead of the plan in force, and the
-//! editor refuses a commit whose root was never published
-//! ([`CommitError::RootNotPublished`](tutti_graph::CommitError::RootNotPublished)).
+//! every width. A main output's folds stay published until a plan of a later main output has
+//! rendered a block ([`OutputControl::reclaim`]). A main output change that cuts ends
+//! the older main output at the commit's block. One that crossfades
+//! ([`Editor::set_main_output_fade`](tutti_graph::Editor::set_main_output_fade)) keeps the
+//! older main output's folds until the block that ends the fade, since that block
+//! still folds the old main output's outputs. At most
+//! [`MAX_PENDING_MAIN_OUTPUTS`] are published ahead of the plan in force, and the
+//! editor refuses a commit whose main output was never published
+//! ([`CommitError::MainOutputNotPublished`](tutti_graph::CommitError::MainOutputNotPublished)).
 //!
 //! # A routing change
 //!
@@ -40,7 +40,7 @@
 //! over the declick length. The audio thread counts the frames since it first
 //! lent a table of the new generation, reports the fade's end in an atomic, and
 //! [`OutputControl::reclaim`] drops the replaced table through the cell; the
-//! audio thread never holds or frees it. A change that lands while a root
+//! audio thread never holds or frees it. A change that lands while a main output
 //! crossfade runs, or while the last routing fade has not ended, cuts: it holds
 //! no third table.
 //!
@@ -49,14 +49,14 @@
 //! A device states its channel count and nothing else (a backend has no channel
 //! map), so it takes the default layout for
 //! its width where it has one (mono, stereo, quad, 5.1, 7.1, 7.1.4), and a 5.1
-//! root plays folded on a stereo device and a 7.1 root plays on a 5.1 one by
+//! main output plays folded on a stereo device and a 7.1 main output plays on a 5.1 one by
 //! position. A caller that knows the wiring states it
-//! ([`OutputControl::state_device`]): the root folds by speaker into that
+//! ([`OutputControl::state_device`]): the main output folds by speaker into that
 //! topology. Where either end has no named speaker (3, 5, 7, 9 to 11, 13 and
 //! up, or a declaration of independent buses) channels go by index
 //! ([`Fold::by_index`](tutti_buffers::Fold::by_index)): zero-filled when the
 //! device is wider, and a pair that would drop a channel has no fold, so that
-//! root renders a silent, counted block into that device. Such a pair is
+//! main output renders a silent, counted block into that device. Such a pair is
 //! refused where it is made (a declaration, a commit, a restart), and the
 //! silent block is the last resort for a device swapped under the session.
 
@@ -65,18 +65,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tutti_buffers::{BufferError, Float, Fold, FoldError};
 use tutti_buffers::{ChannelLayout, ChannelTopology, MAX_CHANNELS, Placement};
-use tutti_graph::{RootError, RootId};
+use tutti_graph::{MainOutputError, MainOutputId};
 use tutti_rt::{LockExt, Publisher};
 
 /// The widest device an engine can render into without being told
 /// ([`Engine::support_output`](crate::Engine::support_output)).
 pub(crate) const DEFAULT_DEVICE_WIDTHS: usize = 16;
 
-/// The most root generations that may be published and not yet rendered: a
-/// stream that is not running never advances the rendered root, so without a
+/// The most main output generations that may be published and not yet rendered: a
+/// stream that is not running never advances the rendered main output, so without a
 /// bound each publish would clone a longer table. Past it
-/// [`OutputControl::publish_root`] refuses with [`RootError::TooManyPending`].
-pub const MAX_PENDING_ROOTS: usize = 8;
+/// [`OutputControl::publish_main_output`] refuses with [`MainOutputError::TooManyPending`].
+pub const MAX_PENDING_MAIN_OUTPUTS: usize = 8;
 
 /// What a device's channels are, and whether that was stated or guessed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,21 +85,21 @@ struct DeviceEntry {
     placement: Placement,
 }
 
-/// One root generation's folds.
+/// One main output generation's folds.
 #[derive(Debug, Clone)]
-struct RootFolds<F: Float> {
-    id: RootId,
-    /// What the root was declared with; `None` is the engine's order for the
+struct MainOutputFolds<F: Float> {
+    id: MainOutputId,
+    /// What the main output was declared with; `None` is the engine's order for the
     /// plan's width, at every width.
     topology: Option<ChannelTopology>,
     /// Index `d - 1` holds the folds into a device of `d` channels, `None` for
-    /// a width not supported; inside, index `w - 1` folds a root of `w`.
+    /// a width not supported; inside, index `w - 1` folds a main output of `w`.
     by_device: Vec<Option<Box<[Option<Fold<F>>]>>>,
 }
 
-impl<F: Float> RootFolds<F> {
-    /// The fold of this root at `width` channels into `device`: `None` for a
-    /// width a declared root does not have (it renders at the one it was
+impl<F: Float> MainOutputFolds<F> {
+    /// The fold of this main output at `width` channels into `device`: `None` for a
+    /// width a declared main output does not have (it renders at the one it was
     /// declared at), and the routing's refusal for a pair that cannot be placed.
     fn build(
         &self,
@@ -108,20 +108,23 @@ impl<F: Float> RootFolds<F> {
         routing: &Routing,
     ) -> Result<Option<Fold<F>>, RoutingError> {
         let default;
-        let root = match &self.topology {
-            Some(root) if usize::from(root.width().count()) != width => return Ok(None),
-            Some(root) => root,
+        let main_output = match &self.topology {
+            Some(main_output) if usize::from(main_output.width().count()) != width => {
+                return Ok(None);
+            }
+            Some(main_output) => main_output,
             None => {
                 default = ChannelTopology::default_for(
-                    ChannelLayout::try_from(width).expect("a root width is within MAX_CHANNELS"),
+                    ChannelLayout::try_from(width)
+                        .expect("a main output width is within MAX_CHANNELS"),
                 );
                 &default
             }
         };
-        routing.fold(root, &device.topology).map(Some)
+        routing.fold(main_output, &device.topology).map(Some)
     }
 
-    /// The folds of every root width this root has into `device`. A width the
+    /// The folds of every main output width this main output has into `device`. A width the
     /// routing cannot place has no fold, and renders a silent, counted block
     /// into the device; [`OutputControl::set_routing`] refuses before that for
     /// the pair in use.
@@ -131,25 +134,25 @@ impl<F: Float> RootFolds<F> {
             .collect()
     }
 
-    /// Whether a root of `width` channels is one this root can render.
+    /// Whether a main output of `width` channels is one this main output can render.
     fn has_width(&self, width: usize) -> bool {
         self.topology
             .as_ref()
-            .is_none_or(|root| usize::from(root.width().count()) == width)
+            .is_none_or(|main_output| usize::from(main_output.width().count()) == width)
             && (1..=MAX_CHANNELS).contains(&width)
     }
 }
 
-/// The folds from each published root, at each width it renders, to each
+/// The folds from each published main output, at each width it renders, to each
 /// device width supported.
 #[derive(Debug, Clone)]
 pub(crate) struct OutputFolds<F: Float> {
     /// Index `d - 1` is the device of `d` channels, `None` for a width not
     /// supported.
     devices: Vec<Option<DeviceEntry>>,
-    /// Every root still published, by ascending id.
-    roots: Vec<RootFolds<F>>,
-    /// Where the mix lands: composed into every root's folds.
+    /// Every main output still published, by ascending id.
+    main_outputs: Vec<MainOutputFolds<F>>,
+    /// Where the mix lands: composed into every main output's folds.
     routing: Routing,
     /// Counts the changes that replace folds in place (a routing, a device's
     /// statement); a change of it starts a crossfade on the audio thread.
@@ -161,12 +164,12 @@ pub(crate) struct OutputFolds<F: Float> {
 
 impl<F: Float> OutputFolds<F> {
     /// The folds into devices of `1..=widest` channels, for the undeclared
-    /// first root. Control side: it allocates.
+    /// first main output. Control side: it allocates.
     pub(crate) fn up_to(widest: usize) -> Self {
         let mut folds = Self {
             devices: Vec::new(),
-            roots: vec![RootFolds {
-                id: RootId::GENESIS,
+            main_outputs: vec![MainOutputFolds {
+                id: MainOutputId::GENESIS,
                 topology: None,
                 by_device: Vec::new(),
             }],
@@ -211,17 +214,17 @@ impl<F: Float> OutputFolds<F> {
     }
 
     /// Sets what the device of `slot + 1` channels is, and rebuilds its folds
-    /// from every root published. A pair that cannot be placed has no fold:
-    /// that root width renders a silent, counted block into this device.
+    /// from every main output published. A pair that cannot be placed has no fold:
+    /// that main output width renders a silent, counted block into this device.
     fn set_device(&mut self, device: DeviceEntry, slot: usize) {
         if self.devices.len() <= slot {
             self.devices.resize(slot + 1, None);
         }
-        for root in &mut self.roots {
-            if root.by_device.len() <= slot {
-                root.by_device.resize(slot + 1, None);
+        for main_output in &mut self.main_outputs {
+            if main_output.by_device.len() <= slot {
+                main_output.by_device.resize(slot + 1, None);
             }
-            root.by_device[slot] = Some(root.column(&device, &self.routing));
+            main_output.by_device[slot] = Some(main_output.column(&device, &self.routing));
         }
         self.devices[slot] = Some(device);
     }
@@ -248,12 +251,12 @@ impl<F: Float> OutputFolds<F> {
         self.previous.as_ref()
     }
 
-    /// Whether every root can be placed on the device of `device` channels
-    /// under `routing`, a root of no declared width at `width` channels.
+    /// Whether every main output can be placed on the device of `device` channels
+    /// under `routing`, a main output of no declared width at `width` channels.
     ///
     /// # Errors
     ///
-    /// The first [`RoutingError`] a root's fold into the device meets.
+    /// The first [`RoutingError`] a main output's fold into the device meets.
     fn place(&self, routing: &Routing, width: usize, device: usize) -> Result<(), RoutingError> {
         let Some(entry) = device
             .checked_sub(1)
@@ -262,35 +265,41 @@ impl<F: Float> OutputFolds<F> {
         else {
             return Ok(());
         };
-        for root in &self.roots {
-            let width = root
+        for main_output in &self.main_outputs {
+            let width = main_output
                 .topology
                 .as_ref()
                 .map_or(width, |t| usize::from(t.width().count()));
-            root.build(width, entry, routing)?;
+            main_output.build(width, entry, routing)?;
         }
         Ok(())
     }
 
-    /// Rebuilds every root's folds into every device held, from `routing`.
+    /// Rebuilds every main output's folds into every device held, from `routing`.
     fn set_routing(&mut self, routing: Routing) {
         self.routing = routing;
-        for root in &mut self.roots {
-            root.by_device = self
+        for main_output in &mut self.main_outputs {
+            main_output.by_device = self
                 .devices
                 .iter()
-                .map(|d| d.as_ref().map(|d| root.column(d, &self.routing)))
+                .map(|d| d.as_ref().map(|d| main_output.column(d, &self.routing)))
                 .collect();
         }
     }
 
-    /// The fold of a root of `width` channels, of the root generation `root`,
-    /// into a device of `device` channels, or `None` for a root not published
-    /// (or retired), a root of no channels (or more than the engine renders), a
+    /// The fold of a main output of `width` channels, of the main output generation `main_output`,
+    /// into a device of `device` channels, or `None` for a main output not published
+    /// (or retired), a main output of no channels (or more than the engine renders), a
     /// device not supported, or a pair that cannot be placed.
-    pub(crate) fn get(&self, root: RootId, device: usize, width: usize) -> Option<&Fold<F>> {
-        let root = self.roots.iter().find(|r| r.id == root)?;
-        root.by_device
+    pub(crate) fn get(
+        &self,
+        main_output: MainOutputId,
+        device: usize,
+        width: usize,
+    ) -> Option<&Fold<F>> {
+        let main_output = self.main_outputs.iter().find(|r| r.id == main_output)?;
+        main_output
+            .by_device
             .get(device.checked_sub(1)?)?
             .as_ref()?
             .get(width.checked_sub(1)?)?
@@ -319,7 +328,7 @@ pub struct OutputPlacement {
 
 /// The control side of the engine's output folds: what the session keeps when
 /// the [`Engine`](crate::Engine) goes to the audio thread, to say what each
-/// graph root is, what each device is, and which devices it can take.
+/// graph main output is, what each device is, and which devices it can take.
 ///
 /// Cloneable; every clone publishes into the one cell the engine lends from.
 /// A publish is a read-modify-write, so clones serialize on a lock (control
@@ -330,13 +339,13 @@ pub struct OutputControl<F: Float = f32> {
     /// The gain each device output is ramped to, lent beside the folds.
     stage: Publisher<StageTargets>,
     writer: Arc<Mutex<()>>,
-    /// The root of the plan the last block rendered, written by the audio
-    /// thread: the older roots' folds are done with.
+    /// The main output of the plan the last block rendered, written by the audio
+    /// thread: the older main outputs' folds are done with.
     installed: Arc<AtomicU64>,
     /// The newest routing generation whose crossfade the audio thread has
     /// finished or cut: its `previous` table is no longer read.
     routing_ended: Arc<AtomicU64>,
-    /// The root width and the device width of the last block rendered, packed
+    /// The main output width and the device width of the last block rendered, packed
     /// by [`pack_in_use`]; `0` before one has. Written by the audio thread and
     /// cleared on the control side wherever the device in use changes
     /// ([`state_device`](Self::state_device) onto another width, a new
@@ -346,8 +355,8 @@ pub struct OutputControl<F: Float = f32> {
     in_use: Arc<AtomicU64>,
 }
 
-/// The widths of the pair a block renders, in one word: the root's width above
-/// the device's. Both are at least one in a block that renders a root.
+/// The widths of the pair a block renders, in one word: the main output's width above
+/// the device's. Both are at least one in a block that renders a main output.
 pub(crate) fn pack_in_use(width: usize, device: usize) -> u64 {
     ((width as u64) << 32) | device as u64
 }
@@ -374,8 +383,8 @@ impl<F: Float> OutputControl<F> {
         self.in_use.store(0, Ordering::Relaxed);
     }
 
-    /// The widths of the (root, device) pair the last block rendered, once one
-    /// has: the root's, then the device's.
+    /// The widths of the (main output, device) pair the last block rendered, once one
+    /// has: the main output's, then the device's.
     fn in_use(&self) -> Option<(usize, usize)> {
         let packed = self.in_use.load(Ordering::Relaxed);
         (packed != 0).then(|| {
@@ -434,7 +443,7 @@ impl<F: Float> OutputControl<F> {
         self.update(|folds| folds.support(device).map(|()| true))
     }
 
-    /// States what a device's channels are: the roots fold by speaker into
+    /// States what a device's channels are: the main outputs fold by speaker into
     /// `topology` instead of into the engine's order for its width, for the
     /// device of that many channels. `None` takes the statement back, and the
     /// device is the engine's order for its width again.
@@ -442,14 +451,14 @@ impl<F: Float> OutputControl<F> {
     /// Replacing a device already held crossfades like
     /// [`set_routing`](Self::set_routing): the audio thread mixes from the old
     /// folds to the new over the declick length, and the same cuts apply (a
-    /// root fade, a fade still running, no old fold; see the module's "A
+    /// main output fade, a fade still running, no old fold; see the module's "A
     /// routing change").
     ///
     /// A device of `topology`'s width must have been built for first
     /// ([`support`](Self::support)) or is added here.
     ///
     /// Control side: it allocates, and publishes the new set for the next
-    /// block. A callback mid-block keeps the folds it lent. A root that
+    /// block. A callback mid-block keeps the folds it lent. A main output that
     /// cannot be placed on the statement has no fold into the device, and
     /// [`has_fold`](Self::has_fold) says so.
     ///
@@ -511,16 +520,16 @@ impl<F: Float> OutputControl<F> {
         })
     }
 
-    /// Publishes the root generation `id`, declared as `root` (`None` is the
+    /// Publishes the main output generation `id`, declared as `main_output` (`None` is the
     /// engine's order for the plan's width), before the commit that carries
-    /// `id` is sent: a plan of that root finds its folds on its first block.
-    /// The older roots' folds stay until [`reclaim`](Self::reclaim) finds a
-    /// plan of a later root has rendered.
+    /// `id` is sent: a plan of that main output finds its folds on its first block.
+    /// The older main outputs' folds stay until [`reclaim`](Self::reclaim) finds a
+    /// plan of a later main output has rendered.
     ///
     /// A declaration of independent buses
     /// ([`ChannelTopology::unassigned`]) stays by index: a 4-wide one into a
     /// 6-wide device keeps channels 2 and 3 at 2 and 3 (undeclared, a 4-wide
-    /// root is quad, and they land on the side pair).
+    /// main output is quad, and they land on the side pair).
     ///
     /// Control side: it allocates, and publishes the new set for the next
     /// block. A callback mid-block keeps the folds it lent.
@@ -529,50 +538,55 @@ impl<F: Float> OutputControl<F> {
     ///
     /// Nothing is published on an error.
     ///
-    /// - [`RootError::Fold`] when the declaration cannot be placed on `device`
-    ///   (an unassigned root wider than it, or an unnamed channel). A device
+    /// - [`MainOutputError::Fold`] when the declaration cannot be placed on `device`
+    ///   (an unassigned main output wider than it, or an unnamed channel). A device
     ///   the engine holds that cannot take it has no fold
     ///   ([`has_fold`](Self::has_fold)).
-    /// - [`RootError::NotPast`] when `id` is not past every root published.
-    /// - [`RootError::TooManyPending`] when [`MAX_PENDING_ROOTS`] roots are
+    /// - [`MainOutputError::NotPast`] when `id` is not past every main output published.
+    /// - [`MainOutputError::TooManyPending`] when [`MAX_PENDING_MAIN_OUTPUTS`] main outputs are
     ///   published and none a plan has rendered: a stream that is not running
-    ///   advances no root, so the table is bounded rather than grown.
-    pub fn publish_root(
+    ///   advances no main output, so the table is bounded rather than grown.
+    pub fn publish_main_output(
         &self,
-        id: RootId,
-        root: Option<ChannelTopology>,
+        id: MainOutputId,
+        main_output: Option<ChannelTopology>,
         device: ChannelLayout,
-    ) -> Result<(), RootError> {
-        if let Some(root) = &root {
+    ) -> Result<(), MainOutputError> {
+        if let Some(main_output) = &main_output {
             let placed = self
                 .device(device)
                 .map_or_else(|| ChannelTopology::default_for(device), |d| d.topology);
             // A refusal of the fold itself is the call's; a map that does not
             // fit leaves the pair with no fold, which a commit names.
             if let Err(RoutingError::Fold(refused)) =
-                self.cell.current().routing.fold::<F>(root, &placed)
+                self.cell.current().routing.fold::<F>(main_output, &placed)
             {
                 return Err(refused.into());
             }
         }
         let installed = self.installed.load(Ordering::Acquire);
         self.update(|folds| {
-            if let Some(last) = folds.roots.last().map(|r| r.id).filter(|last| *last >= id) {
-                return Err(RootError::NotPast { id, last });
+            if let Some(last) = folds
+                .main_outputs
+                .last()
+                .map(|r| r.id)
+                .filter(|last| *last >= id)
+            {
+                return Err(MainOutputError::NotPast { id, last });
             }
             let pending = folds
-                .roots
+                .main_outputs
                 .iter()
                 .filter(|r| r.id.get() > installed)
                 .count();
-            if pending >= MAX_PENDING_ROOTS {
-                return Err(RootError::TooManyPending {
-                    limit: MAX_PENDING_ROOTS,
+            if pending >= MAX_PENDING_MAIN_OUTPUTS {
+                return Err(MainOutputError::TooManyPending {
+                    limit: MAX_PENDING_MAIN_OUTPUTS,
                 });
             }
-            let mut entry = RootFolds {
+            let mut entry = MainOutputFolds {
                 id,
-                topology: root,
+                topology: main_output,
                 by_device: Vec::new(),
             };
             entry.by_device = folds
@@ -580,45 +594,45 @@ impl<F: Float> OutputControl<F> {
                 .iter()
                 .map(|d| d.as_ref().map(|d| entry.column(d, &folds.routing)))
                 .collect();
-            folds.roots.push(entry);
+            folds.main_outputs.push(entry);
             Ok(true)
         })
     }
 
-    /// Whether the root generation `root` has a fold at `width` channels into
+    /// Whether the main output generation `main_output` has a fold at `width` channels into
     /// a device of `device` channels: the pair a commit of that width, or a
     /// restart onto that device, must be able to place.
     #[must_use]
-    pub fn has_fold(&self, root: RootId, width: usize, device: ChannelLayout) -> bool {
+    pub fn has_fold(&self, main_output: MainOutputId, width: usize, device: ChannelLayout) -> bool {
         self.cell
             .current()
-            .get(root, usize::from(device.count()), width)
+            .get(main_output, usize::from(device.count()), width)
             .is_some()
     }
 
-    /// Whether a root of `width` channels is one the generation `root` can
-    /// render at all, whichever device (a declared root has the one width).
+    /// Whether a main output of `width` channels is one the generation `main_output` can
+    /// render at all, whichever device (a declared main output has the one width).
     #[must_use]
-    pub fn has_width(&self, root: RootId, width: usize) -> bool {
+    pub fn has_width(&self, main_output: MainOutputId, width: usize) -> bool {
         self.cell
             .current()
-            .roots
+            .main_outputs
             .iter()
-            .find(|r| r.id == root)
+            .find(|r| r.id == main_output)
             .is_some_and(|r| r.has_width(width))
     }
 
-    /// Sets where the mix lands: the format the root is heard in and the map
-    /// to the device, composed into every root's folds into every device held
+    /// Sets where the mix lands: the format the main output is heard in and the map
+    /// to the device, composed into every main output's folds into every device held
     /// (one fold per pair, so the callback still applies one). Live: from the
     /// next segment the callback crossfades the same rendered channels from the
     /// old routing's folds to the new ones over the declick length
     /// ([`declick_frames`](tutti_graph::declick_frames)), with no restart.
     ///
     /// The change cuts instead, folding by the new routing at once, when a
-    /// root change is crossfading, when the last routing change (or device
+    /// main output change is crossfading, when the last routing change (or device
     /// statement) is still fading, when the old routing has no fold for the
-    /// root, or when no block has rendered yet. A root a routing cannot place on
+    /// main output, or when no block has rendered yet. A main output a routing cannot place on
     /// a device the stream does not render into has no fold into it
     /// ([`has_fold`](Self::has_fold)).
     ///
@@ -627,8 +641,8 @@ impl<F: Float> OutputControl<F> {
     ///
     /// # Errors
     ///
-    /// The [`RoutingError`] of the first root the routing cannot place on the
-    /// device the last block rendered into (a root of no declared width at the
+    /// The [`RoutingError`] of the first main output the routing cannot place on the
+    /// device the last block rendered into (a main output of no declared width at the
     /// width that block rendered); nothing is published. Before a block has
     /// rendered no device is in use and every routing is taken.
     pub fn set_routing(&self, routing: Routing) -> Result<(), RoutingError> {
@@ -665,24 +679,24 @@ impl<F: Float> OutputControl<F> {
         }
     }
 
-    /// As [`Engine::reclaim`](crate::Engine::reclaim): first the roots a plan
-    /// of a later root has rendered after are dropped from the published set,
+    /// As [`Engine::reclaim`](crate::Engine::reclaim): first the main outputs a plan
+    /// of a later main output has rendered after are dropped from the published set,
     /// then what that and every earlier publish retired is freed once no
     /// block holds it.
     pub fn reclaim(&self) -> usize {
         let installed = self.installed.load(Ordering::Acquire);
-        // The table is cloned only when a root drops; an idle tick reads.
+        // The table is cloned only when a main output drops; an idle tick reads.
         let retired = self
             .cell
             .current()
-            .roots
+            .main_outputs
             .iter()
             .any(|r| r.id.get() < installed);
         if retired {
             let _ = self.update(|folds| {
-                let before = folds.roots.len();
-                folds.roots.retain(|r| r.id.get() >= installed);
-                Ok::<_, std::convert::Infallible>(folds.roots.len() != before)
+                let before = folds.main_outputs.len();
+                folds.main_outputs.retain(|r| r.id.get() >= installed);
+                Ok::<_, std::convert::Infallible>(folds.main_outputs.len() != before)
             });
         }
         // A crossfade the audio thread has finished: its `previous` goes
@@ -702,8 +716,8 @@ impl<F: Float> OutputControl<F> {
     }
 }
 
-impl<F: Float> tutti_graph::RootGate for OutputControl<F> {
-    fn published(&self, root: RootId, outputs: usize) -> bool {
-        self.has_width(root, outputs)
+impl<F: Float> tutti_graph::MainOutputGate for OutputControl<F> {
+    fn published(&self, main_output: MainOutputId, outputs: usize) -> bool {
+        self.has_width(main_output, outputs)
     }
 }

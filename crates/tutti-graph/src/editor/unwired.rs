@@ -44,8 +44,8 @@ pub struct Unwired {
     pub event_edges: Vec<(EventIn, EventEdge)>,
     /// Bus edges into a bus the shape lacks or out of one, by the sink bus.
     pub bus_edges: Vec<(BusRef, BusFeed)>,
-    /// Bus edges into the root out of an output bus the shape lacks.
-    pub root_buses: Vec<BusFeed>,
+    /// Bus edges into the main output out of an output bus the shape lacks.
+    pub main_output_buses: Vec<BusFeed>,
     /// Param ports a source drove that no longer exists or whose source
     /// port is gone: the port, and the event output that drove it. The
     /// source is cleared; a param the shape no longer declares loses its
@@ -156,10 +156,10 @@ impl<F: Float> Editor<F> {
             });
             !feeds.is_empty()
         });
-        spec.root_sources.retain(|f| {
+        spec.main_output_sources.retain(|f| {
             let gone = feed_gone(f);
             if gone && f.fade != EdgeFade::Out {
-                out.root_buses.push(*f);
+                out.main_output_buses.push(*f);
             }
             !gone
         });

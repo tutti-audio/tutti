@@ -167,7 +167,7 @@ pub fn write_buffers(
 
 /// The master of `live`, forked offline at `rate` and assembled: what an
 /// export gets from a live graph (the session's fork, without its pool or
-/// root).
+/// main output).
 pub fn fork_offline(live: &Editor, rate: SampleRate) -> RenderGraph {
     let (editor, executor) = live
         .fork(

@@ -1,30 +1,30 @@
-//! The graph root's placement on the world outside it: a width is not a
-//! topology, so how a root of known or bare channels reaches a device or a
+//! The graph main output's placement on the world outside it: a width is not a
+//! topology, so how a main output of known or bare channels reaches a device or a
 //! file of which only the width is known lives here, once.
 
 use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker};
 use tutti_buffers::{Float, Fold, FoldEnd, FoldError, FoldLevels};
 
-/// The generation of the graph root: each commit that changes the root's
+/// The generation of the graph main output: each commit that changes the main output's
 /// declaration carries the next one.
 ///
-/// The plan carries it ([`Plan::root_id`](crate::Plan::root_id)), so what
-/// depends on the root's topology (the engine's folds into a device) is looked
+/// The plan carries it ([`Plan::main_output_id`](crate::Plan::main_output_id)), so what
+/// depends on the main output's topology (the engine's folds into a device) is looked
 /// up by the plan being rendered and swaps with it, and no topology crosses to
-/// the audio thread. The first root, before any declaration, is
+/// the audio thread. The first main output, before any declaration, is
 /// [`GENESIS`](Self::GENESIS).
 ///
 /// ```
-/// use tutti_graph::RootId;
+/// use tutti_graph::MainOutputId;
 ///
-/// assert!(RootId::GENESIS < RootId::GENESIS.next());
-/// assert_eq!(RootId::GENESIS.next().get(), RootId::GENESIS.get() + 1);
+/// assert!(MainOutputId::GENESIS < MainOutputId::GENESIS.next());
+/// assert_eq!(MainOutputId::GENESIS.next().get(), MainOutputId::GENESIS.get() + 1);
 /// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct RootId(u64);
+pub struct MainOutputId(u64);
 
-impl RootId {
-    /// The root a graph starts with: undeclared, the engine's order for its
+impl MainOutputId {
+    /// The main output a graph starts with: undeclared, the engine's order for its
     /// width.
     pub const GENESIS: Self = Self(0);
 
@@ -41,73 +41,73 @@ impl RootId {
     }
 }
 
-impl std::fmt::Display for RootId {
+impl std::fmt::Display for MainOutputId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-/// The old root's outputs a plan renders beside its own while a root change
+/// The old main output's outputs a plan renders beside its own while a main output change
 /// crossfades.
 ///
-/// A plan that carries one renders `base` channels of the new root (the root's
+/// A plan that carries one renders `base` channels of the new main output (the main output's
 /// width, [`Plan::global_outputs`](crate::Plan::global_outputs)) and, after
-/// them, the old root's channels: the same nodes, wired as the previous root
-/// wired them. The host folds each bank with its own root's fold and sums them
-/// under the [`fade`](Self::fade)'s gains, the old root's as the outgoing side,
+/// them, the old main output's channels: the same nodes, wired as the previous main output
+/// wired them. The host folds each bank with its own main output's fold and sums them
+/// under the [`fade`](Self::fade)'s gains, the old main output's as the outgoing side,
 /// for the first [`Fade::duration`](crate::Fade::duration) frames rendered
-/// since the commit that declared the new root
-/// ([`Executor::root_fade`](crate::Executor::root_fade) counts them). A later
-/// plan that leaves the root alone carries the same bank, and the count goes on
+/// since the commit that declared the new main output
+/// ([`Executor::main_output_fade`](crate::Executor::main_output_fade) counts them). A later
+/// plan that leaves the main output alone carries the same bank, and the count goes on
 /// through it.
 ///
-/// The old root's channels align to the total latency of the plan the root
+/// The old main output's channels align to the total latency of the plan the main output
 /// change was made from, through every plan that continues the fade: when the
-/// old and new totals differ, a source present in both roots is heard at two
+/// old and new totals differ, a source present in both main outputs is heard at two
 /// delays during the fade and shifts once at its end.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct RootBank {
-    /// The generation of the root that fades out.
-    pub old: RootId,
-    /// The index of the old root's first channel among the plan's outputs:
-    /// the new root's width.
+pub struct MainOutputBank {
+    /// The generation of the main output that fades out.
+    pub old: MainOutputId,
+    /// The index of the old main output's first channel among the plan's outputs:
+    /// the new main output's width.
     pub base: usize,
-    /// How the two roots trade places.
+    /// How the two main outputs trade places.
     pub fade: crate::Fade,
 }
 
-/// Why the graph root cannot be widened or placed.
+/// Why the graph main output cannot be widened or placed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
-pub enum RootError {
-    /// A graph root's channels were declared at one width and the root is, or
-    /// was asked to be, another: the declaration owns the root's width.
-    #[error("the root is declared {declared:?} wide and cannot be {requested:?}")]
+pub enum MainOutputError {
+    /// A graph main output's channels were declared at one width and the main output is, or
+    /// was asked to be, another: the declaration owns the main output's width.
+    #[error("the graph's main output is declared {declared:?} wide and cannot be {requested:?}")]
     Width {
-        /// The width the root was declared with.
+        /// The width the main output was declared with.
         declared: ChannelLayout,
-        /// The width the root has, or was asked to widen to.
+        /// The width the main output has, or was asked to widen to.
         requested: ChannelLayout,
     },
-    /// The root's channels cannot be placed.
+    /// The main output's channels cannot be placed.
     #[error(transparent)]
     Fold(#[from] FoldError),
-    /// A root was published under an id that is not past every root already
+    /// A main output was published under an id that is not past every main output already
     /// published: ids are minted in order by the one graph that declares them.
-    #[error("root {id} is not past the last published root {last}")]
+    #[error("main output {id} is not past the last published main output {last}")]
     NotPast {
         /// The id that was published.
-        id: RootId,
+        id: MainOutputId,
         /// The newest id already published.
-        last: RootId,
+        last: MainOutputId,
     },
-    /// Too many published roots are waiting for a plan to carry them: the
+    /// Too many published main outputs are waiting for a plan to carry them: the
     /// stream is not rendering (or not fast enough), so the engine holds the
-    /// roots in flight and takes no more until a plan of a later root has
+    /// main outputs in flight and takes no more until a plan of a later main output has
     /// rendered.
-    #[error("{limit} roots are published and none has rendered; wait for a block")]
+    #[error("{limit} main outputs are published and none has rendered; wait for a block")]
     TooManyPending {
-        /// The most roots that may be pending.
+        /// The most main outputs that may be pending.
         limit: usize,
     },
 }
