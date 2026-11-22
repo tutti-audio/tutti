@@ -406,11 +406,12 @@ mod stand_in_probe {
         assert!(catalog.is_blacklisted(&file));
     }
 
-    /// **A registration of a plugin that hangs its probe blacklists it** once
-    /// the deadline passes. The deadline is already up, so the probe is killed at
-    /// its first look whatever the load, and no step waits on the child.
+    /// **A registration whose probe is past the caller's deadline blacklists the
+    /// plugin**, as a timed-out probe. The deadline is already up, so the probe is
+    /// killed at its first look whatever it would have done, and no step waits on
+    /// the child. A listing written before the end is `settle`'s, tested there.
     #[test]
-    fn registering_a_plugin_that_hangs_its_probe_blacklists_it() {
+    fn registering_a_plugin_past_its_probe_deadline_blacklists_it() {
         let dir = tempfile::TempDir::new().expect("a scratch directory");
         let (mut catalog, file, _) = catalog_probed_by(&dir, HANG, Some(Duration::ZERO));
 
