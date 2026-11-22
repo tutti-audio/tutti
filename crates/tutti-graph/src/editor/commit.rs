@@ -376,7 +376,7 @@ impl<F: Float> Editor<F> {
                 .shapes
                 .get(&p.node)
                 .is_some_and(|shape| usize::from(p.port) < usize::from(shape.audio_out().count())),
-            PortSource::Global(ch) => ch < now.spec.topology.inputs.count(),
+            PortSource::MainInput(ch) => ch < now.spec.topology.inputs.count(),
             PortSource::Zero => false,
         };
         let mut kept = false;
@@ -457,7 +457,7 @@ impl<F: Float> Editor<F> {
             return Err(CommitError::Repreparing);
         }
         self.link.check_room()?;
-        self.limits.outputs(plan.global_outputs())?;
+        self.limits.outputs(plan.main_outputs())?;
         self.fade_room(&delta)?;
         plan.verify_fades(self.base().map(|p| &**p), &delta)
             .map_err(CommitError::Fade)?;

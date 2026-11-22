@@ -79,7 +79,7 @@ fn notes(k: u64) -> Vec<TimedMidiEvent> {
 }
 
 /// [`LIGHT`] eight-voice synths and [`HEAVY`] 32-voice ones, each played
-/// by a clip of its own, summed by the graph (a fan-in onto each of two global outputs);
+/// by a clip of its own, summed by the graph (a fan-in onto each of two main outputs);
 /// on a pool of `workers` when more than one. `declared`: the eight-voice
 /// synths as shipped, or wrapped to declare nothing.
 fn graph(workers: usize, declared: bool) -> Executor {
@@ -96,7 +96,7 @@ fn graph(workers: usize, declared: bool) -> Executor {
         )));
     }
     let sources = LIGHT + HEAVY;
-    // Two silent global outputs, which the fan-in below fills.
+    // Two silent main outputs, which the fan-in below fills.
     ed.spec_mut().topology.set_outputs([PortSource::Zero; 2]);
     for k in 0..sources {
         let (clip, key) = (NodeKey(100 + k), NodeKey(k + 1));

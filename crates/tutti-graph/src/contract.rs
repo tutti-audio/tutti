@@ -201,7 +201,7 @@ pub enum Detect {
 /// node crates' `tests/executor/contract.rs`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Path {
-    /// The excitation straight in: an upstream event source, or the global
+    /// The excitation straight in: an upstream event source, or the main
     /// input. Whole [`MAX_BLOCK`] blocks.
     Direct,
     /// Behind PDC: a latent sibling ([`Latent`], [`SIBLING_LATENCY`])
@@ -315,7 +315,7 @@ enum Topo {
 /// Where the excitation comes from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Feed {
-    /// An [`Emitter`] upstream, or the global input for an impulse.
+    /// An [`Emitter`] upstream, or the main input for an impulse.
     Source,
     /// Two emitters on one port.
     FanIn,
@@ -2197,7 +2197,7 @@ impl<F: Float> BlockRig<F> {
                     node: key,
                     port: c as u16,
                 },
-                crate::Edge::Direct(crate::PortSource::Global(c as u16)),
+                crate::Edge::Direct(crate::PortSource::MainInput(c as u16)),
             );
         }
         topology.outputs = (0..outs)

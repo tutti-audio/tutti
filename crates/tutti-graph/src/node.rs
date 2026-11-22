@@ -1012,7 +1012,7 @@ mask!(
 mask!(
     /// Audio ports with something on the other end: an input port with at
     /// least one source, an output port with at least one consumer (an edge,
-    /// a feedback edge, a global output, a tap or a meter). Exact, never a
+    /// a feedback edge, a main output, a tap or a meter). Exact, never a
     /// hint: an unset input reads silence because nothing feeds it.
     WiredMask
 );

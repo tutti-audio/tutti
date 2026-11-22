@@ -152,9 +152,9 @@ fn validate_reports_every_fault_at_once() {
     // (3) an edge naming a node that is not in the map
     t.edges
         .insert(at(A, 0), vec![Edge::Direct(PortSource::Node(out(C, 0)))]);
-    // (4) a global-input edge past the declared input width
+    // (4) a main-input edge past the declared input width
     t.edges
-        .insert(at(B, 1), vec![Edge::Direct(PortSource::Global(5))]);
+        .insert(at(B, 1), vec![Edge::Direct(PortSource::MainInput(5))]);
     // (5) an output channel from a port that does not exist
     t.set_outputs(vec![PortSource::Node(out(B, 3))]);
 
@@ -177,7 +177,7 @@ fn validate_reports_every_fault_at_once() {
     );
     assert!(
         errs.iter()
-            .any(|e| matches!(e, Invalid::GlobalInputOutOfRange { channel, .. } if *channel == 5)),
+            .any(|e| matches!(e, Invalid::MainInputOutOfRange { channel, .. } if *channel == 5)),
         "{errs:?}"
     );
     assert!(
@@ -188,7 +188,7 @@ fn validate_reports_every_fault_at_once() {
 }
 
 /// A sink's sources are a set: the same edge twice at one input port, or at
-/// one global output channel, is `DuplicateEdge`. Two different sources are
+/// one main output channel, is `DuplicateEdge`. Two different sources are
 /// not (that is a fan-in, which `validate` accepts and `compile` refuses for
 /// now), and neither is the same node on two ports.
 #[test]
@@ -313,7 +313,7 @@ fn connect_and_disconnect_keep_the_set_canonical() {
 }
 
 /// A tap lane naming a source that does not exist (a node port past the
-/// node's width, a node not in the map, a global input past the declared
+/// node's width, a node not in the map, a main input past the declared
 /// width) is not a fault: the compiler reads silence for it, so a display or
 /// a recording cannot wedge the graph. `validate` accepts all of them.
 #[test]
@@ -327,7 +327,7 @@ fn a_tap_lane_naming_a_missing_source_is_not_a_fault() {
                 PortSource::Zero,
                 PortSource::Node(out(B, 3)),
                 PortSource::Node(out(C, 0)),
-                PortSource::Global(5),
+                PortSource::MainInput(5),
             ],
             align: TapAlign::ToOutput,
         },
@@ -456,24 +456,24 @@ fn insertion_order_does_not_change_the_value() {
     );
 }
 
-/// The default topology has **no** global inputs.
+/// The default topology has **no** main inputs.
 ///
-/// Not a formality: with any global inputs, a `PortSource::Global(1)` typo would
+/// Not a formality: with any main inputs, a `PortSource::MainInput(1)` typo would
 /// resolve against them instead of being rejected as out of range.
 /// `ChannelLayout` has no `Default`, so the impl is hand-written; this pins its
 /// *choice* of width, which the compiler cannot.
 #[test]
-fn the_default_topology_has_no_global_inputs() {
+fn the_default_topology_has_no_main_inputs() {
     let t = Topology::default();
     assert_eq!(t.inputs, ChannelLayout::EMPTY);
 
     let mut t = chain();
     t.edges
-        .insert(at(B, 0), vec![Edge::Direct(PortSource::Global(1))]);
-    let errs = t.validate().expect_err("no global input to name");
+        .insert(at(B, 0), vec![Edge::Direct(PortSource::MainInput(1))]);
+    let errs = t.validate().expect_err("no main input to name");
     assert!(
         errs.iter()
-            .any(|e| matches!(e, Invalid::GlobalInputOutOfRange { channel, .. } if *channel == 1)),
+            .any(|e| matches!(e, Invalid::MainInputOutOfRange { channel, .. } if *channel == 1)),
         "{errs:?}"
     );
 }

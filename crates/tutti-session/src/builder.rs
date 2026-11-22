@@ -698,7 +698,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
 }
 
 impl<C: Clock> SessionBuilder<C> {
-    /// Global graph inputs (hardware or host input channels). Default none
+    /// Main inputs (hardware or host input channels). Default none
     /// ([`ChannelLayout::EMPTY`]).
     #[must_use]
     pub fn inputs(mut self, inputs: ChannelLayout) -> Self {
@@ -1188,7 +1188,7 @@ impl<C: Clock> SessionBuilder<C> {
 /// rather than upmixing, so nothing downstream can recover them.
 ///
 /// The [`MAX_CHANNELS`] clamp is applied here, at construction:
-/// `Engine::new` bounds the editor to that many global outputs, so a wider
+/// `Engine::new` bounds the editor to that many main outputs, so a wider
 /// main output would be refused at its first commit and never play. An export's
 /// fork is prepared on its own, with no such cap.
 pub fn main_output_width(project: ChannelLayout, device: ChannelLayout) -> usize {

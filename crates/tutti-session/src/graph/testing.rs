@@ -199,8 +199,8 @@ impl<F: Float> AudioSide<F> {
         }
     }
 
-    /// Renders one frame, with silence on every global input, into `output`:
-    /// one value per global output. Commits sent since the last call land
+    /// Renders one frame, with silence on every main input, into `output`:
+    /// one value per main output. Commits sent since the last call land
     /// first.
     pub fn tick(&mut self, output: InterleavedMut<'_, F>) {
         render(&mut self.exec, &mut self.scratch, &self.transport, output);
@@ -214,8 +214,8 @@ impl<F: Float> AudioSide<F> {
         self.transport = transport;
     }
 
-    /// Renders `output`'s frames with no global input into it, planar, one
-    /// plane per global output, in the blocks a device would hand over:
+    /// Renders `output`'s frames with no main input into it, planar, one
+    /// plane per main output, in the blocks a device would hand over:
     /// executor blocks of up to `block` frames, each under the transport
     /// last [set](Self::set_transport) (stopped at beat zero until one is). A
     /// plane the graph has no output for stays silent.
@@ -236,9 +236,9 @@ impl<F: Float> AudioSide<F> {
             exec.apply_pending();
             let (ins, outs, main_output) = exec.plan().map_or((0, 0, 0), |p| {
                 (
-                    p.global_inputs() as usize,
+                    p.main_inputs() as usize,
                     p.rendered_outputs(),
-                    p.global_outputs(),
+                    p.main_outputs(),
                 )
             });
             let zeros = vec![F::ZERO; len];
