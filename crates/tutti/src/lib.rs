@@ -939,7 +939,7 @@ pub mod midi {
     /// `midi-network`.
     ///
     /// ```
-    /// use tutti::midi::network::{Credentials, EndpointIdentity};
+    /// use tutti::midi::network::EndpointIdentity;
     /// use tutti::midi::{EndpointName, ProductInstanceId};
     ///
     /// let identity = EndpointIdentity::new(
@@ -947,20 +947,17 @@ pub mod midi {
     ///     ProductInstanceId::new("HOST-1").unwrap(),
     /// );
     /// assert!(identity.is_some());
-    /// let _ = Credentials::none();
     /// ```
     #[cfg(all(feature = "midi-network", not(target_arch = "wasm32")))]
     pub mod network {
         pub use tutti_midi_network::{
-            Admission, Advertisement, AuthFailure, AuthMethods, Browser, ByeReason, Credentials,
-            DiscoveryError, EndedBy, EndpointIdentity, Fec, FoundHost, HostEvent, IdleInterval,
-            IdleIntervalOutOfRange, InstanceName, InstanceNameError, PendingHosts, Requests,
-            Retransmit, SessionConfig, Timer, TimerOutOfRange, Username,
+            Admission, Advertisement, AuthFailure, AuthMethods, Browser, ByeReason, Client,
+            Credentials, DiscoveryError, EndedBy, EndpointIdentity, Fec, FoundHost, Host,
+            HostEvent, IdleInterval, IdleIntervalOutOfRange, InstanceName, InstanceNameError,
+            PendingHosts, Requests, Retransmit, SessionConfig, Timer, TimerOutOfRange, Username,
         };
         #[cfg(feature = "session")]
-        pub use tutti_session::{
-            ClientEnd, HostEnd, MidiNetwork, NetworkError, NetworkReport, OpenClient, OpenHost,
-        };
+        pub use tutti_session::{MidiNetwork, NetworkError, NetworkReport, OpenClient, OpenHost};
     }
 
     /// MIDI-CI Property Exchange (M2-103 and its resource specifications): a

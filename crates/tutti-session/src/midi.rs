@@ -928,18 +928,11 @@ impl MidiState {
     pub(crate) fn midi_input_phase<F: Float>(
         &mut self,
         io: Option<&mut tutti_midi_hardware::MidiSession>,
-        nodes: Option<&MidiNodes>,
         graph: &mut Graph<F>,
         now: Instant,
-        networks_changed: bool,
         out: &mut Vec<crate::SessionEvent>,
     ) -> bool {
-        let Some(io) = io else {
-            if networks_changed {
-                self.compile_feeds_for(nodes, graph);
-            }
-            return networks_changed;
-        };
+        let Some(io) = io else { return false };
         // Drained first: reopening a device takes the state mutably.
         let pending: Vec<_> = self
             .device_events
@@ -948,9 +941,6 @@ impl MidiState {
             .collect();
         let rate = graph.prepared().sample_rate();
         let edits = self.ports.poll(io, graph, rate, pending, now, out);
-        if edits.routes || networks_changed {
-            self.compile_feeds_for(nodes, graph);
-        }
         if !self.watch_failure_reported
             && let Some(why) = self
                 .device_events
@@ -960,7 +950,7 @@ impl MidiState {
             self.watch_failure_reported = true;
             out.push(MidiReport::WatchFailed(why).into());
         }
-        edits.graph || edits.routes || networks_changed
+        edits.graph || edits.routes
     }
 
     /// Compiles the session's own route rules onto every input port's input node

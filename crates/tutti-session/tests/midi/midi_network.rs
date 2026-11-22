@@ -1,10 +1,7 @@
-//! A network endpoint as the session's MIDI: a Client or a Host bound by
-//! `Midi::open_network_client` and `open_network_host`, over real UDP sockets on the loopback interface.
-//!
-//! The peer of a Host is a bare `Client` endpoint on a socket of the test's, so
-//! each wait is a blocking read of a datagram (under a hang guard) and a Ping is
-//! the barrier that says the Host's socket task has taken everything sent before
-//! it. The session is read the way an app reads it: through `update`.
+//! A network endpoint as the session's MIDI, over real UDP sockets on loopback. A
+//! Host's peer is a bare `Client` on a socket of the test's: each wait is a blocking
+//! read under a hang guard, and a Ping is the barrier that says the Host's socket
+//! task has taken everything sent before it.
 
 use std::net::{SocketAddr, UdpSocket};
 use std::time::Duration;
@@ -18,13 +15,13 @@ use tutti_midi_network::{
 };
 use tutti_platform::{Executor, Instant};
 use tutti_session::{
-    HostEnd, MidiNetwork, MidiReport, MidiRouteRule, NetworkError, NetworkReport, OpenClient,
-    OpenHost, Session, SessionEvent, Stamp,
+    MidiNetwork, MidiReport, MidiRouteRule, NetworkError, NetworkReport, OpenClient, OpenHost,
+    Session, SessionEvent, Stamp,
 };
 use tutti_ump::{EndpointName, Message, MidiChannel, NoteNumber, NoteVelocity, ProductInstanceId};
 use tutti_ump::{Ump, Voice2};
 
-/// A hang guard: a wait that ends in time never reaches it.
+/// A hang guard, never reached by a wait that ends.
 const HANG_GUARD: Duration = Duration::from_secs(30);
 
 fn identity(name: &str, id: &str) -> EndpointIdentity {
@@ -130,6 +127,24 @@ impl Peer {
         }
     }
 
+    /// Connects and returns once the Host has the Session, and its socket task has
+    /// taken everything sent so far.
+    fn join(&mut self) {
+        self.connect();
+        self.established();
+        self.barrier(1);
+    }
+
+    /// Reads datagrams until the Session ends: who ended it, and why.
+    fn closed(&mut self) -> (EndedBy, ByeReason) {
+        self.next_event(|e| match e {
+            Event::Closed {
+                ended_by, reason, ..
+            } => Some((*ended_by, *reason)),
+            _ => None,
+        })
+    }
+
     fn send(&mut self, packets: &[Ump]) {
         self.client.send(Instant::now(), packets).unwrap();
         self.flush();
@@ -142,11 +157,11 @@ impl Peer {
 }
 
 /// A session, and a Host endpoint it opened on a port the OS picked.
-fn hosting(admission: Admission) -> (Session, MidiNetwork<HostEnd>, u16) {
+fn hosting(admission: Admission) -> (Session, MidiNetwork<Host>, u16) {
     let mut s = offline();
     let net = s
         .midi()
-        .open_network_host(OpenHost::host(identity("Studio", "HOST-1"), 0).admission(admission))
+        .open_network_host(OpenHost::new(identity("Studio", "HOST-1"), 0).admission(admission))
         .expect("binds");
     let port = net.local_addr().unwrap().port();
     let _ = s.update();
@@ -164,9 +179,8 @@ fn reports(events: Vec<SessionEvent>) -> Vec<NetworkReport> {
         .collect()
 }
 
-/// A peer invites a Host that confirms: the invitation is reported and waits, a
-/// call that names no invitation is refused, and an accept establishes the Session
-/// with an input node of its own in the graph.
+/// An invitation to a confirming Host is reported and waits; an accept gives the
+/// peer an input node in the graph.
 #[test]
 fn an_invitation_is_reported_and_an_accept_gives_the_peer_an_input_node() {
     let (mut s, net, port) = hosting(Admission::Confirm);
@@ -202,8 +216,7 @@ fn an_invitation_is_reported_and_an_accept_gives_the_peer_an_input_node() {
     assert_eq!(net.accept(laptop), Err(NetworkError::NoInvitation));
 }
 
-/// A Host that declines tells the peer: its Bye carries the reason, and no input
-/// entry was made.
+/// A decline tells the peer, with its reason, and makes no input entry.
 #[test]
 fn a_decline_ends_the_invitation_with_its_reason() {
     let (mut s, net, port) = hosting(Admission::Confirm);
@@ -213,12 +226,7 @@ fn a_decline_ends_the_invitation_with_its_reason() {
     peer.barrier(1);
     let _ = s.update();
     net.decline(laptop).unwrap();
-    let (by, reason) = peer.next_event(|e| match e {
-        Event::Closed {
-            ended_by, reason, ..
-        } => Some((*ended_by, *reason)),
-        _ => None,
-    });
+    let (by, reason) = peer.closed();
     assert_eq!((by, reason), (EndedBy::Remote, ByeReason::UserDeclined));
     // The peer answered the Bye; the Host's socket task has taken the answer.
     peer.barrier(2);
@@ -234,9 +242,8 @@ fn a_decline_ends_the_invitation_with_its_reason() {
     assert!(net.inputs().is_empty());
 }
 
-/// UMP a peer sends reaches a node of the graph: through the peer's input node,
-/// on the route rule the session declared, once the update has read what the
-/// link queued and a block has rendered.
+/// UMP a peer sends reaches a node of the graph through the peer's input node and
+/// the session's route rule.
 #[test]
 fn a_peers_ump_reaches_a_graph_node() {
     let (mut s, net, port) = hosting(Admission::Open);
@@ -245,9 +252,7 @@ fn a_peers_ump_reaches_a_graph_node() {
         .route(MidiRouteRule::new().to(target))
         .expect("the tap takes MIDI");
     let mut peer = Peer::new("Laptop", port);
-    peer.connect();
-    peer.established();
-    peer.barrier(1);
+    peer.join();
     let heard = reports(s.update());
     assert!(
         matches!(&heard[..], [NetworkReport::Connected { .. }]),
@@ -274,9 +279,7 @@ fn a_graph_event_reaches_the_peer() {
         .expect("the output takes MIDI");
     let _ = s.update();
     let mut peer = Peer::new("Laptop", port);
-    peer.connect();
-    peer.established();
-    peer.barrier(1);
+    peer.join();
     let _ = s.update();
 
     keys.note_on(
@@ -296,8 +299,7 @@ fn a_graph_event_reaches_the_peer() {
     assert_eq!(net.losses().refused, 0, "a Session took it");
 }
 
-/// With no Session established the output has nowhere to send: what the graph
-/// sends is counted as refused, never waited on.
+/// With no Session the output has nowhere to send: events are counted refused.
 #[test]
 fn an_event_with_no_peer_is_counted_refused() {
     let (mut s, net, _) = hosting(Admission::Open);
@@ -315,18 +317,15 @@ fn an_event_with_no_peer_is_counted_refused() {
     assert_eq!(net.losses().refused, 1);
 }
 
-/// A Host's Clients each have an input node of their own, and a Bye from one
-/// ends its entry (reported with who ended it and why, its node taken out once
-/// the graph has rendered past the release) and no other.
+/// A Host's Clients each have an input node of their own; a Bye from one ends its
+/// entry alone, reported with who ended it and why.
 #[test]
 fn a_peers_bye_ends_its_input_entry_alone() {
     let (mut s, net, port) = hosting(Admission::Open);
     let mut stay = Peer::new("Stays", port);
     let mut leave = Peer::new("Leaves", port);
     for peer in [&mut stay, &mut leave] {
-        peer.connect();
-        peer.established();
-        peer.barrier(1);
+        peer.join();
     }
     let heard = reports(s.update());
     assert_eq!(heard.len(), 2, "{heard:?}");
@@ -355,77 +354,57 @@ fn a_peers_bye_ends_its_input_entry_alone() {
     assert!(s.graph().contains(stays_node));
 }
 
-/// Dropping the handle ends the network: the next update retires the entries, and
-/// the link's Bye reaches every peer, sent from the executor's pool.
+/// Dropping the handle ends the network: the next update retires the entries and
+/// the link's Bye reaches every peer.
 #[test]
 fn dropping_the_network_sends_bye_to_the_peer() {
     let (mut s, net, port) = hosting(Admission::Open);
     let mut peer = Peer::new("Laptop", port);
-    peer.connect();
-    peer.established();
-    peer.barrier(1);
+    peer.join();
     let _ = s.update();
     let node = net.input_node(identity("Laptop", "Laptop")).unwrap();
 
     drop(net);
     let _ = s.update();
-    let (by, reason) = peer.next_event(|e| match e {
-        Event::Closed {
-            ended_by, reason, ..
-        } => Some((*ended_by, *reason)),
-        _ => None,
-    });
+    let (by, reason) = peer.closed();
     assert_eq!((by, reason), (EndedBy::Remote, ByeReason::PowerDown));
     blocks(&s, 2);
     let _ = s.update();
     assert!(!s.graph().contains(node), "the peer's input node left");
 }
 
-/// A handle that outlives its session still ends cleanly: the link says Bye when
-/// the last clone drops, though the executor it ran on is gone.
+/// A session ends its links when it drops, whatever handles live: the peer's Bye
+/// arrives when the session drops, not when the handle does.
 #[test]
-fn a_handle_may_outlive_its_session() {
+fn the_session_ends_its_links_when_it_drops_though_a_handle_lives() {
     let (mut s, net, port) = hosting(Admission::Open);
     let mut peer = Peer::new("Laptop", port);
-    peer.connect();
-    peer.established();
-    peer.barrier(1);
+    peer.join();
     let _ = s.update();
     drop(s);
+    assert_eq!(peer.closed(), (EndedBy::Remote, ByeReason::PowerDown));
     drop(net);
-    let (by, reason) = peer.next_event(|e| match e {
-        Event::Closed {
-            ended_by, reason, ..
-        } => Some((*ended_by, *reason)),
-        _ => None,
-    });
-    assert_eq!((by, reason), (EndedBy::Remote, ByeReason::PowerDown));
 }
 
-/// A peer that comes back under its identity from another address replaces its
-/// entry: the old one ends, reported before the new one connects, and the new one
-/// has an input node of its own.
+/// A peer back under its identity from another address replaces its entry, reported
+/// before the new one connects, with an input node of its own.
 #[test]
 fn a_peer_back_from_another_address_replaces_its_entry() {
     let (mut s, net, port) = hosting(Admission::Open);
     let laptop = identity("Laptop", "Laptop");
     let mut first = Peer::new("Laptop", port);
-    first.connect();
-    first.established();
-    first.barrier(1);
+    first.join();
     let _ = s.update();
     let old = net.input_node(laptop).unwrap();
 
     let mut second = Peer::new("Laptop", port);
-    second.connect();
-    second.established();
-    second.barrier(1);
+    second.join();
     let heard = reports(s.update());
     assert!(
         matches!(
             &heard[..],
             [
-                NetworkReport::Ended { identity: gone, by: EndedBy::Remote, .. },
+                NetworkReport::Replaced { identity: gone },
                 NetworkReport::Connected { identity: came },
             ] if *gone == laptop && *came == laptop
         ),
@@ -456,7 +435,7 @@ fn a_client_session_hears_its_host() {
     s.midi().route(MidiRouteRule::new().to(target)).unwrap();
     let net = s
         .midi()
-        .open_network_client(OpenClient::client(
+        .open_network_client(OpenClient::new(
             identity("Laptop", "CLIENT-1"),
             SocketAddr::from(([127, 0, 0, 1], addr.port())),
         ))

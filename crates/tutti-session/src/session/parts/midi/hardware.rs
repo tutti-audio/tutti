@@ -65,11 +65,10 @@ impl Hardware {
         nodes: Option<&MidiNodes>,
         graph: &mut Graph<F>,
         now: Instant,
-        networks_changed: bool,
         out: &mut Vec<SessionEvent>,
     ) -> bool {
         self.apply_policy(nodes);
-        state.midi_input_phase(self.io.as_mut(), nodes, graph, now, networks_changed, out)
+        state.midi_input_phase(self.io.as_mut(), graph, now, out)
     }
 
     fn apply_policy(&mut self, nodes: Option<&MidiNodes>) {

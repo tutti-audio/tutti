@@ -131,14 +131,14 @@ impl MidiPart {
         let networks = self
             .state
             .midi_network_phase(self.nodes.as_ref(), graph, out);
-        self.hardware.poll(
-            &mut self.state,
-            self.nodes.as_ref(),
-            graph,
-            now,
-            networks,
-            out,
-        )
+        let devices = self
+            .hardware
+            .poll(&mut self.state, self.nodes.as_ref(), graph, now, out);
+        // The input nodes may have changed in either: the routes are compiled once.
+        if networks || devices {
+            self.state.compile_feeds_for(self.nodes.as_ref(), graph);
+        }
+        networks || devices
     }
 
     /// The tempo, the MIDI clock and Machine Control the session follows, read

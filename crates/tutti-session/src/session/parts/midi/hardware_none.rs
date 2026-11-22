@@ -35,21 +35,16 @@ impl Hardware {
         0
     }
 
-    /// No device to step: the routes are compiled again when the networks changed
-    /// the set of input nodes.
+    /// No device to step.
     pub(crate) fn poll<F: Float>(
         &mut self,
-        state: &mut MidiState,
-        nodes: Option<&MidiNodes>,
-        graph: &mut Graph<F>,
+        _: &mut MidiState,
+        _: Option<&MidiNodes>,
+        _: &mut Graph<F>,
         _: Instant,
-        networks_changed: bool,
         _: &mut Vec<SessionEvent>,
     ) -> bool {
-        if networks_changed {
-            state.compile_feeds_for(nodes, graph);
-        }
-        networks_changed
+        false
     }
 
     /// No inlet to place.
