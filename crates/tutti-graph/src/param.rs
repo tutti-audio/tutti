@@ -1040,8 +1040,10 @@ pub(crate) struct PortState<F: Float> {
     source: Option<EventOutputPort>,
     /// Whether the last block delivered frames.
     modulated: bool,
-    /// Whether the port's [`EffectiveCell`] reads `Driven`.
-    shown: bool,
+    /// What the port's [`EffectiveCell`] reads, as far as this state knows.
+    /// A state starts `Unknown`: the cell is the key's, and a unit placed
+    /// without a crossfade replaced a state that may have left it `Driven`.
+    shown: Shown,
     /// The last frame delivered.
     last: F,
     /// The base at the end of the last block.
@@ -1055,13 +1057,22 @@ pub(crate) struct PortState<F: Float> {
     ramp: Ramp,
 }
 
+/// What a port state knows of its [`EffectiveCell`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Shown {
+    /// Not written by this state yet: its first block stores either way.
+    Unknown,
+    Idle,
+    Driven,
+}
+
 impl<F: Float> Default for PortState<F> {
     fn default() -> Self {
         Self {
             fresh: true,
             source: None,
             modulated: false,
-            shown: false,
+            shown: Shown::Unknown,
             last: F::ZERO,
             last_base: F::ZERO,
             hold: F::ZERO,
@@ -1165,6 +1176,17 @@ impl<F: Float> ParamState<F> {
         Self::new(1, max, declick, ranges.readers(), ranges.lanes())
     }
 
+    /// Reads no lane from the cells: for a state that is dropped while its
+    /// ports may still read `Driven`. Audio side, wait-free.
+    pub(crate) fn release_lanes(&mut self) {
+        for (st, lane) in self.ports.iter_mut().zip(&self.lanes) {
+            if st.shown != Shown::Idle {
+                lane.release();
+                st.shown = Shown::Idle;
+            }
+        }
+    }
+
     /// The lane has run a block undriven: its first block under a source is
     /// a connection to a running port, not a first block.
     pub(crate) fn resume(&mut self) {
@@ -1235,12 +1257,13 @@ impl<F: Float> ParamState<F> {
         let Some(b1) = base else {
             // A node that cannot say its base is never driven: it reads
             // its own control. No state to carry.
-            if st.shown
+            if st.shown != Shown::Idle
                 && let Some(lane) = self.lanes.get(k)
             {
                 lane.release();
             }
             *st = PortState::default();
+            st.shown = Shown::Idle;
             return;
         };
         let source = m.map(|(from, _)| from);
@@ -1258,11 +1281,11 @@ impl<F: Float> ParamState<F> {
         }
         let fading = st.fade < d;
         if source.is_none() && !fading {
-            if st.shown
+            if st.shown != Shown::Idle
                 && let Some(lane) = self.lanes.get(k)
             {
                 lane.release();
-                st.shown = false;
+                st.shown = Shown::Idle;
             }
             st.modulated = false;
             return;
@@ -1343,11 +1366,11 @@ impl<F: Float> ParamState<F> {
         if let Some(lane) = self.lanes.get(k) {
             let last: f64 = st.last.into();
             if last.is_finite() {
-                lane.deliver(last, !st.shown);
-                st.shown = true;
-            } else if st.shown {
+                lane.deliver(last, st.shown != Shown::Driven);
+                st.shown = Shown::Driven;
+            } else if st.shown != Shown::Idle {
                 lane.release();
-                st.shown = false;
+                st.shown = Shown::Idle;
             }
         }
         self.framed[k] = true;

@@ -415,7 +415,8 @@ impl<F: Float> SumLane<F> {
                 }
             }
             other => {
-                if let Some(old) = other {
+                if let Some(mut old) = other {
+                    old.release_lanes();
                     crate::exec::place(spare, old);
                 }
                 if prev.is_some()
