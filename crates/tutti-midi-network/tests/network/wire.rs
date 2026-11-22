@@ -703,3 +703,13 @@ fn a_command_stays_small() {
     let size = std::mem::size_of::<Command>();
     assert!(size <= 160, "{size}");
 }
+
+/// Spec: m2-124/5.3#1
+#[test]
+fn a_leading_byte_order_mark_is_refused_in_every_wire_string() {
+    assert!(ByeText::new("\u{FEFF}Keys").is_none());
+    assert!(NakText::new("\u{FEFF}Keys").is_none());
+    assert!(Username::new("\u{FEFF}Keys").is_none());
+    // U+FEFF inside a string is a zero-width no-break space, not a BOM.
+    assert!(Username::new("Ke\u{FEFF}ys").is_some());
+}

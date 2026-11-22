@@ -28,8 +28,9 @@
 
 #![cfg(feature = "conformance")]
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tutti_fixtures::main_thread;
+use tutti_rt::Mutex;
 
 use tutti_vst3_host::host::{send_key_down, send_key_up, send_wheel, set_view_focus};
 
@@ -75,10 +76,7 @@ impl Class for RecordingView {
 
 impl RecordingView {
     fn record(&self, input: Input) {
-        self.inputs
-            .lock()
-            .expect("recording lock poisoned")
-            .push(input);
+        self.inputs.lock().push(input);
     }
 }
 
@@ -167,7 +165,7 @@ fn view_answering(answer: tresult) -> (ComWrapper<RecordingView>, Arc<Mutex<Vec<
 }
 
 fn recorded(log: &Arc<Mutex<Vec<Input>>>) -> Vec<Input> {
-    log.lock().expect("recording lock poisoned").clone()
+    log.lock().clone()
 }
 
 /// The three key arguments reach the plugin exactly as given.

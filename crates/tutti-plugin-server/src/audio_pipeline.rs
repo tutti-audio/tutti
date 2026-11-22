@@ -1324,7 +1324,7 @@ mod tests {
         const N: usize = 128;
         const SR: f64 = 48_000.0;
 
-        let _lock = crate::test_utils::plugin_load_lock();
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
         let (mut plugin, _) = Server::<Vst3Loaded>::load(
             tutti_fixtures::main_thread(),
             &tutti_fixtures::detached_work(),

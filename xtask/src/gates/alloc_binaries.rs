@@ -69,24 +69,8 @@ pub(super) const EXEMPT: &[(&str, &str)] = &[
 /// test node or helper that allocates inside an `RtScope`.
 pub(super) const DEBT: &[(&str, &str)] = &[
     (
-        "crates/tutti-nodes/tests/control/main.rs",
-        "control_lane::a_constant_layer_is_one_held_value: Vec growth in SegSink::process, tests/control/control_lane.rs:94",
-    ),
-    (
-        "crates/tutti-nodes/tests/node_contract/main.rs",
-        "matrix_tail::a_burst_after_a_parked_gap_is_a_fresh_nodes_at_any_block_size: Recording::process, tests/node_contract/matrix_tail.rs:70",
-    ),
-    (
-        "crates/tutti-sampler/tests/offline/main.rs",
-        "offline_disk_voice::a_fork_follows_a_looping_render_timeline: FileIn::open inside a render, tutti-codec src/decode/read.rs:223 via tutti-sampler src/voice/offline_read.rs:321",
-    ),
-    (
         "crates/tutti-soundfont/tests/graph/main.rs",
         "contract::soundfont::direct: tutti_graph::contract::Recorder::process, tutti-graph src/contract.rs:1534",
-    ),
-    (
-        "crates/tutti-soundfont/tests/player/main.rs",
-        "universal::general_midi_off_also_returns_to_the_initial_status: Player::universal, tutti-soundfont src/player.rs:389",
     ),
 ];
 

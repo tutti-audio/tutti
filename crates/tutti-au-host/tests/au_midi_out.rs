@@ -47,9 +47,9 @@
 
 #![cfg(target_os = "macos")]
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 mod support;
 use support::corpus::{DELAY, DLS_SYNTH, LOWPASS, SAMPLER, every_component};
@@ -81,12 +81,6 @@ fn note(e: &tutti_plugin_types::WireMidi) -> Option<u8> {
 /// Whether the event is a note-on.
 fn is_note_on(e: &tutti_plugin_types::WireMidi) -> bool {
     matches!(voice(e), Some((_, Voice2::NoteOn { .. })))
-}
-
-/// Recover from poisoning: the guard only serializes, it protects no shared state,
-/// so one panicking test must not convert into N spurious failures.
-fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock_recover()
 }
 
 const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
@@ -233,7 +227,7 @@ impl PacketListBuf {
 /// hits it does not "fix" it by deleting the assertion.
 #[test]
 fn no_installed_au_publishes_midi_output_info() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut publishers = Vec::new();
     let mut probed = 0usize;
 
@@ -288,7 +282,7 @@ fn no_installed_au_publishes_midi_output_info() {
 /// if it does.
 #[test]
 fn accepting_the_callback_write_does_not_mean_the_au_emits_midi() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in [DELAY, LOWPASS] {
         let mut au = unit.open_uninitialized(RATE, BLOCK);
         assert!(
@@ -326,7 +320,7 @@ fn accepting_the_callback_write_does_not_mean_the_au_emits_midi() {
 /// the ordering held.
 #[test]
 fn install_then_withdraw_leaves_the_au_renderable() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in [DELAY, SAMPLER] {
         let mut au = unit.open_uninitialized(RATE, BLOCK);
         let registration = au
@@ -391,7 +385,7 @@ fn install_then_withdraw_leaves_the_au_renderable() {
 /// invoked a *dangling* sink would crash rather than increment.
 #[test]
 fn no_delivery_arrives_after_the_callback_is_withdrawn() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let calls = Arc::new(AtomicUsize::new(0));
     let events = Arc::new(AtomicUsize::new(0));
 
@@ -472,7 +466,7 @@ fn no_delivery_arrives_after_the_callback_is_withdrawn() {
 /// `userData` and this render is what would dereference it.
 #[test]
 fn dropping_the_registration_withdraws_the_callback() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let calls = Arc::new(AtomicUsize::new(0));
     let mut au = DELAY.open_uninitialized(RATE, BLOCK);
     {
@@ -513,7 +507,7 @@ fn dropping_the_registration_withdraws_the_callback() {
 /// cannot null another's callback, because there is no other handle.
 #[test]
 fn a_second_install_on_a_unit_is_refused_until_the_first_is_withdrawn() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open_uninitialized(RATE, BLOCK);
 
     let first = au

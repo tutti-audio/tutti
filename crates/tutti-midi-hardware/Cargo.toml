@@ -11,16 +11,26 @@ keywords = ["midi", "ump", "audio", "real-time"]
 categories = ["multimedia::audio", "hardware-support"]
 
 [features]
+# One backend per OS, each a no-op off its OS: it enables that OS's ffi crate, and
+# `build.rs` names the backend from the target and these features. With none of the
+# three, the backend is the stub, which lists no device.
+default = ["alsa", "coremidi", "winmm"]
+# The ALSA UMP sequencer on Linux (needs alsa-lib >= 1.2.10, else the stub).
+alsa = ["dep:tutti-alsa-ffi"]
+# CoreMIDI on macOS.
+coremidi = ["dep:tutti-coremidi-ffi"]
+# Windows Multimedia on Windows.
+winmm = ["dep:tutti-winmm-ffi"]
 # `Serialize`/`Deserialize` on `MidiHardwareConfig` and `InputTiming`.
 serde = ["dep:serde", "tutti-ump/serde"]
 # Exports `test_support::FakeBackend`, a device list with no OS behind it.
 testing = []
 # The suites that need a real ALSA sequencer (`/dev/snd/seq`); Linux only. They
 # stand in for devices through `tutti-alsa-ffi`'s `testing` hooks.
-sequencer-tests = ["tutti-alsa-ffi/testing"]
+sequencer-tests = ["alsa", "tutti-alsa-ffi/testing"]
 # The suites that open Windows' GS Wavetable Synth, which needs an audio
 # endpoint; Windows only.
-synth-tests = []
+synth-tests = ["winmm"]
 
 [lints]
 workspace = true
@@ -49,16 +59,16 @@ tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 
 
 [target.'cfg(target_os = "linux")'.dependencies]
-tutti-alsa-ffi = { version = "0.0.1", path = "../tutti-alsa-ffi" }
+tutti-alsa-ffi = { version = "0.0.1", path = "../tutti-alsa-ffi", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-tutti-coremidi-ffi = { version = "0.0.1", path = "../tutti-coremidi-ffi" }
+tutti-coremidi-ffi = { version = "0.0.1", path = "../tutti-coremidi-ffi", optional = true }
 
 [target.'cfg(windows)'.dependencies]
-tutti-winmm-ffi = { version = "0.0.1", path = "../tutti-winmm-ffi" }
+tutti-winmm-ffi = { version = "0.0.1", path = "../tutti-winmm-ffi", optional = true }
 
 [dev-dependencies]
-tutti-midi-hardware = { path = ".", features = ["testing"] }
+tutti-midi-hardware = { path = ".", default-features = false, features = ["testing"] }
 tutti-buffers = { path = "../tutti-buffers" }
 
 serde_json = "1"

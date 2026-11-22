@@ -8,12 +8,13 @@
 //! extension a request came from.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use tutti_clap_ffi::ThreadRoles;
 use tutti_platform::Instant;
 use tutti_plugin_types::{
     AtomicRequestFlags, MainThreadMarker, ProcessWake, TrackInfo, TransportRequest,
 };
+use tutti_rt::Mutex;
 use tutti_rt::PackedAtomic;
 
 pub(crate) struct TimerEntry {
@@ -206,12 +207,10 @@ impl TransportState {
     }
 
     /// Queues `request`; `false` when it was refused, because
-    /// [`TRANSPORT_QUEUE`] are waiting or the queue's lock is poisoned.
+    /// [`TRANSPORT_QUEUE`] are waiting.
     #[must_use]
     pub(crate) fn push(&self, request: TransportRequest) -> bool {
-        let Ok(mut queue) = self.queue.lock() else {
-            return false;
-        };
+        let mut queue = self.queue.lock();
         if queue.len() < TRANSPORT_QUEUE {
             queue.push(request);
             true
@@ -222,9 +221,7 @@ impl TransportState {
 
     /// Moves what is queued to `out`, oldest first.
     pub(crate) fn drain_into(&self, out: &mut Vec<TransportRequest>) {
-        if let Ok(mut queue) = self.queue.lock() {
-            out.append(&mut queue);
-        }
+        out.append(&mut self.queue.lock());
     }
 }
 

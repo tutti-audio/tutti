@@ -36,3 +36,4 @@ tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 proptest = "1.9.0"
 serde_json = "1"
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
+tutti-rt = { version = "0.0.1", path = "../tutti-rt" }

@@ -45,11 +45,10 @@ use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::Result;
 use crate::start::Started;
-use std::sync::Mutex;
 use tutti_alsa_ffi::{Address, Client, UmpVersion};
 use tutti_midi_device::{EndpointId, OsDevice, PortDirection};
 use tutti_platform::Executor;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 /// The handle a port is listed under.
 pub(super) fn handle_of(at: Address) -> EndpointId {
@@ -93,7 +92,7 @@ impl AlsaEndpoints {
     /// An unopenable sequencer is the platform error, tried again at the next
     /// call.
     fn list(&self, direction: PortDirection) -> Result<Vec<OsEndpoint>> {
-        let mut held = self.enumerator.lock_recover();
+        let mut held = self.enumerator.lock();
         let seq = match held.take() {
             Some(seq) => seq,
             None => client::open("tutti-enum", UmpVersion::Midi2)?,

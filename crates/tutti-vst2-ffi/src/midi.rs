@@ -1439,18 +1439,17 @@ mod tests {
     #[test]
     fn a_refused_message_keeps_an_mpe_notes_channel() {
         use tutti_midi_protocol::{
-            MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
+            MemberCount, MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
         };
         use tutti_ump::{
             Address, Attribute, BendValue, ControlValue, ExtremeValues, Message, NoteNumber,
             NoteVelocity, Voice2,
         };
         let zone = MpeZoneConfig::lower(
-            2,
+            MemberCount::of(2),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-        )
-        .unwrap();
+        );
         // Room for the note, the bend and one more: the RPN's four do not fit.
         let mut buf = MidiSendBuffer::new();
         buf.midi1_translator = Midi1Translator::with_mode(TranslationMode {

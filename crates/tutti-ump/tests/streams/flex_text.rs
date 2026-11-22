@@ -94,6 +94,16 @@ fn a_nul_is_refused() {
     assert_eq!(Text::try_from("a\0b").err(), Some(FlexTextError::Nul));
 }
 
+/// A writer never starts a Flex text with a byte order mark; U+FEFF inside a
+/// text is kept, and an entry or a list that starts with one is refused too.
+/// Spec: m2-104/7.5.9#1
+#[test]
+fn a_leading_byte_order_mark_is_refused_on_the_write_side() {
+    assert_eq!(Text::try_from("\u{FEFF}a").err(), Some(FlexTextError::Bom));
+    assert!(Text::try_from("a\u{FEFF}b").is_ok());
+    assert!(Entry::try_from("\u{FEFF}a").is_err());
+}
+
 /// A Flex Data message has at most 32 packets: a Start, 30 Continue and an
 /// End carry the longest text, and one byte more is refused.
 /// Spec: m2-104/7.5.1#4

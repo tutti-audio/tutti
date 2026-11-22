@@ -12,10 +12,10 @@
 //! [`PROBE_LOCK`] across the whole set→load→assert sequence.
 
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 use tutti_fixtures::main_thread;
 use tutti_graph::UmpAt;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_graph::Offset;
 use tutti_plugin_types::{ContentScale, Control, EditorWindow, ParamWriteError};
@@ -43,7 +43,7 @@ const BLOCK: usize = 512;
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_probe() -> MutexGuard<'static, ()> {
-    PROBE_LOCK.lock_recover()
+    PROBE_LOCK.lock()
 }
 
 /// Every `TUTTI_VST2_PROBE_*` key a test in this file sets. Listed explicitly

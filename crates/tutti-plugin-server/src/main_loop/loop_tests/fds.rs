@@ -15,7 +15,7 @@ const SLOW_TICK: Duration = Duration::from_millis(600);
 /// soon it is served is not asserted: speed is not a test's.
 #[test]
 fn a_registered_descriptor_that_becomes_readable_is_served_once_each_time() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let probe = crate::test_utils::clap();
     probe.thread_reset();
     let _cmd =
