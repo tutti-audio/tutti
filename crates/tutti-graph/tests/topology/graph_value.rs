@@ -57,8 +57,8 @@ fn unequal_latency_diamond() -> Topology {
     t.nodes.insert(
         B,
         spec("lookahead", 1, 1)
-            .with_latency(Samples::new(512))
-            .with_tail(Tail::Finite(Samples::new(64))),
+            .latency(Samples::new(512))
+            .tail(Tail::Finite(Samples::new(64))),
     );
     t.nodes.insert(C, spec("mix", 2, 1));
     t.edges
@@ -441,8 +441,8 @@ fn insertion_order_does_not_change_the_value() {
     backward.nodes.insert(
         B,
         spec("lookahead", 1, 1)
-            .with_latency(Samples::new(512))
-            .with_tail(Tail::Finite(Samples::new(64))),
+            .latency(Samples::new(512))
+            .tail(Tail::Finite(Samples::new(64))),
     );
     backward.nodes.insert(D, spec("dc", 0, 1));
     backward.nodes.insert(A, spec("dc", 0, 1));

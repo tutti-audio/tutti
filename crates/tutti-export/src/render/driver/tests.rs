@@ -219,7 +219,7 @@ fn the_clock_advances_exactly_once_per_frame_and_never_ahead() {
     impl tutti_graph::Node for BeatPorts {
         fn shape(&self) -> tutti_graph::Shape {
             tutti_graph::Shape::source_unassigned(ChannelLayout::STEREO)
-                .with_tail(tutti_units::Tail::Unbounded)
+                .tail(tutti_units::Tail::Unbounded)
         }
         fn prepare(&mut self, _: &tutti_graph::Prepare) {}
         fn process(
@@ -341,8 +341,8 @@ mod loss {
 
     impl Burst {
         const SHAPE: Shape = Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(std::num::NonZeroU32::new(4).expect("a capacity"));
+            .events(0, 1)
+            .event_capacity(std::num::NonZeroU32::new(4).expect("a capacity"));
         const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
     }
 
@@ -368,7 +368,7 @@ mod loss {
 
     impl Node for Discard {
         fn shape(&self) -> Shape {
-            Shape::EMPTY.with_events(1, 0)
+            Shape::EMPTY.events(1, 0)
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {

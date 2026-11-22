@@ -7,11 +7,11 @@ use super::super::legacy_port::bytes::{ByteOut, Wire};
 use super::super::legacy_port::sender::{Mailbox, run};
 use crate::endpoints::DeviceOut;
 use crate::error::{MidiHardwareError, MidiThread, Result};
-use tutti_graph::Losses;
 use tutti_midi_runtime::{MidiOut, Outgoing, SendAt, Taken};
 use tutti_platform::{Executor, Task, join};
 use tutti_rt::{Counter, CounterWriter};
 use tutti_ump::Ump;
+use tutti_units::Losses;
 use tutti_winmm_ffi::{MidiOut as Port, OutputPort, TimerWaiter, TimerWaker, waitable_timer};
 
 /// How many events wait at most; a queue past it takes a prefix and says so.

@@ -698,13 +698,13 @@ impl<K: Kernel> Node<K::Float> for KernelNode<K> {
     /// The ports and cells always; latency and tail from the prepared rate. Unprepared, a
     /// node declares no latency and an unknown tail.
     fn shape(&self) -> Shape {
-        let shape = self.kernel.shape().with_param_addrs(self.params.addrs());
+        let shape = self.kernel.shape().param_addrs(self.params.addrs());
         if self.tuned.is_none() {
-            return shape.with_tail(Tail::Unknown);
+            return shape.tail(Tail::Unknown);
         }
         shape
-            .with_latency(Latency::new(self.kernel.latency()))
-            .with_tail(self.kernel.tail())
+            .latency(Latency::new(self.kernel.latency()))
+            .tail(self.kernel.tail())
     }
 
     fn prepare(&mut self, p: &Prepare) {

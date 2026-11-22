@@ -73,7 +73,7 @@ struct BeatPorts;
 
 impl Node for BeatPorts {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::STEREO).with_tail(Tail::Unbounded)
+        Shape::source_unassigned(ChannelLayout::STEREO).tail(Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -103,7 +103,7 @@ impl Node for GraphBeats {
             tutti_graph::Buses::unassigned(ChannelLayout::STEREO),
             tutti_graph::Buses::unassigned(ChannelLayout::MONO),
         )
-        .with_tail(Tail::Unbounded)
+        .tail(Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -404,7 +404,7 @@ pub(crate) struct EnvLog(pub(crate) Record<Env>);
 
 impl Node for EnvLog {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_tail(Tail::Unbounded)
+        Shape::source_unassigned(ChannelLayout::MONO).tail(Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {

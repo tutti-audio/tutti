@@ -534,7 +534,7 @@ mod logged {
 
     impl Node for Poison {
         fn shape(&self) -> Shape {
-            Shape::source_unassigned(ChannelLayout::STEREO).with_tail(Tail::Unbounded)
+            Shape::source_unassigned(ChannelLayout::STEREO).tail(Tail::Unbounded)
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

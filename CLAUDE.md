@@ -116,7 +116,7 @@ std only. A rule the compiler already enforces is not a gate.
 - Musical delay is not latency: report only processing latency.
 - Nodes communicate only through ports. Two nodes sharing mutable state outside the graph
   are unordered on the parallel executor: share through an edge, or make it one node.
-- A cheap node declares its cost (`Shape::with_cost`); one that declares none is `Heavy`.
+- A cheap node declares its cost (`Shape::cost`); one that declares none is `Heavy`.
 - Op code reaches the arena, event slots, units, rings and outputs only through
   `AudioSlots`/`EventSlots` or a claim, which keeps `tutti-graph` `#![forbid(unsafe_code)]`.
 - A parallel render is bit-identical to the serial one; a parallel test compares against
@@ -216,7 +216,7 @@ touched.
 
 - A reading the audio thread writes and any thread reads is a `tutti_rt::Gauge<U>` (latest
   value) or `Counter<U>` (a cumulative count that saturates); a count with many writers is
-  a `Tally<U>`. A count of lost events is a `Counter<Losses>` (`tutti_graph::Losses`).
+  a `Tally<U>`. A count of lost events is a `Counter<Losses>` (`tutti_units::Losses`).
 - A refusable push returns `tutti_rt::PushError { Full, Disconnected }`.
 - A thread's wake-up is `tutti_rt::parker()`: any number of `Unparker`s unpark one
   `Parker`. A future's wake-up is a `tutti_rt::Bell` from the session's `Bells`: the audio

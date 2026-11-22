@@ -114,7 +114,7 @@ struct Recorder(Record<Ump>);
 
 impl Recorder {
     const SHAPE: Shape =
-        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::STEREO)).with_events(1, 0);
+        Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::STEREO)).events(1, 0);
     const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 

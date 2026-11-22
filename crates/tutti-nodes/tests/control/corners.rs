@@ -16,9 +16,9 @@ struct Sends(Vec<(u64, ParamSegment)>);
 
 impl Sends {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_param_events()
-        .with_event_capacity(std::num::NonZeroU32::new(16).expect("a capacity"));
+        .events(0, 1)
+        .param_events()
+        .event_capacity(std::num::NonZeroU32::new(16).expect("a capacity"));
     const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 

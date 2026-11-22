@@ -2,8 +2,8 @@ use super::*;
 use crate::Delivered;
 use crate::testing::{RATE, Rig, ports};
 use std::time::Duration;
-use tutti_graph::Losses;
 use tutti_platform::Instant;
+use tutti_units::Losses;
 
 use tutti_fixtures::midi;
 use tutti_midi_runtime::{InputInlets, InputWriters};
@@ -119,7 +119,7 @@ fn arrivals_keep_their_spacing_and_the_lead_is_added_to_each() {
 
 /// **An event that arrives after its frame has begun is late, not lost**: it
 /// sounds at the first frame of the next block and is counted
-/// ([`Losses::late`](tutti_graph::Losses::late)).
+/// ([`Losses::late`](tutti_units::Losses::late)).
 #[test]
 fn an_arrival_past_its_block_is_emitted_late_and_counted() {
     let (manager, mut rig) = rig(64, Duration::ZERO);

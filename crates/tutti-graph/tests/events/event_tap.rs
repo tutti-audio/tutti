@@ -112,9 +112,9 @@ impl Script {
 impl Node for Script {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, self.ports)
-            .with_event_capacity(tutti_graph::testing::cap_of(self.cap))
-            .with_latency(Latency::new(Samples::new(self.latency)))
+            .events(0, self.ports)
+            .event_capacity(tutti_graph::testing::cap_of(self.cap))
+            .latency(Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -708,15 +708,15 @@ struct Probe {
 }
 
 impl Probe {
-    const BASE: Shape = Shape::EMPTY.with_events(1, 0);
+    const BASE: Shape = Shape::EMPTY.events(1, 0);
     const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
 }
 
 impl Node for Probe {
     fn shape(&self) -> Shape {
-        let shape = Shape::EMPTY.with_events(self.ports as u16, 0);
+        let shape = Shape::EMPTY.events(self.ports as u16, 0);
         if self.capacity > 0 {
-            shape.with_event_capacity(tutti_graph::testing::cap_of(self.capacity))
+            shape.event_capacity(tutti_graph::testing::cap_of(self.capacity))
         } else {
             shape
         }

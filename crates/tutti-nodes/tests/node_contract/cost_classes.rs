@@ -31,7 +31,7 @@ struct Undeclared<N>(N);
 
 impl<N: Node> Node for Undeclared<N> {
     fn shape(&self) -> Shape {
-        self.0.shape().with_cost(Cost::Heavy)
+        self.0.shape().cost(Cost::Heavy)
     }
     fn prepare(&mut self, p: &Prepare) {
         self.0.prepare(p);
@@ -52,11 +52,11 @@ impl Node for Sum {
     fn shape(&self) -> Shape {
         // Ports with no bus: its inputs are the clicks it sums, not a bus.
         Shape::EMPTY
-            .with_ports(
+            .ports(
                 ChannelLayout::try_from(2 * self.0).expect("a test width is small"),
                 ChannelLayout::STEREO,
             )
-            .with_cost(Cost::Light)
+            .cost(Cost::Light)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

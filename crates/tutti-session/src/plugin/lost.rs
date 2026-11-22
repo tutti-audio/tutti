@@ -16,8 +16,8 @@ impl Lost {
     pub(crate) const fn of(shape: Shape) -> Self {
         Self {
             shape: shape
-                .with_tail(tutti_units::Tail::None)
-                .with_cost(tutti_graph::Cost::Light),
+                .tail(tutti_units::Tail::None)
+                .cost(tutti_graph::Cost::Light),
         }
     }
 }
@@ -51,8 +51,8 @@ mod tests {
     #[test]
     fn the_stand_in_keeps_ports_and_latency_drops_the_tail_and_renders_silence() {
         let shape = Shape::through_unassigned(ChannelLayout::MONO)
-            .with_latency(Latency::new(Samples::new(64)))
-            .with_tail(Tail::Finite(Samples::new(100)));
+            .latency(Latency::new(Samples::new(64)))
+            .tail(Tail::Finite(Samples::new(100)));
         let stand_in = Lost::of(shape).shape();
         assert_eq!(stand_in.latency, shape.latency, "the last latency");
         assert_eq!(stand_in.tail, Tail::None, "no tail");

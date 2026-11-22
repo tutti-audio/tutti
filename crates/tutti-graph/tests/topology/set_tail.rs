@@ -31,7 +31,7 @@ struct Ringer {
 
 impl Node for Ringer {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::MONO).with_tail(self.tail)
+        Shape::through_unassigned(ChannelLayout::MONO).tail(self.tail)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

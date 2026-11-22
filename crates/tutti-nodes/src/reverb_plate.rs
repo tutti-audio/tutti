@@ -176,7 +176,7 @@ impl<F: Float + Lerp> Kernel for PlateKernel<F> {
             Buses::NONE.with(stereo(BusRole::Main)).expect("one bus"),
             Buses::NONE.with(stereo(BusRole::Main)).expect("one bus"),
         )
-        .with_cost(Cost::Moderate)
+        .cost(Cost::Moderate)
     }
 
     /// Sizes the lines at `rate` (the paper's lengths scaled to it): a re-prepare empties them.

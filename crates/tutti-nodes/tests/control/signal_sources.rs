@@ -142,7 +142,7 @@ struct Seq {
 }
 
 impl Seq {
-    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
     const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -187,8 +187,8 @@ struct Midi {
 
 impl Midi {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_event_capacity(std::num::NonZeroU32::new(1024).expect("a capacity"));
+        .events(0, 1)
+        .event_capacity(std::num::NonZeroU32::new(1024).expect("a capacity"));
     const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -220,7 +220,7 @@ struct Tap {
 }
 
 impl Tap {
-    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::from_count(4)).with_events(1, 0);
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::from_count(4)).events(1, 0);
     const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
@@ -270,7 +270,7 @@ struct Probe;
 
 impl Node for Probe {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_params(&[UnitParam::Cutoff])
+        Shape::source_unassigned(ChannelLayout::MONO).params(&[UnitParam::Cutoff])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

@@ -69,7 +69,7 @@ struct Fork(Arc<Crashed>);
 
 impl ForkSource for Fork {
     fn fork(&self, _: RenderMode) -> Result<Forked, ForkCause> {
-        Ok(Forked::new(Box::new(Dc)).with_health(Arc::clone(&self.0) as Arc<dyn ForkHealth>))
+        Ok(Forked::new(Box::new(Dc)).health(Arc::clone(&self.0) as Arc<dyn ForkHealth>))
     }
 }
 

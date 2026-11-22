@@ -68,7 +68,7 @@ fn side(role: BusRole) -> Buses {
 }
 
 fn probe_shape() -> Shape {
-    Shape::buses(side(BusRole::Sidechain), side(BusRole::Aux)).with_tail(Tail::Unbounded)
+    Shape::buses(side(BusRole::Sidechain), side(BusRole::Aux)).tail(Tail::Unbounded)
 }
 
 impl Node for Probe {
@@ -364,7 +364,7 @@ fn a_shape_with_64_ports_reads_bit_63() {
     impl Node for Wide {
         fn shape(&self) -> Shape {
             let all = ChannelLayout::from_count(64);
-            Shape::unassigned(all, all).with_tail(Tail::Unbounded)
+            Shape::unassigned(all, all).tail(Tail::Unbounded)
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {

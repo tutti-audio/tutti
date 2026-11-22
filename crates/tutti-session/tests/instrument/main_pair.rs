@@ -6,8 +6,9 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, ForkByClone, InstrumentNode, IntoNode, Io, Node, NodeParts, Prepare, Shape, Status,
 };
+use tutti_session::MainOutput;
 use tutti_session::SessionNode;
-use tutti_session::{Losses, MainOutput};
+use tutti_units::Losses;
 
 /// Output `c` is the constant `c + 1`, whatever it is played.
 #[derive(Clone)]
@@ -15,7 +16,7 @@ struct Five;
 
 impl Node for Five {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::from_count(5)).with_events(1, 0)
+        Shape::source_unassigned(ChannelLayout::from_count(5)).events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

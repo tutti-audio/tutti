@@ -276,14 +276,14 @@ impl NodeSpec {
 
     /// Returns this spec with `latency` frames of involuntary latency.
     #[must_use]
-    pub fn with_latency(mut self, latency: Samples) -> Self {
+    pub fn latency(mut self, latency: Samples) -> Self {
         self.latency = latency;
         self
     }
 
     /// Returns this spec with the given ring-out, which excludes latency.
     #[must_use]
-    pub fn with_tail(mut self, tail: Tail) -> Self {
+    pub fn tail(mut self, tail: Tail) -> Self {
         self.tail = tail;
         self
     }

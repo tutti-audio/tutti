@@ -451,9 +451,9 @@ impl<F: Float> Node<F> for BusStripNode {
             // With the volume fed per frame it is borderline: about 0.7 of
             // the way from a gain to `SvfFilterNode` on a log scale, the
             // boundary about 0.73. `Light`, as a wrong `Light` costs little.
-            .with_cost(tutti_graph::Cost::Light)
-            .with_tail(Tail::None)
-            .with_param_addrs(self.declared_ports().as_slice())
+            .cost(tutti_graph::Cost::Light)
+            .tail(Tail::None)
+            .param_addrs(self.declared_ports().as_slice())
     }
 
     /// Nothing is rate-dependent: the ramp is one block long, whatever the

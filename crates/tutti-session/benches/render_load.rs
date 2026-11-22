@@ -155,7 +155,7 @@ struct Hold {
 }
 
 impl Hold {
-    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1).with_cost(Cost::Light);
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1).cost(Cost::Light);
     const OUT: tutti_graph::OutEvents = Self::SHAPE
         .event_output(0)
         .expect("one event output is declared");

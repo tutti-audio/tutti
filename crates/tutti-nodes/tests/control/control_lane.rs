@@ -47,7 +47,7 @@ struct Probe;
 
 impl Node for Probe {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_params(&[UnitParam::Cutoff])
+        Shape::source_unassigned(ChannelLayout::MONO).params(&[UnitParam::Cutoff])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -75,7 +75,7 @@ struct SegSink {
 }
 
 impl SegSink {
-    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::STEREO).with_events(1, 0);
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::STEREO).events(1, 0);
     const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
@@ -121,7 +121,7 @@ struct Feed {
 }
 
 impl Feed {
-    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1).with_param_events();
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1).param_events();
     const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 

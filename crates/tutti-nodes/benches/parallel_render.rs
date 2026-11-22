@@ -127,7 +127,7 @@ impl tutti_graph::Node for Gain {
     fn shape(&self) -> tutti_graph::Shape {
         let s = tutti_graph::Shape::through_unassigned(ChannelLayout::MONO);
         if self.light {
-            s.with_cost(tutti_graph::Cost::Light)
+            s.cost(tutti_graph::Cost::Light)
         } else {
             s
         }

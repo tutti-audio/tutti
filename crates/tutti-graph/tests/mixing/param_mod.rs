@@ -143,11 +143,11 @@ impl Node for Probe {
             tutti_graph::Buses::unassigned(ChannelLayout::MONO),
             tutti_graph::Buses::unassigned(ChannelLayout::MONO),
         )
-        .with_ports(
+        .ports(
             ChannelLayout::MONO,
             ChannelLayout::from_count(if self.corners { 4 } else { 3 }),
         )
-        .with_params(&self.declared)
+        .params(&self.declared)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -222,9 +222,9 @@ struct Signal {
 
 impl Signal {
     const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO)
-        .with_events(0, 1)
-        .with_param_events()
-        .with_event_capacity(tutti_graph::testing::cap_of(256));
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(256));
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -258,9 +258,9 @@ struct Hold {
 
 impl Hold {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_param_events()
-        .with_event_capacity(tutti_graph::testing::cap_of(4));
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(4));
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -299,8 +299,7 @@ impl Lag {
 
 impl Node for Lag {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::MONO)
-            .with_latency(Latency::new(Samples::new(self.n)))
+        Shape::through_unassigned(ChannelLayout::MONO).latency(Latency::new(Samples::new(self.n)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -356,9 +355,9 @@ impl Ramps {
 
 impl Ramps {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_param_events()
-        .with_event_capacity(tutti_graph::testing::cap_of(EVENT_ROOM as u32));
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(EVENT_ROOM as u32));
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -724,7 +723,7 @@ fn a_fade_keeps_the_params_it_declares() {
                 tutti_graph::Buses::unassigned(ChannelLayout::MONO),
                 tutti_graph::Buses::unassigned(ChannelLayout::from_count(3)),
             )
-            .with_params(&[UnitParam::Cutoff])
+            .params(&[UnitParam::Cutoff])
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
@@ -1028,7 +1027,7 @@ impl Node for LatentHold {
     fn shape(&self) -> Shape {
         Hold { value: self.value }
             .shape()
-            .with_latency(Latency::new(Samples::new(self.latency)))
+            .latency(Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
@@ -1092,9 +1091,9 @@ struct OnFirstBlock {
 
 impl OnFirstBlock {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_param_events()
-        .with_event_capacity(tutti_graph::testing::cap_of(4));
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(4));
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -1650,9 +1649,9 @@ struct SegmentThenRamp {
 
 impl SegmentThenRamp {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_param_events()
-        .with_event_capacity(tutti_graph::testing::cap_of(4));
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(4));
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
