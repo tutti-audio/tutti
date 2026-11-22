@@ -208,7 +208,7 @@ pub use device::{
 pub use editor::{Editor, EditorCallError, Opened};
 pub use error::{
     BackgroundWork, ConnectError, DeclarationError, Error, InletError, NoSuchNode, RemoveError,
-    Result, SessionHeardTapError, SetRateError, SetTempoError,
+    Result, SessionHeardTapError, SetRateError,
 };
 #[cfg(feature = "midi")]
 pub use error::{MidiError, RouteDeclarer};
@@ -362,6 +362,7 @@ pub use value::{
     PolarityTarget, RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget, Target,
     TargetInfo, TempoTarget, ValueError, ValueErrorKind, Values,
 };
+pub use value::{Change, ChangedBy, GestureId, GestureState, IntoTargets, Watchable, Watcher};
 #[cfg(feature = "midi")]
 pub use value::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
 #[cfg(feature = "sampler")]

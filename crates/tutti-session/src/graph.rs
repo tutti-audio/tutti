@@ -67,7 +67,7 @@ use tutti_graph::{NodeParts, ParamSet};
 use tutti_rt::Mint;
 #[cfg(feature = "plugin")]
 use tutti_units::Latency;
-use tutti_units::{Amplitude, SampleRate};
+use tutti_units::{Gain, SampleRate};
 use tutti_units::{Samples, Tail};
 
 mod observe;
@@ -2563,7 +2563,7 @@ impl<F: Float> Graph<F> {
             .gains
             .get(&id)
             .is_some_and(|g| g.source.is_none())
-            && self.editor.edge_gain(id) == Some(Amplitude::UNITY)
+            && self.editor.edge_gain(id) == Some(Gain::UNITY)
             && self.editor.edge_gain_range(id) == Some(EdgeGain::DEFAULT_RANGE);
         if plain {
             self.editor.spec_mut().clear_edge_gain(id);
@@ -2755,7 +2755,7 @@ impl<F: Float> Graph<F> {
     }
 
     /// Connects `from` to `to` and returns the connection, which a gain can
-    /// follow: `g.connect(osc.output(0), lp.input(0))?.gain(Amplitude::new(0.5))?`.
+    /// follow: `g.connect(osc.output(0), lp.input(0))?.gain(Gain::new(0.5))?`.
     ///
     /// What the two ends are says what is connected:
     ///
@@ -3049,7 +3049,7 @@ impl<F: Float> Graph<F> {
     pub(crate) fn declare_edge_gain(
         &mut self,
         edge: ChannelEdge,
-        gain: Amplitude,
+        gain: Gain,
     ) -> Result<(), DeclarationError> {
         if !gain.get().is_finite() {
             return Err(DeclarationError::NotFinite);
@@ -3114,7 +3114,7 @@ impl<F: Float> Graph<F> {
         if !self.has_gain_lane(edge) {
             return Err(GainTargetError::NoLane(edge));
         }
-        let seed = self.editor.edge_gain(id).unwrap_or(Amplitude::UNITY);
+        let seed = self.editor.edge_gain(id).unwrap_or(Gain::UNITY);
         self.values.provide_gain(edge, seed);
         Ok(GainTarget::new(edge))
     }
@@ -3128,15 +3128,15 @@ impl<F: Float> Graph<F> {
         }
         // A fade in is not the author's gain: the edge goes on rising, to unity.
         let cleared = if self.editor.edge_fade(id) == Some(EdgeFade::In) {
+            if let Some(source) = self.editor.spec().gains.get(&id).and_then(|g| g.source) {
+                self.editor.spec_mut().disconnect_edge_gain(id, source);
+            }
             self.editor
-                .spec_mut()
-                .set_edge_gain(id, EdgeGain::default());
-            self.editor
-                .set_edge_gain(id, Amplitude::UNITY)
-                .expect("the lane was just declared");
+                .set_edge_gain(id, Gain::UNITY)
+                .expect("the lane has its entry");
             self.editor
                 .set_edge_gain_range(id, EdgeGain::DEFAULT_RANGE)
-                .expect("the lane was just declared");
+                .expect("the lane has its entry");
             true
         } else {
             self.editor.spec_mut().clear_edge_gain(id).is_some()

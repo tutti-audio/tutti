@@ -661,7 +661,7 @@ fn range_and_depth_edits_need_no_commit_and_a_follower_route_one() {
         param: UnitParam::Cutoff.into(),
     };
     let cell = ed.param_range_cell(at).expect("a cell").current();
-    assert_eq!((cell.min, cell.max), (0.0, 2000.0), "the store landed");
+    assert_eq!((cell.min(), cell.max()), (0.0, 2000.0), "the store landed");
     let got = render(&mut ed, &mut exec, 128, 4_096);
     // Depth 0.1 of a 2000 span: ±200 about 500.
     for (i, &v) in got[0].iter().enumerate().skip(STEP) {
@@ -1566,7 +1566,7 @@ fn a_range_edit_after_a_steady_state_is_stored() {
         param: UnitParam::Cutoff.into(),
     };
     assert_eq!(
-        r.ed.param_range_cell(at).expect("a cell").current().max,
+        r.ed.param_range_cell(at).expect("a cell").current().max(),
         2_000.0
     );
 }
@@ -1837,5 +1837,5 @@ fn a_declared_range_reaches_the_ports_cell_at_f64() {
         param: UnitParam::Cutoff.into(),
     };
     let cell = ed.param_range_cell(at).expect("a cell").current();
-    assert_eq!((cell.min, cell.max), (lo, hi));
+    assert_eq!((cell.min(), cell.max()), (lo, hi));
 }

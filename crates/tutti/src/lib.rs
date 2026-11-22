@@ -230,6 +230,10 @@ pub use tutti_session::{
 pub use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, Bounced, Range, Stem, StemGain, Written,
 };
+#[cfg(feature = "session")]
+pub use tutti_session::{
+    Change, ChangedBy, GestureId, GestureState, IntoTargets, Watchable, Watcher,
+};
 #[cfg(all(feature = "session", feature = "midi"))]
 pub use tutti_session::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
 #[cfg(all(feature = "session", feature = "device"))]
@@ -549,7 +553,7 @@ pub mod session {
         OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError, PeerEvent,
         PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Removal, RemoveError,
         Reopened, ReplaceRefused, Replacement, Resource, ResourceFact, SessionHeardTapError,
-        SessionNode, SetRateError, SetSources, SetTempoError, Taps, TimelineView, Weighted, Wire,
+        SessionNode, SetRateError, SetSources, Taps, TimelineView, Weighted, Wire,
         main_output_width,
     };
     pub use tutti_timeline::{

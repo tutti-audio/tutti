@@ -182,7 +182,7 @@ struct Outgoing {
     peer: Muid,
     id: PeRequestId,
     sub: SubscribeId,
-    wait: deadline::Pending,
+    wait: deadline::Deadline,
 }
 
 /// What waits for a free Request ID of a peer: one item per Subscription, which
@@ -214,7 +214,7 @@ struct Stream {
     /// How many chunks have been sent: the last is the one waiting for its ACK.
     sent: usize,
     resends: u8,
-    wait: deadline::Pending,
+    wait: deadline::Deadline,
 }
 
 /// An inquiry held while its Resource is busy.
@@ -436,7 +436,7 @@ impl ResourceResponder {
             .iter()
             .map(|o| o.wait)
             .chain(self.streams.iter().map(|s| s.wait))
-            .map(deadline::Pending::deadline)
+            .map(deadline::Deadline::deadline)
             .chain(self.deferred.iter().map(|d| d.renew))
             .chain(self.reassembler.next_deadline())
             .min()
@@ -863,7 +863,7 @@ impl ResourceResponder {
                 chunks,
                 sent: 1,
                 resends: 0,
-                wait: deadline::Pending::after(now, PE_TIMEOUT),
+                wait: deadline::Deadline::after(now, PE_TIMEOUT),
             });
             self.send_chunks(peer, kind, vec![first], out);
         } else {
@@ -1515,7 +1515,7 @@ impl ResourceResponder {
             peer,
             id,
             sub: sub.clone(),
-            wait: deadline::Pending::after(now, PE_TIMEOUT),
+            wait: deadline::Deadline::after(now, PE_TIMEOUT),
         });
         self.send_chunks(peer, PeMessageKind::SUBSCRIPTION_INQUIRY, chunks, out);
     }

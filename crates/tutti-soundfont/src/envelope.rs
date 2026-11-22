@@ -6,7 +6,7 @@ use tutti_dsp::{Envelope, EnvelopeCurve, EnvelopeDesign, EnvelopeStage, Envelope
 use tutti_units::{Amplitude, Db, Normalized, SampleRate, Samples, Seconds};
 
 use crate::render::Render;
-use crate::soundfont_math::SoundFontMath;
+use crate::soundfont_math::NON_AUDIBLE;
 
 /// The fall of the decay and release times (SF2 2.04 section 8.1.2, generators 36 and 38):
 /// the time to fall 100 dB, at a constant dB per time unit.
@@ -15,19 +15,36 @@ const FALL: EnvelopeCurve = match EnvelopeCurve::db_linear(Db::new(100.0)) {
     None => panic!("100 dB is a fall"),
 };
 
-/// The volume envelope (SF2 2.04 section 8.1.2, generators 33 to 38) read once a chunk: a
-/// linear attack, and a decay and release linear in decibels, 100 dB over their times. Every
-/// stage is a closed form of the frames elapsed, so a release of the longest time at the
-/// highest rate reaches its level exactly at any width the voice mixes in.
+/// A SoundFont delay, attack, hold, decay, sustain and release envelope (SF2 2.04 section
+/// 8.1.2) read once a chunk. Every stage is a closed form of the frames elapsed, so a release
+/// of the longest time at the highest rate reaches its level exactly at any width the voice
+/// mixes in.
+///
+/// The volume envelope (generators 33 to 38, [`volume`](Self::volume)) attacks linearly and
+/// decays and releases linearly in decibels, 100 dB over their times. The modulation
+/// envelope (generators 25 to 30, [`modulation`](Self::modulation)) is straight lines in
+/// every stage: its level is a position in `0..=1` that scales a depth in cents.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub(crate) struct VolumeEnvelope {
+pub(crate) struct SoundFontEnvelope {
     rate: SampleRate,
+    /// The fall of the decay and release: the volume envelope's, none for straight lines.
+    fall: Option<EnvelopeCurve>,
     envelope: Envelope,
 }
 
-impl VolumeEnvelope {
-    pub(crate) fn new(settings: &Render) -> Self {
+impl SoundFontEnvelope {
+    /// The volume envelope, idle.
+    pub(crate) fn volume(settings: &Render) -> Self {
+        Self::idle(settings, Some(FALL))
+    }
+
+    /// The modulation envelope, idle.
+    pub(crate) fn modulation(settings: &Render) -> Self {
+        Self::idle(settings, None)
+    }
+
+    fn idle(settings: &Render, fall: Option<EnvelopeCurve>) -> Self {
         let rate = settings.rate();
         let idle = EnvelopeStages::new(
             Seconds::new(0.0),
@@ -37,6 +54,7 @@ impl VolumeEnvelope {
         );
         Self {
             rate,
+            fall,
             envelope: Envelope::new(EnvelopeDesign::new(&idle, rate)),
         }
     }
@@ -50,11 +68,12 @@ impl VolumeEnvelope {
         sustain: Normalized,
         release: Seconds,
     ) {
-        let stages = EnvelopeStages::new(attack, decay, sustain, release)
+        let mut stages = EnvelopeStages::new(attack, decay, sustain, release)
             .delay(delay)
-            .hold(hold)
-            .decay_curve(FALL)
-            .release_curve(FALL);
+            .hold(hold);
+        if let Some(fall) = self.fall {
+            stages = stages.decay_curve(fall).release_curve(fall);
+        }
         self.envelope.start(EnvelopeDesign::new(&stages, self.rate));
     }
 
@@ -71,22 +90,31 @@ impl VolumeEnvelope {
         self.envelope.release_within(time);
     }
 
-    /// Moves on by `sample_count` frames. Whether the voice is still audible: a decay,
-    /// sustain or release under [`SoundFontMath::NON_AUDIBLE`] ends it.
-    pub(crate) fn process(&mut self, sample_count: usize) -> bool {
+    /// Moves on by `sample_count` frames.
+    pub(crate) fn advance(&mut self, sample_count: usize) {
         self.envelope.advance(Samples::new(sample_count));
+    }
+
+    /// Whether the voice is still audible: a decay, sustain or release under
+    /// [`NON_AUDIBLE`] ends it.
+    pub(crate) fn audible(&self) -> bool {
         match self.envelope.stage() {
             EnvelopeStage::Delay | EnvelopeStage::Attack | EnvelopeStage::Hold => true,
             EnvelopeStage::Decay
             | EnvelopeStage::Sustain
             | EnvelopeStage::Release
-            | EnvelopeStage::Idle => self.envelope.level() > SoundFontMath::NON_AUDIBLE,
+            | EnvelopeStage::Idle => self.envelope.level() > NON_AUDIBLE,
         }
     }
 
     /// The level at the last chunk.
-    pub(crate) fn value(&self) -> Amplitude {
+    pub(crate) fn level(&self) -> Amplitude {
         self.envelope.level()
+    }
+
+    /// The level at the last chunk as a position in `0..=1`.
+    pub(crate) fn position(&self) -> Normalized {
+        Normalized::clamped(self.envelope.level().get())
     }
 }
 
@@ -102,7 +130,7 @@ impl VolumeEnvelope {
 mod tests {
     use tutti_units::{Amplitude, Db, Normalized, SampleRate, Seconds};
 
-    use super::VolumeEnvelope;
+    use super::SoundFontEnvelope;
     use crate::render::Render;
 
     const RATE: f64 = 48_000.0;
@@ -110,8 +138,8 @@ mod tests {
     /// that is a time's `exp`, then a `log10` and a scale of 20.
     const DB: f64 = 1e-12;
 
-    fn envelope(decay: f64, sustain: Normalized, release: f64) -> VolumeEnvelope {
-        let mut envelope = VolumeEnvelope::new(&Render::new(SampleRate::of(RATE)));
+    fn envelope(decay: f64, sustain: Normalized, release: f64) -> SoundFontEnvelope {
+        let mut envelope = SoundFontEnvelope::volume(&Render::new(SampleRate::of(RATE)));
         // No delay, a 1 ms attack, no hold.
         envelope.start(
             Seconds::new(0.0),
@@ -142,15 +170,15 @@ mod tests {
         for sustain_db in [0.0, 6.0] {
             let sustain = Normalized::clamped(Db::new(-sustain_db).to_amplitude().get());
             let mut envelope = envelope(1.0, sustain, 2.0);
-            envelope.process(frames(0.5));
-            let before = db(envelope.value());
+            envelope.advance(frames(0.5));
+            let before = db(envelope.level());
             envelope.release();
             let mut elapsed = 0;
             for fraction in [0.1, 0.3, 0.5] {
                 let to = frames(fraction * 2.0);
-                envelope.process(to - elapsed);
+                envelope.advance(to - elapsed);
                 elapsed = to;
-                let fell = before - db(envelope.value());
+                let fell = before - db(envelope.level());
                 assert!(
                     (fell - 100.0 * fraction).abs() < DB,
                     "{fraction} of the release is {fell} dB down, not {}",
@@ -166,11 +194,11 @@ mod tests {
     #[test]
     fn a_decay_falls_100_db_in_its_time() {
         let mut envelope = envelope(2.0, Normalized::of(0.0), 1.0);
-        envelope.process(frames(0.001));
+        envelope.advance(frames(0.001));
         for fraction in [0.1, 0.3, 0.5] {
             let mut again = envelope.clone();
-            again.process(frames(fraction * 2.0));
-            let fell = -db(again.value());
+            again.advance(frames(fraction * 2.0));
+            let fell = -db(again.level());
             assert!(
                 (fell - 100.0 * fraction).abs() < DB,
                 "{fraction} of the decay is {fell} dB down"
@@ -184,10 +212,10 @@ mod tests {
     #[test]
     fn a_quick_release_falls_100_db_in_its_time() {
         let mut envelope = envelope(10.0, Normalized::of(1.0), 5.0);
-        envelope.process(frames(0.01));
+        envelope.advance(frames(0.01));
         envelope.release_within(Seconds::new(0.01));
         envelope.release();
-        envelope.process(frames(0.005));
-        assert!((-db(envelope.value()) - 50.0).abs() < DB);
+        envelope.advance(frames(0.005));
+        assert!((-db(envelope.level()) - 50.0).abs() < DB);
     }
 }

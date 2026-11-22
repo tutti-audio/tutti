@@ -72,7 +72,7 @@ use super::Initiator;
 use super::TimeoutWait;
 use super::handshake::Handshake;
 use super::link::Link;
-use crate::deadline::Pending;
+use crate::deadline::Deadline;
 
 use tutti_ump::{MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan, U7};
 
@@ -396,7 +396,7 @@ impl ProfileTable {
 #[derive(Clone, Debug)]
 struct InFlight {
     request: ProfileRequest,
-    wait: Pending,
+    wait: Deadline,
 }
 
 /// The Initiator of Profile Configuration with one peer.
@@ -650,7 +650,7 @@ impl ProfileInitiator {
         }
         self.pending.push(InFlight {
             request,
-            wait: Pending::after(now, PEER_REPLY_TIMEOUT),
+            wait: Deadline::after(now, PEER_REPLY_TIMEOUT),
         });
         Ok(())
     }
@@ -668,7 +668,7 @@ impl Initiator for ProfileInitiator {
     type Action = ProfileAction;
 
     fn deadline(&self) -> Option<Instant> {
-        Pending::earliest(
+        Deadline::earliest(
             self.inquiry
                 .wait()
                 .into_iter()

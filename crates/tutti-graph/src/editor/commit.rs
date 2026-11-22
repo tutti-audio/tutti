@@ -18,7 +18,7 @@ use crate::plan::{Delta, Placement, Plan};
 use crate::spec::{GraphSpec, ValidGraph};
 use crate::{Edge, EdgeId, PortSink, PortSource};
 use crate::{Fade, MainOutputBank, NodeKey};
-use tutti_units::Amplitude;
+use tutti_units::Gain;
 
 /// A node whose audio wiring changed in a commit: a port gained its first
 /// source or consumer, or lost its last.
@@ -353,7 +353,7 @@ impl<F: Float> Editor<F> {
         };
         // The bases the old main output's lanes had when the crossfade began:
         // the running crossfade's own, or the table's now.
-        let bases: BTreeMap<EdgeId, Amplitude> = continuing.map_or_else(
+        let bases: BTreeMap<EdgeId, Gain> = continuing.map_or_else(
             || {
                 was.spec
                     .gains
@@ -419,8 +419,8 @@ impl<F: Float> Editor<F> {
                     .get(&was_id)
                     .or_else(|| bases.get(&was_id))
                     .copied()
-                    .unwrap_or(Amplitude::UNITY);
-                if weight != Amplitude::UNITY {
+                    .unwrap_or(Gain::UNITY);
+                if weight != Gain::UNITY {
                     now.spec.gains.insert(id, EdgeGain::default());
                 }
                 now.lanes.insert(id, weight);
@@ -508,7 +508,6 @@ impl<F: Float> Editor<F> {
         resume: Option<Resume>,
     ) {
         self.touch();
-        self.declare_gain_cells();
         let fades = starting(&delta);
         // A plan that carries the crossfade the last one carried continues
         // it: the executor keeps its progress, and it ends under the seq that
