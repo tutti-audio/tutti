@@ -11,9 +11,9 @@
 //! Active Sensing.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, MutexGuard};
 use tutti_platform::Instant;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_graph::Offset;
 use tutti_midi_runtime::ActiveSensingSender;
@@ -93,7 +93,7 @@ impl Heartbeat {
 }
 
 fn lock(schedule: &Mutex<ActiveSensingSender>) -> MutexGuard<'_, ActiveSensingSender> {
-    schedule.lock_recover()
+    schedule.lock()
 }
 
 /// Sleeps to the schedule's deadline, sends what is due, and repeats until the
