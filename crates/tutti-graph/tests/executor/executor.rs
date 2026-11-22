@@ -395,11 +395,7 @@ impl IntoNode for GainBuilder {
     type Controls = Param<Amplitude>;
     fn into_parts(self) -> NodeParts<Self::Controls> {
         let p = Param::new(Amplitude::new(1.0));
-        NodeParts {
-            node: Box::new(GainNode(p.handle())),
-            fork: None,
-            controls: p,
-        }
+        NodeParts::new(Box::new(GainNode(p.handle())), p, None)
     }
 }
 

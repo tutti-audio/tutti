@@ -746,6 +746,56 @@ impl<'a, S: RingSample> PosClaim<'a, S> {
     pub fn sample(&self, s: u64, c: usize) -> S {
         self.frame(s).get(c)
     }
+
+    /// Copies channel `c` of positions `from..from + out.len()` into `out`,
+    /// in order: what [`sample`](Self::sample) reads at each, with the slot
+    /// found once and the run split at most once where it wraps the ring.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if the run leaves the window or the claimed ranges,
+    /// if it is longer than the ring, or if `c` is not below the stride. A
+    /// release build reads whatever the slots hold, and silence for a `c`
+    /// past the stride.
+    #[inline]
+    pub fn copy_channel(&self, from: u64, c: usize, out: &mut [S]) {
+        let Some(last) = (out.len() as u64).checked_sub(1).map(|n| from + n) else {
+            return;
+        };
+        debug_assert!(
+            self.window.holds(from) && self.window.holds(last),
+            "positions {from}..={last} outside the window"
+        );
+        debug_assert!(
+            self.reads.iter().any(|&(a, e)| a <= from && last < e),
+            "positions {from}..={last} outside the claimed ranges"
+        );
+        debug_assert!(out.len() <= self.ring.frames, "a run longer than the ring");
+        let stride = usize::from(self.ring.layout.count());
+        debug_assert!(c < stride, "channel {c} past the stride");
+        if c >= stride {
+            out.fill(S::SILENCE);
+            return;
+        }
+        let layout = self.ring.layout;
+        let start = self.ring.slot(from);
+        let (head, tail) = out.split_at_mut(out.len().min(self.ring.frames - start));
+        let (lo, hi) = (
+            layout.interleaved_len(Samples::new(start)),
+            layout.interleaved_len(Samples::new(start + head.len())),
+        );
+        copy_strided(&self.ring.slots[lo..hi], stride, c, head);
+        copy_strided(&self.ring.slots, stride, c, tail);
+    }
+}
+
+/// Channel `c` of each whole `stride`-long frame of `atoms`, into `out` in
+/// order, as far as the shorter of the two runs.
+#[inline]
+fn copy_strided<S: RingSample>(atoms: &[S::Atom], stride: usize, c: usize, out: &mut [S]) {
+    for (o, frame) in out.iter_mut().zip(atoms.chunks_exact(stride)) {
+        *o = S::load(&frame[c]);
+    }
 }
 
 /// One claimed frame's samples, from [`PosClaim::frame`].

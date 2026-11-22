@@ -861,11 +861,7 @@ impl<F: Float> IntoNode<F> for MidiInputNode {
             serial: Arc::clone(&self.request_serial),
             dropped: self.dropped_reader.clone(),
         };
-        NodeParts {
-            node: Box::new(self),
-            controls,
-            fork: Some(Box::new(fork)),
-        }
+        NodeParts::new(Box::new(self), controls, Some(Box::new(fork)))
     }
 }
 

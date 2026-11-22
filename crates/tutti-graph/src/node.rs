@@ -1795,10 +1795,13 @@ pub trait IntoNode<F: Float = f32> {
 }
 
 /// A node split for insertion: the unit, its controls, and where a fork of
-/// it comes from. What [`IntoNode::into_parts`] returns — and itself an
+/// it comes from. What [`IntoNode::into_parts`] returns, and itself an
 /// [`IntoNode`], so a caller that had to split a node early (to read its
 /// shape, as [`GraphBuilder`](crate::GraphBuilder) does) can still insert it
 /// with its fork source.
+///
+/// Built with [`NodeParts::new`]. The fields are public because callers
+/// destructure them.
 pub struct NodeParts<C, F: Float = f32> {
     /// The unit the executor will own.
     pub node: Box<dyn Node<F>>,
@@ -1806,6 +1809,18 @@ pub struct NodeParts<C, F: Float = f32> {
     pub controls: C,
     /// Where a fork of this node comes from; `None` if it cannot be forked.
     pub fork: Option<Box<dyn ForkSource<F>>>,
+}
+
+impl<C, F: Float> NodeParts<C, F> {
+    /// The unit, its controls and its fork source.
+    #[must_use]
+    pub fn new(node: Box<dyn Node<F>>, controls: C, fork: Option<Box<dyn ForkSource<F>>>) -> Self {
+        Self {
+            node,
+            controls,
+            fork,
+        }
+    }
 }
 
 impl<C, F: Float> std::fmt::Debug for NodeParts<C, F> {
