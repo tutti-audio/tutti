@@ -67,12 +67,7 @@ pub(super) const EXEMPT: &[(&str, &str)] = &[
 
 /// `(area binary, first failing test and its allocation site)`: removed by fixing the
 /// test node or helper that allocates inside an `RtScope`.
-pub(super) const DEBT: &[(&str, &str)] = &[
-    (
-        "crates/tutti-soundfont/tests/graph/main.rs",
-        "contract::soundfont::direct: tutti_graph::contract::Recorder::process, tutti-graph src/contract.rs:1534",
-    ),
-];
+pub(super) const DEBT: &[(&str, &str)] = &[];
 
 /// Whether `path` is `(crates|testing)/<crate>/tests/<area>/main.rs`, an area binary.
 fn is_area_binary(path: &str) -> bool {
