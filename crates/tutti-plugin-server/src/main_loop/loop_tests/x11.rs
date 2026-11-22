@@ -38,7 +38,7 @@ impl Drop for GuiShape {
 /// same here as in the host (an X11 window id).
 #[test]
 fn the_editor_opens_resizes_and_closes_on_the_served_instance() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let _shape = GuiShape::embeddable();
     let probe = crate::test_utils::clap();
     probe.gui_command(GUI_CMD_REQUEST_RESIZE);
@@ -122,7 +122,7 @@ fn the_editor_opens_resizes_and_closes_on_the_served_instance() {
 /// the host is told**: the server closed it on its own account.
 #[test]
 fn unloading_a_plugin_closes_its_editor_and_says_so() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let _shape = GuiShape::embeddable();
     let probe = crate::test_utils::clap();
     let (mut session, _slab) = session();

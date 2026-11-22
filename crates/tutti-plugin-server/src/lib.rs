@@ -167,7 +167,6 @@ pub(crate) mod test_utils {
     // `Path` belongs to the VST3 bundle walk; CLAP only resolves a path string.
     #[cfg(feature = "vst3")]
     use std::path::Path;
-    use std::sync::MutexGuard;
     #[cfg(any(feature = "clap", feature = "vst3"))]
     use std::sync::OnceLock;
     #[cfg(feature = "clap")]
@@ -525,17 +524,5 @@ pub(crate) mod test_utils {
                     .into_owned()
             })
             .as_str()
-    }
-
-    /// Acquire the plugin-load lock, recovering from poisoning.
-    ///
-    /// These tests load real plugins, and a single failing
-    /// assertion panics while holding the lock — poisoning it. Without
-    /// recovery, every *other* plugin test then fails with `PoisonError`,
-    /// turning one real failure into dozens of misleading cascade failures.
-    /// The guarded data is `()`, so there's no invariant a poisoned lock
-    /// could violate; recovering is safe and keeps failures isolated.
-    pub fn plugin_load_lock() -> MutexGuard<'static, ()> {
-        PLUGIN_LOAD_LOCK.lock()
     }
 }

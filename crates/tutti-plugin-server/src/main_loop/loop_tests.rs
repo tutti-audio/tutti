@@ -303,7 +303,7 @@ fn run_ticking(fixture: &mut Fixture, script: &mut Script, tick: Duration) {
 /// that waits for the host serves it once and the script's guard fails.
 #[test]
 fn a_quiet_host_does_not_stop_the_plugins_timers() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let probe = crate::test_utils::clap();
     probe.thread_reset();
     let _cmd =
@@ -342,7 +342,7 @@ fn timer_period(millis: u32) -> crate::test_utils::Restore {
 /// loop that served it only at the tick would not within the script's guard.
 #[test]
 fn a_timer_is_served_at_its_deadline_not_the_tick() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let probe = crate::test_utils::clap();
     probe.thread_reset();
     let _period = timer_period(50);
@@ -375,7 +375,7 @@ fn a_timer_is_served_at_its_deadline_not_the_tick() {
 /// script's guard.
 #[test]
 fn a_message_after_silence_is_answered() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let (mut session, _slab) = session();
     let waits = std::sync::Arc::<std::sync::atomic::AtomicU64>::default();
     let mut script = Script::new([
@@ -411,7 +411,7 @@ fn a_message_after_silence_is_answered() {
 /// host gets).
 #[test]
 fn a_lost_plugin_ends_the_server_abnormally() {
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let (mut fixture, _slab) = session();
     let main = main_thread();
     assert!(matches!(
@@ -553,7 +553,7 @@ fn a_slow_paint_on_the_main_loop_delays_no_block() {
     const PAINT_MS: u32 = 250;
     const BLOCKS_IN_ONE_PAINT: usize = 5;
 
-    let _lock = crate::test_utils::plugin_load_lock();
+    let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let probe = crate::test_utils::clap();
     probe.thread_reset();
     let _cmd =
