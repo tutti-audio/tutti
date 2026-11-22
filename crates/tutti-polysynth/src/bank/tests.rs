@@ -2,6 +2,7 @@ use super::*;
 use tutti_buffers::Float;
 use tutti_dsp::EnvelopeCurve;
 use tutti_dsp::Noise;
+use tutti_dsp::{LadderSaturation, nonlinear_ladder_step};
 use tutti_units::{Amplitude, Db, Normalized, PhaseIncrement, Seconds};
 
 const SR: f64 = 48_000.0;
@@ -22,7 +23,15 @@ fn flat() -> Adsr {
 }
 
 fn bank<F: SynthFloat>(osc: OscillatorType, filter: FilterType, env: Adsr) -> VoiceBank<F> {
-    VoiceBank::new(osc, &filter, &env, sr(), 16, UnisonVoices::ONE)
+    VoiceBank::new(
+        osc,
+        &filter,
+        LadderSaturation::PerStage,
+        &env,
+        sr(),
+        16,
+        UnisonVoices::ONE,
+    )
 }
 
 /// Start `lane` sounding at `freq` with unity gains, as a note-on would.
@@ -368,12 +377,13 @@ fn ladder_gain(fc: f64, res: f64, hz: f64) -> f64 {
 }
 
 /// The lane ladder's gain is `|1 / ((1 + s/wc)^4 + k)|`, `k = 4 res`, under the bilinear map
-/// prewarped at the cutoff. The bank's own coefficients (`g1`, `k` of the lane) drive
-/// `ladder_step` with the lane `tanh` and a sine of amplitude `1e-3`: the oscillator's
-/// unit amplitude would saturate. The
-/// saturator's cubic term is `u^2 / 3` of its input `u`, and `u = x / |1 + k L^4|` reaches
-/// `2x` at the cutoff for `res = 0.5` (`L^4 = -1/4`, `k = 2`), so `(2e-3)^2 / 3 = 1.3e-6`
-/// of the signal. The bound is `1e-5` for that plus `64 * EPSILON` of the response.
+/// prewarped at the cutoff, in both saturation models. The bank's own coefficients (`g1`, `k`
+/// of the lane) drive the step the bank renders with (`ladder_lanes`, with the lane `tanh`)
+/// and a sine of amplitude `1e-3`: the oscillator's unit amplitude would saturate. A saturator's
+/// cubic term is `u^2 / 3` of its input `u`, and `u = x / |1 + k L^4|` reaches `2x` at the
+/// cutoff for `res = 0.5` (`L^4 = -1/4`, `k = 2`), so `(2e-3)^2 / 3 = 1.3e-6` of the signal
+/// per saturator; the per-stage model has five, the input model one. The bound is `1e-5` for
+/// that plus `64 * EPSILON` of the response.
 fn ladder_gain_matches_the_closed_form<F: SynthFloat>() {
     type L<F> = <F as SynthFloat>::Lanes;
     let (fc, res) = (1_200.0f64, 0.5f64);
@@ -388,19 +398,16 @@ fn ladder_gain_matches_the_closed_form<F: SynthFloat>() {
     let coefficients = tutti_dsp::LadderCoefficients { g1: c[0], k: c[1] };
     const AMPLITUDE: f64 = 1e-3;
     const WINDOW: usize = 4800;
-    for hz in [120.0, 600.0, 1_200.0, 4_800.0] {
+    for (per_stage, hz) in [false, true]
+        .into_iter()
+        .flat_map(|m| [120.0, 600.0, 1_200.0, 4_800.0].map(|hz| (m, hz)))
+    {
         let w = core::f64::consts::TAU * hz / SR;
         let mut z = [L::<F>::ZERO; 4];
         let (mut re, mut im) = (0.0, 0.0);
         for n in 0..2 * WINDOW {
             let x = L::<F>::splat(F::from_design(AMPLITUDE * (w * n as f64).sin()));
-            let y = tutti_dsp::ladder_step(
-                &coefficients,
-                tutti_dsp::LadderType::LP24,
-                &mut z,
-                x,
-                crate::kernel::tanh,
-            );
+            let y = ladder_lanes(per_stage, &coefficients, &mut z, x);
             if n >= WINDOW {
                 let y: f64 = y.as_slice()[0].into();
                 let m = (n - WINDOW) as f64;
@@ -413,9 +420,105 @@ fn ladder_gain_matches_the_closed_form<F: SynthFloat>() {
         let bound = 1e-5 + 64.0 * eps;
         assert!(
             (got - want).abs() < bound * want.max(0.01),
-            "{hz} Hz: gain {got}, closed form {want}"
+            "{hz} Hz, per stage {per_stage}: gain {got}, closed form {want}"
         );
     }
+}
+
+/// The per-stage solve over lanes is the scalar per-stage solve, bit for bit: one generic
+/// `nonlinear_ladder_step`, its scalar instance saturating through the lane `tanh` of one
+/// splatted value. Every lane carries its own loud input (a sine of amplitude `4 (k + 1) /
+/// LANES`, so the saturators bite) through a resonant ladder, and a lane's output equals the
+/// scalar run on that input at every sample: the lane arithmetic is the scalar's add, multiply
+/// and divide in the same order, and the `tanh` is the same function.
+fn lane_per_stage_ladder_is_the_scalar_solve<F: SynthFloat + SimdLanes>() {
+    type L<F> = <F as SynthFloat>::Lanes;
+    let filter = FilterType::Moog {
+        cutoff: Hz::new(1_200.0),
+        resonance: Resonance::new(0.8),
+    };
+    let mut b = bank::<F>(OscillatorType::Sine, filter, flat());
+    b.set_filter(0, 1, Hz::new(1_200.0), Resonance::new(0.8));
+    let c = b.coef_target[0];
+    let scalar = LadderCoefficients {
+        g1: c[0].as_slice()[0],
+        k: c[1].as_slice()[0],
+    };
+    let lanes = LadderCoefficients {
+        g1: L::<F>::splat(scalar.g1),
+        k: L::<F>::splat(scalar.k),
+    };
+    let w = core::f64::consts::TAU * 300.0 / SR;
+    let mut z = [L::<F>::ZERO; 4];
+    let mut zs = [[F::ZERO; 4]; 8];
+    let mut loud = 0.0f64;
+    for n in 0..2_000 {
+        let mut x = L::<F>::ZERO;
+        for (k, lane) in x.as_mut_slice().iter_mut().enumerate() {
+            let gain = 4.0 * (k + 1) as f64 / L::<F>::LANES as f64;
+            *lane = F::from_design(gain * (w * f64::from(n)).sin());
+        }
+        let y = ladder_lanes(true, &lanes, &mut z, x);
+        for (k, zk) in zs.iter_mut().enumerate().take(L::<F>::LANES) {
+            let xk = x.as_slice()[k];
+            loud = loud.max(xk.into().abs());
+            let want = nonlinear_ladder_step(&scalar, LadderType::LP24, zk, xk, |v| {
+                kernel::tanh(L::<F>::splat(v)).as_slice()[0]
+            });
+            assert_eq!(y.as_slice()[k], want, "lane {k}, sample {n}");
+        }
+    }
+    assert!(loud > 3.0, "the input never reached the saturators: {loud}");
+}
+
+/// A bank renders its configured model: a unit sine at 100 Hz through the ladder at 18 kHz with
+/// no resonance is quasi-static (the stages' lag is under 1% of the peak), so its peak is `tanh`
+/// of the unit peak applied once by the input model and four times by the per-stage model.
+#[test]
+fn a_bank_peaks_at_the_saturation_of_its_model() {
+    let filter = FilterType::Moog {
+        cutoff: Hz::new(18_000.0),
+        resonance: Resonance::NONE,
+    };
+    for (saturation, times) in [
+        (LadderSaturation::Input, 1),
+        (LadderSaturation::PerStage, 4),
+    ] {
+        let mut b = VoiceBank::<f64>::new(
+            OscillatorType::Sine,
+            &filter,
+            saturation,
+            &flat(),
+            sr(),
+            16,
+            UnisonVoices::ONE,
+        );
+        start(
+            &mut b,
+            0,
+            Hz::new(100.0),
+            Hz::new(18_000.0),
+            Resonance::NONE,
+        );
+        let peak = render(&mut b, &[0], 4_800, CONTROL_BLOCK)
+            .into_iter()
+            .fold(0.0, f64::max);
+        let want = (0..times).fold(1.0f64, |x, _| x.tanh());
+        assert!(
+            (peak - want).abs() < 0.01 * want,
+            "{saturation:?}: peak {peak}, want {want}"
+        );
+    }
+}
+
+#[test]
+fn the_lane_per_stage_ladder_is_the_scalar_solve_at_f32() {
+    lane_per_stage_ladder_is_the_scalar_solve::<f32>();
+}
+
+#[test]
+fn the_lane_per_stage_ladder_is_the_scalar_solve_at_f64() {
+    lane_per_stage_ladder_is_the_scalar_solve::<f64>();
 }
 
 #[test]
@@ -598,6 +701,7 @@ fn every_lane_starts_on_its_own_noise_seed() {
     let bank = VoiceBank::<f32>::new(
         OscillatorType::Noise,
         &FilterType::None,
+        LadderSaturation::PerStage,
         &flat(),
         sr(),
         16,
@@ -616,6 +720,7 @@ fn extreme_bank<F: SynthFloat>(rate: SampleRate, env: Adsr) -> VoiceBank<F> {
     VoiceBank::new(
         OscillatorType::Sine,
         &FilterType::None,
+        LadderSaturation::PerStage,
         &env,
         rate,
         1,
@@ -892,6 +997,7 @@ fn every_lane_of_an_f64_bank_starts_on_its_own_noise_seed() {
     let bank = VoiceBank::<f64>::new(
         OscillatorType::Noise,
         &FilterType::None,
+        LadderSaturation::PerStage,
         &flat(),
         sr(),
         16,

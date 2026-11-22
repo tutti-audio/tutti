@@ -22,7 +22,7 @@ pub use crossover::{
 pub use envelope::{EnvelopeFilterBank, EnvelopeFilterControls};
 pub use ladder::{
     LadderBank, LadderBlend, LadderCoefficients, LadderControls, LadderDesign, LadderModel,
-    LadderType, ladder_step,
+    LadderSaturation, LadderType, ladder_step, nonlinear_ladder_step,
 };
 pub use simd_lanes::SimdLanes;
 pub use svf::{
