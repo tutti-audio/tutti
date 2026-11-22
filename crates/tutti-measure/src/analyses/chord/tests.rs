@@ -1,5 +1,6 @@
 use super::*;
 use crate::test_rng::uniform;
+use crate::{FramingError, TooManyFrames};
 use tutti_dsp::{BinCount, FrameCount};
 use tutti_rt::SplitMix64;
 use tutti_units::Cents;
@@ -284,14 +285,14 @@ fn no_chord_leaves_a_gap() {
 fn inputs_are_validated() {
     let invalid = |g: &Grid<f64>| detect(g, framing(4096, 1024), &cfg()).unwrap_err();
     let wide = Grid::try_from((vec![0.0; 13], FrameCount(1), BinCount(13))).unwrap();
-    assert_eq!(invalid(&wide), Error::NotTwelveClasses { columns: 13 });
+    assert_eq!(invalid(&wide), ChordError::NotTwelveClasses { columns: 13 });
     let mut x = [0.5; CLASSES];
     x[4] = f64::NAN;
-    assert_eq!(invalid(&grid(&[x])), Error::NonFiniteInput);
+    assert_eq!(invalid(&grid(&[x])), ChordError::NonFiniteInput);
     x[4] = f64::NEG_INFINITY;
-    assert_eq!(invalid(&grid(&[x])), Error::NonFiniteInput);
+    assert_eq!(invalid(&grid(&[x])), ChordError::NonFiniteInput);
     x[4] = -0.5;
-    assert_eq!(invalid(&grid(&[x])), Error::NegativeInput);
+    assert_eq!(invalid(&grid(&[x])), ChordError::NegativeInput);
     let huge = Grid::try_from((
         vec![0.0; (MAX_FRAMES.get() + 1) * CLASSES],
         FrameCount(MAX_FRAMES.get() + 1),
@@ -300,10 +301,10 @@ fn inputs_are_validated() {
     .unwrap();
     assert_eq!(
         invalid(&huge),
-        Error::TooManyFrames {
+        ChordError::TooManyFrames(TooManyFrames {
             frames: FrameCount(MAX_FRAMES.get() + 1),
             max: MAX_FRAMES
-        }
+        })
     );
     let empty = Grid::try_from((Vec::new(), FrameCount(0), BinCount(CLASSES))).unwrap();
     assert!(
@@ -317,12 +318,15 @@ fn inputs_are_validated() {
             framing(1024, usize::MAX),
             &cfg()
         ),
-        Err(Error::SpanBeyondSampleCount)
+        Err(ChordError::SpanBeyondSampleCount)
     );
     // A zero window or hop is refused, not placed.
     for (zero, error) in [
-        (framing(0, 1024), Error::ZeroWindow),
-        (framing(4096, 0), Error::ZeroHop),
+        (
+            framing(0, 1024),
+            ChordError::Framing(FramingError::ZeroWindow),
+        ),
+        (framing(4096, 0), ChordError::Framing(FramingError::ZeroHop)),
     ] {
         assert_eq!(
             detect(&grid(&[triad(0, false); 3]), zero, &cfg()),

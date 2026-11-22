@@ -158,7 +158,7 @@ fn a_band_above_the_files_nyquist_fails_the_job_with_the_meters_error() {
     assert!(
         matches!(
             failed,
-            AnalyzeError::Measure(tutti_measure::Error::AboveNyquist { .. })
+            AnalyzeError::Measure(tutti_measure::MeterError::Nyquist(_))
         ),
         "{failed:?}"
     );
@@ -226,7 +226,7 @@ impl tutti_measure::Measure<f32> for Counting {
     type Context = ();
     type Meter = CountingMeter;
 
-    fn measure(&self, (): ()) -> tutti_measure::Result<CountingMeter> {
+    fn measure(&self, (): ()) -> core::result::Result<CountingMeter, tutti_measure::MeterError> {
         Ok(CountingMeter(self.0.clone()))
     }
 }
@@ -236,7 +236,11 @@ impl StreamMeter for CountingMeter {
     type Item = ();
     type Output = usize;
 
-    fn push(&mut self, _: Self::Input<'_>, _: &mut impl Extend<()>) -> tutti_measure::Result<()> {
+    fn push(
+        &mut self,
+        _: Self::Input<'_>,
+        _: &mut impl Extend<()>,
+    ) -> core::result::Result<(), tutti_measure::MeterError> {
         self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
@@ -264,7 +268,10 @@ impl tutti_measure::Measure<f32> for ChannelPeaks {
     type Context = ();
     type Meter = ChannelPeaksMeter;
 
-    fn measure(&self, (): ()) -> tutti_measure::Result<ChannelPeaksMeter> {
+    fn measure(
+        &self,
+        (): (),
+    ) -> core::result::Result<ChannelPeaksMeter, tutti_measure::MeterError> {
         Ok(ChannelPeaksMeter([0.0; 2]))
     }
 }
@@ -278,7 +285,7 @@ impl StreamMeter for ChannelPeaksMeter {
         &mut self,
         input: Self::Input<'_>,
         _: &mut impl Extend<()>,
-    ) -> tutti_measure::Result<()> {
+    ) -> core::result::Result<(), tutti_measure::MeterError> {
         for (peak, channel) in self.0.iter_mut().zip(0..2) {
             let plane = input.plane(channel);
             *peak = plane.iter().fold(*peak, |m, x| m.max(x.abs()));
@@ -332,7 +339,7 @@ impl<S: Float> tutti_measure::Measure<S> for MaxAbs {
     type Context = ();
     type Meter = MaxAbsMeter<S>;
 
-    fn measure(&self, (): ()) -> tutti_measure::Result<MaxAbsMeter<S>> {
+    fn measure(&self, (): ()) -> core::result::Result<MaxAbsMeter<S>, tutti_measure::MeterError> {
         Ok(MaxAbsMeter(S::SILENCE))
     }
 }
@@ -346,7 +353,7 @@ impl<S: Float> StreamMeter for MaxAbsMeter<S> {
         &mut self,
         input: Self::Input<'_>,
         _: &mut impl Extend<()>,
-    ) -> tutti_measure::Result<()> {
+    ) -> core::result::Result<(), tutti_measure::MeterError> {
         for &x in input.samples() {
             let x = if x < S::SILENCE { -x } else { x };
             if x > self.0 {

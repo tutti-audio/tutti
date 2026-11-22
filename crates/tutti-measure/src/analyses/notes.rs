@@ -77,7 +77,7 @@ use crate::convert::widen;
 use crate::framing::{Framing, check_frame_count, check_hop_within, check_overlap};
 use crate::meters::onset::{DetectionFunction, OnsetConfig, OnsetPlan, onset_lag, run};
 use crate::meters::silence::FiniteLevel;
-use crate::{Error, Region, Result, StreamMeter};
+use crate::{EmptyVelocityRange, FramingError, NoteError, Region, StreamMeter};
 use tutti_dsp::{median, median_of_sorted};
 use tutti_units::ranged;
 
@@ -115,7 +115,7 @@ ranged! {
 /// What [`transcribe`] and [`notes_from_track`] segment with. Immutable once
 /// built, and free of a sample rate: the call that takes the audio resolves
 /// the seconds to samples, checks the pitch band against Nyquist and the
-/// settings that depend on each other, and answers with a named [`Error`].
+/// settings that depend on each other, and answers with a named [`NoteError`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NoteConfig {
     yin: YinConfig,
@@ -150,8 +150,8 @@ impl NoteConfig {
     /// The pitch analysis: its band and threshold.
     ///
     /// The call that takes the audio refuses a YIN frame longer than 262144
-    /// samples ([`Error::YinFrameTooLong`]; a lowest frequency that low is not
-    /// a note) and a band above the rate's Nyquist ([`Error::AboveNyquist`]).
+    /// samples ([`NoteError::YinFrameTooLong`]; a lowest frequency that low is not
+    /// a note) and a band above the rate's Nyquist ([`AboveNyquist`](crate::AboveNyquist)).
     #[must_use]
     pub fn pitch(mut self, yin: YinConfig) -> Self {
         self.yin = yin;
@@ -161,7 +161,7 @@ impl NoteConfig {
     /// The onset analysis that splits notes. The call that takes the audio
     /// refuses one that is not [`DetectionFunction::SpectralFlux`], the only
     /// function whose peak has a known lag behind its attack
-    /// ([`Error::OnsetNotSpectralFlux`]).
+    /// ([`NoteError::OnsetNotSpectralFlux`]).
     #[must_use]
     pub fn onsets(mut self, onset: OnsetConfig) -> Self {
         self.onset = onset;
@@ -171,8 +171,8 @@ impl NoteConfig {
     /// How far the pitch track advances per frame.
     ///
     /// [`transcribe`], [`frame_levels`] and [`notes_from_track`] refuse a hop
-    /// wider than the YIN frame ([`Error::HopWiderThanWindow`]) or under 1/64 of
-    /// it ([`Error::TooManyOverlaps`]).
+    /// wider than the YIN frame ([`FramingError::HopWiderThanWindow`]) or under 1/64 of
+    /// it ([`FramingError::TooManyOverlaps`]).
     #[must_use]
     pub fn hop(mut self, hop: PitchHop) -> Self {
         self.hop = Some(hop);
@@ -224,21 +224,21 @@ impl NoteConfig {
     ///
     /// # Errors
     ///
-    /// [`Error::AboveNyquist`] for a pitch band above half `rate`;
-    /// [`Error::YinFrameTooLong`] when the YIN frame is longer than 262144
-    /// samples; [`Error::OnsetNotSpectralFlux`] when the onset function is not
-    /// spectral flux; [`Error::ZeroWindow`] or [`Error::ZeroHop`] for a zero onset window or hop.
-    fn plan(&self, rate: SampleRate) -> Result<NotePlan> {
+    /// [`AboveNyquist`](crate::AboveNyquist) for a pitch band above half `rate`;
+    /// [`NoteError::YinFrameTooLong`] when the YIN frame is longer than 262144
+    /// samples; [`NoteError::OnsetNotSpectralFlux`] when the onset function is not
+    /// spectral flux; [`FramingError::ZeroWindow`] or [`FramingError::ZeroHop`] for a zero onset window or hop.
+    fn plan(&self, rate: SampleRate) -> Result<NotePlan, NoteError> {
         let yin = self.yin.plan(rate)?;
         let frame = yin.buffer_size().get();
         if frame > MAX_FRAME {
-            return Err(Error::YinFrameTooLong {
+            return Err(NoteError::YinFrameTooLong {
                 frame: Samples::new(frame),
                 max: Samples::new(MAX_FRAME),
             });
         }
         if self.onset.function() != DetectionFunction::SpectralFlux {
-            return Err(Error::OnsetNotSpectralFlux);
+            return Err(NoteError::OnsetNotSpectralFlux);
         }
         let onset = self.onset.plan(rate)?;
         let samples = |span: NoteSpan| span.get().to_samples(rate);
@@ -291,7 +291,7 @@ impl NotePlan {
 
     /// Whether the hop suits the YIN frame: not wider than it, and no more
     /// than `MAX_OVERLAP` hops across it.
-    fn check_hop(&self) -> Result<()> {
+    fn check_hop(&self) -> Result<(), FramingError> {
         check_hop_within(self.frame(), self.hop)?;
         check_overlap(self.frame(), self.hop)
     }
@@ -356,15 +356,15 @@ impl Default for VelocityRange {
 }
 
 impl TryFrom<core::ops::RangeInclusive<FiniteLevel>> for VelocityRange {
-    type Error = Error;
+    type Error = EmptyVelocityRange;
 
     /// # Errors
     ///
-    /// [`Error::EmptyVelocityRange`] unless `floor < ceiling`.
-    fn try_from(range: core::ops::RangeInclusive<FiniteLevel>) -> Result<Self> {
+    /// [`EmptyVelocityRange`] unless `floor < ceiling`.
+    fn try_from(range: core::ops::RangeInclusive<FiniteLevel>) -> Result<Self, EmptyVelocityRange> {
         let (floor, ceiling) = (range.start().get(), range.end().get());
         if floor >= ceiling {
-            return Err(Error::EmptyVelocityRange { floor, ceiling });
+            return Err(EmptyVelocityRange { floor, ceiling });
         }
         Ok(Self { floor, ceiling })
     }
@@ -398,11 +398,11 @@ impl VelocityRange {
 ///
 /// # Errors
 ///
-/// [`Error::HopWiderThanWindow`] or [`Error::TooManyOverlaps`] when the hop does
-/// not suit the YIN frame; [`Error::NonFiniteInput`] for a NaN or infinite
-/// sample; [`Error::InsufficientInput`] when shorter than one YIN frame;
-/// [`Error::NoSignal`] when the peak is under -90 dBFS;
-/// [`Error::TooManyFrames`] when the hop would make more than 4194304
+/// [`FramingError::HopWiderThanWindow`] or [`FramingError::TooManyOverlaps`] when the hop does
+/// not suit the YIN frame; [`NoteError::NonFiniteInput`] for a NaN or infinite
+/// sample; [`NoteError::InsufficientInput`] when shorter than one YIN frame;
+/// [`NoteError::NoSignal`] when the peak is under -90 dBFS;
+/// [`NoteError::TooManyFrames`] when the hop would make more than 4194304
 /// frames. Noise gives no notes rather than an error, and a buffer shorter
 /// than the onset window (but not than a YIN frame) has no onsets, so only
 /// pitch changes split it.
@@ -410,23 +410,23 @@ pub fn transcribe<S: Sample>(
     cfg: &NoteConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-) -> Result<Vec<NoteEvent>> {
+) -> Result<Vec<NoteEvent>, NoteError> {
     let cfg = &cfg.plan(rate.into())?;
     let samples = &widen(samples.samples());
     cfg.check_hop()?;
     if samples.iter().any(|s| !s.is_finite()) {
-        return Err(Error::NonFiniteInput);
+        return Err(NoteError::NonFiniteInput);
     }
     let frame = cfg.frame();
     if samples.len() < frame.get() {
-        return Err(Error::InsufficientInput {
+        return Err(NoteError::InsufficientInput {
             needed: frame,
             got: Samples::new(samples.len()),
         });
     }
     let peak = samples.iter().fold(0.0f64, |m, s| m.max(s.abs()));
     if peak < SILENCE_FLOOR.to_amplitude().get() {
-        return Err(Error::NoSignal);
+        return Err(NoteError::NoSignal);
     }
     check_frame_count(
         cfg.framing().frames_for(Samples::new(samples.len())),
@@ -450,18 +450,18 @@ pub fn transcribe<S: Sample>(
 ///
 /// # Errors
 ///
-/// [`Error::HopWiderThanWindow`] or [`Error::TooManyOverlaps`] when the hop
+/// [`FramingError::HopWiderThanWindow`] or [`FramingError::TooManyOverlaps`] when the hop
 /// does not suit the YIN frame.
 pub fn frame_levels<S: Sample>(
     cfg: &NoteConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-) -> Result<Vec<Amplitude>> {
+) -> Result<Vec<Amplitude>, NoteError> {
     levels_at(&cfg.plan(rate.into())?, &widen(samples.samples()))
 }
 
 /// [`frame_levels`] over a resolved config and `f64` samples.
-fn levels_at(cfg: &NotePlan, samples: &[f64]) -> Result<Vec<Amplitude>> {
+fn levels_at(cfg: &NotePlan, samples: &[f64]) -> Result<Vec<Amplitude>, NoteError> {
     cfg.check_hop()?;
     let frame = cfg.frame().get();
     let frames = cfg.framing().frames_for(Samples::new(samples.len()));
@@ -482,21 +482,21 @@ fn levels_at(cfg: &NotePlan, samples: &[f64]) -> Result<Vec<Amplitude>> {
 ///
 /// # Errors
 ///
-/// [`Error::HopWiderThanWindow`] or [`Error::TooManyOverlaps`] when the hop does
-/// not suit the YIN frame; [`Error::LevelsLengthMismatch`] when `levels` and
+/// [`FramingError::HopWiderThanWindow`] or [`FramingError::TooManyOverlaps`] when the hop does
+/// not suit the YIN frame; [`NoteError::LevelsLengthMismatch`] when `levels` and
 /// `track` differ in length;
-/// [`Error::NegativeInput`] when a level is negative;
-/// [`Error::SmoothingTooLong`] when the smoothing span is over 1024 frames;
-/// [`Error::TooManyFrames`] when the track is over 4194304 frames;
-/// [`Error::NonFiniteInput`] for a non-finite level or voiced frequency;
-/// [`Error::NonPositiveFrequency`] for a voiced frequency of zero or below.
+/// [`NoteError::NegativeInput`] when a level is negative;
+/// [`NoteError::SmoothingTooLong`] when the smoothing span is over 1024 frames;
+/// [`NoteError::TooManyFrames`] when the track is over 4194304 frames;
+/// [`NoteError::NonFiniteInput`] for a non-finite level or voiced frequency;
+/// [`NoteError::NonPositiveFrequency`] for a voiced frequency of zero or below.
 pub fn notes_from_track(
     cfg: &NoteConfig,
     track: &[PitchEstimate],
     levels: &[Amplitude],
     onsets: &[Samples],
     rate: impl Into<SampleRate>,
-) -> Result<Vec<NoteEvent>> {
+) -> Result<Vec<NoteEvent>, NoteError> {
     segment(&cfg.plan(rate.into())?, track, levels, onsets)
 }
 
@@ -506,17 +506,17 @@ fn segment(
     track: &[PitchEstimate],
     levels: &[Amplitude],
     onsets: &[Samples],
-) -> Result<Vec<NoteEvent>> {
+) -> Result<Vec<NoteEvent>, NoteError> {
     cfg.check_hop()?;
     if track.len() != levels.len() {
-        return Err(Error::LevelsLengthMismatch {
+        return Err(NoteError::LevelsLengthMismatch {
             levels: levels.len(),
             track: track.len(),
         });
     }
     check_frame_count(FrameCount(track.len()), MAX_FRAMES)?;
     if cfg.smoothing_frames() > MAX_SMOOTHING_FRAMES {
-        return Err(Error::SmoothingTooLong {
+        return Err(NoteError::SmoothingTooLong {
             frames: cfg.smoothing_frames(),
             max: MAX_SMOOTHING_FRAMES,
         });
@@ -562,31 +562,32 @@ fn voiced_frames(
     track: &[PitchEstimate],
     levels: &[Amplitude],
     floor: Amplitude,
-) -> Result<Vec<Option<Voiced>>> {
+) -> Result<Vec<Option<Voiced>>, NoteError> {
     let a4 = Note::A4.frequency().get();
     track
         .iter()
         .zip(levels)
         .map(|(pitch, level)| {
             if !level.get().is_finite() {
-                return Err(Error::NonFiniteInput);
+                return Err(NoteError::NonFiniteInput);
             }
             if level.get() < 0.0 {
-                return Err(Error::NegativeInput);
+                return Err(NoteError::NegativeInput);
             }
             let Some(pitch) = pitch.pitch() else {
                 return Ok(None);
             };
             let frequency = pitch.frequency.get();
             if !frequency.is_finite() {
-                return Err(Error::NonFiniteInput);
+                return Err(NoteError::NonFiniteInput);
             }
             if frequency <= 0.0 {
-                return Err(Error::NonPositiveFrequency);
+                return Err(NoteError::NonPositiveFrequency);
             }
             // Under the finite positive frequency, the ratio is positive unless
             // it underflows to zero.
-            let ratio = FrequencyRatio::new(frequency / a4).ok_or(Error::NonPositiveFrequency)?;
+            let ratio =
+                FrequencyRatio::new(frequency / a4).ok_or(NoteError::NonPositiveFrequency)?;
             Ok((*level >= floor).then(|| Voiced {
                 cents: Cents::from_pitch_ratio(ratio),
                 level: *level,

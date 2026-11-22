@@ -1,5 +1,6 @@
 use super::*;
 use crate::fold_uneven;
+use crate::{AboveNyquist, FramingError, TooManyFrames};
 use tutti_dsp::{HopSize, WindowLength};
 
 const RATE: SampleRate = SampleRate::SR_22K05;
@@ -268,7 +269,7 @@ fn a_refused_chunk_keeps_the_carry_and_reset_reads_fresh() {
     nan[7] = f64::NAN;
     assert_eq!(
         meter.push(Mono::new(&nan), &mut Vec::new()),
-        Err(Error::NonFiniteInput)
+        Err(MeterError::NonFiniteInput)
     );
     assert_eq!((meter.mean(), meter.tuning()), (mean, tuning));
 
@@ -282,17 +283,28 @@ fn a_refused_chunk_keeps_the_carry_and_reset_reads_fresh() {
 #[test]
 fn the_framing_and_band_are_validated() {
     let at = |window, hop| Measure::<f64>::measure(&cfg().framing(framing(window, hop)), RATE);
-    assert!(matches!(at(32, 8), Err(Error::WindowOutOfRange { .. })));
+    assert!(matches!(
+        at(32, 8),
+        Err(MeterError::Framing(FramingError::WindowOutOfRange { .. }))
+    ));
     assert!(matches!(
         at(1 << 19, 1 << 17),
-        Err(Error::WindowOutOfRange { .. })
+        Err(MeterError::Framing(FramingError::WindowOutOfRange { .. }))
     ));
-    assert!(matches!(at(4096, 32), Err(Error::TooManyOverlaps { .. })));
+    assert!(matches!(
+        at(4096, 32),
+        Err(MeterError::Framing(FramingError::TooManyOverlaps { .. }))
+    ));
     assert!(at(4096, 64).is_ok());
-    assert!(matches!(at(0, 8), Err(Error::ZeroWindow | Error::ZeroHop)));
+    assert!(matches!(
+        at(0, 8),
+        Err(MeterError::Framing(FramingError::ZeroWindow)
+            | MeterError::Framing(FramingError::ZeroHop))
+    ));
     assert!(matches!(
         at(4096, 0),
-        Err(Error::ZeroWindow | Error::ZeroHop)
+        Err(MeterError::Framing(FramingError::ZeroWindow)
+            | MeterError::Framing(FramingError::ZeroHop))
     ));
     for (lo, hi) in [
         (500.0, 100.0),
@@ -304,7 +316,7 @@ fn the_framing_and_band_are_validated() {
         assert!(
             matches!(
                 FrequencyBand::try_from(Hz::new(lo)..=Hz::new(hi)),
-                Err(Error::EmptyFrequencyRange { .. })
+                Err(EmptyFrequencyRange { .. })
             ),
             "{lo} {hi}"
         );
@@ -315,16 +327,16 @@ fn the_framing_and_band_are_validated() {
     let narrow = cfg().band(FrequencyBand::new(Hz::new(100.0), Hz::new(110.0)).unwrap());
     assert!(matches!(
         chroma(&narrow, Mono::new(&x), RATE),
-        Err(Error::EmptyFrequencyRange { .. })
+        Err(MeterError::EmptyFrequencyRange(EmptyFrequencyRange { .. }))
     ));
     let wide = cfg().band(FrequencyBand::new(Hz::new(100.0), Hz::new(12_000.0)).unwrap());
     assert!(matches!(
         chroma(&wide, Mono::new(&x), RATE),
-        Err(Error::AboveNyquist { .. })
+        Err(MeterError::Nyquist(AboveNyquist { .. }))
     ));
     assert!(matches!(
         Measure::<f64>::measure(&wide, RATE),
-        Err(Error::AboveNyquist { .. })
+        Err(MeterError::Nyquist(AboveNyquist { .. }))
     ));
     // A low rate clamps the default band to Nyquist instead of failing.
     let low = cfg()
@@ -340,13 +352,19 @@ fn bad_input_is_refused() {
     let mut x = sine(440.0, 8192, 0.5);
     let one_shot = |x: &[f64], cfg: &ChromaConfig| chroma(cfg, Mono::new(x), RATE);
     x[100] = f64::NAN;
-    assert_eq!(one_shot(&x, &cfg()).unwrap_err(), Error::NonFiniteInput);
+    assert_eq!(
+        one_shot(&x, &cfg()).unwrap_err(),
+        MeterError::NonFiniteInput
+    );
     x[100] = f64::INFINITY;
-    assert_eq!(one_shot(&x, &cfg()).unwrap_err(), Error::NonFiniteInput);
+    assert_eq!(
+        one_shot(&x, &cfg()).unwrap_err(),
+        MeterError::NonFiniteInput
+    );
     x[100] = 0.25;
     assert_eq!(
         one_shot(&x[..4095], &cfg()).unwrap_err(),
-        Error::InsufficientInput {
+        MeterError::InsufficientInput {
             needed: Samples::new(4096),
             got: Samples::new(4095)
         }
@@ -355,13 +373,16 @@ fn bad_input_is_refused() {
     let long = vec![0.0; MAX_FRAMES.get() + 64];
     assert!(matches!(
         one_shot(&long, &tiny),
-        Err(Error::TooManyFrames { .. })
+        Err(MeterError::TooManyFrames(TooManyFrames { .. }))
     ));
     // A NaN between two frames is in no window but is still refused.
     let sparse = cfg().framing(framing(64, 128));
     let mut gap = sine(440.0, 512, 0.5);
     gap[100] = f64::NAN;
-    assert_eq!(one_shot(&gap, &sparse).unwrap_err(), Error::NonFiniteInput);
+    assert_eq!(
+        one_shot(&gap, &sparse).unwrap_err(),
+        MeterError::NonFiniteInput
+    );
 }
 
 /// A 16-bit buffer folds at its nominal level: the chroma of the integer

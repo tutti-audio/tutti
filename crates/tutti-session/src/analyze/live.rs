@@ -28,7 +28,7 @@ pub enum AnalyzerError {
     /// The analysis cannot be bound to the graph's rate and the tap's width
     /// (a band above the Nyquist rate, say).
     #[error("the analysis refused the graph's rate and the tap's width: {0}")]
-    Measure(#[from] tutti_measure::Error),
+    Measure(#[from] tutti_measure::MeterError),
     /// The tap's channels cannot be shown to the meter in the view it takes:
     /// a stereo analysis on a tap of another width, or a mono analysis with
     /// no fold from the tap's width.

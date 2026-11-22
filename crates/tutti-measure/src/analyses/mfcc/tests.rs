@@ -1,5 +1,5 @@
 use super::*;
-use crate::{Error, SampleRange, StftConfig, stft_magnitude};
+use crate::{SampleRange, StftConfig, stft_magnitude};
 use core::num::NonZeroUsize;
 use tutti_buffers::Mono;
 use tutti_rt::SplitMix64;
@@ -77,12 +77,12 @@ fn a_bank_that_does_not_fit_the_transform_is_refused() {
     let above = config(13).range(Hz::new(0.0), Hz::new(9000.0));
     assert!(matches!(
         mfcc(&above, &t),
-        Err(Error::Mel(tutti_dsp::MelError::AboveNyquist { .. }))
+        Err(MfccError::Mel(tutti_dsp::MelError::AboveNyquist { .. }))
     ));
     let dense = MfccConfig::new(MelBandCount::of(512), NonZeroUsize::new(13).unwrap());
     assert!(matches!(
         mfcc(&dense, &t),
-        Err(Error::Mel(tutti_dsp::MelError::EmptyBand { .. }))
+        Err(MfccError::Mel(tutti_dsp::MelError::EmptyBand { .. }))
     ));
 }
 

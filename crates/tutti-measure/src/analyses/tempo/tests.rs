@@ -271,11 +271,11 @@ fn a_signal_without_change_has_no_tempo() {
     for x in [vec![0.0f64; 441_000], vec![0.5f64; 441_000]] {
         assert_eq!(
             estimate_tempo(&cfg, Mono::new(&x), SampleRate::of(RATE)),
-            Err(Error::NoSignal)
+            Err(TempoEstimateError::NoSignal)
         );
         assert_eq!(
             track_beats(&cfg, Mono::new(&x), SampleRate::of(RATE)),
-            Err(Error::NoSignal)
+            Err(TempoEstimateError::NoSignal)
         );
     }
     // A constant, and a constant with one ulp of rounding on every 7th value.
@@ -287,7 +287,7 @@ fn a_signal_without_change_has_no_tempo() {
     for curve in [flat, ulp] {
         assert_eq!(
             estimate_tempo_from_novelty(&cfg, &curve, SampleRate::of(RATE), Samples::new(512)),
-            Err(Error::NoSignal)
+            Err(TempoEstimateError::NoSignal)
         );
     }
 }
@@ -301,18 +301,18 @@ fn non_finite_input_is_refused() {
         x[20_000] = bad;
         assert_eq!(
             estimate_tempo(&cfg, Mono::new(&x), SampleRate::of(RATE)),
-            Err(Error::NonFiniteInput)
+            Err(TempoEstimateError::NonFiniteInput)
         );
         assert_eq!(
             track_beats(&cfg, Mono::new(&x), SampleRate::of(RATE)),
-            Err(Error::NonFiniteInput)
+            Err(TempoEstimateError::NonFiniteInput)
         );
         let mut curve = vec![0.0f64; 1000];
         curve[10] = 1.0;
         curve[500] = bad;
         assert_eq!(
             estimate_tempo_from_novelty(&cfg, &curve, SampleRate::of(RATE), Samples::new(512)),
-            Err(Error::NonFiniteInput)
+            Err(TempoEstimateError::NonFiniteInput)
         );
         assert_eq!(
             track_beats_from_novelty(
@@ -322,7 +322,7 @@ fn non_finite_input_is_refused() {
                 Samples::new(512),
                 Some(Bpm::of(120.0))
             ),
-            Err(Error::NonFiniteInput)
+            Err(TempoEstimateError::NonFiniteInput)
         );
     }
 }
@@ -433,7 +433,7 @@ fn unusable_settings_are_refused() {
     for (min, max) in [(100.0, 100.0), (120.0, 90.0)] {
         assert!(matches!(
             TempoRange::try_from(Bpm::of(min)..=Bpm::of(max)),
-            Err(Error::EmptyTempoRange { .. })
+            Err(EmptyTempoRange { .. })
         ));
     }
     // A zero, negative, NaN or infinite bound, or a centre, is not a
@@ -445,18 +445,18 @@ fn unusable_settings_are_refused() {
     let curve = vec![0.0f64; 1000];
     assert_eq!(
         estimate_tempo_from_novelty(&cfg, &curve, SampleRate::of(RATE), Samples::new(0)),
-        Err(Error::ZeroHop)
+        Err(TempoEstimateError::Framing(FramingError::ZeroHop))
     );
     // Under one window, and under two periods of the slowest tempo.
     assert!(matches!(
         estimate_tempo(&cfg, Mono::new(&[0.0f64; 100]), SampleRate::of(RATE)),
-        Err(Error::InsufficientInput { .. })
+        Err(TempoEstimateError::InsufficientInput { .. })
     ));
     let mut short = vec![0.0f64; 100];
     short[3] = 1.0;
     assert!(matches!(
         estimate_tempo_from_novelty(&cfg, &short, SampleRate::of(RATE), Samples::new(512)),
-        Err(Error::InsufficientInput { .. })
+        Err(TempoEstimateError::InsufficientInput { .. })
     ));
     // At a hop this wide no whole-frame lag falls in 100 to 101 BPM.
     let narrow = cfg.range(TempoRange::new(Bpm::of(100.0), Bpm::of(101.0)).unwrap());
@@ -464,7 +464,7 @@ fn unusable_settings_are_refused() {
     long[3] = 1.0;
     assert!(matches!(
         estimate_tempo_from_novelty(&narrow, &long, SampleRate::of(RATE), Samples::new(512)),
-        Err(Error::EmptyTempoRange { .. })
+        Err(TempoEstimateError::EmptyTempoRange(EmptyTempoRange { .. }))
     ));
 }
 
@@ -502,11 +502,11 @@ fn near_silence_has_no_tempo() {
     let cfg = TempoConfig::new();
     assert_eq!(
         estimate_tempo(&cfg, Mono::new(&quiet(-100.0)), SampleRate::of(RATE)),
-        Err(Error::NoSignal)
+        Err(TempoEstimateError::NoSignal)
     );
     assert_eq!(
         track_beats(&cfg, Mono::new(&quiet(-100.0)), SampleRate::of(RATE)),
-        Err(Error::NoSignal)
+        Err(TempoEstimateError::NoSignal)
     );
     let tempo = estimate_tempo(&cfg, Mono::new(&quiet(-80.0)), SampleRate::of(RATE)).unwrap();
     assert!((tempo.bpm.get() - 120.0).abs() < 1.5);
@@ -529,7 +529,7 @@ fn a_supplied_tempo_must_fit_the_curve() {
     for bad in [1e-6, 5.0, 3001.0, 1e12] {
         assert_eq!(
             track_beats_from_novelty(&cfg, &curve, SampleRate::of(RATE), hop, Some(Bpm::of(bad))),
-            Err(Error::UntrackableTempo { bpm: Bpm::of(bad) }),
+            Err(TempoEstimateError::UntrackableTempo { bpm: Bpm::of(bad) }),
             "{bad}"
         );
     }
@@ -552,7 +552,7 @@ fn an_absurd_range_is_refused() {
         assert!(
             matches!(
                 TempoRange::try_from(Bpm::of(min)..=Bpm::of(max)),
-                Err(Error::EmptyTempoRange { .. })
+                Err(EmptyTempoRange { .. })
             ),
             "{min}..{max}"
         );
@@ -562,6 +562,6 @@ fn an_absurd_range_is_refused() {
     let curve: Vec<f64> = (0..2000).map(|i| (i % 43) as f64).collect();
     assert!(matches!(
         estimate_tempo_from_novelty(&slow, &curve, SampleRate::of(RATE), Samples::new(512)),
-        Err(Error::InsufficientInput { .. })
+        Err(TempoEstimateError::InsufficientInput { .. })
     ));
 }

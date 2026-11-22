@@ -19,7 +19,7 @@ use tutti_units::{Amplitude, SampleRate, Samples, Seconds};
 
 use crate::convert::for_blocks;
 use crate::meters::onset::OnsetGap;
-use crate::{Measure, Result, StreamMeter};
+use crate::{Measure, MeterError, StreamMeter};
 
 /// Transient detection parameters. Immutable once built, and free of a sample rate:
 /// [`detect_transients`] and [`TransientConfig::measure`] take it.
@@ -80,7 +80,7 @@ impl<S: Sample> Measure<S> for TransientConfig {
     type Meter = TransientMeter<S>;
 
     /// A meter that detects transients in audio at `rate`, chunk by chunk.
-    fn measure(&self, rate: SampleRate) -> Result<TransientMeter<S>> {
+    fn measure(&self, rate: SampleRate) -> Result<TransientMeter<S>, MeterError> {
         Ok(TransientMeter {
             detector: TransientDetector::new(rate)
                 .threshold(self.threshold)
@@ -126,7 +126,11 @@ impl<S: Sample> StreamMeter for TransientMeter<S> {
 
     /// Feeds the next chunk, in order, and extends `out` with the position of each attack the
     /// chunk confirms. A position can lie in an earlier chunk than the one that confirms it.
-    fn push(&mut self, chunk: Mono<'_, S>, out: &mut impl Extend<Samples>) -> Result<()> {
+    fn push(
+        &mut self,
+        chunk: Mono<'_, S>,
+        out: &mut impl Extend<Samples>,
+    ) -> Result<(), MeterError> {
         for_blocks(chunk.samples(), 1, |block| {
             for &x in block {
                 if let Some(position) = self.detector.push(x) {
@@ -155,7 +159,7 @@ pub fn detect_transients<S: Sample>(
     cfg: &TransientConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-) -> Result<Vec<Samples>> {
+) -> Result<Vec<Samples>, MeterError> {
     let mut meter = Measure::<S>::measure(cfg, rate.into())?;
     meter.push(samples, &mut crate::convert::Discard)?;
     Ok(meter.finish())

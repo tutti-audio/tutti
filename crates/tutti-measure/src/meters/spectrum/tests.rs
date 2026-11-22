@@ -1,6 +1,7 @@
 use super::*;
 use crate::fold_uneven;
 use crate::test_rng::uniform;
+use crate::{AboveNyquist, FramingError};
 use std::f64::consts::TAU;
 use tutti_dsp::{HopSize, WindowLength};
 use tutti_rt::SplitMix64;
@@ -495,7 +496,7 @@ fn an_empty_band_names_itself_and_the_window_that_holds_it() {
         per_octave: BandsPerOctave::of(3),
         band: band(20.0, 20_000.0),
     };
-    let Err(Error::EmptyBand {
+    let Err(MeterError::EmptyBand {
         band,
         lower,
         upper,
@@ -581,7 +582,7 @@ fn the_hold_is_a_whole_number_of_frames_without_over_holding() {
             SampleRate::of(10_000_000.0)
         )
         .map(|_: SpectrumMeter<f32>| ()),
-        Err(Error::PeakHoldTooLong { .. })
+        Err(MeterError::PeakHoldTooLong { .. })
     ));
 }
 
@@ -593,21 +594,24 @@ fn bad_settings_are_errors() {
     for size in [63, 65_537] {
         assert!(matches!(
             new(size, size),
-            Err(Error::WindowOutOfRange { .. })
+            Err(MeterError::Framing(FramingError::WindowOutOfRange { .. }))
         ));
     }
     assert!(matches!(
         new(256, 257),
-        Err(Error::HopWiderThanWindow { .. })
+        Err(MeterError::Framing(FramingError::HopWiderThanWindow { .. }))
     ));
     for (size, hop) in [(65_536, 1), (4096, 63)] {
-        assert!(matches!(new(size, hop), Err(Error::TooManyOverlaps { .. })));
+        assert!(matches!(
+            new(size, hop),
+            Err(MeterError::Framing(FramingError::TooManyOverlaps { .. }))
+        ));
     }
     assert!(new(64, 1).is_ok() && new(65_536, 65_536).is_ok() && new(4096, 64).is_ok());
     for rate in [0.5, 1e9] {
         assert!(matches!(
             Measure::<f32>::measure(&config(256, 64), SampleRate::of(rate)),
-            Err(Error::SampleRateOutOfRange { .. })
+            Err(MeterError::SampleRateOutOfRange { .. })
         ));
     }
 
@@ -618,7 +622,7 @@ fn bad_settings_are_errors() {
             SampleRate::of(RATE)
         )
         .map(|_: SpectrumMeter<f32>| ()),
-        Err(Error::SpectrogramTooLarge { .. })
+        Err(MeterError::SpectrogramTooLarge { .. })
     ));
     assert_eq!(
         Measure::<f32>::measure(
@@ -626,7 +630,7 @@ fn bad_settings_are_errors() {
             SampleRate::of(RATE)
         )
         .map(|_: SpectrumMeter<f32>| ()),
-        Err(Error::SpectrogramTooLarge {
+        Err(MeterError::SpectrogramTooLarge {
             cells: ((1 << 22) / 513 + 1) * 513,
             max: 1 << 22
         })
@@ -645,7 +649,7 @@ fn bad_settings_are_errors() {
         .measure(SampleRate::of(RATE))
         .map(|_: SpectrumMeter<f32>| ());
     assert!(
-        matches!(banded, Err(Error::EmptyBand { .. })),
+        matches!(banded, Err(MeterError::EmptyBand { .. })),
         "4000 bands of 513 bins cannot all hold a bin"
     );
 
@@ -659,14 +663,14 @@ fn bad_settings_are_errors() {
         oct(48, 1e-30, 20_000.0)
             .measure(SampleRate::of(RATE))
             .map(|_: SpectrumMeter<f32>| ()),
-        Err(Error::TooManyBands { max: 4096, .. })
+        Err(MeterError::TooManyBands { max: 4096, .. })
     ));
     assert!(
         matches!(
             oct(48, 100.0, 20_000.0)
                 .measure(SampleRate::of(RATE))
                 .map(|_: SpectrumMeter<f32>| ()),
-            Err(Error::EmptyBand { .. })
+            Err(MeterError::EmptyBand { .. })
         ),
         "1/48 octave is finer than the bins"
     );
@@ -679,7 +683,7 @@ fn bad_settings_are_errors() {
         assert!(
             matches!(
                 FrequencyBand::try_from(Hz::new(min)..=Hz::new(max)),
-                Err(Error::EmptyFrequencyRange { .. })
+                Err(EmptyFrequencyRange { .. })
             ),
             "{min} {max}"
         );
@@ -688,13 +692,13 @@ fn bad_settings_are_errors() {
         oct(1, 100.0, 30_000.0)
             .measure(SampleRate::of(RATE))
             .map(|_: SpectrumMeter<f32>| ()),
-        Err(Error::AboveNyquist { .. })
+        Err(MeterError::Nyquist(AboveNyquist { .. }))
     ));
     assert!(matches!(
         oct(1, 100.0, 150.0)
             .measure(SampleRate::of(RATE))
             .map(|_: SpectrumMeter<f32>| ()),
-        Err(Error::EmptyFrequencyRange { .. })
+        Err(MeterError::EmptyFrequencyRange(EmptyFrequencyRange { .. }))
     ));
     // Returning to per-bin outputs multiplies the cells per column: a
     // spectrogram sized for 17 bands is not one for 513 bins.
@@ -710,7 +714,7 @@ fn bad_settings_are_errors() {
             .banding(Banding::Bins)
             .measure(SampleRate::of(RATE))
             .map(|_: SpectrumMeter<f32>| ()),
-        Err(Error::SpectrogramTooLarge { .. })
+        Err(MeterError::SpectrogramTooLarge { .. })
     ));
 }
 
@@ -747,7 +751,7 @@ fn input_is_checked_and_state_stays_finite() {
         block[499] = bad;
         assert_eq!(
             state.push(Mono::new(&block), &mut Vec::new()),
-            Err(Error::NonFiniteInput)
+            Err(MeterError::NonFiniteInput)
         );
         assert_eq!(state.levels().to_vec(), before);
     }
