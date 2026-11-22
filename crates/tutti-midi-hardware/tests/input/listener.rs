@@ -50,10 +50,10 @@ impl Listener {
         // node, each output port of its first Group.
         let ports = tutti_midi_runtime::MidiInputPorts::FIRST_GROUP.count();
         let slots = if input { ports } else { 1 };
-        let mut rig = EventRig::new(RATE, BLOCK, slots as u16);
+        let mut rig = EventRig::new(RATE, BLOCK, slots);
         if input {
             rig.editor.insert(INPUT, "input", MidiInputNode::new());
-            for port in 0..ports as u16 {
+            for port in 0..ports {
                 rig.feed(INPUT, port, port);
             }
         }

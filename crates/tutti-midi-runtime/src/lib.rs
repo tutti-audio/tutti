@@ -81,15 +81,15 @@
 //!
 //! let ports = MidiInputPorts::FIRST_GROUP;
 //! // A synth on channel 3 hears port 3 and the channelless port...
-//! let on_three: Vec<usize> = ports
+//! let on_three: Vec<u16> = ports
 //!     .listening(Some(MidiGroup::FIRST), Some(MidiChannel::of(3)))
 //!     .collect();
 //! assert_eq!(on_three, vec![3, CHANNELLESS_PORT]);
 //! // ...one on every channel hears all of them.
-//! assert_eq!(ports.listening(None, None).count(), MIDI_INPUT_PORTS);
+//! assert_eq!(ports.listening(None, None).count(), usize::from(MIDI_INPUT_PORTS));
 //! // Group 2's channel 3 is another port, on a node that hears two Groups.
 //! let two = MidiInputPorts::through(MidiGroup::of(1));
-//! let group2: Vec<usize> = two
+//! let group2: Vec<u16> = two
 //!     .listening(Some(MidiGroup::of(1)), Some(MidiChannel::of(3)))
 //!     .collect();
 //! assert_eq!(group2, vec![MIDI_INPUT_PORTS + 3, MIDI_INPUT_PORTS + CHANNELLESS_PORT]);

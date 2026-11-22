@@ -191,10 +191,13 @@ fn each_event_leaves_on_its_channels_port() {
         Ump::from(Message::System(MidiGroup::FIRST, System::TimingClock)),
     );
     let wire = Script::new(vec![vec![note(9, 64, 40), note(0, 60, 10), clock]]);
-    let (_ed, mut exec, _c, seen) = input(Input::new(wire), MIDI_INPUT_PORTS as u16, 512);
+    let (_ed, mut exec, _c, seen) = input(Input::new(wire), MIDI_INPUT_PORTS, 512);
     block(&mut exec, 512);
     let got: Vec<(usize, u64)> = seen.lock().unwrap().iter().map(|s| (s.0, s.1)).collect();
-    assert_eq!(got, vec![(0, 10), (9, 40), (CHANNELLESS_PORT, 20)]);
+    assert_eq!(
+        got,
+        vec![(0, 10), (9, 40), (usize::from(CHANNELLESS_PORT), 20)]
+    );
 }
 
 /// **A Group's channels leave on ports of their own** (M2-104 section 2.1.2,
@@ -221,8 +224,7 @@ fn a_groups_channels_leave_on_their_own_ports() {
         group(1, 1, 61),
         group(2, 1, 62),
     ]]);
-    let (live, mut exec, _c, seen) =
-        input(Input::new(wire).hearing(ports), ports.count() as u16, 512);
+    let (live, mut exec, _c, seen) = input(Input::new(wire).hearing(ports), ports.count(), 512);
     block(&mut exec, 512);
     let got: Vec<(usize, u8)> = seen
         .lock()
@@ -230,7 +232,7 @@ fn a_groups_channels_leave_on_their_own_ports() {
         .iter()
         .map(|s| (s.0, note_of(s.2).unwrap()))
         .collect();
-    assert_eq!(got, vec![(1, 60), (MIDI_INPUT_PORTS + 1, 61)]);
+    assert_eq!(got, vec![(1, 60), (usize::from(MIDI_INPUT_PORTS + 1), 61)]);
     let prepare = *live.prepare();
     assert!(
         live.fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
@@ -254,7 +256,7 @@ fn an_rpn_run_split_across_blocks_is_assembled() {
             cc_ev(3, CCNumber::DATA_ENTRY_LSB, 0),
         ],
     ]);
-    let (_ed, mut exec, _c, seen) = input(Input::new(wire), MIDI_INPUT_PORTS as u16, 512);
+    let (_ed, mut exec, _c, seen) = input(Input::new(wire), MIDI_INPUT_PORTS, 512);
     block(&mut exec, 512);
     block(&mut exec, 512);
     let seen = seen.lock().unwrap();
@@ -293,11 +295,7 @@ fn a_devices_select_and_entry_make_a_run() {
         cc_ev(3, CCNumber::DATA_ENTRY, 10),
         cc_ev(3, CCNumber::DATA_ENTRY_LSB, 0),
     ]];
-    let (_ed, mut exec, _c, seen) = input(
-        Input::new(Script::new(together)),
-        MIDI_INPUT_PORTS as u16,
-        512,
-    );
+    let (_ed, mut exec, _c, seen) = input(Input::new(Script::new(together)), MIDI_INPUT_PORTS, 512);
     block(&mut exec, 512);
     assert_eq!(
         seen.lock()
@@ -319,8 +317,7 @@ fn a_departed_devices_generation_is_handled_only_after_a_block_has_run() {
     let (mut writer, generation) = DeviceGeneration::new();
     writer.arrive();
     let wire = Script::new(vec![vec![note(0, 60, 10)], vec![]]);
-    let (_ed, mut exec, _c, seen) =
-        input(following(wire, &generation), MIDI_INPUT_PORTS as u16, 512);
+    let (_ed, mut exec, _c, seen) = input(following(wire, &generation), MIDI_INPUT_PORTS, 512);
     block(&mut exec, 512);
     assert!(generation.is_idle(), "the block handled the arrival");
     assert_eq!(heard(&seen).len(), 1, "the key is down");
@@ -346,8 +343,7 @@ fn a_release_that_does_not_fit_is_owed_and_is_handled_when_it_has_gone() {
     let (mut writer, generation) = DeviceGeneration::new();
     writer.arrive();
     let wire = Script::new(vec![keys(0), keys(4), vec![], vec![]]);
-    let (_ed, mut exec, _c, seen) =
-        input(following(wire, &generation), MIDI_INPUT_PORTS as u16, 512);
+    let (_ed, mut exec, _c, seen) = input(following(wire, &generation), MIDI_INPUT_PORTS, 512);
     let offs = |from: u64, to: u64| {
         heard(&seen)
             .iter()
@@ -726,8 +722,7 @@ fn a_slot_a_new_device_takes_forgets_the_previous_devices_half_sent_run() {
         let (mut writer, generation) = DeviceGeneration::new();
         let Input { node, inlet } = Input::new(script());
         let node = node.following(&generation);
-        let (_ed, mut exec, _controls, seen) =
-            input(Input { node, inlet }, MIDI_INPUT_PORTS as u16, 512);
+        let (_ed, mut exec, _controls, seen) = input(Input { node, inlet }, MIDI_INPUT_PORTS, 512);
         block(&mut exec, 512);
         if reopened {
             writer.arrive();
@@ -800,8 +795,7 @@ fn a_device_that_lets_go_has_what_it_held_released() {
             vec![note(0, 60, 10), cc_at(20, 0, CCNumber::SUSTAIN, 127), bend],
             vec![note(0, 61, 5)],
         ]);
-        let (_ed, mut exec, _c, seen) =
-            input(following(wire, &generation), MIDI_INPUT_PORTS as u16, 512);
+        let (_ed, mut exec, _c, seen) = input(following(wire, &generation), MIDI_INPUT_PORTS, 512);
         block(&mut exec, 512);
         assert_eq!(heard(&seen).len(), 3, "the key, the pedal, the bend");
         seen.lock().unwrap().clear();
@@ -836,11 +830,8 @@ fn a_cable_that_goes_quiet_after_active_sensing_has_its_notes_ended() {
     for (extra, ran_out) in [(None, 15_840u64), (Some(15_000usize), 30_840)] {
         let mut batch = vec![sense, note(0, 60, 0)];
         batch.extend(extra.map(|f| cc_at(f, 0, CCNumber::of(1), 1)));
-        let (_ed, mut exec, _c, seen) = input(
-            Input::new(Script::new(vec![batch])),
-            MIDI_INPUT_PORTS as u16,
-            512,
-        );
+        let (_ed, mut exec, _c, seen) =
+            input(Input::new(Script::new(vec![batch])), MIDI_INPUT_PORTS, 512);
         for _ in 0..blocks(ran_out) {
             block(&mut exec, 512);
         }
@@ -863,7 +854,7 @@ fn a_cable_that_goes_quiet_after_active_sensing_has_its_notes_ended() {
 fn a_cable_with_no_active_sensing_is_never_judged_gone() {
     let (_ed, mut exec, _c, seen) = input(
         Input::new(Script::new(vec![vec![note(0, 60, 0)]])),
-        MIDI_INPUT_PORTS as u16,
+        MIDI_INPUT_PORTS,
         512,
     );
     for _ in 0..40 {
@@ -902,7 +893,7 @@ fn a_system_reset_ends_its_cables_notes_and_runs_and_is_not_echoed() {
         cc_at(200, 0, CCNumber::DATA_ENTRY, 10),
         cc_at(201, 0, CCNumber::DATA_ENTRY_LSB, 0),
     ]]);
-    let (_ed, mut exec, _c, seen) = input(Input::new(wire).hearing(two), two.count() as u16, 512);
+    let (_ed, mut exec, _c, seen) = input(Input::new(wire).hearing(two), two.count(), 512);
     block(&mut exec, 512);
     let got = heard(&seen);
     let after: Vec<_> = got.iter().filter(|(f, _)| *f >= 100).cloned().collect();
@@ -946,7 +937,7 @@ fn a_system_reset_reaches_every_channel_of_its_group() {
         other_group,
         reset,
     ]]);
-    let (_ed, mut exec, _c, seen) = input(Input::new(wire).hearing(two), two.count() as u16, 512);
+    let (_ed, mut exec, _c, seen) = input(Input::new(wire).hearing(two), two.count(), 512);
     block(&mut exec, 512);
     let got = heard(&seen);
     let mut after: Vec<_> = got.iter().filter(|(f, _)| *f >= 100).cloned().collect();
@@ -985,7 +976,7 @@ fn a_requested_mpe_mode_is_adopted_once() {
     ]);
     let cell = Publisher::new(MpeMode::Disabled);
     let (_ed, mut exec, _controls, seen) =
-        input(Input::new(wire).mpe(&cell), MIDI_INPUT_PORTS as u16, 512);
+        input(Input::new(wire).mpe(&cell), MIDI_INPUT_PORTS, 512);
     cell.publish(midi::lower_zone(6));
     for _ in 0..3 {
         block(&mut exec, 512);
@@ -1037,7 +1028,7 @@ fn a_devices_profile_zones_switch_its_rules() {
         Script::new(vec![vec![reset(0)], vec![reset(1)], vec![reset(2)]]),
         &generation,
     );
-    let (_ed, mut exec, controls, seen) = input(node, MIDI_INPUT_PORTS as u16, 512);
+    let (_ed, mut exec, controls, seen) = input(node, MIDI_INPUT_PORTS, 512);
     let zone = MpeZones::single(MpeZoneConfig::profile(
         MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(4)).unwrap(),
         PitchBendSensitivity::MPE_PROFILE_DEFAULT,
@@ -1091,7 +1082,7 @@ fn a_profile_zone_starts_once_per_request() {
             Script::new(vec![vec![], vec![], vec![], vec![]]),
             &generation,
         ),
-        MIDI_INPUT_PORTS as u16,
+        MIDI_INPUT_PORTS,
         512,
     );
     let zone = MpeZones::single(MpeZoneConfig::profile(
@@ -1135,7 +1126,7 @@ fn clearing_a_devices_profiles_returns_it_to_the_rules_it_had() {
             Script::new(vec![vec![], vec![reset], vec![reset]]),
             &generation,
         ),
-        MIDI_INPUT_PORTS as u16,
+        MIDI_INPUT_PORTS,
         512,
     );
     let zone = MpeZones::single(MpeZoneConfig::profile(
@@ -1187,7 +1178,7 @@ fn a_host_set_modes_reset_goes_ahead_of_the_blocks_events() {
     let wire = Script::new(vec![vec![range]]);
     let cell = Publisher::new(MpeMode::Disabled);
     let (_ed, mut exec, _controls, seen) =
-        input(Input::new(wire).mpe(&cell), MIDI_INPUT_PORTS as u16, 512);
+        input(Input::new(wire).mpe(&cell), MIDI_INPUT_PORTS, 512);
     cell.publish(midi::lower_zone(6));
     block(&mut exec, 512);
     let seen = seen.lock().unwrap();
@@ -1228,7 +1219,7 @@ fn a_member_bend_range_fans_out_over_the_zones_ports() {
         note(1, 60, 5),
     ]]);
     let node = Input::new(wire).mpe(&Publisher::new(midi::lower_zone(7)));
-    let (_ed, mut exec, _c, seen) = input(node, MIDI_INPUT_PORTS as u16, 512);
+    let (_ed, mut exec, _c, seen) = input(node, MIDI_INPUT_PORTS, 512);
     block(&mut exec, 512);
     let seen = seen.lock().unwrap();
     let mut ranges = BendRanges::default();
@@ -1276,7 +1267,7 @@ fn a_fan_out_with_no_room_is_dropped_whole_and_counted() {
     ]);
     assert_eq!(batch.len(), MIDI_INPUT_EVENT_CAPACITY);
     let node = Input::new(Script::new(vec![batch])).mpe(&Publisher::new(midi::lower_zone(7)));
-    let (_ed, mut exec, controls, seen) = input(node, MIDI_INPUT_PORTS as u16, 512);
+    let (_ed, mut exec, controls, seen) = input(node, MIDI_INPUT_PORTS, 512);
     block(&mut exec, 512);
     let seen = seen.lock().unwrap();
     let mut ranges = BendRanges::default();
@@ -1307,7 +1298,7 @@ fn a_note_off_has_room_past_the_capacity() {
     batch.extend((0..4).map(|k| at(508 + k, midi::note_off(MidiChannel::of(1), 61 + k as u8, 0))));
     assert_eq!(batch.len(), MIDI_INPUT_EVENT_CAPACITY);
     let node = Input::new(Script::new(vec![batch])).mpe(&Publisher::new(midi::lower_zone(7)));
-    let (_ed, mut exec, controls, seen) = input(node, MIDI_INPUT_PORTS as u16, 512);
+    let (_ed, mut exec, controls, seen) = input(node, MIDI_INPUT_PORTS, 512);
     block(&mut exec, 512);
     let seen = seen.lock().unwrap();
     assert_eq!(seen.iter().filter(|s| s.2.is_note_off()).count(), 4);
@@ -1320,7 +1311,7 @@ fn a_note_off_has_room_past_the_capacity() {
 #[test]
 fn an_input_nodes_fork_is_silent() {
     let wire = Script::new(vec![vec![note(0, 60, 0)]]);
-    let (live, _exec, _c, seen) = input(Input::new(wire), MIDI_INPUT_PORTS as u16, 512);
+    let (live, _exec, _c, seen) = input(Input::new(wire), MIDI_INPUT_PORTS, 512);
     let prepare = *live.prepare();
     let (_fork, mut fork_exec) = live
         .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
