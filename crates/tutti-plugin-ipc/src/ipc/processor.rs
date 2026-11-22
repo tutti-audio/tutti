@@ -175,8 +175,8 @@ impl Processor for IpcProcessor {
 /// What a piece gives the batcher: the chunk's payload, begun and filled from
 /// the piece's context, and where the plugin's MIDI-out and the chunk's
 /// losses go.
-struct Piece<'a, 'c> {
-    ctx: &'a ProcessContext<'c>,
+struct Piece<'a> {
+    ctx: &'a ProcessContext<'a>,
     out: &'a mut ProcessOutput,
     pending: &'a mut BlockPayload,
     intake: &'a mut MidiIntake,
@@ -207,7 +207,7 @@ fn carries_input<S: Float>(ctx: &ProcessContext<'_>, input: Planes<'_, S>) -> bo
             .any(|plane| plane.iter().any(|&x| x != S::SILENCE))
 }
 
-impl Chunks for Piece<'_, '_> {
+impl Chunks for Piece<'_> {
     /// The chunk begins empty: its transport and changes are the node's, read
     /// when it completes ([`payload`](Chunks::payload)).
     fn begin(&mut self, _at: usize, _chunk: usize) {

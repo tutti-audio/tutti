@@ -495,8 +495,6 @@ fn deliver(host: &HostState, event: &mut vst::SysExEvent) {
 }
 
 /// **A SysEx the plugin emits reaches the host whole, at any length.**
-/// `process_events` used to look at `Midi` events only, so every SysEx a
-/// VST2 plugin emitted was ignored.
 #[test]
 fn a_sysex_from_the_plugin_reaches_the_host_whole() {
     for len in [1usize, 6, 7, 40, 200] {

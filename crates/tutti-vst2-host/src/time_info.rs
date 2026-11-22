@@ -337,11 +337,8 @@ mod tests {
     }
 
     /// `kVstTransportChanged` means the transport state *just
-    /// changed*, not "a transport snapshot exists". The previous version of
-    /// this function asserted it on every block — and the previous version of
-    /// this test asserted that as correct — so a tempo-synced delay or
-    /// arpeggiator retriggered every 64 samples and never advanced, and a
-    /// reverb flushed its tail every block.
+    /// changed*, not "a transport snapshot exists": asserted on every block,
+    /// a tempo-synced delay or arpeggiator retriggers every block.
     /// Spec: vst2.timeinfo.kVstTransportChanged
     #[test]
     fn transport_changed_is_an_edge_not_a_level() {

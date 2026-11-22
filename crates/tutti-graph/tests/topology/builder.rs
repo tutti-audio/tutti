@@ -493,14 +493,14 @@ fn chain_and_add_take_nodes() {
     impl tutti_graph::IntoNode for Tagged {
         type Controls = u32;
         fn into_parts(self) -> tutti_graph::NodeParts<u32> {
-            tutti_graph::NodeParts {
-                node: Box::new(TestNode::new(Kind::Gain {
+            tutti_graph::NodeParts::new(
+                Box::new(TestNode::new(Kind::Gain {
                     gain: 2.0,
                     width: 1,
                 })),
-                controls: 7,
-                fork: None,
-            }
+                7,
+                None,
+            )
         }
     }
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);

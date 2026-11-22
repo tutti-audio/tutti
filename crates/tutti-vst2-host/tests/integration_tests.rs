@@ -17,18 +17,15 @@ use tutti_fixtures::main_thread;
 use tutti_graph::UmpAt;
 use tutti_rt::Mutex;
 
-use tutti_graph::Offset;
 use tutti_plugin_types::{ContentScale, Control, EditorWindow, ParamWriteError};
-use tutti_ump::MidiChannel;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
-use tutti_vst2_host::{Samples, TimeSignature, TransportInfo, Vst2ProcessContext};
+use tutti_vst2_host::Vst2ProcessContext;
 
 #[path = "support/active.rs"]
 mod active;
 
-use active::{Active, ActiveExt};
-use tutti_fixtures::midi;
+use active::{Active, ActiveExt, LoadError};
 
 /// The id of the parameter at `index`.
 fn pid(index: i32) -> ParamId {
@@ -1319,6 +1316,7 @@ fn process_delivers_the_expected_audio() {
 }
 
 #[test]
+<<<<<<< HEAD
 fn process_forwards_midi_without_panicking() {
     let _guard = lock_probe();
     let mut instance = load_probe();
@@ -1395,7 +1393,12 @@ fn many_midi_events_in_one_block() {
 }
 
 #[test]
+=======
+>>>>>>> origin/plugin/types-bundle
 fn load_nonexistent_path() {
     let result = Active::load(Path::new("/nonexistent/plugin.vst"), SAMPLE_RATE, BLOCK);
-    assert!(result.is_err());
+    assert!(
+        matches!(result, Err(LoadError::Load(_))),
+        "a missing binary is a load failure, not an activation one"
+    );
 }

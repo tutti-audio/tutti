@@ -70,8 +70,14 @@ assert_no_alloc = { version = "1", default-features = false }
 # `tests/request_flag.rs` checks `RequestFlag` with `check_range_contract`; an integration
 # test links the one `tutti-rt` this crate builds, so the copies never meet.
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
+# The position ring's gather bench.
+criterion.workspace = true
 
 # `tests/spin_starvation.rs` (an ignored probe) pins its threads to one core
 # and sets their scheduling policy: `sched_setaffinity`, `pthread_setschedparam`.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 libc = "0.2"
+
+[[bench]]
+name = "pos_ring"
+harness = false
