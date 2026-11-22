@@ -1,8 +1,10 @@
 //! The session's MIDI-CI link (feature `midi-hardware`): the OS MIDI layer shared
-//! between [`update`](crate::Session::update) and one task on the session's
-//! executor.
+//! between [`update`](crate::Session::update) and one task on a thread of its own.
 //!
-//! The task steps [`MidiSession::poll`] whenever a port's reader wrote what it
+//! The task runs on a dedicated thread of the session's executor
+//! ([`Executor::spawn_dedicated`]), not on the executor's shared queue: an
+//! app-driven executor the app does not step must not stall the peers' answers,
+//! Discovery and replies. It steps [`MidiSession::poll`] whenever a port's reader wrote what it
 //! reads, a handle queued a request, a control call changed the session, or a
 //! wait of the devices ran out. It sends what the devices answer or ask again
 //! and resolves a peer's answer at once, which wakes the future that asked. The
@@ -22,7 +24,7 @@ use std::pin::Pin;
 use std::sync::{Arc, MutexGuard, Weak};
 use std::task::{Context, Poll};
 
-use tutti_midi_hardware::{MidiSession, Polled};
+use tutti_midi_hardware::{MidiHardwareError, MidiSession, MidiThread, Polled};
 use tutti_platform::{Executor, Instant, Task, Timer};
 use tutti_rt::{Bell, Listener, Mutex};
 
@@ -48,22 +50,36 @@ impl std::fmt::Debug for MidiLink {
 }
 
 impl MidiLink {
-    /// The link over `io`, and the task that drives it on `executor`, woken by
-    /// `bell`'s `listener`. The task ends when the returned link drops.
+    /// The link over `io`, and the task that drives it on a thread of its own
+    /// of `executor`, woken by `bell`'s `listener`. The task ends when the
+    /// returned link drops.
+    ///
+    /// # Errors
+    ///
+    /// [`MidiHardwareError::Spawn`] when the OS refuses the thread.
     pub(crate) fn start(
         io: MidiSession,
         executor: &Executor,
         bell: Bell,
         listener: Listener,
-    ) -> (Arc<Self>, Task<()>) {
+    ) -> Result<(Arc<Self>, Task<()>), MidiHardwareError> {
         let link = Arc::new(Self {
             io: Mutex::new(io),
             ports: Mutex::new(Vec::new()),
             queued: Mutex::new(Vec::new()),
             bell,
         });
-        let task = executor.spawn(drive(Arc::downgrade(&link), listener, executor.timer()));
-        (link, task)
+        let task = executor
+            .spawn_dedicated(
+                MidiThread::MidiCi.name(),
+                None,
+                drive(Arc::downgrade(&link), listener, executor.timer()),
+            )
+            .map_err(|source| MidiHardwareError::Spawn {
+                thread: MidiThread::MidiCi,
+                source,
+            })?;
+        Ok((link, task))
     }
 
     /// The layer, locked for a call of the control side.
