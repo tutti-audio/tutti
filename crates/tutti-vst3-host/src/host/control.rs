@@ -8,8 +8,8 @@ use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorOpened, EditorPresence, EditorWindow, Features,
     KeyEvent, KeyUse, Loaded, LoadedPlugin, ModifierConvention, OwnBypass, ParamAccess, ParamEdit,
     ParamMapping, ParamWriteError, ParameterInfo, PluginClass, PluginDescriptor, PluginError,
-    PluginResult, PluginTail, Preset, PresetId, RenderModeSupport, Request, RescanScope, Samples,
-    StateUse, Vst3SubCategories, WindowHandle, bypass_parameter,
+    PluginPreset, PluginResult, PluginTail, PresetId, RenderModeSupport, Request, RescanScope,
+    Samples, StateUse, Vst3SubCategories, WindowHandle, bypass_parameter,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -417,13 +417,13 @@ impl Control for Vst3Loaded {
     /// The plugin's programs, flattened out of its named program lists.
     ///
     /// VST3 is the one format whose presets are **grouped**: programs live in
-    /// lists attached to units, so each `Preset` carries its list's name as
+    /// lists attached to units, so each `PluginPreset` carries its list's name as
     /// `bank`. The id keeps both coordinates, since the list id is
     /// plugin-chosen rather than a position in `program_lists()`. A program the
     /// plugin declines to name is kept with an empty name rather than skipped:
     /// the index is half the identifier, so dropping one would renumber every
     /// program after it within that list.
-    fn presets(&mut self, main: MainThreadMarker) -> Vec<Preset> {
+    fn presets(&mut self, main: MainThreadMarker) -> Vec<PluginPreset> {
         self.program_lists(main)
             .into_iter()
             .flat_map(|list| {
@@ -431,7 +431,7 @@ impl Control for Vst3Loaded {
                 (0..list.program_count)
                     .map(move |index| {
                         let name = this.program_name(main, list.id, index).unwrap_or_default();
-                        Preset::in_bank(
+                        PluginPreset::in_bank(
                             PresetId::Program {
                                 list_id: list.id,
                                 index,

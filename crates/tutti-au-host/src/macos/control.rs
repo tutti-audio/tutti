@@ -18,9 +18,9 @@ use tutti_plugin_types::{
     AuComponentType, BypassWrite, ContentScale, Control, EditorCapabilities, EditorError,
     EditorPresence, EditorWindow, Features, FourCc, LoadedPlugin, MainThreadMarker, OwnBypass,
     ParamEdit, ParamFlags, ParamMapping, ParamRange, ParamSteps, ParamWriteError, ParameterInfo,
-    PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginId, PluginResult,
-    PluginTail, PluginVersion, Preset, PresetId, RenderModeSupport, Request, RescanScope, StateUse,
-    WindowHandle, Wraps, taken,
+    PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginId, PluginPreset,
+    PluginResult, PluginTail, PluginVersion, PresetId, RenderModeSupport, Request, RescanScope,
+    StateUse, WindowHandle, Wraps, taken,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -496,10 +496,10 @@ impl Control for AuLoaded {
     /// The AU's factory presets. `AuPreset::number` is a **unit-assigned
     /// selector**, not a position, so the id is built from it and never from the
     /// enumeration index. `bank` is `None`: AU exposes one flat factory set.
-    fn presets(&mut self, _main: MainThreadMarker) -> Vec<Preset> {
+    fn presets(&mut self, _main: MainThreadMarker) -> Vec<PluginPreset> {
         self.factory_presets()
             .into_iter()
-            .map(|p| Preset::new(PresetId::Number(p.number), p.name))
+            .map(|p| PluginPreset::new(PresetId::Number(p.number), p.name))
             .collect()
     }
 

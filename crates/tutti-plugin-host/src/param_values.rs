@@ -572,8 +572,8 @@ mod tests {
         fn rate_refusal(&self) -> Option<tutti_plugin_types::RateRefusal> {
             None
         }
-        fn block_counts(&self) -> tutti_plugin_types::BlockCounts {
-            tutti_plugin_types::BlockCounts::default()
+        fn block_counts(&self) -> tutti_plugin_types::PipelineCounts {
+            tutti_plugin_types::PipelineCounts::default()
         }
         fn terminate(&self, _reason: TerminationReason) {}
     }

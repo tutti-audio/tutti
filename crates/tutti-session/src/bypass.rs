@@ -226,9 +226,9 @@ pub(crate) mod tests {
 
     use tutti_plugin_host::{ParameterChangeSink, PluginHandle, PluginParamValues};
     use tutti_plugin_types::{
-        AnyThread, AutomationMode, AutomationModeError, BlockCounts, BypassWrite, Health,
-        LoadedPlugin, OwnBypass, ParamFlags, ParameterInfo, PluginFailure, RenderMode, StateError,
-        StateUse, TerminationReason, bypass_value, is_bypassed,
+        AnyThread, AutomationMode, AutomationModeError, BypassWrite, Health, LoadedPlugin,
+        OwnBypass, ParamFlags, ParameterInfo, PipelineCounts, PluginFailure, RenderMode,
+        StateError, StateUse, TerminationReason, bypass_value, is_bypassed,
     };
     use tutti_units::Normalized;
     use tutti_units::ParamId;
@@ -340,8 +340,8 @@ pub(crate) mod tests {
         fn rate_refusal(&self) -> Option<tutti_plugin_types::RateRefusal> {
             None
         }
-        fn block_counts(&self) -> BlockCounts {
-            BlockCounts::default()
+        fn block_counts(&self) -> PipelineCounts {
+            PipelineCounts::default()
         }
         fn terminate(&self, _reason: TerminationReason) {}
     }

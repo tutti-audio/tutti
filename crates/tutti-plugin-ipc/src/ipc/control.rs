@@ -8,10 +8,10 @@
 
 use dpi::Size;
 use tutti_plugin_types::{
-    Answer, AnyThread, AutomationMode, AutomationModeError, BlockCounts, BypassWrite, ContentScale,
-    Control, Delivered, EditorCapabilities, EditorOpened, EditorPresence, EditorWindow, Features,
-    Health, LoadedPlugin, MainThreadMarker, OwnBypass, ParameterInfo, PluginDescriptor,
-    PluginError, PluginFailure, PluginResult, Preset, PresetId, ProcessWake, RateRefusal,
+    Answer, AnyThread, AutomationMode, AutomationModeError, BypassWrite, ContentScale, Control,
+    Delivered, EditorCapabilities, EditorOpened, EditorPresence, EditorWindow, Features, Health,
+    LoadedPlugin, MainThreadMarker, OwnBypass, ParameterInfo, PipelineCounts, PluginDescriptor,
+    PluginError, PluginFailure, PluginPreset, PluginResult, PresetId, ProcessWake, RateRefusal,
     RenderMode, RenderModeSupport, Request, StateError, StateUse, TerminationReason, TrackInfo,
     UnknownParam, WindowHandle, bypass_value,
 };
@@ -309,7 +309,7 @@ macro_rules! served_control {
                     .map_err(PluginError::StateFailed)
             }
 
-            fn presets(&mut self, _main: MainThreadMarker) -> Vec<Preset> {
+            fn presets(&mut self, _main: MainThreadMarker) -> Vec<PluginPreset> {
                 self.link.bridge.audio().presets().unwrap_or_default()
             }
 
@@ -399,7 +399,7 @@ impl Health for IpcController {
         self.link.bridge.audio().rate_refusal()
     }
 
-    fn block_counts(&self) -> BlockCounts {
+    fn block_counts(&self) -> PipelineCounts {
         self.link.bridge.audio().block_counts()
     }
 

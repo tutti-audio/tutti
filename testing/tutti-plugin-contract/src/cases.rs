@@ -9,7 +9,7 @@ use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
     BusRole, BypassWrite, Control, Controller, Loaded, OwnBypass, ParamFlags, ParamWriteError,
-    ParameterChanges, PluginBus, PluginIo, PluginTail, Preset, PresetId, ProcessContext,
+    ParameterChanges, PluginBus, PluginIo, PluginPreset, PluginTail, PresetId, ProcessContext,
     ProcessOutput, Processor, Reopen, Samples, TransportChange, TransportInfo,
 };
 use tutti_plugin_types::{ParamEdit, ParamMapping, PlainMap, Request};
@@ -356,12 +356,12 @@ pub fn presets_listed_in_order<F: Format>() {
     let main = main_thread();
     let mut loaded = F::load();
     let programs = &spec::PROGRAMS;
-    let want: Vec<Preset> = programs
+    let want: Vec<PluginPreset> = programs
         .names
         .iter()
         .zip(0u32..)
         .map(|(&name, index)| match F::SURFACE.preset_ids {
-            spec::PresetIds::Programs => Preset::in_bank(
+            spec::PresetIds::Programs => PluginPreset::in_bank(
                 PresetId::Program {
                     list_id: programs.list_id,
                     index,
@@ -369,7 +369,7 @@ pub fn presets_listed_in_order<F: Format>() {
                 name,
                 programs.list,
             ),
-            spec::PresetIds::Numbered => Preset::new(PresetId::Number(index as i32), name),
+            spec::PresetIds::Numbered => PluginPreset::new(PresetId::Number(index as i32), name),
         })
         .collect();
     let listed = loaded.presets(main);

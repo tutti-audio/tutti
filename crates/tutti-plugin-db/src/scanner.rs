@@ -981,7 +981,7 @@ mod tests {
             PluginDescriptor::new(name, PluginClass::Unknown),
         )
     }
-    use crate::pedal::RecoveryFailure;
+    use crate::pedal::CrashRecoveryFailure;
     use crate::table::FileState;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, UNIX_EPOCH};
@@ -2600,7 +2600,9 @@ mod tests {
         assert_eq!(report.recovered().files, std::slice::from_ref(&crashy));
         assert_eq!(
             report.recovered().failure,
-            Some(RecoveryFailure::Unsaved(std::io::ErrorKind::StorageFull))
+            Some(CrashRecoveryFailure::Unsaved(
+                std::io::ErrorKind::StorageFull
+            ))
         );
         assert_eq!(report.blacklisted(), 1, "the scan skips the crashed file");
         assert!(db.is_blacklisted(&crashy));
