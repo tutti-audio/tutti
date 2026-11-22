@@ -3222,7 +3222,6 @@ dependencies = [
  "dpi",
  "futures-lite",
  "libloading 0.9.1",
- "parking_lot",
  "thiserror 2.0.21",
  "tracing",
  "tutti-buffers",
