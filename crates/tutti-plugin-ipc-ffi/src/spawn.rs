@@ -13,13 +13,20 @@ mod platform;
 pub use platform::spawn;
 
 /// What a spawned helper is to the host.
+///
+/// On Windows it also says what the helper's standard handles are, which std's
+/// opaque `Stdio` cannot say to a hand-written spawn: a leader's are the host's
+/// and a helper's are the `NUL` device, whatever the command sets. On unix the
+/// command's own `stdin`, `stdout` and `stderr` are used.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Spawn {
-    /// A helper that ends by itself or by its owner's kill.
+    /// A helper that ends by itself or by its owner's kill, with no standard
+    /// input or output of the host's (Windows).
     Helper,
     /// A server, which leads the process group (unix) or sits in the host's
     /// kill-on-close job (Windows) that ends it, and the helpers a plugin
-    /// spawned, with the host.
+    /// spawned, with the host; on Windows it is in the job before it runs, and
+    /// inherits the host's standard handles.
     Leader,
 }
 
