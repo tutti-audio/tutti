@@ -83,7 +83,7 @@ use tutti_graph::{
 use tutti_midi_protocol::Midi2Translator;
 use tutti_midi_protocol::{MpeMode, MpeZones};
 use tutti_rt::{Counter, CounterWriter, Mutex, Publisher, Reader, counter};
-use tutti_ump::{Held, Message, MidiChannel, MidiGroup, System, Ump};
+use tutti_ump::{Held, Message, MidiChannel, MidiGroup, MidiGroupSet, System, Ump};
 use tutti_units::{Frame, SampleRate, Samples};
 
 use super::mpe_translator::MpeTranslator;
@@ -333,7 +333,7 @@ struct Device {
     sensing: ActiveSensing,
     /// The Groups (bit `g` for Group `g`) whose release did not fit the
     /// block's room: tried again at the next block's first frame.
-    owing: u16,
+    owing: MidiGroupSet,
 }
 
 impl Device {
@@ -347,7 +347,7 @@ impl Device {
             held: Held::new(),
             // Built again for the real rate in `prepare`.
             sensing: ActiveSensing::at_rate(SampleRate::SR_48K),
-            owing: 0,
+            owing: MidiGroupSet::EMPTY,
         }
     }
 
@@ -401,11 +401,11 @@ impl Device {
             };
             staging.whole(ev.is_note_off(), |send| mpe.translate(&(at, ev), send))
         });
-        let mask = group.map_or(u16::MAX, |g| 1 << g.get());
-        if all {
-            *owing &= !mask;
-        } else {
-            *owing |= mask;
+        match (group, all) {
+            (Some(group), true) => owing.remove(group),
+            (Some(group), false) => owing.insert(group),
+            (None, true) => *owing = MidiGroupSet::EMPTY,
+            (None, false) => *owing = MidiGroupSet::ALL,
         }
     }
 
@@ -430,10 +430,8 @@ impl Device {
 
     /// The release of every Group that owes one.
     fn pay(&mut self, staging: &mut Staging<'_>) {
-        for group in MidiGroup::all() {
-            if self.owing & (1 << group.get()) != 0 {
-                self.release(Some(group), Offset::ZERO, staging);
-            }
+        for group in self.owing.iter() {
+            self.release(Some(group), Offset::ZERO, staging);
         }
     }
 }
@@ -724,7 +722,7 @@ impl<F: Float> Node<F> for MidiInputNode {
         let handled_generation = self
             .generation
             .as_ref()
-            .filter(|_| device.owing == 0)
+            .filter(|_| device.owing.is_empty())
             .map(|_| device.generation);
         let Staging { kept, dropped, .. } = staging;
         if dropped > 0 {
@@ -762,7 +760,7 @@ impl<F: Float> Node<F> for MidiInputNode {
         self.device.mpe = MpeTranslator::new(self.device.mode);
         self.device.held.clear();
         self.device.sensing.forget_all();
-        self.device.owing = 0;
+        self.device.owing = MidiGroupSet::EMPTY;
         self.profiles = NO_PROFILES;
         // The cell's first value holds no zones, so number 0 reads the requests
         // again whenever one was published.

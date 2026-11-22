@@ -121,12 +121,11 @@
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_midi_protocol::{
-    ChannelResponse, Mcm, MemberCount, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones,
-    PitchBendSensitivity,
+    ChannelResponse, Mcm, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones, PitchBendSensitivity,
 };
 use tutti_ump::{
-    Address, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, RegisteredData, Rpn, Ump,
-    Voice2,
+    Address, CCNumber, Message, MidiChannel, MidiChannelSet, MidiGroup, NoteNumber, RegisteredData,
+    Rpn, Ump, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
 
@@ -390,7 +389,7 @@ struct GroupState {
     /// The channels the last host-set zone change took into or out of MPE
     /// control, one bit each, whose notes the next
     /// [`zone_defaults`](MpeTranslator::zone_defaults) stops.
-    entered: u16,
+    entered: MidiChannelSet,
 }
 
 impl GroupState {
@@ -401,7 +400,7 @@ impl GroupState {
             held: held::HeldNotes::default(),
             told: [Told::default(); MidiChannel::COUNT as usize],
             mono: [false; MidiChannel::COUNT as usize],
-            entered: 0,
+            entered: MidiChannelSet::EMPTY,
         };
         // Every zone starts in the mode its response names.
         for channel in MidiChannel::all() {
@@ -424,15 +423,15 @@ impl GroupState {
     /// bit each): their notes and controls are what M1-100 section 2.2.3 and
     /// M2-120 section 3.3 have a receiver stop and reset, and their record
     /// here goes.
-    fn reconfigure(&mut self, mode: MpeMode, profile: Option<MpeZones>) -> u16 {
-        let mut changed = 0u16;
+    fn reconfigure(&mut self, mode: MpeMode, profile: Option<MpeZones>) -> MidiChannelSet {
+        let mut changed = MidiChannelSet::EMPTY;
         let mut entering = [None; MidiChannel::COUNT as usize];
         for c in 0..MidiChannel::COUNT {
             let channel = MidiChannel::of(c);
             let before = self.zone_of(channel);
             let after = zone_view(&mode, profile.as_ref(), &self.mono, channel);
             if before.map(|z| z.key(channel)) != after.map(|z| z.key(channel)) {
-                changed |= 1 << c;
+                changed.insert(channel);
                 self.held.release(channel);
                 self.told[usize::from(c)] = Told::default();
                 if let Some(zone) = before {
@@ -457,10 +456,9 @@ impl GroupState {
 struct ZoneView {
     spec: MpeSpec,
     manager: MidiChannel,
-    /// The channels above or below the manager the zone's members occupy,
-    /// ascending: `first..first + count`.
-    first_member: u8,
-    member_count: MemberCount,
+    /// The zone's layout: the channels above or below the manager its
+    /// members occupy.
+    config: MpeZoneConfig,
     manager_range: PitchBendSensitivity,
     member_range: PitchBendSensitivity,
     /// How the zone's members were configured to take notes.
@@ -473,13 +471,12 @@ struct ZoneView {
 impl ZoneView {
     /// What identifies `channel`'s place in its zone, to tell when a change of
     /// layout moved it: the specification, the manager and its role.
-    fn key(&self, channel: MidiChannel) -> (MpeSpec, u8, Role) {
-        (self.spec, self.manager.get(), self.role_of(channel))
+    fn key(&self, channel: MidiChannel) -> (MpeSpec, MidiChannel, Role) {
+        (self.spec, self.manager, self.role_of(channel))
     }
 
     fn member_channels(&self) -> impl Iterator<Item = MidiChannel> + Clone {
-        (self.first_member..self.first_member + self.member_count.get())
-            .filter_map(MidiChannel::new)
+        self.config.member_channels()
     }
 
     fn role_of(&self, channel: MidiChannel) -> Role {
@@ -498,8 +495,7 @@ fn view_of(config: &MpeZoneConfig, mono: &[bool; MidiChannel::COUNT as usize]) -
     ZoneView {
         spec: config.spec(),
         manager: config.master_channel(),
-        first_member: first_member.get(),
-        member_count: config.member_count(),
+        config: *config,
         manager_range: config.pitch_bend_range_for(config.master_channel()),
         member_range: config.pitch_bend_range_for(first_member),
         response: config.response(),
@@ -544,13 +540,15 @@ fn control(group: MidiGroup, channel: MidiChannel, controller: CCNumber, offset:
 /// M1-100 section 2.2.3: a channel entering or leaving MPE control has its
 /// notes stopped and its controllers reset. For each channel of `channels`
 /// (one bit each), All Sound Off and Reset All Controllers, at `offset`.
-fn send_stops(group: MidiGroup, offset: Offset, channels: u16, out: &mut impl FnMut(UmpAt)) {
-    for c in 0..MidiChannel::COUNT {
-        if channels & (1 << c) != 0 {
-            let channel = MidiChannel::of(c);
-            out(control(group, channel, CCNumber::ALL_SOUND_OFF, offset));
-            out(control(group, channel, CCNumber::RESET_ALL, offset));
-        }
+fn send_stops(
+    group: MidiGroup,
+    offset: Offset,
+    channels: MidiChannelSet,
+    out: &mut impl FnMut(UmpAt),
+) {
+    for channel in channels.iter() {
+        out(control(group, channel, CCNumber::ALL_SOUND_OFF, offset));
+        out(control(group, channel, CCNumber::RESET_ALL, offset));
     }
 }
 
@@ -653,7 +651,7 @@ impl MpeTranslator {
             return;
         }
         let changed = state.reconfigure(state.mode, zones);
-        state.entered = 0;
+        state.entered = MidiChannelSet::EMPTY;
         send_stops(group, offset, changed, &mut out);
         for c in MidiChannel::all() {
             let Some(zone) = state.zone_of(c) else {
@@ -909,7 +907,7 @@ impl MpeTranslator {
         // the other Groups, and the channels that did not change, keep theirs.
         let state = &mut self.groups[group.index()];
         let changed = state.reconfigure(mode, state.profile);
-        state.entered = 0;
+        state.entered = MidiChannelSet::EMPTY;
         send_stops(group, offset, changed, out);
         true
     }
@@ -1124,7 +1122,7 @@ impl MpeTranslator {
                 // Member Channel of a zone, not to the Manager Channel,
                 // switches the zone between Mode 3 and Mode 4.
                 if let Some(mono) = mode_switch(zone.spec, controller)
-                    && zone.first_member == ch.get()
+                    && zone.config.first_member() == ch
                 {
                     state.mono[usize::from(zone.manager.get())] = mono;
                 }

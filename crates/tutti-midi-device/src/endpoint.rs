@@ -795,8 +795,8 @@ impl Endpoint {
 
     /// The number of Function Blocks it declares (§7.1.2), `0..=32`.
     #[must_use]
-    pub const fn declared_function_blocks(&self) -> u8 {
-        self.declared_blocks.get()
+    pub const fn declared_function_blocks(&self) -> FunctionBlockCount {
+        self.declared_blocks
     }
 
     /// Function Block `id`, when it is known.
