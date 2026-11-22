@@ -407,7 +407,7 @@ pub struct PlanUnit {
 pub enum Op {
     /// Copy a main input channel into a slot.
     MainInput {
-        /// The graph input channel.
+        /// The main input channel.
         channel: u16,
         /// Audio slot written.
         dst: u32,
