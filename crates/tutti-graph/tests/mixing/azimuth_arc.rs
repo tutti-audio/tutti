@@ -210,7 +210,7 @@ fn the_port_wraps_a_bearing_rather_than_clamping_it() {
     };
     let (mut ed, mut exec) = graph(
         both_step(190.0),
-        &[(UnitParam::Elevation, ParamRange::new(-90.0, 90.0))],
+        &[(UnitParam::Elevation, ParamRange::of(-90.0, 90.0))],
     );
     ed.commit().expect("commits");
     let [az, el] = render(&mut ed, &mut exec, 8);
@@ -250,7 +250,7 @@ fn the_port_holds_a_bearing_to_an_arc_across_180() {
 #[test]
 fn a_crossed_range_on_a_circular_param_is_refused() {
     let (mut ed, _exec) = graph(Vec::new(), &[]);
-    let crossed = ParamRange::new(170.0, -170.0);
+    let crossed = ParamRange::of(170.0, -170.0);
     assert!(matches!(
         ed.set_param_range(at(UnitParam::Azimuth), crossed),
         Err(ParamRangeError::InvalidRange { at: a }) if a == at(UnitParam::Azimuth)

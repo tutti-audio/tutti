@@ -19,7 +19,7 @@ use std::marker::PhantomData;
 
 use tutti_buffers::Float;
 use tutti_graph::{BusOutputPort, EdgeId, EventInputPort, EventOutputPort, NodeBus, NodeKey};
-use tutti_units::Amplitude;
+use tutti_units::Gain;
 
 use crate::{ConnectError, DeclarationError, Graph};
 
@@ -924,7 +924,7 @@ impl<W: Weighted, F: Float> Connection<'_, W, F> {
     ///
     /// [`DeclarationError::NotFinite`]; the edges this call added are taken
     /// out again, so nothing is added.
-    pub fn gain(self, gain: Amplitude) -> Result<Self, DeclarationError> {
+    pub fn gain(self, gain: Gain) -> Result<Self, DeclarationError> {
         if !gain.get().is_finite() {
             for (edge, added) in &self.edges {
                 if *added {
