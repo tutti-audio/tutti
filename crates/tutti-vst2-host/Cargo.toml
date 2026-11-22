@@ -45,7 +45,7 @@ tutti-vst2-ffi = { version = "0.0.1", path = "../tutti-vst2-ffi" }
 raw-window-handle = "0.6"
 tutti-vst2-ffi = { path = "../tutti-vst2-ffi", features = ["testing"] }
 # `mapping_contract!`: the laws `IntegerRange` is held to.
-tutti-plugin-types = { path = "../tutti-plugin-types", features = ["contract"] }
+tutti-plugin-types = { path = "../tutti-plugin-types", features = ["contract", "testing"] }
 # Finds the reference plugins and the plugin-server beside the test binary.
 tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["plugin"] }
 assert_no_alloc = { version = "1", default-features = false }

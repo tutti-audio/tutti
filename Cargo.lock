@@ -3747,6 +3747,7 @@ dependencies = [
  "tracing",
  "tutti-buffers",
  "tutti-fixtures",
+ "tutti-graph",
  "tutti-music",
  "tutti-platform",
  "tutti-plugin-ipc-ffi",

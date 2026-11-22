@@ -118,10 +118,23 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use crate::node_losses::{Count, LossCounts};
-use tutti_plugin_types::{ParameterChanges, ParameterQueue, epoch_before};
+use tutti_graph::Offset;
+#[cfg(test)]
+use tutti_plugin_types::fake::at_frame;
+use tutti_plugin_types::{MAX_CHUNK, ParameterChanges, ParameterQueue, epoch_before};
 use tutti_rt::Tally;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
+use tutti_units::Samples;
+
+/// The offset of chunk frame `frame`: a chunk is at most [`MAX_CHUNK`] frames,
+/// and a frame past it reads as the last.
+pub(crate) fn chunk_offset(frame: usize) -> Offset {
+    Offset::clamped(
+        u32::try_from(frame).unwrap_or(u32::MAX),
+        Samples::new(MAX_CHUNK),
+    )
+}
 
 /// A slot with no queue in the chunk being filled.
 const NO_QUEUE: u32 = u32::MAX;
@@ -742,17 +755,17 @@ impl ParamDelivery {
     /// its latest point replaced, counted as merged: the latest value wins,
     /// so a chunk spanning several blocks ends exact.
     /// `false` when `address` has no slot (counted). Allocation-free.
-    pub fn point(&mut self, address: ParamId, offset: i32, value: f64) -> bool {
+    pub fn point(&mut self, address: ParamId, offset: Offset, value: f64) -> bool {
         self.point_kind(address, offset, value, false)
     }
 
     /// [`point`](Self::point) for a grid point (a frame whose play count is
     /// a multiple of 32): dropped first when its queue is full, and counted.
-    pub fn grid_point(&mut self, address: ParamId, offset: i32, value: f64) -> bool {
+    pub fn grid_point(&mut self, address: ParamId, offset: Offset, value: f64) -> bool {
         self.point_kind(address, offset, value, true)
     }
 
-    fn point_kind(&mut self, address: ParamId, offset: i32, value: f64, grid: bool) -> bool {
+    fn point_kind(&mut self, address: ParamId, offset: Offset, value: f64, grid: bool) -> bool {
         let Some(i) = self.slot(address) else {
             self.counters.dropped.add(1);
             return false;
@@ -768,7 +781,13 @@ impl ParamDelivery {
     /// delivered: a value the node's sources hold still stays unsent after it,
     /// so it cannot overwrite the write. `false` when `address` has no slot
     /// (counted). Allocation-free.
-    pub(crate) fn write(&mut self, address: ParamId, offset: i32, value: f64, epoch: u32) -> bool {
+    pub(crate) fn write(
+        &mut self,
+        address: ParamId,
+        offset: Offset,
+        value: f64,
+        epoch: u32,
+    ) -> bool {
         let Some(i) = self.slot(address) else {
             self.counters.dropped.add(1);
             return false;
@@ -835,7 +854,7 @@ impl ParamDelivery {
     /// `value` (already normalized) for slot `i` at chunk frame `offset`,
     /// a grid point or not; `forced` sends it though the plugin has it from
     /// this node already.
-    fn place(&mut self, i: usize, offset: i32, value: f64, grid: bool, host: Option<u32>) {
+    fn place(&mut self, i: usize, offset: Offset, value: f64, grid: bool, host: Option<u32>) {
         let forced = host.is_some();
         if let Some(epoch) = host
             && self.slots[i].host_write
@@ -925,7 +944,9 @@ impl ParamDelivery {
         self.grid.fits(q, self.changes.queues[q].points.capacity());
         // Room now (its own, a block, or a grid point's), or a queue of
         // corners keeping its latest value (counted above).
-        let stored = self.changes.push_point(q, offset, value);
+        let stored = self
+            .changes
+            .push_point(q, offset, Normalized::clamped(value));
         if stored {
             let k = self.changes.queues[q].points.len() - 1;
             self.grid.set(q, k, grid);
@@ -965,7 +986,7 @@ impl ParamDelivery {
                 self.slots[i].owed = false;
                 let (value, host) = (self.slots[i].staged, self.slots[i].host_write);
                 let epoch = self.slots[i].host_epoch;
-                self.place(i, 0, value, false, host.then_some(epoch));
+                self.place(i, Offset::ZERO, value, false, host.then_some(epoch));
             }
         }
         self.owed = 0;
@@ -1129,7 +1150,7 @@ mod tests {
     }
 
     /// `(address, [(offset, value)])` of the chunk being filled.
-    fn chunk(d: &ParamDelivery) -> Vec<(ParamId, Vec<(i32, f64)>)> {
+    fn chunk(d: &ParamDelivery) -> Vec<(ParamId, Vec<(u32, f64)>)> {
         d.changes
             .queues
             .iter()
@@ -1138,7 +1159,7 @@ mod tests {
                     q.param_id,
                     q.points
                         .iter()
-                        .map(|p| (p.sample_offset, p.value.get()))
+                        .map(|p| (p.sample_offset.get(), p.value.get()))
                         .collect(),
                 )
             })
@@ -1164,7 +1185,7 @@ mod tests {
         let room = d.changes.capacity();
         d.begin();
         for id in 0..200 {
-            assert!(d.point(op(id), 0, f64::from(id) / 400.0));
+            assert!(d.point(op(id), at_frame(0), f64::from(id) / 400.0));
         }
         assert_eq!(chunk(&d).len(), 200);
         assert_eq!(d.changes.capacity(), room, "the chunk never grew");
@@ -1178,16 +1199,16 @@ mod tests {
     fn an_unchanged_value_is_not_sent_again() {
         let (mut d, counters) = delivery(4);
         d.begin();
-        d.point(op(1), 0, 0.5);
-        d.point(op(1), 8, 0.5);
+        d.point(op(1), at_frame(0), 0.5);
+        d.point(op(1), at_frame(8), 0.5);
         assert_eq!(chunk(&d), vec![(op(1), vec![(0, 0.5)])]);
         hand_off(&mut d, true);
         assert_eq!(counters.snapshot().points_sent, 1);
 
         d.begin();
-        d.point(op(1), 0, 0.5);
+        d.point(op(1), at_frame(0), 0.5);
         assert!(chunk(&d).is_empty(), "unchanged: nothing sent");
-        d.point(op(1), 16, 0.25);
+        d.point(op(1), at_frame(16), 0.25);
         assert_eq!(chunk(&d), vec![(op(1), vec![(16, 0.25)])]);
         hand_off(&mut d, true);
         assert_eq!(counters.snapshot().points_sent, 2);
@@ -1200,8 +1221,8 @@ mod tests {
     fn a_chunk_that_did_not_go_is_owed_to_the_next() {
         let (mut d, counters) = delivery(4);
         d.begin();
-        d.point(op(2), 5, 0.125);
-        d.point(op(2), 9, 0.375);
+        d.point(op(2), at_frame(5), 0.125);
+        d.point(op(2), at_frame(9), 0.375);
         hand_off(&mut d, false);
         assert_eq!(counters.snapshot().chunks_deferred, 1);
         assert_eq!(counters.snapshot().points_sent, 0);
@@ -1209,12 +1230,12 @@ mod tests {
         d.begin();
         assert_eq!(chunk(&d), vec![(op(2), vec![(0, 0.375)])]);
         // The host still sending 0.375 adds nothing: it is in the chunk.
-        d.point(op(2), 4, 0.375);
+        d.point(op(2), at_frame(4), 0.375);
         assert_eq!(chunk(&d), vec![(op(2), vec![(0, 0.375)])]);
         hand_off(&mut d, true);
 
         d.begin();
-        d.point(op(2), 0, 0.375);
+        d.point(op(2), at_frame(0), 0.375);
         assert!(chunk(&d).is_empty(), "delivered once, not again");
     }
 
@@ -1227,13 +1248,13 @@ mod tests {
     fn a_write_mid_chunk_is_not_undone_by_a_held_source_at_the_next_chunk() {
         let (mut d, _) = delivery(4);
         d.begin();
-        d.point(op(2), 0, 0.25);
-        assert!(d.write(op(2), 10, 0.75, 0));
+        d.point(op(2), at_frame(0), 0.25);
+        assert!(d.write(op(2), at_frame(10), 0.75, 0));
         assert_eq!(chunk(&d), vec![(op(2), vec![(0, 0.25), (10, 0.75)])]);
         hand_off(&mut d, true);
 
         d.begin();
-        d.point(op(2), 0, 0.25);
+        d.point(op(2), at_frame(0), 0.25);
         assert!(
             chunk(&d).is_empty(),
             "the held source value was sent again over the write"
@@ -1248,14 +1269,14 @@ mod tests {
     fn a_write_drained_before_a_load_is_not_sent_after_it() {
         let (mut d, _) = delivery(4);
         d.begin();
-        assert!(d.write(op(2), 0, 0.75, 0));
+        assert!(d.write(op(2), at_frame(0), 0.75, 0));
         d.void_writes_before(1);
         assert!(
             chunk(&d).iter().all(|(_, points)| points.is_empty()),
             "the stale write was sent: {:?}",
             chunk(&d)
         );
-        assert!(d.write(op(2), 5, 0.5, 1));
+        assert!(d.write(op(2), at_frame(5), 0.5, 1));
         d.void_writes_before(1);
         assert_eq!(
             chunk(&d),
@@ -1270,13 +1291,13 @@ mod tests {
     fn a_voided_write_leaves_the_sources_point_beneath_it() {
         let (mut d, _) = delivery(4);
         d.begin();
-        d.point(op(2), 0, 0.25);
-        assert!(d.write(op(2), 10, 0.75, 0));
+        d.point(op(2), at_frame(0), 0.25);
+        assert!(d.write(op(2), at_frame(10), 0.75, 0));
         d.void_writes_before(1);
         assert_eq!(chunk(&d), vec![(op(2), vec![(0, 0.25)])]);
         hand_off(&mut d, true);
         d.begin();
-        d.point(op(2), 0, 0.25);
+        d.point(op(2), at_frame(0), 0.25);
         assert!(
             chunk(&d).is_empty(),
             "the source's value is what was delivered"
@@ -1295,15 +1316,15 @@ mod tests {
         let mut under = 0.0;
         while counters.snapshot().points_merged == 0 {
             under = 0.01 + f64::from(at) / 4096.0;
-            d.point(op(2), at, under);
+            d.point(op(2), at_frame(at), under);
             at += 1;
             assert!(at < 4096, "the queue never filled");
         }
-        assert!(d.write(op(2), at, 0.9, 0));
+        assert!(d.write(op(2), at_frame(at), 0.9, 0));
         d.void_writes_before(1);
         hand_off(&mut d, true);
         d.begin();
-        d.point(op(2), 0, under);
+        d.point(op(2), at_frame(0), under);
         assert!(
             !chunk(&d).is_empty(),
             "the point the write replaced was recorded as delivered"
@@ -1316,7 +1337,7 @@ mod tests {
     fn an_owed_write_is_voided_by_a_load() {
         let (mut d, _) = delivery(4);
         d.begin();
-        assert!(d.write(op(2), 0, 0.75, 0));
+        assert!(d.write(op(2), at_frame(0), 0.75, 0));
         hand_off(&mut d, false);
         d.void_writes_before(1);
         d.begin();
@@ -1337,8 +1358,8 @@ mod tests {
         let (mut d, _) = delivery(4);
         d.begin();
         assert_eq!(d.current(op(2)), None);
-        d.point(op(2), 5, 0.125);
-        d.point(op(2), 9, 0.375);
+        d.point(op(2), at_frame(5), 0.125);
+        d.point(op(2), at_frame(9), 0.375);
         assert_eq!(d.current(op(2)), Some(0.375));
         hand_off(&mut d, false);
         assert_eq!(d.current(op(2)), Some(0.375), "owed");
@@ -1356,13 +1377,13 @@ mod tests {
         let (mut d, counters) = delivery(4);
         d.prepare(256);
         d.begin();
-        d.point(op(1), 0, 0.5);
+        d.point(op(1), at_frame(0), 0.5);
         hand_off(&mut d, true);
 
         d.abandon(); // a reset
         d.prepare(512); // a re-prepare
         d.begin();
-        d.point(op(1), 0, 0.5);
+        d.point(op(1), at_frame(0), 0.5);
         assert!(chunk(&d).is_empty(), "held: not re-sent");
 
         let delivered = counters.delivered();
@@ -1372,12 +1393,12 @@ mod tests {
         fork.seed(&delivered);
         fork.prepare(512);
         fork.begin();
-        fork.point(op(1), 0, 0.5);
+        fork.point(op(1), at_frame(0), 0.5);
         assert!(
             chunk(&fork).is_empty(),
             "the fork holds what live delivered"
         );
-        fork.point(op(1), 8, 0.25);
+        fork.point(op(1), at_frame(8), 0.25);
         assert_eq!(chunk(&fork), vec![(op(1), vec![(8, 0.25)])]);
     }
 
@@ -1389,16 +1410,16 @@ mod tests {
         let room = d.slots.capacity();
         d.begin();
         for id in 1000..1000 + ParameterChanges::SPARE_QUEUES as u32 {
-            assert!(d.point(op(id), 0, 0.5), "spare slot for {id}");
+            assert!(d.point(op(id), at_frame(0), 0.5), "spare slot for {id}");
         }
-        assert!(!d.point(op(5000), 0, 0.5));
+        assert!(!d.point(op(5000), at_frame(0), 0.5));
         assert_eq!(d.slots.capacity(), room, "never grown");
         assert_eq!(counters.snapshot().points_dropped, 1);
         // A learned slot shifts the ones after it; the chunk's queues still
         // belong to their own parameters.
         hand_off(&mut d, true);
         d.begin();
-        d.point(op(1), 0, 0.75);
+        d.point(op(1), at_frame(0), 0.75);
         assert_eq!(chunk(&d), vec![(op(1), vec![(0, 0.75)])]);
     }
 
@@ -1412,9 +1433,9 @@ mod tests {
         let counters = Arc::new(DeliveryCounters::default());
         let mut d = ParamDelivery::closed((0..4).map(ParamId::new), Arc::clone(&counters));
         d.begin();
-        assert!(!d.point(ParamId::new(4), 0, 0.5));
-        assert!(!d.point(ParamId::new(200), 0, 0.5));
-        assert!(d.point(ParamId::new(3), 0, 0.5));
+        assert!(!d.point(ParamId::new(4), at_frame(0), 0.5));
+        assert!(!d.point(ParamId::new(200), at_frame(0), 0.5));
+        assert!(d.point(ParamId::new(3), at_frame(0), 0.5));
         assert_eq!(chunk(&d), vec![(ParamId::new(3), vec![(0, 0.5)])]);
         assert_eq!(counters.snapshot().points_dropped, 2);
     }
@@ -1424,12 +1445,12 @@ mod tests {
         let counters = Arc::new(DeliveryCounters::default());
         let mut d = ParamDelivery::new([op(50)], counters);
         d.begin();
-        d.point(op(50), 0, 0.25);
-        d.point(op(10), 0, 0.625);
+        d.point(op(50), at_frame(0), 0.25);
+        d.point(op(10), at_frame(0), 0.625);
         hand_off(&mut d, true);
         d.begin();
-        d.point(op(50), 0, 0.625);
-        d.point(op(10), 0, 0.25);
+        d.point(op(50), at_frame(0), 0.625);
+        d.point(op(10), at_frame(0), 0.25);
         assert_eq!(
             chunk(&d),
             vec![(op(50), vec![(0, 0.625)]), (op(10), vec![(0, 0.25)])]
@@ -1459,7 +1480,7 @@ mod tests {
                     // of 8 would end each chunk where the next starts, and
                     // changes-only would skip that point).
                     let v = ((k + id as usize) % 7) as f64 / 8.0;
-                    d.point(op(id), (k * 30) as i32, v);
+                    d.point(op(id), at_frame((k * 30) as i32), v);
                 }
             }
             let q = &d.changes.queues[0];
@@ -1479,13 +1500,13 @@ mod tests {
         // Past the budget: the last point replaced, counted.
         d.begin();
         for k in 0..budget + 3 {
-            d.point(op(0), k as i32, (k % 2) as f64 / 4.0 + 0.5);
+            d.point(op(0), at_frame(k as i32), (k % 2) as f64 / 4.0 + 0.5);
         }
         let q = &d.changes.queues[0];
         assert_eq!(q.points.len(), budget);
         assert_eq!(
-            q.points.last().map(|p| p.sample_offset),
-            Some((budget + 2) as i32)
+            q.points.last().map(|p| p.sample_offset.get()),
+            Some((budget + 2) as u32)
         );
         assert_eq!(counters.snapshot().points_merged, 3);
     }
@@ -1504,37 +1525,37 @@ mod tests {
         d.begin();
         for k in 0..room {
             if k < grids {
-                d.grid_point(op(0), k as i32, v(k));
+                d.grid_point(op(0), at_frame(k as i32), v(k));
             } else {
-                d.point(op(0), k as i32, v(k));
+                d.point(op(0), at_frame(k as i32), v(k));
             }
         }
-        let offsets = |d: &ParamDelivery| -> Vec<i32> {
+        let offsets = |d: &ParamDelivery| -> Vec<u32> {
             d.changes.queues[0]
                 .points
                 .iter()
-                .map(|p| p.sample_offset)
+                .map(|p| p.sample_offset.get())
                 .collect()
         };
         assert_eq!(offsets(&d).len(), room);
         // A grid point at full: dropped.
-        d.grid_point(op(0), 1000, v(room));
+        d.grid_point(op(0), at_frame(1000), v(room));
         assert_eq!(offsets(&d).len(), room);
-        assert_eq!(offsets(&d).last(), Some(&(room as i32 - 1)));
+        assert_eq!(offsets(&d).last(), Some(&(room as u32 - 1)));
         assert_eq!(counters.snapshot().grid_points_dropped, 1);
         // A corner at full: the earliest grid point (offset 0) goes.
-        d.point(op(0), 2000, v(room));
+        d.point(op(0), at_frame(2000), v(room));
         let o = offsets(&d);
         assert_eq!((o[0], o.last().copied()), (1, Some(2000)));
         assert_eq!(counters.snapshot().grid_points_dropped, 2);
         assert_eq!(counters.snapshot().points_merged, 0);
         // Every other grid point goes before a corner is merged.
         for k in 1..grids {
-            d.point(op(0), 2000 + k as i32, v(room + k));
+            d.point(op(0), at_frame(2000 + k as i32), v(room + k));
         }
         assert_eq!(counters.snapshot().grid_points_dropped, 1 + grids as u64);
-        assert_eq!(offsets(&d)[0], grids as i32, "only corners left");
-        d.point(op(0), 3000, v(room + grids));
+        assert_eq!(offsets(&d)[0], grids as u32, "only corners left");
+        d.point(op(0), at_frame(3000), v(room + grids));
         assert_eq!(counters.snapshot().points_merged, 1);
         assert_eq!(offsets(&d).len(), room);
     }
@@ -1591,7 +1612,7 @@ mod tests {
                     // from the last chunk's last (else it is unchanged and
                     // not sent).
                     let v = ((k + id as usize + 4 * phase) % 8) as f64 / 8.0;
-                    d.point(op(id), (k * 28) as i32, v);
+                    d.point(op(id), at_frame((k * 28) as i32), v);
                 }
             }
             for (i, q) in d.changes.queues.iter().enumerate() {
@@ -1604,7 +1625,7 @@ mod tests {
                 assert!(
                     q.points
                         .windows(2)
-                        .all(|w| w[0].sample_offset < w[1].sample_offset)
+                        .all(|w| w[0].sample_offset.get() < w[1].sample_offset.get())
                 );
             }
             std::mem::swap(d.changes(), spare);
@@ -1624,13 +1645,13 @@ mod tests {
         d.begin();
         for k in 0..3 {
             for id in 0..=moving {
-                d.point(op(id), k, (2 * k + 1) as f64 / 16.0);
+                d.point(op(id), at_frame(k), (2 * k + 1) as f64 / 16.0);
             }
         }
         let last = d.changes.queue(op(moving)).expect("queued");
         assert_eq!(last.points.len(), ParameterChanges::FLOOR_POINTS);
         assert_eq!(last.points.last().map(|p| p.value.get()), Some(5.0 / 16.0));
-        assert_eq!(last.points.last().map(|p| p.sample_offset), Some(2));
+        assert_eq!(last.points.last().map(|p| p.sample_offset.get()), Some(2));
         assert_eq!(counters.snapshot().points_merged, 1);
     }
 
@@ -1654,9 +1675,9 @@ mod tests {
             for id in 0..lanes {
                 let v = ((k + id as usize + 3 * phase) % 7 + 1) as f64 / 8.0;
                 if grid {
-                    d.grid_point(op(id), f, v);
+                    d.grid_point(op(id), at_frame(f), v);
                 } else {
-                    d.point(op(id), f, v);
+                    d.point(op(id), at_frame(f), v);
                 }
                 latest[id as usize] = v;
             }
@@ -1699,11 +1720,11 @@ mod tests {
                 assert_eq!(q.param_id, op(id as u32));
                 let last = q.points.last().expect("a point");
                 assert_eq!(
-                    (last.sample_offset, last.value.get()),
+                    (last.sample_offset.get(), last.value.get()),
                     (511, v),
                     "lane {id} ends on its latest value"
                 );
-                let offsets: Vec<i32> = q.points.iter().map(|p| p.sample_offset).collect();
+                let offsets: Vec<u32> = q.points.iter().map(|p| p.sample_offset.get()).collect();
                 if id < pooled {
                     assert_eq!(offsets.len(), 33, "lane {id} holds a block");
                 } else {
@@ -1747,15 +1768,15 @@ mod tests {
         let room = d.prepare(512);
         let v = |k: usize| if k.is_multiple_of(2) { 0.25 } else { 0.75 };
         d.begin();
-        d.grid_point(op(0), 0, v(0));
+        d.grid_point(op(0), at_frame(0), v(0));
         for k in 1..room {
-            d.point(op(0), k as i32, v(k));
+            d.point(op(0), at_frame(k as i32), v(k));
         }
         let points = |d: &ParamDelivery| d.changes.queues[0].points.len();
         assert_eq!(points(&d), room);
-        d.point(op(0), 1000, v(room));
+        d.point(op(0), at_frame(1000), v(room));
         assert_eq!(points(&d), room);
-        assert_eq!(d.changes.queues[0].points[0].sample_offset, 1);
+        assert_eq!(d.changes.queues[0].points[0].sample_offset.get(), 1);
         let stats = counters.snapshot();
         assert_eq!((stats.grid_points_dropped, stats.points_merged), (1, 0));
     }

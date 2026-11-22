@@ -27,6 +27,7 @@ use vst3::Steinberg::Vst::{IParamValueQueue, IParameterChanges, IParameterChange
 use vst3::{Class, ComWrapper};
 
 use super::param_queue::ParamValueQueueImpl;
+use tutti_graph::Offset;
 use tutti_plugin_types::PointPool;
 use tutti_plugin_types::{ParameterChanges, ParameterPoint};
 use tutti_units::Normalized;
@@ -221,7 +222,7 @@ impl ParameterChangesImpl {
             // The plugin answered with a bare `ParamID`, and VST3 ids are opaque: tag it.
             let param_id = state.param_id();
             state.for_each_point(|point| {
-                out.add_change(param_id, point.sample_offset, point.value.get());
+                out.add_change(param_id, point.sample_offset, point.value);
             });
         }
         true
@@ -343,7 +344,7 @@ impl ParamStaging<'_> {
     /// [`Busy`] if a plugin thread holds a queue it needs.
     pub fn prepend(&mut self, param_id: ParamId, value: Normalized) -> Result<(), Busy> {
         let point = ParameterPoint {
-            sample_offset: 0,
+            sample_offset: Offset::ZERO,
             value,
         };
         let Self { list, inner } = self;

@@ -27,7 +27,7 @@ use vst3::Steinberg::Vst::{
 use tutti_midi_protocol::channel_voice;
 use tutti_ump::{Address, MidiChannel, MidiGroup, U7, Ump, Voice2};
 
-use crate::events::{InputEvents, Stager, sample_offset};
+use crate::events::{InputEvents, Stager};
 use crate::types::ParameterChanges;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{MIDI_STACK_CAPACITY, MainThreadMarker, MidiAssignment, MidiSource};
@@ -291,11 +291,7 @@ pub(crate) fn route_cc_events(
                     // keeps the latest value in time, the host's or the CC's
                     // (`PointBuf::push_or_replace_last`), counted in the
                     // set's `points_overflowed`.
-                    let _ = out_params.add_change(
-                        ParamId::new(param_id),
-                        sample_offset(event.0.get()),
-                        value.get(),
-                    );
+                    let _ = out_params.add_change(ParamId::new(param_id), event.0, value);
                 }
                 // Mappable message but no mapping for this slot — keep it as a
                 // MIDI event so the plugin can still react.
@@ -562,7 +558,7 @@ impl CcRoute {
                 }
                 let i = changes.queues.len() - 1;
                 for point in &queue.points {
-                    let stored = changes.push_point(i, point.sample_offset, point.value.get());
+                    let stored = changes.push_point(i, point.sample_offset, point.value);
                     *overflowed += u64::from(!stored);
                 }
             }

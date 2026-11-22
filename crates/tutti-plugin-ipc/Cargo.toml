@@ -22,6 +22,8 @@ testing = []
 [dependencies]
 # The editor's sizes, which name their unit (`dpi::Size`); they cross the wire serialized.
 dpi = { workspace = true, features = ["serde"] }
+# `Offset`: where a parameter point sits in its block.
+tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-music = { version = "0.0.1", path = "../tutti-music" }
 # `Executor`, `PriorityRequest`: the client's audio and control lanes.
@@ -51,13 +53,14 @@ thiserror = "2"
 tracing.workspace = true
 
 [dev-dependencies]
+# `at_frame` and `unit_value`: the parameter points the tests build.
+tutti-plugin-types = { path = "../tutti-plugin-types", features = ["testing"] }
 # `inheritable_descriptors`: the spawn test's snapshot of what the host holds open.
 tutti-plugin-ipc-ffi = { path = "../tutti-plugin-ipc-ffi", features = ["testing"] }
 # The plugin handle the served-handle tests drive over the mock server. Not a
 # dependency: a format host knows no hosting, and the handle is `tutti-plugin-host`'s.
 tutti-plugin-host = { path = "../tutti-plugin-host" }
 tutti-midi-protocol = { path = "../tutti-midi-protocol" }
-tutti-graph = { path = "../tutti-graph" }
 tempfile = "3"
 tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["plugin"] }
 assert_no_alloc = { version = "1", default-features = false }

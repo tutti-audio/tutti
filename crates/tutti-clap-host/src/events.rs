@@ -30,7 +30,7 @@ use clap_sys::events::{
 use std::num::NonZeroU32;
 use std::ptr;
 use tutti_clap_ffi::{EventRef, EventSink, PluginEvent};
-use tutti_graph::UmpAt;
+use tutti_graph::{Offset, UmpAt};
 use tutti_plugin_types::{
     LinearRange, ParamEdit, ParamMapping, PlainMap, RtMidiEvents, StableOrder, WireMidi,
     expression_of_per_note_controller, group_of_port, note_id_to_channel_note, per_note_message,
@@ -38,10 +38,12 @@ use tutti_plugin_types::{
 };
 use tutti_rt::{CappedVec, RtVec, Tally, TallyWriter, tally};
 use tutti_units::ParamId;
-use tutti_units::{Normalized, Semitones, Velocity};
+use tutti_units::{Normalized, Samples, Semitones, Velocity};
 
 use crate::types::RtNoteExpressions;
 use tutti_midi_protocol::{Midi1Translator, Midi2Translator, PitchBendSensitivity};
+#[cfg(test)]
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_ump::{
     Address, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity, Rpn,
     SysexAssembler, SysexStep, U7, Ump, Voice1, Voice2, parse_exact,
@@ -1554,13 +1556,10 @@ impl InputEventList {
                     None => point.value.get(),
                 };
                 let event = ClapEvent::param_value(
-                    // `sample_offset` is `i32`; a bare `as u32` turns a
-                    // negative offset into ~4.29 billion, which sorts last and
-                    // is handed to the plugin as a buffer index. Saturate at 0
-                    // — the change is simply already due. The upper bound is
-                    // enforced once for the whole list by `clamp_times`, which
-                    // is the only place `frames_count` is known.
-                    point.sample_offset.max(0) as u32,
+                    // The upper bound is enforced once for the whole list by
+                    // `clamp_times`, which is the only place `frames_count` is
+                    // known.
+                    point.sample_offset.get(),
                     param_id.get(),
                     value,
                 );
@@ -2158,7 +2157,7 @@ impl OutputEventList {
             };
             // Room of its own, or a block from `out`'s shared point pool;
             // past both the queue keeps its latest value.
-            if !out.push_point(i, point.sample_offset, point.value.get()) {
+            if !out.push_point(i, point.sample_offset, point.value) {
                 dropped += 1;
             }
         }
@@ -2179,11 +2178,9 @@ impl OutputEventList {
             .filter_map(|&i| self.latest[i as usize].as_ref());
         listed.chain(latest).map(|e| {
             let point = ParameterPoint {
-                // Saturate rather than wrap: `header.time` is `u32` and
-                // `ParameterPoint::sample_offset` is `i32`, so a bare cast turns
-                // a large offset negative and the automation point lands before
-                // the block.
-                sample_offset: i32::try_from(e.header.time).unwrap_or(i32::MAX),
+                // The block's length is `clamp_times`'s to enforce; any `u32`
+                // frame count is in range here.
+                sample_offset: Offset::clamped(e.header.time, Samples::new(u32::MAX as usize)),
                 // Inbound from the plugin: clamped at the boundary, since a
                 // plugin's output event is as untrusted as any other input.
                 value: Normalized::clamped(e.value),
@@ -2454,47 +2451,6 @@ mod tests {
         midi.ump.decode().expect("a defined message")
     }
 
-    /// A huge event time must saturate, not wrap negative.
-    ///
-    /// `clap_event_header::time` is `u32` and `ParameterPoint::sample_offset` is
-    /// `i32`, so a bare `as i32` sends a large offset negative — the automation
-    /// point then sorts before the block instead of after it.
-    ///
-    /// `u32::MAX` is not a realistic block offset, but it is the value that
-    /// distinguishes saturation from wrapping, which is the whole property.
-    #[test]
-    fn a_huge_event_time_saturates_rather_than_going_negative() {
-        let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
-        list.events.push(ClapEvent::param_value(u32::MAX, 7, 0.5));
-
-        // `fill_param_changes` fills within the room the set was reserved
-        // with (an unreserved set has none); one queue is all this needs.
-        let mut changes = ParameterChanges::reserved(1, 10);
-        assert_eq!(
-            list.fill_param_changes(&mut changes),
-            0,
-            "nothing past the room"
-        );
-
-        let point = changes
-            .queues
-            .iter()
-            .find(|q| q.param_id == ParamId::new(7u32))
-            .and_then(|q| q.points.first())
-            .expect("the param value must survive into a queue");
-        assert!(
-            point.sample_offset >= 0,
-            "sample_offset wrapped negative ({}) — the automation point sorts \
-             before the block it belongs to",
-            point.sample_offset
-        );
-        assert_eq!(
-            point.sample_offset,
-            i32::MAX,
-            "an unrepresentable offset must saturate"
-        );
-    }
-
     // (`use super::*` is already in scope from the top of this module.)
     use tutti_fixtures::midi;
 
@@ -2524,8 +2480,8 @@ mod tests {
             ParamBounds::continuous(ParamId::new(9), 100.0, 1100.0),
         ];
         let mut changes = ParameterChanges::reserved(2, 1);
-        changes.add_change(ParamId::new(9u32), 0, 0.5);
-        changes.add_change(ParamId::new(5u32), 1, 0.25);
+        changes.add_change(ParamId::new(9u32), at_frame(0), unit_value(0.5));
+        changes.add_change(ParamId::new(5u32), at_frame(1), unit_value(0.25));
         let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
         list.add_param_changes(&changes, &ranges, true);
         let got: Vec<(u32, f64)> = list
@@ -3098,8 +3054,8 @@ mod tests {
                 // Every parameter on the same frames: many ties.
                 changes.add_change(
                     ParamId::new(id),
-                    (k * 25) as i32,
-                    (id as f64 + k as f64) / 1000.0 % 1.0,
+                    at_frame((k * 25) as i32),
+                    unit_value((id as f64 + k as f64) / 1000.0 % 1.0),
                 );
             }
         }
@@ -3157,12 +3113,12 @@ mod tests {
     fn add_param_changes_stays_within_its_room() {
         let mut changes = ParameterChanges::reserved(3, 4);
         for k in 0..4 {
-            changes.add_change(ParamId::new(1u32), k, 0.5);
+            changes.add_change(ParamId::new(1u32), at_frame(k), unit_value(0.5));
         }
         for (k, v) in [0.1, 0.2, 0.3].into_iter().enumerate() {
-            changes.add_change(ParamId::new(2u32), k as i32, v);
+            changes.add_change(ParamId::new(2u32), at_frame(k as i32), unit_value(v));
         }
-        changes.add_change(ParamId::new(3u32), 0, 0.9);
+        changes.add_change(ParamId::new(3u32), at_frame(0), unit_value(0.9));
         let mut list = InputEventList::new(InputRooms::new(0).param_points(5));
         list.add_param_changes(&changes, &[], false);
         let got: Vec<(u32, f64)> = list
@@ -3262,7 +3218,7 @@ mod tests {
     fn param_points_past_the_lists_room_are_counted_in_the_tally() {
         let mut changes = ParameterChanges::reserved(1, 5);
         for k in 0..5 {
-            changes.add_change(ParamId::new(1), k, 0.5);
+            changes.add_change(ParamId::new(1), at_frame(k), unit_value(0.5));
         }
         let mut list = InputEventList::new(InputRooms::new(0).param_points(3));
         let tally = list.param_points_tally();
@@ -3393,7 +3349,7 @@ mod tests {
     fn add_param_changes_denormalizes_against_range() {
         // Param 9 has plain range [100, 1100]; a normalized 0.25 → 350.
         let mut changes = ParameterChanges::reserved(1, 1);
-        changes.add_change(ParamId::new(9u32), 0, 0.25);
+        changes.add_change(ParamId::new(9u32), at_frame(0), unit_value(0.25));
         let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
         list.add_param_changes(
             &changes,
@@ -3413,7 +3369,11 @@ mod tests {
             let bounds = [ParamBounds::stepped(ParamId::new(9), 0.0, f64::from(n))];
             for k in 0..=n {
                 let mut changes = ParameterChanges::reserved(1, 1);
-                changes.add_change(ParamId::new(9u32), 0, f64::from(k) / f64::from(n));
+                changes.add_change(
+                    ParamId::new(9u32),
+                    at_frame(0),
+                    unit_value(f64::from(k) / f64::from(n)),
+                );
                 let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
                 list.add_param_changes(&changes, &bounds, true);
                 assert_eq!(
@@ -3499,7 +3459,7 @@ mod tests {
     fn add_param_changes_clamps_denormalized_value_into_range() {
         // A normalized 1.5 (over-range) must clamp to the plain max, not overshoot.
         let mut changes = ParameterChanges::reserved(1, 1);
-        changes.add_change(ParamId::new(9u32), 0, 1.5);
+        changes.add_change(ParamId::new(9u32), at_frame(0), unit_value(1.5));
         let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
         list.add_param_changes(
             &changes,
@@ -3515,7 +3475,7 @@ mod tests {
         // plugin reported. A malformed plugin must not take down the audio
         // thread — the value lands inside the range either way round.
         let mut changes = ParameterChanges::reserved(1, 1);
-        changes.add_change(ParamId::new(9u32), 0, 0.5);
+        changes.add_change(ParamId::new(9u32), at_frame(0), unit_value(0.5));
         let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
         list.add_param_changes(
             &changes,
@@ -3531,7 +3491,7 @@ mod tests {
         // No range for this param id → value forwarded unchanged (safe fallback
         // for the common normalized-0..1 param).
         let mut changes = ParameterChanges::reserved(1, 1);
-        changes.add_change(ParamId::new(9u32), 0, 0.42);
+        changes.add_change(ParamId::new(9u32), at_frame(0), unit_value(0.42));
         let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
         list.add_param_changes(&changes, &[], false);
         assert_eq!(first_param_value(&list), 0.42);
@@ -3609,26 +3569,6 @@ mod tests {
 
     fn first_time(list: &InputEventList) -> u32 {
         list.events().first().expect("an event").header().time
-    }
-
-    /// A NEGATIVE `sample_offset` must not wrap.
-    ///
-    /// `sample_offset` is `i32` and `header.time` is `u32`; a bare
-    /// `point.sample_offset as u32` turns -1 into 4_294_967_295, which sorts
-    /// last and is handed to the plugin as a sample index into the block.
-    /// Plugins split their buffer on `time`, so that is an out-of-bounds access
-    /// inside the plugin.
-    #[test]
-    fn negative_sample_offset_does_not_wrap_to_four_billion() {
-        let mut changes = ParameterChanges::reserved(1, 1);
-        changes.add_change(ParamId::new(9u32), -1, 0.5);
-        let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
-        list.add_param_changes(&changes, &[], false);
-        assert_eq!(
-            first_time(&list),
-            0,
-            "a negative offset means 'already due', so it saturates at 0"
-        );
     }
 
     /// The same trap on the note-expression path.
@@ -4643,7 +4583,7 @@ mod tests {
                 // A frame a point: a full room (273 at 512 frames) fits the
                 // block. (Changed in doc 014 §12.2: every third frame, which
                 // put a 273-point room's points past a 512-frame block.)
-                changes.queues[i].add_point(k as i32, pooled_value(id, k));
+                changes.queues[i].add_point(at_frame(k as i32), unit_value(pooled_value(id, k)));
             }
         }
         changes
@@ -4710,7 +4650,7 @@ mod tests {
             let want: Vec<(u32, f64)> = q
                 .points
                 .iter()
-                .map(|p| (p.sample_offset as u32, p.value.get()))
+                .map(|p| (p.sample_offset.get() as u32, p.value.get()))
                 .collect();
             assert_eq!(got, want, "parameter {id}");
         }
@@ -4730,9 +4670,9 @@ mod tests {
             assert!(grown.points.push(*p).is_ok());
         }
         for k in 0..extra {
-            assert!(grown.add_point(70 + k as i32 % 300, 0.5));
+            assert!(grown.add_point(at_frame(70 + k as i32 % 300), unit_value(0.5)));
         }
-        assert!(grown.add_point(400, 0.875));
+        assert!(grown.add_point(at_frame(400), unit_value(0.875)));
         *last = grown;
         assert_no_alloc::assert_no_alloc(|| fill(&mut list, &over));
         assert_eq!(list.len(), budget);

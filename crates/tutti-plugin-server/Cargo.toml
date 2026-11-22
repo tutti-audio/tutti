@@ -74,6 +74,8 @@ tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-au-host = { version = "0.0.1", path = "../tutti-au-host", optional = true }
 
 [dev-dependencies]
+# `at_frame` and `unit_value`: the parameter points the tests build.
+tutti-plugin-types = { path = "../tutti-plugin-types", features = ["testing"] }
 tutti-midi-protocol = { path = "../tutti-midi-protocol" }
 # Finds the reference plugins and the plugin-server beside the test binary.
 tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["plugin"] }

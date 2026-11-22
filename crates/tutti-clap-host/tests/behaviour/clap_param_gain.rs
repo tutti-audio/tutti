@@ -43,6 +43,7 @@ use tutti_buffers::InputOutput;
 use tutti_clap_host::{ClapLoaded, ClapProcessContext, LoadOptions};
 use tutti_clap_test_plugin::params_state::{GAIN_DB_MAX, GAIN_DB_MIN, GAIN_PARAM_ID};
 use tutti_plugin_types::ParameterChanges;
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_units::ParamId;
 
 const SAMPLE_RATE: f64 = 48_000.0;
@@ -227,7 +228,11 @@ fn minus_six_db_halves_the_output_amplitude() {
     let mut inst = session.activate();
 
     let mut params = ParameterChanges::reserved(1, 1);
-    params.add_change(gain_addr(), 0, normalized_for_db(-6.0));
+    params.add_change(
+        gain_addr(),
+        at_frame(0),
+        unit_value(normalized_for_db(-6.0)),
+    );
     let out = drive(&mut inst, &params);
 
     let expected = TAG_P0C0 * amplitude_for_db(-6.0);
@@ -257,7 +262,7 @@ fn unity_gain_leaves_the_output_untouched() {
     let mut inst = session.activate();
 
     let mut params = ParameterChanges::reserved(1, 1);
-    params.add_change(gain_addr(), 0, normalized_for_db(0.0));
+    params.add_change(gain_addr(), at_frame(0), unit_value(normalized_for_db(0.0)));
     let out = drive(&mut inst, &params);
 
     for (i, &s) in out.iter().enumerate() {
@@ -292,7 +297,11 @@ fn a_mid_block_point_takes_effect_at_its_own_sample() {
     let mut inst = session.activate();
 
     let mut params = ParameterChanges::reserved(1, 1);
-    params.add_change(gain_addr(), AT as i32, normalized_for_db(-6.0));
+    params.add_change(
+        gain_addr(),
+        at_frame(AT as i32),
+        unit_value(normalized_for_db(-6.0)),
+    );
     let out = drive(&mut inst, &params);
 
     for (i, &s) in out.iter().enumerate().take(AT) {
@@ -335,8 +344,16 @@ fn two_points_apply_in_order_at_their_own_offsets() {
     let mut inst = session.activate();
 
     let mut params = ParameterChanges::reserved(1, 2);
-    params.add_change(gain_addr(), FIRST as i32, normalized_for_db(-6.0));
-    params.add_change(gain_addr(), SECOND as i32, normalized_for_db(-12.0));
+    params.add_change(
+        gain_addr(),
+        at_frame(FIRST as i32),
+        unit_value(normalized_for_db(-6.0)),
+    );
+    params.add_change(
+        gain_addr(),
+        at_frame(SECOND as i32),
+        unit_value(normalized_for_db(-12.0)),
+    );
     let out = drive(&mut inst, &params);
 
     let after_first = TAG_P0C0 * amplitude_for_db(-6.0);
@@ -372,7 +389,11 @@ fn a_gain_set_in_one_block_persists_into_the_next() {
     let mut inst = session.activate();
 
     let mut params = ParameterChanges::reserved(1, 1);
-    params.add_change(gain_addr(), 0, normalized_for_db(-6.0));
+    params.add_change(
+        gain_addr(),
+        at_frame(0),
+        unit_value(normalized_for_db(-6.0)),
+    );
     let _ = drive(&mut inst, &params);
 
     // Second block: no events at all.

@@ -25,6 +25,8 @@ use tutti_plugin_types::{
 
 use super::Link;
 use crate::{Batcher, BlockPayload, Chunks, Replies, SlabWriter};
+#[cfg(test)]
+use tutti_plugin_types::fake::{at_frame, unit_value};
 
 /// The realtime half of an activated served plugin. See the module docs.
 pub struct IpcProcessor {
@@ -285,7 +287,7 @@ impl Chunks for Piece<'_, '_> {
                 for point in &queue.points {
                     let _ = self
                         .params
-                        .push_point(index, point.sample_offset, point.value.into());
+                        .push_point(index, point.sample_offset, point.value);
                 }
             }
         }
@@ -355,7 +357,7 @@ mod tests {
             "a sample past the piece is not the piece's"
         );
         let mut changes = ParameterChanges::reserved(1, 4);
-        assert!(changes.add_change(ParamId::new(1), 3, 0.5));
+        assert!(changes.add_change(ParamId::new(1), at_frame(3), unit_value(0.5)));
         let params = ProcessContext::new().params(&changes);
         let one = [&silence[..]];
         assert!(
