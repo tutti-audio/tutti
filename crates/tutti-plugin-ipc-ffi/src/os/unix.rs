@@ -6,7 +6,7 @@
 //! it (what a failure to ask means, how long to wait) stays with the caller.
 
 use rustix::event::{PollFd, PollFlags, Timespec};
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{BorrowedFd, OwnedFd};
 use std::time::Duration;
 
 use crate::{Interest, Ready, Watch};
@@ -224,13 +224,14 @@ pub enum AdoptError {
 /// # Errors
 ///
 /// The descriptor table cannot be read.
-pub fn inheritable_descriptors() -> std::io::Result<Vec<RawFd>> {
+#[cfg(feature = "testing")]
+pub fn inheritable_descriptors() -> std::io::Result<Vec<std::os::fd::RawFd>> {
     let mut found = Vec::new();
     for entry in std::fs::read_dir("/dev/fd")? {
         let Some(fd) = entry?
             .file_name()
             .to_str()
-            .and_then(|n| n.parse::<RawFd>().ok())
+            .and_then(|n| n.parse::<std::os::fd::RawFd>().ok())
         else {
             continue;
         };
@@ -249,30 +250,9 @@ pub fn inheritable_descriptors() -> std::io::Result<Vec<RawFd>> {
     Ok(found)
 }
 
-/// Closes every [`inheritable_descriptors`] but `keep`: what the host app held
-/// open without close-on-exec when it spawned this process, which std's spawn
-/// passes through and a helper a plugin starts would pass on. rustix has no
-/// `close_range`, so each is closed by its own.
-fn close_inherited(keep: BorrowedFd<'_>) -> Result<(), AdoptError> {
-    let listed = inheritable_descriptors().map_err(|source| AdoptError::Os {
-        op: "list the descriptors of",
-        source,
-    })?;
-    for fd in listed {
-        if fd == keep.as_raw_fd() {
-            continue;
-        }
-        // SAFETY: the process is single-threaded here (`adopt_host_socket` runs
-        // first in `main`), nothing has made an `OwnedFd` or `File` of `fd`, and
-        // it was open a moment ago, so this is its one owner.
-        drop(unsafe { OwnedFd::from_raw_fd(fd) });
-    }
-    Ok(())
-}
-
 /// Takes the connection the host handed this process as its standard input: the
 /// stream socket on descriptor 0 moves to a descriptor of its own, closed on
-/// `exec`, every other descriptor from 3 up that is not closed on `exec` is closed, and `/dev/null` replaces
+/// `exec`, and `/dev/null` replaces
 /// descriptor 0, so a plugin that reads its
 /// standard input reads end of file and no process a plugin starts inherits the
 /// socket.
@@ -308,7 +288,6 @@ pub fn adopt_host_socket() -> Result<OwnedFd, AdoptError> {
     // From 3: a duplicate that took the number of a closed standard descriptor
     // would be replaced with it.
     let socket = fcntl_dupfd_cloexec(stdin(), 3).map_err(os("duplicate"))?;
-    close_inherited(socket.as_fd())?;
     let null = open("/dev/null", OFlags::RDWR | OFlags::CLOEXEC, Mode::empty())
         .map_err(os("open /dev/null for"))?;
     dup2_stdin(&null).map_err(os("replace"))?;
@@ -505,34 +484,6 @@ mod tests {
                 "no descriptor holds the end"
             );
             assert_eq!(std::io::stdin().read(&mut got).unwrap(), 0);
-        }
-
-        /// **Descriptors the host left open are closed, the socket is kept**: a
-        /// descriptor without close-on-exec (what a spawn passes through) is gone
-        /// after the adoption, and the adopted socket still talks to the peer.
-        #[test]
-        fn adopt_closes_inherited_descriptors_and_keeps_the_socket() {
-            use rustix::io::{dup, fcntl_getfd};
-            use std::os::fd::{AsRawFd, BorrowedFd, IntoRawFd};
-
-            let (mut host, server) = UnixStream::pair().unwrap();
-            dup2_stdin(&server).unwrap();
-            drop(server);
-            let leaked = dup(&host).unwrap();
-            assert!(!fcntl_getfd(&leaked).unwrap().contains(FdFlags::CLOEXEC));
-            let number = leaked.into_raw_fd();
-
-            let adopted = adopt_host_socket().expect("a stream socket on fd 0");
-
-            // SAFETY: the number is only asked about; nothing reopens it here.
-            let gone = unsafe { BorrowedFd::borrow_raw(number) };
-            assert!(fcntl_getfd(gone).is_err(), "descriptor {number} is open");
-            assert_ne!(adopted.as_raw_fd(), number);
-            let mut end = UnixStream::from(adopted);
-            end.write_all(b"x").unwrap();
-            let mut got = [0u8; 1];
-            host.read_exact(&mut got).unwrap();
-            assert_eq!(&got, b"x");
         }
 
         /// **A standard input that is not a stream socket is refused by name**,
