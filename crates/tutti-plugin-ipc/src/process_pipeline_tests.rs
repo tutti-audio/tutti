@@ -974,14 +974,18 @@ fn the_chunk_counters_report_misses_and_answers() {
         counters.in_flight_answered()
     });
     drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
-    assert_eq!(counters.missed(), 0, "an answered chunk was counted missed");
+    assert_eq!(
+        counters.outcomes().missed,
+        0,
+        "an answered chunk was counted missed"
+    );
 
     // Back to back: each block collects a chunk the server is still holding.
     for _ in 0..4 {
         drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
     }
     assert!(
-        counters.missed() > 0,
+        counters.outcomes().missed > 0,
         "blocks that outran a stalled server were not counted"
     );
 
@@ -1014,18 +1018,26 @@ fn a_chunk_published_after_its_miss_is_counted_late() {
 
     drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
     drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
-    assert_eq!(counters.missed(), 1, "chunk 1 was collected unanswered");
-    assert_eq!(counters.late(), 0, "and had not been published yet");
+    assert_eq!(
+        counters.outcomes().missed,
+        1,
+        "chunk 1 was collected unanswered"
+    );
+    assert_eq!(
+        counters.outcomes().late,
+        0,
+        "and had not been published yet"
+    );
 
     permits.send(()).expect("the server waits for a permit");
     wait_for(&bridge, "chunk 1 never came", || host_slab.has_output(1));
     drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
     assert_eq!(
-        counters.late(),
+        counters.outcomes().late,
         1,
         "chunk 1, published after its miss, is counted late"
     );
-    assert!(counters.late() <= counters.missed());
+    assert!(counters.outcomes().late <= counters.outcomes().missed);
 
     bridge_thread.shutdown();
 }
@@ -1053,8 +1065,16 @@ fn a_chunk_never_published_is_missed_and_never_late() {
     for _ in 0..6 {
         drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
     }
-    assert_eq!(counters.missed(), 5, "every chunk but the first collect");
-    assert_eq!(counters.late(), 0, "none of them was ever published");
+    assert_eq!(
+        counters.outcomes().missed,
+        5,
+        "every chunk but the first collect"
+    );
+    assert_eq!(
+        counters.outcomes().late,
+        0,
+        "none of them was ever published"
+    );
 
     bridge_thread.shutdown();
 }
@@ -1134,15 +1154,19 @@ fn a_chunk_the_server_refuses_is_counted_refused() {
     // Block 5 resolves chunk 1.
     block();
 
-    assert_eq!(counters.refused(), 1, "chunk 1, the scripted refusal");
-    assert_eq!(counters.late(), 1, "chunk 2, published after its miss");
-    assert_eq!(counters.skipped(), 0, "the bridge kept up");
-    assert_eq!(counters.unanswered(), 0);
-    let resolved = counters.late() + counters.refused() + counters.skipped();
+    // Chunks 1 and 2 were missed (block 5's collect finds chunk 4 answered),
+    // and both fates are learned, so the four fates sum to `missed`: chunk 1
+    // the scripted refusal, chunk 2 published after its miss, and the bridge
+    // kept up.
     assert_eq!(
-        counters.missed(),
-        resolved,
-        "chunks 1 and 2 were missed; block 5's collect finds chunk 4 answered"
+        counters.outcomes(),
+        tutti_plugin_types::ChunkOutcomes {
+            missed: 2,
+            late: 1,
+            refused: 1,
+            unanswered: 0,
+            skipped: 0,
+        }
     );
 
     bridge_thread.shutdown();
@@ -1176,10 +1200,10 @@ fn a_chunk_the_server_never_accounts_for_is_counted_unanswered() {
             bridge.audio().block_counts().abandoned + bridge.audio().skipped_cell().get() >= sent
         });
     }
-    assert_eq!(counters.refused(), 0, "the server said nothing");
-    assert_eq!(counters.late(), 0, "nothing was published");
+    assert_eq!(counters.outcomes().refused, 0, "the server said nothing");
+    assert_eq!(counters.outcomes().late, 0, "nothing was published");
     assert!(
-        counters.unanswered() >= 1,
+        counters.outcomes().unanswered >= 1,
         "chunks the server never answered, past the window, are unanswered"
     );
 

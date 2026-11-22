@@ -82,7 +82,7 @@ pub const EXIT_PLUGIN_LEAKED: u8 = 3;
 
 /// The exit status of a server whose session ended with [`Ended::TasksDetached`].
 /// No host reads it, as for [`EXIT_PLUGIN_LEAKED`]: the host's own detached
-/// tasks are its count, `PluginControls::detached_tasks`.
+/// tasks are its count, `BridgeLosses::detached_tasks`.
 pub const EXIT_TASKS_DETACHED: u8 = 4;
 
 /// The exit status of a server whose session ended with [`Ended::RenderLaneLost`].

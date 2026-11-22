@@ -364,7 +364,9 @@ pub use param_unit::{ParamUnit, PlainUnit};
 pub use parameters::{
     ParamAccess, ParamFlags, ParamSteps, ParamWriteError, ParameterInfo, PluginParamRange,
 };
-pub use pipeline::{ChunkCounters, MAX_CHUNK, PipelineCounts, ServerLosses};
+pub use pipeline::{
+    BridgeLosses, ChunkCounters, ChunkOutcomes, MAX_CHUNK, PipelineCounts, ServerLosses,
+};
 pub use presets::{PluginPreset, PresetId, PresetSupport};
 #[cfg(feature = "probe-wire")]
 pub use probe_exit::{ProbeDeath, ProbeExit};
