@@ -65,7 +65,7 @@ impl ClaimWord {
     /// Adds a shared claim unless an exclusive one is held, or the count would
     /// reach the exclusive bit; `false` then, with the word restored.
     #[inline]
-    pub(crate) fn try_shared(&self) -> bool {
+    pub(crate) fn claim_shared(&self) -> bool {
         let prev = self.0.fetch_add(1, Ordering::Acquire);
         if prev & EXCLUSIVE != 0 || prev + 1 >= EXCLUSIVE {
             // Leave the word as found.
@@ -77,7 +77,7 @@ impl ClaimWord {
 
     /// Takes the word if nothing holds it; `false` if anything does.
     #[inline]
-    pub(crate) fn try_exclusive(&self) -> bool {
+    pub(crate) fn claim_exclusive(&self) -> bool {
         self.0
             .compare_exchange(0, EXCLUSIVE, Ordering::Acquire, Ordering::Relaxed)
             .is_ok()
@@ -86,7 +86,7 @@ impl ClaimWord {
     /// Turns the caller's shared claim into an exclusive one if it is the only
     /// shared claim; `false` if another is held, with the caller's claim kept.
     #[inline]
-    pub(crate) fn try_upgrade(&self) -> bool {
+    pub(crate) fn upgrade(&self) -> bool {
         self.0
             .compare_exchange(1, EXCLUSIVE, Ordering::Acquire, Ordering::Relaxed)
             .is_ok()
