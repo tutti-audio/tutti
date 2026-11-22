@@ -14,7 +14,7 @@
 //! skip.
 
 use crate::bounced::bounced;
-use crate::loading::{Block as _, LoadFrom as _, LoadPlugin, Spec};
+use crate::loading::{Block as _, LoadFrom as _, LoadPlugin, Perform as _, Spec};
 use crate::param_reads::ParamReads as _;
 use crate::support;
 use tutti_fixtures::block_on;
@@ -22,7 +22,7 @@ use tutti_plugin_db::Hosting;
 use tutti_rt::LockExt;
 use tutti_session::InPort;
 use tutti_session::MainOutput;
-use tutti_session::{PluginChange, PluginEvent};
+use tutti_session::{AnyPlugin, Key, PluginChange, PluginEvent};
 
 use std::sync::atomic::Ordering;
 
@@ -90,18 +90,17 @@ fn session_built(
 }
 
 /// Loads the probe into `s` (blocking), unwired.
-fn add_probe(s: &mut Session) -> NodeKey {
+fn add_probe(s: &mut Session) -> Key<AnyPlugin> {
     s.load_plugin_blocking(
         tutti_fixtures::main_thread(),
         Spec::new(PluginRef::file(clap_probe())),
     )
     .expect("the reference CLAP plugin loads")
-    .erase()
 }
 
 /// The probe's own latency (without the pipeline's chunk), as its node's
 /// latency cell holds it.
-fn latency(s: &Session, node: NodeKey) -> Samples {
+fn latency(s: &Session, node: impl Into<NodeKey>) -> Samples {
     s.plugin_view(node)
         .expect("hosted")
         .diagnostics()
@@ -113,17 +112,16 @@ fn latency(s: &Session, node: NodeKey) -> Samples {
 /// bridge thread reads it off the socket only while it waits for the next
 /// reply; live, any later control call (a snapshot, a parameter read) carries
 /// it, and here this one does.
-fn round_trip(s: &Session, node: NodeKey) {
+fn round_trip(s: &Session, node: Key<AnyPlugin>) {
     let _ = s
-        .plugin_view(node)
+        .save_state(&node, tutti_plugin_types::StateUse::Project)
         .expect("hosted")
-        .handle()
-        .save_state(tutti_plugin_types::StateUse::Project);
+        .perform(tutti_fixtures::main_thread());
 }
 
 /// Waits (up to 10 s) for the probe's latency to read `want`: the
 /// `clap.latency` callback reaches the cell from the server's bridge thread.
-fn await_latency(s: &Session, node: NodeKey, want: Samples, why: &str) {
+fn await_latency(s: &Session, node: Key<AnyPlugin>, want: Samples, why: &str) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while {
         round_trip(s, node);
@@ -140,7 +138,7 @@ fn await_latency(s: &Session, node: NodeKey, want: Samples, why: &str) {
 
 /// Holds for 200 ms that the probe's latency reads `want`: what an
 /// announcement that did not happen looks like.
-fn stays_latency(s: &Session, node: NodeKey, want: Samples, why: &str) {
+fn stays_latency(s: &Session, node: Key<AnyPlugin>, want: Samples, why: &str) {
     let until = Instant::now() + Duration::from_millis(200);
     while Instant::now() < until {
         round_trip(s, node);
@@ -172,7 +170,7 @@ fn request() -> Bounce<NodeKey, BufferMaster> {
 
 /// The probe on the outputs, its render mode announced (Realtime) by an
 /// update: returns its node and its realtime latency.
-fn wired_probe(s: &mut Session) -> (NodeKey, Samples) {
+fn wired_probe(s: &mut Session) -> (Key<AnyPlugin>, Samples) {
     let node = add_probe(s);
     s.graph().connect(node, MainOutput).unwrap();
     let _ = s.update();
@@ -344,7 +342,7 @@ fn a_plugin_dead_for_the_window_stays_silent_at_its_node_and_is_reported_once() 
     }
     let died = plugins_at(&mut s, 60);
     assert_eq!(died.len(), 1, "one report: {died:?}");
-    assert_eq!(died[0].0, node);
+    assert_eq!(died[0].0, node.erase());
     assert!(
         matches!(
             died[0].1,
@@ -443,11 +441,11 @@ fn export_leftovers_drop_on_the_main_thread() {
 // --- Recovery ---------------------------------------------------------------
 
 /// The reference plugin's applied `Gain` parameter.
-fn gain_param(_s: &Session, _node: NodeKey) -> tutti_units::ParamId {
+fn gain_param(_s: &Session, _node: impl Into<NodeKey>) -> tutti_units::ParamId {
     tutti_units::ParamId::new(tutti_clap_test_plugin::params_state::GAIN_PARAM_ID)
 }
 
-fn param(s: &Session, node: NodeKey, id: tutti_units::ParamId) -> Option<f64> {
+fn param(s: &Session, node: impl Into<NodeKey>, id: tutti_units::ParamId) -> Option<f64> {
     s.plugin_view(node)
         .expect("hosted")
         .handle()
@@ -466,7 +464,7 @@ fn is_quarter(v: Option<f64>) -> bool {
 /// rendering: the number of blocks the plugin has processed does not depend on how long
 /// the echo takes, which a plugin that aborts on its Nth block relies on. A hang guard
 /// bounds the wait.
-fn take_value(s: &mut Session, node: NodeKey, id: tutti_units::ParamId) {
+fn take_value(s: &mut Session, node: impl Into<NodeKey> + Copy, id: tutti_units::ParamId) {
     let _ = renders_sound(s);
     let guard = Instant::now() + Duration::from_secs(30);
     while !is_quarter(param(s, node, id)) {
@@ -675,7 +673,7 @@ fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
     else {
         unreachable!()
     };
-    assert_eq!(*at, node, "the same node");
+    assert_eq!(*at, node.erase(), "the same node");
     assert!(
         matches!(state, tutti_session::StateRestore::Restored { .. }),
         "{state:?}"
@@ -800,7 +798,7 @@ fn a_plugin_that_crashes_every_time_is_given_up_on() {
     else {
         unreachable!()
     };
-    assert_eq!(*at, node);
+    assert_eq!(*at, node.erase());
     assert_eq!(why.failures, 3);
     assert!(
         matches!(
@@ -1116,7 +1114,7 @@ fn a_killed_server_reads_died_then_reloading() {
                 node: n,
                 change: PluginChange::Reloading { cause, attempt, .. },
                 ..
-            }) if n == node => Some((cause, attempt)),
+            }) if n == node.erase() => Some((cause, attempt)),
             _ => None,
         }) {
             break found;
@@ -1203,7 +1201,7 @@ fn a_plugin_that_stops_answering_is_declared_hung_with_recovery_off() {
     else {
         unreachable!()
     };
-    assert_eq!(*died, node);
+    assert_eq!(*died, node.erase());
     assert!(
         matches!(
             cause,
@@ -1389,7 +1387,7 @@ fn a_replacement_with_other_ports_is_refused_and_the_graph_stays_editable() {
 /// starts the cadence, the second, a virtual 2 s on, asks the plugin, and the phases after
 /// it land the task's end; a hang guard bounds the wait, and a plugin that died first ends it at
 /// once.
-fn snapshot_now(s: &mut Session, node: NodeKey) {
+fn snapshot_now(s: &mut Session, node: impl Into<NodeKey> + Copy) {
     let t0 = Instant::now();
     s.run_phase(Phase::Plugins, PhaseCx::at(t0), &mut Vec::new());
     let cx = PhaseCx::at(t0 + Duration::from_millis(2_000));
