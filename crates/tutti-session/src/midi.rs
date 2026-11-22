@@ -23,9 +23,9 @@ use std::sync::{Arc, Weak};
 use tutti_graph::{EventTapOptions, EventTapReader, NodeKey, Offset, TapEvent};
 use tutti_midi_protocol::MpeMode;
 use tutti_midi_runtime::{
-    ClipEvents, ClockMap, DeviceGeneration, GenerationWriter, MidiClipNode, MidiInputPorts,
-    MidiKeys, MpeTransformNode, Outgoing, OutputLatency, OutputPlan, OutputTerms, Placement,
-    RouteRule, SendAt, TimedMidiEvent, compile_routes,
+    ClipEvents, ClockMap, DeviceGeneration, GenerationWriter, MIDI_INPUT_PORTS, MidiClipNode,
+    MidiInputPorts, MidiKeys, MpeTransformNode, Outgoing, OutputLatency, OutputPlan, OutputTerms,
+    Placement, RouteRule, SendAt, TimedMidiEvent, compile_routes,
 };
 use tutti_music::MeterMap;
 use tutti_rt::Mint;
@@ -1192,8 +1192,12 @@ pub(crate) fn drain_events(
     losses.lost(tap.take_lost());
 }
 
-/// The graph's index of the input node's port `port`. An input node has at most
-/// `MidiGroup::COUNT * MIDI_INPUT_PORTS` ports, which fits the graph's `u16`.
+// An input node has at most `MidiGroup::COUNT * MIDI_INPUT_PORTS` ports, all
+// within the graph's `u16` port index.
+const _: () = assert!(MidiGroup::COUNT as usize * MIDI_INPUT_PORTS <= u16::MAX as usize + 1);
+
+/// The graph's index of the input node's port `port`; the bound above makes the
+/// conversion infallible.
 fn input_port(port: usize) -> u16 {
     u16::try_from(port).expect("an input node's port index fits u16")
 }
