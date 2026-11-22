@@ -8,8 +8,9 @@ use tutti_fixtures::block_on_within;
 use tutti_platform::{Executor, Instant};
 
 use tutti_midi_network::{
-    Admission, ByeReason, Client, Credentials, EndedBy, EndpointIdentity, Event, Host, HostConfig,
-    MAX_QUEUED_EVENTS, NetworkEndpoint, NetworkLink, SessionConfig, SessionState,
+    Admission, AuthMethods, ByeReason, Client, Command, Credentials, DatagramBuilder, EndedBy,
+    EndpointIdentity, Event, Host, HostConfig, Invitation, MAX_QUEUED_EVENTS, NetworkEndpoint,
+    NetworkLink, SessionConfig, SessionState, parse,
 };
 
 use crate::sim::{identity, note_on};
@@ -187,6 +188,74 @@ fn a_device_with_two_endpoints_runs_a_host_for_each_on_its_own_port_and_name() {
     assert_eq!(clients[1].with(|c, _| c.remote()), Some(synth));
     assert_eq!(hosts[0].with(|h, _| h.session_count()), 1);
     assert_eq!(hosts[1].with(|h, _| h.session_count()), 1);
+}
+
+/// A Host holds the one port it bound for as long as it lives: the address is
+/// the same before and after a Session, and no other socket can take it.
+/// Spec: m2-124/3.2#1
+#[test]
+fn a_host_holds_the_one_port_it_bound_for_its_whole_life() {
+    let executor = Executor::new();
+    let host = host(&executor, HostConfig::new(identity("Studio", "HOST-1")));
+    let address = host.local_addr().unwrap();
+    assert_ne!(address.port(), 0, "a dedicated, bound port");
+    let client = client(&executor, identity("Laptop", "CLIENT-1"), address);
+    established(&host);
+    established(&client);
+    client.with(|c, now| c.close(now, ByeReason::UserTerminated));
+    next_event(&host, |e| matches!(e, Event::Closed { .. }).then_some(()));
+    assert_eq!(host.local_addr().unwrap(), address);
+    let taken = std::net::UdpSocket::bind(address).unwrap_err();
+    assert_eq!(taken.kind(), std::io::ErrorKind::AddrInUse);
+}
+
+/// A Host sends from the port it listens on: the datagram a peer receives
+/// comes from the Host's own address.
+/// Spec: m2-124/3.2#2
+#[test]
+fn a_host_sends_from_the_port_it_listens_on() {
+    let executor = Executor::new();
+    let host = host(&executor, HostConfig::new(identity("Studio", "HOST-1")));
+    let peer = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    peer.set_read_timeout(Some(HANG_GUARD)).unwrap();
+    let mut invitation = DatagramBuilder::new();
+    invitation.push(&Command::Invitation(Invitation {
+        methods: AuthMethods::NONE,
+        identity: identity("Laptop", "CLIENT-1"),
+    }));
+    peer.send_to(&invitation.finish(), host.local_addr().unwrap())
+        .unwrap();
+    let mut reply = [0u8; 2048];
+    let (len, source) = peer.recv_from(&mut reply).unwrap();
+    assert_eq!(source, host.local_addr().unwrap());
+    let commands: Vec<_> = parse(&reply[..len]).unwrap().map(Result::unwrap).collect();
+    assert!(matches!(&commands[..], [Command::Accepted(_)]));
+}
+
+/// A Client's port is its own for the Session: a second Client of the same
+/// Host runs from a different port, and the first port cannot be bound again
+/// while its link lives.
+/// Spec: m2-124/2.2#2, m2-124/2.2#3, m2-124/3.3#6
+#[test]
+fn a_second_session_to_one_host_runs_from_a_different_client_port() {
+    let executor = Executor::new();
+    let host = host(&executor, HostConfig::new(identity("Studio", "HOST-1")));
+    let first = client(
+        &executor,
+        identity("Laptop", "CLIENT-1"),
+        host.local_addr().unwrap(),
+    );
+    let second = client(
+        &executor,
+        identity("Tablet", "CLIENT-2"),
+        host.local_addr().unwrap(),
+    );
+    established(&first);
+    established(&second);
+    assert_ne!(first.local_addr().unwrap(), second.local_addr().unwrap());
+    assert_eq!(host.with(|h, _| h.session_count()), 2);
+    let taken = std::net::UdpSocket::bind(first.local_addr().unwrap()).unwrap_err();
+    assert_eq!(taken.kind(), std::io::ErrorKind::AddrInUse);
 }
 
 /// A [`NetworkEndpoint`] whose `on_message` panics: its socket task ends.

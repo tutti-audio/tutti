@@ -702,3 +702,23 @@ fn a_command_stays_small() {
     let size = std::mem::size_of::<Command>();
     assert!(size <= 160, "{size}");
 }
+
+/// A string with no NUL ends where its Command ends: a Bye and a NAK whose text
+/// fills the longest payload to the last byte are read whole.
+/// Spec: m2-124/5.3#3
+#[test]
+fn a_string_that_fills_its_command_to_the_last_byte_is_read_whole() {
+    let mut bye = vec![0xF0, 255, 0x01, 0x00];
+    bye.extend_from_slice(&[b'x'; 1020]);
+    let Ok(Command::Bye(bye)) = one(&bye) else {
+        panic!("a Bye of 255 words")
+    };
+    assert_eq!(bye.text.as_str(), "x".repeat(1020));
+
+    let mut nak = vec![0x8F, 255, 0x00, 0x00, 0xF1, 0x00, 0x00, 0x00];
+    nak.extend_from_slice(&[b'y'; 1016]);
+    let Ok(Command::Nak(nak)) = one(&nak) else {
+        panic!("a NAK of 255 words")
+    };
+    assert_eq!(nak.text.as_str(), "y".repeat(1016));
+}

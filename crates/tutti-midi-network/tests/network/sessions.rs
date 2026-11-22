@@ -9,8 +9,8 @@ use tutti_midi_network::{
     Admission, AuthChallenge, AuthFailure, AuthMethods, AuthState, Bye, ByeReason, Client, Command,
     Credentials, DatagramBuilder, Digest, EndedBy, Event, Fec, Host, HostConfig, IdleInterval,
     Invitation, MAX_QUEUED_EVENTS, NakReason, NetworkEndpoint, Nonce, PingId, Requests, Retransmit,
-    RetransmitRequest, SendError, SequenceNumber, SessionConfig, SessionState, Timer, UmpData,
-    UserAuthChallenge, UserAuthState, Username,
+    RetransmitErrorReason, RetransmitRefusal, RetransmitRequest, SendError, SequenceNumber,
+    SessionConfig, SessionState, Timer, UmpData, UserAuthChallenge, UserAuthState, Username,
 };
 
 use crate::sim::{Direction, Fate, Sim, client_addr, fixed_nonce, host_addr, identity, note_on};
@@ -399,21 +399,38 @@ fn five_failed_digests_end_the_invitation_with_authentication_failed() {
     assert!(saw_bye);
 }
 
-/// Spec: m2-124/6.4#13
+/// A Host that needs a method the Invitation did not flag sends no challenge
+/// of any kind: its one reply is the Bye.
+/// Spec: m2-124/6.4#13, m2-124/6.7#2, m2-124/6.8#2
 #[test]
 fn a_client_with_no_matching_credentials_is_told_there_is_no_matching_method() {
-    let mut sim = Sim::new(
-        host_with(Admission::SharedSecret("5483".into())),
-        Credentials::none(),
-        SessionConfig::default(),
-    );
-    sim.connect();
-    assert!(sim.client_events.contains(&Event::Closed {
-        peer: host_addr(),
-        ended_by: EndedBy::Remote,
-        reason: ByeReason::NoMatchingAuthentication
-    }));
-    assert_eq!(sim.host.state(client_addr()), SessionState::Idle);
+    let users = || Admission::Users(vec![(Username::new("Rosa").unwrap(), "RPBqBno".into())]);
+    let cases = [
+        (Admission::SharedSecret("5483".into()), Credentials::none()),
+        (
+            Admission::SharedSecret("5483".into()),
+            Credentials::none().user(Username::new("Rosa").unwrap(), "RPBqBno"),
+        ),
+        (users(), Credentials::none()),
+        (users(), Credentials::none().secret("5483")),
+    ];
+    for (admission, credentials) in cases {
+        let mut sim = Sim::new(host_with(admission), credentials, SessionConfig::default());
+        sim.connect();
+        assert!(sim.client_events.contains(&Event::Closed {
+            peer: host_addr(),
+            ended_by: EndedBy::Remote,
+            reason: ByeReason::NoMatchingAuthentication
+        }));
+        assert_eq!(sim.host.state(client_addr()), SessionState::Idle);
+        assert_eq!(
+            sim.commands(Direction::HostToClient),
+            vec![Command::Bye(Box::new(Bye::new(
+                ByeReason::NoMatchingAuthentication
+            )))],
+            "no challenge before the Bye"
+        );
+    }
 }
 
 static NONCE_CALLS: AtomicU8 = AtomicU8::new(0);
@@ -805,7 +822,7 @@ fn a_missing_command_is_requested_after_the_wait_and_retransmitted_in_order() {
     );
 }
 
-/// Spec: m2-124/7.2.4#1
+/// Spec: m2-124/7.2.4#1, m2-124/7.2.4#2
 #[test]
 fn a_retransmit_request_the_sender_cannot_serve_reports_the_data_lost() {
     // Only the last command is kept; commands 1 and 2 are gone.
@@ -829,6 +846,12 @@ fn a_retransmit_request_the_sender_cannot_serve_reports_the_data_lost() {
                 Command::RetransmitError(e) if e.first == SequenceNumber::new(3)
             ))
     );
+    // Command 3 is still kept and was asked for, but the Error answers alone.
+    let sent_3 = data_commands(&sim, Direction::ClientToHost)
+        .iter()
+        .filter(|d| d.sequence() == SequenceNumber::new(3))
+        .count();
+    assert_eq!(sent_3, 1, "sent once, not resent behind the Error");
     let kinds: Vec<_> = sim
         .host_events
         .iter()
@@ -1366,7 +1389,7 @@ fn a_silent_peer_ends_the_session_with_a_timeout_bye_that_is_repeated() {
 
 // ---- Bye ----
 
-/// Spec: m2-124/6.16#3, m2-124/6.17#1
+/// Spec: m2-124/6.16#3, m2-124/6.17#1, m2-124/6.17#2
 #[test]
 fn a_bye_is_answered_once_and_both_ends_return_to_idle() {
     let mut sim = established();
@@ -1396,6 +1419,10 @@ fn a_bye_is_answered_once_and_both_ends_return_to_idle() {
             state: SessionState::Idle
         })
     );
+    // The Bye Reply stopped the repeats: nothing more is sent, ever.
+    sim.log.clear();
+    sim.advance(Duration::from_secs(60));
+    assert_eq!(sim.log, vec![]);
 }
 
 /// A datagram holding one Bye (reason User Terminated) whose message field is
@@ -1497,7 +1524,7 @@ fn data_outside_a_session_gets_a_bye_for_session_not_established() {
 
 // ---- Session reset ----
 
-/// Spec: m2-124/6.11#4, m2-124/6.11#8, m2-124/6.11#11, m2-124/6.12#1, m2-124/6.12#2
+/// Spec: m2-124/6.11#4, m2-124/6.11#8, m2-124/6.11#11, m2-124/6.11#12, m2-124/6.12#1, m2-124/6.12#2
 #[test]
 fn a_reset_zeroes_both_sequence_numbers_and_flushes_the_buffers() {
     let mut sim = established();
@@ -1515,6 +1542,24 @@ fn a_reset_zeroes_both_sequence_numbers_and_flushes_the_buffers() {
     assert!(sim.host_events.contains(&Event::Reset {
         peer: client_addr()
     }));
+    sim.log.clear();
+    sim.host_events.clear();
+    // The Retransmit buffers are empty: each end answers a request for the
+    // commands it sent before the reset with an Error and no data.
+    let request = datagram(&Command::RetransmitRequest(RetransmitRequest {
+        first: SequenceNumber::ZERO,
+        count: 0,
+    }));
+    sim.client.on_message(host_addr(), &request, sim.now);
+    sim.host.on_message(client_addr(), &request, sim.now);
+    sim.flush();
+    for dir in [Direction::ClientToHost, Direction::HostToClient] {
+        let sent = sim.commands(dir);
+        assert!(
+            matches!(&sent[..], [Command::RetransmitError(_)]),
+            "{dir:?}: {sent:?}"
+        );
+    }
     sim.log.clear();
     sim.host_events.clear();
     sim.client.send(sim.now, &[note_on(100)]).unwrap();
@@ -1736,4 +1781,113 @@ fn a_receiver_that_never_requests_gives_a_gap_up_without_asking() {
             .iter()
             .any(|c| matches!(c, Command::RetransmitRequest(_)))
     );
+}
+
+// ---- Commands outside the state they belong to ----
+
+/// Spec: m2-124/6.5#3, m2-124/6.6#3
+#[test]
+fn a_late_accepted_or_pending_is_ignored_by_an_established_client() {
+    let mut sim = established();
+    for reply in [
+        Command::Accepted(identity("Impostor", "HOST-2")),
+        Command::Pending(identity("Impostor", "HOST-2")),
+    ] {
+        sim.client
+            .on_message(host_addr(), &datagram(&reply), sim.now);
+        sim.flush();
+    }
+    assert_eq!(sim.log, vec![], "no reply to either");
+    assert!(sim.client_events.is_empty());
+    assert_eq!(sim.client.state(), SessionState::Established);
+    assert_eq!(sim.client.remote(), Some(identity("Studio", "HOST-1")));
+}
+
+/// Spec: m2-124/6.6#3
+#[test]
+fn a_pending_reply_to_a_client_with_no_invitation_gets_a_bye_for_no_pending_invitation() {
+    let mut sim = Sim::open();
+    let pending = datagram(&Command::Pending(identity("Studio", "HOST-1")));
+    sim.client.on_message(host_addr(), &pending, sim.now);
+    sim.flush();
+    assert_eq!(
+        sim.commands(Direction::ClientToHost),
+        vec![Command::Bye(Box::new(Bye::new(
+            ByeReason::NoPendingInvitation
+        )))]
+    );
+}
+
+/// A Host is not the one a Client's replies are meant for: each reply it
+/// receives is refused as not expected, quoting the header, and no Session is
+/// harmed.
+/// Spec: m2-124/6.6#4, m2-124/6.7#9, m2-124/6.8#7
+#[test]
+fn a_host_naks_a_pending_or_a_challenge_as_not_expected() {
+    let mut sim = established();
+    for command in [
+        Command::Pending(identity("Laptop", "CLIENT-1")),
+        auth_required(),
+        user_auth_required(),
+    ] {
+        sim.log.clear();
+        sim.host
+            .on_message(client_addr(), &datagram(&command), sim.now);
+        sim.flush();
+        let [Command::Nak(nak)] = &sim.commands(Direction::HostToClient)[..] else {
+            panic!("expected one NAK for {command:?}")
+        };
+        assert_eq!(nak.reason, NakReason::NotExpected);
+        assert_eq!(nak.refused, command.header());
+        assert_eq!(sim.host.state(client_addr()), SessionState::Established);
+    }
+}
+
+/// Spec: m2-124/6.17#3
+#[test]
+fn a_bye_reply_with_no_bye_sent_changes_nothing() {
+    let mut sim = established();
+    sim.client
+        .on_message(host_addr(), &datagram(&Command::ByeReply), sim.now);
+    sim.host
+        .on_message(client_addr(), &datagram(&Command::ByeReply), sim.now);
+    sim.flush();
+    assert_eq!(sim.log, vec![]);
+    assert!(sim.client_events.is_empty() && sim.host_events.is_empty());
+    assert_eq!(sim.client.state(), SessionState::Established);
+    assert_eq!(sim.host.state(client_addr()), SessionState::Established);
+}
+
+/// Spec: m2-124/6.12#4, m2-124/7.2.3#12, m2-124/7.2.4#4
+#[test]
+fn a_reset_reply_a_retransmit_request_or_error_outside_a_session_gets_a_bye() {
+    let commands = [
+        Command::SessionResetReply,
+        Command::RetransmitRequest(RetransmitRequest {
+            first: SequenceNumber::ZERO,
+            count: 1,
+        }),
+        Command::RetransmitError(RetransmitRefusal {
+            reason: RetransmitErrorReason::BufferMiss,
+            first: SequenceNumber::new(4),
+        }),
+    ];
+    for command in commands {
+        // To a Host that holds no session for the peer, and to a Client that
+        // has sent no Invitation.
+        let mut sim = Sim::open();
+        sim.host
+            .on_message(client_addr(), &datagram(&command), sim.now);
+        sim.client
+            .on_message(host_addr(), &datagram(&command), sim.now);
+        sim.flush();
+        // Each Bye reaches the other end, which answers it; the Byes are
+        // what the commands themselves drew.
+        let bye = Command::Bye(Box::new(Bye::new(ByeReason::SessionNotEstablished)));
+        for dir in [Direction::HostToClient, Direction::ClientToHost] {
+            let sent = sim.commands(dir);
+            assert_eq!(sent.first(), Some(&bye), "{dir:?} {command:?}");
+            assert!(!sent.iter().any(|c| matches!(c, Command::Nak(_))));
+        }
+    }
 }

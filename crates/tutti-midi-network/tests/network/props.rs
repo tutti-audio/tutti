@@ -146,6 +146,63 @@ fn command() -> impl Strategy<Value = Command> {
     ]
 }
 
+/// The padding of the string field of `len` bytes at `start`: the bytes that
+/// complete its last word, and where the next field begins. An empty string
+/// takes one word when the field is required and none when it is optional.
+fn padding(start: usize, len: usize, required: bool) -> (std::ops::Range<usize>, usize) {
+    let words = if required {
+        len.div_ceil(4).max(1)
+    } else {
+        len.div_ceil(4)
+    };
+    (start + len..start + words * 4, start + words * 4)
+}
+
+/// One reserved range.
+fn at(range: std::ops::Range<usize>) -> Vec<std::ops::Range<usize>> {
+    vec![range]
+}
+
+/// The padding of a name field and the Product Instance Id field after it.
+fn identity_padding(start: usize, identity: &EndpointIdentity) -> Vec<std::ops::Range<usize>> {
+    let (name, next) = padding(start, identity.name().as_bytes().len(), true);
+    let (id, _) = padding(next, identity.instance_id().as_str().len(), true);
+    vec![name, id]
+}
+
+/// The bytes of `command` as written that M2-124 Tables 8 to 34 leave reserved
+/// or unused, and so section 5.3 and 5.4 require to be zero. A Command
+/// Specific Data byte that carries a value is not listed.
+fn reserved_bytes(command: &Command) -> Vec<std::ops::Range<usize>> {
+    match command {
+        Command::Invitation(inv) => identity_padding(4, &inv.identity),
+        Command::InvitationWithAuth(_)
+        | Command::Ping(_)
+        | Command::PingReply(_)
+        | Command::SessionReset
+        | Command::SessionResetReply
+        | Command::ByeReply => at(2..4),
+        Command::InvitationWithUserAuth(auth) => {
+            let mut ranges = at(2..4);
+            ranges.push(padding(4 + 32, auth.username.as_str().len(), true).0);
+            ranges
+        }
+        Command::Accepted(identity) | Command::Pending(identity) => {
+            let mut ranges = at(3..4);
+            ranges.extend(identity_padding(4, identity));
+            ranges
+        }
+        Command::AuthRequired(c) => identity_padding(4 + 16, &c.identity),
+        Command::UserAuthRequired(c) => identity_padding(4 + 16, &c.identity),
+        // The payload word is the count and 16 reserved bits.
+        Command::RetransmitRequest(_) => at(6..8),
+        Command::RetransmitError(_) => vec![3..4, 6..8],
+        Command::Nak(nak) => vec![3..4, padding(8, nak.text.as_str().len(), false).0],
+        Command::Bye(bye) => vec![3..4, padding(4, bye.text.as_str().len(), false).0],
+        Command::UmpData(_) => vec![],
+    }
+}
+
 fn signed(bytes: &[u8]) -> Vec<u8> {
     let mut all = SIGNATURE.to_be_bytes().to_vec();
     all.extend_from_slice(bytes);
@@ -191,6 +248,25 @@ proptest! {
         // The same header over a payload of exactly its length.
         let exact = vec![0xA5; usize::from(header.payload_words()) * 4];
         let _ = Command::parse(header, &exact);
+    }
+
+    /// Every reserved or unused byte of a command written is zero, and so is
+    /// every reserved bit of an Invitation's Authentication Methods byte.
+    /// Spec: m2-124/5.3#5, m2-124/5.4#1
+    #[test]
+    fn every_reserved_field_and_unused_byte_of_a_written_command_is_zero(command in command()) {
+        let mut bytes = Vec::new();
+        command.write(&mut bytes);
+        for range in reserved_bytes(&command) {
+            prop_assert!(
+                bytes[range.clone()].iter().all(|&b| b == 0),
+                "{command:?} wrote {:?} in {range:?}",
+                &bytes[range.clone()]
+            );
+        }
+        if matches!(command, Command::Invitation(_)) {
+            prop_assert_eq!(bytes[3] & !0b11, 0, "reserved method bits");
+        }
     }
 
     /// A command written is the command read back, from its own datagram.
