@@ -16,7 +16,7 @@
 //! to Channels in another), so a Group has its own sixteen channel ports and
 //! its own channelless port, which carries that Group's System, SysEx and Flex
 //! messages. The node hears the first Group unless built to hear more
-//! ([`MidiInputNode::hearing`]), so a one-Group device has [`MIDI_INPUT_PORTS`]
+//! ([`MidiInputNode::hearing`]), so a one-Group device has seventeen
 //! ports. A message with no Group (Utility, UMP Stream: they address
 //! the Endpoint, not a Group) leaves the first Group's channelless port.
 //! **Routing is wiring**: a synth listening to channel 3 of a Group takes event
@@ -77,8 +77,8 @@ use tutti_units::Losses;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use tutti_graph::{
-    Cx, Event, EventDensity, EventKind, ForkCause, ForkSource, Forked, InEvents, IntoNode, Io,
-    Node, NodeParts, Offset, OutEvents, Prepare, RenderMode, Shape, Status,
+    Cx, Event, EventDensity, EventKind, EventOutputPort, ForkCause, ForkSource, Forked, InEvents,
+    IntoNode, Io, Node, NodeKey, NodeParts, Offset, OutEvents, Prepare, RenderMode, Shape, Status,
 };
 use tutti_midi_protocol::Midi2Translator;
 use tutti_midi_protocol::{MpeMode, MpeZones};
@@ -91,15 +91,12 @@ use super::order::{BLANK, in_offset_order, offset_of};
 use super::sensing::ActiveSensing;
 use crate::live::device_generation::DeviceGeneration;
 
-/// The port that carries a Group's events with no channel: after its sixteen
-/// channel ports. For the first Group (and a node that hears only it); Group
-/// `g`'s is [`MidiInputPorts::channelless`].
-pub const CHANNELLESS_PORT: u16 = MidiChannel::COUNT as u16;
+/// A Group's output ports on a [`MidiInputNode`]: its sixteen channels and its
+/// channelless port.
+const PORTS_PER_GROUP: u16 = MidiChannel::COUNT as u16 + 1;
 
-/// How many event outputs a [`MidiInputNode`] that hears one Group has: one
-/// per channel and [`CHANNELLESS_PORT`]. Each further Group adds as many
-/// ([`MidiInputPorts::count`]).
-pub const MIDI_INPUT_PORTS: u16 = CHANNELLESS_PORT + 1;
+/// Where a Group's channelless port sits among its ports: after the channels.
+const CHANNELLESS_SLOT: u16 = MidiChannel::COUNT as u16;
 
 /// The fewest events a [`MidiInputNode`] translates in one block, and each port's
 /// declared event capacity at the shortest blocks.
@@ -124,11 +121,14 @@ pub const MIDI_INPUT_DENSITY: EventDensity = EventDensity::per_kiloframe(128);
 /// Which output port of a [`MidiInputNode`] carries what: the layout of the
 /// Groups it hears.
 ///
-/// Group `g` owns the ports `g * 17 ..= g * 17 + 16`: channel `c`'s is
-/// `g * 17 + c`, and the seventeenth ([`channelless`](Self::channelless)) is
-/// the Group's messages that have no channel. The Groups a node hears are the
+/// Group `g` owns the node's event outputs `g * 17 ..= g * 17 + 16`: channel
+/// `c`'s is `g * 17 + c`, and the seventeenth ([`channelless`](Self::channelless))
+/// is the Group's messages that have no channel. The Groups a node hears are the
 /// first ones, `0` through the last it was built for, so the first Group's
-/// ports are the same whatever follows.
+/// ports are the same whatever follows. A caller names a port through
+/// [`channel`](Self::channel), [`channelless`](Self::channelless) or
+/// [`listening`](Self::listening), each an [`EventOutputPort`] of the node it is
+/// given; the node's own side reads [`output_of`](Self::output_of).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MidiInputPorts {
     /// How many Groups, from the first: 1 to 16.
@@ -137,7 +137,7 @@ pub struct MidiInputPorts {
 
 impl MidiInputPorts {
     /// The ports of a node that hears the first Group alone: the default, and
-    /// [`MIDI_INPUT_PORTS`] of them.
+    /// seventeen of them.
     pub const FIRST_GROUP: Self = Self::through(MidiGroup::FIRST);
 
     /// The ports of a node that hears every Group up to and including `last`.
@@ -154,7 +154,7 @@ impl MidiInputPorts {
         self.groups
     }
 
-    /// How many event outputs the node has.
+    /// How many event outputs the node has: seventeen for each Group it hears.
     #[must_use]
     pub const fn count(self) -> u16 {
         self.groups.get() as u16 * PORTS_PER_GROUP
@@ -166,52 +166,72 @@ impl MidiInputPorts {
         MidiGroup::masked(self.groups.get() - 1)
     }
 
-    /// The port of `group`'s events with no channel (System, SysEx, Flex).
-    /// `None` for a Group the node does not hear.
-    #[must_use]
-    pub const fn channelless(self, group: MidiGroup) -> Option<u16> {
+    /// The index of output `slot` of `group`. `None` for a Group the node does
+    /// not hear.
+    const fn index(self, group: MidiGroup, slot: u16) -> Option<u16> {
         if group.get() < self.groups.get() {
-            Some(group.get() as u16 * PORTS_PER_GROUP + CHANNELLESS_PORT)
+            Some(group.get() as u16 * PORTS_PER_GROUP + slot)
         } else {
             None
         }
     }
 
-    /// The port channel `channel` of `group` leaves from. `None` for a Group
-    /// the node does not hear.
-    #[must_use]
-    pub const fn channel(self, group: MidiGroup, channel: MidiChannel) -> Option<u16> {
-        if group.get() < self.groups.get() {
-            Some(group.get() as u16 * PORTS_PER_GROUP + channel.get() as u16)
-        } else {
-            None
-        }
-    }
-
-    /// The port an event leaves from: its channel's in its Group, a Group's
-    /// channelless port for a message that has a Group but no channel, and the
-    /// first Group's channelless port for one with no Group. `None` for an
-    /// event of a Group the node does not hear: it was addressed to a
-    /// Group nothing here listens to, so it is not delivered.
-    #[must_use]
-    pub fn port_of(self, event: &Ump) -> Option<u16> {
+    /// The index of the output an event leaves from: its channel's in its
+    /// Group, a Group's channelless output for a message that has a Group but
+    /// no channel, and the first Group's channelless output for one with no
+    /// Group. `None` for an event of a Group the node does not hear.
+    fn index_of(self, event: &Ump) -> Option<u16> {
         match (event.address(), event.group()) {
-            (Some(a), _) => self.channel(a.group, a.channel),
-            (None, Some(group)) => self.channelless(group),
-            (None, None) => self.channelless(MidiGroup::FIRST),
+            (Some(a), _) => self.index(a.group, u16::from(a.channel.get())),
+            (None, Some(group)) => self.index(group, CHANNELLESS_SLOT),
+            (None, None) => self.index(MidiGroup::FIRST, CHANNELLESS_SLOT),
         }
     }
 
-    /// The ports a listener takes edges from: the ports of `channel` in
-    /// `group`, and that Group's channelless port. `None` for `channel` is
+    /// The port of `group`'s events with no channel (System, SysEx, Flex) on
+    /// `node`. `None` for a Group the node does not hear.
+    #[must_use]
+    pub fn channelless(self, node: NodeKey, group: MidiGroup) -> Option<EventOutputPort> {
+        self.index(group, CHANNELLESS_SLOT)
+            .map(|port| EventOutputPort::new(node, port))
+    }
+
+    /// The port channel `channel` of `group` leaves from on `node`. `None` for
+    /// a Group the node does not hear.
+    #[must_use]
+    pub fn channel(
+        self,
+        node: NodeKey,
+        group: MidiGroup,
+        channel: MidiChannel,
+    ) -> Option<EventOutputPort> {
+        self.index(group, u16::from(channel.get()))
+            .map(|port| EventOutputPort::new(node, port))
+    }
+
+    /// The output of `shape` (a [`MidiInputNode`]'s, or a node that declares the
+    /// same outputs) an event leaves from: its channel's in its Group, a Group's
+    /// channelless output for a message that has a Group but no channel, and the
+    /// first Group's channelless output for one with no Group. `None` for an
+    /// event of a Group the node does not hear: it was addressed to a Group
+    /// nothing here listens to, so it is not delivered.
+    #[must_use]
+    pub fn output_of(self, shape: &Shape, event: &Ump) -> Option<OutEvents> {
+        self.index_of(event)
+            .and_then(|index| shape.event_output(index))
+    }
+
+    /// The ports of `node` a listener takes edges from: the ports of `channel`
+    /// in `group`, and that Group's channelless port. `None` for `channel` is
     /// every channel of the Group, and `None` for `group` is every Group the
     /// node hears (the first Group's channelless port then also carries
     /// what has no Group). A Group the node does not hear has no ports.
     pub fn listening(
         self,
+        node: NodeKey,
         group: Option<MidiGroup>,
         channel: Option<MidiChannel>,
-    ) -> impl Iterator<Item = u16> {
+    ) -> impl Iterator<Item = EventOutputPort> {
         let (from, to) = match group {
             Some(g) => (g.get(), g.get() + 1),
             None => (0, self.groups.get()),
@@ -220,9 +240,11 @@ impl MidiInputPorts {
             let base = u16::from(g) * PORTS_PER_GROUP;
             let (a, b) = match channel {
                 Some(c) => (u16::from(c.get()), u16::from(c.get()) + 1),
-                None => (0, CHANNELLESS_PORT),
+                None => (0, CHANNELLESS_SLOT),
             };
-            (base + a..base + b).chain(std::iter::once(base + CHANNELLESS_PORT))
+            (base + a..base + b)
+                .chain(std::iter::once(base + CHANNELLESS_SLOT))
+                .map(move |port| EventOutputPort::new(node, port))
         })
     }
 }
@@ -233,11 +255,8 @@ impl Default for MidiInputPorts {
     }
 }
 
-/// A Group's ports: its sixteen channels and its channelless port.
-const PORTS_PER_GROUP: u16 = MIDI_INPUT_PORTS;
-
 /// The MIDI input edge as a graph node: one event input, for one device, and
-/// [`MidiInputPorts::count`] event outputs ([`MIDI_INPUT_PORTS`] for the first
+/// [`MidiInputPorts::count`] event outputs (seventeen for the first
 /// Group alone). See the module docs.
 ///
 /// ```
@@ -291,8 +310,6 @@ pub struct MidiInputNode {
     /// The events a block translates and each port holds, from the block the
     /// node was prepared for.
     capacity: NonZeroU32,
-    /// Its event outputs, in port order.
-    outputs: Vec<OutEvents>,
 }
 
 /// The MPE Profile zones of each of a device's Groups.
@@ -461,9 +478,7 @@ impl MidiInputNode {
     pub fn new() -> Self {
         let cell = Publisher::new(Requests::new());
         let (dropped, dropped_reader) = counter();
-        let shape = Self::declared(MidiInputPorts::FIRST_GROUP, MIDI_INPUT_PORT_CAPACITY);
         Self {
-            outputs: shape.event_outputs().collect(),
             mpe_mode: None,
             mpe_request: cell.reader(),
             request_serial: Arc::default(),
@@ -499,14 +514,11 @@ impl MidiInputNode {
 
     /// Hear the Groups of `ports` (the first Group alone by default): each
     /// has its own channel ports and channelless port, and an event of a Group
-    /// past them is not delivered ([`MidiInputPorts::port_of`]). The node's
+    /// past them is not delivered ([`MidiInputPorts::output_of`]). The node's
     /// event outputs are [`MidiInputPorts::count`].
     #[must_use]
     pub fn hearing(mut self, ports: MidiInputPorts) -> Self {
         self.ports = ports;
-        self.outputs = Self::declared(ports, self.capacity)
-            .event_outputs()
-            .collect();
         self
     }
 
@@ -607,7 +619,7 @@ impl MidiInputControls {
 
 impl<F: Float> Node<F> for MidiInputNode {
     /// No audio; one event input per attached input, [`MidiInputPorts::count`]
-    /// event outputs ([`MIDI_INPUT_PORTS`] for the first Group alone) of the
+    /// event outputs (seventeen for the first Group alone) of the
     /// prepared capacity ([`MIDI_INPUT_EVENT_CAPACITY`] at least, and
     /// [`MIDI_INPUT_DENSITY`] per frame of a long block).
     fn shape(&self) -> Shape {
@@ -734,14 +746,15 @@ impl<F: Float> Node<F> for MidiInputNode {
         }
         let events = &mut self.out[..kept];
         in_offset_order(events);
+        let shape = Self::declared(self.ports, self.capacity);
         for ev in events.iter() {
             // A Group the node does not hear has no port.
-            let Some(port) = self.ports.port_of(&ev.1) else {
+            let Some(port) = self.ports.output_of(&shape, &ev.1) else {
                 continue;
             };
             // Refused past the capacity: counted by the executor.
             let _ = io
-                .event_out(self.outputs[usize::from(port)])
+                .event_out(port)
                 .push(Event::midi(offset_of(ev, block_len), ev.1));
         }
         if let (Some(cell), Some(handled)) = (&self.generation, handled_generation) {
