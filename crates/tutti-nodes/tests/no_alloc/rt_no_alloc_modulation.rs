@@ -450,7 +450,7 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
                 node: p,
                 param: UnitParam::Cutoff.into(),
             },
-            EventOutputPort { node: l, port: 0 },
+            EventOutputPort::new(l, 0),
         );
         outputs.push(PortSource::Node(OutputPort::new(p, 0)));
     }
@@ -767,7 +767,7 @@ fn lanes_200(
         let key = NodeKey(2000 + k as u64);
         controls.push(ed.insert(key, "lane", lane).controls);
         ed.spec_mut()
-            .connect_param(at(k), EventOutputPort { node: key, port: 0 });
+            .connect_param(at(k), EventOutputPort::new(key, 0));
     }
     ed.commit().expect("commits");
     (ed, exec, controls)
@@ -1090,8 +1090,8 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
                 ForkByClone(NoteEnvelopeNode::from(NoteEnvelopeConfig::new(id, adsr))),
             );
             ed.spec_mut().connect_events(
-                EventInputPort { node, port: 0 },
-                EventEdge::Direct(EventOutputPort { node: src, port: 0 }),
+                EventInputPort::new(node, 0),
+                EventEdge::Direct(EventOutputPort::new(src, 0)),
             );
         }
         let input = InputLayer {
@@ -1117,19 +1117,11 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
         let lane_key = NodeKey(6000 + k as u64);
         ed.insert(lane_key, "lane", lane);
         ed.spec_mut().connect_events(
-            EventInputPort {
-                node: lane_key,
-                port: 0,
-            },
-            EventEdge::Direct(EventOutputPort { node, port: 0 }),
+            EventInputPort::new(lane_key, 0),
+            EventEdge::Direct(EventOutputPort::new(node, 0)),
         );
-        ed.spec_mut().connect_param(
-            cutoff(k),
-            EventOutputPort {
-                node: lane_key,
-                port: 0,
-            },
-        );
+        ed.spec_mut()
+            .connect_param(cutoff(k), EventOutputPort::new(lane_key, 0));
     }
     ed.commit().expect("commits");
     (ed, exec)

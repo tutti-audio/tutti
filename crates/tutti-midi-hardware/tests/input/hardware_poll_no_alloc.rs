@@ -68,20 +68,14 @@ impl Rig {
             let key = NodeKey(100 + input as u64);
             editor.insert(key, "inlet", node);
             editor.spec_mut().connect_events(
-                EventInputPort {
-                    node: input_node,
-                    port: 0,
-                },
-                EventEdge::Direct(EventOutputPort { node: key, port: 0 }),
+                EventInputPort::new(input_node, 0),
+                EventEdge::Direct(EventOutputPort::new(key, 0)),
             );
         }
         let out = editor
             .open_event_tap(
                 EventTapId::of(1),
-                EventOutputPort {
-                    node: INPUT,
-                    port: 0,
-                },
+                EventOutputPort::new(INPUT, 0),
                 EventTapOptions::new(tutti_graph::EventCapacity::of(1024)).align(TapAlign::Raw),
             )
             .expect("the input node is in the graph");

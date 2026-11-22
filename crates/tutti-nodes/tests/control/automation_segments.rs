@@ -88,10 +88,7 @@ fn graph(lane: ControlLaneNode) -> (Editor, Executor) {
             node: NodeKey(2),
             param: UnitParam::Cutoff.into(),
         },
-        EventOutputPort {
-            node: NodeKey(1),
-            port: 0,
-        },
+        EventOutputPort::new(NodeKey(1), 0),
     );
     ed.commit().expect("commits");
     (ed, exec)

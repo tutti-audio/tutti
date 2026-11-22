@@ -1140,17 +1140,11 @@ impl Node for Src {
 }
 
 fn ev_out(n: u64) -> EventOutputPort {
-    EventOutputPort {
-        node: key(n),
-        port: 0,
-    }
+    EventOutputPort::new(key(n), 0)
 }
 
 fn ev_in(n: u64) -> EventInputPort {
-    EventInputPort {
-        node: key(n),
-        port: 0,
-    }
+    EventInputPort::new(key(n), 0)
 }
 
 /// **A held note on a bypassed node's event input is closed**: the executor

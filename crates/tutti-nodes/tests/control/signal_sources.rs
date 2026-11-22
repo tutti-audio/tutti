@@ -312,14 +312,8 @@ fn wire_audio(ed: &mut Editor, from: u64, to: u64, ports: u16) {
 
 fn wire_events(ed: &mut Editor, from: u64, to: u64) {
     ed.spec_mut().connect_events(
-        EventInputPort {
-            node: NodeKey(to),
-            port: 0,
-        },
-        EventEdge::Direct(EventOutputPort {
-            node: NodeKey(from),
-            port: 0,
-        }),
+        EventInputPort::new(NodeKey(to), 0),
+        EventEdge::Direct(EventOutputPort::new(NodeKey(from), 0)),
     );
 }
 
@@ -377,13 +371,8 @@ fn lane_to_probe(
             .range(ed.param_range_cell(cutoff(probe)).expect("committed")),
     );
     ed.insert(NodeKey(lane), "lane", node);
-    ed.spec_mut().connect_param(
-        cutoff(probe),
-        EventOutputPort {
-            node: NodeKey(lane),
-            port: 0,
-        },
-    );
+    ed.spec_mut()
+        .connect_param(cutoff(probe), EventOutputPort::new(NodeKey(lane), 0));
     wire_events(ed, from, lane);
 }
 

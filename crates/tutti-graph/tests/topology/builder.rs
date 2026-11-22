@@ -327,14 +327,8 @@ fn builder_builds_what_a_hand_written_spec_builds() {
         PortSource::Node(from(3, 0)),
     ]);
     spec.connect_events(
-        EventInputPort {
-            node: NodeKey(3),
-            port: 0,
-        },
-        EventEdge::Direct(EventOutputPort {
-            node: NodeKey(2),
-            port: 0,
-        }),
+        EventInputPort::new(NodeKey(3), 0),
+        EventEdge::Direct(EventOutputPort::new(NodeKey(2), 0)),
     );
     ed.commit().expect("commits");
     let mut by_hand = Renderer::new(ed, exec);

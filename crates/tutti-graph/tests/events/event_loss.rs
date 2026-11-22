@@ -132,14 +132,8 @@ fn rig(
         );
         for p in 0..scripts.len() {
             ed.spec_mut().connect_events(
-                EventInputPort {
-                    node: NodeKey(100),
-                    port: next,
-                },
-                EventEdge::Direct(EventOutputPort {
-                    node: key,
-                    port: p as u16,
-                }),
+                EventInputPort::new(NodeKey(100), next),
+                EventEdge::Direct(EventOutputPort::new(key, p as u16)),
             );
             next += 1;
         }
@@ -331,17 +325,13 @@ impl Bounded {
             }),
         );
         let input = self.input();
-        self.ed.spec_mut().connect_events(
-            input,
-            EventEdge::Direct(EventOutputPort { node: key, port: 0 }),
-        );
+        self.ed
+            .spec_mut()
+            .connect_events(input, EventEdge::Direct(EventOutputPort::new(key, 0)));
     }
 
     fn input(&self) -> EventInputPort {
-        EventInputPort {
-            node: NodeKey(100),
-            port: 0,
-        }
+        EventInputPort::new(NodeKey(100), 0)
     }
 
     fn commit(&mut self) {
@@ -534,10 +524,7 @@ fn a_declared_input_bound_covers_flushed_events_and_scheduled_commands() {
             exec.set_pool(Some(test_pool(workers)));
         }
         let blocks = tutti_fixtures::BlockLog::shared();
-        let input = EventInputPort {
-            node: NodeKey(100),
-            port: 0,
-        };
+        let input = EventInputPort::new(NodeKey(100), 0);
         ed.insert(
             NodeKey(100),
             "recorder",
@@ -566,10 +553,7 @@ fn a_declared_input_bound_covers_flushed_events_and_scheduled_commands() {
         for node in [1, 2] {
             ed.spec_mut().connect_events(
                 input,
-                EventEdge::Direct(EventOutputPort {
-                    node: NodeKey(node),
-                    port: 0,
-                }),
+                EventEdge::Direct(EventOutputPort::new(NodeKey(node), 0)),
             );
         }
         ed.commit().expect("commits");
@@ -637,14 +621,8 @@ fn a_lone_writer_within_the_bound_gets_no_merge() {
             }),
         );
         ed.spec_mut().connect_events(
-            EventInputPort {
-                node: NodeKey(100),
-                port: 0,
-            },
-            EventEdge::Direct(EventOutputPort {
-                node: NodeKey(1),
-                port: 0,
-            }),
+            EventInputPort::new(NodeKey(100), 0),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
         );
         ed.commit().expect("commits");
         exec.apply_pending();
@@ -775,14 +753,8 @@ fn a_bypassed_node_is_sent_at_most_its_bound_of_closes_a_block() {
             }),
         );
         ed.spec_mut().connect_events(
-            EventInputPort {
-                node: NodeKey(100),
-                port: 0,
-            },
-            EventEdge::Direct(EventOutputPort {
-                node: NodeKey(1),
-                port: 0,
-            }),
+            EventInputPort::new(NodeKey(100), 0),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
         );
         ed.commit().expect("commits");
         exec.apply_pending();
@@ -900,10 +872,7 @@ fn a_cut_keeps_late_note_offs_and_delivers_in_frame_order() {
             exec.set_pool(Some(test_pool(workers)));
         }
         let blocks = tutti_fixtures::BlockLog::shared();
-        let input = EventInputPort {
-            node: NodeKey(100),
-            port: 0,
-        };
+        let input = EventInputPort::new(NodeKey(100), 0);
         ed.insert(
             NodeKey(100),
             "trace",
@@ -918,10 +887,7 @@ fn a_cut_keeps_late_note_offs_and_delivers_in_frame_order() {
         );
         ed.spec_mut().connect_events(
             input,
-            EventEdge::Direct(EventOutputPort {
-                node: NodeKey(1),
-                port: 0,
-            }),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
         );
         ed.commit().expect("commits");
         exec.apply_pending();

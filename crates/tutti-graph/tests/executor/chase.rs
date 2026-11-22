@@ -270,14 +270,8 @@ fn the_chase_comes_ahead_of_edge_events_at_offset_zero() {
     );
     ed.insert(NodeKey(2), "edge", Unforkable(Edge0(edge, Arc::clone(&on))));
     ed.spec_mut().connect_events(
-        EventInputPort {
-            node: NodeKey(1),
-            port: 0,
-        },
-        EventEdge::Direct(EventOutputPort {
-            node: NodeKey(2),
-            port: 0,
-        }),
+        EventInputPort::new(NodeKey(1), 0),
+        EventEdge::Direct(EventOutputPort::new(NodeKey(2), 0)),
     );
     ed.spec_mut()
         .topology

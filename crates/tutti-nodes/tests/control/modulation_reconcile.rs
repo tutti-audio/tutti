@@ -715,7 +715,7 @@ fn a_removed_source_leaves_no_node_and_no_layer() {
         spec.events
             .values()
             .flatten()
-            .all(|e| e.from().node != node),
+            .all(|e| e.from().node() != node),
         "its edges are gone"
     );
     let (_, lane) = r.m.lane(cutoff_of(2)).expect("a lane");
@@ -769,13 +769,8 @@ fn resync_rig() -> (Rig, SourceKey) {
     decl.target(cutoff_of(1), 0.0, 1.0);
     decl.target(cutoff_of(2), 0.0, 1.0);
     let env = decl.source(1, envelope());
-    host.feeds.insert(
-        env,
-        Feed::Events(EventOutputPort {
-            node: key(10),
-            port: 0,
-        }),
-    );
+    host.feeds
+        .insert(env, Feed::Events(EventOutputPort::new(key(10), 0)));
     decl.route(1, env, cutoff_of(1), 0.5);
     let zero = decl.source(2, ModSource::Macro { value: 0.0 });
     let lfo = decl.route(2, zero, cutoff_of(2), 0.5);
@@ -882,7 +877,7 @@ fn a_follower_takes_no_resync() {
     let mut r = rig(128);
     assert_eq!(r.m.resyncs_owed(), 0, "the rig's follower owes none");
     let node = r.m.source(SourceKey(2)).expect("a follower");
-    let to = EventInputPort { node, port: 0 };
+    let to = EventInputPort::new(node, 0);
     assert_eq!(
         r.ed.schedule(At::NextBlock, to, EventKind::Resync),
         Err(ScheduleError::NoSuchPort { to })
@@ -1080,10 +1075,7 @@ fn a_port_with_another_event_source_is_refused() {
             node: key(3),
             param: UnitParam::Cutoff.into(),
         },
-        EventOutputPort {
-            node: key(30),
-            port: 0,
-        },
+        EventOutputPort::new(key(30), 0),
     );
     r.ed.commit().expect("commits");
     render(&mut r.ed, &mut r.exec, 128, 128);
@@ -1284,15 +1276,9 @@ fn a_taken_lanes_unwiring_keeps_the_hosts_edges() {
 
     let lane = m.lane(param).expect("a lane").0;
     ed.insert(lane, "clip", ForkByClone(Held { on: 10 }));
-    let to = EventInputPort {
-        node: key(50),
-        port: 0,
-    };
+    let to = EventInputPort::new(key(50), 0);
     let feedback = EventEdge::Feedback {
-        from: EventOutputPort {
-            node: lane,
-            port: 0,
-        },
+        from: EventOutputPort::new(lane, 0),
         delay: Samples::new(128),
     };
     ed.spec_mut().connect_events(to, feedback);
@@ -1303,10 +1289,7 @@ fn a_taken_lanes_unwiring_keeps_the_hosts_edges() {
         "the host's edge stays: {edges:?}"
     );
     assert!(
-        !edges.contains(&EventEdge::Direct(EventOutputPort {
-            node: lane,
-            port: 0
-        })),
+        !edges.contains(&EventEdge::Direct(EventOutputPort::new(lane, 0))),
         "the lane's edge goes: {edges:?}"
     );
 }
@@ -1620,7 +1603,7 @@ fn a_rebind_after_a_steady_state_moves_the_lane() {
     };
     let lane = r.m.lane(cutoff_of(1)).expect("a lane").0;
     assert_eq!(
-        r.ed.spec().params[&at].source.map(|s| s.node),
+        r.ed.spec().params[&at].source.map(|s| s.node()),
         Some(lane),
         "the lane drives the new node's port"
     );
@@ -1743,12 +1726,10 @@ fn foreign_rig() -> (Editor, Host, Decl, Modulation, TargetKey) {
 
 /// Whether `lane` drives `to`.
 fn drives(ed: &Editor, lane: NodeKey, to: EventInputPort) -> bool {
-    ed.spec().events.get(&to).is_some_and(|edges| {
-        edges.contains(&EventEdge::Direct(EventOutputPort {
-            node: lane,
-            port: 0,
-        }))
-    })
+    ed.spec()
+        .events
+        .get(&to)
+        .is_some_and(|edges| edges.contains(&EventEdge::Direct(EventOutputPort::new(lane, 0))))
 }
 
 /// A foreign target the host resolves to another node, with nothing in the
@@ -1760,22 +1741,8 @@ fn a_foreign_target_on_another_node_after_a_steady_state_moves_the_lane() {
     let applied = m.apply(&decl.get(), &mut ed, &host).expect("applies");
     assert!(applied.commit, "the lane is rewired");
     let lane = m.lane(param).expect("a lane").0;
-    assert!(drives(
-        &ed,
-        lane,
-        EventInputPort {
-            node: key(51),
-            port: 0
-        }
-    ));
-    assert!(!drives(
-        &ed,
-        lane,
-        EventInputPort {
-            node: key(50),
-            port: 0
-        }
-    ));
+    assert!(drives(&ed, lane, EventInputPort::new(key(51), 0)));
+    assert!(!drives(&ed, lane, EventInputPort::new(key(50), 0)));
 }
 
 /// A foreign target the host resolves to another event input of the same
@@ -1797,22 +1764,8 @@ fn a_foreign_target_on_another_port_after_a_steady_state_moves_the_lane() {
     let applied = m.apply(&decl.get(), &mut ed, &host).expect("applies");
     assert!(applied.commit, "the lane is rewired");
     let lane = m.lane(param).expect("a lane").0;
-    assert!(drives(
-        &ed,
-        lane,
-        EventInputPort {
-            node: key(51),
-            port: 1
-        }
-    ));
-    assert!(!drives(
-        &ed,
-        lane,
-        EventInputPort {
-            node: key(51),
-            port: 0
-        }
-    ));
+    assert!(drives(&ed, lane, EventInputPort::new(key(51), 1)));
+    assert!(!drives(&ed, lane, EventInputPort::new(key(51), 0)));
 }
 
 /// A native target resolved with no knob cell, to another node, moves its
@@ -1834,7 +1787,7 @@ fn a_native_target_on_another_node_without_a_knob_moves_the_lane() {
     };
     let lane = r.m.lane(cutoff_of(1)).expect("a lane").0;
     assert_eq!(
-        r.ed.spec().params[&at].source.map(|s| s.node),
+        r.ed.spec().params[&at].source.map(|s| s.node()),
         Some(lane),
         "the lane drives the new node's port"
     );

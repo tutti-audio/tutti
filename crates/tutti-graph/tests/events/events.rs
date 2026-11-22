@@ -175,14 +175,8 @@ fn spec_of(ph: &Phase, emitters: &[(u32, u64)]) -> (GraphSpec, Shapes) {
     let mut g = GraphSpec::new(t);
     for (p, srcs) in ph.edges.iter().enumerate() {
         for &(e, fb) in srcs {
-            let from = EventOutputPort {
-                node: NodeKey(e as u64),
-                port: 0,
-            };
-            let at = EventInputPort {
-                node: REC,
-                port: p as u16,
-            };
+            let from = EventOutputPort::new(NodeKey(e as u64), 0);
+            let at = EventInputPort::new(REC, p as u16);
             g.connect_events(
                 at,
                 if fb {
@@ -305,7 +299,7 @@ fn run_scheduled(
             let tag = SCHEDULED + landings.len() as u32;
             let target = now.saturating_add_signed(rel);
             let kind = EventKind::Midi(Ump([tag, target as u32, (target >> 32) as u32, 0]));
-            let at = EventInputPort { node: REC, port };
+            let at = EventInputPort::new(REC, port);
             let when = At::Frame(Frame::new(target));
             if executor {
                 ed.schedule(when, at, kind)
@@ -520,15 +514,10 @@ fn wide_event_fan_in_is_a_merge_tree_in_source_order() {
         // `connect_events`, which keeps source order), so a merge that fell
         // back to the listed order would be caught.
         g.events.insert(
-            EventInputPort { node: REC, port: 0 },
+            EventInputPort::new(REC, 0),
             (0..width)
                 .rev()
-                .map(|i| {
-                    EventEdge::Direct(EventOutputPort {
-                        node: NodeKey(i as u64),
-                        port: 0,
-                    })
-                })
+                .map(|i| EventEdge::Direct(EventOutputPort::new(NodeKey(i as u64), 0)))
                 .collect(),
         );
         let valid = g.validate().unwrap();
@@ -687,14 +676,8 @@ fn feedback_delays_by_its_declared_delay_at_any_max_block() {
             t.set_outputs(vec![PortSource::Node(OutputPort::new(tap, 0))]);
             let mut g = GraphSpec::new(t);
             g.connect_events(
-                EventInputPort { node: tap, port: 0 },
-                EventEdge::feedback(
-                    EventOutputPort {
-                        node: clock,
-                        port: 0,
-                    },
-                    Samples::new(DELAY),
-                ),
+                EventInputPort::new(tap, 0),
+                EventEdge::feedback(EventOutputPort::new(clock, 0), Samples::new(DELAY)),
             );
             let valid = g.validate().unwrap();
             let shapes: Shapes = [(clock, cs), (tap, ts)].into();
@@ -805,11 +788,8 @@ fn wide_fan_in_matches_the_reference() {
     let mut g = GraphSpec::new(t);
     for i in (0..width).rev() {
         g.connect_events(
-            EventInputPort { node: REC, port: 0 },
-            EventEdge::Direct(EventOutputPort {
-                node: NodeKey(i as u64),
-                port: 0,
-            }),
+            EventInputPort::new(REC, 0),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(i as u64), 0)),
         );
     }
     let valid = g.validate().unwrap();

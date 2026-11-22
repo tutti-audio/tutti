@@ -471,14 +471,8 @@ fn a_clip_into_a_synth_is_allocation_free() {
         ),
     );
     ed.spec_mut().connect_events(
-        EventInputPort {
-            node: NodeKey(2),
-            port: 0,
-        },
-        EventEdge::Direct(EventOutputPort {
-            node: NodeKey(1),
-            port: 0,
-        }),
+        EventInputPort::new(NodeKey(2), 0),
+        EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
     );
     ed.spec_mut().topology.set_outputs(
         (0..2).map(|port| {

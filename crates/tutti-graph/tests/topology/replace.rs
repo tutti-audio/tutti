@@ -491,16 +491,10 @@ fn events_go_to_the_incoming_unit_only() {
         })),
     );
     ed.insert(NODE, "count", Unforkable(EventCount(Arc::clone(&old))));
-    let to = EventInputPort {
-        node: NODE,
-        port: 0,
-    };
+    let to = EventInputPort::new(NODE, 0);
     ed.spec_mut().connect_events(
         to,
-        tutti_graph::EventEdge::Direct(tutti_graph::EventOutputPort {
-            node: emitter,
-            port: 0,
-        }),
+        tutti_graph::EventEdge::Direct(tutti_graph::EventOutputPort::new(emitter, 0)),
     );
     ed.spec_mut()
         .topology
