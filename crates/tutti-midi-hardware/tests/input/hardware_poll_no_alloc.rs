@@ -32,7 +32,7 @@ use tutti_graph::{
 };
 use tutti_midi_hardware::{HardwareMidiInputs, InputProducerHandle};
 use tutti_midi_runtime::{InputInlets, InputWriters, MidiInputNode};
-use tutti_ump::{Message, MidiChannel, Ump, Utility};
+use tutti_ump::{JrTicks, Message, MidiChannel, Ump, Utility};
 use tutti_units::{Frame, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
@@ -288,24 +288,27 @@ fn hardware_input_timed_by_jr_is_allocation_free() {
         for round in 0..100u64 {
             // The block's arrivals, a timestamp before any clock first.
             let at = rig.time_of(rig.frames + 100);
-            let _ = port.push(jr(Utility::JrTimestamp(40)), at);
+            let _ = port.push(jr(Utility::JrTimestamp(JrTicks::new(40))), at);
             let _ = port.push(note(), at);
             for k in 0..8u16 {
                 let at = rig.time_of(rig.frames + 100 + u64::from(k));
-                let _ = port.push(jr(Utility::JrClock(k * 3_125)), at);
-                let _ = port.push(jr(Utility::JrTimestamp(k * 3_125 + 20)), at);
+                let _ = port.push(jr(Utility::JrClock(JrTicks::new(k * 3_125))), at);
+                let _ = port.push(jr(Utility::JrTimestamp(JrTicks::new(k * 3_125 + 20))), at);
                 let _ = port.push(note(), at);
             }
             // Late (a repeat) and restarted (a jump).
             let at = rig.time_of(rig.frames + 100);
-            let _ = port.push(jr(Utility::JrClock(7 * 3_125)), at);
-            let _ = port.push(jr(Utility::JrClock(30_000 + round as u16)), at);
-            let _ = port.push(jr(Utility::JrTimestamp(0)), at);
+            let _ = port.push(jr(Utility::JrClock(JrTicks::new(7 * 3_125))), at);
+            let _ = port.push(
+                jr(Utility::JrClock(JrTicks::new(30_000 + round as u16))),
+                at,
+            );
+            let _ = port.push(jr(Utility::JrTimestamp(JrTicks::new(0))), at);
             let _ = port.push(note(), at);
             if round % 10 == 0 {
                 // A timestamp two seconds after the last clock: it is lost.
                 let later = at + Duration::from_secs(2);
-                let _ = port.push(jr(Utility::JrTimestamp(9)), later);
+                let _ = port.push(jr(Utility::JrTimestamp(JrTicks::new(9))), later);
                 let _ = port.push(note(), later);
             }
             rig.run(512);

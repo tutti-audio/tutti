@@ -32,7 +32,8 @@ pub struct OsFunctionBlock {
     pub first_group: u8,
     /// How many Groups it spans.
     pub groups_spanned: u8,
-    /// The MIDI-CI message version, `0` for none.
+    /// The MIDI-CI message version: `0` for none, a number above `0x1F` is
+    /// reserved.
     pub midi_ci_version: u8,
     /// The simultaneous SysEx 8 streams.
     pub max_sysex8_streams: Sysex8StreamCount,

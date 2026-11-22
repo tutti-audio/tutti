@@ -154,7 +154,7 @@ fn function_block_fields() {
             midi1,
             first_group: FirstGroup::new(0).unwrap().into(),
             groups_spanned: GroupSpan::new(1).unwrap().into(),
-            midi_ci_version: 0,
+            midi_ci_version: None,
             max_sysex8_streams: Sysex8StreamCount::new(0),
         }))
     };

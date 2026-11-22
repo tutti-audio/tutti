@@ -1,56 +1,11 @@
 //! The Flex Data values the transport follows, as the project's unit types:
-//! Set Tempo (M2-104 section 7.5.3) as a [`Bpm`] and Set Time Signature
-//! (section 7.5.4) as a [`tutti_music::TimeSignature`]; [`flex_metronome`] is the
+//! Set Time Signature (M2-104 section 7.5.4) as a [`tutti_music::TimeSignature`]; [`flex_metronome`] is the
 //! Set Metronome (section 7.5.5) of a click on every beat of a meter. [`tutti_ump::Flex`]
 //! holds the wire's integers; this is the one reading of them as units.
 
 use core::num::NonZeroU8;
 use tutti_music::{BeatsPerBar, NoteValue};
 use tutti_ump::{BarAccents, FlexTimeSignature, Metronome, System};
-use tutti_units::{Bpm, Seconds};
-
-/// 10-nanosecond units in one second: the Set Tempo field counts them per
-/// quarter note (M2-104 section 7.5.3).
-const TEN_NS_UNITS_PER_SECOND: f64 = 100_000_000.0;
-
-/// The tempo a Set Tempo field declares: the field is 10 ns units per quarter
-/// note (section 7.5.3), so a beat lasts `field / 1e8` seconds. `None` for `0`,
-/// no valid tempo. The slowest the field holds is 1.39698 bpm.
-///
-/// ```
-/// use tutti_midi_protocol::flex_tempo;
-/// use tutti_units::Bpm;
-///
-/// // 0.5 s per quarter note is 120 bpm.
-/// assert_eq!(flex_tempo(50_000_000), Bpm::new(120.0));
-/// assert_eq!(flex_tempo(0), None);
-/// ```
-#[must_use]
-pub fn flex_tempo(field: u32) -> Option<Bpm> {
-    (field != 0)
-        .then(|| Bpm::from_beat_period(Seconds::new(f64::from(field) / TEN_NS_UNITS_PER_SECOND)))
-        .flatten()
-}
-
-/// The Set Tempo field that declares `bpm`: 10 ns units per quarter note,
-/// the beat period in 10 ns units, rounded to the nearest unit, the inverse of [`flex_tempo`]. A
-/// tempo too slow for the 32-bit field (under 1.39698 bpm) is the slowest the
-/// field holds, and one too fast for a unit (over 6e9 bpm) is one unit.
-///
-/// ```
-/// use tutti_midi_protocol::{flex_tempo, flex_tempo_field};
-/// use tutti_units::Bpm;
-///
-/// let bpm = Bpm::new(120.0).unwrap();
-/// assert_eq!(flex_tempo_field(bpm), 50_000_000);
-/// assert_eq!(flex_tempo(flex_tempo_field(bpm)), Some(bpm));
-/// ```
-#[must_use]
-pub fn flex_tempo_field(bpm: Bpm) -> u32 {
-    // `as` saturates the float into the field; `max(1)` keeps a field that
-    // `flex_tempo` reads as a tempo.
-    (libm::round(bpm.beat_period().get() * TEN_NS_UNITS_PER_SECOND) as u32).max(1)
-}
 
 /// The meter a Set Time Signature message declares: the numerator field is the
 /// beats per bar, the denominator field a negative power of 2 (2 is a quarter

@@ -27,11 +27,10 @@ use std::time::Duration;
 use tutti_graph::UmpAt;
 
 use tutti_graph::Offset;
-use tutti_midi_device::TICK_RATE;
-use tutti_ump::{Message, Ump, Utility};
+use tutti_ump::{JrTicks, Message, Ump, Utility};
 use tutti_units::{Frame, SampleRate, Samples, Seconds};
 
-/// Converts sample positions to 16-bit JR ticks at a fixed sample rate. Cheap,
+/// Converts sample positions to JR ticks at a fixed sample rate. Cheap,
 /// `Copy`, and stateless — the shared reference both `JrStamper` reasons in.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct JrClock {
@@ -44,13 +43,13 @@ impl JrClock {
         Self { sample_rate }
     }
 
-    /// The 16-bit JR tick a frame maps to (wrapping at 0x1_0000). A whole
+    /// The JR tick a frame maps to (wrapping at 0x1_0000). A whole
     /// stream is stamped from one origin, so pass frames counted from it.
     #[inline]
-    pub(crate) fn ticks_at(&self, frame: Frame) -> u16 {
+    pub(crate) fn ticks_at(&self, frame: Frame) -> JrTicks {
         // ticks = frames * (JR_ticks/sec) / (frames/sec)
-        let ticks = (frame.get() as f64) * TICK_RATE.get() / self.sample_rate.get();
-        (ticks as u64 & 0xFFFF) as u16
+        let ticks = (frame.get() as f64) * JrTicks::RATE.get() / self.sample_rate.get();
+        JrTicks::masked(ticks as u64)
     }
 }
 

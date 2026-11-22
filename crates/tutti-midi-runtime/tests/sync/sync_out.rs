@@ -14,7 +14,7 @@ use tutti_graph::{
 };
 use tutti_midi_protocol::{MtcRate, Recipient};
 use tutti_midi_runtime::{SyncMessages, SyncOut, SyncOutControls};
-use tutti_ump::{Message, MidiGroup, SysexStatus, System, U14, Ump};
+use tutti_ump::{FlexTempo, Message, MidiGroup, SysexStatus, System, U14, Ump};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 use tutti_fixtures::{EventRig, Seen, heard};
@@ -467,7 +467,7 @@ fn flex_states_the_tempo_and_the_nodes_meter_once() {
     assert_eq!(
         flexes(&started),
         [
-            (0, tutti_ump::Flex::SetTempo(50_000_000)),
+            (0, tutti_ump::Flex::SetTempo(FlexTempo::new(50_000_000))),
             (
                 0,
                 tutti_ump::Flex::SetTimeSignature(tutti_ump::FlexTimeSignature {

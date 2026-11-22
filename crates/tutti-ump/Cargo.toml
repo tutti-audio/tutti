@@ -23,7 +23,7 @@ serde = ["dep:serde", "tutti-music/serde"]
 [dependencies]
 bytemuck = { version = "1.16", features = ["derive"] }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
-# `Normalized`'s scaling rounds with `libm`'s pure-Rust `round`, so the result does not depend on the platform's C math library.
+# `Normalized`'s scaling and `FlexTempo::from_bpm` round with `libm`'s pure-Rust `round`, so the result does not depend on the platform's C math library.
 libm = "0.2.15"
 tutti-music = { version = "0.0.1", path = "../tutti-music", default-features = false }
 thiserror.workspace = true

@@ -47,7 +47,7 @@
 //! one the negotiation sends on):
 //!
 //! - **A UMP Endpoint that answered its Stream negotiation** gets one for each
-//!   Function Block that declares MIDI-CI (`midi_ci_version() != 0`, M2-104
+//!   Function Block that declares MIDI-CI (`midi_ci_version()` is `Some`, M2-104
 //!   §7.1.8), on that block's first Group, so a block is a MIDI-CI Device of
 //!   its own with its own MUID (M2-101 §3.2.2). **A block that declares no
 //!   MIDI-CI gets none**: it said it does not speak it. An Endpoint that
@@ -474,7 +474,7 @@ pub(crate) fn groups_after_settle(stream: &DeviceStream) -> Vec<MidiGroup> {
     }
     let mut groups: Vec<MidiGroup> = endpoint
         .function_blocks()
-        .filter(|block| block.midi_ci_version() != 0)
+        .filter(|block| block.midi_ci_version().is_some())
         .filter_map(|block| MidiGroup::new(block.first_group().get()))
         .collect();
     groups.sort_unstable();
