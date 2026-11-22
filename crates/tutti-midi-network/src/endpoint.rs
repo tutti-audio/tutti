@@ -8,6 +8,7 @@ use std::sync::Arc;
 use tutti_platform::Instant;
 
 use tutti_ump::Ump;
+use tutti_units::Losses;
 
 use crate::datagram::{self, pack};
 use crate::session::{Capacity, Role, Session};
@@ -36,12 +37,13 @@ pub trait NetworkEndpoint {
     /// The next event for the application, if one is queued.
     fn poll_event(&mut self) -> Option<Event>;
 
-    /// How many events were dropped because [`MAX_QUEUED_EVENTS`] were
-    /// already waiting for [`poll_event`](Self::poll_event), since the
-    /// endpoint was made: a data event that found the queue full, or an event
-    /// a later session-life event evicted. An application that polls events
-    /// never sees the count rise.
-    fn events_lost(&self) -> u64;
+    /// The events dropped because [`MAX_QUEUED_EVENTS`] were already waiting
+    /// for [`poll_event`](Self::poll_event), since the endpoint was made: a
+    /// data event that found the queue full is [lost](Losses::lost), and an
+    /// event a later session-life event displaced is
+    /// [evicted](Losses::evicted). An application that polls events never sees
+    /// the counts rise.
+    fn losses(&self) -> Losses;
 
     /// When [`on_timeout`](Self::on_timeout) next has work, if ever.
     fn deadline(&self) -> Option<Instant>;
@@ -54,7 +56,7 @@ pub trait NetworkEndpoint {
 /// The most events an endpoint holds for the application; the queue never
 /// exceeds it, so an application that never polls costs the endpoint a bounded
 /// amount of memory. Every event lost is counted
-/// ([`events_lost`](NetworkEndpoint::events_lost)).
+/// ([`losses`](NetworkEndpoint::losses)).
 ///
 /// A data event (`Ump`, `DataLost`, `Reset`, `Nak`) that finds the queue full
 /// is dropped. The events of a session's life (`Established`, `Confirm`,
@@ -68,7 +70,7 @@ pub const MAX_QUEUED_EVENTS: usize = 4096;
 struct Outbox {
     transmits: VecDeque<Transmit>,
     events: VecDeque<Event>,
-    events_lost: u64,
+    losses: Losses,
 }
 
 impl Outbox {
@@ -88,9 +90,9 @@ impl Outbox {
                 let oldest_data = self.events.iter().position(|e| !is_lifecycle(e));
                 self.events.remove(oldest_data.unwrap_or(0));
                 self.events.push_back(event);
-                self.events_lost += 1;
+                self.losses += Losses::evicted(1);
             } else {
-                self.events_lost += 1;
+                self.losses += Losses::lost(1);
             }
         }
     }
@@ -219,8 +221,8 @@ impl NetworkEndpoint for Client {
         self.outbox.events.pop_front()
     }
 
-    fn events_lost(&self) -> u64 {
-        self.outbox.events_lost
+    fn losses(&self) -> Losses {
+        self.outbox.losses
     }
 
     fn deadline(&self) -> Option<Instant> {
@@ -435,8 +437,8 @@ impl NetworkEndpoint for Host {
         self.outbox.events.pop_front()
     }
 
-    fn events_lost(&self) -> u64 {
-        self.outbox.events_lost
+    fn losses(&self) -> Losses {
+        self.outbox.losses
     }
 
     fn deadline(&self) -> Option<Instant> {

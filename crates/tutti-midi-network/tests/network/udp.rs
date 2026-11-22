@@ -6,6 +6,7 @@ use std::time::Duration;
 use futures_lite::StreamExt;
 use tutti_fixtures::block_on_within;
 use tutti_platform::{Executor, Instant};
+use tutti_units::Losses;
 
 use tutti_midi_network::{
     Admission, AuthMethods, ByeReason, Client, Command, Credentials, DatagramBuilder, EndedBy,
@@ -273,8 +274,8 @@ impl NetworkEndpoint for Panics {
     fn poll_event(&mut self) -> Option<Event> {
         None
     }
-    fn events_lost(&self) -> u64 {
-        0
+    fn losses(&self) -> Losses {
+        Losses::NONE
     }
     fn deadline(&self) -> Option<Instant> {
         None
@@ -345,8 +346,8 @@ impl NetworkEndpoint for Flood {
             peer: "127.0.0.1:9".parse().unwrap(),
         })
     }
-    fn events_lost(&self) -> u64 {
-        0
+    fn losses(&self) -> Losses {
+        Losses::NONE
     }
     fn deadline(&self) -> Option<Instant> {
         None
@@ -362,7 +363,7 @@ fn events_past_the_queue_bound_are_counted_lost_exactly() {
     let link = NetworkLink::bind(&executor, "127.0.0.1:0", Flood::default()).unwrap();
     let excess = 7;
     link.with(|flood, _| flood.owed = MAX_QUEUED_EVENTS + excess);
-    assert_eq!(link.events_lost(), excess as u64);
+    assert_eq!(link.losses(), Losses::lost(excess as u64));
     assert_eq!(link.pending().count(), MAX_QUEUED_EVENTS);
 }
 
@@ -439,8 +440,8 @@ impl NetworkEndpoint for Echo {
     fn poll_event(&mut self) -> Option<Event> {
         self.heard.pop_front()
     }
-    fn events_lost(&self) -> u64 {
-        0
+    fn losses(&self) -> Losses {
+        Losses::NONE
     }
     fn deadline(&self) -> Option<Instant> {
         self.due

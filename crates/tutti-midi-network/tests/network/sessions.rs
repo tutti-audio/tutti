@@ -4,6 +4,7 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 use tutti_platform::Instant;
+use tutti_units::Losses;
 
 use tutti_midi_network::{
     Admission, AuthChallenge, AuthFailure, AuthMethods, AuthState, Bye, ByeReason, Client, Command,
@@ -1124,12 +1125,12 @@ fn a_full_event_queue_keeps_what_it_holds_and_counts_the_rest() {
     // first MAX_QUEUED_EVENTS.
     let total = 1 + batches * per_batch;
     assert!(total > MAX_QUEUED_EVENTS);
-    assert_eq!(client.events_lost(), (total - MAX_QUEUED_EVENTS) as u64);
-    let lost = client.events_lost();
+    let lost = Losses::lost((total - MAX_QUEUED_EVENTS) as u64);
+    assert_eq!(client.losses(), lost);
     // A Closed at a full queue is delivered and evicts the oldest data event.
     host.close(now, client_addr(), ByeReason::PowerDown);
     deliver(&mut host, &mut client, now);
-    assert_eq!(client.events_lost(), lost + 1);
+    assert_eq!(client.losses(), lost + Losses::evicted(1));
     let mut held = 0;
     let mut first = None;
     let mut last = None;
@@ -1193,11 +1194,11 @@ fn a_queue_of_session_events_evicts_its_oldest_for_the_newest() {
         deliver(&mut host, &mut client);
     }
     assert_eq!(client.state(), SessionState::Idle);
-    assert_eq!(client.events_lost(), 0);
+    assert_eq!(client.losses(), Losses::NONE);
     // One more session-life event: the oldest (the first Established) goes.
     client.connect(now);
     deliver(&mut host, &mut client);
-    assert_eq!(client.events_lost(), 1);
+    assert_eq!(client.losses(), Losses::evicted(1));
     let mut events = Vec::new();
     while let Some(event) = client.poll_event() {
         events.push(event);

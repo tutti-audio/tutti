@@ -564,10 +564,10 @@ fn capability_is_the_backends_for_a_present_device() {
     assert_eq!(caps.active().protocol, tutti_ump::Protocol::Midi2);
 }
 
-/// **An event with no wire form is taken and counted apart from the losses**: a
+/// **An event with no wire form is taken and counted as refused**: a
 /// JR Clock sent to a device that receives no JR is dropped by the spec's rule
-/// (M2-104 7.1.6.2), `queue` says the device took it, and `unrepresentable`
-/// says it went nowhere. The note beside it is sent.
+/// (M2-104 7.1.6.2), `queue` says the device took it, and `losses`
+/// says it was refused. The note beside it is sent.
 #[test]
 fn an_event_with_no_wire_form_is_taken_and_counted() {
     let (devices, mut events, fake) = fake();
@@ -581,12 +581,11 @@ fn an_event_with_no_wire_form_is_taken_and_counted() {
     let at = |ump| (tutti_graph::Offset::ZERO, ump);
     let taken = out.queue(&[at(clock), at(note)]);
     assert_eq!(taken.packets(), 2, "the clock counts as taken");
-    assert_eq!(out.unrepresentable(), 1);
-    assert_eq!(out.losses(), Losses::NONE, "it is not a loss of room");
+    assert_eq!(out.losses(), Losses::refused(1));
     assert_eq!(fake.take_sent(EndpointId::from_raw(1)), [note]);
     let taken = out.queue(&[at(note)]);
     assert_eq!(taken.packets(), 1);
-    assert_eq!(out.unrepresentable(), 1, "a note has a form");
+    assert_eq!(out.losses(), Losses::refused(1), "a note has a form");
 }
 
 /// **Function Blocks the spec cannot hold are counted on the device**: two of
