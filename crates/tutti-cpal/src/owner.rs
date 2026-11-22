@@ -13,7 +13,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use futures_channel::oneshot;
-use tutti_platform::{Executor, Task, is_driving, join_within, panic_message};
+use tutti_platform::{Executor, Task, Unjoined, join_within, panic_message};
 
 use crate::error::{DeviceError, Result};
 
@@ -28,7 +28,7 @@ const STOP_PATIENCE: Duration = Duration::from_secs(5);
 /// the stream is stopped when the drop returns.
 ///
 /// A drop on a thread that drives an executor does not wait: it asks for the
-/// stop and detaches, with a warning.
+/// stop and detaches.
 #[derive(Debug)]
 pub(crate) struct Owned {
     /// Dropping it is the stop: the owner's future awaits the other end.
@@ -100,12 +100,13 @@ impl Drop for Owned {
         let Some(task) = self.task.take() else {
             return;
         };
-        if is_driving() {
-            tracing::warn!("a stream is dropped on an executor's thread; leaving it to stop there");
-            task.detach();
-        } else if let Err(task) = join_within(task, STOP_PATIENCE) {
-            tracing::warn!("the stream thread did not stop in time; leaving it");
-            task.detach();
+        match join_within(task, STOP_PATIENCE) {
+            Ok(_) => {}
+            Err(Unjoined::TimedOut(task)) => {
+                tracing::warn!("the stream thread did not stop in time; leaving it");
+                task.detach();
+            }
+            Err(Unjoined::Driving(task)) => task.detach(),
         }
     }
 }

@@ -834,7 +834,6 @@ fn dropping_a_session_on_a_driving_thread_returns_without_joining() {
         .spawn_dedicated("drops-a-session", None, {
             let path = path.clone();
             async move {
-                assert!(tutti_platform::is_driving());
                 let mut rig = rig(InputConfig::default(), Samples::new(0));
                 rig.step(256);
                 let take = rig

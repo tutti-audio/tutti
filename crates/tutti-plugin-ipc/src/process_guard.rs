@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicBool, Ordering, fence};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tutti_platform::{
-    Executor, Instant, Task, WeakExecutor, join_within, monotonic_ns, sleep_until_ns,
+    Executor, Instant, Task, Unjoined, WeakExecutor, join_within, monotonic_ns, sleep_until_ns,
 };
 use tutti_plugin_ipc_ffi::{ExitWait, Reaped};
 use tutti_plugin_types::{Deadline, IpcError, PluginFailure};
@@ -64,8 +64,8 @@ fn ended_within(exit: &mut Option<Task<()>>, timeout: Duration) -> bool {
         None => true,
         Some(task) => match join_within(task, timeout) {
             Ok(_) => true,
-            Err(task) => {
-                *exit = Some(task);
+            Err(unjoined) => {
+                *exit = Some(unjoined.into_task());
                 false
             }
         },
@@ -226,7 +226,6 @@ impl Drop for ProcessGuard {
     ///
     /// Every wait is on the exit task's end, an event; nothing polls.
     ///
-    /// Must not run on a thread that drives an executor: `join_within` panics there.
     fn drop(&mut self) {
         let shutting_down = self._bridge_thread.is_some();
         if let Some(launched) = &self.launched {
@@ -258,12 +257,16 @@ impl Drop for ProcessGuard {
             }
             flow.stop.store(true, Ordering::Release);
             // Ends within a slice of the stop, or at once when it has ended.
-            if let Some(exit) = exit
-                && let Err(exit) = join_within(exit, EXIT_STOP_PATIENCE)
-            {
-                tracing::warn!("plugin-ipc: the plugin-exit task did not stop; leaving it");
-                self.watch.note_detached();
-                exit.detach();
+            if let Some(exit) = exit {
+                match join_within(exit, EXIT_STOP_PATIENCE) {
+                    Ok(_) => {}
+                    Err(Unjoined::TimedOut(exit)) => {
+                        tracing::warn!("plugin-ipc: the plugin-exit task did not stop; leaving it");
+                        self.watch.note_detached();
+                        exit.detach();
+                    }
+                    Err(Unjoined::Driving(exit)) => exit.detach(),
+                }
             }
             let left = process.lock_recover().take();
             if let (false, Some(process)) = (reaped, left) {

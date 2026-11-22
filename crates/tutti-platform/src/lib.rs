@@ -34,8 +34,8 @@
 //!   [`Executor::timer`] gives a [`Timer`] that makes them and keeps nothing alive, and
 //!   [`Executor::downgrade`] a [`WeakExecutor`] that reaches the executor while it lives;
 //!   [`join`] waits on the calling thread for a [`Task`] that runs elsewhere to end, and
-//!   [`join_within`] waits at most a bound, handing the task back past it ([`is_driving`]
-//!   says where neither may wait).
+//!   [`join_within`] waits at most a bound, handing the task back ([`Unjoined`]) past it
+//!   and on a thread that drives an executor, where it cannot wait.
 //! - [`MainThreadMarker`] — proof that the holder is on the process's main
 //!   thread, made only where the OS says so (`!Send`, `!Sync`).
 //! - [`Asset`] — where bytes come from, as every file entry point takes it

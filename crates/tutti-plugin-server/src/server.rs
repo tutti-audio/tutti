@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
-use tutti_platform::{Executor, Task, join_within};
+use tutti_platform::{Executor, Task, Unjoined, join_within};
 use tutti_plugin_ipc::{
     ControlFrame, ControlReply, ControlRequest, PROTOCOL_VERSION, ReqId, Request, Working,
 };
@@ -514,16 +514,19 @@ impl Beat {
 impl Drop for Beat {
     /// Stops the task at its wait for the next period, or after the frame it is
     /// sending: the wait is for that frame, which the host reads, and never for a
-    /// period. Runs on the thread that serves a request (the main thread), never
-    /// on one that drives an executor, which `join_within` would refuse.
+    /// period.
     fn drop(&mut self) {
         drop(self.stop.take());
-        if let Some(task) = self.task.take()
-            && let Err(task) = join_within(task, BEAT_STOP_PATIENCE)
-        {
-            tracing::warn!("plugin-server: the plugin-beat task did not stop; leaving it");
-            crate::leak::note_detached();
-            task.detach();
+        if let Some(task) = self.task.take() {
+            match join_within(task, BEAT_STOP_PATIENCE) {
+                Ok(_) => {}
+                Err(Unjoined::TimedOut(task)) => {
+                    tracing::warn!("plugin-server: the plugin-beat task did not stop; leaving it");
+                    crate::leak::note_detached();
+                    task.detach();
+                }
+                Err(Unjoined::Driving(task)) => task.detach(),
+            }
         }
     }
 }

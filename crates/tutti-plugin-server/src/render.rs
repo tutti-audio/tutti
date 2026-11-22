@@ -42,7 +42,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tutti_platform::Instant;
-use tutti_platform::{Executor, PriorityRequest, Task, WeakExecutor, join_within};
+use tutti_platform::{Executor, PriorityRequest, Task, Unjoined, WeakExecutor, join_within};
 use tutti_rt::LockExt;
 
 use tutti_buffers::Float;
@@ -1111,11 +1111,6 @@ impl RenderThread {
     ///
     /// The lane panicked (its state went with it), it ended without handing its
     /// state back (the executor dropped it), or it did not end within `patience`.
-    ///
-    /// # Panics
-    ///
-    /// On a thread that drives an executor ([`join_within`]): the server stops its
-    /// render thread from its main thread.
     pub(crate) fn stop_within(mut self, patience: Duration) -> Result<RenderSide, NotHome> {
         let lane = self.lane.take().expect("stopped once");
         lane.stop.store(true, Ordering::Release);
@@ -1124,10 +1119,14 @@ impl RenderThread {
             Ok(Some(Ok(side))) => Ok(side),
             Ok(Some(Err(payload))) => Err(NotHome::Panicked(panicked(payload.as_ref()))),
             Ok(None) => Err(NotHome::Dropped),
-            Err(task) => {
+            Err(Unjoined::TimedOut(task)) => {
                 // A lane inside a plugin call ends when that returns, which it
                 // may never do.
                 tracing::warn!("plugin-server: the render lane did not stop; leaving it");
+                task.detach();
+                Err(NotHome::Stuck)
+            }
+            Err(Unjoined::Driving(task)) => {
                 task.detach();
                 Err(NotHome::Stuck)
             }
@@ -1167,10 +1166,14 @@ impl Drop for RenderThread {
         if let Some(lane) = self.lane.take() {
             lane.stop.store(true, Ordering::Release);
             self.wake.ring();
-            if let Err(task) = join_within(lane.task, crate::server::RENDER_STOP_PATIENCE) {
-                tracing::warn!("plugin-server: the render lane did not stop; leaving it");
-                crate::leak::note_detached();
-                task.detach();
+            match join_within(lane.task, crate::server::RENDER_STOP_PATIENCE) {
+                Ok(_) => {}
+                Err(Unjoined::TimedOut(task)) => {
+                    tracing::warn!("plugin-server: the render lane did not stop; leaving it");
+                    crate::leak::note_detached();
+                    task.detach();
+                }
+                Err(Unjoined::Driving(task)) => task.detach(),
             }
         }
     }

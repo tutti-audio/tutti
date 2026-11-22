@@ -32,7 +32,7 @@ use crate::transport::control::{self as ipc, ControlStream, ControlWait};
 use futures_lite::future::yield_now;
 use std::sync::Arc;
 use std::time::Duration;
-use tutti_platform::{Executor, PriorityRequest, Task, WeakExecutor, join_within};
+use tutti_platform::{Executor, PriorityRequest, Task, Unjoined, WeakExecutor, join_within};
 use tutti_plugin_types::{IpcError, PluginFailure, Timeouts};
 use tutti_rt::Parker;
 
@@ -160,10 +160,9 @@ impl IpcThread {
     /// in the bridge's timeouts) and, when idle, at once. A lane the executor
     /// dropped has ended already.
     ///
-    /// # Panics
-    ///
-    /// On a thread that drives an executor ([`join_within`]): a bridge is dropped
-    /// from the control side, never from a task.
+    /// On a thread that drives an executor (a task dropping the last handle of a
+    /// plugin) a wait would stop that thread's tasks: the lanes, already asked to
+    /// stop, are detached and end on their own.
     pub fn shutdown(&mut self) {
         self.lifecycle.request_shutdown();
         self.channels.wake();
@@ -176,10 +175,16 @@ impl IpcThread {
                 ("plugin-bridge", lanes.audio),
                 ("plugin-control", lanes.control),
             ] {
-                if let Err(lane) = join_within(lane, patience) {
-                    tracing::warn!("plugin-ipc: the {name} lane did not stop; leaving it");
-                    self.lifecycle.watch().note_detached();
-                    lane.detach();
+                match join_within(lane, patience) {
+                    Ok(_) => {}
+                    Err(Unjoined::TimedOut(lane)) => {
+                        tracing::warn!("plugin-ipc: the {name} lane did not stop; leaving it");
+                        // The count is of lanes that outlived their patience, not of
+                        // every detach: a detach on a driving thread is not a hang.
+                        self.lifecycle.watch().note_detached();
+                        lane.detach();
+                    }
+                    Err(Unjoined::Driving(lane)) => lane.detach(),
                 }
             }
         }
@@ -205,7 +210,6 @@ fn lane_patience(timeouts: &Timeouts) -> Duration {
 }
 
 impl Drop for IpcThread {
-    /// Must not run on a thread that drives an executor: `join_within` panics there.
     fn drop(&mut self) {
         self.shutdown();
     }
@@ -823,6 +827,33 @@ mod tests {
             1,
             "a lane is still running after the join"
         );
+    }
+
+    /// **A bridge shut down on a thread that drives an executor returns, and both lanes
+    /// still end**: the lanes are detached there, not joined, so the task that shuts
+    /// the bridge down ends without panicking and each lane's listener clone goes.
+    #[test]
+    fn shutdown_on_a_driving_thread_returns_and_both_lanes_end() {
+        let executor = tutti_fixtures::executor();
+        let rig = rig(executor);
+        assert!(Arc::strong_count(&rig.listener) > 1, "the lanes run");
+        let mut thread = rig.thread;
+        let shutdown = executor
+            .spawn_dedicated("shuts-down", None, async move { thread.shutdown() })
+            .expect("a dedicated thread");
+        assert_eq!(
+            tutti_platform::join(shutdown),
+            Some(()),
+            "the shutdown ended without panicking"
+        );
+        let hang_guard = tutti_platform::Instant::now() + HANG_GUARD;
+        while Arc::strong_count(&rig.listener) > 1 {
+            assert!(
+                tutti_platform::Instant::now() < hang_guard,
+                "a lane never ended"
+            );
+            std::thread::yield_now();
+        }
     }
 
     /// **A lane never polled resolves its task and declares the bridge dead**:
