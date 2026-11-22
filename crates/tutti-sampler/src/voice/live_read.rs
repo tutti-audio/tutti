@@ -62,7 +62,7 @@ use tutti_units::{Amplitude, ReadRate, SamplePosition, Samples};
 use crate::streamer::{Arrangement, Block, Cells, RingMap, RingReader, SharedReader, straight};
 
 use super::interp::{Place, hermite_lanes, interpolate_taps};
-use crate::lanes::{Gather, Lane, audible_gain};
+use crate::lanes::{GATHER_TAPS, Gather, Lane, audible_gain};
 
 /// Output frames of continuation rendered at a discontinuity: the refill gap
 /// plus the fade, with room to spare.
@@ -487,7 +487,13 @@ fn steady_lanes<F: SamplerFloat>(
     let lanes = &mut lanes[..lanes_n];
     // A switch to cross: `State::cross_switch` acts at some frame.
     let switch = map.fade.is_some() && Some(map.epoch) != st.applied_epoch;
-    let Gather { index, frac, y, .. } = gather;
+    let Gather {
+        index,
+        frac,
+        y,
+        run,
+        ..
+    } = gather;
     let mut base = 0u64;
     for (i, pos) in positions.iter().enumerate() {
         let Some(pos) = *pos else {
@@ -518,22 +524,48 @@ fn steady_lanes<F: SamplerFloat>(
         frac[i] = f;
     }
     let (index, frac) = (&index[..frames], &frac[..frames]);
-    for (c, lane_out) in lanes.iter_mut().enumerate() {
-        for (t, lane) in y.iter_mut().enumerate() {
-            for (s, &k) in lane.iter_mut().zip(index) {
-                *s = block.frame(base + k as u64 + t as u64).get(c);
+    // Frames in runs, each a stretch of ring positions `run` holds: a run
+    // ends where `index` steps back (a wrap in the arrangement) or where
+    // its span, the first frame's first tap to the last frame's last tap,
+    // would pass `run`. Inside a run `index` never decreases, so the span
+    // is `index[end - 1] - index[start] + GATHER_TAPS`, and every position in it
+    // lies between two taps `block.contains` held: in the claim's one
+    // contiguous window.
+    let mut start = 0;
+    while start < frames {
+        let first = index[start];
+        let mut end = start + 1;
+        while end < frames
+            && index[end] >= index[end - 1]
+            && (index[end] - first) as usize + GATHER_TAPS <= run.len()
+        {
+            end += 1;
+        }
+        let span = (index[end - 1] - first) as usize + GATHER_TAPS;
+        for (c, lane_out) in lanes.iter_mut().enumerate() {
+            block.copy_channel(base + u64::from(first), c, &mut run[..span]);
+            for (t, lane) in y.iter_mut().enumerate() {
+                for (s, &k) in lane[start..end].iter_mut().zip(&index[start..end]) {
+                    *s = run[(k - first) as usize + t];
+                }
+            }
+            let [y0, y1, y2, y3] = &*y;
+            let out = &mut lane_out[at + start..at + end];
+            hermite_lanes(
+                out,
+                [
+                    &y0[start..end],
+                    &y1[start..end],
+                    &y2[start..end],
+                    &y3[start..end],
+                ],
+                &frac[start..end],
+            );
+            for s in out.iter_mut() {
+                *s *= gain;
             }
         }
-        let [y0, y1, y2, y3] = &*y;
-        let out = &mut lane_out[at..at + frames];
-        hermite_lanes(
-            out,
-            [&y0[..frames], &y1[..frames], &y2[..frames], &y3[..frames]],
-            frac,
-        );
-        for s in out.iter_mut() {
-            *s *= gain;
-        }
+        start = end;
     }
     true
 }

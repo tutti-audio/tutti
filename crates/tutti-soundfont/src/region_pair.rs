@@ -6,7 +6,7 @@ use tutti_sf2::{InstrumentRegion, LoopMode, PresetRegion, SummedGenerator};
 
 use tutti_units::{Cents, Db, Hz, Normalized, Pan, Seconds};
 
-use crate::soundfont_math::SoundFontMath;
+use crate::soundfont_math::{cents_to_hertz, timecents_to_seconds};
 
 #[non_exhaustive]
 pub(crate) struct RegionPair<'a> {
@@ -117,7 +117,7 @@ impl<'a> RegionPair<'a> {
     }
 
     pub(crate) fn initial_filter_cutoff_frequency(&self) -> Hz {
-        SoundFontMath::cents_to_hertz(self.gs(SummedGenerator::InitialFilterCutoffFrequency))
+        cents_to_hertz(self.gs(SummedGenerator::InitialFilterCutoffFrequency))
     }
 
     /// The resonance, the height of the filter's peak above its DC gain.
@@ -162,35 +162,35 @@ impl<'a> RegionPair<'a> {
     }
 
     pub(crate) fn delay_modulation_lfo(&self) -> Seconds {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::DelayModulationLfo))
+        timecents_to_seconds(self.gs(SummedGenerator::DelayModulationLfo))
     }
 
     pub(crate) fn frequency_modulation_lfo(&self) -> Hz {
-        SoundFontMath::cents_to_hertz(self.gs(SummedGenerator::FrequencyModulationLfo))
+        cents_to_hertz(self.gs(SummedGenerator::FrequencyModulationLfo))
     }
 
     pub(crate) fn delay_vibrato_lfo(&self) -> Seconds {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::DelayVibratoLfo))
+        timecents_to_seconds(self.gs(SummedGenerator::DelayVibratoLfo))
     }
 
     pub(crate) fn frequency_vibrato_lfo(&self) -> Hz {
-        SoundFontMath::cents_to_hertz(self.gs(SummedGenerator::FrequencyVibratoLfo))
+        cents_to_hertz(self.gs(SummedGenerator::FrequencyVibratoLfo))
     }
 
     pub(crate) fn delay_modulation_envelope(&self) -> Seconds {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::DelayModulationEnvelope))
+        timecents_to_seconds(self.gs(SummedGenerator::DelayModulationEnvelope))
     }
 
     pub(crate) fn attack_modulation_envelope(&self) -> Seconds {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::AttackModulationEnvelope))
+        timecents_to_seconds(self.gs(SummedGenerator::AttackModulationEnvelope))
     }
 
     pub(crate) fn hold_modulation_envelope(&self) -> Seconds {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::HoldModulationEnvelope))
+        timecents_to_seconds(self.gs(SummedGenerator::HoldModulationEnvelope))
     }
 
     pub(crate) fn decay_modulation_envelope(&self) -> Seconds {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::DecayModulationEnvelope))
+        timecents_to_seconds(self.gs(SummedGenerator::DecayModulationEnvelope))
     }
 
     /// The level the modulation envelope's decay falls to: one less the generator's
@@ -200,7 +200,7 @@ impl<'a> RegionPair<'a> {
     }
 
     pub(crate) fn release_modulation_envelope(&self) -> Seconds {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::ReleaseModulationEnvelope))
+        timecents_to_seconds(self.gs(SummedGenerator::ReleaseModulationEnvelope))
     }
 
     pub(crate) fn key_number_to_modulation_envelope_hold(&self) -> i32 {
@@ -212,19 +212,19 @@ impl<'a> RegionPair<'a> {
     }
 
     pub(crate) fn delay_volume_envelope(&self) -> Seconds {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::DelayVolumeEnvelope))
+        timecents_to_seconds(self.gs(SummedGenerator::DelayVolumeEnvelope))
     }
 
     pub(crate) fn attack_volume_envelope(&self) -> Seconds {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::AttackVolumeEnvelope))
+        timecents_to_seconds(self.gs(SummedGenerator::AttackVolumeEnvelope))
     }
 
     pub(crate) fn hold_volume_envelope(&self) -> Seconds {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::HoldVolumeEnvelope))
+        timecents_to_seconds(self.gs(SummedGenerator::HoldVolumeEnvelope))
     }
 
     pub(crate) fn decay_volume_envelope(&self) -> Seconds {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::DecayVolumeEnvelope))
+        timecents_to_seconds(self.gs(SummedGenerator::DecayVolumeEnvelope))
     }
 
     /// How far the volume envelope's decay falls below its peak.
@@ -233,7 +233,7 @@ impl<'a> RegionPair<'a> {
     }
 
     pub(crate) fn release_volume_envelope(&self) -> Seconds {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::ReleaseVolumeEnvelope))
+        timecents_to_seconds(self.gs(SummedGenerator::ReleaseVolumeEnvelope))
     }
 
     /// The volume envelope's release as a voice starts it: never

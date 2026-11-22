@@ -191,7 +191,7 @@ fn a_bearings_modulation_depth_scales_by_the_arcs_length() {
 /// its 180-degree range is 116, clamped to the range's 90.
 #[test]
 fn a_modulated_height_is_clamped_as_ever() {
-    let (mut ed, mut exec) = rig(ParamRange::UNBOUNDED, ParamRange::new(-90.0, 90.0));
+    let (mut ed, mut exec) = rig(ParamRange::UNBOUNDED, ParamRange::of(-90.0, 90.0));
     let program = ControlProgramBuilder::new()
         .layers(vec![constant(0.2)])
         .build()
@@ -201,7 +201,7 @@ fn a_modulated_height_is_clamped_as_ever() {
     let [_, el] = roll(&mut ed, &mut exec, 0.0, 256, 3);
     assert!(el[512..].iter().all(|&v| v == 90.0), "{:?}", &el[512..516]);
     // And 0.05 of it (9) gives 89, a plain sum.
-    let (mut ed, mut exec) = rig(ParamRange::UNBOUNDED, ParamRange::new(-90.0, 90.0));
+    let (mut ed, mut exec) = rig(ParamRange::UNBOUNDED, ParamRange::of(-90.0, 90.0));
     let program = ControlProgramBuilder::new()
         .layers(vec![constant(0.05)])
         .build()
@@ -230,7 +230,7 @@ fn seam_program() -> ControlProgram {
 /// bearing never nears 0, the height passes through it.
 #[test]
 fn an_automation_curve_across_180_turns_through_it_and_a_height_does_not() {
-    let (mut ed, mut exec) = rig(ParamRange::UNBOUNDED, ParamRange::new(-200.0, 200.0));
+    let (mut ed, mut exec) = rig(ParamRange::UNBOUNDED, ParamRange::of(-200.0, 200.0));
     let program = seam_program();
     lane(&mut ed, 1, UnitParam::Azimuth, &program, 0.0);
     lane(&mut ed, 3, UnitParam::Elevation, &program, 0.0);
