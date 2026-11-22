@@ -222,7 +222,7 @@ pub struct PointPool {
     /// Each holder of a block, by index, with the buffer it gets back.
     lent: Vec<(usize, PointBuf)>,
     /// Whether each holder, by index, holds a block.
-    holds: Vec<bool>,
+    holds: Box<[bool]>,
     /// The points a block holds.
     block_room: usize,
 }
@@ -235,7 +235,7 @@ impl PointPool {
         Self {
             free: (0..blocks).map(|_| PointBuf::with_capacity(room)).collect(),
             lent: Vec::with_capacity(blocks),
-            holds: vec![false; holders],
+            holds: vec![false; holders].into_boxed_slice(),
             block_room: room,
         }
     }
