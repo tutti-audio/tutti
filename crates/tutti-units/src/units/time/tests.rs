@@ -448,9 +448,15 @@ fn finite_or_keeps_a_finite_value_and_replaces_a_non_finite_one() {
 ///   owns the drop-frame wrap.
 /// - `From<f64>`, `From<TimecodeFrames> for f64`: `new` and `get`.
 ///
-/// The body is empty and this test cannot fail; see the note in `units/tests.rs`.
+/// Each replacement is asserted here.
 #[test]
-fn timecode_frames_omissions_are_documented() {}
+fn timecode_frames_omissions_have_their_replacements() {
+    let frames = TimecodeFrames::new(2.5);
+    assert_eq!(frames * 2.0, TimecodeFrames::new(5.0));
+    assert!(frames < TimecodeFrames::from_count(3));
+    assert_eq!(frames.floor(), 2);
+    assert_eq!(TimecodeFrames::new(frames.get()), frames);
+}
 
 /// `round` is nearest (half away from zero), `floor` is down, and a count no whole
 /// number holds (NaN, negative) is 0, so a caller that needs a refusal checks first.
