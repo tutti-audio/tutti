@@ -1202,7 +1202,12 @@ impl IntoNode for Published {
     type Controls = PublishedControls;
     fn into_parts(self) -> NodeParts<PublishedControls> {
         let NodeParts { node, fork, .. } = IntoNode::into_parts(Unforkable(self.node));
-        NodeParts::new(node, self.controls.clone(), fork).reclaimer(self.controls)
+        NodeParts::new(
+            node,
+            self.controls.clone(),
+            fork,
+            Some(Box::new(self.controls)),
+        )
     }
 }
 

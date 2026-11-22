@@ -252,7 +252,13 @@ impl<F: Float, N: ParamNode<F>> ForkSource<F> for ParamFork<N> {
 pub fn param_parts<F: Float, N: ParamNode<F> + Clone>(node: N) -> NodeParts<ParamSet, F> {
     let fork = ParamFork::new(&node);
     let params = fork.params.clone();
-    NodeParts::new(Box::new(node), fork.params.clone(), Some(Box::new(fork))).params(params)
+    NodeParts::new(
+        Box::new(node),
+        fork.params.clone(),
+        Some(Box::new(fork)),
+        None,
+    )
+    .params(params)
 }
 
 /// A [`ParamNode`] inserted as one: the wrapper that makes `Params(node)` an

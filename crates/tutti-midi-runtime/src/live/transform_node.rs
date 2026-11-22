@@ -260,6 +260,11 @@ impl<F: Float> IntoNode<F> for MpeTransformNode {
         let controls = MpeTransformControls {
             dropped: self.dropped_reader.clone(),
         };
-        NodeParts::new(Box::new(self), controls, Some(Box::new(ModeFork { mode })))
+        NodeParts::new(
+            Box::new(self),
+            controls,
+            Some(Box::new(ModeFork { mode })),
+            None,
+        )
     }
 }

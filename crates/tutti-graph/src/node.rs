@@ -1819,16 +1819,34 @@ pub struct NodeParts<C, F: Float = f32> {
 }
 
 impl<C, F: Float> NodeParts<C, F> {
-    /// The unit, its controls and its fork source; no params and nothing to
-    /// reclaim until [`params`](Self::params) and [`reclaimer`](Self::reclaimer) say so.
+    /// The unit, its controls, its fork source and what frees what its
+    /// published cells retired (`None` for a node that publishes nothing),
+    /// each stated by the caller. No params until [`params`](Self::params)
+    /// says so.
+    ///
+    /// The reclaimer is a clone of the node's controls (or of the cells they
+    /// hold); the session runs it on every update, on the control thread, for
+    /// as long as the node is in. A call that leaves it out does not compile:
+    ///
+    /// ```compile_fail,E0061
+    /// # use tutti_graph::{Node, NodeParts};
+    /// fn parts(node: Box<dyn Node>) -> NodeParts<()> {
+    ///     NodeParts::new(node, (), None)
+    /// }
+    /// ```
     #[must_use]
-    pub fn new(node: Box<dyn Node<F>>, controls: C, fork: Option<Box<dyn ForkSource<F>>>) -> Self {
+    pub fn new(
+        node: Box<dyn Node<F>>,
+        controls: C,
+        fork: Option<Box<dyn ForkSource<F>>>,
+        reclaimer: Option<Box<dyn Reclaim + Send>>,
+    ) -> Self {
         Self {
             node,
             controls,
             fork,
             params: None,
-            reclaimer: None,
+            reclaimer,
         }
     }
 
@@ -1837,15 +1855,6 @@ impl<C, F: Float> NodeParts<C, F> {
     #[must_use]
     pub fn params(mut self, params: ParamSet) -> Self {
         self.params = Some(params);
-        self
-    }
-
-    /// What frees the values the node's published cells retired: a clone of
-    /// the node's controls (or of the cells they hold). The session runs it
-    /// on every update, on the control thread, for as long as the node is in.
-    #[must_use]
-    pub fn reclaimer(mut self, reclaimer: impl Reclaim + Send + 'static) -> Self {
-        self.reclaimer = Some(Box::new(reclaimer));
         self
     }
 }

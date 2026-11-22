@@ -640,7 +640,12 @@ impl<F: Float> IntoNode<F> for MidiClipNode {
         let fork = ClipFork {
             cell: self.cell.clone(),
         };
-        NodeParts::new(Box::new(self), controls.clone(), Some(Box::new(fork))).reclaimer(controls)
+        NodeParts::new(
+            Box::new(self),
+            controls.clone(),
+            Some(Box::new(fork)),
+            Some(Box::new(controls)),
+        )
     }
 }
 

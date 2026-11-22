@@ -979,7 +979,7 @@ impl<F: Float> Graph<F> {
             reclaimer,
         } = node.into_parts();
         (
-            NodeParts::new(node, (), fork),
+            NodeParts::new(node, (), fork, None),
             Kept {
                 controls,
                 params,

@@ -688,7 +688,7 @@ where
         // A plugin with no origin to load again has no fork.
         let fork = super::fork::Fork::of(&self).map(|fork| Box::new(fork) as _);
         let controls = self.client.controls();
-        NodeParts::new(Box::new(self), controls, fork)
+        NodeParts::new(Box::new(self), controls, fork, None)
     }
 }
 

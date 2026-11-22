@@ -744,7 +744,7 @@ impl tutti_graph::IntoNode for BoundPlugin {
             // The controls are the client's, shared with this node's cells: the
             // session keeps the ones it has.
             BoundPlaced::ServedNode(node, fork) => {
-                tutti_graph::NodeParts::new(node, None, Some(fork))
+                tutti_graph::NodeParts::new(node, None, Some(fork), None)
             }
             // An in-process node has no `PluginControls` (its meter is reached
             // through `Plugin::node_controls`, taken before binding).
