@@ -89,6 +89,9 @@
 //! - **Diode clipper** (`diode_clipper.rs`): [`DiodeClipper`], the RC-loaded antiparallel diode
 //!   pair of Yeh, Abel and Smith, by the trapezoidal rule with a capped Newton solve seeded from
 //!   the Wright omega closed form (`wright_omega.rs`, `newton.rs`).
+//! - **Hysteresis** (`hysteresis.rs`): [`Hysteresis`], the Jiles-Atherton model of magnetization
+//!   (Jiles and Atherton 1986), by the trapezoidal rule of Holters and Zoelzer (2016) with a
+//!   capped Newton solve (`newton.rs`).
 //! - **Spatial** (`spatial/`): VBAP ([`SpeakerLayout`], Pulkki's pairs and triplets and the
 //!   gain solve over them, [`SpeakerGeometryError`]; [`VbapKernel`] and [`VbapGains`], one
 //!   direction's gains and one channel rendered along a ramp between two) and the HRTF
@@ -204,6 +207,7 @@ mod fm;
 mod follower;
 mod frequency_shifter;
 mod granular;
+mod hysteresis;
 mod interp;
 mod karplus_strong;
 mod level;
@@ -319,6 +323,7 @@ pub use frequency_shifter::{
 pub use granular::{
     GrainScheduler, GrainSettings, GrainStart, Granular, MaxGrains, MaxGrainsError,
 };
+pub use hysteresis::{Hysteresis, HysteresisControls, HysteresisDrive, HysteresisDriveError};
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
 pub use karplus_strong::{KarplusStrong, KarplusStrongBank, KarplusStrongControls};
 pub use level::rms;

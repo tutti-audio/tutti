@@ -159,12 +159,13 @@ impl Subject for Plugin {
             .session
             .plugin_view(rig.node)
             .expect("the plugin is hosted")
-            .diagnostics();
+            .diagnostics()
+            .chunks();
         Chunks {
-            missed: d.missed_chunks(),
-            late: d.late_chunks(),
-            refused: d.refused_chunks(),
-            skipped: d.skipped_chunks(),
+            missed: d.missed,
+            late: d.late,
+            refused: d.refused,
+            skipped: d.skipped,
         }
     }
 

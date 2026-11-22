@@ -45,9 +45,86 @@ pub struct ServerLosses {
     pub refused_off_thread_calls: u64,
 }
 
+/// What became of the chunks a served plugin's pipeline did not have answered
+/// in time, cumulative since the plugin was bound
+/// (`PluginControls::chunk_outcomes` in `tutti-plugin-host`). Zero for a
+/// plugin that runs in this process, which has no pipeline to be late.
+///
+/// In a reading taken while the pipeline is quiet,
+/// `late + refused + unanswered + skipped <= missed`, not equal: a chunk a
+/// reset dropped, and one whose channel the shared-memory slab lacks, is
+/// missed and none of the four; and a missed chunk's fate is learned a few
+/// chunks after it played, so a reading can hold missed chunks whose fate is
+/// not known yet. A reading taken while the pipeline runs loads each count
+/// on its own, so it can catch one count ahead of another.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ChunkOutcomes {
+    /// Chunks the server had not answered by the time the node played them,
+    /// each played as silence (a dropout). A crashed plugin's silence is not
+    /// counted. An offline fork waits for every chunk, so this stays zero
+    /// unless it gave up.
+    pub missed: u64,
+    /// Of the missed chunks, those the server published after the node had
+    /// played the silence: a late answer (an overloaded plugin or machine:
+    /// raise the device buffer size), not a lost one. Seen in the shared ring
+    /// or in the server's reply.
+    pub late: u64,
+    /// Of the missed chunks, those the server refused: it did not publish the
+    /// audio, and said so in its reply. Its reasons are the chunk's input slot
+    /// recycled before it ran, a block that did not fit, an output channel not
+    /// written, and a refused sample rate.
+    pub refused: u64,
+    /// Of the missed chunks, those neither late, refused nor skipped: the
+    /// server never said what became of them within the last few chunks. Not
+    /// zero is a loss no other count explains.
+    pub unanswered: u64,
+    /// Chunks the bridge dropped because the plugin fell more than one chunk
+    /// behind (the shared ring holds one chunk behind the newest): never sent,
+    /// so each played as silence and was never answered. Raise the device
+    /// buffer size if it grows.
+    pub skipped: u64,
+}
+
+/// What the host side of a served plugin lost of its own work, cumulative
+/// since the plugin was bound (`PluginControls::bridge_losses` in
+/// `tutti-plugin-host`). Zero for a plugin that runs in this process. The
+/// server's own losses are [`ServerLosses`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BridgeLosses {
+    /// Commands the audio side could not hand to the bridge: a full command
+    /// queue refused a reset or rate command, or a block found no payload or
+    /// no room for its parameter buffer, so the block was refused and played
+    /// as silence.
+    pub commands_refused: u64,
+    /// Audio responses (a block's MIDI-out and status) the bridge could not
+    /// queue for the audio thread because its queue was full: lost.
+    pub responses_lost: u64,
+    /// Parameter-change buffers the audio thread leaked rather than free on
+    /// its own thread: a broken sizing bound, apart from a full command queue.
+    pub leaked_buffers: u64,
+    /// Transfers between the plugin and its editor instance that were refused:
+    /// a parameter write the mirror's full queue dropped (the plugin still got
+    /// it; only the open editor's display missed it), an edit made in the
+    /// editor that the plugin did not take, and a state that could not be read
+    /// or loaded either way (an editor opened at the plugin's defaults among
+    /// them).
+    pub mirror_transfers_refused: u64,
+    /// Requests the plugin's editor instance made that were dropped: every
+    /// [`Request`](crate::Request) but a transport request (a restart, an I/O
+    /// change, a parameter rescan, a latency or tail change, a reload, a
+    /// callback, a MIDI-CC or note-expression change, a timer or a file
+    /// descriptor), which the plugin's audio instance cannot be told.
+    pub editor_requests_dropped: u64,
+    /// Tasks of the server on the host side (the bridge's lanes, the process's
+    /// exit watch) that did not stop in time and were left running.
+    pub detached_tasks: u64,
+}
+
 /// What the pipeline reports to its controls
-/// (`PluginControls::missed_chunks`, `late_chunks`, `refused_chunks`, `skipped_chunks`, `unanswered_chunks` and `chunk_in_flight_answered`
-/// in `tutti-plugin-host`):
+/// ([`outcomes`](Self::outcomes), [`bridge_losses`](Self::bridge_losses),
+/// [`server_losses`](Self::server_losses) and
+/// [`in_flight_answered`](Self::in_flight_answered), read by
+/// `PluginControls` in `tutti-plugin-host`):
 /// written on the audio thread with relaxed atomics, read anywhere.
 ///
 /// Here, beside [`PipelineCounts`], because the batcher in `tutti-plugin-ipc`
@@ -119,17 +196,9 @@ impl std::fmt::Debug for ChunkCounters {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ChunkCounters")
             .field("in_flight", &self.in_flight)
-            .field("missed", &self.missed)
-            .field("late", &self.late)
-            .field("refused", &self.refused)
-            .field("unanswered", &self.unanswered)
-            .field("skipped", &self.skipped())
-            .field("commands_refused", &self.commands_refused())
-            .field("responses_lost", &self.responses_lost())
-            .field("leaked_buffers", &self.leaked_buffers())
-            .field("mirror_transfers_refused", &self.mirror_transfers_refused())
-            .field("editor_requests_dropped", &self.editor_requests_dropped())
-            .field("detached", &self.detached())
+            .field("outcomes", &self.outcomes())
+            .field("bridge_losses", &self.bridge_losses())
+            .field("server_losses", &self.server_losses())
             .finish_non_exhaustive()
     }
 }
@@ -138,11 +207,6 @@ impl ChunkCounters {
     /// Records how to tell that a chunk is answered (the node's bind).
     pub fn attach(&self, answered: impl Fn(u64) -> bool + Send + Sync + 'static) {
         let _ = self.answered.set(Box::new(answered));
-    }
-
-    /// See `PluginControls::missed_chunks`.
-    pub fn missed(&self) -> u64 {
-        self.missed.load(Ordering::Relaxed)
     }
 
     /// Reads the bridge thread's count of skipped chunks (the node's bind).
@@ -155,19 +219,9 @@ impl ChunkCounters {
         let _ = self.commands_refused.set(refused);
     }
 
-    /// See `PluginControls::refused_commands`.
-    pub fn commands_refused(&self) -> u64 {
-        self.commands_refused.get().map_or(0, Tally::get)
-    }
-
     /// Reads the bridge's count of lost audio responses (the node's bind).
     pub fn attach_responses_lost(&self, lost: Counter<u64>) {
         let _ = self.responses_lost.set(lost);
-    }
-
-    /// See `PluginControls::lost_responses`.
-    pub fn responses_lost(&self) -> u64 {
-        self.responses_lost.get().map_or(0, Counter::get)
     }
 
     /// Reads the payload pool's count of leaked buffers (the node's bind).
@@ -175,19 +229,9 @@ impl ChunkCounters {
         let _ = self.leaked_buffers.set(leaked);
     }
 
-    /// See `PluginControls::leaked_buffers`.
-    pub fn leaked_buffers(&self) -> u64 {
-        self.leaked_buffers.get().map_or(0, Tally::get)
-    }
-
     /// Reads the editor mirror's count of refused transfers (the node's bind).
     pub fn attach_mirror_transfers_refused(&self, refused: Tally<u64>) {
         let _ = self.mirror_transfers_refused.set(refused);
-    }
-
-    /// See `PluginControls::mirror_transfers_refused`.
-    pub fn mirror_transfers_refused(&self) -> u64 {
-        self.mirror_transfers_refused.get().map_or(0, Tally::get)
     }
 
     /// Reads the count of editor-instance requests dropped (the node's bind).
@@ -195,19 +239,9 @@ impl ChunkCounters {
         let _ = self.editor_requests_dropped.set(dropped);
     }
 
-    /// See `PluginControls::editor_requests_dropped`.
-    pub fn editor_requests_dropped(&self) -> u64 {
-        self.editor_requests_dropped.get().map_or(0, Tally::get)
-    }
-
     /// Reads the server watch's count of detached tasks (the node's bind).
     pub fn attach_detached(&self, detached: Tally<u64>) {
         let _ = self.detached.set(detached);
-    }
-
-    /// See `PluginControls::detached_tasks`.
-    pub fn detached(&self) -> u64 {
-        self.detached.get().map_or(0, Tally::get)
     }
 
     /// Takes the server's cumulative counts, as it last told them.
@@ -220,42 +254,42 @@ impl ChunkCounters {
             .store(losses.edits_refused, Ordering::Relaxed);
     }
 
-    /// See `PluginControls::server_refused_commands`.
-    pub fn server_refused_commands(&self) -> u64 {
-        self.server_refused_commands.load(Ordering::Relaxed)
+    /// What became of the missed chunks, as the counts stand now. Each count
+    /// is one relaxed load: a reading taken while the pipeline runs can catch
+    /// one count ahead of another.
+    pub fn outcomes(&self) -> ChunkOutcomes {
+        ChunkOutcomes {
+            missed: self.missed.load(Ordering::Relaxed),
+            late: self.late.load(Ordering::Relaxed),
+            refused: self.refused.load(Ordering::Relaxed),
+            unanswered: self.unanswered.load(Ordering::Relaxed),
+            skipped: self.skipped.get().map_or(0, Tally::get),
+        }
     }
 
-    /// The callbacks the plugin made from a thread its format forbids, which
-    /// its server refused, as the server last told them
-    /// ([`Control::refused_off_thread_calls`](crate::Control::refused_off_thread_calls)
-    /// of a served plugin).
-    pub fn server_refused_off_thread_calls(&self) -> u64 {
-        self.server_refused_off_thread_calls.load(Ordering::Relaxed)
+    /// What the host side lost of its own work, as the counts stand now;
+    /// zero for a count whose producer was never attached.
+    pub fn bridge_losses(&self) -> BridgeLosses {
+        let tally = |cell: &OnceLock<Tally<u64>>| cell.get().map_or(0, Tally::get);
+        BridgeLosses {
+            commands_refused: tally(&self.commands_refused),
+            responses_lost: self.responses_lost.get().map_or(0, Counter::get),
+            leaked_buffers: tally(&self.leaked_buffers),
+            mirror_transfers_refused: tally(&self.mirror_transfers_refused),
+            editor_requests_dropped: tally(&self.editor_requests_dropped),
+            detached_tasks: tally(&self.detached),
+        }
     }
 
-    /// See `PluginControls::server_refused_edits`.
-    pub fn server_refused_edits(&self) -> u64 {
-        self.server_refused_edits.load(Ordering::Relaxed)
-    }
-
-    /// See `PluginControls::skipped_chunks`.
-    pub fn skipped(&self) -> u64 {
-        self.skipped.get().map_or(0, Tally::get)
-    }
-
-    /// See `PluginControls::late_chunks`.
-    pub fn late(&self) -> u64 {
-        self.late.load(Ordering::Relaxed)
-    }
-
-    /// See `PluginControls::refused_chunks`.
-    pub fn refused(&self) -> u64 {
-        self.refused.load(Ordering::Relaxed)
-    }
-
-    /// See `PluginControls::unanswered_chunks`.
-    pub fn unanswered(&self) -> u64 {
-        self.unanswered.load(Ordering::Relaxed)
+    /// The server's own cumulative losses, as it last told them
+    /// ([`note_server_losses`](Self::note_server_losses)); zero before it
+    /// told any.
+    pub fn server_losses(&self) -> ServerLosses {
+        ServerLosses {
+            commands_refused: self.server_refused_commands.load(Ordering::Relaxed),
+            edits_refused: self.server_refused_edits.load(Ordering::Relaxed),
+            refused_off_thread_calls: self.server_refused_off_thread_calls.load(Ordering::Relaxed),
+        }
     }
 
     /// See `PluginControls::chunk_in_flight_answered`.
