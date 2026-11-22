@@ -2517,7 +2517,9 @@ impl<F: Float> Graph<F> {
         };
         if added || leaving {
             // The edge exists now, so the fade is the editor's to take.
-            let _ = self.editor.set_edge_fade(id, EdgeFade::In);
+            self.editor
+                .set_edge_fade(id, EdgeFade::In)
+                .expect("the edge was just wired");
             self.edited = true;
         }
         Ok(added || leaving)
@@ -2546,7 +2548,9 @@ impl<F: Float> Graph<F> {
         {
             return;
         }
-        let _ = self.editor.set_edge_fade(id, EdgeFade::None);
+        self.editor
+            .set_edge_fade(id, EdgeFade::None)
+            .expect("the edge has a gain entry");
         let plain = self
             .editor
             .spec()
@@ -3124,8 +3128,12 @@ impl<F: Float> Graph<F> {
                 ..EdgeGain::default()
             };
             self.editor.spec_mut().set_edge_gain(id, fresh);
-            let _ = self.editor.set_edge_gain(id, Amplitude::UNITY);
-            let _ = self.editor.set_edge_gain_range(id, EdgeGain::DEFAULT_RANGE);
+            self.editor
+                .set_edge_gain(id, Amplitude::UNITY)
+                .expect("the lane was just declared");
+            self.editor
+                .set_edge_gain_range(id, EdgeGain::DEFAULT_RANGE)
+                .expect("the lane was just declared");
             true
         } else {
             self.editor.spec_mut().clear_edge_gain(id).is_some()
