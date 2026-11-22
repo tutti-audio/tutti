@@ -242,3 +242,33 @@ fn an_edge_target_keys_apart_and_goes_with_its_node() {
     assert_ne!(key, s.mods_mut().key(param));
     assert_eq!(ParamRef::from_key(key), None);
 }
+
+/// **An edge's gain reads its effective value beside its base**: the base
+/// with no route, the lane's weight (`1.0 + 0.25 * 0.5 * 4 = 1.5`) while a
+/// route drives it, the base again once the route is gone and its declick is
+/// over; the base reads unity throughout.
+#[test]
+fn a_gain_reads_its_effective_value_beside_its_base() {
+    let mut s = offline();
+    let edge = mixer(&mut s);
+    settle(&mut s);
+    let _ = render(&mut s, 2);
+    let target = gain(&s, edge);
+    assert_eq!(s.get(target.effective()).unwrap(), Gain::UNITY);
+
+    let mut m = s.mods_mut();
+    m.range(edge, Gain::new(-2.0)..Gain::new(2.0)).unwrap();
+    let source = m.macro_(0.5);
+    let route = m
+        .route(RouteSpec::new(source, edge, Depth::of(0.25)))
+        .unwrap();
+    settle(&mut s);
+    let _ = render(&mut s, 12);
+    assert_eq!(s.get(target.effective()).unwrap(), Gain::new(1.5));
+    assert_eq!(s.get(target).unwrap(), Gain::UNITY, "the base stays");
+
+    s.mods_mut().remove_route(route).unwrap();
+    settle(&mut s);
+    let _ = render(&mut s, 12);
+    assert_eq!(s.get(target.effective()).unwrap(), Gain::UNITY);
+}

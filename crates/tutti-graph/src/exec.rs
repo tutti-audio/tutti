@@ -914,7 +914,7 @@ mod tests {
             Arc::clone(&plan),
             delta,
             units,
-            |_, ports, max| ParamState::new(ports, max, declick, Vec::new()),
+            |_, ports, max| ParamState::new(ports, max, declick, Vec::new(), Vec::new()),
             |key| {
                 let cell = ModeCell::new(NodeMode::Active, Mix::WET);
                 let shape = &plan.unit(key).expect("placed").shape;

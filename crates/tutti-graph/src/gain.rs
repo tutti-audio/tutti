@@ -61,7 +61,9 @@ use tutti_rt::{CappedVec, ParamCell};
 use tutti_units::{Gain, Samples, UnitAddr, UnitParam};
 
 use crate::lane::{fade_in, ramp_in};
-use crate::param::{ParamPorts, ParamRange, ParamRangeCell, ParamRanges, ParamState};
+use crate::param::{
+    EffectiveCell, ParamPorts, ParamRange, ParamRangeCell, ParamRanges, ParamState,
+};
 use crate::param_event::ParamEvent;
 use crate::spec::EventOutputPort;
 
@@ -254,6 +256,13 @@ impl GainCell {
     pub(crate) fn range_cell(&self) -> ParamRangeCell {
         self.range
             .cell(EdgeGain::ADDR)
+            .expect("the cell holds the gain's own address")
+    }
+
+    /// A handle on the weight the lane's source last delivered.
+    pub(crate) fn effective_cell(&self) -> EffectiveCell {
+        self.range
+            .lane(EdgeGain::ADDR)
             .expect("the cell holds the gain's own address")
     }
 

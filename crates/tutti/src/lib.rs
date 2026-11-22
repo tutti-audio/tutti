@@ -490,8 +490,8 @@ pub mod graph {
     };
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,
-        Due, Edge, Event, EventKind, EventOrderError, EventRejected, EventWriter, ForkBuild,
-        ForkCause, ForkFaultKind, ForkHealth, ForkSource, Forked, GraphInvalid, Harmony,
+        Due, Edge, EffectiveCell, Event, EventKind, EventOrderError, EventRejected, EventWriter,
+        ForkBuild, ForkCause, ForkFaultKind, ForkHealth, ForkSource, Forked, GraphInvalid, Harmony,
         HarmonyKind, InPlaceMask, NodeParts, Offset, ParamEvent, ParamInput, ParamKind, ParamPorts,
         ParamPortsError, ParamRamp, ParamRange, ParamRangeCell, ParamRangeReader, ParamSegment,
         Pass, PlayClock, PortSink, PortSource, RenderMode, Resolution, SilenceMask, SortedEvents,

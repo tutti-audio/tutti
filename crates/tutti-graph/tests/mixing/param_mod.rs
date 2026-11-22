@@ -2623,3 +2623,85 @@ enum Side {
     Executor,
     Reference,
 }
+
+/// **A port's effective cell reads the lane's last frame while it drives the
+/// port, held to the range, and reads no lane once it stops.** A source
+/// holding 1.0 on the cutoff: before it is connected the staged cell reads no
+/// lane; after the connect's declick the cell reads 1.0; a range of
+/// `-0.5..=0.5` holds it to 0.5, and the base cell never moves; after the
+/// disconnect's declick the cell reads no lane again. A port that is not
+/// driven reads no lane throughout.
+#[test]
+fn an_effective_cell_reads_the_lane_and_then_no_lane() {
+    let (cutoff, q) = (Cell::new(0.25), Cell::new(0.25));
+    let (mut ed, mut exec) = probe_graph(64, &cutoff, &q);
+    ed.insert(NodeKey(1), "one", Unforkable(Hold { value: 1.0 }));
+    let at = param(PROBE, UnitParam::Cutoff);
+    let cell = ed.param_effective_cell(at).expect("a staged node's port");
+    assert!(
+        ed.param_effective_cell(param(PROBE, UnitParam::Wet))
+            .is_none()
+    );
+    assert!(
+        ed.param_effective_cell(param(7, UnitParam::Cutoff))
+            .is_none()
+    );
+    ed.commit().expect("commits");
+    let _ = render(&mut exec, &mut ed, 128, 64);
+    assert_eq!(cell.current(), None, "nothing drives the port");
+
+    ed.spec_mut().connect_param(at, ev(1));
+    ed.commit().expect("connects");
+    let _ = render(&mut exec, &mut ed, 1024, 64);
+    assert_eq!(cell.current(), Some(1.0), "the lane's last frame");
+    assert!(
+        cell.same_cell(&ed.param_effective_cell(at).expect("the same port")),
+        "a commit keeps the cell"
+    );
+    assert_eq!(cutoff.get(), 0.25, "the base is not the lane's");
+
+    ed.set_param_range(at, ParamRange::of(-0.5, 0.5))
+        .expect("a range");
+    let _ = render(&mut exec, &mut ed, 64, 64);
+    assert_eq!(cell.current(), Some(0.5), "held to the range");
+    assert_eq!(cutoff.get(), 0.25);
+
+    assert!(ed.spec_mut().disconnect_param(at, ev(1)));
+    ed.commit().expect("disconnects");
+    let _ = render(&mut exec, &mut ed, 1024, 64);
+    assert_eq!(cell.current(), None, "the lane is gone");
+}
+
+/// **A lane's NaN is never latched into the effective cell.** A source steps
+/// the cutoff to 2.0 at frame 10, to NaN at 100 and to 3.0 at 200: after each
+/// 64-frame block the cell reads 2.0, then no lane (the block's last frame is
+/// NaN, and so the next's), then 3.0.
+#[test]
+fn a_nan_lane_is_never_latched_in_the_effective_cell() {
+    let (cutoff, q) = (Cell::new(0.0), Cell::new(0.0));
+    let (mut ed, mut exec) = probe_graph(64, &cutoff, &q);
+    ed.insert(
+        NodeKey(1),
+        "ramps",
+        Unforkable(Ramps {
+            plan: vec![
+                (10, UnitParam::Cutoff, 2.0, 0),
+                (100, UnitParam::Cutoff, f64::NAN, 0),
+                (200, UnitParam::Cutoff, 3.0, 0),
+            ],
+            segs: Vec::new(),
+            shaped: Vec::new(),
+            events: Vec::new(),
+        }),
+    );
+    let at = param(PROBE, UnitParam::Cutoff);
+    let cell = ed.param_effective_cell(at).expect("a staged node's port");
+    ed.spec_mut().connect_param(at, ev(1));
+    ed.commit().expect("commits");
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        let _ = render(&mut exec, &mut ed, 64, 64);
+        seen.push(cell.current());
+    }
+    assert_eq!(seen, [Some(2.0), None, None, Some(3.0)]);
+}

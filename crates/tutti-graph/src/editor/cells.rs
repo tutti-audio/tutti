@@ -17,7 +17,9 @@ use tutti_curve::declick_frames;
 use super::BusLanes;
 use crate::gain::{EdgeFade, EdgeGain, GainCell};
 use crate::mode::{ModeCell, ModeState, NodeMix, NodeMode};
-use crate::param::{ParamIn, ParamPorts, ParamRange, ParamRangeCell, ParamRanges, ParamState};
+use crate::param::{
+    EffectiveCell, ParamIn, ParamPorts, ParamRange, ParamRangeCell, ParamRanges, ParamState,
+};
 use crate::plan::Plan;
 use crate::spec::GraphSpec;
 use crate::values::GraphValues;
@@ -98,6 +100,11 @@ impl RangeCells {
         self.0.get(&at.node).and_then(|cells| cells.cell(at.param))
     }
 
+    /// A handle on the value `at`'s lane last delivered.
+    pub(super) fn effective(&self, at: ParamIn) -> Option<EffectiveCell> {
+        self.0.get(&at.node).and_then(|cells| cells.lane(at.param))
+    }
+
     fn reclaim(&self) -> usize {
         self.0.values().map(|cells| cells.reclaim()).sum()
     }
@@ -151,7 +158,9 @@ impl RangeCells {
     ) -> ParamState<F> {
         self.declare(key, declared.unwrap_or(ParamPorts::NONE), values);
         match self.0.get(&key) {
-            Some(cells) if ports > 0 => ParamState::new(ports, max, declick, cells.readers()),
+            Some(cells) if ports > 0 => {
+                ParamState::new(ports, max, declick, cells.readers(), cells.lanes())
+            }
             _ => ParamState::default(),
         }
     }
