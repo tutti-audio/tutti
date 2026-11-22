@@ -109,7 +109,7 @@ impl TryFrom<&str> for ParamPath {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ParamPathError {
     /// More than [`ParamPath::MAX_LEN`] bytes (M2-117 Table 5).
-    #[error("the path is {len} bytes, and at most 256 fit")]
+    #[error("the path is {len} bytes, and at most {} fit", ParamPath::MAX_LEN)]
     TooLong {
         /// Its length in bytes.
         len: usize,

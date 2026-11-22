@@ -1256,15 +1256,31 @@ fn a_controller_entry_fault_names_the_index_and_the_path_that_failed() {
         fault(r#""ctrlType":"rpn","ctrlIndex":[0]"#),
         PeDataFault::NotValid(InvalidValue::ControllerIndex(ControllerIndexError::Shape {
             kind: CtrlKind::Rpn,
-            integers: Some(1)
+            integers: 1
         }))
     );
     assert_eq!(
+        ControllerIndexError::Shape {
+            kind: CtrlKind::Rpn,
+            integers: 1
+        }
+        .to_string(),
+        "a `rpn` controller takes no ctrlIndex of 1 integers"
+    );
+    assert_eq!(
         fault(r#""ctrlType":"cc""#),
-        PeDataFault::NotValid(InvalidValue::ControllerIndex(ControllerIndexError::Shape {
-            kind: CtrlKind::ControlChange,
-            integers: None
-        }))
+        PeDataFault::NotValid(InvalidValue::ControllerIndex(
+            ControllerIndexError::Missing {
+                kind: CtrlKind::ControlChange
+            }
+        ))
+    );
+    assert_eq!(
+        ControllerIndexError::Missing {
+            kind: CtrlKind::ControlChange
+        }
+        .to_string(),
+        "a `cc` controller needs a ctrlIndex"
     );
     assert_eq!(
         fault(r#""ctrlType":"nrpn","ctrlIndex":[128,0]"#),
@@ -1288,6 +1304,10 @@ fn a_controller_entry_fault_names_the_index_and_the_path_that_failed() {
         PeDataFault::NotValid(InvalidValue::ParamPath(ParamPathError::TooLong {
             len: 257
         }))
+    );
+    assert_eq!(
+        ParamPathError::TooLong { len: 257 }.to_string(),
+        "the path is 257 bytes, and at most 256 fit"
     );
 }
 

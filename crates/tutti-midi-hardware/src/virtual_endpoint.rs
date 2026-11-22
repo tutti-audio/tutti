@@ -707,6 +707,17 @@ mod tests {
         assert_eq!(outbound.losses.get(), Losses::refused(4));
     }
 
+    // A packet forwarded as it is (not MIDI 2.0 voice) is a message of one.
+    #[test]
+    fn a_full_queue_on_a_passthrough_packet_refuses_it() {
+        let (outbound, sent) = source(0, true);
+        outbound
+            .send(Message::Utility(tutti_ump::Utility::Noop).into())
+            .unwrap();
+        assert!(sent.lock().unwrap().is_empty());
+        assert_eq!(outbound.losses.get(), Losses::refused(1));
+    }
+
     #[test]
     fn a_full_queue_mid_message_loses_its_tail() {
         // The first controller's second packet (CC 100) meets a full queue.

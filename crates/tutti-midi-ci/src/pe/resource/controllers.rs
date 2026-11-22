@@ -123,10 +123,11 @@ impl PeController {
             },
             (CtrlKind::PerNoteRegistered, Some(&[n])) => Self::PerNoteRegistered(byte(n)?),
             (CtrlKind::PerNoteAssignable, Some(&[n])) => Self::PerNoteAssignable(byte(n)?),
-            (kind, index) => {
+            (kind, None) => return Err(ControllerIndexError::Missing { kind }),
+            (kind, Some(index)) => {
                 return Err(ControllerIndexError::Shape {
                     kind,
-                    integers: index.map(<[i64]>::len),
+                    integers: index.len(),
                 });
             }
         })
@@ -136,14 +137,19 @@ impl PeController {
 /// A `ctrlIndex` that does not fit its `ctrlType` (M2-117 Table 5).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ControllerIndexError {
-    /// The index has the wrong number of integers for the type, or is absent
-    /// where the type needs one.
-    #[error("a `{}` controller takes no ctrlIndex of {}", .kind.as_str(), integers_text(*.integers))]
+    /// The type needs an index and the entry has none.
+    #[error("a `{}` controller needs a ctrlIndex", .kind.as_str())]
+    Missing {
+        /// The `ctrlType`.
+        kind: CtrlKind,
+    },
+    /// The index has the wrong number of integers for the type.
+    #[error("a `{}` controller takes no ctrlIndex of {integers} integers", .kind.as_str())]
     Shape {
         /// The `ctrlType`.
         kind: CtrlKind,
-        /// How many integers the index had; `None` when it was absent.
-        integers: Option<usize>,
+        /// How many integers the index had.
+        integers: usize,
     },
     /// An index integer that is no 7-bit value.
     #[error("the index {0} is not a 7-bit value")]
@@ -151,11 +157,6 @@ pub enum ControllerIndexError {
     /// An index integer that is no byte.
     #[error("the index {0} is not a byte")]
     NotAByte(i64),
-}
-
-/// How the index of a [`ControllerIndexError::Shape`] reads.
-fn integers_text(integers: Option<usize>) -> String {
-    integers.map_or_else(|| "none".to_owned(), |n| format!("{n} integers"))
 }
 
 /// How a controller is meant to be shown and driven (`typeHint`, `ctrlMapId`;

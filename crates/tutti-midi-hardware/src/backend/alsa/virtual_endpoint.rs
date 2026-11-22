@@ -108,15 +108,12 @@ impl Drop for AlsaVirtualEndpoint {
     }
 }
 
-/// `-EAGAIN`'s errno: a subscriber's queue has no room.
-const EAGAIN: i32 = 11;
-
 /// What a send's result says: a subscriber with no room is [`Delivery::Full`], the
 /// non-blocking client's refusal, and any other failure is the OS's error.
 fn delivery(sent: tutti_alsa_ffi::Result<()>) -> Result<Delivery> {
     match sent {
         Ok(()) => Ok(Delivery::Sent),
-        Err(error) if error.errno() == Some(EAGAIN) => Ok(Delivery::Full),
+        Err(error) if error.would_block() => Ok(Delivery::Full),
         Err(error) => Err(error.into()),
     }
 }
