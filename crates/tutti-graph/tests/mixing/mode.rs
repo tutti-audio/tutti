@@ -28,9 +28,9 @@ use tutti_buffers::FoldError;
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
 use tutti_graph::{
     Bus, BusRole, Buses, Cx, Edge, Editor, Event, EventEdge, EventInputPort, EventKind,
-    EventOutputPort, Executor, FadeLaw, ForkByClone, ForkTarget, GraphInvalid, GraphSpec,
-    InputPort, Io, ModeError, Node, NodeKey, NodeMode, Offset, OutputPort, PassError, PortSource,
-    Prepare, RenderMode, Shape, Status, Topology, TransportPosition, Unforkable, ValidGraph,
+    EventOutputPort, Executor, FadeLaw, ForkByClone, ForkTarget, GraphSpec, InputPort, Io,
+    ModeError, Node, NodeKey, NodeMode, Offset, OutputPort, PassError, PortSource, Prepare,
+    RenderMode, Shape, Status, Topology, TransportPosition, Unforkable,
 };
 use tutti_ump::Ump;
 use tutti_units::{Latency, Samples, Tail};
@@ -68,7 +68,7 @@ fn gains(k: usize) -> (f32, f32) {
 }
 
 /// A `Pair` over `kinds` (keys `1..`), wired by `wire`, with `modes` set
-/// before the first block (a unit starts steady in the spec's mode).
+/// before the first block (a unit starts steady in its mode).
 struct Rig {
     pair: Pair,
     frame: u64,
@@ -90,11 +90,11 @@ impl Rig {
         }
         t.inputs = ChannelLayout::from_count(inputs);
         wire(&mut t);
-        let mut spec = GraphSpec::new(t);
-        for &(n, m) in modes {
-            spec.set_mode(key(n), m);
-        }
+        let spec = GraphSpec::new(t);
         let mut pair = Pair::with_workers(MAX_BLOCK, workers);
+        for &(n, m) in modes {
+            pair.start_mode(key(n), m);
+        }
         pair.switch(&spec.validate().expect("valid"), &map);
         Self { pair, frame: 0 }
     }
@@ -1356,12 +1356,11 @@ fn set_mode_does_not_change_the_plan() {
     assert!(Arc::ptr_eq(&exec_plan, s.exec.plan().expect("running")));
     assert_eq!(s.ed.mode(key(1)), NodeMode::Bypassed);
     assert_eq!(s.ed.mode(key(9)), NodeMode::Active, "absent is Active");
-    // Back to Active: the spec holds no entry for it.
+    // Back to Active, and on to Muted: a commit between them still has
+    // nothing to send.
     s.mode(1, NodeMode::Active);
-    assert!(s.ed.spec().modes.is_empty());
-    // A mode edited in the spec directly lands at the next commit, which is
-    // still not a new plan.
-    s.ed.spec_mut().set_mode(key(1), NodeMode::Muted);
+    assert_eq!(s.ed.mode(key(1)), NodeMode::Active);
+    s.ed.set_mode(key(1), NodeMode::Muted).expect("a node");
     s.ed.commit().expect("commits");
     s.exec.apply_pending();
     s.ed.collect();
@@ -1370,8 +1369,8 @@ fn set_mode_does_not_change_the_plan() {
     assert!(heard[BLOCK * 6..].iter().all(|v| v.to_bits() == 0), "muted");
 }
 
-/// `set_mode` refuses a key with no node, a spec with a mode for one is
-/// invalid, and removing the node takes its mode with it.
+/// `set_mode` refuses a key with no node, and removing the node takes its
+/// mode with it.
 #[test]
 fn modes_name_nodes() {
     let mut s = probe_chain(Probe::new(2.0), None);
@@ -1379,15 +1378,9 @@ fn modes_name_nodes() {
         s.ed.set_mode(key(7), NodeMode::Muted),
         Err(ModeError::NoSuchNode { node: key(7) })
     );
-    let mut spec: GraphSpec = s.ed.spec().clone();
-    spec.set_mode(key(7), NodeMode::Muted);
-    assert_eq!(
-        spec.validate().map(|_| ()),
-        Err(vec![GraphInvalid::ModeWithoutNode { node: key(7) }])
-    );
     s.mode(1, NodeMode::Muted);
     s.ed.remove(key(1));
-    assert!(s.ed.spec().modes.is_empty());
+    assert_eq!(s.ed.mode(key(1)), NodeMode::Active);
 }
 
 /// **A fork copies the modes and starts every unit steady, with no fade**:
@@ -1448,17 +1441,6 @@ fn a_fork_copies_the_mode_and_starts_steady() {
         &mut [&mut o[..]],
     );
     assert_ne!(o[0], input[0], "and the live graph still fades");
-}
-
-/// A `ValidGraph` carries the modes the reference reads.
-#[test]
-fn a_valid_graph_carries_its_modes() {
-    let mut t = Topology::default();
-    t.nodes.insert(key(1), spec_of(&Kind::Smooth));
-    let mut spec = GraphSpec::new(t);
-    spec.set_mode(key(1), NodeMode::Bypassed);
-    let v: ValidGraph = spec.validate().expect("valid");
-    assert_eq!(v.modes().get(&key(1)), Some(&NodeMode::Bypassed));
 }
 
 /// **A node that declares its own bypass is still called when bypassed**, and

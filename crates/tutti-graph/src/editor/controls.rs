@@ -438,8 +438,8 @@ impl<F: Float> Editor<F> {
     /// bypass, a mix short of [`Mix::WET`], or a lane on the mix.
     pub(super) fn check_passes(&self) -> Result<(), CommitError> {
         let heard = |key: NodeKey| {
-            (self.spec.mode(key) == NodeMode::Bypassed && !self.bypasses_itself(key))
-                || self.spec.mix(key) != Mix::WET
+            (self.values.mode(key) == NodeMode::Bypassed && !self.bypasses_itself(key))
+                || self.values.mix(key) != Mix::WET
                 || self
                     .spec
                     .params
@@ -459,7 +459,7 @@ impl<F: Float> Editor<F> {
         Ok(())
     }
 
-    /// Sets `key`'s [`NodeMode`] **without a commit**: the spec records it
+    /// Sets `key`'s [`NodeMode`] **without a commit**: the editor records it
     /// and the running unit reads it once per block, from the next block on
     /// (a store while the audio thread is inside a block lands on that block
     /// or the next, and every op of a block sees one mode). Nothing is
@@ -469,9 +469,9 @@ impl<F: Float> Editor<F> {
     /// A change of mode is a crossfade of [`DECLICK`](crate::DECLICK),
     /// counted from the first frame of the block it lands on; see
     /// [`NodeMode`] and `src/mode.rs` for what each mode does. A fork starts
-    /// every unit steady in the mode the spec holds, with no fade.
+    /// every unit steady in the mode the editor holds, with no fade.
     ///
-    /// Before the unit is committed the spec holds the mode, and the unit
+    /// Before the unit is committed the editor holds the mode, and the unit
     /// starts in it.
     ///
     /// # Errors
@@ -491,27 +491,21 @@ impl<F: Float> Editor<F> {
             return Err(ModeError::Unplaced { node: key, error });
         }
         self.touch();
-        self.spec.set_mode(key, mode);
+        self.values.set_mode(key, mode);
         if let Some(cell) = self.cells.modes.get(key) {
             cell.store(mode);
-        }
-        // As for a range: the cell holds it, so the spec last committed holds
-        // it too, and a later commit with nothing else to send is the plain
-        // comparison.
-        if let Some(c) = self.life.committed_mut() {
-            c.spec.set_mode(key, mode);
         }
         Ok(())
     }
 
     /// `key`'s mode: [`NodeMode::Active`] unless [`set_mode`](Self::set_mode)
-    /// (or an edit of [`GraphSpec::modes`](crate::GraphSpec::modes)) set another.
+    /// set another.
     pub fn mode(&self, key: NodeKey) -> NodeMode {
-        self.spec.mode(key)
+        self.values.mode(key)
     }
 
     /// Sets `key`'s [`Mix`] **without a commit**: the blend of the node's output
-    /// with its aligned input, `out = y * m + x̂ * (1 - m)` per channel. The spec records it and the
+    /// with its aligned input, `out = y * m + x̂ * (1 - m)` per channel. The editor records it and the
     /// running unit reads it once per block, from the next block on; the plan
     /// is the same `Arc` and a host may call this for every move of a knob.
     ///
@@ -520,7 +514,7 @@ impl<F: Float> Editor<F> {
     /// unblended node; [`Mix::DRY`] (all of the aligned input) is what Bypassed
     /// writes in steady state, but the node keeps running. A node that is
     /// [`Bypassed`](NodeMode::Bypassed) or [`Muted`](NodeMode::Muted) ignores
-    /// the mix: the mode wins. A fork starts every unit at the mix the spec
+    /// the mix: the mode wins. A fork starts every unit at the mix the editor
     /// holds.
     ///
     /// # Errors
@@ -543,27 +537,23 @@ impl<F: Float> Editor<F> {
             return Err(MixError::Unplaced { node: key, error });
         }
         self.touch();
-        self.spec.set_mix(key, mix);
+        self.values.set_mix(key, mix);
         if let Some(cell) = self.cells.modes.get(key) {
             cell.store_mix(mix);
-        }
-        if let Some(c) = self.life.committed_mut() {
-            c.spec.set_mix(key, mix);
         }
         Ok(())
     }
 
-    /// `key`'s mix: [`Mix::WET`] unless [`set_mix`](Self::set_mix) (or an edit
-    /// of [`GraphSpec::mixes`](crate::GraphSpec::mixes)) set another. The live cell's once a commit has
-    /// placed the unit (the one writer's, whether it is `set_mix` or a lane's
-    /// knob), the spec's before; it is the base a driving lane modulates
-    /// around, not the lane's value.
+    /// `key`'s mix: [`Mix::WET`] unless [`set_mix`](Self::set_mix) set another.
+    /// The live cell's once a commit has placed the unit (the one writer's,
+    /// whether it is `set_mix` or a lane's knob), the editor's value before;
+    /// it is the base a driving lane modulates around, not the lane's value.
     pub fn mix(&self, key: NodeKey) -> Mix {
         self.cells
             .modes
             .get(key)
             .filter(|_| self.spec.topology.nodes.contains_key(&key))
-            .map_or_else(|| self.spec.mix(key), ModeCell::load_mix)
+            .map_or_else(|| self.values.mix(key), ModeCell::load_mix)
     }
 
     /// `key`'s live mix: the very cell [`set_mix`](Self::set_mix) stores into,
@@ -584,10 +574,10 @@ impl<F: Float> Editor<F> {
         Some(self.cells.gains.get(id).map_or(gain.base, GainCell::load))
     }
 
-    /// Write every live cell from the spec: every range and mode, and a base
-    /// or mix the spec moved since the last commit.
+    /// Write every live cell from the spec and the node values: every range
+    /// and mode, and a base the spec moved since the last commit.
     pub(super) fn sync_ranges(&self) {
         let committed = self.life.committed().map(|c| &c.spec);
-        self.cells.sync(&self.spec, committed);
+        self.cells.sync(&self.spec, &self.values, committed);
     }
 }

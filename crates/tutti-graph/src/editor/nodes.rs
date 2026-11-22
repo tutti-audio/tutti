@@ -692,8 +692,8 @@ impl<F: Float> Editor<F> {
         if leaving {
             return;
         }
-        self.spec.modes.remove(&key);
-        self.spec.mixes.remove(&key);
+        self.values.forget(key);
+        self.cells.forget(key);
         self.spec.generations.remove(&key);
         self.shapes.remove(&key);
         self.placements.forget(key);

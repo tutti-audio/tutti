@@ -109,8 +109,6 @@ tutti-graph  setter  crates/tutti-graph/src/editor/nodes.rs::Editor::set_tail
 tutti-graph  setter  crates/tutti-graph/src/exec.rs::Executor::set_pool
 tutti-graph  setter  crates/tutti-graph/src/graph.rs::Topology::set_outputs
 tutti-graph  setter  crates/tutti-graph/src/spec.rs::GraphSpec::set_edge_gain
-tutti-graph  setter  crates/tutti-graph/src/spec.rs::GraphSpec::set_mix
-tutti-graph  setter  crates/tutti-graph/src/spec.rs::GraphSpec::set_mode
 tutti-graph  setter  crates/tutti-graph/src/spec.rs::GraphSpec::set_param_range
 tutti-graph  node-ctor  crates/tutti-graph/src/inlet.rs::InletNode::new
 tutti-graph  ctor-result  crates/tutti-graph/src/event.rs::SortedEvents::new

@@ -121,6 +121,7 @@ use crate::node::{
     ConstantMask, Cx, Env, InPlaceMask, Node, Prepare, SilenceMask, Status, TransportChanges,
     TransportPosition,
 };
+use crate::node_values::NodeValues;
 use crate::param::{CellValue, ParamIn, ParamInput, ParamRange};
 use crate::param_event::{ParamEvent, ParamKind};
 use crate::plan::DelayKey;
@@ -641,7 +642,7 @@ impl<F: Float> Reference<F> {
     ///
     /// If `fresh` lacks a needed unit.
     pub fn set_graph(&mut self, graph: &ValidGraph, fresh: BTreeMap<NodeKey, Box<dyn Node<F>>>) {
-        self.set_graph_with_fades(graph, fresh, &BTreeMap::new());
+        self.set_graph_with(graph, fresh, &BTreeMap::new(), &NodeValues::default());
     }
 
     /// As [`set_graph`](Self::set_graph), with the regenerated keys in
@@ -657,8 +658,20 @@ impl<F: Float> Reference<F> {
     pub fn set_graph_with_fades(
         &mut self,
         graph: &ValidGraph,
+        fresh: BTreeMap<NodeKey, Box<dyn Node<F>>>,
+        fades: &BTreeMap<NodeKey, crate::Fade>,
+    ) {
+        self.set_graph_with(graph, fresh, fades, &NodeValues::default());
+    }
+
+    /// [`set_graph_with_fades`](Self::set_graph_with_fades), with a unit placed
+    /// now starting steady in the mode and mix `values` holds.
+    pub(crate) fn set_graph_with(
+        &mut self,
+        graph: &ValidGraph,
         mut fresh: BTreeMap<NodeKey, Box<dyn Node<F>>>,
         fades: &BTreeMap<NodeKey, crate::Fade>,
+        values: &NodeValues,
     ) {
         let t = graph.topology();
         // Keys whose unit is not the one running now: removed, or replaced.
@@ -745,16 +758,14 @@ impl<F: Float> Reference<F> {
                 }
             }
         }
-        // Modes: the cell of a key placed or swapped now takes the graph's
+        // Modes: the cell of a key placed or swapped now takes the node values'
         // mode (as the editor writes it for every unit a commit places); the
         // state of one placed fresh starts steady in it, and a swap with a
         // fade keeps what it had.
-        let spec_mode = |k: NodeKey| graph.modes().get(&k).copied().unwrap_or_default();
-        let spec_mix = |k: NodeKey| graph.mixes().get(&k).map_or(Mix::WET, |m| m.mix);
         for &key in &replaced {
             if t.nodes.contains_key(&key) {
-                self.wanted.insert(key, spec_mode(key));
-                self.wanted_mix.insert(key, spec_mix(key));
+                self.wanted.insert(key, values.mode(key));
+                self.wanted_mix.insert(key, values.mix(key));
             }
         }
         self.units.retain(|k, (generation, _)| {
@@ -771,13 +782,13 @@ impl<F: Float> Reference<F> {
                 unit.prepare(&self.prepare);
                 let shape = unit.shape();
                 self.units.insert(key, (graph.generation(key), unit));
-                self.wanted.insert(key, spec_mode(key));
-                self.wanted_mix.insert(key, spec_mix(key));
+                self.wanted.insert(key, values.mode(key));
+                self.wanted_mix.insert(key, values.mix(key));
                 self.modes.insert(
                     key,
                     RefMode::new(
-                        spec_mode(key),
-                        F::from_unit(spec_mix(key)),
+                        values.mode(key),
+                        F::from_unit(values.mix(key)),
                         &shape,
                         t.nodes[&key].latency.get(),
                         declick_frames(self.prepare.sample_rate()).get(),

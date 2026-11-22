@@ -114,6 +114,8 @@ fn stepped(n: usize, shift: usize) -> Option<f32> {
 struct Rig {
     kinds: BTreeMap<NodeKey, Kind>,
     spec: GraphSpec,
+    /// The mix of the node (key 2) a pair starts at: its base.
+    base: Option<Mix>,
 }
 
 impl Rig {
@@ -137,7 +139,11 @@ impl Rig {
         t.set_outputs(vec![out(2)]);
         let mut spec = GraphSpec::new(t);
         spec.connect_param(mix_of(2), lane_out(1));
-        Self { kinds, spec }
+        Self {
+            kinds,
+            spec,
+            base: None,
+        }
     }
 
     fn graph(&self) -> ValidGraph {
@@ -149,6 +155,9 @@ impl Rig {
 /// asserting each is the reference's; the node's output and the input.
 fn render(rig: &Rig, workers: usize, blocks: usize) -> (Vec<f32>, Vec<f32>) {
     let mut pair = Pair::with_workers(BLOCK, workers);
+    if let Some(base) = rig.base {
+        pair.start_mix(key(2), base);
+    }
     pair.switch(&rig.graph(), &rig.kinds);
     run(&mut pair, 0, blocks)
 }
@@ -323,10 +332,10 @@ fn a_source_that_goes_is_declicked_to_the_base() {
             latency: 0,
         },
     );
-    rig.spec.set_mix(key(2), Mix::new(base));
     let held = (driver_value(0, 1 << 20) * 2.0).clamp(0.0, 1.0);
 
     let mut pair = Pair::new(BLOCK);
+    pair.start_mix(key(2), Mix::new(base));
     pair.switch(&rig.graph(), &rig.kinds);
     let (got, x) = run(&mut pair, 0, 2);
     for (n, &g) in got.iter().enumerate() {
@@ -365,9 +374,9 @@ fn a_driven_lane_survives_a_commit_that_keeps_its_node() {
             latency: 0,
         },
     );
-    rig.spec.set_mix(key(2), Mix::new(0.25));
     let held = (driver_value(0, 1 << 20) * 2.0).clamp(0.0, 1.0);
     let mut pair = Pair::new(BLOCK);
+    pair.start_mix(key(2), Mix::new(0.25));
     pair.switch(&rig.graph(), &rig.kinds);
     for round in 0..3 {
         let input = input_signal(0, BLOCK);
@@ -468,7 +477,7 @@ fn a_late_lane_delays_the_audio_to_the_node() {
 #[test]
 fn an_early_lane_is_delayed_to_the_node() {
     let mut rig = Rig::new(plain(), 0, Some(latent_dc(1.0, 48)));
-    rig.spec.set_mix(key(2), Mix::new(0.25));
+    rig.base = Some(Mix::new(0.25));
     let plan = plan_of(&rig);
     assert_eq!(
         delay_of(
