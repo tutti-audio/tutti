@@ -1386,3 +1386,27 @@ fn a_resource_with_entries_says_require_res_id_true_in_the_resource_list() {
             .contains(r#""requireResId":true"#)
     );
 }
+
+// M2-103 §6.1: a number in Property Data is decimal too: the writer writes the
+// numbers of a Resource as decimal digits and a hexadecimal literal is not JSON.
+/// Spec: m2-103/6.1#4
+#[test]
+fn a_property_data_number_is_written_and_read_in_decimal() {
+    let data = ok(
+        PeResource::ChannelList,
+        r#"[{"title":"T","channel":10,"bankPC":[125,0,127]}]"#,
+    );
+    let written = String::from_utf8(data.to_json().unwrap().encode()).unwrap();
+    assert!(written.contains(r#""channel":10"#), "{written}");
+    assert!(written.contains("[125,0,127]"), "{written}");
+    assert!(
+        !written.contains("0x") && !written.contains("0X"),
+        "{written}"
+    );
+    for hex in ["0x0A", "0X0a", "0Ah", "$0A"] {
+        let text = format!(r#"[{{"title":"T","channel":{hex}}}]"#);
+        assert!(PeJson::try_from(text.as_bytes()).is_err(), "{text}");
+    }
+    assert_eq!(PeJson::Integer(0x7D).encode(), b"125");
+    assert_eq!(PeJson::Integer(-0x10).encode(), b"-16");
+}

@@ -1843,20 +1843,64 @@ fn an_inquiry_without_the_res_id_the_entry_requires_is_refused() {
 /// Spec: m2-103/7.3#3
 #[test]
 fn the_reply_is_in_the_mutual_encoding_the_get_asked_for() {
-    let mut raw = Raw::new();
+    use super::super::body::decode_body;
+    use super::super::mcoded7;
+    let mut link = Link::new(store(), 4096);
+    let expected = PeData::ChannelList(PeChannelList::new(vec![
+        channel(1, "Lead"),
+        channel(10, "Drums"),
+    ]))
+    .to_json()
+    .unwrap()
+    .encode();
+    let limit = crate::BodyLimit::new(1 << 16).unwrap();
     for encoding in [
         PeEncoding::Mcoded7,
         PeEncoding::ZlibMcoded7,
         PeEncoding::Ascii,
     ] {
-        let mut get = pe_get("ChannelList");
-        get.encoding = encoding;
-        let PeOutcome::Success(response) = raw.outcome(PeCall::Get(get)) else {
-            panic!("{encoding:?} was not answered");
+        let mark = link.wire.len();
+        let made = link
+            .init
+            .get(&get(PeResource::ChannelList).encoded(encoding), link.now);
+        let call = link.call(made);
+        assert!(link.got(call).is_ok(), "{encoding:?}");
+        // What the Responder put on the wire: the header's reply and the data of its
+        // chunks, as sent.
+        let mut header = None;
+        let mut wire = Vec::new();
+        for (to_resp, message) in &link.wire[mark..] {
+            if let CiMessage::PropertyExchange {
+                message: PeCiMessage::Chunk { kind, chunk },
+                ..
+            } = message
+                && !to_resp
+                && *kind == PeMessageKind::GET_REPLY
+            {
+                if !chunk.header().is_empty() {
+                    header = PeHeader::try_from(chunk.header()).ok();
+                }
+                wire.extend_from_slice(chunk.data());
+            }
+        }
+        let Some(PeHeader::Reply(reply)) = header else {
+            panic!("{encoding:?}: no reply header");
         };
+        assert_eq!(reply.mutual_encoding.unwrap_or(PeEncoding::Ascii), encoding);
         assert_eq!(
-            response.header.mutual_encoding.unwrap_or(PeEncoding::Ascii),
-            encoding
+            decode_body(encoding, &wire, limit).as_deref(),
+            Ok(&expected[..]),
+            "{encoding:?}"
         );
+        match encoding {
+            PeEncoding::Ascii => assert_eq!(wire, expected),
+            _ => {
+                assert!(wire.iter().all(|b| *b < 0x80), "{encoding:?} is 7-bit");
+                assert_ne!(wire, expected, "{encoding:?} is not plain JSON");
+            }
+        }
+        if encoding == PeEncoding::Mcoded7 {
+            assert_eq!(mcoded7::decode_vec(&wire).as_deref(), Ok(&expected[..]));
+        }
     }
 }

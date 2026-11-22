@@ -1247,4 +1247,49 @@ fn a_link_res_id_has_only_the_characters_of_a_res_id() {
         assert!(!reads(entry(bad, "b_2")), "resId {bad:?}");
         assert!(!reads(entry("a_1", bad)), "actionResId {bad:?}");
     }
+    // The resId the Initiator fills into the Set it makes is the Link's, in those
+    // characters.
+    let text = r#"[{"title":"T","channel":1,"links":[{"resource":"X-L","resId":"a_1",
+        "role":"selectorAction","actionResource":"X-ProgramEdit","actionResId":"abcd",
+        "selectedProperty":"p"}]}]"#;
+    let PeData::ChannelList(list) = PeData::decode(&PeResource::ChannelList, &json(text)).unwrap()
+    else {
+        panic!("not ChannelList");
+    };
+    let mut chosen = PeObject::new();
+    chosen.insert("p", program_edit().to_json().unwrap());
+    let set = ResourceSet::from_selection(&list.entries()[0].links[0], &chosen).unwrap();
+    let mut link = Link::new(store(), 256);
+    let made = link.init.set(&set, link.now);
+    link.call(made);
+    let sent: Vec<_> = link
+        .wire
+        .iter()
+        .filter_map(|(to_resp, m)| match m {
+            CiMessage::PropertyExchange {
+                message: PeCiMessage::Chunk { kind, chunk },
+                ..
+            } if *to_resp && *kind == PeMessageKind::SET_INQUIRY && !chunk.header().is_empty() => {
+                match PeHeader::try_from(chunk.header()) {
+                    Ok(PeHeader::Request(request)) => Some(request),
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+        .collect();
+    let [request] = &sent[..] else {
+        panic!("one Set inquiry, got {sent:?}");
+    };
+    let res_id = request
+        .res_id
+        .as_ref()
+        .expect("the resId is filled")
+        .as_str();
+    assert_eq!(res_id, "abcd");
+    assert!(
+        res_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    );
 }
