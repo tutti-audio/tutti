@@ -127,7 +127,7 @@ impl<F: Float> Kernel for BitCrusherKernel<F> {
     fn shape(&self) -> Shape {
         let bus =
             BusTopology::unassigned(self.width).expect("a bit crusher is at most 16 channels wide");
-        Shape::through(bus).with_cost(Cost::Light)
+        Shape::through(bus).cost(Cost::Light)
     }
 
     fn prepare(&mut self, _: SampleRate, _: MaxBlock) {

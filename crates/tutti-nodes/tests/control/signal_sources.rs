@@ -17,8 +17,9 @@ use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Event, EventEdge, EventInputPort, EventOutputPort, Executor, ForkByClone,
-    ForkTarget, Io, Node, Offset, ParamIn, ParamKind, ParamRange, ParamSegment, Prepare,
-    RenderMode, Shape, Status, TransportChanges, TransportPosition, control_in,
+    ForkTarget, InEvents, Io, Node, Offset, OutEvents, ParamIn, ParamKind, ParamRange,
+    ParamSegment, Prepare, RenderMode, Shape, Status, TransportChanges, TransportPosition,
+    control_in,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_modulation::{
@@ -140,9 +141,14 @@ struct Seq {
     stopped_on: Option<u64>,
 }
 
+impl Seq {
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
+    const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Seq {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -163,7 +169,9 @@ impl Node for Seq {
                 (Some(cx.env.frame.get() + i as u64) == self.stopped_on).then(|| note_on(64))
             };
             if let Some(w) = words {
-                io.event_out(0).push(Event::midi(at, Ump(w))).expect("room");
+                io.event_out(Self::OUT)
+                    .push(Event::midi(at, Ump(w)))
+                    .expect("room");
             }
         }
         Status::Modified
@@ -177,17 +185,24 @@ struct Midi {
     plan: Vec<(u64, [u32; 4])>,
 }
 
+impl Midi {
+    const SHAPE: Shape = Shape::EMPTY
+        .events(0, 1)
+        .event_capacity(std::num::NonZeroU32::new(1024).expect("a capacity"));
+    const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Midi {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(std::num::NonZeroU32::new(1024).expect("a capacity"))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         for &(at, w) in &self.plan {
             if let Some(o) = cx.env.offset_of(Frame::new(at)) {
-                io.event_out(0).push(Event::midi(o, Ump(w))).expect("room");
+                io.event_out(Self::OUT)
+                    .push(Event::midi(o, Ump(w)))
+                    .expect("room");
             }
         }
         Status::Modified
@@ -204,15 +219,20 @@ struct Tap {
     last: Option<(ParamSegment, u64)>,
 }
 
+impl Tap {
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::from_count(4)).events(1, 0);
+    const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for Tap {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::from_count(4)).with_events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let n = io.frames();
         let base = cx.env.frame.get();
-        let events = io.events(0).params();
+        let events = io.events(Self::IN).params();
         let mut k = 0;
         for i in 0..n {
             let (mut mark, mut start, mut target) = (0.0f32, 0.0f32, 0.0f32);
@@ -250,7 +270,7 @@ struct Probe;
 
 impl Node for Probe {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_params(&[UnitParam::Cutoff])
+        Shape::source_unassigned(ChannelLayout::MONO).params(&[UnitParam::Cutoff])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

@@ -12,7 +12,7 @@ use std::ops::{Deref, DerefMut};
 use tutti_graph::UmpAt;
 
 use tutti_graph::contract::{Direct, HAND_EVENT_CAPACITY};
-use tutti_graph::{Event, Offset};
+use tutti_graph::{Event, InEvents, Offset};
 use tutti_polysynth::PolySynth;
 use tutti_ump::Ump;
 use tutti_units::{SampleRate, Samples};
@@ -24,6 +24,7 @@ pub const BLOCK: usize = 64;
 /// (`volume`, `active_voice_count`, …) are reachable.
 pub struct Hand {
     direct: Direct<PolySynth<f32>>,
+    input: InEvents,
     queued: Vec<Event>,
 }
 
@@ -36,8 +37,12 @@ impl Hand {
 
     /// `synth`, prepared at `rate` for [`BLOCK`]-frame blocks.
     pub fn at(synth: PolySynth<f32>, rate: SampleRate) -> Self {
+        let direct = Direct::new(synth, rate, BLOCK);
         Self {
-            direct: Direct::new(synth, rate, BLOCK),
+            input: tutti_graph::Node::shape(&*direct.node)
+                .event_input(0)
+                .expect("an event input"),
+            direct,
             queued: Vec::with_capacity(HAND_EVENT_CAPACITY),
         }
     }
@@ -77,7 +82,7 @@ impl Hand {
                 j -= 1;
             }
         }
-        self.direct.events(0, &self.queued);
+        self.direct.events(self.input, &self.queued);
         self.queued.clear();
         self.direct.block();
         (

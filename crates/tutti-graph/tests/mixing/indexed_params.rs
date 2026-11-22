@@ -52,7 +52,7 @@ impl Bands {
 
 impl Node for Bands {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::from_count(2)).with_param_addrs(&[BAND0, BAND1])
+        Shape::source_unassigned(ChannelLayout::from_count(2)).param_addrs(&[BAND0, BAND1])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -103,19 +103,26 @@ struct Steps {
     to: Vec<(UnitAddr, f64)>,
 }
 
+impl Steps {
+    const SHAPE: Shape = Shape::EMPTY
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(8));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Steps {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_param_events()
-            .with_event_capacity(tutti_graph::testing::cap_of(8))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         let at = io.offset(0).expect("a block has a frame");
         for &(addr, v) in &self.to {
             let seg = ParamSegment::unit(addr, v, v, Samples::new(0));
-            let _ = io.event_out(0).push_param(ParamEvent::segment(at, seg));
+            let _ = io
+                .event_out(Self::OUT)
+                .push_param(ParamEvent::segment(at, seg));
         }
         Status::Silent
     }
@@ -425,7 +432,7 @@ struct Wide(Vec<UnitAddr>);
 
 impl Node for Wide {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::from_count(2)).with_param_addrs(&self.0)
+        Shape::source_unassigned(ChannelLayout::from_count(2)).param_addrs(&self.0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

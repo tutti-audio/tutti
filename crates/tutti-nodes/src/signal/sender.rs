@@ -4,7 +4,8 @@
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_graph::{
-    Cost, Cx, EventKind, Io, Node, Offset, ParamEvent, ParamSegment, Prepare, Shape, Status,
+    Cost, Cx, EventKind, InEvents, Io, Node, Offset, OutEvents, ParamEvent, ParamSegment, Prepare,
+    Shape, Status,
 };
 use tutti_modulation::{ControlSource, Leg, SourceId};
 use tutti_units::{Frame, Samples};
@@ -90,22 +91,13 @@ pub struct SourceNode<S: ControlSource> {
     epoch: Option<u32>,
     /// Frames since its last reset: the clock its flight is timed on.
     position: u64,
+    /// Its MIDI event input, when its source hears one.
+    midi_in: Option<InEvents>,
+    /// Its segment output.
+    out: OutEvents,
 }
 
 impl<S: ControlSource> SourceNode<S> {
-    /// A node sending `source`'s legs as `id`, reading `input`-wide audio.
-    pub(crate) fn with_source(id: SourceId, source: S, input: ChannelLayout) -> Self {
-        Self {
-            source,
-            id,
-            input,
-            flight: None,
-            owed: false,
-            epoch: None,
-            position: 0,
-        }
-    }
-
     /// This node, sending where it stands on its first block's first frame
     /// (0, while it has sent nothing): for one that replaces another of the
     /// same [`SourceId`] (a declaration edit rebuilds it), since a lane holds
@@ -164,6 +156,7 @@ struct Out {
     pending: Option<(usize, ParamSegment)>,
     len: Samples,
     refused: bool,
+    port: OutEvents,
 }
 
 impl Out {
@@ -177,7 +170,7 @@ impl Out {
     fn flush<F: Float>(&mut self, io: &mut Io<'_, F>) {
         if let Some((i, seg)) = self.pending.take() {
             let pushed = Offset::new(Samples::new(i), self.len).is_some_and(|at| {
-                io.event_out(0)
+                io.event_out(self.port)
                     .push_param(ParamEvent::segment(at, seg))
                     .is_ok()
             });
@@ -187,6 +180,38 @@ impl Out {
 }
 
 impl<S: SourcePorts> SourceNode<S> {
+    /// A node sending `source`'s legs as `id`, reading `input`-wide audio.
+    pub(crate) fn with_source(id: SourceId, source: S, input: ChannelLayout) -> Self {
+        let shape = Self::declared(input);
+        Self {
+            source,
+            id,
+            input,
+            flight: None,
+            owed: false,
+            epoch: None,
+            position: 0,
+            midi_in: shape.event_input(0),
+            out: shape.event_output(0).expect("declared one event output"),
+        }
+    }
+
+    /// Its audio input (if any) in, no audio out; a MIDI input if its source
+    /// hears one, and one event output (the segments).
+    fn declared(input: ChannelLayout) -> Shape {
+        let shape = if input == ChannelLayout::EMPTY {
+            Shape::EMPTY
+        } else {
+            Shape::sink_unassigned(input)
+        };
+        shape
+            .events(u16::from(S::MIDI_IN), 1)
+            .param_events()
+            .event_capacity(SOURCE_EVENT_CAPACITY)
+            .cost(S::COST)
+            .no_note_events()
+    }
+
     fn send<F: Float>(&mut self, out: &mut Out, io: &mut Io<'_, F>, i: usize, seg: ParamSegment) {
         self.flight = Some(Flight {
             segment: seg,
@@ -247,17 +272,7 @@ impl<F: Float, S: SourcePorts> Node<F> for SourceNode<S> {
     /// Its audio input (if any) in, no audio out; a MIDI input if its source
     /// hears one, and one event output (the segments).
     fn shape(&self) -> Shape {
-        let shape = if self.input == ChannelLayout::EMPTY {
-            Shape::EMPTY
-        } else {
-            Shape::sink_unassigned(self.input)
-        };
-        shape
-            .with_events(u16::from(S::MIDI_IN), 1)
-            .with_param_events()
-            .with_event_capacity(SOURCE_EVENT_CAPACITY)
-            .with_cost(S::COST)
-            .with_no_note_events()
+        Self::declared(self.input)
     }
 
     fn prepare(&mut self, prepare: &Prepare) {
@@ -270,10 +285,9 @@ impl<F: Float, S: SourcePorts> Node<F> for SourceNode<S> {
             return Status::Modified;
         }
         let walk = PlayWalk::new(cx, len);
-        let events = if S::MIDI_IN {
-            io.events(0).as_slice()
-        } else {
-            &[]
+        let events = match self.midi_in {
+            Some(port) => io.events(port).as_slice(),
+            None => &[],
         };
         let n_starts = walk.starts(cx, len, self.epoch).count();
         // Every other stop a block can hold: the owed re-send, the starts,
@@ -284,6 +298,7 @@ impl<F: Float, S: SourcePorts> Node<F> for SourceNode<S> {
             pending: None,
             len: cx.env.block_len,
             refused: false,
+            port: self.out,
         };
         if std::mem::take(&mut self.owed) {
             // Refused last block, or replacing a node: where it stands now.

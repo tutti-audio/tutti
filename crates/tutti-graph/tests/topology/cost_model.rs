@@ -23,7 +23,7 @@ fn gain(cost: Option<Cost>) -> Unforkable<TestNode> {
         width: 1,
     });
     Unforkable(match cost {
-        Some(c) => node.with_cost(c),
+        Some(c) => node.cost(c),
         None => node,
     })
 }
@@ -31,7 +31,7 @@ fn gain(cost: Option<Cost>) -> Unforkable<TestNode> {
 fn sum(inputs: usize, cost: Option<Cost>) -> Unforkable<TestNode> {
     let node = TestNode::new(Kind::Sum { inputs });
     Unforkable(match cost {
-        Some(c) => node.with_cost(c),
+        Some(c) => node.cost(c),
         None => node,
     })
 }

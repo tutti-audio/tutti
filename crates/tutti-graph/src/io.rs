@@ -17,7 +17,7 @@
 use tutti_buffers::{BufferError, Float, PlanesMut};
 use tutti_units::{Samples, Tail};
 
-use crate::bus::{InBus, OutBus, PortSpan};
+use crate::bus::{InBus, InEvents, OutBus, OutEvents, PortSpan};
 use crate::event::{EventWriter, SortedEvents, SubBlocks};
 use crate::node::{ConstantMask, InPlaceMask, MainPorts, SilenceMask, Wired, WiredMask};
 use crate::param::ParamInput;
@@ -316,7 +316,7 @@ impl<'a, F: Float> Io<'a, F> {
     /// These buffers, with [`report_tail`](Self::report_tail) storing into
     /// `tail`.
     #[inline]
-    pub(crate) fn with_tail(mut self, tail: &'a std::cell::Cell<Option<Tail>>) -> Self {
+    pub(crate) fn tail(mut self, tail: &'a std::cell::Cell<Option<Tail>>) -> Self {
         self.tail = Some(tail);
         self
     }
@@ -336,7 +336,7 @@ impl<'a, F: Float> Io<'a, F> {
     /// the ceiling is clamped to it, [`Tail::Unknown`] says nothing (the
     /// ceiling stands), and [`Tail::Unbounded`] under an `Unbounded` ceiling
     /// is never skipped. A node whose shape does not declare a tail with
-    /// [`with_tail`](crate::Shape::with_tail) has the default ceiling and is
+    /// [`tail`](crate::Shape::tail) has the default ceiling and is
     /// never narrowed below it; one that forgets to declare any tail at all
     /// (`Tail::Unknown`) is never skipped, whatever it reports, because an
     /// `Unknown` ceiling bounds nothing for a report to clamp to.
@@ -361,7 +361,7 @@ impl<'a, F: Float> Io<'a, F> {
     /// These buffers, with `params` as the declared params' inputs (every
     /// port past `params`' end reads its base).
     #[inline]
-    pub(crate) fn with_params(mut self, params: &'a [ParamInput<'a, F>]) -> Self {
+    pub(crate) fn params(mut self, params: &'a [ParamInput<'a, F>]) -> Self {
         self.params = params;
         self
     }
@@ -642,13 +642,14 @@ impl<'a, F: Float> Io<'a, F> {
         self.event_inputs
     }
 
-    /// Event input port `p`, sorted by offset, every offset inside the block.
+    /// Event input `port`, sorted by offset, every offset inside the block.
     ///
     /// # Panics
     ///
-    /// If `p` is not below [`event_input_count`](Self::event_input_count).
-    pub fn events(&self, p: u16) -> SortedEvents<'a> {
-        self.events_in[usize::from(p)]
+    /// If the handle reaches past this node's event inputs: one taken from
+    /// another shape.
+    pub fn events(&self, port: InEvents) -> SortedEvents<'a> {
+        self.events_in[port.index()]
     }
 
     /// Number of event output ports.
@@ -656,16 +657,16 @@ impl<'a, F: Float> Io<'a, F> {
         self.event_outputs
     }
 
-    /// The writer for event output port `p`.
+    /// The writer for event output `port`.
     ///
     /// # Panics
     ///
-    /// If `p` is not below [`event_output_count`](Self::event_output_count).
-    pub fn event_out(&mut self, p: u16) -> &mut EventWriter<'a> {
-        &mut self.events_out[usize::from(p)]
+    /// If the handle reaches past this node's event outputs.
+    pub fn event_out(&mut self, port: OutEvents) -> &mut EventWriter<'a> {
+        &mut self.events_out[port.index()]
     }
 
-    /// The block split at event input port `p`'s offsets: `(range, events)`
+    /// The block split at event input `port`'s offsets: `(range, events)`
     /// chunks that tile the block, each carrying exactly the events at its
     /// first frame (see [`SubBlocks`]).
     ///
@@ -675,9 +676,9 @@ impl<'a, F: Float> Io<'a, F> {
     /// events, not the `Io`, so the loop body can write the outputs:
     ///
     /// ```
-    /// use tutti_graph::{Io, EventKind};
-    /// fn render(mut io: Io<'_>, level: &mut f32) {
-    ///     for (range, events) in io.sub_blocks(0) {
+    /// use tutti_graph::{Io, EventKind, InEvents};
+    /// fn render(mut io: Io<'_>, port: InEvents, level: &mut f32) {
+    ///     for (range, events) in io.sub_blocks(port) {
     ///         for e in events {
     ///             if let EventKind::Midi(_) = e.kind {
     ///                 *level = 1.0 - *level; // toggle on every event
@@ -687,8 +688,12 @@ impl<'a, F: Float> Io<'a, F> {
     ///     }
     /// }
     /// ```
-    pub fn sub_blocks(&self, p: u16) -> SubBlocks<'a> {
-        self.events_in[usize::from(p)].sub_blocks(Samples::new(self.frames))
+    ///
+    /// # Panics
+    ///
+    /// If the handle reaches past this node's event inputs.
+    pub fn sub_blocks(&self, port: InEvents) -> SubBlocks<'a> {
+        self.events_in[port.index()].sub_blocks(Samples::new(self.frames))
     }
 
     /// What declared param `k` ([`Shape::params`](crate::Shape::params))
@@ -947,7 +952,7 @@ mod tests {
         );
         let ins = Buses::new(&[main, key]).expect("two buses");
         Shape::buses(ins, Buses::main(BusTopology::STEREO))
-            .with_ports(ChannelLayout::from_count(4), ChannelLayout::from_count(3))
+            .ports(ChannelLayout::from_count(4), ChannelLayout::from_count(3))
     }
 
     /// Runs `f` over an `Io` of [`shape`]: input port `p` holds `p + 1`, every

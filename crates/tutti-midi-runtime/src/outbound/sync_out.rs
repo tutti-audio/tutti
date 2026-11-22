@@ -45,8 +45,8 @@ use std::sync::Arc;
 use tutti_buffers::Float;
 
 use tutti_graph::{
-    Cx, Event, ForkCause, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Offset, Prepare,
-    RenderMode, Shape, Status, UmpAt, declare_params,
+    Cx, Event, ForkCause, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Offset, OutEvents,
+    Prepare, RenderMode, Shape, Status, UmpAt, declare_params,
 };
 use tutti_midi_protocol::{MtcRate, Recipient};
 use tutti_music::MeterMap;
@@ -150,6 +150,15 @@ pub struct SyncOut {
 }
 
 impl SyncOut {
+    const SHAPE: Shape = Shape::EMPTY
+        .events(0, 1)
+        .event_capacity(SYNC_OUT_PORT_CAPACITY)
+        // Event-only: a few pulses a block, nothing per frame (measured
+        // about 0.3 µs a block at any length; a gain's 256 frames, 0.2).
+        .cost(tutti_graph::Cost::Light)
+        .no_note_events();
+    const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
+
     /// A node that sends on `group`, sending nothing until
     /// [`messages`](SyncOutControls::messages) is set, placing events at the
     /// graph's rate once prepared. Control thread.
@@ -242,13 +251,7 @@ fn push_message(
 impl<F: Float> Node<F> for SyncOut {
     /// No audio; one event output of [`SYNC_OUT_EVENT_CAPACITY`].
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(SYNC_OUT_PORT_CAPACITY)
-            // Event-only: a few pulses a block, nothing per frame (measured
-            // about 0.3 µs a block at any length; a gain's 256 frames, 0.2).
-            .with_cost(tutti_graph::Cost::Light)
-            .with_no_note_events()
+        Self::SHAPE
     }
 
     fn prepare(&mut self, p: &Prepare) {
@@ -317,7 +320,7 @@ impl<F: Float> Node<F> for SyncOut {
             self.losses.add(Losses::refused(dropped));
         }
         in_offset_order(self.pending.as_mut_slice());
-        let out = io.event_out(0);
+        let out = io.event_out(Self::OUT);
         for e in &self.pending {
             let _ = out.push(Event::midi(offset_of(e, block_len), e.1));
         }

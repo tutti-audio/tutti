@@ -4,8 +4,8 @@
 use tutti_buffers::Planes;
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_graph::{
-    Cx, EventOutputPort, GraphBuilder, IntoNode, Io, Node, NodeParts, ParamEvent, ParamIn,
-    ParamSegment, Prepare, Shape, Status,
+    Cx, EventOutputPort, GraphBuilder, IntoNode, Io, Node, NodeParts, OutEvents, ParamEvent,
+    ParamIn, ParamSegment, Prepare, Shape, Status,
 };
 use tutti_nodes::{CompressorConfig, CompressorControls, CompressorNode};
 use tutti_units::{CompressionRatio, Db, SampleRate, Samples, Seconds, UnitParam};
@@ -14,12 +14,17 @@ use tutti_units::{CompressionRatio, Db, SampleRate, Samples, Seconds, UnitParam}
 #[derive(Clone)]
 struct Sends(Vec<(u64, ParamSegment)>);
 
+impl Sends {
+    const SHAPE: Shape = Shape::EMPTY
+        .events(0, 1)
+        .param_events()
+        .event_capacity(std::num::NonZeroU32::new(16).expect("a capacity"));
+    const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Sends {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_param_events()
-            .with_event_capacity(std::num::NonZeroU32::new(16).expect("a capacity"))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -28,7 +33,7 @@ impl Node for Sends {
         for &(at, seg) in &self.0 {
             if at >= start && at < start + n {
                 let offset = io.offset((at - start) as usize).expect("inside");
-                io.event_out(0)
+                io.event_out(Self::OUT)
                     .push_param(ParamEvent::segment(offset, seg))
                     .expect("room");
             }

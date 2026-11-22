@@ -50,18 +50,23 @@ struct Burst {
 
 impl Node for Burst {
     fn shape(&self) -> Shape {
-        let s = Shape::EMPTY.with_events(0, self.ports);
+        let s = Shape::EMPTY.events(0, self.ports);
         match self.cap {
-            Some(c) => s.with_event_capacity(tutti_graph::testing::cap_of(c)),
+            Some(c) => s.event_capacity(tutti_graph::testing::cap_of(c)),
             None => s,
         }
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         for &(f, port, tag) in &self.plan {
+            let out = self
+                .shape()
+                .event_outputs()
+                .nth(port as usize)
+                .expect("a declared port");
             if let Some(at) = cx.env.offset_of(Frame::new(f))
                 && io
-                    .event_out(port)
+                    .event_out(out)
                     .push(Event::midi(at, Ump([tag, 0, 0, 0])))
                     .is_err()
             {
@@ -77,18 +82,24 @@ impl Node for Burst {
 /// arpeggiator's shape, with no latency of its own.
 struct Relay;
 
+impl Relay {
+    const SHAPE: Shape = Shape::EMPTY.events(1, 1);
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Relay {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        for e in io.events(0) {
+        for e in io.events(Self::IN) {
             let EventKind::Midi(Ump(mut w)) = e.kind else {
                 continue;
             };
             w[0] += 1000;
-            io.event_out(0)
+            io.event_out(Self::OUT)
                 .push(Event::midi(e.offset, Ump(w)))
                 .expect("forwards what it was handed");
         }
@@ -107,8 +118,8 @@ struct Late {
 impl Node for Late {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
-            .with_latency(Latency::new(Samples::new(self.latency)))
+            .events(0, 1)
+            .latency(Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
@@ -125,13 +136,13 @@ struct Sink {
 
 impl Node for Sink {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(self.ports, 0)
+        Shape::EMPTY.events(self.ports, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
         let mut seen = self.seen.lock().unwrap();
-        for p in 0..io.event_input_count() {
-            for e in io.events(p) {
+        for (p, port) in (0u16..).zip(self.shape().event_inputs()) {
+            for e in io.events(port) {
                 let EventKind::Midi(Ump(w)) = e.kind else {
                     panic!("only MIDI is sent")
                 };
@@ -162,8 +173,8 @@ impl Rig {
             t.nodes.insert(
                 *k,
                 NodeSpec::new("n", s.audio_in(), s.audio_out())
-                    .with_latency(s.latency.samples())
-                    .with_tail(s.tail),
+                    .latency(s.latency.samples())
+                    .tail(s.tail),
             );
             shapes.insert(*k, s);
         }
@@ -633,7 +644,7 @@ impl Node for CappedRelay {
     fn shape(&self) -> Shape {
         Relay
             .shape()
-            .with_event_capacity(tutti_graph::testing::cap_of(8))
+            .event_capacity(tutti_graph::testing::cap_of(8))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {

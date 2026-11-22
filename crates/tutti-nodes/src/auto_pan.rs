@@ -130,7 +130,7 @@ impl<F: Float> Kernel for AutoPanKernel<F> {
 
     /// Left/right in and out, `Moderate`: a sine and a pan law per sample.
     fn shape(&self) -> Shape {
-        Shape::through(BusTopology::STEREO).with_cost(Cost::Moderate)
+        Shape::through(BusTopology::STEREO).cost(Cost::Moderate)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {

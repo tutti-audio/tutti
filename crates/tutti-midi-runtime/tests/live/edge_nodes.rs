@@ -442,7 +442,7 @@ struct Heavy<N>(N);
 
 impl<N: tutti_graph::Node> tutti_graph::Node for Heavy<N> {
     fn shape(&self) -> tutti_graph::Shape {
-        self.0.shape().with_cost(tutti_graph::Cost::Heavy)
+        self.0.shape().cost(tutti_graph::Cost::Heavy)
     }
     fn prepare(&mut self, prepare: &tutti_graph::Prepare) {
         self.0.prepare(prepare);
@@ -1843,10 +1843,13 @@ fn a_reset_transform_sends_the_zones_ranges_again() {
         SampleRate::SR_48K,
         256,
     );
+    let shape = tutti_graph::Node::<f32>::shape(&*d.node);
+    let input = shape.event_input(0).expect("an event input");
+    let output = shape.event_output(0).expect("an event output");
     let ranges = |d: &mut Direct<tutti_midi_runtime::MpeTransformNode>| {
-        d.events(0, &[pedal]);
+        d.events(input, &[pedal]);
         let _ = d.block();
-        d.event_output(0)
+        d.event_output(output)
             .iter()
             .filter(|e| {
                 matches!(e.kind, tutti_graph::EventKind::Midi(u)

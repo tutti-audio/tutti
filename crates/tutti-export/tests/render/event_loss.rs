@@ -14,7 +14,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_export::{
     CancelToken, Control, EventLossPolicy, Progress, RenderError, RenderGraph, Setup,
 };
-use tutti_graph::{Cx, Event, GraphBuilder, Io, Node, Prepare, Shape, Status};
+use tutti_graph::{Cx, Event, GraphBuilder, Io, Node, OutEvents, Prepare, Shape, Status};
 use tutti_nodes::testing::Osc;
 use tutti_timeline::FrozenClock;
 use tutti_ump::Ump;
@@ -24,18 +24,23 @@ use tutti_units::{Hz, SampleRate};
 #[derive(Clone)]
 struct Burst;
 
+impl Burst {
+    const SHAPE: Shape = Shape::EMPTY
+        .events(0, 1)
+        .event_capacity(std::num::NonZeroU32::new(4).expect("a capacity"));
+    const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Burst {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(std::num::NonZeroU32::new(4).expect("a capacity"))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         for i in 0..10 {
             let at = cx.env.offset(i).expect("inside the block");
             let _ = io
-                .event_out(0)
+                .event_out(Self::OUT)
                 .push(Event::midi(at, Ump([0x2090_3c64, 0, 0, 0])));
         }
         Status::Silent
@@ -48,7 +53,7 @@ struct Discard;
 
 impl Node for Discard {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0)
+        Shape::EMPTY.events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {

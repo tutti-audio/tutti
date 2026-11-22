@@ -158,7 +158,7 @@ pub enum Kind {
         buses_in: Box<crate::Buses>,
         buses_out: Box<crate::Buses>,
     },
-    /// `inner`, declaring `Shape::with_own_bypass`: the node behaves as
+    /// `inner`, declaring `Shape::own_bypass`: the node behaves as
     /// `inner` and the executor never blends or parks it in `Bypassed`.
     OwnBypass { inner: Box<Kind> },
 }
@@ -173,6 +173,9 @@ pub enum SpecBehaviour {
 
 pub struct TestNode<F: Float = f32> {
     kind: Kind,
+    /// The handles its kind's shape issued, in port order.
+    event_inputs: Vec<crate::InEvents>,
+    event_outputs: Vec<crate::OutEvents>,
     ring: VecDeque<F>,
     prev: F,
     count: f32,
@@ -182,7 +185,7 @@ pub struct TestNode<F: Float = f32> {
     rate: Option<f64>,
     calls: Arc<AtomicUsize>,
     /// What its shape declares to the cost model (`Cost::Heavy`, the
-    /// default, unless set with `with_cost`).
+    /// default, unless set with `cost`).
     cost: crate::Cost,
     /// The buses a `Kind::Bused` declares.
     buses: Option<(crate::Buses, crate::Buses)>,
@@ -227,8 +230,10 @@ impl<F: Float> TestNode<F> {
             Kind::Lag { latency } => VecDeque::from(vec![F::ZERO; latency]),
             _ => VecDeque::new(),
         };
-        Self {
+        let mut node = Self {
             kind,
+            event_inputs: Vec::new(),
+            event_outputs: Vec::new(),
             ring,
             prev: F::ZERO,
             count: 0.0,
@@ -239,11 +244,15 @@ impl<F: Float> TestNode<F> {
             cost: crate::Cost::default(),
             buses,
             own_bypass,
-        }
+        };
+        let shape = node.kind_shape();
+        node.event_inputs = shape.event_inputs().collect();
+        node.event_outputs = shape.event_outputs().collect();
+        node
     }
 
     /// This node, declaring `cost` (`Shape::cost`).
-    pub fn with_cost(mut self, cost: crate::Cost) -> Self {
+    pub fn cost(mut self, cost: crate::Cost) -> Self {
         self.cost = cost;
         self
     }
@@ -256,49 +265,49 @@ impl<F: Float> TestNode<F> {
                 unreachable!("`counted` unwraps the buses and the own bypass")
             }
             Kind::Const { width, .. } => Shape::source_unassigned(ch(width)),
-            Kind::Gain { width, .. } => Shape::through_unassigned(ch(width)).with_in_place(),
+            Kind::Gain { width, .. } => Shape::through_unassigned(ch(width)).in_place(),
             // Any number of inputs, which are not a bus: ports.
-            Kind::Sum { inputs } => Shape::EMPTY.with_ports(ch(inputs), ch(1)),
+            Kind::Sum { inputs } => Shape::EMPTY.ports(ch(inputs), ch(1)),
             Kind::Smooth => Shape::through_unassigned(ch(1))
-                .with_tail(Tail::Finite(Samples::new(1)))
-                .with_in_place(),
+                .tail(Tail::Finite(Samples::new(1)))
+                .in_place(),
             // A pure delay declared as latency: its tail, which excludes
             // latency, is none.
             Kind::Lag { latency } => Shape::through_unassigned(ch(1))
-                .with_latency(lat(latency))
-                .with_tail(Tail::None),
-            Kind::Emitter { .. } => Shape::source_unassigned(ch(1)).with_events(0, 1),
+                .latency(lat(latency))
+                .tail(Tail::None),
+            Kind::Emitter { .. } => Shape::source_unassigned(ch(1)).events(0, 1),
             Kind::GainDriver { latency, .. } | Kind::MixDriver { latency, .. } => Shape::EMPTY
-                .with_events(0, 1)
-                .with_param_events()
-                .with_latency(lat(latency))
-                .with_tail(Tail::None),
+                .events(0, 1)
+                .param_events()
+                .latency(lat(latency))
+                .tail(Tail::None),
             Kind::Burst { cap, .. } => Shape::source_unassigned(ch(1))
-                .with_events(0, 1)
-                .with_event_capacity(cap_of(cap)),
+                .events(0, 1)
+                .event_capacity(cap_of(cap)),
             Kind::Consumer { inputs } => Shape::source_unassigned(ch(1))
-                .with_events(inputs, 0)
-                .with_param_events()
-                .with_tail(Tail::Unbounded),
+                .events(inputs, 0)
+                .param_events()
+                .tail(Tail::Unbounded),
             Kind::BoundedConsumer { inputs, cap } => Shape::source_unassigned(ch(1))
-                .with_events(inputs, 0)
-                .with_tail(Tail::Unbounded)
-                .with_event_input_capacity(cap_of(cap)),
+                .events(inputs, 0)
+                .tail(Tail::Unbounded)
+                .event_input_capacity(cap_of(cap)),
             Kind::EventLag { latency } => Shape::EMPTY
-                .with_events(1, 1)
-                .with_latency(lat(latency))
-                .with_tail(Tail::None),
+                .events(1, 1)
+                .latency(lat(latency))
+                .tail(Tail::None),
             Kind::EnvProbe => Shape::source_unassigned(ch(1)),
             Kind::Thru { width } => Shape::through_unassigned(ch(width)),
-            Kind::ThruInPlace { width } => Shape::through_unassigned(ch(width)).with_in_place(),
+            Kind::ThruInPlace { width } => Shape::through_unassigned(ch(width)).in_place(),
             Kind::Mixed {
                 width,
                 events_in,
                 events_out,
             } => Shape::through_unassigned(ch(width))
-                .with_events(events_in, events_out)
-                .with_tail(Tail::Unbounded)
-                .with_in_place(),
+                .events(events_in, events_out)
+                .tail(Tail::Unbounded)
+                .in_place(),
             Kind::Spec {
                 ins,
                 outs,
@@ -309,8 +318,8 @@ impl<F: Float> TestNode<F> {
                 crate::Buses::unassigned(ch(ins)),
                 crate::Buses::unassigned(ch(outs)),
             )
-            .with_latency(lat(latency))
-            .with_tail(tail),
+            .latency(lat(latency))
+            .tail(tail),
         }
     }
 }
@@ -328,8 +337,7 @@ pub const fn cap_of(n: u32) -> NonZeroU32 {
 /// `shape`'s figures over these buses, its ports kept.
 #[allow(dead_code)]
 pub fn with_buses(shape: Shape, buses_in: crate::Buses, buses_out: crate::Buses) -> Shape {
-    let mut bused =
-        Shape::buses(buses_in, buses_out).with_ports(shape.audio_in(), shape.audio_out());
+    let mut bused = Shape::buses(buses_in, buses_out).ports(shape.audio_in(), shape.audio_out());
     bused.event_in = shape.event_in;
     bused.event_out = shape.event_out;
     bused.event_capacity = shape.event_capacity;
@@ -347,9 +355,9 @@ pub fn with_buses(shape: Shape, buses_in: crate::Buses, buses_out: crate::Buses)
 
 impl<F: Float> Node<F> for TestNode<F> {
     fn shape(&self) -> Shape {
-        let mut shape = self.kind_shape().with_cost(self.cost);
+        let mut shape = self.kind_shape().cost(self.cost);
         if self.own_bypass {
-            shape = shape.with_own_bypass();
+            shape = shape.own_bypass();
         }
         match self.buses {
             // The kind's figures over the buses the test declared.
@@ -431,7 +439,7 @@ impl<F: Float> Node<F> for TestNode<F> {
                     let f = cx.env.frame_at(at).get();
                     if (f + phase).is_multiple_of(period) {
                         let _ = io
-                            .event_out(0)
+                            .event_out(self.event_outputs[0])
                             .push(Event::midi(at, Ump([f as u32, 0, 0, 0])));
                         self.count += 1.0;
                     }
@@ -449,7 +457,7 @@ impl<F: Float> Node<F> for TestNode<F> {
                             Samples::new(0),
                         );
                         let _ = io
-                            .event_out(0)
+                            .event_out(self.event_outputs[0])
                             .push_param(crate::ParamEvent::ramp(at, ramp));
                     }
                 }
@@ -465,7 +473,7 @@ impl<F: Float> Node<F> for TestNode<F> {
                             Samples::new(0),
                         );
                         let _ = io
-                            .event_out(0)
+                            .event_out(self.event_outputs[0])
                             .push_param(crate::ParamEvent::ramp(at, ramp));
                     }
                 }
@@ -482,7 +490,7 @@ impl<F: Float> Node<F> for TestNode<F> {
                     if (f + phase).is_multiple_of(period) {
                         for i in 0..burst {
                             let e = Event::midi(at, Ump([f as u32 + i, 0, 0, 0]));
-                            if io.event_out(0).push(e).is_ok() {
+                            if io.event_out(self.event_outputs[0]).push(e).is_ok() {
                                 self.count += 1.0;
                             }
                         }
@@ -497,7 +505,7 @@ impl<F: Float> Node<F> for TestNode<F> {
                 let mut heads = [0usize; 8];
                 for i in 0..n {
                     for (p, h) in (0..inputs).zip(heads.iter_mut()) {
-                        let evs = io.events(p);
+                        let evs = io.events(self.event_inputs[usize::from(p)]);
                         while *h < evs.len() && evs[*h].offset.index() == i {
                             if let EventKind::Midi(Ump(w)) = evs[*h].kind {
                                 self.state = 0.5 * self.state + (w[0] % 97) as f32 + f32::from(p);
@@ -510,7 +518,7 @@ impl<F: Float> Node<F> for TestNode<F> {
                 Status::Modified
             }
             Kind::EventLag { latency } => {
-                for e in io.events(0) {
+                for e in io.events(self.event_inputs[0]) {
                     // Word 1 counts hops. Forwarding at most `MAX_HOPS`
                     // times bounds how far an event feedback loop can
                     // multiply events -- without it a random graph can
@@ -544,7 +552,9 @@ impl<F: Float> Node<F> for TestNode<F> {
                         None => break,
                     };
                     self.pending.pop_front();
-                    let _ = io.event_out(0).push(Event { offset, ..e });
+                    let _ = io
+                        .event_out(self.event_outputs[0])
+                        .push(Event { offset, ..e });
                 }
                 Status::Modified
             }
@@ -576,7 +586,7 @@ impl<F: Float> Node<F> for TestNode<F> {
                 // (order-sensitive, like `Consumer`), and stays positive so
                 // silence stays `+0.0`.
                 for p in 0..events_in {
-                    for e in io.events(p) {
+                    for e in io.events(self.event_inputs[usize::from(p)]) {
                         if let EventKind::Midi(Ump(w)) = e.kind {
                             self.state =
                                 0.5 * self.state + ((w[0] % 7) as f32 + f32::from(p)) * 0.125;
@@ -590,9 +600,9 @@ impl<F: Float> Node<F> for TestNode<F> {
                 }
                 if events_in > 0 {
                     for q in 0..events_out {
-                        let from = io.events(q % events_in);
+                        let from = io.events(self.event_inputs[usize::from(q % events_in)]);
                         for &e in from {
-                            let _ = io.event_out(q).push(e);
+                            let _ = io.event_out(self.event_outputs[usize::from(q)]).push(e);
                         }
                     }
                 }
@@ -651,8 +661,8 @@ impl<F: Float> Node<F> for TestNode<F> {
 pub fn spec_of(kind: &Kind) -> crate::NodeSpec {
     let s = TestNode::new(kind.clone()).shape();
     crate::NodeSpec::new("test", s.audio_in(), s.audio_out())
-        .with_latency(s.latency.samples())
-        .with_tail(s.tail)
+        .latency(s.latency.samples())
+        .tail(s.tail)
 }
 
 pub fn shapes_of(kinds: &BTreeMap<NodeKey, Kind>) -> Shapes {
@@ -677,7 +687,7 @@ fn costed<F: Float>(
 ) -> TestNode<F> {
     let node = TestNode::<F>::in_format(kind.clone());
     match costs.get(&k) {
-        Some(&c) => node.with_cost(c),
+        Some(&c) => node.cost(c),
         None => node,
     }
 }
@@ -1113,14 +1123,14 @@ impl Drop for TestPool {
 
 /// A shared [`TestPool`] per participant count, for a whole test binary.
 pub fn test_pool(participants: usize) -> Arc<dyn crate::Pool> {
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::OnceLock;
+    use tutti_rt::Mutex;
     static POOLS: OnceLock<Mutex<BTreeMap<usize, Arc<TestPool>>>> = OnceLock::new();
     let pools = POOLS.get_or_init(|| Mutex::new(BTreeMap::new()));
 
     (Arc::clone(
         pools
             .lock()
-            .expect("pool map")
             .entry(participants)
             .or_insert_with(|| TestPool::new(participants)),
     )) as _
@@ -1214,7 +1224,7 @@ impl RingingNode {
     }
 
     /// This node, declaring `latency`.
-    pub fn with_latency(mut self, latency: Samples) -> Self {
+    pub fn latency(mut self, latency: Samples) -> Self {
         self.latency = latency;
         self
     }
@@ -1236,10 +1246,10 @@ impl Node for RingingNode {
     fn shape(&self) -> Shape {
         let ch = ChannelLayout::try_from(self.width).expect("a width");
         let shape = Shape::through_unassigned(ch)
-            .with_latency(Latency::new(self.latency))
-            .with_tail(self.ceiling);
+            .latency(Latency::new(self.latency))
+            .tail(self.ceiling);
         if self.event_out {
-            shape.with_events(0, 1)
+            shape.events(0, 1)
         } else {
             shape
         }

@@ -39,13 +39,18 @@ type Inbox = tutti_fixtures::Record<(u32, u32, u64)>;
 /// Logs every event it receives, with its absolute delivery frame.
 struct Recorder(Inbox);
 
+impl Recorder {
+    const SHAPE: Shape = Shape::EMPTY.events(1, 0).tail(Tail::Unknown);
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for Recorder {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0).with_tail(Tail::Unknown)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
-        for e in io.events(0) {
+        for e in io.events(Self::IN) {
             if let EventKind::Midi(Ump(w)) = e.kind {
                 self.0
                     .lock()
@@ -363,7 +368,7 @@ struct RateLatency {
 impl Node for RateLatency {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_latency(Latency::new(Samples::new(self.latency)))
+            .latency(Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, p: &Prepare) {
         self.latency = (p.sample_rate().get() / 1000.0) as usize;
@@ -524,7 +529,7 @@ struct CoarseAt96k(tutti_graph::Resolution);
 
 impl Node for CoarseAt96k {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0).with_event_resolution(self.0)
+        Shape::EMPTY.events(1, 0).event_resolution(self.0)
     }
     fn prepare(&mut self, p: &Prepare) {
         self.0 = if p.sample_rate().get() < 90_000.0 {

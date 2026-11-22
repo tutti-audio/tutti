@@ -385,12 +385,12 @@ impl<F: Float> Node<F> for VbapPannerNode<F> {
         // A stereo pair in and the bed's speakers out, so the graph's mix and
         // bypass fold the dry pair onto the bed by speaker.
         Shape::buses(main_bus(ChannelLayout::STEREO), main_bus(self.layout))
-            .with_ports(ChannelLayout::STEREO, self.layout)
-            .with_tail(Tail::Unknown)
-            .with_param_addrs(self.declared_ports().as_slice())
+            .ports(ChannelLayout::STEREO, self.layout)
+            .tail(Tail::Unknown)
+            .param_addrs(self.declared_ports().as_slice())
             // A blended gain pair per output channel and frame, and two
             // solves per grid segment while the source moves.
-            .with_cost(tutti_graph::Cost::Moderate)
+            .cost(tutti_graph::Cost::Moderate)
     }
 
     fn prepare(&mut self, p: &Prepare) {

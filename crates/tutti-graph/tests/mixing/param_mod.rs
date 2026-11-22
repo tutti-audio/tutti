@@ -143,11 +143,11 @@ impl Node for Probe {
             tutti_graph::Buses::unassigned(ChannelLayout::MONO),
             tutti_graph::Buses::unassigned(ChannelLayout::MONO),
         )
-        .with_ports(
+        .ports(
             ChannelLayout::MONO,
             ChannelLayout::from_count(if self.corners { 4 } else { 3 }),
         )
-        .with_params(&self.declared)
+        .params(&self.declared)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -220,12 +220,17 @@ struct Signal {
     seed: u64,
 }
 
+impl Signal {
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::MONO)
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(256));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Signal {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO)
-            .with_events(0, 1)
-            .with_param_events()
-            .with_event_capacity(tutti_graph::testing::cap_of(256))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -236,7 +241,7 @@ impl Node for Signal {
             io.output(0)[i] = v as f32;
             let o = io.offset(i).expect("inside");
             for p in [UnitParam::Cutoff, UnitParam::Q] {
-                let _ = io.event_out(0).push_param(step(o, p, v));
+                let _ = io.event_out(Self::OUT).push_param(step(o, p, v));
             }
         }
         Status::Modified
@@ -251,18 +256,23 @@ struct Hold {
     value: f64,
 }
 
+impl Hold {
+    const SHAPE: Shape = Shape::EMPTY
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(4));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Hold {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_param_events()
-            .with_event_capacity(tutti_graph::testing::cap_of(4))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         let o = io.offset(0).expect("a block has a frame");
         for p in [UnitParam::Cutoff, UnitParam::Q] {
-            let _ = io.event_out(0).push_param(step(o, p, self.value));
+            let _ = io.event_out(Self::OUT).push_param(step(o, p, self.value));
         }
         Status::Silent
     }
@@ -289,8 +299,7 @@ impl Lag {
 
 impl Node for Lag {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::MONO)
-            .with_latency(Latency::new(Samples::new(self.n)))
+        Shape::through_unassigned(ChannelLayout::MONO).latency(Latency::new(Samples::new(self.n)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -344,12 +353,17 @@ impl Ramps {
     }
 }
 
+impl Ramps {
+    const SHAPE: Shape = Shape::EMPTY
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(EVENT_ROOM as u32));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Ramps {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_param_events()
-            .with_event_capacity(tutti_graph::testing::cap_of(u32::from(EVENT_ROOM)))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {
         self.events.reserve(usize::from(EVENT_ROOM));
@@ -389,7 +403,7 @@ impl Node for Ramps {
             }
         }
         for e in self.events.drain(..) {
-            let _ = io.event_out(0).push_param(e);
+            let _ = io.event_out(Self::OUT).push_param(e);
         }
         Status::Silent
     }
@@ -712,7 +726,7 @@ fn a_fade_keeps_the_params_it_declares() {
                 tutti_graph::Buses::unassigned(ChannelLayout::MONO),
                 tutti_graph::Buses::unassigned(ChannelLayout::from_count(3)),
             )
-            .with_params(&[UnitParam::Cutoff])
+            .params(&[UnitParam::Cutoff])
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
@@ -1022,7 +1036,7 @@ impl Node for LatentHold {
     fn shape(&self) -> Shape {
         Hold { value: self.value }
             .shape()
-            .with_latency(Latency::new(Samples::new(self.latency)))
+            .latency(Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
@@ -1084,12 +1098,17 @@ struct OnFirstBlock {
     pending: bool,
 }
 
+impl OnFirstBlock {
+    const SHAPE: Shape = Shape::EMPTY
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(4));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for OnFirstBlock {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_param_events()
-            .with_event_capacity(tutti_graph::testing::cap_of(4))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {
         self.pending = true;
@@ -1098,9 +1117,11 @@ impl Node for OnFirstBlock {
         if std::mem::take(&mut self.pending) {
             let o = io.offset(0).expect("a block has a frame");
             let _ = io
-                .event_out(0)
+                .event_out(Self::OUT)
                 .push_param(step(o, UnitParam::Cutoff, self.cutoff));
-            let _ = io.event_out(0).push_param(step(o, UnitParam::Q, self.q));
+            let _ = io
+                .event_out(Self::OUT)
+                .push_param(step(o, UnitParam::Q, self.q));
         }
         Status::Silent
     }
@@ -1635,12 +1656,17 @@ struct SegmentThenRamp {
     step_at: Option<u64>,
 }
 
+impl SegmentThenRamp {
+    const SHAPE: Shape = Shape::EMPTY
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(4));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for SegmentThenRamp {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_param_events()
-            .with_event_capacity(tutti_graph::testing::cap_of(4))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -1649,7 +1675,9 @@ impl Node for SegmentThenRamp {
         if let Some(at) = self.step_at.filter(|at| block.contains(at)) {
             let o = io.offset((at - start) as usize).expect("inside");
             let step = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(7.0), Samples::new(0));
-            let _ = io.event_out(0).push_param(ParamEvent::ramp(o, step));
+            let _ = io
+                .event_out(Self::OUT)
+                .push_param(ParamEvent::ramp(o, step));
         }
         if block.contains(&self.at) {
             let o = io.offset((self.at - start) as usize).expect("inside");
@@ -1660,8 +1688,12 @@ impl Node for SegmentThenRamp {
                 Samples::new(20),
             );
             let ramp = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(0.0), Samples::new(4));
-            let _ = io.event_out(0).push_param(ParamEvent::segment(o, seg));
-            let _ = io.event_out(0).push_param(ParamEvent::ramp(o, ramp));
+            let _ = io
+                .event_out(Self::OUT)
+                .push_param(ParamEvent::segment(o, seg));
+            let _ = io
+                .event_out(Self::OUT)
+                .push_param(ParamEvent::ramp(o, ramp));
         }
         Status::Silent
     }

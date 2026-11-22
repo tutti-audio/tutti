@@ -18,8 +18,9 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor,
-    ForkByClone, ForkTarget, Io, Node, Offset, ParamIn, ParamKind, ParamSegment, Prepare,
-    RenderMode, ScheduleError, Shape, Status, TransportChanges, TransportPosition,
+    ForkByClone, ForkTarget, InEvents, Io, Node, Offset, OutEvents, ParamIn, ParamKind,
+    ParamSegment, Prepare, RenderMode, ScheduleError, Shape, Status, TransportChanges,
+    TransportPosition,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_modulation::{
@@ -72,8 +73,8 @@ impl Node for Probe {
     fn shape(&self) -> Shape {
         let shape = Shape::source_unassigned(ChannelLayout::MONO);
         match self.extra {
-            None => shape.with_params(&[self.param]),
-            Some(extra) => shape.with_params(&[self.param, extra]),
+            None => shape.params(&[self.param]),
+            Some(extra) => shape.params(&[self.param, extra]),
         }
     }
     fn prepare(&mut self, _: &Prepare) {}
@@ -166,14 +167,19 @@ struct Held {
     on: u64,
 }
 
+impl Held {
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
+    const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Held {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         if let Some(o) = cx.env.offset_of(Frame::new(self.on)) {
-            io.event_out(0)
+            io.event_out(Self::OUT)
                 .push(Event::midi(
                     o,
                     Message::midi1(
@@ -194,7 +200,7 @@ struct Capture2;
 
 impl Node for Capture2 {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(2, 0)
+        Shape::EMPTY.events(2, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
@@ -207,14 +213,19 @@ impl Node for Capture2 {
 #[derive(Clone)]
 struct Capture(Record<(u64, ParamSegment)>);
 
+impl Capture {
+    const SHAPE: Shape = Shape::EMPTY.events(1, 0);
+    const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for Capture {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
         let mut log = self.0.lock().expect("unpoisoned");
-        for e in io.events(0).params() {
+        for e in io.events(Self::IN).params() {
             if let ParamKind::Segment(s) = e.kind {
                 log.push((cx.env.frame_at(e.offset).get(), s));
             }

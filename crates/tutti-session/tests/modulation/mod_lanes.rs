@@ -126,14 +126,21 @@ struct Held {
     on: u64,
 }
 
+impl Held {
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
+    const OUT: tutti_graph::OutEvents = Self::SHAPE
+        .event_output(0)
+        .expect("one event output is declared");
+}
+
 impl Node for Held {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         if let Some(o) = cx.env.offset_of(Frame::new(self.on)) {
-            io.event_out(0)
+            io.event_out(Self::OUT)
                 .push(Event::midi(
                     o,
                     Message::midi1(
@@ -157,7 +164,7 @@ const LATE: usize = 100;
 impl Node for Late {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(tutti_units::Latency::new(Samples::new(LATE)))
+            .latency(tutti_units::Latency::new(Samples::new(LATE)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

@@ -8,7 +8,7 @@
 //! (block-size independence; live equals offline), and those are also held to
 //! the arithmetic.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_rt::CappedVec;
@@ -46,14 +46,14 @@ impl Default for Seen {
     }
 }
 
-type Log = Arc<Mutex<Seen>>;
+type Log = tutti_fixtures::Shared<Seen>;
 
 /// Logs the beat `Env::for_each_beat` gives every frame.
 struct BeatLog(Log);
 
 impl Node for BeatLog {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_tail(Tail::Unbounded)
+        Shape::source_unassigned(ChannelLayout::MONO).tail(Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -74,7 +74,7 @@ fn graph(log: &Log) -> (Editor, Executor) {
         SampleRate::of(SR),
         MaxBlock::of(Samples::new(512)),
     ));
-    ed.insert(NodeKey(1), "beats", Unforkable(BeatLog(Arc::clone(log))));
+    ed.insert(NodeKey(1), "beats", Unforkable(BeatLog(log.clone())));
     ed.spec_mut()
         .topology
         .set_outputs(vec![PortSource::Node(OutputPort {
@@ -141,11 +141,7 @@ fn live(map: &Arc<TempoMap>, start: f64, blocks: &[usize], total: usize) -> Seen
         done += n;
     }
     drop(engine);
-    Arc::try_unwrap(log)
-        .ok()
-        .expect("the engine is gone")
-        .into_inner()
-        .expect("log")
+    log.into_inner().expect("the engine is gone")
 }
 
 fn assert_on_the_line(points: &[(f64, f64)], beats: &[f64], from: u64, what: &str) {

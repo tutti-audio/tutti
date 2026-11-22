@@ -32,8 +32,7 @@ pub struct Gain(pub Param<Amplitude>);
 
 impl<F: Float> Node<F> for Gain {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::MONO)
-            .with_param_addrs(self.declared_ports().as_slice())
+        Shape::through_unassigned(ChannelLayout::MONO).param_addrs(self.declared_ports().as_slice())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {

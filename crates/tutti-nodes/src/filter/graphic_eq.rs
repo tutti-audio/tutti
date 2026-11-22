@@ -174,7 +174,7 @@ impl<F: Float + SimdLanes> Kernel for GraphicEqKernel<F> {
             GraphicBands::Octave => Cost::Moderate,
             _ => Cost::Heavy,
         };
-        filter_shape(self.input).with_cost(cost)
+        filter_shape(self.input).cost(cost)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {

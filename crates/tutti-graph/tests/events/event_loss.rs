@@ -48,13 +48,13 @@ struct Writer {
 impl Node for Writer {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, self.scripts.len() as u16)
-            .with_event_capacity(tutti_graph::testing::cap_of(self.cap))
+            .events(0, self.scripts.len() as u16)
+            .event_capacity(tutti_graph::testing::cap_of(self.cap))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        for (p, s) in (0..).zip(&self.scripts) {
-            let out = io.event_out(p);
+        for (port, s) in self.shape().event_outputs().zip(&self.scripts) {
+            let out = io.event_out(port);
             for i in 0..s.ons + s.offs {
                 let words = if i < s.ons {
                     note_on(i % 100)
@@ -78,13 +78,13 @@ struct Counter {
 
 impl Node for Counter {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(self.ports, 0)
+        Shape::EMPTY.events(self.ports, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
         let mut seen = self.seen.lock().unwrap();
-        for (p, tally) in (0..io.event_input_count()).zip(seen.iter_mut()) {
-            for e in io.events(p) {
+        for (port, tally) in self.shape().event_inputs().zip(seen.iter_mut()) {
+            for e in io.events(port) {
                 if e.is_note_off() {
                     tally.1 += 1;
                 } else if matches!(e.kind, EventKind::Midi(Ump(_))) {
@@ -257,17 +257,22 @@ struct Recorder {
     blocks: tutti_fixtures::Shared<tutti_fixtures::BlockLog<u32>>,
 }
 
+impl Recorder {
+    const BASE: Shape = Shape::EMPTY.events(1, 0);
+    const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
+}
+
 impl Node for Recorder {
     fn shape(&self) -> Shape {
-        let shape = Shape::EMPTY.with_events(1, 0);
+        let shape = Self::BASE;
         match self.bound {
-            Some(n) => shape.with_event_input_capacity(tutti_graph::testing::cap_of(n)),
+            Some(n) => shape.event_input_capacity(tutti_graph::testing::cap_of(n)),
             None => shape,
         }
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
-        let frames = io.events(0).iter().map(|e| e.offset.index() as u32);
+        let frames = io.events(Self::IN).iter().map(|e| e.offset.index() as u32);
         self.blocks.lock().unwrap().push_block(frames);
         Status::Silent
     }
@@ -477,7 +482,7 @@ impl Node for Latent {
     fn shape(&self) -> Shape {
         self.inner
             .shape()
-            .with_latency(tutti_units::Latency::new(Samples::new(self.latency)))
+            .latency(tutti_units::Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
@@ -491,15 +496,22 @@ struct Once {
     written: bool,
 }
 
+impl Once {
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Once {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         if !std::mem::replace(&mut self.written, true) {
             let at = cx.env.offset(0).expect("inside the block");
-            let _ = io.event_out(0).push(Event::midi(at, Ump(note_on(60))));
+            let _ = io
+                .event_out(Self::OUT)
+                .push(Event::midi(at, Ump(note_on(60))));
         }
         Status::Silent
     }
@@ -680,15 +692,18 @@ struct Holder {
     blocks: tutti_fixtures::Record<(usize, usize)>,
 }
 
+impl Holder {
+    const BASE: Shape = Shape::EMPTY.events(1, 1);
+    const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
+}
+
 impl Node for Holder {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(1, 1)
-            .with_event_input_capacity(tutti_graph::testing::cap_of(self.bound))
+        Self::BASE.event_input_capacity(tutti_graph::testing::cap_of(self.bound))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
-        let evs = io.events(0);
+        let evs = io.events(Self::IN);
         let offs = evs.iter().filter(|e| e.is_note_off()).count();
         self.blocks.lock().unwrap().push((evs.len(), offs));
         Status::Silent
@@ -703,11 +718,16 @@ struct Keys {
     next: u32,
 }
 
+impl Keys {
+    const SHAPE: Shape = Shape::EMPTY
+        .events(0, 1)
+        .event_capacity(tutti_graph::testing::cap_of(16));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for Keys {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(tutti_graph::testing::cap_of(16))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -716,7 +736,7 @@ impl Node for Keys {
         for i in 0..n {
             let at = cx.env.offset(i as usize).expect("inside the block");
             let _ = io
-                .event_out(0)
+                .event_out(Self::OUT)
                 .push(Event::midi(at, Ump(note_on(self.next))));
             self.next += 1;
         }
@@ -800,11 +820,16 @@ fn a_bypassed_node_is_sent_at_most_its_bound_of_closes_a_block() {
 /// of every block.
 struct EarlyOnsLateOffs;
 
+impl EarlyOnsLateOffs {
+    const SHAPE: Shape = Shape::EMPTY
+        .events(0, 1)
+        .event_capacity(tutti_graph::testing::cap_of(16));
+    const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
+}
+
 impl Node for EarlyOnsLateOffs {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(tutti_graph::testing::cap_of(16))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -822,7 +847,7 @@ impl Node for EarlyOnsLateOffs {
             } else {
                 note_on(60 + frame as u32)
             };
-            let _ = io.event_out(0).push(Event::midi(at, Ump(words)));
+            let _ = io.event_out(Self::OUT).push(Event::midi(at, Ump(words)));
         }
         Status::Silent
     }
@@ -835,16 +860,21 @@ struct Trace {
     blocks: tutti_fixtures::Shared<tutti_fixtures::BlockLog<(u32, bool)>>,
 }
 
+impl Trace {
+    const SHAPE: Shape = Shape::EMPTY
+        .events(1, 0)
+        .event_input_capacity(tutti_graph::testing::cap_of(4));
+    const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for Trace {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(1, 0)
-            .with_event_input_capacity(tutti_graph::testing::cap_of(4))
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
         let seen = io
-            .events(0)
+            .events(Self::IN)
             .iter()
             .map(|e| (e.offset.index() as u32, e.is_note_off()));
         self.blocks.lock().unwrap().push_block(seen);

@@ -219,7 +219,7 @@ fn the_clock_advances_exactly_once_per_frame_and_never_ahead() {
     impl tutti_graph::Node for BeatPorts {
         fn shape(&self) -> tutti_graph::Shape {
             tutti_graph::Shape::source_unassigned(ChannelLayout::STEREO)
-                .with_tail(tutti_units::Tail::Unbounded)
+                .tail(tutti_units::Tail::Unbounded)
         }
         fn prepare(&mut self, _: &tutti_graph::Prepare) {}
         fn process(
@@ -333,24 +333,29 @@ fn a_recovery_of_an_older_refusal_does_not_mask_a_new_loss() {
 
 mod loss {
     use super::*;
-    use tutti_graph::{Cx, Event, ForkByClone, Io, Node, Prepare, Shape, Status};
+    use tutti_graph::{Cx, Event, ForkByClone, Io, Node, OutEvents, Prepare, Shape, Status};
 
     /// Ten note-ons into a port of four, every block: six refused.
     #[derive(Clone)]
     struct Burst;
 
+    impl Burst {
+        const SHAPE: Shape = Shape::EMPTY
+            .events(0, 1)
+            .event_capacity(std::num::NonZeroU32::new(4).expect("a capacity"));
+        const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
+    }
+
     impl Node for Burst {
         fn shape(&self) -> Shape {
-            Shape::EMPTY
-                .with_events(0, 1)
-                .with_event_capacity(std::num::NonZeroU32::new(4).expect("a capacity"))
+            Self::SHAPE
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
             for i in 0..10 {
                 let at = cx.env.offset(i).expect("inside the block");
                 let _ = io
-                    .event_out(0)
+                    .event_out(Self::OUT)
                     .push(Event::midi(at, Ump([0x2090_3c64, 0, 0, 0])));
             }
             Status::Silent
@@ -363,7 +368,7 @@ mod loss {
 
     impl Node for Discard {
         fn shape(&self) -> Shape {
-            Shape::EMPTY.with_events(1, 0)
+            Shape::EMPTY.events(1, 0)
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {

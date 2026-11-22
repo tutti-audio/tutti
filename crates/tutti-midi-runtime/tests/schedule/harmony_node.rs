@@ -11,8 +11,8 @@ use tutti_buffers::MaxBlock;
 use crate::common::{beat_of, connect, rolling};
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventKind, Executor, ForkTarget, Harmony, HarmonyKind, Io, Node, Prepare, Shape,
-    Status, TransportPosition,
+    Cx, Editor, EventKind, Executor, ForkTarget, Harmony, HarmonyKind, InEvents, Io, Node, Prepare,
+    Shape, Status, TransportPosition,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_midi_runtime::{
@@ -31,14 +31,19 @@ type Seen = tutti_fixtures::Record<(u64, Harmony)>;
 #[derive(Clone)]
 struct Sink(Seen);
 
+impl Sink {
+    const SHAPE: Shape = Shape::source_unassigned(tutti_buffers::ChannelLayout::MONO).events(1, 0);
+    const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
+}
+
 impl Node for Sink {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(tutti_buffers::ChannelLayout::MONO).with_events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let mut seen = self.0.lock().unwrap();
-        for e in io.events(0) {
+        for e in io.events(Self::IN) {
             if let EventKind::Harmony(h) = e.kind {
                 seen.push((cx.env.frame.get() + u64::from(e.offset.get()), h));
             }

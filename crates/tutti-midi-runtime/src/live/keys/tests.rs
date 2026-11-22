@@ -16,7 +16,10 @@ fn rig() -> (Direct<EventInletNode>, MidiKeys) {
 }
 
 fn sent(d: &Direct<EventInletNode>) -> Vec<Ump> {
-    d.event_output(0)
+    let out = tutti_graph::Node::<f32>::shape(&*d.node)
+        .event_output(0)
+        .expect("an event output");
+    d.event_output(out)
         .iter()
         .map(|e| match e.kind {
             EventKind::Midi(ump) => ump,

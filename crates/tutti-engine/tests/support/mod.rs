@@ -72,7 +72,7 @@ impl Sine {
 
 impl Node for Sine {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_tail(Tail::Unbounded)
+        Shape::source_unassigned(ChannelLayout::MONO).tail(Tail::Unbounded)
     }
 
     fn prepare(&mut self, prepare: &Prepare) {
