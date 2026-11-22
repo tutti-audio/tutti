@@ -42,7 +42,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tutti_platform::Instant;
-use tutti_platform::{Executor, PriorityRequest, Task, WeakExecutor, join_within};
+use tutti_platform::{Executor, PriorityRequest, Task, Unjoined, WeakExecutor, join_within};
 use tutti_rt::LockExt;
 
 use tutti_buffers::Float;
@@ -1111,11 +1111,6 @@ impl RenderThread {
     ///
     /// The lane panicked (its state went with it), it ended without handing its
     /// state back (the executor dropped it), or it did not end within `patience`.
-    ///
-    /// # Panics
-    ///
-    /// On a thread that drives an executor ([`join_within`]): the server stops its
-    /// render thread from its main thread.
     pub(crate) fn stop_within(mut self, patience: Duration) -> Result<RenderSide, NotHome> {
         let lane = self.lane.take().expect("stopped once");
         lane.stop.store(true, Ordering::Release);
@@ -1124,12 +1119,16 @@ impl RenderThread {
             Ok(Some(Ok(side))) => Ok(side),
             Ok(Some(Err(payload))) => Err(NotHome::Panicked(panicked(payload.as_ref()))),
             Ok(None) => Err(NotHome::Dropped),
-            Err(task) => {
+            Err(Unjoined::TimedOut(task)) => {
                 // A lane inside a plugin call ends when that returns, which it
                 // may never do.
                 tracing::warn!("plugin-server: the render lane did not stop; leaving it");
                 task.detach();
                 Err(NotHome::Stuck)
+            }
+            Err(Unjoined::Driving(task)) => {
+                task.detach();
+                Err(NotHome::Driving)
             }
         }
     }
@@ -1142,6 +1141,9 @@ pub(crate) enum NotHome {
     Panicked(tutti_platform::Panicked),
     /// The lane is still running (a plugin that does not return from a block).
     Stuck,
+    /// Stopped on a thread that drives an executor: the lane was asked to stop and is
+    /// detached.
+    Driving,
     /// The lane was dropped without running to its end: the executor shut down
     /// under it, and its state was dropped with it.
     Dropped,
@@ -1167,10 +1169,14 @@ impl Drop for RenderThread {
         if let Some(lane) = self.lane.take() {
             lane.stop.store(true, Ordering::Release);
             self.wake.ring();
-            if let Err(task) = join_within(lane.task, crate::server::RENDER_STOP_PATIENCE) {
-                tracing::warn!("plugin-server: the render lane did not stop; leaving it");
-                crate::leak::note_detached();
-                task.detach();
+            match join_within(lane.task, crate::server::RENDER_STOP_PATIENCE) {
+                Ok(_) => {}
+                Err(Unjoined::TimedOut(task)) => {
+                    tracing::warn!("plugin-server: the render lane did not stop; leaving it");
+                    crate::leak::note_detached();
+                    task.detach();
+                }
+                Err(Unjoined::Driving(task)) => task.detach(),
             }
         }
     }
@@ -1433,6 +1439,10 @@ mod tests {
     struct Endless {
         entered: Option<std::sync::mpsc::Sender<()>>,
         until: Option<(usize, Arc<AtomicBool>)>,
+        /// Dropped with the transport, which the lane drops when it ends.
+        gone: Option<std::sync::mpsc::Sender<()>>,
+        /// The first read waits for a send on it, or for its sender to drop.
+        hold: Option<std::sync::mpsc::Receiver<()>>,
     }
 
     impl Endless {
@@ -1442,6 +1452,8 @@ mod tests {
                 Self {
                     entered: Some(entered),
                     until: None,
+                    gone: None,
+                    hold: None,
                 },
                 reads,
             )
@@ -1452,6 +1464,9 @@ mod tests {
         fn recv(&mut self) -> IpcResult<AudioRequest> {
             if let Some(entered) = self.entered.take() {
                 let _ = entered.send(());
+            }
+            if let Some(hold) = self.hold.take() {
+                let _ = hold.recv();
             }
             if let Some((left, stop)) = self.until.as_mut() {
                 *left = left.saturating_sub(1);
@@ -1469,6 +1484,37 @@ mod tests {
         fn send(&mut self, _: &AudioReply) -> IpcResult<()> {
             Ok(())
         }
+    }
+
+    /// **A render thread stopped on a thread that drives an executor reports `Driving`
+    /// and its lane still ends**: the stop flag is set and the lane detached, so the
+    /// outcome is `Driving` (never `Stuck`, which ends the process) and, once released
+    /// from its read, the lane drops its transport.
+    #[test]
+    fn a_render_thread_stopped_on_a_driving_thread_reports_driving_and_its_lane_ends() {
+        let (_link, side) = link().expect("bells");
+        let (mut busy, reads) = Endless::new();
+        let (gone, ended) = std::sync::mpsc::channel::<()>();
+        busy.gone = Some(gone);
+        let (release, hold) = std::sync::mpsc::channel::<()>();
+        busy.hold = Some(hold);
+        let executor = Executor::new();
+        let thread = RenderThread::spawn(&executor, side, Some(Box::new(busy))).expect("lane");
+        reads.recv_timeout(HANG_GUARD).expect("the lane is serving");
+        let stopper = executor
+            .spawn_dedicated("stops-the-render", None, async move {
+                thread.stop_within(HANG_GUARD).err()
+            })
+            .expect("a dedicated thread");
+        let outcome = tutti_platform::join(stopper).expect("the stop ended without panicking");
+        assert!(matches!(outcome, Some(NotHome::Driving)), "{outcome:?}");
+        // The lane sat in its read until now, so it could not end before the stop looked.
+        release.send(()).expect("the lane holds the receiver");
+        assert_eq!(
+            ended.recv_timeout(HANG_GUARD),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected),
+            "the lane ended and dropped its transport"
+        );
     }
 
     /// Waits for the lane of `thread` to end by itself: its task is finished.

@@ -20,7 +20,7 @@ use std::task::{Context, Poll, Wake, Waker};
 use std::thread::{self, Thread, ThreadId};
 use std::time::Duration;
 
-use super::{Executor, Handle, Shared, Task, Timers, lock};
+use super::{Executor, Handle, Shared, Task, Timers, Unjoined, lock};
 use crate::Instant;
 use crate::priority::{PriorityOutcome, PriorityRequest};
 use crate::thread::{ThreadHandle, spawn_named};
@@ -109,7 +109,7 @@ impl Drop for Driving {
 }
 
 /// Whether this thread runs [`drive`].
-pub(super) fn is_driving() -> bool {
+fn is_driving() -> bool {
     DRIVING.with(Cell::get)
 }
 
@@ -127,8 +127,10 @@ pub(super) fn join<T>(task: Task<T>) -> Option<T> {
 
 /// Parks the calling thread until `task` ends or `bound` has passed. Polls `task`'s
 /// handle, parking between polls; the task's waker unparks it.
-pub(super) fn join_within<T>(mut task: Task<T>, bound: Duration) -> Result<Option<T>, Task<T>> {
-    refuse_on_a_driving_thread();
+pub(super) fn join_within<T>(mut task: Task<T>, bound: Duration) -> Result<Option<T>, Unjoined<T>> {
+    if is_driving() && !task.is_finished() {
+        return Err(Unjoined::Driving(task));
+    }
     let deadline = Instant::now() + bound;
     let waker = Waker::from(Arc::new(Unpark(thread::current())));
     let mut cx = Context::from_waker(&waker);
@@ -146,7 +148,7 @@ pub(super) fn join_within<T>(mut task: Task<T>, bound: Duration) -> Result<Optio
             Ok(Poll::Pending) => {
                 let left = deadline.saturating_duration_since(Instant::now());
                 if left.is_zero() {
-                    return Err(task);
+                    return Err(Unjoined::TimedOut(task));
                 }
                 thread::park_timeout(left);
             }

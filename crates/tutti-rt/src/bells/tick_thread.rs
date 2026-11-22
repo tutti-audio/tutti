@@ -4,7 +4,7 @@
 use std::io;
 use std::time::Duration;
 
-use tutti_platform::{Executor, Task, is_driving, join_within};
+use tutti_platform::{Executor, Task, Unjoined, join_within};
 
 use super::{Arc, Parker, Shared};
 
@@ -64,26 +64,23 @@ impl Drop for Tick {
     /// Runs after `Bells`' drop has shut the set and unparked: the task runs the last
     /// pass and ends, and the drop waits for it.
     ///
-    /// On a thread that drives an executor a wait would stop that thread's tasks (and
-    /// `join_within` panics there), so the task is detached with a warning instead.
+    /// On a thread that drives an executor a wait would stop that thread's tasks, so the
+    /// task is detached instead.
     fn drop(&mut self) {
         let Some(task) = self.task.take() else {
             return;
         };
         // A drop has no caller left to tell, so each failure here is logged.
-        if is_driving() {
-            tracing::warn!(
-                "the bells dropped on a thread that drives an executor: their tick task is detached, and its last pass may not have run"
-            );
-            task.detach();
-            return;
-        }
-        if let Err(task) = join_within(task, JOIN_BOUND) {
-            tracing::warn!(
-                "the bells' tick task did not end within {JOIN_BOUND:?} of the drop: \
-                 its last pass may not have run"
-            );
-            task.detach();
+        match join_within(task, JOIN_BOUND) {
+            Ok(_) => {}
+            Err(Unjoined::TimedOut(task)) => {
+                tracing::warn!(
+                    "the bells' tick task did not end within {JOIN_BOUND:?} of the drop: \
+                     its last pass may not have run"
+                );
+                task.detach();
+            }
+            Err(Unjoined::Driving(task)) => task.detach(),
         }
     }
 }
