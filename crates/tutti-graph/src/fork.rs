@@ -334,15 +334,7 @@ impl<F: Float> PendingFork<F> {
                 editor.insert_prepared(key, kind, forked.node, wake)
             } else {
                 editor
-                    .insert(
-                        key,
-                        kind,
-                        NodeParts {
-                            node: forked.node,
-                            controls: (),
-                            fork: None,
-                        },
-                    )
+                    .insert(key, kind, NodeParts::new(forked.node, (), None))
                     .unwired
             };
             debug_assert!(unwired.is_empty());
@@ -685,11 +677,7 @@ impl<F: Float, N: Node<F> + Clone + Send + 'static> IntoNode<F> for ForkByClone<
 
     fn into_parts(self) -> NodeParts<(), F> {
         let fork = CloneFork(self.0.clone());
-        NodeParts {
-            node: Box::new(self.0),
-            controls: (),
-            fork: Some(Box::new(fork)),
-        }
+        NodeParts::new(Box::new(self.0), (), Some(Box::new(fork)))
     }
 }
 
@@ -740,11 +728,7 @@ impl<F: Float, N: Node<F>> IntoNode<F> for Unforkable<N> {
     }
 
     fn into_parts(self) -> NodeParts<(), F> {
-        NodeParts {
-            node: Box::new(self.0),
-            controls: (),
-            fork: None,
-        }
+        NodeParts::new(Box::new(self.0), (), None)
     }
 }
 
@@ -756,11 +740,7 @@ impl IntoNode for Unforkable<Box<dyn Node>> {
     }
 
     fn into_parts(self) -> NodeParts<()> {
-        NodeParts {
-            node: self.0,
-            controls: (),
-            fork: None,
-        }
+        NodeParts::new(self.0, (), None)
     }
 }
 

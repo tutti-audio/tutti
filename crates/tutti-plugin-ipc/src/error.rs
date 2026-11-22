@@ -55,6 +55,14 @@ pub enum PluginRenderFault {
     },
 }
 
+/// The launch error of a server that [`tutti_plugin_ipc_ffi::spawn`] refused.
+pub(crate) fn spawn_failed(error: tutti_plugin_ipc_ffi::SpawnError) -> IpcError {
+    match error {
+        tutti_plugin_ipc_ffi::SpawnError::Start(e) => IpcError::Io(e),
+        tutti_plugin_ipc_ffi::SpawnError::NotBound(e) => IpcError::ServerNotBound(e),
+    }
+}
+
 /// Builds an `UnexpectedMessage` error by Debug-formatting the received
 /// message.
 pub(crate) fn unexpected_message(expected: &'static str, got: &impl std::fmt::Debug) -> IpcError {

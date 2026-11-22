@@ -578,3 +578,32 @@ fn an_empty_layout_is_refused() {
         Err(BufferError::ZeroWidth)
     );
 }
+
+/// **A copied channel run is what each position reads**, at every channel of
+/// a three-channel ring, for a run that wraps the ring's end and one that
+/// does not; an empty run copies nothing.
+#[test]
+fn a_copied_channel_run_reads_each_position_and_wraps_the_ring() {
+    let (mut writer, mut reader) = ring(8, 3, 0);
+    assert_eq!(push(&mut writer, &indexed(6, 3)), 6);
+    writer.set_play(6);
+    let data: Vec<f32> = (18..36).map(|i| i as f32).collect();
+    assert_eq!(push(&mut writer, &data), 6);
+    let claim = reader.claim(6, [(6, 12), (0, 0)]);
+    for c in 0..3 {
+        // Positions 6..12 sit in slots 6, 7, 0, 1, 2, 3.
+        let mut run = [0.0f32; 6];
+        claim.copy_channel(6, c, &mut run);
+        let want: Vec<f32> = (6..12).map(|s| (s * 3 + c) as f32).collect();
+        assert_eq!(run.to_vec(), want, "channel {c}, wrapped");
+        let mut inner = [0.0f32; 2];
+        claim.copy_channel(8, c, &mut inner);
+        assert_eq!(
+            inner.to_vec(),
+            want[2..4].to_vec(),
+            "channel {c}, unwrapped"
+        );
+    }
+    let mut none: [f32; 0] = [];
+    claim.copy_channel(6, 0, &mut none);
+}

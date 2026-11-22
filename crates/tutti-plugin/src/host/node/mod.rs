@@ -712,11 +712,7 @@ impl IntoNode for PluginClient<Bound> {
     fn into_parts(self) -> NodeParts<PluginControls> {
         let fork = ServedFork::of(&self);
         let (node, controls) = self.into_node();
-        NodeParts {
-            node,
-            controls,
-            fork: Some(Box::new(fork)),
-        }
+        NodeParts::new(node, controls, Some(Box::new(fork)))
     }
 }
 
