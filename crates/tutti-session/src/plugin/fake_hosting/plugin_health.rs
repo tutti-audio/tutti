@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tutti_buffers::ChannelLayout;
 use tutti_platform::Instant;
+use tutti_units::Calls;
 
 use crate::{DetachedSession, Phase, PhaseCx, PluginHealth, Session, SessionEvent};
 use crate::{PluginChange, PluginEvent};
@@ -533,16 +534,20 @@ fn a_failed_periodic_snapshot_is_counted() {
             .diagnostics()
             .failed_snapshots()
     };
-    assert_eq!(diagnostics(&s), 0);
+    assert_eq!(diagnostics(&s), Calls::ZERO);
     assert!(s.land_snapshot(node, &token, Instant::now(), Ok(vec![1, 2, 3]),));
-    assert_eq!(diagnostics(&s), 0, "a taken snapshot is not a failure");
+    assert_eq!(
+        diagnostics(&s),
+        Calls::ZERO,
+        "a taken snapshot is not a failure"
+    );
     assert!(!s.land_snapshot(
         node,
         &token,
         Instant::now(),
         Err(tutti_plugin_types::StateError::Lost),
     ));
-    assert_eq!(diagnostics(&s), 1);
+    assert_eq!(diagnostics(&s), Calls::new(1));
 }
 
 /// **A round trip that panicked is counted for the app**
@@ -562,9 +567,9 @@ fn a_panicked_round_trip_is_counted() {
         super::super::contained("fine", node, &panics, || 7),
         Some(7)
     );
-    assert_eq!(count(&s), 0);
+    assert_eq!(count(&s), Calls::ZERO);
     let lost: Option<()> =
         super::super::contained("state snapshot", node, &panics, || panic!("a plugin panic"));
     assert!(lost.is_none());
-    assert_eq!(count(&s), 1);
+    assert_eq!(count(&s), Calls::new(1));
 }

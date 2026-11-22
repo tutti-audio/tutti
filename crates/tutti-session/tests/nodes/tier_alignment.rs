@@ -19,9 +19,7 @@
 //! the memory tier by `L` (the memory tier, which never pre-rolled, was right).
 
 use std::path::Path;
-use std::time::Duration;
 use tutti_buffers::Interleaved;
-use tutti_platform::Instant;
 
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{BusTopology, ChannelLayout};
@@ -155,14 +153,12 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
     // ahead (the first 4 200 of the file's 4 800 frames, which covers the
     // frames read back).
     if let Some(stream) = &stream {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        let phase = loop {
-            let phase = stream.status().phase;
-            if phase != StreamPhase::Opening || Instant::now() > deadline {
-                break phase;
-            }
-            std::thread::sleep(Duration::from_millis(1));
-        };
+        tutti_fixtures::wait_until(
+            "the stream to be primed",
+            tutti_fixtures::HANG_GUARD,
+            || stream.status().phase != StreamPhase::Opening,
+        );
+        let phase = stream.status().phase;
         assert!(
             matches!(phase, StreamPhase::Live | StreamPhase::Ended),
             "the stream is not primed: {phase:?}"

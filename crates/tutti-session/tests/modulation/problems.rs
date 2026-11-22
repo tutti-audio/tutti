@@ -2,27 +2,19 @@
 //! lists a `Problem` for each refusal, unresolved target and unfed follower,
 //! and its `Display` names the node and the param.
 
+use crate::common::session;
 use std::time::Duration;
 
 use tutti_platform::Instant;
 
 use tutti_buffers::ChannelLayout;
-use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;
 use tutti_modulation::{Follower, Lfo};
 use tutti_session::{
     ModTarget, PHASES, ParamRef, PhaseCx, Problem, RouteSpec, Session, SessionEvent, SourceName,
     TargetName,
 };
-use tutti_units::{Depth, Hz, Samples, UnitParam};
-
-fn session() -> Session {
-    Session::builder()
-        .outputs(tutti_buffers::ChannelLayout::STEREO)
-        .max_block(MaxBlock::of(Samples::new(256)))
-        .build()
-        .expect("builds")
-}
+use tutti_units::{Depth, Hz, UnitParam};
 
 /// Every phase at `now`: one update, at a time the test picks.
 fn update_at(s: &mut Session, now: Instant) -> Vec<SessionEvent> {

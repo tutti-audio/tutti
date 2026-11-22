@@ -4,6 +4,7 @@
 //!
 //! Every figure is analytic: constants of exactly representable values.
 
+use crate::offline::offline;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{FoldError, InterleavedMut};
 use tutti_graph::ForkByClone;
@@ -13,10 +14,6 @@ use tutti_session::{
     OutputPort, Session,
 };
 use tutti_units::Gain;
-
-fn offline() -> Session {
-    Session::builder().build().expect("builds")
-}
 
 /// The first frame of a committed 64-frame block, per channel.
 fn first_frame(s: &mut Session) -> [f32; 2] {

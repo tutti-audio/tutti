@@ -506,26 +506,26 @@ pub fn transport_info(s: &Snapshot, meter: &MeterMap) -> TransportInfo {
             .map_or(0.0, |frames| frames / s.sample_rate.get()),
     );
     let mut info = TransportInfo::new(s.sample_rate)
-        .with_tempo(s.tempo)
-        .with_tempo_inc(s.tempo_inc)
-        .with_playing(s.playing)
-        .with_recording(s.recording)
-        .with_time_signature(position.signature)
-        .with_bar(position.bar_start, position.bar)
-        .with_beat(s.beat)
-        .with_seconds(seconds)
-        .with_continuous_samples(s.continuous);
+        .tempo(s.tempo)
+        .tempo_inc(s.tempo_inc)
+        .playing(s.playing)
+        .recording(s.recording)
+        .time_signature(position.signature)
+        .bar(position.bar_start, position.bar)
+        .beat(s.beat)
+        .seconds(seconds)
+        .continuous_samples(s.continuous);
     if let Some(range) = s.looping {
-        info = info.with_loop(LoopRegion {
+        info = info.loop_region(LoopRegion {
             range,
             seconds: s.loop_seconds,
         });
     }
     if let Some(frames) = s.project_frames {
-        info = info.with_position_samples(frames.round() as i64);
+        info = info.position_samples(frames.round() as i64);
     }
     if let Some(ns) = s.system_time_ns {
-        info = info.with_system_time_ns(ns);
+        info = info.system_time_ns(ns);
     }
     info
 }
