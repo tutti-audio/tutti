@@ -263,13 +263,14 @@ unsafe fn packets(list: *const MIDIEventList, on_packet: &mut dyn FnMut(MIDITime
     for _ in 0..count {
         // SAFETY: `packet` is one of the list's `count` packets (the first, or
         // `MIDIEventPacketNext` of the one before); its fields are read unaligned
-        // for the four-byte packing, and `wordCount` is clamped to the 64 words
-        // of the packet's `words` array, so the slice stays inside it.
-        // `MIDIEventPacketNext` steps by the unclamped `wordCount`, so the walk
-        // trusts CoreMIDI for it, as it does for `numPackets`.
+        // for the four-byte packing. A packet is variable-length: its `words` run
+        // for `wordCount` words, past the 64 the declaration names when CoreMIDI
+        // gathers messages of one time stamp into one packet, and the list holds
+        // them all. The slice and `MIDIEventPacketNext` both take `wordCount` as
+        // CoreMIDI wrote it, as the walk takes `numPackets`.
         let (stamp, words) = unsafe {
             let stamp = std::ptr::addr_of!((*packet).timeStamp).read_unaligned();
-            let len = (std::ptr::addr_of!((*packet).wordCount).read_unaligned() as usize).min(64);
+            let len = std::ptr::addr_of!((*packet).wordCount).read_unaligned() as usize;
             let words = std::ptr::addr_of!((*packet).words).cast::<u32>();
             (stamp, std::slice::from_raw_parts(words, len))
         };
@@ -428,6 +429,38 @@ mod tests {
         });
         assert_eq!(calls.load(Ordering::Relaxed), 1);
         assert_eq!(callback.truncated.load(Ordering::Relaxed), 1);
+    }
+
+    /// A packet longer than the 64 words its declaration names, as CoreMIDI
+    /// delivers 50 64-bit notes of one time stamp (100 words), hands over every
+    /// message, in order, and none is counted truncated.
+    #[test]
+    fn a_packet_past_64_words_delivers_every_message() {
+        let notes: Vec<[u32; 2]> = (0..50u32)
+            .map(|i| [0x4090_0000 | (i << 8), (0x1000 + i) << 16])
+            .collect();
+        let words: Vec<u32> = notes.iter().flatten().copied().collect();
+        // The list laid out by hand, packed to four bytes: protocol and packet
+        // count, then one packet's 64-bit time stamp, word count and words.
+        let mut list = vec![
+            protocol_id(Protocol::Midi2)
+                .expect("MIDI 2.0 has an id")
+                .cast_unsigned(),
+            1,
+            0,
+            0,
+            u32::try_from(words.len()).expect("100 words"),
+        ];
+        list.extend_from_slice(&words);
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&log);
+        let callback = callback_of(Box::new(move |_, ump| seen.lock().unwrap().push(ump)));
+        // SAFETY: `list` is an event list of one packet of `words.len()` words,
+        // laid out as `MIDIEventList` is (packed to four bytes).
+        unsafe { receive(&callback, list.as_ptr().cast::<MIDIEventList>()) };
+        let expected: Vec<Ump> = notes.iter().map(|&[a, b]| Ump([a, b, 0, 0])).collect();
+        assert_eq!(*log.lock().unwrap(), expected);
+        assert_eq!(callback.truncated.load(Ordering::Relaxed), 0);
     }
 
     /// A list announces itself once, before all its messages, whatever the number

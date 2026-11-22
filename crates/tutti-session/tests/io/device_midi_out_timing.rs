@@ -3,9 +3,15 @@
 //! callbacks report the audio output's latency as they are told to.
 //!
 //! Every figure is arithmetic on the MIDI spec's tick (24 per quarter note,
-//! 1/48 s at 120 BPM, so 1 000 frames at 48 kHz) and on `Instant`s the test
-//! reads around its own calls.
+//! 1/48 s at 120 BPM, so 1 000 frames at 48 kHz) and on instants the test
+//! constructs: each callback is dated by the test (`ManualStream::render_block_at`),
+//! block `k` at `base + k * BLOCK / RATE`, so no figure depends on how long a
+//! call took. The session places events against `Instant::now()` at each
+//! `update`, so `base` sits where every send time falls after that `now` and
+//! within `MAX_OUTPUT_AHEAD` of it, with a margin of half a second or more
+//! either way.
 
+use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::Instant;
@@ -20,8 +26,11 @@ use tutti_ump::{Message, MidiGroup, System, Ump};
 use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity, Voice2};
 use tutti_units::{Beat, SampleRate, Samples, Seconds};
 
-const RATE: f64 = 48_000.0;
-const BLOCK: usize = 512;
+const RATE: SampleRate = SampleRate::of(48_000.0);
+const BLOCK: Samples = Samples::new(512);
+/// The most a figure here may differ from its arithmetic: the nanosecond
+/// roundings of a block's date and of a frame count turned into a `Duration`.
+const ROUNDING: Duration = Duration::from_nanos(5);
 
 /// Every event the output was told to send, with when.
 #[derive(Clone, Default)]
@@ -55,7 +64,7 @@ impl Wire {
 
 fn spec() -> OutputSpec {
     OutputSpec::new(
-        SampleRate::of(RATE),
+        RATE,
         ChannelLayout::STEREO,
         tutti_buffers::SampleFormat::F32,
     )
@@ -83,58 +92,89 @@ fn rig(wire: &Wire) -> (LiveSession, ManualStream, tutti_session::MidiSink) {
     (s, stream, sink)
 }
 
-/// Renders `blocks` blocks reporting `delay` as the audio output's latency, the
-/// last one after reading `Instant::now()` into the return.
-fn render(stream: &ManualStream, blocks: usize, delay: Option<Duration>) -> Instant {
-    let one = || match delay {
-        Some(delay) => stream.render_block_delayed(Samples::new(BLOCK), delay),
-        None => stream.render_block(Samples::new(BLOCK)),
-    };
-    for _ in 1..blocks {
-        one().expect("the stream is open");
+/// The instant frame `frame` is rendered, for blocks dated from `base`: its
+/// frames over the rate after block 0's date.
+fn rendered(base: Instant, frame: Samples) -> Instant {
+    base + span(frame)
+}
+
+/// The `Duration` of `frames` at [`RATE`].
+fn span(frames: Samples) -> Duration {
+    Duration::from_secs_f64(frames.to_seconds(RATE).get())
+}
+
+/// Renders blocks `from..to`, block `k` dated `base + k * BLOCK / RATE` and
+/// reporting `delay` as the audio output's latency.
+fn render(stream: &ManualStream, base: Instant, blocks: Range<usize>, delay: Option<Duration>) {
+    for k in blocks {
+        stream
+            .render_block_at(BLOCK, rendered(base, BLOCK * k), delay)
+            .expect("the stream is open");
     }
-    let last = Instant::now();
-    one().expect("the stream is open");
-    last
+}
+
+/// Asserts `at` is `expected` to within [`ROUNDING`].
+#[track_caller]
+fn assert_at(at: Instant, expected: Instant, what: &str) {
+    let off = if at >= expected {
+        at.duration_since(expected)
+    } else {
+        expected.duration_since(at)
+    };
+    assert!(
+        off <= ROUNDING,
+        "{what}: {at:?} is {off:?} from {expected:?}"
+    );
+}
+
+/// Asserts `ticks` are the clock's, one per 1 000 frames from frame 0 on the
+/// first, each sent `after` its frame is rendered.
+#[track_caller]
+fn assert_ticks(ticks: &[Instant], base: Instant, after: Duration) {
+    for (j, at) in ticks.iter().enumerate() {
+        assert_at(
+            *at,
+            rendered(base, Samples::new(1_000) * j) + after,
+            &format!("tick {j}"),
+        );
+    }
 }
 
 /// **Events reach the output at the instants their frames are heard, spaced by
-/// the frames.** With the stream reporting 1.5 s of audio latency and a second
+/// the frames.** With the stream reporting 1.5 s of audio latency and 60 blocks
 /// of clock rendered, every tick is in the future, and ticks 1 000 frames apart
-/// are 20.833 ms apart in `SendAt::At`, not all `Now`.
+/// are exactly 1 000 / 48 000 s apart in `SendAt::At`, not all `Now`, the
+/// newest at its frame's instant plus the latency.
 #[test]
 fn the_clock_is_sent_at_the_time_of_its_frames() {
     let wire = Wire::default();
     let (mut s, stream, _sink) = rig(&wire);
     let latency = Duration::from_millis(1500);
-    let last_block = render(&stream, 100, Some(latency));
+    let base = Instant::now() - Duration::from_secs(1);
+    render(&stream, base, 0..60, Some(latency));
     let _ = s.update();
     let sent = wire.take();
     let ticks = Wire::tick_times(&sent);
-    assert!(ticks.len() > 20, "ticks to measure: {}", ticks.len());
+    // Frames 0 to 30 719 hold the ticks at 0, 1 000, ... 30 000.
+    assert_eq!(ticks.len(), 31);
     for pair in ticks.windows(2) {
-        let gap = pair[1].duration_since(pair[0]).as_secs_f64();
-        assert!((gap - 1_000.0 / RATE).abs() < 1e-5, "ticks {gap} s apart");
+        assert_at(pair[1], pair[0] + span(Samples::new(1_000)), "tick spacing");
     }
-    // The last block began at `last_block` (within the call's own few ms), and
-    // every frame of it is heard its offset after, plus the latency.
-    let newest = *ticks.last().unwrap();
-    let expected = last_block + latency;
-    assert!(
-        newest >= expected && newest <= expected + Duration::from_millis(11 + 5),
-        "the newest tick is {:?} after the last block began, plus the latency",
-        newest.checked_duration_since(last_block)
+    assert_at(
+        *ticks.last().unwrap(),
+        rendered(base, Samples::new(30_000)) + latency,
+        "the newest tick is its frame's instant plus the latency",
     );
+    assert_ticks(&ticks, base, latency);
 }
 
 /// **An output's offset shifts every event by it.** The same clock in two
-/// sessions, one with a +0.25 s offset: the newest tick leaves 250 ms later
-/// relative to the instant its block began, which the test read the same way
-/// for both.
+/// sessions, one with a +0.25 s offset: the newest tick leaves exactly 250 ms
+/// later relative to the instant block 0 was dated, which is the same for both.
 #[test]
 fn an_output_offset_shifts_the_send_times() {
     let latency = Some(Duration::from_millis(1500));
-    let newest_after_block = |offset: f64| {
+    let newest_after_base = |offset: f64| {
         let wire = Wire::default();
         let (mut s, stream, _sink) = rig(&wire);
         let target = s.midi().output_latency();
@@ -146,17 +186,22 @@ fn an_output_offset_shifts_the_send_times() {
             .unwrap()),
         )
         .unwrap();
-        let last_block = render(&stream, 100, latency);
+        let base = Instant::now() - Duration::from_secs(1);
+        render(&stream, base, 0..60, latency);
         let _ = s.update();
         let ticks = Wire::tick_times(&wire.take());
-        ticks
-            .last()
-            .unwrap()
-            .duration_since(last_block)
-            .as_secs_f64()
+        assert_ticks(
+            &ticks,
+            base,
+            Duration::from_millis(1500) + Duration::from_secs_f64(offset),
+        );
+        ticks.last().unwrap().duration_since(base)
     };
-    let shift = newest_after_block(0.25) - newest_after_block(0.0);
-    assert!((shift - 0.25).abs() < 0.02, "shifted by {shift} s");
+    let shift = newest_after_base(0.25) - newest_after_base(0.0);
+    assert!(
+        shift.abs_diff(Duration::from_millis(250)) <= 2 * ROUNDING,
+        "shifted by {shift:?}"
+    );
 }
 
 /// **A written output latency is the terms' own on a device clock.** A device
@@ -177,7 +222,12 @@ fn a_written_output_latency_is_the_terms_own_on_a_device_clock() {
     .unwrap();
     let target = s.midi().output_latency();
     s.set(target.to(written)).unwrap();
-    let _ = render(&stream, 2, Some(Duration::from_millis(40)));
+    render(
+        &stream,
+        Instant::now(),
+        0..2,
+        Some(Duration::from_millis(40)),
+    );
     let _ = s.update();
     let terms = s.midi().output_terms().unwrap();
     assert_eq!(
@@ -191,8 +241,8 @@ fn a_written_output_latency_is_the_terms_own_on_a_device_clock() {
 /// **While the audio latency is unreported, events are timed with the terms
 /// known, and the terms say so.** Before the stream's first callback and after
 /// one that reports nothing, `output_terms` is incomplete and ticks leave at
-/// the instant their frames are rendered (none a second out); once a callback
-/// reports 40 ms the term is in.
+/// the instant their frames are rendered, with no latency term; once a callback
+/// reports 40 ms the term is in, exactly.
 #[test]
 fn an_unreported_audio_latency_is_left_out_and_reported() {
     let wire = Wire::default();
@@ -201,53 +251,45 @@ fn an_unreported_audio_latency_is_left_out_and_reported() {
     assert_eq!(terms.audio_output, None);
     assert!(!terms.is_complete());
 
-    let last_block = render(&stream, 100, None);
+    let base = Instant::now() + Duration::from_millis(500);
+    render(&stream, base, 0..60, None);
     let _ = s.update();
     let sent = wire.take();
     assert!(!s.midi().output_terms().unwrap().is_complete());
-    let scheduled: Vec<Instant> = sent
-        .iter()
-        .filter_map(|e| match e.send {
-            SendAt::At(at) => Some(at),
-            SendAt::Now => None,
-        })
-        .collect();
-    assert!(!scheduled.is_empty(), "the newest block's events are ahead");
     assert!(
-        scheduled
-            .iter()
-            .all(|at| *at <= last_block + Duration::from_millis(40)),
-        "with no audio latency known, nothing is scheduled beyond its own frame"
+        sent.iter().all(|e| matches!(e.send, SendAt::At(_))),
+        "every event is ahead of the update"
     );
+    let ticks = Wire::tick_times(&sent);
+    assert_eq!(ticks.len(), 31, "the ticks of frames 0 to 30 719");
+    assert_ticks(&ticks, base, Duration::ZERO);
 
-    let last_block = render(&stream, 2, Some(Duration::from_millis(40)));
+    render(&stream, base, 60..62, Some(Duration::from_millis(40)));
     let terms = s.midi().output_terms().unwrap();
     assert_eq!(terms.audio_output, Some(Seconds::new(0.04)));
     assert!(terms.is_complete());
     let _ = s.update();
-    let scheduled: Vec<Instant> = wire
-        .take()
-        .iter()
-        .filter_map(|e| match e.send {
-            SendAt::At(at) => Some(at),
-            SendAt::Now => None,
-        })
-        .collect();
+    let sent = wire.take();
     assert!(
-        scheduled
-            .iter()
-            .any(|at| *at >= last_block + Duration::from_millis(40)),
-        "the reported 40 ms is in the send time"
+        sent.iter().all(|e| matches!(e.send, SendAt::At(_))),
+        "every event is ahead of the update"
+    );
+    // Frames 30 720 to 31 743 hold the tick at 31 000.
+    let ticks = Wire::tick_times(&sent);
+    assert_eq!(ticks.len(), 1);
+    assert_at(
+        ticks[0],
+        rendered(base, Samples::new(31_000)) + Duration::from_millis(40),
+        "the reported 40 ms is in the send time",
     );
 }
 
 /// **A clip's notes reach a sink at the instants their frames are heard.** A
 /// note from beat 1 for one beat at 120 BPM and 48 kHz is a note-on at frame
 /// 24 000 and a note-off at 48 000, so the two leave exactly 0.5 s apart in
-/// `SendAt::At`, and the note-on leaves at the time its frame is heard: the
-/// last block's instant plus the 1.5 s the stream reports, less the 26 688
-/// frames (0.556 s) between the note and that block's start, less the sink's
-/// own 5 ms latency.
+/// `SendAt::At`, and the note-on leaves at the time its frame is heard: block
+/// 0's date plus 0.5 s of frames and the 1.5 s the stream reports, less the
+/// sink's own 5 ms latency.
 #[test]
 fn a_clips_notes_are_sent_when_their_frames_are_heard() {
     let wire = Wire::default();
@@ -283,7 +325,8 @@ fn a_clips_notes_are_sent_when_their_frames_are_heard() {
         .expect("the sink's node takes events");
     let _ = s.update();
     let latency = Duration::from_millis(1500);
-    let last_block = render(&stream, 100, Some(latency));
+    let base = Instant::now() - Duration::from_millis(1200);
+    render(&stream, base, 0..100, Some(latency));
     let _ = s.update();
     let sends: Vec<(bool, Instant)> = wire
         .take()
@@ -297,15 +340,15 @@ fn a_clips_notes_are_sent_when_their_frames_are_heard() {
     let [(true, on), (false, off)] = sends[..] else {
         panic!("a note-on then a note-off, scheduled: {sends:?}")
     };
-    let gap = off.duration_since(on).as_secs_f64();
-    assert!((gap - 0.5).abs() < 1e-6, "{gap}");
-    // The last block began at frame 99 * 512 = 50 688.
-    let heard = last_block + latency
-        - Duration::from_secs_f64(f64::from(50_688 - 24_000) / RATE)
-        - Duration::from_millis(5);
-    assert!(
-        on >= heard && on <= heard + Duration::from_millis(16),
-        "the note-on is {:?} after the instant its frame is heard",
-        on.checked_duration_since(heard)
+    assert_at(
+        off,
+        on + Duration::from_millis(500),
+        "the note-off is half a second after the note-on",
+    );
+    // The note-on is frame 24 000 and the sink's own latency is sent early.
+    assert_at(
+        on,
+        rendered(base, Samples::new(24_000)) + latency - Duration::from_millis(5),
+        "the note-on is its frame's instant plus the audio latency, less the sink's",
     );
 }
