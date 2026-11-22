@@ -44,27 +44,22 @@ fn band(
     release: f64,
     makeup: f64,
 ) -> BandSettings {
-    BandSettings {
-        compressor: CompressorControls {
-            threshold: Db::new(threshold),
-            knee: Db::new(knee),
-            ratio: CompressionRatio::new(ratio),
-            attack: Seconds::new(attack),
-            release: Seconds::new(release),
-            makeup: Db::new(makeup),
-            ..CompressorControls::DEFAULT
-        },
-        bypass: false,
-        solo: false,
-    }
+    BandSettings::new().compressor(CompressorControls {
+        threshold: Db::new(threshold),
+        knee: Db::new(knee),
+        ratio: CompressionRatio::new(ratio),
+        attack: Seconds::new(attack),
+        release: Seconds::new(release),
+        makeup: Db::new(makeup),
+        ..CompressorControls::DEFAULT
+    })
 }
 
 /// Every band at unity ratio and no makeup, the splits at `freqs`: nothing is reduced.
 fn unity(freqs: &[f64]) -> MultibandSettings {
-    MultibandSettings {
-        crossover: hz(freqs),
-        bands: [band(-18.0, 0.0, 1.0, 0.01, 0.1, 0.0); MAX_BANDS],
-    }
+    MultibandSettings::new()
+        .crossover(hz(freqs))
+        .bands([band(-18.0, 0.0, 1.0, 0.01, 0.1, 0.0); MAX_BANDS])
 }
 
 /// `audio` (one slice per channel) through `k` in calls of `chunk` frames, band `b`'s
@@ -862,10 +857,11 @@ fn an_f64_multiband_under_every_threshold_is_the_crossover_sum() {
         RATE,
     );
     // The signal is near 0.25 (-12 dB), 12 dB under the threshold of every band.
-    k.retarget(&MultibandSettings {
-        crossover: hz(&[1_000.0]),
-        bands: [band(0.0, 0.0, 8.0, 0.01, 0.1, 0.0); MAX_BANDS],
-    });
+    k.retarget(
+        &MultibandSettings::new()
+            .crossover(hz(&[1_000.0]))
+            .bands([band(0.0, 0.0, 8.0, 0.01, 0.1, 0.0); MAX_BANDS]),
+    );
     let mut out = vec![0.0f64; n];
     k.process(
         MultibandSignals::default(),
@@ -877,4 +873,18 @@ fn an_f64_multiband_under_every_threshold_is_the_crossover_sum() {
     )
     .unwrap();
     assert_close_f64(&out, &butterworth_all_pass(&x, 1_000.0, RATE.get()), 1e-12);
+}
+
+/// A fresh settings value is the do-nothing multiband: the default compressor in every band,
+/// neither bypassed nor soloed, the splits at 200 Hz, 1 kHz and 5 kHz.
+#[test]
+fn new_settings_split_at_200_1000_5000_and_leave_every_band_alone() {
+    let set = MultibandSettings::new();
+    let f = set.crossover.frequencies;
+    assert_eq!(f[..3], [Hz::new(200.0), Hz::new(1_000.0), Hz::new(5_000.0)]);
+    assert_eq!(f[3..], [Hz::ZERO; 2]);
+    for b in set.bands {
+        assert_eq!(b.compressor, CompressorControls::DEFAULT);
+        assert!(!b.bypass && !b.solo);
+    }
 }
