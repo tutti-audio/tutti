@@ -167,14 +167,21 @@ fn a_removed_clips_target_is_gone() {
 /// with their absolute frames.
 struct HarmonyTap(tutti_fixtures::Record<(u64, Harmony)>);
 
+impl HarmonyTap {
+    const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+    const IN: tutti_graph::InEvents = Self::SHAPE
+        .event_input(0)
+        .expect("one event input is declared");
+}
+
 impl Node for HarmonyTap {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
         let mut seen = self.0.lock().unwrap();
-        for e in io.events(0) {
+        for e in io.events(Self::IN) {
             if let EventKind::Harmony(h) = e.kind {
                 seen.push((cx.env.frame.get() + u64::from(e.offset.get()), h));
             }
@@ -293,13 +300,21 @@ fn a_removed_harmony_nodes_target_is_gone() {
 #[derive(Clone)]
 struct Count(Arc<AtomicUsize>);
 
+impl Count {
+    const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+    const IN: tutti_graph::InEvents = Self::SHAPE
+        .event_input(0)
+        .expect("one event input is declared");
+}
+
 impl Node for Count {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
-        self.0.fetch_add(io.events(0).len(), Ordering::Relaxed);
+        self.0
+            .fetch_add(io.events(Self::IN).len(), Ordering::Relaxed);
         Status::Modified
     }
     fn reset(&mut self) {}

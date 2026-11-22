@@ -107,13 +107,17 @@ impl RampEvery {
     }
 }
 
+impl RampEvery {
+    const BASE: Shape = Shape::EMPTY
+        .with_events(0, 1)
+        .with_param_events()
+        .with_event_capacity(tutti_graph::testing::cap_of(16));
+    const OUT: tutti_graph::OutEvents = Self::BASE.event_output(0).expect("declared");
+}
+
 impl Node for RampEvery {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
-            .with_events(0, 1)
-            .with_param_events()
-            .with_event_capacity(tutti_graph::testing::cap_of(16))
-            .with_latency(Latency::new(Samples::new(self.latency)))
+        Self::BASE.with_latency(Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -148,7 +152,7 @@ impl Node for RampEvery {
                         tutti_graph::ParamEvent::segment(o, seg)
                     }
                 };
-                let _ = io.event_out(0).push_param(event);
+                let _ = io.event_out(Self::OUT).push_param(event);
             }
         }
         Status::Silent

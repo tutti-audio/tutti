@@ -20,9 +20,16 @@ use tutti_units::{Frame, SampleRate};
 /// A note-on on every frame that is a multiple of 4, its own frame in word 0.
 struct Every4;
 
+impl Every4 {
+    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const OUT: tutti_graph::OutEvents = Self::SHAPE
+        .event_output(0)
+        .expect("one event output is declared");
+}
+
 impl Node for Every4 {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -30,7 +37,7 @@ impl Node for Every4 {
             let f = cx.env.frame_at(at).get();
             if f.is_multiple_of(4) {
                 let _ = io
-                    .event_out(0)
+                    .event_out(Self::OUT)
                     .push(Event::midi(at, Ump([f as u32, 0, 0, 0])));
             }
         }

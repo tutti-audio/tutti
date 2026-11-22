@@ -154,9 +154,16 @@ struct Hold {
     sent: usize,
 }
 
+impl Hold {
+    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1).with_cost(Cost::Light);
+    const OUT: tutti_graph::OutEvents = Self::SHAPE
+        .event_output(0)
+        .expect("one event output is declared");
+}
+
 impl Node for Hold {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_cost(Cost::Light)
+        Self::SHAPE
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -172,7 +179,7 @@ impl Node for Hold {
                 ),
             ));
             let at = Offset::of(Samples::new(0), Samples::new(io.frames()));
-            if io.event_out(0).push(Event::midi(at, note)).is_ok() {
+            if io.event_out(Self::OUT).push(Event::midi(at, note)).is_ok() {
                 self.sent += 1;
             }
         }

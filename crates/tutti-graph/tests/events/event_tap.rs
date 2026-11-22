@@ -118,8 +118,8 @@ impl Node for Script {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        for p in 0..self.ports {
-            let out = io.event_out(p);
+        for (p, port) in (0..self.ports).zip(self.shape().event_outputs()) {
+            let out = io.event_out(port);
             if p == 0 && self.resync {
                 let _ = out.push(Event::resync(Offset::ZERO));
             }
@@ -716,6 +716,11 @@ struct Probe {
     capacity: u32,
 }
 
+impl Probe {
+    const BASE: Shape = Shape::EMPTY.with_events(1, 0);
+    const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
+}
+
 impl Node for Probe {
     fn shape(&self) -> Shape {
         let shape = Shape::EMPTY.with_events(self.ports as u16, 0);
@@ -728,7 +733,7 @@ impl Node for Probe {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
         let mut heard = self.heard.lock().unwrap();
-        for e in io.events(0) {
+        for e in io.events(Self::IN) {
             if let EventKind::Midi(ump) = e.kind {
                 heard.push(TapEvent {
                     frame: cx.env.frame_at(e.offset),
