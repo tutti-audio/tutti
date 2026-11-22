@@ -21,8 +21,8 @@ use crate::Request as WireRequest;
 
 use crate::{
     AudioReply, AudioRequest, AudioSlab, ControlFrame, ControlReply, ControlRequest, Framed, Ipc,
-    IpcController, IpcEvent, IpcParts, IpcProcessor, News, PROTOCOL_VERSION, PluginBridge,
-    ProcessGuard, RING_SLOTS, ReqId, SlabHandle, SlabLayout, unique_socket_path,
+    IpcController, IpcEvent, IpcParts, IpcProcessor, News, PluginBridge, ProcessGuard, RING_SLOTS,
+    ReqId, SlabHandle, SlabLayout,
 };
 
 const CEILING: usize = 64;
@@ -192,7 +192,7 @@ fn mock_with(
     format: tutti_plugin_types::PluginFormat,
     load_editor: Option<crate::EditorLoader>,
 ) -> (Ipc, Mock) {
-    use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
+    use crate::transport::broker_pair;
     use std::io::Read;
     let layout = SlabLayout {
         samples_per_channel: CEILING,
@@ -201,16 +201,12 @@ fn mock_with(
         inputs: vec![ChannelLayout::STEREO],
         outputs: vec![ChannelLayout::STEREO],
     };
-    let path = unique_socket_path().expect("the OS has a random source");
-    let _ = std::fs::remove_file(&path);
-    let listener = ListenerOptions::new()
-        .name(crate::socket_name(&path).unwrap())
-        .create_sync()
-        .unwrap();
+    let ((audio_stream, audio), (control_stream, stream)) = (broker_pair(), broker_pair());
     let (slab, _handle) = AudioSlab::create(layout).unwrap();
     let (bridge, thread, replies) = PluginBridge::new(
         tutti_fixtures::executor(),
-        path.clone(),
+        audio_stream,
+        control_stream,
         origin,
         format,
         load_editor,
@@ -225,24 +221,8 @@ fn mock_with(
         },
     )
     .unwrap();
-    // The audio connection first, then the control one, as the server accepts
-    // them. Blocks and resets arrive on the first and are only logged.
-    let audio = Arc::new(listener.accept().unwrap());
-    // The host connects the control stream only once it has the audio one's
-    // `Ready`.
-    reply(
-        &audio,
-        &AudioReply::Ready {
-            protocol_version: PROTOCOL_VERSION,
-        },
-    );
-    let stream = Arc::new(listener.accept().unwrap());
-    reply(
-        &stream,
-        &ControlFrame::Ready {
-            protocol_version: PROTOCOL_VERSION,
-        },
-    );
+    // Blocks and resets arrive on the audio connection and are only logged.
+    let (audio, stream) = (Arc::new(audio), Arc::new(stream));
     let received: Received = Arc::default();
     let parameters: Arc<Mutex<Vec<ParameterInfo>>> =
         Arc::new(Mutex::new(vec![ParameterInfo::new(
@@ -429,7 +409,6 @@ fn mock_with(
                 _ => {}
             }
         }
-        let _ = std::fs::remove_file(&path);
     });
     let ipc = Ipc::new(IpcParts {
         bridge,

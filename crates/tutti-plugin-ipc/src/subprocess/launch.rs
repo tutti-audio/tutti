@@ -1,14 +1,18 @@
 //! Full launch sequence for a plugin-server subprocess:
-//! spawn → handshake → load plugin → setup shared memory → return
-//! a [`LaunchedServer`] ready for the RT bridge thread to connect.
+//! spawn → handshake → load plugin → setup shared memory → open the audio lane →
+//! return a [`LaunchedServer`] holding the lane and the broker connection, ready
+//! for the RT bridge thread.
 
 use crate::ProcessGuard;
 use crate::config::IpcConfig;
 use crate::conversation::Conversation;
 use crate::error::unexpected_message;
+use crate::transport::PendingLane;
 use crate::transport::control::{self as ipc, ControlStream};
 use crate::transport::shm::{AudioSlab, SlabLayout, SlabWriter};
-use crate::{ControlFrame, ControlReply, ControlRequest, ReqId, Request, StagedState, Working};
+use crate::{
+    ControlFrame, ControlReply, ControlRequest, Lane, ReqId, Request, StagedState, Working,
+};
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
@@ -30,8 +34,8 @@ use tutti_units::SampleRate;
 /// the common case returns in single-digit milliseconds.
 const CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(2);
 
-/// A plugin-server that has loaded its plugin and waits for the bridge
-/// thread to connect ([`launch`]).
+/// A plugin-server that has loaded its plugin and opened its audio lane, and
+/// waits for the bridge thread to speak on its connections ([`launch`]).
 pub struct LaunchedServer {
     /// The server process, killed and reaped when this drops, and the watch
     /// on whether it is alive.
@@ -49,6 +53,11 @@ pub struct LaunchedServer {
     /// the one in this process (`SlabWriter`). Readers share
     /// [`SlabWriter::slab`].
     pub slab: SlabWriter,
+    /// The audio lane the server opened over the broker: blocks out, block
+    /// replies in.
+    pub audio: ControlStream,
+    /// The broker connection, which serves as the control lane from here on.
+    pub control: ControlStream,
     /// What became of the state the launch was given: `None` when it had none,
     /// else the plugin's refusal as text (`Ok` when it took it).
     pub state_restore: Option<std::result::Result<(), StateError>>,
@@ -103,7 +112,7 @@ impl Restore<'_> {
 }
 
 /// Spawn a plugin-server and bring it to the point where the RT bridge thread
-/// can connect.
+/// can speak to it.
 ///
 /// **Every failure after the spawn must reap the child.** The child is held
 /// by a [`ProcessGuard`] from the moment it is spawned, which kills and reaps it
@@ -195,19 +204,33 @@ pub(super) fn launch_with_state(
             None => None,
         };
         let slab = setup_shm(&mut launch, config, &loaded, format)?;
-        Ok((id, descriptor, loaded, format, slab, state_restore))
-    })(&server);
-
-    match result {
-        Ok((id, descriptor, loaded, format, slab, state_restore)) => Ok(LaunchedServer {
-            server,
+        let audio = open_audio_lane(&mut launch, config)?;
+        Ok((
             id,
-            descriptor: *descriptor,
+            descriptor,
             loaded,
             format,
             slab,
+            audio,
+            launch.stream,
             state_restore,
-        }),
+        ))
+    })(&server);
+
+    match result {
+        Ok((id, descriptor, loaded, format, slab, audio, control, state_restore)) => {
+            Ok(LaunchedServer {
+                server,
+                id,
+                descriptor: *descriptor,
+                loaded,
+                format,
+                slab,
+                audio,
+                control,
+                state_restore,
+            })
+        }
         Err(e) => {
             // `server` drops here, killed and reaped, and its socket removed. Best-effort and
             // deliberately un-propagated: the launch error is the one worth
@@ -297,10 +320,10 @@ const LOAD_CEILING_FACTOR: u32 = 10;
 fn handshake(config: &IpcConfig, server: &ProcessGuard) -> IpcResult<ControlStream> {
     let mut stream = connect_when_listening(&config.socket_path, server, config.timeouts.connect)?;
     let timeout = config.timeouts.call;
-    // A server from before version 27 frames its `Ready` in bincode, which does
+    // A server from before version 27 frames its `Hello` in bincode, which does
     // not decode as one message of ours: say which binary is stale rather than
     // report a bare codec error.
-    let ready = ipc::recv_within::<ControlFrame>(&mut stream, timeout).map_err(|e| match e {
+    let hello = ipc::recv_within::<ControlFrame>(&mut stream, timeout).map_err(|e| match e {
         undecodable @ (IpcError::Serialization(_) | IpcError::TrailingBytes { .. }) => {
             IpcError::StaleServer {
                 cause: Box::new(undecodable),
@@ -308,12 +331,12 @@ fn handshake(config: &IpcConfig, server: &ProcessGuard) -> IpcResult<ControlStre
         }
         other => other,
     })?;
-    match ready {
-        ControlFrame::Ready { protocol_version } => {
+    match hello {
+        ControlFrame::Hello { protocol_version } => {
             crate::protocol::check_protocol_version(protocol_version)?;
             Ok(stream)
         }
-        ref other => Err(unexpected_message("Ready", other)),
+        ref other => Err(unexpected_message("Hello", other)),
     }
 }
 
@@ -630,6 +653,20 @@ fn setup_shm(
     }
 }
 
+/// Opens the audio lane over the broker: a fresh stream whose server end the
+/// server serves, and whose host end is returned once the server says it holds
+/// its own.
+fn open_audio_lane(launch: &mut Launch<'_>, config: &IpcConfig) -> IpcResult<ControlStream> {
+    let lane = PendingLane::new()?;
+    let call = config.timeouts.call;
+    let id = launch.open(call, call);
+    ipc::send_open_lane(&mut launch.stream, id, Lane::Audio, &lane)?;
+    match launch.answer(id)? {
+        ControlReply::LaneOpened => lane.stream(),
+        ref other => Err(unexpected_message("LaneOpened", other)),
+    }
+}
+
 /// The slab a running server renders through when the plugin's buses are
 /// `loaded`'s: `None` when `held` is already laid out for them (and the server
 /// is known to render through it, `unsure` false), else a new one the server has
@@ -767,7 +804,7 @@ mod tests {
             tutti_fixtures::executor(),
         ) {
             Err(e) => e,
-            // Cannot happen (`sleep` never sends `Ready`), but reap rather than
+            // Cannot happen (`sleep` never sends `Hello`), but reap rather than
             // leak if the premise ever changes.
             Ok(server) => {
                 server.server.terminate();
@@ -1123,6 +1160,48 @@ mod tests {
         assert!(exchange.hear(other, id, now).is_err());
     }
 
+    /// **A launch refuses a second `Hello` and a `LaneOpened` it did not ask
+    /// for**: neither is the answer to the request waited for, nor a sign of life.
+    #[test]
+    fn a_second_hello_and_an_unrequested_lane_answer_end_the_wait() {
+        let t = exchange_timeouts();
+        let now = Instant::now();
+        let mut exchange = Exchange::new(&t);
+        let id = exchange.open(now, t.call, t.call);
+        let hello = ControlFrame::Hello {
+            protocol_version: crate::PROTOCOL_VERSION,
+        };
+        let unrequested = ControlFrame::Reply {
+            id: ReqId::new(99),
+            reply: ControlReply::LaneOpened,
+        };
+        assert!(exchange.hear(hello, id, now).is_err());
+        assert!(exchange.hear(unrequested, id, now).is_err());
+    }
+
+    /// **The first frame of a server must be its `Hello`**: a reply sent before
+    /// it is refused as the unexpected message it is, and no version is read.
+    #[test]
+    fn a_frame_before_hello_is_refused() {
+        let err = handshake_against(
+            postcard::to_allocvec(&ControlFrame::Reply {
+                id: ReqId::new(1),
+                reply: ControlReply::LaneOpened,
+            })
+            .unwrap(),
+        );
+        assert!(
+            matches!(
+                err,
+                IpcError::UnexpectedMessage {
+                    expected: "Hello",
+                    ..
+                }
+            ),
+            "{err}"
+        );
+    }
+
     /// **A plugin that dies before the restore is not blamed on the state**: it
     /// dies initializing, which comes first, and the launch fails as any load does.
     #[test]
@@ -1428,7 +1507,7 @@ mod tests {
         );
 
         let err = handshake_against(
-            postcard::to_allocvec(&ControlFrame::Ready {
+            postcard::to_allocvec(&ControlFrame::Hello {
                 protocol_version: STALE_VERSION,
             })
             .unwrap(),
@@ -1460,7 +1539,7 @@ mod tests {
 
         const BEFORE_STATUS: u32 = 31;
         let err = handshake_against(
-            postcard::to_allocvec(&ControlFrame::Ready {
+            postcard::to_allocvec(&ControlFrame::Hello {
                 protocol_version: BEFORE_STATUS,
             })
             .unwrap(),
@@ -1476,18 +1555,18 @@ mod tests {
     }
 
     /// **A server from the bincode wire (protocol 26 and older) is refused at
-    /// the handshake, and the error says to rebuild it.** Its `Ready` is a
+    /// the handshake, and the error says to rebuild it.** Its `Hello` is a
     /// four-byte little-endian variant tag then the version as a four-byte
     /// little-endian `u32`, written out here from bincode 1's layout; under
     /// postcard those bytes do not decode as one message, so the version is
     /// never read and the codec error is what the operator would otherwise see.
     #[test]
     fn a_bincode_era_server_is_refused_with_a_rebuild_hint() {
-        let ready = postcard::to_allocvec(&ControlFrame::Ready {
+        let hello = postcard::to_allocvec(&ControlFrame::Hello {
             protocol_version: 0,
         })
         .unwrap()[0];
-        let mut bincode_ready = vec![ready, 0, 0, 0];
+        let mut bincode_ready = vec![hello, 0, 0, 0];
         bincode_ready.extend_from_slice(&26u32.to_le_bytes());
 
         match handshake_against(bincode_ready) {
@@ -1713,3 +1792,7 @@ mod tests {
         }
     }
 }
+
+/// The audio lane's open, against a mock server over a socket pair.
+#[cfg(all(test, unix))]
+mod lane_tests;

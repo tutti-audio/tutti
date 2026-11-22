@@ -18,8 +18,8 @@ use interprocess::local_socket::Stream;
 use interprocess::local_socket::traits::Stream as _;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::{
-    AudioReply, ControlFrame, ControlReply, ControlRequest, ReqId, Request, Working, read_frame,
-    socket_name, write_frame,
+    ControlFrame, ControlReply, ControlRequest, Lane, LaneWire, ReqId, Request, Working,
+    read_frame, socket_name, write_frame,
 };
 use tutti_plugin_types::{PluginFormat, PluginId, SampleRate, ServerError};
 
@@ -51,6 +51,42 @@ fn connect(socket: &Path, server: &mut Server) -> Stream {
         },
     );
     connected.expect("the wait ended on a connection")
+}
+
+/// Asks for the audio lane over `broker` as the host does: the `OpenLane` frame
+/// of request `id`, then the server's end of a fresh socket pair as a descriptor.
+/// Returns the host's end and the server's answer.
+fn request_audio_lane(broker: &mut Stream, id: u64) -> (Stream, ControlReply) {
+    use std::os::fd::AsFd as _;
+    let (host, server) = tutti_plugin_ipc_ffi::lane_pair().expect("a socket pair");
+    write_frame(
+        broker,
+        &Request {
+            id: ReqId::new(id),
+            body: ControlRequest::OpenLane {
+                lane: Lane::Audio,
+                wire: LaneWire::fresh().expect("a lane wire"),
+            },
+        },
+    )
+    .expect("send OpenLane");
+    let Stream::UdSocket(socket) = &*broker;
+    tutti_plugin_ipc_ffi::send_lane(socket.as_fd(), server.as_fd()).expect("send the lane's end");
+    match read_frame(broker).expect("the server answers the lane") {
+        ControlFrame::Reply { id: of, reply } => {
+            assert_eq!(of, ReqId::new(id), "the answer echoes the request's id");
+            (Stream::UdSocket(host.into()), reply)
+        }
+        other => panic!("expected the answer to the lane, got {other:?}"),
+    }
+}
+
+/// [`request_audio_lane`], which the server opens: the host's end of the lane.
+fn open_audio_lane(broker: &mut Stream) -> Stream {
+    match request_audio_lane(broker, 2) {
+        (lane, ControlReply::LaneOpened) => lane,
+        (_, other) => panic!("expected LaneOpened, got {other:?}"),
+    }
 }
 
 fn load(stream: &mut Stream, path: &Path, format: PluginFormat) -> ControlReply {
@@ -100,7 +136,7 @@ fn fixtures() -> (PathBuf, PathBuf) {
     (not_a_plugin, real)
 }
 
-/// A `plugin-server` process and its handshake connection, past `Ready`.
+/// A `plugin-server` process and its broker connection, past `Hello`.
 fn start_server() -> (Server, Stream) {
     let (server, stream, _) = start_server_for_this_process();
     (server, stream)
@@ -126,7 +162,7 @@ fn start_server_for_this_process() -> (Server, Stream, PathBuf) {
     let mut stream = connect(&socket, &mut server);
     assert!(matches!(
         read_frame::<_, ControlFrame>(&mut stream),
-        Ok(ControlFrame::Ready { .. })
+        Ok(ControlFrame::Hello { .. })
     ));
     (server, stream, socket)
 }
@@ -312,6 +348,41 @@ fn a_shutdown_in_the_handshake_releases_the_plugin() {
     assert_eq!(status.code(), Some(0), "{status:?}: {logged}");
 }
 
+/// **A second lane is refused by name, and the first goes on**: the server
+/// answers the second `OpenLane` with `LaneAlreadyOpen`, stays up, and ends clean
+/// at the host's `Shutdown`.
+#[test]
+fn a_second_lane_is_refused_by_name_and_the_session_goes_on() {
+    let (_not_a_plugin, good) = fixtures();
+    let (mut server, mut stream) = start_server();
+    assert!(matches!(
+        load(&mut stream, &good, PluginFormat::Clap),
+        ControlReply::PluginLoaded { .. }
+    ));
+    let _audio = open_audio_lane(&mut stream);
+
+    let (_second, reply) = request_audio_lane(&mut stream, 3);
+    assert!(
+        matches!(
+            reply,
+            ControlReply::Error {
+                error: ServerError::LaneAlreadyOpen
+            }
+        ),
+        "{reply:?}"
+    );
+    write_frame(
+        &mut stream,
+        &Request {
+            id: ReqId::new(4),
+            body: ControlRequest::Shutdown,
+        },
+    )
+    .expect("send Shutdown");
+    let (status, logged) = ended(&mut server);
+    assert_eq!(status.code(), Some(0), "{status:?}: {logged}");
+}
+
 /// **A handshake frame that does not decode ends the server, with that cause
 /// and not as a host that went away.** A host of another protocol sends a
 /// well-framed body the server cannot read; the server used to take it for the
@@ -370,23 +441,14 @@ fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
     let mut handshake = connect(&socket, &mut host);
     assert!(matches!(
         read_frame::<_, ControlFrame>(&mut handshake),
-        Ok(ControlFrame::Ready { .. })
+        Ok(ControlFrame::Hello { .. })
     ));
     assert!(matches!(
         load(&mut handshake, &good, PluginFormat::Clap),
         ControlReply::PluginLoaded { .. }
     ));
-    drop(handshake);
-    let mut audio = connect(&socket, &mut host);
-    let mut control = connect(&socket, &mut host);
-    assert!(matches!(
-        read_frame::<_, AudioReply>(&mut audio),
-        Ok(AudioReply::Ready { .. })
-    ));
-    assert!(matches!(
-        read_frame::<_, ControlFrame>(&mut control),
-        Ok(ControlFrame::Ready { .. })
-    ));
+    let _audio = open_audio_lane(&mut handshake);
+    let mut control = handshake;
     let (ended, server_ended) = std::sync::mpsc::channel();
     let executor = tutti_platform::Executor::new();
     let _watch = tutti_plugin_ipc_ffi::watch_host(&executor, server, move || {

@@ -248,6 +248,15 @@ impl Session {
         reply.into()
     }
 
+    /// The answer to an `OpenLane` once the audio lane is open: refused in a
+    /// reply, the open lane untouched.
+    pub(crate) fn refuse_second_lane(&self) -> Reaction {
+        ControlReply::Error {
+            error: ServerError::LaneAlreadyOpen,
+        }
+        .into()
+    }
+
     fn dispatch(
         &mut self,
         main: MainThreadMarker,
@@ -435,6 +444,12 @@ impl Session {
             // (`setup_slab`); a frame that reaches here has no slab.
             M::SetupSharedMemory { .. } => Ok(ControlReply::Error {
                 error: ServerError::SlabSetupWithoutSlab,
+            }
+            .into()),
+            // The transport delivers a lane open with its end as
+            // `Incoming::OpenAudio`; a frame that reaches here has no end.
+            M::OpenLane { .. } => Ok(ControlReply::Error {
+                error: ServerError::LaneWithoutEnd,
             }
             .into()),
             M::Shutdown => Ok(Reaction::Shutdown),
@@ -1431,6 +1446,29 @@ mod tests {
         assert!(matches!(
             s.handle(main_thread(), ControlRequest::Shutdown).unwrap(),
             Reaction::Shutdown
+        ));
+    }
+
+    /// **A lane open that reaches the session without its end, and one for a lane
+    /// already open, are each refused in a reply by name.**
+    #[test]
+    fn a_lane_open_is_refused_without_its_end_and_when_already_open() {
+        let mut s = Rig::new();
+        let bare = ControlRequest::OpenLane {
+            lane: tutti_plugin_ipc::Lane::Audio,
+            wire: tutti_plugin_ipc::LaneWire::fresh().unwrap(),
+        };
+        assert!(matches!(
+            s.handle(main_thread(), bare).unwrap(),
+            Reaction::Reply(ControlReply::Error {
+                error: ServerError::LaneWithoutEnd
+            })
+        ));
+        assert!(matches!(
+            s.session.refuse_second_lane(),
+            Reaction::Reply(ControlReply::Error {
+                error: ServerError::LaneAlreadyOpen
+            })
         ));
     }
 

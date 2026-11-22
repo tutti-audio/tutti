@@ -3,6 +3,7 @@
 //! holds and naps between asks.
 
 use super::control::{ControlStream, back_off};
+use interprocess::local_socket::traits::Stream as _;
 use interprocess::local_socket::{GenericNamespaced, Name, Stream, ToNsName as _};
 use std::os::windows::io::{AsHandle, OwnedHandle};
 use std::path::{Path, PathBuf};
@@ -10,7 +11,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tutti_platform::Instant;
-use tutti_plugin_ipc_ffi::Connection;
+use tutti_plugin_ipc_ffi::{Connection, LaneWire};
+use tutti_plugin_types::IpcResult;
 
 /// Converts a host-chosen socket path into the local-socket name for this
 /// platform.
@@ -34,6 +36,82 @@ pub fn socket_name(socket: &Path) -> std::io::Result<Name<'static>> {
         )
     })?;
     leaf.to_owned().to_ns_name::<GenericNamespaced>()
+}
+
+/// A lane the host is opening: the name of the pipe the server listens on.
+pub(crate) struct PendingLane {
+    wire: LaneWire,
+}
+
+impl PendingLane {
+    /// A fresh lane, under a fresh name.
+    ///
+    /// # Errors
+    ///
+    /// The operating system's random source cannot be read.
+    pub(crate) fn new() -> IpcResult<Self> {
+        Ok(Self {
+            wire: LaneWire::fresh()?,
+        })
+    }
+
+    /// What the `OpenLane` frame carries of the lane: the pipe's name.
+    pub(crate) fn wire(&self) -> LaneWire {
+        self.wire.clone()
+    }
+
+    /// Nothing is sent beside the frame: the name is in it.
+    #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
+    pub(crate) fn send_end(&self, _: Connection<'_>) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    /// Connects to the pipe the server listens on, which it does before it says
+    /// the lane is open.
+    ///
+    /// # Errors
+    ///
+    /// The pipe cannot be connected to.
+    pub(crate) fn stream(self) -> IpcResult<ControlStream> {
+        let name = self
+            .wire
+            .name()
+            .to_owned()
+            .to_ns_name::<GenericNamespaced>()?;
+        let stream = Stream::connect(name)?;
+        let _ = stream.set_send_timeout(Some(super::control::SEND_TIMEOUT));
+        Ok(stream)
+    }
+}
+
+/// The two ends of a broker connection, host's first, for the mock servers of
+/// the tests: a fresh pipe, connected.
+///
+/// # Panics
+///
+/// The pipe cannot be created or connected.
+#[cfg(any(test, feature = "testing"))]
+pub fn broker_pair() -> (ControlStream, ControlStream) {
+    use interprocess::local_socket::ListenerOptions;
+    use interprocess::local_socket::traits::Listener as _;
+    static COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let name = format!(
+        "tutti_broker_pair-{}-{}",
+        std::process::id(),
+        COUNT.fetch_add(1, Ordering::Relaxed)
+    );
+    let name = || {
+        name.clone()
+            .to_ns_name::<GenericNamespaced>()
+            .expect("a pipe name")
+    };
+    let listener = ListenerOptions::new()
+        .name(name())
+        .create_sync()
+        .expect("a pipe to listen on");
+    let host = Stream::connect(name()).expect("the host's end connects");
+    let server = listener.accept().expect("the server's end accepts");
+    (host, server)
 }
 
 /// Bytes the named pipe can hand over right now, without blocking or consuming.

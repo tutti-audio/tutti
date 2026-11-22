@@ -15,7 +15,8 @@
 //! are needed and neither subsumes the other.
 
 use crate::protocol::frame::{decode_body, decode_prefix, write_frame};
-use crate::{ControlRequest, Framed, ReqId, Request, SlabHandle, SlabLayout};
+use crate::transport::PendingLane;
+use crate::{ControlRequest, Framed, Lane, ReqId, Request, SlabHandle, SlabLayout};
 use tutti_plugin_ipc_ffi::{Blob, Connection, Lease, Received};
 use tutti_plugin_types::{IpcError, IpcResult};
 
@@ -119,6 +120,25 @@ pub fn send_setup(
         layout,
     };
     send_then(stream, id, body, |conn| slab.send(conn))
+}
+
+/// Writes the request that opens `lane`, and then the server's end of it
+/// ([`PendingLane::send_end`]), as [`send_setup`] does a slab.
+///
+/// # Errors
+///
+/// As [`send_setup`].
+pub(crate) fn send_open_lane(
+    stream: &mut ControlStream,
+    id: ReqId,
+    lane: Lane,
+    pending: &PendingLane,
+) -> IpcResult<()> {
+    let body = ControlRequest::OpenLane {
+        lane,
+        wire: pending.wire(),
+    };
+    send_then(stream, id, body, |conn| pending.send_end(conn))
 }
 
 /// Writes the request `body`, which announces `blob` ([`Blob::wire`] is in it),
