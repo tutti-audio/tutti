@@ -102,6 +102,8 @@ missing_debug_implementations = "deny"
 [workspace.lints.clippy]
 # The thread ban: `clippy.toml` lists the thread starts.
 disallowed_methods = "deny"
+# The lock ban: `clippy.toml` lists std's blocking locks.
+disallowed_types = "deny"
 too_many_arguments = "allow"
 type_complexity = "allow"
 missing_errors_doc = "warn"

@@ -38,6 +38,10 @@
 // asks of its caller.
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 #![warn(unsafe_op_in_unsafe_fn)]
+#![allow(
+    clippy::disallowed_types,
+    reason = "layer 0, below tutti-rt: CoreMIDI's client and receive state are std locks"
+)]
 #![cfg_attr(
     test,
     allow(

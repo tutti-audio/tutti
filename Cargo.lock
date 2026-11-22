@@ -3190,6 +3190,7 @@ dependencies = [
  "tutti-plugin-ipc",
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
+ "tutti-rt",
  "tutti-shared-plugin",
  "tutti-ump",
  "tutti-units",
