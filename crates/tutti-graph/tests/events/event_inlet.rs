@@ -57,7 +57,7 @@ fn rig(capacity: u32) -> Rig {
 
 /// `(offset, status nibble, data byte 1)` of what the last block emitted.
 fn sent(d: &Direct<EventInletNode>) -> Vec<(u32, u32, u32)> {
-    d.events_out(0)
+    d.event_output(0)
         .iter()
         .map(|e| match e.kind {
             EventKind::Midi(Ump(w)) => (e.offset.get(), (w[0] >> 20) & 0xf, (w[0] >> 8) & 0x7f),

@@ -152,7 +152,7 @@ fn sent_at_arrival(reset: bool) -> usize {
     d.events(0, &[]);
     writer.arrive();
     d.block();
-    (0..MIDI_INPUT_PORTS).map(|p| d.events_out(p).len()).sum()
+    (0..MIDI_INPUT_PORTS).map(|p| d.event_output(p).len()).sum()
 }
 
 /// **`reset` returns the node to a freshly prepared one's state**: a device

@@ -169,7 +169,7 @@ fn a_params_wrapped_node_is_addressed_and_forks_from_its_values() {
         cutoff: Param::new(Hz::new(100.0)),
     }));
     s.graph()
-        .set_sources(tutti_session::MainOutput::channel(0), [mine.out(0)])
+        .set_sources(tutti_session::MainOutput::channel(0), [mine.output(0)])
         .unwrap()
         .unfaded();
     let _ = s.update();

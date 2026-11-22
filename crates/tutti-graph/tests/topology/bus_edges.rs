@@ -17,10 +17,10 @@ use tutti_buffers::{BufferError, Float, FoldError};
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology};
 use tutti_graph::Node;
 use tutti_graph::{
-    Bus, BusError, BusFeed, BusFold, BusRef, BusRole, BusSide, BusSource, Buses, CommitError,
+    Bus, BusError, BusFeed, BusFold, BusOutputPort, BusRole, BusSide, Buses, CommitError,
     CompileError, DelayKey, Edge, EdgeGain, EdgeId, Editor, GraphInvalid, GraphSpec, InputPort,
-    Lowering, NodeKey, Op, OutputPort, Plan, PortSink, PortSource, TransportPosition, Unforkable,
-    ValidGraph, compile,
+    Lowering, NodeBus, NodeKey, Op, OutputPort, Plan, PortSink, PortSource, TransportPosition,
+    Unforkable, ValidGraph, compile,
 };
 use tutti_units::{Amplitude, SampleRate, Samples, Tail};
 
@@ -99,11 +99,11 @@ fn sink(n: usize, input: Bus) -> Kind {
     bused(Kind::Thru { width: n }, &[input], &[unassigned(n)])
 }
 
-fn bus_ref(node: u64, bus: u8) -> BusRef {
-    BusRef::new(key(node), bus)
+fn bus_ref(node: u64, bus: u8) -> NodeBus {
+    NodeBus::new(key(node), bus)
 }
 
-fn feed(source: BusSource, fold: BusFold) -> BusFeed {
+fn feed(source: BusOutputPort, fold: BusFold) -> BusFeed {
     BusFeed {
         source,
         fold,
@@ -111,8 +111,8 @@ fn feed(source: BusSource, fold: BusFold) -> BusFeed {
     }
 }
 
-fn from(node: u64, bus: u8) -> BusSource {
-    BusSource::Node(bus_ref(node, bus))
+fn from(node: u64, bus: u8) -> BusOutputPort {
+    BusOutputPort::Node(bus_ref(node, bus))
 }
 
 /// A graph value and the kinds that make its nodes, built by hand.
@@ -506,7 +506,7 @@ fn an_unfoldable_bus_edge_is_refused_at_the_call_and_stores_nothing() {
 fn the_global_input_is_a_unassigned_bus() {
     let (mut ed, _exec) = editor(&[(1, sink(2, unassigned(2)))], 0);
     let refused = ed
-        .connect_bus(BusSource::Global, bus_ref(1, 0))
+        .connect_bus(BusOutputPort::Global, bus_ref(1, 0))
         .unwrap_err();
     assert!(
         matches!(
@@ -520,13 +520,14 @@ fn the_global_input_is_a_unassigned_bus() {
     );
     // Unassigned(2) into unassigned(2): the same width folds.
     ed.spec_mut().topology.inputs = ch(2);
-    ed.connect_bus(BusSource::Global, bus_ref(1, 0)).unwrap();
+    ed.connect_bus(BusOutputPort::Global, bus_ref(1, 0))
+        .unwrap();
     // Wider than a bus holds.
     ed.spec_mut().topology.inputs = ch(17);
     ed.spec_mut()
-        .disconnect_bus(BusSource::Global, bus_ref(1, 0));
+        .disconnect_bus(BusOutputPort::Global, bus_ref(1, 0));
     let refused = ed
-        .connect_bus(BusSource::Global, bus_ref(1, 0))
+        .connect_bus(BusOutputPort::Global, bus_ref(1, 0))
         .unwrap_err();
     assert_eq!(refused, BusError::GlobalTooWide { width: 17 });
 }
@@ -1228,7 +1229,7 @@ fn a_bus_edge_reads_the_band_it_names() {
     rig.add(1, source(4, bands));
     rig.feed_globals(1, 4);
     rig.add(2, sink(2, stereo));
-    let band_1 = BusSource::Node(BusRef::band(key(1), 0, 1));
+    let band_1 = BusOutputPort::Node(NodeBus::band(key(1), 0, 1));
     assert!(rig.spec.connect_bus(band_1, bus_ref(2, 0)));
     rig.output_all(2, 2);
     let lowering = rig.lowering().unwrap();
@@ -1238,9 +1239,9 @@ fn a_bus_edge_reads_the_band_it_names() {
     );
 
     let (mut ed, _exec) = editor(&[(1, source(4, bands)), (2, sink(2, stereo))], 4);
-    let past = BusRef::band(key(1), 0, 2);
+    let past = NodeBus::band(key(1), 0, 2);
     assert_eq!(
-        ed.connect_bus(BusSource::Node(past), bus_ref(2, 0)),
+        ed.connect_bus(BusOutputPort::Node(past), bus_ref(2, 0)),
         Err(BusError::NoSuchBus {
             bus: past,
             side: BusSide::Output

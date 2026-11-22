@@ -649,10 +649,10 @@ fn a_hosted_plugin_key_wires_like_a_native_key() {
     let (mut s, key, _, _) = session_keyed();
     let _ = update(&mut s);
     s.graph()
-        .connect(key.out(0), crate::MainOutput::channel(0))
+        .connect(key.output(0), crate::MainOutput::channel(0))
         .unwrap();
     let sources = s.graph().sources(crate::MainOutput::channel(0)).unwrap();
-    assert_eq!(sources, [key.out(0)]);
+    assert_eq!(sources, [key.output(0)]);
 }
 
 /// **A gesture outlives frames**: begun, then `update` runs (and a rescan lands),

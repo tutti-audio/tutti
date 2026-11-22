@@ -484,9 +484,9 @@ pub mod graph {
         Shape, Status, Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
-        BusIn, BusOut, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge, Due,
-        Edge, Event, EventKind, EventOrderError, EventRejected, EventWriter, ForkBuild, ForkCause,
-        ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, GraphInvalid, Harmony,
+        BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,
+        Due, Edge, Event, EventKind, EventOrderError, EventRejected, EventWriter, ForkBuild,
+        ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, GraphInvalid, Harmony,
         HarmonyKind, InPlaceMask, NodeParts, Offset, ParamEvent, ParamInput, ParamKind, ParamMod,
         ParamPorts, ParamPortsError, ParamRamp, ParamRange, ParamRangeCell, ParamRangeReader,
         ParamSegment, Pass, PlayClock, PortSink, PortSource, RenderMode, Resolution, SilenceMask,
@@ -522,12 +522,12 @@ pub mod session {
         ConfigError, JobError, RenderError, Rendered, RenderedError, TargetError, Unmeasured,
     };
     pub use tutti_graph::{
-        BusError, BusRef, BusSource, CloseError, CommitError, Inserted, MissingSource, MixError,
+        BusError, BusOutputPort, CloseError, CommitError, Inserted, MissingSource, MixError,
         ModeError, PassError, Rewired, Unwired, Wired,
     };
     pub use tutti_graph::{
         BusFeed, BusFold, BusSide, EdgeFade, EdgeId, EventCapacityError, ForkError, InletCounts,
-        InstrumentNode, MainOutputError, MainOutputId, MeterId, ParamIn, PrerollTable,
+        InstrumentNode, MainOutputError, MainOutputId, MeterId, NodeBus, ParamIn, PrerollTable,
     };
     pub use tutti_modulation::PeriodPoint;
     pub use tutti_session::Apply;
@@ -541,7 +541,7 @@ pub mod session {
     ))]
     pub use tutti_session::LoadError;
     pub use tutti_session::{
-        BackgroundWork, BlockConfig, BusSink, BusWire, ChannelWire, Committed, Connection,
+        BackgroundWork, BlockConfig, BusInputPort, BusWire, ChannelWire, Committed, Connection,
         DeclarationError, Disconnection, EventEdge, EventTapPort, EventWire, Fanin, Feeder, Graph,
         Inlet, InletError, LIVE_MAX_BLOCK, MainBusWire, MainOutputDeclaration, MainOutputReader,
         MainOutputTopologyStatus, MainSink, Meters, NodeSlots, NotReopened, Outlet,

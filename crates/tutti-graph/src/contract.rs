@@ -2498,7 +2498,7 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
     }
 
     /// What the node wrote to event output `port` in the last block.
-    pub fn events_out(&self, port: usize) -> &[Event] {
+    pub fn event_output(&self, port: usize) -> &[Event] {
         &self.events_out[port]
     }
 

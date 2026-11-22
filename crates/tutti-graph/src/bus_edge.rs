@@ -1,4 +1,4 @@
-//! Wiring bus to bus: [`BusRef`], [`BusSource`], the spec's `bus_edges`, and the pure
+//! Wiring bus to bus: [`NodeBus`], [`BusOutputPort`], the spec's `bus_edges`, and the pure
 //! function that **lowers** a bus edge to weighted lanes.
 //!
 //! A bus edge says "this output bus feeds that input bus". Its meaning is a
@@ -45,7 +45,7 @@ use crate::{Edge, EdgeId, InputPort, NodeKey, OutputPort, PortSink, PortSource, 
 /// [`Shape::buses_in`](crate::Shape::buses_in) (as a sink) or
 /// [`Shape::buses_out`](crate::Shape::buses_out) (as a source).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct BusRef {
+pub struct NodeBus {
     /// The node.
     pub node: NodeKey,
     /// Which of its buses on that side, in port order.
@@ -55,7 +55,7 @@ pub struct BusRef {
     pub band: u8,
 }
 
-impl BusRef {
+impl NodeBus {
     /// Bus `bus` of `node`, its only band.
     #[must_use]
     pub const fn new(node: NodeKey, bus: u8) -> Self {
@@ -83,9 +83,9 @@ impl BusRef {
 
 /// What feeds a sink bus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum BusSource {
+pub enum BusOutputPort {
     /// An output bus of a node.
-    Node(BusRef),
+    Node(NodeBus),
     /// The graph's own global input, as one
     /// [`Unassigned`](tutti_buffers::Speaker::Unassigned) bus of its width: it folds
     /// only to a bus of the same width and kind.
@@ -107,7 +107,7 @@ pub enum BusFold {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BusFeed {
     /// What feeds the bus.
-    pub source: BusSource,
+    pub source: BusOutputPort,
     /// How its channels map onto the bus's.
     pub fold: BusFold,
     /// The fade its lanes run ([`EdgeFade`]): each lane of the fold fades by
@@ -140,7 +140,7 @@ pub enum BusError {
     #[error("node {} declares no {side:?} bus {}", .bus.node.0, .bus.bus)]
     NoSuchBus {
         /// The bus asked for.
-        bus: BusRef,
+        bus: NodeBus,
         /// The side of the node it was asked on: a sink bus is an input, a
         /// source bus an output.
         side: BusSide,
@@ -157,9 +157,9 @@ pub enum BusError {
     #[error("bus edge {from:?} -> {to:?} cannot be folded: {error}")]
     Fold {
         /// The source bus.
-        from: BusSource,
+        from: BusOutputPort,
         /// The sink bus.
-        to: BusRef,
+        to: NodeBus,
         /// Why.
         error: FoldError,
     },
@@ -172,7 +172,7 @@ pub enum BusError {
     #[error("bus edge {from:?} -> the graph's main output cannot be folded: {error}")]
     MainOutputFold {
         /// The source bus.
-        from: BusSource,
+        from: BusOutputPort,
         /// Why.
         error: FoldError,
     },
@@ -241,18 +241,18 @@ impl GraphSpec {
     /// [`lowered`](Self::lowered) (at a commit), and
     /// [`Editor::connect_bus`](crate::Editor::connect_bus) checks it at the
     /// call.
-    pub fn connect_bus(&mut self, from: BusSource, to: BusRef) -> bool {
+    pub fn connect_bus(&mut self, from: BusOutputPort, to: NodeBus) -> bool {
         self.feed_bus(from, to, BusFold::Speakers)
     }
 
-    fn feed_bus(&mut self, from: BusSource, to: BusRef, fold: BusFold) -> bool {
+    fn feed_bus(&mut self, from: BusOutputPort, to: NodeBus, fold: BusFold) -> bool {
         insert_feed(self.bus_edges.entry(to).or_default(), from, fold)
     }
 
     /// Removes `from` from the sources of sink bus `to`, and the key with the
     /// last one. Returns whether it was there. Its lanes go with it at the
     /// next lowering: the author's own edges and gains are not touched.
-    pub fn disconnect_bus(&mut self, from: BusSource, to: BusRef) -> bool {
+    pub fn disconnect_bus(&mut self, from: BusOutputPort, to: NodeBus) -> bool {
         let Some(sources) = self.bus_edges.get_mut(&to) else {
             return false;
         };
@@ -270,13 +270,13 @@ impl GraphSpec {
     /// source order. Returns whether it was new. As
     /// [`connect_bus`](Self::connect_bus), nothing is checked until the
     /// lowering.
-    pub fn connect_bus_to_main_output(&mut self, from: BusSource) -> bool {
+    pub fn connect_bus_to_main_output(&mut self, from: BusOutputPort) -> bool {
         insert_feed(&mut self.main_output_sources, from, BusFold::Speakers)
     }
 
     /// Removes `from` from the bus edges into the main output. Returns whether it
     /// was there.
-    pub fn disconnect_bus_from_main_output(&mut self, from: BusSource) -> bool {
+    pub fn disconnect_bus_from_main_output(&mut self, from: BusOutputPort) -> bool {
         match self
             .main_output_sources
             .iter()
@@ -293,7 +293,7 @@ impl GraphSpec {
     /// The fade of the bus edge `from -> to` (`None` for the main output), or `None`
     /// when it is not in the spec.
     #[must_use]
-    pub fn bus_fade(&self, from: BusSource, to: Option<BusRef>) -> Option<EdgeFade> {
+    pub fn bus_fade(&self, from: BusOutputPort, to: Option<NodeBus>) -> Option<EdgeFade> {
         self.feeds(to)
             .and_then(|f| f.iter().find(|f| f.source == from))
             .map(|f| f.fade)
@@ -301,7 +301,12 @@ impl GraphSpec {
 
     /// Sets the fade of the bus edge `from -> to` (`None` for the main output).
     /// Returns whether it was there and changed.
-    pub fn set_bus_fade(&mut self, from: BusSource, to: Option<BusRef>, fade: EdgeFade) -> bool {
+    pub fn set_bus_fade(
+        &mut self,
+        from: BusOutputPort,
+        to: Option<NodeBus>,
+        fade: EdgeFade,
+    ) -> bool {
         let feeds = match to {
             Some(to) => self.bus_edges.get_mut(&to),
             None => Some(&mut self.main_output_sources),
@@ -315,7 +320,7 @@ impl GraphSpec {
         }
     }
 
-    fn feeds(&self, to: Option<BusRef>) -> Option<&Vec<BusFeed>> {
+    fn feeds(&self, to: Option<NodeBus>) -> Option<&Vec<BusFeed>> {
         match to {
             Some(to) => self.bus_edges.get(&to),
             None => Some(&self.main_output_sources),
@@ -329,7 +334,7 @@ impl GraphSpec {
         &self,
         shapes: &Shapes,
         id: EdgeId,
-    ) -> Option<(BusSource, Option<BusRef>, EdgeFade)> {
+    ) -> Option<(BusOutputPort, Option<NodeBus>, EdgeFade)> {
         let has = |lanes: Result<Vec<(EdgeId, Amplitude)>, BusError>| {
             lanes.is_ok_and(|l| l.iter().any(|(lane, _)| *lane == id))
         };
@@ -360,8 +365,8 @@ impl GraphSpec {
     fn bus_lanes(
         &self,
         shapes: &Shapes,
-        from: BusSource,
-        to: BusRef,
+        from: BusOutputPort,
+        to: NodeBus,
         fold: BusFold,
     ) -> Result<Vec<(EdgeId, Amplitude)>, BusError> {
         let sink_shape = shapes
@@ -389,7 +394,7 @@ impl GraphSpec {
     fn main_output_lanes(
         &self,
         shapes: &Shapes,
-        from: BusSource,
+        from: BusOutputPort,
         fold: BusFold,
     ) -> Result<Vec<(EdgeId, Amplitude)>, BusError> {
         // The engine's main outputs are at most `MAX_CHANNELS` wide, a bus's width, so
@@ -409,13 +414,13 @@ impl GraphSpec {
     fn fold_lanes(
         &self,
         shapes: &Shapes,
-        from: BusSource,
+        from: BusOutputPort,
         sink: BusTopology,
         by: BusFold,
         at: impl Fn(usize) -> PortSink,
     ) -> Result<Vec<(EdgeId, Amplitude)>, LaneError> {
         let (source_topology, source_first, source_node) = match from {
-            BusSource::Node(bus) => {
+            BusOutputPort::Node(bus) => {
                 let shape = shapes
                     .get(&bus.node)
                     .ok_or(BusError::NoSuchNode { node: bus.node })?;
@@ -426,7 +431,7 @@ impl GraphSpec {
                 let (topology, first) = bus.resolve(shape.buses_out()).ok_or(no_bus)?;
                 (topology, first, Some(bus.node))
             }
-            BusSource::Global => {
+            BusOutputPort::Global => {
                 let width = self.topology.inputs;
                 let topology = BusTopology::unassigned(width).ok_or(BusError::GlobalTooWide {
                     width: usize::from(width.count()),
@@ -471,8 +476,8 @@ impl GraphSpec {
     pub(crate) fn check_bus_edge(
         &self,
         shapes: &Shapes,
-        from: BusSource,
-        to: BusRef,
+        from: BusOutputPort,
+        to: NodeBus,
         fold: BusFold,
     ) -> Result<(), BusError> {
         for (id, _) in self.bus_lanes(shapes, from, to, fold)? {
@@ -485,7 +490,7 @@ impl GraphSpec {
     pub(crate) fn check_main_output_bus_edge(
         &self,
         shapes: &Shapes,
-        from: BusSource,
+        from: BusOutputPort,
         fold: BusFold,
     ) -> Result<(), BusError> {
         for (id, _) in self.main_output_lanes(shapes, from, fold)? {
@@ -589,7 +594,7 @@ impl GraphSpec {
 
 /// Adds `from` with `fold` to a source list kept in source order, once per
 /// source. Returns whether it was new.
-fn insert_feed(sources: &mut Vec<BusFeed>, from: BusSource, fold: BusFold) -> bool {
+fn insert_feed(sources: &mut Vec<BusFeed>, from: BusOutputPort, fold: BusFold) -> bool {
     match sources.binary_search_by_key(&from, |f| f.source) {
         Ok(_) => false,
         Err(i) => {

@@ -95,10 +95,13 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
         .add(FreeverbNode::from(FreeverbConfig::general_midi()));
     s.graph().connect(first, filter)?;
     s.graph().connect(second, filter)?; // adds: both clips sum into the filter
-    s.graph().connect(filter.bus_out(0), reverb.bus_in(0))?;
+    s.graph()
+        .connect(filter.bus_output(0), reverb.bus_input(0))?;
     for c in 0..2 {
-        s.graph().connect(filter.out(c), MainOutput::channel(c))?;
-        s.graph().connect(reverb.out(c), MainOutput::channel(c))?;
+        s.graph()
+            .connect(filter.output(c), MainOutput::channel(c))?;
+        s.graph()
+            .connect(reverb.output(c), MainOutput::channel(c))?;
     }
 
     // An LFO on the cutoff: 1 Hz across 200 Hz to 3 kHz.

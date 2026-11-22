@@ -68,7 +68,7 @@ fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
         Some(ConnectError::NoSuchNode(GHOST))
     );
     assert_eq!(
-        g.disconnect(a.out(0), ghost_in).err(),
+        g.disconnect(a.output(0), ghost_in).err(),
         Some(ConnectError::NoSuchNode(GHOST))
     );
     assert_eq!(
@@ -77,9 +77,9 @@ fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
     );
     assert_eq!(g.sources(ghost_in), Err(ConnectError::NoSuchNode(GHOST)));
     assert_eq!(
-        g.disconnect(a.events_out(), EventInputPort::new(GHOST, 0))
+        g.disconnect(a.event_output(0), EventInputPort::new(GHOST, 0))
             .err(),
-        Some(ConnectError::NoSuchEventOut(a.events_out())),
+        Some(ConnectError::NoSuchEventOut(a.event_output(0))),
         "the source side is checked first: a constant has no event output"
     );
     assert_eq!(
@@ -95,17 +95,13 @@ fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
         Some(ConnectError::NoSuchNode(GHOST))
     );
     assert_eq!(
-        g.bus_sources(tutti_session::BusRef {
-            node: GHOST,
-            bus: 0,
-            band: 0
-        }),
+        g.bus_sources(tutti_session::BusInputPort::new(GHOST, 0)),
         Err(ConnectError::NoSuchNode(GHOST))
     );
 
     // Real ends with no edge between them: absent, not an error.
     assert!(
-        !g.disconnect(a.out(0), MainOutput::channel(0))
+        !g.disconnect(a.output(0), MainOutput::channel(0))
             .unwrap()
             .was_connected()
     );
@@ -158,7 +154,7 @@ fn a_tap_source_past_what_a_port_index_holds_is_refused() {
         .graph()
         .taps()
         .open_ports(
-            &[a.out(0), far],
+            &[a.output(0), far],
             TapOptions::new(Samples::new(64)).align(TapAlign::Raw),
         )
         .map(|_| ())
@@ -227,7 +223,7 @@ fn set_feed_refuses_a_sink_that_is_not_there_and_changes_nothing() {
         inputs: 0,
         outputs: 1,
     }));
-    let fed = vec![source.events_out()];
+    let fed = vec![source.event_output(0)];
     g.set_feed(sink, Feeder::Routes, fed.clone()).unwrap();
     g.set_feed(gone, Feeder::Routes, fed.clone()).unwrap();
     s.remove(gone).unwrap();

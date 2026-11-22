@@ -552,7 +552,7 @@ pub fn an_instrument_is_one_handle_at_a_time<S: Subject>() {
         rig.peak(rig.t(STAMP)..rig.t(STAMP) + 2_000) > 1e-4,
         "the first handle plays"
     );
-    let (queue, strip) = (rig.handle.queue(), rig.handle.out());
+    let (queue, strip) = (rig.handle.queue(), rig.handle.output());
     rig.session.remove(strip.erase()).unwrap();
     assert_eq!(
         rig.session.remove_instrument(rig.handle),

@@ -55,14 +55,14 @@ impl PortSpan {
 /// An input bus of a node, from its [`Shape`](crate::Shape)
 /// ([`input_bus`](crate::Shape::input_bus), [`spare_in`](crate::Shape::spare_in)):
 /// the ports a node reads past its main bus through
-/// [`Io::bus_in`](crate::Io::bus_in) or [`Inputs::bus`](crate::Inputs::bus), each a
+/// [`Io::bus_input`](crate::Io::bus_input) or [`Inputs::bus`](crate::Inputs::bus), each a
 /// view bounded to the bus. A node takes its handles once, from the shape it
 /// declares, and keeps them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct InBus(pub(crate) PortSpan);
 
 /// An output bus of a node: as [`InBus`], written through
-/// [`Io::bus_out`](crate::Io::bus_out) or [`Outputs::bus`](crate::Outputs::bus).
+/// [`Io::bus_output`](crate::Io::bus_output) or [`Outputs::bus`](crate::Outputs::bus).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct OutBus(pub(crate) PortSpan);
 
@@ -89,7 +89,7 @@ impl OutBus {
 /// input's speakers once per band, so they are one bus of `bands` copies,
 /// band-major ([`bands`](Self::bands)): band 0 is the one a
 /// [`Main`](BusRole::Main) bus's dry path and [`Io::output`](crate::Io::output)
-/// see, and a bus edge names the band it reads ([`BusRef::band`](crate::BusRef)).
+/// see, and a bus edge names the band it reads ([`NodeBus::band`](crate::NodeBus)).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Bus {
     /// The speaker each channel of one band feeds, in channel order.

@@ -7,7 +7,7 @@ use tutti_units::{Amplitude, Mix};
 
 use super::{CommitError, Editor};
 use crate::NodeKey;
-use crate::bus_edge::{BusRef, BusSource};
+use crate::bus_edge::{BusOutputPort, NodeBus};
 use crate::gain::{EdgeFade, EdgeGain, GainCell};
 use crate::mode::{MixError, ModeCell, ModeError, NodeMix, NodeMode};
 use crate::param::{ParamIn, ParamRange, ParamRangeCell};
@@ -202,7 +202,12 @@ impl<F: Float> Editor<F> {
     /// rule. Unlike an edge's, a bus edge's fade is part of the spec's
     /// structure (its lanes are made at the commit), so the next commit
     /// recompiles. Returns whether the bus edge was there and changed.
-    pub fn set_bus_fade(&mut self, from: BusSource, to: Option<BusRef>, fade: EdgeFade) -> bool {
+    pub fn set_bus_fade(
+        &mut self,
+        from: BusOutputPort,
+        to: Option<NodeBus>,
+        fade: EdgeFade,
+    ) -> bool {
         self.touch();
         self.spec.set_bus_fade(from, to, fade)
     }
@@ -218,7 +223,7 @@ impl<F: Float> Editor<F> {
     /// As [`edge_is_live`](Self::edge_is_live) for the bus edge `from -> to`
     /// (`None`: the main output).
     #[must_use]
-    pub fn bus_edge_is_live(&self, from: BusSource, to: Option<BusRef>) -> bool {
+    pub fn bus_edge_is_live(&self, from: BusOutputPort, to: Option<NodeBus>) -> bool {
         self.life.plan().is_some()
             && self
                 .life

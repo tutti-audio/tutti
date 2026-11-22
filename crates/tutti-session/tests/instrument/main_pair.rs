@@ -67,7 +67,7 @@ fn only_add_instrument_wires_the_strip_to_the_main_output() {
     let handle = session
         .add_instrument_unwired(Dressed(ForkByClone(Five)))
         .expect("an instrument");
-    let strip = handle.out();
+    let strip = handle.output();
     let mut rig = Rig::played(session, handle);
     rig.render_to(4 * crate::instrument_support::BLOCK);
     assert_eq!(

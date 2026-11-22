@@ -96,10 +96,10 @@ connect it to the left channel and to the right one:
 // One mono output, heard in the left and the right channel.
 session
     .graph()
-    .connect(sine.out(0), MainOutput::channel(0))?;
+    .connect(sine.output(0), MainOutput::channel(0))?;
 session
     .graph()
-    .connect(sine.out(0), MainOutput::channel(1))?;
+    .connect(sine.output(0), MainOutput::channel(1))?;
 ```
 
 [`MainOutput`](../api/tutti/struct.MainOutput.html) is the session's main output,

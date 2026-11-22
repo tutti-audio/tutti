@@ -30,7 +30,7 @@ use std::num::NonZeroUsize;
 use arrayvec::ArrayVec;
 use tutti_buffers::Float;
 use tutti_graph::{
-    BusOut, Cx, Event, EventKind, Harmony, HarmonyKind, InBus, IntoNode, Io, MAX_BUSES, Node,
+    BusOutput, Cx, Event, EventKind, Harmony, HarmonyKind, InBus, IntoNode, Io, MAX_BUSES, Node,
     NodeParts, Offset, OutBus, Prepare, RtLevel, Shape, SortedEvents, Status,
 };
 use tutti_units::{Latency, Samples, Tail};
@@ -314,7 +314,7 @@ where
                     .collect();
                 let mut outs: ChannelTable<&mut [F]> = outputs
                     .buses(&outs_by_bus)
-                    .flat_map(BusOut::into_channels)
+                    .flat_map(BusOutput::into_channels)
                     .take(n_out)
                     .map(|out| &mut out[at..at + n])
                     .collect();
@@ -479,7 +479,7 @@ where
                 .collect();
             let mut outs: ChannelTable<&mut [F]> = outputs
                 .buses(&outs_by_bus)
-                .flat_map(BusOut::into_channels)
+                .flat_map(BusOutput::into_channels)
                 .take(n_out)
                 .map(|out| &mut out[..size])
                 .collect();

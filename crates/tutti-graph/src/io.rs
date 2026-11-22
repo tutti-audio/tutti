@@ -62,8 +62,8 @@ pub enum PortKind {
 /// declares no bus: channel `c` is the main bus's channel `c`. Any other bus
 /// (a key, a crossover's further bands, a plugin's aux buses, the ports past
 /// the buses) is reached only through its handle ([`InBus`], [`OutBus`], from
-/// the node's shape) as a view bounded to it: [`bus_in`](Self::bus_in),
-/// [`bus_out`](Self::bus_out), [`Inputs::bus`], [`Outputs::bus`]. So `c + width`
+/// the node's shape) as a view bounded to it: [`bus_input`](Self::bus_input),
+/// [`bus_output`](Self::bus_output), [`Inputs::bus`], [`Outputs::bus`]. So `c + width`
 /// on the main view is out of range in every build, as a slice is, and never
 /// another bus's port.
 pub struct Io<'a, F: Float = f32> {
@@ -116,14 +116,14 @@ pub struct Inputs<'s, F: Float = f32> {
 }
 
 /// One input bus, read by channel: channel `c` of the bus, bounded to it.
-pub struct BusIn<'s, F: Float = f32> {
+pub struct BusInput<'s, F: Float = f32> {
     slices: &'s [&'s [F]],
     first: usize,
     in_place: InPlaceMask,
 }
 
 /// One output bus, written by channel: channel `c` of the bus, bounded to it.
-pub struct BusOut<'s, 'a, F: Float = f32> {
+pub struct BusOutput<'s, 'a, F: Float = f32> {
     slices: &'s mut [&'a mut [F]],
 }
 
@@ -136,17 +136,17 @@ impl<F: Float> std::fmt::Debug for Inputs<'_, F> {
     }
 }
 
-impl<F: Float> std::fmt::Debug for BusIn<'_, F> {
+impl<F: Float> std::fmt::Debug for BusInput<'_, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BusIn")
+        f.debug_struct("BusInput")
             .field("channels", &self.slices.len())
             .finish_non_exhaustive()
     }
 }
 
-impl<F: Float> std::fmt::Debug for BusOut<'_, '_, F> {
+impl<F: Float> std::fmt::Debug for BusOutput<'_, '_, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BusOut")
+        f.debug_struct("BusOutput")
             .field("channels", &self.slices.len())
             .finish_non_exhaustive()
     }
@@ -550,8 +550,8 @@ impl<'a, F: Float> Io<'a, F> {
     ///
     /// If the handle reaches past this node's input ports: one taken from
     /// another shape.
-    pub fn bus_in(&self, bus: InBus) -> BusIn<'_, F> {
-        bus_in(self.inputs, bus, self.in_place)
+    pub fn bus_input(&self, bus: InBus) -> BusInput<'_, F> {
+        bus_input(self.inputs, bus, self.in_place)
     }
 
     /// Output bus `bus`, by its handle.
@@ -559,8 +559,8 @@ impl<'a, F: Float> Io<'a, F> {
     /// # Panics
     ///
     /// If the handle reaches past this node's output ports.
-    pub fn bus_out(&mut self, bus: OutBus) -> BusOut<'_, 'a, F> {
-        BusOut {
+    pub fn bus_output(&mut self, bus: OutBus) -> BusOutput<'_, 'a, F> {
+        BusOutput {
             slices: &mut self.outputs[bus.0.range()],
         }
     }
@@ -735,8 +735,8 @@ impl<'s, F: Float> Inputs<'s, F> {
     /// # Panics
     ///
     /// If the handle reaches past this node's input ports.
-    pub fn bus(&self, bus: InBus) -> BusIn<'s, F> {
-        bus_in(self.slices, bus, self.in_place)
+    pub fn bus(&self, bus: InBus) -> BusInput<'s, F> {
+        bus_input(self.slices, bus, self.in_place)
     }
 }
 
@@ -787,8 +787,8 @@ impl<'s, 'a, F: Float> Outputs<'s, 'a, F> {
     /// # Panics
     ///
     /// If the handle reaches past this node's output ports.
-    pub fn bus(&mut self, bus: OutBus) -> BusOut<'_, 'a, F> {
-        BusOut {
+    pub fn bus(&mut self, bus: OutBus) -> BusOutput<'_, 'a, F> {
+        BusOutput {
             slices: &mut self.slices[bus.0.range()],
         }
     }
@@ -806,7 +806,7 @@ impl<'s, 'a, F: Float> Outputs<'s, 'a, F> {
     pub fn buses<'h>(
         &mut self,
         buses: &'h [OutBus],
-    ) -> impl Iterator<Item = BusOut<'_, 'a, F>> + use<'_, 'h, 's, 'a, F> {
+    ) -> impl Iterator<Item = BusOutput<'_, 'a, F>> + use<'_, 'h, 's, 'a, F> {
         let mut rest: &mut [&'a mut [F]] = &mut self.slices[..];
         let mut at = 0;
         buses.iter().map(move |bus| {
@@ -819,12 +819,12 @@ impl<'s, 'a, F: Float> Outputs<'s, 'a, F> {
             let (view, tail) = tail.split_at_mut(span.len());
             rest = tail;
             at = span.end;
-            BusOut { slices: view }
+            BusOutput { slices: view }
         })
     }
 }
 
-impl<'s, F: Float> BusIn<'s, F> {
+impl<'s, F: Float> BusInput<'s, F> {
     /// The bus's channels.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -860,7 +860,7 @@ impl<'s, F: Float> BusIn<'s, F> {
     }
 }
 
-impl<'s, 'a, F: Float> BusOut<'s, 'a, F> {
+impl<'s, 'a, F: Float> BusOutput<'s, 'a, F> {
     /// The bus's channels.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -894,8 +894,12 @@ impl<'s, 'a, F: Float> BusOut<'s, 'a, F> {
 }
 
 /// The view of input bus `bus` over `slices`.
-fn bus_in<'s, F: Float>(slices: &'s [&'s [F]], bus: InBus, in_place: InPlaceMask) -> BusIn<'s, F> {
-    BusIn {
+fn bus_input<'s, F: Float>(
+    slices: &'s [&'s [F]],
+    bus: InBus,
+    in_place: InPlaceMask,
+) -> BusInput<'s, F> {
+    BusInput {
         slices: &slices[bus.0.range()],
         first: usize::from(bus.0.first),
         in_place,
@@ -1002,7 +1006,7 @@ mod tests {
         with_io(|shape, io| {
             let read: Vec<f32> = shape
                 .input_handles()
-                .flat_map(|bus| io.bus_in(bus).channels())
+                .flat_map(|bus| io.bus_input(bus).channels())
                 .map(|ch| ch[0])
                 .collect();
             assert_eq!(read, [1.0, 2.0, 3.0, 4.0]);
@@ -1018,7 +1022,7 @@ mod tests {
             let (_, mut outputs) = io.split();
             for (k, ch) in outputs
                 .buses(&handles)
-                .flat_map(BusOut::into_channels)
+                .flat_map(BusOutput::into_channels)
                 .enumerate()
             {
                 ch.fill(k as f32 + 10.0);
