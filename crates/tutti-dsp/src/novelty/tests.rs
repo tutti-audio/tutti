@@ -11,8 +11,8 @@ fn detection_functions_respond_to_what_they_are_for() {
     let falling = vec![Complex64::new(0.01, 0.0); 16];
     assert_eq!(spectral_flux(&previous, &falling), 0.0);
 
-    // Complex-domain counts change in either direction.
-    assert!(complex_domain_deviation(&previous, &falling) > 0.0);
+    // Spectral distance counts change in either direction.
+    assert!(spectral_distance(&previous, &falling) > 0.0);
 
     // HFC weights high bins more than low ones.
     let mut low = vec![Complex64::default(); 16];
@@ -54,7 +54,7 @@ fn the_flux_of_sixteen_bins_growing_by_point_nine_is_fourteen_point_four() {
 #[test]
 fn the_deviation_of_four_bins_falling_by_one_is_two() {
     let bins = [Complex64::new(0.0, 0.0); 4];
-    assert_eq!(complex_domain_deviation(&[1.0f64; 4], &bins), 2.0);
+    assert_eq!(spectral_distance(&[1.0f64; 4], &bins), 2.0);
     assert_eq!(spectral_flux(&[1.0f64; 4], &bins), 0.0);
 }
 

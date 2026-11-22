@@ -16,6 +16,7 @@ mod lookahead;
 mod multiband;
 mod sliding_min;
 mod transient;
+mod transient_detector;
 
 pub use brickwall::{BrickwallBank, BrickwallControls, BrickwallSignals};
 pub use compressor::{CompressorBank, CompressorControls, CompressorSignals};
@@ -37,3 +38,7 @@ pub use multiband::{
     MultibandSettings, MultibandSignals,
 };
 pub use transient::{TransientBank, TransientControls};
+pub use transient_detector::{
+    TransientDetector, TransientThreshold, TransientThresholdError, TransientTime,
+    TransientTimeError, TransientTimes, TransientTimesError,
+};

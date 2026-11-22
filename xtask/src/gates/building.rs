@@ -292,6 +292,12 @@ pub(super) const ALLOW: &[Allow] = &[
         "the coefficients kept are valid only against the bank: at most its band count, validity of two arguments together",
     ),
     ty(
+        "crates/tutti-dsp/src/dynamics/transient_detector.rs",
+        "TransientTimes::new",
+        CTOR,
+        "the fast time is valid only below the slow one: validity of two arguments together, which neither type can carry",
+    ),
+    ty(
         "crates/tutti-plugin-types/src/channels.rs",
         "ChannelTable::of_planes",
         CTOR,
