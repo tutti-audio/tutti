@@ -10,8 +10,6 @@
 //! A [`NoteMapping`] states the two choices the MIDI spec does not make: what a
 //! note's `cents` become, and what its level becomes. Neither choice has a default.
 
-use core::num::NonZeroU16;
-
 use tutti_graph::Harmony;
 use tutti_measure::{ChordQuality, ChordSpan, NoteEvent, VelocityRange};
 use tutti_midi_protocol::PitchBendSensitivity;
@@ -31,10 +29,8 @@ pub enum LevelVelocity {
     /// widened to the MIDI 2.0 field by M2-115 section 3, so the floor is
     /// velocity 1 and the ceiling `0xFFFF`, and 64 is `0x8000`.
     ByLevel(VelocityRange),
-    /// Every note at this velocity (the wire's 16-bit field), whatever its level.
-    /// Never zero: a velocity of zero is a silent Note On, which `ByLevel` never
-    /// sends either (its floor is velocity 1).
-    Fixed(NonZeroU16),
+    /// Every note at this velocity, whatever its level.
+    Fixed(NoteVelocity),
 }
 
 /// What a note's `cents` (its distance from the nearest note, `-50..=50`)
@@ -82,7 +78,7 @@ impl NoteMapping {
 
     fn note_velocity(&self, level: tutti_units::Db) -> NoteVelocity {
         match self.velocity {
-            LevelVelocity::Fixed(velocity) => NoteVelocity::new(velocity.get()),
+            LevelVelocity::Fixed(velocity) => velocity,
             LevelVelocity::ByLevel(range) => NoteVelocity::from(U7::masked(range.midi(level))),
         }
     }
