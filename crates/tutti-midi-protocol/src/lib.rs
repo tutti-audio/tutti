@@ -149,7 +149,6 @@ mod midi2_translator;
 mod mode;
 mod mpe;
 mod per_note_management;
-mod scale;
 mod sensitivity;
 mod smpte;
 mod song_position;
