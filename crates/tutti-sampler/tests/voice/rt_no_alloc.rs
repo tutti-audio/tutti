@@ -261,6 +261,56 @@ fn a_stretching_voice_does_not_allocate_when_it_seats() {
     guarded(&mut rig, 3);
 }
 
+/// A stretching disk voice allocates nothing wherever it seats either: the priming (the
+/// ring read for the vocoder's history, the first analysis frame, the discarded frames) runs
+/// in `process`, at the start (from a window ahead), at a seek mid-play, and at a stop and
+/// a start. The streamer is stepped by hand between blocks, outside the guard.
+#[test]
+fn a_stretching_disk_voice_does_not_allocate_when_it_seats() {
+    use tutti_sampler::testing::wait_for_open;
+    use tutti_sampler::{DiskStreamer, DiskVoice, StreamStart};
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("tone.wav");
+    let tone: Vec<f32> = (0..2 * 96_000)
+        .map(|i| (0.3 * (std::f64::consts::TAU * 440.0 * (i / 2) as f64 / 48_000.0).sin()) as f32)
+        .collect();
+    tutti_fixtures::signal::write_wav_f32(&path, RATE, 2, &tone);
+    let mut streamer =
+        DiskStreamer::<_, f32>::manual(RATE, Default::default()).expect("streamer builds");
+    let opening = streamer.open_stream(&path, StreamStart::HEAD);
+    let (stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
+    assert!(streamer.step_until_idle(1_000) < 1_000, "the ring primes");
+    let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.5)));
+    let (pool, handle) = VoicePool::new().with_handle();
+    handle
+        .add_streaming(
+            SlotId(1),
+            voice,
+            stream,
+            Playback {
+                stretch: StretchFactor::new(1.5),
+                pitch: Cents::new(300.0),
+                ..Playback::default()
+            },
+        )
+        .expect("the command queue has room in a test");
+    let mut rig = Rig::new(pool, 64);
+    let mut run = |rig: &mut Rig<VoicePool<f32>>, blocks: usize| {
+        for _ in 0..blocks {
+            rig.block();
+            let _ = streamer.step();
+        }
+    };
+    // The window opens at beat 0.5 (frame 12 000): the voice primes ahead of it.
+    run(&mut rig, 250);
+    rig.t.seek(Beat::new(1.2));
+    run(&mut rig, 60);
+    rig.t.set_rolling(false);
+    run(&mut rig, 8);
+    rig.t.set_rolling(true);
+    run(&mut rig, 60);
+}
+
 /// A stretching voice allocates nothing while it primes where a stopped transport stands:
 /// the stopped blocks that prime, a locate, and the blocks that play on from it.
 #[test]

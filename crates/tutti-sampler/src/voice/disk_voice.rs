@@ -204,19 +204,16 @@ pub struct DiskVoiceConfig {
 /// `offline_read`. That path blocks on file I/O and is never taken live: a
 /// live fork of a disk voice is refused.
 ///
-/// # Under a stretch it sounds late
+/// # Under a stretch it sounds on time
 ///
 /// A stretched or transposed disk voice runs a
-/// [`PhaseVocoder`](tutti_dsp::PhaseVocoder), and its ring reads only forward
-/// from where it seats, so it cannot read ahead of its place on the timeline as
-/// a memory voice does. It sounds [`latency`](tutti_dsp::PhaseVocoder::latency)
-/// frames late. A standalone `VoiceNode` declares that latency for delay
-/// compensation; in a [`VoicePool`](crate::VoicePool) it is not compensated.
-///
-/// Its seat is not primed either, so its first `latency` frames after a seat
-/// are silence, and the end of its window cuts the vocoder's output where it
-/// stands: the last `latency` frames of the source before the gate closes are
-/// still inside the vocoder and never sound.
+/// [`PhaseVocoder`](tutti_dsp::PhaseVocoder) seated on the file's own history: it
+/// primes ahead of its window, from the ring, and sounds from the frame its place on
+/// the timeline falls on, with no latency (see `stretched`). The ring follows the position
+/// the voice reads, so the history before a seat is what the streamer fetches first; a
+/// frame the ring has not yet got is a counted underrun and reads as silence into the
+/// vocoder, so the voice sounds on time with a gap, and never waits. A loop wrap is a
+/// seek.
 pub struct DiskVoice<F: SamplerFloat> {
     inner: DiskSource<F>,
     /// The playback controls: the streamer's cell, shared with `inner`, while
@@ -635,7 +632,7 @@ impl<F: SamplerFloat> DiskVoice<F> {
     /// The gate: this voice's window, in the file's frames, at the window
     /// rate.
     #[inline]
-    fn gate(&self) -> Gate {
+    pub(crate) fn gate(&self) -> Gate {
         Gate {
             window: self.window,
             source_rate: self.file_sample_rate,

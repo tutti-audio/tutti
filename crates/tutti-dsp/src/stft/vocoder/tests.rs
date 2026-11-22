@@ -588,3 +588,117 @@ fn fixed_rate_ignores_the_stretch() {
     v.retarget(&controls(2.0, 0.0));
     assert_eq!(v.input_needed(Samples::new(5000)), at_unity);
 }
+
+/// Streams `source` (as many frames as it holds) through a seated vocoder at a stretch and a
+/// shift, `discard` taking the first analysis frame without synthesis and `process` taking it
+/// in full; both then go on in blocks of 256 output frames. The output from the discarded
+/// frame on.
+fn seated_run<F: FftFloat>(source: &[Vec<F>], discard: bool) -> (Vec<Vec<F>>, Samples) {
+    let mut v = vocoder::<F>(ChannelLayout::STEREO);
+    v.seat();
+    v.retarget(&controls(1.3, 100.0));
+    let mut out = vec![Vec::new(); 2];
+    let mut at = 0;
+    // The window of history the first frame analyses.
+    let history = [source[0][..WINDOW].to_vec(), source[1][..WINDOW].to_vec()];
+    let first = Planes::from_vecs(&history).unwrap();
+    let counts = if discard {
+        v.discard(first, Samples::new(1))
+    } else {
+        let mut sink = vec![vec![F::ZERO; 1]; 2];
+        v.process(first, PlanesMut::from_vecs(&mut sink).unwrap())
+    };
+    assert_eq!(counts.produced.get(), 1);
+    at += counts.consumed.get();
+    for channel in &mut out {
+        channel.push(F::ZERO);
+    }
+    let mut consumed = counts.consumed;
+    while at + 4096 < source[0].len() {
+        let needed = v.input_needed(Samples::new(256)).get();
+        let input: Vec<Vec<F>> = source.iter().map(|c| c[at..at + needed].to_vec()).collect();
+        let mut block = vec![vec![F::ZERO; 256]; 2];
+        let counts = v.process(
+            Planes::from_vecs(&input).unwrap(),
+            PlanesMut::from_vecs(&mut block).unwrap(),
+        );
+        assert_eq!(counts.produced.get(), 256);
+        at += counts.consumed.get();
+        consumed = Samples::new(consumed.get() + counts.consumed.get());
+        for (o, b) in out.iter_mut().zip(block) {
+            o.extend(b);
+        }
+    }
+    (out, consumed)
+}
+
+fn two_channels<F: FftFloat>(len: usize) -> Vec<Vec<F>> {
+    vec![
+        sine::<F>(1234.5, 0.5, 0.3, len),
+        sine::<F>(2345.6, 0.25, 1.1, len),
+    ]
+}
+
+/// The phase history a discarded frame leaves is the one the full path leaves: the stream's
+/// output from the end of the ramp on is bit for bit the same, which it is only if every phase
+/// accumulator and every cursor agrees (a stretch of 1.3 and a shift of 100 cents make each
+/// frame depend on the last), and the frames taken are the same. Inside the ramp the discard
+/// differs, so the test can tell it from a full frame.
+fn a_discarded_frame_leaves_the_phases_of_the_full_path<F: FftFloat>() {
+    let source = two_channels::<F>(40_000);
+    let (full, taken) = seated_run(&source, false);
+    let (cheap, cheap_taken) = seated_run(&source, true);
+    assert_eq!(taken, cheap_taken);
+    for c in 0..2 {
+        assert!(
+            full[c][1..WINDOW] != cheap[c][1..WINDOW],
+            "channel {c}: the ramp holds the synthesis the discard skipped"
+        );
+        assert!(
+            full[c][WINDOW..] == cheap[c][WINDOW..],
+            "channel {c}: steady output differs after the discard"
+        );
+    }
+}
+
+#[test]
+fn a_discarded_frame_leaves_the_phases_of_the_full_path_f32() {
+    a_discarded_frame_leaves_the_phases_of_the_full_path::<f32>();
+}
+
+#[test]
+fn a_discarded_frame_leaves_the_phases_of_the_full_path_f64() {
+    a_discarded_frame_leaves_the_phases_of_the_full_path::<f64>();
+}
+
+/// A seated stream is the history at unity from the end of the ramp on: output frame `k` is
+/// input frame `k` (`1e-12` as in the latency test), with no silence ahead of the history.
+#[test]
+fn a_seated_stream_is_the_history_itself_after_its_ramp() {
+    let input = sine::<f64>(1234.5, 0.5, 0.3, 30_000);
+    let mut v = vocoder::<f64>(ChannelLayout::MONO);
+    v.seat();
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at + 4096 < input.len() {
+        let needed = v.input_needed(Samples::new(300)).get();
+        let mut block = vec![0.0; 300];
+        let counts = v.process(
+            Planes::new(&[&input[at..at + needed]]).unwrap(),
+            PlanesMut::new(&mut [&mut block]).unwrap(),
+        );
+        assert_eq!(counts.produced.get(), 300);
+        at += counts.consumed.get();
+        out.extend(block);
+    }
+    for k in WINDOW..20_000 {
+        assert!((out[k] - input[k]).abs() < 1e-12, "frame {k}");
+    }
+    assert!(
+        out[..HOP]
+            .iter()
+            .zip(&input)
+            .any(|(y, x)| (y - x).abs() > 1e-3),
+        "the first frames are a ramp"
+    );
+}

@@ -849,3 +849,67 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
         assert!(sounded >= LEN, "{}: the two agreed on silence", case.what);
     }
 }
+
+/// A stretched fork sounds from the frame its beat falls on, as the live voice does, at every
+/// varispeed: nothing before frame 24 000 (beat 1), and a tone that starts 4 000 frames into
+/// the file starts `4 000 x 1.5 / speed` frames after it, where its half-level crossing falls
+/// within two blocks of the 64 frames the RMS is taken in. The fork reads its file for the
+/// vocoder's history as well as along it, so the seat is on time without a latency.
+#[test]
+fn a_stretched_fork_sounds_from_the_frame_its_beat_falls_on() {
+    const AT: usize = 4_000;
+    const RES: usize = 64;
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("tone.wav");
+    let tone: Vec<f32> = (0..60_000)
+        .flat_map(|i| {
+            let x = if i >= AT {
+                0.5 * (std::f64::consts::TAU * 1_000.0 * i as f64 / SR).sin()
+            } else {
+                0.0
+            };
+            [x as f32; 2]
+        })
+        .collect();
+    tutti_fixtures::signal::write_wav_f32(&path, SampleRate::of(SR), 2, &tone);
+    for speed in [0.5, 1.0, 2.0] {
+        let (_streamer, reader) = streamer_on(&path);
+        let voice = live_voice(reader, 1.0);
+        let node = VoiceNode::with_channels(
+            Voice {
+                source: VoiceSource::Disk(voice),
+                play: Playback {
+                    speed: tutti_units::PlaybackRate::of(speed),
+                    stretch: tutti_units::StretchFactor::new(1.5),
+                    ..Playback::default()
+                },
+            },
+            2u16,
+        )
+        .expect("a finite gain and a nonempty width");
+        let mut copy = fork_unprepared(node);
+        copy.node.prepare(&offline_prepare(SampleRate::of(SR)));
+        let [l, _] = render(&mut *copy.node, &clock_at(SR), 24_000 + 20_000);
+        assert!(
+            l[..24_000].iter().all(|&s| s == 0.0),
+            "speed {speed}: sounded before frame 24 000"
+        );
+        let half = 0.5 / 2.0f64.sqrt() / 2.0;
+        let first = l[24_000..]
+            .as_chunks::<RES>()
+            .0
+            .iter()
+            .position(|block| {
+                (block.iter().map(|&x| f64::from(x).powi(2)).sum::<f64>() / RES as f64).sqrt()
+                    >= half
+            })
+            .expect("the tone sounds")
+            * RES
+            + RES / 2;
+        let want = AT as f64 * 1.5 / speed;
+        assert!(
+            (first as f64 - want).abs() <= (2 * RES) as f64,
+            "speed {speed}: the tone starts {first} frames in, want {want}"
+        );
+    }
+}

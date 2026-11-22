@@ -9,6 +9,7 @@ mod gain;
 mod loops_and_handles;
 mod reverse_and_loop;
 mod rt_no_alloc;
+mod stretched_onset;
 mod stretched_seek;
 mod tier_parity;
 mod vocoder_voice;
