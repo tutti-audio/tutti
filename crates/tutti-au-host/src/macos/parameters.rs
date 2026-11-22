@@ -6,16 +6,12 @@
 //! is where every effect and instrument keeps its parameters; the `_at`
 //! variants take an explicit address.
 //!
-//! Per-element parameters are not hypothetical surface. Measured on macOS 15.6:
-//! AUMultiChannelMixer publishes 7 parameters on **each** of its 8 input
-//! elements plus 5 on its output element, and AUMixer3D publishes 11 per input
-//! element across 64 of them. Writes to the same id on different elements were
-//! verified independent — setting input element 0's volume to 0.25 and element
-//! 1's to 0.75 reads back 0.25 and 0.75 respectively. Addressing every one of
-//! those through element 0 would collapse a whole mixer's per-channel strip
-//! onto a single control, which is why the `_at` functions take an element.
+//! A mixer publishes the same parameter id on each of its elements, and writes
+//! to different elements are independent. Addressing them all through element 0
+//! would collapse a mixer's per-channel strip onto a single control, which is
+//! why the `_at` functions take an element.
 //!
-//! LIMITATION (intentional): [`ParamView`] and [`crate::AuLoaded`]'s
+//! [`ParamView`] and [`crate::AuLoaded`]'s
 //! parameter methods stay global/element-0. They are the DAW-facing surface, and
 //! the DAW hosts effects and instruments, none of which put parameters anywhere
 //! else. A mixer-hosting caller reaches for the `_at` functions directly. That
@@ -35,19 +31,12 @@
 //! ## Flags under-report; the property read is the authority
 //!
 //! `kAudioUnitParameterFlag_ValuesHaveStrings` is NOT a reliable gate for
-//! [`value_strings`]. Measured on macOS 15.6, AUNBandEQ's "Type" parameter
-//! returns 11 filter names with that flag clear. [`AuParameter::values_have_strings`]
-//! is carried for reporting only — always attempt the read.
+//! [`value_strings`]: a parameter can return value names with that flag clear.
+//! [`AuParameter::values_have_strings`] is carried for reporting only; always
+//! attempt the read.
 //!
-//! ## Measured absence of the string conversions
-//!
-//! **No Apple AU on macOS 15.6 implements `ParameterStringFromValue` or
-//! `ParameterValueFromString`** — probed across 15 units × every parameter ×
-//! several candidate values/strings, every call failed. Both are implemented here
-//! because third-party AUs use them, but the round-trip cannot be demonstrated
-//! against the system corpus, and the tests assert the honest `None` rather than a
-//! fabricated success. Do not "fix" those tests by relaxing them into a tautology;
-//! the absence is the measurement.
+//! `ParameterStringFromValue` and `ParameterValueFromString` are implemented by
+//! third-party AUs only; an AU that lacks them answers `None`.
 
 // AudioUnit is an opaque C pointer (`ComponentInstanceRecord*`) that every
 // AudioToolbox call dereferences. Callers must supply a valid unit, same as

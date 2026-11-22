@@ -18,18 +18,10 @@
 //!   is running right now, and the one a host sets.
 //! * `kAudioUnitProperty_ElementName` (30, read) — the AU's own name for a bus.
 //!
-//! Element names are here rather than in [`crate::bus`] for two reasons: the
-//! property is addressed by the same `(scope, element)` pair the layout
-//! properties are, and unlike everything in `bus.rs` it returns a
-//! **CoreFoundation reference the host owns** (see [`element_name`]) — an
-//! ownership discipline `bus.rs` has none of.
-//!
-//! # What was measured on macOS 15.6
-//!
-//! Every assertion here was probed against the ~35 Apple AUs plus TDR Nova /
-//! TAL-NoiseMaker / TAL-Reverb-4. Two measurements shaped the API:
-//! [`set_layout_tag`] (the width gate) and [`element_name`] (the retain-count
-//! leak).
+//! Element names are here rather than in [`crate::bus`] because the property is
+//! addressed by the same `(scope, element)` pair the layout properties are, and
+//! it returns a **CoreFoundation reference the host owns** (see
+//! [`element_name`]), an ownership discipline `bus.rs` has none of.
 
 use std::mem::size_of;
 use tutti_au_ffi::Element;
@@ -462,26 +454,13 @@ pub(crate) fn set_layout_tag(
 /// the plugin has perfectly good names for them, and a sidechain input is
 /// indistinguishable from a second audio input.
 ///
-/// # This property leaks unless the host releases — measured
+/// # The host releases the returned string
 ///
 /// `kAudioUnitProperty_ElementName` is **Copy-rule**: the returned `CFStringRef`
-/// carries a retain the host owns. Apple's header says so ("The Host owns a
-/// reference to this property value ... and should release the string
-/// retrieved"), and it was verified rather than trusted, because most of the
-/// strings involved *look* like they need no release:
-///
-/// | unit / element | retain count |
-/// |---|---|
-/// | TDR Nova `in[0]` "Input" | `i64::MAX` (immortal constant) |
-/// | DLSMusicDevice `out[0]` "stereo mix" | `0x0FFF_FFFF_FFFF_FFFF` (immortal) |
-/// | TAL-NoiseMaker `out[0]` "Output Master" | **2** — a real, mortal object |
-///
-/// Reading the TAL-NoiseMaker name ten times **without** releasing walks the
-/// retain count `2,3,4,…,11`; releasing each read holds it flat at `2`. The leak
-/// is real and only that unit exposes it — a host tested against Apple's units
-/// alone would see immortal strings, conclude no release was needed, and leak
-/// one CFString per read on every third-party AU. A UI polling bus names on a
-/// redraw leaks unboundedly.
+/// carries a retain the host owns ("The Host owns a reference to this property
+/// value ... and should release the string retrieved"). Some units return
+/// immortal constants, others a mortal object, so skipping the release leaks
+/// one CFString per read on those.
 ///
 /// `CfString::from_copied` takes that +1 and releases on drop, on
 /// every path out including the `checked` rejection below.
