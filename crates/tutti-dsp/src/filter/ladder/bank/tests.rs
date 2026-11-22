@@ -348,12 +348,8 @@ fn a_ramp_is_linear_and_arrives_on_the_new_design() {
             g1: blend(old.coefficients.g1, new.coefficients.g1),
             k: blend(old.coefficients.k, new.coefficients.k),
         };
-        let want = nonlinear_ladder_step(
-            &c,
-            LadderType::HP12,
-            &mut LadderState::silent(),
-            0.5 * blend(1.0, 4.0),
-        );
+        let want =
+            nonlinear_ladder_step(&c, LadderType::HP12, &mut [0.0; 4], 0.5 * blend(1.0, 4.0));
         assert!(
             (y[i] - want).abs() <= 1e-13 * want.abs(),
             "frame {i}: {} against {want}",
@@ -405,7 +401,7 @@ fn a_retarget_in_flight_goes_on_from_where_the_ramp_was() {
         g1: mid + (a.coefficients.g1 - mid) / 16.0,
         k: a.coefficients.k,
     };
-    let want = nonlinear_ladder_step(&c, LadderType::HP12, &mut LadderState::silent(), 0.5);
+    let want = nonlinear_ladder_step(&c, LadderType::HP12, &mut [0.0; 4], 0.5);
     assert!(
         (got - want).abs() <= 1e-13 * want.abs(),
         "{got} against {want}"
@@ -474,14 +470,18 @@ fn a_reset_bank_is_silent() {
 
 /// A ramp's midpoint between two designs the small-signal model keeps stable is itself
 /// stable: an impulse through the half-way design decays (the last thousand frames of
-/// 150 000 peak below half of the first thousand's). 200 pairs drawn from a seeded sweep of
+/// 12 000 peak below half of the first thousand's). The slowest pole in the swept range is
+/// at 20 Hz with a resonance of 0.7 (`k = 2.8`): its real part is
+/// `wc (1 - k^(1/4) / sqrt 2) = 0.085 wc`, a decay of `2.2e-4` a frame, so the last window
+/// sits `e^-2.2` (0.11) of the first at the worst, under the one half asserted; a pole slower
+/// than `6e-5` a frame (a blend leaving the stable set, whose radius reaches 1) fails. 200 pairs drawn from a seeded sweep of
 /// reachable designs: every type, a cutoff from 20 Hz to 3 kHz, a resonance up to 0.7 and
 /// a drive from 0.1 to 8. The reach stops where the linearisation has a pole outside the
 /// circle (a high cutoff with a middling resonance, a resonance of 1); a ramp that
 /// extrapolated, or a blend that left the stable set, fails.
 #[test]
 fn a_ramps_midpoint_is_stable() {
-    const FRAMES: usize = 150_000;
+    const FRAMES: usize = 12_000;
     let mut seed = 24u32;
     let mut next = |lo: f64, hi: f64| {
         seed ^= seed << 13;

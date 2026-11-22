@@ -37,8 +37,7 @@ fn residual_bound(c: &LadderCoefficients<f64>, start: f64) -> f64 {
 /// (M / 2)^3 F(start)^4`, plus the rounding of `F`'s terms (`8 eps` of their magnitudes), at
 /// every sample of a loud noise through every corner of the controls: the drive 0.1 to 8
 /// (`x` up to 8), the resonance 0 to 1 (`k` 0 to 4), the cutoff from 100 Hz to a quarter of
-/// the rate (`G` up to 1/2, the range `M` is derived for), and the start the better of the
-/// seed and the warm start. One Newton step leaves `(1 + k G^4) (M / 2) F(start)^2`, which
+/// the rate (`G` up to 1/2, the range `M` is derived for), and the start the seed. One Newton step leaves `(1 + k G^4) (M / 2) F(start)^2`, which
 /// exceeds the bound where `F(start)` is not small: at drive 8, `k = 4` and 12 kHz the start
 /// has `F` near 1 and a single step is over the bound by a factor of the order of `1/F^2`;
 /// the test counts the samples where the bound is under the one-step residual's bound's half
@@ -52,24 +51,23 @@ fn the_loop_residual_after_the_cap_is_the_derived_bound() {
         for res in [0.0, 0.5, 0.9, 1.0] {
             for drive in [0.1, 1.0, 8.0] {
                 let c = coefficients(fc, res);
-                let mut state = LadderState::<f64>::silent();
+                let mut state = [0.0f64; 4];
                 for (i, v) in noise(4_000, 1 + i64::from(drive as i32) as u64)
                     .iter()
                     .enumerate()
                 {
                     let x = v * drive;
-                    let seed = linear_seed(&c, &state.s, x);
-                    let at_seed = loop_residual(&c, &state.s, x, seed).0.abs();
-                    let at_warm = loop_residual(&c, &state.s, x, state.u).0.abs();
-                    let start = at_seed.min(at_warm);
-                    let u = solve_loop(&c, &state.s, x, state.u);
-                    let (residual, _) = loop_residual(&c, &state.s, x, u);
-                    let chain = Chain::at(c.g1, &state.s, u);
+                    let seed = linear_seed(&c, &state, x);
+                    let at_seed = loop_residual(&c, &state, x, seed).0.abs();
+                    let start = at_seed;
+                    let u = solve_loop(&c, &state, x);
+                    let (residual, _) = loop_residual(&c, &state, x, u);
+                    let chain = Chain::at(c.g1, &state, u);
                     let size = u.abs()
                         + x.abs()
                         + c.k
                             * (0..4)
-                                .map(|n| chain.y[n].abs() + chain.v[n].abs() + state.s[n].abs())
+                                .map(|n| chain.y[n].abs() + chain.v[n].abs() + state[n].abs())
                                 .sum::<f64>();
                     let bound = residual_bound(&c, start) + 8.0 * eps * size;
                     assert!(
@@ -110,7 +108,7 @@ fn the_taps_are_bounded_by_the_saturators_before_them() {
     for (ty, bound) in [(LadderType::LP12, t1), (LadderType::LP24, t3)] {
         for fc in [50.0, 1_000.0, 12_000.0] {
             let c = coefficients(fc, 1.0);
-            let mut state = LadderState::<f64>::silent();
+            let mut state = [0.0f64; 4];
             let mut rest = 0.0;
             for _ in 0..40_000 {
                 rest = nonlinear_ladder_step(&c, ty, &mut state, 1_000.0);
@@ -237,7 +235,7 @@ fn a_hot_sine_matches_the_continuous_ladder_ode_integrated_at_64_times_the_rate(
     let substeps = 64;
     let hs = h / f64::from(substeps);
 
-    let mut state = LadderState::<f64>::silent();
+    let mut state = [0.0f64; 4];
     let ladder: Vec<f64> = (0..n)
         .map(|i| nonlinear_ladder_step(&c, LadderType::LP24, &mut state, ode.x(i as f64 * h)))
         .collect();
