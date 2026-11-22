@@ -17,9 +17,8 @@ use tutti_graph::{
 use tutti_nodes::testing::{Const, Osc, Through};
 use tutti_rt::Param;
 use tutti_session::{
-    DetachedSession, EventInputPort, Feeder, InputPort, MainInput, MainOutput, OutputPort,
-    RemoveError, ReplaceRefused, Replacement, Session, SessionEvent, SessionNode,
-    main_output_width,
+    DetachedSession, Feeder, InputPort, MainInput, MainOutput, OutputPort, RemoveError,
+    ReplaceRefused, Replacement, Session, SessionEvent, SessionNode, main_output_width,
 };
 use tutti_units::{Drive, Hz, Real, SampleRate, Samples};
 use tutti_units::{Latency, UnitParam};
@@ -970,7 +969,7 @@ fn move_feeds_moves_every_feeders_sources() {
         both,
         "each feeder kept its own entry"
     );
-    let mut edges = g.sources(EventInputPort::new(old, 0)).unwrap();
+    let mut edges = g.sources(old.event_input(0)).unwrap();
     edges.sort();
     assert_eq!(edges, both, "the union is the sink's event edges");
 
@@ -987,11 +986,11 @@ fn move_feeds_moves_every_feeders_sources() {
         g.feeds(old).unwrap().is_empty(),
         "the old sink is fed by nothing"
     );
-    let mut edges = g.sources(EventInputPort::new(new, 0)).unwrap();
+    let mut edges = g.sources(new.event_input(0)).unwrap();
     edges.sort();
     assert_eq!(edges, both, "the new sink's edges are the union");
     assert!(
-        g.sources(EventInputPort::new(old, 0)).unwrap().is_empty(),
+        g.sources(old.event_input(0)).unwrap().is_empty(),
         "and the old's are gone"
     );
     assert_eq!(s.update().len(), 0);

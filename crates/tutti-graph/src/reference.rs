@@ -1054,7 +1054,7 @@ impl<F: Float> Reference<F> {
         for (&node, (_, unit)) in &self.units {
             let shape = unit.shape();
             for port in (0..shape.event_out).filter(|_| shape.note_events) {
-                self.tracked.insert(EventOutputPort { node, port });
+                self.tracked.insert(EventOutputPort::new(node, port));
             }
         }
         self.inject = inject;
@@ -1460,7 +1460,7 @@ impl<F: Float> Reference<F> {
         let mut ev_ins: Vec<Vec<Event>> = Vec::new();
         let mut pm_ins: Vec<Vec<ParamEvent>> = Vec::new();
         for port in 0..shape.event_in {
-            let at = EventInputPort { node: key, port };
+            let at = EventInputPort::new(key, port);
             // Flushed events first: they are older than anything this block.
             let mut all: Vec<Event> = self.inject.remove(&at).unwrap_or_default();
             for e in &mut all {
@@ -1655,7 +1655,7 @@ impl<F: Float> Reference<F> {
             if !m.stale {
                 m.stale = true;
                 for port in 0..shape.event_out {
-                    let from = EventOutputPort { node: key, port };
+                    let from = EventOutputPort::new(key, port);
                     if self.tracked.contains(&from) {
                         let held = std::mem::take(self.held.entry(from).or_default());
                         m.owed.insert(port, held);
@@ -1787,10 +1787,7 @@ impl<F: Float> Reference<F> {
             audio.insert(OutputPort::new(key, port as u16), o);
         }
         for (port, e) in ev_bufs.into_iter().enumerate() {
-            let from = EventOutputPort {
-                node: key,
-                port: port as u16,
-            };
+            let from = EventOutputPort::new(key, port as u16);
             if self.tracked.contains(&from) && !parked {
                 self.held.entry(from).or_default().observe(&e.events);
             }

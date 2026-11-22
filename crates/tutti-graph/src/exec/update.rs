@@ -499,7 +499,7 @@ impl<F: Float> Executor<F> {
         // interpreter's order too.
         let (inject, has_inject) = (&mut new.inject, &mut new.has_inject);
         for (key, span, refused) in departed.chased.drain(..) {
-            let at = EventInputPort { node: key, port: 0 };
+            let at = EventInputPort::new(key, 0);
             let events = &departed.chase_events[span];
             match flush_target(plan, inject, has_inject, at) {
                 Some((u, shell)) => {
@@ -516,10 +516,7 @@ impl<F: Float> Executor<F> {
         }
         if let Some(op) = old_plan {
             for inj in old.inject.iter_mut().filter(|i| i.live) {
-                let at = EventInputPort {
-                    node: op.units[inj.unit as usize].key,
-                    port: inj.port,
-                };
+                let at = EventInputPort::new(op.units[inj.unit as usize].key, inj.port);
                 if let Some((u, shell)) = flush_target(plan, inject, has_inject, at) {
                     let mut lost = fill(&mut shell.events, &inj.events);
                     // What was owed there is still owed: the tables move.

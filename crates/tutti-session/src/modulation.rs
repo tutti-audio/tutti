@@ -1215,7 +1215,7 @@ impl ModKeys for OwnKeys<'_> {
     fn feed(&self, source: SourceKey) -> Option<Feed> {
         Some(match self.0.sources.get(&source)?.feed? {
             OwnFeed::Audio(node) => Feed::Audio(node),
-            OwnFeed::Events(node, port) => Feed::Events(EventOutputPort { node, port }),
+            OwnFeed::Events(node, port) => Feed::Events(EventOutputPort::new(node, port)),
         })
     }
 

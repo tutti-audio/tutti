@@ -1365,7 +1365,7 @@ impl<F: Float> Midi<'_, F> {
             .feed(target, Feeder::Instrument)
             .ok()?
             .first()
-            .map(|port| port.node)
+            .map(|port| port.node())
     }
 
     /// The node of `target`'s live input, opened with its keys held if it has
@@ -1564,7 +1564,7 @@ impl<F: Float> Midi<'_, F> {
                 self.state
                     .clips
                     .iter()
-                    .find_map(|(&clip, c)| (c.transform == s.node).then_some(clip))
+                    .find_map(|(&clip, c)| (c.transform == s.node()).then_some(clip))
             })
             .map(Key::new)
     }
@@ -1582,7 +1582,7 @@ impl<F: Float> Midi<'_, F> {
             .feed(target, feeder)
             .ok()?
             .iter()
-            .find_map(|s| ours.get_key_value(&s.node))
+            .find_map(|s| ours.get_key_value(&s.node()))
             .map(|(&node, v)| (node, v))
     }
 

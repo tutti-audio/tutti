@@ -139,10 +139,7 @@ fn out(node: u64) -> PortSource {
 }
 
 fn port(node: u64, port: u16) -> EventOutputPort {
-    EventOutputPort {
-        node: NodeKey(node),
-        port,
-    }
+    EventOutputPort::new(NodeKey(node), port)
 }
 
 struct Rig {
@@ -761,10 +758,7 @@ fn fan_in(r: &mut Rig, probe_ports: usize) -> tutti_fixtures::Record<TapEvent> {
     );
     for from in [1, 2] {
         r.ed.spec_mut().connect_events(
-            EventInputPort {
-                node: NodeKey(3),
-                port: 0,
-            },
+            EventInputPort::new(NodeKey(3), 0),
             EventEdge::Direct(port(from, 0)),
         );
     }
@@ -787,10 +781,7 @@ fn an_input_tap_reads_what_the_node_heard() {
     ] {
         let mut r = rig(workers, false, 40);
         let heard = fan_in(&mut r, 1);
-        let input = EventInputPort {
-            node: NodeKey(3),
-            port: 0,
-        };
+        let input = EventInputPort::new(NodeKey(3), 0);
         let mut raw =
             r.ed.open_event_tap(
                 EventTapId::of(1),
@@ -826,30 +817,19 @@ fn an_input_tap_reads_what_the_node_heard() {
 fn an_input_tap_of_one_source_and_of_none() {
     let mut r = rig(1, false, 0);
     let heard = fan_in(&mut r, 2);
-    r.ed.spec_mut().disconnect_events(
-        EventInputPort {
-            node: NodeKey(3),
-            port: 0,
-        },
-        port(2, 0),
-    );
+    r.ed.spec_mut()
+        .disconnect_events(EventInputPort::new(NodeKey(3), 0), port(2, 0));
     let mut one =
         r.ed.open_event_tap(
             EventTapId::of(1),
-            EventInputPort {
-                node: NodeKey(3),
-                port: 0,
-            },
+            EventInputPort::new(NodeKey(3), 0),
             EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .expect("the input exists");
     let mut none =
         r.ed.open_event_tap(
             EventTapId::of(2),
-            EventInputPort {
-                node: NodeKey(3),
-                port: 1,
-            },
+            EventInputPort::new(NodeKey(3), 1),
             EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .expect("the input exists");
@@ -887,20 +867,14 @@ fn an_aligned_input_tap_is_sized_for_every_source_of_the_input() {
     );
     for from in [1, 2] {
         r.ed.spec_mut().connect_events(
-            EventInputPort {
-                node: NodeKey(3),
-                port: 0,
-            },
+            EventInputPort::new(NodeKey(3), 0),
             EventEdge::Direct(port(from, 0)),
         );
     }
     let mut tap =
         r.ed.open_event_tap(
             EventTapId::of(1),
-            EventInputPort {
-                node: NodeKey(3),
-                port: 0,
-            },
+            EventInputPort::new(NodeKey(3), 0),
             EventTapOptions::new(EventCapacity::of(64)),
         )
         .expect("the input exists");
@@ -926,10 +900,7 @@ fn opening_an_input_tap_refuses_a_port_that_does_not_exist_now() {
     let open = |r: &mut Rig, node: u64, port: u16| {
         r.ed.open_event_tap(
             EventTapId::of(9),
-            EventInputPort {
-                node: NodeKey(node),
-                port,
-            },
+            EventInputPort::new(NodeKey(node), port),
             EventTapOptions::new(EventCapacity::of(8)).align(TapAlign::Raw),
         )
         .err()

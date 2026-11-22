@@ -125,13 +125,8 @@ fn drive(ed: &mut Editor, at: ParamIn, knob: impl Into<ParamCell>, layers: Vec<L
     }
     let lane = ControlLaneNode::from(config);
     ed.insert(LANE, "lane", lane);
-    ed.spec_mut().connect_param(
-        at,
-        EventOutputPort {
-            node: LANE,
-            port: 0,
-        },
-    );
+    ed.spec_mut()
+        .connect_param(at, EventOutputPort::new(LANE, 0));
     ed.commit().expect("the lane commits");
 }
 
@@ -1172,10 +1167,7 @@ fn an_unmodulated_param_adds_nothing_to_the_plan() {
         node: n,
         param: UnitParam::Drive.into(),
     };
-    let from = EventOutputPort {
-        node: LANE,
-        port: 0,
-    };
+    let from = EventOutputPort::new(LANE, 0);
     r.editor_mut().spec_mut().connect_param(at, from);
     r.editor_mut().commit().expect("connects");
     // The lane has sent its knob already, into nothing: a re-wired lane

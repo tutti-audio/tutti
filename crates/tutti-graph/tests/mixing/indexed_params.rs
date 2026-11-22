@@ -144,7 +144,7 @@ fn param(addr: UnitAddr) -> ParamIn {
 }
 
 fn src_out() -> EventOutputPort {
-    EventOutputPort { node: SRC, port: 0 }
+    EventOutputPort::new(SRC, 0)
 }
 
 /// Renders `frames` of the graph's two outputs in one block.

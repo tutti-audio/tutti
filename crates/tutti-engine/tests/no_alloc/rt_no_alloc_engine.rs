@@ -105,10 +105,7 @@ fn graph_engine_with_timed_transport_is_allocation_free() {
     // happens before the gate.
     engine.process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
     ed.collect();
-    let to = EventInputPort {
-        node: NodeKey(1),
-        port: 0,
-    };
+    let to = EventInputPort::new(NodeKey(1), 0);
     for b in 0..8 {
         ed.schedule(
             At::Beat(Beat::new(0.25 * b as f64)),
