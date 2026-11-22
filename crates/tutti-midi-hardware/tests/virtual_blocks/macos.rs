@@ -208,18 +208,18 @@ pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
     ));
 }
 
-/// **What another app writes to the endpoint reaches the producer, on the one
-/// endpoint that also sends**: a session output sends notes to the endpoint's
-/// destination one at a time, and each is heard from the producer's inlet.
+/// **What another app writes to the endpoint reaches the producer, whole and in
+/// order, on the one endpoint that also sends**: a session output sends a burst of
+/// 100 distinct notes to the endpoint's destination in one call, and every one is
+/// heard from the producer's inlet.
 ///
-/// One at a time because the path from the session's output to CoreMIDI is not
-/// lossless under load (a loaded CI Mac delivered 83 of 100 notes sent in a burst),
-/// so a burst cannot say how many arrived. CoreMIDI also sends the endpoint a few
-/// messages of its own (MIDI-CI and stream messages, mostly at creation), so each
-/// step listens until the note it sent is among what arrived.
+/// The inlet holds more than the burst plus the few messages CoreMIDI sends the
+/// endpoint itself (MIDI-CI and stream messages, mostly at creation), so nothing
+/// can overflow it; those messages are skipped by matching only the notes sent.
 pub fn what_is_written_to_an_endpoints_destination_reaches_its_producer() {
+    const BURST: u16 = 100;
     let name = &unique_name("tutti-vend-input");
-    let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
+    let inlets = InputInlets::new(EventCapacity::of(256), Duration::ZERO);
     let mut graph = Listener::over(&inlets);
     let executor = Executor::new();
     let session = started(
@@ -251,15 +251,28 @@ pub fn what_is_written_to_an_endpoints_destination_reaches_its_producer() {
     let mut out = session
         .connect_output(opening::started(&session), &device.id)
         .expect("connects");
-    for key in 40..45 {
-        let note: Ump = tutti_fixtures::midi::note_on(tutti_ump::MidiChannel::of(1), key, 0x8000);
-        assert_eq!(out.queue(&[(Offset::ZERO, note)]).packets(), 1);
-        let mut heard = Vec::new();
-        tutti_fixtures::wait_until("the note reaches the producer", PATIENCE, || {
-            heard.extend(graph.listen(Duration::from_millis(20)));
-            heard.contains(&note)
-        });
-    }
+    let sent: Vec<Ump> = (0..BURST)
+        .map(|i| {
+            let channel = tutti_ump::MidiChannel::new((i % 16) as u8).expect("below 16");
+            tutti_fixtures::midi::note_on(channel, (i % 128) as u8, 0x1000 + i)
+        })
+        .collect();
+    let burst: Vec<(Offset, Ump)> = sent.iter().map(|&note| (Offset::ZERO, note)).collect();
+    assert_eq!(out.queue(&burst).packets(), usize::from(BURST));
+    let mut heard = Vec::new();
+    tutti_fixtures::wait_until("the whole burst reaches the producer", PATIENCE, || {
+        heard.extend(
+            graph
+                .listen(Duration::from_millis(20))
+                .into_iter()
+                .filter(|ump| sent.contains(ump)),
+        );
+        heard.len() >= sent.len()
+    });
+    assert_eq!(
+        heard, sent,
+        "every note of the burst arrived once, in order"
+    );
     assert!(endpoint.is_alive());
 }
 
