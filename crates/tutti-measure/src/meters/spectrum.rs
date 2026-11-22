@@ -471,7 +471,6 @@ impl SpectrumPlan {
 /// Pushing allocates nothing once the meter is built, but each frame is a
 /// transform and every output is smoothed, so it belongs on the consumer side of
 /// a tap, not in an audio callback.
-#[derive(Debug)]
 pub struct SpectrumMeter<S: Sample> {
     cfg: SpectrumPlan,
     fft: FftScratch<f64>,
@@ -500,6 +499,15 @@ pub struct SpectrumMeter<S: Sample> {
     head: usize,
     filled: usize,
     sample: PhantomData<fn(S)>,
+}
+
+impl<S: Sample> core::fmt::Debug for SpectrumMeter<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("SpectrumMeter")
+            .field("cfg", &self.cfg)
+            .field("frames", &self.frames)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<S: Sample> SpectrumMeter<S> {

@@ -244,7 +244,6 @@ pub(crate) fn onset_lag(geometry: StftGeometry) -> Samples {
 ///
 /// Not for the audio thread: it keeps one novelty value per frame, so it grows
 /// with the audio and allocates.
-#[derive(Debug)]
 pub struct OnsetMeter<S: Sample> {
     plan: OnsetPlan,
     cutter: FrameCutter,
@@ -259,6 +258,15 @@ pub struct OnsetMeter<S: Sample> {
     /// can only be picked once the run is complete.
     novelty: Vec<Novelty>,
     sample: PhantomData<fn(S)>,
+}
+
+impl<S: Sample> core::fmt::Debug for OnsetMeter<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("OnsetMeter")
+            .field("plan", &self.plan)
+            .field("frames", &self.novelty.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl<S: Sample> OnsetMeter<S> {
