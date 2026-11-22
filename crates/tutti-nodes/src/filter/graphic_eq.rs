@@ -1,8 +1,8 @@
 //! [`GraphicEqNode`]: a graphic equalizer, a bank of cookbook peaking bells at the ISO 266
 //! octave or third-octave centers run as one [`SosBank`](tutti_dsp::SosBank) cascade.
 
-use tutti_buffers::{BusTopology, Float, MaxBlock, Planes, PlanesMut};
-use tutti_dsp::{GraphicBands, SimdLanes, SosCoefficients};
+use tutti_buffers::{BusTopology, Float, InputOutput, MaxBlock};
+use tutti_dsp::{BlockMismatch, GraphicBands, SimdLanes, SosCoefficients};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Db, SampleRate, Tail};
 
@@ -181,11 +181,10 @@ impl<F: Float + SimdLanes> Kernel for GraphicEqKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
-        self.sos.render(input, output);
+    ) -> Result<(), BlockMismatch> {
+        self.sos.render(block)
     }
 
     fn tail(&self) -> Tail {

@@ -9,10 +9,11 @@
 //! ([`LadderBank`]); the node is a [`KernelNode`] over it, and this file holds the
 //! kernel, the cells and how a block reads them.
 
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{
-    LadderBank, LadderBlend, LadderControls, LadderModel, LadderType, Ramp, SimdLanes,
+    BlockMismatch, LadderBank, LadderBlend, LadderControls, LadderModel, LadderType, Ramp,
+    SimdLanes,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Drive, Hz, Resonance, SampleRate, Tail};
@@ -207,11 +208,10 @@ impl<F: Float + SimdLanes> Kernel for LadderKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
-        self.bank.process(&mut self.blend, input, output);
+    ) -> Result<(), BlockMismatch> {
+        self.bank.process(&mut self.blend, block)
     }
 
     /// A resonant ladder rings on after its input stops, and at a resonance of 1 it does not

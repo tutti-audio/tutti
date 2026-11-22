@@ -924,19 +924,20 @@ fn the_servers_loss_counts_are_heard() {
         ControlRequest::SetRenderMode { .. } => Action::Events(vec![News::ServerLosses {
             commands_refused: 3,
             edits_refused: 2,
+            refused_off_thread_calls: 5,
         }]),
         ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
     });
-    let heard: Arc<PlMutex<Vec<(u64, u64)>>> = Arc::new(PlMutex::new(Vec::new()));
+    let heard: Arc<PlMutex<Vec<(u64, u64, u64)>>> = Arc::new(PlMutex::new(Vec::new()));
     let sink = Arc::clone(&heard);
     mock.bridge.audio().set_listener(Some(Arc::new(move |ev| {
-        if let IpcEvent::ServerLosses {
-            commands_refused,
-            edits_refused,
-        } = ev
-        {
-            sink.lock().push((commands_refused, edits_refused));
+        if let IpcEvent::ServerLosses(losses) = ev {
+            sink.lock().push((
+                losses.commands_refused,
+                losses.edits_refused,
+                losses.refused_off_thread_calls,
+            ));
         }
     })));
     assert!(
@@ -947,7 +948,7 @@ fn the_servers_loss_counts_are_heard() {
     tutti_fixtures::wait_until("the counts to be heard", NOTICE_TIMEOUT, || {
         !heard.lock().is_empty()
     });
-    assert_eq!(*heard.lock(), [(3, 2)]);
+    assert_eq!(*heard.lock(), [(3, 2, 5)]);
 }
 
 /// A handle to a real slab of `layout`: what the host sends, to a mock server

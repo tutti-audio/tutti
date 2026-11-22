@@ -4,8 +4,10 @@
 //! (a zero stays a zero of either sign, and NaN stays NaN). It is memoryless, so a
 //! block's render does not depend on where blocks fall.
 
+use crate::BlockMismatch;
+use crate::block::expect_widths;
 use tutti_buffers::{ChannelIndex, ChannelLayout};
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput};
 
 /// A channel an inversion names that the width lacks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
@@ -83,14 +85,16 @@ impl Polarity {
     }
 
     /// Runs `input` into `output`: channel `c` negated where [`inverts`](Self::inverts),
-    /// copied elsewhere. The channels rendered are the fewest of the two views' and the
-    /// width's, and the frames the fewer of the two views'. No allocation.
-    pub fn process<F: Float>(&self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = input
-            .channels()
-            .min(output.channels())
-            .min(self.inverted.len());
+    /// copied elsewhere. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels.
+    pub fn process<F: Float>(&self, block: &mut InputOutput<'_, F>) -> Result<(), BlockMismatch> {
+        let width = self.inverted.len();
+        expect_widths(block, width, width)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         for (c, &flip) in self.inverted.iter().enumerate().take(width) {
             let x = &input.plane(c).samples()[..frames];
             let mut plane = output.plane_mut(c);
@@ -103,6 +107,7 @@ impl Polarity {
                 y.copy_from_slice(x);
             }
         }
+        Ok(())
     }
 }
 

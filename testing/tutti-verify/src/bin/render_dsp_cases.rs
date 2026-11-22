@@ -18,15 +18,15 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use tutti_buffers::ChannelLayout;
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput, Planes, PlanesMut};
 use tutti_dsp::{
-    ChunkSize, CrossoverBands, CrossoverBank, CrossoverControls, CrossoverModel, LadderBank,
-    LadderBlend, LadderControls, LadderModel, LadderType, PhaserChain, Ramp, SimdLanes, Stages,
-    StreamingResampler, StreamingResamplerConfig, SvfBank, SvfCoefficients, SvfControls, SvfModel,
-    SvfType, allpass_complement,
+    BlockMismatch, ChunkSize, CrossoverBands, CrossoverBank, CrossoverControls, CrossoverModel,
+    LadderBank, LadderBlend, LadderControls, LadderModel, LadderType, PhaserChain, Ramp, SimdLanes,
+    Stages, StreamingResampler, StreamingResamplerConfig, SvfBank, SvfCoefficients, SvfControls,
+    SvfModel, SvfType, allpass_complement,
 };
 use tutti_fixtures::signal::write_wav_f32;
-use tutti_units::{Db, Drive, Hz, Q, Resonance, SampleRate};
+use tutti_units::{Db, Drive, Hz, Q, Resonance, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
 /// Impulse-response length: long enough that every case below has rung out.
@@ -37,7 +37,7 @@ const IR_FRAMES: usize = 1 << 16;
 fn blocks<F: Float>(
     input: &[f32],
     outputs: usize,
-    mut process: impl FnMut(Planes<'_, F>, PlanesMut<'_, '_, F>),
+    mut process: impl FnMut(&mut InputOutput<'_, F>) -> Result<(), BlockMismatch>,
 ) -> Vec<Vec<f32>> {
     let input: Vec<F> = input.iter().map(|&x| F::from_f32(x)).collect();
     let mut out = vec![vec![F::ZERO; input.len()]; outputs];
@@ -45,10 +45,13 @@ fn blocks<F: Float>(
         let end = (start + 512).min(input.len());
         let ins = [&input[start..end]];
         let mut outs: Vec<&mut [F]> = out.iter_mut().map(|c| &mut c[start..end]).collect();
-        process(
+        let mut block = InputOutput::new(
+            Samples::new(end - start),
             Planes::new(&ins).expect("one plane"),
             PlanesMut::new(&mut outs).expect("equal planes"),
-        );
+        )
+        .expect("planes of the block's frames");
+        process(&mut block).expect("a block of the bank's width");
     }
     out.iter()
         .map(|plane| plane.iter().map(|&y| y.to_f32()).collect())
@@ -63,7 +66,7 @@ fn run_svf<F: Float + SimdLanes>(
 ) -> Vec<Vec<f32>> {
     let mut bank = SvfBank::<F>::new(ChannelLayout::MONO);
     let mut coefficients = Ramp::new(SvfCoefficients::from(&SvfModel::new(*controls, rate)));
-    blocks::<F>(input, 1, |x, y| bank.process(&mut coefficients, x, y))
+    blocks::<F>(input, 1, |block| bank.process(&mut coefficients, block))
 }
 
 fn impulse(amplitude: f32) -> Vec<f32> {
@@ -177,8 +180,8 @@ fn ladder(dir: &Path, cases: &mut Cases) {
             let name = format!("ladder_{label}_{freq}_{res}");
             let mut bank = LadderBank::<f64>::new(ChannelLayout::MONO);
             let mut blend = Ramp::new(LadderBlend::from(&LadderModel::new(c, rate)));
-            let out = blocks::<f64>(&impulse(amplitude), 1, |x, y| {
-                bank.process(&mut blend, x, y);
+            let out = blocks::<f64>(&impulse(amplitude), 1, |block| {
+                bank.process(&mut blend, block)
             });
             wav(dir, &name, RATE, &out);
             cases.push(
@@ -209,8 +212,8 @@ fn crossover(dir: &Path, cases: &mut Cases) {
         let mut bank = CrossoverBank::<f64>::new(ChannelLayout::MONO);
         let mut coefficients = Ramp::new(model.blend());
         // One channel per band, band 0 first.
-        let out = blocks::<f64>(&impulse(1.0), model.bands(), |x, y| {
-            bank.process(&mut coefficients, x, y);
+        let out = blocks::<f64>(&impulse(1.0), model.bands(), |block| {
+            bank.process(&mut coefficients, block)
         });
         wav(dir, name, RATE, &out);
         cases.push(name, "crossover", RATE, &format!(r#""splits": {splits:?}"#));

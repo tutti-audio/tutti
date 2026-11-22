@@ -13,7 +13,9 @@
 //! `g = 1 - |d| (1 + u) / 2`. Auto-pan's position is `d u`, a [`Pan`](tutti_units::Pan), so
 //! `d = 1` sweeps the whole way across and a negative depth sweeps the opposite way.
 
-use tutti_buffers::{Float, Planes, PlanesMut};
+use crate::BlockMismatch;
+use crate::block::{expect_same_width, expect_widths};
+use tutti_buffers::{Float, InputOutput};
 use tutti_units::{Depth, Hz, SampleRate};
 
 use crate::pan::pan_gains_in;
@@ -111,11 +113,18 @@ impl Tremolo {
         self.lfo.osc.reset();
     }
 
-    /// Runs `input` into `output`. The channels rendered are the fewer of the two views',
-    /// the frames the fewer of the two views'. No allocation.
-    pub fn process<F: Float>(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = input.channels().min(output.channels());
+    /// Runs `input` into `output`, every channel scaled by the one gain. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the output has other channels than the input.
+    pub fn process<F: Float>(
+        &mut self,
+        block: &mut InputOutput<'_, F>,
+    ) -> Result<(), BlockMismatch> {
+        let width = expect_same_width(block)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let TremoloControls { rate, depth } = self.controls;
         // The depth crosses into the data's float once per block.
         let d = F::from_unit(depth);
@@ -136,6 +145,7 @@ impl Tremolo {
         }
         // Every channel walked the same frames from the same phase.
         self.lfo = end;
+        Ok(())
     }
 }
 
@@ -175,19 +185,24 @@ impl AutoPan {
         self.lfo.osc.reset();
     }
 
-    /// Runs the first two channels of `input` into the first two of `output`; nothing is
-    /// written when either view has fewer than two. The frames are the fewer of the two
-    /// views'. No allocation.
-    pub fn process<F: Float>(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
-        if input.channels() < 2 || output.channels() < 2 {
-            return;
-        }
-        let frames = input.frames().get().min(output.frames().get());
+    /// Runs the two channels of `input` into the two of `output`. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the input or the output is not two channels.
+    pub fn process<F: Float>(
+        &mut self,
+        block: &mut InputOutput<'_, F>,
+    ) -> Result<(), BlockMismatch> {
+        expect_widths(block, 2, 2)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let (l, r) = (input.plane(0), input.plane(1));
         let (l, r) = (&l.samples()[..frames], &r.samples()[..frames]);
         let mut planes = output.iter_mut();
         let (Some(mut left), Some(mut right)) = (planes.next(), planes.next()) else {
-            return;
+            // Not reached: the width check above left two output channels.
+            return Ok(());
         };
         let (out_l, out_r) = (
             &mut left.samples_mut()[..frames],
@@ -202,6 +217,7 @@ impl AutoPan {
             *o_l = l * gl;
             *o_r = r * gr;
         }
+        Ok(())
     }
 }
 

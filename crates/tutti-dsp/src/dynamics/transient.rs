@@ -34,7 +34,9 @@
 //! The amounts ramp over [`GAIN_RAMP`], as a compressor's makeup does; the
 //! times are the bank's build. The shaper has no latency and no tail: it only scales.
 
-use tutti_buffers::{Float, Planes, PlanesMut};
+use crate::BlockMismatch;
+use crate::block::expect_same_width;
+use tutti_buffers::{Float, InputOutput};
 use tutti_units::{Db, SampleRate, Seconds};
 
 use super::curves::db_gain;
@@ -169,14 +171,17 @@ impl<F: Float + Lerp> TransientBank<F> {
 
     /// Runs `input` into `output`, scaled by one gain from the loudest channel of `input`.
     ///
-    /// Channel `c` of `input` feeds channel `c` of `output`; a channel past the narrower of the
-    /// two views is not touched, and the frames rendered are the fewer of the two views'. A NaN
-    /// sample reads as quiet and an infinite one as the largest finite level. Frame `i` reads
-    /// the amounts at the ramp's step `taken + 1 + i`, then the block's steps are taken. No
-    /// allocation.
-    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = input.channels().min(output.channels());
+    /// Channel `c` of `input` feeds channel `c` of `output`. A NaN sample reads as quiet and an
+    /// infinite one as the largest finite level. Frame `i` reads the amounts at the ramp's
+    /// step `taken + 1 + i`, then the block's steps are taken. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the output has other channels than the input.
+    pub fn process(&mut self, block: &mut InputOutput<'_, F>) -> Result<(), BlockMismatch> {
+        let width = expect_same_width(block)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let blended = self.amounts.blended_frames(frames);
         let taken = self.amounts.steps_taken();
         let mut gains = [F::ZERO; CHUNK];
@@ -215,6 +220,7 @@ impl<F: Float + Lerp> TransientBank<F> {
         }
         self.amounts
             .advance(u32::try_from(frames).unwrap_or(u32::MAX));
+        Ok(())
     }
 }
 

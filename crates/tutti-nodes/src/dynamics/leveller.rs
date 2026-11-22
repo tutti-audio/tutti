@@ -1,11 +1,11 @@
 //! [`LevellerNode`]: a real-time loudness leveller, an automatic gain control on the
 //! short-term loudness.
 
-use tutti_buffers::{BusTopology, ChannelTopology, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
-    COEFF_INTERVAL, ChannelWeightError, ChannelWeights, KWeighting, LevellerBank, LevellerControls,
-    SimdLanes, SosCoefficients, channel_weights,
+    BlockMismatch, COEFF_INTERVAL, ChannelWeightError, ChannelWeights, KWeighting, LevellerBank,
+    LevellerControls, SimdLanes, SosCoefficients, channel_weights,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Db, SampleRate, Seconds, Tail};
@@ -194,12 +194,12 @@ impl<F: Float + SimdLanes> Kernel for LevellerKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
-        if let Some(bank) = &mut self.bank {
-            bank.process(input, output);
+    ) -> Result<(), BlockMismatch> {
+        match &mut self.bank {
+            Some(bank) => bank.process(block),
+            None => Ok(()),
         }
     }
 

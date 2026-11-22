@@ -1,8 +1,10 @@
 //! [`DistanceNode`]: a source at a distance, as the delay `r / c`, the level `r_ref / r` and
 //! optional air absorption.
 
-use tutti_buffers::{BusTopology, ChannelLayout, Float, MaxBlock, Planes, PlanesMut};
-use tutti_dsp::{DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec, ReferenceDistance};
+use tutti_buffers::{BusTopology, ChannelLayout, Float, InputOutput, MaxBlock};
+use tutti_dsp::{
+    BlockMismatch, DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec, ReferenceDistance,
+};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, Metres, SampleRate, Samples, Speed, Tail};
 
@@ -184,11 +186,12 @@ impl<F: Float> Kernel for DistanceKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
+        let (input, output) = block.split();
         self.distance.process(input, output);
+        Ok(())
     }
 
     /// No latency: the delay is the source's distance, not the node's processing.

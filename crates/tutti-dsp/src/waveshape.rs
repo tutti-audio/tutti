@@ -10,8 +10,10 @@
 //! previous input to this one, which removes most of what the curve folds back past the Nyquist
 //! frequency. The bank then keeps each channel's last two inputs.
 
+use crate::BlockMismatch;
+use crate::block::expect_same_width;
 use tutti_buffers::MAX_CHANNELS;
-use tutti_buffers::{Float, Mono, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput, Mono};
 use tutti_units::{Drive, SampleRate, Samples};
 
 use crate::{GAIN_RAMP, Lerp, OversamplingFactor, Ramp, Steps};
@@ -384,17 +386,19 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
     ///
     /// `signal` is the drive per frame where a port drives it: a frame past its end, or one
     /// that is not finite, reads the drive in force: the ramp's value at that frame. Channel `c`
-    /// of `input` feeds channel `c` of `output`; a channel past the narrower of the two views is
-    /// not touched, and the frames rendered are the fewer of the two
-    /// views'. No allocation.
+    /// of `input` feeds channel `c` of `output`. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the output has other channels than the input.
     pub fn process(
         &mut self,
         signal: Option<Mono<'_, F>>,
-        input: Planes<'_, F>,
-        mut output: PlanesMut<'_, '_, F>,
-    ) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = input.channels().min(output.channels());
+        block: &mut InputOutput<'_, F>,
+    ) -> Result<(), BlockMismatch> {
+        let width = expect_same_width(block)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         debug_assert!(width <= MAX_CHANNELS, "a bank is at most MAX_CHANNELS wide");
         let kind = self.kind;
         let blended = self.drive.blended_frames(frames);
@@ -443,6 +447,7 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
         }
         self.drive
             .advance(u32::try_from(frames).unwrap_or(u32::MAX));
+        Ok(())
     }
 }
 

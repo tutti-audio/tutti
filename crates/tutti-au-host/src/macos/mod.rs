@@ -35,6 +35,9 @@ pub(crate) mod transport;
 pub mod types;
 pub(crate) mod watch;
 
+/// The failure of a lookup by exact key, as the safe handle layer names it.
+pub(crate) use tutti_au_ffi::NotRegistered;
+
 /// How an [`AuType::Unknown`](crate::component::AuType::Unknown) code reads:
 /// its four characters.
 pub(crate) fn unknown_code(code: u32) -> String {

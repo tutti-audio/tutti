@@ -5,6 +5,7 @@ use tutti_units::Db;
 
 use super::*;
 use crate::testing::noise;
+use tutti_buffers::InputOutput;
 
 // The banks under test are `f32` (the session's audio format), so their tolerances are `f32`'s;
 // the `f64` banks have their own tests below.
@@ -55,9 +56,13 @@ fn render_blocks(
         let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[start..end]).collect();
         bank.process(
             signals,
-            Planes::new(&ins).unwrap(),
-            PlanesMut::new(&mut outs).unwrap(),
-        );
+            &mut InputOutput::paired(
+                Planes::new(&ins).unwrap(),
+                PlanesMut::new(&mut outs).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         start = end;
     }
     out
@@ -255,9 +260,13 @@ fn an_f64_brickwall_clamps_at_the_f64_amplitude_and_passes_what_is_inside() {
         let mut y = vec![0.0f64; x.len()];
         bank.process(
             BrickwallSignals::default(),
-            Planes::new(&[&x[..]]).unwrap(),
-            PlanesMut::new(&mut [&mut y[..]]).unwrap(),
-        );
+            &mut InputOutput::paired(
+                Planes::new(&[&x[..]]).unwrap(),
+                PlanesMut::new(&mut [&mut y[..]]).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         y
     };
     assert_close_f64(
@@ -278,8 +287,12 @@ fn an_f32_ceiling_of_800_db_passes_an_infinity_unchanged() {
     let mut y = [0.0f32; 5];
     bank.process(
         BrickwallSignals::default(),
-        Planes::new(&[&x[..]]).unwrap(),
-        PlanesMut::new(&mut [&mut y[..]]).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::new(&[&x[..]]).unwrap(),
+            PlanesMut::new(&mut [&mut y[..]]).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     assert_eq!(y, x);
 }

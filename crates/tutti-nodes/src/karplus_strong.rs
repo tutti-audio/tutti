@@ -1,8 +1,10 @@
 //! [`KarplusStrongNode`]: a plucked string excited by its input.
 
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{COEFF_INTERVAL, KarplusStrongBank, KarplusStrongControls, LowestPitch};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_dsp::{
+    BlockMismatch, COEFF_INTERVAL, KarplusStrongBank, KarplusStrongControls, LowestPitch,
+};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, SampleRate, Seconds, Tail};
 
@@ -156,13 +158,14 @@ impl<F: Float> Kernel for KarplusStrongKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
+        let (input, output) = block.split();
         if let Some(bank) = &mut self.bank {
             bank.process(input, output);
         }
+        Ok(())
     }
 
     /// A decay is any time, so the ceiling is unbounded; [`tail_of`](Kernel::tail_of) narrows it

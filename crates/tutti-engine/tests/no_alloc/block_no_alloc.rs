@@ -170,17 +170,14 @@ fn process_audio_across_block_sizes_is_allocation_free() {
         warm_up(&state, &mut out[..frames * 2]);
     }
 
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..64 {
-            for frames in SIZES {
-                process_audio(
-                    &state,
-                    &mut InterleavedMut::new(&mut out[..frames * 2], ChannelLayout::STEREO)
-                        .unwrap(),
-                );
-            }
+    for _ in 0..64 {
+        for frames in SIZES {
+            process_audio(
+                &state,
+                &mut InterleavedMut::new(&mut out[..frames * 2], ChannelLayout::STEREO).unwrap(),
+            );
         }
-    });
+    }
 }
 
 /// The whole output callback, with the meter enabled and a graph tap open

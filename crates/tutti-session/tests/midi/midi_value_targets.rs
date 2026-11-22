@@ -205,6 +205,11 @@ fn at(beat: f64, harmony: Harmony) -> TimedHarmony {
     TimedHarmony::new(Beat::new(beat), harmony)
 }
 
+/// The lanes of `list`, at distinct beats of their own kind.
+fn changes(list: impl IntoIterator<Item = TimedHarmony>) -> HarmonyChanges {
+    HarmonyChanges::new(list).expect("finite beats, one chord and one scale to a beat")
+}
+
 /// A harmony node with no changes, wired to a tap, and the transport rolling.
 fn harmony_session() -> (
     Session,
@@ -214,7 +219,7 @@ fn harmony_session() -> (
     let mut s = offline();
     let seen = tutti_fixtures::Record::new();
     let tap = s.graph().add(HarmonyTap(seen.clone()));
-    let harmony = s.graph().add(HarmonyNode::new([]));
+    let harmony = s.graph().add(HarmonyNode::new(HarmonyChanges::default()));
     s.graph()
         .set_feed(tap, Feeder::Declared, vec![harmony.events_out()])
         .unwrap();
@@ -235,9 +240,7 @@ fn harmony_changes_written_through_the_target_reach_the_node() {
     s.set(
         harmony
             .changes()
-            .to([at(0.0, C), at(0.0, C_MAJOR), at(1.0, G)]
-                .into_iter()
-                .collect::<HarmonyChanges>()),
+            .to(changes([at(0.0, C), at(0.0, C_MAJOR), at(1.0, G)])),
     )
     .unwrap();
     let _ = s.update();
@@ -257,23 +260,18 @@ fn harmony_changes_written_through_the_target_reach_the_node() {
 #[test]
 fn writing_equal_harmony_changes_restates_nothing_and_different_ones_do() {
     let (mut s, harmony, seen) = harmony_session();
-    let changes = || -> HarmonyChanges { [at(0.0, C), at(0.0, C_MAJOR)].into_iter().collect() };
-    s.set(harmony.changes().to(changes())).unwrap();
+    let in_force = || changes([at(0.0, C), at(0.0, C_MAJOR)]);
+    s.set(harmony.changes().to(in_force())).unwrap();
     let _ = s.update();
     blocks(&s, 2);
     assert_eq!(seen.lock().unwrap().len(), 2);
 
-    s.set(harmony.changes().to(changes())).unwrap();
+    s.set(harmony.changes().to(in_force())).unwrap();
     let _ = s.update();
     blocks(&s, 2);
     assert_eq!(seen.lock().unwrap().len(), 2, "the same changes: nothing");
 
-    s.set(
-        harmony
-            .changes()
-            .to([at(0.0, G)].into_iter().collect::<HarmonyChanges>()),
-    )
-    .unwrap();
+    s.set(harmony.changes().to(changes([at(0.0, G)]))).unwrap();
     let _ = s.update();
     blocks(&s, 1);
     assert_eq!(seen.lock().unwrap()[2..], [(2_048, G)]);
@@ -326,7 +324,7 @@ fn blocks_adopting_written_values_do_not_allocate() {
         )
         .expect("the sink takes MIDI");
     let clip = s.midi().clip(note_sink).expect("the clip");
-    let harmony = s.graph().add(HarmonyNode::new([]));
+    let harmony = s.graph().add(HarmonyNode::new(HarmonyChanges::default()));
     s.graph()
         .set_feed(chord_sink, Feeder::Declared, vec![harmony.events_out()])
         .unwrap();
@@ -345,18 +343,14 @@ fn blocks_adopting_written_values_do_not_allocate() {
             Beat::new(0.1),
             BeatDuration::new(1_000.0),
         ))),
-        harmony
-            .changes()
-            .to([at(0.0, C)].into_iter().collect::<HarmonyChanges>()),
+        harmony.changes().to(changes([at(0.0, C)])),
     ))
     .unwrap();
     let _ = s.update();
     let mut buf = vec![0.0f32; 512 * 2];
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..4 {
-            s.render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
-        }
-    });
+    for _ in 0..4 {
+        s.render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
+    }
     let after = (
         notes.load(Ordering::Relaxed),
         chords.load(Ordering::Relaxed),

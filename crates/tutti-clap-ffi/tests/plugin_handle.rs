@@ -87,6 +87,8 @@ struct Recorder {
 }
 
 impl HostCallbacks for Recorder {
+    fn refused_off_thread_call(&self) {}
+
     fn is_main_thread(&self) -> bool {
         true
     }

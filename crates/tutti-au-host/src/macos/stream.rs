@@ -54,31 +54,33 @@ impl StreamConfig {
     ///
     /// `has_input` is taken from the AU's own input **element count**, not from
     /// whether the stream-format query happened to succeed. Those differ: an AU
-    /// can have an input element whose format it declines to report, and the old
-    /// "format read failed ⇒ 0 channels ⇒ no input" inference would then skip
-    /// installing the render callback on a unit that genuinely needs one. The
-    /// element count is the AU's direct answer to "is there an input bus".
+    /// can have an input element whose format it declines to report, which is
+    /// an error here, not an absent input bus (a unit that genuinely needs the
+    /// render callback would run without one). The element count is the AU's
+    /// direct answer to "is there an input bus".
     ///
-    /// Falls back to stereo out / no input if the AU refuses the queries.
-    pub(crate) fn probe(handle: &AuHandle) -> AuBusLayout {
+    /// # Errors
+    /// The AU's own error when it refuses the output bus's format, or the input
+    /// bus's one it has; [`AuError::BusTooWide`] for a width no layout holds. No
+    /// layout is made up for a bus that cannot be read.
+    pub(crate) fn probe(handle: &AuHandle) -> Result<AuBusLayout> {
         let unit = handle.unit();
-        let outputs =
-            crate::bus::bus_layout(unit, BusDirection::Output, 0).unwrap_or(ChannelLayout::STEREO);
+        let outputs = crate::bus::bus_layout(unit, BusDirection::Output, 0)?;
 
         // An AU with zero input elements has no bus 0 to ask about, so skip the
         // format query entirely rather than reading -10877 and inferring from it.
         let has_input = crate::bus::bus_count(unit, BusDirection::Input) > 0;
         let inputs = if has_input {
-            crate::bus::bus_layout(unit, BusDirection::Input, 0).unwrap_or(ChannelLayout::STEREO)
+            crate::bus::bus_layout(unit, BusDirection::Input, 0)?
         } else {
             ChannelLayout::EMPTY
         };
 
-        AuBusLayout {
+        Ok(AuBusLayout {
             inputs,
             outputs,
             has_input,
-        }
+        })
     }
 
     /// The largest relative deviation tolerated between the requested sample

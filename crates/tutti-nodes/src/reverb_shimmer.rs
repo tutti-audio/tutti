@@ -5,8 +5,8 @@
 //! [shimmering](FdnLayout::shimmering) layout; this file holds the controls it adds to the
 //! [`FdnSet`](crate::FdnSet)'s and how the graph reaches them.
 
-use tutti_buffers::{MaxBlock, Planes, PlanesMut};
-use tutti_dsp::{FdnControls, FdnLayout, FftFloat, Lerp, MaxDecay};
+use tutti_buffers::{InputOutput, MaxBlock};
+use tutti_dsp::{BlockMismatch, FdnControls, FdnLayout, FftFloat, Lerp, MaxDecay};
 use tutti_graph::Shape;
 use tutti_units::{
     Cents, Db, Depth, Feedback, Hz, Mix, SampleRate, Samples, Seconds, StereoWidth, Tail,
@@ -178,11 +178,10 @@ impl<F: FftFloat + Lerp> Kernel for ShimmerKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         signals: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
-        self.fdn.render(input, signals, output);
+    ) -> Result<(), BlockMismatch> {
+        self.fdn.render(block, signals)
     }
 
     /// None: the shifter's delay is the reverb's onset (see [`ShimmerNode`]).

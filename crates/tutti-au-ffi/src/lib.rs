@@ -53,7 +53,7 @@ pub use bundle::{BundleError, DeclaredComponent, declared_components};
 pub use cf::{
     NotADictionary, PresetFacts, cfstring_to_string_checked, preset_facts, preset_with_identity,
 };
-pub use component::ComponentRef;
+pub use component::{ComponentKey, ComponentRef, NotRegistered};
 pub use editor::AuEditor;
 pub use error::{Error, OsError, Result, check};
 pub use event_list::{EventList, Pushed, Wire, event_list_available};

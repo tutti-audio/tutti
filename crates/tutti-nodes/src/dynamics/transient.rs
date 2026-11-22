@@ -1,8 +1,8 @@
 //! [`TransientShaperNode`]: raises or lowers a signal's attacks and its sustain apart.
 
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{COEFF_INTERVAL, Lerp, TransientBank, TransientControls};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, Lerp, TransientBank, TransientControls};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Db, SampleRate, Seconds, Tail};
 
@@ -171,12 +171,12 @@ impl<F: Float + Lerp> Kernel for TransientShaperKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
-        if let Some(bank) = &mut self.bank {
-            bank.process(input, output);
+    ) -> Result<(), BlockMismatch> {
+        match &mut self.bank {
+            Some(bank) => bank.process(block),
+            None => Ok(()),
         }
     }
 
@@ -188,7 +188,9 @@ impl<F: Float + Lerp> Kernel for TransientShaperKernel<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_buffers::InputOutput;
     use tutti_fixtures::signal::wide_signal;
+    use tutti_units::Samples;
 
     /// An `f64` kernel keeps its envelopes and gain in `f64`: a constant `c` from silence has
     /// `f_n = c (1 - af^n)` and `s_n = c (1 - as^n)` with `a = exp(-1 / (tau rate))`, so at an
@@ -208,10 +210,11 @@ mod tests {
         let x = vec![c; 2_000];
         let mut y = vec![0.0f64; x.len()];
         k.render(
-            Planes::new(&[&x[..]]).unwrap(),
+            &mut InputOutput::from_slices(Samples::new(x.len()), &[&x[..]], &mut [&mut y[..]])
+                .unwrap(),
             ControlSignals::NONE,
-            PlanesMut::new(&mut [&mut y[..]]).unwrap(),
-        );
+        )
+        .unwrap();
         let pole = |tau: f64| (-1.0 / (tau * rate.get())).exp();
         let (af, asl) = (pole(0.002), pole(0.02));
         for (i, &got) in y.iter().enumerate() {

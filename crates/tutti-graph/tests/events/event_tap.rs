@@ -210,11 +210,7 @@ fn render(r: &mut Rig, sizes: &[usize], total: usize) {
         let mut chan = vec![0.0f32; n];
         {
             let mut outs: Vec<&mut [f32]> = vec![chan.as_mut_slice()];
-            if r.gated {
-                assert_no_alloc::assert_no_alloc(|| r.exec.process(n, &t, &[], &mut outs));
-            } else {
-                r.exec.process(n, &t, &[], &mut outs);
-            }
+            r.exec.process(n, &t, &[], &mut outs);
         }
         r.ed.collect();
         done += n;

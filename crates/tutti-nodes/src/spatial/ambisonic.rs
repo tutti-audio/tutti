@@ -8,11 +8,11 @@ use core::marker::PhantomData;
 use thiserror::Error;
 use tutti_buffers::{
     AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrdering, Bed, BusTopology,
-    ChannelTopology, Float, MaxBlock, Mono, Planes, PlanesMut,
+    ChannelTopology, Float, InputOutput, MaxBlock, Mono,
 };
 use tutti_dsp::{
-    AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, COEFF_INTERVAL, HarmonicNormalization,
-    Rotation, SpeakerGeometryError, SpeakerLayout,
+    AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, BlockMismatch, COEFF_INTERVAL,
+    HarmonicNormalization, Rotation, SpeakerGeometryError, SpeakerLayout,
 };
 use tutti_graph::{Buses, Cost, Shape};
 use tutti_units::{ArcDegrees, Azimuth, Direction, Elevation, SampleRate, Tail};
@@ -153,12 +153,13 @@ impl<F: Float> Kernel for AmbisonicEncoderKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
+        let (input, output) = block.split();
         let input: Mono<'_, F> = input.plane(0);
         self.encoder.process(input, output);
+        Ok(())
     }
 
     fn tail(&self) -> Tail {
@@ -273,11 +274,12 @@ impl<F: Float> Kernel for AmbisonicRotatorKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
+        let (input, output) = block.split();
         self.rotator.process(input, output);
+        Ok(())
     }
 
     fn tail(&self) -> Tail {
@@ -452,10 +454,10 @@ impl<F: Float> Kernel for AmbisonicDecoderKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        mut output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
+        let (input, mut output) = block.split();
         for (channel, speaker) in self.speaker_of_channel.iter().enumerate() {
             let mut out = output.plane_mut(channel);
             match speaker {
@@ -463,6 +465,7 @@ impl<F: Float> Kernel for AmbisonicDecoderKernel<F> {
                 None => out.samples_mut().fill(F::ZERO),
             }
         }
+        Ok(())
     }
 
     fn tail(&self) -> Tail {

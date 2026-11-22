@@ -1,8 +1,10 @@
 //! [`CrossoverBank`]: one Linkwitz-Riley band tree per channel, all channels at one ramp of
 //! [`CrossoverBlend`], over buffers views.
 
+use crate::BlockMismatch;
+use crate::block::expect_widths;
 use tutti_buffers::{ChannelLayout, MAX_CHANNELS};
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput};
 
 use super::CrossoverBlend;
 use super::CrossoverState;
@@ -40,21 +42,23 @@ impl<F: Float + SimdLanes> CrossoverBank<F> {
 
     /// Runs `input` into `output`, frame `i` at `blend.at(taken + 1 + i)`, then
     /// takes the block's steps from the ramp: channel `c` of `input` makes planes `c`,
-    /// `width + c`, ... of `output`, one a band, for as many frames as the shorter view
-    /// holds.
+    /// `width + c`, ... of `output`, one a band. No allocation.
     ///
-    /// A channel past the bank's width, the input's or [`MAX_CHANNELS`], and a band's plane
-    /// past the output's, is not touched. No allocation.
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the input is not the bank's width in channels, or the output is not
+    /// `width` times the ramp's bands.
     pub fn process(
         &mut self,
         blend: &mut Ramp<CrossoverBlend>,
-        input: Planes<'_, F>,
-        mut output: PlanesMut<'_, '_, F>,
-    ) {
-        let frames = input.frames().get().min(output.frames().get());
+        block: &mut InputOutput<'_, F>,
+    ) -> Result<(), BlockMismatch> {
         let width = self.state.len();
         let bands = blend.target().bands();
-        let channels = width.min(input.channels()).min(MAX_CHANNELS);
+        expect_widths(block, width, width * bands)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
+        let channels = width.min(MAX_CHANNELS);
         // Every channel's band planes, taken from the output once per block.
         let mut planes: [[&mut [F]; MAX_BANDS]; MAX_CHANNELS] =
             core::array::from_fn(|_| core::array::from_fn(|_| <&mut [F]>::default()));
@@ -85,6 +89,7 @@ impl<F: Float + SimdLanes> CrossoverBank<F> {
             }
         }
         blend.advance(u32::try_from(frames).unwrap_or(u32::MAX));
+        Ok(())
     }
 }
 

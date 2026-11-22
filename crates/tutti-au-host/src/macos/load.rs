@@ -13,12 +13,10 @@ use tutti_plugin_types::{
     PluginError, PluginFormat, PluginId, PluginRef, PluginResult, SampleRate,
 };
 
-use crate::bus::BusDirection;
 use crate::component::component_info;
-use crate::component::{AuType, find_component};
+use crate::component::{AuType, ComponentKey, find_component};
 use crate::control::{class_of, plugin_error, unit_id};
 use crate::instance::AuLoaded;
-use crate::types::AudioComponentDescription;
 
 /// The stream configuration a unit is created at: the activation applies its
 /// own rate and block ceiling, so these only have to be a configuration the
@@ -27,8 +25,8 @@ const LOAD_RATE: SampleRate = SampleRate::SR_44K1;
 const LOAD_BLOCK: u32 = 512;
 
 /// The Audio Units the bundle at `path` declares, as the id a [`PluginRef`]
-/// names them by and the exact description the registry resolves.
-fn declared(path: &Path) -> PluginResult<Vec<(PluginId, AudioComponentDescription)>> {
+/// names them by and the key the registry resolves.
+fn declared(path: &Path) -> PluginResult<Vec<(PluginId, ComponentKey)>> {
     let scanning = |reason: String| PluginError::Load {
         stage: LoadStage::Scanning,
         reason,
@@ -43,8 +41,8 @@ fn declared(path: &Path) -> PluginResult<Vec<(PluginId, AudioComponentDescriptio
     // unit it can load.
     let units: Vec<_> = entries
         .into_iter()
-        .filter(|c| !matches!(AuType::from_raw(c.desc.componentType), AuType::Unknown(_)))
-        .map(|c| (unit_id(&c.desc), c.desc))
+        .filter(|c| !matches!(AuType::from_raw(c.key.component_type()), AuType::Unknown(_)))
+        .map(|c| (unit_id(c.key), c.key))
         .collect();
     if units.is_empty() {
         return Err(scanning(format!(
@@ -59,16 +57,16 @@ fn declared(path: &Path) -> PluginResult<Vec<(PluginId, AudioComponentDescriptio
 /// choice, otherwise the one whose id is the choice.
 fn select(
     path: &Path,
-    units: &[(PluginId, AudioComponentDescription)],
+    units: &[(PluginId, ComponentKey)],
     chosen: Option<&PluginId>,
-) -> PluginResult<AudioComponentDescription> {
+) -> PluginResult<ComponentKey> {
     let Some(id) = chosen else {
         return Ok(units[0].1);
     };
     units
         .iter()
         .find(|(declared, _)| *declared == *id)
-        .map(|(_, desc)| *desc)
+        .map(|(_, key)| *key)
         .ok_or_else(|| PluginError::Load {
             stage: LoadStage::Scanning,
             reason: format!(
@@ -98,8 +96,8 @@ impl AuLoaded {
         let units = declared(path)?;
         let found: Vec<_> = units
             .iter()
-            .filter_map(|(id, desc)| {
-                let info = find_component(desc).and_then(component_info)?;
+            .filter_map(|(id, key)| {
+                let info = find_component(*key).ok().and_then(component_info)?;
                 Some((
                     id.clone(),
                     PluginDescriptor {
@@ -140,7 +138,7 @@ impl AuLoaded {
     /// render. A unit that refuses the property simply runs on its own clock
     /// ([`transport`](Self::transport) is then `None`, and its features say so),
     /// not a failed load. The property listener is started
-    /// ([`watch_properties`](Self::watch_properties)).
+    /// ([`watch_properties`](Self::watch_properties)); its refusal fails the load.
     ///
     /// The unit is chosen from the bundle's own declaration (`AudioComponents`
     /// in its `Info.plist`) and resolved in the registry by its exact type,
@@ -152,7 +150,7 @@ impl AuLoaded {
     /// [`PluginError::Load`] with the stage reached: `Scanning` when the path
     /// is not a bundle that declares an Audio Unit, the choice is not among its
     /// units, or the chosen unit is not registered, `Instantiation` when the component cannot be
-    /// created, `Initialization` for a bus no channel layout holds.
+    /// created, `Initialization` when AudioToolbox refuses the property listener.
     pub fn load(
         main: MainThreadMarker,
         work: &MainWorkHandle,
@@ -161,13 +159,13 @@ impl AuLoaded {
         let _ = main;
         let path = plugin.path();
         let units = declared(path)?;
-        let desc = select(path, &units, plugin.id_for(PluginFormat::AudioUnit)?)?;
-        let component = find_component(&desc).ok_or_else(|| PluginError::Load {
+        let key = select(path, &units, plugin.id_for(PluginFormat::AudioUnit)?)?;
+        let component = find_component(key).map_err(|_| PluginError::Load {
             stage: LoadStage::Scanning,
             reason: format!(
                 "'{}' declares {}, which the system has not registered",
                 path.display(),
-                unit_id(&desc)
+                unit_id(key)
             ),
         })?;
         let mut loaded = AuLoaded::new(component, LOAD_RATE, LOAD_BLOCK, work).map_err(|e| {
@@ -180,18 +178,22 @@ impl AuLoaded {
                 },
             }
         })?;
-        // A bus no layout holds fails the load, naming the side.
-        for direction in [BusDirection::Input, BusDirection::Output] {
-            loaded.buses(direction).map_err(|e| PluginError::Load {
+        // A unit that refuses the transport callbacks keeps its own clock: its
+        // features lack `Features::TRANSPORT`, which is how the refusal reaches
+        // the app.
+        loaded.install_host_callbacks().ok();
+        // Without the property listener no change of latency, tail or
+        // parameters, and no edit the unit makes, is ever heard: a refusal fails
+        // the load.
+        if !loaded.watch_properties() {
+            return Err(PluginError::Load {
                 stage: LoadStage::Initialization,
-                reason: e.to_string(),
-            })?;
+                reason: "AudioToolbox refused the property listener".to_owned(),
+            });
         }
-        let _ = loaded.install_host_callbacks();
-        let _ = loaded.watch_properties();
         // The unit chosen by id even when the load named none, so a reopen
         // takes the same one.
-        loaded.origin = PluginRef::new(path, unit_id(&desc));
+        loaded.origin = PluginRef::new(path, unit_id(key));
         Ok(loaded)
     }
 }

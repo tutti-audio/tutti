@@ -2,6 +2,7 @@ use core::f64::consts::PI;
 
 use super::*;
 use crate::TAIL_FLOOR;
+use tutti_buffers::InputOutput;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const ORDERS: [u8; 9] = [1, 2, 3, 4, 5, 7, 8, 12, 16];
@@ -358,11 +359,16 @@ fn a_five_hz_high_pass_at_192_khz_holds_its_gain_and_noise_in_f32() {
         .map(|n| libm::sin(w * n as f64) as f32)
         .collect();
     let mut out = vec![0.0f32; input.len()];
-    SosBank::<f32>::new(ChannelLayout::MONO).process(
-        &mut ramp,
-        Planes::new(&[&input[..]]).unwrap(),
-        PlanesMut::new(&mut [&mut out[..]]).unwrap(),
-    );
+    SosBank::<f32>::new(ChannelLayout::MONO)
+        .process(
+            &mut ramp,
+            &mut InputOutput::paired(
+                Planes::new(&[&input[..]]).unwrap(),
+                PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
     let y: Vec<f64> = out.iter().map(|&v| f64::from(v)).collect();
     let h = Complex64::new(0.0, core::f64::consts::FRAC_1_SQRT_2);
     let tau = 1.0 / (libm::tan(PI * FC / FS) * core::f64::consts::SQRT_2);

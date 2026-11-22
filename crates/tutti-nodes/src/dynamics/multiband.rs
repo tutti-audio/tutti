@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use atomic_float::AtomicF64;
 use tutti_buffers::{BusTopology, ChannelLayout};
-use tutti_buffers::{Float, Mono, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput, Mono, Planes, PlanesMut};
 use tutti_dsp::{
     BandSettings, BankShape, COEFF_INTERVAL, CompressorControls, CrossoverControls, Lerp,
     MultibandBands, MultibandBank, MultibandSettings, MultibandSignals, SimdLanes,
@@ -24,11 +24,13 @@ use tutti_graph::{
     Status,
 };
 use tutti_rt::Param;
-use tutti_units::{CompressionRatio, Db, Hz, SampleRate};
+use tutti_units::{CompressionRatio, Db, Hz, SampleRate, Samples};
 use tutti_units::{Seconds, Tail, UnitParam};
 
 use crate::filter::Splits;
-use crate::kernel::{Grid, first_non_finite, log_non_finite, slice_in, slice_out, walk_grid};
+use crate::kernel::{
+    Grid, first_non_finite, log_non_finite, silence_block, slice_in, slice_out, walk_grid,
+};
 use crate::ramp::LastGood;
 
 /// The crossover frequencies a band count starts with.
@@ -453,11 +455,17 @@ impl<F: Float + SimdLanes + Lerp> Tuned<F> {
         ) else {
             return;
         };
+        let Ok(mut block) = InputOutput::new(Samples::new(frames.len()), input, output) else {
+            return;
+        };
         let mut thresholds = MultibandSignals::default();
         for (slot, signal) in thresholds.thresholds.iter_mut().zip(&signals.band) {
             *slot = signal[THRESHOLD].map(|l| Mono::new(&l[frames.clone()]));
         }
-        self.bank.process(thresholds, input, output);
+        // A block that is not the bank's shape is refused whole: silence, never a part.
+        if self.bank.process(thresholds, &mut block).is_err() {
+            silence_block(&mut block);
+        }
     }
 
     /// Renders the block cut at the grid points of the stream, the block beginning at

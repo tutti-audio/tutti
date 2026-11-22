@@ -199,20 +199,18 @@ impl Drop for AuEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::component::ComponentRef;
 
     /// **AUDelay advertises a Cocoa view**: `has_editor` reads the property's
     /// size, and the host's lifecycle suite opens that view.
     #[test]
     fn audelay_advertises_a_cocoa_view() {
-        let desc = coreaudio_sys::AudioComponentDescription {
-            componentType: coreaudio_sys::kAudioUnitType_Effect,
-            componentSubType: u32::from_be_bytes(*b"dely"),
-            componentManufacturer: u32::from_be_bytes(*b"appl"),
-            componentFlags: 0,
-            componentFlagsMask: 0,
-        };
-        let comp = ComponentRef::first_matching(&desc).expect("AUDelay should be present");
+        let key = crate::ComponentKey::new(
+            coreaudio_sys::kAudioUnitType_Effect,
+            u32::from_be_bytes(*b"dely"),
+            u32::from_be_bytes(*b"appl"),
+        )
+        .expect("an exact key");
+        let comp = crate::ComponentRef::find(key).expect("AUDelay should be present");
         let (_work, handle) = tutti_plugin_types::MainWork::new();
         let unit = Unit::new(comp, &handle).expect("instantiate");
         unit.initialize().expect("initialize");

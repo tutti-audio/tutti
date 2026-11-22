@@ -1,8 +1,10 @@
 //! [`LadderBank`]: one four-stage ladder per channel, all channels at one
 //! [`LadderBlend`], over buffers views.
 
+use crate::BlockMismatch;
+use crate::block::expect_widths;
 use tutti_buffers::ChannelLayout;
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput, Planes, PlanesMut};
 use tutti_units::Real;
 
 use super::kernel::{LadderCoefficients, ladder_step};
@@ -76,22 +78,22 @@ impl<F: Float + SimdLanes> LadderBank<F> {
     /// Runs `input` into `output`, frame `i` at `blend.at(taken + 1 + i)`, then takes the
     /// block's steps from the ramp.
     ///
-    /// Channel `c` of `input` feeds channel `c` of `output`; a channel past the bank's
-    /// width, or past the narrower of the two views, is not touched. Channels run in groups
-    /// of up to eight, each group's planes taken once per block; while the ramp moves, a
-    /// group reads the blend once per frame. No allocation.
+    /// Channel `c` of `input` feeds channel `c` of `output`. Channels run in groups of up to
+    /// eight, each group's planes taken once per block; while the ramp moves, a group reads
+    /// the blend once per frame. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels.
     pub fn process(
         &mut self,
         blend: &mut Ramp<LadderBlend<F>>,
-        input: Planes<'_, F>,
-        mut output: PlanesMut<'_, '_, F>,
-    ) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = self
-            .state
-            .len()
-            .min(input.channels())
-            .min(output.channels());
+        block: &mut InputOutput<'_, F>,
+    ) -> Result<(), BlockMismatch> {
+        let width = self.state.len();
+        expect_widths(block, width, width)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let mut first = 0;
         while first < width {
             let n = group_size(width - first);
@@ -120,6 +122,7 @@ impl<F: Float + SimdLanes> LadderBank<F> {
             first += n;
         }
         blend.advance(u32::try_from(frames).unwrap_or(u32::MAX));
+        Ok(())
     }
 }
 

@@ -1539,7 +1539,8 @@ fn a_plugin_with_no_render_entry_is_refused_at_load() {
 }
 
 /// **Each refusal of an audio-thread entry is counted in its own tally.** A closed gate,
-/// a missing entry (`f64` render, `setParameter`) and a cleared dispatcher.
+/// a missing entry (`f64` render, `setParameter`) and a cleared dispatcher, whether an
+/// audio-thread entry or a main-thread opcode reaches it.
 #[test]
 fn each_refused_entry_is_counted_apart() {
     extern "C" fn dispatch(
@@ -1572,7 +1573,7 @@ fn each_refused_entry_is_counted_apart() {
         (*effect).processReplacing = Some(render);
         (*effect).flags = PluginFlags::CAN_REPLACING.bits();
     }
-    let (instance, main) = instance_over(effect);
+    let (mut instance, main) = instance_over(effect);
     let mut handle = instance.render_handle(main);
     handle.process(&mut host32.bind(&inputs, &mut outputs));
     assert_eq!(instance.gate_refusals().get(), 0);
@@ -1589,6 +1590,9 @@ fn each_refused_entry_is_counted_apart() {
     assert_eq!(instance.dispatcher_cleared().get(), 1);
     handle.start_process();
     assert_eq!(instance.dispatcher_cleared().get(), 2);
+    // A main-thread opcode reads 0 and is counted in the same tally: two here.
+    instance.with_preset_bracket(main, |_| ());
+    assert_eq!(instance.dispatcher_cleared().get(), 4);
     assert_eq!(instance.gate_refusals().get(), 0, "the gate was open");
     assert_eq!(instance.pin_refusals().get(), 0);
     // The dispatcher is restored for the close.

@@ -4,6 +4,7 @@ use tutti_units::{Amplitude, Hz};
 
 use super::*;
 use crate::{ChannelWeight, KWeighting};
+use tutti_buffers::InputOutput;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 /// The K-weighting at `RATE`.
@@ -49,7 +50,11 @@ fn run(bank: &mut LevellerBank<f32>, audio: &[Vec<f32>], block: usize) -> Vec<Ve
         let end = (at + block).min(n);
         let a: Vec<&[f32]> = audio.iter().map(|c| &c[at..end]).collect();
         let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
-        bank.process(Planes::new(&a).unwrap(), PlanesMut::new(&mut outs).unwrap());
+        bank.process(
+            &mut InputOutput::paired(Planes::new(&a).unwrap(), PlanesMut::new(&mut outs).unwrap())
+                .unwrap(),
+        )
+        .unwrap();
         at = end;
     }
     out
@@ -177,9 +182,13 @@ fn an_f64_bank_settles_the_gain_to_the_target_less_the_loudness_in_f64() {
     let mut y = vec![0.0f64; x.len()];
     for (xs, ys) in x.chunks(480).zip(y.chunks_mut(480)) {
         bank.process(
-            Planes::new(&[xs, xs]).unwrap(),
-            PlanesMut::new(&mut [&mut ys[..], &mut xs.to_vec()[..]]).unwrap(),
-        );
+            &mut InputOutput::paired(
+                Planes::new(&[xs, xs]).unwrap(),
+                PlanesMut::new(&mut [&mut ys[..], &mut xs.to_vec()[..]]).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
     }
     let want = -23.0 - bank.short_term().unwrap().get();
     assert!(

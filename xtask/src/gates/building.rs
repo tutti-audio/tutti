@@ -299,6 +299,12 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-buffers/src/input_output.rs",
+        "InputOutput::paired",
+        CTOR,
+        "the same validity as `InputOutput::new` with the frame count taken from the views: they must agree",
+    ),
+    ty(
+        "crates/tutti-buffers/src/input_output.rs",
         "InputOutput::from_slices",
         CTOR,
         "the same validity as `InputOutput::new` over two slice tables: their frame counts must agree",
@@ -334,6 +340,12 @@ pub(super) const ALLOW: &[Allow] = &[
         "loading a VST3 module the OS refuses: the failure is the OS's, not a value's",
     ),
     ty(
+        "crates/tutti-midi-runtime/src/schedule/harmony_node.rs",
+        "HarmonyChanges::new",
+        CTOR,
+        "the changes are valid together (no chord, and no scale, shares a beat with another): no single change's type holds it",
+    ),
+    ty(
         "crates/tutti-dsp/src/spatial/hrtf/sphere.rs",
         "HrirSphere::new",
         CTOR,
@@ -359,7 +371,13 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-midi-network/src/udp.rs",
-        "UdpDriver::bind",
+        "NetworkLink::spawn",
+        CTOR,
+        "duplicating the socket and starting the task's thread: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-midi-network/src/udp.rs",
+        "NetworkLink::bind",
         CTOR,
         "binding a UDP socket: the failure is the OS's, not a value's",
     ),

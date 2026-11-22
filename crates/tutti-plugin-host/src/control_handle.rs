@@ -595,6 +595,17 @@ impl PluginHandle {
             .unwrap_or(0)
     }
 
+    /// How many callbacks the plugin made from a thread its format's rules
+    /// forbid, which the host refused, over the plugin's life; the plugin's
+    /// [`Control::refused_off_thread_calls`]. A served plugin's is the
+    /// server's, as it last told. Not for the audio thread.
+    pub fn refused_off_thread_calls(&self) -> u64 {
+        self.control
+            .as_deref()
+            .and_then(|control| lent(control, |c| c.refused_off_thread_calls()))
+            .unwrap_or(0)
+    }
+
     // ---- State and presets (main thread) ----------------------------------
 
     /// Restores a blob produced by [`AnyThread::save_state`].
@@ -1091,6 +1102,9 @@ mod tests {
             self.accepts
         }
         fn dropped_reported_edits(&self) -> u64 {
+            0
+        }
+        fn refused_off_thread_calls(&self) -> u64 {
             0
         }
     }

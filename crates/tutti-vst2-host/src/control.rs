@@ -352,6 +352,11 @@ impl Control for Vst2Loaded {
     fn dropped_reported_edits(&self) -> u64 {
         self.dropped_param_changes().get()
     }
+
+    /// VST2 has no host-side main-thread refusal: none is counted.
+    fn refused_off_thread_calls(&self) -> u64 {
+        0
+    }
 }
 
 impl EditorWindow for Vst2Loaded {
