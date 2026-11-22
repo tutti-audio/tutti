@@ -49,10 +49,6 @@ fn ports(s: &Session, input: NodeKey, node: NodeKey) -> BTreeSet<u16> {
         .collect()
 }
 
-fn channelless() -> u16 {
-    u16::try_from(CHANNELLESS_PORT).unwrap()
-}
-
 /// **Two channel rules on one target take the union of their ports and the
 /// channelless one, beside an any-channel rule on another target taking all
 /// seventeen.**
@@ -80,11 +76,11 @@ fn two_rules_on_one_target_take_the_union() {
         .unwrap();
     assert_eq!(
         ports(&s, input, lead.erase()),
-        BTreeSet::from([2, 5, channelless()])
+        BTreeSet::from([2, 5, CHANNELLESS_PORT])
     );
     assert_eq!(
         ports(&s, input, pad.erase()),
-        (0..u16::try_from(MIDI_INPUT_PORTS).unwrap()).collect()
+        (0..MIDI_INPUT_PORTS).collect()
     );
 }
 

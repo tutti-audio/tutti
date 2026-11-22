@@ -58,11 +58,11 @@ fn reclaim_frees_a_request_a_block_held_across_the_next() {
 #[test]
 fn a_listener_takes_its_channel_and_the_channelless_port() {
     let first = MidiInputPorts::FIRST_GROUP;
-    let one: Vec<usize> = first
+    let one: Vec<u16> = first
         .listening(Some(MidiGroup::FIRST), Some(MidiChannel::of(3)))
         .collect();
     assert_eq!(one, vec![3, CHANNELLESS_PORT]);
-    let all: Vec<usize> = first.listening(None, None).collect();
+    let all: Vec<u16> = first.listening(None, None).collect();
     assert_eq!(all, (0..MIDI_INPUT_PORTS).collect::<Vec<_>>());
 }
 
@@ -120,7 +120,7 @@ fn a_group_has_ports_of_its_own() {
     );
     assert_eq!(two.port_of(&note(2, 1)), None, "not heard");
     // A listener on Group 2's channel 1 takes that Group's ports only.
-    let ports: Vec<usize> = two
+    let ports: Vec<u16> = two
         .listening(Some(MidiGroup::of(1)), Some(MidiChannel::of(1)))
         .collect();
     assert_eq!(
@@ -152,7 +152,9 @@ fn sent_at_arrival(reset: bool) -> usize {
     d.events(0, &[]);
     writer.arrive();
     d.block();
-    (0..MIDI_INPUT_PORTS).map(|p| d.events_out(p).len()).sum()
+    (0..MIDI_INPUT_PORTS)
+        .map(|p| d.events_out(usize::from(p)).len())
+        .sum()
 }
 
 /// **`reset` returns the node to a freshly prepared one's state**: a device

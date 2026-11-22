@@ -67,7 +67,7 @@ fn the_compile_is_total_and_the_fallback_holds_only_unrouted_ports() {
             .collect();
         let ports = compile_routes(FIRST, rules.iter().copied(), Some("fallback"));
 
-        let reached: BTreeSet<usize> = ports.values().flatten().copied().collect();
+        let reached: BTreeSet<u16> = ports.values().flatten().copied().collect();
         assert_eq!(
             reached,
             (0..MIDI_INPUT_PORTS).collect(),
@@ -75,7 +75,7 @@ fn the_compile_is_total_and_the_fallback_holds_only_unrouted_ports() {
         );
         let mut routed = BTreeSet::new();
         for rule in &rules {
-            let theirs: BTreeSet<usize> = FIRST
+            let theirs: BTreeSet<u16> = FIRST
                 .listening(Some(MidiGroup::FIRST), rule.channel)
                 .collect();
             for target in rule.targets {
@@ -86,7 +86,7 @@ fn the_compile_is_total_and_the_fallback_holds_only_unrouted_ports() {
             }
             routed.extend(theirs);
         }
-        let unrouted: BTreeSet<usize> = (0..MIDI_INPUT_PORTS)
+        let unrouted: BTreeSet<u16> = (0..MIDI_INPUT_PORTS)
             .filter(|p| !routed.contains(p))
             .collect();
         assert_eq!(

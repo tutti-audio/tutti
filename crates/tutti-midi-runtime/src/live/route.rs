@@ -70,11 +70,11 @@ pub fn compile_routes<'a, T: Copy + Ord + 'a>(
     input: MidiInputPorts,
     rules: impl IntoIterator<Item = RouteRule<'a, T>>,
     fallback: Option<T>,
-) -> BTreeMap<T, BTreeSet<usize>> {
-    let mut ports: BTreeMap<T, BTreeSet<usize>> = BTreeMap::new();
-    let mut covered: BTreeSet<usize> = BTreeSet::new();
+) -> BTreeMap<T, BTreeSet<u16>> {
+    let mut ports: BTreeMap<T, BTreeSet<u16>> = BTreeMap::new();
+    let mut covered: BTreeSet<u16> = BTreeSet::new();
     for rule in rules.into_iter().filter(|r| !r.targets.is_empty()) {
-        let theirs: BTreeSet<usize> = input.listening(rule.group, rule.channel).collect();
+        let theirs: BTreeSet<u16> = input.listening(rule.group, rule.channel).collect();
         if theirs.is_empty() {
             // A Group the node does not hear: nothing to take.
             continue;
@@ -88,7 +88,7 @@ pub fn compile_routes<'a, T: Copy + Ord + 'a>(
         }
     }
     if let Some(target) = fallback {
-        let uncovered: BTreeSet<usize> = (0..input.count())
+        let uncovered: BTreeSet<u16> = (0..input.count())
             .filter(|p| !covered.contains(p))
             .collect();
         if !uncovered.is_empty() {

@@ -401,16 +401,13 @@ fn route_rules_wire_the_hardware_input() {
     };
 
     let all = s.midi().route(MidiRouteRule::new().to(a)).unwrap();
-    assert_eq!(
-        ports(&s, a),
-        (0..MIDI_INPUT_PORTS as u16).collect::<Vec<_>>()
-    );
+    assert_eq!(ports(&s, a), (0..MIDI_INPUT_PORTS).collect::<Vec<_>>());
 
     let ch2 = MidiChannel::of(2);
     s.midi()
         .route(MidiRouteRule::new().channel(ch2).to(b))
         .unwrap();
-    assert_eq!(ports(&s, b), vec![2, CHANNELLESS_PORT as u16]);
+    assert_eq!(ports(&s, b), vec![2, CHANNELLESS_PORT]);
 
     s.midi().unroute(all).unwrap();
     assert!(
@@ -423,8 +420,8 @@ fn route_rules_wire_the_hardware_input() {
     assert_eq!(ports(&s, a), Vec::<u16>::new(), "unrouted");
 
     s.midi().set_route_fallback(Some(a)).unwrap();
-    let rest: Vec<u16> = (0..MIDI_INPUT_PORTS as u16)
-        .filter(|&p| p != 2 && p != CHANNELLESS_PORT as u16)
+    let rest: Vec<u16> = (0..MIDI_INPUT_PORTS)
+        .filter(|&p| p != 2 && p != CHANNELLESS_PORT)
         .collect();
     assert_eq!(ports(&s, a), rest, "the fallback takes what no rule covers");
 }
@@ -455,7 +452,7 @@ fn a_route_rule_names_a_group() {
         p
     };
     let ch2 = MidiChannel::of(2);
-    let group = MIDI_INPUT_PORTS as u16;
+    let group = MIDI_INPUT_PORTS;
     s.midi()
         .route(
             MidiRouteRule::new()
@@ -464,14 +461,11 @@ fn a_route_rule_names_a_group() {
                 .to(a),
         )
         .unwrap();
-    assert_eq!(
-        ports(&s, a),
-        vec![group + 2, group + CHANNELLESS_PORT as u16]
-    );
+    assert_eq!(ports(&s, a), vec![group + 2, group + CHANNELLESS_PORT]);
     s.midi()
         .route(MidiRouteRule::new().channel(ch2).to(b))
         .unwrap();
-    assert_eq!(ports(&s, b), vec![2, CHANNELLESS_PORT as u16]);
+    assert_eq!(ports(&s, b), vec![2, CHANNELLESS_PORT]);
     s.midi()
         .route(
             MidiRouteRule::new()
