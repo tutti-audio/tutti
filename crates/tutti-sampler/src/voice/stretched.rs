@@ -139,7 +139,7 @@ const NOMINAL_RATE: SampleRate = SampleRate::SR_48K;
 /// that leaves goes back through the retirement ring). A standalone
 /// [`VoiceNode`](crate::VoiceNode) has no command ring, so it carries its spare from
 /// construction. A voice with no spare that meets a wrap flushes as a seek does: it is
-/// silent for [`prime`] frames after the wrap.
+/// silent for [`PRIME`] frames after the wrap.
 pub(crate) struct Vocoders<F: SamplerFloat> {
     pub(crate) live: PhaseVocoder<F>,
     pub(crate) spare: Option<Box<PhaseVocoder<F>>>,
