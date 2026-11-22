@@ -224,20 +224,27 @@ const fn step(bits: u32) -> f64 {
 /// Float to an `n`-bit integer: scale, round half to even, clip. NaN is `0`.
 /// The flag says the rounded value lay past `MAX` or `MIN` and was clipped;
 /// NaN is not a clip.
+///
+/// Branch-free, so a loop over it vectorizes. The scaled value is first held
+/// to `[-s - 1, s]`, which keeps every clip a clip and every in-range value
+/// as it is (a value at `s - 0.5` rounds to the even `s`, a clip either way),
+/// and bounds it far below `2^51`: there, adding and subtracting `1.5 * 2^52`
+/// rounds it to an integer under the default round-half-to-even mode, which
+/// is what `rint` does.
 #[inline]
 fn float_to_int_clipped(x: f64, bits: u32) -> (i32, bool) {
-    if x.is_nan() {
-        return (0, false);
-    }
+    /// `1.5 * 2^52`: the sum's ulp is `1`, so the add rounds to an integer.
+    const ROUND: f64 = 6_755_399_441_055_744.0;
     let s = scale(bits);
-    let v = libm::rint(x * s);
-    if v > s - 1.0 {
-        ((s - 1.0) as i32, true)
-    } else if v < -s {
-        ((-s) as i32, true)
-    } else {
-        (v as i32, false)
-    }
+    let held = x * s;
+    let held = if held > s { s } else { held };
+    let held = if held < -s - 1.0 { -s - 1.0 } else { held };
+    let v = (held + ROUND) - ROUND;
+    let nan = x.is_nan();
+    let clipped = !nan & ((v > s - 1.0) | (v < -s));
+    let v = if v > s - 1.0 { s - 1.0 } else { v };
+    let v = if v < -s { -s } else { v };
+    (if nan { 0 } else { v as i32 }, clipped)
 }
 
 /// An `n`-bit integer to `m` bits: the exact integer form of scaling by

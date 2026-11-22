@@ -4,7 +4,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_music::LoopRange;
 use tutti_session::{Session, TransportHandle};
-use tutti_timeline::{FadeOut, LoopRegion, MotionCommand, TimedError};
+use tutti_timeline::{AfterLocate, FadeOut, LoopRegion, MotionCommand, TimedError};
 use tutti_units::{At, Beat, Bpm, Frame, Samples};
 
 fn offline() -> Session {
@@ -109,6 +109,32 @@ fn a_next_block_schedule_updates_the_rolling_record() {
         .unwrap();
     assert!(matches!(
         handle.schedule(Beat::new(5.0), MotionCommand::Play),
+        Err(TimedError::BeatWhileStopped(MotionCommand::Play))
+    ));
+}
+
+/// **A next-block locate that then stops is a stop the record knows:** after
+/// it, while the last render still played, a beat play is refused rather than
+/// left waiting on a stopped transport.
+#[test]
+fn a_next_block_locate_then_stop_refuses_a_beat_play() {
+    let mut s = offline();
+    s.play().unwrap();
+    render(&mut s, 2);
+    assert!(s.playhead().playing());
+    let handle = s.transport_handle();
+    handle
+        .schedule(
+            At::NextBlock,
+            MotionCommand::Locate {
+                beat: Beat::new(0.0),
+                fade: FadeOut::Immediate,
+                then: AfterLocate::Stop,
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        handle.schedule(Beat::new(8.0), MotionCommand::Play),
         Err(TimedError::BeatWhileStopped(MotionCommand::Play))
     ));
 }
