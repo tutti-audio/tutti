@@ -1812,7 +1812,7 @@ pub(super) fn check(tree: &dyn Tree, allow: &[Allow], min_sites: usize) -> Repor
     }
     if !stale.is_empty() {
         r.fail(format!(
-            "check-building: FAIL (a row of {LIST} names no violation; delete it):"
+            "check-building: FAIL (a row of {LIST} names no violation; delete it, or run `cargo xtask prune-building`):"
         ));
         stale
             .into_iter()
@@ -1842,6 +1842,66 @@ pub(super) fn check(tree: &dyn Tree, allow: &[Allow], min_sites: usize) -> Repor
         counts.join(", ")
     ));
     r
+}
+
+/// The baseline with every row that names no violation deleted, and a crate's
+/// `# <crate>` heading with it once its last row goes; the number of rows
+/// deleted. What `cargo xtask prune-building` writes. It never adds a row: a new
+/// violation is still `check`'s failure, so the list only shrinks.
+pub(super) fn pruned(
+    tree: &dyn Tree,
+    allow: &[Allow],
+    min_sites: usize,
+) -> Result<(String, usize), String> {
+    let text = tree
+        .read(LIST)
+        .ok_or_else(|| format!("{LIST} is missing"))?;
+    let rows = parse(&text).map_err(|e| format!("{LIST} is malformed:\n{}", e.join("\n")))?;
+    let (sites, _) = found(tree, allow);
+    if sites.len() < min_sites {
+        return Err(format!(
+            "{} violations found, at least {min_sites} expected; the walk is broken",
+            sites.len()
+        ));
+    }
+    let crates: BTreeSet<String> = rows.iter().map(|(c, _, _)| format!("# {c}")).collect();
+    let is_row = |line: &str| {
+        let line = line.trim();
+        !line.is_empty() && !line.starts_with('#')
+    };
+    let mut removed = 0;
+    let mut kept: Vec<&str> = Vec::new();
+    for line in text.lines() {
+        if is_row(line) {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            let row =
+                Rule::parse(parts[1]).map(|rule| (parts[0].to_owned(), rule, parts[2].to_owned()));
+            if row.is_some_and(|row| !sites.contains(&row)) {
+                removed += 1;
+                continue;
+            }
+        }
+        kept.push(line);
+    }
+    let mut out: Vec<&str> = Vec::new();
+    for (i, &line) in kept.iter().enumerate() {
+        if crates.contains(line.trim()) {
+            let empty = !kept[i + 1..]
+                .iter()
+                .take_while(|l| !l.trim().is_empty() && !crates.contains(l.trim()))
+                .any(|l| is_row(l));
+            if empty {
+                if out.last().is_some_and(|l| l.trim().is_empty()) {
+                    out.pop();
+                }
+                continue;
+            }
+        }
+        out.push(line);
+    }
+    let mut text = out.join("\n");
+    text.push('\n');
+    Ok((text, removed))
 }
 
 #[cfg(test)]
@@ -2550,5 +2610,30 @@ mod tests {
     fn a_walk_that_finds_too_few_violations_fails() {
         let tree = Mem::with(&[(LIST, ""), (F, "pub fn f() {}")]);
         assert!(check(&tree, &[], 1).findings[0].contains("the walk is broken"));
+    }
+
+    fn prune(list: &str, src: &str) -> (String, usize) {
+        pruned(&Mem::with(&[(LIST, list), (F, src)]), &[], 0).expect("prunes")
+    }
+
+    #[test]
+    fn pruning_deletes_a_stale_row_and_its_emptied_heading_and_keeps_the_rest() {
+        let list = "# header\n\n# a\na  with-prefix  crates/a/src/lib.rs::T::with_x\n\
+                    a  with-prefix  crates/a/src/lib.rs::T::with_y\n\n# b\n\
+                    b  setter  crates/b/src/lib.rs::U::set_z\n";
+        let src = "impl T { pub fn with_x(self) -> Self { self } }";
+        let (text, removed) = prune(list, src);
+        assert_eq!(removed, 2);
+        assert_eq!(
+            text,
+            "# header\n\n# a\na  with-prefix  crates/a/src/lib.rs::T::with_x\n"
+        );
+    }
+
+    #[test]
+    fn pruning_never_adds_the_row_of_a_new_violation() {
+        let src = "impl T { pub fn with_x(self) -> Self { self } }";
+        let (text, removed) = prune("# header\n", src);
+        assert_eq!((text.as_str(), removed), ("# header\n", 0));
     }
 }

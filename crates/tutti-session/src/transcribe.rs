@@ -29,7 +29,9 @@ pub enum LevelVelocity {
     /// widened to the MIDI 2.0 field by M2-115 section 3, so the floor is
     /// velocity 1 and the ceiling `0xFFFF`, and 64 is `0x8000`.
     ByLevel(VelocityRange),
-    /// Every note at this velocity, whatever its level.
+    /// Every note at this velocity, whatever its level. Velocity 0 is a
+    /// MIDI 2.0 Note On (M2-104 section 7.4.2), and a MIDI 1.0 sink receives
+    /// it as velocity 1.
     Fixed(NoteVelocity),
 }
 
@@ -155,11 +157,11 @@ fn note_events(
 /// The bend of `note`'s cents over `range`, centred at none and saturating at
 /// the range's ends. A range of nothing bends nothing.
 fn bend(note: &NoteEvent, range: PitchBendSensitivity) -> BendValue {
-    let span = range.semitones().to_cents().get();
-    if span <= 0.0 {
+    let span = range.semitones().to_cents();
+    if span.get() <= 0.0 {
         return BendValue::CENTER;
     }
-    BendValue::from_bipolar(Bipolar::clamped(note.cents.get() / span))
+    BendValue::from_bipolar(Bipolar::clamped(note.cents / span))
 }
 
 fn beat_at(tempo: &mut TempoView<'_>, at: Samples) -> Beat {

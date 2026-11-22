@@ -52,7 +52,7 @@ use crate::host::RenderHandle;
 /// ```
 pub struct RenderScratch {
     rows: Format,
-    /// The most frames a render may be asked for: what every Vec was sized to.
+    /// The most frames a render may be asked for: what every row was sized to.
     block_size: usize,
 }
 
@@ -64,10 +64,10 @@ enum Format {
 
 /// One width's channel rows and the pointer tables the plugin is handed.
 struct Rows<T> {
-    inputs: Vec<Vec<T>>,
-    outputs: Vec<Vec<T>>,
-    input_ptrs: Vec<*const T>,
-    output_ptrs: Vec<*mut T>,
+    inputs: Box<[Box<[T]>]>,
+    outputs: Box<[Box<[T]>]>,
+    input_ptrs: Box<[*const T]>,
+    output_ptrs: Box<[*mut T]>,
 }
 
 impl std::fmt::Debug for RenderScratch {
@@ -79,7 +79,7 @@ impl std::fmt::Debug for RenderScratch {
     }
 }
 
-// SAFETY: the raw pointers point into the owned `Vec<Vec<_>>` fields within the same
+// SAFETY: the raw pointers point into the owned boxed-slice fields within the same
 // struct, whose heap blocks move with it, so moving the struct to another thread moves
 // what they point at. Not `Sync`: nothing shares one, and an argument that "callers
 // serialize" is not one for `Sync`.
@@ -158,7 +158,7 @@ impl RenderScratch {
         }
     }
 
-    /// Refuses a render longer than the Vecs behind the pointer tables.
+    /// Refuses a render longer than the rows behind the pointer tables.
     fn check_block(&self, num_samples: usize) {
         assert!(
             num_samples <= self.block_size,
@@ -170,11 +170,11 @@ impl RenderScratch {
 
 impl<T: Float + VstFloat> Rows<T> {
     fn new(num_inputs: usize, num_outputs: usize, block_size: usize) -> Self {
-        let inputs: Vec<Vec<T>> = (0..num_inputs)
-            .map(|_| vec![T::SILENCE; block_size])
+        let inputs: Box<[Box<[T]>]> = (0..num_inputs)
+            .map(|_| vec![T::SILENCE; block_size].into_boxed_slice())
             .collect();
-        let outputs: Vec<Vec<T>> = (0..num_outputs)
-            .map(|_| vec![T::SILENCE; block_size])
+        let outputs: Box<[Box<[T]>]> = (0..num_outputs)
+            .map(|_| vec![T::SILENCE; block_size].into_boxed_slice())
             .collect();
         let input_ptrs = inputs.iter().map(|v| v.as_ptr()).collect();
         let output_ptrs = outputs.iter().map(|v| v.as_ptr().cast_mut()).collect();
@@ -231,7 +231,7 @@ impl<T: Float + VstFloat> Rows<T> {
 /// Converts the first `len` frames of each caller channel into the scratch row of the same
 /// index: a row the caller has no channel for is silence, a caller channel past the rows is not
 /// staged.
-fn stage<T: Sample, S: Sample>(rows: &mut [Vec<T>], from: &Planes<'_, S>, len: usize) {
+fn stage<T: Sample, S: Sample>(rows: &mut [Box<[T]>], from: &Planes<'_, S>, len: usize) {
     for (c, row) in rows.iter_mut().enumerate() {
         let row = &mut row[..len];
         match from.get_plane(c) {
@@ -246,7 +246,7 @@ fn stage<T: Sample, S: Sample>(rows: &mut [Vec<T>], from: &Planes<'_, S>, len: u
 }
 
 /// Silences the first `len` frames of each scratch row.
-fn zero<T: Sample>(rows: &mut [Vec<T>], len: usize) {
+fn zero<T: Sample>(rows: &mut [Box<[T]>], len: usize) {
     for row in rows {
         row[..len].fill(T::SILENCE);
     }
@@ -254,7 +254,7 @@ fn zero<T: Sample>(rows: &mut [Vec<T>], len: usize) {
 
 /// Converts the first `len` frames of each scratch row into the caller channel of the same
 /// index; a caller channel past the rows keeps what it held.
-fn emit<T: Sample, S: Sample>(rows: &[Vec<T>], to: &mut PlanesMut<'_, '_, S>, len: usize) {
+fn emit<T: Sample, S: Sample>(rows: &[Box<[T]>], to: &mut PlanesMut<'_, '_, S>, len: usize) {
     for (c, row) in rows.iter().enumerate() {
         if let Some(plane) = to.get_plane_mut(c) {
             for (d, &s) in plane.into_samples_mut().iter_mut().zip(&row[..len]) {
@@ -268,7 +268,7 @@ fn emit<T: Sample, S: Sample>(rows: &[Vec<T>], to: &mut PlanesMut<'_, '_, S>, le
 mod tests {
     use super::*;
 
-    /// **A render longer than the block the Vecs were sized for is refused**, before the
+    /// **A render longer than the block the rows were sized for is refused**, before the
     /// plugin sees pointers that would run past them.
     #[test]
     #[should_panic(expected = "exceeds the scratch's block size")]
@@ -297,7 +297,7 @@ mod tests {
     }
 
     /// Scratch rows holding a recognizable ramp, so an emit can be checked sample by sample.
-    fn ramp_rows(channels: usize, block: usize) -> Vec<Vec<f32>> {
+    fn ramp_rows(channels: usize, block: usize) -> Box<[Box<[f32]>]> {
         (0..channels)
             .map(|c| (0..block).map(|i| (c * 100 + i) as f32).collect())
             .collect()
@@ -344,12 +344,12 @@ mod tests {
     /// A scratch input the caller has no channel for is silence, not the previous block's samples.
     #[test]
     fn a_scratch_input_without_a_caller_channel_is_silence() {
-        let mut rows = vec![vec![9.0f32; 4], vec![9.0f32; 4]];
+        let mut rows = [Box::new([9.0f32; 4]) as Box<[f32]>, Box::new([9.0f32; 4])];
         let src = [0.5f32; 4];
         let chans = [&src[..]];
         stage(&mut rows, &Planes::new(&chans).expect("one channel"), 4);
-        assert_eq!(rows[0], [0.5; 4]);
-        assert_eq!(rows[1], [0.0; 4]);
+        assert_eq!(*rows[0], [0.5; 4]);
+        assert_eq!(*rows[1], [0.0; 4]);
     }
 
     /// Staging into the f64 rows carries a value that has no f32 representation through
@@ -362,10 +362,10 @@ mod tests {
             EXACT as f32 as f64, EXACT,
             "the fixture is vacuous unless this value rounds in f32"
         );
-        let mut rows = vec![vec![0.0f64; 4]];
+        let mut rows = [Box::new([0.0f64; 4]) as Box<[f64]>];
         let src = [EXACT; 4];
         let chans = [&src[..]];
         stage(&mut rows, &Planes::new(&chans).expect("one channel"), 4);
-        assert_eq!(rows[0], [EXACT; 4]);
+        assert_eq!(*rows[0], [EXACT; 4]);
     }
 }

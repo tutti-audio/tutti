@@ -8,6 +8,7 @@ use std::time::Duration;
 use tutti_platform::Instant;
 
 use tutti_ump::Ump;
+use tutti_units::Losses;
 
 use crate::command::code;
 use crate::link::{Link, Loss};
@@ -111,6 +112,8 @@ pub(crate) struct Session {
     outstanding_pings: VecDeque<PingId>,
     out: Vec<Command>,
     events: Vec<Event>,
+    /// Commands whose advisory text a peer sent partly unreadable.
+    losses: Losses,
 }
 
 /// The most Pings that may be unanswered at once before the oldest is dropped.
@@ -139,6 +142,7 @@ impl Session {
             outstanding_pings: VecDeque::new(),
             out: Vec::new(),
             events: Vec::new(),
+            losses: Losses::NONE,
         }
     }
 
@@ -170,11 +174,12 @@ impl Session {
         }
     }
 
-    /// The commands and events the last calls produced.
-    pub(crate) fn take_output(&mut self) -> (Vec<Command>, Vec<Event>) {
+    /// The commands and events the last calls produced, and what they lost.
+    pub(crate) fn take_output(&mut self) -> (Vec<Command>, Vec<Event>, Losses) {
         (
             std::mem::take(&mut self.out),
             std::mem::take(&mut self.events),
+            std::mem::take(&mut self.losses),
         )
     }
 
@@ -192,6 +197,7 @@ impl Session {
             reason,
             refused,
             text: crate::NakText::default(),
+            text_cut: 0,
         })));
     }
 
@@ -425,6 +431,7 @@ impl Session {
     }
 
     fn on_nak(&mut self, now: Instant, nak: &Nak) {
+        self.count_cut_text(nak.text_cut);
         if nak.reason == NakReason::NotSupported
             && nak.refused.code() == code::RETRANSMIT_REQUEST
             && matches!(self.phase, Phase::Established)
@@ -438,7 +445,15 @@ impl Session {
         });
     }
 
+    /// Counts a command whose advisory text a peer sent partly unreadable.
+    fn count_cut_text(&mut self, cut: usize) {
+        if cut > 0 {
+            self.losses += Losses::lost(1);
+        }
+    }
+
     fn on_bye(&mut self, bye: &Bye) {
+        self.count_cut_text(bye.text_cut);
         // Every Bye is answered, repeated ones and ones from a peer that is
         // in no Session with this endpoint included.
         self.out.push(Command::ByeReply);

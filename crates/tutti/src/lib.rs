@@ -460,7 +460,7 @@ pub mod types {
         SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail, TimecodeFrames, Unit, UnitAddr,
         UnitParam, UnitParamOutOfRange, Velocity,
     };
-    pub use tutti_units::{Phase, Quantity, Real, Resyncs};
+    pub use tutti_units::{Blocks, Calls, Chunks, Phase, Quantity, Real, Resyncs};
 }
 
 /// The project's tempo (`tutti-tempo`): `TempoMap`, the points and builder it is
@@ -898,9 +898,10 @@ pub mod midi {
         SysexStatus, SysexStep, System, U4, UiHint, UmpVersion, Unknown, Utility, Voice2,
     };
     pub use tutti_ump::{
-        Address, CCNumber, DeviceIdentity, ExtremeValues, ManufacturerId, Message, Midi1Parser,
-        MidiChannel, MidiChannelSet, MidiGroup, MidiGroupSet, NoteNumber, NoteVelocity, Protocol,
-        StreamConfig, SysexAssembler, TicksPerQuarterNote, U7, U14, Ump, Voice1,
+        Address, CCNumber, DeviceIdentity, ExtremeValues, FunctionBlockSet, ManufacturerId,
+        Message, Midi1Parser, MidiChannel, MidiChannelSet, MidiGroup, MidiGroupSet, NoteNumber,
+        NoteVelocity, Protocol, StreamConfig, SysexAssembler, TicksPerQuarterNote, U7, U14, Ump,
+        Voice1,
     };
     pub use tutti_ump::{
         CCNumberOutOfRange, ChordTypeOutOfRange, DeltaTicksOutOfRange, FirstGroupOutOfRange,

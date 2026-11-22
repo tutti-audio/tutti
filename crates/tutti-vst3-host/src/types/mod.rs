@@ -256,9 +256,9 @@ pub trait Vst3Sample: tutti_buffers::Float {
 
     /// Binds the output channels of a block.
     #[doc(hidden)]
-    fn bind_outputs<'a, 'b: 'a>(
+    fn bind_outputs<'a>(
         buses: &'a mut BusBuffers,
-        channels: &'a mut [&'b mut [Self]],
+        channels: &'a mut [&mut [Self]],
     ) -> Result<BoundBuses<'a>, FfiError>;
 }
 
@@ -273,9 +273,9 @@ impl Vst3Sample for f32 {
         buses.bind_inputs_f32(channels)
     }
 
-    fn bind_outputs<'a, 'b: 'a>(
+    fn bind_outputs<'a>(
         buses: &'a mut BusBuffers,
-        channels: &'a mut [&'b mut [f32]],
+        channels: &'a mut [&mut [f32]],
     ) -> Result<BoundBuses<'a>, FfiError> {
         buses.bind_outputs_f32(channels)
     }
@@ -292,9 +292,9 @@ impl Vst3Sample for f64 {
         buses.bind_inputs_f64(channels)
     }
 
-    fn bind_outputs<'a, 'b: 'a>(
+    fn bind_outputs<'a>(
         buses: &'a mut BusBuffers,
-        channels: &'a mut [&'b mut [f64]],
+        channels: &'a mut [&mut [f64]],
     ) -> Result<BoundBuses<'a>, FfiError> {
         buses.bind_outputs_f64(channels)
     }

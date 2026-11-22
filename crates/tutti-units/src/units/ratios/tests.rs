@@ -25,6 +25,13 @@ use super::*;
 #[test]
 fn omitted_conversions_are_documented() {}
 
+/// The quotient of two offsets is the bare number of times one holds the other.
+#[test]
+fn cents_over_cents_is_the_number_of_times_one_holds_the_other() {
+    assert_eq!(Cents(150.0) / Cents(300.0), 0.5);
+    assert_eq!(Cents(-50.0) / Cents::SEMITONE, -0.5);
+}
+
 #[test]
 fn cents_and_semitones_convert_rather_than_scale() {
     // `Cents` being `Scalable` means `Cents / 100.0` COMPILES and

@@ -227,7 +227,7 @@ impl InputWriters {
     /// New cells and their writers, with their readers: a gauge reading 0 s
     /// and counters at zero. Allocates: control side.
     pub fn new() -> (Self, InputReaders) {
-        let (timing, timing_reader) = gauge(Seconds::new(0.0));
+        let (timing, timing_reader) = gauge(Seconds::ZERO);
         let (resyncs, resyncs_reader) = counter();
         let (lost, lost_reader) = counter();
         let (ci_refused, ci_refused_reader) = counter();

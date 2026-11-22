@@ -44,10 +44,10 @@ use crate::{AppKey, Clock, Session};
 const CHUNK_FRAMES: Samples = Samples::new(16_384);
 
 /// The audio an analysis reads, in the sample format `S` the measure asks for:
-/// a wave in memory or an [`Asset`] to decode.
+/// a wave in memory or an [asset](tutti_platform::Asset) to decode.
 ///
 /// Converts from what the session already holds: an [`Arc<Wave<S>>`](Wave) or
-/// a [`Wave<S>`]; with a decoder, an [`Asset`] or a path; and with a decoder and
+/// a [`Wave<S>`]; with a decoder, an [asset](tutti_platform::Asset) or a path; and with a decoder and
 /// feature `sampler`, a `LoadedAudio`. An asset, and a streamed load, are decoded
 /// chunk by chunk into `S` as the analysis runs.
 #[derive(Clone, Debug)]

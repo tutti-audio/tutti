@@ -25,10 +25,8 @@
 //!
 //! # audioMaster query callbacks
 //!
-//! Hosting is on the `tutti-vst2-ffi` fork, whose `host_dispatch` wires the query
-//! opcodes that upstream vst-rs swallows in its `_ =>` arm. That makes these
-//! callbacks *answerable*: the plugin gets a real response rather than a silent
-//! 0. Of them:
+//! `tutti-vst2-ffi`'s `host_dispatch` wires the query opcodes, so the plugin gets
+//! a real response rather than a silent 0. Of them:
 //!
 //! - `get_sample_rate`, `get_block_size` and `get_process_level` return **real
 //!   data**: the rate and maximum block the plugin was last told, and
@@ -47,8 +45,7 @@
 //!   carries it in its automation flags.
 //! - `get_input_latency` and `get_output_latency` return
 //!   honest neutral defaults — `HostState` has no reference to the value each
-//!   would need (see each method's note). The fork owns the answer rather than
-//!   falling through to vst-rs's swallowed 0.
+//!   would need (see each method's note).
 
 use crate::transport_cell::TransportReader;
 use crossbeam_queue::ArrayQueue;
@@ -440,7 +437,7 @@ thread_local! {
 ///
 /// Without this an echoing plugin turns every host write into a reported
 /// edit: a host that takes reported edits as the user's (a modulation lane's
-/// knob, doc 014 §8.2) adopts the modulated value as the new base, and the
+/// knob) adopts the modulated value as the new base, and the
 /// next write adds the offsets again, ratcheting the base to the clamp.
 /// An edit made on another thread (the editor) while a write runs is still
 /// reported: the mark is this thread's.
@@ -544,17 +541,15 @@ impl Host for HostState {
         self.time_info.read()
     }
 
-    /// Maximum render block size, in samples. vst-rs's default returns 0,
-    /// which mis-signals plugins that poll `audioMasterGetBlockSize` (they
-    /// then either allocate for a zero-size block or fall back to a guess).
+    /// Maximum render block size, in samples: the figure a plugin polling
+    /// `audioMasterGetBlockSize` sizes its buffers from.
     fn get_block_size(&self) -> isize {
         self.block_size.load(Ordering::Acquire) as isize
     }
 
     // ── audioMaster query callbacks, answerable via the tutti-vst2-ffi host half ──
     //
-    // Upstream vst-rs 0.3.0 swallows these in `host_dispatch`'s `_ =>` arm;
-    // the `tutti-vst2-ffi` fork adds the trait methods + dispatch arms, so
+    // `tutti-vst2-ffi`'s `host_dispatch` routes each to a trait method, so
     // each callback returns a real answer instead of 0. Two carry live data
     // (sample rate, process level); the rest are honest neutral defaults
     // pending engine plumbing (documented per method below).
