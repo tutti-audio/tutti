@@ -272,25 +272,29 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
 
     // --- Release, and let the drain happen.
     release.fire();
-    let late_before = bridge.audio().block_counts().late.get();
-    let mut collected = 0;
+    let late_before = bridge.audio().block_counts().late;
+    let mut collected = tutti_units::Chunks::ZERO;
     let deadline = Instant::now() + Duration::from_secs(60);
     while Instant::now() < deadline {
         let _ = drive_block(&mut client, &mut midi_out);
         // The released plugin works through what it was sent; the next block
         // comes once it has answered one, or an owed reply has been collected.
         await_answer_or(&controls, "the released plugin to answer", || {
-            bridge.audio().block_counts().late.get() > late_before
+            bridge.audio().block_counts().late > late_before
         });
-        collected = bridge.audio().block_counts().late.get() - late_before;
-        if collected > 0 {
+        collected = bridge
+            .audio()
+            .block_counts()
+            .late
+            .saturating_sub(late_before);
+        if collected > tutti_units::Chunks::ZERO {
             break;
         }
     }
 
     // --- The deterministic gate.
     assert!(
-        collected > 0,
+        collected > tutti_units::Chunks::ZERO,
         "no owed reply was collected after the release. Either the budget never elapsed (so \
          nothing was owed, and this test exercised the ordinary path rather than the \
          abandonment one), or the owed replies were never taken back off the \
@@ -323,7 +327,7 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
 /// The counter really moves only because a block was abandoned, and an
 /// ordinary run rarely abandons one.
 ///
-/// The control for the test above, and the reason its `collected > 0` assertion is
+/// The control for the test above, and the reason its `collected` non-zero assertion is
 /// worth anything. An identical run with **no** park must show:
 ///
 /// - **`abandoned <= ORDINARY_MISSES`**: an ordinary block misses its budget

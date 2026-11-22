@@ -4,7 +4,7 @@
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_rt::{Counter, Tally, TallyWriter, tally};
-use tutti_units::Chunks;
+use tutti_units::{Calls, Chunks};
 
 /// The largest chunk that crosses the process edge: the largest device
 /// callback a live plugin keeps in step with, and so the ceiling on the
@@ -43,7 +43,7 @@ pub struct ServerLosses {
     pub edits_refused: u64,
     /// Callbacks the plugin made from a thread its format forbids, which the
     /// server refused.
-    pub refused_off_thread_calls: u64,
+    pub refused_off_thread_calls: Calls,
 }
 
 /// What became of the chunks a served plugin's pipeline did not have answered
@@ -294,7 +294,7 @@ impl ChunkCounters {
     /// Takes the server's cumulative counts, as it last told them.
     pub fn note_server_losses(&self, losses: ServerLosses) {
         self.server_refused_off_thread_calls
-            .store(losses.refused_off_thread_calls, Ordering::Relaxed);
+            .store(losses.refused_off_thread_calls.get(), Ordering::Relaxed);
         self.server_refused_commands
             .store(losses.commands_refused, Ordering::Relaxed);
         self.server_refused_edits
@@ -335,7 +335,9 @@ impl ChunkCounters {
         ServerLosses {
             commands_refused: self.server_refused_commands.load(Ordering::Relaxed),
             edits_refused: self.server_refused_edits.load(Ordering::Relaxed),
-            refused_off_thread_calls: self.server_refused_off_thread_calls.load(Ordering::Relaxed),
+            refused_off_thread_calls: Calls::new(
+                self.server_refused_off_thread_calls.load(Ordering::Relaxed),
+            ),
         }
     }
 

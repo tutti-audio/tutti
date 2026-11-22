@@ -894,7 +894,7 @@ fn the_servers_loss_counts_are_heard() {
         ControlRequest::SetRenderMode { .. } => Action::Events(vec![News::ServerLosses {
             commands_refused: 3,
             edits_refused: 2,
-            refused_off_thread_calls: 5,
+            refused_off_thread_calls: tutti_units::Calls::new(5),
         }]),
         ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
@@ -906,7 +906,7 @@ fn the_servers_loss_counts_are_heard() {
             sink.lock().push((
                 losses.commands_refused,
                 losses.edits_refused,
-                losses.refused_off_thread_calls,
+                losses.refused_off_thread_calls.get(),
             ));
         }
     })));

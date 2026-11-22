@@ -357,8 +357,8 @@ impl Control for Vst2Loaded {
     }
 
     /// VST2 has no host-side main-thread refusal: none is counted.
-    fn refused_off_thread_calls(&self) -> u64 {
-        0
+    fn refused_off_thread_calls(&self) -> tutti_units::Calls {
+        tutti_units::Calls::ZERO
     }
 }
 

@@ -131,7 +131,7 @@ impl<'a> Diagnostics<'a> {
     /// the node: a nonzero count is a plugin that breaks its format's thread
     /// rules. Only CLAP counts them; a served plugin's is the server's, as it
     /// last told.
-    pub fn refused_off_thread_calls(&self) -> u64 {
+    pub fn refused_off_thread_calls(&self) -> tutti_units::Calls {
         self.hosted.refused_off_thread_calls()
     }
 

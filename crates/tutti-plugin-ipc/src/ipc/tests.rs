@@ -1150,9 +1150,13 @@ const CHUNKS_AFTER: usize = 90;
 /// chunk before it returns, and the bridge counts a block abandoned before it
 /// sends the next, so the count is settled when the render is.
 fn assert_off_the_budget(bridge: &PluginBridge, before: Chunks) {
-    let abandoned = bridge.audio().block_counts().abandoned.get() - before.get();
+    let abandoned = bridge
+        .audio()
+        .block_counts()
+        .abandoned
+        .saturating_sub(before);
     assert!(
-        abandoned >= OFF_THE_BUDGET,
+        abandoned >= Chunks::new(OFF_THE_BUDGET),
         "the bridge abandoned {abandoned} blocks after {CHUNKS_AFTER} chunks, wanted \
          {OFF_THE_BUDGET}: it is holding a block for the fork's budget"
     );

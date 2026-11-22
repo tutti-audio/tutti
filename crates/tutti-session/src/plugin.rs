@@ -938,7 +938,7 @@ pub(crate) struct HostedPlugin {
     /// What the plugins before the held one had refused off their thread:
     /// banked when a plugin is replaced, so
     /// [`Diagnostics::refused_off_thread_calls`] only grows.
-    banked_off_thread: u64,
+    banked_off_thread: tutti_units::Calls,
     liveness: Liveness,
     hang: HangDetector,
     status: PluginLiveness,
@@ -1207,7 +1207,7 @@ impl HostedPlugin {
             banked_blocks: tutti_plugin_host::BlockLosses::default(),
             panicked_round_trips: tutti_rt::tally(),
             failed_snapshots: tutti_rt::tally().writer(),
-            banked_off_thread: 0,
+            banked_off_thread: tutti_units::Calls::ZERO,
             liveness: Liveness::new(),
             hang: HangDetector::default(),
             status: PluginLiveness::Healthy,
@@ -1371,7 +1371,7 @@ impl HostedPlugin {
     /// The callbacks the plugin made from a thread its format forbids, which
     /// the host refused, over the record's life: the held plugin's and the
     /// ones before it.
-    pub(crate) fn refused_off_thread_calls(&self) -> u64 {
+    pub(crate) fn refused_off_thread_calls(&self) -> tutti_units::Calls {
         self.banked_off_thread + self.handle.refused_off_thread_calls()
     }
 
@@ -2638,12 +2638,10 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             // ended here, and dies by the path above.
             if cause.is_none()
                 && let counts = hosted.handle.block_counts()
-                && let Some(reason) = hosted.hang.observe(
-                    hang_policy,
-                    counts.abandoned.get(),
-                    counts.replies.get(),
-                    now,
-                )
+                && let Some(reason) =
+                    hosted
+                        .hang
+                        .observe(hang_policy, counts.abandoned, counts.replies, now)
             {
                 tracing::error!(
                     "plugin '{}' ({node:?}): {reason}; ending its server",

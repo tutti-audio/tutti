@@ -532,8 +532,8 @@ impl Control for ClapLoaded {
 
     /// The `[main-thread]` callbacks the plugin made from another thread,
     /// which the host refused (`HostCallbacks::refused_off_thread_call`).
-    fn refused_off_thread_calls(&self) -> u64 {
-        self.host_state.refused_off_thread.get()
+    fn refused_off_thread_calls(&self) -> tutti_units::Calls {
+        tutti_units::Calls::new(self.host_state.refused_off_thread.get())
     }
 
     /// What the plugin's `request_process` raises: CLAP's `SLEEP` status is

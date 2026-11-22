@@ -2644,6 +2644,9 @@ fn the_refused_off_thread_calls_are_told_to_the_host_when_they_change() {
         .host_state()
         .refused_off_thread
         .add(3);
-    assert_eq!(told(&instance.poll(main_thread())), [3]);
+    assert_eq!(
+        told(&instance.poll(main_thread())),
+        [tutti_units::Calls::new(3)]
+    );
     assert!(told(&instance.poll(main_thread())).is_empty(), "told once");
 }
