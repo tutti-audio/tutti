@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
-use tutti_units::{Amplitude, SampleRate};
+use tutti_units::{Gain, SampleRate};
 
 use crate::NodeKey;
 use crate::{Edge, FeedbackFrom, InputPort, OutputPort, PortSink, PortSource, Topology};
@@ -1102,7 +1102,7 @@ impl<F: Float> Editor<F> {
             // writes the cell).
             let base = match lowered.as_ref().and_then(|l| l.lanes.get(&id)) {
                 Some(&weight) => weight,
-                None => self.edge_gain(id).unwrap_or(Amplitude::UNITY),
+                None => self.edge_gain(id).unwrap_or(Gain::UNITY),
             };
             values.set_base(id, base);
             values.set_gain_range(id, self.values().gain_range(id));

@@ -23,7 +23,7 @@ use tutti_graph::{
     PortSink, PortSource, Prepare, Renderer, Shape, Status, Topology, TransportPosition,
     Unforkable, ValidGraph, compile,
 };
-use tutti_units::Amplitude;
+use tutti_units::Gain;
 
 const BLOCK: usize = 64;
 
@@ -47,8 +47,8 @@ fn dc(value: f32) -> Kind {
     Kind::Const { value, width: 1 }
 }
 
-fn amp(v: f32) -> Amplitude {
-    Amplitude::new(f64::from(v))
+fn amp(v: f32) -> Gain {
+    Gain::new(f64::from(v))
 }
 
 /// Edge `node → (sink, 0)` of a pass-through sink.
@@ -156,7 +156,7 @@ impl Fan {
 /// not the spec's.
 struct Weighed {
     graph: ValidGraph,
-    bases: Vec<(EdgeId, Amplitude)>,
+    bases: Vec<(EdgeId, Gain)>,
 }
 
 impl std::ops::Deref for Weighed {

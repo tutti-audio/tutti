@@ -3,7 +3,7 @@
 
 use tutti_buffers::Float;
 use tutti_rt::ParamCell;
-use tutti_units::{Amplitude, Mix};
+use tutti_units::{Gain, Mix};
 
 use super::{CommitError, Editor};
 use crate::NodeKey;
@@ -123,7 +123,7 @@ impl<F: Float> Editor<F> {
     /// that is not finite, [`EdgeGainError::NoSuchEdge`] when `id` is not an
     /// edge of the spec, and [`EdgeGainError::BusLane`] for a lane of a bus
     /// edge.
-    pub fn set_edge_gain(&mut self, id: EdgeId, base: Amplitude) -> Result<(), EdgeGainError> {
+    pub fn set_edge_gain(&mut self, id: EdgeId, base: Gain) -> Result<(), EdgeGainError> {
         if !base.get().is_finite() {
             return Err(EdgeGainError::NotFinite { id });
         }
@@ -296,7 +296,7 @@ impl<F: Float> Editor<F> {
                 },
                 EdgeFade::In => {
                     let plain = g.source.is_none()
-                        && self.values.base(id) == Amplitude::UNITY
+                        && self.values.base(id) == Gain::UNITY
                         && self.values.gain_range(id) == EdgeGain::DEFAULT_RANGE;
                     if plain {
                         self.spec.clear_edge_gain(id);
@@ -556,7 +556,7 @@ impl<F: Float> Editor<F> {
     /// Edge `id`'s base, if the edge has an entry: the live cell's (the one
     /// writer's, whether it is [`set_edge_gain`](Self::set_edge_gain) or a
     /// lane's knob).
-    pub fn edge_gain(&self, id: EdgeId) -> Option<Amplitude> {
+    pub fn edge_gain(&self, id: EdgeId) -> Option<Gain> {
         self.spec.gains.get(&id)?;
         Some(
             self.cells

@@ -26,7 +26,7 @@ use tutti_graph::{
     Edge, EdgeGain, EdgeId, FeedbackFrom, InputPort, NodeSpec, OutputPort, PortSink, PortSource,
 };
 use tutti_graph::{EventEdge, EventInputPort, EventOutputPort, GraphSpec, Unforkable};
-use tutti_units::{Amplitude, Samples};
+use tutti_units::{Gain, Samples};
 
 use tutti_graph::Node;
 use tutti_rt::SplitMix64;
@@ -73,7 +73,7 @@ struct Desc {
     /// to) where they were.
     fan: Rng,
     /// The base of each gain lane: the editor's, not the spec's.
-    bases: BTreeMap<EdgeId, Amplitude>,
+    bases: BTreeMap<EdgeId, Gain>,
     /// The range of each gain lane.
     gain_ranges: BTreeMap<EdgeId, tutti_graph::ParamRange>,
     /// The range of each node's mix port.
@@ -2295,7 +2295,7 @@ fn weigh(desc: &mut Desc, rng: &mut Rng) {
         if rng.chance(33) && !desc.spec.gains.contains_key(&id) {
             let w = WEIGHTS[rng.below(WEIGHTS.len() as u64) as usize];
             desc.spec.set_edge_gain(id, EdgeGain::default());
-            desc.bases.insert(id, Amplitude::new(w));
+            desc.bases.insert(id, Gain::new(w));
         }
     }
 }
@@ -2336,7 +2336,7 @@ proptest! {
                 if gains.chance(40)
                     && let Some(id) = gains.pick(&desc.spec.gains.keys().copied().collect::<Vec<_>>())
                 {
-                    let w = Amplitude::new(WEIGHTS[gains.below(WEIGHTS.len() as u64) as usize]);
+                    let w = Gain::new(WEIGHTS[gains.below(WEIGHTS.len() as u64) as usize]);
                     pair.set_edge_gain(id, w);
                     desc.bases.insert(id, w);
                 }
@@ -2379,7 +2379,7 @@ proptest! {
                 if gains.chance(40)
                     && let Some(id) = gains.pick(&desc.spec.gains.keys().copied().collect::<Vec<_>>())
                 {
-                    let w = Amplitude::new(WEIGHTS[gains.below(WEIGHTS.len() as u64) as usize]);
+                    let w = Gain::new(WEIGHTS[gains.below(WEIGHTS.len() as u64) as usize]);
                     pair.set_edge_gain(id, w);
                     desc.bases.insert(id, w);
                 }
@@ -2544,7 +2544,7 @@ proptest! {
                 if lanes.chance(30)
                     && let Some(id) = lanes.pick(&ids)
                 {
-                    let w = Amplitude::new(WEIGHTS[lanes.below(WEIGHTS.len() as u64) as usize]);
+                    let w = Gain::new(WEIGHTS[lanes.below(WEIGHTS.len() as u64) as usize]);
                     pair.set_edge_gain(id, w);
                     desc.bases.insert(id, w);
                 }

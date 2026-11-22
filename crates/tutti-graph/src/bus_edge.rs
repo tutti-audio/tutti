@@ -35,7 +35,7 @@ use std::collections::BTreeMap;
 
 use tutti_buffers::{BusTopology, ChannelTopology};
 use tutti_buffers::{Fold, FoldError};
-use tutti_units::Amplitude;
+use tutti_units::Gain;
 
 use crate::gain::{EdgeFade, EdgeGain};
 use crate::spec::GraphSpec;
@@ -229,7 +229,7 @@ pub struct Lowering {
     pub spec: GraphSpec,
     /// Every lane a bus edge produced, plain or weighted, with its weight
     /// (`1.0` for a plain one), in edge order.
-    pub lanes: BTreeMap<EdgeId, Amplitude>,
+    pub lanes: BTreeMap<EdgeId, Gain>,
     /// The fade of each lane whose feed has one.
     pub fades: BTreeMap<EdgeId, EdgeFade>,
 }
@@ -238,12 +238,12 @@ impl Lowering {
     /// The lanes that became weighted lanes of their sink's sum: a weight
     /// other than `1.0`, or a fade, with the fade each runs.
     #[must_use]
-    pub fn weights(&self) -> BTreeMap<EdgeId, (Amplitude, EdgeFade)> {
+    pub fn weights(&self) -> BTreeMap<EdgeId, (Gain, EdgeFade)> {
         self.lanes
             .iter()
             .filter_map(|(&id, &w)| {
                 let fade = self.fades.get(&id).copied().unwrap_or_default();
-                (w != Amplitude::UNITY || fade != EdgeFade::None).then_some((id, (w, fade)))
+                (w != Gain::UNITY || fade != EdgeFade::None).then_some((id, (w, fade)))
             })
             .collect()
     }
@@ -350,7 +350,7 @@ impl GraphSpec {
         shapes: &Shapes,
         id: EdgeId,
     ) -> Option<(BusOutputPort, Option<NodeBus>, EdgeFade)> {
-        let has = |lanes: Result<Vec<(EdgeId, Amplitude)>, BusError>| {
+        let has = |lanes: Result<Vec<(EdgeId, Gain)>, BusError>| {
             lanes.is_ok_and(|l| l.iter().any(|(lane, _)| *lane == id))
         };
         for (&to, feeds) in &self.bus_edges {
@@ -383,7 +383,7 @@ impl GraphSpec {
         from: BusOutputPort,
         to: NodeBus,
         fold: BusFold,
-    ) -> Result<Vec<(EdgeId, Amplitude)>, BusError> {
+    ) -> Result<Vec<(EdgeId, Gain)>, BusError> {
         let sink_shape = shapes
             .get(&to.node)
             .ok_or(BusError::NoSuchNode { node: to.node })?;
@@ -408,7 +408,7 @@ impl GraphSpec {
         shapes: &Shapes,
         from: BusOutputPort,
         fold: BusFold,
-    ) -> Result<Vec<(EdgeId, Amplitude)>, BusError> {
+    ) -> Result<Vec<(EdgeId, Gain)>, BusError> {
         // The engine's main outputs are at most `MAX_CHANNELS` wide, a bus's width, so
         // a main output with no `BusTopology` is one never declared.
         let main_output = self.main_output.ok_or(BusError::MainOutputUndeclared)?;
@@ -430,7 +430,7 @@ impl GraphSpec {
         sink: BusTopology,
         by: BusFold,
         at: impl Fn(usize) -> PortSink,
-    ) -> Result<Vec<(EdgeId, Amplitude)>, LaneError> {
+    ) -> Result<Vec<(EdgeId, Gain)>, LaneError> {
         let (source_topology, source_first, source_node) = match from {
             BusOutputPort::Node(bus) => {
                 let shape = shapes
@@ -475,7 +475,7 @@ impl GraphSpec {
                         sink: at(c),
                         from: Edge::Direct(source),
                     },
-                    Amplitude::new(gain),
+                    Gain::new(gain),
                 ));
             }
         }
@@ -540,7 +540,7 @@ impl GraphSpec {
         let mut fades = BTreeMap::new();
         let mut place = |spec: &mut GraphSpec,
                          id: EdgeId,
-                         weight: Amplitude,
+                         weight: Gain,
                          fade: EdgeFade|
          -> Result<(), BusError> {
             // Against the spec as lowered so far, so two bus edges that make
@@ -563,7 +563,7 @@ impl GraphSpec {
                     unreachable!("a bus lane is a direct edge");
                 }
             }
-            if weight != Amplitude::UNITY || fade != EdgeFade::None {
+            if weight != Gain::UNITY || fade != EdgeFade::None {
                 spec.gains.insert(id, EdgeGain::default());
             }
             if fade != EdgeFade::None {

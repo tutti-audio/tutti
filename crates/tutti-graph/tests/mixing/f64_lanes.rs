@@ -326,7 +326,7 @@ fn block(exec: &mut Executor<f64>, ed: &mut Editor<f64>) -> Vec<f64> {
 #[test]
 fn an_f64_edge_weight_ramps_in_f64() {
     use tutti_graph::{Edge, EdgeId, PortSink};
-    use tutti_units::Amplitude;
+    use tutti_units::Gain;
     let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
     ed.insert(LANE, "dc", ForkByClone(Dc(FINE)));
     let from = PortSource::Node(OutputPort::new(LANE, 0));
@@ -335,12 +335,12 @@ fn an_f64_edge_weight_ramps_in_f64() {
         sink: PortSink::Output(0),
         from: Edge::Direct(from),
     };
-    ed.set_edge_gain(id, Amplitude::new(0.5)).expect("an edge");
+    ed.set_edge_gain(id, Gain::new(0.5)).expect("an edge");
     ed.commit().expect("commits");
     exec.apply_pending();
     let first = block(&mut exec, &mut ed);
     assert_eq!(first[FRAMES - 1], FINE * 0.5, "a steady weight");
-    ed.set_edge_gain(id, Amplitude::new(1.5)).expect("an edge");
+    ed.set_edge_gain(id, Gain::new(1.5)).expect("an edge");
     let second = block(&mut exec, &mut ed);
     for (k, &v) in second.iter().enumerate() {
         let want = FINE * (0.5 + (k + 1) as f64 / FRAMES as f64);

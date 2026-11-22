@@ -58,7 +58,7 @@ use tutti_curve::FadeLaw;
 use atomic_float::AtomicF64;
 
 use tutti_rt::{CappedVec, ParamCell};
-use tutti_units::{Amplitude, Samples, UnitAddr, UnitParam};
+use tutti_units::{Gain, Samples, UnitAddr, UnitParam};
 
 use crate::lane::{fade_in, ramp_in};
 use crate::param::{ParamPorts, ParamRange, ParamRangeCell, ParamRanges, ParamState};
@@ -180,7 +180,7 @@ pub enum EdgeGainError {
 /// into and the executor snapshots once per block, and the range a driven
 /// value is clamped to.
 ///
-/// The cell holds the base as an `f64` (an `AtomicF64`, the [`Amplitude`]'s own
+/// The cell holds the base as an `f64` (an `AtomicF64`, the [`Gain`]'s own
 /// width, which is what a control lane's knob is). **The base is the lane's
 /// knob, and the cell is its one writer's**: [`Editor::set_edge_gain`] and a
 /// route's `LaneControls::store` writes into the same cell, so a routed
@@ -199,7 +199,7 @@ pub(crate) struct GainCell {
 
 impl GainCell {
     /// A cell holding `base` and `range`. Control side: allocates.
-    pub(crate) fn new(base: Amplitude, range: ParamRange) -> Self {
+    pub(crate) fn new(base: Gain, range: ParamRange) -> Self {
         let ranges = ParamRanges::new(ParamPorts::of(&[EdgeGain::ADDR]));
         ranges.store(EdgeGain::ADDR, range);
         Self {
@@ -221,7 +221,7 @@ impl GainCell {
     }
 
     /// Store `base`. Wait-free.
-    pub(crate) fn store(&self, base: Amplitude) {
+    pub(crate) fn store(&self, base: Gain) {
         self.base.store(base.get(), Ordering::Release);
     }
 
@@ -238,8 +238,8 @@ impl GainCell {
 
     /// The base now. Wait-free.
     #[inline]
-    pub(crate) fn load(&self) -> Amplitude {
-        Amplitude::new(self.base.load(Ordering::Acquire))
+    pub(crate) fn load(&self) -> Gain {
+        Gain::new(self.base.load(Ordering::Acquire))
     }
 
     /// The base as a width-erased cell: the very cell the executor reads and
@@ -693,8 +693,8 @@ pub(crate) fn add<F: Float>(out: &mut [F], a: &[F], w: Weight<'_, F>) {
 mod tests {
     use super::*;
 
-    fn amp(v: f32) -> Amplitude {
-        Amplitude::new(f64::from(v))
+    fn amp(v: f32) -> Gain {
+        Gain::new(f64::from(v))
     }
 
     fn lane(base: f32) -> (GainCell, SumLane<f32>) {

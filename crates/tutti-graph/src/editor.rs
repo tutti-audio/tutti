@@ -93,7 +93,7 @@ use link::Link;
 use outlets::Outlets;
 use placements::Placements;
 use tutti_buffers::MAX_CHANNELS;
-use tutti_units::Amplitude;
+use tutti_units::Gain;
 pub use unwired::{Inserted, Unwired};
 
 /// The host's side of a main output generation: whether it has published the folds
@@ -287,7 +287,7 @@ struct Fading {
     /// The old main output's spec and shapes.
     was: lifecycle::Committed,
     /// The base of each gain lane of `was`'s spec when the crossfade began.
-    bases: BTreeMap<EdgeId, Amplitude>,
+    bases: BTreeMap<EdgeId, Gain>,
     /// The fade of each gain lane of `was`'s spec that ran one when the
     /// crossfade began.
     fades: BTreeMap<EdgeId, EdgeFade>,
@@ -822,7 +822,7 @@ impl<F: Float> Editor<F> {
 
 /// The weighted lanes a lowering made, by edge: the fold's weight and the fade
 /// the lane runs.
-type BusLanes = BTreeMap<EdgeId, (Amplitude, EdgeFade)>;
+type BusLanes = BTreeMap<EdgeId, (Gain, EdgeFade)>;
 
 /// The crossfades `delta` starts: one per fade that is not a plain swap.
 /// Each is built into the commit and comes back once on the fade-return

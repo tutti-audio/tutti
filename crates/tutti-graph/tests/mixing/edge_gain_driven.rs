@@ -19,7 +19,7 @@ use tutti_graph::{
     GraphInvalid, GraphSpec, InputPort, IntoNode, Node, NodeKey, NodeParts, OutputPort, ParamRange,
     PortSink, PortSource, RenderMode, Topology, Unforkable, ValidGraph, compile,
 };
-use tutti_units::{Amplitude, Samples, Tail};
+use tutti_units::{Gain, Samples, Tail};
 
 const BLOCK: usize = 32;
 const PERIOD: u64 = 16;
@@ -40,8 +40,8 @@ fn lane_out(node: u64) -> EventOutputPort {
     EventOutputPort::new(key(node), 0)
 }
 
-fn amp(v: f32) -> Amplitude {
-    Amplitude::new(f64::from(v))
+fn amp(v: f32) -> Gain {
+    Gain::new(f64::from(v))
 }
 
 fn dc(value: f32) -> Kind {

@@ -22,7 +22,7 @@ use tutti_graph::{
     Lowering, NodeBus, NodeKey, Op, OutputPort, Plan, PortSink, PortSource, TransportPosition,
     Unforkable, ValidGraph, compile,
 };
-use tutti_units::{Amplitude, SampleRate, Samples, Tail};
+use tutti_units::{Gain, SampleRate, Samples, Tail};
 
 const BLOCK: usize = 64;
 
@@ -656,14 +656,14 @@ fn a_bus_lane_takes_no_gain_of_the_authors() {
     ed.connect_bus(from(1, 0), bus_ref(2, 0)).unwrap();
     let id = lane(2, 0, out_port(1, 0));
     assert_eq!(
-        ed.set_edge_gain(id, Amplitude::new(0.25)),
+        ed.set_edge_gain(id, Gain::new(0.25)),
         Err(EdgeGainError::BusLane { id })
     );
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
     assert_eq!(
-        ed.set_edge_gain(id, Amplitude::new(0.25)),
+        ed.set_edge_gain(id, Gain::new(0.25)),
         Err(EdgeGainError::BusLane { id })
     );
     assert!(ed.edge_gain_cell(id).is_none(), "no knob on a bus lane");
@@ -671,7 +671,7 @@ fn a_bus_lane_takes_no_gain_of_the_authors() {
     // An edge that is neither the spec's nor a lane is still a plain miss.
     let none = lane(2, 0, out_port(7, 0));
     assert_eq!(
-        ed.set_edge_gain(none, Amplitude::new(0.25)),
+        ed.set_edge_gain(none, Gain::new(0.25)),
         Err(EdgeGainError::NoSuchEdge { id: none })
     );
     // A hand-written entry at a lane's edge is the author's weight where the
@@ -759,7 +759,7 @@ fn connecting_and_removing_a_bus_edge_round_trips_through_the_editor() {
     ed.spec_mut()
         .topology
         .connect(at(2, 0), Edge::Direct(out_port(3, 0)));
-    ed.set_edge_gain(own, Amplitude::new(0.25))
+    ed.set_edge_gain(own, Gain::new(0.25))
         .expect("the author's edge");
 
     ed.connect_bus(from(1, 0), bus_ref(2, 0)).unwrap();
