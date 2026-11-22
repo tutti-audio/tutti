@@ -55,7 +55,9 @@ use tutti_graph::ParamSegment;
 use tutti_rt::CappedVec;
 use tutti_units::Samples;
 
-use super::param_delivery::ParamDelivery;
+use super::param_delivery::{ParamDelivery, chunk_offset};
+#[cfg(test)]
+use tutti_plugin_types::fake::at_frame;
 use tutti_units::ParamId;
 
 /// Segment slots the unit tests prepare: a figure past any they fill.
@@ -165,8 +167,7 @@ impl SegmentPoints {
         // chunk is never the one dropped first, so a full queue still ends
         // the chunk on its latest value.
         if grid && at != self.chunk.saturating_sub(1) {
-            let offset = i32::try_from(at).unwrap_or(i32::MAX);
-            changes.grid_point(address, offset, first);
+            changes.grid_point(address, chunk_offset(at), first);
         } else {
             point(changes, address, at, first);
         }
@@ -207,8 +208,7 @@ impl SegmentPoints {
                         .segment
                         .raw_value_after(Samples::new(usize::try_from(j).unwrap_or(usize::MAX)));
                     if on_grid {
-                        let offset = i32::try_from(c).unwrap_or(i32::MAX);
-                        changes.grid_point(t.address, offset, value);
+                        changes.grid_point(t.address, chunk_offset(c), value);
                     } else {
                         point(changes, t.address, c, value);
                     }
@@ -227,8 +227,7 @@ impl SegmentPoints {
 
 /// A point at chunk frame `at`. The address has a slot (`start` checked).
 fn point(changes: &mut ParamDelivery, address: ParamId, at: usize, value: f64) {
-    let offset = i32::try_from(at).unwrap_or(i32::MAX);
-    changes.point(address, offset, value);
+    changes.point(address, chunk_offset(at), value);
 }
 
 #[cfg(test)]
@@ -252,7 +251,7 @@ mod tests {
     }
 
     /// `(chunk frame, value)` of `address`'s queue in the chunk being filled.
-    fn queue(d: &mut ParamDelivery, address: ParamId) -> Vec<(i32, f64)> {
+    fn queue(d: &mut ParamDelivery, address: ParamId) -> Vec<(u32, f64)> {
         d.changes()
             .queues
             .iter()
@@ -260,7 +259,7 @@ mod tests {
             .map(|q| {
                 q.points
                     .iter()
-                    .map(|p| (p.sample_offset, p.value.get()))
+                    .map(|p| (p.sample_offset.get(), p.value.get()))
                     .collect()
             })
             .unwrap_or_default()
@@ -298,7 +297,7 @@ mod tests {
         // Alternating values to the room, on frames before the last.
         for k in 0..room {
             let v = if k.is_multiple_of(2) { 0.25 } else { 0.75 };
-            d.point(A, (k * 62 / room) as i32, v);
+            d.point(A, at_frame((k * 62 / room) as i32), v);
         }
         assert_eq!(queue(&mut d, A).len(), room);
         sp.start(&mut d, A, seg, 63, 63, true);
@@ -339,7 +338,7 @@ mod tests {
             chunks.push(queue(&mut d, A));
             hand_off(&mut d);
         }
-        let at = |k: u64, c: i32| k as u32 * 64 + c as u32 - 10;
+        let at = |k: u64, c: u32| k as u32 * 64 + c - 10;
         for (k, q) in chunks.iter().enumerate().take(3) {
             for &(c, v) in q {
                 let want = seg.raw_value_after(Samples::new(at(k as u64, c) as usize));
@@ -349,7 +348,7 @@ mod tests {
         // Chunk 0: the event, grid frame 32, the last frame; chunk 1: grid
         // frames 64 and 96, its last frame; chunk 2: grid frame 128, then
         // the arrival.
-        let frames = |k: usize| chunks[k].iter().map(|p| p.0).collect::<Vec<i32>>();
+        let frames = |k: usize| chunks[k].iter().map(|p| p.0).collect::<Vec<u32>>();
         assert_eq!(frames(0), [10, 32, 63]);
         assert_eq!(frames(1), [0, 32, 63]);
         assert_eq!(frames(2), [0, 31]);

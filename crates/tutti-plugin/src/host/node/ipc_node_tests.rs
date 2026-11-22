@@ -376,7 +376,7 @@ fn the_server_is_sent_the_schedule_on_the_chunks_frames() {
         let want: &[(u32, f64)] = if i == 1 { &[(72, 90.0)] } else { &[] };
         assert_eq!(steps, want, "chunk {i}: the tempo step, in its chunk only");
     }
-    let points = |c: &ProcessAudioData, id: u32| -> Vec<(i32, f64)> {
+    let points = |c: &ProcessAudioData, id: u32| -> Vec<(u32, f64)> {
         c.param_changes
             .queues
             .iter()
@@ -384,7 +384,7 @@ fn the_server_is_sent_the_schedule_on_the_chunks_frames() {
             .flat_map(|q| {
                 q.points
                     .iter()
-                    .map(|p| (p.sample_offset, f64::from(p.value)))
+                    .map(|p| (p.sample_offset.get(), f64::from(p.value)))
             })
             .collect()
     };

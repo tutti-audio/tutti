@@ -223,7 +223,7 @@ fn session_keyed() -> (DetachedSession, Key<AnyPlugin>, Arc<Fake>, RefreshSink) 
         Default::default(),
         Default::default(),
     )
-    .with_refresh_sink(refresh.clone());
+    .refresh_sink(refresh.clone());
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)

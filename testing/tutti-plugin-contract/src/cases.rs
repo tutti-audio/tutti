@@ -78,6 +78,9 @@ fn note(offset: usize, on: bool) -> UmpAt {
 fn changes(points: &[(Param, i32, f64)]) -> ParameterChanges {
     let mut changes = ParameterChanges::reserved(points.len(), 4);
     for &(param, offset, value) in points {
+        let offset = usize::try_from(offset).expect("a case's offset is not negative");
+        let offset = Offset::of(Samples::new(offset), Samples::new(BLOCK));
+        let value = Normalized::new(value).expect("a case's value is normalized");
         assert!(changes.add_change(param.id(), offset, value));
     }
     changes
@@ -818,8 +821,9 @@ pub fn automation_to_a_read_only_parameter_is_not_applied<F: Format>() {
 pub fn automation_to_an_undeclared_parameter_is_not_applied<F: Format>() {
     let mut a = active_in::<F>(Mode::Level);
     let mut points = ParameterChanges::reserved(2, 4);
-    assert!(points.add_change(spec::UNLISTED, 0, spec::WRITE));
-    assert!(points.add_change(Param::Level.id(), 0, spec::WRITE));
+    let write = Normalized::new(spec::WRITE).expect("the spec's write is normalized");
+    assert!(points.add_change(spec::UNLISTED, Offset::ZERO, write));
+    assert!(points.add_change(Param::Level.id(), Offset::ZERO, write));
     let out = a.render(
         &silence(BLOCK),
         BLOCK,

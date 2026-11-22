@@ -11,6 +11,7 @@ use tutti_buffers::{InputOutput, Planes, PlanesMut};
 use std::ffi::CStr;
 
 use tutti_graph::Offset;
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_ump::MidiChannel;
 use tutti_units::Samples;
 use tutti_vst3_host::{InputEvents, Library, ParameterChanges, TransportInfo};
@@ -578,9 +579,9 @@ fn parameter_changes_are_spec_clean() {
         };
         let mut params = ParameterChanges::reserved(1, 3);
         let param_id = param_address(param_id);
-        params.add_change(param_id, 384, 0.75);
-        params.add_change(param_id, 0, 0.25);
-        params.add_change(param_id, 128, 0.5);
+        params.add_change(param_id, at_frame(384), unit_value(0.75));
+        params.add_change(param_id, at_frame(0), unit_value(0.25));
+        params.add_change(param_id, at_frame(128), unit_value(0.5));
 
         exercised += 1;
         match drive_block::<f32>(&path, 512, 48_000.0, 512, &[], Some(&params)) {
