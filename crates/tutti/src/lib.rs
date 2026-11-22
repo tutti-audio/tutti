@@ -931,12 +931,24 @@ pub mod midi {
         MidiPolicyError, MidiPortError, NoHardware, PortCause, ProfilePeer, ReportPeer,
         RequestReport, RestorePeerState, SavePeerState, SwitchProfile, WholeProfile,
     };
-    #[cfg(feature = "midi-hardware")]
+    #[cfg(any(feature = "midi-hardware", feature = "midi-network"))]
     pub use tutti_ump::{EndpointName, InstanceIdError, Name, NameError, ProductInstanceId};
     /// Network MIDI 2.0 (M2-124) as the session's MIDI: a Client or a Host bound by
-    /// `Midi::open_network`, its peers' input nodes and its output node, and the
+    /// `Midi::open_network_client` and `open_network_host`, its peers' input nodes and its output node, and the
     /// Hosts found by mDNS. Not on the web, which has no UDP sockets. Feature
     /// `midi-network`.
+    ///
+    /// ```
+    /// use tutti::midi::network::{Credentials, EndpointIdentity};
+    /// use tutti::midi::{EndpointName, ProductInstanceId};
+    ///
+    /// let identity = EndpointIdentity::new(
+    ///     EndpointName::new("Studio").unwrap(),
+    ///     ProductInstanceId::new("HOST-1").unwrap(),
+    /// );
+    /// assert!(identity.is_some());
+    /// let _ = Credentials::none();
+    /// ```
     #[cfg(all(feature = "midi-network", not(target_arch = "wasm32")))]
     pub mod network {
         pub use tutti_midi_network::{
@@ -946,8 +958,9 @@ pub mod midi {
             Retransmit, SessionConfig, Timer, TimerOutOfRange, Username,
         };
         #[cfg(feature = "session")]
-        pub use tutti_session::{MidiNetwork, NetworkError, NetworkReport, OpenNetwork};
-        pub use tutti_units::Text;
+        pub use tutti_session::{
+            ClientEnd, HostEnd, MidiNetwork, NetworkError, NetworkReport, OpenClient, OpenHost,
+        };
     }
 
     /// MIDI-CI Property Exchange (M2-103 and its resource specifications): a

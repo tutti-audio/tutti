@@ -931,9 +931,15 @@ impl MidiState {
         nodes: Option<&MidiNodes>,
         graph: &mut Graph<F>,
         now: Instant,
+        networks_changed: bool,
         out: &mut Vec<crate::SessionEvent>,
     ) -> bool {
-        let Some(io) = io else { return false };
+        let Some(io) = io else {
+            if networks_changed {
+                self.compile_feeds_for(nodes, graph);
+            }
+            return networks_changed;
+        };
         // Drained first: reopening a device takes the state mutably.
         let pending: Vec<_> = self
             .device_events
@@ -942,9 +948,8 @@ impl MidiState {
             .collect();
         let rate = graph.prepared().sample_rate();
         let edits = self.ports.poll(io, graph, rate, pending, now, out);
-        if edits.routes && !self.host_routes {
-            let layout = nodes.map_or(MidiInputPorts::FIRST_GROUP, |n| n.input_ports);
-            self.compile_session_feeds(graph, layout);
+        if edits.routes || networks_changed {
+            self.compile_feeds_for(nodes, graph);
         }
         if !self.watch_failure_reported
             && let Some(why) = self
@@ -955,7 +960,7 @@ impl MidiState {
             self.watch_failure_reported = true;
             out.push(MidiReport::WatchFailed(why).into());
         }
-        edits.graph || edits.routes
+        edits.graph || edits.routes || networks_changed
     }
 
     /// Compiles the session's own route rules onto every input port's input node
@@ -993,8 +998,23 @@ impl MidiState {
         self.ports.is_input_node(node) || self.networks.is_input_node(node)
     }
 
+    /// Compiles the session's own routes onto every input node, unless a host
+    /// declares them.
+    pub(crate) fn compile_feeds_for<F: Float>(
+        &mut self,
+        nodes: Option<&MidiNodes>,
+        graph: &mut Graph<F>,
+    ) {
+        if !self.host_routes {
+            let layout = nodes.map_or(MidiInputPorts::FIRST_GROUP, |n| n.input_ports);
+            self.compile_session_feeds(graph, layout);
+        }
+    }
+
     /// `Phase::Poll`, for the network endpoints: reads what their links queued and
-    /// reports it into `out`. Whether the graph was edited.
+    /// reports it into `out`. Whether the graph was edited, which is also whether
+    /// the set of input nodes changed: the caller compiles the routes again, once
+    /// with the devices' changes.
     pub(crate) fn midi_network_phase<F: Float>(
         &mut self,
         nodes: Option<&MidiNodes>,
@@ -1002,11 +1022,7 @@ impl MidiState {
         out: &mut Vec<crate::SessionEvent>,
     ) -> bool {
         let layout = nodes.map_or(MidiInputPorts::FIRST_GROUP, |n| n.input_ports);
-        let edited = self.networks.poll(graph, &self.mpe, layout, out);
-        if edited && !self.host_routes {
-            self.compile_session_feeds(graph, layout);
-        }
-        edited
+        self.networks.poll(graph, &self.mpe, layout, out)
     }
 
     /// The timing of a drain at `now`, from the engine's block clock: `None`

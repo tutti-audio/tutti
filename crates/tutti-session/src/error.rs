@@ -307,13 +307,13 @@ pub enum MidiError {
     #[error("another follower already publishes the tempo; unfollow it first")]
     TempoSourceTaken,
 
-    /// `Midi::open_network`: the session's executor is gone, so the link has nothing to
-    /// run on.
+    /// `Midi::open_network_client` or `open_network_host`: the session's executor is gone, so
+    /// the link has nothing to run on.
     #[cfg(feature = "midi-network")]
     #[error("the session's executor is shut down")]
     NetworkShutDown,
 
-    /// `Midi::open_network`: the socket could not be bound, or the OS refused the
+    /// `Midi::open_network_client` or `open_network_host`: the socket could not be bound, or the OS refused the
     /// link's thread.
     #[cfg(feature = "midi-network")]
     #[error("the network socket")]

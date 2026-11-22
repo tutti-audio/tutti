@@ -148,7 +148,8 @@ pub enum MidiReport {
     /// ([`Midi::unfollow_machine_control`](crate::Midi::unfollow_machine_control)).
     MachineControlUnfollowed,
     /// A network endpoint's peer was invited, joined, left or failed to
-    /// authenticate ([`Midi::open_network`](crate::Midi::open_network)). There is none
+    /// authenticate ([`Midi::open_network_client`](crate::Midi::open_network_client) and
+    /// [`open_network_host`](crate::Midi::open_network_host)). There is none
     /// on a target with no UDP sockets.
     #[cfg(feature = "midi-network")]
     Network(crate::NetworkReport),

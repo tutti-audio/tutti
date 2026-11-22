@@ -57,6 +57,11 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 /// `*` is every type of the crate.
 const INTERNAL: &[(&str, &str, &str)] = &[
     (
+        "tutti_units",
+        "Text",
+        "the bounded text behind a name alias the umbrella exports (`Username`); the alias is the name",
+    ),
+    (
         "tutti_timeline",
         "Transport",
         "the engine's playback transport; an app drives it through `Session`",

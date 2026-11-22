@@ -1,5 +1,7 @@
 //! Network MIDI 2.0 as the session's MIDI (feature `midi-network`, native targets):
-//! [`Midi::open_network`](crate::Midi::open_network) binds a Client or a Host and returns a [`MidiNetwork`].
+//! [`Midi::open_network_client`](crate::Midi::open_network_client) and
+//! [`open_network_host`](crate::Midi::open_network_host) bind a Client or a Host and
+//! return a [`MidiNetwork`].
 //!
 //! A network is an output as a [`MidiSink`] is: an output node whose events the
 //! session sends each update ([`UmpOut`](crate::midi::UmpOut), the same drain), to
@@ -10,25 +12,26 @@
 //! peer, its Host; a Host has one per Client, each known by its
 //! [`EndpointIdentity`].
 //!
-//! The session owns the link. The last clone of the handle dropped, the next update
-//! retires the entries and drops the link on the executor's blocking pool: a Bye to
-//! every peer, then the join of the socket task, which waits out the socket's read.
+//! The session owns the link. When the last clone of the handle is dropped, the next
+//! update retires the entries and drops the link: a Bye to every peer, and the socket
+//! task stops without being waited for.
 
 use std::io;
-use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
+use std::marker::PhantomData;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
 use std::num::NonZeroUsize;
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex, Weak};
 
 use tutti_buffers::Float;
 use tutti_graph::{EventInletWriter, Losses, NodeKey, Stamp};
 use tutti_midi_network::{
     Admission, AuthFailure, ByeReason, Client, Credentials, EndedBy, EndpointIdentity, Event,
-    FoundHost, Host, HostConfig, NetworkLink, SessionConfig,
+    FoundHost, Host, HostConfig, NetworkEndpoint, NetworkLink, SessionConfig,
 };
 use tutti_midi_runtime::{
     LIVE_INLET_CAPACITY, MidiInputNode, MidiInputPorts, MidiOut, Outgoing, Taken,
 };
-use tutti_platform::{Instant, WeakExecutor};
+use tutti_platform::{Executor, Instant};
 use tutti_rt::LockExt;
 use tutti_ump::Ump;
 
@@ -36,75 +39,116 @@ use crate::graph::Graph;
 use crate::midi::{Claim, Departure, Held, Retiring, settle};
 use crate::{EventInPort, EventOutPort, MidiError, MidiReport, MidiSink, SessionEvent, Stamping};
 
-// --- The request ---
+// --- The two roles ---
 
-/// Which end of a Session this end is.
-#[derive(Clone, Debug)]
-enum Role {
-    /// Invites the Host at the address.
-    Client(SocketAddr),
-    /// Listens on the port.
-    Host {
-        port: u16,
-        admission: Admission,
-        max_sessions: Option<NonZeroUsize>,
-    },
+/// An end of a Session a link runs: a [`Client`] or a [`Host`].
+trait Role: NetworkEndpoint + Send + 'static {
+    /// Sends `packets` to the Sessions established with `to` (a Client sends to its
+    /// Host and ignores `to`), and whether any took them.
+    fn send(&mut self, now: Instant, to: &[SocketAddr], packets: &[Ump]) -> bool;
+
+    /// Answers the Invitation of `peer`. Only a Host is invited: a Client does
+    /// nothing, and no handle of a Client can ask.
+    fn answer(&mut self, _now: Instant, _peer: SocketAddr, _accept: bool) {}
 }
 
-/// A network endpoint to open: [`Midi::open_network`](crate::Midi::open_network).
-///
-/// A Client ([`client`](Self::client), [`client_of`](Self::client_of)) invites a Host
-/// and holds one Session; a Host ([`host`](Self::host)) serves any number of Clients.
-/// Both present an [`EndpointIdentity`] (M2-124 section 4.4).
+impl Role for Client {
+    fn send(&mut self, now: Instant, _: &[SocketAddr], packets: &[Ump]) -> bool {
+        Self::send(self, now, packets).is_ok()
+    }
+}
+
+impl Role for Host {
+    fn send(&mut self, now: Instant, to: &[SocketAddr], packets: &[Ump]) -> bool {
+        let mut took = false;
+        for &peer in to {
+            took |= Self::send(self, now, peer, packets).is_ok();
+        }
+        took
+    }
+
+    fn answer(&mut self, now: Instant, peer: SocketAddr, accept: bool) {
+        if accept {
+            self.accept(now, peer);
+        } else {
+            self.decline(now, peer);
+        }
+    }
+}
+
+/// What the session asks of a link, whichever role it runs.
+trait Wire: Send + Sync {
+    fn pending(&self) -> Box<dyn Iterator<Item = Event> + '_>;
+    fn local_addr(&self) -> io::Result<SocketAddr>;
+    fn events_lost(&self) -> u64;
+    fn sends_failed(&self) -> u64;
+    fn send(&self, to: &[SocketAddr], packets: &[Ump]) -> bool;
+    fn answer(&self, peer: SocketAddr, accept: bool);
+}
+
+impl<E: Role> Wire for NetworkLink<E> {
+    fn pending(&self) -> Box<dyn Iterator<Item = Event> + '_> {
+        Box::new(NetworkLink::pending(self))
+    }
+
+    fn local_addr(&self) -> io::Result<SocketAddr> {
+        NetworkLink::local_addr(self)
+    }
+
+    fn events_lost(&self) -> u64 {
+        NetworkLink::events_lost(self)
+    }
+
+    fn sends_failed(&self) -> u64 {
+        NetworkLink::sends_failed(self)
+    }
+
+    fn send(&self, to: &[SocketAddr], packets: &[Ump]) -> bool {
+        self.with(|endpoint, now| Role::send(endpoint, now, to, packets))
+    }
+
+    fn answer(&self, peer: SocketAddr, accept: bool) {
+        self.with(|endpoint, now| endpoint.answer(now, peer, accept));
+    }
+}
+
+// --- The requests ---
+
+/// A Client to open: [`Midi::open_network_client`](crate::Midi::open_network_client). It invites a
+/// Host and holds one Session, which is the Host's.
 #[derive(Clone, Debug)]
 #[must_use = "a request opens nothing until it is given to `Midi::open_network`"]
-pub struct OpenNetwork {
-    role: Role,
+pub struct OpenClient {
     identity: EndpointIdentity,
+    host: SocketAddr,
     credentials: Credentials,
     config: SessionConfig,
 }
 
-impl OpenNetwork {
-    /// A Client called `identity` that invites the Host at `host`.
+impl OpenClient {
+    /// A Client called `identity` that invites the Host at `host`. Its socket is
+    /// bound in `host`'s address family.
     pub fn client(identity: EndpointIdentity, host: SocketAddr) -> Self {
-        Self::new(Role::Client(host), identity)
-    }
-
-    /// A Client called `identity` that invites `host`, a Host found by discovery
-    /// ([`Browser`](tutti_midi_network::Browser)): at its first address. `None`
-    /// when `host` lists no address.
-    pub fn client_of(identity: EndpointIdentity, host: &FoundHost) -> Option<Self> {
-        host.addresses
-            .first()
-            .map(|&address| Self::client(identity, address))
-    }
-
-    /// A Host called `identity` that listens on UDP `port` of every interface (`0`
-    /// for one the OS picks: [`MidiNetwork::local_addr`] says which). It accepts
-    /// every Invitation unless [`admission`](Self::admission) says otherwise.
-    pub fn host(identity: EndpointIdentity, port: u16) -> Self {
-        Self::new(
-            Role::Host {
-                port,
-                admission: Admission::Open,
-                max_sessions: None,
-            },
-            identity,
-        )
-    }
-
-    fn new(role: Role, identity: EndpointIdentity) -> Self {
         Self {
-            role,
             identity,
+            host,
             credentials: Credentials::none(),
             config: SessionConfig::default(),
         }
     }
 
-    /// What a Client answers a Host's authentication challenge with. A Host
-    /// ignores it: its credentials are its [`admission`](Self::admission).
+    /// A Client called `identity` that invites `host`, a Host found by discovery
+    /// ([`Browser`](tutti_midi_network::Browser)): at its first IPv4 address, or its
+    /// first address when it has none. `None` when `host` lists no address.
+    pub fn client_of(identity: EndpointIdentity, host: &FoundHost) -> Option<Self> {
+        host.addresses
+            .iter()
+            .find(|address| address.is_ipv4())
+            .or_else(|| host.addresses.first())
+            .map(|&address| Self::client(identity, address))
+    }
+
+    /// What the Client answers a Host's authentication challenge with.
     pub fn credentials(mut self, credentials: Credentials) -> Self {
         self.credentials = credentials;
         self
@@ -115,29 +159,96 @@ impl OpenNetwork {
         self.config = config;
         self
     }
+}
 
-    /// How a Host admits an Invitation: with
-    /// [`Admission::Confirm`] each one is reported
-    /// ([`NetworkReport::Invited`]) and waits for
-    /// [`MidiNetwork::accept`] or [`MidiNetwork::decline`]. A Client has no admission.
-    pub fn admission(mut self, admission: Admission) -> Self {
-        if let Role::Host {
-            admission: held, ..
-        } = &mut self.role
-        {
-            *held = admission;
+/// A Host to open: [`Midi::open_network_host`](crate::Midi::open_network_host). It serves any
+/// number of Clients, each with an input of its own.
+#[derive(Clone, Debug)]
+#[must_use = "a request opens nothing until it is given to `Midi::open_network`"]
+pub struct OpenHost {
+    identity: EndpointIdentity,
+    port: u16,
+    admission: Admission,
+    max_sessions: Option<NonZeroUsize>,
+    config: SessionConfig,
+}
+
+impl OpenHost {
+    /// A Host called `identity` that listens on IPv4 UDP `port` of every interface
+    /// (`0` for one the OS picks: [`MidiNetwork::local_addr`] says which). It accepts
+    /// every Invitation unless [`admission`](Self::admission) says otherwise.
+    pub fn host(identity: EndpointIdentity, port: u16) -> Self {
+        Self {
+            identity,
+            port,
+            admission: Admission::Open,
+            max_sessions: None,
+            config: SessionConfig::default(),
         }
+    }
+
+    /// How an Invitation is admitted: with [`Admission::Confirm`] each one is
+    /// reported ([`NetworkReport::Invited`]) and waits for
+    /// [`MidiNetwork::accept`] or [`MidiNetwork::decline`].
+    pub fn admission(mut self, admission: Admission) -> Self {
+        self.admission = admission;
         self
     }
 
-    /// How many Clients a Host serves at once. A Client has no such limit.
-    pub fn max_sessions(mut self, max: NonZeroUsize) -> Self {
-        if let Role::Host { max_sessions, .. } = &mut self.role {
-            *max_sessions = Some(max);
-        }
+    /// How many Clients are served at once.
+    pub const fn max_sessions(mut self, max: NonZeroUsize) -> Self {
+        self.max_sessions = Some(max);
+        self
+    }
+
+    /// How a Session sends, repeats and recovers.
+    pub const fn config(mut self, config: SessionConfig) -> Self {
+        self.config = config;
         self
     }
 }
+
+impl OpenClient {
+    fn spawn(self, executor: &Executor) -> io::Result<NetworkLink<Client>> {
+        let any = if self.host.is_ipv6() {
+            SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))
+        } else {
+            SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))
+        };
+        let socket = UdpSocket::bind(any)?;
+        let client = Client::new(
+            self.identity,
+            self.credentials,
+            self.config,
+            self.host,
+            Instant::now(),
+        );
+        let link = NetworkLink::spawn(executor, socket, client)?;
+        link.with(|client, now| client.connect(now));
+        Ok(link)
+    }
+}
+
+impl OpenHost {
+    fn spawn(self, executor: &Executor) -> io::Result<NetworkLink<Host>> {
+        let mut host = HostConfig::new(self.identity);
+        host.admission = self.admission;
+        host.session = self.config;
+        if let Some(max) = self.max_sessions {
+            host.max_sessions = max;
+        }
+        let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, self.port))?;
+        NetworkLink::spawn(executor, socket, Host::new(host))
+    }
+}
+
+/// The end of a Session a [`MidiNetwork`] is: a Client, which invited a Host.
+#[derive(Clone, Copy, Debug)]
+pub enum ClientEnd {}
+
+/// The end of a Session a [`MidiNetwork`] is: a Host, which is invited.
+#[derive(Clone, Copy, Debug)]
+pub enum HostEnd {}
 
 // --- What the network reports ---
 
@@ -159,7 +270,10 @@ pub enum NetworkReport {
         identity: EndpointIdentity,
     },
     /// The Session, or the Invitation still waiting, ended: the peer's input
-    /// entry is retired.
+    /// entry is retired. A Session that a new one replaced (the peer came back
+    /// from another address, or another peer took its address) ends with
+    /// [`EndedBy::Remote`] and [`ByeReason::Unknown`], before the new one's
+    /// [`Connected`](Self::Connected).
     Ended {
         /// The peer.
         identity: EndpointIdentity,
@@ -168,13 +282,10 @@ pub enum NetworkReport {
         /// The reason given.
         reason: ByeReason,
     },
-    /// A Client's authentication did not succeed. The identity is the peer's
-    /// when it was told one.
+    /// A Client's authentication did not succeed.
     AuthenticationFailed {
         /// Where the peer is.
         peer: SocketAddr,
-        /// Who it is, when known.
-        identity: Option<EndpointIdentity>,
         /// Why.
         cause: AuthFailure,
     },
@@ -186,87 +297,20 @@ impl From<NetworkReport> for SessionEvent {
     }
 }
 
-/// Why a [`MidiNetwork`] call was refused.
+/// Why a [`MidiNetwork<HostEnd>`] call was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 #[non_exhaustive]
 pub enum NetworkError {
-    /// [`accept`](MidiNetwork::accept) or [`decline`](MidiNetwork::decline) on a
-    /// Client: only a Host is invited.
-    #[error("only a Host is invited")]
-    NotAHost,
-    /// No Invitation from this peer waits: it was answered, ended, or never came.
+    /// The network holds no peer called that: it never invited, or its Session
+    /// ended.
+    #[error("the network holds no such peer")]
+    UnknownPeer,
+    /// The peer is known but no Invitation of it waits: it was answered already.
     #[error("no Invitation from that peer waits")]
     NoInvitation,
 }
 
-// --- The link ---
-
-/// A Client's link or a Host's.
-enum Link {
-    Client(NetworkLink<Client>),
-    Host(NetworkLink<Host>),
-}
-
-impl Link {
-    fn pending(&self) -> Vec<Event> {
-        match self {
-            Self::Client(link) => link.pending().collect(),
-            Self::Host(link) => link.pending().collect(),
-        }
-    }
-
-    fn local_addr(&self) -> io::Result<SocketAddr> {
-        match self {
-            Self::Client(link) => link.local_addr(),
-            Self::Host(link) => link.local_addr(),
-        }
-    }
-
-    fn events_lost(&self) -> u64 {
-        match self {
-            Self::Client(link) => link.events_lost(),
-            Self::Host(link) => link.events_lost(),
-        }
-    }
-
-    fn sends_failed(&self) -> u64 {
-        match self {
-            Self::Client(link) => link.sends_failed(),
-            Self::Host(link) => link.sends_failed(),
-        }
-    }
-
-    /// Sends `packets` to the peers at `to` (a Client's one is its Host), and
-    /// whether any Session took them.
-    fn send(&self, to: &[SocketAddr], packets: &[Ump]) -> bool {
-        match self {
-            Self::Client(link) => link.with(|client, now| client.send(now, packets)).is_ok(),
-            Self::Host(link) => link.with(|host, now| {
-                to.iter()
-                    .filter(|&&peer| host.send(now, peer, packets).is_ok())
-                    .count()
-                    > 0
-            }),
-        }
-    }
-
-    /// Answers the Invitation of `peer`.
-    fn answer(&self, peer: SocketAddr, accept: bool) -> Result<(), NetworkError> {
-        match self {
-            Self::Client(_) => Err(NetworkError::NotAHost),
-            Self::Host(link) => {
-                link.with(|host, now| {
-                    if accept {
-                        host.accept(now, peer);
-                    } else {
-                        host.decline(now, peer);
-                    }
-                });
-                Ok(())
-            }
-        }
-    }
-}
+// --- What the session and the handles share ---
 
 /// A peer the network knows: invited, or with a Session whose input node is in
 /// the graph.
@@ -280,7 +324,7 @@ struct Peer {
 
 /// What the session and the handles of one network share.
 struct NetShared {
-    link: Link,
+    link: Box<dyn Wire>,
     peers: Mutex<Vec<Peer>>,
 }
 
@@ -305,13 +349,13 @@ impl NetShared {
 
 /// The sink the session's output drain sends to: the established peers of the
 /// network, while it lives.
-struct NetworkOut(Arc<OnceLock<Weak<NetShared>>>);
+struct NetworkOut(Weak<NetShared>);
 
 impl MidiOut for NetworkOut {
     /// Sent at once whatever each event's [`SendAt`](tutti_midi_runtime::SendAt): a
     /// Session has no wire clock. Nothing is taken when no Session is established.
     fn queue_timed(&self, events: &[Outgoing]) -> Taken {
-        let Some(shared) = self.0.get().and_then(Weak::upgrade) else {
+        let Some(shared) = self.0.upgrade() else {
             return Taken::NONE;
         };
         let packets: Vec<Ump> = events.iter().map(|event| event.ump).collect();
@@ -325,18 +369,40 @@ impl MidiOut for NetworkOut {
 
 // --- The handle ---
 
-/// A network endpoint: [`Midi::open_network`](crate::Midi::open_network).
+/// A network endpoint: [`Midi::open_network_client`](crate::Midi::open_network_client)
+/// or [`open_network_host`](crate::Midi::open_network_host). `R` is the end of the
+/// Session, [`ClientEnd`] or [`HostEnd`]; only a `MidiNetwork<HostEnd>` is invited,
+/// so only it can [`accept`](Self::accept) or [`decline`](Self::decline).
 ///
 /// `Clone` and `Send`. Clones share the endpoint, which closes when the last clone
 /// is dropped: the next [`update`](crate::Session::update) retires the peers' input
-/// nodes and the link says Bye to every peer.
-#[derive(Clone, Debug)]
-pub struct MidiNetwork {
+/// nodes and drops the link, which sends a Bye to every peer and stops its socket
+/// task without waiting for it.
+pub struct MidiNetwork<R> {
     claim: Arc<Claim<NetShared>>,
     sink: MidiSink,
+    role: PhantomData<fn() -> R>,
 }
 
-impl MidiNetwork {
+impl<R> Clone for MidiNetwork<R> {
+    fn clone(&self) -> Self {
+        Self {
+            claim: Arc::clone(&self.claim),
+            sink: self.sink.clone(),
+            role: PhantomData,
+        }
+    }
+}
+
+impl<R> std::fmt::Debug for MidiNetwork<R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MidiNetwork")
+            .field("shared", &self.claim.shared)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<R> MidiNetwork<R> {
     /// The output node: wire to its event input what should be sent to the peers
     /// ([`MidiSink::node`]). Each established peer is sent every event.
     #[must_use]
@@ -345,8 +411,9 @@ impl MidiNetwork {
     }
 
     /// The input node of the established peer `identity`: what a peer sent comes
-    /// out of its event outputs, as out of a hardware input's. `None` before
-    /// [`NetworkReport::Connected`] and after [`NetworkReport::Ended`].
+    /// out of its event outputs, as out of a hardware input's. A query of the
+    /// network's state now, so `None` for a peer not established: before its
+    /// [`NetworkReport::Connected`], after its [`NetworkReport::Ended`], or never.
     #[must_use]
     pub fn input_node(&self, identity: EndpointIdentity) -> Option<NodeKey> {
         self.claim
@@ -380,43 +447,6 @@ impl MidiNetwork {
         self.claim.shared.link.local_addr()
     }
 
-    /// Accepts the Invitation of `identity` (a Host that admits with
-    /// [`Admission::Confirm`], after [`NetworkReport::Invited`]): the Session is
-    /// established with the next update.
-    ///
-    /// # Errors
-    ///
-    /// [`NetworkError::NotAHost`] on a Client, [`NetworkError::NoInvitation`] when
-    /// `identity` has none waiting.
-    pub fn accept(&self, identity: EndpointIdentity) -> Result<(), NetworkError> {
-        self.answer(identity, true)
-    }
-
-    /// Declines the Invitation of `identity`; the peer is told
-    /// ([`ByeReason::UserDeclined`]).
-    ///
-    /// # Errors
-    ///
-    /// As [`accept`](Self::accept).
-    pub fn decline(&self, identity: EndpointIdentity) -> Result<(), NetworkError> {
-        self.answer(identity, false)
-    }
-
-    fn answer(&self, identity: EndpointIdentity, accept: bool) -> Result<(), NetworkError> {
-        let shared = &self.claim.shared;
-        let addr = shared
-            .peers
-            .lock_recover()
-            .iter()
-            .find(|peer| peer.identity == identity && peer.input.is_none())
-            .map(|peer| peer.addr);
-        match (&shared.link, addr) {
-            (Link::Client(_), _) => Err(NetworkError::NotAHost),
-            (Link::Host(_), None) => Err(NetworkError::NoInvitation),
-            (Link::Host(_), Some(peer)) => shared.link.answer(peer, accept),
-        }
-    }
-
     /// What the output did not send, cumulative: [`lost`](Losses::lost) are events
     /// its node's tap had no room for, [`refused`](Losses::refused) those no
     /// Session took (none was established, or the link had failed).
@@ -435,6 +465,48 @@ impl MidiNetwork {
     #[must_use]
     pub fn sends_failed(&self) -> u64 {
         self.claim.shared.link.sends_failed()
+    }
+}
+
+impl MidiNetwork<HostEnd> {
+    /// Accepts the Invitation of `identity` (a Host that admits with
+    /// [`Admission::Confirm`], after [`NetworkReport::Invited`]): the Session is
+    /// established with the next update.
+    ///
+    /// # Errors
+    ///
+    /// [`NetworkError::UnknownPeer`] when the network holds no peer called
+    /// `identity`, [`NetworkError::NoInvitation`] when it is known but has no
+    /// Invitation waiting.
+    pub fn accept(&self, identity: EndpointIdentity) -> Result<(), NetworkError> {
+        self.answer(identity, true)
+    }
+
+    /// Declines the Invitation of `identity`; the peer is told
+    /// ([`ByeReason::UserDeclined`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`accept`](Self::accept).
+    pub fn decline(&self, identity: EndpointIdentity) -> Result<(), NetworkError> {
+        self.answer(identity, false)
+    }
+
+    fn answer(&self, identity: EndpointIdentity, accept: bool) -> Result<(), NetworkError> {
+        let shared = &self.claim.shared;
+        let addr = {
+            let peers = shared.peers.lock_recover();
+            let peer = peers
+                .iter()
+                .find(|peer| peer.identity == identity)
+                .ok_or(NetworkError::UnknownPeer)?;
+            if peer.input.is_some() {
+                return Err(NetworkError::NoInvitation);
+            }
+            peer.addr
+        };
+        shared.link.answer(addr, accept);
+        Ok(())
     }
 }
 
@@ -458,7 +530,6 @@ struct Net {
     shared: Arc<NetShared>,
     claim: Held<NetShared>,
     entries: Vec<Entry>,
-    executor: WeakExecutor,
 }
 
 /// The networks of the session, and the input nodes going.
@@ -577,7 +648,8 @@ impl Networks {
             for entry in net.entries.drain(..) {
                 Self::retire(&mut self.retiring, graph, entry);
             }
-            net.release();
+            // The link drops here: a Bye to every peer, and its task stops, unawaited.
+            drop(net);
             edited = true;
         }
         let gone = settle(&mut self.retiring, graph, |_| {}, |_| false);
@@ -595,26 +667,40 @@ impl Net {
         out: &mut Vec<SessionEvent>,
     ) -> bool {
         let mut edited = false;
-        for event in self.shared.link.pending() {
+        let shared = Arc::clone(&self.shared);
+        for event in shared.link.pending() {
             match event {
                 Event::Confirm { peer, remote } => {
-                    self.shared.peers.lock_recover().push(Peer {
+                    let mut peers = shared.peers.lock_recover();
+                    peers.retain(|known| known.addr != peer);
+                    peers.push(Peer {
                         addr: peer,
                         identity: remote,
                         input: None,
                     });
+                    drop(peers);
                     out.push(NetworkReport::Invited { identity: remote }.into());
                 }
                 Event::Established { peer, remote } => {
-                    // A peer that comes back under its identity from another
-                    // address replaces its old entry.
+                    // A peer that comes back under its identity from another address,
+                    // or another that takes its address, replaces the old entry,
+                    // which ends first.
                     for at in (0..self.entries.len()).rev() {
                         if self.entries[at].identity == remote || self.entries[at].addr == peer {
-                            Networks::retire(retiring, graph, self.entries.remove(at));
+                            let old = self.entries.remove(at);
+                            out.push(
+                                NetworkReport::Ended {
+                                    identity: old.identity,
+                                    by: EndedBy::Remote,
+                                    reason: ByeReason::Unknown,
+                                }
+                                .into(),
+                            );
+                            Networks::retire(retiring, graph, old);
                         }
                     }
                     let entry = Entry::open(graph, cx, peer, remote);
-                    let mut peers = self.shared.peers.lock_recover();
+                    let mut peers = shared.peers.lock_recover();
                     peers.retain(|known| known.addr != peer && known.identity != remote);
                     peers.push(Peer {
                         addr: peer,
@@ -640,7 +726,7 @@ impl Net {
                     reason,
                 } => {
                     let known = {
-                        let mut peers = self.shared.peers.lock_recover();
+                        let mut peers = shared.peers.lock_recover();
                         let at = peers.iter().position(|known| known.addr == peer);
                         at.map(|at| peers.remove(at))
                     };
@@ -660,21 +746,7 @@ impl Net {
                     }
                 }
                 Event::AuthenticationFailed { peer, cause } => {
-                    let identity = self
-                        .shared
-                        .peers
-                        .lock_recover()
-                        .iter()
-                        .find(|known| known.addr == peer)
-                        .map(|known| known.identity);
-                    out.push(
-                        NetworkReport::AuthenticationFailed {
-                            peer,
-                            identity,
-                            cause,
-                        }
-                        .into(),
-                    );
+                    out.push(NetworkReport::AuthenticationFailed { peer, cause }.into());
                 }
                 // The link counts what it lost; a lost run of UMP, a reset and a NAK
                 // change nothing the session holds, and a nonce the OS could not
@@ -687,28 +759,14 @@ impl Net {
         }
         edited
     }
-
-    /// Drops the link on the executor's blocking pool: it sends a Bye to every peer
-    /// and joins its socket task, which waits out the socket's read, so it is not
-    /// done on the control thread. Where the executor is gone, here.
-    fn release(self) {
-        let Self {
-            shared, executor, ..
-        } = self;
-        if let Some(executor) = executor.upgrade()
-            && let Ok(task) = executor.unblock(move || drop(shared))
-        {
-            task.detach();
-        }
-    }
 }
 
 // --- Opening ---
 
 impl<F: Float> crate::Midi<'_, F> {
-    /// Opens the network endpoint `request`: binds its socket and returns at once.
-    /// A Client's Invitation goes out and a Host listens; who joined, who left
-    /// and what failed are [`NetworkReport`]s of the next updates.
+    /// Opens the Client `request`: binds its socket, sends its Invitation and
+    /// returns at once. The Host's answer, and who joins, leaves or fails, are
+    /// [`NetworkReport`]s of the next updates.
     ///
     /// The link runs on the session's executor, and the session owns it: it ends
     /// when the last clone of the returned handle is dropped.
@@ -718,54 +776,50 @@ impl<F: Float> crate::Midi<'_, F> {
     /// [`MidiError::NetworkShutDown`] when the session's executor is gone, and
     /// [`MidiError::NetworkSocket`] when the socket cannot be bound or its task
     /// started. Nothing is opened.
-    pub fn open_network(&mut self, request: OpenNetwork) -> Result<MidiNetwork, MidiError> {
+    pub fn open_network_client(
+        &mut self,
+        request: OpenClient,
+    ) -> Result<MidiNetwork<ClientEnd>, MidiError> {
         let executor = self.executor.upgrade().ok_or(MidiError::NetworkShutDown)?;
-        let OpenNetwork {
-            role,
-            identity,
-            credentials,
-            config,
-        } = request;
-        let link = match role {
-            Role::Client(host) => {
-                let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
-                let client = Client::new(identity, credentials, config, host, Instant::now());
-                let link = NetworkLink::spawn(&executor, socket, client)?;
-                link.with(|client, now| client.connect(now));
-                Link::Client(link)
-            }
-            Role::Host {
-                port,
-                admission,
-                max_sessions,
-            } => {
-                let mut host = HostConfig::new(identity);
-                host.admission = admission;
-                host.session = config;
-                if let Some(max) = max_sessions {
-                    host.max_sessions = max;
-                }
-                let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, port))?;
-                Link::Host(NetworkLink::spawn(&executor, socket, Host::new(host))?)
-            }
-        };
-        // The sink is opened over a slot the link's state fills next: the session's
-        // output drain reaches the link while the network lives and no longer.
-        let slot = Arc::new(OnceLock::new());
-        let sink = self.open_sink(Arc::new(NetworkOut(Arc::clone(&slot))), Stamping::Off);
+        Ok(self.adopt(request.spawn(&executor)?))
+    }
+
+    /// Opens the Host `request`: binds its socket and returns at once. It listens;
+    /// who joins, leaves or fails to authenticate are [`NetworkReport`]s of the
+    /// next updates, and each Client has an input of its own.
+    ///
+    /// The link runs on the session's executor, and the session owns it: it ends
+    /// when the last clone of the returned handle is dropped.
+    ///
+    /// # Errors
+    ///
+    /// As [`open_network_client`](Self::open_network_client).
+    pub fn open_network_host(
+        &mut self,
+        request: OpenHost,
+    ) -> Result<MidiNetwork<HostEnd>, MidiError> {
+        let executor = self.executor.upgrade().ok_or(MidiError::NetworkShutDown)?;
+        Ok(self.adopt(request.spawn(&executor)?))
+    }
+
+    /// The session holds `link` and answers with its handle.
+    fn adopt<E: Role, R>(&mut self, link: NetworkLink<E>) -> MidiNetwork<R> {
         let shared = Arc::new(NetShared {
-            link,
+            link: Box::new(link),
             peers: Mutex::new(Vec::new()),
         });
-        // Set once, here.
-        let _ = slot.set(Arc::downgrade(&shared));
+        // The output drain reaches the link while the network lives and no longer.
+        let sink = self.open_sink(Arc::new(NetworkOut(Arc::downgrade(&shared))), Stamping::Off);
         let (claim, held) = Held::new(Arc::clone(&shared), sink.node());
         self.state.networks.nets.push(Net {
             shared,
             claim: held,
             entries: Vec::new(),
-            executor: self.executor.clone(),
         });
-        Ok(MidiNetwork { claim, sink })
+        MidiNetwork {
+            claim,
+            sink,
+            role: PhantomData,
+        }
     }
 }

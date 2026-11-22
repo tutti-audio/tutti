@@ -1,5 +1,5 @@
 //! A network endpoint as the session's MIDI: a Client or a Host bound by
-//! `Midi::open_network`, over real UDP sockets on the loopback interface.
+//! `Midi::open_network_client` and `open_network_host`, over real UDP sockets on the loopback interface.
 //!
 //! The peer of a Host is a bare `Client` endpoint on a socket of the test's, so
 //! each wait is a blocking read of a datagram (under a hang guard) and a Ping is
@@ -10,15 +10,16 @@ use std::net::{SocketAddr, UdpSocket};
 use std::time::Duration;
 
 use crate::common::{blocks, offline, tap};
-use tutti_fixtures::wait_until;
+use futures_lite::StreamExt;
+use tutti_fixtures::{block_on_within, wait_until};
 use tutti_midi_network::{
     Admission, ByeReason, Client, Command, Credentials, DatagramBuilder, EndedBy, EndpointIdentity,
     Event, Host, HostConfig, NetworkEndpoint, NetworkLink, PingId, SessionConfig, parse,
 };
 use tutti_platform::{Executor, Instant};
 use tutti_session::{
-    MidiNetwork, MidiReport, MidiRouteRule, NetworkError, NetworkReport, OpenNetwork, Session,
-    SessionEvent, Stamp,
+    HostEnd, MidiNetwork, MidiReport, MidiRouteRule, NetworkError, NetworkReport, OpenClient,
+    OpenHost, Session, SessionEvent, Stamp,
 };
 use tutti_ump::{EndpointName, Message, MidiChannel, NoteNumber, NoteVelocity, ProductInstanceId};
 use tutti_ump::{Ump, Voice2};
@@ -141,11 +142,11 @@ impl Peer {
 }
 
 /// A session, and a Host endpoint it opened on a port the OS picked.
-fn hosting(admission: Admission) -> (Session, MidiNetwork, u16) {
+fn hosting(admission: Admission) -> (Session, MidiNetwork<HostEnd>, u16) {
     let mut s = offline();
     let net = s
         .midi()
-        .open_network(OpenNetwork::host(identity("Studio", "HOST-1"), 0).admission(admission))
+        .open_network_host(OpenHost::host(identity("Studio", "HOST-1"), 0).admission(admission))
         .expect("binds");
     let port = net.local_addr().unwrap().port();
     let _ = s.update();
@@ -185,7 +186,7 @@ fn an_invitation_is_reported_and_an_accept_gives_the_peer_an_input_node() {
     assert_eq!(net.input_node(laptop), None, "an invitation has no input");
     assert_eq!(
         net.accept(identity("Other", "Other")),
-        Err(NetworkError::NoInvitation)
+        Err(NetworkError::UnknownPeer)
     );
 
     net.accept(laptop).unwrap();
@@ -401,6 +402,43 @@ fn a_handle_may_outlive_its_session() {
     assert_eq!((by, reason), (EndedBy::Remote, ByeReason::PowerDown));
 }
 
+/// A peer that comes back under its identity from another address replaces its
+/// entry: the old one ends, reported before the new one connects, and the new one
+/// has an input node of its own.
+#[test]
+fn a_peer_back_from_another_address_replaces_its_entry() {
+    let (mut s, net, port) = hosting(Admission::Open);
+    let laptop = identity("Laptop", "Laptop");
+    let mut first = Peer::new("Laptop", port);
+    first.connect();
+    first.established();
+    first.barrier(1);
+    let _ = s.update();
+    let old = net.input_node(laptop).unwrap();
+
+    let mut second = Peer::new("Laptop", port);
+    second.connect();
+    second.established();
+    second.barrier(1);
+    let heard = reports(s.update());
+    assert!(
+        matches!(
+            &heard[..],
+            [
+                NetworkReport::Ended { identity: gone, by: EndedBy::Remote, .. },
+                NetworkReport::Connected { identity: came },
+            ] if *gone == laptop && *came == laptop
+        ),
+        "{heard:?}"
+    );
+    let new = net.input_node(laptop).unwrap();
+    assert_ne!(new, old);
+    blocks(&s, 2);
+    let _ = s.update();
+    assert!(!s.graph().contains(old));
+    assert!(s.graph().contains(new));
+}
+
 /// A session that is a Client of a Host hears it: the Host's UMP reaches the
 /// graph through the Host's input node.
 #[test]
@@ -418,14 +456,22 @@ fn a_client_session_hears_its_host() {
     s.midi().route(MidiRouteRule::new().to(target)).unwrap();
     let net = s
         .midi()
-        .open_network(OpenNetwork::client(
+        .open_network_client(OpenClient::client(
             identity("Laptop", "CLIENT-1"),
             SocketAddr::from(([127, 0, 0, 1], addr.port())),
         ))
         .expect("binds");
 
-    // The session learns of its Session in `update`, its one read: the wait is
-    // on the link's task, which another thread runs.
+    // The Host's link has the Session established once its stream says so.
+    block_on_within(
+        host.events()
+            .find(|event| matches!(event, Event::Established { .. })),
+        HANG_GUARD,
+    )
+    .expect("the Host establishes within the hang guard");
+    // The session learns of its end of it in `update`, which is the session's only
+    // read of its link, so the wait is a look at `update` until the link's task,
+    // which another thread runs, has queued it.
     let studio = identity("Studio", "HOST-1");
     let mut heard = Vec::new();
     wait_until("the session to connect", HANG_GUARD, || {
