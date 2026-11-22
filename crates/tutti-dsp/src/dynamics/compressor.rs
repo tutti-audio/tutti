@@ -121,7 +121,7 @@ impl CompressorMember {
 /// The figures the detector runs on: the controls it follows, with the times as one-pole
 /// poles at the rate in the bank's float `F`.
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Detector<F> {
+struct CompressorStage<F> {
     threshold: Db,
     /// The knee in dB, crossed once.
     knee: F,
@@ -131,7 +131,7 @@ struct Detector<F> {
     ballistics: Follower<F>,
 }
 
-impl<F: Float> Detector<F> {
+impl<F: Float> CompressorStage<F> {
     /// The figures member `m` asks for: its controls and the times as poles at its rate.
     fn of(m: &CompressorMember) -> Self {
         Self {
@@ -178,7 +178,7 @@ pub struct CompressorSignals<'a, F: Float> {
 /// graph's float. Nothing it holds grows.
 #[derive(Clone, Debug)]
 pub struct CompressorBank<F: Float + SimdLanes> {
-    detector: Detector<F>,
+    detector: CompressorStage<F>,
     /// The makeup in dB, ramping over [`GAIN_RAMP`].
     makeup: Ramp<F>,
     /// The steps a makeup ramp takes: [`GAIN_RAMP`] at the rate.
@@ -201,7 +201,7 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
         // than panic, since a prepare must not.
         let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         Self {
-            detector: Detector::NEUTRAL,
+            detector: CompressorStage::NEUTRAL,
             makeup: Ramp::new(F::ZERO),
             steps,
             rate,
@@ -249,7 +249,7 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
     /// allocation.
     pub fn retarget(&mut self, controls: &CompressorControls) {
         let member = CompressorMember::designed(controls, self.rate);
-        self.detector = Detector::of(&member);
+        self.detector = CompressorStage::of(&member);
         if let Some(key) = &mut self.key {
             key.retarget(member.key_cutoff, member.key_q);
         }

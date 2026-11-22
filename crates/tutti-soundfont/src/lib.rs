@@ -180,12 +180,10 @@
 //! - [`SoundFontConfig`]: what a unit is made from, and [`Polyphony`], its voice count.
 //! - [`enum@Error`] and [`Result`]: this crate's failure type.
 
-mod array_math;
 mod channel;
 mod config;
+mod envelope;
 mod error;
-mod lfo;
-mod modulation_envelope;
 mod oscillator;
 mod patch;
 mod player;
@@ -195,7 +193,6 @@ mod render;
 mod soundfont_math;
 mod voice;
 mod voices;
-mod volume_envelope;
 
 pub use config::{Polyphony, PolyphonyError, SoundFontConfig};
 pub use error::{Error, Result};
