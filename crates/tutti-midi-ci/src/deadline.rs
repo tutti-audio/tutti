@@ -1,4 +1,4 @@
-//! The sans-IO timing vocabulary of the initiators: a wait that ends at an
+//! The sans-IO timing vocabulary of the initiators and discoverers: a wait that ends at an
 //! instant. Every method takes the `now` it is asked at.
 
 use std::time::Duration;
@@ -7,20 +7,20 @@ use tutti_platform::Instant;
 
 /// A wait that ends at an instant: reached when `now` is at or past it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct Pending {
+pub struct Deadline {
     deadline: Instant,
 }
 
-impl Pending {
+impl Deadline {
     /// A wait of `timeout` from `now`.
-    pub(crate) fn after(now: Instant, timeout: Duration) -> Self {
+    pub fn after(now: Instant, timeout: Duration) -> Self {
         Self {
             deadline: now + timeout,
         }
     }
 
     /// The wait runs `timeout` from `now` again.
-    pub(crate) fn restart(&mut self, now: Instant, timeout: Duration) {
+    pub fn restart(&mut self, now: Instant, timeout: Duration) {
         *self = Self::after(now, timeout);
     }
 
@@ -30,12 +30,12 @@ impl Pending {
     }
 
     /// Whether the wait is over at `now`: an instant at the deadline is late.
-    pub(crate) fn expired(self, now: Instant) -> bool {
+    pub fn expired(self, now: Instant) -> bool {
         now >= self.deadline
     }
 
     /// The instant the wait ends.
-    pub(crate) fn deadline(self) -> Instant {
+    pub fn deadline(self) -> Instant {
         self.deadline
     }
 

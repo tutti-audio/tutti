@@ -71,6 +71,7 @@ pub use articulation::{
     CustomSounds, NotVariationCount, Sound, SoundSet, SubclassCounts, VariationCount,
 };
 pub use curve::{send_level, volume_gain};
+pub use deadline::Deadline;
 pub use default_cc::{CcFunction, CcPart, CcReset, CcValue, DefaultCcLevel, SuggestedCc};
 pub use device::{CiAction, CiDevice, CiPeer, DISCOVERY_WINDOW};
 pub use discovery::{

@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use super::{Ack, AckStatus};
-use crate::deadline::Pending;
+use crate::deadline::Deadline;
 
 /// How long an Initiator waits on a peer's answer where the specification gives
 /// no limit: 3 seconds. A Profile Inquiry, Set Profile On or Off, or Details
@@ -50,7 +50,7 @@ impl TimeoutWait {
 
     /// Adds this wait to a transaction's deadline (M2-103 §12.2.1: the wait is
     /// added to the current timeout period).
-    pub(crate) fn extend(self, wait: &mut Pending) {
+    pub(crate) fn extend(self, wait: &mut Deadline) {
         wait.extend(self.duration());
     }
 }
