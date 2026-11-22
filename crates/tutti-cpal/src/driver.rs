@@ -188,8 +188,8 @@ where
         Ok(())
     }
 
-    /// The one start [`AudioEngine::start_resolved`] and `start_on` make:
-    /// `driver` takes the host's stream.
+    /// The start [`AudioEngine::start_resolved`] makes: `driver` takes the
+    /// host's stream.
     pub(crate) fn take_over<D: StreamDriver<F>, E: From<crate::DeviceError>>(
         mut host: StreamHost<F>,
         spec: OutputSpec,

@@ -280,11 +280,10 @@
 // The fallible constructions are the crossover's (`CrossoverControls::try_from`,
 // `CrossoverNode::try_from`), all `CrossoverError`; the rest of this crate has no `Error` type.
 
-// Per-block control reads and the ramps that keep them from stepping.
 mod buses;
+mod last_good;
 #[macro_use]
 mod params;
-mod ramp;
 mod tail_clock;
 
 // Tests of every kernel node in a graph of `f64`.

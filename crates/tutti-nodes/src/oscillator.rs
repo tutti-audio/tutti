@@ -4,7 +4,7 @@
 //! The node holds the params, the sample rate and the shape; the algorithm is
 //! `tutti_dsp::Oscillator`.
 
-use crate::ramp::LastGood;
+use crate::last_good::LastGood;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_dsp::{OscillatorStep, OscillatorWave};
@@ -50,7 +50,7 @@ use tutti_units::{Amplitude, Hz, SampleRate, Tail, UnitParam};
 /// assert_eq!(out[0][0], 0.0);
 /// assert!(out[0][1] > 0.0);
 /// ```
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct OscillatorNode {
     wave: tutti_dsp::Oscillator,
     frequency: Param<Hz>,
@@ -123,20 +123,6 @@ impl OscillatorNode {
     }
 }
 
-/// Shares the cells (the template [`tutti_graph::param_parts`] forks from).
-impl Clone for OscillatorNode {
-    fn clone(&self) -> Self {
-        Self {
-            wave: self.wave,
-            frequency: self.frequency.handle(),
-            level: self.level.handle(),
-            rate: self.rate,
-            good_frequency: self.good_frequency,
-            good_level: self.good_level,
-        }
-    }
-}
-
 impl<F: Float> Node<F> for OscillatorNode {
     /// No inputs, one output, no latency, no ring-out; arithmetic and one
     /// `sin` a frame, `Light`.
@@ -176,7 +162,7 @@ impl<F: Float> Node<F> for OscillatorNode {
             rate,
         );
         let mut gain = if level.is_none() {
-            F::from_unit(Amplitude::new(self.good_level.read(level_cell)))
+            self.good_level.level(level_cell)
         } else {
             F::ZERO
         };
@@ -186,13 +172,7 @@ impl<F: Float> Node<F> for OscillatorNode {
                 step = OscillatorStep::new(Hz::new(f), rate);
             }
             if let Some(signal) = level {
-                // A finite control signal value is the level in `F` as it is.
-                let good = self.good_level.read(signal[i].into());
-                gain = if signal[i].is_finite() {
-                    signal[i]
-                } else {
-                    F::from_unit(Amplitude::new(good))
-                };
+                gain = self.good_level.driven_level(signal[i]);
             }
             *o = self.wave.step(step) * gain;
         }

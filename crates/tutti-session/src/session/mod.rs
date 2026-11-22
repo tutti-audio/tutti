@@ -455,7 +455,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// edited; [`mods_mut`](Self::mods_mut) edits.
     #[must_use]
     pub fn mods(&self) -> crate::ModsView<'_> {
-        crate::Mods::view_of(&self.mods.own)
+        crate::ModsView::new(&self.mods.own)
     }
 
     /// The session's own modulation declarations, to edit (design 015
