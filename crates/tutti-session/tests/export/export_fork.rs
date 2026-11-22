@@ -270,8 +270,8 @@ const TAIL: usize = 300;
 impl Node for Late {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(tutti_units::Latency::new(Samples::new(LATE)))
-            .with_tail(Tail::Finite(Samples::new(TAIL)))
+            .latency(tutti_units::Latency::new(Samples::new(LATE)))
+            .tail(Tail::Finite(Samples::new(TAIL)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -635,7 +635,7 @@ impl IntoNode for Counter {
 
 impl Node for Counter {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_tail(Tail::Unknown)
+        Shape::source_unassigned(ChannelLayout::MONO).tail(Tail::Unknown)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

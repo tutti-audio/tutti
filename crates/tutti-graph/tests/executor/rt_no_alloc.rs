@@ -417,8 +417,8 @@ struct HeldChaser(Arc<AtomicU64>);
 
 impl HeldChaser {
     const SHAPE: Shape = Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO))
-        .with_events(1, 0)
-        .with_chase(4);
+        .events(1, 0)
+        .chase(4);
     const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
@@ -596,13 +596,13 @@ struct Spray {
 }
 
 impl Spray {
-    const BASE: Shape = Shape::EMPTY.with_events(0, 1);
+    const BASE: Shape = Shape::EMPTY.events(0, 1);
     const OUT: tutti_graph::OutEvents = Self::BASE.event_output(0).expect("declared");
 }
 
 impl Node for Spray {
     fn shape(&self) -> Shape {
-        Self::BASE.with_event_capacity(tutti_graph::testing::cap_of(self.cap))
+        Self::BASE.event_capacity(tutti_graph::testing::cap_of(self.cap))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -634,9 +634,9 @@ struct LateEvents;
 impl Node for LateEvents {
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
-            .with_latency(Latency::new(Samples::new(141)))
-            .with_tail(Tail::Finite(Samples::new(141)))
+            .events(0, 1)
+            .latency(Latency::new(Samples::new(141)))
+            .tail(Tail::Finite(Samples::new(141)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
@@ -650,7 +650,7 @@ struct Tally([Arc<AtomicU64>; 2]);
 
 impl Node for Tally {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(2, 0)
+        Shape::EMPTY.events(2, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
@@ -795,7 +795,7 @@ struct ParamSink;
 impl Node for ParamSink {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_params(&[tutti_units::UnitParam::Cutoff, tutti_units::UnitParam::Q])
+            .params(&[tutti_units::UnitParam::Cutoff, tutti_units::UnitParam::Q])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -818,9 +818,9 @@ struct RampEvery;
 
 impl RampEvery {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_param_events()
-        .with_event_capacity(tutti_graph::testing::cap_of(16));
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(16));
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -992,8 +992,8 @@ struct ParamTally([Arc<AtomicU64>; 2]);
 impl Node for ParamTally {
     fn shape(&self) -> Shape {
         Shape::sink_unassigned(ChannelLayout::MONO)
-            .with_events(2, 0)
-            .with_param_events()
+            .events(2, 0)
+            .param_events()
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
@@ -1193,8 +1193,7 @@ struct AzimuthSink;
 
 impl Node for AzimuthSink {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::MONO)
-            .with_params(&[tutti_units::UnitParam::Azimuth])
+        Shape::through_unassigned(ChannelLayout::MONO).params(&[tutti_units::UnitParam::Azimuth])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -1215,9 +1214,9 @@ struct SeamEvery;
 
 impl SeamEvery {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_param_events()
-        .with_event_capacity(tutti_graph::testing::cap_of(16));
+        .events(0, 1)
+        .param_events()
+        .event_capacity(tutti_graph::testing::cap_of(16));
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -1755,10 +1754,10 @@ impl Node for Wire {
         // pass by index; a wider input's rest are ports.
         let main = ch(self.ins.min(self.outs));
         Shape::buses(Buses::unassigned(main), Buses::unassigned(main))
-            .with_ports(ch(self.ins), ch(self.outs))
-            .with_latency(Latency::new(Samples::new(self.latency)))
-            .with_events(self.ein, self.eout)
-            .with_tail(Tail::None)
+            .ports(ch(self.ins), ch(self.outs))
+            .latency(Latency::new(Samples::new(self.latency)))
+            .events(self.ein, self.eout)
+            .tail(Tail::None)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -2187,8 +2186,8 @@ const STATE: u8 = 4;
 
 impl Chaser {
     const SHAPE: Shape = Shape::buses(Buses::NONE, Buses::unassigned(ChannelLayout::MONO))
-        .with_events(1, 0)
-        .with_chase(STATE as u32);
+        .events(1, 0)
+        .chase(STATE as u32);
     const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
@@ -2392,7 +2391,7 @@ struct OffCount {
 
 impl Node for OffCount {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(self.inputs, 0)
+        Shape::EMPTY.events(self.inputs, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
@@ -2412,13 +2411,13 @@ impl Node for OffCount {
 }
 
 impl Holder {
-    const BASE: Shape = Shape::EMPTY.with_events(0, 1);
+    const BASE: Shape = Shape::EMPTY.events(0, 1);
     const OUT: tutti_graph::OutEvents = Self::BASE.event_output(0).expect("declared");
 }
 
 impl Node for Holder {
     fn shape(&self) -> Shape {
-        Self::BASE.with_event_capacity(tutti_graph::testing::cap_of(self.per_block.max(1) as u32))
+        Self::BASE.event_capacity(tutti_graph::testing::cap_of(self.per_block.max(1) as u32))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -2918,7 +2917,7 @@ struct Latch {
 }
 
 impl Latch {
-    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -2959,7 +2958,7 @@ struct Closed {
 }
 
 impl Closed {
-    const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+    const SHAPE: Shape = Shape::EMPTY.events(1, 0);
     const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 

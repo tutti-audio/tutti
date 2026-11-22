@@ -186,11 +186,11 @@ impl<F: Float> Node<F> for InletNode<F> {
     /// executor never skips it as silent.
     fn shape(&self) -> Shape {
         Shape::source_unassigned(self.ring.layout())
-            .with_tail(Tail::Unbounded)
+            .tail(Tail::Unbounded)
             // A block copy out of the ring: measured 0.4-0.6 ns per frame and
             // channel, against a gain's 0.05 and `SvfFilterNode`'s 4.0 on the
             // same box, under the boundary.
-            .with_cost(Cost::Light)
+            .cost(Cost::Light)
     }
 
     fn prepare(&mut self, _: &Prepare) {}

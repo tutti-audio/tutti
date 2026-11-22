@@ -19,7 +19,7 @@ pub type Seen = tutti_fixtures::Record<(u64, Ump)>;
 pub struct Tap(pub Seen);
 
 impl Tap {
-    const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+    const SHAPE: Shape = Shape::EMPTY.events(1, 0);
     const IN: tutti_graph::InEvents = Self::SHAPE
         .event_input(0)
         .expect("one event input is declared");

@@ -55,14 +55,14 @@ impl<N: ?Sized> Key<N> {
 
     /// Output port `index` of the node.
     #[must_use]
-    pub fn output(self, index: u16) -> OutputPort {
-        OutputPort(OutEnd::Node(self.node, usize::from(index)))
+    pub const fn output(self, index: usize) -> OutputPort {
+        OutputPort(OutEnd::Node(self.node, index))
     }
 
     /// Input port `index` of the node.
     #[must_use]
-    pub fn input(self, index: u16) -> InputPort {
-        InputPort(InEnd::Node(self.node, usize::from(index)))
+    pub const fn input(self, index: usize) -> InputPort {
+        InputPort(InEnd::Node(self.node, index))
     }
 
     /// Event output `index` of the node.

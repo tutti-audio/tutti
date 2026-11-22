@@ -491,12 +491,12 @@ impl From<ForeignLaneConfig> for ControlLaneNode {
 
 impl ControlLaneNode {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(1, 1)
-        .with_param_events()
-        .with_event_capacity(SOURCE_EVENT_CAPACITY)
-        .with_cost(Cost::Moderate)
-        .with_tail(Tail::None)
-        .with_no_note_events();
+        .events(1, 1)
+        .param_events()
+        .event_capacity(SOURCE_EVENT_CAPACITY)
+        .cost(Cost::Moderate)
+        .tail(Tail::None)
+        .no_note_events();
     const IN: InEvents = Self::SHAPE
         .event_input(0)
         .expect("declared one event input");

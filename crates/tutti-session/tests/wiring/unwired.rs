@@ -32,7 +32,7 @@ struct Pass<const W: u16, const EV: u16>;
 
 impl<const W: u16, const EV: u16> Node for Pass<W, EV> {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::from_count(W)).with_events(EV, EV)
+        Shape::through_unassigned(ChannelLayout::from_count(W)).events(EV, EV)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -51,7 +51,7 @@ struct Ports<const IN: u16, const OUT: u16>;
 
 impl<const IN: u16, const OUT: u16> Node for Ports<IN, OUT> {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_events(IN, OUT)
+        Shape::source_unassigned(ChannelLayout::MONO).events(IN, OUT)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

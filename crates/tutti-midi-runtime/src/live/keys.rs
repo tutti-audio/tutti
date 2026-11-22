@@ -10,9 +10,10 @@
 
 use std::ops::{Deref, DerefMut};
 
-use tutti_graph::{EventCapacity, EventInletWriter, Losses, Stamp};
+use tutti_graph::{EventCapacity, EventInletWriter, Stamp};
 use tutti_rt::PushError;
 use tutti_ump::{Address, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Voice2};
+use tutti_units::Losses;
 
 /// The ring a live input's inlet is opened with, in events (it is also the
 /// waiting list's size and the port's declared capacity).

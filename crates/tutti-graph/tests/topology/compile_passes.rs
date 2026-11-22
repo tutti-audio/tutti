@@ -34,7 +34,7 @@ fn spec(kind: &str, ins: u16, outs: u16) -> NodeSpec {
         ChannelLayout::from_count(ins),
         ChannelLayout::from_count(outs),
     )
-    .with_tail(Tail::None)
+    .tail(Tail::None)
 }
 
 fn at(node: NodeKey, port: u16) -> InputPort {
@@ -97,7 +97,7 @@ fn shapes() -> Vec<(&'static str, Topology)> {
     let mut t = Topology::default();
     t.nodes.insert(A, spec("dc", 0, 1));
     t.nodes
-        .insert(B, spec("gain", 1, 1).with_latency(Samples::new(512)));
+        .insert(B, spec("gain", 1, 1).latency(Samples::new(512)));
     t.nodes.insert(C, spec("gain", 1, 1));
     t.nodes.insert(D, spec("sum", 2, 1));
     edge(&mut t, at(B, 0), out(A, 0));
@@ -110,9 +110,9 @@ fn shapes() -> Vec<(&'static str, Topology)> {
     let mut t = Topology::default();
     t.nodes.insert(A, spec("dc", 0, 1));
     t.nodes
-        .insert(B, spec("gain", 1, 1).with_latency(Samples::new(128)));
+        .insert(B, spec("gain", 1, 1).latency(Samples::new(128)));
     t.nodes
-        .insert(C, spec("gain", 1, 1).with_latency(Samples::new(64)));
+        .insert(C, spec("gain", 1, 1).latency(Samples::new(64)));
     edge(&mut t, at(B, 0), out(A, 0));
     edge(&mut t, at(C, 0), out(B, 0));
     t.set_outputs(vec![PortSource::Node(out(C, 0))]);
@@ -166,12 +166,10 @@ fn shapes() -> Vec<(&'static str, Topology)> {
     t.nodes.insert(A, spec("dc", 0, 1));
     t.nodes.insert(
         B,
-        spec("gain", 1, 1).with_tail(Tail::Finite(Samples::new(2_048))),
+        spec("gain", 1, 1).tail(Tail::Finite(Samples::new(2_048))),
     );
-    t.nodes.insert(
-        C,
-        spec("gain", 1, 1).with_tail(Tail::Finite(Samples::new(256))),
-    );
+    t.nodes
+        .insert(C, spec("gain", 1, 1).tail(Tail::Finite(Samples::new(256))));
     edge(&mut t, at(B, 0), out(A, 0));
     edge(&mut t, at(C, 0), out(B, 0));
     t.set_outputs(vec![PortSource::Node(out(C, 0))]);
@@ -180,7 +178,7 @@ fn shapes() -> Vec<(&'static str, Topology)> {
     let mut t = Topology::default();
     t.nodes.insert(A, spec("dc", 0, 1));
     t.nodes
-        .insert(B, spec("gain", 1, 1).with_latency(Samples::new(999)));
+        .insert(B, spec("gain", 1, 1).latency(Samples::new(999)));
     edge(&mut t, at(B, 0), out(A, 0));
     t.set_outputs(vec![PortSource::Node(out(A, 0))]);
     all.push(("orphan_branch", t));
@@ -225,8 +223,8 @@ fn shapes_of_spec(t: &Topology) -> Shapes {
                     tutti_graph::Buses::unassigned(s.inputs),
                     tutti_graph::Buses::unassigned(s.outputs),
                 )
-                .with_latency(Latency::new(s.latency))
-                .with_tail(s.tail),
+                .latency(Latency::new(s.latency))
+                .tail(s.tail),
             )
         })
         .collect()
@@ -325,9 +323,9 @@ fn ties_break_by_key_across_edge_kinds() {
     let shapes: Shapes = [
         (
             x,
-            Shape::source_unassigned(ChannelLayout::MONO).with_events(0, 1),
+            Shape::source_unassigned(ChannelLayout::MONO).events(0, 1),
         ),
-        (a, Shape::EMPTY.with_events(1, 0)),
+        (a, Shape::EMPTY.events(1, 0)),
         (b, Shape::through_unassigned(ChannelLayout::MONO)),
     ]
     .into();
@@ -422,9 +420,9 @@ fn a_diamond_of_3_and_7_delays_the_short_branch_by_4() {
     let mut t = Topology::default();
     t.nodes.insert(A, spec("dc", 0, 1));
     t.nodes
-        .insert(B, spec("gain", 1, 1).with_latency(Samples::new(3)));
+        .insert(B, spec("gain", 1, 1).latency(Samples::new(3)));
     t.nodes
-        .insert(C, spec("gain", 1, 1).with_latency(Samples::new(7)));
+        .insert(C, spec("gain", 1, 1).latency(Samples::new(7)));
     t.nodes.insert(D, spec("sum", 2, 1));
     edge(&mut t, at(B, 0), out(A, 0));
     edge(&mut t, at(C, 0), out(A, 0));
@@ -482,7 +480,7 @@ fn gain_kinds(keys: &[NodeKey]) -> Shapes {
         .map(|&k| {
             (
                 k,
-                Shape::through_unassigned(ChannelLayout::MONO).with_events(1, 1),
+                Shape::through_unassigned(ChannelLayout::MONO).events(1, 1),
             )
         })
         .collect()
@@ -715,7 +713,7 @@ fn in_place_spec(ports_read_twice: bool) -> (GraphSpec, Shapes) {
         (A, Shape::source_unassigned(ChannelLayout::MONO)),
         (
             B,
-            Shape::through_unassigned(ChannelLayout::STEREO).with_in_place(),
+            Shape::through_unassigned(ChannelLayout::STEREO).in_place(),
         ),
     ]
     .into();
@@ -869,7 +867,7 @@ fn a_main_input_merging_with_a_latent_path_is_delayed() {
     };
     t.nodes.insert(A, spec("dc", 0, 1));
     t.nodes
-        .insert(B, spec("gain", 1, 1).with_latency(Samples::new(48)));
+        .insert(B, spec("gain", 1, 1).latency(Samples::new(48)));
     t.nodes.insert(C, spec("sum", 2, 1));
     edge(&mut t, at(B, 0), out(A, 0));
     edge(&mut t, at(C, 0), out(B, 0));
@@ -920,7 +918,7 @@ fn an_event_source_counts_toward_arrival_in_both_solves() {
     // A (64 frames latent, emits events) ─events─▶ C;  B (dry) ─audio─▶ C.
     let mut t = Topology::default();
     t.nodes
-        .insert(A, spec("emit", 0, 0).with_latency(Samples::new(64)));
+        .insert(A, spec("emit", 0, 0).latency(Samples::new(64)));
     t.nodes.insert(B, spec("dc", 0, 1));
     t.nodes.insert(C, spec("gain", 1, 1));
     edge(&mut t, at(C, 0), out(B, 0));
@@ -934,15 +932,15 @@ fn an_event_source_counts_toward_arrival_in_both_solves() {
     shapes.insert(
         A,
         Shape::EMPTY
-            .with_latency(Latency::new(Samples::new(64)))
-            .with_tail(Tail::None)
-            .with_events(0, 1),
+            .latency(Latency::new(Samples::new(64)))
+            .tail(Tail::None)
+            .events(0, 1),
     );
     shapes.insert(
         C,
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_tail(Tail::None)
-            .with_events(1, 0),
+            .tail(Tail::None)
+            .events(1, 0),
     );
     let plan = compile(
         &g.validate().expect("valid"),
@@ -987,11 +985,11 @@ fn an_event_source_counts_toward_arrival_in_both_solves() {
 fn a_shape_disagreeing_on_latency_or_tail_is_refused() {
     let mut t = Topology::default();
     t.nodes
-        .insert(A, spec("gain", 1, 1).with_latency(Samples::new(10)));
+        .insert(A, spec("gain", 1, 1).latency(Samples::new(10)));
     let valid = GraphSpec::new(t).validate().unwrap();
     let late: Shapes = [(
         A,
-        Shape::through_unassigned(ChannelLayout::MONO).with_latency(Latency::new(Samples::new(12))),
+        Shape::through_unassigned(ChannelLayout::MONO).latency(Latency::new(Samples::new(12))),
     )]
     .into();
     assert!(matches!(
@@ -1001,8 +999,8 @@ fn a_shape_disagreeing_on_latency_or_tail_is_refused() {
     let tailed: Shapes = [(
         A,
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_latency(Latency::new(Samples::new(10)))
-            .with_tail(Tail::Unbounded),
+            .latency(Latency::new(Samples::new(10)))
+            .tail(Tail::Unbounded),
     )]
     .into();
     assert!(matches!(
@@ -1029,8 +1027,8 @@ fn automation_into(
     }
     let mono = || Shape::through_unassigned(ChannelLayout::MONO);
     let shapes: Shapes = [
-        (A, mono().with_events(0, 1)),
-        (B, mono().with_events(1, 0).with_event_resolution(sink)),
+        (A, mono().events(0, 1)),
+        (B, mono().events(1, 0).event_resolution(sink)),
     ]
     .into();
     let valid = g.validate().expect("valid");
@@ -1145,12 +1143,12 @@ fn disconnecting_an_edge_drops_its_resolution_mark() {
     g.clear_resolution(at, from);
     let mono = || Shape::through_unassigned(ChannelLayout::MONO);
     let shapes: Shapes = [
-        (A, mono().with_events(0, 1)),
+        (A, mono().events(0, 1)),
         (
             B,
             mono()
-                .with_events(1, 0)
-                .with_event_resolution(tutti_graph::Resolution::Block),
+                .events(1, 0)
+                .event_resolution(tutti_graph::Resolution::Block),
         ),
     ]
     .into();

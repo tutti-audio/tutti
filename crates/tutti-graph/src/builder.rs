@@ -237,8 +237,8 @@ impl<F: Float> GraphBuilder<F> {
         self.spec.topology.nodes.insert(
             key,
             NodeSpec::new(kind, shape.audio_in(), shape.audio_out())
-                .with_latency(shape.latency.samples())
-                .with_tail(shape.tail),
+                .latency(shape.latency.samples())
+                .tail(shape.tail),
         );
         self.shapes.push(shape);
         self.units.push(Pending {

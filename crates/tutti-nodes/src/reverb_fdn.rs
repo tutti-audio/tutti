@@ -166,7 +166,7 @@ impl<F: FftFloat + Lerp> Kernel for FdnKernel<F> {
             Buses::main(BusTopology::MONO),
             Buses::NONE.with(output).expect("one bus"),
         )
-        .with_cost(Cost::Moderate)
+        .cost(Cost::Moderate)
     }
 
     /// Sizes the lines, the pre-delay and the scratch of a design at `rate`: a re-prepare

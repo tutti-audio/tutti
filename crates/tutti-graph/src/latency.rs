@@ -65,7 +65,7 @@
 //! let mut g = Topology::default();
 //! g.nodes.insert(a, NodeSpec::new("src", ChannelLayout::EMPTY, mono));
 //! g.nodes.insert(b, NodeSpec::new("src", ChannelLayout::EMPTY, mono));
-//! g.nodes.insert(limiter, NodeSpec::new("limiter", mono, mono).with_latency(Samples::new(512)));
+//! g.nodes.insert(limiter, NodeSpec::new("limiter", mono, mono).latency(Samples::new(512)));
 //! g.nodes.insert(mixer, NodeSpec::new("mixer", stereo, mono));
 //! g.connect(InputPort::new(limiter, 0), out(a));
 //! g.connect(InputPort::new(mixer, 0), out(limiter));

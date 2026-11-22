@@ -196,7 +196,7 @@ impl GraphTail {
     /// g.nodes.insert(
     ///     verb,
     ///     NodeSpec::new("reverb", ChannelLayout::EMPTY, ChannelLayout::MONO)
-    ///         .with_tail(Tail::Unbounded),
+    ///         .tail(Tail::Unbounded),
     /// );
     /// g.set_outputs([PortSource::Node(OutputPort::new(verb, 0))]);
     ///

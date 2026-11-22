@@ -14,9 +14,10 @@ use std::collections::VecDeque;
 use std::pin::Pin;
 use std::sync::{Arc, MutexGuard, Weak};
 use std::task::{Context, Poll, Waker};
-use tutti_graph::{Losses, UmpAt};
+use tutti_graph::UmpAt;
 use tutti_platform::Executor;
 use tutti_rt::Mutex;
+use tutti_units::Losses;
 
 use tutti_graph::EventInletNode;
 use tutti_midi_device::{

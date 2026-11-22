@@ -8,7 +8,6 @@ use tutti_platform::Instant;
 
 use crate::common::OpenPorts as _;
 use crate::common::{MF, blocks, note, play};
-use tutti_graph::Losses;
 use tutti_midi_ci::Muid;
 use tutti_midi_ci::{CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, MaxSysexSize};
 use tutti_midi_device::{
@@ -27,6 +26,7 @@ use tutti_ump::{
     DeviceIdentity, DiscoveryFilter, ManufacturerId, Message, MidiGroup, Protocol, Stream,
     StreamConfig, SysexAssembler, SysexStep, U7, Ump, UmpVersion,
 };
+use tutti_units::Losses;
 use tutti_units::SampleRate;
 use tutti_units::{Beat, BeatDuration};
 

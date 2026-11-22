@@ -64,8 +64,8 @@ impl Sink {
 
     fn declared(ports: u16, output: Output) -> Shape {
         match output {
-            Output::Mono => Shape::source_unassigned(ChannelLayout::MONO).with_events(ports, 0),
-            Output::None => Shape::EMPTY.with_events(ports, 0),
+            Output::Mono => Shape::source_unassigned(ChannelLayout::MONO).events(ports, 0),
+            Output::None => Shape::EMPTY.events(ports, 0),
         }
     }
 }

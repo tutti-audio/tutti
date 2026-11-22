@@ -90,8 +90,8 @@ struct TailProbe {
 impl Node for TailProbe {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_latency(Latency::new(self.latency))
-            .with_tail(self.tail)
+            .latency(Latency::new(self.latency))
+            .tail(self.tail)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -246,7 +246,7 @@ fn masked_status_reaches_the_next_nodes_mask() {
                 tutti_graph::Buses::unassigned(ChannelLayout::STEREO),
                 tutti_graph::Buses::unassigned(ChannelLayout::MONO),
             )
-            .with_tail(Tail::Unknown)
+            .tail(Tail::Unknown)
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -405,7 +405,7 @@ impl IntoNode for GainBuilder {
 
 impl Node for GainNode {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::MONO).with_in_place()
+        Shape::through_unassigned(ChannelLayout::MONO).in_place()
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -677,13 +677,13 @@ impl Synth {
 }
 
 impl Synth {
-    const BASE: Shape = Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0);
+    const BASE: Shape = Shape::source_unassigned(ChannelLayout::MONO).events(1, 0);
     const IN: tutti_graph::InEvents = Self::BASE.event_input(0).expect("declared");
 }
 
 impl Node for Synth {
     fn shape(&self) -> Shape {
-        Self::BASE.with_tail(Tail::Finite(Samples::new(self.release)))
+        Self::BASE.tail(Tail::Finite(Samples::new(self.release)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -735,7 +735,7 @@ struct OneShot {
 }
 
 impl OneShot {
-    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
     const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -861,7 +861,7 @@ fn applying_refuses_a_plan_for_another_prepare() {
 fn a_merge_holds_all_its_inputs_so_no_note_off_is_lost() {
     struct Offs;
     impl Offs {
-        const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+        const SHAPE: Shape = Shape::EMPTY.events(0, 1);
         const OUT: tutti_graph::OutEvents = Self::SHAPE.event_output(0).expect("declared");
     }
 
@@ -890,7 +890,7 @@ fn a_merge_holds_all_its_inputs_so_no_note_off_is_lost() {
     }
     struct Count(Arc<AtomicUsize>);
     impl Count {
-        const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+        const SHAPE: Shape = Shape::EMPTY.events(1, 0);
         const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
     }
 
@@ -961,7 +961,7 @@ impl Node for OutOfBand {
             tutti_graph::Buses::unassigned(ChannelLayout::from_count(self.inputs)),
             tutti_graph::Buses::unassigned(ChannelLayout::from_count(self.outputs)),
         )
-        .with_tail(Tail::None)
+        .tail(Tail::None)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -1212,7 +1212,7 @@ fn a_reported_tail_shorter_than_the_ceiling_is_what_the_skip_waits() {
     assert_eq!(ringer_calls(RingingNode::new(ceiling, 5, 10), 300), 10);
     assert_eq!(
         ringer_calls(
-            RingingNode::new(ceiling, 5, 10).with_latency(Samples::new(7)),
+            RingingNode::new(ceiling, 5, 10).latency(Samples::new(7)),
             300
         ),
         7 + 10,

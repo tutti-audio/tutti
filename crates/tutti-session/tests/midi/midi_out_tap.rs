@@ -12,9 +12,10 @@ use tutti_rt::Mutex;
 use crate::common::{MF, note};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
-use tutti_graph::{EventCapacity, EventTapOptions, Losses, TapAlign, UmpAt};
+use tutti_graph::{EventCapacity, EventTapOptions, TapAlign, UmpAt};
 use tutti_midi_runtime::MidiOut;
 use tutti_ump::{MidiGroup, Ump};
+use tutti_units::Losses;
 use tutti_units::SampleRate;
 
 use tutti_midi_runtime::MidiClipNode;

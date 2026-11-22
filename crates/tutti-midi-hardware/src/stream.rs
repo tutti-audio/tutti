@@ -75,7 +75,7 @@
 use std::sync::Arc;
 use tutti_platform::Instant;
 
-use tutti_graph::{Losses, Offset};
+use tutti_graph::Offset;
 use tutti_midi_ci::ResourceStore;
 use tutti_midi_device::{
     Capabilities, DiscoveryAction, DiscoveryEnding, Endpoint, EndpointDiscovery, EndpointReply,
@@ -88,6 +88,7 @@ use tutti_ump::{
     BlockFilter, BlockSelect, DeviceIdentity, DiscoveryFilter, Message, MidiGroup, Protocol,
     Stream, StreamConfig, SysexAssembler, SysexStep, Ump,
 };
+use tutti_units::Losses;
 
 use crate::answer::Answer;
 use crate::capability::{described, is_ump_endpoint};

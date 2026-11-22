@@ -36,7 +36,7 @@ impl Node for Ported {
 /// `audio` ports each way and `events` event ports each way.
 fn ported(audio: u16, events: u16) -> Ported {
     let width = ChannelLayout::from_count(audio);
-    Ported(Shape::unassigned(width, width).with_events(events, events))
+    Ported(Shape::unassigned(width, width).events(events, events))
 }
 
 const A: NodeKey = NodeKey(1);

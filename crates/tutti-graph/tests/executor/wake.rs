@@ -44,7 +44,7 @@ impl Clone for Napper {
 
 impl Node for Napper {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0)
+        Shape::source_unassigned(ChannelLayout::MONO).events(1, 0)
     }
     fn bind_wake(&mut self, wake: Wake) {
         self.placements.lock().push((wake, Arc::clone(&self.calls)));

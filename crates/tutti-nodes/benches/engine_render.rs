@@ -239,7 +239,7 @@ struct Sine {
 impl tutti_graph::Node for Sine {
     fn shape(&self) -> tutti_graph::Shape {
         tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
-            .with_tail(tutti_units::Tail::Unbounded)
+            .tail(tutti_units::Tail::Unbounded)
     }
     fn prepare(&mut self, p: &tutti_graph::Prepare) {
         self.dt = (1.0 / p.sample_rate().get()) as f32;
@@ -286,8 +286,8 @@ impl Lowpass {
 impl tutti_graph::Node for Lowpass {
     fn shape(&self) -> tutti_graph::Shape {
         tutti_graph::Shape::through_unassigned(ChannelLayout::MONO)
-            .with_tail(tutti_units::Tail::Unknown)
-            .with_in_place()
+            .tail(tutti_units::Tail::Unknown)
+            .in_place()
     }
     fn prepare(&mut self, p: &tutti_graph::Prepare) {
         let g = (std::f32::consts::PI * self.cutoff / p.sample_rate().get() as f32).tan();

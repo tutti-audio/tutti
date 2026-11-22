@@ -1640,7 +1640,7 @@ impl<F: Float> Reference<F> {
                         &mut writers,
                     )
                     .with_main(shape.main_ports())
-                    .with_params(&param_table);
+                    .params(&param_table);
                     f.old.process(&cx, io)
                 };
                 settle(status, &copies, &mut o);
@@ -1718,7 +1718,7 @@ impl<F: Float> Reference<F> {
                 &mut writers,
             )
             .with_main(shape.main_ports())
-            .with_params(&param_table);
+            .params(&param_table);
             let status = self
                 .units
                 .get_mut(&key)

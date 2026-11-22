@@ -16,8 +16,9 @@
 
 use std::sync::Arc;
 
-use tutti_graph::{EventTapReader, Losses, NodeKey};
+use tutti_graph::{EventTapReader, NodeKey};
 use tutti_midi_runtime::{DeviceGeneration, MidiOut};
+use tutti_units::Losses;
 
 use crate::Session;
 use crate::midi::{

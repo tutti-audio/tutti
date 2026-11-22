@@ -265,8 +265,8 @@ fn wire_node(desc: &mut Desc, j: usize, rng: &mut Rng) {
 fn spec_for(kind: &Kind) -> NodeSpec {
     let s = shape(kind);
     NodeSpec::new("test", s.audio_in(), s.audio_out())
-        .with_latency(s.latency.samples())
-        .with_tail(s.tail)
+        .latency(s.latency.samples())
+        .tail(s.tail)
 }
 
 fn wire_outputs(desc: &mut Desc, rng: &mut Rng) {

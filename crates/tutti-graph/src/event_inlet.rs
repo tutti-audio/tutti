@@ -97,13 +97,12 @@ use tutti_rt::{
     ring, tally,
 };
 use tutti_ump::Ump;
-use tutti_units::{At, Frame, Moment, SampleRate};
+use tutti_units::{At, Frame, Losses, Moment, SampleRate};
 
 use crate::RenderMode;
 use crate::bus::OutEvents;
 use crate::cost::Cost;
 use crate::event::Event;
-use crate::event_losses::Losses;
 use crate::fork::{ForkCause, ForkSource, Forked};
 use crate::io::Io;
 use crate::node::{Cx, IntoNode, Node, NodeParts, Prepare, Shape, Status};
@@ -441,15 +440,15 @@ impl EventInletNode {
         (node, writer)
     }
 
-    const BASE: Shape = Shape::EMPTY.with_events(0, 1);
+    const BASE: Shape = Shape::EMPTY.events(0, 1);
     const OUT: OutEvents = Self::BASE.event_output(0).expect("declared");
 
     fn declared(capacity: EventCapacity) -> Shape {
         Self::BASE
             // `pair` checked that it fits.
-            .with_event_capacity(capacity.non_zero())
+            .event_capacity(capacity.non_zero())
             // Event-only: a ring drain, work per event, nothing per frame.
-            .with_cost(Cost::Light)
+            .cost(Cost::Light)
     }
 
     /// The ring's capacity in events, which is also how many may wait for their

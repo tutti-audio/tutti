@@ -47,7 +47,7 @@ struct Undeclared<N>(N);
 
 impl<N: Node> Node for Undeclared<N> {
     fn shape(&self) -> Shape {
-        self.0.shape().with_cost(Cost::Heavy)
+        self.0.shape().cost(Cost::Heavy)
     }
     fn prepare(&mut self, p: &Prepare) {
         self.0.prepare(p);
